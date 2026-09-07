@@ -50,7 +50,7 @@ pub(crate) mod tasklease;
 pub(crate) mod version;
 
 pub use api::{
-	GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
+	GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable, ValsBatch,
 };
 pub use consts::{
 	COUNT_BATCH_SIZE, ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV,

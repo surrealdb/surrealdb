@@ -294,6 +294,48 @@ The server bridge registers each entry as an OTel observable gauge under
 the `surrealdb.storage.<backend>.<metric>` namespace; the Prometheus
 exporter renders them as `surrealdb_storage_<backend>_<metric>`.
 
+### Not a metric — index pending-queue depth
+
+Indexes that compact in the background (full-text, HNSW, DiskANN) queue
+each write and drain it later. The depth of that queue is what predicts
+a read's cost against the index, but it is deliberately **not** exposed
+as a gauge, for two reasons:
+
+- **Cardinality.** The only meaningful key is the index, so the series
+  would be labelled by namespace, database, table and index — all
+  user-chosen and unbounded. `PUBLIC_METRICS` aside, this is the
+  cardinality shape the rest of this document exists to avoid.
+- **Scrape cost.** No counter of queue depth is maintained; the depth is
+  the length of a key range. An observable gauge would therefore run a
+  range scan per index on every collection — the same O(backlog) work
+  the depth is a warning about.
+
+The signal is published as a **log record** instead, from the read path
+that already walks the queue and so counts it for free. An HNSW or
+DiskANN kNN search emits a `WARN` naming the index and the engine the
+first time one of its scans reads more pending data than a single
+materialisation batch holds — either because the entry count passed what
+one batch admits, or because admitting the current value alongside the
+cursor page and buffered candidates would force the batch to roll over.
+The second crossing is taken from the rollover predicate rather than from
+a byte threshold, because a batch shares its residency budget with the
+cursor page it is filled from: a queue of wide entries costs several
+batches well before its raw values add up to the budget, and a threshold
+over raw bytes would say nothing about it. This pre-check is conservative:
+it counts the already-read value even when decoding later discards it,
+just as the entry-count threshold counts discarded values.
+
+The record is emitted at that crossing rather than at the end of the
+scan, and the entry it crosses on is accounted before the scan's
+cancellation checkpoint for that entry, so a search that goes on to
+exhaust its deadline still reports. The entry count it carries is what
+the scan had read by then, which is a lower bound on the queue's depth.
+It fires once per crossing, not once per query: a sustained backlog
+produces one record, and a scan that completes inside both budgets
+re-arms it only if no newer scan observed another crossing after that
+scan began. The threshold is per index family, and each index re-arms
+its own.
+
 ---
 
 ## Audit and slow-query records

@@ -3307,12 +3307,36 @@ impl Datastore {
 		Ok(())
 	}
 
+	/// Discards the process-local HNSW wrapper and element caches for one index
+	/// after a compaction write that reached the graph and did not commit.
+	///
+	/// Neither half of that state can be validated against the store. The
+	/// element caches carry no version at all. A graph layer carries one, but
+	/// it is a counter each writer advances in its own copy as it applies, so
+	/// two writers applying the same batch from the same version reach the same
+	/// one: the rolled-back topology is then indistinguishable to a state check
+	/// from the topology the winning commit stored, and a later apply would
+	/// write node changes derived from it over the winner's nodes. An apply
+	/// that failed part-way is worse still — it can mutate a layer before
+	/// reaching the `save_nodes` that advances the version at all.
+	///
+	/// The next access rebuilds the wrapper and reloads every layer from
+	/// persisted state, which is the cost this pays. A write that stopped at
+	/// the compaction guards never reached the graph and must not come here.
+	async fn discard_hnsw_index(&self, tb: crate::catalog::TableId, ikb: &IndexKeyBase) {
+		if let Err(e) = self.index_stores.remove_hnsw_index(tb, ikb.clone()).await {
+			warn!(target: TARGET, "Failed to evict HNSW index after an uncommitted compaction write: {e}");
+		}
+	}
+
 	/// Runs HNSW compaction as bounded read-plan/write-apply batches.
 	///
 	/// Pending entries are captured in a read transaction and conditionally
-	/// deleted in a short write transaction before graph mutation. If a write
-	/// fails after local graph mutation may have started, the cached HNSW index
-	/// is evicted so later use reloads persisted state.
+	/// deleted in a short write transaction before graph mutation. A write that
+	/// reached the graph and then did not commit leaves the process-local
+	/// wrapper holding a topology and caches the store never took, so the
+	/// wrapper is discarded; a write that stopped at the guards left the
+	/// wrapper untouched and keeps it.
 	async fn process_hnsw_compaction(
 		&self,
 		ikb: &IndexKeyBase,
@@ -3389,7 +3413,7 @@ impl Datastore {
 				Ok(true) => {
 					if let Err(e) = Self::ensure_not_cancelled(canceller) {
 						let _ = txn.cancel().await;
-						self.index_stores.invalidate_hnsw_caches(tb, ikb.clone()).await;
+						self.discard_hnsw_index(tb, ikb).await;
 						return Err(e);
 					}
 					#[cfg(test)]
@@ -3398,7 +3422,7 @@ impl Datastore {
 						self.id,
 					) {
 						let _ = txn.cancel().await;
-						self.index_stores.invalidate_hnsw_caches(tb, ikb.clone()).await;
+						self.discard_hnsw_index(tb, ikb).await;
 						if Self::retry_index_operation_conflict(
 							&e,
 							format!(
@@ -3413,7 +3437,7 @@ impl Datastore {
 					}
 					if let Err(e) = txn.commit().await {
 						let _ = txn.cancel().await;
-						self.index_stores.invalidate_hnsw_caches(tb, ikb.clone()).await;
+						self.discard_hnsw_index(tb, ikb).await;
 						if Self::retry_index_operation_conflict(
 							&e,
 							format!(
@@ -3433,9 +3457,7 @@ impl Datastore {
 				}
 				Err(e) => {
 					let _ = txn.cancel().await;
-					if let Err(evict) = self.index_stores.remove_hnsw_index(tb, ikb.clone()).await {
-						warn!(target: TARGET, "Failed to evict HNSW index after compaction error: {evict}");
-					}
+					self.discard_hnsw_index(tb, ikb).await;
 					if Self::retry_index_operation_conflict(
 						&e,
 						format!("Retryable conflict applying HNSW compaction for {ikb}, retrying"),
@@ -5715,6 +5737,222 @@ mod test {
 			HNSW_COMPACTION_SQL,
 		)
 		.await
+	}
+
+	/// The process-local HNSW wrapper for one index, resolved the way the query
+	/// path resolves it, so a test holds the same instance the compaction and
+	/// the executor reach for.
+	async fn loaded_hnsw_index(
+		ds: &Datastore,
+		table: &str,
+		index: &str,
+	) -> Result<crate::idx::trees::store::hnsw::SharedHnswIndex> {
+		let table = TableName::from(table);
+		let txn = Arc::new(ds.transaction(Read, Optimistic).await?);
+		let ns = txn.get_ns_by_name("test", None).await?.unwrap();
+		let db = txn.get_db_by_name("test", "test", None).await?.unwrap();
+		let tb = txn.get_tb(ns.namespace_id, db.database_id, &table, None).await?.unwrap();
+		let ix =
+			txn.get_tb_index(ns.namespace_id, db.database_id, &table, index, None).await?.unwrap();
+		let Index::Hnsw(p) = &ix.index else {
+			panic!("{index} is not an HNSW index");
+		};
+		let mut ctx = ds.setup_ctx()?;
+		ctx.set_transaction(Arc::clone(&txn));
+		let ctx = ctx.freeze();
+		let hi = ds
+			.index_store()
+			.get_index_hnsw(ns.namespace_id, db.database_id, &ctx, tb.table_id, &ix, p)
+			.await?;
+		txn.cancel().await?;
+		Ok(hi)
+	}
+
+	/// The entries an HNSW compaction still has to apply, across both pending
+	/// families.
+	/// The layer versions the store holds for one HNSW index, layer 0 first.
+	async fn hnsw_layer_versions(ds: &Datastore, ikb: &IndexKeyBase) -> Result<Vec<u64>> {
+		let txn = ds.transaction(Read, Optimistic).await?;
+		let state: crate::idx::trees::hnsw::HnswState = txn
+			.get(
+				&crate::key::index::hs::Hs::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index()),
+				None,
+			)
+			.await?
+			.unwrap_or_default();
+		txn.cancel().await?;
+		Ok(state.layer_versions())
+	}
+
+	async fn hnsw_pending_len(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
+		let txn = ds.transaction(Read, Optimistic).await?;
+		let records = txn
+			.count(
+				crate::key::index::hr::HnswRecordPendingPrefix::range(
+					ikb.ns(),
+					ikb.db(),
+					ikb.table(),
+					ikb.index(),
+				)?,
+				None,
+			)
+			.await?;
+		let appends = txn
+			.count(
+				crate::key::index::hp::HnswPendingPrefix::range(
+					ikb.ns(),
+					ikb.db(),
+					ikb.table(),
+					ikb.index(),
+				)?,
+				None,
+			)
+			.await?;
+		txn.cancel().await?;
+		Ok(records + appends)
+	}
+
+	/// A compaction apply that reached the graph and then failed to commit must
+	/// not leave that graph reachable.
+	///
+	/// The apply advances the in-memory version of every layer it writes, and
+	/// that version is a plain per-layer counter: a peer applying the same
+	/// batch from the same version lands on the same one. This fixture pins the
+	/// arithmetic — one staged record advances layer 0 by exactly one — so the
+	/// rolled-back copy and a peer's committed copy stand at the same version
+	/// with topologies that need not match, and a state check comparing
+	/// versions would keep the copy the store never took. The wrapper goes
+	/// instead, and the next access rebuilds it from persisted state.
+	///
+	/// The injected conflict classifies as retryable, so the compaction rolls
+	/// its write back, discards the wrapper, and applies again; the call
+	/// returns once that attempt commits. That attempt drains the queue, so the
+	/// records the index then answers over come from the graph alone.
+	#[tokio::test]
+	async fn hnsw_index_compaction_commit_failure_evicts_the_loaded_index() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
+		let site = RetryableConflictSite::HnswCompaction;
+		let node_id = ds.id();
+
+		// Hold the wrapper the query path uses, with its graph resident.
+		let before = loaded_hnsw_index(&ds, "vec", "hnsw_idx").await?;
+		ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+		let versions = hnsw_layer_versions(&ds, &ikb).await?;
+
+		// One more pending, and a commit conflict to roll its apply back.
+		execute_all(&ds, &session, "CREATE vec:3 SET vector = [8, 9] RETURN NONE;").await?;
+		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, 1, "the record must be staged, not indexed");
+		let _guard = inject_retryable_conflict(site, node_id);
+		ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+		assert_eq!(retryable_conflict_count(site, node_id), 0, "the conflict must have fired");
+		assert_eq!(
+			hnsw_pending_len(&ds, &ikb).await?,
+			0,
+			"the attempt after the rollback must have applied the pending it rolled back"
+		);
+
+		// The advance the rolled-back apply staged in memory, and that the
+		// attempt after it then committed: one batch of one record, one layer-0
+		// version. A peer applying that same batch reproduces it exactly, which
+		// is why the version cannot certify the rolled-back topology.
+		let applied = hnsw_layer_versions(&ds, &ikb).await?;
+		assert_eq!(
+			applied[0],
+			versions[0] + 1,
+			"one staged record must advance layer 0 by exactly one: {versions:?} -> {applied:?}"
+		);
+
+		// The wrapper the rollback mutated is gone; the attempt after it ran on
+		// one rebuilt from the store.
+		let after = loaded_hnsw_index(&ds, "vec", "hnsw_idx").await?;
+		assert!(
+			!Arc::ptr_eq(&before, &after),
+			"a rolled-back compaction write must not leave its graph reachable"
+		);
+
+		// With the queue drained, every record answered for comes from the
+		// graph, which the rebuilt wrapper took from the store.
+		let mut response =
+			ds.execute("SELECT id FROM vec WHERE vector <|3,40|> [1, 2];", &session, None).await?;
+		let PublicValue::Array(rows) = response.remove(0).result? else {
+			panic!("expected an array result");
+		};
+		assert_eq!(rows.len(), 3, "the recovered index must return every record: {rows:?}");
+		Ok(())
+	}
+
+	/// An apply error can land after a layer mutates but before `save_nodes`
+	/// advances its version, leaving a resident topology the store never took
+	/// under the version the store already holds. That path must evict the
+	/// wrapper too.
+	#[tokio::test]
+	async fn hnsw_index_compaction_apply_error_evicts_the_loaded_index() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
+		ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+
+		// Hold the query-path wrapper with the two-node graph resident. Element
+		// ids follow the two separately keyed pending records: vec:1 is 0 and
+		// vec:2 is 1.
+		let before = loaded_hnsw_index(&ds, "vec", "hnsw_idx").await?;
+		let (table_id, entry_point) = {
+			let txn = ds.transaction(Read, Optimistic).await?;
+			let ns = txn.get_ns_by_name("test", None).await?.unwrap();
+			let db = txn.get_db_by_name("test", "test", None).await?.unwrap();
+			let table = TableName::from("vec");
+			let tb = txn.get_tb(ns.namespace_id, db.database_id, &table, None).await?.unwrap();
+			let state: crate::idx::trees::hnsw::HnswState = txn
+				.get(
+					&crate::key::index::hs::Hs::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index()),
+					None,
+				)
+				.await?
+				.unwrap();
+			txn.cancel().await?;
+			(tb.table_id, state.enter_point().unwrap())
+		};
+		assert!(entry_point <= 1, "the two-node fixture has an unexpected entry point");
+
+		// Delete the non-entry-point record. Its layer-0 removal mutates the
+		// resident graph before resolving the remaining neighbour's vector.
+		let removed_element = 1 - entry_point;
+		let delete = format!("DELETE vec:{} RETURN NONE;", removed_element + 1);
+		execute_all(&ds, &session, &delete).await?;
+		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, 1);
+
+		// Force that neighbour lookup to the store, then corrupt its encoded
+		// vector. The apply now errors after the layer-0 edge removal but
+		// before `save_nodes` can version the mutated layer.
+		ds.index_store().invalidate_hnsw_index_caches(table_id, &ikb).await;
+		let entry_vector_key = crate::kvs::KVKey::encode_key(&crate::key::index::he::He::new(
+			ikb.ns(),
+			ikb.db(),
+			ikb.table(),
+			ikb.index(),
+			entry_point,
+		))?;
+		let txn = ds.transaction(Write, Optimistic).await?;
+		txn.set(&entry_vector_key, &vec![0xffu8]).await?;
+		txn.commit().await?;
+
+		ds.process_index_compaction(&ikb, CancellationToken::new())
+			.await
+			.expect_err("the malformed neighbour vector must fail the graph apply");
+		assert_eq!(
+			hnsw_pending_len(&ds, &ikb).await?,
+			1,
+			"the failed apply must roll back its conditional pending delete"
+		);
+
+		let after = loaded_hnsw_index(&ds, "vec", "hnsw_idx").await?;
+		assert!(
+			!Arc::ptr_eq(&before, &after),
+			"an apply error before versioning must evict the mutated wrapper"
+		);
+		Ok(())
 	}
 
 	#[tokio::test]

@@ -112,37 +112,32 @@ impl IndexStores {
 		Ok(())
 	}
 
-	/// Evicts cached HNSW graph and vector entries for one table index.
+	/// Evicts the loaded HNSW graph and the element caches for one table index.
 	///
-	/// Drops the loaded graph as well as the element caches, so the next access
-	/// reloads every layer from persisted state. Reserved for real index
-	/// removal and for a compaction *apply* that failed part-way: there, a
-	/// fallible operation may have followed an in-memory graph mutation but
-	/// preceded the `save_nodes` that advances the layer version, leaving a
-	/// mutated layer that no version check can detect.
+	/// The next access rebuilds the wrapper and reloads every layer from
+	/// persisted state. This is the only recovery available to a caller whose
+	/// write reached the graph and then rolled back: a layer's version is a
+	/// counter each writer advances in its own copy as it applies, so two
+	/// writers applying the same batch from the same version reach the same
+	/// one, and a state check comparing versions cannot tell a rolled-back
+	/// topology from the commit that won.
 	pub(crate) async fn remove_hnsw_index(&self, tb: TableId, ikb: IndexKeyBase) -> Result<()> {
 		self.0.hnsw_indexes.remove(tb, &ikb).await?;
 		self.0.vector_cache.remove_index(ikb.ns(), ikb.db(), tb, ikb.index()).await;
 		Ok(())
 	}
 
-	/// Invalidates the unversioned HNSW element caches for one table index,
-	/// keeping the loaded graph.
+	/// Drops the process-local element caches for one table index at one format
+	/// version, leaving any loaded graph in place.
 	///
-	/// For a compaction whose apply *completed* and whose transaction was then
-	/// cancelled or failed to commit. The element caches carry no version and
-	/// are the real hazard there: `VecDocs::insert` on an already-present
-	/// vector writes the `Hv` key and the cached doc set without touching the
-	/// graph, so no version moves and a rollback would leave the cache serving
-	/// a doc the store does not have.
-	///
-	/// The graph does not need dropping on that path. Graph mutation goes
-	/// through `save_nodes`, which advances the in-memory layer version, so a
-	/// rolled-back apply leaves each mutated layer ahead of the persisted `hs`
-	/// record and `check_state` reloads exactly those layers. Dropping the
-	/// whole graph instead forces an O(N) reload of every layer, which under
-	/// sustained ingest is a timeout-then-rebuild cycle that never converges.
-	pub(crate) async fn invalidate_hnsw_caches(&self, tb: TableId, ikb: IndexKeyBase) {
+	/// The vector and document caches are keyed by element and carry no
+	/// version, so nothing reconciles them against the store; a caller that has
+	/// made their contents unreachable must drop them itself. Reach for
+	/// [`Self::remove_hnsw_index`] instead whenever the loaded graph is also in
+	/// doubt: it drops the wrapper as well, and a graph cannot be validated
+	/// against the store by its layer versions alone.
+	#[cfg(test)]
+	pub(crate) async fn invalidate_hnsw_index_caches(&self, tb: TableId, ikb: &IndexKeyBase) {
 		self.0.vector_cache.remove_index(ikb.ns(), ikb.db(), tb, ikb.index()).await;
 	}
 

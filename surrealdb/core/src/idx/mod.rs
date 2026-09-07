@@ -51,7 +51,7 @@ use crate::key::index::hh::Hh;
 use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hn::HnswNode;
-use crate::key::index::hp::HnswPendingPrefix;
+use crate::key::index::hp::{HnswPendingLegacy, HnswPendingPrefix};
 use crate::key::index::hr::{HnswRecordPending, HnswRecordPendingPrefix};
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
@@ -165,6 +165,16 @@ impl IndexKeyBase {
 	/// Range covering append-keyed HNSW pending updates.
 	fn new_hp_range(&self) -> Result<Range<Key>> {
 		HnswPendingPrefix::range(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
+	}
+
+	/// Key storing one append-keyed HNSW pending update.
+	///
+	/// New writes never use this layout — they read-modify-write the record's
+	/// single [`Self::new_hr_key`] — so only tests staging an index upgraded
+	/// from that layout construct it; hence `dead_code` in a non-test build.
+	#[allow(dead_code)]
+	fn new_hp_key(&self, appending_id: u64) -> HnswPendingLegacy<'_> {
+		HnswPendingLegacy::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, appending_id)
 	}
 
 	/// Key storing the HNSW pending compaction generation.

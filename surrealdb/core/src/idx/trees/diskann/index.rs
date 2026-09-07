@@ -53,6 +53,7 @@ use crate::idx::trees::diskann::{
 };
 use crate::idx::trees::hnsw::VectorId;
 use crate::idx::trees::knn::KnnResultBuilder;
+use crate::idx::trees::pending::{PendingBacklogReport, PendingScan, PendingScanStats};
 use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::idx::{
 	IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
@@ -60,7 +61,7 @@ use crate::idx::{
 };
 use crate::key::index::dr::DiskAnnRecordPending;
 use crate::key::index::dw::DiskAnnRecordPendingShard;
-use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
+use crate::kvs::{KVKey, KVValue, Key, Transaction, Val, ValsBatch};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 
 /// Soft per-batch limits for [`DiskAnnIndex::prepare_compaction`]. When either cap fires,
@@ -297,6 +298,15 @@ pub(crate) struct DiskAnnIndex {
 	graph: RwLock<DiskAnnGraph>,
 	/// Vector-to-document mapping helper for `!dq`/`!dh` resolution.
 	vec_docs: DiskAnnVecDocs,
+	/// Set from the moment a KNN scan reads more of this index's pending queue
+	/// than one materialisation batch holds, by entry count or by a scoring
+	/// rollover. Re-armed by a scan that runs to completion inside both budgets
+	/// only if no newer scan observed another crossing, so the warning is
+	/// emitted once per crossing rather than once per query.
+	pending_backlog_reported: PendingBacklogReport,
+	/// What the KNN pending scans on this index materialised. Zero-sized outside
+	/// test builds.
+	pending_scan_stats: PendingScanStats,
 }
 
 /// Context passed from SurrealDB execution into DiskANN provider calls.
@@ -541,6 +551,44 @@ impl DiskAnnSearch {
 	}
 }
 
+/// Which record-keyed pending layout a scanned range belongs to.
+///
+/// Both hold at most one entry per record; they differ in how the key is decoded
+/// and in which of them owns a record the other also holds.
+#[derive(Clone, Copy)]
+enum PendingLayout {
+	/// Sharded `!dw{shard}` entries, the layout every current write uses.
+	Sharded,
+	/// Legacy unsharded `!dr` entries, read and drained but never written.
+	Legacy,
+}
+
+/// Mutable state threaded through the pending scan of one KNN lookup.
+struct DiskAnnPendingScan<'a, 'b> {
+	/// Prepared typed query and limits.
+	search: &'a DiskAnnSearch,
+	/// Optional condition filter applied before admitting candidates to the result
+	/// builder.
+	filter: &'a mut Option<DiskAnnTruthyDocumentFilter<'b>>,
+	/// Shared result builder combining pending and graph candidates.
+	builder: &'a mut KnnResultBuilder,
+	/// Cursor paging, residency budget and backlog accounting, shared with the
+	/// HNSW read path. This is the scan's whole vector residency; see
+	/// [`DiskAnnIndex::search_pendings`].
+	pending: PendingScan<'a>,
+	/// Doc-IDs seen anywhere in the pending keyspace, which suppress the graph
+	/// entries they supersede.
+	suppressed: RoaringTreemap,
+	/// Shards that at least one legacy `!dr` record hashes to, one bit per shard.
+	/// A shard outside this mask can hold no entry the legacy range supersedes, so
+	/// its scan resolves no ownership.
+	legacy_shards: u32,
+}
+
+/// Every pending shard the keyspace defines gets a bit in
+/// [`DiskAnnPendingScan::legacy_shards`].
+const _: () = assert!(DISKANN_PENDING_STATE_SHARDS as u32 <= u32::BITS);
+
 /// Mutable search state threaded through graph result filtering.
 struct DiskAnnGraphSearch<'a, 'b> {
 	/// Read-locked graph used for the ANN search.
@@ -584,7 +632,23 @@ impl DiskAnnIndex {
 			graph: RwLock::new(DiskAnnGraph::new(ikb.clone(), tb, p, cache.clone())?),
 			vec_docs: DiskAnnVecDocs::new(ikb.clone(), tb, cache, p.use_hashed_vector),
 			ikb,
+			pending_backlog_reported: PendingBacklogReport::default(),
+			pending_scan_stats: PendingScanStats::default(),
 		})
+	}
+
+	/// What the KNN pending scans on this index materialised.
+	#[cfg(test)]
+	pub(crate) fn pending_scan_stats(&self) -> &PendingScanStats {
+		&self.pending_scan_stats
+	}
+
+	/// Whether the pending-backlog report is armed for this index, which it is
+	/// from the moment a scan crosses a materialisation budget until one
+	/// completes inside both.
+	#[cfg(test)]
+	pub(crate) fn pending_backlog_reported(&self) -> bool {
+		self.pending_backlog_reported.is_reported()
 	}
 
 	/// Converts upstream DiskANN scores to SurrealDB's public distance semantics.
@@ -1413,7 +1477,50 @@ impl DiskAnnIndex {
 		Ok(())
 	}
 
-	/// Scores pending vectors exactly and returns document IDs that should suppress graph results.
+	/// Searches the pending queue for nearest neighbours, and returns the doc-IDs
+	/// the graph search must suppress.
+	///
+	/// # Residency
+	///
+	/// The whole pending queue is read, but what the scan holds at any moment is
+	/// one cursor page plus the candidates read from it and not yet scored,
+	/// bounded by [`PendingScan`]: at most `PENDING_MAX_BATCH_KEYS` buffered
+	/// entries, at most `PENDING_MAX_ROWS` entries in a page, and page and batch
+	/// together sized for `PENDING_MAX_BYTES` — a target the page sizer converges
+	/// to rather than a ceiling, for the reason given on
+	/// [`crate::idx::trees::pending`]. Candidates are buffered, scored into the
+	/// result builder, and dropped before the scan advances; the page they came
+	/// from shares the budget because it stays borrowed while they are scored. A
+	/// deep queue therefore costs more batches, not more memory — which matters
+	/// because this cost is paid per concurrent search, and the queue is deepest
+	/// exactly when bulk writes are outrunning compaction.
+	///
+	/// Two things are deliberately *not* bounded, because bounding them would
+	/// change results rather than only memory:
+	///
+	/// * The suppression bitmap is complete. It is a [`RoaringTreemap`] of doc-IDs and stays small
+	///   even for a deep queue, and dropping an id from it would resurrect that document's stale
+	///   graph vector.
+	/// * Every live pending vector is scored. Truncating the scan would drop candidates that can
+	///   win a top-K slot, silently degrading recall.
+	///
+	/// # Coalescing
+	///
+	/// Both pending layouts are record-keyed and a record maps to exactly one `!dw`
+	/// shard, so each range holds at most one entry per record and every entry read
+	/// is live on its own — with a single exception. One record can carry an entry
+	/// in both layouts, which a mixed-version cluster produces when a pre-sharding
+	/// node writes `!dr` for a record an upgraded node already wrote `!dw` for. The
+	/// legacy entry is then the later write, and supersedes the sharded one whether
+	/// it replaces the record's vectors or deletes them.
+	///
+	/// That conflict is resolved from the legacy side: the `!dr` range is scanned
+	/// first and owns every record it holds, and a shard scan yields any record the
+	/// legacy range also holds. Ownership is resolved one cursor page at a time —
+	/// see [`Self::legacy_owned_rows`] — and gated twice so it costs nothing
+	/// outside the migration window: once on the legacy range holding anything at
+	/// all, and once on the shard being one that a legacy record actually hashes
+	/// to.
 	async fn search_pendings(
 		&self,
 		ctx: &DiskAnnContext<'_>,
@@ -1423,113 +1530,243 @@ impl DiskAnnIndex {
 		builder: &mut KnnResultBuilder,
 		pending_state: &[Option<DiskAnnPendingState>],
 	) -> Result<Option<RoaringTreemap>> {
-		let mut all_existing_docs = RoaringTreemap::new();
-		let mut non_deleted_docs = HashMap::default();
-		self.collect_pending(ctx.ctx, &ctx.tx, pending_state, |pending| {
-			if let VectorId::DocId(doc_id) = &pending.id {
-				all_existing_docs.insert(*doc_id);
-			};
-			if pending.new_vectors.is_empty() {
-				non_deleted_docs.remove(&pending.id);
-			} else {
-				non_deleted_docs.insert(pending.id, pending.new_vectors);
-			}
-		})
-		.await?;
-		if all_existing_docs.is_empty() && non_deleted_docs.is_empty() {
-			return Ok(None);
-		}
-		// Warm the transaction record cache for the pending candidates in one
-		// batch, so the per-doc truthy checks below hit the cache instead of
-		// fetching each record individually.
-		if let Some(filter) = filter.as_mut() {
-			let ids: Vec<VectorId> = non_deleted_docs.keys().cloned().collect();
-			filter.prefetch_records(ctx, &ids).await?;
-		}
-		for (id, vectors) in non_deleted_docs {
-			if let Some(filter) = filter
-				&& !filter.check_vector_id_truthy(ctx, stk, id.clone()).await?
-			{
+		let mut scan = DiskAnnPendingScan {
+			search,
+			filter,
+			builder,
+			// One of these across every range read, so only the scan's first page
+			// is sized before any entry size is known, the cancellation checks
+			// keep their back-off schedule over the whole scan, and the backlog
+			// report fires on what the whole scan has read.
+			pending: PendingScan::new(
+				"diskann",
+				&self.ikb,
+				&self.pending_backlog_reported,
+				&self.pending_scan_stats,
+			),
+			suppressed: RoaringTreemap::new(),
+			legacy_shards: 0,
+		};
+		// Phase 1: the legacy range, which owns every record it holds. Nothing
+		// writes it, so on an index that has drained it this is a single empty
+		// range probe and `legacy_shards` stays clear.
+		let rng = self.ikb.new_dr_range()?;
+		self.scan_pending_range(ctx, stk, &mut scan, rng, PendingLayout::Legacy, false).await?;
+		// Phase 2: the sharded ranges of every shard that may hold data. A write
+		// sets the `!dw` key and bumps its `!dy` shard in the same transaction, so
+		// a shard that is absent or confirmed `Empty` cannot hold a committed `!dw`
+		// entry. Skipping those shards keeps the scan proportional to the
+		// un-compacted backlog of the few active shards rather than the whole index.
+		for shard in 0..DISKANN_PENDING_STATE_SHARDS {
+			let state = pending_state.get(usize::from(shard)).and_then(|state| state.as_ref());
+			if state.is_none_or(|state| state.kind == DiskAnnPendingStateKind::Empty) {
 				continue;
 			}
-			for vector in vectors {
-				let vector = Vector::from(vector);
-				let d = self.distance.calculate(&search.pt, &vector);
-				if builder.check_add(d)
-					&& let Some(evicted_id) = builder.add_vector_id_result(d, id.clone())
-					&& let Some(filter) = filter
-				{
-					filter.expire(&evicted_id);
-				}
-			}
+			let probe_legacy = scan.legacy_shards & (1u32 << u32::from(shard)) != 0;
+			let rng = self.ikb.new_dw_shard_range(shard)?;
+			self.scan_pending_range(ctx, stk, &mut scan, rng, PendingLayout::Sharded, probe_legacy)
+				.await?;
 		}
-		if all_existing_docs.is_empty() {
+		self.score_pending_batch(ctx, stk, &mut scan).await?;
+		scan.pending.finish();
+		if scan.suppressed.is_empty() {
 			return Ok(None);
 		}
-		Ok(Some(all_existing_docs))
+		Ok(Some(scan.suppressed))
 	}
 
-	/// Streams pending updates for conservative lookup merging.
+	/// Streams one pending-update range into the scan, scoring each batch of
+	/// candidates as it fills so that one cursor page and one batch of vectors are
+	/// the whole of the scan's residency.
 	///
-	/// Sharded `!dw` entries are scanned only for shards that may hold data: a write sets the
-	/// `!dw` key and bumps its `!dy` shard in the same transaction, so a shard that is absent or
-	/// confirmed `Empty` cannot hold a committed `!dw` entry. Skipping those shards keeps the scan
-	/// proportional to the un-compacted backlog of the few active shards rather than the whole
-	/// index. The legacy unsharded `!dr` range is always swept as well for the dual-read
-	/// transition; it drains to empty over time, after which it costs a single empty range probe.
-	async fn collect_pending<F>(
+	/// `layout` selects the key decoding and, for the legacy range, records which
+	/// shards its records hash to. `probe_legacy` is set for a `!dw` shard that at
+	/// least one legacy record hashes to: each page of that shard resolves which of
+	/// its records the legacy range also holds, and yields ownership for those.
+	async fn scan_pending_range(
 		&self,
-		ctx: &Context,
-		tx: &Transaction,
-		pending_state: &[Option<DiskAnnPendingState>],
-		mut collector: F,
-	) -> Result<()>
-	where
-		F: FnMut(PendingOperation),
-	{
-		let mut count = 0;
-		for (shard, state) in pending_state.iter().enumerate() {
-			if state.as_ref().is_none_or(|s| s.kind == DiskAnnPendingStateKind::Empty) {
-				continue;
+		ctx: &DiskAnnContext<'_>,
+		stk: &mut Stk,
+		scan: &mut DiskAnnPendingScan<'_, '_>,
+		rng: Range<Key>,
+		layout: PendingLayout,
+		probe_legacy: bool,
+	) -> Result<()> {
+		let mut cursor = ctx.tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
+		loop {
+			let read = cursor.next_batch(scan.pending.rows()).await?;
+			// The page stays borrowed while the candidates it fills are scored, so
+			// it shares the residency budget with them. An empty page — which is
+			// what ends every range — releases the charge.
+			scan.pending.observe_page(&read);
+			if read.is_empty() {
+				break;
 			}
-			let rng = self.ikb.new_dw_shard_range(shard as u16)?;
-			Self::scan_pending_range(ctx, tx, rng, true, &mut count, &mut collector).await?;
+			// Ownership for the whole page, resolved before any of its entries are
+			// examined. Empty for a shard the legacy range cannot hold records of.
+			let legacy_owned = if probe_legacy {
+				// Score what the batch already holds first. The reply carries up
+				// to one legacy value per row of this page, so answering it with
+				// a full batch resident would put page, batch, request and reply live
+				// together; scoring first leaves only page, request and reply. The cost is
+				// a scoring batch per page instead of per budget, and only while
+				// the legacy range still holds records of this shard.
+				self.score_pending_batch(ctx, stk, scan).await?;
+				self.legacy_owned_rows(ctx, &read, &scan.pending).await?
+			} else {
+				Vec::new()
+			};
+			for (row, (key, value)) in read.iter().enumerate() {
+				let entry_bytes = key.len() + value.len();
+				// Charged before the checkpoint, so an entry the scan has read is
+				// accounted — and reported, if it crosses — before an expired
+				// deadline can bail out of the scan.
+				scan.pending.charge_entry(entry_bytes);
+				if ctx.ctx.is_done(Some(scan.pending.entries())).await? {
+					bail!(Error::QueryCancelled)
+				}
+				let id = match layout {
+					PendingLayout::Sharded => {
+						DiskAnnRecordPendingShard::decode_key(key)?.id.into_owned()
+					}
+					PendingLayout::Legacy => DiskAnnRecordPending::decode_key(key)?.id.into_owned(),
+				};
+				match layout {
+					// A legacy record can collide only with the one shard it hashes
+					// to, so recording the shard is enough to spare every other
+					// shard the resolution below.
+					PendingLayout::Legacy => {
+						scan.legacy_shards |= 1u32 << u32::from(Self::pending_state_shard(&id));
+					}
+					PendingLayout::Sharded if probe_legacy => {
+						if legacy_owned[row] {
+							continue;
+						}
+					}
+					PendingLayout::Sharded => {}
+				}
+				let pending = DiskAnnRecordPendingUpdate::kv_decode_value(value, ())?;
+				let pending = Self::record_pending_to_operation(id, pending);
+				// The suppression bitmap covers every doc-ID the queue mentions,
+				// superseded entries included: the graph entry such an id masks is
+				// stale either way.
+				if let VectorId::DocId(doc_id) = &pending.id {
+					scan.suppressed.insert(*doc_id);
+				}
+				if pending.new_vectors.is_empty() {
+					continue;
+				}
+				if scan.pending.rollover_required(entry_bytes) {
+					self.score_pending_batch(ctx, stk, scan).await?;
+				}
+				scan.pending.push(pending.id, pending.new_vectors, entry_bytes);
+			}
 		}
-		let rng = self.ikb.new_dr_range()?;
-		Self::scan_pending_range(ctx, tx, rng, false, &mut count, &mut collector).await?;
 		Ok(())
 	}
 
-	/// Streams one pending-update range, decoding each key as sharded (`!dw`) or legacy (`!dr`).
-	async fn scan_pending_range<F>(
-		ctx: &Context,
-		tx: &Transaction,
-		rng: Range<Key>,
-		sharded: bool,
-		count: &mut usize,
-		collector: &mut F,
-	) -> Result<()>
-	where
-		F: FnMut(PendingOperation),
-	{
-		let mut cursor = tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
-		loop {
-			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
-			if batch.is_empty() {
-				break;
-			}
-			for (key, value) in &batch {
-				if ctx.is_done(Some(*count)).await? {
-					bail!(Error::QueryCancelled)
+	/// Resolves, in one round trip, which rows of a `!dw` page the legacy `!dr`
+	/// range also holds. Row `i` of the result answers row `i` of the page.
+	///
+	/// Asked once per cursor page rather than once per record. A record-at-a-time
+	/// existence check makes every entry of every shard a legacy record hashes to
+	/// cost a serial point read, and a migration backlog large enough to reach all
+	/// [`DISKANN_PENDING_STATE_SHARDS`] shards makes that every sharded entry in
+	/// the queue — turning a lookup made of sequential range scans into one point
+	/// read per pending record, which is what remote key-value backends charge
+	/// most for. Batching leaves the shard gating in place and reduces the cost of
+	/// a shard that survives it to one round trip per page.
+	///
+	/// The reply and encoded request each carry at most one item per row, so they
+	/// are bounded like the page that produced them; the reply is reduced to one
+	/// flag per row before any page entry is read. The caller scores the pending
+	/// batch before asking, so page, request, and reply are the only pending
+	/// allocations live while the lookup is answered.
+	async fn legacy_owned_rows(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		read: &ValsBatch<'_>,
+		pending: &PendingScan<'_>,
+	) -> Result<Vec<bool>> {
+		debug_assert!(
+			pending.batch.is_empty(),
+			"the pending batch is scored before an ownership reply is read, so only the page, \
+			 request, and reply are live while the reply is"
+		);
+		// Upstream moves each decoded ID straight into its legacy key, so the page
+		// is accompanied by one request-key representation. That is not
+		// expressible here: `DiskAnnRecordPending::new` borrows its table name and
+		// record id rather than taking owned `Cow`s, so the decoded ids must
+		// outlive the keys built from them.
+		let mut ids = Vec::with_capacity(read.len());
+		for (key, _) in read {
+			ids.push(DiskAnnRecordPendingShard::decode_key(key)?.id.into_owned());
+		}
+		let keys: Vec<_> = ids.iter().map(|id| self.ikb.new_dr_key(id)).collect();
+		let found = ctx.tx.getm_raw(keys, None).await?;
+		let reply_bytes: usize = found.iter().flatten().map(|value| value.len()).sum();
+		// A legacy `!dr` request key is the corresponding `!dw` page key minus
+		// its shard field, so the page's key bytes are a conservative charge for
+		// the encoded request without retaining or re-encoding that request here.
+		pending.record_side_read(
+			read.len(),
+			pending.batch.bytes()
+				+ pending.batch.page_bytes()
+				+ read.key_bytes as usize
+				+ reply_bytes,
+		);
+		Ok(found.into_iter().map(|value| value.is_some()).collect())
+	}
+
+	/// Scores one buffered batch of pending candidates and empties it.
+	///
+	/// The records behind the batch are warmed in a single multi-get before the
+	/// per-candidate truthy checks, so those checks read the transaction cache
+	/// instead of fetching one record at a time.
+	///
+	/// A candidate that takes no top-K slot has its filter-cache entry released on
+	/// the way out, so the cache the search carries grows with `k` rather than with
+	/// the length of the queue — the filter keeps a full record per truthy
+	/// candidate and otherwise drops one only when the result builder evicts it.
+	/// Releasing an entry costs at most a re-evaluation, and never happens to a
+	/// candidate that holds a slot: the ids reaching this function are distinct,
+	/// and every pending doc is suppressed from the graph search that follows, so
+	/// no released verdict is asked for again.
+	async fn score_pending_batch(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		stk: &mut Stk,
+		scan: &mut DiskAnnPendingScan<'_, '_>,
+	) -> Result<()> {
+		if scan.pending.batch.is_empty() {
+			return Ok(());
+		}
+		scan.pending.begin_scoring();
+		if let Some(filter) = scan.filter.as_mut() {
+			filter.prefetch_records(ctx, &scan.pending.batch.ids).await?;
+		}
+		let batch = &mut scan.pending.batch;
+		for (id, vectors) in batch.ids.drain(..).zip(batch.vectors.drain(..)) {
+			let truthy = match scan.filter.as_mut() {
+				Some(filter) => filter.check_vector_id_truthy(ctx, stk, id.clone()).await?,
+				None => true,
+			};
+			if truthy {
+				for vector in vectors {
+					let vector = Vector::from(vector);
+					let d = self.distance.calculate(&scan.search.pt, &vector);
+					if scan.builder.check_add(d)
+						&& let Some(evicted_id) = scan.builder.add_vector_id_result(d, id.clone())
+						&& let Some(filter) = scan.filter.as_mut()
+					{
+						filter.expire(&evicted_id);
+					}
 				}
-				let id = if sharded {
-					DiskAnnRecordPendingShard::decode_key(key)?.id.into_owned()
-				} else {
-					DiskAnnRecordPending::decode_key(key)?.id.into_owned()
-				};
-				let pending = DiskAnnRecordPendingUpdate::kv_decode_value(value, ())?;
-				collector(Self::record_pending_to_operation(id, pending));
-				*count += 1;
+			}
+			if let Some(filter) = scan.filter.as_mut()
+				&& !scan.builder.contains(&id)
+			{
+				filter.expire(&id);
 			}
 		}
 		Ok(())
@@ -1544,6 +1781,10 @@ mod tests {
 	use super::*;
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 	use crate::idx::trees::diskann::cache::DiskAnnCache;
+	use crate::idx::trees::pending::{
+		PENDING_MAX_BATCH_KEYS, PENDING_MAX_BYTES, PENDING_MAX_PAGE_BYTES, PENDING_MAX_ROWS,
+		PENDING_PROBE_ROWS,
+	};
 	use crate::kvs::{Datastore, LockType, TransactionType};
 
 	fn ikb() -> IndexKeyBase {
@@ -1555,8 +1796,14 @@ mod tests {
 	}
 
 	fn params(vector_type: VectorType, distance: Distance) -> DiskAnnParams {
+		wide_params(4, vector_type, distance)
+	}
+
+	/// The same parameters at an arbitrary dimension. Width is what decides
+	/// whether the byte budget or the row cap sizes a pending cursor page.
+	fn wide_params(dimension: u16, vector_type: VectorType, distance: Distance) -> DiskAnnParams {
 		DiskAnnParams {
-			dimension: 4,
+			dimension,
 			distance,
 			vector_type,
 			degree: 16,
@@ -2268,6 +2515,979 @@ mod tests {
 		// The record is still visible: the `!dw` scan is gated on `!dy`, which the old compactor
 		// never touched.
 		assert_eq!(knn_len(&index, &ds, &[1.0, 2.0, 3.0, 4.0]).await?, 1);
+		Ok(())
+	}
+
+	/// The record numbers a KNN search returns, sorted.
+	async fn knn_keys(
+		index: &DiskAnnIndex,
+		ds: &Datastore,
+		values: &[f32],
+		k: usize,
+	) -> Result<Vec<i64>> {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let query = f32_query(values);
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| async { index.knn_search(&ctx, stk, &query, k, 8, None).await })
+			.finish()
+			.await?;
+		ctx.tx().cancel().await?;
+		let mut keys: Vec<i64> = res
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect();
+		keys.sort();
+		Ok(keys)
+	}
+
+	/// Runs a KNN search that a deadline stops at the `at`-th pending entry the
+	/// scan reads, and returns the error it fails with.
+	///
+	/// The interrupt is armed against the scan's own entry accounting, so the
+	/// entry a scan is stopped on is a chosen quantity rather than a race against
+	/// a clock: cancelling while entry `at` is charged is observed by that entry's
+	/// own cancellation checkpoint.
+	async fn knn_cancelled_at(
+		index: &DiskAnnIndex,
+		ds: &Datastore,
+		values: &[f32],
+		k: usize,
+		at: usize,
+	) -> Result<anyhow::Error> {
+		let tx = Arc::new(ds.transaction(TransactionType::Read, LockType::Optimistic).await?);
+		let mut ctx = Context::new_test();
+		ctx.set_transaction(tx);
+		let canceller = ctx.add_cancel();
+		let ctx = ctx.freeze();
+		index.pending_scan_stats().interrupt_at(at, canceller);
+		let query = f32_query(values);
+		let mut stack = reblessive::tree::TreeStack::new();
+		let err = stack
+			.enter(|stk| async { index.knn_search(&ctx, stk, &query, k, 8, None).await })
+			.finish()
+			.await
+			.expect_err("the scan is cancelled before it finishes reading the queue");
+		ctx.tx().cancel().await?;
+		Ok(err)
+	}
+
+	/// A DiskANN index holding `n` uncompacted sharded pendings: record key `i`
+	/// carries vector `[i, 0, 0, 0]` for `i` in `1..=n`. Nothing reaches the graph,
+	/// so a search over it reads the whole queue.
+	///
+	/// Record `i` hashes to shard `i % 32` and the scan walks the shards in order,
+	/// so scan position is not record order — which is what lets the tests below
+	/// place a query's neighbours in different materialisation batches.
+	async fn new_pending_backlog_fixture(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+		n: i64,
+	) -> Result<DiskAnnIndex> {
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		for i in 1..=n {
+			index
+				.index(
+					&ctx,
+					&RecordIdKey::Number(i),
+					None,
+					Some(f32_content(&[i as f32, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+		}
+		ctx.tx().commit().await?;
+		Ok(index)
+	}
+
+	/// A pending queue whose retained identity bytes live primarily in the
+	/// record keys rather than the vector values.
+	async fn new_large_key_pending_backlog_fixture(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+		n: i64,
+		key_payload_bytes: usize,
+	) -> Result<DiskAnnIndex> {
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		index
+			.index(&ctx, &RecordIdKey::Number(0), None, Some(f32_content(&[0.0, 0.0, 0.0, 0.0])))
+			.await?;
+		let suffix = "x".repeat(key_payload_bytes);
+		for i in 1..=n {
+			let id = RecordIdKey::String(format!("{i:04}-{suffix}").into());
+			index.index(&ctx, &id, None, Some(f32_content(&[i as f32, 0.0, 0.0, 0.0]))).await?;
+		}
+		ctx.tx().commit().await?;
+		Ok(index)
+	}
+
+	/// Large user record IDs remain buffered as `VectorId::RecordKey` values
+	/// after the cursor page that supplied them is released. Their encoded key
+	/// bytes must therefore roll the scoring batch even when the vector values
+	/// themselves and the entry count fit in one batch.
+	#[tokio::test]
+	async fn diskann_pending_scan_accounts_for_record_key_bytes() -> Result<()> {
+		const PENDING: i64 = 600;
+		const KEY_PAYLOAD_BYTES: usize = 8 * 1024;
+		const _: () = assert!(PENDING as usize + 1 < PENDING_MAX_BATCH_KEYS);
+		const _: () = assert!(PENDING as usize * KEY_PAYLOAD_BYTES > PENDING_MAX_BYTES);
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index =
+			new_large_key_pending_backlog_fixture(&ds, &ikb, PENDING, KEY_PAYLOAD_BYTES).await?;
+
+		assert_eq!(knn_keys(&index, &ds, &[0.0, 0.0, 0.0, 0.0], 1).await?, vec![0]);
+
+		let stats = index.pending_scan_stats();
+		assert!(
+			stats.batches() > 1,
+			"record key bytes alone must split the queue into several scoring batches"
+		);
+		assert!(
+			stats.peak_batch_bytes() <= PENDING_MAX_BYTES,
+			"retained record-key bytes stay inside the scoring-batch budget: {} bytes",
+			stats.peak_batch_bytes(),
+		);
+		Ok(())
+	}
+
+	/// A DiskANN index holding `n` uncompacted sharded pendings whose vectors are
+	/// `dimension` wide, all landing in the same shard: record key
+	/// `i * DISKANN_PENDING_STATE_SHARDS` carries `[i, 0, ...]` for `i` in
+	/// `1..=n`.
+	///
+	/// One shard is what makes the scan's paging a single sequence rather than one
+	/// per shard, and the width is what decides whether the byte budget or the row
+	/// cap sizes each page.
+	async fn new_wide_pending_backlog_fixture(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+		dimension: u16,
+		n: i64,
+	) -> Result<DiskAnnIndex> {
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&wide_params(dimension, VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		for i in 1..=n {
+			let mut values = vec![0.0f32; usize::from(dimension)];
+			values[0] = i as f32;
+			index
+				.index(
+					&ctx,
+					&RecordIdKey::Number(i * i64::from(DISKANN_PENDING_STATE_SHARDS)),
+					None,
+					Some(vec![f32_value(&values)]),
+				)
+				.await?;
+		}
+		ctx.tx().commit().await?;
+		Ok(index)
+	}
+
+	/// A pending queue whose entries widen partway through, all in one shard:
+	/// `narrow` records carrying one `dimension`-wide vector each, then `wide`
+	/// records carrying `vectors_per_wide_record` of them.
+	///
+	/// A shard's range is scanned in record order, so the narrow prefix is what
+	/// the scan measures its first pages from and the wide tail is what those
+	/// pages then have to hold. Record key `i * DISKANN_PENDING_STATE_SHARDS`
+	/// carries `[i, 0, ...]`, so the nearest neighbours to the origin are the head
+	/// of the queue whichever half they fall in.
+	async fn new_widening_pending_backlog_fixture(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+		dimension: u16,
+		narrow: i64,
+		wide: i64,
+		vectors_per_wide_record: usize,
+	) -> Result<DiskAnnIndex> {
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&wide_params(dimension, VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		for i in 1..=(narrow + wide) {
+			let mut values = vec![0.0f32; usize::from(dimension)];
+			values[0] = i as f32;
+			let copies = if i <= narrow {
+				1
+			} else {
+				vectors_per_wide_record
+			};
+			index
+				.index(
+					&ctx,
+					&RecordIdKey::Number(i * i64::from(DISKANN_PENDING_STATE_SHARDS)),
+					None,
+					Some(vec![f32_value(&values); copies]),
+				)
+				.await?;
+		}
+		ctx.tx().commit().await?;
+		Ok(index)
+	}
+
+	/// A KNN search holds at most one cursor page and one materialisation batch of
+	/// pending vectors at a time, however deep the queue is. Pinned as exact
+	/// accounting: a queue of a known length scores in a known number of batches,
+	/// no batch exceeds the entry budget, no page exceeds its byte share, and page
+	/// and batch together stay inside the residency budget.
+	#[tokio::test]
+	async fn diskann_pending_scan_materialises_bounded_batches() -> Result<()> {
+		// Two full batches plus a remainder, so the counts below pin the budget and
+		// the split of a queue across batches, not just that some batching
+		// happened.
+		const PENDING: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2 + 7;
+		const EXPECTED_BATCHES: usize = 3;
+		// The fixture's 4-D f32 vectors are orders of magnitude smaller than the
+		// byte budget, so the entry budget alone decides where a batch ends and the
+		// batch count above is exact.
+		const _: () = assert!(PENDING_MAX_BYTES > PENDING_MAX_BATCH_KEYS * 1024);
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = new_pending_backlog_fixture(&ds, &ikb, PENDING).await?;
+
+		assert_eq!(knn_keys(&index, &ds, &[0.0, 0.0, 0.0, 0.0], 4).await?, vec![1, 2, 3, 4]);
+
+		let stats = index.pending_scan_stats();
+		assert_eq!(
+			stats.batches(),
+			EXPECTED_BATCHES,
+			"a {PENDING}-entry queue scores in {EXPECTED_BATCHES} batches"
+		);
+		assert_eq!(
+			stats.peak_batch_entries(),
+			PENDING_MAX_BATCH_KEYS,
+			"no batch holds more than the entry budget"
+		);
+		assert!(
+			stats.peak_batch_bytes() < PENDING_MAX_BYTES,
+			"the byte budget must not bind for this fixture: {} bytes",
+			stats.peak_batch_bytes()
+		);
+		assert!(
+			stats.peak_page_entries() <= PENDING_MAX_ROWS as usize,
+			"no page holds more than the row cap: {} entries",
+			stats.peak_page_entries()
+		);
+		assert!(
+			stats.peak_page_bytes() <= PENDING_MAX_PAGE_BYTES,
+			"no page holds more than its byte share: {} bytes",
+			stats.peak_page_bytes()
+		);
+		assert!(
+			stats.peak_resident_bytes() <= PENDING_MAX_BYTES,
+			"page and batch together stay inside the residency budget: {} bytes",
+			stats.peak_resident_bytes()
+		);
+		assert_eq!(stats.side_reads(), 0, "an empty legacy range costs no ownership resolution");
+		Ok(())
+	}
+
+	/// Wide vectors shrink the cursor pages instead of the residency bound.
+	///
+	/// A page is requested by entry count, so a fixed count would let entries this
+	/// wide materialise several times the budget in the cursor's arena, where they
+	/// stay resident for as long as the scan holds the page. Pinned as exact
+	/// accounting: the row cap does not bind, the byte share does, and page and
+	/// batch together stay inside the residency budget.
+	#[tokio::test]
+	async fn diskann_pending_scan_pages_shrink_for_wide_vectors() -> Result<()> {
+		// Wide enough that a full-size page of these entries would not fit the page
+		// budget, and deep enough that the byte budget — not the entry budget — is
+		// what ends a scoring batch.
+		const DIMENSION: u16 = 16_384;
+		const PENDING: i64 = 64;
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = new_wide_pending_backlog_fixture(&ds, &ikb, DIMENSION, PENDING).await?;
+
+		let query = vec![0.0f32; usize::from(DIMENSION)];
+		assert_eq!(
+			knn_keys(&index, &ds, &query, 2).await?,
+			vec![
+				i64::from(DISKANN_PENDING_STATE_SHARDS),
+				2 * i64::from(DISKANN_PENDING_STATE_SHARDS)
+			]
+		);
+
+		let stats = index.pending_scan_stats();
+		let entry_bytes = stats.peak_page_bytes().div_ceil(stats.peak_page_entries());
+		assert!(
+			entry_bytes * PENDING_MAX_ROWS as usize > PENDING_MAX_PAGE_BYTES,
+			"the fixture must be wide enough for a full-size page to overrun the budget: \
+			 {entry_bytes} bytes per entry"
+		);
+		assert!(
+			stats.peak_page_entries() < PENDING_MAX_ROWS as usize,
+			"the byte share, not the row cap, sized the pages: {} entries",
+			stats.peak_page_entries()
+		);
+		assert!(
+			stats.peak_page_bytes() <= PENDING_MAX_PAGE_BYTES,
+			"no page holds more than its byte share: {} bytes",
+			stats.peak_page_bytes()
+		);
+		assert!(
+			stats.peak_batch_entries() < PENDING_MAX_BATCH_KEYS,
+			"the byte budget, not the entry budget, ended a batch: {} entries",
+			stats.peak_batch_entries()
+		);
+		assert!(
+			stats.peak_resident_bytes() <= PENDING_MAX_BYTES,
+			"page and batch together stay inside the residency budget: {} bytes",
+			stats.peak_resident_bytes()
+		);
+		// The empty legacy range costs one page. The one populated shard costs a
+		// probe page, pages of the observed byte-derived size for everything the
+		// probe left, and the empty page that ends it.
+		let after_probe = PENDING as usize - PENDING_PROBE_ROWS as usize;
+		let shard_pages = 1 + after_probe.div_ceil(stats.peak_page_entries()) + 1;
+		assert_eq!(
+			stats.pages(),
+			1 + shard_pages,
+			"every page after the probe is the size the byte share allows"
+		);
+		Ok(())
+	}
+
+	/// An abrupt increase in entry width cannot restore the ordinary 500-row
+	/// cursor amplification.
+	///
+	/// The narrow probe sizes the next page at the pending scan's conservative
+	/// row cap. The entries then widen enough that an ordinary 500-row cursor page
+	/// would exceed the whole residency target, but the pending page stays inside
+	/// its byte share because it can hold only sixteen. Results are unaffected.
+	#[tokio::test]
+	async fn diskann_pending_scan_caps_pages_when_entries_widen() -> Result<()> {
+		// A narrow entry small enough that the row cap, not the byte target, sizes
+		// the page after the probe...
+		const DIMENSION: u16 = 256;
+		const NARROW: i64 = PENDING_PROBE_ROWS as i64;
+		// ...and a wide entry large enough that the engine-wide 500-row default
+		// would overrun the whole residency target.
+		const VECTORS_PER_WIDE_RECORD: usize = 10;
+		// Several conservatively capped pages pin that the narrow prefix cannot
+		// increase the request beyond the pending-specific cap.
+		const WIDE: i64 = PENDING_MAX_ROWS as i64 * 3 + 5;
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = new_widening_pending_backlog_fixture(
+			&ds,
+			&ikb,
+			DIMENSION,
+			NARROW,
+			WIDE,
+			VECTORS_PER_WIDE_RECORD,
+		)
+		.await?;
+
+		let shard = i64::from(DISKANN_PENDING_STATE_SHARDS);
+		let query = vec![0.0f32; usize::from(DIMENSION)];
+		assert_eq!(
+			knn_keys(&index, &ds, &query, 4).await?,
+			vec![shard, 2 * shard, 3 * shard, 4 * shard],
+			"the conservative page cap changes residency, not results"
+		);
+
+		let stats = index.pending_scan_stats();
+		assert_eq!(
+			stats.peak_page_entries(),
+			PENDING_MAX_ROWS as usize,
+			"the narrow prefix sized the next page at the row cap"
+		);
+		let wide_entry_bytes = stats.peak_page_bytes().div_ceil(PENDING_MAX_ROWS as usize);
+		assert!(
+			wide_entry_bytes * crate::kvs::NORMAL_BATCH_SIZE as usize > PENDING_MAX_BYTES,
+			"the ordinary row cap must recreate the allocation this regression guards: \
+			 {wide_entry_bytes} bytes per entry"
+		);
+		assert!(
+			stats.peak_page_bytes() <= PENDING_MAX_PAGE_BYTES,
+			"the pending-specific row cap keeps the widening page inside its share: {} bytes",
+			stats.peak_page_bytes()
+		);
+		assert!(
+			stats.peak_resident_bytes() <= PENDING_MAX_BYTES,
+			"page and batch stay inside the residency target: {} bytes",
+			stats.peak_resident_bytes()
+		);
+		// The empty legacy range costs one page. The populated shard costs the
+		// probe, capped pages for the wide tail, and its empty page.
+		assert_eq!(
+			stats.pages(),
+			1 + 1 + (WIDE as usize).div_ceil(PENDING_MAX_ROWS as usize) + 1,
+			"the widening tail stays split by the conservative row cap"
+		);
+		Ok(())
+	}
+
+	/// The backlog report arms on a scoring rollover, from inside the scan, for a
+	/// queue whose raw bytes are well inside the residency budget.
+	///
+	/// A batch shares that budget with the cursor page it is filled from, so a
+	/// queue of wide vectors costs several materialisation batches long before its
+	/// raw values add up to [`PENDING_MAX_BYTES`]. A report gated on a raw byte
+	/// total would say nothing about it. Deriving the crossing from the rollover
+	/// itself is what makes the two agree. Draining the queue re-arms the report
+	/// for the next crossing, so a sustained backlog stays one record rather than
+	/// one per query.
+	#[tokio::test]
+	async fn diskann_pending_backlog_report_arms_on_a_scoring_rollover() -> Result<()> {
+		// Wide enough that page residency rolls a batch over...
+		const DIMENSION: u16 = 12_000;
+		const PENDING: i64 = 80;
+		// ...while the entry count stays inside the entry budget, so the entry
+		// count alone cannot be what arms the report.
+		const _: () = assert!(PENDING as usize <= PENDING_MAX_BATCH_KEYS);
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = new_wide_pending_backlog_fixture(&ds, &ikb, DIMENSION, PENDING).await?;
+		assert!(!index.pending_backlog_reported(), "no scan has read the queue yet");
+
+		let query = vec![0.0f32; usize::from(DIMENSION)];
+		assert_eq!(
+			knn_keys(&index, &ds, &query, 1).await?,
+			vec![i64::from(DISKANN_PENDING_STATE_SHARDS)]
+		);
+		let stats = index.pending_scan_stats();
+		assert!(
+			stats.batches() > 1,
+			"the fixture must cost more than one batch to score: {} batches",
+			stats.batches()
+		);
+		// Keys included, the whole queue is inside the residency budget: a
+		// threshold over raw bytes could not have armed this report.
+		let entry_bytes = stats.peak_page_bytes().div_ceil(stats.peak_page_entries());
+		assert!(
+			stats.entries_read() * entry_bytes < PENDING_MAX_BYTES,
+			"the queue's raw bytes must stay inside the budget: {} entries of {entry_bytes} bytes",
+			stats.entries_read()
+		);
+		assert!(
+			index.pending_backlog_reported(),
+			"a queue that costs several materialisation batches arms the report"
+		);
+
+		// Drain the queue behind the index's back: every record of this fixture
+		// lands in the one shard, and nothing was ever compacted, so removing that
+		// shard's range leaves an empty index. The `!dy` guard still says the shard
+		// may hold data, so the scan still opens it.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			ctx.tx().delr(ikb.new_dw_shard_range(0)?).await?;
+			ctx.tx().commit().await?;
+		}
+		assert!(knn_keys(&index, &ds, &query, 1).await?.is_empty());
+		assert!(
+			!index.pending_backlog_reported(),
+			"a scan that completes inside both budgets re-arms the report"
+		);
+		Ok(())
+	}
+
+	/// A scan cancelled at a checkpoint has already accounted for the entry that
+	/// checkpoint belongs to.
+	///
+	/// The cancellation schedule deep-checks on entry counts that bracket the
+	/// entry-count crossing, so a loop that checked before charging would return
+	/// `QueryCancelled` out of the very scan the backlog report exists to
+	/// explain, having read the crossing entry but never accounted for it. Pinned
+	/// as exact accounting: cancelling at the checkpoint of the entry that
+	/// crosses leaves that entry charged and the report armed.
+	#[tokio::test]
+	async fn diskann_pending_scan_reports_the_entry_it_is_cancelled_on() -> Result<()> {
+		// One entry past the entry budget is the crossing; the queue is deeper so
+		// the scan is stopped by the checkpoint rather than by the range end.
+		const CROSSING: usize = PENDING_MAX_BATCH_KEYS + 1;
+		const PENDING: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2;
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = new_pending_backlog_fixture(&ds, &ikb, PENDING).await?;
+		assert!(!index.pending_backlog_reported(), "no scan has read the queue yet");
+
+		let err = knn_cancelled_at(&index, &ds, &[0.0, 0.0, 0.0, 0.0], 4, CROSSING).await?;
+		assert!(
+			matches!(err.downcast_ref::<Error>(), Some(Error::QueryCancelled)),
+			"unexpected error: {err}"
+		);
+
+		let stats = index.pending_scan_stats();
+		assert_eq!(
+			stats.entries_read(),
+			CROSSING,
+			"the entry the scan is cancelled on is charged before the checkpoint"
+		);
+		assert!(
+			index.pending_backlog_reported(),
+			"the crossing is reported before the deadline bails out of the scan"
+		);
+		Ok(())
+	}
+
+	/// A byte-based rollover is reported before cancellation on the entry that
+	/// would force it, even while the queue remains below the entry threshold.
+	#[tokio::test]
+	async fn diskann_pending_scan_reports_byte_rollover_before_cancellation() -> Result<()> {
+		const DIMENSION: u16 = 256;
+		const PENDING: i64 = 2;
+		const VECTORS_PER_RECORD: usize = 1536;
+		const CANCEL_AT: usize = 2;
+		const _: () = assert!((PENDING as usize) < PENDING_MAX_BATCH_KEYS);
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = new_widening_pending_backlog_fixture(
+			&ds,
+			&ikb,
+			DIMENSION,
+			0,
+			PENDING,
+			VECTORS_PER_RECORD,
+		)
+		.await?;
+		assert!(!index.pending_backlog_reported(), "no scan has read the queue yet");
+
+		let query = vec![0.0f32; usize::from(DIMENSION)];
+		let err = knn_cancelled_at(&index, &ds, &query, 1, CANCEL_AT).await?;
+		assert!(
+			matches!(err.downcast_ref::<Error>(), Some(Error::QueryCancelled)),
+			"unexpected error: {err}"
+		);
+
+		assert_eq!(index.pending_scan_stats().entries_read(), CANCEL_AT);
+		assert!(
+			index.pending_backlog_reported(),
+			"the byte rollover must be reported before its cancellation checkpoint"
+		);
+		Ok(())
+	}
+
+	/// Legacy ownership is resolved per cursor page, not per record.
+	///
+	/// Once any legacy record hashes to a shard, every entry of that shard has to
+	/// be checked against the legacy range. A record-at-a-time existence check
+	/// makes that one serial point read per pending record; resolving a page at a
+	/// time makes it one round trip per page. Pinned as exact accounting: a shard
+	/// holding many records resolves them in the number of round trips its pages
+	/// take.
+	#[tokio::test]
+	async fn diskann_legacy_ownership_resolves_one_page_at_a_time() -> Result<()> {
+		// Every record lands in shard 0, so one shard carries the whole backlog and
+		// the page arithmetic below is a single sequence.
+		const PENDING: i64 = PENDING_MAX_ROWS as i64 + 7;
+		let shard = i64::from(DISKANN_PENDING_STATE_SHARDS);
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 1..=PENDING {
+				index
+					.index(
+						&ctx,
+						&RecordIdKey::Number(i * shard),
+						None,
+						Some(f32_content(&[i as f32, 0.0, 0.0, 0.0])),
+					)
+					.await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		// One legacy entry, which puts the shard every record lives in inside the
+		// mask and so makes every one of them need resolving. Its record is parked
+		// far from the query, so scoring the sharded entry instead would surface it.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			ctx.tx()
+				.set(
+					&ikb.new_dr_key(&RecordIdKey::Number(shard)),
+					&f32_pending(&[9999.0, 0.0, 0.0, 0.0]),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+
+		assert_eq!(
+			knn_keys(&index, &ds, &[0.0, 0.0, 0.0, 0.0], 2).await?,
+			vec![2 * shard, 3 * shard],
+			"the legacy entry owns its record, so the sharded entry for it is not scored"
+		);
+
+		let stats = index.pending_scan_stats();
+		assert_eq!(
+			stats.side_read_keys(),
+			PENDING as usize,
+			"every record of the masked shard is resolved"
+		);
+		// The preceding legacy phase warms the shared sizer to the row cap, so
+		// ownership resolution starts with capped pages rather than another probe.
+		// The empty page that ends the range asks about nothing.
+		let expected_batches = (PENDING as usize).div_ceil(PENDING_MAX_ROWS as usize);
+		assert_eq!(
+			stats.side_reads(),
+			expected_batches,
+			"resolving them costs one round trip per page, not one per record"
+		);
+		let first_request_bytes: usize = (1..=PENDING_MAX_ROWS as i64)
+			.map(|i| ikb.new_dr_key(&RecordIdKey::Number(i * shard)).encode_key().unwrap().len())
+			.sum();
+		assert!(
+			stats.peak_resident_bytes() >= stats.peak_page_bytes() + first_request_bytes,
+			"ownership residency includes the encoded lookup request: page={} request={} peak={}",
+			stats.peak_page_bytes(),
+			first_request_bytes,
+			stats.peak_resident_bytes(),
+		);
+		assert!(
+			stats.peak_resident_bytes() <= PENDING_MAX_BYTES,
+			"the ownership request and reply land inside the residency budget: {} bytes",
+			stats.peak_resident_bytes()
+		);
+		Ok(())
+	}
+
+	/// Splitting the pending queue into batches must not change which candidates
+	/// win. The query's four neighbours hash to shards 30, 31, 0 and 1, which the
+	/// scan reads in the second, third and first batch respectively, so a top-K
+	/// kept per batch rather than across the whole scan would return a different
+	/// set.
+	#[tokio::test]
+	async fn diskann_pending_scan_batching_preserves_top_k() -> Result<()> {
+		const PENDING: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2 + 7;
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = new_pending_backlog_fixture(&ds, &ikb, PENDING).await?;
+
+		// Midway between records 2047 and 2048: the winners are the two records
+		// either side of the query, then the two beyond them.
+		assert_eq!(
+			knn_keys(&index, &ds, &[2047.5, 0.0, 0.0, 0.0], 4).await?,
+			vec![2046, 2047, 2048, 2049]
+		);
+		assert_eq!(index.pending_scan_stats().batches(), 3);
+		Ok(())
+	}
+
+	/// A queue below the entry budget scores in a single batch, and returns the
+	/// same neighbours the batched scan returns for the same records.
+	#[tokio::test]
+	async fn diskann_pending_scan_below_budget_scores_in_one_batch() -> Result<()> {
+		const SHALLOW: i64 = PENDING_MAX_BATCH_KEYS as i64 - 1;
+		const DEEP: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2 + 7;
+		// A neighbourhood both fixtures hold, so the two answers are comparable.
+		const QUERY: [f32; 4] = [511.5, 0.0, 0.0, 0.0];
+		const EXPECTED: [i64; 4] = [510, 511, 512, 513];
+
+		let ds = Datastore::new("memory").await?;
+		let shallow_ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3));
+		let deep_ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let shallow = new_pending_backlog_fixture(&ds, &shallow_ikb, SHALLOW).await?;
+		let deep = new_pending_backlog_fixture(&ds, &deep_ikb, DEEP).await?;
+
+		assert_eq!(knn_keys(&shallow, &ds, &QUERY, 4).await?, EXPECTED.to_vec());
+		assert_eq!(
+			shallow.pending_scan_stats().batches(),
+			1,
+			"a queue one entry short of the budget scores in a single batch"
+		);
+		assert_eq!(
+			knn_keys(&deep, &ds, &QUERY, 4).await?,
+			EXPECTED.to_vec(),
+			"batching the same records across three batches returns the same neighbours"
+		);
+		assert_eq!(deep.pending_scan_stats().batches(), 3);
+		Ok(())
+	}
+
+	/// The suppression bitmap covers every document seen anywhere in the pending
+	/// queue, whatever batch its vectors were scored in. The moved record hashes
+	/// to the last shard and sorts after every filler in it, so its doc-ID enters
+	/// the bitmap only after two batches have already been scored; without it the
+	/// graph search would return that record at the position it no longer
+	/// occupies.
+	#[tokio::test]
+	async fn diskann_pending_scan_masks_stale_graph_entries_across_batches() -> Result<()> {
+		const FILLERS: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2;
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let near = RecordIdKey::Number(9023);
+		let winner = RecordIdKey::Number(9024);
+
+		// Two committed records: the nearest to the origin, and the runner-up.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index.index(&ctx, &near, None, Some(f32_content(&[1.0, 0.0, 0.0, 0.0]))).await?;
+			index.index(&ctx, &winner, None, Some(f32_content(&[5.0, 0.0, 0.0, 0.0]))).await?;
+			ctx.tx().commit().await?;
+		}
+		// Fold both into the graph, so what follows is the only pending work.
+		for _ in 0..8 {
+			if !compact_once(&index, &ds, &ikb).await? {
+				break;
+			}
+		}
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			assert!(ctx.tx().get(&dw_key(&ikb, &near), None).await?.is_none());
+			assert!(ctx.tx().get(&dw_key(&ikb, &winner), None).await?.is_none());
+			ctx.tx().cancel().await?;
+		}
+
+		// A queue deep enough to span several batches, every entry farther from the
+		// origin than the runner-up.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 1..=FILLERS {
+				index
+					.index(
+						&ctx,
+						&RecordIdKey::Number(i),
+						None,
+						Some(f32_content(&[10000.0 + i as f32, 0.0, 0.0, 0.0])),
+					)
+					.await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		// Move the committed nearest record away, leaving its graph entry stale.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index
+				.index(
+					&ctx,
+					&near,
+					Some(f32_content(&[1.0, 0.0, 0.0, 0.0])),
+					Some(f32_content(&[30000.0, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+
+		assert_eq!(
+			knn_keys(&index, &ds, &[0.0, 0.0, 0.0, 0.0], 1).await?,
+			vec![9024],
+			"the moved record's stale graph entry must stay masked"
+		);
+		assert_eq!(
+			index.pending_scan_stats().batches(),
+			3,
+			"the moved record is scored alone in the third batch"
+		);
+		Ok(())
+	}
+
+	/// A record carrying an entry in both pending layouts is owned by the legacy
+	/// one, which a mixed-version cluster leaves as the later write. Its sharded
+	/// entry is neither scored in place of the legacy one nor scored alongside it.
+	#[tokio::test]
+	async fn diskann_legacy_pending_supersedes_sharded_entry() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let first = RecordIdKey::Number(1);
+		let second = RecordIdKey::Number(2);
+
+		// Record 1 in both layouts: the sharded entry puts it nearest the origin,
+		// the legacy entry farthest.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			tx.set(&dw_key(&ikb, &first), &f32_pending(&[1.0, 0.0, 0.0, 0.0])).await?;
+			tx.set(
+				&ikb.new_dy_key(DiskAnnIndex::pending_state_shard(&first)),
+				&DiskAnnPendingState {
+					kind: DiskAnnPendingStateKind::NonEmpty,
+					generation: 1,
+				},
+			)
+			.await?;
+			tx.set(&ikb.new_dr_key(&first), &f32_pending(&[9.0, 0.0, 0.0, 0.0])).await?;
+			tx.commit().await?;
+		}
+		// Record 2 sits between the two, so which entry owns record 1 decides the
+		// order.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index.index(&ctx, &second, None, Some(f32_content(&[5.0, 0.0, 0.0, 0.0]))).await?;
+			ctx.tx().commit().await?;
+		}
+
+		// Scoring the sharded entry instead would hand the single slot to record 1.
+		assert_eq!(knn_keys(&index, &ds, &[0.0, 0.0, 0.0, 0.0], 1).await?, vec![2]);
+		// Scoring it as well would return record 1 twice.
+		assert_eq!(knn_keys(&index, &ds, &[0.0, 0.0, 0.0, 0.0], 3).await?, vec![1, 2]);
+		assert_eq!(
+			index.pending_scan_stats().side_reads(),
+			2,
+			"one round trip per search, for the single shard a legacy record hashes to"
+		);
+		Ok(())
+	}
+
+	/// A legacy delete cancels the record's sharded entry. The legacy layout owns
+	/// the record and its entry says the record is gone, so the superseded
+	/// vectors must not resurface.
+	#[tokio::test]
+	async fn diskann_legacy_pending_delete_cancels_sharded_entry() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let first = RecordIdKey::Number(1);
+		let second = RecordIdKey::Number(2);
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			tx.set(&dw_key(&ikb, &first), &f32_pending(&[1.0, 0.0, 0.0, 0.0])).await?;
+			tx.set(
+				&ikb.new_dy_key(DiskAnnIndex::pending_state_shard(&first)),
+				&DiskAnnPendingState {
+					kind: DiskAnnPendingStateKind::NonEmpty,
+					generation: 1,
+				},
+			)
+			.await?;
+			// The delete carries the doc-ID the record held when it was captured,
+			// which is the shape that reaches the scan under a shared doc-ID space.
+			tx.set(
+				&ikb.new_dr_key(&first),
+				&DiskAnnRecordPendingUpdate {
+					doc_id: Some(7),
+					old_vectors: vec![SerializedVector::F32(vec![1.0, 0.0, 0.0, 0.0])],
+					new_vectors: vec![],
+				},
+			)
+			.await?;
+			tx.commit().await?;
+		}
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index.index(&ctx, &second, None, Some(f32_content(&[5.0, 0.0, 0.0, 0.0]))).await?;
+			ctx.tx().commit().await?;
+		}
+
+		assert_eq!(
+			knn_keys(&index, &ds, &[0.0, 0.0, 0.0, 0.0], 3).await?,
+			vec![2],
+			"the deleted record's sharded entry must not resurface"
+		);
+		Ok(())
+	}
+
+	/// The legacy ownership probe is gated twice: no probe at all while the legacy
+	/// range is empty, and afterwards only for the shards a legacy record actually
+	/// hashes to.
+	#[tokio::test]
+	async fn diskann_pending_scan_probes_only_shards_a_legacy_record_touches() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+
+		// Three records, one per shard, all in the sharded layout.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 1..=3 {
+				index
+					.index(
+						&ctx,
+						&RecordIdKey::Number(i),
+						None,
+						Some(f32_content(&[i as f32, 0.0, 0.0, 0.0])),
+					)
+					.await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		assert_eq!(knn_keys(&index, &ds, &[0.0, 0.0, 0.0, 0.0], 4).await?, vec![1, 2, 3]);
+		assert_eq!(
+			index.pending_scan_stats().side_read_keys(),
+			0,
+			"an empty legacy range costs no ownership resolution"
+		);
+
+		// One legacy entry, for the record in the third shard.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			ctx.tx()
+				.set(&ikb.new_dr_key(&RecordIdKey::Number(3)), &f32_pending(&[7.0, 0.0, 0.0, 0.0]))
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		// Record 3 now scores at 7.0, from its legacy entry alone.
+		assert_eq!(knn_keys(&index, &ds, &[0.0, 0.0, 0.0, 0.0], 4).await?, vec![1, 2, 3]);
+		assert_eq!(
+			index.pending_scan_stats().side_read_keys(),
+			1,
+			"only the one shard a legacy record hashes to is resolved"
+		);
+		assert_eq!(
+			index.pending_scan_stats().side_reads(),
+			1,
+			"and that shard's single page costs one round trip"
+		);
 		Ok(())
 	}
 

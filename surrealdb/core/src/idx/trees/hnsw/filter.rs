@@ -289,12 +289,6 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		}
 	}
 
-	/// Number of verdicts currently cached.
-	#[cfg(test)]
-	pub(super) fn cache_len(&self) -> usize {
-		self.cache.len()
-	}
-
 	/// Consumes the filter and returns the accumulated result cache.
 	pub(super) fn release(self) -> FilterCache {
 		self.cache

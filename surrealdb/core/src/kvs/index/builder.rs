@@ -1222,30 +1222,23 @@ impl Building {
 		Ok(ctx.freeze())
 	}
 
-	/// Evicts the process-local HNSW wrapper and element caches after an
-	/// index-builder compaction *apply* returned an error.
+	/// Discards the HNSW wrapper and element caches after an index-builder
+	/// compaction write that reached the graph and did not commit.
 	///
-	/// On that path a fallible operation may have followed an in-memory graph
-	/// mutation but preceded the `save_nodes` that advances the layer version,
-	/// so the mutation is undetectable by a version check and the graph has to
-	/// go with the caches.
+	/// Neither half of that state can be validated against the store. The
+	/// caches hold values read and written through the failed transaction and
+	/// carry no version. A graph layer carries one, but it is a counter each
+	/// writer advances in its own copy as it applies, so two writers applying
+	/// the same batch from the same version reach the same one and a state
+	/// check cannot tell the rolled-back topology from the one the winning
+	/// commit stored. An apply that failed part-way can also mutate a layer
+	/// before reaching the `save_nodes` that advances the version at all.
 	async fn evict_cached_hnsw_index(&self) {
 		if let Err(err) =
 			self.ctx.get_index_stores().remove_hnsw_index(self.tb, self.ikb.clone()).await
 		{
-			warn!("Failed to evict HNSW index after index-builder compaction error: {err}");
+			warn!("Failed to evict HNSW index after index-builder compaction apply error: {err}");
 		}
-	}
-
-	/// Invalidates the unversioned element caches after an index-builder
-	/// compaction whose apply completed and whose commit then failed, keeping
-	/// the loaded graph.
-	///
-	/// Every graph layer the apply mutated has advanced its in-memory version,
-	/// so `check_state` reloads exactly those from persisted state. Dropping
-	/// the graph as well would force a full reload each cycle.
-	async fn invalidate_cached_hnsw_caches(&self) {
-		self.ctx.get_index_stores().invalidate_hnsw_caches(self.tb, self.ikb.clone()).await;
 	}
 
 	pub(super) async fn check_prepare_remove_with_tx(
@@ -1910,7 +1903,7 @@ impl Building {
 			match res {
 				Ok(true) => {
 					if let Err(err) = tx.commit().await {
-						self.invalidate_cached_hnsw_caches().await;
+						self.evict_cached_hnsw_index().await;
 						return Err(err);
 					}
 				}

@@ -71,6 +71,28 @@ pub(crate) struct HnswState {
 	layers: Vec<LayerState>,
 }
 
+impl HnswState {
+	/// The element a graph traversal starts from, or `None` while the graph
+	/// holds nothing.
+	#[cfg(test)]
+	pub(crate) fn enter_point(&self) -> Option<ElementId> {
+		self.enter_point
+	}
+
+	/// The version of every layer, layer 0 first.
+	///
+	/// A version records how far the writer's own copy of that layer has
+	/// moved, not which writer moved it, so it identifies staleness only
+	/// against a copy that shares its lineage.
+	#[cfg(test)]
+	pub(crate) fn layer_versions(&self) -> Vec<u64> {
+		let mut versions = Vec::with_capacity(1 + self.layers.len());
+		versions.push(self.layer0.version);
+		versions.extend(self.layers.iter().map(|l| l.version));
+		versions
+	}
+}
+
 impl KVValue for HnswState {
 	type KeyContext = ();
 
@@ -586,15 +608,19 @@ where
 		if let Some(mut ep_id) = self.state.enter_point {
 			if let Some(mut ep_dist) = self.elements.get_distance(&ctx.tx, pt, &ep_id).await? {
 				for layer in self.layers.iter().rev() {
+					// A layer that admits no candidate leaves the entry point as
+					// it stands and descent continues one layer down: every
+					// element the descent has accepted so far had its vector
+					// read, so the entry point carried forward is always usable.
+					// Upper layers hold a subset of the elements and
+					// `pending_doc` suppresses more, so an empty layer result is
+					// ordinary.
 					if let Some(ep_dist_id) = layer
 						.search_single(ctx, &self.elements, pt, ep_dist, ep_id, 1, pending_doc)
 						.await?
 						.peek_first()
 					{
 						(ep_dist, ep_id) = ep_dist_id;
-					} else {
-						#[cfg(debug_assertions)]
-						unreachable!()
 					}
 				}
 				return Ok(Some((ep_dist, ep_id)));
@@ -646,24 +672,29 @@ mod tests {
 		DatabaseId, Distance, HnswParams, IndexId, NamespaceId, TableDefinition, TableId,
 		VectorType,
 	};
-	use crate::ctx::{Context, FrozenContext};
+	use crate::ctx::{Canceller, Context, FrozenContext};
 	use crate::dbs::Session;
+	use crate::err::Error;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::seqdocids::DocId;
-	use crate::idx::trees::hnsw::docs::VecDocs;
+	use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
 	use crate::idx::trees::hnsw::index::{HnswContext, HnswIndex};
 	use crate::idx::trees::hnsw::{
-		ElementId, HnswRecordPendingUpdate, HnswSearch, HnswState, VectorId,
+		ElementId, HnswRecordPendingUpdate, HnswSearch, HnswState, VectorId, VectorPendingUpdate,
 	};
 	use crate::idx::trees::knn::tests::{
 		RandomItemGenerator, TestCollection, get_seed_rnd, new_random_vec, new_vectors_from_file,
 	};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
+	use crate::idx::trees::pending::{
+		PENDING_MAX_BATCH_KEYS, PENDING_MAX_BYTES, PENDING_MAX_PAGE_BYTES, PENDING_MAX_ROWS,
+		PENDING_PROBE_ROWS,
+	};
 	use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::{RecordIdKey, Value};
+	use crate::val::{Number, RecordIdKey, Value};
 
 	async fn insert_collection_hnsw(
 		ctx: &HnswContext<'_>,
@@ -1320,6 +1351,834 @@ mod tests {
 		Ok(())
 	}
 
+	/// An HNSW index holding `n` uncompacted record-keyed pendings: record key
+	/// `i` carries vector `(i, i)` for `i` in `1..=n`. Nothing reaches the
+	/// graph, so a search over it reads the whole queue.
+	async fn new_pending_backlog_fixture(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+		n: i64,
+	) -> Result<HnswIndex> {
+		new_wide_pending_backlog_fixture(ds, ikb, 2, n).await
+	}
+
+	/// A pending queue whose retained identity bytes live primarily in the
+	/// record keys rather than the vector values.
+	async fn new_large_key_pending_backlog_fixture(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+		n: i64,
+		key_payload_bytes: usize,
+	) -> Result<HnswIndex> {
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ctx.get_index_stores().vector_cache().clone(),
+			&tx,
+			ikb.clone(),
+			TableId(3),
+			&p,
+		)
+		.await?;
+		h.index(&ctx, &RecordIdKey::Number(0), None, Some(vector_content(&new_i16_vec(0, 0))))
+			.await?;
+		let suffix = "x".repeat(key_payload_bytes);
+		for i in 1..=n {
+			let id = RecordIdKey::String(format!("{i:04}-{suffix}").into());
+			h.index(&ctx, &id, None, Some(vector_content(&new_i16_vec(i as isize, i as isize))))
+				.await?;
+		}
+		tx.commit().await?;
+		Ok(h)
+	}
+
+	/// Large user record IDs remain buffered as `VectorId::RecordKey` values
+	/// after the cursor page that supplied them is released. Their encoded key
+	/// bytes must therefore roll the scoring batch even when the vector values
+	/// themselves and the entry count fit in one batch.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_accounts_for_record_key_bytes() -> Result<()> {
+		const PENDING: i64 = 600;
+		const KEY_PAYLOAD_BYTES: usize = 8 * 1024;
+		const _: () = assert!(PENDING as usize + 1 < PENDING_MAX_BATCH_KEYS);
+		const _: () = assert!(PENDING as usize * KEY_PAYLOAD_BYTES > PENDING_MAX_BYTES);
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h =
+			new_large_key_pending_backlog_fixture(&ds, &ikb, PENDING, KEY_PAYLOAD_BYTES).await?;
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		assert_eq!(knn_ids(&ds, &h, &pt, 1).await?, vec![0]);
+
+		let stats = h.pending_scan_stats();
+		assert!(
+			stats.batches() > 1,
+			"record key bytes alone must split the queue into several scoring batches"
+		);
+		assert!(
+			stats.peak_batch_bytes() <= PENDING_MAX_BYTES,
+			"retained record-key bytes stay inside the scoring-batch budget: {} bytes",
+			stats.peak_batch_bytes()
+		);
+		Ok(())
+	}
+
+	/// The same backlog with `dimension`-wide vectors, so one pending entry is
+	/// as large as `dimension` makes it. Record `i` still carries `(i, i)` in
+	/// the leading components, so the queries below pick the same winners
+	/// whatever the width.
+	async fn new_wide_pending_backlog_fixture(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+		dimension: usize,
+		n: i64,
+	) -> Result<HnswIndex> {
+		let p =
+			new_params(dimension, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ctx.get_index_stores().vector_cache().clone(),
+			&tx,
+			ikb.clone(),
+			TableId(3),
+			&p,
+		)
+		.await?;
+		for i in 1..=n {
+			let v = new_padded_i16_vec(dimension, i as isize, i as isize);
+			h.index(&ctx, &RecordIdKey::Number(i), None, Some(vector_content(&v))).await?;
+		}
+		tx.commit().await?;
+		Ok(h)
+	}
+
+	/// A pending queue whose entries widen partway through: `narrow` records
+	/// carrying one `dimension`-wide vector each, then `wide` records carrying
+	/// `vectors_per_wide_record` of them.
+	///
+	/// The record-keyed range is scanned in record order, so the narrow prefix is
+	/// what the scan measures its first pages from and the wide tail is what
+	/// those pages then have to hold. Record `i` carries `(i, i)` in the leading
+	/// components of every one of its vectors, so the nearest neighbours to the
+	/// origin are the head of the queue whichever half they fall in.
+	async fn new_widening_pending_backlog_fixture(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+		dimension: usize,
+		narrow: i64,
+		wide: i64,
+		vectors_per_wide_record: usize,
+	) -> Result<HnswIndex> {
+		let p =
+			new_params(dimension, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ctx.get_index_stores().vector_cache().clone(),
+			&tx,
+			ikb.clone(),
+			TableId(3),
+			&p,
+		)
+		.await?;
+		for i in 1..=(narrow + wide) {
+			let v = new_padded_i16_vec(dimension, i as isize, i as isize);
+			let copies = if i <= narrow {
+				1
+			} else {
+				vectors_per_wide_record
+			};
+			let content = vec![Value::from(v.deref()); copies];
+			h.index(&ctx, &RecordIdKey::Number(i), None, Some(content)).await?;
+		}
+		tx.commit().await?;
+		Ok(h)
+	}
+
+	/// The same index with its queue fully drained into the graph, plus the
+	/// doc-ID compaction resolved for each record. A test staging append-keyed
+	/// entries needs both: the doc-IDs to address entries by, and a committed
+	/// graph for those entries to mask.
+	async fn new_compacted_fixture(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+		n: i64,
+	) -> Result<(HnswIndex, Vec<DocId>)> {
+		let h = new_pending_backlog_fixture(ds, ikb, n).await?;
+		loop {
+			let ctx = new_ctx(ds, TransactionType::Write).await;
+			let compacted = h.index_pendings(&ctx).await?;
+			ctx.tx().commit().await?;
+			if compacted == 0 {
+				break;
+			}
+		}
+		let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+		let mut docs = Vec::with_capacity(n as usize);
+		for i in 1..=n {
+			let id = RecordIdKey::Number(i);
+			let doc_id = HnswDocs::get_doc_id(ikb, &tx, &id)
+				.await?
+				.expect("compaction must resolve a doc-ID for every record");
+			docs.push(doc_id);
+		}
+		tx.cancel().await?;
+		Ok((h, docs))
+	}
+
+	/// Writes one entry into the append-keyed pending layout.
+	///
+	/// Nothing in the engine writes that layout: an index still carrying
+	/// entries under it was upgraded from before the record-keyed layout, and
+	/// the read paths must keep scoring and draining them. The tests below are
+	/// therefore the only writers, and they place entries at explicit
+	/// positions because position is what decides which entry for an identity
+	/// is the live one.
+	async fn write_legacy_pending(
+		ds: &Datastore,
+		ikb: &IndexKeyBase,
+		appending_id: u64,
+		id: VectorId,
+		vector: &SharedVector,
+	) -> Result<()> {
+		let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+		let key = ikb.new_hp_key(appending_id);
+		let pending = VectorPendingUpdate {
+			id,
+			old_vectors: vec![],
+			new_vectors: vec![serialized(vector)],
+		};
+		tx.set(&key, &pending).await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
+	/// The record numbers a kNN search returns, sorted.
+	async fn knn_ids(ds: &Datastore, h: &HnswIndex, pt: &[Number], k: usize) -> Result<Vec<i64>> {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| async { h.knn_search(&ctx, stk, pt, k, 500, None).await })
+			.finish()
+			.await?;
+		ctx.tx().cancel().await?;
+		let mut keys: Vec<i64> = res
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect();
+		keys.sort();
+		Ok(keys)
+	}
+
+	/// A read context whose cancellation flag the caller holds, for the tests
+	/// that stop a scan on a chosen entry.
+	async fn new_cancellable_ctx(ds: &Datastore) -> (FrozenContext, Canceller) {
+		let tx = Arc::new(ds.transaction(TransactionType::Read, Optimistic).await.unwrap());
+		let mut ctx = Context::new_test();
+		ctx.set_transaction(tx);
+		let canceller = ctx.add_cancel();
+		(ctx.freeze(), canceller)
+	}
+
+	/// Runs a kNN search that a deadline stops at the `at`-th pending entry the
+	/// scan reads, and returns the error it fails with.
+	///
+	/// The interrupt is armed against the scan's own entry accounting, so the
+	/// entry a scan is stopped on is a chosen quantity rather than a race
+	/// against a clock: cancelling while entry `at` is charged is observed by
+	/// that entry's own cancellation checkpoint.
+	async fn knn_cancelled_at(
+		ds: &Datastore,
+		h: &HnswIndex,
+		pt: &[Number],
+		k: usize,
+		at: usize,
+	) -> Result<anyhow::Error> {
+		let (ctx, canceller) = new_cancellable_ctx(ds).await;
+		h.pending_scan_stats().interrupt_at(at, canceller);
+		let mut stack = reblessive::tree::TreeStack::new();
+		let err = stack
+			.enter(|stk| async { h.knn_search(&ctx, stk, pt, k, 500, None).await })
+			.finish()
+			.await
+			.expect_err("the scan is cancelled before it finishes reading the queue");
+		ctx.tx().cancel().await?;
+		Ok(err)
+	}
+
+	/// A kNN search holds at most one cursor page and one materialisation
+	/// batch of pending vectors at a time, however deep the queue is. Pinned
+	/// as exact accounting: a queue of a known length is read in a known
+	/// number of pages and scores in a known number of batches, and page and
+	/// batch together stay inside the residency budget.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_materialises_bounded_batches() -> Result<()> {
+		// Two full batches plus a remainder, so the counts below pin the
+		// budget and the split of a queue across batches, not just that some
+		// batching happened.
+		const PENDING: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2 + 7;
+		const EXPECTED_BATCHES: usize = 3;
+		// The fixture's 2-D i16 vectors are orders of magnitude smaller than
+		// the byte budget, so the entry budget alone decides where a batch
+		// ends and the row cap alone decides where a page ends — which is what
+		// makes both counts below exact.
+		const _: () = assert!(PENDING_MAX_BYTES > PENDING_MAX_BATCH_KEYS * 1024);
+		// The empty append-keyed range costs one page. The record-keyed range
+		// costs a probe page, full pages for everything the probe left, and
+		// the empty page that ends it.
+		const AFTER_PROBE: usize = PENDING as usize - PENDING_PROBE_ROWS as usize;
+		const FULL_PAGES: usize = AFTER_PROBE.div_ceil(PENDING_MAX_ROWS as usize);
+		const EXPECTED_PAGES: usize = 1 + 1 + FULL_PAGES + 1;
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_pending_backlog_fixture(&ds, &ikb, PENDING).await?;
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		assert_eq!(knn_ids(&ds, &h, &pt, 4).await?, vec![1, 2, 3, 4]);
+
+		let stats = h.pending_scan_stats();
+		assert_eq!(
+			stats.batches(),
+			EXPECTED_BATCHES,
+			"a {PENDING}-entry queue scores in {EXPECTED_BATCHES} batches"
+		);
+		assert_eq!(
+			stats.peak_batch_entries(),
+			PENDING_MAX_BATCH_KEYS,
+			"no batch holds more than the entry budget"
+		);
+		assert!(
+			stats.peak_batch_bytes() < PENDING_MAX_BYTES,
+			"the byte budget must not bind for this fixture: {} bytes",
+			stats.peak_batch_bytes()
+		);
+		assert_eq!(
+			stats.pages(),
+			EXPECTED_PAGES,
+			"a {PENDING}-entry queue is read in {EXPECTED_PAGES} pages"
+		);
+		assert_eq!(
+			stats.peak_page_entries(),
+			PENDING_MAX_ROWS as usize,
+			"narrow entries keep full-size pages"
+		);
+		assert!(
+			stats.peak_page_bytes() <= PENDING_MAX_PAGE_BYTES,
+			"no page holds more than its byte share: {} bytes",
+			stats.peak_page_bytes()
+		);
+		assert!(
+			stats.peak_resident_bytes() <= PENDING_MAX_BYTES,
+			"page and batch together stay inside the residency budget: {} bytes",
+			stats.peak_resident_bytes()
+		);
+		Ok(())
+	}
+
+	/// Wide vectors shrink the cursor pages instead of the residency bound.
+	///
+	/// A page is requested by entry count, so a fixed count would let entries
+	/// this wide materialise several times the budget in the cursor's arena,
+	/// where they stay resident for as long as the scan holds the page. Pinned
+	/// as exact accounting: the row cap does not bind, the byte share does,
+	/// and page and batch together stay inside the residency budget — while
+	/// the search still returns the query's true nearest neighbours.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_pages_shrink_for_wide_vectors() -> Result<()> {
+		// Wide enough that a full-size page of these entries would not fit the
+		// page budget, and deep enough that the byte budget — not the entry
+		// budget — is what ends a scoring batch.
+		const DIMENSION: usize = 32_768;
+		const PENDING: i64 = 64;
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_wide_pending_backlog_fixture(&ds, &ikb, DIMENSION, PENDING).await?;
+
+		let pt = vec![Number::Int(0); DIMENSION];
+		assert_eq!(knn_ids(&ds, &h, &pt, 4).await?, vec![1, 2, 3, 4]);
+
+		let stats = h.pending_scan_stats();
+		let entry_bytes = stats.peak_page_bytes().div_ceil(stats.peak_page_entries());
+		assert!(
+			entry_bytes * PENDING_MAX_ROWS as usize > PENDING_MAX_PAGE_BYTES,
+			"the fixture must be wide enough for a full-size page to overrun the budget: \
+			 {entry_bytes} bytes per entry"
+		);
+		assert!(
+			stats.peak_page_entries() < PENDING_MAX_ROWS as usize,
+			"the byte share, not the row cap, sized the pages: {} entries",
+			stats.peak_page_entries()
+		);
+		assert!(
+			stats.peak_page_bytes() <= PENDING_MAX_PAGE_BYTES,
+			"no page holds more than its byte share: {} bytes",
+			stats.peak_page_bytes()
+		);
+		assert!(
+			stats.peak_batch_entries() < PENDING_MAX_BATCH_KEYS,
+			"the byte budget, not the entry budget, ended a batch: {} entries",
+			stats.peak_batch_entries()
+		);
+		assert!(
+			stats.peak_resident_bytes() <= PENDING_MAX_BYTES,
+			"page and batch together stay inside the residency budget: {} bytes",
+			stats.peak_resident_bytes()
+		);
+		Ok(())
+	}
+
+	/// The backlog report arms on a scoring rollover, from inside the scan, for
+	/// a queue whose raw bytes are well inside the residency budget.
+	///
+	/// A batch shares that budget with the cursor page it is filled from, so a
+	/// queue of wide vectors costs several materialisation batches long before
+	/// its raw values add up to [`PENDING_MAX_BYTES`]. A report gated on a raw
+	/// byte total would say nothing about it. Deriving the crossing from the
+	/// rollover itself is what makes the two agree. Draining the queue re-arms
+	/// the report for the next crossing, so a sustained backlog stays one record
+	/// rather than one per query.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_backlog_report_arms_on_a_scoring_rollover() -> Result<()> {
+		// Wide enough that page residency rolls a batch over...
+		const DIMENSION: usize = 24_000;
+		const PENDING: i64 = 80;
+		// ...while the entry count stays inside the entry budget, so the entry
+		// count alone cannot be what arms the report.
+		const _: () = assert!(PENDING as usize <= PENDING_MAX_BATCH_KEYS);
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_wide_pending_backlog_fixture(&ds, &ikb, DIMENSION, PENDING).await?;
+		assert!(!h.pending_backlog_reported(), "no scan has read the queue yet");
+
+		let pt = vec![Number::Int(0); DIMENSION];
+		assert_eq!(knn_ids(&ds, &h, &pt, 1).await?, vec![1]);
+		let stats = h.pending_scan_stats();
+		assert!(
+			stats.batches() > 1,
+			"the fixture must cost more than one batch to score: {} batches",
+			stats.batches()
+		);
+		// Keys included, the whole queue is inside the residency budget: a
+		// threshold over raw bytes could not have armed this report.
+		let entry_bytes = stats.peak_page_bytes().div_ceil(stats.peak_page_entries());
+		assert!(
+			stats.entries_read() * entry_bytes < PENDING_MAX_BYTES,
+			"the queue's raw bytes must stay inside the budget: {} entries of {entry_bytes} bytes",
+			stats.entries_read()
+		);
+		assert!(
+			h.pending_backlog_reported(),
+			"a queue that costs several materialisation batches arms the report"
+		);
+
+		// Drain the queue behind the index's back: nothing was ever compacted,
+		// so removing the record-keyed range leaves an empty index.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			ctx.tx().delr(ikb.new_hr_range()?).await?;
+			ctx.tx().commit().await?;
+		}
+		assert!(knn_ids(&ds, &h, &pt, 1).await?.is_empty());
+		assert!(
+			!h.pending_backlog_reported(),
+			"a scan that completes inside both budgets re-arms the report"
+		);
+		Ok(())
+	}
+
+	/// An abrupt increase in entry width cannot restore the ordinary 500-row
+	/// cursor amplification.
+	///
+	/// The narrow probe sizes the next page at the pending scan's conservative
+	/// row cap. The entries then widen enough that an ordinary 500-row cursor page
+	/// would exceed the whole residency target, but the pending page stays inside
+	/// its byte share because it can hold only sixteen. Results are unaffected.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_caps_pages_when_entries_widen() -> Result<()> {
+		// A narrow entry small enough that the row cap, not the byte target,
+		// sizes the page after the probe...
+		const DIMENSION: usize = 512;
+		const NARROW: i64 = PENDING_PROBE_ROWS as i64;
+		// ...and a wide entry large enough that the engine-wide 500-row default
+		// would overrun the whole residency target.
+		const VECTORS_PER_WIDE_RECORD: usize = 10;
+		// Several conservatively capped pages pin that the narrow prefix cannot
+		// increase the request beyond the pending-specific cap.
+		const WIDE: i64 = PENDING_MAX_ROWS as i64 * 3 + 5;
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_widening_pending_backlog_fixture(
+			&ds,
+			&ikb,
+			DIMENSION,
+			NARROW,
+			WIDE,
+			VECTORS_PER_WIDE_RECORD,
+		)
+		.await?;
+
+		let pt = vec![Number::Int(0); DIMENSION];
+		assert_eq!(
+			knn_ids(&ds, &h, &pt, 4).await?,
+			vec![1, 2, 3, 4],
+			"the conservative page cap changes residency, not results"
+		);
+
+		let stats = h.pending_scan_stats();
+		assert_eq!(
+			stats.peak_page_entries(),
+			PENDING_MAX_ROWS as usize,
+			"the narrow prefix sized the next page at the row cap"
+		);
+		let wide_entry_bytes = stats.peak_page_bytes().div_ceil(PENDING_MAX_ROWS as usize);
+		assert!(
+			wide_entry_bytes * crate::kvs::NORMAL_BATCH_SIZE as usize > PENDING_MAX_BYTES,
+			"the ordinary row cap must recreate the allocation this regression guards: \
+			 {wide_entry_bytes} bytes per entry"
+		);
+		assert!(
+			stats.peak_page_bytes() <= PENDING_MAX_PAGE_BYTES,
+			"the pending-specific row cap keeps the widening page inside its share: {} bytes",
+			stats.peak_page_bytes()
+		);
+		assert!(
+			stats.peak_resident_bytes() <= PENDING_MAX_BYTES,
+			"page and batch stay inside the residency target: {} bytes",
+			stats.peak_resident_bytes()
+		);
+		// The empty append-keyed range costs one page. The record-keyed range
+		// costs the probe, capped pages for the wide tail, and its empty page.
+		assert_eq!(
+			stats.pages(),
+			1 + 1 + (WIDE as usize).div_ceil(PENDING_MAX_ROWS as usize) + 1,
+			"the widening tail stays split by the conservative row cap"
+		);
+		Ok(())
+	}
+
+	/// A scan cancelled at a checkpoint has already accounted for the entry that
+	/// checkpoint belongs to.
+	///
+	/// The cancellation schedule deep-checks on entry counts that bracket the
+	/// entry-count crossing, so a loop that checked before charging would return
+	/// `QueryCancelled` out of the very scan the backlog report exists to
+	/// explain, having read the crossing entry but never accounted for it.
+	/// Pinned as exact accounting: cancelling at the checkpoint of the entry
+	/// that crosses leaves that entry charged and the report armed.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_reports_the_entry_it_is_cancelled_on() -> Result<()> {
+		// One entry past the entry budget is the crossing; the queue is deeper
+		// so the scan is stopped by the checkpoint rather than by the range end.
+		const CROSSING: usize = PENDING_MAX_BATCH_KEYS + 1;
+		const PENDING: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2;
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_pending_backlog_fixture(&ds, &ikb, PENDING).await?;
+		assert!(!h.pending_backlog_reported(), "no scan has read the queue yet");
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		let err = knn_cancelled_at(&ds, &h, &pt, 4, CROSSING).await?;
+		assert!(
+			matches!(err.downcast_ref::<Error>(), Some(Error::QueryCancelled)),
+			"unexpected error: {err}"
+		);
+
+		let stats = h.pending_scan_stats();
+		assert_eq!(
+			stats.entries_read(),
+			CROSSING,
+			"the entry the scan is cancelled on is charged before the checkpoint"
+		);
+		assert!(
+			h.pending_backlog_reported(),
+			"the crossing is reported before the deadline bails out of the scan"
+		);
+		Ok(())
+	}
+
+	/// A byte-based rollover is reported before cancellation on the entry that
+	/// would force it, even while the queue remains below the entry threshold.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_reports_byte_rollover_before_cancellation() -> Result<()> {
+		const DIMENSION: usize = 512;
+		const PENDING: i64 = 2;
+		const VECTORS_PER_RECORD: usize = 1536;
+		const CANCEL_AT: usize = 2;
+		const _: () = assert!((PENDING as usize) < PENDING_MAX_BATCH_KEYS);
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_widening_pending_backlog_fixture(
+			&ds,
+			&ikb,
+			DIMENSION,
+			0,
+			PENDING,
+			VECTORS_PER_RECORD,
+		)
+		.await?;
+		assert!(!h.pending_backlog_reported(), "no scan has read the queue yet");
+
+		let pt = vec![Number::Int(0); DIMENSION];
+		let err = knn_cancelled_at(&ds, &h, &pt, 1, CANCEL_AT).await?;
+		assert!(
+			matches!(err.downcast_ref::<Error>(), Some(Error::QueryCancelled)),
+			"unexpected error: {err}"
+		);
+
+		assert_eq!(h.pending_scan_stats().entries_read(), CANCEL_AT);
+		assert!(
+			h.pending_backlog_reported(),
+			"the byte rollover must be reported before its cancellation checkpoint"
+		);
+		Ok(())
+	}
+
+	/// Splitting the pending queue into batches must not change which
+	/// candidates win. The second query's neighbours straddle a batch
+	/// boundary, so a top-K kept per batch rather than across the whole scan
+	/// would return a different set.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_batching_preserves_top_k() -> Result<()> {
+		const PENDING: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2 + 7;
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_pending_backlog_fixture(&ds, &ikb, PENDING).await?;
+
+		// Nearest to the origin: the head of the queue, wholly inside the
+		// first batch.
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		assert_eq!(knn_ids(&ds, &h, &pt, 9).await?, (1..=9).collect::<Vec<i64>>());
+
+		// Nearest to the last entry of the first batch: the winners span the
+		// boundary between the first and second batch.
+		let boundary = PENDING_MAX_BATCH_KEYS as i64;
+		let pt = vec![Number::Int(boundary), Number::Int(boundary)];
+		assert_eq!(
+			knn_ids(&ds, &h, &pt, 9).await?,
+			(boundary - 4..=boundary + 4).collect::<Vec<i64>>()
+		);
+		Ok(())
+	}
+
+	/// The suppression bitmap covers every document seen anywhere in the
+	/// pending queue, whatever batch its vectors were scored in. The moved
+	/// record's pending sorts last, so its doc-ID enters the bitmap only after
+	/// two batches have already been scored; without it the graph search would
+	/// return that record at the position it no longer occupies.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_masks_stale_graph_entries_across_batches() -> Result<()> {
+		const FILLERS: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2;
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let near = RecordIdKey::Number(9000);
+		let winner = RecordIdKey::Number(9001);
+
+		// Two committed records: the nearest to the origin, and the runner-up.
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ctx.get_index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+			)
+			.await?;
+			h.index(&ctx, &near, None, Some(vector_content(&new_i16_vec(1, 1)))).await?;
+			h.index(&ctx, &winner, None, Some(vector_content(&new_i16_vec(5, 5)))).await?;
+			tx.commit().await?;
+			h
+		};
+		loop {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let compacted = h.index_pendings(&ctx).await?;
+			ctx.tx().commit().await?;
+			if compacted == 0 {
+				break;
+			}
+		}
+
+		// A queue deep enough to span several batches, every entry farther
+		// from the origin than the runner-up.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 1..=FILLERS {
+				let v = new_i16_vec(10000 + i as isize, 10000 + i as isize);
+				h.index(&ctx, &RecordIdKey::Number(i), None, Some(vector_content(&v))).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		// Move the committed nearest record away, leaving its graph entry
+		// stale. Its record key sorts after every filler, so its pending is
+		// read last.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(
+				&ctx,
+				&near,
+				Some(vector_content(&new_i16_vec(1, 1))),
+				Some(vector_content(&new_i16_vec(30000, 30000))),
+			)
+			.await?;
+			ctx.tx().commit().await?;
+		}
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		assert_eq!(
+			knn_ids(&ds, &h, &pt, 1).await?,
+			vec![9001],
+			"the moved record's stale graph entry must stay masked"
+		);
+		Ok(())
+	}
+
+	/// The append-keyed layout may hold several entries for one identity. Only
+	/// the last of them is live: the earlier ones carry superseded vectors and
+	/// must not be scored.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_scores_last_legacy_entry_for_an_identity() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_compacted_fixture(&ds, &ikb, 2).await?;
+
+		// Record 1: first parked far from the origin, then superseded by an
+		// entry that puts it nearer than record 2.
+		write_legacy_pending(&ds, &ikb, 0, VectorId::DocId(docs[0]), &new_i16_vec(9, 9)).await?;
+		write_legacy_pending(&ds, &ikb, 1, VectorId::DocId(docs[1]), &new_i16_vec(5, 5)).await?;
+		write_legacy_pending(&ds, &ikb, 2, VectorId::DocId(docs[0]), &new_i16_vec(1, 1)).await?;
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		// Scoring the superseded entry instead would put record 1 at (9, 9)
+		// and hand the single slot to record 2.
+		assert_eq!(knn_ids(&ds, &h, &pt, 1).await?, vec![1]);
+		assert_eq!(knn_ids(&ds, &h, &pt, 2).await?, vec![1, 2]);
+		Ok(())
+	}
+
+	/// Legacy coalescing remains exact when the superseding entry falls in a
+	/// later bounded chunk. Large distinct record identities between the two
+	/// target writes reproduce the allocation that an all-identities liveness
+	/// map would retain for the whole query.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_coalesces_legacy_entries_across_bounded_chunks() -> Result<()> {
+		const FILLERS: u64 = 600;
+		const KEY_PAYLOAD_BYTES: usize = 8 * 1024;
+		const _: () = assert!(FILLERS as usize * KEY_PAYLOAD_BYTES > PENDING_MAX_BYTES);
+
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_pending_backlog_fixture(&ds, &ikb, 0).await?;
+		let target = Arc::new(RecordIdKey::String("target".into()));
+		let winner = Arc::new(RecordIdKey::Number(1));
+
+		let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+		let write = |appending_id: u64, id: VectorId, vector: SharedVector| {
+			let tx = &tx;
+			let ikb = &ikb;
+			async move {
+				let key = ikb.new_hp_key(appending_id);
+				let pending = VectorPendingUpdate {
+					id,
+					old_vectors: vec![],
+					new_vectors: vec![serialized(&vector)],
+				};
+				tx.set(&key, &pending).await
+			}
+		};
+		write(0, VectorId::RecordKey(Arc::clone(&target)), new_i16_vec(0, 0)).await?;
+		write(1, VectorId::RecordKey(winner), new_i16_vec(1, 1)).await?;
+		let suffix = "x".repeat(KEY_PAYLOAD_BYTES);
+		for i in 0..FILLERS {
+			let id = RecordIdKey::String(format!("{i:04}-{suffix}").into());
+			write(
+				i + 2,
+				VectorId::RecordKey(Arc::new(id)),
+				new_i16_vec(10000 + i as isize, 10000 + i as isize),
+			)
+			.await?;
+		}
+		write(FILLERS + 2, VectorId::RecordKey(target), new_i16_vec(20000, 20000)).await?;
+		tx.commit().await?;
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		assert_eq!(
+			knn_ids(&ds, &h, &pt, 1).await?,
+			vec![1],
+			"the target's stale first vector must not survive its later-chunk replacement"
+		);
+		assert!(
+			h.pending_scan_stats().batches() > 1,
+			"the fixture must span multiple bounded legacy chunks"
+		);
+		Ok(())
+	}
+
+	/// A record-keyed pending supersedes the append-keyed entry queued under
+	/// the same identity: the `!hr` entry carries the record's final state,
+	/// and the entry it replaces must not be scored.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_record_pending_supersedes_legacy_entry() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_compacted_fixture(&ds, &ikb, 2).await?;
+		let first = RecordIdKey::Number(1);
+
+		// Record 1 queued nearer to the origin than anything else.
+		write_legacy_pending(&ds, &ikb, 0, VectorId::DocId(docs[0]), &new_i16_vec(1, 1)).await?;
+		// The record-keyed pending moves record 1 away, and record 2 to a
+		// position between the legacy entry and the new one.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &first, None, Some(vector_content(&new_i16_vec(30000, 30000)))).await?;
+			h.index(&ctx, &RecordIdKey::Number(2), None, Some(vector_content(&new_i16_vec(5, 5))))
+				.await?;
+			ctx.tx().commit().await?;
+		}
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		// The legacy entry leaking would hand the slot back to record 1.
+		assert_eq!(knn_ids(&ds, &h, &pt, 1).await?, vec![2]);
+		Ok(())
+	}
+
+	/// A record-keyed delete cancels the append-keyed entry queued under the
+	/// same identity: the record is gone, and its legacy vectors must not
+	/// resurface.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_record_pending_delete_cancels_legacy_entry() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_compacted_fixture(&ds, &ikb, 2).await?;
+		let first = RecordIdKey::Number(1);
+
+		write_legacy_pending(&ds, &ikb, 0, VectorId::DocId(docs[0]), &new_i16_vec(1, 1)).await?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &first, Some(vector_content(&new_i16_vec(1, 1))), None).await?;
+			h.index(&ctx, &RecordIdKey::Number(2), None, Some(vector_content(&new_i16_vec(5, 5))))
+				.await?;
+			ctx.tx().commit().await?;
+		}
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		assert_eq!(knn_ids(&ds, &h, &pt, 2).await?, vec![2]);
+		Ok(())
+	}
+
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn hnsw_compaction_deletes_pending_key_after_final_batch() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
@@ -1608,200 +2467,6 @@ mod tests {
 		assert!(pending_records.is_empty());
 		assert!(pending_appends.is_empty());
 		assert_eq!(state.next_element_id, 3);
-		Ok(())
-	}
-
-	/// The read path must never admit a larger scoring batch than the
-	/// compaction path over the same keyspace already accepts. An uncapped read
-	/// path is what let queue depth set a query's peak residency.
-	const _: () = assert!(
-		crate::idx::trees::hnsw::index::HNSW_QUERY_MAX_PENDING_KEYS
-			<= crate::idx::trees::hnsw::index::HNSW_COMPACTION_MAX_PENDING_KEYS
-	);
-
-	/// Builds `count` record-keyed pending entries: the index is defined first,
-	/// so every record created after it is queued rather than compacted.
-	async fn pending_backlog_ds(tb_name: &str, count: usize) -> Result<(Arc<Datastore>, Session)> {
-		let ds = Arc::new(Datastore::new("memory").await?);
-		let db = {
-			let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
-			let db = tx.ensure_ns_db(None, "test", "test").await?;
-			tx.commit().await?;
-			db
-		};
-		let session = Session::owner().with_ns("test").with_db("test");
-		let define = format!(
-			"DEFINE INDEX hnsw_pts ON {tb_name} FIELDS point HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 100 M 12;"
-		);
-		for response in ds.execute(&define, &session, None).await? {
-			response.result?;
-		}
-		// Spread along x so the nearest neighbours of the origin are the lowest
-		// ids, whatever order the backlog is read or batched in.
-		let mut sql = String::new();
-		for i in 0..count {
-			sql.push_str(&format!(
-				"CREATE {tb_name}:{i} SET point = [{}f, 0f], grp = 'a';\n",
-				i as f64
-			));
-		}
-		for response in ds.execute(&sql, &session, None).await? {
-			response.result?;
-		}
-		// These cases are only meaningful against a queue that is actually
-		// pending, so fail loudly rather than vacuously if it was compacted.
-		let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
-		let tb = tb_name.into();
-		let ix =
-			tx.get_tb_index(db.namespace_id, db.database_id, &tb, "hnsw_pts", None).await?.unwrap();
-		let ikb = IndexKeyBase::new(db.namespace_id, db.database_id, tb, ix.index_id);
-		let queued = tx.getr(ikb.new_hr_range()?, None).await?.len();
-		tx.cancel().await?;
-		assert_eq!(queued, count, "backlog was compacted, so nothing is pending");
-		Ok((ds, session))
-	}
-
-	/// Scoring must run in batches capped by `HNSW_QUERY_MAX_PENDING_KEYS`, so a
-	/// query's resident candidate set does not grow with queue depth.
-	///
-	/// Asserted by flush count rather than by timing or memory: the previous
-	/// behaviour accumulated the whole backlog and scored it once, which is
-	/// exactly one flush however deep the queue.
-	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn hnsw_query_bounds_pending_scoring_batches() -> Result<()> {
-		let cap = crate::idx::trees::hnsw::index::HNSW_QUERY_MAX_PENDING_KEYS;
-		let count = cap * 2 + 100;
-		// A table name unique to this case, so the flush count cannot be
-		// perturbed by another test scoring pending entries concurrently.
-		let tb = "pts_flush_accounting";
-		let (ds, session) = pending_backlog_ds(tb, count).await?;
-		crate::idx::trees::hnsw::index::reset_pending_score_flushes(tb);
-		let mut response = ds
-			.execute(
-				&format!("SELECT id FROM {tb} WHERE point <|3,100|> [0f, 0f];"),
-				&session,
-				None,
-			)
-			.await?;
-		response.remove(0).result?;
-		let flushes = crate::idx::trees::hnsw::index::pending_score_flushes(tb);
-		let expected = count.div_ceil(cap);
-		assert_eq!(
-			flushes, expected,
-			"{count} queued entries should score in {expected} bounded batches, got {flushes}"
-		);
-		Ok(())
-	}
-
-	/// Bounding residency must not cost recall: the true nearest neighbours are
-	/// returned even when they are spread across scoring batches.
-	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn hnsw_query_pending_batching_preserves_recall() -> Result<()> {
-		let count = crate::idx::trees::hnsw::index::HNSW_QUERY_MAX_PENDING_KEYS * 2 + 100;
-		let tb = "pts_recall";
-		let (ds, session) = pending_backlog_ds(tb, count).await?;
-		let mut response = ds
-			.execute(
-				&format!("SELECT id FROM {tb} WHERE point <|3,100|> [0f, 0f];"),
-				&session,
-				None,
-			)
-			.await?;
-		let result = response.remove(0).result?;
-		let surrealdb_types::Value::Array(result) = result else {
-			panic!("Expected array result");
-		};
-		let ids: Vec<String> = result
-			.iter()
-			.map(|r| {
-				let surrealdb_types::Value::Object(o) = r else {
-					panic!("Expected object");
-				};
-				format!("{:?}", o.get("id").expect("id"))
-			})
-			.collect();
-		assert_eq!(ids.len(), 3, "wrong neighbour count: {ids:?}");
-		// pts:0, pts:1 and pts:2 sit at x = 0, 1, 2 and are the three closest to
-		// the origin; anything else means a batch boundary dropped a candidate.
-		for expected in ["Number(0)", "Number(1)", "Number(2)"] {
-			assert!(ids.iter().any(|id| id.contains(expected)), "{expected} missing from {ids:?}");
-		}
-		Ok(())
-	}
-
-	/// A record retired while still queued must not surface, and the retirement
-	/// must survive being read in a different batch from its neighbours.
-	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn hnsw_query_pending_retirement_survives_batching() -> Result<()> {
-		let count = crate::idx::trees::hnsw::index::HNSW_QUERY_MAX_PENDING_KEYS * 2 + 100;
-		let tb = "pts_retire";
-		let (ds, session) = pending_backlog_ds(tb, count).await?;
-		for response in ds.execute(&format!("DELETE {tb}:1;"), &session, None).await? {
-			response.result?;
-		}
-		let mut response = ds
-			.execute(
-				&format!("SELECT id FROM {tb} WHERE point <|3,100|> [0f, 0f];"),
-				&session,
-				None,
-			)
-			.await?;
-		let result = response.remove(0).result?;
-		let surrealdb_types::Value::Array(result) = result else {
-			panic!("Expected array result");
-		};
-		let ids: Vec<String> = result
-			.iter()
-			.map(|r| {
-				let surrealdb_types::Value::Object(o) = r else {
-					panic!("Expected object");
-				};
-				format!("{:?}", o.get("id").expect("id"))
-			})
-			.collect();
-		assert!(!ids.iter().any(|id| id.contains("Number(1)")), "retired doc surfaced: {ids:?}");
-		// With pts:1 retired the three closest to the origin are pts:0, pts:2
-		// and pts:3.
-		for expected in ["Number(0)", "Number(2)", "Number(3)"] {
-			assert!(ids.iter().any(|id| id.contains(expected)), "{expected} missing from {ids:?}");
-		}
-		assert_eq!(ids.len(), 3, "wrong neighbour count: {ids:?}");
-		Ok(())
-	}
-
-	/// A *filtered* kNN over a deep backlog must not accumulate the filter's
-	/// per-candidate verdicts, which hold the whole matching record.
-	///
-	/// Batching the vectors alone does not achieve that: only an eviction from
-	/// the result builder retires a cache entry, so once the builder is full a
-	/// broad residual condition keeps every record it visited but never
-	/// admitted. Asserted on the cache's peak size after each batch retires its
-	/// non-result entries — without that retirement the peak grows to the
-	/// backlog depth.
-	#[test(tokio::test(flavor = "multi_thread"))]
-	async fn hnsw_query_bounds_pending_filter_cache() -> Result<()> {
-		let k = 3usize;
-		let count = crate::idx::trees::hnsw::index::HNSW_QUERY_MAX_PENDING_KEYS * 2 + 100;
-		let tb = "pts_filter_cache";
-		let (ds, session) = pending_backlog_ds(tb, count).await?;
-		crate::idx::trees::hnsw::index::reset_pending_filter_cache_peak(tb);
-		// `grp = 'a'` matches every row, so every candidate is truthy and would
-		// cache a record — the worst case for the filter cache.
-		let mut response = ds
-			.execute(
-				&format!("SELECT id FROM {tb} WHERE point <|{k},100|> [0f, 0f] AND grp = 'a';"),
-				&session,
-				None,
-			)
-			.await?;
-		response.remove(0).result?;
-		let peak = crate::idx::trees::hnsw::index::pending_filter_cache_peak(tb);
-		assert!(peak > 0, "filter never engaged, so this case proves nothing");
-		assert!(
-			peak <= k,
-			"filter cache retained {peak} verdicts over a {count}-entry backlog; only the {k} \
-			 results should survive a batch"
-		);
 		Ok(())
 	}
 
@@ -2185,7 +2850,21 @@ mod tests {
 	}
 
 	fn new_i16_vec(x: isize, y: isize) -> SharedVector {
-		let vec = Vector::I16(Array1::from_vec(vec![x as i16, y as i16]));
-		vec.into()
+		new_padded_i16_vec(2, x, y)
+	}
+
+	/// `(x, y)` padded with zeros out to `dimension` components.
+	///
+	/// Distance ordering stays with `x` and `y`, so a fixture can be made
+	/// arbitrarily wide without changing which record wins a query. Width is
+	/// what decides whether the byte budget or the row cap sizes a pending
+	/// cursor page.
+	fn new_padded_i16_vec(dimension: usize, x: isize, y: isize) -> SharedVector {
+		let mut values = vec![0i16; dimension];
+		values[0] = x as i16;
+		if dimension > 1 {
+			values[1] = y as i16;
+		}
+		Vector::I16(Array1::from_vec(values)).into()
 	}
 }

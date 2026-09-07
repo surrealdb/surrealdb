@@ -10,6 +10,7 @@ pub mod dynamicset;
 mod graph;
 pub mod hnsw;
 pub(in crate::idx) mod knn;
+pub(crate) mod pending;
 pub mod store;
 pub mod vector;
 

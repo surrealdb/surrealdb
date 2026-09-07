@@ -1731,7 +1731,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		let keys = keys.iter().map(|k| k.encode_key()).collect::<Result<Vec<_>>>()?;
+		// Consume each typed key as it is encoded so owned fields do not remain
+		// resident alongside the complete encoded request during the await.
+		let keys = keys.into_iter().map(|k| k.encode_key()).collect::<Result<Vec<_>>>()?;
 		let key_bytes: u64 = keys.iter().map(|k| k.len() as u64).sum();
 		let res = self.tr.getm(keys, version).await.map_err(Error::from)?;
 		self.metrics.record_get(res.records, key_bytes, res.value_bytes);

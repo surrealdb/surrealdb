@@ -367,7 +367,9 @@ pub(super) struct KnnResultBuilder {
 	knn: usize,
 	/// The sorted results
 	priority_list: KnnResult,
-	/// Count the number of time a vector id is present in the result
+	/// The number of slots each vector id holds in `priority_list`. An id that
+	/// holds no slot is absent from the map, which is what makes `contains` a
+	/// faithful answer for the callers that release per-candidate state on it.
 	vector_id_count: BTreeMap<VectorId, usize>,
 }
 
@@ -405,15 +407,6 @@ impl KnnResultBuilder {
 		evicted_ids
 	}
 
-	/// Returns whether the id currently holds at least one slot in the result.
-	///
-	/// Lets a caller tell a candidate that is still in the running from one
-	/// that was scored and rejected, so per-candidate state kept alongside the
-	/// builder can be released for the latter.
-	pub(super) fn contains(&self, id: &VectorId) -> bool {
-		self.vector_id_count.contains_key(id)
-	}
-
 	/// Add the result to the priority list.
 	/// Returns any evicted id, so any filter cache can be freed
 	pub(super) fn add_vector_id_result(&mut self, dist: f64, id: VectorId) -> Option<VectorId> {
@@ -446,6 +439,15 @@ impl KnnResultBuilder {
 			*c -= 1;
 		}
 		None
+	}
+
+	/// Returns whether the id currently holds at least one slot in the result.
+	///
+	/// Lets a caller tell a candidate that is still in the running from one
+	/// that was scored and rejected, so per-candidate state kept alongside the
+	/// builder can be released for the latter.
+	pub(super) fn contains(&self, id: &VectorId) -> bool {
+		self.vector_id_count.contains_key(id)
 	}
 
 	pub(super) fn collect(self) -> KnnResult {
