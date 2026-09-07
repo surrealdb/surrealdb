@@ -144,7 +144,14 @@ pub async fn revoke_refresh_token(token: Token, kvs: &Datastore) -> Result<()> {
 				name: "ac".into(),
 				message: "Token does not contain an access name".into(),
 			})?;
-			iam::access::revoke_refresh_token_record(kvs, grant_id, ac, &ns, &db).await?;
+			// The presented refresh key is passed through so the grant it names
+			// can require proof of possession. The access token's claims are
+			// decoded without verification and only locate the grant; they are
+			// not what authorises the revocation.
+			iam::access::verify_and_revoke_refresh_token_record(
+				kvs, grant_id, ac, refresh, &ns, &db,
+			)
+			.await?;
 			Ok(())
 		}
 	}
@@ -307,5 +314,160 @@ impl Claims {
 		}
 		// Return value
 		out
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::sync::Arc;
+
+	use super::*;
+	use crate::dbs::Session;
+	use crate::iam::signin::db_access;
+	use crate::kvs::Datastore;
+	use crate::types::PublicVariables;
+
+	/// Sets up a record access method with `WITH REFRESH`, signs a user in, and
+	/// returns the datastore alongside that user's real access and refresh
+	/// tokens.
+	async fn refresh_token_fixture() -> (Arc<Datastore>, String, String) {
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN (
+					SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
+				)
+				WITH REFRESH
+				DURATION FOR GRANT 1w, FOR SESSION 2h
+			;
+
+			CREATE user:test CONTENT {
+				name: 'user',
+				pass: crypto::argon2::generate('pass')
+			}
+			"#,
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("user", "user");
+		vars.insert("pass", "pass");
+		let token = db_access(
+			&ds,
+			&mut sess,
+			"test".to_string(),
+			"test".to_string(),
+			"user".to_string(),
+			vars,
+		)
+		.await
+		.expect("signin with credentials should succeed");
+
+		match token {
+			Token::WithRefresh {
+				access,
+				refresh,
+			} => (ds, access, refresh),
+			Token::Access(_) => panic!("a WITH REFRESH access method must return a refresh token"),
+		}
+	}
+
+	/// Swaps the key half of a bearer token, keeping its key identifier. This
+	/// is what a caller who has learned a grant id — `ACCESS <ac> SHOW ALL`
+	/// discloses ids while redacting keys — but not the key itself can present.
+	fn with_wrong_key(refresh: &str) -> String {
+		let parts: Vec<&str> = refresh.split('-').collect();
+		assert_eq!(parts.len(), 4, "a bearer token has four dash-separated parts");
+		format!("{}-{}-{}-{}", parts[0], parts[1], parts[2], "A".repeat(parts[3].len()))
+	}
+
+	// Revoking a refresh token must require proof that the caller holds its
+	// key. The grant id alone is not a secret: it is disclosed by `ACCESS <ac>
+	// SHOW ALL`, which needs only `Action::View`, and it is embedded in every
+	// issued refresh token. Without a possession check, knowing an id would be
+	// enough to permanently invalidate that token.
+	#[tokio::test]
+	async fn revoke_refresh_token_requires_the_grant_key() {
+		let (ds, access, refresh) = refresh_token_fixture().await;
+
+		// A correctly-shaped refresh token carrying the victim's grant id but
+		// the wrong key must be refused.
+		let forged = with_wrong_key(&refresh);
+		assert_ne!(forged, refresh, "the forged token must differ from the real one");
+		let res = revoke_refresh_token(
+			Token::WithRefresh {
+				access: access.clone(),
+				refresh: forged,
+			},
+			&ds,
+		)
+		.await;
+		assert!(res.is_err(), "revoking with a wrong key must fail");
+
+		// The victim's token still works, so the rejected request had no effect.
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("refresh", refresh.clone());
+		let res = db_access(
+			&ds,
+			&mut sess,
+			"test".to_string(),
+			"test".to_string(),
+			"user".to_string(),
+			vars,
+		)
+		.await;
+		assert!(res.is_ok(), "the victim's refresh token must still be usable: {res:?}");
+	}
+
+	// The holder of a refresh token can still revoke it: the possession check
+	// authorises the operation rather than disabling it. Guards against a fix
+	// that simply refuses every revocation.
+	#[tokio::test]
+	async fn revoke_refresh_token_succeeds_for_the_key_holder() {
+		let (ds, access, refresh) = refresh_token_fixture().await;
+
+		revoke_refresh_token(
+			Token::WithRefresh {
+				access,
+				refresh: refresh.clone(),
+			},
+			&ds,
+		)
+		.await
+		.expect("the key holder must be able to revoke their own refresh token");
+
+		// And the revocation took effect.
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("refresh", refresh);
+		let res = db_access(
+			&ds,
+			&mut sess,
+			"test".to_string(),
+			"test".to_string(),
+			"user".to_string(),
+			vars,
+		)
+		.await;
+		assert!(res.is_err(), "a revoked refresh token must no longer be usable");
 	}
 }

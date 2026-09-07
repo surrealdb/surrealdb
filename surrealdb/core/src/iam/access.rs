@@ -6,6 +6,7 @@ use surrealdb_types::ToSql;
 
 use crate::catalog;
 use crate::catalog::base::Base as AccessBase;
+use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider};
 use crate::dbs::{Session, SessionData};
 use crate::err::exec_error;
 use crate::exec::Error as ExecError;
@@ -317,6 +318,69 @@ pub(crate) async fn create_refresh_token_record(
 }
 
 // Revoke a bearer key that acted as a refresh token for a record user
+/// Revokes the refresh-token grant named by `gr`, but only once the caller has
+/// proved they hold its key.
+///
+/// This is the entry point for the externally reachable `revoke` operation.
+/// That request carries no session, and the grant id it names is readable by
+/// any principal holding `Action::View` on the access method, so possession of
+/// the key is the only thing that distinguishes the token's owner from anyone
+/// who has merely seen its id. Verifying it here is what authorises the
+/// revocation; [`revoke_refresh_token_record`] itself runs as owner and
+/// performs no such check, which is correct for the callers that have already
+/// authenticated the grant.
+///
+/// Every failure is reported as `InvalidAuth` so a caller cannot distinguish a
+/// wrong key from a grant that does not exist, is expired, or is already
+/// revoked.
+pub async fn verify_and_revoke_refresh_token_record(
+	kvs: &Datastore,
+	gr: String,
+	ac: String,
+	refresh: String,
+	ns: &str,
+	db: &str,
+) -> Result<()> {
+	let tx = kvs.transaction(Read).await?;
+	let db_def = match tx.get_db_by_name(ns, db, None).await {
+		Ok(Some(db_def)) => db_def,
+		Ok(None) => {
+			let _ = tx.cancel().await;
+			debug!("Refresh token revocation rejected: database `{ns}/{db}` not found");
+			return Err(anyhow::Error::new(AuthError::InvalidAuth));
+		}
+		Err(e) => {
+			let _ = tx.cancel().await;
+			return Err(e);
+		}
+	};
+	let grant = match tx
+		.get_db_access_grant(db_def.namespace_id, db_def.database_id, &ac, &gr, None)
+		.await
+	{
+		Ok(Some(grant)) => grant,
+		Ok(None) => {
+			let _ = tx.cancel().await;
+			debug!("Refresh token revocation rejected: grant `{gr}` for method `{ac}` not found");
+			return Err(anyhow::Error::new(AuthError::InvalidAuth));
+		}
+		Err(e) => {
+			let _ = tx.cancel().await;
+			return Err(e);
+		}
+	};
+	tx.cancel().await?;
+	// Constant-time comparison of the presented key against the stored grant.
+	crate::iam::signin::verify_grant_bearer(&grant, refresh)?;
+	revoke_refresh_token_record(kvs, gr, ac, ns, db).await
+}
+
+/// Revokes the refresh-token grant named by `gr`, as owner and without
+/// verifying possession of its key.
+///
+/// Callers must have already established that the revocation is authorised —
+/// `signin_bearer` does so by authenticating the grant before rotating it. A
+/// caller that has not must use [`verify_and_revoke_refresh_token_record`].
 pub async fn revoke_refresh_token_record(
 	kvs: &Datastore,
 	gr: String,

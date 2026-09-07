@@ -773,9 +773,9 @@ dependencies = [
 
 [[package]]
 name = "diskann"
-version = "0.55.0"
+version = "0.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31a7680a192e1abc16cb70415cb6c1aa4c4cf3269294ce2583c5d81763ee9762"
+checksum = "3ead115d8a4f3917c1ae9c3db0aa4dd56251841864ef8637329969f8e5145dd3"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -793,9 +793,9 @@ dependencies = [
 
 [[package]]
 name = "diskann-utils"
-version = "0.55.0"
+version = "0.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e2d755436dbe7141db9d2311ba99e885126003251d9392d5e41768548df777a"
+checksum = "ac627181d402b5dd63318e434fc2e7107843be0a10cf0a6a99a24666453239bc"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -810,9 +810,9 @@ dependencies = [
 
 [[package]]
 name = "diskann-vector"
-version = "0.55.0"
+version = "0.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf19284b35e697b4c49e71306425490b526ebe70b5602eb06d19c3013fb5138c"
+checksum = "0ee9ba401eba2a12cea01aba7ee2ba7c755019f2b73c2417fecc49a2da26dd4c"
 dependencies = [
  "cfg-if",
  "diskann-wide",
@@ -821,9 +821,9 @@ dependencies = [
 
 [[package]]
 name = "diskann-wide"
-version = "0.55.0"
+version = "0.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d3f814c2b66a98968630b7ad31afbb3c5e62b94b26f80542878eb7440aa8e5d"
+checksum = "343f4ea154bad7f8a9c6936746379faa880899165740a20092775bec97c9a141"
 dependencies = [
  "cfg-if",
  "half",
@@ -949,7 +949,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2697,7 +2697,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3197,7 +3197,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3354,7 +3354,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4270,7 +4270,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4894,7 +4894,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
