@@ -235,6 +235,7 @@ pub fn table_relation() -> StoredTableDefinition {
 			from: vec![TableName::from("users")],
 			to: vec![TableName::from("posts"), TableName::from("comments")],
 			enforced: true,
+			lightweight: false,
 		}),
 		cache_fields_ts: UuidExt::nil(),
 		cache_events_ts: UuidExt::nil(),

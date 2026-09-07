@@ -35,6 +35,18 @@ pub(crate) async fn remove_field_statement_compute(
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 	// Get the transaction
 	let txn = ctx.tx();
+	// A lightweight relation's only fields are the auto in/out pair, which
+	// the record-less scan and endpoint checks rest on.
+	if let Some(tb) = txn.get_tb(ns, db, &table_name, None).await? {
+		anyhow::ensure!(
+			crate::kvs::lightweight::lightweight_relation(&tb.table_type).is_none(),
+			crate::exec::Error::Thrown(
+				"a LIGHTWEIGHT relation's fields cannot be removed: its in/out contract is \
+				 managed by the table definition"
+					.to_owned(),
+			)
+		);
+	}
 	// Get the field name
 	let name = name.to_raw_string();
 	// Get the definition

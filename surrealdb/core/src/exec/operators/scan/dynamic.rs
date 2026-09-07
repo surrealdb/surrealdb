@@ -964,6 +964,20 @@ async fn resolve_table_scan_stream(
 		// Fall back to table KV scan (NOINDEX, BTree rejected by ordering
 		// check, etc.)
 		_ => {
+			// Fail closed: a record-range scan over a lightweight relation
+			// would be wrong-empty, and a runtime-resolved source cannot fall
+			// back to the legacy collectors.
+			{
+				use crate::catalog::providers::TableProvider;
+				if txn.get_tb(cfg.ns_id, cfg.db_id, &cfg.table_name, None).await?.is_some_and(
+					|def| crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some(),
+				) {
+					return Err(ControlFlow::Err(anyhow::anyhow!(
+						"a LIGHTWEIGHT relation cannot be scanned by this execution path; \
+						 reference the table statically so the record-less scan can serve it"
+					)));
+				}
+			}
 			let range = RecordPrefix {
 				ns: cfg.ns_id,
 				db: cfg.db_id,

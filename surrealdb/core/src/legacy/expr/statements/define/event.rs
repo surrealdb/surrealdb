@@ -57,6 +57,16 @@ pub(crate) async fn define_event_statement_compute(
 	// Ensure the table exists
 	let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &target_table, None).await?;
 
+	// A lightweight relation's edges store no records for an event to
+	// apply to; the auto `in`/`out` fields are written by the table
+	// definition directly, never through this statement.
+	anyhow::ensure!(
+		crate::kvs::lightweight::lightweight_relation(&tb.table_type).is_none(),
+		crate::exec::Error::Thrown(
+			"a LIGHTWEIGHT relation cannot carry an event: its edges store no records".to_owned(),
+		)
+	);
+
 	let comment = stk
 		.run(|stk| crate::legacy::expr_compute(&this.comment, stk, ctx, opt, doc))
 		.await

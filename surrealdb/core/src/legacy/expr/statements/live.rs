@@ -101,7 +101,17 @@ pub(crate) async fn live_statement_compute(
 			// Ensure that the table definition exists.
 			{
 				let (ns, db) = opt.ns_db()?;
-				txn.expect_tb_by_name(ns, db, &tb).await?;
+				let tbdef = txn.expect_tb_by_name(ns, db, &tb).await?;
+				// Live queries over record-less edges are out of scope:
+				// parts of the notification machinery assume stored
+				// records, so a subscription could observe partial
+				// behaviour rather than failing loudly.
+				anyhow::ensure!(
+					crate::kvs::lightweight::lightweight_relation(&tbdef.table_type).is_none(),
+					crate::exec::Error::Thrown(
+						"a LIVE query cannot subscribe to a LIGHTWEIGHT relation".to_owned()
+					)
+				);
 			}
 			// If the WHERE clause is document-independent (no field references or
 			// document-event params), evaluate it now while we still have a full

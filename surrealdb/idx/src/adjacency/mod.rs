@@ -28,7 +28,7 @@ pub use self::fold::{FoldOutcome, fold_scope};
 pub use self::merge::{AdjacencyScope, MergeStats, MergedAdjacencyCursor, MergedAdjacencyEdge};
 pub use self::resolve::{AdjacencyResolveCache, resolve_doc_ids};
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::val::TableName;
 
 /// Whether the given vertex table has folded adjacency, from the
@@ -43,4 +43,51 @@ pub async fn vertex_table_folded(
 	tb: &TableName,
 ) -> Result<bool> {
 	Ok(txn.get_tb(ns, db, tb, None).await?.is_some_and(|tb| tb.graph_folded))
+}
+
+/// How a record's own adjacency subspace is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VertexAdjacency {
+	/// Physical keys, merged with packed blocks once the table has folded.
+	Normal {
+		folded: bool,
+	},
+	/// The record is a lightweight edge: it writes no edge-side keys, so
+	/// its adjacency is synthesized from its `[in, out]` id — see
+	/// [`MergedAdjacencyCursor::open_lightweight`].
+	Lightweight,
+}
+
+/// Classifies how a table's records' adjacency is read, from its catalog
+/// definition.
+///
+/// A table absent from the catalog has never been defined, so nothing can
+/// have folded it and no record can be a lightweight edge. Callers that
+/// already hold the definition — a batched scan memoizing it per source
+/// table — classify through this instead of paying another catalog lookup.
+pub fn table_adjacency(tb: Option<&TableDefinition>) -> VertexAdjacency {
+	match tb {
+		Some(tb) => match &tb.table_type {
+			crate::catalog::TableType::Relation(rel) if rel.lightweight => {
+				VertexAdjacency::Lightweight
+			}
+			_ => VertexAdjacency::Normal {
+				folded: tb.graph_folded,
+			},
+		},
+		None => VertexAdjacency::Normal {
+			folded: false,
+		},
+	}
+}
+
+/// Classifies how the given source table's records' adjacency is read,
+/// from the transaction-cached catalog.
+pub async fn vertex_adjacency(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableName,
+) -> Result<VertexAdjacency> {
+	Ok(table_adjacency(txn.get_tb(ns, db, tb, None).await?.as_deref()))
 }

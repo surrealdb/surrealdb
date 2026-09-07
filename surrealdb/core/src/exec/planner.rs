@@ -223,6 +223,40 @@ pub struct Planner<'ctx> {
 }
 
 impl<'ctx> Planner<'ctx> {
+	/// Declines planning when the named table is a lightweight relation:
+	/// its edges have no record range, so every streaming scan shape over
+	/// it is wrong-empty. The fallback executor's collectors enumerate the
+	/// edges from the relation's IN tables' adjacency instead. Callable
+	/// only where a static table name is known; runtime-resolved scans
+	/// perform the equivalent check at execute time and fail closed. A
+	/// catalog read failure also declines rather than failing open: the
+	/// fallback executor re-reads the catalog itself, surfacing a
+	/// persistent datastore error and executing correctly a transient one.
+	pub(crate) async fn decline_lightweight_table(
+		&self,
+		table: &surrealdb_strand::TableName,
+	) -> Result<(), crate::exec::Error> {
+		use crate::catalog::providers::TableProvider;
+		if let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) {
+			let def = match txn.get_tb_by_name(ns, db, table, None).await {
+				Ok(def) => def,
+				Err(_) => {
+					return Err(crate::exec::Error::PlannerUnsupported(
+						"the table catalog could not be read at plan time".to_owned(),
+					));
+				}
+			};
+			if def.is_some_and(|def| {
+				crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some()
+			}) {
+				return Err(crate::exec::Error::PlannerUnsupported(
+					"lightweight relations are scanned by the fallback executor".to_owned(),
+				));
+			}
+		}
+		Ok(())
+	}
+
 	/// Create a new planner with the given context (no transaction).
 	///
 	/// Table sources will use the generic `Scan` operator that resolves

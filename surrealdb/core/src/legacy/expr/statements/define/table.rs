@@ -29,7 +29,7 @@ use crate::expr::{
 };
 use crate::iam::{Action, ResourceKind};
 use crate::key::schema::{
-	EdgeCachePrefix, FieldKey, ForeignTableKey, RecordKey, RefCachePrefix, TblRoot,
+	EdgeCachePrefix, FieldKey, ForeignTableKey, RecordKey, RecordPrefix, RefCachePrefix, TblRoot,
 };
 use crate::kvs::Transaction;
 use crate::legacy::{expr_to_ident, kill_table_subscriptions};
@@ -79,8 +79,9 @@ pub(crate) async fn define_table_statement_compute(
 	// table id and carries the graph markers forward: they record that
 	// packed adjacency blocks may exist under the table's subspace, or hold
 	// its record ids, which redefining the schema does not change.
+	let existing = txn.get_tb(ns.namespace_id, db.database_id, &name, None).await?;
 	let (table_id, graph_folded, graph_doc_ids, old_edges_cap, old_refs_cap) = if let Some(tb) =
-		txn.get_tb(ns.namespace_id, db.database_id, &name, None).await?
+		&existing
 	{
 		match this.kind {
 			DefineKind::Default => {
@@ -140,6 +141,17 @@ pub(crate) async fn define_table_statement_compute(
 		inline_edges_cap: this.inline_edges_cap,
 		inline_refs_cap: this.inline_refs_cap,
 	};
+
+	// Validate (and normalise) a lightweight relation definition against
+	// the table's previous shape and current contents.
+	validate_lightweight_table(
+		&txn,
+		ns.namespace_id,
+		db.database_id,
+		existing.as_deref(),
+		&mut tb_def,
+	)
+	.await?;
 
 	// Add table relational fields
 	crate::legacy::define_table_statement_add_in_out_fields(
@@ -877,6 +889,155 @@ pub(crate) async fn define_table_statement_add_in_out_fields(
 		}
 		// Refresh the table cache for the fields
 		tb.cache_fields_ts = Uuid::now_v7();
+	}
+	Ok(())
+}
+
+/// Validates a table definition that declares — or previously declared — a
+/// lightweight relation, normalising what the flag implies.
+///
+/// A lightweight relation's edges are vertex-side adjacency keys alone, so
+/// the definition must rule out everything that assumes records exist:
+/// endpoints must be explicit (the record-less scan enumerates the `IN`
+/// tables) and may only grow while edges exist, enforcement is implied
+/// (vertex deletion is the only cleanup path), and the record-consuming
+/// clauses — views, changefeeds, DROP, SCHEMAFULL — are rejected. Turning
+/// the flag on over an existing table requires it to be provably empty of
+/// records, graph keys and user schema objects; turning it off is never
+/// allowed, because the stored edges have no records to fall back to.
+pub(crate) async fn validate_lightweight_table(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	existing: Option<&TableDefinition>,
+	def: &mut TableDefinition,
+) -> Result<()> {
+	use surrealdb_types::ToSql;
+
+	use crate::exec::Error as ExecError;
+	use crate::kvs::lightweight::lightweight_relation;
+
+	let was = existing.and_then(|e| lightweight_relation(&e.table_type)).cloned();
+	let is_lightweight = matches!(&def.table_type, TableType::Relation(rel) if rel.lightweight);
+	if !is_lightweight {
+		// Clearing the flag is allowed only while the relation is provably
+		// empty: its stored edges have no records to fall back to, so a
+		// non-empty relation losing the flag would strand them. The empty
+		// escape also makes a table recoverable if a racing writer ever
+		// slips an edge past the becoming-lightweight probes below (see
+		// their comment).
+		if let Some(old) = was {
+			anyhow::ensure!(
+				crate::kvs::lightweight::lightweight_relation_is_empty(
+					txn, ns, db, &def.name, &old
+				)
+				.await?,
+				ExecError::Thrown(
+					"a LIGHTWEIGHT relation can only be redefined as something else while it \
+					 holds no edges: delete them first"
+						.to_owned()
+				)
+			);
+		}
+		return Ok(());
+	}
+	let TableType::Relation(rel) = &mut def.table_type else {
+		unreachable!("is_lightweight implies a relation");
+	};
+	anyhow::ensure!(
+		!rel.from.is_empty() && !rel.to.is_empty(),
+		ExecError::Thrown(
+			"a LIGHTWEIGHT relation requires explicit IN and OUT tables: the record-less scan \
+			 enumerates its edges from the IN tables' adjacency"
+				.to_owned()
+		)
+	);
+	// Vertex deletion is the only cleanup path a record-less edge has, so
+	// dangling endpoints would be permanent garbage: enforcement is implied.
+	rel.enforced = true;
+	for (rejected, why) in [
+		(def.drop, "DROP"),
+		(def.view.is_some(), "AS"),
+		(def.changefeed.is_some(), "CHANGEFEED"),
+		(def.schemafull, "SCHEMAFULL"),
+	] {
+		anyhow::ensure!(
+			!rejected,
+			ExecError::Thrown(format!(
+				"a LIGHTWEIGHT relation cannot be declared {why}: its edges store no records"
+			))
+		);
+	}
+	let rel = rel.clone();
+	match (existing, was) {
+		(_, Some(old)) => {
+			// Narrowing IN or OUT would orphan edges the scan and the auto
+			// in/out field checks then no longer cover; allowed only while
+			// the relation is provably empty.
+			let narrowed = old.from.iter().any(|t| !rel.from.contains(t))
+				|| old.to.iter().any(|t| !rel.to.contains(t));
+			if narrowed {
+				anyhow::ensure!(
+					crate::kvs::lightweight::lightweight_relation_is_empty(
+						txn, ns, db, &def.name, &old
+					)
+					.await?,
+					ExecError::Thrown(
+						"a LIGHTWEIGHT relation's IN and OUT tables can only grow while it \
+						 holds edges"
+							.to_owned()
+					)
+				);
+			}
+		}
+		(Some(_), None) => {
+			// Becoming lightweight: the table must be provably empty — no
+			// records, no graph keys of its own, no user schema objects —
+			// because nothing migrates existing state into the record-less
+			// form.
+			//
+			// The proof reads at this DDL transaction's snapshot, so — as
+			// with every schema-shape flip in this executor — a writer
+			// concurrently inserting into the pre-flip table can commit
+			// beside it with a disjoint write set. The empty-only clearing
+			// escape above keeps that window recoverable: delete the
+			// slipped edges and redefine.
+			let records = RecordPrefix {
+				ns,
+				db,
+				tb: Cow::Borrowed(&def.name),
+			};
+			let graph = crate::key::schema::GraphPrefix {
+				ns,
+				db,
+				tb: Cow::Borrowed(&def.name),
+			};
+			let has_records = !txn.keys_raw(records.range()?, 1, 0, None).await?.is_empty();
+			let has_graph = !txn.keys_raw(graph.range()?, 1, 0, None).await?.is_empty();
+			anyhow::ensure!(
+				!has_records && !has_graph,
+				ExecError::Thrown(
+					"only an empty table can become a LIGHTWEIGHT relation: it still holds \
+					 records or graph keys"
+						.to_owned()
+				)
+			);
+			let user_fields = txn.all_tb_fields(ns, db, &def.name, None).await?.iter().any(|fd| {
+				let name = fd.name.to_sql();
+				name != "in" && name != "out"
+			});
+			let has_events = !txn.all_tb_events(ns, db, &def.name, None).await?.is_empty();
+			let has_indexes = !txn.all_tb_indexes(ns, db, &def.name, None).await?.is_empty();
+			anyhow::ensure!(
+				!user_fields && !has_events && !has_indexes,
+				ExecError::Thrown(
+					"only a table without fields, events or indexes can become a LIGHTWEIGHT \
+					 relation: its edges store no records for them to apply to"
+						.to_owned()
+				)
+			);
+		}
+		(None, None) => {}
 	}
 	Ok(())
 }

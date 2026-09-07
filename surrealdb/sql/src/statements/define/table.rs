@@ -85,6 +85,9 @@ impl ToSql for DefineTableStatement {
 				if rel.enforced {
 					f.push_str(" ENFORCED");
 				}
+				if rel.lightweight {
+					f.push_str(" LIGHTWEIGHT");
+				}
 			}
 			TableType::Any => f.push_str(" ANY"),
 		}

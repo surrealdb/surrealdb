@@ -229,6 +229,19 @@ impl ExecOperator for TableScan {
 						)))?;
 					}
 
+					// Fail closed: a record-range scan over a lightweight
+					// relation would be wrong-empty. Statically-planned scans
+					// were declined at plan time; only runtime-resolved paths
+					// reach this.
+					if table_def.as_ref().is_some_and(|def| {
+						crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some()
+					}) {
+						Err(ControlFlow::Err(anyhow::anyhow!(
+							"a LIGHTWEIGHT relation cannot be scanned by this execution path; \
+							 reference the table statically so the record-less scan can serve it"
+						)))?;
+					}
+
 					let perm = if check_perms {
 						let catalog_perm = match &table_def {
 							Some(def) => def.permissions.select.clone(),

@@ -44,8 +44,8 @@ pub(crate) async fn alter_table_statement_compute(
 	let txn = ctx.tx();
 
 	// Get the table definition
-	let mut dt = match txn.get_tb(ns, db, &name, None).await? {
-		Some(tb) => tb.deref().clone(),
+	let previous = match txn.get_tb(ns, db, &name, None).await? {
+		Some(tb) => tb,
 		None => {
 			if this.if_exists {
 				return Ok(Value::None);
@@ -57,6 +57,7 @@ pub(crate) async fn alter_table_statement_compute(
 			}
 		}
 	};
+	let mut dt = previous.deref().clone();
 	// Process the statement
 	match this.schemafull {
 		AlterKind::Set(_) => dt.schemafull = true,
@@ -118,6 +119,17 @@ pub(crate) async fn alter_table_statement_compute(
 	if let Some(kind) = &this.kind {
 		dt.table_type = kind.clone();
 	}
+
+	// Validate (and normalise) a lightweight relation definition against
+	// the table's previous shape and current contents.
+	crate::legacy::expr::statements::define::table::validate_lightweight_table(
+		&txn,
+		ns,
+		db,
+		Some(previous.deref()),
+		&mut dt,
+	)
+	.await?;
 
 	// Add table relational fields
 	if matches!(this.kind, Some(TableType::Relation(_))) {

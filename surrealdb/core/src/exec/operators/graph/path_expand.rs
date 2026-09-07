@@ -88,6 +88,7 @@ use crate::exec::{
 	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::{ControlFlow, Dir};
+use crate::idx::adjacency::VertexAdjacency;
 use crate::val::{Array, Object, RecordId, TableName, Value};
 
 /// The storage-layer [`Dir`] scanned from a source vertex for an expand
@@ -469,9 +470,9 @@ impl ExecOperator for PathExpand {
 			// caches avoid churn (mirrors `Expand`'s edge/target split).
 			let mut edge_cache = FetchFieldStateCache::new();
 			let mut node_cache = FetchFieldStateCache::new();
-			// Per-table `graph_folded` answers, cached for the whole stream
+			// Per-table adjacency classifications, cached for the whole stream
 			// (path tips can span tables).
-			let mut folded_memo: HashMap<TableName, bool> = HashMap::new();
+			let mut adjacency_memo: HashMap<TableName, VertexAdjacency> = HashMap::new();
 
 			// Output batch, flushed when it reaches the configured batch size.
 			let mut out: Vec<Value> = Vec::with_capacity(scan_batch_size);
@@ -564,7 +565,7 @@ impl ExecOperator for PathExpand {
 							&edge_specs,
 							&ctx,
 							version,
-							&mut folded_memo,
+							&mut adjacency_memo,
 							|item| {
 								if !path.contains_edge(&item.edge) {
 									edge_ids.push(item.edge);

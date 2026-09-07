@@ -104,6 +104,15 @@ pub async fn generate_schema(
 		GraphQLTablesConfig::None => None,
 		_ => {
 			let tbs = tx.all_tb(db_def.namespace_id, db_def.database_id, None).await?;
+			// Lightweight relations are skipped: their edges are record-less,
+			// and the GraphQL layer's resolvers assume stored records. They
+			// stay reachable through the tables they connect.
+			let tbs: Arc<[_]> = tbs
+				.iter()
+				.filter(|t| crate::kvs::lightweight::lightweight_relation(&t.table_type).is_none())
+				.cloned()
+				.collect::<Vec<_>>()
+				.into();
 
 			match graphql_config.tables {
 				GraphQLTablesConfig::None => None,

@@ -42,8 +42,8 @@ use crate::catalog::{DatabaseId, NamespaceId};
 use crate::docids::DocId;
 use crate::expr::Dir;
 use crate::key::schema::{
-	AdjacencyDirPrefix, AdjacencyEdgeTablePrefix, AdjacencyIdPrefix, AdjacencyKey, DecodedGraph,
-	GraphForeignTablePrefix,
+	AdjacencyDirPrefix, AdjacencyEdgeTablePrefix, AdjacencyIdPrefix, AdjacencyKey, AdjacencyPrefix,
+	DecodedGraph, GraphForeignTablePrefix, GraphKey, GraphPointerKey, GraphPrefix,
 };
 use crate::key::{KVKeyDecode, KVValue, RawRange};
 use crate::val::{RecordId, RecordIdKey, TableName};
@@ -110,6 +110,9 @@ pub struct MergeStats {
 enum DeltaCursor<'a> {
 	Keys(MeteredKeysCursor<'a>),
 	Vals(MeteredValsCursor<'a>),
+	/// A pre-computed item list: the adjacency of a lightweight edge, which
+	/// writes no edge-side keys and derives them from its id instead.
+	Synthesized(VecDeque<DeltaItem>),
 }
 
 struct DeltaItem {
@@ -196,6 +199,14 @@ pub struct MergedAdjacencyCursor<'a> {
 	current_chunk: Option<OpenChunk>,
 	block_buf: VecDeque<BlockItem>,
 	block_done: bool,
+	// The order both sides are walked and merged in. Backward is only
+	// offered table-wide; the vertex-scoped and lightweight openers are
+	// forward-only.
+	direction: Direction,
+	// Restricts the cursor to one `(direction, edge table)` slice: delta
+	// keys are dropped before buffering and whole chunks before their
+	// entries are resolved. Only offered table-wide.
+	filter: Option<(Dir, TableName)>,
 	// What the cursor emits; set by the first batch call.
 	mode: Option<EmitMode>,
 	// The window every block entry must fall into, in the pointer-key
@@ -260,6 +271,149 @@ impl<'a> MergedAdjacencyCursor<'a> {
 			current_chunk: None,
 			block_buf: VecDeque::new(),
 			block_done: false,
+			direction: Direction::Forward,
+			filter: None,
+			mode: None,
+			window_start,
+			window_end,
+			stats: MergeStats::default(),
+			#[cfg(test)]
+			delta_fills: 0,
+		})
+	}
+
+	/// Opens the merged cursor over a whole vertex table's adjacency —
+	/// every vertex, both directions, all edge tables — walked in
+	/// `direction` order.
+	///
+	/// The merge stays correct table-wide because both sides remain sorted
+	/// in the pointer-key byte domain across vertices: delta keys by their
+	/// physical order, and block entries by their chunk keys, which share
+	/// the `(id, dir, edge_table)` prefix order the synthesized keys sort
+	/// by. A `filter` restricts the cursor to one `(direction, edge table)`
+	/// slice, dropping non-matching delta keys before any allocation and
+	/// skipping non-matching chunks whole; only pointer-layout keys can
+	/// match it, so a filtered scan never emits a legacy inner key. Without
+	/// one, callers that want a slice decode each emitted key (a pointer
+	/// key, or its legacy inner form) and filter themselves.
+	#[allow(clippy::too_many_arguments)]
+	pub async fn open_table_wide(
+		txn: &'a Transaction,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		folded: bool,
+		direction: Direction,
+		filter: Option<(Dir, TableName)>,
+		version: Option<u64>,
+		resolve: Option<&'a AdjacencyResolveCache>,
+	) -> Result<Self> {
+		let delta_range = GraphPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.range()?;
+		let window_start = delta_range.start().to_vec();
+		let window_end = delta_range.end().to_vec();
+		let (delta, blocks) = if folded {
+			let block_range: RawRange = AdjacencyPrefix {
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
+			}
+			.range()?
+			.into();
+			let delta = txn
+				.open_vals_cursor_raw(delta_range, direction, 0, version)
+				.await
+				.context("Failed to open the graph delta cursor")?;
+			let blocks = txn
+				.open_vals_cursor_raw(block_range, direction, 0, version)
+				.await
+				.context("Failed to open the adjacency block cursor")?;
+			(DeltaCursor::Vals(delta), Some(blocks))
+		} else {
+			let delta = txn
+				.open_keys_cursor_raw(delta_range, direction, 0, version)
+				.await
+				.context("Failed to open the graph cursor")?;
+			(DeltaCursor::Keys(delta), None)
+		};
+		Ok(Self {
+			txn,
+			version,
+			resolve,
+			delta,
+			delta_buf: VecDeque::new(),
+			delta_done: false,
+			delta_fill: 1,
+			blocks,
+			current_chunk: None,
+			block_buf: VecDeque::new(),
+			block_done: false,
+			direction,
+			filter,
+			mode: None,
+			window_start,
+			window_end,
+			stats: MergeStats::default(),
+			#[cfg(test)]
+			delta_fills: 0,
+		})
+	}
+
+	/// Opens the cursor over a lightweight edge's *edge-side* adjacency.
+	///
+	/// A lightweight edge writes no edge-side keys — its whole state is the
+	/// two vertex-side pointers — so a scan of its own graph subspace (the
+	/// second hop of a traversal, or a connected-edges probe) synthesizes
+	/// the two inner keys its id implies: `(In, in)` and `(Out, out)`. The
+	/// synthesized bytes are exactly the keys a classic edge would have
+	/// written, filtered to the scope's window, so downstream decoding and
+	/// semantics are unchanged. The caller owns establishing that the edge
+	/// exists at the read snapshot — this derives from the id alone.
+	pub fn open_lightweight(txn: &'a Transaction, scope: &AdjacencyScope<'_>) -> Result<Self> {
+		let window_start = scope.delta_range.start().to_vec();
+		let window_end = scope.delta_range.end().to_vec();
+		let mut items = VecDeque::new();
+		if let Some((l, r)) = surrealdb_datastore::tx::lightweight_edge_parts(&scope.vertex.key) {
+			for (dir, endpoint) in [(Dir::In, l), (Dir::Out, r)] {
+				let key = GraphKey {
+					ns: scope.ns,
+					db: scope.db,
+					tb: Cow::Borrowed(&scope.vertex.table),
+					id: Cow::Borrowed(&scope.vertex.key),
+					dir,
+					foreign_table: Cow::Borrowed(&endpoint.table),
+					foreign_key: Cow::Borrowed(&endpoint.key),
+				};
+				let key = crate::key::KVKey::encode_key(&key)?;
+				if key.as_slice() < window_start.as_slice()
+					|| key.as_slice() >= window_end.as_slice()
+				{
+					continue;
+				}
+				items.push_back(DeltaItem {
+					key: key.to_vec(),
+					value: AdjacencyValue::live(),
+				});
+			}
+		}
+		Ok(Self {
+			txn,
+			version: None,
+			resolve: None,
+			delta: DeltaCursor::Synthesized(items),
+			delta_buf: VecDeque::new(),
+			delta_done: false,
+			delta_fill: 1,
+			blocks: None,
+			current_chunk: None,
+			block_buf: VecDeque::new(),
+			block_done: true,
+			direction: Direction::Forward,
+			filter: None,
 			mode: None,
 			window_start,
 			window_end,
@@ -369,12 +523,15 @@ impl<'a> MergedAdjacencyCursor<'a> {
 			// across the sides (a delta key and a synthesized block key for
 			// the same edge are byte-identical only when the edge exists on
 			// both sides, which the dedupe below resolves before comparing
-			// again), so a strict comparison decides.
+			// again), so a strict comparison decides — in the scan direction.
 			let take_delta = match (self.delta_buf.front(), self.block_buf.front()) {
 				(None, None) => return Ok(None),
 				(Some(_), None) => true,
 				(None, Some(_)) => false,
-				(Some(d), Some(b)) => d.key <= b.key,
+				(Some(d), Some(b)) => match self.direction {
+					Direction::Forward => d.key <= b.key,
+					Direction::Backward => d.key >= b.key,
+				},
 			};
 			if take_delta {
 				let item =
@@ -397,36 +554,61 @@ impl<'a> MergedAdjacencyCursor<'a> {
 		}
 	}
 
+	/// Fills the delta buffer, scanning `fill` keys per round trip until at
+	/// least one item survives the filter or the side is exhausted, so a
+	/// filtered scan stays batched instead of degrading per key.
 	async fn fill_delta(&mut self, fill: u32) -> Result<()> {
-		#[cfg(test)]
-		{
-			self.delta_fills += 1;
-		}
-		match &mut self.delta {
-			DeltaCursor::Keys(cursor) => {
-				let batch = cursor.next_batch(fill).await.context("Failed to scan graph edges")?;
-				if batch.is_empty() {
-					self.delta_done = true;
-					return Ok(());
-				}
-				for key in &batch {
-					self.delta_buf.push_back(DeltaItem {
-						key: key.to_vec(),
-						value: AdjacencyValue::live(),
-					});
-				}
+		while self.delta_buf.is_empty() && !self.delta_done {
+			#[cfg(test)]
+			{
+				self.delta_fills += 1;
 			}
-			DeltaCursor::Vals(cursor) => {
-				let batch = cursor.next_batch(fill).await.context("Failed to scan graph edges")?;
-				if batch.is_empty() {
-					self.delta_done = true;
-					return Ok(());
+			match &mut self.delta {
+				DeltaCursor::Keys(cursor) => {
+					let batch =
+						cursor.next_batch(fill).await.context("Failed to scan graph edges")?;
+					if batch.is_empty() {
+						self.delta_done = true;
+						break;
+					}
+					for key in &batch {
+						if !filter_admits(&self.filter, key) {
+							continue;
+						}
+						self.delta_buf.push_back(DeltaItem {
+							key: key.to_vec(),
+							value: AdjacencyValue::live(),
+						});
+					}
 				}
-				for (key, val) in &batch {
-					self.delta_buf.push_back(DeltaItem {
-						key: key.to_vec(),
-						value: AdjacencyValue::kv_decode_value(val, ())?,
-					});
+				DeltaCursor::Vals(cursor) => {
+					let batch =
+						cursor.next_batch(fill).await.context("Failed to scan graph edges")?;
+					if batch.is_empty() {
+						self.delta_done = true;
+						break;
+					}
+					for (key, val) in &batch {
+						if !filter_admits(&self.filter, key) {
+							continue;
+						}
+						self.delta_buf.push_back(DeltaItem {
+							key: key.to_vec(),
+							value: AdjacencyValue::kv_decode_value(val, ())?,
+						});
+					}
+				}
+				DeltaCursor::Synthesized(items) => {
+					if items.is_empty() {
+						self.delta_done = true;
+						break;
+					}
+					for _ in 0..fill {
+						let Some(item) = items.pop_front() else {
+							break;
+						};
+						self.delta_buf.push_back(item);
+					}
 				}
 			}
 		}
@@ -457,6 +639,13 @@ impl<'a> MergedAdjacencyCursor<'a> {
 			};
 			let chunk_key =
 				AdjacencyKey::decode_key(key).context("Failed to decode an adjacency block key")?;
+			// A chunk's key names its whole scope, so a filtered cursor skips
+			// foreign chunks before decoding the block or resolving doc-ids.
+			if let Some((dir, table)) = &self.filter
+				&& (chunk_key.dir != *dir || *chunk_key.edge_table != *table)
+			{
+				continue;
+			}
 			let block = AdjacencyBlock::kv_decode_value(val, ())?;
 			// A numeric chunk resolves its doc-IDs once for the whole chunk:
 			// the pointer-key domain the merge orders, windows and emits in
@@ -511,19 +700,38 @@ impl<'a> MergedAdjacencyCursor<'a> {
 		let mut next = chunk.next;
 		let mut exhausted = true;
 		let mut window_ended = false;
-		while let Some(entry) = entries.get(next) {
+		// A chunk's entries are stored ascending, so `next` counts them in
+		// scan order: a backward scan walks them from the end, keeping the
+		// buffer in scan order.
+		while next < entries.len() {
 			if self.block_buf.len() >= need {
 				// The chunk stays open; the next fill resumes at `next`.
 				exhausted = false;
 				break;
 			}
+			let entry = &entries[match self.direction {
+				Direction::Forward => next,
+				Direction::Backward => entries.len() - 1 - next,
+			}];
 			next += 1;
 			let key = synthesize_pointer_key(&chunk.prefix, &chunk.target_tables, entry)?;
-			// A bounded or resumed scan's window, in the same domain.
-			if key.as_slice() < self.window_start.as_slice() {
+			// A bounded or resumed scan's window, in the same domain: an
+			// entry before the window (in scan order) is skipped, and the
+			// first entry past it ends the block side.
+			let (before, past) = match self.direction {
+				Direction::Forward => (
+					key.as_slice() < self.window_start.as_slice(),
+					key.as_slice() >= self.window_end.as_slice(),
+				),
+				Direction::Backward => (
+					key.as_slice() >= self.window_end.as_slice(),
+					key.as_slice() < self.window_start.as_slice(),
+				),
+			};
+			if before {
 				continue;
 			}
-			if key.as_slice() >= self.window_end.as_slice() {
+			if past {
 				window_ended = true;
 				break;
 			}
@@ -579,6 +787,20 @@ impl<'a> MergedAdjacencyCursor<'a> {
 	pub(super) fn open_chunk_remaining(&self) -> usize {
 		self.current_chunk.as_ref().map_or(0, |chunk| chunk.entries().len() - chunk.next)
 	}
+}
+
+/// Whether a delta key belongs to a cursor's `(direction, edge-table)`
+/// filter. Only pointer-layout keys can match: the filter serves the
+/// lightweight relation scan, and a lightweight relation writes nothing
+/// else, so a key in any other layout is never one of its edges.
+fn filter_admits(filter: &Option<(Dir, TableName)>, key: &[u8]) -> bool {
+	let Some((dir, table)) = filter else {
+		return true;
+	};
+	let Ok(decoded) = GraphPointerKey::decode_key(key) else {
+		return false;
+	};
+	decoded.dir == *dir && *decoded.foreign_table == *table
 }
 
 /// The block-side range for a scope, seeking the covering chunk when the

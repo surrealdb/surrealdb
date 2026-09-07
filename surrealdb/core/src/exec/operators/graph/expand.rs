@@ -86,6 +86,7 @@ use crate::exec::{
 	monitor_stream,
 };
 use crate::expr::{ControlFlow, Dir};
+use crate::idx::adjacency::VertexAdjacency;
 use crate::val::{Object, RecordId, TableName, Value};
 
 /// Direction of a single `Expand` hop.
@@ -331,9 +332,9 @@ impl ExecOperator for Expand {
 			// table's permission + FieldState are resolved at most once.
 			let mut edge_cache = FetchFieldStateCache::new();
 			let mut target_cache = FetchFieldStateCache::new();
-			// Per-table `graph_folded` answers, cached for the whole stream
+			// Per-table adjacency classifications, cached for the whole stream
 			// (source rids can span tables).
-			let mut folded_memo: HashMap<TableName, bool> = HashMap::new();
+			let mut adjacency_memo: HashMap<TableName, VertexAdjacency> = HashMap::new();
 
 			// Cumulative emitted-row count across all batches and source rows —
 			// bounds high-fan-out expand output (a single dense source vertex, or
@@ -370,7 +371,7 @@ impl ExecOperator for Expand {
 								scan_batch_size,
 								&mut edge_cache,
 								&mut target_cache,
-								&mut folded_memo,
+								&mut adjacency_memo,
 								&mut out,
 								&mut emitted,
 								max_output_rows,
@@ -498,7 +499,7 @@ async fn expand_row(
 	scan_batch_size: usize,
 	edge_cache: &mut FetchFieldStateCache,
 	target_cache: &mut FetchFieldStateCache,
-	folded_memo: &mut HashMap<TableName, bool>,
+	adjacency_memo: &mut HashMap<TableName, VertexAdjacency>,
 	out: &mut Vec<Value>,
 	emitted: &mut usize,
 	max_output_rows: usize,
@@ -519,7 +520,7 @@ async fn expand_row(
 		edge_specs,
 		ctx,
 		version,
-		folded_memo,
+		adjacency_memo,
 		|item| {
 			edge_rids.push(item.edge);
 			decoded_targets.push(item.target);

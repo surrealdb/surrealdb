@@ -84,6 +84,36 @@ impl Document {
 					}
 				);
 			}
+			// A lightweight relation cannot itself be a graph endpoint: its
+			// "records" are synthesized from adjacency, so hanging classic
+			// edges off them would write pointer keys into the lightweight
+			// table's own graph subspace — the exact state its emptiness
+			// probes and record-less scans define as impossible.
+			for endpoint in [l, r] {
+				if let Some(def) = txn.get_tb(ns, db, &endpoint.table, None).await?
+					&& matches!(
+						&def.table_type,
+						TableType::Relation(Relation {
+							lightweight: true,
+							..
+						})
+					) {
+					anyhow::bail!(crate::exec::Error::Thrown(format!(
+						"a LIGHTWEIGHT relation's edges cannot be graph endpoints: {}",
+						endpoint.to_sql()
+					)));
+				}
+			}
+			// A lightweight relation stores each edge as its two vertex-side
+			// pointer keys alone: no record, no edge-side keys. Readers
+			// synthesize the record from the canonical `[in, out]` id.
+			let lightweight = matches!(
+				&tb.table_type,
+				TableType::Relation(Relation {
+					lightweight: true,
+					..
+				})
+			);
 			// The four keys written below together model a single relation,
 			// linking the `in` vertex (`l`), the edge record (`rid`), and the
 			// `out` vertex (`r`):
@@ -128,10 +158,11 @@ impl Document {
 			// `initial`, not `current`, because `default_record_data`
 			// has already advanced `current`'s stamp to the latest
 			// variant. Older variants need their stale vertex-side keys
-			// deleted before the current layout is written.
+			// deleted before the current layout is written. Lightweight
+			// edges only ever exist in the latest layout.
 			let variant = self.initial.doc.edge_variant().unwrap_or(LATEST_EDGE_VARIANT);
 			// Detect which variant the edge was originally
-			if variant == 1 {
+			if !lightweight && variant == 1 {
 				let ltr_legacy = GraphKey {
 					ns,
 					db,
@@ -178,12 +209,16 @@ impl Document {
 			};
 
 			let live = AdjacencyValue::live();
-			futures::try_join!(
-				txn.set_key(&ltr, &live),
-				txn.set_key(&etl, &()),
-				txn.set_key(&etr, &()),
-				txn.set_key(&rtl, &live),
-			)?;
+			if lightweight {
+				futures::try_join!(txn.set_key(&ltr, &live), txn.set_key(&rtl, &live))?;
+			} else {
+				futures::try_join!(
+					txn.set_key(&ltr, &live),
+					txn.set_key(&etl, &()),
+					txn.set_key(&etr, &()),
+					txn.set_key(&rtl, &live),
+				)?;
+			}
 			// Fold the edge into each endpoint's inline adjacency cache —
 			// after the key writes above, so a first-write backfill's scan
 			// (which runs in this transaction) already includes them.

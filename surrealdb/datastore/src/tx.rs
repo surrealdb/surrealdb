@@ -32,8 +32,8 @@ use surrealdb_catalog::providers::{
 };
 use surrealdb_catalog::{
 	self, DatabaseDefinition, DatabaseId, DefaultConfig, Error as CatalogError, FromStored,
-	IndexId, NamespaceDefinition, NamespaceId, Record, StoredConfigDefinition,
-	StoredTableDefinition, TableDefinition, TableId,
+	IndexId, LATEST_EDGE_VARIANT, Metadata, NamespaceDefinition, NamespaceId, Record, RecordType,
+	StoredConfigDefinition, StoredTableDefinition, TableDefinition, TableId, TableType,
 };
 use surrealdb_expr::val::{RecordId, RecordIdKey, TableName, Value};
 use surrealdb_kvs::api::{
@@ -59,19 +59,19 @@ use crate::cache::tx::TransactionCache;
 use crate::close::{CommitAction, RollbackAction};
 use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
-	AnalyzerKey, AnalyzerPrefix, ApiKey, ApiPrefix, BucketKey, BucketPrefix,
-	BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey, ChangeFeedKey, ChangefeedFenceKey,
-	DatabaseKey, DatabasePrefix, DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot,
-	DbConfigKey, DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix,
-	DocStatsBatchKey, EventKey, EventPrefix, FieldKey, FieldPrefix, ForeignTablePrefix,
-	FunctionKey, FunctionPrefix, GraphFoldKey, IdxRoot, IndexCompactionKey, IndexCountKey,
-	IndexDefKey, IndexDefPrefix, IndexNameKey, LiveEventsKey, MlModelKey, MlModelPrefix, ModuleKey,
-	ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix, NsAccessMethodKey,
-	NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix,
-	ParamKey, ParamPrefix, ReclaimKey, ReclaimTbPrefix, RecordKey, RootAccessMethodKey,
-	RootAccessMethodPrefix, RootAccessRoot, RootConfigKey, RootGrantKey, RootGrantPrefix,
-	RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionPrefix, TableKey,
-	TablePrefix, TermChangeBatchKey,
+	AdjacencyEdgeTablePrefix, AdjacencyKey, AnalyzerKey, AnalyzerPrefix, ApiKey, ApiPrefix,
+	BucketKey, BucketPrefix, BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey,
+	ChangeFeedKey, ChangefeedFenceKey, DatabaseKey, DatabasePrefix, DbAccessMethodKey,
+	DbAccessMethodPrefix, DbAccessRoot, DbConfigKey, DbConfigPrefix, DbGrantKey, DbGrantPrefix,
+	DbUserKey, DbUserPrefix, DocLookupKey, DocStatsBatchKey, EventKey, EventPrefix, FieldKey,
+	FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, GraphFoldKey, GraphPointerKey,
+	IdxRoot, IndexCompactionKey, IndexCountKey, IndexDefKey, IndexDefPrefix, IndexNameKey,
+	LiveEventsKey, MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey,
+	NamespacePrefix, NodeKey, NodePrefix, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot,
+	NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix, ParamKey, ParamPrefix, ReclaimKey,
+	ReclaimTbPrefix, RecordKey, RootAccessMethodKey, RootAccessMethodPrefix, RootAccessRoot,
+	RootConfigKey, RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey,
+	SequencePrefix, SubscriptionPrefix, TableKey, TablePrefix, TermChangeBatchKey,
 };
 use crate::sequences::Sequences;
 #[cfg(any(test, feature = "test-hooks"))]
@@ -82,7 +82,7 @@ use crate::testing::{
 use crate::triggers::CommitTriggers;
 use crate::values::changefeed::Changefeed;
 use crate::values::fulltext::DocLengthAndCount;
-use crate::values::graph::GraphFoldScope;
+use crate::values::graph::{AdjacencyBlock, BlockEntries, GraphFoldScope};
 use crate::values::index_build::{
 	BuildGeneration, BuildTicket, BuildTicketMutationSeq, IndexBuildPhase, IndexBuildReportStatus,
 };
@@ -5563,7 +5563,10 @@ impl TableProvider for Transaction {
 					};
 					match self.get_key(&key, version).await? {
 						Some(record) => Ok(record.into_read_only()),
-						None => Ok(Arc::new(Default::default())),
+						None => match self.lightweight_record(ns, db, tb, id, version).await? {
+							Some(record) => Ok(record.into_read_only()),
+							None => Ok(Arc::new(Default::default())),
+						},
 					}
 				} else {
 					let qey = cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
@@ -5585,7 +5588,21 @@ impl TableProvider for Transaction {
 									self.cache.insert(qey, entry);
 									Ok(record)
 								}
-								None => Ok(Arc::new(Default::default())),
+								// A lightweight edge has no record; synthesize
+								// it from the adjacency. Cacheable: the delete
+								// pipeline clears the entry through
+								// `del_record` exactly as for a stored record.
+								None => {
+									match self.lightweight_record(ns, db, tb, id, None).await? {
+										Some(record) => {
+											let record = record.into_read_only();
+											let entry = cache::tx::Entry::Val(Arc::clone(&record));
+											self.cache.insert(qey, entry);
+											Ok(record)
+										}
+										None => Ok(Arc::new(Default::default())),
+									}
+								}
 							}
 						}
 					}
@@ -5625,14 +5642,36 @@ impl TableProvider for Transaction {
 						})
 						.collect();
 					let values = self.get_many_key(keys, version).await?;
-					let out: Vec<Arc<Record>> = values
+					let mut out: Vec<Option<Arc<Record>>> =
+						values.into_iter().map(|opt| opt.map(Record::into_read_only)).collect();
+					// A miss can be a lightweight edge; resolve every miss in
+					// one batched adjacency read.
+					let misses: Vec<(usize, &RecordId)> = out
+						.iter()
+						.enumerate()
+						.filter(|(_, o)| o.is_none())
+						.map(|(i, _)| (i, &rids[i]))
+						.collect();
+					if !misses.is_empty() {
+						let miss_rids: Vec<&RecordId> =
+							misses.iter().map(|(_, rid)| *rid).collect();
+						let records = self.lightweight_records(ns, db, &miss_rids, version).await?;
+						for ((i, _), record) in misses.into_iter().zip(records) {
+							out[i] = Some(match record {
+								Some(record) => record.into_read_only(),
+								None => Arc::new(Default::default()),
+							});
+						}
+					}
+					return out
 						.into_iter()
-						.map(|opt| match opt {
-							Some(record) => record.into_read_only(),
-							None => Arc::new(Default::default()),
+						.map(|o| {
+							o.ok_or_else(|| {
+								EngineError::Internal("missing record in multi-get batch".into())
+									.into()
+							})
 						})
 						.collect();
-					return Ok(out);
 				}
 				// Phase 1: check cache, collect hits and indices of misses
 				let mut out: Vec<Option<Arc<Record>>> = vec![None; rids.len()];
@@ -5658,29 +5697,46 @@ impl TableProvider for Transaction {
 						})
 						.collect();
 					let values = self.get_many_key(keys, None).await?;
-					// Phase 3: populate cache + merge into output
-					for ((i, rid), opt) in uncached_rids.into_iter().zip(values) {
-						let record = match opt {
-							Some(record) => {
-								let record = record.into_read_only();
-								// Only populate the cache when the caller requests
-								// ReadWrite; ReadOnly avoids eviction churn during
-								// large sequential scans.
-								if matches!(cache_policy, CachePolicy::ReadWrite) {
-									let qey = cache::tx::Lookup::Record(
-										ns,
-										db,
-										rid.table.as_str(),
-										&rid.key,
-									);
-									let entry = cache::tx::Entry::Val(Arc::clone(&record));
-									self.cache.insert(qey, entry);
-								}
-								record
-							}
-							None => Arc::new(Default::default()),
-						};
+					// Phase 3: populate cache + merge into output.
+					//
+					// Only populate the cache when the caller requests
+					// ReadWrite; ReadOnly avoids eviction churn during
+					// large sequential scans. Default (missing) records
+					// are never cached, matching `get_record`.
+					let place = |out: &mut Vec<Option<Arc<Record>>>,
+					             i: usize,
+					             rid: &RecordId,
+					             record: Arc<Record>| {
+						if (record.metadata.is_some() || !record.data.is_none())
+							&& matches!(cache_policy, CachePolicy::ReadWrite)
+						{
+							let qey =
+								cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
+							let entry = cache::tx::Entry::Val(Arc::clone(&record));
+							self.cache.insert(qey, entry);
+						}
 						out[i] = Some(record);
+					};
+					// A miss can be a lightweight edge; collect every miss and
+					// resolve them in one batched adjacency read.
+					let mut misses: Vec<(usize, &RecordId)> = Vec::new();
+					for ((i, rid), opt) in uncached_rids.into_iter().zip(values) {
+						match opt {
+							Some(record) => place(&mut out, i, rid, record.into_read_only()),
+							None => misses.push((i, rid)),
+						}
+					}
+					if !misses.is_empty() {
+						let miss_rids: Vec<&RecordId> =
+							misses.iter().map(|(_, rid)| *rid).collect();
+						let records = self.lightweight_records(ns, db, &miss_rids, None).await?;
+						for ((i, rid), record) in misses.into_iter().zip(records) {
+							let record = match record {
+								Some(record) => record.into_read_only(),
+								None => Arc::new(Default::default()),
+							};
+							place(&mut out, i, rid, record);
+						}
 					}
 				}
 				// Every slot should be populated by now
@@ -5711,7 +5767,12 @@ impl TableProvider for Transaction {
 				tb: Cow::Borrowed(tb),
 				id: Cow::Borrowed(id),
 			};
-			self.exists_key(&key, version).await
+			if self.exists_key(&key, version).await? {
+				return Ok(true);
+			}
+			// A lightweight edge has no record; its existence is the
+			// adjacency's.
+			Ok(self.lightweight_record(ns, db, tb, id, version).await?.is_some())
 		})
 	}
 
@@ -6929,3 +6990,323 @@ impl BucketProvider for Transaction {
 // --------------------------------------------------
 
 impl CatalogProvider for Transaction {}
+
+/// The record a lightweight edge presents to readers, derived entirely from
+/// its table, canonical id, and the two endpoints the id carries.
+fn synthesize_lightweight_record(
+	tb: &TableName,
+	id: &RecordIdKey,
+	l: &RecordId,
+	r: &RecordId,
+) -> Record {
+	let rid = RecordId {
+		table: tb.clone(),
+		key: id.clone(),
+	};
+	let mut data = surrealdb_expr::val::Object::default();
+	data.insert("id".to_owned(), Value::RecordId(rid));
+	data.insert("in".to_owned(), Value::RecordId(l.clone()));
+	data.insert("out".to_owned(), Value::RecordId(r.clone()));
+	Record {
+		metadata: Some(Metadata {
+			record_type: RecordType::Edge {
+				variant: LATEST_EDGE_VARIANT,
+			},
+			aggregation_stats: Vec::new(),
+		}),
+		data: Value::Object(data),
+	}
+}
+
+/// The two endpoints of a lightweight edge's canonical `[in, out]` id, when
+/// the id has that shape.
+pub fn lightweight_edge_parts(id: &RecordIdKey) -> Option<(&RecordId, &RecordId)> {
+	let RecordIdKey::Array(arr) = id else {
+		return None;
+	};
+	match arr.as_slice() {
+		[Value::RecordId(l), Value::RecordId(r)] => Some((l, r)),
+		_ => None,
+	}
+}
+
+/// Lightweight-relation record synthesis.
+///
+/// A lightweight relation stores each edge as its two vertex-side adjacency
+/// keys alone — no record. The record providers below synthesize the record
+/// on demand from the edge's canonical `[in, out]` id, so every reader of
+/// records — point reads, the processors, the delete pipeline, cascades,
+/// permission gates, FETCH — is correct without knowing the table is
+/// lightweight. Existence is decided by the merged adjacency truth for the
+/// `in` endpoint: the exact pointer key (live or tombstone) wins, and a
+/// folded vertex table is additionally probed through its covering packed
+/// chunk, resolving numeric entries through the shared doc-id space.
+impl Transaction {
+	/// Synthesizes the record for a lightweight edge, or returns `None`
+	/// when the id is not a lightweight edge of this table or the edge does
+	/// not exist at the read snapshot.
+	async fn lightweight_record(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordIdKey,
+		version: Option<u64>,
+	) -> Result<Option<Record>> {
+		let Some((l, r)) = lightweight_edge_parts(id) else {
+			return Ok(None);
+		};
+		let Some(tbdef) = self.get_tb(ns, db, tb, version).await? else {
+			return Ok(None);
+		};
+		let TableType::Relation(rel) = &tbdef.table_type else {
+			return Ok(None);
+		};
+		if !rel.lightweight {
+			return Ok(None);
+		}
+		if !self.lightweight_edge_present(ns, db, tb, l, r, id, version).await? {
+			return Ok(None);
+		}
+		Ok(Some(synthesize_lightweight_record(tb, id, l, r)))
+	}
+
+	/// Batched [`Self::lightweight_record`]: one slot per input id, `None`
+	/// where the id is not a live lightweight edge.
+	///
+	/// The candidates' exact pointer keys are read with a single batched get;
+	/// only edges whose `in` vertex table has folded adjacency fall back to
+	/// the per-edge covering-chunk probe, and the last fetched chunk is
+	/// memoized per `(in vertex, edge table)` scope, so a hub's edges — which
+	/// typically share their covering chunk — do not refetch it.
+	async fn lightweight_records(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		rids: &[&RecordId],
+		version: Option<u64>,
+	) -> Result<Vec<Option<Record>>> {
+		use surrealdb_expr::expr::Dir;
+		let mut out: Vec<Option<Record>> = (0..rids.len()).map(|_| None).collect();
+		// Keep the ids with the canonical `[in, out]` shape on a lightweight
+		// relation; anything else can never synthesize a record.
+		let mut candidates: Vec<(usize, &RecordId, &RecordId, &RecordId)> = Vec::new();
+		for (i, rid) in rids.iter().enumerate() {
+			let Some((l, r)) = lightweight_edge_parts(&rid.key) else {
+				continue;
+			};
+			let Some(tbdef) = self.get_tb(ns, db, &rid.table, version).await? else {
+				continue;
+			};
+			let TableType::Relation(rel) = &tbdef.table_type else {
+				continue;
+			};
+			if !rel.lightweight {
+				continue;
+			}
+			candidates.push((i, rid, l, r));
+		}
+		if candidates.is_empty() {
+			return Ok(out);
+		}
+		// One batched read over the candidates' exact `in`-side pointer keys:
+		// a live value proves the edge, a tombstone proves its absence.
+		let keys: Vec<GraphPointerKey<'_>> = candidates
+			.iter()
+			.map(|(_, rid, l, r)| GraphPointerKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(&l.table),
+				id: Cow::Borrowed(&l.key),
+				dir: Dir::Out,
+				foreign_table: Cow::Borrowed(&rid.table),
+				foreign_key: Cow::Borrowed(&rid.key),
+				target_table: Cow::Borrowed(&r.table),
+				target_key: Cow::Borrowed(&r.key),
+			})
+			.collect();
+		let values = self.get_many_key(keys, version).await?;
+		// A pointer-key miss can only live in a packed chunk, which only
+		// exists once the `in` vertex's table has folded. The covering-chunk
+		// probe stays per-edge, but the fetched chunk is memoized per scope:
+		// an edge found in the memoized block is present (it has no
+		// tombstone, or the batched read above would have seen it), and a
+		// probe that lands on the memoized chunk again resolves without
+		// refetching the block.
+		type Scope = (TableName, RecordIdKey, TableName);
+		// The scope tuple hashes by value; the ids in it are never mutated
+		// while memoized.
+		#[expect(clippy::mutable_key_type)]
+		let mut chunks: HashMap<Scope, (Vec<u8>, AdjacencyBlock)> = HashMap::new();
+		for ((i, rid, l, r), value) in candidates.into_iter().zip(values) {
+			if let Some(value) = value {
+				if !value.is_tombstone() {
+					out[i] = Some(synthesize_lightweight_record(&rid.table, &rid.key, l, r));
+				}
+				continue;
+			}
+			let folded =
+				self.get_tb(ns, db, &l.table, version).await?.is_some_and(|tb| tb.graph_folded);
+			if !folded {
+				continue;
+			}
+			let scope = (l.table.clone(), l.key.clone(), rid.table.clone());
+			if let Some((_, block)) = chunks.get(&scope)
+				&& self.block_holds_edge(ns, db, &rid.table, block, &rid.key, r, version).await?
+			{
+				out[i] = Some(synthesize_lightweight_record(&rid.table, &rid.key, l, r));
+				continue;
+			}
+			// The covering chunk: the last chunk starting at or before the
+			// edge key; entries are partitioned by `chunk_start`, so no other
+			// chunk can hold it.
+			let up_to_bound = AdjacencyEdgeTablePrefix {
+				ns,
+				db,
+				tb: Cow::Borrowed(&l.table),
+				id: Cow::Borrowed(&l.key),
+				dir: Dir::Out,
+				edge_table: Cow::Borrowed(&rid.table),
+			}
+			.range_where((
+				std::ops::Bound::Unbounded,
+				std::ops::Bound::Included(Cow::Borrowed(&rid.key)),
+			))?;
+			let covering = self.keysr_raw(up_to_bound, 1, 0, version).await?;
+			let Some(chunk_key_bytes) = covering.into_iter().next() else {
+				continue;
+			};
+			// The probe landed on the memoized chunk, which was already
+			// checked above: the edge is absent.
+			if chunks.get(&scope).is_some_and(|(key, _)| *key == chunk_key_bytes) {
+				continue;
+			}
+			let chunk_key = AdjacencyKey::decode_key(&chunk_key_bytes)?;
+			let Some(block) = self.get_key(&chunk_key, version).await? else {
+				continue;
+			};
+			let holds =
+				self.block_holds_edge(ns, db, &rid.table, &block, &rid.key, r, version).await?;
+			chunks.insert(scope, (chunk_key_bytes, block));
+			if holds {
+				out[i] = Some(synthesize_lightweight_record(&rid.table, &rid.key, l, r));
+			}
+		}
+		Ok(out)
+	}
+
+	/// Whether the lightweight edge `l -[tb:id]-> r` exists at the read
+	/// snapshot: its exact `in`-side pointer key (live beats absent,
+	/// tombstone beats everything), falling back to the covering packed
+	/// chunk when the `in` vertex's table has folded adjacency.
+	#[allow(clippy::too_many_arguments)]
+	async fn lightweight_edge_present(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		l: &RecordId,
+		r: &RecordId,
+		id: &RecordIdKey,
+		version: Option<u64>,
+	) -> Result<bool> {
+		use surrealdb_expr::expr::Dir;
+		let key = GraphPointerKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(&l.table),
+			id: Cow::Borrowed(&l.key),
+			dir: Dir::Out,
+			foreign_table: Cow::Borrowed(tb),
+			foreign_key: Cow::Borrowed(id),
+			target_table: Cow::Borrowed(&r.table),
+			target_key: Cow::Borrowed(&r.key),
+		};
+		if let Some(value) = self.get_key(&key, version).await? {
+			return Ok(!value.is_tombstone());
+		}
+		// No delta key: the edge can only live in a packed chunk, which only
+		// exists once the vertex table has folded.
+		let folded =
+			self.get_tb(ns, db, &l.table, version).await?.is_some_and(|tb| tb.graph_folded);
+		if !folded {
+			return Ok(false);
+		}
+		// The covering chunk: the last chunk starting at or before the edge
+		// key; entries are partitioned by `chunk_start`, so no other chunk
+		// can hold it.
+		let prefix = || AdjacencyEdgeTablePrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(&l.table),
+			id: Cow::Borrowed(&l.key),
+			dir: Dir::Out,
+			edge_table: Cow::Borrowed(tb),
+		};
+		let up_to_bound = prefix().range_where((
+			std::ops::Bound::Unbounded,
+			std::ops::Bound::Included(Cow::Borrowed(id)),
+		))?;
+		let covering = self.keysr_raw(up_to_bound, 1, 0, version).await?;
+		let Some(chunk_key) = covering.into_iter().next() else {
+			return Ok(false);
+		};
+		let chunk_key = AdjacencyKey::decode_key(&chunk_key)?;
+		let Some(block) = self.get_key(&chunk_key, version).await? else {
+			return Ok(false);
+		};
+		self.block_holds_edge(ns, db, tb, &block, id, r, version).await
+	}
+
+	/// Whether a decoded packed chunk holds the edge `(id -> r)`, matching
+	/// on the full entry identity. Numeric chunks are matched through the
+	/// forward key→doc-id mappings; a key with no mapping was never
+	/// compressed and cannot be in a numeric chunk.
+	#[allow(clippy::too_many_arguments)]
+	async fn block_holds_edge(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		block: &AdjacencyBlock,
+		id: &RecordIdKey,
+		r: &RecordId,
+		version: Option<u64>,
+	) -> Result<bool> {
+		match &block.entries {
+			BlockEntries::Plain(entries) => {
+				let edge_key = storekey::encode_vec(id).map_err(anyhow::Error::from_boxed)?;
+				let target_key = storekey::encode_vec(&r.key).map_err(anyhow::Error::from_boxed)?;
+				Ok(entries.iter().any(|e| {
+					e.edge_key == edge_key
+						&& e.target_key == target_key
+						&& block.targets.get(e.target_table as usize).is_some_and(|t| *t == r.table)
+				}))
+			}
+			BlockEntries::Numeric(entries) => {
+				let lookup = DocLookupKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+					id: Cow::Borrowed(id),
+				};
+				let Some(edge_id) = self.get_key(&lookup, version).await? else {
+					return Ok(false);
+				};
+				let Some(entry) = entries.iter().find(|e| e.edge == edge_id) else {
+					return Ok(false);
+				};
+				if block.targets.get(entry.target_table as usize) != Some(&r.table) {
+					return Ok(false);
+				}
+				let lookup = DocLookupKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(&r.table),
+					id: Cow::Borrowed(&r.key),
+				};
+				Ok(self.get_key(&lookup, version).await? == Some(entry.target))
+			}
+		}
+	}
+}

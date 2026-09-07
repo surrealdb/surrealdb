@@ -8,7 +8,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId, Record};
+use crate::catalog::{DatabaseId, NamespaceId, Record, Relation};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processable, Statement};
@@ -26,6 +26,7 @@ use crate::key::schema::{
 	ReferenceKey,
 };
 use crate::key::{AnyRange, KVKeyDecode, KVValue, RawRange, Resumable, TypedRange};
+use crate::kvs::lightweight::{LightweightEdgeScanner, lightweight_relation};
 use crate::kvs::{DatastoreError, Direction, NORMAL_BATCH_SIZE, Transaction, Val};
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
@@ -844,6 +845,16 @@ pub(super) trait Collector {
 		table: &TableName,
 		sc: Direction,
 	) -> Result<()> {
+		// A lightweight relation has no record range: its edges are
+		// enumerated from its IN tables' adjacency instead.
+		if let Some(tbdef) = ctx
+			.tx()
+			.get_tb(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, table, None)
+			.await? && let Some(rel) = lightweight_relation(&tbdef.table_type)
+		{
+			let rel = rel.clone();
+			return self.collect_lightweight(ctx, opt, doc_ctx, table, &rel, None, sc, false).await;
+		}
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
 
@@ -917,6 +928,16 @@ pub(super) trait Collector {
 		table: &TableName,
 		sc: Direction,
 	) -> Result<()> {
+		// A lightweight relation has no record range: its edges are
+		// enumerated from its IN tables' adjacency instead.
+		if let Some(tbdef) = ctx
+			.tx()
+			.get_tb(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, table, None)
+			.await? && let Some(rel) = lightweight_relation(&tbdef.table_type)
+		{
+			let rel = rel.clone();
+			return self.collect_lightweight(ctx, opt, doc_ctx, table, &rel, None, sc, false).await;
+		}
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
 
@@ -965,6 +986,17 @@ pub(super) trait Collector {
 		doc_ctx: DocumentContext,
 		v: &TableName,
 	) -> Result<()> {
+		// A lightweight relation has no record range: its edges are
+		// enumerated from its IN tables' adjacency instead.
+		if let Some(tbdef) =
+			ctx.tx().get_tb(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, v, None).await?
+			&& let Some(rel) = lightweight_relation(&tbdef.table_type)
+		{
+			let rel = rel.clone();
+			return self
+				.collect_lightweight(ctx, opt, doc_ctx, v, &rel, None, Direction::Forward, true)
+				.await;
+		}
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
 		let range = RecordPrefix {
@@ -1010,6 +1042,18 @@ pub(super) trait Collector {
 		r: RecordIdKeyRange,
 		sc: Direction,
 	) -> Result<()> {
+		// A lightweight relation has no record range: its edges are
+		// enumerated from its IN tables' adjacency instead.
+		if let Some(tbdef) = ctx
+			.tx()
+			.get_tb(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, table_name, None)
+			.await? && let Some(rel) = lightweight_relation(&tbdef.table_type)
+		{
+			let rel = rel.clone();
+			return self
+				.collect_lightweight(ctx, opt, doc_ctx, table_name, &rel, Some(&r), sc, false)
+				.await;
+		}
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
 		// Prepare
@@ -1054,6 +1098,17 @@ pub(super) trait Collector {
 		r: RecordIdKeyRange,
 		sc: Direction,
 	) -> Result<()> {
+		// A lightweight relation has no record range: its edges are
+		// enumerated from its IN tables' adjacency instead.
+		if let Some(tbdef) =
+			ctx.tx().get_tb(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, tb, None).await?
+			&& let Some(rel) = lightweight_relation(&tbdef.table_type)
+		{
+			let rel = rel.clone();
+			return self
+				.collect_lightweight(ctx, opt, doc_ctx, tb, &rel, Some(&r), sc, false)
+				.await;
+		}
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
 
@@ -1099,6 +1154,26 @@ pub(super) trait Collector {
 		tb: &TableName,
 		r: RecordIdKeyRange,
 	) -> Result<()> {
+		// A lightweight relation has no record range: its edges are
+		// enumerated from its IN tables' adjacency instead.
+		if let Some(tbdef) =
+			ctx.tx().get_tb(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, tb, None).await?
+			&& let Some(rel) = lightweight_relation(&tbdef.table_type)
+		{
+			let rel = rel.clone();
+			return self
+				.collect_lightweight(
+					ctx,
+					opt,
+					doc_ctx,
+					tb,
+					&rel,
+					Some(&r),
+					Direction::Forward,
+					true,
+				)
+				.await;
+		}
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
@@ -1109,6 +1184,113 @@ pub(super) trait Collector {
 		// Collect the count
 		self.collect(Collectable::Count(doc_ctx, count)).await?;
 		// Everything ok
+		Ok(())
+	}
+
+	/// Collects a lightweight relation's edges by scanning its `IN` tables'
+	/// adjacency (see `crate::kvs::lightweight`). The scan emits edges in
+	/// canonical-id order — `[in, out]` ids sort exactly as the
+	/// `(in vertex, out)` pointer keys the scan walks — streaming in either
+	/// direction, so memory stays bounded by the batch size and
+	/// cancellation is observed per row.
+	#[allow(clippy::too_many_arguments)]
+	#[instrument(level = "trace", skip_all)]
+	async fn collect_lightweight(
+		&mut self,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc_ctx: DocumentContext,
+		table: &TableName,
+		rel: &Relation,
+		range: Option<&RecordIdKeyRange>,
+		sc: Direction,
+		count_only: bool,
+	) -> Result<()> {
+		let ns = doc_ctx.ns().namespace_id;
+		let db = doc_ctx.db().database_id;
+		let txn = ctx.tx();
+		// An id range filters in the storekey byte domain, which the pinned
+		// array-id ordering test keeps aligned with value order.
+		let encode = |bound: &std::ops::Bound<RecordIdKey>| -> Result<std::ops::Bound<Vec<u8>>> {
+			Ok(match bound {
+				std::ops::Bound::Included(id) => std::ops::Bound::Included(
+					storekey::encode_vec(id).map_err(anyhow::Error::from_boxed)?,
+				),
+				std::ops::Bound::Excluded(id) => std::ops::Bound::Excluded(
+					storekey::encode_vec(id).map_err(anyhow::Error::from_boxed)?,
+				),
+				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
+			})
+		};
+		let bounds = match range {
+			Some(r) => Some((encode(&r.start)?, encode(&r.end)?)),
+			None => None,
+		};
+		let in_bounds = |id: &RecordIdKey| -> Result<bool> {
+			let Some((start, end)) = &bounds else {
+				return Ok(true);
+			};
+			let bytes = storekey::encode_vec(id).map_err(anyhow::Error::from_boxed)?;
+			let after_start = match start {
+				std::ops::Bound::Included(b) => bytes >= *b,
+				std::ops::Bound::Excluded(b) => bytes > *b,
+				std::ops::Bound::Unbounded => true,
+			};
+			let before_end = match end {
+				std::ops::Bound::Included(b) => bytes <= *b,
+				std::ops::Bound::Excluded(b) => bytes < *b,
+				std::ops::Bound::Unbounded => true,
+			};
+			Ok(after_start && before_end)
+		};
+		let mut scanner = LightweightEdgeScanner::new(
+			&txn,
+			ns,
+			db,
+			table,
+			rel,
+			sc,
+			opt.version,
+			Some(ctx.get_index_stores().adjacency_resolve()),
+		);
+		if count_only {
+			let mut count = 0;
+			'outer: loop {
+				let batch = scanner.next_batch(NORMAL_BATCH_SIZE).await?;
+				if batch.is_empty() {
+					break;
+				}
+				for rid in batch {
+					if ctx.is_done(Some(count)).await? {
+						break 'outer;
+					}
+					if in_bounds(&rid.key)? {
+						count += 1;
+					}
+				}
+			}
+			return self.collect(Collectable::Count(doc_ctx, count)).await;
+		}
+		// START skipping is the collector's own: each `collect` call drops a
+		// row while the iterator still reports skippable rows, exactly as the
+		// mock collector relies on. A second skip here would double-count.
+		let mut count = 0;
+		'outer: loop {
+			let batch = scanner.next_batch(NORMAL_BATCH_SIZE).await?;
+			if batch.is_empty() {
+				break;
+			}
+			for rid in batch {
+				if ctx.is_done(Some(count)).await? {
+					break 'outer;
+				}
+				if !in_bounds(&rid.key)? {
+					continue;
+				}
+				count += 1;
+				self.collect(Collectable::RecordId(doc_ctx.clone(), rid)).await?;
+			}
+		}
 		Ok(())
 	}
 
@@ -1185,8 +1367,16 @@ pub(super) trait Collector {
 		// the packed blocks. Block-sourced entries carry the pointer-key
 		// bytes they had before folding, so the collectable's raw-key
 		// contract is unchanged. The vertex-delete cascade runs through this
-		// collector, so missing folded edges here would leak them.
-		let folded = crate::idx::adjacency::vertex_table_folded(&txn, ns, db, tb).await?;
+		// collector, so missing folded edges here would leak them. A
+		// lightweight-edge source synthesizes its edge-side adjacency from
+		// its id — gated on the edge still existing, since the id alone
+		// says nothing about that.
+		let adjacency = crate::idx::adjacency::vertex_adjacency(&txn, ns, db, tb).await?;
+		if adjacency == crate::idx::adjacency::VertexAdjacency::Lightweight
+			&& !txn.record_exists(ns, db, tb, &from.key, opt.version).await?
+		{
+			return Ok(());
+		}
 		let scopes: Vec<GraphLookupScope> = match (what.is_empty(), &kind) {
 			(true, LookupKind::Graph(dir)) => match dir {
 				// One scope spanning both directions, in key order.
@@ -1232,22 +1422,32 @@ pub(super) trait Collector {
 			(_, LookupKind::Reference) => unreachable!("handled above"),
 		};
 		'scopes: for scope in &scopes {
-			let mut cursor = MergedAdjacencyCursor::open(
-				&txn,
-				AdjacencyScope {
-					ns,
-					db,
-					vertex: &from,
-					dir: scope.dir,
-					edge_table: scope.edge_table.as_ref(),
-					fk_lower: scope.fk_lower.as_ref(),
-					delta_range: scope.delta_range.clone(),
-				},
-				folded,
-				opt.version,
-				Some(ctx.get_index_stores().adjacency_resolve()),
-			)
-			.await?;
+			let adjacency_scope = AdjacencyScope {
+				ns,
+				db,
+				vertex: &from,
+				dir: scope.dir,
+				edge_table: scope.edge_table.as_ref(),
+				fk_lower: scope.fk_lower.as_ref(),
+				delta_range: scope.delta_range.clone(),
+			};
+			let mut cursor = match adjacency {
+				crate::idx::adjacency::VertexAdjacency::Lightweight => {
+					MergedAdjacencyCursor::open_lightweight(&txn, &adjacency_scope)?
+				}
+				crate::idx::adjacency::VertexAdjacency::Normal {
+					folded,
+				} => {
+					MergedAdjacencyCursor::open(
+						&txn,
+						adjacency_scope,
+						folded,
+						opt.version,
+						Some(ctx.get_index_stores().adjacency_resolve()),
+					)
+					.await?
+				}
+			};
 			let mut count = 0;
 			loop {
 				// Keys-only: the collectable forwards raw key bytes and

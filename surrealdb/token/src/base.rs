@@ -411,6 +411,8 @@ pub enum BaseTokenKind {
 	KwEnd,
 	#[regex(r"(?i)ENFORCED")]
 	KwEnforced,
+	#[regex(r"(?i)LIGHTWEIGHT")]
+	KwLightweight,
 	#[regex(r"(?i)EDGES")]
 	KwEdges,
 	#[regex(r"(?i)INLINE")]
@@ -1046,6 +1048,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwElse => "keyword `ELSE`",
 			BaseTokenKind::KwEnd => "keyword `END`",
 			BaseTokenKind::KwEnforced => "keyword `ENFORCED`",
+			BaseTokenKind::KwLightweight => "keyword `LIGHTWEIGHT`",
 			BaseTokenKind::KwEdges => "keyword `EDGES`",
 			BaseTokenKind::KwInline => "keyword `INLINE`",
 			BaseTokenKind::KwExclude => "keyword `EXCLUDE`",
@@ -1378,6 +1381,7 @@ impl BaseTokenKind {
 				| Self::KwElse
 				| Self::KwEnd
 				| Self::KwEnforced
+				| Self::KwLightweight
 				| Self::KwEdges
 				| Self::KwInline
 				| Self::KwExclude

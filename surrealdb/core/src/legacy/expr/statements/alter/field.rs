@@ -54,6 +54,21 @@ pub(crate) async fn alter_field_statement_compute(
 		}
 	};
 
+	// A lightweight relation's only fields are the auto in/out pair, whose
+	// types ARE the relation's IN/OUT contract — the record-less scan and
+	// the endpoint checks rest on them — so they are managed exclusively by
+	// the table definition, never altered directly.
+	if let Some(tb) = txn.get_tb(ns, db, &what, None).await? {
+		ensure!(
+			crate::kvs::lightweight::lightweight_relation(&tb.table_type).is_none(),
+			ExecError::Thrown(
+				"a LIGHTWEIGHT relation's fields cannot be altered: its in/out contract is \
+				 managed by the table definition"
+					.to_owned(),
+			)
+		);
+	}
+
 	// Snapshot the definition before mutating it so we can tell which
 	// reference target tables the change drops.
 	let old_definition = df.clone();

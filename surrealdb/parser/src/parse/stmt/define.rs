@@ -494,13 +494,26 @@ impl ParseSync for ast::TableKind {
 					}
 				}
 
-				let enforced = parser.eat(T![ENFORCED])?.is_some();
+				// Trailing flags, accepted in either order; rendered
+				// canonically as `ENFORCED LIGHTWEIGHT`.
+				let mut enforced = false;
+				let mut lightweight = false;
+				loop {
+					if !enforced && parser.eat(T![ENFORCED])?.is_some() {
+						enforced = true;
+					} else if !lightweight && parser.eat(T![LIGHTWEIGHT])?.is_some() {
+						lightweight = true;
+					} else {
+						break;
+					}
+				}
 
 				let span = parser.span_since(peek.span);
 				Ok(ast::TableKind::Relation(RelationTable {
 					from: from.map(|x| x.0),
 					to: to.map(|x| x.0),
 					enforced,
+					lightweight,
 					span,
 				}))
 			}

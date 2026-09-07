@@ -747,6 +747,26 @@ impl<'ctx> Planner<'ctx> {
 		// COUNT fast-path
 		if is_count_all_eligible(&fields, &group, &cond, &split, &order, &fetch, &omit, &what) {
 			use crate::exec::operators::CountScan;
+			// A lightweight relation has no record range to count: decline
+			// every statically-named source shape (table, record id, or
+			// record-id range) so the fallback executor's record-less scan
+			// serves it. Runtime-resolved sources (params) are caught by the
+			// fail-closed guard in `CountScan::execute` instead.
+			let static_table = match what.first() {
+				Some(Expr::Table(table)) => Some(table),
+				Some(Expr::Literal(Literal::RecordId(rid))) => Some(&rid.table),
+				Some(Expr::Postfix {
+					expr,
+					..
+				}) => match expr.as_ref() {
+					Expr::Literal(Literal::RecordId(rid)) => Some(&rid.table),
+					_ => None,
+				},
+				_ => None,
+			};
+			if let Some(table) = static_table {
+				self.decline_lightweight_table(table).await?;
+			}
 			let table_expr = self
 				.physical_expr(what.into_iter().next().expect("what verified non-empty"))
 				.await?;
@@ -2216,6 +2236,19 @@ impl<'ctx> Planner<'ctx> {
 			TopKPushdownHandle, TopKPushdownReason, TopKPushdownStatus, TopKThresholdCell,
 			TopKThresholdProbe, field_path_wire_segments, topk_pushdown_status_at_plan_time,
 		};
+
+		// A lightweight relation has no record range to scan.
+		if let Some(tc) = &table_ctx
+			&& crate::kvs::lightweight::lightweight_relation(&tc.table_def.table_type).is_some()
+		{
+			return Err(crate::exec::Error::PlannerUnsupported(
+				"lightweight relations are scanned by the fallback executor".to_owned(),
+			)
+			.into());
+		}
+		if table_ctx.is_none() {
+			self.decline_lightweight_table(&table).await?;
+		}
 
 		let filter_action = filter_action_for_predicate(&scan_predicate);
 		let push = scan_limit.is_some() && order_is_scan_compatible(order);

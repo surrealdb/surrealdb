@@ -52,6 +52,16 @@ pub(crate) async fn define_index_statement_compute(
 	let tb = txn.get_or_add_tb(Some(ctx), ns, db, &table_name, None).await?;
 	let tb_name = tb.name.clone();
 
+	// A lightweight relation's edges store no records for an index to
+	// apply to; the auto `in`/`out` fields are written by the table
+	// definition directly, never through this statement.
+	anyhow::ensure!(
+		crate::kvs::lightweight::lightweight_relation(&tb.table_type).is_none(),
+		crate::exec::Error::Thrown(
+			"a LIGHTWEIGHT relation cannot carry an index: its edges store no records".to_owned(),
+		)
+	);
+
 	// Check if the definition exists
 	let existing = txn.get_tb_index(tb.namespace_id, tb.database_id, &tb_name, &name, None).await?;
 	if existing.is_some() {

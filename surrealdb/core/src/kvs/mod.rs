@@ -25,6 +25,7 @@ pub(crate) mod ds;
 #[cfg(test)]
 pub(crate) mod compat;
 pub(crate) mod index;
+pub(crate) mod lightweight;
 pub(crate) mod migration;
 pub(crate) mod paging;
 pub mod request;

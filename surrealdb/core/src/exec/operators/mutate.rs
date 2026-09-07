@@ -39,7 +39,9 @@ use crate::expr::data::Assignment;
 use crate::expr::match_plan::{DetachMode, UpdateData};
 use crate::expr::statements::{CreateStatement, DeleteStatement, RelateStatement, UpdateStatement};
 use crate::expr::{AssignOperator, ControlFlow, Data, Expr, Literal, Output};
-use crate::idx::adjacency::{AdjacencyScope, MergedAdjacencyCursor, vertex_table_folded};
+use crate::idx::adjacency::{
+	AdjacencyScope, MergedAdjacencyCursor, VertexAdjacency, vertex_adjacency,
+};
 use crate::key::schema::GraphIdPrefix;
 use crate::val::{Object, RecordId, TableName, Value};
 
@@ -395,7 +397,7 @@ async fn has_connected_edges(
 	frozen: &FrozenContext,
 ) -> Result<bool, ControlFlow> {
 	let txn = frozen.tx();
-	let folded = vertex_table_folded(&txn, ns, db, &rid.table).await.map_err(ControlFlow::Err)?;
+	let adjacency = vertex_adjacency(&txn, ns, db, &rid.table).await.map_err(ControlFlow::Err)?;
 	let scope = AdjacencyScope {
 		ns,
 		db,
@@ -411,15 +413,24 @@ async fn has_connected_edges(
 		}
 		.range()?,
 	};
-	let mut cursor = MergedAdjacencyCursor::open(
-		&txn,
-		scope,
-		folded,
-		None,
-		Some(frozen.get_index_stores().adjacency_resolve()),
-	)
-	.await
-	.map_err(ControlFlow::Err)?;
+	let mut cursor = match adjacency {
+		// A lightweight edge's synthesized adjacency mirrors the edge-side
+		// keys a classic edge carries, so NODETACH treats both alike.
+		VertexAdjacency::Lightweight => {
+			MergedAdjacencyCursor::open_lightweight(&txn, &scope).map_err(ControlFlow::Err)?
+		}
+		VertexAdjacency::Normal {
+			folded,
+		} => MergedAdjacencyCursor::open(
+			&txn,
+			scope,
+			folded,
+			None,
+			Some(frozen.get_index_stores().adjacency_resolve()),
+		)
+		.await
+		.map_err(ControlFlow::Err)?,
+	};
 	// Only emptiness matters here, so nothing is decoded.
 	let batch = cursor.next_batch_keys(1).await.map_err(ControlFlow::Err)?;
 	Ok(!batch.is_empty())

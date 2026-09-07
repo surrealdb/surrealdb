@@ -7,7 +7,7 @@ use surrealdb_datastore::values::graph::{AdjacencyValue, GraphFoldScope};
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{Error, FieldDefinition};
+use crate::catalog::{Error, FieldDefinition, Relation, TableType};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document, Error as DocError};
@@ -260,7 +260,16 @@ impl Document {
 					)?;
 				}
 			}
-			futures::try_join!(txn.del_key(&etl), txn.del_key(&etr))?;
+			// A lightweight edge never wrote edge-side keys.
+			if !matches!(
+				&self.doc_ctx.tb()?.table_type,
+				TableType::Relation(Relation {
+					lightweight: true,
+					..
+				})
+			) {
+				futures::try_join!(txn.del_key(&etl), txn.del_key(&etr))?;
+			}
 			// Remove the edge from each endpoint's inline adjacency cache.
 			// The cache sits above the merged (blocks ∪ delta) tiers, so the
 			// removal is the same whether the key above was deleted or
@@ -308,6 +317,19 @@ impl Document {
 		opt: &Options,
 		rid: &RecordId,
 	) -> Result<()> {
+		// Nothing can connect to a lightweight edge — it is rejected as a
+		// graph endpoint — and its synthesized adjacency derives from its id
+		// regardless of existence, so the peek below would see its own
+		// endpoints and cascade a delete over them. Skip outright.
+		if matches!(
+			&self.doc_ctx.tb()?.table_type,
+			TableType::Relation(Relation {
+				lightweight: true,
+				..
+			})
+		) {
+			return Ok(());
+		}
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the namespace id

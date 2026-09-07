@@ -783,6 +783,7 @@ ast_type! {
 		pub from: Option<NodeListId<Ident>>,
 		pub to: Option<NodeListId<Ident>>,
 		pub enforced: bool,
+		pub lightweight: bool,
 	}
 }
 

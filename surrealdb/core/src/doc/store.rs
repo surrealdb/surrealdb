@@ -22,6 +22,11 @@ impl Document {
 		if tb.drop {
 			return Ok(());
 		}
+		// A lightweight edge stores no record: its adjacency keys are the
+		// whole edge, and readers synthesize the record from its id.
+		if self.table_is_lightweight()? {
+			return Ok(());
+		}
 		// Get the record id
 		let rid = self.id()?;
 		// Get the namespace id

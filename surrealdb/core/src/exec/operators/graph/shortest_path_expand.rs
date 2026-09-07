@@ -74,6 +74,7 @@ use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
+use crate::idx::adjacency::VertexAdjacency;
 use crate::val::{RecordId, TableName, Value};
 
 /// Which of the paths to each endpoint a path search keeps. Named for the
@@ -466,9 +467,9 @@ impl ExecOperator for ShortestPathExpand {
 
 			let mut edge_cache = FetchFieldStateCache::new();
 			let mut node_cache = FetchFieldStateCache::new();
-			// Per-table `graph_folded` answers, cached for the whole stream
+			// Per-table adjacency classifications, cached for the whole stream
 			// (path tips can span tables).
-			let mut folded_memo: HashMap<TableName, bool> = HashMap::new();
+			let mut adjacency_memo: HashMap<TableName, VertexAdjacency> = HashMap::new();
 
 			let mut out: Vec<Value> = Vec::with_capacity(scan_batch_size);
 
@@ -552,7 +553,7 @@ impl ExecOperator for ShortestPathExpand {
 							&edge_specs,
 							&ctx,
 							version,
-							&mut folded_memo,
+							&mut adjacency_memo,
 							|item| {
 								if !path.contains_edge(&item.edge) {
 									edge_ids.push(item.edge);

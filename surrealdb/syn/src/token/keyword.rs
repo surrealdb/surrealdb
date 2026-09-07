@@ -130,6 +130,7 @@ keyword! {
 	KeepPrunedConnections => "KEEP_PRUNED_CONNECTIONS",
 	Kill => "KILL",
 	Let => "LET",
+	Lightweight => "LIGHTWEIGHT",
 	Limit => "LIMIT",
 	Live => "LIVE",
 	Lowercase => "LOWERCASE",

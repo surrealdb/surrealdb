@@ -340,6 +340,9 @@ macro_rules! T {
 	(ENFORCED) => {
 		$crate::BaseTokenKind::KwEnforced
 	};
+	(LIGHTWEIGHT) => {
+		$crate::BaseTokenKind::KwLightweight
+	};
 	(EDGES) => {
 		$crate::BaseTokenKind::KwEdges
 	};

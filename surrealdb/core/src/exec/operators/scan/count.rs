@@ -175,6 +175,20 @@ impl ExecOperator for CountScan {
 				})))?;
 			}
 
+			// Fail closed: a lightweight relation stores no records, so every
+			// key-space count below — point, range, table, or the conditional
+			// permission fallback — would be wrong-zero. Statically-named
+			// sources were declined at plan time; only runtime-resolved
+			// sources reach this.
+			if table_def.as_deref().is_some_and(|def| {
+				crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some()
+			}) {
+				Err(ControlFlow::Err(anyhow::anyhow!(
+					"a LIGHTWEIGHT relation cannot be scanned by this execution path; \
+					 reference the table statically so the record-less scan can serve it"
+				)))?;
+			}
+
 			// Resolve SELECT permission.
 			let select_permission = if check_perms {
 				let catalog_perm = table_select_permission(table_def.as_deref());

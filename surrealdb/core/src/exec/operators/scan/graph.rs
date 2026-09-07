@@ -29,7 +29,9 @@ use crate::exec::{
 };
 use crate::expr::{ControlFlow, Dir};
 use crate::iam::Action;
-use crate::idx::adjacency::{AdjacencyScope, MergedAdjacencyCursor};
+use crate::idx::adjacency::{
+	AdjacencyScope, MergedAdjacencyCursor, VertexAdjacency, table_adjacency,
+};
 use crate::key::Resumable;
 use crate::key::schema::EdgeCacheKey;
 use crate::kvs::{CachePolicy, Direction, Transaction};
@@ -424,9 +426,25 @@ impl ExecOperator for GraphEdgeScan {
 				// Scan edges for each source record
 				for (src_idx, rid) in source_rids.iter().enumerate() {
 					let mut edges_yielded: usize = 0;
-					// Whether the source's table has folded adjacency, which
-					// is what routes the scan through the packed-block merge.
-					let folded = source_table(rid).is_some_and(|tb| tb.graph_folded);
+					// How the source's adjacency is read: merged with packed
+					// blocks once its table folds, or synthesized from the id
+					// when the source is itself a lightweight edge. Read off
+					// the batch's memoized definitions, so classifying a
+					// source costs no extra catalog lookup.
+					let adjacency = table_adjacency(source_table(rid));
+					// A lightweight edge's synthesized adjacency derives from
+					// its id alone, which says nothing about existence — and
+					// sources can be literal ids (`follows:[a,b]->person`),
+					// not just live upstream rows. Gate on the edge existing
+					// at this snapshot, exactly as the fallback executor does.
+					if adjacency == VertexAdjacency::Lightweight
+						&& !txn
+							.record_exists(ns_id, db_id, &rid.table, &rid.key, version)
+							.await
+							.context("Failed to check a lightweight source's existence")?
+					{
+						continue;
+					}
 					'dir_loop: for &dir in &directions {
 						// Cache fast path: emit the cached adjacency through
 						// the same limit/predicate flush machinery the cursor
@@ -556,23 +574,40 @@ impl ExecOperator for GraphEdgeScan {
 								let mut chunk_bound_hit = false;
 								let mut last_processed_key: Option<Vec<u8>> = None;
 								{
-									let mut cursor = MergedAdjacencyCursor::open(
-										&txn,
-										AdjacencyScope {
-											ns: ns_id,
-											db: db_id,
-											vertex: rid,
-											dir: Some(dir),
-											edge_table: scope.edge_table.as_ref(),
-											fk_lower: scope.fk_lower.as_ref(),
-											delta_range: chunk.clone(),
-										},
-										folded,
-										version,
-										Some(ctx.root().ctx.get_index_stores().adjacency_resolve()),
-									)
-									.await
-									.context("Failed to open graph cursor")?;
+									let adjacency_scope = AdjacencyScope {
+										ns: ns_id,
+										db: db_id,
+										vertex: rid,
+										dir: Some(dir),
+										edge_table: scope.edge_table.as_ref(),
+										fk_lower: scope.fk_lower.as_ref(),
+										delta_range: chunk.clone(),
+									};
+									let mut cursor = match adjacency {
+										VertexAdjacency::Lightweight => {
+											MergedAdjacencyCursor::open_lightweight(
+												&txn,
+												&adjacency_scope,
+											)
+											.context("Failed to open graph cursor")?
+										}
+										VertexAdjacency::Normal {
+											folded,
+										} => MergedAdjacencyCursor::open(
+											&txn,
+											adjacency_scope,
+											folded,
+											version,
+											Some(
+												ctx.root()
+													.ctx
+													.get_index_stores()
+													.adjacency_resolve(),
+											),
+										)
+										.await
+										.context("Failed to open graph cursor")?,
+									};
 									'cursor_loop: loop {
 										// Without a predicate, `edges_yielded` counts scanned
 										// edges, so cap each batch to the remaining LIMIT

@@ -47,6 +47,10 @@ impl Document {
 		self.generate_record_id(stk, ctx, opt).await?;
 		// Ensure we can store this type of record
 		self.check_table_type_relate()?;
+		// A lightweight edge carries no data beyond its endpoints.
+		if stm.data().is_some() {
+			self.check_table_not_lightweight("given a data clause")?;
+		}
 		// Ensure all special fields are valid
 		self.check_data_fields()?;
 		// Set the default record field values
@@ -107,6 +111,14 @@ impl Document {
 		self.check_update_permissions(stk, ctx, opt, &self.current).await?;
 		// Reject writes to read-only view tables (after the permission gate)
 		self.check_table_not_view(opt)?;
+		// A lightweight edge carries no data beyond its endpoints; a repeated
+		// RELATE of the same edge is idempotent, but cannot set anything.
+		// Gated after the permission check — like the view gate — so an actor
+		// without update permission gets the normal permission outcome rather
+		// than an error disclosing the table's storage mode.
+		if stm.data().is_some() {
+			self.check_table_not_lightweight("given a data clause")?;
+		}
 		// Ensure any input data is computed
 		self.compute_input_data(stk, ctx, opt, stm).await?;
 		// Ensure all special fields are valid

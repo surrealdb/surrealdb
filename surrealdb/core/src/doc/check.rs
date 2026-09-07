@@ -6,7 +6,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use super::IgnoreError;
-use crate::catalog::Permission;
+use crate::catalog::{Permission, TableType};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document, Error as DocError, Extras};
@@ -136,6 +136,30 @@ impl Document {
 		Ok(())
 	}
 
+	/// Whether this document's table is a lightweight relation — one whose
+	/// edges are vertex-side adjacency keys alone, synthesized on read from
+	/// their canonical `[in, out]` ids.
+	#[inline]
+	pub(super) fn table_is_lightweight(&self) -> Result<bool> {
+		let tb = self.doc_ctx.tb()?;
+		Ok(matches!(&tb.table_type, TableType::Relation(rel) if rel.lightweight))
+	}
+
+	/// Rejects a mutation of a lightweight relation's edges. Their whole
+	/// state is the canonical id: there is nothing to set, and readers
+	/// synthesize the record, so a stored mutation could never be observed
+	/// consistently.
+	#[inline]
+	pub(super) fn check_table_not_lightweight(&self, action: &str) -> Result<()> {
+		ensure!(
+			!self.table_is_lightweight()?,
+			crate::exec::Error::Thrown(format!(
+				"a LIGHTWEIGHT relation's edges cannot be {action}: they carry no data beyond `id`, `in` and `out`"
+			))
+		);
+		Ok(())
+	}
+
 	/// Checks whether an INSERT statement is allowed on
 	/// the table for this document. When inserting a
 	/// normal record, we check that the table type
@@ -155,6 +179,9 @@ impl Document {
 						target_type: tb.table_type.to_sql(),
 					}
 				);
+				// INSERT RELATION is the data-bearing edge-write form, and a
+				// lightweight edge carries no data; RELATE is the only way in.
+				self.check_table_not_lightweight("written with INSERT")?;
 			}
 			_ => {
 				ensure!(

@@ -149,6 +149,17 @@ pub(crate) async fn define_field_statement_compute(
 	let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &definition.table, None).await?;
 	let tb_name = tb.name.clone();
 
+	// A lightweight relation's edges store no records for a field definition to
+	// apply to; the auto `in`/`out` fields are written by the table
+	// definition directly, never through this statement.
+	anyhow::ensure!(
+		crate::kvs::lightweight::lightweight_relation(&tb.table_type).is_none(),
+		crate::exec::Error::Thrown(
+			"a LIGHTWEIGHT relation cannot carry a field definition: its edges store no records"
+				.to_owned(),
+		)
+	);
+
 	// Get the name of the field. Use the resolved name (with parameterized
 	// indices substituted) so duplicate detection matches what `put_tb_field`
 	// will store; otherwise a second DEFINE FIELD with the same resolved

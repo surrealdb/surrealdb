@@ -65,6 +65,46 @@ pub(crate) async fn remove_table_statement_compute(
 		});
 	}
 
+	// A lightweight relation's edges live under its endpoint tables — in
+	// both directions. Removing a table that a non-empty lightweight
+	// relation names as an endpoint would orphan pointer keys the
+	// record-less scan can no longer enumerate (its IN-side keys vanish
+	// with this table's subspace, leaving the OUT-side keys unreachable),
+	// so the relation must be emptied first.
+	for other in txn.all_tb(ns, db, None).await?.iter() {
+		let Some(rel) = crate::kvs::lightweight::lightweight_relation(&other.table_type) else {
+			continue;
+		};
+		if other.name == name || (!rel.from.contains(&name) && !rel.to.contains(&name)) {
+			continue;
+		}
+		anyhow::ensure!(
+			crate::kvs::lightweight::lightweight_relation_is_empty(&txn, ns, db, &other.name, rel)
+				.await?,
+			ExecError::Thrown(format!(
+				"cannot remove `{name}`: the LIGHTWEIGHT relation `{}` uses it as an endpoint \
+				 and still holds edges — delete them first (e.g. `DELETE {}`)",
+				other.name, other.name
+			))
+		);
+	}
+
+	// A lightweight relation's edges live under its endpoint tables'
+	// subspaces, which deleting this table's own key range cannot reach —
+	// they would silently survive as orphaned adjacency. Deleting them here
+	// would be an unbounded scan inside one DDL transaction, so a non-empty
+	// lightweight relation must be emptied first.
+	if let Some(rel) = crate::kvs::lightweight::lightweight_relation(&tb.table_type) {
+		anyhow::ensure!(
+			crate::kvs::lightweight::lightweight_relation_is_empty(&txn, ns, db, &name, rel)
+				.await?,
+			ExecError::Thrown(format!(
+				"cannot remove the LIGHTWEIGHT relation `{name}` while it holds edges: delete \
+				 them first (e.g. `DELETE {name}`)"
+			))
+		);
+	}
+
 	// Retire index state before deleting the table definition. Durable
 	// cleanup is transactional; local builder aborts are deferred until commit.
 	retire_table_indexes(ctx, &txn, ns, db, &tb, this.expunge).await?;

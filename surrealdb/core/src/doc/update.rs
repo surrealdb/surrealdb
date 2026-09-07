@@ -27,6 +27,13 @@ impl Document {
 		self.check_update_permissions(stk, ctx, opt, &self.current).await?;
 		// Reject writes to read-only view tables (after the permission gate)
 		self.check_table_not_view(opt)?;
+		// A lightweight edge is immutable. Gated after the permission check —
+		// like the view gate — so an actor without update permission gets the
+		// normal permission outcome rather than an error disclosing the
+		// table's storage mode; still before the WHERE condition and data
+		// clause, so no user expression runs against an edge that can never
+		// be updated.
+		self.check_table_not_lightweight("updated")?;
 		// Check if the WHERE condition is truthy BEFORE evaluating the data
 		// clause, so a data clause with side effects runs only for records the
 		// condition accepts. This also matches the index-backed plan, where

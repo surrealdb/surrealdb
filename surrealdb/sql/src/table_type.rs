@@ -42,6 +42,9 @@ impl ToSql for TableType {
 				if rel.enforced {
 					write_sql!(f, sql_fmt, " ENFORCED");
 				}
+				if rel.lightweight {
+					write_sql!(f, sql_fmt, " LIGHTWEIGHT");
+				}
 			}
 			TableType::Any => {
 				write_sql!(f, sql_fmt, " ANY");
@@ -58,4 +61,6 @@ pub struct Relation {
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::arbitrary::atleast_one))]
 	pub to: Vec<TableName>,
 	pub enforced: bool,
+	/// Store edges as vertex-side adjacency keys alone, with no records.
+	pub lightweight: bool,
 }

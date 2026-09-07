@@ -10,6 +10,8 @@ DEFINE TABLE foo CHANGEFEED 1s;
 DEFINE TABLE foo TYPE NORMAL;
 DEFINE TABLE foo TYPE ANY;
 DEFINE TABLE foo TYPE RELATION from a|b to c|d ENFORCED;
+DEFINE TABLE foo TYPE RELATION IN a OUT b ENFORCED LIGHTWEIGHT;
+DEFINE TABLE foo TYPE RELATION IN a OUT b LIGHTWEIGHT ENFORCED;
 DEFINE TABLE foo INLINE EDGES 64;
 DEFINE TABLE foo INLINE REFERENCES 32;
 DEFINE TABLE foo TYPE RELATION FROM a TO b INLINE EDGES 8 INLINE REFERENCES 8;
@@ -281,6 +283,63 @@ Query
                                 -Ident
                                     .text: "d"
                             .enforced: true
+                            .lightweight: false
+                    .permission: None
+                    .changefeed: None
+                    .view: None
+                    .inline_edges_cap: None
+                    .inline_refs_cap: None
+        -TopLevelExpr::Expr
+            Expr::DefineTable
+                DefineTable
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "foo"
+                            .parts: None
+                    .comment: None
+                    .drop: false
+                    .schema: None
+                    .table_kind: Some
+                    TableKind::Relation
+                        RelationTable
+                            .from: Some
+                                -Ident
+                                    .text: "a"
+                            .to: Some
+                                -Ident
+                                    .text: "b"
+                            .enforced: true
+                            .lightweight: true
+                    .permission: None
+                    .changefeed: None
+                    .view: None
+                    .inline_edges_cap: None
+                    .inline_refs_cap: None
+        -TopLevelExpr::Expr
+            Expr::DefineTable
+                DefineTable
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "foo"
+                            .parts: None
+                    .comment: None
+                    .drop: false
+                    .schema: None
+                    .table_kind: Some
+                    TableKind::Relation
+                        RelationTable
+                            .from: Some
+                                -Ident
+                                    .text: "a"
+                            .to: Some
+                                -Ident
+                                    .text: "b"
+                            .enforced: true
+                            .lightweight: true
                     .permission: None
                     .changefeed: None
                     .view: None
@@ -346,6 +405,7 @@ Query
                                 -Ident
                                     .text: "b"
                             .enforced: false
+                            .lightweight: false
                     .permission: None
                     .changefeed: None
                     .view: None

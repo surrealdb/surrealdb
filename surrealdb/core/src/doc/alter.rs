@@ -13,7 +13,7 @@ use crate::expr::data::Data;
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::{AssignOperator, Error, Idiom, Kind, KindLiteral, Operation, Part};
 use crate::iam::AuthLimit;
-use crate::val::{RecordId, RecordIdKey, TableName, Value};
+use crate::val::{Array, RecordId, RecordIdKey, TableName, Value};
 
 impl Document {
 	/// Generate (or finalise) a record ID for CREATE, UPSERT, RELATE, and
@@ -36,6 +36,36 @@ impl Document {
 		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<()> {
+		// A lightweight relation's edge id is canonical — `[in, out]`, derived
+		// from the endpoints, never generated. A record-id target must match
+		// it: the id is the edge's entire identity and storage, so an
+		// arbitrary id would name a different edge than the one related.
+		if let Extras::Relate(l, r, _) = &self.extras
+			&& self.table_is_lightweight()?
+		{
+			let table = self.doc_ctx.tb()?.name.clone();
+			let canonical = RecordIdKey::Array(Array(vec![
+				Value::RecordId(l.clone()),
+				Value::RecordId(r.clone()),
+			]));
+			if let Some(existing) = self.id.take() {
+				ensure!(
+					existing.key == canonical,
+					crate::exec::Error::Thrown(format!(
+						"a LIGHTWEIGHT relation's edge id is canonical: expected {}:{}, found {}",
+						table,
+						canonical.to_sql(),
+						existing.to_sql(),
+					))
+				);
+			}
+			self.id = Some(Arc::new(RecordId {
+				table,
+				key: canonical,
+			}));
+			return Ok(());
+		}
+
 		// This is a CREATE, UPSERT, RELATE, or INSERT statement.
 		//
 		// Locate the precomputed `id` field definition (if any). Its declared

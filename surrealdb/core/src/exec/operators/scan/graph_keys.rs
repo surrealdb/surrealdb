@@ -28,11 +28,13 @@ use anyhow::Result as AnyResult;
 use surrealdb_datastore::values::graph::GraphFoldScope;
 
 use super::common::evaluate_bound_key;
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::{ControlFlowExt, ExecutionContext, PhysicalExpr};
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::adjacency::{
-	AdjacencyScope, MergeStats, MergedAdjacencyCursor, MergedAdjacencyEdge, vertex_table_folded,
+	AdjacencyScope, MergeStats, MergedAdjacencyCursor, MergedAdjacencyEdge, VertexAdjacency,
+	vertex_adjacency,
 };
 /// The decoder re-exported so scan and expand operators don't need to reach
 /// into the `key::schema` module directly for the range-decode call sites.
@@ -190,10 +192,10 @@ fn as_cow_bound<'a>(bound: &'a Bound<RecordIdKey>) -> Bound<Cow<'a, RecordIdKey>
 /// streaming — only what it chooses to retain is buffered, never the whole
 /// unfiltered adjacency — and must not hold the transaction borrow (store
 /// plain values; the cursor is dropped before the caller can use `txn`
-/// again). `folded_memo` caches the per-table `graph_folded` lookup across
-/// calls within one operator execution; `get_tb` is transaction-cache-stable
-/// within a statement, so the memo returns what each per-row lookup would.
-/// The returned stats accumulate across all ranges.
+/// again). `adjacency_memo` caches the per-table adjacency classification
+/// across calls within one operator execution; `get_tb` is
+/// transaction-cache-stable within a statement, so the memo returns what each
+/// per-row lookup would. The returned stats accumulate across all ranges.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn collect_adjacency(
 	txn: &Transaction,
@@ -204,25 +206,45 @@ pub(crate) async fn collect_adjacency(
 	edge_tables: &[EdgeTableSpec],
 	ctx: &ExecutionContext,
 	version: Option<u64>,
-	folded_memo: &mut HashMap<TableName, bool>,
+	adjacency_memo: &mut HashMap<TableName, VertexAdjacency>,
 	mut visit: impl FnMut(MergedAdjacencyEdge) -> Result<(), ControlFlow>,
 ) -> Result<MergeStats, ControlFlow> {
 	let ranges = compute_graph_ranges(ns_id, db_id, rid, dir, edge_tables, ctx).await?;
-	let folded = vertex_table_folded_memo(txn, ns_id, db_id, &rid.table, folded_memo)
+	let adjacency = vertex_adjacency_memo(txn, ns_id, db_id, &rid.table, adjacency_memo)
 		.await
 		.map_err(ControlFlow::Err)?;
+	// A lightweight edge's synthesized adjacency derives from its id alone;
+	// gate on the edge existing at this snapshot so a deleted or
+	// never-created id expands to nothing.
+	if adjacency == VertexAdjacency::Lightweight
+		&& !txn
+			.record_exists(ns_id, db_id, &rid.table, &rid.key, version)
+			.await
+			.map_err(ControlFlow::Err)?
+	{
+		return Ok(MergeStats::default());
+	}
 	let fold_threshold = ctx.root().ctx.config.idx.graph_fold_threshold;
 	let mut stats = MergeStats::default();
 	for range in &ranges {
-		let mut cursor = MergedAdjacencyCursor::open(
-			txn,
-			range.as_adjacency_scope(ns_id, db_id, rid, dir),
-			folded,
-			version,
-			Some(ctx.root().ctx.get_index_stores().adjacency_resolve()),
-		)
-		.await
-		.context("Failed to open graph cursor")?;
+		let mut cursor = match adjacency {
+			VertexAdjacency::Lightweight => MergedAdjacencyCursor::open_lightweight(
+				txn,
+				&range.as_adjacency_scope(ns_id, db_id, rid, dir),
+			)
+			.context("Failed to open graph cursor")?,
+			VertexAdjacency::Normal {
+				folded,
+			} => MergedAdjacencyCursor::open(
+				txn,
+				range.as_adjacency_scope(ns_id, db_id, rid, dir),
+				folded,
+				version,
+				Some(ctx.root().ctx.get_index_stores().adjacency_resolve()),
+			)
+			.await
+			.context("Failed to open graph cursor")?,
+		};
 		loop {
 			crate::exec::operators::check_cancelled(ctx)?;
 			let batch = cursor
@@ -244,23 +266,23 @@ pub(crate) async fn collect_adjacency(
 	Ok(stats)
 }
 
-/// As [`vertex_table_folded`], memoized per [`TableName`] for the lifetime
-/// of one operator execution. The answer is invariant per table within a
+/// As [`vertex_adjacency`], memoized per [`TableName`] for the lifetime of
+/// one operator execution. The answer is invariant per table within a
 /// statement (`get_tb` is transaction-cache-stable), so the memo exists
 /// only to skip the boxed catalog lookup the plain call pays per row.
-pub(crate) async fn vertex_table_folded_memo(
+pub(crate) async fn vertex_adjacency_memo(
 	txn: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
 	table: &TableName,
-	memo: &mut HashMap<TableName, bool>,
-) -> AnyResult<bool> {
-	if let Some(folded) = memo.get(table) {
-		return Ok(*folded);
+	memo: &mut HashMap<TableName, VertexAdjacency>,
+) -> AnyResult<VertexAdjacency> {
+	if let Some(adjacency) = memo.get(table) {
+		return Ok(*adjacency);
 	}
-	let folded = vertex_table_folded(txn, ns, db, table).await?;
-	memo.insert(table.clone(), folded);
-	Ok(folded)
+	let adjacency = vertex_adjacency(txn, ns, db, table).await?;
+	memo.insert(table.clone(), adjacency);
+	Ok(adjacency)
 }
 
 /// Observe a (vertex, direction) range for a background fold when a scan

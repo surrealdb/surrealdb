@@ -51,6 +51,9 @@ impl ToSql for TableType {
 				if rel.enforced {
 					f.push_str(" ENFORCED");
 				}
+				if rel.lightweight {
+					f.push_str(" LIGHTWEIGHT");
+				}
 			}
 		}
 	}
@@ -71,7 +74,8 @@ impl InfoStructure for TableType {
 					rel.from.into_iter().map(Value::Table).collect::<Vec<_>>().into(),
 				"out", if !rel.to.is_empty() =>
 					rel.to.into_iter().map(Value::Table).collect::<Vec<_>>().into(),
-				"enforced" => rel.enforced.into()
+				"enforced" => rel.enforced.into(),
+				"lightweight", if rel.lightweight => true.into()
 			}),
 		}
 	}
@@ -97,7 +101,7 @@ impl From<TableType> for sql::table_type::TableType {
 	}
 }
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct Relation {
 	#[revision(end = 2, convert_fn = "rev_convert_from")]
@@ -113,6 +117,14 @@ pub struct Relation {
 	#[revision(start = 2)]
 	pub to: Vec<TableName>,
 	pub enforced: bool,
+	/// A lightweight relation stores each edge as its two vertex-side
+	/// adjacency keys alone — no record, no edge-side keys, no index keys.
+	/// Its edges are synthesized on read from their canonical
+	/// `[in, out]` ids, so the table can hold no data beyond `id`, `in`
+	/// and `out`, and its endpoints must always be enforced (vertex
+	/// deletion is the only cleanup path).
+	#[revision(start = 3)]
+	pub lightweight: bool,
 }
 
 impl Relation {
@@ -148,6 +160,7 @@ impl From<sql::table_type::Relation> for Relation {
 			from: v.from.into_iter().map(Into::into).collect(),
 			to: v.to.into_iter().map(Into::into).collect(),
 			enforced: v.enforced,
+			lightweight: v.lightweight,
 		}
 	}
 }
@@ -158,6 +171,7 @@ impl From<Relation> for sql::table_type::Relation {
 			from: v.from.into_iter().map(Into::into).collect(),
 			to: v.to.into_iter().map(Into::into).collect(),
 			enforced: v.enforced,
+			lightweight: v.lightweight,
 		}
 	}
 }

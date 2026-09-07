@@ -251,9 +251,14 @@ async fn export_table_structure(
 	// Export all table field definitions with OVERWRITE to ensure
 	// idempotent re-import (relation tables auto-generate in/out fields,
 	// and array types generate sub-field definitions that would conflict).
-	let fields = tx.all_tb_fields(ns, db, &tb_name, None).await?;
-	for field in fields.iter() {
-		chn.send(bytes!(format!("{};", field.to_sql_overwrite()))).await?;
+	// A lightweight relation's only fields are the auto in/out pair, which
+	// its table definition regenerates and whose explicit redefinition the
+	// importer would reject — so no field lines are emitted for it.
+	if crate::kvs::lightweight::lightweight_relation(&table.table_type).is_none() {
+		let fields = tx.all_tb_fields(ns, db, &tb_name, None).await?;
+		for field in fields.iter() {
+			chn.send(bytes!(format!("{};", field.to_sql_overwrite()))).await?;
+		}
 	}
 	chn.send(bytes!("")).await?;
 	// Export all table index definitions for this table
@@ -481,6 +486,45 @@ async fn export_table_data(
 	chn.send(bytes!("")).await?;
 
 	let tb_name = table.name.clone();
+
+	// A lightweight relation has no record range; its edges are enumerated
+	// from its IN tables' adjacency and emitted as the `RELATE` statements
+	// that recreate them — deterministic canonical ids make the round trip
+	// idempotent.
+	if let Some(rel) = crate::kvs::lightweight::lightweight_relation(&table.table_type) {
+		let mut scanner = crate::kvs::lightweight::LightweightEdgeScanner::new(
+			tx,
+			ns,
+			db,
+			&tb_name,
+			rel,
+			surrealdb_kvs::Direction::Forward,
+			None,
+			None,
+		);
+		loop {
+			let batch = scanner.next_batch(batch_size).await?;
+			if batch.is_empty() {
+				break;
+			}
+			let mut statements = String::new();
+			for edge in &batch {
+				let Some((l, r)) = crate::kvs::lightweight::edge_parts(&edge.key) else {
+					continue;
+				};
+				statements.push_str(&format!(
+					"RELATE {} -> {} -> {};\n",
+					l.to_sql(),
+					surrealdb_types::ToSql::to_sql(&crate::val::Value::Table(tb_name.clone())),
+					r.to_sql()
+				));
+			}
+			chn.send(bytes!(statements)).await?;
+		}
+		chn.send(bytes!("")).await?;
+		return Ok(());
+	}
+
 	// How many records one `INSERT` carries is a separate question from how many
 	// keys one scan reads: the scan size trades KV round trips against memory,
 	// while the `INSERT` size sets the size of a transaction on re-import. The

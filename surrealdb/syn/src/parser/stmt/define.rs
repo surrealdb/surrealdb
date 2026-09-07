@@ -1792,6 +1792,7 @@ impl Parser<'_> {
 			from: Vec::new(),
 			to: Vec::new(),
 			enforced: false,
+			lightweight: false,
 		};
 		loop {
 			match self.peek_kind() {
@@ -1803,11 +1804,18 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.to = self.parse_tables()?;
 				}
+				// Trailing flags, accepted in either order; rendered
+				// canonically as `ENFORCED LIGHTWEIGHT`.
+				t!("ENFORCED") => {
+					self.pop_peek();
+					res.enforced = true;
+				}
+				t!("LIGHTWEIGHT") => {
+					self.pop_peek();
+					res.lightweight = true;
+				}
 				_ => break,
 			}
-		}
-		if self.eat(t!("ENFORCED")) {
-			res.enforced = true;
 		}
 		Ok(res)
 	}
