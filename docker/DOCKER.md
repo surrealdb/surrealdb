@@ -109,9 +109,32 @@ environment variable:
 docker run -e TZ=Europe/London surrealdb/surrealdb:latest start
 ```
 
-SurrealDB can be executed as a non-root user for added security. This ensures that exploiting certain vulnerabilities in the SurrealDB process does not immediately result in privileged access to the container. When doing this, ensure that any files required by SurrealDB are mounted to the container in a volume and that are accessible to that non-root user through their ownership and permissions.
+To persist data using a Docker named volume, use the built-in `/data` directory:
 
-Here is an example of running the container with a persistent volume as a non-root user with Docker Compose:
+```yaml
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:latest # Consider using a specific version
+    pull_policy: always
+    command: start rocksdb:/data/database.db
+    ports:
+      - 8000:8000
+    volumes:
+      - surrealdb-data:/data
+    environment:
+      - SURREAL_LOG=info # Use "info" in production
+      - SURREAL_USER=root
+      - SURREAL_PASS=root # Change this in production!
+
+volumes:
+  surrealdb-data:
+```
+
+The container runs as a non-root user by default and the `/data` directory is pre-configured with the correct ownership, so named volumes work without any additional setup.
+
+If you need to use a bind mount instead, ensure that the mounted directory is accessible to the container user through its ownership and permissions.
+
+Here is an example of running the container with a bind mount as a specific non-root user with Docker Compose:
 
 ```yaml
 services:
