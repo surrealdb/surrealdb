@@ -36,6 +36,11 @@ jobs:
     if: ${{ github.repository == 'surrealdb/surrealdb-private' }} # Don't run outside the private repo
     timeout-minutes: 240
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -69,6 +74,11 @@ jobs:
     runs-on: ubuntu-latest-8-cores
     if: ${{ github.repository == 'surrealdb/surrealdb-private' }}
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
