@@ -489,6 +489,7 @@ fn every_doc_variant() -> Vec<(&'static str, DocError)> {
 				error: Box::new(sample_coerce_error()),
 			},
 		),
+		("PatchPointerNotAllowed", DocError::PatchPointerNotAllowed("sample".to_string())),
 		(
 			"DeleteRejectedByReference",
 			DocError::DeleteRejectedByReference("sample".to_string(), "sample".to_string()),

@@ -118,6 +118,7 @@ FieldReadonly	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found cha
 FieldUndefined	{ cause: NONE, code: -32000, kind: 'Internal', message: "Found field 'f', but no such field exists for table 'sample'" }
 FieldDependencyCycle	{ cause: NONE, code: -32000, kind: 'Configuration', message: "Cannot write to table 'sample': the DEFAULT, VALUE, ASSERT or COMPUTED clauses of the fields sample depend on each other in a cycle" }
 FieldCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Couldn't coerce value for field `sample` of `sample`: Expected `sample` but found `NONE`" }
+PatchPointerNotAllowed	{ cause: NONE, code: -32000, kind: 'NotAllowed', message: "Cannot read `sample` in a JSON Patch operation: the field's PERMISSIONS FOR select clause does not allow it" }
 DeleteRejectedByReference	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot delete `sample` as it is referenced by `sample` with an ON DELETE REJECT clause' }
 RefsUpdateFailure	{ cause: NONE, code: -32000, kind: 'Internal', message: 'An error occurred while updating references for `sample`: sample' }
 EvNamespaceMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Error with the event sample. The ID of the namespace `sample` does not match the namespace this event has been generated from.' }

@@ -121,6 +121,12 @@ pub(crate) enum Error {
 		error: Box<CoerceError>,
 	},
 
+	/// A `PATCH` pointer reads a field the caller may not select
+	#[error(
+		"Cannot read `{0}` in a JSON Patch operation: the field's PERMISSIONS FOR select clause does not allow it"
+	)]
+	PatchPointerNotAllowed(String),
+
 	/// The record cannot be deleted as it's still referenced elsewhere
 	#[error("Cannot delete `{0}` as it is referenced by `{1}` with an ON DELETE REJECT clause")]
 	DeleteRejectedByReference(String, String),
@@ -186,6 +192,9 @@ impl LeafError for Error {
 					id: rid,
 				},
 			),
+			// A denied read, so it is reported as a permission failure rather
+			// than a schema or internal one.
+			Error::PatchPointerNotAllowed(..) => TypesError::not_allowed(message, None),
 			Error::IdMismatch {
 				..
 			}

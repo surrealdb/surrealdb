@@ -11,7 +11,7 @@ use crate::doc::{CursorDoc, Document, Error as DocError, Extras};
 use crate::exe::FlowResultExt;
 use crate::expr::data::Data;
 use crate::expr::paths::{ID, IN, OUT};
-use crate::expr::{AssignOperator, Error, Idiom, Kind, KindLiteral, Part};
+use crate::expr::{AssignOperator, Error, Idiom, Kind, KindLiteral, Operation, Part};
 use crate::iam::AuthLimit;
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
@@ -307,6 +307,82 @@ impl Document {
 		Ok(())
 	}
 
+	/// Reject a `PATCH` whose `copy`/`move` `from` or `test` `path` pointer
+	/// reads a field the caller may not select.
+	///
+	/// `Value::patch` applies its operations to the full record loaded from
+	/// storage and resolves those pointers against it, so without this gate a
+	/// caller holding table-level write permission reads a field denied by
+	/// `DEFINE FIELD ... PERMISSIONS FOR select`: `copy`/`move` land the value
+	/// in a destination of the caller's choosing, and `test` reports it in the
+	/// mismatch error. The `SET`/`CONTENT`/`MERGE`/`REPLACE` clauses are not
+	/// affected because their right-hand sides are computed against the reduced
+	/// view and already observe `NONE`.
+	///
+	/// A pointer is judged by comparing what it resolves to on the record with
+	/// what it resolves to on the permission-reduced view of that record. Any
+	/// difference means the pointer reaches data the reduction removed, whether
+	/// the pointer names the restricted field directly or an ancestor object or
+	/// array that contains it. Delegating to the reduction rather than
+	/// re-deriving which paths are restricted keeps this in step with the
+	/// field-permission kernel, including its wildcard and array-element
+	/// handling.
+	///
+	/// `add` and `change` also read a pointer, but each writes its result back
+	/// to the same path it read, so neither carries a value out of the field it
+	/// came from.
+	async fn check_patch_read_pointers(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		ops: &Value,
+	) -> Result<()> {
+		// Nothing to enforce when field permissions do not apply to this actor.
+		if !self.reduction_required(ctx, opt)? {
+			return Ok(());
+		}
+		// Collect the pointers that carry a value out of the field they read.
+		// `Value::patch` maps every segment of these to `Part::Field`, so the
+		// same mapping is used here.
+		let pointers: Vec<Vec<Part>> = Operation::value_to_operations(ops.clone())
+			.map_err(Error::InvalidPatch)
+			.map_err(anyhow::Error::new)?
+			.into_iter()
+			.filter_map(|op| match op {
+				Operation::Copy {
+					from,
+					..
+				}
+				| Operation::Move {
+					from,
+					..
+				} => Some(from),
+				Operation::Test {
+					path,
+					..
+				} => Some(path),
+				_ => None,
+			})
+			.map(|path| path.into_iter().map(Part::Field).collect())
+			.collect();
+		if pointers.is_empty() {
+			return Ok(());
+		}
+		// Materialise the reduced view, then compare each pointer against it.
+		// The full record is cloned first so the reduced view can be borrowed
+		// mutably without holding a borrow on `self.current`.
+		let full = self.current.doc.as_ref().clone();
+		let reduced = self.reduce_current(stk, ctx, opt).await?.doc.as_ref().clone();
+		for pointer in pointers {
+			if full.pick(&pointer) != reduced.pick(&pointer) {
+				let field = Idiom(pointer);
+				bail!(DocError::PatchPointerNotAllowed(field.to_sql()));
+			}
+		}
+		Ok(())
+	}
+
 	/// Updates the current document using the data
 	/// clause present on the statement. This can be
 	/// one of CONTENT, REPLACE, MERGE, PATCH, SET,
@@ -324,6 +400,7 @@ impl Document {
 		if let Some(v) = self.input_data.clone() {
 			match v {
 				ComputedData::Patch(data) => {
+					self.check_patch_read_pointers(stk, ctx, opt, data.as_ref()).await?;
 					self.current.doc.to_mut().patch(data.as_ref().clone())?
 				}
 				ComputedData::Merge(data) => {
