@@ -8,7 +8,10 @@ use surrealdb_rpc::Token;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
-use super::access::{access_session, authenticate_record, create_refresh_token_record};
+use super::access::{
+	access_session, authenticate_record, create_refresh_token_record, reset_previous_principal,
+	session_data_for_record,
+};
 use crate::catalog;
 use crate::catalog::Error as CatalogError;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider};
@@ -20,7 +23,7 @@ use crate::iam::token::{Audience, Claims};
 use crate::iam::{Actor, Auth, Error as AuthError, Level, algorithm_to_jwt_algorithm};
 use crate::kvs::TransactionType::*;
 use crate::kvs::{Datastore, is_retryable_transaction_conflict};
-use crate::types::PublicVariables;
+use crate::types::{PublicValue, PublicVariables};
 use crate::val::Value;
 
 /// Registers a new user and returns an authentication token.
@@ -253,6 +256,18 @@ pub async fn db_access(
 				);
 				rid = authenticate_record(kvs, &sess, au).await?;
 			}
+			// CONTEXT clause. Evaluated once, after the identity has settled,
+			// so `$auth` is the final record. Independent of AUTHENTICATE.
+			let data = session_data_for_record(
+				kvs,
+				&av,
+				ns.as_str(),
+				db.as_str(),
+				PublicValue::RecordId(rid.clone()),
+				&claims,
+				session,
+			)
+			.await?;
 			// Create refresh token if defined for the record access method
 			let refresh = match &at.bearer {
 				Some(_) => Some(
@@ -271,7 +286,11 @@ pub async fn db_access(
 			trace!("Signing up with access method `{}`", ac);
 			// Create the authentication token
 			let enc = encode(&Header::new(algorithm_to_jwt_algorithm(iss.alg)), &claims, &key);
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(av.session_duration)?;
 			// Set the authentication on the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(claims.into_claims_object().into())
 					.expect("claims conversion should succeed"),
@@ -283,7 +302,8 @@ pub async fn db_access(
 				crate::val::convert_value_to_public_value(Value::RecordId(rid.clone().into()))
 					.expect("record id conversion should succeed"),
 			);
-			session.exp = expiration(av.session_duration)?;
+			session.data = data;
+			session.exp = session_exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_sql(),
 				Default::default(),
@@ -1246,5 +1266,78 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				},
 			}
 		}
+	}
+}
+
+/// `CONTEXT` on the record-signup path.
+#[cfg(test)]
+mod context_clause_tests {
+	use surrealdb_types::Value as PV;
+
+	use super::*;
+
+	/// Signup settles on the newly created record, and CONTEXT sees it.
+	#[tokio::test]
+	async fn signup_computes_the_context() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNUP ( CREATE type::record('user', $id) )
+				SIGNIN ( SELECT * FROM type::record('user', $id) )
+				CONTEXT ( RETURN { me: $auth } )
+				DURATION FOR SESSION 2h;
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("id", 1);
+		db_access(&ds, &mut sess, "test".to_string(), "test".to_string(), "user".to_string(), vars)
+			.await
+			.expect("signup failed");
+
+		let data = sess.data.as_ref().expect("data").public().clone().into_object().unwrap();
+		assert_eq!(data.get("me"), Some(&PV::RecordId(surrealdb_types::RecordId::new("user", 1))));
+	}
+
+	/// An access method without the clause is untouched on this path too.
+	#[tokio::test]
+	async fn signup_without_the_clause_leaves_no_data() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNUP ( CREATE type::record('user', $id) )
+				SIGNIN ( SELECT * FROM type::record('user', $id) )
+				DURATION FOR SESSION 2h;
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("id", 1);
+		db_access(&ds, &mut sess, "test".to_string(), "test".to_string(), "user".to_string(), vars)
+			.await
+			.expect("signup failed");
+		assert!(sess.data.is_none());
 	}
 }

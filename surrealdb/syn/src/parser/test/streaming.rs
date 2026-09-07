@@ -232,6 +232,7 @@ fn statements() -> Vec<TopLevelExpr> {
 					bearer: None,
 				})),
 				authenticate: None,
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(

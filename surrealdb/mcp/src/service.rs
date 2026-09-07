@@ -52,6 +52,13 @@ struct BoundHandshake {
 	/// Used by [`McpService::verify_request_subject`] to reject inbound
 	/// requests that present a *different* authenticated identity on the same
 	/// MCP session id (the spec's "MUST verify all inbound requests" rule).
+	///
+	/// It also carries the access method's `CONTEXT` payload, because `session`
+	/// above is pinned here for the life of the MCP session and never
+	/// re-derived. Each request's own HTTP verification recomputes the payload;
+	/// comparing it here is the only thing that lets a revoked grant reach a
+	/// handshake-bound session before `DURATION FOR SESSION` elapses. See
+	/// [`BoundSubject`].
 	subject: BoundSubject,
 }
 

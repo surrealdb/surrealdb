@@ -62,6 +62,7 @@ pub static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map! {
 	UniCase::ascii("CONTAINSNONE") => TokenKind::Keyword(Keyword::ContainsNone),
 	UniCase::ascii("CONTAINSNOT") => TokenKind::Keyword(Keyword::ContainsNot),
 	UniCase::ascii("CONTENT") => TokenKind::Keyword(Keyword::Content),
+	UniCase::ascii("CONTEXT") => TokenKind::Keyword(Keyword::Context),
 	UniCase::ascii("CONTINUE") => TokenKind::Keyword(Keyword::Continue),
 	UniCase::ascii("COUNT") => TokenKind::Keyword(Keyword::Count),
 	UniCase::ascii("CREATE") => TokenKind::Keyword(Keyword::Create),

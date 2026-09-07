@@ -143,6 +143,11 @@ pub(crate) fn alter_access_statement_apply(
 		AlterKind::Drop => ac.authenticate = None,
 		AlterKind::None => {}
 	}
+	match this.context {
+		AlterKind::Set(ref v) => ac.context = Some(v.clone()),
+		AlterKind::Drop => ac.context = None,
+		AlterKind::None => {}
+	}
 	match this.grant_duration {
 		AlterKind::Set(v) => ac.grant_duration = v,
 		AlterKind::Drop => ac.grant_duration = None,
@@ -169,5 +174,9 @@ pub(crate) fn alter_access_statement_apply(
 	if matches!(ac.access_type, catalog::AccessType::Record(_)) && ac.token_duration.is_none() {
 		bail!(ExecError::AccessRecordTokenDurationRequired);
 	}
+	// Mirrors the check in `define_access_statement_to_definition`: an ALTER
+	// that could install a CONTEXT clause DEFINE would refuse is the same hole
+	// with an extra step.
+	crate::legacy::validate_access_context(&ac.base, &ac.access_type, ac.context.as_ref())?;
 	Ok(())
 }

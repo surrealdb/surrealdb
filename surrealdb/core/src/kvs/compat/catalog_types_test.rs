@@ -100,11 +100,12 @@ use crate::val::{Datetime, TableName, Value};
 	}),
 	base: Base::Root,
 	authenticate: Some(ExprText::from_raw("'expr'")),
+	context: Some(ExprText::from_raw("'expr'")),
 	grant_duration: Some(Duration::from_secs(123)),
 	token_duration: Some(Duration::from_secs(123)),
 	session_duration: Some(Duration::from_secs(123)),
 	comment: Some("comment".to_string()),
-}, 62)]
+}, 70)]
 #[case::access(AccessGrant {
 	id: "access".to_string(),
 	ac: "access".to_string(),

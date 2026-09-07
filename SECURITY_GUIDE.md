@@ -151,6 +151,25 @@ SurrealDB's security model rests on four pillars:
 - SIGNIN, SIGNUP, and AUTHENTICATE clauses must be evaluated with minimum necessary
   privileges. The evaluation session must not grant write access outside the
   authentication flow's scope.
+- A CONTEXT clause must be evaluated with the authenticated record's own
+  permissions, never with the privileged session the other access-method clauses
+  use. Its whole result is stored on the session and readable by the client as
+  `$session.data` — a SIGNIN/AUTHENTICATE result never is — so a privileged
+  evaluation would make every CONTEXT clause a permission-bypassing read the
+  record user can print. It must also be read-only and must run only after the
+  identity is settled, so an unverified credential never triggers it.
+- `$session.data` is server-computed, but it is **not** unforgeable, and no
+  invariant may be written as if it were. `PROTECTED_PARAM_NAMES` is consulted
+  only by `LET`, `UNSET`, `db.set` and RPC `set`/`unset`; the constructs that
+  bind a caller-chosen parameter name — `FOR $session IN [...]`, closure
+  parameters, user-defined function arguments — bind it unchecked, and
+  `Context::value` prefers a locally-inserted key over the parent chain. The
+  same routes shadow `$auth`. A permission that reads `$session.data` is
+  therefore exactly as trustworthy as one that reads `$auth` — no more, no less
+  — and every record permission already depends on `$auth`. Fixing this is an
+  engine-wide change to parameter binding; until then, documentation and tests
+  for CONTEXT must state the shared boundary rather than claim `$session` is
+  unshadowable.
 - Session state must only be committed after all authentication steps complete
   successfully. Partial failures must leave the session in its pre-authentication
   state.
@@ -160,7 +179,9 @@ SurrealDB's security model rests on four pillars:
   entry must carry a finite absolute expiry, enforced both lazily on load and by
   the periodic purge task. The durable copy contains the session's authentication
   state at rest, so only client-named (attached) sessions may ever be persisted —
-  never ephemeral per-request sessions.
+  never ephemeral per-request sessions. A CONTEXT payload is part of that
+  authentication state and is written at rest with it, in the durable copy and in
+  the frozen session snapshot each LIVE subscription carries.
 - Deleting a session (`detach`, teardown) must delete its durable copy in the same
   operation, so a torn-down session cannot be rehydrated. A failed durable delete
   must fail the teardown (leaving the session intact for retry), never report

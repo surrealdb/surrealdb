@@ -38,7 +38,7 @@ pub(crate) use function::{
 };
 pub(crate) use idiom::IdiomExpr;
 pub(crate) use knn_membership::KnnMembershipOp;
-pub(crate) use literal::{Literal, MockExpr, Param};
+pub(crate) use literal::{FoldedIdiom, Literal, MockExpr, Param};
 pub(crate) use matches::{
 	MatchProbe, MatchesOp, MatchesScope, collect_cond_matches, first_unregistered_cond_matches,
 };

@@ -1058,6 +1058,8 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 		("AccessLevelMismatch", ExecError::AccessLevelMismatch),
 		("AccessUnsupportedAlgorithm", ExecError::AccessUnsupportedAlgorithm),
 		("AccessRecordTokenDurationRequired", ExecError::AccessRecordTokenDurationRequired),
+		("AccessContextNotReadOnly", ExecError::AccessContextNotReadOnly),
+		("AccessContextRequiresRecord", ExecError::AccessContextRequiresRecord),
 		("AccessGrantInvalidSubject", ExecError::AccessGrantInvalidSubject),
 		("AccessGrantRevoked", ExecError::AccessGrantRevoked),
 		(

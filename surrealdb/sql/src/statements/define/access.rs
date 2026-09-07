@@ -11,6 +11,7 @@ pub struct DefineAccessStatement {
 	pub base: Base,
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
+	pub context: Option<Expr>,
 	pub duration: AccessDuration,
 	pub comment: Expr,
 }
@@ -39,6 +40,11 @@ impl ToSql for DefineAccessStatement {
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
 			write_sql!(f, fmt, " AUTHENTICATE {}", CoverStmts(v))
+		}
+		// The authorisation context clause. Printed before DURATION so a
+		// rendered definition re-parses to the same statement.
+		if let Some(ref v) = self.context {
+			write_sql!(f, fmt, " CONTEXT {}", CoverStmts(v))
 		}
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible

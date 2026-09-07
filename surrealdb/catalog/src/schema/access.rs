@@ -229,7 +229,7 @@ impl ToSql for Algorithm {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct StoredAccessDefinition {
 	pub name: Strand,
@@ -237,6 +237,13 @@ pub struct StoredAccessDefinition {
 	pub base: Base,
 	/// Canonical SurrealQL text of the `AUTHENTICATE` clause's expression.
 	pub authenticate: Option<ExprText>,
+	/// Canonical SurrealQL text of the `CONTEXT` clause's expression.
+	///
+	/// Added in revision 2. `Option` defaults to `None`, so revision-1 bytes
+	/// decode to an access method without a context clause — which is exactly
+	/// the pre-feature behaviour.
+	#[revision(start = 2)]
+	pub context: Option<ExprText>,
 	pub grant_duration: Option<Duration>,
 	pub token_duration: Option<Duration>,
 	pub session_duration: Option<Duration>,
@@ -266,6 +273,7 @@ impl AccessDefinition {
 			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
 			access_type: sql::AccessType::from(access_type),
 			authenticate: self.authenticate.clone().map(Into::into),
+			context: self.context.clone().map(Into::into),
 			duration: sql::access::AccessDuration {
 				grant: self
 					.grant_duration
@@ -369,6 +377,7 @@ impl InfoStructure for AccessDefinition {
 		Value::from(map! {
 			"name" => Value::String(self.name.clone()),
 			"authenticate", if let Some(v) = self.authenticate => Value::from(v.to_stored_sql()),
+			"context", if let Some(v) = self.context => Value::from(v.to_stored_sql()),
 			"duration" => Value::from(map!{
 				"session" => self.session_duration.map(Value::from).unwrap_or(Value::None),
 				"grant", if access_type.can_issue_grants() => self.grant_duration.map(Value::from).unwrap_or(Value::None),
@@ -673,6 +682,43 @@ pub struct AccessDefinition {
 	pub base: Base,
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
+	/// Compiled `CONTEXT` clause. Evaluated once, at authentication time,
+	/// after the identity has been settled, and its whole result is stored on
+	/// the session and read back as `$session.data`.
+	///
+	/// What it buys: a permission written as
+	/// `WHERE org IN (SELECT VALUE org FROM grant WHERE owner = $auth)` costs
+	/// O(rows x grant_rows) — the subquery re-scans the inner table for every
+	/// row it filters. Moving that lookup into a `CONTEXT` clause makes it
+	/// O(rows x payload_size), because the payload is materialised once.
+	///
+	/// It does NOT reach O(rows). Resolving `$session.<constant path>` to a
+	/// literal happens in `exec/planner/idiom.rs`, during physical-expression
+	/// construction — after index analysis has chosen the plan — so the
+	/// predicate cannot drive an index and `IN` still walks the payload once
+	/// per row. What that fold removes is a per-row deep clone of the whole
+	/// `$session` object, which is worth having and is not the same thing.
+	/// See the ALTITUDE note on `plan_idiom` for why the fold sits there and
+	/// what it would take to lift it.
+	///
+	/// The payload size is therefore a first-order term: a clause that
+	/// materialises thousands of entries trades one problem for another.
+	///
+	/// What it costs: the value is a snapshot taken at authentication and goes
+	/// stale for the life of the session, bounded by `DURATION FOR SESSION`. A
+	/// grant revoked in the table is not seen until the session re-authenticates
+	/// — which, for a refresh-token flow, is every rotation. `$auth` is
+	/// deliberately left alone and keeps its fetch semantics, so a definition
+	/// can choose per-value which side of that trade it wants.
+	///
+	/// This field is the *compiled* clause: `from_stored` below re-parses the
+	/// stored text under `ParserSettings::STORED_TEXT`, which is a different
+	/// parse from the one `DEFINE`/`ALTER` validated. The read-only rule that
+	/// makes the clause safe to run on every authentication is therefore
+	/// re-checked on this value, at the point it is evaluated
+	/// (`core/src/iam/access.rs`, `session_data_for_record`), rather than
+	/// trusted from definition time.
+	pub context: Option<Expr>,
 	pub signup: Option<Expr>,
 	pub signin: Option<Expr>,
 	pub grant_duration: Option<Duration>,
@@ -698,6 +744,7 @@ impl FromStored for AccessDefinition {
 				base: stored.base.clone(),
 				access_type: stored.access_type.clone(),
 				authenticate: stored.authenticate.as_ref().map(|t| t.compile()).transpose()?,
+				context: stored.context.as_ref().map(|t| t.compile()).transpose()?,
 				signup,
 				signin,
 				grant_duration: stored.grant_duration,
@@ -726,6 +773,7 @@ impl AccessDefinition {
 			access_type,
 			base: self.base.clone(),
 			authenticate: self.authenticate.as_ref().map(ExprText::new),
+			context: self.context.as_ref().map(ExprText::new),
 			grant_duration: self.grant_duration,
 			token_duration: self.token_duration,
 			session_duration: self.session_duration,

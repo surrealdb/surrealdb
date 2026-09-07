@@ -14,6 +14,7 @@ pub struct DefineAccessStatement {
 	pub base: Base,
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
+	pub context: Option<Expr>,
 	pub duration: AccessDuration,
 	pub comment: Expr,
 }
@@ -26,6 +27,7 @@ impl Default for DefineAccessStatement {
 			base: Base::Root,
 			access_type: AccessType::default(),
 			authenticate: None,
+			context: None,
 			duration: AccessDuration::default(),
 			comment: Expr::Literal(Literal::None),
 		}

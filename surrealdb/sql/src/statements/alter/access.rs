@@ -12,6 +12,7 @@ pub struct AlterAccessStatement {
 	pub base: Base,
 	pub if_exists: bool,
 	pub authenticate: AlterKind<Expr>,
+	pub context: AlterKind<Expr>,
 	pub grant_duration: AlterKind<std::time::Duration>,
 	pub token_duration: AlterKind<std::time::Duration>,
 	pub session_duration: AlterKind<std::time::Duration>,
@@ -25,6 +26,7 @@ impl Default for AlterAccessStatement {
 			base: Base::Root,
 			if_exists: false,
 			authenticate: AlterKind::None,
+			context: AlterKind::None,
 			grant_duration: AlterKind::None,
 			token_duration: AlterKind::None,
 			session_duration: AlterKind::None,
@@ -44,6 +46,12 @@ impl ToSql for AlterAccessStatement {
 		match self.authenticate {
 			AlterKind::Set(ref v) => write_sql!(f, fmt, " AUTHENTICATE {}", CoverStmts(v)),
 			AlterKind::Drop => f.push_str(" DROP AUTHENTICATE"),
+			AlterKind::None => {}
+		}
+
+		match self.context {
+			AlterKind::Set(ref v) => write_sql!(f, fmt, " CONTEXT {}", CoverStmts(v)),
+			AlterKind::Drop => f.push_str(" DROP CONTEXT"),
 			AlterKind::None => {}
 		}
 

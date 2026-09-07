@@ -13,6 +13,7 @@ impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatem
 			base: v.base.into(),
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
+			context: v.context.map(Into::into),
 			duration: v.duration.into(),
 			comment: v.comment.into(),
 		}
@@ -27,6 +28,7 @@ impl From<crate::expr::statements::DefineAccessStatement> for DefineAccessStatem
 			base: v.base.into(),
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
+			context: v.context.map(Into::into),
 			duration: v.duration.into(),
 			comment: v.comment.into(),
 		}

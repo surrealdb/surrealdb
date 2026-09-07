@@ -259,6 +259,9 @@ macro_rules! T {
 	(CONTENT) => {
 		$crate::BaseTokenKind::KwContent
 	};
+	(CONTEXT) => {
+		$crate::BaseTokenKind::KwContext
+	};
 	(CONTINUE) => {
 		$crate::BaseTokenKind::KwContinue
 	};

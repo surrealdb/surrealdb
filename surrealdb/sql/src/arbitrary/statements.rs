@@ -38,6 +38,7 @@ impl<'a> Arbitrary<'a> for DefineAccessStatement {
 		let name = u.arbitrary()?;
 		let access_type = u.arbitrary()?;
 		let authenticate = u.arbitrary()?;
+		let context = u.arbitrary()?;
 		let duration = crate::access::AccessDuration {
 			grant: u.arbitrary()?,
 			token: u.arbitrary()?,
@@ -64,6 +65,7 @@ impl<'a> Arbitrary<'a> for DefineAccessStatement {
 			base,
 			access_type,
 			authenticate,
+			context,
 			duration,
 			comment,
 		})

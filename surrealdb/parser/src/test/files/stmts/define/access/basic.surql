@@ -25,6 +25,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -41,6 +42,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -57,6 +59,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -76,6 +79,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -99,6 +103,7 @@ Query
                             .op: BinaryOperator::Add
                             .right: Expr::Integer
                                 +1
+                    .context: None
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -121,6 +126,7 @@ Query
                     Expr::Duration
                         1s
                     .authenticate: None
+                    .context: None
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -137,6 +143,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: Some
                     AccessType::Jwt
                         Jwt
@@ -177,6 +184,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: Some
                     AccessType::Jwt
                         Jwt
@@ -205,6 +213,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: Some
                     AccessType::Record
                         RecordAccess

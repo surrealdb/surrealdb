@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use super::access::{
 	access_session, authenticate_generic, authenticate_record, create_refresh_token_record,
-	revoke_refresh_token_record,
+	reset_previous_principal, revoke_refresh_token_record, session_data_for_record,
 };
 use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level, Role};
@@ -358,6 +358,19 @@ pub async fn db_access(
 										);
 										rid = authenticate_record(kvs, &sess, au).await?;
 									}
+									// CONTEXT clause. Evaluated once, after the
+									// identity has settled, so `$auth` is the
+									// final record. Independent of AUTHENTICATE.
+									let data = session_data_for_record(
+										kvs,
+										&av,
+										ns.as_str(),
+										db.as_str(),
+										PublicValue::RecordId(rid.clone()),
+										&claims,
+										session,
+									)
+									.await?;
 									// Create refresh token if defined for the record access
 									// method
 									let refresh = match &at.bearer {
@@ -381,7 +394,13 @@ pub async fn db_access(
 										&claims,
 										&key,
 									);
+									// Every fallible step is taken before the
+									// session is touched: a partial failure
+									// must leave the session in its
+									// pre-authentication state.
+									let session_exp = iam::issue::expiration(av.session_duration)?;
 									// Set the authentication on the session
+									reset_previous_principal(session);
 									session.tk = Some(
 										crate::val::convert_value_to_public_value(
 											claims.into_claims_object().into(),
@@ -397,7 +416,8 @@ pub async fn db_access(
 										))
 										.expect("record id conversion should succeed"),
 									);
-									session.exp = iam::issue::expiration(av.session_duration)?;
+									session.data = data;
+									session.exp = session_exp;
 									session.au = Arc::new(Auth::new(Actor::new(
 										rid.to_sql(),
 										Default::default(),
@@ -503,15 +523,19 @@ pub async fn db_user(
 			let enc = encode(&HEADER, &val, &key);
 
 			let au = auth_from_level_user(Level::Database(ns.clone(), db.clone()), &u)?;
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(u.session_duration)?;
 
 			// Set the authentication on the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(val.into_claims_object().into())
 					.expect("claims conversion should succeed"),
 			);
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
-			session.exp = expiration(u.session_duration)?;
+			session.exp = session_exp;
 			session.au = Arc::new(au);
 			// Check the authentication token
 			match enc {
@@ -592,14 +616,18 @@ pub async fn ns_user(
 			let enc = encode(&HEADER, &val, &key);
 
 			let au = auth_from_level_user(Level::Namespace(ns.clone()), &u)?;
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(u.session_duration)?;
 
 			// Set the authentication on the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(val.into_claims_object().into())
 					.expect("claims conversion should succeed"),
 			);
 			session.ns = Some(ns.clone());
-			session.exp = expiration(u.session_duration)?;
+			session.exp = session_exp;
 			session.au = Arc::new(au);
 			// Check the authentication token
 			match enc {
@@ -644,13 +672,17 @@ pub async fn root_user(
 			let enc = encode(&HEADER, &val, &key);
 
 			let au = auth_from_level_user(Level::Root, &u)?;
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(u.session_duration)?;
 
 			// Set the authentication on the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(val.into_claims_object().into())
 					.expect("claims conversion should succeed"),
 			);
-			session.exp = expiration(u.session_duration)?;
+			session.exp = session_exp;
 			session.au = Arc::new(au);
 			// Check the authentication token
 			match enc {
@@ -901,6 +933,31 @@ pub(crate) async fn signin_bearer(
 		);
 		authenticate_generic(kvs, &sess, au).await?;
 	}
+	// CONTEXT clause. A bearer grant whose subject is a record settles on an
+	// identity here just as signin/signup/token verification do, so it gets the
+	// same treatment. This is also the refresh-token rotation path: refresh
+	// tokens rotate without bound, so recomputing here is what stops a session
+	// pinning the grant it was first issued with, forever.
+	//
+	// A grant whose subject is a system user has no record identity for `$auth`
+	// to name, which is why `CONTEXT` is rejected at definition time for every
+	// access method that cannot authenticate a record.
+	let data = match (&gr.subject, &ns, &db) {
+		(catalog::Subject::Record(rid), Some(ns), Some(db)) => {
+			session_data_for_record(
+				kvs,
+				&av,
+				&ns.name,
+				&db.name,
+				crate::val::convert_value_to_public_value(Value::from(rid.clone()))
+					.expect("record id conversion should succeed"),
+				&claims,
+				session,
+			)
+			.await?
+		}
+		_ => None,
+	};
 	// If the bearer grant is a refresh token.
 	let refresh = match at.kind {
 		catalog::BearerAccessType::Refresh => {
@@ -947,6 +1004,51 @@ pub(crate) async fn signin_bearer(
 	trace!("Signing in to database with bearer access method `{}`", av.name);
 	// Create the authentication token.
 	let enc = encode(&Header::new(algorithm_to_jwt_algorithm(iss.alg)), &claims, &key);
+	// Resolve the new principal BEFORE any of it is written to the session.
+	//
+	// A root-level `BEARER FOR RECORD` grant reaches the Record arm below with
+	// no namespace or database and bails; `expiration` can bail on an invalid
+	// duration; a stored role that no longer parses can bail too. Computed
+	// here, all three leave the session in its pre-authentication state
+	// instead of a failed signin extending its expiry and scrambling its
+	// scope.
+	let session_exp = expiration(av.session_duration)?;
+	let (au, rd) = match &gr.subject {
+		catalog::Subject::User(user) => {
+			let level = match (ns, db) {
+				(Some(ns), Some(db)) => Level::Database(ns.name.to_string(), db.name.to_string()),
+				(Some(ns), None) => Level::Namespace(ns.name.to_string()),
+				(None, None) => Level::Root,
+				(None, Some(_)) => bail!(ExecError::NsEmpty),
+			};
+			let au = Auth::new(Actor::new(
+				user.clone(),
+				roles
+					.iter()
+					.map(|e| Role::from_str(e))
+					.collect::<Result<_, _>>()
+					.map_err(Error::from)?,
+				level,
+			));
+			(au, None)
+		}
+		catalog::Subject::Record(rid) => {
+			let (Some(ns), Some(db)) = (ns, db) else {
+				debug!(
+					"Invalid attempt to authenticate as a record without a namespace and database"
+				);
+				bail!(AuthError::InvalidAuth);
+			};
+			let au = Auth::new(Actor::new(
+				rid.to_sql(),
+				Default::default(),
+				Level::Record(ns.name.to_string(), db.name.to_string(), rid.to_sql()),
+			));
+			let rd = crate::val::convert_value_to_public_value(Value::from(rid.clone()))
+				.expect("value conversion should succeed");
+			(au, Some(rd))
+		}
+	};
 	// Set the authentication on the session.
 	//
 	// IMPORTANT: These assignments overwrite the session's working context (ns, db, ac).
@@ -955,6 +1057,7 @@ pub(crate) async fn signin_bearer(
 	// from the bearer grant (which comes from the expired access token's claims),
 	// not the current session's working context that may have been modified by USE commands.
 	// This maintains proper authentication boundaries and prevents scope confusion.
+	reset_previous_principal(session);
 	session.tk = Some(
 		crate::val::convert_value_to_public_value(claims.into_claims_object().into())
 			.expect("claims conversion should succeed"),
@@ -962,45 +1065,10 @@ pub(crate) async fn signin_bearer(
 	session.ns.clone_from(&ns.map(|ns| ns.name.to_string()));
 	session.db.clone_from(&db.map(|db| db.name.to_string()));
 	session.ac = Some(av.name.to_string());
-	session.exp = expiration(av.session_duration)?;
-	match &gr.subject {
-		catalog::Subject::User(user) => {
-			session.au = Arc::new(Auth::new(Actor::new(
-				user.clone(),
-				roles
-					.iter()
-					.map(|e| Role::from_str(e))
-					.collect::<Result<_, _>>()
-					.map_err(Error::from)?,
-				match (ns, db) {
-					(Some(ns), Some(db)) => {
-						Level::Database(ns.name.to_string(), db.name.to_string())
-					}
-					(Some(ns), None) => Level::Namespace(ns.name.to_string()),
-					(None, None) => Level::Root,
-					(None, Some(_)) => bail!(ExecError::NsEmpty),
-				},
-			)));
-		}
-		catalog::Subject::Record(rid) => {
-			session.au = Arc::new(Auth::new(Actor::new(
-				rid.to_sql(),
-				Default::default(),
-				if let (Some(ns), Some(db)) = (ns, db) {
-					Level::Record(ns.name.to_string(), db.name.to_string(), rid.to_sql())
-				} else {
-					debug!(
-						"Invalid attempt to authenticate as a record without a namespace and database"
-					);
-					bail!(AuthError::InvalidAuth);
-				},
-			)));
-			session.rd = Some(
-				crate::val::convert_value_to_public_value(Value::from(rid.clone()))
-					.expect("value conversion should succeed"),
-			);
-		}
-	};
+	session.data = data;
+	session.exp = session_exp;
+	session.au = Arc::new(au);
+	session.rd = rd;
 	// Return the authentication token.
 	match enc {
 		Ok(token) => Ok(match refresh {
@@ -3388,5 +3456,707 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				),
 			}
 		}
+	}
+}
+
+/// Tests for the `CONTEXT` clause on `DEFINE ACCESS`.
+///
+/// The clause is evaluated once, at authentication time, with `$auth` already
+/// bound to the settled identity, and its whole result — no `into_record()` —
+/// is stored on the session and read back as `$session.data`.
+#[cfg(test)]
+mod context_clause_tests {
+	use surrealdb_types::Value as PV;
+
+	use super::*;
+	use crate::dbs::Session;
+	use crate::types::PublicVariables;
+
+	/// `DEFINE ACCESS ... CONTEXT ...` used by most of these tests: `user:1`
+	/// owns two `grant` rows, and the clause projects just their `org` values.
+	const SETUP: &str = r#"
+		DEFINE ACCESS user ON DATABASE TYPE RECORD
+			SIGNIN ( SELECT * FROM type::record('user', $id) )
+			CONTEXT ( SELECT VALUE org FROM grant WHERE owner = $auth )
+			DURATION FOR SESSION 2h
+		;
+		DEFINE TABLE grant SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+		CREATE user:1, user:2;
+		CREATE grant:a SET owner = user:1, org = "acme";
+		CREATE grant:b SET owner = user:1, org = "globex";
+		CREATE grant:c SET owner = user:2, org = "initech";
+	"#;
+
+	async fn signin_as(ds: &Datastore, id: i64) -> (Session, Result<Token>) {
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("id", id);
+		let res = db_access(
+			ds,
+			&mut sess,
+			"test".to_string(),
+			"test".to_string(),
+			"user".to_string(),
+			vars,
+		)
+		.await;
+		(sess, res)
+	}
+
+	async fn setup(sql: &str) -> std::sync::Arc<Datastore> {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		let res = ds.execute(sql, &owner, None).await.unwrap();
+		for r in res {
+			r.result.unwrap();
+		}
+		ds
+	}
+
+	/// The clause parses, evaluates once with `$auth` bound to the settled
+	/// identity, and its whole result is readable back as `$session.data`.
+	#[tokio::test]
+	async fn context_is_evaluated_with_auth_bound_and_readable_as_session_data() {
+		let ds = setup(SETUP).await;
+		let (sess, res) = signin_as(&ds, 1).await;
+		assert!(res.is_ok(), "signin failed: {res:?}");
+
+		// The clause saw `$auth` — it returned only user:1's grants.
+		let data = sess.data.as_ref().expect("CONTEXT should have populated session data");
+		let mut orgs = data.public().clone().into_array().unwrap().into_vec();
+		orgs.sort_by_key(|v| v.clone().into_string().unwrap());
+		assert_eq!(orgs, vec![PV::String("acme".to_owned()), PV::String("globex".to_owned())]);
+
+		// And the same value is what a query reads back.
+		let res = ds.execute("RETURN $session.data", &sess, None).await.unwrap();
+		let mut got =
+			res.into_iter().next().unwrap().result.unwrap().into_array().unwrap().into_vec();
+		got.sort_by_key(|v| v.clone().into_string().unwrap());
+		assert_eq!(got, vec![PV::String("acme".to_owned()), PV::String("globex".to_owned())]);
+
+		// `$auth` is untouched: still a bare record link, not the projection.
+		let res = ds.execute("RETURN $auth", &sess, None).await.unwrap();
+		assert_eq!(
+			res.into_iter().next().unwrap().result.unwrap(),
+			PV::RecordId(surrealdb_types::RecordId::new("user", 1))
+		);
+	}
+
+	/// The result is stored WHOLE. A record-shaped projection stays an object
+	/// with all its fields, rather than being reduced to a link the way
+	/// `authenticate_record` reduces the AUTHENTICATE clause's result.
+	#[tokio::test]
+	async fn context_result_is_stored_whole() {
+		let ds = setup(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN ( SELECT * FROM type::record('user', $id) )
+				CONTEXT ( SELECT * FROM ONLY $auth )
+				DURATION FOR SESSION 2h
+			;
+			DEFINE TABLE user SCHEMALESS PERMISSIONS FOR select WHERE id = $auth;
+			CREATE user:1 SET name = "tobie", tier = "gold";
+			"#,
+		)
+		.await;
+		let (sess, res) = signin_as(&ds, 1).await;
+		assert!(res.is_ok(), "signin failed: {res:?}");
+
+		let res = ds.execute("RETURN $session.data.tier", &sess, None).await.unwrap();
+		assert_eq!(res.into_iter().next().unwrap().result.unwrap(), PV::String("gold".to_owned()));
+	}
+
+	/// A permission clause can read the materialised payload.
+	#[tokio::test]
+	async fn context_data_is_readable_from_a_permission() {
+		let ds = setup(&format!(
+			r#"
+			{SETUP}
+			DEFINE TABLE doc SCHEMALESS PERMISSIONS FOR select WHERE org IN $session.data;
+			CREATE doc:1 SET org = "acme";
+			CREATE doc:2 SET org = "globex";
+			CREATE doc:3 SET org = "initech";
+			"#
+		))
+		.await;
+		let (sess, res) = signin_as(&ds, 1).await;
+		assert!(res.is_ok(), "signin failed: {res:?}");
+
+		let res = ds.execute("SELECT VALUE id FROM doc ORDER BY id", &sess, None).await.unwrap();
+		let rows = res.into_iter().next().unwrap().result.unwrap().into_array().unwrap().into_vec();
+		assert_eq!(
+			rows,
+			vec![
+				PV::RecordId(surrealdb_types::RecordId::new("doc", 1)),
+				PV::RecordId(surrealdb_types::RecordId::new("doc", 2)),
+			],
+			"only the rows the CONTEXT payload grants should be visible"
+		);
+	}
+
+	/// `LET $session = ...` is refused, by any of the three routes a client
+	/// has to it.
+	///
+	/// That is the whole of the claim, and it is worth being precise about
+	/// what it is not. `$session.data` is exactly as trustworthy as `$auth` —
+	/// no better, no worse. `$session` being in `PROTECTED_PARAM_NAMES` closes
+	/// `LET`, `db.set` and the RPC `let`; it does not close every route. A
+	/// `FOR $session IN [...] { ... }` loop rebinds the name for its body, and
+	/// so does a closure parameter, and a permission clause evaluated inside
+	/// one reads the rebound value. `FOR $auth IN [user:2] { ... }` does the
+	/// same to `$auth`, which every record permission written before this
+	/// clause existed already depends on.
+	///
+	/// That is a pre-existing, engine-wide property of parameter binding, not
+	/// something this clause introduces, and it is being addressed separately.
+	/// `$session.data` simply inherits the trust boundary `$auth` already had:
+	/// a permission that is safe to write against `$auth` is exactly as safe
+	/// written against `$session.data`.
+	#[tokio::test]
+	async fn let_session_is_refused_by_every_client_route() {
+		let ds = setup(SETUP).await;
+		let (mut sess, res) = signin_as(&ds, 1).await;
+		assert!(res.is_ok(), "signin failed: {res:?}");
+
+		// A top-level LET.
+		let res = ds.execute(r#"LET $session = { data: ["initech"] }"#, &sess, None).await.unwrap();
+		assert!(res.into_iter().next().unwrap().result.is_err(), "LET $session must be refused");
+
+		// The same inside a block, which is a different execution path.
+		let res = ds
+			.execute(
+				r#"{ LET $session = { data: ["initech"] }; RETURN $session.data }"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+		assert!(
+			res.into_iter().next().unwrap().result.is_err(),
+			"LET $session inside a block must be refused"
+		);
+
+		// And as a session variable, the `db.set` / RPC `let` route.
+		sess.variables.insert("session", PV::String("forged".to_owned()));
+		let res = ds.execute("RETURN $session.data", &sess, None).await;
+		let refused = match res {
+			Err(_) => true,
+			Ok(res) => res.into_iter().next().unwrap().result.is_err(),
+		};
+		assert!(refused, "a session variable named `session` must be refused");
+	}
+
+	/// The CONTEXT clause runs as the authenticated record, not privileged, so
+	/// it cannot materialise anything the session could not have selected for
+	/// itself. This is what makes exposing the result to the client safe.
+	#[tokio::test]
+	async fn context_is_evaluated_with_the_records_own_permissions() {
+		let ds = setup(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN ( SELECT * FROM type::record('user', $id) )
+				CONTEXT ( SELECT VALUE secret FROM vault )
+				DURATION FOR SESSION 2h
+			;
+			DEFINE TABLE vault SCHEMALESS PERMISSIONS NONE;
+			CREATE user:1;
+			CREATE vault:1 SET secret = "hunter2";
+			"#,
+		)
+		.await;
+		let (sess, res) = signin_as(&ds, 1).await;
+		assert!(res.is_ok(), "signin failed: {res:?}");
+		let data = sess.data.as_ref().expect("CONTEXT populates data even when it reads nothing");
+		assert_eq!(
+			data.public().clone().into_array().unwrap().into_vec(),
+			Vec::<PV>::new(),
+			"a table the record cannot read must not leak through CONTEXT"
+		);
+	}
+
+	/// An access method without the clause behaves exactly as before: no `data`
+	/// on the session, and `$session` carries the same keys it always did.
+	#[tokio::test]
+	async fn access_without_the_clause_is_unchanged() {
+		let ds = setup(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN ( SELECT * FROM type::record('user', $id) )
+				DURATION FOR SESSION 2h
+			;
+			CREATE user:1;
+			"#,
+		)
+		.await;
+		let (sess, res) = signin_as(&ds, 1).await;
+		assert!(res.is_ok(), "signin failed: {res:?}");
+		assert!(sess.data.is_none(), "no CONTEXT clause means no session data");
+
+		let res = ds.execute("RETURN $session.data", &sess, None).await.unwrap();
+		assert_eq!(res.into_iter().next().unwrap().result.unwrap(), PV::None);
+
+		// The `$session` object itself is byte-identical to what it was before
+		// the clause existed: exactly the nine pre-existing keys.
+		let res = ds.execute("RETURN $session", &sess, None).await.unwrap();
+		let obj = res.into_iter().next().unwrap().result.unwrap().into_object().unwrap();
+		let mut keys: Vec<_> = obj.keys().cloned().collect();
+		keys.sort();
+		assert_eq!(keys, vec!["ac", "db", "exp", "id", "ip", "ns", "or", "rd", "tk"]);
+	}
+
+	/// The clause is independent of AUTHENTICATE: it must fire whether or not
+	/// one is defined, and when one is, it must see the identity AUTHENTICATE
+	/// settled on rather than the one signin produced.
+	#[tokio::test]
+	async fn context_sees_the_identity_authenticate_settled_on() {
+		let ds = setup(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN ( SELECT * FROM type::record('user', $id) )
+				AUTHENTICATE ( SELECT * FROM ONLY type::record('user', record::id($auth) + 1) )
+				CONTEXT ( RETURN $auth )
+				DURATION FOR SESSION 2h
+			;
+			CREATE user:1, user:2;
+			"#,
+		)
+		.await;
+		let (sess, res) = signin_as(&ds, 1).await;
+		assert!(res.is_ok(), "signin failed: {res:?}");
+		assert_eq!(
+			sess.data.as_ref().unwrap().public(),
+			&PV::RecordId(surrealdb_types::RecordId::new("user", 2)),
+			"CONTEXT must run after AUTHENTICATE has settled the identity"
+		);
+	}
+
+	/// `$token.ID` and `$auth` name the same record inside the clause.
+	///
+	/// The `id` claim is minted before AUTHENTICATE runs and still names the
+	/// record SIGNIN found. CONTEXT is the first clause to receive both the
+	/// claims and the settled identity at once, so without the rebuild a
+	/// clause keyed on `$token.ID` would resolve against the record SIGNIN
+	/// found rather than the one AUTHENTICATE settled on — the exact
+	/// substitution AUTHENTICATE exists to perform.
+	#[tokio::test]
+	async fn context_token_id_names_the_identity_authenticate_settled_on() {
+		let ds = setup(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN ( SELECT * FROM type::record('user', $id) )
+				AUTHENTICATE ( SELECT * FROM ONLY type::record('user', record::id($auth) + 1) )
+				CONTEXT ( { auth: $auth, token: $token.ID } )
+				DURATION FOR SESSION 2h
+			;
+			CREATE user:1, user:2;
+			"#,
+		)
+		.await;
+		let (sess, res) = signin_as(&ds, 1).await;
+		assert!(res.is_ok(), "signin failed: {res:?}");
+		let data = sess.data.as_ref().unwrap().public().clone().into_object().unwrap();
+		assert_eq!(
+			data.get("auth").unwrap(),
+			&PV::RecordId(surrealdb_types::RecordId::new("user", 2)),
+			"$auth is the settled identity"
+		);
+		assert_eq!(
+			data.get("token").unwrap(),
+			&PV::String("user:2".to_owned()),
+			"$token.ID must name the same record as $auth"
+		);
+	}
+
+	/// A signin that can still fail must not have committed session state.
+	///
+	/// `signin_bearer` assigned `tk`, `ns`, `db`, `ac` and `data` and only
+	/// then computed the session expiry, which can bail on a duration that
+	/// overflows. The failed attempt therefore installed a new token, a new
+	/// access method and a CONTEXT payload on a session whose `au` still named
+	/// the previous principal.
+	#[tokio::test]
+	async fn a_failed_bearer_signin_leaves_the_session_untouched() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		let res = ds
+			.execute(
+				r#"
+				DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
+					CONTEXT ( RETURN 'granted' )
+					DURATION FOR TOKEN 1h, FOR SESSION 100000000w;
+				CREATE user:1;
+				ACCESS api ON DATABASE GRANT FOR RECORD user:1;
+				"#,
+				&owner,
+				None,
+			)
+			.await
+			.unwrap();
+		let grant = res
+			.into_iter()
+			.next_back()
+			.unwrap()
+			.result
+			.unwrap()
+			.get("grant")
+			.clone()
+			.into_object()
+			.unwrap();
+		let key = grant.get("key").unwrap().as_string().unwrap().clone();
+
+		// A session already authenticated as something else.
+		let before = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			ac: Some("previous".to_string()),
+			exp: Some(1),
+			..Default::default()
+		};
+		let mut sess = before.clone();
+
+		let mut vars = PublicVariables::new();
+		vars.insert("key", key);
+		let res = db_access(
+			&ds,
+			&mut sess,
+			"test".to_string(),
+			"test".to_string(),
+			"api".to_string(),
+			vars,
+		)
+		.await;
+		assert!(res.is_err(), "an unrepresentable session expiry must fail the signin");
+
+		assert_eq!(sess.ac, before.ac, "a failed signin must not change the access method");
+		assert_eq!(sess.exp, before.exp, "a failed signin must not extend the expiry");
+		assert!(sess.tk.is_none(), "a failed signin must not install a token");
+		assert!(sess.data.is_none(), "a failed signin must not install a CONTEXT payload");
+	}
+
+	/// Invalidating or resetting a session drops the payload: it is an
+	/// authorisation grant, and a reset session must be maximally restrictive.
+	#[tokio::test]
+	async fn reset_and_clear_drop_the_payload() {
+		let ds = setup(SETUP).await;
+
+		let (mut sess, res) = signin_as(&ds, 1).await;
+		assert!(res.is_ok(), "signin failed: {res:?}");
+		assert!(sess.data.is_some());
+		crate::iam::clear::clear(&mut sess).unwrap();
+		assert!(sess.data.is_none(), "invalidate must drop the CONTEXT payload");
+
+		let (mut sess, res) = signin_as(&ds, 1).await;
+		assert!(res.is_ok(), "signin failed: {res:?}");
+		assert!(sess.data.is_some());
+		crate::iam::reset::reset(&mut sess);
+		assert!(sess.data.is_none(), "reset must drop the CONTEXT payload");
+	}
+
+	/// A CONTEXT clause that writes is refused at definition time — it would
+	/// otherwise fire a write on every HTTP request, which re-authenticates.
+	#[tokio::test]
+	async fn writing_context_is_refused_by_define_and_alter() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+
+		let res = ds
+			.execute(
+				r#"DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN ( SELECT * FROM user )
+					CONTEXT ( CREATE audit SET at = time::now() )
+					DURATION FOR SESSION 2h;"#,
+				&owner,
+				None,
+			)
+			.await
+			.unwrap();
+		let err = res.into_iter().next().unwrap().result.unwrap_err();
+		assert!(err.to_string().contains("read-only"), "unexpected error: {err}");
+
+		// The same expression must not be installable through ALTER either.
+		ds.execute(
+			r#"DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN ( SELECT * FROM user )
+				DURATION FOR SESSION 2h;"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap()
+		.into_iter()
+		.next()
+		.unwrap()
+		.result
+		.unwrap();
+
+		let res = ds
+			.execute(
+				r#"ALTER ACCESS user ON DATABASE CONTEXT ( CREATE audit SET at = time::now() );"#,
+				&owner,
+				None,
+			)
+			.await
+			.unwrap();
+		let err = res.into_iter().next().unwrap().result.unwrap_err();
+		assert!(err.to_string().contains("read-only"), "unexpected error: {err}");
+	}
+
+	/// CONTEXT is scoped to access methods that authenticate a record, because
+	/// that record's own permissions are what the clause is evaluated under.
+	#[tokio::test]
+	async fn context_is_refused_on_access_without_a_record_identity() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		let res = ds
+			.execute(
+				r#"DEFINE ACCESS tok ON DATABASE TYPE JWT ALGORITHM HS512 KEY "secret"
+					CONTEXT ( RETURN 1 ) DURATION FOR SESSION 2h;"#,
+				&owner,
+				None,
+			)
+			.await
+			.unwrap();
+		let err = res.into_iter().next().unwrap().result.unwrap_err();
+		assert!(err.to_string().contains("authenticates a record"), "unexpected error: {err}");
+	}
+
+	/// The accept case the scoping rule exists to allow: `TYPE BEARER FOR
+	/// RECORD` settles a record identity through the key exchange, so it takes
+	/// a CONTEXT clause and gets a payload.
+	///
+	/// It also pins what happens to the JWT that exchange issues.
+	/// `signin_bearer` always fills the `id` claim from the grant's subject,
+	/// so presenting that JWT back matches `verify::token`'s record-access arm
+	/// — which requires the definition's access type to be `RECORD` and
+	/// rejects a `BEARER` one outright. Re-verification is a hard
+	/// AccessMethodMismatch, not a downgrade to a session with neither `$auth`
+	/// nor `$session.data`.
+	#[tokio::test]
+	async fn context_is_accepted_on_bearer_for_record() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		let res = ds
+			.execute(
+				r#"
+				DEFINE ACCESS api ON DATABASE TYPE BEARER FOR RECORD
+					CONTEXT ( SELECT VALUE org FROM grant WHERE owner = $auth )
+					DURATION FOR TOKEN 1h, FOR SESSION 2h;
+				DEFINE TABLE grant SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+				CREATE user:1;
+				CREATE grant:a SET owner = user:1, org = "acme";
+				ACCESS api ON DATABASE GRANT FOR RECORD user:1;
+				"#,
+				&owner,
+				None,
+			)
+			.await
+			.unwrap();
+		let grant = res
+			.into_iter()
+			.next_back()
+			.unwrap()
+			.result
+			.unwrap()
+			.get("grant")
+			.clone()
+			.into_object()
+			.unwrap();
+		let key = grant.get("key").unwrap().as_string().unwrap().clone();
+
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("key", key);
+		let issued = db_access(
+			&ds,
+			&mut sess,
+			"test".to_string(),
+			"test".to_string(),
+			"api".to_string(),
+			vars,
+		)
+		.await
+		.expect("bearer signin failed");
+
+		assert_eq!(
+			sess.data.as_ref().expect("data").public().clone().into_array().unwrap().into_vec(),
+			vec![PV::String("acme".to_owned())],
+			"a BEARER FOR RECORD exchange settles an identity, so it gets a payload"
+		);
+
+		let access = match issued {
+			Token::Access(t) => t,
+			Token::WithRefresh {
+				access,
+				..
+			} => access,
+		};
+		let mut other = Session::default();
+		let err = crate::iam::verify::token(&ds, &mut other, &access).await.unwrap_err();
+		assert!(
+			err.to_string().contains("cannot be used in the requested operation"),
+			"presenting the issued JWT back must be a hard mismatch, got: {err}"
+		);
+		assert!(other.data.is_none());
+	}
+
+	/// The reject cases either side of it: a bearer method whose subject is a
+	/// system user has no record identity for `$auth` to name, and a
+	/// definition outside a database could never run the clause at all.
+	#[tokio::test]
+	async fn context_is_refused_on_bearer_for_user_and_outside_a_database() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+
+		for stmt in [
+			r#"DEFINE ACCESS api ON DATABASE TYPE BEARER FOR USER
+				CONTEXT ( RETURN 1 ) DURATION FOR SESSION 2h;"#,
+			r#"DEFINE ACCESS api ON NAMESPACE TYPE BEARER FOR USER
+				CONTEXT ( RETURN 1 ) DURATION FOR SESSION 2h;"#,
+			r#"DEFINE ACCESS api ON ROOT TYPE BEARER FOR USER
+				CONTEXT ( RETURN 1 ) DURATION FOR SESSION 2h;"#,
+		] {
+			let res = ds.execute(stmt, &owner, None).await.unwrap();
+			let err = res.into_iter().next().unwrap().result.unwrap_err();
+			assert!(
+				err.to_string().contains("authenticates a record"),
+				"unexpected error for `{stmt}`: {err}"
+			);
+		}
+	}
+
+	/// The clause survives a definition round-trip through the catalog: it is
+	/// rendered by `INFO FOR DB`, and `ALTER ... DROP CONTEXT` removes it.
+	#[tokio::test]
+	async fn context_round_trips_through_info_and_alter() {
+		let ds = setup(SETUP).await;
+		let owner = Session::owner().with_ns("test").with_db("test");
+
+		let res = ds.execute("INFO FOR DB", &owner, None).await.unwrap();
+		let info = res.into_iter().next().unwrap().result.unwrap();
+		let accesses = info.get("accesses").clone().into_object().unwrap();
+		let def = accesses.get("user").unwrap().as_string().unwrap().clone();
+		assert!(def.contains("CONTEXT"), "INFO FOR DB should render the clause: {def}");
+
+		ds.execute("ALTER ACCESS user ON DATABASE DROP CONTEXT", &owner, None)
+			.await
+			.unwrap()
+			.into_iter()
+			.next()
+			.unwrap()
+			.result
+			.unwrap();
+
+		let res = ds.execute("INFO FOR DB", &owner, None).await.unwrap();
+		let info = res.into_iter().next().unwrap().result.unwrap();
+		let accesses = info.get("accesses").clone().into_object().unwrap();
+		let def = accesses.get("user").unwrap().as_string().unwrap().clone();
+		assert!(!def.contains("CONTEXT"), "DROP CONTEXT should remove the clause: {def}");
+
+		let (sess, res) = signin_as(&ds, 1).await;
+		assert!(res.is_ok(), "signin failed: {res:?}");
+		assert!(sess.data.is_none(), "a dropped clause leaves no session data");
+	}
+
+	/// A refresh-token rotation recomputes the payload, so a grant revoked in
+	/// the table stops being carried by the session on the next rotation.
+	#[tokio::test]
+	async fn refresh_token_rotation_recomputes_the_payload() {
+		let ds = setup(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN ( SELECT * FROM type::record('user', $id) )
+				WITH REFRESH
+				CONTEXT ( SELECT VALUE org FROM grant WHERE owner = $auth )
+				DURATION FOR TOKEN 1h, FOR SESSION 2h
+			;
+			DEFINE TABLE grant SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+			CREATE user:1;
+			CREATE grant:a SET owner = user:1, org = "acme";
+			"#,
+		)
+		.await;
+
+		let (sess, res) = signin_as(&ds, 1).await;
+		let refresh = match res.expect("signin failed") {
+			Token::WithRefresh {
+				refresh,
+				..
+			} => refresh,
+			other => panic!("expected a refresh token, got {other:?}"),
+		};
+		assert_eq!(
+			sess.data.as_ref().unwrap().public().clone().into_array().unwrap().into_vec(),
+			vec![PV::String("acme".to_owned())]
+		);
+
+		// Revoke the grant, then rotate the refresh token.
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute("DELETE grant:a", &owner, None).await.unwrap();
+
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("refresh", refresh);
+		db_access(&ds, &mut sess, "test".to_string(), "test".to_string(), "user".to_string(), vars)
+			.await
+			.expect("refresh rotation failed");
+
+		assert_eq!(
+			sess.data.as_ref().unwrap().public().clone().into_array().unwrap().into_vec(),
+			Vec::<PV>::new(),
+			"rotating a refresh token must recompute the CONTEXT payload"
+		);
+	}
+
+	/// The plan-time fold of `$session.<constant path>` must not reach record
+	/// links: `$auth.tier` stays a fetch of the stored row, so it tracks a
+	/// later UPDATE, while `$session.data` is the snapshot the clause froze at
+	/// authentication time and deliberately does not.
+	#[tokio::test]
+	async fn auth_still_fetches_while_session_data_stays_frozen() {
+		let ds = setup(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN ( SELECT * FROM type::record('user', $id) )
+				CONTEXT ( SELECT VALUE tier FROM ONLY $auth )
+				DURATION FOR SESSION 2h
+			;
+			DEFINE TABLE user SCHEMALESS PERMISSIONS FOR select WHERE id = $auth;
+			CREATE user:1 SET tier = "gold";
+			"#,
+		)
+		.await;
+		let (sess, res) = signin_as(&ds, 1).await;
+		assert!(res.is_ok(), "signin failed: {res:?}");
+
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute("UPDATE user:1 SET tier = 'silver'", &owner, None).await.unwrap();
+
+		// `$auth.tier` re-reads the row.
+		let res = ds.execute("RETURN $auth.tier", &sess, None).await.unwrap();
+		assert_eq!(
+			res.into_iter().next().unwrap().result.unwrap(),
+			PV::String("silver".to_owned()),
+			"$auth must keep fetch semantics"
+		);
+
+		// `$session.data` is the login-time snapshot.
+		let res = ds.execute("RETURN $session.data", &sess, None).await.unwrap();
+		assert_eq!(
+			res.into_iter().next().unwrap().result.unwrap(),
+			PV::String("gold".to_owned()),
+			"the CONTEXT payload is a snapshot, bounded by DURATION FOR SESSION"
+		);
 	}
 }

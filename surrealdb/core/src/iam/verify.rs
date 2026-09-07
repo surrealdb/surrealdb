@@ -15,7 +15,10 @@ use crate::dbs::Session;
 use crate::err::Error;
 #[cfg(feature = "jwks")]
 use crate::expr::Error as ExprError;
-use crate::iam::access::{access_session, authenticate_generic, authenticate_record};
+use crate::iam::access::{
+	access_session, authenticate_generic, authenticate_record, reset_previous_principal,
+	session_data_for_record,
+};
 use crate::iam::issue::expiration;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
@@ -23,6 +26,7 @@ use crate::iam::token::Claims;
 use crate::iam::{self, Actor, Auth, Error as AuthError, Level, Role};
 use crate::kvs::Datastore;
 use crate::kvs::TransactionType::*;
+use crate::types::PublicValue;
 use crate::{catalog, syn};
 
 /// Returns the decoding key as wel as the method by which to verify the key against
@@ -129,13 +133,17 @@ pub async fn basic(
 		(Some(ns), Some(db)) => match verify_db_creds(kvs, ns, db, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as database user '{}'", user);
-				session.exp = expiration(u.session_duration)?;
+				// Every fallible step is taken before the session is touched: a
+				// partial failure must leave the session in its
+				// pre-authentication state.
+				let session_exp = expiration(u.session_duration)?;
 				let au = Auth::new(Actor::from_role_names(
 					u.name.to_string(),
 					&u.roles,
 					Level::Database(ns.to_owned(), db.to_owned()),
 				)?);
-
+				reset_previous_principal(session);
+				session.exp = session_exp;
 				session.au = Arc::new(au);
 				Ok(())
 			}
@@ -145,13 +153,17 @@ pub async fn basic(
 		(Some(ns), None) => match verify_ns_creds(kvs, ns, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as namespace user '{}'", user);
-				session.exp = expiration(u.session_duration)?;
+				// Every fallible step is taken before the session is touched: a
+				// partial failure must leave the session in its
+				// pre-authentication state.
+				let session_exp = expiration(u.session_duration)?;
 				let au = Auth::new(Actor::from_role_names(
 					u.name.to_string(),
 					&u.roles,
 					Level::Namespace(ns.to_owned()),
 				)?);
-
+				reset_previous_principal(session);
+				session.exp = session_exp;
 				session.au = Arc::new(au);
 				Ok(())
 			}
@@ -161,10 +173,14 @@ pub async fn basic(
 		(None, None) => match verify_root_creds(kvs, user, pass).await {
 			Ok(u) => {
 				debug!("Authenticated as root user '{}'", user);
-				session.exp = expiration(u.session_duration)?;
+				// Every fallible step is taken before the session is touched: a
+				// partial failure must leave the session in its
+				// pre-authentication state.
+				let session_exp = expiration(u.session_duration)?;
 				let au =
 					Auth::new(Actor::from_role_names(u.name.to_string(), &u.roles, Level::Root)?);
-
+				reset_previous_principal(session);
+				session.exp = session_exp;
 				session.au = Arc::new(au);
 				Ok(())
 			}
@@ -293,13 +309,32 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				);
 				rid = authenticate_record(kvs, &sess, au).await?;
 			}
+			// CONTEXT clause. Evaluated after the identity has settled — and
+			// after `verify_token` above — so `$auth` is the final record and
+			// an unverified token never pays for it. Independent of the
+			// AUTHENTICATE clause: an access method may define either.
+			let data = session_data_for_record(
+				kvs,
+				&de,
+				ns.as_str(),
+				db.as_str(),
+				PublicValue::RecordId(rid.clone()),
+				&token_data.claims,
+				session,
+			)
+			.await?;
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(de.session_duration)?;
 			// Set the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(value)
 					.expect("value conversion should succeed"),
 			);
+			session.data = data;
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
@@ -309,7 +344,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				))
 				.expect("record id conversion should succeed"),
 			);
-			session.exp = expiration(de.session_duration)?;
+			session.exp = session_exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_sql(),
 				Default::default(),
@@ -415,7 +450,11 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					};
 					// Log the success
 					debug!("Authenticated to database `{}` with access method `{}`", db, ac);
+					// Every fallible step is taken before the session is touched: a partial
+					// failure must leave the session in its pre-authentication state.
+					let session_exp = expiration(de.session_duration)?;
 					// Set the session
+					reset_previous_principal(session);
 					session.tk = Some(
 						crate::val::convert_value_to_public_value(value)
 							.expect("value conversion should succeed"),
@@ -423,7 +462,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					session.ns = Some(ns.to_owned());
 					session.db = Some(db.to_owned());
 					session.ac = Some(ac.to_owned());
-					session.exp = expiration(de.session_duration)?;
+					session.exp = session_exp;
 					session.au = Arc::new(Auth::new(Actor::new(
 						de.name.to_string(),
 						roles,
@@ -470,13 +509,29 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							.expect("claims conversion should succeed"),
 						);
 						let rid = authenticate_record(kvs, &sess, au).await?;
+						// CONTEXT clause, evaluated with the settled identity.
+						let data = session_data_for_record(
+							kvs,
+							&de,
+							ns.as_str(),
+							db.as_str(),
+							PublicValue::RecordId(rid.clone()),
+							&token_data.claims,
+							session,
+						)
+						.await?;
 						// Log the success
 						debug!("Authenticated with record access method `{}`", ac);
+						// Every fallible step is taken before the session is touched: a partial
+						// failure must leave the session in its pre-authentication state.
+						let session_exp = expiration(de.session_duration)?;
 						// Set the session
+						reset_previous_principal(session);
 						session.tk = Some(
 							crate::val::convert_value_to_public_value(value)
 								.expect("value conversion should succeed"),
 						);
+						session.data = data;
 						session.ns = Some(ns.to_owned());
 						session.db = Some(db.to_owned());
 						session.ac = Some(ac.to_owned());
@@ -486,7 +541,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							))
 							.expect("record id conversion should succeed"),
 						);
-						session.exp = expiration(de.session_duration)?;
+						session.exp = session_exp;
 						session.au = Arc::new(Auth::new(Actor::new(
 							rid.to_sql(),
 							Default::default(),
@@ -544,20 +599,26 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
 			debug!("Authenticated to database `{}` with user `{}` using token", db, id);
+			let roles: Vec<Role> = de
+				.roles
+				.iter()
+				.map(|e| Role::from_str(e).map_err(Error::from))
+				.collect::<Result<_, _>>()?;
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(de.session_duration)?;
 			// Set the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(value)
 					.expect("value conversion should succeed"),
 			);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
-			session.exp = expiration(de.session_duration)?;
+			session.exp = session_exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.clone(),
-				de.roles
-					.iter()
-					.map(|e| Role::from_str(e).map_err(Error::from))
-					.collect::<Result<_, _>>()?,
+				roles,
 				Level::Database(ns.clone(), db.clone()),
 			)));
 			Ok(())
@@ -656,14 +717,18 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 			// Log the success
 			debug!("Authenticated to namespace `{}` with access method `{}`", ns, ac);
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(de.session_duration)?;
 			// Set the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(value)
 					.expect("value conversion should succeed"),
 			);
 			session.ns = Some(ns.to_owned());
 			session.ac = Some(ac.to_owned());
-			session.exp = expiration(de.session_duration)?;
+			session.exp = session_exp;
 			session.au = Arc::new(Auth::new(Actor::new(
 				de.name.to_string(),
 				roles,
@@ -713,21 +778,24 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
 			debug!("Authenticated to namespace `{}` with user `{}` using token", ns, id);
+			let roles: Vec<Role> = de
+				.roles
+				.iter()
+				.map(|e| Role::from_str(e).map_err(Error::from))
+				.collect::<Result<_, _>>()?;
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(de.session_duration)?;
 			// Set the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(value)
 					.expect("value conversion should succeed"),
 			);
 			session.ns = Some(ns.to_owned());
-			session.exp = expiration(de.session_duration)?;
-			session.au = Arc::new(Auth::new(Actor::new(
-				id.clone(),
-				de.roles
-					.iter()
-					.map(|e| Role::from_str(e).map_err(Error::from))
-					.collect::<Result<_, _>>()?,
-				Level::Namespace(ns.clone()),
-			)));
+			session.exp = session_exp;
+			session.au =
+				Arc::new(Auth::new(Actor::new(id.clone(), roles, Level::Namespace(ns.clone()))));
 			Ok(())
 		}
 		// Check if this is root access
@@ -812,13 +880,17 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 			// Log the success
 			debug!("Authenticated to root with access method `{}`", ac);
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(de.session_duration)?;
 			// Set the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(value)
 					.expect("value conversion should succeed"),
 			);
 			session.ac = Some(ac.to_owned());
-			session.exp = expiration(de.session_duration)?;
+			session.exp = session_exp;
 			session.au = Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Root)));
 			Ok(())
 		}
@@ -847,20 +919,22 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			verify_token(token, &cf.0, &cf.1)?;
 			// Log the success
 			debug!("Authenticated to root level with user `{}` using token", id);
+			let roles: Vec<Role> = de
+				.roles
+				.iter()
+				.map(|e| Role::from_str(e).map_err(Error::from))
+				.collect::<Result<_, _>>()?;
+			// Every fallible step is taken before the session is touched: a partial
+			// failure must leave the session in its pre-authentication state.
+			let session_exp = expiration(de.session_duration)?;
 			// Set the session
+			reset_previous_principal(session);
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(value)
 					.expect("value conversion should succeed"),
 			);
-			session.exp = expiration(de.session_duration)?;
-			session.au = Arc::new(Auth::new(Actor::new(
-				id.clone(),
-				de.roles
-					.iter()
-					.map(|e| Role::from_str(e).map_err(Error::from))
-					.collect::<Result<_, _>>()?,
-				Level::Root,
-			)));
+			session.exp = session_exp;
+			session.au = Arc::new(Auth::new(Actor::new(id.clone(), roles, Level::Root)));
 			Ok(())
 		}
 		// There was an auth error
@@ -1023,12 +1097,17 @@ impl ScramAuth {
 	/// Establish `session.au` / `session.exp` for the SCRAM-verified user. Call
 	/// only after the client proof has been verified via [`Self::verify_client_proof`].
 	pub fn apply(&self, session: &mut Session) -> Result<()> {
-		session.exp = expiration(self.user.session_duration)?;
-		session.au = Arc::new(Auth::new(Actor::from_role_names(
+		// Every fallible step is taken before the session is touched: a partial
+		// failure must leave the session in its pre-authentication state.
+		let session_exp = expiration(self.user.session_duration)?;
+		let au = Auth::new(Actor::from_role_names(
 			self.user.name.to_string(),
 			&self.user.roles,
 			self.level.clone(),
-		)?));
+		)?);
+		reset_previous_principal(session);
+		session.exp = session_exp;
+		session.au = Arc::new(au);
 		Ok(())
 	}
 }
@@ -2886,5 +2965,190 @@ mod tests {
 			AuthError::InvalidAuth.to_string(),
 			"the public message must not describe why the token failed to decode"
 		);
+	}
+}
+
+/// `CONTEXT` on the two token-verification paths that settle on a record.
+#[cfg(test)]
+mod context_clause_tests {
+	use chrono::{Duration, Utc};
+	use jsonwebtoken::{EncodingKey, encode};
+	use surrealdb_types::Value as PV;
+
+	use super::*;
+	use crate::iam::token::HEADER;
+
+	fn signed(secret: &str, claims: &Claims) -> String {
+		encode(&HEADER, claims, &EncodingKey::from_secret(secret.as_ref())).unwrap()
+	}
+
+	fn base_claims() -> Claims {
+		Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			ac: Some("token".to_string()),
+			..Claims::default()
+		}
+	}
+
+	/// A token carrying an `id` claim: CONTEXT runs with `$auth` bound to that
+	/// record, with no AUTHENTICATE clause in play.
+	#[tokio::test]
+	async fn token_with_id_claim_computes_the_context() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY 'secret'
+				CONTEXT ( SELECT VALUE org FROM grant WHERE owner = $auth )
+				DURATION FOR SESSION 30d;
+			DEFINE TABLE grant SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+			CREATE user:test;
+			CREATE grant:a SET owner = user:test, org = "acme";
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut claims = base_claims();
+		claims.id = Some("user:test".to_string());
+		let enc = signed("secret", &claims);
+
+		let mut sess = Session::default();
+		token(&ds, &mut sess, &enc).await.expect("token verification failed");
+		assert_eq!(
+			sess.data.as_ref().expect("data").public().clone().into_array().unwrap().into_vec(),
+			vec![PV::String("acme".to_owned())]
+		);
+
+		// A token that fails signature verification never reaches the clause,
+		// and leaves the session untouched.
+		let bad = signed("wrong-secret", &claims);
+		let mut sess = Session::default();
+		assert!(token(&ds, &mut sess, &bad).await.is_err());
+		assert!(sess.data.is_none());
+	}
+
+	/// A token with no `id` claim, where AUTHENTICATE derives the record:
+	/// CONTEXT must see the identity AUTHENTICATE settled on.
+	#[tokio::test]
+	async fn token_authenticated_by_clause_computes_the_context() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY 'secret'
+				AUTHENTICATE ( SELECT * FROM ONLY user:test )
+				CONTEXT ( RETURN $auth )
+				DURATION FOR SESSION 30d;
+			DEFINE TABLE user SCHEMALESS PERMISSIONS FULL;
+			CREATE user:test;
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let enc = signed("secret", &base_claims());
+		let mut sess = Session::default();
+		token(&ds, &mut sess, &enc).await.expect("token verification failed");
+		assert_eq!(
+			sess.data.as_ref().expect("data").public(),
+			&PV::RecordId(surrealdb_types::RecordId::new("user", "test"))
+		);
+	}
+
+	/// Re-authenticating a session replaces the principal, so it must not
+	/// leave the previous principal's CONTEXT payload behind.
+	///
+	/// `data` is an authorisation grant — the same grounds on which `clear`
+	/// and `reset` drop it. Only the paths that settle a record identity used
+	/// to assign it, so a session that authenticated as `user:1` and then
+	/// re-authenticated as a database-level principal kept carrying `user:1`'s
+	/// grants into every permission it evaluated. An empty `roles` array is
+	/// what makes that observable: it leaves the actor without the viewer
+	/// role, so table permissions are still enforced for the new principal.
+	#[tokio::test]
+	async fn re_authentication_drops_the_previous_principals_payload() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY 'secret'
+				CONTEXT ( SELECT VALUE org FROM grant WHERE owner = $auth )
+				DURATION FOR SESSION 30d;
+			DEFINE ACCESS tok ON DATABASE TYPE JWT ALGORITHM HS512 KEY 'other'
+				DURATION FOR SESSION 30d;
+			DEFINE TABLE grant SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+			DEFINE TABLE doc SCHEMALESS PERMISSIONS FOR select WHERE org IN $session.data;
+			CREATE user:1;
+			CREATE grant:a SET owner = user:1, org = "acme";
+			CREATE doc:1 SET org = "acme";
+			CREATE doc:2 SET org = "initech";
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		// Authenticate as the record: the payload is populated.
+		let mut claims = base_claims();
+		claims.ac = Some("user".to_string());
+		claims.id = Some("user:1".to_string());
+		let mut sess = Session::default();
+		token(&ds, &mut sess, &signed("secret", &claims)).await.expect("record token");
+		assert!(sess.data.is_some(), "the record path populates the payload");
+		assert!(sess.rd.is_some());
+
+		// Re-authenticate the SAME session as a different principal, through
+		// an access method that has no record identity and no CONTEXT clause.
+		let mut claims = base_claims();
+		claims.ac = Some("tok".to_string());
+		claims.roles = Some(vec![]);
+		token(&ds, &mut sess, &signed("other", &claims)).await.expect("database token");
+
+		assert_eq!(sess.ac.as_deref(), Some("tok"));
+		assert!(sess.data.is_none(), "the previous principal's CONTEXT payload must not survive");
+		assert!(sess.rd.is_none(), "the previous principal's record identity must not survive");
+
+		let res = ds.execute("SELECT VALUE id FROM doc ORDER BY id", &sess, None).await.unwrap();
+		let rows = res.into_iter().next().unwrap().result.unwrap().into_array().unwrap().into_vec();
+		assert_eq!(rows, Vec::<PV>::new(), "a stale payload must not keep granting rows");
+	}
+
+	/// An access method without the clause is untouched on this path too.
+	#[tokio::test]
+	async fn token_without_the_clause_leaves_no_data() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let owner = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY 'secret'
+				DURATION FOR SESSION 30d;
+			CREATE user:test;
+			"#,
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut claims = base_claims();
+		claims.id = Some("user:test".to_string());
+		let mut sess = Session::default();
+		token(&ds, &mut sess, &signed("secret", &claims)).await.expect("token verification");
+		assert!(sess.data.is_none());
 	}
 }

@@ -3,7 +3,16 @@
 planner-strategy = ["all-ro"]
 
 [test]
-reason = "Test planner recognition of parameter, datetime, and UUID values in WHERE with index (new executor)"
+reason = """
+Test planner recognition of parameter, datetime, and UUID values in WHERE with
+index (new executor).
+
+`$obj.field` reaches the planner as a constant object literal, because
+`resolve_condition_params` has already substituted the parameter. The planner
+resolves the field chain once, at plan time, so the predicate is a plain
+`field = literal` and the pre-decode filter applies — rather than re-picking the
+field out of a freshly cloned object on every row.
+"""
 
 [[test.results]]
 value = "[{ company: 'SurrealDB', genre: 'm', id: person:tobie, name: 'Tobie' }]"
@@ -23,7 +32,7 @@ value = "NONE"
 [[test.results]]
 value = """
 "SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = { name: 'Tobie' }.name, pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Tobie', pre_decode_filter: yes] {rows: 1}
 
 Total rows: 1""""
 
@@ -78,7 +87,7 @@ Total rows: 1""""
 [[test.results]]
 value = """
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    TableScan [ctx: Db] [table: sessions, direction: Forward, predicate: sessionUid = { uuid: u'00ad70db-f435-442e-9012-1cd853102084' }.uuid, pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    TableScan [ctx: Db] [table: sessions, direction: Forward, predicate: sessionUid = u'00ad70db-f435-442e-9012-1cd853102084', pre_decode_filter: yes] {rows: 1}
 
 Total rows: 1""""
 

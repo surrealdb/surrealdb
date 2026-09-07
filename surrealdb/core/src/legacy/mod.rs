@@ -77,6 +77,7 @@ pub(crate) use self::expr::statements::create::create_statement_compute;
 pub(crate) use self::expr::statements::define::access::{
 	define_access_statement_compute, define_access_statement_reject_es512,
 	define_access_statement_to_definition, define_access_statement_uses_es512,
+	validate_access_context,
 };
 pub(crate) use self::expr::statements::define::analyzer::{
 	define_analyzer_statement_compute, define_analyzer_statement_to_definition,

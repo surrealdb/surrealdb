@@ -692,6 +692,7 @@ pub(crate) fn define_access_statement_from_definition(
 			.map(|x| Expr::Literal(Literal::String(x.into())))
 			.unwrap_or(Expr::Literal(Literal::None)),
 		authenticate: def.authenticate.clone(),
+		context: def.context.clone(),
 		access_type: match &def.access_type {
 			catalog::AccessType::Record(record_access) => {
 				AccessType::Record(Box::new(RecordAccess {

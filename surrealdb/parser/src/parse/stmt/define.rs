@@ -2439,6 +2439,7 @@ impl Parse for ast::DefineAccess {
 		let mut duration_token = None;
 		let mut duration_grant = None;
 		let mut authenticate = None;
+		let mut context = None;
 		let mut ty = None;
 		loop {
 			let Some(peek) = parser.peek()? else {
@@ -2453,6 +2454,15 @@ impl Parse for ast::DefineAccess {
 				T![AUTHENTICATE] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut authenticate, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
+					.await?;
+				}
+				T![CONTEXT] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut context, peek.span, async |parser| {
 						parser
 							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
 							.await
@@ -2602,6 +2612,7 @@ impl Parse for ast::DefineAccess {
 			duration_session: duration_session.map(|x| x.0),
 			duration_token: duration_token.map(|x| x.0),
 			authenticate: authenticate.map(|x| x.0),
+			context: context.map(|x| x.0),
 			ty: ty.map(|x| x.0),
 			span,
 		})

@@ -37,6 +37,7 @@
 
 mod catalog_types_test;
 mod compiled_test;
+mod durable_session;
 pub(crate) mod fixtures;
 mod generator;
 mod tests;

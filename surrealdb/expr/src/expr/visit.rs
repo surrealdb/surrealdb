@@ -467,6 +467,11 @@ implement_visitor! {
 			AlterKind::Drop => {},
 			AlterKind::Set(ref x) => this.visit_expr(x)?,
 		}
+		match a.context {
+			AlterKind::None |
+			AlterKind::Drop => {},
+			AlterKind::Set(ref x) => this.visit_expr(x)?,
+		}
 		Ok(())
 	}
 
@@ -1062,6 +1067,9 @@ implement_visitor! {
 		this.visit_expr(&d.name)?;
 		this.visit_access_type(&d.access_type)?;
 		if let Some(v) = d.authenticate.as_ref(){
+			this.visit_expr(v)?;
+		}
+		if let Some(v) = d.context.as_ref(){
 			this.visit_expr(v)?;
 		}
 
@@ -2057,6 +2065,11 @@ implement_visitor_mut! {
 			AlterKind::Drop => {},
 			AlterKind::Set(ref mut x) => this.visit_mut_expr(x)?,
 		}
+		match a.context {
+			AlterKind::None |
+			AlterKind::Drop => {},
+			AlterKind::Set(ref mut x) => this.visit_mut_expr(x)?,
+		}
 		Ok(())
 	}
 
@@ -2652,6 +2665,9 @@ implement_visitor_mut! {
 		this.visit_mut_expr(&mut d.name)?;
 		this.visit_mut_access_type(&mut d.access_type)?;
 		if let Some(v) = d.authenticate.as_mut(){
+			this.visit_mut_expr(v)?;
+		}
+		if let Some(v) = d.context.as_mut(){
 			this.visit_mut_expr(v)?;
 		}
 		this.visit_mut_expr(&mut d.duration.grant)?;

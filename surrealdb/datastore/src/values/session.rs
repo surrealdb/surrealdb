@@ -20,7 +20,7 @@ use uuid::Uuid;
 /// stored KV value is `revision`-encoded — so this mirror carries the same fields
 /// converted to their internal revisioned forms, plus the absolute expiry of the
 /// durable copy. The conversion in both directions lives with the live session.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct DurableSession {
 	/// When the durable copy expires, in milliseconds since the UNIX epoch.
@@ -47,6 +47,20 @@ pub struct DurableSession {
 	pub tk: Option<Value>,
 	/// The record authentication data
 	pub rd: Option<Value>,
+	/// The result of the access method's `CONTEXT` clause, read back as
+	/// `$session.data`.
+	///
+	/// Added in revision 2; revision-1 bytes decode to `None`, which is a
+	/// session without a context clause. Every `/!se{id}` entry a previous
+	/// version wrote is revision 1, so that decode is what a rolling upgrade
+	/// depends on: frozen revision-1 bytes prove it in
+	/// `surrealdb/core/src/kvs/compat/durable_session.rs`, because a round-trip
+	/// of revision-2 bytes through revision-2 code cannot.
+	///
+	/// SECURITY: this is an authorisation payload written at rest under
+	/// `/!se{id}` alongside the rest of the attached session.
+	#[revision(start = 2)]
+	pub data: Option<Value>,
 	/// The expiration time of the session authentication
 	pub exp: Option<i64>,
 	/// The variables set on the session

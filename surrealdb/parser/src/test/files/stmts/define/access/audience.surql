@@ -19,6 +19,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: Some
                     AccessType::Jwt
                         Jwt
@@ -51,6 +52,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: Some
                     AccessType::Jwt
                         Jwt
@@ -96,6 +98,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: Some
                     AccessType::Record
                         RecordAccess

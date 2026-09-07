@@ -453,6 +453,7 @@ fn parse_define_access_jwt_key() {
 					audience: None,
 				}),
 				authenticate: None,
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
@@ -486,6 +487,7 @@ fn parse_define_access_jwt_key() {
 					audience: None,
 				}),
 				authenticate: None,
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
@@ -519,6 +521,7 @@ fn parse_define_access_jwt_key() {
 					audience: None,
 				}),
 				authenticate: Some(Expr::Literal(Literal::Bool(true))),
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
@@ -556,6 +559,7 @@ fn parse_define_access_jwt_key() {
 					audience: None,
 				}),
 				authenticate: None,
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
@@ -589,6 +593,7 @@ fn parse_define_access_jwt_key() {
 					audience: None,
 				}),
 				authenticate: None,
+				context: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
 						(30) * 86400
@@ -621,6 +626,7 @@ fn parse_define_access_jwt_key() {
 					audience: None,
 				}),
 				authenticate: None,
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
@@ -674,6 +680,7 @@ fn parse_define_access_jwt_key() {
 					audience: None,
 				}),
 				authenticate: None,
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
@@ -709,6 +716,7 @@ fn parse_define_access_jwt_key() {
 					audience: None,
 				}),
 				authenticate: None,
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
@@ -750,6 +758,7 @@ fn parse_define_access_jwt_audience() {
 					)))]),
 				}),
 				authenticate: None,
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
@@ -792,6 +801,7 @@ fn parse_define_access_jwt_audience() {
 					]),
 				}),
 				authenticate: None,
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
@@ -849,6 +859,7 @@ fn parse_define_access_jwt_jwks() {
 					audience: None,
 				}),
 				authenticate: None,
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
@@ -883,6 +894,7 @@ fn parse_define_access_jwt_jwks() {
 					audience: None,
 				}),
 				authenticate: None,
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
@@ -917,6 +929,7 @@ fn parse_define_access_jwt_jwks() {
 					audience: None,
 				}),
 				authenticate: None,
+				context: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
 						(30) * 86400
@@ -950,6 +963,7 @@ fn parse_define_access_jwt_jwks() {
 					audience: None,
 				}),
 				authenticate: None,
+				context: None,
 				// Default durations.
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
@@ -984,6 +998,7 @@ fn parse_define_access_jwt_jwks() {
 					audience: None,
 				}),
 				authenticate: None,
+				context: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
 						(30) * 86400
@@ -1209,6 +1224,7 @@ fn parse_define_access_record() {
 					bearer: None,
 				})),
 				authenticate: None,
+				context: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
 						(30) * 86400
@@ -1249,6 +1265,7 @@ fn parse_define_access_record() {
 					bearer: None,
 				})),
 				authenticate: None,
+				context: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
 						(30) * 86400
@@ -1308,6 +1325,7 @@ fn parse_define_access_record() {
 					}),
 				})),
 				authenticate: None,
+				context: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
 						(10) * 86400
@@ -1366,6 +1384,7 @@ fn parse_define_access_record() {
 					}),
 				})),
 				authenticate: None,
+				context: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
 						(10) * 86400
@@ -1406,6 +1425,7 @@ fn parse_define_access_record() {
 					bearer: None,
 				})),
 				authenticate: None,
+				context: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
 						(30) * 86400
@@ -1652,6 +1672,7 @@ fn parse_define_access_bearer() {
 					},
 				}),
 				authenticate: None,
+				context: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
 						(90) * 86400
@@ -1694,6 +1715,7 @@ fn parse_define_access_bearer() {
 					},
 				}),
 				authenticate: None,
+				context: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
 						(90) * 86400

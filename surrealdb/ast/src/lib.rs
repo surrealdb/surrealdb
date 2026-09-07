@@ -1259,6 +1259,7 @@ ast_type! {
 		pub duration_token: Option<NodeId<Expr>>,
 		pub duration_grant: Option<NodeId<Expr>>,
 		pub authenticate: Option<NodeId<Expr>>,
+		pub context: Option<NodeId<Expr>>,
 		pub ty: Option<AccessType>,
 	}
 }
@@ -1548,6 +1549,7 @@ ast_type! {
 		pub name: NodeId<Expr>,
 		pub base: Base,
 		pub authenticate: Option<AlterKind<NodeId<Expr>>>,
+		pub context: Option<AlterKind<NodeId<Expr>>>,
 		pub grant_duration: Option<AlterKind<NodeId<Spanned<Duration>>>>,
 		pub token_duration: Option<AlterKind<NodeId<Spanned<Duration>>>>,
 		pub session_duration: Option<AlterKind<NodeId<Spanned<Duration>>>>,

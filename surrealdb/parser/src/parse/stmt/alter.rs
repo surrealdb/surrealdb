@@ -1146,6 +1146,7 @@ impl Parse for ast::AlterAccess {
 
 		let mut comment = None;
 		let mut authenticate = None;
+		let mut context = None;
 		let mut grant_duration = None;
 		let mut session_duration = None;
 		let mut token_duration = None;
@@ -1156,13 +1157,20 @@ impl Parse for ast::AlterAccess {
 			match peek.token {
 				T![DROP] => {
 					let _ = parser.next();
-					let expect = "`AUTHENTICATE` or `COMMENT`";
+					let expect = "`AUTHENTICATE`, `CONTEXT` or `COMMENT`";
 					let drop = parser.peek_expect(expect)?;
 					match drop.token {
 						T![AUTHENTICATE] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
 							parse_unordered_clause_sync(parser, &mut authenticate, span, |_| {
+								Ok(AlterKind::Drop(span))
+							})?;
+						}
+						T![CONTEXT] => {
+							let _ = parser.next();
+							let span = parser.span_since(peek.span);
+							parse_unordered_clause_sync(parser, &mut context, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
@@ -1256,6 +1264,16 @@ impl Parse for ast::AlterAccess {
 					})
 					.await?;
 				}
+				T![CONTEXT] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut context, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+							.map(AlterKind::Set)
+					})
+					.await?;
+				}
 				T![COMMENT] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut comment, peek.span, async |parser| {
@@ -1273,6 +1291,7 @@ impl Parse for ast::AlterAccess {
 			name,
 			base,
 			authenticate: authenticate.map(|x| x.0),
+			context: context.map(|x| x.0),
 			grant_duration: grant_duration.map(|x| x.0),
 			token_duration: token_duration.map(|x| x.0),
 			session_duration: session_duration.map(|x| x.0),

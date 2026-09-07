@@ -17,8 +17,24 @@ compat/
 ├── fixtures.rs         # Source of truth: expected values for each test case
 ├── generator.rs        # Tool to serialize fixtures into byte arrays
 ├── v3_0_0.rs           # FROZEN: Serialized bytes from version 3.0.0
-└── tests.rs            # Tests that decode bytes and assert equality
+├── tests.rs            # Tests that decode bytes and assert equality
+└── durable_session.rs  # FROZEN rev-1 bytes for a type no released snapshot holds
 ```
+
+### Types outside the snapshot machinery
+
+The `fixtures.rs`/`vX_Y_Z.rs` pipeline snapshots the **catalog** at a released
+version. A revisioned KV value that no released snapshot contains — `/!se{id}`
+durable sessions, for instance — has nowhere to live in it, but still needs
+old-bytes decode coverage the moment its revision is bumped: `revision.lock`
+records that a shape changed, not that previously-written bytes still decode.
+
+`durable_session.rs` is the pattern for those: a private mirror struct declaring
+the *previous* revision's shape, a frozen byte constant generated from it by an
+`#[ignore]`d test, and a decode test asserting the newly-added field defaults
+the way a rolling upgrade needs. The frozen bytes are subject to the same rule
+as a version file — never edit them, and never regenerate them to make a failing
+test pass.
 
 ### Data Flow
 

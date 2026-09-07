@@ -13,6 +13,7 @@ impl From<AlterAccessStatement> for crate::expr::statements::alter::AlterAccessS
 			base: v.base.into(),
 			if_exists: v.if_exists,
 			authenticate: v.authenticate.into(),
+			context: v.context.into(),
 			grant_duration: match v.grant_duration {
 				AlterKind::Set(d) => crate::expr::statements::alter::AlterKind::Set(Some(d)),
 				AlterKind::Drop => crate::expr::statements::alter::AlterKind::Set(None),
@@ -40,6 +41,7 @@ impl From<crate::expr::statements::alter::AlterAccessStatement> for AlterAccessS
 			base: v.base.into(),
 			if_exists: v.if_exists,
 			authenticate: v.authenticate.into(),
+			context: v.context.into(),
 			grant_duration: match v.grant_duration {
 				crate::expr::statements::alter::AlterKind::Set(Some(d)) => AlterKind::Set(d),
 				crate::expr::statements::alter::AlterKind::Set(None) => AlterKind::Drop,

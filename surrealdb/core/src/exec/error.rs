@@ -273,6 +273,16 @@ pub(crate) enum Error {
 	)]
 	AccessRecordTokenDurationRequired,
 
+	#[error(
+		"A CONTEXT clause is evaluated on every authentication and its result is exposed to the client; it must be read-only"
+	)]
+	AccessContextNotReadOnly,
+
+	#[error(
+		"A CONTEXT clause is evaluated with the authenticated record's own permissions, so it can only be defined on an access method that authenticates a record"
+	)]
+	AccessContextRequiresRecord,
+
 	#[error("This access grant has an invalid subject")]
 	AccessGrantInvalidSubject,
 
@@ -390,6 +400,12 @@ impl LeafError for Error {
 			// `ComputedFieldSideEffect` is the same fault caught at read time
 			// instead of definition time, so it reaches clients the same way.
 			Error::ComputedWrite(_) | Error::ComputedFieldSideEffect => {
+				TypesError::validation(message, ValidationError::InvalidRequest)
+			}
+			// A `CONTEXT` clause the access method may not carry: the author of
+			// the DEFINE/ALTER can correct it, so it is a validation fault
+			// rather than an engine gap.
+			Error::AccessContextNotReadOnly | Error::AccessContextRequiresRecord => {
 				TypesError::validation(message, ValidationError::InvalidRequest)
 			}
 

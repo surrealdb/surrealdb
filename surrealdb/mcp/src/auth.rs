@@ -15,7 +15,7 @@
 
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer};
-use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::{Session, SessionData};
 use surrealdb_iam::Level;
 
 /// Extract the authenticated `Session` from HTTP request parts in the
@@ -45,18 +45,41 @@ pub(crate) fn extract_session_from_parts(parts: &http::request::Parts) -> Option
 /// authenticated by the same `DEFINE ACCESS` share a fingerprint. Roles are not
 /// part of it either. The check therefore binds a session to an access path, not
 /// to a principal.
+///
+/// SECURITY: the access method's `CONTEXT` payload is part of the fingerprint,
+/// for the same reason `AuthPrincipalSnapshot` counts it as part of the auth
+/// principal. `McpService` pins the handshake `Session` in `BoundHandshake` and
+/// serves every later tool call from it, so nothing else in the MCP path ever
+/// re-reads the payload. Without it here, a grant revoked in the table would be
+/// recomputed (correctly, and emptily) by each request's HTTP verification and
+/// then thrown away in favour of the pinned session, leaving the caller reading
+/// rows their grant no longer covers until `DURATION FOR SESSION` elapsed.
+/// Including it makes the mismatch a rejection, and the caller re-initializes.
+///
+/// The corollary: a `CONTEXT` clause that is not deterministic for a settled
+/// identity — one reading `time::now()`, say — recomputes differently on every
+/// request and so rejects every call after the handshake. Such a clause is
+/// already unusable, because `AuthPrincipalSnapshot` would tear the session's
+/// LIVE subscriptions down on every re-authentication for the same reason; MCP
+/// simply surfaces it sooner and louder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BoundSubject {
 	level: Level,
 	identity: String,
+	/// The access method's `CONTEXT` payload, compared by [`SessionData`]'s own
+	/// order-insensitive equality so a rescan that reorders an unchanged grant
+	/// list does not read as a different subject.
+	data: Option<SessionData>,
 }
 
 impl BoundSubject {
-	/// Compute the fingerprint from the authenticated `Session.au`.
+	/// Compute the fingerprint from the authenticated `Session.au`, plus the
+	/// `CONTEXT` payload the session was authenticated with.
 	pub(crate) fn from_session(session: &Session) -> Self {
 		Self {
 			level: session.au.level().clone(),
 			identity: session.au.id().to_string(),
+			data: session.data.clone(),
 		}
 	}
 
@@ -113,7 +136,9 @@ pub(crate) fn incoming_subject(ctx: &RequestContext<RoleServer>) -> Option<Bound
 /// - Bound subject is authenticated, incoming is authenticated and matches: accept.
 /// - Bound subject is authenticated, incoming is authenticated but different: reject with
 ///   [`McpError::invalid_params`] so the caller sees a protocol-level failure rather than a leaked
-///   tool result.
+///   tool result. "Different" includes the same identity presenting a changed `CONTEXT` payload —
+///   that is a revoked or altered grant, and the pinned handshake session would otherwise keep
+///   serving under the old one. See [`BoundSubject`].
 ///
 /// Mismatches also emit a `tracing::warn!` on the general
 /// `surrealdb::mcp` target so operators who have not yet wired up
@@ -204,10 +229,12 @@ mod tests {
 		let alice = BoundSubject {
 			level: Level::Database("ns".into(), "db".into()),
 			identity: "alice".into(),
+			data: None,
 		};
 		let bob = BoundSubject {
 			level: Level::Database("ns".into(), "db".into()),
 			identity: "bob".into(),
+			data: None,
 		};
 		assert!(check_subject(&alice, Some(bob)).is_err());
 	}
@@ -223,6 +250,47 @@ mod tests {
 		assert!(check_subject(&bound, Some(again)).is_ok());
 	}
 
+	/// A revoked grant changes the `CONTEXT` payload the request is
+	/// authenticated with. The handshake session is pinned, so the only place
+	/// that can notice is this fingerprint.
+	#[test]
+	fn a_changed_context_payload_is_a_different_subject() {
+		use surrealdb_core::dbs::SessionData;
+		use surrealdb_types::{Array, Value as PV};
+
+		fn session_with(orgs: &[&str]) -> Session {
+			Session {
+				au: std::sync::Arc::new(Auth::for_db(Role::Editor, "ns", "db")),
+				ns: Some("ns".into()),
+				db: Some("db".into()),
+				data: Some(SessionData::new(PV::Array(Array::from(
+					orgs.iter().map(|o| PV::String((*o).to_owned())).collect::<Vec<_>>(),
+				)))),
+				..Session::default()
+			}
+		}
+
+		let bound = BoundSubject::from_session(&session_with(&["acme"]));
+
+		// The grant is gone: the request must not be served from the pinned
+		// handshake session.
+		let revoked = BoundSubject::from_session(&session_with(&[]));
+		assert!(check_subject(&bound, Some(revoked)).is_err());
+
+		// A different grant set is equally a different subject.
+		let moved = BoundSubject::from_session(&session_with(&["globex"]));
+		assert!(check_subject(&bound, Some(moved)).is_err());
+
+		// An unchanged payload is accepted, including when the scan that
+		// produced it returned the same grants in a different order.
+		let same = BoundSubject::from_session(&session_with(&["acme"]));
+		assert!(check_subject(&bound, Some(same)).is_ok());
+
+		let two = BoundSubject::from_session(&session_with(&["acme", "globex"]));
+		let reordered = BoundSubject::from_session(&session_with(&["globex", "acme"]));
+		assert!(check_subject(&two, Some(reordered)).is_ok());
+	}
+
 	#[test]
 	fn audit_label_distinguishes_anonymous_and_authenticated() {
 		let anon = BoundSubject::from_session(&Session::default());
@@ -230,6 +298,7 @@ mod tests {
 		let auth = BoundSubject {
 			level: Level::Root,
 			identity: "root".into(),
+			data: None,
 		};
 		assert!(auth.audit_label().contains("root"));
 	}

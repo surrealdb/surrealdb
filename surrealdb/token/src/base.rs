@@ -354,6 +354,8 @@ pub enum BaseTokenKind {
 	KwConfig,
 	#[regex(r"(?i)CONTENT")]
 	KwContent,
+	#[regex(r"(?i)CONTEXT")]
+	KwContext,
 	#[regex(r"(?i)CONTINUE")]
 	KwContinue,
 	#[regex(r"(?i)COUNT")]
@@ -1013,6 +1015,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwConcurrently => "keyword `CONCURRENTLY`",
 			BaseTokenKind::KwConfig => "keyword `CONFIG`",
 			BaseTokenKind::KwContent => "keyword `CONTENT`",
+			BaseTokenKind::KwContext => "keyword `CONTEXT`",
 			BaseTokenKind::KwContinue => "keyword `CONTINUE`",
 			BaseTokenKind::KwCount => "keyword `COUNT`",
 			BaseTokenKind::KwCreate => "keyword `CREATE`",
@@ -1342,6 +1345,7 @@ impl BaseTokenKind {
 				| Self::KwConcurrently
 				| Self::KwConfig
 				| Self::KwContent
+				| Self::KwContext
 				| Self::KwContinue
 				| Self::KwCount
 				| Self::KwCreate

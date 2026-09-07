@@ -51,6 +51,97 @@ impl ToSql for Literal {
 	}
 }
 
+/// A constant field chain the planner resolved once, at plan time.
+///
+/// `$session.data.orgs` inside a permission or `WHERE` clause would otherwise
+/// re-derive itself on every row: `IdiomExpr` evaluates its start first, and
+/// both [`Param::evaluate`] and [`Literal::evaluate`] hand back a *clone* — so
+/// each row deep-clones the entire `$session` object just to read one field out
+/// of it. Resolving the chain at plan time replaces the whole `IdiomExpr` with
+/// the value it denotes.
+///
+/// Behaves exactly like [`Literal`] at runtime, `try_literal` included, so the
+/// `field op literal` fast path ([`super::SimpleBinaryOp`]) still fires and the
+/// per-row cost drops to a direct field lookup with no cloning at all.
+///
+/// What it does *not* do is make the predicate index-eligible. This node is
+/// built during physical-expression construction, after index analysis has
+/// already chosen the plan off the AST, so `WHERE org IN $session.data.orgs`
+/// still scans the table and still walks the payload once per row. The saving
+/// is the clone, not the scan. See the ALTITUDE note at the fold site in
+/// `planner/idiom.rs` for why the fold lives there and what moving it up would
+/// take.
+///
+/// Its own [`ToSql`] renders the idiom it came from rather than its value — but
+/// that is **not** a guarantee that `EXPLAIN` never prints the payload, and must
+/// not be relied on as one. It holds only while this node is what gets printed.
+/// In the case the fold exists for it is not: once `try_literal` makes the
+/// `field op literal` fast path eligible, the planner drops the `FoldedIdiom`
+/// and keeps only the `Value`, and [`super::SimpleBinaryOp`]'s `fmt_sql` prints
+/// that. So `EXPLAIN SELECT * FROM doc WHERE org IN $session.data` prints
+/// `org INSIDE ['acme','globex']`, and a folded permission predicate puts the
+/// `CONTEXT` payload into plan text.
+///
+/// Confidentiality impact is low — it is the caller's own payload, in their own
+/// plan — but two consequences are real. Plan text for identical SQL is now
+/// session-dependent (it varies with the token, the selected ns/db, and the
+/// payload), which destabilises plan strings for fixtures and telemetry;
+/// `redact_volatile_explain_attrs` does not cover it, since it redacts only
+/// elapsed times and batch counts. And a reader of this type should not assume
+/// the display survives into the plan.
+///
+/// Carrying a display override into `SimpleBinaryOp` — so the fast path prints
+/// the idiom it folded rather than the value — would restore the property for
+/// both nodes. That is a change to `SimpleBinaryOp` and the planner site that
+/// builds it, not to this type.
+#[derive(Debug, Clone)]
+pub struct FoldedIdiom {
+	/// The idiom as written, kept for display only.
+	display: String,
+	value: Value,
+}
+
+impl FoldedIdiom {
+	pub(crate) fn new(display: String, value: Value) -> Self {
+		Self {
+			display,
+			value,
+		}
+	}
+}
+
+impl PhysicalExpr for FoldedIdiom {
+	fn name(&self) -> &'static str {
+		"FoldedIdiom"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		crate::exec::ContextLevel::Root
+	}
+
+	fn evaluate<'a>(&'a self, _ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move { Ok(self.value.clone()) })
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		AccessMode::ReadOnly
+	}
+
+	fn try_literal(&self) -> Option<&Value> {
+		Some(&self.value)
+	}
+}
+
+impl ToSql for FoldedIdiom {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(&self.display);
+	}
+}
+
 /// Parameter reference - $foo
 #[derive(Debug, Clone)]
 pub struct Param(pub(crate) Strand);

@@ -457,6 +457,7 @@ impl Parser<'_> {
 			base,
 			kind,
 			authenticate: None,
+			context: None,
 			access_type: AccessType::default(),
 			duration: AccessDuration::default(),
 			comment: Expr::Literal(Literal::None),
@@ -568,6 +569,10 @@ impl Parser<'_> {
 				t!("AUTHENTICATE") => {
 					self.pop_peek();
 					res.authenticate = Some(stk.run(|stk| self.parse_expr_field(stk)).await?);
+				}
+				t!("CONTEXT") => {
+					self.pop_peek();
+					res.context = Some(stk.run(|stk| self.parse_expr_field(stk)).await?);
 				}
 				t!("DURATION") => {
 					self.pop_peek();

@@ -912,17 +912,25 @@ impl Parser<'_> {
 							self.pop_peek();
 							res.authenticate = AlterKind::Drop;
 						}
+						t!("CONTEXT") => {
+							self.pop_peek();
+							res.context = AlterKind::Drop;
+						}
 						t!("COMMENT") => {
 							self.pop_peek();
 							res.comment = AlterKind::Drop;
 						}
-						_ => unexpected!(self, peek, "`AUTHENTICATE` or `COMMENT`"),
+						_ => unexpected!(self, peek, "`AUTHENTICATE`, `CONTEXT` or `COMMENT`"),
 					}
 				}
 				t!("AUTHENTICATE") => {
 					self.pop_peek();
 					res.authenticate =
 						AlterKind::Set(stk.run(|stk| self.parse_expr_field(stk)).await?);
+				}
+				t!("CONTEXT") => {
+					self.pop_peek();
+					res.context = AlterKind::Set(stk.run(|stk| self.parse_expr_field(stk)).await?);
 				}
 				t!("DURATION") => {
 					self.pop_peek();

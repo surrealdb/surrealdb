@@ -65,6 +65,7 @@ keyword! {
 	Concurrently => "CONCURRENTLY",
 	Config => "CONFIG",
 	Content => "CONTENT",
+	Context => "CONTEXT",
 	Continue => "CONTINUE",
 	Computed => "COMPUTED",
 	Count => "COUNT",
