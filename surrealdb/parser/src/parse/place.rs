@@ -220,6 +220,30 @@ impl Parse for ast::Place {
 						continue;
 					}
 
+					if parser.eat(T![*])?.is_some() {
+						let _ = parser
+							.expect_closing_delimiter(BaseTokenKind::CloseBracket, peek.span)?;
+						let new_lhs = parser.push(lhs);
+						let span = parser.span_since(start);
+						lhs = ast::Place::All(ast::AllPlace {
+							lhs: new_lhs,
+							span,
+						});
+						continue;
+					}
+
+					if parser.eat(T![$])?.is_some() {
+						let _ = parser
+							.expect_closing_delimiter(BaseTokenKind::CloseBracket, peek.span)?;
+						let new_lhs = parser.push(lhs);
+						let span = parser.span_since(start);
+						lhs = ast::Place::Last(ast::LastPlace {
+							lhs: new_lhs,
+							span,
+						});
+						continue;
+					}
+
 					let index = parser.parse_enter().await?;
 					let _ =
 						parser.expect_closing_delimiter(BaseTokenKind::CloseBracket, peek.span)?;

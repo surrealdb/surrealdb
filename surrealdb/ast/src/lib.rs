@@ -2269,10 +2269,24 @@ ast_type! {
 }
 
 ast_type! {
+	pub struct AllPlace{
+		pub lhs: NodeId<Place>,
+	}
+}
+
+ast_type! {
+	pub struct LastPlace{
+		pub lhs: NodeId<Place>,
+	}
+}
+
+ast_type! {
 	pub enum Place{
 		Field(NodeId<Ident>),
 		Member(MemberPlace),
 		Index(IndexPlace),
+		All(AllPlace),
+		Last(LastPlace),
 		/// Marks that the rest of the place contains syntax which was allowed, but
 		/// doesn't actually do anything, nor make real sense.
 		Legacy(Span),
