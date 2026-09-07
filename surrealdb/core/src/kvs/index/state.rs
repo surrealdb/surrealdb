@@ -7,7 +7,7 @@ pub(super) use surrealdb_datastore::index_state::{
 };
 pub(crate) use surrealdb_datastore::index_state::{filter_online_indexes, index_building_info};
 
-use super::{BUILD_OWNER_LEASE_SECS, IndexBuildState};
+use super::{BUILD_OWNER_LEASE_SECS, IndexBuildPhase, IndexBuildState};
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Error as KvsError, Transaction, storage_error};
@@ -121,4 +121,61 @@ pub(super) fn build_owner_expired(state: &IndexBuildState, now: DateTime<Utc>) -
 	state.owner_heartbeat_at.unwrap_or(state.updated_at)
 		+ chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS)
 		<= now
+}
+
+/// Whether a builder anywhere in the cluster still owns this index.
+///
+/// True while the state is `Building` or `Closing`, and while it is `Online`
+/// with an owner that has not released it. That last window covers both the
+/// drain a build runs after publishing the index and the wait for the
+/// statement that started it to close the transaction carrying the new
+/// definition — until that commit lands, every other node reads the previous
+/// definition, so this is the only signal that the build happened at all.
+/// [`Building::defer_ownership_release`](super::builder::Building) is what
+/// holds the window open that far.
+///
+/// Deliberately not bounded on the owner's heartbeat lease. Lease expiry is
+/// what lets another builder *attempt* a takeover; it is not itself a fence,
+/// because `maintain_build_ownership` accepts the same `(generation, owner)`
+/// whatever the heartbeat age. A builder inside one long uninterruptible
+/// stretch — a vector compaction plan carries no internal checkpoint — can let
+/// its heartbeat lapse and then carry on writing, so treating expiry as
+/// "nobody owns this" would let maintenance run against a live writer. Only a
+/// committed CAS takeover changes the owner, and this reads that.
+///
+/// The cost of that choice is that a builder which dies mid-drain leaves the
+/// index fenced until something rewrites `!bs`: the resume scan for a
+/// `Building`/`Closing` generation, or the next `REBUILD INDEX` for a stranded
+/// `Online` owner. That failure mode is bounded and benign — pendings simply
+/// accumulate for a reader that already materialises them — where the
+/// alternative is two writers folding the same pendings through different
+/// on-disk layouts.
+pub(crate) async fn build_owner_is_live(tx: &Transaction, ikb: &IndexKeyBase) -> Result<bool> {
+	Ok(build_owner_holds(tx.get_key(&ikb.new_bs_key(), None).await?))
+}
+
+/// [`build_owner_is_live`] under a commit-time conflict registration.
+///
+/// For a caller that goes on to write in the same transaction. A build
+/// acquiring or releasing ownership writes `!bs`, so registering the key here
+/// means a build that starts after this read cannot commit alongside the
+/// caller: one of the two is rejected, and the caller re-reads on retry.
+/// Without it the read is only a snapshot, and a build acquired just after it
+/// would be invisible to the write that follows.
+pub(crate) async fn build_owner_is_live_locked(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+) -> Result<bool> {
+	Ok(build_owner_holds(tx.getu_key(&ikb.new_bs_key()).await?))
+}
+
+fn build_owner_holds(state: Option<IndexBuildState>) -> bool {
+	let Some(state) = state else {
+		return false;
+	};
+	match state.phase {
+		IndexBuildPhase::Building | IndexBuildPhase::Closing => true,
+		IndexBuildPhase::Online => state.owner.is_some(),
+		IndexBuildPhase::Error => false,
+	}
 }

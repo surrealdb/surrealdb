@@ -93,7 +93,7 @@ use crate::key::{
 };
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SystemClock;
-use crate::kvs::index::IndexBuilder;
+use crate::kvs::index::{IndexBuilder, build_owner_is_live, build_owner_is_live_locked};
 use crate::kvs::paging::{PageCompanion, PagedDelete, PagedOutcome};
 use crate::kvs::request::{Dialect, QueryRequest, QuerySource};
 use crate::kvs::sequences::Sequences;
@@ -4265,35 +4265,82 @@ impl Datastore {
 		canceller: CancellationToken,
 	) -> Result<()> {
 		Self::ensure_not_cancelled(&canceller)?;
-		let ix = {
+		// The catalog definition and the index's durable build state, read
+		// together so the ownership decision below costs no extra transaction.
+		let (ix, build_owner_live) = {
 			let txn = self.transaction(Read).await?;
-			let res =
-				txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None).await;
+			let res = async {
+				let ix = txn
+					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
+					.await?;
+				let live = build_owner_is_live(&txn, ikb).await?;
+				Ok::<_, anyhow::Error>((ix, live))
+			}
+			.await;
 			let _ = txn.cancel().await;
 			res?
 		};
 		Self::ensure_not_cancelled(&canceller)?;
 		match ix {
-			Some(ix) if !ix.prepare_remove => match &ix.index {
-				Index::FullText(p) => {
-					self.process_fulltext_compaction(ikb, p, &canceller).await?;
+			Some(ix) if !ix.prepare_remove => {
+				// A vector index whose build is still in flight is left to that
+				// build's own drain, because only the drain knows which on-disk
+				// layout to compact into. A `REBUILD INDEX` that migrates
+				// `format_version` holds the new definition in its uncommitted
+				// statement transaction, so the catalog read above still reports the
+				// retired one. Compacting from here would fold the pendings into the
+				// retired layout and leave the published index without them; and
+				// because the process-local vector-index wrapper is keyed without the
+				// format version, the two compactors would also evict each other's
+				// graph on every access.
+				//
+				// Durable state is the whole test, on every node including the one
+				// running the build. It is committed before the builder is
+				// registered locally and held until the statement that publishes
+				// the definition closes its transaction, so it already covers every
+				// window in which this catalog read can be stale. A process-local
+				// check would only add the tail between that release and the
+				// builder task's exit, where the build has finished publishing and
+				// skipping would discard the request that release just queued.
+				//
+				// The queue entry that led here is dropped with the rest of its
+				// batch, and for these two kinds that loses nothing: their builders
+				// drain the index's pendings before returning, so the entry is
+				// already redundant. Full-text and count builders have no such drain,
+				// which is why the test is scoped to the kinds that do rather than
+				// applied to every index — dropping one of their requests would leave
+				// deltas uncompacted until the next write to the index.
+				let drains_own_pendings = match &ix.index {
+					Index::Hnsw(_) => true,
+					#[cfg(diskann)]
+					Index::DiskAnn(_) => true,
+					_ => false,
+				};
+				if drains_own_pendings && build_owner_live {
+					trace!(target: TARGET, "Index compaction: Index {ikb:?} is being built, leaving it to its builder");
+					return Ok(());
 				}
-				Index::Count(_) => {
-					self.process_count_compaction(ikb, &canceller).await?;
+				match &ix.index {
+					Index::FullText(p) => {
+						self.process_fulltext_compaction(ikb, p, &canceller).await?;
+					}
+					Index::Count(_) => {
+						self.process_count_compaction(ikb, &canceller).await?;
+					}
+					Index::Hnsw(_) => {
+						// HNSW compaction owns its pending-key allocation and pending-range
+						// drain semantics separately from full-text/count compaction.
+						self.process_hnsw_compaction(ikb, ix.format_version, &canceller).await?;
+					}
+					#[cfg(diskann)]
+					Index::DiskAnn(_) => {
+						self.process_diskann_compaction(ikb, &canceller).await?;
+					}
+					_ => {
+						trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ikb);
+					}
 				}
-				Index::Hnsw(_) => {
-					// HNSW compaction owns its pending-key allocation and pending-range
-					// drain semantics separately from full-text/count compaction.
-					self.process_hnsw_compaction(ikb, ix.format_version, &canceller).await?;
-				}
-				#[cfg(diskann)]
-				Index::DiskAnn(_) => {
-					self.process_diskann_compaction(ikb, &canceller).await?;
-				}
-				_ => {
-					trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ikb);
-				}
-			},
+			}
 			_ => {
 				trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ikb);
 			}
@@ -4392,6 +4439,15 @@ impl Datastore {
 			// dispatch time.
 			let mut applied_format = format_version;
 			let res: Result<bool> = async {
+				// Re-tested inside the write transaction, and under a conflict
+				// registration. The dispatch-time test was a snapshot in a
+				// transaction that has since been cancelled, so a build acquired
+				// after it would otherwise be invisible to this apply; the
+				// registration makes such an acquisition conflict this commit
+				// instead, and the retry re-reads it.
+				if build_owner_is_live_locked(&txn, ikb).await? {
+					return Ok(false);
+				}
 				match txn
 					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
 					.await?
@@ -4544,6 +4600,12 @@ impl Datastore {
 
 			let txn = Arc::new(self.transaction(Write).await?);
 			let res: Result<bool> = async {
+				// See the HNSW counterpart: the dispatch-time ownership test is
+				// a cancelled snapshot, so it is re-tested here under a conflict
+				// registration that a concurrent build acquisition trips.
+				if build_owner_is_live_locked(&txn, ikb).await? {
+					return Ok(false);
+				}
 				match txn
 					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
 					.await?

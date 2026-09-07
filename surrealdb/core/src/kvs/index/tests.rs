@@ -9,6 +9,7 @@ use surrealdb_kvs::TransactionType;
 #[cfg(any(feature = "kv-surrealkv", feature = "kv-rocksdb"))]
 use temp_dir::TempDir;
 use tokio::time::{sleep, timeout};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use web_time::Instant;
 
@@ -2182,6 +2183,53 @@ async fn count_query_value(ds: &Datastore, session: &Session, sql: &str) -> Resu
 
 async fn count_index_value(ds: &Datastore, session: &Session) -> Result<i64> {
 	count_query_value(ds, session, "SELECT count() FROM user GROUP ALL").await
+}
+
+/// Number of undrained count-index delta entries for one index.
+#[cfg(feature = "kv-mem")]
+async fn count_index_delta_keys(
+	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	ix: IndexId,
+) -> Result<usize> {
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let rng = IndexCountPrefix {
+		ns,
+		db,
+		tb: Cow::Borrowed(table),
+		ix,
+	}
+	.range()?;
+	let keys = catch!(tx, tx.keys(rng, u32::MAX, 0, None).await);
+	tx.cancel().await?;
+	Ok(keys.len())
+}
+
+/// Put this index's durable build state into `Building` under an owner that is
+/// not this node, so the compaction task sees a build in flight elsewhere in
+/// the cluster. `heartbeat_age` back-dates the owner's heartbeat.
+#[cfg(feature = "kv-mem")]
+async fn claim_build_for_a_remote_owner(
+	ds: &Datastore,
+	ikb: &IndexKeyBase,
+	heartbeat_age: chrono::Duration,
+) -> Result<()> {
+	let mut state = durable_build_state(ds, ikb).await?;
+	state.phase = IndexBuildPhase::Building;
+	state.owner = Some(Uuid::now_v7());
+	state.owner_heartbeat_at = Some(Utc::now() - heartbeat_age);
+	set_durable_build_state(ds, ikb, state).await
+}
+
+/// Number of HNSW pending entries queued for one index.
+#[cfg(feature = "kv-mem")]
+async fn count_hnsw_pendings(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let count = catch!(tx, tx.count(ikb.new_hr_range()?, None).await);
+	tx.cancel().await?;
+	Ok(count)
 }
 
 async fn wait_for_retry_conflict(
@@ -4976,6 +5024,491 @@ async fn concurrent_indexing_retries_initial_cleanup_stops_after_abort() -> Resu
 
 	let remaining = wait_for_retry_conflict_count_to_stabilize(site, node_id).await?;
 	assert!(remaining > 0, "abort should stop retries before all conflicts are consumed");
+	Ok(())
+}
+
+/// The HNSW pending drain that closes a blocking build contends with the
+/// datastore's periodic index compaction over the same batch, so the loser's
+/// commit fails with a retryable conflict. That conflict must be retried
+/// against a freshly read plan, not returned: it is the statement's own error
+/// otherwise, and `REBUILD INDEX` reports a raw transaction conflict the caller
+/// can do nothing with.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rebuild_index_retries_a_conflicted_hnsw_pending_compaction() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];",
+	)
+	.await?;
+	let site = RetryableConflictSite::ConcurrentIndexHnswPendingCompaction;
+	let node_id = ds.id();
+	let _guard = inject_retryable_conflict(site, node_id);
+
+	execute_all(&ds, &session, "REBUILD INDEX hx ON t").await?;
+
+	assert_eq!(
+		retryable_conflict_count(site, node_id),
+		0,
+		"the rebuild must consume the injected conflict by retrying the drain"
+	);
+	// A retry that gave up early would leave pendings uncompacted, so the graph
+	// would answer with fewer neighbours than the table holds.
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM t WHERE vec <|2,40|> [1.0f, 0.0f]", 2)
+		.await
+}
+
+/// DiskANN counterpart of
+/// [`rebuild_index_retries_a_conflicted_hnsw_pending_compaction`]. Its apply
+/// owns the commit, so the conflict arrives as the apply's own error.
+#[cfg(all(feature = "kv-mem", diskann))]
+#[tokio::test(flavor = "multi_thread")]
+async fn rebuild_index_retries_a_conflicted_diskann_pending_compaction() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX dx ON t FIELDS vec DISKANN DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];",
+	)
+	.await?;
+	let site = RetryableConflictSite::ConcurrentIndexDiskAnnPendingCompaction;
+	let node_id = ds.id();
+	let _guard = inject_retryable_conflict(site, node_id);
+
+	execute_all(&ds, &session, "REBUILD INDEX dx ON t").await?;
+
+	assert_eq!(
+		retryable_conflict_count(site, node_id),
+		0,
+		"the rebuild must consume the injected conflict by retrying the drain"
+	);
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM t WHERE vec <|2,40|> [1.0f, 0.0f]", 2)
+		.await
+}
+
+/// The periodic index-compaction task must leave an index alone while a local
+/// build owns it.
+///
+/// A `REBUILD INDEX` that migrates the on-disk format holds the new definition
+/// in its own uncommitted transaction, so the compaction task reads the retired
+/// one from the catalog. Compacting from there folds the index's pendings into
+/// the layout the rebuild is replacing, and the published index is left without
+/// them — a silently empty vector index rather than a failed statement.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn index_compaction_leaves_an_index_its_builder_still_owns() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+	let pendings = count_hnsw_pendings(&ds, &ikb).await?;
+	assert!(pendings > 0, "the fixture must leave pendings for a compaction to consume");
+
+	// Park a build in its pre-scan cleanup retry loop. The injection aborts the
+	// transaction that both wipes the index data and would commit the wipe, so
+	// the pendings above survive while the index stays registered to a builder.
+	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
+	let node_id = ds.id();
+	let _guard = inject_retryable_conflicts(site, node_id, REPEATED_RETRY_CONFLICTS);
+	execute_all(&ds, &session, "REBUILD INDEX hx ON t CONCURRENTLY").await?;
+	wait_for_retry_conflict(site, node_id, REPEATED_RETRY_CONFLICTS).await?;
+
+	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())
+		.await?;
+
+	assert_eq!(
+		count_hnsw_pendings(&ds, &ikb).await?,
+		pendings,
+		"compaction must leave the pendings to the builder that owns the index"
+	);
+	// Stop the parked build so the task does not outlive the test.
+	execute_all(&ds, &session, "REMOVE INDEX hx ON t").await?;
+	Ok(())
+}
+
+/// The exclusion must hold cluster-wide, not just for builds on this node. The
+/// `IndexCompaction` task lease can sit on a different node from the one running
+/// the rebuild, and that node's local builder registry knows nothing about it.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn index_compaction_leaves_an_index_a_remote_builder_owns() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+	let pendings = count_hnsw_pendings(&ds, &ikb).await?;
+	assert!(pendings > 0, "the fixture must leave pendings for a compaction to consume");
+	claim_build_for_a_remote_owner(&ds, &ikb, chrono::Duration::zero()).await?;
+
+	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())
+		.await?;
+
+	assert_eq!(
+		count_hnsw_pendings(&ds, &ikb).await?,
+		pendings,
+		"compaction must leave the pendings to the builder that owns the index"
+	);
+	Ok(())
+}
+
+/// A heartbeat lapse is not a fence. `maintain_build_ownership` accepts the
+/// same `(generation, owner)` whatever the heartbeat age, so a builder stalled
+/// inside one long uninterruptible stretch can resume and keep writing; letting
+/// compaction in on wall-clock expiry alone would put it alongside a live
+/// writer. Only a committed takeover changes the owner.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn index_compaction_still_defers_to_a_build_whose_heartbeat_lapsed() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+	let pendings = count_hnsw_pendings(&ds, &ikb).await?;
+	assert!(pendings > 0, "the fixture must leave pendings for a compaction to consume");
+	claim_build_for_a_remote_owner(
+		&ds,
+		&ikb,
+		chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS * 4),
+	)
+	.await?;
+
+	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())
+		.await?;
+
+	assert_eq!(
+		count_hnsw_pendings(&ds, &ikb).await?,
+		pendings,
+		"an expired heartbeat is a takeover trigger, not evidence that nobody is writing"
+	);
+	Ok(())
+}
+
+/// The window between publishing `Online` and the statement committing its
+/// catalog change is still owned: the build's own pending drain runs there, and
+/// the catalog still advertises the format the rebuild is replacing. Ownership
+/// is not released until that drain is done.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn index_compaction_defers_to_an_online_build_that_has_not_released() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+	let pendings = count_hnsw_pendings(&ds, &ikb).await?;
+	assert!(pendings > 0, "the fixture must leave pendings for a compaction to consume");
+	// A published generation whose owner has not yet released it — what a
+	// blocking rebuild looks like from another node while it drains.
+	let mut state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online);
+	assert_eq!(state.owner, None, "a finished build must have released ownership");
+	state.owner = Some(Uuid::now_v7());
+	state.owner_heartbeat_at = Some(Utc::now());
+	set_durable_build_state(&ds, &ikb, state).await?;
+
+	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())
+		.await?;
+
+	assert_eq!(
+		count_hnsw_pendings(&ds, &ikb).await?,
+		pendings,
+		"an Online generation still owned by its builder must be left to that builder"
+	);
+	Ok(())
+}
+
+/// Run a build the way a statement does: inside a write transaction that stays
+/// open across it and is the caller's to close.
+///
+/// Returns once the build task has exited, whether the statement waited on it
+/// (`blocking`) or only spawned it, so a caller can assert on what the finished
+/// build left behind while its statement is still uncommitted.
+#[cfg(feature = "kv-mem")]
+async fn build_index_inside_an_open_statement_transaction(
+	ds: &Arc<Datastore>,
+	session: &Session,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	ix: Arc<IndexDefinition>,
+	blocking: bool,
+) -> Result<Arc<crate::kvs::Transaction>> {
+	let txn = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let table_def = catch!(txn, txn.get_tb(ns, db, table, None).await).expect("table should exist");
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(Arc::clone(&txn));
+	let ctx = ctx.freeze();
+	let builder = ctx.get_index_builder().expect("index builder should exist").clone();
+	let index_id = ix.index_id;
+	let rcv =
+		builder.build(&ctx, ds.setup_options(session), table_def.table_id, ix, blocking).await?;
+	match rcv {
+		Some(rcv) => rcv.await.expect("the build task must report its result")?,
+		None => {
+			let building = local_builder_for_key(ds, ns, db, table, index_id)
+				.await?
+				.expect("the build registers a local builder");
+			wait_for_finished_builder(&building).await?;
+		}
+	}
+	Ok(txn)
+}
+
+/// `CONCURRENTLY` returns as soon as the build task is spawned, so its
+/// statement transaction — the one staging the definition the build is made
+/// against — is still uncommitted while the build runs and can outlast it on a
+/// small index. Ownership has to cover that too, not just the blocking case.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn build_ownership_outlives_a_concurrent_build_until_its_statement_commits() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		false,
+	)
+	.await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online);
+	assert!(
+		state.owner.is_some(),
+		"a concurrent build must hold the fence until its statement transaction closes"
+	);
+
+	txn.commit().await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.owner, None, "the commit must release the fence");
+	Ok(())
+}
+
+/// A blocking build publishes `Online` and drains its pendings while the
+/// statement that started it still holds the definition it built against in an
+/// uncommitted transaction. Every other node reads the previous definition for
+/// that whole window, so ownership — the only durable signal that the build
+/// happened — has to outlast the builder task itself.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn build_ownership_outlives_the_builder_until_its_statement_commits() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("the build registers a local builder");
+	assert!(building.is_finished(), "a blocking build reports only after its task has exited");
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online);
+	assert!(
+		state.owner.is_some(),
+		"ownership must still fence compaction while the statement transaction is open"
+	);
+
+	txn.commit().await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(
+		state.owner, None,
+		"the commit that publishes the definition must release the fence"
+	);
+	Ok(())
+}
+
+/// The fence answers a compaction request with "leave it to the builder", and
+/// the queue entry that carried it is deleted with its batch either way. That
+/// costs nothing while the builder still has a drain to run, but the fence
+/// outlives its last one: a write committing between the drain and the
+/// statement's commit queues a pending whose request is consumed by a pass that
+/// does not act on it. Releasing the fence has to put a request back.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn releasing_build_ownership_requeues_compaction_skipped_by_the_fence() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	assert_eq!(
+		count_hnsw_pendings(&ds, &ikb).await?,
+		0,
+		"the build drains the index's pendings before it reports"
+	);
+
+	// A write in the window the fence outlives: the build has drained for the
+	// last time, and the statement that publishes its definition is still open.
+	execute_all(&ds, &session, "CREATE t:2 SET vec = [0.0, 1.0]").await?;
+	let pendings = count_hnsw_pendings(&ds, &ikb).await?;
+	assert!(pendings > 0, "the write must queue a pending for compaction to consume");
+
+	// Consumes the request that write queued without acting on it.
+	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())
+		.await?;
+	assert_eq!(
+		count_hnsw_pendings(&ds, &ikb).await?,
+		pendings,
+		"the fence must leave the pending to the builder"
+	);
+
+	txn.commit().await?;
+
+	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())
+		.await?;
+	assert_eq!(
+		count_hnsw_pendings(&ds, &ikb).await?,
+		0,
+		"the released fence must queue the compaction it turned away"
+	);
+	Ok(())
+}
+
+/// A statement that does not commit leaves the definition background
+/// compaction was already reading, so the fence it was holding has to go too —
+/// otherwise a rolled-back rebuild strands the index with no maintenance.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn build_ownership_is_released_when_its_statement_rolls_back() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let txn = build_index_inside_an_open_statement_transaction(
+		&ds,
+		&session,
+		ns,
+		db,
+		&table,
+		Arc::clone(&ix),
+		true,
+	)
+	.await?;
+	txn.cancel().await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.owner, None, "a rolled-back statement must not leave the index fenced");
+	Ok(())
+}
+
+/// The exclusion is scoped to the index kinds whose builders drain their own
+/// pendings. A full-text or count builder has no such drain, so skipping its
+/// compaction request would drop it — the batch that carried it is deleted
+/// either way — and leave the deltas uncompacted until the next write.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn index_compaction_still_drains_a_count_index_under_build() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX cx ON t COUNT;
+		 CREATE t:1 SET n = 1;
+		 CREATE t:2 SET n = 2;
+		 CREATE t:3 SET n = 3;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "cx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let deltas = count_index_delta_keys(&ds, ns, db, &table, ix.index_id).await?;
+	assert!(deltas > 1, "the fixture must leave deltas for a compaction to fold");
+	claim_build_for_a_remote_owner(&ds, &ikb, chrono::Duration::zero()).await?;
+
+	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())
+		.await?;
+
+	assert!(
+		count_index_delta_keys(&ds, ns, db, &table, ix.index_id).await? < deltas,
+		"a count index under build must still be compacted"
+	);
 	Ok(())
 }
 

@@ -39,7 +39,10 @@ mod tests;
 use std::time::Duration;
 
 pub(crate) use builder::{AbortLocalBuild, CleanUncommittedBuild, IndexBuilder, IndexMutation};
-pub(crate) use state::{filter_online_indexes, index_building_info, retire_durable_index};
+pub(crate) use state::{
+	build_owner_is_live, build_owner_is_live_locked, filter_online_indexes, index_building_info,
+	retire_durable_index,
+};
 // Only the frozen-fixture corpus names this directly; the builder reaches a
 // primary appending through its ticket.
 #[cfg(test)]

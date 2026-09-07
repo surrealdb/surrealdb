@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
@@ -57,6 +57,14 @@ use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 /// Process-local key used only to deduplicate active builder tasks.
 pub(super) type SharedIndexKey = Arc<IndexKey>;
+
+/// The build task has stopped writing (see [`Building::release_gate`]).
+const RELEASE_GATE_BUILDER: u8 = 1 << 0;
+/// The statement that publishes this build's definition has closed its
+/// transaction (see [`Building::release_gate`]).
+const RELEASE_GATE_STATEMENT: u8 = 1 << 1;
+/// Both halves have arrived, so durable ownership can be released.
+const RELEASE_GATE_OPEN: u8 = RELEASE_GATE_BUILDER | RELEASE_GATE_STATEMENT;
 
 /// Whether an error reports that the build crossed the process memory
 /// threshold (see [`Building::is_beyond_threshold`]).
@@ -179,6 +187,7 @@ impl IndexBuilder {
 			Ok(None) => return Ok(BuildStart::RemoteOwner(building)),
 			Err(err) => return Err(err),
 		};
+		building.defer_ownership_release(ctx).await;
 		self.start_acquired_building(Arc::clone(&building), acquired, sdr).await?;
 		Ok(BuildStart::Started)
 	}
@@ -304,6 +313,7 @@ impl IndexBuilder {
 						&& let Some(acquired) = building.takeover_expired_build_state().await?
 					{
 						let (s, r) = channel();
+						building.defer_ownership_release(ctx).await;
 						self.start_acquired_building(Arc::clone(&building), acquired, Some(s))
 							.await?;
 						return r.await.map_err(|_| DatastoreError::IndexingBuildingCancelled {
@@ -437,6 +447,20 @@ pub(super) struct Building {
 	pub(super) aborted: AtomicBool,
 	/// Set when the spawned task exits so a later local build can start.
 	pub(super) finished: AtomicBool,
+	/// Rendezvous controlling when durable build ownership is released.
+	///
+	/// Ownership is what keeps every node's background index compaction off an
+	/// index whose layout only the builder knows, so it may not be released
+	/// while either the builder or the statement that publishes the definition
+	/// is still in flight. Each arrives once, and whichever arrives second
+	/// performs the release.
+	///
+	/// A build with no statement behind it — a maintenance resume, whose
+	/// definition was committed long before — starts with
+	/// [`RELEASE_GATE_STATEMENT`] already set, so its builder releases alone.
+	/// [`Building::defer_ownership_release`] clears it for every build a
+	/// statement started, before that build is spawned.
+	release_gate: AtomicU8,
 	/// Wakes [`Building::wait_finished`] once `finished` is set. Private because
 	/// the two must move together: a notification without the flag is a lost
 	/// wake-up for every waiter that has not registered yet.
@@ -465,6 +489,7 @@ impl Building {
 			build_generation: AtomicU64::new(0),
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
+			release_gate: AtomicU8::new(RELEASE_GATE_STATEMENT),
 			finished_notify: Notify::new(),
 		})
 	}
@@ -1059,6 +1084,12 @@ impl Building {
 	}
 
 	/// Publish the index as queryable once all admitted work has been replayed.
+	///
+	/// Ownership is deliberately retained past this point. The build still has
+	/// its pending drain to run, and the statement that started it has still not
+	/// committed its catalog change, so background maintenance elsewhere in the
+	/// cluster must keep seeing this index as owned. `release_build_ownership`
+	/// is what ends that window.
 	pub(super) async fn mark_durable_online(
 		&self,
 		generation: BuildGeneration,
@@ -1067,7 +1098,6 @@ impl Building {
 	) -> Result<()> {
 		self.update_owned_build_state(generation, |state| {
 			state.phase = IndexBuildPhase::Online;
-			state.owner = None;
 			state.initial_complete = true;
 			state.error = None;
 			Self::set_report(
@@ -1080,6 +1110,137 @@ impl Building {
 		})
 		.await?;
 		Ok(())
+	}
+
+	/// Hold durable ownership until the statement that started this build has
+	/// closed its transaction.
+	///
+	/// A statement stages the definition it builds against in its own
+	/// transaction, which is still open when the build starts and, for a
+	/// blocking build, until after it returns. Every other node reads the
+	/// previous definition for that whole window, so ownership — the one signal
+	/// that is durable before the definition is — has to outlast it. That holds
+	/// however the statement started the build: `CONCURRENTLY` returns as soon
+	/// as the task is spawned, which on a small index can finish and release
+	/// before the commit lands. Registered on both outcomes: a rolled-back
+	/// statement leaves the previous definition in place, which is the one
+	/// background compaction was already reading, so the fence is no longer
+	/// needed either.
+	///
+	/// A no-op for a build with no statement behind it — a maintenance resume,
+	/// whose definition was committed long before — which keeps the statement
+	/// half of [`Building::release_gate`] as it starts, already arrived.
+	///
+	/// Must be called before the build is spawned, so the release cannot be
+	/// reached before both halves of the gate are in play.
+	pub(super) async fn defer_ownership_release(self: &Arc<Self>, ctx: &FrozenContext) {
+		let Some(txn) = ctx.try_tx() else {
+			return;
+		};
+		self.release_gate.store(0, Ordering::Release);
+		txn.on_commit(Box::new(ReleaseBuildOwnership(Arc::clone(self)))).await;
+		txn.on_rollback(Box::new(ReleaseBuildOwnership(Arc::clone(self)))).await;
+	}
+
+	/// Record one half of [`Building::release_gate`], reporting whether this
+	/// arrival was the one that completed it.
+	fn arrive_at_release_gate(&self, arrival: u8) -> bool {
+		(self.release_gate.fetch_or(arrival, Ordering::AcqRel) | arrival) == RELEASE_GATE_OPEN
+	}
+
+	/// Release durable ownership of a published generation.
+	///
+	/// Until it commits, an `Online` generation still names this builder as its
+	/// owner, which is what keeps every node's index compaction off an index
+	/// whose definition the publishing statement has not committed yet.
+	///
+	/// A no-op for a generation this builder no longer owns: a build that ended
+	/// before publishing had its owner cleared by the transition that ended it.
+	///
+	/// Best-effort by design: a build that reaches here has already published,
+	/// so failing to clear the owner must not fail the statement waiting on it.
+	/// A stranded owner leaves the index unattended by background compaction
+	/// until the next build rewrites `!bs`; its pendings keep accumulating for a
+	/// reader that materialises them anyway.
+	pub(super) async fn release_build_ownership(&self, generation: BuildGeneration) {
+		match self.read_durable_build_state().await {
+			Ok(Some(state))
+				if state.generation == generation
+					&& state.phase == IndexBuildPhase::Online
+					&& state.owner == Some(self.owner) => {}
+			Ok(_) => return,
+			Err(err) => {
+				warn!(
+					index = %self.ix.name,
+					table = %self.ix.table_name,
+					error = %err,
+					"could not read durable build state to release build ownership"
+				);
+				return;
+			}
+		}
+		match self
+			.update_owned_build_state(generation, |state| {
+				if state.phase == IndexBuildPhase::Online {
+					state.owner = None;
+				}
+			})
+			.await
+		{
+			Ok(_) => self.requeue_compaction_after_release().await,
+			Err(err) => warn!(
+				index = %self.ix.name,
+				table = %self.ix.table_name,
+				error = %err,
+				"could not release durable build ownership; background compaction \
+				 will skip this index until its next build"
+			),
+		}
+	}
+
+	/// Queue one compaction pass for an index whose fence has just come down.
+	///
+	/// A compaction request that arrives while the fence is up is answered with
+	/// "leave it to the builder", and the queue entry that carried it is deleted
+	/// with the rest of its batch. That is only free while the builder is still
+	/// going to drain the index: the fence outlives its last drain, so a write
+	/// committing in between queues a pending whose request is consumed by a
+	/// pass that does not act on it, leaving the pending for the next write to
+	/// the index to notice. This puts one request back to cover that window.
+	///
+	/// Runs after the release rather than with it. A pass that reads the queue
+	/// in between finds nothing and does nothing, where one that read this
+	/// request while the fence was still up would consume it.
+	///
+	/// Scoped to the kinds whose builders drain their own pendings, because
+	/// those are the only ones the fence applies to.
+	async fn requeue_compaction_after_release(&self) {
+		let fenced = match &self.ix.index {
+			Index::Hnsw(_) => true,
+			#[cfg(diskann)]
+			Index::DiskAnn(_) => true,
+			_ => false,
+		};
+		if !fenced {
+			return;
+		}
+		if let Err(err) = self.enqueue_compaction_request().await {
+			warn!(
+				index = %self.ix.name,
+				table = %self.ix.table_name,
+				error = %err,
+				"could not queue index compaction after releasing build ownership; \
+				 pendings queued during the build wait for the next write to the index"
+			);
+		}
+	}
+
+	async fn enqueue_compaction_request(&self) -> Result<()> {
+		let ctx = self.new_write_tx_ctx().await?;
+		let tx = ctx.tx();
+		tx.set_key(&self.ikb.new_ic_key(self.ctx.node_id()), &()).await?;
+		tx.trigger_index_compaction();
+		tx.commit().await
 	}
 
 	/// Publish a durable build error if this builder still owns the generation.
@@ -1917,13 +2078,31 @@ impl Building {
 				 reclaimed by the next doc-ID index build on the table"
 			);
 		}
-		self.compact_hnsw_pendings(&mut last_prepare_remove_check).await?;
+		let drained = self.compact_hnsw_pendings(&mut last_prepare_remove_check).await;
 		#[cfg(diskann)]
-		self.compact_diskann_pendings(&mut last_prepare_remove_check).await?;
-		Ok(())
+		let drained = match drained {
+			Ok(()) => self.compact_diskann_pendings(&mut last_prepare_remove_check).await,
+			Err(err) => Err(err),
+		};
+		// Reached whichever way the drain ended, so a drain that stopped on an
+		// error still hands the index back to background compaction. The release
+		// itself waits for the statement that publishes this build's definition,
+		// which for a build nobody waits on has already happened.
+		if self.arrive_at_release_gate(RELEASE_GATE_BUILDER) {
+			self.release_build_ownership(generation).await;
+		}
+		drained
 	}
 
 	/// Drains pending HNSW updates while a blocking `DEFINE INDEX` build is still running.
+	///
+	/// The datastore's periodic index-compaction task drains the same queue, and
+	/// a commit that queues compaction work wakes it, so the two regularly
+	/// contend for the same batch. A retryable conflict means the other
+	/// compactor won that batch; the plan is re-read and re-applied rather than
+	/// failing the statement that is waiting for the drain. The process-local
+	/// wrapper and caches are discarded first, because a write that reached the
+	/// graph and did not commit leaves them holding state the store never took.
 	async fn compact_hnsw_pendings(&self, last_prepare_remove_check: &mut Instant) -> Result<()> {
 		let Index::Hnsw(p) = &self.ix.index else {
 			return Ok(());
@@ -1975,8 +2154,36 @@ impl Building {
 			.await;
 			match res {
 				Ok(true) => {
+					#[cfg(test)]
+					if let Err(err) = maybe_inject_retryable_conflict(
+						RetryableConflictSite::ConcurrentIndexHnswPendingCompaction,
+						self.ctx.node_id(),
+					) {
+						self.evict_cached_hnsw_index().await;
+						if self
+							.cancel_and_retryable_conflict(
+								&tx,
+								&err,
+								"transient conflict compacting HNSW pendings, retrying",
+							)
+							.await
+						{
+							continue;
+						}
+						return Err(err);
+					}
 					if let Err(err) = tx.commit().await {
 						self.evict_cached_hnsw_index().await;
+						if self
+							.cancel_and_retryable_conflict(
+								&tx,
+								&err,
+								"transient conflict compacting HNSW pendings, retrying",
+							)
+							.await
+						{
+							continue;
+						}
 						return Err(err);
 					}
 				}
@@ -1987,6 +2194,15 @@ impl Building {
 				Err(err) => {
 					let _ = tx.cancel().await;
 					self.evict_cached_hnsw_index().await;
+					if self
+						.retryable_conflict(
+							&err,
+							"transient conflict compacting HNSW pendings, retrying",
+						)
+						.await
+					{
+						continue;
+					}
 					return Err(err);
 				}
 			}
@@ -1999,6 +2215,13 @@ impl Building {
 
 	#[cfg(diskann)]
 	/// Drains pending DiskANN updates while a blocking `DEFINE INDEX` build is still running.
+	///
+	/// Contends with the datastore's periodic index-compaction task for the same
+	/// queue, so a retryable conflict is retried against a freshly read plan
+	/// rather than failing the statement that is waiting for the drain.
+	/// `apply_diskann_compaction` owns the transaction and clears the
+	/// per-index cache before returning a failed commit, so the retry starts
+	/// from state that agrees with the store.
 	async fn compact_diskann_pendings(
 		&self,
 		last_prepare_remove_check: &mut Instant,
@@ -2042,6 +2265,23 @@ impl Building {
 				tx.cancel().await?;
 				return Ok(());
 			}
+			#[cfg(test)]
+			if let Err(err) = maybe_inject_retryable_conflict(
+				RetryableConflictSite::ConcurrentIndexDiskAnnPendingCompaction,
+				self.ctx.node_id(),
+			) {
+				let _ = tx.cancel().await;
+				if self
+					.retryable_conflict(
+						&err,
+						"transient conflict compacting DiskANN pendings, retrying",
+					)
+					.await
+				{
+					continue;
+				}
+				return Err(err);
+			}
 			// `apply_diskann_compaction` normally owns the transaction's
 			// lifecycle (commits on success, cancels on apply failure while
 			// holding the graph write lock — closing the #7318 race). A few
@@ -2065,7 +2305,18 @@ impl Building {
 			match res {
 				Ok(true) => {}
 				Ok(false) => return Ok(()),
-				Err(err) => return Err(err),
+				Err(err) => {
+					if self
+						.retryable_conflict(
+							&err,
+							"transient conflict compacting DiskANN pendings, retrying",
+						)
+						.await
+					{
+						continue;
+					}
+					return Err(err);
+				}
 			}
 
 			if !has_more {
@@ -2138,6 +2389,42 @@ impl Building {
 			}
 			notified.await;
 		}
+	}
+}
+
+/// Releases durable build ownership once the statement that publishes the
+/// build's definition has closed its transaction.
+///
+/// Registered on both outcomes, and the same either way: a committed statement
+/// has made its definition visible to every node, and a rolled-back one has
+/// left the definition background compaction was already reading. See
+/// [`Building::defer_ownership_release`].
+struct ReleaseBuildOwnership(IndexBuilding);
+
+impl ReleaseBuildOwnership {
+	async fn release(self) {
+		if self.0.arrive_at_release_gate(RELEASE_GATE_STATEMENT) {
+			let generation = self.0.build_generation.load(Ordering::Acquire);
+			self.0.release_build_ownership(generation).await;
+		}
+	}
+}
+
+impl CommitAction for ReleaseBuildOwnership {
+	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+		Box::pin((*self).release())
+	}
+}
+
+impl RollbackAction for ReleaseBuildOwnership {
+	fn run(
+		self: Box<Self>,
+		_drain_started_at: Instant,
+	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+		Box::pin(async move {
+			(*self).release().await;
+			Ok(())
+		})
 	}
 }
 
