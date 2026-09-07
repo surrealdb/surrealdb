@@ -144,20 +144,28 @@ impl BucketsManager {
 		db: DatabaseId,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
-		// Attempt to obtain an existing bucket connection
 		let key = BucketConnectionKey::new(ns, db, bu);
+		// Attempt to obtain an existing bucket connection, dropping the guard
+		// before the connect below.
+		if let Some(existing) = self.0.connections.get(&key) {
+			return Ok(Arc::clone(existing.value()));
+		}
+		// Obtain the bucket definition and connect holding no shard lock. A
+		// `DashMap` guard is not await-safe: held across a yield it stalls every
+		// other caller hashing to that shard, and on a single-threaded runtime
+		// the holder can never be polled again, so the deadlock is permanent.
+		let bd = tx.expect_db_bucket(ns, db, bu).await?;
+		let store = if let Some(ref backend) = bd.backend {
+			self.connect(backend, false, bd.readonly).await?
+		} else {
+			self.connect_global(ns, db, bu).await?
+		};
+		// Persist the bucket connection. Callers racing to resolve the same cold
+		// bucket all adopt whichever connection lands first, so a bucket is never
+		// served by two stores at once; the connections that lost are dropped here.
 		match self.0.connections.entry(key) {
 			Entry::Occupied(e) => Ok(Arc::clone(e.get())),
 			Entry::Vacant(e) => {
-				// Obtain the bucket definition
-				let bd = tx.expect_db_bucket(ns, db, bu).await?;
-				// Connect to the bucket
-				let store = if let Some(ref backend) = bd.backend {
-					self.connect(backend, false, bd.readonly).await?
-				} else {
-					self.connect_global(ns, db, bu).await?
-				};
-				// Persist the bucket connection
 				e.insert(Arc::clone(&store));
 				Ok(store)
 			}
