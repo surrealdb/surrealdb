@@ -1,11 +1,33 @@
 //! Headers class implementation
 
+use std::borrow::Cow;
 use std::str::FromStr;
 
 use js::class::Trace;
 use js::prelude::{Coerced, List};
 use js::{Array, Ctx, Exception, JsLifetime, Result, Value};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+
+/// Renders a header value as the string the script sees.
+///
+/// A `Headers` built from a response carries the values a remote server sent.
+/// HTTP header values are opaque bytes (RFC 9110) and `HeaderValue::from_bytes`
+/// accepts any byte outside a narrow set of control characters, whereas
+/// `HeaderValue::to_str` succeeds only for values made entirely of visible
+/// ASCII. Any non-ASCII byte therefore reaches this function as an error, so a
+/// fallback is required rather than optional: a panic in this position aborts
+/// the process under the release profile's `panic = "abort"`.
+///
+/// Visible-ASCII values are borrowed unchanged, so every value a script could
+/// already read keeps its exact representation. Anything else is decoded from
+/// UTF-8 lossily, which renders valid multi-byte UTF-8 correctly and maps only
+/// genuinely malformed sequences to U+FFFD.
+fn header_value_to_string(value: &HeaderValue) -> Cow<'_, str> {
+	match value.to_str() {
+		Ok(v) => Cow::Borrowed(v),
+		Err(_) => String::from_utf8_lossy(value.as_bytes()),
+	}
+}
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
@@ -60,11 +82,9 @@ impl Headers {
 			if Some(k) == res.last().map(|x| x.0.0.as_str()) {
 				let ent = res.last_mut().expect("last element exists");
 				ent.0.1.push_str(", ");
-				// Header value came from a string, so it should also be able to be cast back
-				// to a string
-				ent.0.1.push_str(v.to_str().expect("valid header value"));
+				ent.0.1.push_str(&header_value_to_string(v));
 			} else {
-				res.push(List((k.to_owned(), v.to_str().expect("valid header value").to_owned())));
+				res.push(List((k.to_owned(), header_value_to_string(v).into_owned())));
 			}
 		}
 
@@ -79,14 +99,12 @@ impl Headers {
 		// Convert the header values to strings
 		let all = self.inner.get_all(&key);
 
-		// Header value came from a string, so it should also be able to be cast back
-		// to a string
 		let mut res = String::new();
 		for (idx, v) in all.iter().enumerate() {
 			if idx != 0 {
 				res.push_str(", ");
 			}
-			res.push_str(v.to_str().expect("valid header value"));
+			res.push_str(&header_value_to_string(v));
 		}
 
 		if res.is_empty() {
@@ -100,11 +118,7 @@ impl Headers {
 	pub fn get_set_cookie(&self) -> Vec<String> {
 		// This should always be a correct cookie;
 		let key = HeaderName::from_str("set-cookie").expect("valid header name");
-		self.inner
-			.get_all(key)
-			.iter()
-			.map(|x| x.to_str().expect("valid header value").to_owned())
-			.collect()
+		self.inner.get_all(key).iter().map(|x| header_value_to_string(x).into_owned()).collect()
 	}
 
 	// Checks to see if the header set contains a header
@@ -148,10 +162,10 @@ impl Headers {
 			if Some(k) == pref {
 				let ent = res.last_mut().expect("last element exists");
 				ent.push_str(", ");
-				ent.push_str(v.to_str().expect("valid header value"))
+				ent.push_str(&header_value_to_string(v))
 			} else {
 				pref = Some(k);
-				res.push(v.to_str().expect("valid header value").to_owned());
+				res.push(header_value_to_string(v).into_owned());
 			}
 		}
 
@@ -264,8 +278,60 @@ impl Headers {
 #[cfg(test)]
 mod test {
 	use js::CatchResultExt;
+	use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
+	use super::Headers;
 	use crate::fnc::script::fetch::test::create_test_context;
+
+	/// Builds a `Headers` the way a response does — from a real `HeaderMap`
+	/// rather than from script-authored strings.
+	fn headers_with_value(name: &str, value: HeaderValue) -> Headers {
+		let mut map = HeaderMap::new();
+		map.insert(HeaderName::from_bytes(name.as_bytes()).expect("valid header name"), value);
+		Headers::from_map(map)
+	}
+
+	// `Headers::from_map` is fed the `HeaderMap` of an actual outbound
+	// response, so its values are whatever the remote server sent. HTTP header
+	// values are opaque bytes and `HeaderValue::to_str` succeeds only for
+	// visible ASCII, so the accessors must not assume it succeeds:
+	// under the release profile's `panic = "abort"` a panic here takes the
+	// whole process down, reachable by any allowed endpoint simply choosing to
+	// return such a header.
+	#[test]
+	fn response_accessors_tolerate_non_utf8_header_values() {
+		// The crux: `from_bytes` accepts bytes that `to_str` then rejects.
+		let invalid = HeaderValue::from_bytes(&[0xff, 0xfe]).expect("from_bytes accepts raw bytes");
+		assert!(invalid.to_str().is_err(), "[0xff, 0xfe] must not be valid UTF-8");
+
+		// Every response-reachable accessor must return rather than panic.
+		let headers = headers_with_value("x-invalid", invalid.clone());
+		assert_eq!(headers.entries().len(), 1, "entries must yield the header");
+		assert_eq!(headers.values().len(), 1, "values must yield the header");
+		let got = headers.keys();
+		assert_eq!(got, vec!["x-invalid".to_owned()]);
+
+		let cookies = headers_with_value("set-cookie", invalid);
+		assert_eq!(cookies.get_set_cookie().len(), 1, "getSetCookie must yield the cookie");
+		assert_eq!(cookies.entries().len(), 1);
+	}
+
+	// A value that decodes cleanly must keep its exact representation: the
+	// fallback applies only to values `to_str` rejects.
+	#[test]
+	fn valid_header_values_are_unchanged() {
+		let headers = headers_with_value("x-valid", HeaderValue::from_static("plain-ascii"));
+		let entries = headers.entries();
+		assert_eq!(entries.len(), 1);
+		assert_eq!(entries[0].0.1, "plain-ascii");
+		assert_eq!(headers.values(), vec!["plain-ascii".to_owned()]);
+
+		// Valid multi-byte UTF-8 must survive intact rather than being decoded
+		// byte-wise, which is what a blanket isomorphic decode would do.
+		let utf8 = HeaderValue::from_bytes("café".as_bytes()).expect("valid utf-8 bytes");
+		let headers = headers_with_value("x-utf8", utf8);
+		assert_eq!(headers.entries()[0].0.1, "café");
+	}
 
 	#[tokio::test]
 	async fn basic_headers_use() {
