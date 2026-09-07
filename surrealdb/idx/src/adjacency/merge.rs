@@ -31,12 +31,15 @@ use anyhow::{Context as _, Result, bail};
 use surrealdb_datastore::Transaction;
 use surrealdb_datastore::tx::{MeteredKeysCursor, MeteredValsCursor};
 use surrealdb_datastore::values::graph::{
-	ADJACENCY_FLAG_PROPS, AdjacencyBlock, AdjacencyValue, BlockEntry,
+	ADJACENCY_FLAG_PROPS, AdjacencyBlock, AdjacencyValue, BlockEntries, BlockEntry, NumericEntry,
 };
 use surrealdb_kvs::Direction;
 use surrealdb_kvs::consts::NORMAL_BATCH_SIZE;
 
+use super::resolve::{AdjacencyResolveCache, resolve_doc_ids};
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
+use crate::docids::DocId;
 use crate::expr::Dir;
 use crate::key::schema::{
 	AdjacencyDirPrefix, AdjacencyEdgeTablePrefix, AdjacencyIdPrefix, AdjacencyKey, DecodedGraph,
@@ -140,9 +143,16 @@ struct BlockEdge {
 
 /// A chunk mid-materialization: fetched and decoded once, its entries
 /// synthesized on demand as the merge needs them, so a bounded read (an
-/// existence peek, a small LIMIT) never pays for the whole chunk.
+/// existence peek, a small LIMIT) never materializes the whole chunk. A
+/// numeric chunk's doc-ID resolution is the one whole-chunk cost: the
+/// pointer-key domain is built from record keys, so those ids resolve in
+/// one batch when the chunk opens.
 struct OpenChunk {
 	block: AdjacencyBlock,
+	/// A numeric chunk's entries in the record-key form the synthesis
+	/// reads, resolved once when the chunk opened. Empty for a plain
+	/// chunk, whose entries the synthesis borrows from `block` in place.
+	resolved: Vec<BlockEntry>,
 	/// The pointer-key bytes shared by every entry, through the edge table.
 	prefix: Vec<u8>,
 	/// The storekey-encoded target-table names, positional with
@@ -154,7 +164,24 @@ struct OpenChunk {
 	next: usize,
 }
 
+impl OpenChunk {
+	/// The chunk's entries in the record-key form the synthesis reads:
+	/// borrowed from the decoded block for a plain chunk, from the resolved
+	/// vector for a numeric one.
+	fn entries(&self) -> &[BlockEntry] {
+		match &self.block.entries {
+			BlockEntries::Plain(entries) => entries,
+			BlockEntries::Numeric(_) => &self.resolved,
+		}
+	}
+}
+
 pub struct MergedAdjacencyCursor<'a> {
+	// Resolution of numeric block entries: the transaction the reads go
+	// through, the snapshot they read at, and the process-wide cache.
+	txn: &'a Transaction,
+	version: Option<u64>,
+	resolve: Option<&'a AdjacencyResolveCache>,
 	// Delta side.
 	delta: DeltaCursor<'a>,
 	delta_buf: VecDeque<DeltaItem>,
@@ -199,6 +226,7 @@ impl<'a> MergedAdjacencyCursor<'a> {
 		scope: AdjacencyScope<'_>,
 		folded: bool,
 		version: Option<u64>,
+		resolve: Option<&'a AdjacencyResolveCache>,
 	) -> Result<Self> {
 		let window_start = scope.delta_range.start().to_vec();
 		let window_end = scope.delta_range.end().to_vec();
@@ -221,6 +249,9 @@ impl<'a> MergedAdjacencyCursor<'a> {
 			(DeltaCursor::Keys(delta), None)
 		};
 		Ok(Self {
+			txn,
+			version,
+			resolve,
 			delta,
 			delta_buf: VecDeque::new(),
 			delta_done: false,
@@ -427,6 +458,25 @@ impl<'a> MergedAdjacencyCursor<'a> {
 			let chunk_key =
 				AdjacencyKey::decode_key(key).context("Failed to decode an adjacency block key")?;
 			let block = AdjacencyBlock::kv_decode_value(val, ())?;
+			// A numeric chunk resolves its doc-IDs once for the whole chunk:
+			// the pointer-key domain the merge orders, windows and emits in
+			// is built from record keys, so even a keys-only read needs
+			// them. A plain chunk's entries are borrowed in place, so only
+			// the emitted edges own their data.
+			let resolved = match &block.entries {
+				BlockEntries::Plain(_) => Vec::new(),
+				BlockEntries::Numeric(entries) => {
+					resolve_numeric_entries(
+						self.txn,
+						&chunk_key,
+						&block.targets,
+						entries,
+						self.version,
+						self.resolve,
+					)
+					.await?
+				}
+			};
 			// The pointer-key bytes shared by every entry in this chunk:
 			// everything up to and including the edge table. Entries append
 			// their own edge key, target table and target key.
@@ -438,6 +488,7 @@ impl<'a> MergedAdjacencyCursor<'a> {
 				.collect::<Result<_>>()?;
 			self.current_chunk = Some(OpenChunk {
 				block,
+				resolved,
 				prefix,
 				target_tables,
 				edge_table: chunk_key.edge_table.into_owned(),
@@ -453,18 +504,20 @@ impl<'a> MergedAdjacencyCursor<'a> {
 	/// fetches the following chunk). Window-skipped entries do not count
 	/// toward `need`.
 	fn materialize_open_chunk(&mut self, need: usize, keys_only: bool) -> Result<()> {
-		let Some(chunk) = self.current_chunk.as_mut() else {
+		let Some(chunk) = self.current_chunk.as_ref() else {
 			return Ok(());
 		};
+		let entries = chunk.entries();
+		let mut next = chunk.next;
 		let mut exhausted = true;
 		let mut window_ended = false;
-		while let Some(entry) = chunk.block.entries.get(chunk.next) {
+		while let Some(entry) = entries.get(next) {
 			if self.block_buf.len() >= need {
 				// The chunk stays open; the next fill resumes at `next`.
 				exhausted = false;
 				break;
 			}
-			chunk.next += 1;
+			next += 1;
 			let key = synthesize_pointer_key(&chunk.prefix, &chunk.target_tables, entry)?;
 			// A bounded or resumed scan's window, in the same domain.
 			if key.as_slice() < self.window_start.as_slice() {
@@ -503,6 +556,8 @@ impl<'a> MergedAdjacencyCursor<'a> {
 		}
 		if exhausted || window_ended {
 			self.current_chunk = None;
+		} else if let Some(chunk) = self.current_chunk.as_mut() {
+			chunk.next = next;
 		}
 		Ok(())
 	}
@@ -522,7 +577,7 @@ impl<'a> MergedAdjacencyCursor<'a> {
 	/// How many entries of the open chunk are not yet materialized.
 	#[cfg(test)]
 	pub(super) fn open_chunk_remaining(&self) -> usize {
-		self.current_chunk.as_ref().map_or(0, |chunk| chunk.block.entries.len() - chunk.next)
+		self.current_chunk.as_ref().map_or(0, |chunk| chunk.entries().len() - chunk.next)
 	}
 }
 
@@ -615,6 +670,66 @@ fn pointer_prefix(chunk_key: &AdjacencyKey) -> Result<Vec<u8>> {
 	}
 	.range_subtree()?;
 	Ok(prefix.start().to_vec())
+}
+
+/// One chunk's numeric entries in the record-key form the merge compares
+/// and emits: doc-IDs resolved through the mapping in `version`'s snapshot,
+/// batched per table and cache-first, landing in the same byte-domain shape
+/// plain chunks decode to. An id that no longer resolves marks a deleted
+/// record and is dropped — the deletion that removed its mapping also
+/// tombstoned the entry, so nothing observable is lost.
+async fn resolve_numeric_entries(
+	txn: &Transaction,
+	chunk_key: &AdjacencyKey<'_>,
+	targets: &[TableName],
+	entries: &[NumericEntry],
+	version: Option<u64>,
+	cache: Option<&AdjacencyResolveCache>,
+) -> Result<Vec<BlockEntry>> {
+	let ns = chunk_key.ns;
+	let db = chunk_key.db;
+	// The resolve cache is keyed per table generation, so each table's id
+	// comes from this read's own snapshot.
+	let edge_ids: Vec<DocId> = entries.iter().map(|e| e.edge).collect();
+	let edge_tb_id =
+		txn.get_tb(ns, db, &chunk_key.edge_table, version).await?.map(|tb| tb.table_id);
+	let edge_keys =
+		resolve_doc_ids(txn, ns, db, &chunk_key.edge_table, edge_tb_id, &edge_ids, version, cache)
+			.await?;
+	let mut target_keys: Vec<Option<RecordIdKey>> = vec![None; entries.len()];
+	for (dict, table) in targets.iter().enumerate() {
+		let slots: Vec<usize> = entries
+			.iter()
+			.enumerate()
+			.filter(|(_, e)| e.target_table as usize == dict)
+			.map(|(i, _)| i)
+			.collect();
+		if slots.is_empty() {
+			continue;
+		}
+		let ids: Vec<DocId> = slots.iter().map(|&i| entries[i].target).collect();
+		let table_id = txn.get_tb(ns, db, table, version).await?.map(|tb| tb.table_id);
+		let keys = resolve_doc_ids(txn, ns, db, table, table_id, &ids, version, cache).await?;
+		for (&slot, key) in slots.iter().zip(keys) {
+			target_keys[slot] = key;
+		}
+	}
+	entries
+		.iter()
+		.zip(edge_keys.into_iter().zip(target_keys))
+		.filter_map(|(entry, (edge_key, target_key))| {
+			let (edge_key, target_key) = (edge_key?, target_key?);
+			Some((entry, edge_key, target_key))
+		})
+		.map(|(entry, edge_key, target_key)| {
+			Ok(BlockEntry {
+				edge_key: storekey::encode_vec(&edge_key).map_err(anyhow::Error::from_boxed)?,
+				target_table: entry.target_table,
+				target_key: storekey::encode_vec(&target_key).map_err(anyhow::Error::from_boxed)?,
+				props: entry.props.clone(),
+			})
+		})
+		.collect()
 }
 
 /// A block entry's pointer-key bytes: the chunk prefix, the edge key, the

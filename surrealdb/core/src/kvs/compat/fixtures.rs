@@ -136,6 +136,7 @@ pub fn table_basic() -> StoredTableDefinition {
 		graphql_alias: None,
 		graphql_deprecated: None,
 		graph_folded: false,
+		graph_doc_ids: false,
 	}
 }
 
@@ -173,6 +174,7 @@ pub fn table_with_view() -> StoredTableDefinition {
 		graphql_alias: None,
 		graphql_deprecated: None,
 		graph_folded: false,
+		graph_doc_ids: false,
 	}
 }
 
@@ -201,6 +203,7 @@ pub fn table_schemafull() -> StoredTableDefinition {
 		graphql_alias: None,
 		graphql_deprecated: None,
 		graph_folded: false,
+		graph_doc_ids: false,
 	}
 }
 
@@ -235,6 +238,7 @@ pub fn table_relation() -> StoredTableDefinition {
 		graphql_alias: None,
 		graphql_deprecated: None,
 		graph_folded: false,
+		graph_doc_ids: false,
 	}
 }
 
@@ -269,6 +273,7 @@ pub fn table_with_stored_clauses() -> StoredTableDefinition {
 		graphql_alias: None,
 		graphql_deprecated: None,
 		graph_folded: false,
+		graph_doc_ids: false,
 	}
 }
 
@@ -298,6 +303,7 @@ pub fn table_with_materialized_view() -> StoredTableDefinition {
 		graphql_alias: None,
 		graphql_deprecated: None,
 		graph_folded: false,
+		graph_doc_ids: false,
 	}
 }
 
@@ -323,6 +329,7 @@ pub fn table_any_type() -> StoredTableDefinition {
 		graphql_alias: None,
 		graphql_deprecated: None,
 		graph_folded: false,
+		graph_doc_ids: false,
 	}
 }
 

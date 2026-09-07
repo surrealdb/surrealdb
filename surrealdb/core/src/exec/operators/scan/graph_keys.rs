@@ -219,6 +219,7 @@ pub(crate) async fn collect_adjacency(
 			range.as_adjacency_scope(ns_id, db_id, rid, dir),
 			folded,
 			version,
+			Some(ctx.root().ctx.get_index_stores().adjacency_resolve()),
 		)
 		.await
 		.context("Failed to open graph cursor")?;

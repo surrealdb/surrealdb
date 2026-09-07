@@ -319,7 +319,14 @@ impl Document {
 			}
 			.range()?,
 		};
-		let mut cursor = MergedAdjacencyCursor::open(&txn, scope, folded, None).await?;
+		let mut cursor = MergedAdjacencyCursor::open(
+			&txn,
+			scope,
+			folded,
+			None,
+			Some(ctx.get_index_stores().adjacency_resolve()),
+		)
+		.await?;
 		// Check if there are any edges to purge by fetching at most one key:
 		// only emptiness matters here, so nothing is decoded.
 		let batch = cursor.next_batch_keys(1).await?;

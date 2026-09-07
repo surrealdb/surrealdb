@@ -46,6 +46,27 @@ impl TestIndexStore {
 		Self::with_path("mem://").await
 	}
 
+	/// Opens an in-memory store with a modified engine configuration.
+	pub(crate) async fn with_idx_config(configure: impl FnOnce(&mut IdxConfig)) -> Self {
+		let mut store = Self::with_path("mem://").await;
+		let mut config = (*store.config).clone();
+		configure(&mut config);
+		store.config = Arc::new(config);
+		store
+	}
+
+	/// The engine configuration this store hands out.
+	pub(crate) fn config(&self) -> &Arc<IdxConfig> {
+		&self.config
+	}
+
+	/// The same store — same backend, same caches — under a different
+	/// engine configuration, for tests that flip a knob mid-flight.
+	pub(crate) fn rewire_config(mut store: Self, config: IdxConfig) -> Self {
+		store.config = Arc::new(config);
+		store
+	}
+
 	/// Opens a store on `path`, for the tests pinned to a specific backend.
 	pub(crate) async fn with_path(path: &str) -> Self {
 		let builder = surrealdb_kvs_any::Backends::community()
@@ -59,7 +80,11 @@ impl TestIndexStore {
 		);
 		let node_id = Uuid::new_v4();
 		let config = IdxConfig::default();
-		let stores = IndexStores::new(config.hnsw_cache_size, config.diskann_cache_size);
+		let stores = IndexStores::new(
+			config.hnsw_cache_size,
+			config.diskann_cache_size,
+			config.graph_resolve_cache_size,
+		);
 		Self {
 			sequences: Sequences::new(tf.clone(), node_id),
 			tf,

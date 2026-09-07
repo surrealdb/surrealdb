@@ -60,10 +60,10 @@ pub(crate) async fn define_table_statement_compute(
 	let db = txn.expect_db_by_name(ns_name, db_name).await?;
 
 	// Check if the definition exists. A redefinition keeps the existing
-	// table id and carries the `graph_folded` marker forward: the marker
-	// records that packed adjacency blocks may exist under the table's
-	// subspace, which redefining the schema does not change.
-	let (table_id, graph_folded) =
+	// table id and carries the graph markers forward: they record that
+	// packed adjacency blocks may exist under the table's subspace, or hold
+	// its record ids, which redefining the schema does not change.
+	let (table_id, graph_folded, graph_doc_ids) =
 		if let Some(tb) = txn.get_tb(ns.namespace_id, db.database_id, &name, None).await? {
 			match this.kind {
 				DefineKind::Default => {
@@ -77,9 +77,9 @@ pub(crate) async fn define_table_statement_compute(
 				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 
-			(tb.table_id, tb.graph_folded)
+			(tb.table_id, tb.graph_folded, tb.graph_doc_ids)
 		} else {
-			(txn.get_next_tb_id(Some(ctx), ns.namespace_id, db.database_id).await?, false)
+			(txn.get_next_tb_id(Some(ctx), ns.namespace_id, db.database_id).await?, false, false)
 		};
 
 	let comment = stk
@@ -113,6 +113,7 @@ pub(crate) async fn define_table_statement_compute(
 		graphql_alias: this.graphql_alias.clone(),
 		graphql_deprecated: this.graphql_deprecated.clone(),
 		graph_folded,
+		graph_doc_ids,
 	};
 
 	// Add table relational fields

@@ -402,6 +402,7 @@ impl Builder {
 			index_stores: IndexStores::new(
 				config.idx.hnsw_cache_size,
 				config.idx.diskann_cache_size,
+				config.idx.graph_resolve_cache_size,
 			),
 			index_builder: IndexBuilder::new(tf.clone()),
 			#[cfg(storage)]

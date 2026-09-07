@@ -222,6 +222,14 @@ pub struct Transaction {
 	/// Drained by [`Self::cancel`] and by a failed commit; discarded once the
 	/// commit succeeds.
 	rollback_actions: Mutex<Vec<Box<dyn RollbackAction>>>,
+	/// Per-table memo of the settled `graph_doc_ids` marker, backing
+	/// [`Self::graph_doc_ids_settled`]. The first read per table is locked
+	/// (`getu`), and its conflict registration covers the rest of the
+	/// transaction, so later calls — one per record in a multi-record
+	/// delete — reuse the answer instead of re-issuing an uncached engine
+	/// read each. Cleared by [`Self::rollback_to_save_point`], which may
+	/// release the registration on rollback-scoped engines.
+	graph_doc_ids_settled: Mutex<HashMap<(NamespaceId, DatabaseId, TableName), bool>>,
 }
 
 /// Whether a table's shared doc-ID space is safe for a new consumer to adopt.
@@ -806,6 +814,44 @@ impl Transaction {
 		Ok(targets)
 	}
 
+	/// The table's settled `graph_doc_ids` marker — whether numeric
+	/// adjacency blocks consume its shared doc-ID space — read through a
+	/// locked (`getu`) read of the table-definition key. `false` for a
+	/// table with no definition.
+	///
+	/// The locked read is what makes the answer settled: a plain snapshot
+	/// read registers no commit-time conflict on backends that validate
+	/// only what a transaction wrote, so a transaction that skips doc-ID
+	/// maintenance because it observed the marker unset could commit that
+	/// decision after a concurrent fold set the marker (see
+	/// `Document::remove_doc_id`). Conflict registration is per key and
+	/// validated once at commit, so one locked read covers the whole
+	/// transaction: the answer is memoized, and a multi-record delete pays
+	/// one engine read per table instead of one per record.
+	///
+	/// Whether the registration survives a savepoint rollback is
+	/// engine-defined (see `Transactable::getu`), so
+	/// [`Self::rollback_to_save_point`] clears the memo and the next call
+	/// re-issues the locked read.
+	pub async fn graph_doc_ids_settled(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<bool> {
+		if let Some(&settled) = self.graph_doc_ids_settled.lock().await.get(&(ns, db, tb.clone())) {
+			return Ok(settled);
+		}
+		let key = TableKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		let settled = self.getu_key(&key).await?.is_some_and(|stored| stored.graph_doc_ids);
+		self.graph_doc_ids_settled.lock().await.insert((ns, db, tb.clone()), settled);
+		Ok(settled)
+	}
+
 	/// Create a new transaction.
 	///
 	/// `observer` is dispatched to on commit/cancel; pass
@@ -844,6 +890,7 @@ impl Transaction {
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
 			commit_actions: Mutex::new(Vec::new()),
 			rollback_actions: Mutex::new(Vec::new()),
+			graph_doc_ids_settled: Mutex::new(HashMap::new()),
 		}
 	}
 
@@ -2078,12 +2125,13 @@ impl Transaction {
 	/// Claim a table's shared doc-ID space for a new consumer when it is still
 	/// internally consistent.
 	///
-	/// `DEFINE INDEX` calls this before defining a doc-ID-consuming index. If all
+	/// `DEFINE INDEX` calls this before defining a doc-ID-consuming index, and
+	/// the graph fold before recording a table's `graph_doc_ids` marker. If all
 	/// three reclaim entries still exist and none carries a cursor, no deletion
 	/// has committed and they are conditionally cancelled in this transaction.
 	/// The conditional deletes make the cancellation atomic with a concurrent
 	/// page on last-writer-wins backends: either this transaction removes the
-	/// claim and defines the index, or the page advances the state and this
+	/// claim and defines the consumer, or the page advances the state and this
 	/// transaction is rejected.
 	///
 	/// Once a cursor exists, or a strict subset of the three entries survives,
@@ -2103,6 +2151,34 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
+	) -> Result<DocIdsReclaimClaim> {
+		self.tb_doc_ids_reclaim(ns, db, tb, true).await
+	}
+
+	/// [`Self::claim_tb_doc_ids_reclaim`] without the cancellation: reports
+	/// whether the space could be claimed, writing nothing.
+	///
+	/// For a caller whose claim decision spans several tables and is
+	/// all-or-nothing — probing every table first keeps one unclaimable
+	/// table from leaving another table's queued reclaim already cancelled
+	/// in the same transaction. Within one transaction a probe's verdict
+	/// holds for a following claim: both scan the same snapshot.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn probe_tb_doc_ids_reclaim(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<DocIdsReclaimClaim> {
+		self.tb_doc_ids_reclaim(ns, db, tb, false).await
+	}
+
+	async fn tb_doc_ids_reclaim(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		cancel: bool,
 	) -> Result<DocIdsReclaimClaim> {
 		// Whether a surviving entry names a prefix already deleted from, and
 		// which of the three kinds are still queued for this table.
@@ -2167,9 +2243,11 @@ impl Transaction {
 		}
 		// Every entry is untouched. Withdraw exactly the values observed above so
 		// a page that advances one concurrently wins the race rather than having
-		// its cursor deleted and its partial purge adopted by the new index.
-		for (key, value) in entries {
-			self.del_compare(Key::from(key), Some(&value)).await?;
+		// its cursor deleted and its partial purge adopted by the new consumer.
+		if cancel {
+			for (key, value) in entries {
+				self.del_compare(Key::from(key), Some(&value)).await?;
+			}
 		}
 		Ok(DocIdsReclaimClaim::Available)
 	}
@@ -2680,6 +2758,10 @@ impl Transaction {
 		if let Some(buffer) = self.index_deltas.get() {
 			buffer.rollback_save_point();
 		}
+		// Whether a locked read's conflict registration survives a savepoint
+		// rollback is engine-defined, so no memo of one may outlive it: the
+		// next `graph_doc_ids_settled` call re-issues the locked read.
+		self.graph_doc_ids_settled.lock().await.clear();
 		Ok(())
 	}
 

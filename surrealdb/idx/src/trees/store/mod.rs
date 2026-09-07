@@ -34,10 +34,16 @@ struct Inner {
 	hnsw_indexes: HnswIndexes,
 	mappers: Mappers,
 	vector_cache: VectorCache,
+	/// Doc-ID → record-key cache for numeric adjacency resolution.
+	adjacency_resolve: crate::adjacency::AdjacencyResolveCache,
 }
 
 impl IndexStores {
-	pub fn new(hnsw_cache_size: u64, diskann_cache_size: u64) -> Self {
+	pub fn new(
+		hnsw_cache_size: u64,
+		diskann_cache_size: u64,
+		adjacency_resolve_cache_size: u64,
+	) -> Self {
 		#[cfg(not(diskann))]
 		let _ = diskann_cache_size;
 		Self(Arc::new(Inner {
@@ -48,7 +54,15 @@ impl IndexStores {
 			hnsw_indexes: HnswIndexes::default(),
 			mappers: Mappers::default(),
 			vector_cache: VectorCache::new(hnsw_cache_size),
+			adjacency_resolve: crate::adjacency::AdjacencyResolveCache::new(
+				adjacency_resolve_cache_size,
+			),
 		}))
+	}
+
+	/// The doc-ID → record-key cache for numeric adjacency resolution.
+	pub fn adjacency_resolve(&self) -> &crate::adjacency::AdjacencyResolveCache {
+		&self.0.adjacency_resolve
 	}
 
 	pub async fn get_index_hnsw(

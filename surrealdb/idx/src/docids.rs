@@ -589,16 +589,29 @@ impl TableDocIds {
 		tx: &Transaction,
 		doc_ids: &[DocId],
 	) -> Result<Vec<Option<RecordIdKey>>> {
+		self.get_record_ids_batch_at(tx, doc_ids, None).await
+	}
+
+	/// [`Self::get_record_ids_batch`] as of `version`. Mappings are removed
+	/// when their record is deleted, so a time-travel read must resolve
+	/// through the mapping state its snapshot saw, not the current one.
+	pub async fn get_record_ids_batch_at(
+		&self,
+		tx: &Transaction,
+		doc_ids: &[DocId],
+		version: Option<u64>,
+	) -> Result<Vec<Option<RecordIdKey>>> {
 		let keys: Vec<DocKeyKey<'_>> = doc_ids
 			.iter()
 			.map(|&doc_id| DocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), doc_id))
 			.collect();
-		tx.get_many_key(keys, None).await
+		tx.get_many_key(keys, version).await
 	}
 
 	/// Resolves many record keys to their doc-IDs in one batched read,
 	/// preserving input order. Records with no id in this table's space yield
-	/// `None` in their slot.
+	/// `None` in their slot. The mirror of [`Self::get_record_ids_batch`] for
+	/// the forward (`!di`) direction.
 	pub async fn get_doc_ids_batch(
 		&self,
 		tx: &Transaction,

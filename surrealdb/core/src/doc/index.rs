@@ -135,20 +135,40 @@ impl Document {
 	/// released the record — rather than by any individual index. Called on record
 	/// deletion, after [`store_index_data`](Self::store_index_data).
 	///
-	/// No-op for tables without a doc-ID-consuming index (full-text / HNSW /
-	/// DiskAnn / doc-ID-format b-tree), so index-free tables never allocate
-	/// or write a mapping.
+	/// No-op for tables without a doc-ID consumer, so consumer-free tables
+	/// never allocate or write a mapping. The consumers are the doc-ID
+	/// indexes (full-text / HNSW / DiskAnn / doc-ID-format b-tree) and —
+	/// once the table's `graph_doc_ids` marker is set — the numeric
+	/// adjacency blocks holding its record ids: a mapping surviving its
+	/// record would hand a re-created record its predecessor's id, which a
+	/// block entry naming that id would then resolve to.
 	pub(super) async fn remove_doc_id(&self, ctx: &FrozenContext) -> Result<()> {
-		// Only tables carrying a doc-ID-consuming index maintain the shared space.
-		let ixs = self.doc_ctx.ix()?;
-		if !ixs.iter().any(IndexDefinition::uses_shared_doc_ids) {
-			return Ok(());
-		}
 		// A table being dropped has its whole prefix reclaimed separately.
-		if self.doc_ctx.tb()?.drop {
+		let tb = self.doc_ctx.tb()?;
+		if tb.drop {
 			return Ok(());
 		}
 		let db = self.doc_ctx.db();
+		// Only tables with a consumer of the shared space maintain it.
+		let ixs = self.doc_ctx.ix()?;
+		if !tb.graph_doc_ids && !ixs.iter().any(IndexDefinition::uses_shared_doc_ids) {
+			// `tb` is a plain snapshot read that registers no read-conflict, so a
+			// concurrent fold committing the table's first numeric block between
+			// this snapshot and this transaction's commit would otherwise go
+			// undetected: the two transactions touch disjoint write-sets, so no
+			// write-write check catches it either, even though this read
+			// happened-before that write. Re-read the flag through the
+			// transaction's settled read — locked, so commit-time OCC
+			// validates it, and memoized, so a multi-record delete issues it
+			// once per table — if a fold's flag-set is racing this
+			// transaction, one of the two is forced to retry and the retry
+			// observes the settled value.
+			let settled =
+				ctx.tx().graph_doc_ids_settled(db.namespace_id, db.database_id, &tb.name).await?;
+			if !settled {
+				return Ok(());
+			}
+		}
 		let rid = self.id()?;
 		TableDocIds::new(db.namespace_id, db.database_id, rid.table.clone())
 			.remove(&ctx.tx(), &rid.key)

@@ -179,6 +179,7 @@ impl Context {
 			index_stores: IndexStores::new(
 				parent.config.idx.hnsw_cache_size,
 				parent.config.idx.diskann_cache_size,
+				parent.config.idx.graph_resolve_cache_size,
 			),
 			cache: None,
 			index_builder: None,
@@ -483,7 +484,7 @@ impl Context {
 			query_executor: None,
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
-			index_stores: IndexStores::new(256 * 1024 * 1024, 256 * 1024 * 1024),
+			index_stores: IndexStores::new(256 * 1024 * 1024, 256 * 1024 * 1024, 64 * 1024 * 1024),
 			cache: None,
 			index_builder: None,
 			sequences: None,

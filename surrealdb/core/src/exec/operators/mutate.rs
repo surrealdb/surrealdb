@@ -411,8 +411,15 @@ async fn has_connected_edges(
 		}
 		.range()?,
 	};
-	let mut cursor =
-		MergedAdjacencyCursor::open(&txn, scope, folded, None).await.map_err(ControlFlow::Err)?;
+	let mut cursor = MergedAdjacencyCursor::open(
+		&txn,
+		scope,
+		folded,
+		None,
+		Some(frozen.get_index_stores().adjacency_resolve()),
+	)
+	.await
+	.map_err(ControlFlow::Err)?;
 	// Only emptiness matters here, so nothing is decoded.
 	let batch = cursor.next_batch_keys(1).await.map_err(ControlFlow::Err)?;
 	Ok(!batch.is_empty())

@@ -46,6 +46,14 @@ pub struct IdxConfig {
 	/// Bounds the fold's transaction size on high-degree vertices; a scope
 	/// with more keys drains over several passes. (default: 1024)
 	pub graph_fold_batch: usize,
+	/// Whether folds emit numeric-encoded blocks, compressing each entry's
+	/// record ids into table-level doc-IDs. Existing plain blocks migrate
+	/// on their next fold; readers handle both encodings either way.
+	/// (default: false)
+	pub graph_numeric_ids: bool,
+	/// The maximum total size of the doc-ID → record-key cache that
+	/// resolves numeric adjacency entries (default: 64 MiB)
+	pub graph_resolve_cache_size: u64,
 }
 
 impl Default for IdxConfig {
@@ -57,6 +65,8 @@ impl Default for IdxConfig {
 			file_allowlist: Vec::new(),
 			graph_fold_threshold: 64,
 			graph_fold_batch: 1024,
+			graph_numeric_ids: false,
+			graph_resolve_cache_size: 64 * 1024 * 1024,
 		}
 	}
 }
@@ -67,6 +77,8 @@ impl cnf::Config for IdxConfig {
 			.parse_key("hnsw_cache_size", &mut self.hnsw_cache_size)
 			.parse_key("diskann_cache_size", &mut self.diskann_cache_size)
 			.parse_key("graph_fold_batch", &mut self.graph_fold_batch)
+			.parse_key("graph_numeric_ids", &mut self.graph_numeric_ids)
+			.parse_key("graph_resolve_cache_size", &mut self.graph_resolve_cache_size)
 			.parse_key_with("file_allowlist", &mut self.file_allowlist, |x| {
 				// FIXME: We really shouldn't be doing random, faillable, IO when reading
 				// configuration values. But no way to fix it without restructuring the

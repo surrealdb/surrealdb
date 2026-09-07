@@ -200,6 +200,7 @@ pub(crate) async fn define_index_statement_compute(
 		let replacement_uses_doc_ids = !matches!(this.index, Index::Count(_));
 		let purge_table_doc_ids = ix.uses_shared_doc_ids()
 			&& !replacement_uses_doc_ids
+			&& !tb.graph_doc_ids
 			&& !txn
 				.all_tb_indexes(tb.namespace_id, tb.database_id, &tb_name, None)
 				.await?

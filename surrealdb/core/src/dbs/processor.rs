@@ -1245,6 +1245,7 @@ pub(super) trait Collector {
 				},
 				folded,
 				opt.version,
+				Some(ctx.get_index_stores().adjacency_resolve()),
 			)
 			.await?;
 			let mut count = 0;

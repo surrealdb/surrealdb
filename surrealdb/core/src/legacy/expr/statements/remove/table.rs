@@ -92,6 +92,11 @@ pub(crate) async fn remove_table_statement_compute(
 	} else {
 		txn.del_prefix_key(&key).await?
 	};
+	// The table's doc-ID mappings went with the rest of its keyspace, and a
+	// redefinition restarts id allocation from scratch. The process-wide
+	// adjacency resolve cache needs no eviction for that: it is keyed on
+	// the table's never-reused `TableId`, so this generation's entries are
+	// unreachable once the definition is gone.
 	// Check if this is a foreign table
 	if let Some(tables) = tb.view.as_ref().map(|v| v.source_tables()) {
 		// Process each foreign table

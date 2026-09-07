@@ -196,10 +196,16 @@ const BLOCK_KNOWN_FLAGS: u8 = BLOCK_FLAG_NUMERIC | BLOCK_FLAG_PROPS;
 ///
 /// Entries carry the same information as the pointer keys they were
 /// folded from — the edge's own record key and the far vertex — so every
-/// read that today's pointer keys serve can be served from a block.
-/// Record keys are held as their storekey-encoded bytes: comparisons
-/// against pointer keys during the block/delta merge, and against the
-/// chunk-routing bounds, are then exact byte comparisons.
+/// read that today's pointer keys serve can be served from a block, in
+/// one of two encodings:
+///
+/// * **Plain** entries hold the storekey bytes of their record ids, so comparisons against pointer
+///   keys during the block/delta merge, and against the chunk-routing bounds, are exact byte
+///   comparisons.
+/// * **Numeric** entries hold each record's table-level doc-ID (the shared space every index
+///   consumes), delta-compressed, and a reader resolves them back through the `!dd` mapping. The
+///   fold only emits this encoding when every involved table is defined and numeric compression is
+///   enabled; an id that no longer resolves marks a deleted record, and readers skip it.
 ///
 /// Entries are sorted by, and unique on, their full identity — edge key,
 /// then target table, then target key — the same order the pointer keys
@@ -208,18 +214,50 @@ const BLOCK_KNOWN_FLAGS: u8 = BLOCK_FLAG_NUMERIC | BLOCK_FLAG_PROPS;
 /// is almost always unique too, but a deleted edge re-related to a new
 /// target can transiently pair one edge key with two targets across the
 /// block and delta layers, so the identity the format enforces is the
-/// full one.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// full one. Numeric entries keep that order positionally: doc-IDs do
+/// not sort like the keys they map, so the writer's ordering is the
+/// contract and the codec preserves it byte for byte.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdjacencyBlock {
 	/// The target-table dictionary entries reference by index. Targets
 	/// concentrate on few tables, so the name is stored once per table
 	/// rather than once per edge.
 	pub targets: Vec<TableName>,
-	/// The edges, sorted by `edge_key` bytes.
-	pub entries: Vec<BlockEntry>,
+	/// The edges, in pointer-key order.
+	pub entries: BlockEntries,
 }
 
-/// One edge held in an [`AdjacencyBlock`].
+impl Default for AdjacencyBlock {
+	fn default() -> Self {
+		Self {
+			targets: Vec::new(),
+			entries: BlockEntries::Plain(Vec::new()),
+		}
+	}
+}
+
+impl AdjacencyBlock {
+	/// How many edges the chunk holds.
+	pub fn len(&self) -> usize {
+		match &self.entries {
+			BlockEntries::Plain(entries) => entries.len(),
+			BlockEntries::Numeric(entries) => entries.len(),
+		}
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.len() == 0
+	}
+}
+
+/// The chunk's entries, in one of the two encodings.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BlockEntries {
+	Plain(Vec<BlockEntry>),
+	Numeric(Vec<NumericEntry>),
+}
+
+/// One edge held in a plain-encoded [`AdjacencyBlock`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockEntry {
 	/// The storekey bytes of the edge record's `RecordIdKey`.
@@ -230,6 +268,19 @@ pub struct BlockEntry {
 	pub target_key: Vec<u8>,
 	/// The edge's inline-property section body, carried verbatim from
 	/// the pointer value it was folded from.
+	pub props: Option<Vec<u8>>,
+}
+
+/// One edge held in a numeric-encoded [`AdjacencyBlock`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NumericEntry {
+	/// The edge record's doc-ID in its table's shared space.
+	pub edge: u64,
+	/// Index into the block's target-table dictionary.
+	pub target_table: u8,
+	/// The target record's doc-ID in its table's shared space.
+	pub target: u64,
+	/// The edge's inline-property section body, carried verbatim.
 	pub props: Option<Vec<u8>>,
 }
 
@@ -244,45 +295,87 @@ impl KVValue for AdjacencyBlock {
 			"adjacency block target dictionary exceeds {} tables",
 			u8::MAX
 		);
-		let props = self.entries.iter().any(|e| e.props.is_some());
-		let flags = if props {
-			BLOCK_FLAG_PROPS
-		} else {
-			0
+		let (numeric, props) = match &self.entries {
+			BlockEntries::Plain(entries) => (false, entries.iter().any(|e| e.props.is_some())),
+			BlockEntries::Numeric(entries) => (true, entries.iter().any(|e| e.props.is_some())),
 		};
+		let mut flags = 0;
+		if numeric {
+			flags |= BLOCK_FLAG_NUMERIC;
+		}
+		if props {
+			flags |= BLOCK_FLAG_PROPS;
+		}
 		let mut buf = Vec::new();
 		buf.push(flags);
-		write_uvarint(&mut buf, self.entries.len() as u64);
+		write_uvarint(&mut buf, self.len() as u64);
 		buf.push(self.targets.len() as u8);
 		for target in &self.targets {
 			let name = target.as_str().as_bytes();
 			write_uvarint(&mut buf, name.len() as u64);
 			buf.extend_from_slice(name);
 		}
-		let mut previous: Option<(&[u8], &TableName, &[u8])> = None;
-		for entry in &self.entries {
-			let target_name = self.targets.get(entry.target_table as usize);
-			let Some(target_name) = target_name else {
-				bail!("adjacency block entry names a target table outside the dictionary");
-			};
-			let identity = (entry.edge_key.as_slice(), target_name, entry.target_key.as_slice());
-			ensure!(
-				previous.is_none_or(|p| p < identity),
-				"adjacency block entries must be unique and sorted by identity"
-			);
-			previous = Some(identity);
-			write_uvarint(&mut buf, entry.edge_key.len() as u64);
-			buf.extend_from_slice(&entry.edge_key);
-			buf.push(entry.target_table);
-			write_uvarint(&mut buf, entry.target_key.len() as u64);
-			buf.extend_from_slice(&entry.target_key);
-			if props {
-				match &entry.props {
-					Some(body) => {
-						write_uvarint(&mut buf, body.len() as u64);
-						buf.extend_from_slice(body);
+		match &self.entries {
+			BlockEntries::Plain(entries) => {
+				let mut previous: Option<(&[u8], &TableName, &[u8])> = None;
+				for entry in entries {
+					let target_name = self.targets.get(entry.target_table as usize);
+					let Some(target_name) = target_name else {
+						bail!("adjacency block entry names a target table outside the dictionary");
+					};
+					let identity =
+						(entry.edge_key.as_slice(), target_name, entry.target_key.as_slice());
+					ensure!(
+						previous.is_none_or(|p| p < identity),
+						"adjacency block entries must be unique and sorted by identity"
+					);
+					previous = Some(identity);
+					write_uvarint(&mut buf, entry.edge_key.len() as u64);
+					buf.extend_from_slice(&entry.edge_key);
+					buf.push(entry.target_table);
+					write_uvarint(&mut buf, entry.target_key.len() as u64);
+					buf.extend_from_slice(&entry.target_key);
+					if props {
+						match &entry.props {
+							Some(body) => {
+								write_uvarint(&mut buf, body.len() as u64);
+								buf.extend_from_slice(body);
+							}
+							None => write_uvarint(&mut buf, 0),
+						}
 					}
-					None => write_uvarint(&mut buf, 0),
+				}
+			}
+			BlockEntries::Numeric(entries) => {
+				// The edge ids first, delta-compressed. Entries sit in
+				// pointer-key order, which doc-IDs do not follow, so the
+				// deltas are signed (zigzag). The remaining per-entry fields
+				// follow positionally.
+				let mut previous: u64 = 0;
+				for (i, entry) in entries.iter().enumerate() {
+					if i == 0 {
+						write_uvarint(&mut buf, entry.edge);
+					} else {
+						write_ivarint(&mut buf, entry.edge.wrapping_sub(previous) as i64);
+					}
+					previous = entry.edge;
+				}
+				for entry in entries {
+					ensure!(
+						(entry.target_table as usize) < self.targets.len(),
+						"adjacency block entry names a target table outside the dictionary"
+					);
+					buf.push(entry.target_table);
+					write_uvarint(&mut buf, entry.target);
+					if props {
+						match &entry.props {
+							Some(body) => {
+								write_uvarint(&mut buf, body.len() as u64);
+								buf.extend_from_slice(body);
+							}
+							None => write_uvarint(&mut buf, 0),
+						}
+					}
 				}
 			}
 		}
@@ -300,10 +393,7 @@ impl KVValue for AdjacencyBlock {
 			flags & !BLOCK_KNOWN_FLAGS == 0,
 			KeyError::Corrupted("adjacency block header carries unknown flags")
 		);
-		ensure!(
-			flags & BLOCK_FLAG_NUMERIC == 0,
-			KeyError::Corrupted("numeric adjacency block encoding is not supported by this build")
-		);
+		let numeric = flags & BLOCK_FLAG_NUMERIC != 0;
 		let props = flags & BLOCK_FLAG_PROPS != 0;
 		let corrupted = || KeyError::Corrupted("adjacency block is truncated");
 		let count = read_uvarint(&mut rest).ok_or_else(corrupted)?;
@@ -317,35 +407,79 @@ impl KVValue for AdjacencyBlock {
 				.map_err(|_| KeyError::Corrupted("adjacency block table name is not utf-8"))?;
 			targets.push(TableName::from(name));
 		}
-		let mut entries = Vec::with_capacity(count.min(4096));
-		for _ in 0..count {
-			let edge_key = read_segment(&mut rest).ok_or_else(corrupted)?.to_vec();
-			let (&target_table, tail) = rest.split_first().ok_or_else(corrupted)?;
-			rest = tail;
-			ensure!(
-				(target_table as usize) < targets.len(),
-				KeyError::Corrupted(
-					"adjacency block entry names a target table outside the dictionary"
-				)
-			);
-			let target_key = read_segment(&mut rest).ok_or_else(corrupted)?.to_vec();
-			let props = if props {
-				let body = read_segment(&mut rest).ok_or_else(corrupted)?;
-				if body.is_empty() {
-					None
+		let entries = if numeric {
+			let mut edges = Vec::with_capacity(count.min(4096));
+			let mut previous: u64 = 0;
+			for i in 0..count {
+				let edge = if i == 0 {
+					read_uvarint(&mut rest).ok_or_else(corrupted)?
 				} else {
-					Some(body.to_vec())
-				}
-			} else {
-				None
-			};
-			entries.push(BlockEntry {
-				edge_key,
-				target_table,
-				target_key,
-				props,
-			});
-		}
+					previous.wrapping_add(read_ivarint(&mut rest).ok_or_else(corrupted)? as u64)
+				};
+				previous = edge;
+				edges.push(edge);
+			}
+			let mut entries = Vec::with_capacity(count.min(4096));
+			for edge in edges {
+				let (&target_table, tail) = rest.split_first().ok_or_else(corrupted)?;
+				rest = tail;
+				ensure!(
+					(target_table as usize) < targets.len(),
+					KeyError::Corrupted(
+						"adjacency block entry names a target table outside the dictionary"
+					)
+				);
+				let target = read_uvarint(&mut rest).ok_or_else(corrupted)?;
+				let props = if props {
+					let body = read_segment(&mut rest).ok_or_else(corrupted)?;
+					if body.is_empty() {
+						None
+					} else {
+						Some(body.to_vec())
+					}
+				} else {
+					None
+				};
+				entries.push(NumericEntry {
+					edge,
+					target_table,
+					target,
+					props,
+				});
+			}
+			BlockEntries::Numeric(entries)
+		} else {
+			let mut entries = Vec::with_capacity(count.min(4096));
+			for _ in 0..count {
+				let edge_key = read_segment(&mut rest).ok_or_else(corrupted)?.to_vec();
+				let (&target_table, tail) = rest.split_first().ok_or_else(corrupted)?;
+				rest = tail;
+				ensure!(
+					(target_table as usize) < targets.len(),
+					KeyError::Corrupted(
+						"adjacency block entry names a target table outside the dictionary"
+					)
+				);
+				let target_key = read_segment(&mut rest).ok_or_else(corrupted)?.to_vec();
+				let props = if props {
+					let body = read_segment(&mut rest).ok_or_else(corrupted)?;
+					if body.is_empty() {
+						None
+					} else {
+						Some(body.to_vec())
+					}
+				} else {
+					None
+				};
+				entries.push(BlockEntry {
+					edge_key,
+					target_table,
+					target_key,
+					props,
+				});
+			}
+			BlockEntries::Plain(entries)
+		};
 		ensure!(
 			rest.is_empty(),
 			KeyError::Corrupted("adjacency block carries bytes beyond its entries")
@@ -370,6 +504,22 @@ fn write_uvarint(buf: &mut Vec<u8>, mut value: u64) {
 	}
 }
 
+/// Appends `value` as zigzag-then-unsigned LEB128, for signed deltas.
+fn write_ivarint(buf: &mut Vec<u8>, value: i64) {
+	write_uvarint(buf, ((value << 1) ^ (value >> 63)) as u64);
+}
+
+/// The byte width [`write_uvarint`] encodes `value` in, so a writer can
+/// size an encoding without producing it.
+pub fn uvarint_len(value: u64) -> usize {
+	(64 - (value | 1).leading_zeros() as usize).div_ceil(7)
+}
+
+/// The byte width [`write_ivarint`] encodes `value` in.
+pub fn ivarint_len(value: i64) -> usize {
+	uvarint_len(((value << 1) ^ (value >> 63)) as u64)
+}
+
 /// Reads an unsigned LEB128 value, advancing `bytes` past it. Returns
 /// `None` when the input ends mid-varint or the value overflows a `u64`.
 fn read_uvarint(bytes: &mut &[u8]) -> Option<u64> {
@@ -390,6 +540,12 @@ fn read_uvarint(bytes: &mut &[u8]) -> Option<u64> {
 			return None;
 		}
 	}
+}
+
+/// Reads a zigzag-encoded signed value, advancing `bytes` past it.
+fn read_ivarint(bytes: &mut &[u8]) -> Option<i64> {
+	let raw = read_uvarint(bytes)?;
+	Some(((raw >> 1) as i64) ^ -((raw & 1) as i64))
 }
 
 /// Reads a length-prefixed byte segment, advancing `bytes` past it.
@@ -501,10 +657,10 @@ mod tests {
 	fn block_round_trips() {
 		let block = AdjacencyBlock {
 			targets: vec![TableName::from("person"), TableName::from("org")],
-			entries: vec![
+			entries: BlockEntries::Plain(vec![
 				entry(b"\x03a\x00", 0, b"\x03x\x00"),
 				entry(b"\x03b\x00", 1, b"\x03y\x00"),
-			],
+			]),
 		};
 		let bytes = block.kv_encode_value().unwrap();
 		assert_eq!(AdjacencyBlock::kv_decode_value(&bytes, ()).unwrap(), block);
@@ -516,7 +672,7 @@ mod tests {
 		with_props.props = Some(vec![1, 2, 3]);
 		let block = AdjacencyBlock {
 			targets: vec![TableName::from("person")],
-			entries: vec![with_props, entry(b"\x03b\x00", 0, b"\x03y\x00")],
+			entries: BlockEntries::Plain(vec![with_props, entry(b"\x03b\x00", 0, b"\x03y\x00")]),
 		};
 		let bytes = block.kv_encode_value().unwrap();
 		assert_eq!(AdjacencyBlock::kv_decode_value(&bytes, ()).unwrap(), block);
@@ -526,15 +682,15 @@ mod tests {
 	fn block_rejects_unsorted_entries_and_bad_dictionary_indexes() {
 		let unsorted = AdjacencyBlock {
 			targets: vec![TableName::from("person")],
-			entries: vec![
+			entries: BlockEntries::Plain(vec![
 				entry(b"\x03b\x00", 0, b"\x03y\x00"),
 				entry(b"\x03a\x00", 0, b"\x03x\x00"),
-			],
+			]),
 		};
 		assert!(unsorted.kv_encode_value().is_err());
 		let out_of_dict = AdjacencyBlock {
 			targets: vec![TableName::from("person")],
-			entries: vec![entry(b"\x03a\x00", 1, b"\x03x\x00")],
+			entries: BlockEntries::Plain(vec![entry(b"\x03a\x00", 1, b"\x03x\x00")]),
 		};
 		assert!(out_of_dict.kv_encode_value().is_err());
 	}
@@ -543,12 +699,10 @@ mod tests {
 	fn block_rejects_unknown_flags_and_truncation() {
 		// Unknown header flag.
 		assert!(AdjacencyBlock::kv_decode_value(&[1 << 5, 0, 0], ()).is_err());
-		// Numeric encoding is a later format.
-		assert!(AdjacencyBlock::kv_decode_value(&[BLOCK_FLAG_NUMERIC, 0, 0], ()).is_err());
 		// Truncated mid-entry.
 		let block = AdjacencyBlock {
 			targets: vec![TableName::from("person")],
-			entries: vec![entry(b"\x03a\x00", 0, b"\x03x\x00")],
+			entries: BlockEntries::Plain(vec![entry(b"\x03a\x00", 0, b"\x03x\x00")]),
 		};
 		let bytes = block.kv_encode_value().unwrap();
 		assert!(AdjacencyBlock::kv_decode_value(&bytes[..bytes.len() - 1], ()).is_err());
@@ -556,6 +710,53 @@ mod tests {
 		let mut padded = bytes;
 		padded.push(0);
 		assert!(AdjacencyBlock::kv_decode_value(&padded, ()).is_err());
+	}
+
+	/// Numeric entries keep positional order and survive non-monotonic,
+	/// wrapping deltas — doc-IDs do not sort like the keys they map.
+	#[test]
+	fn numeric_block_round_trips() {
+		let block = AdjacencyBlock {
+			targets: vec![TableName::from("person")],
+			entries: BlockEntries::Numeric(vec![
+				NumericEntry {
+					edge: 42,
+					target_table: 0,
+					target: 7,
+					props: None,
+				},
+				NumericEntry {
+					edge: 3,
+					target_table: 0,
+					target: 900,
+					props: Some(vec![1, 2]),
+				},
+				NumericEntry {
+					edge: u64::MAX,
+					target_table: 0,
+					target: 0,
+					props: None,
+				},
+			]),
+		};
+		let bytes = block.kv_encode_value().unwrap();
+		assert_eq!(AdjacencyBlock::kv_decode_value(&bytes, ()).unwrap(), block);
+	}
+
+	/// The width helpers must agree byte-for-byte with the encoders they
+	/// mirror, across every varint length class.
+	#[test]
+	fn varint_widths_match_the_encoders() {
+		for value in [0u64, 1, 127, 128, 300, 16383, 16384, u32::MAX as u64, u64::MAX] {
+			let mut buf = Vec::new();
+			write_uvarint(&mut buf, value);
+			assert_eq!(uvarint_len(value), buf.len(), "uvarint width for {value}");
+		}
+		for value in [0i64, 1, -1, 63, 64, -64, -65, 1 << 20, -(1 << 20), i64::MAX, i64::MIN] {
+			let mut buf = Vec::new();
+			write_ivarint(&mut buf, value);
+			assert_eq!(ivarint_len(value), buf.len(), "ivarint width for {value}");
+		}
 	}
 
 	#[test]
@@ -585,7 +786,7 @@ mod tests {
 		};
 		let block = |tables: usize| AdjacencyBlock {
 			targets: (0..tables).map(|n| TableName::from(format!("t{n:03}"))).collect(),
-			entries: vec![entry(0)],
+			entries: BlockEntries::Plain(vec![entry(0)]),
 		};
 		let ok = block(255);
 		let bytes = ok.kv_encode_value().unwrap();

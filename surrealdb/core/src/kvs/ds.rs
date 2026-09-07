@@ -702,6 +702,7 @@ impl Datastore {
 			index_stores: IndexStores::new(
 				self.config.idx.hnsw_cache_size,
 				self.config.idx.diskann_cache_size,
+				self.config.idx.graph_resolve_cache_size,
 			),
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(storage)]
@@ -761,6 +762,7 @@ impl Datastore {
 			index_stores: IndexStores::new(
 				self.config.idx.hnsw_cache_size,
 				self.config.idx.diskann_cache_size,
+				self.config.idx.graph_resolve_cache_size,
 			),
 			index_builder: IndexBuilder::new(transaction_factory.clone()),
 			#[cfg(storage)]
@@ -3610,13 +3612,26 @@ impl Datastore {
 	/// Resolves the entry's kind to the byte range beneath it and hands that
 	/// range to [`Self::reclaim_range`]. All three kinds name a subtree holding
 	/// keys of more than one type, so the range is resolved as bytes.
-	/// Whether the table a queue entry names still has an index that consumes
-	/// the shared doc-ID space.
+	/// Whether the table a queue entry names still has a consumer of the
+	/// shared doc-ID space: a doc-ID index, or the `graph_doc_ids` marker a
+	/// numeric graph fold records (its blocks resolve through the space). A
+	/// table with no definition has no consumer — its whole keyspace is
+	/// reclaimed separately.
 	async fn tb_has_doc_id_consumer(&self, rc: &ReclaimKey<'_>) -> Result<bool> {
 		let txn = self.transaction(Read).await?;
-		let res = txn.all_tb_indexes(rc.ns, rc.db, rc.tb.as_ref(), None).await;
+		let res = async {
+			let Some(tb) = txn.get_tb(rc.ns, rc.db, rc.tb.as_ref(), None).await? else {
+				return Ok(false);
+			};
+			if tb.graph_doc_ids {
+				return Ok(true);
+			}
+			let ixs = txn.all_tb_indexes(rc.ns, rc.db, rc.tb.as_ref(), None).await?;
+			Ok(ixs.iter().any(|ix| ix.uses_shared_doc_ids()))
+		}
+		.await;
 		let _ = txn.cancel().await;
-		Ok(res?.iter().any(|ix| ix.uses_shared_doc_ids()))
+		res
 	}
 
 	async fn reclaim_decoded(
@@ -3650,11 +3665,12 @@ impl Datastore {
 			//
 			// The space is only orphaned while the table has no doc-ID consumer.
 			// A consumer present here means one was defined after the entry was
-			// queued without cancelling it — a node too old to know these kinds
-			// is the case that matters — so the reclaim obligation has lapsed and
-			// the entry is retired with whatever the space still holds left in
-			// place. Deleting from it would strip mappings the live index
-			// resolves its entries through.
+			// queued without cancelling it — a node too old to know these kinds,
+			// or too old to know the `graph_doc_ids` marker, is the case that
+			// matters — so the reclaim obligation has lapsed and the entry is
+			// retired with whatever the space still holds left in place.
+			// Deleting from it would strip mappings the live consumer resolves
+			// its entries through.
 			//
 			// The consumer check is resolved once, ahead of the prefix arms
 			// below, because it opens a read transaction and scans the table's
@@ -4081,9 +4097,15 @@ impl Datastore {
 		let mut retries = 0;
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
-			let txn = dbs.transaction(Write).await?;
+			let txn = Arc::new(dbs.transaction(Write).await?);
+			// The environment the fold's doc-ID assignment reads: the
+			// production `IndexEnv` is the query context, built the same way
+			// the index-compaction processors build theirs.
+			let mut env = dbs.setup_ctx()?;
+			env.set_transaction(Arc::clone(&txn));
+			let env = env.freeze();
 			let outcome = match crate::idx::adjacency::fold_scope(
-				&txn, scope.ns, scope.db, &ns_name, &db_name, &vertex, scope.dir, batch,
+				&env, scope.ns, scope.db, &ns_name, &db_name, &vertex, scope.dir, batch,
 			)
 			.await
 			{

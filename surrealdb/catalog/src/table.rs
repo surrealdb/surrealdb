@@ -127,6 +127,29 @@ pub struct StoredTableDefinition {
 	/// output for observability.
 	#[revision(start = 4)]
 	pub graph_folded: bool,
+
+	/// Whether this table's shared doc-ID space is referenced from packed
+	/// adjacency blocks — its records appear, as edges or as targets, in
+	/// numeric-encoded block entries somewhere in the database.
+	///
+	/// Set transactionally with the first numeric block that compresses one
+	/// of this table's record ids, and never cleared: while set, record
+	/// deletion must remove the record's doc-ID mapping even when no index
+	/// consumes the space (a stale mapping would hand a re-created record
+	/// its predecessor's id), and removing the table's last doc-ID-consuming
+	/// index must not reclaim the space (block entries still resolve through
+	/// it).
+	///
+	/// Internal bookkeeping: excluded from the SQL rendering; surfaced in
+	/// `INFO` structure output for observability.
+	#[revision(start = 4)]
+	/// `REMOVE TABLE` deletes the table's mapping space while foreign
+	/// tables' numeric blocks may still name its ids; recreating the same
+	/// table name then restarts allocation, so stale folded entries can
+	/// alias new records until the referencing scopes re-fold. Numeric
+	/// encoding therefore stays behind its default-off knob until removal
+	/// epochs land.
+	pub graph_doc_ids: bool,
 }
 
 impl_kv_value_revisioned!(StoredTableDefinition);
@@ -159,6 +182,7 @@ impl StoredTableDefinition {
 			graphql_alias: None,
 			graphql_deprecated: None,
 			graph_folded: false,
+			graph_doc_ids: false,
 		}
 	}
 }
@@ -206,6 +230,7 @@ impl InfoStructure for TableDefinition {
 			"graphql_alias", if let Some(v) = self.graphql_alias => v.into(),
 			"graphql_deprecated", if let Some(v) = self.graphql_deprecated => v.into(),
 			"graph_folded", if self.graph_folded => true.into(),
+			"graph_doc_ids", if self.graph_doc_ids => true.into(),
 			"id" => self.table_id.0.into(),
 		})
 	}
@@ -234,6 +259,8 @@ pub struct TableDefinition {
 	pub graphql_deprecated: Option<String>,
 	/// See [`StoredTableDefinition::graph_folded`].
 	pub graph_folded: bool,
+	/// See [`StoredTableDefinition::graph_doc_ids`].
+	pub graph_doc_ids: bool,
 }
 
 /// The SELECT permission guarding a table, for callers holding a table lookup
@@ -275,6 +302,7 @@ impl FromStored for TableDefinition {
 				graphql_alias: stored.graphql_alias.clone(),
 				graphql_deprecated: stored.graphql_deprecated.clone(),
 				graph_folded: stored.graph_folded,
+				graph_doc_ids: stored.graph_doc_ids,
 			})
 		}
 		build(stored).with_context(|| {
@@ -317,6 +345,7 @@ impl TableDefinition {
 			graphql_alias: self.graphql_alias.clone(),
 			graphql_deprecated: self.graphql_deprecated.clone(),
 			graph_folded: self.graph_folded,
+			graph_doc_ids: self.graph_doc_ids,
 		}
 	}
 }

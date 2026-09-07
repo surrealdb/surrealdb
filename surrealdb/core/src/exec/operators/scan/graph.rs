@@ -367,6 +367,7 @@ impl ExecOperator for GraphEdgeScan {
 										},
 										folded,
 										version,
+										Some(ctx.root().ctx.get_index_stores().adjacency_resolve()),
 									)
 									.await
 									.context("Failed to open graph cursor")?;

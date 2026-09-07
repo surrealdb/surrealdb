@@ -133,7 +133,7 @@ async fn read_scope(
 		fk_lower,
 		delta_range,
 	};
-	let mut cursor = MergedAdjacencyCursor::open(&txn, scope, folded, None).await.unwrap();
+	let mut cursor = MergedAdjacencyCursor::open(&txn, scope, folded, None, None).await.unwrap();
 	let mut out = Vec::new();
 	loop {
 		let batch = cursor.next_batch(97).await.unwrap();
@@ -172,7 +172,7 @@ async fn read_all_keys(store: &TestIndexStore, folded: bool) -> Vec<Vec<u8>> {
 	let txn = store.transaction(Read).await.unwrap();
 	let vertex = vertex();
 	let mut cursor =
-		MergedAdjacencyCursor::open(&txn, out_scope(&vertex), folded, None).await.unwrap();
+		MergedAdjacencyCursor::open(&txn, out_scope(&vertex), folded, None, None).await.unwrap();
 	let mut out = Vec::new();
 	loop {
 		let batch = cursor.next_batch_keys(7).await.unwrap();
@@ -194,11 +194,11 @@ async fn fold_all(store: &TestIndexStore, max_deltas: usize) -> usize {
 	let vertex = vertex();
 	let mut total = 0;
 	loop {
-		let txn = store.transaction(Write).await.unwrap();
-		let outcome = fold_scope(&txn, NS, DB, NS_NAME, DB_NAME, &vertex, Dir::Out, max_deltas)
+		let env = store.env(Write).await;
+		let outcome = fold_scope(&env, NS, DB, NS_NAME, DB_NAME, &vertex, Dir::Out, max_deltas)
 			.await
 			.unwrap();
-		txn.commit().await.unwrap();
+		env.tx().commit().await.unwrap();
 		total += outcome.folded;
 		if !outcome.has_more {
 			return total;
@@ -373,12 +373,12 @@ async fn scattered_deltas_fold_over_bounded_chunk_passes() {
 	// more work.
 	let mut passes = 0;
 	loop {
-		let txn = store.transaction(Write).await.unwrap();
+		let env = store.env(Write).await;
 		let outcome =
-			fold_scope_bounded(&txn, NS, DB, NS_NAME, DB_NAME, &vertex, Dir::Out, 1024, 1)
+			fold_scope_bounded(&env, NS, DB, NS_NAME, DB_NAME, &vertex, Dir::Out, 1024, 1)
 				.await
 				.unwrap();
-		txn.commit().await.unwrap();
+		env.tx().commit().await.unwrap();
 		passes += 1;
 		if passes == 1 {
 			assert!(outcome.has_more, "one bounded pass must not rewrite the whole scope");
@@ -420,9 +420,13 @@ async fn randomized_operations_match_the_model() {
 	use rand::rngs::StdRng;
 	use rand::{Rng, SeedableRng};
 
-	for seed in [1u64, 7, 42] {
+	for (seed, numeric) in [(1u64, false), (7, false), (42, false), (1, true), (7, true)] {
 		let mut rng = StdRng::seed_from_u64(seed);
-		let store = TestIndexStore::new().await;
+		let store = if numeric {
+			TestIndexStore::with_idx_config(|config| config.graph_numeric_ids = true).await
+		} else {
+			TestIndexStore::new().await
+		};
 		seed_table(&store).await;
 		let vertex = vertex();
 		// The model: edge id -> target, in the same order the storekey
@@ -478,11 +482,11 @@ async fn randomized_operations_match_the_model() {
 				}
 				// Fold one bounded pass.
 				_ => {
-					let txn = store.transaction(Write).await.unwrap();
-					fold_scope(&txn, NS, DB, NS_NAME, DB_NAME, &vertex, Dir::Out, 16)
+					let env = store.env(Write).await;
+					fold_scope(&env, NS, DB, NS_NAME, DB_NAME, &vertex, Dir::Out, 16)
 						.await
 						.unwrap();
-					txn.commit().await.unwrap();
+					env.tx().commit().await.unwrap();
 				}
 			}
 
@@ -508,7 +512,7 @@ async fn randomized_operations_match_the_model() {
 				.collect();
 			let expected: Vec<(String, RecordId)> =
 				model.iter().map(|(id, t)| (id.clone(), t.clone())).collect();
-			assert_eq!(read, expected, "seed {seed} diverged at step {step}");
+			assert_eq!(read, expected, "seed {seed} (numeric: {numeric}) diverged at step {step}");
 		}
 	}
 }
@@ -516,6 +520,242 @@ async fn randomized_operations_match_the_model() {
 /// Defines the vertex table without seeding edges.
 async fn seed_table(store: &TestIndexStore) {
 	seed(store, &[]).await;
+}
+
+/// Numeric folding: entries compress into doc-IDs, both involved tables
+/// gain the `graph_doc_ids` marker, reads resolve back to the pre-fold
+/// oracle, an id whose record mapping is removed (a deleted record)
+/// disappears from reads and is collected by the next fold, and turning
+/// the knob off decompresses chunks on their next fold.
+#[tokio::test]
+async fn numeric_folds_resolve_and_collect_deleted_ids() {
+	use surrealdb_datastore::values::graph::BlockEntries;
+
+	use crate::docids::TableDocIds;
+	use crate::key::KVKey;
+
+	let store = TestIndexStore::with_idx_config(|config| config.graph_numeric_ids = true).await;
+	// The edge table must be defined for its ids to be compressible.
+	{
+		let txn = store.transaction(Write).await.unwrap();
+		let table = TableDefinition::from_stored(&StoredTableDefinition::new(
+			NS,
+			DB,
+			TableId(2),
+			TableName::from("likes"),
+		))
+		.unwrap();
+		txn.put_tb(NS_NAME, DB_NAME, &table).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+	let all = edges(5);
+	seed(&store, &all).await;
+	let oracle = read_all(&store, false).await;
+
+	assert_eq!(fold_all(&store, 1024).await, 5);
+
+	// The chunk is numeric and both tables carry the marker.
+	{
+		let txn = store.transaction(Read).await.unwrap();
+		let vertex = vertex();
+		let range = AdjacencyDirPrefix {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&vertex.table),
+			id: Cow::Borrowed(&vertex.key),
+			dir: Dir::Out,
+		}
+		.range()
+		.unwrap();
+		let chunks = txn.getr(range, None).await.unwrap();
+		assert_eq!(chunks.len(), 1);
+		assert!(
+			matches!(chunks[0].1.entries, BlockEntries::Numeric(_)),
+			"the fold must emit the numeric encoding"
+		);
+		for table in ["person", "likes"] {
+			let tb = txn.get_tb(NS, DB, &TableName::from(table), None).await.unwrap().unwrap();
+			assert!(tb.graph_doc_ids, "{table} must carry the doc-ID consumer marker");
+		}
+		txn.cancel().await.unwrap();
+	}
+	assert_eq!(read_all(&store, true).await, oracle);
+
+	// Deleting a record removes its mapping; entries naming its id vanish
+	// from reads and the next fold collects them. The tombstone the
+	// deletion writes covers the edge either way — removing the TARGET
+	// record's mapping alone must already hide the entry.
+	let (e2, t2) = &all[2];
+	{
+		let txn = store.transaction(Write).await.unwrap();
+		TableDocIds::new(NS, DB, t2.table.clone()).remove(&txn, &t2.key).await.unwrap();
+		txn.set_key(&pointer_key(&vertex(), e2, t2), &AdjacencyValue::tombstone()).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+	let expected: Vec<_> = oracle.iter().filter(|item| item.edge != *e2).cloned().collect();
+	assert_eq!(read_all(&store, true).await, expected);
+	fold_all(&store, 1024).await;
+	assert_eq!(read_all(&store, true).await, expected);
+
+	// With the knob off, the next fold rewrites touched chunks as plain.
+	let plain_store = store;
+	let mut config = (**plain_store.config()).clone();
+	config.graph_numeric_ids = false;
+	// A fresh delta forces the chunk rewrite.
+	let (e9, t9) = (edge("e90009"), target("t90009"));
+	{
+		let txn = plain_store.transaction(Write).await.unwrap();
+		txn.set_key(&pointer_key(&vertex(), &e9, &t9), &AdjacencyValue::live()).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+	let plain_store = TestIndexStore::rewire_config(plain_store, config);
+	fold_all(&plain_store, 1024).await;
+	{
+		let txn = plain_store.transaction(Read).await.unwrap();
+		let vertex = vertex();
+		let range = AdjacencyDirPrefix {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&vertex.table),
+			id: Cow::Borrowed(&vertex.key),
+			dir: Dir::Out,
+		}
+		.range()
+		.unwrap();
+		let chunks = txn.getr(range, None).await.unwrap();
+		assert!(
+			chunks.iter().all(|(_, b)| matches!(b.entries, BlockEntries::Plain(_))),
+			"folds with the knob off must decompress the chunks they rewrite"
+		);
+		txn.cancel().await.unwrap();
+	}
+	let mut expected = expected;
+	expected.push(MergedAdjacencyEdge {
+		key: pointer_key(&vertex(), &e9, &t9).encode_key().unwrap().as_ref().to_vec(),
+		edge: e9,
+		target: Some(t9),
+		props: None,
+	});
+	assert_eq!(read_all(&plain_store, true).await, expected);
+}
+
+/// The numeric writer sizes entries at their exact encoded width, so
+/// small-id propless chunks fill to the entry cap rather than closing
+/// early on an inflated byte estimate — and the encoding they produce
+/// still fits the byte threshold.
+#[tokio::test]
+async fn numeric_chunks_fill_to_the_entry_cap() {
+	use surrealdb_datastore::values::graph::BlockEntries;
+	use surrealdb_kvs::value::KVValue;
+
+	use super::fold::{CHUNK_MAX_BYTES, CHUNK_MAX_ENTRIES};
+
+	let store = TestIndexStore::with_idx_config(|config| config.graph_numeric_ids = true).await;
+	{
+		let txn = store.transaction(Write).await.unwrap();
+		let table = TableDefinition::from_stored(&StoredTableDefinition::new(
+			NS,
+			DB,
+			TableId(2),
+			TableName::from("likes"),
+		))
+		.unwrap();
+		txn.put_tb(NS_NAME, DB_NAME, &table).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+	let total = CHUNK_MAX_ENTRIES + 88;
+	seed(&store, &edges(total)).await;
+	let oracle = read_all(&store, false).await;
+	assert_eq!(fold_all(&store, 10_000).await, total);
+
+	let txn = store.transaction(Read).await.unwrap();
+	let vertex = vertex();
+	let range = AdjacencyDirPrefix {
+		ns: NS,
+		db: DB,
+		tb: Cow::Borrowed(&vertex.table),
+		id: Cow::Borrowed(&vertex.key),
+		dir: Dir::Out,
+	}
+	.range()
+	.unwrap();
+	let chunks = txn.getr(range, None).await.unwrap();
+	txn.cancel().await.unwrap();
+	let lens: Vec<usize> = chunks.iter().map(|(_, block)| block.len()).collect();
+	assert_eq!(lens, vec![CHUNK_MAX_ENTRIES, total - CHUNK_MAX_ENTRIES]);
+	for (_, block) in &chunks {
+		assert!(matches!(block.entries, BlockEntries::Numeric(_)));
+		let encoded = block.kv_encode_value().unwrap().len();
+		assert!(
+			encoded <= CHUNK_MAX_BYTES,
+			"a {}-entry chunk encoded to {encoded} bytes",
+			block.len()
+		);
+	}
+	assert_eq!(read_all(&store, true).await, oracle);
+}
+
+/// Refolding an already-numeric scope reuses the ids carried through the
+/// merge verbatim: no `!di`/`!dd` mapping appears or changes in either
+/// involved table's space, and the rewritten chunk still resolves to the
+/// same edges.
+#[tokio::test]
+async fn refolding_a_numeric_scope_assigns_no_new_ids() {
+	use crate::key::schema::{DocKeyPrefix, DocLookupPrefix};
+
+	let store = TestIndexStore::with_idx_config(|config| config.graph_numeric_ids = true).await;
+	{
+		let txn = store.transaction(Write).await.unwrap();
+		let table = TableDefinition::from_stored(&StoredTableDefinition::new(
+			NS,
+			DB,
+			TableId(2),
+			TableName::from("likes"),
+		))
+		.unwrap();
+		txn.put_tb(NS_NAME, DB_NAME, &table).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+	let all = edges(5);
+	seed(&store, &all).await;
+	let oracle = read_all(&store, false).await;
+	assert_eq!(fold_all(&store, 1024).await, 5);
+
+	/// Every `!di`/`!dd` mapping of both involved tables, raw.
+	async fn mappings(store: &TestIndexStore) -> Vec<(Vec<u8>, Vec<u8>)> {
+		let txn = store.transaction(Read).await.unwrap();
+		let mut out = Vec::new();
+		for table in ["person", "likes"] {
+			let tb = TableName::from(table);
+			let ranges: [crate::key::RawRange; 2] = [
+				DocLookupPrefix::new(NS, DB, Cow::Borrowed(&tb)).range().unwrap().into(),
+				DocKeyPrefix::new(NS, DB, Cow::Borrowed(&tb)).range().unwrap().into(),
+			];
+			for range in ranges {
+				for (key, val) in txn.scan_raw(range, u32::MAX, 0, None).await.unwrap() {
+					out.push((key.clone(), val.clone()));
+				}
+			}
+		}
+		txn.cancel().await.unwrap();
+		out
+	}
+	let before = mappings(&store).await;
+	assert!(!before.is_empty(), "the numeric fold must have assigned ids");
+
+	// A tombstone forces the chunk rewrite; the surviving entries' ids ride
+	// through the merge and back into the rewritten chunk untouched.
+	let (e2, t2) = &all[2];
+	{
+		let txn = store.transaction(Write).await.unwrap();
+		txn.set_key(&pointer_key(&vertex(), e2, t2), &AdjacencyValue::tombstone()).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+	assert_eq!(fold_all(&store, 1024).await, 1);
+
+	assert_eq!(mappings(&store).await, before, "a refold must not touch the id mappings");
+	let expected: Vec<_> = oracle.into_iter().filter(|item| item.edge != *e2).collect();
+	assert_eq!(read_all(&store, true).await, expected);
 }
 
 /// A fold deletes exactly the keys it captured, conditioned on their
@@ -541,9 +781,9 @@ async fn a_fold_racing_a_delete_loses_instead_of_losing_the_delete() {
 	}
 
 	// The fold captures both live keys...
-	let fold_txn = store.transaction(Write).await.unwrap();
+	let fold_env = store.env(Write).await;
 	let outcome =
-		fold_scope(&fold_txn, NS, DB, NS_NAME, DB_NAME, &vertex(), Dir::Out, 1024).await.unwrap();
+		fold_scope(&fold_env, NS, DB, NS_NAME, DB_NAME, &vertex(), Dir::Out, 1024).await.unwrap();
 	assert_eq!(outcome.folded, 2);
 
 	// ...then a concurrent deletion tombstones one of them and commits
@@ -556,7 +796,10 @@ async fn a_fold_racing_a_delete_loses_instead_of_losing_the_delete() {
 
 	// The fold must not win: committing it would erase the tombstone and
 	// resurrect the deleted edge from the block it just wrote.
-	assert!(fold_txn.commit().await.is_err(), "the fold must fail against the newer tombstone");
+	assert!(
+		fold_env.tx().commit().await.is_err(),
+		"the fold must fail against the newer tombstone"
+	);
 
 	// The deletion survives, and a retried fold converges.
 	fold_all(&store, 1024).await;
@@ -570,6 +813,8 @@ async fn a_fold_racing_a_delete_loses_instead_of_losing_the_delete() {
 /// delta-only, block-only and mixed scopes.
 #[tokio::test]
 async fn next_batch_keys_matches_the_edge_stream() {
+	use surrealdb_datastore::values::graph::BlockEntries;
+
 	let store = TestIndexStore::new().await;
 	let all = edges(20);
 	seed(&store, &all).await;
@@ -594,6 +839,47 @@ async fn next_batch_keys_matches_the_edge_stream() {
 	assert!(merged.iter().any(|item| item.edge == e));
 	assert!(!merged.iter().any(|item| item.edge == *e3));
 	assert_eq!(read_all_keys(&store, true).await, keys_of(merged));
+
+	// Numeric blocks: the keys-only synthesis resolves the chunk's doc-IDs
+	// exactly as the edge stream does, since the pointer-key domain both
+	// emit in is built from the resolved record keys.
+	let numeric = TestIndexStore::with_idx_config(|config| config.graph_numeric_ids = true).await;
+	{
+		// The edge table must be defined for its ids to be compressible.
+		let txn = numeric.transaction(Write).await.unwrap();
+		let table = TableDefinition::from_stored(&StoredTableDefinition::new(
+			NS,
+			DB,
+			TableId(2),
+			TableName::from("likes"),
+		))
+		.unwrap();
+		txn.put_tb(NS_NAME, DB_NAME, &table).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+	seed(&numeric, &all).await;
+	fold_all(&numeric, 1024).await;
+	{
+		let txn = numeric.transaction(Read).await.unwrap();
+		let vertex = vertex();
+		let range = AdjacencyDirPrefix {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&vertex.table),
+			id: Cow::Borrowed(&vertex.key),
+			dir: Dir::Out,
+		}
+		.range()
+		.unwrap();
+		let chunks = txn.getr(range, None).await.unwrap();
+		assert_eq!(chunks.len(), 1);
+		assert!(
+			matches!(chunks[0].1.entries, BlockEntries::Numeric(_)),
+			"the fold must emit the numeric encoding"
+		);
+		txn.cancel().await.unwrap();
+	}
+	assert_eq!(read_all_keys(&numeric, true).await, keys_of(read_all(&numeric, true).await));
 }
 
 /// A bounded read on a folded scope materializes block entries on demand:
@@ -611,7 +897,7 @@ async fn bounded_reads_materialize_block_entries_on_demand() {
 	let txn = store.transaction(Read).await.unwrap();
 	let vertex = vertex();
 	let mut cursor =
-		MergedAdjacencyCursor::open(&txn, out_scope(&vertex), true, None).await.unwrap();
+		MergedAdjacencyCursor::open(&txn, out_scope(&vertex), true, None, None).await.unwrap();
 	let mut drained = cursor.next_batch(1).await.unwrap();
 	assert_eq!(drained.len(), 1);
 	assert_eq!(cursor.buffered_block_entries(), 0, "nothing may be buffered past the need");
@@ -655,7 +941,7 @@ async fn tombstone_runs_escalate_the_delta_fill() {
 	{
 		let txn = store.transaction(Read).await.unwrap();
 		let mut cursor =
-			MergedAdjacencyCursor::open(&txn, out_scope(&vertex), true, None).await.unwrap();
+			MergedAdjacencyCursor::open(&txn, out_scope(&vertex), true, None, None).await.unwrap();
 		let batch = cursor.next_batch_keys(1).await.unwrap();
 		assert!(batch.is_empty());
 		assert!(
@@ -676,7 +962,7 @@ async fn tombstone_runs_escalate_the_delta_fill() {
 	}
 	let txn = store.transaction(Read).await.unwrap();
 	let mut cursor =
-		MergedAdjacencyCursor::open(&txn, out_scope(&vertex), true, None).await.unwrap();
+		MergedAdjacencyCursor::open(&txn, out_scope(&vertex), true, None, None).await.unwrap();
 	let batch = cursor.next_batch_keys(1).await.unwrap();
 	assert_eq!(batch.len(), 1);
 	assert_eq!(cursor.delta_fill_count(), 1, "a live-head peek fills exactly once");
@@ -735,7 +1021,7 @@ async fn uninterpreted_sections_stay_in_the_delta_layer() {
 	.unwrap();
 	let chunks = txn.scan(range, u32::MAX, 0, None).await.unwrap();
 	txn.cancel().await.unwrap();
-	let entries: usize = chunks.iter().map(|(_, block)| block.entries.len()).sum();
+	let entries: usize = chunks.iter().map(|(_, block)| block.len()).sum();
 	assert_eq!(entries, 3, "no block entry may be created for the sectioned edge");
 
 	// The merge keeps serving the edge from the delta side.
@@ -778,4 +1064,79 @@ async fn legacy_keys_stay_in_the_delta_layer() {
 		merged.iter().filter(|e| e.target.is_none()).count() == 2,
 		"legacy entries carry no target"
 	);
+}
+
+/// A chunk whose `involved` tables include one undefined table always falls
+/// back to Plain, and — regardless of which of the *defined* tables the
+/// (unspecified-order) scan happens to visit first — none of them gets
+/// `graph_doc_ids` set: the marker is written only once every involved
+/// table is confirmed defined, never speculatively per table. Runs several
+/// independent trials because each fold builds its own freshly, randomly
+/// seeded `HashSet` for `involved`; a single trial could not rule out an
+/// iteration order that happens to visit the undefined table first, which
+/// would hide a partial-marking regression.
+#[tokio::test]
+async fn undefined_target_table_marks_no_table_numeric() {
+	use surrealdb_datastore::values::graph::BlockEntries;
+
+	for trial in 0..25 {
+		let store = TestIndexStore::with_idx_config(|config| config.graph_numeric_ids = true).await;
+		let vertex = vertex();
+		let txn = store.transaction(Write).await.unwrap();
+		for (id, name) in [(1, "person"), (2, "likes"), (3, "friend")] {
+			let table = TableDefinition::from_stored(&StoredTableDefinition::new(
+				NS,
+				DB,
+				TableId(id),
+				TableName::from(name),
+			))
+			.unwrap();
+			txn.put_tb(NS_NAME, DB_NAME, &table).await.unwrap();
+		}
+		// "ghost" is deliberately left undefined.
+		let e1 = edge("e00001");
+		let e2 = edge("e00002");
+		let e3 = edge("e00003");
+		let friend_target = RecordId::new("friend".into(), "t00002".to_owned());
+		let ghost_target = RecordId::new("ghost".into(), "t00003".to_owned());
+		txn.set_key(&pointer_key(&vertex, &e1, &target("t00001")), &AdjacencyValue::live())
+			.await
+			.unwrap();
+		txn.set_key(&pointer_key(&vertex, &e2, &friend_target), &AdjacencyValue::live())
+			.await
+			.unwrap();
+		txn.set_key(&pointer_key(&vertex, &e3, &ghost_target), &AdjacencyValue::live())
+			.await
+			.unwrap();
+		txn.commit().await.unwrap();
+
+		let env = store.env(Write).await;
+		fold_scope(&env, NS, DB, NS_NAME, DB_NAME, &vertex, Dir::Out, 1024).await.unwrap();
+		env.tx().commit().await.unwrap();
+
+		let txn = store.transaction(Read).await.unwrap();
+		let range = AdjacencyDirPrefix {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&vertex.table),
+			id: Cow::Borrowed(&vertex.key),
+			dir: Dir::Out,
+		}
+		.range()
+		.unwrap();
+		let chunks = txn.getr(range, None).await.unwrap();
+		assert_eq!(chunks.len(), 1, "trial {trial}");
+		assert!(
+			matches!(chunks[0].1.entries, BlockEntries::Plain(_)),
+			"trial {trial}: a chunk naming an undefined table must fall back to Plain"
+		);
+		for name in ["person", "likes", "friend"] {
+			let tb = txn.get_tb(NS, DB, &TableName::from(name), None).await.unwrap().unwrap();
+			assert!(
+				!tb.graph_doc_ids,
+				"trial {trial}: {name} must not be marked when the chunk fell back to Plain"
+			);
+		}
+		txn.cancel().await.unwrap();
+	}
 }

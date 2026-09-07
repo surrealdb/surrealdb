@@ -50,8 +50,11 @@ pub(crate) async fn remove_index_statement_compute(
 	// Determine — before the definition is removed — whether this is the last
 	// doc-ID-consuming index (full-text / HNSW / DiskAnn / doc-ID-format
 	// b-tree) on the table. If so, the shared table-level doc-ID mappings
-	// must be reclaimed once it is gone (see the purge below).
+	// must be reclaimed once it is gone (see the purge below) — unless the
+	// table's `graph_doc_ids` marker is set: numeric adjacency blocks then
+	// still resolve through the space, so it must survive its last index.
 	let removed_last_doc_id_index = ix.uses_shared_doc_ids()
+		&& !tb.graph_doc_ids
 		&& !txn
 			.all_tb_indexes(ns, db, &table_name, None)
 			.await?

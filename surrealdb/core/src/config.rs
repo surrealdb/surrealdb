@@ -169,6 +169,10 @@ mod tests {
 		assert_eq!(c.graph_fold_threshold, IdxConfig::default().graph_fold_threshold);
 		let c: IdxConfig = map_with("graph_fold_batch", "7").load();
 		assert_eq!(c.graph_fold_batch, 7);
+		let c: IdxConfig = map_with("graph_numeric_ids", "true").load();
+		assert!(c.graph_numeric_ids);
+		let c: IdxConfig = map_with("graph_resolve_cache_size", "7").load();
+		assert_eq!(c.graph_resolve_cache_size, 7);
 		// Canonicalizing, so the value has to name a directory that exists.
 		let dir = std::env::temp_dir();
 		let c: IdxConfig = map_with("file_allowlist", &dir.to_string_lossy()).load();

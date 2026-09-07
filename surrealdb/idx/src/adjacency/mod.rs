@@ -17,6 +17,7 @@
 
 pub mod fold;
 pub mod merge;
+pub mod resolve;
 #[cfg(test)]
 mod tests;
 
@@ -25,6 +26,7 @@ use surrealdb_datastore::Transaction;
 
 pub use self::fold::{FoldOutcome, fold_scope};
 pub use self::merge::{AdjacencyScope, MergeStats, MergedAdjacencyCursor, MergedAdjacencyEdge};
+pub use self::resolve::{AdjacencyResolveCache, resolve_doc_ids};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::val::TableName;
