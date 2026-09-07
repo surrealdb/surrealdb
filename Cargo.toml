@@ -207,12 +207,23 @@ indexmap = "2.14.0"
 inventory = "0.3.24"
 ipnet = "2.12.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
+# Raw jemalloc bindings, for `nallocx`: the allocation-tracking allocator
+# records the size class jemalloc reserves for a layout rather than the
+# requested size. Version-matched to `jemallocator`, which owns the vendored
+# jemalloc build.
+jemalloc-sys = { version = "0.6.1", package = "tikv-jemalloc-sys" }
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["use_pem"] }
 js-sys = { version = "0.3.103", default-features = false }
 logos = "0.16.1" # TODO: pin version
 md-5 = "0.10.6"
 memchr = "2.8.0"
-mimalloc = "0.1.49"
+mimalloc = { version = "0.1.49", features = ["extended"] }
+# Raw mimalloc bindings, for `mi_good_size`; `mimalloc`'s `extended` feature
+# above forwards to this crate's, which gates the module declaring it. Must
+# stay on the version `mimalloc` itself requires so cargo resolves one shared
+# copy: a divergent pin would build a second vendored mimalloc whose size
+# classes need not match the allocator actually installed.
+mimalloc-sys = { version = "0.1.47", package = "libmimalloc-sys" }
 napi = { version = "3.12.0", default-features = false }
 napi-build = "2.4.0"
 napi-derive = "3.6.2"
@@ -301,8 +312,8 @@ toml = "0.9.12"
 wasm-encoder = "0.245"
 wasm-opt = "0.116.1"
 wasmparser = "0.245"
-wasmtime = { version = "46.0.2", default-features = false, features = ["async", "cranelift", "winch", "runtime", "std", "wat", "component-model", "parallel-compilation"] }
-wasmtime-wasi = { version = "46.0.2", features = ["p1", "p2"] }
+wasmtime = { version = "46.0.3", default-features = false, features = ["async", "cranelift", "winch", "runtime", "std", "wat", "component-model", "parallel-compilation"] }
+wasmtime-wasi = { version = "46.0.3", features = ["p1", "p2"] }
 wit-bindgen = { version = "0.51", default-features = false, features = ["macros", "realloc"] }
 zstd = { version = "0.13.3", default-features = false }
 

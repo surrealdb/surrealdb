@@ -46,6 +46,24 @@ use crate::telemetry::traces::rpc::span_for_request;
 /// An error string sent when the server is out of memory
 const SERVER_OVERLOADED: &str = "The server is unable to handle the request";
 
+/// Report a request refused because tracked memory crossed
+/// `SURREAL_MEMORY_THRESHOLD`.
+///
+/// A refusal short-circuits before dispatch, so no statement or RPC metric
+/// moves and the only other outward sign is that clients stop getting answers.
+/// `transport` names the ingress that refused, and the two byte counts — taken
+/// from the check that refused, so the total is not recomputed — are what an
+/// operator needs to tell "the threshold is set too low" apart from "this
+/// instance is genuinely out of memory".
+pub(crate) fn log_memory_refusal(transport: &str, allocated: usize, threshold: usize) {
+	warn!(
+		transport,
+		memory_allocated = allocated,
+		memory_threshold = threshold,
+		"Refusing request: tracked memory is beyond SURREAL_MEMORY_THRESHOLD"
+	);
+}
+
 /// An error string sent when the server is gracefully shutting down
 const SERVER_SHUTTING_DOWN: &str = "The server is gracefully shutting down";
 
@@ -424,9 +442,9 @@ impl Websocket {
 							// Clone the response sending channel
 							let chn = internal_sender.clone();
 							// Check to see whether we have available memory
-							if ALLOC.is_beyond_threshold() {
+							if let Some(over) = ALLOC.beyond_threshold_by() {
 								// Reject the message
-								Self::close_socket(Arc::clone(&rpc), chn).await;
+								Self::close_socket(Arc::clone(&rpc), chn, over).await;
 								// Exit out of the loop
 								break;
 							}
@@ -602,7 +620,8 @@ impl Websocket {
 						.await;
 					}
 					// Check to see whether we have available memory
-					else if ALLOC.is_beyond_threshold() {
+					else if let Some((allocated, threshold)) = ALLOC.beyond_threshold_by() {
+						log_memory_refusal("websocket", allocated, threshold);
 						crate::rpc::response::send(
 							DbResponse::failure(
 								req.id,
@@ -727,9 +746,12 @@ impl Websocket {
 	}
 
 	/// Reject a WebSocket message due to server overloading
-	async fn close_socket(rpc: Arc<Websocket>, chn: Sender<Message>) {
+	///
+	/// `over` is the tracked total and the threshold it exceeded, from the
+	/// check that refused the message.
+	async fn close_socket(rpc: Arc<Websocket>, chn: Sender<Message>, over: (usize, usize)) {
 		// Log the error as a warning
-		warn!("The server is overloaded and is unable to process a WebSocket request");
+		log_memory_refusal("websocket", over.0, over.1);
 		// Create a custom close frame
 		let frame = CloseFrame {
 			code: AGAIN,

@@ -94,21 +94,90 @@ pub fn extract_allowed_paths(input: &str, canonicalize: bool, subject: &str) -> 
 
 // Used in the memory allocator global, so hard to remove.
 
-/// The memory usage threshold before tasks are forced to exit (default: 0
-/// bytes). The default 0 bytes means that there is no memory threshold.
-/// Any other user-set memory threshold will default to at least 1 MiB.
+/// The tracked-memory ceiling, in bytes, above which queries are refused
+/// (`SURREAL_MEMORY_THRESHOLD`). `0` — the default — disables the guard
+/// entirely; any other value is floored to 1 MiB.
+///
+/// # What the threshold is compared against
+///
+/// The guard compares this value against *tracked* bytes, not process RSS: for
+/// each live Rust-heap allocation the size class the allocator reserved for it,
+/// plus every registered external memory reporter (the RocksDB block/row/blob
+/// cache). Tracked bytes are a lower bound on the process's real footprint. Not
+/// counted, and therefore requiring headroom below a container memory limit:
+///
+/// - allocator arena metadata, slab-level fragmentation, and pages the allocator retains rather
+///   than returning to the operating system
+/// - RocksDB memory outside its cache — per-SST table readers, compaction and flush buffers,
+///   iterator readahead, and an open transaction's pending writes
+/// - WebAssembly linear memory, which is mapped rather than heap-allocated (bound it with
+///   `SURREAL_SURREALISM_MAX_MEMORY`)
+/// - thread stacks and the binary's own text
+///
+/// Because the heap term is the reserved size class rather than the requested
+/// size, it exceeds the sum of the requests — by more, proportionally, the
+/// smaller the allocations are. A value carried over from a release that
+/// compared requested bytes therefore refuses queries at a lighter workload
+/// than it used to, and wants raising to match.
+///
+/// Set this *below* the container's memory limit so the guard sheds load before
+/// the kernel's OOM killer intervenes, and *above* the configured RocksDB block
+/// cache size (`SURREAL_ROCKSDB_BLOCK_CACHE_SIZE`, which defaults to half of
+/// system memory less 1 GiB): a warm cache occupies its full capacity
+/// indefinitely, so a threshold at or below that size refuses every query once
+/// the cache fills and does not recover without a restart.
+///
+/// # When the guard is inert
+///
+/// Enforcement needs the `allocation-tracking` feature, which the server
+/// enables by default. A build without it reports no tracked memory and never
+/// refuses a query, whatever this is set to.
+///
+/// # Lifetime
+///
+/// Read once, on first use. Changing the environment variable takes effect only
+/// in a fresh process.
 pub static MEMORY_THRESHOLD: LazyLock<usize> = LazyLock::new(|| {
-	std::env::var("SURREAL_MEMORY_THRESHOLD")
-		.ok()
-		.and_then(|x| parse_memory_threshold(&x))
-		.unwrap_or(0)
+	let raw = match std::env::var("SURREAL_MEMORY_THRESHOLD") {
+		Ok(raw) => raw,
+		// Absent is the documented default: the guard is off.
+		Err(std::env::VarError::NotPresent) => return 0,
+		// Set to something that is not UTF-8. Reported rather than treated as
+		// absent, because the operator did configure it and it will not apply.
+		Err(std::env::VarError::NotUnicode(_)) => {
+			warn!(
+				"Ignoring SURREAL_MEMORY_THRESHOLD: the value is not valid UTF-8. The memory \
+				 threshold is DISABLED: queries will not be refused on memory pressure."
+			);
+			return 0;
+		}
+	};
+	// An empty value is how a deployment spells "leave this unset", so it takes
+	// the default without being reported as a mistake.
+	if raw.trim().is_empty() {
+		return 0;
+	}
+	match parse_memory_threshold(&raw) {
+		Some(v) => v,
+		None => {
+			warn!(
+				"Ignoring invalid SURREAL_MEMORY_THRESHOLD value `{raw}`; expected a byte count \
+				 with an optional k/kb/kib/m/mb/mib/g/gb/gib suffix (Kubernetes-style `Gi`/`Mi` \
+				 quantities are not accepted). The memory threshold is DISABLED: queries will \
+				 not be refused on memory pressure."
+			);
+			0
+		}
+	}
 });
 
 /// Parse a `SURREAL_MEMORY_THRESHOLD` value into a byte count. Accepts a plain
-/// byte count or a human-readable size suffix (`b`/`kb`/`kib`/`mb`/`mib`/
-/// `gb`/`gib`, case-insensitive). Returns `None` for unparseable values;
-/// `Some(0)` for `"0"` (disables the threshold); otherwise `Some(n)` floored
-/// to 1 MiB.
+/// byte count or a human-readable size suffix (`b`, `k`/`kb`/`kib`,
+/// `m`/`mb`/`mib`, `g`/`gb`/`gib`, case-insensitive; all multipliers are
+/// binary). Returns `None` for unparseable values — note that
+/// Kubernetes-style `Gi`/`Mi` suffixes are *not* accepted, so a resource
+/// quantity cannot be passed through verbatim. Returns `Some(0)` for `"0"`
+/// (disables the threshold); otherwise `Some(n)` floored to 1 MiB.
 fn parse_memory_threshold(value: &str) -> Option<usize> {
 	value.parse_bytes::<usize>().ok().map(|x| match x {
 		0 => 0,
@@ -331,6 +400,22 @@ mod tests {
 		assert_eq!(parse_memory_threshold("10"), Some(1024 * 1024));
 		// An unparseable value returns None; callers map that to disabled (0).
 		assert_eq!(parse_memory_threshold("garbage"), None);
+	}
+
+	/// Kubernetes resource quantities are not accepted. A deployment that
+	/// templates a container memory limit straight into the environment
+	/// variable disables the guard rather than setting it, so these forms must
+	/// keep returning `None` and be reported to the operator.
+	#[test]
+	fn memory_threshold_rejects_kubernetes_quantities() {
+		// Binary IEC suffixes as Kubernetes spells them.
+		assert_eq!(parse_memory_threshold("8Gi"), None);
+		assert_eq!(parse_memory_threshold("8192Mi"), None);
+		// Decimal fractions and percentages are not a supported spelling.
+		assert_eq!(parse_memory_threshold("1.5g"), None);
+		assert_eq!(parse_memory_threshold("85%"), None);
+		// Terabyte suffixes are outside the accepted set.
+		assert_eq!(parse_memory_threshold("1tb"), None);
 	}
 
 	/// The in-process HNSW seed default is off until installed, then answers every

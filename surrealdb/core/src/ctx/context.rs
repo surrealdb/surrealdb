@@ -1678,99 +1678,64 @@ mod tests {
 		assert_eq!(result.unwrap(), None);
 	}
 
-	/// Integration test that actually tests memory threshold detection.
+	/// A crossed memory threshold makes `done` bail with
+	/// [`DatastoreError::QueryBeyondMemoryThreshold`].
 	///
-	/// This test requires:
-	/// 1. The "allocation-tracking" feature to be enabled
-	/// 2. The "allocator" feature to be enabled (for tracking to work)
-	/// 3. Running with #[serial] to avoid interference from other tests
+	/// `MEMORY_THRESHOLD` is a process-wide `LazyLock` read once on first use,
+	/// and this binary's other tests assert the no-pressure path, so the
+	/// threshold has to come from the environment rather than be installed
+	/// here. Ignored by default so that it reports as skipped rather than
+	/// passing without asserting anything:
 	///
-	/// The test sets SURREAL_MEMORY_THRESHOLD environment variable, allocates memory
-	/// to exceed the threshold, and verifies that context.done(true) detects the violation.
+	/// ```text
+	/// SURREAL_MEMORY_THRESHOLD=1mb cargo test -p surrealdb-core \
+	///   --features allocator,allocation-tracking \
+	///   test_context_memory_threshold_enforced
+	/// ```
 	#[tokio::test]
 	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
-	#[serial_test::serial]
-	async fn test_context_memory_threshold_integration() {
-		use common::str::ParseBytes;
-
+	#[ignore = "requires SURREAL_MEMORY_THRESHOLD in the process environment"]
+	async fn test_context_memory_threshold_enforced() {
 		use crate::kvs::DatastoreError;
 
-		// Set a low memory threshold (1MB) before MEMORY_THRESHOLD is accessed
-		// This must happen before any code accesses cnf::MEMORY_THRESHOLD
-		// Safety: This test runs with #[serial] ensuring no other tests run concurrently,
-		// so there's no risk of data races when modifying the environment variable.
-		unsafe {
-			std::env::set_var(
-				"SURREAL_MEMORY_THRESHOLD",
-				"1MB".parse_bytes::<u64>().unwrap().to_string(),
+		// The most this test will allocate to cross the threshold. Reaching a
+		// production-shaped threshold would mean allocating that much for real,
+		// so the environment is not allowed to ask for more than this: crossing
+		// the guard at a small threshold proves the same code path.
+		const BALLAST_LIMIT: usize = 256 * 1024 * 1024;
+		const BALLAST_CHUNK: usize = 1024 * 1024;
+
+		let threshold = *MEMORY_THRESHOLD;
+		assert_ne!(
+			threshold, 0,
+			"SURREAL_MEMORY_THRESHOLD must be set in this process for the guard to be enforceable"
+		);
+		assert!(
+			threshold <= BALLAST_LIMIT,
+			"SURREAL_MEMORY_THRESHOLD is {threshold} bytes, above the {BALLAST_LIMIT}-byte ceiling \
+			 this test will allocate to cross it; re-run with a smaller value"
+		);
+
+		// Cross the threshold in bounded steps. A single threshold-sized
+		// request would route an allocation failure to `handle_alloc_error`,
+		// aborting the binary with no failure message.
+		let mut ballast: Vec<Vec<u8>> = Vec::new();
+		while crate::mem::ALLOC.memory_allocated() <= threshold {
+			ballast.push(vec![0u8; BALLAST_CHUNK]);
+			assert!(
+				ballast.len().saturating_mul(BALLAST_CHUNK) <= BALLAST_LIMIT,
+				"allocated {BALLAST_LIMIT} bytes without the {threshold}-byte guard tripping"
 			);
 		}
-		// Assert that SURREAL_MEMORY_THRESHOLD shows up as MEMORY_THRESHOLD with the expected value
-		assert_eq!(*MEMORY_THRESHOLD, 1048576);
+		let ctx = Context::new_test().freeze();
 
-		// Force reinitialization by dropping and recreating (this won't work with LazyLock)
-		// Instead, we rely on this test running in isolation with #[serial]
-		// and being run in a fresh process where MEMORY_THRESHOLD hasn't been accessed yet
-
-		// Note: This test may not work reliably if MEMORY_THRESHOLD was already accessed
-		// elsewhere in the test suite. The #[serial] attribute ensures tests run one at a time,
-		// but doesn't guarantee a fresh process. For reliable testing, this should be run
-		// as a separate integration test binary.
-
-		// Allocate a large vector (10MB) to exceed the threshold
-		// Using Vec::with_capacity to ensure the memory is actually allocated
-		let _large_allocation: Vec<u8> = Vec::with_capacity(20 * 1024 * 1024);
-
-		// Give the allocator tracking time to register the allocation
-		tokio::time::sleep(Duration::from_millis(10)).await;
-
-		let ctx = Context::new_test();
-		let ctx = ctx.freeze();
-
-		// The memory threshold check should detect that we've exceeded the limit
-		let result = ctx.done(true);
-
-		// We expect either:
-		// 1. An error if memory tracking properly detected the threshold violation
-		// 2. Ok(None) if MEMORY_THRESHOLD was already initialized with default (0) before we set
-		//    the environment variable
-		match result {
-			Err(e) => {
-				// Verify it's the correct error type
-				match e.downcast_ref::<DatastoreError>() {
-					Some(DatastoreError::QueryBeyondMemoryThreshold) => {
-						// Success! Memory threshold was properly detected
-						println!("✓ Memory threshold violation detected as expected");
-					}
-					other => {
-						panic!("Expected QueryBeyondMemoryThreshold error, got: {:?}", other);
-					}
-				}
-			}
-			Ok(None) => {
-				// This means MEMORY_THRESHOLD was already initialized before we set the env var
-				// This is expected behavior in the test suite - document it
-				println!(
-					"⚠ Memory threshold not enforced - MEMORY_THRESHOLD was already initialized"
-				);
-				println!("  This is expected when running as part of the full test suite.");
-				println!(
-					"  To properly test memory threshold enforcement, run this test in isolation:"
-				);
-				println!(
-					"  cargo test --package surrealdb-core --features allocation-tracking,allocator test_context_memory_threshold_integration"
-				);
-				panic!("MEMORY_THRESHOLD was already initialized")
-			}
-			Ok(Some(reason)) => {
-				panic!("Unexpected reason returned: {:?}", reason);
-			}
-		}
-
-		// Clean up the environment variable
-		// Safety: Same as above - #[serial] ensures no concurrent access
-		unsafe {
-			std::env::remove_var("SURREAL_MEMORY_THRESHOLD");
-		}
+		let err = ctx.done(true).expect_err("expected the memory threshold to be enforced");
+		assert!(
+			matches!(
+				err.downcast_ref::<DatastoreError>(),
+				Some(DatastoreError::QueryBeyondMemoryThreshold)
+			),
+			"expected QueryBeyondMemoryThreshold, got: {err:?}"
+		);
 	}
 }

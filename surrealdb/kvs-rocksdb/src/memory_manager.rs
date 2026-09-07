@@ -9,15 +9,36 @@ use super::TARGET;
 use crate::RocksDbConfig;
 
 pub(super) struct MemoryManager {
-	/// The write buffer manager
-	write_buffer_manager: WriteBufferManager,
-	/// The RocksDB block cache
+	/// The RocksDB block cache, shared with the row and blob caches.
+	///
+	/// Held so [`MemoryReporter::memory_allocated`] can read its usage, not to
+	/// keep it alive: `Options` clones both this cache and the write buffer
+	/// manager into its own `OptionsMustOutliveDB`, and an opened database
+	/// stores a clone of that, so both outlive the database regardless of what
+	/// this struct holds.
 	cache: Cache,
 }
 
 impl MemoryReporter for MemoryManager {
+	/// Reports the RocksDB memory that the global allocator tracker cannot see.
+	///
+	/// RocksDB allocates in C++, so none of its memory passes through Rust's
+	/// `GlobalAlloc` and none of it is counted by the tracking allocator. This
+	/// reporter is the only channel by which it enters the tracked total.
+	///
+	/// The single [`Cache`] built by [`Self::configure`] backs the block cache,
+	/// the row cache and the blob cache, and the [`WriteBufferManager`] is
+	/// constructed against that same cache, so memtable arena bytes are charged
+	/// into it as reservation entries and `Cache::get_usage` covers memtables
+	/// too.
+	///
+	/// Not covered: per-SST table-reader memory (top-level index and filter
+	/// blocks, table properties), compaction and flush buffers, iterator
+	/// readahead, and the pending writes held by an open transaction's
+	/// `WriteBatchWithIndex`. Callers sizing a memory threshold against a
+	/// container limit must leave headroom for those.
 	fn memory_allocated(&self) -> usize {
-		self.write_buffer_manager.get_usage() + self.cache.get_usage()
+		self.cache.get_usage()
 	}
 }
 
@@ -43,13 +64,13 @@ impl MemoryManager {
 			true,
 			cache.clone(),
 		);
-		// Set the write buffer manager in the options
+		// The options take their own handle on the write buffer manager, and an
+		// opened database keeps a clone of the options, so it outlives both.
 		opts.set_write_buffer_manager(&write_buffer_manager);
 		// Set the row cache in the options
 		opts.set_row_cache(&cache);
 		// Build the manager and apply its per-CF settings to `opts`
 		let manager = Self {
-			write_buffer_manager,
 			cache,
 		};
 		manager.apply_to_cf_options(opts, config);

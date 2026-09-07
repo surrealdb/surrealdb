@@ -255,6 +255,29 @@ applicable. Sentinel `"-"` values appear when ctx is unresolved.
 | `surrealdb_http_active_requests` | `surrealdb.http` | gauge | `http_request_method, http_route` (attribute-stripped to keep the gauge balanced) |
 | `surrealdb_live_query_active` | `surrealdb.live_query` | gauge | none |
 | `surrealdb_live_query_notifications_total` | `surrealdb.live_query` | counter | none |
+| `surrealdb_process_memory_allocated_bytes` | `surrealdb.process` | gauge | none |
+| `surrealdb_process_memory_requested_bytes` | `surrealdb.process` | gauge | none |
+| `surrealdb_process_memory_reserved_bytes` | `surrealdb.process` | gauge | none |
+| `surrealdb_process_memory_threshold_bytes` | `surrealdb.process` | gauge | none |
+
+The three memory gauges are deliberately **not** on the public allowlist,
+unlike `surrealdb_process_memory_bytes`: read together they describe how
+close the instance is to refusing queries, which is closer to capacity
+intelligence than the aggregate RSS figure is.
+
+Read as a set they answer three different questions:
+
+- `memory_allocated / memory_threshold` — how close this instance is to refusing queries. A
+  sustained ratio near `1` is the signal that preceded a `ServerOverloaded` refusal; alert on it.
+  When the threshold gauge reads `0` the guard is disabled and no refusal will ever happen.
+- `memory_bytes − memory_allocated` — resident memory the tracker cannot see (allocator overhead,
+  RocksDB memory outside its caches, mapped WebAssembly memory, thread stacks). This is the
+  headroom a memory threshold must leave below a container memory limit, and measuring it is how
+  that headroom should be chosen rather than guessed.
+- `memory_reserved − memory_requested` — internal fragmentation, the space the allocator reserved
+  beyond what was asked for. Use the reserved figure, not `memory_allocated`: that one also carries
+  the external reporters, so subtracting requested from it would report the whole RocksDB cache as
+  fragmentation.
 
 ### Authenticated-only — pipeline self-metrics
 

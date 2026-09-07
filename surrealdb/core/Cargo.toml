@@ -46,7 +46,7 @@ http = ["dep:reqwest"]
 ml = ["dep:surrealml-core"]
 jwks = ["dep:reqwest", "surrealdb-datastore/jwks"]
 surrealism = ["dep:surrealism-runtime", "dep:async-trait"]
-allocator = ["dep:jemallocator", "dep:mimalloc"]
+allocator = ["dep:jemallocator", "dep:jemalloc-sys", "dep:mimalloc", "dep:mimalloc-sys"]
 arbitrary = [
     "surrealdb-expr/arbitrary",
     "surrealdb-catalog/arbitrary",
@@ -214,9 +214,11 @@ surrealism-runtime = { workspace = true, optional = true }
 # OS-SPECIFIC ALLOCATOR DEPENDENCIES
 [target.'cfg(all(any(target_arch = "x86_64", target_arch = "x86"), any(target_os = "linux", target_os = "macos"), not(target_env = "msvc")))'.dependencies]
 jemallocator = { workspace = true, optional = true }
+jemalloc-sys = { workspace = true, optional = true }
 
 [target.'cfg(all(any(unix, windows), not(all(any(target_arch = "x86_64", target_arch = "x86"), any(target_os = "linux", target_os = "macos"), not(target_env = "msvc")))))'.dependencies]
 mimalloc = { workspace = true, optional = true }
+mimalloc-sys = { workspace = true, optional = true }
 
 # DEVELOPMENT DEPENDENCIES
 [dev-dependencies]

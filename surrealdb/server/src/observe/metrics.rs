@@ -594,6 +594,70 @@ pub fn register_process_metrics(runtime: &ObservabilityRuntime) {
 			obs.observe(snap.memory_bytes as i64, &[]);
 		})
 		.build();
+	// The quantity the memory threshold is actually compared against. Paired
+	// with `PROCESS_MEMORY` (resident set size) it shows how far tracked bytes
+	// sit below the real footprint, and paired with `PROCESS_MEMORY_THRESHOLD`
+	// it shows how close the instance is to refusing queries. Reports 0 in
+	// builds without allocation tracking compiled in.
+	let _memory_allocated = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_ALLOCATED)
+		.with_description(
+			"Tracked memory of the surreal process: live Rust-heap allocations plus external \
+			 memory reporters. This is the value compared against SURREAL_MEMORY_THRESHOLD",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			let snap = process_snapshot();
+			obs.observe(snap.memory_allocated_bytes as i64, &[]);
+		})
+		.build();
+	// The logical size of the process's data, before size-class rounding.
+	// Unlike the reserved and allocated gauges it is comparable across builds
+	// and architectures. Pair it with `PROCESS_MEMORY_RESERVED` for internal
+	// fragmentation — not with `PROCESS_MEMORY_ALLOCATED`, which also carries
+	// the external reporters. Reports 0 in builds without allocation tracking
+	// compiled in.
+	let _memory_requested = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_REQUESTED)
+		.with_description(
+			"Bytes requested by the surreal process for live heap allocations, before the \
+			 allocator rounded each request up to a size class",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			let snap = process_snapshot();
+			obs.observe(snap.memory_requested_bytes as i64, &[]);
+		})
+		.build();
+	// The heap half of `PROCESS_MEMORY_ALLOCATED`, excluding the external
+	// reporters. This is the term that makes the fragmentation subtraction
+	// meaningful, and the one to compare against a heap-only budget. Reports 0
+	// in builds without allocation tracking compiled in.
+	let _memory_reserved = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_RESERVED)
+		.with_description(
+			"Reserved Rust-heap bytes of the surreal process: the size classes the allocator \
+			 rounded live requests up into, excluding external memory reporters",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			let snap = process_snapshot();
+			obs.observe(snap.memory_reserved_bytes as i64, &[]);
+		})
+		.build();
+	// Emitted so a dashboard can plot the limit alongside the usage without the
+	// operator having to restate it. Constant for the process lifetime, since
+	// the threshold is read once from the environment.
+	let _memory_threshold = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_THRESHOLD)
+		.with_description(
+			"Configured SURREAL_MEMORY_THRESHOLD in bytes, or 0 when the memory guard is disabled",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			obs.observe(surrealdb_core::mem::memory_threshold() as i64, &[]);
+		})
+		.build();
 	let _cpu = meter
 		.f64_observable_gauge(names::PROCESS_CPU_PERCENT)
 		.with_description(

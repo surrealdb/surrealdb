@@ -344,6 +344,12 @@ pub async fn init<
 		.with_system_metrics_refresh_interval(Duration::from_secs(
 			(*PROCESS_METRICS_REFRESH_INTERVAL).max(1),
 		));
+	// The memory threshold is read once per process, so this is the only place
+	// its effective value is observable.
+	match surrealdb_core::mem::memory_threshold() {
+		0 => info!("Memory threshold is disabled; queries will not be refused on memory pressure"),
+		bytes => info!("Memory threshold is {bytes} bytes"),
+	}
 	// Configure the config
 	let Some(bind) = listen_addresses.first().copied() else {
 		return Err(anyhow::anyhow!("No listen address provided"));

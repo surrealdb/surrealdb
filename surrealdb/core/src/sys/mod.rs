@@ -34,6 +34,8 @@ pub async fn refresh() {
 	let mut information = INFORMATION.lock().await;
 	// Update the cached information metrics
 	information.cpu_usage = environment.cpu_usage();
+	information.memory_requested = crate::mem::ALLOC.memory_requested();
+	information.memory_reserved = crate::mem::ALLOC.memory_reserved();
 	information.memory_allocated = crate::mem::ALLOC.memory_allocated();
 	information.memory_usage = environment.memory_usage();
 	information.load_average = environment.load_average();
@@ -47,7 +49,22 @@ pub struct Information {
 	pub available_parallelism: usize,
 	pub cpu_usage: f32,
 	pub load_average: [f64; 3],
+	/// Tracked memory: reserved Rust-heap bytes plus external reporters. The
+	/// figure `SURREAL_MEMORY_THRESHOLD` is compared against.
 	pub memory_allocated: usize,
+	/// Bytes the program requested, before the allocator rounded each request
+	/// up to a size class.
+	pub memory_requested: usize,
+	/// Reserved Rust-heap bytes: the size classes those requests were rounded
+	/// up into. [`Self::memory_allocated`] is this plus the external memory
+	/// reporters, so internal fragmentation is this figure less
+	/// [`Self::memory_requested`] — not the allocated figure less requested,
+	/// which would fold in the whole RocksDB cache.
+	pub memory_reserved: usize,
+	/// Resident set size of the process, as the operating system reports it.
+	/// Sits above [`Self::memory_allocated`]; the gap is memory the tracker
+	/// cannot see, chiefly allocator overhead and mapped (rather than
+	/// heap-allocated) regions.
 	pub memory_usage: u64,
 	pub physical_cores: usize,
 }

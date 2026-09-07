@@ -199,5 +199,6 @@ async fn system() -> Value {
 		"memory_usage" => info.memory_usage.into(),
 		"physical_cores" => info.physical_cores.into(),
 		"memory_allocated" => info.memory_allocated.into(),
+		"memory_requested" => info.memory_requested.into(),
 	})
 }

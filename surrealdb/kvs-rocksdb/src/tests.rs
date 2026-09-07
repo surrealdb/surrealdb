@@ -839,3 +839,76 @@ async fn commit_after_coordinator_shutdown_is_refused_before_apply() {
 	assert_eq!(val, None, "a refused commit must not have applied anything");
 	tx.cancel().await.unwrap();
 }
+
+/// The memory reporter must see memtable memory.
+///
+/// The write buffer manager is constructed against the block cache
+/// (cost-to-cache), so RocksDB charges memtable arena bytes into that cache as
+/// reservation entries and `Cache::get_usage` covers them. Two properties
+/// depend on that and are asserted here:
+///
+/// - the reporter counts memtables exactly once, by reading the cache alone; adding the write
+///   buffer manager's own usage on top would double count.
+/// - the charging survives `configure` dropping its local handle on the write buffer manager.
+///   `Options` clones it into `OptionsMustOutliveDB` and the opened database stores a clone of
+///   that, so the manager outlives the database without this crate holding a handle.
+///
+/// Writes are never read back, so no data block enters the cache: with a large
+/// write buffer nothing flushes, and the growth observed here can only be the
+/// memtable reservation.
+///
+/// Growth is measured on this datastore's own manager rather than through
+/// `memory_reporters_allocated_by_name`. Every datastore registers under the
+/// name `rocksdb`, so in a shared test binary that map resolves to an
+/// arbitrary one of them — including a dropped one, which reports `0`.
+#[tokio::test(flavor = "multi_thread")]
+async fn memory_reporter_observes_memtable_charge() {
+	use common::mem_registry::{MemoryReporter, memory_reporters_allocated_by_name};
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
+	// A write buffer far larger than the data below so no flush happens and
+	// the arena keeps growing, and a block cache with room to hold the
+	// resulting reservation.
+	let config = RocksDbConfig {
+		write_buffer_size: 64 * 1024 * 1024,
+		max_write_buffer_number: 4,
+		block_cache_size: 64 * 1024 * 1024,
+		..RocksDbConfig::default()
+	};
+
+	let ds = RocksDbDatastore::new(&path, config).await.unwrap();
+
+	// The datastore must register itself with the global tracker: without it
+	// RocksDB memory is invisible to the memory threshold, which no other
+	// test would notice. Only the key is asserted, since the value may belong
+	// to another datastore in this binary.
+	assert!(
+		memory_reporters_allocated_by_name().contains_key("rocksdb"),
+		"the rocksdb memory reporter must be registered with the global tracker"
+	);
+
+	let before = ds.memory_manager.memory_allocated();
+
+	// Write enough to move the arena well past the 256 KiB granularity that
+	// RocksDB charges cache reservations in.
+	for batch in 0..16u32 {
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		for i in 0..256u32 {
+			let key: Vec<u8> = format!("memtable_charge_{batch:04}_{i:04}").into_bytes();
+			tx.set(key.into(), vec![0u8; 1024]).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+	}
+
+	let after = ds.memory_manager.memory_allocated();
+	assert!(
+		after > before,
+		"reported RocksDB memory did not grow while memtables filled: {before} -> {after}. \
+		 Memtable arena bytes are charged into the block cache, so the cache usage the reporter \
+		 reads must rise."
+	);
+
+	ds.shutdown().await.unwrap();
+}

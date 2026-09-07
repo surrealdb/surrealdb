@@ -1651,7 +1651,29 @@ impl Executor {
 			};
 
 			// check for timeout and cancellation.
-			if let Some(done) = self.ctx.done(true)? {
+			//
+			// `done` reports a timeout or cancellation as `Ok(Some(reason))` and a
+			// crossed memory threshold as `Err`. Both must cancel the transaction
+			// before unwinding: an abandoned transaction keeps its buffered writes
+			// alive, so returning the memory error without cancelling holds on to
+			// the very memory the threshold check exists to release.
+			let done = match self.ctx.done(true) {
+				Ok(done) => done,
+				Err(e) => {
+					let _ = txn.cancel().await;
+					// The rollback discards the statements already recorded as
+					// successful, so their results have to say so.
+					for res in &mut self.results[start_results..] {
+						res.query_type = QueryType::Other;
+						res.result = Err(TypesError::query(
+							"The query was not executed due to a cancelled transaction".to_string(),
+							Some(QueryError::Cancelled),
+						));
+					}
+					return Err(e);
+				}
+			};
+			if let Some(done) = done {
 				// A cancellation happened. Cancel the transaction, fast-forward the remaining
 				// results and then return.
 				let _ = txn.cancel().await;
@@ -2100,7 +2122,17 @@ impl Executor {
 					stmt_result_rows = rows;
 
 					match r {
-						Ok(value) => Ok(convert_value_to_public_value(value)?),
+						Ok(value) => match convert_value_to_public_value(value) {
+							Ok(value) => Ok(value),
+							Err(err) => {
+								// This returns from the function with the
+								// transaction still open, so cancel it first:
+								// an abandoned transaction is never rolled
+								// back and holds its buffered writes.
+								let _ = txn.cancel().await;
+								return Err(err);
+							}
+						},
 						Err(err) => Err(TypesError::internal(err.to_string())),
 					}
 				}

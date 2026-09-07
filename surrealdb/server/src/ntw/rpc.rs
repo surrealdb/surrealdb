@@ -192,7 +192,8 @@ async fn post_handler(
 	let request_session_id = Uuid::new_v4();
 	rpc.register_ephemeral_session(request_session_id, Arc::new(RwLock::new(session)));
 	// Check to see available memory
-	if ALLOC.is_beyond_threshold() {
+	if let Some((allocated, threshold)) = ALLOC.beyond_threshold_by() {
+		crate::rpc::websocket::log_memory_refusal("http", allocated, threshold);
 		rpc.remove_ephemeral_session(&request_session_id);
 		return Err(NetError::ServerOverloaded.into());
 	}
