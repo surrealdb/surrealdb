@@ -2714,6 +2714,65 @@ pub async fn live_query_cleared_on_record_identity_change(
 	server.finish().unwrap();
 }
 
+/// RFC 6455 section 5.5.1: an endpoint that receives a close frame MUST send
+/// one in response.
+///
+/// The server's read loop trips the connection canceller as soon as it reads
+/// the client's close frame, and its write loop polls that canceller ahead of
+/// everything else, so the reply only reaches the socket if the write task
+/// finishes the handshake as it tears down. When it does not, the client sees
+/// the transport drop and reports `Protocol(ResetWithoutClosingHandshake)`
+/// rather than a clean close.
+///
+/// Driven with a raw client rather than [`Socket`], whose reader task consumes
+/// the end of the stream and so cannot report how the connection finished.
+pub async fn close_handshake(cfg_server: Option<Format>, _cfg_format: Format) {
+	use futures_util::SinkExt;
+	use tokio_stream::StreamExt;
+	use tokio_tungstenite::tungstenite::Message as WsMessage;
+	use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to the WebSocket, negotiating the same subprotocol the rest of
+	// these tests do -- axum only echoes the protocol header when one was
+	// negotiated, so the close path is worth covering under each.
+	let mut req = format!("ws://{addr}/rpc").into_client_request().unwrap();
+	if let Some(format) = cfg_server.map(|v| v.to_string()) {
+		req.headers_mut().insert("Sec-WebSocket-Protocol", format.parse().unwrap());
+	}
+	let (mut stream, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+	// Start the closing handshake
+	stream.send(WsMessage::Close(None)).await.unwrap();
+	// Read until the connection ends, and report how it ended
+	let answered = loop {
+		let next = tokio::time::timeout(Duration::from_secs(10), stream.next())
+			.await
+			.expect("the connection ends within 10s");
+		match next {
+			// The keepalive ping runs on its own schedule and can land here
+			Some(Ok(WsMessage::Ping(_) | WsMessage::Pong(_))) => continue,
+			// The close frame we are owed
+			Some(Ok(WsMessage::Close(_))) => break true,
+			// A data frame after a close frame is a protocol violation
+			Some(Ok(other)) => panic!("frame sent after the close frame: {other:?}"),
+			// The transport dropped instead of answering
+			Some(Err(err)) => panic!("connection failed instead of closing: {err}"),
+			// The stream ended without the close frame
+			None => break false,
+		}
+	};
+	assert!(answered, "the connection ended without a close frame from the server");
+	// The handshake is only complete if the stream then ends cleanly: a close
+	// frame followed by a reset is still a reset.
+	let after = tokio::time::timeout(Duration::from_secs(10), stream.next())
+		.await
+		.expect("the stream ends within 10s");
+	assert!(after.is_none(), "the connection did not end cleanly after the close frame: {after:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
 /// A macro which defines a macro which can be used to define tests running the
 /// above functions with a set of given paramenters.
 macro_rules! define_include_tests {
@@ -3164,4 +3223,6 @@ define_include_tests! {
 	live_notification_default_session_is_null,
 	#[test_log::test(tokio::test)]
 	detach_connection_session_rejected,
+	#[test_log::test(tokio::test)]
+	close_handshake,
 }

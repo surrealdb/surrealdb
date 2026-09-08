@@ -403,24 +403,33 @@ impl Websocket {
 				}
 			}
 		}
-		// Write out whatever teardown left in the channel.
+		// Write out whatever teardown left in the channel, and close.
 		rpc.flush_on_teardown(&mut socket, &mut internal_receiver).await;
 	}
 
-	/// Write what is already queued, so a close frame that teardown put in
-	/// the channel still reaches the client.
+	/// Write what is already queued and close the socket, so the close frame
+	/// the connection owes its peer reaches the client.
 	///
-	/// Teardown queues its close frame and trips the connection canceller,
-	/// and the write loop polls that canceller ahead of the response channel
-	/// so it cannot be starved. What guarantees the frame goes out is
-	/// therefore this, on the way past: without it the client would be left
-	/// to infer an unexplained disconnect in place of a stated reason.
+	/// Two kinds of close frame end up here. One this connection chose to send
+	/// -- the overload notice in [`Self::close_socket`], the lagging notice in
+	/// [`Self::deliver_notification`] -- is queued on the response channel and
+	/// then trips the connection canceller, and the write loop polls that
+	/// canceller ahead of the channel, so this drain on the way past is what
+	/// carries it out; without it the client would be left to infer an
+	/// unexplained disconnect in place of a stated reason. The reply owed to a
+	/// close frame the peer sent is instead queued inside the transport, which
+	/// read the connection as closing and refuses a second one from us, so
+	/// closing the sink -- not merely flushing it -- is what writes that reply
+	/// out and completes the handshake RFC 6455 section 5.5.1 requires.
 	///
 	/// Only what is already queued, because senders remain alive and a `recv`
-	/// would wait for a message that is not coming. Bounded by
-	/// [`TEARDOWN_FLUSH_GRACE`] across the whole drain and abandoned on the
-	/// first write error: the client this serves most is by definition one
-	/// that may have stopped reading, and the connection is over either way.
+	/// would wait for a message that is not coming. Each frame is sent rather
+	/// than fed, so a frame the transport refuses fails on itself instead of
+	/// being left parked in the sink, where it would abort the close behind it.
+	/// Bounded by [`TEARDOWN_FLUSH_GRACE`] across the whole drain and
+	/// abandoned on the first write error: the client this serves most is by
+	/// definition one that may have stopped reading, and the connection is
+	/// over either way.
 	async fn flush_on_teardown<S: SinkExt<Message> + Unpin>(
 		&self,
 		socket: &mut S,
@@ -432,24 +441,30 @@ impl Websocket {
 		while let Ok(msg) = internal_receiver.try_recv() {
 			// Before the message moves into the sink, as in the write loop.
 			let out_bytes = Self::payload_len(&msg);
-			if !Self::teardown_progressed(tokio::time::timeout_at(deadline, socket.feed(msg)).await)
+			// A close frame is terminal on the wire: nothing may follow it.
+			let terminal = matches!(msg, Message::Close(_));
+			if !Self::teardown_progressed(tokio::time::timeout_at(deadline, socket.send(msg)).await)
 			{
-				// Stop draining, but still flush below: what already reached
-				// the sink is worth writing even when the frame behind it was
-				// not, and the close frame is usually the one in front.
+				// Stop draining, but still close below: the handshake has to
+				// be finished off whether or not the frame behind this one
+				// made it out.
 				break;
 			}
 			// A frame written here left the machine like any other, so it is
 			// charged like any other.
 			self.record_sent_bytes(out_bytes).await;
+			if terminal {
+				break;
+			}
 		}
-		// Flush unconditionally, not just when something was drained above.
+		// Close unconditionally, not just when something was drained above.
 		// In buffered mode the write loop feeds without flushing and relies on
 		// its periodic flush, so a frame it took from the channel before
 		// handing over is sitting in the sink rather than on the wire -- and a
 		// frame in the sink has not reached the client any more than one left
-		// in the channel had.
-		Self::teardown_progressed(tokio::time::timeout_at(deadline, socket.flush()).await);
+		// in the channel had. The reply to a peer's close frame is likewise
+		// held inside the transport until the socket closes.
+		Self::teardown_progressed(tokio::time::timeout_at(deadline, socket.close()).await);
 	}
 
 	/// The payload bytes an outbound frame is charged for.
@@ -555,10 +570,14 @@ impl Websocket {
 							tasks.push(Self::handle_message(&rpc, msg, chn, rec_limit));
 						}
 						Message::Close(_) => {
-							// Respond with a close message
-							if let Err(err) = internal_sender.send(Message::Close(None)).await {
-								trace!("WebSocket error when replying to the close message: {err}");
-							};
+							// The close frame RFC 6455 section 5.5.1 requires
+							// in response to this one is already queued inside
+							// the transport, which read the connection as
+							// closing and refuses a second one from us. What
+							// writes it out is `write` closing the sink from
+							// [`Self::flush_on_teardown`], so tripping the
+							// canceller is what sends the reply on its way.
+							//
 							// Cancel the WebSocket tasks AND the executor
 							// cancel flag so in-flight queries return early.
 							rpc.cancel_all();
@@ -1713,6 +1732,90 @@ mod tests {
 		assert!(
 			matches!(messages.as_slice(), [Message::Text(_)]),
 			"the response queued ahead of it goes out too, got {messages:?}"
+		);
+	}
+
+	/// A sink that behaves as the transport does once it has read the peer's
+	/// close frame: it holds the reply it owes, refuses any further frame from
+	/// this side, and writes that reply out only when the socket is closed.
+	///
+	/// A permissive sink cannot express this, and it is the shape that matters
+	/// -- the reply to a client's close frame is never a frame this code hands
+	/// over, so nothing but the close reaches it.
+	#[derive(Clone, Default)]
+	struct ClosingSink {
+		/// What reached the wire.
+		written: Arc<Mutex<Vec<Message>>>,
+		/// The reply the transport queued for itself, still unwritten.
+		reply_held: Arc<Mutex<bool>>,
+	}
+
+	impl ClosingSink {
+		fn after_peer_close() -> Self {
+			Self {
+				written: Arc::default(),
+				reply_held: Arc::new(Mutex::new(true)),
+			}
+		}
+	}
+
+	impl Sink<Message> for ClosingSink {
+		// Any `Display` error will do; the refusal is what matters.
+		type Error = std::fmt::Error;
+
+		fn poll_ready(
+			self: std::pin::Pin<&mut Self>,
+			_: &mut std::task::Context<'_>,
+		) -> std::task::Poll<Result<(), Self::Error>> {
+			std::task::Poll::Ready(Ok(()))
+		}
+
+		fn start_send(self: std::pin::Pin<&mut Self>, _: Message) -> Result<(), Self::Error> {
+			// Nothing may follow the peer's close frame.
+			Err(std::fmt::Error)
+		}
+
+		fn poll_flush(
+			self: std::pin::Pin<&mut Self>,
+			_: &mut std::task::Context<'_>,
+		) -> std::task::Poll<Result<(), Self::Error>> {
+			// A flush alone does not release the reply.
+			std::task::Poll::Ready(Ok(()))
+		}
+
+		fn poll_close(
+			self: std::pin::Pin<&mut Self>,
+			_: &mut std::task::Context<'_>,
+		) -> std::task::Poll<Result<(), Self::Error>> {
+			if std::mem::take(&mut *self.reply_held.lock().unwrap()) {
+				self.written.lock().unwrap().push(Message::Close(None));
+			}
+			std::task::Poll::Ready(Ok(()))
+		}
+	}
+
+	/// The reply owed to a close frame the peer sent is held inside the
+	/// transport, which refuses any further frame from this side and writes
+	/// that reply out only when the socket closes. Teardown that merely
+	/// flushed would leave the peer with a transport-level reset in place of
+	/// the close handshake RFC 6455 section 5.5.1 requires.
+	#[tokio::test]
+	async fn teardown_closes_the_socket_so_the_transports_reply_goes_out() {
+		let (rpc, mut frames) = ws_with_channel(4).await;
+		let mut sink = ClosingSink::after_peer_close();
+		let view = sink.clone();
+
+		// A response queued behind the peer's close frame can no longer be
+		// sent, and being refused must not stop the handshake.
+		rpc.channel.try_send(Message::Text("refused".into())).expect("a free slot");
+
+		rpc.flush_on_teardown(&mut sink, &mut frames).await;
+
+		let written = view.written.lock().unwrap().clone();
+		assert_eq!(
+			written,
+			[Message::Close(None)],
+			"the reply the transport was holding did not reach the wire",
 		);
 	}
 
