@@ -94,8 +94,12 @@ pub(crate) fn path_to_string(protocol: &str, path: impl AsRef<std::path::Path>) 
 	use std::path::Path;
 
 	use path_clean::PathClean;
+	use percent_encoding::percent_decode_str;
 
-	let path = path.as_ref().display().to_string();
+	// Percent-decode the path so that URL-encoded characters (e.g. %20 for spaces)
+	// are converted to their literal equivalents before being used as filesystem paths.
+	let path =
+		percent_decode_str(&path.as_ref().display().to_string()).decode_utf8_lossy().into_owned();
 	// Split query parameters from the path before cleaning to avoid
 	// path normalization corrupting query strings (e.g. `?` is valid
 	// in Unix filenames but has special meaning in URLs).
@@ -137,6 +141,27 @@ mod tests {
 			let converted = path_to_string(scheme, path);
 			assert_eq!(converted, format!("{scheme}{path}"), "failed to convert `{path}`");
 		}
+	}
+
+	#[test]
+	fn test_path_to_string_percent_decoding() {
+		let scheme = "surrealkv://";
+
+		// %20 should be decoded to spaces
+		let result = path_to_string(scheme, "/tmp/surrealdb%20path%20test/db");
+		assert_eq!(result, "surrealkv:///tmp/surrealdb path test/db");
+
+		// Multiple encoded characters
+		let result = path_to_string(scheme, "/path%20with%20multiple%20spaces/db");
+		assert_eq!(result, "surrealkv:///path with multiple spaces/db");
+
+		// Path without encoding should be unchanged
+		let result = path_to_string(scheme, "/tmp/normal-path/db");
+		assert_eq!(result, "surrealkv:///tmp/normal-path/db");
+
+		// Other percent-encoded characters (e.g. %23 = #)
+		let result = path_to_string(scheme, "/tmp/path%23with%23hashes/db");
+		assert_eq!(result, "surrealkv:///tmp/path#with#hashes/db");
 	}
 }
 

@@ -69,6 +69,7 @@ chrono = { workspace = true, features = ["serde"] }
 futures.workspace = true
 indexmap = { workspace = true, features = ["serde"] }
 path-clean.workspace = true
+percent-encoding.workspace = true
 semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
