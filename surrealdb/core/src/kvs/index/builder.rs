@@ -1851,6 +1851,14 @@ impl Building {
 	}
 
 	/// Drains pending HNSW updates while a blocking `DEFINE INDEX` build is still running.
+	///
+	/// The datastore's periodic index-compaction task drains the same queue, and
+	/// a commit that queues compaction work wakes it, so the two regularly
+	/// contend for the same batch. A retryable conflict means the other
+	/// compactor won that batch; the plan is re-read and re-applied rather than
+	/// failing the statement that is waiting for the drain. The process-local
+	/// wrapper and caches are discarded first, because a write that reached the
+	/// graph and did not commit leaves them holding state the store never took.
 	async fn compact_hnsw_pendings(&self, last_prepare_remove_check: &mut Instant) -> Result<()> {
 		let Index::Hnsw(p) = &self.ix.index else {
 			return Ok(());
@@ -1902,8 +1910,36 @@ impl Building {
 			.await;
 			match res {
 				Ok(true) => {
+					#[cfg(test)]
+					if let Err(err) = maybe_inject_retryable_conflict(
+						RetryableConflictSite::ConcurrentIndexHnswPendingCompaction,
+						self.ctx.node_id(),
+					) {
+						self.evict_cached_hnsw_index().await;
+						if self
+							.cancel_and_retryable_conflict(
+								&tx,
+								&err,
+								"transient conflict compacting HNSW pendings, retrying",
+							)
+							.await
+						{
+							continue;
+						}
+						return Err(err);
+					}
 					if let Err(err) = tx.commit().await {
 						self.evict_cached_hnsw_index().await;
+						if self
+							.cancel_and_retryable_conflict(
+								&tx,
+								&err,
+								"transient conflict compacting HNSW pendings, retrying",
+							)
+							.await
+						{
+							continue;
+						}
 						return Err(err);
 					}
 				}
@@ -1914,6 +1950,15 @@ impl Building {
 				Err(err) => {
 					let _ = tx.cancel().await;
 					self.evict_cached_hnsw_index().await;
+					if self
+						.retryable_conflict(
+							&err,
+							"transient conflict compacting HNSW pendings, retrying",
+						)
+						.await
+					{
+						continue;
+					}
 					return Err(err);
 				}
 			}
@@ -1926,6 +1971,13 @@ impl Building {
 
 	#[cfg(diskann)]
 	/// Drains pending DiskANN updates while a blocking `DEFINE INDEX` build is still running.
+	///
+	/// Contends with the datastore's periodic index-compaction task for the same
+	/// queue, so a retryable conflict is retried against a freshly read plan
+	/// rather than failing the statement that is waiting for the drain.
+	/// `apply_diskann_compaction` owns the transaction and clears the
+	/// per-index cache before returning a failed commit, so the retry starts
+	/// from state that agrees with the store.
 	async fn compact_diskann_pendings(
 		&self,
 		last_prepare_remove_check: &mut Instant,
@@ -1969,6 +2021,23 @@ impl Building {
 				tx.cancel().await?;
 				return Ok(());
 			}
+			#[cfg(test)]
+			if let Err(err) = maybe_inject_retryable_conflict(
+				RetryableConflictSite::ConcurrentIndexDiskAnnPendingCompaction,
+				self.ctx.node_id(),
+			) {
+				let _ = tx.cancel().await;
+				if self
+					.retryable_conflict(
+						&err,
+						"transient conflict compacting DiskANN pendings, retrying",
+					)
+					.await
+				{
+					continue;
+				}
+				return Err(err);
+			}
 			// `apply_diskann_compaction` normally owns the transaction's
 			// lifecycle (commits on success, cancels on apply failure while
 			// holding the graph write lock — closing the #7318 race). A few
@@ -1992,7 +2061,18 @@ impl Building {
 			match res {
 				Ok(true) => {}
 				Ok(false) => return Ok(()),
-				Err(err) => return Err(err),
+				Err(err) => {
+					if self
+						.retryable_conflict(
+							&err,
+							"transient conflict compacting DiskANN pendings, retrying",
+						)
+						.await
+					{
+						continue;
+					}
+					return Err(err);
+				}
 			}
 
 			if !has_more {

@@ -123,6 +123,13 @@ pub(crate) mod testing {
 		ConcurrentIndexInitialCleanup,
 		ConcurrentIndexInitialBatch,
 		ConcurrentIndexReservationRelease,
+		/// A conflict on the commit that drains HNSW pendings at the end of a
+		/// build — the batch the datastore's periodic index compaction also
+		/// drains.
+		ConcurrentIndexHnswPendingCompaction,
+		/// The DiskANN counterpart, raised in place of the apply whose own commit
+		/// would have carried the conflict.
+		ConcurrentIndexDiskAnnPendingCompaction,
 		IndexCompactionQueueCleanup,
 		FullTextCompaction,
 		CountCompaction,

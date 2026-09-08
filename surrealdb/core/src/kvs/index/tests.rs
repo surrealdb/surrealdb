@@ -5447,3 +5447,69 @@ async fn legacy_generation_with_advanced_ticket_still_publishes() -> Result<()> 
 	assert_eq!(durable_build_state(&ds, &ikb).await?.phase, IndexBuildPhase::Online);
 	Ok(())
 }
+
+/// A `REBUILD INDEX` must not surface a raw storage conflict from the pending
+/// drain it runs after publishing.
+///
+/// The datastore's periodic index-compaction task drains the same queue, so the
+/// drain's commit can lose a race it is expected to retry. Without the retry the
+/// conflict propagates out of the blocking build and reaches the user as
+/// `There was a problem with the key-value store: Transaction conflict`.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn rebuild_index_retries_a_conflicted_hnsw_pending_compaction() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];",
+	)
+	.await?;
+	let site = RetryableConflictSite::ConcurrentIndexHnswPendingCompaction;
+	let node_id = ds.id();
+	let _guard = inject_retryable_conflict(site, node_id);
+
+	execute_all(&ds, &session, "REBUILD INDEX hx ON t").await?;
+
+	assert_eq!(
+		retryable_conflict_count(site, node_id),
+		0,
+		"the rebuild must consume the injected conflict by retrying the drain"
+	);
+	// A retry that gave up early would leave pendings uncompacted, so the graph
+	// would answer with fewer neighbours than the table holds.
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM t WHERE vec <|2,40|> [1.0f, 0.0f]", 2)
+		.await
+}
+
+/// DiskANN counterpart of
+/// [`rebuild_index_retries_a_conflicted_hnsw_pending_compaction`]. Its apply
+/// owns the commit, so the conflict arrives as the apply's own error.
+#[cfg(all(feature = "kv-mem", diskann))]
+#[tokio::test(flavor = "multi_thread")]
+async fn rebuild_index_retries_a_conflicted_diskann_pending_compaction() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX dx ON t FIELDS vec DISKANN DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];",
+	)
+	.await?;
+	let site = RetryableConflictSite::ConcurrentIndexDiskAnnPendingCompaction;
+	let node_id = ds.id();
+	let _guard = inject_retryable_conflict(site, node_id);
+
+	execute_all(&ds, &session, "REBUILD INDEX dx ON t").await?;
+
+	assert_eq!(
+		retryable_conflict_count(site, node_id),
+		0,
+		"the rebuild must consume the injected conflict by retrying the drain"
+	);
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM t WHERE vec <|2,40|> [1.0f, 0.0f]", 2)
+		.await
+}
