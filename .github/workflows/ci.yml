@@ -450,6 +450,31 @@ jobs:
         uses: ./.github/actions/check-crate-versions
 
   # ----------------------------------------
+  # Lockfile freshness
+  # ----------------------------------------
+
+  # The only `--locked` assertion in CI that is guaranteed to be about the
+  # commit. Every other one is sequenced after the shared setup action, whose
+  # cache step resolves each workspace it is handed without `--locked` and so
+  # rewrites a stale lockfile before the assertion reads it. This job therefore
+  # runs bare — no setup action, no cache, no other cargo step — and resolves
+  # only, so it covers every workspace in the repository in seconds.
+  check-lockfiles:
+    name: Check lockfiles
+    runs-on: ubuntu-latest-4-cores
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
+        with:
+          toolchain: stable
+
+      - name: Check every lockfile satisfies its manifests
+        run: ./.github/scripts/check-lockfiles.sh
+
+  # ----------------------------------------
   # Integration tests
   # ----------------------------------------
 
@@ -1031,6 +1056,7 @@ jobs:
       - check-bench
       - unused-deps
       - check-versions
+      - check-lockfiles
       # Integration tests
       - integration-tests
       # Workspace tests
@@ -1074,6 +1100,7 @@ jobs:
             "${{ needs.check-bench.result }}"
             "${{ needs.unused-deps.result }}"
             "${{ needs.check-versions.result }}"
+            "${{ needs.check-lockfiles.result }}"
             "${{ needs.integration-tests.result }}"
             "${{ needs.test.result }}"
             "${{ needs.sdk-build.result }}"
