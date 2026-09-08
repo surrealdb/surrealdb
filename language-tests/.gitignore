@@ -2,3 +2,4 @@ target/
 .binary_cache/
 .ds_cache/
 bench_results/
+.module_cache/

@@ -74,6 +74,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let set_builder = RunSetBuilder::new(&set, &mut load_errors)
 		// Only run test for which run is enabled.
 		.with_filter(|x| x.test.config.parsed.test.run)
+		// A `[test.chain]` test has no meaning here. Its fixture is created by
+		// the chain runner's `setup` on whichever version first supports the
+		// feature, and its body asserts against `$hop`, which only a walk binds
+		// — run standalone it would query a table nothing created.
+		.with_filter(|x| x.test.config.parsed.test.chain.is_none())
 		// Only run test for this backend.
 		.with_filter(|x| {
 			let config_backend = &x.test.config.parsed.env.backend;
@@ -126,6 +131,17 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 		if let Some(x) = &x.test.config.parsed.test.importing_version
 			&& !x.matches(&core_version)
+		{
+			return false;
+		}
+
+		// A feature this build cannot create is not testable against it, and the
+		// test's fixture would fail to parse or apply. Matched the same way the
+		// upgrade expander matches it: strict semver rejects every prerelease,
+		// and the workspace version is one, so a strict check here would drop
+		// every gated test from this runner.
+		if let Some(x) = &x.test.config.parsed.test.introduced
+			&& !crate::version::version_matches(x, &core_version)
 		{
 			return false;
 		}
@@ -702,6 +718,9 @@ mod tests {
 			case: Arc::new(CaseImports {
 				test,
 				imports,
+				chain_setup: Vec::new(),
+				chain_mutate: Vec::new(),
+				repairs: Vec::new(),
 			}),
 			config: TestRunConfig {
 				planner_config: NewPlannerStrategyConfig::ComputeOnly,

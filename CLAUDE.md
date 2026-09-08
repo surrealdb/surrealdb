@@ -18,6 +18,32 @@ cargo make ci-clippy
 Language tests, upgrade tests, and benchmarks: `language-tests/CLAUDE.md`.
 Parser tests: `surrealdb/parser/CLAUDE.md`.
 
+### Keep the upgrade tests current
+
+State written by a released binary must stay readable by every later one. That
+property is only checked by `language-tests/tests/upgrade/`, and it fails
+silently — an unreadable index falls back to a table scan and returns the same
+rows. Three changes oblige you to touch that suite:
+
+- **Changing a persisted format** — a storage key, an index layout, a revisioned
+  catalog struct. Extend the pair that produces the old shape from an old binary
+  and reads it on the new one. `revision.lock` and the frozen byte fixtures in
+  `surrealdb/core/src/kvs/compat/` are separate guards and do not substitute:
+  they prove a type decodes, not that the read path around it still works. If an
+  operator must intervene, declare `[[test.repair]]` — never write `REBUILD
+  INDEX` into a test body, which the loader rejects because it masks the failure.
+- **Adding a durable SurrealQL construct** — add the pair once a release can
+  write it, prefixed and gated with that release. Before then no axis can reach
+  it, so it belongs in the ordinary language tests.
+- **Cutting a release** — add it to all three version lists in
+  `Makefile.ci.toml`. Verify the hop first: release order is not version order,
+  and a patch shipped after a newer line can carry a revision that line cannot
+  decode.
+
+Nothing goes red when this is skipped; the suite just quietly tests less than it
+appears to. How it works: `language-tests/tests/upgrade/README.md`. Conventions
+and the repair contract: `language-tests/CLAUDE.md`.
+
 ### SDK/Integration Tests
 
 Located in `surrealdb/tests/` and `tests/`. Follow standard Rust testing conventions.

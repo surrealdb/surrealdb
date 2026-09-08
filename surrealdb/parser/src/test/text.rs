@@ -137,6 +137,12 @@ fn all_language_tests() {
 		if source.contains("parsing-error") {
 			return;
 		}
+		// An upgrade helper marked `[test] legacy-syntax` is replayed against a
+		// spawned released binary and is written in that binary's SurrealQL, in
+		// a spelling this parser is never asked to read.
+		if source.contains("legacy-syntax") {
+			return;
+		}
 
 		let res = crate::Parser::enter_parse::<Query>(
 			&source,

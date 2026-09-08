@@ -271,6 +271,10 @@ impl_vis_type! {
 			database: NodeId<Expr>
 		},
 		Database(NodeId<Expr>),
+		/// `USE DEFAULT` takes no arguments: the namespace and database come
+		/// from the root-scoped default config, so a session that runs it
+		/// lands wherever `DEFINE CONFIG DEFAULT` currently points.
+		Default,
 	}
 }
 

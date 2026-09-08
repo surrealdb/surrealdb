@@ -4,6 +4,8 @@ USE NAMESPACE ns DATABASE db;
 USE DATABASE $db;
 USE DATABASE type::string("x");
 USE NAMESPACE (SELECT VALUE id FROM anything);
+USE DEFAULT;
+USE NS ns DB db;
 /* ===== result =====
 Query
     .exprs: Some
@@ -95,4 +97,20 @@ Query
                                 .for_update: false
                                 .tempfiles: false
                                 .explain: None
+        -TopLevelExpr::Use
+            Use
+                .kind: UseKind::Default
+        -TopLevelExpr::Use
+            Use
+                .kind: UseKind::NamespaceDatabase
+                    .namespace: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "ns"
+                            .parts: None
+                    .database: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "db"
+                            .parts: None
 */

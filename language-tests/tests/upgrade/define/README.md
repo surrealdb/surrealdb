@@ -27,5 +27,5 @@ green.
 The case that does matter for subscriptions is a rolling cluster upgrade, where
 a new node writes to a table whose subscriptions a still-live old node
 registered. That is a cross-version *decode* of stored bytes, which is what the
-frozen fixtures in `core/src/catalog/compat/` cover directly, at the byte level
+frozen fixtures in `surrealdb/core/src/kvs/compat/` cover directly, at the byte level
 and for every released format.

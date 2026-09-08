@@ -192,21 +192,32 @@ impl Parse for ast::Use {
 
 		// An argument is an expression, which carries no span of its own, so
 		// the statement's span runs from `USE` to whatever the last argument
-		// consumed.
-		let kind = if parser.eat(T![NAMESPACE])?.is_some() {
-			let ns = parser.parse_enter().await?;
-			if parser.eat(T![DATABASE])?.is_some() {
-				UseKind::NamespaceDatabase {
-					namespace: ns,
-					database: parser.parse_enter().await?,
+		// consumed. `DEFAULT` takes no argument, so there the span ends on the
+		// keyword itself.
+		let expect = "`NAMESPACE`, `DATABASE`, or `DEFAULT`";
+		let peek = parser.peek_expect(expect)?;
+		let kind = match peek.token {
+			T![NAMESPACE] => {
+				let _ = parser.next();
+				let ns = parser.parse_enter().await?;
+				if parser.eat(T![DATABASE])?.is_some() {
+					UseKind::NamespaceDatabase {
+						namespace: ns,
+						database: parser.parse_enter().await?,
+					}
+				} else {
+					UseKind::Namespace(ns)
 				}
-			} else {
-				UseKind::Namespace(ns)
 			}
-		} else if parser.eat(T![DATABASE])?.is_some() {
-			UseKind::Database(parser.parse_enter().await?)
-		} else {
-			return Err(parser.unexpected("either `NAMESPACE` or `DATABASE`"));
+			T![DATABASE] => {
+				let _ = parser.next();
+				UseKind::Database(parser.parse_enter().await?)
+			}
+			T![DEFAULT] => {
+				let _ = parser.next();
+				UseKind::Default
+			}
+			_ => return Err(parser.unexpected(expect)),
 		};
 
 		Ok(ast::Use {

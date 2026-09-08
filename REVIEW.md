@@ -9,7 +9,8 @@
 - **Revisioned structs**: changes to types that derive `Revision` must be backwards compatible.
 - **Test coverage**: bug fixes should include a language test (`language-tests/tests/`) or SDK test (`surrealdb/tests/`, `tests/`). New SurrealQL functionality needs corresponding `.surql` test files. Functionality that can be tested with language tests should be preferred over writing custom rust language tests.
 - **Dependency changes**: new external crates require justification. Prefer workspace-managed dependencies in the root `Cargo.toml`.
-- **New releases**: a change that tags or ships a version must add it to `LANG_UPGRADE_VERSIONS` in [Makefile.ci.toml](Makefile.ci.toml), before the trailing `..`. Omitting it silently widens the last upgrade-test hop into a multi-release jump instead of failing. See [CLAUDE.md](CLAUDE.md) > Testing Conventions > Upgrade Tests.
+- **New releases**: a change that tags or ships a version must add it to all three of `LANG_UPGRADE_VERSIONS`, `LANG_UPGRADE_SEEDS` and `LANG_UPGRADE_CHAIN` in [Makefile.ci.toml](Makefile.ci.toml) — in the first and third, before the trailing `..`; the seeds list has no terminator. `LANG_UPGRADE_CHAIN` omits any release that demands a manual repair, so check its comment before adding a prerelease. Omitting it silently widens the last upgrade-test hop into a multi-release jump instead of failing. See [language-tests/CLAUDE.md](language-tests/CLAUDE.md) > Upgrade Tests.
+- **Upgrade-test repairs**: a change that makes an upgrade require a manual step (a `REBUILD INDEX`, a migration an operator has to run) must declare it as `[[test.repair]]` on the affected upgrade test, never write the statement into the test body. A repair in the body reads back bytes the new binary just wrote, so it hides exactly what the test is there to check.
 
 ## Skip
 

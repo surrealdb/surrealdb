@@ -503,6 +503,22 @@ test running datastore.
 
 Defaults to `"*"`
 
+#### `[test.legacy-syntax]`
+
+Marks an upgrade helper written in the SurrealQL of the released binary that
+replays it, in a spelling the current parser no longer accepts. `DEFINE MODULE`
+is the standing example: the releases in the upgrade matrix spell the module
+source `AS f"bucket:/key"` and have no `UNSIGNED` keyword, so a script that
+writes one on those binaries cannot also be a document the current parser reads.
+
+The current parser's language-test corpus check reads this flag and leaves such
+a file alone, which is why it is a declared key and not a comment. Only a script
+replayed against a spawned release may set it — an `[env] imports` entry or a
+`[test.chain] setup`. A test body and a `[test.chain] mutate` run on the upgrade
+target, so the runner refuses the flag on either.
+
+Defaults to `false`
+
 #### `[test.results]`
 
 The test results table specifies the expected out of the test. The command line
@@ -896,7 +912,10 @@ database should be run. This can be used to disable functions, net targets,
 http routs and scripting just like with the SurrealDB binary/rust SDK. Defaults
 to all capabilities enabled.
 
-This field is not supported for upgrade tests.
+Upgrade tests accept exactly one key here, `allow-experimental`, which is
+passed to each spawned binary; every other key is rejected, and writing the
+table without that key is a load error. It must sit on the graded test case —
+on an import or a chain script it is inert.
 
 #### `[env.planner-strategy]`
 

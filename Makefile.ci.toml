@@ -18,33 +18,86 @@ BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", conditi
 LLVM_PROFILE_FILE = { value = "target/llvm-cov-target/%p-%m.profraw", condition = { env_not_set = [
     "LLVM_PROFILE_FILE",
 ] } }
-# Adjacent-pair upgrade chain for language upgrade tests. Each consecutive
-# pair (3.0.0 -> 3.0.1, 3.0.1 -> 3.0.2, ...) is exercised as a separate hop.
+# Versions the language upgrade tests hop through.
+#
+# Three axes run over the same test tree, each proving something the others
+# cannot:
+#
+#   LANG_UPGRADE_VERSIONS  adjacent pairs (3.0.0 -> 3.0.1, 3.0.1 -> 3.0.2, ...).
+#                          Proves each release can read the one before it. Also
+#                          the version list the cumulative walk uses.
+#   LANG_UPGRADE_SEEDS     every seed straight to the current checkout. Proves
+#                          today's build reads bytes an *old* release wrote,
+#                          with no intermediate binary in between to migrate or
+#                          rebuild them. Adjacent pairs cannot show this: the
+#                          oldest writer HEAD ever sees is the release directly
+#                          before it.
+#   LANG_UPGRADE_CHAIN     one datastore carried through every listed version in
+#                          order, for the tests that declare `[test.chain]`.
+#                          Proves a structure created once stays correct while
+#                          every release in turn maintains it.
+#
 # The trailing `..` token resolves to a path-based version, which the runner
 # cargo-builds against the current checkout — this is the "main" target.
 #
 # The chain lists every *stable* release on the 3.x line in order. Betas are
 # omitted: once a minor goes stable nobody upgrades from its betas, and a beta
 # left in the chain only displaces the stable that shipped after it. A beta
-# belongs here only while its minor is unreleased. Each new release must be
+# belongs here only while its minor is unreleased, which is why 3.3.0-beta.3 is
+# listed — the 3.3 line has no stable release yet. Each new release must be
 # appended before `..`, or the last hop silently widens into a multi-release
 # jump and the versions users actually upgrade from stop being covered.
 #
-# `;` separates independent chains; hops are only made within a chain. The break
-# between 3.2.0 and 3.2.1 is deliberate. `REBUILD INDEX` on an HNSW, FULLTEXT or
-# DISKANN index never returns when the index was written before 3.2.1 and is read
-# by 3.2.1 or later — verified for sources 3.1.5 and 3.2.0 against targets 3.2.1,
-# 3.2.2 and 3.2.4. The store is otherwise sound: it opens, queries and reports
-# INFO normally, and only the rebuild wedges. Rebuilding is the documented upgrade
-# step for those index types, so the three tests covering them cannot cross that
-# boundary. Splitting the chain keeps every other pair covered, including 3.2.0 as
-# a target; `importing-version` cannot express "every version except this one".
+# `;` separates independent chains; hops are only made within a chain. A hop that
+# cannot work — one spanning a defect in a released binary that no
+# `version`/`importing-version` gate can express — is excluded by breaking the
+# chain there, leaving every other pair covered.
+#
+# Release order is not version order: a patch on an older line can ship after a
+# newer line and carry a catalog revision the newer line's early releases
+# predate. 3.1.6 is such a release. It writes `TableDefinition` at revision 3,
+# which 3.2.0 and 3.2.1 cannot decode, so upgrading onto either fails outright;
+# its first valid target is 3.2.2. It therefore forms its own chain rather than
+# sitting between 3.1.5 and 3.2.0, where it would both break the 3.1.5 -> 3.2.0
+# hop and assert an upgrade path that does not exist. That chain starts at 3.1.5
+# so the in-line patch upgrade onto it stays covered as well.
 #
 # Every numeric entry must have a published binary at
 #   https://download.surrealdb.com/v{ver}/surreal-v{ver}.{platform}.{tgz|exe}
 # Override `LANG_UPGRADE_VERSIONS` to test alternative chains locally.
-LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0;3.2.1,3.2.2,3.2.3,3.2.4,..", condition = { env_not_set = [
+LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0,3.2.1,3.2.2,3.2.3,3.2.4,3.3.0-beta.3,..;3.1.5,3.1.6,3.2.2", condition = { env_not_set = [
     "LANG_UPGRADE_VERSIONS",
+] } }
+
+# Versions the cumulative walk carries one datastore through.
+#
+# Deliberately not the same list as the adjacent-pair chain. A walk must not pass
+# through a release that demands a manual repair, for two reasons. The property
+# the walk measures is that a structure created once survives being maintained by
+# every release in turn; a release that forces a `REBUILD INDEX` replaces that
+# structure, so everything after it reads what the rebuild wrote rather than what
+# the original writer left. And rebuilding an index first written before 3.2.1 on
+# any later binary never returns, so a walk that starts at 3.1.0 and crosses a
+# 3.3.0 beta hangs until the run's timeout instead of failing.
+#
+# Repairs are a pairwise concern, and the pairwise axis covers them properly; the
+# chain runner refuses to schedule a test whose repair would fire mid-walk.
+#
+# This is one ordered list, not several: the runner flattens `;` to `,` because a
+# walk cannot skip a version. A release that can only be upgraded onto a target
+# further down the list therefore cannot take part at all — 3.1.6 is omitted for
+# that reason, and the pair and seed axes carry it instead.
+LANG_UPGRADE_CHAIN = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0,3.2.1,3.2.2,3.2.3,3.2.4,..", condition = { env_not_set = [
+    "LANG_UPGRADE_CHAIN",
+] } }
+
+# Seeds for the every-release-to-HEAD axis. One release per minor plus the ends
+# of each line: enough to cover every stored format the 3.x series produced
+# without paying for all eighteen. Add the newest release here as well as to the
+# chain above. 3.1.6 rather than 3.1.5 stands for the end of the 3.1 line, and
+# this axis is the only one that carries it all the way to HEAD.
+LANG_UPGRADE_SEEDS = { value = "3.0.0,3.0.5,3.1.0,3.1.6,3.2.0,3.2.4,3.3.0-beta.3", condition = { env_not_set = [
+    "LANG_UPGRADE_SEEDS",
 ] } }
 
 # --------------------------------------------------
@@ -981,26 +1034,51 @@ run_task = { name = [
 [tasks.test-lang-upgrade]
 private = true
 category = "CI - LANGUAGE TESTS"
-description = "Run SurrealQL language upgrade tests, hopping through adjacent version pairs"
+description = "Run SurrealQL language upgrade tests across the adjacent-pair, seed and cumulative axes"
 script = """
 #!/bin/bash -ex
 # Override _TEST_LANG_UPGRADE_JOBS to tune per-runner concurrency (default 12).
 cd language-tests
 cargo build --locked --features "${_TEST_LANG_FEATURES}"
-# `;` separates independent chains, `,` separates versions within one. Adjacent
-# pairs are hopped within a chain; no hop is made across a chain boundary.
+# The harness's own unit tests live behind the `upgrade` feature and nothing
+# else in CI runs them: the language-test jobs only `cargo build` and then
+# execute the binary. Without this the version-gate regression tests — the guard
+# against a test silently dropping out of the run set — never execute.
+cargo test --locked --features "${_TEST_LANG_FEATURES}"
+JOBS="${_TEST_LANG_UPGRADE_JOBS:-12}"
+# Only `--color` is a global flag; everything else belongs to the `upgrade`
+# subcommand and has to follow it.
+OPTS=(--backend "${_TEST_API_ENGINE}" --allow-download --no-wip --jobs "${JOBS}")
+# A machine without a wasm-capable C toolchain skips the Surrealism module tests
+# with a warning so the rest of the suite stays usable. CI has the toolchain, so
+# here a fixture that will not build is a failure rather than lost coverage.
+export LANG_UPGRADE_REQUIRE_MODULES=1
+
+# Axis 1 — adjacent pairs. `;` separates independent chains, `,` separates
+# versions within one. Adjacent pairs are hopped within a chain; no hop is made
+# across a chain boundary.
 IFS=';' read -ra CHAINS <<< "${LANG_UPGRADE_VERSIONS}"
 for chain in "${CHAINS[@]}"; do
     IFS=',' read -ra V <<< "${chain}"
     for ((i=0; i<${#V[@]}-1; i++)); do
         echo "=== Upgrade hop: ${V[$i]} -> ${V[$((i+1))]} (backend=${_TEST_API_ENGINE}) ==="
-        ./target/debug/surrealql-test --color always upgrade \\
-            --from "${V[$i]}" --to "${V[$((i+1))]}" \\
-            --backend "${_TEST_API_ENGINE}" \\
-            --allow-download --no-wip \\
-            --jobs "${_TEST_LANG_UPGRADE_JOBS:-12}"
+        ./target/debug/surrealql-test --color always upgrade "${OPTS[@]}" \
+            --from "${V[$i]}" --to "${V[$((i+1))]}"
     done
 done
+
+# Axis 2 — every seed straight to the current checkout, in one invocation so the
+# runs fan out across all workers rather than serialising per version.
+echo "=== Upgrade seeds: ${LANG_UPGRADE_SEEDS} -> .. (backend=${_TEST_API_ENGINE}) ==="
+./target/debug/surrealql-test --color always upgrade "${OPTS[@]}" \
+    --from "${LANG_UPGRADE_SEEDS}" --to ..
+
+# Axis 3 — cumulative walk. One datastore per test, carried through every
+# version in order. Only tests declaring `[test.chain]` are selected, and the
+# chain separator is dropped because a walk cannot skip a version.
+echo "=== Upgrade chain walk: ${LANG_UPGRADE_CHAIN} (backend=${_TEST_API_ENGINE}) ==="
+./target/debug/surrealql-test --color always upgrade "${OPTS[@]}" \
+    --chain "${LANG_UPGRADE_CHAIN//;/,}"
 """
 
 [tasks.ci-lang-upgrade-test-surrealkv]

@@ -46,6 +46,8 @@ impl SurrealProcess {
 		version: &DsVersion,
 		tmp_dir: &str,
 		port: u16,
+		experimental: &[String],
+		module_dir: Option<&Path>,
 	) -> Result<SurrealProcess, anyhow::Error> {
 		let mut command = match version {
 			DsVersion::Path(x) => {
@@ -75,6 +77,27 @@ impl SurrealProcess {
 			.stdout(Stdio::piped())
 			.stderr(Stdio::piped())
 			.kill_on_drop(true);
+
+		// Experimental capabilities have no `surreal start` flag, but the server
+		// reads them from this variable on every release the chain spans, so a
+		// test needing one (DEFINE BUCKET, file values) can be spawned for.
+		// A target an older binary does not recognise makes it exit during
+		// startup, which surfaces as a failure to open the connection.
+		if !experimental.is_empty() {
+			command.env("SURREAL_CAPS_ALLOW_EXPERIMENTAL", experimental.join(","));
+		}
+
+		// A Surrealism module is loaded out of a file-backed bucket, so the
+		// directory holding it has to be allowlisted, and the demo package
+		// declares a loopback network capability the server must grant before it
+		// will load the package at all. Passed per case rather than per run: a
+		// binary spawned for a test that never asked for a module must not get
+		// network access or an allowlisted path, or a test covering the denial
+		// of either would pass for the wrong reason.
+		if let Some(dir) = module_dir {
+			command.env("SURREAL_BUCKET_FOLDER_ALLOWLIST", dir);
+			command.env("SURREAL_CAPS_ALLOW_NET", "127.0.0.1");
+		}
 
 		let process = command.spawn().context("Failed to spawn process")?;
 

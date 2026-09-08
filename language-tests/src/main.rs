@@ -5,6 +5,7 @@ mod cmd;
 mod format;
 mod runner;
 mod tests;
+mod version;
 mod util;
 
 use anyhow::{self, Result};

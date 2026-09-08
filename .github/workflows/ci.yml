@@ -694,6 +694,9 @@ jobs:
           sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          # The WASI target is needed to build the Surrealism module the upgrade
+          # tests load through DEFINE MODULE.
+          targets: wasm32-wasip2
           # Both workspaces are cached: `language-tests` for the test harness,
           # and the root workspace because the final `..` hop builds the
           # current checkout's surreal binary via cargo.
@@ -709,10 +712,13 @@ jobs:
           # Extract the version chains, then translate their ',' and ';'
           # separators to '_' so the value is usable inside an `actions/cache`
           # key (which forbids commas).
-          chain=$(grep -E '^LANG_UPGRADE_VERSIONS = ' Makefile.ci.toml \
-            | sed -E 's/.*value = "([^"]+)".*/\1/' \
-            | tr ',;' '__')
-          echo "chain=$chain" >> "$GITHUB_OUTPUT"
+          extract() {
+            grep -E "^$1 = " Makefile.ci.toml \
+              | sed -E 's/.*value = "([^"]+)".*/\1/' \
+              | tr ',;' '__'
+          }
+          # All three lists name binaries the run downloads, so all three belong in the key.
+          echo "chain=$(extract LANG_UPGRADE_VERSIONS)_$(extract LANG_UPGRADE_SEEDS)_$(extract LANG_UPGRADE_CHAIN)" >> "$GITHUB_OUTPUT"
 
       - name: Cache upgrade binaries
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # (Actions must be pinned by commit hash) v6.1.0
@@ -728,6 +734,12 @@ jobs:
         uses: ./.github/actions/install-tools
         with:
           tools: cargo-make
+
+      # rust-toolchain.toml pins the toolchain every cargo invocation resolves
+      # to, which is not the one the setup action installs targets for, so the
+      # WASI target has to be added to the pinned toolchain as well.
+      - name: Install wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
 
       - name: Run language upgrade tests
         run: cargo make ci-lang-upgrade-test-${{ matrix.engine }}
