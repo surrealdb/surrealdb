@@ -17,7 +17,7 @@ use super::common::{extract_record_ids_into, resolve_record_batch, resolve_versi
 pub use super::graph_keys::EdgeTableSpec;
 use super::graph_keys::{compute_graph_ranges, observe_fold_candidate};
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::parts::LookupDirection;
 use crate::exec::permission::{
 	PhysicalPermission, should_check_perms, validate_record_user_access,
@@ -30,12 +30,23 @@ use crate::exec::{
 use crate::expr::{ControlFlow, Dir};
 use crate::iam::Action;
 use crate::idx::adjacency::{
-	AdjacencyScope, MergedAdjacencyCursor, VertexAdjacency, table_adjacency,
+	AdjacencyScope, MergedAdjacencyCursor, VertexAdjacency, VisitFlow, vertex_adjacency_of,
 };
 use crate::key::Resumable;
 use crate::key::schema::EdgeCacheKey;
 use crate::kvs::{CachePolicy, Direction, Transaction};
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
+
+/// The per-source-table facts the scan needs for every source row —
+/// adjacency classification and the inline-cache cap. Memoized for the
+/// operator's lifetime, not per execution: a recursion re-executes the
+/// scan once per frontier vertex, and a catalog lookup per vertex is
+/// measurable. Entries come from the transaction-cached catalog, which is
+/// stable for the duration of the statement the plan was built for. The
+/// memo is read and written once per input batch — never per source row —
+/// so concurrent executions contend on it at batch granularity only.
+type SourceTableInfo =
+	std::sync::Mutex<std::collections::HashMap<TableName, (VertexAdjacency, Option<u32>)>>;
 
 /// Plan-time snapshot of the inline-field state a payload-resident
 /// predicate was admitted under: per edge table, the inline generation and
@@ -48,6 +59,23 @@ use crate::val::{RecordId, RecordIdKey, TableName, Value};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PayloadPredicateSpec {
 	pub(crate) tables: std::collections::HashMap<TableName, PayloadTableSpec>,
+	/// Whether the predicate references the synthetic `id` / `in` / `out`
+	/// fields. The synthesized candidate carries only what the predicate
+	/// reads — every skipped field is a per-edge record-id clone or value
+	/// insert saved on the scan's hottest path.
+	pub(crate) needs_id: bool,
+	pub(crate) needs_in: bool,
+	pub(crate) needs_out: bool,
+	/// A key-resident predicate: every field it reads is `id`, `in` or
+	/// `out`, all of which the adjacency entry itself carries — no inline
+	/// payload is needed, so evaluation prunes non-matching edges before
+	/// any fetch on any table, with no `INLINE` fields declared and no
+	/// per-table generation to validate. Pruning on key material is
+	/// permission-safe: an edge the predicate drops would have been
+	/// dropped by the same predicate after the fetch, so the visible
+	/// result set is unchanged, and every surviving edge still resolves
+	/// through the permission-checked record path.
+	pub(crate) key_only: bool,
 }
 
 /// One table's inline-field snapshot inside a [`PayloadPredicateSpec`].
@@ -57,6 +85,10 @@ pub(crate) struct PayloadTableSpec {
 	pub(crate) generation: u32,
 	/// The raw names of every inline field, in the canonical payload order.
 	pub(crate) fields: Vec<String>,
+	/// Which of `fields` the predicate references, in the same order. The
+	/// full list is still what stamps the payload's value count; only the
+	/// referenced ones land in the synthesized candidate.
+	pub(crate) referenced: Vec<bool>,
 }
 
 /// What kind of output the GraphEdgeScan should produce.
@@ -148,6 +180,10 @@ pub struct GraphEdgeScan {
 
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
+
+	/// Operator-lifetime memo of per-source-table facts; see
+	/// [`SourceTableInfo`].
+	pub(crate) table_info: Arc<SourceTableInfo>,
 }
 
 impl GraphEdgeScan {
@@ -170,6 +206,7 @@ impl GraphEdgeScan {
 			predicate_key_resident: false,
 			payload_spec: None,
 			metrics: Arc::new(OperatorMetrics::new()),
+			table_info: Arc::new(SourceTableInfo::default()),
 		}
 	}
 
@@ -248,8 +285,12 @@ impl ExecOperator for GraphEdgeScan {
 				"predicate_scope".to_string(),
 				if self.predicate_key_resident {
 					"key".to_string()
-				} else if self.payload_spec.is_some() {
-					"payload".to_string()
+				} else if let Some(spec) = self.payload_spec.as_deref() {
+					if spec.key_only {
+						"key".to_string()
+					} else {
+						"payload".to_string()
+					}
 				} else {
 					"record".to_string()
 				},
@@ -332,6 +373,7 @@ impl ExecOperator for GraphEdgeScan {
 		let payload_spec = self.payload_spec.clone();
 		let metrics = Arc::clone(&self.metrics);
 		let record_metrics = metrics.is_enabled();
+		let table_info = Arc::clone(&self.table_info);
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let txn = ctx.txn();
@@ -363,8 +405,11 @@ impl ExecOperator for GraphEdgeScan {
 			// reads current data over unbounded edge-table specs — a windowed
 			// (`->edge:a..b`) or versioned read needs the cursor.
 			// A payload-resident predicate needs the adjacency values, which
-			// the caches do not carry — payload mode always reads the cursor.
-			let cache_eligible = payload_spec.is_none()
+			// the caches do not carry, so it reads the cursor — except a
+			// key-only spec, which reads nothing beyond the `(edge, target)`
+			// pairs the caches store and evaluates against them in the
+			// cache-hit loop below.
+			let cache_eligible = payload_spec.as_deref().is_none_or(|s| s.key_only)
 				&& version.is_none()
 				&& edge_tables.iter().all(|s| {
 					matches!(s.range_start, std::ops::Bound::Unbounded)
@@ -404,27 +449,48 @@ impl ExecOperator for GraphEdgeScan {
 					})
 					.collect();
 
-				// One catalog lookup per distinct source table in this input
-				// batch — the cache-eligibility check and the folded-adjacency
-				// flag below both read the same definition, and sources
-				// overwhelmingly share one table. `get_tb` is snapshot-stable
-				// within the transaction, so batching the lookups observes the
-				// same definitions a per-source lookup would.
-				let mut source_tables: std::collections::HashMap<
+				// Per-source-table facts for this batch, resolved once per
+				// distinct table: known entries are copied out of the
+				// operator-lifetime memo under one lock, missing tables are
+				// fetched from the catalog outside it, and the new entries
+				// are published back under a second lock — the per-source
+				// loops below read the local copy with no locking at all.
+				// The guarded state is a plain map, so a poisoned lock still
+				// holds a consistent value and is read through.
+				let mut batch_table_info: std::collections::HashMap<
 					TableName,
-					Option<Arc<TableDefinition>>,
+					(VertexAdjacency, Option<u32>),
 				> = std::collections::HashMap::new();
-				for rid in &source_rids {
-					if !source_tables.contains_key(&rid.table) {
-						let tb = txn
-							.get_tb(ns_id, db_id, &rid.table, None)
-							.await
-							.context("Failed to resolve the source vertex's table")?;
-						source_tables.insert(rid.table.clone(), tb);
+				{
+					let memo = table_info.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+					for rid in &source_rids {
+						if let Some(info) = memo.get(&rid.table) {
+							batch_table_info.insert(rid.table.clone(), *info);
+						}
 					}
 				}
-				let source_table =
-					|rid: &RecordId| source_tables.get(&rid.table).and_then(|tb| tb.as_deref());
+				let mut resolved: Vec<(TableName, (VertexAdjacency, Option<u32>))> = Vec::new();
+				for rid in &source_rids {
+					if batch_table_info.contains_key(&rid.table) {
+						continue;
+					}
+					let tb = txn
+						.get_tb(ns_id, db_id, &rid.table, None)
+						.await
+						.context("Failed to resolve the source vertex's table")?;
+					let info = (
+						vertex_adjacency_of(tb.as_deref()),
+						crate::idx::inline_cache::effective_edges_cap(tb.as_deref()),
+					);
+					batch_table_info.insert(rid.table.clone(), info);
+					resolved.push((rid.table.clone(), info));
+				}
+				if !resolved.is_empty() {
+					table_info
+						.lock()
+						.unwrap_or_else(std::sync::PoisonError::into_inner)
+						.extend(resolved);
+				}
 
 				// One multi-get fetches every eligible source's cache keys for
 				// this input batch — the fan-out the caches exist to amortise.
@@ -439,9 +505,8 @@ impl ExecOperator for GraphEdgeScan {
 					let mut slots: Vec<(usize, Dir)> = Vec::new();
 					let mut keys: Vec<EdgeCacheKey> = Vec::new();
 					for (src_idx, rid) in source_rids.iter().enumerate() {
-						if crate::idx::inline_cache::effective_edges_cap(source_table(rid))
-							.is_none()
-						{
+						let (_, edges_cap) = batch_table_info[&rid.table];
+						if edges_cap.is_none() {
 							continue;
 						}
 						for &dir in &directions {
@@ -484,9 +549,9 @@ impl ExecOperator for GraphEdgeScan {
 					// How the source's adjacency is read: merged with packed
 					// blocks once its table folds, or synthesized from the id
 					// when the source is itself a lightweight edge. Read off
-					// the batch's memoized definitions, so classifying a
-					// source costs no extra catalog lookup.
-					let adjacency = table_adjacency(source_table(rid));
+					// the batch's memoized facts, so classifying a source
+					// costs no extra catalog lookup.
+					let (adjacency, _) = batch_table_info[&rid.table];
 					// A lightweight edge's synthesized adjacency derives from
 					// its id alone, which says nothing about existence — and
 					// sources can be literal ids (`follows:[a,b]->person`),
@@ -535,6 +600,45 @@ impl ExecOperator for GraphEdgeScan {
 											edges_yielded += 1;
 										}
 									}
+									_ if payload_spec.is_some() => {
+										// The cache gate admits only key-only specs,
+										// and a cached `(edge, target)` pair carries
+										// everything such a spec reads — the
+										// predicate prunes here, before any fetch,
+										// exactly as on the cursor path.
+										let spec = payload_spec
+											.as_deref()
+											.expect("guarded by the match arm");
+										let pred = record_predicate
+											.as_ref()
+											.expect("payload mode implies a predicate");
+										let item = crate::idx::adjacency::MergedAdjacencyEdge {
+											key: Vec::new(),
+											edge,
+											target: Some(target),
+											props: None,
+										};
+										let (edge, candidate) =
+											synthesize_payload_candidate(spec, rid, dir, item);
+										let Some(candidate) = candidate else {
+											return Err(ControlFlow::Err(anyhow::anyhow!(
+												"a key-only predicate cannot fall back on a cached entry"
+											)));
+										};
+										if record_metrics {
+											metrics.add_props_evals(1);
+										}
+										if pred
+											.evaluate(
+												EvalContext::from_exec_ctx(&ctx)
+													.with_value(&candidate),
+											)
+											.await?
+											.is_truthy()
+										{
+											rid_batch.push(edge);
+										}
+									}
 									_ => {
 										rid_batch.push(edge);
 										if !has_predicate {
@@ -573,8 +677,16 @@ impl ExecOperator for GraphEdgeScan {
 							// With a predicate, flush per (source, direction) so
 							// filtering and per-source LIMIT counting stay
 							// within one source, exactly as the cursor path
-							// flushes per cursor batch.
+							// flushes per cursor batch. In payload mode every
+							// buffered edge already matched the key-resident
+							// predicate above, so the flush resolves without
+							// re-applying it.
 							if has_predicate && !rid_batch.is_empty() {
+								let flush_record_predicate = if payload_spec.is_some() {
+									None
+								} else {
+									record_predicate.as_ref()
+								};
 								let mut values = resolve_and_filter_batch(
 									&ctx,
 									&txn,
@@ -586,7 +698,7 @@ impl ExecOperator for GraphEdgeScan {
 									version,
 									&mut perm_cache,
 									key_predicate.as_ref(),
-									record_predicate.as_ref(),
+									flush_record_predicate,
 								)
 								.await?;
 								rid_batch.clear();
@@ -649,23 +761,30 @@ impl ExecOperator for GraphEdgeScan {
 										// Payload mode needs the adjacency
 										// values even on a never-folded table,
 										// whose keys-only scan would otherwise
-										// skip them.
+										// skip them. A key-resident predicate
+										// reads only the keys and stays on the
+										// plain open below.
 										VertexAdjacency::Normal {
 											folded,
-										} if payload_spec.is_some() => MergedAdjacencyCursor::open_with_values(
-											&txn,
-											adjacency_scope,
-											folded,
-											version,
-											Some(
-												ctx.root()
-													.ctx
-													.get_index_stores()
-													.adjacency_resolve(),
-											),
-										)
-										.await
-										.context("Failed to open graph cursor")?,
+										} if payload_spec
+											.as_deref()
+											.is_some_and(|s| !s.key_only) =>
+										{
+											MergedAdjacencyCursor::open_with_values(
+												&txn,
+												adjacency_scope,
+												folded,
+												version,
+												Some(
+													ctx.root()
+														.ctx
+														.get_index_stores()
+														.adjacency_resolve(),
+												),
+											)
+											.await
+											.context("Failed to open graph cursor")?
+										}
 										VertexAdjacency::Normal {
 											folded,
 										} => MergedAdjacencyCursor::open(
@@ -707,95 +826,178 @@ impl ExecOperator for GraphEdgeScan {
 												None => crate::kvs::NORMAL_BATCH_SIZE,
 											}
 										};
-										let batch = cursor
-											.next_batch(batch_size)
-											.await
-											.context("Failed to scan graph edge")?;
-										if batch.is_empty() {
-											break;
-										}
-										let mut scanned_in_batch: u64 = 0;
-										for item in batch {
-											scanned_in_batch += 1;
-											if output_mode == GraphScanOutput::TargetVertex {
-												match item.target {
-													// New-format entry: the embedded
-													// target vertex lets us skip
-													// the edge-record hop entirely.
-													Some(target)
-														if target_tables.is_empty()
-															|| target_tables
-																.contains(&target.table) =>
+										// Never-folded fast path: consume the batch straight
+										// from the cursor's borrowed buffer, no per-edge
+										// materialization. Payload mode is excluded — its
+										// edges need the synthesized candidate the
+										// materialized loop builds — so these arms mirror
+										// only the TargetVertex / identity arms of that
+										// loop; keep the two in step.
+										let visited = if payload_spec.is_none() {
+											cursor
+												.visit_unfolded_batch(batch_size, |key| {
+													let decoded =
+														crate::key::schema::DecodedGraph::decode(
+															key,
+														)?;
+													if output_mode == GraphScanOutput::TargetVertex
 													{
-														rid_batch.push(target);
-														edges_yielded += 1;
-													}
-													Some(_) => {
-														// Target table doesn't
-														// match the next-hop
-														// filter; skip.
-													}
-													None => {
-														// Legacy entry: defer the
-														// fallback scan until the
-														// outer cursor closes
-														// (see below). Bound the
-														// buffer to `scan_batch_size`
-														// so a vertex with many
-														// un-migrated edges
-														// doesn't OOM the scan.
-														legacy_edges.push(item.edge);
-														if legacy_edges.len() >= scan_batch_size {
-															chunk_bound_hit = true;
-															last_processed_key = Some(item.key);
-															break;
+														match decoded.target {
+															Some(target)
+																if target_tables.is_empty()
+																	|| target_tables.contains(
+																		&target.table,
+																	) =>
+															{
+																rid_batch.push(target);
+																edges_yielded += 1;
+															}
+															Some(_) => {}
+															None => {
+																legacy_edges.push(decoded.edge);
+																if legacy_edges.len()
+																	>= scan_batch_size
+																{
+																	chunk_bound_hit = true;
+																	last_processed_key =
+																		Some(key.to_vec());
+																	return Ok(VisitFlow::Stop);
+																}
+															}
+														}
+													} else {
+														rid_batch.push(decoded.edge);
+														if !has_predicate {
+															edges_yielded += 1;
 														}
 													}
-												}
-											} else if let Some(spec) = payload_spec.as_deref() {
-												// Payload-resident predicate: synthesize the
-												// candidate object now, evaluate at flush time
-												// in one batch — a falsy edge is dropped there
-												// without touching its record (the selectivity
-												// win), a truthy one proceeds to the batched
-												// existence and permission resolve. An edge
-												// whose payload is unusable falls back to the
-												// one trustworthy source, the edge record,
-												// prefetched per flush with a single multi-get.
-												// Scan order is preserved throughout.
-												let entry = synthesize_payload_candidate(
-													spec, rid, dir, item,
-												);
+													if !has_predicate
+														&& edge_limit
+															.is_some_and(|l| edges_yielded >= l)
+													{
+														limit_hit = true;
+														return Ok(VisitFlow::Stop);
+													}
+													Ok(VisitFlow::Continue)
+												})
+												.await
+												.context("Failed to scan graph edge")?
+										} else {
+											None
+										};
+										match visited {
+											// The cursor is exhausted.
+											Some(0) => break,
+											Some(n) => {
 												if record_metrics {
-													if entry.1.is_some() {
-														metrics.add_props_evals(1);
+													metrics.add_edges_scanned(n as u64);
+												}
+											}
+											// Folded, lightweight or payload-carrying:
+											// the materialized batch path.
+											None => {
+												let batch = cursor
+													.next_batch_scan(batch_size)
+													.await
+													.context("Failed to scan graph edge")?;
+												if batch.is_empty() {
+													break;
+												}
+												let mut scanned_in_batch: u64 = 0;
+												for item in batch {
+													scanned_in_batch += 1;
+													if output_mode == GraphScanOutput::TargetVertex
+													{
+														match item.target {
+															// New-format entry: the embedded
+															// target vertex lets us skip
+															// the edge-record hop entirely.
+															Some(target)
+																if target_tables.is_empty()
+																	|| target_tables.contains(
+																		&target.table,
+																	) =>
+															{
+																rid_batch.push(target);
+																edges_yielded += 1;
+															}
+															Some(_) => {
+																// Target table doesn't
+																// match the next-hop
+																// filter; skip.
+															}
+															None => {
+																// Legacy entry: defer the
+																// fallback scan until the
+																// outer cursor closes
+																// (see below). Bound the
+																// buffer to `scan_batch_size`
+																// so a vertex with many
+																// un-migrated edges
+																// doesn't OOM the scan.
+																legacy_edges.push(item.edge);
+																if legacy_edges.len()
+																	>= scan_batch_size
+																{
+																	chunk_bound_hit = true;
+																	last_processed_key =
+																		Some(item.key);
+																	break;
+																}
+															}
+														}
+													} else if let Some(spec) =
+														payload_spec.as_deref()
+													{
+														// Payload-resident predicate: synthesize
+														// the candidate object now, evaluate at
+														// flush time in one batch — a falsy edge
+														// is dropped there without touching its
+														// record (the selectivity win), a truthy
+														// one proceeds to the batched existence
+														// and permission resolve. An edge whose
+														// payload is unusable falls back to the
+														// one trustworthy source, the edge
+														// record, prefetched per flush with a
+														// single multi-get. Scan order is
+														// preserved throughout.
+														let entry = synthesize_payload_candidate(
+															spec, rid, dir, item,
+														);
+														if record_metrics {
+															if entry.1.is_some() {
+																metrics.add_props_evals(1);
+															} else {
+																metrics.add_props_fallbacks(1);
+															}
+														}
+														payload_pending.push(entry);
 													} else {
-														metrics.add_props_fallbacks(1);
+														// `TargetId` / `FullEdge` operate on the
+														// edge identity. Defer counting until after
+														// filtering at flush time when a predicate
+														// is pushed down; otherwise
+														// count each edge as it
+														// is buffered.
+														rid_batch.push(item.edge);
+														if !has_predicate {
+															edges_yielded += 1;
+														}
+													}
+													if !has_predicate
+														&& edge_limit
+															.is_some_and(|l| edges_yielded >= l)
+													{
+														limit_hit = true;
+														break;
 													}
 												}
-												payload_pending.push(entry);
-											} else {
-												// `TargetId` / `FullEdge` operate on the
-												// edge identity. Defer counting until after
-												// filtering at flush time when a predicate is
-												// pushed down; otherwise count each edge as it
-												// is buffered.
-												rid_batch.push(item.edge);
-												if !has_predicate {
-													edges_yielded += 1;
+												// Record scanned adjacency keys for EXPLAIN
+												// selectivity (matched = output_rows).
+												if record_metrics && scanned_in_batch > 0 {
+													metrics.add_edges_scanned(scanned_in_batch);
 												}
 											}
-											if !has_predicate
-												&& edge_limit.is_some_and(|l| edges_yielded >= l)
-											{
-												limit_hit = true;
-												break;
-											}
-										}
-										// Record scanned adjacency keys for EXPLAIN
-										// selectivity (matched = output_rows).
-										if record_metrics && scanned_in_batch > 0 {
-											metrics.add_edges_scanned(scanned_in_batch);
 										}
 										// With a predicate we flush after every
 										// cursor batch so filtering and per-source LIMIT
@@ -1071,38 +1273,74 @@ fn synthesize_payload_candidate(
 ) -> PayloadPending {
 	use surrealdb_datastore::values::graph::InlineProps;
 	let edge = item.edge;
-	let Some(table_spec) = spec.tables.get(&edge.table) else {
-		return (edge, None);
-	};
-	let Some(target) = item.target else {
-		return (edge, None);
-	};
-	let Some(body) = item.props.as_deref() else {
-		return (edge, None);
-	};
-	let Ok(props) = InlineProps::decode(body) else {
-		return (edge, None);
-	};
-	if props.generation != table_spec.generation {
+	// A target-less (legacy-format) entry still answers a key-only
+	// predicate that reads nothing beyond `id`; anything needing `in`,
+	// `out` or the payload has only the record to trust.
+	if item.target.is_none() && (!spec.key_only || spec.needs_in || spec.needs_out) {
 		return (edge, None);
 	}
-	let Some(values) = props.values else {
-		return (edge, None);
-	};
-	if values.len() != table_spec.fields.len() {
+	if matches!(dir, Dir::Both) {
 		return (edge, None);
 	}
-	let (in_rid, out_rid) = match dir {
-		Dir::Out => (source.clone(), target),
-		Dir::In => (target, source.clone()),
-		Dir::Both => return (edge, None),
+	// A key-resident predicate reads only what the entry itself carries;
+	// everything else needs the entry's payload, validated against the
+	// plan-time snapshot.
+	let fields: Vec<(String, Value)> = if spec.key_only {
+		Vec::new()
+	} else {
+		let Some(table_spec) = spec.tables.get(&edge.table) else {
+			return (edge, None);
+		};
+		let Some(body) = item.props.as_deref() else {
+			return (edge, None);
+		};
+		let Ok(props) = InlineProps::decode(body) else {
+			return (edge, None);
+		};
+		if props.generation != table_spec.generation {
+			return (edge, None);
+		}
+		let Some(values) = props.values else {
+			return (edge, None);
+		};
+		if values.len() != table_spec.fields.len() {
+			return (edge, None);
+		}
+		table_spec
+			.fields
+			.iter()
+			.zip(&table_spec.referenced)
+			.zip(values)
+			.filter(|((_, referenced), _)| **referenced)
+			.map(|((name, _), value)| (name.clone(), value))
+			.collect()
 	};
+	// The candidate carries only the fields the predicate reads — anything
+	// more is a per-edge clone or insert spent on a value the evaluation
+	// never touches.
 	let mut object = crate::val::Object::default();
-	object.insert("id".to_owned(), Value::RecordId(edge.clone()));
-	object.insert("in".to_owned(), Value::RecordId(in_rid));
-	object.insert("out".to_owned(), Value::RecordId(out_rid));
-	for (name, value) in table_spec.fields.iter().zip(values) {
-		object.insert(name.clone(), value);
+	if spec.needs_id {
+		object.insert("id".to_owned(), Value::RecordId(edge.clone()));
+	}
+	if spec.needs_in || spec.needs_out {
+		let target = item
+			.target
+			.as_ref()
+			.expect("an in/out-reading predicate falls back on target-less entries");
+		let (in_rid, out_rid) = match dir {
+			Dir::Out => (source, target),
+			Dir::In => (target, source),
+			Dir::Both => unreachable!("handled above"),
+		};
+		if spec.needs_in {
+			object.insert("in".to_owned(), Value::RecordId(in_rid.clone()));
+		}
+		if spec.needs_out {
+			object.insert("out".to_owned(), Value::RecordId(out_rid.clone()));
+		}
+	}
+	for (name, value) in fields {
+		object.insert(name, value);
 	}
 	(edge, Some(Value::Object(object)))
 }

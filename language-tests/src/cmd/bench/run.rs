@@ -68,14 +68,17 @@ fn resolve_capabilities(config: &TestConfig) -> Capabilities {
 /// target namespace + database all match — everything that determines the
 /// populated keyspace and the engine config.
 ///
-/// Deliberately excluded: auth, planner strategy, dialect, and the bench's own
-/// query. These only parameterize the per-bench execute session and statement
-/// (built fresh per bench against the shared store), never where imported data
-/// lands — imports always run as `Session::owner()` retargeted to `(ns, db)`.
+/// Deliberately excluded for ordinary benches: auth, planner strategy, dialect,
+/// and the bench's own query. These only parameterize the per-bench execute
+/// session and statement (built fresh per bench against the shared store), never
+/// where imported data lands — imports always run as `Session::owner()`
+/// retargeted to `(ns, db)`. Graph-fold benches are the exception: their store
+/// layout depends on the statement (see below), so `source` joins the key there.
 fn calc_group_key(
 	chain: &[Arc<crate::tests::case::TestCase>],
 	parsed: &TestConfig,
 	backend: Backend,
+	source: &str,
 ) -> String {
 	let mut hasher = Sha256::new();
 	// Effective import chain: each import's path + mtime, in order.
@@ -101,6 +104,15 @@ fn calc_group_key(
 	hasher.update(parsed.env.namespace().unwrap_or("").as_bytes());
 	hasher.update(b"\x00");
 	hasher.update(parsed.env.database().unwrap_or("").as_bytes());
+	// Graph adjacency layout: a folded store is not interchangeable with an
+	// unfolded one, nor numeric block entries with plain ones. The fold pass
+	// primes with the bench's own statement, so which scopes end up folded is
+	// statement-dependent: folded benches never share a store unless they run
+	// the same statement.
+	hasher.update([parsed.bench.graph_fold as u8, parsed.bench.graph_numeric_ids as u8]);
+	if parsed.bench.graph_fold || parsed.bench.graph_numeric_ids {
+		hasher.update(source.as_bytes());
+	}
 
 	let bytes = hasher.finalize();
 	let mut res = String::new();
@@ -470,7 +482,12 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	// matrix variants with different chains land in distinct groups.
 	for run in runs.iter_mut() {
 		let chain = run.config.imports.as_deref().unwrap_or(&run.case.imports);
-		run.config.group_key = calc_group_key(chain, &run.case.test.config.parsed, cfg.backend);
+		run.config.group_key = calc_group_key(
+			chain,
+			&run.case.test.config.parsed,
+			cfg.backend,
+			&run.case.test.source,
+		);
 	}
 
 	if runs.is_empty() {
@@ -887,6 +904,22 @@ pub fn builder_from_config(config: &TestConfig) -> Builder {
 	// of during it, and the explicit drain no longer contends with the
 	// background task for the `IndexCompaction` lease.
 	let builder = Datastore::builder().without_maintenance_tasks();
+	// Graph-fold benches drop the fold threshold to one so the single priming
+	// execution observes every scope it traverses, however small — the
+	// post-import fold pass in `build_and_populate` then packs exactly those
+	// scopes. The threshold is a builder-level override, not a config key.
+	let builder = if config.bench.graph_fold || config.bench.graph_numeric_ids {
+		let builder = builder.with_graph_fold_threshold(1);
+		if config.bench.graph_numeric_ids {
+			builder.with_config(
+				surrealdb_cnf::ConfigMap::empty().with_key_value("graph_numeric_ids", "true"),
+			)
+		} else {
+			builder
+		}
+	} else {
+		builder
+	};
 	let builder = if capabilities.allows_live_query_notifications() {
 		let (send, _) = channel::bounded(15_000);
 		builder.with_notify(send)
@@ -1110,6 +1143,59 @@ async fn build_and_populate(
 
 	Datastore::index_compaction(dbs.clone(), Duration::from_secs(1), token.clone()).await?;
 
+	// Graph-fold benches: execute the statement once as the priming pass — the
+	// fold queue is observation-driven, so exactly the scopes the timed
+	// statement traverses get folded — then drain the queue with the same
+	// routine the background task runs. Both land here, before the warmup, so
+	// the measured iterations read the folded layout without paying for it.
+	let bench = &run.case.test.config.parsed.bench;
+	if bench.graph_fold || bench.graph_numeric_ids {
+		if bench.rebuild {
+			bail!(
+				"`graph-fold` / `graph-numeric-ids` require `rebuild = false`: the fold \
+				 priming pass would execute a mutating statement an extra, unmeasured time"
+			);
+		}
+		if !matches!(run.case.test.dialect, Dialect::SurrealQl) {
+			bail!("`graph-fold` / `graph-numeric-ids` require a SurrealQL bench statement");
+		}
+		let session = util::session_from_test_config(
+			&run.case.test.config.parsed,
+			config.new_planner.into(),
+		);
+		let results = dbs.execute(&run.case.test.source, &session, None).await?;
+		for (idx, result) in results.iter().enumerate() {
+			if let Err(error) = &result.result {
+				bail!("graph-fold priming statement {idx} returned an error: {error}");
+			}
+		}
+		// A single pass drains the queue as it stood when the pass began; a
+		// very large scope can leave residual entries behind, so run passes
+		// until one reports no work. The pass count is bounded so a scope
+		// that keeps re-enqueuing itself fails with a diagnostic instead of
+		// spinning until the job timeout.
+		const MAX_FOLD_DRAIN_PASSES: usize = 100;
+		let mut residual = usize::MAX;
+		for _ in 0..MAX_FOLD_DRAIN_PASSES {
+			let (iterations, errors) =
+				Datastore::graph_fold(dbs.clone(), Duration::from_secs(1), token.clone())
+					.await?;
+			if errors > 0 {
+				bail!("the graph-fold pass reported {errors} scope errors");
+			}
+			residual = iterations;
+			if iterations == 0 {
+				break;
+			}
+		}
+		if residual != 0 {
+			bail!(
+				"the graph-fold drain did not quiesce after {MAX_FOLD_DRAIN_PASSES} passes \
+				 ({residual} scopes still queued on the last pass)"
+			);
+		}
+	}
+
 	Ok(Ok(dbs))
 }
 
@@ -1301,8 +1387,10 @@ async fn run_bench(
 	);
 
 	// Mark the measured region so a profiler attaching mid-run (after the dataset
-	// import + warmup) samples only the timed statements.
+	// import + warmup) samples only the timed statements. The in-process
+	// profiler (`bench-pprof` feature + `BENCH_PPROF`) covers the same region.
 	bench_marker("__BENCH_MEASURE_START__");
+	let profiler = super::pprof::RegionProfiler::start();
 
 	let measure_start = Instant::now();
 	let mut iterations = Vec::new();
@@ -1349,6 +1437,7 @@ async fn run_bench(
 		}
 	}
 
+	profiler.finish();
 	bench_marker("__BENCH_MEASURE_END__");
 
 	// A bench whose single iteration exceeds `max_time` collects only one sample,

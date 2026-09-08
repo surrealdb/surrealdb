@@ -159,6 +159,46 @@ async fn cached_results_equal_uncached_results() {
 	assert_eq!((hits, misses), (0, 0));
 }
 
+/// A key-resident predicate reads only the `(edge, target)` pairs the
+/// cache stores, so a cached vertex serves the filtered lookup without
+/// opening a cursor: answers equal the uncached ones, the cache-hit
+/// counter engages, and the merged cursor reports no delta hits.
+#[tokio::test]
+async fn key_resident_predicates_serve_from_the_cache() {
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let cached = ds().await;
+	let uncached = ds().await;
+	seed(&cached, &ses, "INLINE EDGES 16").await;
+	seed(&uncached, &ses, "").await;
+
+	// The RELATEs in `seed` materialised person:p0's cache.
+	const QUERIES: &[&str] = &[
+		"SELECT VALUE ->(likes WHERE out = person:p2) FROM person:p0;",
+		"SELECT VALUE ->(likes WHERE out != person:p2) FROM person:p0;",
+		"SELECT VALUE ->(likes WHERE id = likes:l01) FROM person:p0;",
+	];
+	for query in QUERIES {
+		assert_eq!(
+			run(&cached, &ses, query).await,
+			run(&uncached, &ses, query).await,
+			"cached and uncached answers diverged for {query}"
+		);
+		let explained = run(&cached, &ses, &format!("EXPLAIN ANALYZE {query}")).await.remove(0);
+		assert_eq!(sum_metric(&explained, "cache_hits"), 1, "{query} must hit the cache");
+		assert_eq!(sum_metric(&explained, "cache_misses"), 0);
+		assert_eq!(
+			sum_metric(&explained, "delta_hits"),
+			0,
+			"{query} must be served without opening the merged cursor"
+		);
+		assert_eq!(
+			sum_metric(&explained, "props_evals"),
+			3,
+			"{query} must evaluate every cached edge"
+		);
+	}
+}
+
 /// Setting a cap on a table with pre-existing edges: the first eligible
 /// write backfills the complete set — the cache serves the old edges too.
 #[tokio::test]

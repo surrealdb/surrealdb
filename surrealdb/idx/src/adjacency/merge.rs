@@ -94,6 +94,14 @@ pub struct MergedAdjacencyEdge {
 	pub props: Option<Vec<u8>>,
 }
 
+/// Per-key verdict from a [`MergedAdjacencyCursor::visit_unfolded_batch`]
+/// visitor: keep going, or stop consuming this scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisitFlow {
+	Continue,
+	Stop,
+}
+
 /// How many edges each side of the merge produced.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct MergeStats {
@@ -121,9 +129,11 @@ struct DeltaItem {
 }
 
 /// What one cursor emits, fixed by its first batch call: full edges
-/// ([`MergedAdjacencyCursor::next_batch`]) or raw pointer-key bytes
-/// ([`MergedAdjacencyCursor::next_batch_keys`]). The mode decides how much
-/// of each item the fills materialize, so it cannot change mid-scan.
+/// ([`MergedAdjacencyCursor::next_batch`],
+/// [`MergedAdjacencyCursor::next_batch_scan`]) or raw pointer-key bytes
+/// ([`MergedAdjacencyCursor::next_batch_keys`],
+/// [`MergedAdjacencyCursor::visit_unfolded_batch`]). The mode decides how
+/// much of each item the fills materialize, so it cannot change mid-scan.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EmitMode {
 	Edges,
@@ -156,6 +166,11 @@ struct OpenChunk {
 	/// reads, resolved once when the chunk opened. Empty for a plain
 	/// chunk, whose entries the synthesis borrows from `block` in place.
 	resolved: Vec<BlockEntry>,
+	/// The record keys `resolved` was encoded from, positional with it:
+	/// resolution already produced them, so an edges-mode read reuses them
+	/// instead of decoding bytes it just encoded. Empty for a plain chunk,
+	/// whose entries decode from the block's own stored bytes.
+	resolved_keys: Vec<(RecordIdKey, RecordIdKey)>,
 	/// The pointer-key bytes shared by every entry, through the edge table.
 	prefix: Vec<u8>,
 	/// The storekey-encoded target-table names, positional with
@@ -239,6 +254,10 @@ impl<'a> MergedAdjacencyCursor<'a> {
 		version: Option<u64>,
 		resolve: Option<&'a AdjacencyResolveCache>,
 	) -> Result<Self> {
+		// The window bounds clip block-sourced entries. They are set even
+		// when no block side is opened: `fill_blocks` treats any key at or
+		// past `window_end` as out of window, so empty bounds would drop a
+		// block side wholesale were one ever paired with them.
 		let window_start = scope.delta_range.start().to_vec();
 		let window_end = scope.delta_range.end().to_vec();
 		let (delta, blocks) = if folded {
@@ -479,14 +498,126 @@ impl<'a> MergedAdjacencyCursor<'a> {
 		self.stats
 	}
 
+	/// Zero-materialization batch for the never-folded configuration: when
+	/// this cursor is a bare keys-only delta — no block side, no buffered
+	/// items, so nothing to merge, no tombstones and no sections — each key
+	/// of the next cursor batch is handed to `visit` straight from the
+	/// cursor's borrowed batch buffer, and `Some(visited)` is returned
+	/// (`Some(0)` = exhausted). Keys after a `VisitFlow::Stop` in the same
+	/// batch are consumed and dropped, exactly as a caller of
+	/// [`Self::next_batch`] drops the tail of a batch it stops consuming —
+	/// callers stop only to abandon or resume the scan by key. Returns
+	/// `None` when the cursor carries blocks, values, synthesized items or
+	/// a `(direction, edge table)` filter — every shape whose batches can
+	/// hold fewer emitted items than keys read, which `Some(0)` could not
+	/// tell apart from exhaustion; batches must then be read through
+	/// [`Self::next_batch`] / [`Self::next_batch_scan`]. Visiting keys
+	/// fixes the cursor in keys mode, exactly as [`Self::next_batch_keys`]
+	/// does.
+	pub async fn visit_unfolded_batch<F>(
+		&mut self,
+		fill: u32,
+		mut visit: F,
+	) -> Result<Option<usize>>
+	where
+		F: FnMut(&[u8]) -> Result<VisitFlow>,
+	{
+		if self.blocks.is_some()
+			|| self.filter.is_some()
+			|| !self.delta_buf.is_empty()
+			|| !matches!(self.delta, DeltaCursor::Keys(_))
+		{
+			return Ok(None);
+		}
+		self.set_mode(EmitMode::Keys)?;
+		if self.delta_done {
+			return Ok(Some(0));
+		}
+		let DeltaCursor::Keys(cursor) = &mut self.delta else {
+			return Ok(None);
+		};
+		let batch = cursor.next_batch(fill.max(1)).await.context("Failed to scan graph edges")?;
+		if batch.is_empty() {
+			self.delta_done = true;
+			return Ok(Some(0));
+		}
+		let mut visited = 0usize;
+		for key in batch.iter() {
+			visited += 1;
+			if matches!(visit(key)?, VisitFlow::Stop) {
+				break;
+			}
+		}
+		self.stats.delta_hits += visited as u64;
+		Ok(Some(visited))
+	}
+
 	/// The next run of merged edges, at most `limit` of them. An empty
 	/// result means the scope is exhausted. A cursor emits either edges or
-	/// keys ([`Self::next_batch_keys`]), never both.
+	/// keys ([`Self::next_batch_keys`], [`Self::visit_unfolded_batch`]),
+	/// never both.
 	pub async fn next_batch(&mut self, limit: u32) -> Result<Vec<MergedAdjacencyEdge>> {
+		self.next_batch_impl(limit, true).await
+	}
+
+	/// [`Self::next_batch`] for callers that resume only over legacy
+	/// entries: edges with an embedded target are emitted with an **empty**
+	/// `key`, saving the per-edge copy out of the cursor's borrowed batch
+	/// on the never-folded path. Only target-less (legacy-format) entries —
+	/// the ones such callers actually take resume positions or lookup bytes
+	/// from — carry their key bytes.
+	pub async fn next_batch_scan(&mut self, limit: u32) -> Result<Vec<MergedAdjacencyEdge>> {
+		self.next_batch_impl(limit, false).await
+	}
+
+	async fn next_batch_impl(
+		&mut self,
+		limit: u32,
+		want_keys: bool,
+	) -> Result<Vec<MergedAdjacencyEdge>> {
 		self.set_mode(EmitMode::Edges)?;
 		let limit = limit.max(1) as usize;
 		self.delta_fill = (limit as u32).min(NORMAL_BATCH_SIZE);
 		let mut out = Vec::with_capacity(limit.min(NORMAL_BATCH_SIZE as usize));
+		// Never-folded fast path: a keys-only delta with no block side has
+		// nothing to merge, no tombstones and no per-edge sections, so emit
+		// straight from the cursor's borrowed batch instead of round-tripping
+		// every key through the merge buffers — this is the default
+		// configuration, and its per-edge cost must match the raw scan it
+		// replaced.
+		if self.blocks.is_none()
+			&& self.delta_buf.is_empty()
+			&& let DeltaCursor::Keys(cursor) = &mut self.delta
+		{
+			while out.len() < limit && !self.delta_done {
+				let fill = ((limit - out.len()) as u32).min(NORMAL_BATCH_SIZE);
+				let batch = cursor.next_batch(fill).await.context("Failed to scan graph edges")?;
+				if batch.is_empty() {
+					self.delta_done = true;
+					break;
+				}
+				for key in batch.iter() {
+					// A filtered cursor still owes its caller only the keys
+					// the filter admits, exactly as the merge buffers do.
+					if !filter_admits(&self.filter, key) {
+						continue;
+					}
+					self.stats.delta_hits += 1;
+					let decoded = DecodedGraph::decode(key)?;
+					out.push(MergedAdjacencyEdge {
+						key: if want_keys || decoded.target.is_none() {
+							key.to_vec()
+						} else {
+							Vec::new()
+						},
+						edge: decoded.edge,
+						target: decoded.target,
+						props: None,
+					});
+				}
+			}
+			return Ok(out);
+		}
 		while out.len() < limit {
 			let Some(item) = self.next_merged(limit - out.len()).await? else {
 				break;
@@ -703,8 +834,8 @@ impl<'a> MergedAdjacencyCursor<'a> {
 			// is built from record keys, so even a keys-only read needs
 			// them. A plain chunk's entries are borrowed in place, so only
 			// the emitted edges own their data.
-			let resolved = match &block.entries {
-				BlockEntries::Plain(_) => Vec::new(),
+			let (resolved, resolved_keys) = match &block.entries {
+				BlockEntries::Plain(_) => (Vec::new(), Vec::new()),
 				BlockEntries::Numeric(entries) => {
 					resolve_numeric_entries(
 						self.txn,
@@ -729,6 +860,7 @@ impl<'a> MergedAdjacencyCursor<'a> {
 			self.current_chunk = Some(OpenChunk {
 				block,
 				resolved,
+				resolved_keys,
 				prefix,
 				target_tables,
 				edge_table: chunk_key.edge_table.into_owned(),
@@ -760,10 +892,11 @@ impl<'a> MergedAdjacencyCursor<'a> {
 				exhausted = false;
 				break;
 			}
-			let entry = &entries[match self.direction {
+			let idx = match self.direction {
 				Direction::Forward => next,
 				Direction::Backward => entries.len() - 1 - next,
-			}];
+			};
+			let entry = &entries[idx];
 			next += 1;
 			let key = synthesize_pointer_key(&chunk.prefix, &chunk.target_tables, entry)?;
 			// A bounded or resumed scan's window, in the same domain: an
@@ -789,10 +922,17 @@ impl<'a> MergedAdjacencyCursor<'a> {
 			let edge = if keys_only {
 				None
 			} else {
-				let edge_key: RecordIdKey = storekey::decode_borrow(&entry.edge_key)
-					.context("Failed to decode a block entry's edge key")?;
-				let target_key: RecordIdKey = storekey::decode_borrow(&entry.target_key)
-					.context("Failed to decode a block entry's target key")?;
+				// A numeric chunk's keys came back from resolution; only a
+				// plain chunk's are still bytes at this point.
+				let (edge_key, target_key) = match chunk.resolved_keys.get(idx) {
+					Some((edge_key, target_key)) => (edge_key.clone(), target_key.clone()),
+					None => (
+						storekey::decode_borrow::<RecordIdKey>(&entry.edge_key)
+							.context("Failed to decode a block entry's edge key")?,
+						storekey::decode_borrow::<RecordIdKey>(&entry.target_key)
+							.context("Failed to decode a block entry's target key")?,
+					),
+				};
 				let target_table = chunk
 					.block
 					.targets
@@ -951,6 +1091,10 @@ fn pointer_prefix(chunk_key: &AdjacencyKey) -> Result<Vec<u8>> {
 /// plain chunks decode to. An id that no longer resolves marks a deleted
 /// record and is dropped — the deletion that removed its mapping also
 /// tombstoned the entry, so nothing observable is lost.
+///
+/// Returns the entries alongside the record keys they were encoded from,
+/// positionally paired, so an edges-mode read reuses those keys rather than
+/// decoding the bytes this encoded.
 async fn resolve_numeric_entries(
 	txn: &Transaction,
 	chunk_key: &AdjacencyKey<'_>,
@@ -958,7 +1102,7 @@ async fn resolve_numeric_entries(
 	entries: &[NumericEntry],
 	version: Option<u64>,
 	cache: Option<&AdjacencyResolveCache>,
-) -> Result<Vec<BlockEntry>> {
+) -> Result<(Vec<BlockEntry>, Vec<(RecordIdKey, RecordIdKey)>)> {
 	let ns = chunk_key.ns;
 	let db = chunk_key.db;
 	// The resolve cache is keyed per table generation, so each table's id
@@ -987,22 +1131,23 @@ async fn resolve_numeric_entries(
 			target_keys[slot] = key;
 		}
 	}
-	entries
-		.iter()
-		.zip(edge_keys.into_iter().zip(target_keys))
-		.filter_map(|(entry, (edge_key, target_key))| {
-			let (edge_key, target_key) = (edge_key?, target_key?);
-			Some((entry, edge_key, target_key))
-		})
-		.map(|(entry, edge_key, target_key)| {
-			Ok(BlockEntry {
-				edge_key: storekey::encode_vec(&edge_key).map_err(anyhow::Error::from_boxed)?,
-				target_table: entry.target_table,
-				target_key: storekey::encode_vec(&target_key).map_err(anyhow::Error::from_boxed)?,
-				props: entry.props.clone(),
-			})
-		})
-		.collect()
+	let mut resolved = Vec::with_capacity(entries.len());
+	let mut keys = Vec::with_capacity(entries.len());
+	for (entry, (edge_key, target_key)) in
+		entries.iter().zip(edge_keys.into_iter().zip(target_keys))
+	{
+		let (Some(edge_key), Some(target_key)) = (edge_key, target_key) else {
+			continue;
+		};
+		resolved.push(BlockEntry {
+			edge_key: storekey::encode_vec(&edge_key).map_err(anyhow::Error::from_boxed)?,
+			target_table: entry.target_table,
+			target_key: storekey::encode_vec(&target_key).map_err(anyhow::Error::from_boxed)?,
+			props: entry.props.clone(),
+		});
+		keys.push((edge_key, target_key));
+	}
+	Ok((resolved, keys))
 }
 
 /// A block entry's pointer-key bytes: the chunk prefix, the edge key, the

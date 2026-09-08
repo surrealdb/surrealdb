@@ -21,11 +21,9 @@ value = "'OK'"
 
 	CREATE |person:1..=20001| SET name = rand::string(8) RETURN NONE;
 
-	FOR $s IN (SELECT VALUE id FROM person WHERE record::id(id) = 1) {
-		FOR $n IN array::range(1, 20000) {
-			LET $t = type::record('person', $n + 1);
-			RELATE $s->knows->$t SET score = $n % 1000;
-		};
+	FOR $n IN 1..=20000 {
+		LET $t = type::record('person', $n + 1);
+		RELATE person:1->knows->$t SET score = $n % 1000;
 	};
 
 	RETURN 'OK';

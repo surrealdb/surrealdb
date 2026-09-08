@@ -25,7 +25,9 @@ use anyhow::Result;
 use surrealdb_datastore::Transaction;
 
 pub use self::fold::{FoldOutcome, fold_scope};
-pub use self::merge::{AdjacencyScope, MergeStats, MergedAdjacencyCursor, MergedAdjacencyEdge};
+pub use self::merge::{
+	AdjacencyScope, MergeStats, MergedAdjacencyCursor, MergedAdjacencyEdge, VisitFlow,
+};
 pub use self::resolve::{AdjacencyResolveCache, resolve_doc_ids};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
@@ -58,14 +60,14 @@ pub enum VertexAdjacency {
 	Lightweight,
 }
 
-/// Classifies how a table's records' adjacency is read, from its catalog
-/// definition.
+/// Classifies how a table's records' adjacency is read, from an
+/// already-fetched catalog definition.
 ///
 /// A table absent from the catalog has never been defined, so nothing can
-/// have folded it and no record can be a lightweight edge. Callers that
-/// already hold the definition — a batched scan memoizing it per source
-/// table — classify through this instead of paying another catalog lookup.
-pub fn table_adjacency(tb: Option<&TableDefinition>) -> VertexAdjacency {
+/// have folded it and no record can be a lightweight edge. Callers
+/// classifying many records should fetch each distinct table once and reuse
+/// this — a catalog lookup per record is measurable on hot scans.
+pub fn vertex_adjacency_of(tb: Option<&TableDefinition>) -> VertexAdjacency {
 	match tb {
 		Some(tb) => match &tb.table_type {
 			crate::catalog::TableType::Relation(rel) if rel.lightweight => {
@@ -89,5 +91,5 @@ pub async fn vertex_adjacency(
 	db: DatabaseId,
 	tb: &TableName,
 ) -> Result<VertexAdjacency> {
-	Ok(table_adjacency(txn.get_tb(ns, db, tb, None).await?.as_deref()))
+	Ok(vertex_adjacency_of(txn.get_tb(ns, db, tb, None).await?.as_deref()))
 }

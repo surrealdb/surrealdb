@@ -247,8 +247,10 @@ pub(crate) async fn collect_adjacency(
 		};
 		loop {
 			crate::exec::operators::check_cancelled(ctx)?;
+			// The expand operators consume edge/target identities only, so
+			// the scan variant skips the per-edge key copies.
 			let batch = cursor
-				.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
+				.next_batch_scan(crate::kvs::NORMAL_BATCH_SIZE)
 				.await
 				.context("Failed to scan graph edge")?;
 			if batch.is_empty() {

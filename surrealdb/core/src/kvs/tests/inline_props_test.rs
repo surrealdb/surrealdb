@@ -500,3 +500,150 @@ async fn nested_field_permissions_gate_the_payload_path() {
 		"owner plan should be payload-scoped: {text}"
 	);
 }
+
+/// A predicate that reads only `id` / `in` / `out` is key-resident: the
+/// adjacency entry itself carries every referenced field, so the scan
+/// prunes non-matching edges before any record fetch — on plain tables
+/// with no `INLINE` fields, on folded blocks, and on lightweight
+/// relations alike. `EXPLAIN` reports the `key` predicate scope and the
+/// eval counters show every edge was answered without a fallback.
+#[tokio::test]
+async fn endpoint_predicates_prune_before_any_fetch() {
+	let ds = ds().await;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	run(
+		&ds,
+		&ses,
+		"DEFINE NAMESPACE test;
+		 DEFINE DATABASE test;
+		 DEFINE TABLE person SCHEMALESS;
+		 DEFINE TABLE knows TYPE RELATION;
+		 DEFINE TABLE follows TYPE RELATION IN person OUT person LIGHTWEIGHT;
+		 CREATE |person:1..=8| RETURN NONE;
+		 FOR $n IN 2..=8 { RELATE person:1->knows->(type::record('person', $n)); };
+		 FOR $n IN 2..=8 { RELATE person:1->follows->(type::record('person', $n)); };",
+	)
+	.await;
+
+	// Classic relation: the plan is key-scoped and the counters show all
+	// seven edges evaluated with no fallback, one survivor.
+	let query = "SELECT VALUE ->(knows WHERE out = person:5) FROM person:1";
+	let explained = run(&ds, &ses, &format!("EXPLAIN {query}")).await.remove(0);
+	let Value::String(plan) = &explained else {
+		panic!("expected a rendered plan, found {explained:?}");
+	};
+	assert!(plan.contains("predicate_scope: key"), "expected a key-scoped predicate:\n{plan}");
+	let (evals, fallbacks) = props_counters(&ds, &ses, query).await;
+	assert_eq!((evals, fallbacks), (7, 0));
+	assert_eq!(
+		run(&ds, &ses, query).await,
+		run(&ds, &ses, "RETURN [(SELECT VALUE id FROM knows WHERE out = person:5)];").await
+	);
+
+	// The same pruning over a lightweight relation, whose synthesized
+	// adjacency carries the same key material.
+	let (evals, fallbacks) =
+		props_counters(&ds, &ses, "SELECT VALUE ->(follows WHERE out = person:5) FROM person:1")
+			.await;
+	assert_eq!((evals, fallbacks), (7, 0));
+	assert_eq!(
+		run(&ds, &ses, "SELECT VALUE ->(follows WHERE out = person:5).out FROM person:1").await,
+		run(&ds, &ses, "RETURN [[person:5]];").await
+	);
+
+	// And over folded blocks: fold the classic scope, then the same
+	// key-scoped answer comes from block entries.
+	fold_vertex(&ds, &RecordId::new("person".into(), 1)).await;
+	let (evals, fallbacks) = props_counters(&ds, &ses, query).await;
+	assert_eq!((evals, fallbacks), (7, 0));
+	assert_eq!(
+		run(&ds, &ses, query).await,
+		run(&ds, &ses, "RETURN [(SELECT VALUE id FROM knows WHERE out = person:5)];").await
+	);
+}
+
+/// Rewrites `rid`'s outgoing vertex-side pointer keys into the legacy
+/// (target-less) format a pre-embedded-target writer left, leaving the
+/// edge records untouched.
+async fn strip_embedded_targets(ds: &Datastore, rid: &RecordId) {
+	use std::borrow::Cow;
+
+	use crate::key::schema::{DecodedGraph, GraphDirPrefix, GraphKey, GraphPointerKey};
+	let txn = ds.transaction(Write).await.unwrap();
+	let db = txn.get_db_by_name("test", "test", None).await.unwrap().unwrap();
+	let range = GraphDirPrefix {
+		ns: db.namespace_id,
+		db: db.database_id,
+		tb: Cow::Borrowed(&rid.table),
+		id: Cow::Borrowed(&rid.key),
+		dir: Dir::Out,
+	}
+	.range()
+	.unwrap();
+	let keys = txn.keys_raw(range, u32::MAX, 0, None).await.unwrap();
+	for bytes in keys {
+		let decoded = DecodedGraph::decode(&bytes).unwrap();
+		let Some(target) = decoded.target else {
+			continue;
+		};
+		txn.del_key(&GraphPointerKey {
+			ns: db.namespace_id,
+			db: db.database_id,
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+			dir: Dir::Out,
+			foreign_table: Cow::Borrowed(&decoded.edge.table),
+			foreign_key: Cow::Borrowed(&decoded.edge.key),
+			target_table: Cow::Borrowed(&target.table),
+			target_key: Cow::Borrowed(&target.key),
+		})
+		.await
+		.unwrap();
+		txn.set_key(
+			&GraphKey {
+				ns: db.namespace_id,
+				db: db.database_id,
+				tb: Cow::Borrowed(&rid.table),
+				id: Cow::Borrowed(&rid.key),
+				dir: Dir::Out,
+				foreign_table: Cow::Borrowed(&decoded.edge.table),
+				foreign_key: Cow::Borrowed(&decoded.edge.key),
+			},
+			&(),
+		)
+		.await
+		.unwrap();
+	}
+	txn.commit().await.unwrap();
+}
+
+/// Legacy-format (target-less) adjacency entries cannot answer an
+/// endpoint-reading key predicate from the entry alone: each falls back
+/// to its record — the fallbacks of one cursor batch resolve in a single
+/// batched read — and answers exactly as a twin whose entries embed their
+/// targets. A pure-`id` predicate reads nothing a legacy entry lacks, so
+/// it evaluates with no fallback at all.
+#[tokio::test]
+async fn legacy_entries_answer_key_predicates_through_the_record() {
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let legacy = ds().await;
+	let modern = ds().await;
+	seed(&legacy, &ses, false).await;
+	seed(&modern, &ses, false).await;
+	strip_embedded_targets(&legacy, &RecordId::new("person".into(), "p0".to_owned())).await;
+
+	// An out-reading predicate must consult the record behind each legacy
+	// entry; the answer stays identical to the embedded-target twin.
+	let by_out = "SELECT VALUE ->(likes WHERE out = person:p2) FROM person:p0;";
+	assert_eq!(run(&legacy, &ses, by_out).await, run(&modern, &ses, by_out).await);
+	let (evals, fallbacks) = props_counters(&legacy, &ses, by_out).await;
+	assert_eq!((evals, fallbacks), (0, 3), "every legacy entry falls back to its record");
+	let (evals, fallbacks) = props_counters(&modern, &ses, by_out).await;
+	assert_eq!((evals, fallbacks), (3, 0), "embedded targets answer without a fallback");
+
+	// A pure-id predicate is answered by the legacy entry itself.
+	let by_id = "SELECT VALUE ->(likes WHERE id = likes:l1) FROM person:p0;";
+	assert_eq!(run(&legacy, &ses, by_id).await, run(&modern, &ses, by_id).await);
+	let (evals, fallbacks) = props_counters(&legacy, &ses, by_id).await;
+	assert_eq!((evals, fallbacks), (3, 0), "a pure-id predicate needs no record fetch");
+}

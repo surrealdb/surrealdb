@@ -894,6 +894,21 @@ pub struct BenchDetails {
 	/// slate per iteration.
 	#[serde(default)]
 	pub rebuild: bool,
+	/// Folds the imported graph adjacency into packed blocks before the warmup,
+	/// so the timed statement reads the folded layout. The datastore is built
+	/// with `graph_fold_threshold = 1`, the bench statement is executed once as
+	/// a priming pass — the fold queue is observation-driven, so exactly the
+	/// scopes the statement traverses are folded — and the fold queue is then
+	/// drained by the same routine the background task runs. Requires
+	/// `rebuild = false` (the priming pass would execute a mutating statement
+	/// an extra, unmeasured time) and a SurrealQL bench statement.
+	#[serde(default)]
+	pub graph_fold: bool,
+	/// Encodes folded block entries as numeric doc-ids instead of record keys
+	/// (`graph_numeric_ids = true`). Implies the same fold pass as
+	/// `graph-fold`, under the same constraints.
+	#[serde(default)]
+	pub graph_numeric_ids: bool,
 	/// Run this bench once per named dataset, each resolved (transitively) as the
 	/// bench's import for that run. Lets a single read-only scan be measured
 	/// against multiple datasets — e.g. one without indexes and one with — from a

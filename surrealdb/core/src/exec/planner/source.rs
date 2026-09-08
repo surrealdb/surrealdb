@@ -519,11 +519,26 @@ impl<'ctx> Planner<'ctx> {
 		if !deps.is_complete {
 			return None;
 		}
+		let needs_id = deps.fields.iter().any(|f| f == "id");
+		let needs_in = deps.fields.iter().any(|f| f == "in");
+		let needs_out = deps.fields.iter().any(|f| f == "out");
 		let needed: Vec<&String> =
 			deps.fields.iter().filter(|f| !matches!(f.as_str(), "id" | "in" | "out")).collect();
 		if needed.is_empty() {
-			// A pure id/in/out predicate has nothing to gain from payloads.
-			return None;
+			// A pure id/in/out predicate is key-resident: every field it
+			// reads is carried by the adjacency entry itself, so it prunes
+			// before any fetch, on any table, with no inline payload, no
+			// per-table snapshot and no permission precondition — an edge it
+			// drops would have been dropped by the same predicate after the
+			// fetch, and every survivor still resolves through the
+			// permission-checked record path.
+			return Some(PayloadPredicateSpec {
+				tables: std::collections::HashMap::new(),
+				needs_id,
+				needs_in,
+				needs_out,
+				key_only: true,
+			});
 		}
 		// When the actor's runtime permission checks are provably skipped,
 		// the permission gates below don't apply; otherwise every involved
@@ -581,16 +596,22 @@ impl<'ctx> Planner<'ctx> {
 					}
 				}
 			}
+			let referenced = names.iter().map(|n| needed.contains(&n)).collect::<Vec<_>>();
 			tables.insert(
 				def.name.clone(),
 				PayloadTableSpec {
 					generation: def.graph_inline_gen,
 					fields: names,
+					referenced,
 				},
 			);
 		}
 		Some(PayloadPredicateSpec {
 			tables,
+			needs_id,
+			needs_in,
+			needs_out,
+			key_only: false,
 		})
 	}
 
