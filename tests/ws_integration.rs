@@ -1,7 +1,14 @@
 // RUST_LOG=warn cargo make ci-ws-integration
 mod common;
 
+/// Every test in this suite must live under this module. The `ci-ws-integration`
+/// and `ci-workspace-test` tasks select and skip the suite by the `ws_integration::`
+/// name prefix, so a test declared at the file root is silently excluded from the
+/// former and not excluded by the latter.
 mod ws_integration {
+	use serde_json::json;
+
+	use crate::common::{Format, Socket, StartServerArguments, start_server};
 
 	/// Tests for the empty protocol format
 	mod none {
@@ -19,6 +26,52 @@ mod ws_integration {
 	mod cbor {
 		use crate::common::Format;
 		crate::include_tests!(Some(Format::Cbor), Format::Cbor);
+	}
+
+	/// Defense-in-depth: the WebSocket `attach` method must enforce
+	/// `SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS` so a single connection
+	/// cannot create an unbounded number of per-connection sessions.
+	///
+	/// We run the server with a deliberately tiny cap, then attach
+	/// `cap + 1` sessions over a single WebSocket. The first `cap`
+	/// attaches must succeed; the last one must be refused.
+	#[test_log::test(tokio::test)]
+	async fn websocket_attach_session_cap() {
+		use std::collections::HashMap;
+
+		let mut vars = HashMap::new();
+		vars.insert("SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS".to_string(), "3".to_string());
+		let (addr, mut server) = start_server(StartServerArguments {
+			vars: Some(vars),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+
+		let socket = Socket::connect(&addr, Some(Format::Json), Format::Json).await.unwrap();
+
+		// The cap (3) already includes the implicit connection session
+		// keyed by `self.id`, so the first two explicit attaches should
+		// succeed (bringing the count to 3) and the third must be refused.
+		let session_ids =
+			["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"];
+
+		for sid in &session_ids {
+			let res = socket.send_request_with_session("attach", json!([]), sid).await.unwrap();
+			assert!(
+				res.get("error").is_none(),
+				"attach within cap must succeed for {sid}: {res:?}"
+			);
+		}
+
+		// One past the cap must be refused.
+		let res = socket
+			.send_request_with_session("attach", json!([]), "33333333-3333-3333-3333-333333333333")
+			.await
+			.unwrap();
+		assert!(res.get("error").is_some(), "attach past cap must be refused: {res:?}");
+
+		server.finish().unwrap();
 	}
 }
 
@@ -3111,47 +3164,4 @@ define_include_tests! {
 	live_notification_default_session_is_null,
 	#[test_log::test(tokio::test)]
 	detach_connection_session_rejected,
-}
-
-/// Defense-in-depth: the WebSocket `attach` method must enforce
-/// `SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS` so a single connection
-/// cannot create an unbounded number of per-connection sessions.
-///
-/// We run the server with a deliberately tiny cap, then attach
-/// `cap + 1` sessions over a single WebSocket. The first `cap`
-/// attaches must succeed; the last one must be refused.
-#[test_log::test(tokio::test)]
-async fn websocket_attach_session_cap() {
-	use std::collections::HashMap;
-
-	let mut vars = HashMap::new();
-	vars.insert("SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS".to_string(), "3".to_string());
-	let (addr, mut server) = common::start_server(StartServerArguments {
-		vars: Some(vars),
-		..Default::default()
-	})
-	.await
-	.unwrap();
-
-	let socket = Socket::connect(&addr, Some(Format::Json), Format::Json).await.unwrap();
-
-	// The cap (3) already includes the implicit connection session
-	// keyed by `self.id`, so the first two explicit attaches should
-	// succeed (bringing the count to 3) and the third must be refused.
-	let session_ids =
-		["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"];
-
-	for sid in &session_ids {
-		let res = socket.send_request_with_session("attach", json!([]), sid).await.unwrap();
-		assert!(res.get("error").is_none(), "attach within cap must succeed for {sid}: {res:?}");
-	}
-
-	// One past the cap must be refused.
-	let res = socket
-		.send_request_with_session("attach", json!([]), "33333333-3333-3333-3333-333333333333")
-		.await
-		.unwrap();
-	assert!(res.get("error").is_some(), "attach past cap must be refused: {res:?}");
-
-	server.finish().unwrap();
 }
