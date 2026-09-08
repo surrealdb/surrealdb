@@ -99,9 +99,34 @@ impl PhysicalExpr for LookupPart {
 		ctx: EvalContext<'a>,
 		values: &'a [Value],
 	) -> BoxFut<'a, FlowResult<Vec<Value>>> {
-		Box::pin(evaluate_each(ctx.exec_ctx, self.access_mode(), values, move |value| {
-			self.evaluate(ctx.with_value(value))
-		}))
+		Box::pin(async move {
+			// Row-level lookups are the workload where cooperative overlap
+			// buys nothing: each row runs a whole scan plan, which on an
+			// embedded backend is CPU-bound, so rows only overlap on
+			// separate runtime tasks. Spawn read-only batches above the
+			// fan-out threshold; wasm has no worker threads and everything
+			// else keeps the cooperative fan-out.
+			#[cfg(not(target_family = "wasm"))]
+			{
+				let threshold = ctx.exec_ctx.root().ctx.config.exec.fan_out_row_threshold.max(2);
+				if self.access_mode() == AccessMode::ReadOnly
+					&& ctx.recursion_ctx.is_none()
+					&& values.len() >= threshold
+				{
+					return crate::exec::fan_out::evaluate_rows_spawned(
+						Arc::new(self.clone()),
+						&ctx,
+						values,
+						crate::exec::fan_out::SpawnedDocRoot::Inherited,
+					)
+					.await;
+				}
+			}
+			evaluate_each(ctx.exec_ctx, self.access_mode(), values, move |value| {
+				self.evaluate(ctx.with_value(value))
+			})
+			.await
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {

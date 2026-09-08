@@ -244,3 +244,472 @@ mod tests {
 		}
 	}
 }
+
+/// What the spawned rows' `document_root` is reconstructed as: the row's
+/// own value (the default `evaluate_batch` convention) or the enclosing
+/// context's root, cloned once and shared (the lookup convention).
+#[cfg(not(target_family = "wasm"))]
+#[derive(Clone, Copy)]
+pub(crate) enum SpawnedDocRoot {
+	RowValue,
+	Inherited,
+}
+
+/// How many chunks run side by side in the spawned fan-out.
+#[cfg(not(target_family = "wasm"))]
+const SPAWNED_CHUNK_CONCURRENCY: usize = 16;
+
+/// Rows the probe runs before its timer starts, absorbing one-off costs
+/// (cursor and context setup) that would otherwise inflate the reading.
+#[cfg(not(target_family = "wasm"))]
+const PROBE_WARM_ROWS: usize = 2;
+
+/// Rows the probe times to estimate the per-row cost. A sample this wide
+/// keeps timer and scheduling noise from tipping cheap rows over the bar,
+/// while staying constant so the serial prefix never grows with the batch.
+#[cfg(not(target_family = "wasm"))]
+const PROBE_TIMED_ROWS: usize = 6;
+
+/// The measured per-row cost below which spawning does not pay: the owned
+/// row clones and task dispatch cost roughly this much themselves.
+#[cfg(not(target_family = "wasm"))]
+const SPAWN_PER_ROW_NANOS: u64 = 5_000;
+
+/// The projected remaining work below which spawning does not pay: at
+/// millisecond scale, task dispatch, scheduling latency and cross-core
+/// cache traffic eat the parallel saving, and a wrong call here costs
+/// real regressions on cheap batches — the bar sits far above timing
+/// noise so small workloads always keep their exact sequential cost.
+#[cfg(not(target_family = "wasm"))]
+const SPAWN_MIN_TOTAL_NANOS: u64 = 8_000_000;
+
+/// Runs contiguous chunks of rows on their own runtime tasks — bounded,
+/// results in input order — reconstructing each chunk's evaluation context
+/// from owned clones so the tasks are `'static`. This is what row-level
+/// plan-executing expressions (graph and reference lookups) need where the
+/// cooperative fan-out buys nothing: their work is CPU-bound on an
+/// embedded backend, and only separate tasks reach separate cores. Chunks
+/// rather than single rows keep the dispatch cost amortized when each row
+/// is cheap; several chunks per task slot keep a skewed chunk from
+/// stalling the batch. The `JoinSet` aborts whatever is still in flight
+/// when it drops, so an error never leaks detached tasks. On failure the
+/// lowest-index row's error surfaces: no further chunks are spawned, the
+/// bounded in-flight set is drained, and the smallest failing index wins —
+/// which error a caller sees never depends on the scheduler.
+///
+/// The reconstruction restores `local_params`, `skip_fetch_perms`,
+/// `computing_record`, `plan_depth` and the `doc_root`-selected
+/// `document_root` into each spawned row's context. Callers must gate on
+/// `AccessMode::ReadOnly` and an empty `recursion_ctx` — neither survives
+/// the context reconstruction.
+#[cfg(not(target_family = "wasm"))]
+pub(crate) async fn evaluate_rows_spawned(
+	expr: std::sync::Arc<dyn crate::exec::PhysicalExpr>,
+	ctx: &crate::exec::physical_expr::EvalContext<'_>,
+	values: &[Value],
+	doc_root: SpawnedDocRoot,
+) -> crate::expr::FlowResult<Vec<Value>> {
+	use crate::exec::physical_expr::EvalContext;
+	let inherited_root: Option<std::sync::Arc<Value>> = match doc_root {
+		SpawnedDocRoot::Inherited => ctx.document_root.map(|v| std::sync::Arc::new(v.clone())),
+		SpawnedDocRoot::RowValue => None,
+	};
+	// Block-local `LET` bindings, owned once per batch (never per row) so
+	// each spawned chunk can restore them: `from_exec_ctx` reconstructs a
+	// context with no `local_params`, and a `$param` that silently resolved
+	// to nothing would be a wrong answer, not an error.
+	let local_params: Option<
+		std::sync::Arc<std::collections::HashMap<surrealdb_strand::Strand, Value>>,
+	> = ctx.local_params.map(|m| std::sync::Arc::new(m.clone()));
+	// The probe is a constant handful of rows run inline — borrowed
+	// values, the exact sequential cost — independent of the batch size:
+	// its warm rows absorb one-off setup cost and its timed rows estimate
+	// the per-row cost that decides whether the remainder is worth
+	// spawning. A constant sample keeps the serial prefix from scaling
+	// with the batch, so the achievable parallel speedup is not capped by
+	// the probe itself. Below the spawn bars, per-row work is so cheap
+	// that the owned clones and task dispatch cost more than they
+	// recover, so the remainder stays sequential.
+	let probe = (PROBE_WARM_ROWS + PROBE_TIMED_ROWS).min(values.len());
+	let mut head = Vec::with_capacity(probe);
+	let mut started = web_time::Instant::now();
+	for (idx, value) in values.iter().take(probe).enumerate() {
+		if idx == PROBE_WARM_ROWS {
+			started = web_time::Instant::now();
+		}
+		let row_ctx = match doc_root {
+			SpawnedDocRoot::RowValue => ctx.with_value_and_doc(value),
+			SpawnedDocRoot::Inherited => ctx.with_value(value),
+		};
+		head.push(expr.evaluate(row_ctx).await?);
+	}
+	let timed = head.len().saturating_sub(PROBE_WARM_ROWS);
+	let per_row = started.elapsed().as_nanos() as u64 / timed.max(1) as u64;
+	let remaining_work = per_row.saturating_mul(values.len().saturating_sub(probe) as u64);
+	if timed == 0
+		|| per_row < SPAWN_PER_ROW_NANOS
+		|| remaining_work < SPAWN_MIN_TOTAL_NANOS
+		|| values.len() <= probe
+	{
+		let mut results = head;
+		results.reserve(values.len().saturating_sub(probe));
+		for value in values.iter().skip(probe) {
+			let row_ctx = match doc_root {
+				SpawnedDocRoot::RowValue => ctx.with_value_and_doc(value),
+				SpawnedDocRoot::Inherited => ctx.with_value(value),
+			};
+			results.push(expr.evaluate(row_ctx).await?);
+		}
+		return Ok(results);
+	}
+	let values = &values[probe..];
+	// Chunks are sized from the rows that remain after the probe: several
+	// per task slot amortize dispatch when rows are cheap while keeping a
+	// skewed chunk from stalling the batch.
+	let chunk_size = values.len().div_ceil(SPAWNED_CHUNK_CONCURRENCY * 4).max(1);
+	let mut out: Vec<Option<Vec<Value>>> = Vec::new();
+	out.resize_with(values.len().div_ceil(chunk_size), || None);
+	let mut pending: std::collections::VecDeque<_> = values
+		.chunks(chunk_size)
+		.enumerate()
+		.map(|(idx, chunk)| {
+			let expr = std::sync::Arc::clone(&expr);
+			let exec_ctx = ctx.exec_ctx.clone();
+			let chunk = chunk.to_vec();
+			let inherited_root = inherited_root.clone();
+			let local_params = local_params.clone();
+			let skip_fetch_perms = ctx.skip_fetch_perms;
+			let computing_record = ctx.computing_record.clone();
+			let plan_depth = ctx.plan_depth;
+			async move {
+				let mut results = Vec::with_capacity(chunk.len());
+				for value in &chunk {
+					let mut row_ctx = EvalContext::from_exec_ctx(&exec_ctx);
+					row_ctx.local_params = local_params.as_deref();
+					row_ctx.skip_fetch_perms = skip_fetch_perms;
+					row_ctx.computing_record = computing_record.clone();
+					row_ctx.plan_depth = plan_depth;
+					let row_ctx = match doc_root {
+						SpawnedDocRoot::RowValue => row_ctx.with_value_and_doc(value),
+						SpawnedDocRoot::Inherited => {
+							row_ctx.document_root = inherited_root.as_deref();
+							row_ctx.with_value(value)
+						}
+					};
+					match expr.evaluate(row_ctx).await {
+						Ok(value) => results.push(value),
+						Err(err) => return (idx, Err(err)),
+					}
+				}
+				(idx, Ok(results))
+			}
+		})
+		.collect();
+	let mut set = tokio::task::JoinSet::new();
+	// The lowest-index failure wins: chunks are contiguous, so the smallest
+	// failing chunk index carries the batch's first failing row. On any
+	// failure no further chunks are spawned; what is already in flight
+	// (bounded by the concurrency cap) is drained so a lower-index error
+	// still in progress can overtake one that merely finished first. A
+	// panicked task surfaces only when no row error was collected — its
+	// position carries no meaning.
+	let mut first_err: Option<(usize, crate::expr::ControlFlow)> = None;
+	let mut join_err: Option<crate::expr::ControlFlow> = None;
+	loop {
+		if first_err.is_none() && join_err.is_none() {
+			while set.len() < SPAWNED_CHUNK_CONCURRENCY {
+				let Some(task) = pending.pop_front() else {
+					break;
+				};
+				set.spawn(task);
+			}
+		}
+		let Some(joined) = set.join_next().await else {
+			break;
+		};
+		match joined {
+			Ok((idx, Ok(results))) => out[idx] = Some(results),
+			Ok((idx, Err(err))) => {
+				if first_err.as_ref().is_none_or(|(lowest, _)| idx < *lowest) {
+					first_err = Some((idx, err));
+				}
+			}
+			Err(e) => {
+				join_err.get_or_insert_with(|| {
+					crate::expr::ControlFlow::Err(anyhow::anyhow!("row fan-out task failed: {e}"))
+				});
+			}
+		}
+	}
+	if let Some((_, err)) = first_err {
+		return Err(err);
+	}
+	if let Some(err) = join_err {
+		return Err(err);
+	}
+	// `head` already holds the timing probe's own rows, evaluated
+	// sequentially and in order; the spawned suffix's chunks follow, each
+	// already in order courtesy of `out`'s per-chunk indexing, so the
+	// concatenation lines up with the original `values` one for one.
+	let mut results = head;
+	results.reserve(values.len());
+	results.extend(out.into_iter().flat_map(|chunk| chunk.expect("every chunk task completed")));
+	Ok(results)
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[cfg(test)]
+mod spawned_tests {
+	use std::sync::Arc;
+	use std::time::Duration;
+
+	use surrealdb_types::{SqlFormat, ToSql};
+
+	use super::*;
+	use crate::exec::operators::test_util::root_ctx;
+	use crate::exec::{BoxFut, ContextLevel, EvalContext, PhysicalExpr};
+	use crate::val::Number;
+
+	/// A row expression whose cost is a fixed real-time delay rather than CPU
+	/// work, so a test can push `evaluate_rows_spawned` past its per-row and
+	/// total-work spawn thresholds without depending on how fast the row's own
+	/// logic happens to run on the machine executing the test.
+	///
+	/// Maps each row's integer to `n * 2 + 1`, a value the row's own input
+	/// still determines, so a test can check that a result corresponds to the
+	/// row that produced it and not merely that the count came out right.
+	#[derive(Debug)]
+	struct SlowDoubler {
+		per_row_delay: Duration,
+	}
+
+	impl ToSql for SlowDoubler {
+		fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+			f.push_str("SlowDoubler");
+		}
+	}
+
+	impl PhysicalExpr for SlowDoubler {
+		fn name(&self) -> &'static str {
+			"SlowDoubler"
+		}
+
+		fn as_any(&self) -> &dyn std::any::Any {
+			self
+		}
+
+		fn required_context(&self) -> ContextLevel {
+			ContextLevel::Root
+		}
+
+		fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+			Box::pin(async move {
+				let n = match ctx.current_value {
+					Some(Value::Number(Number::Int(n))) => *n,
+					other => panic!("expected an integer row, got {other:?}"),
+				};
+				tokio::time::sleep(self.per_row_delay).await;
+				Ok(Value::from(n * 2 + 1))
+			})
+		}
+
+		fn access_mode(&self) -> AccessMode {
+			AccessMode::ReadOnly
+		}
+	}
+
+	/// The probe is a constant number of rows, so batches at and just past
+	/// its size are the boundary cases: at (or below) it every row runs
+	/// inline, one past it the spawned suffix is a single small chunk.
+	/// Whichever arm runs, the results must be complete and in order.
+	#[tokio::test]
+	async fn batches_around_the_probe_boundary_keep_every_row() {
+		let probe = (PROBE_WARM_ROWS + PROBE_TIMED_ROWS) as i64;
+		for rows in [probe - 1, probe, probe + 1] {
+			let values: Vec<Value> = (0..rows).map(Value::from).collect();
+			// 10ms per row keeps one remaining row past the projected-work
+			// bar, so the `probe + 1` case reliably takes the spawned path.
+			let expr: Arc<dyn PhysicalExpr> = Arc::new(SlowDoubler {
+				per_row_delay: Duration::from_millis(10),
+			});
+			let exec_ctx = root_ctx();
+			let base = EvalContext::from_exec_ctx(&exec_ctx);
+			let results = evaluate_rows_spawned(expr, &base, &values, SpawnedDocRoot::RowValue)
+				.await
+				.expect("evaluation should succeed");
+			let expected: Vec<Value> = (0..rows).map(|n| Value::from(n * 2 + 1)).collect();
+			assert_eq!(results, expected, "{rows} rows must come back complete and in order");
+		}
+	}
+
+	/// A row expression that reads the block-local `$x` binding from the
+	/// evaluation context, with a delay that pushes a batch onto the
+	/// spawned path — where the context is reconstructed and the binding
+	/// must be restored rather than silently dropped.
+	#[derive(Debug)]
+	struct LocalParamReader;
+
+	impl ToSql for LocalParamReader {
+		fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+			f.push_str("LocalParamReader");
+		}
+	}
+
+	impl PhysicalExpr for LocalParamReader {
+		fn name(&self) -> &'static str {
+			"LocalParamReader"
+		}
+
+		fn as_any(&self) -> &dyn std::any::Any {
+			self
+		}
+
+		fn required_context(&self) -> ContextLevel {
+			ContextLevel::Root
+		}
+
+		fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+			Box::pin(async move {
+				tokio::time::sleep(Duration::from_millis(1)).await;
+				Ok(ctx
+					.local_params
+					.and_then(|params| params.get("x"))
+					.cloned()
+					.unwrap_or(Value::None))
+			})
+		}
+
+		fn access_mode(&self) -> AccessMode {
+			AccessMode::ReadOnly
+		}
+	}
+
+	#[tokio::test]
+	async fn spawned_rows_still_see_block_local_params() {
+		use std::collections::HashMap;
+
+		use surrealdb_strand::Strand;
+
+		const ROWS: i64 = 100;
+		let rows: Vec<Value> = (0..ROWS).map(Value::from).collect();
+		let expr: Arc<dyn PhysicalExpr> = Arc::new(LocalParamReader);
+
+		let exec_ctx = root_ctx();
+		// The binding lives only in the evaluation context — deliberately
+		// not mirrored into the execution context — so a spawned row that
+		// loses `local_params` has nothing to fall back on.
+		let params: HashMap<Strand, Value> = HashMap::from([(Strand::from("x"), Value::from(42))]);
+		let mut base = EvalContext::from_exec_ctx(&exec_ctx);
+		base.local_params = Some(&params);
+
+		let results = evaluate_rows_spawned(expr, &base, &rows, SpawnedDocRoot::RowValue)
+			.await
+			.expect("evaluation should succeed");
+		assert_eq!(results.len(), rows.len());
+		for (idx, result) in results.iter().enumerate() {
+			assert_eq!(
+				*result,
+				Value::from(42),
+				"row {idx} must resolve $x from the restored local params"
+			);
+		}
+	}
+
+	/// A row expression that fails on two chosen rows: the lower-index one
+	/// slowly, the higher-index one immediately — so the failure that
+	/// *completes* first is not the one that must surface.
+	#[derive(Debug)]
+	struct FailsTwice;
+
+	impl ToSql for FailsTwice {
+		fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+			f.push_str("FailsTwice");
+		}
+	}
+
+	impl PhysicalExpr for FailsTwice {
+		fn name(&self) -> &'static str {
+			"FailsTwice"
+		}
+
+		fn as_any(&self) -> &dyn std::any::Any {
+			self
+		}
+
+		fn required_context(&self) -> ContextLevel {
+			ContextLevel::Root
+		}
+
+		fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+			Box::pin(async move {
+				let n = match ctx.current_value {
+					Some(Value::Number(Number::Int(n))) => *n,
+					other => panic!("expected an integer row, got {other:?}"),
+				};
+				match n {
+					10 => {
+						tokio::time::sleep(Duration::from_millis(20)).await;
+						Err(crate::expr::ControlFlow::Err(anyhow::anyhow!("row 10 failed")))
+					}
+					90 => Err(crate::expr::ControlFlow::Err(anyhow::anyhow!("row 90 failed"))),
+					_ => {
+						tokio::time::sleep(Duration::from_millis(1)).await;
+						Ok(Value::from(n))
+					}
+				}
+			})
+		}
+
+		fn access_mode(&self) -> AccessMode {
+			AccessMode::ReadOnly
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn the_lowest_index_error_surfaces_regardless_of_completion_order() {
+		const ROWS: i64 = 100;
+		let rows: Vec<Value> = (0..ROWS).map(Value::from).collect();
+		let expr: Arc<dyn PhysicalExpr> = Arc::new(FailsTwice);
+
+		let exec_ctx = root_ctx();
+		let base = EvalContext::from_exec_ctx(&exec_ctx);
+		let err = evaluate_rows_spawned(expr, &base, &rows, SpawnedDocRoot::RowValue)
+			.await
+			.expect_err("two rows fail, so the batch must fail");
+
+		assert!(
+			err.to_string().contains("row 10 failed"),
+			"row 90's immediate failure completes first, but row 10's must surface: got {err}"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_spawned_batch_keeps_every_row_including_the_timing_probe() {
+		// 100 rows at 1ms each clears both `SPAWN_PER_ROW_NANOS` (per-row cost)
+		// and `SPAWN_MIN_TOTAL_NANOS` (projected remaining work) by two orders
+		// of magnitude, so the run reliably takes the concurrent-chunk path
+		// rather than staying sequential.
+		const ROWS: i64 = 100;
+		let rows: Vec<Value> = (0..ROWS).map(Value::from).collect();
+		let expr: Arc<dyn PhysicalExpr> = Arc::new(SlowDoubler {
+			per_row_delay: Duration::from_millis(1),
+		});
+
+		let exec_ctx = root_ctx();
+		let base = EvalContext::from_exec_ctx(&exec_ctx);
+		let results = evaluate_rows_spawned(expr, &base, &rows, SpawnedDocRoot::RowValue)
+			.await
+			.expect("evaluation should succeed");
+
+		let expected: Vec<Value> = (0..ROWS).map(|n| Value::from(n * 2 + 1)).collect();
+		assert_eq!(
+			results.len(),
+			rows.len(),
+			"every row must produce a result, including the rows the timing probe ran"
+		);
+		assert_eq!(
+			results, expected,
+			"each result must correspond to the input row that produced it, in input order"
+		);
+	}
+}

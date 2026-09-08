@@ -359,9 +359,12 @@ impl ExecOperator for GraphEdgeScan {
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let direction = self.direction;
-		let edge_tables = self.edge_tables.clone();
+		// Arc'd rather than owned: the concurrent fan-out captures these
+		// loop-invariant lists per spawned source, and an Arc clone there is
+		// a refcount bump instead of a deep Vec clone.
+		let edge_tables = Arc::new(self.edge_tables.clone());
 		let output_mode = self.output_mode;
-		let target_tables = self.target_tables.clone();
+		let target_tables = Arc::new(self.target_tables.clone());
 		let edge_limit = self.limit;
 		let version_expr = self.version.clone();
 		let scan_batch_size = ctx.root().ctx.config.exec.scan_batch_size;
@@ -397,14 +400,16 @@ impl ExecOperator for GraphEdgeScan {
 
 			// Determine the directions to scan
 			// Note: For Both, we scan In first then Out to match legacy executor behavior
-			let directions: Vec<Dir> = match direction {
+			// Arc'd for the same reason as the edge/target table lists: the
+			// fan-out shares it with each spawned source.
+			let directions: Arc<Vec<Dir>> = Arc::new(match direction {
 				LookupDirection::Out => vec![Dir::Out],
 				LookupDirection::In => vec![Dir::In],
 				LookupDirection::Both => vec![Dir::In, Dir::Out],
 				LookupDirection::Reference => Err(ControlFlow::Err(anyhow::anyhow!(
 					"Reference lookups should use ReferenceScan, not GraphEdgeScan"
 				)))?,
-			};
+			});
 
 			// Inline sidecar caches serve a `(source, dir)`'s complete current
 			// adjacency in one value, so they are usable only when this scan
@@ -515,7 +520,7 @@ impl ExecOperator for GraphEdgeScan {
 						if edges_cap.is_none() {
 							continue;
 						}
-						for &dir in &directions {
+						for &dir in directions.iter() {
 							slots.push((src_idx, dir));
 							keys.push(EdgeCacheKey {
 								ns: ns_id,
@@ -549,41 +554,207 @@ impl ExecOperator for GraphEdgeScan {
 					}
 				}
 
-				// Scan edges for each source record
-				for (src_idx, rid) in source_rids.iter().enumerate() {
-					let mut edges_yielded: usize = 0;
-					// How the source's adjacency is read: merged with packed
-					// blocks once its table folds, or synthesized from the id
-					// when the source is itself a lightweight edge. Read off
-					// the batch's memoized facts, so classifying a source
-					// costs no extra catalog lookup.
-					let (adjacency, _) = batch_table_info[&rid.table];
-					// A lightweight edge's synthesized adjacency derives from
-					// its id alone, which says nothing about existence — and
-					// sources can be literal ids (`follows:[a,b]->person`),
-					// not just live upstream rows. Gate on the edge existing
-					// at this snapshot, exactly as the fallback executor does.
-					if adjacency == VertexAdjacency::Lightweight
-						&& !txn
-							.record_exists(ns_id, db_id, &rid.table, &rid.key, version)
-							.await
-							.context("Failed to check a lightweight source's existence")?
-					{
-						continue;
+				// Concurrent fan-out for the plain traversal shape — no
+				// predicate, no payload, no per-source LIMIT: cache-missed
+				// sources scan side by side (bounded, in input order) into
+				// owned buffers the per-source loop below drains, so a
+				// multi-source traversal overlaps its per-source cursor
+				// work instead of paying one sequential open-and-drain per
+				// source, and its flushes coalesce several sources' results
+				// into each record-resolve batch. Every source the fan-out
+				// declines — legacy-format entries, over-cap adjacencies,
+				// any cached direction — falls through to the sequential
+				// machinery unchanged.
+				//
+				// The batch is processed in contiguous windows of the
+				// fan-out width, each prescanned and then drained/emitted
+				// before the next begins: results stream between windows,
+				// so a downstream operator that stops early (LIMIT) drops
+				// the stream after one window's work rather than the whole
+				// batch's, and the aggregate prescan footprint is bounded
+				// at one window of capped buffers.
+				let mut prescanned: Vec<Option<Vec<RecordId>>> = Vec::new();
+				prescanned.resize_with(source_rids.len(), || None);
+				#[cfg(not(target_family = "wasm"))]
+				let plain_shape = !has_predicate && payload_spec.is_none() && edge_limit.is_none();
+				// Whether spawning pays for this batch: undecided until the
+				// first window has run sequentially as a timing probe, then
+				// fixed for the batch's remaining windows.
+				#[cfg(not(target_family = "wasm"))]
+				let mut fanout_engaged: Option<bool> = None;
+				let mut win_start = 0usize;
+				while win_start < source_rids.len() {
+					let win_end = (win_start + GRAPH_FANOUT_CONCURRENCY).min(source_rids.len());
+					// Spawned rather than merely polled concurrently: on an
+					// embedded backend the per-source scans are CPU-bound,
+					// and only separate runtime tasks let them use separate
+					// cores. wasm has no worker threads, so it keeps the
+					// sequential machinery below unchanged.
+					#[cfg(not(target_family = "wasm"))]
+					if plain_shape && fanout_engaged == Some(true) {
+						let missed: Vec<usize> = (win_start..win_end)
+							.filter(|src_idx| {
+								!directions
+									.iter()
+									.any(|dir| cache_map.contains_key(&(*src_idx, *dir)))
+							})
+							.collect();
+						// A window with one cache-missed source has nothing
+						// to overlap; the futures are built only for windows
+						// that spawn, so a declined window allocates no
+						// captures.
+						if missed.len() > 1 {
+							let mut pending: std::collections::VecDeque<_> = missed
+								.into_iter()
+								.map(|src_idx| {
+									let ctx = ctx.clone();
+									let txn = Arc::clone(&txn);
+									let rid = source_rids[src_idx].clone();
+									let (adjacency, _) = batch_table_info[&rid.table];
+									let directions = Arc::clone(&directions);
+									let edge_tables = Arc::clone(&edge_tables);
+									let target_tables = Arc::clone(&target_tables);
+									let metrics = Arc::clone(&metrics);
+									async move {
+										let out = scan_source_plain(
+											&ctx,
+											&txn,
+											adjacency,
+											ns_id,
+											db_id,
+											&rid,
+											&directions,
+											&edge_tables,
+											output_mode,
+											&target_tables,
+											version,
+											fold_threshold,
+											scan_batch_size,
+											&metrics,
+											record_metrics,
+										)
+										.await;
+										(src_idx, out)
+									}
+								})
+								.collect();
+							// A `JoinSet` aborts whatever is still in flight
+							// when it drops, so an error or a cancelled
+							// stream never leaks detached tasks. On failure
+							// the lowest-index source's error surfaces: no
+							// further tasks are spawned and the in-flight set
+							// is drained, so which error a caller sees never
+							// depends on the scheduler. A panicked task
+							// surfaces only when no source error was
+							// collected — its position carries no meaning.
+							let mut set = tokio::task::JoinSet::new();
+							let mut first_err: Option<(usize, ControlFlow)> = None;
+							let mut join_err: Option<ControlFlow> = None;
+							loop {
+								if first_err.is_none() && join_err.is_none() {
+									while set.len() < GRAPH_FANOUT_CONCURRENCY {
+										let Some(task) = pending.pop_front() else {
+											break;
+										};
+										set.spawn(task);
+									}
+								}
+								let Some(joined) = set.join_next().await else {
+									break;
+								};
+								match joined {
+									Ok((src_idx, Ok(out))) => prescanned[src_idx] = out,
+									Ok((src_idx, Err(err))) => {
+										if first_err
+											.as_ref()
+											.is_none_or(|(lowest, _)| src_idx < *lowest)
+										{
+											first_err = Some((src_idx, err));
+										}
+									}
+									Err(e) => {
+										join_err.get_or_insert_with(|| {
+											ControlFlow::Err(anyhow::anyhow!(
+												"graph fan-out task failed: {e}"
+											))
+										});
+									}
+								}
+							}
+							if let Some((_, err)) = first_err {
+								return Err(err);
+							}
+							if let Some(err) = join_err {
+								return Err(err);
+							}
+						}
 					}
-					'dir_loop: for &dir in &directions {
-						// Cache fast path: emit the cached adjacency through
-						// the same limit/predicate flush machinery the cursor
-						// path uses, grouped in the requested spec order — no
-						// cursor is opened for this direction. Entries are
-						// taken out of the batch map and decoded one at a
-						// time as they are consumed, so a LIMIT stops both
-						// the decoding and the `edges_scanned` count at the
-						// entries it actually visited, and the adjacency
-						// drops as soon as this direction is done.
-						if let Some(entries) = cache_map.remove(&(src_idx, dir)) {
-							let selected: Box<dyn Iterator<Item = &EdgeCacheEntry> + Send + '_> =
-								if spec_prefixes.is_empty() {
+					#[cfg(not(target_family = "wasm"))]
+					let win_timer = (plain_shape && fanout_engaged.is_none()).then(web_time::Instant::now);
+
+					// Scan edges for each source record in this window
+					for (offset, rid) in source_rids[win_start..win_end].iter().enumerate() {
+						let src_idx = win_start + offset;
+						// A prescanned source's results flow through the same
+						// flush machinery, coalesced with its neighbours'.
+						if let Some(found) = prescanned[src_idx].take() {
+							for target in found {
+								rid_batch.push(target);
+								if rid_batch.len() >= scan_batch_size {
+									let values = resolve_and_filter_batch(
+										&ctx,
+										&txn,
+										ns_id,
+										db_id,
+										&rid_batch,
+										fetch_full,
+										check_perms,
+										version,
+										&mut perm_cache,
+										None,
+										None,
+									)
+									.await?;
+									rid_batch.clear();
+									yielder.emit(ValueBatch::new(values)).await;
+								}
+							}
+							continue;
+						}
+						let mut edges_yielded: usize = 0;
+						// How the source's adjacency is read: merged with packed
+						// blocks once its table folds, or synthesized from the id
+						// when the source is itself a lightweight edge. Read off
+						// the batch's memoized facts, so classifying a source
+						// costs no extra catalog lookup.
+						let (adjacency, _) = batch_table_info[&rid.table];
+						// A lightweight edge's synthesized adjacency derives from
+						// its id alone, which says nothing about existence — and
+						// sources can be literal ids (`follows:[a,b]->person`),
+						// not just live upstream rows. Gate on the edge existing
+						// at this snapshot, exactly as the fallback executor does.
+						if adjacency == VertexAdjacency::Lightweight
+							&& !txn
+								.record_exists(ns_id, db_id, &rid.table, &rid.key, version)
+								.await
+								.context("Failed to check a lightweight source's existence")?
+						{
+							continue;
+						}
+						'dir_loop: for &dir in directions.iter() {
+							// Cache fast path: emit the cached adjacency through
+							// the same limit/predicate flush machinery the cursor
+							// path uses, grouped in the requested spec order — no
+							// cursor is opened for this direction. Entries are
+							// taken out of the batch map and decoded one at a
+							// time as they are consumed, so a LIMIT stops both
+							// the decoding and the `edges_scanned` count at the
+							// entries it actually visited, and the adjacency
+							// drops as soon as this direction is done.
+							if let Some(entries) = cache_map.remove(&(src_idx, dir)) {
+								let selected: Box<
+									dyn Iterator<Item = &EdgeCacheEntry> + Send + '_,
+								> = if spec_prefixes.is_empty() {
 									Box::new(entries.iter())
 								} else {
 									Box::new(spec_prefixes.iter().flat_map(|prefix| {
@@ -592,191 +763,208 @@ impl ExecOperator for GraphEdgeScan {
 											.filter(move |e| e.edge.starts_with(prefix.as_slice()))
 									}))
 								};
-							let mut scanned: u64 = 0;
-							let mut limit_hit = false;
-							for entry in selected {
-								scanned += 1;
-								let (edge, target) = decode_edge_cache_entry(entry)?;
-								match output_mode {
-									GraphScanOutput::TargetVertex => {
-										if target_tables.is_empty()
-											|| target_tables.contains(&target.table)
-										{
-											rid_batch.push(target);
-											edges_yielded += 1;
+								let mut scanned: u64 = 0;
+								let mut limit_hit = false;
+								for entry in selected {
+									scanned += 1;
+									let (edge, target) = decode_edge_cache_entry(entry)?;
+									match output_mode {
+										GraphScanOutput::TargetVertex => {
+											if target_tables.is_empty()
+												|| target_tables.contains(&target.table)
+											{
+												rid_batch.push(target);
+												edges_yielded += 1;
+											}
 										}
-									}
-									_ if payload_spec.is_some() => {
-										// The cache gate admits only key-only specs,
-										// and a cached `(edge, target)` pair carries
-										// everything such a spec reads — the
-										// predicate prunes here, before any fetch,
-										// exactly as on the cursor path.
-										let spec = payload_spec
-											.as_deref()
-											.expect("guarded by the match arm");
-										let pred = record_predicate
-											.as_ref()
-											.expect("payload mode implies a predicate");
-										let item = crate::idx::adjacency::MergedAdjacencyEdge {
-											key: Vec::new(),
-											edge,
-											target: Some(target),
-											props: None,
-										};
-										let (edge, candidate) =
-											synthesize_payload_candidate(spec, rid, dir, item);
-										let Some(candidate) = candidate else {
-											return Err(ControlFlow::Err(anyhow::anyhow!(
-												"a key-only predicate cannot fall back on a cached entry"
-											)));
-										};
-										if record_metrics {
-											metrics.add_props_evals(1);
+										_ if payload_spec.is_some() => {
+											// The cache gate admits only key-only specs,
+											// and a cached `(edge, target)` pair carries
+											// everything such a spec reads — the
+											// predicate prunes here, before any fetch,
+											// exactly as on the cursor path.
+											let spec = payload_spec
+												.as_deref()
+												.expect("guarded by the match arm");
+											let pred = record_predicate
+												.as_ref()
+												.expect("payload mode implies a predicate");
+											let item = crate::idx::adjacency::MergedAdjacencyEdge {
+												key: Vec::new(),
+												edge,
+												target: Some(target),
+												props: None,
+											};
+											let (edge, candidate) =
+												synthesize_payload_candidate(spec, rid, dir, item);
+											let Some(candidate) = candidate else {
+												return Err(ControlFlow::Err(anyhow::anyhow!(
+													"a key-only predicate cannot fall back on a cached entry"
+												)));
+											};
+											if record_metrics {
+												metrics.add_props_evals(1);
+											}
+											if pred
+												.evaluate(
+													EvalContext::from_exec_ctx(&ctx)
+														.with_value(&candidate),
+												)
+												.await?
+												.is_truthy()
+											{
+												rid_batch.push(edge);
+											}
 										}
-										if pred
-											.evaluate(
-												EvalContext::from_exec_ctx(&ctx)
-													.with_value(&candidate),
-											)
-											.await?
-											.is_truthy()
-										{
+										_ => {
 											rid_batch.push(edge);
+											if !has_predicate {
+												edges_yielded += 1;
+											}
 										}
 									}
-									_ => {
-										rid_batch.push(edge);
-										if !has_predicate {
-											edges_yielded += 1;
+									if !has_predicate {
+										if edge_limit.is_some_and(|l| edges_yielded >= l) {
+											limit_hit = true;
+											break;
+										}
+										if rid_batch.len() >= scan_batch_size {
+											let values = resolve_and_filter_batch(
+												&ctx,
+												&txn,
+												ns_id,
+												db_id,
+												&rid_batch,
+												fetch_full,
+												check_perms,
+												version,
+												&mut perm_cache,
+												key_predicate.as_ref(),
+												record_predicate.as_ref(),
+											)
+											.await?;
+											rid_batch.clear();
+											yielder.emit(ValueBatch::new(values)).await;
 										}
 									}
 								}
-								if !has_predicate {
-									if edge_limit.is_some_and(|l| edges_yielded >= l) {
-										limit_hit = true;
-										break;
+								if record_metrics && scanned > 0 {
+									metrics.add_edges_scanned(scanned);
+								}
+								// With a predicate, flush per (source, direction) so
+								// filtering and per-source LIMIT counting stay
+								// within one source, exactly as the cursor path
+								// flushes per cursor batch. In payload mode every
+								// buffered edge already matched the key-resident
+								// predicate above, so the flush resolves without
+								// re-applying it.
+								if has_predicate && !rid_batch.is_empty() {
+									let flush_record_predicate = if payload_spec.is_some() {
+										None
+									} else {
+										record_predicate.as_ref()
+									};
+									let mut values = resolve_and_filter_batch(
+										&ctx,
+										&txn,
+										ns_id,
+										db_id,
+										&rid_batch,
+										fetch_full,
+										check_perms,
+										version,
+										&mut perm_cache,
+										key_predicate.as_ref(),
+										flush_record_predicate,
+									)
+									.await?;
+									rid_batch.clear();
+									if let Some(l) = edge_limit {
+										let room = l.saturating_sub(edges_yielded);
+										if values.len() >= room {
+											values.truncate(room);
+											limit_hit = true;
+										}
 									}
-									if rid_batch.len() >= scan_batch_size {
-										let values = resolve_and_filter_batch(
-											&ctx,
-											&txn,
-											ns_id,
-											db_id,
-											&rid_batch,
-											fetch_full,
-											check_perms,
-											version,
-											&mut perm_cache,
-											key_predicate.as_ref(),
-											record_predicate.as_ref(),
-										)
-										.await?;
-										rid_batch.clear();
+									edges_yielded += values.len();
+									if !values.is_empty() {
 										yielder.emit(ValueBatch::new(values)).await;
 									}
 								}
-							}
-							if record_metrics && scanned > 0 {
-								metrics.add_edges_scanned(scanned);
-							}
-							// With a predicate, flush per (source, direction) so
-							// filtering and per-source LIMIT counting stay
-							// within one source, exactly as the cursor path
-							// flushes per cursor batch. In payload mode every
-							// buffered edge already matched the key-resident
-							// predicate above, so the flush resolves without
-							// re-applying it.
-							if has_predicate && !rid_batch.is_empty() {
-								let flush_record_predicate = if payload_spec.is_some() {
-									None
-								} else {
-									record_predicate.as_ref()
-								};
-								let mut values = resolve_and_filter_batch(
-									&ctx,
-									&txn,
-									ns_id,
-									db_id,
-									&rid_batch,
-									fetch_full,
-									check_perms,
-									version,
-									&mut perm_cache,
-									key_predicate.as_ref(),
-									flush_record_predicate,
-								)
-								.await?;
-								rid_batch.clear();
-								if let Some(l) = edge_limit {
-									let room = l.saturating_sub(edges_yielded);
-									if values.len() >= room {
-										values.truncate(room);
-										limit_hit = true;
-									}
+								if limit_hit {
+									break 'dir_loop;
 								}
-								edges_yielded += values.len();
-								if !values.is_empty() {
-									yielder.emit(ValueBatch::new(values)).await;
-								}
+								continue;
 							}
-							if limit_hit {
-								break 'dir_loop;
-							}
-							continue;
-						}
-						let scopes =
-							compute_graph_ranges(ns_id, db_id, rid, dir, &edge_tables, &ctx)
-								.await?;
-						// Unfolded keys seen across this direction's scopes,
-						// for the fold observation below.
-						let mut dir_delta_hits: u64 = 0;
+							let scopes =
+								compute_graph_ranges(ns_id, db_id, rid, dir, &edge_tables, &ctx)
+									.await?;
+							// Unfolded keys seen across this direction's scopes,
+							// for the fold observation below.
+							let mut dir_delta_hits: u64 = 0;
 
-						for scope in scopes {
-							// Merged cursor over the source vertex's adjacency.
-							// In `TargetVertex` mode, legacy-format entries (no
-							// embedded target) are buffered into a bounded
-							// chunk and resolved after the cursor closes; when
-							// the buffer fills before the scope is exhausted,
-							// we drain it via inner scans and resume the scan
-							// past the last processed position.
-							let mut chunk = scope.range.clone();
-							let mut limit_hit = false;
-							'range_chunks: loop {
-								let mut legacy_edges: Vec<RecordId> = Vec::new();
-								let mut chunk_bound_hit = false;
-								let mut last_processed_key: Option<Vec<u8>> = None;
-								{
-									let adjacency_scope = AdjacencyScope {
-										ns: ns_id,
-										db: db_id,
-										vertex: rid,
-										dir: Some(dir),
-										edge_table: scope.edge_table.as_ref(),
-										fk_lower: scope.fk_lower.as_ref(),
-										delta_range: chunk.clone(),
-									};
-									let mut cursor = match adjacency {
-										VertexAdjacency::Lightweight => {
-											MergedAdjacencyCursor::open_lightweight(
-												&txn,
-												&adjacency_scope,
-											)
-											.context("Failed to open graph cursor")?
-										}
-										// Payload mode needs the adjacency
-										// values even on a never-folded table,
-										// whose keys-only scan would otherwise
-										// skip them. A key-resident predicate
-										// reads only the keys and stays on the
-										// plain open below.
-										VertexAdjacency::Normal {
-											folded,
-										} if payload_spec
-											.as_deref()
-											.is_some_and(|s| !s.key_only) =>
-										{
-											MergedAdjacencyCursor::open_with_values(
+							for scope in scopes {
+								// Merged cursor over the source vertex's adjacency.
+								// In `TargetVertex` mode, legacy-format entries (no
+								// embedded target) are buffered into a bounded
+								// chunk and resolved after the cursor closes; when
+								// the buffer fills before the scope is exhausted,
+								// we drain it via inner scans and resume the scan
+								// past the last processed position.
+								let mut chunk = scope.range.clone();
+								let mut limit_hit = false;
+								'range_chunks: loop {
+									let mut legacy_edges: Vec<RecordId> = Vec::new();
+									let mut chunk_bound_hit = false;
+									let mut last_processed_key: Option<Vec<u8>> = None;
+									{
+										let adjacency_scope = AdjacencyScope {
+											ns: ns_id,
+											db: db_id,
+											vertex: rid,
+											dir: Some(dir),
+											edge_table: scope.edge_table.as_ref(),
+											fk_lower: scope.fk_lower.as_ref(),
+											delta_range: chunk.clone(),
+										};
+										let mut cursor = match adjacency {
+											VertexAdjacency::Lightweight => {
+												MergedAdjacencyCursor::open_lightweight(
+													&txn,
+													&adjacency_scope,
+												)
+												.context("Failed to open graph cursor")?
+											}
+											// Payload mode needs the adjacency
+											// values even on a never-folded table,
+											// whose keys-only scan would otherwise
+											// skip them. A key-resident predicate
+											// reads only the keys and stays on the
+											// plain open below.
+											VertexAdjacency::Normal {
+												folded,
+											} if payload_spec
+												.as_deref()
+												.is_some_and(|s| !s.key_only) =>
+											{
+												MergedAdjacencyCursor::open_with_values(
+													&txn,
+													adjacency_scope,
+													folded,
+													version,
+													Some(
+														ctx.root()
+															.ctx
+															.get_index_stores()
+															.adjacency_resolve(),
+													),
+												)
+												.await
+												.context("Failed to open graph cursor")?
+											}
+											VertexAdjacency::Normal {
+												folded,
+											} => MergedAdjacencyCursor::open(
 												&txn,
 												adjacency_scope,
 												folded,
@@ -789,421 +977,293 @@ impl ExecOperator for GraphEdgeScan {
 												),
 											)
 											.await
-											.context("Failed to open graph cursor")?
-										}
-										VertexAdjacency::Normal {
-											folded,
-										} => MergedAdjacencyCursor::open(
-											&txn,
-											adjacency_scope,
-											folded,
-											version,
-											Some(
-												ctx.root()
-													.ctx
-													.get_index_stores()
-													.adjacency_resolve(),
-											),
-										)
-										.await
-										.context("Failed to open graph cursor")?,
-									};
-									'cursor_loop: loop {
-										// Without a predicate, `edges_yielded` counts scanned
-										// edges, so cap each batch to the remaining LIMIT
-										// budget to avoid over-fetching. With a predicate,
-										// `edges_yielded` counts post-filter matches, so we may
-										// need to scan many more keys than the budget to find
-										// that many matches — request full chunks and rely on
-										// the post-filter LIMIT check at flush time.
-										let batch_size = if has_predicate {
-											crate::kvs::NORMAL_BATCH_SIZE
-										} else {
-											let remaining = edge_limit.map(|l| {
-												l.saturating_sub(edges_yielded)
-													.min(crate::kvs::NORMAL_BATCH_SIZE as usize)
-											});
-											match remaining {
-												Some(0) => {
-													limit_hit = true;
-													break;
-												}
-												Some(r) => r as u32,
-												None => crate::kvs::NORMAL_BATCH_SIZE,
-											}
+											.context("Failed to open graph cursor")?,
 										};
-										// Never-folded fast path: consume the batch straight
-										// from the cursor's borrowed buffer, no per-edge
-										// materialization. Payload mode is excluded — its
-										// edges need the synthesized candidate the
-										// materialized loop builds — so these arms mirror
-										// only the TargetVertex / identity arms of that
-										// loop; keep the two in step.
-										let visited = if payload_spec.is_none() {
-											cursor
-												.visit_unfolded_batch(batch_size, |key| {
-													let decoded =
+										'cursor_loop: loop {
+											// Without a predicate, `edges_yielded` counts scanned
+											// edges, so cap each batch to the remaining LIMIT
+											// budget to avoid over-fetching. With a predicate,
+											// `edges_yielded` counts post-filter matches, so we may
+											// need to scan many more keys than the budget to find
+											// that many matches — request full chunks and rely on
+											// the post-filter LIMIT check at flush time.
+											let batch_size = if has_predicate {
+												crate::kvs::NORMAL_BATCH_SIZE
+											} else {
+												let remaining = edge_limit.map(|l| {
+													l.saturating_sub(edges_yielded)
+														.min(crate::kvs::NORMAL_BATCH_SIZE as usize)
+												});
+												match remaining {
+													Some(0) => {
+														limit_hit = true;
+														break;
+													}
+													Some(r) => r as u32,
+													None => crate::kvs::NORMAL_BATCH_SIZE,
+												}
+											};
+											// Never-folded fast path: consume the batch straight
+											// from the cursor's borrowed buffer, no per-edge
+											// materialization. Payload mode is excluded — its
+											// edges need the synthesized candidate the
+											// materialized loop builds — so these arms mirror
+											// only the TargetVertex / identity arms of that
+											// loop; keep the two in step.
+											let visited = if payload_spec.is_none() {
+												cursor
+													.visit_unfolded_batch(batch_size, |key| {
+														let decoded =
 														crate::key::schema::DecodedGraph::decode(
 															key,
 														)?;
-													if output_mode == GraphScanOutput::TargetVertex
-													{
-														match decoded.target {
-															Some(target)
-																if target_tables.is_empty()
-																	|| target_tables.contains(
-																		&target.table,
-																	) =>
-															{
-																rid_batch.push(target);
-																edges_yielded += 1;
-															}
-															Some(_) => {}
-															None => {
-																legacy_edges.push(decoded.edge);
-																if legacy_edges.len()
-																	>= scan_batch_size
+														if output_mode
+															== GraphScanOutput::TargetVertex
+														{
+															match decoded.target {
+																Some(target)
+																	if target_tables.is_empty()
+																		|| target_tables
+																			.contains(
+																				&target.table,
+																			) =>
 																{
-																	chunk_bound_hit = true;
-																	last_processed_key =
-																		Some(key.to_vec());
-																	return Ok(VisitFlow::Stop);
+																	rid_batch.push(target);
+																	edges_yielded += 1;
+																}
+																Some(_) => {}
+																None => {
+																	legacy_edges.push(decoded.edge);
+																	if legacy_edges.len()
+																		>= scan_batch_size
+																	{
+																		chunk_bound_hit = true;
+																		last_processed_key =
+																			Some(key.to_vec());
+																		return Ok(VisitFlow::Stop);
+																	}
 																}
 															}
+														} else {
+															rid_batch.push(decoded.edge);
+															if !has_predicate {
+																edges_yielded += 1;
+															}
 														}
-													} else {
-														rid_batch.push(decoded.edge);
-														if !has_predicate {
-															edges_yielded += 1;
+														if !has_predicate
+															&& edge_limit
+																.is_some_and(|l| edges_yielded >= l)
+														{
+															limit_hit = true;
+															return Ok(VisitFlow::Stop);
 														}
-													}
-													if !has_predicate
-														&& edge_limit
-															.is_some_and(|l| edges_yielded >= l)
-													{
-														limit_hit = true;
-														return Ok(VisitFlow::Stop);
-													}
-													Ok(VisitFlow::Continue)
-												})
-												.await
-												.context("Failed to scan graph edge")?
-										} else {
-											None
-										};
-										match visited {
-											// The cursor is exhausted.
-											Some(0) => break,
-											Some(n) => {
-												if record_metrics {
-													metrics.add_edges_scanned(n as u64);
-												}
-											}
-											// Folded, lightweight or payload-carrying:
-											// the materialized batch path.
-											None => {
-												let batch = cursor
-													.next_batch_scan(batch_size)
+														Ok(VisitFlow::Continue)
+													})
 													.await
-													.context("Failed to scan graph edge")?;
-												if batch.is_empty() {
-													break;
+													.context("Failed to scan graph edge")?
+											} else {
+												None
+											};
+											match visited {
+												// The cursor is exhausted.
+												Some(0) => break,
+												Some(n) => {
+													if record_metrics {
+														metrics.add_edges_scanned(n as u64);
+													}
 												}
-												let mut scanned_in_batch: u64 = 0;
-												for item in batch {
-													scanned_in_batch += 1;
-													if output_mode == GraphScanOutput::TargetVertex
-													{
-														match item.target {
-															// New-format entry: the embedded
-															// target vertex lets us skip
-															// the edge-record hop entirely.
-															Some(target)
-																if target_tables.is_empty()
-																	|| target_tables.contains(
-																		&target.table,
-																	) =>
-															{
-																rid_batch.push(target);
-																edges_yielded += 1;
-															}
-															Some(_) => {
-																// Target table doesn't
-																// match the next-hop
-																// filter; skip.
-															}
-															None => {
-																// Legacy entry: defer the
-																// fallback scan until the
-																// outer cursor closes
-																// (see below). Bound the
-																// buffer to `scan_batch_size`
-																// so a vertex with many
-																// un-migrated edges
-																// doesn't OOM the scan.
-																legacy_edges.push(item.edge);
-																if legacy_edges.len()
-																	>= scan_batch_size
+												// Folded, lightweight or payload-carrying:
+												// the materialized batch path.
+												None => {
+													let batch = cursor
+														.next_batch_scan(batch_size)
+														.await
+														.context("Failed to scan graph edge")?;
+													if batch.is_empty() {
+														break;
+													}
+													let mut scanned_in_batch: u64 = 0;
+													for item in batch {
+														scanned_in_batch += 1;
+														if output_mode
+															== GraphScanOutput::TargetVertex
+														{
+															match item.target {
+																// New-format entry: the embedded
+																// target vertex lets us skip
+																// the edge-record hop entirely.
+																Some(target)
+																	if target_tables.is_empty()
+																		|| target_tables
+																			.contains(
+																				&target.table,
+																			) =>
 																{
-																	chunk_bound_hit = true;
-																	last_processed_key =
-																		Some(item.key);
-																	break;
+																	rid_batch.push(target);
+																	edges_yielded += 1;
+																}
+																Some(_) => {
+																	// Target table doesn't
+																	// match the next-hop
+																	// filter; skip.
+																}
+																None => {
+																	// Legacy entry: defer the
+																	// fallback scan until the
+																	// outer cursor closes
+																	// (see below). Bound the
+																	// buffer to `scan_batch_size`
+																	// so a vertex with many
+																	// un-migrated edges
+																	// doesn't OOM the scan.
+																	legacy_edges.push(item.edge);
+																	if legacy_edges.len()
+																		>= scan_batch_size
+																	{
+																		chunk_bound_hit = true;
+																		last_processed_key =
+																			Some(item.key);
+																		break;
+																	}
 																}
 															}
-														}
-													} else if let Some(spec) =
-														payload_spec.as_deref()
-													{
-														// Payload-resident predicate. A compiled
-														// matcher answers
-														// synchronously from the entry itself — no
-														// candidate to synthesize and
-														// nothing to defer. Every other shape
-														// synthesizes the candidate now and
-														// evaluates at flush time in
-														// one batch: a falsy edge is dropped there
-														// without touching its record
-														// (the selectivity win), a truthy one
-														// proceeds to the
-														// batched existence and permission resolve.
-														// An edge whose payload is
-														// unusable falls back to the one
-														// trustworthy source,
-														// the edge record, prefetched per flush
-														// with a single multi-get.
-														// Target-less (legacy) entries carry no far
-														// vertex, so they take
-														// that fallback either way. Scan order is
-														// preserved throughout.
-														let matched =
-															match (&spec.matcher, &item.target) {
-																(Some(matcher), Some(target))
-																	if dir != Dir::Both =>
+														} else if let Some(spec) =
+															payload_spec.as_deref()
+														{
+															// Payload-resident predicate. A
+															// compiled
+															// matcher answers
+															// synchronously from the entry itself —
+															// no candidate to
+															// synthesize and nothing
+															// to defer. Every other shape
+															// synthesizes the candidate now and
+															// evaluates at flush time in
+															// one batch: a falsy edge is dropped
+															// there without touching
+															// its record
+															// (the selectivity win), a truthy one
+															// proceeds to the
+															// batched existence and permission
+															// resolve. An edge whose
+															// payload is
+															// unusable falls back to the one
+															// trustworthy source,
+															// the edge record, prefetched per flush
+															// with a single multi-get.
+															// Target-less (legacy) entries carry no
+															// far vertex, so they
+															// take that fallback
+															// either way. Scan order is
+															// preserved throughout.
+															let matched =
+																match (&spec.matcher, &item.target)
 																{
-																	Some(matcher.matches(
+																	(
+																		Some(matcher),
+																		Some(target),
+																	) if dir != Dir::Both => Some(matcher.matches(
 																		rid,
 																		&item.edge,
 																		target,
 																		dir == Dir::Out,
-																	))
+																	)),
+																	_ => None,
+																};
+															if let Some(keep) = matched {
+																if record_metrics {
+																	metrics.add_props_evals(1);
 																}
-																_ => None,
-															};
-														if let Some(keep) = matched {
-															if record_metrics {
-																metrics.add_props_evals(1);
-															}
-															if keep {
-																rid_batch.push(item.edge);
+																if keep {
+																	rid_batch.push(item.edge);
+																}
+															} else {
+																let entry =
+																	synthesize_payload_candidate(
+																		spec, rid, dir, item,
+																	);
+																if record_metrics {
+																	if entry.1.is_some() {
+																		metrics.add_props_evals(1);
+																	} else {
+																		metrics
+																			.add_props_fallbacks(1);
+																	}
+																}
+																payload_pending.push(entry);
 															}
 														} else {
-															let entry =
-																synthesize_payload_candidate(
-																	spec, rid, dir, item,
-																);
-															if record_metrics {
-																if entry.1.is_some() {
-																	metrics.add_props_evals(1);
-																} else {
-																	metrics.add_props_fallbacks(1);
-																}
+															// `TargetId` / `FullEdge` operate on
+															// the edge identity.
+															// Defer counting until after
+															// filtering at flush time when a
+															// predicate
+															// is pushed down; otherwise
+															// count each edge as it
+															// is buffered.
+															rid_batch.push(item.edge);
+															if !has_predicate {
+																edges_yielded += 1;
 															}
-															payload_pending.push(entry);
 														}
+														if !has_predicate
+															&& edge_limit
+																.is_some_and(|l| edges_yielded >= l)
+														{
+															limit_hit = true;
+															break;
+														}
+													}
+													// Record scanned adjacency keys for EXPLAIN
+													// selectivity (matched = output_rows).
+													if record_metrics && scanned_in_batch > 0 {
+														metrics.add_edges_scanned(scanned_in_batch);
+													}
+												}
+											}
+											// With a predicate we flush after every
+											// cursor batch so filtering and per-source LIMIT
+											// counting stay within one source (cursors are per
+											// source+direction); without one we flush at
+											// `scan_batch_size` to amortise the batch fetch.
+											let should_flush = if has_predicate {
+												!rid_batch.is_empty() || !payload_pending.is_empty()
+											} else {
+												rid_batch.len() >= scan_batch_size
+											};
+											if should_flush {
+												// In payload mode the buffered edges are first
+												// reduced to the predicate's matches — evaluated
+												// in batch against their payloads or their
+												// prefetched records — so the flush resolves
+												// without re-applying it: that resolve is the
+												// batched existence-and-permissions check.
+												if !payload_pending.is_empty() {
+													let pred = record_predicate
+														.as_ref()
+														.expect("payload mode implies a predicate");
+													filter_payload_pending(
+														&ctx,
+														&txn,
+														ns_id,
+														db_id,
+														version,
+														pred,
+														std::mem::take(&mut payload_pending),
+														&mut rid_batch,
+													)
+													.await?;
+												}
+												let flush_record_predicate =
+													if payload_spec.is_some() {
+														None
 													} else {
-														// `TargetId` / `FullEdge` operate on the
-														// edge identity. Defer counting until after
-														// filtering at flush time when a predicate
-														// is pushed down; otherwise
-														// count each edge as it
-														// is buffered.
-														rid_batch.push(item.edge);
-														if !has_predicate {
-															edges_yielded += 1;
-														}
-													}
-													if !has_predicate
-														&& edge_limit
-															.is_some_and(|l| edges_yielded >= l)
-													{
-														limit_hit = true;
-														break;
-													}
-												}
-												// Record scanned adjacency keys for EXPLAIN
-												// selectivity (matched = output_rows).
-												if record_metrics && scanned_in_batch > 0 {
-													metrics.add_edges_scanned(scanned_in_batch);
-												}
-											}
-										}
-										// With a predicate we flush after every
-										// cursor batch so filtering and per-source LIMIT
-										// counting stay within one source (cursors are per
-										// source+direction); without one we flush at
-										// `scan_batch_size` to amortise the batch fetch.
-										let should_flush = if has_predicate {
-											!rid_batch.is_empty() || !payload_pending.is_empty()
-										} else {
-											rid_batch.len() >= scan_batch_size
-										};
-										if should_flush {
-											// In payload mode the buffered edges are first
-											// reduced to the predicate's matches — evaluated
-											// in batch against their payloads or their
-											// prefetched records — so the flush resolves
-											// without re-applying it: that resolve is the
-											// batched existence-and-permissions check.
-											if !payload_pending.is_empty() {
-												let pred = record_predicate
-													.as_ref()
-													.expect("payload mode implies a predicate");
-												filter_payload_pending(
-													&ctx,
-													&txn,
-													ns_id,
-													db_id,
-													version,
-													pred,
-													std::mem::take(&mut payload_pending),
-													&mut rid_batch,
-												)
-												.await?;
-											}
-											let flush_record_predicate = if payload_spec.is_some() {
-												None
-											} else {
-												record_predicate.as_ref()
-											};
-											let mut values = if rid_batch.is_empty() {
-												Vec::new()
-											} else {
-												resolve_and_filter_batch(
-													&ctx,
-													&txn,
-													ns_id,
-													db_id,
-													&rid_batch,
-													fetch_full,
-													check_perms,
-													version,
-													&mut perm_cache,
-													key_predicate.as_ref(),
-													flush_record_predicate,
-												)
-												.await?
-											};
-											rid_batch.clear();
-											if has_predicate {
-												// Count post-filter matches and enforce the
-												// per-source LIMIT against them.
-												if let Some(l) = edge_limit {
-													let room = l.saturating_sub(edges_yielded);
-													if values.len() >= room {
-														values.truncate(room);
-														limit_hit = true;
-													}
-												}
-												edges_yielded += values.len();
-												if !values.is_empty() {
-													yielder.emit(ValueBatch::new(values)).await;
-												}
-											} else {
-												yielder.emit(ValueBatch::new(values)).await;
-											}
-										}
-										if limit_hit || chunk_bound_hit {
-											break 'cursor_loop;
-										}
-									}
-									let merge_stats = cursor.stats();
-									dir_delta_hits += merge_stats.delta_hits;
-									if record_metrics {
-										metrics.add_block_hits(merge_stats.block_hits);
-										metrics.add_delta_hits(merge_stats.delta_hits);
-									}
-									drop(cursor);
-								}
-
-								// Legacy-format fallback: for each adjacency entry
-								// that did not embed a target, walk the edge's
-								// own adjacency (restricted to the requested
-								// target tables) to recover the target vertex.
-								// Runs after the outer cursor is dropped so we
-								// can hold an inner cursor on `txn`.
-								if !legacy_edges.is_empty() && !limit_hit {
-									let inner_specs: Vec<EdgeTableSpec> =
-										if target_tables.is_empty() {
-											Vec::new()
-										} else {
-											target_tables
-												.iter()
-												.cloned()
-												.map(|t| EdgeTableSpec {
-													table: t,
-													range_start: std::ops::Bound::Unbounded,
-													range_end: std::ops::Bound::Unbounded,
-												})
-												.collect()
-										};
-									'legacy_loop: for edge_rid in legacy_edges {
-										// Edge-side inner keys are never folded,
-										// so the fallback stays a plain key scan.
-										let inner_scopes = compute_graph_ranges(
-											ns_id,
-											db_id,
-											&edge_rid,
-											dir,
-											&inner_specs,
-											&ctx,
-										)
-										.await?;
-										for inner in inner_scopes {
-											let mut inner_cursor = txn
-												.open_keys_cursor_raw(
-													inner.range,
-													Direction::Forward,
-													0,
-													version,
-												)
-												.await
-												.context(
-													"Failed to open legacy-fallback graph cursor",
-												)?;
-											loop {
-												let inner_batch = inner_cursor
-													.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
-													.await
-													.context(
-														"Failed to scan edge adjacency for legacy graph fallback",
-													)?;
-												if inner_batch.is_empty() {
-													break;
-												}
-												for ik in &inner_batch {
-													// On edge-side adjacency keys the
-													// `(ft, fk)` slot holds the endpoint
-													// vertex, not an edge -- the legacy
-													// fallback walks the edge's own
-													// adjacency precisely to recover
-													// that vertex. Bind it under a name
-													// that reflects what it actually is.
-													let endpoint = inner
-														.decoder
-														.decode_edge(ik)
-														.context("Failed to decode graph key")?;
-													rid_batch.push(endpoint);
-													edges_yielded += 1;
-													if edge_limit
-														.is_some_and(|l| edges_yielded >= l)
-													{
-														limit_hit = true;
-														break;
-													}
-												}
-												if rid_batch.len() >= scan_batch_size {
-													let values = resolve_record_batch(
+														record_predicate.as_ref()
+													};
+												let mut values = if rid_batch.is_empty() {
+													Vec::new()
+												} else {
+													resolve_and_filter_batch(
 														&ctx,
 														&txn,
 														ns_id,
@@ -1212,52 +1272,190 @@ impl ExecOperator for GraphEdgeScan {
 														fetch_full,
 														check_perms,
 														version,
-														CachePolicy::ReadWrite,
 														&mut perm_cache,
+														key_predicate.as_ref(),
+														flush_record_predicate,
 													)
-													.await?;
+													.await?
+												};
+												rid_batch.clear();
+												if has_predicate {
+													// Count post-filter matches and enforce the
+													// per-source LIMIT against them.
+													if let Some(l) = edge_limit {
+														let room = l.saturating_sub(edges_yielded);
+														if values.len() >= room {
+															values.truncate(room);
+															limit_hit = true;
+														}
+													}
+													edges_yielded += values.len();
+													if !values.is_empty() {
+														yielder.emit(ValueBatch::new(values)).await;
+													}
+												} else {
 													yielder.emit(ValueBatch::new(values)).await;
-													rid_batch.clear();
-												}
-												if limit_hit {
-													break;
 												}
 											}
-											drop(inner_cursor);
-											if limit_hit {
-												break 'legacy_loop;
+											if limit_hit || chunk_bound_hit {
+												break 'cursor_loop;
+											}
+										}
+										let merge_stats = cursor.stats();
+										dir_delta_hits += merge_stats.delta_hits;
+										if record_metrics {
+											metrics.add_block_hits(merge_stats.block_hits);
+											metrics.add_delta_hits(merge_stats.delta_hits);
+										}
+										drop(cursor);
+									}
+
+									// Legacy-format fallback: for each adjacency entry
+									// that did not embed a target, walk the edge's
+									// own adjacency (restricted to the requested
+									// target tables) to recover the target vertex.
+									// Runs after the outer cursor is dropped so we
+									// can hold an inner cursor on `txn`.
+									if !legacy_edges.is_empty() && !limit_hit {
+										let inner_specs: Vec<EdgeTableSpec> =
+											if target_tables.is_empty() {
+												Vec::new()
+											} else {
+												target_tables
+													.iter()
+													.cloned()
+													.map(|t| EdgeTableSpec {
+														table: t,
+														range_start: std::ops::Bound::Unbounded,
+														range_end: std::ops::Bound::Unbounded,
+													})
+													.collect()
+											};
+										'legacy_loop: for edge_rid in legacy_edges {
+											// Edge-side inner keys are never folded,
+											// so the fallback stays a plain key scan.
+											let inner_scopes = compute_graph_ranges(
+												ns_id,
+												db_id,
+												&edge_rid,
+												dir,
+												&inner_specs,
+												&ctx,
+											)
+											.await?;
+											for inner in inner_scopes {
+												let mut inner_cursor = txn
+													.open_keys_cursor_raw(
+														inner.range,
+														Direction::Forward,
+														0,
+														version,
+													)
+													.await
+													.context(
+														"Failed to open legacy-fallback graph cursor",
+													)?;
+												loop {
+													let inner_batch = inner_cursor
+														.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
+														.await
+														.context(
+															"Failed to scan edge adjacency for legacy graph fallback",
+														)?;
+													if inner_batch.is_empty() {
+														break;
+													}
+													for ik in &inner_batch {
+														// On edge-side adjacency keys the
+														// `(ft, fk)` slot holds the endpoint
+														// vertex, not an edge -- the legacy
+														// fallback walks the edge's own
+														// adjacency precisely to recover
+														// that vertex. Bind it under a name
+														// that reflects what it actually is.
+														let endpoint =
+															inner.decoder.decode_edge(ik).context(
+																"Failed to decode graph key",
+															)?;
+														rid_batch.push(endpoint);
+														edges_yielded += 1;
+														if edge_limit
+															.is_some_and(|l| edges_yielded >= l)
+														{
+															limit_hit = true;
+															break;
+														}
+													}
+													if rid_batch.len() >= scan_batch_size {
+														let values = resolve_record_batch(
+															&ctx,
+															&txn,
+															ns_id,
+															db_id,
+															&rid_batch,
+															fetch_full,
+															check_perms,
+															version,
+															CachePolicy::ReadWrite,
+															&mut perm_cache,
+														)
+														.await?;
+														yielder.emit(ValueBatch::new(values)).await;
+														rid_batch.clear();
+													}
+													if limit_hit {
+														break;
+													}
+												}
+												drop(inner_cursor);
+												if limit_hit {
+													break 'legacy_loop;
+												}
 											}
 										}
 									}
+
+									// Continue chunking only when the cursor was
+									// suspended because the legacy buffer filled.
+									// `last_processed_key` is the legacy key that
+									// triggered the bound; the next chunk picks the
+									// range up immediately after it.
+									if !chunk_bound_hit || limit_hit {
+										break 'range_chunks;
+									}
+									let resume_from = last_processed_key
+										.expect("chunk_bound_hit implies a key was processed");
+									chunk = chunk.resume_after(&resume_from, Direction::Forward);
 								}
 
-								// Continue chunking only when the cursor was
-								// suspended because the legacy buffer filled.
-								// `last_processed_key` is the legacy key that
-								// triggered the bound; the next chunk picks the
-								// range up immediately after it.
-								if !chunk_bound_hit || limit_hit {
-									break 'range_chunks;
+								if limit_hit {
+									break 'dir_loop;
 								}
-								let resume_from = last_processed_key
-									.expect("chunk_bound_hit implies a key was processed");
-								chunk = chunk.resume_after(&resume_from, Direction::Forward);
 							}
-
-							if limit_hit {
-								break 'dir_loop;
-							}
+							observe_fold_candidate(
+								&txn,
+								ns_id,
+								db_id,
+								rid,
+								dir,
+								dir_delta_hits,
+								fold_threshold,
+							);
 						}
-						observe_fold_candidate(
-							&txn,
-							ns_id,
-							db_id,
-							rid,
-							dir,
-							dir_delta_hits,
-							fold_threshold,
-						);
 					}
+					#[cfg(not(target_family = "wasm"))]
+					if let Some(started) = win_timer {
+						// The first window's sequential run doubles as the
+						// timing probe: engage the spawned fan-out for the
+						// batch's remaining windows only when the measured
+						// per-source cost clears the dispatch-overhead bar,
+						// so a cheap batch (a couple of edges per source)
+						// keeps its exact sequential cost.
+						let per_source =
+							started.elapsed().as_nanos() as u64 / (win_end - win_start) as u64;
+						fanout_engaged = Some(per_source >= GRAPH_SPAWN_PER_SOURCE_NANOS);
+					}
+					win_start = win_end;
 				}
 			}
 
@@ -1576,6 +1774,381 @@ async fn apply_record_predicate(
 	}
 	values.truncate(write);
 	Ok(values)
+}
+
+/// How many cache-missed sources' adjacency scans run side by side in the
+/// plain-shape concurrent fan-out — and the width of the drain windows the
+/// scan processes an input batch in, which bounds the aggregate prescan
+/// footprint and keeps the output streaming between windows.
+const GRAPH_FANOUT_CONCURRENCY: usize = 16;
+
+/// The measured per-source scan cost below which the fan-out does not pay:
+/// each spawned source costs a context clone, a handful of `Arc` bumps, a
+/// `RecordId` clone and a task dispatch, which together sit at roughly this
+/// scale — overlapping work cheaper than that loses more to dispatch than
+/// it recovers from parallelism.
+#[cfg(not(target_family = "wasm"))]
+const GRAPH_SPAWN_PER_SOURCE_NANOS: u64 = 5_000;
+
+/// One source's adjacency for the plain traversal shape — no predicate,
+/// no payload, no per-source LIMIT — collected into an owned buffer of at
+/// most `cap` record ids: the self-contained unit the concurrent fan-out
+/// runs per source. Mirrors the sequential loop's plain arms (the
+/// zero-materialization visitor, the materialized folded/lightweight
+/// path) — keep the two in step. Returns `None` when the source needs
+/// machinery only the sequential loop carries: a legacy-format
+/// (target-less) entry in `TargetVertex` mode, whose inner-scan fallback
+/// and chunk resume stay sequential, or an adjacency larger than `cap`,
+/// whose incremental flush-as-you-go emission bounds memory where this
+/// buffer cannot; metrics and fold observations are withheld on that path
+/// so the sequential re-scan records them once.
+#[cfg(not(target_family = "wasm"))]
+#[allow(clippy::too_many_arguments)]
+async fn scan_source_plain(
+	ctx: &ExecutionContext,
+	txn: &Transaction,
+	adjacency: VertexAdjacency,
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	rid: &RecordId,
+	directions: &[Dir],
+	edge_tables: &[EdgeTableSpec],
+	output_mode: GraphScanOutput,
+	target_tables: &[TableName],
+	version: Option<u64>,
+	fold_threshold: usize,
+	cap: usize,
+	metrics: &OperatorMetrics,
+	record_metrics: bool,
+) -> Result<Option<Vec<RecordId>>, ControlFlow> {
+	crate::exec::operators::check_cancelled(ctx)?;
+	// A lightweight edge's synthesized adjacency derives from its id alone,
+	// which says nothing about existence — gate exactly as the sequential
+	// loop does.
+	if adjacency == VertexAdjacency::Lightweight
+		&& !txn
+			.record_exists(ns_id, db_id, &rid.table, &rid.key, version)
+			.await
+			.context("Failed to check a lightweight source's existence")?
+	{
+		return Ok(Some(Vec::new()));
+	}
+	let mut out: Vec<RecordId> = Vec::new();
+	let mut scanned: u64 = 0;
+	let mut block_hits: u64 = 0;
+	let mut delta_hits: u64 = 0;
+	let mut observations: Vec<(Dir, u64)> = Vec::new();
+	for &dir in directions {
+		let scopes = compute_graph_ranges(ns_id, db_id, rid, dir, edge_tables, ctx).await?;
+		let mut dir_delta_hits: u64 = 0;
+		for scope in scopes {
+			let adjacency_scope = AdjacencyScope {
+				ns: ns_id,
+				db: db_id,
+				vertex: rid,
+				dir: Some(dir),
+				edge_table: scope.edge_table.as_ref(),
+				fk_lower: scope.fk_lower.as_ref(),
+				delta_range: scope.range.clone(),
+			};
+			let mut cursor = match adjacency {
+				VertexAdjacency::Lightweight => {
+					MergedAdjacencyCursor::open_lightweight(txn, &adjacency_scope)
+						.context("Failed to open graph cursor")?
+				}
+				VertexAdjacency::Normal {
+					folded,
+				} => MergedAdjacencyCursor::open(
+					txn,
+					adjacency_scope,
+					folded,
+					version,
+					Some(ctx.root().ctx.get_index_stores().adjacency_resolve()),
+				)
+				.await
+				.context("Failed to open graph cursor")?,
+			};
+			// One flag for both bail-out shapes — a legacy entry and a
+			// buffer at `cap` — since they share the contract: drop the
+			// cursor and hand the whole source back to the sequential loop.
+			let mut bail = false;
+			loop {
+				let visited = cursor
+					.visit_unfolded_batch(crate::kvs::NORMAL_BATCH_SIZE, |key| {
+						let decoded = crate::key::schema::DecodedGraph::decode(key)?;
+						if output_mode == GraphScanOutput::TargetVertex {
+							match decoded.target {
+								Some(target) => {
+									if target_tables.is_empty()
+										|| target_tables.contains(&target.table)
+									{
+										out.push(target);
+									}
+								}
+								None => {
+									bail = true;
+									return Ok(VisitFlow::Stop);
+								}
+							}
+						} else {
+							out.push(decoded.edge);
+						}
+						if out.len() >= cap {
+							bail = true;
+							return Ok(VisitFlow::Stop);
+						}
+						Ok(VisitFlow::Continue)
+					})
+					.await
+					.context("Failed to scan graph edge")?;
+				match visited {
+					Some(0) => break,
+					Some(n) => scanned += n as u64,
+					None => {
+						let batch = cursor
+							.next_batch_scan(crate::kvs::NORMAL_BATCH_SIZE)
+							.await
+							.context("Failed to scan graph edge")?;
+						if batch.is_empty() {
+							break;
+						}
+						scanned += batch.len() as u64;
+						for item in batch {
+							if output_mode == GraphScanOutput::TargetVertex {
+								match item.target {
+									Some(target) => {
+										if target_tables.is_empty()
+											|| target_tables.contains(&target.table)
+										{
+											out.push(target);
+										}
+									}
+									None => {
+										bail = true;
+										break;
+									}
+								}
+							} else {
+								out.push(item.edge);
+							}
+							if out.len() >= cap {
+								bail = true;
+								break;
+							}
+						}
+					}
+				}
+				if bail {
+					break;
+				}
+			}
+			let stats = cursor.stats();
+			dir_delta_hits += stats.delta_hits;
+			block_hits += stats.block_hits;
+			delta_hits += stats.delta_hits;
+			drop(cursor);
+			if bail {
+				return Ok(None);
+			}
+		}
+		observations.push((dir, dir_delta_hits));
+	}
+	if record_metrics {
+		metrics.add_edges_scanned(scanned);
+		metrics.add_block_hits(block_hits);
+		metrics.add_delta_hits(delta_hits);
+	}
+	for (dir, dir_delta_hits) in observations {
+		observe_fold_candidate(txn, ns_id, db_id, rid, dir, dir_delta_hits, fold_threshold);
+	}
+	Ok(Some(out))
+}
+
+#[cfg(all(feature = "kv-mem", not(target_family = "wasm")))]
+#[cfg(test)]
+mod prescan_tests {
+	use super::*;
+	use crate::exec::operators::test_util::TestDb;
+
+	/// A datastore with two source vertices: `person:big` with ten out-edges
+	/// and `person:small` with three, every target existing.
+	async fn traversal_db() -> TestDb {
+		let mut setup = String::from("CREATE person:big; CREATE person:small;");
+		for i in 0..10 {
+			setup.push_str(&format!("CREATE person:t{i}; RELATE person:big->knows->person:t{i};"));
+		}
+		for i in 0..3 {
+			setup.push_str(&format!("RELATE person:small->knows->person:t{i};"));
+		}
+		TestDb::new(&setup).await
+	}
+
+	/// One prescan of `person:{source}`'s out-adjacency under `cap`,
+	/// returning its buffered targets (`None` is the sequential-fallback
+	/// contract).
+	async fn prescan(db: &TestDb, source: &str, cap: usize) -> Option<Vec<RecordId>> {
+		let ctx = db.exec_ctx().await;
+		let txn = ctx.txn();
+		let db_ctx = ctx.database().expect("database context").clone();
+		let tb = txn
+			.get_tb(db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id, &"person".into(), None)
+			.await
+			.expect("the source table resolves");
+		let metrics = OperatorMetrics::new();
+		scan_source_plain(
+			&ctx,
+			&txn,
+			vertex_adjacency_of(tb.as_deref()),
+			db_ctx.ns_ctx.ns.namespace_id,
+			db_ctx.db.database_id,
+			&RecordId::new("person".into(), source.to_string()),
+			&[Dir::Out],
+			&[],
+			GraphScanOutput::TargetVertex,
+			&[],
+			None,
+			usize::MAX,
+			cap,
+			&metrics,
+			false,
+		)
+		.await
+		.expect("prescan should succeed")
+	}
+
+	#[tokio::test]
+	async fn a_source_over_the_cap_defers_to_the_sequential_machinery() {
+		let db = traversal_db().await;
+		assert!(
+			prescan(&db, "big", 5).await.is_none(),
+			"a source with more edges than the cap must not buffer them all"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_source_under_the_cap_returns_its_complete_adjacency() {
+		let db = traversal_db().await;
+		let mut out = prescan(&db, "small", 5).await.expect("three edges fit a cap of five");
+		out.sort();
+		let expected: Vec<RecordId> =
+			(0..3).map(|i| RecordId::new("person".into(), format!("t{i}"))).collect();
+		assert_eq!(out, expected);
+	}
+}
+
+#[cfg(all(feature = "kv-mem", not(target_family = "wasm")))]
+#[cfg(test)]
+mod window_tests {
+	use std::ops::Bound;
+
+	use futures::StreamExt;
+	use surrealdb_cnf::ConfigMap;
+
+	use super::*;
+	use crate::exec::operators::test_util::{TestDb, ValuesOperator, collect};
+
+	/// A `GraphEdgeScan` over `person:s*->knows->person` in `TargetVertex`
+	/// mode, with metrics enabled so a test can observe `edges_scanned`.
+	fn knows_scan(sources: Vec<Value>) -> (Arc<dyn ExecOperator>, Arc<OperatorMetrics>) {
+		let scan = GraphEdgeScan::new(
+			ValuesOperator::new(sources),
+			LookupDirection::Out,
+			vec![EdgeTableSpec {
+				table: "knows".into(),
+				range_start: Bound::Unbounded,
+				range_end: Bound::Unbounded,
+			}],
+			GraphScanOutput::TargetVertex,
+			None,
+		);
+		scan.metrics.enable();
+		let metrics = Arc::clone(&scan.metrics);
+		(Arc::new(scan), metrics)
+	}
+
+	fn person(key: impl std::fmt::Display) -> Value {
+		Value::RecordId(RecordId::new("person".into(), key.to_string()))
+	}
+
+	/// Dropping the output stream after one batch must abandon the sources
+	/// not yet reached: the scan works window by window, emitting between
+	/// windows, so a downstream `LIMIT` never pays for the whole input
+	/// batch's adjacency.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn dropping_the_stream_stops_the_remaining_windows() {
+		const SOURCES: usize = 64;
+		const EDGES_PER_SOURCE: usize = 8;
+		let mut setup = String::new();
+		for j in 0..EDGES_PER_SOURCE {
+			setup.push_str(&format!("CREATE person:t{j};"));
+		}
+		for i in 0..SOURCES {
+			setup.push_str(&format!("CREATE person:s{i};"));
+			for j in 0..EDGES_PER_SOURCE {
+				setup.push_str(&format!("RELATE person:s{i}->knows->person:t{j};"));
+			}
+		}
+		let db = TestDb::new_with_config(
+			&setup,
+			ConfigMap::empty().with_key_value("scan_batch_size", "8"),
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+
+		let (op, metrics) = knows_scan((0..SOURCES).map(|i| person(format!("s{i}"))).collect());
+		let mut stream = op.execute(&ctx).expect("execute should succeed");
+		let first = stream.next().await.expect("one batch").expect("batch should be Ok");
+		assert!(!first.values().is_empty(), "the first batch should carry rows");
+		drop(stream);
+
+		let scanned = metrics.edges_scanned();
+		let window = (GRAPH_FANOUT_CONCURRENCY * EDGES_PER_SOURCE) as u64;
+		assert!(
+			scanned <= 2 * window,
+			"dropping after one batch should stop the later windows: \
+			 scanned {scanned} edges, expected at most two windows ({})",
+			2 * window
+		);
+	}
+
+	/// Results must be complete and exact across every boundary the
+	/// windowed fan-out introduces: window edges, the per-source prescan
+	/// cap (an over-cap source falls back to the sequential machinery), and
+	/// the flush size — no row dropped, none double-emitted.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn results_are_exact_across_window_and_cap_boundaries() {
+		const SOURCES: usize = 40;
+		const HUB_EDGES: usize = 20;
+		let mut setup = String::from("CREATE person:s0;");
+		for j in 0..HUB_EDGES {
+			setup.push_str(&format!("CREATE person:u{j}; RELATE person:s0->knows->person:u{j};"));
+		}
+		for i in 1..SOURCES {
+			setup.push_str(&format!(
+				"CREATE person:s{i}; CREATE person:v{i}; \
+				 RELATE person:s{i}->knows->person:v{i};"
+			));
+		}
+		// A scan_batch_size of 8 is both the prescan cap (under the hub's
+		// twenty edges) and the flush size, so every boundary is crossed.
+		let db = TestDb::new_with_config(
+			&setup,
+			ConfigMap::empty().with_key_value("scan_batch_size", "8"),
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+
+		let (op, _) = knows_scan((0..SOURCES).map(|i| person(format!("s{i}"))).collect());
+		let mut out = collect(&op, &ctx).await;
+		out.sort();
+
+		let mut expected: Vec<Value> = (0..HUB_EDGES)
+			.map(|j| person(format!("u{j}")))
+			.chain((1..SOURCES).map(|i| person(format!("v{i}"))))
+			.collect();
+		expected.sort();
+		assert_eq!(out, expected);
+	}
 }
 
 #[cfg(test)]
