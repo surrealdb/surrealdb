@@ -7,11 +7,11 @@ use std::sync::Arc;
 use surrealdb_strand::TableName;
 
 use super::Planner;
-use super::util::{extract_table_from_matches, key_lit_to_expr};
+use super::util::{extract_table_from_matches, get_effective_limit_literal, key_lit_to_expr};
 use crate::err::Error;
 use crate::exec::operators::{
 	CurrentValueSource, EdgeTableSpec, Filter, GraphEdgeScan, GraphScanOutput, Limit, OrderByField,
-	RandomShuffle, ReferenceScan, ReferenceScanOutput, SortDirection,
+	ReferenceScan, ReferenceScanOutput, SortDirection,
 };
 use crate::exec::parts::LookupDirection;
 use crate::exec::planner::select::SelectPipelineConfig;
@@ -310,6 +310,66 @@ impl<'ctx> Planner<'ctx> {
 					edge_tables.push(spec);
 				}
 
+				// An ORDER BY normally blocks the limit push below (the sort
+				// needs every row), with one exception: a single plain
+				// ascending `id` key over a single edge table in one fixed
+				// direction is exactly the scan's own emission order — one
+				// adjacency scope, whose pointer keys sort by edge id — so
+				// the first `limit + start` rows the scan yields are the
+				// rows the sort would keep. Multiple edge tables or a `<->`
+				// traversal concatenate separately-sorted scopes, and a
+				// descending key would need a reverse scan, so those keep
+				// the full scan. A field list that aliases a different
+				// field to the literal name `id` also keeps the full scan:
+				// `ORDER BY id` then resolves against the aliased
+				// expression (see `order_by_id_is_source_id`), not the
+				// edge's own id, so the scan's emission order no longer
+				// matches the sort.
+				let ordered_scan_cap = !matches!(dir, crate::expr::Dir::Both)
+					&& edge_tables.len() == 1
+					&& order.as_ref().is_some_and(order_is_plain_id_asc)
+					&& order_by_id_is_source_id(expr.as_ref());
+				// Push limit into the scan when no filter/sort/split would
+				// change the result count. This avoids scanning all edges
+				// when only a few are needed. `get_effective_limit_literal`
+				// returns the combined `start + limit` only when both are
+				// literal non-negative integers (absent START counts as
+				// zero); a parameter, expression, or negative value yields
+				// `None`, declining the push so the downstream Limit
+				// operator applies the real value at execution time instead.
+				// Only push the limit into the scan when the scan's output is the
+				// final filtered set: no downstream clause changes the row count. A
+				// `cond` is safe only when it was pushed into the scan
+				// (`graph_pushdown`); when it flows through the expr/group pipeline
+				// or a downstream Filter, limiting the scan first would drop rows the
+				// filter has not yet seen. An ORDER BY blocks the push unless
+				// it matches the scan's own emission order (`ordered_scan_cap`
+				// above).
+				//
+				// The cap must count *visible* rows: with a pushed predicate
+				// the scan counts post-resolve at flush time — after
+				// permission filtering — so the count is always exact, but
+				// without one it counts at buffer time, before the batched
+				// resolve applies table SELECT permissions. That shape is
+				// admitted only when no counted row can be permission-dropped
+				// (`graph_limit_count_is_exact`).
+				let pushed_limit = if (cond.is_none() || graph_pushdown.is_some())
+					&& split.is_none()
+					&& (order.is_none() || ordered_scan_cap)
+					&& group.is_none()
+				{
+					match get_effective_limit_literal(&start, &limit) {
+						Some(effective_limit)
+							if graph_pushdown.is_some()
+								|| self.graph_limit_count_is_exact(&edge_tables).await =>
+						{
+							Some(effective_limit)
+						}
+						_ => None,
+					}
+				} else {
+					None
+				};
 				let scan = GraphEdgeScan::new(
 					input,
 					LookupDirection::from(dir),
@@ -317,37 +377,12 @@ impl<'ctx> Planner<'ctx> {
 					output_mode,
 					self.version.clone(),
 				);
-				// Push limit into the scan when no filter/sort/split would
-				// change the result count. This avoids scanning all edges
-				// when only a few are needed. When START is present, add
-				// the offset so the scan fetches enough rows for the skip.
-				// Only push the limit into the scan when the scan's output is the
-				// final filtered set: no downstream clause changes the row count. A
-				// `cond` is safe only when it was pushed into the scan
-				// (`graph_pushdown`); when it flows through the expr/group pipeline
-				// or a downstream Filter, limiting the scan first would drop rows the
-				// filter has not yet seen.
-				let scan = if (cond.is_none() || graph_pushdown.is_some())
-					&& split.is_none()
-					&& order.is_none()
-					&& group.is_none()
-				{
-					if let Some(crate::expr::limit::Limit(crate::expr::Expr::Literal(
-						crate::expr::Literal::Integer(n),
-					))) = &limit
-					{
-						let offset = match &start {
-							Some(crate::expr::start::Start(crate::expr::Expr::Literal(
-								crate::expr::Literal::Integer(s),
-							))) => *s as usize,
-							_ => 0,
-						};
-						scan.with_limit(*n as usize + offset)
-					} else {
-						scan
+				let scan = match pushed_limit {
+					Some(effective_limit) if ordered_scan_cap => {
+						scan.with_ordered_limit(effective_limit)
 					}
-				} else {
-					scan
+					Some(effective_limit) => scan.with_limit(effective_limit),
+					None => scan,
 				};
 				// Push the compiled predicate into the scan, replacing the
 				// downstream Filter for graph lookups.
@@ -440,14 +475,11 @@ impl<'ctx> Planner<'ctx> {
 				filtered
 			};
 
+			// `plan_sort` picks the sort operator the same way the SELECT
+			// pipeline does: a bounded literal LIMIT gets a top-k heap
+			// instead of a full blocking sort.
 			let sorted: Arc<dyn ExecOperator> = match order {
-				Some(crate::expr::order::Ordering::Order(order_list)) => {
-					let order_by = self.convert_order_list(order_list).await?;
-					Arc::new(crate::exec::operators::Sort::new(split_op, order_by))
-				}
-				Some(crate::expr::order::Ordering::Random) => {
-					Arc::new(RandomShuffle::new(split_op, None))
-				}
+				Some(order) => self.plan_sort(split_op, order, &start, &limit, false).await?,
 				None => split_op,
 			};
 
@@ -628,6 +660,46 @@ impl<'ctx> Planner<'ctx> {
 		})
 	}
 
+	/// Whether a LIMIT pushed into a graph scan with no pushed predicate
+	/// counts exactly the rows the query returns.
+	///
+	/// Without a pushed predicate the scan counts rows toward its cap at
+	/// buffer time, before `resolve_record_batch` applies each edge table's
+	/// SELECT permission — a permission-dropped row would consume cap budget
+	/// and the capped lookup would return fewer than `limit` visible rows.
+	/// The count is therefore exact only when no counted row can be dropped:
+	/// the runtime provably skips permission evaluation for this session, or
+	/// every named edge table's SELECT permission is `Full`. Everything else
+	/// declines conservatively — a missing plan-time txn/ns/db or auth
+	/// principal, an unbounded traversal (no named edge tables, so nothing to
+	/// permission-check), a versioned read (which enforces the historical
+	/// permissions, not the current catalog's), or any catalog miss or error.
+	/// Declining only loses the cap: the downstream Limit operator still
+	/// applies the real bound.
+	async fn graph_limit_count_is_exact(&self, edge_tables: &[EdgeTableSpec]) -> bool {
+		use crate::catalog::providers::TableProvider;
+		let (Some(ns), Some(db)) = (self.ns(), self.db()) else {
+			return false;
+		};
+		if !self.should_check_perms_for_view(ns, db) {
+			return true;
+		}
+		if self.version.is_some() || edge_tables.is_empty() {
+			return false;
+		}
+		let Some(txn) = self.txn() else {
+			return false;
+		};
+		for spec in edge_tables {
+			match txn.get_tb_by_name(ns, db, &spec.table, None).await {
+				Ok(Some(td))
+					if matches!(td.permissions.select, crate::catalog::Permission::Full) => {}
+				_ => return false,
+			}
+		}
+		true
+	}
+
 	/// Decide whether a consecutive `(edge_lookup, vertex_lookup)` pair can
 	/// be served by a single `GraphEdgeScan` in `TargetVertex` mode.
 	///
@@ -800,5 +872,52 @@ impl<'ctx> Planner<'ctx> {
 		)
 		.with_target_tables(plan.target_tables);
 		Ok(Arc::new(scan))
+	}
+}
+
+/// Whether an ORDER clause is exactly one plain ascending `id` key — no
+/// collation, no numeric coercion, no nested path. This is the ordering a
+/// single adjacency scope's pointer keys already emit, which is what lets
+/// a LIMIT be capped at the scan beneath the sort.
+fn order_is_plain_id_asc(order: &crate::expr::order::Ordering) -> bool {
+	let crate::expr::order::Ordering::Order(list) = order else {
+		return false;
+	};
+	let [key] = list.0.as_slice() else {
+		return false;
+	};
+	key.direction
+		&& !key.collate
+		&& !key.numeric
+		&& matches!(key.value.0.as_slice(), [crate::expr::Part::Field(f)] if f.as_str() == "id")
+}
+
+/// Whether an `ORDER BY id` key (already confirmed plain-ascending by
+/// `order_is_plain_id_asc`) still refers to the edge's own id once the
+/// lookup's field list is taken into account.
+///
+/// The guard invokes `resolve_order_by_alias` — the same resolver the sort
+/// planner (`plan_sort_consolidated`) applies to each ORDER BY key — and
+/// admits only the resolutions that planner maps to the row's own id: no
+/// resolution at all, or a bare single-part `id` idiom (the `SELECT id`
+/// projection naming the field it sorts by). Any other resolution means a
+/// field list aliased a different expression to the literal name `id`, so
+/// the sort orders by that expression and the scan's ascending-edge-id
+/// emission order no longer matches it. This admission can drift from the
+/// sort's behaviour only if the sort planner adopts an alias mechanism
+/// other than `resolve_order_by_alias`; the alias-shadowing cases in
+/// `kvs::tests::graph_ordered_limit_test` pin the two together end to end.
+fn order_by_id_is_source_id(fields: Option<&crate::expr::Fields>) -> bool {
+	let Some(fields) = fields else {
+		return true;
+	};
+	let id_idiom = crate::expr::Idiom(crate::expr::paths::ID.to_vec());
+	match crate::exec::expression_registry::resolve_order_by_alias(&id_idiom, fields) {
+		None => true,
+		Some((resolved, _)) => matches!(
+			&resolved,
+			crate::expr::Expr::Idiom(idiom)
+				if matches!(idiom.0.as_slice(), [crate::expr::Part::Field(f)] if f.as_str() == "id")
+		),
 	}
 }

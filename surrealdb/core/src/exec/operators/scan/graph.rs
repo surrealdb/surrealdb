@@ -160,6 +160,16 @@ pub struct GraphEdgeScan {
 	/// When set, edge scanning stops early after this many results.
 	pub(crate) limit: Option<usize>,
 
+	/// When set, `limit` was pushed beneath an `ORDER BY id ASC` and the cap
+	/// is sound only where the scan emits in ascending edge-id order. The
+	/// planner only sets this for a single edge table in one fixed
+	/// direction — one adjacency scope per source, whose pointer keys (and
+	/// folded blocks, numeric or plain) sort by edge id, and whose
+	/// lightweight synthesis holds at most one entry. The one consumer not
+	/// driven by a cursor is the inline cache fast path, which orders its
+	/// stored entries before the cap applies.
+	pub(crate) limit_needs_id_order: bool,
+
 	/// Optional `WHERE` predicate pushed down from the graph lookup's `cond`,
 	/// replacing the downstream `Filter` operator. Rows for which this
 	/// evaluates falsy are dropped inside the scan.
@@ -208,6 +218,7 @@ impl GraphEdgeScan {
 			target_tables: Vec::new(),
 			version,
 			limit: None,
+			limit_needs_id_order: false,
 			predicate: None,
 			predicate_key_resident: false,
 			payload_spec: None,
@@ -218,6 +229,16 @@ impl GraphEdgeScan {
 
 	pub(crate) fn with_limit(mut self, limit: usize) -> Self {
 		self.limit = Some(limit);
+		self
+	}
+
+	/// Set a per-source cap pushed beneath an `ORDER BY id ASC`: the first
+	/// `limit` rows in the scan's ascending edge-id order are exactly the
+	/// rows the downstream sort keeps. See [`Self::limit_needs_id_order`]
+	/// for the emission orders the scan must compensate for at runtime.
+	pub(crate) fn with_ordered_limit(mut self, limit: usize) -> Self {
+		self.limit = Some(limit);
+		self.limit_needs_id_order = true;
 		self
 	}
 
@@ -284,6 +305,9 @@ impl ExecOperator for GraphEdgeScan {
 		}
 		if let Some(limit) = self.limit {
 			attrs.push(("limit".to_string(), limit.to_string()));
+			if self.limit_needs_id_order {
+				attrs.push(("order_pushdown".to_string(), "id".to_string()));
+			}
 		}
 		if let Some(ref predicate) = self.predicate {
 			attrs.push(("predicate".to_string(), predicate.to_sql()));
@@ -366,6 +390,7 @@ impl ExecOperator for GraphEdgeScan {
 		let output_mode = self.output_mode;
 		let target_tables = Arc::new(self.target_tables.clone());
 		let edge_limit = self.limit;
+		let limit_needs_id_order = self.limit_needs_id_order;
 		let version_expr = self.version.clone();
 		let scan_batch_size = ctx.root().ctx.config.exec.scan_batch_size;
 		let fold_threshold = ctx.root().ctx.config.idx.graph_fold_threshold;
@@ -583,16 +608,18 @@ impl ExecOperator for GraphEdgeScan {
 				}
 
 				// Concurrent fan-out for the plain traversal shape — no
-				// predicate, no payload, no per-source LIMIT: cache-missed
-				// sources scan side by side (bounded, in input order) into
-				// owned buffers the per-source loop below drains, so a
-				// multi-source traversal overlaps its per-source cursor
-				// work instead of paying one sequential open-and-drain per
-				// source, and its flushes coalesce several sources' results
-				// into each record-resolve batch. Every source the fan-out
-				// declines — legacy-format entries, over-cap adjacencies,
-				// any cached direction — falls through to the sequential
-				// machinery unchanged.
+				// predicate, no payload: cache-missed sources scan side by
+				// side (bounded, in input order) into owned buffers the
+				// per-source loop below drains, so a multi-source traversal
+				// overlaps its per-source cursor work instead of paying one
+				// sequential open-and-drain per source, and its flushes
+				// coalesce several sources' results into each record-resolve
+				// batch. A pushed LIMIT rides along: the cap is per source,
+				// so each fan-out scan enforces its own budget exactly as the
+				// sequential path does. Every source the fan-out declines —
+				// legacy-format entries, over-cap adjacencies, any cached
+				// direction — falls through to the sequential machinery
+				// unchanged.
 				//
 				// The batch is processed in contiguous windows of the
 				// fan-out width, each prescanned and then drained/emitted
@@ -604,7 +631,7 @@ impl ExecOperator for GraphEdgeScan {
 				let mut prescanned: Vec<Option<Vec<RecordId>>> = Vec::new();
 				prescanned.resize_with(source_rids.len(), || None);
 				#[cfg(not(target_family = "wasm"))]
-				let plain_shape = !has_predicate && payload_spec.is_none() && edge_limit.is_none();
+				let plain_shape = !has_predicate && payload_spec.is_none();
 				// Whether spawning pays for this batch: undecided until the
 				// first window has run sequentially as a timing probe, then
 				// fixed for the batch's remaining windows.
@@ -656,6 +683,7 @@ impl ExecOperator for GraphEdgeScan {
 											output_mode,
 											&target_tables,
 											version,
+											edge_limit,
 											fold_threshold,
 											scan_batch_size,
 											&metrics,
@@ -790,6 +818,26 @@ impl ExecOperator for GraphEdgeScan {
 											.iter()
 											.filter(move |e| e.edge.starts_with(prefix.as_slice()))
 									}))
+								};
+								// A cap pushed beneath `ORDER BY id` consumes rows
+								// in ascending edge-id order. Ordering the entries
+								// by their identity bytes — the same storekey
+								// encoding whose byte order is edge-id order on the
+								// cursor path's pointer keys — makes that the fast
+								// path's emission order at the point the cap applies,
+								// rather than inheriting it from how the cache is
+								// maintained. The cache holds this (source,
+								// direction)'s complete adjacency, so the first
+								// `edge_limit` entries are exactly the rows the
+								// downstream sort keeps.
+								let selected: Box<
+									dyn Iterator<Item = &EdgeCacheEntry> + Send + '_,
+								> = if limit_needs_id_order && edge_limit.is_some() {
+									let mut ordered: Vec<&EdgeCacheEntry> = selected.collect();
+									ordered.sort_unstable_by(|a, b| a.edge.cmp(&b.edge));
+									Box::new(ordered.into_iter())
+								} else {
+									selected
 								};
 								let mut scanned: u64 = 0;
 								let mut limit_hit = false;
@@ -1951,9 +1999,15 @@ const GRAPH_FANOUT_CONCURRENCY: usize = 16;
 const GRAPH_SPAWN_PER_SOURCE_NANOS: u64 = 5_000;
 
 /// One source's adjacency for the plain traversal shape — no predicate,
-/// no payload, no per-source LIMIT — collected into an owned buffer of at
-/// most `cap` record ids: the self-contained unit the concurrent fan-out
-/// runs per source. Mirrors the sequential loop's plain arms (the
+/// no payload — collected into an owned buffer of at most `cap` record
+/// ids: the self-contained unit the concurrent fan-out runs per source.
+/// `edge_limit` is the per-source cap a pushed LIMIT imposes: the buffer
+/// stops at the cap, each batch request is sized to the remaining budget
+/// so a small cap never over-fetches, and — because the planner admits an
+/// ordered cap only for a single edge table in one fixed direction, one
+/// adjacency scope whose merged cursor emits in ascending edge-id order —
+/// the first `edge_limit` rows are exactly the rows the downstream sort
+/// keeps. Mirrors the sequential loop's plain arms (the
 /// zero-materialization visitor, the materialized folded/lightweight
 /// path) — keep the two in step. Returns `None` when the source needs
 /// machinery only the sequential loop carries: a legacy-format
@@ -1976,6 +2030,7 @@ async fn scan_source_plain(
 	output_mode: GraphScanOutput,
 	target_tables: &[TableName],
 	version: Option<u64>,
+	edge_limit: Option<usize>,
 	fold_threshold: usize,
 	cap: usize,
 	metrics: &OperatorMetrics,
@@ -1997,6 +2052,7 @@ async fn scan_source_plain(
 	let mut scanned: u64 = 0;
 	let mut block_hits: u64 = 0;
 	let mut delta_hits: u64 = 0;
+	let mut capped = false;
 	let mut observations: Vec<(Dir, u64)> = Vec::new();
 	for &dir in directions {
 		let scopes = compute_graph_ranges(ns_id, db_id, rid, dir, edge_tables, ctx).await?;
@@ -2033,8 +2089,23 @@ async fn scan_source_plain(
 			// cursor and hand the whole source back to the sequential loop.
 			let mut bail = false;
 			loop {
+				// Size each batch request to the remaining LIMIT budget so a
+				// small cap never over-fetches, exactly as the sequential
+				// path does; the buffer counts rows toward the cap, so this
+				// is only reached with budget left.
+				let batch_size = match edge_limit {
+					Some(l) => {
+						let remaining = l.saturating_sub(out.len());
+						if remaining == 0 {
+							capped = true;
+							break;
+						}
+						remaining.min(crate::kvs::NORMAL_BATCH_SIZE as usize) as u32
+					}
+					None => crate::kvs::NORMAL_BATCH_SIZE,
+				};
 				let visited = cursor
-					.visit_unfolded_batch(crate::kvs::NORMAL_BATCH_SIZE, |key| {
+					.visit_unfolded_batch(batch_size, |key| {
 						let decoded = crate::key::schema::DecodedGraph::decode(key)?;
 						if output_mode == GraphScanOutput::TargetVertex {
 							match decoded.target {
@@ -2053,6 +2124,10 @@ async fn scan_source_plain(
 						} else {
 							out.push(decoded.edge);
 						}
+						if edge_limit.is_some_and(|l| out.len() >= l) {
+							capped = true;
+							return Ok(VisitFlow::Stop);
+						}
 						if out.len() >= cap {
 							bail = true;
 							return Ok(VisitFlow::Stop);
@@ -2066,7 +2141,7 @@ async fn scan_source_plain(
 					Some(n) => scanned += n as u64,
 					None => {
 						let batch = cursor
-							.next_batch_scan(crate::kvs::NORMAL_BATCH_SIZE)
+							.next_batch_scan(batch_size)
 							.await
 							.context("Failed to scan graph edge")?;
 						if batch.is_empty() {
@@ -2091,6 +2166,10 @@ async fn scan_source_plain(
 							} else {
 								out.push(item.edge);
 							}
+							if edge_limit.is_some_and(|l| out.len() >= l) {
+								capped = true;
+								break;
+							}
 							if out.len() >= cap {
 								bail = true;
 								break;
@@ -2098,7 +2177,7 @@ async fn scan_source_plain(
 						}
 					}
 				}
-				if bail {
+				if bail || capped {
 					break;
 				}
 			}
@@ -2110,6 +2189,15 @@ async fn scan_source_plain(
 			if bail {
 				return Ok(None);
 			}
+			if capped {
+				break;
+			}
+		}
+		if capped {
+			// A limit hit ends the scan before the direction completes, so
+			// its fold observation is skipped — the sequential path breaks
+			// out of its direction loop at the same point.
+			break;
 		}
 		observations.push((dir, dir_delta_hits));
 	}
@@ -2166,6 +2254,7 @@ mod prescan_tests {
 			&[],
 			GraphScanOutput::TargetVertex,
 			&[],
+			None,
 			None,
 			usize::MAX,
 			cap,
