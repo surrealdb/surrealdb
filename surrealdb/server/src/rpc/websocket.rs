@@ -8,7 +8,7 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use bytes::Bytes;
 use dashmap::DashMap;
 use futures::stream::FuturesUnordered;
-use futures::{Sink, SinkExt, StreamExt};
+use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt};
 use http::{HeaderMap, HeaderName, HeaderValue};
 use opentelemetry_http::HeaderExtractor;
 use surrealdb_core::dbs::Session;
@@ -29,6 +29,14 @@ use tokio::sync::RwLock;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
+use tokio_stream::wrappers::ReceiverStream;
+
+/// The merged view of a connection's outbound queues; see
+/// [`Websocket::outbound_queues`].
+type Outbound = futures::stream::Select<
+	futures::stream::Select<ReceiverStream<Message>, ReceiverStream<Message>>,
+	ReceiverStream<Message>,
+>;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -168,8 +176,36 @@ pub struct Websocket {
 	/// lockstep by [`Self::cancel_all`]; there is no way to fire one view
 	/// without the other.
 	pub(crate) cancel: surrealdb_core::ctx::CancelHandle,
-	/// The channels used to send and receive WebSocket messages
+	/// The channel used to send solicited output: everything answering a
+	/// request this client made, plus the overload close frame.
 	pub(crate) channel: Sender<Message>,
+	/// The channel used to send unsolicited output: live-query notifications,
+	/// and the close frame that ends a connection which has stopped reading
+	/// them.
+	///
+	/// Separate from [`Self::channel`] because occupancy here is what decides
+	/// that a client has stopped reading its notifications, and a client's own
+	/// pipelined requests must not be able to look like that. One shared queue
+	/// could not tell the two apart: a burst of replies filled it -- a single
+	/// reply, at the configured minimum size -- and the next notification
+	/// would end a connection whose writer was draining normally.
+	///
+	/// The queues are drained fairly, so none starves the others, and order
+	/// is preserved within each. Nothing orders a notification against a
+	/// reply: a notification answers no request.
+	pub(crate) notifications: Sender<Message>,
+	/// A single slot carrying the close frame that ends a connection which
+	/// stopped reading its notifications.
+	///
+	/// Its own queue, because a slot held back inside another one is reserved
+	/// only by convention: two deliveries can both read the same free slot
+	/// before either fills it, and the second then cancels the connection
+	/// with no room left to say why. A queue of one that nothing else may
+	/// write cannot be filled out from under the delivery that needs it, and
+	/// exactly one delivery can claim it -- so however many find the
+	/// notification queue full at once, one close frame is queued and the
+	/// client always learns the reason.
+	pub(crate) lagging_close: Sender<Message>,
 }
 
 impl Websocket {
@@ -196,8 +232,11 @@ impl Websocket {
 		// Record the connect timestamp so we can emit the session lifetime
 		// alongside the disconnect event further down.
 		let connected_at = web_time::Instant::now();
-		// Create a channel for sending messages
+		// Create the channels for sending messages. Solicited and unsolicited
+		// output queue separately; see [`Websocket::notifications`].
 		let (sender, receiver) = channel(*WEBSOCKET_RESPONSE_CHANNEL_SIZE);
+		let (notifier, notification_receiver) = channel(*WEBSOCKET_RESPONSE_CHANNEL_SIZE);
+		let (closer, close_receiver) = channel(1);
 		let rec_limit = datastore.parser_config().max_object_parsing_depth as usize;
 		// Create and store the RPC connection
 		let rpc = Arc::new(Websocket {
@@ -212,6 +251,8 @@ impl Websocket {
 			streams: DashMap::new(),
 			stream_slots: AtomicUsize::new(0),
 			channel: sender.clone(),
+			notifications: notifier.clone(),
+			lagging_close: closer.clone(),
 			datastore,
 		});
 
@@ -248,14 +289,26 @@ impl Websocket {
 				let (ws_sender, ws_receiver) = buffer.split();
 				// Spawn async tasks for the WebSocket
 				tasks.spawn(Self::read(Arc::clone(&rpc), ws_receiver, sender.clone(), rec_limit));
-				tasks.spawn(Self::write(Arc::clone(&rpc), ws_sender, receiver));
+				tasks.spawn(Self::write(
+					Arc::clone(&rpc),
+					ws_sender,
+					receiver,
+					notification_receiver,
+					close_receiver,
+				));
 			}
 			false => {
 				// Split the socket into sending and receiving streams
 				let (ws_sender, ws_receiver) = ws.split();
 				// Spawn async tasks for the WebSocket
 				tasks.spawn(Self::read(Arc::clone(&rpc), ws_receiver, sender.clone(), rec_limit));
-				tasks.spawn(Self::write(Arc::clone(&rpc), ws_sender, receiver));
+				tasks.spawn(Self::write(
+					Arc::clone(&rpc),
+					ws_sender,
+					receiver,
+					notification_receiver,
+					close_receiver,
+				));
 			}
 		}
 		// Wait for all tasks to finish
@@ -264,8 +317,10 @@ impl Websocket {
 				error!("Error handling RPC connection: {err}");
 			}
 		}
-		// Close the internal response channel
+		// Close the internal output channels
 		std::mem::drop(sender);
+		std::mem::drop(notifier);
+		std::mem::drop(closer);
 		// Log the WebSocket disconnection
 		trace!("WebSocket {id} disconnected");
 		// Cleanup the live queries for this WebSocket
@@ -299,6 +354,38 @@ impl Websocket {
 		});
 	}
 
+	/// One view of a connection's outbound queues.
+	///
+	/// Every queue alternates with the others, so none can starve any of
+	/// them. Biasing replies would let a pipelining client hold its own
+	/// notifications back until the notification queue filled -- the state
+	/// this connection is closed for; biasing notifications would delay the
+	/// answers the client is waiting on; and deferring the lagging close
+	/// frame until the other two ran dry would let the replies that
+	/// cancellation is still draining keep it waiting until the grace period
+	/// ran out, disconnecting a client without telling it why.
+	///
+	/// What keeps a close frame last on the wire is not this order but that
+	/// the writer stops after one: nothing may follow a close, so whoever
+	/// writes it writes nothing further. Alternation bounds how long it waits
+	/// to be that frame -- at most one other goes ahead of it.
+	///
+	/// The stream ends only when every queue does, so one closing early
+	/// cannot strand what is left in another.
+	fn outbound_queues(
+		replies: Receiver<Message>,
+		notifications: Receiver<Message>,
+		lagging_close: Receiver<Message>,
+	) -> Outbound {
+		futures::stream::select(
+			futures::stream::select(
+				ReceiverStream::new(replies),
+				ReceiverStream::new(notifications),
+			),
+			ReceiverStream::new(lagging_close),
+		)
+	}
+
 	/// Write messages to the client, and keep the connection alive
 	///
 	/// Owns the sending half of the socket, so it also emits the periodic ping:
@@ -307,10 +394,14 @@ impl Websocket {
 	async fn write<S: SinkExt<Message> + Unpin>(
 		rpc: Arc<Websocket>,
 		mut socket: S,
-		mut internal_receiver: Receiver<Message>,
+		internal_receiver: Receiver<Message>,
+		notification_receiver: Receiver<Message>,
+		close_receiver: Receiver<Message>,
 	) where
 		<S as Sink<Message>>::Error: fmt::Display,
 	{
+		let mut outbound =
+			Self::outbound_queues(internal_receiver, notification_receiver, close_receiver);
 		// Clone the WebSocket cancellation token (awaitable view of the
 		// shared cancel handle).
 		let canceller = rpc.cancel.token();
@@ -325,6 +416,9 @@ impl Websocket {
 		// much as the whole backlog, so missed ticks are dropped rather than
 		// burst onto the socket.
 		ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+		// Whether a close frame has gone out, after which the wire carries
+		// nothing more.
+		let mut closed = false;
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
@@ -357,12 +451,14 @@ impl Websocket {
 						break;
 					}
 				},
-				// Retrieve a response from the channel
-				Some(res) = internal_receiver.recv() => {
+				// Retrieve a message from any outbound queue
+				Some(res) = outbound.next() => {
 					// Capture the byte length before the message is moved
 					// into the sink so we can fold it into the outbound
 					// Prometheus counter when metrics are enabled.
 					let out_bytes = Self::payload_len(&res);
+					// And whether this is the last frame the wire may carry.
+					let terminal = Self::ends_the_connection(&res);
 					// Check if the socket is buffered
 					let result = match buffer {
 						// Send the message to the socket buffer
@@ -385,6 +481,12 @@ impl Websocket {
 					// Record outbound bytes on success. We deliberately avoid
 					// double-counting on the error path above.
 					rpc.record_sent_bytes(out_bytes).await;
+					// Nothing may follow a close frame, so stop here rather
+					// than leave the drain below to write behind it.
+					if terminal {
+						closed = true;
+						break;
+					}
 				},
 				// Wait for a short period of time
 				_ = tokio::time::sleep(period), if buffer => {
@@ -403,24 +505,28 @@ impl Websocket {
 				}
 			}
 		}
-		// Write out whatever teardown left in the channel, and close.
-		rpc.flush_on_teardown(&mut socket, &mut internal_receiver).await;
+		// Write out whatever teardown left in the queues, and close.
+		rpc.flush_on_teardown(&mut socket, &mut outbound, closed).await;
 	}
 
 	/// Write what is already queued and close the socket, so the close frame
 	/// the connection owes its peer reaches the client.
 	///
 	/// Two kinds of close frame end up here. One this connection chose to send
-	/// -- the overload notice in [`Self::close_socket`], the lagging notice in
-	/// [`Self::deliver_notification`] -- is queued on the response channel and
-	/// then trips the connection canceller, and the write loop polls that
-	/// canceller ahead of the channel, so this drain on the way past is what
-	/// carries it out; without it the client would be left to infer an
+	/// -- the overload notice in [`Self::close_socket`] on the reply queue,
+	/// the lagging notice in [`Self::deliver_notification`] on its own slot --
+	/// is queued and then trips the connection canceller, and the write loop
+	/// polls that canceller ahead of the queues, so this drain on the way past
+	/// is what carries it out; without it the client would be left to infer an
 	/// unexplained disconnect in place of a stated reason. The reply owed to a
 	/// close frame the peer sent is instead queued inside the transport, which
 	/// read the connection as closing and refuses a second one from us, so
 	/// closing the sink -- not merely flushing it -- is what writes that reply
 	/// out and completes the handshake RFC 6455 section 5.5.1 requires.
+	///
+	/// `closed` says the write loop has already put a close frame on the wire,
+	/// which leaves nothing to drain: the queues are skipped and only the
+	/// close below runs.
 	///
 	/// Only what is already queued, because senders remain alive and a `recv`
 	/// would wait for a message that is not coming. Each frame is sent rather
@@ -430,19 +536,32 @@ impl Websocket {
 	/// abandoned on the first write error: the client this serves most is by
 	/// definition one that may have stopped reading, and the connection is
 	/// over either way.
-	async fn flush_on_teardown<S: SinkExt<Message> + Unpin>(
-		&self,
-		socket: &mut S,
-		internal_receiver: &mut Receiver<Message>,
-	) where
+	///
+	/// Nothing else here waits, which is what keeps that bound the real one:
+	/// byte accounting runs after the writes and never blocks on the session
+	/// (see [`Self::teardown_network_ctx`]), so no request a client issues can
+	/// stretch its own connection's teardown -- and with it a graceful
+	/// shutdown -- past the grace period.
+	async fn flush_on_teardown<S, Q>(&self, socket: &mut S, queued: &mut Q, closed: bool)
+	where
+		S: SinkExt<Message> + Unpin,
 		<S as Sink<Message>>::Error: fmt::Display,
+		Q: Stream<Item = Message> + Unpin,
 	{
 		let deadline = tokio::time::Instant::now() + TEARDOWN_FLUSH_GRACE;
-		while let Ok(msg) = internal_receiver.try_recv() {
+		// What the drain wrote, charged once the writing is done rather than
+		// between frames. Attribution reads the session, and nothing may sit
+		// between one teardown write and the next that a client's own
+		// concurrent request can extend -- see [`Self::teardown_network_ctx`].
+		let mut written = Vec::new();
+		// `now_or_never` rather than an await, so this takes what is already
+		// queued and does not wait on senders that are still alive. Skipped
+		// once a close frame has gone out: the wire carries nothing after
+		// one, so there is nothing left to drain -- only the close below.
+		while !closed && let Some(Some(msg)) = queued.next().now_or_never() {
 			// Before the message moves into the sink, as in the write loop.
 			let out_bytes = Self::payload_len(&msg);
-			// A close frame is terminal on the wire: nothing may follow it.
-			let terminal = matches!(msg, Message::Close(_));
+			let terminal = Self::ends_the_connection(&msg);
 			if !Self::teardown_progressed(tokio::time::timeout_at(deadline, socket.send(msg)).await)
 			{
 				// Stop draining, but still close below: the handshake has to
@@ -450,9 +569,8 @@ impl Websocket {
 				// made it out.
 				break;
 			}
-			// A frame written here left the machine like any other, so it is
-			// charged like any other.
-			self.record_sent_bytes(out_bytes).await;
+			written.push(out_bytes);
+			// Nothing may follow a close frame.
 			if terminal {
 				break;
 			}
@@ -465,6 +583,32 @@ impl Websocket {
 		// in the channel had. The reply to a peer's close frame is likewise
 		// held inside the transport until the socket closes.
 		Self::teardown_progressed(tokio::time::timeout_at(deadline, socket.close()).await);
+		// A frame written here left the machine like any other, so it is
+		// charged like any other.
+		self.charge_teardown_bytes(&written).await;
+	}
+
+	/// Charge the frames [`Self::flush_on_teardown`] wrote, one event each as
+	/// on every other path, from a single attribution snapshot.
+	async fn charge_teardown_bytes(&self, written: &[usize]) {
+		if written.iter().all(|bytes| *bytes == 0) {
+			return;
+		}
+		let ctx = self.teardown_network_ctx().await;
+		for bytes in written.iter().copied().filter(|bytes| *bytes > 0) {
+			self.charge_sent_bytes(ctx.clone(), bytes);
+		}
+	}
+
+	/// Whether a frame is the last one the connection may carry.
+	///
+	/// A close frame ends the conversation: the sink refuses data behind one,
+	/// and a client told the connection is over has no reason to read
+	/// further. Whoever writes one therefore writes nothing more, which is
+	/// what makes a close frame the last thing on the wire without it having
+	/// to be the last thing offered to the writer.
+	fn ends_the_connection(msg: &Message) -> bool {
+		matches!(msg, Message::Close(_))
 	}
 
 	/// The payload bytes an outbound frame is charged for.
@@ -495,6 +639,14 @@ impl Websocket {
 			return;
 		}
 		let ctx = self.default_network_ctx().await;
+		self.charge_sent_bytes(ctx, bytes);
+	}
+
+	/// Emit one outbound byte event against an attribution already in hand.
+	///
+	/// Split out so the paths that cannot wait for a fresh snapshot still
+	/// charge through the same code as the ones that can.
+	fn charge_sent_bytes(&self, ctx: NetworkBytesEventCtx, bytes: usize) {
 		self.datastore.observer().on_network_bytes(&NetworkBytesEvent {
 			safe: NetworkBytesEventSafe {
 				direction: NetworkDirection::Sent,
@@ -503,6 +655,38 @@ impl Websocket {
 			},
 			ctx,
 		});
+	}
+
+	/// The connection's outbound attribution, taken without waiting for the
+	/// session lock.
+	///
+	/// [`Self::default_network_ctx`] waits for a read guard, and a read guard
+	/// waits behind any writer: `signin`, `signup`, `authenticate` and
+	/// `refresh` each hold the session's write guard across a datastore round
+	/// trip, and for password access across the hash verification itself.
+	/// Teardown must not wait on that -- [`Self::flush_on_teardown`] bounds
+	/// its writes by [`TEARDOWN_FLUSH_GRACE`] precisely because the client it
+	/// serves may have stopped reading, and [`graceful_shutdown`] waits for
+	/// the connection to leave the WebSocket map, so a request the client
+	/// itself issued must not be able to hold shutdown open.
+	///
+	/// Falls back to the default attribution -- the same one an absent session
+	/// yields -- when the guard is unavailable. The bytes are charged either
+	/// way: a counter that drops what it wrote is worse than one that labels
+	/// the last frames of a closing connection with the default tenant.
+	///
+	/// [`graceful_shutdown`]: crate::rpc::graceful_shutdown
+	async fn teardown_network_ctx(&self) -> NetworkBytesEventCtx {
+		if self.datastore.observer().is_noop() {
+			return NetworkBytesEventCtx::default();
+		}
+		match self.get_session(&self.id).await {
+			Ok(lock) => lock
+				.try_read()
+				.map(|session| NetworkBytesEventCtx::from(&*session))
+				.unwrap_or_default(),
+			Err(_) => NetworkBytesEventCtx::default(),
+		}
 	}
 
 	/// Whether a teardown write got through, tracing the reason when it did
@@ -562,7 +746,7 @@ impl Websocket {
 							// Check to see whether we have available memory
 							if let Some(over) = ALLOC.beyond_threshold_by() {
 								// Reject the message
-								Self::close_socket(Arc::clone(&rpc), chn, over).await;
+								Self::close_socket(Arc::clone(&rpc), over).await;
 								// Exit out of the loop
 								break;
 							}
@@ -878,9 +1062,12 @@ impl Websocket {
 
 	/// Reject a WebSocket message due to server overloading
 	///
+	/// The frame goes on the solicited-output queue, not the notification
+	/// one: it answers the request being refused.
+	///
 	/// `over` is the tracked total and the threshold it exceeded, from the
 	/// check that refused the message.
-	async fn close_socket(rpc: Arc<Websocket>, chn: Sender<Message>, over: (usize, usize)) {
+	async fn close_socket(rpc: Arc<Websocket>, over: (usize, usize)) {
 		// Log the error as a warning
 		log_memory_refusal("websocket", over.0, over.1);
 		// Create a custom close frame
@@ -889,7 +1076,7 @@ impl Websocket {
 			reason: SERVER_OVERLOADED.into(),
 		};
 		// Respond with a close message
-		if let Err(err) = chn.send(Message::Close(Some(frame))).await {
+		if let Err(err) = rpc.channel.send(Message::Close(Some(frame))).await {
 			debug!("WebSocket error when sending close message: {err}");
 		};
 		// Cancel the WebSocket tasks AND the executor cancel flag so any
@@ -928,26 +1115,30 @@ impl Websocket {
 		if self.cancel.is_cancelled() {
 			return false;
 		}
-		// Hold the last slot back for the close frame below.
-		if self.channel.capacity() > 1 {
-			match crate::rpc::response::try_send(response, self.format, &self.channel) {
-				Ok(()) => return true,
-				// The connection has already gone away, so there is no
-				// teardown left to do and nobody to tell.
-				Err(TrySendError::Closed(_)) => return false,
-				// Lost the race for the slot the check above saw free.
-				Err(TrySendError::Full(_)) => {}
-			}
+		// One admission, decided by the queue itself rather than by reading
+		// its capacity and sending afterwards: nothing is held back here, so
+		// there is no window in which two deliveries both count the same free
+		// slot. The queue carries notifications alone, so a full one means
+		// this client is not reading them -- not that it has replies
+		// outstanding.
+		match crate::rpc::response::try_send(response, self.format, &self.notifications) {
+			Ok(()) => return true,
+			// The connection has already gone away, so there is no teardown
+			// left to do and nobody to tell.
+			Err(TrySendError::Closed(_)) => return false,
+			Err(TrySendError::Full(_)) => {}
 		}
-		// Log the reason this connection is going away
-		warn!("Closing a WebSocket whose client stopped reading its notifications");
-		// Create a custom close frame
+		// The close frame's slot is its own and cannot have been filled by
+		// anything else, so the only way to lose it is to another delivery
+		// that found the queue full at the same moment -- which has queued
+		// the same frame this one would have. Whoever claims it logs it.
 		let frame = CloseFrame {
 			code: AGAIN,
 			reason: CLIENT_LAGGING.into(),
 		};
-		// Respond with a close message, in the slot held back for it
-		let _ = self.channel.try_send(Message::Close(Some(frame)));
+		if self.lagging_close.try_send(Message::Close(Some(frame))).is_ok() {
+			warn!("Closing a WebSocket whose client stopped reading its notifications");
+		}
 		// Cancel the WebSocket tasks AND the executor cancel flag so any
 		// in-flight queries return early.
 		self.cancel_all();
@@ -1600,6 +1791,21 @@ mod tests {
 		}
 	}
 
+	/// The receiving ends of a connection's outbound queues.
+	struct Queues {
+		replies: Receiver<Message>,
+		notifications: Receiver<Message>,
+		lagging_close: Receiver<Message>,
+	}
+
+	impl Queues {
+		/// The queues as the write loop reads them, through the same
+		/// construction it uses, so a test sees production's ordering.
+		fn merged(self) -> Outbound {
+			Websocket::outbound_queues(self.replies, self.notifications, self.lagging_close)
+		}
+	}
+
 	async fn ws_with_observer(observer: Option<Arc<dyn ExecutionObserver>>) -> Arc<Websocket> {
 		let mut builder = Datastore::builder();
 		if let Some(obs) = observer {
@@ -1609,6 +1815,8 @@ mod tests {
 		let state = Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds)));
 		let id = Uuid::new_v4();
 		let (tx, _rx) = channel::<Message>(8);
+		let (notifier, _notify_rx) = channel::<Message>(8);
+		let (closer, _close_rx) = channel::<Message>(1);
 		Arc::new(Websocket {
 			id,
 			format: Format::Json,
@@ -1622,12 +1830,15 @@ mod tests {
 			shutdown: CancellationToken::new(),
 			cancel: surrealdb_core::ctx::CancelHandle::new(),
 			channel: tx,
+			notifications: notifier,
+			lagging_close: closer,
 		})
 	}
 
-	/// A bare connection whose outbound channel has the given capacity, handed
-	/// back with its receiving end so a test controls how much room is left.
-	async fn ws_with_channel(capacity: usize) -> (Arc<Websocket>, Receiver<Message>) {
+	/// A bare connection whose reply and notification queues each have the
+	/// given capacity, handed back with every receiving end so a test controls
+	/// how much room is left in each.
+	async fn ws_with_channel(capacity: usize) -> (Arc<Websocket>, Queues) {
 		ws_with_channel_and_observer(capacity, None).await
 	}
 
@@ -1636,7 +1847,7 @@ mod tests {
 	async fn ws_with_channel_and_observer(
 		capacity: usize,
 		observer: Option<Arc<dyn ExecutionObserver>>,
-	) -> (Arc<Websocket>, Receiver<Message>) {
+	) -> (Arc<Websocket>, Queues) {
 		let mut builder = Datastore::builder();
 		if let Some(obs) = observer {
 			builder = builder.with_observer(obs);
@@ -1644,6 +1855,8 @@ mod tests {
 		let ds = builder.build_with_path("memory").await.unwrap();
 		let state = Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds)));
 		let (tx, rx) = channel::<Message>(capacity);
+		let (notifier, notify_rx) = channel::<Message>(capacity);
+		let (closer, close_rx) = channel::<Message>(1);
 		let rpc = Arc::new(Websocket {
 			id: Uuid::new_v4(),
 			format: Format::Json,
@@ -1657,8 +1870,17 @@ mod tests {
 			shutdown: CancellationToken::new(),
 			cancel: surrealdb_core::ctx::CancelHandle::new(),
 			channel: tx,
+			notifications: notifier,
+			lagging_close: closer,
 		});
-		(rpc, rx)
+		(
+			rpc,
+			Queues {
+				replies: rx,
+				notifications: notify_rx,
+				lagging_close: close_rx,
+			},
+		)
 	}
 
 	/// Any response will do: `deliver_notification` is about how a response
@@ -1677,23 +1899,36 @@ mod tests {
 	/// await to park on, which is what bounds the dispatcher's in-flight set.
 	#[tokio::test]
 	async fn a_notification_for_a_client_that_stopped_reading_closes_the_connection() {
-		// Two slots: one taken by a response already queued, and the last
-		// reserved for the close frame.
-		let (rpc, mut frames) = ws_with_channel(2).await;
-		rpc.channel.try_send(Message::Text("queued".into())).expect("a free slot");
-		assert_eq!(rpc.channel.capacity(), 1, "only the reserved slot is left");
+		// A notification queue with no room left, which is what says this
+		// client has stopped reading. The close frame's slot is separate, so
+		// filling this one does not consume it.
+		let (rpc, queues) = ws_with_channel(2).await;
+		let mut frames = queues.merged();
+		while rpc.notifications.capacity() > 0 {
+			rpc.notifications.try_send(Message::Text("queued".into())).expect("a free slot");
+		}
 
 		let delivered = rpc.deliver_notification(deliverable());
 
 		assert!(!delivered, "a notification that could not be queued is not reported as delivered");
 		assert!(rpc.cancel.token().is_cancelled(), "the connection is torn down");
-		// The already-queued response first, then the close frame behind it.
-		assert!(
-			matches!(frames.recv().await, Some(Message::Text(_))),
-			"the response that was already queued"
-		);
-		let Some(Message::Close(Some(frame))) = frames.recv().await else {
-			panic!("the close frame reaches the client");
+		// The close frame is queued, carrying the reason. That it is the last
+		// thing to reach the wire is the writer's doing rather than the
+		// queues' -- see
+		// [`the_close_frame_for_a_lagging_client_reaches_the_socket`].
+		let mut queued = Vec::new();
+		while let Some(Some(msg)) = frames.next().now_or_never() {
+			queued.push(msg);
+		}
+		let closes: Vec<&CloseFrame> = queued
+			.iter()
+			.filter_map(|msg| match msg {
+				Message::Close(frame) => frame.as_ref(),
+				_ => None,
+			})
+			.collect();
+		let [frame] = closes.as_slice() else {
+			panic!("exactly one close frame is queued, got {queued:?}");
 		};
 		assert_eq!(frame.code, AGAIN, "the client is invited to reconnect");
 		assert_eq!(frame.reason.as_str(), CLIENT_LAGGING, "and told why it was closed");
@@ -1706,10 +1941,12 @@ mod tests {
 	/// disconnect in place of the reason it was given.
 	#[tokio::test]
 	async fn the_close_frame_for_a_lagging_client_reaches_the_socket() {
-		// Two slots: one taken by a response already queued, the last
-		// reserved for the close frame.
-		let (rpc, frames) = ws_with_channel(2).await;
-		rpc.channel.try_send(Message::Text("queued".into())).expect("a free slot");
+		// A notification queue with no room left, which is what trips the
+		// lagging path.
+		let (rpc, queues) = ws_with_channel(2).await;
+		while rpc.notifications.capacity() > 0 {
+			rpc.notifications.try_send(Message::Text("queued".into())).expect("a free slot");
+		}
 
 		// Trip the lagging path before the writer runs, so the canceller is
 		// already set when it takes its first look -- the ordering that drops
@@ -1718,7 +1955,14 @@ mod tests {
 
 		// Drive the real write loop over a sink that records what it wrote.
 		let (sink, mut written) = futures::channel::mpsc::unbounded::<Message>();
-		Websocket::write(Arc::clone(&rpc), sink, frames).await;
+		Websocket::write(
+			Arc::clone(&rpc),
+			sink,
+			queues.replies,
+			queues.notifications,
+			queues.lagging_close,
+		)
+		.await;
 
 		let mut messages = Vec::new();
 		while let Ok(Some(msg)) = written.try_next() {
@@ -1730,8 +1974,60 @@ mod tests {
 		assert_eq!(frame.code, AGAIN, "the client is invited to reconnect");
 		assert_eq!(frame.reason.as_str(), CLIENT_LAGGING, "and told why it was closed");
 		assert!(
-			matches!(messages.as_slice(), [Message::Text(_)]),
-			"the response queued ahead of it goes out too, got {messages:?}"
+			messages.iter().all(|msg| matches!(msg, Message::Text(_))),
+			"the notifications queued ahead of it go out too, got {messages:?}"
+		);
+	}
+
+	/// A backlog of replies cannot hold the close frame back.
+	///
+	/// The connection this serves is by definition one with work outstanding:
+	/// cancelling it drains every in-flight handler, and each of those still
+	/// answers on the reply queue, so replies keep arriving while teardown
+	/// runs. Offering the close frame only once the other queues had run dry
+	/// would let those replies keep it waiting until the flush grace period
+	/// expired, and the client would be disconnected with nothing said --
+	/// which is the whole thing the frame exists to prevent. What keeps it
+	/// last on the wire is that the writer stops after it, so it can be
+	/// offered as early as fairness allows.
+	#[tokio::test]
+	async fn a_backlog_of_replies_does_not_starve_the_close_frame() {
+		let (rpc, queues) = ws_with_channel(8).await;
+		// Both other queues full: replies the client is waiting on, and the
+		// unread notifications that make it a lagging one.
+		while rpc.channel.capacity() > 0 {
+			rpc.channel.try_send(Message::Text("reply".into())).expect("a free slot");
+		}
+		while rpc.notifications.capacity() > 0 {
+			rpc.notifications.try_send(Message::Text("unread".into())).expect("a free slot");
+		}
+		assert!(!rpc.deliver_notification(deliverable()), "the client is closed, not served");
+
+		let (sink, mut written) = futures::channel::mpsc::unbounded::<Message>();
+		Websocket::write(
+			Arc::clone(&rpc),
+			sink,
+			queues.replies,
+			queues.notifications,
+			queues.lagging_close,
+		)
+		.await;
+
+		let mut messages = Vec::new();
+		while let Ok(Some(msg)) = written.try_next() {
+			messages.push(msg);
+		}
+		let Some(Message::Close(Some(frame))) = messages.pop() else {
+			panic!("the close frame is the last thing written, got {messages:?}");
+		};
+		assert_eq!(frame.reason.as_str(), CLIENT_LAGGING, "and it carries the reason");
+		// Sixteen frames were queued ahead of it. Alternation lets at most one
+		// per queue go first, so a close frame waiting on the backlog to clear
+		// is what this rules out -- not the exact count.
+		assert!(
+			messages.len() <= 3,
+			"the close frame does not wait for the backlog, got {} ahead of it: {messages:?}",
+			messages.len()
 		);
 	}
 
@@ -1801,7 +2097,8 @@ mod tests {
 	/// the close handshake RFC 6455 section 5.5.1 requires.
 	#[tokio::test]
 	async fn teardown_closes_the_socket_so_the_transports_reply_goes_out() {
-		let (rpc, mut frames) = ws_with_channel(4).await;
+		let (rpc, queues) = ws_with_channel(4).await;
+		let mut frames = queues.merged();
 		let mut sink = ClosingSink::after_peer_close();
 		let view = sink.clone();
 
@@ -1809,7 +2106,7 @@ mod tests {
 		// sent, and being refused must not stop the handshake.
 		rpc.channel.try_send(Message::Text("refused".into())).expect("a free slot");
 
-		rpc.flush_on_teardown(&mut sink, &mut frames).await;
+		rpc.flush_on_teardown(&mut sink, &mut frames, false).await;
 
 		let written = view.written.lock().unwrap().clone();
 		assert_eq!(
@@ -1868,18 +2165,19 @@ mod tests {
 	/// has reached the client no more than one left in the channel had.
 	#[tokio::test]
 	async fn teardown_flushes_a_frame_the_write_loop_had_already_fed() {
-		let (rpc, mut frames) = ws_with_channel(4).await;
+		let (rpc, queues) = ws_with_channel(4).await;
+		let mut frames = queues.merged();
 		let mut sink = BufferedSink::default();
 		let view = sink.clone();
 
 		// Reproduce the handover state: the frame is out of the channel and
 		// fed into the sink, unflushed, with nothing left queued behind it.
 		rpc.channel.try_send(Message::Close(None)).expect("a free slot");
-		let handed_over = frames.recv().await.expect("the frame leaves the channel");
+		let handed_over = frames.next().await.expect("the frame leaves the channel");
 		SinkExt::feed(&mut sink, handed_over).await.expect("the sink takes it");
 		assert!(view.flushed.lock().unwrap().is_empty(), "nothing has reached the wire yet");
 
-		rpc.flush_on_teardown(&mut sink, &mut frames).await;
+		rpc.flush_on_teardown(&mut sink, &mut frames, false).await;
 
 		assert_eq!(
 			view.flushed.lock().unwrap().len(),
@@ -1895,11 +2193,12 @@ mod tests {
 	#[tokio::test]
 	async fn the_teardown_drain_charges_the_bytes_it_writes() {
 		let observer = Arc::new(CapturingObserver::default());
-		let (rpc, mut frames) = ws_with_channel_and_observer(
+		let (rpc, queues) = ws_with_channel_and_observer(
 			4,
 			Some(Arc::clone(&observer) as Arc<dyn ExecutionObserver>),
 		)
 		.await;
+		let mut frames = queues.merged();
 		// The session the byte context is attributed to.
 		rpc.set_session(rpc.id, Arc::new(RwLock::new(Session::default())));
 		// A payload-carrying response left queued when teardown began, plus
@@ -1908,7 +2207,7 @@ mod tests {
 		rpc.channel.try_send(Message::Close(None)).expect("a free slot");
 
 		let mut sink = BufferedSink::default();
-		rpc.flush_on_teardown(&mut sink, &mut frames).await;
+		rpc.flush_on_teardown(&mut sink, &mut frames, false).await;
 
 		let charged: u64 = observer
 			.events
@@ -1925,6 +2224,65 @@ mod tests {
 		);
 	}
 
+	/// `signin`, `signup`, `authenticate` and `refresh` hold the session's
+	/// write guard across a datastore round trip -- and, for password access,
+	/// across the hash verification. Teardown reads the same session for byte
+	/// attribution, so waiting for that guard would let a request a client
+	/// issued itself decide how long its connection takes to go away, and
+	/// `graceful_shutdown` waits for exactly that.
+	///
+	/// The frames still have to be written and still have to be charged; only
+	/// the tenant labels degrade to the default when the guard is unavailable.
+	#[tokio::test]
+	async fn teardown_does_not_wait_for_a_locked_session() {
+		let observer = Arc::new(CapturingObserver::default());
+		let (rpc, queues) = ws_with_channel_and_observer(
+			4,
+			Some(Arc::clone(&observer) as Arc<dyn ExecutionObserver>),
+		)
+		.await;
+		let mut frames = queues.merged();
+		let session = Arc::new(RwLock::new(Session::default()));
+		rpc.set_session(rpc.id, Arc::clone(&session));
+		// The state an in-flight authentication leaves the session in, held
+		// for longer than teardown may wait.
+		let held = session.write().await;
+		rpc.channel.try_send(Message::Text("payload".into())).expect("a free slot");
+		rpc.channel.try_send(Message::Close(None)).expect("a free slot");
+
+		let mut sink = BufferedSink::default();
+		let view = sink.clone();
+		// Bounded by the drain's own grace period: teardown has no reason to
+		// take longer than the writes it is there to make, and without this
+		// bound the assertion below would hang rather than fail.
+		let finished = tokio::time::timeout(
+			TEARDOWN_FLUSH_GRACE,
+			rpc.flush_on_teardown(&mut sink, &mut frames, false),
+		)
+		.await;
+
+		assert!(finished.is_ok(), "teardown must not wait on the session lock");
+		assert_eq!(
+			view.flushed.lock().unwrap().len(),
+			2,
+			"both queued frames still reach the wire"
+		);
+		let charged: Vec<(u64, Option<String>)> = observer
+			.events
+			.lock()
+			.unwrap()
+			.iter()
+			.filter(|event| matches!(event.safe.direction, NetworkDirection::Sent))
+			.map(|event| (event.safe.bytes, event.ctx.namespace.clone()))
+			.collect();
+		assert_eq!(
+			charged,
+			vec![("payload".len() as u64, None)],
+			"the payload is charged with the default attribution, not dropped"
+		);
+		drop(held);
+	}
+
 	/// The smallest queue an operator can configure still delivers. One slot
 	/// is held back for a close frame, so the floor is what leaves a slot
 	/// beside it: were the reservation able to consume the only slot, every
@@ -1932,12 +2290,92 @@ mod tests {
 	/// promptly the client was reading.
 	#[tokio::test]
 	async fn a_notification_fits_the_smallest_configured_queue() {
-		let (rpc, mut frames) = ws_with_channel(crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_FLOOR).await;
+		let (rpc, queues) = ws_with_channel(crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_FLOOR).await;
+		let mut frames = queues.merged();
 
 		assert!(rpc.deliver_notification(deliverable()), "the notification is queued");
 
 		assert!(!rpc.cancel.token().is_cancelled(), "a client that is reading is not closed");
-		assert!(matches!(frames.recv().await, Some(Message::Text(_))), "the notification");
+		assert!(matches!(frames.next().await, Some(Message::Text(_))), "the notification");
+	}
+
+	/// A client's own replies must not be able to look like notification lag.
+	///
+	/// The two share a socket but not a queue, because occupancy is what
+	/// decides a client has stopped reading its notifications, and a client
+	/// that pipelines requests fills a reply queue as fast as the server can
+	/// answer -- while reading perfectly well. Charging that against the
+	/// notification budget would close a healthy connection and cancel its
+	/// in-flight work, and at the configured minimum size a single
+	/// outstanding reply would do it.
+	#[tokio::test]
+	async fn pipelined_replies_are_not_notification_lag() {
+		// The reply queue is full to its last slot -- the state a client that
+		// pipelines requests puts it in -- while the notification queue is
+		// untouched.
+		let (rpc, queues) = ws_with_channel(crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_FLOOR).await;
+		let mut frames = queues.merged();
+		while rpc.channel.capacity() > 0 {
+			rpc.channel.try_send(Message::Text("reply".into())).expect("a free slot");
+		}
+
+		assert!(rpc.deliver_notification(deliverable()), "the notification is queued");
+
+		assert!(
+			!rpc.cancel.token().is_cancelled(),
+			"a client with replies outstanding has not stopped reading its notifications"
+		);
+		let mut seen = Vec::new();
+		while let Some(Some(msg)) = frames.next().now_or_never() {
+			seen.push(msg);
+		}
+		assert_eq!(seen.len(), 3, "both replies and the notification are queued: {seen:?}");
+		assert!(
+			!seen.iter().any(|msg| matches!(msg, Message::Close(_))),
+			"nothing closed the connection: {seen:?}"
+		);
+	}
+
+	/// However many deliveries find the notification queue full at once, the
+	/// client is told why.
+	///
+	/// `deliver_notification` is a plain `fn`, so two of them cannot interleave
+	/// inside one dispatcher task -- but `spawn_notifications` is public and
+	/// callable more than once, and each call drives deliveries for the same
+	/// connection from a task of its own. A close frame held back inside the
+	/// notification queue was reserved only by convention: two deliveries
+	/// could both read the same free slot, fill it between them, and the next
+	/// one would cancel the connection with no room left to say why. The
+	/// frame's own slot cannot be filled by anything but the frame.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn concurrent_lagging_deliveries_still_tell_the_client_why() {
+		for _ in 0..500 {
+			let (rpc, queues) = ws_with_channel(crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_FLOOR).await;
+			let mut frames = queues.merged();
+			// Full, so every delivery below takes the lagging path.
+			while rpc.notifications.capacity() > 0 {
+				rpc.notifications.try_send(Message::Text("unread".into())).expect("a free slot");
+			}
+
+			let racers: Vec<_> = (0..4)
+				.map(|_| {
+					let rpc = Arc::clone(&rpc);
+					tokio::spawn(async move { rpc.deliver_notification(deliverable()) })
+				})
+				.collect();
+			for racer in racers {
+				assert!(!racer.await.expect("the delivery ran"), "none of them is delivered");
+			}
+
+			assert!(rpc.cancel.token().is_cancelled(), "the connection is torn down");
+			let mut closes = 0;
+			while let Some(Some(msg)) = frames.next().now_or_never() {
+				if matches!(msg, Message::Close(Some(ref frame)) if frame.code == AGAIN) {
+					closes += 1;
+				}
+			}
+			assert_eq!(closes, 1, "exactly one close frame, carrying the reason");
+		}
 	}
 
 	/// A connection already being torn down takes no further notifications,
@@ -1952,13 +2390,14 @@ mod tests {
 	#[tokio::test]
 	async fn a_notification_after_teardown_began_is_refused() {
 		// Plenty of room, so capacity is not what refuses it.
-		let (rpc, mut frames) = ws_with_channel(8).await;
+		let (rpc, queues) = ws_with_channel(8).await;
+		let mut frames = queues.merged();
 		rpc.cancel_all();
 
 		assert!(!rpc.deliver_notification(deliverable()), "the notification is refused");
 
 		assert!(
-			frames.try_recv().is_err(),
+			frames.next().now_or_never().is_none(),
 			"nothing was queued behind a connection that is closing"
 		);
 	}
@@ -1967,12 +2406,13 @@ mod tests {
 	/// the connection is left alone.
 	#[tokio::test]
 	async fn a_notification_for_a_reading_client_is_queued() {
-		let (rpc, mut frames) = ws_with_channel(8).await;
+		let (rpc, queues) = ws_with_channel(8).await;
+		let mut frames = queues.merged();
 
 		assert!(rpc.deliver_notification(deliverable()), "the notification is queued");
 
 		assert!(!rpc.cancel.token().is_cancelled(), "the connection is left alone");
-		assert!(matches!(frames.recv().await, Some(Message::Text(_))), "the notification");
+		assert!(matches!(frames.next().await, Some(Message::Text(_))), "the notification");
 	}
 
 	/// A connection whose receiver is gone is already over. There is nobody to
@@ -1981,7 +2421,8 @@ mod tests {
 	/// canceller, which the departing write loop has already handled.
 	#[tokio::test]
 	async fn a_notification_for_a_departed_client_is_dropped_quietly() {
-		let (rpc, frames) = ws_with_channel(8).await;
+		let (rpc, queues) = ws_with_channel(8).await;
+		let frames = queues.merged();
 		drop(frames);
 
 		assert!(!rpc.deliver_notification(deliverable()), "nothing was queued");
@@ -2305,6 +2746,8 @@ mod tests {
 			let state = Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds)));
 			let id = Uuid::new_v4();
 			let (chn_internal, _chn_internal_rx) = channel::<Message>(8);
+			let (chn_notify, _chn_notify_rx) = channel::<Message>(8);
+			let (chn_close, _chn_close_rx) = channel::<Message>(1);
 			let rpc = Arc::new(Websocket {
 				id,
 				format: Format::Json,
@@ -2318,6 +2761,8 @@ mod tests {
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
+				notifications: chn_notify,
+				lagging_close: chn_close,
 			});
 
 			// Pin the owner session under the connection's default session
@@ -2427,6 +2872,8 @@ mod tests {
 			let state = Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds)));
 			let id = Uuid::new_v4();
 			let (chn_internal, _chn_internal_rx) = channel::<Message>(8);
+			let (chn_notify, _chn_notify_rx) = channel::<Message>(8);
+			let (chn_close, _chn_close_rx) = channel::<Message>(1);
 			let rpc = Arc::new(Websocket {
 				id,
 				format: Format::Json,
@@ -2440,6 +2887,8 @@ mod tests {
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
+				notifications: chn_notify,
+				lagging_close: chn_close,
 			});
 
 			// LIVE queries require a realtime-enabled session.
@@ -2537,6 +2986,8 @@ mod tests {
 			let state = Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds)));
 			let id = Uuid::new_v4();
 			let (chn_internal, _chn_internal_rx) = channel::<Message>(8);
+			let (chn_notify, _chn_notify_rx) = channel::<Message>(8);
+			let (chn_close, _chn_close_rx) = channel::<Message>(1);
 			let rpc = Arc::new(Websocket {
 				id,
 				format: Format::Json,
@@ -2550,6 +3001,8 @@ mod tests {
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
+				notifications: chn_notify,
+				lagging_close: chn_close,
 			});
 
 			// Set the canceller before calling handle_live.
@@ -2590,7 +3043,13 @@ mod tests {
 		state: Arc<RpcState>,
 		rpc: Arc<Websocket>,
 		/// Frames the dispatcher sends to the connection.
+		/// The notification queue's receiving end: what the dispatcher writes
+		/// to, and so what this harness reads.
 		frames: Receiver<Message>,
+		/// The reply queue's receiving end, held open and otherwise unused.
+		_replies: Receiver<Message>,
+		/// The close frame's slot, held open and otherwise unused.
+		_lagging_close: Receiver<Message>,
 		canceller: CancellationToken,
 		dispatcher: tokio::task::JoinHandle<()>,
 	}
@@ -2621,7 +3080,11 @@ mod tests {
 				canceller.clone(),
 			));
 
-			let (channel, frames) = channel::<Message>(8);
+			let (notifier, notify_frames) = channel::<Message>(8);
+			// Held so the other queues stay open; this harness watches only
+			// what the dispatcher sends unprompted.
+			let (closer, close_frames) = channel::<Message>(1);
+			let (channel, replies) = channel::<Message>(8);
 			let rpc = Arc::new(Websocket {
 				id: Uuid::new_v4(),
 				format: Format::Json,
@@ -2635,6 +3098,8 @@ mod tests {
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel,
+				notifications: notifier,
+				lagging_close: closer,
 			});
 			// The dispatcher delivers to connected WebSockets only.
 			state.web_sockets.write().await.insert(rpc.id, Arc::clone(&rpc));
@@ -2645,7 +3110,9 @@ mod tests {
 			Self {
 				state,
 				rpc,
-				frames,
+				frames: notify_frames,
+				_replies: replies,
+				_lagging_close: close_frames,
 				canceller,
 				dispatcher,
 			}
@@ -2842,6 +3309,8 @@ mod tests {
 			let state = Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds)));
 			let id = Uuid::new_v4();
 			let (chn_internal, _chn_internal_rx) = channel::<Message>(8);
+			let (chn_notify, _chn_notify_rx) = channel::<Message>(8);
+			let (chn_close, _chn_close_rx) = channel::<Message>(1);
 			let rpc = Arc::new(Websocket {
 				id,
 				format: Format::Json,
@@ -2855,6 +3324,8 @@ mod tests {
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
+				notifications: chn_notify,
+				lagging_close: chn_close,
 			});
 			let sess = Session::owner().with_ns("test").with_db("test");
 			rpc.set_session(rpc.id, Arc::new(RwLock::new(sess)));
@@ -3103,6 +3574,8 @@ mod tests {
 		ds.execute("DEFINE DB `test`", &owner.clone().with_ns("test"), None).await.unwrap();
 		let state = Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds)));
 		let (tx, _rx) = channel::<Message>(8);
+		let (notifier, _notify_rx) = channel::<Message>(8);
+		let (closer, _close_rx) = channel::<Message>(1);
 		let rpc = Arc::new(Websocket {
 			id: Uuid::new_v4(),
 			format: Format::Json,
@@ -3116,6 +3589,8 @@ mod tests {
 			shutdown: CancellationToken::new(),
 			cancel: surrealdb_core::ctx::CancelHandle::new(),
 			channel: tx,
+			notifications: notifier,
+			lagging_close: closer,
 		});
 		let sess = Session::owner().with_ns("test").with_db("test").with_rt(true);
 		rpc.set_session(rpc.id, Arc::new(RwLock::new(sess)));
@@ -3910,6 +4385,8 @@ mod tests {
 			use surrealdb_rpc::capabilities::Capabilities;
 			let rpc = streaming_rpc(Capabilities::all()).await;
 			// The frames of this connection are encoded as CBOR.
+			let (notifier, _notify_rx) = channel::<Message>(8);
+			let (closer, _close_rx) = channel::<Message>(1);
 			let rpc = Arc::new(Websocket {
 				id: rpc.id,
 				format: Format::Cbor,
@@ -3923,6 +4400,8 @@ mod tests {
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: rpc.channel.clone(),
+				notifications: notifier,
+				lagging_close: closer,
 			});
 			let sess = Session::owner().with_ns("test").with_db("test").with_rt(true);
 			rpc.set_session(rpc.id, Arc::new(RwLock::new(sess)));
