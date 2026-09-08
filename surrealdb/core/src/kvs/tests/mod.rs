@@ -17,6 +17,8 @@
 #[cfg(feature = "kv-mem")]
 mod changefeed_gc_test;
 #[cfg(feature = "kv-mem")]
+mod graph_degree_test;
+#[cfg(feature = "kv-mem")]
 mod graph_fold_test;
 #[cfg(feature = "kv-mem")]
 mod graph_migration_test;

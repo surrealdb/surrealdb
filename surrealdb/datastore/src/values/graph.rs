@@ -412,6 +412,30 @@ impl AdjacencyBlock {
 		}
 	}
 
+	/// The header of an encoded chunk — the flags byte and the entry count —
+	/// without decoding the dictionary or the entries. Applies the same
+	/// validation as [`KVValue::kv_decode_value`]: an unknown header flag is
+	/// a build too old for the data, a loud error.
+	pub fn kv_decode_header(bytes: &[u8]) -> Result<(u8, u64)> {
+		let Some((&flags, mut rest)) = bytes.split_first() else {
+			bail!(KeyError::Corrupted("adjacency block is empty"));
+		};
+		ensure!(
+			flags & !BLOCK_KNOWN_FLAGS == 0,
+			KeyError::Corrupted("adjacency block header carries unknown flags")
+		);
+		let count =
+			read_uvarint(&mut rest).ok_or(KeyError::Corrupted("adjacency block is truncated"))?;
+		Ok((flags, count))
+	}
+
+	/// The entry count alone, read from the leading header bytes of an
+	/// encoded chunk — degree counting sums these without decoding the
+	/// dictionary or the entries.
+	pub fn kv_decode_len(bytes: &[u8]) -> Result<u64> {
+		Ok(Self::kv_decode_header(bytes)?.1)
+	}
+
 	pub fn is_empty(&self) -> bool {
 		self.len() == 0
 	}
@@ -877,6 +901,56 @@ mod tests {
 		let mut padded = bytes;
 		padded.push(0);
 		assert!(AdjacencyBlock::kv_decode_value(&padded, ()).is_err());
+	}
+
+	/// The header-only reads agree with the full decode — the entry count
+	/// matches for both encodings — and reject an unknown header flag
+	/// exactly as `kv_decode_value` does.
+	#[test]
+	fn block_header_reads_match_the_full_decode_and_validate_flags() {
+		let plain = AdjacencyBlock {
+			targets: vec![TableName::from("person")],
+			entries: BlockEntries::Plain(vec![
+				entry(b"\x03a\x00", 0, b"\x03x\x00"),
+				entry(b"\x03b\x00", 0, b"\x03y\x00"),
+			]),
+		};
+		let numeric = AdjacencyBlock {
+			targets: vec![TableName::from("person")],
+			entries: BlockEntries::Numeric(vec![
+				NumericEntry {
+					edge: 42,
+					target_table: 0,
+					target: 7,
+					props: Some(vec![1, 2]),
+				},
+				NumericEntry {
+					edge: 3,
+					target_table: 0,
+					target: 900,
+					props: None,
+				},
+				NumericEntry {
+					edge: 8,
+					target_table: 0,
+					target: 1,
+					props: None,
+				},
+			]),
+		};
+		for (block, numeric_flag) in [(plain, false), (numeric, true)] {
+			let bytes = block.kv_encode_value().unwrap();
+			assert_eq!(AdjacencyBlock::kv_decode_len(&bytes).unwrap(), block.len() as u64);
+			let (flags, count) = AdjacencyBlock::kv_decode_header(&bytes).unwrap();
+			assert_eq!(count, block.len() as u64);
+			assert_eq!(flags & BLOCK_FLAG_NUMERIC != 0, numeric_flag);
+			// An unknown header flag must be rejected, not counted.
+			let mut unknown = bytes;
+			unknown[0] |= 1 << 7;
+			assert!(AdjacencyBlock::kv_decode_len(&unknown).is_err());
+			assert!(AdjacencyBlock::kv_decode_header(&unknown).is_err());
+		}
+		assert!(AdjacencyBlock::kv_decode_len(&[]).is_err());
 	}
 
 	/// Numeric entries keep positional order and survive non-monotonic,

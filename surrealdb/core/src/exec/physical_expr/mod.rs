@@ -19,6 +19,7 @@ mod collections;
 mod conditional;
 mod control_flow;
 pub(crate) mod function;
+pub(crate) mod graph_degree;
 mod idiom;
 mod knn_membership;
 mod literal;

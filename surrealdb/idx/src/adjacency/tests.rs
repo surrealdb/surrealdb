@@ -12,8 +12,8 @@ use surrealdb_datastore::values::graph::AdjacencyValue;
 use surrealdb_kvs::TransactionType::{Read, Write};
 
 use super::fold::{fold_scope, fold_scope_bounded};
-use super::merge::{AdjacencyScope, MergedAdjacencyCursor, MergedAdjacencyEdge};
-use crate::catalog::providers::TableProvider;
+use super::merge::{AdjacencyScope, MergedAdjacencyCursor, MergedAdjacencyEdge, scope_degree};
+use crate::catalog::providers::{BoxProviderFut, CancellationProbe, TableProvider};
 use crate::catalog::{
 	DatabaseId, FromStored, NamespaceId, StoredTableDefinition, TableDefinition, TableId,
 };
@@ -520,6 +520,167 @@ async fn randomized_operations_match_the_model() {
 /// Defines the vertex table without seeding edges.
 async fn seed_table(store: &TestIndexStore) {
 	seed(store, &[]).await;
+}
+
+/// Counts the whole out-direction scope through `scope_degree`, with an
+/// optional cancellation probe.
+async fn degree_all(
+	store: &TestIndexStore,
+	folded: bool,
+	cancel: Option<&dyn CancellationProbe>,
+) -> anyhow::Result<u64> {
+	let txn = store.transaction(Read).await.unwrap();
+	let vertex = vertex();
+	let scope = AdjacencyScope {
+		ns: NS,
+		db: DB,
+		vertex: &vertex,
+		dir: Some(Dir::Out),
+		edge_table: None,
+		fk_lower: None,
+		delta_range: GraphDirPrefix {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&vertex.table),
+			id: Cow::Borrowed(&vertex.key),
+			dir: Dir::Out,
+		}
+		.range()
+		.unwrap(),
+	};
+	let result = scope_degree(&txn, scope, folded, None, None, cancel).await;
+	txn.cancel().await.unwrap();
+	result
+}
+
+/// A probe that permits its first poll and fails every later one, so a
+/// count that polls per batch errors mid-scan.
+struct FailingProbe(std::sync::atomic::AtomicUsize);
+
+impl CancellationProbe for FailingProbe {
+	fn expect_not_timedout(&self) -> BoxProviderFut<'_, anyhow::Result<()>> {
+		let calls = self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+		Box::pin(async move {
+			anyhow::ensure!(calls == 0, "cancelled");
+			Ok(())
+		})
+	}
+}
+
+/// Every counting strategy polls the cancellation probe per batch: the
+/// unfolded key count, the clean-tail header sum, and the merge drain must
+/// all stop when the probe fails instead of draining the scope.
+#[tokio::test]
+async fn scope_degree_polls_cancellation_on_every_strategy() {
+	let store = TestIndexStore::new().await;
+	seed(&store, &edges(40)).await;
+
+	// Unfolded: the keys-only count.
+	let probe = FailingProbe(Default::default());
+	assert!(degree_all(&store, false, Some(&probe)).await.is_err());
+	assert_eq!(degree_all(&store, false, None).await.unwrap(), 40);
+
+	// Folded with a clean tail: the header sum.
+	fold_all(&store, 1024).await;
+	let probe = FailingProbe(Default::default());
+	assert!(degree_all(&store, true, Some(&probe)).await.is_err());
+	assert_eq!(degree_all(&store, true, None).await.unwrap(), 40);
+
+	// A live tail: the merge drain.
+	let (e, t) = (edge("e90000"), target("t90000"));
+	{
+		let txn = store.transaction(Write).await.unwrap();
+		txn.set_key(&pointer_key(&vertex(), &e, &t), &AdjacencyValue::live()).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+	let probe = FailingProbe(Default::default());
+	assert!(degree_all(&store, true, Some(&probe)).await.is_err());
+	assert_eq!(degree_all(&store, true, None).await.unwrap(), 41);
+}
+
+/// A bounded scope — a foreign-key window, with or without the `fk_lower`
+/// hint — must count through the merge, which window-clips, never through
+/// the whole-chunk header sums.
+#[tokio::test]
+async fn a_bounded_scope_counts_through_the_merge() {
+	let store = TestIndexStore::new().await;
+	seed(&store, &edges(10)).await;
+	fold_all(&store, 1024).await;
+
+	let low = RecordIdKey::from("e00002".to_owned());
+	let high = RecordIdKey::from("e00006".to_owned());
+	let oracle = read_scope(&store, true, Some((&low, &high))).await.len() as u64;
+	assert!(oracle > 0 && oracle < 10, "the window must be a strict subset of the scope");
+
+	let txn = store.transaction(Read).await.unwrap();
+	let vertex = vertex();
+	let edge_table = TableName::from("likes");
+	let delta_range = GraphForeignTablePrefix {
+		ns: NS,
+		db: DB,
+		tb: Cow::Borrowed(&vertex.table),
+		id: Cow::Borrowed(&vertex.key),
+		dir: Dir::Out,
+		foreign_table: Cow::Borrowed(&edge_table),
+	}
+	.range_where((Bound::Included(Cow::Borrowed(&low)), Bound::Included(Cow::Borrowed(&high))))
+	.unwrap();
+	for fk_lower in [Some(&low), None] {
+		let scope = AdjacencyScope {
+			ns: NS,
+			db: DB,
+			vertex: &vertex,
+			dir: Some(Dir::Out),
+			edge_table: Some(&edge_table),
+			fk_lower,
+			delta_range: delta_range.clone(),
+		};
+		assert_eq!(
+			scope_degree(&txn, scope, true, None, None, None).await.unwrap(),
+			oracle,
+			"a bounded scope must window-clip (fk_lower given: {})",
+			fk_lower.is_some()
+		);
+	}
+	txn.cancel().await.unwrap();
+}
+
+/// A numeric chunk's header counts entries whose doc-IDs may no longer
+/// resolve, so the degree must come from the merge: removing a target
+/// record's mapping with no masking tombstone — the `REMOVE TABLE` shape —
+/// must subtract from the count exactly as it subtracts from a read.
+#[tokio::test]
+async fn numeric_chunks_count_through_the_merge() {
+	use crate::docids::TableDocIds;
+
+	let store = TestIndexStore::with_idx_config(|config| config.graph_numeric_ids = true).await;
+	// The edge table must be defined for its ids to be compressible.
+	{
+		let txn = store.transaction(Write).await.unwrap();
+		let table = TableDefinition::from_stored(&StoredTableDefinition::new(
+			NS,
+			DB,
+			TableId(2),
+			TableName::from("likes"),
+		))
+		.unwrap();
+		txn.put_tb(NS_NAME, DB_NAME, &table).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+	let all = edges(5);
+	seed(&store, &all).await;
+	fold_all(&store, 1024).await;
+	assert_eq!(degree_all(&store, true, None).await.unwrap(), 5);
+
+	// Remove one TARGET record's mapping, with no tombstone anywhere.
+	let (_, t2) = &all[2];
+	{
+		let txn = store.transaction(Write).await.unwrap();
+		TableDocIds::new(NS, DB, t2.table.clone()).remove(&txn, &t2.key).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+	assert_eq!(read_all(&store, true).await.len(), 4);
+	assert_eq!(degree_all(&store, true, None).await.unwrap(), 4);
 }
 
 /// Numeric folding: entries compress into doc-IDs, both involved tables

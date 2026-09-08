@@ -26,7 +26,7 @@ use surrealdb_datastore::Transaction;
 
 pub use self::fold::{FoldOutcome, fold_scope};
 pub use self::merge::{
-	AdjacencyScope, MergeStats, MergedAdjacencyCursor, MergedAdjacencyEdge, VisitFlow,
+	AdjacencyScope, MergeStats, MergedAdjacencyCursor, MergedAdjacencyEdge, VisitFlow, scope_degree,
 };
 pub use self::resolve::{AdjacencyResolveCache, resolve_doc_ids};
 use crate::catalog::providers::TableProvider;

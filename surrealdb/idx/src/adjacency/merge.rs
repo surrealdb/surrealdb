@@ -31,19 +31,21 @@ use anyhow::{Context as _, Result, bail};
 use surrealdb_datastore::Transaction;
 use surrealdb_datastore::tx::{MeteredKeysCursor, MeteredValsCursor};
 use surrealdb_datastore::values::graph::{
-	ADJACENCY_FLAG_PROPS, AdjacencyBlock, AdjacencyValue, BlockEntries, BlockEntry, NumericEntry,
+	ADJACENCY_FLAG_PROPS, AdjacencyBlock, AdjacencyValue, BLOCK_FLAG_NUMERIC, BlockEntries,
+	BlockEntry, NumericEntry,
 };
 use surrealdb_kvs::Direction;
 use surrealdb_kvs::consts::NORMAL_BATCH_SIZE;
 
 use super::resolve::{AdjacencyResolveCache, resolve_doc_ids};
-use crate::catalog::providers::TableProvider;
+use crate::catalog::providers::{CancellationProbe, TableProvider};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::docids::DocId;
 use crate::expr::Dir;
 use crate::key::schema::{
 	AdjacencyDirPrefix, AdjacencyEdgeTablePrefix, AdjacencyIdPrefix, AdjacencyKey, AdjacencyPrefix,
-	DecodedGraph, GraphForeignTablePrefix, GraphKey, GraphPointerKey, GraphPrefix,
+	DecodedGraph, GraphDirPrefix, GraphForeignTablePrefix, GraphIdPrefix, GraphKey,
+	GraphPointerKey, GraphPrefix,
 };
 use crate::key::{KVKeyDecode, KVValue, RawRange};
 use crate::val::{RecordId, RecordIdKey, TableName};
@@ -1168,6 +1170,165 @@ fn synthesize_pointer_key(
 	key.extend_from_slice(target_table);
 	key.extend_from_slice(&entry.target_key);
 	Ok(key)
+}
+
+/// The number of live edges in one adjacency scope, computed as cheaply as
+/// the scope's state allows: a never-folded scope counts its keys without
+/// decoding them, and a whole, folded scope whose delta tail is empty and
+/// whose chunks are all plain-encoded sums the chunk headers' entry counts
+/// without decoding entries. Every other state drains the merge, the only
+/// reader that applies the delta-wins dedupe, the tombstone subtraction,
+/// the window clipping, and the numeric resolve-and-drop semantics — a
+/// numeric chunk's header counts entries whose doc-IDs may no longer
+/// resolve (nothing tombstones a foreign block's entries when the table
+/// they point into is removed), so numeric chunks always count through the
+/// merge and both readers agree.
+///
+/// `cancel`, when given, is polled once per batch so a large scope's count
+/// is interruptible by the surrounding query's cancellation or deadline.
+pub async fn scope_degree(
+	txn: &Transaction,
+	scope: AdjacencyScope<'_>,
+	folded: bool,
+	version: Option<u64>,
+	resolve: Option<&AdjacencyResolveCache>,
+	cancel: Option<&dyn CancellationProbe>,
+) -> Result<u64> {
+	if !folded {
+		let mut cursor = txn
+			.open_keys_cursor_raw(scope.delta_range, Direction::Forward, 0, version)
+			.await
+			.context("Failed to open the graph cursor")?;
+		let mut degree = 0u64;
+		loop {
+			if let Some(cancel) = cancel {
+				cancel.expect_not_timedout().await?;
+			}
+			let batch =
+				cursor.next_batch(NORMAL_BATCH_SIZE).await.context("Failed to scan graph edges")?;
+			if batch.is_empty() {
+				return Ok(degree);
+			}
+			degree += batch.len() as u64;
+		}
+	}
+	// The header sums count whole chunks and cannot window-clip, so a
+	// bounded scope goes through the merge, which clips correctly.
+	if !scope_is_whole(&scope)? {
+		return merge_degree(txn, scope, version, resolve, cancel).await;
+	}
+	// One key decides the strategy: any delta item forces the full merge.
+	let tail = {
+		let mut probe = txn
+			.open_keys_cursor_raw(scope.delta_range.clone(), Direction::Forward, 0, version)
+			.await
+			.context("Failed to open the graph cursor")?;
+		!probe.next_batch(1).await.context("Failed to scan graph edges")?.is_empty()
+	};
+	if tail {
+		return merge_degree(txn, scope, version, resolve, cancel).await;
+	}
+	let range = block_range(txn, &scope, version).await?;
+	let mut blocks = txn
+		.open_vals_cursor_raw(range, Direction::Forward, 0, version)
+		.await
+		.context("Failed to open the adjacency block cursor")?;
+	let mut degree = 0u64;
+	let mut numeric = false;
+	loop {
+		if let Some(cancel) = cancel {
+			cancel.expect_not_timedout().await?;
+		}
+		let batch = blocks.next_batch(NORMAL_BATCH_SIZE).await?;
+		if batch.is_empty() {
+			break;
+		}
+		for (_, val) in &batch {
+			let (flags, len) = AdjacencyBlock::kv_decode_header(val)?;
+			if flags & BLOCK_FLAG_NUMERIC != 0 {
+				numeric = true;
+				break;
+			}
+			degree += len;
+		}
+		if numeric {
+			break;
+		}
+	}
+	drop(blocks);
+	if numeric {
+		return merge_degree(txn, scope, version, resolve, cancel).await;
+	}
+	Ok(degree)
+}
+
+/// Whether a folded scope spans its whole (vertex, direction, edge-table)
+/// slice: no foreign-key lower bound, and a delta range byte-equal to the
+/// unbounded range its shape encodes to. Only such a scope may be counted
+/// from chunk headers; anything narrower must window-clip through the
+/// merge.
+fn scope_is_whole(scope: &AdjacencyScope<'_>) -> Result<bool> {
+	if scope.fk_lower.is_some() {
+		return Ok(false);
+	}
+	let ns = scope.ns;
+	let db = scope.db;
+	let tb = Cow::Borrowed(&scope.vertex.table);
+	let id = Cow::Borrowed(&scope.vertex.key);
+	let whole = match (scope.dir, scope.edge_table) {
+		(Some(dir), Some(edge_table)) => GraphForeignTablePrefix {
+			ns,
+			db,
+			tb,
+			id,
+			dir,
+			foreign_table: Cow::Borrowed(edge_table),
+		}
+		.range()?,
+		(Some(dir), None) => GraphDirPrefix {
+			ns,
+			db,
+			tb,
+			id,
+			dir,
+		}
+		.range()?,
+		(None, None) => GraphIdPrefix {
+			ns,
+			db,
+			tb,
+			id,
+		}
+		.range()?,
+		// A direction-less scope narrowed to one edge table spans two
+		// non-contiguous slices; no single unbounded range describes it.
+		(None, Some(_)) => return Ok(false),
+	};
+	Ok(scope.delta_range.start() == whole.start() && scope.delta_range.end() == whole.end())
+}
+
+/// Counts a scope by draining the merged cursor — the reader that decides
+/// the delta-wins dedupe, the tombstone subtraction, the window clipping,
+/// and which numeric entries still resolve.
+async fn merge_degree(
+	txn: &Transaction,
+	scope: AdjacencyScope<'_>,
+	version: Option<u64>,
+	resolve: Option<&AdjacencyResolveCache>,
+	cancel: Option<&dyn CancellationProbe>,
+) -> Result<u64> {
+	let mut cursor = MergedAdjacencyCursor::open(txn, scope, true, version, resolve).await?;
+	let mut degree = 0u64;
+	loop {
+		if let Some(cancel) = cancel {
+			cancel.expect_not_timedout().await?;
+		}
+		let batch = cursor.next_batch_scan(NORMAL_BATCH_SIZE).await?;
+		if batch.is_empty() {
+			return Ok(degree);
+		}
+		degree += batch.len() as u64;
+	}
 }
 
 #[cfg(test)]

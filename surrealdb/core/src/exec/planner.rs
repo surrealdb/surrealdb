@@ -1116,6 +1116,64 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Convert a function call to a physical expression.
+	/// Recognizes the `count(->edge)` projection shape the degree fast path
+	/// serves: one argument, a single-part idiom holding a pure graph
+	/// lookup — no clauses, no ONLY, plain table subjects — counted for a
+	/// session whose permission checks are provably skipped (the id-only
+	/// resolve today's path takes for such a session never fetches records
+	/// either, so the raw adjacency cardinality is exactly its answer) and
+	/// reading current data.
+	fn graph_degree_shape(
+		&self,
+		name: &str,
+		arguments: &[Expr],
+	) -> Option<(crate::exec::parts::LookupDirection, Vec<surrealdb_strand::TableName>)> {
+		use crate::expr::lookup::{LookupKind, LookupSubject};
+		use crate::expr::part::Part;
+		if name != "count" || arguments.len() != 1 || self.version.is_some() {
+			return None;
+		}
+		let (Some(ns), Some(db)) = (&self.ns, &self.db) else {
+			return None;
+		};
+		if self.should_check_perms_for_view(ns, db) {
+			return None;
+		}
+		let Expr::Idiom(idiom) = &arguments[0] else {
+			return None;
+		};
+		let [Part::Lookup(lookup)] = idiom.0.as_slice() else {
+			return None;
+		};
+		let LookupKind::Graph(dir) = &lookup.kind else {
+			return None;
+		};
+		if lookup.only
+			|| lookup.expr.is_some()
+			|| lookup.cond.is_some()
+			|| lookup.split.is_some()
+			|| lookup.group.is_some()
+			|| lookup.order.is_some()
+			|| lookup.limit.is_some()
+			|| lookup.start.is_some()
+			|| lookup.alias.is_some()
+		{
+			return None;
+		}
+		let mut tables = Vec::with_capacity(lookup.what.len());
+		for subject in &lookup.what {
+			let LookupSubject::Table {
+				table,
+				referencing_field: None,
+			} = subject
+			else {
+				return None;
+			};
+			tables.push(table.clone());
+		}
+		Some(((*dir).into(), tables))
+	}
+
 	async fn physical_function_call(
 		&self,
 		func_call: FunctionCall,
@@ -1133,6 +1191,13 @@ impl<'ctx> Planner<'ctx> {
 					return Box::pin(self.plan_index_function(&name, arguments)).await;
 				}
 
+				// A `count(->edge)`-shaped projection over a pure graph
+				// lookup is a degree question the adjacency storage can
+				// often answer without materializing the edges — wrap the
+				// normal expression in the degree fast path when the
+				// count's answer is provably the raw adjacency cardinality.
+				let degree = self.graph_degree_shape(&name, &arguments);
+
 				let arguments = self.physical_args(arguments).await?;
 				if registry.is_projection(&name) {
 					let func_ctx = registry
@@ -1149,14 +1214,26 @@ impl<'ctx> Planner<'ctx> {
 						.get(&name)
 						.map(|f| f.required_context())
 						.unwrap_or(crate::exec::ContextLevel::Root);
-					Ok(Arc::new(BuiltinFunctionExec {
-						name,
-						arguments,
-						func_required_context: func_ctx,
-						// Recorded so `eval::*` can continue the depth count from
-						// here when it re-plans its query string at runtime.
-						plan_depth: self.current_depth(),
-					}))
+					let normal: Arc<dyn crate::exec::PhysicalExpr> =
+						Arc::new(BuiltinFunctionExec {
+							name,
+							arguments,
+							func_required_context: func_ctx,
+							// Recorded so `eval::*` can continue the depth count from
+							// here when it re-plans its query string at runtime.
+							plan_depth: self.current_depth(),
+						});
+					if let Some((direction, edge_tables)) = degree {
+						return Ok(Arc::new(
+							crate::exec::physical_expr::graph_degree::GraphDegreeExpr::new(
+								direction,
+								edge_tables,
+								normal,
+							)
+							.map_err(|e| EngineError::Internal(e.to_string()))?,
+						));
+					}
+					Ok(normal)
 				}
 			}
 			Function::Custom(name) => {
