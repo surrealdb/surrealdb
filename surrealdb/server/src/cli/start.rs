@@ -43,6 +43,19 @@ use crate::{dbs, env, ntw};
 /// continues behind the readiness gate.
 const STARTUP_BIND_GRACE: Duration = Duration::from_secs(5);
 
+/// How long shutdown waits for the deferred startup work to stop before it
+/// closes the storage engine.
+///
+/// That work opens transactions of its own — the version stamp, the defaults,
+/// this node's registration, the import — and is not joined the way the
+/// datastore's own maintenance tasks are, because it is the task that starts
+/// the maintenance schedule: there is nothing to register with until it has
+/// already run. So the join is made here instead, on the same terms
+/// `Datastore::shutdown` gives the maintenance tasks: bounded at the same
+/// budget, and a task still running when it expires is abandoned exactly as a
+/// maintenance pass would be.
+const STARTUP_SHUTDOWN_JOIN: Duration = Duration::from_secs(30);
+
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
 	#[arg(help = "Database path used for storing data")]
@@ -407,7 +420,7 @@ pub async fn init<
 	// Whether the deferred work includes a startup import, which decides whether
 	// the bind waits for it (see the grace period below).
 	let has_import = pending_startup.has_import();
-	let mut startup = {
+	let mut startup = Some({
 		// Run the deferred startup work as a task, so the listener can bind
 		// without waiting for it when it turns out to be slow.
 		let ds = Arc::clone(&datastore);
@@ -415,6 +428,11 @@ pub async fn init<
 		let startup_canceller = canceller.clone();
 		let fatal_canceller = canceller.clone();
 		let fatal = fatal.clone();
+		// A plain spawn: this is the task that starts the maintenance schedule,
+		// so until it has run there is no task set to register it with. Shutdown
+		// joins this handle directly instead — see [`STARTUP_SHUTDOWN_JOIN`] —
+		// which keeps the same guarantee: the storage engine does not close
+		// under the transactions this task opens.
 		tokio::spawn(async move {
 			tokio::select! {
 				biased;
@@ -469,7 +487,7 @@ pub async fn init<
 				} => {}
 			}
 		})
-	};
+	});
 	// With no startup import, everything deferred is bounded work against local
 	// storage — the version check, the defaults, this node's registration and the
 	// root credential hash — so the bind waits for it. A client that connects the
@@ -485,10 +503,20 @@ pub async fn init<
 	//
 	// An import is never waited for: it is unbounded, and not starving the probes
 	// for the length of one is why it is deferred at all.
-	if !has_import && tokio::time::timeout(STARTUP_BIND_GRACE, &mut startup).await.is_err() {
-		info!(
-			"Startup is still running after {STARTUP_BIND_GRACE:?}; binding the listener now and finishing in the background"
-		);
+	if !has_import && let Some(handle) = startup.as_mut() {
+		if tokio::time::timeout(STARTUP_BIND_GRACE, handle).await.is_ok() {
+			// The work finished inside the grace period, so the handle has already
+			// yielded its output. Drop it here: a `JoinHandle` panics when polled
+			// again after completion, and the shutdown join below is that second
+			// poll. What that join is there for — not closing the storage engine
+			// under this task's transactions — is satisfied either way, because
+			// the task is done.
+			startup = None;
+		} else {
+			info!(
+				"Startup is still running after {STARTUP_BIND_GRACE:?}; binding the listener now and finishing in the background"
+			);
+		}
 	}
 	// A failure already known here has not been served against, so report it
 	// without binding at all.
@@ -570,6 +598,16 @@ pub async fn init<
 	};
 	// Shutdown and stop closed tasks
 	canceller.cancel();
+	// Join the deferred startup work before the engine closes under the
+	// transactions it opens. The wait is short in practice because the task
+	// selects on the token cancelled just above.
+	if let Some(handle) = startup
+		&& tokio::time::timeout(STARTUP_SHUTDOWN_JOIN, handle).await.is_err()
+	{
+		warn!(
+			"Deferred startup work did not stop within {STARTUP_SHUTDOWN_JOIN:?}; continuing shutdown without it"
+		);
+	}
 	// Wait for background tasks to finish
 	// Shutdown the datastore
 	let shutdown = datastore.shutdown().await;
