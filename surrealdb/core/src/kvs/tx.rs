@@ -840,7 +840,7 @@ impl Transaction {
 	/// issued, so concurrent writes within the transaction can never admit
 	/// more than the limit. The accounting rules (range deletes, commit-time
 	/// feed writes, reservations never being refunded) are documented on
-	/// `transaction_max_write_keys` in [`surrealdb_cnf::CommonConfig`].
+	/// `transaction_max_write_keys` in [`crate::cnf::CommonConfig`].
 	pub fn with_write_keys_limit(self, limit: Option<NonZeroU64>) -> Self {
 		self.arm_write_keys_limit(limit);
 		self
@@ -1524,13 +1524,7 @@ impl Transaction {
 			expunge,
 			Uuid::now_v7(),
 		);
-		self.set(
-			&rc,
-			&crate::key::root::rc::ReclaimState {
-				observed_ms: 0,
-			},
-		)
-		.await?;
+		self.set(&rc, &crate::key::root::rc::ReclaimState::enqueued()).await?;
 		// Invalidate cached namespace lookups so the removal is observed.
 		self.cache.remove(&cache::tx::Lookup::Nss);
 		self.cache.remove(&cache::tx::Lookup::NsByName(&ns_def.name));
@@ -1567,13 +1561,7 @@ impl Transaction {
 			expunge,
 			Uuid::now_v7(),
 		);
-		self.set(
-			&rc,
-			&crate::key::root::rc::ReclaimState {
-				observed_ms: 0,
-			},
-		)
-		.await?;
+		self.set(&rc, &crate::key::root::rc::ReclaimState::enqueued()).await?;
 		// Invalidate cached database lookups so the removal is observed.
 		self.cache.remove(&cache::tx::Lookup::Dbs(db_def.namespace_id));
 		self.cache.remove(&cache::tx::Lookup::DbByName(ns, &db_def.name));
@@ -1620,17 +1608,92 @@ impl Transaction {
 			false,
 			Uuid::now_v7(),
 		);
-		self.set(
-			&rc,
-			&crate::key::root::rc::ReclaimState {
-				observed_ms: 0,
-			},
-		)
-		.await?;
+		self.set(&rc, &crate::key::root::rc::ReclaimState::enqueued()).await?;
 		// Invalidate the cached list of all indexes for this table.
 		self.cache.remove(&cache::tx::Lookup::Ixs(ns, db, tb.as_ref()));
 		// Invalidate the cached index entry.
 		self.cache.remove(&cache::tx::Lookup::Ix(ns, db, tb.as_ref(), &ix_def.name));
+		Ok(())
+	}
+
+	/// Register this database's changefeed-retention fence for commit-time
+	/// conflict detection, so this transaction cannot commit if a retention
+	/// change lands first.
+	///
+	/// Read through [`Self::getu_key`] rather than written: the fence exists only
+	/// to give the changefeed collector and the statements that set a retention a
+	/// key in common, and a plain read would not serve — on a last-writer-wins
+	/// backend nothing validates a read set, which is the backend where the two
+	/// otherwise share no key and so never conflict.
+	///
+	/// The collector calls this inside each page's own write transaction, so the
+	/// arming covers that page and no more.
+	pub async fn arm_changefeed_retention_fence(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<()> {
+		let key = crate::key::database::cf::new(ns, db);
+		// Upstream arms this with a locked read, which registers a conflict
+		// without writing. 3.2 has no locked-read primitive, so the fence is
+		// armed by writing the value back under a condition on the value just
+		// read. Conditional rather than a plain write-back: two plain writes to
+		// one key both commit on a last-writer-wins backend, so a fence built
+		// from them would be a silent no-op there while passing on every
+		// conflict-serializing one. `kvs::tests::conditional_write_fences`
+		// characterises the conditional operation on each backend, including the
+		// same-value arm this performs.
+		//
+		// The cost over a locked read is that collection pages also conflict
+		// with each other on this key. The collector is lease-guarded to one
+		// holder per database, so in practice nothing contends for it.
+		//
+		// A missing key is armed as absent, so a retention write that creates it
+		// invalidates this page too — the state an upgraded datastore starts in.
+		let current = self.get(&key, None).await?;
+		self.putc(&key, &current.unwrap_or(0), current.as_ref()).await
+	}
+
+	/// Bump this database's changefeed-retention fence, so a collection page that
+	/// armed against it cannot commit.
+	///
+	/// Called by every path that writes a changefeed retention. The count carries
+	/// no meaning beyond changing, and over-bumping costs only a retried page, so
+	/// it is bumped whenever a written definition carries a retention rather than
+	/// only when one is extended.
+	pub async fn bump_changefeed_retention_fence(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<()> {
+		let key = crate::key::database::cf::new(ns, db);
+		let next = self.get(&key, None).await?.unwrap_or(0).wrapping_add(1);
+		self.set(&key, &next).await
+	}
+
+	/// Enqueue background reclaim of an index-data prefix by its stable id.
+	///
+	/// The id is sufficient after catalog retirement because index ids are never
+	/// reused. Re-enqueuing is safe and ensures a reclaim that raced with a final
+	/// builder write is followed by another idempotent pass. `expunge` preserves
+	/// the all-version deletion policy of a cascading parent removal.
+	pub async fn enqueue_index_reclaim(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		expunge: bool,
+	) -> Result<()> {
+		let rc = crate::key::root::rc::ReclaimKey::index(
+			ns,
+			db,
+			std::borrow::Cow::Borrowed(tb),
+			ix,
+			expunge,
+			Uuid::now_v7(),
+		);
+		self.set(&rc, &crate::key::root::rc::ReclaimState::enqueued()).await?;
 		Ok(())
 	}
 

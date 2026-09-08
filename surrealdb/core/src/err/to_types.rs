@@ -331,7 +331,8 @@ pub fn into_types_error(error: Error) -> TypesError {
 			| KvsError::Transaction(_)
 			| KvsError::TimestampInvalid(_)
 			| KvsError::Internal(_)
-			| KvsError::CompactionNotSupported => TypesError::internal(message),
+			| KvsError::CompactionNotSupported
+			| KvsError::RangeDestroyNotSupported => TypesError::internal(message),
 		},
 
 		// Internal and everything else

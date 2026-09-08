@@ -1,5 +1,6 @@
 use std::any::{Any, TypeId};
 use std::borrow::Cow;
+use std::collections::BinaryHeap;
 #[cfg(not(target_family = "wasm"))]
 use std::collections::HashMap;
 #[cfg(target_family = "wasm")]
@@ -7,6 +8,7 @@ use std::collections::HashSet;
 #[cfg(not(target_family = "wasm"))]
 use std::collections::hash_map::Entry;
 use std::fmt::{self, Display};
+use std::ops::Range;
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::pin::pin;
@@ -74,24 +76,26 @@ use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::ic::{IndexCompactionIndexPrefix, IndexCompactionKey};
-use crate::key::root::rc::{
-	RECLAIM_DATABASE, RECLAIM_INDEX, RECLAIM_NAMESPACE, ReclaimKey, ReclaimState,
-};
+use crate::key::root::rc::{Expunge, ReclaimKey, ReclaimKind, ReclaimState};
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SystemClock;
+use crate::kvs::destroy::{DestroyRange, DestroyRangeHandle};
 use crate::kvs::ds::requirements::{
 	TransactionBuilderFactoryRequirements, TransactionBuilderRequirements,
 };
 use crate::kvs::index::IndexBuilder;
+use crate::kvs::paging::{PageCompanion, PagedDelete, PagedOutcome};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 #[cfg(test)]
 use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
+use crate::kvs::util::to_prefix_range;
 use crate::kvs::{
-	Error as KvsError, KVValue, LockType, NORMAL_BATCH_SIZE, TransactionType,
+	CHANGEFEED_GC_PASS_KEY_BUDGET, Error as KvsError, KVValue, LockType, NORMAL_BATCH_SIZE,
+	RECLAIM_BATCH_SIZE, RECLAIM_PASS_ENTRY_QUOTA, RECLAIM_PASS_KEY_BUDGET, TransactionType,
 	is_retryable_transaction_conflict,
 };
 use crate::lq::LiveQueryRouter;
@@ -127,7 +131,7 @@ const INITIAL_USER_ROLE: &str = "owner";
 /// returns the backend error directly) or wrapped as [`Error::Kvs`] (from the
 /// transaction helpers' `map_err(Error::from)`), so both forms are checked —
 /// mirroring [`is_retryable_transaction_conflict`].
-fn is_conditional_write_conflict(err: &anyhow::Error) -> bool {
+pub(crate) fn is_conditional_write_conflict(err: &anyhow::Error) -> bool {
 	fn is_condition_error(e: &KvsError) -> bool {
 		matches!(e, KvsError::TransactionConditionNotMet | KvsError::TransactionKeyAlreadyExists)
 	}
@@ -135,6 +139,28 @@ fn is_conditional_write_conflict(err: &anyhow::Error) -> bool {
 		return is_condition_error(e);
 	}
 	matches!(err.downcast_ref::<Error>(), Some(Error::Kvs(e)) if is_condition_error(e))
+}
+
+/// Whether a reclaim pass emptied the prefix it was given.
+///
+/// `Complete` licenses the caller to retire the queue entry. `Incomplete` means
+/// the entry's durable resume cursor has advanced but keys remain, so the entry
+/// must stay queued for a later pass to finish — retiring it then would orphan
+/// the remainder with nothing left to find it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReclaimOutcome {
+	Complete,
+	Incomplete,
+	/// The queue entry was deleted by someone else while the reclaim was
+	/// running, withdrawing the claim that the prefix is orphaned. Nothing more
+	/// may be deleted from it.
+	Cancelled,
+	/// The task lease passed to another node mid-reclaim. Like `Incomplete` for
+	/// this entry, but the pass itself must stop rather than move on to the next
+	/// entry: a lease check is throttled to one datastore read per maintenance
+	/// period, so the reclaim consumed the read a fresh check here would depend
+	/// on and that check would report the lease held without asking.
+	LeaseLost,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -872,6 +898,18 @@ impl TransactionBuilder for DatastoreFlavor {
 		match self {
 			#[cfg(feature = "kv-tikv")]
 			Self::TiKV(v) if type_id == TypeId::of::<super::tikv::TikvOpsHandle>() => Some(v.ops_handle()),
+			// Offered only while garbage collection is running. The destroy
+			// bypasses MVCC, so what makes it safe is the safepoint advancing
+			// past the removal before the data goes; with collection disabled the
+			// safepoint never moves, a snapshot older than the removal is never
+			// invalidated, and a reader holding one would watch keys vanish
+			// mid-scan. Withholding the capability routes such a deployment to
+			// the transactional delete, which every reader's snapshot sees
+			// consistently.
+			#[cfg(feature = "kv-tikv")]
+			Self::TiKV(v) if type_id == TypeId::of::<DestroyRangeHandle>() && v.gc_enabled() => {
+				Some(Arc::new(DestroyRangeHandle(v.ops_handle())) as _)
+			}
 			#[allow(unreachable_patterns)]
 			_ => None,
 		}
@@ -903,6 +941,45 @@ impl Display for Datastore {
 		self.transaction_factory.builder.fmt(f)
 	}
 }
+
+/// One reclaim queue entry in the running for this pass's key budget.
+///
+/// Ordered by how long the entry has been waiting — oldest observation first,
+/// and the queue's key order between entries observed in the same millisecond so
+/// selection is deterministic. Held in a max-heap capped at
+/// [`RECLAIM_BATCH_SIZE`], where "greatest" is the newest and so the first to
+/// lose its place. The pass then spends its key budget across at most
+/// [`RECLAIM_PASS_ENTRY_QUOTA`] of those — a separate, smaller bound.
+struct ReclaimCandidate {
+	/// When the reclaim task first observed the entry. Zero only where the grace
+	/// is disabled, in which case every candidate ties and key order decides.
+	observed_ms: u64,
+	/// The queue key, as the scan returned it.
+	key: Vec<u8>,
+	/// The state read during the walk, carrying the resume cursor the delete
+	/// continues from.
+	state: ReclaimState,
+}
+
+impl Ord for ReclaimCandidate {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		self.observed_ms.cmp(&other.observed_ms).then_with(|| self.key.cmp(&other.key))
+	}
+}
+
+impl PartialOrd for ReclaimCandidate {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl PartialEq for ReclaimCandidate {
+	fn eq(&self, other: &Self) -> bool {
+		self.cmp(other) == std::cmp::Ordering::Equal
+	}
+}
+
+impl Eq for ReclaimCandidate {}
 
 impl Datastore {
 	pub fn builder() -> Builder {
@@ -1393,18 +1470,37 @@ impl Datastore {
 	/// Drop every version of every key in the half-open range `[start, end)`
 	/// **outside** any user transaction.
 	///
-	/// Routes through the backend's [`TransactionBuilder::extension`] hook.
-	/// Backends other than TiKV treat this as a no-op. Callers are
-	/// responsible for ensuring the data is already logically inaccessible
-	/// (typically by running this only after a committed catalog-clearing
-	/// transaction).
-	pub async fn unsafe_destroy_range(&self, start: Vec<u8>, end: Vec<u8>) -> Result<()> {
-		#[cfg(feature = "kv-tikv")]
-		if let Some(ops) = self.tikv_ops() {
-			return ops.unsafe_destroy_range(start, end).await.map_err(Into::into);
-		}
-		let _ = (start, end);
-		Ok(())
+	/// Resolves the backend's [`DestroyRange`] capability through the
+	/// [`TransactionBuilder::extension`] hook and delegates to it. A backend
+	/// that does not offer the capability yields
+	/// [`crate::kvs::Error::RangeDestroyNotSupported`]: nothing was deleted, so
+	/// a caller holding a transactional fallback matches on that error and
+	/// takes it, and every other caller propagates rather than mistaking an
+	/// unperformed destroy for a completed one.
+	///
+	/// The destruction bypasses MVCC, so the caller owns two guarantees: the
+	/// data is already logically inaccessible (typically because a committed
+	/// transaction cleared the catalog entry naming it), and any snapshot that
+	/// could still read it has expired.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self), fields(start = ?range.start, end = ?range.end))]
+	pub async fn unsafe_destroy_range(&self, range: Range<Key>) -> Result<()> {
+		let Some(ops) = self.destroy_range_ops() else {
+			return Err(crate::kvs::Error::RangeDestroyNotSupported.into());
+		};
+		ops.destroy_range(range).await
+	}
+
+	/// Resolve the backend's out-of-transaction range-destroy capability.
+	///
+	/// `None` means the backend cannot destroy a range outside a transaction —
+	/// either it has no such primitive, or its current configuration cannot use
+	/// the one it has. Resolved by capability rather than by backend name, so
+	/// callers stay free of per-backend `cfg` arms and a new capable backend
+	/// needs no change here.
+	fn destroy_range_ops(&self) -> Option<Arc<dyn DestroyRange>> {
+		let ext = self.transaction_factory.builder.extension(TypeId::of::<DestroyRangeHandle>())?;
+		let handle = ext.downcast::<DestroyRangeHandle>().ok()?;
+		Some(Arc::clone(&handle.0))
 	}
 
 	/// Advance the MVCC garbage-collection safepoint by `lifetime`.
@@ -2452,7 +2548,49 @@ impl Datastore {
 	/// # Arguments
 	/// * `interval` - The interval between compaction runs, to calculate the lease duration
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn changefeed_process(&self, interval: &Duration) -> Result<()> {
+	pub async fn changefeed_process(
+		&self,
+		interval: &Duration,
+		canceller: &CancellationToken,
+	) -> Result<()> {
+		self.changefeed_process_bounded(interval, CHANGEFEED_GC_PASS_KEY_BUDGET, canceller).await
+	}
+
+	/// [`Self::changefeed_process`] with the per-pass key budget lowered, so a
+	/// test can drive a pass that stops mid-backlog and inspect what it left
+	/// behind.
+	#[cfg(test)]
+	// Driven only by the changefeed-GC tests, which build an in-memory datastore.
+	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
+	pub(crate) async fn changefeed_gc_with_budget(
+		&self,
+		interval: &Duration,
+		budget: u64,
+		canceller: &CancellationToken,
+	) -> Result<()> {
+		self.changefeed_process_bounded(interval, budget, canceller).await
+	}
+
+	/// One changefeed-collection pass, deleting at most `budget` entries from
+	/// each keyspace it collects.
+	///
+	/// The changefeed backlog and, under the Router engine, the live-query event
+	/// backlog are both sized by write throughput rather than by the catalog, so
+	/// neither is deleted in one transaction: each is paged behind committed
+	/// transactions of at most one page (see [`crate::kvs::paging`]). A pass
+	/// therefore costs a bounded amount of work however far either backlog has
+	/// run ahead, and the next tick resumes at the head of what survives.
+	///
+	/// The two keyspaces share this pass's lease but hold separate budgets. The
+	/// same writes fill both, so a budget spanning them would let whichever is
+	/// collected first spend it whenever the write rate outran it, leaving the
+	/// other uncollected on every pass and growing on disk without limit.
+	async fn changefeed_process_bounded(
+		&self,
+		interval: &Duration,
+		budget: u64,
+		canceller: &CancellationToken,
+	) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting changefeed garbage collection");
 		// Create a new lease handler
@@ -2469,22 +2607,25 @@ impl Datastore {
 		}
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
-		// Create a new transaction
-		let txn = self.transaction(Write, Optimistic).await?;
-		// Perform the changefeed garbage collection
-		catch!(txn, crate::cf::gc_all_at(&lh, &txn).await);
+		// Entries this pass may delete from the changefeed keyspace, shared out
+		// across the databases it visits.
+		let mut cf_budget = budget;
+		// Perform the changefeed garbage collection. A pass that lost the lease
+		// ends this one: the live-query collector below shares the lease, and its
+		// own first check would be answered from the maintenance throttle by the
+		// very check that lost it — so it would delete alongside the new holder.
+		if !crate::cf::gc_all_at(self, &lh, canceller, &mut cf_budget).await? {
+			return Ok(());
+		}
 		// When the Router engine is active, also garbage-collect the dedicated
 		// live-query event keyspace, retaining entries for the configured window so
-		// reconnecting/lagging subscribers can still replay. This rides the same
-		// lease and transaction as the changefeed GC above.
+		// reconnecting/lagging subscribers can still replay. This shares the
+		// pass's lease with the changefeed GC above and spends its own budget.
 		if self.config.live_query_engine == LiveQueryEngine::Router {
-			catch!(
-				txn,
-				crate::lq::gc::gc_all_at(&lh, &txn, self.config.live_query_retention).await
-			);
+			let retention = self.config.live_query_retention;
+			let mut lq_budget = budget;
+			crate::lq::gc::gc_all_at(self, &lh, retention, canceller, &mut lq_budget).await?;
 		}
-		// Commit the changes
-		catch!(txn, txn.commit().await);
 		// Everything ok
 		Ok(())
 	}
@@ -2511,7 +2652,7 @@ impl Datastore {
 	// Indexing functions
 	// --------------------------------------------------
 
-	fn ensure_not_cancelled(canceller: &CancellationToken) -> Result<()> {
+	pub(crate) fn ensure_not_cancelled(canceller: &CancellationToken) -> Result<()> {
 		if canceller.is_cancelled() {
 			bail!(Error::QueryCancelled);
 		}
@@ -2885,17 +3026,33 @@ impl Datastore {
 	/// returns immediately and never trips a request/transaction timeout.
 	///
 	/// Coordinated across the cluster by a [`TaskLeaseType::ReclaimTombstones`]
-	/// lease so only one node reclaims at a time. The queue is read in a
-	/// short-lived read transaction; each prefix is destroyed independently
-	/// (idempotently — re-running on an already-empty prefix is a no-op) and the
-	/// processed queue entry is then deleted in a separate write transaction, so
-	/// a crash mid-reclaim simply retries on the next pass.
+	/// lease so only one node reclaims at a time. The queue is walked in batches
+	/// of at most [`RECLAIM_BATCH_SIZE`] entries, each read in a short-lived
+	/// read transaction and each retired or stamped in one write transaction of
+	/// its own, so neither the pass's snapshot nor its queue update grows with
+	/// the number of pending removals. Each prefix is then destroyed
+	/// independently and idempotently — in one out-of-transaction call on a
+	/// backend offering [`DestroyRange`], otherwise in bounded pages, each
+	/// committed together with the resume cursor that accounts for it. A queue
+	/// entry is retired only once its prefix is empty, so a crash or an
+	/// exhausted budget mid-reclaim resumes from the committed cursor on a later
+	/// pass instead of restarting the prefix.
+	///
+	/// One pass deletes at most [`RECLAIM_PASS_KEY_BUDGET`] data keys in total,
+	/// so a prefix larger than that is finished over several ticks rather than
+	/// monopolising the schedule this task shares. That budget is divided among
+	/// the entries a batch still has to visit, floored at one page each: an
+	/// entry naming an oversized prefix takes a page and yields to the next
+	/// instead of spending the whole pass on itself, so each of the first
+	/// `RECLAIM_PASS_KEY_BUDGET / RECLAIM_BATCH_SIZE` entries that still hold
+	/// data makes progress on every pass.
 	///
 	/// Snapshot safety: a queued removal is only reclaimed once it has been
 	/// *observed* by this task for at least `grace`. The reclaim task destroys
-	/// data out-of-band — on TiKV via `unsafe_destroy_range`, which bypasses
-	/// MVCC — so a read transaction whose snapshot predates the `REMOVE` must be
-	/// given time to finish first. On first sight the task stamps the entry's
+	/// data out-of-band, and on a backend offering out-of-transaction range
+	/// destruction that destruction bypasses MVCC, so a read transaction whose
+	/// snapshot predates the `REMOVE` must be given time to finish first. On
+	/// first sight the task stamps the entry's
 	/// [`ReclaimState::observed_ms`]; aging is measured from there, not from the
 	/// key's `uid` (a UUIDv7 stamped while the `REMOVE` statement runs, which can
 	/// be arbitrarily earlier than the commit inside a long `BEGIN`/`COMMIT`
@@ -2915,7 +3072,59 @@ impl Datastore {
 		grace: Duration,
 		canceller: CancellationToken,
 	) -> Result<(usize, usize)> {
+		Self::reclaim_tombstones_bounded(dbs, interval, grace, RECLAIM_PASS_KEY_BUDGET, canceller)
+			.await
+	}
+
+	/// [`Self::reclaim_tombstones`] with the per-pass key budget lowered, so a
+	/// test can drive a pass that stops mid-prefix and inspect what it left
+	/// behind.
+	#[cfg(test)]
+	// Driven only by the reclaim tests, which build an in-memory datastore.
+	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
+	pub(crate) async fn reclaim_tombstones_with_budget(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		grace: Duration,
+		budget: u64,
+		canceller: CancellationToken,
+	) -> Result<(usize, usize)> {
+		Self::reclaim_tombstones_bounded(dbs, interval, grace, budget, canceller).await
+	}
+
+	/// One reclaim pass, deleting at most `budget` data keys in total.
+	///
+	/// The pass walks the whole queue and spends its key budget on part of it,
+	/// which are two different bounds and are enforced separately.
+	///
+	/// The walk is unconditional. Stamping an entry's first sighting and ageing it
+	/// against the grace costs at most one write per entry, so that work scales
+	/// with the number of pending removals — catalog scale — and not with the data
+	/// they name. Gating it on the key budget would leave an entry beyond the
+	/// budget's reach unstamped, and an unstamped entry has `observed_ms == 0`, so
+	/// its grace has not started and it is not yet even a candidate for reclaim.
+	/// The queue is walked in bounded batches, each batch's stamps committed in one
+	/// transaction, so the walk's memory and write batches stay proportional to one
+	/// batch however long the queue is.
+	///
+	/// The key budget is then spent on the [`RECLAIM_PASS_ENTRY_QUOTA`]
+	/// longest-observed eligible entries, selected while walking so only that many
+	/// are ever held. Oldest-first rather than queue order: key order makes the
+	/// entries that happen to sort lowest the only ones ever served while they hold
+	/// data, whereas the wait an operator cares about is how long a removal has
+	/// gone unreclaimed. Spreading the budget across every eligible entry instead
+	/// would shrink each share towards one key as the queue grows.
+	async fn reclaim_tombstones_bounded(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		grace: Duration,
+		budget: u64,
+		canceller: CancellationToken,
+	) -> Result<(usize, usize)> {
 		trace!(target: TARGET, "Attempting tombstone reclaim process");
+		// Data keys this pass may still delete, shared out across the entries it
+		// serves. Spent to zero ends the spend with every cursor committed.
+		let mut budget = budget;
 		// Coordinate across the cluster so only one node reclaims at a time.
 		let lh = LeaseHandler::new_with_canceller(
 			dbs.sequences.clone(),
@@ -2927,27 +3136,47 @@ impl Datastore {
 		)?;
 		let mut count_iteration = 0;
 		let mut count_error = 0;
-		// Continue without interruptions while there are entries and the lease.
+		// The queue range and a window within it, advanced past each batch the
+		// walk reads. Reading the queue in bounded batches is what keeps both the
+		// snapshot the pass holds and the write transaction that updates it
+		// proportional to one batch rather than to the number of pending removals.
+		let (queue_beg, queue_end) = ReclaimKey::range();
+		let queue = queue_beg..queue_end;
+		let mut window = queue.clone();
+		// The longest-observed eligible entries seen so far, at most
+		// `RECLAIM_PASS_ENTRY_QUOTA` of them. A max-heap ordered oldest-first, so
+		// the entry discarded when the quota is exceeded is the newest held.
+		let mut candidates: BinaryHeap<ReclaimCandidate> = BinaryHeap::new();
+		// Whether the walk finished holding the lease. Losing it mid-walk ends the
+		// pass: the deletes below would otherwise run against a prefix the node
+		// that holds the lease now is already working on.
+		let mut lease_held = true;
+		// Walk the queue: stamp, age, and select. No deletes, so no budget.
 		loop {
 			Self::ensure_not_cancelled(&canceller)?;
 			// If we don't hold the lease, another node is handling this task.
 			if !lh.has_lease().await? {
-				return Ok((count_iteration, count_error));
+				lease_held = false;
+				break;
 			}
 			Self::ensure_not_cancelled(&canceller)?;
-			// Read the reclaim queue in a short-lived read transaction to avoid
-			// holding a write lock across the entire reclaim cycle.
-			let (beg, end) = ReclaimKey::range();
+			// Read one bounded batch of queue entries in a short-lived read
+			// transaction, to avoid holding a write lock across the entire
+			// reclaim cycle. Values are read as bytes so that an entry this node
+			// cannot decode is skipped with a warning rather than failing the
+			// whole pass.
 			let items = {
 				let txn = dbs.transaction(Read, Optimistic).await?;
-				let res = txn.getr(beg..end, None).await;
+				let res = txn.scan(window.clone(), RECLAIM_BATCH_SIZE, 0, None).await;
 				let _ = txn.cancel().await;
 				res?
 			};
 			Self::ensure_not_cancelled(&canceller)?;
-			if items.is_empty() {
-				return Ok((count_iteration, count_error));
-			}
+			let Some((last, _)) = items.last().cloned() else {
+				// The window has run off the end of the queue: everything queued
+				// has been walked.
+				break;
+			};
 			count_iteration += 1;
 			// Current wall-clock time (unix millis), used to age each entry
 			// against `grace` and to stamp first observations.
@@ -2956,16 +3185,12 @@ impl Datastore {
 				.map(|d| d.as_millis() as u64)
 				.unwrap_or(0);
 			let grace_ms = grace.as_millis() as u64;
-			// `done`: entries reclaimed this pass (to delete from the queue).
-			// `to_stamp`: entries seen for the first time (to record an
-			// observation time so aging is measured from commit, not the
-			// pre-commit `uid`). Entries seen but still inside the grace window
-			// are left untouched for a later pass.
-			let mut done: Vec<Key> = Vec::with_capacity(items.len());
-			let mut to_stamp: Vec<Key> = Vec::new();
-			for (k, v) in &items {
+			// Queue states to initialise or repair. The raw value read with each
+			// one is the compare-and-set guard, so a concurrent cursor advance or
+			// cancellation cannot be overwritten by this batch.
+			let mut to_stamp: Vec<(Vec<u8>, Vec<u8>, ReclaimState)> = Vec::new();
+			for (k, v) in items.iter() {
 				Self::ensure_not_cancelled(&canceller)?;
-				lh.try_maintain_lease().await?;
 				let rc = match ReclaimKey::decode_key(k) {
 					Ok(rc) => rc,
 					Err(e) => {
@@ -2974,140 +3199,479 @@ impl Datastore {
 						continue;
 					}
 				};
-				// Zero grace: reclaim immediately without the observe-then-age
-				// dance (tests / harness teardown — no concurrent readers).
-				if grace.is_zero() {
-					match dbs.reclaim_decoded(&rc).await {
-						Ok(()) => done.push(k.clone()),
-						Err(e) => {
-							count_error += 1;
-							warn!(target: TARGET, "Tombstone reclaim failed for a queue entry: {e}");
-						}
-					}
+				// A kind this version cannot act on takes no candidate slot. It
+				// would be refused on every pass, and because only an older node
+				// with a different layout could have written one it is older than
+				// the entries that are actionable, so in an oldest-first set it
+				// would crowd them out and stall their reclaim indefinitely. The
+				// entry stays queued for a node that understands it.
+				if rc.kind.is_doc_id() {
 					continue;
 				}
+				// The state carries both the observation stamp the grace is
+				// measured from and the resume cursor a partly-reclaimed prefix
+				// continues at, so it is read before either is consulted.
+				// A value this node cannot read still names a prefix whose catalog
+				// entry is committed-removed, so the entry is restarted rather than
+				// skipped: skipping it strands data that nothing else can reach,
+				// because the queue entry is the only remaining name for it.
+				// Restarting is safe in both fields — treating the entry as never
+				// observed keeps the grace gate conservative, and discarding an
+				// unreadable cursor only re-scans pages that may already be empty,
+				// which a delete tolerates.
 				let state = match ReclaimState::kv_decode_value(v, ()) {
 					Ok(s) => s,
 					Err(e) => {
 						count_error += 1;
-						warn!(target: TARGET, "Failed to decode reclaim queue state: {e}");
+						warn!(
+							target: TARGET,
+							"Restarting a reclaim queue entry whose state could not be read: {e}",
+						);
+						// Repair the unreadable state conditionally before attempting
+						// the reclaim. A typed cursor CAS cannot use unreadable bytes as
+						// its expected value, and a blind repair could resurrect a claim
+						// concurrently cancelled on another node.
+						let repaired = ReclaimState {
+							observed_ms: if grace.is_zero() {
+								0
+							} else {
+								now_ms
+							},
+							cursor: None,
+						};
+						to_stamp.push((k.clone(), v.clone(), repaired.clone()));
+						// Zero-grace callers may reclaim immediately after the
+						// conditional repair commits. If that repair loses a race, the
+						// page's own CAS sees that `repaired` is not current and stops.
+						if grace.is_zero() {
+							candidates.push(ReclaimCandidate {
+								observed_ms: repaired.observed_ms,
+								key: k.clone(),
+								state: repaired,
+							});
+							if candidates.len() > RECLAIM_BATCH_SIZE as usize {
+								candidates.pop();
+							}
+						}
 						continue;
 					}
 				};
-				if state.observed_ms == 0 {
-					// First sighting of this committed entry — record an
-					// observation time (>= commit) and defer reclaim. Aging is
-					// measured from here, never from the pre-commit `uid`.
-					to_stamp.push(k.clone());
-					continue;
-				}
-				// Snapshot-safety gate: only destroy data once it has been
-				// observed for at least `grace`, by which point any transaction
-				// that could still read it is behind the MVCC GC safepoint.
-				if now_ms.saturating_sub(state.observed_ms) >= grace_ms {
-					match dbs.reclaim_decoded(&rc).await {
-						Ok(()) => done.push(k.clone()),
-						Err(e) => {
-							count_error += 1;
-							warn!(target: TARGET, "Tombstone reclaim failed for a queue entry: {e}");
-						}
+				// A zero grace reclaims immediately, skipping the
+				// observe-then-age dance (tests / harness teardown — no
+				// concurrent readers).
+				if !grace.is_zero() {
+					if state.observed_ms == 0 {
+						// First sighting of this committed entry — record an
+						// observation time (>= commit) and defer reclaim. Aging
+						// is measured from here, never from the pre-commit
+						// `uid`. Not a candidate this pass: its grace starts now.
+						to_stamp.push((
+							k.clone(),
+							v.clone(),
+							ReclaimState {
+								observed_ms: now_ms,
+								cursor: state.cursor.clone(),
+							},
+						));
+						continue;
+					}
+					// Snapshot-safety gate: only destroy data once it has been
+					// observed for at least `grace`, by which point any
+					// transaction that could still read it is behind the MVCC
+					// GC safepoint.
+					if now_ms.saturating_sub(state.observed_ms) < grace_ms {
+						continue;
 					}
 				}
+				candidates.push(ReclaimCandidate {
+					observed_ms: state.observed_ms,
+					key: k.clone(),
+					state,
+				});
+				if candidates.len() > RECLAIM_BATCH_SIZE as usize {
+					// The newest held entry gives up its place: it has waited
+					// least, so it loses to every other candidate. Held up to one
+					// batch rather than up to the share divisor, because an entry
+					// whose reclaim spends nothing — an already-empty prefix, or a
+					// backend that drops the range in one call — costs no budget,
+					// and the spend below walks through as many of those as it
+					// finds. Capping the set at the divisor would stop that at the
+					// divisor and throttle the backends where reclaim is cheapest.
+					// One batch of candidates is the memory the pass already holds
+					// for one batch of scanned entries.
+					candidates.pop();
+				}
 			}
-			// Persist queue changes in a single write transaction: stamp
-			// newly-observed entries and delete reclaimed ones. Done separately
-			// from the read scan so we don't conflict with concurrent enqueues.
-			if !done.is_empty() || !to_stamp.is_empty() {
+			// Persist this batch's stamps in one write transaction, bounded by the
+			// batch as the paged data delete is bounded by the page. Done
+			// separately from the read scan so we don't conflict with concurrent
+			// enqueues.
+			if !to_stamp.is_empty() {
 				let txn = dbs.transaction(Write, Optimistic).await?;
 				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
 					let _ = txn.cancel().await;
 					return Err(e);
 				}
-				for k in &to_stamp {
-					if let Ok(rc) = ReclaimKey::decode_key(k) {
-						let state = ReclaimState {
-							observed_ms: now_ms,
-						};
-						if let Err(e) = txn.set(&rc, &state).await {
+				let mut condition_failed = false;
+				for (k, expected, state) in &to_stamp {
+					let value = match state.kv_encode_value() {
+						Ok(value) => value,
+						Err(e) => {
+							let _ = txn.cancel().await;
+							return Err(e);
+						}
+					};
+					match txn.putc(k, &value, Some(expected)).await {
+						Ok(()) => {}
+						Err(e) if is_conditional_write_conflict(&e) => {
+							condition_failed = true;
+							break;
+						}
+						Err(e) => {
 							warn!(target: TARGET, "Failed to stamp reclaim queue entry: {e}");
 						}
 					}
 				}
-				for k in &done {
-					if let Err(e) = txn.del(k).await {
+				if condition_failed {
+					let _ = txn.cancel().await;
+				} else {
+					// A stamp that does not land leaves the entry unobserved, so the
+					// next pass starts its grace instead. Counted rather than silent:
+					// an uncounted failure here reports as a healthy pass while the
+					// entry's clock never starts.
+					if let Err(e) = txn.commit().await {
+						let _ = txn.cancel().await;
+						if !is_conditional_write_conflict(&e) {
+							count_error += 1;
+							warn!(target: TARGET, "Failed to commit reclaim queue stamps: {e}");
+							return Ok((count_iteration, count_error));
+						}
+					}
+				}
+			}
+			// Seek past the batch just walked; the window advancing is also what
+			// terminates the walk, at the end of the queue.
+			// Seek past the batch just walked. `Range<Key>` has no `resume_after`
+			// here, so the lower bound moves to the successor of the last key in
+			// unsigned byte order.
+			let mut next = last.clone();
+			next.push(0);
+			window = next..queue.end.clone();
+		}
+		if !lease_held {
+			return Ok((count_iteration, count_error));
+		}
+		// Spend the key budget on the selected entries, longest-observed first.
+		// `into_sorted_vec` is ascending in the candidate order, which is the
+		// oldest observation first and the queue's key order between entries
+		// observed in the same millisecond.
+		let selected = candidates.into_sorted_vec();
+		// Entries whose prefix this pass emptied, to delete from the queue. An
+		// entry the pass only partly emptied is left queued for a later pass.
+		let mut done: Vec<Vec<u8>> = Vec::with_capacity(selected.len());
+		// How many of the selected entries are still to spend from the budget, so
+		// each takes its slice of what is left rather than all of it.
+		let mut remaining = selected.len() as u64;
+		for candidate in selected {
+			Self::ensure_not_cancelled(&canceller)?;
+			// Stop at the entry the lease was lost on. The queue update below
+			// still commits what this pass emptied, and whichever node holds
+			// the lease now continues from the durable cursors. The answer has
+			// to be read rather than discarded: a lease check is throttled to
+			// one datastore read per maintenance period, so a call that drops
+			// it consumes the read the page loop's own check depends on and
+			// leaves that check answering affirmatively without asking.
+			if !lh.try_maintain_lease().await? {
+				break;
+			}
+			let ReclaimCandidate {
+				key,
+				state,
+				..
+			} = candidate;
+			// Decoded during the walk that selected it, so this cannot fail; a
+			// failure is still counted rather than panicking on it.
+			let rc = match ReclaimKey::decode_key(&key) {
+				Ok(rc) => rc,
+				Err(e) => {
+					count_error += 1;
+					warn!(target: TARGET, "Failed to decode reclaim queue entry: {e}");
+					remaining = remaining.saturating_sub(1);
+					continue;
+				}
+			};
+			// Keys this entry may delete before the pass moves on: its share of
+			// what the budget has left, across the entries still to spend from
+			// it, capped at the budget so the tail of a pass hands out only what
+			// remains. An entry naming a prefix larger than its share therefore
+			// cannot take the whole budget and leave its siblings untouched.
+			// Floored at one key rather than one page: a share below a page
+			// still deletes, since the page size caps a transaction rather than
+			// setting a minimum.
+			// The divisor is the entries still to spend, capped at the quota: a
+			// pass holding a batch of candidates would otherwise cut every share
+			// to a thousandth of the budget, so no entry would delete a useful
+			// amount. Capped, each served entry gets about a page and the pass
+			// stops when the budget runs out — which is what makes the
+			// oldest-first order above decide who is served.
+			let divisor = remaining.min(RECLAIM_PASS_ENTRY_QUOTA as u64);
+			let share = (budget / divisor.max(1)).max(1).min(budget);
+			remaining = remaining.saturating_sub(1);
+			let mut left = share;
+			// Whether the lease passed to another node mid-entry. Recorded
+			// rather than broken on directly, so the budget below is charged
+			// for the pages this entry did commit before the pass ends.
+			let mut lease_lost = false;
+			match dbs.reclaim_decoded(&rc, &state, &lh, &canceller, &mut left).await {
+				// The prefix is empty, so the entry has nothing left to
+				// name and can be retired.
+				Ok(ReclaimOutcome::Complete) => done.push(key),
+				// Progress is durable but keys remain: leaving the entry
+				// queued is what lets a later pass resume it.
+				Ok(ReclaimOutcome::Incomplete) => {}
+				// The entry is already gone, so it must not be added to
+				// `done`: that would delete whatever a concurrent writer
+				// put at the same key.
+				Ok(ReclaimOutcome::Cancelled) => {}
+				// Whichever node holds the lease now resumes from the
+				// cursors this pass committed.
+				Ok(ReclaimOutcome::LeaseLost) => lease_lost = true,
+				// Shutdown. Not a failure of this entry, so it is neither
+				// counted nor logged; the queue update below refuses to
+				// commit and the pass ends there.
+				Err(e) if crate::err::is_query_cancelled(&e) => {
+					break;
+				}
+				Err(e) => {
+					count_error += 1;
+					warn!(target: TARGET, "Tombstone reclaim failed for a queue entry: {e}");
+				}
+			}
+			// Charge what the entry deleted, not what it was offered.
+			budget = budget.saturating_sub(share.saturating_sub(left));
+			if lease_lost {
+				// The queue update below still commits what this pass
+				// emptied; the node holding the lease now takes the rest.
+				break;
+			}
+			if budget == 0 {
+				// The pass has spent its key budget. Every cursor it
+				// advanced is committed, so the next tick continues from
+				// there rather than repeating this work.
+				break;
+			}
+		}
+		// Retire the entries this pass emptied, in one write transaction bounded
+		// by the entry quota.
+		if !done.is_empty() {
+			let txn = dbs.transaction(Write, Optimistic).await?;
+			if let Err(e) = Self::ensure_not_cancelled(&canceller) {
+				let _ = txn.cancel().await;
+				return Err(e);
+			}
+			// Retire only the value currently stored. This prevents a stale
+			// completion from deleting a state advanced by another node, and
+			// makes a concurrent cancellation win cleanly on TiKV.
+			let mut condition_failed = false;
+			for k in &done {
+				let current = match txn.get(k, None).await {
+					Ok(Some(current)) => current,
+					Ok(None) => continue,
+					Err(e) => {
+						warn!(target: TARGET, "Failed to read reclaim queue entry: {e}");
+						continue;
+					}
+				};
+				match txn.delc(k, Some(&current)).await {
+					Ok(()) => {}
+					Err(e) if is_conditional_write_conflict(&e) => {
+						condition_failed = true;
+						break;
+					}
+					Err(e) => {
 						warn!(target: TARGET, "Failed to delete reclaim queue entry: {e}");
 					}
 				}
-				if let Err(e) = txn.commit().await {
-					let _ = txn.cancel().await;
-					warn!(target: TARGET, "Failed to commit reclaim queue update: {e}");
-					return Ok((count_iteration, count_error));
-				}
 			}
-			// If this pass reclaimed nothing, the remaining entries are still
-			// inside their grace window (or were just stamped, or are
-			// persistently failing) — stop now and let the next timer tick retry
-			// once they have aged, rather than busy-looping.
-			if done.is_empty() {
+			if condition_failed {
+				let _ = txn.cancel().await;
 				return Ok((count_iteration, count_error));
 			}
-		}
-	}
-
-	/// Destroy the data prefix of a decoded reclaim queue entry.
-	async fn reclaim_decoded(&self, rc: &ReclaimKey<'_>) -> Result<()> {
-		let expunge = rc.expunge != 0;
-		match rc.kind {
-			RECLAIM_NAMESPACE => {
-				let prefix = crate::key::namespace::all::new(rc.ns);
-				self.reclaim_prefix(&prefix, expunge).await
-			}
-			RECLAIM_DATABASE => {
-				let prefix = crate::key::database::all::new(rc.ns, rc.db);
-				self.reclaim_prefix(&prefix, expunge).await
-			}
-			RECLAIM_INDEX => {
-				let prefix = crate::key::index::all::new(rc.ns, rc.db, rc.tb.as_ref(), rc.ix);
-				self.reclaim_prefix(&prefix, expunge).await
-			}
-			other => {
-				warn!(target: TARGET, "Unknown reclaim queue entry kind {other}, skipping");
-				Ok(())
-			}
-		}
-	}
-
-	/// Destroy a key prefix out-of-band: `unsafe_destroy_range` on TiKV, a
-	/// transactional prefix delete on every other backend. Idempotent — a
-	/// re-run on an already-empty prefix is a no-op.
-	async fn reclaim_prefix<K>(&self, prefix: &K, expunge: bool) -> Result<()>
-	where
-		K: crate::kvs::KVKey + std::fmt::Debug,
-	{
-		#[cfg(feature = "kv-tikv")]
-		if self.tikv_ops().is_some() {
-			// `unsafe_destroy_range` hard-removes every version in the range
-			// in a single out-of-transaction call, so it ignores `expunge`
-			// (the catalog entry is already gone — there is nothing to retain).
-			let range = crate::kvs::util::to_prefix_range(prefix)?;
-			return self.unsafe_destroy_range(range.start, range.end).await;
-		}
-		// Non-TiKV backends: delete the prefix transactionally. This runs off
-		// the user request path, so even a large prefix delete here cannot trip
-		// a client deadline.
-		let txn = self.transaction(Write, Optimistic).await?;
-		let res = if expunge {
-			txn.clrp(prefix).await
-		} else {
-			txn.delp(prefix).await
-		};
-		match res {
-			Ok(()) => txn.commit().await,
-			Err(e) => {
+			// A pass whose queue update does not land has reclaimed data
+			// without recording that it did, so it is counted: an uncounted
+			// failure here reports as a healthy pass and leaves nothing for an
+			// operator to see but the next tick repeating the same work.
+			if let Err(e) = txn.commit().await {
 				let _ = txn.cancel().await;
-				Err(e)
+				if !is_conditional_write_conflict(&e) {
+					count_error += 1;
+					warn!(target: TARGET, "Failed to commit reclaim queue update: {e}");
+				}
 			}
 		}
+		Ok((count_iteration, count_error))
+	}
+
+	/// Destroy the data prefix a decoded reclaim queue entry names.
+	///
+	/// Resolves the entry's kind to the byte range beneath it and hands that
+	/// range to [`Self::reclaim_range`]. All three kinds name a subtree holding
+	/// keys of more than one type, so the range is resolved as bytes.
+	async fn reclaim_decoded(
+		&self,
+		rc: &ReclaimKey<'_>,
+		state: &ReclaimState,
+		lh: &LeaseHandler,
+		canceller: &CancellationToken,
+		budget: &mut u64,
+	) -> Result<ReclaimOutcome> {
+		let prefix = match rc.kind {
+			ReclaimKind::Namespace => to_prefix_range(&crate::key::namespace::all::new(rc.ns))?,
+			ReclaimKind::Database => {
+				to_prefix_range(&crate::key::database::all::new(rc.ns, rc.db))?
+			}
+			ReclaimKind::Index => {
+				to_prefix_range(&crate::key::index::all::new(rc.ns, rc.db, rc.tb.as_ref(), rc.ix))?
+			}
+			// The three directions of a table's shared doc-ID space. Nothing on
+			// this branch enqueues them: 3.2 has no shared per-table doc-ID
+			// space — its doc ids are per-index sequences (`SeqDocIds`) — so the
+			// kinds exist here only to keep the on-disk discriminants identical
+			// to upstream. An entry of one of these kinds can therefore only
+			// have been written by a newer node against this keyspace, which
+			// this node must not act on: it does not know which keys the space
+			// occupies, and guessing would delete a live index's mappings.
+			//
+			// Candidate selection already skips these, so this arm is the
+			// backstop for a kind that reaches dispatch by another route; it
+			// refuses the entry rather than retiring it, leaving it for a node
+			// that understands the layout.
+			ReclaimKind::DocKey | ReclaimKind::DocLookup | ReclaimKind::DocPending => {
+				warn!(
+					target: TARGET,
+					"Skipping a doc-ID reclaim queue entry ({}:{}:{}): this version has no \
+					 shared doc-ID space and cannot reclaim one",
+					rc.ns,
+					rc.db,
+					rc.tb.as_ref(),
+				);
+				return Ok(ReclaimOutcome::Incomplete);
+			}
+		};
+		self.reclaim_range(rc, state, prefix, lh, canceller, budget).await
+	}
+
+	/// Destroy every key beneath `prefix`, resuming from the queue entry's
+	/// committed cursor and stopping once `budget` keys have gone.
+	///
+	/// `budget` is this entry's allowance out of the pass's, and is decremented by
+	/// what the entry actually deletes. Returning [`ReclaimOutcome::Incomplete`]
+	/// with it spent leaves a durable cursor for the next turn this entry gets.
+	///
+	/// A backend offering [`DestroyRange`] empties the whole prefix in one
+	/// out-of-transaction call, and the pass is complete. Every other backend
+	/// pages the delete: each round opens one write transaction, scans a bounded
+	/// page of keys, deletes exactly those keys, writes the resume cursor, and
+	/// commits. Memory is therefore O(page) whatever the prefix's cardinality.
+	///
+	/// The cursor and the page of deletions it accounts for commit in the same
+	/// transaction, so every key at or before the cursor is durably gone and
+	/// progress is monotonic: a restart, a lost lease or an exhausted budget
+	/// resumes at the cursor instead of rescanning the prefix. Resuming is also
+	/// what keeps each scan off the delete tombstones the retired pages left
+	/// behind. [`ReclaimState::observed_ms`] is carried through every cursor
+	/// write unchanged — the grace gate measures from the first observation, and
+	/// restamping here would let a prefix too large for one pass reset its own
+	/// grace and never age past it.
+	///
+	/// Giving up single-transaction atomicity is sound because the catalog entry
+	/// naming this prefix is already committed-removed: a partly-destroyed
+	/// prefix is unreachable garbage, not partial state any reader can observe.
+	///
+	/// Idempotent: a re-run on an already-empty prefix scans one empty page and
+	/// reports [`ReclaimOutcome::Complete`].
+	async fn reclaim_range(
+		&self,
+		rc: &ReclaimKey<'_>,
+		state: &ReclaimState,
+		prefix: Range<Key>,
+		lh: &LeaseHandler,
+		canceller: &CancellationToken,
+		budget: &mut u64,
+	) -> Result<ReclaimOutcome> {
+		// A backend that can drop the range outside a transaction destroys
+		// every version in it in one call, so it needs neither pages nor a
+		// cursor and ignores `expunge` — the catalog entry is already gone, so
+		// there is nothing to retain. A failure here is propagated rather than
+		// retried through the paged path: the entry stays queued and the next
+		// pass tries again, so a transient storage failure is never mistaken
+		// for an absent capability.
+		//
+		// Not taken for a table's shared doc-ID prefixes, whose claim is
+		// revocable: `DEFINE INDEX` cancels the reclaim to keep the mappings the
+		// space still holds. An out-of-transaction destroy neither joins that
+		// transaction's conflict domain nor re-reads the claim, so it would go on
+		// to delete mappings the new index has already adopted, leaving entries
+		// pointing at doc-IDs that resolve to no record. The paged path re-reads
+		// the claim inside every page's transaction, which is what lets the
+		// cancellation stop it; its cursor is also what tells the next
+		// `DEFINE INDEX` that the space was left torn.
+		if !rc.kind.is_doc_id()
+			&& let Some(ops) = self.destroy_range_ops()
+		{
+			trace!(
+				target: TARGET,
+				mechanism = ops.mechanism(),
+				"Destroying a reclaimed prefix out-of-transaction",
+			);
+			ops.destroy_range(prefix).await?;
+			return Ok(ReclaimOutcome::Complete);
+		}
+		// Resume past the last key whose deletion is durable, but only where the
+		// cursor names a key this prefix covers. A cursor at or past the prefix's
+		// end would leave an empty window, which the delete cannot tell from a
+		// drained prefix: it would report the entry complete, retire the only
+		// remaining name for the data, and strand whatever the prefix still holds.
+		// Restarting from the head instead re-scans pages that may already be
+		// empty, which a delete tolerates.
+		let resumable = state
+			.cursor
+			.as_deref()
+			.is_some_and(|c| c >= prefix.start.as_slice() && c < prefix.end.as_slice());
+		let window = match &state.cursor {
+			Some(cursor) if resumable => {
+				// Resume just past the durable cursor: its byte successor.
+				let mut start = cursor.clone();
+				start.push(0);
+				start..prefix.end.clone()
+			}
+			Some(_) => {
+				warn!(
+					target: TARGET,
+					"Restarting a reclaim from the head of its prefix: the resume cursor \
+					 names a key outside it",
+				);
+				prefix
+			}
+			None => prefix,
+		};
+		let outcome = PagedDelete {
+			window,
+			companion: PageCompanion::ReclaimEntry {
+				rc,
+				state: state.clone(),
+			},
+			expunge: rc.expunge == Expunge::Expunge,
+			page: RECLAIM_BATCH_SIZE,
+		}
+		.run(self, lh, canceller, budget)
+		.await?;
+		Ok(match outcome {
+			PagedOutcome::Complete => ReclaimOutcome::Complete,
+			PagedOutcome::Incomplete => ReclaimOutcome::Incomplete,
+			PagedOutcome::Cancelled => ReclaimOutcome::Cancelled,
+			PagedOutcome::LeaseLost => ReclaimOutcome::LeaseLost,
+		})
 	}
 
 	#[cfg(not(target_family = "wasm"))]
@@ -5021,6 +5585,7 @@ mod test {
 		CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider,
 	};
 	use crate::iam::verify::verify_root_creds;
+	use crate::kvs::test_support::{WriteTxSizeObserver, cleanup_sizes};
 	use crate::kvs::testing::{
 		RetryableConflictSite, inject_retryable_conflict, retryable_conflict_count,
 	};
@@ -5975,29 +6540,6 @@ mod test {
 		Ok(())
 	}
 
-	/// Records the keys written by every write transaction, so tests can
-	/// assert per-transaction write cardinality.
-	#[derive(Default)]
-	struct WriteTxSizeObserver(std::sync::Mutex<Vec<u64>>);
-
-	impl ExecutionObserver for WriteTxSizeObserver {
-		fn on_transaction_complete(&self, event: &crate::observe::TransactionEvent) {
-			if event.safe.write {
-				self.0.lock().unwrap().push(event.safe.metrics.keys_written);
-			}
-		}
-	}
-
-	/// Strips task-lease maintenance writes (always single-key transactions)
-	/// from an observed write-transaction size sequence. In these tests the
-	/// remaining sizes are exactly the queue-cleanup batches: compacting an
-	/// index with no pending work writes nothing, so every substantive
-	/// transaction is a cleanup whose size equals the number of queue keys
-	/// it deleted.
-	fn cleanup_sizes(sizes: &[u64]) -> Vec<u64> {
-		sizes.iter().copied().filter(|&n| n > 1).collect()
-	}
-
 	/// The compaction-queue drain must never delete more than one batch of
 	/// `/!ic` entries per write transaction: the queue grows by one entry per
 	/// indexed record write, so an unbounded cleanup transaction would carry
@@ -6044,7 +6586,7 @@ mod test {
 			txn.commit().await?;
 		}
 		// Only observe the compaction cycle's own transactions.
-		observer.0.lock().unwrap().clear();
+		observer.clear();
 
 		let (batches, errors) = Datastore::index_compaction(
 			Arc::clone(&ds),
@@ -6069,7 +6611,7 @@ mod test {
 
 		// No write transaction exceeded the batch bound, and the cleanups
 		// were exactly [batch, batch, batch/2].
-		let sizes = observer.0.lock().unwrap();
+		let sizes = observer.sizes();
 		assert!(
 			sizes.iter().all(|&n| n <= batch as u64),
 			"a write transaction exceeded the {batch}-key bound: {sizes:?}"
@@ -6129,7 +6671,7 @@ mod test {
 			}
 			txn.commit().await?;
 		}
-		observer.0.lock().unwrap().clear();
+		observer.clear();
 
 		let (batches, errors) = Datastore::index_compaction(
 			Arc::clone(&ds),
@@ -6142,7 +6684,7 @@ mod test {
 
 		// Rotation signature: after the first full batch of the early index,
 		// the late index is served before the early index's remainder.
-		let sizes = observer.0.lock().unwrap();
+		let sizes = observer.sizes();
 		let cleanups = cleanup_sizes(&sizes);
 		assert_eq!(
 			cleanups,

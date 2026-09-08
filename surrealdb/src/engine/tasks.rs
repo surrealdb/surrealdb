@@ -225,7 +225,7 @@ fn spawn_task_changefeed_cleanup(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.changefeed_process(&interval).await {
+					if let Err(e) = dbs.changefeed_process(&interval, &canceller).await {
 						error!("Error running changefeed garbage collection: {e}");
 					}
 				}

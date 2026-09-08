@@ -132,7 +132,8 @@ pub fn prefix_ts(ns: NamespaceId, db: DatabaseId, ts: &[u8]) -> DatabaseChangeFe
 }
 
 /// Returns the prefix for the whole database change feeds
-#[expect(unused)]
+// Used by the changefeed-GC tests, which are gated on an in-memory datastore.
+#[allow(unused)]
 pub fn prefix(ns: NamespaceId, db: DatabaseId) -> DatabaseChangeFeedRange {
 	DatabaseChangeFeedRange::new_prefix(ns, db)
 }

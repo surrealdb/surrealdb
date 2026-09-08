@@ -40,10 +40,14 @@ mod surrealkv;
 mod tikv;
 
 #[cfg(test)]
+pub(crate) mod test_support;
+#[cfg(test)]
 mod tests;
 
 pub(crate) mod cache;
+pub(crate) mod destroy;
 pub(crate) mod index;
+pub(crate) mod paging;
 pub(crate) mod sequences;
 pub(crate) mod slowlog;
 pub(crate) mod tasklease;
@@ -53,9 +57,10 @@ pub use api::{
 	GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable, ValsBatch,
 };
 pub use consts::{
-	COUNT_BATCH_SIZE, ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV,
-	INDEX_COMPACTION_QUEUE_BATCH_SIZE, INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE,
-	INDEXING_PROBE_BATCH_SIZE, NORMAL_BATCH_SIZE,
+	CHANGEFEED_GC_BATCH_SIZE, CHANGEFEED_GC_PASS_KEY_BUDGET, COUNT_BATCH_SIZE,
+	ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV, INDEX_COMPACTION_QUEUE_BATCH_SIZE,
+	INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE, INDEXING_PROBE_BATCH_SIZE, NORMAL_BATCH_SIZE,
+	RECLAIM_BATCH_SIZE, RECLAIM_PASS_ENTRY_QUOTA, RECLAIM_PASS_KEY_BUDGET,
 };
 pub use direction::Direction;
 pub(crate) use ds::TransactionFactory;

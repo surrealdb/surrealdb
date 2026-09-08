@@ -97,6 +97,35 @@ pub async fn concurrent_conditional_writes_conflict(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
+/// The changefeed-retention fence: a same-value conditional write must lose to
+/// a concurrent plain write of the same key.
+///
+/// The changefeed collector arms the fence by writing back the value it read
+/// under a condition on that value, while a retention write bumps the counter
+/// with a plain write. The arm has to be rejected when the bump commits first,
+/// or a page could delete entries a retention extension has just taken
+/// responsibility for. Asserted here rather than beside the collector because
+/// the answer is per-backend.
+pub async fn a_same_value_conditional_write_loses_to_a_plain_write(new_ds: impl CreateDs) {
+	let node_id = Uuid::parse_str("5c0f2d41-6e70-4f81-bd9c-3a4b5c6d7e8f").unwrap();
+	let (ds, _) = new_ds.create_ds(node_id).await;
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	tx.set(&"test", &b"0".to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// A collection page arming the fence against the value it observed.
+	let page = ds.transaction(Write, Optimistic).await.unwrap();
+	page.putc(&"test", &b"0".to_vec(), Some(&b"0".to_vec())).await.unwrap();
+	// A retention write bumping the counter.
+	let bump = ds.transaction(Write, Optimistic).await.unwrap();
+	bump.set(&"test", &b"1".to_vec()).await.unwrap();
+	// The bump wins and the page must not be allowed to commit its deletes.
+	bump.commit().await.unwrap();
+	page.commit().await.unwrap_err();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
+	assert_eq!(tx.get(&"test", None).await.unwrap().unwrap(), b"1");
+	tx.cancel().await.unwrap();
+}
+
 macro_rules! define_tests {
 	($new_ds:ident) => {
 		#[tokio::test]
@@ -118,6 +147,12 @@ macro_rules! define_tests {
 		async fn concurrent_conditional_writes_conflict() {
 			use super::conditional_write_fences as fences;
 			fences::concurrent_conditional_writes_conflict($new_ds).await;
+		}
+		#[tokio::test]
+		#[serial_test::serial]
+		async fn a_same_value_conditional_write_loses_to_a_plain_write() {
+			use super::conditional_write_fences as fences;
+			fences::a_same_value_conditional_write_loses_to_a_plain_write($new_ds).await;
 		}
 	};
 }

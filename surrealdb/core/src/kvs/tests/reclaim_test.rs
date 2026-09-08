@@ -12,8 +12,9 @@ use tokio_util::sync::CancellationToken;
 use web_time::{Duration, SystemTime};
 
 use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::dbs::{Capabilities, Session};
-use crate::key::root::rc::{ReclaimKey, ReclaimState};
+use crate::key::root::rc::{ReclaimKey, ReclaimKind, ReclaimState};
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::TransactionType::{Read, Write};
 use crate::kvs::{Datastore, KVValue};
@@ -51,6 +52,40 @@ async fn reclaim_entry_observed_ms(ds: &Datastore) -> u64 {
 	let _ = tx.cancel().await;
 	assert_eq!(items.len(), 1, "expected exactly one reclaim queue entry");
 	ReclaimState::kv_decode_value(&items[0].1, ()).unwrap().observed_ms
+}
+
+/// Every key currently stored under a half-open byte range, for asserting a
+/// prefix is empty and naming what survived when it is not.
+async fn keys_in_range(ds: &Datastore, beg: Vec<u8>, end: Vec<u8>) -> Vec<Vec<u8>> {
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
+	let res = tx.keysr(beg..end, 1000, 0, None).await.unwrap();
+	let _ = tx.cancel().await;
+	res
+}
+
+/// Drive reclaim passes until one reads no queue entry, the only state that
+/// leaves nothing behind. Bounded so an entry this version cannot act on ends
+/// the loop instead of hanging it.
+///
+/// `budget` is the per-pass key allowance. A budget below the window's key
+/// count is what forces the delete to page and resume, so a caller asserting a
+/// prefix is emptied should pass one well under it.
+async fn drain_reclaim(ds: &Arc<Datastore>, budget: u64) {
+	for _ in 0..256 {
+		let (iterations, errors) = Datastore::reclaim_tombstones_with_budget(
+			Arc::clone(ds),
+			Duration::from_secs(1),
+			Duration::ZERO,
+			budget,
+			CancellationToken::new(),
+		)
+		.await
+		.unwrap();
+		assert_eq!(errors, 0, "a reclaim pass must not error");
+		if iterations == 0 {
+			break;
+		}
+	}
 }
 
 fn now_ms() -> u64 {
@@ -140,6 +175,103 @@ async fn remove_database_defers_data_reclaim() {
 		count_range(&ds, new_range.start, new_range.end).await,
 		0,
 		"recreated database must start empty with no data leaked from the removed one"
+	);
+}
+
+#[tokio::test]
+async fn remove_namespace_reclaims_every_key_under_the_namespace() {
+	let ds = mem_ds().await;
+	let ses = Session::owner().with_ns("test").with_db("tenant");
+
+	// A database inside the namespace, so the namespace holds more than the
+	// database subtree: allocating the database id also writes the namespace's
+	// database-id sequence keys, which sort *below* the database prefix (`!` <
+	// `*`). Enough records that the window cannot be emptied in one page, so the
+	// delete has to resume from its cursor — a resume that skips the low end of
+	// the window strands exactly those sequence keys.
+	ds.execute("DEFINE NAMESPACE test; DEFINE DATABASE tenant;", &ses, None).await.unwrap();
+	for i in 0..40 {
+		ds.execute(&format!("CREATE thing:{i} SET v = {i};"), &ses, None).await.unwrap();
+	}
+
+	let ns_id = {
+		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let db = tx.get_db_by_name("test", "tenant", None).await.unwrap().unwrap();
+		let _ = tx.cancel().await;
+		db.namespace_id
+	};
+	let range = crate::kvs::util::to_prefix_range(&crate::key::namespace::all::new(ns_id)).unwrap();
+	assert!(
+		count_range(&ds, range.start.clone(), range.end.clone()).await > 0,
+		"the namespace prefix should hold keys before reclaim"
+	);
+
+	// Remove the database and then its namespace, the order a caller tearing a
+	// tenant down uses. Both removals defer, so the queue holds two entries whose
+	// prefixes nest: the namespace's window contains the database's entirely.
+	ds.execute("REMOVE DATABASE tenant;", &ses, None).await.unwrap();
+	ds.execute("REMOVE NAMESPACE test;", &Session::owner(), None).await.unwrap();
+	// Well under the ~45 keys the namespace holds, so the delete pages several times.
+	drain_reclaim(&ds, 4).await;
+
+	// Every key beneath the namespace, not merely the database subtree: a
+	// namespace removal names the whole prefix, so anything left under it is
+	// unreachable data no later statement can address.
+	let leftover = keys_in_range(&ds, range.start.clone(), range.end.clone()).await;
+	assert!(
+		leftover.is_empty(),
+		"the reclaim task must destroy every key under the namespace prefix, left {} behind: {:?}",
+		leftover.len(),
+		leftover.iter().map(crate::key::debug::Sprintable::sprint).collect::<Vec<_>>(),
+	);
+	assert_eq!(reclaim_queue_len(&ds).await, 0, "the reclaim task must drain the reclaim queue");
+}
+
+#[tokio::test]
+async fn a_doc_id_entry_is_left_queued_and_takes_no_candidate_slot() {
+	let ds = mem_ds().await;
+
+	// A kind only a node with a newer layout could have written: 3.2 has no
+	// shared per-table doc-ID space, so this version cannot know which keys the
+	// entry names.
+	let rc = ReclaimKey::of_kind(
+		ReclaimKind::DocKey,
+		NamespaceId(9),
+		DatabaseId(9),
+		uuid::Uuid::from_u128(1),
+	);
+	{
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		tx.set(&rc, &ReclaimState::enqueued()).await.unwrap();
+		tx.commit().await.unwrap();
+	}
+
+	// A pass with a real grace, which stamps every entry it takes as a
+	// candidate. Nothing here should be taken.
+	let (_, errors) = Datastore::reclaim_tombstones(
+		Arc::clone(&ds),
+		Duration::from_secs(1),
+		Duration::from_secs(3600),
+		CancellationToken::new(),
+	)
+	.await
+	.unwrap();
+	assert_eq!(errors, 0, "an entry this version cannot act on is not an error");
+
+	assert_eq!(
+		reclaim_queue_len(&ds).await,
+		1,
+		"the entry must stay queued for a node that understands its layout"
+	);
+	// Unstamped is the observable form of "took no candidate slot": an entry
+	// that reached selection would have had its first sighting recorded. Slots
+	// are bounded, so an entry that can only ever be refused must not hold one
+	// — it is older than anything actionable and would crowd it out on every
+	// pass.
+	assert_eq!(
+		reclaim_entry_observed_ms(&ds).await,
+		0,
+		"it must not be observed, so it cannot occupy a bounded candidate slot"
 	);
 }
 
@@ -291,6 +423,7 @@ async fn reclaim_runs_once_observation_ages_past_grace() {
 			&rc,
 			&ReclaimState {
 				observed_ms: now_ms().saturating_sub(3_600_000),
+				cursor: None,
 			},
 		)
 		.await

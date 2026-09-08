@@ -621,14 +621,29 @@ async fn cleanup_environment(dbs: &Arc<Datastore>, session: &Session) -> Result<
 	// datastore with no concurrent readers, so the snapshot-safety grace that
 	// production uses is unnecessary here and would leave residue for the
 	// retained-key check.
-	Datastore::reclaim_tombstones(
-		Arc::clone(dbs),
-		std::time::Duration::from_secs(1),
-		std::time::Duration::ZERO,
-		tokio_util::sync::CancellationToken::new(),
-	)
-	.await
-	.context("failed to drain tombstone reclaim queue")?;
+	// One pass deletes a bounded number of keys, so draining a prefix larger than
+	// that budget takes several. Repeat until a pass reads no queue entry at all,
+	// which is the only state that leaves nothing behind for the retained-key
+	// check — `/!rc` is not one of the prefixes it tolerates.
+	//
+	// Bounded rather than unconditional: an entry the engine cannot act on stays
+	// queued by design, so keying the loop on the queue being read would hang the
+	// harness on it. Falling out leaves the residue for the retained-key check to
+	// report, which names the test and the keys instead of stalling the run.
+	const MAX_RECLAIM_PASSES: usize = 64;
+	for _ in 0..MAX_RECLAIM_PASSES {
+		let (batches, _) = Datastore::reclaim_tombstones(
+			Arc::clone(dbs),
+			std::time::Duration::from_secs(1),
+			std::time::Duration::ZERO,
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await
+		.context("failed to drain tombstone reclaim queue")?;
+		if batches == 0 {
+			break;
+		}
+	}
 
 	Ok(())
 }

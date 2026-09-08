@@ -160,6 +160,11 @@ impl DefineTableStatement {
 		// Record definition change
 		if self.changefeed.is_some() {
 			txn.changefeed_buffer_table_change(ns.namespace_id, db.database_id, &name, &tb_def);
+			// A table's retention counts towards its database's collection
+			// watermark, so the fence is bumped in the same transaction: a
+			// collection page that armed against it is rejected rather than
+			// deleting under the old policy.
+			txn.bump_changefeed_retention_fence(ns.namespace_id, db.database_id).await?;
 		}
 
 		// Update the catalog

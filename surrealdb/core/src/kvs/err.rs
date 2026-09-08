@@ -52,7 +52,9 @@ pub enum Error {
 	///
 	/// Returned by TiKV's `delr` when the range would exceed
 	/// `SURREAL_TIKV_DELR_MAX_KEYS`. Callers that need to drop very large
-	/// ranges should use a datastore-level `unsafe_destroy_range` instead.
+	/// ranges either page the delete across committed transactions or, where
+	/// the backend offers it, use the out-of-transaction
+	/// [`crate::DestroyRange`] capability.
 	#[error("Transaction range operation exceeded the maximum key count of {0}")]
 	TransactionRangeTooLarge(u32),
 
@@ -94,6 +96,16 @@ pub enum Error {
 
 	#[error("The storage layer does not support compaction requests.")]
 	CompactionNotSupported,
+
+	/// The storage layer cannot drop a key range outside a transaction.
+	///
+	/// Returned when the [`crate::DestroyRange`] capability was asked for and
+	/// the backend does not offer it — either because it has no such primitive
+	/// or because its current configuration cannot use the one it has. A
+	/// caller that has a transactional fallback matches on this and takes it;
+	/// every other caller propagates, because nothing was deleted.
+	#[error("The storage layer does not support out-of-transaction range destruction.")]
+	RangeDestroyNotSupported,
 }
 
 impl Error {

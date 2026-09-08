@@ -1,3 +1,11 @@
+//! Tests for core behaviour layered on top of the KV backends: the
+//! transaction metrics wrappers, the transaction cache, and the deferred
+//! data reclaim task. The raw KV-store behaviour tests live in the
+//! `surrealdb-kvs-any` crate.
+//!
+//! A module gated on `kv-mem` asserts behaviour every backend shares, so the
+//! in-memory store is enough to cover it. An ungated module carries per-backend
+//! tests, each gated on its own `kv-*` feature.
 #![cfg(any(
 	feature = "kv-mem",
 	feature = "kv-rocksdb",
@@ -23,6 +31,8 @@ macro_rules! include_tests {
 #[cfg(feature = "kv-rocksdb")]
 mod metrics;
 
+#[cfg(feature = "kv-mem")]
+mod changefeed_gc_test;
 mod conditional_write_fences;
 mod multireader;
 mod multiwriter_different_keys;

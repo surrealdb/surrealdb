@@ -23,6 +23,7 @@ use super::timestamp::MAX_TIMESTAMP_BYTES;
 use super::util;
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
+use crate::kvs::destroy::DestroyRange;
 use crate::kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use crate::kvs::{COUNT_BATCH_SIZE, Key, TimeStamp, TimeStampImpl, Val};
 
@@ -34,11 +35,15 @@ const TARGET: &str = "surrealdb::core::kvs::tikv";
 /// Callers reach this through the top-level
 /// [`crate::kvs::Datastore::run_mvcc_gc`] /
 /// [`crate::kvs::Datastore::run_lock_cleanup`] /
-/// [`crate::kvs::Datastore::unsafe_destroy_range`] /
 /// [`crate::kvs::Datastore::in_flight_transaction_count`] convenience
 /// methods, which look the handle up by `TypeId` so non-TiKV backends
 /// return a no-op without the generic `TransactionBuilder` trait needing
 /// to advertise these signatures.
+///
+/// The same handle also serves the backend-agnostic
+/// [`DestroyRange`] capability, published under
+/// [`crate::kvs::destroy::DestroyRangeHandle`] so the engine resolves it
+/// without naming TiKV.
 pub struct TikvOpsHandle {
 	/// Underlying transactional client.
 	db: Pin<Arc<TransactionClient>>,
@@ -312,6 +317,15 @@ impl Datastore {
 	/// Clone of the operational handle. Exposed to the engine through the
 	/// `TransactionBuilder::extension` hook so non-TiKV callers don't
 	/// need to know about TiKV-specific signatures.
+	/// Whether MVCC garbage collection is running on this datastore.
+	///
+	/// Gates the out-of-transaction range destroy: that bypasses MVCC, so what
+	/// makes it safe is the safepoint advancing past the removal before the data
+	/// goes. With collection disabled the safepoint never moves.
+	pub(crate) fn gc_enabled(&self) -> bool {
+		self.handle.config.gc_enabled
+	}
+
 	pub(crate) fn ops_handle(&self) -> Arc<TikvOpsHandle> {
 		Arc::clone(&self.handle)
 	}
@@ -417,6 +431,18 @@ impl Datastore {
 			}
 			Err(e) => Err(Error::from(e)),
 		}
+	}
+}
+
+impl DestroyRange for TikvOpsHandle {
+	fn mechanism(&self) -> &'static str {
+		"tikv-unsafe-destroy-range"
+	}
+
+	fn destroy_range(&self, range: Range<Key>) -> BoxFut<'_, anyhow::Result<()>> {
+		Box::pin(async move {
+			self.unsafe_destroy_range(range.start, range.end).await.map_err(Into::into)
+		})
 	}
 }
 
@@ -967,16 +993,16 @@ impl Transactable for Transaction {
 
 	/// Delete a range of keys from the database transactionally.
 	///
-	/// Previously this called `unsafe_destroy_range` on the underlying
-	/// `TransactionClient` directly which bypassed MVCC entirely: a
-	/// rollback could not undo it and concurrent snapshot readers could
-	/// observe partial state. The new implementation materialises keys
-	/// via `scan_keys` in batches and deletes them as part of the
-	/// surrounding transaction, capped by `SURREAL_TIKV_DELR_MAX_KEYS`
-	/// to keep individual transactions reasonably sized. Callers that
-	/// need to drop arbitrarily large ranges out-of-transaction (e.g. a
-	/// background namespace expunge) should use
-	/// [`Datastore::unsafe_destroy_range`] instead.
+	/// Keys are materialised via `scan_keys` in batches and deleted as part of
+	/// the surrounding transaction, so a rollback undoes the delete and a
+	/// concurrent snapshot reader never observes partial state. The number of
+	/// keys one call may delete is capped by `SURREAL_TIKV_DELR_MAX_KEYS`;
+	/// exceeding it returns [`Error::TransactionRangeTooLarge`] rather than
+	/// building an oversized transaction. Callers that need to drop an
+	/// arbitrarily large range either page the delete across committed
+	/// transactions or use the out-of-transaction
+	/// [`DestroyRange`] capability, which bypasses MVCC and is only safe once
+	/// the range is already logically unreachable.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	fn delr(&self, rng: Range<Key>) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move { self.delete_range_bounded(rng).await })

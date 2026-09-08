@@ -20,6 +20,7 @@ use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::key::index::all as index_all;
 use crate::key::index::iu::IndexCountKey;
+use crate::key::root::rc::{Expunge, ReclaimKey, ReclaimKind};
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::testing::{
 	NonRetryableErrorSite, RetryableConflictGuard, RetryableConflictSite,
@@ -522,6 +523,32 @@ async fn assert_no_index_build_artifacts(
 	assert_eq!(index_prefix_key_count(ds, ns, db, table, ix).await?, 0);
 	assert!(local_builder_for_key(ds, ns, db, table, ix).await?.is_none());
 	Ok(())
+}
+
+#[expect(dead_code, reason = "used by the #1023 reclaim-mode tests, which are not ported to 3.2")]
+async fn index_reclaim_modes(
+	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableName,
+	ix: IndexId,
+) -> Result<Vec<Expunge>> {
+	let tx = ds.transaction(TransactionType::Read, crate::kvs::LockType::Optimistic).await?;
+	let (beg, end) = ReclaimKey::range();
+	let entries = catch!(tx, tx.getr(beg..end, None).await);
+	tx.cancel().await?;
+	Ok(entries
+		.into_iter()
+		.filter_map(|(key, _)| {
+			let reclaim = ReclaimKey::decode_key(&key).ok()?;
+			(reclaim.kind == ReclaimKind::Index
+				&& reclaim.ns == ns
+				&& reclaim.db == db
+				&& reclaim.tb.as_ref() == tb
+				&& reclaim.ix == ix)
+				.then_some(reclaim.expunge)
+		})
+		.collect())
 }
 
 async fn index_prefix_key_count(

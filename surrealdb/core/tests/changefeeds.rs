@@ -592,7 +592,12 @@ async fn test_changefeed_gc_cycle_removed() -> Result<()> {
 	);
 
 	tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-	db.changefeed_process(&std::time::Duration::from_secs(1)).await.unwrap();
+	db.changefeed_process(
+		&std::time::Duration::from_secs(1),
+		&tokio_util::sync::CancellationToken::new(),
+	)
+	.await
+	.unwrap();
 
 	let src = r#"
 		SHOW CHANGES FOR TABLE t SINCE 0;
@@ -650,7 +655,12 @@ async fn test_changefeed_gc_cycle_kept() -> Result<()> {
 	);
 
 	tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-	db.changefeed_process(&std::time::Duration::from_secs(1)).await.unwrap();
+	db.changefeed_process(
+		&std::time::Duration::from_secs(1),
+		&tokio_util::sync::CancellationToken::new(),
+	)
+	.await
+	.unwrap();
 
 	let src = r#"
 		SHOW CHANGES FOR TABLE t SINCE 0;
