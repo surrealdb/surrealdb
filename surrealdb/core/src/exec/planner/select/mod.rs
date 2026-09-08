@@ -1640,9 +1640,16 @@ impl<'ctx> Planner<'ctx> {
 			// where the actor's real field permissions are known (so it cannot
 			// over-apply to privileged users the way a conservative plan-time
 			// `AssumeRestricted` would).
-			let order = match order {
-				Some(o) if restricted_select.order_touches(o) => None,
-				other => other,
+			//
+			// Withholding is tracked separately from absence: a withheld
+			// ORDER BY is still an ordering the statement requires, so the
+			// limit-pushdown decisions below must not read the resulting
+			// `None` as "no ordering to preserve". They take `order_withheld`
+			// and refuse to push, leaving LIMIT/START to the outer operators
+			// above the Sort.
+			let (order, order_withheld) = match order {
+				Some(o) if restricted_select.order_touches(o) => (None, true),
+				other => (other, false),
 			};
 
 			let resolved = self
@@ -1679,6 +1686,7 @@ impl<'ctx> Planner<'ctx> {
 								direction,
 								cond,
 								order,
+								order_withheld,
 								scan_predicate,
 								scan_limit,
 								scan_start,
@@ -1735,6 +1743,7 @@ impl<'ctx> Planner<'ctx> {
 								table,
 								direction,
 								order,
+								order_withheld,
 								scan_predicate,
 								scan_limit,
 								scan_start,
@@ -1906,6 +1915,7 @@ impl<'ctx> Planner<'ctx> {
 		direction: crate::kvs::Direction,
 		cond: Option<&Cond>,
 		order: Option<&crate::expr::order::Ordering>,
+		order_withheld: bool,
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
@@ -1933,8 +1943,17 @@ impl<'ctx> Planner<'ctx> {
 		// index. With a residual filter above the scan, pushing LIMIT
 		// would make the scan return fewer rows than needed because the
 		// post-filter may remove some of them.
-		let order_covered =
-			|| order.is_none_or(|ord| index_covers_ordering(&index_ref, &access, direction, ord));
+		//
+		// A withheld ORDER BY (see the security guard in `plan_source`) is
+		// never covered: the ordering the statement requires is still
+		// outstanding, so LIMIT/START must stay above the Sort. `order` is
+		// `None` here precisely because it was withheld, and `is_none_or`
+		// would otherwise read that as "nothing to order by".
+		let order_covered = || {
+			!order_withheld
+				&& order
+					.is_none_or(|ord| index_covers_ordering(&index_ref, &access, direction, ord))
+		};
 		let push = scan_limit.is_some()
 			&& matches!(filter_action, FilterAction::FullyConsumed)
 			&& order_covered();
@@ -2224,6 +2243,7 @@ impl<'ctx> Planner<'ctx> {
 		table: surrealdb_strand::TableName,
 		direction: crate::kvs::Direction,
 		order: Option<&crate::expr::order::Ordering>,
+		order_withheld: bool,
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
@@ -2251,7 +2271,12 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		let filter_action = filter_action_for_predicate(&scan_predicate);
-		let push = scan_limit.is_some() && order_is_scan_compatible(order);
+		// A withheld ORDER BY (see the security guard in `plan_source`) leaves
+		// `order` as `None`, which `order_is_scan_compatible` reads as "the
+		// scan order already satisfies the statement". It does not: the
+		// ordering is still outstanding and the Sort above this scan needs
+		// every row, so LIMIT/START stay with the outer operators.
+		let push = scan_limit.is_some() && !order_withheld && order_is_scan_compatible(order);
 		let (tbl_limit, tbl_start, limit_pushed) = if push {
 			(scan_limit, scan_start, true)
 		} else {
