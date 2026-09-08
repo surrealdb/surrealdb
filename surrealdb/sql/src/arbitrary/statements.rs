@@ -271,6 +271,7 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineFieldStatement {
 			field_kind,
 			flexible,
 			readonly: u.arbitrary()?,
+			inline: u.arbitrary()?,
 			value: u.arbitrary()?,
 			assert: u.arbitrary()?,
 			computed: u.arbitrary()?,
