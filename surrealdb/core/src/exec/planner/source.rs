@@ -249,10 +249,14 @@ impl<'ctx> Planner<'ctx> {
 					// A predicate that is not key-resident may still be
 					// payload-resident: every field it references inlined
 					// into the adjacency payloads of every named edge table.
+					let direction = match &kind {
+						crate::expr::lookup::LookupKind::Graph(dir) => (*dir).into(),
+						_ => LookupDirection::Both,
+					};
 					let payload = if key_resident {
 						None
 					} else {
-						self.graph_predicate_payload_spec(&c.0, &pred, &what).await
+						self.graph_predicate_payload_spec(&c.0, &pred, &what, direction).await
 					};
 					Some((pred, key_resident, payload))
 				}
@@ -502,6 +506,7 @@ impl<'ctx> Planner<'ctx> {
 		cond: &crate::expr::Expr,
 		pred: &Arc<dyn crate::exec::PhysicalExpr>,
 		what: &[crate::expr::lookup::LookupSubject],
+		direction: LookupDirection,
 	) -> Option<crate::exec::operators::scan::PayloadPredicateSpec> {
 		use crate::catalog::providers::TableProvider;
 		use crate::exec::operators::scan::{PayloadPredicateSpec, PayloadTableSpec};
@@ -532,12 +537,19 @@ impl<'ctx> Planner<'ctx> {
 			// drops would have been dropped by the same predicate after the
 			// fetch, and every survivor still resolves through the
 			// permission-checked record path.
+			// A comparison-shaped conjunction additionally compiles to a
+			// synchronous matcher the scan runs in place of the evaluator.
+			let matcher = crate::exec::operators::scan::key_matcher::KeyPredicateMatcher::compile(
+				cond, direction,
+			)
+			.map(Arc::new);
 			return Some(PayloadPredicateSpec {
 				tables: std::collections::HashMap::new(),
 				needs_id,
 				needs_in,
 				needs_out,
 				key_only: true,
+				matcher,
 			});
 		}
 		// When the actor's runtime permission checks are provably skipped,
@@ -612,6 +624,7 @@ impl<'ctx> Planner<'ctx> {
 			needs_in,
 			needs_out,
 			key_only: false,
+			matcher: None,
 		})
 	}
 

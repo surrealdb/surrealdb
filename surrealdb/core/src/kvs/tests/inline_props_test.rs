@@ -562,6 +562,75 @@ async fn endpoint_predicates_prune_before_any_fetch() {
 	);
 }
 
+/// Comparison-shaped key-resident predicates compile to the synchronous
+/// matcher; every shape must answer exactly as the record path does, on
+/// plain keys and over folded blocks, while the counters show no edge
+/// fell back.
+#[tokio::test]
+async fn the_key_matcher_agrees_with_the_record_path() {
+	let ds = ds().await;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	run(
+		&ds,
+		&ses,
+		"DEFINE NAMESPACE test;
+		 DEFINE DATABASE test;
+		 DEFINE TABLE person SCHEMALESS;
+		 DEFINE TABLE knows TYPE RELATION;
+		 CREATE |person:1..=9| RETURN NONE;
+		 FOR $n IN 2..=9 { RELATE person:1->knows->(type::record('person', $n)) SET id = type::record('knows', $n) RETURN NONE; };",
+	)
+	.await;
+
+	let shapes = [
+		"out = person:5",
+		"out != person:5",
+		"out > person:6",
+		"out >= person:6",
+		"out < person:4",
+		"out <= person:4",
+		"person:7 < out",
+		"out > person:3 AND out != person:6",
+		"id = knows:4",
+		"in = person:1",
+		"in = person:2",
+	];
+	for shape in shapes {
+		let traversal = format!("SELECT VALUE ->(knows WHERE {shape}) FROM person:1");
+		let oracle = format!("RETURN [(SELECT VALUE id FROM knows WHERE {shape} ORDER BY id)];");
+		assert_eq!(
+			run(&ds, &ses, &traversal).await,
+			run(&ds, &ses, &oracle).await,
+			"shape `{shape}` diverged from the record path"
+		);
+		let (evals, fallbacks) = props_counters(&ds, &ses, &traversal).await;
+		assert_eq!((evals, fallbacks), (8, 0), "shape `{shape}` fell back");
+	}
+
+	// The same battery over folded blocks.
+	fold_vertex(&ds, &RecordId::new("person".into(), 1)).await;
+	for shape in shapes {
+		let traversal = format!("SELECT VALUE ->(knows WHERE {shape}) FROM person:1");
+		let oracle = format!("RETURN [(SELECT VALUE id FROM knows WHERE {shape} ORDER BY id)];");
+		assert_eq!(
+			run(&ds, &ses, &traversal).await,
+			run(&ds, &ses, &oracle).await,
+			"shape `{shape}` diverged from the record path over blocks"
+		);
+	}
+
+	// Inverse traversal: `in`/`out` swap sides relative to the scan.
+	assert_eq!(
+		run(
+			&ds,
+			&ses,
+			"SELECT VALUE <-(knows WHERE in = person:1 AND out = person:5) FROM person:5"
+		)
+		.await,
+		run(&ds, &ses, "RETURN [[knows:5]];").await,
+	);
+}
+
 /// Rewrites `rid`'s outgoing vertex-side pointer keys into the legacy
 /// (target-less) format a pre-embedded-target writer left, leaving the
 /// edge records untouched.

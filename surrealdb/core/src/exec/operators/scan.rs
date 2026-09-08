@@ -15,6 +15,7 @@ mod graph;
 pub(crate) mod graph_keys;
 mod index;
 pub(crate) mod index_count;
+pub(crate) mod key_matcher;
 mod knn;
 pub(crate) mod pipeline;
 mod record_id;

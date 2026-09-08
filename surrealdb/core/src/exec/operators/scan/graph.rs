@@ -76,6 +76,12 @@ pub(crate) struct PayloadPredicateSpec {
 	/// result set is unchanged, and every surviving edge still resolves
 	/// through the permission-checked record path.
 	pub(crate) key_only: bool,
+	/// A comparison-shaped key-resident predicate additionally compiles
+	/// to a synchronous matcher (see [`super::key_matcher`]); when set,
+	/// the scan tests each entry directly instead of synthesizing a
+	/// candidate and running the evaluator. The matcher covers the whole
+	/// predicate or is absent — never a partial residue.
+	pub(crate) matcher: Option<Arc<super::key_matcher::KeyPredicateMatcher>>,
 }
 
 /// One table's inline-field snapshot inside a [`PayloadPredicateSpec`].
@@ -949,29 +955,62 @@ impl ExecOperator for GraphEdgeScan {
 													} else if let Some(spec) =
 														payload_spec.as_deref()
 													{
-														// Payload-resident predicate: synthesize
-														// the candidate object now, evaluate at
-														// flush time in one batch — a falsy edge
-														// is dropped there without touching its
-														// record (the selectivity win), a truthy
-														// one proceeds to the batched existence
-														// and permission resolve. An edge whose
-														// payload is unusable falls back to the
-														// one trustworthy source, the edge
-														// record, prefetched per flush with a
-														// single multi-get. Scan order is
+														// Payload-resident predicate. A compiled
+														// matcher answers
+														// synchronously from the entry itself — no
+														// candidate to synthesize and
+														// nothing to defer. Every other shape
+														// synthesizes the candidate now and
+														// evaluates at flush time in
+														// one batch: a falsy edge is dropped there
+														// without touching its record
+														// (the selectivity win), a truthy one
+														// proceeds to the
+														// batched existence and permission resolve.
+														// An edge whose payload is
+														// unusable falls back to the one
+														// trustworthy source,
+														// the edge record, prefetched per flush
+														// with a single multi-get.
+														// Target-less (legacy) entries carry no far
+														// vertex, so they take
+														// that fallback either way. Scan order is
 														// preserved throughout.
-														let entry = synthesize_payload_candidate(
-															spec, rid, dir, item,
-														);
-														if record_metrics {
-															if entry.1.is_some() {
+														let matched =
+															match (&spec.matcher, &item.target) {
+																(Some(matcher), Some(target))
+																	if dir != Dir::Both =>
+																{
+																	Some(matcher.matches(
+																		rid,
+																		&item.edge,
+																		target,
+																		dir == Dir::Out,
+																	))
+																}
+																_ => None,
+															};
+														if let Some(keep) = matched {
+															if record_metrics {
 																metrics.add_props_evals(1);
-															} else {
-																metrics.add_props_fallbacks(1);
 															}
+															if keep {
+																rid_batch.push(item.edge);
+															}
+														} else {
+															let entry =
+																synthesize_payload_candidate(
+																	spec, rid, dir, item,
+																);
+															if record_metrics {
+																if entry.1.is_some() {
+																	metrics.add_props_evals(1);
+																} else {
+																	metrics.add_props_fallbacks(1);
+																}
+															}
+															payload_pending.push(entry);
 														}
-														payload_pending.push(entry);
 													} else {
 														// `TargetId` / `FullEdge` operate on the
 														// edge identity. Defer counting until after
