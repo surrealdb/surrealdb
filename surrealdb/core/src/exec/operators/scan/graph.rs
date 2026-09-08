@@ -391,10 +391,7 @@ impl ExecOperator for GraphEdgeScan {
 			// Compiled SELECT permissions, cached by table. Different edge
 			// tables may have different permission policies, so we resolve
 			// lazily per table on first use.
-			let mut perm_cache: std::collections::HashMap<
-				surrealdb_strand::TableName,
-				PhysicalPermission,
-			> = std::collections::HashMap::new();
+			let mut perm_cache = PermCache::new();
 
 			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
 
@@ -445,6 +442,37 @@ impl ExecOperator for GraphEdgeScan {
 
 			// Read from the child operator stream and extract RecordIds
 			let mut rid_batch: Vec<RecordId> = Vec::with_capacity(scan_batch_size);
+			// The pipelined resolve engages only when the resolve performs a
+			// batch read — a permission check or a `FullEdge` fetch. An
+			// identity-only resolve (a plain id traversal) completes with no
+			// I/O, so those batches emit inline and keep the single-buffer
+			// memory bound.
+			#[cfg(not(target_family = "wasm"))]
+			let pipelined_resolve = check_perms || fetch_full;
+			// A flushed batch resolving on its own runtime task while the
+			// scan continues — spawned rather than merely polled
+			// concurrently: on an embedded backend both the resolve and the
+			// next cursor fetch complete synchronously on their first poll,
+			// and only separate runtime tasks let them use separate cores.
+			// The `JoinSet` aborts the task if the stream drops mid-flight.
+			// Values always emit in buffer order — the pending batch drains
+			// before anything newer flushes or the cursor closes. The stash
+			// exists only on the predicate-free path, so the resolve carries
+			// no key or record predicate; a pipelined predicate flush would
+			// have to carry its predicates through the stash. While a stash
+			// is pending, two id batches plus one resolved value batch are
+			// in flight at once, so the pipelined scan's peak memory is ~2x
+			// `scan_batch_size` ids plus one value batch. The permission
+			// cache travels through the task and returns at the drain; every
+			// drain precedes the next resolve, so no resolve runs without it.
+			#[cfg(not(target_family = "wasm"))]
+			let mut inflight: Option<InflightResolve> = None;
+			// The recycled id buffer: each drained resolve hands its cleared
+			// buffer back here, and each stash moves it into `rid_batch`, so
+			// the steady state reuses two buffers with no per-flush
+			// allocation.
+			#[cfg(not(target_family = "wasm"))]
+			let mut spare: Vec<RecordId> = Vec::new();
 			// Payload-mode edges buffered for the flush-time batched
 			// evaluation; always drained by the per-cursor-batch flush.
 			let mut payload_pending: Vec<PayloadPending> = Vec::new();
@@ -1231,7 +1259,107 @@ impl ExecOperator for GraphEdgeScan {
 											} else {
 												rid_batch.len() >= scan_batch_size
 											};
-											if should_flush {
+											if should_flush && !has_predicate {
+												// No predicate: when the resolve performs a
+												// batch read, stash the batch on its own
+												// resolve task so it overlaps whatever the
+												// scan does next, draining anything already
+												// pending first so emission stays in buffer
+												// order. An identity-only resolve does no
+												// I/O worth hiding, so it emits inline.
+												// wasm has no worker threads, so it always
+												// resolves and emits in place.
+												#[cfg(not(target_family = "wasm"))]
+												{
+													if pipelined_resolve {
+														if let Some(pending) = inflight.take() {
+															let (values, cache, drained) =
+																join_inflight_resolve(pending)
+																	.await?;
+															perm_cache = cache;
+															spare = drained;
+															yielder
+																.emit(ValueBatch::new(values))
+																.await;
+														}
+														debug_assert!(
+															!has_predicate,
+															"inflight stash is only valid without a pushed-down predicate"
+														);
+														let task_ctx = ctx.clone();
+														let task_txn = Arc::clone(&txn);
+														let task_cache =
+															std::mem::take(&mut perm_cache);
+														let rids = std::mem::replace(
+															&mut rid_batch,
+															std::mem::take(&mut spare),
+														);
+														if rid_batch.capacity() == 0 {
+															rid_batch.reserve(scan_batch_size);
+														}
+														let mut set = tokio::task::JoinSet::new();
+														set.spawn(async move {
+															let mut rids = rids;
+															let mut cache = task_cache;
+															let values = resolve_and_filter_batch(
+																&task_ctx,
+																&task_txn,
+																ns_id,
+																db_id,
+																&rids,
+																fetch_full,
+																check_perms,
+																version,
+																&mut cache,
+																None,
+																None,
+															)
+															.await?;
+															rids.clear();
+															Ok::<_, ControlFlow>((
+																values, cache, rids,
+															))
+														});
+														inflight = Some(set);
+													} else {
+														let values = resolve_and_filter_batch(
+															&ctx,
+															&txn,
+															ns_id,
+															db_id,
+															&rid_batch,
+															fetch_full,
+															check_perms,
+															version,
+															&mut perm_cache,
+															None,
+															None,
+														)
+														.await?;
+														rid_batch.clear();
+														yielder.emit(ValueBatch::new(values)).await;
+													}
+												}
+												#[cfg(target_family = "wasm")]
+												{
+													let values = resolve_and_filter_batch(
+														&ctx,
+														&txn,
+														ns_id,
+														db_id,
+														&rid_batch,
+														fetch_full,
+														check_perms,
+														version,
+														&mut perm_cache,
+														None,
+														None,
+													)
+													.await?;
+													rid_batch.clear();
+													yielder.emit(ValueBatch::new(values)).await;
+												}
+											} else if should_flush {
 												// In payload mode the buffered edges are first
 												// reduced to the predicate's matches — evaluated
 												// in batch against their payloads or their
@@ -1308,6 +1436,17 @@ impl ExecOperator for GraphEdgeScan {
 											metrics.add_delta_hits(merge_stats.delta_hits);
 										}
 										drop(cursor);
+									}
+									// The cursor is closed: drain the pipelined
+									// flush before anything newer — the legacy
+									// fallback below and later scopes emit after it.
+									#[cfg(not(target_family = "wasm"))]
+									if let Some(pending) = inflight.take() {
+										let (values, cache, drained) =
+											join_inflight_resolve(pending).await?;
+										perm_cache = cache;
+										spare = drained;
+										yielder.emit(ValueBatch::new(values)).await;
 									}
 
 									// Legacy-format fallback: for each adjacency entry
@@ -1693,7 +1832,7 @@ async fn resolve_and_filter_batch(
 	fetch_full: bool,
 	check_perms: bool,
 	version: Option<u64>,
-	perm_cache: &mut std::collections::HashMap<TableName, PhysicalPermission>,
+	perm_cache: &mut PermCache,
 	key_predicate: Option<&Arc<dyn PhysicalExpr>>,
 	record_predicate: Option<&Arc<dyn PhysicalExpr>>,
 ) -> Result<Vec<Value>, ControlFlow> {
@@ -1750,6 +1889,27 @@ async fn resolve_and_filter_batch(
 		Some(pred) => apply_record_predicate(pred, ctx, values).await,
 		None => Ok(values),
 	}
+}
+
+/// Compiled SELECT permissions, cached by table for the lifetime of one scan.
+type PermCache = std::collections::HashMap<TableName, PhysicalPermission>;
+
+/// A stashed flush's resolve, running on its own runtime task: a
+/// single-task `JoinSet` (so dropping the stream aborts the task)
+/// resolving to the batch's values, the permission cache the task
+/// borrowed, and the cleared id buffer for recycling.
+#[cfg(not(target_family = "wasm"))]
+type InflightResolve =
+	tokio::task::JoinSet<Result<(Vec<Value>, PermCache, Vec<RecordId>), ControlFlow>>;
+
+/// Await the pipelined resolve task and hand back its values, the
+/// permission cache, and the recycled id buffer.
+#[cfg(not(target_family = "wasm"))]
+async fn join_inflight_resolve(
+	mut set: InflightResolve,
+) -> Result<(Vec<Value>, PermCache, Vec<RecordId>), ControlFlow> {
+	let joined = set.join_next().await.expect("the inflight resolve set holds exactly one task");
+	joined.map_err(|e| ControlFlow::Err(anyhow::anyhow!("graph resolve task failed: {e}")))?
 }
 
 /// Retain only rows for which `predicate` is truthy, evaluated against the

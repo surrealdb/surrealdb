@@ -45,7 +45,12 @@ pub(crate) struct ExecConfig {
 	/// yielding downstream (table/index/record-id/graph/reference scans).
 	/// Memory-constrained deployments can reduce this to lower per-pipeline
 	/// in-flight memory at the cost of slightly more per-batch dispatch
-	/// overhead. Per-batch unit is values, not bytes. (default: 1000)
+	/// overhead. Per-batch unit is values, not bytes. Permission-checked and
+	/// `FullEdge` graph scans pipeline their record resolves, holding up to
+	/// two id batches plus one resolved value batch in flight, so their
+	/// worst-case per-pipeline memory is ~2x this knob plus one materialized
+	/// batch (dominant in `FullEdge` mode); the knob still scales that bound
+	/// linearly. (default: 1000)
 	pub scan_batch_size: usize,
 	/// The maximum size of the priority queue triggering usage of the priority
 	/// queue for the result collector.
