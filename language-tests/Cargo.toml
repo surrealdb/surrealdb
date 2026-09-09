@@ -75,6 +75,36 @@ oorandom = { version = "11", optional = true }
 # profile below mirrors the root one: an optimised (release-like) build that
 # keeps frame symbolication for `samply`/`perf`/flamegraphs while rebuilding far
 # faster than full LTO. Used by `scripts/bench/profile.sh`.
+# Code-generate the bench binary the way the shipped server is built. Without
+# this, the workspace takes cargo's release defaults — `lto = false` and
+# `codegen-units = 16` — so the suite gates a configuration nobody runs: no
+# cross-crate inlining, and codegen-unit partitioning that shifts as code is
+# added, which moves measured times without any corresponding change in what a
+# user would see. These two keys mirror the root manifest.
+#
+# `panic` deliberately does not mirror it. The root ships `panic = 'abort'`;
+# here the runner isolates a panicking test with `catch_unwind`
+# (src/cmd/run/mod.rs), which `abort` would turn into a runner-wide abort on the
+# first panicking test. `opt-level = 3` is already the release default, and
+# `strip` is left off so backtraces stay resolvable.
+[profile.release]
+codegen-units = 1
+lto = true
+
+# Matches the codegen `release` uses — and therefore the codegen the bench suite
+# measures — adding only symbols. Use this profile, not `profiling`, when a
+# measured bench delta has to be attributed to a function: a profile taken of a
+# differently-optimised binary can attribute a cost to the wrong one. Expect
+# collapsed frames, since this inlines as aggressively as the measured build
+# does; `line-tables-only` keeps the inline frames resolvable.
+[profile.bench-profiling]
+inherits = "release"
+debug = "line-tables-only"
+strip = false
+
+# Trades the measured build's codegen for build speed and readable frames: thin
+# LTO and 16 codegen units compile far faster and inline less, which suits
+# exploring where time goes rather than attributing a regression.
 [profile.profiling]
 inherits = "release"
 debug = "line-tables-only"

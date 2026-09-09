@@ -26,6 +26,11 @@
 #
 # Build profile: `profiling` (release + line-tables-only debug, unstripped,
 # panic=unwind, thin-LTO). Requires `samply` (installed on first use).
+#
+# `profiling` inlines less than the `release` build the nightly measures, which
+# keeps frames readable but means a cost can sit in a different function here
+# than it does there. To attribute a measured bench delta rather than explore,
+# build with `--profile bench-profiling`, which matches the measured codegen.
 set -euo pipefail
 
 # `cargo make bench-profile -- <args>` forwards the `--` separator through to
