@@ -9,14 +9,14 @@ use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::visit::{MutVisitor, VisitMut};
 use crate::expr::{BinaryOperator, Cond, Expr};
-use crate::val::Number;
+use crate::val::{Array, Number, Object};
 
 /// Best-effort conversion of a `Literal` to a `Value`.
 ///
-/// Handles all scalar types, simple record IDs (Number/String/Uuid keys), and
-/// arrays of convertible expressions. Returns `None` for types that require
-/// async computation or are otherwise unsupported (Object, Set, Generate keys,
-/// Range keys, etc.).
+/// Handles all scalar types, record IDs with convertible keys, and arrays or
+/// objects of convertible expressions. Returns `None` for types that require
+/// async computation or are otherwise unsupported (Set, Generate keys, Range
+/// keys, etc.).
 ///
 /// Used by both the planner (for physical expression compilation) and the index
 /// analyzer (for index matching).
@@ -38,31 +38,42 @@ pub(crate) fn try_literal_to_value(
 		Literal::Datetime(dt) => Some(Value::Datetime(*dt)),
 		Literal::Duration(d) => Some(Value::Duration(*d)),
 		Literal::RecordId(rid) => {
-			// Convert simple record ID literals (Number, String, Uuid keys).
-			// Complex keys (Array, Object, Generate, Range) may contain
-			// expressions requiring async computation and are skipped.
 			use crate::expr::RecordIdKeyLit;
 			let key = match &rid.key {
 				RecordIdKeyLit::Number(n) => crate::val::RecordIdKey::Number(*n),
 				RecordIdKeyLit::String(s) => crate::val::RecordIdKey::String(s.clone()),
 				RecordIdKeyLit::Uuid(u) => crate::val::RecordIdKey::Uuid(*u),
-				_ => return None,
+				RecordIdKeyLit::Array(exprs) => {
+					crate::val::RecordIdKey::Array(try_exprs_to_array(exprs)?)
+				}
+				RecordIdKeyLit::Object(entries) => {
+					crate::val::RecordIdKey::Object(try_entries_to_object(entries)?)
+				}
+				RecordIdKeyLit::Generate(_) | RecordIdKeyLit::Range(_) => return None,
 			};
 			Some(Value::RecordId(crate::val::RecordId::new(rid.table.clone(), key)))
 		}
-		Literal::Array(arr) => {
-			let values: Option<Vec<Value>> = arr.iter().map(try_expr_to_value).collect();
-			values.map(|v| Value::Array(v.into()))
-		}
+		Literal::Array(exprs) => try_exprs_to_array(exprs).map(Value::Array),
+		Literal::Object(entries) => try_entries_to_object(entries).map(Value::Object),
 		// Types that cannot be converted without async or are unsupported
 		Literal::Bytes(_)
 		| Literal::Regex(_)
 		| Literal::Geometry(_)
 		| Literal::File(_)
-		| Literal::Object(_)
 		| Literal::Set(_)
 		| Literal::UnboundedRange => None,
 	}
+}
+
+fn try_exprs_to_array(exprs: &[Expr]) -> Option<Array> {
+	exprs.iter().map(try_expr_to_value).collect()
+}
+
+fn try_entries_to_object(entries: &[crate::expr::literal::ObjectEntry]) -> Option<Object> {
+	entries
+		.iter()
+		.map(|entry| try_expr_to_value(&entry.value).map(|value| (entry.key.clone(), value)))
+		.collect()
 }
 
 /// Try to convert an expression to a constant value.
@@ -258,15 +269,15 @@ fn try_eval_binary(
 ///
 /// Delegates to [`try_literal_to_value`] for common types, then handles
 /// planner-specific types (UnboundedRange, Bytes, Regex, Geometry, File).
-/// Returns `Error::Internal` for types that should have been handled upstream
-/// by `physical_expr()` (RecordId, Array, Object, Set).
+/// Returns `Error::Internal` for any remaining compound literals or sets,
+/// which should have been handled upstream by `physical_expr()`.
 pub(crate) fn literal_to_value(
 	lit: crate::expr::literal::Literal,
 ) -> Result<crate::val::Value, Error> {
 	use crate::expr::literal::Literal;
 	use crate::val::{Range, Value};
 
-	// Try the shared conversion first (handles scalars, simple RecordIds, arrays)
+	// Try the shared conversion first (handles scalars and supported static compound literals)
 	if let Some(value) = try_literal_to_value(&lit) {
 		return Ok(value);
 	}
