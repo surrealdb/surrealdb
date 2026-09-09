@@ -1684,6 +1684,23 @@ mod tests {
 		}
 
 		#[test]
+		fn idx_equality_static_complex_literals() {
+			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			for predicate in
+				["a = x:[1, 'a']", "a = x:{ k: 1 }", "a = { k: 1 }", "a IN [x:[1, 'a']]"]
+			{
+				let cond = parse_cond(predicate);
+				let cands = a.analyze(Some(&cond), None);
+				let c = find_for(&cands, "ix_a")
+					.unwrap_or_else(|| panic!("ix_a candidate for {predicate}"));
+				assert!(matches!(c.access, BTreeAccess::Equality(_)));
+			}
+
+			let cond = parse_cond("a = { k: dynamic }");
+			assert_no_candidate(&a.analyze(Some(&cond), None), "ix_a");
+		}
+
+		#[test]
 		fn uniq_equality_outranks_non_unique() {
 			// Same column has both a non-unique and a unique index.
 			// `select_access_path` must prefer the unique one.
@@ -1891,6 +1908,18 @@ mod tests {
 			// Compound analysis rejects (no leading column); single-column
 			// analysis also rejects (b is not the first column of the index).
 			assert_no_candidate(&cands, "ix_ab");
+		}
+
+		#[test]
+		fn static_complex_literal_forms_compound_prefix() {
+			let a = analyzer(vec![idx_basic(1, "ix_ab", &["a", "b"])], None);
+			let cond = parse_cond("a = x:[1, 'a'] AND b = 2");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "ix_ab").expect("ix_ab candidate");
+			assert!(matches!(
+				&c.access,
+				BTreeAccess::Compound { prefix, range: None } if prefix.len() == 2
+			));
 		}
 	}
 
