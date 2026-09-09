@@ -860,7 +860,9 @@ fn apply_binary(op: &BinaryOperator, left: &Value, right: &Value) -> Option<Valu
 
 #[cfg(test)]
 mod tests {
+	use std::collections::hash_map::DefaultHasher;
 	use std::collections::{BTreeMap, HashSet};
+	use std::hash::{Hash, Hasher};
 	use std::sync::Arc;
 
 	use memchr::memmem;
@@ -996,8 +998,16 @@ mod tests {
 		let float = Value::Number(Number::Float(0.1));
 		let decimal = Value::Number(Number::Decimal("0.1".parse().unwrap()));
 		// Precondition: the two are one value to `==` and two keys to `Hash`.
+		// Compare the hashes directly under a fixed seed rather than probing a
+		// `HashSet`: a probe consults `==` whenever the two land in the same
+		// bucket, which under `RandomState` is a per-process coin flip.
+		let hash_of = |v: &Value| {
+			let mut hasher = DefaultHasher::new();
+			v.hash(&mut hasher);
+			hasher.finish()
+		};
 		assert_eq!(float, decimal);
-		assert!(!HashSet::from([decimal.clone()]).contains(&float));
+		assert_ne!(hash_of(&float), hash_of(&decimal));
 
 		for (stored, field) in [(&decimal, &float), (&float, &decimal)] {
 			let set = Arc::new(HashSet::from([stored.clone()]));
