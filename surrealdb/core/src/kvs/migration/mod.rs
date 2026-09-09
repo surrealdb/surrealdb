@@ -98,7 +98,7 @@ pub(crate) static MIGRATIONS: &[Migration] = &[
 	Migration {
 		id: 2,
 		name: "re-key module definitions to their derived name",
-		version: (3, 4, 0),
+		version: (3, 3, 0),
 		run: |ds| Box::pin(module_keys::rekey_definitions_to_their_derived_name(ds)),
 	},
 ];

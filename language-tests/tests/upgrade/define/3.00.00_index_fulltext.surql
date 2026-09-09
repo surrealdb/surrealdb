@@ -12,20 +12,22 @@ same rows on the new binary reading the posting lists the old one wrote.
 The post-upgrade write lives in 3.00.00_index_fulltext_current.surql: a body carrying a
 `[[test.repair]]` is run twice, so it cannot mutate the state it reads.
 
-Releases in the 3.3.0-beta line are the exception and say so through
+3.3.0-beta.1 through beta.3 are the exception and say so through
 `[[test.repair]]`: they reject an index stamped with the pre-shared-doc-ID
 format instead of reading it, so an operator has to rebuild. Declaring that
 keeps it checkable in both directions — the runner requires the damage to
 actually happen on those targets, and fails the moment it stops."""
 
 [[test.repair]]
-since = ">=3.3.0-beta.1, <3.4.0"
+since = ">=3.3.0-beta.1, <3.3.0-beta.4"
 script = "upgrade/define/3.00.00_index_fulltext_rebuild.surql"
 unrepaired = "broken"
 reason = """
-The 3.3.0 betas moved full-text indexes onto a table-level shared doc-ID space
-and refuse to serve an index still stamped with the per-index format, so
-`REBUILD INDEX` is a required manual step when upgrading onto one of them."""
+3.3.0-beta.1 through beta.3 moved full-text indexes onto a table-level shared
+doc-ID space and refuse to serve an index still stamped with the per-index
+format, so `REBUILD INDEX` is a required manual step when upgrading onto one
+of them. 3.3.0-beta.4 preserves the per-index layout until an explicit
+rebuild instead, so no repair is required upgrading onto it or later."""
 
 [[test.results]]
 match = '''$result.indexes.blog_title == "DEFINE INDEX blog_title ON blog FIELDS title FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS"'''
