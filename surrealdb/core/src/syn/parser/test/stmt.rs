@@ -261,6 +261,133 @@ fn parse_define_function() {
 	)
 }
 
+#[cfg(feature = "surrealism")]
+#[test]
+fn parse_define_module_requires_file_name() {
+	for modifier in ["", "IF NOT EXISTS ", "OVERWRITE "] {
+		for file in [r#"f"bucket:/file.surli""#, "f'bucket:/file.surli'"] {
+			let source = format!("DEFINE MODULE {modifier}{file};");
+			let err = syn::parse_with_settings(
+				source.as_bytes(),
+				ParserSettings {
+					files_enabled: true,
+					surrealism_enabled: true,
+					..Default::default()
+				},
+				async |parser, stk| parser.parse_query(stk).await,
+			)
+			.unwrap_err();
+			assert!(matches!(err.downcast_ref(), Some(crate::err::Error::InvalidQuery(_))));
+			let message = err.to_string();
+			assert!(message.contains("File-backed modules require a module name"), "{message}");
+			assert!(message.contains("DEFINE MODULE mod::<name> AS f\"...\""), "{message}");
+		}
+	}
+}
+
+#[cfg(feature = "surrealism")]
+#[test]
+fn parse_define_module_valid_executables() {
+	use crate::sql::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
+
+	let file = ModuleExecutable::Surrealism(SurrealismExecutable(crate::val::File::new(
+		"bucket".into(),
+		"/file.surli".into(),
+	)));
+	let silo = ModuleExecutable::Silo(SiloExecutable {
+		organisation: "org".into(),
+		package: "pkg".into(),
+		major: 1,
+		minor: 2,
+		patch: 3,
+	});
+	for (modifier, kind) in [
+		("", DefineKind::Default),
+		("IF NOT EXISTS ", DefineKind::IfNotExists),
+		("OVERWRITE ", DefineKind::Overwrite),
+	] {
+		for (source, name, executable) in [
+			(r#"mod::test AS f"bucket:/file.surli""#, Some("test"), &file),
+			("mod::test AS f'bucket:/file.surli'", Some("test"), &file),
+			// Separate version numbers so the lexer does not treat them as floats.
+			("mod::test AS silo::org::pkg<1 . 2 . 3>", Some("test"), &silo),
+			("silo::org::pkg<1 . 2 . 3>", None, &silo),
+		] {
+			let source =
+				format!("DEFINE MODULE {modifier}{source} COMMENT 'module' PERMISSIONS FULL;");
+			let mut query = syn::parse_with_settings(
+				source.as_bytes(),
+				ParserSettings {
+					files_enabled: true,
+					surrealism_enabled: true,
+					..Default::default()
+				},
+				async |parser, stk| parser.parse_query(stk).await,
+			)
+			.unwrap();
+			assert_eq!(query.expressions.len(), 1);
+			assert_eq!(
+				query.expressions.pop().unwrap(),
+				TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Module(
+					crate::sql::DefineModuleStatement {
+						kind: kind.clone(),
+						name: name.map(str::to_owned),
+						executable: executable.clone(),
+						comment: Expr::Literal(Literal::String("module".into())),
+						permissions: Permission::Full,
+					}
+				))))
+			);
+		}
+	}
+}
+
+#[cfg(feature = "surrealism")]
+#[test]
+fn parse_define_module_preserves_file_errors() {
+	for (file, files_enabled, expected) in [
+		(r#"f"bucket:/file.surli""#, false, "the experimental files feature to be enabled"),
+		(r#"f"invalid""#, true, "missing bucket separator `:/`"),
+	] {
+		let parse = |named: bool| {
+			let prefix = if named {
+				"mod::test AS "
+			} else {
+				""
+			};
+			let source = format!("DEFINE MODULE {prefix}{file};");
+			syn::parse_with_settings(
+				source.as_bytes(),
+				ParserSettings {
+					files_enabled,
+					surrealism_enabled: true,
+					..Default::default()
+				},
+				async |parser, stk| parser.parse_query(stk).await,
+			)
+			.unwrap_err()
+			.to_string()
+		};
+		let unnamed = parse(false);
+		assert!(unnamed.contains(expected), "{unnamed}");
+		assert_eq!(unnamed.lines().next(), parse(true).lines().next());
+	}
+}
+
+#[test]
+fn parse_define_module_capability() {
+	let err = syn::parse_with(
+		r#"DEFINE MODULE f"bucket:/file.surli";"#.as_bytes(),
+		async |parser, stk| parser.parse_query(stk).await,
+	)
+	.unwrap_err()
+	.to_string();
+	#[cfg(feature = "surrealism")]
+	assert!(err.contains("Experimental capability `surrealism` is not enabled"));
+	#[cfg(not(feature = "surrealism"))]
+	assert!(err.contains("Surrealism modules are not supported in WASM environments"));
+}
+
 #[test]
 fn parse_define_user() {
 	// Password.

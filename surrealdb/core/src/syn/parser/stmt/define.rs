@@ -293,6 +293,12 @@ impl Parser<'_> {
 			}
 			t!("f\"") | t!("f'") => {
 				let file = self.next_token_value::<PublicFile>()?;
+				if name.is_none() {
+					bail!(
+						"File-backed modules require a module name",
+						@peek.span => "Use `DEFINE MODULE mod::<name> AS f\"...\"`"
+					);
+				}
 				ModuleExecutable::Surrealism(SurrealismExecutable(file.into()))
 			}
 			_ => {
