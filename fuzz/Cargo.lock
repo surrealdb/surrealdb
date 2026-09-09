@@ -3611,7 +3611,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surrealdb-catalog"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -3638,7 +3638,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-cnf"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "num-traits",
  "path-clean",
@@ -3649,7 +3649,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-collections"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "revision",
  "storekey",
@@ -3657,7 +3657,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-common"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "arbitrary",
  "chrono",
@@ -3675,7 +3675,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -3758,7 +3758,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-datastore"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "anyhow",
  "blake3",
@@ -3794,7 +3794,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-expr"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -3848,7 +3848,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-gql"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "phf",
  "reblessive",
@@ -3862,7 +3862,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-iam"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -3882,7 +3882,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-idx"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -3922,7 +3922,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-keyspace-macro"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3931,7 +3931,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-kvs"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "affinitypool",
  "anyhow",
@@ -3949,7 +3949,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-kvs-any"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "surrealdb-cnf",
  "surrealdb-kvs",
@@ -3960,7 +3960,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-kvs-mem"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "affinitypool",
  "chrono",
@@ -3973,7 +3973,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-observe"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "surrealdb-iam",
  "surrealdb-rpc",
@@ -3983,7 +3983,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-parse-common"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "chrono",
  "logos",
@@ -4011,7 +4011,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-rpc"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -4032,7 +4032,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-runtime"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "addr",
  "ammonia",
@@ -4069,7 +4069,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-sql"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "arbitrary",
  "bytes",
@@ -4093,7 +4093,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-strand"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "arbitrary",
  "revision",
@@ -4103,7 +4103,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-syn"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "bytes",
  "chrono",
@@ -4126,7 +4126,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -4157,7 +4157,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types-derive"
-version = "3.3.0-beta.4"
+version = "3.3.0-beta.5"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
