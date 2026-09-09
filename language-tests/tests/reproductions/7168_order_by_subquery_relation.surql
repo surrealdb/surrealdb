@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "ORDER BY in subquery using graph traversal should correctly sort the results"

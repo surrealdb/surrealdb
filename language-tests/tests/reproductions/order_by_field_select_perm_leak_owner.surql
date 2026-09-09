@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/order_by_field_select_perm_leak_import.surql"]
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Positive counterpart to order_by_field_select_perm_leak: a privileged actor (database owner) bypasses field-level SELECT permission checks, so the value-ordering guard must NOT be applied. The owner sees `code`, the planner keeps index-covered sort elimination, and ORDER BY returns the rows in true value order. This proves the guard is scoped to permission-restricted actors and does not over-apply / corrupt results for users who can legitimately read the field."

@@ -3,7 +3,6 @@
 reason = "INFO FOR TABLE returns the table's events/fields/indexes/lives/tables map. INFO FOR INDEX returns the named index's build status."
 
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [[test.results]]
 value = "NONE"

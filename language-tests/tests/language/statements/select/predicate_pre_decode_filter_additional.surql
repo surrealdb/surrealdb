@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Pre-decode filter: OR no-match; computed field row read; int=float equality; repeated AND key; NOT(AND); type::table scan; three-valued logic with missing fields (AND/OR/NOT)."

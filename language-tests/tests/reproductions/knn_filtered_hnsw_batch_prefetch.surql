@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Filtered HNSW KNN warms the transaction record cache for each visited neighbourhood in one batch before evaluating the residual WHERE (idx/trees/hnsw/layer.rs::prefetch_neighbourhood_records + filter.rs::prefetch_records). The evaluation loop is left byte-identical, so a selective residual filter must return exactly the same rows, in the same order, as before. Query vector [0f]; category = 'a' selects the odd-id points (10, 30, 50, ...); the three nearest matching rows are pts:1, pts:3, pts:5 — note pts:2 (distance 20) is nearer than pts:3 (distance 30) but is correctly excluded by the filter."

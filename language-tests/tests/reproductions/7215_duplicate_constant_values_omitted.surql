@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Duplicate constant values in SELECT projections must not be omitted"

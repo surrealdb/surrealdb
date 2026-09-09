@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "TopK threshold pushdown result correctness on unindexed scans: ORDER BY + LIMIT results must equal the prefix of the full ordered result (LIMIT above the priority-queue cap forces SortByKey, the pushdown-free reference), including missing sort fields (None sorts below everything), mixed-type sort keys, multi-key ORDER BY with heavy first-key ties (equal first keys must fall through to the later keys), and WHERE + ORDER BY + LIMIT with the pre-decode WHERE probe active in the same scan visitor."
