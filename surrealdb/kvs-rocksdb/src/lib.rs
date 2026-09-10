@@ -73,6 +73,44 @@ fn kvs_error(e: rocksdb::Error) -> Error {
 	}
 }
 
+/// Point `ro` at the snapshot `tx` captured when it began.
+///
+/// `tx.snapshot()` yields a `SnapshotWithThreadMode` **temporary** that is
+/// dropped before this function returns, which reads like it would leave `ro`
+/// holding freed memory. It does not, because of a two-step indirection in
+/// rocksdb's C API:
+///
+/// * `rocksdb_transaction_get_snapshot` creates no snapshot. It `malloc`s a one-field wrapper whose
+///   field points at the snapshot the transaction already owns — the one
+///   `OptimisticTransactionOptions::set_snapshot(true)` captured at `begin`.
+/// * `rocksdb_readoptions_set_snapshot` dereferences that wrapper eagerly and stores the
+///   transaction-owned pointer, not the wrapper.
+///
+/// Dropping the temporary therefore frees the wrapper alone, and `ro` retains
+/// a pointer that rocksdb releases only when the transaction is destroyed.
+///
+/// That places an obligation on every caller, and nothing in this signature
+/// enforces it — there is no `unsafe`, no lifetime, and `ReadOptions` itself
+/// carries no borrow: **the transaction must outlive the `ReadOptions` and
+/// every iterator built from them.**
+///
+/// A `ReadOptions` used under the inner lock satisfies this on its own, since
+/// the finishers cannot take the transaction out while the lock is held. One
+/// that is used after the lock is released — or on another thread — must carry
+/// an explicit keep-alive: build the iterator through `OwnedTx::handle`, whose
+/// `OwnedTxBorrow` makes `OwnedTx::into_inner` wait for the reader. Cloning the
+/// `Db` and building the iterator from that instead compiles cleanly and
+/// reintroduces the hazard.
+///
+/// rocksdb reads the retained pointer back on paths such as
+/// `MemTableListVersion::AddIterators`, which dereferences
+/// `ReadOptions::snapshot` to get a sequence number while building range
+/// tombstone iterators over immutable memtables — so a stale pointer here
+/// faults rather than degrading quietly.
+fn attach_snapshot(ro: &mut ReadOptions, tx: &OwnedTx) {
+	ro.set_snapshot(&tx.snapshot());
+}
+
 pub struct Datastore {
 	/// The underlying RocksDB optimistic transaction database
 	db: Db,
@@ -786,11 +824,16 @@ impl Datastore {
 			tx.set_read_timestamp_for_validation(read_ts.0);
 		}
 		// Build the default read options pointing at the captured snapshot.
-		// `set_snapshot` copies the internal snapshot pointer into the
-		// `ReadOptions`, so `ReadOptions` remains valid as long as the
-		// underlying rocksdb snapshot (owned by `inner`) is alive.
+		//
+		// `ro` does outlive the `OwnedTx`: `commit` and `cancel` take the
+		// transaction out of the mutex and destroy it while `read_options`
+		// stays on the `Transaction`. What keeps the stale pointer from being
+		// read is that every user of `read_options` first re-acquires the inner
+		// lock and resolves `guard.as_ref().ok_or(TransactionFinished)`, so no
+		// read can reach rocksdb once the transaction is gone. See
+		// `attach_snapshot` for the pointer's lifetime.
 		let mut ro = ReadOptions::default();
-		ro.set_snapshot(&tx.snapshot());
+		attach_snapshot(&mut ro, &tx);
 		ro.set_async_io(true);
 		ro.fill_cache(true);
 		// When versioned, default reads fetch the latest version
@@ -895,7 +938,7 @@ impl Transaction {
 	/// view that will be used at commit time).
 	fn versioned_read_options(&self, version: Option<u64>, inner: &OwnedTx) -> ReadOptions {
 		let mut ro = ReadOptions::default();
-		ro.set_snapshot(&inner.snapshot());
+		attach_snapshot(&mut ro, inner);
 		ro.set_async_io(true);
 		ro.fill_cache(true);
 		if self.versioned {
@@ -957,7 +1000,7 @@ impl Transaction {
 		inner: &OwnedTx,
 	) -> ReadOptions {
 		let mut ro = ReadOptions::default();
-		ro.set_snapshot(&inner.snapshot());
+		attach_snapshot(&mut ro, inner);
 		ro.set_iterate_lower_bound(rng.start.clone());
 		ro.set_iterate_upper_bound(rng.end.clone());
 		ro.set_auto_readahead_size(true);
@@ -993,7 +1036,7 @@ impl Transaction {
 		inner: &OwnedTx,
 	) -> ReadOptions {
 		let mut ro = ReadOptions::default();
-		ro.set_snapshot(&inner.snapshot());
+		attach_snapshot(&mut ro, inner);
 		ro.set_iterate_lower_bound(rng.start.clone());
 		ro.set_iterate_upper_bound(rng.end.clone());
 		ro.set_auto_readahead_size(true);
@@ -1076,17 +1119,16 @@ impl Transaction {
 		// as it avoids the `BaseDeltaIterator` wrapper used by the
 		// transactional iterator.
 		else {
-			let db = inner.db().clone();
-
-			// Release the inner lock before the scan: `ReadOptions` already
-			// holds the raw snapshot pointer, and the underlying rocksdb
-			// snapshot stays alive for as long as the boxed `inner.tx` (owned by this
-			// `Transaction`) is alive. Read-only transactions never take the
-			// inner out of the mutex, so the snapshot is safe to use unlocked.
+			// Build the iterator before releasing the lock. `ro` holds the raw
+			// snapshot pointer, which rocksdb frees when the transaction is
+			// destroyed, and `cancel` takes the inner out from behind a shared
+			// `&self` regardless of `self.write`. Going through the handle
+			// gives the iterator its own `OwnedTx` borrow, so `into_inner`
+			// waits for this scan instead of freeing the snapshot under it.
+			let mut iter = inner.handle().raw_iter(ro);
+			// The scan itself needs no further inner access, so the lock is
+			// released for the whole walk.
 			drop(guard);
-
-			let mut iter = db.raw_iterator_opt(ro);
-			// Create the iterator on the database
 			// Seek to the start key
 			iter.seek(&rng.start);
 			// Count the items
@@ -1141,11 +1183,13 @@ impl Transaction {
 		// as it avoids the `BaseDeltaIterator` wrapper used by the
 		// transactional iterator.
 		else {
-			let db = inner.db().clone();
-			// Release the inner lock before the scan
+			// Build the iterator before releasing the lock, so it carries its
+			// own `OwnedTx` borrow and `cancel` cannot free the snapshot `ro`
+			// points at while this scan is running. See `attach_snapshot`.
+			let mut iter = inner.handle().raw_iter(ro);
+			// The scan itself needs no further inner access, so the lock is
+			// released for the whole walk.
 			drop(guard);
-			// Create the iterator on the database
-			let mut iter = db.raw_iterator_opt(ro);
 			// Seek to the start (or end) key based on direction
 			match dir {
 				Direction::Forward => iter.seek(&rng.start),
@@ -1196,11 +1240,13 @@ impl Transaction {
 		// as it avoids the `BaseDeltaIterator` wrapper used by the
 		// transactional iterator.
 		else {
-			let db = inner.db().clone();
-			// Release the inner lock before the scan
+			// Build the iterator before releasing the lock, so it carries its
+			// own `OwnedTx` borrow and `cancel` cannot free the snapshot `ro`
+			// points at while this scan is running. See `attach_snapshot`.
+			let mut iter = inner.handle().raw_iter(ro);
+			// The scan itself needs no further inner access, so the lock is
+			// released for the whole walk.
 			drop(guard);
-			// Create the iterator on the database
-			let mut iter = db.raw_iterator_opt(ro);
 			// Seek to the start (or end) key based on direction
 			match dir {
 				Direction::Forward => iter.seek(&rng.start),
@@ -1232,7 +1278,7 @@ impl Transaction {
 			let iter = inner.owned_raw_iter(ro);
 			ScanIter::Tx(iter)
 		} else {
-			let iter = inner.db().owned_raw_iter(ro, inner);
+			let iter = inner.handle().raw_iter(ro);
 			ScanIter::Db(iter)
 		}
 	}
@@ -1513,9 +1559,10 @@ pub(crate) async fn cursor_next_keys<'s>(
 	limit: u32,
 ) -> Result<KeysBatch<'s>> {
 	// Best-effort early-exit on a stale handle. Cursor-vs-commit safety
-	// is already guaranteed by the `cursors_alive` drain + the borrow
-	// checker on the cursor handle, so a stale read here only delays the
-	// error by at most one batch — well worth the cheaper load.
+	// is already guaranteed by the cursor iterator's `OwnedTx` borrow, which
+	// `OwnedTx::into_inner` waits on, plus the borrow checker on the cursor
+	// handle — so a stale read here only delays the error by at most one
+	// batch, well worth the cheaper load.
 	if cursor.tx.done.load(Ordering::Relaxed) {
 		return Err(Error::TransactionFinished);
 	}
@@ -1542,9 +1589,10 @@ pub(crate) async fn cursor_next_vals<'s>(
 	limit: u32,
 ) -> Result<ValsBatch<'s>> {
 	// Best-effort early-exit on a stale handle. Cursor-vs-commit safety
-	// is already guaranteed by the `cursors_alive` drain + the borrow
-	// checker on the cursor handle, so a stale read here only delays the
-	// error by at most one batch — well worth the cheaper load.
+	// is already guaranteed by the cursor iterator's `OwnedTx` borrow, which
+	// `OwnedTx::into_inner` waits on, plus the borrow checker on the cursor
+	// handle — so a stale read here only delays the error by at most one
+	// batch, well worth the cheaper load.
 	if cursor.tx.done.load(Ordering::Relaxed) {
 		return Err(Error::TransactionFinished);
 	}
@@ -1786,8 +1834,13 @@ impl Transactable for Transaction {
 			// WriteBatchWithIndex and resets the tracked-keys set — it never
 			// touches disk. We therefore take the inner lock and run inline
 			// rather than dispatching through the inline-blocking guard.
-			let mut guard = self.inner.lock().await;
-			let inner = guard.take().ok_or(Error::TransactionFinished)?;
+			// Take the value and drop the guard at the end of the statement, as
+			// `commit` does. `into_inner` waits for every live reader holding an
+			// `OwnedTx` borrow — a cursor, or a scan or count in flight — and a
+			// full-range read has no abort check, so holding the lock across
+			// that wait would queue every other op on this transaction behind
+			// the slowest reader instead of failing them fast.
+			let inner = self.inner.lock().await.take().ok_or(Error::TransactionFinished)?;
 			inner.into_inner().await.rollback().map_err(kvs_error)
 		})
 	}
@@ -2208,37 +2261,42 @@ impl Transactable for Transaction {
 				}
 				.await;
 			}
-			// Build all shard `ReadOptions` under the inner lock so each shard
-			// captures the same snapshot pointer. The lock is dropped before
-			// dispatching shards: the snapshot stays alive for as long as
-			// `inner.tx` is alive (owned by this `Transaction`), and read-only
-			// transactions never take the inner out of the mutex.
-			let (scans, db) = {
+			// Take one snapshot-bearing `ReadOptions` and one `OwnedTx` handle
+			// per shard under the inner lock, so every shard reads through the
+			// same snapshot. Each shard then builds its own iterator on the
+			// worker, which is where the merging-iterator setup and the
+			// SuperVersion it pins belong: only the shards actually running
+			// hold one, rather than all of them from dispatch onwards.
+			//
+			// The handle is what makes that safe to defer. See
+			// `attach_snapshot` for the obligation it discharges.
+			let scans = {
 				// Acquire the inner lock
 				let guard = self.inner.lock().await;
 				// Get the inner transaction state
 				let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
-				// Build one (sub-range, ReadOptions) pair per shard
-				let scans = sub_ranges
+				// Build one (sub-range, ReadOptions, handle) triple per shard
+				sub_ranges
 					.into_iter()
 					.map(|(lo, hi)| {
 						// Construct the shard's sub-range
 						let sub_rng = lo..hi;
 						// Build the ReadOptions for this shard
 						let ro = self.count_read_options(&sub_rng, version, inner);
-						(sub_rng, ro)
+						// Take the keep-alive this shard's iterator will own
+						(sub_rng, ro, inner.handle())
 					})
-					.collect::<Vec<_>>();
-
-				(scans, inner.db().clone())
+					.collect::<Vec<_>>()
 			};
 			let mut tasks = Vec::with_capacity(scans.len());
-			for (sub_rng, ro) in scans {
-				// Clone the Arc'd handle so each shard owns its own reference
-				let db = db.clone();
-				let count_shard = move || -> Result<usize> {
-					// Create the iterator on the database
-					let mut iter = db.raw_iterator_opt(ro);
+			for (sub_rng, ro, handle) in scans {
+				// Every capture is owned — the sub-range, the `ReadOptions`,
+				// and the handle that keeps the transaction alive — so the
+				// closure is `Send + 'static` and needs no borrow from the
+				// producer's stack.
+				tasks.push(affinitypool::spawn(move || -> Result<usize> {
+					// Create the iterator, moving the keep-alive into it
+					let mut iter = handle.raw_iter(ro);
 					// Seek to the start key
 					iter.seek(&sub_rng.start);
 					// Initialize the per-shard count
@@ -2252,15 +2310,7 @@ impl Transactable for Transaction {
 					iter.status().map_err(kvs_error)?;
 					// Return the per-shard count
 					Ok(res)
-				};
-				// SAFETY: each shard's `ReadOptions` holds the transaction's
-				// snapshot pointer, which stays valid only while `inner.tx`
-				// lives. The blocking drop of the returned future is what keeps
-				// a shard from iterating past that point, so no future may be
-				// leaked: they are collected into `tasks`, joined below, and
-				// dropped there — `try_join_all` drops the outstanding ones on
-				// the error path, blocking on each in turn.
-				tasks.push(unsafe { affinitypool::spawn_local(count_shard) });
+				}));
 			}
 			// Run all shard scans concurrently and sum the per-shard counts
 			let counts = futures::future::try_join_all(tasks).await?;

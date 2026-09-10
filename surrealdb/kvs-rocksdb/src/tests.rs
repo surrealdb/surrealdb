@@ -24,6 +24,23 @@ fn prefix_byte_range(prefix: &str) -> KeyRange<'static> {
 	}
 }
 
+/// Build a range over `prefix` whose bounds differ in a byte that
+/// `shard_range` can interpolate across, so a read-only `count()` takes the
+/// parallel shard path rather than falling back to a single serial scan.
+///
+/// [`prefix_byte_range`] cannot be used for that: its bounds are `prefix` and
+/// `prefix\xff`, so one is a prefix of the other and `shard_range` returns a
+/// single shard. Padding the lower bound with `0x00` gives a first differing
+/// byte of `0x00` vs `0xff`, which splits.
+fn splittable_prefix_range(prefix: &str) -> KeyRange<'static> {
+	let start = prefix.as_bytes().iter().copied().chain(std::iter::once(0x00)).collect::<Vec<u8>>();
+	let end = prefix.as_bytes().iter().copied().chain(std::iter::once(0xff)).collect::<Vec<u8>>();
+	KeyRange {
+		start: start.into(),
+		end: end.into(),
+	}
+}
+
 /// Sanity-check that `ALTER SYSTEM COMPACT` (which routes through
 /// `Datastore::compact`) pushes all live data to the bottommost level and
 /// drains the upper levels.
@@ -909,6 +926,257 @@ async fn memory_reporter_observes_memtable_charge() {
 		 Memtable arena bytes are charged into the block cache, so the cache usage the reporter \
 		 reads must rise."
 	);
+
+	ds.shutdown().await.unwrap();
+}
+
+/// Pins the snapshot-lifetime contract documented on `attach_snapshot`: the
+/// pointer a `ReadOptions` retains is the transaction-owned snapshot, not the
+/// short-lived wrapper that `tx.snapshot()` hands over.
+///
+/// The distinction is invisible in normal operation, so a `rocksdb` bump that
+/// made `ReadOptions` retain the wrapper instead would turn every read in
+/// this backend into a use-after-free without failing a single existing test.
+/// This test forces the path that reads the pointer back explicitly:
+/// `MemTableListVersion::AddIterators` dereferences `ReadOptions::snapshot`
+/// for a sequence number while building range-tombstone iterators over
+/// *immutable* memtables. The config keeps several of those resident, and the
+/// write loop republishes every seeded key so the reader has something to be
+/// isolated *from*.
+///
+/// Reading stale-but-correct data proves the retained pointer still resolves
+/// to the transaction's snapshot; a freed one would fault, or yield a garbage
+/// sequence number and leak post-snapshot writes into the results.
+#[tokio::test(flavor = "multi_thread")]
+async fn read_options_snapshot_outlives_the_temporary() {
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	const KEYS: usize = 512;
+	const OVERWRITE_ROUNDS: usize = 4;
+
+	let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
+	// Tiny memtables that are *not* eagerly flushed: RocksDB switches a
+	// memtable at most once per write batch and only starts a flush once
+	// `min_write_buffer_number_to_merge` immutable ones have accumulated. Each
+	// round below writes comfortably more than `write_buffer_size`, so
+	// `OVERWRITE_ROUNDS` rounds produce roughly that many switches — kept well
+	// under the merge threshold so no flush is ever triggered and the resident
+	// count cannot land on a boundary. The reader then iterates with several
+	// immutable memtables sitting in `MemTableListVersion::memlist_`.
+	let config = RocksDbConfig {
+		write_buffer_size: 64 * 1024,
+		max_write_buffer_number: 16,
+		min_write_buffer_number_to_merge: 12,
+		..RocksDbConfig::default()
+	};
+	let ds = RocksDbDatastore::new(&path, config).await.unwrap();
+
+	// Seed the values the reader must keep seeing.
+	{
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		for k in 0..KEYS {
+			let key = format!("snap/key_{k:04}").into_bytes();
+			tx.set(key.into(), b"seed".to_vec()).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+	}
+
+	// Open the reader. This is the call that captures the snapshot and stores
+	// the resulting `ReadOptions` on the transaction for the rest of its life.
+	let reader = ds.transaction(TransactionType::Read).await.unwrap();
+
+	// Churn the same keys behind the reader's back. Every round commits a
+	// new version of all `KEYS` keys plus a batch of padding, which switches
+	// memtables repeatedly and leaves immutable memtables holding versions
+	// newer than the reader's snapshot.
+	for round in 0..OVERWRITE_ROUNDS {
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		for k in 0..KEYS {
+			let key = format!("snap/key_{k:04}").into_bytes();
+			let val = format!("overwrite_{round}").into_bytes();
+			tx.set(key.into(), val).await.unwrap();
+		}
+		for k in 0..KEYS {
+			let key = format!("pad/{round:02}/key_{k:04}").into_bytes();
+			tx.set(key.into(), vec![0u8; 128]).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+	}
+
+	// The assertions below only exercise the `options.snapshot` dereference
+	// if immutable memtables are actually resident, so make that a
+	// precondition of the test rather than an assumption about the config.
+	let immutable = ds
+		.db
+		.property_int_value("rocksdb.num-immutable-mem-table")
+		.expect("rocksdb rejected the num-immutable-mem-table property")
+		.expect("num-immutable-mem-table is not reported for this column family");
+	assert!(
+		immutable > 0,
+		"expected resident immutable memtables so the scan reaches \
+		 MemTableListVersion::AddIterators, got {immutable}"
+	);
+
+	// Point read through the stored `read_options`.
+	let one = reader.get(b"snap/key_0000".as_slice().into(), None).await.unwrap();
+	assert_eq!(
+		one.as_deref(),
+		Some(b"seed".as_slice()),
+		"point get must observe the transaction's snapshot, not the latest write"
+	);
+
+	// Range scan through `scan_read_options` — this is the path that reaches
+	// `MemTableListVersion::AddIterators` and dereferences `options.snapshot`.
+	let scanned = reader.scan(prefix_byte_range("snap/"), u32::MAX, 0, None).await.unwrap();
+	assert_eq!(scanned.values.len(), KEYS, "scan must return every seeded key");
+	for (key, val) in &scanned.values {
+		assert_eq!(
+			val.as_slice(),
+			b"seed".as_slice(),
+			"scan returned a post-snapshot value for {}",
+			String::from_utf8_lossy(key)
+		);
+	}
+
+	// The padding written after the snapshot must be invisible to the
+	// reader, and `count_read_options` must agree with the scan. The ranges
+	// are splittable so this goes through the parallel shard path, where each
+	// shard iterator carries its own snapshot-bearing `ReadOptions`.
+	let padding = reader.count(splittable_prefix_range("pad/"), None).await.unwrap();
+	assert_eq!(padding, 0, "count observed keys committed after the snapshot");
+	let counted = reader.count(splittable_prefix_range("snap/"), None).await.unwrap();
+	assert_eq!(counted, KEYS, "count must agree with the scan under the same snapshot");
+
+	reader.cancel().await.unwrap();
+	ds.shutdown().await.unwrap();
+}
+
+/// Every read-only iterator in this backend is built from a `ReadOptions`
+/// holding the transaction's snapshot, which rocksdb frees when the
+/// transaction is destroyed. `cancel` takes the inner transaction out from
+/// behind a shared `&self` regardless of `self.write`, so a caller holding the
+/// transaction in an `Arc` can finish it while a read is still setting up.
+///
+/// Each read therefore builds its iterator through `OwnedTx::handle` while the
+/// inner lock is held, so the iterator owns an `OwnedTx` borrow and
+/// `OwnedTx::into_inner` waits for it rather than freeing the snapshot
+/// underneath it. This covers every shape that builds a detached iterator: the
+/// sharded `count` fan-out and the serial `count_blocking`, `scan_blocking` and
+/// `keys_blocking` helpers.
+///
+/// The two properties are checked separately, because the interleavings that
+/// prove them are opposites.
+///
+/// *Liveness* — each shape, run with nothing racing it, returns the exact
+/// range. This is what shows the path builds a working iterator at all, and it
+/// does not depend on scheduling.
+///
+/// *Safety* — each shape raced against a concurrent `cancel`, which must
+/// either lose (exact result) or win (clean `TransactionFinished`), never
+/// fault. The race gets no head start on purpose: `ReadOptions::snapshot` is
+/// dereferenced only while the iterator is being **constructed**, so the
+/// vulnerable window is the gap between releasing the guard and creating the
+/// iterator. A `cancel` landing later, mid-walk, is harmless — the iterator
+/// already holds its own SuperVersion reference — so delaying the cancel to
+/// make the read win would test nothing.
+///
+/// That window is wide for the fan-out, where the build happens on a worker,
+/// and only a few instructions for the serial helpers. Detection is therefore
+/// probabilistic while the pass is not: removing a keep-alive is caught on
+/// most runs, and correct code passes every run. Lowering `ROUNDS` or `KEYS`
+/// weakens the test without making it fail.
+#[tokio::test(flavor = "multi_thread")]
+async fn reads_survive_a_concurrent_cancel() {
+	use std::sync::Arc;
+
+	use surrealdb_kvs::err::Error as KvsError;
+
+	use crate::range_shard::{COUNT_PARALLEL_MAX_SHARDS, shard_range};
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	const KEYS: usize = 200_000;
+	const ROUNDS: usize = 60;
+
+	/// The three read shapes that build a detached iterator in their read-only
+	/// branch: `count` (sharded fan-out, or its serial `count_blocking`
+	/// fallback), `scan` (`scan_blocking`) and `keys` (`keys_blocking`).
+	async fn read(
+		tx: &dyn surrealdb_kvs::api::Transactable,
+		shape: usize,
+	) -> Result<usize, KvsError> {
+		let rng = splittable_prefix_range("race/");
+		match shape {
+			0 => tx.count(rng, None).await,
+			1 => tx.scan(rng, u32::MAX, 0, None).await.map(|r| r.values.len()),
+			_ => tx.keys(rng, u32::MAX, 0, None).await.map(|r| r.keys.len()),
+		}
+	}
+
+	const SHAPES: [&str; 3] = ["count", "scan", "keys"];
+
+	let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
+	let ds = Arc::new(RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap());
+
+	{
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		for k in 0..KEYS {
+			let key = format!("race/key_{k:06}").into_bytes();
+			tx.set(key.into(), b"v".to_vec()).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+	}
+
+	// Report which `count` path this machine exercises, derived the way
+	// `count()` derives it rather than hardcoded: on a single-CPU runner the
+	// range yields one shard and `count` takes the serial fallback. Both carry
+	// the same keep-alive, so either is meaningful — but they are different
+	// code, so a failure should say which ran.
+	let rng = splittable_prefix_range("race/");
+	let desired = std::thread::available_parallelism()
+		.map(|n| n.get())
+		.unwrap_or(8)
+		.min(COUNT_PARALLEL_MAX_SHARDS);
+	let count_shards = shard_range(&rng.start, &rng.end, desired).len();
+	let path_note = format!("count uses {count_shards} shard(s) from {desired} desired");
+
+	// Liveness: unraced, every shape must build a working iterator and return
+	// the whole range.
+	for (shape, name) in SHAPES.iter().enumerate() {
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
+		let n = read(tx.as_ref(), shape)
+			.await
+			.unwrap_or_else(|e| panic!("unraced {name} failed ({path_note}): {e}"));
+		assert_eq!(n, KEYS, "unraced {name} returned a partial result ({path_note})");
+		tx.cancel().await.unwrap();
+	}
+
+	// Safety: race a `cancel` against each shape with no head start.
+	for round in 0..ROUNDS {
+		let shape = round % SHAPES.len();
+		let name = SHAPES[shape];
+		let reader = Arc::new(ds.transaction(TransactionType::Read).await.unwrap());
+		let worker = Arc::clone(&reader);
+		let canceller = Arc::clone(&reader);
+
+		let read_task = tokio::spawn(async move { read(&**worker, shape).await });
+		let cancel_task = tokio::spawn(async move { canceller.cancel().await });
+
+		let observed = read_task.await.unwrap();
+		let cancelled = cancel_task.await.unwrap();
+
+		match observed {
+			// The read won: it must be exact. An iterator built over a released
+			// snapshot would fault, or read a garbage sequence number and
+			// return the wrong rows.
+			Ok(n) => assert_eq!(n, KEYS, "{name} returned a partial result in round {round}"),
+			// The cancel won: refusing is correct, faulting is not.
+			Err(e) => assert!(
+				matches!(e, KvsError::TransactionFinished),
+				"{name} failed with an unexpected error in round {round}: {e}"
+			),
+		}
+		assert!(cancelled.is_ok(), "cancel failed in round {round}: {cancelled:?}");
+	}
 
 	ds.shutdown().await.unwrap();
 }
