@@ -26,6 +26,7 @@ pub mod math;
 pub mod not;
 pub mod object;
 pub mod operate;
+pub mod print;
 pub mod parse;
 pub mod rand;
 pub mod record;
@@ -323,6 +324,8 @@ pub fn synchronous(
 		"parse::url::port" => parse::url::port,
 		"parse::url::query" => parse::url::query,
 		"parse::url::scheme" => parse::url::scheme,
+		//
+		"print::log" => print::log,
 		//
 		"rand" => rand::rand,
 		"rand::bool" => rand::bool,

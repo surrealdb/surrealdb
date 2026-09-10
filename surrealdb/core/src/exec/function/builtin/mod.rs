@@ -21,6 +21,7 @@ mod meta;
 mod not;
 mod object;
 mod parse;
+mod print;
 mod rand;
 mod record;
 mod schema;
@@ -57,6 +58,7 @@ pub fn register_all(registry: &mut FunctionRegistry) {
 	not::register(registry);
 	object::register(registry);
 	parse::register(registry);
+	print::register(registry);
 	rand::register(registry);
 	record::register(registry);
 	schema::register(registry);

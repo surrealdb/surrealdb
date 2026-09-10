@@ -245,6 +245,8 @@ pub(crate) static PATHS: phf::Map<
 		UniCase::ascii("parse::url::query") => (PathKind::Function, None),
 		UniCase::ascii("parse::url::scheme") => (PathKind::Function, None),
 		//
+		UniCase::ascii("print::log") => (PathKind::Function, None),
+		// 
 		UniCase::ascii("rand") => (PathKind::Function, None),
 		UniCase::ascii("rand::bool") => (PathKind::Function, None),
 		UniCase::ascii("rand::duration") => (PathKind::Function, None),
