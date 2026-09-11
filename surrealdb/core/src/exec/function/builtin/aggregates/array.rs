@@ -15,7 +15,12 @@ use crate::val::Value;
 // ArrayGroup
 // ============================================================================
 
-/// array::group - collects values into an array
+/// array::group - flattens the group's values and returns the unique ones.
+///
+/// Shares its result with the scalar `array::group`, which is the contract
+/// callers rely on: the aggregate must not report values the scalar form would
+/// have collapsed, or `array::len` over it reports a count no row set
+/// justifies.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ArrayGroup;
 
@@ -25,7 +30,40 @@ impl AggregateFunction for ArrayGroup {
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
-		Box::new(ArrayGroupAccumulator::default())
+		Box::new(ArrayGroupAccumulator::deduping())
+	}
+
+	fn signature(&self) -> Signature {
+		Signature::new().arg("value", Kind::Any).returns(Kind::Array(Box::new(Kind::Any), None))
+	}
+}
+
+/// array::collect - the group's values in row order, duplicates kept.
+///
+/// The fold that answers "every value this group saw", as distinct from
+/// `array::group`'s "the distinct values, flattened". One accumulator cannot
+/// honour both contracts, so they are separate functions, and two callers
+/// depend on this one:
+///
+/// - the SurrealQL planner substitutes it for a projected expression that carries no aggregate of
+///   its own but does read the row, so that `SELECT name, count() ... GROUP BY type` reports one
+///   element per row;
+/// - the GQL lowering targets it for `collect`/`collect_list`, which owe one entry per matched row.
+///
+/// The name is absent from the parser's builtin path table, so SurrealQL text
+/// cannot call it: it names the fold in plan output and gives the GQL lowering
+/// something to point at. The SurrealQL spelling of this fold is the projected
+/// expression itself.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArrayCollect;
+
+impl AggregateFunction for ArrayCollect {
+	fn name(&self) -> &'static str {
+		"array::collect"
+	}
+
+	fn create_accumulator(&self) -> Box<dyn Accumulator> {
+		Box::new(ArrayGroupAccumulator::collecting())
 	}
 
 	fn signature(&self) -> Signature {
@@ -36,6 +74,25 @@ impl AggregateFunction for ArrayGroup {
 #[derive(Debug, Clone, Default)]
 struct ArrayGroupAccumulator {
 	values: Vec<Value>,
+	/// Whether `finalize` applies the scalar `array::group` reduction
+	/// (flatten, then unique) or returns what it collected verbatim.
+	dedupe: bool,
+}
+
+impl ArrayGroupAccumulator {
+	fn deduping() -> Self {
+		Self {
+			values: Vec::new(),
+			dedupe: true,
+		}
+	}
+
+	fn collecting() -> Self {
+		Self {
+			values: Vec::new(),
+			dedupe: false,
+		}
+	}
 }
 
 impl Accumulator for ArrayGroupAccumulator {
@@ -54,7 +111,15 @@ impl Accumulator for ArrayGroupAccumulator {
 	}
 
 	fn finalize(&self) -> Result<Value> {
-		Ok(Value::Array(self.values.clone().into()))
+		let array = self.values.clone().into();
+		if self.dedupe {
+			// Delegate rather than reimplement: the aggregate and the scalar
+			// form have to agree, and sharing the call is what keeps them
+			// from drifting apart again.
+			crate::fnc::array::group((array,))
+		} else {
+			Ok(Value::Array(array))
+		}
 	}
 
 	fn reset(&mut self) {
@@ -223,6 +288,153 @@ impl Accumulator for ArrayDistinctAccumulator {
 	fn reset(&mut self) {
 		self.values.clear();
 		self.seen_hashes.clear();
+	}
+
+	fn clone_box(&self) -> Box<dyn Accumulator> {
+		Box::new(self.clone())
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
+	}
+}
+
+// ============================================================================
+// ArrayMin / ArrayMax
+// ============================================================================
+
+/// Whether an [`ExtremumAccumulator`] keeps the least or the greatest value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Extremum {
+	Min,
+	Max,
+}
+
+/// array::min - the least of the group's values, by SurrealDB's value order.
+///
+/// The orderable counterpart to `math::min`, which folds only numbers. Ordering
+/// is `Value`'s own `Ord`, the same comparison the scalar `array::min` uses, so
+/// the aggregate and scalar forms cannot disagree about which value is least —
+/// across strings, datetimes, durations, and mixed types alike.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArrayMin;
+
+impl AggregateFunction for ArrayMin {
+	fn name(&self) -> &'static str {
+		"array::min"
+	}
+
+	fn create_accumulator(&self) -> Box<dyn Accumulator> {
+		Box::new(ExtremumAccumulator::new(Extremum::Min))
+	}
+
+	fn signature(&self) -> Signature {
+		Signature::new().arg("value", Kind::Any).returns(Kind::Any)
+	}
+}
+
+/// array::max - the greatest of the group's values, by SurrealDB's value order.
+///
+/// See [`ArrayMin`] for the ordering contract.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArrayMax;
+
+impl AggregateFunction for ArrayMax {
+	fn name(&self) -> &'static str {
+		"array::max"
+	}
+
+	fn create_accumulator(&self) -> Box<dyn Accumulator> {
+		Box::new(ExtremumAccumulator::new(Extremum::Max))
+	}
+
+	fn signature(&self) -> Signature {
+		Signature::new().arg("value", Kind::Any).returns(Kind::Any)
+	}
+}
+
+/// Running least-or-greatest value for [`ArrayMin`] and [`ArrayMax`].
+///
+/// Every value is orderable against every other, so unlike the numeric
+/// aggregates there is no wrong-kind input to reject and no identity to
+/// mistake for an answer: a group that folded nothing reports `NONE`, which is
+/// what the scalar forms return for an empty array.
+///
+/// `NONE` and `NULL` are skipped rather than ordered. The scalar form would
+/// order them (they sort below every other value, so a single missing field
+/// would decide the whole group's minimum), but an aggregate that ignores nulls
+/// is what SQL specifies and what a sparsely populated column needs.
+#[derive(Debug, Clone)]
+struct ExtremumAccumulator {
+	extremum: Extremum,
+	current: Option<Value>,
+}
+
+impl ExtremumAccumulator {
+	fn new(extremum: Extremum) -> Self {
+		Self {
+			extremum,
+			current: None,
+		}
+	}
+
+	/// Fold one candidate into the running value.
+	fn fold(&mut self, value: &Value) {
+		if matches!(value, Value::None | Value::Null) {
+			return;
+		}
+		let replace = match &self.current {
+			None => true,
+			Some(current) => match self.extremum {
+				Extremum::Min => value < current,
+				Extremum::Max => value > current,
+			},
+		};
+		if replace {
+			self.current = Some(value.clone());
+		}
+	}
+}
+
+impl Accumulator for ExtremumAccumulator {
+	fn update(&mut self, value: Value) -> Result<()> {
+		self.fold(&value);
+		Ok(())
+	}
+
+	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
+		for value in values {
+			self.fold(value);
+		}
+		Ok(())
+	}
+
+	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()> {
+		let other = other
+			.as_any()
+			.downcast_ref::<ExtremumAccumulator>()
+			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		// Both aggregates share this accumulator, so the downcast above does
+		// not distinguish them; finalising a max as a min would silently return
+		// the wrong end of the group.
+		anyhow::ensure!(
+			self.extremum == other.extremum,
+			"Cannot merge a {:?} accumulator into a {:?} one",
+			other.extremum,
+			self.extremum
+		);
+		if let Some(value) = &other.current {
+			self.fold(value);
+		}
+		Ok(())
+	}
+
+	fn finalize(&self) -> Result<Value> {
+		Ok(self.current.clone().unwrap_or(Value::None))
+	}
+
+	fn reset(&mut self) {
+		self.current = None;
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -484,5 +696,74 @@ mod tests {
 		acc.reset();
 		let result = acc.finalize().unwrap();
 		assert!(as_array(&result).is_empty());
+	}
+
+	// -------------------------------------------------------------------------
+	// ArrayMin / ArrayMax tests
+	// -------------------------------------------------------------------------
+
+	fn strand(s: &'static str) -> Value {
+		Value::String(Strand::new_static(s))
+	}
+
+	#[test]
+	fn orderable_extremes_order_any_comparable_value() {
+		for (func, expected) in
+			[(ArrayMin.create_accumulator(), "apple"), (ArrayMax.create_accumulator(), "pear")]
+		{
+			let mut acc = func;
+			acc.update(strand("pear")).unwrap();
+			acc.update(strand("apple")).unwrap();
+			acc.update(strand("fig")).unwrap();
+			assert_eq!(acc.finalize().unwrap(), strand(expected));
+		}
+	}
+
+	#[test]
+	fn orderable_extremes_report_none_for_an_empty_group() {
+		// Not the numeric aggregates' `Infinity` identity, which a caller cannot
+		// tell from a real extreme.
+		assert_eq!(ArrayMin.create_accumulator().finalize().unwrap(), Value::None);
+		assert_eq!(ArrayMax.create_accumulator().finalize().unwrap(), Value::None);
+	}
+
+	#[test]
+	fn orderable_extremes_skip_absent_values_rather_than_ordering_them() {
+		// `NONE` sorts below every other value, so ordering it would make the
+		// minimum of any sparsely populated column `NONE`.
+		let mut acc = ArrayMin.create_accumulator();
+		acc.update(Value::None).unwrap();
+		acc.update(strand("pear")).unwrap();
+		acc.update(Value::Null).unwrap();
+		assert_eq!(acc.finalize().unwrap(), strand("pear"));
+	}
+
+	#[test]
+	fn orderable_extremes_merge_across_partial_groups() {
+		let mut left = ArrayMin.create_accumulator();
+		left.update(strand("pear")).unwrap();
+		let mut right = ArrayMin.create_accumulator();
+		right.update(strand("apple")).unwrap();
+
+		left.merge(right.clone_box()).unwrap();
+		assert_eq!(left.finalize().unwrap(), strand("apple"));
+	}
+
+	#[test]
+	fn orderable_extremes_refuse_to_merge_opposite_ends() {
+		// Both share one accumulator, so the downcast cannot tell them apart;
+		// finalising a max as a min would silently return the wrong end.
+		let mut min = ArrayMin.create_accumulator();
+		min.update(strand("pear")).unwrap();
+		let max = ArrayMax.create_accumulator();
+		assert!(min.merge(max.clone_box()).is_err());
+	}
+
+	#[test]
+	fn orderable_extremes_reset_forgets_the_running_value() {
+		let mut acc = ArrayMax.create_accumulator();
+		acc.update(strand("pear")).unwrap();
+		acc.reset();
+		assert_eq!(acc.finalize().unwrap(), Value::None);
 	}
 }

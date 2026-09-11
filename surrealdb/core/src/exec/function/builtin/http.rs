@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 
-use crate::exec::function::FunctionRegistry;
+use crate::exec::function::{FunctionRegistry, MutatesState};
 use crate::exec::physical_expr::EvalContext;
 #[cfg(feature = "http")]
 use crate::val::Object;
@@ -305,6 +305,18 @@ define_async_function!(HttpDelete, "http::delete", (uri: String, ?opts: Object) 
 // Registration
 // =========================================================================
 
+// The non-safe methods are registered behind `MutatesState`: a request that
+// the remote acts on cannot be sent a different number of times just
+// because a query grouped its rows differently. `head` and `get` only read,
+// so they carry no such constraint.
 pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(registry, HttpHead, HttpGet, HttpPut, HttpPost, HttpPatch, HttpDelete,);
+	register_functions!(
+		registry,
+		HttpHead,
+		HttpGet,
+		MutatesState<HttpPut>,
+		MutatesState<HttpPost>,
+		MutatesState<HttpPatch>,
+		MutatesState<HttpDelete>,
+	);
 }

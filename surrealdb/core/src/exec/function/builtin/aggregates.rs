@@ -7,19 +7,21 @@
 //! - [`count`]: Row and value counting (COUNT(), COUNT(field))
 //! - [`math`]: Mathematical aggregations (sum, mean, min, max, stddev, variance, median)
 //! - [`time`]: Datetime aggregations (min, max)
-//! - [`array`]: Array collection operations (group, join, distinct)
+//! - [`array`]: Array collection operations (group, join, distinct, orderable min/max)
 //! - [`vector`]: Elementwise vector aggregations (sum)
 
 mod array;
 mod count;
 mod math;
+mod reject;
 mod time;
 mod vector;
 
 // Re-export all aggregate functions
-pub use array::{ArrayDistinct, ArrayGroup, ArrayJoin};
+pub use array::{ArrayCollect, ArrayDistinct, ArrayGroup, ArrayJoin, ArrayMax, ArrayMin};
 pub use count::{Count, CountField};
 pub use math::{MathMax, MathMean, MathMedian, MathMin, MathStddev, MathSum, MathVariance};
+use reject::Rejected;
 pub use time::{TimeMax, TimeMin};
 pub use vector::VectorSum;
 
@@ -46,8 +48,11 @@ pub fn register(registry: &mut FunctionRegistry) {
 
 	// Array aggregates
 	registry.register_aggregate(ArrayGroup);
+	registry.register_aggregate(ArrayCollect);
 	registry.register_aggregate(ArrayJoin);
 	registry.register_aggregate(ArrayDistinct);
+	registry.register_aggregate(ArrayMin);
+	registry.register_aggregate(ArrayMax);
 
 	// Vector aggregates
 	registry.register_aggregate(VectorSum);

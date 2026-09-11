@@ -5,7 +5,7 @@ database = true
 imports = ["gql/_schema.surql"]
 
 [test]
-reason = "collect(x) maps onto array::group, gathering each group's values into a list. Per source person, the names of the person nodes it knows."
+reason = "collect(x) gathers one entry per matched row into a list. Per source person, the names of the person nodes it knows."
 
 [[test.results]]
 value = "[{ friends: ['B'], name: 'A' }, { friends: ['A', 'C'], name: 'B' }, { friends: ['A'], name: 'C' }]"

@@ -81,6 +81,21 @@ pub struct AggregateField {
 	/// Expression to evaluate for non-aggregate fields (e.g., group-by keys or first-value
 	/// fields). This is used when aggregate_expr_info is None.
 	pub fallback_expr: Option<Arc<dyn PhysicalExpr>>,
+	/// Whether [`Self::fallback_expr`] has the same value for every row of a
+	/// group, which decides how many times it is evaluated and what a `NONE`
+	/// from it means.
+	///
+	/// `false` — the default — is the first-value contract: the expression reads
+	/// the row, so it is evaluated until it yields something other than `NONE`
+	/// and that first non-`NONE` value represents the group. A column
+	/// functionally determined by the grouping keys is emitted this way.
+	///
+	/// `true` says the row cannot influence the result, so the first evaluation
+	/// is the group's answer even when it is `NONE`. Re-evaluating such an
+	/// expression would repeat work proportional to the group's size, and for a
+	/// non-deterministic one would make the result depend on how many rows the
+	/// group holds.
+	pub fallback_is_constant: bool,
 }
 
 impl AggregateField {
@@ -128,6 +143,25 @@ impl AggregateField {
 			group_key_index,
 			aggregate_expr_info,
 			fallback_expr,
+			fallback_is_constant: false,
+		}
+	}
+
+	/// Mark [`Self::fallback_expr`] as having one value for the whole group.
+	pub fn with_constant_fallback(mut self) -> Self {
+		self.fallback_is_constant = true;
+		self
+	}
+
+	/// Whether the fallback still needs evaluating, given what the group holds
+	/// for this field so far.
+	///
+	/// `None` means it has not been evaluated yet. A stored `NONE` is final for
+	/// a constant fallback and provisional for a first-value one.
+	fn fallback_needs_evaluation(&self, stored: &Option<Value>) -> bool {
+		match stored {
+			None => true,
+			Some(value) => !self.fallback_is_constant && value.is_none(),
 		}
 	}
 
@@ -199,8 +233,16 @@ struct GroupState {
 	/// this contains a Vec of accumulators, one per extracted aggregate.
 	/// Empty Vec for non-aggregate fields.
 	accumulators: Vec<Vec<Box<dyn Accumulator>>>,
-	/// First values seen for non-aggregate fields
-	first_values: Vec<Value>,
+	/// Value held for each non-aggregate field, `None` until the field's
+	/// expression has been evaluated for this group.
+	///
+	/// The unevaluated state is tracked separately from the value rather than
+	/// by testing the value for `NONE`: a non-aggregate field is evaluated once
+	/// per group, and an expression that legitimately returns `NONE` would
+	/// otherwise be re-evaluated for every later row. That is wasted work for a
+	/// deterministic expression and wrong for a non-deterministic one, whose
+	/// result would then depend on how many rows the group holds.
+	first_values: Vec<Option<Value>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -561,13 +603,13 @@ impl ExecOperator for Aggregate {
 								}
 							}
 						} else if let Some(expr) = &agg.fallback_expr {
-							// Non-aggregate field - store first value
-							if state.first_values[field_idx].is_none()
+							// Non-aggregate field - evaluate once for the group
+							if agg.fallback_needs_evaluation(&state.first_values[field_idx])
 								&& let Some(first_value) = batch.values().first()
 							{
 								match expr.evaluate(eval_ctx.with_value(first_value)).await {
 									Ok(field_value) => {
-										state.first_values[field_idx] = field_value;
+										state.first_values[field_idx] = Some(field_value);
 									}
 									Err(cf) if cf.is_ignorable() => {
 										tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
@@ -609,11 +651,11 @@ impl ExecOperator for Aggregate {
 									}
 								}
 							} else if let Some(expr) = &agg.fallback_expr {
-								// Non-aggregate field - store first value (per-row, lazy)
-								if state.first_values[field_idx].is_none() {
+								// Non-aggregate field - evaluate once for the group
+								if agg.fallback_needs_evaluation(&state.first_values[field_idx]) {
 									match expr.evaluate(eval_ctx.with_value(value)).await {
 										Ok(field_value) => {
-											state.first_values[field_idx] = field_value;
+											state.first_values[field_idx] = Some(field_value);
 										}
 										Err(cf) if cf.is_ignorable() => {
 											tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
@@ -634,9 +676,29 @@ impl ExecOperator for Aggregate {
 			if group_by_exprs.is_empty() && groups.is_empty() {
 				let perms_active = ctx.should_check_perms(crate::iam::Action::View).unwrap_or(true);
 				if !perms_active {
-					groups.entry_for_row(&[], || {
+					let state = groups.entry_for_row(&[], || {
 						create_group_state(&aggregates, &evaluated_extra_args)
 					});
+					// A non-aggregate field carries an expression the row
+					// cannot influence, so it has a value even for a group no
+					// row reached — but the per-row evaluation above never ran
+					// to produce one. Evaluate it against the row-less context
+					// so `SELECT 7 ... GROUP ALL` over an empty table still
+					// reports 7 rather than NONE.
+					let empty_group_ctx = EvalContext::from_exec_ctx(&ctx);
+					for (field_idx, agg) in aggregates.iter().enumerate() {
+						if let Some(expr) = &agg.fallback_expr {
+							match expr.evaluate(empty_group_ctx.clone()).await {
+								Ok(field_value) => {
+									state.first_values[field_idx] = Some(field_value);
+								}
+								Err(cf) if cf.is_ignorable() => {
+									tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
+								}
+								Err(cf) => Err(cf)?,
+							}
+						}
+					}
 				}
 			}
 
@@ -690,7 +752,7 @@ fn create_group_state(
 		})
 		.collect();
 
-	let first_values = aggregates.iter().map(|_| Value::None).collect();
+	let first_values = aggregates.iter().map(|_| None).collect();
 
 	GroupState {
 		accumulators,
@@ -738,7 +800,7 @@ async fn compute_group_result_async(
 	// If there's exactly one aggregate with an empty name, return the raw value
 	if aggregates.len() == 1 && aggregates[0].is_empty_name() {
 		let agg = &aggregates[0];
-		let first_value = state.first_values.into_iter().next().unwrap_or(Value::None);
+		let first_value = state.first_values.into_iter().next().flatten().unwrap_or(Value::None);
 		let accumulators = state.accumulators.into_iter().next().unwrap_or_default();
 		return compute_single_field_value(agg, group_key, &accumulators, first_value, ctx).await;
 	}
@@ -750,6 +812,7 @@ async fn compute_group_result_async(
 	let field_data = aggregates.iter().zip(state.accumulators).zip(state.first_values);
 
 	for ((agg, accumulators), first_value) in field_data {
+		let first_value = first_value.unwrap_or(Value::None);
 		let field_value =
 			compute_single_field_value(agg, group_key, &accumulators, first_value, ctx).await?;
 
@@ -810,16 +873,16 @@ async fn compute_aggregate_field_value(
 		return Ok(Value::Null);
 	}
 
-	// Finalize all accumulators and build the aggregate document
+	// Finalize all accumulators and build the aggregate document.
+	//
+	// A failure here is raised rather than substituted. An accumulator fails
+	// when it was handed a value of a kind it cannot fold, which is the same
+	// argument-type error the scalar form of the function raises; reporting
+	// `NULL` instead would present a group as having an answer when the query
+	// is in fact ill-typed.
 	let mut agg_doc = Object::default();
 	for (idx, acc) in accumulators.iter().enumerate() {
-		let value = match acc.finalize() {
-			Ok(v) => v,
-			Err(e) => {
-				tracing::debug!(error = %e, idx, "Accumulator finalize failed, using Null");
-				Value::Null
-			}
-		};
+		let value = acc.finalize().map_err(crate::expr::ControlFlow::Err)?;
 		agg_doc.insert(aggregate_field_name(idx), value);
 	}
 
@@ -1491,6 +1554,34 @@ mod tests {
 		// value, so the first row's missing `label` does not win.
 		let out = collect(&op, &ctx).await;
 		assert_eq!(out, rows(&["{ c: 'us', label: 'second' }"]).await);
+	}
+
+	#[tokio::test]
+	async fn a_constant_non_aggregate_field_is_evaluated_once_even_when_it_is_none() {
+		let ctx = root_ctx();
+		// Same rows and same expression as the test above, but the field is
+		// declared constant across the group. The first evaluation is then the
+		// group's answer, so the missing `label` on the first row stands
+		// instead of being retried until a later row supplies one.
+		//
+		// The distinction exists because retrying re-evaluates the expression
+		// once per row, which for a row-independent expression repeats work
+		// proportional to the group's size and, when the expression is
+		// non-deterministic, makes the result depend on the row count.
+		let input = ValuesOperator::new(
+			rows(&["{ c: 'us' }", "{ c: 'us', label: 'second' }", "{ c: 'us', label: 'third' }"])
+				.await,
+		);
+		let op = aggregate_over(
+			input,
+			&["c"],
+			vec![key("c", 0), first_value("label", "label", &ctx).await.with_constant_fallback()],
+			&ctx,
+		)
+		.await;
+
+		let out = collect(&op, &ctx).await;
+		assert_eq!(field(&out[0], "label"), Value::None);
 	}
 
 	#[tokio::test]

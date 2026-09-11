@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 
+use super::Rejected;
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
 use crate::expr::Kind;
 use crate::val::{Datetime, Value};
@@ -33,11 +34,12 @@ impl AggregateFunction for TimeMin {
 #[derive(Debug, Clone, Default)]
 struct TimeMinAccumulator {
 	min: Option<Datetime>,
+	rejected: Rejected,
 }
 
 impl Accumulator for TimeMinAccumulator {
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Datetime(d) = value {
+		if let Some(d) = self.rejected.datetime("time::min", &value) {
 			self.min = Some(match &self.min {
 				None => d,
 				Some(current) => {
@@ -57,6 +59,7 @@ impl Accumulator for TimeMinAccumulator {
 			.as_any()
 			.downcast_ref::<TimeMinAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		self.rejected.merge_from(&other.rejected);
 		if let Some(other_min) = &other.min {
 			self.min = Some(match &self.min {
 				None => *other_min,
@@ -76,6 +79,7 @@ impl Accumulator for TimeMinAccumulator {
 		// Streaming executor only. The materialised-view path
 		// (`catalog/aggregation.rs`) still emits `Datetime::MAX_UTC` for empty
 		// groups; aligning it requires bumping `AggregationStat`'s revision.
+		self.rejected.check()?;
 		match &self.min {
 			Some(d) => Ok(Value::Datetime(*d)),
 			None => Ok(Value::None),
@@ -84,6 +88,7 @@ impl Accumulator for TimeMinAccumulator {
 
 	fn reset(&mut self) {
 		self.min = None;
+		self.rejected.reset();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -120,11 +125,12 @@ impl AggregateFunction for TimeMax {
 #[derive(Debug, Clone, Default)]
 struct TimeMaxAccumulator {
 	max: Option<Datetime>,
+	rejected: Rejected,
 }
 
 impl Accumulator for TimeMaxAccumulator {
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Datetime(d) = value {
+		if let Some(d) = self.rejected.datetime("time::max", &value) {
 			self.max = Some(match &self.max {
 				None => d,
 				Some(current) => {
@@ -144,6 +150,7 @@ impl Accumulator for TimeMaxAccumulator {
 			.as_any()
 			.downcast_ref::<TimeMaxAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		self.rejected.merge_from(&other.rejected);
 		if let Some(other_max) = &other.max {
 			self.max = Some(match &self.max {
 				None => *other_max,
@@ -163,6 +170,7 @@ impl Accumulator for TimeMaxAccumulator {
 		// Streaming executor only. The materialised-view path
 		// (`catalog/aggregation.rs`) still emits `Datetime::MIN_UTC` for empty
 		// groups; aligning it requires bumping `AggregationStat`'s revision.
+		self.rejected.check()?;
 		match &self.max {
 			Some(d) => Ok(Value::Datetime(*d)),
 			None => Ok(Value::None),
@@ -171,6 +179,7 @@ impl Accumulator for TimeMaxAccumulator {
 
 	fn reset(&mut self) {
 		self.max = None;
+		self.rejected.reset();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -307,16 +316,31 @@ mod tests {
 	}
 
 	#[test]
-	fn time_min_skips_non_datetime() {
-		// Type-mismatched values (including arrays) are silently skipped,
-		// matching how `math::*` aggregators handle non-numbers. The group
-		// then finalizes to NONE.
+	fn time_min_skips_non_datetime_only_when_something_folded() {
+		// A value of the wrong kind is tolerated when the group has an answer
+		// without it: the datetime folds and the array is ignored.
 		let func = TimeMin;
+		let sample = Value::Datetime(Datetime::from(Utc.timestamp_opt(1_700_000_000, 0).unwrap()));
 		let mut acc = func.create_accumulator();
 		acc.update(Value::Array(Default::default())).unwrap();
 		acc.update(Value::None).unwrap();
-		let result = acc.finalize().unwrap();
-		assert_eq!(result, Value::None);
+		acc.update(sample.clone()).unwrap();
+		assert_eq!(acc.finalize().unwrap(), sample);
+
+		// `NONE` alone is absent rather than wrong, so it still finalises to NONE.
+		let mut absent = func.create_accumulator();
+		absent.update(Value::None).unwrap();
+		assert_eq!(absent.finalize().unwrap(), Value::None);
+
+		// With nothing folded, reporting NONE would present the absence of an
+		// answer as an answer, so the wrong-kind value raises instead.
+		let mut wrong = func.create_accumulator();
+		wrong.update(Value::Array(Default::default())).unwrap();
+		let err = wrong.finalize().unwrap_err().to_string();
+		assert!(
+			err.contains("time::min") && err.contains("Expected `datetime`"),
+			"unexpected error: {err}"
+		);
 	}
 
 	// -------------------------------------------------------------------------
@@ -421,12 +445,30 @@ mod tests {
 	}
 
 	#[test]
-	fn time_max_skips_non_datetime() {
+	fn time_max_skips_non_datetime_only_when_something_folded() {
+		// A value of the wrong kind is tolerated when the group has an answer
+		// without it: the datetime folds and the array is ignored.
 		let func = TimeMax;
+		let sample = Value::Datetime(Datetime::from(Utc.timestamp_opt(1_700_000_000, 0).unwrap()));
 		let mut acc = func.create_accumulator();
 		acc.update(Value::Array(Default::default())).unwrap();
 		acc.update(Value::None).unwrap();
-		let result = acc.finalize().unwrap();
-		assert_eq!(result, Value::None);
+		acc.update(sample.clone()).unwrap();
+		assert_eq!(acc.finalize().unwrap(), sample);
+
+		// `NONE` alone is absent rather than wrong, so it still finalises to NONE.
+		let mut absent = func.create_accumulator();
+		absent.update(Value::None).unwrap();
+		assert_eq!(absent.finalize().unwrap(), Value::None);
+
+		// With nothing folded, reporting NONE would present the absence of an
+		// answer as an answer, so the wrong-kind value raises instead.
+		let mut wrong = func.create_accumulator();
+		wrong.update(Value::Array(Default::default())).unwrap();
+		let err = wrong.finalize().unwrap_err().to_string();
+		assert!(
+			err.contains("time::max") && err.contains("Expected `datetime`"),
+			"unexpected error: {err}"
+		);
 	}
 }

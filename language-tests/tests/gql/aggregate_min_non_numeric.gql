@@ -5,10 +5,24 @@ database = true
 imports = ["gql/_schema.surql"]
 
 [test]
-reason = "Numeric-only contract (v1): min/max map onto the numeric math::min/math::max accumulators, which silently ignore non-numeric values. Over the string `name` column they accumulate nothing and return the empty-accumulator identity (Infinity/-Infinity) rather than an orderable min/max. Orderable MIN/MAX is a documented follow-up."
+reason = """
+GQL `MIN`/`MAX` are orderable rather than numeric, so they answer over any
+comparable column. They lower onto `array::min`/`array::max`, which order by
+SurrealDB's own value order and agree with those functions' scalar forms.
+
+Two properties are asserted together, because the second is what stops the
+first from being implemented the easy and wrong way:
+
+- Over the string column `name` the result is the actual least and greatest string, not the
+  `Infinity`/`-Infinity` a numeric accumulator returns for having folded nothing.
+- Over `age`, which `person:3` does not carry, the missing value is skipped rather than ordered.
+  `NONE` sorts below every other value, so ordering it would make every `MIN` over a sparse column
+  report `NONE`. Skipping nulls is what SQL specifies, and it is why these aggregates cannot simply
+  defer to the scalar form for a group.
+"""
 
 [[test.results]]
-value = "[{ hi: -Infinity, lo: Infinity }]"
+value = "[{ hi_age: 30, hi_name: 'C', lo_age: 20, lo_name: 'A' }]"
 */
 
-MATCH (n:person) RETURN min(n.name) AS lo, max(n.name) AS hi
+MATCH (n:person) RETURN min(n.name) AS lo_name, max(n.name) AS hi_name, min(n.age) AS lo_age, max(n.age) AS hi_age

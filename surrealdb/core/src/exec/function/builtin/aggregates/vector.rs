@@ -3,7 +3,7 @@
 //! Provides aggregates that fold a vector-valued expression across the rows of
 //! a group.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use surrealdb_runtime::util::math::vector::add_assign;
 
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
@@ -42,10 +42,14 @@ impl AggregateFunction for VectorSum {
 /// field still totals the rows that do have one. Any other non-vector value, or
 /// a vector whose dimension disagrees with the running total, instead leaves the
 /// group's total undefined: a partial sum over an inconsistent group is
-/// indistinguishable from a correct one, so [`Accumulator::finalize`] fails for
-/// the whole group rather than returning a total that silently omits rows. The
-/// aggregate operator renders that failure as `NULL` for the field, keeping one
-/// bad group from failing the surrounding query.
+/// indistinguishable from a correct one, so the group reports `NULL` rather than
+/// a total that silently omits rows, keeping one bad group from failing the
+/// surrounding query.
+///
+/// `NULL` is returned from [`Accumulator::finalize`] directly. The numeric
+/// aggregates raise instead, because there the wrong outcome is the accumulator's
+/// identity being mistaken for an answer; here the wrong outcome is a plausible
+/// vector, and no identity is at stake.
 #[derive(Debug, Clone, Default)]
 struct VectorSumAccumulator {
 	total: Option<Vec<Number>>,
@@ -169,8 +173,13 @@ impl Accumulator for VectorSumAccumulator {
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		// An inconsistent group has no total to report. The reason is kept for
+		// the log rather than raised: unlike a numeric aggregate, there is no
+		// identity here that could be mistaken for an answer, and one bad group
+		// should not fail the surrounding query.
 		if let Some(reason) = &self.undefined {
-			bail!("{reason}");
+			tracing::debug!(reason = %reason, "vector::sum group is undefined, reporting NULL");
+			return Ok(Value::Null);
 		}
 		match &self.total {
 			// No vector was seen, so there is no dimension to return a zero
@@ -280,7 +289,7 @@ mod tests {
 		left.update(vector([1, 2, 3])).unwrap();
 		left.merge(poisoned.clone_box()).unwrap();
 
-		assert!(left.finalize().is_err());
+		assert_eq!(left.finalize().unwrap(), Value::Null);
 	}
 
 	/// A dimension mismatch must not yield a total summed from only the rows
@@ -291,28 +300,29 @@ mod tests {
 		acc.update(vector([1, 2, 3])).unwrap();
 		acc.update(Value::Array(vec![Value::from(Number::Int(1))].into())).unwrap();
 
-		let err = acc.finalize().unwrap_err().to_string();
-		assert!(err.starts_with(PREFIX), "reason lost the function prefix: {err}");
-		assert!(err.contains("same dimension"), "unexpected reason: {err}");
+		// A partial sum over an inconsistent group is indistinguishable from a
+		// correct one, so the group has no total to report.
+		assert_eq!(acc.finalize().unwrap(), Value::Null);
 	}
 
-	/// `finalize` errors are rendered as `NULL` by the aggregate operator, so
-	/// the reason is only ever read from a log — but it must still name the
-	/// function, matching the scalar form, in case that changes.
+	/// The reason an inconsistent group has no total is only ever read from a
+	/// log, since `finalize` reports `NULL` rather than raising — but it must
+	/// still name the function, matching the scalar form, in case that changes.
 	#[test]
 	fn a_non_vector_reason_carries_the_function_prefix() {
-		let mut acc = accumulator();
+		let mut acc = VectorSumAccumulator::default();
 		acc.update(Value::from(Number::Int(7))).unwrap();
 
-		let err = acc.finalize().unwrap_err().to_string();
-		assert!(err.starts_with(PREFIX), "reason lost the function prefix: {err}");
+		let reason = acc.undefined.as_deref().expect("a non-vector must leave a reason");
+		assert!(reason.starts_with(PREFIX), "reason lost the function prefix: {reason}");
+		assert_eq!(acc.finalize().unwrap(), Value::Null);
 	}
 
 	#[test]
 	fn reset_clears_both_the_total_and_the_undefined_reason() {
 		let mut acc = accumulator();
 		acc.update(Value::from(Number::Int(7))).unwrap();
-		assert!(acc.finalize().is_err());
+		assert_eq!(acc.finalize().unwrap(), Value::Null);
 
 		acc.reset();
 		acc.update(vector([1, 2, 3])).unwrap();

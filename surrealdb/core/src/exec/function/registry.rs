@@ -116,6 +116,15 @@ impl FunctionRegistry {
 		self.aggregates.len()
 	}
 
+	/// The aggregate that reduces a projected expression carrying no aggregate
+	/// of its own, by collecting each row's value with duplicates kept.
+	///
+	/// Deliberately not `array::group`, which owes its caller a deduplicated
+	/// result: one accumulator cannot honour both contracts.
+	pub fn get_implicit_collect_aggregate(&self) -> Arc<dyn AggregateFunction> {
+		Arc::new(builtin::aggregates::ArrayCollect)
+	}
+
 	/// Get the appropriate aggregate function for "count", handling the special case:
 	/// - count() with no arguments counts all rows (uses Count)
 	/// - count(expr) with arguments counts truthy values (uses CountField)
@@ -367,5 +376,52 @@ mod tests {
 			"these must be registered behind `NonDeterministic`, or the planner will fold a \
 			 call to one constant reused for every row: {offenders:?}"
 		);
+	}
+
+	/// Every builtin that leaves something behind must report it, so a grouped
+	/// projection holding one is evaluated per row rather than once per group.
+	/// The set is spelled out here because the flag is applied by hand at each
+	/// registration: a new mutator added without it reduces silently, and the
+	/// only symptom is a statement with the wrong number of effects.
+	#[test]
+	fn mutating_builtins_report_mutating_state() {
+		let registry = FunctionRegistry::with_builtins();
+
+		let expected = [
+			"sequence::nextval",
+			"http::put",
+			"http::post",
+			"http::patch",
+			"http::delete",
+			"file::put",
+			"file::put_if_not_exists",
+			"file::delete",
+			"file::copy",
+			"file::copy_if_not_exists",
+			"file::rename",
+			"file::rename_if_not_exists",
+		];
+
+		let missing: Vec<&str> = expected
+			.iter()
+			.filter(|name| {
+				!registry.get(name).expect("expected a registered builtin").mutates_state()
+			})
+			.copied()
+			.collect();
+		assert!(
+			missing.is_empty(),
+			"these must be registered behind `MutatesState`, or a grouped projection will run \
+			 them once per group instead of once per row: {missing:?}"
+		);
+
+		// The readers alongside them must not be swept up: reducing those is
+		// what the flag is meant to keep allowed.
+		for name in ["http::get", "http::head", "file::get", "file::exists", "file::list"] {
+			assert!(
+				!registry.get(name).expect("expected a registered builtin").mutates_state(),
+				"{name} only reads, so it must stay reducible"
+			);
+		}
 	}
 }

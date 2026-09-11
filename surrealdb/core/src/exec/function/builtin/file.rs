@@ -13,7 +13,7 @@ use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, Permission};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::EngineError;
-use crate::exec::function::FunctionRegistry;
+use crate::exec::function::{FunctionRegistry, MutatesState};
 use crate::exec::physical_expr::EvalContext;
 use crate::exec::planner::Planner;
 use crate::exec::{Error as ExecError, ExecutionContext};
@@ -541,18 +541,24 @@ define_pure_function!(FileKey, "file::key", (file: Any) -> Any, file_key_impl);
 // Registration
 // =========================================================================
 
+// Everything that writes, deletes, copies or renames is registered behind
+// `MutatesState`, so a projection holding one is evaluated per row rather than
+// per group: the bucket keeps what these leave behind, and the count of
+// effects must not follow from how a query grouped its rows. The readers
+// (`get`, `head`, `exists`, `list`) and the pure accessors carry no such
+// constraint.
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(
 		registry,
-		FilePut,
-		FilePutIfNotExists,
+		MutatesState<FilePut>,
+		MutatesState<FilePutIfNotExists>,
 		FileGet,
 		FileHead,
-		FileDelete,
-		FileCopy,
-		FileCopyIfNotExists,
-		FileRename,
-		FileRenameIfNotExists,
+		MutatesState<FileDelete>,
+		MutatesState<FileCopy>,
+		MutatesState<FileCopyIfNotExists>,
+		MutatesState<FileRename>,
+		MutatesState<FileRenameIfNotExists>,
 		FileExists,
 		FileList,
 		FileBucket,

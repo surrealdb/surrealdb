@@ -1,7 +1,4 @@
 /**
-[env]
-planner-strategy = ["all-ro"]
-
 [test]
 reason = "Test GROUP BY with array aggregation functions and patterns"
 
@@ -9,7 +6,7 @@ reason = "Test GROUP BY with array aggregation functions and patterns"
 value = "'OK'"
 
 [[test.results]]
-value = "[{ names: ['apple', 'banana', 'apple', 'banana'], type: 'fruit' }, { names: ['carrot', 'broccoli'], type: 'vegetable' }]"
+value = "[{ names: ['apple', 'banana'], type: 'fruit' }, { names: ['carrot', 'broccoli'], type: 'vegetable' }]"
 
 [[test.results]]
 value = "[{ type: 'fruit', unique_names: ['apple', 'banana'] }, { type: 'vegetable', unique_names: ['carrot', 'broccoli'] }]"
@@ -18,11 +15,10 @@ value = "[{ type: 'fruit', unique_names: ['apple', 'banana'] }, { type: 'vegetab
 value = "[{ type: 'fruit', unique_names: ['apple', 'banana'] }, { type: 'vegetable', unique_names: ['carrot', 'broccoli'] }]"
 
 [[test.results]]
-value = "[{ count: 4, type: 'fruit' }, { count: 2, type: 'vegetable' }]"
+value = "[{ type: 'fruit', unique_count: 2 }, { type: 'vegetable', unique_count: 2 }]"
 
 [[test.results]]
-value = "[{ all_names: ['apple', 'banana', 'apple', 'banana'], count: 4, type: 'fruit' }, { all_names: ['carrot', 'broccoli'], count: 2, type: 'vegetable' }]"
-
+value = "[{ all_names: ['apple', 'banana'], count: 4, type: 'fruit' }, { all_names: ['carrot', 'broccoli'], count: 2, type: 'vegetable' }]"
 */
 
 -- Setup data
@@ -43,8 +39,11 @@ SELECT type, array::group(name) as names FROM items GROUP BY type;
 SELECT type, array::distinct(array::group(name)) as unique_names FROM items GROUP BY type;
 SELECT type, array::distinct(name) as unique_names FROM items GROUP BY type;
 
--- Test array::len with grouping
-SELECT type, array::len(array::group(name)) as count FROM items GROUP BY type;
+-- `array::group` reports the unique names, so its length counts distinct
+-- values, not rows. Deliberately not aliased `count`: fruit holds four rows
+-- and two distinct names, and the query below returns the row count of 4 for
+-- the same group.
+SELECT type, array::len(array::group(name)) as unique_count FROM items GROUP BY type;
 
 -- Test combining array functions with other aggregates
 SELECT type, COUNT() as count, array::group(name) as all_names FROM items GROUP BY type;

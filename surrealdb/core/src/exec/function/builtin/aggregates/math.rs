@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 
+use super::Rejected;
 use crate::catalog::aggregation;
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
 use crate::expr::Kind;
@@ -35,21 +36,21 @@ impl AggregateFunction for MathSum {
 #[derive(Debug, Clone, Default)]
 struct SumAccumulator {
 	sum: Number,
+	rejected: Rejected,
 }
 
 impl Accumulator for SumAccumulator {
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
+		if let Some(n) = self.rejected.number("math::sum", &value) {
 			self.sum = self.sum + n;
 		}
-		// Skip non-numbers (matches old behavior)
 		Ok(())
 	}
 
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
-			if let Value::Number(n) = value {
-				self.sum = self.sum + *n;
+			if let Some(n) = self.rejected.number("math::sum", value) {
+				self.sum = self.sum + n;
 			}
 		}
 		Ok(())
@@ -60,16 +61,19 @@ impl Accumulator for SumAccumulator {
 			.as_any()
 			.downcast_ref::<SumAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		self.rejected.merge_from(&other.rejected);
 		self.sum = self.sum + other.sum;
 		Ok(())
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		self.rejected.check()?;
 		Ok(Value::Number(self.sum))
 	}
 
 	fn reset(&mut self) {
 		self.sum = Number::Int(0);
+		self.rejected.reset();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -107,22 +111,22 @@ impl AggregateFunction for MathMean {
 struct MeanAccumulator {
 	sum: Number,
 	count: i64,
+	rejected: Rejected,
 }
 
 impl Accumulator for MeanAccumulator {
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
+		if let Some(n) = self.rejected.number("math::mean", &value) {
 			self.sum = self.sum + n;
 			self.count += 1;
 		}
-		// Skip non-numbers
 		Ok(())
 	}
 
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
-			if let Value::Number(n) = value {
-				self.sum = self.sum + *n;
+			if let Some(n) = self.rejected.number("math::mean", value) {
+				self.sum = self.sum + n;
 				self.count += 1;
 			}
 		}
@@ -134,12 +138,14 @@ impl Accumulator for MeanAccumulator {
 			.as_any()
 			.downcast_ref::<MeanAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		self.rejected.merge_from(&other.rejected);
 		self.sum = self.sum + other.sum;
 		self.count += other.count;
 		Ok(())
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		self.rejected.check()?;
 		if self.count == 0 {
 			// Return NaN for empty groups (matches old behavior)
 			Ok(Value::Number(Number::Float(f64::NAN)))
@@ -152,6 +158,7 @@ impl Accumulator for MeanAccumulator {
 	fn reset(&mut self) {
 		self.sum = Number::Int(0);
 		self.count = 0;
+		self.rejected.reset();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -188,11 +195,12 @@ impl AggregateFunction for MathMin {
 #[derive(Debug, Clone, Default)]
 struct MinAccumulator {
 	min: Option<Number>,
+	rejected: Rejected,
 }
 
 impl Accumulator for MinAccumulator {
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
+		if let Some(n) = self.rejected.number("math::min", &value) {
 			self.min = Some(match &self.min {
 				None => n,
 				Some(current) => {
@@ -209,12 +217,12 @@ impl Accumulator for MinAccumulator {
 
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
-			if let Value::Number(n) = value {
+			if let Some(n) = self.rejected.number("math::min", value) {
 				self.min = Some(match &self.min {
-					None => *n,
+					None => n,
 					Some(current) => {
-						if *n < *current {
-							*n
+						if n < *current {
+							n
 						} else {
 							*current
 						}
@@ -230,6 +238,7 @@ impl Accumulator for MinAccumulator {
 			.as_any()
 			.downcast_ref::<MinAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		self.rejected.merge_from(&other.rejected);
 		if let Some(other_min) = &other.min {
 			self.min = Some(match &self.min {
 				None => *other_min,
@@ -246,6 +255,7 @@ impl Accumulator for MinAccumulator {
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		self.rejected.check()?;
 		match &self.min {
 			Some(n) => Ok(Value::Number(*n)),
 			None => Ok(Value::Number(Number::Float(f64::INFINITY))),
@@ -254,6 +264,7 @@ impl Accumulator for MinAccumulator {
 
 	fn reset(&mut self) {
 		self.min = None;
+		self.rejected.reset();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -290,11 +301,12 @@ impl AggregateFunction for MathMax {
 #[derive(Debug, Clone, Default)]
 struct MaxAccumulator {
 	max: Option<Number>,
+	rejected: Rejected,
 }
 
 impl Accumulator for MaxAccumulator {
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
+		if let Some(n) = self.rejected.number("math::max", &value) {
 			self.max = Some(match &self.max {
 				None => n,
 				Some(current) => {
@@ -311,12 +323,12 @@ impl Accumulator for MaxAccumulator {
 
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
-			if let Value::Number(n) = value {
+			if let Some(n) = self.rejected.number("math::max", value) {
 				self.max = Some(match &self.max {
-					None => *n,
+					None => n,
 					Some(current) => {
-						if *n > *current {
-							*n
+						if n > *current {
+							n
 						} else {
 							*current
 						}
@@ -332,6 +344,7 @@ impl Accumulator for MaxAccumulator {
 			.as_any()
 			.downcast_ref::<MaxAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		self.rejected.merge_from(&other.rejected);
 		if let Some(other_max) = &other.max {
 			self.max = Some(match &self.max {
 				None => *other_max,
@@ -348,6 +361,7 @@ impl Accumulator for MaxAccumulator {
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		self.rejected.check()?;
 		match &self.max {
 			Some(n) => Ok(Value::Number(*n)),
 			None => Ok(Value::Number(Number::Float(f64::NEG_INFINITY))),
@@ -356,6 +370,7 @@ impl Accumulator for MaxAccumulator {
 
 	fn reset(&mut self) {
 		self.max = None;
+		self.rejected.reset();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -414,6 +429,16 @@ enum Spread {
 	Deviation,
 }
 
+impl Spread {
+	/// The function name to report a rejected input against.
+	fn function_name(self) -> &'static str {
+		match self {
+			Spread::Variance => "math::variance",
+			Spread::Deviation => "math::stddev",
+		}
+	}
+}
+
 /// Shared accumulator for `math::variance` and `math::stddev`.
 ///
 /// Delegates to [`aggregation::shifted_accumulate`] and
@@ -428,6 +453,7 @@ struct SpreadAccumulator {
 	sum: Number,
 	sum_of_squares: Number,
 	count: i64,
+	rejected: Rejected,
 }
 
 impl SpreadAccumulator {
@@ -438,6 +464,7 @@ impl SpreadAccumulator {
 			sum: 0.0.into(),
 			sum_of_squares: 0.0.into(),
 			count: 0,
+			rejected: Rejected::default(),
 		}
 	}
 
@@ -452,7 +479,7 @@ impl SpreadAccumulator {
 
 impl Accumulator for SpreadAccumulator {
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
+		if let Some(n) = self.rejected.number(self.spread.function_name(), &value) {
 			aggregation::shifted_accumulate(
 				&mut self.shift,
 				&mut self.sum,
@@ -479,6 +506,7 @@ impl Accumulator for SpreadAccumulator {
 			other.spread,
 			self.spread
 		);
+		self.rejected.merge_from(&other.rejected);
 		if other.count == 0 {
 			return Ok(());
 		}
@@ -507,6 +535,7 @@ impl Accumulator for SpreadAccumulator {
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		self.rejected.check()?;
 		let num = match self.spread {
 			Spread::Variance => {
 				aggregation::shifted_sample_variance(self.sum, self.sum_of_squares, self.count)
@@ -556,11 +585,12 @@ impl AggregateFunction for MathMedian {
 #[derive(Debug, Clone, Default)]
 struct MedianAccumulator {
 	values: Vec<Number>,
+	rejected: Rejected,
 }
 
 impl Accumulator for MedianAccumulator {
 	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
+		if let Some(n) = self.rejected.number("math::median", &value) {
 			self.values.push(n);
 		}
 		Ok(())
@@ -571,11 +601,13 @@ impl Accumulator for MedianAccumulator {
 			.as_any()
 			.downcast_ref::<MedianAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		self.rejected.merge_from(&other.rejected);
 		self.values.extend(other.values.iter().copied());
 		Ok(())
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		self.rejected.check()?;
 		if self.values.is_empty() {
 			return Ok(Value::None);
 		}
@@ -601,6 +633,7 @@ impl Accumulator for MedianAccumulator {
 
 	fn reset(&mut self) {
 		self.values.clear();
+		self.rejected.reset();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {

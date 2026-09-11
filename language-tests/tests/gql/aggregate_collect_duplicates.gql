@@ -1,0 +1,23 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["gql/_schema.surql"]
+
+[test]
+reason = """
+`collect` reports one entry per matched row, keeping duplicates. Three people
+live in two cities, so the list holds three entries with `'London'` twice, and
+its length agrees with the `count(*)` beside it.
+
+This is what separates `collect` from `array::group`, which reports each
+distinct value once: folding with that one would drop rows the caller can
+count, and silently, since a group whose values happen to be distinct answers
+the same either way.
+"""
+
+[[test.results]]
+value = "[{ cities: ['London', 'Paris', 'London'], n: 3 }]"
+*/
+
+MATCH (n:person) RETURN collect(n.city) AS cities, count(*) AS n

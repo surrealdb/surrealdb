@@ -33,6 +33,17 @@ impl ScalarFunction for SequenceNextval {
 		true
 	}
 
+	/// Every call hands out a value no other call will.
+	fn is_deterministic(&self) -> bool {
+		false
+	}
+
+	/// Each call advances the sequence, and the values it has handed out
+	/// outlive the statement, so how many times it runs is observable.
+	fn mutates_state(&self) -> bool {
+		true
+	}
+
 	fn invoke(&self, _args: Vec<Value>) -> Result<Value> {
 		Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
 	}

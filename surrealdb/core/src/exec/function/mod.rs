@@ -139,6 +139,22 @@ pub trait ScalarFunction: Send + Sync + Debug {
 		true
 	}
 
+	/// Whether invoking this function changes state that outlives the query.
+	///
+	/// A function that only observes can be called any number of times without
+	/// anything outside the expression noticing, however much its answers
+	/// differ between calls — `rand::*` and `time::now` are in that class. One
+	/// that advances a sequence, writes a file, or sends a non-safe HTTP
+	/// request is not: how many times it runs is itself part of the answer.
+	///
+	/// The planner asks this before reducing a grouped projection to a single
+	/// evaluation per group. Reducing a mutator would let the grouping decide
+	/// how many effects the statement has, and would run one for a `GROUP ALL`
+	/// that saw no rows at all, so those stay on the per-row path.
+	fn mutates_state(&self) -> bool {
+		false
+	}
+
 	/// Synchronous invocation for pure functions.
 	///
 	/// This is the primary entry point for pure scalar functions.
@@ -200,6 +216,69 @@ impl<F: ScalarFunction> ScalarFunction for NonDeterministic<F> {
 
 	fn is_deterministic(&self) -> bool {
 		false
+	}
+
+	fn mutates_state(&self) -> bool {
+		self.0.mutates_state()
+	}
+
+	fn invoke(&self, args: Vec<Value>) -> Result<Value> {
+		self.0.invoke(args)
+	}
+
+	fn invoke_async<'a>(
+		&'a self,
+		ctx: &'a EvalContext<'_>,
+		args: Vec<Value>,
+	) -> BoxFut<'a, Result<Value>> {
+		self.0.invoke_async(ctx, args)
+	}
+}
+
+/// Wraps a scalar function to report it as changing state beyond the query.
+///
+/// Every other part of the [`ScalarFunction`] contract, including the name the
+/// registry keys on, is delegated to the wrapped function, so wrapping changes
+/// nothing but [`ScalarFunction::mutates_state`].
+///
+/// Like [`NonDeterministic`], this exists because the arity-specific
+/// `define_*_function!` arms have no slot for per-function overrides; wrapping
+/// at registration keeps one declaration per function regardless of its
+/// signature.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MutatesState<F>(pub F);
+
+impl<F: ScalarFunction> ScalarFunction for MutatesState<F> {
+	fn name(&self) -> &'static str {
+		self.0.name()
+	}
+
+	fn signature(&self) -> Signature {
+		self.0.signature()
+	}
+
+	fn return_type(&self, arg_types: &[Kind]) -> Result<Kind> {
+		self.0.return_type(arg_types)
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		self.0.required_context()
+	}
+
+	fn is_pure(&self) -> bool {
+		self.0.is_pure()
+	}
+
+	fn is_async(&self) -> bool {
+		self.0.is_async()
+	}
+
+	fn is_deterministic(&self) -> bool {
+		self.0.is_deterministic()
+	}
+
+	fn mutates_state(&self) -> bool {
+		true
 	}
 
 	fn invoke(&self, args: Vec<Value>) -> Result<Value> {

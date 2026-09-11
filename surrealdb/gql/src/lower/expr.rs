@@ -650,20 +650,25 @@ enum AggregateTarget {
 /// Resolves a (lowercased) GQL aggregate name to its lowering target, or `None`
 /// if the name is not a supported aggregate.
 ///
-/// Numeric contract (v1): `sum`/`avg` are numeric by the GQL spec, and `min`/`max`
-/// map onto the numeric `math::*` accumulators, which **silently ignore
-/// non-numeric values** (including `NULL`/`NONE`). So over a non-numeric column
-/// they accumulate nothing and return the empty-accumulator identity (`0` for
-/// `sum`, `±∞` for `min`/`max`) rather than an orderable min/max or an error.
-/// Orderable (datetime/string/duration) `MIN`/`MAX` is a deliberate follow-up;
-/// see `language-tests/tests/gql/aggregate_min_non_numeric.gql`.
+/// `sum` and `avg` are numeric by the GQL spec, so they map onto the numeric
+/// `math::*` accumulators. `min`/`max` are *orderable* rather than numeric —
+/// GQL admits them over any comparable type — so they map onto `array::min` and
+/// `array::max`, which order by SurrealDB's own value order and so also answer
+/// over strings, datetimes and durations. A group whose column holds no value
+/// reports `NONE` from those, rather than the `±∞` a numeric accumulator would
+/// return for having folded nothing.
+///
+/// `collect`/`collect_list` owe one entry per matched row, so they map onto
+/// `array::collect` rather than `array::group`: the latter reports each
+/// distinct value once, which would drop rows the caller can count and flatten
+/// an array-valued column into its neighbours.
 fn aggregate_target(name: &str) -> Option<AggregateTarget> {
 	Some(match name {
 		"count" => AggregateTarget::Count,
 		"sum" => AggregateTarget::Mapped("math::sum"),
-		"collect" | "collect_list" => AggregateTarget::Mapped("array::group"),
-		"min" => AggregateTarget::Mapped("math::min"),
-		"max" => AggregateTarget::Mapped("math::max"),
+		"collect" | "collect_list" => AggregateTarget::Mapped("array::collect"),
+		"min" => AggregateTarget::Mapped("array::min"),
+		"max" => AggregateTarget::Mapped("array::max"),
 		"avg" => AggregateTarget::Mapped("math::mean"),
 		_ => return None,
 	})

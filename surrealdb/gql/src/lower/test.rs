@@ -1797,15 +1797,20 @@ fn lowers_group_by_with_aggregates() {
 	assert!(rendered.contains("GROUP BY n.city"), "{rendered}");
 	assert!(rendered.contains("math::sum(n.age)"), "{rendered}");
 	assert!(rendered.contains("math::mean(n.age)"), "{rendered}");
-	assert!(rendered.contains("math::min(n.age)"), "{rendered}");
-	assert!(rendered.contains("math::max(n.age)"), "{rendered}");
+	// `min`/`max` are orderable rather than numeric, so they lower onto the
+	// value-ordering accumulators, which answer over strings and datetimes too.
+	assert!(rendered.contains("array::min(n.age)"), "{rendered}");
+	assert!(rendered.contains("array::max(n.age)"), "{rendered}");
 }
 
 #[test]
-fn lowers_collect_to_array_group() {
+fn lowers_collect_to_array_collect() {
+	// `collect` owes one entry per matched row, so it lowers onto the
+	// duplicate-preserving fold rather than `array::group`, which reports each
+	// distinct value once.
 	let rendered =
 		render("MATCH (n:person) RETURN n.city AS c, collect(n.name) AS names GROUP BY n.city");
-	assert!(rendered.contains("array::group(n.name)"), "{rendered}");
+	assert!(rendered.contains("array::collect(n.name)"), "{rendered}");
 }
 
 #[test]
