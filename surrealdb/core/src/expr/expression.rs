@@ -19,7 +19,7 @@ use crate::expr::statements::{
 };
 use crate::expr::{
 	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Idiom, Literal, Mock,
-	ObjectEntry, Param, PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
+	ObjectEntry, Param, Part, PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
 use crate::fnc;
 use crate::types::PublicValue;
@@ -873,9 +873,13 @@ impl Expr {
 			#[cfg(feature = "gql")]
 			Expr::Match(_) => true,
 
+			// Implicit recursion absorbs trailing idiom parts, so preserve its boundary.
+			Expr::Idiom(idiom) => {
+				idiom.0.iter().any(|part| matches!(part, Part::Recurse(_, None, _)))
+			}
+
 			Expr::Literal(_)
 			| Expr::Param(_)
-			| Expr::Idiom(_)
 			| Expr::Table(_)
 			| Expr::Mock(_)
 			| Expr::Block(_)
