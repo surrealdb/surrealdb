@@ -633,6 +633,8 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 			let _ = std::fs::create_dir_all(root);
 		}
 
+		release_freed_heap();
+
 		idx = end;
 	}
 
@@ -707,6 +709,8 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 			let _ = std::fs::remove_dir_all(root);
 			let _ = std::fs::create_dir_all(root);
 		}
+
+		release_freed_heap();
 	}
 
 	for (name, m, _rows, compare) in &measurements {
@@ -1457,3 +1461,31 @@ async fn run_bench(
 
 	Ok(BenchRunResult::Ok(measurement, rows, comp))
 }
+
+/// Returns pages freed by a bench's datastore to the OS.
+///
+/// Called only where a datastore has just been dropped — a read-only dataset
+/// group finishing, or a mutating bench finishing — so its allocations are
+/// already free as far as the process is concerned, but glibc keeps them
+/// resident until something trims. Trimming holds the resident floor a later
+/// bench measures under at a repeatable level rather than at whatever the
+/// heaviest preceding dataset happened to leave behind.
+///
+/// This does not lower the process's peak, which is reached inside a group
+/// while its dataset is being imported and nothing has yet been freed. It is
+/// never called from inside a measured region, so its `madvise` cost cannot
+/// land in a reported median.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn release_freed_heap() {
+	unsafe extern "C" {
+		fn malloc_trim(pad: usize) -> i32;
+	}
+	// SAFETY: takes no pointers, borrows nothing, and is callable at any point
+	// in the life of a process.
+	unsafe { malloc_trim(0) };
+}
+
+/// No-op on targets whose allocator exposes no equivalent: musl has no
+/// `malloc_trim`, and macOS would need `malloc_zone_pressure_relief`.
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn release_freed_heap() {}
