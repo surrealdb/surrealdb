@@ -144,3 +144,34 @@ mod length_prefixed_bytes_tests {
 		assert!(r.is_empty());
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use revision::{DeserializeRevisioned, SerializeRevisioned};
+
+	use super::Block;
+
+	#[test]
+	fn recursive_idiom_grouping_roundtrip() {
+		let block: Block = crate::syn::block(
+			r#"{
+				LET $ids = ($node.{..+collect}->links->n).map(|$v| record::id($v));
+				RETURN [
+					$ids,
+					($node.{..+collect}->links->n)[0],
+					($node.{..+collect}->links->n).map(|$v| record::id($v)).reverse(),
+					$node.{..+collect}->links->n.map(|$v| $v),
+					$node.{..+collect}(->links->n).map(|$v| record::id($v))
+				];
+			}"#,
+		)
+		.unwrap()
+		.into();
+		let mut bytes = Vec::new();
+		block.serialize_revisioned(&mut bytes).unwrap();
+		let mut reader = bytes.as_slice();
+		let restored = Block::deserialize_revisioned(&mut reader).unwrap();
+		assert_eq!(block, restored);
+		assert!(reader.is_empty());
+	}
+}

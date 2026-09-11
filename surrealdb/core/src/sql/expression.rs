@@ -175,9 +175,13 @@ impl Expr {
 					| PostfixOperator::Call(_)
 			),
 
+			// Implicit recursion absorbs trailing idiom parts, so preserve its boundary.
+			Expr::Idiom(idiom) => {
+				idiom.0.iter().any(|part| matches!(part, Part::Recurse(_, None, _)))
+			}
+
 			Expr::Literal(_)
 			| Expr::Param(_)
-			| Expr::Idiom(_)
 			| Expr::Table(_)
 			| Expr::Mock(_)
 			| Expr::Block(_)
