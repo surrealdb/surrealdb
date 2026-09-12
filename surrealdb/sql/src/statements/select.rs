@@ -73,6 +73,9 @@ impl ToSql for SelectStatement {
 		if self.for_update {
 			write_sql!(f, fmt, " FOR UPDATE");
 		}
+		if self.tempfiles {
+			write_sql!(f, fmt, " TEMPFILES");
+		}
 		if let Some(ref v) = self.explain {
 			write_sql!(f, fmt, " {v}");
 		}

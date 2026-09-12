@@ -1,5 +1,5 @@
-DEFINE ACCESS acss ON ROOT;
-DEFINE ACCESS acss ON NAMESPACE;
+-- ROOT and NAMESPACE need an explicit TYPE, since the default is RECORD:
+-- errors/access_missing_type_above_database.surql.
 DEFINE ACCESS acss ON DATABASE;
 DEFINE ACCESS acss ON DB COMMENT "foo";
 DEFINE ACCESS acss ON DB AUTHENTICATE 1 + 1;
@@ -10,40 +10,6 @@ DEFINE ACCESS acss ON DB TYPE RECORD SIGNIN 1 + 1 SIGNUP 1 + 2 WITH REFRESH WITH
 /* ===== result =====
 Query
     .exprs: Some
-        -TopLevelExpr::Expr
-            Expr::DefineAccess
-                DefineAccess
-                    .kind: Create
-                    .name: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "acss"
-                            .parts: None
-                    .base: Root
-                    .comment: None
-                    .duration_session: None
-                    .duration_token: None
-                    .duration_grant: None
-                    .authenticate: None
-                    .context: None
-                    .ty: None
-        -TopLevelExpr::Expr
-            Expr::DefineAccess
-                DefineAccess
-                    .kind: Create
-                    .name: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "acss"
-                            .parts: None
-                    .base: Namespace
-                    .comment: None
-                    .duration_session: None
-                    .duration_token: None
-                    .duration_grant: None
-                    .authenticate: None
-                    .context: None
-                    .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
                 DefineAccess

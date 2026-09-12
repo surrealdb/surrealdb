@@ -2628,7 +2628,12 @@ impl Parse for ast::DefineAccess {
 										_ => return Err(parser.unexpected(expect)),
 									};
 
+									// `WITH JWT …`, spelled as it is for a record
+									// access — and as a rendered definition
+									// spells it, which is what `INFO` and
+									// export produce.
 									let jwt = if parser.eat(T![WITH])?.is_some() {
+										let _ = parser.expect(T![JWT])?;
 										Some(parser.parse().await?)
 									} else {
 										None
@@ -2647,6 +2652,18 @@ impl Parse for ast::DefineAccess {
 				}
 				_ => break,
 			}
+		}
+
+		// An omitted `TYPE` means `RECORD`, which the branch above accepts only
+		// on a database. Left unchecked the default slips past that rule and
+		// defines an access no `DEFINE ACCESS` can express.
+		if ty.is_none() && !matches!(base, Base::Database) {
+			return Err(parser.with_error(|parser| {
+				Level::Error
+					.title("Missing access type, an access at this level must specify a `TYPE`")
+					.snippet(parser.snippet().annotate(AnnotationKind::Primary.span(span)))
+					.to_diagnostic()
+			}));
 		}
 
 		Ok(ast::DefineAccess {

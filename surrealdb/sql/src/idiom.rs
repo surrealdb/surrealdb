@@ -30,9 +30,18 @@ impl surrealdb_types::ToSql for Idiom {
 		match iter.next() {
 			Some(Part::Field(v)) => EscapeIdent(v).fmt_sql(f, fmt),
 			Some(Part::Start(x)) => {
+				// A nested idiom must keep its parentheses: the parts that
+				// follow would otherwise extend the inner path instead of
+				// applying to its result, and `([{ a: [1] }, { a: [2] }].a)[0]`
+				// would reparse as `[{ a: [1] }, { a: [2] }].a[0]` — a
+				// different value.
 				if x.needs_parentheses()
-					|| matches!(x, Expr::Binary { .. } | Expr::Prefix { .. } | Expr::Postfix { .. })
-				{
+					|| matches!(
+						x,
+						Expr::Binary { .. }
+							| Expr::Prefix { .. } | Expr::Postfix { .. }
+							| Expr::Idiom(_)
+					) {
 					write_sql!(f, fmt, "({x})");
 				} else if let Expr::Literal(Literal::Decimal(d)) = x
 					&& d.is_sign_negative()

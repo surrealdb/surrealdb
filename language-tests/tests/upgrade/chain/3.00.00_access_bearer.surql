@@ -25,9 +25,14 @@ since = ">=3.0.0"
 setup = "upgrade/chain/3.00.00_access_bearer_setup.surql"
 mutate = "upgrade/chain/3.00.00_access_bearer_mutate.surql"
 
+# The body runs on every walked release, and how much of an access a release
+# renders is that release's own business — the `WITH JWT` clause is absent from
+# the definition text of the older binaries in the matrix — so this brackets the
+# durations rather than pinning the line.
 [[test.results]]
 match = '''
-	$result.accesses.chain_access_bearer_ac == "DEFINE ACCESS chain_access_bearer_ac ON DATABASE TYPE BEARER FOR USER DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE"
+	string::contains($result.accesses.chain_access_bearer_ac, "DEFINE ACCESS chain_access_bearer_ac ON DATABASE TYPE BEARER FOR USER")
+		&& string::contains($result.accesses.chain_access_bearer_ac, "DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE")
 		&& string::contains($result.users.chain_access_bearer_user, "DEFINE USER chain_access_bearer_user ON DATABASE")
 		&& string::contains($result.users.chain_access_bearer_user, "ROLES VIEWER")
 '''

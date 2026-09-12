@@ -52,6 +52,22 @@ impl ToSql for AccessType {
 					BearerAccessSubject::User => write_sql!(f, sql_fmt, " FOR USER"),
 					BearerAccessSubject::Record => write_sql!(f, sql_fmt, " FOR RECORD"),
 				}
+				// `ac.jwt` is deliberately not rendered, which makes this the
+				// one access type whose text does not round-trip: reparsing it
+				// mints a fresh key rather than restoring this one.
+				//
+				// SECURITY: the alternative is worse. Every surface that
+				// renders an access redacts its symmetric keys first
+				// (`DefineAccessStatement::redact`), export included, so
+				// rendering the clause emits executable SurrealQL that names
+				// `[REDACTED]` as the signing secret — and a database restored
+				// from that dump verifies tokens anyone can forge. A random key
+				// is unusable; a published one is worse than unusable. The same
+				// render reaches the tracing span, the slow log and observers,
+				// where a real key does not belong either.
+				//
+				// Rendering this clause is correct only once redaction and
+				// restorability stop being the same code path.
 			}
 		}
 	}

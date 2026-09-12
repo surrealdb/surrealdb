@@ -1057,6 +1057,73 @@ mod cli_integration {
 		}
 	}
 
+	/// The shell parses each line to validate it and to count the results it
+	/// should expect, then sends the line itself. Rendering the parsed
+	/// statements back instead would put every gap in `ToSql` between the user
+	/// and the server, silently changing what they asked for or sending
+	/// something the server rejects.
+	///
+	/// The probe is a parenthesised equality as a statement of its own, which
+	/// the renderer writes back without its parentheses — the server reads that
+	/// as an assignment and refuses it. The shell must not depend on the
+	/// renderer being faithful, which is what this asserts; the appended
+	/// capture expressions still have to line up with the results.
+	#[test(tokio::test)]
+	async fn shell_sends_the_statement_it_was_given() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let ns = Ulid::new();
+		let db = Ulid::new();
+		let args =
+			format!("sql --endpoint http://{addr} --user {USER} --pass {PASS} --ns {ns} --db {db}");
+
+		info!("* A statement the renderer does not round-trip still reaches the server");
+		{
+			let output =
+				common::run(&args).input("LET $p = 1;\n($p = 1);\n").output().expect("success");
+			assert!(
+				output.contains("true"),
+				"the shell sent something other than what it was given: {output}"
+			);
+		}
+
+		info!("* A LET is still read back into the session");
+		{
+			let output = common::run(&args)
+				.input("LET $x = 41;\nRETURN $x + 1;\n")
+				.output()
+				.expect("success");
+			assert!(output.contains("42"), "the session variable was lost: {output}");
+		}
+
+		info!("* A LET whose name needs escaping is read back too");
+		{
+			let output = common::run(&args)
+				.input("LET $`R-X` = 41;\nRETURN $`R-X` + 1;\n")
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("42"),
+				"the capture expression did not name the variable: {output}"
+			);
+		}
+
+		info!("* A trailing line comment cannot swallow the statements the shell appends");
+		{
+			let output = common::run(&args).input("RETURN 7 -- seven\n").output().expect("success");
+			assert!(output.contains('7'), "the commented line did not run: {output}");
+		}
+
+		info!("* A USE still switches the session");
+		{
+			let db2 = Ulid::new();
+			let output = common::run(&args)
+				.input(&format!("USE DB `{db2}`;\nCREATE ONLY thing:one;\n"))
+				.output()
+				.expect("success");
+			assert!(output.contains("thing:one"), "the USE did not take effect: {output}");
+		}
+	}
+
 	#[test(tokio::test)]
 	async fn node() {
 		// Commands without credentials when auth is disabled, should succeed

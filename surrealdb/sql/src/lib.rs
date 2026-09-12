@@ -143,7 +143,7 @@ pub use self::order::Order;
 pub use self::output::Output;
 pub use self::param::Param;
 pub use self::part::Part;
-pub use self::permission::{Permission, Permissions};
+pub use self::permission::{FieldPermissions, Permission, Permissions};
 pub use self::record_id::{RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
 pub use self::scoring::Scoring;
 pub use self::script::Script;

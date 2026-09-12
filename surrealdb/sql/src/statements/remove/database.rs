@@ -23,6 +23,9 @@ impl Default for RemoveDatabaseStatement {
 impl ToSql for RemoveDatabaseStatement {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		write_sql!(f, sql_fmt, "REMOVE DATABASE");
+		if self.expunge {
+			write_sql!(f, sql_fmt, " AND EXPUNGE");
+		}
 		if self.if_exists {
 			write_sql!(f, sql_fmt, " IF EXISTS");
 		}

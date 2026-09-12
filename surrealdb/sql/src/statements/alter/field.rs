@@ -3,7 +3,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
 use crate::reference::Reference;
-use crate::{CoverStmts, Expr, Kind, Literal, Permissions};
+use crate::{CoverStmts, Expr, FieldPermissions, Kind, Literal, Permissions};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -100,7 +100,7 @@ impl ToSql for AlterFieldStatement {
 		}
 
 		if let Some(permissions) = &self.permissions {
-			write_sql!(f, fmt, " {permissions}");
+			write_sql!(f, fmt, " {}", FieldPermissions(permissions));
 		}
 
 		match self.comment {

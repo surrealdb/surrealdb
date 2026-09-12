@@ -64,8 +64,31 @@ impl PermissionKind {
 	}
 }
 
+/// Renders the three clauses a field can carry, omitting `delete`.
+///
+/// `DEFINE FIELD` rejects a `FOR delete` clause and the catalog does not track
+/// one, so a field's `delete` is a placeholder that must never reach the
+/// output. Tables render through [`Permissions`] itself and must emit all four:
+/// an action left out of a table's `PERMISSIONS FOR …` list reparses as `NONE`,
+/// so dropping a clause revokes it.
+pub struct FieldPermissions<'a>(pub &'a Permissions);
+
+impl surrealdb_types::ToSql for FieldPermissions<'_> {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		self.0.fmt_sql_actions(f, fmt, false)
+	}
+}
+
 impl surrealdb_types::ToSql for Permissions {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		self.fmt_sql_actions(f, fmt, true)
+	}
+}
+
+impl Permissions {
+	/// Writes the `PERMISSIONS` clause, covering `delete` only when the owner
+	/// can express it. See [`FieldPermissions`].
+	fn fmt_sql_actions(&self, f: &mut String, fmt: surrealdb_types::SqlFormat, delete: bool) {
 		f.push_str("PERMISSIONS");
 		if self.is_none() {
 			f.push_str(" NONE");
@@ -85,8 +108,7 @@ impl surrealdb_types::ToSql for Permissions {
 		.into_iter()
 		.zip([&self.select, &self.create, &self.update, &self.delete])
 		{
-			// Skip delete permission if it's Full (default), since catalog fields don't track it
-			if matches!(c, PermissionKind::Delete) && matches!(permission, Permission::Full) {
+			if matches!(c, PermissionKind::Delete) && !delete {
 				continue;
 			}
 
