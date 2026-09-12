@@ -47,7 +47,7 @@ use crate::expr::table_type::{Relation, TableType};
 use crate::expr::{
 	AccessType, Block, ClosureExpr, Data, Expr, Field, Fields, Function, FunctionCall, Idiom,
 	JwtAccess, Kind, KindLiteral, Literal, Lookup, Model, Output, Param, Part, RecordAccess,
-	RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit, TopLevelExpr, View,
+	RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit, View,
 };
 
 macro_rules! implement_visitor{
@@ -131,22 +131,6 @@ macro_rules! implement_visitor_mut{
 // This macro implements the visitor for the expr types.
 // When modifying also make sure to modify the mutable visitor implementation below it.
 implement_visitor! {
-	fn visit_top_level_expr(this, value: &TopLevelExpr) {
-		match value {
-			TopLevelExpr::Begin => {},
-			TopLevelExpr::Cancel => {},
-			TopLevelExpr::Commit => {},
-			TopLevelExpr::Access(s) => {this.visit_access(s)? },
-			TopLevelExpr::Kill(s) => {this.visit_kill(s)?; },
-			TopLevelExpr::Live(s) => {this.visit_live(s)?; },
-		TopLevelExpr::Option(s) =>{ this.visit_option(s)?; },
-		TopLevelExpr::Use(s) => {this.visit_use(s)?; },
-		TopLevelExpr::Show(s) => {this.visit_show(s)?; },
-		TopLevelExpr::Expr(e) => {this.visit_expr(e)?; },
-		}
-		Ok(())
-	}
-
 	fn visit_access(this, a: &AccessStatement){
 		match a {
 			AccessStatement::Grant(a) => {
@@ -316,52 +300,6 @@ implement_visitor! {
 		},
 		Expr::Explain { statement, .. } => {
 			this.visit_expr(statement)?;
-		},
-		Expr::Match(plan) => {
-			use crate::expr::match_plan::{MatchStage, MutationStage, UpdateData};
-			// Walk every reachable Expr across the steps (clause predicates and
-			// mutation-stage values), then the output columns/ORDER BY/SKIP/LIMIT.
-			for stage in plan.stages.iter(){
-				match stage {
-					MatchStage::Read(clause) => {
-						for predicate in clause.predicates.iter(){
-							this.visit_expr(&predicate.expr)?;
-						}
-					}
-					MatchStage::Mutate(MutationStage::Update { data, .. }) => match data {
-						UpdateData::Set(assignments) => {
-							for (_, value) in assignments.iter(){
-								this.visit_expr(value)?;
-							}
-						}
-						UpdateData::Unset(_) => {}
-						UpdateData::Content(expr) => this.visit_expr(expr)?,
-					},
-					MatchStage::Mutate(MutationStage::Delete { .. }) => {}
-					MatchStage::Mutate(MutationStage::Insert(insert)) => {
-						for node in insert.nodes.iter(){
-							this.visit_expr(&node.props)?;
-						}
-						for edge in insert.edges.iter(){
-							this.visit_expr(&edge.props)?;
-						}
-					}
-				}
-			}
-			if let Some(output) = plan.output.as_ref(){
-				for column in output.columns.iter(){
-					this.visit_expr(&column.expr)?;
-				}
-				for order in output.order.iter(){
-					this.visit_expr(&order.expr)?;
-				}
-				if let Some(skip) = output.skip.as_ref(){
-					this.visit_expr(skip)?;
-				}
-				if let Some(limit) = output.limit.as_ref(){
-					this.visit_expr(limit)?;
-				}
-			}
 		},
 	}
 
@@ -1731,22 +1669,6 @@ implement_visitor! {
 }
 
 implement_visitor_mut! {
-	fn visit_mut_top_level_expr(this, value: &mut TopLevelExpr) {
-		match value {
-			TopLevelExpr::Begin => {},
-			TopLevelExpr::Cancel => {},
-			TopLevelExpr::Commit => {},
-			TopLevelExpr::Access(s) => {this.visit_mut_access(s)? },
-			TopLevelExpr::Kill(s) => {this.visit_mut_kill(s)?; },
-			TopLevelExpr::Live(s) => {this.visit_mut_live(s)?; },
-		TopLevelExpr::Option(s) =>{ this.visit_mut_option(s)?; },
-		TopLevelExpr::Use(s) => {this.visit_mut_use(s)?; },
-		TopLevelExpr::Show(s) => {this.visit_mut_show(s)?; },
-		TopLevelExpr::Expr(e) => {this.visit_mut_expr(e)?; },
-		}
-		Ok(())
-	}
-
 	fn visit_mut_access(this, a: &mut AccessStatement){
 		match a {
 			AccessStatement::Grant(a) => {
@@ -1914,52 +1836,6 @@ implement_visitor_mut! {
 		},
 		Expr::Explain { statement, .. } => {
 			this.visit_mut_expr(statement)?;
-		},
-		Expr::Match(plan) => {
-			use crate::expr::match_plan::{MatchStage, MutationStage, UpdateData};
-			// Walk every reachable Expr across the steps (clause predicates and
-			// mutation-stage values), then the output columns/ORDER BY/SKIP/LIMIT.
-			for stage in plan.stages.iter_mut(){
-				match stage {
-					MatchStage::Read(clause) => {
-						for predicate in clause.predicates.iter_mut(){
-							this.visit_mut_expr(&mut predicate.expr)?;
-						}
-					}
-					MatchStage::Mutate(MutationStage::Update { data, .. }) => match data {
-						UpdateData::Set(assignments) => {
-							for (_, value) in assignments.iter_mut(){
-								this.visit_mut_expr(value)?;
-							}
-						}
-						UpdateData::Unset(_) => {}
-						UpdateData::Content(expr) => this.visit_mut_expr(expr)?,
-					},
-					MatchStage::Mutate(MutationStage::Delete { .. }) => {}
-					MatchStage::Mutate(MutationStage::Insert(insert)) => {
-						for node in insert.nodes.iter_mut(){
-							this.visit_mut_expr(&mut node.props)?;
-						}
-						for edge in insert.edges.iter_mut(){
-							this.visit_mut_expr(&mut edge.props)?;
-						}
-					}
-				}
-			}
-			if let Some(output) = plan.output.as_mut(){
-				for column in output.columns.iter_mut(){
-					this.visit_mut_expr(&mut column.expr)?;
-				}
-				for order in output.order.iter_mut(){
-					this.visit_mut_expr(&mut order.expr)?;
-				}
-				if let Some(skip) = output.skip.as_mut(){
-					this.visit_mut_expr(skip)?;
-				}
-				if let Some(limit) = output.limit.as_mut(){
-					this.visit_mut_expr(limit)?;
-				}
-			}
 		},
 	}
 

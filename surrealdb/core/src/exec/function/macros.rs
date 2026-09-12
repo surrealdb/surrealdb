@@ -51,6 +51,7 @@ macro_rules! define_pure_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		() -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -60,6 +61,12 @@ macro_rules! define_pure_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -77,6 +84,7 @@ macro_rules! define_pure_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		($arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -86,6 +94,12 @@ macro_rules! define_pure_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -105,6 +119,7 @@ macro_rules! define_pure_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -114,6 +129,12 @@ macro_rules! define_pure_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -134,6 +155,7 @@ macro_rules! define_pure_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -143,6 +165,12 @@ macro_rules! define_pure_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -164,6 +192,7 @@ macro_rules! define_pure_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		(... $arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -173,6 +202,12 @@ macro_rules! define_pure_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -192,6 +227,7 @@ macro_rules! define_pure_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		($arg1_name:ident : $arg1_type:ident, ... $rest_name:ident : $rest_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -201,6 +237,12 @@ macro_rules! define_pure_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -221,6 +263,7 @@ macro_rules! define_pure_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		(? $arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -230,6 +273,12 @@ macro_rules! define_pure_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -249,6 +298,7 @@ macro_rules! define_pure_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -258,6 +308,12 @@ macro_rules! define_pure_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -278,6 +334,7 @@ macro_rules! define_pure_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -287,6 +344,12 @@ macro_rules! define_pure_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -308,6 +371,7 @@ macro_rules! define_pure_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -317,6 +381,12 @@ macro_rules! define_pure_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -338,6 +408,7 @@ macro_rules! define_pure_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident, ? $arg4_name:ident : $arg4_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -347,6 +418,12 @@ macro_rules! define_pure_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -369,6 +446,7 @@ macro_rules! define_pure_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		(? $arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -378,6 +456,12 @@ macro_rules! define_pure_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -439,6 +523,7 @@ macro_rules! define_context_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		() -> $ret:ident,
 		$impl_fn:expr
 	) => {
@@ -448,6 +533,12 @@ macro_rules! define_context_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -508,6 +599,7 @@ macro_rules! define_async_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		() -> $ret:ident,
 		$impl_fn:expr
 	) => {
@@ -517,6 +609,12 @@ macro_rules! define_async_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -552,6 +650,7 @@ macro_rules! define_async_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		($arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_fn:expr
 	) => {
@@ -561,6 +660,12 @@ macro_rules! define_async_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -598,6 +703,7 @@ macro_rules! define_async_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_fn:expr
 	) => {
@@ -607,6 +713,12 @@ macro_rules! define_async_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -645,6 +757,7 @@ macro_rules! define_async_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_fn:expr
 	) => {
@@ -654,6 +767,12 @@ macro_rules! define_async_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -692,6 +811,7 @@ macro_rules! define_async_function {
 	(
 		$struct_name:ident,
 		$func_name:literal,
+		effects: $effects:expr,
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_fn:expr
 	) => {
@@ -701,6 +821,12 @@ macro_rules! define_async_function {
 		impl $crate::exec::function::ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> $crate::expr::logical::EffectSet {
+				#[allow(unused_imports)]
+				use $crate::expr::logical::EffectSet;
+				$effects
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {

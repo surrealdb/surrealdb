@@ -19,8 +19,9 @@ use common::future::stream::{self, Yielder};
 
 use crate::catalog::Permission;
 use crate::catalog::providers::TableProvider;
+use crate::exec::operators::limit::{PagingClause, paging_count};
 use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
+	LegacyClause, PhysicalPermission, check_permission_for_value, permission_to_physical,
 };
 use crate::exec::pre_decode_filter::{PreDecodeFilter, PreDecodeFilterOutcome};
 use crate::exec::topk_pushdown::TopKThresholdProbe;
@@ -188,12 +189,15 @@ impl ScanPipeline {
 
 /// Determine scan direction from ORDER BY clause.
 /// Returns Backward if the first ORDER BY is `id DESC`, otherwise Forward.
-pub(crate) fn determine_scan_direction(order: Option<&crate::expr::order::Ordering>) -> Direction {
-	use crate::expr::order::Ordering as OrderingType;
-	if let Some(OrderingType::Order(order_list)) = order
-		&& let Some(first) = order_list.0.first()
+pub(crate) fn determine_scan_direction(
+	order: Option<&crate::expr::logical::LogicalOrdering>,
+) -> Direction {
+	use crate::exec::planner::util::idiom_is_id;
+	use crate::expr::logical::LogicalOrdering;
+	if let Some(LogicalOrdering::Order(order_list)) = order
+		&& let Some(first) = order_list.first()
 		&& !first.direction
-		&& first.value.is_id()
+		&& idiom_is_id(&first.value)
 	{
 		Direction::Backward
 	} else {
@@ -465,33 +469,19 @@ pub(crate) async fn filter_and_process_batch(
 // Key helpers
 // =============================================================================
 
-/// Evaluate a limit or start expression to a usize value.
+/// Evaluate a paging clause a scan takes for itself, to the count it names.
+///
+/// The clause means the same thing pushed into a scan as it does in the
+/// [`Limit`](crate::exec::operators::Limit) above one, so both read it through
+/// [`paging_count`].
 pub(crate) async fn eval_limit_expr(
 	expr: &dyn PhysicalExpr,
 	ctx: &ExecutionContext,
+	clause: PagingClause,
 ) -> Result<usize, ControlFlow> {
 	let eval_ctx = EvalContext::from_exec_ctx(ctx);
-	let value = expr
-		.evaluate(eval_ctx)
-		.await
-		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to evaluate LIMIT/START: {e}")))?;
-	match &value {
-		Value::Number(n) => {
-			let i = (*n).to_int();
-			if i >= 0 {
-				Ok(i as usize)
-			} else {
-				Err(ControlFlow::Err(anyhow::anyhow!(
-					"LIMIT/START must be a non-negative integer, got {i}"
-				)))
-			}
-		}
-		Value::None | Value::Null => Ok(0),
-		_ => Err(ControlFlow::Err(anyhow::anyhow!(
-			"LIMIT/START must be an integer, got {:?}",
-			value
-		))),
-	}
+	let value = expr.evaluate(eval_ctx).await?;
+	paging_count(&value, clause).map(|count| count as usize).map_err(ControlFlow::Err)
 }
 
 // =============================================================================
@@ -721,16 +711,22 @@ pub(crate) async fn build_field_state_raw(
 	let mut dep_map: HashMap<String, crate::expr::computed_deps::ComputedDeps> = HashMap::new();
 
 	for fd in field_defs.iter() {
-		if let Some(ref expr) = fd.computed {
+		// The dependency analysis reads the stored clause; the body the engine
+		// evaluates is its logical form, or the stored clause itself through
+		// the legacy bridge when it has no logical form.
+		if let (Some(expr), Some(body)) = (fd.computed.as_ref(), fd.computed_logical()) {
 			let field_name = fd.name.to_raw_string();
 
 			let deps = crate::expr::computed_deps::extract_computed_deps(expr);
 
 			dep_map.insert(field_name.clone(), deps.clone());
 
-			let physical_expr = planner.physical_expr(expr.clone()).await.with_context(|| {
-				format!("Computed field '{field_name}' has unsupported expression")
-			})?;
+			let physical_expr = match body {
+				Ok(body) => planner.physical_expr(body.clone()).await.with_context(|| {
+					format!("Computed field '{field_name}' has unsupported expression")
+				})?,
+				Err(_) => LegacyClause::computed(expr.clone()),
+			};
 
 			raw_computed.push((
 				field_name,
@@ -774,29 +770,38 @@ pub(crate) async fn build_field_state_raw(
 	let mut permission_deps_complete = true;
 	if check_perms {
 		for fd in field_defs.iter() {
-			if matches!(fd.select_permission, Permission::Full) {
-				continue;
-			}
-			if let Permission::Specific(ref expr) = fd.select_permission {
-				let deps = crate::expr::computed_deps::extract_computed_deps(expr);
-				if !deps.is_complete {
-					// Read the flag *before* flipping it below so we only emit
-					// on the first opaque field — one log line per table
-					// build. `FieldState` is cached per `(table, check_perms)`,
-					// so this fires once per distinct table per cache lifetime.
-					if permission_deps_complete {
-						crate::expr::computed_deps::warn_incomplete_perm_deps(
-							table_name.as_str(),
-							fd.name.to_raw_string().as_str(),
-						);
+			let physical_perm = match &fd.select_permission {
+				Permission::Full => continue,
+				Permission::None => PhysicalPermission::Deny,
+				Permission::Specific(expr) => {
+					let deps = crate::expr::computed_deps::extract_computed_deps(expr);
+					if !deps.is_complete {
+						// Read the flag *before* flipping it below so we only
+						// emit on the first opaque field — one log line per
+						// table build. `FieldState` is cached per `(table,
+						// check_perms)`, so this fires once per distinct table
+						// per cache lifetime.
+						if permission_deps_complete {
+							crate::expr::computed_deps::warn_incomplete_perm_deps(
+								table_name.as_str(),
+								fd.name.to_raw_string().as_str(),
+							);
+						}
+						permission_deps_complete = false;
 					}
-					permission_deps_complete = false;
+					permission_field_deps.extend(deps.fields);
+					// The guard in the logical form the catalog compiled from
+					// its text, or the stored clause through the legacy bridge
+					// when it has none.
+					permission_to_physical(
+						&fd.select_permission,
+						fd.select_permission_logical(),
+						planner,
+					)
+					.await
+					.context("Failed to convert field permission")?
 				}
-				permission_field_deps.extend(deps.fields);
-			}
-			let physical_perm = convert_permission_to_physical(&fd.select_permission, planner)
-				.await
-				.context("Failed to convert field permission")?;
+			};
 			field_permissions.push((fd.name.clone(), physical_perm));
 		}
 	}
@@ -1324,9 +1329,11 @@ mod tests {
 	use std::borrow::Cow;
 
 	use super::*;
-	use crate::exec::operators::test_util::{TestDb, parse_idiom, physical_expr, root_ctx, val};
+	use crate::exec::operators::test_util::{
+		TestDb, field_idiom, parse_path, physical_expr, root_ctx, val,
+	};
 	use crate::expr::computed_deps::ComputedDeps;
-	use crate::expr::order::{Order, OrderList, Ordering};
+	use crate::expr::logical::{LogicalOrder, LogicalOrdering};
 	use crate::key::schema::RecordPrefix;
 	use crate::val::Number;
 
@@ -1376,7 +1383,7 @@ mod tests {
 
 	/// Read a field path out of a row.
 	fn pick(value: &Value, path: &str) -> Value {
-		value.pick(&parse_idiom(path).0)
+		value.pick(&field_idiom(path).0)
 	}
 
 	/// The `n` field of every row in a batch, for order-sensitive assertions.
@@ -1384,13 +1391,19 @@ mod tests {
 		batch.iter().map(|v| pick(v, "n")).collect()
 	}
 
-	/// An `ORDER BY` clause over a single field.
-	fn order_by(field: &str, ascending: bool) -> Ordering {
-		Ordering::Order(OrderList(vec![Order {
-			value: parse_idiom(field),
+	/// One `ORDER BY` key.
+	fn order(field: &str, ascending: bool) -> LogicalOrder {
+		LogicalOrder {
+			value: parse_path(field),
+			collate: false,
+			numeric: false,
 			direction: ascending,
-			..Default::default()
-		}]))
+		}
+	}
+
+	/// An `ORDER BY` clause over a single field.
+	fn order_by(field: &str, ascending: bool) -> LogicalOrdering {
+		LogicalOrdering::Order(vec![order(field, ascending)])
 	}
 
 	// =========================================================================
@@ -1442,7 +1455,7 @@ mod tests {
 	#[tokio::test]
 	async fn field_permissions_need_processing_only_when_perms_are_checked() {
 		let with_field_perms =
-			state(Vec::new(), vec![(parse_idiom("secret"), PhysicalPermission::Deny)]);
+			state(Vec::new(), vec![(field_idiom("secret"), PhysicalPermission::Deny)]);
 
 		assert!(ScanPipeline::compute_needs_processing(
 			&PhysicalPermission::Allow,
@@ -1886,7 +1899,7 @@ mod tests {
 	async fn a_deny_field_permission_cuts_the_field() {
 		let ctx = root_ctx();
 		let field_state =
-			state(Vec::new(), vec![(parse_idiom("secret"), PhysicalPermission::Deny)]);
+			state(Vec::new(), vec![(field_idiom("secret"), PhysicalPermission::Deny)]);
 
 		let mut row = val("{ id: t:1, secret: 'x', public: 'y' }").await;
 		filter_fields_by_permission(&ctx, &field_state, &mut row).await.unwrap();
@@ -1894,7 +1907,7 @@ mod tests {
 		assert_eq!(pick(&row, "public"), Value::from("y"));
 
 		// An `Allow` entry is a no-op, and a non-object row is left alone.
-		let allow = state(Vec::new(), vec![(parse_idiom("secret"), PhysicalPermission::Allow)]);
+		let allow = state(Vec::new(), vec![(field_idiom("secret"), PhysicalPermission::Allow)]);
 		let mut row = val("{ secret: 'x' }").await;
 		filter_fields_by_permission(&ctx, &allow, &mut row).await.unwrap();
 		assert_eq!(pick(&row, "secret"), Value::from("x"));
@@ -1910,7 +1923,7 @@ mod tests {
 		let field_state = state(
 			Vec::new(),
 			vec![(
-				parse_idiom("score"),
+				field_idiom("score"),
 				PhysicalPermission::Conditional(physical_expr("$value > 10", &ctx).await),
 			)],
 		);
@@ -1933,9 +1946,9 @@ mod tests {
 		let field_state = state(
 			Vec::new(),
 			vec![
-				(parse_idiom("a"), PhysicalPermission::Deny),
+				(field_idiom("a"), PhysicalPermission::Deny),
 				(
-					parse_idiom("b"),
+					field_idiom("b"),
 					PhysicalPermission::Conditional(physical_expr("a = 1", &ctx).await),
 				),
 			],
@@ -1951,7 +1964,7 @@ mod tests {
 	async fn every_element_a_wildcard_deny_targets_is_cut() {
 		let ctx = root_ctx();
 		let field_state =
-			state(Vec::new(), vec![(parse_idiom("items[*]"), PhysicalPermission::Deny)]);
+			state(Vec::new(), vec![(field_idiom("items[*]"), PhysicalPermission::Deny)]);
 
 		let mut row = val("{ items: [1, 2, 3, 4, 5] }").await;
 		filter_fields_by_permission(&ctx, &field_state, &mut row).await.unwrap();
@@ -1966,7 +1979,7 @@ mod tests {
 		let field_state = state(
 			Vec::new(),
 			vec![(
-				parse_idiom("items[*]"),
+				field_idiom("items[*]"),
 				PhysicalPermission::Conditional(physical_expr("$value % 2 = 0", &ctx).await),
 			)],
 		);
@@ -2009,10 +2022,10 @@ mod tests {
 			],
 			field_permissions: Arc::new(vec![
 				(
-					parse_idiom("secret"),
+					field_idiom("secret"),
 					PhysicalPermission::Conditional(physical_expr("flag", &ctx).await),
 				),
-				(parse_idiom("hidden"), PhysicalPermission::Deny),
+				(field_idiom("hidden"), PhysicalPermission::Deny),
 			]),
 			dep_map: Arc::new(dep_map),
 			permission_field_deps: Arc::new(HashSet::from(["flag".to_owned()])),
@@ -2181,45 +2194,34 @@ mod tests {
 	async fn a_non_negative_integer_limit_evaluates_to_itself() {
 		let ctx = root_ctx();
 		let expr = physical_expr("7", &ctx).await;
-		assert_eq!(eval_limit_expr(expr.as_ref(), &ctx).await.unwrap(), 7);
+		assert_eq!(eval_limit_expr(expr.as_ref(), &ctx, PagingClause::Limit).await.unwrap(), 7);
 
 		let zero = physical_expr("0", &ctx).await;
-		assert_eq!(eval_limit_expr(zero.as_ref(), &ctx).await.unwrap(), 0);
+		assert_eq!(eval_limit_expr(zero.as_ref(), &ctx, PagingClause::Limit).await.unwrap(), 0);
 	}
 
 	#[tokio::test]
-	async fn an_absent_limit_means_no_offset() {
+	async fn a_count_that_is_not_a_non_negative_integer_is_rejected() {
 		let ctx = root_ctx();
-		for src in ["NONE", "NULL"] {
+		// A count is written down as an integer: nothing else is read as one,
+		// and a float is not truncated to the integer below it.
+		for src in ["NONE", "NULL", "-1", "'ten'", "1.5", "1dec", "4294967296"] {
 			let expr = physical_expr(src, &ctx).await;
-			assert_eq!(
-				eval_limit_expr(expr.as_ref(), &ctx).await.unwrap(),
-				0,
-				"{src} should evaluate to 0"
+			let err = eval_limit_expr(expr.as_ref(), &ctx, PagingClause::Limit)
+				.await
+				.expect_err("{src} is not a count");
+			assert!(
+				err.to_string().contains("the LIMIT clause must evaluate to a positive integer"),
+				"expected the LIMIT rejection for {src}, got {err}"
+			);
+			let err = eval_limit_expr(expr.as_ref(), &ctx, PagingClause::Start)
+				.await
+				.expect_err("{src} is not a count");
+			assert!(
+				err.to_string().contains("the START clause must evaluate to a positive integer"),
+				"expected the START rejection for {src}, got {err}"
 			);
 		}
-	}
-
-	#[tokio::test]
-	async fn a_negative_limit_is_rejected() {
-		let ctx = root_ctx();
-		let expr = physical_expr("-1", &ctx).await;
-		let err = eval_limit_expr(expr.as_ref(), &ctx).await.unwrap_err();
-		assert!(
-			err.to_string().contains("non-negative"),
-			"expected the non-negative message, got {err}"
-		);
-	}
-
-	#[tokio::test]
-	async fn a_non_numeric_limit_is_rejected() {
-		let ctx = root_ctx();
-		let expr = physical_expr("'ten'", &ctx).await;
-		let err = eval_limit_expr(expr.as_ref(), &ctx).await.unwrap_err();
-		assert!(
-			err.to_string().contains("must be an integer"),
-			"expected the integer message, got {err}"
-		);
 	}
 
 	// =========================================================================
@@ -2243,25 +2245,14 @@ mod tests {
 		assert_eq!(determine_scan_direction(Some(&name_desc)), Direction::Forward);
 
 		// Leading `name DESC` decides the direction; a later `id DESC` does not.
-		let name_then_id = Ordering::Order(OrderList(vec![
-			Order {
-				value: parse_idiom("name"),
-				direction: false,
-				..Default::default()
-			},
-			Order {
-				value: parse_idiom("id"),
-				direction: false,
-				..Default::default()
-			},
-		]));
+		let name_then_id = LogicalOrdering::Order(vec![order("name", false), order("id", false)]);
 		assert_eq!(determine_scan_direction(Some(&name_then_id)), Direction::Forward);
 
 		// No ORDER BY, an empty list, and ORDER BY RAND() all scan forward.
 		assert_eq!(determine_scan_direction(None), Direction::Forward);
-		let empty = Ordering::Order(OrderList(Vec::new()));
+		let empty = LogicalOrdering::Order(Vec::new());
 		assert_eq!(determine_scan_direction(Some(&empty)), Direction::Forward);
-		assert_eq!(determine_scan_direction(Some(&Ordering::Random)), Direction::Forward);
+		assert_eq!(determine_scan_direction(Some(&LogicalOrdering::Random)), Direction::Forward);
 	}
 
 	// =========================================================================

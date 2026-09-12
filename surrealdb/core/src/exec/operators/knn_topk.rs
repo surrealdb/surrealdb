@@ -22,12 +22,14 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::Distance;
 use crate::err::EngineError;
+use crate::exec::operators::split::output_field_path;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
-use crate::expr::Idiom;
+use crate::expr::logical::LogicalExpr;
+use crate::val::field_path::FieldPath;
 use crate::val::{Number, Value};
 
 /// The query vector of a brute-force KNN, as planned.
@@ -152,8 +154,13 @@ impl<T> KnnTopKHeap<T> {
 pub struct KnnTopK {
 	/// Child operator providing the input stream (typically a table scan).
 	pub(crate) input: Arc<dyn ExecOperator>,
-	/// Idiom path to the vector field on each record (e.g., `embedding`).
-	pub(crate) field: Idiom,
+	/// The vector field on each record (e.g., `embedding`), as written, for
+	/// EXPLAIN.
+	pub(crate) field: LogicalExpr,
+	/// `field` as a navigable path: a KNN operand names a stored field, so the
+	/// vector is read off the record at the field's output position without
+	/// evaluation.
+	field_path: FieldPath,
 	/// The query vector to compute distances against.
 	pub(crate) query_vector: KnnVectorSource,
 	/// Number of nearest neighbors to return.
@@ -172,14 +179,16 @@ impl KnnTopK {
 	/// Create a new KnnTopK operator.
 	pub(crate) fn new(
 		input: Arc<dyn ExecOperator>,
-		field: Idiom,
+		field: LogicalExpr,
 		query_vector: KnnVectorSource,
 		k: usize,
 		distance: Distance,
 	) -> Self {
+		let field_path = output_field_path(&field.output_path());
 		Self {
 			input,
 			field,
+			field_path,
 			query_vector,
 			k,
 			distance,
@@ -254,7 +263,7 @@ impl ExecOperator for KnnTopK {
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
-		let field = self.field.clone();
+		let field = self.field_path.clone();
 		let query_vector = self.query_vector.clone();
 		let k = self.k;
 		let distance = self.distance.clone();
@@ -343,13 +352,13 @@ impl ExecOperator for KnnTopK {
 	}
 }
 
-/// Extract a numeric vector from a record value at the given idiom path.
+/// Extract a numeric vector from a record value at the given field path.
 ///
 /// Returns `None` if the field is missing, None/Null, not an array,
 /// or contains non-numeric elements. Shared with the KNN prefilter's exact
-/// tier (#548), which scores allow-list records outside the graph.
-pub(crate) fn extract_vector(value: &Value, field: &Idiom) -> Option<Vec<Number>> {
-	match value.pick(field) {
+/// tier, which scores allow-list records outside the graph.
+pub(crate) fn extract_vector(value: &Value, field: &FieldPath) -> Option<Vec<Number>> {
+	match field.extract(value).as_ref() {
 		Value::Array(arr) if !arr.is_empty() => {
 			let mut nums = Vec::with_capacity(arr.len());
 			for v in arr.iter() {

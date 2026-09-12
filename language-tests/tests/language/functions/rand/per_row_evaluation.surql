@@ -21,28 +21,28 @@ only hold with high probability.
 value = "[]"
 
 [[test.results]]
-value = "{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'rand::float(...) < 0.5f', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"
+value = "{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'rand::float() < 0.5f', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"
 
 [[test.results]]
-value = "{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'rand::int(...) <= 50', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"
+value = "{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'rand::int(1, 100) <= 50', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"
 
 [[test.results]]
-value = "{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'rand::bool(...)', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"
+value = "{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'rand::bool()', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"
 
 [[test.results]]
-value = """{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: "rand::enum(...) = 'a'", table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"""
+value = """{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: "rand::enum('a', 'b') = 'a'", table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"""
 
 [[test.results]]
-value = "{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'rand::duration(...) < 50s', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"
+value = "{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'rand::duration(0ns, 1m40s) < 50s', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"
 
 [[test.results]]
-value = """{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: "rand::string(...) != ''", table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"""
+value = """{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: "rand::string(8) != ''", table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"""
 
 [[test.results]]
-value = """{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: "rand::uuid::v4(...) != u'00000000-0000-0000-0000-000000000000'", table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"""
+value = """{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: "rand::uuid::v4() != u'00000000-0000-0000-0000-000000000000'", table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"""
 
 [[test.results]]
-value = "{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'array::len(...) > 1', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"
+value = "{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'array::len(array::distinct(array::map([1, 2], |$i: any| `rand`::float()))) > 1', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"
 
 [[test.results]]
 value = "{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: '20f = 20', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'agg_arg', sql: 'NONE' }], operator: 'Aggregate' }"

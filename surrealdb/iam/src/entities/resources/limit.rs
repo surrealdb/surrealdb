@@ -1,6 +1,6 @@
 use crate::{Auth, Level, Role};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AuthLimit {
 	pub level: Level,

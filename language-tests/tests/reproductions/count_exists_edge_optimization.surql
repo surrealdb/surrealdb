@@ -24,105 +24,104 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(...) > 0, pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) > 0, pre_decode_filter: no (unsupported predicate)] {rows: 1}
 
-Total rows: 1'"""
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ name: 'A' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(...) >= 1, pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) >= 1, pre_decode_filter: no (unsupported predicate)] {rows: 1}
 
-Total rows: 1'"""
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ name: 'A' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 2}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(...) = 0, pre_decode_filter: no (unsupported predicate)] {rows: 2}
+    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) = 0, pre_decode_filter: no (unsupported predicate)] {rows: 2}
 
-Total rows: 2'"""
+Total rows: 2''''
 
 [[test.results]]
 value = "[{ name: 'B' }, { name: 'C' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(...) > 1, pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) > 1, pre_decode_filter: no (unsupported predicate)] {rows: 1}
 
-Total rows: 1'"""
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ name: 'A' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(...) >= 2, pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) >= 2, pre_decode_filter: no (unsupported predicate)] {rows: 1}
 
-Total rows: 1'"""
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ name: 'A' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(...) = 2, pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) = 2, pre_decode_filter: no (unsupported predicate)] {rows: 1}
 
-Total rows: 1'"""
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ name: 'A' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(...) != 0, pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) != 0, pre_decode_filter: no (unsupported predicate)] {rows: 1}
 
-Total rows: 1'"""
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ name: 'A' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 2}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(...) < 2, pre_decode_filter: no (unsupported predicate)] {rows: 2}
+    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) < 2, pre_decode_filter: no (unsupported predicate)] {rows: 2}
 
-Total rows: 2'"""
+Total rows: 2''''
 
 [[test.results]]
 value = "[{ name: 'B' }, { name: 'C' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 2}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(...) <= 1, pre_decode_filter: no (unsupported predicate)] {rows: 2}
+    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) <= 1, pre_decode_filter: no (unsupported predicate)] {rows: 2}
 
-Total rows: 2'"""
+Total rows: 2''''
 
 [[test.results]]
 value = "[{ name: 'B' }, { name: 'C' }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: 1 < count(...), pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    TableScan [ctx: Db] [table: node, direction: Forward, predicate: 1 < count(->connects), pre_decode_filter: no (unsupported predicate)] {rows: 1}
 
-Total rows: 1'"""
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ name: 'A' }]"
-
 */
 
 -- Setup: create nodes and edges

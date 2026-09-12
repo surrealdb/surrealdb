@@ -34,19 +34,36 @@ value = "[]"
 value = "[{ count: 2 }]"
 
 [[test.results]]
-value = '''"IndexCountScan [ctx: Db] [source: t, condition: a = 'x' AND b = true]\n    BitmapAnd [ctx: Db]\n        BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']\n        BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]\n"'''
+value = '''
+"IndexCountScan [ctx: Db] [source: t, condition: a = 'x' AND b = true]
+    BitmapAnd [ctx: Db]
+        BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
+        BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+"'''
 
 [[test.results]]
 value = "[{ count: 1 }]"
 
 [[test.results]]
-value = '''"IndexCountScan [ctx: Db] [source: t, condition: a = 'x' AND not(...)]\n    BitmapAndNot [ctx: Db]\n        BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']\n        BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]\n"'''
+value = '''
+"IndexCountScan [ctx: Db] [source: t, condition: a = 'x' AND not(b = true)]
+    BitmapAndNot [ctx: Db]
+        BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
+        BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+"'''
 
 [[test.results]]
 value = "[{ count: 1 }]"
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL]\n    Filter [ctx: Db] [predicate: a = 'x' AND b = true AND id != t:1]\n        BitmapResolve [ctx: Db] [table: t]\n            BitmapAnd [ctx: Db]\n                BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']\n                BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]\n"'''
+value = '''
+"Aggregate [ctx: Db] [mode: GROUP ALL]
+    Filter [ctx: Db] [predicate: a = 'x' AND b = true AND id != t:1]
+        BitmapResolve [ctx: Db] [table: t]
+            BitmapAnd [ctx: Db]
+                BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
+                BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+"'''
 
 [[test.results]]
 value = "[{ count: 2 }]"

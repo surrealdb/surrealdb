@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::helpers::args_access_mode;
 #[cfg(feature = "scripting")]
 use super::helpers::evaluate_args;
+use super::helpers::{args_access_mode, fmt_call_args};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut};
 use crate::expr::{FlowResult, Script};
@@ -102,7 +102,8 @@ impl PhysicalExpr for JsFunctionExec {
 }
 
 impl ToSql for JsFunctionExec {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		f.push_str("function(...)");
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("function");
+		fmt_call_args(f, fmt, &self.arguments);
 	}
 }

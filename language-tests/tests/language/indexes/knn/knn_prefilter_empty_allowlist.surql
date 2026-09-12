@@ -22,7 +22,13 @@ value = "[{ category: 'a', flag: true, id: pts:1, point: [10f] }, { category: 'b
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 0}\n    Filter [ctx: Db] [predicate: category = 'zzz' AND flag = true] {rows: 0}\n        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: flag = true, prefilter_tier: exact] {rows: 0}\n            BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'zzz'] {rows: 0}\n\nTotal rows: 0"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id] {rows: 0}
+    Filter [ctx: Db] [predicate: category = 'zzz' AND flag = true] {rows: 0}
+        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: flag = true, prefilter_tier: exact] {rows: 0}
+            BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'zzz'] {rows: 0}
+
+Total rows: 0"'''
 
 [[test.results]]
 value = "[]"

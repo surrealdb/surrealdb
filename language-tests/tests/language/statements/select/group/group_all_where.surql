@@ -1,7 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
-
 [test]
 reason = "Test GROUP ALL with WHERE clause for filtering before aggregating entire dataset"
 
@@ -32,7 +30,9 @@ value = "[{ count: 2, total: 47f }]"
 -- Test WHERE with GROUP ALL
 SELECT math::mean(temperature) as avg_temp, COUNT() as count FROM sensor WHERE active = true GROUP ALL;
 
--- Test WHERE filtering all records
+-- A predicate no record satisfies narrows the input to nothing, and the
+-- grand total of nothing is a row: `GROUP ALL` names one group whatever
+-- reaches it.
 SELECT COUNT() as count FROM sensor WHERE temperature > 100 GROUP ALL;
 
 -- Test WHERE with multiple conditions

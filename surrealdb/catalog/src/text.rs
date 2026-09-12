@@ -40,6 +40,7 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
+use std::sync::OnceLock;
 
 use revision::{
 	DeserializeRevisioned, Revisioned, SerializeRevisioned, SkipRevisioned, WalkRevisioned,
@@ -47,6 +48,7 @@ use revision::{
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::api_path::Path;
+use crate::expr::logical::{LogicalExpr, LogicalOp, lower, lower_expr};
 use crate::expr::{Block, Cond, Expr, Fields, Idiom, Kind};
 use crate::val::Value;
 
@@ -101,6 +103,15 @@ pub type FieldsText = SurqlText<Fields>;
 pub type BlockText = SurqlText<Block>;
 /// Canonical text of an API's route path (`/users/:id<int>/*rest`).
 pub type PathText = SurqlText<Path>;
+/// Canonical text of an expression, compiled to the logical scalar the
+/// streaming engine evaluates. The same grammar and the same stored bytes as
+/// [`ExprText`]; only the compile target differs. See [`SurqlText::to_logical`].
+pub type LogicalExprText = SurqlText<LogicalExpr>;
+/// Canonical text of a `{ ... }` block, compiled to the logical operator the
+/// streaming engine runs. The same grammar and the same stored bytes as
+/// [`BlockText`]; only the compile target differs. See
+/// [`SurqlText::<Block>::to_logical`].
+pub type LogicalBlockText = SurqlText<LogicalOp>;
 
 impl<T> SurqlText<T> {
 	/// Wraps text that is already canonical: the revision-decode
@@ -133,6 +144,30 @@ impl<T: SurqlTarget> SurqlText<T> {
 	/// it ran).
 	pub fn compile(&self) -> anyhow::Result<T> {
 		T::parse_canonical(&self.text)
+	}
+}
+
+impl SurqlText<Expr> {
+	/// The same stored text, retargeted at the logical scalar.
+	///
+	/// Expression text is one grammar with two compile targets: the
+	/// expression layer's [`Expr`], which the legacy engine evaluates, and the
+	/// logical [`LogicalExpr`], which the streaming engine evaluates. Both
+	/// compile from the stored text; nothing converts one compiled form into
+	/// the other. This is the one way to obtain a [`LogicalExprText`] from a
+	/// definition, so the two targets can never disagree about which text
+	/// they came from.
+	pub fn to_logical(&self) -> LogicalExprText {
+		LogicalExprText::from_raw(self.text.clone())
+	}
+}
+
+impl SurqlText<Block> {
+	/// The same stored text, retargeted at the logical operator. The block
+	/// form and the logical form compile from the same bytes; nothing converts
+	/// one compiled form into the other.
+	pub fn to_logical(&self) -> LogicalBlockText {
+		LogicalBlockText::from_raw(self.text.clone())
 	}
 }
 
@@ -245,6 +280,42 @@ impl SurqlTarget for Cond {
 	}
 }
 
+/// The logical form of expression text. Parses under the same stored-text
+/// profile as [`Expr`] and lowers the parse to the streaming engine's scalar,
+/// so a clause that has no logical form (a write statement in scalar position)
+/// fails to compile here and compiles as an [`Expr`] as before.
+///
+/// Definitions are never rendered from this target: the `DEFINE`/`ALTER` path
+/// renders the [`Expr`] it parsed, and a [`LogicalExprText`] is only ever
+/// obtained from an [`ExprText`] through [`SurqlText::to_logical`]. The
+/// rendering here is the scalar's SurrealQL, which re-parses to the same
+/// scalar for every shape that has one.
+impl SurqlTarget for LogicalExpr {
+	fn render_canonical(&self) -> String {
+		self.to_sql()
+	}
+
+	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
+		Ok(lower_expr(crate::syn::expr_for_definition(text)?)?)
+	}
+}
+
+/// The logical form of block text: the block parses under the stored-text
+/// profile and lowers to the [`LogicalOp::Sequence`] that runs it. A block
+/// with no logical form (one that writes) fails to compile here and compiles
+/// as a [`Block`] as before. Only obtained from a [`BlockText`] through
+/// [`SurqlText::<Block>::to_logical`]; definitions are never rendered from it.
+impl SurqlTarget for LogicalOp {
+	fn render_canonical(&self) -> String {
+		self.to_sql()
+	}
+
+	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
+		let block = crate::syn::block_for_definition(text)?;
+		Ok(lower(crate::sql::Expr::Block(Box::new(block)))?)
+	}
+}
+
 impl SurqlTarget for Kind {
 	fn render_canonical(&self) -> String {
 		self.to_sql()
@@ -303,6 +374,159 @@ impl SurqlTarget for Path {
 	}
 }
 
+/// An expression clause of a definition, compiled to its logical form on
+/// first use and kept for the life of the definition.
+///
+/// A definition is read from the catalog cache far more often than any one
+/// clause is planned, and the streaming engine plans a clause each time a
+/// statement binds a table that declares it. Compiling once per definition
+/// rather than once per statement is what makes carrying the logical form on
+/// the runtime definition worthwhile; the [`OnceLock`] is that cache.
+///
+/// Identity is the text: two bodies with the same stored text are equal
+/// whatever their compile state, so a definition compares and hashes as it
+/// did before the body was attached to it.
+pub struct LogicalBody {
+	text: LogicalExprText,
+	compiled: OnceLock<Result<LogicalExpr, String>>,
+}
+
+impl LogicalBody {
+	/// A body over already-stored expression text.
+	pub fn new(text: &ExprText) -> Self {
+		Self {
+			text: text.to_logical(),
+			compiled: OnceLock::new(),
+		}
+	}
+
+	/// A body for a compiled expression, over the text `to_stored` writes for
+	/// it. This is how a definition built from a `DEFINE` statement gets its
+	/// body: the text is rendered from the statement's expression exactly as it
+	/// is about to be persisted, so the body compiles what the catalog will
+	/// hand back, never the in-memory expression itself.
+	pub fn of(expr: &Expr) -> Self {
+		Self::new(&ExprText::new(expr))
+	}
+
+	/// The stored text this body compiles.
+	pub fn text(&self) -> &LogicalExprText {
+		&self.text
+	}
+
+	/// The logical form of the clause, compiled on first call.
+	///
+	/// Fails when the text has no logical form; the failure is remembered, so
+	/// repeated calls neither re-parse nor change their answer.
+	pub fn logical(&self) -> anyhow::Result<&LogicalExpr> {
+		self.compiled
+			.get_or_init(|| self.text.compile().map_err(|e| format!("{e:#}")))
+			.as_ref()
+			.map_err(|message| anyhow::anyhow!("{message}"))
+	}
+}
+
+impl Clone for LogicalBody {
+	/// The compiled form is not carried across a clone: the clone recompiles
+	/// on first use, which keeps a clone as cheap as the text it copies.
+	fn clone(&self) -> Self {
+		Self {
+			text: self.text.clone(),
+			compiled: OnceLock::new(),
+		}
+	}
+}
+
+impl fmt::Debug for LogicalBody {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_tuple("LogicalBody").field(&self.text.as_str()).finish()
+	}
+}
+
+impl PartialEq for LogicalBody {
+	fn eq(&self, other: &Self) -> bool {
+		self.text == other.text
+	}
+}
+
+impl Eq for LogicalBody {}
+
+impl Hash for LogicalBody {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		self.text.hash(state)
+	}
+}
+
+/// A block clause of a definition — a function body — compiled to its logical
+/// operator on first use and kept for the life of the definition. The block
+/// counterpart of [`LogicalBody`], with the same identity and caching rules.
+pub struct LogicalBlockBody {
+	text: LogicalBlockText,
+	compiled: OnceLock<Result<LogicalOp, String>>,
+}
+
+impl LogicalBlockBody {
+	/// A body over already-stored block text.
+	pub fn new(text: &BlockText) -> Self {
+		Self {
+			text: text.to_logical(),
+			compiled: OnceLock::new(),
+		}
+	}
+
+	/// A body for a compiled block, over the text `to_stored` writes for it.
+	pub fn of(block: &Block) -> Self {
+		Self::new(&BlockText::new(block))
+	}
+
+	/// The stored text this body compiles.
+	pub fn text(&self) -> &LogicalBlockText {
+		&self.text
+	}
+
+	/// The logical form of the block, compiled on first call.
+	///
+	/// Fails when the block has no logical form — it writes — and the failure
+	/// is remembered, so repeated calls neither re-parse nor change their
+	/// answer.
+	pub fn logical(&self) -> anyhow::Result<&LogicalOp> {
+		self.compiled
+			.get_or_init(|| self.text.compile().map_err(|e| format!("{e:#}")))
+			.as_ref()
+			.map_err(|message| anyhow::anyhow!("{message}"))
+	}
+}
+
+impl Clone for LogicalBlockBody {
+	/// The compiled form is not carried across a clone; see [`LogicalBody`].
+	fn clone(&self) -> Self {
+		Self {
+			text: self.text.clone(),
+			compiled: OnceLock::new(),
+		}
+	}
+}
+
+impl fmt::Debug for LogicalBlockBody {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_tuple("LogicalBlockBody").field(&self.text.as_str()).finish()
+	}
+}
+
+impl PartialEq for LogicalBlockBody {
+	fn eq(&self, other: &Self) -> bool {
+		self.text == other.text
+	}
+}
+
+impl Eq for LogicalBlockBody {}
+
+impl Hash for LogicalBlockBody {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		self.text.hash(state)
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -334,6 +558,48 @@ mod tests {
 
 		let i: Idiom = IdiomText::from_raw("field[0]").compile().unwrap();
 		assert_eq!(IdiomText::new(&i).as_str(), "field[0]");
+	}
+
+	#[test]
+	fn expression_text_compiles_to_its_logical_form_too() {
+		// One grammar, two compile targets, and a bare identifier means the
+		// same field on both: the logical funnel is the expression funnel
+		// followed by lowering, so the field-context decision below applies
+		// to it unchanged.
+		let text = ExprText::from_raw("person.age > $value");
+		let logical = text.to_logical().compile().unwrap();
+		assert!(matches!(&logical, LogicalExpr::Binary { .. }), "{logical:?}");
+		assert_eq!(LogicalExprText::new(&logical).as_str(), "person.age > $value");
+		let field = ExprText::from_raw("person").to_logical().compile().unwrap();
+		assert!(matches!(&field, LogicalExpr::Field(_)), "{field:?}");
+	}
+
+	#[test]
+	fn a_body_compiles_once_and_remembers_a_failure() {
+		let body = LogicalBody::new(&ExprText::from_raw("a + b"));
+		let first: *const LogicalExpr = body.logical().unwrap();
+		let second: *const LogicalExpr = body.logical().unwrap();
+		assert_eq!(first, second, "the compiled form is cached on the body");
+
+		// A write statement in scalar position compiles as an `Expr` and has
+		// no logical form; the body reports that rather than panicking, and
+		// keeps reporting it.
+		let write = ExprText::from_raw("(CREATE person)");
+		assert!(write.compile().is_ok());
+		let body = LogicalBody::new(&write);
+		assert!(body.logical().is_err());
+		assert!(body.logical().is_err());
+	}
+
+	#[test]
+	fn a_body_is_its_text() {
+		let expr: Expr = ExprText::from_raw("a + 1").compile().unwrap();
+		let from_expr = LogicalBody::of(&expr);
+		let from_text = LogicalBody::new(&ExprText::from_raw("a + 1"));
+		assert_eq!(from_expr, from_text);
+		from_expr.logical().unwrap();
+		assert_eq!(from_expr, from_text, "compile state does not enter equality");
+		assert_eq!(from_expr.clone(), from_expr);
 	}
 
 	#[test]

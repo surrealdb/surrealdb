@@ -136,6 +136,42 @@ pub fn compare_keys_by_sort_key<A: Borrow<Value>, B: Borrow<Value>>(
 	Ordering::Equal
 }
 
+/// The ORDER BY keys of `values`, as one column per field.
+///
+/// `effect_free_columns` chooses the shape, exactly as it does in the
+/// projection operators: where no key has an effect to reorder, each key is
+/// evaluated for the whole batch in one call, which lets a key reading through
+/// a lookup overlap its fetches. Where one may, the keys of a row are evaluated
+/// together, in the order the statement wrote them, so that two keys drawing
+/// from the same sequence draw in written order rather than a column at a time.
+///
+/// A sort is where this is easiest to miss: the keys are not in the output, so
+/// a reordering shows only in which rows the comparison puts first. The keys a
+/// `Compute` pre-computes are judged at that operator instead; these are the
+/// ones the sort evaluates itself.
+pub(crate) async fn evaluate_key_columns(
+	order_by: &[OrderByField],
+	values: &[Value],
+	ctx: crate::exec::EvalContext<'_>,
+	effect_free_columns: bool,
+) -> crate::exec::FlowResult<Vec<Vec<Value>>> {
+	let mut key_columns: Vec<Vec<Value>> = Vec::with_capacity(order_by.len());
+	if effect_free_columns {
+		for field in order_by {
+			key_columns.push(field.expr.evaluate_batch(ctx.clone(), values).await?);
+		}
+		return Ok(key_columns);
+	}
+	key_columns.resize_with(order_by.len(), || Vec::with_capacity(values.len()));
+	for value in values {
+		let row_ctx = ctx.with_value_and_doc(value);
+		for (field, column) in order_by.iter().zip(key_columns.iter_mut()) {
+			column.push(field.expr.evaluate(row_ctx.clone()).await?);
+		}
+	}
+	Ok(key_columns)
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

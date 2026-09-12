@@ -14,12 +14,13 @@ use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object,
 
 use super::GraphqlError;
 use super::schema::{graphql_to_sql_kind_with_scope, sql_value_to_graphql_value_with_kind};
-use super::utils::execute_plan;
+use super::utils::execute_statement;
 use crate::catalog::FunctionDefinition;
 use crate::dbs::Session;
-use crate::expr::{Expr, FunctionCall, Kind, LogicalPlan, TopLevelExpr};
+use crate::expr::Kind;
 use crate::graphql::schema::kind_to_type_with_enum_prefix;
 use crate::kvs::Datastore;
+use crate::sql::{Expr, Function, FunctionCall, TopLevelExpr};
 use crate::val::Value;
 
 /// Process all exposed functions and add them as Query root fields.
@@ -28,8 +29,8 @@ use crate::val::Value;
 /// `fn_<name>` on the Query object with:
 /// - Typed arguments matching the function's parameter list
 /// - A return type derived from the function's `RETURNS` clause
-/// - A resolver that converts GraphQL arguments to SurrealQL values, invokes the function via a
-///   `LogicalPlan`, and converts the result back
+/// - A resolver that converts GraphQL arguments to SurrealQL values, invokes the function as a
+///   surface statement, and converts the result back
 pub async fn process_fns(
 	fns: Arc<[FunctionDefinition]>,
 	mut query: Object,
@@ -89,22 +90,21 @@ pub async fn process_fns(
 								arg_kind.clone(),
 								Some(&scope),
 							)?;
-							args.push(arg_val.into_literal());
+							args.push(arg_val.into_sql_literal());
 						} else {
 							// Missing arguments default to None
-							args.push(Value::None.into_literal());
+							args.push(Value::None.into_sql_literal());
 						}
 					}
 
-					// Execute the function call via a LogicalPlan
+					// Execute the function call as a surface statement
 					let func_call = Expr::FunctionCall(Box::new(FunctionCall {
-						receiver: crate::expr::Function::Custom(fnd1.name.to_string()),
+						receiver: Function::Custom(fnd1.name.to_string()),
 						arguments: args,
 					}));
-					let plan = LogicalPlan {
-						expressions: vec![TopLevelExpr::Expr(func_call)],
-					};
-					let res = execute_plan(&kvs1, sess1.as_ref(), plan).await?;
+					let res =
+						execute_statement(&kvs1, sess1.as_ref(), TopLevelExpr::Expr(func_call))
+							.await?;
 
 					// Convert the SurrealQL result to a GraphQL value
 					let graphql_res = match res {

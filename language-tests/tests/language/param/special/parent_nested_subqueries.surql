@@ -74,7 +74,7 @@ SELECT name,
     $parent.name AS from_outer,
     name AS middle_name,
     (SELECT $parent.name AS from_middle FROM ONLY true) AS deep
-  FROM person WHERE name != $parent.name ORDER BY name) AS chain
+  FROM person WHERE name != $parent.name ORDER BY middle_name) AS chain
 FROM person ORDER BY name;
 
 -- Graph WHERE inside a subquery that iterates a table.
@@ -84,7 +84,7 @@ SELECT name,
   (SELECT
     name AS who,
     ->knows[WHERE out = $parent.id] AS edges_to_self
-  FROM person ORDER BY name) AS sub
+  FROM person ORDER BY who) AS sub
 FROM person ORDER BY name;
 
 -- Graph traversal at depth 2: outer -> sub1 (FROM ONLY true) -> graph WHERE.
@@ -107,5 +107,5 @@ SELECT name,
       $parent.name AS mid_name,
       ->knows[WHERE out = $parent.id] AS edges_to_mid
     FROM person:alice) AS deep
-  FROM person WHERE name != $parent.name ORDER BY name) AS chain
+  FROM person WHERE name != $parent.name ORDER BY mid) AS chain
 FROM person ORDER BY name;

@@ -7,11 +7,9 @@
 //! `Options`) and evaluates its expression through the legacy compute path, so
 //! the index layer names neither.
 //!
-//! [`LegacyCondition`] serves both executors — the streaming executor pushes
-//! its residual WHERE into the ANN search and it is evaluated here too.
-//! [`LegacyTableSelect`] serves only the legacy path; the streaming executor
-//! supplies its own gate over the permission it resolved for the surrounding
-//! scan.
+//! Both serve only the legacy path. The streaming executor pushes its residual
+//! WHERE into the ANN search as a compiled [`PhysicalCondition`] and supplies
+//! its own gate over the permission it resolved for the surrounding scan.
 
 use std::sync::Arc;
 
@@ -107,7 +105,7 @@ impl TableSelectGate for LegacyTableSelect<'_> {
 	}
 }
 
-/// The [`CandidateCondition`] both executors use: the pushed-down WHERE,
+/// The legacy executor's [`CandidateCondition`]: the pushed-down WHERE,
 /// evaluated against each admitted candidate through the legacy compute path.
 pub(crate) struct LegacyCondition<'a> {
 	ctx: &'a FrozenContext,

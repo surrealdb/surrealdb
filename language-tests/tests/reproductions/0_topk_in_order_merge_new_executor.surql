@@ -41,16 +41,43 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: created_at, http_status]\n    Limit [ctx: Db] [limit: 3]\n        Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]\n            UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Desc]\n                IndexScan [ctx: Db] [index: idx_status_created, access: [200], direction: Backward]\n                IndexScan [ctx: Db] [index: idx_status_created, access: [201], direction: Backward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: created_at, http_status]
+    Limit [ctx: Db] [limit: 3]
+        Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
+            UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Desc]
+                IndexScan [ctx: Db] [index: idx_status_created, access: [200], direction: Backward]
+                IndexScan [ctx: Db] [index: idx_status_created, access: [201], direction: Backward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: created_at, http_status]\n    Limit [ctx: Db] [limit: 3]\n        Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]\n            UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Asc]\n                IndexScan [ctx: Db] [index: idx_status_created, access: [200], direction: Forward]\n                IndexScan [ctx: Db] [index: idx_status_created, access: [201], direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: created_at, http_status]
+    Limit [ctx: Db] [limit: 3]
+        Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
+            UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Asc]
+                IndexScan [ctx: Db] [index: idx_status_created, access: [200], direction: Forward]
+                IndexScan [ctx: Db] [index: idx_status_created, access: [201], direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: created_at, http_status]\n    Limit [ctx: Db] [limit: 3, offset: 2]\n        Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]\n            UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Desc]\n                IndexScan [ctx: Db] [index: idx_status_created, access: [200], direction: Backward]\n                IndexScan [ctx: Db] [index: idx_status_created, access: [201], direction: Backward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: created_at, http_status]
+    Limit [ctx: Db] [limit: 3, offset: 2]
+        Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
+            UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Desc]
+                IndexScan [ctx: Db] [index: idx_status_created, access: [200], direction: Backward]
+                IndexScan [ctx: Db] [index: idx_status_created, access: [201], direction: Backward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: created_at]\n    Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]\n        UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Asc]\n            IndexScan [ctx: Db] [index: idx_status_created, access: [200], direction: Forward]\n            IndexScan [ctx: Db] [index: idx_status_created, access: [201], direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: created_at]
+    Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
+        UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Asc]
+            IndexScan [ctx: Db] [index: idx_status_created, access: [200], direction: Forward]
+            IndexScan [ctx: Db] [index: idx_status_created, access: [201], direction: Forward]
+''''
 */
 
 DEFINE INDEX idx_status_created ON record FIELDS http_status, created_at;

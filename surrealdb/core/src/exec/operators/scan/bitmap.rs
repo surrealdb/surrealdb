@@ -46,7 +46,7 @@ use crate::exec::index::iterator::btree::{
 	INDEX_BATCH_SIZE, bitmap_scan_range, decode_entry_doc_ids,
 };
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
+	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
 	tables_have_full_select_permission, validate_record_user_access,
 };
 use crate::exec::{
@@ -853,7 +853,10 @@ pub struct BitmapResolve {
 	/// `None` = all fields, `Some(set)` = specific fields.
 	needed_fields: Option<HashSet<String>>,
 	/// Plan-time resolved table context. When present, `execute()` skips
-	/// runtime table def + permission lookup.
+	/// runtime table def + permission lookup, and its enforcement mode says
+	/// whether the scan applies the table permission, computed fields and
+	/// field permissions itself or yields records as stored for the plan
+	/// above it to apply them.
 	resolved: Option<ResolvedTableContext>,
 	/// Streaming plan to run when a bitmap branch overflows its budget.
 	///
@@ -967,7 +970,7 @@ impl ExecOperator for BitmapResolve {
 				let table_def =
 					db_ctx.get_table_def(&table_name, None).await.context("Failed to get table")?;
 				if let Some(def) = &table_def {
-					convert_permission_to_physical_runtime(&def.permissions.select, &ctx)
+					table_select_permission_physical_runtime(Some(&**def), &ctx)
 						.await
 						.context("Failed to convert permission")?
 				} else {
@@ -1093,5 +1096,33 @@ impl ExecOperator for BitmapResolve {
 		});
 
 		Ok(monitor_stream(Box::pin(stream), "BitmapResolve", &self.metrics))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::scan::resolved::test_support::{
+		RESTRICTED_TABLE, anonymous, assert_as_stored, assert_reduced, contexts, index_ref,
+	};
+	use crate::exec::operators::test_util::{TestDb, collect};
+	use crate::kvs::TransactionType;
+	use crate::val::Value;
+
+	/// Under the plan's enforcement the resolve yields the fetched record as
+	/// stored, for the nodes above it to reduce; under its own it reduces the
+	/// record for a permission-checked caller.
+	#[tokio::test]
+	async fn a_planned_resolve_yields_the_stored_record_and_a_runtime_resolve_reduces_it() {
+		let db = TestDb::new_with_auth(RESTRICTED_TABLE).await;
+		let ctx = db.exec_ctx_as(&anonymous(), TransactionType::Read).await;
+		let (planned, runtime) = contexts(&ctx, "t").await;
+		let index_ref = index_ref(&ctx, "t", "n_idx").await;
+		let scan = |tc: ResolvedTableContext| -> Arc<dyn ExecOperator> {
+			let root = BitmapNode::btree(index_ref.clone(), BTreeAccess::Equality(Value::from(1)));
+			Arc::new(BitmapResolve::new("t".into(), root, None).with_resolved(tc))
+		};
+		assert_as_stored(&collect(&scan(planned), &ctx).await);
+		assert_reduced(&collect(&scan(runtime), &ctx).await);
 	}
 }

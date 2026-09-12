@@ -11,7 +11,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::plan_or_compute::collect_stream;
+use crate::exec::operators::collect_stream;
 use crate::exec::{
 	AccessMode, BoxFut, CardinalityHint, Error as ExecError, ExecOperator, FlowResult,
 	OperatorMetrics, OutputShape, ValueBatchStream, buffer_stream,

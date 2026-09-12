@@ -40,16 +40,38 @@ value = "[]"
 value = "[{ id: docs:1 }, { id: docs:2 }, { id: docs:4 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: category = 'ml' OR published = false]\n        BitmapResolve [ctx: Db] [table: docs]\n            BitmapOr [ctx: Db]\n                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']\n                BitmapIndexScan [ctx: Db] [index: idx_published, access: = false]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: category = 'ml' OR published = false]
+        BitmapResolve [ctx: Db] [table: docs]
+            BitmapOr [ctx: Db]
+                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']
+                BitmapIndexScan [ctx: Db] [index: idx_published, access: = false]
+"'''
 
 [[test.results]]
 value = "[{ id: docs:3 }, { id: docs:4 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: category = 'db' OR body @@ 'convolution']\n        BitmapResolve [ctx: Db] [table: docs]\n            BitmapOr [ctx: Db]\n                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'db']\n                BitmapFullTextScan [ctx: Db] [index: ft_body, query: convolution]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: category = 'db' OR body @@ 'convolution']
+        BitmapResolve [ctx: Db] [table: docs]
+            BitmapOr [ctx: Db]
+                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'db']
+                BitmapFullTextScan [ctx: Db] [index: ft_body, query: convolution]
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: category = 'db' OR published = false OR body @@ 'convolution']\n        BitmapResolve [ctx: Db] [table: docs]\n            BitmapOr [ctx: Db]\n                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'db']\n                BitmapIndexScan [ctx: Db] [index: idx_published, access: = false]\n                BitmapFullTextScan [ctx: Db] [index: ft_body, query: convolution]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: category = 'db' OR published = false OR body @@ 'convolution']
+        BitmapResolve [ctx: Db] [table: docs]
+            BitmapOr [ctx: Db]
+                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'db']
+                BitmapIndexScan [ctx: Db] [index: idx_published, access: = false]
+                BitmapFullTextScan [ctx: Db] [index: ft_body, query: convolution]
+"'''
 
 [[test.results]]
 value = "[{ id: docs:3, score: 0.8472978472709656f }]"
@@ -58,28 +80,78 @@ value = "[{ id: docs:3, score: 0.8472978472709656f }]"
 value = "[]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: category = 'ml' OR category = 'db']\n        UnionIndexScan [ctx: Db] [table: docs, branches: 2]\n            IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]\n            IndexScan [ctx: Db] [index: idx_category, access: = 'db', direction: Forward]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: category = 'ml' OR category = 'db']
+        UnionIndexScan [ctx: Db] [table: docs, branches: 2]
+            IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]
+            IndexScan [ctx: Db] [index: idx_category, access: = 'db', direction: Forward]
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: category = 'ml' OR published = false]\n        UnionIndexScan [ctx: Db] [table: docs, branches: 2, merge_by_id: Asc]\n            IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]\n            IndexScan [ctx: Db] [index: idx_published, access: = false, direction: Forward]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: category = 'ml' OR published = false]
+        UnionIndexScan [ctx: Db] [table: docs, branches: 2, merge_by_id: Asc]
+            IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]
+            IndexScan [ctx: Db] [index: idx_published, access: = false, direction: Forward]
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Limit [ctx: Db] [limit: 1]\n        Filter [ctx: Db] [predicate: category = 'ml' OR published = false]\n            UnionIndexScan [ctx: Db] [table: docs, branches: 2]\n                IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]\n                IndexScan [ctx: Db] [index: idx_published, access: = false, direction: Forward]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Limit [ctx: Db] [limit: 1]
+        Filter [ctx: Db] [predicate: category = 'ml' OR published = false]
+            UnionIndexScan [ctx: Db] [table: docs, branches: 2]
+                IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]
+                IndexScan [ctx: Db] [index: idx_published, access: = false, direction: Forward]
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    TableScan [ctx: Db] [table: docs, direction: Forward, predicate: category = 'ml' OR rank = 4, pre_decode_filter: yes]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    TableScan [ctx: Db] [table: docs, direction: Forward, predicate: category = 'ml' OR rank = 4, pre_decode_filter: yes]
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    TableScan [ctx: Db] [table: docs, direction: Forward, predicate: category = 'ml' OR published = false, pre_decode_filter: yes]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    TableScan [ctx: Db] [table: docs, direction: Forward, predicate: category = 'ml' OR published = false, pre_decode_filter: yes]
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 3}\n    Filter [ctx: Db] [predicate: category = 'ml' OR published = false] {rows: 3}\n        BitmapResolve [ctx: Db] [table: docs] {rows: 3}\n            BitmapOr [ctx: Db] {rows: 3}\n                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml'] {rows: 3}\n                BitmapIndexScan [ctx: Db] [index: idx_published, access: = false] {rows: 1}\n\nTotal rows: 3"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id] {rows: 3}
+    Filter [ctx: Db] [predicate: category = 'ml' OR published = false] {rows: 3}
+        BitmapResolve [ctx: Db] [table: docs] {rows: 3}
+            BitmapOr [ctx: Db] {rows: 3}
+                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml'] {rows: 3}
+                BitmapIndexScan [ctx: Db] [index: idx_published, access: = false] {rows: 1}
+
+Total rows: 3"'''
 
 [[test.results]]
-value = '''"Limit [ctx: Db] [limit: 5]\n    Aggregate [ctx: Db] [by: category]\n        Filter [ctx: Db] [predicate: category = 'ml' OR published = false]\n            BitmapResolve [ctx: Db] [table: docs]\n                BitmapOr [ctx: Db]\n                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']\n                    BitmapIndexScan [ctx: Db] [index: idx_published, access: = false]\n"'''
+value = '''
+"Limit [ctx: Db] [limit: 5]
+    Aggregate [ctx: Db] [by: category]
+        Filter [ctx: Db] [predicate: category = 'ml' OR published = false]
+            BitmapResolve [ctx: Db] [table: docs]
+                BitmapOr [ctx: Db]
+                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']
+                    BitmapIndexScan [ctx: Db] [index: idx_published, access: = false]
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Limit [ctx: Db] [limit: 2]\n        SortTopKByKey [ctx: Db] [sort_keys: rank ASC, limit: 2]\n            Filter [ctx: Db] [predicate: category = 'ml' OR published = false]\n                BitmapResolve [ctx: Db] [table: docs]\n                    BitmapOr [ctx: Db]\n                        BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']\n                        BitmapIndexScan [ctx: Db] [index: idx_published, access: = false]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Limit [ctx: Db] [limit: 2]
+        SortTopKByKey [ctx: Db] [sort_keys: rank ASC, limit: 2]
+            Filter [ctx: Db] [predicate: category = 'ml' OR published = false]
+                BitmapResolve [ctx: Db] [table: docs]
+                    BitmapOr [ctx: Db]
+                        BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']
+                        BitmapIndexScan [ctx: Db] [index: idx_published, access: = false]
+"'''
 
 */
 

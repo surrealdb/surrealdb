@@ -265,19 +265,24 @@ async fn scrypt_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Resul
 // Function definitions using the macro
 // =========================================================================
 
-define_async_function!(CryptoArgon2Compare, "crypto::argon2::compare", (hash: String, pass: String) -> Bool, argon2_compare_impl);
-define_async_function!(CryptoArgon2Generate, "crypto::argon2::generate", (pass: String) -> String, argon2_generate_impl);
-define_async_function!(CryptoBcryptCompare, "crypto::bcrypt::compare", (hash: String, pass: String) -> Bool, bcrypt_compare_impl);
-define_async_function!(CryptoBcryptGenerate, "crypto::bcrypt::generate", (pass: String) -> String, bcrypt_generate_impl);
-define_async_function!(CryptoPbkdf2Compare, "crypto::pbkdf2::compare", (hash: String, pass: String) -> Bool, pbkdf2_compare_impl);
-define_async_function!(CryptoPbkdf2Generate, "crypto::pbkdf2::generate", (pass: String) -> String, pbkdf2_generate_impl);
-define_async_function!(CryptoScryptCompare, "crypto::scrypt::compare", (hash: String, pass: String) -> Bool, scrypt_compare_impl);
-define_async_function!(CryptoScryptGenerate, "crypto::scrypt::generate", (pass: String) -> String, scrypt_generate_impl);
+define_async_function!(CryptoArgon2Compare, "crypto::argon2::compare", effects: EffectSet::PURE, (hash: String, pass: String) -> Bool, argon2_compare_impl);
+define_async_function!(CryptoArgon2Generate, "crypto::argon2::generate", effects: EffectSet::ENTROPY, (pass: String) -> String, argon2_generate_impl);
+define_async_function!(CryptoBcryptCompare, "crypto::bcrypt::compare", effects: EffectSet::PURE, (hash: String, pass: String) -> Bool, bcrypt_compare_impl);
+define_async_function!(CryptoBcryptGenerate, "crypto::bcrypt::generate", effects: EffectSet::ENTROPY, (pass: String) -> String, bcrypt_generate_impl);
+define_async_function!(CryptoPbkdf2Compare, "crypto::pbkdf2::compare", effects: EffectSet::PURE, (hash: String, pass: String) -> Bool, pbkdf2_compare_impl);
+define_async_function!(CryptoPbkdf2Generate, "crypto::pbkdf2::generate", effects: EffectSet::ENTROPY, (pass: String) -> String, pbkdf2_generate_impl);
+define_async_function!(CryptoScryptCompare, "crypto::scrypt::compare", effects: EffectSet::PURE, (hash: String, pass: String) -> Bool, scrypt_compare_impl);
+define_async_function!(CryptoScryptGenerate, "crypto::scrypt::generate", effects: EffectSet::ENTROPY, (pass: String) -> String, scrypt_generate_impl);
 
 // =========================================================================
 // Registration
 // =========================================================================
 
+// Each `generate` draws a fresh salt, so two calls on the same password
+// answer differently; each declares `EffectSet::ENTROPY` so that a rule which
+// substitutes an expression for every occurrence of a name cannot duplicate
+// one hash into several, nor fold one into a constant. The `compare` halves
+// read the salt out of the hash they are given and are pure.
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(
 		registry,

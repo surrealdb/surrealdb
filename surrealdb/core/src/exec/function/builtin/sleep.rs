@@ -43,12 +43,14 @@ async fn sleep_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 // Function definition using the macro
 // =========================================================================
 
-define_async_function!(Sleep, "sleep", (duration: Duration) -> None, sleep_impl);
+define_async_function!(Sleep, "sleep", effects: EffectSet::BLOCKING, (duration: Duration) -> None, sleep_impl);
 
 // =========================================================================
 // Registration
 // =========================================================================
 
+// The delay, not the `NONE` it returns, is what the call is for, which
+// `EffectSet::BLOCKING` declares: a rule may neither drop it nor repeat it.
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(registry, Sleep,);
 }

@@ -30,19 +30,30 @@ value = "[{ createdAt: d'2026-02-01T00:00:00Z', id: canonical_finding:f5, scanDe
 value = "NONE"
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ attributes: { predicate: "closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z'" }, children: [{ attributes: { access: "[scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z'", direction: 'Forward', index: 'scanDefinition_compound_idx' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', expressions: [{ role: 'predicate', sql: "closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z'" }], operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"""
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z']
+        IndexScan [ctx: Db] [index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
+"'''
 
 [[test.results]]
 value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }]"
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ attributes: { predicate: "closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z'" }, children: [{ attributes: { access: "[scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z'", direction: 'Forward', index: 'scanDefinition_compound_idx' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', expressions: [{ role: 'predicate', sql: "closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z'" }], operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"""
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z']
+        IndexScan [ctx: Db] [index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
+"'''
 
 [[test.results]]
 value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }]"
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "[scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z'", direction: 'Forward', index: 'scanDefinition_compound_idx' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
+"'''
 
 [[test.results]]
 value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }, { id: canonical_finding:f3 }]"
@@ -59,13 +70,13 @@ CREATE canonical_finding:f5 SET scanDefinition = scan_definition:a, createdAt = 
 LET $scan = scan:one;
 
 -- Customer query shape: param-idiom operands
-SELECT id FROM canonical_finding WHERE scanDefinition = $scan.scanDefinition AND createdAt <= $scan.task.finishedAt AND (closedAt IS NONE OR closedAt >= $scan.createdAt) EXPLAIN;
+EXPLAIN SELECT id FROM canonical_finding WHERE scanDefinition = $scan.scanDefinition AND createdAt <= $scan.task.finishedAt AND (closedAt IS NONE OR closedAt >= $scan.createdAt);
 SELECT id FROM canonical_finding WHERE scanDefinition = $scan.scanDefinition AND createdAt <= $scan.task.finishedAt AND (closedAt IS NONE OR closedAt >= $scan.createdAt);
 
 -- Same shape with literal operands (isolates param resolution from AND/OR planning)
-SELECT id FROM canonical_finding WHERE scanDefinition = scan_definition:a AND createdAt <= d'2026-01-11T00:00:00Z' AND (closedAt IS NONE OR closedAt >= d'2026-01-10T00:00:00Z') EXPLAIN;
+EXPLAIN SELECT id FROM canonical_finding WHERE scanDefinition = scan_definition:a AND createdAt <= d'2026-01-11T00:00:00Z' AND (closedAt IS NONE OR closedAt >= d'2026-01-10T00:00:00Z');
 SELECT id FROM canonical_finding WHERE scanDefinition = scan_definition:a AND createdAt <= d'2026-01-11T00:00:00Z' AND (closedAt IS NONE OR closedAt >= d'2026-01-10T00:00:00Z');
 
 -- Control: pure AND (no OR) — this is the part the planner should already index
-SELECT id FROM canonical_finding WHERE scanDefinition = scan_definition:a AND createdAt <= d'2026-01-11T00:00:00Z' EXPLAIN;
+EXPLAIN SELECT id FROM canonical_finding WHERE scanDefinition = scan_definition:a AND createdAt <= d'2026-01-11T00:00:00Z';
 SELECT id FROM canonical_finding WHERE scanDefinition = scan_definition:a AND createdAt <= d'2026-01-11T00:00:00Z';

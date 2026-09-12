@@ -46,13 +46,15 @@ pub enum Key {
 	Cgs(NamespaceId, DatabaseId),
 	/// A cache key for parameters (on a database)
 	Pas(NamespaceId, DatabaseId),
+	/// A cache key for sequences (on a database)
+	Sqs(NamespaceId, DatabaseId),
 	/// A cache key for tables
 	Tbs(NamespaceId, DatabaseId),
 	/// A cache key for the database-wide reference-target summary consumed by
 	/// the DELETE purge gate (which tables any `REFERENCE` field can target).
 	DbReferenceTargets(NamespaceId, DatabaseId),
-	/// A cache key for sequences (on a database)
-	Sqs(NamespaceId, DatabaseId),
+	/// A cache key for a table's catalog version, as this transaction sees it.
+	Cv(NamespaceId, DatabaseId, String),
 	/// A cache key for events (on a table)
 	Evs(NamespaceId, DatabaseId, String),
 	/// A cache key for fieds (on a table)
@@ -107,10 +109,10 @@ pub enum Key {
 	Pa(NamespaceId, DatabaseId, String),
 	/// A cache key for a sequence (on a database)
 	Sq(NamespaceId, DatabaseId, String),
-	/// A cache key for a table
-	TbByName(String, String, String),
 	/// A cache key for a table by id.
 	Tb(NamespaceId, DatabaseId, String),
+	/// A cache key for a table
+	TbByName(String, String, String),
 	/// A cache key for an event (on a table)
 	Ev(NamespaceId, DatabaseId, String, String),
 	/// A cache key for a fied (on a table)
@@ -149,6 +151,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Sqs(a, b) => Key::Sqs(a, b),
 			Lookup::Tbs(a, b) => Key::Tbs(a, b),
 			Lookup::DbReferenceTargets(a, b) => Key::DbReferenceTargets(a, b),
+			Lookup::Cv(a, b, c) => Key::Cv(a, b, c.to_string()),
 			Lookup::Evs(a, b, c) => Key::Evs(a, b, c.to_string()),
 			Lookup::Fds(a, b, c) => Key::Fds(a, b, c.to_string()),
 			Lookup::Fts(a, b, c) => Key::Fts(a, b, c.to_string()),

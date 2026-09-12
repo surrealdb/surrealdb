@@ -12,7 +12,7 @@ use crate::exe::{FlowResultExt as _, try_join_all_buffered};
 use crate::exec::Error as ExecError;
 use crate::expr::field::Fields;
 use crate::expr::idiom::recursion::Recursion;
-use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Recurse, SplitByRepeatRecurse};
+use crate::expr::part::{FindRecursionPlan, Next, Part, Recurse, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
 use crate::expr::{ControlFlow, Error as ExprError, Expr, FlowResult, Idiom, Literal, Lookup};
 use crate::fnc::idiom;
@@ -35,6 +35,35 @@ macro_rules! fallback_function {
 			x => x,
 		}
 	};
+}
+
+/// Skip `path` to its next method part, evaluating the index expressions
+/// skipped over on the way.
+///
+/// A path continued on a value that has no field to read yields `NONE` until a
+/// method can be applied to it, and the parts in between are not read. An
+/// index expression among them is still an expression the statement wrote:
+/// its control flow (`a[({ BREAK })]`) and its side effects happen whatever
+/// there is to index into, as they do on the streaming engine.
+pub(crate) async fn skip_to_method<'a>(
+	path: &'a [Part],
+	stk: &mut Stk,
+	ctx: &FrozenContext,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
+) -> FlowResult<&'a [Part]> {
+	let split = path.iter().position(|p| matches!(p, Part::Method(_, _))).unwrap_or(path.len());
+	for part in &path[..split] {
+		if let Part::Value(x) = part {
+			// The value is discarded, a `RETURN` with it; `BREAK`, `CONTINUE`
+			// and errors propagate.
+			match stk.run(|stk| crate::legacy::expr_compute(x, stk, ctx, opt, doc)).await {
+				Ok(_) | Err(ControlFlow::Return(_)) => {}
+				Err(flow) => return Err(flow),
+			}
+		}
+	}
+	Ok(&path[split..])
 }
 
 /// Asynchronous method for getting a local or remote field from a `Value`
@@ -919,15 +948,9 @@ pub(crate) async fn value_get(
 					// Only continue processing the path from the point that it contains a
 					// method
 					_ => {
+						let rest = skip_to_method(path, stk, ctx, opt, doc).await?;
 						stk.run(|stk| {
-							crate::legacy::value_get(
-								&Value::None,
-								stk,
-								ctx,
-								opt,
-								doc,
-								path.next_method(),
-							)
+							crate::legacy::value_get(&Value::None, stk, ctx, opt, doc, rest)
 						})
 						.await
 					}
@@ -946,6 +969,7 @@ mod tests {
 	use crate::exe::FlowResultExt as _;
 	use crate::exec::Error as ExecError;
 	use crate::expr::idiom::Idiom;
+	use crate::expr::part::Part;
 	use crate::sql::idiom::Idiom as SqlIdiom;
 	use crate::syn;
 	use crate::val::{RecordId, RecordIdKey, Value};
@@ -1006,8 +1030,12 @@ mod tests {
 	#[tokio::test]
 	async fn get_basic_deep_ko() {
 		let (ctx, opt) = mock().await;
+		// The parser rejects a path this deep, so the idiom is built directly:
+		// the evaluation depth check is the subject here, not the parser's.
 		let depth = 2000;
-		let idi: Idiom = syn::idiom(&format!("{}something", "test.".repeat(depth))).unwrap().into();
+		let mut parts = vec![Part::Field(Strand::new_static("test")); depth];
+		parts.push(Part::Field(Strand::new_static("something")));
+		let idi = Idiom(parts);
 		let val: Value = parse_val!("{}"); // A deep enough object cannot be parsed.
 		let mut stack = reblessive::tree::TreeStack::new();
 		let err = stack

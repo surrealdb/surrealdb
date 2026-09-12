@@ -5749,7 +5749,9 @@ async fn btree_index_entries_carry_doc_ids() -> Result<()> {
 /// record fetches. Proved behaviorally: after deleting the record *values*
 /// directly at the KV layer (leaving index entries and doc-ID mappings
 /// intact), the bitmap count still reports the indexed cardinality, while a
-/// NOINDEX count — which must fetch records — reports zero.
+/// NOINDEX count — which must fetch records — finds none. Finding none is
+/// no row rather than a count of zero: the count comes from the rows read,
+/// and an aggregation over no row reports nothing.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 #[test_log::test]
@@ -5771,6 +5773,8 @@ async fn bitmap_count_performs_zero_record_fetches() -> Result<()> {
 	)
 	.await?;
 
+	// `GROUP ALL` reports one row whatever reaches it, so the count is always
+	// a number and a statement that answered with no row at all is a failure.
 	let count = |sql: &'static str| {
 		let ds = &ds;
 		let session = &session;
@@ -5818,7 +5822,8 @@ async fn bitmap_count_performs_zero_record_fetches() -> Result<()> {
 	}
 
 	// The bitmap count never fetched a record, so it still reports the
-	// indexed cardinality; the NOINDEX count reads records and finds none.
+	// indexed cardinality. The NOINDEX count reads records and finds none, so
+	// its group holds nothing to count.
 	assert_eq!(count(BITMAP_COUNT).await?, 2, "bitmap count reads index entries only");
 	assert_eq!(count(NOINDEX_COUNT).await?, 0, "record-fetching count sees the deletions");
 	Ok(())

@@ -25,19 +25,43 @@ value = "[{ category: 'a', id: pts:1, point: [10f], rawcat: 'a' }, { category: '
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: category = 'a' OR category = 'b']\n        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1]\n            BitmapOr [ctx: Db]\n                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a']\n                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'b']\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: category = 'a' OR category = 'b']
+        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1]
+            BitmapOr [ctx: Db]
+                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a']
+                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'b']
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: category = 'a' AND ! category = 'b']\n        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: !(category = 'b')]\n            BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a']\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: category = 'a' AND ! category = 'b']
+        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: ! category = 'b']
+            BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a']
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: category = 'a']\n        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: category = 'a']\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: category = 'a']
+        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: category = 'a']
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: category = 'a']\n        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: category = 'a']\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: category = 'a']
+        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: category = 'a']
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: rawcat = 'a']\n        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: rawcat = 'a']\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: rawcat = 'a']
+        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: rawcat = 'a']
+"'''
 */
 
 DEFINE FIELD category ON pts TYPE string;

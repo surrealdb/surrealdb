@@ -49,7 +49,7 @@ value = "[{ id: pflen:3 }]"
 # array-length path was selected.
 [[test.results]]
 value = '''"SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: pflen, direction: Forward, predicate: array::len(...) > 0, pre_decode_filter: yes]
+    TableScan [ctx: Db] [table: pflen, direction: Forward, predicate: array::len(tags) > 0, pre_decode_filter: yes]
 "'''
 
 */

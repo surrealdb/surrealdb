@@ -9,10 +9,10 @@
 //!
 //! Two further layers sit on top of that:
 //!
-//! - [`parse_expr`] / [`physical_expr`] compile a SurrealQL fragment into the runtime AST and into
-//!   a [`PhysicalExpr`], so a test states its predicate as source text rather than hand-building
-//!   node trees. `physical_expr` uses a txn-less planner, which is exactly the runtime
-//!   permission-resolution path.
+//! - [`parse_expr`] / [`physical_expr`] lower a SurrealQL fragment into its logical form and
+//!   compile it into a [`PhysicalExpr`], so a test states its predicate as source text rather than
+//!   hand-building node trees. `physical_expr` uses a txn-less planner, which is exactly the
+//!   runtime permission-resolution path. [`plan_statement`] does the same for a whole statement.
 //! - [`TestDb`] wraps an in-memory datastore and hands out a **database-level**
 //!   [`ExecutionContext`]. Anything that reads the catalog (table/field permissions, computed
 //!   fields, index metadata) or dereferences a record needs this rather than [`root_ctx`], because
@@ -105,7 +105,9 @@ pub(crate) fn root_ctx() -> ExecutionContext {
 		auth: Arc::new(Auth::default()),
 		session: None,
 		current_value: None,
+		current_row: None,
 		skip_fetch_perms: false,
+		computing_record: None,
 		computing_field: false,
 		version_stamp: None,
 	})
@@ -153,29 +155,39 @@ pub(crate) async fn try_collect(
 }
 
 // =============================================================================
-// SurrealQL -> Expr -> PhysicalExpr
+// SurrealQL -> LogicalExpr -> PhysicalExpr
 // =============================================================================
 
-/// Parse a SurrealQL expression fragment into the runtime AST.
+/// Parse a SurrealQL expression fragment into the surface AST.
 ///
-/// The fragment is wrapped in `RETURN … ;` so it parses as one statement, then
-/// the `OutputStatement` wrapper is peeled off. Panics on a parse error — a test
-/// fixture that does not parse is a broken fixture, not a failed assertion.
-pub(crate) fn parse_expr(src: &str) -> crate::expr::Expr {
-	let ast = crate::syn::parse(&format!("RETURN {src};")).expect("fragment should parse");
-	let mut exprs = ast.expressions;
-	assert_eq!(exprs.len(), 1, "expected exactly one statement in {src:?}");
-	let top: crate::expr::TopLevelExpr = exprs.remove(0).into();
-	match top {
-		crate::expr::TopLevelExpr::Expr(crate::expr::Expr::Return(ret)) => ret.what.clone(),
-		other => panic!("unexpected statement shape for {src:?}: {other:?}"),
-	}
+/// Panics on a parse error — a test fixture that does not parse is a broken
+/// fixture, not a failed assertion.
+pub(crate) fn parse_sql_expr(src: &str) -> crate::sql::Expr {
+	crate::syn::expr(src).expect("fragment should parse")
 }
 
-/// Parse a SurrealQL idiom (a field path) into the runtime AST.
-pub(crate) fn parse_idiom(src: &str) -> crate::expr::Idiom {
-	match parse_expr(src) {
-		crate::expr::Expr::Idiom(idiom) => idiom,
+/// Parse a SurrealQL expression fragment and lower it to its logical form.
+///
+/// Panics when the fragment has no logical form (a write or a schema
+/// statement), which a scalar fixture never is.
+pub(crate) fn parse_expr(src: &str) -> crate::expr::logical::LogicalExpr {
+	crate::expr::logical::lower_expr(parse_sql_expr(src)).expect("fragment should lower")
+}
+
+/// Parse a SurrealQL idiom (a field path) into its logical form: a path
+/// expression (see [`LogicalExpr::is_path`](crate::expr::logical::LogicalExpr::is_path)).
+pub(crate) fn parse_path(src: &str) -> crate::expr::logical::LogicalExpr {
+	let expr = parse_expr(src);
+	assert!(expr.is_path(), "expected a path for {src:?}, got {expr:?}");
+	expr
+}
+
+/// Parse a SurrealQL idiom into the catalog's runtime idiom, the form a
+/// `DEFINE FIELD` name is stored as and the form the value layer's navigation
+/// (`Value::pick`, `Value::each`) takes.
+pub(crate) fn field_idiom(src: &str) -> crate::expr::Idiom {
+	match parse_sql_expr(src) {
+		crate::sql::Expr::Idiom(idiom) => idiom.into(),
 		other => panic!("expected an idiom for {src:?}, got {other:?}"),
 	}
 }
@@ -183,13 +195,45 @@ pub(crate) fn parse_idiom(src: &str) -> crate::expr::Idiom {
 /// Compile a SurrealQL expression fragment into a [`PhysicalExpr`] against
 /// `ctx`.
 ///
-/// Uses a txn-less [`crate::exec::planner::Planner`], which is the same path
-/// runtime permission resolution takes — no plan-time index resolution, so it
-/// works under [`root_ctx`] as well as under [`TestDb`].
+/// Uses a txn-less planner, which is the same path runtime permission
+/// resolution takes — no plan-time index resolution, so it works under
+/// [`root_ctx`] as well as under [`TestDb`].
 pub(crate) async fn physical_expr(src: &str, ctx: &ExecutionContext) -> Arc<dyn PhysicalExpr> {
-	crate::exec::planner::expr_to_physical_expr(parse_expr(src), ctx.ctx(), ctx.function_registry())
-		.await
-		.expect("fragment should compile to a physical expression")
+	crate::exec::planner::compile_expr(
+		parse_expr(src),
+		ctx.ctx(),
+		ctx.function_registry(),
+		None,
+		None,
+		0,
+	)
+	.await
+	.expect("fragment should compile to a physical expression")
+}
+
+/// Lower, bind and plan one SurrealQL statement against `ctx`, the way the
+/// executor does for a top-level statement.
+///
+/// Needs a context with a transaction ([`TestDb`]): binding and planning read
+/// the catalog through it. Panics when the statement has no logical form.
+pub(crate) async fn plan_statement(src: &str, ctx: &ExecutionContext) -> Arc<dyn ExecOperator> {
+	let ast = crate::syn::parse(src).expect("statement should parse");
+	let mut exprs = ast.expressions;
+	assert_eq!(exprs.len(), 1, "expected exactly one statement in {src:?}");
+	let crate::sql::TopLevelExpr::Expr(expr) = exprs.remove(0) else {
+		panic!("unexpected statement shape for {src:?}");
+	};
+	let op = crate::expr::logical::lower(expr).expect("statement should lower");
+	crate::exec::planner::plan_statement_inner(
+		op,
+		ctx.ctx(),
+		ctx.function_registry(),
+		ctx.try_txn().expect("plan_statement needs a context with a transaction"),
+		Some(Arc::clone(&ctx.root().auth)),
+		0,
+	)
+	.await
+	.expect("statement should plan")
 }
 
 /// Compile and evaluate `src` with `value` bound as both the current value and
@@ -333,7 +377,9 @@ impl TestDb {
 			auth: Arc::clone(&session.au),
 			session: Some(Arc::new(session_info(session))),
 			current_value: None,
+			current_row: None,
 			skip_fetch_perms: false,
+			computing_record: None,
 			computing_field: false,
 			version_stamp: None,
 		};
@@ -347,6 +393,7 @@ impl TestDb {
 			field_state_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
 			table_def_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
 			index_def_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+			select_permission_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
 		})
 	}
 }

@@ -72,23 +72,23 @@ use super::schema::{
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{FieldDefinition, TableDefinition};
 use crate::dbs::Session;
-use crate::expr::field::{Field as SelectField, Selector};
-use crate::expr::group::{Group, Groups};
-use crate::expr::lookup::{Lookup, LookupKind, LookupSubject};
-use crate::expr::order::{OrderList, Ordering};
-use crate::expr::part::Part;
-use crate::expr::statements::SelectStatement;
-use crate::expr::{
-	self, BinaryOperator, Cond, Dir, Expr, Fields, Function, FunctionCall, Idiom, Kind,
-	KindLiteral, Limit, Literal, LogicalPlan, Start, TopLevelExpr,
-};
+use crate::expr::{self, Kind, KindLiteral};
 use crate::graphql::error::internal_error;
 use crate::graphql::schema::{
 	filter_type_name, geometry_graphql_type_name, kind_to_type, kind_to_type_with_enum_prefix,
 	unwrap_type,
 };
-use crate::graphql::utils::{GraphqlValueUtils, execute_plan};
+use crate::graphql::utils::{GraphqlValueUtils, execute_statement};
 use crate::kvs::Datastore;
+use crate::sql::field::{Field as SelectField, Selector};
+use crate::sql::group::{Group, Groups};
+use crate::sql::lookup::{Lookup, LookupKind, LookupSubject};
+use crate::sql::order::{Order, OrderList, Ordering};
+use crate::sql::statements::SelectStatement;
+use crate::sql::{
+	BinaryOperator, Cond, Dir, Expr, Fields, Function, FunctionCall, Idiom, Limit, Literal, Part,
+	Start, TopLevelExpr,
+};
 use crate::val::{Array as SurArray, Datetime, Object as SurObject, RecordId, TableName, Value};
 
 /// Upper bound on `id: { in: [...] }` list size. Each entry adds one branch to
@@ -143,9 +143,9 @@ fn is_valid_graphql_identifier(s: &str) -> bool {
 	chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-pub(crate) fn idiom_to_graphql_name(idiom: &Idiom) -> String {
+pub(crate) fn idiom_to_graphql_name(idiom: &expr::Idiom) -> String {
 	if idiom.0.len() == 1
-		&& let Part::Field(name) = &idiom.0[0]
+		&& let expr::Part::Field(name) = &idiom.0[0]
 	{
 		return name.as_str().to_owned();
 	}
@@ -174,8 +174,8 @@ pub(crate) fn idiom_to_graphql_name(idiom: &Idiom) -> String {
 }
 
 /// Create an ascending `ORDER BY` clause for the given field.
-fn order_asc(field_name: String) -> expr::Order {
-	expr::Order {
+fn order_asc(field_name: String) -> Order {
+	Order {
 		value: Idiom::field(field_name),
 		direction: true,
 		..Default::default()
@@ -183,10 +183,10 @@ fn order_asc(field_name: String) -> expr::Order {
 }
 
 /// Create a descending `ORDER BY` clause for the given field.
-fn order_desc(field_name: String) -> expr::Order {
-	expr::Order {
+fn order_desc(field_name: String) -> Order {
+	Order {
 		value: Idiom::field(field_name),
-		..expr::Order::default()
+		..Order::default()
 	}
 }
 
@@ -228,7 +228,7 @@ pub(crate) struct CachedRecord {
 /// used in `SelectStatement.version`.
 fn version_to_expr(version: &Option<Datetime>) -> Expr {
 	match version {
-		Some(dt) => Expr::Literal(Literal::Datetime(*dt)),
+		Some(dt) => Expr::Literal(Literal::Datetime(dt.0)),
 		None => Expr::Literal(Literal::None),
 	}
 }
@@ -351,7 +351,7 @@ pub(crate) fn parse_filter_arg(
 /// record's full data for caching.
 fn select_all_from_record(rid: &RecordId, version: &Option<Datetime>) -> SelectStatement {
 	SelectStatement {
-		what: vec![Value::RecordId(rid.clone()).into_literal()],
+		what: vec![Value::RecordId(rid.clone()).into_sql_literal()],
 		fields: Fields::all(),
 		only: true,
 		version: version_to_expr(version),
@@ -382,7 +382,7 @@ fn select_field_from_record(
 	version: &Option<Datetime>,
 ) -> SelectStatement {
 	SelectStatement {
-		what: vec![Value::RecordId(rid.clone()).into_literal()],
+		what: vec![Value::RecordId(rid.clone()).into_sql_literal()],
 		fields: Fields::Value(Box::new(Selector {
 			expr: Expr::Idiom(Idiom::field(field_name.to_string())),
 			alias: None,
@@ -438,16 +438,13 @@ fn select_all_from_table(
 	}
 }
 
-/// Execute a `SelectStatement` via `LogicalPlan` and return the result.
+/// Execute a `SelectStatement` and return the result.
 async fn execute_select(
 	ds: &Datastore,
 	sess: &Session,
 	stmt: SelectStatement,
 ) -> Result<Value, GraphqlError> {
-	let plan = LogicalPlan {
-		expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(stmt)))],
-	};
-	execute_plan(ds, sess, plan).await
+	execute_statement(ds, sess, TopLevelExpr::Expr(Expr::Select(Box::new(stmt)))).await
 }
 
 // ---------------------------------------------------------------------------
@@ -501,18 +498,18 @@ fn detect_nested_objects(
 
 		// Get the parent field name (first part must be a Field)
 		let parent_name = match &parts[0] {
-			Part::Field(name) => name.as_str().to_owned(),
+			expr::Part::Field(name) => name.as_str().to_owned(),
 			_ => continue,
 		};
 
 		// Get the child field name (last part must be a Field)
 		let child_name = match parts.last() {
-			Some(Part::Field(name)) => name.as_str().to_owned(),
+			Some(expr::Part::Field(name)) => name.as_str().to_owned(),
 			_ => continue,
 		};
 
-		// Check if there's a Part::All (wildcard `*`) between parent and child
-		let has_wildcard = parts[1..parts.len() - 1].iter().any(|p| matches!(p, Part::All));
+		// Check if there's a expr::Part::All (wildcard `*`) between parent and child
+		let has_wildcard = parts[1..parts.len() - 1].iter().any(|p| matches!(p, expr::Part::All));
 
 		// Only handle direct children:
 		// - depth 2 for plain object: [Field("parent"), Field("child")]
@@ -542,7 +539,8 @@ fn detect_nested_objects(
 	for (parent_name, sub_fields) in children_by_parent {
 		// Find the parent field definition
 		let parent_fd = fds.iter().find(|fd| {
-			fd.name.0.len() == 1 && matches!(&fd.name.0[0], Part::Field(n) if n == &parent_name)
+			fd.name.0.len() == 1
+				&& matches!(&fd.name.0[0], expr::Part::Field(n) if n == &parent_name)
 		});
 
 		let is_array = parent_has_wildcard.get(&parent_name).copied().unwrap_or(false);
@@ -596,7 +594,7 @@ fn detect_nested_objects(
 		if fd.name.0.len() != 1 {
 			continue;
 		}
-		let Part::Field(name) = &fd.name.0[0] else {
+		let expr::Part::Field(name) = &fd.name.0[0] else {
 			continue;
 		};
 		let parent_name = name.as_str().to_owned();
@@ -926,8 +924,14 @@ fn make_table_list_field(
 			trace!("parsed order: {order:?}");
 			trace!("parsed filter: {cond:?}");
 
-			let stmt =
-				select_all_from_table(Expr::Table(tb_name), cond, order, limit, start, &version);
+			let stmt = select_all_from_table(
+				Expr::Table(tb_name.into()),
+				cond,
+				order,
+				limit,
+				start,
+				&version,
+			);
 			let res = execute_select(&kvs, sess, stmt).await?;
 
 			match res {
@@ -1776,7 +1780,7 @@ fn make_relation_field_resolver(
 			let mut base_cond = Expr::Binary {
 				left: Box::new(Expr::Idiom(Idiom::field(filter_field.to_string()))),
 				op: BinaryOperator::Equal,
-				right: Box::new(Value::RecordId(rid.clone()).into_literal()),
+				right: Box::new(Value::RecordId(rid.clone()).into_sql_literal()),
 			};
 
 			// Parse and combine user-supplied filter
@@ -1795,7 +1799,7 @@ fn make_relation_field_resolver(
 			// Build SELECT * FROM <relation_table> WHERE ...
 			// Propagate version from parent for consistent temporal queries
 			let stmt = select_all_from_table(
-				Expr::Table(relation_table),
+				Expr::Table(relation_table.into()),
 				cond,
 				order,
 				limit,
@@ -2077,15 +2081,15 @@ fn val_from_filter(
 }
 
 /// Operators that map directly to SurrealDB binary operators.
-fn parse_binary_op(name: &str) -> Option<expr::BinaryOperator> {
+fn parse_binary_op(name: &str) -> Option<BinaryOperator> {
 	match name {
-		"eq" => Some(expr::BinaryOperator::Equal),
-		"ne" => Some(expr::BinaryOperator::NotEqual),
-		"gt" => Some(expr::BinaryOperator::MoreThan),
-		"gte" => Some(expr::BinaryOperator::MoreThanEqual),
-		"lt" => Some(expr::BinaryOperator::LessThan),
-		"lte" => Some(expr::BinaryOperator::LessThanEqual),
-		"in" => Some(expr::BinaryOperator::Inside),
+		"eq" => Some(BinaryOperator::Equal),
+		"ne" => Some(BinaryOperator::NotEqual),
+		"gt" => Some(BinaryOperator::MoreThan),
+		"gte" => Some(BinaryOperator::MoreThanEqual),
+		"lt" => Some(BinaryOperator::LessThan),
+		"lte" => Some(BinaryOperator::LessThanEqual),
+		"in" => Some(BinaryOperator::Inside),
 		_ => None,
 	}
 }
@@ -2112,7 +2116,7 @@ fn negate(
 	let inner_cond = val_from_filter(obj, fds, tb_name, relations)?;
 
 	Ok(Expr::Prefix {
-		op: expr::PrefixOperator::Not,
+		op: crate::sql::PrefixOperator::Not,
 		expr: Box::new(inner_cond),
 	})
 }
@@ -2216,7 +2220,7 @@ fn binop(
 			exprs.push(Expr::Binary {
 				left: Box::new(lhs),
 				op: binary_op,
-				right: Box::new(rhs.into_literal()),
+				right: Box::new(rhs.into_sql_literal()),
 			});
 		} else if op_name == "contains"
 			&& matches!(strip_option(&field_kind), Kind::Array(inner, _) if matches!(*inner, Kind::Record(_)))
@@ -2227,14 +2231,14 @@ fn binop(
 			exprs.push(Expr::Binary {
 				left: Box::new(lhs),
 				op: BinaryOperator::Contain,
-				right: Box::new(rhs.into_literal()),
+				right: Box::new(rhs.into_sql_literal()),
 			});
 		} else if let Some(fn_name) = parse_function_op(op_name) {
 			// Function-call operators: string::contains(field, value)
 			let rhs = graphql_to_sql_kind(v, Kind::String)?;
 			exprs.push(Expr::FunctionCall(Box::new(FunctionCall {
 				receiver: Function::Normal(fn_name.to_string()),
-				arguments: vec![lhs, rhs.into_literal()],
+				arguments: vec![lhs, rhs.into_sql_literal()],
 			})));
 		} else {
 			match op_name {
@@ -2277,16 +2281,16 @@ fn binop_for_relation(
 	}
 
 	let lookup = Lookup {
-		kind: LookupKind::Graph(rel.dir),
+		kind: LookupKind::Graph(rel.dir.clone()),
 		what: vec![LookupSubject::Table {
-			table: rel.relation_table.clone(),
+			table: rel.relation_table.clone().into(),
 			referencing_field: None,
 		}],
 		..Default::default()
 	};
 	let count_lhs = Expr::FunctionCall(Box::new(FunctionCall {
 		receiver: Function::Normal("count".to_string()),
-		arguments: vec![Expr::Idiom(Idiom(vec![Part::Lookup(Box::new(lookup))]))],
+		arguments: vec![Expr::Idiom(Idiom(vec![Part::Graph(Box::new(lookup))]))],
 	}));
 
 	let mut exprs: Vec<Expr> = Vec::new();
@@ -2315,7 +2319,7 @@ fn binop_for_relation(
 					exprs.push(Expr::Binary {
 						left: Box::new(count_lhs.clone()),
 						op: binary_op,
-						right: Box::new(rhs.into_literal()),
+						right: Box::new(rhs.into_sql_literal()),
 					});
 				}
 			}
@@ -2369,7 +2373,7 @@ fn translate_id_range(lhs: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlErro
 		clauses.push(Expr::Binary {
 			left: Box::new(lhs.clone()),
 			op: BinaryOperator::MoreThanEqual,
-			right: Box::new(rhs.into_literal()),
+			right: Box::new(rhs.into_sql_literal()),
 		});
 	}
 
@@ -2383,7 +2387,7 @@ fn translate_id_range(lhs: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlErro
 		clauses.push(Expr::Binary {
 			left: Box::new(lhs),
 			op,
-			right: Box::new(rhs.into_literal()),
+			right: Box::new(rhs.into_sql_literal()),
 		});
 	}
 
@@ -2435,7 +2439,7 @@ fn binop_for_id(obj: &IndexMap<Name, GraphqlValue>) -> Result<Expr, GraphqlError
 			let mut combined = Expr::Binary {
 				left: Box::new(lhs.clone()),
 				op: BinaryOperator::Equal,
-				right: Box::new(first.into_literal()),
+				right: Box::new(first.into_sql_literal()),
 			};
 			for next in iter {
 				combined = Expr::Binary {
@@ -2444,7 +2448,7 @@ fn binop_for_id(obj: &IndexMap<Name, GraphqlValue>) -> Result<Expr, GraphqlError
 					right: Box::new(Expr::Binary {
 						left: Box::new(lhs.clone()),
 						op: BinaryOperator::Equal,
-						right: Box::new(next.into_literal()),
+						right: Box::new(next.into_sql_literal()),
 					}),
 				};
 			}
@@ -2454,7 +2458,7 @@ fn binop_for_id(obj: &IndexMap<Name, GraphqlValue>) -> Result<Expr, GraphqlError
 			exprs.push(Expr::Binary {
 				left: Box::new(lhs),
 				op: binary_op,
-				right: Box::new(rhs.into_literal()),
+				right: Box::new(rhs.into_sql_literal()),
 			});
 		} else if op_name == "range" {
 			exprs.push(translate_id_range(lhs, v)?);
@@ -2775,7 +2779,7 @@ fn take_enum<'a>(
 /// Translate a `_KnnInput` GraphqlValue object into
 /// `Expr::Binary { left: field, op: NearestNeighbor::K(k, dist), right: to }`.
 fn translate_nearest(field: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlError> {
-	use crate::expr::operator::NearestNeighbor;
+	use crate::sql::operator::NearestNeighbor;
 	let obj = val.as_object().ok_or(resolver_error("`nearest` value must be an object"))?;
 
 	let k = obj
@@ -2795,7 +2799,7 @@ fn translate_nearest(field: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlErr
 	Ok(Expr::Binary {
 		left: Box::new(field),
 		op: BinaryOperator::NearestNeighbor(Box::new(NearestNeighbor::K(k, dist.into()))),
-		right: Box::new(to.into_literal()),
+		right: Box::new(to.into_sql_literal()),
 	})
 }
 
@@ -2819,19 +2823,19 @@ fn translate_similarity(field: Expr, val: &GraphqlValue) -> Result<Expr, Graphql
 
 	let call = Expr::FunctionCall(Box::new(FunctionCall {
 		receiver: Function::Normal(fn_name.to_string()),
-		arguments: vec![field, to.into_literal()],
+		arguments: vec![field, to.into_sql_literal()],
 	}));
 
 	Ok(Expr::Binary {
 		left: Box::new(call),
 		op,
-		right: Box::new(value.into_literal()),
+		right: Box::new(value.into_sql_literal()),
 	})
 }
 
 /// Translate a `_MatchesInput` GraphqlValue into `field @@ query`.
 fn translate_matches(field: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlError> {
-	use crate::expr::operator::{BooleanOperator, MatchesOperator};
+	use crate::sql::operator::{BooleanOperator, MatchesOperator};
 	let obj = val.as_object().ok_or(resolver_error("`matches` value must be an object"))?;
 	let q = obj
 		.get("query")
@@ -2845,9 +2849,9 @@ fn translate_matches(field: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlErr
 		left: Box::new(field),
 		op: BinaryOperator::Matches(MatchesOperator {
 			rf: None,
-			operator: BooleanOperator::And,
+			operator: Some(BooleanOperator::And),
 		}),
-		right: Box::new(query.into_literal()),
+		right: Box::new(query.into_sql_literal()),
 	})
 }
 
@@ -2870,7 +2874,7 @@ fn translate_call(field: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlError>
 		let list = args_val.as_list().ok_or(resolver_error("`call.args` must be a list"))?;
 		for a in list {
 			let v = graphql_to_sql_kind(a, Kind::Any)?;
-			args.push(v.into_literal());
+			args.push(v.into_sql_literal());
 		}
 	}
 
@@ -2898,7 +2902,7 @@ fn translate_call(field: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlError>
 	Ok(Expr::Binary {
 		left: Box::new(call),
 		op,
-		right: Box::new(value.into_literal()),
+		right: Box::new(value.into_sql_literal()),
 	})
 }
 
@@ -2912,6 +2916,20 @@ fn translate_call(field: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlError>
 /// and pull the corresponding key (count, `<field>_min`, …, or a group key).
 #[derive(Clone)]
 struct AggregateRow(SurObject);
+
+/// Resolve one column of an aggregate row.
+///
+/// A column with no GraphQL representation resolves to null rather than
+/// failing the field: `NONE` and `NULL`, and the numbers GraphQL cannot carry
+/// — the `-Infinity`, `Infinity` and `NaN` that `math::max`, `math::min` and
+/// `math::mean` answer for no values, which is what every column of a
+/// `GROUP ALL` over no rows holds.
+fn aggregate_field_value(v: Value) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
+	match sql_value_to_graphql_value(v).map_err(async_graphql::Error::from)? {
+		GraphqlValue::Null => Ok(None),
+		out => Ok(Some(FieldValue::value(out))),
+	}
+}
 
 /// Return `true` if `kind` is numeric (Float/Int/Number/Decimal), recursing
 /// through `Either`/`Option` once.
@@ -3013,11 +3031,7 @@ fn build_aggregate_type(
 					FieldFuture::new(async move {
 						let row = ctx.parent_value.try_downcast_ref::<AggregateRow>()?;
 						let v = row.0.get(k.as_str()).cloned().unwrap_or(Value::None);
-						if matches!(v, Value::None | Value::Null) {
-							Ok(None)
-						} else {
-							Ok(Some(FieldValue::value(sql_value_to_graphql_value(v)?)))
-						}
+						aggregate_field_value(v)
 					})
 				}));
 			}
@@ -3039,11 +3053,7 @@ fn build_aggregate_type(
 				FieldFuture::new(async move {
 					let row = ctx.parent_value.try_downcast_ref::<AggregateRow>()?;
 					let v = row.0.get(k.as_str()).cloned().unwrap_or(Value::None);
-					if matches!(v, Value::None | Value::Null) {
-						Ok(None)
-					} else {
-						Ok(Some(FieldValue::value(sql_value_to_graphql_value(v)?)))
-					}
+					aggregate_field_value(v)
 				})
 			}));
 			groupable_items.push(fname);
@@ -3170,7 +3180,7 @@ fn make_table_aggregate_field(
 			));
 
 			let stmt = SelectStatement {
-				what: vec![Expr::Table(tb_name)],
+				what: vec![Expr::Table(tb_name.into())],
 				fields: Fields::Select(select_fields),
 				cond,
 				group,
@@ -3364,7 +3374,7 @@ async fn run_connection_total_count(
 	sess: &Arc<Session>,
 ) -> Result<i64, async_graphql::Error> {
 	let stmt = SelectStatement {
-		what: vec![Expr::Table(q.tb_name.clone())],
+		what: vec![Expr::Table(q.tb_name.clone().into())],
 		fields: Fields::Select(vec![SelectField::Single(Selector {
 			expr: Expr::FunctionCall(Box::new(FunctionCall {
 				receiver: Function::Normal("count".to_string()),
@@ -3491,7 +3501,7 @@ fn make_table_connection_field(
 					let extra = Expr::Binary {
 						left: Box::new(Expr::Idiom(Idiom::field("id".to_string()))),
 						op,
-						right: Box::new(Value::RecordId(rid.clone()).into_literal()),
+						right: Box::new(Value::RecordId(rid.clone()).into_sql_literal()),
 					};
 					cond = Some(match cond {
 						Some(Cond(prev)) => Cond(Expr::Binary {
@@ -3519,9 +3529,9 @@ fn make_table_connection_field(
 			// `id DESC` (then reverses the slice so edges read ascending);
 			// forward fetches `id ASC`.
 			let order_for_query = if backward {
-				Some(Ordering::Order(OrderList(vec![expr::Order {
+				Some(Ordering::Order(OrderList(vec![Order {
 					value: Idiom::field("id".to_string()),
-					..expr::Order::default()
+					..Order::default()
 				}])))
 			} else {
 				Some(Ordering::Order(OrderList(vec![order_asc("id".to_string())])))
@@ -3531,7 +3541,7 @@ fn make_table_connection_field(
 			// without a second round-trip.
 			let limit = Some(Limit(Expr::Literal(Literal::Integer(page_size.saturating_add(1)))));
 			let stmt = select_all_from_table(
-				Expr::Table(tb_name.clone()),
+				Expr::Table(tb_name.clone().into()),
 				cond,
 				order_for_query,
 				limit,
@@ -3607,7 +3617,7 @@ fn make_table_connection_field(
 				let probe_extra = Expr::Binary {
 					left: Box::new(Expr::Idiom(Idiom::field("id".to_string()))),
 					op: probe_op,
-					right: Box::new(Value::RecordId(rid).into_literal()),
+					right: Box::new(Value::RecordId(rid).into_sql_literal()),
 				};
 				let probe_cond = Some(match cond_without_cursor {
 					Some(Cond(prev)) => Cond(Expr::Binary {
@@ -3619,7 +3629,7 @@ fn make_table_connection_field(
 				});
 				let probe_limit = Some(Limit(Expr::Literal(Literal::Integer(1))));
 				let probe_stmt = select_all_from_table(
-					Expr::Table(tb_name.clone()),
+					Expr::Table(tb_name.clone().into()),
 					probe_cond,
 					None,
 					probe_limit,

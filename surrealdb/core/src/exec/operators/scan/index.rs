@@ -19,8 +19,9 @@ use crate::exec::index::iterator::btree::{CompoundEqualIterator, CompoundRangeIt
 use crate::exec::index::iterator::{
 	IndexEqualIterator, IndexRangeIterator, UniqueEqualIterator, UniqueRangeIterator,
 };
+use crate::exec::operators::limit::PagingClause;
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
+	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
 	validate_record_user_access,
 };
 use crate::exec::{
@@ -56,7 +57,10 @@ pub struct IndexScan {
 	/// Optional VERSION timestamp for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Plan-time resolved table context. When present, `execute()` skips
-	/// runtime table def + permission lookup.
+	/// runtime table def + permission lookup, and its enforcement mode says
+	/// whether the scan applies the table permission, computed fields and
+	/// field permissions itself or yields records as stored for the plan
+	/// above it to apply them.
 	pub(crate) resolved: Option<ResolvedTableContext>,
 	/// Projection-aware field set for computed-field materialization.
 	/// Outer `None` = sub-operator mode (parent handles fields).
@@ -74,7 +78,7 @@ pub struct IndexScan {
 	/// downstream Limit operator.  Does NOT cap total entries — the loop
 	/// continues until either the range is exhausted or the consumer
 	/// drops the stream.
-	pub(crate) batch_ceiling: Option<Arc<dyn PhysicalExpr>>,
+	pub(crate) batch_ceiling: Option<usize>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -121,7 +125,7 @@ impl IndexScan {
 	/// This makes each batch small so the downstream Limit operator can
 	/// terminate the stream quickly instead of waiting for a full 1000-entry
 	/// batch.
-	pub(crate) fn with_batch_ceiling(mut self, ceiling: Option<Arc<dyn PhysicalExpr>>) -> Self {
+	pub(crate) fn with_batch_ceiling(mut self, ceiling: Option<usize>) -> Self {
 		self.batch_ceiling = ceiling;
 		self
 	}
@@ -284,7 +288,7 @@ impl ExecOperator for IndexScan {
 		let table_name = self.table_name.clone();
 		let limit_expr = self.limit.clone();
 		let start_expr = self.start.clone();
-		let ceiling_expr = self.batch_ceiling.clone();
+		let ceiling = self.batch_ceiling;
 		let version_expr = self.version.clone();
 		let resolved = self.resolved.clone();
 		let needed_fields = self.needed_fields.clone();
@@ -301,27 +305,29 @@ impl ExecOperator for IndexScan {
 
 			// Evaluate pushed-down LIMIT and START expressions
 			let limit_val: Option<usize> = match &limit_expr {
-				Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+				Some(expr) => Some(eval_limit_expr(&**expr, &ctx, PagingClause::Limit).await?),
 				None => None,
 			};
 			let start_val: usize = match &start_expr {
-				Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+				Some(expr) => eval_limit_expr(&**expr, &ctx, PagingClause::Start).await?,
 				None => 0,
 			};
 
-			// Evaluate batch ceiling expression (downstream LIMIT hint for
-			// residual-filter queries).  Each batch reads at most this many
-			// index entries so the downstream Limit operator can stop the
-			// stream quickly instead of waiting for a full 1000-entry batch.
-			// We use a 4x multiplier to account for rows rejected by the
-			// residual filter — this keeps the batch large enough to avoid
-			// excessive small-batch round-trips while still being far smaller
-			// than the default 1000-entry INDEX_BATCH_SIZE.
-			let batch_max: u32 = match &ceiling_expr {
-				Some(expr) => {
-					let c = eval_limit_expr(&**expr, &ctx).await?;
-					c.saturating_add(start_val).saturating_mul(4).clamp(1, 1000) as u32
-				}
+			// The batch ceiling is a downstream LIMIT hint for residual-filter
+			// queries: each batch reads at most this many index entries so the
+			// downstream Limit operator can stop the stream quickly instead of
+			// waiting for a full 1000-entry batch. A 4x multiplier accounts
+			// for rows rejected by the residual filter — large enough to avoid
+			// excessive small-batch round-trips, still far smaller than the
+			// default 1000-entry INDEX_BATCH_SIZE.
+			//
+			// It is a plan-time number rather than an expression because the
+			// `Limit` operator above this scan evaluates the statement's LIMIT
+			// itself; evaluating it here as well would run a clause the
+			// statement wrote once as many times as there are scans beneath
+			// that operator.
+			let batch_max: u32 = match ceiling {
+				Some(c) => c.saturating_add(start_val).saturating_mul(4).clamp(1, 1000) as u32,
 				None => u32::MAX, // next_batch caps at INDEX_BATCH_SIZE internally
 			};
 
@@ -340,7 +346,7 @@ impl ExecOperator for IndexScan {
 					.context("Failed to get table")?;
 
 				if let Some(def) = &table_def {
-					convert_permission_to_physical_runtime(&def.permissions.select, &ctx)
+					table_select_permission_physical_runtime(Some(&**def), &ctx)
 						.await
 						.context("Failed to convert permission")?
 				} else {
@@ -782,5 +788,45 @@ impl ExecOperator for IndexScan {
 		});
 
 		Ok(monitor_stream(Box::pin(stream), "IndexScan", &self.metrics))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::scan::resolved::test_support::{
+		RESTRICTED_TABLE, anonymous, assert_as_stored, assert_reduced, contexts, index_ref,
+	};
+	use crate::exec::operators::test_util::{TestDb, collect};
+	use crate::kvs::TransactionType;
+	use crate::val::Value;
+
+	/// Under the plan's enforcement the scan yields the fetched record as
+	/// stored, for the nodes above it to reduce; under its own it reduces the
+	/// record for a permission-checked caller.
+	#[tokio::test]
+	async fn a_planned_scan_yields_the_stored_record_and_a_runtime_scan_reduces_it() {
+		let db = TestDb::new_with_auth(RESTRICTED_TABLE).await;
+		let ctx = db.exec_ctx_as(&anonymous(), TransactionType::Read).await;
+		let (planned, runtime) = contexts(&ctx, "t").await;
+		let index_ref = index_ref(&ctx, "t", "n_idx").await;
+		let scan = |tc: ResolvedTableContext| -> Arc<dyn ExecOperator> {
+			Arc::new(
+				IndexScan::new(
+					index_ref.clone(),
+					BTreeAccess::Equality(Value::from(1)),
+					Direction::Forward,
+					"t".into(),
+					None,
+					None,
+					None,
+					Some(None),
+					None,
+				)
+				.with_resolved(tc),
+			)
+		};
+		assert_as_stored(&collect(&scan(planned), &ctx).await);
+		assert_reduced(&collect(&scan(runtime), &ctx).await);
 	}
 }

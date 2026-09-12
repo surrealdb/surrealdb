@@ -1,26 +1,32 @@
-//! `HashJoin` — equi-join (and cartesian product) of two binding-row streams.
+//! `HashJoin` — an equi-join of two row streams, the right side built into a
+//! table in memory and the left side probed against it.
 //!
-//! `HashJoin` combines the binding tables produced by two MATCH sub-plans —
-//! either two comma-separated patterns inside one `MATCH`, or two sequential
-//! `MATCH` clauses — that share zero or more *node* variables (the planner makes
-//! repeated node variables join keys, see `doc/gql/V2_DESIGN.md` §6). Each
-//! input row is a `Value::Object` keyed by binding name (the binding-row
-//! convention, §3); the output row is the union of a build row and a probe row.
+//! The operator serves two row conventions, chosen by [`JoinShape`]:
 //!
-//! ## Join key
+//! - **Binding rows** ([`JoinShape::Bindings`]): the binding tables produced by two GQL `MATCH`
+//!   sub-plans — two comma-separated patterns inside one `MATCH`, or two sequential `MATCH` clauses
+//!   — that share zero or more *node* variables (the planner makes repeated node variables join
+//!   keys, see `doc/gql/V2_DESIGN.md` §6). Each input row is a `Value::Object` keyed by binding
+//!   name (§3); the output row is the union of a build row and a probe row.
+//! - **Document rows** ([`JoinShape::Documents`]): the rows of a SurrealQL pipeline, joined by
+//!   arbitrary key expressions. The output row is the probe row with the matched build row added
+//!   under one top-level key, the join's *alias*; a semi or anti join emits the probe row as it is.
 //!
-//! The join is keyed on `<binding>.id` for each shared binding name in [`keys`],
-//! in order. A binding row holds a full record object, so `<binding>.id` is its
-//! `id` field (a `Value::RecordId`); a bare `Value::RecordId` slot is tolerated
-//! defensively. The key is the `Vec<Value>` of those id values, one per key
-//! binding. **No fetch happens here** — keys are read straight from the
-//! already-bound objects (§5). Because the shared keys are equal by construction
-//! on every emitted match, the merged row keeps the probe side's copy of each
-//! shared binding (they are identical, so the choice is immaterial).
+//! ## Join key — binding rows
 //!
-//! [`keys`]: HashJoin::keys
+//! The join is keyed on `<binding>.id` for each shared binding name in
+//! [`keys`], in order. A binding row holds a full record object, so
+//! `<binding>.id` is its `id` field (a `Value::RecordId`); a bare
+//! `Value::RecordId` slot is tolerated defensively. The key is the `Vec<Value>`
+//! of those id values, one per key binding. **No fetch happens here** — keys
+//! are read straight from the already-bound objects (§5). Because the shared
+//! keys are equal by construction on every emitted match, the merged row keeps
+//! the probe side's copy of each shared binding (they are identical, so the
+//! choice is immaterial).
 //!
-//! ## NULL / NONE keys (3VL, §0 "Joins & null")
+//! [`keys`]: JoinShape::Bindings::keys
+//!
+//! ### NULL / NONE keys (3VL, §0 "Joins & null")
 //!
 //! A `Value::Null` or `Value::None` in *any* key slot — or a missing /
 //! non-extractable key binding — means the row has no join key (SQL 3VL: null
@@ -33,7 +39,18 @@
 //!
 //! [`Inner`]: JoinType::Inner
 //! [`Left`]: JoinType::Left
-//! [`null_template`]: HashJoin::null_template
+//! [`null_template`]: JoinShape::Bindings::null_template
+//!
+//! ## Join key — document rows
+//!
+//! Each side's key is a list of expressions, one per key column: the probe
+//! expressions are evaluated against the probe row, the build expressions
+//! against the build row seen through the alias (`{ alias: row }`), so the
+//! same expression reads the same field on both sides of the join. Two keys
+//! match when they are equal by SurrealQL's `=`, which is what the `IN` and
+//! `CONTAINS` these joins replace apply element by element: `NULL` matches
+//! `NULL`, `NONE` matches `NONE`, and a string matches a regex it satisfies.
+//! No key is excluded for being `NULL` or `NONE`.
 //!
 //! ## Join types
 //!
@@ -41,8 +58,12 @@
 //!   key.
 //! - [`Left`](JoinType::Left): like `Inner`, but a probe row with no matching build row (including
 //!   a null-keyed probe row) is still emitted once, with the build-introduced bindings
-//!   ([`null_template`]) set to `Value::Null`. PR-C wires this in for `OPTIONAL MATCH`; the
-//!   operator supports it now.
+//!   ([`null_template`]) — or the alias, for document rows — set to `Value::Null`. Used by GQL
+//!   `OPTIONAL MATCH`.
+//! - [`Semi`](JoinType::Semi): emit each probe row with at least one matching build row, once and
+//!   unchanged. The form of `x IN (SELECT VALUE k FROM t …)`.
+//! - [`Anti`](JoinType::Anti): emit each probe row with no matching build row, unchanged. The form
+//!   of `x NOT IN (SELECT VALUE k FROM t …)`.
 //! - [`Cross`](JoinType::Cross): `keys` is empty; emit the full cartesian product of build × probe
 //!   rows (the no-shared-variable case).
 //!
@@ -56,19 +77,47 @@
 //! `OPTIONAL MATCH` predicate spanning the optional body and the accumulator can
 //! gate the left-outer match instead of becoming a post-join filter (which would
 //! wrongly drop the null-filled rows). Mirrors `NestedLoopJoin.cond` in
-//! surrealdb/surrealdb#7024.
+//! surrealdb/surrealdb#7024. For a semi or anti join the residual decides which
+//! candidate build rows count as matches.
+//!
+//! ## Evaluation frame
+//!
+//! A document join lifted out of a `PERMISSIONS FOR select` predicate carries a
+//! [`JoinFrame`]: its keys and residual are evaluated, and its build side is
+//! run, in the permission frame — reads inside them are not themselves
+//! permission-checked and run under the definer's recorded authority — exactly
+//! as the predicate they came from would be by `PermissionFilter`. Inside an
+//! enclosing permission frame (`skip_fetch_perms` set on the context's root) a
+//! semi or anti join in a frame passes every probe row through, as
+//! `PermissionFilter` does: enforcement is bypassed there. For a checked caller
+//! such a join hides its keys, residual and build plan from `EXPLAIN`, since
+//! they are the table definer's.
 //!
 //! ## Build budget & output bound
 //!
-//! The build side is materialised fully in memory (the probe side streams). The
-//! number of build rows is bounded by `SURREAL_GQL_MAX_JOIN_BUILD_ROWS` (the
-//! shared GQL in-memory-build budget, default 1M); exceeding it fails the query
-//! with an error that names the knob. Spill to disk is a future change, matching
-//! the `Aggregate` / `Distinct` stance. Separately, the cumulative number of
-//! rows *emitted* (a `Cross` product, or a high-fan-out equi-join, can emit far
-//! more rows than either side holds) is bounded by `SURREAL_GQL_MAX_OUTPUT_ROWS`;
-//! the probe loop also polls cancellation between batches so a runaway join is
-//! interruptible.
+//! The build side is materialised fully in memory (the probe side streams). For
+//! binding rows, the number of build rows is bounded by
+//! `SURREAL_GQL_MAX_JOIN_BUILD_ROWS` (the shared GQL in-memory-build budget,
+//! default 1M); exceeding it fails the query with an error that names the knob.
+//! Spill to disk is a future change, matching the `Aggregate` / `Distinct`
+//! stance. Separately, the cumulative number of rows *emitted* (a `Cross`
+//! product, or a high-fan-out equi-join, can emit far more rows than either
+//! side holds) is bounded by `SURREAL_GQL_MAX_OUTPUT_ROWS`; the probe loop also
+//! polls cancellation between batches so a runaway join is interruptible. A
+//! document join has no budget: the scalar subquery it replaces materialises
+//! the same rows for every probe row.
+//!
+//! ## Build and probe order
+//!
+//! When neither side mutates, the probe side is pulled first: its first
+//! non-empty batch is awaited before the build side is constructed, and a
+//! probe that yields no row ends the join with the build side never
+//! constructed and never polled. A right side lifted from an `IN` subquery is
+//! therefore evaluated only when a left row reaches the join, as the per-row
+//! subquery it replaces is evaluated only for a row the other conjuncts
+//! admitted — a right filter that would raise on a stored value raises on
+//! neither engine when no row reaches it. Once a probe row exists the build
+//! side is drained fully into the build table, then the probe streams.
 //!
 //! ## Read-after-write ordering (interleaved GQL mutations)
 //!
@@ -89,10 +138,11 @@ use std::sync::Arc;
 use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
+use super::JoinFrame;
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
-	monitor_stream,
+	FlowResult, OperatorMetrics, OutputOrdering, PhysicalExpr, ValueBatch, ValueBatchStream,
+	buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::{Object, Value};
@@ -103,24 +153,54 @@ pub enum JoinType {
 	/// Emit only probe rows that match at least one build row.
 	Inner,
 	/// Emit every probe row; unmatched probe rows are null-filled with the
-	/// build-introduced bindings (`null_template`). Used by `OPTIONAL MATCH`.
+	/// build-introduced bindings (`null_template`) or the alias. Used by
+	/// `OPTIONAL MATCH`.
 	Left,
+	/// Emit each probe row with at least one match, unchanged.
+	Semi,
+	/// Emit each probe row with no match, unchanged.
+	Anti,
 	/// Cartesian product (`keys` is empty): every build row × every probe row.
 	Cross,
 }
 
 impl JoinType {
 	/// EXPLAIN rendering of the join type.
-	fn label(self) -> &'static str {
+	pub(crate) fn label(self) -> &'static str {
 		match self {
 			JoinType::Inner => "Inner",
 			JoinType::Left => "Left",
+			JoinType::Semi => "Semi",
+			JoinType::Anti => "Anti",
 			JoinType::Cross => "Cross",
 		}
 	}
 }
 
-/// Equi-join / cartesian product of two binding-row streams.
+/// How the two sides' rows are keyed and merged; see the module docs.
+#[derive(Debug, Clone)]
+pub(crate) enum JoinShape {
+	/// Binding rows, keyed on `<binding>.id`.
+	Bindings {
+		/// Shared binding names to equi-join on (`<binding>.id` per side).
+		/// Empty for a `Cross` join.
+		keys: Vec<String>,
+		/// Build-introduced binding names, set to `Value::Null` on a `Left`
+		/// miss. Empty for `Inner` / `Cross`.
+		null_template: Vec<String>,
+	},
+	/// Document rows, keyed by expressions; the matched build row lands on
+	/// the probe row under `alias`.
+	Documents {
+		/// Evaluated against the probe row, one per key column.
+		probe_keys: Vec<Arc<dyn PhysicalExpr>>,
+		/// Evaluated against `{ alias: build row }`, one per key column.
+		build_keys: Vec<Arc<dyn PhysicalExpr>>,
+		alias: String,
+	},
+}
+
+/// Equi-join / cartesian product of two row streams.
 ///
 /// See the module docs for the key extraction, the null-key rules per join
 /// type, and the build budget.
@@ -130,26 +210,24 @@ pub struct HashJoin {
 	pub(crate) build: Arc<dyn ExecOperator>,
 	/// Child producing the probe side; streamed.
 	pub(crate) probe: Arc<dyn ExecOperator>,
-	/// Shared binding names to equi-join on (`<binding>.id` per side). Empty
-	/// for a `Cross` join.
-	pub(crate) keys: Vec<String>,
+	pub(crate) shape: JoinShape,
 	/// The kind of join.
 	pub(crate) join_type: JoinType,
-	/// Build-introduced binding names, set to `Value::Null` on a `Left` miss.
-	/// Empty for `Inner` / `Cross`.
-	pub(crate) null_template: Vec<String>,
 	/// Residual join predicate (SQL `ON`), evaluated against the merged
 	/// (build ∪ probe) row. A merged row that fails it is not a match. For
 	/// `Left`, a probe row with no residual-passing build row is null-filled
 	/// (the correlated-`OPTIONAL` match-vs-null-fill decision), NOT dropped.
-	/// `None` ⇒ a pure equi-join (the existing behaviour).
+	/// `None` ⇒ a pure equi-join.
 	pub(crate) residual: Option<Arc<dyn PhysicalExpr>>,
+	/// The permission frame a document join lifted from a permission
+	/// predicate evaluates in; `None` evaluates as the caller.
+	pub(crate) frame: Option<JoinFrame>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 impl HashJoin {
-	/// Create a new `HashJoin` with fresh metrics.
+	/// A join of binding rows, keyed on the shared bindings `keys`.
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		build: Arc<dyn ExecOperator>,
@@ -162,12 +240,68 @@ impl HashJoin {
 		Self {
 			build,
 			probe,
-			keys,
+			shape: JoinShape::Bindings {
+				keys,
+				null_template,
+			},
 			join_type,
-			null_template,
 			residual,
+			frame: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// A join of document rows: each probe row keyed by `probe_keys`, each
+	/// build row by `build_keys` read through `alias`, the matched build row
+	/// added to the probe row under `alias`.
+	#[allow(clippy::too_many_arguments)]
+	pub(crate) fn documents(
+		build: Arc<dyn ExecOperator>,
+		probe: Arc<dyn ExecOperator>,
+		probe_keys: Vec<Arc<dyn PhysicalExpr>>,
+		build_keys: Vec<Arc<dyn PhysicalExpr>>,
+		join_type: JoinType,
+		alias: String,
+		residual: Option<Arc<dyn PhysicalExpr>>,
+		frame: Option<JoinFrame>,
+	) -> Self {
+		Self {
+			build,
+			probe,
+			shape: JoinShape::Documents {
+				probe_keys,
+				build_keys,
+				alias,
+			},
+			join_type,
+			residual,
+			frame,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+
+	/// Whether the join's expressions and build plan are the table
+	/// definer's and the plan is compiled for a caller they are enforced on.
+	fn redacted(&self) -> bool {
+		self.frame.as_ref().is_some_and(|frame| frame.checked_caller)
+	}
+
+	/// Every expression the join evaluates, with its role.
+	fn own_expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		let mut out = Vec::new();
+		if let JoinShape::Documents {
+			probe_keys,
+			build_keys,
+			..
+		} = &self.shape
+		{
+			out.extend(probe_keys.iter().map(|key| ("probe_key", key)));
+			out.extend(build_keys.iter().map(|key| ("build_key", key)));
+		}
+		if let Some(residual) = self.residual.as_ref() {
+			out.push(("residual", residual));
+		}
+		out
 	}
 }
 
@@ -210,14 +344,50 @@ impl ExecOperator for HashJoin {
 
 	fn attrs(&self) -> Vec<(String, String)> {
 		let mut attrs = vec![("type".to_string(), self.join_type.label().to_string())];
-		if !self.keys.is_empty() {
-			attrs.push(("keys".to_string(), self.keys.join(", ")));
-		}
-		if !self.null_template.is_empty() {
-			attrs.push(("null_template".to_string(), self.null_template.join(", ")));
+		match &self.shape {
+			JoinShape::Bindings {
+				keys,
+				null_template,
+			} => {
+				if !keys.is_empty() {
+					attrs.push(("keys".to_string(), keys.join(", ")));
+				}
+				if !null_template.is_empty() {
+					attrs.push(("null_template".to_string(), null_template.join(", ")));
+				}
+			}
+			JoinShape::Documents {
+				probe_keys,
+				build_keys,
+				alias,
+			} => {
+				attrs.push(("alias".to_string(), alias.clone()));
+				if self.redacted() {
+					attrs.push(("on".to_string(), "<permission>".to_string()));
+				} else if !probe_keys.is_empty() {
+					let on = probe_keys
+						.iter()
+						.zip(build_keys)
+						.map(|(probe, build)| format!("{} = {}", probe.to_sql(), build.to_sql()))
+						.collect::<Vec<_>>()
+						.join(" AND ");
+					attrs.push(("on".to_string(), on));
+				}
+			}
 		}
 		if let Some(residual) = self.residual.as_ref() {
-			attrs.push(("residual".to_string(), residual.to_sql()));
+			let residual = if self.redacted() {
+				"<permission>".to_string()
+			} else {
+				residual.to_sql()
+			};
+			attrs.push(("residual".to_string(), residual));
+		}
+		if let Some(frame) = &self.frame {
+			attrs.push(("frame".to_string(), "permission".to_string()));
+			if frame.auth.is_some() {
+				attrs.push(("auth".to_string(), "limited".to_string()));
+			}
 		}
 		attrs
 	}
@@ -226,38 +396,77 @@ impl ExecOperator for HashJoin {
 		let mut level = ContextLevel::Database
 			.max(self.build.required_context())
 			.max(self.probe.required_context());
-		if let Some(residual) = self.residual.as_ref() {
-			level = level.max(residual.required_context());
+		for (_, expr) in self.own_expressions() {
+			level = level.max(expr.required_context());
 		}
 		level
 	}
 
 	fn access_mode(&self) -> AccessMode {
 		let mut mode = self.build.access_mode().combine(self.probe.access_mode());
-		if let Some(residual) = self.residual.as_ref() {
-			mode = mode.combine(residual.access_mode());
+		for (_, expr) in self.own_expressions() {
+			mode = mode.combine(expr.access_mode());
 		}
 		mode
 	}
 
 	fn cardinality_hint(&self) -> CardinalityHint {
-		// A join fans out to an unknown number of rows.
-		CardinalityHint::Unbounded
+		match self.join_type {
+			// A semi or anti join emits a subset of the probe rows.
+			JoinType::Semi | JoinType::Anti => self.probe.cardinality_hint(),
+			// Any other join fans out to an unknown number of rows.
+			JoinType::Inner | JoinType::Left | JoinType::Cross => CardinalityHint::Unbounded,
+		}
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		vec![&self.build, &self.probe]
+		// Binding rows list the build side first. Document rows list the
+		// probe side first, as the logical join lists its left input, so a
+		// plan reads top to bottom as the pipeline's source and then what it
+		// is joined against, the order `LookupJoin` uses.
+		match self.shape {
+			JoinShape::Bindings {
+				..
+			} => vec![&self.build, &self.probe],
+			JoinShape::Documents {
+				..
+			} => vec![&self.probe, &self.build],
+		}
+	}
+
+	fn explain_children(&self) -> Vec<&Arc<dyn ExecOperator>> {
+		// The build plan is the definer's; a checked caller is shown the
+		// probe side only.
+		if self.redacted() {
+			vec![&self.probe]
+		} else {
+			self.children()
+		}
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(&self.metrics)
 	}
 
+	fn hides_metrics_beneath(&self) -> bool {
+		// The probe side's rows are the records before the permission judged
+		// them; a checked caller is shown the counts of what reaches it.
+		self.redacted()
+	}
+
 	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
-		match self.residual.as_ref() {
-			Some(residual) => vec![("residual", residual)],
-			None => vec![],
+		// The expressions are the definer's; a checked caller is shown none
+		// of them.
+		if self.redacted() {
+			return Vec::new();
 		}
+		self.own_expressions()
+	}
+
+	fn output_ordering(&self) -> OutputOrdering {
+		// Probe rows are emitted in probe order, the matches of one row
+		// together, so the probe side's ordering holds on the output.
+		self.probe.output_ordering()
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -282,23 +491,42 @@ impl ExecOperator for HashJoin {
 		//    on the build side): the build would otherwise drain (read) before the probe's write
 		//    runs. So PRE-DRAIN the probe (executing its writes), THEN construct the build
 		//    (post-write), then replay the buffered probe rows in the probe phase.
-		//  - neither mutates: construct both eagerly (one shared snapshot, so overlapping the reads
-		//    is safe and faster).
+		//  - neither mutates: construct the probe eagerly and the build only once the probe has
+		//    yielded a row (the module docs, "Build and probe order"): an empty probe leaves the
+		//    build side unbuilt.
 		let buffer_size = ctx.root().ctx.config.exec.operator_buffer_size;
 		let build = JoinSide::new(&self.build);
 		let probe = JoinSide::new(&self.probe);
 		let probe_first = probe.mutates() && !build.mutates();
 
+		// A framed semi or anti join inside an enclosing permission frame
+		// enforces nothing; see the module docs.
+		if self.frame.is_some()
+			&& ctx.root().skip_fetch_perms
+			&& matches!(self.join_type, JoinType::Semi | JoinType::Anti)
+		{
+			return Ok(monitor_stream(probe.stream(ctx, buffer_size)?, "HashJoin", &self.metrics));
+		}
+
+		// The keys, residual and build side evaluate in the join's frame; the
+		// probe side is the enclosing pipeline's and runs in its context.
+		let frame_ctx = match &self.frame {
+			Some(frame) => frame.context(ctx),
+			None => ctx.clone(),
+		};
+
 		// Eagerly construct a side only when doing so is safe — i.e. it neither
 		// reads pre-write data nor is the pre-drained writer. The build is eager
-		// unless it must read post-write state (`probe_first`); the probe is eager
-		// unless it must read post-write state (`build.mutates()`) or it is the
-		// pre-drained writer (`probe_first`). Anything left `None` is constructed
-		// lazily inside the stream, after the writing side has drained.
-		let eager_build = if probe_first {
-			None
+		// only when it mutates (its writes land before the probe is constructed);
+		// otherwise it waits for the probe's first row (`peek_probe`) or for the
+		// probe's pre-drain (`probe_first`). The probe is eager unless it must
+		// read post-write state (`build.mutates()`) or it is the pre-drained
+		// writer (`probe_first`). Anything left `None` is constructed lazily
+		// inside the stream, after the writing side has drained.
+		let eager_build = if build.mutates() && !probe_first {
+			Some(build.stream(&frame_ctx, buffer_size)?)
 		} else {
-			Some(build.stream(ctx, buffer_size)?)
+			None
 		};
 		let eager_probe = if build.mutates() || probe_first {
 			None
@@ -306,12 +534,21 @@ impl ExecOperator for HashJoin {
 			Some(probe.stream(ctx, buffer_size)?)
 		};
 
-		let keys = self.keys.clone();
+		let shape = self.shape.clone();
 		let join_type = self.join_type;
-		let null_template = self.null_template.clone();
 		let residual = self.residual.clone();
-		let max_rows = ctx.root().ctx.config.exec.gql_max_join_build_rows;
-		let max_output_rows = ctx.root().ctx.config.exec.gql_max_output_rows;
+		// The GQL budgets bound binding-row joins; a document join has none.
+		let (max_rows, max_output_rows) = match shape {
+			JoinShape::Bindings {
+				..
+			} => (
+				ctx.root().ctx.config.exec.gql_max_join_build_rows,
+				ctx.root().ctx.config.exec.gql_max_output_rows,
+			),
+			JoinShape::Documents {
+				..
+			} => (usize::MAX, usize::MAX),
+		};
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -345,13 +582,39 @@ impl ExecOperator for HashJoin {
 				None
 			};
 
+			// ---- Peek phase (neither side mutates): the probe's first non-empty
+			// batch is awaited before the build side exists. A probe that yields
+			// no row ends the join here, the build side never constructed and
+			// never polled; the batch found is replayed ahead of the rest of the
+			// probe in the probe phase.
+			let peeked_probe: Option<(ValueBatchStream, ValueBatch)> = match eager_probe {
+				Some(mut probe_stream) => {
+					let first = loop {
+						match probe_stream.next().await {
+							None => return Ok(()),
+							Some(batch_result) => {
+								crate::exec::operators::check_cancelled(&ctx)?;
+								let batch = batch_result?;
+								if !batch.is_empty() {
+									break batch;
+								}
+							}
+						}
+					};
+					Some((probe_stream, first))
+				}
+				None => None,
+			};
+
 			// ---- Build phase: drain the build side fully into the build table.
-			// Constructed now (after the probe pre-drain when `probe_first`) so a
-			// post-write build reads the live transaction state.
+			// Constructed now (after the probe pre-drain when `probe_first`, after
+			// the probe's first row otherwise) so a post-write build reads the
+			// live transaction state and an empty probe builds nothing.
 			let mut build_stream = match eager_build {
 				Some(stream) => stream,
-				None => build.stream(&ctx, buffer_size)?,
+				None => build.stream(&frame_ctx, buffer_size)?,
 			};
+			let frame_eval = EvalContext::from_exec_ctx(&frame_ctx);
 			let mut table = BuildTable::new();
 			while let Some(batch_result) = build_stream.next().await {
 				// Draining the whole build side can run long without yielding;
@@ -359,27 +622,27 @@ impl ExecOperator for HashJoin {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
 				for row in batch.into_values() {
-					if let Some(key) = join_key(&row, &keys) {
+					if let Some(key) = shape.build_key(&row, &frame_eval).await? {
 						table.insert(key, row, max_rows)?
 					}
 				}
 			}
 
 			// ---- Probe phase: stream the probe side, emitting matches.
-			// Either replay the pre-drained (post-write) probe rows, or construct
-			// the probe now — deferred past the build phase when `build_mutates` so
-			// its scans read the live, post-write transaction state.
-			let mut probe_stream: ValueBatchStream = match prebuffered_probe {
-				Some(batches) => Box::pin(futures::stream::iter(batches.into_iter().map(Ok))),
-				None => match eager_probe {
-					Some(stream) => stream,
-					None => probe.stream(&ctx, buffer_size)?,
-				},
+			// Either replay the pre-drained (post-write) probe rows, continue the
+			// peeked probe behind its first batch, or construct the probe now —
+			// deferred past the build phase when `build_mutates` so its scans
+			// read the live, post-write transaction state.
+			let mut probe_stream: ValueBatchStream = match (prebuffered_probe, peeked_probe) {
+				(Some(batches), _) => Box::pin(futures::stream::iter(batches.into_iter().map(Ok))),
+				(None, Some((rest, first))) => {
+					Box::pin(futures::stream::once(std::future::ready(Ok(first))).chain(rest))
+				}
+				(None, None) => probe.stream(&ctx, buffer_size)?,
 			};
-			// `base_eval` evaluates the residual (ON) predicate against each merged
-			// row; `emitted` bounds the cumulative output (a Cross product or a
-			// high-fan-out equi-join can emit far more rows than either side holds).
-			let base_eval = EvalContext::from_exec_ctx(&ctx);
+			// `emitted` bounds the cumulative output (a Cross product or a
+			// high-fan-out equi-join can emit far more rows than either side
+			// holds).
 			let mut emitted: usize = 0;
 			while let Some(batch_result) = probe_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
@@ -391,25 +654,36 @@ impl ExecOperator for HashJoin {
 							// Cartesian product: pair every probe row with every
 							// build row that passes the residual.
 							for build_row in table.all_rows() {
-								let merged = merge_rows(build_row, &row);
-								if residual_passes(residual.as_deref(), &base_eval, &merged).await?
+								if residual_passes(
+									residual.as_deref(),
+									&frame_eval,
+									&shape,
+									build_row,
+									&row,
+								)
+								.await?
 								{
+									let merged = shape.merge(build_row, &row);
 									emit(&mut out, &mut emitted, max_output_rows, merged)?;
 								}
 							}
 						}
 						JoinType::Inner => {
-							// A null-keyed probe row matches nothing and is dropped;
-							// otherwise emit the union with each residual-passing
-							// build row sharing the key.
-							if let Some(key) = join_key(&row, &keys)
-								&& let Some(matches) = table.get(&key)
-							{
-								for build_row in matches {
-									let merged = merge_rows(build_row, &row);
-									if residual_passes(residual.as_deref(), &base_eval, &merged)
-										.await?
+							// A probe row without a key matches nothing and is
+							// dropped; otherwise emit the union with each
+							// residual-passing build row sharing the key.
+							if let Some(key) = shape.probe_key(&row, &frame_eval).await? {
+								for build_row in table.matches(&key) {
+									if residual_passes(
+										residual.as_deref(),
+										&frame_eval,
+										&shape,
+										build_row,
+										&row,
+									)
+									.await?
 									{
+										let merged = shape.merge(build_row, &row);
 										emit(&mut out, &mut emitted, max_output_rows, merged)?;
 									}
 								}
@@ -418,18 +692,22 @@ impl ExecOperator for HashJoin {
 						JoinType::Left => {
 							// A build row counts as a match only if the merged row
 							// passes the residual; a probe row with no passing build
-							// row (including a null-keyed one) is null-filled — NOT
+							// row (including a keyless one) is null-filled — NOT
 							// dropped — which is the correlated-OPTIONAL match-vs-null
 							// -fill decision (a post-join Filter would drop it).
 							let mut matched = false;
-							if let Some(key) = join_key(&row, &keys)
-								&& let Some(matches) = table.get(&key)
-							{
-								for build_row in matches {
-									let merged = merge_rows(build_row, &row);
-									if residual_passes(residual.as_deref(), &base_eval, &merged)
-										.await?
+							if let Some(key) = shape.probe_key(&row, &frame_eval).await? {
+								for build_row in table.matches(&key) {
+									if residual_passes(
+										residual.as_deref(),
+										&frame_eval,
+										&shape,
+										build_row,
+										&row,
+									)
+									.await?
 									{
+										let merged = shape.merge(build_row, &row);
 										emit(&mut out, &mut emitted, max_output_rows, merged)?;
 										matched = true;
 									}
@@ -440,8 +718,32 @@ impl ExecOperator for HashJoin {
 									&mut out,
 									&mut emitted,
 									max_output_rows,
-									null_filled(&row, &null_template),
+									shape.null_filled(&row),
 								)?;
+							}
+						}
+						JoinType::Semi | JoinType::Anti => {
+							// The probe row itself is emitted, once, when it has a
+							// residual-passing match (semi) or none (anti).
+							let mut matched = false;
+							if let Some(key) = shape.probe_key(&row, &frame_eval).await? {
+								for build_row in table.matches(&key) {
+									if residual_passes(
+										residual.as_deref(),
+										&frame_eval,
+										&shape,
+										build_row,
+										&row,
+									)
+									.await?
+									{
+										matched = true;
+										break;
+									}
+								}
+							}
+							if matched == (join_type == JoinType::Semi) {
+								emit(&mut out, &mut emitted, max_output_rows, row)?;
 							}
 						}
 					}
@@ -457,14 +759,131 @@ impl ExecOperator for HashJoin {
 	}
 }
 
-/// A join key: the ordered `<binding>.id` values for the shared bindings.
+impl JoinShape {
+	/// The key of a build row, or `None` for a row that can match nothing.
+	async fn build_key(&self, row: &Value, eval: &EvalContext<'_>) -> FlowResult<Option<JoinKey>> {
+		match self {
+			JoinShape::Bindings {
+				keys,
+				..
+			} => Ok(join_key(row, keys)),
+			JoinShape::Documents {
+				build_keys,
+				alias,
+				..
+			} => {
+				// The build expressions read the row through the alias, as the
+				// residual and everything above the join do.
+				let mut seen = Object::default();
+				seen.insert(alias.clone(), row.clone());
+				let seen = Value::Object(seen);
+				Ok(Some(evaluate_keys(build_keys, eval, &seen).await?))
+			}
+		}
+	}
+
+	/// The key of a probe row, or `None` for a row that can match nothing.
+	async fn probe_key(&self, row: &Value, eval: &EvalContext<'_>) -> FlowResult<Option<JoinKey>> {
+		match self {
+			JoinShape::Bindings {
+				keys,
+				..
+			} => Ok(join_key(row, keys)),
+			JoinShape::Documents {
+				probe_keys,
+				..
+			} => Ok(Some(evaluate_keys(probe_keys, eval, row).await?)),
+		}
+	}
+
+	/// The output row for a build row matching a probe row.
+	fn merge(&self, build_row: &Value, probe_row: &Value) -> Value {
+		match self {
+			JoinShape::Bindings {
+				..
+			} => merge_rows(build_row, probe_row),
+			JoinShape::Documents {
+				alias,
+				..
+			} => with_alias(probe_row, alias, build_row.clone()),
+		}
+	}
+
+	/// The row the residual predicate reads for a build row and a probe row.
+	///
+	/// This is [`JoinShape::merge`]'s row wherever the merge can carry the
+	/// alias. A probe row that is not an object cannot — a bare value from a
+	/// `VALUE` projection or a scalar source has no field to hold it, and is
+	/// emitted as it is — but the residual still has to read the build row
+	/// through the alias, so it reads an object holding the alias alone.
+	/// Every other name answers `NONE` there, as it does off the bare value:
+	/// a residual is built from field reads, `$parent.path`, literals and
+	/// operators over them (`Side::of` in `logical/rules/decorrelate.rs`),
+	/// never from a read of the row itself.
+	fn residual_row(&self, build_row: &Value, probe_row: &Value) -> Value {
+		match self {
+			JoinShape::Documents {
+				alias,
+				..
+			} if !matches!(probe_row, Value::Object(_)) => {
+				let mut row = Object::default();
+				row.insert(alias.clone(), build_row.clone());
+				Value::Object(row)
+			}
+			_ => self.merge(build_row, probe_row),
+		}
+	}
+
+	/// The output row for a probe row a `Left` join found no match for.
+	fn null_filled(&self, probe_row: &Value) -> Value {
+		match self {
+			JoinShape::Bindings {
+				null_template,
+				..
+			} => null_filled(probe_row, null_template),
+			JoinShape::Documents {
+				alias,
+				..
+			} => with_alias(probe_row, alias, Value::Null),
+		}
+	}
+}
+
+/// A join key: one value per key column.
 type JoinKey = Vec<Value>;
+
+/// Evaluate each key expression against `row`, as the row and its document.
+async fn evaluate_keys(
+	keys: &[Arc<dyn PhysicalExpr>],
+	eval: &EvalContext<'_>,
+	row: &Value,
+) -> FlowResult<JoinKey> {
+	let mut out = Vec::with_capacity(keys.len());
+	for key in keys {
+		out.push(key.evaluate(eval.with_value_and_doc(row)).await?);
+	}
+	Ok(out)
+}
+
+/// The probe row with `value` set under `alias`. A probe row that is not an
+/// object — a bare value from a `VALUE` projection — has no field to hold
+/// the alias, and is emitted as it is.
+fn with_alias(probe_row: &Value, alias: &str, value: Value) -> Value {
+	match probe_row {
+		Value::Object(row) => {
+			let mut row = row.clone();
+			row.insert(alias.to_string(), value);
+			Value::Object(row)
+		}
+		other => other.clone(),
+	}
+}
 
 /// Extract the join key for `row`: the `id` of each binding named in `keys`.
 ///
 /// Returns `None` if any key slot is `Value::Null` / `Value::None`, missing, or
 /// not a record (i.e. has no usable id) — such a row never equi-joins (3VL).
-/// For a `Cross` join `keys` is empty; the planner uses [`HashJoin::all_rows`]
+/// For a `Cross` join `keys` is empty; the planner uses [`BuildTable::all_rows`]
 /// directly and never calls this with an empty `keys`, but an empty `keys`
 /// here would yield `Some(vec![])` (every row shares the one empty key), which
 /// is also correct.
@@ -530,18 +949,22 @@ fn null_filled(probe_row: &Value, null_template: &[String]) -> Value {
 	Value::Object(row)
 }
 
-/// Evaluate the residual (`ON`) predicate against a merged row. `None` ⇒ always
-/// passes (a pure equi-join). Mirrors `Expand`'s per-candidate predicate eval
+/// Whether a build row and a probe row pass the residual (`ON`) predicate.
+/// `None` ⇒ always passes (a pure equi-join), and the row the predicate would
+/// read is not built. Mirrors `Expand`'s per-candidate predicate eval
 /// (`graph/expand.rs`) and `Filter`.
 async fn residual_passes(
 	residual: Option<&dyn PhysicalExpr>,
 	base_eval: &EvalContext<'_>,
-	merged: &Value,
+	shape: &JoinShape,
+	build_row: &Value,
+	probe_row: &Value,
 ) -> FlowResult<bool> {
-	match residual {
-		None => Ok(true),
-		Some(predicate) => Ok(predicate.evaluate(base_eval.with_value(merged)).await?.is_truthy()),
-	}
+	let Some(predicate) = residual else {
+		return Ok(true);
+	};
+	let row = shape.residual_row(build_row, probe_row);
+	Ok(predicate.evaluate(base_eval.with_value_and_doc(&row)).await?.is_truthy())
 }
 
 /// Push `row` to the output batch, bumping the cumulative emitted-row counter and
@@ -558,6 +981,17 @@ fn emit(out: &mut Vec<Value>, emitted: &mut usize, max_rows: usize, row: Value) 
 	Ok(())
 }
 
+/// Whether two keys are equal by SurrealQL's `=`, column by column.
+fn keys_equal(left: &[Value], right: &[Value]) -> bool {
+	left.len() == right.len() && left.iter().zip(right).all(|(l, r)| l.equal(r))
+}
+
+/// Whether a key holds a regex in any column, which `=` matches against
+/// strings rather than by identity.
+fn key_has_regex(key: &[Value]) -> bool {
+	key.iter().any(|v| matches!(v, Value::Regex(_)))
+}
+
 /// Build table keyed by `JoinKey: Ord`, with the rows sharing a key accumulating
 /// in that key's `Vec` in insertion order. The stored row count is bounded by the
 /// configured build-row budget.
@@ -569,8 +1003,15 @@ fn emit(out: &mut Vec<Value>, emitted: &mut usize, max_rows: usize, row: Value) 
 /// match, reachable here through a compound record id holding a non-integral
 /// number (`t:[0.1f]` against `t:[0.1dec]`). Ordering also makes iteration
 /// deterministic, which is what [`Self::all_rows`] needs.
+///
+/// A key holding a regex is kept apart: `=` matches a regex against a string
+/// it satisfies, which no ordering expresses, so such keys are compared one
+/// by one with [`Value::equal`] — on the build side against every probe key,
+/// and a regex probe key against every build row.
 struct BuildTable {
 	keyed: BTreeMap<JoinKey, Vec<Value>>,
+	/// Build rows whose key holds a regex, with their keys.
+	regex_keyed: Vec<(JoinKey, Value)>,
 	rows: usize,
 }
 
@@ -578,6 +1019,7 @@ impl BuildTable {
 	fn new() -> Self {
 		Self {
 			keyed: BTreeMap::new(),
+			regex_keyed: Vec::new(),
 			rows: 0,
 		}
 	}
@@ -593,14 +1035,36 @@ impl BuildTable {
 				),
 			))));
 		}
-		self.keyed.entry(key).or_default().push(row);
+		if key_has_regex(&key) {
+			self.regex_keyed.push((key, row));
+		} else {
+			self.keyed.entry(key).or_default().push(row);
+		}
 		self.rows += 1;
 		Ok(())
 	}
 
-	/// The build rows stored under `key`, if any.
+	/// The build rows stored under `key`, if any, by ordering equality alone.
 	fn get(&self, key: &JoinKey) -> Option<&[Value]> {
 		self.keyed.get(key).map(|rows| rows.as_slice())
+	}
+
+	/// The build rows whose key equals `key` by `=`: those stored under it,
+	/// then those a regex on either side matches.
+	fn matches<'a>(&'a self, key: &'a JoinKey) -> impl Iterator<Item = &'a Value> + 'a {
+		let exact = self.get(key).unwrap_or(&[]).iter();
+		let build_regex =
+			self.regex_keyed.iter().filter(move |(k, _)| keys_equal(k, key)).map(|(_, row)| row);
+		let probe_regex = key_has_regex(key)
+			.then(|| {
+				self.keyed
+					.iter()
+					.filter(move |(k, _)| keys_equal(k, key))
+					.flat_map(|(_, rows)| rows.iter())
+			})
+			.into_iter()
+			.flatten();
+		exact.chain(build_regex).chain(probe_regex)
 	}
 
 	/// Every stored build row, used by `Cross`, in an order that is deterministic
@@ -608,7 +1072,7 @@ impl BuildTable {
 	/// join keys at all, so every row shares the one empty key and this is plain
 	/// insertion order.
 	fn all_rows(&self) -> impl Iterator<Item = &Value> {
-		self.keyed.values().flatten()
+		self.keyed.values().flatten().chain(self.regex_keyed.iter().map(|(_, row)| row))
 	}
 }
 
@@ -688,9 +1152,87 @@ mod tests {
 		)
 	}
 
+	#[test]
+	fn a_scalar_probe_row_still_carries_the_alias_into_the_residual() {
+		fn read(row: &Value, name: &str) -> Value {
+			match row {
+				Value::Object(o) => o.get(name).cloned().unwrap_or(Value::None),
+				_ => Value::None,
+			}
+		}
+		let shape = JoinShape::Documents {
+			probe_keys: vec![],
+			build_keys: vec![],
+			alias: "_join0".to_string(),
+		};
+		let build = raw_row(&[("n", Value::from(2))]);
+
+		// An object probe row holds the alias, so the residual reads the
+		// merged row itself.
+		let probe = raw_row(&[("z", Value::from(1))]);
+		let row = shape.residual_row(&build, &probe);
+		assert_eq!(row, shape.merge(&build, &probe));
+		assert_eq!(read(&row, "z"), Value::from(1));
+		assert_eq!(read(&read(&row, "_join0"), "n"), Value::from(2));
+
+		// A bare value has no field to hold the alias and is emitted as it
+		// is, but the residual still reads the build row through the alias.
+		// Every other name answers `NONE`, as it does off the bare value.
+		let probe = Value::from(0);
+		assert_eq!(shape.merge(&build, &probe), Value::from(0));
+		let row = shape.residual_row(&build, &probe);
+		assert_eq!(read(&read(&row, "_join0"), "n"), Value::from(2));
+		assert_eq!(read(&row, "z"), Value::None);
+	}
+
 	/// A constant-`value` residual predicate, for exercising the ON-gate.
 	fn const_residual(value: bool) -> Arc<dyn PhysicalExpr> {
 		Arc::new(crate::exec::physical_expr::Literal(Value::Bool(value))) as Arc<dyn PhysicalExpr>
+	}
+
+	/// A build side that fails the test if it is ever constructed.
+	#[derive(Debug)]
+	struct UnreachableSource;
+
+	impl ExecOperator for UnreachableSource {
+		fn name(&self) -> &'static str {
+			"Unreachable"
+		}
+
+		fn required_context(&self) -> ContextLevel {
+			ContextLevel::Root
+		}
+
+		fn access_mode(&self) -> AccessMode {
+			AccessMode::ReadOnly
+		}
+
+		fn cardinality_hint(&self) -> CardinalityHint {
+			CardinalityHint::Unbounded
+		}
+
+		fn output_ordering(&self) -> OutputOrdering {
+			OutputOrdering::Unordered
+		}
+
+		fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
+			panic!("the build side of a join with an empty probe must never be executed")
+		}
+	}
+
+	#[tokio::test]
+	async fn an_empty_probe_never_executes_the_build_side() {
+		for join_type in [JoinType::Inner, JoinType::Left, JoinType::Semi, JoinType::Anti] {
+			let op: Arc<dyn ExecOperator> = Arc::new(HashJoin::new(
+				Arc::new(UnreachableSource),
+				ValuesOperator::new(vec![]),
+				vec!["b".to_string()],
+				join_type,
+				vec![],
+				None,
+			));
+			assert!(collect(&op, &root_ctx()).await.is_empty(), "{join_type:?}");
+		}
 	}
 
 	#[tokio::test]
@@ -1085,5 +1627,167 @@ mod tests {
 	fn children_are_build_then_probe() {
 		let op = join(Vec::new(), Vec::new(), &["b"], JoinType::Inner, &[]);
 		assert_eq!(op.children().len(), 2);
+	}
+
+	// ---- document rows -------------------------------------------------
+
+	use crate::exec::operators::test_util::{TestDb, physical_expr, val};
+
+	async fn docs(srcs: &[&str]) -> Vec<Value> {
+		let mut out = Vec::with_capacity(srcs.len());
+		for src in srcs {
+			out.push(val(src).await);
+		}
+		out
+	}
+
+	/// A document join of `probe` against `build` on `probe_key = alias.build_key`.
+	async fn doc_join(
+		ctx: &crate::exec::ExecutionContext,
+		build: Vec<Value>,
+		probe: Vec<Value>,
+		probe_key: &str,
+		build_key: &str,
+		join_type: JoinType,
+		residual: Option<&str>,
+	) -> Arc<dyn ExecOperator> {
+		let residual = match residual {
+			Some(src) => Some(physical_expr(src, ctx).await),
+			None => None,
+		};
+		Arc::new(HashJoin::documents(
+			ValuesOperator::new(build),
+			ValuesOperator::new(probe),
+			vec![physical_expr(probe_key, ctx).await],
+			vec![physical_expr(build_key, ctx).await],
+			join_type,
+			"_join0".to_string(),
+			residual,
+			None,
+		))
+	}
+
+	fn ids(rows: &[Value]) -> Vec<Value> {
+		rows.iter()
+			.map(|row| match row {
+				Value::Object(o) => o.get("id").cloned().unwrap_or(Value::None),
+				_ => Value::None,
+			})
+			.collect()
+	}
+
+	#[tokio::test]
+	async fn a_document_semi_join_keeps_each_probe_row_once_and_unchanged() {
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let build = docs(&["{ id: 1, k: 'a' }", "{ id: 2, k: 'a' }", "{ id: 3, k: 'b' }"]).await;
+		let probe = docs(&["{ id: 10, x: 'a' }", "{ id: 11, x: 'c' }", "{ id: 12, x: 'b' }"]).await;
+		let op = doc_join(&ctx, build, probe.clone(), "x", "_join0.k", JoinType::Semi, None).await;
+		let out = collect(&op, &ctx).await;
+		// Two build rows share 'a'; the probe row is emitted once, as it was.
+		assert_eq!(out, vec![probe[0].clone(), probe[2].clone()]);
+	}
+
+	#[tokio::test]
+	async fn a_document_anti_join_keeps_the_probe_rows_with_no_match() {
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let build = docs(&["{ k: 'a' }"]).await;
+		let probe = docs(&["{ id: 10, x: 'a' }", "{ id: 11, x: 'c' }"]).await;
+		let op = doc_join(&ctx, build, probe.clone(), "x", "_join0.k", JoinType::Anti, None).await;
+		assert_eq!(collect(&op, &ctx).await, vec![probe[1].clone()]);
+	}
+
+	#[tokio::test]
+	async fn document_keys_match_none_to_none_and_null_to_null() {
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		// `IN` compares elements with `=`: NONE equals NONE, NULL equals
+		// NULL, and neither equals the other.
+		let build = docs(&["{ id: 1, k: NULL }", "{ id: 2 }"]).await;
+		let probe = docs(&["{ id: 10, x: NULL }", "{ id: 11 }", "{ id: 12, x: 1 }"]).await;
+		let op = doc_join(&ctx, build, probe, "x", "_join0.k", JoinType::Inner, None).await;
+		let out = collect(&op, &ctx).await;
+		assert_eq!(ids(&out), vec![Value::from(10), Value::from(11)]);
+		let Value::Object(first) = &out[0] else {
+			panic!("expected an object");
+		};
+		assert_eq!(first.get("_join0"), Some(&val("{ id: 1, k: NULL }").await));
+	}
+
+	#[tokio::test]
+	async fn a_regex_key_matches_the_strings_it_accepts() {
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let build = docs(&["{ id: 1, k: /^a/ }", "{ id: 2, k: 'b' }"]).await;
+		let probe =
+			docs(&["{ id: 10, x: 'apple' }", "{ id: 11, x: 'b' }", "{ id: 12, x: /^b/ }"]).await;
+		let op = doc_join(&ctx, build, probe, "x", "_join0.k", JoinType::Semi, None).await;
+		// 'apple' matches the regex build key; 'b' its equal; the regex
+		// probe key matches the string build key.
+		assert_eq!(
+			ids(&collect(&op, &ctx).await),
+			vec![Value::from(10), Value::from(11), Value::from(12)]
+		);
+	}
+
+	#[tokio::test]
+	async fn a_document_left_join_adds_the_match_under_the_alias_or_null() {
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let build = docs(&["{ id: 1, k: 'a', v: 'A' }"]).await;
+		let probe = docs(&["{ id: 10, x: 'a' }", "{ id: 11, x: 'z' }"]).await;
+		let op = doc_join(&ctx, build, probe, "x", "_join0.k", JoinType::Left, None).await;
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out[0], val("{ id: 10, x: 'a', _join0: { id: 1, k: 'a', v: 'A' } }").await);
+		assert_eq!(out[1], val("{ id: 11, x: 'z', _join0: NULL }").await);
+	}
+
+	#[tokio::test]
+	async fn a_document_residual_reads_both_rows_through_the_alias() {
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let build = docs(&["{ k: 'a', n: 1 }", "{ k: 'a', n: 5 }"]).await;
+		let probe = docs(&["{ id: 10, x: 'a', m: 3 }", "{ id: 11, x: 'a', m: 9 }"]).await;
+		let op =
+			doc_join(&ctx, build, probe, "x", "_join0.k", JoinType::Semi, Some("_join0.n > m"))
+				.await;
+		// Only the first probe row has a build row with n above its m.
+		assert_eq!(ids(&collect(&op, &ctx).await), vec![Value::from(10)]);
+	}
+
+	#[tokio::test]
+	async fn a_document_join_renders_its_keys_and_hides_them_for_a_checked_caller() {
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let open = HashJoin::documents(
+			ValuesOperator::new(Vec::new()),
+			ValuesOperator::new(Vec::new()),
+			vec![physical_expr("x", &ctx).await],
+			vec![physical_expr("_join0.k", &ctx).await],
+			JoinType::Semi,
+			"_join0".to_string(),
+			None,
+			None,
+		);
+		assert!(open.attrs().iter().any(|(k, v)| k == "on" && v == "x = _join0.k"));
+		assert_eq!(open.expressions().len(), 2);
+		assert_eq!(open.explain_children().len(), 2);
+		let framed = HashJoin::documents(
+			ValuesOperator::new(Vec::new()),
+			ValuesOperator::new(Vec::new()),
+			vec![physical_expr("x", &ctx).await],
+			vec![physical_expr("_join0.k", &ctx).await],
+			JoinType::Semi,
+			"_join0".to_string(),
+			None,
+			Some(JoinFrame::new(None, true)),
+		);
+		assert!(framed.attrs().iter().any(|(k, v)| k == "on" && v == "<permission>"));
+		assert!(framed.attrs().iter().any(|(k, v)| k == "frame" && v == "permission"));
+		assert!(framed.expressions().is_empty());
+		// Only the probe side is shown; every child is still instrumented.
+		assert_eq!(framed.explain_children().len(), 1);
+		assert_eq!(framed.children().len(), 2);
 	}
 }

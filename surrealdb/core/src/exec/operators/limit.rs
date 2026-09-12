@@ -11,7 +11,7 @@ use crate::exec::{
 	OperatorMetrics, PhysicalExpr, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlow;
-use crate::val::Value;
+use crate::val::{Number, Value};
 
 /// Applies LIMIT and OFFSET (START) to an input stream.
 ///
@@ -41,21 +41,42 @@ impl Limit {
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
+}
 
-	/// Coerce a Value to usize for limit/offset.
-	fn coerce_to_usize(value: &Value) -> Result<usize, String> {
-		match value {
-			Value::Number(n) => {
-				let i = n.to_int();
-				if i >= 0 {
-					Ok(i as usize)
-				} else {
-					Err(format!("expected non-negative integer, got {}", i))
-				}
-			}
-			Value::None | Value::Null => Ok(0),
-			_ => Err(format!("expected integer, got {:?}", value)),
+/// Which paging clause a count was written for. Only the error it raises
+/// depends on this; the contract below is the same for both.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum PagingClause {
+	Limit,
+	Start,
+}
+
+impl PagingClause {
+	fn rejects(self, value: String) -> anyhow::Error {
+		match self {
+			PagingClause::Limit => anyhow::Error::new(crate::exec::Error::InvalidLimit {
+				value,
+			}),
+			PagingClause::Start => anyhow::Error::new(crate::exec::Error::InvalidStart {
+				value,
+			}),
 		}
+	}
+}
+
+/// The row count a paging clause names.
+///
+/// A count is written as a non-negative integer that fits in a `u32`, and
+/// every other value is rejected rather than read as one: a float or decimal
+/// is not truncated, `NONE` and `NULL` are not read as zero, and a count too
+/// large to fit is an error rather than a wrap — so the answer does not depend
+/// on the width of a pointer on the machine running the query.
+pub(crate) fn paging_count(value: &Value, clause: PagingClause) -> Result<u32, anyhow::Error> {
+	match value {
+		Value::Number(Number::Int(count)) if *count >= 0 => {
+			u32::try_from(*count).map_err(|_| clause.rejects(count.to_string()))
+		}
+		other => Err(clause.rejects(other.clone().into_raw_string())),
 	}
 }
 impl ExecOperator for Limit {
@@ -136,15 +157,9 @@ impl ExecOperator for Limit {
 			// Evaluate limit expression
 			let limit_value = match &limit_expr {
 				Some(expr) => {
-					let value = expr.evaluate(eval_ctx.clone()).await.map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to evaluate LIMIT: {}", e))
-					})?;
-					Some(Limit::coerce_to_usize(&value).map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!(
-							"LIMIT must be a non-negative integer: {}",
-							e
-						))
-					})?)
+					let value = expr.evaluate(eval_ctx.clone()).await?;
+					Some(paging_count(&value, PagingClause::Limit).map_err(ControlFlow::Err)?
+						as usize)
 				}
 				None => None,
 			};
@@ -152,15 +167,8 @@ impl ExecOperator for Limit {
 			// Evaluate offset expression
 			let offset = match &offset_expr {
 				Some(expr) => {
-					let value = expr.evaluate(eval_ctx).await.map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to evaluate START: {}", e))
-					})?;
-					Limit::coerce_to_usize(&value).map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!(
-							"START must be a non-negative integer: {}",
-							e
-						))
-					})?
+					let value = expr.evaluate(eval_ctx).await?;
+					paging_count(&value, PagingClause::Start).map_err(ControlFlow::Err)? as usize
 				}
 				None => 0,
 			};

@@ -12,13 +12,21 @@ value = "NONE"
 value = "[{ age: 90, id: record:5 }, { age: 50, id: record:2 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, age] {rows: 2}\n    IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Backward, limit: 2] {rows: 2}\n\nTotal rows: 2"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, age] {rows: 2}
+    IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Backward, limit: 2] {rows: 2}
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ age: 10, id: record:6 }, { age: 20, id: record:1 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, age] {rows: 2}\n    IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Forward, limit: 2] {rows: 2}\n\nTotal rows: 2"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, age] {rows: 2}
+    IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Forward, limit: 2] {rows: 2}
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "NONE"
@@ -27,13 +35,21 @@ value = "NONE"
 value = "[{ age: 10, id: entry:3, score: 99 }, { age: 20, id: entry:2, score: 30 }, { age: 20, id: entry:1, score: 50 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, age, score] {rows: 3}\n    IndexScan [ctx: Db] [index: tag_age_score, access: ['omicron'], direction: Forward, limit: 3] {rows: 3}\n\nTotal rows: 3"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, age, score] {rows: 3}
+    IndexScan [ctx: Db] [index: tag_age_score, access: ['omicron'], direction: Forward, limit: 3] {rows: 3}
+
+Total rows: 3"'''
 
 [[test.results]]
 value = "[{ age: 30, id: entry:4, score: 70 }, { age: 20, id: entry:1, score: 50 }, { age: 20, id: entry:2, score: 30 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, age, score] {rows: 3}\n    IndexScan [ctx: Db] [index: tag_age_score, access: ['omicron'], direction: Backward, limit: 3] {rows: 3}\n\nTotal rows: 3"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, age, score] {rows: 3}
+    IndexScan [ctx: Db] [index: tag_age_score, access: ['omicron'], direction: Backward, limit: 3] {rows: 3}
+
+Total rows: 3"'''
 
 [[test.results]]
 value = "[{ age: 90, id: record:5 }, { age: 50, id: record:2 }, { age: 30, id: record:4 }]"
@@ -45,22 +61,49 @@ value = "[{ age: 10, id: record:6 }, { age: 20, id: record:1 }, { age: 30, id: r
 value = "[{ age: 90, id: record:5 }, { age: 50, id: record:2 }, { age: 30, id: record:4 }, { age: 20, id: record:1 }, { age: 10, id: record:6 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, age] {rows: 5}\n    UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key_dedup: age Desc] {rows: 5}\n        IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Backward] {rows: 5}\n        IndexScan [ctx: Db] [index: tag_age, access: ['beta'], direction: Backward] {rows: 1}\n\nTotal rows: 5"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, age] {rows: 5}
+    UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key_dedup: age Desc] {rows: 5}
+        IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Backward] {rows: 5}
+        IndexScan [ctx: Db] [index: tag_age, access: ['beta'], direction: Backward] {rows: 1}
+
+Total rows: 5"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, age] {rows: 5}\n    UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key_dedup: age Asc] {rows: 5}\n        IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Forward] {rows: 5}\n        IndexScan [ctx: Db] [index: tag_age, access: ['beta'], direction: Forward] {rows: 1}\n\nTotal rows: 5"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, age] {rows: 5}
+    UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key_dedup: age Asc] {rows: 5}
+        IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Forward] {rows: 5}
+        IndexScan [ctx: Db] [index: tag_age, access: ['beta'], direction: Forward] {rows: 1}
+
+Total rows: 5"'''
 
 [[test.results]]
 value = "[{ age: 50, id: record:2 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, age] {rows: 1}\n    Limit [ctx: Db] [limit: 3] {rows: 1}\n        Filter [ctx: Db] [predicate: tags CONTAINSALL ['omicron', 'beta']] {rows: 1}\n            UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key_dedup: age Desc] {rows: 5}\n                IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Backward] {rows: 5}\n                IndexScan [ctx: Db] [index: tag_age, access: ['beta'], direction: Backward] {rows: 1}\n\nTotal rows: 1"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, age] {rows: 1}
+    Limit [ctx: Db] [limit: 3] {rows: 1}
+        Filter [ctx: Db] [predicate: tags CONTAINSALL ['omicron', 'beta']] {rows: 1}
+            UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key_dedup: age Desc] {rows: 5}
+                IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Backward] {rows: 5}
+                IndexScan [ctx: Db] [index: tag_age, access: ['beta'], direction: Backward] {rows: 1}
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, age] {rows: 0}\n    Limit [ctx: Db] [limit: 3] {rows: 0}\n        Filter [ctx: Db] [predicate: tags CONTAINSANY []] {rows: 0}\n            UnionIndexScan [ctx: Db] [table: record, branches: 1, merge_by_index_key_dedup: age Desc] {rows: 5}\n                IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Backward] {rows: 5}\n\nTotal rows: 0"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, age] {rows: 0}
+    Limit [ctx: Db] [limit: 3] {rows: 0}
+        Filter [ctx: Db] [predicate: tags CONTAINSANY []] {rows: 0}
+            UnionIndexScan [ctx: Db] [table: record, branches: 1, merge_by_index_key_dedup: age Desc] {rows: 5}
+                IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Backward] {rows: 5}
+
+Total rows: 0"'''
 
 */
 

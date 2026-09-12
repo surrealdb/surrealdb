@@ -3,18 +3,16 @@
 //! constructs must be stack-safe via the reblessive stack, and adversarial
 //! inputs must fail fast.
 //!
-//! Operator chains (binary spines, `NOT`/sign prefixes, `IS` postfixes) are
-//! bounded by `expr_recursion_limit` (default 128, mirroring `syn`), because
-//! they lower one-to-one onto `sql::Expr` spines whose downstream recursive
-//! walks (drop, formatting, `sql → expr` conversion) must stay within the
-//! machine stack. Property-access and label chains are deliberately *not*
-//! charged: properties lower to flat `sql::Idiom` part vectors and labels
-//! never reach `sql::Expr`, so their ASTs can be arbitrarily deep; the manual
-//! iterative [`Drop`] of `GqlExpr` and `LabelExpr` must release them without
-//! overflowing the machine stack either. The `*_drop_safe`/`*_is_iterative`
-//! tests below use depths far beyond what recursive drop glue survives on a
-//! 2MiB test thread stack (which overflows somewhere between 20k and 40k
-//! levels).
+//! Operator chains (binary spines, `NOT`/sign prefixes, `IS` postfixes) and
+//! property-access chains are bounded by `expr_recursion_limit` (default
+//! 128, mirroring `syn`), because they lower one-to-one onto `LogicalExpr`
+//! nests whose downstream recursive walks (drop, compilation, planning) must
+//! stay within the machine stack. Label chains are *not* charged: labels
+//! never reach `LogicalExpr`, so their ASTs can be arbitrarily deep, and the
+//! manual iterative [`Drop`] of `LabelExpr` must release them without
+//! overflowing the machine stack. The `*_drop_safe`/`*_is_iterative` tests
+//! below use depths far beyond what recursive drop glue survives on a 2MiB
+//! test thread stack (which overflows somewhere between 20k and 40k levels).
 //!
 //! The 4GB input length guard in [`crate::gql::parse_with_settings`] is
 //! not tested here: exercising it requires allocating a `u32::MAX`-byte
@@ -158,16 +156,18 @@ fn custom_expression_depth_limit(#[case] source: &str, #[case] ok: bool) {
 }
 
 #[test]
-fn long_property_chain_is_parse_and_drop_safe() {
+fn long_property_chain_hits_the_expression_depth_limit() {
+	// A property chain lowers to one `Access` node per property, so it is
+	// charged like an operator chain and a pathological run is rejected
+	// before any tree is built.
 	let source = format!("RETURN a{}", ".b".repeat(200_000));
-	parse(&source);
+	let error = parse_err(&source);
+	assert!(error.contains("Exceeded expression recursion depth limit"), "{error}");
 }
 
 #[test]
-fn deep_is_null_operand_chain_is_drop_safe() {
-	// Property chains are not charged against the expression budget; the
-	// trailing null test is consumed by the primary itself.
-	let source = format!("RETURN a{} IS NOT NULL", ".b".repeat(200_000));
+fn property_chains_within_the_budget_parse() {
+	let source = format!("RETURN a{} IS NOT NULL", ".b".repeat(100));
 	parse(&source);
 }
 
@@ -186,8 +186,9 @@ fn long_label_operator_chain_is_parse_and_drop_safe() {
 
 #[test]
 fn long_function_argument_and_list_trees_are_drop_safe() {
-	// Wide-and-deep mixes: every list element is itself a deep chain.
-	let element = format!("a{}", ".b".repeat(10_000));
+	// Wide-and-deep mixes: every list element is itself a chain near the
+	// budget, and siblings are not charged for one another.
+	let element = format!("a{}", ".b".repeat(100));
 	let source = format!("RETURN [{}]", vec![element; 20].join(", "));
 	parse(&source);
 	// Operator chains inside argument positions are charged like any other

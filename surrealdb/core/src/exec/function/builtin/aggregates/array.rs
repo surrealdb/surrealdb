@@ -149,19 +149,12 @@ impl AggregateFunction for ArrayJoin {
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
-		// Default accumulator with empty separator
+		// The separator is the group's own argument and is bound through
+		// `Accumulator::set_extra_args` before the group is finalized; a group
+		// whose statement supplies none joins on nothing.
 		Box::new(ArrayJoinAccumulator {
 			values: Vec::new(),
 			separator: String::new(),
-		})
-	}
-
-	fn create_accumulator_with_args(&self, args: &[Value]) -> Box<dyn Accumulator> {
-		// Extract separator from extra args (first extra arg after the accumulated value)
-		let separator = args.first().map(|v| v.clone().into_raw_string()).unwrap_or_default();
-		Box::new(ArrayJoinAccumulator {
-			values: Vec::new(),
-			separator,
 		})
 	}
 
@@ -183,6 +176,11 @@ impl Accumulator for ArrayJoinAccumulator {
 	fn update(&mut self, value: Value) -> Result<()> {
 		self.values.push(value);
 		Ok(())
+	}
+
+	/// The first argument after the accumulated one is the separator.
+	fn set_extra_args(&mut self, args: &[Value]) {
+		self.separator = args.first().map(|v| v.clone().into_raw_string()).unwrap_or_default();
 	}
 
 	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()> {
@@ -571,10 +569,11 @@ mod tests {
 	#[test]
 	fn array_join_with_separator() {
 		let func = ArrayJoin;
-		let mut acc = func.create_accumulator_with_args(&[Value::String(Strand::new_static(", "))]);
+		let mut acc = func.create_accumulator();
 		acc.update(Value::String(Strand::new_static("a"))).unwrap();
 		acc.update(Value::String(Strand::new_static("b"))).unwrap();
 		acc.update(Value::String(Strand::new_static("c"))).unwrap();
+		acc.set_extra_args(&[Value::String(Strand::new_static(", "))]);
 		let result = acc.finalize().unwrap();
 		assert_eq!(as_string(&result), "a, b, c");
 	}
@@ -582,10 +581,11 @@ mod tests {
 	#[test]
 	fn array_join_with_numbers() {
 		let func = ArrayJoin;
-		let mut acc = func.create_accumulator_with_args(&[Value::String(Strand::new_static("-"))]);
+		let mut acc = func.create_accumulator();
 		acc.update(Value::Number(Number::Int(1))).unwrap();
 		acc.update(Value::Number(Number::Int(2))).unwrap();
 		acc.update(Value::Number(Number::Int(3))).unwrap();
+		acc.set_extra_args(&[Value::String(Strand::new_static("-"))]);
 		let result = acc.finalize().unwrap();
 		assert_eq!(as_string(&result), "1-2-3");
 	}
@@ -593,13 +593,16 @@ mod tests {
 	#[test]
 	fn array_join_merge() {
 		let func = ArrayJoin;
-		let mut acc1 = func.create_accumulator_with_args(&[Value::String(Strand::new_static(","))]);
+		let mut acc1 = func.create_accumulator();
 		acc1.update(Value::String(Strand::new_static("a"))).unwrap();
 
-		let mut acc2 = func.create_accumulator_with_args(&[Value::String(Strand::new_static(","))]);
+		let mut acc2 = func.create_accumulator();
 		acc2.update(Value::String(Strand::new_static("b"))).unwrap();
 
+		// The separator belongs to the merged group, not to either partial
+		// accumulator, so it is bound after the merge.
 		acc1.merge(acc2).unwrap();
+		acc1.set_extra_args(&[Value::String(Strand::new_static(","))]);
 		let result = acc1.finalize().unwrap();
 		assert_eq!(as_string(&result), "a,b");
 	}

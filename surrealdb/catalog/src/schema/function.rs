@@ -5,7 +5,11 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::auth::AuthLimit;
-use crate::catalog::{BlockText, FromStored, KindText, Permission, StoredPermission};
+use crate::catalog::{
+	BlockText, FromStored, KindText, LogicalBlockBody, LogicalPermissionBody, Permission,
+	StoredPermission,
+};
+use crate::expr::logical::{LogicalOp, LogicalPermission};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Block, Kind};
 use crate::sql::statements::define::DefineKind;
@@ -118,17 +122,43 @@ impl ToSql for FunctionDefinition {
 }
 
 /// Runtime form of [`StoredFunctionDefinition`].
+///
+/// The body and the `PERMISSIONS` clause are carried twice: as the [`Block`]
+/// and [`Permission`] the legacy engine evaluates and as lazily compiled
+/// logical bodies for the streaming engine. Both halves come from the stored
+/// text, so a constructor that sets one half sets the other from the same
+/// source ([`LogicalBlockBody::of`], [`LogicalPermissionBody::of`]).
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FunctionDefinition {
 	pub name: Strand,
 	pub args: Vec<(String, Kind)>,
 	pub block: Block,
+	/// The body in logical form; see [`Self::logical_body`].
+	pub body: LogicalBlockBody,
 	pub returns: Option<Kind>,
 	pub permissions: Permission,
+	/// The `PERMISSIONS` clause in logical form; see
+	/// [`Self::permissions_logical`].
+	pub permissions_body: LogicalPermissionBody,
 	pub auth_limit: AuthLimit,
 	pub comment: Option<String>,
 	pub graphql_alias: Option<String>,
 	pub graphql_deprecated: Option<String>,
+}
+
+impl FunctionDefinition {
+	/// The `PERMISSIONS` clause in logical form, compiling its guard on first
+	/// call.
+	pub fn permissions_logical(&self) -> anyhow::Result<LogicalPermission> {
+		self.permissions_body.logical()
+	}
+
+	/// The body in logical form, compiled on first call. `Err` when the body
+	/// has no logical form — it writes — in which case the caller runs the
+	/// stored [`Self::block`] on the legacy engine.
+	pub fn logical_body(&self) -> anyhow::Result<&LogicalOp> {
+		self.body.logical()
+	}
 }
 
 impl FromStored for FunctionDefinition {
@@ -144,8 +174,10 @@ impl FromStored for FunctionDefinition {
 					.map(|(n, t)| Ok((n.clone(), t.compile()?)))
 					.collect::<anyhow::Result<_>>()?,
 				block: stored.block.compile()?,
+				body: LogicalBlockBody::new(&stored.block),
 				returns: stored.returns.as_ref().map(|t| t.compile()).transpose()?,
 				permissions: Permission::from_stored(&stored.permissions)?,
+				permissions_body: LogicalPermissionBody::from_stored(&stored.permissions),
 				auth_limit: stored.auth_limit.clone(),
 				comment: stored.comment.clone(),
 				graphql_alias: stored.graphql_alias.clone(),

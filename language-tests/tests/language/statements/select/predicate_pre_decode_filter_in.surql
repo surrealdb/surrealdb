@@ -53,13 +53,22 @@ value = "[]"
 value = "[{ id: pin:1, s: 'hello', v: 10 }, { id: pin:2, v: 20 }, { id: pin:3, v: 5 }, { id: pin:5, v: 1 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: pin, direction: Forward, predicate: v INSIDE [10, 20], pre_decode_filter: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: pin, direction: Forward, predicate: v INSIDE [10, 20], pre_decode_filter: yes]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: pin, direction: Forward, predicate: v NOTINSIDE [99], pre_decode_filter: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: pin, direction: Forward, predicate: v NOTINSIDE [99], pre_decode_filter: yes]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: pin, direction: Forward, predicate: v INSIDE 3 .. 7, pre_decode_filter: no (unsupported predicate)]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: pin, direction: Forward, predicate: v INSIDE 3 .. 7, pre_decode_filter: no (unsupported predicate)]
+''''
 */
 
 CREATE ONLY pin:1 SET v = 10, s = 'hello';

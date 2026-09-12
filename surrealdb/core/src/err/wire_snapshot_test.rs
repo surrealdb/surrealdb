@@ -23,7 +23,7 @@ use crate::dbs::capabilities::Error as CapabilitiesError;
 use crate::doc::Error as DocError;
 use crate::exec::Error as ExecError;
 use crate::expr::operation::PatchError;
-use crate::expr::{Bytesize, Error as ExprError, Expr, Idiom};
+use crate::expr::{Bytesize, Error as ExprError, Idiom};
 use crate::iam::{Error as AuthError, PolicyError};
 use crate::idx::Error as IdxError;
 use crate::key::Error as KeyError;
@@ -896,7 +896,7 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 		(
 			"InvalidFetch",
 			ExecError::InvalidFetch {
-				value: Expr::Literal(crate::expr::Literal::None),
+				value: "NONE".to_string(),
 			},
 		),
 		(
@@ -1060,7 +1060,6 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 		),
 		("Unimplemented", ExecError::Unimplemented("sample".to_string())),
 		("PlannerUnsupported", ExecError::PlannerUnsupported("sample".to_string())),
-		("PlannerUnimplemented", ExecError::PlannerUnimplemented("sample".to_string())),
 		("AccessLevelMismatch", ExecError::AccessLevelMismatch),
 		("AccessUnsupportedAlgorithm", ExecError::AccessUnsupportedAlgorithm),
 		("AccessRecordTokenDurationRequired", ExecError::AccessRecordTokenDurationRequired),
@@ -1362,7 +1361,7 @@ fn snapshot_covers_every_variant() {
 // 173: idx::Error carries a `FileAccessDenied` twin of the buc variant with a
 // byte-identical message, so the mapper allowlist is enforced inside idx; the
 // wire output of the affected sites is unchanged.
-const UNTYPED_INTERNAL_BUDGET: usize = 169;
+const UNTYPED_INTERNAL_BUDGET: usize = 168;
 
 /// Counts variants whose OWN kind is `Internal`.
 ///

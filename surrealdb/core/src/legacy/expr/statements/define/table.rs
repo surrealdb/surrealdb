@@ -29,7 +29,7 @@ use crate::expr::{
 };
 use crate::iam::{Action, ResourceKind};
 use crate::key::schema::{
-	EdgeCachePrefix, FieldKey, ForeignTableKey, RecordKey, RecordPrefix, RefCachePrefix, TblRoot,
+	EdgeCachePrefix, ForeignTableKey, RecordKey, RecordPrefix, RefCachePrefix, TblRoot,
 };
 use crate::kvs::Transaction;
 use crate::legacy::{expr_to_ident, kill_table_subscriptions};
@@ -133,6 +133,7 @@ pub(crate) async fn define_table_statement_compute(
 		// VALUE-selector rejection) before anything is stored.
 		view: this.view.as_ref().map(crate::catalog::view::view_to_definition).transpose()?,
 		permissions: this.permissions.clone(),
+		select_body: crate::catalog::LogicalPermissionBody::of(&this.permissions.select),
 		comment,
 		changefeed: this.changefeed,
 
@@ -660,6 +661,23 @@ pub(crate) async fn define_table_statement_initialize_aggregate_view(
 			fail!("select result did not contain a field for a selection");
 		};
 
+		// A view row stands for a group that source rows are in, and the
+		// incremental path keeps it that way: it creates the row with the
+		// group's first row and deletes it with the group's last. `GROUP ALL`
+		// answers a query over no rows with the grand total, which stands for
+		// no group and whose extremes are each aggregate's answer over no
+		// values rather than a group's. Every view's analysis carries a count,
+		// which is what tells the two apart.
+		let Some(count_idx) = required_values.get(&SelectAggr::Base(Aggregation::Count)) else {
+			fail!("a materialised view's aggregations did not include a count");
+		};
+		let Value::Number(Number::Int(rows)) = &aggregate_stats[*count_idx] else {
+			fail!("initial select statement did not return the right value");
+		};
+		if *rows == 0 {
+			continue;
+		}
+
 		let mut stats = Vec::with_capacity(analysis.aggregations.len());
 		for a in analysis.aggregations.iter() {
 			match *a {
@@ -874,35 +892,23 @@ pub(crate) async fn define_table_statement_add_in_out_fields(
 		let tb_name = tb.name.clone();
 		// Set the `in` field as a DEFINE FIELD definition
 		{
-			let key = FieldKey {
-				ns,
-				db,
-				tb: Cow::Borrowed(&tb_name),
-				fd: Cow::Borrowed("in"),
-			};
 			let fd = FieldDefinition {
 				name: Idiom::from(IN.to_vec()),
 				table: tb_name.clone(),
 				field_kind: Some(Kind::Record(rel.from.clone())),
 				..Default::default()
 			};
-			txn.set_key(&key, &fd.to_stored()).await?;
+			txn.put_tb_field(ns, db, &tb_name, &fd).await?;
 		}
 		// Set the `out` field as a DEFINE FIELD definition
 		{
-			let key = FieldKey {
-				ns,
-				db,
-				tb: Cow::Borrowed(&tb_name),
-				fd: Cow::Borrowed("out"),
-			};
 			let fd = FieldDefinition {
 				name: Idiom::from(OUT.to_vec()),
 				table: tb_name.clone(),
 				field_kind: Some(Kind::Record(rel.to.clone())),
 				..Default::default()
 			};
-			txn.set_key(&key, &fd.to_stored()).await?;
+			txn.put_tb_field(ns, db, &tb_name, &fd).await?;
 		}
 		// Refresh the table cache for the fields
 		tb.cache_fields_ts = Uuid::now_v7();

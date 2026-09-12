@@ -1,10 +1,11 @@
-//! Control flow physical expressions - BREAK, CONTINUE, THROW, RETURN.
+//! Control flow physical expressions - BREAK, CONTINUE, THROW.
 //!
 //! These expressions signal control flow changes when evaluated inside blocks,
 //! function bodies, or other expression contexts. They mirror the behavior of
 //! [`crate::exec::operators::control_flow::ControlFlowPlan`] but implement
 //! [`PhysicalExpr`] so they can be used within expression-level planning
-//! (e.g. inside `BlockPhysicalExpr`).
+//! (e.g. inside a closure body or an `IF` branch). `RETURN` is a statement:
+//! it compiles to `ReturnPlan`, and in scalar position it is a subquery.
 
 use std::sync::Arc;
 
@@ -18,8 +19,6 @@ use crate::val::Value;
 /// The kind of control flow operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlFlowKind {
-	/// RETURN - exit from block/function with a value
-	Return,
 	/// THROW - raise an error
 	Throw,
 	/// BREAK - exit from loop
@@ -31,7 +30,6 @@ pub enum ControlFlowKind {
 impl std::fmt::Display for ControlFlowKind {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			ControlFlowKind::Return => write!(f, "RETURN"),
 			ControlFlowKind::Throw => write!(f, "THROW"),
 			ControlFlowKind::Break => write!(f, "BREAK"),
 			ControlFlowKind::Continue => write!(f, "CONTINUE"),
@@ -39,17 +37,16 @@ impl std::fmt::Display for ControlFlowKind {
 	}
 }
 
-/// Control flow expression - BREAK, CONTINUE, THROW, RETURN.
+/// Control flow expression - BREAK, CONTINUE, THROW.
 ///
 /// Produces a control flow signal rather than a value:
 /// - BREAK/CONTINUE: signal immediately (no inner expression)
 /// - THROW: evaluate inner expression, signal `ExecError::Thrown`
-/// - RETURN: evaluate inner expression, signal `ControlFlow::Return`
 #[derive(Debug, Clone)]
 pub struct ControlFlowExpr {
 	/// The kind of control flow operation
 	pub(crate) kind: ControlFlowKind,
-	/// Inner expression for THROW/RETURN (None for BREAK/CONTINUE)
+	/// Inner expression for THROW (None for BREAK/CONTINUE)
 	pub(crate) inner: Option<Arc<dyn PhysicalExpr>>,
 }
 impl PhysicalExpr for ControlFlowExpr {
@@ -77,11 +74,6 @@ impl PhysicalExpr for ControlFlowExpr {
 						value.to_raw_string(),
 					))))
 				}
-				ControlFlowKind::Return => {
-					let inner = self.inner.as_ref().expect("RETURN must have inner expression");
-					let value = inner.evaluate(ctx).await?;
-					Err(ControlFlow::Return(value))
-				}
 			}
 		})
 	}
@@ -98,12 +90,6 @@ impl ToSql for ControlFlowExpr {
 			ControlFlowKind::Continue => f.push_str("CONTINUE"),
 			ControlFlowKind::Throw => {
 				f.push_str("THROW");
-				if let Some(inner) = &self.inner {
-					write_sql!(f, fmt, " {}", inner);
-				}
-			}
-			ControlFlowKind::Return => {
-				f.push_str("RETURN");
 				if let Some(inner) = &self.inner {
 					write_sql!(f, fmt, " {}", inner);
 				}

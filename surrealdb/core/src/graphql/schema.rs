@@ -360,10 +360,14 @@ pub(crate) fn sql_value_to_graphql_value(v: SurValue) -> Result<GraphqlValue, Gr
 		SurValue::Bool(b) => GraphqlValue::Boolean(b),
 		SurValue::Number(n) => match n {
 			SurNumber::Int(i) => GraphqlValue::Number(i.into()),
-			SurNumber::Float(f) => GraphqlValue::Number(
-				Number::from_f64(f)
-					.ok_or(resolver_error("unimplemented: graceful NaN and Inf handling"))?,
-			),
+			// GraphQL numbers are finite, and `NaN`, `Infinity` and
+			// `-Infinity` are all answers SurrealQL gives — the extremes of no
+			// values, a mean of none. None of them has a number to send, so
+			// they are sent as null rather than failing the whole query.
+			SurNumber::Float(f) => match Number::from_f64(f) {
+				Some(n) => GraphqlValue::Number(n),
+				None => GraphqlValue::Null,
+			},
 			num @ SurNumber::Decimal(_) => GraphqlValue::String(num.to_string()),
 		},
 		SurValue::String(s) => GraphqlValue::String(s.into_string()),

@@ -95,6 +95,19 @@ impl MethodDescriptor {
 	/// generic fallback. Returns `None` when no implementation exists for the
 	/// value's type; the caller decides how to degrade (method calls fall back
 	/// to closure-field-call semantics).
+	/// Whether an object receiver is guaranteed to reach a builtin, so that
+	/// the closure-field degradation in [`MethodPart`](crate::exec::parts::MethodPart)
+	/// is unreachable for this name.
+	///
+	/// A closure can only be stored in a field, and only an object carries
+	/// fields, so an object receiver is the whole of that path: a name that
+	/// dispatches for one runs a body the call site can see, whatever the
+	/// receiver turns out to hold.
+	pub fn dispatches_for_an_object(&self) -> bool {
+		self.fallback.is_some()
+			|| self.type_impls.iter().any(|(kind, _)| *kind == ValueKind::Object)
+	}
+
 	pub fn resolve(&self, value: &Value) -> Option<&Arc<dyn ScalarFunction>> {
 		let kind = ValueKind::of(value);
 
@@ -706,6 +719,42 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// A method with no implementation for the receiver's type degrades to
+	/// invoking a closure stored in a field of that name, and only an object
+	/// carries fields — so a name an object receiver dispatches for cannot
+	/// reach a body the call site did not write, and every other name can.
+	///
+	/// SECURITY: [`MethodDescriptor::dispatches_for_an_object`] is what the
+	/// analyzer asks before it lets a call move below a field-permission
+	/// layer. It is asserted here on names of each shape so that a change to
+	/// how a method is registered cannot quietly widen the exemption: a name
+	/// gaining an object arm or a generic fallback is a name gaining it.
+	#[test]
+	fn only_a_name_an_object_dispatches_for_cannot_reach_a_closure() {
+		let registry = FunctionRegistry::with_builtins();
+		let dispatches = |name: &str| {
+			registry
+				.get_method(name)
+				.unwrap_or_else(|| panic!("{name} should be a registered method"))
+				.dispatches_for_an_object()
+		};
+
+		// Registered with an object arm, and with a generic fallback.
+		assert!(dispatches("len"));
+		assert!(dispatches("is_empty"));
+		assert!(dispatches("type_of"));
+		assert!(dispatches("to_string"));
+
+		// Registered for other types alone: an object receiver reaches the
+		// closure-field path instead.
+		assert!(!dispatches("get"));
+		assert!(!dispatches("split"));
+		assert!(!dispatches("starts_with"));
+
+		// A name the registry does not know at all was never exempt.
+		assert!(registry.get_method("check").is_none());
+	}
 
 	/// Read-only classification treats a method call as read-only exactly when
 	/// its name dispatches to a builtin; an unregistered name resolves to a

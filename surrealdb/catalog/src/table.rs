@@ -8,10 +8,11 @@ use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
 use crate::catalog::{
-	DatabaseId, FromStored, NamespaceId, Permission, Permissions, StoredPermissions,
-	StoredViewDefinition, ViewDefinition,
+	DatabaseId, FromStored, LogicalPermissionBody, NamespaceId, Permission, Permissions,
+	StoredPermissions, StoredViewDefinition, ViewDefinition,
 };
 use crate::expr::ChangeFeed;
+use crate::expr::logical::LogicalPermission;
 use crate::expr::statements::info::InfoStructure;
 pub use crate::expr::table_type::{Relation, TableType};
 use crate::sql;
@@ -268,6 +269,14 @@ impl InfoStructure for TableDefinition {
 }
 
 /// Runtime form of [`StoredTableDefinition`].
+///
+/// The `PERMISSIONS FOR select` clause is carried twice: as the [`Permission`]
+/// the legacy engine evaluates, inside `permissions`, and as a lazily compiled
+/// logical body the streaming engine's analyzer reads. Both come from the
+/// stored text, so `select_body` names the same clause as `permissions.select`.
+/// A constructor that sets one half must set the other from the same source:
+/// [`LogicalPermissionBody::of`] does so from the expression a `DEFINE` or
+/// `ALTER` statement produced. The body is not part of the stored form.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TableDefinition {
 	pub namespace_id: NamespaceId,
@@ -278,6 +287,9 @@ pub struct TableDefinition {
 	pub schemafull: bool,
 	pub view: Option<ViewDefinition>,
 	pub permissions: Permissions,
+	/// The `PERMISSIONS FOR select` clause in logical form; see
+	/// [`Self::select_permission_logical`].
+	pub select_body: LogicalPermissionBody,
 	pub table_type: TableType,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<String>,
@@ -328,6 +340,7 @@ impl FromStored for TableDefinition {
 				schemafull: stored.schemafull,
 				view: stored.view.as_ref().map(ViewDefinition::from_stored).transpose()?,
 				permissions: Permissions::from_stored(&stored.permissions)?,
+				select_body: LogicalPermissionBody::from_stored(&stored.permissions.select),
 				table_type: stored.table_type.clone(),
 				changefeed: stored.changefeed,
 				comment: stored.comment.clone(),
@@ -352,6 +365,16 @@ impl FromStored for TableDefinition {
 }
 
 impl TableDefinition {
+	/// The `PERMISSIONS FOR select` clause in logical form, compiling its
+	/// guard on first call and keeping it for the life of the definition, so
+	/// a statement binding this table does not re-lower the clause.
+	///
+	/// Errs when the clause has no logical form; the failure is remembered
+	/// and repeated calls answer the same.
+	pub fn select_permission_logical(&self) -> anyhow::Result<LogicalPermission> {
+		self.select_body.logical()
+	}
+
 	/// See [`StoredTableDefinition::allows_normal`]; same predicate on the
 	/// compiled form.
 	pub fn allows_normal(&self) -> bool {
@@ -400,5 +423,96 @@ impl From<StoredTableDefinition> for crate::val::Value {
 		h.insert("id", crate::val::Value::Number(crate::val::Number::Int(v.table_id.0 as i64)));
 		h.insert("name", crate::val::Value::String(v.name));
 		crate::val::Value::Object(crate::val::Object::from(h))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_types::ToSql;
+
+	use super::*;
+	use crate::catalog::ExprText;
+	use crate::expr::Expr;
+
+	fn definition(select: Permission) -> TableDefinition {
+		TableDefinition {
+			namespace_id: NamespaceId(1),
+			database_id: DatabaseId(1),
+			table_id: TableId(1),
+			name: TableName::from("t"),
+			drop: false,
+			schemafull: false,
+			view: None,
+			select_body: LogicalPermissionBody::of(&select),
+			permissions: Permissions {
+				select,
+				..Default::default()
+			},
+			table_type: TableType::Any,
+			changefeed: None,
+			comment: None,
+			cache_fields_ts: Uuid::nil(),
+			cache_events_ts: Uuid::nil(),
+			cache_tables_ts: Uuid::nil(),
+			cache_indexes_ts: Uuid::nil(),
+			cache_lives_ts: Uuid::nil(),
+			graphql_alias: None,
+			graphql_deprecated: None,
+			graph_folded: false,
+			graph_doc_ids: false,
+			inline_edges_cap: None,
+			inline_refs_cap: None,
+			graph_inline_gen: 0,
+		}
+	}
+
+	/// The select body is the stored text compiled for the streaming engine: a
+	/// definition built from a statement carries it, a definition read back
+	/// from storage carries it, and both compile to the same guard. The
+	/// compiled guard is kept on the definition, so the second read returns the
+	/// value the first one produced rather than compiling the text again.
+	#[test]
+	fn the_select_body_compiles_once_per_definition() {
+		let guard: Expr = ExprText::from_raw("published = true").compile().unwrap();
+		let def = definition(Permission::Specific(guard));
+		let loaded = TableDefinition::from_stored(&def.to_stored()).unwrap();
+		assert_eq!(loaded, def);
+
+		let LogicalPermissionBody::Specific(body) = &loaded.select_body else {
+			panic!("a conditional permission has a body");
+		};
+		let first = body.logical().unwrap();
+		let second = body.logical().unwrap();
+		assert!(std::ptr::eq(first, second), "the second read recompiled the body");
+		assert_eq!(first.to_sql(), "published = true");
+		assert_eq!(
+			loaded.select_permission_logical().unwrap(),
+			LogicalPermission::Specific(first.clone())
+		);
+	}
+
+	/// The unconditional permissions carry no text to compile, and the body
+	/// still names the same clause as the legacy half.
+	#[test]
+	fn unconditional_permissions_have_no_body_to_compile() {
+		let full = TableDefinition::from_stored(&definition(Permission::Full).to_stored()).unwrap();
+		assert_eq!(full.select_permission_logical().unwrap(), LogicalPermission::Full);
+		let none = TableDefinition::from_stored(&definition(Permission::None).to_stored()).unwrap();
+		assert_eq!(none.select_permission_logical().unwrap(), LogicalPermission::None);
+	}
+
+	/// A guard the lowering cannot express compiles as the legacy `Expr` and
+	/// fails as a logical body, and the failure is remembered rather than
+	/// retried.
+	#[test]
+	fn a_guard_with_no_logical_form_fails_to_compile_and_stays_failed() {
+		let guard: Expr = ExprText::from_raw("id IN |t:1..3|").compile().unwrap();
+		let def = definition(Permission::Specific(guard));
+		let loaded = TableDefinition::from_stored(&def.to_stored()).unwrap();
+		assert_eq!(loaded.permissions, def.permissions);
+		let first = loaded.select_permission_logical().unwrap_err().to_string();
+		let second = loaded.select_permission_logical().unwrap_err().to_string();
+		assert!(first.contains("no logical form"), "{first}");
+		assert_eq!(first, second);
 	}
 }

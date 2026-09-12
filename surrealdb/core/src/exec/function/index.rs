@@ -31,6 +31,7 @@ use crate::exec::physical_expr::EvalContext;
 use crate::exec::{BoxFut, ContextLevel};
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
+use crate::expr::logical::{FieldPath, LogicalExpr};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
@@ -157,30 +158,43 @@ pub trait IndexFunction: Send + Sync + Debug {
 
 /// Resolved context for a single MATCHES clause, created at plan time.
 ///
-/// This captures the field path and query string from a `WHERE field @N@ 'query'`
+/// This captures the field and query string from a `WHERE field @N@ 'query'`
 /// expression and provides lazy access to the associated full-text index
 /// infrastructure. The expensive FullTextIndex/QueryTerms/Scorer are initialized
 /// only on first use and then cached for all subsequent rows.
 pub struct MatchContext {
-	/// The field path from the left side of the MATCHES operator.
-	pub idiom: Idiom,
+	/// The field read on the left side of the MATCHES operator, as written.
+	/// It names an index column when its declared position
+	/// ([`LogicalExpr::field_path`]) is that column.
+	pub field: LogicalExpr,
 	/// The search query string from the right side of the MATCHES operator.
 	pub query: String,
 	/// The table name for index lookup.
 	pub table: TableName,
 	/// Lazily initialized full-text index resources. The inner `Option` is
-	/// `None` when no full-text index on `table` covers `idiom` — e.g. a
-	/// MATCHES traversing a record link to an index on another table — in
-	/// which case score/highlight/offsets yield `NONE`, matching the legacy
-	/// executor's missing-match-ref-entry behaviour.
-	ft_cache: tokio::sync::OnceCell<Option<(FullTextIndex, QueryTerms, Option<Scorer>)>>,
+	/// `None` when no full-text index on `table` covers `field` — e.g. a
+	/// MATCHES traversing a record link to an index on another table, or a
+	/// field that reads no declared position — in which case
+	/// score/highlight/offsets yield `NONE`, matching the legacy executor's
+	/// missing-match-ref-entry behaviour.
+	ft_cache: tokio::sync::OnceCell<Option<FullTextResources>>,
+}
+
+/// The full-text resources a [`MatchContext`] resolves once per statement.
+pub struct FullTextResources {
+	pub index: FullTextIndex,
+	pub terms: QueryTerms,
+	pub scorer: Option<Scorer>,
+	/// The indexed column the MATCHES field named, as the catalog declares it.
+	/// Highlighting reads the document through this path.
+	pub column: Idiom,
 }
 
 impl MatchContext {
 	/// Create a new MatchContext from resolved MATCHES clause info.
-	pub fn new(idiom: Idiom, query: String, table: TableName) -> Self {
+	pub fn new(field: LogicalExpr, query: String, table: TableName) -> Self {
 		Self {
-			idiom,
+			field,
 			query,
 			table,
 			ft_cache: tokio::sync::OnceCell::new(),
@@ -190,14 +204,11 @@ impl MatchContext {
 	/// Get or lazily initialize the full-text index resources.
 	///
 	/// On first call, this looks up the full-text index definition for the
-	/// table/idiom, opens the FullTextIndex, extracts QueryTerms, and
+	/// table/field, opens the FullTextIndex, extracts QueryTerms, and
 	/// optionally creates a Scorer. Subsequent calls return the cached
 	/// result. Returns `Ok(None)` when no full-text index on the table
-	/// covers the idiom (see the `ft_cache` field docs).
-	pub async fn ft_resources(
-		&self,
-		ctx: &EvalContext<'_>,
-	) -> Result<&Option<(FullTextIndex, QueryTerms, Option<Scorer>)>> {
+	/// covers the field (see the `ft_cache` field docs).
+	pub async fn ft_resources(&self, ctx: &EvalContext<'_>) -> Result<&Option<FullTextResources>> {
 		self.ft_cache
 			.get_or_try_init(|| async {
 				use crate::catalog::providers::TableProvider;
@@ -217,7 +228,11 @@ impl MatchContext {
 				let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 				let db_id = db_ctx.db.database_id;
 
-				// Find the full-text index for this table and idiom
+				// Find the full-text index for this table and field: the
+				// column whose declared position the field reads.
+				let Some(path) = self.field.field_path() else {
+					return Ok(None);
+				};
 				let indexes = tx
 					.all_tb_indexes(ns_id, db_id, &self.table, ctx.exec_ctx.version_stamp())
 					.await?;
@@ -228,11 +243,17 @@ impl MatchContext {
 				} else {
 					indexes
 				};
-				let index_def = match indexes.iter().find(|idx| {
-					matches!(&idx.index, Index::FullText(_)) && idx.cols.contains(&self.idiom)
+				let (index_def, column) = match indexes.iter().find_map(|idx| {
+					if !matches!(&idx.index, Index::FullText(_)) {
+						return None;
+					}
+					idx.cols
+						.iter()
+						.find(|c| FieldPath::from_idiom(c).as_ref() == Some(&path))
+						.map(|c| (idx, c))
 				}) {
-					Some(def) => def,
-					// No index on this table covers the idiom (e.g. the
+					Some(found) => found,
+					// No index on this table covers the field (e.g. the
 					// MATCHES traverses a record link) → score/highlight/
 					// offsets yield NONE, like the legacy executor.
 					None => return Ok(None),
@@ -271,7 +292,12 @@ impl MatchContext {
 				// Create scorer if BM25 is configured
 				let scorer = fti.new_scorer(frozen).await?;
 
-				Ok(Some((fti, query_terms, scorer)))
+				Ok(Some(FullTextResources {
+					index: fti,
+					terms: query_terms,
+					scorer,
+					column: column.clone(),
+				}))
 			})
 			.await
 	}
@@ -280,7 +306,7 @@ impl MatchContext {
 impl Debug for MatchContext {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("MatchContext")
-			.field("idiom", &self.idiom)
+			.field("field", &self.field)
 			.field("query", &self.query)
 			.field("table", &self.table)
 			.field("initialized", &self.ft_cache.initialized())
@@ -350,8 +376,9 @@ impl Debug for KnnContext {
 /// Information about a single MATCHES clause extracted from the WHERE condition.
 #[derive(Debug, Clone)]
 pub struct MatchInfo {
-	/// The field path from the left side of the MATCHES operator.
-	pub idiom: Idiom,
+	/// The field read on the left side of the MATCHES operator, as written: a
+	/// path expression ([`LogicalExpr::is_path`]).
+	pub field: LogicalExpr,
 	/// The search query string from the right side of the MATCHES operator.
 	pub query: String,
 }
@@ -359,7 +386,7 @@ pub struct MatchInfo {
 /// Planning-time context mapping match_ref numbers to MATCHES clause info.
 ///
 /// Built by analyzing the WHERE clause AST during query planning. Each entry
-/// maps a match_ref number (e.g., `1` from `@1@`) to the idiom and query
+/// maps a match_ref number (e.g., `1` from `@1@`) to the field and query
 /// string of the corresponding MATCHES operator.
 #[derive(Debug, Clone)]
 pub struct MatchesContext {
@@ -410,7 +437,7 @@ impl MatchesContext {
 	/// Create a MatchContext for a given match_ref, resolving against this context.
 	///
 	/// If the match_ref is found, creates a MatchContext with the resolved
-	/// idiom, query, and table name. If not found and there's exactly one
+	/// field, query, and table name. If not found and there's exactly one
 	/// entry, falls back to that entry (common case: single MATCHES clause).
 	pub fn resolve(&self, match_ref: MatchRef, table: TableName) -> Result<Arc<MatchContext>> {
 		let info = self.get(match_ref).or_else(|| {
@@ -424,7 +451,7 @@ impl MatchesContext {
 
 		match info {
 			Some(info) => {
-				Ok(Arc::new(MatchContext::new(info.idiom.clone(), info.query.clone(), table)))
+				Ok(Arc::new(MatchContext::new(info.field.clone(), info.query.clone(), table)))
 			}
 			None => {
 				// If there are no MATCHES clauses at all, provide a clear error

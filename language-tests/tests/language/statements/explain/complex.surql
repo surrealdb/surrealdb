@@ -65,16 +65,15 @@ value = """
 [[test.results]]
 value = """
 "SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: tags = ['sale']]
-        SelectProject [ctx: Db] [projections: *]
-            Filter [ctx: Db] [predicate: category = 'electronics']
-                Union [ctx: Db] [inputs: 2]
-                    SelectProject [ctx: Db] [projections: *]
-                        Filter [ctx: Db] [predicate: rating >= 4f]
-                            Union [ctx: Db] [inputs: 2]
-                                TableScan [ctx: Db] [table: product, direction: Forward]
-                                TableScan [ctx: Db] [table: review, direction: Forward]
-                    IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
+    SelectProject [ctx: Db] [projections: *]
+        Filter [ctx: Db] [predicate: category = 'electronics' AND tags = ['sale']]
+            Union [ctx: Db] [inputs: 2]
+                SelectProject [ctx: Db] [projections: *]
+                    Filter [ctx: Db] [predicate: rating >= 4f]
+                        Union [ctx: Db] [inputs: 2]
+                            TableScan [ctx: Db] [table: product, direction: Forward]
+                            TableScan [ctx: Db] [table: review, direction: Forward]
+                IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
 """"
 */
 
@@ -169,4 +168,6 @@ WHERE rating >= 4.0
 LIMIT 3;
 
 -- Complex query 8: Multiple subqueries.
+-- The outer predicate is pushed through the middle query's `SELECT *`
+-- projection and merged with its own, so one Filter covers both.
 EXPLAIN SELECT * FROM (SELECT * FROM (SELECT * FROM product, review WHERE rating >= 4.0), product WHERE category = 'electronics') WHERE tags = ['sale'];

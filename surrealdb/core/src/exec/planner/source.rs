@@ -2,21 +2,27 @@
 //!
 //! Handles graph/reference lookups, index functions, range bounds, and order conversion.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
-use surrealdb_strand::TableName;
+use surrealdb_strand::{Strand, TableName};
 
 use super::Planner;
 use super::util::{extract_table_from_matches, get_effective_limit_literal, key_lit_to_expr};
 use crate::err::Error;
 use crate::exec::operators::{
-	CurrentValueSource, EdgeTableSpec, Filter, GraphEdgeScan, GraphScanOutput, Limit, OrderByField,
-	ReferenceScan, ReferenceScanOutput, SortDirection,
+	EdgeTableSpec, Filter, GraphEdgeScan, GraphScanOutput, Limit, OrderByField, ReferenceScan,
+	ReferenceScanOutput, SortDirection,
 };
 use crate::exec::parts::LookupDirection;
-use crate::exec::planner::select::SelectPipelineConfig;
-use crate::exec::{Error as ExecError, ExecOperator};
-use crate::expr::{Expr, Literal};
+use crate::exec::planner::select::{SelectPipelineConfig, WhereClauseState};
+use crate::exec::{Error as ExecError, ExecOperator, PhysicalExpr};
+use crate::expr::Dir;
+use crate::expr::logical::{
+	LogicalExpr, LogicalFields, LogicalLiteral, LogicalLookup, LogicalLookupSubject, LogicalOrder,
+	LogicalOrdering, LogicalRecordIdKey,
+};
+use crate::expr::lookup::LookupKind;
 
 /// Planned representation of a `->edge->vertex` fast-path collapse.
 pub(crate) struct TargetVertexPlan {
@@ -41,8 +47,8 @@ impl<'ctx> Planner<'ctx> {
 	pub(crate) async fn plan_index_function(
 		&self,
 		name: &str,
-		mut ast_args: Vec<Expr>,
-	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		mut args: Vec<LogicalExpr>,
+	) -> Result<Arc<dyn PhysicalExpr>, Error> {
 		use crate::exec::function::{IndexContext, IndexContextKind};
 		use crate::exec::physical_expr::function::IndexFunctionExec;
 
@@ -62,7 +68,7 @@ impl<'ctx> Planner<'ctx> {
 					),
 				})?;
 
-				if ref_idx >= ast_args.len() {
+				if ref_idx >= args.len() {
 					return Err(ExecError::Query {
 						message: format!(
 							"Index function '{}' requires at least {} arguments",
@@ -74,10 +80,11 @@ impl<'ctx> Planner<'ctx> {
 				}
 
 				// Extract the match_ref argument at plan time (not passed at runtime)
-				let match_ref_ast = ast_args.remove(ref_idx);
-				let match_ref = match match_ref_ast {
-					Expr::Literal(Literal::Integer(n)) if (0..=255).contains(&n) => n as u8,
-					Expr::Literal(Literal::Float(n))
+				let match_ref = match args.remove(ref_idx) {
+					LogicalExpr::Literal(LogicalLiteral::Integer(n)) if (0..=255).contains(&n) => {
+						n as u8
+					}
+					LogicalExpr::Literal(LogicalLiteral::Float(n))
 						if (0.0..=255.0).contains(&n) && n.fract() == 0.0 =>
 					{
 						n as u8
@@ -114,9 +121,9 @@ impl<'ctx> Planner<'ctx> {
 				// KNN functions: retrieve the KNN context from the planning context.
 				// If there's a ref argument, extract it (currently unused for single-KNN queries).
 				if let Some(ref_idx) = func.index_ref_arg_index()
-					&& ref_idx < ast_args.len()
+					&& ref_idx < args.len()
 				{
-					ast_args.remove(ref_idx);
+					args.remove(ref_idx);
 				}
 
 				let knn_ctx = self.knn_context.as_ref().ok_or_else(|| ExecError::Query {
@@ -130,8 +137,8 @@ impl<'ctx> Planner<'ctx> {
 		};
 
 		// Compile remaining arguments to physical expressions
-		let mut phys_args = Vec::with_capacity(ast_args.len());
-		for arg in ast_args {
+		let mut phys_args = Vec::with_capacity(args.len());
+		for arg in args {
 			phys_args.push(self.physical_expr(arg).await?);
 		}
 
@@ -145,15 +152,14 @@ impl<'ctx> Planner<'ctx> {
 		}))
 	}
 
-	/// Convert an `OrderList` to a `Vec<OrderByField>`.
+	/// Compile `ORDER BY` keys to the sort operator's fields.
 	pub(crate) async fn convert_order_list(
 		&self,
-		order_list: crate::expr::order::OrderList,
+		order_list: Vec<LogicalOrder>,
 	) -> Result<Vec<OrderByField>, Error> {
 		let mut fields = Vec::with_capacity(order_list.len());
 		for order_field in order_list {
-			let expr: Arc<dyn crate::exec::PhysicalExpr> =
-				self.convert_idiom(order_field.value).await?;
+			let expr: Arc<dyn PhysicalExpr> = self.physical_expr(order_field.value).await?;
 
 			let direction = if order_field.direction {
 				SortDirection::Asc
@@ -171,50 +177,38 @@ impl<'ctx> Planner<'ctx> {
 		Ok(fields)
 	}
 
-	/// Convert a `Bound<RecordIdKeyLit>` to a `Bound<Arc<dyn PhysicalExpr>>`.
+	/// Compile one bound of a record-id key range to a physical expression.
 	pub(crate) async fn convert_range_bound(
 		&self,
-		bound: &std::ops::Bound<crate::expr::RecordIdKeyLit>,
-	) -> Result<std::ops::Bound<Arc<dyn crate::exec::PhysicalExpr>>, Error> {
+		bound: &Bound<LogicalRecordIdKey>,
+	) -> Result<Bound<Arc<dyn PhysicalExpr>>, Error> {
 		match bound {
-			std::ops::Bound::Unbounded => Ok(std::ops::Bound::Unbounded),
-			std::ops::Bound::Included(lit) => {
-				let expr = key_lit_to_expr(lit)?;
+			Bound::Unbounded => Ok(Bound::Unbounded),
+			Bound::Included(key) => {
+				let expr = key_lit_to_expr(key)?;
 				let phys = self.physical_expr(expr).await?;
-				Ok(std::ops::Bound::Included(phys))
+				Ok(Bound::Included(phys))
 			}
-			std::ops::Bound::Excluded(lit) => {
-				let expr = key_lit_to_expr(lit)?;
+			Bound::Excluded(key) => {
+				let expr = key_lit_to_expr(key)?;
 				let phys = self.physical_expr(expr).await?;
-				Ok(std::ops::Bound::Excluded(phys))
+				Ok(Bound::Excluded(phys))
 			}
 		}
 	}
 
-	/// Plan a Lookup operation (graph edge or reference traversal).
+	/// Plan a Lookup operation (graph edge or reference traversal) over
+	/// `input`, the operator yielding the record ids to traverse from.
 	///
-	/// Builds a streaming operator chain rooted at `CurrentValueSource`.
-	/// At execution time, `LookupPart` sets `current_value` on the
-	/// `ExecutionContext` before executing this chain, so `CurrentValueSource`
-	/// yields the appropriate RecordId into the stream.
-	pub(crate) async fn plan_lookup(
-		&self,
-		lookup: crate::expr::lookup::Lookup,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
-		let input: Arc<dyn ExecOperator> = Arc::new(CurrentValueSource::new());
-		self.plan_lookup_with_input(input, lookup).await
-	}
-
-	/// Plan a Lookup operation with a specific input operator.
-	///
-	/// This is the core of lookup planning. When fusing consecutive lookups
-	/// into a single operator chain, the planner passes the output of one
-	/// lookup as the `input` to the next, instead of always creating a fresh
-	/// `CurrentValueSource`.
+	/// A single hop is planned over a `CurrentValueSource`: at execution
+	/// time, `LookupPart` sets `current_value` on the `ExecutionContext`
+	/// before executing the chain, so the source yields the RecordId into the
+	/// stream. When consecutive lookups fuse into one operator chain, the
+	/// planner passes the output of one hop as the `input` of the next.
 	pub(crate) async fn plan_lookup_with_input(
 		&self,
 		input: Arc<dyn ExecOperator>,
-		crate::expr::lookup::Lookup {
+		LogicalLookup {
 			kind,
 			expr,
 			only: _,
@@ -226,10 +220,10 @@ impl<'ctx> Planner<'ctx> {
 			limit,
 			start,
 			alias: _,
-		}: crate::expr::lookup::Lookup,
+		}: LogicalLookup,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		let needs_full_pipeline = expr.is_some() || group.is_some();
-		let is_graph = matches!(&kind, crate::expr::lookup::LookupKind::Graph(_));
+		let is_graph = matches!(&kind, LookupKind::Graph(_));
 		// For a graph lookup outside the full (expr/group) pipeline, compile
 		// the `cond` once and classify it so it can be pushed into the scan
 		// instead of a downstream `Filter`. A key-resident predicate (see
@@ -244,7 +238,7 @@ impl<'ctx> Planner<'ctx> {
 		)> = if is_graph && !needs_full_pipeline {
 			match &cond {
 				Some(c) => {
-					let pred = self.physical_expr(c.0.clone()).await?;
+					let pred = self.physical_expr(c.clone()).await?;
 					let key_resident = Self::graph_predicate_is_key_resident(&pred);
 					// A predicate that is not key-resident may still be
 					// payload-resident: every field it references inlined
@@ -256,7 +250,7 @@ impl<'ctx> Planner<'ctx> {
 					let payload = if key_resident {
 						None
 					} else {
-						self.graph_predicate_payload_spec(&c.0, &pred, &what, direction).await
+						self.graph_predicate_payload_spec(c, &pred, &what, direction).await
 					};
 					Some((pred, key_resident, payload))
 				}
@@ -281,19 +275,19 @@ impl<'ctx> Planner<'ctx> {
 		};
 
 		let base_scan: Arc<dyn ExecOperator> = match &kind {
-			crate::expr::lookup::LookupKind::Graph(dir) => {
+			LookupKind::Graph(dir) => {
 				let mut edge_tables: Vec<EdgeTableSpec> = Vec::with_capacity(what.len());
 				for s in what {
 					let spec = match s {
-						crate::expr::lookup::LookupSubject::Table {
+						LogicalLookupSubject::Table {
 							table,
 							..
 						} => EdgeTableSpec {
 							table,
-							range_start: std::ops::Bound::Unbounded,
-							range_end: std::ops::Bound::Unbounded,
+							range_start: Bound::Unbounded,
+							range_end: Bound::Unbounded,
 						},
-						crate::expr::lookup::LookupSubject::Range {
+						LogicalLookupSubject::Range {
 							table,
 							range,
 							..
@@ -358,7 +352,7 @@ impl<'ctx> Planner<'ctx> {
 					&& (order.is_none() || ordered_scan_cap)
 					&& group.is_none()
 				{
-					match get_effective_limit_literal(&start, &limit) {
+					match get_effective_limit_literal(start.as_ref(), limit.as_ref()) {
 						Some(effective_limit)
 							if graph_pushdown.is_some()
 								|| self.graph_limit_count_is_exact(&edge_tables).await =>
@@ -397,20 +391,20 @@ impl<'ctx> Planner<'ctx> {
 				};
 				Arc::new(scan)
 			}
-			crate::expr::lookup::LookupKind::Reference => {
+			LookupKind::Reference => {
 				let (referencing_table, referencing_field, range_start, range_end) =
 					if let Some(subject) = what.first() {
 						match subject {
-							crate::expr::lookup::LookupSubject::Table {
+							LogicalLookupSubject::Table {
 								table,
 								referencing_field,
 							} => (
 								Some(table.clone()),
 								referencing_field.clone(),
-								std::ops::Bound::Unbounded,
-								std::ops::Bound::Unbounded,
+								Bound::Unbounded,
+								Bound::Unbounded,
 							),
-							crate::expr::lookup::LookupSubject::Range {
+							LogicalLookupSubject::Range {
 								table,
 								referencing_field,
 								range,
@@ -421,7 +415,7 @@ impl<'ctx> Planner<'ctx> {
 							}
 						}
 					} else {
-						(None, None, std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
+						(None, None, Bound::Unbounded, Bound::Unbounded)
 					};
 
 				let ref_output_mode = if needs_full_records {
@@ -445,8 +439,8 @@ impl<'ctx> Planner<'ctx> {
 		if needs_full_pipeline {
 			let config = SelectPipelineConfig {
 				where_clause: match cond {
-					Some(c) => crate::exec::planner::select::WhereClauseState::Original(c),
-					None => crate::exec::planner::select::WhereClauseState::None,
+					Some(c) => WhereClauseState::Original(c),
+					None => WhereClauseState::None,
 				},
 				split,
 				group,
@@ -462,15 +456,16 @@ impl<'ctx> Planner<'ctx> {
 			let filtered: Arc<dyn ExecOperator> = match cond {
 				// Graph lookups pushed the predicate into the scan above.
 				Some(_) if graph_pushdown.is_some() => base_scan,
-				Some(cond) => Arc::new(Filter::new(base_scan, self.physical_expr(cond.0).await?)),
+				Some(cond) => Arc::new(Filter::new(base_scan, self.physical_expr(cond).await?)),
 				None => base_scan,
 			};
 
 			let split_op: Arc<dyn ExecOperator> = if let Some(splits) = split {
-				Arc::new(crate::exec::operators::Split::new(
-					filtered,
-					splits.into_iter().map(|s| s.0).collect(),
-				))
+				let mut keys = Vec::with_capacity(splits.len());
+				for expr in &splits {
+					keys.push(self.physical_expr(expr.clone()).await?);
+				}
+				Arc::new(crate::exec::operators::Split::new(filtered, splits, keys)?)
 			} else {
 				filtered
 			};
@@ -479,17 +474,19 @@ impl<'ctx> Planner<'ctx> {
 			// pipeline does: a bounded literal LIMIT gets a top-k heap
 			// instead of a full blocking sort.
 			let sorted: Arc<dyn ExecOperator> = match order {
-				Some(order) => self.plan_sort(split_op, order, &start, &limit, false).await?,
+				Some(order) => {
+					self.plan_sort(split_op, order, start.as_ref(), limit.as_ref(), false).await?
+				}
 				None => split_op,
 			};
 
 			let limited: Arc<dyn ExecOperator> = if limit.is_some() || start.is_some() {
 				let limit_expr = match limit {
-					Some(l) => Some(self.physical_expr(l.0).await?),
+					Some(l) => Some(self.physical_expr(l).await?),
 					None => None,
 				};
 				let offset_expr = match start {
-					Some(s) => Some(self.physical_expr(s.0).await?),
+					Some(s) => Some(self.physical_expr(s).await?),
 					None => None,
 				};
 				Arc::new(Limit::new(sorted, limit_expr, offset_expr))
@@ -506,10 +503,9 @@ impl<'ctx> Planner<'ctx> {
 	/// `id`), free of subqueries, functions, and side effects. Key-resident
 	/// predicates are applied before fetching the edge record. Conservative
 	/// — anything not provably key-resident is treated as
-	/// record-referencing, which only costs a fetch. Milestone E implements
-	/// the id-only recognizer; until then every predicate is
-	/// record-referencing.
-	fn graph_predicate_is_key_resident(_pred: &Arc<dyn crate::exec::PhysicalExpr>) -> bool {
+	/// record-referencing, which only costs a fetch. The id-only recognizer
+	/// is not implemented, so every predicate is record-referencing.
+	fn graph_predicate_is_key_resident(_pred: &Arc<dyn PhysicalExpr>) -> bool {
 		false
 	}
 
@@ -535,9 +531,9 @@ impl<'ctx> Planner<'ctx> {
 	/// evaluation trusts at read time.
 	async fn graph_predicate_payload_spec(
 		&self,
-		cond: &crate::expr::Expr,
+		cond: &LogicalExpr,
 		pred: &Arc<dyn crate::exec::PhysicalExpr>,
-		what: &[crate::expr::lookup::LookupSubject],
+		what: &[LogicalLookupSubject],
 		direction: LookupDirection,
 	) -> Option<crate::exec::operators::scan::PayloadPredicateSpec> {
 		use crate::catalog::providers::TableProvider;
@@ -552,15 +548,12 @@ impl<'ctx> Planner<'ctx> {
 		if pred.access_mode() != crate::exec::AccessMode::ReadOnly {
 			return None;
 		}
-		let deps = crate::expr::computed_deps::extract_computed_deps(cond);
-		if !deps.is_complete {
-			return None;
-		}
-		let needs_id = deps.fields.iter().any(|f| f == "id");
-		let needs_in = deps.fields.iter().any(|f| f == "in");
-		let needs_out = deps.fields.iter().any(|f| f == "out");
+		let roots = static_field_roots(cond, self.function_registry())?;
+		let needs_id = roots.iter().any(|f| f == "id");
+		let needs_in = roots.iter().any(|f| f == "in");
+		let needs_out = roots.iter().any(|f| f == "out");
 		let needed: Vec<&String> =
-			deps.fields.iter().filter(|f| !matches!(f.as_str(), "id" | "in" | "out")).collect();
+			roots.iter().filter(|f| !matches!(f.as_str(), "id" | "in" | "out")).collect();
 		if needed.is_empty() {
 			// A pure id/in/out predicate is key-resident: every field it
 			// reads is carried by the adjacency entry itself, so it prunes
@@ -592,11 +585,11 @@ impl<'ctx> Planner<'ctx> {
 		let mut tables = std::collections::HashMap::new();
 		for subject in what {
 			let table = match subject {
-				crate::expr::lookup::LookupSubject::Table {
+				LogicalLookupSubject::Table {
 					table,
 					..
 				}
-				| crate::expr::lookup::LookupSubject::Range {
+				| LogicalLookupSubject::Range {
 					table,
 					..
 				} => table,
@@ -707,18 +700,16 @@ impl<'ctx> Planner<'ctx> {
 	///
 	/// - Both be `Graph(dir)` lookups in the same direction.
 	/// - Have no edge/vertex-side filtering, projection, ordering, alias, sub-range, or `ONLY`
-	///   markers — the new layout only optimises the pure "walk through the edge to the target
-	///   table" case.
+	///   markers — the layout only optimises the pure "walk through the edge to the target table"
+	///   case.
 	/// - Reference only edge tables whose `SELECT` permission is `Permission::Full`. `Specific`
 	///   permissions would otherwise be bypassed by reading the target directly from the adjacency
 	///   key.
 	pub(crate) async fn try_fast_path_pair(
 		&self,
-		edge: &crate::expr::lookup::Lookup,
-		vertex: &crate::expr::lookup::Lookup,
+		edge: &LogicalLookup,
+		vertex: &LogicalLookup,
 	) -> Result<Option<TargetVertexPlan>, Error> {
-		use crate::expr::lookup::{LookupKind, LookupSubject};
-
 		// Both hops must be graph traversal in the same direction. The
 		// `d1 == d2` guard means the vertex-hop direction is exactly
 		// `edge_dir`, so we only bind the one we use.
@@ -745,13 +736,13 @@ impl<'ctx> Planner<'ctx> {
 		// path emits only the embedded target, dropping the source-side
 		// duplicate. Force the slow path on `<->` to preserve semantics;
 		// `->` and `<-` keep the optimisation.
-		if matches!(edge_dir, crate::expr::Dir::Both) {
+		if matches!(edge_dir, Dir::Both) {
 			return Ok(None);
 		}
 
 		// Neither hop may carry edge-side filtering, projection, or other
 		// clauses that depend on reading the edge / vertex record.
-		let lookup_is_plain = |l: &crate::expr::lookup::Lookup| {
+		let lookup_is_plain = |l: &LogicalLookup| {
 			l.expr.is_none()
 				&& l.cond.is_none()
 				&& l.split.is_none()
@@ -766,13 +757,13 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(None);
 		}
 
-		// We only support unbounded `LookupSubject::Table` subjects on both
-		// hops. Range subjects on the edge would change the bound semantics
-		// (and would need the trailing-target-aware bound construction);
-		// keep them on the slow path for now.
+		// Only unbounded `Table` subjects are supported on both hops. Range
+		// subjects on the edge would change the bound semantics (and would
+		// need the trailing-target-aware bound construction); they stay on
+		// the slow path.
 		let mut edge_tables: Vec<EdgeTableSpec> = Vec::with_capacity(edge.what.len());
 		for s in &edge.what {
-			let LookupSubject::Table {
+			let LogicalLookupSubject::Table {
 				table,
 				..
 			} = s
@@ -781,8 +772,8 @@ impl<'ctx> Planner<'ctx> {
 			};
 			edge_tables.push(EdgeTableSpec {
 				table: table.clone(),
-				range_start: std::ops::Bound::Unbounded,
-				range_end: std::ops::Bound::Unbounded,
+				range_start: Bound::Unbounded,
+				range_end: Bound::Unbounded,
 			});
 		}
 		// The edge `what` list must be non-empty so we can resolve each
@@ -795,7 +786,7 @@ impl<'ctx> Planner<'ctx> {
 
 		let mut target_tables: Vec<TableName> = Vec::with_capacity(vertex.what.len());
 		for s in &vertex.what {
-			let LookupSubject::Table {
+			let LogicalLookupSubject::Table {
 				table,
 				..
 			} = s
@@ -875,49 +866,153 @@ impl<'ctx> Planner<'ctx> {
 	}
 }
 
+/// The root field names `expr` reads off the row, sorted, or `None` when
+/// some construct in it may read the row other than by a static field name:
+/// a parameter, a row parameter or the document, a nested plan, a lookup, a
+/// recursion, a closure or method call, a projection function, a path part
+/// evaluated per element, or a dynamic index. Such an expression may reach
+/// any field, so the set cannot be known.
+fn static_field_roots(
+	expr: &LogicalExpr,
+	registry: &crate::exec::function::FunctionRegistry,
+) -> Option<Vec<String>> {
+	use std::collections::BTreeSet;
+	use std::ops::ControlFlow;
+
+	use crate::expr::Function;
+
+	let mut roots = BTreeSet::new();
+	let complete = expr
+		.visit(&mut |e| {
+			let known = match e {
+				LogicalExpr::Field(name) => {
+					roots.insert(name.to_string());
+					true
+				}
+				LogicalExpr::Literal(_)
+				| LogicalExpr::Array(_)
+				| LogicalExpr::Set(_)
+				| LogicalExpr::Object(_)
+				| LogicalExpr::RecordId(_)
+				| LogicalExpr::Table(_)
+				| LogicalExpr::Constant(_)
+				| LogicalExpr::Access {
+					..
+				}
+				| LogicalExpr::Prefix {
+					..
+				}
+				| LogicalExpr::Postfix {
+					..
+				}
+				| LogicalExpr::Invoke {
+					..
+				}
+				| LogicalExpr::Binary {
+					..
+				}
+				| LogicalExpr::If(_) => true,
+				// The index is evaluated against the row, so a literal one is
+				// as static as a field name; any other may read anything.
+				LogicalExpr::Index {
+					index,
+					..
+				} => matches!(index.as_ref(), LogicalExpr::Literal(_)),
+				LogicalExpr::Call(call) => match &call.receiver {
+					Function::Normal(name) => !registry.is_projection(name),
+					Function::Custom(_)
+					| Function::Script(_)
+					| Function::Model(_)
+					| Function::Module(..)
+					| Function::Silo {
+						..
+					} => false,
+				},
+				LogicalExpr::Param(_)
+				| LogicalExpr::Current
+				| LogicalExpr::Doc
+				| LogicalExpr::Subquery(_)
+				| LogicalExpr::Lookup {
+					..
+				}
+				| LogicalExpr::Recurse(_)
+				| LogicalExpr::RepeatRecurse(_)
+				| LogicalExpr::Closure(_)
+				| LogicalExpr::Method {
+					..
+				}
+				| LogicalExpr::First(_)
+				| LogicalExpr::Last(_)
+				| LogicalExpr::Each(_)
+				| LogicalExpr::Flatten {
+					..
+				}
+				| LogicalExpr::Filter {
+					..
+				}
+				| LogicalExpr::Destructure {
+					..
+				}
+				| LogicalExpr::Optional {
+					..
+				}
+				| LogicalExpr::Broadcast {
+					..
+				}
+				| LogicalExpr::SetField {
+					..
+				}
+				| LogicalExpr::Throw(_)
+				| LogicalExpr::Break
+				| LogicalExpr::Continue => false,
+			};
+			if known {
+				ControlFlow::Continue(())
+			} else {
+				ControlFlow::Break(())
+			}
+		})
+		.is_continue();
+	complete.then(|| roots.into_iter().collect())
+}
+
 /// Whether an ORDER clause is exactly one plain ascending `id` key — no
 /// collation, no numeric coercion, no nested path. This is the ordering a
 /// single adjacency scope's pointer keys already emit, which is what lets
 /// a LIMIT be capped at the scan beneath the sort.
-fn order_is_plain_id_asc(order: &crate::expr::order::Ordering) -> bool {
-	let crate::expr::order::Ordering::Order(list) = order else {
+fn order_is_plain_id_asc(order: &LogicalOrdering) -> bool {
+	let LogicalOrdering::Order(list) = order else {
 		return false;
 	};
-	let [key] = list.0.as_slice() else {
+	let [key] = list.as_slice() else {
 		return false;
 	};
 	key.direction
 		&& !key.collate
 		&& !key.numeric
-		&& matches!(key.value.0.as_slice(), [crate::expr::Part::Field(f)] if f.as_str() == "id")
+		&& matches!(&key.value, LogicalExpr::Field(name) if name.as_str() == "id")
 }
 
 /// Whether an `ORDER BY id` key (already confirmed plain-ascending by
-/// `order_is_plain_id_asc`) still refers to the edge's own id once the
+/// [`order_is_plain_id_asc`]) still names the edge's own id once the
 /// lookup's field list is taken into account.
 ///
-/// The guard invokes `resolve_order_by_alias` — the same resolver the sort
-/// planner (`plan_sort_consolidated`) applies to each ORDER BY key — and
-/// admits only the resolutions that planner maps to the row's own id: no
-/// resolution at all, or a bare single-part `id` idiom (the `SELECT id`
-/// projection naming the field it sorts by). Any other resolution means a
-/// field list aliased a different expression to the literal name `id`, so
-/// the sort orders by that expression and the scan's ascending-edge-id
-/// emission order no longer matches it. This admission can drift from the
-/// sort's behaviour only if the sort planner adopts an alias mechanism
-/// other than `resolve_order_by_alias`; the alias-shadowing cases in
-/// `kvs::tests::graph_ordered_limit_test` pin the two together end to end.
-fn order_by_id_is_source_id(fields: Option<&crate::expr::Fields>) -> bool {
+/// The guard invokes [`resolve_order_by_alias`] — the same resolver the sort
+/// planner applies to each ORDER BY key — and admits only the resolutions
+/// that planner maps to the row's own id: no resolution at all, or a bare
+/// `id` field read (the `SELECT id` projection naming the field it sorts
+/// by). Any other resolution means the field list landed a different
+/// expression under the name `id`, so the sort orders by that expression and
+/// the scan's ascending-edge-id emission order no longer matches it.
+fn order_by_id_is_source_id(fields: Option<&LogicalFields>) -> bool {
 	let Some(fields) = fields else {
 		return true;
 	};
-	let id_idiom = crate::expr::Idiom(crate::expr::paths::ID.to_vec());
-	match crate::exec::expression_registry::resolve_order_by_alias(&id_idiom, fields) {
+	let id = LogicalExpr::Field(Strand::new_static("id"));
+	match crate::exec::expression_registry::resolve_order_by_alias(&id, fields) {
 		None => true,
-		Some((resolved, _)) => matches!(
-			&resolved,
-			crate::expr::Expr::Idiom(idiom)
-				if matches!(idiom.0.as_slice(), [crate::expr::Part::Field(f)] if f.as_str() == "id")
-		),
+		Some((resolved, _)) => {
+			matches!(&resolved, LogicalExpr::Field(name) if name.as_str() == "id")
+		}
 	}
 }

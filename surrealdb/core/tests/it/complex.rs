@@ -1,6 +1,7 @@
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
+use surrealdb_rpc::capabilities::NewPlannerStrategy;
 use surrealdb_types::{Error as TypesError, Value};
 
 use crate::helpers::{new_ds, with_enough_stack};
@@ -198,12 +199,15 @@ fn ok_cast_chain_depth() -> Result<()> {
 	})
 }
 
+/// The legacy evaluator charges every cast against the computation-depth
+/// budget, so a chain deeper than the budget is refused before it is
+/// evaluated.
 #[test]
 fn excessive_cast_chain_depth() -> Result<()> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		// Run a casting query which will fail (either while parsing or executing)
-		let mut res = run_queries(&cast_chain(125)).await;
+		let mut res = run_queries_as(&cast_chain(125), NewPlannerStrategy::ComputeOnly).await;
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap();
@@ -218,12 +222,57 @@ fn excessive_cast_chain_depth() -> Result<()> {
 	})
 }
 
+/// The streaming planner charges every cast it compiles against the same
+/// budget, so a chain of casts that convert is refused at the same depth
+/// (the parser's own expression-depth limit lies just above it).
+#[test]
+fn excessive_converting_cast_chain_depth() -> Result<()> {
+	with_enough_stack(async {
+		for strategy in [NewPlannerStrategy::ComputeOnly, NewPlannerStrategy::AllReadOnlyStatements]
+		{
+			let mut res = run_queries_as(&converting_cast_chain(125), strategy).await;
+			assert_eq!(res.len(), 1);
+			let err = res.next().unwrap().unwrap_err();
+			assert_eq!(
+				err.message(),
+				"Reached excessive computation depth due to functions, subqueries, or computed values",
+				"{strategy:?}"
+			);
+		}
+		Ok(())
+	})
+}
+
+/// A cast to the kind its operand already has is removed when the plan is
+/// bound, so a chain of such casts, however deep, never reaches the evaluator
+/// whose depth is bounded: the parser's expression-depth limit bounds the
+/// chain instead, and the statement yields the value.
+#[test]
+fn a_redundant_cast_chain_collapses_on_the_streaming_engine() -> Result<()> {
+	with_enough_stack(async {
+		let mut res =
+			run_queries_as(&cast_chain(125), NewPlannerStrategy::AllReadOnlyStatements).await;
+		assert_eq!(res.len(), 1);
+		let val = res.next().unwrap()?;
+		assert_eq!(val, Value::from_vec(vec![Value::from_int(5)]));
+		Ok(())
+	})
+}
+
 async fn run_queries(
 	sql: &str,
 ) -> impl ExactSizeIterator<Item = std::result::Result<Value, TypesError>> + DoubleEndedIterator + 'static
 {
+	run_queries_as(sql, NewPlannerStrategy::default()).await
+}
+
+async fn run_queries_as(
+	sql: &str,
+	strategy: NewPlannerStrategy,
+) -> impl ExactSizeIterator<Item = std::result::Result<Value, TypesError>> + DoubleEndedIterator + 'static
+{
 	let (_, dbs) = new_ds("test", "test", false).await.expect("Failed to create new datastore");
-	let ses = Session::owner().with_ns("test").with_db("test");
+	let ses = Session::owner().with_ns("test").with_db("test").new_planner_strategy(strategy);
 	dbs.execute(sql, &ses, None)
 		.await
 		.expect("Failed to execute query")
@@ -235,6 +284,21 @@ fn cast_chain(n: usize) -> String {
 	let mut sql = String::from("SELECT * FROM ");
 	for _ in 0..n {
 		sql.push_str("<int>");
+	}
+	sql.push_str("5;");
+	sql
+}
+
+/// A chain of `n` casts alternating between `int` and `string`, each of
+/// which converts its operand, so none is redundant.
+fn converting_cast_chain(n: usize) -> String {
+	let mut sql = String::from("SELECT * FROM ");
+	for i in 0..n {
+		sql.push_str(if i % 2 == 0 {
+			"<int>"
+		} else {
+			"<string>"
+		});
 	}
 	sql.push_str("5;");
 	sql

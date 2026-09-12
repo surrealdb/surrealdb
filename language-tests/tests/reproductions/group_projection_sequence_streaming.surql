@@ -15,12 +15,15 @@ each call hands out a value no other call will, and the values it has
 handed out outlive the statement, so the number of evaluations is itself
 part of what the statement did. Reducing it would let the grouping decide
 how many values a query consumes, and would consume one for a `GROUP ALL`
-that matched no rows at all — an allocation with no row to show for it.
+that matched no rows at all — which is what the legacy path does, since
+`GROUP ALL` has its group whatever reaches it.
 
 So it stays on the per-row path here: one group of three rows consumes
 three values and reports all three, the next call continues from 3, and
-the empty `GROUP ALL` consumes nothing, leaving `t` still at its start.
-The legacy path reduces instead, reporting one value and consuming one.
+the empty `GROUP ALL` collects no per-row value at all — an empty list,
+with `t` still at its start. The legacy path reduces instead, reporting
+one value and consuming one, for a group of three rows and for a group
+of none alike.
 
 Whether the reduced reading is the better one is a product call about
 side effects rather than about values, and it is not the question this
@@ -53,7 +56,7 @@ value = "[{ g: 'a', k: [0, 1, 2] }]"
 value = "3"
 
 [[test.results]]
-value = "NONE"
+value = "[{ k: [] }]"
 
 [[test.results]]
 value = "0"
@@ -72,9 +75,7 @@ CREATE items:3 SET g = 'a';
 SELECT sequence::nextval('s') AS k, g FROM items GROUP BY g;
 RETURN sequence::nextval('s');
 
--- A GROUP ALL over a table with no rows. The select is bound rather than
--- returned because the two engines also disagree about the shape of an empty
--- GROUP ALL's output, which is pinned on its own elsewhere; what this asks is
--- only whether producing it consumed a sequence value.
-LET $_ = (SELECT sequence::nextval('t') AS k FROM empty GROUP ALL);
+-- A GROUP ALL over a table with no rows. Both what the group reports and
+-- whether a value was consumed to report it are the divergence here.
+SELECT sequence::nextval('t') AS k FROM empty GROUP ALL;
 RETURN sequence::nextval('t');

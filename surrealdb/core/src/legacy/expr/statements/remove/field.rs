@@ -11,7 +11,6 @@ use crate::doc::CursorDoc;
 use crate::expr::Base;
 use crate::expr::statements::remove::field::RemoveFieldStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::key::schema::FieldKey;
 use crate::legacy::{expr_to_ident, expr_to_idiom};
 use crate::val::Value;
 
@@ -64,13 +63,7 @@ pub(crate) async fn remove_field_statement_compute(
 		}
 	};
 	// Delete the definition
-	let key = FieldKey {
-		ns,
-		db,
-		tb: std::borrow::Cow::Borrowed(&table_name),
-		fd: std::borrow::Cow::Borrowed(&name),
-	};
-	txn.del_key(&key).await?;
+	txn.del_tb_field(ns, db, &table_name, &name).await?;
 	// If the removed field declared a REFERENCE, purge the reference keys it
 	// wrote. Those keys live under the referenced (target) record's range,
 	// keyed by the referencing (table, field) rather than under the removed

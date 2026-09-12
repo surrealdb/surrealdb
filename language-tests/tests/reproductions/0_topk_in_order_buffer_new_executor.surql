@@ -41,13 +41,37 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: created_at, http_status]\n    Limit [ctx: Db] [limit: 3]\n        SortTopKByKey [ctx: Db] [sort_keys: created_at DESC, limit: 3]\n            Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]\n                UnionIndexScan [ctx: Db] [table: record, branches: 2, downstream_topk: true]\n                    IndexScan [ctx: Db] [index: idx_status, access: = 200, direction: Forward]\n                    IndexScan [ctx: Db] [index: idx_status, access: = 201, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: created_at, http_status]
+    Limit [ctx: Db] [limit: 3]
+        SortTopKByKey [ctx: Db] [sort_keys: created_at DESC, limit: 3]
+            Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
+                UnionIndexScan [ctx: Db] [table: record, branches: 2, downstream_topk: true]
+                    IndexScan [ctx: Db] [index: idx_status, access: = 200, direction: Forward]
+                    IndexScan [ctx: Db] [index: idx_status, access: = 201, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: created_at, http_status]\n    Limit [ctx: Db] [limit: 3]\n        SortTopKByKey [ctx: Db] [sort_keys: created_at ASC, limit: 3]\n            Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]\n                UnionIndexScan [ctx: Db] [table: record, branches: 2, downstream_topk: true]\n                    IndexScan [ctx: Db] [index: idx_status, access: = 200, direction: Forward]\n                    IndexScan [ctx: Db] [index: idx_status, access: = 201, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: created_at, http_status]
+    Limit [ctx: Db] [limit: 3]
+        SortTopKByKey [ctx: Db] [sort_keys: created_at ASC, limit: 3]
+            Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
+                UnionIndexScan [ctx: Db] [table: record, branches: 2, downstream_topk: true]
+                    IndexScan [ctx: Db] [index: idx_status, access: = 200, direction: Forward]
+                    IndexScan [ctx: Db] [index: idx_status, access: = 201, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: created_at, http_status]\n    Limit [ctx: Db] [limit: 3, offset: 2]\n        SortTopKByKey [ctx: Db] [sort_keys: created_at DESC, limit: 5]\n            Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]\n                UnionIndexScan [ctx: Db] [table: record, branches: 2, downstream_topk: true]\n                    IndexScan [ctx: Db] [index: idx_status, access: = 200, direction: Forward]\n                    IndexScan [ctx: Db] [index: idx_status, access: = 201, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: created_at, http_status]
+    Limit [ctx: Db] [limit: 3, offset: 2]
+        SortTopKByKey [ctx: Db] [sort_keys: created_at DESC, limit: 5]
+            Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
+                UnionIndexScan [ctx: Db] [table: record, branches: 2, downstream_topk: true]
+                    IndexScan [ctx: Db] [index: idx_status, access: = 200, direction: Forward]
+                    IndexScan [ctx: Db] [index: idx_status, access: = 201, direction: Forward]
+''''
 */
 
 -- Single-column index on the IN-list column only.  ORDER BY is on

@@ -27,22 +27,24 @@ value = "NONE"
 value = "[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, dist] {rows: 2}
-    Compute [ctx: Db] [fields: dist = vector::distance::knn(...)] {rows: 2}
+value = '''
+'SelectProject [ctx: Db] [projections: id, dist] {rows: 2}
+    Compute [ctx: Db] [fields: dist = vector::distance::knn()] {rows: 2}
         KnnScan [ctx: Db] [index: hnsw_pts, k: 2, ef: 100, dimension: 4] {rows: 2}
 
-Total rows: 2"'''
+Total rows: 2''''
 
 [[test.results]]
 value = "[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, dist] {rows: 2}
-    Compute [ctx: Db] [fields: dist = vector::distance::knn(...)] {rows: 2}
+value = '''
+'SelectProject [ctx: Db] [projections: id, dist] {rows: 2}
+    Compute [ctx: Db] [fields: dist = vector::distance::knn()] {rows: 2}
         KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 4] {rows: 2}
             TableScan [ctx: Db] [table: pts, direction: Forward] {rows: 3}
 
-Total rows: 2"'''
+Total rows: 2''''
 
 [[test.results]]
 value = "[]"

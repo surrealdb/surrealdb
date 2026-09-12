@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 //! Reproduction: COUNT-index read latency scales with the un-compacted
 //! `!iu` delta backlog, independently of how many records the table holds.
 //!

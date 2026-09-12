@@ -15,6 +15,24 @@ use crate::expr::{ClosureExpr, Expr, Kind, Param};
 /// concrete type it constructed in order to invoke the closure.
 pub trait BuiltinClosureObj: Send + Sync + 'static {
 	fn as_any(&self) -> &dyn std::any::Any;
+
+	/// Render the closure as SurrealQL. An implementation that keeps its
+	/// source renders that; the default is an opaque placeholder for a
+	/// closure that has none.
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(r#"|| THROW "builtin""#);
+	}
+
+	/// Whether `other` denotes the same closure as this one.
+	///
+	/// Consulted by [`Closure`]'s equality once identity has been ruled out:
+	/// an implementation that keeps its source compares it (and whatever it
+	/// captured) so two separately created values of the same closure are
+	/// equal, as two `Closure::Expr` values are. The default holds that two
+	/// distinct objects are distinct closures.
+	fn dyn_eq(&self, _other: &dyn BuiltinClosureObj) -> bool {
+		false
+	}
 }
 
 #[derive(Clone)]
@@ -69,17 +87,10 @@ impl PartialEq for Closure {
 					captures: captures2,
 				},
 			) => args1 == args2 && returns1 == returns2 && body1 == body2 && captures1 == captures2,
-			(
-				Closure::Builtin {
-					..
-				},
-				Closure::Builtin {
-					..
-				},
-			) => {
-				// Builtin closures cannot be meaningfully compared
-				false
-			}
+			// The same object is the same closure; otherwise the implementation
+			// decides, so a closure value is at least equal to itself and a
+			// compiled closure compares structurally.
+			(Closure::Builtin(a), Closure::Builtin(b)) => Arc::ptr_eq(a, b) || a.dyn_eq(b.as_ref()),
 			_ => false,
 		}
 	}
@@ -173,11 +184,7 @@ impl ToSql for Closure {
 				}
 				write_sql!(f, sql_fmt, " {}", body);
 			}
-			Closure::Builtin {
-				..
-			} => {
-				write_sql!(f, sql_fmt, r#"|| THROW "builtin""#);
-			}
+			Closure::Builtin(obj) => obj.fmt_sql(f, sql_fmt),
 		}
 	}
 }

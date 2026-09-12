@@ -10,11 +10,13 @@ use super::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
 };
 use crate::catalog::{Index, IndexDefinition};
-use crate::exec::planner::util::try_literal_to_value;
+use crate::exec::planner::util::{
+	expr_contains_matches, idiom_matches_column, idiom_matches_containment, try_literal_to_value,
+};
+use crate::expr::logical::{LogicalExpr, LogicalOrdering};
 use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
-use crate::expr::order::Ordering;
 use crate::expr::with::With;
-use crate::expr::{BinaryOperator, Cond, Expr, Idiom};
+use crate::expr::{BinaryOperator, Idiom, Part};
 use crate::kvs::Direction;
 use crate::val::{Number, Range, Value};
 
@@ -38,7 +40,11 @@ impl<'a> IndexAnalyzer<'a> {
 	/// Analyze conditions and ORDER BY to find candidate access paths.
 	///
 	/// Returns a list of index candidates that could be used for this query.
-	pub fn analyze(&self, cond: Option<&Cond>, order: Option<&Ordering>) -> Vec<IndexCandidate> {
+	pub fn analyze(
+		&self,
+		cond: Option<&LogicalExpr>,
+		order: Option<&LogicalOrdering>,
+	) -> Vec<IndexCandidate> {
 		let mut candidates = Vec::new();
 
 		// Skip analysis if indexes are empty
@@ -48,15 +54,15 @@ impl<'a> IndexAnalyzer<'a> {
 
 		// Analyze WHERE conditions
 		if let Some(cond) = cond {
-			// First, collect all simple conditions (idiom op value)
+			// First, collect all simple conditions (path op value)
 			let mut conditions = Vec::new();
-			self.collect_conditions(&cond.0, &mut conditions);
+			self.collect_conditions(cond, &mut conditions);
 
 			// Try to build compound index access for multi-column indexes
 			self.analyze_compound_conditions(&conditions, &mut candidates);
 
 			// Also analyze for single-column matches and special operators
-			self.analyze_condition(&cond.0, &mut candidates);
+			self.analyze_condition(cond, &mut candidates);
 		}
 
 		// Analyze ORDER BY for index-ordered scans
@@ -94,7 +100,11 @@ impl<'a> IndexAnalyzer<'a> {
 	/// into an `AccessPath::Union`. If any branch lacks an index candidate, the
 	/// union cannot be used and `None` is returned (the caller should fall back
 	/// to a table scan).
-	pub fn try_or_union(&self, cond: Option<&Cond>, direction: Direction) -> Option<AccessPath> {
+	pub fn try_or_union(
+		&self,
+		cond: Option<&LogicalExpr>,
+		direction: Direction,
+	) -> Option<AccessPath> {
 		let cond = cond?;
 
 		// Check for WITH NOINDEX
@@ -102,7 +112,7 @@ impl<'a> IndexAnalyzer<'a> {
 			return None;
 		}
 
-		self.or_union_from_expr(&cond.0, direction).map(|(path, _)| path)
+		self.or_union_from_expr(cond, direction).map(|(path, _)| path)
 	}
 
 	/// Build a multi-index union `AccessPath` from a single OR expression.
@@ -118,7 +128,7 @@ impl<'a> IndexAnalyzer<'a> {
 	/// candidate (the caller must fall back to a table scan).
 	fn or_union_from_expr(
 		&self,
-		or_expr: &Expr,
+		or_expr: &LogicalExpr,
 		direction: Direction,
 	) -> Option<(AccessPath, u32)> {
 		// Flatten OR branches from the expression tree
@@ -134,8 +144,7 @@ impl<'a> IndexAnalyzer<'a> {
 		let mut branch_paths = Vec::with_capacity(branches.len());
 		let mut min_score = u32::MAX;
 		for branch_expr in branches {
-			let branch_cond = Cond(branch_expr.clone());
-			let candidates = self.analyze(Some(&branch_cond), None);
+			let candidates = self.analyze(Some(branch_expr), None);
 			if candidates.is_empty() {
 				// This branch has no index — cannot use union
 				return None;
@@ -211,7 +220,7 @@ impl<'a> IndexAnalyzer<'a> {
 	/// user has already pinned the plan.
 	pub fn try_and_nested_or_union(
 		&self,
-		cond: Option<&Cond>,
+		cond: Option<&LogicalExpr>,
 		direction: Direction,
 	) -> Option<(AccessPath, u32)> {
 		let cond = cond?;
@@ -228,14 +237,14 @@ impl<'a> IndexAnalyzer<'a> {
 		// union here would demote the KNN to a residual that no longer
 		// restricts rows to the neighbour set, returning rows outside it. Leave
 		// any KNN query to drive from its KnnScan.
-		if Self::expr_contains_knn(&cond.0) {
+		if Self::expr_contains_knn(cond) {
 			return None;
 		}
 
 		// Only meaningful for a conjunction. A top-level OR is already
 		// handled by `try_or_union`.
 		let mut conjuncts = Vec::new();
-		Self::flatten_and(&cond.0, &mut conjuncts);
+		Self::flatten_and(cond, &mut conjuncts);
 		if conjuncts.len() < 2 {
 			return None;
 		}
@@ -246,7 +255,7 @@ impl<'a> IndexAnalyzer<'a> {
 		for conjunct in conjuncts {
 			if !matches!(
 				conjunct,
-				Expr::Binary {
+				LogicalExpr::Binary {
 					op: BinaryOperator::Or,
 					..
 				}
@@ -294,7 +303,7 @@ impl<'a> IndexAnalyzer<'a> {
 	/// therefore unusable for subtraction).
 	pub(crate) fn try_bitmap_fusion(
 		&self,
-		cond: Option<&Cond>,
+		cond: Option<&LogicalExpr>,
 		candidates: &[IndexCandidate],
 		exact_col: &dyn Fn(&Idiom) -> bool,
 	) -> Option<BitmapPlan> {
@@ -308,11 +317,11 @@ impl<'a> IndexAnalyzer<'a> {
 		// fused by [`Self::try_knn_prefilter`] into the scan's allow-list
 		// bitmap instead (#548) — the query never becomes a plain
 		// `BitmapFusion` source.
-		if Self::expr_contains_knn(&cond.0) {
+		if Self::expr_contains_knn(cond) {
 			return None;
 		}
 		let mut conjuncts = Vec::new();
-		Self::flatten_and(&cond.0, &mut conjuncts);
+		Self::flatten_and(cond, &mut conjuncts);
 		if conjuncts.len() < 2 {
 			return None;
 		}
@@ -353,11 +362,11 @@ impl<'a> IndexAnalyzer<'a> {
 		// branch is independently bitmap-capable.
 		for conjunct in &conjuncts {
 			let path = match conjunct {
-				Expr::Binary {
+				LogicalExpr::Binary {
 					op: BinaryOperator::Or,
 					..
 				} => self.or_union_from_expr(conjunct, Direction::Forward).map(|(p, _)| p),
-				Expr::Binary {
+				LogicalExpr::Binary {
 					op:
 						BinaryOperator::Inside
 						| BinaryOperator::ContainAll
@@ -365,12 +374,9 @@ impl<'a> IndexAnalyzer<'a> {
 						| BinaryOperator::AllInside
 						| BinaryOperator::AnyInside,
 					..
-				} => {
-					let single = Cond((*conjunct).clone());
-					self.try_in_expansion(Some(&single), Direction::Forward).or_else(|| {
-						self.try_containment_expansion(Some(&single), Direction::Forward)
-					})
-				}
+				} => self
+					.try_in_expansion(Some(conjunct), Direction::Forward)
+					.or_else(|| self.try_containment_expansion(Some(conjunct), Direction::Forward)),
 				_ => None,
 			};
 			if let Some(path) = path
@@ -458,7 +464,7 @@ impl<'a> IndexAnalyzer<'a> {
 	/// Sort; an ordering nothing covers installs a Sort above either plan.
 	pub(crate) fn try_bitmap_union_fusion(
 		&self,
-		cond: Option<&Cond>,
+		cond: Option<&LogicalExpr>,
 		direction: Direction,
 	) -> Option<(BitmapPlan, AccessPath)> {
 		let cond = cond?;
@@ -468,19 +474,19 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 		// A KNN operator must be consumed by its KnnScan; see
 		// [`Self::try_bitmap_fusion`].
-		if Self::expr_contains_knn(&cond.0) {
+		if Self::expr_contains_knn(cond) {
 			return None;
 		}
 		if !matches!(
-			cond.0,
-			Expr::Binary {
+			cond,
+			LogicalExpr::Binary {
 				op: BinaryOperator::Or,
 				..
 			}
 		) {
 			return None;
 		}
-		let (path, _) = self.or_union_from_expr(&cond.0, direction)?;
+		let (path, _) = self.or_union_from_expr(cond, direction)?;
 		match Self::bitmap_plan_from_access_path(&path)? {
 			BitmapPlan::Or(children)
 				if children.len() >= 2 && !Self::equality_branches_disjoint(&children) =>
@@ -525,20 +531,20 @@ impl<'a> IndexAnalyzer<'a> {
 	/// Match a negated expression: the `!` prefix operator, or the builtin
 	/// `not()` function — the parsed form of `NOT (...)`. Both negate
 	/// truthiness identically.
-	pub(crate) fn as_negated_expr(expr: &Expr) -> Option<&Expr> {
+	pub(crate) fn as_negated_expr(expr: &LogicalExpr) -> Option<&LogicalExpr> {
 		match expr {
-			Expr::Prefix {
+			LogicalExpr::Prefix {
 				op: PrefixOperator::Not,
 				expr: inner,
 			} => Some(inner),
-			Expr::FunctionCall(call)
-				if call.arguments.len() == 1
+			LogicalExpr::Call(call)
+				if call.args.len() == 1
 					&& matches!(
 						&call.receiver,
 						crate::expr::function::Function::Normal(name) if name == "not"
 					) =>
 			{
-				Some(&call.arguments[0])
+				Some(&call.args[0])
 			}
 			_ => None,
 		}
@@ -699,33 +705,32 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// Recognize a single-hop graph containment conjunct as a reachability
-	/// semi-join leaf (issue #549): `->edge->vertex CONTAINS vertex:lit` or
-	/// the flipped `vertex:lit INSIDE ->edge->vertex`.
+	/// semi-join leaf: `->edge->vertex CONTAINS vertex:lit` or the flipped
+	/// `vertex:lit INSIDE ->edge->vertex`.
 	///
 	/// Admitted only when the truth set is exactly "rows adjacent to the
-	/// literal": two bare lookup parts in one fixed direction, plain table
-	/// subjects, no lookup clauses, and a plan-time record-id literal whose
-	/// table the vertex hop names. The produced leaf traverses the INVERSE
-	/// direction from the literal. Anything else — multi-hop, `<->`,
-	/// ranges, edge conditions, unfolded parameters — keeps today's
+	/// literal": two bare lookup hops over the row in one fixed direction,
+	/// plain table subjects, no lookup clauses, and a plan-time record-id
+	/// literal whose table the vertex hop names. The produced leaf traverses
+	/// the INVERSE direction from the literal. Anything else — multi-hop,
+	/// `<->`, ranges, edge conditions, unfolded parameters — keeps the
 	/// per-row evaluation.
-	fn graph_semijoin_leaf(conjunct: &Expr) -> Option<BitmapPlan> {
-		use crate::expr::part::Part;
-		let (idiom, lit) = match conjunct {
-			Expr::Binary {
+	fn graph_semijoin_leaf(conjunct: &LogicalExpr) -> Option<BitmapPlan> {
+		let (path, lit) = match conjunct {
+			LogicalExpr::Binary {
 				left,
 				op: BinaryOperator::Contain,
 				right,
 			} => match (&**left, &**right) {
-				(Expr::Idiom(idiom), Expr::Literal(lit)) => (idiom, lit),
+				(path, lit) if path.is_path() => (path, lit),
 				_ => return None,
 			},
-			Expr::Binary {
+			LogicalExpr::Binary {
 				left,
 				op: BinaryOperator::Inside,
 				right,
 			} => match (&**left, &**right) {
-				(Expr::Literal(lit), Expr::Idiom(idiom)) => (idiom, lit),
+				(lit, path) if path.is_path() => (path, lit),
 				_ => return None,
 			},
 			_ => return None,
@@ -733,9 +738,34 @@ impl<'a> IndexAnalyzer<'a> {
 		let Some(Value::RecordId(anchor)) = try_literal_to_value(lit) else {
 			return None;
 		};
-		let [Part::Lookup(edge_hop), Part::Lookup(vertex_hop)] = idiom.0.as_slice() else {
+		// Two hops over the row: lowering places a run of lookups that
+		// continues nowhere inside a `Broadcast` over the current value, or
+		// bare when nothing follows; both spell the same path.
+		let hops = match path {
+			LogicalExpr::Broadcast {
+				base,
+				body,
+				..
+			} if matches!(**base, LogicalExpr::Current) => &**body,
+			other => other,
+		};
+		let LogicalExpr::Lookup {
+			base,
+			lookup: vertex_hop,
+		} = hops
+		else {
 			return None;
 		};
+		let LogicalExpr::Lookup {
+			base,
+			lookup: edge_hop,
+		} = &**base
+		else {
+			return None;
+		};
+		if !matches!(**base, LogicalExpr::Current) {
+			return None;
+		}
 		let (edge_tables, dir) = Self::plain_graph_hop(edge_hop)?;
 		let (vertex_tables, vertex_dir) = Self::plain_graph_hop(vertex_hop)?;
 		if dir != vertex_dir || edge_tables.is_empty() {
@@ -759,14 +789,15 @@ impl<'a> IndexAnalyzer<'a> {
 		})
 	}
 
-	/// A lookup part usable in a semi-join hop: a bare graph lookup in one
-	/// fixed direction over plain table subjects, with no clauses — the
-	/// shapes whose truth set is pure adjacency.
+	/// A bare graph hop in one fixed direction over plain table subjects:
+	/// the tables it may reach and its direction. `None` for `<->`, for a
+	/// hop with any clause, and for a key-range or referencing subject.
 	fn plain_graph_hop(
-		lookup: &crate::expr::lookup::Lookup,
+		lookup: &crate::expr::logical::LogicalLookup,
 	) -> Option<(Vec<surrealdb_strand::TableName>, crate::expr::Dir)> {
-		use crate::expr::lookup::{Lookup, LookupKind, LookupSubject};
-		let Lookup {
+		use crate::expr::logical::LogicalLookupSubject;
+		use crate::expr::lookup::LookupKind;
+		let crate::expr::logical::LogicalLookup {
 			kind,
 			expr,
 			only,
@@ -799,7 +830,7 @@ impl<'a> IndexAnalyzer<'a> {
 		let mut tables = Vec::with_capacity(what.len());
 		for s in what {
 			match s {
-				LookupSubject::Table {
+				LogicalLookupSubject::Table {
 					table,
 					referencing_field: None,
 				} => tables.push(table.clone()),
@@ -821,17 +852,17 @@ impl<'a> IndexAnalyzer<'a> {
 	/// WHERE clauses are left to the existing single-index key-only count.
 	pub(crate) fn try_bitmap_count_fusion(
 		&self,
-		cond: &Cond,
+		cond: &LogicalExpr,
 		exact_col: &dyn Fn(&Idiom) -> bool,
 	) -> Option<BitmapPlan> {
 		if self.with_hints.is_some() {
 			return None;
 		}
-		if Self::expr_contains_knn(&cond.0) {
+		if Self::expr_contains_knn(cond) {
 			return None;
 		}
 		let mut conjuncts = Vec::new();
-		Self::flatten_and(&cond.0, &mut conjuncts);
+		Self::flatten_and(cond, &mut conjuncts);
 		if conjuncts.len() < 2 {
 			return None;
 		}
@@ -885,11 +916,11 @@ impl<'a> IndexAnalyzer<'a> {
 	/// Anything else returns `None`.
 	fn bitmap_exact_plan(
 		&self,
-		inner: &Expr,
+		inner: &LogicalExpr,
 		exact_col: &dyn Fn(&Idiom) -> bool,
 	) -> Option<BitmapPlan> {
 		// `NOT (B OR C)` — subtract the union when every branch is exact.
-		if let Expr::Binary {
+		if let LogicalExpr::Binary {
 			op: BinaryOperator::Or,
 			..
 		} = inner
@@ -910,7 +941,7 @@ impl<'a> IndexAnalyzer<'a> {
 		// it would drop rows where only one conjunct holds.
 		if matches!(
 			inner,
-			Expr::Binary {
+			LogicalExpr::Binary {
 				op: BinaryOperator::And,
 				..
 			}
@@ -920,8 +951,7 @@ impl<'a> IndexAnalyzer<'a> {
 
 		// A single predicate: analyze it in isolation and keep the best
 		// exact candidate.
-		let single = Cond(inner.clone());
-		let candidates = self.analyze(Some(&single), None);
+		let candidates = self.analyze(Some(inner), None);
 		candidates
 			.into_iter()
 			.filter(|c| {
@@ -960,7 +990,7 @@ impl<'a> IndexAnalyzer<'a> {
 	/// ≥ 2 rule — because it already eliminates in-traversal record fetches.
 	pub(crate) fn try_knn_prefilter(
 		&self,
-		stripped: &Cond,
+		stripped: &LogicalExpr,
 		exact_col: &dyn Fn(&Idiom) -> bool,
 	) -> Option<KnnPrefilterPlan> {
 		// Explicit hints pin the plan.
@@ -968,12 +998,12 @@ impl<'a> IndexAnalyzer<'a> {
 			return None;
 		}
 		let mut conjuncts = Vec::new();
-		Self::flatten_and(&stripped.0, &mut conjuncts);
+		Self::flatten_and(stripped, &mut conjuncts);
 		let mut covered: Vec<BitmapPlan> = Vec::new();
-		let mut residual: Vec<&Expr> = Vec::new();
+		let mut residual: Vec<&LogicalExpr> = Vec::new();
 		let mut uncovered_matches = false;
 		for conjunct in conjuncts {
-			if Self::expr_contains_matches(conjunct) {
+			if expr_contains_matches(conjunct) {
 				if let Some(leaf) = self.bitmap_exact_plan(conjunct, exact_col) {
 					covered.push(leaf);
 				} else {
@@ -998,45 +1028,16 @@ impl<'a> IndexAnalyzer<'a> {
 		} else {
 			BitmapPlan::And(covered)
 		};
-		let residual = residual
-			.into_iter()
-			.cloned()
-			.reduce(|left, right| Expr::Binary {
-				left: Box::new(left),
-				op: BinaryOperator::And,
-				right: Box::new(right),
-			})
-			.map(Cond);
+		let residual = residual.into_iter().cloned().reduce(|left, right| LogicalExpr::Binary {
+			left: Box::new(left),
+			op: BinaryOperator::And,
+			right: Box::new(right),
+		});
 		Some(KnnPrefilterPlan {
 			root,
 			residual,
 			uncovered_matches,
 		})
-	}
-
-	/// Returns `true` if the expression tree contains a full-text MATCHES
-	/// operator. MATCHES needs a query executor and is not evaluable inside
-	/// an ANN traversal's record-fetch filter (it computes to `false` there),
-	/// so such conjuncts must never be pushed down as an in-traversal
-	/// residual (#548) — the outer `Filter` enforces them instead.
-	pub(crate) fn expr_contains_matches(expr: &Expr) -> bool {
-		match expr {
-			Expr::Binary {
-				left,
-				op,
-				right,
-			} => {
-				matches!(op, BinaryOperator::Matches(_))
-					|| Self::expr_contains_matches(left)
-					|| Self::expr_contains_matches(right)
-			}
-			Expr::Prefix {
-				expr: inner,
-				..
-			} => Self::expr_contains_matches(inner),
-			Expr::FunctionCall(call) => call.arguments.iter().any(Self::expr_contains_matches),
-			_ => false,
-		}
 	}
 
 	/// Maximum number of array elements to expand for `field IN [...]`.
@@ -1068,7 +1069,7 @@ impl<'a> IndexAnalyzer<'a> {
 	/// to find index candidates (e.g. standalone `field IN [1, 2]`).
 	pub fn try_in_expansion(
 		&self,
-		cond: Option<&Cond>,
+		cond: Option<&LogicalExpr>,
 		direction: Direction,
 	) -> Option<AccessPath> {
 		let cond = cond?;
@@ -1079,9 +1080,9 @@ impl<'a> IndexAnalyzer<'a> {
 
 		// Collect IN expressions from the condition
 		let mut in_exprs = Vec::new();
-		Self::collect_in_expressions(&cond.0, &mut in_exprs);
+		Self::collect_in_expressions(cond, &mut in_exprs);
 
-		for (idiom, values) in &in_exprs {
+		for (path, values) in &in_exprs {
 			if values.len() < 2 || values.len() > Self::MAX_IN_EXPANSION_SIZE {
 				continue; // Single-element handled by match_operator_to_access; too-large skipped
 			}
@@ -1113,7 +1114,7 @@ impl<'a> IndexAnalyzer<'a> {
 
 				// The IN column must be the FIRST column of the index.
 				if let Some(first_col) = ix_def.cols.first()
-					&& idiom_matches(idiom, first_col)
+					&& path_matches_column(path, first_col)
 				{
 					let ncols = ix_def.cols.len();
 					if best.is_none_or(|(_, best_ncols)| ncols < best_ncols) {
@@ -1169,10 +1170,10 @@ impl<'a> IndexAnalyzer<'a> {
 	/// For `field CONTAINSALL [a, b]` with an index on `field[*]`, creates a
 	/// union of equality scans: one for `a` and one for `b`. This parallels
 	/// `try_in_expansion` but matches against array indexes (columns with
-	/// `Part::All`) using `idiom_matches_containment`.
+	/// `*`) using [`path_matches_containment`].
 	pub fn try_containment_expansion(
 		&self,
-		cond: Option<&Cond>,
+		cond: Option<&LogicalExpr>,
 		direction: Direction,
 	) -> Option<AccessPath> {
 		let cond = cond?;
@@ -1182,9 +1183,9 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 
 		let mut exprs = Vec::new();
-		Self::collect_containment_expressions(&cond.0, &mut exprs);
+		Self::collect_containment_expressions(cond, &mut exprs);
 
-		for (idiom, values) in &exprs {
+		for (path, values) in &exprs {
 			if values.is_empty() || values.len() > Self::MAX_IN_EXPANSION_SIZE {
 				continue;
 			}
@@ -1205,7 +1206,7 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 
 				if let Some(first_col) = ix_def.cols.first()
-					&& idiom_matches_containment(idiom, first_col)
+					&& path_matches_containment(path, first_col)
 				{
 					let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
 					let is_composite = ix_def.cols.len() > 1;
@@ -1243,12 +1244,15 @@ impl<'a> IndexAnalyzer<'a> {
 		None
 	}
 
-	/// Collect CONTAINSALL/CONTAINSANY (idiom on left, array literal on right)
-	/// and ALLINSIDE/ANYINSIDE (array literal on left, idiom on right) from an
-	/// AND tree.
-	fn collect_containment_expressions(expr: &Expr, results: &mut Vec<(Idiom, Vec<Value>)>) {
+	/// Collect CONTAINSALL/CONTAINSANY (field path on left, array literal on
+	/// right) and ALLINSIDE/ANYINSIDE (array literal on left, field path on
+	/// right) from an AND tree.
+	fn collect_containment_expressions(
+		expr: &LogicalExpr,
+		results: &mut Vec<(LogicalExpr, Vec<Value>)>,
+	) {
 		match expr {
-			Expr::Binary {
+			LogicalExpr::Binary {
 				left,
 				op: BinaryOperator::And,
 				right,
@@ -1256,29 +1260,29 @@ impl<'a> IndexAnalyzer<'a> {
 				Self::collect_containment_expressions(left, results);
 				Self::collect_containment_expressions(right, results);
 			}
-			Expr::Binary {
+			LogicalExpr::Binary {
 				left,
 				op: BinaryOperator::ContainAll | BinaryOperator::ContainAny,
 				right,
 			} => {
-				if let (Expr::Idiom(idiom), Expr::Literal(lit)) = (left.as_ref(), right.as_ref())
-					&& let Some(Value::Array(arr)) = try_literal_to_value(lit)
+				if left.is_path()
+					&& let Some(Value::Array(arr)) = try_literal_to_value(right)
 				{
-					results.push((idiom.clone(), arr.0));
+					results.push((left.as_ref().clone(), arr.0));
 				}
 			}
-			Expr::Binary {
+			LogicalExpr::Binary {
 				left,
 				op: BinaryOperator::AllInside | BinaryOperator::AnyInside,
 				right,
 			} => {
-				if let (Expr::Literal(lit), Expr::Idiom(idiom)) = (left.as_ref(), right.as_ref())
-					&& let Some(Value::Array(arr)) = try_literal_to_value(lit)
+				if right.is_path()
+					&& let Some(Value::Array(arr)) = try_literal_to_value(left)
 				{
-					results.push((idiom.clone(), arr.0));
+					results.push((right.as_ref().clone(), arr.0));
 				}
 			}
-			Expr::Prefix {
+			LogicalExpr::Prefix {
 				op,
 				expr: inner,
 			} if !matches!(op, PrefixOperator::Not) => {
@@ -1289,9 +1293,9 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// Collect `field INSIDE [values]` expressions from an AND tree.
-	fn collect_in_expressions(expr: &Expr, results: &mut Vec<(Idiom, Vec<Value>)>) {
+	fn collect_in_expressions(expr: &LogicalExpr, results: &mut Vec<(LogicalExpr, Vec<Value>)>) {
 		match expr {
-			Expr::Binary {
+			LogicalExpr::Binary {
 				left,
 				op: BinaryOperator::And,
 				right,
@@ -1299,20 +1303,20 @@ impl<'a> IndexAnalyzer<'a> {
 				Self::collect_in_expressions(left, results);
 				Self::collect_in_expressions(right, results);
 			}
-			Expr::Binary {
+			LogicalExpr::Binary {
 				left,
 				op: BinaryOperator::Inside,
 				right,
 			} => {
-				if let (Expr::Idiom(idiom), Expr::Literal(lit)) = (left.as_ref(), right.as_ref())
-					&& let Some(Value::Array(arr)) = try_literal_to_value(lit)
+				if left.is_path()
+					&& let Some(Value::Array(arr)) = try_literal_to_value(right)
 				{
-					results.push((idiom.clone(), arr.0));
+					results.push((left.as_ref().clone(), arr.0));
 				}
 			}
 			// Do NOT recurse into NOT — expanding `NOT (field IN [...])`
 			// into index lookups would produce the wrong result set.
-			Expr::Prefix {
+			LogicalExpr::Prefix {
 				op,
 				expr: inner,
 			} if !matches!(op, PrefixOperator::Not) => {
@@ -1325,9 +1329,9 @@ impl<'a> IndexAnalyzer<'a> {
 	/// Flatten nested OR expressions into a list of branches.
 	///
 	/// `A OR B OR C` (parsed as `(A OR B) OR C`) becomes `[A, B, C]`.
-	fn flatten_or<'b>(expr: &'b Expr, branches: &mut Vec<&'b Expr>) {
+	fn flatten_or<'b>(expr: &'b LogicalExpr, branches: &mut Vec<&'b LogicalExpr>) {
 		match expr {
-			Expr::Binary {
+			LogicalExpr::Binary {
 				left,
 				op: BinaryOperator::Or,
 				right,
@@ -1346,9 +1350,9 @@ impl<'a> IndexAnalyzer<'a> {
 	/// `A AND B AND C` (parsed as `(A AND B) AND C`) becomes `[A, B, C]`.
 	/// Non-AND nodes (including OR sub-trees) are returned as single
 	/// conjuncts so the caller can inspect them.
-	fn flatten_and<'b>(expr: &'b Expr, conjuncts: &mut Vec<&'b Expr>) {
+	fn flatten_and<'b>(expr: &'b LogicalExpr, conjuncts: &mut Vec<&'b LogicalExpr>) {
 		match expr {
-			Expr::Binary {
+			LogicalExpr::Binary {
 				left,
 				op: BinaryOperator::And,
 				right,
@@ -1366,9 +1370,9 @@ impl<'a> IndexAnalyzer<'a> {
 	/// operator. Such an operator is consumed by a `KnnScan` and stripped from
 	/// the WHERE before residual filtering, so it must not be left behind as a
 	/// residual by an index substitution (see `try_and_nested_or_union`).
-	fn expr_contains_knn(expr: &Expr) -> bool {
+	fn expr_contains_knn(expr: &LogicalExpr) -> bool {
 		match expr {
-			Expr::Binary {
+			LogicalExpr::Binary {
 				left,
 				op,
 				right,
@@ -1377,7 +1381,7 @@ impl<'a> IndexAnalyzer<'a> {
 					|| Self::expr_contains_knn(left)
 					|| Self::expr_contains_knn(right)
 			}
-			Expr::Prefix {
+			LogicalExpr::Prefix {
 				expr: inner,
 				..
 			} => Self::expr_contains_knn(inner),
@@ -1386,9 +1390,9 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// Collect all simple conditions from an AND tree.
-	fn collect_conditions(&self, expr: &Expr, conditions: &mut Vec<SimpleCondition>) {
+	fn collect_conditions(&self, expr: &LogicalExpr, conditions: &mut Vec<SimpleCondition>) {
 		match expr {
-			Expr::Binary {
+			LogicalExpr::Binary {
 				left,
 				op,
 				right,
@@ -1412,7 +1416,7 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 			// Do NOT recurse into NOT — `NOT (field > 5)` must not
 			// generate an index candidate for `field > 5`.
-			Expr::Prefix {
+			LogicalExpr::Prefix {
 				op,
 				expr: inner,
 			} if !matches!(op, PrefixOperator::Not) => {
@@ -1422,27 +1426,20 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 	}
 
-	/// Extract a simple condition (idiom op value) from a binary expression.
+	/// Extract a simple condition (path op value) from a binary expression:
+	/// one operand is a path over the row, the other a literal value.
 	fn extract_simple_condition(
 		&self,
-		left: &Expr,
+		left: &LogicalExpr,
 		op: &BinaryOperator,
-		right: &Expr,
+		right: &LogicalExpr,
 	) -> Option<SimpleCondition> {
-		let (idiom, value, position) = match (left, right) {
-			(Expr::Idiom(idiom), Expr::Literal(lit)) => {
-				if let Some(value) = try_literal_to_value(lit) {
-					(idiom.clone(), value, IdiomPosition::Left)
-				} else {
-					return None;
-				}
+		let (path, value, position) = match (left, right) {
+			(lhs, rhs) if lhs.is_path() && !rhs.is_path() => {
+				(lhs.clone(), try_literal_to_value(rhs)?, IdiomPosition::Left)
 			}
-			(Expr::Literal(lit), Expr::Idiom(idiom)) => {
-				if let Some(value) = try_literal_to_value(lit) {
-					(idiom.clone(), value, IdiomPosition::Right)
-				} else {
-					return None;
-				}
+			(lhs, rhs) if rhs.is_path() => {
+				(rhs.clone(), try_literal_to_value(lhs)?, IdiomPosition::Right)
 			}
 			_ => return None,
 		};
@@ -1465,7 +1462,7 @@ impl<'a> IndexAnalyzer<'a> {
 		};
 
 		Some(SimpleCondition {
-			idiom,
+			path,
 			op,
 			value,
 			position,
@@ -1511,7 +1508,7 @@ impl<'a> IndexAnalyzer<'a> {
 
 			for col in &ix_def.cols {
 				// Find a condition that matches this column
-				let matching_cond = conditions.iter().find(|c| idiom_matches(&c.idiom, col));
+				let matching_cond = conditions.iter().find(|c| path_matches_column(&c.path, col));
 
 				match matching_cond {
 					Some(cond) => {
@@ -1624,10 +1621,10 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// Analyze a single expression for index opportunities.
-	fn analyze_condition(&self, expr: &Expr, candidates: &mut Vec<IndexCandidate>) {
+	fn analyze_condition(&self, expr: &LogicalExpr, candidates: &mut Vec<IndexCandidate>) {
 		match expr {
 			// Binary expression - check for indexable patterns
-			Expr::Binary {
+			LogicalExpr::Binary {
 				left,
 				op,
 				right,
@@ -1664,7 +1661,7 @@ impl<'a> IndexAnalyzer<'a> {
 			// Nested expression in parentheses (but NOT negation).
 			// Do NOT recurse into NOT — negated predicates invert
 			// the result set and index candidates would be wrong.
-			Expr::Prefix {
+			LogicalExpr::Prefix {
 				op,
 				expr: inner,
 			} if !matches!(op, PrefixOperator::Not) => {
@@ -1677,45 +1674,39 @@ impl<'a> IndexAnalyzer<'a> {
 	/// Try to match a comparison expression to an index.
 	fn try_match_comparison(
 		&self,
-		left: &Expr,
+		left: &LogicalExpr,
 		op: &BinaryOperator,
-		right: &Expr,
+		right: &LogicalExpr,
 		candidates: &mut Vec<IndexCandidate>,
 	) {
-		// Extract idiom and value from the comparison
-		let (idiom, value, position) = match (left, right) {
-			(Expr::Idiom(idiom), Expr::Literal(lit)) => {
-				if let Some(value) = try_literal_to_value(lit) {
-					(idiom, value, IdiomPosition::Left)
-				} else {
-					return;
-				}
-			}
-			(Expr::Literal(lit), Expr::Idiom(idiom)) => {
-				if let Some(value) = try_literal_to_value(lit) {
-					(idiom, value, IdiomPosition::Right)
-				} else {
-					return;
-				}
-			}
-			// Parameters are pre-folded into literals before the analyzer
-			// runs (see `resolve_condition_params` in the planner and dynamic
-			// scan). If a bare `Expr::Param` reaches the analyzer it means
-			// the param could not be resolved at plan time, so we cannot push
-			// it down to the index and fall through to the table-scan path.
+		// Extract the field path and value from the comparison. Parameters
+		// are pre-folded into literals before the analyzer runs (see
+		// `resolve_condition_params` in the planner and dynamic scan). A bare
+		// `LogicalExpr::Param` reaching the analyzer means the param could not
+		// be resolved at plan time, so it cannot be pushed down to the index
+		// and the comparison falls through to the table-scan path.
+		let (path, value, position) = match (left, right) {
+			(lhs, rhs) if lhs.is_path() && !rhs.is_path() => match try_literal_to_value(rhs) {
+				Some(value) => (lhs, value, IdiomPosition::Left),
+				None => return,
+			},
+			(lhs, rhs) if rhs.is_path() => match try_literal_to_value(lhs) {
+				Some(value) => (rhs, value, IdiomPosition::Right),
+				None => return,
+			},
 			_ => return,
 		};
 
-		// Find indexes that match this idiom
+		// Find indexes that match this path
 		for (idx, ix_def) in self.indexes.iter().enumerate() {
 			// Skip indexes being removed
 			if ix_def.prepare_remove {
 				continue;
 			}
 
-			// Check if the idiom matches the first column of the index
+			// Check if the path matches the first column of the index
 			if let Some(first_col) = ix_def.cols.first()
-				&& idiom_matches(idiom, first_col)
+				&& path_matches_column(path, first_col)
 				&& let Some(access) =
 					self.match_operator_to_access(op, &value, position, &ix_def.index)
 			{
@@ -1849,31 +1840,19 @@ impl<'a> IndexAnalyzer<'a> {
 	/// for ORDER BY pushdown via `index_covers_ordering`.
 	fn try_match_containment(
 		&self,
-		left: &Expr,
+		left: &LogicalExpr,
 		op: &BinaryOperator,
-		right: &Expr,
+		right: &LogicalExpr,
 		candidates: &mut Vec<IndexCandidate>,
 	) {
-		let (idiom, value) = match op {
-			BinaryOperator::Contain => match (left, right) {
-				(Expr::Idiom(idiom), Expr::Literal(lit)) => {
-					if let Some(v) = try_literal_to_value(lit) {
-						(idiom, v)
-					} else {
-						return;
-					}
-				}
-				_ => return,
+		let (path, value) = match op {
+			BinaryOperator::Contain if left.is_path() => match try_literal_to_value(right) {
+				Some(v) => (left, v),
+				None => return,
 			},
-			BinaryOperator::Inside => match (left, right) {
-				(Expr::Literal(lit), Expr::Idiom(idiom)) => {
-					if let Some(v) = try_literal_to_value(lit) {
-						(idiom, v)
-					} else {
-						return;
-					}
-				}
-				_ => return,
+			BinaryOperator::Inside if right.is_path() => match try_literal_to_value(left) {
+				Some(v) => (right, v),
+				None => return,
 			},
 			_ => return,
 		};
@@ -1886,7 +1865,7 @@ impl<'a> IndexAnalyzer<'a> {
 				continue;
 			}
 			if let Some(first_col) = ix_def.cols.first()
-				&& idiom_matches_containment(idiom, first_col)
+				&& path_matches_containment(path, first_col)
 			{
 				// Compound indexes need a prefix scan rather than a point
 				// lookup, because the on-disk key includes all columns. The
@@ -1910,24 +1889,19 @@ impl<'a> IndexAnalyzer<'a> {
 	/// Try to match a MATCHES expression to a full-text index.
 	fn try_match_fulltext(
 		&self,
-		left: &Expr,
+		left: &LogicalExpr,
 		operator: &MatchesOperator,
-		right: &Expr,
+		right: &LogicalExpr,
 		candidates: &mut Vec<IndexCandidate>,
 	) {
-		// Extract idiom from left side and query string from right side
-		let (idiom, query) = match (left, right) {
-			(Expr::Idiom(idiom), Expr::Literal(lit)) => {
-				if let Some(Value::String(s)) = try_literal_to_value(lit) {
-					(idiom, s)
-				} else {
-					return;
-				}
-			}
+		// Extract the field path from the left side and the query string
+		// from the right side
+		let (path, query) = match try_literal_to_value(right) {
+			Some(Value::String(s)) if left.is_path() => (left, s),
 			_ => return,
 		};
 
-		// Find full-text indexes that match this idiom
+		// Find full-text indexes that match this path
 		for (idx, ix_def) in self.indexes.iter().enumerate() {
 			if ix_def.prepare_remove {
 				continue;
@@ -1939,7 +1913,7 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 
 			if let Some(first_col) = ix_def.cols.first()
-				&& idiom_matches(idiom, first_col)
+				&& path_matches_column(path, first_col)
 			{
 				let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
 				candidates.push(IndexCandidate::new(
@@ -1956,8 +1930,8 @@ impl<'a> IndexAnalyzer<'a> {
 	/// Try to match a KNN expression to an ANN index.
 	fn try_match_knn(
 		&self,
-		left: &Expr,
-		right: &Expr,
+		left: &LogicalExpr,
+		right: &LogicalExpr,
 		nn: &NearestNeighbor,
 		candidates: &mut Vec<IndexCandidate>,
 	) {
@@ -1969,36 +1943,32 @@ impl<'a> IndexAnalyzer<'a> {
 			_ => return,
 		};
 
-		// Extract idiom from left side
-		let idiom = match left {
-			Expr::Idiom(idiom) => idiom,
-			_ => return,
-		};
+		// Extract the field path from the left side
+		if !left.is_path() {
+			return;
+		}
+		let path = left;
 
 		// Extract numeric vector from right side
-		let vector = match right {
-			Expr::Literal(lit) => {
-				if let Some(Value::Array(arr)) = try_literal_to_value(lit) {
-					let nums: Vec<Number> = arr
-						.iter()
-						.filter_map(|v| match v {
-							Value::Number(n) => Some(*n),
-							_ => None,
-						})
-						.collect();
-					if nums.len() != arr.len() {
-						// Not all elements are numbers
-						return;
-					}
-					nums
-				} else {
+		let vector = match try_literal_to_value(right) {
+			Some(Value::Array(arr)) => {
+				let nums: Vec<Number> = arr
+					.iter()
+					.filter_map(|v| match v {
+						Value::Number(n) => Some(*n),
+						_ => None,
+					})
+					.collect();
+				if nums.len() != arr.len() {
+					// Not all elements are numbers
 					return;
 				}
+				nums
 			}
 			_ => return,
 		};
 
-		// Find ANN indexes that match this idiom
+		// Find ANN indexes that match this path
 		for (idx, ix_def) in self.indexes.iter().enumerate() {
 			if ix_def.prepare_remove {
 				continue;
@@ -2025,7 +1995,7 @@ impl<'a> IndexAnalyzer<'a> {
 			};
 
 			if let Some(first_col) = ix_def.cols.first()
-				&& idiom_matches(idiom, first_col)
+				&& path_matches_column(path, first_col)
 			{
 				let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
 				candidates.push(IndexCandidate::new(
@@ -2056,7 +2026,7 @@ impl<'a> IndexAnalyzer<'a> {
 	///   with `covers_order = true`.
 	/// - For each index where no candidate exists yet, synthesize a full-range scan candidate when
 	///   that scan would satisfy ORDER BY.
-	fn analyze_order(&self, ordering: &Ordering, candidates: &mut Vec<IndexCandidate>) {
+	fn analyze_order(&self, ordering: &LogicalOrdering, candidates: &mut Vec<IndexCandidate>) {
 		use crate::exec::planner::util::index_covers_ordering;
 
 		// Pass 1 — mark existing candidates that the authoritative check
@@ -2107,11 +2077,11 @@ impl<'a> IndexAnalyzer<'a> {
 fn covers_ordering_either_direction<F>(
 	index_ref: &IndexRef,
 	access: &BTreeAccess,
-	ordering: &Ordering,
+	ordering: &LogicalOrdering,
 	covers: F,
 ) -> bool
 where
-	F: Fn(&IndexRef, &BTreeAccess, Direction, &Ordering) -> bool,
+	F: Fn(&IndexRef, &BTreeAccess, Direction, &LogicalOrdering) -> bool,
 {
 	covers(index_ref, access, Direction::Forward, ordering)
 		|| covers(index_ref, access, Direction::Backward, ordering)
@@ -2270,78 +2240,51 @@ impl IndexCandidate {
 	}
 }
 
-/// Position of the idiom in a comparison expression.
+/// Position of the field path in a comparison expression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IdiomPosition {
-	/// Idiom is on the left: `field = value`
+	/// The path is on the left: `field = value`
 	Left,
-	/// Idiom is on the right: `value = field`
+	/// The path is on the right: `value = field`
 	Right,
 }
 
 /// A simple condition extracted from the WHERE clause.
 #[derive(Debug, Clone)]
 struct SimpleCondition {
-	idiom: Idiom,
+	/// The path operand, compared against index columns by
+	/// [`path_matches_column`].
+	path: LogicalExpr,
 	op: BinaryOperator,
 	value: Value,
 	position: IdiomPosition,
 }
 
-/// Check if an idiom matches an index column.
+/// Whether a condition's path is exactly an index column, step for step
+/// ([`idiom_matches_column`]): a column may hold any part a path can — a
+/// field, a computed index such as `id[1]`, a method call such as
+/// `id.id().r` — and matches the expression that renders the same way.
 ///
-/// Idioms containing `Part::All` (flattened field paths like `marks.*.mark`)
-/// are excluded because the Scan predicate filter cannot correctly evaluate
+/// Columns containing `*` (flattened field paths like `marks.*.mark`) are
+/// excluded because the Scan predicate filter cannot correctly evaluate
 /// comparison operators on flattened paths — `[40] = 40` evaluates to false.
 /// Users should use CONTAINS/INSIDE operators for array-aware queries.
-fn idiom_matches(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
-	use crate::expr::Part;
-
-	if expr_idiom != index_col {
-		return false;
-	}
-
-	// Skip flattened field paths — comparison predicates don't evaluate
-	// correctly on array-valued paths (e.g., marks.*.mark = 40 becomes
-	// [40] = 40 which is false).
-	if index_col.0.iter().any(|p| matches!(p, Part::All)) {
-		return false;
-	}
-
-	true
+fn path_matches_column(path: &LogicalExpr, index_col: &Idiom) -> bool {
+	!index_col.0.iter().any(|p| matches!(p, Part::All)) && idiom_matches_column(path, index_col)
 }
 
-/// Check if an idiom matches an index column for containment operators.
-///
-/// Unlike `idiom_matches`, this allows `Part::All` in the index column.
-/// The query idiom `tags` matches index column `tags.*` (or `tags[*]`)
-/// because each array element is indexed individually, and the containment
-/// operator checks membership of a scalar in the indexed array.
-///
-/// Also handles nested array paths like `marks.*.subject` where both the
-/// expression idiom and the index column contain `Part::All`. The comparison
-/// strips `Part::All` from both sides before checking equality.
-///
-/// Only matches when the index column actually contains `Part::All` --
-/// regular scalar indexes are not valid for containment lookups.
-pub(crate) fn idiom_matches_containment(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
-	use crate::expr::Part;
-
-	if !index_col.0.iter().any(|p| matches!(p, Part::All)) {
-		return false;
-	}
-
-	let col_without_all: Vec<&Part> =
-		index_col.0.iter().filter(|p| !matches!(p, Part::All)).collect();
-	let expr_without_all: Vec<&Part> =
-		expr_idiom.0.iter().filter(|p| !matches!(p, Part::All)).collect();
-	col_without_all == expr_without_all
+/// Whether a field reference in a containment leaf (`field CONTAINS v`,
+/// `v INSIDE field`) is served by an array-element index column
+/// ([`idiom_matches_containment`]): the column must flatten (`.*` / `[*]`),
+/// and the two paths must agree once every flatten is removed from both.
+fn path_matches_containment(path: &LogicalExpr, index_col: &Idiom) -> bool {
+	idiom_matches_containment(path, index_col)
 }
 
-/// Normalize a range operator based on the position of the idiom in the
+/// Normalize a range operator based on the position of the path in the
 /// comparison expression.
 ///
-/// When the idiom is on the left (`field > value`), the operator is already
+/// When the path is on the left (`field > value`), the operator is already
 /// correct. When on the right (`value < field`), the operator must be
 /// flipped so it describes the condition from the field's perspective.
 ///
@@ -2365,9 +2308,6 @@ fn normalize_range_op(op: &BinaryOperator, position: IdiomPosition) -> Option<Bi
 	}
 }
 
-// literal_to_value and expr_to_value are imported from crate::exec::planner::util
-// as try_literal_to_value and try_expr_to_value.
-
 #[cfg(test)]
 mod tests {
 	//! Unit tests for the IndexAnalyzer.
@@ -2388,9 +2328,9 @@ mod tests {
 
 	use super::*;
 	use crate::catalog::{FullTextParams, Index, IndexDefinition, IndexId, Scoring};
-	use crate::expr::order::Ordering;
+	use crate::expr::Idiom;
+	use crate::expr::logical::{LogicalFilter, LogicalOp, LogicalSort, LogicalSource, lower};
 	use crate::expr::with::With;
-	use crate::expr::{Cond, Expr, Idiom};
 
 	// ------------------------------------------------------------------
 	// Fixture helpers
@@ -2440,27 +2380,55 @@ mod tests {
 		IndexAnalyzer::new(Arc::<[_]>::from(defs.into_boxed_slice()), with)
 	}
 
-	/// Parse a snippet wrapped in `SELECT * FROM t <snippet>` and extract
-	/// `(cond, order, with)`.  Useful for driving the analyzer with realistic
-	/// expression trees without hand-building AST nodes.
-	fn parse_select_parts(snippet: &str) -> (Option<Cond>, Option<Ordering>, Option<With>) {
+	/// Parse a snippet wrapped in `SELECT * FROM t <snippet>`, lower it, and
+	/// extract `(cond, order, with)` from the logical plan. Useful for driving
+	/// the analyzer with realistic expression trees without hand-building
+	/// them.
+	fn parse_select_parts(
+		snippet: &str,
+	) -> (Option<LogicalExpr>, Option<LogicalOrdering>, Option<With>) {
 		let src = format!("SELECT * FROM t {snippet}");
 		let ast = crate::syn::parse(&src).expect("parse");
 		let mut exprs = ast.expressions;
 		assert_eq!(exprs.len(), 1, "expected one statement from {src:?}");
-		let top: crate::expr::TopLevelExpr = exprs.remove(0).into();
-		match top {
-			crate::expr::TopLevelExpr::Expr(Expr::Select(s)) => (s.cond, s.order, s.with),
+		let plan = match exprs.remove(0) {
+			crate::sql::TopLevelExpr::Expr(select @ crate::sql::Expr::Select(_)) => {
+				lower(select).expect("SELECT lowers")
+			}
 			other => panic!("expected SELECT, got {other:?}"),
+		};
+		let (mut cond, mut order, mut with) = (None, None, None);
+		let mut stack = vec![&plan];
+		while let Some(op) = stack.pop() {
+			match op {
+				LogicalOp::Filter(LogicalFilter {
+					predicate,
+					..
+				}) => cond = Some(predicate.clone()),
+				LogicalOp::Sort(LogicalSort {
+					ordering,
+					..
+				}) => order = Some(ordering.clone()),
+				LogicalOp::Source(LogicalSource {
+					with: hint,
+					..
+				}) => with = hint.clone(),
+				_ => {}
+			}
+			stack.extend(op.children());
 		}
+		(cond, order, with)
 	}
 
-	fn parse_cond(snippet: &str) -> Cond {
+	fn parse_cond(snippet: &str) -> LogicalExpr {
 		let (cond, _, _) = parse_select_parts(&format!("WHERE {snippet}"));
-		cond.expect("WHERE produced a Cond")
+		cond.expect("WHERE produced a predicate")
 	}
 
-	fn parse_cond_order(where_snippet: &str, order_snippet: &str) -> (Cond, Ordering) {
+	fn parse_cond_order(
+		where_snippet: &str,
+		order_snippet: &str,
+	) -> (LogicalExpr, LogicalOrdering) {
 		let (cond, order, _) =
 			parse_select_parts(&format!("WHERE {where_snippet} ORDER BY {order_snippet}"));
 		(cond.expect("WHERE"), order.expect("ORDER BY"))
@@ -2502,7 +2470,7 @@ mod tests {
 		/// Run `try_bitmap_fusion` the way `resolve_access_path` does: analyze
 		/// without ORDER BY, then attempt the fusion. `exact` stands in for
 		/// the field-kind check gating NOT subtraction.
-		fn fuse(az: &IndexAnalyzer<'_>, cond: &Cond, exact: bool) -> Option<BitmapPlan> {
+		fn fuse(az: &IndexAnalyzer<'_>, cond: &LogicalExpr, exact: bool) -> Option<BitmapPlan> {
 			let candidates = az.analyze(Some(cond), None);
 			az.try_bitmap_fusion(Some(cond), &candidates, &move |_| exact)
 		}
@@ -2516,7 +2484,7 @@ mod tests {
 		}
 
 		/// Run `try_bitmap_union_fusion` the way `resolve_access_path` does.
-		fn fuse_union(az: &IndexAnalyzer<'_>, cond: &Cond) -> Option<BitmapPlan> {
+		fn fuse_union(az: &IndexAnalyzer<'_>, cond: &LogicalExpr) -> Option<BitmapPlan> {
 			az.try_bitmap_union_fusion(Some(cond), Direction::Forward).map(|(plan, _)| plan)
 		}
 
@@ -3502,7 +3470,11 @@ mod tests {
 		}
 
 		/// Split the KNN-stripped WHERE the way `try_knn_prefilter_plan` does.
-		fn split(az: &IndexAnalyzer<'_>, cond: &Cond, exact: bool) -> Option<KnnPrefilterPlan> {
+		fn split(
+			az: &IndexAnalyzer<'_>,
+			cond: &LogicalExpr,
+			exact: bool,
+		) -> Option<KnnPrefilterPlan> {
 			let stripped = crate::exec::planner::util::strip_knn_from_condition(cond)
 				.expect("a non-KNN residual remains");
 			az.try_knn_prefilter(&stripped, &move |_| exact)
@@ -3520,7 +3492,7 @@ mod tests {
 				plan.root
 			);
 			let residual = plan.residual.expect("the unindexed conjunct stays residual");
-			assert_eq!(surrealdb_types::ToSql::to_sql(&residual.0), "unindexed = 2");
+			assert_eq!(surrealdb_types::ToSql::to_sql(&residual), "unindexed = 2");
 		}
 
 		#[test]
@@ -3541,9 +3513,9 @@ mod tests {
 			let plan = split(&az, &cond, true).expect("the positive equality is coverable");
 			let residual = plan.residual.expect("the negation stays residual");
 			assert!(
-				surrealdb_types::ToSql::to_sql(&residual.0).contains('!'),
+				surrealdb_types::ToSql::to_sql(&residual).contains('!'),
 				"negation kept: {}",
-				surrealdb_types::ToSql::to_sql(&residual.0)
+				surrealdb_types::ToSql::to_sql(&residual)
 			);
 		}
 

@@ -34,6 +34,17 @@ impl Value {
 					nested.set_at_field_path_owned_depth(path, val, depth + 1);
 				}
 			}
+			// Index on object addresses the key the index renders as, and
+			// creates it as a field key would.
+			(Value::Object(obj), FieldPathPart::Index(i)) => {
+				let key = i.to_string();
+				if is_last {
+					obj.insert(key, val);
+				} else {
+					let nested = obj.entry(key).or_insert_with(|| Value::Object(Object::default()));
+					nested.set_at_field_path_owned_depth(path, val, depth + 1);
+				}
+			}
 			// Index on array - must come before the catch-all array pattern
 			(Value::Array(arr), FieldPathPart::Index(i)) if *i < arr.len() => {
 				if is_last {

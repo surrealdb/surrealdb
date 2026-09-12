@@ -15,9 +15,8 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use common::{LeafError, internal_todo};
-use surrealdb_types::{Error as TypesError, ToSql, ValidationError};
+use surrealdb_types::{Error as TypesError, ValidationError};
 
-use crate::expr::Expr;
 use crate::val::CoerceError;
 
 /// A failure in the statement-execution layer.
@@ -47,9 +46,9 @@ pub(crate) enum Error {
 	},
 
 	/// The FETCH clause accepts idioms, strings and fields.
-	#[error("Found {} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields", value.to_sql())]
+	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields")]
 	InvalidFetch {
-		value: Expr,
+		value: String,
 	},
 
 	/// The LIMIT clause must evaluate to a positive integer
@@ -249,15 +248,6 @@ pub(crate) enum Error {
 	/// Callers should always fall back to the compute path.
 	#[error("Planner unsupported: {0}")]
 	PlannerUnsupported(String),
-
-	/// The planner intends to support this but it is not yet implemented.
-	/// Callers fall back in BestEffort mode; hard error in AllReadOnlyStatements mode.
-	#[error("Planner not yet implemented: {0}")]
-	#[allow(
-		dead_code,
-		reason = "no planner path raises this today; the ladders that read it are already in place"
-	)]
-	PlannerUnimplemented(String),
 
 	/// The access method cannot be defined on the requested level
 	#[error("The access method cannot be defined on the requested level")]
@@ -513,7 +503,6 @@ impl LeafError for Error {
 				..
 			}
 			| Error::PlannerUnsupported(_)
-			| Error::PlannerUnimplemented(_)
 			| Error::AccessLevelMismatch
 			| Error::AccessRecordTokenDurationRequired
 			| Error::AccessGrantInvalidSubject

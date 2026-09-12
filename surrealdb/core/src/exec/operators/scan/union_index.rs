@@ -24,7 +24,7 @@ use crate::exec::field_path::FieldPath;
 use crate::exec::operators::SortDirection;
 use crate::exec::ordering::{OutputOrdering, SortProperty};
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
+	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
 	validate_record_user_access,
 };
 use crate::exec::{
@@ -165,7 +165,10 @@ pub struct UnionIndexScan {
 	pub(crate) inputs: Vec<Arc<dyn ExecOperator>>,
 	pub(crate) needed_fields: Option<HashSet<String>>,
 	/// Plan-time resolved table context. When present, `execute()` skips
-	/// runtime table def + permission lookup and uses pre-built field state.
+	/// runtime table def + permission lookup and uses pre-built field state,
+	/// and its enforcement mode says whether the union applies the table
+	/// permission, computed fields and field permissions itself or yields
+	/// records as stored for the plan above it to apply them.
 	pub(crate) resolved: Option<ResolvedTableContext>,
 	/// When set, the sub-streams are k-way merged on a comparison key
 	/// instead of drained sequentially.  See [`MergeMode`].
@@ -416,11 +419,7 @@ impl ExecOperator for UnionIndexScan {
 				}
 
 				let select_permission = if check_perms {
-					let catalog_perm = match &table_def {
-						Some(def) => def.permissions.select.clone(),
-						None => crate::catalog::Permission::None,
-					};
-					convert_permission_to_physical_runtime(&catalog_perm, &ctx)
+					table_select_permission_physical_runtime(table_def.as_deref(), &ctx)
 						.await
 						.context("Failed to convert permission")?
 				} else {
@@ -614,5 +613,48 @@ impl ExecOperator for UnionIndexScan {
 		});
 
 		Ok(monitor_stream(Box::pin(stream), "UnionIndexScan", &self.metrics))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::index::access_path::BTreeAccess;
+	use crate::exec::operators::IndexScan;
+	use crate::exec::operators::scan::resolved::test_support::{
+		RESTRICTED_TABLE, anonymous, assert_as_stored, assert_reduced, contexts, index_ref,
+	};
+	use crate::exec::operators::test_util::{TestDb, collect};
+	use crate::kvs::{Direction, TransactionType};
+
+	/// Under the plan's enforcement the union yields its branches' records as
+	/// stored, for the nodes above it to reduce; under its own it reduces them
+	/// for a permission-checked caller. Each branch runs in sub-operator mode
+	/// and leaves the fields to the union either way.
+	#[tokio::test]
+	async fn a_planned_union_yields_the_stored_record_and_a_runtime_union_reduces_it() {
+		let db = TestDb::new_with_auth(RESTRICTED_TABLE).await;
+		let ctx = db.exec_ctx_as(&anonymous(), TransactionType::Read).await;
+		let (planned, runtime) = contexts(&ctx, "t").await;
+		let index_ref = index_ref(&ctx, "t", "n_idx").await;
+		let scan = |tc: ResolvedTableContext| -> Arc<dyn ExecOperator> {
+			let branch: Arc<dyn ExecOperator> = Arc::new(
+				IndexScan::new(
+					index_ref.clone(),
+					BTreeAccess::Equality(Value::from(1)),
+					Direction::Forward,
+					"t".into(),
+					None,
+					None,
+					None,
+					None,
+					None,
+				)
+				.with_resolved(tc.clone()),
+			);
+			Arc::new(UnionIndexScan::new("t".into(), vec![branch], None).with_resolved(tc))
+		};
+		assert_as_stored(&collect(&scan(planned), &ctx).await);
+		assert_reduced(&collect(&scan(runtime), &ctx).await);
 	}
 }

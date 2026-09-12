@@ -18,6 +18,7 @@
 //! it comes here too, and is documented as belonging to the value rather than to
 //! its caller.
 
+pub mod catalog_version;
 pub mod changefeed;
 pub mod diskann;
 pub mod entry;

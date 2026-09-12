@@ -172,6 +172,16 @@ pub(crate) const FOR_UPDATE_TARGETS_ERROR: &str =
 pub(crate) const FOR_UPDATE_VERSION_ERROR: &str =
 	"SELECT ... FOR UPDATE cannot be combined with VERSION";
 
+/// Rejection message for a `FOR UPDATE` read that groups or splits its rows.
+/// Shared for the same reason as [`FOR_UPDATE_TARGETS_ERROR`].
+pub(crate) const FOR_UPDATE_GROUP_ERROR: &str =
+	"SELECT ... FOR UPDATE cannot be combined with GROUP BY or SPLIT";
+
+/// Rejection message for a `FOR UPDATE` read with a `LIMIT` over more than
+/// one target. Shared for the same reason as [`FOR_UPDATE_TARGETS_ERROR`].
+pub(crate) const FOR_UPDATE_LIMIT_ERROR: &str =
+	"SELECT ... FOR UPDATE cannot be combined with LIMIT over multiple targets";
+
 /// Validate the clause combinations a `FOR UPDATE` SELECT permits.
 ///
 /// `FOR UPDATE` locks the selected records for the duration of the
@@ -190,6 +200,17 @@ pub(crate) fn validate_for_update(
 	stm: &SelectStatement,
 ) -> std::result::Result<(), crate::exec::Error> {
 	use crate::expr::{Expr, Literal};
+	// A `SELECT` in `FROM` position is a statement in its own right, with its
+	// own clauses to validate. Lowering flattens the two into one plan and
+	// distributes `FOR UPDATE` onto the stored sources it finds, so a
+	// statement whose only source is a subquery leaves no trace of the clause
+	// in the plan. The nesting is still visible here, which is why these rules
+	// are checked on the statement and not over the plan.
+	for expr in &stm.what {
+		if let Expr::Select(inner) = expr {
+			validate_for_update(inner)?;
+		}
+	}
 	if !stm.for_update {
 		return Ok(());
 	}
@@ -200,16 +221,78 @@ pub(crate) fn validate_for_update(
 	}
 	if stm.group.is_some() || stm.split.is_some() {
 		return Err(crate::exec::Error::Query {
-			message: "SELECT ... FOR UPDATE cannot be combined with GROUP BY or SPLIT".to_string(),
+			message: FOR_UPDATE_GROUP_ERROR.to_string(),
 		});
 	}
 	if stm.limit.is_some() && stm.what.len() > 1 {
 		return Err(crate::exec::Error::Query {
-			message: "SELECT ... FOR UPDATE cannot be combined with LIMIT over multiple targets"
-				.to_string(),
+			message: FOR_UPDATE_LIMIT_ERROR.to_string(),
 		});
 	}
 	check_for_update_targets(&stm.what)
+}
+
+/// [`validate_for_update`] for a statement in surface form.
+///
+/// The executor validates before lowering, so the surface statement is the
+/// form the rules are checked on for everything the parser produced; the
+/// expression-layer twin above covers a `SELECT` embedded in an already
+/// converted expression. Both must reject the same statements, or a subquery
+/// would be admitted where the same text at the top level is refused;
+/// `for_update_validation_agrees_across_statement_forms` holds them to it.
+pub(crate) fn validate_for_update_ast(
+	stm: &crate::sql::statements::SelectStatement,
+) -> std::result::Result<(), crate::exec::Error> {
+	use crate::sql::{Expr, Literal};
+	for expr in &stm.what {
+		if let Expr::Select(inner) = expr {
+			validate_for_update_ast(inner)?;
+		}
+	}
+	if !stm.for_update {
+		return Ok(());
+	}
+	if !matches!(stm.version, Expr::Literal(Literal::None)) {
+		return Err(crate::exec::Error::Query {
+			message: FOR_UPDATE_VERSION_ERROR.to_string(),
+		});
+	}
+	if stm.group.is_some() || stm.split.is_some() {
+		return Err(crate::exec::Error::Query {
+			message: FOR_UPDATE_GROUP_ERROR.to_string(),
+		});
+	}
+	if stm.limit.is_some() && stm.what.len() > 1 {
+		return Err(crate::exec::Error::Query {
+			message: FOR_UPDATE_LIMIT_ERROR.to_string(),
+		});
+	}
+	check_for_update_targets_ast(&stm.what)
+}
+
+/// [`check_for_update_targets`] for targets in surface form.
+fn check_for_update_targets_ast<'a>(
+	what: impl IntoIterator<Item = &'a crate::sql::Expr>,
+) -> std::result::Result<(), crate::exec::Error> {
+	use crate::sql::operator::PostfixOperator;
+	use crate::sql::{Expr, Literal, RecordIdKeyLit};
+	for expr in what {
+		match expr {
+			Expr::Literal(Literal::RecordId(rid))
+				if !matches!(rid.key, RecordIdKeyLit::Range(_)) => {}
+			Expr::Param(_) | Expr::FunctionCall(_) => {}
+			Expr::Postfix {
+				op: PostfixOperator::MethodCall(..) | PostfixOperator::Call(..),
+				..
+			} => {}
+			_ => {
+				return Err(crate::exec::Error::Query {
+					message: FOR_UPDATE_TARGETS_ERROR.to_string(),
+				});
+			}
+		}
+	}
+	Ok(())
 }
 
 /// Check that every statically-classifiable FROM target of a
@@ -218,8 +301,8 @@ pub(crate) fn validate_for_update(
 /// Targets whose shape is only known at runtime — params, function
 /// calls, and call/method postfix expressions — pass this check and
 /// must be re-validated at the site where they resolve to a value.
-pub(crate) fn check_for_update_targets(
-	what: &[crate::expr::Expr],
+pub(crate) fn check_for_update_targets<'a>(
+	what: impl IntoIterator<Item = &'a crate::expr::Expr>,
 ) -> std::result::Result<(), crate::exec::Error> {
 	use crate::expr::{Expr, Literal, PostfixOperator, RecordIdKeyLit};
 	for expr in what {

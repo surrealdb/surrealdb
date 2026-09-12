@@ -31,13 +31,27 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: category = 'ml' AND published = true OR category = 'db' AND published = false]\n        UnionIndexScan [ctx: Db] [table: docs, branches: 2, merge_by_index_key_dedup: rank Asc]\n            IndexScan [ctx: Db] [index: idx_cat_pub_rank, access: ['ml', true], direction: Forward]\n            IndexScan [ctx: Db] [index: idx_cat_pub_rank, access: ['db', false], direction: Forward]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: category = 'ml' AND published = true OR category = 'db' AND published = false]
+        UnionIndexScan [ctx: Db] [table: docs, branches: 2, merge_by_index_key_dedup: rank Asc]
+            IndexScan [ctx: Db] [index: idx_cat_pub_rank, access: ['ml', true], direction: Forward]
+            IndexScan [ctx: Db] [index: idx_cat_pub_rank, access: ['db', false], direction: Forward]
+"'''
 
 [[test.results]]
 value = "[{ id: docs:2, rank: 1 }, { id: docs:3, rank: 2 }, { id: docs:1, rank: 3 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    SortByKey [ctx: Db] [sort_keys: score ASC]\n        Filter [ctx: Db] [predicate: category = 'ml' AND published = true OR category = 'db' AND published = false]\n            BitmapResolve [ctx: Db] [table: docs]\n                BitmapOr [ctx: Db]\n                    BitmapIndexScan [ctx: Db] [index: idx_cat_pub_rank, access: ['ml', true]]\n                    BitmapIndexScan [ctx: Db] [index: idx_cat_pub_rank, access: ['db', false]]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    SortByKey [ctx: Db] [sort_keys: score ASC]
+        Filter [ctx: Db] [predicate: category = 'ml' AND published = true OR category = 'db' AND published = false]
+            BitmapResolve [ctx: Db] [table: docs]
+                BitmapOr [ctx: Db]
+                    BitmapIndexScan [ctx: Db] [index: idx_cat_pub_rank, access: ['ml', true]]
+                    BitmapIndexScan [ctx: Db] [index: idx_cat_pub_rank, access: ['db', false]]
+"'''
 */
 
 DEFINE FIELD category ON docs TYPE string;

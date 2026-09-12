@@ -79,16 +79,20 @@ impl ExecOperator for SourceExpr {
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// In a correlated subquery, ScalarSubquery binds the outer document
-			// as `$this`. Use it as current_value so that bare field paths in
-			// the FROM expression resolve against the outer row (e.g.
-			// `FROM data.files` where `data` is a record link on the outer row).
+			// as `$this`. Use it as both the current value and the document
+			// root, so that bare field paths in the FROM expression resolve
+			// against the outer row (e.g. `FROM data.files` where `data` is a
+			// record link on the outer row) and so do the reads inside a
+			// nested expression — a method's argument, a dynamic index — which
+			// are evaluated against the root rather than against the position
+			// the path has reached.
 			let this_value = ctx.value("this").cloned();
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 			let eval_ctx = match this_value {
-				Some(ref v) => eval_ctx.with_value(v),
+				Some(ref v) => eval_ctx.with_value_and_doc(v),
 				None => eval_ctx,
 			};
-			let value = expr.evaluate(eval_ctx).await?;
+			let value = super::evaluate_from_source(&*expr, eval_ctx).await?;
 
 			match value {
 				Value::Array(arr) => {

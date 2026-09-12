@@ -69,7 +69,12 @@ impl ExecOperator for ExprPlan {
 		let ctx = ctx.clone();
 
 		Ok(Box::pin(stream::once(async move {
-			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+			// A statement in scalar position reads the enclosing row as its
+			// document; a top-level statement has none.
+			let eval_ctx = match ctx.current_row() {
+				Some(row) => EvalContext::from_exec_ctx(&ctx).with_value_and_doc(row),
+				None => EvalContext::from_exec_ctx(&ctx),
+			};
 			let value = expr.evaluate(eval_ctx).await?;
 			Ok(ValueBatch::new(vec![value]))
 		})))

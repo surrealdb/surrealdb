@@ -22,7 +22,15 @@ value = "[{ category: 'a', flag: true, id: pts:1, point: [10f] }, { category: 'b
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, distance] {rows: 2}\n    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2}\n        Compute [ctx: Db] [fields: distance = vector::distance::knn(...)] {rows: 2}\n            Filter [ctx: Db] [predicate: category = 'a' AND flag = true] {rows: 2}\n                KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: flag = true, prefilter_tier: exact] {rows: 2}\n                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 4}\n\nTotal rows: 2"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, distance] {rows: 2}
+    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2}
+        Compute [ctx: Db] [fields: distance = vector::distance::knn()] {rows: 2}
+            Filter [ctx: Db] [predicate: category = 'a' AND flag = true] {rows: 2}
+                KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: flag = true, prefilter_tier: exact] {rows: 2}
+                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 4}
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ distance: 10f, id: pts:1 }, { distance: 50f, id: pts:5 }]"

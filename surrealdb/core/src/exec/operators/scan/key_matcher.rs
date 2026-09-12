@@ -11,7 +11,8 @@
 //! shape it cannot express stays on the evaluator path.
 
 use crate::exec::parts::LookupDirection;
-use crate::expr::{BinaryOperator, Expr, Literal, Part, RecordIdKeyLit};
+use crate::expr::BinaryOperator;
+use crate::expr::logical::{LogicalExpr, LogicalRecordIdKey};
 use crate::val::{RecordId, RecordIdKey};
 
 /// Which synthesized field one comparison reads.
@@ -38,11 +39,11 @@ pub(crate) struct KeyPredicateMatcher {
 
 impl KeyPredicateMatcher {
 	/// Compiles `cond` when every conjunct is a comparison between a bare
-	/// `id`/`in`/`out` idiom and a static record-id literal, in either
+	/// `id`/`in`/`out` field read and a static record-id literal, in either
 	/// operand order. `direction` must be a single direction: under `Both`
 	/// the `in`/`out` mapping differs per emitted edge in a way the
 	/// evaluator resolves by falling back, so nothing is compiled.
-	pub(crate) fn compile(cond: &Expr, direction: LookupDirection) -> Option<Self> {
+	pub(crate) fn compile(cond: &LogicalExpr, direction: LookupDirection) -> Option<Self> {
 		if matches!(direction, LookupDirection::Both | LookupDirection::Reference) {
 			return None;
 		}
@@ -50,7 +51,7 @@ impl KeyPredicateMatcher {
 		let mut stack = vec![cond];
 		while let Some(expr) = stack.pop() {
 			match expr {
-				Expr::Binary {
+				LogicalExpr::Binary {
 					left,
 					op: BinaryOperator::And,
 					right,
@@ -58,7 +59,7 @@ impl KeyPredicateMatcher {
 					stack.push(left);
 					stack.push(right);
 				}
-				Expr::Binary {
+				LogicalExpr::Binary {
 					left,
 					op,
 					right,
@@ -106,7 +107,7 @@ impl KeyPredicateMatcher {
 
 /// Compiles one comparison, accepting the literal on either side (the
 /// operator flips accordingly).
-fn compile_test(left: &Expr, op: &BinaryOperator, right: &Expr) -> Option<KeyTest> {
+fn compile_test(left: &LogicalExpr, op: &BinaryOperator, right: &LogicalExpr) -> Option<KeyTest> {
 	let (field, operand, op) = match (key_field(left), key_field(right)) {
 		(Some(field), None) => (field, record_id_literal(right)?, op.clone()),
 		(None, Some(field)) => (field, record_id_literal(left)?, flip(op)?),
@@ -142,12 +143,9 @@ fn flip(op: &BinaryOperator) -> Option<BinaryOperator> {
 	})
 }
 
-/// Recognizes a bare `id` / `in` / `out` idiom.
-fn key_field(expr: &Expr) -> Option<KeyField> {
-	let Expr::Idiom(idiom) = expr else {
-		return None;
-	};
-	let [Part::Field(name)] = idiom.0.as_slice() else {
+/// Recognizes a bare `id` / `in` / `out` field read.
+fn key_field(expr: &LogicalExpr) -> Option<KeyField> {
+	let LogicalExpr::Field(name) = expr else {
 		return None;
 	};
 	match name.as_str() {
@@ -159,20 +157,20 @@ fn key_field(expr: &Expr) -> Option<KeyField> {
 }
 
 /// Recognizes a static record-id literal with a scalar key.
-fn record_id_literal(expr: &Expr) -> Option<RecordId> {
-	let Expr::Literal(Literal::RecordId(lit)) = expr else {
+fn record_id_literal(expr: &LogicalExpr) -> Option<RecordId> {
+	let LogicalExpr::RecordId(lit) = expr else {
 		return None;
 	};
 	let key = match &lit.key {
-		RecordIdKeyLit::Number(n) => RecordIdKey::Number(*n),
-		RecordIdKeyLit::String(s) => RecordIdKey::String(s.clone()),
-		RecordIdKeyLit::Uuid(u) => RecordIdKey::Uuid(*u),
+		LogicalRecordIdKey::Number(n) => RecordIdKey::Number(*n),
+		LogicalRecordIdKey::String(s) => RecordIdKey::String(s.clone()),
+		LogicalRecordIdKey::Uuid(u) => RecordIdKey::Uuid(*u),
 		// Generated keys are not static; composite keys can nest
 		// arbitrary expressions — leave both to the evaluator.
-		RecordIdKeyLit::Array(_)
-		| RecordIdKeyLit::Object(_)
-		| RecordIdKeyLit::Generate(_)
-		| RecordIdKeyLit::Range(_) => return None,
+		LogicalRecordIdKey::Array(_)
+		| LogicalRecordIdKey::Object(_)
+		| LogicalRecordIdKey::Generate(_)
+		| LogicalRecordIdKey::Range(_) => return None,
 	};
 	Some(RecordId::new(lit.table.clone(), key))
 }

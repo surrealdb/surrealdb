@@ -77,6 +77,14 @@ impl PlanBuilder {
 			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp).await;
 		}
 
+		// An index holds the state the last write left it in, with no stamp to
+		// read it at, so it answers for now rather than for the version asked
+		// for. A versioned read is answered by the table iterator, which reads
+		// each record at the stamp.
+		if ctx.opt.version.is_some() {
+			return Self::table_iterator(ctx, Some("VERSION"), p.gp).await;
+		}
+
 		if let Some(io) = p.index_count {
 			return Ok(Plan::SingleIndex(None, io, RecordStrategy::Count));
 		}

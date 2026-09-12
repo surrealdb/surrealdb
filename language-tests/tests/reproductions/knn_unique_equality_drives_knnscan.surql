@@ -19,7 +19,11 @@ value = "[{ email: 'a@x.com', id: pts:1, point: [10f] }, { email: 'b@x.com', id:
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: email = 'b@x.com']\n        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: email = 'b@x.com']\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: email = 'b@x.com']
+        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: email = 'b@x.com']
+"'''
 
 [[test.results]]
 value = "[{ dist: 20f, id: pts:2 }]"

@@ -10,14 +10,15 @@ use anyhow::{Result, bail, ensure};
 use crate::buc::store::{ListOptions, ObjectKey, ObjectStore};
 use crate::buc::{BucketOperation, Error as BucError};
 use crate::catalog::providers::BucketProvider;
-use crate::catalog::{BucketDefinition, Permission};
+use crate::catalog::{BucketDefinition, LogicalPermissionBody};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::EngineError;
-use crate::exec::function::{FunctionRegistry, MutatesState};
+use crate::exec::function::FunctionRegistry;
 use crate::exec::physical_expr::EvalContext;
 use crate::exec::planner::Planner;
 use crate::exec::{Error as ExecError, ExecutionContext};
 use crate::expr::Error as ExprError;
+use crate::expr::logical::LogicalPermission;
 use crate::fnc::args::FromArgs;
 use crate::val::{Bytes, File, Object, Value};
 use crate::{define_async_function, define_pure_function, register_functions};
@@ -103,17 +104,22 @@ impl<'a> StreamingBucketOps<'a> {
 				}
 			);
 
-			match &self.bucket.permissions {
-				Permission::None => {
+			// The bucket permission compiles from its stored text through
+			// the same funnel as every other permission clause.
+			let permission = LogicalPermissionBody::of(&self.bucket.permissions)
+				.logical()
+				.map_err(|e| anyhow::anyhow!("bucket permission has no logical form: {e:#}"))?;
+			match permission {
+				LogicalPermission::None => {
 					bail!(BucError::BucketPermissions {
 						name: self.bucket.name.to_string(),
 						op,
 					})
 				}
-				Permission::Full => (),
-				Permission::Specific(e) => {
+				LogicalPermission::Full => (),
+				LogicalPermission::Specific(e) => {
 					let expr = Planner::new(self.exec_ctx.ctx(), self.exec_ctx.function_registry())
-						.physical_expr(e.clone())
+						.physical_expr(e)
 						.await?;
 					let mut exec_ctx =
 						self.exec_ctx.with_param("action", Value::from(op.to_string()));
@@ -522,43 +528,45 @@ fn file_key_impl((file,): (File,)) -> Result<Value> {
 
 // Note: We use `Any` for file arguments in the macro signature because Kind::File takes
 // parameters (bucket types). The actual type checking happens via FromArgs::from_args.
-define_async_function!(FilePut, "file::put", (file: Any, value: Any) -> Any, file_put_impl);
-define_async_function!(FilePutIfNotExists, "file::put_if_not_exists", (file: Any, value: Any) -> Any, file_put_if_not_exists_impl);
-define_async_function!(FileGet, "file::get", (file: Any) -> Any, file_get_impl);
-define_async_function!(FileHead, "file::head", (file: Any) -> Any, file_head_impl);
-define_async_function!(FileDelete, "file::delete", (file: Any) -> Any, file_delete_impl);
-define_async_function!(FileCopy, "file::copy", (src: Any, dst: Any) -> Any, file_copy_impl);
-define_async_function!(FileCopyIfNotExists, "file::copy_if_not_exists", (src: Any, dst: Any) -> Any, file_copy_if_not_exists_impl);
-define_async_function!(FileRename, "file::rename", (file: Any, target: String) -> Any, file_rename_impl);
-define_async_function!(FileRenameIfNotExists, "file::rename_if_not_exists", (file: Any, target: String) -> Any, file_rename_if_not_exists_impl);
-define_async_function!(FileExists, "file::exists", (file: Any) -> Any, file_exists_impl);
-define_async_function!(FileList, "file::list", (bucket: String, ?opts: Object) -> Any, file_list_impl);
+define_async_function!(FilePut, "file::put", effects: EffectSet::WRITES_EXTERNAL, (file: Any, value: Any) -> Any, file_put_impl);
+define_async_function!(FilePutIfNotExists, "file::put_if_not_exists", effects: EffectSet::WRITES_EXTERNAL, (file: Any, value: Any) -> Any, file_put_if_not_exists_impl);
+define_async_function!(FileGet, "file::get", effects: EffectSet::READS_EXTERNAL, (file: Any) -> Any, file_get_impl);
+define_async_function!(FileHead, "file::head", effects: EffectSet::READS_EXTERNAL, (file: Any) -> Any, file_head_impl);
+define_async_function!(FileDelete, "file::delete", effects: EffectSet::WRITES_EXTERNAL, (file: Any) -> Any, file_delete_impl);
+define_async_function!(FileCopy, "file::copy", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (src: Any, dst: Any) -> Any, file_copy_impl);
+define_async_function!(FileCopyIfNotExists, "file::copy_if_not_exists", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (src: Any, dst: Any) -> Any, file_copy_if_not_exists_impl);
+define_async_function!(FileRename, "file::rename", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (file: Any, target: String) -> Any, file_rename_impl);
+define_async_function!(FileRenameIfNotExists, "file::rename_if_not_exists", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (file: Any, target: String) -> Any, file_rename_if_not_exists_impl);
+define_async_function!(FileExists, "file::exists", effects: EffectSet::READS_EXTERNAL, (file: Any) -> Any, file_exists_impl);
+define_async_function!(FileList, "file::list", effects: EffectSet::READS_EXTERNAL, (bucket: String, ?opts: Object) -> Any, file_list_impl);
 
-define_pure_function!(FileBucket, "file::bucket", (file: Any) -> Any, file_bucket_impl);
-define_pure_function!(FileKey, "file::key", (file: Any) -> Any, file_key_impl);
+define_pure_function!(FileBucket, "file::bucket", effects: EffectSet::PURE, (file: Any) -> Any, file_bucket_impl);
+define_pure_function!(FileKey, "file::key", effects: EffectSet::PURE, (file: Any) -> Any, file_key_impl);
 
 // =========================================================================
 // Registration
 // =========================================================================
 
-// Everything that writes, deletes, copies or renames is registered behind
-// `MutatesState`, so a projection holding one is evaluated per row rather than
-// per group: the bucket keeps what these leave behind, and the count of
-// effects must not follow from how a query grouped its rows. The readers
-// (`get`, `head`, `exists`, `list`) and the pure accessors carry no such
-// constraint.
+// A bucket lives outside the transaction's snapshot, so every function that
+// reaches into one declares `READS_EXTERNAL`, `WRITES_EXTERNAL` or both: the
+// writes have an effect a rule may not repeat or drop and a grouped projection
+// may not run once per group — the bucket keeps what they leave behind, so the
+// count of effects must not follow from how a query grouped its rows — and the
+// reads answer differently on either side of such a write. `file::bucket` and
+// `file::key` only read the two fields of the file value they are given, and
+// are pure.
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(
 		registry,
-		MutatesState<FilePut>,
-		MutatesState<FilePutIfNotExists>,
+		FilePut,
+		FilePutIfNotExists,
 		FileGet,
 		FileHead,
-		MutatesState<FileDelete>,
-		MutatesState<FileCopy>,
-		MutatesState<FileCopyIfNotExists>,
-		MutatesState<FileRename>,
-		MutatesState<FileRenameIfNotExists>,
+		FileDelete,
+		FileCopy,
+		FileCopyIfNotExists,
+		FileRename,
+		FileRenameIfNotExists,
 		FileExists,
 		FileList,
 		FileBucket,

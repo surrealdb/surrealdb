@@ -14,36 +14,38 @@ use crate::expr::idiom::Idiom;
 use crate::kvs::Transaction;
 use crate::val::{RecordId, Value};
 
-mod block;
 mod collections;
 mod conditional;
 mod control_flow;
 pub(crate) mod function;
 pub(crate) mod graph_degree;
-mod idiom;
 mod knn_membership;
 mod literal;
 mod matches;
 mod ops;
+mod path;
 pub(crate) mod record_id;
 mod subquery;
 
 // Re-export all expression types for external use
-pub(crate) use block::BlockPhysicalExpr;
-pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
+pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetFieldExpr, SetLiteral};
 pub(crate) use conditional::IfElseExpr;
 pub(crate) use control_flow::{ControlFlowExpr, ControlFlowKind};
 pub(crate) use function::{
-	BuiltinFunctionExec, ClosureCallExec, ClosureExec, JsFunctionExec, ModelFunctionExec,
-	ProjectionFunctionExec, SiloModuleExec, SurrealismModuleExec, UserDefinedFunctionExec,
+	BodyPlan, BuiltinFunctionExec, ClosureCallExec, ClosureExec, JsFunctionExec, ModelFunctionExec,
+	PlannedBody, ProjectionFunctionExec, RecursiveBody, SiloModuleExec, SurrealismModuleExec,
+	UserDefinedFunctionExec,
 };
-pub(crate) use idiom::IdiomExpr;
 pub(crate) use knn_membership::KnnMembershipOp;
-pub(crate) use literal::{FoldedIdiom, Literal, MockExpr, Param};
+pub(crate) use literal::{Literal, MockExpr, Param};
 pub(crate) use matches::{
-	MatchProbe, MatchesOp, MatchesScope, collect_cond_matches, first_unregistered_cond_matches,
+	ExecutorTables, MatchProbe, MatchesOp, MatchesScope, collect_cond_matches,
+	first_unregistered_cond_matches,
 };
 pub(crate) use ops::{BinaryOp, PostfixOp, SimpleBinaryOp, UnaryOp};
+#[cfg(test)]
+pub(crate) use path::find_part;
+pub(crate) use path::{Broadcast, Current, FoldedPath, Step};
 pub(crate) use record_id::RecordIdExpr;
 pub(crate) use subquery::ScalarSubquery;
 
@@ -174,7 +176,7 @@ impl<'a> EvalContext<'a> {
 			recursion_ctx: None,
 			document_root: None,
 			skip_fetch_perms: exec_ctx.root().skip_fetch_perms,
-			computing_record: None,
+			computing_record: exec_ctx.root().computing_record.clone(),
 			plan_depth: 0,
 		}
 	}
@@ -312,6 +314,10 @@ impl<'a> EvalContext<'a> {
 type ProjectionEvalFut<'a> = BoxFut<'a, FlowResult<Option<Vec<(Idiom, Value)>>>>;
 
 pub trait PhysicalExpr: ToSql + Send + Sync + Debug + 'static {
+	/// The name of this expression's kind, stable across releases. Evaluation
+	/// never dispatches on it; tests assert with it which physical form a
+	/// source compiled to.
+	#[cfg_attr(not(test), allow(dead_code))]
 	fn name(&self) -> &'static str;
 
 	/// The minimum context level required to evaluate this expression.
@@ -396,16 +402,6 @@ pub trait PhysicalExpr: ToSql + Send + Sync + Debug + 'static {
 		vec![]
 	}
 
-	/// Whether this expression is a fused multi-step lookup chain.
-	///
-	/// When consecutive graph/reference lookups are fused into a single
-	/// `LookupPart`, the continuation logic in `evaluate_parts_with_continuation`
-	/// needs to know so it can correctly map per-element over non-lookup arrays
-	/// even when the fused Lookup is the last part in the idiom.
-	fn is_fused_lookup(&self) -> bool {
-		false
-	}
-
 	/// Returns the constant value if this expression is a literal.
 	///
 	/// Used at plan/construction time by parent expressions (e.g., `SimpleBinaryOp`)
@@ -415,11 +411,12 @@ pub trait PhysicalExpr: ToSql + Send + Sync + Debug + 'static {
 		None
 	}
 
-	/// Returns the simple field name if this is a single-field idiom expression.
+	/// Returns the field name if this is a read of one field of the current
+	/// value (`age`).
 	///
 	/// Used at plan/construction time by parent expressions (e.g., `SimpleBinaryOp`)
-	/// to detect simple field access patterns like `age` and inline them, avoiding
-	/// per-record async dispatch through the full IdiomExpr + FieldPart chain.
+	/// to detect simple field access patterns and inline them, avoiding
+	/// per-record async dispatch through the `Step` + `FieldPart` chain.
 	fn try_simple_field(&self) -> Option<&str> {
 		None
 	}

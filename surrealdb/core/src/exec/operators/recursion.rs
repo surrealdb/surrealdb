@@ -236,7 +236,16 @@ impl ExecOperator for RecursionOp {
 		// This operator always yields exactly one batch, so use
 		// stream::once instead of a generator to avoid state-machine overhead.
 		let fut = async move {
-			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+			// RecursePart hands the idiom's document root across the operator
+			// boundary as the enclosing row, so the path's parts -- a dynamic
+			// index, a method argument, the `+shortest=` target -- keep the
+			// record as their frame; the value being recursed is only the
+			// chain's position.
+			let base_ctx = EvalContext::from_exec_ctx(&ctx);
+			let eval_ctx = match ctx.current_row() {
+				Some(row) => base_ctx.with_value_and_doc(row),
+				None => base_ctx,
+			};
 
 			let result = if has_repeat_recurse {
 				repeat::evaluate_recurse_iterative(
@@ -310,11 +319,11 @@ mod tests {
 	use super::common::RecursionBounds;
 	use super::*;
 	use crate::exec::operators::test_util::{
-		TestDb, collect as collect_rows, parse_idiom, physical_expr, try_collect, val,
+		TestDb, collect as collect_rows, parse_path, physical_expr, try_collect, val,
 	};
 	use crate::exec::planner::Planner;
 	use crate::expr::ControlFlow;
-	use crate::expr::part::Part;
+	use crate::expr::logical::LogicalExpr;
 
 	// =========================================================================
 	// Shared fixtures and helpers
@@ -376,23 +385,29 @@ mod tests {
 
 	/// Compile the tail of `src` into the physical path a `RecursionOp` holds.
 	///
-	/// `src` is a whole idiom whose first part is the start expression (e.g.
-	/// `link:a.next`); that part is dropped and the remainder goes through
-	/// `Planner::convert_parts`, which is exactly how the planner builds a
-	/// recursion body — including lookup fusion and the auto-inserted flattens.
+	/// `src` is a whole path whose root is a start expression (e.g.
+	/// `link:a.next`); the root is replaced by the current value, which makes
+	/// the remaining steps a recursion body — a path over `Current`, exactly
+	/// what the planner compiles as one expression, lookup fusion and the
+	/// auto-inserted flattens included.
 	pub(super) async fn body_path(src: &str, ctx: &ExecutionContext) -> Vec<Arc<dyn PhysicalExpr>> {
-		let mut parts = parse_idiom(src).0;
-		assert!(
-			matches!(parts.first(), Some(Part::Start(_))),
-			"{src:?} should start with a start expression, got {parts:?}"
-		);
-		parts.remove(0);
-		let path = Planner::new(ctx.ctx(), ctx.function_registry())
-			.convert_parts(parts)
+		let path = parse_path(src);
+		let root = path.path_root().clone();
+		assert!(!root.is_path(), "{src:?} should start with a start expression, got {root:?}");
+		let body = path
+			.transform::<()>(&mut |node| {
+				Ok(if node == root {
+					LogicalExpr::Current
+				} else {
+					node
+				})
+			})
+			.expect("the rewrite is infallible");
+		let body = Planner::new(ctx.ctx(), ctx.function_registry())
+			.physical_expr(body)
 			.await
 			.expect("recursion body should convert");
-		assert!(!path.is_empty(), "{src:?} should convert to at least one part");
-		path
+		vec![body]
 	}
 
 	/// The body operator the planner extracts from a converted path: the single

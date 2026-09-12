@@ -54,6 +54,9 @@ pub enum Lookup<'a> {
 	/// A cache key for the database-wide reference-target summary consumed by
 	/// the DELETE purge gate (which tables any `REFERENCE` field can target).
 	DbReferenceTargets(NamespaceId, DatabaseId),
+	/// A cache key for a table's catalog version, as this transaction sees it:
+	/// `Some` once read or stamped, `None` for a table nothing has stamped.
+	Cv(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for events (on a table)
 	Evs(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for fields (on a table)
@@ -150,6 +153,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Sqs(la, lb), Key::Sqs(ka, kb)) => la == ka && lb == kb,
 			(Self::Tbs(la, lb), Key::Tbs(ka, kb)) => la == ka && lb == kb,
 			(Self::DbReferenceTargets(la, lb), Key::DbReferenceTargets(ka, kb)) => la == ka && lb == kb,
+			(Self::Cv(la, lb, lc), Key::Cv(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Evs(la, lb, lc), Key::Evs(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Fds(la, lb, lc), Key::Fds(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Fts(la, lb, lc), Key::Fts(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
@@ -295,7 +299,23 @@ mod tests {
 	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &RecordIdKey::Number(1)), Key::Record(NamespaceId(1), DatabaseId(1), "test".to_string(), RecordIdKey::Number(1)), true)]
 	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &RecordIdKey::Number(1)), Key::Record(NamespaceId(1), DatabaseId(1), "test".to_string(), RecordIdKey::Number(2)), false)]
 	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &RecordIdKey::Number(1)), Key::Record(NamespaceId(1), DatabaseId(2), "test".to_string(), RecordIdKey::Number(1)), false)]
+	#[case(Lookup::Cv(NamespaceId(1), DatabaseId(1), "test"), Key::Cv(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Cv(NamespaceId(1), DatabaseId(1), "test"), Key::Cv(NamespaceId(1), DatabaseId(1), "other".to_string()), false)]
 	fn test_equivalent(#[case] l: Lookup<'_>, #[case] k: Key, #[case] expected: bool) {
 		assert_eq!(l.equivalent(&k), expected);
+		// The cache hashes the lookup and compares it against the stored key,
+		// so an equivalent pair must also hash alike. The derived `Hash`
+		// includes the variant's position, which is why `Lookup` and `Key`
+		// declare their variants in the same order.
+		if expected {
+			assert_eq!(hash(&l), hash(&k), "an equivalent lookup and key hash alike");
+		}
+	}
+
+	fn hash<T: std::hash::Hash>(value: &T) -> u64 {
+		use std::hash::Hasher;
+		let mut hasher = std::collections::hash_map::DefaultHasher::new();
+		value.hash(&mut hasher);
+		hasher.finish()
 	}
 }

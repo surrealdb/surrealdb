@@ -3853,7 +3853,6 @@ dependencies = [
  "phf",
  "reblessive",
  "surrealdb-expr",
- "surrealdb-sql",
  "surrealdb-strand",
  "surrealdb-syn",
  "surrealdb-types",

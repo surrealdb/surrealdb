@@ -50,18 +50,7 @@ impl Document {
 			return Ok(self.current.doc.as_ref().clone());
 		}
 		// Resolve the closure of computed fields the projection touches
-		let mut needed_roots = {
-			let omit_exprs: Vec<crate::expr::Expr> =
-				omit.iter().cloned().map(crate::expr::Expr::Idiom).collect();
-			crate::exec::planner::Planner::extract_needed_fields(
-				&stmt.fields,
-				&omit_exprs,
-				stmt.cond.as_ref(),
-				stmt.order.as_ref(),
-				stmt.group.as_ref(),
-				stmt.split.as_ref(),
-			)
-		};
+		let mut needed_roots = needed_field_roots(stmt, omit);
 		// Augment with deps of field-level select permissions
 		if let Some(ref mut roots) = needed_roots
 			&& self.id.is_some()
@@ -420,5 +409,184 @@ impl Document {
 			}
 		}
 		Ok(())
+	}
+}
+
+/// Root field names a SELECT's clauses read from the current row, or `None`
+/// when the statement may read any field (a `*` projection, a parameter, an
+/// idiom anchored on an opaque expression, or a filter nested more deeply than
+/// the scope model follows).
+///
+/// Idiom roots decide whose row a field access belongs to:
+///
+/// - unrooted, `$this.x` and `$self.x`: the leading `Part::Field` is a column of the current row's
+///   table;
+/// - `$parent.x`: the fields belong to the outer row, and only nested predicates are walked;
+/// - a computed start or any other parameter: the analysis is opaque.
+///
+/// Inside one `[WHERE …]` predicate the runtime rebinds the scope — `.x` and
+/// `$this.x` name the iteration element, `$parent.x` names the current row —
+/// so the classification flips at depth 1. Deeper nesting is not modelled and
+/// reads as opaque.
+fn needed_field_roots(
+	stmt: &SelectStatement,
+	omit: &[Idiom],
+) -> Option<std::collections::HashSet<String>> {
+	use crate::expr::field::Field;
+	use crate::expr::visit::{Visit, Visitor};
+	use crate::expr::{Expr, Part};
+
+	if let Fields::Select(field_list) = &stmt.fields
+		&& field_list.iter().any(|f| matches!(f, Field::All))
+	{
+		return None;
+	}
+
+	enum IdiomRoot {
+		ThisRow,
+		OuterRow,
+		Opaque,
+	}
+
+	fn classify(idiom: &Idiom) -> IdiomRoot {
+		match idiom.0.first() {
+			None => IdiomRoot::ThisRow,
+			Some(Part::Start(Expr::Param(p))) => match p.as_str() {
+				"this" | "self" => IdiomRoot::ThisRow,
+				"parent" => IdiomRoot::OuterRow,
+				_ => IdiomRoot::Opaque,
+			},
+			Some(Part::Start(_)) => IdiomRoot::Opaque,
+			Some(_) => IdiomRoot::ThisRow,
+		}
+	}
+
+	struct NeededFieldExtractor {
+		fields: std::collections::HashSet<String>,
+		has_opaque: bool,
+		/// Depth of `Part::Where(...)` predicates currently being walked.
+		filter_depth: u32,
+	}
+
+	impl NeededFieldExtractor {
+		fn take_leading_field<'a>(
+			&mut self,
+			parts: impl Iterator<Item = &'a Part>,
+		) -> Result<(), std::convert::Infallible> {
+			let mut leading_field_taken = false;
+			for part in parts {
+				match part {
+					Part::Start(_) => continue,
+					Part::Field(name) if !leading_field_taken => {
+						self.fields.insert(name.as_str().to_owned());
+						leading_field_taken = true;
+					}
+					_ => {}
+				}
+				self.visit_part(part)?;
+			}
+			Ok(())
+		}
+	}
+
+	impl Visitor for NeededFieldExtractor {
+		type Error = std::convert::Infallible;
+
+		fn visit_idiom(&mut self, idiom: &Idiom) -> Result<(), Self::Error> {
+			match (self.filter_depth, classify(idiom)) {
+				(0, IdiomRoot::OuterRow) => {
+					for p in idiom.0.iter().skip(1) {
+						self.visit_part(p)?;
+					}
+				}
+				(0, IdiomRoot::ThisRow) => self.take_leading_field(idiom.0.iter())?,
+				(1, IdiomRoot::OuterRow) => self.take_leading_field(idiom.0.iter().skip(1))?,
+				(1, IdiomRoot::ThisRow) => {
+					for part in idiom.0.iter() {
+						if matches!(part, Part::Start(_)) {
+							continue;
+						}
+						self.visit_part(part)?;
+					}
+				}
+				(0 | 1, IdiomRoot::Opaque) | (2.., _) => {
+					self.has_opaque = true;
+				}
+			}
+			Ok(())
+		}
+
+		fn visit_part(&mut self, part: &Part) -> Result<(), Self::Error> {
+			if matches!(part, Part::Where(_)) {
+				self.filter_depth = self.filter_depth.saturating_add(1);
+				let r = part.visit(self);
+				self.filter_depth = self.filter_depth.saturating_sub(1);
+				r
+			} else {
+				part.visit(self)
+			}
+		}
+
+		fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
+			match expr {
+				// A parameter may hold any field.
+				Expr::Param(_) => {
+					self.has_opaque = true;
+				}
+				_ => {
+					expr.visit(self)?;
+				}
+			}
+			Ok(())
+		}
+	}
+
+	let mut extractor = NeededFieldExtractor {
+		fields: std::collections::HashSet::new(),
+		has_opaque: false,
+		filter_depth: 0,
+	};
+
+	match &stmt.fields {
+		Fields::Value(selector) => {
+			let _ = extractor.visit_expr(&selector.expr);
+		}
+		Fields::Select(field_list) => {
+			for field in field_list {
+				if let Field::Single(selector) = field {
+					let _ = extractor.visit_expr(&selector.expr);
+					if let Some(alias) = &selector.alias {
+						let _ = extractor.visit_idiom(alias);
+					}
+				}
+			}
+		}
+	}
+	for idiom in omit {
+		let _ = extractor.visit_idiom(idiom);
+	}
+	if let Some(cond) = &stmt.cond {
+		let _ = extractor.visit_expr(&cond.0);
+	}
+	if let Some(crate::expr::order::Ordering::Order(order_list)) = &stmt.order {
+		for order in order_list.iter() {
+			let _ = extractor.visit_idiom(&order.value);
+		}
+	}
+	if let Some(groups) = &stmt.group {
+		for group in groups.0.iter() {
+			let _ = extractor.visit_idiom(&group.0);
+		}
+	}
+	if let Some(splits) = &stmt.split {
+		for split in splits.iter() {
+			let _ = extractor.visit_idiom(&split.0);
+		}
+	}
+
+	if extractor.has_opaque {
+		None
+	} else {
+		Some(extractor.fields)
 	}
 }

@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -48,7 +49,7 @@ pub(crate) async fn fetch_compute_expr(
 					v.clone()
 						.coerce_to::<String>()
 						.map_err(|_| ExecError::InvalidFetch {
-							value: v.into_literal(),
+							value: v.into_literal().to_sql(),
 						})?
 						.as_str(),
 				)?
@@ -103,12 +104,12 @@ pub(crate) async fn fetch_compute_expr(
 					Ok(())
 				}
 				_ => Err(anyhow::Error::new(ExecError::InvalidFetch {
-					value: Expr::FunctionCall(f.clone()),
+					value: Expr::FunctionCall(f.clone()).to_sql(),
 				})),
 			}
 		}
 		v => Err(anyhow::Error::new(ExecError::InvalidFetch {
-			value: v.clone(),
+			value: v.to_sql(),
 		})),
 	}
 }

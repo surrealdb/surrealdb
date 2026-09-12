@@ -4,11 +4,15 @@ use std::sync::Arc;
 
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::helpers::{args_access_mode, args_required_context};
+use super::helpers::{args_access_mode, args_required_context, fmt_call_args};
 #[cfg(feature = "surrealism")]
 use super::helpers::{check_permission, evaluate_args, validate_return};
 #[cfg(feature = "surrealism")]
+use crate::catalog::ModuleDefinition;
+#[cfg(feature = "surrealism")]
 use crate::catalog::providers::DatabaseProvider;
+#[cfg(feature = "surrealism")]
+use crate::exec::permission::CompiledGuard;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut};
 #[cfg(feature = "surrealism")]
@@ -29,6 +33,7 @@ async fn call_module_export<'a>(
 	mod_name: String,
 	sub: Option<&'a str>,
 	arguments: &'a [Arc<dyn PhysicalExpr>],
+	permission: &'a CompiledGuard<ModuleDefinition>,
 	ctx: EvalContext<'a>,
 ) -> FlowResult<Value> {
 	use reblessive::TreeStack;
@@ -58,9 +63,11 @@ async fn call_module_export<'a>(
 	let val =
 		ctx.txn().get_db_module(ns_id, db_id, &mod_name, ctx.exec_ctx.version_stamp()).await?;
 
-	// Check permissions
-	if ctx.exec_ctx.should_check_perms(crate::iam::Action::View)? {
-		check_permission(&val.permissions, &mod_name, &ctx).await?;
+	// Check permissions. Inside a permission predicate the call is the
+	// definer's and is not checked.
+	if !ctx.skip_fetch_perms && ctx.exec_ctx.should_check_perms(crate::iam::Action::View)? {
+		check_permission(permission, val.permissions_body.logical_ref()?, &val, &mod_name, &ctx)
+			.await?;
 	}
 
 	// Get the executable and signature
@@ -137,8 +144,20 @@ pub struct SurrealismModuleExec {
 	pub(crate) sub: Option<String>,
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
 	/// Whether this function is declared writeable by the module author.
-	/// When `false`, the function is read-only and the host can use a read transaction.
+	///
+	/// When `false` the call reports [`AccessMode::ReadOnly`], which is what
+	/// lets a parent buffer its rows ahead of demand and evaluate them side by
+	/// side. It does not choose the transaction: the transaction type is taken
+	/// from the surface statement before planning, and a module or silo call
+	/// answers `read_only()` with `false` whatever this flag says, so the
+	/// statement runs in a write transaction either way.
 	pub(crate) writeable: bool,
+	/// The `PERMISSIONS` clause of the definition this call last found,
+	/// compiled. A call in a projection is made once per row, and compiling
+	/// its guard is plan-time work; see [`CompiledGuard`] for what is kept
+	/// and what is not.
+	#[cfg(feature = "surrealism")]
+	pub(crate) permission: CompiledGuard<ModuleDefinition>,
 }
 impl PhysicalExpr for SurrealismModuleExec {
 	fn name(&self) -> &'static str {
@@ -161,6 +180,7 @@ impl PhysicalExpr for SurrealismModuleExec {
 			format!("mod::{}", self.module),
 			self.sub.as_deref(),
 			&self.arguments,
+			&self.permission,
 			ctx,
 		))
 	}
@@ -191,14 +211,14 @@ impl PhysicalExpr for SurrealismModuleExec {
 }
 
 impl ToSql for SurrealismModuleExec {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push_str("mod::");
 		f.push_str(&self.module);
 		if let Some(sub) = &self.sub {
 			f.push_str("::");
 			f.push_str(sub);
 		}
-		f.push_str("(...)");
+		fmt_call_args(f, fmt, &self.arguments);
 	}
 }
 
@@ -218,6 +238,12 @@ pub struct SiloModuleExec {
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
 	/// Whether this function is declared writeable by the module author.
 	pub(crate) writeable: bool,
+	/// The `PERMISSIONS` clause of the definition this call last found,
+	/// compiled. A call in a projection is made once per row, and compiling
+	/// its guard is plan-time work; see [`CompiledGuard`] for what is kept
+	/// and what is not.
+	#[cfg(feature = "surrealism")]
+	pub(crate) permission: CompiledGuard<ModuleDefinition>,
 }
 impl PhysicalExpr for SiloModuleExec {
 	fn name(&self) -> &'static str {
@@ -243,6 +269,7 @@ impl PhysicalExpr for SiloModuleExec {
 			),
 			self.sub.as_deref(),
 			&self.arguments,
+			&self.permission,
 			ctx,
 		))
 	}
@@ -273,7 +300,7 @@ impl PhysicalExpr for SiloModuleExec {
 }
 
 impl ToSql for SiloModuleExec {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push_str("silo::");
 		f.push_str(&self.org);
 		f.push_str("::");
@@ -290,6 +317,6 @@ impl ToSql for SiloModuleExec {
 			f.push_str("::");
 			f.push_str(sub);
 		}
-		f.push_str("(...)");
+		fmt_call_args(f, fmt, &self.arguments);
 	}
 }

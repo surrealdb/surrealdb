@@ -573,6 +573,18 @@ pub trait TableProvider: Sync {
 		fd: &'a catalog::FieldDefinition,
 	) -> BoxProviderFut<'a, Result<()>>;
 
+	/// Delete a field definition from a table, by the field's declared path.
+	///
+	/// Deleting a field that does not exist is not an error. Callers that
+	/// need the definition first read it with [`Self::get_tb_field`].
+	fn del_tb_field<'a>(
+		&'a self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		fd: &'a str,
+	) -> BoxProviderFut<'a, Result<()>>;
+
 	/// Retrieve an index for a table.
 	fn get_tb_index<'a>(
 		&'a self,

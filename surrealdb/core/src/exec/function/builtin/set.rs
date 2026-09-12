@@ -5,34 +5,35 @@ use reblessive::tree::TreeStack;
 
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
+use crate::exec::physical_expr::function::StreamingClosureEvaluator;
 use crate::expr::Kind;
+use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
-use crate::fnc::closure::LegacyClosureEvaluator;
 use crate::val::{ClosureEvaluator, Value};
 use crate::{define_pure_function, register_functions};
 
 // Single set argument functions
-define_pure_function!(SetFirst, "set::first", (set: Any) -> Any, crate::fnc::set::first);
-define_pure_function!(SetFlatten, "set::flatten", (set: Any) -> Any, crate::fnc::set::flatten);
-define_pure_function!(SetIsEmpty, "set::is_empty", (set: Any) -> Bool, crate::fnc::set::is_empty);
-define_pure_function!(SetLast, "set::last", (set: Any) -> Any, crate::fnc::set::last);
-define_pure_function!(SetLen, "set::len", (set: Any) -> Int, crate::fnc::set::len);
-define_pure_function!(SetMax, "set::max", (set: Any) -> Any, crate::fnc::set::max);
-define_pure_function!(SetMin, "set::min", (set: Any) -> Any, crate::fnc::set::min);
+define_pure_function!(SetFirst, "set::first", effects: EffectSet::PURE, (set: Any) -> Any, crate::fnc::set::first);
+define_pure_function!(SetFlatten, "set::flatten", effects: EffectSet::PURE, (set: Any) -> Any, crate::fnc::set::flatten);
+define_pure_function!(SetIsEmpty, "set::is_empty", effects: EffectSet::PURE, (set: Any) -> Bool, crate::fnc::set::is_empty);
+define_pure_function!(SetLast, "set::last", effects: EffectSet::PURE, (set: Any) -> Any, crate::fnc::set::last);
+define_pure_function!(SetLen, "set::len", effects: EffectSet::PURE, (set: Any) -> Int, crate::fnc::set::len);
+define_pure_function!(SetMax, "set::max", effects: EffectSet::PURE, (set: Any) -> Any, crate::fnc::set::max);
+define_pure_function!(SetMin, "set::min", effects: EffectSet::PURE, (set: Any) -> Any, crate::fnc::set::min);
 
 // Two argument set functions
-define_pure_function!(SetAdd, "set::add", (set: Any, value: Any) -> Any, crate::fnc::set::add);
-define_pure_function!(SetAt, "set::at", (set: Any, index: Int) -> Any, crate::fnc::set::at);
-define_pure_function!(SetComplement, "set::complement", (a: Any, b: Any) -> Any, crate::fnc::set::complement);
-define_pure_function!(SetContains, "set::contains", (set: Any, value: Any) -> Bool, crate::fnc::set::contains);
-define_pure_function!(SetDifference, "set::difference", (a: Any, b: Any) -> Any, crate::fnc::set::difference);
-define_pure_function!(SetIntersect, "set::intersect", (a: Any, b: Any) -> Any, crate::fnc::set::intersect);
-define_pure_function!(SetJoin, "set::join", (set: Any, separator: String) -> String, crate::fnc::set::join);
-define_pure_function!(SetRemove, "set::remove", (set: Any, value: Any) -> Any, crate::fnc::set::remove);
-define_pure_function!(SetUnion, "set::union", (a: Any, b: Any) -> Any, crate::fnc::set::union);
+define_pure_function!(SetAdd, "set::add", effects: EffectSet::PURE, (set: Any, value: Any) -> Any, crate::fnc::set::add);
+define_pure_function!(SetAt, "set::at", effects: EffectSet::PURE, (set: Any, index: Int) -> Any, crate::fnc::set::at);
+define_pure_function!(SetComplement, "set::complement", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::set::complement);
+define_pure_function!(SetContains, "set::contains", effects: EffectSet::PURE, (set: Any, value: Any) -> Bool, crate::fnc::set::contains);
+define_pure_function!(SetDifference, "set::difference", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::set::difference);
+define_pure_function!(SetIntersect, "set::intersect", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::set::intersect);
+define_pure_function!(SetJoin, "set::join", effects: EffectSet::PURE, (set: Any, separator: String) -> String, crate::fnc::set::join);
+define_pure_function!(SetRemove, "set::remove", effects: EffectSet::PURE, (set: Any, value: Any) -> Any, crate::fnc::set::remove);
+define_pure_function!(SetUnion, "set::union", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::set::union);
 
 // Three argument set functions
-define_pure_function!(SetSlice, "set::slice", (set: Any, ?start: Any, ?end: Int) -> Any, crate::fnc::set::slice);
+define_pure_function!(SetSlice, "set::slice", effects: EffectSet::PURE, (set: Any, ?start: Any, ?end: Int) -> Any, crate::fnc::set::slice);
 
 // =========================================================================
 // Closure-based set functions (require async execution with TreeStack)
@@ -40,13 +41,17 @@ define_pure_function!(SetSlice, "set::slice", (set: Any, ?start: Any, ?end: Int)
 
 /// Helper macro for creating closure-based set functions
 macro_rules! define_set_closure_function {
-	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident),+, ?$oarg:ident: $okind:ident => $ret:ident) => {
+	($struct_name:ident, $func_name:literal, effects: $effects:expr, $impl_path:path, $($arg:ident: $kind:ident),+, ?$oarg:ident: $okind:ident => $ret:ident) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
 
 		impl ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> EffectSet {
+				$effects
 			}
 
 			fn signature(&self) -> Signature {
@@ -74,15 +79,9 @@ macro_rules! define_set_closure_function {
 				args: Vec<Value>,
 			) -> crate::exec::BoxFut<'a, Result<Value>> {
 				Box::pin(async move {
-					use crate::doc::CursorDoc;
 					let args = FromArgs::from_args($func_name, args)?;
-					let frozen = ctx.exec_ctx.ctx();
-					let opt = ctx.exec_ctx.options();
-					let doc = ctx.document_root.or(ctx.current_value)
-						.map(|v| CursorDoc::new(None, None, v.clone()));
-					let evaluator =
-						opt.map(|o| LegacyClosureEvaluator::new(frozen, o, doc.as_ref()));
-					let ev = evaluator.as_ref().map(|e| e as &dyn ClosureEvaluator);
+					let evaluator = StreamingClosureEvaluator::new(ctx);
+					let ev = Some(&evaluator as &dyn ClosureEvaluator);
 					let mut stack = TreeStack::new();
 					stack
 						.enter(|stk| async move {
@@ -94,13 +93,17 @@ macro_rules! define_set_closure_function {
 			}
 		}
 	};
-	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident),+ => $ret:ident) => {
+	($struct_name:ident, $func_name:literal, effects: $effects:expr, $impl_path:path, $($arg:ident: $kind:ident),+ => $ret:ident) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
 
 		impl ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> EffectSet {
+				$effects
 			}
 
 			fn signature(&self) -> Signature {
@@ -127,15 +130,9 @@ macro_rules! define_set_closure_function {
 				args: Vec<Value>,
 			) -> crate::exec::BoxFut<'a, Result<Value>> {
 				Box::pin(async move {
-					use crate::doc::CursorDoc;
 					let args = FromArgs::from_args($func_name, args)?;
-					let frozen = ctx.exec_ctx.ctx();
-					let opt = ctx.exec_ctx.options();
-					let doc = ctx.document_root.or(ctx.current_value)
-						.map(|v| CursorDoc::new(None, None, v.clone()));
-					let evaluator =
-						opt.map(|o| LegacyClosureEvaluator::new(frozen, o, doc.as_ref()));
-					let ev = evaluator.as_ref().map(|e| e as &dyn ClosureEvaluator);
+					let evaluator = StreamingClosureEvaluator::new(ctx);
+					let ev = Some(&evaluator as &dyn ClosureEvaluator);
 					let mut stack = TreeStack::new();
 					stack
 						.enter(|stk| async move {
@@ -150,25 +147,25 @@ macro_rules! define_set_closure_function {
 }
 
 // array::all - Check if all elements match a condition
-define_set_closure_function!(SetAll, "set::all", crate::fnc::set::all, set: Any, ?check: Any => Any);
+define_set_closure_function!(SetAll, "set::all", effects: EffectSet::PURE, crate::fnc::set::all, set: Any, ?check: Any => Any);
 
 // set::any - Check if any element matches a condition
-define_set_closure_function!(SetAny, "set::any", crate::fnc::set::any, set: Any, ?check: Any => Any);
+define_set_closure_function!(SetAny, "set::any", effects: EffectSet::PURE, crate::fnc::set::any, set: Any, ?check: Any => Any);
 
 // set::filter - Filter elements by closure/value
-define_set_closure_function!(SetFilter, "set::filter", crate::fnc::set::filter, set: Any, check: Any => Any);
+define_set_closure_function!(SetFilter, "set::filter", effects: EffectSet::PURE, crate::fnc::set::filter, set: Any, check: Any => Any);
 
 // set::find - Find first matching element
-define_set_closure_function!(SetFind, "set::find", crate::fnc::set::find, set: Any, check: Any => Any);
+define_set_closure_function!(SetFind, "set::find", effects: EffectSet::PURE, crate::fnc::set::find, set: Any, check: Any => Any);
 
 // set::fold - Fold with accumulator and closure
-define_set_closure_function!(SetFold, "set::fold", crate::fnc::set::fold, set: Any, init: Any, mapper: Any => Any);
+define_set_closure_function!(SetFold, "set::fold", effects: EffectSet::PURE, crate::fnc::set::fold, set: Any, init: Any, mapper: Any => Any);
 
 // set::map - Transform elements with closure
-define_set_closure_function!(SetMap, "set::map", crate::fnc::set::map, set: Any, mapper: Any => Any);
+define_set_closure_function!(SetMap, "set::map", effects: EffectSet::PURE, crate::fnc::set::map, set: Any, mapper: Any => Any);
 
 // set::reduce - Reduce set with closure
-define_set_closure_function!(SetReduce, "set::reduce", crate::fnc::set::reduce, set: Any, mapper: Any => Any);
+define_set_closure_function!(SetReduce, "set::reduce", effects: EffectSet::PURE, crate::fnc::set::reduce, set: Any, mapper: Any => Any);
 
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(

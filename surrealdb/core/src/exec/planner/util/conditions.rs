@@ -1,23 +1,33 @@
-//! WHERE-clause analysis and rewriting.
+//! WHERE-clause analysis and rewriting over the logical scalar type.
 //!
 //! Predicate inspection (top-level OR, KNN/FTS detection), brute-force KNN
 //! parameter extraction, condition stripping after a scan operator has
 //! consumed parts of the predicate, MATCHES context collection for index
 //! functions, and the record-id point-lookup detector.
 //!
-//! The visitors here all stop at SELECT subquery boundaries: subqueries
-//! have their own planning pass and their predicates do not contribute to
-//! the outer scan's analysis.
+//! Every walk here stops at a [`LogicalExpr::Subquery`]: a nested plan is
+//! bound and planned on its own, and its predicates do not contribute to the
+//! outer scan's analysis. The field reference is any path expression
+//! ([`LogicalExpr::is_path`]); the literal side of a comparison is whatever
+//! [`try_literal_to_value`] accepts.
+//!
+//! Index columns come from the catalog as expression-layer idioms. They are
+//! compared against logical paths by [`idiom_matches_column`], which is the
+//! one place that comparison lives.
 
 use std::collections::HashSet;
-use std::ops::Bound;
+use std::convert::Infallible;
+use std::ops::{Bound, ControlFlow};
 
+use surrealdb_strand::TableName;
+use surrealdb_types::ToSql;
+
+use super::fields::{idiom_is_id, path_steps};
 use super::literals::try_literal_to_value;
 use crate::catalog::Distance;
-use crate::exec::index::analysis::idiom_matches_containment;
+use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalRecordIdKey};
 use crate::expr::operator::NearestNeighbor;
-use crate::expr::visit::{MutVisitor, Visit, VisitMut, Visitor};
-use crate::expr::{BinaryOperator, Cond, Expr, Idiom, Literal};
+use crate::expr::{BinaryOperator, Idiom, Part};
 use crate::val::Number;
 
 // ============================================================================
@@ -29,21 +39,18 @@ use crate::val::Number;
 /// Used to prevent LIMIT/START pushdown into Scan when the condition may
 /// trigger a multi-index union at runtime. Union streams don't maintain
 /// a global ordering, so pushing LIMIT would truncate results arbitrarily.
-pub(crate) fn has_top_level_or(cond: Option<&Cond>) -> bool {
-	match cond {
-		Some(c) => matches!(
-			c.0,
-			Expr::Binary {
-				op: BinaryOperator::Or,
-				..
-			}
-		),
-		None => false,
-	}
+pub(crate) fn has_top_level_or(cond: Option<&LogicalExpr>) -> bool {
+	matches!(
+		cond,
+		Some(LogicalExpr::Binary {
+			op: BinaryOperator::Or,
+			..
+		})
+	)
 }
 
 /// Check if an expression contains any KNN (nearest neighbor) operators.
-pub(crate) fn has_knn_operator(expr: &Expr) -> bool {
+pub(crate) fn has_knn_operator(expr: &LogicalExpr) -> bool {
 	scan_knn_operators(expr).found_any
 }
 
@@ -51,7 +58,7 @@ pub(crate) fn has_knn_operator(expr: &Expr) -> bool {
 ///
 /// Used to distinguish between brute-force KNN with parameter-based vectors
 /// (where `extract_bruteforce_knn` fails) and HNSW KNN (`Approximate`).
-pub(crate) fn has_knn_k_operator(expr: &Expr) -> bool {
+pub(crate) fn has_knn_k_operator(expr: &LogicalExpr) -> bool {
 	scan_knn_operators(expr).found_k
 }
 
@@ -60,56 +67,42 @@ pub(crate) fn has_knn_k_operator(expr: &Expr) -> bool {
 /// `KTree` was backed by the M-Tree index, which has been removed. The
 /// streaming planner uses this to distinguish "unsupported variant" from
 /// "KNN nested under OR/NOT" when emitting the user-facing error.
-pub(crate) fn has_knn_ktree_operator(expr: &Expr) -> bool {
+pub(crate) fn has_knn_ktree_operator(expr: &LogicalExpr) -> bool {
 	scan_knn_operators(expr).found_ktree
 }
 
-fn scan_knn_operators(expr: &Expr) -> KnnOperatorChecker {
-	let mut checker = KnnOperatorChecker {
-		found_any: false,
-		found_k: false,
-		found_ktree: false,
-	};
-	let _ = checker.visit_expr(expr);
-	checker
-}
-
-/// Visitor that detects the presence of KNN operators in an expression tree.
-struct KnnOperatorChecker {
+/// Which KNN operator variants an expression tree contains.
+#[derive(Default)]
+struct KnnOperators {
 	found_any: bool,
 	found_k: bool,
 	found_ktree: bool,
 }
 
-impl Visitor for KnnOperatorChecker {
-	type Error = std::convert::Infallible;
-
-	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
-		if let Expr::Binary {
+fn scan_knn_operators(expr: &LogicalExpr) -> KnnOperators {
+	let mut found = KnnOperators::default();
+	let _ = expr.visit(&mut |e| {
+		if let LogicalExpr::Binary {
 			op: BinaryOperator::NearestNeighbor(nn),
 			..
-		} = expr
+		} = e
 		{
-			self.found_any = true;
+			found.found_any = true;
 			match nn.as_ref() {
-				NearestNeighbor::K(..) => self.found_k = true,
-				NearestNeighbor::KTree(..) => self.found_ktree = true,
+				NearestNeighbor::K(..) => found.found_k = true,
+				NearestNeighbor::KTree(..) => found.found_ktree = true,
 				NearestNeighbor::Approximate(..) => {}
 			}
 		}
-		expr.visit(self)
-	}
-
-	// Don't descend into subqueries -- only check outer WHERE.
-	fn visit_select(&mut self, _: &crate::expr::SelectStatement) -> Result<(), Self::Error> {
-		Ok(())
-	}
+		ControlFlow::<()>::Continue(())
+	});
+	found
 }
 
 /// Parameters extracted from a brute-force KNN expression.
 pub(crate) struct BruteForceKnnParams {
-	/// The idiom path to the vector field.
-	pub field: Idiom,
+	/// The path to the vector field, a path expression.
+	pub field: LogicalExpr,
 	/// The query vector.
 	pub vector: BruteForceKnnVector,
 	/// Number of nearest neighbors.
@@ -127,33 +120,33 @@ pub(crate) enum BruteForceKnnVector {
 	/// array with computed elements, binary of computables). Evaluated once
 	/// at stream open by `KnnTopK` and coerced to `array<number>` with the
 	/// same coercion the legacy tree applies.
-	Deferred(Expr),
+	Deferred(LogicalExpr),
 }
 
 /// Whether the legacy planner's `Tree::eval_value` would compute this
-/// expression at plan time (`Node::Computable` / `Node::Computed`). Idioms,
+/// expression at plan time (`Node::Computable` / `Node::Computed`). Fields,
 /// subqueries, closures, prefix expressions and every other node kind are
 /// `Unsupported` there — a brute-force KNN with such a right-hand side never
 /// registers an executor entry and evaluates to `false` per row instead.
-fn is_plan_time_computable(expr: &Expr) -> bool {
+fn is_plan_time_computable(expr: &LogicalExpr) -> bool {
 	match expr {
 		// `Tree::eval_array` fully computes array elements, whatever they are.
-		Expr::Literal(Literal::Array(_)) => true,
-		Expr::Literal(
-			Literal::Integer(_)
-			| Literal::Bool(_)
-			| Literal::String(_)
-			| Literal::RecordId(_)
-			| Literal::Duration(_)
-			| Literal::Uuid(_)
-			| Literal::Datetime(_)
-			| Literal::None
-			| Literal::Null
-			| Literal::Decimal(_)
-			| Literal::Float(_),
+		LogicalExpr::Array(_) => true,
+		LogicalExpr::Literal(
+			LogicalLiteral::Integer(_)
+			| LogicalLiteral::Bool(_)
+			| LogicalLiteral::String(_)
+			| LogicalLiteral::Duration(_)
+			| LogicalLiteral::Uuid(_)
+			| LogicalLiteral::Datetime(_)
+			| LogicalLiteral::None
+			| LogicalLiteral::Null
+			| LogicalLiteral::Decimal(_)
+			| LogicalLiteral::Float(_),
 		) => true,
-		Expr::Param(_) | Expr::FunctionCall(_) => true,
-		Expr::Binary {
+		LogicalExpr::RecordId(_) => true,
+		LogicalExpr::Param(_) | LogicalExpr::Call(_) => true,
+		LogicalExpr::Binary {
 			left,
 			right,
 			..
@@ -164,32 +157,70 @@ fn is_plan_time_computable(expr: &Expr) -> bool {
 
 /// Extract brute-force KNN parameters from a WHERE clause.
 ///
-/// Returns the parameters if a `NearestNeighbor::K(k, dist)` expression is
-/// found at the top level of AND-connected conditions.
-pub(crate) fn extract_bruteforce_knn(cond: &Cond) -> Option<BruteForceKnnParams> {
-	let mut expr = cond.0.clone();
-	let mut extractor = BruteForceKnnExtractor {
-		params: None,
-	};
-	let _ = extractor.visit_mut_expr(&mut expr);
-	extractor.params
+/// Returns the parameters of the first `NearestNeighbor::K(k, dist)`
+/// expression, in pre-order, whose left side is a field and whose right side
+/// is a literal vector or a plan-time computable expression (see
+/// [`BruteForceKnnVector`]). Anything else (a field, a subquery, …) on the
+/// right stays in the condition and evaluates to `false` per row, like a
+/// legacy KNN expression without an executor entry.
+pub(crate) fn extract_bruteforce_knn(cond: &LogicalExpr) -> Option<BruteForceKnnParams> {
+	let mut params = None;
+	let _ = cond.visit(&mut |e| {
+		if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::NearestNeighbor(nn),
+			right,
+		} = e && let NearestNeighbor::K(k, dist) = nn.as_ref()
+			&& left.is_path()
+		{
+			let vector = if let Some(vector) = extract_literal_vector(right) {
+				Some(BruteForceKnnVector::Literal(vector))
+			} else if is_plan_time_computable(right) {
+				Some(BruteForceKnnVector::Deferred(right.as_ref().clone()))
+			} else {
+				None
+			};
+			if let Some(vector) = vector {
+				params = Some(BruteForceKnnParams {
+					field: left.as_ref().clone(),
+					vector,
+					k: *k,
+					distance: dist.clone().into(),
+				});
+				return ControlFlow::Break(());
+			}
+		}
+		ControlFlow::Continue(())
+	});
+	params
 }
 
 /// Strip the MATCHES (`@@`) predicate from a WHERE clause, returning the residual.
 ///
 /// Returns `None` when the entire condition is consumed (just a single `@@`),
 /// or `Some(residual)` when additional predicates remain (e.g., `content @@ 'x' AND status = 'a'`).
-pub(crate) fn strip_fts_condition(cond: &Cond) -> Option<Cond> {
-	strip_and_simplify(cond.0.clone(), |e| {
+pub(crate) fn strip_fts_condition(cond: &LogicalExpr) -> Option<LogicalExpr> {
+	strip_and_simplify(cond.clone(), |e| {
 		matches!(
 			e,
-			Expr::Binary {
+			LogicalExpr::Binary {
 				op: BinaryOperator::Matches(_),
 				..
 			}
 		)
 	})
-	.map(Cond)
+}
+
+/// Whether `e` is a KNN operator a scan operator consumes: `NearestNeighbor::K`
+/// (by `KnnTopK`) or `NearestNeighbor::Approximate` (by `KnnScan` via HNSW).
+fn is_handled_knn(e: &LogicalExpr) -> bool {
+	matches!(
+		e,
+		LogicalExpr::Binary {
+			op: BinaryOperator::NearestNeighbor(nn),
+			..
+		} if matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..))
+	)
 }
 
 /// Strip handled KNN operators from a WHERE clause, returning the residual condition.
@@ -198,22 +229,13 @@ pub(crate) fn strip_fts_condition(cond: &Cond) -> Option<Cond> {
 /// (consumed by `KnnScan` via HNSW index) are stripped. `KTree` is left in place --
 /// the caller should verify the residual contains no remaining KNN operators and
 /// return an error if it does.
-pub(crate) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
-	strip_and_simplify(cond.0.clone(), |e| {
-		matches!(
-			e,
-			Expr::Binary {
-				op: BinaryOperator::NearestNeighbor(nn),
-				..
-			} if matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..))
-		)
-	})
-	.map(Cond)
+pub(crate) fn strip_knn_from_condition(cond: &LogicalExpr) -> Option<LogicalExpr> {
+	strip_and_simplify(cond.clone(), is_handled_knn)
 }
 
 /// Strip handled KNN operators AND every conjunct containing a MATCHES
 /// operator from a WHERE clause, returning the in-traversal residual for a
-/// `KnnScan` (#548).
+/// `KnnScan`.
 ///
 /// The residual is evaluated per candidate inside the ANN search through the
 /// legacy compute path, where MATCHES has no query executor and computes to
@@ -228,39 +250,54 @@ pub(crate) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
 /// ...): non-matching candidates occupy top-K slots inside the search, so
 /// the statement may return **fewer than k rows even when k matching rows
 /// exist** — the k nearest overall are found first and then filtered, rather
-/// than the k nearest *matching* rows. Strictly better than the zero rows
-/// this replaced, and covered conjuncts (an online, current-format FULLTEXT
-/// index) avoid it entirely by joining the allow-list.
-pub(crate) fn strip_knn_and_matches_from_condition(cond: &Cond) -> Option<Cond> {
-	use crate::exec::index::analysis::IndexAnalyzer;
-	strip_and_simplify(cond.0.clone(), |e| {
-		matches!(
-			e,
-			Expr::Binary {
-				op: BinaryOperator::NearestNeighbor(nn),
-				..
-			} if matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..))
-		) || IndexAnalyzer::expr_contains_matches(e)
-	})
-	.map(Cond)
+/// than the k nearest *matching* rows. Covered conjuncts (an online,
+/// current-format FULLTEXT index) avoid it entirely by joining the allow-list.
+pub(crate) fn strip_knn_and_matches_from_condition(cond: &LogicalExpr) -> Option<LogicalExpr> {
+	strip_and_simplify(cond.clone(), |e| is_handled_knn(e) || expr_contains_matches(e))
+}
+
+/// Whether a MATCHES operator appears in `expr`, looking through operator
+/// applications and call arguments. Other shapes (a field's own parts, an
+/// `IF`, a subquery) are not searched: a MATCHES inside them has no index
+/// context of the enclosing scan to resolve against. The logical rules'
+/// `mentions_index_operator` answers a different question — whether a
+/// conjunct names an index of its statement anywhere inside it, so that no
+/// rule moves it out of that statement — and so searches every shape.
+pub(crate) fn expr_contains_matches(expr: &LogicalExpr) -> bool {
+	match expr {
+		LogicalExpr::Binary {
+			left,
+			op,
+			right,
+		} => {
+			matches!(op, BinaryOperator::Matches(_))
+				|| expr_contains_matches(left)
+				|| expr_contains_matches(right)
+		}
+		LogicalExpr::Prefix {
+			expr: inner,
+			..
+		} => expr_contains_matches(inner),
+		LogicalExpr::Call(call) => call.args.iter().any(expr_contains_matches),
+		_ => false,
+	}
 }
 
 /// Walk the top-level AND chain of `expr` and replace each leaf for which
-/// `should_strip` returns `true` with `Literal::Bool(true)`. After the
-/// walk, collapse boolean sentinels via [`BoolSimplifier`]. Returns the
-/// rewritten expression, or `None` if the whole condition reduced to
-/// `true`.
+/// `should_strip` returns `true` with `true`. After the walk, collapse the
+/// boolean sentinels via [`simplify_and_sentinels`]. Returns the rewritten
+/// expression, or `None` if the whole condition reduced to `true`.
 ///
 /// Shared body for the per-clause strippers ([`strip_fts_condition`],
 /// [`strip_knn_from_condition`], [`strip_index_conditions`]). Does not
 /// descend below AND boundaries; KNN/FTS operators nested under OR/NOT
 /// remain so the planner can detect and reject those shapes.
-fn strip_and_simplify<F>(mut expr: Expr, mut should_strip: F) -> Option<Expr>
+fn strip_and_simplify<F>(mut expr: LogicalExpr, mut should_strip: F) -> Option<LogicalExpr>
 where
-	F: FnMut(&Expr) -> bool,
+	F: FnMut(&LogicalExpr) -> bool,
 {
-	fn walk<F: FnMut(&Expr) -> bool>(expr: &mut Expr, f: &mut F) {
-		if let Expr::Binary {
+	fn walk<F: FnMut(&LogicalExpr) -> bool>(expr: &mut LogicalExpr, f: &mut F) {
+		if let LogicalExpr::Binary {
 			left,
 			op: BinaryOperator::And,
 			right,
@@ -269,16 +306,152 @@ where
 			walk(left, f);
 			walk(right, f);
 		} else if f(expr) {
-			*expr = Expr::Literal(Literal::Bool(true));
+			*expr = LogicalExpr::Literal(LogicalLiteral::Bool(true));
 		}
 	}
 	walk(&mut expr, &mut should_strip);
-	let _ = BoolSimplifier.visit_mut_expr(&mut expr);
-	if matches!(expr, Expr::Literal(Literal::Bool(true))) {
+	let Ok(()) = expr.visit_mut(&mut |e| {
+		simplify_and_sentinels(e);
+		Ok::<_, Infallible>(())
+	});
+	if matches!(expr, LogicalExpr::Literal(LogicalLiteral::Bool(true))) {
 		None
 	} else {
 		Some(expr)
 	}
+}
+
+/// Collapses boolean-literal sentinels in one AND node: `true AND x → x`,
+/// `x AND true → x`, `true AND true → true`. Applied bottom-up over a
+/// condition after stripping, so a chain of consumed leaves collapses to a
+/// single `true`.
+fn simplify_and_sentinels(expr: &mut LogicalExpr) {
+	let is_true = |e: &LogicalExpr| matches!(e, LogicalExpr::Literal(LogicalLiteral::Bool(true)));
+	if let LogicalExpr::Binary {
+		left,
+		op: BinaryOperator::And,
+		right,
+	} = expr
+	{
+		match (is_true(left), is_true(right)) {
+			(true, true) => *expr = LogicalExpr::Literal(LogicalLiteral::Bool(true)),
+			(true, false) => {
+				let r = std::mem::replace(right.as_mut(), LogicalExpr::Break);
+				*expr = r;
+			}
+			(false, true) => {
+				let l = std::mem::replace(left.as_mut(), LogicalExpr::Break);
+				*expr = l;
+			}
+			(false, false) => {}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Index column comparison
+// ---------------------------------------------------------------------------
+
+/// Whether a logical path names the same path as a catalog index column.
+///
+/// The path's steps ([`path_steps`]) are compared one to one with the
+/// column's parts. Steps that hold no expression compare structurally; a step
+/// that does (a filter, an index expression, a method call, a lookup) compares
+/// by its rendering, which is identical across the two representations. An
+/// expression that is not a path never matches a column.
+pub(crate) fn idiom_matches_column(expr: &LogicalExpr, col: &Idiom) -> bool {
+	if !expr.is_path() {
+		return false;
+	}
+	let steps = path_steps(expr);
+	steps.len() == col.0.len()
+		&& steps.iter().zip(col.0.iter()).all(|(step, p)| step_matches(step, p))
+}
+
+fn step_matches(step: &LogicalExpr, p: &Part) -> bool {
+	match (step, p) {
+		(LogicalExpr::Each(_), Part::All)
+		| (
+			LogicalExpr::Flatten {
+				..
+			},
+			Part::Flatten,
+		)
+		| (LogicalExpr::Last(_), Part::Last)
+		| (LogicalExpr::First(_), Part::First)
+		| (
+			LogicalExpr::Optional {
+				..
+			},
+			Part::Optional,
+		)
+		| (LogicalExpr::Doc, Part::Doc)
+		| (LogicalExpr::RepeatRecurse(_), Part::RepeatRecurse) => true,
+		(LogicalExpr::Field(a), Part::Field(b))
+		| (
+			LogicalExpr::Access {
+				field: a,
+				..
+			},
+			Part::Field(b),
+		) => a == b,
+		(
+			LogicalExpr::Filter {
+				..
+			}
+			| LogicalExpr::Lookup {
+				..
+			}
+			| LogicalExpr::Index {
+				..
+			}
+			| LogicalExpr::Method {
+				..
+			}
+			| LogicalExpr::Destructure {
+				..
+			}
+			| LogicalExpr::Recurse(_),
+			_,
+		) => step_rendering(step) == p.to_sql(),
+		// The expression a path starts from renders as a whole.
+		(start, _) if !start.is_path() => start.to_sql() == p.to_sql(),
+		_ => false,
+	}
+}
+
+/// How one step renders on its own: the step's rendering with its base's
+/// rendering removed from the front, `[WHERE x]` for a filter, `->likes` for
+/// a lookup.
+fn step_rendering(step: &LogicalExpr) -> String {
+	let sql = step.to_sql();
+	let Some(base) = step.step_base() else {
+		return sql;
+	};
+	let base_sql = base.to_sql();
+	match sql.strip_prefix(base_sql.as_str()) {
+		Some(suffix) => suffix.to_owned(),
+		None => sql,
+	}
+}
+
+/// Whether a field reference in a containment leaf (`field CONTAINS v`,
+/// `v INSIDE field`) is served by an array-element index column: the column
+/// must flatten (`.*` / `[*]`), and the two paths must agree once every
+/// flatten is removed from both.
+pub(crate) fn idiom_matches_containment(expr: &LogicalExpr, index_col: &Idiom) -> bool {
+	if !expr.is_path() || !index_col.0.iter().any(|p| matches!(p, Part::All)) {
+		return false;
+	}
+	let col_without_all: Vec<&Part> =
+		index_col.0.iter().filter(|p| !matches!(p, Part::All)).collect();
+	let expr_without_all: Vec<&LogicalExpr> =
+		path_steps(expr).into_iter().filter(|s| !matches!(s, LogicalExpr::Each(_))).collect();
+	col_without_all.len() == expr_without_all.len()
+		&& expr_without_all
+			.iter()
+			.zip(col_without_all.iter())
+			.all(|(step, p)| step_matches(step, p))
 }
 
 // ---------------------------------------------------------------------------
@@ -290,32 +463,31 @@ where
 /// Returns `None` when all conditions are consumed (no Filter needed),
 /// or `Some(residual)` when conditions remain that the index does not cover.
 pub(crate) fn strip_index_conditions(
-	cond: &Cond,
+	cond: &LogicalExpr,
 	access: &crate::exec::index::access_path::BTreeAccess,
 	cols: &[Idiom],
-) -> Option<Cond> {
+) -> Option<LogicalExpr> {
 	let matcher = IndexConditionMatcher {
 		cols,
 		access,
 	};
-	strip_and_simplify(cond.0.clone(), |e| match e {
-		Expr::Binary {
+	strip_and_simplify(cond.clone(), |e| match e {
+		LogicalExpr::Binary {
 			left,
 			op,
 			right,
 		} => matcher.matches_access(left, op, right),
 		_ => false,
 	})
-	.map(Cond)
 }
 
 /// Strip conditions covered by a union of BTree access paths from a WHERE
 /// clause.
 ///
-/// Recognises `field CONTAINSANY [l0, l1, ...]` (idiom on left) and the
-/// symmetric `[l0, l1, ...] ANYINSIDE field` (idiom on right).  The branches
+/// Recognises `field CONTAINSANY [l0, l1, ...]` (field on left) and the
+/// symmetric `[l0, l1, ...] ANYINSIDE field` (field on right).  The branches
 /// must all share the same index and all use that index's leading
-/// array-element column (via `idiom_matches_containment`).
+/// array-element column (via [`idiom_matches_containment`]).
 ///
 /// A union over branch values `V` emits every row whose indexed array holds
 /// *at least one* member of `V`, so a leaf `field CONTAINSANY L` is only
@@ -334,9 +506,9 @@ pub(crate) fn strip_index_conditions(
 /// intersection.  Tracking issue #236 covers a future
 /// intersection-operator follow-up.
 pub(crate) fn strip_union_index_conditions(
-	cond: &Cond,
+	cond: &LogicalExpr,
 	paths: &[crate::exec::index::access_path::AccessPath],
-) -> Option<Cond> {
+) -> Option<LogicalExpr> {
 	use crate::exec::index::access_path::{AccessPath, BTreeAccess};
 	use crate::val::Value;
 
@@ -379,39 +551,31 @@ pub(crate) fn strip_union_index_conditions(
 		return Some(cond.clone());
 	};
 
-	strip_and_simplify(cond.0.clone(), |e| match e {
-		Expr::Binary {
+	strip_and_simplify(cond.clone(), |e| match e {
+		LogicalExpr::Binary {
 			left,
 			op,
 			right,
 		} => union_covers_leaf(col, &branch_values, left, op, right),
 		_ => false,
 	})
-	.map(Cond)
 }
 
-/// Returns `true` when a `CONTAINSANY` (idiom-left) or `ANYINSIDE`
-/// (idiom-right) leaf is implied by the union, i.e. every branch value is one
+/// Returns `true` when a `CONTAINSANY` (field-left) or `ANYINSIDE`
+/// (field-right) leaf is implied by the union, i.e. every branch value is one
 /// of the leaf's literals so no branch can admit a row the leaf rejects.
 fn union_covers_leaf(
 	col: &Idiom,
 	branch_values: &HashSet<&crate::val::Value>,
-	left: &Expr,
+	left: &LogicalExpr,
 	op: &BinaryOperator,
-	right: &Expr,
+	right: &LogicalExpr,
 ) -> bool {
-	use crate::exec::index::analysis::idiom_matches_containment;
 	use crate::val::Value;
 
 	let (idiom, lit) = match op {
-		BinaryOperator::ContainAny => match (left, right) {
-			(Expr::Idiom(i), Expr::Literal(l)) => (i, l),
-			_ => return false,
-		},
-		BinaryOperator::AnyInside => match (left, right) {
-			(Expr::Literal(l), Expr::Idiom(i)) => (i, l),
-			_ => return false,
-		},
+		BinaryOperator::ContainAny if left.is_path() => (left, right),
+		BinaryOperator::AnyInside if right.is_path() => (right, left),
 		// CONTAINSALL / ALLINSIDE need intersection; the union does
 		// not cover them.  See `strip_union_index_conditions` rustdoc.
 		_ => return false,
@@ -456,24 +620,22 @@ struct IndexConditionMatcher<'a> {
 
 impl IndexConditionMatcher<'_> {
 	/// Check whether a binary comparison leaf is covered by the access pattern.
-	fn matches_access(&self, left: &Expr, op: &BinaryOperator, right: &Expr) -> bool {
+	fn matches_access(&self, left: &LogicalExpr, op: &BinaryOperator, right: &LogicalExpr) -> bool {
 		use crate::exec::index::access_path::BTreeAccess;
+		use crate::val::Value;
 
-		// Extract idiom, value, and the effective operator (normalized so the
-		// idiom is always on the left side of the comparison). `idiom_on_left`
+		// Extract field, value, and the effective operator (normalized so the
+		// field is always on the left side of the comparison). `idiom_on_left`
 		// tracks the original position because some operator rewrites are
-		// only valid when the idiom was the left operand (see the Inside
+		// only valid when the field was the left operand (see the Inside
 		// normalisation below).
 		let (idiom, value, effective_op, idiom_on_left) = match (left, right) {
-			(Expr::Idiom(i), Expr::Literal(lit)) => {
-				if let Some(v) = try_literal_to_value(lit) {
-					(i, v, op.clone(), true)
-				} else {
-					return false;
-				}
-			}
-			(Expr::Literal(lit), Expr::Idiom(i)) => {
-				if let Some(v) = try_literal_to_value(lit) {
+			(i, other) if i.is_path() => match try_literal_to_value(other) {
+				Some(v) => (i, v, op.clone(), true),
+				None => return false,
+			},
+			(other, i) if i.is_path() => match try_literal_to_value(other) {
+				Some(v) => {
 					let flipped = match op {
 						BinaryOperator::LessThan => BinaryOperator::MoreThan,
 						BinaryOperator::LessThanEqual => BinaryOperator::MoreThanEqual,
@@ -482,19 +644,16 @@ impl IndexConditionMatcher<'_> {
 						other => other.clone(),
 					};
 					(i, v, flipped, false)
-				} else {
-					return false;
 				}
-			}
+				None => return false,
+			},
 			_ => return false,
 		};
-
-		use crate::val::Value;
 
 		// Normalise the leaf so the strip path sees the same canonical
 		// form the analyzer produced: a single-element `field IN [v]` is
 		// rewritten by `extract_simple_condition` (analyzer side) to
-		// `field = v`, but ONLY when the idiom is on the left.
+		// `field = v`, but ONLY when the field is on the left.
 		// `[v] IN field` (Right-position) has different runtime
 		// semantics — `[v].contains(field)` — and the analyzer correctly
 		// produces no candidate for it, so we must not strip it from the
@@ -512,8 +671,8 @@ impl IndexConditionMatcher<'_> {
 		let is_equality =
 			matches!(effective_op, BinaryOperator::Equal | BinaryOperator::ExactEqual);
 
-		// `field CONTAINS scalar` (idiom on left) and `scalar INSIDE field`
-		// (idiom on right) are covered when the matching index column is an
+		// `field CONTAINS scalar` (field on left) and `scalar INSIDE field`
+		// (field on right) are covered when the matching index column is an
 		// array-element flatten (`.*`/`[*]`) and the scalar matches the
 		// access's prefix/equality value. Mirrors the analyser's
 		// `try_match_containment` so a containment leaf is stripped from the
@@ -530,7 +689,7 @@ impl IndexConditionMatcher<'_> {
 				// Check equality conditions against prefix values.
 				if is_equality {
 					for (col, val) in self.cols.iter().zip(prefix.iter()) {
-						if idiom == col && value == *val {
+						if idiom_matches_column(idiom, col) && value == *val {
 							return true;
 						}
 					}
@@ -549,7 +708,7 @@ impl IndexConditionMatcher<'_> {
 				// Check range condition on the column after the prefix.
 				if let Some((range_op, range_val)) = range
 					&& let Some(col) = self.cols.get(prefix.len())
-					&& idiom == col
+					&& idiom_matches_column(idiom, col)
 				{
 					if effective_op == *range_op && value == *range_val {
 						return true;
@@ -572,7 +731,7 @@ impl IndexConditionMatcher<'_> {
 				let Some(col) = self.cols.first() else {
 					return false;
 				};
-				if is_equality && idiom == col && value == *val {
+				if is_equality && idiom_matches_column(idiom, col) && value == *val {
 					return true;
 				}
 				// CONTAINS / INSIDE on the single-column array-element index:
@@ -588,7 +747,7 @@ impl IndexConditionMatcher<'_> {
 				let Some(col) = self.cols.first() else {
 					return false;
 				};
-				if idiom != col {
+				if !idiom_matches_column(idiom, col) {
 					return false;
 				}
 				match &range.start {
@@ -634,136 +793,22 @@ impl IndexConditionMatcher<'_> {
 	}
 }
 
-/// Extracts a single brute-force KNN (`NearestNeighbor::K`) expression,
-/// replacing it with `Literal::Bool(true)`. The extracted parameters are
-/// stashed in `params`.
-struct BruteForceKnnExtractor {
-	params: Option<BruteForceKnnParams>,
-}
-
-impl MutVisitor for BruteForceKnnExtractor {
-	type Error = std::convert::Infallible;
-
-	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
-		// Already found one -- stop looking.
-		if self.params.is_some() {
-			return Ok(());
+/// Extract a `Vec<Number>` from an array literal whose every element is a
+/// numeric literal.
+fn extract_literal_vector(expr: &LogicalExpr) -> Option<Vec<Number>> {
+	let LogicalExpr::Array(items) = expr else {
+		return None;
+	};
+	let mut nums = Vec::with_capacity(items.len());
+	for elem in items {
+		match elem {
+			LogicalExpr::Literal(LogicalLiteral::Integer(i)) => nums.push(Number::Int(*i)),
+			LogicalExpr::Literal(LogicalLiteral::Float(f)) => nums.push(Number::Float(*f)),
+			LogicalExpr::Literal(LogicalLiteral::Decimal(d)) => nums.push(Number::Decimal(*d)),
+			_ => return None,
 		}
-		if let Expr::Binary {
-			left,
-			op: BinaryOperator::NearestNeighbor(nn),
-			right,
-		} = expr && let NearestNeighbor::K(k, dist) = nn.as_ref()
-			&& let Expr::Idiom(idiom) = left.as_ref()
-		{
-			// Literal arrays extract directly; other legacy-computable
-			// right-hand sides defer evaluation to stream open (see
-			// `BruteForceKnnVector`). Anything else (idiom, subquery, …)
-			// stays in the condition and evaluates to `false` per row,
-			// like a legacy KNN expression without an executor entry.
-			let vector = if let Some(vector) = extract_literal_vector(right) {
-				Some(BruteForceKnnVector::Literal(vector))
-			} else if is_plan_time_computable(right) {
-				Some(BruteForceKnnVector::Deferred(right.as_ref().clone()))
-			} else {
-				None
-			};
-			if let Some(vector) = vector {
-				self.params = Some(BruteForceKnnParams {
-					field: idiom.clone(),
-					vector,
-					k: *k,
-					distance: dist.clone().into(),
-				});
-				*expr = Expr::Literal(Literal::Bool(true));
-				return Ok(());
-			}
-		}
-		expr.visit_mut(self)
 	}
-
-	// Don't descend into subqueries.
-	fn visit_mut_select(
-		&mut self,
-		_: &mut crate::expr::SelectStatement,
-	) -> Result<(), Self::Error> {
-		Ok(())
-	}
-}
-
-/// Reusable postorder pass that collapses boolean-literal sentinels in AND
-/// chains: `true AND x → x`, `x AND true → x`, `true AND true → true`.
-///
-/// Used after `KnnStripper` / `BruteForceKnnExtractor` to clean up the tree.
-struct BoolSimplifier;
-
-impl MutVisitor for BoolSimplifier {
-	type Error = std::convert::Infallible;
-
-	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
-		// Postorder: recurse first, then simplify this node.
-		expr.visit_mut(self)?;
-
-		if let Expr::Binary {
-			left,
-			op: BinaryOperator::And,
-			right,
-		} = expr
-		{
-			let l_true = matches!(left.as_ref(), Expr::Literal(Literal::Bool(true)));
-			let r_true = matches!(right.as_ref(), Expr::Literal(Literal::Bool(true)));
-			match (l_true, r_true) {
-				(true, true) => *expr = Expr::Literal(Literal::Bool(true)),
-				(true, false) => {
-					let r = std::mem::replace(right.as_mut(), Expr::Literal(Literal::None));
-					*expr = r;
-				}
-				(false, true) => {
-					let l = std::mem::replace(left.as_mut(), Expr::Literal(Literal::None));
-					*expr = l;
-				}
-				_ => {}
-			}
-		}
-		Ok(())
-	}
-
-	// Don't descend into subqueries.
-	fn visit_mut_select(
-		&mut self,
-		_: &mut crate::expr::SelectStatement,
-	) -> Result<(), Self::Error> {
-		Ok(())
-	}
-}
-
-/// Extract a `Vec<Number>` from a literal array expression.
-fn extract_literal_vector(expr: &Expr) -> Option<Vec<Number>> {
-	match expr {
-		Expr::Literal(lit) => {
-			if let Literal::Array(arr) = lit {
-				let mut nums = Vec::with_capacity(arr.len());
-				for elem in arr.iter() {
-					match elem {
-						Expr::Literal(Literal::Integer(i)) => {
-							nums.push(Number::Int(*i));
-						}
-						Expr::Literal(Literal::Float(f)) => {
-							nums.push(Number::Float(*f));
-						}
-						Expr::Literal(Literal::Decimal(d)) => {
-							nums.push(Number::Decimal(*d));
-						}
-						_ => return None,
-					}
-				}
-				Some(nums)
-			} else {
-				None
-			}
-		}
-		_ => None,
-	}
+	Some(nums)
 }
 
 // ============================================================================
@@ -781,20 +826,20 @@ fn extract_literal_vector(expr: &Expr) -> Option<Vec<Number>> {
 ///
 /// Only matches point-key RecordIds (not range keys like `table:1..5`).
 pub(crate) fn extract_record_id_point_lookup(
-	cond: &Cond,
-	table_name: &surrealdb_strand::TableName,
-) -> Option<Expr> {
-	find_id_equality_in_and_chain(&cond.0, table_name)
+	cond: &LogicalExpr,
+	table_name: &TableName,
+) -> Option<LogicalExpr> {
+	find_id_equality_in_and_chain(cond, table_name)
 }
 
 /// Walk the top-level AND chain looking for `id = <RecordId literal>`.
 fn find_id_equality_in_and_chain(
-	expr: &Expr,
-	table_name: &surrealdb_strand::TableName,
-) -> Option<Expr> {
+	expr: &LogicalExpr,
+	table_name: &TableName,
+) -> Option<LogicalExpr> {
 	match expr {
 		// AND: check both branches
-		Expr::Binary {
+		LogicalExpr::Binary {
 			left,
 			op: BinaryOperator::And,
 			right,
@@ -802,7 +847,7 @@ fn find_id_equality_in_and_chain(
 			.or_else(|| find_id_equality_in_and_chain(right, table_name)),
 
 		// Equality: check for `id = <RecordId>` or `<RecordId> = id`
-		Expr::Binary {
+		LogicalExpr::Binary {
 			left,
 			op: BinaryOperator::Equal | BinaryOperator::ExactEqual,
 			right,
@@ -814,47 +859,22 @@ fn find_id_equality_in_and_chain(
 	}
 }
 
-/// Check if `idiom_side` is the `id` idiom and `lit_side` is a matching
+/// Check if `idiom_side` is the `id` field and `lit_side` is a matching
 /// RecordId literal with a non-range key.
 fn check_id_recordid_pair(
-	idiom_side: &Expr,
-	lit_side: &Expr,
-	table_name: &surrealdb_strand::TableName,
-) -> Option<Expr> {
-	if let Expr::Idiom(idiom) = idiom_side
-		&& idiom.is_id()
-		&& let Expr::Literal(Literal::RecordId(rid)) = lit_side
+	idiom_side: &LogicalExpr,
+	lit_side: &LogicalExpr,
+	table_name: &TableName,
+) -> Option<LogicalExpr> {
+	if idiom_is_id(idiom_side)
+		&& let LogicalExpr::RecordId(rid) = lit_side
 		&& &rid.table == table_name
-		&& !matches!(rid.key, crate::expr::RecordIdKeyLit::Range(_))
+		&& !matches!(rid.key, LogicalRecordIdKey::Range(_))
 	{
 		Some(lit_side.clone())
 	} else {
 		None
 	}
-}
-
-/// Check if a source expression represents a "value source" (array, primitive).
-pub(crate) fn is_value_source_expr(expr: &Expr) -> bool {
-	match expr {
-		Expr::Literal(Literal::Array(_)) => true,
-		Expr::Literal(Literal::String(_))
-		| Expr::Literal(Literal::Integer(_))
-		| Expr::Literal(Literal::Float(_))
-		| Expr::Literal(Literal::Decimal(_))
-		| Expr::Literal(Literal::Bool(_))
-		| Expr::Literal(Literal::None)
-		| Expr::Literal(Literal::Null) => true,
-		Expr::Table(_) => false,
-		Expr::Literal(Literal::RecordId(_)) => false,
-		Expr::Param(_) => false,
-		Expr::Select(_) => false,
-		_ => false,
-	}
-}
-
-/// Check if ALL source expressions are value sources.
-pub(crate) fn all_value_sources(sources: &[Expr]) -> bool {
-	!sources.is_empty() && sources.iter().all(is_value_source_expr)
 }
 
 // ============================================================================
@@ -866,37 +886,24 @@ pub(crate) fn all_value_sources(sources: &[Expr]) -> bool {
 /// Accepts an optional `FrozenContext` to resolve bind parameters (`$query`)
 /// that appear on the right-hand side of `@N@` operators.
 pub(crate) fn extract_matches_context(
-	cond: &Cond,
+	cond: &LogicalExpr,
 	ctx: Option<&crate::ctx::FrozenContext>,
 ) -> crate::exec::function::MatchesContext {
-	let mut collector = MatchesCollector(crate::exec::function::MatchesContext::new(), ctx);
-	let _ = collector.visit_expr(&cond.0);
-	collector.0
-}
-
-/// Visitor that collects MATCHES clause entries from expression trees.
-struct MatchesCollector<'a>(
-	crate::exec::function::MatchesContext,
-	Option<&'a crate::ctx::FrozenContext>,
-);
-
-impl Visitor for MatchesCollector<'_> {
-	type Error = std::convert::Infallible;
-
-	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
-		if let Expr::Binary {
+	let mut matches = crate::exec::function::MatchesContext::new();
+	let _ = cond.visit(&mut |e| {
+		if let LogicalExpr::Binary {
 			left,
 			op: BinaryOperator::Matches(matches_op),
 			right,
-		} = expr && let Expr::Idiom(idiom) = left.as_ref()
+		} = e && left.is_path()
 		{
 			// Extract the query string from the right-hand side.
 			// Supports both literal strings and bind parameters.
 			let query_str = match right.as_ref() {
-				Expr::Literal(Literal::String(s)) => Some(s.as_str().to_owned()),
-				Expr::Param(param) => {
+				LogicalExpr::Literal(LogicalLiteral::String(s)) => Some(s.as_str().to_owned()),
+				LogicalExpr::Param(param) => {
 					// Resolve the bind parameter from the frozen context
-					self.1.and_then(|ctx| {
+					ctx.and_then(|ctx| {
 						ctx.value(param.as_str()).and_then(|v| {
 							if let crate::val::Value::String(s) = v {
 								Some(s.as_str().to_owned())
@@ -911,22 +918,18 @@ impl Visitor for MatchesCollector<'_> {
 
 			if let Some(query) = query_str {
 				let match_ref = matches_op.rf.unwrap_or(0);
-				self.0.insert(
+				matches.insert(
 					match_ref,
 					crate::exec::function::MatchInfo {
-						idiom: idiom.clone(),
+						field: left.as_ref().clone(),
 						query,
 					},
 				);
 			}
 		}
-		expr.visit(self)
-	}
-
-	// Don't descend into subqueries -- only collect outer MATCHES.
-	fn visit_select(&mut self, _: &crate::expr::SelectStatement) -> Result<(), Self::Error> {
-		Ok(())
-	}
+		ControlFlow::<()>::Continue(())
+	});
+	matches
 }
 
 /// The primary table the in-scope MATCHES entries were collected against.
@@ -938,11 +941,11 @@ impl Visitor for MatchesCollector<'_> {
 /// row — the same outcome as a MATCHES whose index does not cover the idiom.
 pub(crate) fn extract_table_from_matches(
 	matches_context: &crate::exec::function::MatchesContext,
-) -> surrealdb_strand::TableName {
+) -> TableName {
 	if let Some(table) = matches_context.table() {
 		return table.clone();
 	}
-	surrealdb_strand::TableName::from("unknown".to_string())
+	TableName::from("unknown".to_string())
 }
 
 #[cfg(test)]
@@ -956,15 +959,18 @@ mod tests {
 	use super::*;
 	use crate::catalog::{Index, IndexDefinition, IndexId};
 	use crate::exec::index::access_path::{AccessPath, BTreeAccess, IndexRef};
+	use crate::expr::logical::lower_expr;
 	use crate::kvs::Direction;
 	use crate::val::Value;
 
-	fn parse_cond(snippet: &str) -> Cond {
+	fn parse_cond(snippet: &str) -> LogicalExpr {
 		let src = format!("SELECT * FROM t WHERE {snippet}");
 		let mut exprs = crate::syn::parse(&src).expect("parse").expressions;
 		assert_eq!(exprs.len(), 1, "expected one statement from {src:?}");
-		match exprs.remove(0).into() {
-			crate::expr::TopLevelExpr::Expr(Expr::Select(s)) => s.cond.expect("WHERE"),
+		match exprs.remove(0) {
+			crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Select(s)) => {
+				lower_expr(s.cond.expect("WHERE").0).expect("lowers")
+			}
 			other => panic!("expected SELECT, got {other:?}"),
 		}
 	}
@@ -997,7 +1003,7 @@ mod tests {
 	/// the whole condition was consumed and no `Filter` survives.
 	fn residual(cond: &str, col: &str, branches: &[&str]) -> Option<String> {
 		strip_union_index_conditions(&parse_cond(cond), &union_paths(col, branches))
-			.map(|c| c.0.to_sql())
+			.map(|c| c.to_sql())
 	}
 
 	#[test]
@@ -1082,5 +1088,57 @@ mod tests {
 			residual("tags CONTAINSANY ['a', 'b']", "tags", &["a", "b"]).as_deref(),
 			Some("tags CONTAINSANY ['a', 'b']"),
 		);
+	}
+
+	#[test]
+	fn index_columns_compare_against_logical_paths() {
+		let col = |s: &str| Idiom::from_str(s).expect("valid idiom");
+		let path = |s: &str| {
+			lower_expr(crate::sql::Expr::Idiom(crate::syn::idiom(s).expect("idiom")))
+				.expect("lowers")
+		};
+		let a_b = path("a.b");
+		assert!(idiom_matches_column(&a_b, &col("a.b")));
+		assert!(!idiom_matches_column(&a_b, &col("a")));
+		assert!(!idiom_matches_column(&a_b, &col("a.c")));
+		assert!(idiom_matches_containment(&a_b, &col("a.b.*")));
+		assert!(idiom_matches_containment(&a_b, &col("a.*.b")));
+		assert!(!idiom_matches_containment(&a_b, &col("a.b")));
+		// Steps that hold an expression compare by their rendering; a
+		// broadcast contributes no step of its own.
+		assert!(idiom_matches_column(&path("a.b[0]"), &col("a.b[0]")));
+		assert!(idiom_matches_column(&path("a[WHERE x = 1].b"), &col("a[WHERE x = 1].b")));
+		assert!(!idiom_matches_column(&path("a[WHERE x = 1].b"), &col("a[WHERE x = 2].b")));
+		assert!(idiom_matches_column(&path("a.*"), &col("a.*")));
+		assert!(idiom_matches_column(&path("a[*].b"), &col("a[*].b")));
+		assert!(!idiom_matches_column(&parse_cond("a + 1"), &col("a")));
+	}
+
+	#[test]
+	fn knn_and_matches_strippers_leave_the_rest() {
+		let cond = parse_cond("v <|2, EUCLIDEAN|> [1, 2] AND a = 1");
+		assert!(has_knn_operator(&cond));
+		assert!(has_knn_k_operator(&cond));
+		assert_eq!(strip_knn_from_condition(&cond).map(|c| c.to_sql()).as_deref(), Some("a = 1"));
+		let params = extract_bruteforce_knn(&cond).expect("brute-force KNN");
+		assert_eq!(params.k, 2);
+		assert!(matches!(params.vector, BruteForceKnnVector::Literal(ref v) if v.len() == 2));
+		let cond = parse_cond("title @@ 'x' AND a = 1");
+		assert_eq!(strip_fts_condition(&cond).map(|c| c.to_sql()).as_deref(), Some("a = 1"));
+		assert_eq!(strip_fts_condition(&parse_cond("title @@ 'x'")), None);
+	}
+
+	#[test]
+	fn point_lookup_is_found_in_the_and_chain_only() {
+		let t = TableName::from("t");
+		assert_eq!(
+			extract_record_id_point_lookup(&parse_cond("a = 1 AND id = t:1"), &t)
+				.map(|e| e.to_sql())
+				.as_deref(),
+			Some("t:1")
+		);
+		assert!(extract_record_id_point_lookup(&parse_cond("a = 1 OR id = t:1"), &t).is_none());
+		assert!(extract_record_id_point_lookup(&parse_cond("id = u:1"), &t).is_none());
+		assert!(extract_record_id_point_lookup(&parse_cond("id = t:1..5"), &t).is_none());
 	}
 }

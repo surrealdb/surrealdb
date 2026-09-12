@@ -34,7 +34,12 @@ value = "[{ id: pts:1 }, { id: pts:2 }]"
 value = "[{ id: pts:1 }, { id: pts:2 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    Filter [ctx: Db] [predicate: email = 'a' OR email = 'b' OR email = 'c'] {rows: 2}\n        KnnScan [ctx: Db] [index: pt_hnsw, k: 2, ef: 100, dimension: 2, predicate: email = 'a' OR email = 'b' OR email = 'c'] {rows: 2}\n\nTotal rows: 2"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id] {rows: 2}
+    Filter [ctx: Db] [predicate: email = 'a' OR email = 'b' OR email = 'c'] {rows: 2}
+        KnnScan [ctx: Db] [index: pt_hnsw, k: 2, ef: 100, dimension: 2, predicate: email = 'a' OR email = 'b' OR email = 'c'] {rows: 2}
+
+Total rows: 2"'''
 
 */
 

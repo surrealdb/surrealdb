@@ -45,6 +45,90 @@ value = "expected_result"
 -- SurrealQL queries here
 ```
 
+**Expectations that span lines:** a value whose text runs over several lines —
+what an `EXPLAIN` renders — is recorded as a TOML multi-line literal, so the
+expectation reads as the plan tree it is rather than as one line of escapes:
+
+```surql
+[[test.results]]
+value = '''
+'Limit [ctx: Db] [limit: 0]
+    CountScan [ctx: Db] [source: sale]
+''''
+```
+
+The literal holds SurrealQL source, so the string inside keeps its own quotes,
+and the newline straight after the opening delimiter belongs to TOML rather than
+to the value. `--results accept` writes this form for every string carrying a
+newline and the single-line form for everything else, including arrays and
+objects with newlines in a nested string. Text a literal cannot hold — text
+carrying a literal delimiter of its own, or a carriage return — stays on one
+line.
+
+### Which engines a test runs on
+
+A `.surql` file runs under **three planner strategies** by default —
+`compute-only` (the per-row engine), `all-ro` and `best-effort-ro` (the
+streaming planner) — so one file is three runs and any divergence between the
+engines fails it. A `.gql` file runs under the two streaming strategies; GQL has
+no per-row path.
+
+`[env] planner-strategy = [...]` narrows that axis. **Narrowing costs coverage,
+so it needs a reason in the file**, and there are only two good ones:
+
+- The answer is the same but the *plan* is not — an `EXPLAIN` assertion, which only one engine renders.
+- The engines genuinely disagree and the divergence is being pinned rather than fixed. Say which answer is correct and why it is not fixed here.
+
+### Naming and companions
+
+Reproductions are flat in `tests/reproductions/`, named for the behaviour they
+hold rather than for where they came from: `a_counted_value_is_the_count_itself`,
+not a PR or branch name. A GitHub issue number is the one prefix that earns its
+place (`ISSUE_NUMBER_description.surql`), because it is an address a reader can
+look up. Put the provenance in `issue = 1234` or in `reason`, not in the
+filename.
+
+Four suffixes are load-bearing. A new test should carry no other:
+
+| Suffix | Is |
+|---|---|
+| `_import` | Setup only, run as owner by the files that import it. Names the tests it serves in its `reason`. |
+| `_plan` | The `EXPLAIN` companion of the test of the same name — the plan its rows were produced by. Pins the streaming strategies. |
+| `_legacy` | The `compute-only` half of a pinned divergence. |
+| `_streaming` | The `all-ro` / `best-effort-ro` half of the same divergence. |
+
+`_new_executor` is an older spelling of `_streaming` still carried by tests
+written while the streaming planner was new. It means the same thing; most of
+those pin `all-ro` alone, which leaves `best-effort-ro` uncovered. Do not add
+another — and when you touch one, pin both streaming strategies or say in the
+`reason` why only one applies.
+
+Both halves of a pair carry the same queries and the same `reason`, and the
+`reason` says which answer is correct. **When a fix makes the halves agree,
+delete both and write one unpinned file** — a pair whose halves no longer
+diverge is two files, three redundant runs and a claim of a divergence that is
+gone.
+
+`imports = [...]` entries are paths from the `tests/` root
+(`"reproductions/x_import.surql"`); `./` and `../` resolve against the importing
+file's own directory. Imports are transitive and de-duplicated, and an import
+must itself be a `.surql` file.
+
+### Prove the test catches its own bug
+
+A reproduction that passes against the unfixed code tests nothing. Revert the
+fix, watch the test fail, restore it, watch it pass — in both directions, and
+for each strategy the file runs under. For a divergence, measure both engines
+before deciding which one is right: the shipping engine is not automatically
+correct, and several defects found this way were in it.
+
+Generating expectations has two traps. `--results accept` fills only blocks that
+are **empty**, and where a file runs under several strategies it silently writes
+the **first** strategy's values — so probe each strategy in its own file and
+diff the results before writing one file that claims they agree. And numeric
+expectations are type-blind: `3` is satisfied by `3f` and `3dec`, so pin a type
+with `type::is_int(...)` rather than by writing the number.
+
 ## Upgrade Tests (`language-tests/tests/upgrade/*.surql`)
 
 `tests/upgrade/README.md` is the full description of the harness: the axes, the

@@ -7,27 +7,42 @@ reason = "Test EXPLAIN with closure expressions"
 
 [[test.results]]
 value = '''
-'Expr [ctx: Rt] [expr: |$x: any| { $x * 2 }]
+'Expr [ctx: Rt] [expr: |$x: any| (
+  Sequence
+    Eval[$x * 2]
+)]
 ''''
 
 [[test.results]]
 value = '''
-'Expr [ctx: Rt] [expr: |$x: int| { $x * 2 }]
+'Expr [ctx: Rt] [expr: |$x: int| (
+  Sequence
+    Eval[$x * 2]
+)]
 ''''
 
 [[test.results]]
 value = '''
-'Expr [ctx: Rt] [expr: |$x: int| -> int { $x * 2 }]
+'Expr [ctx: Rt] [expr: |$x: int| -> int (
+  Sequence
+    Eval[$x * 2]
+)]
 ''''
 
 [[test.results]]
 value = '''
-'Expr [ctx: Rt] [expr: |$a: int, $b: int| -> int { $a + $b }]
+'Expr [ctx: Rt] [expr: |$a: int, $b: int| -> int (
+  Sequence
+    Eval[$a + $b]
+)]
 ''''
 
 [[test.results]]
 value = '''
-'Expr [ctx: Rt] [expr: || { 42 }]
+'Expr [ctx: Rt] [expr: || (
+  Sequence
+    Eval[42]
+)]
 ''''
 
 */

@@ -110,7 +110,7 @@ mod tests {
 	use super::*;
 	use crate::exec::ExecutionContext;
 	use crate::exec::operators::test_util::{eval_on, physical_expr, root_ctx, val};
-	use crate::exec::physical_expr::IdiomExpr;
+	use crate::exec::physical_expr::find_part;
 	use crate::expr::ControlFlow;
 	use crate::val::Set;
 
@@ -218,14 +218,8 @@ mod tests {
 			[("people[WHERE age > $parent.min]", true), ("people[WHERE age > 30]", false)]
 		{
 			let expr = physical_expr(src, &ctx).await;
-			let idiom =
-				expr.downcast_ref::<IdiomExpr>().expect("an idiom compiles to an IdiomExpr");
-			let part = idiom
-				.parts
-				.last()
-				.expect("the idiom has parts")
-				.downcast_ref::<WherePart>()
-				.expect("the trailing part is the filter");
+			let part = find_part::<WherePart>(&expr).expect("the path contains the filter");
+			let part = part.downcast_ref::<WherePart>().expect("found by type");
 			assert_eq!(part.needs_parent, expected, "needs_parent for {src}");
 		}
 	}

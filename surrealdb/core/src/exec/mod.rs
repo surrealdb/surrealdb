@@ -60,6 +60,7 @@ pub(crate) use crate::val::field_path;
 pub(crate) mod field_path_convert;
 pub(crate) mod function;
 pub(crate) mod index;
+pub(crate) mod logical;
 pub(crate) mod metrics;
 pub(crate) mod object_extract;
 pub(crate) mod operators;
@@ -68,7 +69,6 @@ pub(crate) mod partitioning;
 pub(crate) mod parts;
 pub(crate) mod permission;
 pub(crate) mod physical_expr;
-pub(crate) mod plan_or_compute;
 pub(crate) mod planner;
 pub(crate) mod pre_decode_filter;
 pub(crate) mod topk_pushdown;
@@ -161,9 +161,39 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 	/// Used for:
 	/// - Pre-flight validation (recursive context requirement checking)
 	/// - Query optimization
-	/// - EXPLAIN output
+	/// - EXPLAIN output, through [`Self::explain_children`]
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![]
+	}
+
+	/// The children `EXPLAIN` renders beneath this operator: every child,
+	/// unless the operator hides one from the caller. A join lifted out of a
+	/// permission predicate hides its right side from a caller the permission
+	/// is enforced on, as `PermissionFilter` hides its predicate. Every other
+	/// traversal — validation, metrics, instrumentation — uses
+	/// [`Self::children`].
+	fn explain_children(&self) -> Vec<&Arc<dyn ExecOperator>> {
+		self.children()
+	}
+
+	/// Whether `EXPLAIN ANALYZE` withholds the metrics of every operator
+	/// beneath this one. `true` for a node enforcing a definer's declaration
+	/// on a caller it is enforced on — a table permission, a field-guard
+	/// layer, a join lifted from a permission predicate — since the row
+	/// counts beneath it are counts over records that caller may not see.
+	/// The node's own metrics are still rendered: its output is what the
+	/// caller receives.
+	fn hides_metrics_beneath(&self) -> bool {
+		false
+	}
+
+	/// Whether `EXPLAIN` renders the access path of every operator beneath
+	/// this one as `<permission>`. `true` for a permission node whose
+	/// predicate was offered to the access path of the scan beneath it, in a
+	/// plan compiled for a caller the predicate is enforced on: the bound an
+	/// index scan or a record-id lookup would print is the definer's.
+	fn redacts_access_paths_beneath(&self) -> bool {
+		false
 	}
 
 	/// Does this operator modify the execution context?

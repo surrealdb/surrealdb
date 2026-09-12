@@ -290,6 +290,48 @@ fn expr_depth_rejects_pathological_chain_without_overflow() {
 		.unwrap();
 }
 
+/// An idiom lowers to one expression node per part, so a long part run is the
+/// same denial-of-service vector as a long operator chain and is charged
+/// against the same budget. Runs on an explicit 2 MiB stack so the test is
+/// meaningful regardless of `RUST_MIN_STACK`.
+#[test]
+fn expr_depth_rejects_pathological_idiom_without_overflow() {
+	std::thread::Builder::new()
+		.stack_size(2 * 1024 * 1024)
+		.spawn(|| {
+			let src = format!("RETURN a{}", ".b".repeat(50_000));
+			let err =
+				crate::syn::parse(&src).expect_err("a 50k-part idiom must be rejected, not parsed");
+			assert!(
+				err.to_string().contains("expression recursion depth limit"),
+				"unexpected error: {err}"
+			);
+			let src = format!("RETURN a{}", "->e".repeat(50_000));
+			let err = crate::syn::parse(&src)
+				.expect_err("a 50k-hop graph idiom must be rejected, not parsed");
+			assert!(
+				err.to_string().contains("expression recursion depth limit"),
+				"unexpected error: {err}"
+			);
+		})
+		.unwrap()
+		.join()
+		.unwrap();
+}
+
+/// Idiom parts are charged per idiom, not per statement: two sibling idioms
+/// each near the budget parse, and an idiom whose index expression holds
+/// another idiom accounts for both.
+#[test]
+fn idiom_parts_are_charged_per_idiom() {
+	let one = format!("a{}", ".b".repeat(110));
+	let expr = crate::syn::expr(&format!("[{one}, {one}]")).expect("two near-limit idioms parse");
+	let lowered = crate::expr::logical::lower_expr(expr).expect("a path has a logical form");
+	assert!(surrealdb_types::ToSql::to_sql(&lowered).contains(".b.b"));
+	let nested = format!("a{}[{one}]", ".b".repeat(110));
+	assert!(crate::syn::expr(&nested).is_err(), "the inner idiom sees the outer's consumption");
+}
+
 /// Confirms the default `expr_recursion_limit` is small enough that the deepest
 /// `Expr` tree the parser will accept can still be lowered, formatted, and
 /// dropped — all of which recurse once per node — without overflowing a 2 MiB

@@ -6,6 +6,7 @@ use crate::err::EngineError;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
+use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
 use crate::val::Value;
 
@@ -21,6 +22,10 @@ impl ScalarFunction for SequenceNextval {
 		"sequence::nextval"
 	}
 
+	fn effects(&self) -> EffectSet {
+		EffectSet::ADVANCES_STATE
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new().arg("sequence", Kind::String).returns(Kind::Int)
 	}
@@ -30,17 +35,6 @@ impl ScalarFunction for SequenceNextval {
 	}
 
 	fn is_async(&self) -> bool {
-		true
-	}
-
-	/// Every call hands out a value no other call will.
-	fn is_deterministic(&self) -> bool {
-		false
-	}
-
-	/// Each call advances the sequence, and the values it has handed out
-	/// outlive the statement, so how many times it runs is observable.
-	fn mutates_state(&self) -> bool {
 		true
 	}
 
@@ -69,6 +63,10 @@ impl ScalarFunction for SequenceNextval {
 	}
 }
 
+// Every call advances the sequence and answers with the value it moved past,
+// which is what `EffectSet::ADVANCES_STATE` declares: a rule that duplicated
+// the call would consume an extra value, and one that dropped it would leave
+// the sequence where it stood.
 pub fn register(registry: &mut FunctionRegistry) {
 	registry.register(SequenceNextval);
 }

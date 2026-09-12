@@ -3,20 +3,23 @@ use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
 use futures::StreamExt;
+use surrealdb_types::ToSql;
 use tracing::instrument;
 
+use super::common::resolve_version_stamp;
 use super::pipeline::{
 	build_field_state, determine_scan_direction, eval_limit_expr, kv_scan_stream,
 	table_read_restricted_fields,
 };
 use super::{FullTextScan, IndexScan, KnnScan};
-use crate::catalog::{DatabaseId, Error, NamespaceId, table_select_permission};
+use crate::catalog::{DatabaseId, Error, NamespaceId};
 use crate::err::EngineError;
 use crate::exec::index::access_path::{AccessPath, select_access_path};
 use crate::exec::index::analysis::IndexAnalyzer;
+use crate::exec::operators::limit::PagingClause;
 use crate::exec::operators::scan::pipeline::ScanPipeline;
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
+	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
 	validate_record_user_access,
 };
 use crate::exec::planner::util::{
@@ -29,9 +32,9 @@ use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
-use crate::expr::order::Ordering;
+use crate::expr::logical::{FieldPath, FieldSegment, LogicalExpr, LogicalLiteral, LogicalOrdering};
 use crate::expr::with::With;
-use crate::expr::{Cond, ControlFlow, ControlFlowExt};
+use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::key::schema::RecordPrefix;
 use crate::kvs::Direction;
@@ -58,10 +61,10 @@ pub struct DynamicScan {
 	pub(crate) source: Arc<dyn PhysicalExpr>,
 	/// Optional version timestamp for time-travel queries (VERSION clause)
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
-	/// Optional WHERE condition for index selection (AST form)
-	pub(crate) cond: Option<Cond>,
+	/// Optional WHERE condition for index selection (logical form)
+	pub(crate) cond: Option<LogicalExpr>,
 	/// Optional ORDER BY for index selection and scan direction
-	pub(crate) order: Option<Ordering>,
+	pub(crate) order: Option<LogicalOrdering>,
 	/// Optional WITH INDEX/NOINDEX hints
 	pub(crate) with: Option<With>,
 	/// Fields needed by the query (projection + WHERE + ORDER + GROUP).
@@ -95,8 +98,8 @@ impl DynamicScan {
 	pub(crate) fn new(
 		source: Arc<dyn PhysicalExpr>,
 		version: Option<Arc<dyn PhysicalExpr>>,
-		cond: Option<Cond>,
-		order: Option<Ordering>,
+		cond: Option<LogicalExpr>,
+		order: Option<LogicalOrdering>,
 		with: Option<With>,
 		needed_fields: Option<std::collections::HashSet<String>>,
 		predicate: Option<Arc<dyn PhysicalExpr>>,
@@ -262,7 +265,7 @@ impl ExecOperator for DynamicScan {
 
 			// Evaluate table expression
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			let table_value = source_expr.evaluate(eval_ctx).await?;
+			let table_value = super::super::evaluate_from_source(&*source_expr, eval_ctx).await?;
 
 			// FOR UPDATE targets must resolve to specific record ids so the
 			// locked read is never silently skipped for other shapes.
@@ -284,44 +287,37 @@ impl ExecOperator for DynamicScan {
 					// `type::thing(...)` or other dynamic expressions).
 					//
 					// The planner marks predicate/limit/start as consumed for
-					// FunctionCall/Postfix sources, so the outer Filter/Limit
+					// FunctionCall/Invoke sources, so the outer Filter/Limit
 					// operators are removed. We must forward the pushdowns here
 					// to ensure WHERE/LIMIT/START are still applied.
 
-					// Evaluate VERSION expression
-					let version: Option<u64> = match &version {
-						Some(expr) => {
-							let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-							let v = expr.evaluate(eval_ctx).await?;
-							Some(
-								v.cast_to::<crate::val::Datetime>()
-									.map_err(|e| anyhow::anyhow!("{e}"))?
-									.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
-							)
-						}
-						None => ctx.version_stamp(),
-					};
+					// Resolve VERSION timestamp; see [`resolve_version_stamp`] for
+					// why the stamp an enclosing `VersionScope` already set is
+					// preferred over re-evaluating `version` here.
+					let version: Option<u64> =
+						resolve_version_stamp(&ctx, version.as_ref()).await?;
 
 					// Evaluate pushed-down LIMIT and START expressions
 					let limit_val: Option<usize> = match &limit_expr {
-						Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+						Some(expr) => {
+							Some(eval_limit_expr(&**expr, &ctx, PagingClause::Limit).await?)
+						}
 						None => None,
 					};
 					let start_val: usize = match &start_expr {
-						Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+						Some(expr) => eval_limit_expr(&**expr, &ctx, PagingClause::Start).await?,
 						None => 0,
 					};
 
-					// Early exit if limit is 0. A FOR UPDATE source must still
-					// reach `execute_record_lookup` so the locked read
-					// registers the key for conflict detection: the lookup
-					// performs the read first and discards the row for a zero
-					// limit afterwards, keeping this plan in agreement with
-					// the literal RecordIdScan plan for the same query.
-					if limit_val == Some(0) && !for_update {
-						return Ok(());
-					}
-
+					// A zero limit does not short-circuit the lookup. It is one
+					// key read, and what it does per row — the table
+					// `PERMISSIONS` clause, the `COMPUTED` fields, the pushed
+					// predicate, and the locked read a `FOR UPDATE` source
+					// registers for conflict detection — is owed whether or
+					// not the row is emitted. The lookup reads and judges
+					// first and discards for a zero limit afterwards, which is
+					// what the literal `RecordIdScan` plan for the same query
+					// does.
 					let results = super::record_id::execute_record_lookup(
 						&rid,
 						version,
@@ -333,6 +329,7 @@ impl ExecOperator for DynamicScan {
 						limit_val,
 						start_val,
 						None,
+						super::resolved::EnforcementMode::Runtime,
 						&pre_decode_filter_status,
 					)
 					.await?;
@@ -345,31 +342,55 @@ impl ExecOperator for DynamicScan {
 				Value::Array(arr) => {
 					// === ARRAY SOURCE ===
 					// The planner marks predicate/limit/start as consumed for
-					// FunctionCall/Postfix sources, so the outer Filter/Limit
+					// FunctionCall/Invoke sources, so the outer Filter/Limit
 					// operators are removed. We must apply them here.
 
 					// Evaluate pushed-down LIMIT and START expressions
 					let limit_val: Option<usize> = match &limit_expr {
-						Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+						Some(expr) => {
+							Some(eval_limit_expr(&**expr, &ctx, PagingClause::Limit).await?)
+						}
 						None => None,
 					};
 					let start_val: usize = match &start_expr {
-						Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+						Some(expr) => eval_limit_expr(&**expr, &ctx, PagingClause::Start).await?,
 						None => 0,
 					};
 
-					// Early exit if limit is 0
-					if limit_val == Some(0) {
-						return Ok(());
+					// No early exit for `LIMIT 0`: filtering precedes paging, so
+					// the source rows are read and the pushed predicate judges
+					// them whether or not any row survives the limit. The
+					// truncation below leaves nothing. A cast or a permission in
+					// the predicate is an evaluation the statement owes.
+
+					// A NONE or NULL element is not a row, as it is not in a
+					// literal array source.
+					let mut values = arr.0;
+					values.retain(|v| !matches!(v, Value::None | Value::Null));
+
+					// A record id element is the record it names, read here
+					// with the read's permission and computed-field
+					// processing, as a literal array source reads it
+					// (`SourceExpr`). An id no record answers is no row, so
+					// the read happens before the pushed predicate judges the
+					// row: a predicate is never evaluated against a row the
+					// source does not produce.
+					if !values.is_empty() {
+						super::super::fetch::batch_fetch_in_place(&ctx, &mut values).await?;
+						values.retain(|v| !matches!(v, Value::None | Value::Null));
 					}
 
-					// Apply pushed-down predicate
-					let mut values = arr.0;
+					// Apply pushed-down predicate. The element is the row the
+					// predicate judges, so it is bound as the document root as
+					// well as the current value: a path evaluates its steps
+					// against the value it has reached, and a read of the row
+					// inside one — the separator of `text.split(sep)` — is
+					// owed the row rather than that value.
 					if let Some(ref pred) = predicate {
 						let mut write_idx = 0;
 						for read_idx in 0..values.len() {
-							let eval_ctx =
-								EvalContext::from_exec_ctx(&ctx).with_value(&values[read_idx]);
+							let eval_ctx = EvalContext::from_exec_ctx(&ctx)
+								.with_value_and_doc(&values[read_idx]);
 							if pred.evaluate(eval_ctx).await?.is_truthy() {
 								if write_idx != read_idx {
 									values.swap(write_idx, read_idx);
@@ -398,6 +419,9 @@ impl ExecOperator for DynamicScan {
 					}
 					return Ok(());
 				}
+				// NONE and NULL are no rows at all, as they are not in a
+				// literal source.
+				Value::None | Value::Null => return Ok(()),
 				// For any other value type, yield as a single row.
 				// This matches legacy FROM behavior for non-table values.
 				other => {
@@ -406,25 +430,28 @@ impl ExecOperator for DynamicScan {
 
 					// Evaluate pushed-down LIMIT and START expressions
 					let limit_val: Option<usize> = match &limit_expr {
-						Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+						Some(expr) => {
+							Some(eval_limit_expr(&**expr, &ctx, PagingClause::Limit).await?)
+						}
 						None => None,
 					};
 					let start_val: usize = match &start_expr {
-						Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+						Some(expr) => eval_limit_expr(&**expr, &ctx, PagingClause::Start).await?,
 						None => 0,
 					};
 
-					// Early exit if limit is 0 or start skips past the single value
-					if limit_val == Some(0) || start_val > 0 {
-						return Ok(());
-					}
-
-					// Apply pushed-down predicate
+					// The predicate is judged before paging discards the row, as
+					// in the array branch: filtering precedes paging.
 					if let Some(ref pred) = predicate {
-						let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&other);
+						let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value_and_doc(&other);
 						if !pred.evaluate(eval_ctx).await?.is_truthy() {
 							return Ok(());
 						}
+					}
+
+					// One row, so `LIMIT 0` or any `START` leaves nothing.
+					if limit_val == Some(0) || start_val > 0 {
+						return Ok(());
 					}
 
 					yielder.emit(ValueBatch::new(vec![other])).await;
@@ -437,27 +464,20 @@ impl ExecOperator for DynamicScan {
 
 			// Evaluate pushed-down LIMIT and START expressions
 			let limit_val: Option<usize> = match &limit_expr {
-				Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+				Some(expr) => Some(eval_limit_expr(&**expr, &ctx, PagingClause::Limit).await?),
 				None => None,
 			};
 			let start_val: usize = match &start_expr {
-				Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+				Some(expr) => eval_limit_expr(&**expr, &ctx, PagingClause::Start).await?,
 				None => 0,
 			};
 
-			// VERSION stamp for metadata lookups (same evaluation as `resolve_table_scan_stream`).
-			let version_stamp: Option<u64> = match &version {
-				Some(expr) => {
-					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-					let v = expr.evaluate(eval_ctx).await?;
-					Some(
-						v.cast_to::<crate::val::Datetime>()
-							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
-					)
-				}
-				None => ctx.version_stamp(),
-			};
+			// VERSION stamp for metadata lookups, resolved as
+			// `resolve_table_scan_stream` resolves it; see
+			// [`resolve_version_stamp`] for why the stamp an enclosing
+			// `VersionScope` already set is preferred over re-evaluating
+			// `version` here.
+			let version_stamp: Option<u64> = resolve_version_stamp(&ctx, version.as_ref()).await?;
 
 			// Check table existence and resolve SELECT permission
 			let table_def = db_ctx
@@ -472,8 +492,7 @@ impl ExecOperator for DynamicScan {
 			}
 
 			let select_permission = if check_perms {
-				let catalog_perm = table_select_permission(table_def.as_deref());
-				convert_permission_to_physical_runtime(catalog_perm, &ctx)
+				table_select_permission_physical_runtime(table_def.as_deref(), &ctx)
 					.await
 					.context("Failed to convert permission")?
 			} else {
@@ -615,28 +634,89 @@ impl ExecOperator for DynamicScan {
 /// [`crate::exec::operators::scan::pipeline::FieldState`]; `Permission::Full`
 /// fields are intentionally absent and the list is empty when permission
 /// enforcement is skipped (owner/root), so a privileged actor never matches
-/// here. The match is shallow — each `Order.value` is a plain top-level idiom
+/// here. The match is shallow — each `Order.value` is a plain top-level path
 /// and an index-ordering leak requires the index to cover the field directly,
-/// so a restricted field referenced only inside an idiom filter (e.g.
+/// so a restricted field referenced only inside a path filter (e.g.
 /// `ORDER BY foo[WHERE code = …]`) is not an indexable ordering and cannot leak
 /// through this vector. Mirrors the plan-time `RestrictedPrefixes::order_touches`
 /// guard in `planner/select`, including its out-of-scope parent/child
 /// nested-field gap (ordering by a *parent* of a restricted child is not
 /// caught — see that guard's docs).
 fn order_touches_restricted_select_field(
-	order: Option<&Ordering>,
+	order: Option<&LogicalOrdering>,
 	field_permissions: &[(crate::expr::Idiom, PhysicalPermission)],
 ) -> bool {
 	// `ORDER BY RAND()` references no field and cannot leak ordering.
-	let Some(Ordering::Order(order_list)) = order else {
+	let Some(LogicalOrdering::Order(order_list)) = order else {
 		return false;
 	};
 	if field_permissions.is_empty() {
 		return false;
 	}
-	order_list
-		.iter()
-		.any(|o| field_permissions.iter().any(|(field, _)| o.value.starts_with(field.0.as_slice())))
+	order_list.iter().any(|o| {
+		let leading = leading_field_path(&o.value);
+		field_permissions.iter().any(|(field, _)| path_starts_with_field(&leading, field))
+	})
+}
+
+/// The declared position the leading steps of an `ORDER BY` key read: its
+/// `Field` root followed by every field access and `.*` up to the first step
+/// of another kind (`foo.bar[0].baz` reads `foo.bar`). Empty for a key that
+/// does not start from a field of the row.
+fn leading_field_path(expr: &LogicalExpr) -> Vec<FieldSegment> {
+	/// Appends the declared segments of `expr` to `out`; `true` while every
+	/// step so far is declared, `false` from the first one that is not.
+	fn walk(expr: &LogicalExpr, out: &mut Vec<FieldSegment>) -> bool {
+		match expr {
+			LogicalExpr::Field(name) => {
+				out.push(FieldSegment::Field(name.clone()));
+				true
+			}
+			LogicalExpr::Current => true,
+			LogicalExpr::Access {
+				base,
+				field,
+			} => {
+				if !walk(base, out) {
+					return false;
+				}
+				out.push(FieldSegment::Field(field.clone()));
+				true
+			}
+			LogicalExpr::Each(base) => {
+				if !walk(base, out) {
+					return false;
+				}
+				out.push(FieldSegment::All);
+				true
+			}
+			// A broadcast is its base followed by its body; the body's steps
+			// continue the same written path.
+			LogicalExpr::Broadcast {
+				base,
+				body,
+				..
+			} => walk(base, out) && walk(body, out),
+			// Any other step ends the declared prefix, which its base may
+			// still contribute to.
+			other => {
+				if let Some(base) = other.step_base() {
+					walk(base, out);
+				}
+				false
+			}
+		}
+	}
+	let mut out = Vec::new();
+	walk(expr, &mut out);
+	out
+}
+
+/// Whether a key's leading declared position lies at or under a catalog
+/// field's path. A catalog name that declares no position (one holding a
+/// part other than a field or `*`) governs no key.
+fn path_starts_with_field(leading: &[FieldSegment], field: &crate::expr::Idiom) -> bool {
+	FieldPath::from_idiom(field).is_some_and(|path| leading.starts_with(path.segments()))
 }
 
 /// SECURITY: whether any column of an index is governed by a non-`Full` SELECT
@@ -667,8 +747,8 @@ struct TableScanConfig {
 	ns_id: NamespaceId,
 	db_id: DatabaseId,
 	table_name: TableName,
-	cond: Option<Cond>,
-	order: Option<Ordering>,
+	cond: Option<LogicalExpr>,
+	order: Option<LogicalOrdering>,
 	with: Option<With>,
 	direction: Direction,
 	/// VERSION expression for time-travel queries (evaluated inside
@@ -707,33 +787,30 @@ async fn resolve_table_scan_stream(
 ) -> Result<(ValueBatchStream, usize), ControlFlow> {
 	let txn = ctx.txn();
 
-	// Evaluate VERSION expression once for the fallback KV scan path.
-	// Child operators receive the unevaluated expr and evaluate it themselves.
-	let version_stamp: Option<u64> = match &cfg.version {
-		Some(expr) => {
-			let eval_ctx = EvalContext::from_exec_ctx(ctx);
-			let v = expr.evaluate(eval_ctx).await?;
-			Some(
-				v.cast_to::<crate::val::Datetime>()
-					.map_err(|e| anyhow::anyhow!("{e}"))?
-					.to_version_stamp(txn.timestamp_impl().as_ref())?,
-			)
-		}
-		None => ctx.version_stamp(),
-	};
+	// The VERSION stamp for the fallback KV scan path. Child operators
+	// receive the unevaluated expression and resolve it the same way; see
+	// [`resolve_version_stamp`] for why the stamp an enclosing `VersionScope`
+	// already set is preferred over re-evaluating it here.
+	let version_stamp: Option<u64> = resolve_version_stamp(ctx, cfg.version.as_ref()).await?;
 
 	// Resolve bind-parameter references so that index analysis sees
-	// Expr::Literal instead of Expr::Param. Covers LET bindings, client
-	// bind params, and DEFINE PARAM (via txn store).
+	// literals instead of parameters. Covers LET bindings, client bind
+	// params, and DEFINE PARAM (via txn store).
 	//
 	// After param resolution, re-fold constant expressions (pure functions
 	// whose arguments are now all literals) and rewrite type::field("name")
-	// to Expr::Idiom so the index analyzer can match them.
+	// to a field so the index analyzer can match them.
 	let resolved_cond = match cfg.cond.as_ref() {
 		Some(c) => {
 			let ns_db = Some((cfg.ns_id, cfg.db_id));
-			let mut cond =
-				resolve_condition_params(c, &ctx.root().ctx, ns_db, SELECT_ITERATION_PARAMS).await;
+			let mut cond = resolve_condition_params(
+				c,
+				&ctx.root().ctx,
+				Some(&ctx.txn()),
+				ns_db,
+				SELECT_ITERATION_PARAMS,
+			)
+			.await;
 			let capabilities = ctx.root().ctx.get_capabilities();
 			// This path scans a table, so every row reaching the condition is
 			// a record. A field read off one is still only inert while
@@ -771,7 +848,7 @@ async fn resolve_table_scan_stream(
 	// check at `planner/select/mod.rs` so dynamic FROM sources get the same
 	// zero-I/O treatment as static `FROM table` sources.
 	if let Some(c) = resolved_cond.as_ref()
-		&& matches!(&c.0, crate::expr::Expr::Literal(crate::expr::literal::Literal::Bool(false)))
+		&& matches!(c, LogicalExpr::Literal(LogicalLiteral::Bool(false)))
 	{
 		let op = super::EmptyScan::new();
 		let stream = op.execute(ctx)?;
@@ -904,19 +981,24 @@ async fn resolve_table_scan_stream(
 				Some(c) => {
 					let mut allowlist = std::collections::HashSet::new();
 					if let Some(orig) = cfg.cond.as_ref() {
-						crate::exec::physical_expr::collect_cond_matches(&orig.0, &mut allowlist);
+						crate::exec::physical_expr::collect_cond_matches(orig, &mut allowlist);
 					}
-					crate::exec::physical_expr::collect_cond_matches(&c.0, &mut allowlist);
+					crate::exec::physical_expr::collect_cond_matches(&c, &mut allowlist);
 					let mut planner =
 						crate::exec::planner::Planner::new(ctx.ctx(), ctx.function_registry());
 					planner.set_matches_scope(Arc::new(crate::exec::physical_expr::MatchesScope {
 						allowlist,
-						executor_tables: Arc::from(vec![cfg.table_name.clone()]),
+						executor_tables: crate::exec::physical_expr::ExecutorTables::new(
+							vec![cfg.table_name.clone()],
+							Vec::new(),
+							false,
+						),
 					}));
-					Some(planner.physical_expr(c.0).await.map_err(|e| anyhow::anyhow!("{e}"))?)
+					Some(planner.physical_expr(c).await.map_err(|e| anyhow::anyhow!("{e}"))?)
 				}
 				None => None,
 			};
+			let residual_phys = compile_residual(ctx, residual_cond).await?;
 			let knn_op = KnnScan::new(
 				index_ref,
 				vector,
@@ -925,7 +1007,7 @@ async fn resolve_table_scan_stream(
 				cfg.table_name,
 				cfg.version,
 				cfg.knn_context.clone(),
-				residual_cond,
+				residual_phys,
 				None,
 				None,
 			)
@@ -947,7 +1029,8 @@ async fn resolve_table_scan_stream(
 		}) => {
 			let mut sub_operators: Vec<Arc<dyn ExecOperator>> = Vec::with_capacity(paths.len());
 			for path in paths {
-				sub_operators.push(create_index_operator(&path, &cfg, resolved_cond.as_ref()));
+				sub_operators
+					.push(create_index_operator(ctx, &path, &cfg, resolved_cond.as_ref()).await?);
 			}
 			let union_op = super::UnionIndexScan::new(cfg.table_name.clone(), sub_operators, None);
 			let stream = union_op.execute(ctx)?;
@@ -1003,18 +1086,37 @@ async fn resolve_table_scan_stream(
 	}
 }
 
+/// Compile the residual WHERE a runtime-resolved KNN search evaluates per
+/// candidate inside the ANN traversal.
+///
+/// The access path is chosen at execute time, so the residual is only known
+/// here; it is compiled once per scan, not per candidate.
+async fn compile_residual(
+	ctx: &ExecutionContext,
+	residual: Option<LogicalExpr>,
+) -> Result<Option<Arc<dyn PhysicalExpr>>, ControlFlow> {
+	match residual {
+		Some(expr) => {
+			let planner = crate::exec::planner::Planner::new(ctx.ctx(), ctx.function_registry());
+			Ok(Some(planner.physical_expr(expr).await.map_err(|e| anyhow::anyhow!("{e}"))?))
+		}
+		None => Ok(None),
+	}
+}
+
 /// Create an index scan operator for a single access path.
 ///
 /// Used by the multi-index union handler to create individual operators
 /// for each branch of an OR condition. The caller (typically
 /// [`UnionIndexScan`](super::UnionIndexScan)) is responsible for
 /// executing the operators and deduplicating results.
-fn create_index_operator(
+async fn create_index_operator(
+	ctx: &ExecutionContext,
 	path: &AccessPath,
 	cfg: &TableScanConfig,
-	resolved_cond: Option<&Cond>,
-) -> Arc<dyn ExecOperator> {
-	match path {
+	resolved_cond: Option<&LogicalExpr>,
+) -> Result<Arc<dyn ExecOperator>, ControlFlow> {
+	Ok(match path {
 		AccessPath::BTreeScan {
 			index_ref,
 			access,
@@ -1050,6 +1152,7 @@ fn create_index_operator(
 			prefilter: _,
 		} => {
 			let residual_cond = resolved_cond.and_then(strip_knn_and_matches_from_condition);
+			let residual_phys = compile_residual(ctx, residual_cond).await?;
 			Arc::new(KnnScan::new(
 				index_ref.clone(),
 				vector.clone(),
@@ -1058,7 +1161,7 @@ fn create_index_operator(
 				cfg.table_name.clone(),
 				cfg.version.clone(),
 				cfg.knn_context.clone(),
-				residual_cond,
+				residual_phys,
 				None,
 				None,
 			))
@@ -1084,26 +1187,17 @@ fn create_index_operator(
 			None,
 			None,
 		)),
-	}
+	})
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::ctx::Context;
-	use crate::exec::planner::expr_to_physical_expr;
 
 	/// Helper to create a Scan with all fields for testing
 	async fn create_test_scan(table_name: &str, with_index_hints: bool) -> DynamicScan {
-		let ctx = std::sync::Arc::new(Context::new_test());
-		let registry = crate::exec::function::FunctionRegistry::with_builtins();
-		let source = expr_to_physical_expr(
-			crate::expr::Expr::Literal(crate::expr::literal::Literal::String(table_name.into())),
-			&ctx,
-			&registry,
-		)
-		.await
-		.expect("Failed to create physical expression");
+		let source: Arc<dyn PhysicalExpr> =
+			Arc::new(crate::exec::physical_expr::Literal(Value::from(table_name)));
 
 		DynamicScan::new(
 			source,
@@ -1160,10 +1254,8 @@ mod tests {
 
 	#[test]
 	fn test_determine_scan_direction_random_order() {
-		use crate::expr::order::Ordering;
-
 		// Random order -> Forward
-		let order = Ordering::Random;
+		let order = LogicalOrdering::Random;
 		let direction = determine_scan_direction(Some(&order));
 		assert!(matches!(direction, Direction::Forward));
 	}

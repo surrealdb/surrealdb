@@ -7,7 +7,7 @@ planner-strategy = ["compute-only"]
 [test]
 reason = """
 Half of a pair. Same queries as
-`projection_indexed_alias_new_planner.surql`, pinned to the legacy compute
+`projection_indexed_alias_streaming.surql`, pinned to the legacy compute
 path; the two files' expected results are the divergence.
 
 An index part in a projection alias selects one element here. `AS arr[0]`

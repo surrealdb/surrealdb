@@ -37,6 +37,7 @@ pub use signature::Signature;
 use crate::exec::BoxFut;
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
+pub use crate::expr::logical::EffectSet;
 use crate::val::Value;
 
 /// Enforce an argument-count range, producing the same error shape and
@@ -123,36 +124,50 @@ pub trait ScalarFunction: Send + Sync + Debug {
 		false
 	}
 
-	/// Whether repeated calls with the same arguments produce the same value.
+	/// What the function does besides compute its result: the effects a
+	/// rewrite has to respect before it may duplicate, drop, fold or move a
+	/// call. See [`EffectSet`] for the flags and what each licenses.
 	///
-	/// This is distinct from [`ScalarFunction::is_pure`], which reports only
-	/// whether a function can run without an execution context. A function can
-	/// need no context and still return a different value each call — the
-	/// `rand::*` family does.
+	/// Declared, never derived: the `define_*_function!` macros require it at
+	/// the definition, and the registry's guard test pins every set that is
+	/// not [`EffectSet::PURE`] by name, so a builtin's effects are stated once
+	/// and read everywhere. This is distinct from [`ScalarFunction::is_pure`],
+	/// which reports only whether a function can run without an execution
+	/// context: `rand::float` needs no context and still draws entropy.
+	fn effects(&self) -> EffectSet;
+
+	/// Whether a second call with the same arguments answers the same and
+	/// leaves nothing behind: [`EffectSet::is_deterministic`] of the declared
+	/// effects.
 	///
-	/// The planner's literal folder evaluates a call once at plan time and
-	/// substitutes the result for the whole statement, so it must fold only
-	/// deterministic functions; everything else has to be evaluated per row.
-	/// `time::now()` is the one deliberate exception, folded per statement by
-	/// an explicit case in the folder rather than through this flag.
+	/// Two decisions read this. The planner's literal folder evaluates a call
+	/// once at plan time and substitutes the result for the whole statement, so
+	/// it folds only deterministic functions; everything else is evaluated per
+	/// row. `time::now()` is the one deliberate exception, folded per statement
+	/// by an explicit case in the folder rather than through this answer. The
+	/// logical rules ask the same question of every call inside an expression
+	/// before treating that expression as pure, which is what lets a rule
+	/// substitute it for each occurrence of a name.
 	fn is_deterministic(&self) -> bool {
-		true
+		self.effects().is_deterministic()
 	}
 
-	/// Whether invoking this function changes state that outlives the query.
+	/// Whether invoking this function changes state that outlives the query:
+	/// [`EffectSet::mutates_state`] of the declared effects.
 	///
 	/// A function that only observes can be called any number of times without
 	/// anything outside the expression noticing, however much its answers
 	/// differ between calls — `rand::*` and `time::now` are in that class. One
-	/// that advances a sequence, writes a file, or sends a non-safe HTTP
-	/// request is not: how many times it runs is itself part of the answer.
+	/// that advances a sequence, writes a file, sends a non-safe HTTP request,
+	/// or runs a body that may write is not: how many times it runs is itself
+	/// part of the answer.
 	///
 	/// The planner asks this before reducing a grouped projection to a single
 	/// evaluation per group. Reducing a mutator would let the grouping decide
 	/// how many effects the statement has, and would run one for a `GROUP ALL`
 	/// that saw no rows at all, so those stay on the per-row path.
 	fn mutates_state(&self) -> bool {
-		false
+		self.effects().mutates_state()
 	}
 
 	/// Synchronous invocation for pure functions.
@@ -174,122 +189,5 @@ pub trait ScalarFunction: Send + Sync + Debug {
 		args: Vec<Value>,
 	) -> BoxFut<'a, Result<Value>> {
 		Box::pin(async move { self.invoke(args) })
-	}
-}
-
-/// Wraps a scalar function to report it as non-deterministic.
-///
-/// Every other part of the [`ScalarFunction`] contract, including the name the
-/// registry keys on, is delegated to the wrapped function, so wrapping changes
-/// nothing but [`ScalarFunction::is_deterministic`].
-///
-/// This exists because the arity-specific `define_pure_function!` arms have no
-/// slot for per-function overrides; wrapping at registration keeps one
-/// declaration per function regardless of its signature.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NonDeterministic<F>(pub F);
-
-impl<F: ScalarFunction> ScalarFunction for NonDeterministic<F> {
-	fn name(&self) -> &'static str {
-		self.0.name()
-	}
-
-	fn signature(&self) -> Signature {
-		self.0.signature()
-	}
-
-	fn return_type(&self, arg_types: &[Kind]) -> Result<Kind> {
-		self.0.return_type(arg_types)
-	}
-
-	fn required_context(&self) -> crate::exec::ContextLevel {
-		self.0.required_context()
-	}
-
-	fn is_pure(&self) -> bool {
-		self.0.is_pure()
-	}
-
-	fn is_async(&self) -> bool {
-		self.0.is_async()
-	}
-
-	fn is_deterministic(&self) -> bool {
-		false
-	}
-
-	fn mutates_state(&self) -> bool {
-		self.0.mutates_state()
-	}
-
-	fn invoke(&self, args: Vec<Value>) -> Result<Value> {
-		self.0.invoke(args)
-	}
-
-	fn invoke_async<'a>(
-		&'a self,
-		ctx: &'a EvalContext<'_>,
-		args: Vec<Value>,
-	) -> BoxFut<'a, Result<Value>> {
-		self.0.invoke_async(ctx, args)
-	}
-}
-
-/// Wraps a scalar function to report it as changing state beyond the query.
-///
-/// Every other part of the [`ScalarFunction`] contract, including the name the
-/// registry keys on, is delegated to the wrapped function, so wrapping changes
-/// nothing but [`ScalarFunction::mutates_state`].
-///
-/// Like [`NonDeterministic`], this exists because the arity-specific
-/// `define_*_function!` arms have no slot for per-function overrides; wrapping
-/// at registration keeps one declaration per function regardless of its
-/// signature.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct MutatesState<F>(pub F);
-
-impl<F: ScalarFunction> ScalarFunction for MutatesState<F> {
-	fn name(&self) -> &'static str {
-		self.0.name()
-	}
-
-	fn signature(&self) -> Signature {
-		self.0.signature()
-	}
-
-	fn return_type(&self, arg_types: &[Kind]) -> Result<Kind> {
-		self.0.return_type(arg_types)
-	}
-
-	fn required_context(&self) -> crate::exec::ContextLevel {
-		self.0.required_context()
-	}
-
-	fn is_pure(&self) -> bool {
-		self.0.is_pure()
-	}
-
-	fn is_async(&self) -> bool {
-		self.0.is_async()
-	}
-
-	fn is_deterministic(&self) -> bool {
-		self.0.is_deterministic()
-	}
-
-	fn mutates_state(&self) -> bool {
-		true
-	}
-
-	fn invoke(&self, args: Vec<Value>) -> Result<Value> {
-		self.0.invoke(args)
-	}
-
-	fn invoke_async<'a>(
-		&'a self,
-		ctx: &'a EvalContext<'_>,
-		args: Vec<Value>,
-	) -> BoxFut<'a, Result<Value>> {
-		self.0.invoke_async(ctx, args)
 	}
 }

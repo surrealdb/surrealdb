@@ -17,24 +17,26 @@ use super::common::fetch_and_filter_records_batch;
 use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
 use crate::catalog::{DatabaseId, Distance, Error, Index, NamespaceId, VectorType};
+use crate::exec::field_path_convert::field_path_from_idiom;
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::operators::{KnnTopKHeap, check_cancelled, extract_vector};
 use crate::exec::permission::{
-	PhysicalPermission, PhysicalTableSelect, convert_permission_to_physical_runtime,
-	should_check_perms, validate_record_user_access,
+	PhysicalPermission, PhysicalTableSelect, should_check_perms,
+	table_select_permission_physical_runtime, validate_record_user_access,
 };
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
-use crate::expr::{Cond, ControlFlow, ControlFlowExt, Idiom};
+use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::docids::TableDocIds;
 use crate::idx::trees::gate::{CachedTableSelect, CandidateFetchCounter};
 use crate::idx::trees::vector::{score_raw_vector, typed_query_vector};
 use crate::idx::trees::{KnnCondFilter, KnnIteratorResult};
 use crate::kvs::{CachePolicy, Transaction};
-use crate::legacy::knn::LegacyCondition;
+use crate::legacy::knn::PhysicalCondition;
+use crate::val::field_path::FieldPath;
 use crate::val::{Number, TableName, Value};
 
 /// Execution strategy chosen by the KNN prefilter triage (#548), keyed on
@@ -110,9 +112,8 @@ pub(crate) fn boosted_ef(ef: u32, boost: u32, ef_max: u32) -> u32 {
 /// execute time, against the scan's transaction — into an allow-list
 /// `RoaringTreemap` over the table's shared doc-ID space whose members
 /// exactly satisfy the covered WHERE conjuncts. `residual` carries the
-/// uncovered conjuncts for the in-traversal record-fetch filter, and
-/// `residual_phys` the same predicate compiled for batched row evaluation on
-/// the graph-free exact tier.
+/// uncovered conjuncts, compiled, for the in-traversal record-fetch filter
+/// and for batched row evaluation on the graph-free exact tier.
 ///
 /// [`KnnPrefilterPlan`]: crate::exec::index::access_path::KnnPrefilterPlan
 #[derive(Debug, Clone)]
@@ -123,11 +124,8 @@ pub(crate) struct KnnPrefilter {
 	/// [`ExecOperator::children`] can hand out a reference for EXPLAIN.
 	pub(crate) node_dyn: Arc<dyn ExecOperator>,
 	/// The true residual: KNN-stripped conjuncts not covered by `node`,
-	/// never containing a MATCHES operator.
-	pub(crate) residual: Option<Cond>,
-	/// `residual` compiled to a physical expression for per-row evaluation
-	/// outside the traversal (exact tier).
-	pub(crate) residual_phys: Option<Arc<dyn PhysicalExpr>>,
+	/// never containing a MATCHES operator, compiled for per-row evaluation.
+	pub(crate) residual: Option<Arc<dyn PhysicalExpr>>,
 	/// `true` when a MATCHES conjunct could not join the bitmap plan; the
 	/// scan then keeps [`KnnScan::matches_condition`] active alongside the
 	/// allow-list. See [`KnnPrefilterPlan::uncovered_matches`].
@@ -153,7 +151,10 @@ pub struct KnnScan {
 	/// Optional VERSION timestamp for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Plan-time resolved table context. When present, `execute()` skips
-	/// runtime table def + permission lookup.
+	/// runtime table def + permission lookup, and its enforcement mode says
+	/// whether the scan or the plan derives computed fields and applies field
+	/// permissions to the fetched records. The table permission is applied to
+	/// the candidates in either mode.
 	pub(crate) resolved: Option<ResolvedTableContext>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
@@ -181,7 +182,7 @@ pub struct KnnScan {
 	/// permissions are never bitmap-evaluated — and whatever cond is pushed
 	/// down (this full residual on the fallback path, or the prefilter's
 	/// true residual) keeps the per-candidate permission-before-cond order.
-	pub(crate) residual_cond: Option<Cond>,
+	pub(crate) residual_cond: Option<Arc<dyn PhysicalExpr>>,
 	/// Pre-filtered vector search (#548): evaluates into the allow-list
 	/// bitmap gating candidate admission, with the true residual for the
 	/// remaining predicates. `None` keeps the pure in-traversal filter path.
@@ -212,7 +213,7 @@ impl KnnScan {
 		table_name: surrealdb_strand::TableName,
 		version: Option<Arc<dyn PhysicalExpr>>,
 		knn_context: Option<Arc<crate::exec::function::KnnContext>>,
-		residual_cond: Option<Cond>,
+		residual_cond: Option<Arc<dyn PhysicalExpr>>,
 		prefilter: Option<KnnPrefilter>,
 		needed_fields: Option<Option<HashSet<String>>>,
 	) -> Self {
@@ -267,16 +268,14 @@ impl ExecOperator for KnnScan {
 		// cond filter, so EXPLAIN shows it on the KnnScan line — mirroring how
 		// `TableScan` exposes its `predicate`. Without this, an indexed KNN
 		// with a pushed-down filter is indistinguishable in the plan from one
-		// without. Render the inner expression rather than the `Cond` to avoid
-		// a redundant `WHERE` prefix (matching TableScan's `to_sql()` output).
-		// With a prefilter (#548) this is the TRUE residual — the covered
-		// conjuncts render as the bitmap child subtree instead.
+		// without. With a prefilter (#548) this is the TRUE residual — the
+		// covered conjuncts render as the bitmap child subtree instead.
 		let shown_cond = match &self.prefilter {
 			Some(p) => p.residual.as_ref(),
 			None => self.residual_cond.as_ref(),
 		};
 		if let Some(cond) = shown_cond {
-			attrs.push(("predicate".to_string(), cond.0.to_sql()));
+			attrs.push(("predicate".to_string(), cond.to_sql()));
 		}
 		// The prefilter tier actually taken, recorded during execution —
 		// present under EXPLAIN ANALYZE (which drains the plan before
@@ -368,9 +367,13 @@ impl ExecOperator for KnnScan {
 			let root = ctx.root();
 			let frozen_ctx = &root.ctx;
 
-			// Resolve table permissions and table_id: plan-time fast path or runtime fallback
+			// Resolve table permissions and table_id: plan-time fast path or
+			// runtime fallback. A top-k scan applies the table permission to
+			// its candidates whoever enforces the rest of the read: the k
+			// neighbours it returns must be k the caller may see, since a
+			// filter above the scan can only narrow a result already cut to k.
 			let (select_permission, table_id) = if let Some(ref res) = resolved {
-				let perm = res.select_permission(check_perms);
+				let perm = res.candidate_permission(check_perms);
 				(perm, res.table_def.table_id)
 			} else {
 				let table_def = db_ctx
@@ -389,7 +392,7 @@ impl ExecOperator for KnnScan {
 				};
 
 				let select_permission = if check_perms {
-					convert_permission_to_physical_runtime(&table_def.permissions.select, &ctx)
+					table_select_permission_physical_runtime(Some(&*table_def), &ctx)
 						.await
 						.context("Failed to convert permission")?
 				} else {
@@ -437,7 +440,7 @@ impl ExecOperator for KnnScan {
 			// a prefilter.
 			let mut tier: Option<PrefilterTier> = None;
 			let mut allow_list: Option<RoaringTreemap> = None;
-			let mut in_traversal_cond: Option<Cond> = residual_cond;
+			let mut in_traversal_cond: Option<Arc<dyn PhysicalExpr>> = residual_cond;
 			if let Some(pf) = prefilter.as_ref().filter(|_| index_def.uses_shared_doc_ids()) {
 				if version.is_some() {
 					// The planner never attaches a prefilter to a versioned
@@ -513,8 +516,11 @@ impl ExecOperator for KnnScan {
 						unreachable!()
 					}
 				};
+				// The indexed column is a stored field, read off each record
+				// as a pure path.
 				let field = match index_def.cols.first() {
-					Some(f) => f.clone(),
+					Some(f) => field_path_from_idiom(f)
+						.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e)))?,
 					None => {
 						Err(ControlFlow::Err(anyhow::anyhow!(
 							"Index '{}' has no indexed column",
@@ -541,7 +547,7 @@ impl ExecOperator for KnnScan {
 					// residual alone applies.
 					matches_phys
 						.as_ref()
-						.or_else(|| prefilter.as_ref().and_then(|p| p.residual_phys.as_ref())),
+						.or_else(|| prefilter.as_ref().and_then(|p| p.residual.as_ref())),
 					&select_permission,
 					check_perms,
 				)
@@ -580,35 +586,21 @@ impl ExecOperator for KnnScan {
 					)))
 				};
 				let fetch_counter = || Arc::clone(&op_metrics) as Arc<dyn CandidateFetchCounter>;
-				let cond_filter = if let Some(phys) = &matches_phys {
-					Some(KnnCondFilter {
+				// The in-traversal condition is whichever compiled predicate
+				// applies: the MATCHES-aware condition when it is active,
+				// otherwise the residual.
+				let cond_filter = match matches_phys.as_ref().or(in_traversal_cond.as_ref()) {
+					Some(phys) => Some(KnnCondFilter {
 						select_gate: select_gate(),
-						cond: Some(Arc::new(crate::legacy::knn::PhysicalCondition::new(
-							Arc::clone(phys),
-							ctx.clone(),
-						))),
+						cond: Some(Arc::new(PhysicalCondition::new(Arc::clone(phys), ctx.clone()))),
 						metrics: Some(fetch_counter()),
-					})
-				} else {
-					match (&in_traversal_cond, ctx.options()) {
-						(Some(cond), Some(opt)) => Some(KnnCondFilter {
-							select_gate: select_gate(),
-							cond: Some(Arc::new(LegacyCondition::new(
-								frozen_ctx,
-								opt,
-								Arc::new(cond.clone()),
-							))),
-							metrics: Some(fetch_counter()),
-						}),
-						(None, Some(_)) if needs_perm_gate && search_allow.is_some() => {
-							Some(KnnCondFilter {
-								select_gate: select_gate(),
-								cond: None,
-								metrics: Some(fetch_counter()),
-							})
-						}
-						_ => None,
-					}
+					}),
+					None if needs_perm_gate && search_allow.is_some() => Some(KnnCondFilter {
+						select_gate: select_gate(),
+						cond: None,
+						metrics: Some(fetch_counter()),
+					}),
+					None => None,
 				};
 				match &index_def.index {
 					Index::Hnsw(hnsw_params) => {
@@ -797,7 +789,7 @@ async fn exact_prefiltered_knn(
 	ns: NamespaceId,
 	db: DatabaseId,
 	table_name: &TableName,
-	field: &Idiom,
+	field: &FieldPath,
 	distance: &Distance,
 	vector_type: VectorType,
 	dimension: usize,
@@ -888,7 +880,65 @@ async fn exact_prefiltered_knn(
 
 #[cfg(test)]
 mod tests {
-	use super::{PrefilterTier, boosted_ef, choose_prefilter_tier};
+	use std::sync::Arc;
+
+	use super::{KnnScan, PrefilterTier, boosted_ef, choose_prefilter_tier};
+	use crate::exec::ExecOperator;
+	use crate::exec::operators::scan::resolved::{ResolvedTableContext, test_support};
+	use crate::exec::operators::test_util::{TestDb, collect, physical_expr};
+	use crate::kvs::TransactionType;
+	use crate::val::{Number, RecordId, RecordIdKey, Value};
+
+	/// Under the plan's enforcement the scan yields its k records as stored,
+	/// for the nodes above it to reduce, while still applying the table
+	/// permission to every candidate so that k counts records the caller may
+	/// see; under its own enforcement it reduces them as well.
+	#[tokio::test]
+	async fn a_planned_scan_yields_stored_records_and_still_gates_its_candidates() {
+		let db = TestDb::new_with_auth(
+			"DEFINE TABLE v SCHEMALESS PERMISSIONS FOR select WHERE flag = true;
+			 DEFINE FIELD secret ON v TYPE string PERMISSIONS FOR select NONE;
+			 DEFINE FIELD label ON v COMPUTED 'computed';
+			 DEFINE INDEX v_pt ON v FIELDS point HNSW DIMENSION 1 DIST EUCLIDEAN TYPE F32;
+			 CREATE v:hidden SET point = [1f], flag = false, secret = 's';
+			 CREATE v:seen SET point = [2f], flag = true, secret = 's';",
+		)
+		.await;
+		let ctx = db.exec_ctx_as(&test_support::anonymous(), TransactionType::Read).await;
+		let (planned, runtime) = test_support::contexts(&ctx, "v").await;
+		let index_ref = test_support::index_ref(&ctx, "v", "v_pt").await;
+		// A residual condition makes the search gate each candidate; without
+		// one the k nearest are taken before the permission is consulted.
+		let residual = physical_expr("true", &ctx).await;
+		let scan = |tc: ResolvedTableContext| -> Arc<dyn ExecOperator> {
+			Arc::new(
+				KnnScan::new(
+					index_ref.clone(),
+					vec![Number::Float(0.0)],
+					1,
+					10,
+					"v".into(),
+					None,
+					None,
+					Some(Arc::clone(&residual)),
+					None,
+					Some(None),
+				)
+				.with_resolved(tc),
+			)
+		};
+		// `v:hidden` is nearer but denied; with k = 1 the one row is `v:seen`.
+		let seen = Value::RecordId(RecordId {
+			table: "v".into(),
+			key: RecordIdKey::String("seen".into()),
+		});
+		let rows = collect(&scan(planned), &ctx).await;
+		test_support::assert_as_stored(&rows);
+		assert_eq!(test_support::field(&rows[0], "id"), seen);
+		let rows = collect(&scan(runtime), &ctx).await;
+		test_support::assert_reduced(&rows);
+		assert_eq!(test_support::field(&rows[0], "id"), seen);
+	}
 
 	/// The full decision table of the prefilter triage (#548): every tier is
 	/// allow-list-gated, differing only in graph use and ef boosting.

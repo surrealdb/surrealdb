@@ -9,19 +9,28 @@ reason = "type::field('id') = <record-id> must use the record-id point lookup (R
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    RecordIdScan [ctx: Db] [record_id: item:1, predicate: type::field(...) = item:1, pre_decode_filter: no (unsupported predicate)]\n''''
+value = '''
+"SelectProject [ctx: Db] [projections: *]
+    RecordIdScan [ctx: Db] [record_id: item:1, predicate: type::field('id') = item:1, pre_decode_filter: no (unsupported predicate)]
+"'''
 
 [[test.results]]
 value = "[{ id: item:1, name: 'Alpha', score: 10 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    RecordIdScan [ctx: Db] [record_id: item:2, predicate: item:2 = type::field(...), pre_decode_filter: no (unsupported predicate)]\n''''
+value = '''
+"SelectProject [ctx: Db] [projections: *]
+    RecordIdScan [ctx: Db] [record_id: item:2, predicate: item:2 = type::field('id'), pre_decode_filter: no (unsupported predicate)]
+"'''
 
 [[test.results]]
 value = "[{ id: item:2, name: 'Beta', score: 20 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    RecordIdScan [ctx: Db] [record_id: item:3, predicate: type::field(...) = item:3 AND score > 15, pre_decode_filter: no (unsupported predicate)]\n''''
+value = '''
+"SelectProject [ctx: Db] [projections: *]
+    RecordIdScan [ctx: Db] [record_id: item:3, predicate: type::field('id') = item:3 AND score > 15, pre_decode_filter: no (unsupported predicate)]
+"'''
 
 [[test.results]]
 value = "[{ id: item:3, name: 'Gamma', score: 30 }]"
@@ -30,10 +39,16 @@ value = "[{ id: item:3, name: 'Gamma', score: 30 }]"
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    RecordIdScan [ctx: Db] [record_id: item:1, predicate: id = item:1, pre_decode_filter: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    RecordIdScan [ctx: Db] [record_id: item:1, predicate: id = item:1, pre_decode_filter: yes]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    RecordIdScan [ctx: Db] [record_id: item:1, predicate: type::field(...) = item:1, pre_decode_filter: no (unsupported predicate)]\n''''
+value = '''
+"SelectProject [ctx: Db] [projections: *]
+    RecordIdScan [ctx: Db] [record_id: item:1, predicate: type::field('id') = item:1, pre_decode_filter: no (unsupported predicate)]
+"'''
 
 [[test.results]]
 value = "[{ id: item:1, name: 'Alpha', score: 10 }]"

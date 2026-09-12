@@ -23,7 +23,15 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, distance] {rows: 3}\n    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 3}\n        Compute [ctx: Db] [fields: distance = vector::distance::knn(...)] {rows: 3}\n            Filter [ctx: Db] [predicate: category = 'a'] {rows: 3}\n                KnnScan [ctx: Db] [index: hn_pt1, k: 3, ef: 40, dimension: 1, prefilter_tier: graph] {rows: 3}\n                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 2500}\n\nTotal rows: 3"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, distance] {rows: 3}
+    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 3}
+        Compute [ctx: Db] [fields: distance = vector::distance::knn()] {rows: 3}
+            Filter [ctx: Db] [predicate: category = 'a'] {rows: 3}
+                KnnScan [ctx: Db] [index: hn_pt1, k: 3, ef: 40, dimension: 1, prefilter_tier: graph] {rows: 3}
+                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 2500}
+
+Total rows: 3"'''
 
 [[test.results]]
 value = "[{ distance: 0f, id: pts:0 }, { distance: 1f, id: pts:1 }, { distance: 2f, id: pts:2 }]"

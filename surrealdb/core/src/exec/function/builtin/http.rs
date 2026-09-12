@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 
-use crate::exec::function::{FunctionRegistry, MutatesState};
+use crate::exec::function::FunctionRegistry;
 use crate::exec::physical_expr::EvalContext;
 #[cfg(feature = "http")]
 use crate::val::Object;
@@ -294,29 +294,24 @@ async fn http_request(
 // Function definitions using the macro
 // =========================================================================
 
-define_async_function!(HttpHead, "http::head", (uri: String, ?opts: Object) -> Any, http_head_impl);
-define_async_function!(HttpGet, "http::get", (uri: String, ?opts: Object) -> Any, http_get_impl);
-define_async_function!(HttpPut, "http::put", (uri: String, ?body: Any, ?opts: Object) -> Any, http_put_impl);
-define_async_function!(HttpPost, "http::post", (uri: String, ?body: Any, ?opts: Object) -> Any, http_post_impl);
-define_async_function!(HttpPatch, "http::patch", (uri: String, ?body: Any, ?opts: Object) -> Any, http_patch_impl);
-define_async_function!(HttpDelete, "http::delete", (uri: String, ?opts: Object) -> Any, http_delete_impl);
+define_async_function!(HttpHead, "http::head", effects: EffectSet::READS_EXTERNAL, (uri: String, ?opts: Object) -> Any, http_head_impl);
+define_async_function!(HttpGet, "http::get", effects: EffectSet::READS_EXTERNAL, (uri: String, ?opts: Object) -> Any, http_get_impl);
+define_async_function!(HttpPut, "http::put", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (uri: String, ?body: Any, ?opts: Object) -> Any, http_put_impl);
+define_async_function!(HttpPost, "http::post", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (uri: String, ?body: Any, ?opts: Object) -> Any, http_post_impl);
+define_async_function!(HttpPatch, "http::patch", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (uri: String, ?body: Any, ?opts: Object) -> Any, http_patch_impl);
+define_async_function!(HttpDelete, "http::delete", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (uri: String, ?opts: Object) -> Any, http_delete_impl);
 
 // =========================================================================
 // Registration
 // =========================================================================
 
-// The non-safe methods are registered behind `MutatesState`: a request that
-// the remote acts on cannot be sent a different number of times just
-// because a query grouped its rows differently. `head` and `get` only read,
-// so they carry no such constraint.
+// A remote endpoint is outside the transaction's snapshot: it may answer a
+// second call differently, and the write verbs act on it. Every verb declares
+// `READS_EXTERNAL`, and the non-safe verbs `WRITES_EXTERNAL` as well, which
+// keeps a rule from duplicating a request or dropping one it has substituted
+// away, and keeps a grouped projection holding one evaluated per row: a request
+// the remote acts on cannot be sent a different number of times because a
+// query grouped its rows differently. `head` and `get` only read.
 pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(
-		registry,
-		HttpHead,
-		HttpGet,
-		MutatesState<HttpPut>,
-		MutatesState<HttpPost>,
-		MutatesState<HttpPatch>,
-		MutatesState<HttpDelete>,
-	);
+	register_functions!(registry, HttpHead, HttpGet, HttpPut, HttpPost, HttpPatch, HttpDelete,);
 }

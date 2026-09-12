@@ -60,11 +60,6 @@ pub struct LookupPart {
 	/// RecordIds rather than full objects.
 	pub extract_id: bool,
 
-	/// Whether this LookupPart contains a fused chain of multiple consecutive lookups.
-	/// When true, the continuation logic in `evaluate_parts_with_continuation` maps
-	/// per-element over non-lookup arrays even when this is the last part in the idiom.
-	pub fused: bool,
-
 	/// When true, unwrap the result array into a single value (FROM ONLY semantics).
 	/// Empty results yield NONE; more than one result is an error.
 	pub only: bool,
@@ -135,10 +130,6 @@ impl PhysicalExpr for LookupPart {
 
 	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
 		vec![("lookup", &self.plan)]
-	}
-
-	fn is_fused_lookup(&self) -> bool {
-		self.fused
 	}
 }
 
@@ -282,7 +273,7 @@ mod tests {
 	use crate::exec::operators::test_util::{
 		TestDb, ValuesOperator, eval, eval_on, physical_expr, val,
 	};
-	use crate::exec::physical_expr::IdiomExpr;
+	use crate::exec::physical_expr::find_part;
 	use crate::exec::{ExecutionContext, PhysicalExpr};
 	use crate::kvs::TransactionType;
 
@@ -314,13 +305,7 @@ mod tests {
 	/// Compile `src` and pull out the single `LookupPart` it contains.
 	async fn compile_lookup(src: &str, ctx: &ExecutionContext) -> Arc<dyn PhysicalExpr> {
 		let expr = physical_expr(src, ctx).await;
-		let idiom = expr.downcast_ref::<IdiomExpr>().expect("source should compile to an idiom");
-		let part = idiom
-			.parts
-			.iter()
-			.find(|p| p.downcast_ref::<LookupPart>().is_some())
-			.expect("source should contain a lookup part");
-		Arc::clone(part)
+		find_part::<LookupPart>(&expr).expect("source should contain a lookup part")
 	}
 
 	// =========================================================================
@@ -647,7 +632,6 @@ mod tests {
 			direction: LookupDirection::Out,
 			plan: ValuesOperator::new(vec![]),
 			extract_id: false,
-			fused: false,
 			only: false,
 		};
 		assert_eq!(part.plan.required_context(), ContextLevel::Root, "fixture must be Root-level");
@@ -655,21 +639,20 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn fusion_and_the_embedded_plan_are_reported_for_continuation_and_explain() {
-		// `is_fused_lookup` tells the idiom continuation logic to map per element
-		// even when the lookup is the last part; `embedded_operators` is what
-		// EXPLAIN walks to print the scan chain underneath the expression.
+	async fn the_embedded_plan_is_reported_for_explain() {
+		// `embedded_operators` is what EXPLAIN walks to print the scan chain
+		// underneath the expression: one plan per part, so a chain of several
+		// hops planned as one part reports one plan.
 		let db = graph_db().await;
 		let ctx = db.exec_ctx().await;
 
 		let fused = compile_lookup("v->knows->person", &ctx).await;
-		assert!(fused.is_fused_lookup());
 		let embedded = fused.embedded_operators();
 		assert_eq!(embedded.len(), 1);
 		assert_eq!(embedded[0].0, "lookup");
 
 		let single = compile_lookup("v->knows", &ctx).await;
-		assert!(!single.is_fused_lookup());
+		assert_eq!(single.embedded_operators().len(), 1);
 	}
 
 	#[tokio::test]
@@ -680,7 +663,6 @@ mod tests {
 				direction,
 				plan: Arc::clone(&plan),
 				extract_id: false,
-				fused: false,
 				only: false,
 			}
 			.to_sql()

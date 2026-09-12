@@ -156,12 +156,16 @@ impl GroupCollector {
 				fail!("Value for Count RecordStrategy was not a number");
 			};
 
+			// The row stands for the rows of one source, so its count is added
+			// to the group's rather than becoming it: a statement reading
+			// several sources contributes one such row per source, and the
+			// group holds the count of them all.
 			for a in aggragates.iter_mut() {
 				if let AggregationStat::Count {
 					count,
 				} = a
 				{
-					*count = n.as_int();
+					*count = count.saturating_add(n.as_int());
 				}
 			}
 		} else {
@@ -188,6 +192,19 @@ impl GroupCollector {
 		opt: &Options,
 	) -> Result<MemoryCollector> {
 		let mut collector = MemoryCollector::default();
+
+		// `GROUP ALL` names one group over the whole input, and that group
+		// belongs to the statement rather than to the data: the grand total of
+		// no rows is a row of identities — `count()` is 0, `math::sum` is 0 —
+		// so a run that collected no row still emits it. A `GROUP BY` key can
+		// only be learned from a row, so an input that yields none leaves no
+		// group there and nothing is emitted for it.
+		let no_rows = self.analysis.group_expressions.is_empty() && self.results.is_empty();
+		if no_rows {
+			self.results.entry(Vec::new()).or_insert_with(|| {
+				self.analysis.aggregations.iter().map(|x| x.to_stat()).collect()
+			});
+		}
 
 		let mut field_buffer = String::new();
 		let mut doc: CursorDoc = Value::empty_object().into();
@@ -228,14 +245,32 @@ impl GroupCollector {
 						count,
 						..
 					} => sum.try_float_div(count.into()).unwrap_or(f64::NAN.into()).into(),
+					// A datetime extreme is seeded with the opposite bound, which
+					// stands for "no value seen" while the stats accumulate. A
+					// group that saw no row never replaced it, and has no
+					// extreme to report: `time::min`/`time::max` answer `NONE`
+					// for no values, as their scalar forms do for an empty
+					// array.
 					AggregationStat::TimeMax {
 						max,
 						..
-					} => max.into(),
+					} => {
+						if no_rows {
+							Value::None
+						} else {
+							max.into()
+						}
+					}
 					AggregationStat::TimeMin {
 						min,
 						..
-					} => min.into(),
+					} => {
+						if no_rows {
+							Value::None
+						} else {
+							min.into()
+						}
+					}
 					AggregationStat::Accumulate {
 						values,
 						..

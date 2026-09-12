@@ -1,17 +1,22 @@
+mod catalog;
 mod entry;
+mod function;
 mod key;
 mod lookup;
 mod weight;
 
+pub use catalog::{CatalogSnapshot, TableSnapshot};
 #[cfg(feature = "jwks")]
 pub use entry::CachedJwks;
 pub use entry::Entry;
+pub use function::{FunctionFacts, FunctionSnapshot};
 pub use lookup::Lookup;
 use quick_cache::sync::DefaultLifecycle;
 use quick_cache::{DefaultHashBuilder, OptionsBuilder};
 
 /// Concurrent cache for values that should be shared across transactions on
-/// this datastore (schema slices, live-query versions, JWKS payloads, etc.).
+/// this datastore (schema slices, live-query versions, JWKS payloads, a
+/// database's table catalog under one version, etc.).
 ///
 /// # Values
 /// Cache values are cloned when fetched. Value types should be wrapped in an

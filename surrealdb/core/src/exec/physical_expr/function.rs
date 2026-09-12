@@ -25,11 +25,12 @@ mod user_defined;
 pub(crate) use builtin::BuiltinFunctionExec;
 #[cfg(test)]
 pub(crate) use builtin::builtin_can_write;
-pub(crate) use closure::{ClosureCallExec, ClosureExec};
-pub(crate) use helpers::validate_return;
+pub(crate) use closure::{
+	ClosureCallExec, ClosureExec, CompiledClosure, StreamingClosureEvaluator,
+};
 pub(crate) use index::IndexFunctionExec;
 pub(crate) use model::ModelFunctionExec;
 pub(crate) use module::{SiloModuleExec, SurrealismModuleExec};
 pub(crate) use projection::ProjectionFunctionExec;
 pub(crate) use script::JsFunctionExec;
-pub(crate) use user_defined::UserDefinedFunctionExec;
+pub(crate) use user_defined::{BodyPlan, PlannedBody, RecursiveBody, UserDefinedFunctionExec};

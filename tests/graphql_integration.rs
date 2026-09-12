@@ -1348,6 +1348,32 @@ mod graphql_integration {
 		assert_eq!(row["value_min"], 7);
 		assert_eq!(row["value_max"], 42);
 
+		// An aggregate over a filter nothing matches. `GROUP ALL` reports the
+		// grand total of no rows, whose extremes and mean are `-Infinity`,
+		// `Infinity` and `NaN` — none of which is a GraphQL number, so they
+		// are sent as null rather than failing the query.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"query {
+					settings_aggregate(filter: { value: { gt: 1000 } }) {
+						count value_sum value_min value_max value_avg
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+		let row = &body["data"]["settings_aggregate"][0];
+		assert_eq!(row["count"], 0);
+		assert_eq!(row["value_sum"], 0);
+		assert!(row["value_min"].is_null(), "min of no rows should be null: {row}");
+		assert!(row["value_max"].is_null(), "max of no rows should be null: {row}");
+		assert!(row["value_avg"].is_null(), "mean of no rows should be null: {row}");
+
 		Ok(())
 	}
 

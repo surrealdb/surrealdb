@@ -244,6 +244,51 @@ impl Range {
 			},
 		}
 	}
+
+	/// The surface-syntax counterpart of [`Self::into_literal`]; see
+	/// [`Value::into_sql_literal`].
+	pub fn into_sql_literal(self) -> crate::sql::Expr {
+		use crate::sql::{BinaryOperator, Expr, Literal, PostfixOperator, PrefixOperator};
+		match (self.start, self.end) {
+			(Bound::Unbounded, Bound::Unbounded) => Expr::Literal(Literal::UnboundedRange),
+			(Bound::Included(x), Bound::Unbounded) => Expr::Postfix {
+				op: PostfixOperator::Range,
+				expr: Box::new(x.into_sql_literal()),
+			},
+			(Bound::Excluded(x), Bound::Unbounded) => Expr::Postfix {
+				op: PostfixOperator::RangeSkip,
+				expr: Box::new(x.into_sql_literal()),
+			},
+			(Bound::Unbounded, Bound::Included(y)) => Expr::Prefix {
+				op: PrefixOperator::RangeInclusive,
+				expr: Box::new(y.into_sql_literal()),
+			},
+			(Bound::Included(x), Bound::Included(y)) => Expr::Binary {
+				left: Box::new(x.into_sql_literal()),
+				op: BinaryOperator::RangeInclusive,
+				right: Box::new(y.into_sql_literal()),
+			},
+			(Bound::Excluded(x), Bound::Included(y)) => Expr::Binary {
+				left: Box::new(x.into_sql_literal()),
+				op: BinaryOperator::RangeSkipInclusive,
+				right: Box::new(y.into_sql_literal()),
+			},
+			(Bound::Unbounded, Bound::Excluded(y)) => Expr::Prefix {
+				op: PrefixOperator::Range,
+				expr: Box::new(y.into_sql_literal()),
+			},
+			(Bound::Included(x), Bound::Excluded(y)) => Expr::Binary {
+				left: Box::new(x.into_sql_literal()),
+				op: BinaryOperator::Range,
+				right: Box::new(y.into_sql_literal()),
+			},
+			(Bound::Excluded(x), Bound::Excluded(y)) => Expr::Binary {
+				left: Box::new(x.into_sql_literal()),
+				op: BinaryOperator::RangeSkip,
+				right: Box::new(y.into_sql_literal()),
+			},
+		}
+	}
 }
 
 /// `TypedRange<i64>` lives in `surrealdb-common`, below the value layer, so the

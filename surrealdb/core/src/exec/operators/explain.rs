@@ -63,11 +63,12 @@ impl ExecOperator for ExplainPlan {
 		let output = match self.format {
 			ExplainFormat::Text => {
 				let mut plan_text = String::new();
-				format_execution_plan(self.plan.as_ref(), &mut plan_text, "");
+				format_execution_plan(self.plan.as_ref(), &mut plan_text, "", Redaction::default());
 				Value::String(plan_text.into())
 			}
 			ExplainFormat::Json => {
-				let plan_json = format_execution_plan_json(self.plan.as_ref());
+				let plan_json =
+					format_execution_plan_json(self.plan.as_ref(), Redaction::default());
 				Value::Object(plan_json)
 			}
 		};
@@ -176,14 +177,18 @@ impl ExecOperator for AnalyzePlan {
 						&mut plan_text,
 						"",
 						redact_volatile_explain_attrs,
+						Redaction::default(),
 					);
 					let _ = writeln!(plan_text);
 					let _ = write!(plan_text, "Total rows: {}", total_rows);
 					Value::String(plan_text.into())
 				}
 				ExplainFormat::Json => {
-					let mut plan_json =
-						format_analyze_plan_json(plan.as_ref(), redact_volatile_explain_attrs);
+					let mut plan_json = format_analyze_plan_json(
+						plan.as_ref(),
+						redact_volatile_explain_attrs,
+						Redaction::default(),
+					);
 					plan_json.insert("total_rows", Value::from(total_rows as i64));
 					Value::Object(plan_json)
 				}
@@ -202,14 +207,73 @@ impl ExecOperator for AnalyzePlan {
 }
 
 // =========================================================================
+// Redaction beneath a permission node
+// =========================================================================
+
+/// What the rendering withholds of the operators beneath a node that
+/// enforces a definer's declaration on the caller the plan was compiled for;
+/// see [`ExecOperator::hides_metrics_beneath`] and
+/// [`ExecOperator::redacts_access_paths_beneath`]. Accumulated top-down: once
+/// a node withholds something, every operator beneath it — children and the
+/// plans embedded in its expressions alike — renders without it.
+#[derive(Clone, Copy, Default)]
+struct Redaction {
+	/// No operator renders its metrics.
+	metrics: bool,
+	/// Every attribute naming an access path renders as `<permission>`.
+	access_paths: bool,
+}
+
+/// The attributes that print what an access path reads at or a scan applies:
+/// the index and the bound an index scan reads, a record id looked up, a
+/// full-text query, the predicate a scan applies per row. Beneath a
+/// permission node whose predicate drove the access path these are the
+/// definer's, so a checked caller sees `<permission>` in their place.
+const ACCESS_PATH_ATTRS: &[&str] = &["index", "access", "record_id", "query", "predicate"];
+
+impl Redaction {
+	/// The redaction in force beneath `plan`.
+	fn beneath(self, plan: &dyn ExecOperator) -> Self {
+		Self {
+			metrics: self.metrics || plan.hides_metrics_beneath(),
+			access_paths: self.access_paths || plan.redacts_access_paths_beneath(),
+		}
+	}
+
+	/// `plan`'s attributes as this redaction renders them.
+	fn attrs(self, plan: &dyn ExecOperator) -> Vec<(String, String)> {
+		let attrs = plan.attrs();
+		if !self.access_paths {
+			return attrs;
+		}
+		attrs
+			.into_iter()
+			.map(|(key, value)| {
+				if ACCESS_PATH_ATTRS.contains(&key.as_str()) {
+					(key, "<permission>".to_string())
+				} else {
+					(key, value)
+				}
+			})
+			.collect()
+	}
+}
+
+// =========================================================================
 // Text Formatting
 // =========================================================================
 
 /// Format an execution plan node as a text tree
-fn format_execution_plan(plan: &dyn ExecOperator, output: &mut String, prefix: &str) {
+fn format_execution_plan(
+	plan: &dyn ExecOperator,
+	output: &mut String,
+	prefix: &str,
+	redaction: Redaction,
+) {
 	// Get operator name and properties
 	let name = plan.name();
-	let properties = plan.attrs();
+	let properties = redaction.attrs(plan);
+	let beneath = redaction.beneath(plan);
 
 	// Show context level
 	let context = plan.required_context();
@@ -244,18 +308,23 @@ fn format_execution_plan(plan: &dyn ExecOperator, output: &mut String, prefix: &
 		if !embedded.is_empty() {
 			for (embed_role, embed_plan) in &embedded {
 				let _ = write!(output, "{}  {}.{}: ", prefix, role, embed_role);
-				format_execution_plan(embed_plan.as_ref(), output, &format!("{}  ", prefix));
+				format_execution_plan(
+					embed_plan.as_ref(),
+					output,
+					&format!("{}  ", prefix),
+					beneath,
+				);
 			}
 		}
 	}
 
 	// Format children with indentation
-	let children = plan.children();
+	let children = plan.explain_children();
 	if !children.is_empty() {
 		let child_prefix = format!("{}{:width$}", prefix, "", width = INDENT_WIDTH);
 		for child in children.iter() {
 			let _ = write!(output, "{}", child_prefix);
-			format_execution_plan(child.as_ref(), output, &child_prefix);
+			format_execution_plan(child.as_ref(), output, &child_prefix, beneath);
 		}
 	}
 }
@@ -265,8 +334,9 @@ fn format_execution_plan(plan: &dyn ExecOperator, output: &mut String, prefix: &
 // =========================================================================
 
 /// Format an execution plan node as a JSON object
-fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
+fn format_execution_plan_json(plan: &dyn ExecOperator, redaction: Redaction) -> Object {
 	let mut obj = Object::default();
+	let beneath = redaction.beneath(plan);
 
 	obj.insert("operator", Value::String(plan.name().into()));
 
@@ -279,7 +349,7 @@ fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 		obj.insert("partitions", Value::from(partitioning.count() as i64));
 	}
 
-	let attrs = plan.attrs();
+	let attrs = redaction.attrs(plan);
 	if !attrs.is_empty() {
 		let mut attrs_obj = Object::default();
 		for (key, value) in attrs {
@@ -306,7 +376,10 @@ fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 							e.insert("role", Value::String((*embed_role).into()));
 							e.insert(
 								"plan",
-								Value::Object(format_execution_plan_json(embed_plan.as_ref())),
+								Value::Object(format_execution_plan_json(
+									embed_plan.as_ref(),
+									beneath,
+								)),
 							);
 							Value::Object(e)
 						})
@@ -320,11 +393,11 @@ fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 		obj.insert("expressions", Value::Array(Array::from(exprs_arr)));
 	}
 
-	let children = plan.children();
+	let children = plan.explain_children();
 	if !children.is_empty() {
 		let children_array: Vec<Value> = children
 			.iter()
-			.map(|child| Value::Object(format_execution_plan_json(child.as_ref())))
+			.map(|child| Value::Object(format_execution_plan_json(child.as_ref(), beneath)))
 			.collect();
 		obj.insert("children", Value::Array(Array::from(children_array)));
 	}
@@ -424,9 +497,11 @@ fn format_analyze_plan(
 	output: &mut String,
 	prefix: &str,
 	redact_volatile_explain_attrs: bool,
+	redaction: Redaction,
 ) {
 	let name = plan.name();
-	let properties = plan.attrs();
+	let properties = redaction.attrs(plan);
+	let beneath = redaction.beneath(plan);
 
 	// Show context level
 	let context = plan.required_context();
@@ -452,8 +527,10 @@ fn format_analyze_plan(
 		let _ = write!(output, "]");
 	}
 
-	// Show metrics if available
-	if let Some(metrics) = plan.metrics() {
+	// Show metrics if available, and not withheld beneath a permission node.
+	if !redaction.metrics
+		&& let Some(metrics) = plan.metrics()
+	{
 		let _ =
 			write!(output, " {{{}}}", format_metrics_text(metrics, redact_volatile_explain_attrs));
 	}
@@ -472,13 +549,14 @@ fn format_analyze_plan(
 					output,
 					&format!("{}  ", prefix),
 					redact_volatile_explain_attrs,
+					beneath,
 				);
 			}
 		}
 	}
 
 	// Format children with indentation
-	let children = plan.children();
+	let children = plan.explain_children();
 	if !children.is_empty() {
 		let child_prefix = format!("{}{:width$}", prefix, "", width = INDENT_WIDTH);
 		for child in children.iter() {
@@ -488,6 +566,7 @@ fn format_analyze_plan(
 				output,
 				&child_prefix,
 				redact_volatile_explain_attrs,
+				beneath,
 			);
 		}
 	}
@@ -497,8 +576,10 @@ fn format_analyze_plan(
 fn format_analyze_plan_json(
 	plan: &dyn ExecOperator,
 	redact_volatile_explain_attrs: bool,
+	redaction: Redaction,
 ) -> Object {
 	let mut obj = Object::default();
+	let beneath = redaction.beneath(plan);
 
 	obj.insert("operator", Value::String(plan.name().into()));
 
@@ -511,7 +592,7 @@ fn format_analyze_plan_json(
 		obj.insert("partitions", Value::from(partitioning.count() as i64));
 	}
 
-	let attrs = plan.attrs();
+	let attrs = redaction.attrs(plan);
 	if !attrs.is_empty() {
 		let mut attrs_obj = Object::default();
 		for (key, value) in attrs {
@@ -520,7 +601,10 @@ fn format_analyze_plan_json(
 		obj.insert("attributes", Value::Object(attrs_obj));
 	}
 
-	if let Some(metrics) = plan.metrics() {
+	// The metrics, unless withheld beneath a permission node.
+	if !redaction.metrics
+		&& let Some(metrics) = plan.metrics()
+	{
 		let mut metrics_obj = Object::default();
 		metrics_obj.insert("output_rows", Value::from(metrics.output_rows() as i64));
 		// Emitted only when a bitmap branch declined, so its `output_rows: 0`
@@ -598,6 +682,7 @@ fn format_analyze_plan_json(
 								Value::Object(format_analyze_plan_json(
 									embed_plan.as_ref(),
 									redact_volatile_explain_attrs,
+									beneath,
 								)),
 							);
 							Value::Object(e)
@@ -613,7 +698,7 @@ fn format_analyze_plan_json(
 	}
 
 	// Add children if any
-	let children = plan.children();
+	let children = plan.explain_children();
 	if !children.is_empty() {
 		let children_array: Vec<Value> = children
 			.iter()
@@ -621,6 +706,7 @@ fn format_analyze_plan_json(
 				Value::Object(format_analyze_plan_json(
 					child.as_ref(),
 					redact_volatile_explain_attrs,
+					beneath,
 				))
 			})
 			.collect();

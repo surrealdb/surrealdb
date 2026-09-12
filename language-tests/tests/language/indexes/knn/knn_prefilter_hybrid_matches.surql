@@ -61,10 +61,33 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, score, dist]\n    Compute [ctx: Db] [fields: score = search::score(...)]\n        SortByKey [ctx: Db] [sort_keys: dist ASC]\n            Compute [ctx: Db] [fields: dist = vector::distance::knn(...)]\n                Filter [ctx: Db] [predicate: body @1@ 'attention' AND category = 'ml' AND published = true]\n                    KnnScan [ctx: Db] [index: hn_emb, k: 2, ef: 40, dimension: 1]\n                        BitmapAnd [ctx: Db]\n                            BitmapFullTextScan [ctx: Db] [index: ft_body, query: attention]\n                            BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']\n                            BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, score, dist]
+    Compute [ctx: Db] [fields: score = search::score()]
+        SortByKey [ctx: Db] [sort_keys: dist ASC]
+            Compute [ctx: Db] [fields: dist = vector::distance::knn()]
+                Filter [ctx: Db] [predicate: body @1@ 'attention' AND category = 'ml' AND published = true]
+                    KnnScan [ctx: Db] [index: hn_emb, k: 2, ef: 40, dimension: 1]
+                        BitmapAnd [ctx: Db]
+                            BitmapFullTextScan [ctx: Db] [index: ft_body, query: attention]
+                            BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']
+                            BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, score, dist] {rows: 2}\n    Compute [ctx: Db] [fields: score = search::score(...)] {rows: 2}\n        SortByKey [ctx: Db] [sort_keys: dist ASC] {rows: 2}\n            Compute [ctx: Db] [fields: dist = vector::distance::knn(...)] {rows: 2}\n                Filter [ctx: Db] [predicate: body @1@ 'attention' AND category = 'ml' AND published = true] {rows: 2}\n                    KnnScan [ctx: Db] [index: hn_emb, k: 2, ef: 40, dimension: 1, prefilter_tier: exact] {rows: 2}\n                        BitmapAnd [ctx: Db] {rows: 2}\n                            BitmapFullTextScan [ctx: Db] [index: ft_body, query: attention] {rows: 4}\n                            BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml'] {rows: 7}\n                            BitmapIndexScan [ctx: Db] [index: idx_published, access: = true] {rows: 8}\n\nTotal rows: 2"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, score, dist] {rows: 2}
+    Compute [ctx: Db] [fields: score = search::score()] {rows: 2}
+        SortByKey [ctx: Db] [sort_keys: dist ASC] {rows: 2}
+            Compute [ctx: Db] [fields: dist = vector::distance::knn()] {rows: 2}
+                Filter [ctx: Db] [predicate: body @1@ 'attention' AND category = 'ml' AND published = true] {rows: 2}
+                    KnnScan [ctx: Db] [index: hn_emb, k: 2, ef: 40, dimension: 1, prefilter_tier: exact] {rows: 2}
+                        BitmapAnd [ctx: Db] {rows: 2}
+                            BitmapFullTextScan [ctx: Db] [index: ft_body, query: attention] {rows: 4}
+                            BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml'] {rows: 7}
+                            BitmapIndexScan [ctx: Db] [index: idx_published, access: = true] {rows: 8}
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ dist: 10f, id: docs:1, score: 0.2889266014099121f }, { dist: 50f, id: docs:5, score: 0.35173675417900085f }]"

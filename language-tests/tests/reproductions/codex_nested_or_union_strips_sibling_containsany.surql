@@ -30,7 +30,17 @@ value = "[item:has_a, item:has_ab]"
 value = "[item:has_a, item:has_ab]"
 
 [[test.results]]
-value = '''"ProjectValue [ctx: Db] [expr: id]\n    Filter [ctx: Db] [predicate: tags CONTAINSANY ['a'] AND tags CONTAINS 'a' OR tags CONTAINS 'b']\n        BitmapResolve [ctx: Db] [table: item]\n            BitmapAnd [ctx: Db]\n                BitmapOr [ctx: Db]\n                    BitmapIndexScan [ctx: Db] [index: ix_tags, access: = 'a']\n                BitmapOr [ctx: Db]\n                    BitmapIndexScan [ctx: Db] [index: ix_tags, access: = 'a']\n                    BitmapIndexScan [ctx: Db] [index: ix_tags, access: = 'b']\n"'''
+value = '''
+"ProjectValue [ctx: Db] [expr: id]
+    Filter [ctx: Db] [predicate: tags CONTAINSANY ['a'] AND tags CONTAINS 'a' OR tags CONTAINS 'b']
+        BitmapResolve [ctx: Db] [table: item]
+            BitmapAnd [ctx: Db]
+                BitmapOr [ctx: Db]
+                    BitmapIndexScan [ctx: Db] [index: ix_tags, access: = 'a']
+                BitmapOr [ctx: Db]
+                    BitmapIndexScan [ctx: Db] [index: ix_tags, access: = 'a']
+                    BitmapIndexScan [ctx: Db] [index: ix_tags, access: = 'b']
+"'''
 
 [[test.results]]
 value = "[item:has_a, item:has_ab]"
@@ -39,7 +49,14 @@ value = "[item:has_a, item:has_ab]"
 value = "[item:has_a, item:has_ab]"
 
 [[test.results]]
-value = '''"ProjectValue [ctx: Db] [expr: id]\n    Limit [ctx: Db] [limit: 10]\n        Filter [ctx: Db] [predicate: tags CONTAINSANY ['a'] AND tags CONTAINS 'a' OR tags CONTAINS 'b']\n            UnionIndexScan [ctx: Db] [table: item, branches: 2]\n                IndexScan [ctx: Db] [index: ix_tags, access: = 'a', direction: Forward]\n                IndexScan [ctx: Db] [index: ix_tags, access: = 'b', direction: Forward]\n"'''
+value = '''
+"ProjectValue [ctx: Db] [expr: id]
+    Limit [ctx: Db] [limit: 10]
+        Filter [ctx: Db] [predicate: tags CONTAINSANY ['a'] AND tags CONTAINS 'a' OR tags CONTAINS 'b']
+            UnionIndexScan [ctx: Db] [table: item, branches: 2]
+                IndexScan [ctx: Db] [index: ix_tags, access: = 'a', direction: Forward]
+                IndexScan [ctx: Db] [index: ix_tags, access: = 'b', direction: Forward]
+"'''
 
 [[test.results]]
 value = "[item:has_a, item:has_ab]"
@@ -48,7 +65,14 @@ value = "[item:has_a, item:has_ab]"
 value = "[item:has_a, item:has_ab]"
 
 [[test.results]]
-value = '''"ProjectValue [ctx: Db] [expr: id]\n    Limit [ctx: Db] [limit: 10]\n        Filter [ctx: Db] [predicate: tags CONTAINSANY ['a']]\n            UnionIndexScan [ctx: Db] [table: item, branches: 2]\n                IndexScan [ctx: Db] [index: ix_tags, access: = 'a', direction: Forward]\n                IndexScan [ctx: Db] [index: ix_tags, access: = 'b', direction: Forward]\n"'''
+value = '''
+"ProjectValue [ctx: Db] [expr: id]
+    Limit [ctx: Db] [limit: 10]
+        Filter [ctx: Db] [predicate: tags CONTAINSANY ['a']]
+            UnionIndexScan [ctx: Db] [table: item, branches: 2]
+                IndexScan [ctx: Db] [index: ix_tags, access: = 'a', direction: Forward]
+                IndexScan [ctx: Db] [index: ix_tags, access: = 'b', direction: Forward]
+"'''
 
 [[test.results]]
 value = "[item:has_a, item:has_ab, item:has_b]"
@@ -57,7 +81,14 @@ value = "[item:has_a, item:has_ab, item:has_b]"
 value = "[item:has_a, item:has_ab, item:has_b]"
 
 [[test.results]]
-value = '''"ProjectValue [ctx: Db] [expr: id]\n    Limit [ctx: Db] [limit: 10]\n        Filter [ctx: Db] [predicate: tags CONTAINS 'a' OR tags CONTAINS 'b']\n            UnionIndexScan [ctx: Db] [table: item, branches: 2]\n                IndexScan [ctx: Db] [index: ix_tags, access: = 'a', direction: Forward]\n                IndexScan [ctx: Db] [index: ix_tags, access: = 'b', direction: Forward]\n"'''
+value = '''
+"ProjectValue [ctx: Db] [expr: id]
+    Limit [ctx: Db] [limit: 10]
+        Filter [ctx: Db] [predicate: tags CONTAINS 'a' OR tags CONTAINS 'b']
+            UnionIndexScan [ctx: Db] [table: item, branches: 2]
+                IndexScan [ctx: Db] [index: ix_tags, access: = 'a', direction: Forward]
+                IndexScan [ctx: Db] [index: ix_tags, access: = 'b', direction: Forward]
+"'''
 */
 
 DEFINE INDEX ix_tags ON item FIELDS tags[*];

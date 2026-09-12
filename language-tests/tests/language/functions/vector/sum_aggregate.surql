@@ -102,9 +102,7 @@ CREATE engagement:9 SET user = 'erin', weight = 1, embedding = [1, 1, 1] RETURN 
 CREATE engagement:10 SET user = 'erin', weight = 1, embedding = [1, 1] RETURN NONE;
 SELECT user, vector::sum(embedding) AS total FROM engagement WHERE user = 'erin' GROUP BY user;
 
--- GROUP ALL over a table with no rows still emits the default aggregate row,
--- finalizing a fresh accumulator that has seen no dimension to total. Whether
--- that row is emitted at all is strategy-dependent for every aggregate except
--- count(), which is why this case sits behind the pin.
+-- GROUP ALL over a table with no rows still reports its one group, and a
+-- total with no vector in it has no dimension to state.
 DEFINE TABLE quiet SCHEMALESS;
 SELECT vector::sum(embedding) AS total FROM quiet GROUP ALL;

@@ -39,6 +39,15 @@ pub struct ExternalSort {
 	pub(crate) input: Arc<dyn ExecOperator>,
 	pub(crate) order_by: Vec<OrderByField>,
 	pub(crate) temp_dir: PathBuf,
+	/// Whether the ORDER BY keys may be evaluated a column at a time.
+	///
+	/// A key may have an effect — a call the plan cannot see through, or a
+	/// step that fetches the record its base names and so runs that record's
+	/// `COMPUTED` bodies. Two such keys of the same row must be evaluated in
+	/// the order the statement wrote them, which a column-at-a-time pass does
+	/// not do. The planner answers this from the key expressions as written;
+	/// see [`is_effect_free`](crate::exec::logical::is_effect_free).
+	pub(crate) effect_free_columns: bool,
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
@@ -53,8 +62,16 @@ impl ExternalSort {
 			input,
 			order_by,
 			temp_dir,
+			effect_free_columns: false,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+	/// Let the operator evaluate a batch a column at a time; see
+	/// [`Self::effect_free_columns`]. Only the planner, which holds the
+	/// function registry the answer is read from, may set this.
+	pub(crate) fn with_effect_free_columns(mut self) -> Self {
+		self.effect_free_columns = true;
+		self
 	}
 }
 impl ExecOperator for ExternalSort {
@@ -143,6 +160,7 @@ impl ExecOperator for ExternalSort {
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let order_by = Arc::new(self.order_by.clone());
+		let effect_free_columns = self.effect_free_columns;
 		let temp_dir = self.temp_dir.clone();
 		let ctx = ctx.clone();
 
@@ -173,13 +191,13 @@ impl ExecOperator for ExternalSort {
 					Err(e) => return Err(e),
 				};
 
-				// Batch evaluate sort key expressions per-field
-				let num_fields = order_by.len();
-				let mut key_columns: Vec<Vec<Value>> = Vec::with_capacity(num_fields);
-				for field in order_by.iter() {
-					let keys = field.expr.evaluate_batch(eval_ctx.clone(), batch.values()).await?;
-					key_columns.push(keys);
-				}
+				let key_columns = super::common::evaluate_key_columns(
+					&order_by,
+					batch.values(),
+					eval_ctx.clone(),
+					effect_free_columns,
+				)
+				.await?;
 
 				// Transpose column-oriented keys to per-row, then write to temp files
 				let mut key_iters: Vec<std::vec::IntoIter<Value>> =

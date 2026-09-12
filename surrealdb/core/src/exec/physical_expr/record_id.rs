@@ -5,6 +5,7 @@ use common::fmt::{EscapeIdent, EscapeRidKey};
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::exe::FlowResultExt as _;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut, CombineAccessModes, ContextLevel};
 use crate::expr::FlowResult;
@@ -38,6 +39,12 @@ impl PhysicalRecordIdKey {
 	///
 	/// Uses `Box::pin` for the Range variant to break the recursive async cycle
 	/// (Range bounds are themselves `PhysicalRecordIdKey`).
+	///
+	/// An element of an array or object key is a value position: a `RETURN`
+	/// raised there names that element, so `t:[(RETURN 1)]` is the record
+	/// `t:[1]` and the signal does not escape to become the enclosing
+	/// statement's result. `BREAK`/`CONTINUE` have no loop to act on here and
+	/// are rejected as invalid control flow.
 	pub fn evaluate<'a>(
 		&'a self,
 		ctx: EvalContext<'a>,
@@ -51,14 +58,14 @@ impl PhysicalRecordIdKey {
 				PhysicalRecordIdKey::Array(elements) => {
 					let mut values = Vec::with_capacity(elements.len());
 					for elem in elements {
-						values.push(elem.evaluate(ctx.clone()).await?);
+						values.push(elem.evaluate(ctx.clone()).await.catch_return()?);
 					}
 					Ok(RecordIdKey::Array(Array(values)))
 				}
 				PhysicalRecordIdKey::Object(entries) => {
 					let mut obj = Object::default();
 					for (key, expr) in entries {
-						let value = expr.evaluate(ctx.clone()).await?;
+						let value = expr.evaluate(ctx.clone()).await.catch_return()?;
 						obj.insert(key.clone(), value);
 					}
 					Ok(RecordIdKey::Object(obj))

@@ -169,7 +169,35 @@ SurrealDB's security model rests on four pillars:
   — and every record permission already depends on `$auth`. Fixing this is an
   engine-wide change to parameter binding; until then, documentation and tests
   for CONTEXT must state the shared boundary rather than claim `$session` is
-  unshadowable.
+  unshadowable. A plan-time fold of `$session` must respect the same
+  shadowing: the streaming planner folds `$session.field` out of the context
+  the plan will run in, and carries the parameter names an enclosing `FOR`,
+  closure or user-defined function binds so that a read beneath one of them is
+  left to the evaluator. A fold that ignored them would answer with the
+  ambient session where the evaluator answers with the binding.
+- A closure invoked at runtime reads whatever row it is invoked against, and
+  its body is nowhere in the expression that invokes it. The streaming
+  planner's demand analysis decides which fields can reach the caller and
+  emits a field-permission guard column only for those, so an invocation
+  (`$pred()`, `$o.check()`, an unregistered method, which calls a closure
+  stored under that name on the receiver) must be read as demanding the whole
+  row — `exec/logical/reads.rs::invokes_an_unseen_body`. Read as demanding
+  nothing, `WHERE $pred()` over `LET $pred = || secret = 'yes'` gets no guard
+  layer at all and the predicate judges the stored value, leaking a denied
+  field through row membership. A registered method is not this: it
+  dispatches on the receiver's type and reads by name.
+- Reading a `DEFINE PARAM` the plan did not resolve is a permission check where
+  the read happens: the fetch judges the definition's `PERMISSIONS` clause
+  against the caller and is denied where the clause denies. A rewrite that
+  drops such a read unevaluated therefore drops the denial with it, and answers
+  where the statement as written is refused. The bind pass names the parameters
+  whose read is a fetch (`exec/logical/params.rs::permission_checked_names`,
+  classified by the same `bind_param` the resolution uses, so a
+  `PERMISSIONS FULL` definition the plan already folded to its value is not one
+  of them) and `exec/logical/rules/mod.rs::may_raise` reports a read of one as
+  able to raise, which is what keeps every rule gated on inertness from
+  dropping it — `SELECT * FROM [$secret] WHERE false` must be refused, not
+  answered `[]`.
 - Session state must only be committed after all authentication steps complete
   successfully. Partial failures must leave the session in its pre-authentication
   state.
@@ -226,9 +254,15 @@ Flag for detailed review when changes touch:
 `ctx/context.rs` (`check_perms`, `is_allowed`), document processing pipeline in
 `doc/` (`process_table_fields`, `apply_select_field_permissions` in `doc/output.rs`,
 `reduce_current` / `filter_computed_field_permissions` in `doc/reduce.rs`),
-and the streaming read path in `exec/permission.rs`
-(`should_check_perms`, `check_permission_for_value`, `validate_record_user_access`)
-and `exec/operators/scan/fetch.rs` (`resolve_with_field_state`)
+and the streaming engine's two read paths: the bound plan
+(`exec/logical/resolve.rs` writes the table permission as a `PermissionFilter`
+and the computed fields and field guards as projection layers above a resolved
+source; `exec/operators/permission_filter.rs`, `exec/operators/layer.rs`) and
+the runtime path for sources the analyzer left unresolved (`exec/permission.rs`:
+`action_is_checked` — the one role and level rule, shared by the runtime check,
+`ExecutionContext::should_check_perms` (`exec/context.rs`) and the planner's View
+gate — `check_permission_for_value`, `validate_record_user_access`;
+`exec/operators/scan/fetch.rs`: `resolve_with_field_state`)
 
 ### Invariants
 
@@ -255,12 +289,37 @@ and `exec/operators/scan/fetch.rs` (`resolve_with_field_state`)
   exists and cannot filter one; `filter_reduced_computed_fields` is what
   enforces their `PERMISSIONS FOR select` on a reduced view, and every site
   that materialises them on one has to call it. There
-  are two read paths and a new one must join one of them, never neither:
+  are three read paths and a new one must join one of them, never neither:
   the document pipeline (`apply_select_field_permissions` in `doc/output.rs`,
-  `reduce_current` and `filter_computed_field_permissions` in `doc/reduce.rs`)
-  and the streaming engine (`resolve_with_field_state` in
-  `exec/operators/scan/fetch.rs`, backed by `check_permission_for_value` in
-  `exec/permission.rs`).
+  `reduce_current` and `filter_computed_field_permissions` in `doc/reduce.rs`);
+  the streaming engine's bound plan, where a resolved source carries its table
+  permission as a `PermissionFilter` and its computed fields and field guards
+  as projection layers (`exec/logical/resolve.rs`, run by
+  `exec/operators/permission_filter.rs` and `exec/operators/layer.rs`); and the
+  streaming engine's runtime path for a source the analyzer left unresolved
+  (`resolve_with_field_state` in `exec/operators/scan/fetch.rs`, backed by
+  `check_permission_for_value` in `exec/permission.rs`).
+  The bound plan upholds three rules. The barrier rule (module docs of
+  `surrealdb_expr::expr::logical`): a user-written expression never moves
+  below a `PermissionFilter` or a join lifted from a permission predicate, and
+  moves below a layer only when every field it reads is a passthrough of that
+  layer; the one permitted crossing is the access-path offer beneath the
+  stack (`chain_offer` in `exec/planner/fold.rs`), which reads keys, not
+  record values, drops every conjunct and order key rooted in a layer column
+  or reading the row opaquely, and hands the scan no predicate when a
+  permission node stands in the chain, so the nodes above judge every row it
+  yields. The layer order (module docs of `exec/operators/layer.rs`): a
+  stored field's guard is judged against the record as stored, a computed
+  field is derived against the reduced record the stored guards leave, and a
+  guard that does not hold removes the key. Redaction: a plan compiled for a
+  caller the definitions are enforced on (`Planner::compiles_for_checked_caller`)
+  renders every definer expression as `<permission>` or `<computed>` in
+  `EXPLAIN`, a permission join hides its right side, its table and its alias,
+  an access path chosen from a permission predicate prints `<permission>` in
+  place of its index and bound, and `EXPLAIN ANALYZE` reports no metrics for
+  any operator beneath a permission filter, a layer or a permission join
+  (`ExecOperator::hides_metrics_beneath` and `redacts_access_paths_beneath`,
+  applied in `exec/operators/explain.rs`).
   Two scan paths deliberately sit outside the document pipeline and carry
   `// SECURITY:` comments saying so — `exec/operators/scan/graph.rs` (graph edge
   results) and `exec/operators/scan/reference.rs` (reference scans). A change to
@@ -269,6 +328,24 @@ and `exec/operators/scan/fetch.rs` (`resolve_with_field_state`)
   Verified by: `skip_fetch_perms_disables_every_check`,
   `a_record_user_is_confined_to_its_own_namespace_and_database`,
   `record_users_are_always_permission_checked` (`exec/permission.rs`).
+- On the streaming engine each declaration is enforced exactly once per row.
+  A source the analyzer resolved carries the table permission, the computed
+  fields and the field guards as nodes above its scan, and the scan is planned
+  under `EnforcementMode::Planned`, yielding rows as stored: from its
+  `ResolvedTableContext`, or — for a table the catalog lacks at the source's
+  `VERSION` stamp, whose absence the analyzer saw too — from its mode alone,
+  resolving the table when it runs. Such a scan must never enforce at runtime
+  beneath the plan's nodes: that judges the rows twice, a field guard against
+  an already-cut row. When the planner cannot resolve the context — a
+  `VERSION` only known at runtime, a plan-time cycle, a catalog error, an
+  access path the catalog could not choose — it declines the statement with
+  `PlannerUnsupported` and the legacy engine runs it (`try_resolve_table_ctx`
+  in `exec/planner/select/mod.rs`).
+  Verified by: `a_resolved_source_without_a_table_context_declines_the_statement`
+  (`exec/planner/select/mod.rs`),
+  `a_scan_resolving_its_table_at_runtime_enforces_by_its_planned_mode`
+  (`exec/operators/scan/table.rs`), end to end by
+  `reproductions/planned_source_enforced_once.surql`.
 - Reference cascade operations (ON DELETE CASCADE, UNSET, CUSTOM) must only modify
   records reachable through explicitly defined REFERENCE relationships.
 - A `SELECT` permission expression (the WHERE clause in `PERMISSIONS FOR select`)
@@ -285,8 +362,12 @@ and `exec/operators/scan/fetch.rs` (`resolve_with_field_state`)
   through custom-function bodies, `eval`, scripts and closures arriving as data.
   The block logs a warning steering operators to `DEFINE EVENT`, the sanctioned
   definer-authority side-effect mechanism.
-  Verified by: `the_legacy_compute_fallback_cannot_write_from_inside_a_permission_predicate`
-  (`exec/operators/sequence.rs`).
+  Verified by: `legacy_options_for_frame` (`exec/operators/legacy_bridge.rs`), the
+  one place a legacy evaluation inside a plan derives its frame, with the unit
+  tests beside it; end to end by `reproductions/perm_predicate_runtime_block.surql`
+  (guard reached by a scan) and `reproductions/udf_frame_write.surql`
+  (guard reached by a record dereference, where the frame is marked on the
+  `EvalContext` alone and the function call carries it onto the body's context).
 
   There is deliberately **no definition-time counterpart**. A `DEFINE`/`ALTER`
   that stores a writing `SELECT` guard is accepted; it fails when a read reaches
@@ -319,8 +400,16 @@ Flag for detailed review when changes touch:
 - `USE` statement handling in the executor
 - `process_table_fields`, `apply_select_field_permissions`, `reduce_current`, or
   `filter_computed_field_permissions` (document read/write paths)
-- `resolve_with_field_state`, `check_permission_for_value`, or `should_check_perms`
-  (streaming read path), or any new scan operator that fetches record contents
+- `resolve_with_field_state`, `check_permission_for_value`, `action_is_checked`, or
+  `should_check_perms` (streaming runtime read path), or any new scan operator that fetches record contents
+- `exec/logical/resolve.rs` (what the analyzer writes above a source, guard
+  pruning, the whole-row read classification), `exec/logical/rules/` (any rule
+  that moves an expression across a `PermissionFilter`, a layer or a join),
+  `chain_offer` in `exec/planner/fold.rs`, `exec/operators/layer.rs`,
+  `exec/operators/permission_filter.rs`, or `compiles_for_checked_caller` and
+  the `EXPLAIN` redaction it drives
+- `try_resolve_table_ctx`, `EnforcementMode`, `RowEnforcement`, or any planner path
+  that builds a scan for a source whose `schema` is `Some` (the plan enforces above it)
 - `purge_references` or cascade processing logic
 - How `auth_enabled` is evaluated or propagated
 - The `reduced` document mechanism or computed field handling
@@ -1088,7 +1177,8 @@ the binding-table operators — `exec/operators/graph/` (`expand.rs`, `endpoint.
 
 GQL is a second query language lowered to a `MatchPlan` IR and executed by
 the streaming engine. The lowering constructs only a single top-level
-`Expr::Match` (never any other `Expr`, and never a `sql::Ast`). It supports reads
+`TopLevelStatement::Plan` holding a `LogicalOp::Match` (never an `Expr`, and never a
+`sql::Ast`). It supports reads
 (`MATCH … RETURN`) and the four ISO data-modifying statements (`INSERT`, `SET`,
 `REMOVE`, `DELETE`), which the `MatchPlan` carries as trailing mutation stages
 executed through the native document pipeline. Its security posture rests on five
@@ -1173,15 +1263,21 @@ invariants.
   wrappers inject none) or a long-running MATCH ignores client disconnect / query
   timeout — a DoS. Dropping a poll is a regression.
 - **Streaming-only execution & no serialization.** The `MatchPlan` must run only under the
-  streaming engine; its compute-only arm is a hard error (`Expr::Match` `compute()` returns
+  streaming engine. No `Expr` variant can carry a plan, so there is no path by
+  which one could reach `compute()` at all; the two entry points that could
+  otherwise route around the streaming engine refuse instead, each returning
   *"GQL MATCH requires the streaming execution engine; it cannot run under the
-  compute-only planner strategy"*). `Expr::Match` must never enter a `sql::Ast`,
-  the catalog, or `Revisioned` serialization — the `From<expr::Expr> for sql::Expr`
-  conversion logs, `debug_assert!`s, and emits a placeholder rather than
-  round-tripping it. A mutation-bearing plan reports `read_only() == false`
-  (`MatchPlan::has_mutations`), so the executor opens a write transaction.
+  compute-only planner strategy"*: the executor's `TopLevelStatement::Plan` arm when
+  the session is pinned to `NewPlannerStrategy::ComputeOnly`, and `eval`'s
+  legacy `compute`-path adapter (`fnc::eval::run_eval`). A `MatchPlan` must
+  never enter a `sql::Ast`, the catalog, or `Revisioned` serialization:
+  `TopLevelStatement::Plan` (`dbs/top_level.rs`) carries the plan apart from
+  the surface `sql::TopLevelExpr`, so no conversion of a plan to surface syntax
+  exists, and `ToSql` renders the plan directly. A
+  mutation-bearing plan reports `read_only() == false` (`LogicalOp::read_only`
+  via `MatchPlan::has_mutations`), so the executor opens a write transaction.
 - **Mutation safety.** GQL mutations must execute through the native document pipeline via
-  `exec/plan_or_compute::legacy_compute` — a synthetic core `Create`/`Update`/`Delete`/`Relate`
+  `exec/operators/legacy_bridge::legacy_compute` — a synthetic core `Create`/`Update`/`Delete`/`Relate`
   statement per resolved record id — never by writing the KV store directly, so record/field
   permissions, field validation, events, indexes, references, and live-query notifications all
   apply exactly as for a native mutation. The mutation operators (`exec/operators/mutate.rs`)
@@ -1206,7 +1302,9 @@ invariants.
   `fold_mandatory` puts the mutating accumulator on the **build** side, so the probe's construction
   is deferred until the build drains; `fold_optional`'s left-join puts it on the **probe** side, so
   the probe is pre-drained (executing its writes) before the build is constructed, and its buffered
-  rows replayed. Pure-read joins keep eager construction on both sides.
+  rows replayed. A pure-read join constructs the probe eagerly and the build
+  only once the probe has yielded a non-empty batch, so an empty probe leaves
+  the build side unbuilt and unpolled.
 
 #### Why construction order is the control point
 
@@ -1251,14 +1349,18 @@ Flag when changes touch:
   pre-drain branch (probe mutates ⇒ drain the probe, executing its writes, before
   constructing the build) are load-bearing for read-after-write correctness in
   interleaved `MATCH … SET/DELETE/INSERT … MATCH/OPTIONAL …` programs (see Mutation
-  safety, above); `fold_mandatory` vs `fold_optional` decide which side mutates
-- The lowering's surface (any path that would let GQL construct an `Expr` other
-  than a top-level `Expr::Match`)
+  safety, above); `fold_mandatory` vs `fold_optional` decide which side mutates,
+  and the peek branch (neither side mutates ⇒ the build is constructed only after
+  the probe's first row)
+- The lowering's surface (any path that would let GQL construct anything other
+  than a single top-level `TopLevelStatement::Plan` holding a `LogicalOp::Match`)
 - The mutation pipeline: `exec/operators/mutate.rs` (a write that bypasses
   `legacy_compute`, a dropped pipeline-breaker drain, a re-bound RETURN image that
   is not permission-filtered, or a `NODETACH` path that skips the edge probe),
   `gql/lower/mutation.rs` (a dropped rejection — label mutation, group/path or
-  unbound target, reserved `id`/`in`/`out` keys), and `Expr::Match` `read_only()`
-  in `expr/expression.rs` (a mutation plan that reports read-only would run in a
-  read transaction)
-- The `Expr::Match` compute-arm error or the `sql::Expr` conversion guard
+  unbound target, reserved `id`/`in`/`out` keys), and `LogicalOp::read_only`'s
+  `Match` arm in `expr/logical/mod.rs` (a mutation plan that reports read-only
+  would run in a read transaction)
+- The compute-only refusals (the executor's `TopLevelStatement::Plan` arm,
+  `run_logical_plan`, and `fnc::eval::run_eval`), or any path that gives a plan
+  a `sql::TopLevelExpr` form

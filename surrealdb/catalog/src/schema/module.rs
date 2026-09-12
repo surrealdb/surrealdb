@@ -3,7 +3,10 @@ use revision::revisioned;
 use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::catalog::{FromStored, ModuleExecutable, Permission, StoredPermission};
+use crate::catalog::{
+	FromStored, LogicalPermissionBody, ModuleExecutable, Permission, StoredPermission,
+};
+use crate::expr::logical::LogicalPermission;
 use crate::expr::statements::info::InfoStructure;
 use crate::sql::statements::define::DefineKind;
 use crate::sql::{self, DefineModuleStatement};
@@ -99,6 +102,10 @@ impl ToSql for ModuleDefinition {
 }
 
 /// Runtime form of [`StoredModuleDefinition`].
+///
+/// `permissions` and `permissions_body` name the same clause; a constructor
+/// sets both from one source ([`LogicalPermissionBody::of`] for a `DEFINE`,
+/// the stored text in `from_stored`).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModuleDefinition {
 	pub name: Option<String>,
@@ -106,7 +113,18 @@ pub struct ModuleDefinition {
 	/// See [`StoredModuleDefinition::unsigned`].
 	pub unsigned: bool,
 	pub permissions: Permission,
+	/// The `PERMISSIONS` clause in logical form; see
+	/// [`Self::permissions_logical`].
+	pub permissions_body: LogicalPermissionBody,
 	pub comment: Option<String>,
+}
+
+impl ModuleDefinition {
+	/// The `PERMISSIONS` clause in logical form, compiling its guard on first
+	/// call.
+	pub fn permissions_logical(&self) -> anyhow::Result<LogicalPermission> {
+		self.permissions_body.logical()
+	}
 }
 
 impl FromStored for ModuleDefinition {
@@ -119,6 +137,7 @@ impl FromStored for ModuleDefinition {
 				executable: stored.executable.clone(),
 				unsigned: stored.unsigned,
 				permissions: Permission::from_stored(&stored.permissions)?,
+				permissions_body: LogicalPermissionBody::from_stored(&stored.permissions),
 				comment: stored.comment.clone(),
 			})
 		}

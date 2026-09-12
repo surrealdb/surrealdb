@@ -15,7 +15,7 @@ use super::resolved::ResolvedTableContext;
 use crate::catalog::{Error, Index};
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
+	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
 	validate_record_user_access,
 };
 use crate::exec::{
@@ -56,7 +56,10 @@ pub struct FullTextScan {
 	/// Optional VERSION timestamp for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Plan-time resolved table context. When present, `execute()` skips
-	/// runtime table def + permission lookup.
+	/// runtime table def + permission lookup, and its enforcement mode says
+	/// whether the scan applies the table permission, computed fields and
+	/// field permissions itself or yields records as stored for the plan
+	/// above it to apply them.
 	pub(crate) resolved: Option<ResolvedTableContext>,
 	/// Projection-aware field set for computed-field materialization.
 	/// Outer `None` = sub-operator mode (parent handles fields).
@@ -172,7 +175,7 @@ impl ExecOperator for FullTextScan {
 					.context("Failed to get table")?;
 
 				if let Some(def) = &table_def {
-					convert_permission_to_physical_runtime(&def.permissions.select, &ctx)
+					table_select_permission_physical_runtime(Some(&**def), &ctx)
 						.await
 						.context("Failed to convert permission")?
 				} else {
@@ -338,5 +341,53 @@ impl ExecOperator for FullTextScan {
 		});
 
 		Ok(monitor_stream(Box::pin(stream), "FullTextScan", &self.metrics))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::scan::resolved::test_support::{
+		anonymous, assert_as_stored, assert_reduced, contexts, index_ref,
+	};
+	use crate::exec::operators::test_util::{TestDb, collect};
+	use crate::expr::operator::BooleanOperator;
+	use crate::kvs::TransactionType;
+
+	/// Under the plan's enforcement the scan yields the matched record as
+	/// stored, for the nodes above it to reduce; under its own it reduces the
+	/// record for a permission-checked caller.
+	#[tokio::test]
+	async fn a_planned_scan_yields_the_stored_record_and_a_runtime_scan_reduces_it() {
+		let db = TestDb::new_with_auth(
+			"DEFINE TABLE t SCHEMALESS PERMISSIONS FULL;
+			 DEFINE FIELD secret ON t TYPE string PERMISSIONS FOR select NONE;
+			 DEFINE FIELD label ON t COMPUTED 'computed';
+			 DEFINE ANALYZER blank TOKENIZERS blank;
+			 DEFINE INDEX body_ft ON t FIELDS body FULLTEXT ANALYZER blank BM25;
+			 CREATE t:1 SET body = 'hello world', secret = 's';",
+		)
+		.await;
+		let ctx = db.exec_ctx_as(&anonymous(), TransactionType::Read).await;
+		let (planned, runtime) = contexts(&ctx, "t").await;
+		let index_ref = index_ref(&ctx, "t", "body_ft").await;
+		let scan = |tc: ResolvedTableContext| -> Arc<dyn ExecOperator> {
+			Arc::new(
+				FullTextScan::new(
+					index_ref.clone(),
+					"hello".to_owned(),
+					MatchesOperator {
+						rf: None,
+						operator: BooleanOperator::And,
+					},
+					"t".into(),
+					None,
+					Some(None),
+				)
+				.with_resolved(tc),
+			)
+		};
+		assert_as_stored(&collect(&scan(planned), &ctx).await);
+		assert_reduced(&collect(&scan(runtime), &ctx).await);
 	}
 }

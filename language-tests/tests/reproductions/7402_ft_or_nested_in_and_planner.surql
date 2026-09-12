@@ -40,19 +40,56 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 3}\n    Filter [ctx: Db] [predicate: search_title @1@ 'hello' OR search_body @2@ 'hello'] {rows: 3}\n        BitmapResolve [ctx: Db] [table: asset] {rows: 3}\n            BitmapOr [ctx: Db] {rows: 3}\n                BitmapFullTextScan [ctx: Db] [index: asset_search_title_ft, query: hello] {rows: 2}\n                BitmapFullTextScan [ctx: Db] [index: asset_search_body_ft, query: hello] {rows: 1}\n\nTotal rows: 3"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id] {rows: 3}
+    Filter [ctx: Db] [predicate: search_title @1@ 'hello' OR search_body @2@ 'hello'] {rows: 3}
+        BitmapResolve [ctx: Db] [table: asset] {rows: 3}
+            BitmapOr [ctx: Db] {rows: 3}
+                BitmapFullTextScan [ctx: Db] [index: asset_search_title_ft, query: hello] {rows: 2}
+                BitmapFullTextScan [ctx: Db] [index: asset_search_body_ft, query: hello] {rows: 1}
+
+Total rows: 3"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    Filter [ctx: Db] [predicate: type = 'doc' AND search_title @1@ 'hello' OR search_body @2@ 'hello'] {rows: 2}\n        BitmapResolve [ctx: Db] [table: asset] {rows: 2}\n            BitmapAnd [ctx: Db] {rows: 2}\n                BitmapIndexScan [ctx: Db] [index: asset_type_idx, access: = 'doc'] {rows: 2}\n                BitmapOr [ctx: Db] {rows: 3}\n                    BitmapFullTextScan [ctx: Db] [index: asset_search_title_ft, query: hello] {rows: 2}\n                    BitmapFullTextScan [ctx: Db] [index: asset_search_body_ft, query: hello] {rows: 1}\n\nTotal rows: 2"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id] {rows: 2}
+    Filter [ctx: Db] [predicate: type = 'doc' AND search_title @1@ 'hello' OR search_body @2@ 'hello'] {rows: 2}
+        BitmapResolve [ctx: Db] [table: asset] {rows: 2}
+            BitmapAnd [ctx: Db] {rows: 2}
+                BitmapIndexScan [ctx: Db] [index: asset_type_idx, access: = 'doc'] {rows: 2}
+                BitmapOr [ctx: Db] {rows: 3}
+                    BitmapFullTextScan [ctx: Db] [index: asset_search_title_ft, query: hello] {rows: 2}
+                    BitmapFullTextScan [ctx: Db] [index: asset_search_body_ft, query: hello] {rows: 1}
+
+Total rows: 2"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    Filter [ctx: Db] [predicate: type = 'doc' AND search_title @1@ 'hello' OR type = 'doc' AND search_body @2@ 'hello'] {rows: 2}\n        BitmapResolve [ctx: Db] [table: asset] {rows: 3}\n            BitmapOr [ctx: Db] {rows: 3}\n                BitmapFullTextScan [ctx: Db] [index: asset_search_title_ft, query: hello] {rows: 2}\n                BitmapFullTextScan [ctx: Db] [index: asset_search_body_ft, query: hello] {rows: 1}\n\nTotal rows: 2"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id] {rows: 2}
+    Filter [ctx: Db] [predicate: type = 'doc' AND search_title @1@ 'hello' OR type = 'doc' AND search_body @2@ 'hello'] {rows: 2}
+        BitmapResolve [ctx: Db] [table: asset] {rows: 3}
+            BitmapOr [ctx: Db] {rows: 3}
+                BitmapFullTextScan [ctx: Db] [index: asset_search_title_ft, query: hello] {rows: 2}
+                BitmapFullTextScan [ctx: Db] [index: asset_search_body_ft, query: hello] {rows: 1}
+
+Total rows: 2"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    TableScan [ctx: Db] [table: asset, direction: Forward, predicate: type = 'doc' AND search_title @1@ 'hello' OR search_body @2@ 'hello', pre_decode_filter: no (unsupported predicate)] {rows: 2}\n\nTotal rows: 2"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id] {rows: 2}
+    TableScan [ctx: Db] [table: asset, direction: Forward, predicate: type = 'doc' AND search_title @1@ 'hello' OR search_body @2@ 'hello', pre_decode_filter: no (unsupported predicate)] {rows: 2}
+
+Total rows: 2"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    Filter [ctx: Db] [predicate: tag = 'x' AND search_title @1@ 'hello' OR search_body @2@ 'hello'] {rows: 2}\n        UnionIndexScan [ctx: Db] [table: asset, branches: 2] {rows: 3}\n            FullTextScan [ctx: Db] [index: asset_search_title_ft, query: hello] {rows: 2}\n            FullTextScan [ctx: Db] [index: asset_search_body_ft, query: hello] {rows: 1}\n\nTotal rows: 2"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id] {rows: 2}
+    Filter [ctx: Db] [predicate: tag = 'x' AND search_title @1@ 'hello' OR search_body @2@ 'hello'] {rows: 2}
+        UnionIndexScan [ctx: Db] [table: asset, branches: 2] {rows: 3}
+            FullTextScan [ctx: Db] [index: asset_search_title_ft, query: hello] {rows: 2}
+            FullTextScan [ctx: Db] [index: asset_search_body_ft, query: hello] {rows: 1}
+
+Total rows: 2"'''
 
 */
 

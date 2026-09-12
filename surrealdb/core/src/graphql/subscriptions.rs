@@ -12,16 +12,17 @@ use uuid::Uuid;
 
 use super::error::{GraphqlError, resolver_error};
 use super::tables::{CachedRecord, filter_name_from_table, parse_filter_arg};
-use super::utils::{GraphqlValueUtils, execute_plan};
+use super::utils::{GraphqlValueUtils, execute_statement};
 use crate::catalog::{FieldDefinition, TableDefinition};
 use crate::dbs::Session;
-use crate::expr::field::Selector;
-use crate::expr::plan::TopLevelExpr;
-use crate::expr::statements::{KillStatement, LiveFields, LiveStatement};
-use crate::expr::{
-	BinaryOperator, Cond, Expr, Fetch, Fetchs, Field, Fields, Idiom, Literal, LogicalPlan, Part,
-};
+use crate::expr::Part;
 use crate::kvs::Datastore;
+use crate::sql::field::Selector;
+use crate::sql::statements::live::LiveFields;
+use crate::sql::statements::{KillStatement, LiveStatement};
+use crate::sql::{
+	BinaryOperator, Cond, Expr, Fetch, Fetchs, Field, Fields, Idiom, Literal, TopLevelExpr,
+};
 use crate::val::{RecordId, TableName, Value};
 
 /// Routes LIVE query notifications to their specific GraphQL subscribers.
@@ -241,7 +242,7 @@ fn parse_id_cond(
 	Ok(Some(Cond(Expr::Binary {
 		left: Box::new(Expr::Idiom(Idiom::field("id".to_string()))),
 		op: BinaryOperator::Equal,
-		right: Box::new(Value::RecordId(rid).into_literal()),
+		right: Box::new(Value::RecordId(rid).into_sql_literal()),
 	})))
 }
 
@@ -292,10 +293,10 @@ fn parse_fetch_arg(
 	for path in values {
 		let idiom = crate::syn::idiom(&path)
 			.map_err(|_| async_graphql::Error::new(format!("Invalid fetch path: {path}")))?;
-		fetches.push(Fetch(Expr::Idiom(idiom.into())));
+		fetches.push(Fetch(Expr::Idiom(idiom)));
 	}
 
-	Ok(Some(Fetchs::new(fetches)))
+	Ok(Some(Fetchs(fetches)))
 }
 
 fn notification_to_field_value(notification: PublicNotification) -> Option<FieldValue<'static>> {
@@ -333,17 +334,12 @@ async fn start_table_live_query(
 	fetch: Option<Fetchs>,
 ) -> Result<Uuid, async_graphql::Error> {
 	let stmt = LiveStatement {
-		id: Uuid::new_v4(),
-		node: Uuid::new_v4(),
 		fields,
-		what: Expr::Table(table.clone()),
+		what: Expr::Table(table.clone().into()),
 		cond,
 		fetch,
 	};
-	let plan = LogicalPlan {
-		expressions: vec![TopLevelExpr::Live(Box::new(stmt))],
-	};
-	let res = execute_plan(ds, sess, plan).await?;
+	let res = execute_statement(ds, sess, TopLevelExpr::Live(Box::new(stmt))).await?;
 
 	match res {
 		Value::Uuid(id) => Ok(id.into()),
@@ -360,12 +356,9 @@ async fn kill_live_query(
 	live_id: Uuid,
 ) -> Result<(), GraphqlError> {
 	let stmt = KillStatement {
-		id: Expr::Literal(Literal::Uuid(live_id.into())),
+		id: Expr::Literal(Literal::Uuid(live_id)),
 	};
-	let plan = LogicalPlan {
-		expressions: vec![TopLevelExpr::Kill(stmt)],
-	};
-	let _ = execute_plan(ds, sess, plan).await?;
+	let _ = execute_statement(ds, sess, TopLevelExpr::Kill(stmt)).await?;
 	Ok(())
 }
 

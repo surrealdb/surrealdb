@@ -18,7 +18,8 @@ use crate::exec::{
 	monitor_stream,
 };
 use crate::expr::ControlFlow;
-use crate::expr::idiom::Idiom;
+use crate::expr::logical::LogicalExpr;
+use crate::val::Value;
 
 /// ProjectValue operator - evaluates a single expression for each input record.
 ///
@@ -31,8 +32,28 @@ pub struct ProjectValue {
 	pub input: Arc<dyn ExecOperator>,
 	/// The expression to evaluate for each record
 	pub expr: Arc<dyn PhysicalExpr>,
-	/// Fields to strip before evaluating (SELECT VALUE … OMIT).
-	omit: Arc<[Idiom]>,
+	/// Paths to strip before evaluating (SELECT VALUE … OMIT).
+	omit: Arc<[LogicalExpr]>,
+	/// Whether evaluating the projected expression a second time would expose
+	/// anything: it stages no write, advances no counter, reaches nothing
+	/// outside the transaction and runs no body the plan cannot see.
+	///
+	/// This operator holds **one** expression, so unlike its siblings it has
+	/// no second column to interleave with and nothing to reorder. What the
+	/// flag guards here is a repetition, not an order: the batch shape
+	/// evaluates the expression for every row in one call, and a row that
+	/// signals `RETURN` sends it back to the first row, since a failed
+	/// `evaluate_batch` does not say how far it got — so whatever the rows it
+	/// did reach already did happens again. `false`, the default, evaluates a
+	/// row at a time, which makes each row's effects happen once.
+	///
+	/// The planner answers this with the same `is_effect_free` its siblings
+	/// use, which is stronger than this operator needs: an expression that
+	/// cannot signal `RETURN` is never re-evaluated, so repeating is not on
+	/// the table however effectful it is. Narrowing to that would need a
+	/// predicate the layer does not have yet, and under-approximating it
+	/// duplicates effects, so the stronger answer stands.
+	pub(crate) repeat_is_free: bool,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -42,14 +63,23 @@ impl ProjectValue {
 	pub(crate) fn new(
 		input: Arc<dyn ExecOperator>,
 		expr: Arc<dyn PhysicalExpr>,
-		omit: Vec<Idiom>,
+		omit: Vec<LogicalExpr>,
 	) -> Self {
 		Self {
 			input,
 			expr,
 			omit: omit.into(),
+			repeat_is_free: false,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Declare the projected expression free to evaluate again; see
+	/// [`Self::repeat_is_free`]. Only the planner, which holds the expression
+	/// as written, can answer this.
+	pub(crate) fn with_repeat_is_free(mut self) -> Self {
+		self.repeat_is_free = true;
+		self
 	}
 }
 impl ExecOperator for ProjectValue {
@@ -98,6 +128,7 @@ impl ExecOperator for ProjectValue {
 		);
 		let expr = Arc::clone(&self.expr);
 		let omit = Arc::clone(&self.omit);
+		let repeat_is_free = self.repeat_is_free;
 		let ctx = ctx.clone();
 
 		let projected = input_stream.then(move |batch_result| {
@@ -119,28 +150,51 @@ impl ExecOperator for ProjectValue {
 
 				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
-				// Try batch evaluation first for better throughput.
-				// Falls back to per-row evaluation when RETURN signals
-				// are encountered (rare -- only from explicit RETURN
-				// statements in function bodies).
-				match expr.evaluate_batch(eval_ctx.clone(), &values).await {
-					Ok(projected_values) => Ok(ValueBatch::new(projected_values)),
-					Err(ControlFlow::Return(_)) => {
-						let mut projected_values = Vec::with_capacity(values.len());
-						for value in &values {
-							match expr.evaluate(eval_ctx.with_value(value)).await {
-								Ok(result) => projected_values.push(result),
-								Err(ControlFlow::Return(v)) => projected_values.push(v),
-								Err(e) => return Err(e),
-							}
+				// One batch call is the faster shape — it lets an I/O-bound
+				// expression (a subquery, a lookup) overlap its rows — but a
+				// batch that a row ends with `RETURN` is evaluated again from
+				// its first row, since a failed `evaluate_batch` does not say
+				// how far it got. That repeats whatever the rows it did reach
+				// already did, which is invisible only where the expression
+				// has no effect to repeat; `repeat_is_free` answers that, and
+				// where it may, the batch is evaluated a row at a time so each
+				// row's effects happen once.
+				if repeat_is_free {
+					match expr.evaluate_batch(eval_ctx.clone(), &values).await {
+						Ok(projected_values) => Ok(ValueBatch::new(projected_values)),
+						Err(ControlFlow::Return(_)) => {
+							Ok(ValueBatch::new(evaluate_rows(&expr, &eval_ctx, &values).await?))
 						}
-						Ok(ValueBatch::new(projected_values))
+						Err(e) => Err(e),
 					}
-					Err(e) => Err(e),
+				} else {
+					Ok(ValueBatch::new(evaluate_rows(&expr, &eval_ctx, &values).await?))
 				}
 			}
 		});
 
 		Ok(monitor_stream(Box::pin(projected), "ProjectValue", &self.metrics))
 	}
+}
+
+/// Evaluate `expr` for every row of `values` in order, taking the value a row
+/// signals `RETURN` with as that row's projection.
+///
+/// The row is bound as both the current value and the document root, which is
+/// what a nested expression — a method's arguments, a dynamic index — is
+/// evaluated against, so a row reports the same here as in one batch call.
+async fn evaluate_rows<'a>(
+	expr: &Arc<dyn PhysicalExpr>,
+	ctx: &EvalContext<'a>,
+	values: &'a [Value],
+) -> Result<Vec<Value>, ControlFlow> {
+	let mut projected = Vec::with_capacity(values.len());
+	for value in values {
+		match expr.evaluate(ctx.with_value_and_doc(value)).await {
+			Ok(result) => projected.push(result),
+			Err(ControlFlow::Return(v)) => projected.push(v),
+			Err(e) => return Err(e),
+		}
+	}
+	Ok(projected)
 }

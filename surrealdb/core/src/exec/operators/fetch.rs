@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
+use surrealdb_strand::Strand;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::table_select_permission;
 use crate::exec::fan_out::{RECORD_DEREFERENCE, evaluate_each};
 use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
-	should_check_perms, validate_record_user_access,
+	PhysicalPermission, check_permission_for_value, should_check_perms,
+	table_select_permission_physical_runtime, validate_record_user_access,
 };
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
@@ -15,25 +15,110 @@ use crate::exec::{
 	OperatorMetrics, OutputShape, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlowExt;
-use crate::expr::part::Part;
+use crate::expr::logical::LogicalExpr;
 use crate::iam::Action;
-use crate::val::{RecordId, Value};
+use crate::val::{RecordId, TableName, Value};
 
-/// A single step of a FETCH field path.
+/// A single step of a FETCH field path, walked structurally through the
+/// row's value.
 ///
-/// Parts other than a computed index are kept as the original AST `Part` and
-/// walked exactly as before; `Part::Value` (a computed index/key, e.g.
-/// `refs[0]`, `refs[$i]`) is pre-planned into a `PhysicalExpr` at query-plan
-/// time instead of being re-planned on every row.
-///
-/// Invariant: `Static` never holds a `Part::Value` — the sole production
-/// constructor (`Planner::convert_fetch_idioms`) maps those to `Index`. A
-/// stray one would degrade safely to the unsupported-part skip in
-/// `fetch_field_path`, not a wrong result.
+/// A computed index or key (`refs[0]`, `refs[$i]`) is compiled into a
+/// `PhysicalExpr` at plan time instead of being compiled on every row. A step
+/// the fetch cannot walk through ends its path: the value reached so far is
+/// left as it is, unfetched.
 #[derive(Debug, Clone)]
 pub(crate) enum FetchStep {
-	Static(Part),
+	/// `.name`: the field of an object, or of every element of an array.
+	Field(Strand),
+	/// `.*`: every element of an array, every value of an object.
+	All,
+	/// The first element of an array.
+	First,
+	/// `[$]`: the last element of an array.
+	Last,
+	/// `[e]`: a computed index into an array or key into an object.
 	Index(Arc<dyn PhysicalExpr>),
+	/// A step the fetch does not walk through (a filter, a flatten, a method,
+	/// a lookup, a destructure, a recursion, an optional chain, a path not
+	/// rooted at a field of the row).
+	Unsupported,
+}
+
+/// A [`FetchStep`] before its computed index is compiled: what
+/// [`fetch_parts`] reads off a FETCH path for the planner to compile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FetchPart<'a> {
+	Field(&'a Strand),
+	All,
+	First,
+	Last,
+	Index(&'a LogicalExpr),
+	Unsupported,
+}
+
+/// The steps of a FETCH path, root first, up to and including the first one
+/// the fetch cannot walk.
+///
+/// A fetch path names a stored position, so it starts from a field of the row
+/// and continues through field accesses, `.*`, first/last and computed
+/// indices. A `Broadcast` is its base's steps followed by its body's, since
+/// the body continues the same written path over each element. Any other
+/// form — another root, or a step the fetch cannot walk — is an
+/// [`FetchPart::Unsupported`] step, and nothing after it is listed because
+/// the walk ends there.
+pub(crate) fn fetch_parts(expr: &LogicalExpr) -> Vec<FetchPart<'_>> {
+	fn collect<'a>(expr: &'a LogicalExpr, out: &mut Vec<FetchPart<'a>>) {
+		match expr {
+			LogicalExpr::Field(name) => out.push(FetchPart::Field(name)),
+			LogicalExpr::Current => {}
+			LogicalExpr::Access {
+				base,
+				field,
+			} => {
+				collect(base, out);
+				out.push(FetchPart::Field(field));
+			}
+			LogicalExpr::Each(base) => {
+				collect(base, out);
+				out.push(FetchPart::All);
+			}
+			LogicalExpr::First(base) => {
+				collect(base, out);
+				out.push(FetchPart::First);
+			}
+			LogicalExpr::Last(base) => {
+				collect(base, out);
+				out.push(FetchPart::Last);
+			}
+			LogicalExpr::Index {
+				base,
+				index,
+			} => {
+				collect(base, out);
+				out.push(FetchPart::Index(index));
+			}
+			LogicalExpr::Broadcast {
+				base,
+				body,
+				..
+			} => {
+				collect(base, out);
+				collect(body, out);
+			}
+			other => {
+				if let Some(base) = other.step_base() {
+					collect(base, out);
+				}
+				out.push(FetchPart::Unsupported);
+			}
+		}
+	}
+	let mut out = Vec::new();
+	collect(expr, &mut out);
+	if let Some(end) = out.iter().position(|part| *part == FetchPart::Unsupported) {
+		out.truncate(end + 1);
+	}
+	out
 }
 
 /// Fetches related records for specified fields.
@@ -47,8 +132,8 @@ pub struct Fetch {
 	/// SQL rendering of the fetch paths, captured at plan time. Kept only for
 	/// EXPLAIN's `attrs()`; execution walks `physical_fields`.
 	pub(crate) fields_sql: String,
-	/// The fetch paths to walk, with each part converted to a `FetchStep` --
-	/// see `FetchStep` for why `Part::Value` needs this.
+	/// The fetch paths to walk, each a sequence of steps root first (see
+	/// [`fetch_parts`]).
 	pub(crate) physical_fields: Vec<Vec<FetchStep>>,
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -177,7 +262,7 @@ fn fetch_field_path<'a>(
 			}
 
 			match &path[depth] {
-				FetchStep::Static(Part::Field(name)) => match current {
+				FetchStep::Field(name) => match current {
 					Value::Object(obj) => {
 						current = match obj.get_mut(name.as_str()) {
 							Some(child) => child,
@@ -191,7 +276,7 @@ fn fetch_field_path<'a>(
 					}
 					_ => return Ok(()),
 				},
-				FetchStep::Static(Part::All) => match current {
+				FetchStep::All => match current {
 					Value::Array(arr) => {
 						return fetch_each(ctx, arr.iter_mut(), &path[depth + 1..]).await;
 					}
@@ -200,7 +285,7 @@ fn fetch_field_path<'a>(
 					}
 					_ => return Ok(()),
 				},
-				FetchStep::Static(Part::First) => {
+				FetchStep::First => {
 					current = match current {
 						Value::Array(arr) => match arr.first_mut() {
 							Some(v) => v,
@@ -210,7 +295,7 @@ fn fetch_field_path<'a>(
 					};
 					depth += 1;
 				}
-				FetchStep::Static(Part::Last) => {
+				FetchStep::Last => {
 					current = match current {
 						Value::Array(arr) => match arr.last_mut() {
 							Some(v) => v,
@@ -241,8 +326,8 @@ fn fetch_field_path<'a>(
 					};
 					depth += 1;
 				}
-				// For other path parts, we don't support fetching through them
-				FetchStep::Static(_) => return Ok(()),
+				// The fetch does not walk through any other step.
+				FetchStep::Unsupported => return Ok(()),
 			}
 		}
 	})
@@ -368,14 +453,7 @@ pub(crate) async fn process_fetched_record(
 
 	// 1. Table-level permission check (on raw value, before computing fields)
 	if check_perms {
-		let table_def = db_ctx
-			.get_table_def(&rid.table, ctx.version_stamp())
-			.await
-			.context("Failed to get table definition")?;
-		let catalog_perm = table_select_permission(table_def.as_deref());
-		let select_perm = convert_permission_to_physical_runtime(catalog_perm, ctx)
-			.await
-			.context("Failed to convert permission")?;
+		let select_perm = table_select_permission(ctx, &rid.table).await?;
 
 		match &select_perm {
 			PhysicalPermission::Deny => return Ok(false),
@@ -406,6 +484,34 @@ pub(crate) async fn process_fetched_record(
 	.await?;
 
 	Ok(true)
+}
+
+/// The table `SELECT` permission a record of `table` read by id is checked
+/// against, compiled once per table per execution and kept on the database
+/// context; every record of the table fetched by this execution — a `FETCH`
+/// target, a record dereference — is checked against the same compiled guard.
+/// A versioned read compiles the permission of the definition at that stamp
+/// and keeps nothing, as `get_table_def` does for the definition.
+pub(crate) async fn table_select_permission(
+	ctx: &ExecutionContext,
+	table: &TableName,
+) -> crate::expr::FlowResult<PhysicalPermission> {
+	let db_ctx = ctx.database().context("table_select_permission requires database context")?;
+	let version = ctx.version_stamp();
+	if version.is_none()
+		&& let Some(cached) = db_ctx.select_permission_cache.read().await.get(table)
+	{
+		return Ok(cached.clone());
+	}
+	let table_def =
+		db_ctx.get_table_def(table, version).await.context("Failed to get table definition")?;
+	let permission = table_select_permission_physical_runtime(table_def.as_deref(), ctx)
+		.await
+		.context("Failed to convert permission")?;
+	if version.is_none() {
+		db_ctx.select_permission_cache.write().await.insert(table.clone(), permission.clone());
+	}
+	Ok(permission)
 }
 
 /// Fetch a single record by its ID without permission checks, but with
@@ -520,18 +626,94 @@ pub(crate) async fn batch_fetch_in_place(
 
 #[cfg(test)]
 mod tests {
-	use surrealdb_strand::Strand;
-
 	use super::*;
+	use crate::exec::operators::test_util::{parse_expr, parse_path};
 	use crate::exec::physical_expr::Literal;
+
+	#[test]
+	fn a_fetch_path_is_read_root_first_through_its_broadcasts() {
+		let path = parse_path("a.b[0].c.*[$i]");
+		let parts = fetch_parts(&path);
+		let index = match parts.as_slice() {
+			[
+				FetchPart::Field(a),
+				FetchPart::Field(b),
+				FetchPart::Index(index),
+				FetchPart::Field(c),
+				FetchPart::All,
+				FetchPart::Index(i),
+			] => {
+				assert_eq!(a.as_str(), "a");
+				assert_eq!(b.as_str(), "b");
+				assert_eq!(c.as_str(), "c");
+				assert_eq!(**i, parse_expr("$i"));
+				index
+			}
+			other => panic!("unexpected steps {other:?}"),
+		};
+		assert_eq!(**index, LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::Integer(0)));
+	}
+
+	#[test]
+	fn a_step_the_fetch_cannot_walk_ends_the_path() {
+		assert_eq!(
+			fetch_parts(&parse_path("a[WHERE x].b")),
+			vec![FetchPart::Field(&Strand::new_static("a")), FetchPart::Unsupported]
+		);
+		assert_eq!(
+			fetch_parts(&parse_path("a[$].b")),
+			vec![
+				FetchPart::Field(&Strand::new_static("a")),
+				FetchPart::Last,
+				FetchPart::Field(&Strand::new_static("b"))
+			]
+		);
+		// A path not rooted at a field of the row fetches nothing.
+		assert_eq!(fetch_parts(&parse_path("$p.a")), vec![FetchPart::Unsupported]);
+	}
+
+	/// The guard of a table is compiled once per execution: two records of
+	/// the same table are checked against the same compiled predicate.
+	#[tokio::test]
+	async fn a_tables_guard_is_compiled_once_per_execution() {
+		use crate::exec::operators::test_util::TestDb;
+		let db = TestDb::new_with_auth(
+			"DEFINE TABLE doc SCHEMALESS PERMISSIONS FOR select WHERE public = true;
+			 DEFINE TABLE other SCHEMALESS PERMISSIONS FOR select WHERE public = true;",
+		)
+		.await;
+		let anonymous = crate::dbs::Session::default().with_ns("test").with_db("test");
+		let ctx = db.exec_ctx_as(&anonymous, crate::kvs::TransactionType::Read).await;
+		let doc = TableName::from("doc");
+		let first = table_select_permission(&ctx, &doc).await.expect("compiles");
+		let second = table_select_permission(&ctx, &doc).await.expect("cached");
+		let (PhysicalPermission::Conditional(first), PhysicalPermission::Conditional(second)) =
+			(&first, &second)
+		else {
+			panic!("a conditional guard: {first:?} / {second:?}");
+		};
+		assert!(Arc::ptr_eq(first, second), "the second fetch reuses the compiled guard");
+		// Another table compiles its own.
+		let other =
+			table_select_permission(&ctx, &TableName::from("other")).await.expect("compiles");
+		let PhysicalPermission::Conditional(other) = &other else {
+			panic!("a conditional guard: {other:?}");
+		};
+		assert!(!Arc::ptr_eq(first, other));
+		// A context sharing the execution shares the cache.
+		let shared = ctx.with_param("x", Value::from(1));
+		let again = table_select_permission(&shared, &doc).await.expect("cached");
+		let PhysicalPermission::Conditional(again) = &again else {
+			panic!("a conditional guard: {again:?}");
+		};
+		assert!(Arc::ptr_eq(first, again));
+	}
 
 	#[test]
 	fn test_fetch_name() {
 		use crate::exec::operators::scan::DynamicScan;
-		use crate::expr::part::Part;
 
-		let physical_fields =
-			vec![vec![FetchStep::Static(Part::Field(Strand::new_static("author")))]];
+		let physical_fields = vec![vec![FetchStep::Field(Strand::new_static("author"))]];
 
 		// Create a minimal scan for testing
 		let scan = Arc::new(DynamicScan::new(

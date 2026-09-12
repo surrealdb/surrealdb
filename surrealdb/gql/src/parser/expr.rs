@@ -26,12 +26,14 @@ impl Parser<'_> {
 	/// error when it is exhausted.
 	///
 	/// This guards the otherwise-unbounded depth of the [`GqlExpr`] tree —
-	/// and of the `sql::Expr` tree it lowers to — built by the operator
+	/// and of the `LogicalExpr` tree it lowers to — built by the operator
 	/// cascade below; see [`GqlParserSettings::expr_recursion_limit`]
 	/// (mirroring `syn`) for why an unbounded operator chain is a
-	/// denial-of-service vector. Property-access chains are deliberately not
-	/// charged: they lower to flat `sql::Idiom` part vectors, and the
-	/// `GqlExpr` chain itself is dropped iteratively.
+	/// denial-of-service vector. A property-access chain is charged one level
+	/// per property: it lowers to one `LogicalExpr::Access` node per property,
+	/// and that nest is cloned, compared, hashed, visited and dropped
+	/// recursively, so its depth is bounded by the same budget as an operator
+	/// chain's.
 	fn enter_expr_depth(&mut self) -> ParseResult<()> {
 		if self.settings.expr_recursion_limit == 0 {
 			bail!("Exceeded expression recursion depth limit",
@@ -406,6 +408,7 @@ impl Parser<'_> {
 	/// primary.
 	fn parse_primary_postfix(&mut self, mut expr: GqlExpr) -> ParseResult<GqlExpr> {
 		while self.eat(t!(".")) {
+			self.enter_expr_depth()?;
 			// Property names are identifiers: non-reserved keywords and
 			// `"…"` delimited identifiers are valid.
 			let name = self.parse_ident()?;

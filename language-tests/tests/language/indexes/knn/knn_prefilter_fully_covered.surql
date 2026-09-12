@@ -22,10 +22,25 @@ value = "[{ category: 'a', id: pts:1, point: [10f] }, { category: 'b', id: pts:2
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, category, distance]\n    SortByKey [ctx: Db] [sort_keys: distance ASC]\n        Compute [ctx: Db] [fields: distance = vector::distance::knn(...)]\n            Filter [ctx: Db] [predicate: category = 'a']\n                KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1]\n                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a']\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, category, distance]
+    SortByKey [ctx: Db] [sort_keys: distance ASC]
+        Compute [ctx: Db] [fields: distance = vector::distance::knn()]
+            Filter [ctx: Db] [predicate: category = 'a']
+                KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1]
+                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a']
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, category, distance] {rows: 2}\n    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2}\n        Compute [ctx: Db] [fields: distance = vector::distance::knn(...)] {rows: 2}\n            Filter [ctx: Db] [predicate: category = 'a'] {rows: 2}\n                KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, prefilter_tier: exact] {rows: 2}\n                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 4}\n\nTotal rows: 2"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id, category, distance] {rows: 2}
+    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2}
+        Compute [ctx: Db] [fields: distance = vector::distance::knn()] {rows: 2}
+            Filter [ctx: Db] [predicate: category = 'a'] {rows: 2}
+                KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, prefilter_tier: exact] {rows: 2}
+                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 4}
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ category: 'a', distance: 6f, id: pts:5 }, { category: 'a', distance: 14f, id: pts:3 }]"

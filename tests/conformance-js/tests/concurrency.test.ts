@@ -97,7 +97,7 @@ test("parallel UPSERTs of distinct records from two connections all land", async
 	expect(results.filter((r) => !r.ok)).toHaveLength(0);
 
 	const [count] = await a
-		.query<[number]>("RETURN (SELECT VALUE count() FROM conc_upsert GROUP ALL)[0].count")
+		.query<[number]>("RETURN (SELECT VALUE count() FROM conc_upsert GROUP ALL)[0]")
 		.json();
 	expect(count).toBe(perConn * 2);
 
@@ -127,7 +127,7 @@ test("distinct-record writes racing on implicit table creation: occasional confl
 	for (const f of failures) expectConflictError(f.error);
 
 	const [count] = await a
-		.query<[number]>("RETURN (SELECT VALUE count() FROM conc_fresh GROUP ALL)[0].count")
+		.query<[number]>("RETURN (SELECT VALUE count() FROM conc_fresh GROUP ALL)[0]")
 		.json();
 	expect(count).toBe(successes);
 
@@ -360,7 +360,7 @@ test(
 		}
 
 		const [count] = await a
-			.query<[number]>("RETURN (SELECT VALUE count() FROM conc_dupc GROUP ALL)[0].count")
+			.query<[number]>("RETURN (SELECT VALUE count() FROM conc_dupc GROUP ALL)[0]")
 			.json();
 		expect(count).toBe(rounds);
 

@@ -104,6 +104,12 @@ impl Array {
 		self.into_iter().map(|x| x.into_literal()).collect()
 	}
 
+	/// The surface-syntax counterpart of [`Self::into_literal`]; see
+	/// [`Value::into_sql_literal`].
+	pub fn into_sql_literal(self) -> Vec<crate::sql::Expr> {
+		self.into_iter().map(Value::into_sql_literal).collect()
+	}
+
 	pub fn is_all_none_or_null(&self) -> bool {
 		self.0.iter().all(|v| v.is_nullish())
 	}

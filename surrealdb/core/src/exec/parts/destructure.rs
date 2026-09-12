@@ -5,7 +5,6 @@ use std::sync::Arc;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::evaluate_physical_path;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut, CombineAccessModes, ContextLevel};
 use crate::expr::FlowResult;
@@ -24,10 +23,11 @@ pub enum DestructureField {
 	All(Strand),
 	/// Include a single field by name.
 	Field(Strand),
-	/// Include a field with an aliased path.
+	/// Include a field computed by a body evaluated with the destructured
+	/// value as the current value.
 	Aliased {
 		field: Strand,
-		path: Vec<Arc<dyn PhysicalExpr>>,
+		body: Arc<dyn PhysicalExpr>,
 	},
 	/// Nested destructure on a field.
 	Nested {
@@ -51,13 +51,9 @@ impl PhysicalExpr for DestructurePart {
 				.map(|f| match f {
 					DestructureField::All(_) | DestructureField::Field(_) => ContextLevel::Root,
 					DestructureField::Aliased {
-						path,
+						body,
 						..
-					} => path
-						.iter()
-						.map(|p| p.required_context())
-						.max()
-						.unwrap_or(ContextLevel::Root),
+					} => body.required_context(),
 					DestructureField::Nested {
 						parts,
 						..
@@ -84,9 +80,9 @@ impl PhysicalExpr for DestructurePart {
 				.map(|f| match f {
 					DestructureField::All(_) | DestructureField::Field(_) => AccessMode::ReadOnly,
 					DestructureField::Aliased {
-						path,
+						body,
 						..
-					} => path.iter().map(|p| p.access_mode()).combine_all(),
+					} => body.access_mode(),
 					DestructureField::Nested {
 						parts,
 						..
@@ -123,13 +119,11 @@ impl ToSql for DestructureField {
 			}
 			DestructureField::Aliased {
 				field,
-				path,
+				body,
 			} => {
 				f.push_str(field);
 				f.push_str(": ");
-				for part in path {
-					part.fmt_sql(f, fmt);
-				}
+				body.fmt_sql(f, fmt);
 			}
 			DestructureField::Nested {
 				field,
@@ -188,11 +182,15 @@ async fn evaluate_destructure(
 					}
 					DestructureField::Aliased {
 						field: name,
-						path,
+						body,
 					} => {
-						// Evaluate the aliased path starting from the current value
-						// (not from obj.get(field)). The field name is just the output label.
-						let v = evaluate_physical_path(value, path, ctx.clone()).await?;
+						// The body reads the destructured value, not
+						// `obj.get(field)`: the field name is only the output
+						// label. The destructured value is also the document
+						// for every expression inside the body -- a dynamic
+						// index, a method argument, `$parent` -- so
+						// `v.{ pick: items[idx] }` reads `idx` from `v`.
+						let v = body.evaluate(ctx.with_value_and_doc(value)).await?;
 						result.insert(name.clone(), v);
 					}
 					DestructureField::Nested {
@@ -240,7 +238,7 @@ mod tests {
 	use super::*;
 	use crate::exec::ExecutionContext;
 	use crate::exec::operators::test_util::{TestDb, physical_expr, root_ctx, val};
-	use crate::exec::physical_expr::IdiomExpr;
+	use crate::exec::physical_expr::find_part;
 
 	/// Evaluate `tail` (a destructure suffix such as `.{ a, b }`) against
 	/// `value`, which is handed to the part as the value of field `v`.
@@ -251,16 +249,10 @@ mod tests {
 			.expect("destructure should evaluate")
 	}
 
-	/// Compile `src` and pull the `DestructurePart` out of the resulting idiom.
+	/// Compile `src` and pull the `DestructurePart` out of the resulting path.
 	async fn compile_destructure(src: &str, ctx: &ExecutionContext) -> Arc<dyn PhysicalExpr> {
 		let expr = physical_expr(src, ctx).await;
-		let idiom = expr.downcast_ref::<IdiomExpr>().expect("source should compile to an idiom");
-		let part = idiom
-			.parts
-			.iter()
-			.find(|p| p.downcast_ref::<DestructurePart>().is_some())
-			.expect("source should contain a destructure part");
-		Arc::clone(part)
+		find_part::<DestructurePart>(&expr).expect("source should contain a destructure part")
 	}
 
 	// =========================================================================
@@ -283,6 +275,23 @@ mod tests {
 		// key `z`, this would yield `{ z: NONE }`.
 		let out = shape("{ a: 1 }", ".{ z: a }", &ctx).await;
 		assert_eq!(out, val("{ z: 1 }").await);
+	}
+
+	#[tokio::test]
+	async fn an_aliased_path_evaluates_its_expressions_against_the_destructured_value() {
+		let ctx = root_ctx();
+		// The row and the destructured value both have `idx` and `n`; inside
+		// the pattern the destructured value is the document, so the dynamic
+		// index and the method argument read its fields, never the row's.
+		let row = val("{ v: { items: [10, 20, 30], idx: 2, n: 1 }, idx: 0, n: 5 }").await;
+		let out = crate::exec::operators::test_util::eval_on(
+			"v.{ picked: items[idx], head: items.slice(0, n) }",
+			&row,
+			&ctx,
+		)
+		.await
+		.expect("destructure should evaluate");
+		assert_eq!(out, val("{ picked: 30, head: [10] }").await);
 	}
 
 	#[tokio::test]
@@ -452,15 +461,15 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn a_mutating_alias_path_propagates_read_write_through_nesting() {
+	async fn a_mutating_alias_body_propagates_read_write_through_nesting() {
 		// Access-mode propagation decides the transaction mode, so a mutation
-		// buried in an alias path -- at any nesting level -- has to surface.
+		// buried in an alias body -- at any nesting level -- has to surface.
 		let mutating: Arc<dyn PhysicalExpr> = Arc::new(MutatingStep);
 
 		let flat = DestructurePart {
 			fields: vec![DestructureField::Aliased {
 				field: "x".into(),
-				path: vec![Arc::clone(&mutating)],
+				body: Arc::clone(&mutating),
 			}],
 		};
 		assert_eq!(flat.access_mode(), AccessMode::ReadWrite);
@@ -470,7 +479,7 @@ mod tests {
 				field: "outer".into(),
 				parts: vec![DestructureField::Aliased {
 					field: "x".into(),
-					path: vec![mutating],
+					body: mutating,
 				}],
 			}],
 		};

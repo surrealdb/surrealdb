@@ -3,8 +3,9 @@
 This is the normative design for `surrealdb/core/src/gql/lower/`. The
 lowering turns a parsed GQL AST (`gql::ast`) into a
 [`MatchPlan`](../../surrealdb/core/src/expr/match_plan.rs) — the
-language-neutral, binding-table IR — wrapped in a `LogicalPlan` as a single
-top-level `Expr::Match`. **No SurrealQL surface AST is generated**: the streaming
+language-neutral, binding-table IR — carried as a single `LogicalOp::Match`,
+which the executor holds as a `TopLevelStatement::Plan`. **No SurrealQL
+surface AST is generated**: the streaming
 execution planner (`exec/planner/match_plan.rs`) compiles the `MatchPlan`
 directly into physical operators (`exec/operators/` — `graph/`, `join/`, and the
 generic `bind.rs`/`distinct.rs`). The `MatchPlan` never runs under the
@@ -140,9 +141,9 @@ lower the clause's predicates into a flat list of `MatchPredicate`s:
 Lowers each GQL expression with uniform binding addressing (§2) and the
 three-valued-logic guards (§4). Value position (projections, sort keys,
 comparison operands) lowers two-valued; predicate position (`WHERE`) lowers
-three-valued with the guards. Expressions are still built as `crate::sql::Expr`
-and converted to `crate::expr::Expr` per slot by the caller — the guard and NNF
-machinery is unchanged from v1; only the variable-addressing leaf differs.
+three-valued with the guards. Expressions are built directly as the logical
+plan's `LogicalExpr`, the scalar type of `MatchPlan`; the streaming planner
+compiles them as it compiles every other scalar.
 
 ### 3.4 Output spec — `lower/mod.rs`
 

@@ -39,10 +39,12 @@ use crate::catalog::{FieldDefinition, Index, Permission};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut, ContextLevel};
 use crate::expr::idiom::Idiom;
+use crate::expr::logical::{
+	FieldPath, LogicalEval, LogicalExplain, LogicalExpr, LogicalForeach, LogicalLet, LogicalOp,
+	LogicalReturn, LogicalSequence, LogicalSleep,
+};
 use crate::expr::operator::{BinaryOperator, MatchesOperator, PrefixOperator};
-use crate::expr::part::Part;
-use crate::expr::visit::{Visit, Visitor};
-use crate::expr::{Expr, FlowResult, Kind};
+use crate::expr::{FlowResult, Kind};
 use crate::iam::Action;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms};
 use crate::idx::{Error, IndexKeyBase};
@@ -54,7 +56,7 @@ use crate::val::{TableName, Value};
 /// expressions the legacy planner's `Tree` analysis registers on a table's
 /// `QueryExecutor`.
 ///
-/// The legacy tree walks the WHERE condition through `Expr::Binary` nodes
+/// The legacy tree walks the WHERE condition through binary nodes
 /// only — a MATCHES nested inside a function argument, an idiom part filter,
 /// or appearing in a projection is never registered and errors at runtime on
 /// executor-table rows. `allowlist` reproduces that reachable set, plus the
@@ -62,34 +64,82 @@ use crate::val::{TableName, Value};
 /// branch (`!(body @@ 'x')`) stays evaluable in the residual filter (see
 /// [`collect_cond_matches`]). It is built from both the original condition and
 /// its param-resolved/constant-folded form so plan-time rewrites don't break
-/// node identity, and `executor_tables` lists
-/// the tables the legacy executor would have created a `QueryExecutor` for:
-/// full table sources only — record-id sources never get one (see
-/// `Iterator::prepare_record_id`), so their rows evaluate MATCHES to `false`
-/// even when the expression sits in the WHERE condition.
+/// node identity, and `executor_tables` says which rows the legacy executor
+/// would have created a `QueryExecutor` for: rows of full table sources only —
+/// record-id sources never get one (see `Iterator::prepare_record_id`), so
+/// their rows evaluate MATCHES to `false` even when the expression sits in the
+/// WHERE condition. A source whose table is only known when the statement
+/// runs — `type::table(..)` or a parameter — leaves the set open: every row
+/// not from a record-id source's table has an executor (see
+/// [`ExecutorTables`]).
 ///
 /// The scope covers the SELECT's whole expression tree, matching the legacy
 /// executor's per-row lookup, which is keyed by expression and reached from
-/// anywhere the row is in scope. Parts of the tree planned at evaluation time
-/// carry it with them — see
-/// [`BlockPhysicalExpr`](crate::exec::physical_expr::BlockPhysicalExpr) — so a
-/// registered MATCHES resolves the same in a residual filter, a projection, and
-/// an IF/ELSE branch. It stops at a body that is planned in its own scope: a
-/// nested statement registers its own WHERE, and a user-defined function or
+/// anywhere the row is in scope, so a registered MATCHES resolves the same in a
+/// residual filter, a projection, and an IF/ELSE branch. It stops at a body that is planned in its
+/// own scope: a nested statement registers its own WHERE, and a user-defined function or
 /// closure body is planned per call and inherits nothing.
 #[derive(Debug)]
 pub(crate) struct MatchesScope {
 	/// MATCHES binary expressions reachable from the WHERE condition through
-	/// `Expr::Binary` nodes.
-	pub(crate) allowlist: HashSet<Expr>,
-	/// Tables iterated as full table sources by this SELECT.
-	pub(crate) executor_tables: Arc<[TableName]>,
+	/// binary nodes.
+	pub(crate) allowlist: HashSet<LogicalExpr>,
+	/// The rows a legacy `QueryExecutor` would evaluate MATCHES against.
+	pub(crate) executor_tables: ExecutorTables,
 }
 
-/// Collect MATCHES expressions reachable from `expr` through `Expr::Binary`
-/// nodes and logical-NOT (`Expr::Prefix { Not, .. }`) nodes.
+/// The tables whose rows a legacy `QueryExecutor` evaluates MATCHES against.
 ///
-/// The legacy `Tree::eval_value` traversal walks `Expr::Binary` only and treats
+/// The legacy engine builds an executor per full table source when the
+/// statement runs, so a table it only learns of then — a `type::table(..)`
+/// call or a parameter in the `FROM` — gets one too. The planner knows the
+/// tables written as sources (`known`) and the tables of record-id sources,
+/// which get no executor (`excluded`); when a source resolves at run time the
+/// set is `open`, and a row of any table not excluded has an executor. A row
+/// of an excluded table that a run-time source produced is treated as a
+/// record-id source's row, since the two cannot be told apart by name.
+#[derive(Clone, Debug)]
+pub(crate) struct ExecutorTables {
+	/// Tables written as full table sources.
+	known: Arc<[TableName]>,
+	/// Tables written as record-id sources.
+	excluded: Arc<[TableName]>,
+	/// Whether a source's table is only known when the statement runs.
+	open: bool,
+}
+
+impl ExecutorTables {
+	/// The set for a statement with the given source tables.
+	pub(crate) fn new(known: Vec<TableName>, excluded: Vec<TableName>, open: bool) -> Self {
+		Self {
+			known: Arc::from(known),
+			excluded: Arc::from(excluded),
+			open,
+		}
+	}
+
+	/// No executor at all: the set outside any SELECT.
+	pub(crate) fn none() -> Self {
+		Self::new(Vec::new(), Vec::new(), false)
+	}
+
+	/// Whether a row of `table` is evaluated by an executor.
+	pub(crate) fn has_executor(&self, table: &TableName) -> bool {
+		self.known.contains(table) || (self.open && !self.excluded.contains(table))
+	}
+
+	/// Whether any source is known at plan time to get an executor, which is
+	/// when an unregistered WHERE MATCHES can be refused before any row is
+	/// read.
+	pub(crate) fn any_known(&self) -> bool {
+		!self.known.is_empty()
+	}
+}
+
+/// Collect MATCHES expressions reachable from `expr` through binary nodes and
+/// logical-NOT prefix nodes.
+///
+/// The legacy `Tree::eval_value` traversal walks binary nodes only and treats
 /// every other node (function calls, arrays, idioms, prefixes) as an opaque
 /// leaf. The new executor's bitmap-fusion planner additionally turns a negated
 /// full-text branch (`... AND !(body @@ 'x')`) into a `BitmapAndNot` over the
@@ -97,9 +147,9 @@ pub(crate) struct MatchesScope {
 /// for per-row re-evaluation — so the inner MATCHES must be registered too, or
 /// it would raise [`Error::NoIndexFoundForMatch`]. Descending through the `Not`
 /// prefix (a deliberate extension past the legacy walk) registers it.
-pub(crate) fn collect_cond_matches(expr: &Expr, out: &mut HashSet<Expr>) {
+pub(crate) fn collect_cond_matches(expr: &LogicalExpr, out: &mut HashSet<LogicalExpr>) {
 	match expr {
-		Expr::Binary {
+		LogicalExpr::Binary {
 			left,
 			op,
 			right,
@@ -110,7 +160,7 @@ pub(crate) fn collect_cond_matches(expr: &Expr, out: &mut HashSet<Expr>) {
 			collect_cond_matches(left, out);
 			collect_cond_matches(right, out);
 		}
-		Expr::Prefix {
+		LogicalExpr::Prefix {
 			op: PrefixOperator::Not,
 			expr: inner,
 		} => {
@@ -131,79 +181,98 @@ pub(crate) fn collect_cond_matches(expr: &Expr, out: &mut HashSet<Expr>) {
 ///
 /// - A `BinaryOperator::Matches` node absent from `allowlist` is reported and the walk stops. A
 ///   node the allowlist holds is registered, so the walk continues past it.
-/// - Statement-shaped nodes (`Select`, `Create`, `Update`, `Upsert`, `Delete`, `Relate`, `Insert`,
-///   `Define`, `Remove`, `Rebuild`, `Alter`, `Info`, `Foreach`, `Let`, `Sleep`, `Return`,
-///   `Explain`, `Match`, `Break`, `Continue`) and `Expr::Closure` are not descended into. A nested
-///   statement is planned in its own scope and registers its own WHERE, and a closure body is
-///   evaluated wherever the closure is finally called, which is not necessarily this row.
-/// - `Part::Where` and `Part::Lookup` are not descended into. An idiom filter and a graph hop
-///   evaluate their condition against values other than the SELECT's iteration row, where the
-///   outcome is decided by the per-row rules in the module docs (rules 1–2) rather than by
-///   registration.
-/// - Every other shape takes the generated walk, so a MATCHES in a function argument, a literal
-///   container, a block, or an IF/ELSE branch is reported.
+/// - A [`LogicalExpr::Subquery`] holding a statement — a block, `RETURN`, `LET`, `FOR` — is
+///   descended into: it evaluates against this row, so a MATCHES inside it is this SELECT's to
+///   register. One holding a relational plan is not: a nested `SELECT` is planned in its own scope
+///   and registers its own WHERE. A [`LogicalExpr::Closure`] is not descended into either: a
+///   closure body is evaluated wherever the closure is finally called, which is not necessarily
+///   this row.
+/// - The predicate of a [`LogicalExpr::Filter`] and the clauses of a [`LogicalExpr::Lookup`] are
+///   not descended into (their bases are). A path filter and a graph hop evaluate their condition
+///   against values other than the SELECT's iteration row, where the outcome is decided by the
+///   per-row rules in the module docs (rules 1–2) rather than by registration.
+/// - Every other shape is walked, so a MATCHES in a function argument, a literal container, an
+///   index expression, a method argument, a destructure alias, a recursion body, or an IF/ELSE
+///   branch is reported.
 pub(crate) fn first_unregistered_cond_matches(
-	cond: &Expr,
-	allowlist: &HashSet<Expr>,
-) -> Option<Expr> {
-	/// Carries the offending expression out of the walk.
-	struct Unregistered(Expr);
-
-	struct UnregisteredMatches<'a> {
-		allowlist: &'a HashSet<Expr>,
-	}
-
-	impl Visitor for UnregisteredMatches<'_> {
-		type Error = Unregistered;
-
-		fn visit_expr(&mut self, e: &Expr) -> Result<(), Self::Error> {
-			match e {
-				Expr::Binary {
-					op: BinaryOperator::Matches(_),
-					..
-				} if !self.allowlist.contains(e) => Err(Unregistered(e.clone())),
-				Expr::Select(_)
-				| Expr::Create(_)
-				| Expr::Update(_)
-				| Expr::Upsert(_)
-				| Expr::Delete(_)
-				| Expr::Relate(_)
-				| Expr::Insert(_)
-				| Expr::Define(_)
-				| Expr::Remove(_)
-				| Expr::Rebuild(_)
-				| Expr::Alter(_)
-				| Expr::Info(_)
-				| Expr::Foreach(_)
-				| Expr::Let(_)
-				| Expr::Sleep(_)
-				| Expr::Return(_)
-				| Expr::Explain {
-					..
-				}
-				| Expr::Match(_)
-				| Expr::Break
-				| Expr::Continue
-				| Expr::Closure(_) => Ok(()),
-				_ => e.visit(self),
+	cond: &LogicalExpr,
+	allowlist: &HashSet<LogicalExpr>,
+) -> Option<LogicalExpr> {
+	fn walk_expr(e: &LogicalExpr, allowlist: &HashSet<LogicalExpr>) -> Option<LogicalExpr> {
+		match e {
+			LogicalExpr::Binary {
+				op: BinaryOperator::Matches(_),
+				..
+			} if !allowlist.contains(e) => return Some(e.clone()),
+			LogicalExpr::Subquery(op) => return walk_statement(op, allowlist),
+			LogicalExpr::Closure(_) => return None,
+			LogicalExpr::Filter {
+				base,
+				..
 			}
+			| LogicalExpr::Lookup {
+				base,
+				..
+			} => return walk_expr(base, allowlist),
+			_ => {}
 		}
+		e.children().into_iter().find_map(|child| walk_expr(child, allowlist))
+	}
 
-		fn visit_part(&mut self, part: &Part) -> Result<(), Self::Error> {
-			match part {
-				Part::Where(_) | Part::Lookup(_) => Ok(()),
-				_ => part.visit(self),
-			}
+	/// The scalars of a statement evaluated against this row. A relational
+	/// plan or a GQL `MATCH` is its own scope and is not entered.
+	fn walk_statement(op: &LogicalOp, allowlist: &HashSet<LogicalExpr>) -> Option<LogicalExpr> {
+		match op {
+			LogicalOp::Eval(LogicalEval {
+				expr,
+			}) => walk_expr(expr, allowlist),
+			LogicalOp::Sequence(LogicalSequence {
+				stmts,
+			}) => stmts.iter().find_map(|stmt| walk_statement(stmt, allowlist)),
+			LogicalOp::Let(LogicalLet {
+				value,
+				..
+			}) => walk_statement(value, allowlist),
+			LogicalOp::Return(LogicalReturn {
+				what,
+				fetch,
+			}) => walk_statement(what, allowlist)
+				.or_else(|| fetch.iter().find_map(|e| walk_expr(e, allowlist))),
+			LogicalOp::Foreach(LogicalForeach {
+				range,
+				body,
+				..
+			}) => walk_expr(range, allowlist).or_else(|| walk_statement(body, allowlist)),
+			LogicalOp::Explain(LogicalExplain {
+				input,
+				..
+			}) => walk_statement(input, allowlist),
+			LogicalOp::Sleep(LogicalSleep {
+				duration,
+			}) => walk_expr(duration, allowlist),
+			LogicalOp::Info(_)
+			| LogicalOp::Match(_)
+			| LogicalOp::Source(_)
+			| LogicalOp::Values(_)
+			| LogicalOp::Subquery(_)
+			| LogicalOp::UnionAll(_)
+			| LogicalOp::Join(_)
+			| LogicalOp::Filter(_)
+			| LogicalOp::PermissionFilter(_)
+			| LogicalOp::Split(_)
+			| LogicalOp::Aggregate(_)
+			| LogicalOp::Distinct(_)
+			| LogicalOp::Sort(_)
+			| LogicalOp::Limit(_)
+			| LogicalOp::Project(_)
+			| LogicalOp::Fetch(_)
+			| LogicalOp::Timeout(_)
+			| LogicalOp::VersionScope(_)
+			| LogicalOp::Only(_) => None,
 		}
 	}
 
-	let mut walker = UnregisteredMatches {
-		allowlist,
-	};
-	match walker.visit_expr(cond) {
-		Ok(()) => None,
-		Err(Unregistered(e)) => Some(e),
-	}
+	walk_expr(cond, allowlist)
 }
 
 /// A resolved evaluation strategy for one row table.
@@ -211,23 +280,26 @@ enum MatchTarget {
 	/// Full-text index on the row's own table: check via `RecordId → DocId`
 	/// and the query-term bitmaps.
 	Local(FullTextIndex, QueryTerms),
-	/// Full-text index on a record-link target table: evaluate the idiom's
+	/// Full-text index on a record-link target table: evaluate the field's
 	/// value and analyze it with the remote index's analyzer.
 	Remote(FullTextIndex, QueryTerms),
 	/// No usable full-text index for this table.
 	Unresolved,
 }
 
-/// The field path and query string a MATCHES needs to probe a full-text index.
+/// The field and query string a MATCHES needs to probe a full-text index.
 ///
 /// Present only when the source expression can denote an index probe at all:
-/// an idiom on the left, and a right operand that resolves to a value at plan
+/// a path on the left, and a right operand that resolves to a value at plan
 /// time (legacy `Tree::eval_matches_operator` requires a computed node and
 /// takes its `to_raw_string()`).
 #[derive(Debug, Clone)]
 pub(crate) struct MatchProbe {
-	/// Field idiom from the left side (used to find the matching FT index).
-	pub(crate) idiom: Idiom,
+	/// The path read on the left side, as written. It names an index column
+	/// or a catalog field through the declared position it reads
+	/// ([`LogicalExpr::field_path`]); a path reading no declared position
+	/// resolves to no index.
+	pub(crate) field: LogicalExpr,
 	/// Search query string from the right side (extracted at plan time).
 	pub(crate) query: String,
 }
@@ -238,7 +310,7 @@ pub(crate) struct MatchProbe {
 /// tree in the module docs is the single answer for the operator. Index
 /// resolution is performed lazily per row table and cached for subsequent rows.
 pub struct MatchesOp {
-	/// Left side expression (the idiom side — also evaluated per row on the
+	/// Left side expression (the field side — also evaluated per row on the
 	/// record-link path).
 	pub(crate) left: Arc<dyn PhysicalExpr>,
 	/// Right side expression (kept for `ToSql` display).
@@ -248,7 +320,7 @@ pub struct MatchesOp {
 	pub(crate) operator: MatchesOperator,
 	/// The index probe this expression denotes, when it denotes one.
 	///
-	/// `None` for a left operand that is not an idiom, or a right operand that
+	/// `None` for a left operand that is not a path, or a right operand that
 	/// does not resolve to a value at plan time. Neither shape can name an
 	/// index, so both resolve to [`MatchTarget::Unresolved`] — which is also
 	/// what the legacy executor reports for them, since its tree registers
@@ -257,11 +329,11 @@ pub struct MatchesOp {
 	/// Whether this expression was registered from the enclosing SELECT's
 	/// WHERE condition (see [`MatchesScope`]).
 	registered: bool,
-	/// Tables whose rows a legacy `QueryExecutor` would evaluate MATCHES
-	/// against. Rows of any other table evaluate to `false`; rows of these
-	/// tables raise [`Error::NoIndexFoundForMatch`] when the expression is
-	/// unregistered or unresolvable.
-	executor_tables: Arc<[TableName]>,
+	/// The rows a legacy `QueryExecutor` would evaluate MATCHES against. Rows
+	/// of any other table evaluate to `false`; rows with an executor raise
+	/// [`Error::NoIndexFoundForMatch`] when the expression is unregistered or
+	/// unresolvable.
+	executor_tables: ExecutorTables,
 	/// Per-row-table resolution cache.
 	resolution: tokio::sync::Mutex<HashMap<TableName, Arc<MatchTarget>>>,
 }
@@ -274,7 +346,7 @@ impl MatchesOp {
 		operator: MatchesOperator,
 		probe: Option<MatchProbe>,
 		registered: bool,
-		executor_tables: Arc<[TableName]>,
+		executor_tables: ExecutorTables,
 	) -> Self {
 		Self {
 			left,
@@ -316,7 +388,8 @@ impl MatchesOp {
 	/// `resolve_idiom`: first a local index on the table itself, then a
 	/// record-link traversal via the table's field definitions.
 	///
-	/// An expression carrying no [`MatchProbe`] names no field and no query, so
+	/// An expression carrying no [`MatchProbe`] names no field and no query,
+	/// and a probe whose path reads no declared position names no column, so
 	/// there is nothing to resolve against and no catalog read is issued.
 	async fn resolve_uncached(
 		&self,
@@ -326,6 +399,9 @@ impl MatchesOp {
 		use crate::catalog::providers::TableProvider;
 
 		let Some(probe) = self.probe.as_ref() else {
+			return Ok(MatchTarget::Unresolved);
+		};
+		let Some(path) = probe.field.field_path() else {
 			return Ok(MatchTarget::Unresolved);
 		};
 
@@ -363,7 +439,7 @@ impl MatchesOp {
 		};
 		let local = indexes.iter().find(|idx| {
 			matches!(&idx.index, Index::FullText(_))
-				&& idx.cols.contains(&probe.idiom)
+				&& idx.cols.iter().any(|col| column_path(col).as_ref() == Some(&path))
 				&& !(check_perms && index_columns_touch_restricted(&idx.cols, &fields))
 		});
 		if let Some(index_def) = local {
@@ -374,21 +450,24 @@ impl MatchesOp {
 		}
 
 		// 2. Record-link traversal: the first field definition of `Record`
-		// kind whose name prefixes the idiom decides (legacy
+		// kind whose name prefixes the path decides (legacy
 		// `resolve_record_field`); auto-defined `field[*]` children make
 		// `ts[*].name` resolvable while `ts.name` is not.
-		if probe.idiom.0.len() > 1 {
+		if path.segments().len() > 1 {
 			for field in fields.iter() {
 				let Some(Kind::Record(targets)) = &field.field_kind else {
 					continue;
 				};
-				if !probe.idiom.starts_with(&field.name.0) {
+				let Some(link) = column_path(&field.name) else {
 					continue;
-				}
-				let remote_field = &probe.idiom.0[field.name.0.len()..];
+				};
+				let Some(remote_field) = path.segments().strip_prefix(link.segments()) else {
+					continue;
+				};
 				if remote_field.is_empty() {
 					break;
 				}
+				let remote_field = FieldPath::new(remote_field.to_vec());
 				// Walk the link targets in declaration order; keep the last
 				// resolvable target seen before the first unresolvable one
 				// (the legacy executor inserts one entry per resolved target
@@ -399,7 +478,7 @@ impl MatchesOp {
 						.resolve_remote_target(
 							ctx,
 							target,
-							remote_field,
+							&remote_field,
 							&probe.query,
 							check_perms,
 							frozen,
@@ -425,13 +504,13 @@ impl MatchesOp {
 	}
 
 	/// Resolve a full-text index on one record-link target table whose first
-	/// column is the remaining idiom path.
+	/// column is the remaining path.
 	#[expect(clippy::too_many_arguments)]
 	async fn resolve_remote_target(
 		&self,
 		ctx: &EvalContext<'_>,
 		target: &TableName,
-		remote_field: &[Part],
+		remote_field: &FieldPath,
 		query: &str,
 		check_perms: bool,
 		frozen: &crate::ctx::FrozenContext,
@@ -449,11 +528,13 @@ impl MatchesOp {
 		// bitmaps, so build state cannot affect results (and the legacy
 		// planner registers remote indexes regardless of build state).
 		let indexes = tx.all_tb_indexes(ns_id, db_id, target, version).await?;
-		let remote_idiom = Idiom::from(remote_field.to_vec());
 		let index_def = indexes.iter().find(|idx| {
 			matches!(&idx.index, Index::FullText(_))
 				&& !idx.prepare_remove
-				&& idx.cols.first().is_some_and(|col| col == &remote_idiom)
+				&& idx
+					.cols
+					.first()
+					.is_some_and(|col| column_path(col).as_ref() == Some(remote_field))
 				&& !(check_perms && index_columns_touch_restricted(&idx.cols, &fields))
 		});
 		match index_def {
@@ -547,7 +628,7 @@ impl PhysicalExpr for MatchesOp {
 			// Rows of tables without a legacy `QueryExecutor` — record-id
 			// sources, graph/link hops — evaluate to `false` even when the
 			// expression sits in the WHERE condition.
-			if !self.executor_tables.contains(&rid.table) {
+			if !self.executor_tables.has_executor(&rid.table) {
 				return Ok(Value::Bool(false));
 			}
 
@@ -628,7 +709,7 @@ impl Clone for MatchesOp {
 			operator: self.operator.clone(),
 			probe: self.probe.clone(),
 			registered: self.registered,
-			executor_tables: Arc::clone(&self.executor_tables),
+			executor_tables: self.executor_tables.clone(),
 			// The cache is not Clone — the clone lazily re-resolves.
 			resolution: tokio::sync::Mutex::new(HashMap::new()),
 		}
@@ -643,6 +724,15 @@ impl std::fmt::Debug for MatchesOp {
 			.field("registered", &self.registered)
 			.finish()
 	}
+}
+
+/// The declared position a catalog index column or field name declares.
+///
+/// Index columns and field names are plain paths — field names and `[*]` —
+/// so a probe path compares equal to one exactly when it reads the same
+/// position; a catalog name holding any other part declares no position.
+fn column_path(catalog: &Idiom) -> Option<FieldPath> {
+	FieldPath::from_idiom(catalog)
 }
 
 /// Returns true when any index column is governed by a field definition with

@@ -2,15 +2,14 @@
 //!
 //! - [`GraphqlValueUtils`] -- convenience accessors for `async_graphql::Value` variants (number,
 //!   string, list, object) that mirror the JSON scalar types.
-//! - [`execute_plan`] -- runs a [`LogicalPlan`] against the datastore and extracts the first result
-//!   value.
+//! - [`execute_statement`] -- runs one top-level statement against the datastore and extracts the
+//!   first result value.
 
 use async_graphql::dynamic::indexmap::IndexMap;
 use async_graphql::{Name, Value as GraphqlValue};
 
 use super::error::GraphqlError;
 use crate::dbs::Session;
-use crate::expr::LogicalPlan;
 use crate::kvs::{Datastore, QueryRequest};
 use crate::val::Value as SqlValue;
 
@@ -63,20 +62,25 @@ impl GraphqlValueUtils for GraphqlValue {
 	}
 }
 
-/// Execute a [`LogicalPlan`] against the datastore and return the first result
+/// Execute one top-level statement against the datastore and return its result
 /// value.
 ///
-/// This is the lowest-level execution helper: it processes the plan, takes the
-/// first response, and converts the public result value back to an internal
-/// [`Value`](SqlValue).  Most resolvers call higher-level wrappers (e.g.
+/// This is the lowest-level execution helper. The statement is submitted in
+/// the form the parser produces, so the executor chooses its engine exactly as
+/// it would for the same statement typed by a user; the first response is
+/// taken and its public value converted back to an internal
+/// [`Value`](SqlValue). Most resolvers call higher-level wrappers (e.g.
 /// `execute_select` in the tables module) that build a `SelectStatement` first.
-pub(crate) async fn execute_plan(
+pub(crate) async fn execute_statement(
 	ds: &Datastore,
 	sess: &Session,
-	plan: LogicalPlan,
+	stmt: crate::sql::TopLevelExpr,
 ) -> Result<SqlValue, GraphqlError> {
+	let ast = crate::sql::Ast {
+		expressions: vec![stmt],
+	};
 	let results = ds
-		.run(QueryRequest::new(plan, sess))
+		.run(QueryRequest::new(ast, sess))
 		.await
 		.map_err(|e| GraphqlError::InternalError(format!("Failed to execute query plan: {}", e)))?;
 

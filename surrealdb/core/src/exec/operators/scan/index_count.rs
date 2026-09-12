@@ -26,25 +26,27 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
+use surrealdb_types::ToSql;
 use tracing::instrument;
 
-use crate::catalog::{DatabaseId, Error, Index, NamespaceId, table_select_permission};
+use super::count::CountOutput;
+use crate::catalog::{DatabaseId, Error, Index, NamespaceId};
 use crate::err::EngineError;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
-	should_check_perms, validate_record_user_access,
+	PhysicalPermission, check_permission_for_value, should_check_perms,
+	table_select_permission_physical_runtime, validate_record_user_access,
 };
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatchStream, monitor_stream,
 };
-use crate::expr::cond::Cond;
+use crate::expr::logical::LogicalExpr;
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::key::schema::{IndexCountKey, IndexCountPrefix, RecordKey, RecordPrefix};
 use crate::key::{KVKeyDecode, KVValue};
-use crate::val::{Number, Object, TableName, Value};
+use crate::val::{TableName, Value};
 
 /// Optimized operator for `SELECT count() FROM <table> WHERE <cond> GROUP ALL`
 /// when a matching COUNT index exists.
@@ -57,15 +59,12 @@ pub struct IndexCountScan {
 	pub(crate) source: Arc<dyn PhysicalExpr>,
 	/// The physical expression for the WHERE predicate (used for fallback).
 	pub(crate) predicate: Arc<dyn PhysicalExpr>,
-	/// The AST-level WHERE condition for exact matching against COUNT index
-	/// conditions.
-	pub(crate) condition: Cond,
+	/// The logical WHERE condition, matched against COUNT index guards.
+	pub(crate) condition: LogicalExpr,
 	/// Optional VERSION expression for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
-	/// Output field names for the count result (one per SELECT field).
-	/// For `SELECT count() as c FROM t WHERE ... GROUP ALL` this would be `["c"]`.
-	/// For `SELECT count() FROM t WHERE ... GROUP ALL` this would be `["count"]`.
-	pub(crate) field_names: Vec<String>,
+	/// The shape to answer in: a row of named counts, or the count itself.
+	pub(crate) output: CountOutput,
 	/// Optional B-tree index access path for key-only counting when no
 	/// matching COUNT index exists.  The planner resolves this from the
 	/// same index analysis it performs for regular queries.
@@ -85,17 +84,17 @@ impl IndexCountScan {
 	pub(crate) fn new(
 		source: Arc<dyn PhysicalExpr>,
 		predicate: Arc<dyn PhysicalExpr>,
-		condition: Cond,
+		condition: LogicalExpr,
 		version: Option<Arc<dyn PhysicalExpr>>,
-		field_names: Vec<String>,
+		output: CountOutput,
 	) -> Self {
-		debug_assert!(!field_names.is_empty(), "IndexCountScan requires at least one field name");
+		debug_assert!(output.is_well_formed(), "IndexCountScan requires at least one output field");
 		Self {
 			source,
 			predicate,
 			condition,
 			version,
-			field_names,
+			output,
 			btree_access: None,
 			bitmap_plan: None,
 			bitmap_plan_dyn: None,
@@ -168,7 +167,7 @@ impl ExecOperator for IndexCountScan {
 		let predicate_expr = Arc::clone(&self.predicate);
 		let condition = self.condition.clone();
 		let version = self.version.clone();
-		let field_names = self.field_names.clone();
+		let output = self.output.clone();
 		let btree_access = self.btree_access.clone();
 		let bitmap_plan = self.bitmap_plan.clone();
 		let ctx = ctx.clone();
@@ -219,8 +218,7 @@ impl ExecOperator for IndexCountScan {
 
 			// Resolve SELECT permission.
 			let select_permission = if check_perms {
-				let catalog_perm = table_select_permission(table_def.as_deref());
-				convert_permission_to_physical_runtime(catalog_perm, &ctx)
+				table_select_permission_physical_runtime(table_def.as_deref(), &ctx)
 					.await
 					.context("Failed to convert permission")?
 			} else {
@@ -229,7 +227,11 @@ impl ExecOperator for IndexCountScan {
 
 			match select_permission {
 				PhysicalPermission::Deny => {
-					// Table is invisible.
+					// The table is invisible, so no index entry of it is
+					// counted. The `GROUP ALL` this stands in for reports one
+					// row whatever reaches it, and a caller who may read
+					// nothing counts nothing.
+					yielder.emit(output.batch(0)).await;
 					return Ok(());
 				}
 				PhysicalPermission::Conditional(_) => {
@@ -244,7 +246,7 @@ impl ExecOperator for IndexCountScan {
 						&predicate_expr,
 					)
 					.await?;
-					yielder.emit(make_count_batch(count, &field_names)).await;
+					yielder.emit(output.batch(count)).await;
 					return Ok(());
 				}
 				PhysicalPermission::Allow => {
@@ -271,7 +273,7 @@ impl ExecOperator for IndexCountScan {
 					ix_def.index_id,
 				)
 				.await?;
-				yielder.emit(make_count_batch(count, &field_names)).await;
+				yielder.emit(output.batch(count)).await;
 			} else if let Some((ref ix_ref, ref access)) = btree_access {
 				// Medium path: count entries by iterating B-tree index
 				// keys only — no record value deserialization.
@@ -284,13 +286,13 @@ impl ExecOperator for IndexCountScan {
 					access,
 				)
 				.await?;
-				yielder.emit(make_count_batch(count, &field_names)).await;
+				yielder.emit(output.batch(count)).await;
 			} else if let Some(ref plan) = bitmap_plan {
 				// Bitmap path (issue #547): the count is the cardinality of
 				// the exact fused bitmap over the table's shared doc-ID
 				// space — index entries only, zero record fetches.
 				let count = plan.build_exact_cardinality(&ctx, &table_name).await?;
-				yielder.emit(make_count_batch(count as usize, &field_names)).await;
+				yielder.emit(output.batch(count as usize)).await;
 			} else {
 				// No matching COUNT index found: fall back to full scan + filter + count.
 				let perm = PhysicalPermission::Allow;
@@ -304,7 +306,7 @@ impl ExecOperator for IndexCountScan {
 					&predicate_expr,
 				)
 				.await?;
-				yielder.emit(make_count_batch(count, &field_names)).await;
+				yielder.emit(output.batch(count)).await;
 			}
 			Ok(())
 		});
@@ -317,34 +319,18 @@ impl ExecOperator for IndexCountScan {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// True when `ix` is a guarded COUNT index whose guard is structurally the
-/// query's WHERE clause.
+/// True when `ix` is a guarded COUNT index whose guard is the query's WHERE
+/// clause.
 ///
-/// The guard is read from the compiled `count_cond`, never re-parsed from the
-/// stored text in `ix.index`: this is the same comparison the planner makes
-/// when it chooses the `IndexCount` plan
-/// (`exec::planner::select::has_matching_count_index`) and the classic planner
-/// makes in `idx::planner::tree`, so all three agree on which index services a
-/// given condition.
-fn matches_count_guard(ix: &crate::catalog::IndexDefinition, condition: &Cond) -> bool {
-	matches!(&ix.index, Index::Count(Some(_))) && ix.count_cond.as_ref() == Some(condition)
-}
-
-/// Build the single-row batch that the Aggregate operator would normally
-/// produce for `SELECT count() … GROUP ALL`.
-///
-/// Each entry in `field_names` becomes a key in the output object, all
-/// mapping to the same count value. For example:
-/// - `SELECT count() FROM t WHERE … GROUP ALL`      -> `{ "count": N }`
-/// - `SELECT count() AS c FROM t WHERE … GROUP ALL`  -> `{ "c": N }`
-/// - `SELECT count() AS a, count() AS b …`           -> `{ "a": N, "b": N }`
-fn make_count_batch(count: usize, field_names: &[String]) -> ValueBatch {
-	let mut obj = Object::default();
-	let count_val = Value::Number(Number::Int(count as i64));
-	for name in field_names {
-		obj.insert(name.clone(), count_val.clone());
-	}
-	ValueBatch::new(vec![Value::Object(obj)])
+/// A guard is stored as SurrealQL text (`CondText`), so its identity is its
+/// rendering: the catalog's parsed guard and the query's logical condition are
+/// compared as SurrealQL, which is the same comparison the planner makes when
+/// it chooses the `IndexCount` plan
+/// (`exec::planner::select::has_matching_count_index`), so both agree on which
+/// index services a given condition.
+fn matches_count_guard(ix: &crate::catalog::IndexDefinition, condition: &LogicalExpr) -> bool {
+	matches!(&ix.index, Index::Count(Some(_)))
+		&& ix.count_cond.as_ref().map(|guard| guard.0.to_sql()) == Some(condition.to_sql())
 }
 
 /// Sum the delta entries in `IndexCountKey` for a given COUNT index.
@@ -634,10 +620,17 @@ mod tests {
 
 	use super::*;
 	use crate::catalog::{CondText, IndexDefinition, IndexId, SurqlText};
-	use crate::expr::{Expr, Literal};
+	use crate::expr::logical::LogicalLiteral;
+	use crate::expr::{Cond, Expr, Literal};
 
+	/// The guard as the catalog holds it.
 	fn cond(b: bool) -> Cond {
 		Cond(Expr::Literal(Literal::Bool(b)))
+	}
+
+	/// The same condition as a query's WHERE clause reaches the operator.
+	fn logical(b: bool) -> LogicalExpr {
+		LogicalExpr::Literal(LogicalLiteral::Bool(b))
 	}
 
 	fn index_def(index: Index, count_cond: Option<Cond>) -> IndexDefinition {
@@ -680,11 +673,11 @@ mod tests {
 		let ix = IndexDefinition::from_stored(&stored).expect("a rendered guard re-parses");
 
 		// The planner's predicate, verbatim from exec/planner/select/mod.rs.
-		let planner_says =
-			matches!(&ix.index, Index::Count(Some(_))) && ix.count_cond.as_ref() == Some(&guard);
+		let planner_says = matches!(&ix.index, Index::Count(Some(_)))
+			&& ix.count_cond.as_ref().map(|g| g.0.to_sql()) == Some(logical(true).to_sql());
 
 		assert!(planner_says, "planner must select this index");
-		assert!(matches_count_guard(&ix, &guard), "operator must agree with the planner");
+		assert!(matches_count_guard(&ix, &logical(true)), "operator must agree with the planner");
 	}
 
 	/// A guard whose stored text does not re-parse never reaches the operator:
@@ -705,12 +698,12 @@ mod tests {
 	fn guard_match_rejects_a_different_condition() {
 		let ix =
 			index_def(Index::Count(Some(CondText(SurqlText::new(&cond(true))))), Some(cond(true)));
-		assert!(!matches_count_guard(&ix, &cond(false)));
+		assert!(!matches_count_guard(&ix, &logical(false)));
 	}
 
 	#[test]
 	fn guard_match_rejects_an_unguarded_count_index() {
 		let ix = index_def(Index::Count(None), None);
-		assert!(!matches_count_guard(&ix, &cond(true)));
+		assert!(!matches_count_guard(&ix, &logical(true)));
 	}
 }

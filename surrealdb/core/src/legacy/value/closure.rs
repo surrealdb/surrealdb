@@ -74,6 +74,13 @@ pub(crate) async fn closure_invoke(
 			}
 		}
 		Closure::Builtin(obj) => {
+			// A closure the streaming engine compiled and stored in a value
+			// runs its compiled body; the legacy frame is rebuilt per call.
+			if let Some(compiled) =
+				obj.as_any().downcast_ref::<crate::exec::physical_expr::function::CompiledClosure>()
+			{
+				return compiled.invoke_legacy(ctx, opt, doc, args).await;
+			}
 			let Some(NativeClosure(logic)) = obj.as_any().downcast_ref::<NativeClosure>() else {
 				fail!("Closure::Builtin carried an unknown implementation type");
 			};

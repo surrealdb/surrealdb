@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::DatabaseProvider;
-use crate::catalog::{Error as CatalogError, MlModelDefinition};
+use crate::catalog::{self, Error as CatalogError, MlModelDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -66,6 +66,7 @@ pub(crate) async fn define_model_statement_compute(
 			version: this.version.clone(),
 			comment,
 			permissions: this.permissions.clone(),
+			permissions_body: catalog::LogicalPermissionBody::of(&this.permissions),
 		}
 		.to_stored(),
 	)

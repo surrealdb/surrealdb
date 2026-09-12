@@ -3,9 +3,12 @@ use revision::revisioned;
 use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::{StoredPermission, StoredReference};
+use super::{LogicalPermissionBody, StoredPermission, StoredReference};
 use crate::catalog::auth::AuthLimit;
-use crate::catalog::{ExprText, FromStored, IdiomText, KindText, Permission, reference_to_stored};
+use crate::catalog::{
+	ExprText, FromStored, IdiomText, KindText, LogicalBody, Permission, reference_to_stored,
+};
+use crate::expr::logical::{LogicalExpr, LogicalPermission};
 use crate::expr::reference::Reference as ExprReference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, Kind};
@@ -262,6 +265,15 @@ impl DefineDefault {
 }
 
 /// Runtime form of [`StoredFieldDefinition`].
+///
+/// The two clauses the streaming engine's analyzer reads — `COMPUTED` and
+/// `PERMISSIONS FOR select` — are carried twice: as the [`Expr`] the legacy
+/// engine evaluates and as a lazily compiled logical body. Both come from the
+/// stored text, so `computed_body` is `Some` exactly when `computed` is and
+/// `select_body` names the same clause as `select_permission`. A constructor
+/// that sets one half must set the other from the same source:
+/// [`LogicalBody::of`] and [`LogicalPermissionBody::of`] do so from the
+/// expression a `DEFINE` statement produced.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FieldDefinition {
 	pub name: Idiom,
@@ -273,8 +285,13 @@ pub struct FieldDefinition {
 	pub value: Option<Expr>,
 	pub assert: Option<Expr>,
 	pub computed: Option<Expr>,
+	/// The `COMPUTED` clause in logical form; see [`Self::computed_logical`].
+	pub computed_body: Option<LogicalBody>,
 	pub default: DefineDefault,
 	pub select_permission: Permission,
+	/// The `PERMISSIONS FOR select` clause in logical form; see
+	/// [`Self::select_permission_logical`].
+	pub select_body: LogicalPermissionBody,
 	pub create_permission: Permission,
 	pub update_permission: Permission,
 	pub reference: Option<ExprReference>,
@@ -299,8 +316,10 @@ impl FromStored for FieldDefinition {
 				value: stored.value.as_ref().map(|t| t.compile()).transpose()?,
 				assert: stored.assert.as_ref().map(|t| t.compile()).transpose()?,
 				computed: stored.computed.as_ref().map(|t| t.compile()).transpose()?,
+				computed_body: stored.computed.as_ref().map(LogicalBody::new),
 				default: DefineDefault::from_stored(&stored.default)?,
 				select_permission: Permission::from_stored(&stored.select_permission)?,
+				select_body: LogicalPermissionBody::from_stored(&stored.select_permission),
 				create_permission: Permission::from_stored(&stored.create_permission)?,
 				update_permission: Permission::from_stored(&stored.update_permission)?,
 				reference: stored.reference.as_ref().map(ExprReference::from_stored).transpose()?,
@@ -321,6 +340,22 @@ impl FromStored for FieldDefinition {
 }
 
 impl FieldDefinition {
+	/// The `COMPUTED` clause as the logical scalar the streaming engine
+	/// evaluates, compiled on first call; `None` for a stored field.
+	///
+	/// Errs when the clause has no logical form, which a `COMPUTED` body
+	/// cannot have unless the stored text is a write statement; the analyzer
+	/// then declines the table rather than evaluating the legacy form.
+	pub fn computed_logical(&self) -> Option<anyhow::Result<&LogicalExpr>> {
+		self.computed_body.as_ref().map(LogicalBody::logical)
+	}
+
+	/// The `PERMISSIONS FOR select` clause in logical form, compiling its
+	/// guard on first call.
+	pub fn select_permission_logical(&self) -> anyhow::Result<LogicalPermission> {
+		self.select_body.logical()
+	}
+
 	/// The same-table fields this field needs a value from before its own value
 	/// can be produced.
 	///
@@ -473,6 +508,47 @@ mod tests {
 				"`{raw}` did not survive to_stored/from_stored"
 			);
 		}
+	}
+
+	/// The logical bodies are the stored text compiled for the streaming
+	/// engine: a definition built from a statement carries them, a definition
+	/// read back from storage carries them, and both compile to the same
+	/// scalar. The legacy `Expr` half never feeds the logical half.
+	#[test]
+	fn computed_and_select_clauses_compile_to_their_logical_form() {
+		let computed: Expr = ExprText::from_raw("price * qty").compile().unwrap();
+		let guard: Expr = ExprText::from_raw("$auth.id = owner").compile().unwrap();
+		let def = FieldDefinition {
+			name: Idiom::field("total"),
+			table: TableName::from("t"),
+			computed: Some(computed.clone()),
+			computed_body: Some(LogicalBody::of(&computed)),
+			select_permission: Permission::Specific(guard.clone()),
+			select_body: LogicalPermissionBody::of(&Permission::Specific(guard)),
+			..Default::default()
+		};
+		let stored = def.to_stored();
+		let loaded = FieldDefinition::from_stored(&stored).unwrap();
+		assert_eq!(loaded, def);
+
+		let body = loaded.computed_logical().expect("a computed field").unwrap();
+		assert_eq!(surrealdb_types::ToSql::to_sql(body), "price * qty");
+		let LogicalPermission::Specific(guard) = loaded.select_permission_logical().unwrap() else {
+			panic!("expected a conditional permission");
+		};
+		assert_eq!(surrealdb_types::ToSql::to_sql(&guard), "$auth.id = owner");
+
+		let plain = FieldDefinition::from_stored(
+			&FieldDefinition {
+				name: Idiom::field("plain"),
+				table: TableName::from("t"),
+				..Default::default()
+			}
+			.to_stored(),
+		)
+		.unwrap();
+		assert!(plain.computed_logical().is_none());
+		assert_eq!(plain.select_permission_logical().unwrap(), LogicalPermission::Full);
 	}
 
 	/// A field named after any reserved keyword must survive the stored-text

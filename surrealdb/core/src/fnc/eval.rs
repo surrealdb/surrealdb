@@ -70,7 +70,7 @@ use crate::dbs::{Capabilities, Force, Options, Variables};
 use crate::doc::CursorDoc;
 use crate::exe::FlowResultExt as _;
 use crate::exec::Error as ExecError;
-use crate::expr::{Block, LogicalPlan, TopLevelExpr};
+use crate::expr::Block;
 use crate::fnc::args::Optional;
 use crate::iam::Auth;
 use crate::kvs::Dialect;
@@ -85,10 +85,26 @@ fn func_name(dialect: Dialect) -> &'static str {
 	}
 }
 
+/// What a validated `eval` query turned out to be.
+pub(crate) enum Prepared {
+	/// The surface statements to evaluate in order, the last one's value being
+	/// the result. At most one: the dialect restricts `eval::surql` to a single
+	/// statement, and an empty query evaluates to `NONE`. Each engine converts
+	/// a statement the way it converts any surface statement — the legacy
+	/// engine to its `Expr`, the streaming engine by lowering.
+	Statements(Vec<crate::sql::Expr>),
+	/// A query whose front end emits a plan rather than statements. It runs
+	/// only on the streaming engine, which is the one caller that can. GQL is
+	/// the one front end that emits a plan, so without it nothing constructs
+	/// this variant; both engines still have to say what they do with one.
+	#[cfg_attr(not(feature = "gql"), allow(dead_code))]
+	Plan(Box<crate::expr::logical::LogicalOp>),
+}
+
 /// Enforce the eval capability gates, parse the query, and validate it into the
-/// block of statements to evaluate. Shared by the legacy `compute` path and the
-/// streaming-executor adapters so the gating and statement rules are identical
-/// regardless of engine.
+/// statements — or the plan — to evaluate. Shared by the legacy `compute` path
+/// and the streaming-executor adapters so the gating and statement rules are
+/// identical regardless of engine.
 ///
 /// The subject is derived from `auth` (the current execution auth), which is
 /// safe because `Auth::new_limited` never raises the subject class.
@@ -97,7 +113,7 @@ pub(crate) fn prepare(
 	auth: &Auth,
 	dialect: Dialect,
 	query: &str,
-) -> Result<Block> {
+) -> Result<Prepared> {
 	let name = func_name(dialect);
 
 	// --- Gates #2 and #3: subject checks against the current execution auth.
@@ -110,41 +126,42 @@ pub(crate) fn prepare(
 	}
 
 	// --- Parse with the live capabilities (so any SurrealQL experimental
-	// gates are honoured) and default parser
-	// limits (matching the embedded-scripting `surrealdb.query()` bridge). Both
-	// dialects are normalised to a `LogicalPlan`: SurrealQL parses to a `sql::Ast`
-	// (converted via `From`); GQL lowers directly to a `PreparedGqlQuery`
-	// wrapping a `LogicalPlan`.
+	// gates are honoured) and default parser limits (matching the
+	// embedded-scripting `surrealdb.query()` bridge). SurrealQL parses to a
+	// `sql::Ast`. GQL lowers straight to the plan it runs as, which has no
+	// statements to interleave, so it is answered here.
 	let config = crate::syn::ParserConfig::default();
-	let plan: LogicalPlan = match dialect {
-		Dialect::SurrealQl => crate::syn::parse_with_capabilities(query, caps, &config)
-			.map_err(|e| ExecError::InvalidFunction {
-				name: name.to_string(),
-				message: e.to_string(),
-			})?
-			.into(),
-		#[cfg(feature = "gql")]
-		Dialect::Gql => {
-			crate::gql::parse_with_capabilities(query, caps, &config)
+	let ast =
+		match dialect {
+			Dialect::SurrealQl => crate::syn::parse_with_capabilities(query, caps, &config)
 				.map_err(|e| ExecError::InvalidFunction {
 					name: name.to_string(),
 					message: e.to_string(),
-				})?
-				.0
-		}
-		#[cfg(not(feature = "gql"))]
-		Dialect::Gql => bail!(surrealdb_types::Error::configuration(
-			"This build does not support GQL queries".to_string(),
-			surrealdb_types::ConfigurationError::DialectNotSupported,
-		)),
-	};
+				})?,
+			#[cfg(feature = "gql")]
+			Dialect::Gql => {
+				let prepared =
+					crate::gql::parse_with_capabilities(query, caps, &config).map_err(|e| {
+						ExecError::InvalidFunction {
+							name: name.to_string(),
+							message: e.to_string(),
+						}
+					})?;
+				return Ok(Prepared::Plan(Box::new(prepared.0)));
+			}
+			#[cfg(not(feature = "gql"))]
+			Dialect::Gql => bail!(surrealdb_types::Error::configuration(
+				"This build does not support GQL queries".to_string(),
+				surrealdb_types::ConfigurationError::DialectNotSupported,
+			)),
+		};
 
 	// --- Collect the expression statements, rejecting top-level-only forms that
 	// do not belong nested inside the caller's transaction.
-	let mut statements = Vec::with_capacity(plan.expressions.len());
-	for expr in plan.expressions {
+	let mut statements = Vec::with_capacity(ast.expressions.len());
+	for expr in ast.expressions {
 		match expr {
-			TopLevelExpr::Expr(expr) => statements.push(expr),
+			crate::sql::TopLevelExpr::Expr(expr) => statements.push(expr),
 			_ => bail!(ExecError::InvalidFunction {
 				name: name.to_string(),
 				message: "only query statements may be evaluated; transaction-control and \
@@ -158,9 +175,8 @@ pub(crate) fn prepare(
 	// unambiguous (it is a scalar function — it returns one value, not the
 	// per-statement result array that `/sql` would). Multiple statements must be
 	// wrapped in an explicit block `{ ... }`, which has well-defined last-value
-	// semantics. `eval::gql` is exempt: one GQL query lowers to several SurrealQL
-	// statements internally.
-	if matches!(dialect, Dialect::SurrealQl) && statements.len() > 1 {
+	// semantics.
+	if statements.len() > 1 {
 		bail!(ExecError::InvalidFunction {
 			name: name.to_string(),
 			message: "eval::surql evaluates a single statement; wrap multiple statements in a \
@@ -168,7 +184,7 @@ pub(crate) fn prepare(
 				.to_string(),
 		});
 	}
-	Ok(Block(statements))
+	Ok(Prepared::Statements(statements))
 }
 
 pub async fn surql(
@@ -198,7 +214,16 @@ pub(crate) async fn run_eval(
 	query: String,
 	bindings: Option<Object>,
 ) -> Result<Value> {
-	let block = prepare(&ctx.get_capabilities(), opt.auth.as_ref(), dialect, &query)?;
+	let block = match prepare(&ctx.get_capabilities(), opt.auth.as_ref(), dialect, &query)? {
+		Prepared::Statements(statements) => Block(statements.into_iter().map(Into::into).collect()),
+		// The legacy engine has no way to run a plan: nothing carries one into
+		// `compute()`, and there is no statement behind it to run instead.
+		Prepared::Plan(_) => bail!(ExecError::InvalidStatement(
+			"GQL MATCH requires the streaming execution engine; it cannot run under the \
+			 compute-only planner strategy"
+				.to_string(),
+		)),
+	};
 
 	// --- Run in an *isolated* child context: the evaluated query sees only the
 	// transaction, capabilities and the caller-supplied bindings — never the call

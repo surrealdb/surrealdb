@@ -653,9 +653,10 @@ impl Parser<'_> {
 	/// exhausted.
 	///
 	/// This guards the otherwise-unbounded depth of the `Expr` tree built by
-	/// [`Self::pratt_parse_expr`]; see `ParserSettings::expr_recursion_limit`
-	/// for why an unbounded operator chain is a denial-of-service vector.
-	fn enter_expr_depth(&mut self) -> ParseResult<()> {
+	/// [`Self::pratt_parse_expr`] and of the part lists built by the idiom
+	/// parser; see `ParserSettings::expr_recursion_limit` for why an unbounded
+	/// operator chain or part chain is a denial-of-service vector.
+	pub(super) fn enter_expr_depth(&mut self) -> ParseResult<()> {
 		if self.settings.expr_recursion_limit == 0 {
 			bail!("Exceeded expression recursion depth limit",
 				@self.last_span() => "this expression nests or chains operators too deeply");

@@ -26,7 +26,7 @@ mod union_index;
 
 pub(crate) use bitmap::BitmapNode;
 pub use bitmap::BitmapResolve;
-pub use count::CountScan;
+pub use count::{CountOutput, CountScan};
 pub use dynamic::DynamicScan;
 pub use empty::EmptyScan;
 pub use fulltext::FullTextScan;
@@ -35,7 +35,6 @@ pub(crate) use graph::{PayloadPredicateSpec, PayloadTableSpec};
 pub use index::IndexScan;
 pub(crate) use knn::KnnPrefilter;
 pub use knn::KnnScan;
-pub(crate) use pipeline::determine_scan_direction;
 pub use record_id::RecordIdScan;
 pub use reference::{ReferenceScan, ReferenceScanOutput};
 pub use table::TableScan;

@@ -7241,7 +7241,6 @@ dependencies = [
  "reblessive",
  "rstest",
  "surrealdb-expr",
- "surrealdb-sql",
  "surrealdb-strand",
  "surrealdb-syn",
  "surrealdb-types",

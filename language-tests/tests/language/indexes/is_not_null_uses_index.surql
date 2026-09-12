@@ -29,7 +29,10 @@ value = "[{ id: t:d, score: 10 }]"
 value = "[{ id: t:b }, { id: t:c }, { id: t:d }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]\n    IndexScan [ctx: Db] [index: idx_score, access: >NONE, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [index: idx_score, access: >NONE, direction: Forward]
+''''
 
 [[test.results]]
 value = "[{ id: t:b }, { id: t:c }, { id: t:d }]"
@@ -38,7 +41,10 @@ value = "[{ id: t:b }, { id: t:c }, { id: t:d }]"
 value = "[{ id: t:a }, { id: t:c }, { id: t:d }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]\n    TableScan [ctx: Db] [table: t, direction: Forward, predicate: score != NULL, pre_decode_filter: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: score != NULL, pre_decode_filter: yes]
+''''
 
 [[test.results]]
 value = "[{ id: t:a }, { id: t:c }, { id: t:d }]"

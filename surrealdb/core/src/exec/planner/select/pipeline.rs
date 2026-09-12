@@ -3,12 +3,13 @@
 //! Owns the pipeline-state types ([`WhereClauseState`], [`FilterAction`],
 //! [`PlannedSource`], [`SelectPipelineConfig`]) and the orchestration
 //! method [`Planner::plan_pipeline`] that wires the operator chain
-//! together. Source planning hands off to this module via
-//! [`SelectPipelineConfig`]; projection planning is delegated to
-//! [`super::projection`].
+//! together over an already-planned source. The SELECT compiler hands off to
+//! this module once it has chosen an access path, and lookup planning
+//! (`source.rs`) reuses it for a lookup's own clauses; projection planning is
+//! delegated to [`super::projection`].
 //!
-//! Sort planning lives here too — both the legacy [`Planner::plan_sort`]
-//! (for grouped queries that must use the simpler legacy sort path) and
+//! Sort planning lives here too — both [`Planner::plan_sort`] (for grouped
+//! queries, whose projection is evaluated by the aggregation) and
 //! [`Planner::plan_sort_consolidated`] (which shares an
 //! [`ExpressionRegistry`] with projection so an expression appearing in
 //! both ORDER BY and SELECT is computed only once). The
@@ -18,21 +19,26 @@
 
 use std::sync::Arc;
 
+use surrealdb_types::ToSql;
+
 use super::super::Planner;
-use super::super::util::{check_forbidden_group_by_params, get_effective_limit_literal};
+use super::super::util::{
+	check_forbidden_group_by_params, field_path_from_expr, get_effective_limit_literal,
+};
 use crate::err::Error;
 use crate::exec::expression_registry::{ComputePoint, ExpressionRegistry, resolve_order_by_alias};
 use crate::exec::field_path::FieldPath;
+use crate::exec::logical::is_effect_free;
 use crate::exec::operators::{
 	Aggregate, Compute, Filter, Limit, RandomShuffle, Sort, SortByKey, SortDirection, SortKey,
 	SortTopK, SortTopKByKey, Split,
 };
 #[cfg(all(storage, not(target_family = "wasm")))]
 use crate::exec::operators::{ExternalSort, ExternalSortByKey};
+use crate::exec::planner::aggregate::aggregate_columns_are_effect_free;
 use crate::exec::topk_pushdown::{TopKPushdownHandle, TopKPushdownReason};
-use crate::exec::{ExecOperator, OperatorMetrics};
-use crate::expr::field::Fields;
-use crate::expr::{Cond, Expr, Idiom};
+use crate::exec::{ExecOperator, PhysicalExpr};
+use crate::expr::logical::{LogicalExpr, LogicalField, LogicalFields, LogicalOrdering};
 
 // ============================================================================
 // Pipeline-state types
@@ -43,8 +49,8 @@ use crate::expr::{Cond, Expr, Idiom};
 ///
 /// Single source of truth for the pipeline's WHERE handling: the type
 /// system enforces that exactly one representation is in flight, so
-/// callers can't accidentally provide both an AST condition and a
-/// precompiled predicate.
+/// callers can't accidentally provide both a predicate to compile and a
+/// precompiled one.
 #[derive(Default)]
 pub(crate) enum WhereClauseState {
 	/// No predicate to apply at the pipeline level. Either the source
@@ -53,27 +59,28 @@ pub(crate) enum WhereClauseState {
 	/// the brute-force KNN path applies a pre-filter before ranking).
 	#[default]
 	None,
-	/// The original AST condition. `plan_pipeline` will compile it into a
+	/// The predicate to compile. `plan_pipeline` turns it into a
 	/// `PhysicalExpr` before wrapping the source in a `Filter` operator.
-	Original(crate::expr::cond::Cond),
+	Original(LogicalExpr),
 	/// A predicate already compiled (typically by source planning for
 	/// scan pushdown) that ended up not being consumed by the source.
 	/// Reusing it avoids paying the compilation cost twice.
-	Precompiled(Arc<dyn crate::exec::PhysicalExpr>),
+	Precompiled(Arc<dyn PhysicalExpr>),
 }
 
-/// Configuration for the SELECT pipeline.
+/// The clauses [`Planner::plan_pipeline`] applies over a planned source.
 ///
-/// Bundles optional clauses from a SELECT statement to reduce parameter counts.
+/// Bundles the optional clauses so the pipeline is configured in one place.
 #[derive(Default)]
 pub(crate) struct SelectPipelineConfig {
 	pub where_clause: WhereClauseState,
-	pub split: Option<crate::expr::split::Splits>,
-	pub group: Option<crate::expr::group::Groups>,
-	pub order: Option<crate::expr::order::Ordering>,
-	pub limit: Option<crate::expr::limit::Limit>,
-	pub start: Option<crate::expr::start::Start>,
-	pub omit: Vec<Expr>,
+	pub split: Option<Vec<LogicalExpr>>,
+	/// `GROUP BY` keys; an empty list is `GROUP ALL`.
+	pub group: Option<Vec<LogicalExpr>>,
+	pub order: Option<LogicalOrdering>,
+	pub limit: Option<LogicalExpr>,
+	pub start: Option<LogicalExpr>,
+	pub omit: Vec<LogicalExpr>,
 	pub tempfiles: bool,
 	/// TopK threshold pushdown handle created by source planning; installed
 	/// into the sort operator by [`Planner::plan_sort_consolidated`] when the
@@ -87,8 +94,8 @@ pub(crate) enum FilterAction {
 	UseOriginal,
 	/// All conditions consumed by the source. No Filter needed.
 	FullyConsumed,
-	/// Partial residual remains. Create a Filter with this condition only.
-	Residual(Cond),
+	/// Partial residual remains. Create a Filter with this predicate only.
+	Residual(LogicalExpr),
 }
 
 /// Result of planning FROM sources.
@@ -107,6 +114,19 @@ pub(crate) struct PlannedSource {
 	pub(crate) topk_pushdown: Option<TopKPushdownHandle>,
 }
 
+impl PlannedSource {
+	/// A source the pipeline treats as opaque: nothing was pushed into it, so
+	/// every clause above it applies in full.
+	pub(crate) fn opaque(operator: Arc<dyn ExecOperator>) -> Self {
+		Self {
+			operator,
+			filter_action: FilterAction::UseOriginal,
+			limit_pushed: false,
+			topk_pushdown: None,
+		}
+	}
+}
+
 /// Determine `FilterAction` when a scan predicate has been compiled.
 ///
 /// When the planner compiled a `scan_predicate` (physical WHERE expression),
@@ -114,7 +134,7 @@ pub(crate) struct PlannedSource {
 /// pipeline needs no additional Filter. Otherwise the original condition
 /// must be used.
 pub(crate) fn filter_action_for_predicate(
-	scan_predicate: &Option<Arc<dyn crate::exec::PhysicalExpr>>,
+	scan_predicate: &Option<Arc<dyn PhysicalExpr>>,
 ) -> FilterAction {
 	if scan_predicate.is_some() {
 		FilterAction::FullyConsumed
@@ -140,9 +160,10 @@ pub(crate) struct TopKFirstKeySpec {
 /// Whether (and why not) the SELECT's ORDER BY + LIMIT shape allows the scan
 /// to reject rows against the TopK heap's threshold before record decode.
 ///
-/// Computed once in `plan_select` and threaded to `plan_table_scan_source`,
-/// which builds the probe ([`crate::exec::topk_pushdown`]) for `Eligible`
-/// and surfaces `Ineligible` reasons in EXPLAIN.
+/// Computed once when the pipeline is compiled and threaded to
+/// `plan_table_scan_source`, which builds the probe
+/// ([`crate::exec::topk_pushdown`]) for `Eligible` and surfaces `Ineligible`
+/// reasons in EXPLAIN.
 pub(crate) enum TopKPushdownRequest {
 	/// No pushdown opportunity at all (no ORDER BY, `ORDER BY RAND()`,
 	/// first key `id`, SPLIT/GROUP/KNN shapes, feature disabled) — the
@@ -159,35 +180,34 @@ pub(crate) enum TopKPushdownRequest {
 ///
 /// Mirrors [`Planner::plan_sort_consolidated`]'s first-key resolution: any
 /// shape that would route the first key through the expression registry
-/// (alias to expression, multi-part alias idiom, lookup, unconvertible idiom)
+/// (alias to expression, multi-step path, lookup, unconvertible path)
 /// produces a synthetic post-decode sort key that cannot be probed on raw
 /// bytes. The mirror need not be perfect — the install guard in
 /// `plan_sort_consolidated` re-checks the actually-built sort keys against
 /// [`TopKFirstKeySpec::first_key`], so a divergence only leaves the probe
 /// dormant.
 ///
-/// `disqualified` covers plan shapes where rows are duplicated, regrouped, or
-/// ranked between scan and sort (SPLIT, GROUP BY, brute-force KNN).
+/// `fields` is the projection the ORDER BY keys may alias into; `None` when
+/// the pipeline has no projection, so no alias can resolve. `disqualified`
+/// covers plan shapes where rows are duplicated, regrouped, or ranked between
+/// scan and sort (SPLIT, GROUP BY, brute-force KNN).
 pub(crate) fn compute_topk_pushdown_request(
-	order: Option<&crate::expr::order::Ordering>,
-	start: &Option<crate::expr::start::Start>,
-	limit: &Option<crate::expr::limit::Limit>,
-	fields: &Fields,
+	order: Option<&LogicalOrdering>,
+	start: Option<&LogicalExpr>,
+	limit: Option<&LogicalExpr>,
+	fields: Option<&LogicalFields>,
 	tempfiles: bool,
 	disqualified: bool,
 	max_priority_queue_size: usize,
 ) -> TopKPushdownRequest {
-	use crate::expr::order::Ordering;
-	use crate::expr::part::Part;
-
 	if disqualified {
 		return TopKPushdownRequest::NotApplicable;
 	}
 	// `Random` uses RandomShuffle; no heap, no threshold.
-	let Some(Ordering::Order(order_list)) = order else {
+	let Some(LogicalOrdering::Order(order_list)) = order else {
 		return TopKPushdownRequest::NotApplicable;
 	};
-	let Some(first) = order_list.0.first() else {
+	let Some(first) = order_list.first() else {
 		return TopKPushdownRequest::NotApplicable;
 	};
 	// No LIMIT clause means no top-K at all — not an opportunity that was
@@ -216,26 +236,16 @@ pub(crate) fn compute_topk_pushdown_request(
 	// resolution first, then FieldPath conversion. Registry-computed shapes
 	// (the `registry.register` branches there) are synthetic post-decode
 	// fields — not probeable.
-	let idiom = &first.value;
-	let field_path = if let Some((resolved_expr, _alias)) = resolve_order_by_alias(idiom, fields) {
+	let key = &first.value;
+	let field_path = if let Some((resolved_expr, _alias)) =
+		fields.and_then(|fields| resolve_order_by_alias(key, fields))
+	{
 		match &resolved_expr {
-			Expr::Idiom(inner_idiom)
-				if inner_idiom.len() == 1
-					&& !inner_idiom.0.iter().any(|p| matches!(p, Part::Lookup(_))) =>
-			{
-				match crate::exec::field_path_convert::field_path_from_idiom(inner_idiom) {
-					Ok(path) => path,
-					Err(_) => {
-						return TopKPushdownRequest::Ineligible(
-							TopKPushdownReason::UnsupportedOrder,
-						);
-					}
-				}
-			}
+			LogicalExpr::Field(name) => FieldPath::field(name.as_str()),
 			_ => return TopKPushdownRequest::Ineligible(TopKPushdownReason::UnsupportedOrder),
 		}
 	} else {
-		match crate::exec::field_path_convert::field_path_from_idiom(idiom) {
+		match field_path_from_expr(key) {
 			Ok(path) => path,
 			Err(_) => return TopKPushdownRequest::Ineligible(TopKPushdownReason::UnsupportedOrder),
 		}
@@ -260,7 +270,7 @@ pub(crate) fn compute_topk_pushdown_request(
 	};
 	TopKPushdownRequest::Eligible(TopKFirstKeySpec {
 		first_key,
-		key_count: order_list.0.len(),
+		key_count: order_list.len(),
 	})
 }
 
@@ -269,11 +279,17 @@ pub(crate) fn compute_topk_pushdown_request(
 // ============================================================================
 
 impl<'ctx> Planner<'ctx> {
-	/// Plan the SELECT pipeline after the source is determined.
+	/// Apply the pipeline's clauses over a planned source.
+	///
+	/// `fields` is the projection to apply; `None` builds no projection
+	/// operator, so the source's rows are returned as they are (apart from
+	/// any `OMIT`, and the fields a sort computed for itself). A grouped
+	/// pipeline projects inside its aggregation, so `fields` is consumed there
+	/// and only `OMIT` applies above it.
 	pub(crate) async fn plan_pipeline(
 		&self,
 		source: Arc<dyn ExecOperator>,
-		fields: Option<Fields>,
+		fields: Option<LogicalFields>,
 		config: SelectPipelineConfig,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		let SelectPipelineConfig {
@@ -304,35 +320,38 @@ impl<'ctx> Planner<'ctx> {
 				Arc::new(Filter::new(source, predicate)) as Arc<dyn ExecOperator>
 			}
 			WhereClauseState::Original(cond) => {
-				let predicate = self.physical_expr(cond.0).await?;
+				let predicate = self.physical_expr(cond).await?;
 				Arc::new(Filter::new(source, predicate)) as Arc<dyn ExecOperator>
 			}
 		};
 
-		let split_op = if let Some(splits) = split {
-			let idioms: Vec<_> = splits.into_iter().map(|s| s.0).collect();
-			Arc::new(Split {
-				input: filtered,
-				idioms,
-				metrics: Arc::new(OperatorMetrics::new()),
-			}) as Arc<dyn ExecOperator>
+		let split_op = if let Some(exprs) = split {
+			split_reads_the_projected_row(&exprs, fields.as_ref())?;
+			let mut keys = Vec::with_capacity(exprs.len());
+			for expr in &exprs {
+				keys.push(self.physical_expr(expr.clone()).await?);
+			}
+			Arc::new(Split::new(filtered, exprs, keys)?) as Arc<dyn ExecOperator>
 		} else {
 			filtered
 		};
 
-		let fields = fields.unwrap_or_else(Fields::all);
+		let (grouped, skip_projections) = if let Some(group_by) = group {
+			let agg_fields = fields.clone().unwrap_or_else(LogicalFields::all);
+			check_forbidden_group_by_params(&agg_fields)?;
 
-		let (grouped, skip_projections) = if let Some(groups) = group {
-			let group_by: Vec<_> = groups.0.into_iter().map(|g| g.0).collect();
-			check_forbidden_group_by_params(&fields)?;
+			let effect_free_columns =
+				aggregate_columns_are_effect_free(&agg_fields, &group_by, self.function_registry());
 
-			let (aggregates, group_by_exprs) = self.plan_aggregation(&fields, &group_by).await?;
+			let (aggregates, group_by_exprs) =
+				self.plan_aggregation(&agg_fields, &group_by).await?;
 
-			(
-				Arc::new(Aggregate::new(split_op, group_by, group_by_exprs, aggregates))
-					as Arc<dyn ExecOperator>,
-				true,
-			)
+			let mut aggregate = Aggregate::new(split_op, group_by, group_by_exprs, aggregates);
+			if effect_free_columns {
+				aggregate = aggregate.with_effect_free_columns();
+			}
+
+			(Arc::new(aggregate) as Arc<dyn ExecOperator>, true)
 		} else {
 			(split_op, false)
 		};
@@ -342,28 +361,40 @@ impl<'ctx> Planner<'ctx> {
 		// Reserve the SELECT field names so that synthetic `_eN` names never
 		// collide with fields the user explicitly selected.
 		let mut registry = ExpressionRegistry::with_reserved_and_protected_names(
-			super::collect_field_names(&fields),
-			super::collect_simple_source_field_names(&fields),
+			fields.as_ref().map(super::collect_field_names).unwrap_or_default(),
+			fields.as_ref().map(super::collect_simple_source_field_names).unwrap_or_default(),
 		);
 
 		let (sorted, sort_only_omits) = if let Some(order) = order {
 			// Sort elimination: if the input is already sorted in the required
 			// order, skip creating a Sort operator entirely.
-			if self.can_eliminate_sort(&grouped, &order) {
+			// A grouped query's rows are named by the aggregation, so its
+			// ORDER BY keys are already the projected names and resolve
+			// against nothing.
+			let alias_scope = if skip_projections {
+				None
+			} else {
+				fields.as_ref()
+			};
+			if self.can_eliminate_sort(&grouped, &order, alias_scope) {
 				(grouped, vec![])
 			} else if skip_projections {
-				// GROUP BY queries use the legacy sort path because the
-				// consolidated approach's Compute operator would try to
-				// evaluate aggregate expressions (e.g., math::sum) on
-				// individual rows rather than grouped arrays.
-				(self.plan_sort(grouped, order, &start, &limit, tempfiles).await?, vec![])
+				// A grouped query's projection is evaluated by the aggregation,
+				// so its sort keys are read from the aggregated rows: the
+				// consolidated path's Compute operator would evaluate an
+				// aggregate expression (e.g. math::sum) per input row instead.
+				(
+					self.plan_sort(grouped, order, start.as_ref(), limit.as_ref(), tempfiles)
+						.await?,
+					vec![],
+				)
 			} else {
 				self.plan_sort_consolidated(
 					grouped,
 					order,
-					&fields,
-					&start,
-					&limit,
+					fields.as_ref(),
+					start.as_ref(),
+					limit.as_ref(),
 					tempfiles,
 					&mut registry,
 					topk_pushdown,
@@ -376,11 +407,11 @@ impl<'ctx> Planner<'ctx> {
 
 		let limited = if limit.is_some() || start.is_some() {
 			let limit_expr = match limit {
-				Some(l) => Some(self.physical_expr(l.0).await?),
+				Some(l) => Some(self.physical_expr(l).await?),
 				None => None,
 			};
 			let offset_expr = match start {
-				Some(s) => Some(self.physical_expr(s.0).await?),
+				Some(s) => Some(self.physical_expr(s).await?),
 				None => None,
 			};
 			Arc::new(Limit::new(sorted, limit_expr, offset_expr)) as Arc<dyn ExecOperator>
@@ -390,19 +421,26 @@ impl<'ctx> Planner<'ctx> {
 
 		let mut all_omit = omit;
 		for field_name in sort_only_omits {
-			all_omit.push(Expr::Idiom(Idiom::field(field_name)));
+			all_omit.push(LogicalExpr::Field(field_name.into()));
 		}
 
-		let projected = if skip_projections {
-			if !all_omit.is_empty() {
-				let omit_fields = self.plan_omit(all_omit).await?;
-				Arc::new(crate::exec::operators::Project::new(limited, vec![], omit_fields, true))
-					as Arc<dyn ExecOperator>
-			} else {
-				limited
+		let projected = match fields {
+			Some(fields) if !skip_projections => {
+				self.plan_projections_fast(fields, all_omit, limited, &mut registry).await?
 			}
-		} else {
-			self.plan_projections_fast(fields, all_omit, limited, &mut registry).await?
+			// Grouped (the aggregation projected), or no projection at all:
+			// only an `OMIT` is left to apply.
+			Some(_) | None => {
+				if !all_omit.is_empty() {
+					let omit_fields = self.plan_omit(all_omit).await?;
+					Arc::new(
+						crate::exec::operators::Project::new(limited, vec![], omit_fields, true)
+							.with_effect_free_columns(),
+					) as Arc<dyn ExecOperator>
+				} else {
+					limited
+				}
+			}
 		};
 
 		Ok(projected)
@@ -410,15 +448,19 @@ impl<'ctx> Planner<'ctx> {
 
 	/// Check whether the input operator's output ordering already satisfies
 	/// the requested ORDER BY, allowing the Sort operator to be eliminated.
+	///
+	/// `fields` is the projection an ORDER BY key may alias into, and must be
+	/// `None` wherever the sort reads rows the projection already produced —
+	/// a grouped query, whose aggregation names its rows by their aliases.
 	pub(crate) fn can_eliminate_sort(
 		&self,
 		input: &Arc<dyn ExecOperator>,
-		order: &crate::expr::order::Ordering,
+		order: &LogicalOrdering,
+		fields: Option<&LogicalFields>,
 	) -> bool {
 		use crate::exec::ordering::SortProperty;
-		use crate::expr::order::Ordering;
 
-		let Ordering::Order(order_list) = order else {
+		let LogicalOrdering::Order(order_list) = order else {
 			return false; // Random ordering can't be eliminated
 		};
 
@@ -428,22 +470,32 @@ impl<'ctx> Planner<'ctx> {
 		let required: Vec<SortProperty> = order_list
 			.iter()
 			.filter_map(|field| {
-				// Only simple field paths can be matched
-				crate::exec::field_path_convert::field_path_from_idiom(&field.value).ok().map(
-					|path| {
-						let direction = if field.direction {
-							SortDirection::Asc
-						} else {
-							SortDirection::Desc
-						};
-						SortProperty {
-							path,
-							direction,
-							collate: field.collate,
-							numeric: field.numeric,
-						}
-					},
-				)
+				// Resolve the key the way `plan_sort_consolidated` will:
+				// alias resolution first, then FieldPath conversion. An
+				// ORDER BY naming a projection output sorts by what that
+				// output holds, so the path an input ordering has to provide
+				// is the aliased expression's — `b AS a … ORDER BY a` needs
+				// `b` ordered, and an index over the record's own `a` does
+				// not supply it. A key resolving to anything but a plain
+				// field read is computed above the scan, which no scan
+				// ordering can satisfy.
+				let path =
+					match fields.and_then(|fields| resolve_order_by_alias(&field.value, fields)) {
+						Some((LogicalExpr::Field(name), _)) => FieldPath::field(name.as_str()),
+						Some(_) => return None,
+						None => field_path_from_expr(&field.value).ok()?,
+					};
+				let direction = if field.direction {
+					SortDirection::Asc
+				} else {
+					SortDirection::Desc
+				};
+				Some(SortProperty {
+					path,
+					direction,
+					collate: field.collate,
+					numeric: field.numeric,
+				})
 			})
 			.collect();
 
@@ -468,42 +520,56 @@ impl<'ctx> Planner<'ctx> {
 		input.output_ordering().satisfies(&required)
 	}
 
-	/// Plan ORDER BY (legacy path, used by grouped queries).
+	/// Plan ORDER BY over rows whose sort keys are read as written (grouped
+	/// queries, and lookups without a projection to consolidate with).
 	pub(crate) async fn plan_sort(
 		&self,
 		input: Arc<dyn ExecOperator>,
-		order: crate::expr::order::Ordering,
-		start: &Option<crate::expr::start::Start>,
-		limit: &Option<crate::expr::limit::Limit>,
+		order: LogicalOrdering,
+		start: Option<&LogicalExpr>,
+		limit: Option<&LogicalExpr>,
 		#[allow(unused)] tempfiles: bool,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		use crate::expr::order::Ordering;
-
 		match order {
-			Ordering::Random => {
+			LogicalOrdering::Random => {
 				let effective_limit = get_effective_limit_literal(start, limit);
 				Ok(Arc::new(RandomShuffle::new(input, effective_limit)) as Arc<dyn ExecOperator>)
 			}
-			Ordering::Order(order_list) => {
+			LogicalOrdering::Order(order_list) => {
+				// These operators evaluate the keys themselves, so the shape
+				// of that evaluation is judged here rather than at a `Compute`
+				// the way `plan_sort_consolidated`'s keys are; see
+				// `Sort::effect_free_columns`.
+				let effect_free_columns = order_list
+					.iter()
+					.all(|field| is_effect_free(&field.value, self.function_registry()));
 				let order_by = self.convert_order_list(order_list).await?;
 
 				#[cfg(all(storage, not(target_family = "wasm")))]
 				if tempfiles && let Some(temp_dir) = self.ctx.temporary_directory() {
-					return Ok(
-						Arc::new(ExternalSort::new(input, order_by, temp_dir.to_path_buf()))
-							as Arc<dyn ExecOperator>,
-					);
+					let mut sort = ExternalSort::new(input, order_by, temp_dir.to_path_buf());
+					if effect_free_columns {
+						sort = sort.with_effect_free_columns();
+					}
+					return Ok(Arc::new(sort) as Arc<dyn ExecOperator>);
 				}
 
 				if let Some(effective_limit) = get_effective_limit_literal(start, limit)
 					&& effective_limit
 						<= self.ctx.config.exec.max_order_limit_priority_queue_size as usize
 				{
-					return Ok(Arc::new(SortTopK::new(input, order_by, effective_limit))
-						as Arc<dyn ExecOperator>);
+					let mut topk = SortTopK::new(input, order_by, effective_limit);
+					if effect_free_columns {
+						topk = topk.with_effect_free_columns();
+					}
+					return Ok(Arc::new(topk) as Arc<dyn ExecOperator>);
 				}
 
-				Ok(Arc::new(Sort::new(input, order_by)) as Arc<dyn ExecOperator>)
+				let mut sort = Sort::new(input, order_by);
+				if effect_free_columns {
+					sort = sort.with_effect_free_columns();
+				}
+				Ok(Arc::new(sort) as Arc<dyn ExecOperator>)
 			}
 		}
 	}
@@ -512,77 +578,45 @@ impl<'ctx> Planner<'ctx> {
 	///
 	/// Uses a shared `ExpressionRegistry` so that expressions computed for sort
 	/// can be reused by downstream projection (avoiding duplicate computation).
+	/// `fields` is the projection an ORDER BY key may alias into, when there is
+	/// one.
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn plan_sort_consolidated(
 		&self,
 		input: Arc<dyn ExecOperator>,
-		order: crate::expr::order::Ordering,
-		fields: &Fields,
-		start: &Option<crate::expr::start::Start>,
-		limit: &Option<crate::expr::limit::Limit>,
+		order: LogicalOrdering,
+		fields: Option<&LogicalFields>,
+		start: Option<&LogicalExpr>,
+		limit: Option<&LogicalExpr>,
 		#[allow(unused)] tempfiles: bool,
 		registry: &mut ExpressionRegistry,
 		topk_pushdown: Option<TopKPushdownHandle>,
 	) -> Result<(Arc<dyn ExecOperator>, Vec<String>), Error> {
-		use crate::expr::order::Ordering;
-		use crate::expr::part::Part;
-
 		match order {
-			Ordering::Random => {
+			LogicalOrdering::Random => {
 				let effective_limit = get_effective_limit_literal(start, limit);
 				Ok((
 					Arc::new(RandomShuffle::new(input, effective_limit)) as Arc<dyn ExecOperator>,
 					vec![],
 				))
 			}
-			Ordering::Order(order_list) => {
+			LogicalOrdering::Order(order_list) => {
 				let mut sort_keys = Vec::with_capacity(order_list.len());
 				let mut sort_only_fields: Vec<String> = Vec::new();
 
 				for order_field in order_list.iter() {
-					let idiom = &order_field.value;
+					let key = &order_field.value;
 
 					let field_path = if let Some((resolved_expr, alias)) =
-						resolve_order_by_alias(idiom, fields)
+						fields.and_then(|fields| resolve_order_by_alias(key, fields))
 					{
 						match &resolved_expr {
-							Expr::Idiom(inner_idiom) => {
-								// Multi-part idioms or lookups require the
-								// Compute operator for context-aware evaluation
-								// (e.g., record-link traversal like
-								// `in.creationDate` on edge tables).
-								// Single-part idioms can use FieldPath directly.
-								if inner_idiom.len() > 1
-									|| inner_idiom.0.iter().any(|p| matches!(p, Part::Lookup(_)))
-								{
-									let name = registry
-										.register(
-											&resolved_expr,
-											ComputePoint::Sort,
-											Some(alias.clone()),
-											self,
-										)
-										.await?;
-									FieldPath::field(name)
-								} else {
-									match crate::exec::field_path_convert::field_path_from_idiom(
-										inner_idiom,
-									) {
-										Ok(path) => path,
-										Err(_) => {
-											let name = registry
-												.register(
-													&resolved_expr,
-													ComputePoint::Sort,
-													Some(alias.clone()),
-													self,
-												)
-												.await?;
-											FieldPath::field(name)
-										}
-									}
-								}
-							}
+							// A bare field read is read as written. Any other
+							// expression — a multi-step path or a lookup
+							// included, which need context-aware evaluation
+							// (record-link traversal like `in.creationDate` on
+							// edge tables) — is computed before the sort.
+							LogicalExpr::Field(name) => FieldPath::field(name.as_str()),
 							_ => {
 								let name = registry
 									.register(
@@ -596,13 +630,11 @@ impl<'ctx> Planner<'ctx> {
 							}
 						}
 					} else {
-						match crate::exec::field_path_convert::field_path_from_idiom(idiom) {
+						match field_path_from_expr(key) {
 							Ok(path) => path,
 							Err(_) => {
-								let expr = Expr::Idiom(idiom.clone());
-								let name = registry
-									.register(&expr, ComputePoint::Sort, None, self)
-									.await?;
+								let name =
+									registry.register(key, ComputePoint::Sort, None, self).await?;
 								sort_only_fields.push(name.clone());
 								FieldPath::field(name)
 							}
@@ -628,7 +660,11 @@ impl<'ctx> Planner<'ctx> {
 						.into_iter()
 						.map(|(name, expr)| (crate::val::Strand::new(name), expr))
 						.collect();
-					Arc::new(Compute::new(input, compute_fields)) as Arc<dyn ExecOperator>
+					let mut compute = Compute::new(input, compute_fields);
+					if registry.point_is_effect_free(ComputePoint::Sort) {
+						compute = compute.with_effect_free_columns();
+					}
+					Arc::new(compute) as Arc<dyn ExecOperator>
 				} else {
 					input
 				};
@@ -675,6 +711,155 @@ impl<'ctx> Planner<'ctx> {
 					sort_only_fields,
 				))
 			}
+		}
+	}
+}
+
+/// A `SPLIT` names a field of the row the statement returns, so the split
+/// belongs above the projection. The streaming pipeline projects last, and
+/// splits the row the source produced instead, which is the same row only
+/// where the projection hands the split field through untouched.
+///
+/// Where it does not, the two differ and the split silently does nothing or
+/// splits the wrong values: an aliased field (`own AS x … SPLIT x`) is not on
+/// the source row at all; a nested path the projection materialises
+/// (`link.tags`, over a record link) is not reachable on it either; a name the
+/// projection reuses for another value (`other AS own … SPLIT own`) is a
+/// different value before and after; and a second field reading the split one
+/// (`own AS a, own … SPLIT own`) would see the split value where it is owed
+/// the whole.
+///
+/// Such a statement is declined so it runs on the per-row engine, which
+/// projects each row before splitting it.
+fn split_reads_the_projected_row(
+	targets: &[LogicalExpr],
+	fields: Option<&LogicalFields>,
+) -> Result<(), Error> {
+	// No projection at all, or `SELECT *` alone: the row reaching the split is
+	// the row the statement returns.
+	let Some(LogicalFields::Select(field_list)) = fields else {
+		if fields.is_none() {
+			return Ok(());
+		}
+		return Err(unsplittable(targets));
+	};
+	if field_list.iter().all(|field| matches!(field, LogicalField::All)) {
+		return Ok(());
+	}
+
+	for target in targets {
+		let LogicalExpr::Field(name) = target else {
+			return Err(unsplittable(targets));
+		};
+		let name = name.as_str();
+		let mut passed_through = false;
+		for field in field_list {
+			match field {
+				// `*` carries the source row's own fields through under their
+				// own names, the split field among them.
+				LogicalField::All => passed_through = true,
+				LogicalField::Single {
+					expr,
+					alias,
+					..
+				} => {
+					let lands_here = match alias {
+						Some(path) => path.as_field() == Some(name),
+						None => matches!(expr, LogicalExpr::Field(n) if n.as_str() == name),
+					};
+					let reads_it =
+						expr.any(|e| matches!(e, LogicalExpr::Field(n) if n.as_str() == name));
+					if lands_here && matches!(expr, LogicalExpr::Field(n) if n.as_str() == name) {
+						passed_through = true;
+					} else if lands_here || reads_it {
+						// The name holds a different value after the
+						// projection, or another field reads the whole of it.
+						return Err(unsplittable(targets));
+					}
+				}
+			}
+		}
+		if !passed_through {
+			return Err(unsplittable(targets));
+		}
+	}
+	Ok(())
+}
+
+/// The decline [`split_reads_the_projected_row`] raises.
+fn unsplittable(targets: &[LogicalExpr]) -> Error {
+	crate::exec::Error::PlannerUnsupported(format!(
+		"a SPLIT of this shape names a field of the projected row rather than of the row \
+		 beneath it: {}",
+		targets.iter().map(ToSql::to_sql).collect::<Vec<_>>().join(", ")
+	))
+	.into()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::planner::fold::collect_pipeline;
+	use crate::expr::logical::lower_select;
+	use crate::syn;
+
+	/// The `SPLIT` targets and selection of a `SELECT`, as the pipeline sees
+	/// them.
+	fn split_and_fields(sql: &str) -> (Vec<LogicalExpr>, Option<LogicalFields>) {
+		let ast = syn::parse(sql).expect("parse");
+		let mut exprs = ast.expressions;
+		assert_eq!(exprs.len(), 1, "expected one statement in {sql:?}");
+		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Select(select)) = exprs.remove(0)
+		else {
+			panic!("`{sql}` is not a SELECT");
+		};
+		let (clauses, _) = collect_pipeline(lower_select(*select).expect("lowers"));
+		let split = clauses.split.expect("the statement has a SPLIT");
+		(split, clauses.project.map(|project| project.fields))
+	}
+
+	fn splits_the_projected_row(sql: &str) -> bool {
+		let (targets, fields) = split_and_fields(sql);
+		split_reads_the_projected_row(&targets, fields.as_ref()).is_ok()
+	}
+
+	#[test]
+	fn split_plans_where_the_projection_hands_the_field_through() {
+		for sql in [
+			// The field is carried through under its own name, so the row the
+			// split sees is the row the statement returns.
+			"SELECT id, own FROM t SPLIT own",
+			"SELECT own FROM t SPLIT own",
+			"SELECT * FROM t SPLIT own",
+			"SELECT * FROM t SPLIT link.tags",
+			"SELECT id, own, other FROM t SPLIT own, other",
+			// An unrelated alias does not touch the split field.
+			"SELECT id, own, other AS o FROM t SPLIT own",
+		] {
+			assert!(splits_the_projected_row(sql), "`{sql}` should plan");
+		}
+	}
+
+	#[test]
+	fn split_declines_where_the_projection_makes_a_different_row() {
+		for sql in [
+			// The name exists only after the projection.
+			"SELECT id, own AS x FROM t SPLIT x",
+			"SELECT id, [1, 2, 3] AS x FROM t SPLIT x",
+			"SELECT id, link.tags AS x FROM t SPLIT x",
+			// The target is a path rather than a field of the row.
+			"SELECT id, link.tags FROM t SPLIT link.tags",
+			// The name holds a different value on either side.
+			"SELECT id, other AS own FROM t SPLIT own",
+			"SELECT id, array::distinct(own) AS own FROM t SPLIT own",
+			// Another field is owed the whole of the split value.
+			"SELECT id, own AS a, own FROM t SPLIT own",
+			// One target of several is enough to decline.
+			"SELECT id, own, other AS b FROM t SPLIT own, b",
+			// A `VALUE` projection is not the row the split names.
+			"SELECT VALUE own FROM t SPLIT own",
+		] {
+			assert!(!splits_the_projected_row(sql), "`{sql}` should decline");
 		}
 	}
 }

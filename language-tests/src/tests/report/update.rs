@@ -91,6 +91,39 @@ pub fn apply_error(doc: &mut DocumentMut, error_field: &str, error: &str) {
 		.or_insert(Item::None) = Item::Table(table);
 }
 
+/// The TOML entry an expected value is written as.
+///
+/// A string whose text spans lines — what an `EXPLAIN` renders — is written
+/// as a multi-line literal holding the text as it stands, so the expectation
+/// reads as the plan tree it is rather than as one line of escapes. Every
+/// other value, and any text a literal string cannot hold (one carrying a
+/// literal-string delimiter of its own, or a carriage return), is written on
+/// one line.
+fn expectation(value: &SurValue) -> Item {
+	let one_line = || toml_edit::value(value.to_sql());
+	let SurValue::String(text) = value else {
+		return one_line();
+	};
+	if !text.as_str().contains('\n') {
+		return one_line();
+	}
+	// The pretty rendering writes a string's newlines as they are.
+	let pretty = value.to_sql_pretty();
+	if pretty.contains("'''") || pretty.contains('\r') {
+		return one_line();
+	}
+	// A multi-line literal keeps the representation it was parsed with, and no
+	// constructor sets one: parse the entry and take the value it holds. The
+	// newline after the opening delimiter is not part of the string.
+	let Ok(parsed) = format!("value = '''\n{pretty}'''").parse::<DocumentMut>() else {
+		return one_line();
+	};
+	match parsed.get("value").and_then(Item::as_value) {
+		Some(value) => Item::Value(value.clone()),
+		None => one_line(),
+	}
+}
+
 pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>]) {
 	let results_array = doc
 		.entry("test")
@@ -106,7 +139,7 @@ pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>])
 			if let Some(x) = arr.get_mut(idx) {
 				match r {
 					Ok(r) => {
-						x["value"] = toml_edit::value(r.to_sql());
+						x["value"] = expectation(r);
 					}
 					Err(e) => {
 						x["error"] = toml_edit::value(e.to_string());
@@ -116,7 +149,7 @@ pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>])
 				let mut table = Table::default();
 				match r {
 					Ok(r) => {
-						table["value"] = toml_edit::value(r.to_sql());
+						table["value"] = expectation(r);
 					}
 					Err(e) => {
 						table["error"] = toml_edit::value(e.to_string());
@@ -138,7 +171,7 @@ pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>])
 				let mut table = toml_edit::Table::new();
 				match r {
 					Ok(x) => {
-						table.insert("value", toml_edit::value(x.to_sql()));
+						table.insert("value", expectation(x));
 					}
 					Err(e) => {
 						table.insert("error", toml_edit::value(e.to_string()));
@@ -148,7 +181,7 @@ pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>])
 			}
 		} else {
 			for (idx, r) in values.iter().enumerate() {
-				let v = toml_edit::value(r.as_ref().unwrap().to_sql()).into_value().unwrap();
+				let v = expectation(r.as_ref().unwrap()).into_value().unwrap();
 				if let Some(x) = arr.get_mut(idx) {
 					*x = v;
 				} else {

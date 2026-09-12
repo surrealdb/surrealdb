@@ -114,6 +114,12 @@ fn step<'v>(value: &'v Value, part: &FieldPathPart) -> Step<'v> {
 		(Value::Object(obj), FieldPathPart::Field(name) | FieldPathPart::Lookup(name)) => {
 			obj.get(name).map_or(Step::Owned(Value::None), Step::Borrowed)
 		}
+		// Index access on object addresses the key the index renders as, which
+		// is how a read of `a[0]` reaches `{ '0': .. }`. `[0]` written as
+		// first, and `[$]`, address no key: an object has no order.
+		(Value::Object(obj), FieldPathPart::Index(i)) => {
+			obj.get(i.to_string().as_str()).map_or(Step::Owned(Value::None), Step::Borrowed)
+		}
 		// Index access on array
 		(Value::Array(arr), FieldPathPart::Index(i)) => {
 			arr.get(*i).map_or(Step::Owned(Value::None), Step::Borrowed)

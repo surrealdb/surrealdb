@@ -69,11 +69,12 @@ use crate::exe::FlowResultExt as _;
 use crate::exec::Error as ExecError;
 use crate::exec::config::ExecConfig;
 use crate::exec::function::FunctionRegistry;
+use crate::expr::logical::LogicalOp;
 use crate::expr::model::get_model_path;
+use crate::expr::statements::DefineUserStatement;
 use crate::expr::statements::define::DefineKind;
-use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
 use crate::expr::user::UserDuration;
-use crate::expr::{Base, Expr, Idiom, Literal, LogicalPlan, TopLevelExpr};
+use crate::expr::{Base, Expr, Idiom, Literal};
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
 use crate::iam::{Action, Auth, PolicyError, Resource, ResourceKind, Role, ScramCredential};
@@ -5164,14 +5165,14 @@ impl Datastore {
 	/// Parsed SurrealQL stays in surface form: the executor converts each
 	/// statement when it is about to run it, rather than converting the batch
 	/// before the first one does. GQL has no SurrealQL surface form — it lowers
-	/// straight to a plan — so it arrives at the executor already lowered, as
-	/// does a source a caller lowered itself.
+	/// straight to a plan — so it arrives at the executor as the plan it runs
+	/// as, as does a plan a caller submits directly.
 	fn statements_for(
 		&self,
 		source: QuerySource<'_>,
 	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
-		fn lowered(plan: LogicalPlan) -> Vec<TopLevelStatement> {
-			plan.expressions.into_iter().map(TopLevelStatement::Plan).collect()
+		fn planned(plans: Vec<LogicalOp>) -> Vec<TopLevelStatement> {
+			plans.into_iter().map(|op| TopLevelStatement::Plan(Box::new(op))).collect()
 		}
 
 		let ast = match source {
@@ -5183,29 +5184,29 @@ impl Datastore {
 			QuerySource::Text {
 				text,
 				dialect: Dialect::Gql,
-			} => return Ok(lowered(self.parse_gql(text)?)),
+			} => return Ok(planned(self.parse_gql(text)?)),
 			QuerySource::Ast(ast) => ast,
-			QuerySource::Plan(plan) => return Ok(lowered(plan)),
+			QuerySource::Plan(plans) => return Ok(planned(plans)),
 		};
 		Ok(ast.expressions.into_iter().map(TopLevelStatement::Ast).collect())
 	}
 
-	/// Parse and lower GQL query text to the plan the executor runs.
+	/// Parse and lower GQL query text to the plans the executor runs.
 	///
 	/// The plan is returned bare rather than in its `PreparedGqlQuery`
 	/// wrapper: that type comes from the `gql` crate, so naming it here would
 	/// leave the signature unbuildable on a build without the feature.
 	#[cfg(feature = "gql")]
-	fn parse_gql(&self, text: &str) -> std::result::Result<LogicalPlan, TypesError> {
+	fn parse_gql(&self, text: &str) -> std::result::Result<Vec<LogicalOp>, TypesError> {
 		crate::gql::parse_with_capabilities(text, &self.capabilities.load(), &self.parser_config)
-			.map(|prepared| prepared.0)
+			.map(|prepared| vec![prepared.0])
 			.map_err(|e| TypesError::validation(e.to_string(), None))
 	}
 
 	/// The dialect exists on every build because it is chosen from what a
 	/// client sent; the front end that would parse it does not.
 	#[cfg(not(feature = "gql"))]
-	fn parse_gql(&self, _text: &str) -> std::result::Result<LogicalPlan, TypesError> {
+	fn parse_gql(&self, _text: &str) -> std::result::Result<Vec<LogicalOp>, TypesError> {
 		Err(TypesError::configuration(
 			"This build does not support GQL queries".to_string(),
 			surrealdb_types::ConfigurationError::DialectNotSupported,
@@ -6028,23 +6029,22 @@ impl Datastore {
 		let path = get_model_path(ns, db, name, version, &hash);
 		// Insert the file data in to the store
 		crate::obs::put(&path, data).await?;
-		// Insert the model in to the database
-		let model = DefineModelStatement {
+		// Insert the model in to the database. The statement is built in the
+		// form the parser produces, so it runs exactly as the same `DEFINE
+		// MODEL` typed by a user would.
+		let model = crate::sql::DefineModelStatement {
 			name: name.to_string().into(),
 			version: version.to_string().into(),
-			comment: Expr::Literal(Literal::String(description.into())),
+			comment: crate::sql::Expr::Literal(crate::sql::Literal::String(description.into())),
 			hash: hash.into(),
 			kind: Default::default(),
 			permissions: Default::default(),
 		};
+		let ast = crate::sql::Ast::single_expr(crate::sql::Expr::Define(Box::new(
+			crate::sql::statements::DefineStatement::Model(model),
+		)));
 
-		let q = LogicalPlan {
-			expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Model(
-				model,
-			))))],
-		};
-
-		self.run(QueryRequest::new(q, session)).await.map_err(|e| anyhow::anyhow!(e))?;
+		self.run(QueryRequest::new(ast, session)).await.map_err(|e| anyhow::anyhow!(e))?;
 
 		Ok(())
 	}

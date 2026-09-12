@@ -1,9 +1,11 @@
 //! The declarative IR for GQL v2 `MATCH` queries.
 //!
 //! `MatchPlan` is the language-neutral binding-table plan node produced by the
-//! GQL lowering and embedded into the logical plan as [`Expr::Match`]. The
-//! streaming execution planner (`exec/planner/match_plan.rs`) compiles it into a
-//! tree of physical operators; it never runs under the compute-only planner.
+//! GQL lowering and carried by the logical plan's [`LogicalOp::Match`]. Its
+//! scalars are the logical plan's own [`LogicalExpr`], so the streaming
+//! execution planner (`exec/planner/match_plan.rs`) compiles them as it
+//! compiles every other scalar and the plan holds nothing the legacy engine
+//! evaluates. It never runs under the compute-only planner.
 //!
 //! See `doc/gql/V2_DESIGN.md` §2 for the normative contract.
 
@@ -11,7 +13,7 @@ use common::fmt::EscapeIdent;
 use surrealdb_strand::TableName;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::expr::{Expr, Idiom};
+use crate::expr::logical::LogicalExpr;
 
 /// Index into [`MatchPlan::bindings`]; identifies a binding by position.
 ///
@@ -25,8 +27,8 @@ pub type BindingId = u32;
 ///
 /// Invariants the lowering guarantees (the planner relies on these and never
 /// re-derives them):
-/// - every [`Expr`] is BINDING-ROW scoped (`a.x` → `Idiom[Field("a"),Field("x")]`), with 3VL guards
-///   already inserted;
+/// - every [`LogicalExpr`] is BINDING-ROW scoped (`a.x` → the path `a.x`, whose first field is the
+///   binding), with 3VL guards already inserted;
 /// - [`MatchPredicate::deps`] is the exact set of bindings the expr reads;
 /// - conjuncts are NNF-split and live on the clause whose pattern scope owns them (critical for
 ///   OPTIONAL);
@@ -51,9 +53,91 @@ pub struct MatchPlan {
 impl MatchPlan {
 	/// Whether this plan carries any write stage. Drives the transaction type
 	/// (a mutation-bearing plan is not read-only, so the executor opens a write
-	/// transaction) — see `Expr::read_only`.
+	/// transaction) — see `LogicalOp::read_only`.
 	pub fn has_mutations(&self) -> bool {
 		self.stages.iter().any(|s| matches!(s, MatchStage::Mutate(_)))
+	}
+
+	/// Every scalar the plan evaluates, in execution order: each clause
+	/// predicate and mutation value stage by stage, then the output's grouping
+	/// keys, columns, ordering and paging.
+	///
+	/// The plan's own structure — bindings, patterns, labels, property names
+	/// and column names — holds no scalar and is skipped. Mutation *targets*
+	/// are binding ids rather than scalars, so a write is visible here only
+	/// through the values it writes; ask [`Self::has_mutations`] whether the
+	/// plan writes at all.
+	pub fn scalars(&self) -> Vec<&LogicalExpr> {
+		let mut out = Vec::new();
+		for stage in &self.stages {
+			match stage {
+				MatchStage::Read(clause) => {
+					out.extend(clause.predicates.iter().map(|predicate| &predicate.expr));
+				}
+				MatchStage::Mutate(MutationStage::Update {
+					data,
+					..
+				}) => match data {
+					UpdateData::Set(assignments) => {
+						out.extend(assignments.iter().map(|(_, value)| value));
+					}
+					UpdateData::Unset(_) => {}
+					UpdateData::Content(expr) => out.push(expr),
+				},
+				MatchStage::Mutate(MutationStage::Delete {
+					..
+				}) => {}
+				MatchStage::Mutate(MutationStage::Insert(stage)) => {
+					out.extend(stage.nodes.iter().map(|node| &node.props));
+					out.extend(stage.edges.iter().map(|edge| &edge.props));
+				}
+			}
+		}
+		if let Some(output) = self.output.as_ref() {
+			out.extend(output.group_by.iter().flatten());
+			out.extend(output.columns.iter().map(|column| &column.expr));
+			out.extend(output.order.iter().map(|order| &order.expr));
+			out.extend(output.skip.iter());
+			out.extend(output.limit.iter());
+		}
+		out
+	}
+
+	/// [`Self::scalars`], mutably.
+	pub fn scalars_mut(&mut self) -> Vec<&mut LogicalExpr> {
+		let mut out = Vec::new();
+		for stage in &mut self.stages {
+			match stage {
+				MatchStage::Read(clause) => {
+					out.extend(clause.predicates.iter_mut().map(|predicate| &mut predicate.expr));
+				}
+				MatchStage::Mutate(MutationStage::Update {
+					data,
+					..
+				}) => match data {
+					UpdateData::Set(assignments) => {
+						out.extend(assignments.iter_mut().map(|(_, value)| value));
+					}
+					UpdateData::Unset(_) => {}
+					UpdateData::Content(expr) => out.push(expr),
+				},
+				MatchStage::Mutate(MutationStage::Delete {
+					..
+				}) => {}
+				MatchStage::Mutate(MutationStage::Insert(stage)) => {
+					out.extend(stage.nodes.iter_mut().map(|node| &mut node.props));
+					out.extend(stage.edges.iter_mut().map(|edge| &mut edge.props));
+				}
+			}
+		}
+		if let Some(output) = self.output.as_mut() {
+			out.extend(output.group_by.iter_mut().flatten());
+			out.extend(output.columns.iter_mut().map(|column| &mut column.expr));
+			out.extend(output.order.iter_mut().map(|order| &mut order.expr));
+			out.extend(output.skip.iter_mut());
+			out.extend(output.limit.iter_mut());
+		}
+		out
 	}
 }
 
@@ -91,19 +175,20 @@ pub enum MutationStage {
 	Insert(InsertStage),
 }
 
-/// The data a [`MutationStage::Update`] applies. Every [`Expr`] is binding-row
-/// scoped (the same `a.x → Idiom[Field("a"),Field("x")]` rule the read side
-/// uses) and is evaluated against the current binding row before the write.
+/// The data a [`MutationStage::Update`] applies. Every value is binding-row
+/// scoped (the same `a.x` rule the read side uses) and is evaluated against
+/// the current binding row before the write. A property is a single field
+/// name on the target record: GQL addresses `a.p`, never a nested path.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum UpdateData {
-	/// `SET a.p = v` (one assignment per item): set each field path.
-	Set(Vec<(Idiom, Expr)>),
-	/// `REMOVE a.p` (one path per item): unset each field.
-	Unset(Vec<Idiom>),
+	/// `SET a.p = v` (one `(property, value)` per item): set each property.
+	Set(Vec<(String, LogicalExpr)>),
+	/// `REMOVE a.p` (one property per item): unset each property.
+	Unset(Vec<String>),
 	/// `SET a = {…}`: replace all user properties with the object expression
 	/// (the record's `id`, and an edge's `in`/`out`, are preserved by the
 	/// native `CONTENT` path).
-	Content(Expr),
+	Content(LogicalExpr),
 }
 
 /// The detach mode of a [`MutationStage::Delete`]. `NoDetach` (the ISO default)
@@ -130,7 +215,7 @@ pub struct InsertNodePlan {
 	/// The target table (= label).
 	pub label: TableName,
 	/// The property object expression (binding-row scoped), evaluated per row.
-	pub props: Expr,
+	pub props: LogicalExpr,
 }
 
 /// A new edge related by an `INSERT` stage between two node bindings (each of
@@ -147,7 +232,7 @@ pub struct InsertEdgePlan {
 	/// The target endpoint node binding.
 	pub to: BindingId,
 	/// The property object expression (binding-row scoped), evaluated per row.
-	pub props: Expr,
+	pub props: LogicalExpr,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -284,7 +369,7 @@ pub enum PathMode {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MatchPredicate {
-	pub expr: Expr,
+	pub expr: LogicalExpr,
 	/// Sorted and deduped set of bindings the expression reads.
 	pub deps: Vec<BindingId>,
 }
@@ -301,16 +386,16 @@ pub struct MatchOutput {
 	/// rows, e.g. a bare `RETURN count(*)`). Each non-key column carries an
 	/// aggregate; the planner inserts an `Aggregate` operator in place of the
 	/// projection.
-	pub group_by: Option<Vec<Expr>>,
+	pub group_by: Option<Vec<LogicalExpr>>,
 	pub order: Vec<MatchOrder>,
-	pub skip: Option<Expr>,
-	pub limit: Option<Expr>,
+	pub skip: Option<LogicalExpr>,
+	pub limit: Option<LogicalExpr>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MatchColumn {
 	pub name: String,
-	pub expr: Expr,
+	pub expr: LogicalExpr,
 	/// A sort-only column materialised by an aggregating query so a non-projected
 	/// ORDER BY key (a grouping key, functionally-dependent value, or aggregate)
 	/// can be sorted on; the planner emits it from the `Aggregate` operator and
@@ -321,7 +406,7 @@ pub struct MatchColumn {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MatchOrder {
-	pub expr: Expr,
+	pub expr: LogicalExpr,
 	pub ascending: bool,
 }
 
@@ -368,8 +453,9 @@ impl ExpandDirection {
 ///
 /// Used by EXPLAIN, `Debug`-adjacent tooling, and logs: it must be stable and
 /// must never panic on any plan, well-formed or not. Predicate, column, order,
-/// and skip/limit slots delegate to [`Expr`]'s `ToSql` so 3VL guard shapes stay
-/// textually diffable. The rendering is single-line regardless of `fmt`.
+/// and skip/limit slots delegate to [`LogicalExpr`]'s `ToSql` so 3VL guard
+/// shapes stay textually diffable. The rendering is single-line regardless of
+/// `fmt`.
 impl ToSql for MatchPlan {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		// Steps render in textual order, space-separated (reads and mutations
@@ -670,7 +756,8 @@ mod tests {
 	use surrealdb_types::ToSql;
 
 	use super::*;
-	use crate::expr::{Expr, Idiom, Literal, Part};
+	use crate::expr::BinaryOperator;
+	use crate::expr::logical::LogicalLiteral;
 
 	/// Wrap read clauses as the plan's [`MatchStage::Read`] steps (test builders
 	/// are all read-only).
@@ -694,12 +781,12 @@ mod tests {
 		}
 	}
 
-	/// Build `a.x` as a binding-row scoped idiom expression.
-	fn field_path(binding: &str, field: &str) -> Expr {
-		Expr::Idiom(Idiom(vec![
-			Part::Field(binding.to_string().into()),
-			Part::Field(field.to_string().into()),
-		]))
+	/// Build `a.x` as a binding-row scoped path expression.
+	fn field_path(binding: &str, field: &str) -> LogicalExpr {
+		LogicalExpr::Access {
+			base: Box::new(LogicalExpr::Field(binding.into())),
+			field: field.into(),
+		}
 	}
 
 	/// `MATCH (a:person)-[k:knows]->(b:person) WHERE k.since > 2020
@@ -723,10 +810,10 @@ mod tests {
 			},
 		];
 		let predicate = MatchPredicate {
-			expr: Expr::Binary {
+			expr: LogicalExpr::Binary {
 				left: Box::new(field_path("k", "since")),
-				op: crate::expr::BinaryOperator::MoreThan,
-				right: Box::new(Expr::Literal(Literal::Integer(2020))),
+				op: BinaryOperator::MoreThan,
+				right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(2020))),
 			},
 			deps: vec![1],
 		};
@@ -813,8 +900,8 @@ mod tests {
 			expr: field_path("a", "age"),
 			ascending: false,
 		}];
-		output.skip = Some(Expr::Literal(Literal::Integer(5)));
-		output.limit = Some(Expr::Literal(Literal::Integer(10)));
+		output.skip = Some(LogicalExpr::Literal(LogicalLiteral::Integer(5)));
+		output.limit = Some(LogicalExpr::Literal(LogicalLiteral::Integer(10)));
 
 		assert_eq!(
 			plan.to_sql(),
@@ -913,37 +1000,6 @@ mod tests {
 		assert!(rendered.contains("(:person)"));
 	}
 
-	#[test]
-	fn revisioned_serialize_of_match_fails_loud() {
-		// `Expr::Match` must never enter Revisioned serialization (V2_DESIGN §2;
-		// SECURITY_GUIDE §15a): its `to_sql()` renders GQL-ish text that the
-		// SurrealQL-only deserialize path cannot round-trip. The serialize path
-		// mirrors the `From<expr::Expr> for sql::Expr` arm and fails loud via
-		// `debug_assert!`, so a future regression that nests `Expr::Match` is
-		// caught in debug builds rather than silently emitting corrupt bytes.
-		use revision::SerializeRevisioned;
-
-		let expr = Expr::Match(Box::new(sample_plan()));
-		let mut bytes = Vec::new();
-		let serialize = std::panic::AssertUnwindSafe(|| {
-			let _ = SerializeRevisioned::serialize_revisioned(&expr, &mut bytes);
-		});
-		let outcome = std::panic::catch_unwind(serialize);
-
-		if cfg!(debug_assertions) {
-			// Debug: the guard's `debug_assert!(false)` must trip.
-			assert!(
-				outcome.is_err(),
-				"Expr::Match serialize_revisioned must panic in debug builds"
-			);
-		} else {
-			// Release: no panic, but the bytes it would emit are GQL text that
-			// is NOT valid SurrealQL — the invariant is upheld structurally
-			// (this path is unreachable by construction), the guard is purely a
-			// debug tripwire.
-			assert!(outcome.is_ok());
-		}
-	}
 	/// MATCH labels are table names, so a name colliding with a reserved word
 	/// must render quoted or the plan text cannot be read back.
 	///

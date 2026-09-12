@@ -28,10 +28,11 @@
 //! of scope and rejected upstream in the lowering: label mutations, label
 //! expressions, undirected edges.
 //!
-//! None of the internal bails here are `PlannerUnsupported`/`PlannerUnimplemented`:
+//! None of the internal bails here are `PlannerUnsupported`:
 //! a `MatchPlan` only reaches the planner because it lowered cleanly, so an
-//! unexpected shape is a real internal failure with no compute fallback (the
-//! `Expr::Match` compute arm hard-errors).
+//! unexpected shape is a real internal failure. There is no compute fallback to
+//! take instead: the plan arrives already planned, and no statement stands
+//! behind it for the legacy path to run.
 //!
 //! # The plan shape
 //!
@@ -61,6 +62,7 @@ use surrealdb_strand::TableName;
 use super::Planner;
 use crate::err::{EngineError, Error};
 use crate::exec::ExecOperator;
+use crate::exec::logical::is_effect_free;
 use crate::exec::operators::{
 	Aggregate, AggregateField, Bind, DeleteBinding, Distinct, DistinctEdges, DrainSink,
 	EdgeBinding, EndpointBind, EndpointField, Expand, ExpandDir, FieldSelection, Filter, HashJoin,
@@ -68,12 +70,13 @@ use crate::exec::operators::{
 	Project, ShortestPathExpand, ShortestSelector, SingleRowScan, Sort, SortDirection,
 	UpdateBinding,
 };
+use crate::expr::logical::{LogicalExpr, LogicalFilter, LogicalOp, LogicalSource, SourceRef};
 use crate::expr::match_plan::{
 	BindingId, BindingKind, EdgeStep, ExpandDirection, MatchClausePlan, MatchOutput, MatchPlan,
 	MatchPredicate, MatchStage, MutationStage, NodeStep, PathMode as IrPathMode, PathPrefixPlan,
-	PathSearch, PatternPlan,
+	PathSearch, PatternPlan, UpdateData,
 };
-use crate::expr::{Cond, Expr, Function, Idiom, Literal, Part};
+use crate::expr::{BinaryOperator, Function};
 
 /// How a quantified step's path-search selector routes to a physical operator.
 enum SearchRouting {
@@ -196,7 +199,7 @@ impl<'ctx> Planner<'ctx> {
 				// A leading mutation (an `INSERT` with no preceding `MATCH`): seed a
 				// single empty row so it runs exactly once.
 				let seed = Arc::new(SingleRowScan::new()) as Arc<dyn ExecOperator>;
-				self.fold_mutation(&plan, seed, Vec::new(), stage)
+				self.fold_mutation(&plan, seed, Vec::new(), stage).await?
 			}
 		};
 
@@ -210,7 +213,9 @@ impl<'ctx> Planner<'ctx> {
 				StageUnit::Optional(clauses) => {
 					self.fold_optional(&plan, acc_op, &acc_bound, &clauses).await?
 				}
-				StageUnit::Mutation(stage) => self.fold_mutation(&plan, acc_op, acc_bound, stage),
+				StageUnit::Mutation(stage) => {
+					self.fold_mutation(&plan, acc_op, acc_bound, stage).await?
+				}
 			};
 			acc_op = op;
 			acc_bound = bound;
@@ -222,21 +227,39 @@ impl<'ctx> Planner<'ctx> {
 	/// Build one write operator over the accumulator and return it with the
 	/// updated bound set. `INSERT` extends the bound set with its created node /
 	/// edge bindings, so a later read can join or anchor on them; `SET`/`DELETE`
-	/// leave the bound set unchanged (their target was already bound).
-	fn fold_mutation(
+	/// leave the bound set unchanged (their target was already bound). The
+	/// row-scoped values a stage writes are compiled here, like every other
+	/// scalar, and the operator evaluates them against each binding row.
+	async fn fold_mutation(
 		&self,
 		plan: &MatchPlan,
 		op: Arc<dyn ExecOperator>,
 		mut bound: Vec<BindingId>,
 		stage: &MutationStage,
-	) -> (Arc<dyn ExecOperator>, Vec<BindingId>) {
+	) -> Result<(Arc<dyn ExecOperator>, Vec<BindingId>), Error> {
 		let op = match stage {
 			MutationStage::Update {
 				target,
 				data,
 			} => {
 				let name = binding_name(plan, *target).to_string();
-				Arc::new(UpdateBinding::new(op, name, data.clone())) as Arc<dyn ExecOperator>
+				let update = match data {
+					UpdateData::Set(assignments) => {
+						let mut compiled = Vec::with_capacity(assignments.len());
+						for (property, value) in assignments {
+							compiled
+								.push((property.clone(), self.physical_expr(value.clone()).await?));
+						}
+						UpdateBinding::set(op, name, compiled)
+					}
+					UpdateData::Unset(properties) => {
+						UpdateBinding::unset(op, name, properties.clone())
+					}
+					UpdateData::Content(object) => {
+						UpdateBinding::content(op, name, self.physical_expr(object.clone()).await?)
+					}
+				};
+				Arc::new(update) as Arc<dyn ExecOperator>
 			}
 			MutationStage::Delete {
 				target,
@@ -250,32 +273,30 @@ impl<'ctx> Planner<'ctx> {
 				Arc::new(DeleteBinding::new(op, name, *detach, is_edge)) as Arc<dyn ExecOperator>
 			}
 			MutationStage::Insert(insert) => {
-				let nodes: Vec<InsertNodeOp> = insert
-					.nodes
-					.iter()
-					.map(|n| InsertNodeOp {
+				let mut nodes = Vec::with_capacity(insert.nodes.len());
+				for n in &insert.nodes {
+					nodes.push(InsertNodeOp {
 						name: binding_name(plan, n.binding).to_string(),
 						table: n.label.clone(),
-						props: n.props.clone(),
-					})
-					.collect();
-				let edges: Vec<InsertEdgeOp> = insert
-					.edges
-					.iter()
-					.map(|e| InsertEdgeOp {
+						props: self.physical_expr(n.props.clone()).await?,
+					});
+				}
+				let mut edges = Vec::with_capacity(insert.edges.len());
+				for e in &insert.edges {
+					edges.push(InsertEdgeOp {
 						name: binding_name(plan, e.binding).to_string(),
 						table: e.label.clone(),
 						from: binding_name(plan, e.from).to_string(),
 						to: binding_name(plan, e.to).to_string(),
-						props: e.props.clone(),
-					})
-					.collect();
+						props: self.physical_expr(e.props.clone()).await?,
+					});
+				}
 				bound.extend(insert.nodes.iter().map(|n| n.binding));
 				bound.extend(insert.edges.iter().map(|e| e.binding));
 				Arc::new(InsertGraph::new(op, nodes, edges)) as Arc<dyn ExecOperator>
 			}
 		};
-		(op, bound)
+		Ok((op, bound))
 	}
 
 	/// Combine a freshly-planned mandatory clause with the accumulator.
@@ -845,8 +866,8 @@ impl<'ctx> Planner<'ctx> {
 
 		// Anchor-only conjuncts: prefix-strip the strippable ones into the scan
 		// predicate; a whole-record anchor ref runs as a Filter above the scan.
-		let mut anchor_pushed: Vec<Expr> = Vec::new();
-		let mut anchor_filtered: Vec<Expr> = Vec::new();
+		let mut anchor_pushed: Vec<LogicalExpr> = Vec::new();
+		let mut anchor_filtered: Vec<LogicalExpr> = Vec::new();
 		pending.retain(|predicate| {
 			if predicate.deps.as_slice() == [anchor_binding] {
 				match prefix_strip(&predicate.expr, binding_name(plan, anchor_binding)) {
@@ -866,7 +887,7 @@ impl<'ctx> Planner<'ctx> {
 		// deps first become satisfiable at this step ride the step's binder.
 		for (edge, node) in pattern.steps.iter() {
 			let step_bound = step_bindings(&stage.bound, pattern, edge, node);
-			let mut step_predicates: Vec<Expr> = Vec::new();
+			let mut step_predicates: Vec<LogicalExpr> = Vec::new();
 			pending.retain(|predicate| {
 				if deps_subset(&predicate.deps, &step_bound) {
 					step_predicates.push(predicate.expr.clone());
@@ -1033,7 +1054,7 @@ impl<'ctx> Planner<'ctx> {
 		bound: &[BindingId],
 		pending: &mut Vec<MatchPredicate>,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		let mut ready: Vec<Expr> = Vec::new();
+		let mut ready: Vec<LogicalExpr> = Vec::new();
 		pending.retain(|predicate| {
 			if deps_subset(&predicate.deps, bound) {
 				ready.push(predicate.expr.clone());
@@ -1054,7 +1075,7 @@ impl<'ctx> Planner<'ctx> {
 		bound: &[BindingId],
 		predicates: Vec<MatchPredicate>,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		let mut exprs: Vec<Expr> = Vec::with_capacity(predicates.len());
+		let mut exprs: Vec<LogicalExpr> = Vec::with_capacity(predicates.len());
 		for predicate in predicates {
 			if !deps_subset(&predicate.deps, bound) {
 				return Err(EngineError::Internal(
@@ -1098,7 +1119,7 @@ impl<'ctx> Planner<'ctx> {
 		binding: BindingId,
 		label: TableName,
 		plan: &MatchPlan,
-		pushed: Vec<Expr>,
+		pushed: Vec<LogicalExpr>,
 	) -> Result<ChainStage, Error> {
 		let scan = self.plan_table_scan(label, pushed).await?;
 		let name = binding_name(plan, binding).to_string();
@@ -1110,36 +1131,34 @@ impl<'ctx> Planner<'ctx> {
 		})
 	}
 
-	/// Plan a `TableScan` over `label`, folding the prefix-stripped `pushed`
-	/// conjuncts into the scan WHERE (the shape SELECT pushdown expects) and
-	/// applying any residual as a Filter directly above the scan.
+	/// Plan a scan over `label` filtered by the prefix-stripped `pushed`
+	/// conjuncts.
+	///
+	/// The scan is a plan of its own — a `Filter` over a table `Source` —
+	/// bound and compiled like any other, so the access-path selection and
+	/// predicate pushdown the fold applies to a `SELECT … WHERE` apply here
+	/// too, and any residual the source cannot consume stays a filter directly
+	/// above it.
 	async fn plan_table_scan(
 		&self,
 		label: TableName,
-		pushed: Vec<Expr>,
+		pushed: Vec<LogicalExpr>,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		let cond = conjoin(pushed).map(Cond);
-		let scan_predicate = match cond.as_ref() {
-			Some(c) => Some(self.physical_expr(c.0.clone()).await?),
-			None => None,
+		let source = LogicalOp::Source(LogicalSource {
+			source: SourceRef::Table(label),
+			schema: None,
+			with: None,
+			for_update: false,
+		});
+		let op = match conjoin(pushed) {
+			Some(predicate) => LogicalOp::Filter(LogicalFilter {
+				input: Box::new(source),
+				predicate,
+			}),
+			None => source,
 		};
-		let planned = self
-			.plan_source(
-				Expr::Table(label),
-				None,
-				cond.as_ref(),
-				None,
-				None,
-				None,
-				scan_predicate,
-				None,
-				None,
-				false,
-				false,
-				&super::select::TopKPushdownRequest::NotApplicable,
-			)
-			.await?;
-		self.apply_source_filter(planned).await
+		let bound = self.bind(op).await?;
+		self.plan_logical(bound).await
 	}
 
 	/// Build one step stage from the previous stage's rows: `Expand` for an
@@ -1158,7 +1177,7 @@ impl<'ctx> Planner<'ctx> {
 		prev: ChainStage,
 		edge: &EdgeStep,
 		node: &NodeStep,
-		predicates: Vec<Expr>,
+		predicates: Vec<LogicalExpr>,
 		direction: ExpandDirection,
 		reversed: bool,
 	) -> Result<ChainStage, Error> {
@@ -1278,7 +1297,11 @@ impl<'ctx> Planner<'ctx> {
 	/// Wrap a stage in a `Filter` for the conjoined `exprs`, or pass the stage
 	/// through unchanged when there are none. Binding set and tip are preserved
 	/// (a Filter neither adds nor drops bindings).
-	async fn maybe_filter(&self, stage: ChainStage, exprs: Vec<Expr>) -> Result<ChainStage, Error> {
+	async fn maybe_filter(
+		&self,
+		stage: ChainStage,
+		exprs: Vec<LogicalExpr>,
+	) -> Result<ChainStage, Error> {
 		let Some(joined) = conjoin(exprs) else {
 			return Ok(stage);
 		};
@@ -1296,7 +1319,7 @@ impl<'ctx> Planner<'ctx> {
 	async fn filter_above(
 		&self,
 		op: Arc<dyn ExecOperator>,
-		exprs: Vec<Expr>,
+		exprs: Vec<LogicalExpr>,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		let Some(joined) = conjoin(exprs) else {
 			return Ok(op);
@@ -1365,25 +1388,14 @@ impl<'ctx> Planner<'ctx> {
 		&self,
 		input: Arc<dyn ExecOperator>,
 		output: &MatchOutput,
-		group_keys: &[Expr],
+		group_keys: &[LogicalExpr],
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		use surrealdb_types::ToSql;
-
 		// Physical group-key expressions (empty for GROUP ALL — the operator's
 		// `group_by_exprs.is_empty()` check then takes the single-group path).
 		let mut group_by_exprs = Vec::with_capacity(group_keys.len());
 		for key in group_keys {
 			group_by_exprs.push(self.physical_expr(key.clone()).await?);
 		}
-		// Display idioms for EXPLAIN, kept length-aligned with the keys so the
-		// operator renders `GROUP ALL` only when there are genuinely no keys.
-		let group_by_idioms: Vec<Idiom> = group_keys
-			.iter()
-			.map(|key| match key {
-				Expr::Idiom(idiom) => idiom.clone(),
-				other => Idiom::field(other.to_sql()),
-			})
-			.collect();
 
 		let mut aggregates = Vec::with_capacity(output.columns.len());
 		for column in output.columns.iter() {
@@ -1397,7 +1409,8 @@ impl<'ctx> Planner<'ctx> {
 					None,
 				));
 			} else if expr_has_aggregate(self.function_registry(), &column.expr) {
-				let (info, fallback) = self.extract_aggregate_info(column.expr.clone()).await?;
+				let (info, fallback) =
+					self.extract_aggregate_info(column.expr.clone(), group_keys).await?;
 				aggregates.push(AggregateField::new(
 					column.name.clone(),
 					false,
@@ -1419,8 +1432,21 @@ impl<'ctx> Planner<'ctx> {
 			}
 		}
 
-		Ok(Arc::new(Aggregate::new(input, group_by_idioms, group_by_exprs, aggregates))
-			as Arc<dyn ExecOperator>)
+		// The logical keys double as the EXPLAIN display, length-aligned with the
+		// physical keys so the operator renders `GROUP ALL` only when there are
+		// genuinely no keys.
+		// Whether the operator may evaluate a batch one column at a time rather
+		// than one row at a time; see `Aggregate::effect_free_columns`.
+		let effect_free_columns = group_keys
+			.iter()
+			.chain(output.columns.iter().map(|column| &column.expr))
+			.all(|expr| is_effect_free(expr, self.function_registry()));
+
+		let mut aggregate = Aggregate::new(input, group_keys.to_vec(), group_by_exprs, aggregates);
+		if effect_free_columns {
+			aggregate = aggregate.with_effect_free_columns();
+		}
+		Ok(Arc::new(aggregate) as Arc<dyn ExecOperator>)
 	}
 
 	/// Project away the hidden sort-only columns after an aggregating Sort,
@@ -1434,10 +1460,13 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		let mut fields = Vec::new();
 		for column in output.columns.iter().filter(|c| !c.hidden) {
-			let expr = self.physical_expr(Expr::Idiom(Idiom::field(column.name.clone()))).await?;
+			let expr = self.physical_expr(LogicalExpr::Field(column.name.as_str().into())).await?;
 			fields.push(FieldSelection::new(&column.name, expr));
 		}
-		Ok(Arc::new(Project::new(input, fields, Vec::new(), false)) as Arc<dyn ExecOperator>)
+		// Every field is a bare read of a name the `Aggregate` already
+		// produced, so none of them has an effect to reorder.
+		Ok(Arc::new(Project::new(input, fields, Vec::new(), false).with_effect_free_columns())
+			as Arc<dyn ExecOperator>)
 	}
 
 	/// Build the `Sort` operator from `MatchOutput::order`, or pass through when
@@ -1450,6 +1479,11 @@ impl<'ctx> Planner<'ctx> {
 		if output.order.is_empty() {
 			return Ok(input);
 		}
+		// `Sort` evaluates its keys itself, so the shape of that evaluation is
+		// judged here, as it is for the projection and the aggregate above;
+		// see `Sort::effect_free_columns`.
+		let effect_free_columns =
+			output.order.iter().all(|order| is_effect_free(&order.expr, self.function_registry()));
 		let mut order_by = Vec::with_capacity(output.order.len());
 		for order in output.order.iter() {
 			let expr = self.physical_expr(order.expr.clone()).await?;
@@ -1464,7 +1498,11 @@ impl<'ctx> Planner<'ctx> {
 				numeric: false,
 			});
 		}
-		Ok(Arc::new(Sort::new(input, order_by)) as Arc<dyn ExecOperator>)
+		let mut sort = Sort::new(input, order_by);
+		if effect_free_columns {
+			sort = sort.with_effect_free_columns();
+		}
+		Ok(Arc::new(sort) as Arc<dyn ExecOperator>)
 	}
 
 	/// Build the `Limit` operator from `MatchOutput::skip`/`limit`, or pass
@@ -1496,29 +1534,23 @@ impl<'ctx> Planner<'ctx> {
 		input: Arc<dyn ExecOperator>,
 		output: &MatchOutput,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
+		// Judged from the columns as written; see
+		// `Project::effect_free_columns`.
+		let effect_free_columns = output
+			.columns
+			.iter()
+			.all(|column| is_effect_free(&column.expr, self.function_registry()));
+
 		let mut fields = Vec::with_capacity(output.columns.len());
 		for column in output.columns.iter() {
 			let expr = self.physical_expr(column.expr.clone()).await?;
 			fields.push(FieldSelection::new(&column.name, expr));
 		}
-		Ok(Arc::new(Project::new(input, fields, Vec::new(), false)) as Arc<dyn ExecOperator>)
-	}
-
-	/// Resolve a `PlannedSource`'s residual WHERE into a Filter directly above
-	/// the scan, mirroring the SELECT pipeline's `FilterAction` handling.
-	async fn apply_source_filter(
-		&self,
-		planned: super::select::PlannedSource,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
-		use super::select::FilterAction;
-		match planned.filter_action {
-			FilterAction::FullyConsumed => Ok(planned.operator),
-			FilterAction::UseOriginal => Ok(planned.operator),
-			FilterAction::Residual(residual) => {
-				let predicate = self.physical_expr(residual.0).await?;
-				Ok(Arc::new(Filter::new(planned.operator, predicate)) as Arc<dyn ExecOperator>)
-			}
+		let mut project = Project::new(input, fields, Vec::new(), false);
+		if effect_free_columns {
+			project = project.with_effect_free_columns();
 		}
+		Ok(Arc::new(project) as Arc<dyn ExecOperator>)
 	}
 }
 
@@ -1536,7 +1568,7 @@ fn shared_bindings(a: &[BindingId], b: &[BindingId]) -> Vec<BindingId> {
 /// Drain every predicate in `pending` whose deps `bound` now satisfies and
 /// return their exprs (for inline placement on the just-built binder). Mirrors
 /// the `retain`-based draining used during chain construction.
-fn drain_satisfiable(pending: &mut Vec<MatchPredicate>, bound: &[BindingId]) -> Vec<Expr> {
+fn drain_satisfiable(pending: &mut Vec<MatchPredicate>, bound: &[BindingId]) -> Vec<LogicalExpr> {
 	let mut ready = Vec::new();
 	pending.retain(|predicate| {
 		if deps_subset(&predicate.deps, bound) {
@@ -1573,43 +1605,18 @@ fn step_bindings(
 /// Whether an expression contains a call to a registered aggregate function.
 /// Used to classify an aggregating query's columns: a non-key column with an
 /// aggregate folds via `extract_aggregate_info`, one without is a value
-/// determined by the grouping keys (first-value). Walks on an explicit stack.
-fn expr_has_aggregate(registry: &crate::exec::function::FunctionRegistry, expr: &Expr) -> bool {
-	let mut stack = vec![expr];
-	while let Some(e) = stack.pop() {
-		match e {
-			Expr::FunctionCall(call) => {
-				if let Function::Normal(name) = &call.receiver
-					&& registry.get_aggregate(name.as_str()).is_some()
-				{
-					return true;
-				}
-				stack.extend(call.arguments.iter());
-			}
-			Expr::Binary {
-				left,
-				right,
-				..
-			} => {
-				stack.push(left);
-				stack.push(right);
-			}
-			Expr::Prefix {
-				expr,
-				..
-			}
-			| Expr::Postfix {
-				expr,
-				..
-			} => stack.push(expr),
-			Expr::Literal(Literal::Array(items)) => stack.extend(items.iter()),
-			Expr::Literal(Literal::Object(entries)) => {
-				stack.extend(entries.iter().map(|entry| &entry.value));
-			}
-			_ => {}
-		}
-	}
-	false
+/// determined by the grouping keys (first-value).
+fn expr_has_aggregate(
+	registry: &crate::exec::function::FunctionRegistry,
+	expr: &LogicalExpr,
+) -> bool {
+	expr.any(|e| {
+		matches!(
+			e,
+			LogicalExpr::Call(call)
+				if matches!(&call.receiver, Function::Normal(name) if registry.get_aggregate(name.as_str()).is_some())
+		)
+	})
 }
 
 /// The union of two binding sets, preserving `a`'s order then appending the new
@@ -1781,12 +1788,12 @@ fn deps_subset(deps: &[BindingId], bound: &[BindingId]) -> bool {
 }
 
 /// Conjoin a list of expressions with `AND`, or `None` for an empty list.
-fn conjoin(mut exprs: Vec<Expr>) -> Option<Expr> {
+fn conjoin(mut exprs: Vec<LogicalExpr>) -> Option<LogicalExpr> {
 	let mut acc = exprs.pop()?;
 	while let Some(next) = exprs.pop() {
-		acc = Expr::Binary {
+		acc = LogicalExpr::Binary {
 			left: Box::new(next),
-			op: crate::expr::BinaryOperator::And,
+			op: BinaryOperator::And,
 			right: Box::new(acc),
 		};
 	}
@@ -1794,45 +1801,72 @@ fn conjoin(mut exprs: Vec<Expr>) -> Option<Expr> {
 }
 
 /// Rewrite a binding-row-scoped expression into a record-row-scoped one for
-/// scan pushdown: every idiom `Idiom[Field(binding), rest..]` becomes
-/// `Idiom[rest..]`. Returns `None` — bailing to a Filter — if any bare
-/// whole-record reference `Idiom[Field(binding)]` survives.
-fn prefix_strip(expr: &Expr, binding: &str) -> Option<Expr> {
+/// scan pushdown: every access chain `binding.rest…` becomes `rest…`. Returns
+/// `None` — bailing to a Filter — if the binding is read in any other way: a
+/// bare whole-record reference `binding`, or a path that reaches the binding
+/// through a step other than a field access (`binding[0].x`, `binding->e`),
+/// which has no record-row spelling here.
+fn prefix_strip(expr: &LogicalExpr, binding: &str) -> Option<LogicalExpr> {
 	match expr {
-		Expr::Idiom(idiom) => {
-			let parts = idiom.0.as_slice();
-			match parts {
-				[Part::Field(field)] if field.as_str() == binding => None,
-				[Part::Field(field), rest @ ..] if field.as_str() == binding => {
-					Some(Expr::Idiom(Idiom(rest.to_vec())))
-				}
-				_ => Some(expr.clone()),
+		path if path.is_path() => match path.path_root() {
+			LogicalExpr::Field(root) if root.as_str() == binding => {
+				strip_binding_root(path, binding)
 			}
-		}
-		Expr::Binary {
+			_ => Some(path.clone()),
+		},
+		LogicalExpr::Binary {
 			left,
 			op,
 			right,
-		} => Some(Expr::Binary {
+		} => Some(LogicalExpr::Binary {
 			left: Box::new(prefix_strip(left, binding)?),
 			op: op.clone(),
 			right: Box::new(prefix_strip(right, binding)?),
 		}),
-		Expr::Prefix {
+		LogicalExpr::Prefix {
 			op,
 			expr,
-		} => Some(Expr::Prefix {
+		} => Some(LogicalExpr::Prefix {
 			op: op.clone(),
 			expr: Box::new(prefix_strip(expr, binding)?),
 		}),
-		Expr::Postfix {
+		LogicalExpr::Postfix {
 			op,
 			expr,
-		} => Some(Expr::Postfix {
+		} => Some(LogicalExpr::Postfix {
 			op: op.clone(),
 			expr: Box::new(prefix_strip(expr, binding)?),
+		}),
+		LogicalExpr::Invoke {
+			target,
+			args,
+		} => Some(LogicalExpr::Invoke {
+			target: Box::new(prefix_strip(target, binding)?),
+			args: args.clone(),
 		}),
 		other => Some(other.clone()),
+	}
+}
+
+/// `binding.f.g…` becomes `f.g…`: the access directly on the binding becomes
+/// the root field read and the accesses above it are kept. `path` is a path
+/// whose root is `Field(binding)`; the result is `None` unless every step
+/// between the root and `path` is an [`LogicalExpr::Access`].
+fn strip_binding_root(path: &LogicalExpr, binding: &str) -> Option<LogicalExpr> {
+	match path {
+		LogicalExpr::Access {
+			base,
+			field,
+		} => match base.as_ref() {
+			LogicalExpr::Field(root) if root.as_str() == binding => {
+				Some(LogicalExpr::Field(field.clone()))
+			}
+			base => Some(LogicalExpr::Access {
+				base: Box::new(strip_binding_root(base, binding)?),
+				field: field.clone(),
+			}),
+		},
+		_ => None,
 	}
 }
 
@@ -1842,10 +1876,10 @@ mod tests {
 
 	use super::*;
 	use crate::ctx::Context;
+	use crate::expr::logical::LogicalLiteral;
 	use crate::expr::match_plan::{
 		BindingDef, BindingKind, EdgeQuantifier, MatchColumn, MatchOrder, MatchOutput,
 	};
-	use crate::expr::{BinaryOperator, Literal};
 	use crate::kvs::{Datastore, TransactionType};
 
 	// ---- shared builders ----
@@ -1884,20 +1918,20 @@ mod tests {
 		binding(name, BindingKind::Edge, false)
 	}
 
-	/// `a.field` as a binding-row scoped idiom.
-	fn field_path(b: &str, field: &str) -> Expr {
-		Expr::Idiom(Idiom(vec![
-			Part::Field(b.to_string().into()),
-			Part::Field(field.to_string().into()),
-		]))
+	/// `a.field` as a binding-row scoped path.
+	fn field_path(b: &str, field: &str) -> LogicalExpr {
+		LogicalExpr::Access {
+			base: Box::new(var(b)),
+			field: field.into(),
+		}
 	}
 
 	/// `RETURN b` — a bare-binding column expression.
-	fn var(b: &str) -> Expr {
-		Expr::Idiom(Idiom(vec![Part::Field(b.to_string().into())]))
+	fn var(b: &str) -> LogicalExpr {
+		LogicalExpr::Field(b.into())
 	}
 
-	fn col(name: &str, expr: Expr) -> MatchColumn {
+	fn col(name: &str, expr: LogicalExpr) -> MatchColumn {
 		MatchColumn {
 			name: name.to_string(),
 			expr,
@@ -1953,10 +1987,10 @@ mod tests {
 					)],
 				}],
 				predicates: vec![MatchPredicate {
-					expr: Expr::Binary {
+					expr: LogicalExpr::Binary {
 						left: Box::new(field_path("k", "since")),
 						op: BinaryOperator::MoreThan,
-						right: Box::new(Expr::Literal(Literal::Integer(2020))),
+						right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(2020))),
 					},
 					deps: vec![1],
 				}],
@@ -2764,16 +2798,16 @@ Project [ctx: Db]
 
 	#[test]
 	fn prefix_strip_rewrites_binding_field_path() {
-		let expr = Expr::Binary {
+		let expr = LogicalExpr::Binary {
 			left: Box::new(field_path("a", "since")),
 			op: BinaryOperator::MoreThan,
-			right: Box::new(Expr::Literal(Literal::Integer(2020))),
+			right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(2020))),
 		};
 		let stripped = prefix_strip(&expr, "a").expect("strippable");
-		let expected = Expr::Binary {
-			left: Box::new(Expr::Idiom(Idiom(vec![Part::Field("since".to_string().into())]))),
+		let expected = LogicalExpr::Binary {
+			left: Box::new(LogicalExpr::Field("since".into())),
 			op: BinaryOperator::MoreThan,
-			right: Box::new(Expr::Literal(Literal::Integer(2020))),
+			right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(2020))),
 		};
 		assert_eq!(stripped, expected);
 	}
@@ -2781,6 +2815,34 @@ Project [ctx: Db]
 	#[test]
 	fn prefix_strip_bails_on_whole_record_reference() {
 		let expr = var("a");
+		assert!(prefix_strip(&expr, "a").is_none());
+	}
+
+	#[test]
+	fn prefix_strip_keeps_the_accesses_above_the_binding() {
+		// `a.address.city` ⇒ `address.city`; `b.name` is left as written.
+		let expr = LogicalExpr::Access {
+			base: Box::new(field_path("a", "address")),
+			field: "city".into(),
+		};
+		let expected = LogicalExpr::Access {
+			base: Box::new(LogicalExpr::Field("address".into())),
+			field: "city".into(),
+		};
+		assert_eq!(prefix_strip(&expr, "a"), Some(expected));
+		assert_eq!(prefix_strip(&field_path("b", "name"), "a"), Some(field_path("b", "name")));
+	}
+
+	#[test]
+	fn prefix_strip_bails_on_a_non_access_step_over_the_binding() {
+		// `a[0].name` reaches the binding through an index, not a field access.
+		let expr = LogicalExpr::Access {
+			base: Box::new(LogicalExpr::Index {
+				base: Box::new(var("a")),
+				index: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+			}),
+			field: "name".into(),
+		};
 		assert!(prefix_strip(&expr, "a").is_none());
 	}
 
@@ -2794,8 +2856,8 @@ Project [ctx: Db]
 	#[test]
 	fn conjoin_builds_left_leaning_and_chain() {
 		assert!(conjoin(Vec::new()).is_none());
-		let one = conjoin(vec![Expr::Literal(Literal::Bool(true))]).expect("one");
-		assert_eq!(one, Expr::Literal(Literal::Bool(true)));
+		let one = conjoin(vec![LogicalExpr::Literal(LogicalLiteral::Bool(true))]).expect("one");
+		assert_eq!(one, LogicalExpr::Literal(LogicalLiteral::Bool(true)));
 	}
 
 	#[test]

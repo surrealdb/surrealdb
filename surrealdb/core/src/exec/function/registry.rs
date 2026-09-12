@@ -105,7 +105,6 @@ impl FunctionRegistry {
 	}
 
 	/// Check if a function is registered as an aggregate.
-	#[cfg(test)]
 	pub fn is_aggregate(&self, name: &str) -> bool {
 		self.aggregates.contains_key(name)
 	}
@@ -240,6 +239,7 @@ pub(crate) fn experimental_target(
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::expr::logical::EffectSet as E;
 
 	#[test]
 	fn test_builtin_registry() {
@@ -340,49 +340,160 @@ mod tests {
 		assert_eq!(fields.name(), "type::fields");
 	}
 
-	/// Every clock- or entropy-backed builtin must report itself
-	/// non-deterministic, so the planner's literal folder leaves it to be
-	/// evaluated per row instead of freezing one value into the whole
-	/// statement. These are declared with `define_pure_function!` — correctly,
-	/// since they need no execution context — which makes the determinism flag
-	/// the only thing standing between them and the folder, and it is applied
-	/// by hand at each registration.
+	/// The names every builtin that answers `false` to
+	/// [`ScalarFunction::is_deterministic`] is registered under.
+	///
+	/// Kept sorted, and asserted against the registry below, so that a declared
+	/// [`EffectSet`] moving a function across the line — in either direction —
+	/// is a deliberate edit here rather than a silent change of what the
+	/// planner may rewrite.
+	const NON_DETERMINISTIC: &[&str] = &[
+		"api::invoke",
+		"api::req::body",
+		"api::req::max_body",
+		"api::res::body",
+		"api::res::header",
+		"api::res::headers",
+		"api::res::status",
+		"api::timeout",
+		"array::shuffle",
+		"crypto::argon2::generate",
+		"crypto::bcrypt::generate",
+		"crypto::pbkdf2::generate",
+		"crypto::scrypt::generate",
+		"eval::gql",
+		"eval::surql",
+		"file::copy",
+		"file::copy_if_not_exists",
+		"file::delete",
+		"file::exists",
+		"file::get",
+		"file::head",
+		"file::list",
+		"file::put",
+		"file::put_if_not_exists",
+		"file::rename",
+		"file::rename_if_not_exists",
+		"http::delete",
+		"http::get",
+		"http::head",
+		"http::patch",
+		"http::post",
+		"http::put",
+		"rand",
+		"rand::bool",
+		"rand::duration",
+		"rand::enum",
+		"rand::float",
+		"rand::id",
+		"rand::int",
+		"rand::string",
+		"rand::time",
+		"rand::ulid",
+		"rand::uuid",
+		"rand::uuid::v4",
+		"rand::uuid::v7",
+		"sequence::nextval",
+		"sleep",
+		"time::day",
+		"time::hour",
+		"time::is_leap_year",
+		"time::micros",
+		"time::millis",
+		"time::minute",
+		"time::month",
+		"time::nano",
+		"time::now",
+		"time::second",
+		"time::timezone",
+		"time::unix",
+		"time::wday",
+		"time::week",
+		"time::yday",
+		"time::year",
+	];
+
+	/// Whole families reach past what a rewrite can reason about, and every
+	/// member of one owes `is_deterministic() == false`: `rand::*` draws
+	/// entropy, `http::*` talks to a remote endpoint, and `file::*` reads or
+	/// writes a bucket that no transaction snapshots — all but `file::bucket`
+	/// and `file::key`, which only read the two fields of the file value they
+	/// are handed. Naming the families rather than their members is what makes
+	/// this catch a function added to one of them later.
+	fn belongs_to_a_volatile_family(name: &str) -> bool {
+		match name {
+			"file::bucket" | "file::key" => false,
+			_ => {
+				name == "rand"
+					|| name.starts_with("rand::")
+					|| name.starts_with("http::")
+					|| name.starts_with("file::")
+			}
+		}
+	}
+
+	/// A builtin that draws entropy, reaches past the transaction's snapshot or
+	/// runs a body the call site cannot see must report itself
+	/// non-deterministic. Two decisions rest on the answer: the planner's
+	/// literal folder would otherwise evaluate the call once and freeze one
+	/// answer into the whole statement, and the logical rules would treat an
+	/// expression containing it as pure and so substitutable for every
+	/// occurrence of a name — duplicating the call, or dropping it.
+	///
+	/// The answer is derived from the [`EffectSet`] each definition declares,
+	/// so this pins what those declarations add up to.
 	#[test]
 	fn volatile_builtins_are_non_deterministic() {
 		let registry = FunctionRegistry::with_builtins();
 
-		let volatile: Vec<&str> = registry
+		// A family is checked by prefix, so a member added later is covered
+		// without touching this test.
+		let offenders: Vec<&str> = registry
 			.scalar_functions()
 			.map(|f| f.name())
-			.filter(|name| *name == "rand" || name.starts_with("rand::") || *name == "time::now")
-			.collect();
-
-		// Guard the guard: a filter that matched nothing would pass silently.
-		assert!(
-			volatile.len() > 10,
-			"expected the whole rand::* family plus time::now, found {volatile:?}"
-		);
-
-		let offenders: Vec<&str> = volatile
-			.iter()
+			.filter(|name| belongs_to_a_volatile_family(name))
 			.filter(|name| {
 				registry.get(name).expect("just enumerated from the registry").is_deterministic()
 			})
-			.copied()
 			.collect();
 
 		assert!(
 			offenders.is_empty(),
-			"these must be registered behind `NonDeterministic`, or the planner will fold a \
-			 call to one constant reused for every row: {offenders:?}"
+			"these must declare a non-deterministic effect, or the planner will fold a call \
+			 to one constant reused for every row, and a rule will duplicate or drop it: \
+			 {offenders:?}"
 		);
+
+		// Everything else is named one by one, so that the set as a whole only
+		// moves on purpose.
+		let mut actual: Vec<&str> = registry
+			.scalar_functions()
+			.filter(|f| !f.is_deterministic())
+			.map(|f| f.name())
+			.collect();
+		actual.sort_unstable();
+
+		assert!(NON_DETERMINISTIC.is_sorted(), "keep `NON_DETERMINISTIC` sorted");
+		let expected: Vec<&str> =
+			NON_DETERMINISTIC.iter().copied().filter(|name| registry.get(name).is_some()).collect();
+
+		assert_eq!(
+			actual, expected,
+			"the non-deterministic set moved; a builtin that draws entropy, reaches past the \
+			 transaction snapshot or runs a body the call site cannot see belongs in \
+			 `NON_DETERMINISTIC` and declares the effect at its definition"
+		);
+
+		// Guard the guard: a registry that answered nothing would pass both.
+		assert!(actual.len() > 40, "expected the whole volatile class, found {actual:?}");
 	}
 
 	/// Every builtin that leaves something behind must report it, so a grouped
 	/// projection holding one is evaluated per row rather than once per group.
-	/// The set is spelled out here because the flag is applied by hand at each
-	/// registration: a new mutator added without it reduces silently, and the
-	/// only symptom is a statement with the wrong number of effects.
+	/// The answer is derived from the declared [`EffectSet`]; this pins which
+	/// declarations add up to it, since a mutator declared short reduces
+	/// silently, and the only symptom is a statement with the wrong number of
+	/// effects.
 	#[test]
 	fn mutating_builtins_report_mutating_state() {
 		let registry = FunctionRegistry::with_builtins();
@@ -400,6 +511,11 @@ mod tests {
 			"file::copy_if_not_exists",
 			"file::rename",
 			"file::rename_if_not_exists",
+			// A body the call site cannot see may write, and a write outlives the
+			// statement as surely as a bucket put does.
+			"eval::surql",
+			"eval::gql",
+			"api::invoke",
 		];
 
 		let missing: Vec<&str> = expected
@@ -411,8 +527,8 @@ mod tests {
 			.collect();
 		assert!(
 			missing.is_empty(),
-			"these must be registered behind `MutatesState`, or a grouped projection will run \
-			 them once per group instead of once per row: {missing:?}"
+			"these must declare an effect that outlives the statement, or a grouped \
+			 projection will run them once per group instead of once per row: {missing:?}"
 		);
 
 		// The readers alongside them must not be swept up: reducing those is
@@ -421,6 +537,127 @@ mod tests {
 			assert!(
 				!registry.get(name).expect("expected a registered builtin").mutates_state(),
 				"{name} only reads, so it must stay reducible"
+			);
+		}
+	}
+
+	/// Every declared [`EffectSet`] that is not `PURE`, by name.
+	///
+	/// Kept sorted, and asserted against the registry below, so that a
+	/// declaration changing — a flag gained, a flag lost, a function moving off
+	/// `PURE` or onto it — is a deliberate edit here. A builtin not in the
+	/// table is declared `PURE`, so this is the one place to read what every
+	/// builtin is declared to do.
+	const EFFECTS: &[(&str, E)] = &[
+		("api::invoke", E::OPAQUE_BODY.union(E::WRITES_DATA)),
+		("api::req::body", E::OPAQUE_BODY),
+		("api::req::max_body", E::OPAQUE_BODY),
+		("api::res::body", E::OPAQUE_BODY),
+		("api::res::header", E::OPAQUE_BODY),
+		("api::res::headers", E::OPAQUE_BODY),
+		("api::res::status", E::OPAQUE_BODY),
+		("api::timeout", E::OPAQUE_BODY),
+		("array::shuffle", E::ENTROPY),
+		("crypto::argon2::generate", E::ENTROPY),
+		("crypto::bcrypt::generate", E::ENTROPY),
+		("crypto::pbkdf2::generate", E::ENTROPY),
+		("crypto::scrypt::generate", E::ENTROPY),
+		("eval::gql", E::OPAQUE_BODY.union(E::WRITES_DATA)),
+		("eval::surql", E::OPAQUE_BODY.union(E::WRITES_DATA)),
+		("file::copy", E::READS_EXTERNAL.union(E::WRITES_EXTERNAL)),
+		("file::copy_if_not_exists", E::READS_EXTERNAL.union(E::WRITES_EXTERNAL)),
+		("file::delete", E::WRITES_EXTERNAL),
+		("file::exists", E::READS_EXTERNAL),
+		("file::get", E::READS_EXTERNAL),
+		("file::head", E::READS_EXTERNAL),
+		("file::list", E::READS_EXTERNAL),
+		("file::put", E::WRITES_EXTERNAL),
+		("file::put_if_not_exists", E::WRITES_EXTERNAL),
+		("file::rename", E::READS_EXTERNAL.union(E::WRITES_EXTERNAL)),
+		("file::rename_if_not_exists", E::READS_EXTERNAL.union(E::WRITES_EXTERNAL)),
+		("http::delete", E::READS_EXTERNAL.union(E::WRITES_EXTERNAL)),
+		("http::get", E::READS_EXTERNAL),
+		("http::head", E::READS_EXTERNAL),
+		("http::patch", E::READS_EXTERNAL.union(E::WRITES_EXTERNAL)),
+		("http::post", E::READS_EXTERNAL.union(E::WRITES_EXTERNAL)),
+		("http::put", E::READS_EXTERNAL.union(E::WRITES_EXTERNAL)),
+		("rand", E::ENTROPY),
+		("rand::bool", E::ENTROPY),
+		("rand::duration", E::ENTROPY),
+		("rand::enum", E::ENTROPY),
+		("rand::float", E::ENTROPY),
+		("rand::id", E::ENTROPY),
+		("rand::int", E::ENTROPY),
+		("rand::string", E::ENTROPY),
+		("rand::time", E::ENTROPY),
+		("rand::ulid", E::ENTROPY),
+		("rand::uuid", E::ENTROPY),
+		("rand::uuid::v4", E::ENTROPY),
+		("rand::uuid::v7", E::ENTROPY),
+		("record::exists", E::READS_DATA),
+		("record::is_edge", E::READS_DATA),
+		("schema::table::exists", E::READS_CATALOG),
+		("search::analyze", E::READS_CATALOG),
+		("sequence::nextval", E::ADVANCES_STATE),
+		("session::ac", E::READS_SESSION),
+		("session::db", E::READS_SESSION),
+		("session::id", E::READS_SESSION),
+		("session::ip", E::READS_SESSION),
+		("session::ns", E::READS_SESSION),
+		("session::origin", E::READS_SESSION),
+		("session::rd", E::READS_SESSION),
+		("session::token", E::READS_SESSION),
+		("sleep", E::BLOCKING),
+		("time::day", E::CLOCK),
+		("time::hour", E::CLOCK),
+		("time::is_leap_year", E::CLOCK),
+		("time::micros", E::CLOCK),
+		("time::millis", E::CLOCK),
+		("time::minute", E::CLOCK),
+		("time::month", E::CLOCK),
+		("time::nano", E::CLOCK),
+		("time::now", E::CLOCK),
+		("time::second", E::CLOCK),
+		("time::timezone", E::CLOCK),
+		("time::unix", E::CLOCK),
+		("time::wday", E::CLOCK),
+		("time::week", E::CLOCK),
+		("time::yday", E::CLOCK),
+		("time::year", E::CLOCK),
+	];
+
+	/// The declarations add up to exactly the pinned table, and draw the same
+	/// line as the writer list the expression layer keeps for transaction
+	/// classification.
+	#[test]
+	fn every_effect_declaration_is_pinned() {
+		let registry = FunctionRegistry::with_builtins();
+
+		assert!(EFFECTS.is_sorted_by_key(|(name, _)| *name), "keep `EFFECTS` sorted");
+		let mut actual: Vec<(&str, E)> = registry
+			.scalar_functions()
+			.filter(|f| !f.effects().is_pure())
+			.map(|f| (f.name(), f.effects()))
+			.collect();
+		actual.sort_unstable_by_key(|(name, _)| *name);
+		let expected: Vec<(&str, E)> =
+			EFFECTS.iter().copied().filter(|(name, _)| registry.get(name).is_some()).collect();
+		assert_eq!(
+			actual, expected,
+			"a declared effect set moved; `EFFECTS` names every builtin that is not `PURE`, \
+			 with what it declares"
+		);
+		assert!(actual.len() > 60, "expected the whole declared class, found {actual:?}");
+
+		// `is_writer_builtin` decides the transaction a statement holding the
+		// call takes; a declaration that disagreed with it would let a plan
+		// classify a call one way and the transaction another.
+		for f in registry.scalar_functions() {
+			assert_eq!(
+				crate::expr::method::is_writer_builtin(f.name()),
+				f.effects().writes_data(),
+				"{}: `is_writer_builtin` and `EffectSet::WRITES_DATA` disagree",
+				f.name()
 			);
 		}
 	}

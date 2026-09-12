@@ -70,6 +70,14 @@ impl PhysicalExpr for RecursePart {
 			// Create a new execution context with the current value set.
 			// The RecursionOp reads this to seed the recursion.
 			let bound_ctx = ctx.exec_ctx.with_current_value(value);
+			// The document root crosses the operator boundary as the enclosing
+			// row, so the expressions inside the recursed path -- a dynamic
+			// index, a method argument, the `+shortest=` target -- keep the
+			// record as their frame rather than the value being recursed.
+			let bound_ctx = match ctx.document_root {
+				Some(doc) => bound_ctx.with_current_row(Arc::new(doc.clone())),
+				None => bound_ctx,
+			};
 			let bound_ctx = if ctx.skip_fetch_perms {
 				bound_ctx.with_skip_fetch_perms(true)
 			} else {

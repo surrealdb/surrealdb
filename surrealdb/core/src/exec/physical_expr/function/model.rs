@@ -4,11 +4,15 @@ use std::sync::Arc;
 
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::helpers::{args_access_mode, args_required_context};
+use super::helpers::{args_access_mode, args_required_context, fmt_call_args};
 #[cfg(feature = "ml")]
 use super::helpers::{check_permission, evaluate_args};
+#[cfg(feature = "ml")]
+use crate::catalog::MlModelDefinition;
 #[cfg(not(feature = "ml"))]
 use crate::exec::Error as ExecError;
+#[cfg(feature = "ml")]
+use crate::exec::permission::CompiledGuard;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut};
 #[cfg(feature = "ml")]
@@ -21,6 +25,12 @@ use crate::val::Value;
 pub struct ModelFunctionExec {
 	pub(crate) model: Model,
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
+	/// The `PERMISSIONS` clause of the definition this call last found,
+	/// compiled. A call in a projection is made once per row, and compiling
+	/// its guard is plan-time work; see [`CompiledGuard`] for what is kept
+	/// and what is not.
+	#[cfg(feature = "ml")]
+	pub(crate) permission: CompiledGuard<MlModelDefinition>,
 }
 impl PhysicalExpr for ModelFunctionExec {
 	fn name(&self) -> &'static str {
@@ -89,9 +99,17 @@ impl PhysicalExpr for ModelFunctionExec {
 			let path =
 				get_model_path(ns_name, db_name, &self.model.name, &self.model.version, &val.hash);
 
-			// Check permissions
-			if ctx.exec_ctx.should_check_perms(Action::View)? {
-				check_permission(&val.permissions, &self.model.name, &ctx).await?;
+			// Check permissions. Inside a permission predicate the call is the
+			// definer's and is not checked.
+			if !ctx.skip_fetch_perms && ctx.exec_ctx.should_check_perms(Action::View)? {
+				check_permission(
+					&self.permission,
+					val.permissions_body.logical_ref()?,
+					&val,
+					&self.model.name,
+					&ctx,
+				)
+				.await?;
 			}
 
 			// Evaluate arguments
@@ -257,6 +275,6 @@ impl PhysicalExpr for ModelFunctionExec {
 impl ToSql for ModelFunctionExec {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		self.model.fmt_sql(f, fmt);
-		f.push_str("(...)");
+		fmt_call_args(f, fmt, &self.arguments);
 	}
 }

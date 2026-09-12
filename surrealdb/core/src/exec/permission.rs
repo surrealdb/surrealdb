@@ -4,20 +4,34 @@
 //! at execution time. Since SurrealQL allows DDL and DML interleaving within transactions,
 //! permissions must be resolved from the current transaction's schema view rather than
 //! at planning time.
+//!
+//! A stored clause is compiled from its text into the streaming engine's
+//! scalar. The one clause that cannot be — a guard the lowering has no form
+//! for — is carried as a [`LegacyClause`], which evaluates the stored
+//! expression through the engine's legacy bridge in the frame its caller is
+//! in, so a scan enforcing permissions at runtime can evaluate every clause the
+//! catalog holds.
 
 use std::sync::Arc;
 
+use arc_swap::ArcSwapOption;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::catalog::{Permission, Record};
+use crate::catalog::{Permission, Record, TableDefinition};
+use crate::doc::CursorDoc;
 use crate::err::{EngineError, Error};
-use crate::exec::planner::Planner;
+use crate::exec::operators::legacy_bridge::{legacy_compute, legacy_options_for_frame};
+use crate::exec::planner::{Planner, compile_expr};
 use crate::exec::{
-	DatabaseContext, Error as ExecError, EvalContext, ExecutionContext, PhysicalExpr,
+	AccessMode, BoxFut, ContextLevel, DatabaseContext, Error as ExecError, EvalContext,
+	ExecutionContext, FlowResult, PhysicalExpr,
 };
-use crate::expr::ControlFlow;
-use crate::iam::Action;
+use crate::expr::logical::{LogicalPermission, LogicalPermissionRef};
+use crate::expr::{ControlFlow, Expr};
+use crate::iam::{Action, Auth};
 use crate::idx::trees::gate::{BoxGateFut, TableSelectGate};
+use crate::kvs::Transaction;
 use crate::val::{RecordId, Value};
 
 /// Result of a permission check.
@@ -31,85 +45,228 @@ pub enum PhysicalPermission {
 	Conditional(Arc<dyn PhysicalExpr>),
 }
 
-/// Convert a catalog [`Permission`] to a PhysicalPermission via the
-/// given planner. Inner subqueries inherit the planner's `CycleGuard`, so a
+/// The `SELECT` permission of a table as the streaming engine applies it,
+/// compiled through `planner`.
+///
+/// The guard is compiled from the definition's logical body — the clause's
+/// stored text, lowered once for the life of the definition and shared with
+/// the analyzer — so a statement that plans the table does not lower the
+/// clause again. A guard whose text has no logical form is carried as a
+/// [`LegacyClause`] over the definition's expression form of the same clause.
+/// A table with no definition denies, as
+/// [`table_select_permission`](crate::catalog::table_select_permission)
+/// resolves it. Inner subqueries inherit the planner's `CycleGuard`, so a
 /// self-referential permission (`WHERE (SELECT FROM same_table) != NONE`)
 /// falls back to runtime resolution for that subtree instead of recursing.
-pub(crate) async fn convert_permission_to_physical(
-	permission: &Permission,
+pub(crate) async fn table_select_permission_physical(
+	table_def: Option<&TableDefinition>,
 	planner: &Planner<'_>,
 ) -> Result<PhysicalPermission, Error> {
-	match permission {
-		Permission::None => Ok(PhysicalPermission::Deny),
-		Permission::Full => Ok(PhysicalPermission::Allow),
-		Permission::Specific(expr) => {
-			let physical_expr = planner.physical_expr(expr.clone()).await?;
-			Ok(PhysicalPermission::Conditional(physical_expr))
+	let Some(def) = table_def else {
+		return Ok(PhysicalPermission::Deny);
+	};
+	permission_to_physical(&def.permissions.select, def.select_permission_logical(), planner).await
+}
+
+/// A stored `SELECT` clause as the streaming engine applies it: `logical`,
+/// the clause compiled from its stored text by the definition that holds it,
+/// or — when the text has no logical form — a [`LegacyClause`] over
+/// `permission`, the legacy engine's expression form of the same clause. The
+/// two are the same clause of the same definition; a caller passes both halves
+/// of one definition, never a body of its own making.
+pub(crate) async fn permission_to_physical(
+	permission: &Permission,
+	logical: anyhow::Result<LogicalPermission>,
+	planner: &Planner<'_>,
+) -> Result<PhysicalPermission, Error> {
+	match logical {
+		Ok(LogicalPermission::None) => Ok(PhysicalPermission::Deny),
+		Ok(LogicalPermission::Full) => Ok(PhysicalPermission::Allow),
+		Ok(LogicalPermission::Specific(guard)) => {
+			Ok(PhysicalPermission::Conditional(planner.physical_expr(guard).await?))
 		}
+		Err(_) => Ok(match permission {
+			Permission::None => PhysicalPermission::Deny,
+			Permission::Full => PhysicalPermission::Allow,
+			Permission::Specific(guard) => {
+				PhysicalPermission::Conditional(LegacyClause::permission(guard.clone()))
+			}
+		}),
 	}
 }
 
-/// Runtime convenience wrapper: build a txn-less planner from `ctx` and
-/// convert. Equivalent to today's per-scan permission resolution path —
-/// no plan-time index resolution, no cycle guard interaction.
+/// A stored clause the lowering cannot express, evaluated by the legacy
+/// engine.
 ///
-/// Cycle safety note: this path is intentionally *txn-less*. The txn-less
-/// shim in `expr_to_physical_expr` short-circuits `try_resolve_table_ctx`,
-/// so a self-referential permission compiled here (e.g. a cache-miss
-/// runtime build for a permission that contains `SELECT FROM same_table`)
-/// can't recurse into table-context resolution. Do **not** switch this
-/// helper to [`Planner::with_txn`] without re-deriving cycle safety —
-/// in particular, runtime callers don't share a parent [`CycleGuard`]
-/// the way plan-time nested planners do, so the inner subtree would
-/// either need its own guard or a different cycle-break mechanism.
+/// The streaming engine compiles a catalog clause — a table or field
+/// `PERMISSIONS FOR select` guard, a `COMPUTED` body — from its stored text into
+/// a [`PhysicalExpr`]. A clause whose text has no logical form (a mock record
+/// set in scalar position, a write statement) cannot be compiled that way and
+/// is carried as this expression instead, so the runtime enforcement path can
+/// evaluate every clause the catalog holds rather than declining the read.
+/// The clause is the legacy engine's own input; nothing here converts it.
+///
+/// Evaluation goes through the engine's one legacy bridge
+/// (`operators/legacy_bridge.rs`), in the frame the caller is in: a guard is
+/// evaluated under `skip_fetch_perms`, which the bridge maps to the
+/// write-refusing permission frame, and a computed body under the computed
+/// frame the field-state kernel sets on the context, with the definer's `AUTH
+/// LIMIT` already applied to the context's options. The row is bound as the
+/// cursor document, as the legacy reducer binds it, so `$this`, `$parent` and a
+/// `$value` bound on the context resolve as they do there.
+#[derive(Debug)]
+pub(crate) struct LegacyClause {
+	expr: Expr,
+	kind: LegacyClauseKind,
+}
+
+/// Which clause a [`LegacyClause`] carries; names the expression in a plan.
+#[derive(Debug, Clone, Copy)]
+enum LegacyClauseKind {
+	Permission,
+	Computed,
+}
+
+impl LegacyClause {
+	/// A `PERMISSIONS FOR select` guard with no logical form.
+	pub(crate) fn permission(expr: Expr) -> Arc<dyn PhysicalExpr> {
+		Arc::new(Self {
+			expr,
+			kind: LegacyClauseKind::Permission,
+		})
+	}
+
+	/// A `COMPUTED` body with no logical form.
+	pub(crate) fn computed(expr: Expr) -> Arc<dyn PhysicalExpr> {
+		Arc::new(Self {
+			expr,
+			kind: LegacyClauseKind::Computed,
+		})
+	}
+}
+
+impl PhysicalExpr for LegacyClause {
+	fn name(&self) -> &'static str {
+		match self.kind {
+			LegacyClauseKind::Permission => "LegacyPermissionClause",
+			LegacyClauseKind::Computed => "LegacyComputedClause",
+		}
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
+	}
+
+	fn required_context(&self) -> ContextLevel {
+		// A clause belongs to a table, so it is only ever evaluated with a
+		// database selected.
+		ContextLevel::Database
+	}
+
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let Some(options) = ctx.exec_ctx.options() else {
+				return Err(ExecError::Thrown(
+					"Options not available to evaluate a stored clause through the legacy evaluator"
+						.into(),
+				)
+				.into());
+			};
+			let options = legacy_options_for_frame(
+				options,
+				ctx.skip_fetch_perms,
+				ctx.exec_ctx.root().computing_field,
+				ctx.exec_ctx.version_stamp(),
+			)
+			.with_dive_consumed(ctx.plan_depth + 1);
+			let doc = ctx
+				.document_root
+				.or(ctx.current_value)
+				.map(|v| CursorDoc::new(None, None, v.clone()));
+			legacy_compute(&self.expr, ctx.exec_ctx.ctx(), &options, doc.as_ref()).await
+		})
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Both frames the clause is evaluated in refuse writes, so a write in
+		// the clause is an error at evaluation, never a mutation.
+		AccessMode::ReadOnly
+	}
+}
+
+impl ToSql for LegacyClause {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.expr.fmt_sql(f, fmt);
+	}
+}
+
+/// [`table_select_permission_physical`] for a scan that resolves its table
+/// when it runs: a txn-less planner is built from `ctx` — no plan-time index
+/// resolution, no cycle guard interaction.
+///
+/// Cycle safety note: this path is intentionally *txn-less*. A planner
+/// without a transaction resolves no table context, so a self-referential
+/// permission compiled here (e.g. a cache-miss runtime build for a permission
+/// that contains `SELECT FROM same_table`) cannot recurse into table-context
+/// resolution. Do **not** switch this helper to [`Planner::with_txn`] without
+/// re-deriving cycle safety — in particular, runtime callers don't share a
+/// parent [`CycleGuard`] the way plan-time nested planners do, so the inner
+/// subtree would either need its own guard or a different cycle-break
+/// mechanism.
 #[inline]
-pub(crate) async fn convert_permission_to_physical_runtime(
-	permission: &Permission,
+pub(crate) async fn table_select_permission_physical_runtime(
+	table_def: Option<&TableDefinition>,
 	ctx: &ExecutionContext,
 ) -> Result<PhysicalPermission, Error> {
-	convert_permission_to_physical(permission, &Planner::new(ctx.ctx(), ctx.function_registry()))
+	table_select_permission_physical(table_def, &Planner::new(ctx.ctx(), ctx.function_registry()))
 		.await
 }
 
-/// Check if permission should be checked for the given action.
+/// Whether `action` by `auth` is permission-checked, by role and actor level
+/// alone.
 ///
-/// Returns `true` if permission checks should be performed, `false` if they
-/// should be bypassed (e.g., for root/owner users or when auth is disabled).
+/// Never, while server auth is disabled and the session is anonymous.
+/// Otherwise a principal is exempt only when it holds the role the action
+/// needs — Viewer for `View`, Editor for `Edit` — and its actor level covers
+/// the target: a root user covers everything, a namespace user the namespace
+/// named in `ns`, a database user the database named in `ns`/`db`. With no
+/// namespace named only a root user can be exempt.
+///
+/// This is the one rule behind every gate, at run time and at plan time:
+/// [`ExecutionContext::should_check_perms`], which adds the permission-frame
+/// bypass in front of it, `Planner::should_check_perms_for_view` and the
+/// analyzer's `Caller`. The legacy engine's `Context::check_perms` applies
+/// the same rule to its `Options`.
+pub(crate) fn action_is_checked(
+	auth_enabled: bool,
+	auth: &Auth,
+	action: Action,
+	ns: Option<&str>,
+	db: Option<&str>,
+) -> bool {
+	if !auth_enabled && auth.is_anon() {
+		return false;
+	}
+	let allowed = match action {
+		Action::Edit => auth.has_editor_role(),
+		Action::View => auth.has_viewer_role(),
+	};
+	let in_level = auth.is_root()
+		|| match (ns, db) {
+			(Some(ns), Some(db)) => auth.is_ns_check(ns) || auth.is_db_check(ns, db),
+			(Some(ns), None) => auth.is_ns_check(ns),
+			(None, _) => false,
+		};
+	!allowed || !in_level
+}
+
+/// [`ExecutionContext::should_check_perms`] for a database-level context: the
+/// gate every scan, graph, reference and join operator consults before it
+/// enforces anything. `true` when permission checks apply, `false` when they
+/// are bypassed — inside a permission predicate, for an exempt principal, or
+/// for an anonymous session on a datastore with auth disabled.
 pub(crate) fn should_check_perms(db_ctx: &DatabaseContext, action: Action) -> Result<bool, Error> {
-	let root = &db_ctx.ns_ctx.root;
-
-	// Inside a permission predicate (`skip_fetch_perms`), enforcement is
-	// bypassed so the definer-authored predicate can read freely — matching the
-	// legacy `Options::new_with_perms(false)` path. This is the single gate
-	// every scan, graph and reference operator consults, so exempting it here
-	// disables the whole-scan `Deny` short-circuits, per-row table/field
-	// permission filtering, and edge/target enforcement in one place.
-	if root.skip_fetch_perms {
-		return Ok(false);
-	}
-
-	// Check if server auth is disabled
-	if !root.ctx.auth_enabled() && root.auth.is_anon() {
-		return Ok(false);
-	}
-
-	let ns = db_ctx.ns_name();
-	let db = db_ctx.db_name();
-
-	match action {
-		Action::Edit => {
-			let allowed = root.auth.has_editor_role();
-			let db_in_actor_level =
-				root.auth.is_root() || root.auth.is_ns_check(ns) || root.auth.is_db_check(ns, db);
-			Ok(!allowed || !db_in_actor_level)
-		}
-		Action::View => {
-			let allowed = root.auth.has_viewer_role();
-			let db_in_actor_level =
-				root.auth.is_root() || root.auth.is_ns_check(ns) || root.auth.is_db_check(ns, db);
-			Ok(!allowed || !db_in_actor_level)
-		}
-	}
+	db_ctx.should_check_perms(action)
 }
 
 /// Whether every table in `tables` carries `Permission::Full` for `SELECT`.
@@ -288,40 +445,240 @@ impl TableSelectGate for PhysicalTableSelect {
 	}
 }
 
+/// A stored `PERMISSIONS` clause, compiled once for the definition it was read
+/// from rather than once per evaluation.
+///
+/// A clause of this kind is judged per *evaluation*, not per statement: a
+/// `DEFINE PARAM` guard against the row the parameter is read on, a function's
+/// against the frame of the call. Compiling it there puts plan-time work
+/// inside a row loop, and a parameter or a call in a projection is evaluated
+/// once per row.
+///
+/// Only the compilation is kept. The definition is still read afresh, and the
+/// compiled predicate is still evaluated, on every evaluation — what the
+/// predicate answers belongs to that evaluation, so a guard that admits one
+/// row still refuses the next.
+///
+/// Reuse is keyed on the definition and the depth. The transaction cache hands
+/// out one `Arc` per definition, so an evaluation that gets this very
+/// allocation back has the clause the compilation came from without comparing
+/// it, and a `DEFINE` that replaces the definition matches nothing. The depth
+/// is part of the key because a guard is compiled one re-entry deeper than the
+/// expression reading it, and compilation is bounded by that depth.
+///
+/// What the key pins is the clause, not everything compiling it resolved: a
+/// subquery inside a predicate is bound against the catalog the first
+/// evaluation saw, and a later evaluation of the same node reads that binding.
+/// It is the rule the rest of the plan already follows — a statement binds
+/// once, before anything it goes on to define — and it is why the guard is
+/// compiled for the definition rather than for the statement.
+///
+/// The caller's authority is *not* in the key, and the reuse rests on it being
+/// fixed: compiling a scalar consults the principal — a read the caller
+/// bypasses is planned without the permission the check would apply
+/// ([`Planner::should_check_perms_for_view`]) — so a guard compiled for one
+/// principal states another's plan wrongly. What holds it is that a physical
+/// node belongs to one plan, one statement and one principal, and the authority
+/// at the node is a function of that principal and the definition, both of which
+/// the key already pins: an `AUTH LIMIT` derives a fresh `Arc` per call, but
+/// from the same caller and the same definition, so its value does not move.
+/// A cache that let two principals reach one compiled node would break that,
+/// and would have to key this memo on the principal as well.
+pub(crate) struct CompiledGuard<D> {
+	memo: ArcSwapOption<Memo<D>>,
+}
+
+/// A compiled guard and the definition and depth it was compiled for.
+struct Memo<D> {
+	definition: Arc<D>,
+	plan_depth: u32,
+	compiled: Arc<dyn PhysicalExpr>,
+}
+
+/// A cloned node carries the compilation the original made. Reuse is keyed on
+/// the definition, which every evaluation checks, so the copy is used only
+/// where the original's would have been.
+impl<D> Clone for CompiledGuard<D> {
+	fn clone(&self) -> Self {
+		Self {
+			memo: ArcSwapOption::new(self.memo.load_full()),
+		}
+	}
+}
+
+impl<D> Default for CompiledGuard<D> {
+	fn default() -> Self {
+		Self {
+			memo: ArcSwapOption::empty(),
+		}
+	}
+}
+
+/// The memo is an evaluation-time cache and says nothing about the node, so it
+/// is not printed.
+impl<D> std::fmt::Debug for CompiledGuard<D> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("CompiledGuard").finish_non_exhaustive()
+	}
+}
+
+impl<D> CompiledGuard<D> {
+	/// Judge `permission`, the clause `definition` stores, for this
+	/// evaluation, and answer whether it admits the caller.
+	///
+	/// The guard is evaluated in the permission frame — reads inside it are
+	/// not themselves permission-checked, which is what stops a predicate
+	/// following a record link from recursing into itself — one re-entry
+	/// deeper than the expression reading it. `denied` builds the error a
+	/// refusal raises; a guard that fails to compile denies, and so does one
+	/// that raises anything but an error, while an error keeps its type so a
+	/// write conflict raised inside a predicate stays retryable.
+	pub(crate) async fn check(
+		&self,
+		permission: LogicalPermissionRef<'_>,
+		definition: &Arc<D>,
+		ctx: &EvalContext<'_>,
+		txn: Option<Arc<Transaction>>,
+		denied: impl Fn() -> ExecError,
+	) -> FlowResult<()> {
+		let guard = match permission {
+			LogicalPermissionRef::Full => return Ok(()),
+			LogicalPermissionRef::None => return Err(denied().into()),
+			LogicalPermissionRef::Specific(guard) => guard,
+		};
+		let compiled = match self.cached(definition, ctx.plan_depth) {
+			Some(compiled) => compiled,
+			None => {
+				let Ok(compiled) = compile_expr(
+					guard.clone(),
+					ctx.exec_ctx.ctx(),
+					ctx.exec_ctx.function_registry(),
+					txn,
+					Some(Arc::clone(&ctx.exec_ctx.root().auth)),
+					ctx.plan_depth + 1,
+				)
+				.await
+				else {
+					return Err(denied().into());
+				};
+				self.memo.store(Some(Arc::new(Memo {
+					definition: Arc::clone(definition),
+					plan_depth: ctx.plan_depth,
+					compiled: Arc::clone(&compiled),
+				})));
+				compiled
+			}
+		};
+		let mut frame = ctx.clone();
+		frame.skip_fetch_perms = true;
+		match compiled.evaluate(frame).await {
+			Ok(result) if result.is_truthy() => Ok(()),
+			Ok(_) => Err(denied().into()),
+			Err(ControlFlow::Err(e)) => Err(ControlFlow::Err(e)),
+			Err(_) => Err(denied().into()),
+		}
+	}
+
+	/// The kept compilation, if it was made for this definition at this depth.
+	fn cached(&self, definition: &Arc<D>, plan_depth: u32) -> Option<Arc<dyn PhysicalExpr>> {
+		let memo = self.memo.load();
+		let memo = memo.as_ref()?;
+		(Arc::ptr_eq(&memo.definition, definition) && memo.plan_depth == plan_depth)
+			.then(|| Arc::clone(&memo.compiled))
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::dbs::Session;
-	use crate::exec::operators::test_util::{TestDb, parse_expr, physical_expr, root_ctx, val};
+	use crate::exec::operators::test_util::{
+		TestDb, parse_expr, parse_sql_expr, physical_expr, root_ctx, val,
+	};
 	use crate::iam::{Level, Role};
 	use crate::kvs::TransactionType;
 
 	// =========================================================================
-	// convert_permission_to_physical
+	// table_select_permission_physical
 	// =========================================================================
+
+	/// A table definition whose `SELECT` clause is `select`, both halves set
+	/// from it as a `DEFINE` statement sets them.
+	fn table_with_select(select: Permission) -> TableDefinition {
+		let mut def = table_with_disagreeing_halves(select.clone(), &select);
+		def.permissions.select = select;
+		def
+	}
+
+	/// A table definition whose expression half of the `SELECT` clause is
+	/// `permission` and whose logical body is compiled from `body`. Only a
+	/// test builds one: the two halves of a real definition name the same
+	/// clause.
+	fn table_with_disagreeing_halves(permission: Permission, body: &Permission) -> TableDefinition {
+		use crate::catalog::{
+			DatabaseId, FromStored, LogicalPermissionBody, NamespaceId, StoredTableDefinition,
+			TableId,
+		};
+		let mut def = TableDefinition::from_stored(&StoredTableDefinition::new(
+			NamespaceId(0),
+			DatabaseId(0),
+			TableId(0),
+			"t".into(),
+		))
+		.expect("a table definition");
+		def.permissions.select = permission;
+		def.select_body = LogicalPermissionBody::of(body);
+		def
+	}
 
 	#[tokio::test]
 	async fn catalog_permission_maps_onto_the_three_physical_arms() {
 		let ctx = root_ctx();
 		let planner = Planner::new(ctx.ctx(), ctx.function_registry());
 
-		let none = convert_permission_to_physical(&Permission::None, &planner).await.unwrap();
+		let none = table_with_select(Permission::None);
+		let none = table_select_permission_physical(Some(&none), &planner).await.unwrap();
 		assert!(matches!(none, PhysicalPermission::Deny));
 
-		let full = convert_permission_to_physical(&Permission::Full, &planner).await.unwrap();
+		let full = table_with_select(Permission::Full);
+		let full = table_select_permission_physical(Some(&full), &planner).await.unwrap();
 		assert!(matches!(full, PhysicalPermission::Allow));
 
-		let specific = Permission::Specific(parse_expr("owner = $auth.id"));
-		let conditional = convert_permission_to_physical(&specific, &planner).await.unwrap();
+		let specific =
+			table_with_select(Permission::Specific(parse_sql_expr("owner = $auth.id").into()));
+		let conditional =
+			table_select_permission_physical(Some(&specific), &planner).await.unwrap();
 		assert!(matches!(conditional, PhysicalPermission::Conditional(_)));
+
+		// A table with no definition denies.
+		let absent = table_select_permission_physical(None, &planner).await.unwrap();
+		assert!(matches!(absent, PhysicalPermission::Deny));
+	}
+
+	/// The guard is compiled from the definition's logical body, compiled
+	/// once for the life of the definition, and not lowered again from the
+	/// expression form: a body that disagrees with the expression form is
+	/// what the predicate evaluates.
+	#[tokio::test]
+	async fn the_guard_is_compiled_from_the_definitions_logical_body() {
+		let ctx = root_ctx();
+		let planner = Planner::new(ctx.ctx(), ctx.function_registry());
+		let def = table_with_disagreeing_halves(
+			Permission::Specific(parse_sql_expr("false").into()),
+			&Permission::Specific(parse_sql_expr("true").into()),
+		);
+		let permission = table_select_permission_physical(Some(&def), &planner).await.unwrap();
+		let allowed =
+			check_permission_for_value(&permission, &val("{ }").await, None, &ctx).await.unwrap();
+		assert!(allowed, "the logical body (`true`) decides, not the expression form (`false`)");
 	}
 
 	#[tokio::test]
 	async fn runtime_conversion_matches_the_planner_conversion() {
 		let ctx = root_ctx();
-		let permission = Permission::Specific(parse_expr("age > 18"));
+		let def = table_with_select(Permission::Specific(parse_sql_expr("age > 18").into()));
 
-		let resolved = convert_permission_to_physical_runtime(&permission, &ctx).await.unwrap();
+		let resolved = table_select_permission_physical_runtime(Some(&def), &ctx).await.unwrap();
 		let PhysicalPermission::Conditional(expr) = resolved else {
 			panic!("a Specific permission resolves to Conditional");
 		};
@@ -533,6 +890,99 @@ mod tests {
 			matches!(err, Error::Exec(ExecError::DbNotAllowed { .. })),
 			"expected DbNotAllowed, got {err:?}"
 		);
+	}
+
+	// =========================================================================
+	// CompiledGuard
+	// =========================================================================
+
+	/// Judge `clause`, stored by `definition`, against `row`, and report
+	/// whether it admitted.
+	async fn guard_admits<D>(
+		guard: &CompiledGuard<D>,
+		clause: &crate::expr::logical::LogicalExpr,
+		definition: &Arc<D>,
+		row: &Value,
+		ctx: &ExecutionContext,
+	) -> bool {
+		let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value_and_doc(row);
+		guard
+			.check(LogicalPermissionRef::Specific(clause), definition, &eval_ctx, None, || {
+				ExecError::Thrown("denied".to_owned())
+			})
+			.await
+			.is_ok()
+	}
+
+	/// The memo keeps a compilation, never an answer: the kept predicate is
+	/// evaluated afresh against every row, so a guard that admits one row
+	/// still refuses the next.
+	#[tokio::test]
+	async fn a_kept_compilation_is_judged_against_each_row() {
+		let ctx = root_ctx();
+		let guard: CompiledGuard<String> = CompiledGuard::default();
+		// To the memo a definition is an identity and nothing more, so a
+		// `String` stands in for the catalog struct a caller passes.
+		let definition = Arc::new("v1".to_owned());
+		let clause = parse_expr("public = true");
+
+		assert!(
+			guard_admits(&guard, &clause, &definition, &val("{ public: true }").await, &ctx).await
+		);
+		assert!(
+			!guard_admits(&guard, &clause, &definition, &val("{ public: false }").await, &ctx)
+				.await
+		);
+	}
+
+	/// A definition the caller re-read is a different `Arc`, and the clause it
+	/// carries is compiled afresh. This is what stops a redefinition from
+	/// being judged by the clause it replaced: every caller re-reads the
+	/// definition per evaluation, so the memo cannot outlive the one it was
+	/// made for.
+	#[tokio::test]
+	async fn a_redefinition_is_judged_by_its_own_clause() {
+		let ctx = root_ctx();
+		let guard: CompiledGuard<String> = CompiledGuard::default();
+		let admits = parse_expr("public = true");
+		let refuses = parse_expr("public = false");
+
+		let first = Arc::new("v1".to_owned());
+		assert!(guard_admits(&guard, &admits, &first, &val("{ public: true }").await, &ctx).await);
+
+		// The same row, the same guard node, a definition read afresh.
+		let second = Arc::new("v2".to_owned());
+		assert!(
+			!guard_admits(&guard, &refuses, &second, &val("{ public: true }").await, &ctx).await
+		);
+
+		// And back: the memo now holds the second definition's compilation,
+		// so the first's clause is compiled again rather than answered by it.
+		assert!(guard_admits(&guard, &admits, &first, &val("{ public: true }").await, &ctx).await);
+	}
+
+	/// The re-entry depth is the other half of the key. A guard reached one
+	/// level deeper is compiled with a depth budget of its own, so a
+	/// compilation made at one depth is not served at another.
+	#[tokio::test]
+	async fn a_kept_compilation_belongs_to_the_depth_it_was_made_at() {
+		let ctx = root_ctx();
+		let guard: CompiledGuard<String> = CompiledGuard::default();
+		let definition = Arc::new("v1".to_owned());
+		let clause = parse_expr("public = true");
+		let row = val("{ public: true }").await;
+
+		let shallow = EvalContext::from_exec_ctx(&ctx).with_value_and_doc(&row);
+		assert!(
+			guard
+				.check(LogicalPermissionRef::Specific(&clause), &definition, &shallow, None, || {
+					ExecError::Thrown("denied".to_owned())
+				})
+				.await
+				.is_ok()
+		);
+		assert!(guard.cached(&definition, 0).is_some());
+		assert!(guard.cached(&definition, 1).is_none());
 	}
 
 	// =========================================================================

@@ -537,8 +537,8 @@ async fn permission_checked_sessions_decline_the_scan_cap() {
 /// on it: casting a negative literal to `usize` wraps to a huge value, and
 /// adding the other (non-negative) bound on top overflows `usize::MAX`
 /// under the overflow checks this workspace's test builds enable.
-/// Declining leaves the normal Limit operator to reject the negative value
-/// with its usual runtime error instead.
+/// Declining leaves the paging itself to reject the negative count, which
+/// it does wherever it is read.
 #[tokio::test]
 async fn ordered_limit_rejects_negative_literals_without_panicking() {
 	let ds =
@@ -552,8 +552,8 @@ async fn ordered_limit_rejects_negative_literals_without_panicking() {
 	] {
 		let err = run_err(&ds, &ses, query).await;
 		assert!(
-			err.contains("non-negative"),
-			"expected the non-negative LIMIT/START error for `{query}`, got `{err}`"
+			err.contains("must evaluate to a positive integer"),
+			"expected the paging rejection for `{query}`, got `{err}`"
 		);
 	}
 }

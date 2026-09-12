@@ -7,7 +7,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::exe::FlowResultExt;
 use crate::expr::idiom::Idiom;
-use crate::expr::part::{Next, NextMethod};
+use crate::expr::part::Next;
 use crate::expr::{Expr, FlowResult, Literal, Part};
 use crate::val::{Number, Value};
 
@@ -86,7 +86,10 @@ pub(crate) async fn idiom_compute(
 			Some(v) => crate::legacy::value_get(v.doc.as_ref(), stk, ctx, opt, doc, this).await,
 			// There isn't any document
 			None => {
-				crate::legacy::value_get(&Value::None, stk, ctx, opt, doc, this.next_method()).await
+				let path =
+					crate::legacy::value::get::skip_to_method(this.as_ref(), stk, ctx, opt, doc)
+						.await?;
+				crate::legacy::value_get(&Value::None, stk, ctx, opt, doc, path).await
 			}
 		},
 	}

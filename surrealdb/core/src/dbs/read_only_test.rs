@@ -8,15 +8,13 @@
 //! depending on whether the caller wrapped it in `BEGIN`, which opens a write
 //! transaction unconditionally.
 //!
-//! The predicate exists twice — once over the surface AST (`sql::TopLevelExpr`)
-//! and once over the expression tree it converts to (`expr::TopLevelExpr`) —
-//! because the transaction mode is chosen on whichever form the caller holds.
-//! The two enums evolve separately, so every fixture here answers through both
-//! and the answers must match: a variant handled on one side and not the other
+//! The predicate exists twice — over the surface AST (`sql::Expr`), which
+//! chooses the transaction mode, and over the expression tree it converts to
+//! (`expr::Expr`), whose answer a logical plan's scalars carry. The two enums
+//! evolve separately, so every fixture here answers through both and the
+//! answers must match: a variant handled on one side and not the other
 //! surfaces as a disagreement rather than as a mutation reaching a read-only
 //! transaction.
-
-use crate::expr::TopLevelExpr;
 
 /// Parse one statement and report whether it claims to be read-only, asserting
 /// the surface AST and the expression tree agree on the answer.
@@ -26,14 +24,19 @@ fn read_only(sql: &str) -> bool {
 	assert_agree(&ast.expressions.remove(0), sql)
 }
 
-/// Answer through both implementations and require them to match.
+/// Answer through both implementations and require them to match. Only a bare
+/// expression has an expression-layer twin to compare against; every fixture
+/// here is one.
 fn assert_agree(surface: &crate::sql::TopLevelExpr, context: &str) -> bool {
-	let converted: TopLevelExpr = surface.clone().into();
 	let answer = surface.read_only();
+	let crate::sql::TopLevelExpr::Expr(expr) = surface else {
+		panic!("fixture is not a bare expression: {context}");
+	};
+	let converted: crate::expr::Expr = expr.clone().into();
 	assert_eq!(
 		answer,
 		converted.read_only(),
-		"`sql::TopLevelExpr::read_only` and `expr::TopLevelExpr::read_only` disagree on {context}"
+		"`sql::Expr::read_only` and `expr::Expr::read_only` disagree on {context}"
 	);
 	answer
 }

@@ -28,13 +28,15 @@ use crate::dbs::{
 use crate::doc::DefaultBroker;
 use crate::err::{EngineError, Error};
 use crate::exec::function::FunctionRegistry;
-use crate::exec::planner::try_plan_expr;
+use crate::exec::planner::{Engine, engine_for, plan_statement_inner};
 use crate::exec::{Error as ExecError, OutputShape};
+use crate::expr::logical::{LogicalExpr, LogicalOp, LogicalSource, SourceRef, lower};
 use crate::expr::paths::{DB, NS};
 use crate::expr::statements::{OptionStatement, UseStatement};
-use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
+use crate::expr::visit::{Visit, Visitor};
+use crate::expr::{Base, ControlFlow, Expr, FlowResult};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::slowlog::SlowLogVisit;
+use crate::kvs::slowlog::{ParamVisitor, SlowLogVisit};
 use crate::kvs::{Datastore, DatastoreError, Transaction, TransactionType};
 use crate::legacy::expr_to_ident;
 use crate::observe::{
@@ -171,6 +173,23 @@ pub struct Executor {
 	broker_owned_by_executor: bool,
 	/// Present when this execution streams its results.
 	stream: Option<StreamSink>,
+}
+
+/// Mutable access to a frozen context.
+///
+/// Takes the field rather than the executor so the borrow covers the context
+/// alone — `USE` mutates `Options` while holding this reference, which a
+/// method on `&mut self` would forbid.
+///
+/// The context is shared as an `Arc` while a statement runs, so it can only be
+/// unfrozen between statements; a live reference here means a statement held
+/// on to one past its own execution.
+fn context_mut(ctx: &mut Arc<Context>) -> Result<&mut Context, anyhow::Error> {
+	Arc::get_mut(ctx)
+		.ok_or_else(|| {
+			EngineError::unreachable("Tried to unfreeze a Context with multiple references")
+		})
+		.map_err(anyhow::Error::new)
 }
 
 impl Executor {
@@ -425,11 +444,13 @@ impl Executor {
 	/// If slow logging is configured in the current context, evaluate whether the
 	/// statement exceeded the slow threshold and emit a log entry if so.
 	///
-	/// Generic over `S` to accept both concrete statements and wrappers that
-	/// implement `Display` and `VisitExpression`.
-	fn check_slow_log<S: SlowLogVisit + ToSql>(&self, start: &Instant, stm: &S) {
+	/// `stm` is the text the entry prints; `params` is walked for the `$param`
+	/// references whose values the entry lists. They are one value for a
+	/// statement in expression form, and a surface statement paired with its
+	/// plan for one the streaming engine ran.
+	fn check_slow_log<T: ToSql, P: SlowLogVisit>(&self, start: &Instant, stm: &T, params: &P) {
 		if let Some(slow_log) = self.ctx.slow_log() {
-			slow_log.check_log(&self.ctx, start, stm);
+			slow_log.check_log(&self.ctx, start, stm, params);
 		}
 	}
 
@@ -789,7 +810,9 @@ impl Executor {
 			auth: Arc::clone(&self.opt.auth),
 			session: self.get_session_info(),
 			current_value: None,
+			current_row: None,
 			skip_fetch_perms: false,
+			computing_record: None,
 			computing_field: false,
 			version_stamp: None,
 		};
@@ -849,6 +872,9 @@ impl Executor {
 					std::collections::HashMap::new(),
 				)),
 				index_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+					std::collections::HashMap::new(),
+				)),
+				select_permission_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
 					std::collections::HashMap::new(),
 				)),
 			}),
@@ -943,21 +969,154 @@ impl Executor {
 		shape_statement_value(plan.output_shape(), results).map_err(ControlFlow::Err)
 	}
 
+	/// Run a statement on the streaming engine.
+	///
+	/// [`engine_for`] accepted the statement, but that is a decision made from
+	/// its kind; the planner can still decline while compiling it — a nested
+	/// DML subquery, or a shape it has no operator for yet — and that decline
+	/// only appears here. Such a statement is handed to the legacy engine
+	/// rather than failed, so the late decline is a fallback and not an error
+	/// the user sees.
+	///
+	/// Driving those declines to zero is what makes the engine choice final at
+	/// [`engine_for`], and this fallback deletable.
+	async fn run_on_streaming_engine(
+		&mut self,
+		expr: sql::Expr,
+		txn: Arc<Transaction>,
+		start: &Instant,
+	) -> FlowResult<Value> {
+		let lowered = self.lower_bare_expression(&expr);
+		// Planning consumes the plan, and the slow log reads the statement's
+		// parameters from it after the query has run; keep a copy only when a
+		// slow log is configured.
+		let logged = match &lowered {
+			Ok(op) if self.ctx.slow_log().is_some() => Some(op.clone()),
+			_ => None,
+		};
+		let planned = match lowered {
+			Ok(op) => self.plan_bare_expression(op, Arc::clone(&txn)).await,
+			Err(e) => Err(e),
+		};
+		match planned {
+			Ok(plan) => {
+				context_mut(&mut self.ctx)?.set_transaction(Arc::clone(&txn));
+				// Every caller of this method runs a top-level statement, so
+				// these values are the statement's own result and may stream.
+				let stream_rows = self.streams_rows();
+				let exec_result =
+					self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
+				// A statement the streaming engine ran is logged as written.
+				// Its lowering succeeded, and a plan has no node for DDL, so
+				// the surface text names no credential; the parameters are
+				// read from the plan, whose scalars name every `$param` the
+				// statement references.
+				if let Some(op) = logged {
+					self.check_slow_log(start, &expr, &PlanParams(&op));
+				}
+				exec_result
+			}
+			Err(Error::Exec(ExecError::PlannerUnsupported(reason))) => {
+				self.log_legacy_fallback(statement_kind(&expr), &reason);
+				self.run_on_legacy_engine(expr.into(), txn, start).await
+			}
+			Err(e) => Err(ControlFlow::Err(anyhow::Error::new(e))),
+		}
+	}
+
+	/// Records that the streaming engine declined a statement of kind `kind`
+	/// for `reason`, the planner's, and that the legacy engine runs it
+	/// instead. Under `AllReadOnlyStatements` — the strategy a deployment or
+	/// a test sets to exercise the streaming engine — the fallback is a
+	/// warning, since the statement did not run where it was meant to; under
+	/// best effort it is the expected course for a shape the planner declines,
+	/// and a debug line. Neither carries the statement's text, which may hold
+	/// credentials or data.
+	fn log_legacy_fallback(&self, kind: &'static str, reason: &str) {
+		match self.ctx.new_planner_strategy() {
+			crate::dbs::NewPlannerStrategy::AllReadOnlyStatements => tracing::warn!(
+				statement = kind,
+				reason,
+				"the streaming engine declined the statement; the legacy engine runs it",
+			),
+			crate::dbs::NewPlannerStrategy::BestEffortReadOnlyStatements
+			| crate::dbs::NewPlannerStrategy::ComputeOnly => tracing::debug!(
+				statement = kind,
+				reason,
+				"the streaming engine declined the statement; the legacy engine runs it",
+			),
+		}
+	}
+
+	/// Lower a bare expression to its logical plan.
+	///
+	/// No expression-layer value is built on this path. A statement with no
+	/// logical form — DML and DDL, which the legacy engine owns — is reported
+	/// as `PlannerUnsupported`, the same decline the planner uses, so the
+	/// caller's one fallback arm covers both.
+	///
+	/// A `SELECT` is checked against the `FOR UPDATE` rules before lowering,
+	/// on the surface form the parser produced.
+	fn lower_bare_expression(&self, expr: &sql::Expr) -> Result<LogicalOp, Error> {
+		if let sql::Expr::Select(select) = expr {
+			crate::dbs::validate_for_update_ast(select)?;
+		}
+		lower(expr.clone())
+			.map_err(|reason| ExecError::PlannerUnsupported(reason.to_string()).into())
+	}
+
+	/// Bind a lowered bare expression for `txn` and compile it into the
+	/// operator tree that runs it.
+	async fn plan_bare_expression(
+		&self,
+		op: LogicalOp,
+		txn: Arc<Transaction>,
+	) -> Result<Arc<dyn crate::exec::ExecOperator>, Error> {
+		plan_statement_inner(
+			op,
+			&self.ctx,
+			&self.function_registry,
+			txn,
+			Some(Arc::clone(&self.opt.auth)),
+			0,
+		)
+		.await
+	}
+
+	/// Run a statement on the legacy `compute()` recursor.
+	async fn run_on_legacy_engine(
+		&mut self,
+		expr: Expr,
+		txn: Arc<Transaction>,
+		start: &Instant,
+	) -> FlowResult<Value> {
+		context_mut(&mut self.ctx)?.set_transaction(txn);
+		let res = self
+			.stack
+			.enter(|stk| crate::legacy::expr_compute(&expr, stk, &self.ctx, &self.opt, None))
+			.finish()
+			.await;
+		self.check_slow_log(start, &expr, &expr);
+		res
+	}
+
 	/// Executes a statement which needs a transaction with the supplied
 	/// transaction.
 	///
-	/// This is where a statement is converted to the expression layer on its
-	/// way to an engine: a batch that ends before reaching a statement never
-	/// converts it. Rendering a statement as text converts one too, and
-	/// `dispatch` converts an `OPTION`'s payload, so this is the conversion
-	/// that runs, not the only one.
+	/// A statement is converted no further than the engine that runs it
+	/// requires, and only once it is about to run: a batch that ends before
+	/// reaching a statement converts nothing of it, and a statement the
+	/// streaming engine plans is never converted whole. What a surface
+	/// statement converts is stated on [`Self::run_surface_statement`]; a
+	/// plan converts nothing and goes to [`Self::run_logical_plan`].
 	///
-	/// The transaction is already open by the time this runs, so the
-	/// conversion happens inside it and counts against the transaction
-	/// timeout. That is free for most statements and is not for
+	/// The transaction is already open by the time this runs, so whatever does
+	/// convert converts inside it and counts against the transaction timeout.
+	/// That is free for most statements and is not for
 	/// `DEFINE USER`/`ALTER USER ... PASSWORD`, whose conversion derives an
 	/// Argon2 hash and a SCRAM verifier — deliberately expensive, and with no
-	/// yield point. Work added to a `From` impl is added here.
+	/// yield point. Those go to the legacy engine, which converts on the
+	/// branch that enters it; work added to a `From` impl is added there.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	async fn execute_plan_in_transaction(
 		&mut self,
@@ -965,403 +1124,9 @@ impl Executor {
 		start: &Instant,
 		stmt: TopLevelStatement,
 	) -> FlowResult<Value> {
-		/// Helper method to get mutable access to the context
-		macro_rules! ctx_mut {
-			() => {
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						EngineError::unreachable(
-							"Tried to unfreeze a Context with multiple references",
-						)
-					})
-					.map_err(anyhow::Error::new)?
-			};
-		}
-		let res = match stmt.into_expr() {
-			TopLevelExpr::Use(stmt) => {
-				// The namespace and database arguments are expressions, and an
-				// expression may read or write the datastore. They are computed
-				// against `self.ctx` below, so the statement's transaction has
-				// to be installed on it first: `Context::tx()` has no fallback
-				// for a context without one.
-				ctx_mut!().set_transaction(Arc::clone(&txn));
-
-				let opt_ref = self.opt.clone();
-
-				let (use_ns, use_db) = match stmt {
-					UseStatement::Default => {
-						if let Some(x) = txn.get_default_config().await? {
-							(x.namespace.clone(), x.database.clone())
-						} else {
-							(None, None)
-						}
-					}
-					UseStatement::Ns(ns) => {
-						let ns = self
-							.stack
-							.enter(|stk| {
-								expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace")
-							})
-							.finish()
-							.await?;
-
-						(Some(ns), None)
-					}
-					UseStatement::Db(db) => {
-						let db = self
-							.stack
-							.enter(|stk| {
-								expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database")
-							})
-							.finish()
-							.await?;
-
-						(None, Some(db))
-					}
-					UseStatement::NsDb(ns, db) => {
-						let ns = self
-							.stack
-							.enter(|stk| {
-								expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace")
-							})
-							.finish()
-							.await?;
-
-						let db = self
-							.stack
-							.enter(|stk| {
-								expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database")
-							})
-							.finish()
-							.await?;
-
-						(Some(ns), Some(db))
-					}
-				};
-
-				// SECURITY (GHSA-2v9j): `USE` moves the session's *selected*
-				// namespace/database to caller-supplied operands. The
-				// authenticated Auth level — not the (about-to-be-overwritten)
-				// selected ns/db — is the source of truth for tenant scope, so
-				// the principal must be verified as authorized for the target
-				// BEFORE the switch takes effect (SECURITY_GUIDE section 3).
-				// Without this gate a Database- or Namespace-level principal
-				// could pivot into a foreign tenant and reach any table there
-				// whose PERMISSIONS are satisfiable (e.g. `PERMISSIONS FULL`),
-				// collapsing the namespace/database isolation boundary. This
-				// mirrors the custom-API tenant gate added for
-				// GHSA-848m-r628-vrxw (`api/invocation.rs`, `kvs/ds.rs`), which
-				// had never been applied to the `USE` / `/sql` executor path.
-				// A switch that only changes one of ns/db keeps the other from
-				// the current session (`or(self.opt...)`); Root and anonymous
-				// (`Level::No`) principals are unrestricted by `can_access_ns_db`.
-				let target_ns = use_ns.as_deref().or(self.opt.ns.as_deref());
-				let target_db = use_db.as_deref().or(self.opt.db.as_deref());
-				if let Some(ns_name) = target_ns {
-					let db_name = target_db.unwrap_or_default();
-					if !self.opt.auth.can_access_ns_db(ns_name, db_name) {
-						// Report the narrowest boundary that failed: if the
-						// namespace itself is in scope, the database is the
-						// offending operand, otherwise the namespace is.
-						let err = if self.opt.auth.level().ns() == Some(ns_name) {
-							ExecError::DbNotAllowed {
-								db: db_name.to_owned(),
-							}
-						} else {
-							ExecError::NsNotAllowed {
-								ns: ns_name.to_owned(),
-							}
-						};
-						return Err(ControlFlow::Err(anyhow::Error::new(err)));
-					}
-				}
-
-				// SECURITY: implicit creation of a namespace or database via
-				// `USE` requires the same authorization as the explicit
-				// `DEFINE NAMESPACE` / `DEFINE DATABASE` statements
-				// (SECURITY_GUIDE section 3). Re-selecting an existing
-				// namespace or database is unrestricted; downstream
-				// operations against a non-existent resource surface
-				// `NsNotFound` / `DbNotFound` naturally rather than a
-				// silently auto-created resource the session was never
-				// allowed to create.
-				let create_ns = if let Some(ns_name) = use_ns.as_deref() {
-					if txn.get_ns_by_name(ns_name, None).await?.is_some()
-						|| (!self.ctx.auth_enabled() && self.opt.auth.is_anon())
-					{
-						true
-					} else {
-						self.opt
-							.auth
-							.is_allowed(Action::Edit, &ResourceKind::Namespace.on_root())
-							.is_ok()
-					}
-				} else {
-					false
-				};
-				let create_db = if let Some(db_name) = use_db.as_deref() {
-					let target_ns = use_ns.as_deref().or(self.opt.ns.as_deref());
-					if let Some(ns_name) = target_ns {
-						if txn.get_db_by_name(ns_name, db_name, None).await?.is_some()
-							|| (!self.ctx.auth_enabled() && self.opt.auth.is_anon())
-						{
-							true
-						} else if txn.get_ns_by_name(ns_name, None).await?.is_none()
-							&& self
-								.opt
-								.auth
-								.is_allowed(Action::Edit, &ResourceKind::Namespace.on_root())
-								.is_err()
-						{
-							// SECURITY: `ensure_ns_db` is
-							// `get_or_add_db_upwards(..., upwards = true)`
-							// and silently `get_or_add_ns`-es a missing
-							// parent (see `kvs/tx.rs::get_or_add_db_upwards`).
-							// Without this gate, a namespace-level Editor —
-							// including one on a stale token whose
-							// namespace has since been dropped — could
-							// recreate the parent namespace as a side
-							// effect of `USE NS dropped DB anything` or
-							// `USE DB anything` against a stale
-							// session-level ns.
-							false
-						} else {
-							self.opt
-								.auth
-								.is_allowed(Action::Edit, &ResourceKind::Database.on_ns(ns_name))
-								.is_ok()
-						}
-					} else {
-						false
-					}
-				} else {
-					false
-				};
-
-				let ctx = ctx_mut!();
-
-				// Apply new namespace
-				if let Some(ns) = use_ns {
-					if create_ns {
-						txn.get_or_add_ns(Some(ctx), &ns).await?;
-					}
-
-					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
-					self.opt.set_ns(Some(ns.as_str().into()));
-					session.put(NS.as_ref(), ns.into());
-					ctx.add_value("session", session.into());
-				}
-
-				// Apply new database
-				if let Some(db) = use_db {
-					let Some(ns) = &self.opt.ns else {
-						return Err(ControlFlow::Err(anyhow::anyhow!(
-							"Cannot use database without namespace"
-						)));
-					};
-
-					if create_db {
-						txn.ensure_ns_db(Some(ctx), ns, &db).await?;
-					}
-
-					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
-					self.opt.set_db(Some(db.as_str().into()));
-					session.put(DB.as_ref(), db.into());
-					ctx.add_value("session", session.into());
-				}
-
-				// Invalidate cached session info since USE changes ns/db
-				self.cached_session = None;
-
-				// Return the current namespace and database
-				Ok(Value::from(map! {
-					"namespace" => self.opt.ns.as_deref().map(|x| Value::String(x.into())).unwrap_or(Value::None),
-					"database" => self.opt.db.as_deref().map(|x| Value::String(x.into())).unwrap_or(Value::None),
-				}))
-			}
-			TopLevelExpr::Option(_) => {
-				return Err(ControlFlow::Err(anyhow::Error::new(EngineError::unreachable(
-					"TopLevelExpr::Option should have been handled by a calling function",
-				))));
-			}
-
-			TopLevelExpr::Expr(Expr::Let(stm)) => {
-				// Reject protected names first, before any work: avoids planning
-				// or computing a value we'll throw away.
-				if stm.is_protected_set() {
-					return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
-						name: stm.name.to_string(),
-					})));
-				}
-				ctx_mut!().set_transaction(Arc::clone(&txn));
-
-				// Plan the RHS through the streaming pipeline first; fall back
-				// to the legacy `compute()` path on PlannerUnsupported /
-				// PlannerUnimplemented. The streaming pipeline is the same
-				// one a bare `SELECT * FROM t` uses, so a `LET $x = SELECT * FROM t`
-				// no longer pays the legacy recursive evaluator's cost.
-				//
-				// We plan `stm.what` (the RHS), not the LET itself: routing
-				// through `plan_let_statement` would build a `LetPlan` whose
-				// binding lives in `output_context`, which produces a new
-				// `ExecutionContext` local to `execute_operator_plan` that
-				// never reaches `self.ctx`. Planning the RHS directly keeps
-				// the bind-into-session logic in one place — here.
-				let res = match try_plan_expr!(
-					&stm.what,
-					&self.ctx,
-					&self.function_registry,
-					Arc::clone(&txn),
-					Some(Arc::clone(&self.opt.auth))
-				) {
-					// The RHS binds to a param rather than being returned, so its
-					// values are not the statement's rows and must not stream.
-					Ok(plan) => self.execute_operator_plan(plan, Arc::clone(&txn), false).await,
-					Err(Error::Exec(
-						err @ (ExecError::PlannerUnsupported(_)
-						| ExecError::PlannerUnimplemented(_)),
-					)) => {
-						if let ExecError::PlannerUnimplemented(msg) = &err {
-							tracing::warn!("PlannerUnimplemented fallback in top-level LET: {msg}");
-						}
-						self.stack
-							.enter(|stk| {
-								crate::legacy::expr_compute(
-									&stm.what, stk, &self.ctx, &self.opt, None,
-								)
-							})
-							.finish()
-							.await
-					}
-					Err(e) => Err(ControlFlow::Err(anyhow::Error::new(e))),
-				};
-
-				let res = res?;
-				let result = match &stm.kind {
-					Some(kind) => res
-						.coerce_to_kind(kind)
-						.map_err(|e| ExecError::SetCoerce {
-							name: stm.name.to_string(),
-							error: Box::new(e),
-						})
-						.map_err(anyhow::Error::new)?,
-					None => res,
-				};
-
-				// Set the parameter
-				ctx_mut!().add_value(stm.name.clone(), result.into());
-
-				// Check if we dump the slow log
-				self.check_slow_log(start, stm.as_ref());
-				// Finalise transaction, returning nothing unless it couldn't commit
-				Ok(Value::None)
-			}
-			TopLevelExpr::Begin => {
-				return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
-					"Cannot BEGIN a transaction within a transaction".to_string(),
-				))));
-			}
-			TopLevelExpr::Commit => {
-				return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
-					"Cannot COMMIT without starting a transaction".to_string(),
-				))));
-			}
-			TopLevelExpr::Cancel => {
-				return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
-					"Cannot CANCEL without starting a transaction".to_string(),
-				))));
-			}
-			TopLevelExpr::Kill(s) => {
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						err::Error::unreachable(
-							"Tried to unfreeze a Context with multiple references",
-						)
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
-				self.stack
-					.enter(|stk| {
-						crate::legacy::kill_statement_compute(&s, stk, &self.ctx, &self.opt, None)
-					})
-					.finish()
-					.await
-					.map_err(ControlFlow::Err)
-			}
-			TopLevelExpr::Live(s) => {
-				ctx_mut!().set_transaction(txn);
-				self.stack
-					.enter(|stk| {
-						crate::legacy::live_statement_compute(&s, stk, &self.ctx, &self.opt, None)
-					})
-					.finish()
-					.await
-					.map_err(ControlFlow::Err)
-			}
-			TopLevelExpr::Show(s) => {
-				ctx_mut!().set_transaction(txn);
-				crate::legacy::show_statement_compute(&s, &self.ctx, &self.opt, None)
-					.await
-					.map_err(ControlFlow::Err)
-			}
-			TopLevelExpr::Access(s) => {
-				ctx_mut!().set_transaction(txn);
-				self.stack
-					.enter(|stk| {
-						crate::legacy::access_statement_compute(&s, stk, &self.ctx, &self.opt, None)
-					})
-					.finish()
-					.await
-			}
-			// Process all other normal statements
-			TopLevelExpr::Expr(e) => {
-				// Try the new streaming execution path first
-				match try_plan_expr!(
-					&e,
-					&self.ctx,
-					&self.function_registry,
-					Arc::clone(&txn),
-					Some(Arc::clone(&self.opt.auth))
-				) {
-					Ok(plan) => {
-						// Set the transaction on the context
-						ctx_mut!().set_transaction(Arc::clone(&txn));
-
-						// Every caller of this method runs a top-level statement,
-						// so these values are the statement's own result and may
-						// stream.
-						let stream_rows = self.streams_rows();
-						// Build execution context and execute the plan
-						let exec_result =
-							self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
-
-						self.check_slow_log(start, &e);
-
-						// exec_result is now FlowResult<Value>, propagate directly
-						exec_result
-					}
-					Err(Error::Exec(
-						err @ (ExecError::PlannerUnsupported(_)
-						| ExecError::PlannerUnimplemented(_)),
-					)) => {
-						if let ExecError::PlannerUnimplemented(msg) = &err {
-							tracing::warn!("PlannerUnimplemented fallback in executor: {msg}");
-						}
-						// Fallback to existing compute path
-						ctx_mut!().set_transaction(txn);
-						let res = self
-							.stack
-							.enter(|stk| {
-								crate::legacy::expr_compute(&e, stk, &self.ctx, &self.opt, None)
-							})
-							.finish()
-							.await;
-						self.check_slow_log(start, &e);
-						res
-					}
-					Err(e) => Err(ControlFlow::Err(anyhow::Error::new(e))),
-				}
-			}
+		let res = match stmt {
+			TopLevelStatement::Ast(stmt) => self.run_surface_statement(stmt, txn, start).await,
+			TopLevelStatement::Plan(op) => self.run_logical_plan(op, txn, start).await,
 		};
 
 		// Catch cancellation during running.
@@ -1374,6 +1139,474 @@ impl Executor {
 				Err(ControlFlow::from(anyhow::anyhow!(EngineError::QueryCancelled)))
 			}
 		}
+	}
+
+	/// Run a statement in the form the parser produced it.
+	///
+	/// Each arm converts its own payload and nothing else, so a statement pays
+	/// for the conversion the engine that runs it needs: `KILL` converts a
+	/// `KillStatement` rather than the statement enclosing it, and a bare
+	/// expression is not converted at all until an engine has been chosen for
+	/// it.
+	async fn run_surface_statement(
+		&mut self,
+		stmt: sql::TopLevelExpr,
+		txn: Arc<Transaction>,
+		start: &Instant,
+	) -> FlowResult<Value> {
+		match stmt {
+			sql::TopLevelExpr::Use(stmt) => self.run_use(stmt.into(), txn).await,
+			sql::TopLevelExpr::Option(_) => Self::option_reached_an_engine(),
+			sql::TopLevelExpr::Expr(sql::Expr::Let(stmt)) => self.run_let(*stmt, txn, start).await,
+			sql::TopLevelExpr::Begin => {
+				Self::transaction_control_error("Cannot BEGIN a transaction within a transaction")
+			}
+			sql::TopLevelExpr::Commit => {
+				Self::transaction_control_error("Cannot COMMIT without starting a transaction")
+			}
+			sql::TopLevelExpr::Cancel => {
+				Self::transaction_control_error("Cannot CANCEL without starting a transaction")
+			}
+			sql::TopLevelExpr::Kill(stmt) => self.run_kill(stmt.into(), txn).await,
+			sql::TopLevelExpr::Live(stmt) => self.run_live((*stmt).into(), txn).await,
+			sql::TopLevelExpr::Show(stmt) => self.run_show(stmt.into(), txn).await,
+			sql::TopLevelExpr::Access(stmt) => self.run_access((*stmt).into(), txn).await,
+			sql::TopLevelExpr::Expr(expr) => self.run_bare_expression(expr, txn, start).await,
+		}
+	}
+
+	/// The error a transaction-control statement raises where no driver acted
+	/// on it: `BEGIN` inside a transaction, `COMMIT` or `CANCEL` outside one.
+	fn transaction_control_error(message: &str) -> FlowResult<Value> {
+		Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(message.to_string()))))
+	}
+
+	/// `OPTION` changes the options every later statement in the batch runs
+	/// under, so a driver applies it and never hands it to an engine.
+	fn option_reached_an_engine() -> FlowResult<Value> {
+		Err(ControlFlow::Err(anyhow::Error::new(EngineError::unreachable(
+			"TopLevelExpr::Option should have been handled by a calling function",
+		))))
+	}
+
+	/// Run a bare expression on the engine chosen for it.
+	///
+	/// The choice is made from the surface statement, so the conversion to the
+	/// expression layer happens on the legacy branch only — and, for the
+	/// statement kinds the streaming engine has no logical form for, inside
+	/// [`Self::lower_bare_expression`].
+	async fn run_bare_expression(
+		&mut self,
+		expr: sql::Expr,
+		txn: Arc<Transaction>,
+		start: &Instant,
+	) -> FlowResult<Value> {
+		match engine_for(&expr, *self.ctx.new_planner_strategy()) {
+			Engine::Streaming => self.run_on_streaming_engine(expr, txn, start).await,
+			Engine::Legacy(_) => self.run_on_legacy_engine(expr.into(), txn, start).await,
+		}
+	}
+
+	/// Run a statement that arrived already planned. There is no lowering step
+	/// and no `compute()` behind it, so the plan is compiled and run or the
+	/// query fails.
+	async fn run_logical_plan(
+		&mut self,
+		op: Box<crate::expr::logical::LogicalOp>,
+		txn: Arc<Transaction>,
+		start: &Instant,
+	) -> FlowResult<Value> {
+		// A plan runs only under the streaming engine. Nothing can
+		// carry it to the legacy one — no `Expr` variant holds a plan —
+		// so a session pinned to `compute-only` has no engine for it
+		// and is told so rather than being quietly given the other one.
+		if *self.ctx.new_planner_strategy() == crate::dbs::NewPlannerStrategy::ComputeOnly {
+			Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
+				"GQL MATCH requires the streaming execution engine; it cannot run \
+				 under the compute-only planner strategy"
+					.to_string(),
+			))))
+		} else {
+			// Planning consumes the plan, and the slow log needs it after
+			// the query has run; keep a copy only when one is configured.
+			let logged = self.ctx.slow_log().is_some().then(|| op.clone());
+			let planned = crate::exec::planner::plan_logical_inner(
+				*op,
+				&self.ctx,
+				&self.function_registry,
+				Arc::clone(&txn),
+				Some(Arc::clone(&self.opt.auth)),
+				0,
+			)
+			.await;
+			match planned {
+				Ok(plan) => {
+					context_mut(&mut self.ctx)?.set_transaction(Arc::clone(&txn));
+					let stream_rows = self.streams_rows();
+					let exec_result =
+						self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
+					if let Some(op) = logged {
+						self.check_slow_log(start, &op, &PlanParams(&op));
+					}
+					exec_result
+				}
+				Err(e) => Err(ControlFlow::Err(anyhow::Error::new(e))),
+			}
+		}
+	}
+
+	/// Run a `USE`.
+	async fn run_use(&mut self, stmt: UseStatement, txn: Arc<Transaction>) -> FlowResult<Value> {
+		// The namespace and database arguments are expressions, and an
+		// expression may read or write the datastore. They are computed
+		// against `self.ctx` below, so the statement's transaction has
+		// to be installed on it first: `Context::tx()` has no fallback
+		// for a context without one.
+		context_mut(&mut self.ctx)?.set_transaction(Arc::clone(&txn));
+
+		let opt_ref = self.opt.clone();
+
+		let (use_ns, use_db) = match stmt {
+			UseStatement::Default => {
+				if let Some(x) = txn.get_default_config().await? {
+					(x.namespace.clone(), x.database.clone())
+				} else {
+					(None, None)
+				}
+			}
+			UseStatement::Ns(ns) => {
+				let ns = self
+					.stack
+					.enter(|stk| expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace"))
+					.finish()
+					.await?;
+
+				(Some(ns), None)
+			}
+			UseStatement::Db(db) => {
+				let db = self
+					.stack
+					.enter(|stk| expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database"))
+					.finish()
+					.await?;
+
+				(None, Some(db))
+			}
+			UseStatement::NsDb(ns, db) => {
+				let ns = self
+					.stack
+					.enter(|stk| expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace"))
+					.finish()
+					.await?;
+
+				let db = self
+					.stack
+					.enter(|stk| expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database"))
+					.finish()
+					.await?;
+
+				(Some(ns), Some(db))
+			}
+		};
+
+		// SECURITY (GHSA-2v9j): `USE` moves the session's *selected*
+		// namespace/database to caller-supplied operands. The
+		// authenticated Auth level — not the (about-to-be-overwritten)
+		// selected ns/db — is the source of truth for tenant scope, so
+		// the principal must be verified as authorized for the target
+		// BEFORE the switch takes effect (SECURITY_GUIDE section 3).
+		// Without this gate a Database- or Namespace-level principal
+		// could pivot into a foreign tenant and reach any table there
+		// whose PERMISSIONS are satisfiable (e.g. `PERMISSIONS FULL`),
+		// collapsing the namespace/database isolation boundary. This
+		// mirrors the custom-API tenant gate added for
+		// GHSA-848m-r628-vrxw (`api/invocation.rs`, `kvs/ds.rs`), which
+		// had never been applied to the `USE` / `/sql` executor path.
+		// A switch that only changes one of ns/db keeps the other from
+		// the current session (`or(self.opt...)`); Root and anonymous
+		// (`Level::No`) principals are unrestricted by `can_access_ns_db`.
+		let target_ns = use_ns.as_deref().or(self.opt.ns.as_deref());
+		let target_db = use_db.as_deref().or(self.opt.db.as_deref());
+		if let Some(ns_name) = target_ns {
+			let db_name = target_db.unwrap_or_default();
+			if !self.opt.auth.can_access_ns_db(ns_name, db_name) {
+				// Report the narrowest boundary that failed: if the
+				// namespace itself is in scope, the database is the
+				// offending operand, otherwise the namespace is.
+				let err = if self.opt.auth.level().ns() == Some(ns_name) {
+					ExecError::DbNotAllowed {
+						db: db_name.to_owned(),
+					}
+				} else {
+					ExecError::NsNotAllowed {
+						ns: ns_name.to_owned(),
+					}
+				};
+				return Err(ControlFlow::Err(anyhow::Error::new(err)));
+			}
+		}
+
+		// SECURITY: implicit creation of a namespace or database via
+		// `USE` requires the same authorization as the explicit
+		// `DEFINE NAMESPACE` / `DEFINE DATABASE` statements
+		// (SECURITY_GUIDE section 3). Re-selecting an existing
+		// namespace or database is unrestricted; downstream
+		// operations against a non-existent resource surface
+		// `NsNotFound` / `DbNotFound` naturally rather than a
+		// silently auto-created resource the session was never
+		// allowed to create.
+		let create_ns = if let Some(ns_name) = use_ns.as_deref() {
+			if txn.get_ns_by_name(ns_name, None).await?.is_some()
+				|| (!self.ctx.auth_enabled() && self.opt.auth.is_anon())
+			{
+				true
+			} else {
+				self.opt.auth.is_allowed(Action::Edit, &ResourceKind::Namespace.on_root()).is_ok()
+			}
+		} else {
+			false
+		};
+		let create_db = if let Some(db_name) = use_db.as_deref() {
+			let target_ns = use_ns.as_deref().or(self.opt.ns.as_deref());
+			if let Some(ns_name) = target_ns {
+				if txn.get_db_by_name(ns_name, db_name, None).await?.is_some()
+					|| (!self.ctx.auth_enabled() && self.opt.auth.is_anon())
+				{
+					true
+				} else if txn.get_ns_by_name(ns_name, None).await?.is_none()
+					&& self
+						.opt
+						.auth
+						.is_allowed(Action::Edit, &ResourceKind::Namespace.on_root())
+						.is_err()
+				{
+					// SECURITY: `ensure_ns_db` is
+					// `get_or_add_db_upwards(..., upwards = true)`
+					// and silently `get_or_add_ns`-es a missing
+					// parent (see `kvs/tx.rs::get_or_add_db_upwards`).
+					// Without this gate, a namespace-level Editor —
+					// including one on a stale token whose
+					// namespace has since been dropped — could
+					// recreate the parent namespace as a side
+					// effect of `USE NS dropped DB anything` or
+					// `USE DB anything` against a stale
+					// session-level ns.
+					false
+				} else {
+					self.opt
+						.auth
+						.is_allowed(Action::Edit, &ResourceKind::Database.on_ns(ns_name))
+						.is_ok()
+				}
+			} else {
+				false
+			}
+		} else {
+			false
+		};
+
+		let ctx = context_mut(&mut self.ctx)?;
+
+		// Apply new namespace
+		if let Some(ns) = use_ns {
+			if create_ns {
+				txn.get_or_add_ns(Some(ctx), &ns).await?;
+			}
+
+			let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+			self.opt.set_ns(Some(ns.as_str().into()));
+			session.put(NS.as_ref(), ns.into());
+			ctx.add_value("session", session.into());
+		}
+
+		// Apply new database
+		if let Some(db) = use_db {
+			let Some(ns) = &self.opt.ns else {
+				return Err(ControlFlow::Err(anyhow::anyhow!(
+					"Cannot use database without namespace"
+				)));
+			};
+
+			if create_db {
+				txn.ensure_ns_db(Some(ctx), ns, &db).await?;
+			}
+
+			let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+			self.opt.set_db(Some(db.as_str().into()));
+			session.put(DB.as_ref(), db.into());
+			ctx.add_value("session", session.into());
+		}
+
+		// Invalidate cached session info since USE changes ns/db
+		self.cached_session = None;
+
+		// Return the current namespace and database
+		Ok(Value::from(map! {
+			"namespace" => self.opt.ns.as_deref().map(|x| Value::String(x.into())).unwrap_or(Value::None),
+			"database" => self.opt.db.as_deref().map(|x| Value::String(x.into())).unwrap_or(Value::None),
+		}))
+	}
+
+	/// Run a top-level `LET`, binding its result into the batch's scope.
+	///
+	/// The right-hand side is what runs, not the `LET` itself: a `LetPlan`
+	/// binds into the operator tree's own context, which never reaches the
+	/// batch scope, so the value is computed here and bound into `self.ctx`
+	/// directly. The engine is chosen for the right-hand side the way
+	/// [`engine_for`] chooses it for a bare statement — a session pinned to
+	/// the legacy engine runs it there, and so does a side with no logical
+	/// form (DML) or one the planner declines — and the legacy branch is the
+	/// only one that converts it, at that point and only then.
+	async fn run_let(
+		&mut self,
+		stm: sql::statements::SetStatement,
+		txn: Arc<Transaction>,
+		start: &Instant,
+	) -> FlowResult<Value> {
+		// Reject protected names first, before any work: avoids planning
+		// or computing a value we'll throw away.
+		if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&stm.name.as_str()) {
+			return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
+				name: stm.name.to_string(),
+			})));
+		}
+		context_mut(&mut self.ctx)?.set_transaction(Arc::clone(&txn));
+
+		// `None` when the legacy engine runs the side: the session is pinned
+		// to it, or the side has no logical form. A side the streaming engine
+		// ran is slow-logged from its plan, which planning consumes; a copy is
+		// kept only when a slow log is configured. A side the legacy engine
+		// ran has no plan to log from.
+		let mut logged = None;
+		let planned = match engine_for(&stm.what, *self.ctx.new_planner_strategy()) {
+			Engine::Streaming => match lower(stm.what.clone()) {
+				Ok(op) => {
+					if self.ctx.slow_log().is_some() {
+						logged = Some(op.clone());
+					}
+					Some(self.plan_bare_expression(op, Arc::clone(&txn)).await)
+				}
+				Err(reason) => Some(Err(ExecError::PlannerUnsupported(reason.to_string()).into())),
+			},
+			Engine::Legacy(_) => None,
+		};
+		// A decline is a fallback to the legacy engine, logged as such; a
+		// statement the engine choice sent there is not.
+		let planned = match planned {
+			Some(Err(Error::Exec(ExecError::PlannerUnsupported(reason)))) => {
+				self.log_legacy_fallback(statement_kind(&stm.what), &reason);
+				None
+			}
+			other => other,
+		};
+		let res = match planned {
+			// The RHS binds to a param rather than being returned, so its
+			// values are not the statement's rows and must not stream.
+			Some(Ok(plan)) => self.execute_operator_plan(plan, Arc::clone(&txn), false).await,
+			None => {
+				let what = Expr::from(stm.what.clone());
+				self.stack
+					.enter(|stk| {
+						crate::legacy::expr_compute(&what, stk, &self.ctx, &self.opt, None)
+					})
+					.finish()
+					.await
+			}
+			Some(Err(e)) => Err(ControlFlow::Err(anyhow::Error::new(e))),
+		};
+
+		let res = res?;
+		let result = match &stm.kind {
+			Some(kind) => {
+				let kind = crate::expr::Kind::from(kind.clone());
+				res.coerce_to_kind(&kind)
+					.map_err(|e| ExecError::SetCoerce {
+						name: stm.name.to_string(),
+						error: Box::new(e),
+					})
+					.map_err(anyhow::Error::new)?
+			}
+			None => res,
+		};
+
+		// Set the parameter
+		context_mut(&mut self.ctx)?.add_value(stm.name.clone(), result.into());
+
+		// A `LET` with a logical form is logged as written, with its
+		// parameters read from the plan: a plan has no node for DDL, so the
+		// surface text names no credential. One without is logged in the form
+		// the legacy engine ran, which carries none either.
+		if self.ctx.slow_log().is_some() {
+			match logged {
+				Some(op) => self.check_slow_log(start, &stm, &PlanParams(&op)),
+				None => {
+					let stm = crate::expr::statements::SetStatement::from(stm);
+					self.check_slow_log(start, &stm, &stm);
+				}
+			}
+		}
+		// Finalise transaction, returning nothing unless it couldn't commit
+		Ok(Value::None)
+	}
+
+	/// Run a `KILL`.
+	async fn run_kill(
+		&mut self,
+		s: crate::expr::statements::KillStatement,
+		txn: Arc<Transaction>,
+	) -> FlowResult<Value> {
+		Arc::get_mut(&mut self.ctx)
+			.ok_or_else(|| {
+				err::Error::unreachable("Tried to unfreeze a Context with multiple references")
+			})
+			.map_err(anyhow::Error::new)?
+			.set_transaction(txn);
+		self.stack
+			.enter(|stk| crate::legacy::kill_statement_compute(&s, stk, &self.ctx, &self.opt, None))
+			.finish()
+			.await
+			.map_err(ControlFlow::Err)
+	}
+
+	/// Run a `LIVE SELECT`.
+	async fn run_live(
+		&mut self,
+		s: crate::expr::statements::LiveStatement,
+		txn: Arc<Transaction>,
+	) -> FlowResult<Value> {
+		context_mut(&mut self.ctx)?.set_transaction(txn);
+		self.stack
+			.enter(|stk| crate::legacy::live_statement_compute(&s, stk, &self.ctx, &self.opt, None))
+			.finish()
+			.await
+			.map_err(ControlFlow::Err)
+	}
+
+	/// Run a `SHOW CHANGES`.
+	async fn run_show(
+		&mut self,
+		s: crate::expr::statements::ShowStatement,
+		txn: Arc<Transaction>,
+	) -> FlowResult<Value> {
+		context_mut(&mut self.ctx)?.set_transaction(txn);
+		crate::legacy::show_statement_compute(&s, &self.ctx, &self.opt, None)
+			.await
+			.map_err(ControlFlow::Err)
+	}
+
+	/// Run an `ACCESS` statement.
+	async fn run_access(
+		&mut self,
+		s: crate::expr::statements::AccessStatement,
+		txn: Arc<Transaction>,
+	) -> FlowResult<Value> {
+		context_mut(&mut self.ctx)?.set_transaction(txn);
+		self.stack
+			.enter(|stk| {
+				crate::legacy::access_statement_compute(&s, stk, &self.ctx, &self.opt, None)
+			})
+			.finish()
+			.await
 	}
 
 	/// Execute a query not wrapped in a transaction block.
@@ -2621,14 +2854,151 @@ impl Executor {
 	}
 }
 
+/// The parameters a plan references, as the slow log reads them.
+///
+/// A plan's scalars are [`LogicalExpr`]s, which the expression-layer visitor
+/// does not walk, so each `$param` is named to the visitor directly — through
+/// every nested statement. A `FROM $param` source names its parameter too: a
+/// source holds it as a [`SourceRef::Param`], not as a scalar. A GQL `MATCH`
+/// plan's scalars are reached the same way, as scalars of its node.
+struct PlanParams<'a>(&'a LogicalOp);
+
+impl<'v> Visit<ParamVisitor<'v>> for PlanParams<'_> {
+	fn visit(&self, visitor: &mut ParamVisitor<'v>) -> Result<(), ()> {
+		visit_plan_params(self.0, visitor)
+	}
+}
+
+/// Name every parameter `op` references to `visitor`, nested statements
+/// included: each node's scalars and parameter sources, the node's own before
+/// its inputs'.
+fn visit_plan_params<V: Visitor<Error = ()>>(op: &LogicalOp, visitor: &mut V) -> Result<(), ()> {
+	if let LogicalOp::Source(LogicalSource {
+		source: SourceRef::Param(param),
+		..
+	}) = op
+	{
+		visitor.visit_param(param)?;
+	}
+	op.visit_scalars(&mut |scalar| visit_scalar_params(scalar, visitor))?;
+	op.children().iter().try_for_each(|child| visit_plan_params(child, visitor))
+}
+
+/// Name every parameter `scalar` references to `visitor`, descending into the
+/// statements it holds.
+fn visit_scalar_params<V: Visitor<Error = ()>>(
+	scalar: &LogicalExpr,
+	visitor: &mut V,
+) -> Result<(), ()> {
+	use std::ops::ControlFlow as Walk;
+	let walked = scalar.visit(&mut |expr| match expr {
+		LogicalExpr::Param(param) => match visitor.visit_param(param) {
+			Ok(()) => Walk::Continue(()),
+			Err(()) => Walk::Break(()),
+		},
+		LogicalExpr::Subquery(op) => match visit_plan_params(op, visitor) {
+			Ok(()) => Walk::Continue(()),
+			Err(()) => Walk::Break(()),
+		},
+		_ => Walk::Continue(()),
+	});
+	match walked {
+		Walk::Continue(()) => Ok(()),
+		Walk::Break(()) => Err(()),
+	}
+}
+
+/// The kind of a surface statement, for a log line that must not carry its
+/// text: a statement's keyword, or `expression` for a bare value expression.
+fn statement_kind(expr: &sql::Expr) -> &'static str {
+	match expr {
+		sql::Expr::Select(_) => "SELECT",
+		sql::Expr::Let(_) => "LET",
+		sql::Expr::Return(_) => "RETURN",
+		sql::Expr::IfElse(_) => "IF",
+		sql::Expr::Foreach(_) => "FOR",
+		sql::Expr::Info(_) => "INFO",
+		sql::Expr::Sleep(_) => "SLEEP",
+		sql::Expr::Block(_) => "BLOCK",
+		sql::Expr::Explain {
+			..
+		} => "EXPLAIN",
+		sql::Expr::Create(_) => "CREATE",
+		sql::Expr::Update(_) => "UPDATE",
+		sql::Expr::Upsert(_) => "UPSERT",
+		sql::Expr::Delete(_) => "DELETE",
+		sql::Expr::Insert(_) => "INSERT",
+		sql::Expr::Relate(_) => "RELATE",
+		sql::Expr::Define(_) => "DEFINE",
+		sql::Expr::Remove(_) => "REMOVE",
+		sql::Expr::Rebuild(_) => "REBUILD",
+		sql::Expr::Alter(_) => "ALTER",
+		sql::Expr::Throw(_) => "THROW",
+		sql::Expr::Break => "BREAK",
+		sql::Expr::Continue => "CONTINUE",
+		sql::Expr::Literal(_)
+		| sql::Expr::Param(_)
+		| sql::Expr::Idiom(_)
+		| sql::Expr::Table(_)
+		| sql::Expr::Mock(_)
+		| sql::Expr::Constant(_)
+		| sql::Expr::Prefix {
+			..
+		}
+		| sql::Expr::Postfix {
+			..
+		}
+		| sql::Expr::Binary {
+			..
+		}
+		| sql::Expr::FunctionCall(_)
+		| sql::Expr::Closure(_) => "expression",
+	}
+}
+
 #[cfg(test)]
 mod tests {
-	use super::shape_statement_value;
+	use super::{shape_statement_value, visit_plan_params};
 	use crate::dbs::Session;
 	use crate::exec::OutputShape;
+	use crate::expr::logical::lower;
+	use crate::expr::visit::Visitor;
 	use crate::iam::{Level, Role};
 	use crate::kvs::Datastore;
 	use crate::val::{Array, Value};
+
+	/// Collects the name of every parameter a plan walk reports.
+	struct Names(Vec<String>);
+
+	impl Visitor for Names {
+		type Error = ();
+
+		fn visit_param(&mut self, param: &crate::expr::Param) -> Result<(), ()> {
+			self.0.push(param.to_string());
+			Ok(())
+		}
+	}
+
+	/// The parameters the slow log lists for `src`, sorted by name: the log
+	/// lists a set, so the walk order is not part of its contract.
+	fn plan_params(src: &str) -> Vec<String> {
+		let expr = crate::syn::expr(src).expect("statement should parse");
+		let op = lower(expr).expect("statement should have a logical form");
+		let mut names = Names(Vec::new());
+		visit_plan_params(&op, &mut names).expect("the walk cannot fail");
+		names.0.sort();
+		names.0
+	}
+
+	/// A `FROM $param` source names its parameter to the slow log alongside the
+	/// parameters in the statement's scalars, and so does one nested in a
+	/// statement-shaped scalar.
+	#[test]
+	fn plan_params_include_a_parameter_source() {
+		assert_eq!(plan_params("SELECT * FROM $tb WHERE a = $v"), ["tb", "v"]);
+		assert_eq!(plan_params("RETURN (SELECT * FROM $tb)"), ["tb"]);
+		assert_eq!(plan_params("SELECT (SELECT * FROM $inner) FROM $outer"), ["inner", "outer"]);
+	}
 
 	fn values(n: usize) -> Vec<Value> {
 		(0..n).map(|i| Value::from(i as i64)).collect()

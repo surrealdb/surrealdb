@@ -22,11 +22,12 @@
 use reblessive::Stk;
 use surrealdb_strand::TableName;
 
+use crate::expr::BinaryOperator;
+use crate::expr::logical::LogicalExpr;
 use crate::expr::match_plan::{
 	BindingId, EdgeQuantifier, EdgeStep, ExpandDirection, MatchClausePlan, MatchPredicate,
 	NodeStep, PathMode as IrPathMode, PathPrefixPlan, PathSearch, PatternPlan,
 };
-use crate::expr::{BinaryOperator, Expr, Idiom, Part};
 use crate::gql::ast::{
 	BinaryOp, EdgeDirection, EdgePattern, ElementPredicate, GqlExpr, Ident, LabelExpr, MatchClause,
 	PathMode, PathPattern, PathPatternPrefix, PathSearchKind, Quantifier, QuantifierKind, UnaryOp,
@@ -121,16 +122,14 @@ fn reject_selective_group_predicates(
 /// objects, so `.id` extracts the record id (no fetch); the planner places it as
 /// a `Filter` at the earliest stage that binds both.
 fn node_id_equality(registry: &Registry, first: BindingId, repeat: BindingId) -> MatchPredicate {
-	let id_idiom = |id: BindingId| {
-		Expr::Idiom(Idiom(vec![
-			Part::Field(registry.name(id).to_owned().into()),
-			Part::Field("id".to_owned().into()),
-		]))
+	let id_idiom = |id: BindingId| LogicalExpr::Access {
+		base: Box::new(LogicalExpr::Field(registry.name(id).into())),
+		field: "id".into(),
 	};
 	let mut deps = vec![first, repeat];
 	deps.sort_unstable();
 	MatchPredicate {
-		expr: Expr::Binary {
+		expr: LogicalExpr::Binary {
 			left: Box::new(id_idiom(first)),
 			op: BinaryOperator::Equal,
 			right: Box::new(id_idiom(repeat)),
@@ -335,8 +334,7 @@ async fn lower_predicates(
 			} => expr::lower_prop_equality(stk, *binding, binding_name, key, value, &scope).await?,
 		};
 		out.push(MatchPredicate {
-			// The lowering builds `sql::Expr`; the IR is binding-row `expr::Expr`.
-			expr: lowered.into(),
+			expr: lowered,
 			deps,
 		});
 	}

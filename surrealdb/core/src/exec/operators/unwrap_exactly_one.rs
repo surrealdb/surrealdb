@@ -1,7 +1,7 @@
 //! UnwrapExactlyOne operator - implements SELECT ... FROM ONLY semantics.
 //!
-//! This operator enforces that exactly one result is produced:
-//! - 0 results → returns NONE (if `none_on_empty`) or `ExecError::SingleOnlyOutput`
+//! This operator enforces that no more than one result is produced:
+//! - 0 results → returns NONE
 //! - 1 result → returns that value (unwrapped from array)
 //! - >1 results → returns `ExecError::SingleOnlyOutput`
 
@@ -18,30 +18,28 @@ use crate::exec::{
 use crate::expr::ControlFlow;
 use crate::val::Value;
 
-/// Unwraps exactly one result from the input stream.
+/// Unwraps the one result of a `SELECT ... FROM ONLY ...`.
 ///
-/// This operator implements the `ONLY` keyword in `SELECT ... FROM ONLY ...`.
 /// It collects all values from the input stream and:
-/// - Returns NONE if no results and `none_on_empty` is true (table scans)
-/// - Returns `ExecError::SingleOnlyOutput` if no results and `none_on_empty` is false (array
-///   sources)
+/// - Returns NONE if there are no results
 /// - Returns the single value (unwrapped) if exactly one result
 /// - Returns `ExecError::SingleOnlyOutput` if more than one result
+///
+/// No rows is `NONE` whatever the source. What `ONLY` asks is that the
+/// statement not answer with several rows, and none is not several — a
+/// missing record, a predicate nothing satisfies and an empty source all
+/// answer alike.
 #[derive(Debug, Clone)]
 pub struct UnwrapExactlyOne {
 	pub(crate) input: Arc<dyn ExecOperator>,
-	/// If true, return NONE when input produces 0 results (used for table scans).
-	/// If false, return an error when input produces 0 results (used for array sources).
-	pub(crate) none_on_empty: bool,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 impl UnwrapExactlyOne {
-	pub(crate) fn new(input: Arc<dyn ExecOperator>, none_on_empty: bool) -> Self {
+	pub(crate) fn new(input: Arc<dyn ExecOperator>) -> Self {
 		Self {
 			input,
-			none_on_empty,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -87,7 +85,6 @@ impl ExecOperator for UnwrapExactlyOne {
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
-		let none_on_empty = self.none_on_empty;
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// Collect all values from the input stream
@@ -106,13 +103,8 @@ impl ExecOperator for UnwrapExactlyOne {
 			// Stream completed - check result count
 			// More than 1 was handled above with early exit
 			if collected.is_empty() {
-				if none_on_empty {
-					// Table scan with no results → return NONE
-					yielder.emit(ValueBatch::new(vec![Value::None])).await;
-				} else {
-					// Array source with no elements → error
-					Err(ControlFlow::Err(anyhow::anyhow!(ExecError::SingleOnlyOutput)))?;
-				}
+				// No rows: the statement answers NONE.
+				yielder.emit(ValueBatch::new(vec![Value::None])).await;
 			} else {
 				let result = collected.pop().expect("collected has exactly one element");
 

@@ -1,48 +1,44 @@
 //! GQL expression lowering with uniform binding addressing.
 //!
 //! Implements the three-valued-logic guard rules of `doc/gql/V2_DESIGN.md`
-//! §8 (kept verbatim from the v1 contract): predicates are normalized to
-//! negation normal form on the fly — a `negated` flag is pushed through
-//! `NOT`/`AND`/`OR` (De Morgan, never distributing ORs) and into the comparison
-//! and truth-test leaves, where each effective comparison is guarded so that a
-//! `NULL`/`NONE` operand excludes the row, matching GQL's UNKNOWN-excluded
-//! `WHERE` semantics under SurrealQL's two-valued total-order comparisons.
+//! §8: predicates are normalized to negation normal form on the fly — a
+//! `negated` flag is pushed through `NOT`/`AND`/`OR` (De Morgan, never
+//! distributing ORs) and into the comparison and truth-test leaves, where each
+//! effective comparison is guarded so that a `NULL`/`NONE` operand excludes the
+//! row, matching GQL's UNKNOWN-excluded `WHERE` semantics under SurrealQL's
+//! two-valued total-order comparisons.
 //!
-//! The v1 scope tables (Role × ScopeKind, the `__a`/`__m`/`$parent`
-//! rewrites) are gone: every binding is a row field addressed by its name, so
-//! a variable `v` lowers to `Idiom[Field("v")]` and `v.x` to
-//! `Idiom[Field("v"), Field("x")]`, in every position. Group and path bindings
-//! hold composite values (an edge list / an alternating array) with no field
-//! structure, so property access on them is rejected.
+//! Every binding is a row field addressed by its name, so a variable `v`
+//! lowers to the field read `v` and `v.x` to an access of `x` on it, in every
+//! position.
+//! Group and path bindings hold composite values (an edge list / an
+//! alternating array) with no field structure, so property access on them is
+//! rejected.
 //!
 //! All recursion over expressions runs on a [`reblessive`] stack: the parser
 //! deliberately builds arbitrarily deep *linear* chains (binary operator
 //! spines, property and `NOT` chains) without consuming its nesting budget,
 //! so the lowering must not recurse on the machine stack either.
 //!
-//! Expressions are still built as [`crate::sql::Expr`] here and converted to
-//! [`crate::expr::Expr`] per slot by the caller; the guard and NNF machinery is
-//! unchanged from v1, only the variable-addressing leaf differs.
+//! Expressions are built directly as the logical plan's scalar,
+//! [`LogicalExpr`]: a `MatchPlan` is a logical plan node, and the streaming
+//! planner compiles its scalars as it compiles every other scalar. No surface
+//! or expression-layer AST is built on the way.
 
 use reblessive::Stk;
 
+use crate::expr::logical::{LogicalCall, LogicalExpr, LogicalLiteral};
 use crate::expr::match_plan::{BindingId, BindingKind};
+use crate::expr::{BinaryOperator, Function, Param, PrefixOperator};
 use crate::gql::ast::{BinaryOp, GqlExpr, GqlLiteral, Ident, SetQuantifier, TruthValue, UnaryOp};
 use crate::gql::lower::binding::Registry;
 use crate::gql::lower::naming;
-use crate::sql::function::{Function, FunctionCall};
-use crate::sql::literal::ObjectEntry;
-use crate::sql::{BinaryOperator, Expr, Idiom, Literal, Param, Part, PrefixOperator};
 use crate::syn::error::{SyntaxError, bail, syntax_error};
 use crate::syn::token::Span;
 
 /// The binding context an expression is lowered in: the clause registry, used
 /// to resolve variable references to bindings and to reject property access on
 /// composite (group/path) bindings.
-///
-/// A unit struct in PR-A — every expression lowers against the one clause's
-/// registry — but kept as a named scope so the OPTIONAL-clause scoping of PR-C
-/// has a seam to extend.
 pub(super) struct Scope<'a> {
 	pub(super) registry: &'a Registry,
 	/// Whether aggregate function calls (`count`, `sum`, …) may appear in this
@@ -76,15 +72,15 @@ impl Scope<'_> {
 	}
 
 	/// Lowers a reference to a pattern variable, optionally suffixed with a
-	/// property chain, to the binding-row idiom `binding(.prop)*`.
-	fn binding_expr(&self, ident: &Ident, props: &[&Ident]) -> Result<Expr, SyntaxError> {
+	/// property chain, to the binding-row path `binding(.prop)*`.
+	fn binding_expr(&self, ident: &Ident, props: &[&Ident]) -> Result<LogicalExpr, SyntaxError> {
 		let id = self.registry.resolve(ident)?;
 		let kind = self.registry.kind(id);
 		let prop_span = props.first().map(|p| p.span);
 		self.binding_idiom(&ident.name, kind, props, prop_span)
 	}
 
-	/// Builds the binding-row idiom `binding(.prop)*` for a resolved binding,
+	/// Builds the binding-row path `binding(.prop)*` for a resolved binding,
 	/// rejecting property access on a group or path binding: those bindings
 	/// hold composite values (an edge list / an alternating node-edge array)
 	/// with no addressable field structure yet.
@@ -94,7 +90,7 @@ impl Scope<'_> {
 		kind: BindingKind,
 		props: &[&Ident],
 		prop_span: Option<Span>,
-	) -> Result<Expr, SyntaxError> {
+	) -> Result<LogicalExpr, SyntaxError> {
 		if !props.is_empty() {
 			match kind {
 				BindingKind::EdgeGroup | BindingKind::Path => {
@@ -106,22 +102,19 @@ impl Scope<'_> {
 				BindingKind::Node | BindingKind::Edge => {}
 			}
 		}
-		let mut parts = Vec::with_capacity(props.len() + 1);
-		parts.push(Part::Field(name.to_owned().into()));
-		parts.extend(props.iter().map(|p| Part::Field(p.name.clone().into())));
-		Ok(Expr::Idiom(Idiom(parts)))
+		Ok(access_chain(LogicalExpr::Field(name.into()), props.iter().map(|p| p.name.as_str())))
 	}
 }
 
 /// Lowers a GQL expression in value position (projections, sort keys,
-/// comparison operands): variable references resolve to binding-row idioms;
+/// comparison operands): variable references resolve to binding-row paths;
 /// comparisons and logical operators lower two-valued — the §4 guards apply to
 /// predicate position only.
 pub(super) async fn lower_value(
 	stk: &mut Stk,
 	expr: &GqlExpr,
 	scope: &Scope<'_>,
-) -> Result<Expr, SyntaxError> {
+) -> Result<LogicalExpr, SyntaxError> {
 	match expr {
 		GqlExpr::Literal(lit, _) => Ok(lower_literal(lit)),
 		GqlExpr::Param {
@@ -141,7 +134,7 @@ pub(super) async fn lower_value(
 				UnaryOp::Neg => PrefixOperator::Negate,
 				UnaryOp::Plus => PrefixOperator::Positive,
 			};
-			Ok(Expr::Prefix {
+			Ok(LogicalExpr::Prefix {
 				op,
 				expr: Box::new(operand),
 			})
@@ -155,7 +148,7 @@ pub(super) async fn lower_value(
 			let op = binary_op(*op, *span)?;
 			let left = stk.run(|stk| lower_value(stk, left, scope)).await?;
 			let right = stk.run(|stk| lower_value(stk, right, scope)).await?;
-			Ok(Expr::Binary {
+			Ok(LogicalExpr::Binary {
 				left: Box::new(left),
 				op,
 				right: Box::new(right),
@@ -179,18 +172,15 @@ pub(super) async fn lower_value(
 			for item in items {
 				exprs.push(stk.run(|stk| lower_value(stk, item, scope)).await?);
 			}
-			Ok(Expr::Literal(Literal::Array(exprs)))
+			Ok(LogicalExpr::Array(exprs))
 		}
 		GqlExpr::Map(fields, _) => {
 			let mut entries = Vec::with_capacity(fields.len());
 			for (key, value) in fields {
 				let value = stk.run(|stk| lower_value(stk, value, scope)).await?;
-				entries.push(ObjectEntry {
-					key: key.name.clone().into(),
-					value,
-				});
+				entries.push((key.name.clone(), value));
 			}
-			Ok(Expr::Literal(Literal::Object(entries)))
+			Ok(LogicalExpr::Object(entries))
 		}
 	}
 }
@@ -203,7 +193,7 @@ pub(super) async fn lower_predicate(
 	expr: &GqlExpr,
 	negated: bool,
 	scope: &Scope<'_>,
-) -> Result<Expr, SyntaxError> {
+) -> Result<LogicalExpr, SyntaxError> {
 	match expr {
 		GqlExpr::Unary {
 			op: UnaryOp::Not,
@@ -220,7 +210,7 @@ pub(super) async fn lower_predicate(
 			let lowered_right = stk.run(|stk| lower_predicate(stk, right, negated, scope)).await?;
 			// De Morgan: a negated AND becomes an OR of the negated branches.
 			let and = (*op == BinaryOp::And) != negated;
-			Ok(Expr::Binary {
+			Ok(LogicalExpr::Binary {
 				left: Box::new(lowered_left),
 				op: if and {
 					BinaryOperator::And
@@ -253,13 +243,15 @@ pub(super) async fn lower_predicate(
 		| GqlExpr::IsNull {
 			..
 		} => lower_truth_test(stk, expr, negated, scope).await,
-		GqlExpr::Literal(GqlLiteral::Bool(b), _) => Ok(Expr::Literal(Literal::Bool(*b != negated))),
+		GqlExpr::Literal(GqlLiteral::Bool(b), _) => {
+			Ok(LogicalExpr::Literal(LogicalLiteral::Bool(*b != negated)))
+		}
 		// Any other expression in predicate position is tested against an
 		// explicit boolean, so that a NULL/NONE value excludes the row:
 		// `b.flag` → `b.flag = true`, `NOT b.flag` → `b.flag = false` (§4).
 		other => {
 			let value = stk.run(|stk| lower_value(stk, other, scope)).await?;
-			Ok(equality(value, Literal::Bool(!negated), false))
+			Ok(equality(value, LogicalLiteral::Bool(!negated), false))
 		}
 	}
 }
@@ -275,7 +267,7 @@ pub(super) async fn lower_prop_equality(
 	key: &Ident,
 	value: &GqlExpr,
 	scope: &Scope<'_>,
-) -> Result<Expr, SyntaxError> {
+) -> Result<LogicalExpr, SyntaxError> {
 	let kind = scope.registry.kind(binding);
 	let left = scope.binding_idiom(binding_name, kind, &[key], Some(key.span))?;
 	// The property side is always nullable; guard only when the value side
@@ -293,13 +285,13 @@ pub(super) async fn lower_prop_equality(
 		Vec::new()
 	};
 	let right = stk.run(|stk| lower_value(stk, value, scope)).await?;
-	let comparison = Expr::Binary {
+	let comparison = LogicalExpr::Binary {
 		left: Box::new(left),
 		op: BinaryOperator::Equal,
 		right: Box::new(right),
 	};
 	Ok(match and_chain(guards) {
-		Some(guards) => Expr::Binary {
+		Some(guards) => LogicalExpr::Binary {
 			left: Box::new(guards),
 			op: BinaryOperator::And,
 			right: Box::new(comparison),
@@ -309,8 +301,8 @@ pub(super) async fn lower_prop_equality(
 }
 
 /// Folds expressions into a left-associative `AND` chain.
-pub(super) fn and_chain(exprs: impl IntoIterator<Item = Expr>) -> Option<Expr> {
-	exprs.into_iter().reduce(|left, right| Expr::Binary {
+pub(super) fn and_chain(exprs: impl IntoIterator<Item = LogicalExpr>) -> Option<LogicalExpr> {
+	exprs.into_iter().reduce(|left, right| LogicalExpr::Binary {
 		left: Box::new(left),
 		op: BinaryOperator::And,
 		right: Box::new(right),
@@ -328,7 +320,7 @@ async fn lower_comparison(
 	right: &GqlExpr,
 	span: Span,
 	scope: &Scope<'_>,
-) -> Result<Expr, SyntaxError> {
+) -> Result<LogicalExpr, SyntaxError> {
 	let op = if negated {
 		complement(op)
 	} else {
@@ -361,7 +353,7 @@ async fn lower_comparison(
 	};
 	// Lower and deduplicate the guarded atoms, preserving first-occurrence
 	// order.
-	let mut atoms: Vec<Expr> = Vec::new();
+	let mut atoms: Vec<LogicalExpr> = Vec::new();
 	for atom in guard_atoms {
 		let atom = stk.run(|stk| lower_value(stk, atom, scope)).await?;
 		if !atoms.contains(&atom) {
@@ -370,13 +362,13 @@ async fn lower_comparison(
 	}
 	let lowered_left = stk.run(|stk| lower_value(stk, left, scope)).await?;
 	let lowered_right = stk.run(|stk| lower_value(stk, right, scope)).await?;
-	let comparison = Expr::Binary {
+	let comparison = LogicalExpr::Binary {
 		left: Box::new(lowered_left),
 		op: binary_op(op, span)?,
 		right: Box::new(lowered_right),
 	};
 	Ok(match and_chain(guard_conjuncts(&atoms)) {
-		Some(guards) => Expr::Binary {
+		Some(guards) => LogicalExpr::Binary {
 			left: Box::new(guards),
 			op: BinaryOperator::And,
 			right: Box::new(comparison),
@@ -386,18 +378,18 @@ async fn lower_comparison(
 }
 
 /// Builds the `atom != NONE AND atom != NULL` guard pair for each atom (§4).
-fn guard_conjuncts(atoms: &[Expr]) -> Vec<Expr> {
+fn guard_conjuncts(atoms: &[LogicalExpr]) -> Vec<LogicalExpr> {
 	let mut out = Vec::with_capacity(atoms.len() * 2);
 	for atom in atoms {
-		out.push(Expr::Binary {
+		out.push(LogicalExpr::Binary {
 			left: Box::new(atom.clone()),
 			op: BinaryOperator::NotEqual,
-			right: Box::new(Expr::Literal(Literal::None)),
+			right: Box::new(LogicalExpr::Literal(LogicalLiteral::None)),
 		});
-		out.push(Expr::Binary {
+		out.push(LogicalExpr::Binary {
 			left: Box::new(atom.clone()),
 			op: BinaryOperator::NotEqual,
-			right: Box::new(Expr::Literal(Literal::Null)),
+			right: Box::new(LogicalExpr::Literal(LogicalLiteral::Null)),
 		});
 	}
 	out
@@ -412,7 +404,7 @@ async fn lower_truth_test(
 	expr: &GqlExpr,
 	outer_negated: bool,
 	scope: &Scope<'_>,
-) -> Result<Expr, SyntaxError> {
+) -> Result<LogicalExpr, SyntaxError> {
 	match expr {
 		GqlExpr::IsNull {
 			expr: operand,
@@ -431,8 +423,8 @@ async fn lower_truth_test(
 			let operand = stk.run(|stk| lower_value(stk, operand, scope)).await?;
 			let negated = outer_negated != *negated;
 			match value {
-				TruthValue::True => Ok(equality(operand, Literal::Bool(true), negated)),
-				TruthValue::False => Ok(equality(operand, Literal::Bool(false), negated)),
+				TruthValue::True => Ok(equality(operand, LogicalLiteral::Bool(true), negated)),
+				TruthValue::False => Ok(equality(operand, LogicalLiteral::Bool(false), negated)),
 				TruthValue::Unknown => Ok(null_test(operand, negated)),
 			}
 		}
@@ -443,37 +435,37 @@ async fn lower_truth_test(
 
 /// `x IS NULL` → `x = NULL OR x = NONE`; negated, `x != NULL AND x != NONE`.
 /// GQL cannot observe SurrealDB's NONE-vs-NULL distinction (§4).
-fn null_test(value: Expr, negated: bool) -> Expr {
+fn null_test(value: LogicalExpr, negated: bool) -> LogicalExpr {
 	let (cmp, combine) = if negated {
 		(BinaryOperator::NotEqual, BinaryOperator::And)
 	} else {
 		(BinaryOperator::Equal, BinaryOperator::Or)
 	};
-	Expr::Binary {
-		left: Box::new(Expr::Binary {
+	LogicalExpr::Binary {
+		left: Box::new(LogicalExpr::Binary {
 			left: Box::new(value.clone()),
 			op: cmp.clone(),
-			right: Box::new(Expr::Literal(Literal::Null)),
+			right: Box::new(LogicalExpr::Literal(LogicalLiteral::Null)),
 		}),
 		op: combine,
-		right: Box::new(Expr::Binary {
+		right: Box::new(LogicalExpr::Binary {
 			left: Box::new(value),
 			op: cmp,
-			right: Box::new(Expr::Literal(Literal::None)),
+			right: Box::new(LogicalExpr::Literal(LogicalLiteral::None)),
 		}),
 	}
 }
 
 /// An (in)equality against a literal.
-fn equality(left: Expr, literal: Literal, negated: bool) -> Expr {
-	Expr::Binary {
+fn equality(left: LogicalExpr, literal: LogicalLiteral, negated: bool) -> LogicalExpr {
+	LogicalExpr::Binary {
 		left: Box::new(left),
 		op: if negated {
 			BinaryOperator::NotEqual
 		} else {
 			BinaryOperator::Equal
 		},
-		right: Box::new(Expr::Literal(literal)),
+		right: Box::new(LogicalExpr::Literal(literal)),
 	}
 }
 
@@ -591,29 +583,37 @@ fn reject_xor<T>(span: Span) -> Result<T, SyntaxError> {
 	);
 }
 
-fn lower_param(name: &str, span: Span) -> Result<Expr, SyntaxError> {
+fn lower_param(name: &str, span: Span) -> Result<LogicalExpr, SyntaxError> {
 	naming::validate_param_name(name, span)?;
-	Ok(Expr::Param(Param::new(name)))
+	Ok(LogicalExpr::Param(Param::from(name.to_owned())))
 }
 
-fn lower_literal(literal: &GqlLiteral) -> Expr {
-	Expr::Literal(match literal {
-		GqlLiteral::Null => Literal::Null,
-		GqlLiteral::Bool(b) => Literal::Bool(*b),
-		GqlLiteral::Integer(i) => Literal::Integer(*i),
-		GqlLiteral::Float(f) => Literal::Float(*f),
-		GqlLiteral::String(s) => Literal::String(s.clone().into()),
+fn lower_literal(literal: &GqlLiteral) -> LogicalExpr {
+	LogicalExpr::Literal(match literal {
+		GqlLiteral::Null => LogicalLiteral::Null,
+		GqlLiteral::Bool(b) => LogicalLiteral::Bool(*b),
+		GqlLiteral::Integer(i) => LogicalLiteral::Integer(*i),
+		GqlLiteral::Float(f) => LogicalLiteral::Float(*f),
+		GqlLiteral::String(s) => LogicalLiteral::String(s.as_str().into()),
+	})
+}
+
+/// Nests `fields` onto `base` as [`LogicalExpr::Access`] steps, in order.
+fn access_chain<'a>(base: LogicalExpr, fields: impl Iterator<Item = &'a str>) -> LogicalExpr {
+	fields.fold(base, |base, field| LogicalExpr::Access {
+		base: Box::new(base),
+		field: field.into(),
 	})
 }
 
 /// Lowers a property access chain: a chain rooted at a pattern variable
-/// resolves to a binding-row idiom; any other root lowers as a value and the
-/// chain is appended as idiom fields.
+/// resolves to a binding-row path; any other root lowers as a value and the
+/// chain is appended as field accesses on it.
 async fn lower_property(
 	stk: &mut Stk,
 	expr: &GqlExpr,
 	scope: &Scope<'_>,
-) -> Result<Expr, SyntaxError> {
+) -> Result<LogicalExpr, SyntaxError> {
 	let mut names: Vec<&Ident> = Vec::new();
 	let mut base = expr;
 	while let GqlExpr::Property(inner, name, _) = base {
@@ -625,12 +625,7 @@ async fn lower_property(
 		GqlExpr::Variable(ident) => scope.binding_expr(ident, &names),
 		other => {
 			let start = stk.run(|stk| lower_value(stk, other, scope)).await?;
-			let mut parts = match start {
-				Expr::Idiom(idiom) => idiom.0,
-				start => vec![Part::Start(start)],
-			};
-			parts.extend(names.iter().map(|name| Part::Field(name.name.clone().into())));
-			Ok(Expr::Idiom(Idiom(parts)))
+			Ok(access_chain(start, names.iter().map(|name| name.name.as_str())))
 		}
 	}
 }
@@ -689,7 +684,7 @@ async fn lower_function(
 	args: &[GqlExpr],
 	span: Span,
 	scope: &Scope<'_>,
-) -> Result<Expr, SyntaxError> {
+) -> Result<LogicalExpr, SyntaxError> {
 	let lowered = name.name.to_ascii_lowercase();
 	let Some(target) = aggregate_target(&lowered) else {
 		// `*` and a `DISTINCT`/`ALL` set quantifier are aggregate-only syntax, so
@@ -764,11 +759,11 @@ fn single_arg<'a>(
 	}
 }
 
-/// Builds a normal SurrealDB function-call expression.
-fn function_call(name: &str, arguments: Vec<Expr>) -> Expr {
-	Expr::FunctionCall(Box::new(FunctionCall {
+/// Builds a call to a builtin SurrealDB function.
+fn function_call(name: &str, args: Vec<LogicalExpr>) -> LogicalExpr {
+	LogicalExpr::Call(Box::new(LogicalCall {
 		receiver: Function::Normal(name.to_owned()),
-		arguments,
+		args,
 	}))
 }
 

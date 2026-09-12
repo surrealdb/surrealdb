@@ -14,9 +14,11 @@
 //! a synthetic core `UpdateStatement` / `DeleteStatement` targeting the resolved
 //! record id is run through `Expr::compute`, so table/field permissions, field
 //! validation, events, indexes, references, and live-query notifications all
-//! apply exactly as for a native mutation. Row-scoped value expressions are
-//! evaluated against the current binding row first (with the row as the cursor
-//! document), then embedded as concrete literals in the statement.
+//! apply exactly as for a native mutation. The row-scoped values a stage writes
+//! are compiled [`PhysicalExpr`]s: each is evaluated by the streaming engine
+//! against the current binding row, and the resulting value is embedded as a
+//! literal in the synthetic statement. That statement is the only
+//! expression-layer value built here; nothing in it is lowered or compiled.
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -28,22 +30,35 @@ use surrealdb_types::ToSql;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::exec::operators::check_cancelled;
-use crate::exec::plan_or_compute::{get_legacy_context, legacy_compute};
+use crate::exec::operators::legacy_bridge::{self, legacy_compute};
 use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 use crate::expr::data::Assignment;
-use crate::expr::match_plan::{DetachMode, UpdateData};
+use crate::expr::match_plan::DetachMode;
 use crate::expr::statements::{CreateStatement, DeleteStatement, RelateStatement, UpdateStatement};
-use crate::expr::{AssignOperator, ControlFlow, Data, Expr, Literal, Output};
+use crate::expr::{AssignOperator, ControlFlow, Data, Expr, Idiom, Literal, Output};
 use crate::idx::adjacency::{
 	AdjacencyScope, MergedAdjacencyCursor, VertexAdjacency, vertex_adjacency,
 };
 use crate::key::schema::GraphIdPrefix;
 use crate::val::{Object, RecordId, TableName, Value};
+
+/// The compiled update an [`UpdateBinding`] applies. A property is a single
+/// field name on the target record; each value is a row-scoped expression
+/// evaluated against the binding row before the write.
+#[derive(Debug, Clone)]
+pub(crate) enum UpdateOp {
+	/// `SET a.p = v`, one `(property, value)` per assignment.
+	Set(Vec<(String, Arc<dyn PhysicalExpr>)>),
+	/// `REMOVE a.p`, one property per removal.
+	Unset(Vec<String>),
+	/// `SET a = {…}`: the object replacing every user property.
+	Content(Arc<dyn PhysicalExpr>),
+}
 
 /// `SET` / `REMOVE` over the binding bound at `target`.
 #[derive(Debug, Clone)]
@@ -51,19 +66,46 @@ pub struct UpdateBinding {
 	pub(crate) input: Arc<dyn ExecOperator>,
 	/// The binding name whose record is updated.
 	pub(crate) target: String,
-	/// The update to apply (row-scoped value expressions, evaluated per row).
-	pub(crate) data: UpdateData,
+	/// The update to apply (row-scoped values, evaluated per row).
+	pub(crate) op: UpdateOp,
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 impl UpdateBinding {
-	pub(crate) fn new(input: Arc<dyn ExecOperator>, target: String, data: UpdateData) -> Self {
+	fn new(input: Arc<dyn ExecOperator>, target: String, op: UpdateOp) -> Self {
 		Self {
 			input,
 			target,
-			data,
+			op,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// `SET target.p = v` for each `(p, v)` in `assignments`.
+	pub(crate) fn set(
+		input: Arc<dyn ExecOperator>,
+		target: String,
+		assignments: Vec<(String, Arc<dyn PhysicalExpr>)>,
+	) -> Self {
+		Self::new(input, target, UpdateOp::Set(assignments))
+	}
+
+	/// `REMOVE target.p` for each `p` in `properties`.
+	pub(crate) fn unset(
+		input: Arc<dyn ExecOperator>,
+		target: String,
+		properties: Vec<String>,
+	) -> Self {
+		Self::new(input, target, UpdateOp::Unset(properties))
+	}
+
+	/// `SET target = object`.
+	pub(crate) fn content(
+		input: Arc<dyn ExecOperator>,
+		target: String,
+		object: Arc<dyn PhysicalExpr>,
+	) -> Self {
+		Self::new(input, target, UpdateOp::Content(object))
 	}
 }
 
@@ -73,10 +115,10 @@ impl ExecOperator for UpdateBinding {
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
-		let kind = match &self.data {
-			UpdateData::Set(_) => "set",
-			UpdateData::Unset(_) => "unset",
-			UpdateData::Content(_) => "content",
+		let kind = match &self.op {
+			UpdateOp::Set(_) => "set",
+			UpdateOp::Unset(_) => "unset",
+			UpdateOp::Content(_) => "content",
 		};
 		vec![("binding".to_string(), self.target.clone()), ("op".to_string(), kind.to_string())]
 	}
@@ -97,6 +139,16 @@ impl ExecOperator for UpdateBinding {
 		Some(&self.metrics)
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		match &self.op {
+			UpdateOp::Set(assignments) => {
+				assignments.iter().map(|(property, value)| (property.as_str(), value)).collect()
+			}
+			UpdateOp::Unset(_) => Vec::new(),
+			UpdateOp::Content(object) => vec![("content", object)],
+		}
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
@@ -106,7 +158,7 @@ impl ExecOperator for UpdateBinding {
 		);
 		let (opt, frozen) = legacy_handles(ctx)?;
 		let target = self.target.clone();
-		let data = self.data.clone();
+		let op = self.op.clone();
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -125,7 +177,7 @@ impl ExecOperator for UpdateBinding {
 			for mut row in rows {
 				check_cancelled(&ctx)?;
 				if let Some(rid) = target_record_id(&row, &target) {
-					let after = apply_update(&data, &rid, &row, &frozen, &opt).await?;
+					let after = apply_update(&op, &rid, &row, &ctx, &frozen, &opt).await?;
 					set_binding(&mut row, &target, after);
 				}
 				out.push(row);
@@ -258,9 +310,7 @@ impl ExecOperator for DeleteBinding {
 /// Extract the legacy `Options` (owned) and `FrozenContext` the per-row writes
 /// need, mapping the lookup failure into a control-flow error.
 fn legacy_handles(ctx: &ExecutionContext) -> FlowResult<(Options, FrozenContext)> {
-	let (opt, frozen) =
-		get_legacy_context(ctx).map_err(|e| ControlFlow::Err(anyhow::anyhow!(e)))?;
-	Ok((opt, frozen))
+	legacy_bridge::legacy_handles(ctx).map_err(|e| ControlFlow::Err(anyhow::anyhow!(e)))
 }
 
 /// Recover the record id of the node/edge bound at `name` via the shared
@@ -302,33 +352,33 @@ fn null_incident_edges(row: &mut Value, deleted: &RecordId) {
 /// Build the synthetic `UpdateStatement` for one resolved record, run it through
 /// the native pipeline, and return its AFTER image (or `Value::Null`).
 async fn apply_update(
-	data: &UpdateData,
+	op: &UpdateOp,
 	rid: &RecordId,
 	row: &Value,
+	ctx: &ExecutionContext,
 	frozen: &FrozenContext,
 	opt: &Options,
 ) -> Result<Value, ControlFlow> {
-	let update_data = match data {
-		UpdateData::Set(assignments) => {
-			// Every assignment in one `SET` evaluates against the same pre-write row
-			// image, so build the cursor document once (a single clone of the
-			// binding row) and reuse it across all assignments rather than cloning
-			// the row per assignment.
-			let cursor = CursorDoc::new(None, None, row.clone());
+	let update_data = match op {
+		UpdateOp::Set(assignments) => {
+			// Every assignment in one `SET` evaluates against the same pre-write
+			// row image.
 			let mut assigns = Vec::with_capacity(assignments.len());
-			for (place, value_expr) in assignments {
-				let value = legacy_compute(value_expr, frozen, opt, Some(&cursor)).await?;
+			for (property, value) in assignments {
+				let value = eval_in_row(value, row, ctx).await?;
 				assigns.push(Assignment {
-					place: place.clone(),
+					place: Idiom::field(property.clone()),
 					operator: AssignOperator::Assign,
 					value: value.into_literal(),
 				});
 			}
 			Data::SetExpression(assigns)
 		}
-		UpdateData::Unset(fields) => Data::UnsetExpression(fields.clone()),
-		UpdateData::Content(object_expr) => {
-			let value = eval_in_row(object_expr, row, frozen, opt).await?;
+		UpdateOp::Unset(properties) => Data::UnsetExpression(
+			properties.iter().map(|property| Idiom::field(property.clone())).collect(),
+		),
+		UpdateOp::Content(object) => {
+			let value = eval_in_row(object, row, ctx).await?;
 			Data::ContentExpression(value.into_literal())
 		}
 	};
@@ -450,16 +500,15 @@ fn single_record(value: Value) -> Value {
 	}
 }
 
-/// Evaluate a binding-row-scoped expression against `row` (the row is the cursor
-/// document, so `a.x` reads `row.a.x`), reusing the legacy compute path.
+/// Evaluate a binding-row-scoped expression against `row` (the row is the
+/// current value and the document root, so `a.x` reads `row.a.x`).
 async fn eval_in_row(
-	expr: &Expr,
+	expr: &Arc<dyn PhysicalExpr>,
 	row: &Value,
-	frozen: &FrozenContext,
-	opt: &Options,
+	ctx: &ExecutionContext,
 ) -> Result<Value, ControlFlow> {
-	let cursor = CursorDoc::new(None, None, row.clone());
-	legacy_compute(expr, frozen, opt, Some(&cursor)).await
+	let eval = EvalContext::from_exec_ctx(ctx).with_value_and_doc(row);
+	expr.evaluate(eval).await
 }
 
 // ============================================================================
@@ -474,7 +523,7 @@ pub(crate) struct InsertNodeOp {
 	/// The target table (= label).
 	pub(crate) table: TableName,
 	/// The row-scoped property object, evaluated per row.
-	pub(crate) props: Expr,
+	pub(crate) props: Arc<dyn PhysicalExpr>,
 }
 
 /// A new edge an [`InsertGraph`] relates between two endpoints (each a node
@@ -485,7 +534,8 @@ pub(crate) struct InsertEdgeOp {
 	pub(crate) table: TableName,
 	pub(crate) from: String,
 	pub(crate) to: String,
-	pub(crate) props: Expr,
+	/// The row-scoped property object, evaluated per row.
+	pub(crate) props: Arc<dyn PhysicalExpr>,
 }
 
 /// `INSERT` of new nodes and edges. Per input row (or once, when seeded by a
@@ -544,6 +594,14 @@ impl ExecOperator for InsertGraph {
 		Some(&self.metrics)
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		self.nodes
+			.iter()
+			.map(|node| (node.name.as_str(), &node.props))
+			.chain(self.edges.iter().map(|edge| (edge.name.as_str(), &edge.props)))
+			.collect()
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
@@ -565,7 +623,7 @@ impl ExecOperator for InsertGraph {
 			let mut out = Vec::with_capacity(rows.len());
 			for mut row in rows {
 				check_cancelled(&ctx)?;
-				insert_row(&nodes, &edges, &mut row, &frozen, &opt).await?;
+				insert_row(&nodes, &edges, &mut row, &ctx, &frozen, &opt).await?;
 				out.push(row);
 			}
 			yielder.emit(ValueBatch::new(out)).await;
@@ -582,11 +640,12 @@ async fn insert_row(
 	nodes: &[InsertNodeOp],
 	edges: &[InsertEdgeOp],
 	row: &mut Value,
+	ctx: &ExecutionContext,
 	frozen: &FrozenContext,
 	opt: &Options,
 ) -> Result<(), ControlFlow> {
 	for node in nodes {
-		let props = eval_in_row(&node.props, row, frozen, opt).await?;
+		let props = eval_in_row(&node.props, row, ctx).await?;
 		let stmt = CreateStatement {
 			what: vec![Expr::Table(node.table.clone())],
 			data: Some(Data::ContentExpression(props.into_literal())),
@@ -599,7 +658,7 @@ async fn insert_row(
 	for edge in edges {
 		let from = target_record_id(row, &edge.from).ok_or_else(|| endpoint_error(&edge.from))?;
 		let to = target_record_id(row, &edge.to).ok_or_else(|| endpoint_error(&edge.to))?;
-		let props = eval_in_row(&edge.props, row, frozen, opt).await?;
+		let props = eval_in_row(&edge.props, row, ctx).await?;
 		let stmt = RelateStatement {
 			only: false,
 			or_update: false,

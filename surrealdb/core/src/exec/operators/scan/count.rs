@@ -3,14 +3,14 @@
 //! When a query is `SELECT count() FROM table GROUP ALL` (with no WHERE, SPLIT,
 //! or meaningful ORDER BY), this operator replaces the full Scan -> Aggregate
 //! pipeline.  Instead of streaming, decoding, and aggregating every record it
-//! calls `txn.count(beg..end)` on the KV key range and emits a single
-//! `{ "count": N }` row.
+//! calls `txn.count(beg..end)` on the KV key range and emits the single row
+//! the aggregation would have — see [`CountOutput`].
 //!
 //! The planner emits this operator only when it can statically determine that
 //! the query is eligible.  Permissions are resolved at execution time:
 //!
 //! - **Allow** – proceed with the key-range count.
-//! - **Deny**  – yield an empty stream (the table is invisible).
+//! - **Deny**  – count nothing (the table is invisible), and report that count.
 //! - **Conditional** – per-record evaluation is required, so the operator falls back to a full scan
 //!   + count at runtime.
 
@@ -21,12 +21,12 @@ use std::sync::Arc;
 use common::future::stream::{Yielder, try_async_stream};
 use tracing::instrument;
 
-use crate::catalog::{DatabaseId, Error, Index, NamespaceId, table_select_permission};
+use crate::catalog::{DatabaseId, Error, Index, NamespaceId};
 use crate::err::EngineError;
 use crate::exec::operators::scan::index_count::sum_index_count_deltas;
 use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
-	should_check_perms, validate_record_user_access,
+	PhysicalPermission, check_permission_for_value, should_check_perms,
+	table_select_permission_physical_runtime, validate_record_user_access,
 };
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
@@ -38,22 +38,66 @@ use crate::key::schema::{RecordKey, RecordPrefix};
 use crate::key::{KVKeyDecode, KVValue, RawRange};
 use crate::val::{Number, Object, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
+/// What a count scan answers with: the row the aggregation *and the projection
+/// above it* would have produced, since a count scan stands in for both.
+///
+/// A shortcut decides which plan runs, never what the plan answers, so the
+/// shape is settled once by the matcher that chose the shortcut and carried to
+/// every place a count is emitted — including the one where the count is zero
+/// because the table is invisible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CountOutput {
+	/// `SELECT VALUE count() … GROUP ALL` — the count itself. `VALUE` asks for
+	/// the value rather than for a row holding it, so no key is named and the
+	/// alias a statement may write over it names nothing.
+	Value,
+	/// `SELECT count() [AS c] … GROUP ALL` — one key per counted field, in the
+	/// order the statement wrote them, each holding the same count:
+	/// `{ "count": N }`, `{ "c": N }`, `{ "a": N, "b": N }`.
+	Fields(Vec<String>),
+}
+
+impl CountOutput {
+	/// The single-row batch this shape answers `count` with.
+	pub(crate) fn batch(&self, count: usize) -> ValueBatch {
+		let count = Value::Number(Number::Int(count as i64));
+		let value = match self {
+			Self::Value => count,
+			Self::Fields(names) => {
+				let mut obj = Object::default();
+				for name in names {
+					obj.insert(name.clone(), count.clone());
+				}
+				Value::Object(obj)
+			}
+		};
+		ValueBatch::new(vec![value])
+	}
+
+	/// Whether the shape has somewhere to put the count. `VALUE` is that place
+	/// itself; a field list a matcher accepted always names at least one field.
+	pub(crate) fn is_well_formed(&self) -> bool {
+		match self {
+			Self::Value => true,
+			Self::Fields(names) => !names.is_empty(),
+		}
+	}
+}
+
 /// Optimized operator for `SELECT count() FROM <table> GROUP ALL`.
 ///
 /// Counts records by iterating KV keys (`txn.count()`) instead of
 /// deserializing every record through the Scan -> Aggregate pipeline.
-/// Emits a single `ValueBatch` containing one field per count expression,
-/// e.g. `{ "count": N }` or `{ "c": N }` when an alias is used.
+/// Emits a single `ValueBatch` holding the row the pipeline it replaces would
+/// have answered with, as [`CountOutput`] describes it.
 #[derive(Debug, Clone)]
 pub struct CountScan {
 	/// Expression that evaluates to the table name (or a record range).
 	pub(crate) source: Arc<dyn PhysicalExpr>,
 	/// Optional VERSION expression for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
-	/// Output field names for the count result (one per SELECT field).
-	/// For `SELECT count() as c FROM t GROUP ALL` this would be `["c"]`.
-	/// For `SELECT count() FROM t GROUP ALL` this would be `["count"]`.
-	pub(crate) field_names: Vec<String>,
+	/// The shape to answer in: a row of named counts, or the count itself.
+	pub(crate) output: CountOutput,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -63,13 +107,13 @@ impl CountScan {
 	pub(crate) fn new(
 		source: Arc<dyn PhysicalExpr>,
 		version: Option<Arc<dyn PhysicalExpr>>,
-		field_names: Vec<String>,
+		output: CountOutput,
 	) -> Self {
-		debug_assert!(!field_names.is_empty(), "CountScan requires at least one field name");
+		debug_assert!(output.is_well_formed(), "CountScan requires at least one output field");
 		Self {
 			source,
 			version,
-			field_names,
+			output,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -126,7 +170,7 @@ impl ExecOperator for CountScan {
 
 		let source_expr = Arc::clone(&self.source);
 		let version = self.version.clone();
-		let field_names = self.field_names.clone();
+		let output = self.output.clone();
 		let ctx = ctx.clone();
 
 		let stream = try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -191,8 +235,7 @@ impl ExecOperator for CountScan {
 
 			// Resolve SELECT permission.
 			let select_permission = if check_perms {
-				let catalog_perm = table_select_permission(table_def.as_deref());
-				convert_permission_to_physical_runtime(catalog_perm, &ctx)
+				table_select_permission_physical_runtime(table_def.as_deref(), &ctx)
 					.await
 					.context("Failed to convert permission")?
 			} else {
@@ -201,7 +244,12 @@ impl ExecOperator for CountScan {
 
 			match select_permission {
 				PhysicalPermission::Deny => {
-					// Table is invisible – yield nothing (empty result → no GROUP ALL row).
+					// The table is invisible, so no key of it is counted. The
+					// `GROUP ALL` this stands in for reports one row whatever
+					// reaches it, and a caller who may read nothing counts
+					// nothing — the answer an empty table gives, which is what
+					// the caller is entitled to see.
+					yielder.emit(output.batch(0)).await;
 					return Ok(());
 				}
 				PhysicalPermission::Conditional(_) => {
@@ -219,7 +267,7 @@ impl ExecOperator for CountScan {
 						&select_permission,
 					)
 					.await?;
-					yielder.emit(make_count_batch(count, &field_names)).await;
+					yielder.emit(output.batch(count)).await;
 					return Ok(());
 				}
 				PhysicalPermission::Allow => {
@@ -260,7 +308,7 @@ impl ExecOperator for CountScan {
 				}
 			};
 
-			yielder.emit(make_count_batch(count, &field_names)).await;
+			yielder.emit(output.batch(count)).await;
 			Ok(())
 		});
 
@@ -271,23 +319,6 @@ impl ExecOperator for CountScan {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Build the single-row batch that the Aggregate operator would normally
-/// produce for `SELECT count() … GROUP ALL`.
-///
-/// Each entry in `field_names` becomes a key in the output object, all
-/// mapping to the same count value. For example:
-/// - `SELECT count() FROM t GROUP ALL`      → `{ "count": N }`
-/// - `SELECT count() AS c FROM t GROUP ALL`  → `{ "c": N }`
-/// - `SELECT count() AS a, count() AS b …`  → `{ "a": N, "b": N }`
-fn make_count_batch(count: usize, field_names: &[String]) -> ValueBatch {
-	let mut obj = Object::default();
-	let count_val = Value::Number(Number::Int(count as i64));
-	for name in field_names {
-		obj.insert(name.clone(), count_val.clone());
-	}
-	ValueBatch::new(vec![Value::Object(obj)])
-}
 
 /// Count records in a record-id range using `txn.count()`.
 async fn count_range(
@@ -431,4 +462,39 @@ async fn check_perm_value(
 	permission: &PhysicalPermission,
 ) -> Result<bool, ControlFlow> {
 	check_permission_for_value(permission, value, None, ctx).await.map_err(ControlFlow::Err)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A count scan stands in for the projection above the aggregation, so the
+	/// row it emits is the projected one: a named row, or — under `VALUE` —
+	/// the count with nothing wrapped around it.
+	#[test]
+	fn the_output_shape_decides_what_a_count_is_wrapped_in() {
+		let batch = |output: CountOutput| output.batch(7).into_values();
+
+		assert_eq!(batch(CountOutput::Value), vec![Value::from(7)]);
+		assert_eq!(
+			batch(CountOutput::Fields(vec!["count".to_string()])),
+			vec![Value::Object(Object::from(map! { "count".to_string() => Value::from(7) }))]
+		);
+		assert_eq!(
+			batch(CountOutput::Fields(vec!["a".to_string(), "b".to_string()])),
+			vec![Value::Object(Object::from(map! {
+				"a".to_string() => Value::from(7),
+				"b".to_string() => Value::from(7),
+			}))]
+		);
+	}
+
+	/// Only a field list can be empty, and a matcher never builds one: the
+	/// debug assertion in each scan's constructor rests on that.
+	#[test]
+	fn a_shape_with_nowhere_to_put_the_count_is_not_well_formed() {
+		assert!(CountOutput::Value.is_well_formed());
+		assert!(CountOutput::Fields(vec!["count".to_string()]).is_well_formed());
+		assert!(!CountOutput::Fields(Vec::new()).is_well_formed());
+	}
 }

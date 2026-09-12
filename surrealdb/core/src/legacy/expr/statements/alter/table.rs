@@ -67,6 +67,7 @@ pub(crate) async fn alter_table_statement_compute(
 
 	if let Some(permissions) = &this.permissions {
 		dt.permissions = permissions.clone();
+		dt.select_body = crate::catalog::LogicalPermissionBody::of(&permissions.select);
 	}
 
 	let mut changefeed_replaced = false;

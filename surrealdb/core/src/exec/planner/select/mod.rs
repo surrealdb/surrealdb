@@ -1,18 +1,31 @@
-//! SELECT statement planning for the planner.
+//! Compiling a relational pipeline to a source and the operators above it.
 //!
-//! Handles the full SELECT pipeline: source → filter → split → aggregate →
-//! sort → limit → project → fetch → timeout.
+//! The fold ([`super::fold`]) walks a relational tree down to its leaf,
+//! collecting the clauses above it into a [`PipelineClauses`], and hands both
+//! to [`Planner::compile_pipeline`]. Everything here is on the logical types:
+//! predicates and paths are [`LogicalExpr`], projections are
+//! [`LogicalFields`] and orderings are [`LogicalOrdering`]. Nothing in this
+//! module lowers a statement or converts a scalar back into a statement
+//! expression.
 //!
-//! Projection uses a fast path that classifies SELECT fields at plan time:
-//! - **Simple field paths** (e.g. `name`, `age`): handled by `SelectProject` with synchronous field
-//!   selection — zero async/expression overhead.
-//! - **Complex expressions** (e.g. `math::sum(scores) AS total`): pre-evaluated by a `Compute`
-//!   operator, then picked by `SelectProject`.
-//! - **Projection functions** or **nested output paths**: fall back to the full `Project` operator.
+//! `compile_pipeline` decides how the leaf is read:
 //!
-//! An `ExpressionRegistry` is shared between ORDER BY and projection planning
-//! to deduplicate expressions that appear in both clauses.
+//! - The fast paths in [`fast_path`] compile a whole pipeline to one scan when its shape allows — a
+//!   bare or indexed `count()`, or a single record read.
+//! - Otherwise [`Planner::plan_sources`] chooses an access path for each source with plan-time
+//!   index analysis (table scan, B-tree index, full-text, KNN, index union, bitmap fusion) and
+//!   records what the access path consumed — the predicate, or the paging — so the pipeline
+//!   assembled over it by [`pipeline`] does not apply them twice.
+//! - A node the fold does not collect (`PermissionFilter`, a projection layer, `Distinct`, a
+//!   statement) is compiled in place and becomes an opaque source: every clause collected above it
+//!   applies in full, and no filter, paging or threshold is pushed beneath it. The predicate and
+//!   ordering are still offered to the access path beneath a chain of `PermissionFilter` and layer
+//!   nodes over a table; the fold states what that offer withholds.
+//!
+//! Projection planning is in [`projection`]; the plan-time folding of
+//! row-independent record paths in `WHERE` is in [`record_fold`].
 
+mod fast_path;
 mod pipeline;
 mod projection;
 mod record_fold;
@@ -25,19 +38,27 @@ pub(crate) use pipeline::{
 	compute_topk_pushdown_request, filter_action_for_predicate,
 };
 use surrealdb_strand::TableName;
+use surrealdb_types::ToSql;
 
-use super::Planner;
-use super::util::{
-	BruteForceKnnVector, SELECT_ITERATION_PARAMS, all_value_sources, derive_field_name,
-	extract_bruteforce_knn, extract_count_field_names, extract_matches_context,
-	extract_record_id_point_lookup, extract_version, fold_condition_expressions,
-	has_knn_k_operator, has_knn_ktree_operator, has_knn_operator, has_top_level_or,
-	idiom_to_field_name, index_covers_ordering, is_bounded_topk_downstream, is_count_all_eligible,
-	is_indexed_count_eligible, order_is_scan_compatible, resolve_condition_params,
-	resolve_param_value, resolve_projection_field_idioms, source_field_reads_are_inert,
-	strip_fts_condition, strip_index_conditions, strip_knn_and_matches_from_condition,
-	strip_knn_from_condition, strip_union_index_conditions,
+use self::fast_path::{
+	CountAll, IndexedCountAll, SingleRecord, match_count_all, match_indexed_count_all,
+	match_single_record, permission_filtered_source,
 };
+use super::fold::{
+	GroupClause, PipelineClauses, PipelineStop, ProjectClause, is_layer_chain_over_table,
+};
+use super::row_scope::{PathRoot, classify_path_root};
+use super::util::{
+	BruteForceKnnVector, SELECT_ITERATION_PARAMS, expr_contains_matches, extract_bruteforce_knn,
+	extract_matches_context, extract_record_id_point_lookup, extract_version, field_path_from_expr,
+	fold_condition_expressions, get_effective_limit_literal, has_knn_k_operator,
+	has_knn_ktree_operator, has_knn_operator, has_top_level_or, index_covers_ordering,
+	is_bounded_topk_downstream, order_is_scan_compatible, resolve_param_value,
+	resolve_projection_field_idioms, source_field_reads_are_inert, strip_fts_condition,
+	strip_index_conditions, strip_knn_and_matches_from_condition, strip_knn_from_condition,
+	strip_union_index_conditions,
+};
+use super::{PlanTimeVersion, Planner};
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{Index, IndexDefinition};
 use crate::err::{EngineError, Error};
@@ -45,22 +66,173 @@ use crate::exec::index::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
 };
 use crate::exec::index::analysis::IndexAnalyzer;
-use crate::exec::operators::scan::determine_scan_direction;
-use crate::exec::operators::scan::pipeline::table_read_restricted_fields;
-use crate::exec::operators::scan::resolved::{ResolvedTableContext, resolve_table_context};
-use crate::exec::operators::{
-	AnalyzePlan, BitmapNode, BitmapResolve, DynamicScan, ExplainPlan, Fetch, FetchStep, Filter,
-	KnnTopK, KnnVectorSource, Limit, RecordIdScan, SortDirection, SourceExpr, TableScan, Timeout,
-	Union, UnionIndexScan, UnwrapExactlyOne, VersionScope,
+use crate::exec::logical::reads::reads_at_or_beneath;
+use crate::exec::operators::fetch::{FetchPart, fetch_parts};
+use crate::exec::operators::scan::pipeline::{
+	determine_scan_direction, table_read_restricted_fields,
 };
+use crate::exec::operators::scan::resolved::{
+	EnforcementMode, ResolvedTableContext, resolve_table_context,
+};
+use crate::exec::operators::{
+	BitmapNode, BitmapResolve, DynamicScan, Fetch, FetchStep, Filter, KnnTopK, KnnVectorSource,
+	Limit, RecordIdScan, SortDirection, SourceExpr, TableScan, Timeout, Union, UnionIndexScan,
+	UnwrapExactlyOne, VersionScope,
+};
+use crate::exec::physical_expr::MockExpr;
 use crate::exec::pre_decode_filter::pre_decode_filter_status_at_plan_time;
-use crate::exec::{Error as ExecError, ExecOperator, OperatorMetrics};
-use crate::expr::field::{Field, Fields};
-use crate::expr::order::Ordering as OrderClause;
+use crate::exec::{Error as ExecError, ExecOperator, PhysicalExpr};
+use crate::expr::logical::{
+	LogicalDestructureField, LogicalExpr, LogicalField, LogicalFields, LogicalLiteral,
+	LogicalMatch, LogicalOp, LogicalOrdering, LogicalRecordIdKey, LogicalRecordIdLit,
+	LogicalRecurseInstruction, LogicalRecursePath, LogicalSource, LogicalSubquery, LogicalUnionAll,
+	LogicalValues, OutputPathPart, SourceRef, lower_expr,
+};
 use crate::expr::with::With;
-use crate::expr::{Cond, Expr, Idiom, Literal};
+use crate::expr::{Function, Idiom};
 use crate::kvs::index::filter_online_indexes;
 use crate::kvs::{Direction, Transaction};
+
+/// A `VERSION` or `TIMEOUT` the plan does not apply.
+///
+/// An absent clause has two spellings: no operator in the plan, and the
+/// `NONE` literal a fold leaves behind on the operator. Neither bounds
+/// anything.
+fn clause_is_absent(clause: Option<&LogicalExpr>) -> bool {
+	matches!(clause, None | Some(LogicalExpr::Literal(LogicalLiteral::None)))
+}
+
+/// The table a `Source` leaf reads whole, if it is one.
+fn leaf_table(op: &LogicalOp) -> Option<&TableName> {
+	match op {
+		LogicalOp::Source(LogicalSource {
+			source: SourceRef::Table(table),
+			..
+		}) => Some(table),
+		_ => None,
+	}
+}
+
+/// Every table read whole somewhere in `op`'s subtree, in plan order. A nested
+/// statement's sources are its own and are not listed.
+fn tables_beneath<'a>(op: &'a LogicalOp, out: &mut Vec<&'a TableName>) {
+	if let Some(table) = leaf_table(op) {
+		out.push(table);
+	}
+	if matches!(op, LogicalOp::Subquery(_)) {
+		return;
+	}
+	for child in op.children() {
+		tables_beneath(child, out);
+	}
+}
+
+/// The scalar a [`SourceRef`] resolves through, for the source kinds that
+/// have one. A mock set is not a scalar and is compiled by
+/// [`Planner::source_physical_expr`].
+fn source_ref_expr(source: SourceRef) -> Result<LogicalExpr, crate::expr::Mock> {
+	match source {
+		SourceRef::Table(table) => Ok(LogicalExpr::Table(table)),
+		SourceRef::RecordId(rid) => Ok(LogicalExpr::RecordId(rid)),
+		SourceRef::Param(param) => Ok(LogicalExpr::Param(param)),
+		SourceRef::Dynamic(expr) => Ok(expr),
+		SourceRef::Mock(mock) => Err(mock),
+	}
+}
+
+/// The tables of the record-id sources among `sources`: rows the legacy
+/// engine evaluates MATCHES to `false` for, since a record-id source gets no
+/// `QueryExecutor`.
+fn record_id_source_tables(sources: &[LogicalOp]) -> Vec<TableName> {
+	sources
+		.iter()
+		.filter_map(|source| match source {
+			LogicalOp::Source(LogicalSource {
+				source: SourceRef::RecordId(rid),
+				..
+			}) => Some(rid.table.clone()),
+			_ => None,
+		})
+		.collect()
+}
+
+/// Whether a source among `sources` names its table only when the statement
+/// runs: a `type::table(..)` call, a method call, or a parameter the passes
+/// could not resolve.
+fn has_runtime_table_source(sources: &[LogicalOp]) -> bool {
+	sources.iter().any(|source| {
+		matches!(
+			source,
+			LogicalOp::Source(LogicalSource {
+				source: SourceRef::Param(_)
+					| SourceRef::Dynamic(
+						LogicalExpr::Call(_)
+							| LogicalExpr::Postfix { .. }
+							| LogicalExpr::Invoke { .. }
+					),
+				..
+			})
+		)
+	})
+}
+
+/// Whether `source` carries the `FOR UPDATE` flag: a `Source` the clause
+/// locks, or a `Values` the clause was written over, which it cannot lock.
+fn locks_records(source: &LogicalOp) -> bool {
+	matches!(
+		source,
+		LogicalOp::Source(LogicalSource {
+			for_update: true,
+			..
+		}) | LogicalOp::Values(LogicalValues {
+			for_update: true,
+			..
+		})
+	)
+}
+
+/// Reject every `FOR UPDATE` target that is not a specific record.
+///
+/// `FOR UPDATE` locks the records a read returns, so a target must name
+/// specific records: a non-range record id, or a parameter or call whose
+/// shape is only known when the statement runs and is re-validated by the
+/// scan that resolves it. A table, a mock set, a key range, a literal value
+/// and a nested statement — which lowering carries under the clause as a
+/// `Dynamic` source holding the nested plan, so the flag has a node to ride
+/// on — are rejected, and so is a literal value (a `Values`), which lowering
+/// and the passes flag like any other source so that a `FROM [1] FOR UPDATE`
+/// or a parameter that resolved to a value is caught wherever the statement
+/// appears. Applied when any source in the `FROM` carries the flag, to every
+/// source in it.
+fn check_for_update_sources(sources: &[LogicalOp]) -> Result<(), Error> {
+	let locks = sources.iter().any(locks_records);
+	if !locks {
+		return Ok(());
+	}
+	for source in sources {
+		let ok = match source {
+			LogicalOp::Source(LogicalSource {
+				source,
+				..
+			}) => match source {
+				SourceRef::RecordId(rid) => !matches!(rid.key, LogicalRecordIdKey::Range(_)),
+				SourceRef::Param(_) => true,
+				SourceRef::Dynamic(expr) => {
+					matches!(expr, LogicalExpr::Call(_) | LogicalExpr::Invoke { .. })
+				}
+				SourceRef::Table(_) | SourceRef::Mock(_) => false,
+			},
+			_ => false,
+		};
+		if !ok {
+			return Err(ExecError::Query {
+				message: crate::dbs::FOR_UPDATE_TARGETS_ERROR.to_string(),
+			}
+			.into());
+		}
+	}
+	Ok(())
+}
 
 impl<'ctx> Planner<'ctx> {
 	/// Resolve a parameter to its value at plan time.
@@ -69,212 +241,113 @@ impl<'ctx> Planner<'ctx> {
 	/// namespace/database IDs (looked up from the transaction when available).
 	async fn resolve_param(&self, name: &str) -> Option<crate::val::Value> {
 		let ns_db = self.ns_db_ids().await;
-		resolve_param_value(name, self.ctx, ns_db, SELECT_ITERATION_PARAMS).await
+		resolve_param_value(name, self.ctx, self.txn.as_ref(), ns_db, SELECT_ITERATION_PARAMS).await
 	}
 
-	/// Look up (NamespaceId, DatabaseId) from the planner's transaction.
-	///
-	/// Cached on first hit — `(self.ns, self.db, self.txn)` are immutable
-	/// for the planner's lifetime, so callers (parameter resolution,
-	/// SELECT planning, etc.) can hit this many times per plan without
-	/// re-reading the catalog.
-	///
-	/// Returns `None` when the transaction or namespace/database is
-	/// unavailable; callers fall back to runtime resolution.
-	///
-	/// Logging policy on the *first* lookup:
-	/// - **`Ok(None)`** ("ns/db doesn't exist yet"): `debug!` — common during schema-creation
-	///   flows; not actionable.
-	/// - **`Err(e)`** (storage error, lock contention, etc.): `warn!` — exceptional. Plan-time
-	///   index resolution / sort elimination silently degrades, so it should be visible in
-	///   production monitoring.
-	async fn ns_db_ids(&self) -> Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)> {
-		self.ns_db_ids_cache
-			.get_or_init(|| async {
-				let (txn, ns, db) = match (&self.txn, &self.ns, &self.db) {
-					(Some(txn), Some(ns), Some(db)) => (txn, ns, db),
-					_ => return None,
-				};
-				match txn.get_db_by_name(ns, db, None).await {
-					Ok(Some(db_def)) => Some((db_def.namespace_id, db_def.database_id)),
-					Ok(None) => {
-						tracing::debug!(
-							ns = %ns,
-							db = %db,
-							"plan-time db lookup returned None; falling back to runtime resolution",
-						);
-						None
-					}
-					Err(e) => {
-						tracing::warn!(
-							ns = %ns,
-							db = %db,
-							error = %e,
-							"plan-time db lookup failed; falling back to runtime resolution \
-							 (plan-time optimisations may be unavailable)",
-						);
-						None
-					}
-				}
-			})
-			.await
-			.as_ref()
-			.copied()
-	}
-
-	/// Try to evaluate a source expression to a concrete `Value` at plan time.
-	///
-	/// Recursively resolves parameters and evaluates synchronous built-in
-	/// function calls when all arguments are known. Returns `None` when any
-	/// part of the expression cannot be resolved (e.g. row-scoped variables,
-	/// async functions, or unknown parameters).
-	async fn try_resolve_expr_value(&self, expr: &Expr) -> Option<crate::val::Value> {
-		use crate::expr::function::Function;
-		use crate::val::Value;
-
-		match expr {
-			Expr::Param(param) => self.resolve_param(param.as_str()).await,
-			Expr::Literal(lit) => super::util::try_literal_to_value(lit),
-			Expr::Table(name) => Some(Value::Table(name.clone())),
-			Expr::FunctionCall(fc) => {
-				let Function::Normal(ref name) = fc.receiver else {
-					return None;
-				};
-				self.ctx.check_allowed_function(name).ok()?;
-				let mut args = Vec::with_capacity(fc.arguments.len());
-				for arg in &fc.arguments {
-					args.push(Box::pin(self.try_resolve_expr_value(arg)).await?);
-				}
-				crate::fnc::synchronous(self.ctx, None, name, args).ok()
-			}
-			_ => None,
+	/// Compile a `FROM` source's [`SourceRef`] to the expression a scan
+	/// evaluates for its rows.
+	async fn source_physical_expr(
+		&self,
+		source: SourceRef,
+	) -> Result<Arc<dyn PhysicalExpr>, Error> {
+		match source_ref_expr(source) {
+			Ok(expr) => self.physical_expr(expr).await,
+			Err(mock) => Ok(Arc::new(MockExpr(mock)) as Arc<dyn PhysicalExpr>),
 		}
 	}
 
-	/// Try to resolve FROM source expressions at plan time.
-	///
-	/// Walks each source in the `what` vector and attempts to evaluate it
-	/// to a concrete value. When a source resolves to `Value::Table`, it is
-	/// rewritten to `Expr::Table` so that downstream planning (index
-	/// resolution, limit pushdown, sort elimination) works identically to
-	/// literal table names.
-	async fn resolve_source_exprs(&self, what: &mut [Expr]) {
-		for expr in what.iter_mut() {
-			match expr {
-				Expr::Table(_) | Expr::Literal(_) | Expr::Select(_) => continue,
-				_ => {}
-			}
-			if let Some(value) = self.try_resolve_expr_value(expr).await {
-				match value {
-					crate::val::Value::Table(t) => *expr = Expr::Table(t),
-					crate::val::Value::RecordId(rid) => {
-						*expr = crate::val::Value::RecordId(rid).into_literal();
-					}
-					_ => *expr = value.into_literal(),
-				}
-			}
-		}
-	}
-	/// Plan FETCH clause.
+	/// Plan a `FETCH` clause over `input`. No fetches leave `input` as it is.
 	pub(crate) async fn plan_fetch(
 		&self,
-		fetch: Option<crate::expr::fetch::Fetchs>,
+		fetches: Vec<LogicalExpr>,
 		input: Arc<dyn ExecOperator>,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		let Some(fetchs) = fetch else {
+		if fetches.is_empty() {
 			return Ok(input);
-		};
-
-		let mut fields = Vec::with_capacity(fetchs.len());
-		for fetch_item in fetchs {
-			let mut idioms = self.resolve_field_idioms(fetch_item.0).await?;
-			fields.append(&mut idioms);
 		}
-		let (fields_sql, physical_fields) = self.convert_fetch_idioms(fields).await?;
-
-		Ok(Arc::new(Fetch {
-			input,
-			fields_sql,
-			physical_fields,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}) as Arc<dyn ExecOperator>)
+		let mut fields = Vec::with_capacity(fetches.len());
+		for fetch in fetches {
+			let mut paths = self.resolve_field_paths(fetch).await?;
+			fields.append(&mut paths);
+		}
+		let (fields_sql, physical_fields) = self.convert_fetch_paths(fields).await?;
+		Ok(Arc::new(Fetch::new(input, fields_sql, physical_fields)) as Arc<dyn ExecOperator>)
 	}
 
-	/// Convert resolved FETCH idioms into `FetchStep`s, pre-planning each
-	/// `Part::Value` (a computed index/key, e.g. `refs[0]`, `refs[$i]`) into
-	/// a `PhysicalExpr` once here rather than re-planning it on every row.
-	/// Other part kinds are moved in as-is; the `Fetch` operator walks them
-	/// unchanged.
+	/// Convert resolved FETCH paths into the [`FetchStep`]s the `Fetch`
+	/// operator walks, in the order the steps apply. A field read, `.*`,
+	/// `[0]` and `[$]` are walked as written; an index expression (`refs[0]`,
+	/// `refs[$i]`) is compiled once here rather than on every row. The first
+	/// step of any other kind — a filter, a lookup, a method, a path starting
+	/// from an expression — ends the walk there, so nothing after it is
+	/// converted.
 	///
-	/// Consumes the idioms so no part is cloned; the returned string is their
-	/// SQL rendering, captured up front for EXPLAIN (`Fetch::attrs`).
-	pub(crate) async fn convert_fetch_idioms(
+	/// The returned string is the paths' SQL rendering, captured up front for
+	/// EXPLAIN (`Fetch::attrs`).
+	pub(crate) async fn convert_fetch_paths(
 		&self,
-		idioms: Vec<Idiom>,
+		paths: Vec<LogicalExpr>,
 	) -> Result<(String, Vec<Vec<FetchStep>>), Error> {
-		use surrealdb_types::ToSql;
-		let fields_sql = idioms.iter().map(|f| f.to_sql()).collect::<Vec<_>>().join(", ");
-		let mut physical_fields = Vec::with_capacity(idioms.len());
-		for idiom in idioms {
-			let mut steps = Vec::with_capacity(idiom.0.len());
-			for part in idiom.0 {
-				let step = match part {
-					crate::expr::part::Part::Value(expr) => {
-						FetchStep::Index(self.physical_expr(expr).await?)
+		let fields_sql = paths.iter().map(|f| f.to_sql()).collect::<Vec<_>>().join(", ");
+		let mut physical_fields = Vec::with_capacity(paths.len());
+		for path in &paths {
+			let mut steps = Vec::new();
+			for part in fetch_parts(path) {
+				steps.push(match part {
+					FetchPart::Field(name) => FetchStep::Field(name.clone()),
+					FetchPart::All => FetchStep::All,
+					FetchPart::First => FetchStep::First,
+					FetchPart::Last => FetchStep::Last,
+					FetchPart::Index(index) => {
+						FetchStep::Index(self.physical_expr(index.clone()).await?)
 					}
-					other => FetchStep::Static(other),
-				};
-				steps.push(step);
+					FetchPart::Unsupported => FetchStep::Unsupported,
+				});
 			}
 			physical_fields.push(steps);
 		}
 		Ok((fields_sql, physical_fields))
 	}
+
 	// ========================================================================
 	// Field Resolution Helpers
 	// ========================================================================
 
-	/// Resolve a field expression to one or more idioms.
-	pub(crate) async fn resolve_field_idioms(
+	/// Resolve an `OMIT` or `FETCH` expression to the paths it names: a path
+	/// as written, a parameter holding a path as text, or a projection
+	/// function whose arguments name paths.
+	pub(crate) async fn resolve_field_paths(
 		&self,
-		expr: Expr,
-	) -> Result<Vec<crate::expr::idiom::Idiom>, Error> {
-		use crate::expr::Function;
-
+		expr: LogicalExpr,
+	) -> Result<Vec<LogicalExpr>, Error> {
 		match expr {
-			Expr::Idiom(idiom) => Ok(vec![idiom]),
-			Expr::Param(ref param) => {
+			path if path.is_path() => Ok(vec![path]),
+			// A parameter holds a path as text. The error names the value it
+			// held rather than the parameter, as the legacy engine does.
+			LogicalExpr::Param(param) => {
 				let value =
 					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
-				let s =
-					value.clone().coerce_to::<String>().map_err(|_| ExecError::InvalidFetch {
-						value: value.into_literal(),
-					})?;
-				let idiom: Idiom = crate::syn::idiom(&s)
-					.map_err(|_| ExecError::InvalidFetch {
-						value: expr,
-					})?
-					.into();
-				Ok(vec![idiom])
+				let invalid = || ExecError::InvalidFetch {
+					value: value.clone().into_literal().to_sql(),
+				};
+				let s = value.clone().coerce_to::<String>().map_err(|_| invalid())?;
+				let path = parse_field_path(&s).ok_or_else(invalid)?;
+				Ok(vec![path])
 			}
-			Expr::FunctionCall(ref call) => match &call.receiver {
+			LogicalExpr::Call(ref call) => match &call.receiver {
 				Function::Normal(name) if self.function_registry().is_projection(name) => {
 					// Generic projection function handling: resolve each argument
 					// as a string (single field) or array of strings (multiple fields)
-					// and parse each as an idiom.
-					let mut idioms = Vec::new();
-					for arg in &call.arguments {
+					// and parse each as a path.
+					let mut paths = Vec::new();
+					for arg in &call.args {
 						match self.resolve_expr_to_string(arg).await {
 							Ok(s) => {
-								let idiom: Idiom = crate::syn::idiom(&s)
-									.map_err(|e| ExecError::Query {
-										message: format!(
-											"Failed to parse field path '{}': {}",
-											s, e
-										),
-									})?
-									.into();
-								idioms.push(idiom);
+								paths.push(parse_field_path(&s).ok_or_else(|| {
+									ExecError::Query {
+										message: format!("Failed to parse field path '{s}'"),
+									}
+								})?);
 							}
 							Err(_) => {
 								// Try resolving as an array of strings
@@ -289,20 +362,16 @@ impl<'ctx> Planner<'ctx> {
 										),
 									})?;
 								for s in strings {
-									let idiom: Idiom = crate::syn::idiom(&s)
-										.map_err(|e| ExecError::Query {
-											message: format!(
-												"Failed to parse field path '{}': {}",
-												s, e
-											),
-										})?
-										.into();
-									idioms.push(idiom);
+									paths.push(parse_field_path(&s).ok_or_else(|| {
+										ExecError::Query {
+											message: format!("Failed to parse field path '{s}'"),
+										}
+									})?);
 								}
 							}
 						}
 					}
-					if idioms.is_empty() {
+					if paths.is_empty() {
 						return Err(ExecError::Query {
 							message: format!(
 								"Projection function '{}' requires at least one argument",
@@ -311,24 +380,24 @@ impl<'ctx> Planner<'ctx> {
 						}
 						.into());
 					}
-					Ok(idioms)
+					Ok(paths)
 				}
 				_ => Err(ExecError::InvalidFetch {
-					value: expr,
+					value: expr.to_sql(),
 				}
 				.into()),
 			},
 			other => Err(ExecError::InvalidFetch {
-				value: other,
+				value: other.to_sql(),
 			}
 			.into()),
 		}
 	}
 
-	async fn resolve_expr_to_string(&self, expr: &Expr) -> Result<String, Error> {
+	async fn resolve_expr_to_string(&self, expr: &LogicalExpr) -> Result<String, Error> {
 		match expr {
-			Expr::Literal(Literal::String(s)) => Ok(s.as_str().to_owned()),
-			Expr::Param(param) => {
+			LogicalExpr::Literal(LogicalLiteral::String(s)) => Ok(s.as_str().to_owned()),
+			LogicalExpr::Param(param) => {
 				let value =
 					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
 				value.coerce_to::<String>().map_err(|_| {
@@ -345,16 +414,16 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
-	async fn resolve_expr_to_string_array(&self, expr: &Expr) -> Result<Vec<String>, Error> {
+	async fn resolve_expr_to_string_array(&self, expr: &LogicalExpr) -> Result<Vec<String>, Error> {
 		match expr {
-			Expr::Literal(Literal::Array(items)) => {
+			LogicalExpr::Array(items) => {
 				let mut result = Vec::with_capacity(items.len());
 				for item in items {
 					result.push(self.resolve_expr_to_string(item).await?);
 				}
 				Ok(result)
 			}
-			Expr::Param(param) => {
+			LogicalExpr::Param(param) => {
 				let value =
 					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
 				value.coerce_to::<Vec<String>>().map_err(|_| {
@@ -372,214 +441,54 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
-	/// Extract the set of field names needed by a SELECT statement.
+	/// Extract the set of root field names a pipeline reads from its rows.
 	///
-	/// Returns `None` if all fields are needed (SELECT *, wildcard present, or
-	/// opaque expressions prevent static analysis). Returns `Some(set)` with
-	/// the root field names needed by projections, WHERE, ORDER, GROUP, SPLIT.
+	/// Returns `None` if all fields are needed: no projection, a wildcard in
+	/// the projection, or an opaque expression (a parameter, a computed path
+	/// start) that prevents static analysis. Returns `Some(set)` with the root
+	/// field names needed by projections, `WHERE`, `ORDER`, `GROUP`, `SPLIT`.
 	pub(crate) fn extract_needed_fields(
-		fields: &Fields,
-		omit: &[Expr],
-		cond: Option<&Cond>,
-		order: Option<&crate::expr::order::Ordering>,
-		group: Option<&crate::expr::group::Groups>,
-		split: Option<&crate::expr::split::Splits>,
-	) -> Option<std::collections::HashSet<String>> {
-		use crate::expr::visit::{Visit, Visitor};
-		use crate::expr::{Expr, Part};
-
-		// Check for SELECT * (wildcard) -- need all fields
-		match fields {
-			Fields::Select(field_list) => {
-				if field_list.iter().any(|f| matches!(f, Field::All)) {
-					return None;
-				}
-			}
-			Fields::Value(_) => {
-				// SELECT VALUE expr -- still selective
-			}
-		}
-
-		/// Visitor that collects root field names from idioms and detects opaque expressions.
-		///
-		/// Idiom roots determine whose row a field access belongs to, via
-		/// [`super::row_scope::classify_idiom_root`]:
-		///
-		/// - `ThisRow` (unrooted, `$this.x`, `$self.x`): leading `Part::Field` names are columns of
-		///   the current row's table — add them to the needed set.
-		/// - `OuterRow` (`$parent.x`): subsequent `Part::Field` names belong to the outer row, NOT
-		///   the current table. Skip them; only walk nested predicates (which may reference `$this`
-		///   legitimately).
-		/// - `Opaque` (computed start, parameter-bound table): mark `has_opaque` and bail to "all
-		///   fields needed."
-		///
-		/// Issue #7154 was about not treating `parent`/`this` as ordinary field
-		/// names when they appear as `Part::Start(Expr::Param(...))`. Earlier
-		/// fixes did that for the leading segment but still added subsequent
-		/// segments under `$parent` to the needed set, inflating selective
-		/// scans for the outer row's columns. The classifier-driven path
-		/// below is the single source of truth.
-		struct NeededFieldExtractor {
-			fields: std::collections::HashSet<String>,
-			has_opaque: bool,
-			/// Depth of `Part::Where(...)` predicates currently being
-			/// walked.
-			///
-			/// At depth 0 (top-level) the row scope follows the natural
-			/// SELECT semantics: `$this` is the current row, `$parent` is
-			/// the outer SELECT's row.
-			///
-			/// At depth 1 (inside one `[WHERE …]`) the runtime rebinds
-			/// scope: `current_value` is the iteration element and
-			/// `$parent` is bound to the enclosing `document_root`. So
-			/// `.x` and `$this.x` reference the iteration element (NOT
-			/// this row's columns), while `$parent.x` references the
-			/// current row.
-			///
-			/// At depth ≥ 2 we don't model the chain and conservatively
-			/// fall back to "all fields needed" via `has_opaque`.
-			filter_depth: u32,
-		}
-
-		impl Visitor for NeededFieldExtractor {
-			type Error = std::convert::Infallible;
-
-			fn visit_idiom(&mut self, idiom: &crate::expr::Idiom) -> Result<(), Self::Error> {
-				use super::row_scope::{IdiomRoot, classify_idiom_root};
-
-				let root = classify_idiom_root(idiom);
-
-				match (self.filter_depth, root) {
-					// Top-level: standard scope.
-					(0, IdiomRoot::OuterRow) => {
-						// `$parent.X.Y...` — fields belong to the outer
-						// row, not this row's table. Do not add them.
-						// Visit nested parts (Where predicates, method
-						// args) so any `$this`-rooted idioms inside
-						// still contribute.
-						for p in idiom.0.iter().skip(1) {
-							self.visit_part(p)?;
-						}
-					}
-					(0, IdiomRoot::ThisRow) => {
-						// Idiom is rooted at the current row. The first
-						// `Part::Field` (or the field immediately after
-						// a `Part::Start(Expr::Param)` for `$this`/
-						// `$self`) is a column name; add it. Visit
-						// nested parts for predicates that may
-						// reference further fields.
-						//
-						// `Part::Start` is intentionally NOT visited:
-						// doing so would dispatch into its inner
-						// `Expr::Param`, which the `visit_expr` arm
-						// treats as opaque (a param could reference any
-						// field) and mark the whole analysis as such —
-						// losing the selective scan entirely. The
-						// explicit `$this`/`$self` anchor is
-						// structural; only the parts after it describe
-						// this row's columns.
-						let mut leading_field_taken = false;
-						for part in idiom.0.iter() {
-							match part {
-								Part::Start(_) => continue,
-								Part::Field(name) if !leading_field_taken => {
-									self.fields.insert(name.as_str().to_owned());
-									leading_field_taken = true;
-								}
-								_ => {}
-							}
-							self.visit_part(part)?;
-						}
-					}
-					(0, IdiomRoot::Opaque) => {
-						self.has_opaque = true;
-					}
-					// Inside one filter predicate (`[WHERE …]`): scope flips.
-					(1, IdiomRoot::OuterRow) => {
-						// `$parent.X.Y...` inside the filter — `$parent`
-						// is rebound to the enclosing row, so `X` is a
-						// column of *this* row's table.
-						let mut leading_field_taken = false;
-						for part in idiom.0.iter().skip(1) {
-							match part {
-								Part::Field(name) if !leading_field_taken => {
-									self.fields.insert(name.as_str().to_owned());
-									leading_field_taken = true;
-								}
-								_ => {}
-							}
-							self.visit_part(part)?;
-						}
-					}
-					(1, IdiomRoot::ThisRow) => {
-						// `.X` or `$this.X` inside the filter — these
-						// access the iteration element, not this row's
-						// columns. Don't add `X` to needed-fields.
-						// Recurse into nested parts so a deeper
-						// `$parent.Y` (e.g. inside a method-arg subexpr)
-						// still contributes.
-						for part in idiom.0.iter() {
-							if matches!(part, Part::Start(_)) {
-								continue;
-							}
-							self.visit_part(part)?;
-						}
-					}
-					// Filter-scope Opaque (`(1, Opaque)`) or any idiom at
-					// depth ≥ 2 (nested filters whose scope chain we don't
-					// model). The `2..` lower bound on the catch-all means
-					// a new IdiomRoot variant added later trips the
-					// exhaustiveness checker instead of silently
-					// short-circuiting here.
-					(1, IdiomRoot::Opaque) | (2.., _) => {
-						self.has_opaque = true;
-					}
-				}
-				Ok(())
-			}
-
-			fn visit_part(&mut self, part: &Part) -> Result<(), Self::Error> {
-				if matches!(part, Part::Where(_)) {
-					self.filter_depth = self.filter_depth.saturating_add(1);
-					let r = part.visit(self);
-					self.filter_depth = self.filter_depth.saturating_sub(1);
-					r
-				} else {
-					part.visit(self)
-				}
-			}
-
-			fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
-				match expr {
-					// Parameters could reference any field
-					Expr::Param(_) => {
-						self.has_opaque = true;
-					}
-					_ => {
-						expr.visit(self)?;
-					}
-				}
-				Ok(())
-			}
+		fields: Option<&LogicalFields>,
+		omit: &[LogicalExpr],
+		cond: Option<&LogicalExpr>,
+		order: Option<&LogicalOrdering>,
+		group: Option<&[LogicalExpr]>,
+		split: Option<&[LogicalExpr]>,
+	) -> Option<HashSet<String>> {
+		// No projection, or a wildcard in it: every field is needed.
+		let fields = fields?;
+		if fields.has_all_selection() {
+			return None;
 		}
 
 		let mut extractor = NeededFieldExtractor {
-			fields: std::collections::HashSet::new(),
+			fields: HashSet::new(),
 			has_opaque: false,
 			filter_depth: 0,
 		};
 
 		// Walk projection expressions
 		match fields {
-			Fields::Value(selector) => {
-				let _ = extractor.visit_expr(&selector.expr);
-			}
-			Fields::Select(field_list) => {
+			LogicalFields::Value {
+				expr,
+				..
+			} => extractor.visit_expr(expr),
+			LogicalFields::Select(field_list) => {
 				for field in field_list {
-					if let Field::Single(selector) = field {
-						let _ = extractor.visit_expr(&selector.expr);
-						if let Some(alias) = &selector.alias {
-							let _ = extractor.visit_idiom(alias);
+					if let LogicalField::Single {
+						expr,
+						alias,
+						..
+					} = field
+					{
+						extractor.visit_expr(expr);
+						// An alias is walked as a path from the row: its
+						// leading field counts as read, so a later clause
+						// naming the alias finds the field it shadows.
+						if let Some(alias) = alias
+							&& let Some(OutputPathPart::Field(name)) = alias.parts().first()
+						{
+							extractor.fields.insert(name.clone());
 						}
 					}
 				}
@@ -588,38 +497,29 @@ impl<'ctx> Planner<'ctx> {
 
 		// Walk OMIT fields (they may reference computed fields that need evaluation)
 		for expr in omit {
-			let _ = extractor.visit_expr(expr);
+			extractor.visit_expr(expr);
 		}
 
 		// Walk WHERE condition
 		if let Some(cond) = cond {
-			let _ = extractor.visit_expr(&cond.0);
+			extractor.visit_expr(cond);
 		}
 
 		// Walk ORDER BY
-		if let Some(ordering) = order {
-			match ordering {
-				crate::expr::order::Ordering::Random => {}
-				crate::expr::order::Ordering::Order(order_list) => {
-					for order in order_list.iter() {
-						let _ = extractor.visit_idiom(&order.value);
-					}
-				}
+		if let Some(LogicalOrdering::Order(order_list)) = order {
+			for order in order_list {
+				extractor.visit_expr(&order.value);
 			}
 		}
 
 		// Walk GROUP BY
-		if let Some(groups) = group {
-			for group in groups.0.iter() {
-				let _ = extractor.visit_idiom(&group.0);
-			}
+		for key in group.into_iter().flatten() {
+			extractor.visit_expr(key);
 		}
 
 		// Walk SPLIT
-		if let Some(splits) = split {
-			for split in splits.iter() {
-				let _ = extractor.visit_idiom(&split.0);
-			}
+		for key in split.into_iter().flatten() {
+			extractor.visit_expr(key);
 		}
 
 		if extractor.has_opaque {
@@ -629,344 +529,224 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
-	/// Wrap a planned SELECT operator with the standard tail layers:
-	/// `Timeout` (if a non-`NONE` TIMEOUT clause), `VersionScope` (if a
-	/// VERSION expression), and `UnwrapExactlyOne` (if `FROM ONLY`).
+	/// Apply the plan's `LIMIT`/`START` over an operator.
 	///
-	/// `only_none_on_empty` controls `UnwrapExactlyOne::new`'s
-	/// `none_on_empty` flag: `true` for table-source SELECTs (zero rows →
-	/// `NONE`) and `false` for array-source SELECTs (zero rows → error).
-	/// See [`UnwrapExactlyOne`] for the contract.
+	/// A fast path replaces the rows below it but still has to page what it
+	/// produces: `GROUP ALL` yields one row, and `LIMIT 0` or a `START` past
+	/// it returns none of that row.
+	async fn apply_paging(
+		&self,
+		op: Arc<dyn ExecOperator>,
+		limit: Option<LogicalExpr>,
+		start: Option<LogicalExpr>,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		if limit.is_none() && start.is_none() {
+			return Ok(op);
+		}
+		let limit_expr = match limit {
+			Some(l) => Some(self.physical_expr(l).await?),
+			None => None,
+		};
+		let start_expr = match start {
+			Some(s) => Some(self.physical_expr(s).await?),
+			None => None,
+		};
+		Ok(Arc::new(Limit::new(op, limit_expr, start_expr)))
+	}
+
+	/// Wrap a compiled pipeline with the standard tail layers: `Timeout` (if
+	/// a TIMEOUT clause), `VersionScope` (if a VERSION expression), and
+	/// `UnwrapExactlyOne` (if `ONLY`).
 	///
-	/// Every SELECT fast path (COUNT, indexed COUNT, literal-RecordId)
-	/// closes with this helper so the tail is built in exactly one place.
+	/// Every pipeline closes with this helper so the tail is built in exactly
+	/// one place.
 	async fn wrap_select_tail(
 		&self,
 		op: Arc<dyn ExecOperator>,
-		timeout: Expr,
-		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		timeout: Option<LogicalExpr>,
+		version: Option<Arc<dyn PhysicalExpr>>,
 		only: bool,
-		only_none_on_empty: bool,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		let timed = match timeout {
-			Expr::Literal(Literal::None) => op,
-			te => {
-				let tp = self.physical_expr(te).await?;
-				Arc::new(Timeout::new(op, Some(tp))) as Arc<dyn ExecOperator>
-			}
+		let timed = if clause_is_absent(timeout.as_ref()) {
+			op
+		} else if let Some(te) = timeout {
+			let tp = self.physical_expr(te).await?;
+			Arc::new(Timeout::new(op, Some(tp))) as Arc<dyn ExecOperator>
+		} else {
+			op
 		};
 		let versioned: Arc<dyn ExecOperator> = match version {
 			Some(v) => Arc::new(VersionScope::new(timed, v)),
 			None => timed,
 		};
 		if only {
-			Ok(Arc::new(UnwrapExactlyOne::new(versioned, only_none_on_empty)))
+			Ok(Arc::new(UnwrapExactlyOne::new(versioned)))
 		} else {
 			Ok(versioned)
 		}
 	}
 
 	// ========================================================================
-	// SELECT planning with plan-time index resolution
+	// Pipeline compilation with plan-time index resolution
 	// ========================================================================
 
-	/// Plan a SELECT statement.
+	/// Compile a relational pipeline: the clauses the fold collected, over the
+	/// leaf or node it stopped at.
 	///
-	/// Performs plan-time index resolution when a transaction is available,
-	/// enabling sort elimination and concrete scan operators.
-	pub(crate) async fn plan_select_statement(
+	/// `stop` is either the pipeline's leaf — one source, or the `UnionAll` of
+	/// several — or a node the fold compiles in place, which becomes an opaque
+	/// source (see the module docs). The clauses are applied in pipeline
+	/// order: access path and filter → split → aggregate → sort (with
+	/// elimination) → limit → project → fetch → timeout → version → `ONLY`.
+	pub(crate) async fn compile_pipeline(
 		&self,
-		mut select: crate::expr::statements::SelectStatement,
+		stop: PipelineStop,
+		clauses: PipelineClauses,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		let explain = select.explain.take();
-		let plan = Box::pin(self.plan_select_core(select)).await?;
-		match explain {
-			Some(crate::expr::explain::Explain(full)) => {
-				if full {
-					Ok(Arc::new(AnalyzePlan {
-						plan,
-						format: crate::expr::ExplainFormat::Json,
-						redact_volatile_explain_attrs: self.ctx.redact_volatile_explain_attrs(),
-					}))
-				} else {
-					Ok(Arc::new(ExplainPlan {
-						plan,
-						format: crate::expr::ExplainFormat::Json,
-					}))
+		// `VERSION` is resolved up front, because a fast path has to refuse a
+		// versioned read as well as wrap one.
+		let version = match clauses.version.clone() {
+			Some(version) => extract_version(version, self).await?,
+			None => None,
+		};
+		// The stamp the pipeline's sources are read at, for the catalog reads
+		// planning makes; see `PlanTimeVersion`.
+		let plan_time_version = self.plan_time_version_of(clauses.version.as_ref()).await;
+
+		// The sources a `FROM` lowered to, or the node that stands in for
+		// them. A `UnionAll` is the `FROM a, b` form; its inputs are planned
+		// one by one and combined.
+		let (sources, node): (Vec<LogicalOp>, Option<LogicalOp>) = match stop {
+			PipelineStop::Leaf(LogicalOp::UnionAll(LogicalUnionAll {
+				inputs,
+			})) => (inputs, None),
+			PipelineStop::Leaf(leaf) => (vec![leaf], None),
+			PipelineStop::Node(node) => (vec![], Some(node)),
+		};
+
+		// The clause rules of a FOR UPDATE read, checked on the pipeline so
+		// they hold wherever the statement appears — a top-level statement is
+		// also checked on its surface form by the executor, a nested one only
+		// here. A locked read is of current record state, so a version makes
+		// the lock meaningless, whether the statement's own or one inherited
+		// from an enclosing scope (only known here); grouping and splitting
+		// produce rows that are not records to lock; and a limit over several
+		// targets stops reading before the later targets are registered for
+		// conflict detection.
+		let locks = sources.iter().any(locks_records);
+		if locks {
+			if version.is_some() || self.version.is_some() {
+				return Err(ExecError::Query {
+					message: crate::dbs::FOR_UPDATE_VERSION_ERROR.to_string(),
+				}
+				.into());
+			}
+			if clauses.group.is_some() || clauses.split.is_some() {
+				return Err(ExecError::Query {
+					message: crate::dbs::FOR_UPDATE_GROUP_ERROR.to_string(),
+				}
+				.into());
+			}
+			if clauses.limit.is_some() && sources.len() > 1 {
+				return Err(ExecError::Query {
+					message: crate::dbs::FOR_UPDATE_LIMIT_ERROR.to_string(),
+				}
+				.into());
+			}
+		}
+		// Re-classify FOR UPDATE targets after the passes resolved parameters
+		// and calls where they could: a target that resolved to a non-record
+		// source is rejected here, while targets that stay dynamic are
+		// re-validated by the scan operators at execution time.
+		check_for_update_sources(&sources)?;
+
+		match &node {
+			None => {
+				if let Some(compiled) =
+					self.compile_fast_path(&sources, &clauses, version.clone()).await?
+				{
+					return Ok(compiled);
 				}
 			}
-			None => Ok(plan),
+			// A count over a table whose permission the analyzer placed above
+			// it is still one scan: the count operator resolves that permission
+			// itself, so it stands in for the node (see
+			// [`fast_path::permission_filtered_source`]). Only the count shapes
+			// may do so — a single record read enforces nothing of its own.
+			Some(node) => {
+				if let Some(source) = permission_filtered_source(node)
+					&& let Some(compiled) = self
+						.compile_count_fast_path(
+							std::slice::from_ref(source),
+							&clauses,
+							version.clone(),
+						)
+						.await?
+				{
+					return Ok(compiled);
+				}
+			}
 		}
-	}
 
-	/// Core SELECT planning logic.
-	///
-	/// Resolves sources (with plan-time index analysis when a transaction is
-	/// available), then builds the pipeline: filter → split → aggregate →
-	/// sort (with elimination) → limit → project → fetch → timeout.
-	async fn plan_select_core(
-		&self,
-		select: crate::expr::statements::SelectStatement,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
-		// Reject clause combinations FOR UPDATE does not support (VERSION,
-		// GROUP BY, SPLIT, and statically-classifiable non-record targets).
-		crate::dbs::validate_for_update(&select)?;
-		let crate::expr::statements::SelectStatement {
-			fields,
-			omit,
+		let PipelineClauses {
 			only,
-			mut what,
-			with,
-			cond,
-			split,
-			group,
-			order,
+			version: _,
+			timeout,
+			fetch,
+			project,
 			limit,
 			start,
-			fetch,
-			version,
-			timeout,
-			explain: _,
+			order,
 			tempfiles,
-			for_update,
-		} = select;
+			group,
+			split,
+			cond,
+		} = clauses;
 
-		let version = extract_version(version, self).await?;
-
-		// A FOR UPDATE read locks current record state; a versioned read
-		// (here always inherited from an enclosing version scope, as a
-		// statement-level VERSION clause is already rejected above) would
-		// make the lock meaningless.
-		if for_update && (version.is_some() || self.version.is_some()) {
-			return Err(ExecError::Query {
-				message: crate::dbs::FOR_UPDATE_VERSION_ERROR.to_string(),
-			}
-			.into());
-		}
-
-		// COUNT fast-path
-		if is_count_all_eligible(&fields, &group, &cond, &split, &order, &fetch, &omit, &what) {
-			use crate::exec::operators::CountScan;
-			// A lightweight relation has no record range to count: decline
-			// every statically-named source shape (table, record id, or
-			// record-id range) so the fallback executor's record-less scan
-			// serves it. Runtime-resolved sources (params) are caught by the
-			// fail-closed guard in `CountScan::execute` instead.
-			let static_table = match what.first() {
-				Some(Expr::Table(table)) => Some(table),
-				Some(Expr::Literal(Literal::RecordId(rid))) => Some(&rid.table),
-				Some(Expr::Postfix {
-					expr,
-					..
-				}) => match expr.as_ref() {
-					Expr::Literal(Literal::RecordId(rid)) => Some(&rid.table),
-					_ => None,
-				},
-				_ => None,
-			};
-			if let Some(table) = static_table {
-				self.decline_lightweight_table(table).await?;
-			}
-			let table_expr = self
-				.physical_expr(what.into_iter().next().expect("what verified non-empty"))
-				.await?;
-			let field_names = extract_count_field_names(&fields);
-			let count_scan: Arc<dyn ExecOperator> =
-				Arc::new(CountScan::new(table_expr, version.clone(), field_names));
-			return self.wrap_select_tail(count_scan, timeout, version, only, true).await;
-		}
-
-		// Indexed COUNT fast-path (COUNT with WHERE + matching COUNT index)
-		// Skip when WITH NOINDEX is specified — the user explicitly forbids
-		// index-assisted execution.
-		//
-		// SECURITY: also skip when the WHERE clause references a field whose
-		// SELECT permission is not `Full`. The indexed-count fast paths
-		// (`IndexCountScan` with either a dedicated `Index::Count` or a
-		// covering B-tree access) count index entries directly, bypassing
-		// the document-level field reduction that hides restricted values.
-		// Without this guard, a record user could learn the cardinality of
-		// field values they are not permitted to SELECT.
-		if is_indexed_count_eligible(&fields, &group, &cond, &split, &order, &fetch, &omit, &what)
-			&& !matches!(with, Some(crate::expr::with::With::NoIndex))
-			&& !self.cond_touches_restricted_select_field(&what, &cond).await
-		{
-			// Try COUNT index first, then B-tree index for key-only counting,
-			// then an exact bitmap fusion (multi-index AND) count.
-			let has_count_idx = self.has_matching_count_index(&what, &cond).await;
-			let btree_access = if !has_count_idx {
-				self.resolve_count_btree_access(&what, &cond, with.as_ref()).await
-			} else {
-				None
-			};
-			// Never planned for versioned queries (a statement-level VERSION
-			// or an enclosing version context): doc-ID mappings and index
-			// entries are not time-travel-aware, so the fused bitmap would
-			// reflect current state rather than the requested version. The
-			// remaining fallback (scan + filter + count) is version-aware.
-			let bitmap_plan = if !has_count_idx
-				&& btree_access.is_none()
-				&& version.is_none()
-				&& self.version.is_none()
-			{
-				self.resolve_count_bitmap_plan(&what, &cond, with.as_ref()).await
-			} else {
-				None
-			};
-
-			if has_count_idx || btree_access.is_some() || bitmap_plan.is_some() {
-				use crate::exec::operators::scan::index_count::IndexCountScan;
-				// `is_indexed_count_eligible` proves that `what` is non-empty
-				// and `cond` is `Some`. Either invariant breaking would be a
-				// planner bug rather than user input — surface it as
-				// `EngineError::Internal` so the failure message points at the
-				// drift, instead of letting a future eligibility-rule edit
-				// silently turn into a panic on real queries.
-				let table_first = what.first().cloned().ok_or_else(|| {
-					EngineError::Internal(
-						"indexed COUNT fast path: `is_indexed_count_eligible` returned true but `what` is empty".into(),
-					)
-				})?;
-				let table_expr = self.physical_expr(table_first).await?;
-				let condition = cond.clone().ok_or_else(|| {
-					EngineError::Internal(
-						"indexed COUNT fast path: `is_indexed_count_eligible` returned true but `cond` is None".into(),
-					)
-				})?;
-				let predicate = self.physical_expr(condition.0.clone()).await?;
-				let field_names = extract_count_field_names(&fields);
-				let index_count_scan: Arc<dyn ExecOperator> = Arc::new(
-					IndexCountScan::new(
-						table_expr,
-						predicate,
-						condition,
-						version.clone(),
-						field_names,
-					)
-					.with_btree_access(btree_access)
-					.with_bitmap_plan(bitmap_plan),
-				);
-				return self.wrap_select_tail(index_count_scan, timeout, version, only, true).await;
-			}
-		}
-
-		// Fast path: SELECT [*|fields] FROM <literal RecordId>
-		//
-		// This fast path plans projections through `self.plan_projections`
-		// on the outer planner, which has no `version` field set. Idiom-side
-		// optimisations that depend on the enclosing VERSION (notably
-		// [`try_fast_path_pair`], which intentionally declines the
-		// TargetVertex collapse for versioned queries to avoid bypassing
-		// historical edge SELECT permissions) would silently miss the
-		// version flag here. Fall through to the main pipeline when a
-		// VERSION expression is present so idiom planning runs on a
-		// version-aware inner planner.
-		if what.len() == 1
-			&& matches!(&what[0], Expr::Literal(Literal::RecordId(_)))
-			&& cond.is_none()
-			&& order.is_none()
-			&& group.is_none()
-			&& split.is_none()
-			&& fetch.is_none()
-			&& with.is_none()
-			&& version.is_none()
-		{
-			let needed_fields = Self::extract_needed_fields(
-				&fields,
-				&omit,
-				cond.as_ref(),
-				order.as_ref(),
-				group.as_ref(),
-				split.as_ref(),
-			);
-
-			// Extract the literal RecordId once and reuse — the outer guard
-			// (`what.len() == 1 && matches!(&what[0], Expr::Literal(Literal::RecordId(_)))`)
-			// already proved this shape, but pattern-matching the owned value
-			// in a single place keeps the invariant local. If the guard
-			// changes and this destructure desynchronizes, the explicit
-			// `EngineError::Internal` fires with a useful message rather than an
-			// `unreachable!` panic.
-			let rid_lit = match what.into_iter().next() {
-				Some(Expr::Literal(Literal::RecordId(rid_lit))) => rid_lit,
-				_ => {
-					return Err(EngineError::Internal(
-						"literal RecordId fast path entered without a literal RecordId source"
-							.into(),
-					)
-					.into());
-				}
-			};
-			let table_name_for_resolve = Some(rid_lit.table.clone());
-			let rid_expr = self.physical_expr(Expr::Literal(Literal::RecordId(rid_lit))).await?;
-			let resolved_table_ctx: Option<ResolvedTableContext> =
-				if let Some(ref tb) = table_name_for_resolve {
-					self.try_resolve_table_ctx(tb).await
-				} else {
-					None
-				};
-			let pdf = self.pre_decode_filter_status_for(
-				resolved_table_ctx.as_ref(),
+		// A grouped pipeline projects inside its aggregation, so its fields
+		// come from the `Aggregate`; the `Project` above it, when present,
+		// carries only `OMIT`. An ungrouped pipeline's fields come from its
+		// `Project`; with neither there is no projection to apply.
+		let (group_keys, fields, omit): (
+			Option<Vec<LogicalExpr>>,
+			Option<LogicalFields>,
+			Vec<LogicalExpr>,
+		) = match (group, project) {
+			(
+				Some(GroupClause {
+					group,
+					fields,
+				}),
+				project,
+			) => (Some(group), Some(fields), project.map(|p| p.omit).unwrap_or_default()),
+			(
 				None,
-				needed_fields.as_ref(),
-			);
-			let mut scan = RecordIdScan::new(rid_expr, version.clone(), needed_fields, None)
-				.with_for_update(for_update);
-			if let Some(tc) = resolved_table_ctx {
-				scan = scan.with_resolved(tc);
+				Some(ProjectClause {
+					fields,
+					omit,
+				}),
+			) => (None, Some(fields), omit),
+			(None, None) => (None, None, vec![]),
+		};
+
+		// The tables whose rows the predicate is evaluated against: the leaves
+		// of the `FROM`, or the tables beneath the node the walk stopped at.
+		let predicate_tables: Vec<TableName> = {
+			let mut tables = Vec::new();
+			for source in &sources {
+				tables_beneath(source, &mut tables);
 			}
-			scan = scan.with_pre_decode_filter(pdf);
-			let scan: Arc<dyn ExecOperator> = Arc::new(scan);
-			let limited = if limit.is_some() || start.is_some() {
-				let limit_expr = match limit {
-					Some(l) => Some(self.physical_expr(l.0).await?),
-					None => None,
-				};
-				let start_expr = match start {
-					Some(s) => Some(self.physical_expr(s.0).await?),
-					None => None,
-				};
-				Arc::new(Limit::new(scan, limit_expr, start_expr)) as Arc<dyn ExecOperator>
-			} else {
-				scan
-			};
-			let projected = self.plan_projections(fields, omit, limited).await?;
-			return self.wrap_select_tail(projected, timeout, version, only, true).await;
-		}
+			if let Some(node) = &node {
+				tables_beneath(node, &mut tables);
+			}
+			tables.into_iter().cloned().collect()
+		};
+		let primary_table = predicate_tables.first().cloned();
+		let has_knn_early = cond.as_ref().is_some_and(has_knn_operator);
 
-		// Capture literal Expr::Table nodes BEFORE resolve_source_exprs so
-		// that MATCHES context preferentially binds to tables written in the
-		// query rather than param-resolved ones (e.g. FROM $t, article).
-		let literal_primary_table = what.iter().find_map(|e| match e {
-			Expr::Table(t) => Some(t.clone()),
-			_ => None,
-		});
-
-		// Pre-resolve FROM sources so that params and function calls like
-		// type::table($name) are rewritten to concrete Expr::Table nodes
-		// before any downstream checks.
-		self.resolve_source_exprs(&mut what).await;
-
-		// Re-classify FOR UPDATE targets now that params and function calls
-		// have been resolved where possible: a target that resolved to a
-		// non-record source is rejected here, while targets that stay
-		// dynamic are re-validated by the scan operators at execution time.
-		if for_update {
-			crate::dbs::check_for_update_targets(&what)?;
-		}
-
-		let is_value_source = all_value_sources(&what);
-		let primary_table = literal_primary_table.or_else(|| {
-			what.iter().find_map(|e| match e {
-				Expr::Table(t) => Some(t.clone()),
-				_ => None,
-			})
-		});
-		let has_knn_early = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
-
-		// The MATCHES entries and KNN slot this SELECT's own WHERE declares.
+		// The MATCHES entries and KNN slot this pipeline's own WHERE declares.
 		// Either being present replaces what the enclosing planner had; what
-		// this SELECT does not declare is inherited below.
+		// this pipeline does not declare is inherited below.
 		let own_matches_context = cond.as_ref().and_then(|c| {
 			let mut mc = extract_matches_context(c, Some(self.ctx));
 			if mc.is_empty() {
@@ -978,82 +758,83 @@ impl<'ctx> Planner<'ctx> {
 			Some(Arc::new(mc))
 		});
 
-		// Propagate txn, version, auth, and cycle guard to the inner
-		// planner. Inheriting the cycle guard means a self-referential
-		// permission or computed-field body whose subquery flows through
-		// this nested planner will see the parent's in-progress tables
-		// and fall back. Inheriting auth keeps fast-path eligibility
-		// decisions consistent with the outer statement.
-		let mut pp = if let Some(ref txn) = self.txn {
-			Planner::with_txn(
-				self.ctx,
-				self.function_registry,
-				Arc::clone(txn),
-				self.ns.clone(),
-				self.db.clone(),
-			)
-		} else {
-			Planner::new(self.ctx, self.function_registry)
-		}
-		.with_version(version.clone())
-		.with_for_update(for_update)
-		.with_cycle_guard(self.cycle_guard());
-		if let Some(ref auth) = self.auth {
-			pp = pp.with_auth(Arc::clone(auth));
-		}
+		// The nested planner is this planner's own scope — transaction,
+		// namespace and database, auth, cycle guard, catalog id cache and the
+		// path of function bodies being compiled — under the pipeline's
+		// version and its own planning scopes. Inheriting the cycle guard
+		// means a self-referential permission or computed-field body whose
+		// subquery flows through this nested planner sees the parent's
+		// in-progress tables and falls back; inheriting the function path
+		// means a recursive call inside a nested `SELECT` is the recursive
+		// edge `plan_function_body` leaves to the runtime rather than a fresh
+		// body to pre-plan; inheriting auth keeps fast-path eligibility
+		// decisions consistent with the outer statement. The depth is the
+		// enclosing planner's: this is the same statement, not a re-entry.
+		// The version the nested planner reads under is this pipeline's own
+		// or, where it has none, the one already in force: a pipeline nested
+		// two deep under a `VERSION` is still a versioned read, and the
+		// decisions gated on a version — bitmap fusion, the record-path fold,
+		// pre-planning a function body — are made against the planner's own
+		// field, not the enclosing statement's.
+		let mut pp = self
+			.own_scope()
+			.with_version(version.clone().or_else(|| self.version.clone()))
+			.with_plan_time_version(plan_time_version)
+			.with_depth(self.current_depth());
 		pp.set_planning_scopes(own_matches_context, has_knn_early, self);
 
 		let needed_fields = Self::extract_needed_fields(
-			&fields,
+			fields.as_ref(),
 			&omit,
 			cond.as_ref(),
 			order.as_ref(),
-			group.as_ref(),
-			split.as_ref(),
+			group_keys.as_deref(),
+			split.as_deref(),
 		);
-		// After source resolution, params that resolved to tables are now
-		// Expr::Table, so we only need to check concrete types here.
-		let source_is_single_scan = what.len() == 1
-			&& matches!(what[0], Expr::Table(_) | Expr::FunctionCall(_) | Expr::Postfix { .. });
+		// One source whose rows come from one scan, so a compiled predicate
+		// and paging can be offered to that scan. A parameter is not one: it
+		// resolves to a value when the statement runs.
+		let source_is_single_scan = sources.len() == 1
+			&& matches!(
+				&sources[0],
+				LogicalOp::Source(LogicalSource {
+					source: SourceRef::Table(_)
+						| SourceRef::Dynamic(
+							LogicalExpr::Call(_)
+								| LogicalExpr::Postfix { .. }
+								| LogicalExpr::Invoke { .. }
+						),
+					..
+				})
+			);
 
-		// Collect the MATCHES expressions registered by this SELECT's WHERE
+		// Collect the MATCHES expressions registered by this pipeline's WHERE
 		// condition (legacy-executor parity — see `MatchesScope`). Walked
-		// again after param resolution and constant folding below so that
-		// both the original nodes (as projections reference them) and the
-		// rewritten nodes (as the residual scan predicate contains them) are
-		// in the allowlist.
-		let mut cond_matches = std::collections::HashSet::new();
+		// again after the record fold below so that both the original nodes
+		// (as projections reference them) and the rewritten nodes (as the
+		// residual scan predicate contains them) are in the allowlist.
+		let mut cond_matches = HashSet::new();
 		if let Some(ref c) = cond {
-			crate::exec::physical_expr::collect_cond_matches(&c.0, &mut cond_matches);
+			crate::exec::physical_expr::collect_cond_matches(c, &mut cond_matches);
 		}
 
-		// Resolve bind-parameter references so that downstream index analysis
-		// and KNN extraction see Expr::Literal instead of Expr::Param.
-		// This covers LET bindings, client bind params, and DEFINE PARAM.
 		let ns_db = self.ns_db_ids().await;
-		let cond = match cond.as_ref() {
-			Some(c) => {
-				Some(resolve_condition_params(c, self.ctx, ns_db, SELECT_ITERATION_PARAMS).await)
-			}
-			None => None,
-		};
 
-		// Fold constant expressions to literals so that index analysis can
-		// create proper range access patterns. Handles:
-		// - time::now() - 365d → datetime literal
-		// - math::floor(20.5) → 20 (any pure function with literal args)
-		// - type::int('42') → 42
 		// A fold that discards a subtree must not discard a field read that
 		// would have fetched a record or evaluated something on one, so the
 		// folder is told what these sources can put in a row and what reading
-		// a row of them runs. A versioned read resolves its stamp at
-		// evaluation, so the definitions that will apply are not known here.
-		let restricted_fields = if !source_field_reads_are_inert(&what) {
+		// a row of them runs.
+		let has_table_source = !predicate_tables.is_empty();
+		// A node the walk stopped at has a table's rows only as a chain of
+		// `PermissionFilter` and layer nodes over that table; any other node's
+		// rows are unknown here, so no field read off them is inert.
+		let node_is_inert = node.as_ref().is_none_or(is_layer_chain_over_table);
+		let restricted_fields = if !source_field_reads_are_inert(&sources) || !node_is_inert {
 			None
 		} else if version.is_some() || self.version.is_some() {
 			// A versioned read resolves its stamp at evaluation, so the
 			// definitions that will apply are not known here.
-			(!what.iter().any(|e| matches!(e, Expr::Table(_)))).then(HashSet::new)
+			(!has_table_source).then(HashSet::new)
 		} else {
 			match (self.txn(), ns_db) {
 				(Some(txn), Some((ns_id, db_id))) => {
@@ -1064,10 +845,7 @@ impl<'ctx> Planner<'ctx> {
 					};
 					let mut restricted = HashSet::new();
 					let mut resolved = true;
-					for e in what.iter() {
-						let Expr::Table(name) = e else {
-							continue;
-						};
+					for name in &predicate_tables {
 						match table_read_restricted_fields(
 							txn,
 							ns_id,
@@ -1088,28 +866,15 @@ impl<'ctx> Planner<'ctx> {
 					resolved.then_some(restricted)
 				}
 				// Without catalog access a table's field definitions are unknown.
-				_ => (!what.iter().any(|e| matches!(e, Expr::Table(_)))).then(HashSet::new),
+				_ => (!has_table_source).then(HashSet::new),
 			}
-		};
-		let cond = match cond {
-			Some(mut c) => {
-				let capabilities = self.ctx.get_capabilities();
-				fold_condition_expressions(
-					&mut c,
-					self.function_registry(),
-					&capabilities,
-					restricted_fields.as_ref(),
-				);
-				Some(c)
-			}
-			None => None,
 		};
 
-		// Fold row-independent record-idiom traversals (`(scan:one).field`
+		// Fold row-independent record-path traversals (`(scan:one).field`
 		// after param substitution) to literals so index analysis can match
-		// them. Versioned SELECTs are excluded — a statement-level VERSION or
+		// them. Versioned reads are excluded — a statement-level VERSION or
 		// an enclosing version context both disqualify, because the plan-time
-		// walk reads current state, not the versioned snapshot. Statements
+		// walk reads current state, not the versioned snapshot. Pipelines
 		// with write side effects anywhere (projections, sources, condition)
 		// are excluded: a write can change a record between the plan-time
 		// read and the per-row evaluation the fold replaces. See
@@ -1118,11 +883,12 @@ impl<'ctx> Planner<'ctx> {
 			Some(mut c) => {
 				if version.is_none()
 					&& self.version.is_none()
-					&& fields.read_only()
-					&& what.iter().all(Expr::read_only)
-					&& c.0.read_only()
+					&& fields.as_ref().is_none_or(LogicalFields::read_only)
+					&& sources.iter().all(LogicalOp::read_only)
+					&& node.as_ref().is_none_or(LogicalOp::read_only)
+					&& c.read_only()
 				{
-					self.fold_constant_record_idioms(&mut c).await;
+					self.fold_constant_record_paths(&mut c).await;
 					// Substitution can leave an operand constant that was not
 					// constant during the first pass, so simplify again under
 					// the same rules. A literal operand is inert, which is what
@@ -1144,32 +910,33 @@ impl<'ctx> Planner<'ctx> {
 		// allowlist from both condition forms, executor tables from the full
 		// table sources (record-id sources never get a legacy
 		// `QueryExecutor`, so their rows evaluate MATCHES to `false` — see
-		// `Iterator::prepare_record_id`).
+		// `Iterator::prepare_record_id`). A table beneath an in-place node is
+		// still a full table source: the MATCHES above the node is evaluated
+		// per row against the index, so its rows must resolve.
 		{
 			if let Some(ref c) = cond {
-				crate::exec::physical_expr::collect_cond_matches(&c.0, &mut cond_matches);
+				crate::exec::physical_expr::collect_cond_matches(c, &mut cond_matches);
 			}
-			let executor_tables: Vec<surrealdb_strand::TableName> = what
-				.iter()
-				.filter_map(|e| match e {
-					Expr::Table(t) => Some(t.clone()),
-					_ => None,
-				})
-				.collect();
+			let executor_tables = crate::exec::physical_expr::ExecutorTables::new(
+				predicate_tables.clone(),
+				record_id_source_tables(&sources),
+				has_runtime_table_source(&sources),
+			);
 			// A WHERE-clause MATCHES the registration walk does not reach —
 			// a function argument, a literal container, an IF/ELSE branch, a
 			// block — binds to no query executor, which the legacy engine
 			// reports per row as `NoIndexFoundForMatch`. Raise the same
 			// refusal here so the outcome does not depend on which rows the
 			// condition reaches. Only a full table source gets an executor at
-			// all: with none, MATCHES evaluates to `false` per row on both
-			// engines (see `MatchesScope`), and there is nothing to refuse.
-			if !executor_tables.is_empty()
+			// all: with none known at plan time, MATCHES evaluates to `false`
+			// per row on both engines, or is judged per row once a run-time
+			// source names its table (see `MatchesScope`), and there is
+			// nothing to refuse here.
+			if executor_tables.any_known()
 				&& let Some(ref c) = cond
 				&& let Some(found) =
-					crate::exec::physical_expr::first_unregistered_cond_matches(&c.0, &cond_matches)
+					crate::exec::physical_expr::first_unregistered_cond_matches(c, &cond_matches)
 			{
-				use surrealdb_types::ToSql;
 				return Err(crate::idx::Error::NoIndexFoundForMatch {
 					exp: found.to_sql(),
 				}
@@ -1177,12 +944,12 @@ impl<'ctx> Planner<'ctx> {
 			}
 			pp.set_matches_scope(Arc::new(crate::exec::physical_expr::MatchesScope {
 				allowlist: cond_matches,
-				executor_tables: Arc::from(executor_tables),
+				executor_tables,
 			}));
 		}
 
 		// KNN handling
-		let has_knn = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
+		let has_knn = cond.as_ref().is_some_and(has_knn_operator);
 		let brute_force_knn = if has_knn {
 			cond.as_ref().and_then(extract_bruteforce_knn)
 		} else {
@@ -1192,13 +959,13 @@ impl<'ctx> Planner<'ctx> {
 		let (cond_for_index, cond_for_filter) = if has_knn {
 			let stripped = cond.as_ref().and_then(strip_knn_from_condition);
 			if let Some(c) = stripped.as_ref()
-				&& has_knn_operator(&c.0)
+				&& has_knn_operator(c)
 			{
 				// `strip_knn_from_condition` removes `K` and `Approximate` from
 				// the top-level AND chain; whatever is left is either a KTree
 				// variant (no longer backed by any index) or a `K`/`Approximate`
 				// nested under OR/NOT. Disambiguate so the message is actionable.
-				let message = if has_knn_ktree_operator(&c.0) {
+				let message = if has_knn_ktree_operator(c) {
 					"The `<|k|>` KNN operator (KTree / M-Tree) is no longer supported. \
 					 Use `<|k, EF|>` against an HNSW index (e.g. \
 					 `DEFINE INDEX … HNSW DIMENSION N`), or `<|k, DISTANCE|>` for a \
@@ -1217,7 +984,7 @@ impl<'ctx> Planner<'ctx> {
 			}
 			if brute_force_knn.is_some() {
 				(stripped.clone(), stripped)
-			} else if cond.as_ref().is_some_and(|c| has_knn_k_operator(&c.0)) {
+			} else if cond.as_ref().is_some_and(has_knn_k_operator) {
 				// A `K` form whose right-hand side is not plan-time
 				// computable (idiom, subquery, …). The legacy planner
 				// registers no executor entry for such an expression and it
@@ -1235,7 +1002,7 @@ impl<'ctx> Planner<'ctx> {
 
 		let scan_predicate = if source_is_single_scan {
 			match cond_for_filter.as_ref() {
-				Some(c) => Some(pp.physical_expr(c.0.clone()).await?),
+				Some(c) => Some(pp.physical_expr(c.clone()).await?),
 				None => None,
 			}
 		} else {
@@ -1250,30 +1017,50 @@ impl<'ctx> Planner<'ctx> {
 			&& !has_top_level_or(cond_for_filter.as_ref())
 			&& limit.is_some()
 			&& split.is_none()
-			&& group.is_none();
+			&& group_keys.is_none();
 
 		let can_soft_push_limit = !can_push_limit
 			&& source_is_single_scan
 			&& brute_force_knn.is_none()
 			&& limit.is_some()
 			&& split.is_some()
-			&& group.is_none();
+			&& group_keys.is_none();
 
-		let (scan_limit, scan_start) = if can_push_limit {
+		// A chain of layers over a table takes the pipeline's paging on the
+		// same terms as a single scan, provided nothing of the pipeline's own
+		// stands between the chain and its `Limit`: no predicate left above
+		// the chain (every user conjunct moved beneath the layers), no split,
+		// no grouping. `fold_uncollected` withholds it beneath a permission
+		// node.
+		let chain_can_push_limit = node.as_ref().is_some_and(is_layer_chain_over_table)
+			&& cond_for_filter.is_none()
+			&& brute_force_knn.is_none()
+			&& limit.is_some()
+			&& split.is_none()
+			&& group_keys.is_none();
+
+		// A batch-size hint for a scan that keeps its `Limit` operator above
+		// it, taken from the clause only where the clause is a literal. The
+		// hint sizes a read and never changes a row, so an unresolvable clause
+		// simply yields none — and a clause that is not a literal must not be
+		// evaluated a second time here, since the operator above evaluates it.
+		let limit_hint = get_effective_limit_literal(start.as_ref(), limit.as_ref());
+
+		let (scan_limit, scan_start) = if can_push_limit || chain_can_push_limit {
 			(
 				match limit.as_ref() {
-					Some(l) => Some(pp.physical_expr(l.0.clone()).await?),
+					Some(l) => Some(pp.physical_expr(l.clone()).await?),
 					None => None,
 				},
 				match start.as_ref() {
-					Some(s) => Some(pp.physical_expr(s.0.clone()).await?),
+					Some(s) => Some(pp.physical_expr(s.clone()).await?),
 					None => None,
 				},
 			)
 		} else if can_soft_push_limit {
 			(
 				match limit.as_ref() {
-					Some(l) => Some(pp.physical_expr(l.0.clone()).await?),
+					Some(l) => Some(pp.physical_expr(l.clone()).await?),
 					None => None,
 				},
 				None,
@@ -1285,19 +1072,21 @@ impl<'ctx> Planner<'ctx> {
 		// Keep a clone of the scan predicate so we can reuse it as a
 		// precompiled predicate for the pipeline Filter when the source
 		// does not consume it (FilterAction::UseOriginal). This avoids
-		// compiling the same AST expression into a PhysicalExpr twice.
+		// compiling the same expression into a PhysicalExpr twice.
 		let scan_predicate_for_reuse = scan_predicate.clone();
 
 		// Tell source planning whether the downstream pipeline contains a
 		// bounded top-k sort. Used by UnionIndexScan to skip eager
 		// per-sub-stream prefetch — the heap discards most rows anyway,
 		// so prefetching only wastes memory under high concurrency.
+		let max_priority_queue_size =
+			self.ctx.config.exec.max_order_limit_priority_queue_size as usize;
 		let downstream_topk = is_bounded_topk_downstream(
 			order.as_ref(),
-			&start,
-			&limit,
+			start.as_ref(),
+			limit.as_ref(),
 			tempfiles,
-			self.ctx.config.exec.max_order_limit_priority_queue_size as usize,
+			max_priority_queue_size,
 		);
 
 		// TopK threshold pushdown analysis: when the downstream sort will be
@@ -1308,41 +1097,64 @@ impl<'ctx> Planner<'ctx> {
 		let topk_request = if self.ctx.config.exec.topk_threshold_pushdown_enabled {
 			compute_topk_pushdown_request(
 				order.as_ref(),
-				&start,
-				&limit,
-				&fields,
+				start.as_ref(),
+				limit.as_ref(),
+				fields.as_ref(),
 				tempfiles,
-				split.is_some() || group.is_some() || brute_force_knn.is_some(),
-				self.ctx.config.exec.max_order_limit_priority_queue_size as usize,
+				split.is_some() || group_keys.is_some() || brute_force_knn.is_some(),
+				max_priority_queue_size,
 			)
 		} else {
 			TopKPushdownRequest::NotApplicable
 		};
 
-		// Source resolution with plan-time index analysis.
-		// The result tracks whether the predicate and limit/start were
-		// consumed by the source operator, so we can avoid duplicating
-		// them in the outer pipeline.
-		let source_count = what.len();
-		let mut planned = pp
-			.plan_sources(
-				what,
-				version.clone(),
-				cond_for_index.as_ref(),
-				order.as_ref(),
-				with.as_ref(),
-				needed_fields,
-				scan_predicate,
-				scan_limit,
-				scan_start,
-				// A blocking GROUP BY consumes the whole source stream, so its
-				// LIMIT never terminates the source early and must not
-				// disqualify bitmap fusion.
-				limit.is_some() && group.is_none(),
-				downstream_topk,
-				&topk_request,
-			)
-			.await?;
+		// Source resolution with plan-time index analysis. The result tracks
+		// whether the predicate and limit/start were consumed by the source
+		// operator, so we can avoid duplicating them in the outer pipeline.
+		// A node compiled in place is opaque to the pipeline: nothing it
+		// consumed is recorded, so every clause applies in full above it. The
+		// predicate and ordering are still offered to the access path beneath
+		// a chain of `PermissionFilter` and layer nodes (see
+		// `fold_uncollected`); paging and the top-k threshold are not,
+		// since a row the nodes remove must not have been counted.
+		let source_count = sources.len();
+		// A blocking GROUP BY consumes the whole source stream, so its LIMIT
+		// never terminates the source early and must not disqualify bitmap
+		// fusion.
+		let has_query_limit = limit.is_some() && group_keys.is_none();
+		let mut planned = match node {
+			Some(node) => {
+				pp.fold_uncollected(
+					node,
+					version.clone(),
+					cond_for_index.as_ref(),
+					order.as_ref(),
+					scan_limit,
+					scan_start,
+					limit_hint,
+					has_query_limit,
+					downstream_topk,
+				)
+				.await?
+			}
+			None => {
+				pp.plan_sources(
+					sources,
+					version.clone(),
+					cond_for_index.as_ref(),
+					order.as_ref(),
+					needed_fields,
+					scan_predicate,
+					scan_limit,
+					scan_start,
+					limit_hint,
+					has_query_limit,
+					downstream_topk,
+					&topk_request,
+				)
+				.await?
+			}
+		};
 
 		if can_soft_push_limit {
 			planned.limit_pushed = false;
@@ -1373,17 +1185,18 @@ impl<'ctx> Planner<'ctx> {
 
 		// KNN conjuncts are stripped from `cond_for_filter` on the assumption
 		// a KNN source operator enforces them. When none fired — an
-		// `Approximate` form with no usable HNSW index — restore the full
-		// condition so the conjunct is evaluated per row (as membership in
-		// the empty KNN result set, i.e. `false`), matching the legacy
-		// executor's missing-entry behaviour instead of silently dropping
-		// the conjunct and letting every row through. A multi-source FROM
-		// always restores: a KnnScan in one source's subtree says nothing
-		// about the other sources' rows, which legacy filters out per table
-		// (no executor entry ⇒ false). Membership is stable under
-		// re-evaluation, so restoring over a fired KnnScan is harmless, and
-		// this is also safe for sources that resolve their access path at
-		// run time (`DynamicScan`).
+		// `Approximate` form with no usable HNSW index, or a source the KNN
+		// could not be pushed into — restore the full condition so the
+		// conjunct is evaluated per row (as membership in the empty KNN
+		// result set, i.e. `false`), matching the legacy executor's
+		// missing-entry behaviour instead of silently dropping the conjunct
+		// and letting every row through. A multi-source FROM always
+		// restores: a KnnScan in one source's subtree says nothing about the
+		// other sources' rows, which legacy filters out per table (no
+		// executor entry ⇒ false). Membership is stable under re-evaluation,
+		// so restoring over a fired KnnScan is harmless, and this is also
+		// safe for sources that resolve their access path at run time
+		// (`DynamicScan`).
 		let where_clause = if has_knn
 			&& brute_force_knn.is_none()
 			&& (source_count > 1 || !source_contains_knn(&planned.operator))
@@ -1398,11 +1211,10 @@ impl<'ctx> Planner<'ctx> {
 		// be applied BEFORE ranking by distance. Otherwise rows that don't
 		// satisfy the WHERE clause can consume top-K slots and push out
 		// valid rows.
-		//
 		let (source, where_clause) = if let Some(kp) = brute_force_knn {
 			let input = match &where_clause {
 				WhereClauseState::Original(c) => {
-					let pred = pp.physical_expr(c.0.clone()).await?;
+					let pred = pp.physical_expr(c.clone()).await?;
 					Arc::new(Filter::new(planned.operator, pred)) as Arc<dyn ExecOperator>
 				}
 				WhereClauseState::Precompiled(predicate) => {
@@ -1434,7 +1246,7 @@ impl<'ctx> Planner<'ctx> {
 		let config = SelectPipelineConfig {
 			where_clause,
 			split,
-			group,
+			group: group_keys,
 			order,
 			limit: if planned.limit_pushed {
 				None
@@ -1451,32 +1263,220 @@ impl<'ctx> Planner<'ctx> {
 			topk_pushdown: topk_handle,
 		};
 
-		let projected = pp.plan_pipeline(source, Some(fields), config).await?;
+		let projected = pp.plan_pipeline(source, fields, config).await?;
 		let fetched = pp.plan_fetch(fetch, projected).await?;
-		pp.wrap_select_tail(fetched, timeout, version, only, !is_value_source).await
+		pp.wrap_select_tail(fetched, timeout, version, only).await
 	}
 
-	/// Plan FROM sources with plan-time index resolution.
+	/// Compile the pipeline to one scan when its shape allows (see
+	/// [`fast_path`]). `None` when no fast path applies, or when the one that
+	/// matched finds no index to answer it.
+	async fn compile_fast_path(
+		&self,
+		sources: &[LogicalOp],
+		clauses: &PipelineClauses,
+		version: Option<Arc<dyn PhysicalExpr>>,
+	) -> Result<Option<Arc<dyn ExecOperator>>, Error> {
+		if let Some(compiled) =
+			self.compile_count_fast_path(sources, clauses, version.clone()).await?
+		{
+			return Ok(Some(compiled));
+		}
+
+		// A single key read. The match proved there is no predicate, ordering,
+		// grouping or split, so the projection is the only thing that decides
+		// which fields the scan has to decode.
+		if let Some(SingleRecord {
+			record,
+			for_update,
+		}) = match_single_record(sources, clauses)
+		{
+			return self
+				.compile_single_record(sources, record, for_update, clauses)
+				.await
+				.map(Some);
+		}
+
+		Ok(None)
+	}
+
+	/// The count fast paths: a whole key range or an indexed predicate, each
+	/// answered without materialising a row. The scans they compile to resolve
+	/// the table's `SELECT` permission themselves, which is what lets them
+	/// stand in for a permission node the analyzer placed over the source.
+	async fn compile_count_fast_path(
+		&self,
+		sources: &[LogicalOp],
+		clauses: &PipelineClauses,
+		version: Option<Arc<dyn PhysicalExpr>>,
+	) -> Result<Option<Arc<dyn ExecOperator>>, Error> {
+		// Counting a whole key range: one `txn.count()` replaces the scan, the
+		// aggregation and the projection above it.
+		if let Some(CountAll {
+			source,
+			output,
+		}) = match_count_all(sources, clauses)
+		{
+			use crate::exec::operators::CountScan;
+			// A lightweight relation has no record range to count; a source
+			// resolved when the statement runs is refused by the scan itself.
+			let static_table = match source {
+				SourceRef::Table(table) => Some(table),
+				SourceRef::RecordId(rid) => Some(&rid.table),
+				SourceRef::Mock(_) | SourceRef::Param(_) | SourceRef::Dynamic(_) => None,
+			};
+			if let Some(table) = static_table {
+				self.decline_lightweight_table(table).await?;
+			}
+			let source = self.source_physical_expr(source.clone()).await?;
+			let scan: Arc<dyn ExecOperator> =
+				Arc::new(CountScan::new(source, version.clone(), output));
+			let paged =
+				self.apply_paging(scan, clauses.limit.clone(), clauses.start.clone()).await?;
+			return self
+				.wrap_select_tail(paged, clauses.timeout.clone(), version, clauses.only)
+				.await
+				.map(Some);
+		}
+
+		// Counting an indexed predicate. Eligibility is a shape; whether an
+		// index actually answers the predicate is resolved against the catalog
+		// here, and a plan that finds none falls through to the full pipeline.
+		if let Some(IndexedCountAll {
+			table,
+			cond,
+			with,
+			output,
+		}) = match_indexed_count_all(sources, clauses)
+		{
+			// Never planned for a versioned read, whether the statement wrote
+			// the `VERSION` or a pipeline above it did: a COUNT index's
+			// deltas, a B-tree's entries and the doc-ID mappings a fused
+			// bitmap reads are all current state, with no stamp to read them
+			// at, so an index-assisted count answers for now rather than for
+			// the version asked for. The full pipeline (scan, filter, count)
+			// reads at the stamp and answers instead.
+			let versioned = version.is_some() || self.version.is_some();
+
+			// `WITH NOINDEX` forbids index-assisted execution outright.
+			//
+			// SECURITY: an index-assisted count reads index entries directly,
+			// so it never applies the document-level field reduction that
+			// hides values a non-`Full` SELECT permission withholds. A
+			// predicate over such a field would leak the cardinality of values
+			// the actor may not select, and takes the full pipeline instead.
+			if !versioned
+				&& !matches!(with, Some(With::NoIndex))
+				&& !self.cond_touches_restricted_select_field_for_table(table, cond).await
+			{
+				// A dedicated COUNT index first, then a covering B-tree walk,
+				// then an exact bitmap fusion over several indexes.
+				let has_count_idx = self.has_matching_count_index(table, cond).await;
+				let btree_access = if has_count_idx {
+					None
+				} else {
+					self.resolve_count_btree_access(table, cond, with).await
+				};
+				let bitmap_plan = if !has_count_idx && btree_access.is_none() {
+					self.resolve_count_bitmap_plan(table, cond, with).await
+				} else {
+					None
+				};
+
+				if has_count_idx || btree_access.is_some() || bitmap_plan.is_some() {
+					use crate::exec::operators::scan::index_count::IndexCountScan;
+					let table_expr = self.physical_expr(LogicalExpr::Table(table.clone())).await?;
+					let predicate = self.physical_expr(cond.clone()).await?;
+					let scan: Arc<dyn ExecOperator> = Arc::new(
+						IndexCountScan::new(
+							table_expr,
+							predicate,
+							cond.clone(),
+							version.clone(),
+							output,
+						)
+						.with_btree_access(btree_access)
+						.with_bitmap_plan(bitmap_plan),
+					);
+					let paged = self
+						.apply_paging(scan, clauses.limit.clone(), clauses.start.clone())
+						.await?;
+					return self
+						.wrap_select_tail(paged, clauses.timeout.clone(), version, clauses.only)
+						.await
+						.map(Some);
+				}
+			}
+		}
+
+		Ok(None)
+	}
+
+	/// A single key read: the projection is the only thing that decides which
+	/// fields the scan has to decode, and the match declined a versioned read,
+	/// so there is no version to scope the result to.
+	async fn compile_single_record(
+		&self,
+		sources: &[LogicalOp],
+		record: &LogicalRecordIdLit,
+		for_update: bool,
+		clauses: &PipelineClauses,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		let (fields, omit) = match &clauses.project {
+			Some(ProjectClause {
+				fields,
+				omit,
+			}) => (fields.clone(), omit.clone()),
+			None => (LogicalFields::all(), vec![]),
+		};
+		let needed_fields =
+			Self::extract_needed_fields(Some(&fields), &omit, None, None, None, None);
+		let table = record.table.clone();
+		let rid_expr = self.physical_expr(LogicalExpr::RecordId(Box::new(record.clone()))).await?;
+		let mode = EnforcementMode::of_sources(sources);
+		let resolved_table_ctx = self.try_resolve_table_ctx(&table, mode).await?;
+		let pdf = self.pre_decode_filter_status_for(
+			resolved_table_ctx.as_ref(),
+			None,
+			needed_fields.as_ref(),
+		);
+		let mut scan = RecordIdScan::new(rid_expr, None, needed_fields, None)
+			.with_for_update(for_update)
+			.with_enforcement_mode(mode);
+		if let Some(tc) = resolved_table_ctx {
+			scan = scan.with_resolved(tc);
+		}
+		scan = scan.with_pre_decode_filter(pdf);
+		let paged =
+			self.apply_paging(Arc::new(scan), clauses.limit.clone(), clauses.start.clone()).await?;
+		let projected = self.plan_projections(fields, omit, paged).await?;
+		self.wrap_select_tail(projected, clauses.timeout.clone(), None, clauses.only).await
+	}
+
+	/// Plan the sources of a `FROM` with plan-time index resolution.
+	///
+	/// One source is planned on its own; several are planned one by one and
+	/// concatenated with a `Union`, into which nothing is pushed.
 	///
 	/// `has_query_limit` reports a LIMIT the pipeline can terminate the source
 	/// early on — see [`Self::plan_source`] for the contract.
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn plan_sources(
 		&self,
-		what: Vec<Expr>,
-		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		cond: Option<&Cond>,
-		order: Option<&crate::expr::order::Ordering>,
-		with: Option<&crate::expr::with::With>,
-		needed_fields: Option<std::collections::HashSet<String>>,
-		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		sources: Vec<LogicalOp>,
+		version: Option<Arc<dyn PhysicalExpr>>,
+		cond: Option<&LogicalExpr>,
+		order: Option<&LogicalOrdering>,
+		needed_fields: Option<HashSet<String>>,
+		scan_predicate: Option<Arc<dyn PhysicalExpr>>,
+		scan_limit: Option<Arc<dyn PhysicalExpr>>,
+		scan_start: Option<Arc<dyn PhysicalExpr>>,
+		limit_hint: Option<usize>,
 		has_query_limit: bool,
 		downstream_topk: bool,
 		topk_request: &TopKPushdownRequest,
 	) -> Result<PlannedSource, Error> {
-		if what.is_empty() {
+		if sources.is_empty() {
 			return Err(ExecError::Query {
 				message: "SELECT requires at least one source".to_string(),
 			}
@@ -1487,24 +1487,24 @@ impl<'ctx> Planner<'ctx> {
 		// probe would be misleading in EXPLAIN (its cell can never be
 		// installed — sort planning receives a single handle). Drop the
 		// request before fanning out.
-		let topk_request = if what.len() > 1 {
+		let topk_request = if sources.len() > 1 {
 			&TopKPushdownRequest::NotApplicable
 		} else {
 			topk_request
 		};
-		let mut plans = Vec::with_capacity(what.len());
-		for expr in what {
+		let mut plans = Vec::with_capacity(sources.len());
+		for source in sources {
 			let p = self
 				.plan_source(
-					expr,
+					source,
 					version.clone(),
 					cond,
 					order,
-					with,
 					needed_fields.clone(),
 					scan_predicate.clone(),
 					scan_limit.clone(),
 					scan_start.clone(),
+					limit_hint,
 					has_query_limit,
 					downstream_topk,
 					topk_request,
@@ -1516,40 +1516,40 @@ impl<'ctx> Planner<'ctx> {
 			Ok(plans.pop().expect("verified non-empty"))
 		} else {
 			// Multiple sources are combined via Union; pushdowns are not
-			// applicable because source_is_single_scan is false when
-			// what.len() > 1, so scan_predicate/scan_limit are always None.
+			// applicable because source_is_single_scan is false when there is
+			// more than one source, so scan_predicate/scan_limit are always None.
 			let operators = plans.into_iter().map(|p| p.operator).collect();
-			Ok(PlannedSource {
-				operator: Arc::new(Union::new(operators)),
-				filter_action: FilterAction::UseOriginal,
-				limit_pushed: false,
-				topk_pushdown: None,
-			})
+			Ok(PlannedSource::opaque(Arc::new(Union::new(operators))))
 		}
 	}
 
-	/// Plan a single FROM source.
+	/// Plan a single `FROM` source.
 	///
-	/// When the planner has a transaction and the source is a table,
-	/// resolves the access path at plan time and creates the concrete
-	/// operator (IndexScan, FullTextScan, KnnScan) directly. This
-	/// avoids redundant index analysis at execution time and enables
-	/// sort elimination via `output_ordering()`.
+	/// A `Source` reading a table with a transaction at hand resolves its
+	/// access path at plan time and creates the concrete operator (IndexScan,
+	/// FullTextScan, KnnScan, …) directly, which avoids redundant index
+	/// analysis at execution time and enables sort elimination via
+	/// `output_ordering()`. Without a transaction, a `DynamicScan` resolves
+	/// its access path at execution time. The source's own `WITH` hint and
+	/// `FOR UPDATE` flag are read from the node.
 	///
-	/// Without a transaction, creates a generic `Scan` that resolves
-	/// its access path at execution time.
+	/// A `Values` leaf produces its rows from its expression; a `Subquery` or
+	/// a `Match` is compiled whole. Any other node is compiled in place and is
+	/// opaque: the predicate, ordering and paging stay above it.
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn plan_source(
 		&self,
-		expr: Expr,
-		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		cond: Option<&Cond>,
-		order: Option<&crate::expr::order::Ordering>,
-		with: Option<&crate::expr::with::With>,
-		needed_fields: Option<std::collections::HashSet<String>>,
-		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		source: LogicalOp,
+		version: Option<Arc<dyn PhysicalExpr>>,
+		cond: Option<&LogicalExpr>,
+		order: Option<&LogicalOrdering>,
+		needed_fields: Option<HashSet<String>>,
+		scan_predicate: Option<Arc<dyn PhysicalExpr>>,
+		scan_limit: Option<Arc<dyn PhysicalExpr>>,
+		scan_start: Option<Arc<dyn PhysicalExpr>>,
+		// A per-batch read-size hint for a scan that keeps its `Limit`
+		// operator, set only where the clause is a literal; see the caller.
+		limit_hint: Option<usize>,
 		// Whether the enclosing SELECT carries a LIMIT the pipeline can
 		// terminate the source early on. A LIMIT above a blocking stage
 		// (GROUP BY) consumes the whole stream first and does not count.
@@ -1561,6 +1561,82 @@ impl<'ctx> Planner<'ctx> {
 		downstream_topk: bool,
 		topk_request: &TopKPushdownRequest,
 	) -> Result<PlannedSource, Error> {
+		let (source, mode, with, for_update) = match source {
+			// A resolved schema means the analyzer put the read's permission
+			// and field nodes above this source; the scan then yields rows as
+			// stored and is told so through its resolved table context.
+			LogicalOp::Source(LogicalSource {
+				source,
+				schema,
+				with,
+				for_update,
+			}) => (source, EnforcementMode::for_source(schema.as_ref()), with, for_update),
+			LogicalOp::Values(LogicalValues {
+				expr,
+				for_update,
+			}) => {
+				// A value is not a record: there is nothing to lock.
+				if for_update {
+					return Err(ExecError::Query {
+						message: crate::dbs::FOR_UPDATE_TARGETS_ERROR.to_string(),
+					}
+					.into());
+				}
+				let phys_expr = self.physical_expr(expr).await?;
+				return Ok(PlannedSource::opaque(Arc::new(SourceExpr::new(phys_expr))));
+			}
+			// A relational source is compiled from the plan the passes
+			// produced. The outer predicate, ordering and limit stay outside
+			// it: what the subquery may absorb was already moved in by the
+			// pushdown pass, and what remains outside is what could not
+			// soundly move.
+			LogicalOp::Subquery(LogicalSubquery {
+				input,
+			}) => {
+				if version.is_some() {
+					return Err(ExecError::Query {
+						message: "VERSION clause cannot be used with a subquery source. \
+								  Place the VERSION clause inside the subquery instead."
+							.to_string(),
+					}
+					.into());
+				}
+				return Ok(PlannedSource::opaque(Box::pin(self.fold(*input)).await?));
+			}
+			LogicalOp::Match(LogicalMatch {
+				plan,
+			}) => return Ok(PlannedSource::opaque(Box::pin(self.plan_match(*plan)).await?)),
+			other => {
+				return Box::pin(self.fold_uncollected(
+					other,
+					version,
+					cond,
+					order,
+					scan_limit,
+					scan_start,
+					limit_hint,
+					has_query_limit,
+					downstream_topk,
+				))
+				.await;
+			}
+		};
+		let with = with.as_ref();
+
+		// A call source over statically known arguments names its rows at
+		// plan time: `type::table($name)` with `$name` bound denotes one
+		// table, and planning it as that table gives it the same access-path
+		// selection, limit pushdown and sort elimination as a literal name.
+		// The analyzer attached no schema to such a source, so the scan it
+		// becomes enforces its permissions at runtime. A locked source stays
+		// dynamic: `DynamicScan` performs the locked lookup and rejects every
+		// value shape but a record id.
+		let source = if for_update {
+			source
+		} else {
+			self.resolve_call_source(source)
+		};
+
 		// Optimisation: WHERE id = <RecordId> -> point lookup.
 		// Detects `id = <RecordId literal>` in the top-level AND chain and
 		// converts the table scan into a RecordIdScan, avoiding index
@@ -1569,11 +1645,11 @@ impl<'ctx> Planner<'ctx> {
 		// Skipped when the condition contains a KNN operator, because the
 		// KNN access path (KnnScan / HNSW) must be resolved by
 		// resolve_access_path() to populate KnnContext correctly.
-		if let Expr::Table(ref table_name) = expr
-			&& !cond.is_some_and(|c| has_knn_operator(&c.0))
+		if let SourceRef::Table(ref table_name) = source
+			&& !cond.is_some_and(has_knn_operator)
 			&& let Some(rid_expr) = cond.and_then(|c| {
 				// Normalize projection-function field references like
-				// `type::field("id")` to plain idioms so the record-id point
+				// `type::field("id")` to plain paths so the record-id point
 				// lookup recognizes them, mirroring the index-analyzer rewrite
 				// in `resolve_access_path`. Done on a clone so the residual
 				// `scan_predicate` retains the original expression.
@@ -1584,7 +1660,7 @@ impl<'ctx> Planner<'ctx> {
 			let filter_action = filter_action_for_predicate(&scan_predicate);
 			let record_id_expr = self.physical_expr(rid_expr).await?;
 			let resolved_table_ctx: Option<ResolvedTableContext> =
-				self.try_resolve_table_ctx(table_name).await;
+				self.try_resolve_table_ctx(table_name, mode).await?;
 			let pdf = self.pre_decode_filter_status_for(
 				resolved_table_ctx.as_ref(),
 				scan_predicate.as_ref(),
@@ -1592,7 +1668,8 @@ impl<'ctx> Planner<'ctx> {
 			);
 			let mut scan =
 				RecordIdScan::new(record_id_expr, version, needed_fields, scan_predicate.clone())
-					.with_for_update(self.for_update);
+					.with_for_update(for_update)
+					.with_enforcement_mode(mode);
 			if let Some(tc) = resolved_table_ctx {
 				scan = scan.with_resolved(tc);
 			}
@@ -1607,13 +1684,14 @@ impl<'ctx> Planner<'ctx> {
 
 		// When we have a txn and the source is a table, resolve the
 		// access path and table context at plan time.
-		if let Expr::Table(ref table_name) = expr
+		if let SourceRef::Table(ref table_name) = source
 			&& let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
 		{
-			// Resolve table context (table def + field state) at plan time.
-			// This eliminates runtime KV lookups in the operator's execute().
+			// Resolve table context at plan time, under the mode the source
+			// asks for. This eliminates runtime KV lookups in the operator's
+			// execute().
 			let table_ctx: Option<ResolvedTableContext> =
-				self.try_resolve_table_ctx(table_name).await;
+				self.try_resolve_table_ctx(table_name, mode).await?;
 
 			// SECURITY (value-ordering oracle): resolve once which field paths
 			// on this table carry a non-`Full` SELECT permission for the
@@ -1623,7 +1701,7 @@ impl<'ctx> Planner<'ctx> {
 			// `all_tb_fields` lookup instead of two.
 			let restricted_select = self.resolve_restricted_select_prefixes(table_name).await;
 
-			// If any ORDER BY idiom is governed by a non-`Full` field-level
+			// If any ORDER BY path is governed by a non-`Full` field-level
 			// SELECT permission, withhold the ORDER BY from access-path
 			// selection. Otherwise the planner would pick an index that walks
 			// the restricted field in true value order; the value is later
@@ -1641,12 +1719,15 @@ impl<'ctx> Planner<'ctx> {
 			// over-apply to privileged users the way a conservative plan-time
 			// `AssumeRestricted` would).
 			//
-			// Withholding is tracked separately from absence: a withheld
-			// ORDER BY is still an ordering the statement requires, so the
-			// limit-pushdown decisions below must not read the resulting
-			// `None` as "no ordering to preserve". They take `order_withheld`
-			// and refuse to push, leaving LIMIT/START to the outer operators
-			// above the Sort.
+			// Withholding answers "which access path may be chosen"; it is not
+			// a statement that the query needs no ordering. `order_withheld`
+			// keeps the two apart for the pushdown decisions below, which read
+			// an absent ORDER BY as licence to truncate at the scan. A scan
+			// that truncates to the LIMIT under a withheld ORDER BY hands the
+			// sort above it an already-truncated prefix, and the answer is the
+			// first rows in record-id order rather than the first rows in the
+			// requested order -- wrong for an actor the permission grants,
+			// whose sort keys are fully visible.
 			let (order, order_withheld) = match order {
 				Some(o) if restricted_select.order_touches(o) => (None, true),
 				other => (other, false),
@@ -1690,6 +1771,7 @@ impl<'ctx> Planner<'ctx> {
 								scan_predicate,
 								scan_limit,
 								scan_start,
+								limit_hint,
 								needed_fields,
 								version,
 								table_ctx,
@@ -1750,6 +1832,7 @@ impl<'ctx> Planner<'ctx> {
 								needed_fields,
 								version,
 								table_ctx,
+								mode,
 								topk_request,
 							)
 							.await;
@@ -1764,7 +1847,7 @@ impl<'ctx> Planner<'ctx> {
 								paths,
 								dedupe,
 								order,
-								scan_limit,
+								limit_hint,
 								cond,
 								needed_fields,
 								version,
@@ -1805,75 +1888,51 @@ impl<'ctx> Planner<'ctx> {
 		// Fallback: create the appropriate operator (index resolved at runtime)
 		let knn_ctx = self.knn_context.clone();
 
-		match expr {
-			Expr::Literal(crate::expr::literal::Literal::RecordId(rid)) => {
-				let record_id_expr = self
-					.physical_expr(Expr::Literal(crate::expr::literal::Literal::RecordId(rid)))
-					.await?;
-				Ok(PlannedSource {
-					operator: Arc::new(
-						RecordIdScan::new(record_id_expr, version, needed_fields, None)
-							.with_for_update(self.for_update),
-					) as Arc<dyn ExecOperator>,
-					filter_action: FilterAction::UseOriginal,
-					limit_pushed: false,
-					topk_pushdown: None,
-				})
-			}
-			Expr::Select(inner_select) => {
-				if version.is_some() {
-					return Err(ExecError::Query {
-						message: "VERSION clause cannot be used with a subquery source. \
-								  Place the VERSION clause inside the subquery instead."
-							.to_string(),
-					}
-					.into());
+		// The scans built below resolve their table when they run and enforce
+		// what they find per row. A source the analyzer resolved is enforced
+		// by the plan above it, so such a scan would judge the rows a second
+		// time, beneath the plan's nodes; a record-id source still takes its
+		// mode below, and any other resolved source — one whose access path
+		// the catalog could not choose — declines to the legacy engine.
+		if mode == EnforcementMode::Planned && !matches!(source, SourceRef::RecordId(_)) {
+			return Err(ExecError::PlannerUnsupported(
+				"a resolved source has no plan-time access path".to_owned(),
+			)
+			.into());
+		}
+
+		match source {
+			SourceRef::RecordId(rid) => {
+				let table = rid.table.clone();
+				let record_id_expr = self.physical_expr(LogicalExpr::RecordId(rid)).await?;
+				// A source the analyzer resolved is enforced by the plan; the
+				// scan takes its table context, and its mode for a table the
+				// catalog lacks. An unresolved one resolves its table when it
+				// runs, as of the version it reads at.
+				let resolved = if mode == EnforcementMode::Planned {
+					self.try_resolve_table_ctx(&table, mode).await?
+				} else {
+					None
+				};
+				let mut scan = RecordIdScan::new(record_id_expr, version, needed_fields, None)
+					.with_for_update(for_update)
+					.with_enforcement_mode(mode);
+				if let Some(tc) = resolved {
+					scan = scan.with_resolved(tc);
 				}
-				Ok(PlannedSource {
-					operator: self.plan_select_statement(*inner_select).await?,
-					filter_action: FilterAction::UseOriginal,
-					limit_pushed: false,
-					topk_pushdown: None,
-				})
+				Ok(PlannedSource::opaque(Arc::new(scan)))
 			}
-			// Params that could be resolved were already rewritten to
-			// Expr::Table / Expr::Literal by resolve_source_exprs().
-			// Any remaining Expr::Param is unresolvable at plan time.
-			Expr::Param(_) => {
-				// Under FOR UPDATE the param must resolve to a record id at
-				// execution time; DynamicScan performs the locked lookup and
-				// rejects every other value shape.
-				if self.for_update {
-					return self
-						.plan_dynamic_scan(
-							expr,
-							version,
-							cond,
-							order,
-							with,
-							needed_fields,
-							scan_predicate,
-							scan_limit,
-							scan_start,
-							knn_ctx,
-						)
-						.await;
-				}
-				let phys_expr = self.physical_expr(expr).await?;
-				Ok(PlannedSource {
-					operator: Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>,
-					filter_action: FilterAction::UseOriginal,
-					limit_pushed: false,
-					topk_pushdown: None,
-				})
-			}
-			Expr::Table(_)
-			| Expr::FunctionCall(_)
-			| Expr::Postfix {
-				..
-			} => {
+			// A parameter the passes could not resolve — bound by a `LET` or
+			// `FOR` in the statement's own block, or shadowing a binding of
+			// the enclosing context — is only known when the statement runs.
+			// `DynamicScan` decides by the value it finds: a table is scanned
+			// under its permissions, a record id is looked up (and, under FOR
+			// UPDATE, locked; every other shape is rejected there), an array
+			// yields its elements and any other value is one row.
+			SourceRef::Param(param) => {
 				self.plan_dynamic_scan(
-					expr,
+					LogicalExpr::Param(param),
+					None,
 					version,
 					cond,
 					order,
@@ -1883,17 +1942,58 @@ impl<'ctx> Planner<'ctx> {
 					scan_limit,
 					scan_start,
 					knn_ctx,
+					for_update,
 				)
 				.await
 			}
-			other => {
+			SourceRef::Table(table) => {
+				self.plan_dynamic_scan(
+					LogicalExpr::Table(table.clone()),
+					Some(&table),
+					version,
+					cond,
+					order,
+					with,
+					needed_fields,
+					scan_predicate,
+					scan_limit,
+					scan_start,
+					knn_ctx,
+					for_update,
+				)
+				.await
+			}
+			SourceRef::Dynamic(
+				expr @ (LogicalExpr::Call(_)
+				| LogicalExpr::Postfix {
+					..
+				}
+				| LogicalExpr::Invoke {
+					..
+				}),
+			) => {
+				self.plan_dynamic_scan(
+					expr,
+					None,
+					version,
+					cond,
+					order,
+					with,
+					needed_fields,
+					scan_predicate,
+					scan_limit,
+					scan_start,
+					knn_ctx,
+					for_update,
+				)
+				.await
+			}
+			SourceRef::Dynamic(other) => {
 				let phys_expr = self.physical_expr(other).await?;
-				Ok(PlannedSource {
-					operator: Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>,
-					filter_action: FilterAction::UseOriginal,
-					limit_pushed: false,
-					topk_pushdown: None,
-				})
+				Ok(PlannedSource::opaque(Arc::new(SourceExpr::new(phys_expr))))
+			}
+			SourceRef::Mock(mock) => {
+				Ok(PlannedSource::opaque(Arc::new(SourceExpr::new(Arc::new(MockExpr(mock))))))
 			}
 		}
 	}
@@ -1909,18 +2009,19 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_btree_scan_source(
 		&self,
-		table: surrealdb_strand::TableName,
-		index_ref: crate::exec::index::access_path::IndexRef,
+		table: TableName,
+		index_ref: IndexRef,
 		access: BTreeAccess,
-		direction: crate::kvs::Direction,
-		cond: Option<&Cond>,
-		order: Option<&crate::expr::order::Ordering>,
+		direction: Direction,
+		cond: Option<&LogicalExpr>,
+		order: Option<&LogicalOrdering>,
 		order_withheld: bool,
-		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		needed_fields: Option<std::collections::HashSet<String>>,
-		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		scan_predicate: Option<Arc<dyn PhysicalExpr>>,
+		scan_limit: Option<Arc<dyn PhysicalExpr>>,
+		scan_start: Option<Arc<dyn PhysicalExpr>>,
+		limit_hint: Option<usize>,
+		needed_fields: Option<HashSet<String>>,
+		version: Option<Arc<dyn PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
 	) -> Result<PlannedSource, Error> {
 		use crate::exec::operators::IndexScan;
@@ -1944,11 +2045,9 @@ impl<'ctx> Planner<'ctx> {
 		// would make the scan return fewer rows than needed because the
 		// post-filter may remove some of them.
 		//
-		// A withheld ORDER BY (see the security guard in `plan_source`) is
-		// never covered: the ordering the statement requires is still
-		// outstanding, so LIMIT/START must stay above the Sort. `order` is
-		// `None` here precisely because it was withheld, and `is_none_or`
-		// would otherwise read that as "nothing to order by".
+		// `order_withheld` says an ORDER BY was taken away from access-path
+		// selection for confidentiality. The index was then chosen without it
+		// and says nothing about it, so the ordering is not covered.
 		let order_covered = || {
 			!order_withheld
 				&& order
@@ -1964,11 +2063,15 @@ impl<'ctx> Planner<'ctx> {
 		// LIMIT pushdown. Move it once instead of cloning.
 		let (idx_limit, idx_start, limit_pushed, batch_ceiling) = if push {
 			(scan_limit, scan_start, true, None)
-		} else if let Some(sl) = scan_limit
+		} else if scan_limit.is_some()
 			&& matches!(filter_action, FilterAction::Residual(_))
 			&& order_covered()
 		{
-			(None, None, false, Some(sl))
+			// The ceiling is a plan-time number, never the compiled LIMIT: the
+			// `Limit` operator above this scan evaluates the statement's
+			// clause, and a second evaluation here would run it twice. A
+			// clause that is not a literal simply yields no hint.
+			(None, None, false, limit_hint)
 		} else {
 			(None, None, false, None)
 		};
@@ -2009,13 +2112,13 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_fulltext_search_source(
 		&self,
-		table: surrealdb_strand::TableName,
-		index_ref: crate::exec::index::access_path::IndexRef,
+		table: TableName,
+		index_ref: IndexRef,
 		query: String,
 		operator: crate::expr::operator::MatchesOperator,
-		cond: Option<&Cond>,
-		needed_fields: Option<std::collections::HashSet<String>>,
-		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		cond: Option<&LogicalExpr>,
+		needed_fields: Option<HashSet<String>>,
+		version: Option<Arc<dyn PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
 	) -> Result<PlannedSource, Error> {
 		use crate::exec::operators::FullTextScan;
@@ -2048,15 +2151,15 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_knn_search_source(
 		&self,
-		table: surrealdb_strand::TableName,
-		index_ref: crate::exec::index::access_path::IndexRef,
+		table: TableName,
+		index_ref: IndexRef,
 		vector: Vec<crate::val::Number>,
 		k: u32,
 		ef: u32,
 		prefilter: Option<KnnPrefilterPlan>,
-		cond: Option<&Cond>,
-		needed_fields: Option<std::collections::HashSet<String>>,
-		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		cond: Option<&LogicalExpr>,
+		needed_fields: Option<HashSet<String>>,
+		version: Option<Arc<dyn PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
 		knn_ctx: Option<Arc<crate::exec::function::KnnContext>>,
 	) -> Result<PlannedSource, Error> {
@@ -2067,25 +2170,25 @@ impl<'ctx> Planner<'ctx> {
 		// to `false` and would reject every candidate). The outer Filter
 		// (`FilterAction::UseOriginal`) enforces them through their physical
 		// operator instead.
-		let residual_cond = cond.and_then(strip_knn_and_matches_from_condition);
-		// #548: compile the plan-level prefilter into its operator-side form —
+		let residual_cond = match cond.and_then(strip_knn_and_matches_from_condition) {
+			Some(c) => Some(self.physical_expr(c).await?),
+			None => None,
+		};
+		// The plan-level prefilter is compiled into its operator-side form —
 		// the bitmap node tree evaluated at execute time, plus the true
-		// residual both as a `Cond` (for the in-traversal filter) and as a
-		// physical expression (for the graph-free exact tier).
-		// Compiled for a legacy index — which can never use the bitmap
-		// prefilter — and for any index whose KNN-stripped condition contains
-		// a MATCHES the prefilter may fail to cover: one served by a legacy
-		// (not bitmap-capable) full-text index, or an allow-list build that
-		// exceeds its runtime budget.
-		let stripped_cond =
-			cond.as_ref().and_then(|c| crate::exec::planner::util::strip_knn_from_condition(c));
+		// residual compiled once for the in-traversal filter and the
+		// graph-free exact tier.
+		// The MATCHES-aware condition is compiled for a legacy index — which
+		// can never use the bitmap prefilter — and for any index whose
+		// KNN-stripped condition contains a MATCHES the prefilter may fail to
+		// cover: one served by a legacy (not bitmap-capable) full-text index,
+		// or an allow-list build that exceeds its runtime budget.
+		let stripped_cond = cond.and_then(strip_knn_from_condition);
 		let needs_matches_condition = !index_ref.definition().uses_shared_doc_ids()
-			|| stripped_cond.as_ref().is_some_and(|c| {
-				crate::exec::index::analysis::IndexAnalyzer::expr_contains_matches(&c.0)
-			});
+			|| stripped_cond.as_ref().is_some_and(expr_contains_matches);
 		let matches_condition = if needs_matches_condition {
 			match stripped_cond {
-				Some(c) => Some(self.physical_expr(c.0.clone()).await?),
+				Some(c) => Some(self.physical_expr(c).await?),
 				None => None,
 			}
 		} else {
@@ -2093,16 +2196,15 @@ impl<'ctx> Planner<'ctx> {
 		};
 		let prefilter = match prefilter {
 			Some(p) => {
-				let residual_phys = match &p.residual {
-					Some(c) => Some(self.physical_expr(c.0.clone()).await?),
+				let residual = match p.residual {
+					Some(c) => Some(self.physical_expr(c).await?),
 					None => None,
 				};
 				let node = bitmap_plan_to_node(p.root);
 				Some(KnnPrefilter {
 					node_dyn: Arc::clone(&node) as Arc<dyn ExecOperator>,
 					node,
-					residual: p.residual,
-					residual_phys,
+					residual,
 					uncovered_matches: p.uncovered_matches,
 				})
 			}
@@ -2122,14 +2224,9 @@ impl<'ctx> Planner<'ctx> {
 		)
 		.with_matches_condition(matches_condition);
 		if let Some(tc) = table_ctx {
-			scan = scan.with_resolved(tc);
+			scan = scan.with_resolved(tc.with_candidate_guard(self).await?);
 		}
-		Ok(PlannedSource {
-			operator: Arc::new(scan) as Arc<dyn ExecOperator>,
-			filter_action: FilterAction::UseOriginal,
-			limit_pushed: false,
-			topk_pushdown: None,
-		})
+		Ok(PlannedSource::opaque(Arc::new(scan)))
 	}
 
 	/// Build a `BitmapResolve` for [`AccessPath::BitmapFusion`].
@@ -2150,13 +2247,13 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_bitmap_fusion_source(
 		&self,
-		table: surrealdb_strand::TableName,
+		table: TableName,
 		root: BitmapPlan,
 		fallback: Option<Box<AccessPath>>,
-		order: Option<&crate::expr::order::Ordering>,
-		cond: Option<&Cond>,
-		needed_fields: Option<std::collections::HashSet<String>>,
-		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		order: Option<&LogicalOrdering>,
+		cond: Option<&LogicalExpr>,
+		needed_fields: Option<HashSet<String>>,
+		version: Option<Arc<dyn PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
 		knn_ctx: Option<Arc<crate::exec::function::KnnContext>>,
 		downstream_topk: bool,
@@ -2210,12 +2307,7 @@ impl<'ctx> Planner<'ctx> {
 		if let Some(tc) = table_ctx {
 			scan = scan.with_resolved(tc);
 		}
-		Ok(PlannedSource {
-			operator: Arc::new(scan) as Arc<dyn ExecOperator>,
-			filter_action: FilterAction::UseOriginal,
-			limit_pushed: false,
-			topk_pushdown: None,
-		})
+		Ok(PlannedSource::opaque(Arc::new(scan)))
 	}
 
 	/// Build a `EmptyScan` for [`AccessPath::EmptyScan`] — used when the
@@ -2240,16 +2332,17 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_table_scan_source(
 		&self,
-		table: surrealdb_strand::TableName,
-		direction: crate::kvs::Direction,
-		order: Option<&crate::expr::order::Ordering>,
+		table: TableName,
+		direction: Direction,
+		order: Option<&LogicalOrdering>,
 		order_withheld: bool,
-		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		needed_fields: Option<std::collections::HashSet<String>>,
-		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		scan_predicate: Option<Arc<dyn PhysicalExpr>>,
+		scan_limit: Option<Arc<dyn PhysicalExpr>>,
+		scan_start: Option<Arc<dyn PhysicalExpr>>,
+		needed_fields: Option<HashSet<String>>,
+		version: Option<Arc<dyn PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
+		mode: EnforcementMode,
 		topk_request: &TopKPushdownRequest,
 	) -> Result<PlannedSource, Error> {
 		use crate::exec::topk_pushdown::{
@@ -2271,11 +2364,9 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		let filter_action = filter_action_for_predicate(&scan_predicate);
-		// A withheld ORDER BY (see the security guard in `plan_source`) leaves
-		// `order` as `None`, which `order_is_scan_compatible` reads as "the
-		// scan order already satisfies the statement". It does not: the
-		// ordering is still outstanding and the Sort above this scan needs
-		// every row, so LIMIT/START stay with the outer operators.
+		// A withheld ORDER BY is an ordering the scan does not produce, not an
+		// absent one: reading it as absent would truncate the scan to the LIMIT
+		// and leave the sort above with the wrong rows.
 		let push = scan_limit.is_some() && !order_withheld && order_is_scan_compatible(order);
 		let (tbl_limit, tbl_start, limit_pushed) = if push {
 			(scan_limit, scan_start, true)
@@ -2315,10 +2406,9 @@ impl<'ctx> Planner<'ctx> {
 							Arc::clone(&cell),
 							self.ctx.config.exec.idiom_recursion_limit,
 						));
-						let status = topk_pushdown_status_at_plan_time(
-							probe,
-							table_ctx.as_ref().map(|tc| tc.field_state.as_ref()),
-						);
+						let full_state = table_ctx.as_ref().map(|tc| tc.field_state());
+						let status =
+							topk_pushdown_status_at_plan_time(probe, full_state.as_deref());
 						let handle = matches!(
 							status,
 							TopKPushdownStatus::Active(_) | TopKPushdownStatus::Deferred(_)
@@ -2341,7 +2431,8 @@ impl<'ctx> Planner<'ctx> {
 			tbl_limit,
 			tbl_start,
 			needed_fields,
-		);
+		)
+		.with_enforcement_mode(mode);
 		if let Some(tc) = table_ctx {
 			scan = scan.with_resolved(tc);
 		}
@@ -2368,14 +2459,14 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_union_index_source(
 		&self,
-		table: surrealdb_strand::TableName,
+		table: TableName,
 		paths: Vec<AccessPath>,
 		dedupe: bool,
-		order: Option<&crate::expr::order::Ordering>,
-		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		cond: Option<&Cond>,
-		needed_fields: Option<std::collections::HashSet<String>>,
-		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		order: Option<&LogicalOrdering>,
+		limit_hint: Option<usize>,
+		cond: Option<&LogicalExpr>,
+		needed_fields: Option<HashSet<String>>,
+		version: Option<Arc<dyn PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
 		knn_ctx: Option<Arc<crate::exec::function::KnnContext>>,
 		downstream_topk: bool,
@@ -2414,8 +2505,8 @@ impl<'ctx> Planner<'ctx> {
 		// already sorted by the suffix column in the merge's direction.
 		let paths = if let Some((_, dir)) = &merge_by_index_key {
 			let target = match dir {
-				SortDirection::Asc => crate::kvs::Direction::Forward,
-				SortDirection::Desc => crate::kvs::Direction::Backward,
+				SortDirection::Asc => Direction::Forward,
+				SortDirection::Desc => Direction::Backward,
 			};
 			paths
 				.into_iter()
@@ -2442,12 +2533,15 @@ impl<'ctx> Planner<'ctx> {
 		// row's field equals at most one literal). Drives the merge
 		// variant choice below.
 
-		// When merge mode is active and a downstream LIMIT exists, pass
-		// it as a batch-ceiling hint to each sub-scan so the merge
-		// terminates quickly.
+		// When merge mode is active and a downstream LIMIT exists, pass it as
+		// a batch-ceiling hint to each sub-scan so the merge terminates
+		// quickly. The hint is a plan-time number, never the compiled LIMIT:
+		// the union keeps `limit_pushed` false and so retains the outer
+		// `Limit`, which evaluates the statement's clause itself — passing the
+		// expression down would run it once per sub-scan as well.
 		let merge_active = merge_dir.is_some() || merge_by_index_key.is_some();
 		let merge_batch_ceiling = if merge_active {
-			scan_limit
+			limit_hint
 		} else {
 			None
 		};
@@ -2461,8 +2555,7 @@ impl<'ctx> Planner<'ctx> {
 		// covered, the residual Filter goes away and LIMIT can be
 		// pushed into the sub-scans (when merge is active).
 		// CONTAINSALL / ALLINSIDE leaves are NOT stripped (intersection
-		// semantics; see `strip_union_index_conditions` rustdoc and
-		// issue #236).
+		// semantics; see `strip_union_index_conditions` rustdoc).
 		//
 		// SECURITY: stripping is also disabled when the WHERE clause
 		// references a field whose SELECT permission is not `Full`.
@@ -2493,15 +2586,18 @@ impl<'ctx> Planner<'ctx> {
 
 		let mut sub_operators: Vec<Arc<dyn ExecOperator>> = Vec::with_capacity(paths.len());
 		for path in paths {
-			sub_operators.push(self.build_union_sub_operator(
-				path,
-				&table,
-				cond,
-				version.as_ref(),
-				table_ctx.as_ref(),
-				knn_ctx.as_ref(),
-				merge_batch_ceiling.as_ref(),
-			)?);
+			sub_operators.push(
+				self.build_union_sub_operator(
+					path,
+					&table,
+					cond,
+					version.as_ref(),
+					table_ctx.as_ref(),
+					knn_ctx.as_ref(),
+					merge_batch_ceiling,
+				)
+				.await?,
+			);
 		}
 
 		// UnionIndexScan handles field-level permissions and computed-field
@@ -2552,15 +2648,15 @@ impl<'ctx> Planner<'ctx> {
 	/// and surfaces as `EngineError::Internal` rather than silently returning a
 	/// full table scan.
 	#[allow(clippy::too_many_arguments)]
-	fn build_union_sub_operator(
+	async fn build_union_sub_operator(
 		&self,
 		path: AccessPath,
-		table: &surrealdb_strand::TableName,
-		cond: Option<&Cond>,
-		version: Option<&Arc<dyn crate::exec::PhysicalExpr>>,
+		table: &TableName,
+		cond: Option<&LogicalExpr>,
+		version: Option<&Arc<dyn PhysicalExpr>>,
 		table_ctx: Option<&ResolvedTableContext>,
 		knn_ctx: Option<&Arc<crate::exec::function::KnnContext>>,
-		merge_batch_ceiling: Option<&Arc<dyn crate::exec::PhysicalExpr>>,
+		merge_batch_ceiling: Option<usize>,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		use crate::exec::operators::{FullTextScan, IndexScan, KnnScan};
 
@@ -2581,8 +2677,8 @@ impl<'ctx> Planner<'ctx> {
 					None,
 					None,
 				);
-				if let Some(ceiling) = merge_batch_ceiling {
-					scan = scan.with_batch_ceiling(Some(Arc::clone(ceiling)));
+				if merge_batch_ceiling.is_some() {
+					scan = scan.with_batch_ceiling(merge_batch_ceiling);
 				}
 				if let Some(tc) = table_ctx {
 					scan = scan.with_resolved(tc.clone());
@@ -2612,11 +2708,14 @@ impl<'ctx> Planner<'ctx> {
 				vector,
 				k,
 				ef,
-				// Union branches carry no prefilter in v1: a branch is a
-				// single predicate, so there is nothing to cover.
+				// Union branches carry no prefilter: a branch is a single
+				// predicate, so there is nothing to cover.
 				prefilter: _,
 			} => {
-				let residual_cond = cond.and_then(strip_knn_and_matches_from_condition);
+				let residual_cond = match cond.and_then(strip_knn_and_matches_from_condition) {
+					Some(c) => Some(self.physical_expr(c).await?),
+					None => None,
+				};
 				let mut scan = KnnScan::new(
 					index_ref,
 					vector,
@@ -2630,7 +2729,7 @@ impl<'ctx> Planner<'ctx> {
 					None,
 				);
 				if let Some(tc) = table_ctx {
-					scan = scan.with_resolved(tc.clone());
+					scan = scan.with_resolved(tc.clone().with_candidate_guard(self).await?);
 				}
 				Ok(Arc::new(scan))
 			}
@@ -2654,23 +2753,27 @@ impl<'ctx> Planner<'ctx> {
 
 	/// Plan a `DynamicScan` source that resolves its access path at runtime.
 	///
-	/// Used for `FROM type::table(...)`, `FROM $param` (when the param holds a
-	/// table), and the `FROM tablename` fallback when plan-time catalog context
-	/// is unavailable. Handles filter-action, limit pushdown with ORDER BY
-	/// compatibility, and KNN context in a single place.
+	/// Used for `FROM type::table(...)`, `FROM $param` under `FOR UPDATE`,
+	/// and the `FROM tablename` fallback when plan-time catalog context is
+	/// unavailable. `table` names the table when the source is one, so its
+	/// context can still be resolved for the pre-decode filter. Handles
+	/// filter-action, limit pushdown with ORDER BY compatibility, and KNN
+	/// context in a single place.
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_dynamic_scan(
 		&self,
-		expr: Expr,
-		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		cond: Option<&Cond>,
-		order: Option<&crate::expr::order::Ordering>,
-		with: Option<&crate::expr::with::With>,
-		needed_fields: Option<std::collections::HashSet<String>>,
-		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		expr: LogicalExpr,
+		table: Option<&TableName>,
+		version: Option<Arc<dyn PhysicalExpr>>,
+		cond: Option<&LogicalExpr>,
+		order: Option<&LogicalOrdering>,
+		with: Option<&With>,
+		needed_fields: Option<HashSet<String>>,
+		scan_predicate: Option<Arc<dyn PhysicalExpr>>,
+		scan_limit: Option<Arc<dyn PhysicalExpr>>,
+		scan_start: Option<Arc<dyn PhysicalExpr>>,
 		knn_ctx: Option<Arc<crate::exec::function::KnnContext>>,
+		for_update: bool,
 	) -> Result<PlannedSource, Error> {
 		let filter_action = filter_action_for_predicate(&scan_predicate);
 		let push = scan_limit.is_some() && order_is_scan_compatible(order);
@@ -2679,12 +2782,15 @@ impl<'ctx> Planner<'ctx> {
 		} else {
 			(None, None, false)
 		};
-		let resolved_table_ctx: Option<ResolvedTableContext> =
-			if let Expr::Table(table_name) = &expr {
-				self.try_resolve_table_ctx(table_name).await
-			} else {
-				None
-			};
+		// `DynamicScan` enforces at runtime whatever the source asked for, so
+		// the pre-decode filter is judged against the field state it will run
+		// with.
+		let resolved_table_ctx: Option<ResolvedTableContext> = match table {
+			Some(table_name) => {
+				self.try_resolve_table_ctx(table_name, EnforcementMode::Runtime).await?
+			}
+			None => None,
+		};
 		let source_expr = self.physical_expr(expr).await?;
 		let pdf = self.pre_decode_filter_status_for(
 			resolved_table_ctx.as_ref(),
@@ -2706,7 +2812,7 @@ impl<'ctx> Planner<'ctx> {
 				)
 				.with_knn_context(knn_ctx)
 				.with_pre_decode_filter(pdf)
-				.with_for_update(self.for_update),
+				.with_for_update(for_update),
 			) as Arc<dyn ExecOperator>,
 			filter_action,
 			limit_pushed,
@@ -2723,8 +2829,8 @@ impl<'ctx> Planner<'ctx> {
 	fn pre_decode_filter_status_for(
 		&self,
 		table_ctx: Option<&ResolvedTableContext>,
-		predicate: Option<&Arc<dyn crate::exec::PhysicalExpr>>,
-		needed_fields: Option<&std::collections::HashSet<String>>,
+		predicate: Option<&Arc<dyn PhysicalExpr>>,
+		needed_fields: Option<&HashSet<String>>,
 	) -> crate::exec::pre_decode_filter::PreDecodeFilterStatus {
 		let projected = table_ctx.map(|tc| tc.field_state_for_projection(needed_fields));
 		// `idiom_recursion_limit` is shared with the SurrealQL `RECURSE` /
@@ -2738,69 +2844,129 @@ impl<'ctx> Planner<'ctx> {
 		)
 	}
 
-	/// Try to resolve a `ResolvedTableContext` for the given table.
+	/// The table or record a call source denotes, when that is known at plan
+	/// time; any other source is returned unchanged.
 	///
-	/// Returns `None` if namespace/database lookup fails or the table doesn't
-	/// exist. Errors in field state resolution are silently ignored (the
-	/// operator will fall back to runtime resolution). Catalog-lookup failures
-	/// are logged at debug level so the silent fallback is observable.
-	async fn try_resolve_table_ctx(&self, table_name: &TableName) -> Option<ResolvedTableContext> {
-		let ns = self.ns()?;
-		let db = self.db()?;
+	/// The call is folded under the constant-folding rule: a pure,
+	/// deterministic, synchronous built-in the caller's capabilities permit,
+	/// over literal arguments. A denied call stays a call and fails at
+	/// evaluation with the error the unfolded path raises. A result that is
+	/// neither a table nor a record id (an array of values, a string) stays a
+	/// dynamic source whose rows the call yields when the statement runs.
+	fn resolve_call_source(&self, source: SourceRef) -> SourceRef {
+		let SourceRef::Dynamic(mut expr @ LogicalExpr::Call(_)) = source else {
+			return source;
+		};
+		let capabilities = self.ctx.get_capabilities();
+		fold_condition_expressions(&mut expr, self.function_registry(), &capabilities, None);
+		match expr {
+			folded @ (LogicalExpr::Table(_) | LogicalExpr::RecordId(_)) => {
+				SourceRef::classify(folded)
+			}
+			other => SourceRef::Dynamic(other),
+		}
+	}
+
+	/// Resolve a [`ResolvedTableContext`] for `table_name`, planned under
+	/// `mode` and read as of the planner's [`PlanTimeVersion`].
+	///
+	/// [`EnforcementMode::Runtime`] is for a source the analyzer did not
+	/// resolve: the scan enforces per row, and a context spares it catalog
+	/// reads without deciding anything, so every decline — no database
+	/// selected, a plan-time cycle, a catalog error, a table not in the
+	/// catalog, a `VERSION` only the runtime can evaluate — is `Ok(None)`, and
+	/// the scan resolves its table when it runs, at the stamp it reads at.
+	///
+	/// [`EnforcementMode::Planned`] is for a source the analyzer resolved,
+	/// whose permission and field nodes stand above the scan in the plan. Such
+	/// a scan must yield rows as stored, which it does only with a context
+	/// telling it so; built without one it would enforce at runtime beneath
+	/// the plan's own nodes, and a checked caller would have its rows judged
+	/// twice — a field guard against an already-cut row. So under `Planned`
+	/// every decline is [`ExecError::PlannerUnsupported`], and the statement
+	/// runs on the legacy engine.
+	async fn try_resolve_table_ctx(
+		&self,
+		table_name: &TableName,
+		mode: EnforcementMode,
+	) -> Result<Option<ResolvedTableContext>, Error> {
+		match self.resolve_table_ctx(table_name, mode).await {
+			Ok(ctx) => Ok(ctx),
+			Err(reason) => match mode {
+				EnforcementMode::Runtime => Ok(None),
+				EnforcementMode::Planned => Err(ExecError::PlannerUnsupported(format!(
+					"the resolved source `{table_name}` has no plan-time table context: {reason}"
+				))
+				.into()),
+			},
+		}
+	}
+
+	/// The context [`Self::try_resolve_table_ctx`] resolves — `None` for a
+	/// table the catalog lacks at the plan-time version, which the scan then
+	/// resolves when it runs — or the reason none can be: no catalog to read,
+	/// a `VERSION` only known at runtime, a plan-time cycle, a failed read. A
+	/// failed catalog read is logged here, once, whichever mode asked.
+	async fn resolve_table_ctx(
+		&self,
+		table_name: &TableName,
+		mode: EnforcementMode,
+	) -> Result<Option<ResolvedTableContext>, String> {
+		let (Some(ns), Some(db)) = (self.ns(), self.db()) else {
+			return Err("no database is selected".to_owned());
+		};
 		// Single cached catalog read for (ns_id, db_id); `ns_db_ids`
 		// memoises across `resolve_param`, plan-time predicate folding,
 		// and the per-source resolution path that this function backs.
-		let (ns_id, db_id) = self.ns_db_ids().await?;
-
-		// Cycle check: if this table is already being resolved on a parent
-		// stack frame (typically a self-referential permission predicate
-		// like `WHERE (SELECT FROM same_table) != NONE`), fall back to
-		// runtime resolution for this subtree. The entry's `Drop` impl
-		// pops the table when this function returns.
-		let _entry = match self.cycle_guard().try_enter(ns_id, db_id, table_name.clone()) {
-			Some(e) => e,
-			None => {
-				tracing::debug!(
-					ns = %ns,
-					db = %db,
-					table = %table_name,
-					"plan-time cycle detected; falling back to runtime resolution",
-				);
-				return None;
+		let Some((ns_id, db_id)) = self.ns_db_ids().await else {
+			return Err("the namespace or database is not in the catalog".to_owned());
+		};
+		let version = match self.plan_time_version {
+			PlanTimeVersion::Current => None,
+			PlanTimeVersion::At(stamp) => Some(stamp),
+			PlanTimeVersion::Unknown => {
+				return Err("the VERSION is only known when the statement runs".to_owned());
 			}
 		};
 
-		match resolve_table_context(self, ns, db, ns_id, db_id, table_name).await {
-			Ok(opt) => opt,
+		// Cycle check: if this table is already being resolved on a parent
+		// stack frame (typically a self-referential permission predicate
+		// like `WHERE (SELECT FROM same_table) != NONE`), the subtree is left
+		// to the runtime. The entry's `Drop` impl pops the table when this
+		// function returns.
+		let Some(_entry) = self.cycle_guard().try_enter(ns_id, db_id, table_name.clone()) else {
+			tracing::debug!(
+				ns = %ns,
+				db = %db,
+				table = %table_name,
+				"plan-time cycle detected; the table context is not resolved",
+			);
+			return Err("the table is being resolved by an enclosing frame".to_owned());
+		};
+
+		match resolve_table_context(self, ns, db, ns_id, db_id, table_name, mode, version).await {
+			Ok(ctx) => Ok(ctx),
 			Err(e) => {
 				tracing::warn!(
 					ns = %ns,
 					db = %db,
 					table = %table_name,
 					error = %e,
-					"plan-time table-context resolution failed; falling back to runtime",
+					"plan-time table-context resolution failed",
 				);
-				None
+				Err(format!("the catalog could not be read: {e}"))
 			}
 		}
 	}
 
 	/// Check at plan time whether a matching COUNT index exists for the query.
 	///
-	/// Returns `true` when:
-	/// - Plan-time catalog access is available (txn, ns, db)
-	/// - The source is a single table
-	/// - The table has a `DEFINE INDEX ... COUNT WHERE <cond>` whose condition matches the query's
-	///   WHERE clause
-	async fn has_matching_count_index(&self, what: &[Expr], cond: &Option<Cond>) -> bool {
-		let table_name = match what.first() {
-			Some(Expr::Table(t)) => t,
-			_ => return false,
-		};
-		let cond = match cond {
-			Some(c) => c,
-			None => return false,
-		};
+	/// Returns `true` when plan-time catalog access is available (txn, ns, db)
+	/// and `table_name` has an online `DEFINE INDEX ... COUNT WHERE <cond>`
+	/// whose condition is the same predicate as `cond`. The index's condition
+	/// is held in expression form and the query's in logical form; both
+	/// render as the same SurrealQL, so the comparison is on the rendering.
+	async fn has_matching_count_index(&self, table_name: &TableName, cond: &LogicalExpr) -> bool {
 		let Some(txn) = self.txn.as_ref() else {
 			return false;
 		};
@@ -2823,25 +2989,16 @@ impl<'ctx> Planner<'ctx> {
 		let Ok(indexes) = filter_online_indexes(txn, ns_id, db_id, indexes).await else {
 			return false;
 		};
-		// The index's pre-parsed guard condition must match the query's WHERE
-		// clause structurally for the fast path to be used.
+		let cond_sql = cond.to_sql();
 		indexes.iter().any(|ix| {
-			matches!(&ix.index, Index::Count(Some(_))) && ix.count_cond.as_ref() == Some(cond)
+			matches!(&ix.index, Index::Count(Some(_)))
+				&& ix.count_cond.as_ref().is_some_and(|c| c.0.to_sql() == cond_sql)
 		})
 	}
 
 	/// Returns true when permissions are being enforced for this plan AND
-	/// the WHERE clause references a field whose SELECT permission on the
-	/// target table is not `Full`.
-	///
-	/// Thin convenience wrapper for the indexed COUNT fast-path call site,
-	/// which already has `(&[Expr], &Option<Cond>)` on hand: it extracts
-	/// the target `TableName` from `what`, short-circuits on `None`
-	/// conditions or non-table sources, then delegates to
-	/// [`Self::cond_touches_restricted_select_field_for_table`]. Other
-	/// call sites (e.g. the `UnionIndexScan` planner) that already hold a
-	/// resolved `TableName` and `Cond` should call the `_for_table`
-	/// helper directly.
+	/// `cond` references a field whose SELECT permission on `table_name` is
+	/// not `Full`.
 	///
 	/// The indexed COUNT fast paths (`IndexCountScan` over a dedicated
 	/// `Index::Count` or a covering B-tree index) count index entries
@@ -2849,24 +3006,8 @@ impl<'ctx> Planner<'ctx> {
 	/// SELECT permissions. If the predicate references a restricted field,
 	/// returning the materialised count leaks the cardinality of values the
 	/// current user is not permitted to read.
-	async fn cond_touches_restricted_select_field(
-		&self,
-		what: &[Expr],
-		cond: &Option<Cond>,
-	) -> bool {
-		let Some(cond) = cond else {
-			return false;
-		};
-		let table_name = match what.first() {
-			Some(Expr::Table(t)) => t,
-			_ => return false,
-		};
-		self.cond_touches_restricted_select_field_for_table(table_name, cond).await
-	}
-
-	/// Core of [`Self::cond_touches_restricted_select_field`] that operates
-	/// on an already-resolved table name and condition. The `UnionIndexScan`
-	/// planner makes the equivalent decision (whether
+	///
+	/// The `UnionIndexScan` planner makes the equivalent decision (whether
 	/// `strip_union_index_conditions` is safe — the union sub-operators
 	/// don't re-evaluate the WHERE leaf after field-level permissions, so
 	/// stripping a leaf on a restricted field would turn the index entries
@@ -2876,7 +3017,7 @@ impl<'ctx> Planner<'ctx> {
 	async fn cond_touches_restricted_select_field_for_table(
 		&self,
 		table_name: &TableName,
-		cond: &Cond,
+		cond: &LogicalExpr,
 	) -> bool {
 		self.resolve_restricted_select_prefixes(table_name).await.cond_touches(cond)
 	}
@@ -2915,12 +3056,19 @@ impl<'ctx> Planner<'ctx> {
 				return RestrictedPrefixes::AssumeRestricted;
 			}
 		};
-		// Collect the field paths that are not unconditionally SELECT-able.
-		let restricted_prefixes: Vec<crate::expr::Idiom> = fields
+		// Collect the field paths that are not unconditionally SELECT-able. A
+		// declared name that is not a field path names no position a read can
+		// be matched against, so restriction is assumed rather than missed.
+		let mut restricted_prefixes = Vec::new();
+		for f in fields
 			.iter()
 			.filter(|f| !matches!(f.select_permission, crate::catalog::Permission::Full))
-			.map(|f| f.name.clone())
-			.collect();
+		{
+			match crate::expr::logical::FieldPath::from_idiom(&f.name) {
+				Some(path) => restricted_prefixes.push(path),
+				None => return RestrictedPrefixes::AssumeRestricted,
+			}
+		}
 		if restricted_prefixes.is_empty() {
 			RestrictedPrefixes::None
 		} else {
@@ -2935,16 +3083,11 @@ impl<'ctx> Planner<'ctx> {
 	/// instead of deserializing records.
 	async fn resolve_count_btree_access(
 		&self,
-		what: &[Expr],
-		cond: &Option<Cond>,
+		table_name: &TableName,
+		cond: &LogicalExpr,
 		with: Option<&With>,
 	) -> Option<(IndexRef, BTreeAccess)> {
 		let txn = self.txn.as_ref()?;
-		let table_name = match what.first() {
-			Some(Expr::Table(t)) => t,
-			_ => return None,
-		};
-		let cond = cond.as_ref()?;
 
 		let (ns_id, db_id) = self.ns_db_ids().await?;
 		let indexes = match txn.all_tb_indexes(ns_id, db_id, table_name, None).await {
@@ -2985,10 +3128,10 @@ impl<'ctx> Planner<'ctx> {
 		None
 	}
 
-	/// Resolve an exact bitmap fusion plan for an index-only COUNT
-	/// (issue #547): an AND of two or more index-backed predicates whose
-	/// every conjunct is exactly represented by a candidate bitmap. The
-	/// count is then the fused bitmap's cardinality — zero record fetches.
+	/// Resolve an exact bitmap fusion plan for an index-only COUNT: an AND of
+	/// two or more index-backed predicates whose every conjunct is exactly
+	/// represented by a candidate bitmap. The count is then the fused
+	/// bitmap's cardinality — zero record fetches.
 	///
 	/// Exactness needs the declared field kinds (array values fan out to one
 	/// index entry per element, which would inflate the count), so the
@@ -2996,16 +3139,11 @@ impl<'ctx> Planner<'ctx> {
 	/// [`IndexAnalyzer::try_bitmap_count_fusion`] for the structural rules.
 	async fn resolve_count_bitmap_plan(
 		&self,
-		what: &[Expr],
-		cond: &Option<Cond>,
+		table_name: &TableName,
+		cond: &LogicalExpr,
 		with: Option<&With>,
 	) -> Option<Arc<BitmapNode>> {
 		let txn = self.txn.as_ref()?;
-		let table_name = match what.first() {
-			Some(Expr::Table(t)) => t,
-			_ => return None,
-		};
-		let cond = cond.as_ref()?;
 
 		let (ns_id, db_id) = self.ns_db_ids().await?;
 		let indexes = txn.all_tb_indexes(ns_id, db_id, table_name, None).await.ok()?;
@@ -3038,8 +3176,8 @@ impl<'ctx> Planner<'ctx> {
 		ns_name: &str,
 		db_name: &str,
 		table_name: &TableName,
-		cond: Option<&Cond>,
-		order: Option<&OrderClause>,
+		cond: Option<&LogicalExpr>,
+		order: Option<&LogicalOrdering>,
 		with: Option<&With>,
 		has_limit: bool,
 		has_version: bool,
@@ -3050,9 +3188,7 @@ impl<'ctx> Planner<'ctx> {
 		// If the entire WHERE clause folded to `false` (e.g. `field IN []`
 		// short-circuited by `fold_condition_expressions`) the SELECT can
 		// produce no rows. Skip index lookup entirely.
-		if let Some(c) = cond
-			&& matches!(&c.0, Expr::Literal(crate::expr::literal::Literal::Bool(false)))
-		{
+		if matches!(cond, Some(LogicalExpr::Literal(LogicalLiteral::Bool(false)))) {
 			return Ok(Some((AccessPath::EmptyScan, direction)));
 		}
 
@@ -3105,7 +3241,7 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		// Rewrite projection function calls (e.g. type::field("name")) →
-		// Idiom in a cloned condition so the index analyzer can match
+		// path in a cloned condition so the index analyzer can match
 		// against indexed columns.
 		let rewritten_cond = cond.map(|c| {
 			let mut c = c.clone();
@@ -3130,12 +3266,12 @@ impl<'ctx> Planner<'ctx> {
 		let analyzer = IndexAnalyzer::new(indexes, with);
 		let candidates = analyzer.analyze(analysis_cond, order);
 
-		// Bitmap candidate fusion (issue #547): when the WHERE clause is an
-		// AND of several index-backed predicates, intersect per-branch
-		// candidate bitmaps over the table's shared doc-ID space instead of
-		// driving from one index and filtering the rest per row. Chosen
-		// conservatively — the streaming plans keep every case where they
-		// have a structural advantage:
+		// Bitmap candidate fusion: when the WHERE clause is an AND of several
+		// index-backed predicates, intersect per-branch candidate bitmaps
+		// over the table's shared doc-ID space instead of driving from one
+		// index and filtering the rest per row. Chosen conservatively — the
+		// streaming plans keep every case where they have a structural
+		// advantage:
 		// - an index covers ORDER BY → keep sort elimination / sorted-merge early termination;
 		// - LIMIT without ORDER BY → any streaming plan terminates early, a bitmap plan
 		//   materializes every branch first;
@@ -3246,7 +3382,7 @@ impl<'ctx> Planner<'ctx> {
 		// `ORDER BY metadata.payload_metadata.modified DESC LIMIT 25`.
 		let (mut path, direction) = adjust_direction_for_order(path, order, direction);
 
-		// Pre-filtered vector search (#548): evaluate the KNN query's exactly
+		// Pre-filtered vector search: evaluate the KNN query's exactly
 		// index-coverable conjuncts into an allow-list bitmap before the ANN
 		// search, instead of fetching every visited candidate's record.
 		// Gated like bitmap fusion: no WITH hints (the user pinned the plan)
@@ -3286,8 +3422,7 @@ impl<'ctx> Planner<'ctx> {
 		// against an array-element index): the full-range scan would
 		// walk every indexed entry — typically one per array element
 		// per row — and filter post-hoc. A Union of per-value Compound
-		// prefix scans reads only the matching prefix ranges, which is
-		// the win we're after for crud-bench-style workloads. The k-way
+		// prefix scans reads only the matching prefix ranges. The k-way
 		// merge with `MergeMode::ByIndexKeyDedup` preserves the trailing
 		// ORDER BY column's sort order and dedupes rows that match
 		// multiple branches.
@@ -3296,14 +3431,13 @@ impl<'ctx> Planner<'ctx> {
 		{
 			return Ok(Some((union_path, direction)));
 		}
-		// NOTE: We intentionally do NOT try try_in_expansion() here.
-		// The full-range scan covers ORDER BY, enabling sort elimination
-		// and early termination with the batch ceiling.  Replacing it
-		// with a Union of prefix scans would require an expensive Sort
-		// of ALL matching records, which is far worse for ORDER BY +
-		// LIMIT queries.  IN expansion is only helpful in the
-		// candidates.is_empty() fallback above when no index covers
-		// ORDER BY at all.
+		// `try_in_expansion` is deliberately not tried here. The full-range
+		// scan covers ORDER BY, enabling sort elimination and early
+		// termination with the batch ceiling. Replacing it with a Union of
+		// prefix scans would require an expensive Sort of ALL matching
+		// records, which is far worse for ORDER BY + LIMIT queries. IN
+		// expansion is only helpful in the candidates.is_empty() fallback
+		// above when no index covers ORDER BY at all.
 
 		// When the WHERE clause is a conjunction and one conjunct is a pure
 		// OR whose every branch is independently indexable, consider driving
@@ -3343,7 +3477,7 @@ impl<'ctx> Planner<'ctx> {
 		db_id: crate::catalog::DatabaseId,
 		table_name: &TableName,
 		analyzer: &IndexAnalyzer<'_>,
-		cond: Option<&Cond>,
+		cond: Option<&LogicalExpr>,
 		candidates: &[crate::exec::index::analysis::IndexCandidate],
 	) -> Option<BitmapPlan> {
 		// Cheap structural pre-check before touching the catalog: fusion
@@ -3352,8 +3486,8 @@ impl<'ctx> Planner<'ctx> {
 		// skip the obviously-impossible case here.
 		let cond = cond?;
 		if !matches!(
-			cond.0,
-			Expr::Binary {
+			cond,
+			LogicalExpr::Binary {
 				op: crate::expr::BinaryOperator::And,
 				..
 			}
@@ -3364,10 +3498,10 @@ impl<'ctx> Planner<'ctx> {
 		// when the WHERE clause actually contains a negated conjunct.
 		let has_not = {
 			let mut found = false;
-			let mut stack = vec![&cond.0];
+			let mut stack = vec![cond];
 			while let Some(e) = stack.pop() {
 				match e {
-					Expr::Binary {
+					LogicalExpr::Binary {
 						left,
 						op: crate::expr::BinaryOperator::And,
 						right,
@@ -3398,7 +3532,7 @@ impl<'ctx> Planner<'ctx> {
 		analyzer.try_bitmap_fusion(Some(cond), candidates, &exact_col)
 	}
 
-	/// Attempt to build the pre-filter plan for a KNN access path (#548).
+	/// Attempt to build the pre-filter plan for a KNN access path.
 	///
 	/// The KNN-stripped WHERE is split per conjunct: conjuncts whose truth
 	/// set is exactly a candidate bitmap join the allow-list plan, the rest
@@ -3415,7 +3549,7 @@ impl<'ctx> Planner<'ctx> {
 		db_id: crate::catalog::DatabaseId,
 		table_name: &TableName,
 		analyzer: &IndexAnalyzer<'_>,
-		cond: Option<&Cond>,
+		cond: Option<&LogicalExpr>,
 	) -> Option<KnnPrefilterPlan> {
 		let stripped = cond.and_then(strip_knn_from_condition)?;
 		let fields = txn.all_tb_fields(ns_id, db_id, table_name, None).await.ok()?;
@@ -3427,6 +3561,246 @@ impl<'ctx> Planner<'ctx> {
 				.is_some_and(field_kind_excludes_arrays)
 		};
 		analyzer.try_knn_prefilter(&stripped, &exact_col)
+	}
+}
+
+/// Parse a field path given as text (an `OMIT`/`FETCH` parameter, a
+/// projection function argument) into a logical path. `None` when the text
+/// is not a path.
+fn parse_field_path(text: &str) -> Option<LogicalExpr> {
+	let idiom = crate::syn::idiom(text).ok()?;
+	let path = lower_expr(crate::sql::Expr::Idiom(idiom)).ok()?;
+	path.is_path().then_some(path)
+}
+
+/// Collects the root field names a pipeline reads from its rows, and detects
+/// the expressions that make that set unknowable.
+///
+/// Path roots determine whose row a field access belongs to, via
+/// [`classify_path_root`]:
+///
+/// - `ThisRow` (a field, a leading lookup, `$this.x`, `$self.x`): the leading field read is a
+///   column of the current row's table — add it to the needed set.
+/// - `OuterRow` (`$parent.x`): the field reads belong to the outer row, NOT the current table. Skip
+///   them; only walk nested expressions (which may reference `$this` legitimately).
+/// - `Opaque` (a path from a computed value or another parameter): mark `has_opaque` and bail to
+///   "all fields needed."
+///
+/// A parameter anywhere is opaque: it could hold any field. A nested
+/// statement's own expressions are walked as part of this pipeline's, since
+/// they are evaluated against rows this pipeline produces.
+struct NeededFieldExtractor {
+	fields: HashSet<String>,
+	has_opaque: bool,
+	/// Depth of `[WHERE …]` predicates currently being walked.
+	///
+	/// At depth 0 (top-level) the row scope follows the natural SELECT
+	/// semantics: `$this` is the current row, `$parent` is the outer
+	/// SELECT's row.
+	///
+	/// At depth 1 (inside one `[WHERE …]`) the runtime rebinds scope:
+	/// `current_value` is the iteration element and `$parent` is bound to
+	/// the enclosing `document_root`. So `.x` and `$this.x` reference the
+	/// iteration element (NOT this row's columns), while `$parent.x`
+	/// references the current row.
+	///
+	/// At depth ≥ 2 the chain is not modelled and the walk conservatively
+	/// falls back to "all fields needed" via `has_opaque`.
+	filter_depth: u32,
+}
+
+impl NeededFieldExtractor {
+	/// Walk a path: decide from its root whether its leading field read is a
+	/// column of this row, then walk its steps in the order they apply.
+	fn visit_path(&mut self, path: &LogicalExpr) {
+		let mut take_leading = match (self.filter_depth, classify_path_root(path)) {
+			// Top-level, rooted at the current row: the first field read is
+			// a column name. The `$this`/`$self` anchor itself is structural
+			// and is not visited — as a parameter it would read as opaque
+			// and lose the selective scan entirely.
+			(0, PathRoot::ThisRow) => true,
+			// `$parent.X.Y…` at the top level: the fields belong to the outer
+			// row, not this row's table. Only the nested expressions (filter
+			// predicates, method arguments) may still reference this row.
+			(0, PathRoot::OuterRow) => false,
+			// Inside one filter predicate the scope flips: `$parent` is
+			// rebound to the enclosing row, so `X` is a column of *this*
+			// row's table.
+			(1, PathRoot::OuterRow) => true,
+			// `.X` or `$this.X` inside the filter reads the iteration
+			// element, not this row's columns.
+			(1, PathRoot::ThisRow) => false,
+			// An opaque root, or any path at depth ≥ 2 (nested filters whose
+			// scope chain is not modelled). The `2..` lower bound on the
+			// catch-all means a new `PathRoot` variant added later trips the
+			// exhaustiveness checker instead of silently short-circuiting.
+			(0 | 1, PathRoot::Opaque) | (2.., _) => {
+				self.has_opaque = true;
+				return;
+			}
+		};
+		self.visit_steps(path, &mut take_leading);
+	}
+
+	/// Walk the steps of `path` from its root outwards, visiting the
+	/// expressions they hold. `take_leading` is whether the next field read
+	/// met names a column of this row; it is cleared once that field is
+	/// taken. A root that is not a path form (the expression a path starts
+	/// from) is not visited: whose fields it reads was decided by the root
+	/// classification.
+	fn visit_steps(&mut self, path: &LogicalExpr, take_leading: &mut bool) {
+		match path {
+			LogicalExpr::Field(name) => self.take_field(name, take_leading),
+			LogicalExpr::Doc | LogicalExpr::Current => {}
+			LogicalExpr::Access {
+				base,
+				field,
+			} => {
+				self.visit_steps(base, take_leading);
+				self.take_field(field, take_leading);
+			}
+			LogicalExpr::Each(base)
+			| LogicalExpr::First(base)
+			| LogicalExpr::Last(base)
+			| LogicalExpr::RepeatRecurse(base) => self.visit_steps(base, take_leading),
+			LogicalExpr::Flatten {
+				base,
+				..
+			} => self.visit_steps(base, take_leading),
+			LogicalExpr::Index {
+				base,
+				index,
+			} => {
+				self.visit_steps(base, take_leading);
+				self.visit_expr(index);
+			}
+			LogicalExpr::Filter {
+				base,
+				predicate,
+			} => {
+				self.visit_steps(base, take_leading);
+				self.filter_depth = self.filter_depth.saturating_add(1);
+				self.visit_expr(predicate);
+				self.filter_depth = self.filter_depth.saturating_sub(1);
+			}
+			LogicalExpr::Method {
+				base,
+				args,
+				..
+			} => {
+				self.visit_steps(base, take_leading);
+				args.iter().for_each(|a| self.visit_expr(a));
+			}
+			LogicalExpr::Destructure {
+				base,
+				fields,
+			} => {
+				self.visit_steps(base, take_leading);
+				self.visit_destructure(fields);
+			}
+			LogicalExpr::Lookup {
+				base,
+				..
+			} => {
+				self.visit_steps(base, take_leading);
+				// A lookup's clauses are evaluated against the rows it reaches,
+				// but its subjects may hold expressions of this row (a key
+				// range bound) and its predicate may reference `$parent`. The
+				// first child is the base, walked above.
+				for clause in path.children().into_iter().skip(1) {
+					self.visit_expr(clause);
+				}
+			}
+			LogicalExpr::Recurse(recurse) => {
+				self.visit_steps(&recurse.base, take_leading);
+				match &recurse.path {
+					// A written body is applied to each depth's value.
+					Some(LogicalRecursePath::Nested(body)) => self.visit_body(body),
+					// The rest of the path continues the sequence of steps.
+					Some(LogicalRecursePath::Trailing(body)) => {
+						self.visit_steps(body, take_leading)
+					}
+					None => {}
+				}
+				if let Some(LogicalRecurseInstruction::Shortest {
+					expects,
+					..
+				}) = &recurse.instruction
+				{
+					self.visit_expr(expects);
+				}
+			}
+			LogicalExpr::Optional {
+				base,
+				then,
+			} => {
+				self.visit_steps(base, take_leading);
+				self.visit_steps(then, take_leading);
+			}
+			LogicalExpr::Broadcast {
+				base,
+				body,
+				..
+			} => {
+				self.visit_steps(base, take_leading);
+				self.visit_steps(body, take_leading);
+			}
+			// The expression a path starts from.
+			_ => {}
+		}
+	}
+
+	/// Record a field read as a column of this row when it is the path's
+	/// leading one.
+	fn take_field(&mut self, name: &crate::val::Strand, take_leading: &mut bool) {
+		if *take_leading {
+			self.fields.insert(name.as_str().to_owned());
+			*take_leading = false;
+		}
+	}
+
+	/// A body applied to a value other than the row (a destructure alias, a
+	/// written recursion body): its field reads are positions inside that
+	/// value, not columns of this row, so only the expressions its steps hold
+	/// are walked. A body starting from an expression is walked from that
+	/// expression.
+	fn visit_body(&mut self, body: &LogicalExpr) {
+		let root = body.path_root();
+		if !matches!(root, LogicalExpr::Current | LogicalExpr::Field(_) | LogicalExpr::Doc) {
+			self.visit_expr(root);
+		}
+		self.visit_steps(body, &mut false);
+	}
+
+	fn visit_destructure(&mut self, fields: &[LogicalDestructureField]) {
+		for field in fields {
+			match field {
+				LogicalDestructureField::All(_) | LogicalDestructureField::Field(_) => {}
+				LogicalDestructureField::Aliased(_, body) => self.visit_body(body),
+				LogicalDestructureField::Destructure(_, nested) => self.visit_destructure(nested),
+			}
+		}
+	}
+
+	fn visit_expr(&mut self, expr: &LogicalExpr) {
+		match expr {
+			// Parameters could reference any field
+			LogicalExpr::Param(_) => self.has_opaque = true,
+			path if path.is_path() => self.visit_path(path),
+			// A nested statement's expressions are evaluated with this row in
+			// scope; walk them at the current depth.
+			LogicalExpr::Subquery(op) => {
+				let _ = op.visit_scalars_deep(&mut |e| {
+					self.visit_expr(e);
+					Ok::<(), std::convert::Infallible>(())
+				});
+			}
+			_ => {
+				for child in expr.children() {
+					self.visit_expr(child);
+				}
+			}
+		}
 	}
 }
 
@@ -3531,9 +3905,9 @@ enum RestrictedPrefixes {
 	/// The actor sees the table with full field permissions, or no field is
 	/// restricted — index fast paths are safe.
 	None,
-	/// These field-path prefixes are governed by a non-`Full` SELECT
-	/// permission.
-	Some(Vec<Idiom>),
+	/// These declared fields are governed by a non-`Full` SELECT
+	/// permission; a read at or beneath one of them is restricted.
+	Some(Vec<crate::expr::logical::FieldPath>),
 }
 
 impl RestrictedPrefixes {
@@ -3542,20 +3916,23 @@ impl RestrictedPrefixes {
 	/// must be conservatively assumed because plan-time context is missing).
 	///
 	/// Used to keep an index fast path from turning index entries into a
-	/// membership oracle for a value the actor cannot read.
-	fn cond_touches(&self, cond: &Cond) -> bool {
+	/// membership oracle for a value the actor cannot read. A nested
+	/// statement is not descended into: it operates against its own tables
+	/// and performs its own permission resolution.
+	fn cond_touches(&self, cond: &LogicalExpr) -> bool {
 		let prefixes = match self {
 			RestrictedPrefixes::AssumeRestricted => return true,
 			RestrictedPrefixes::None => return false,
 			RestrictedPrefixes::Some(p) => p,
 		};
-		let mut checker = RestrictedIdiomChecker {
-			restricted_prefixes: prefixes,
-			found: false,
-		};
-		use crate::expr::visit::Visitor;
-		let _ = checker.visit_expr(&cond.0);
-		checker.found
+		fn walk(expr: &LogicalExpr, prefixes: &[crate::expr::logical::FieldPath]) -> bool {
+			match expr {
+				LogicalExpr::Subquery(_) => false,
+				read if prefixes.iter().any(|p| reads_at_or_beneath(read, p)) => true,
+				_ => expr.children().into_iter().any(|child| walk(child, prefixes)),
+			}
+		}
+		walk(cond, prefixes)
 	}
 
 	/// SECURITY: returns `true` when any column of an index is governed by a
@@ -3580,11 +3957,17 @@ impl RestrictedPrefixes {
 			RestrictedPrefixes::None => return false,
 			RestrictedPrefixes::Some(p) => p,
 		};
-		cols.iter().any(|col| prefixes.iter().any(|prefix| col.starts_with(prefix.0.as_slice())))
+		cols.iter().any(|col| {
+			// A column that is not a field path names no position a declared
+			// field can be compared against, so it is taken as touching.
+			crate::expr::logical::FieldPath::from_idiom(col).is_none_or(|col| {
+				prefixes.iter().any(|prefix| col.segments().starts_with(prefix.segments()))
+			})
+		})
 	}
 
 	/// SECURITY (value-ordering oracle): returns `true` when any top-level
-	/// `ORDER BY` idiom references a field whose SELECT permission is not
+	/// `ORDER BY` path references a field whose SELECT permission is not
 	/// `Full` for the current actor (or when restriction must be conservatively
 	/// assumed because plan-time context is missing).
 	///
@@ -3596,25 +3979,25 @@ impl RestrictedPrefixes {
 	/// use this to withhold a restricted `ORDER BY` from access-path selection,
 	/// keeping the source in record-id order so no ordering oracle is exposed.
 	///
-	/// The match is intentionally shallow: each `Order.value` is a plain top-
-	/// level `Idiom`, matched via `Idiom::starts_with(prefix)`. An index-
-	/// ordering leak requires the index to cover the field directly, so a
-	/// restricted field referenced only *inside* an idiom filter (e.g.
-	/// `ORDER BY foo[WHERE code = …]`) is not an indexable ordering and cannot
-	/// leak through this vector. This is the same shallow-match property as the
-	/// WHERE guard ([`Self::cond_touches`]).
+	/// The match is intentionally shallow: each `ORDER BY` key is a plain
+	/// top-level path, matched by prefix. An index-ordering leak requires
+	/// the index to cover the field directly, so a restricted field
+	/// referenced only *inside* a path filter (e.g. `ORDER BY foo[WHERE code =
+	/// …]`) is not an indexable ordering and cannot leak through this vector.
+	/// This is the same shallow-match property as the WHERE guard
+	/// ([`Self::cond_touches`]).
 	///
-	/// OUT OF SCOPE (parent/child nested-field gap): `starts_with(prefix)`
-	/// catches ordering by a restricted field *or a descendant of it*
-	/// (`ORDER BY meta` when `meta` is restricted, or `ORDER BY meta.sub` when
-	/// `meta` is restricted), but NOT ordering by a *parent* of a restricted
-	/// child (`ORDER BY meta` when only `meta.secret` is restricted). Ordering
-	/// by the parent object can, with a covering index, still encode the
-	/// child's relative ordering. This is a narrower, separate vector — like
-	/// the compound-index caveat in #394 — and is not addressed here.
-	fn order_touches(&self, order: &OrderClause) -> bool {
+	/// OUT OF SCOPE (parent/child nested-field gap): the prefix match catches
+	/// ordering by a restricted field *or a descendant of it* (`ORDER BY meta`
+	/// when `meta` is restricted, or `ORDER BY meta.sub` when `meta` is
+	/// restricted), but NOT ordering by a *parent* of a restricted child
+	/// (`ORDER BY meta` when only `meta.secret` is restricted). Ordering by
+	/// the parent object can, with a covering index, still encode the child's
+	/// relative ordering. This is a narrower, separate vector and is not
+	/// addressed here.
+	fn order_touches(&self, order: &LogicalOrdering) -> bool {
 		// `ORDER BY RAND()` references no field and cannot leak ordering.
-		let OrderClause::Order(order_list) = order else {
+		let LogicalOrdering::Order(order_list) = order else {
 			return false;
 		};
 		let prefixes = match self {
@@ -3622,50 +4005,9 @@ impl RestrictedPrefixes {
 			RestrictedPrefixes::None => return false,
 			RestrictedPrefixes::Some(p) => p,
 		};
-		let mut checker = RestrictedIdiomChecker {
-			restricted_prefixes: prefixes,
-			found: false,
-		};
-		use crate::expr::visit::Visitor;
-		for order in order_list.iter() {
-			let _ = checker.visit_idiom(&order.value);
-			if checker.found {
-				return true;
-			}
-		}
-		false
-	}
-}
-
-/// Visitor that walks a `Cond` expression looking for any idiom governed by
-/// a field path with restrictive SELECT permissions. Stops descending into
-/// nested SELECT subqueries — those operate against their own tables and
-/// will perform their own permission resolution.
-struct RestrictedIdiomChecker<'a> {
-	restricted_prefixes: &'a [Idiom],
-	found: bool,
-}
-
-impl crate::expr::visit::Visitor for RestrictedIdiomChecker<'_> {
-	type Error = std::convert::Infallible;
-
-	fn visit_idiom(&mut self, idiom: &Idiom) -> Result<(), Self::Error> {
-		if self.found {
-			return Ok(());
-		}
-		for prefix in self.restricted_prefixes {
-			if idiom.starts_with(prefix.0.as_slice()) {
-				self.found = true;
-				return Ok(());
-			}
-		}
-		Ok(())
-	}
-
-	fn visit_select(&mut self, _: &crate::expr::SelectStatement) -> Result<(), Self::Error> {
-		// Subqueries are evaluated against their own tables and apply their
-		// own permission resolution at execute time.
-		Ok(())
+		order_list
+			.iter()
+			.any(|order| prefixes.iter().any(|prefix| reads_at_or_beneath(&order.value, prefix)))
 	}
 }
 
@@ -3674,23 +4016,21 @@ impl crate::expr::visit::Visitor for RestrictedIdiomChecker<'_> {
 ///
 /// `determine_scan_direction` only flips to `Backward` for `ORDER BY id DESC`.
 /// When an index covers a non-`id` ORDER BY (e.g. a nested field like
-/// `metadata.payload_metadata.modified DESC`), we must derive the correct
-/// direction from the ORDER BY clause so that:
+/// `metadata.payload_metadata.modified DESC`), the correct direction is
+/// derived from the ORDER BY clause so that:
 ///
 /// 1. `index_covers_ordering()` succeeds → LIMIT is pushed to the IndexScan
 /// 2. `can_eliminate_sort()` succeeds → the Sort operator is eliminated
 ///
-/// Without this fix, the index is scanned forward, LIMIT cannot be pushed
+/// Otherwise the index is scanned forward, LIMIT cannot be pushed
 /// (direction mismatch), and all rows are read + sorted in memory.
 fn adjust_direction_for_order(
 	path: AccessPath,
-	order: Option<&crate::expr::order::Ordering>,
-	default_direction: crate::kvs::Direction,
-) -> (AccessPath, crate::kvs::Direction) {
+	order: Option<&LogicalOrdering>,
+	default_direction: Direction,
+) -> (AccessPath, Direction) {
 	use crate::exec::field_path::FieldPath;
-	use crate::exec::index::access_path::BTreeAccess;
-	use crate::expr::order::Ordering;
-	use crate::kvs::Direction;
+	use crate::exec::field_path_convert::field_path_from_idiom as field_path_from_column;
 
 	// Only adjust for BTreeScan paths that cover ORDER BY
 	let AccessPath::BTreeScan {
@@ -3703,15 +4043,15 @@ fn adjust_direction_for_order(
 	};
 
 	// Need an ORDER BY clause to determine direction
-	let Some(Ordering::Order(order_list)) = order else {
+	let Some(LogicalOrdering::Order(order_list)) = order else {
 		return (path, default_direction);
 	};
 
 	let ix_def = index_ref.definition();
 
-	// Collect equality-pinned column paths so we can skip ORDER BY fields
-	// that reference them (those columns have a single constant value,
-	// so any direction trivially satisfies the requirement).
+	// Collect equality-pinned column paths so ORDER BY fields that reference
+	// them can be skipped (those columns have a single constant value, so
+	// any direction trivially satisfies the requirement).
 	let equality_col_paths: Vec<FieldPath> = match access {
 		BTreeAccess::Compound {
 			prefix,
@@ -3720,20 +4060,18 @@ fn adjust_direction_for_order(
 			.cols
 			.iter()
 			.take(prefix.len())
-			.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
+			.filter_map(|s| field_path_from_column(s).ok())
 			.collect(),
-		BTreeAccess::Equality(_) => ix_def
-			.cols
-			.iter()
-			.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
-			.collect(),
+		BTreeAccess::Equality(_) => {
+			ix_def.cols.iter().filter_map(|s| field_path_from_column(s).ok()).collect()
+		}
 		_ => vec![],
 	};
 
 	// Skip leading ORDER BY fields that match equality-pinned columns.
 	let mut order_idx = 0;
-	for field in order_list.0.iter() {
-		if let Ok(fp) = crate::exec::field_path_convert::field_path_from_idiom(&field.value)
+	for field in order_list.iter() {
+		if let Ok(fp) = field_path_from_expr(&field.value)
 			&& equality_col_paths.contains(&fp)
 		{
 			order_idx += 1;
@@ -3743,14 +4081,13 @@ fn adjust_direction_for_order(
 	}
 
 	// Get the first non-constant ORDER BY field
-	let Some(first_order) = order_list.0.get(order_idx) else {
+	let Some(first_order) = order_list.get(order_idx) else {
 		// All ORDER BY fields are constant — direction doesn't matter,
 		// keep the default.
 		return (path, default_direction);
 	};
 
-	let Ok(order_path) = crate::exec::field_path_convert::field_path_from_idiom(&first_order.value)
-	else {
+	let Ok(order_path) = field_path_from_expr(&first_order.value) else {
 		return (path, default_direction);
 	};
 
@@ -3791,7 +4128,7 @@ fn adjust_direction_for_order(
 		return (path, default_direction);
 	};
 
-	let Ok(col_path) = crate::exec::field_path_convert::field_path_from_idiom(target_col) else {
+	let Ok(col_path) = field_path_from_column(target_col) else {
 		return (path, default_direction);
 	};
 
@@ -3822,17 +4159,23 @@ fn adjust_direction_for_order(
 /// `ExpressionRegistry::with_reserved_and_protected_names` so that
 /// synthetic internal names (`_e0`, `_e1`, ...) do not collide with fields
 /// the user explicitly selected.
-pub(super) fn collect_field_names(fields: &Fields) -> Vec<String> {
+pub(super) fn collect_field_names(fields: &LogicalFields) -> Vec<String> {
 	match fields {
-		Fields::Value(_) => vec![], // SELECT VALUE has no object fields
-		Fields::Select(field_list) => {
+		LogicalFields::Value {
+			..
+		} => vec![], // SELECT VALUE has no object fields
+		LogicalFields::Select(field_list) => {
 			let mut names = Vec::with_capacity(field_list.len());
 			for field in field_list {
-				if let Field::Single(selector) = field {
-					let name = if let Some(alias) = &selector.alias {
-						idiom_to_field_name(alias)
-					} else {
-						derive_field_name(&selector.expr)
+				if let LogicalField::Single {
+					expr,
+					alias,
+					..
+				} = field
+				{
+					let name = match alias {
+						Some(alias) => alias.name(),
+						None => expr.output_path().name(),
 					};
 					names.push(name);
 				}
@@ -3848,34 +4191,36 @@ pub(super) fn collect_field_names(fields: &Fields) -> Vec<String> {
 /// computed expression has the same alias. Compute runs before projection, so
 /// using one of these names internally would overwrite the source value before
 /// another projection can read it.
-pub(super) fn collect_simple_source_field_names(fields: &Fields) -> Vec<String> {
+pub(super) fn collect_simple_source_field_names(fields: &LogicalFields) -> Vec<String> {
 	match fields {
-		Fields::Value(selector) => match &selector.expr {
-			Expr::Idiom(idiom) => simple_field_name(idiom).into_iter().collect(),
-			_ => vec![],
-		},
-		Fields::Select(field_list) => field_list
+		LogicalFields::Value {
+			expr,
+			..
+		} => simple_field_name(expr).into_iter().collect(),
+		LogicalFields::Select(field_list) => field_list
 			.iter()
 			.filter_map(|field| match field {
-				Field::Single(selector) => match &selector.expr {
-					Expr::Idiom(idiom) => simple_field_name(idiom),
-					_ => None,
-				},
-				Field::All => None,
+				LogicalField::Single {
+					expr,
+					..
+				} => simple_field_name(expr),
+				LogicalField::All => None,
 			})
 			.collect(),
 	}
 }
 
-fn simple_field_name(idiom: &Idiom) -> Option<String> {
-	use crate::expr::part::Part;
-
-	if idiom.len() == 1
-		&& let Some(Part::Field(name)) = idiom.first()
-	{
-		return Some(name.as_str().to_owned());
+/// The name of a bare field read, or `None` for any other expression.
+fn simple_field_name(expr: &LogicalExpr) -> Option<String> {
+	match expr {
+		LogicalExpr::Field(name) => Some(name.as_str().to_owned()),
+		_ => None,
 	}
-	None
+}
+
+/// Whether the expression is exactly a read of the `id` field.
+fn is_id_field(expr: &LogicalExpr) -> bool {
+	matches!(expr, LogicalExpr::Field(name) if name.as_str() == "id")
 }
 
 /// Check whether the ORDER BY clause is exactly `ORDER BY id ASC` or
@@ -3884,12 +4229,10 @@ fn simple_field_name(idiom: &Idiom) -> Option<String> {
 /// Returns `Some(SortDirection)` when the condition is met, allowing
 /// callers to enable optimisations that rely on record-ID ordering
 /// (e.g. merge-sort in `UnionIndexScan`).
-fn detect_order_by_id_only(order: Option<&crate::expr::order::Ordering>) -> Option<SortDirection> {
-	use crate::expr::order::Ordering;
-	if let Some(Ordering::Order(order_list)) = order
-		&& order_list.len() == 1
-		&& let Some(first) = order_list.0.first()
-		&& first.value.is_id()
+fn detect_order_by_id_only(order: Option<&LogicalOrdering>) -> Option<SortDirection> {
+	if let Some(LogicalOrdering::Order(order_list)) = order
+		&& let [first] = order_list.as_slice()
+		&& is_id_field(&first.value)
 		&& !first.collate
 		&& !first.numeric
 	{
@@ -3918,25 +4261,22 @@ fn detect_order_by_id_only(order: Option<&crate::expr::order::Ordering>) -> Opti
 /// COLLATE/NUMERIC modifiers, single-column indexes, duplicate branch
 /// prefixes, etc).
 fn detect_order_for_composite_union(
-	order: Option<&crate::expr::order::Ordering>,
+	order: Option<&LogicalOrdering>,
 	paths: &[AccessPath],
 ) -> Option<(crate::exec::field_path::FieldPath, SortDirection)> {
-	use crate::exec::index::access_path::BTreeAccess;
-	use crate::expr::order::Ordering;
+	use crate::exec::field_path_convert::field_path_from_idiom as field_path_from_column;
 
 	// Must be ORDER BY a single, plain column with no collation modifiers.
-	let Some(Ordering::Order(order_list)) = order else {
+	let Some(LogicalOrdering::Order(order_list)) = order else {
 		return None;
 	};
-	if order_list.len() != 1 {
+	let [order_field] = order_list.as_slice() else {
 		return None;
-	}
-	let order_field = order_list.0.first()?;
+	};
 	if order_field.collate || order_field.numeric {
 		return None;
 	}
-	let order_path =
-		crate::exec::field_path_convert::field_path_from_idiom(&order_field.value).ok()?;
+	let order_path = field_path_from_expr(&order_field.value).ok()?;
 	let direction = if order_field.direction {
 		SortDirection::Asc
 	} else {
@@ -3967,8 +4307,7 @@ fn detect_order_for_composite_union(
 		return None;
 	}
 	let sort_col_idiom = ix_def.cols.get(first_prefix_len)?;
-	let sort_col_path =
-		crate::exec::field_path_convert::field_path_from_idiom(sort_col_idiom).ok()?;
+	let sort_col_path = field_path_from_column(sort_col_idiom).ok()?;
 	if sort_col_path != order_path {
 		return None;
 	}
@@ -4027,7 +4366,8 @@ fn detect_order_for_composite_union(
 /// Whether the planned source tree contains a KNN source operator
 /// (`KnnScan`), i.e. an `Approximate` KNN conjunct from the WHERE condition
 /// was lowered into an index-backed search. Used to decide whether the
-/// pre-stripped filter condition must be restored (see `plan_select_core`).
+/// pre-stripped filter condition must be restored (see
+/// [`Planner::compile_pipeline`]).
 fn source_contains_knn(op: &Arc<dyn ExecOperator>) -> bool {
 	op.name() == crate::exec::operators::KnnScan::NAME
 		|| op.children().iter().any(|c| source_contains_knn(c))
@@ -4035,49 +4375,46 @@ fn source_contains_knn(op: &Arc<dyn ExecOperator>) -> bool {
 
 #[cfg(test)]
 mod tests {
+	use super::super::fold::collect_pipeline;
 	use super::*;
+	use crate::expr::logical::lower_select;
 	use crate::syn;
 
-	fn parse_select(src: &str) -> crate::expr::statements::SelectStatement {
-		let ast = syn::parse(src).expect("parse");
+	/// The clauses of `sql` as the planner receives them: lowered to a plan
+	/// and collected off it.
+	fn clauses_of(sql: &str) -> PipelineClauses {
+		let ast = syn::parse(sql).expect("parse");
 		let mut exprs = ast.expressions;
-		assert_eq!(exprs.len(), 1, "expected one statement: got {} from {src:?}", exprs.len());
-		let top: crate::expr::TopLevelExpr = exprs.remove(0).into();
-		match top {
-			crate::expr::TopLevelExpr::Expr(crate::expr::Expr::Select(s)) => *s,
-			other => panic!("expected SELECT, got {other:?}"),
-		}
+		assert_eq!(exprs.len(), 1, "expected one statement in {sql:?}");
+		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Select(select)) = exprs.remove(0)
+		else {
+			panic!("`{sql}` is not a SELECT");
+		};
+		collect_pipeline(lower_select(*select).expect("SELECT lowers")).0
 	}
 
-	/// Locks in the fix for the `$parent`-in-method-arg case. Pre-fix,
-	/// `NeededFieldExtractor` added `refs` and `kind` (the field paths
-	/// reached through `$parent`) to this row's needed-fields. The
-	/// post-fix selective-scan set should contain only the fields that
-	/// belong to *this* row's table (`cat`, reached via `$this.cat`).
-	///
-	/// This is the structural counterpart to issue #7154's runtime fix —
-	/// that one was about not treating bare `parent` / `this` as field
-	/// names when they appear as `Part::Start(Expr::Param)`. The current
-	/// fix tightens the same path: not treating fields *under* `$parent`
-	/// as this row's columns either.
+	fn needed_fields(sql: &str) -> HashSet<String> {
+		let clauses = clauses_of(sql);
+		Planner::extract_needed_fields(
+			clauses.project.as_ref().map(|p| &p.fields),
+			clauses.project.as_ref().map(|p| p.omit.as_slice()).unwrap_or(&[]),
+			clauses.cond.as_ref(),
+			clauses.order.as_ref(),
+			clauses.group.as_ref().map(|g| g.group.as_slice()),
+			clauses.split.as_deref(),
+		)
+		.expect("non-wildcard projection should produce a Some(set)")
+	}
+
+	/// `$parent.refs` reaches into the OUTER row's `refs` field, so the
+	/// needed-fields set must not include `refs`; `$this.cat` reaches THIS
+	/// row's `cat`, which must be in.
 	#[test]
 	fn extract_needed_fields_excludes_outer_row_paths() {
-		// `$parent.refs` reaches into the OUTER row's `refs` field — the
-		// inner subquery's needed-fields should NOT include `refs`.
-		// `$this.cat` reaches THIS row's `cat` — that one should be in.
-		let stmt = parse_select(
+		let needed = needed_fields(
 			"SELECT cat FROM users \
 			 WHERE $parent.refs CONTAINS $this.cat",
 		);
-		let needed = Planner::extract_needed_fields(
-			&stmt.fields,
-			&stmt.omit,
-			stmt.cond.as_ref(),
-			stmt.order.as_ref(),
-			stmt.group.as_ref(),
-			stmt.split.as_ref(),
-		)
-		.expect("non-wildcard projection should produce a Some(set)");
 		assert!(
 			needed.contains("cat"),
 			"current row's `cat` should be in needed-fields: got {needed:?}",
@@ -4089,25 +4426,14 @@ mod tests {
 		);
 	}
 
-	/// Same shape but with a `Part::Where` inside `$parent.refs[WHERE ...]`,
-	/// which is the bug class my review flagged: even when `$parent` is at
-	/// `Part::Start`, predicates *inside* a downstream Where part used to
-	/// inflate the needed-fields set with names from the outer row.
+	/// A `$parent` path inside a function-call argument belongs to the outer
+	/// row as well.
 	#[test]
 	fn extract_needed_fields_excludes_parent_paths_in_method_args() {
-		let stmt = parse_select(
+		let needed = needed_fields(
 			"SELECT cat FROM users \
 			 WHERE array::find($parent.refs, $this.cat) != NONE",
 		);
-		let needed = Planner::extract_needed_fields(
-			&stmt.fields,
-			&stmt.omit,
-			stmt.cond.as_ref(),
-			stmt.order.as_ref(),
-			stmt.group.as_ref(),
-			stmt.split.as_ref(),
-		)
-		.expect("non-wildcard projection should produce a Some(set)");
 		assert!(needed.contains("cat"), "got {needed:?}");
 		assert!(
 			!needed.contains("refs"),
@@ -4116,45 +4442,23 @@ mod tests {
 		);
 	}
 
-	/// Sanity: `$this.x` paths still propagate into the needed-fields set
-	/// (regression guard against over-aggressive filtering).
+	/// `$this.x` paths propagate into the needed-fields set.
 	#[test]
 	fn extract_needed_fields_keeps_this_row_paths() {
-		let stmt = parse_select("SELECT name FROM users WHERE $this.age > 18");
-		let needed = Planner::extract_needed_fields(
-			&stmt.fields,
-			&stmt.omit,
-			stmt.cond.as_ref(),
-			stmt.order.as_ref(),
-			stmt.group.as_ref(),
-			stmt.split.as_ref(),
-		)
-		.expect("non-wildcard projection should produce a Some(set)");
+		let needed = needed_fields("SELECT name FROM users WHERE $this.age > 18");
 		assert!(needed.contains("name"), "got {needed:?}");
 		assert!(needed.contains("age"), "got {needed:?}");
 	}
 
-	/// Filter-predicate scoping: `t.refs[WHERE kind = 'tag']`. The bare
-	/// `kind` references the *iteration element* of `refs`, not this
-	/// row's columns. The previous `NeededFieldExtractor` walked the
-	/// predicate naively and added `kind` to the current row's
-	/// needed-fields, inflating the selective scan. After the fix, only
-	/// `refs` (the array being iterated) is in the set.
+	/// Filter-predicate scoping: in `refs[WHERE kind = 'tag']` the bare
+	/// `kind` references the iteration element of `refs`, not this row's
+	/// columns; only `refs` (the array being iterated) is in the set.
 	#[test]
 	fn extract_needed_fields_filter_predicate_scope_excluded() {
-		let stmt = parse_select(
+		let needed = needed_fields(
 			"SELECT name FROM users \
 			 WHERE refs[WHERE kind = 'tag'] != []",
 		);
-		let needed = Planner::extract_needed_fields(
-			&stmt.fields,
-			&stmt.omit,
-			stmt.cond.as_ref(),
-			stmt.order.as_ref(),
-			stmt.group.as_ref(),
-			stmt.split.as_ref(),
-		)
-		.expect("non-wildcard projection should produce a Some(set)");
 		assert!(needed.contains("name"), "got {needed:?}");
 		assert!(needed.contains("refs"), "got {needed:?}");
 		assert!(
@@ -4164,25 +4468,15 @@ mod tests {
 		);
 	}
 
-	/// Filter-predicate scoping with `$parent`:
-	/// `t.refs[WHERE $parent.cat = kind]`. Inside the filter `$parent`
+	/// Filter-predicate scoping with `$parent`: inside the filter `$parent`
 	/// is rebound to this row, so `cat` IS a current-row field. Sibling
-	/// iteration-scope idioms (`kind`) remain excluded.
+	/// iteration-scope paths (`kind`) remain excluded.
 	#[test]
 	fn extract_needed_fields_filter_predicate_parent_promotes() {
-		let stmt = parse_select(
+		let needed = needed_fields(
 			"SELECT name FROM users \
 			 WHERE refs[WHERE $parent.cat = kind] != []",
 		);
-		let needed = Planner::extract_needed_fields(
-			&stmt.fields,
-			&stmt.omit,
-			stmt.cond.as_ref(),
-			stmt.order.as_ref(),
-			stmt.group.as_ref(),
-			stmt.split.as_ref(),
-		)
-		.expect("non-wildcard projection should produce a Some(set)");
 		assert!(needed.contains("name"), "got {needed:?}");
 		assert!(needed.contains("refs"), "got {needed:?}");
 		assert!(
@@ -4193,25 +4487,155 @@ mod tests {
 		assert!(!needed.contains("kind"), "got {needed:?}");
 	}
 
-	/// Sanity: a bare field literally named `parent` (not the `$parent`
-	/// parameter) is treated as a real column. Pinned by the existing
-	/// `7154_parent_field_name_select.surql` reproduction at the
-	/// runtime/integration level; this is the analyser-level guard.
+	/// A bare field literally named `parent` (not the `$parent` parameter)
+	/// is a real column.
 	#[test]
 	fn extract_needed_fields_treats_bare_parent_as_field() {
-		let stmt = parse_select("SELECT parent.sub FROM table");
-		let needed = Planner::extract_needed_fields(
-			&stmt.fields,
-			&stmt.omit,
-			stmt.cond.as_ref(),
-			stmt.order.as_ref(),
-			stmt.group.as_ref(),
-			stmt.split.as_ref(),
-		)
-		.expect("non-wildcard projection should produce a Some(set)");
+		let needed = needed_fields("SELECT parent.sub FROM table");
 		assert!(
 			needed.contains("parent"),
 			"bare `parent.sub` is a real column path: got {needed:?}",
 		);
+	}
+
+	/// A grouped pipeline's fields live on its aggregation; the set is read
+	/// from there.
+	#[test]
+	fn extract_needed_fields_reads_a_grouped_projection() {
+		let clauses = clauses_of("SELECT count(), a FROM t GROUP BY a");
+		let needed = Planner::extract_needed_fields(
+			clauses.group.as_ref().map(|g| &g.fields),
+			&[],
+			None,
+			None,
+			clauses.group.as_ref().map(|g| g.group.as_slice()),
+			None,
+		)
+		.expect("a grouped projection is selective");
+		assert!(needed.contains("a"), "got {needed:?}");
+	}
+
+	#[test]
+	fn for_update_targets_must_be_records() {
+		fn sources_of(sql: &str) -> Vec<LogicalOp> {
+			let ast = syn::parse(sql).expect("parse");
+			let mut exprs = ast.expressions;
+			let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Select(select)) = exprs.remove(0)
+			else {
+				panic!("`{sql}` is not a SELECT");
+			};
+			match collect_pipeline(lower_select(*select).expect("SELECT lowers")).1 {
+				PipelineStop::Leaf(LogicalOp::UnionAll(LogicalUnionAll {
+					inputs,
+				})) => inputs,
+				PipelineStop::Leaf(leaf) => vec![leaf],
+				PipelineStop::Node(node) => panic!("stopped at {}", node.name()),
+			}
+		}
+		for sql in [
+			"SELECT * FROM t:1 FOR UPDATE",
+			"SELECT * FROM $p FOR UPDATE",
+			"SELECT * FROM type::record($p) FOR UPDATE",
+			"SELECT * FROM t:1, t:2 FOR UPDATE",
+			"SELECT * FROM t:1",
+			"SELECT * FROM t",
+		] {
+			assert!(check_for_update_sources(&sources_of(sql)).is_ok(), "`{sql}` should pass");
+		}
+		for sql in [
+			"SELECT * FROM t FOR UPDATE",
+			"SELECT * FROM t:1..5 FOR UPDATE",
+			"SELECT * FROM |t:3| FOR UPDATE",
+			"SELECT * FROM t:1, t FOR UPDATE",
+			"SELECT * FROM (SELECT * FROM t:1) FOR UPDATE",
+		] {
+			assert!(check_for_update_sources(&sources_of(sql)).is_err(), "`{sql}` should fail");
+		}
+	}
+
+	#[test]
+	fn restricted_prefix_matches_by_leading_parts() {
+		let secret: Idiom = crate::syn::idiom("meta.secret").expect("idiom").into();
+		let restricted = RestrictedPrefixes::Some(vec![
+			crate::expr::logical::FieldPath::from_idiom(&secret).expect("field path"),
+		]);
+		let clauses = clauses_of("SELECT * FROM t WHERE meta.secret.inner = 1 ORDER BY meta");
+		assert!(restricted.cond_touches(clauses.cond.as_ref().expect("WHERE")));
+		// Ordering by the parent of a restricted child is the documented gap.
+		assert!(!restricted.order_touches(clauses.order.as_ref().expect("ORDER BY")));
+		let clauses = clauses_of("SELECT * FROM t WHERE meta.public = 1 ORDER BY meta.secret");
+		assert!(!restricted.cond_touches(clauses.cond.as_ref().expect("WHERE")));
+		assert!(restricted.order_touches(clauses.order.as_ref().expect("ORDER BY")));
+		// A nested statement resolves its own permissions.
+		let clauses = clauses_of("SELECT * FROM t WHERE (SELECT meta.secret FROM u) != NONE");
+		assert!(!restricted.cond_touches(clauses.cond.as_ref().expect("WHERE")));
+	}
+
+	/// A `Source` the analyzer resolved (`schema: Some`), as the physical
+	/// planner receives it from a bound plan.
+	fn resolved_source(table: &str) -> LogicalOp {
+		LogicalOp::Source(LogicalSource {
+			source: SourceRef::Table(TableName::from(table)),
+			schema: Some(Arc::new(crate::expr::logical::Schema::open())),
+			with: None,
+			for_update: false,
+		})
+	}
+
+	fn select_all(input: LogicalOp) -> LogicalOp {
+		LogicalOp::Project(crate::expr::logical::LogicalProject {
+			input: Box::new(input),
+			fields: LogicalFields::all(),
+			omit: vec![],
+		})
+	}
+
+	/// A source the analyzer resolved is planned with a scan that yields rows
+	/// as stored: from its table context, or from its mode alone for a table
+	/// the catalog lacks. When no context can be resolved — the `VERSION` the
+	/// table is read under is only known when the statement runs — the
+	/// statement is declined to the legacy engine rather than planned with a
+	/// scan that enforces at runtime beneath the plan's own nodes.
+	#[tokio::test]
+	async fn a_resolved_source_without_a_table_context_declines_the_statement() {
+		use crate::exec::operators::test_util::TestDb;
+		let db = TestDb::new("DEFINE TABLE t SCHEMALESS;").await;
+		let ctx = db.exec_ctx().await;
+		let planner = Planner::with_txn(
+			ctx.ctx(),
+			ctx.function_registry(),
+			ctx.try_txn().expect("a transaction"),
+			Some("test".to_owned()),
+			Some("test".to_owned()),
+		);
+		let unsupported = |result: Result<Arc<dyn ExecOperator>, Error>| {
+			matches!(result, Err(Error::Exec(ExecError::PlannerUnsupported(_))))
+		};
+
+		// The table the analyzer saw is planned.
+		assert!(planner.plan_logical(select_all(resolved_source("t"))).await.is_ok());
+		// A table the catalog lacks is planned: the analyzer saw the same
+		// absence, and the scan carries the plan's mode for the table it finds
+		// when it runs.
+		assert!(planner.plan_logical(select_all(resolved_source("ghost"))).await.is_ok());
+		// A `VERSION` the planner cannot evaluate leaves no stamp to read the
+		// table at: declined.
+		let versioned = LogicalOp::VersionScope(crate::expr::logical::LogicalVersionScope {
+			input: Box::new(select_all(resolved_source("t"))),
+			version: LogicalExpr::Param(crate::expr::Param::from("unbound".to_owned())),
+		});
+		assert!(unsupported(planner.plan_logical(versioned).await));
+		// An unresolved source under the same `VERSION` is planned: its scan
+		// resolves the table when it runs, at the stamp it evaluates.
+		let runtime = LogicalOp::VersionScope(crate::expr::logical::LogicalVersionScope {
+			input: Box::new(select_all(LogicalOp::Source(LogicalSource {
+				source: SourceRef::Table(TableName::from("t")),
+				schema: None,
+				with: None,
+				for_update: false,
+			}))),
+			version: LogicalExpr::Param(crate::expr::Param::from("unbound".to_owned())),
+		});
+		assert!(planner.plan_logical(runtime).await.is_ok());
 	}
 }

@@ -17,11 +17,11 @@
 use reblessive::Stk;
 use surrealdb_strand::TableName;
 
+use crate::expr::logical::LogicalExpr;
 use crate::expr::match_plan::{
 	BindingId, BindingKind, DetachMode, InsertEdgePlan, InsertNodePlan, InsertStage, MutationStage,
 	UpdateData,
 };
-use crate::expr::{Expr, Idiom};
 use crate::gql::ast::{
 	DeleteStatement, DetachMode as AstDetachMode, GqlExpr, Ident, InsertEdgeDir, InsertNode,
 	InsertStatement, MutationStatement, RemoveItem, RemoveStatement, SetItem, SetStatement,
@@ -113,8 +113,8 @@ async fn lower_set(
 					// silently no-op (the native write path re-stamps an edge's
 					// `in`/`out` and the record `id` after the SET applies).
 					reject_reserved_key(prop)?;
-					let value: Expr = lower_value(stk, value, &scope).await?.into();
-					assignments.push((Idiom::field(prop.name.clone()), value));
+					let value = lower_value(stk, value, &scope).await?;
+					assignments.push((prop.name.clone(), value));
 					i += 1;
 				}
 				stages.push(MutationStage::Update {
@@ -130,7 +130,7 @@ async fn lower_set(
 				let target = resolve_target(registry, var)?;
 				reject_reserved_keys(props)?;
 				let map = GqlExpr::Map(props.clone(), *span);
-				let content: Expr = lower_value(stk, &map, &scope).await?.into();
+				let content = lower_value(stk, &map, &scope).await?;
 				stages.push(MutationStage::Update {
 					target,
 					data: UpdateData::Content(content),
@@ -172,7 +172,7 @@ fn lower_remove(
 					if next_var.name != target_name {
 						break;
 					}
-					fields.push(Idiom::field(prop.name.clone()));
+					fields.push(prop.name.clone());
 					i += 1;
 				}
 				stages.push(MutationStage::Update {
@@ -328,10 +328,10 @@ async fn lower_props(
 	stk: &mut Stk,
 	props: &[(Ident, GqlExpr)],
 	scope: &Scope<'_>,
-) -> Result<Expr, SyntaxError> {
+) -> Result<LogicalExpr, SyntaxError> {
 	// Reuse the value lowering's object handling by lowering a synthetic map.
 	let map = GqlExpr::Map(props.to_vec(), crate::syn::token::Span::empty());
-	Ok(lower_value(stk, &map, scope).await?.into())
+	lower_value(stk, &map, scope).await
 }
 
 /// Rejects `SET a = {…}` that sets the reserved record keys (`id`, and an edge's

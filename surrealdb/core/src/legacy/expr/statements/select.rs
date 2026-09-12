@@ -40,8 +40,11 @@ fn uncovered_order_idiom(stm: &SelectStatement) -> Option<String> {
 				// `Field::All` is handled by `has_all_selection` above.
 				return true;
 			};
-			if selector.alias.as_ref().is_some_and(|alias| alias == idiom) {
-				return true;
+			// A renamed selector puts only its alias on the output row, so
+			// the idiom it renames is gone by the time the sort runs and
+			// cannot cover an order key.
+			if let Some(alias) = &selector.alias {
+				return alias == idiom;
 			}
 			match &selector.expr {
 				Expr::Idiom(x) => x == idiom,

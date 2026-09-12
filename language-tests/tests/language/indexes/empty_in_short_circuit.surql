@@ -26,13 +26,19 @@ value = "[{ id: t:a, name: 'alice' }, { id: t:b, name: 'bob' }]"
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    EmptyScan [ctx: Rt]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    EmptyScan [ctx: Rt]
+''''
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    EmptyScan [ctx: Rt]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    EmptyScan [ctx: Rt]
+''''
 */
 DEFINE TABLE t;
 DEFINE INDEX idx_name ON t FIELDS name;

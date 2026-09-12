@@ -1,14 +1,11 @@
-//! A statement must answer the same whichever form it is in.
+//! What the executor derives from a statement before it runs.
 //!
-//! [`TopLevelStatement`] carries either the surface AST or the lowered
-//! expression tree, and answers the executor's questions from whichever it
-//! holds. The two enums it walks evolve separately, so every derived answer
-//! exists twice and the two can drift apart: a variant classified on one side
-//! and not the other would send the same query down a different path
-//! depending only on which front end submitted it.
-//!
-//! These sweep the language-test corpus, converting each statement and
-//! comparing every answer.
+//! [`TopLevelStatement`] holds the surface AST, and two of the answers it
+//! gives are checked over the whole language-test corpus: the text that names
+//! a statement to observers, which must never carry a plaintext credential,
+//! and the `FOR UPDATE` admission, which runs on the surface statement before
+//! lowering and must agree with the expression-layer check the legacy engine
+//! applies to the same statement.
 
 use std::path::{Path, PathBuf};
 
@@ -102,70 +99,6 @@ fn assert_swept(visited: Option<usize>) {
 	);
 }
 
-/// Every answer a statement gives, compared across both of its forms in one
-/// walk of the corpus.
-///
-/// One test rather than one per answer because each was re-reading and
-/// re-parsing all 2000-odd fixtures to ask a different question of the same
-/// statements.
-///
-/// `read_only` and `statement_type` are the two independent answers here.
-/// `kind_reads_only` and `query_type` are derived from `statement_type`, so
-/// they agree across forms by construction and asserting them separately would
-/// only restate that.
-#[test]
-fn both_forms_answer_a_statement_the_same_way() {
-	let mut rendered = 0;
-	let visited = each_corpus_statement(|path, expr| {
-		let surface = TopLevelStatement::Ast(expr.clone());
-		let lowered = TopLevelStatement::Plan(expr.clone().into());
-		let context = path.display();
-
-		// What the observer records, and — through it — what a transport
-		// reads to learn whether a result names a new subscription.
-		assert_eq!(
-			surface.statement_type(),
-			lowered.statement_type(),
-			"statement_type differs between the two forms in {context}"
-		);
-
-		// What the executor's drivers act on. A statement that dispatched
-		// differently by form would run under a different driver.
-		assert_eq!(
-			surface.dispatch(),
-			lowered.dispatch(),
-			"dispatch differs between the two forms in {context}"
-		);
-
-		// The predicate that chooses a transaction mode.
-		assert_eq!(
-			surface.read_only(),
-			lowered.read_only(),
-			"read_only differs between the two forms in {context}"
-		);
-
-		// `PASSWORD` is excluded because lowering it is not a function: each
-		// conversion salts the hash afresh, so two conversions of one
-		// statement cannot produce the same text. That case is covered by
-		// `statement_text_never_carries_a_plaintext_password` instead.
-		if !expr.to_sql().to_ascii_uppercase().contains("PASSWORD") {
-			assert_eq!(
-				surface.to_sql(),
-				lowered.to_sql(),
-				"statement text differs between the two forms in {context}"
-			);
-			rendered += 1;
-		}
-	});
-	assert_swept(visited);
-	// The render comparison covers a subset of the same sweep, so it is only a
-	// number worth asserting on when there was a corpus behind it.
-	assert!(
-		visited.is_none_or(|visited| rendered * 100 / visited.max(1) > 95),
-		"only {rendered} of {visited:?} statements had their text compared"
-	);
-}
-
 /// SECURITY: statement text must never carry a plaintext credential.
 ///
 /// The surface form does — it is what the user typed — and lowering is what
@@ -190,4 +123,57 @@ fn statement_text_never_carries_a_plaintext_password() {
 		let text = TopLevelStatement::Ast(surface).to_sql();
 		assert!(!text.contains("hunter2"), "statement text disclosed a plaintext password: {text}");
 	}
+}
+
+/// The `FOR UPDATE` rules are checked on the surface statement before it is
+/// lowered, and on the expression-layer statement by the legacy engine. Both
+/// checks must admit and refuse the same statements with the same message, or
+/// a `SELECT` embedded in a converted expression would be judged differently
+/// from the same text at the top level.
+#[test]
+fn for_update_validation_agrees_across_statement_forms() {
+	fn compare(sql: &str, stmt: &crate::sql::statements::SelectStatement) {
+		let surface = crate::dbs::validate_for_update_ast(stmt).map_err(|e| e.to_string());
+		let lowered =
+			crate::dbs::validate_for_update(&stmt.clone().into()).map_err(|e| e.to_string());
+		assert_eq!(surface, lowered, "FOR UPDATE validation differs between forms for: {sql}");
+	}
+
+	// One statement per rule, so each is exercised whatever the corpus holds.
+	// The first is admitted; every other one is refused for a different
+	// reason.
+	for sql in [
+		"SELECT * FROM t:1 FOR UPDATE",
+		"SELECT * FROM t FOR UPDATE",
+		"SELECT * FROM t:1..9 FOR UPDATE",
+		"SELECT * FROM t:1, t:2 LIMIT 1 FOR UPDATE",
+		"SELECT * FROM t:1 GROUP ALL FOR UPDATE",
+		"SELECT * FROM t:1 SPLIT a FOR UPDATE",
+		"SELECT * FROM t:1 VERSION d'2024-01-01T00:00:00Z' FOR UPDATE",
+		"SELECT * FROM (SELECT * FROM t FOR UPDATE)",
+	] {
+		let mut ast = crate::syn::parse(sql).unwrap_or_else(|e| panic!("{sql}: {e}"));
+		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Select(stmt)) =
+			ast.expressions.remove(0)
+		else {
+			panic!("{sql}: expected a SELECT");
+		};
+		compare(sql, &stmt);
+	}
+
+	let mut for_update = 0;
+	let visited = each_corpus_statement(|path, expr| {
+		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Select(stmt)) = expr else {
+			return;
+		};
+		if stmt.for_update {
+			for_update += 1;
+		}
+		compare(&path.display().to_string(), stmt);
+	});
+	assert_swept(visited);
+	assert!(
+		visited.is_none() || for_update > 0,
+		"the corpus sweep saw no FOR UPDATE statement, so it compared only the admitted path"
+	);
 }

@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use crate::ctx::CancelHandle;
 use crate::dbs::Session;
-use crate::expr::LogicalPlan;
+use crate::expr::logical::LogicalOp;
 use crate::kvs::Transaction;
 use crate::sql::Ast;
 use crate::types::PublicVariables;
@@ -55,11 +55,11 @@ pub enum QuerySource<'src> {
 	},
 	/// An already-parsed SurrealQL surface AST.
 	Ast(Ast),
-	/// Statements lowered by a caller that builds the expression tree itself:
-	/// a `PreparedGqlQuery` wraps one of these, so pass its inner plan; so do
-	/// the GraphQL bridge and model upload. There is no surface syntax behind
-	/// these.
-	Plan(LogicalPlan),
+	/// Plans from a front end that emits operators rather than statements: a
+	/// `PreparedGqlQuery` holds one, so pass its inner plan. There is no
+	/// surface syntax behind a plan, so nothing converts it, and each runs on
+	/// the streaming engine or fails.
+	Plan(Vec<LogicalOp>),
 }
 
 impl<'src> QuerySource<'src> {
@@ -95,9 +95,9 @@ impl From<Ast> for QuerySource<'_> {
 	}
 }
 
-impl From<LogicalPlan> for QuerySource<'_> {
-	fn from(plan: LogicalPlan) -> Self {
-		QuerySource::Plan(plan)
+impl From<Vec<LogicalOp>> for QuerySource<'_> {
+	fn from(plans: Vec<LogicalOp>) -> Self {
+		QuerySource::Plan(plans)
 	}
 }
 

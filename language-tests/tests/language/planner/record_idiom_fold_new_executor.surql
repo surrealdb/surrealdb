@@ -42,7 +42,10 @@ value = "[{ id: ticket:t5, tier: 'pro' }]"
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { projections: 'id' }, children: [{ attributes: { access: '= person:alice', direction: 'Forward', index: 'idx_owner' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [index: idx_owner, access: = person:alice, direction: Forward]
+''''
 
 [[test.results]]
 value = "[{ id: ticket:t1 }, { id: ticket:t2 }]"
@@ -51,13 +54,19 @@ value = "[{ id: ticket:t1 }, { id: ticket:t2 }]"
 value = "NONE"
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "= 'gold'", direction: 'Forward', index: 'idx_tier' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [index: idx_tier, access: = 'gold', direction: Forward]
+"'''
 
 [[test.results]]
 value = "[{ id: ticket:t1 }, { id: ticket:t3 }]"
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "= 'ACME'", direction: 'Forward', index: 'idx_org_label' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [index: idx_org_label, access: = 'ACME', direction: Forward]
+"'''
 
 [[test.results]]
 value = "[{ id: ticket:t1 }, { id: ticket:t3 }]"
@@ -66,7 +75,10 @@ value = "[{ id: ticket:t1 }, { id: ticket:t3 }]"
 value = "NONE"
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "= 'eu'", direction: 'Forward', index: 'idx_region' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [index: idx_region, access: = 'eu', direction: Forward]
+"'''
 
 [[test.results]]
 value = "[{ id: ticket:t1 }, { id: ticket:t3 }, { id: ticket:t4 }]"
@@ -87,7 +99,10 @@ value = "[{ id: account:a, plan: 'pro', score: 2 }]"
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { projections: 'id' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'tier = (account:a).plan', table: 'ticket' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }"
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    TableScan [ctx: Db] [table: ticket, direction: Forward, predicate: tier = (account:a).plan, pre_decode_filter: no (unsupported predicate)]
+''''
 
 [[test.results]]
 value = "[{ id: ticket:t5 }]"
@@ -109,22 +124,22 @@ CREATE ticket:t5 SET tier = 'pro';
 LET $t1 = ticket:t1;
 
 -- Single-hop fold: $t1.owner resolves to person:alice at plan time
-SELECT id FROM ticket WHERE owner = $t1.owner ORDER BY id EXPLAIN;
+EXPLAIN SELECT id FROM ticket WHERE owner = $t1.owner ORDER BY id;
 SELECT id FROM ticket WHERE owner = $t1.owner ORDER BY id;
 
 -- Nested object path: $p.profile.tier resolves through the record's object field
 LET $p = person:alice;
-SELECT id FROM ticket WHERE tier = $p.profile.tier ORDER BY id EXPLAIN;
+EXPLAIN SELECT id FROM ticket WHERE tier = $p.profile.tier ORDER BY id;
 SELECT id FROM ticket WHERE tier = $p.profile.tier ORDER BY id;
 
 -- Chained record links: $t1.owner.org.label fetches person:alice then org:acme
-SELECT id FROM ticket WHERE orgLabel = $t1.owner.org.label ORDER BY id EXPLAIN;
+EXPLAIN SELECT id FROM ticket WHERE orgLabel = $t1.owner.org.label ORDER BY id;
 SELECT id FROM ticket WHERE orgLabel = $t1.owner.org.label ORDER BY id;
 
 -- Object record-id key component: $t4.shard.region resolves from the id key
 -- itself (table `zone` has no records; a fetch would yield NONE instead of 'eu')
 LET $t4 = ticket:t4;
-SELECT id FROM ticket WHERE region = $t4.shard.region ORDER BY id EXPLAIN;
+EXPLAIN SELECT id FROM ticket WHERE region = $t4.shard.region ORDER BY id;
 SELECT id FROM ticket WHERE region = $t4.shard.region ORDER BY id;
 
 -- Missing record: field access yields NONE, matching runtime semantics
@@ -137,5 +152,5 @@ SELECT id FROM ticket WHERE owner = $ghost.owner ORDER BY id;
 DEFINE FIELD score ON TABLE account COMPUTED 1 + 1;
 CREATE account:a SET plan = 'pro';
 LET $a = account:a;
-SELECT id FROM ticket WHERE tier = $a.plan ORDER BY id EXPLAIN;
+EXPLAIN SELECT id FROM ticket WHERE tier = $a.plan ORDER BY id;
 SELECT id FROM ticket WHERE tier = $a.plan ORDER BY id;

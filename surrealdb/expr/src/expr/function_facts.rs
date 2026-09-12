@@ -77,12 +77,6 @@ impl Visitor for FactsScanner {
 			}
 
 			// A GQL plan carries its mutations in its stages.
-			Expr::Match(plan) => {
-				if plan.has_mutations() {
-					self.facts.direct_writes = true;
-				}
-			}
-
 			// A call operator on anything but a closure literal executes a
 			// body this tree cannot see. A literal's body is walked by the
 			// default traversal, so it needs no special case.

@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::ops::Deref;
 
 use anyhow::{Result, ensure};
@@ -17,7 +16,6 @@ use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::field::{AlterDefault, AlterFieldStatement};
 use crate::expr::statements::define::kind_contains_object;
 use crate::iam::{Action, AuthLimit, ResourceKind};
-use crate::key::schema::FieldKey;
 use crate::legacy::{expr_to_ident, expr_to_idiom};
 use crate::val::{TableName, Value};
 
@@ -117,6 +115,7 @@ pub(crate) async fn alter_field_statement_compute(
 
 	if let Some(permissions) = &this.permissions {
 		df.select_permission = permissions.select.clone();
+		df.select_body = catalog::LogicalPermissionBody::of(&permissions.select);
 		df.create_permission = permissions.create.clone();
 		df.update_permission = permissions.update.clone();
 	}
@@ -210,13 +209,7 @@ pub(crate) async fn alter_field_statement_compute(
 		);
 	}
 
-	let key = FieldKey {
-		ns,
-		db,
-		tb: Cow::Borrowed(&what),
-		fd: Cow::Borrowed(&name),
-	};
-	txn.set_key(&key, &df.to_stored()).await?;
+	txn.put_tb_field(ns, db, &what, &df).await?;
 	// Dropping the REFERENCE clause or narrowing/changing the record kind can
 	// strand reference keys under target tables the field no longer
 	// references. Purge them so the DELETE reference-purge gate stays sound.

@@ -31,10 +31,9 @@ use std::sync::Arc;
 
 use super::pipeline::{FieldState, build_field_state, materialise_fields_with_permissions};
 use crate::catalog::providers::TableProvider;
-use crate::catalog::table_select_permission;
 use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
-	should_check_perms, validate_record_user_access,
+	PhysicalPermission, check_permission_for_value, should_check_perms,
+	table_select_permission_physical_runtime, validate_record_user_access,
 };
 use crate::exec::{ControlFlowExt, ExecutionContext};
 use crate::expr::ControlFlow;
@@ -121,8 +120,7 @@ impl FetchFieldStateCache {
 					.get_table_def(table, version)
 					.await
 					.context("Failed to get table definition")?;
-				let catalog_perm = table_select_permission(table_def.as_deref());
-				convert_permission_to_physical_runtime(catalog_perm, ctx)
+				table_select_permission_physical_runtime(table_def.as_deref(), ctx)
 					.await
 					.context("Failed to convert permission")?
 			} else {

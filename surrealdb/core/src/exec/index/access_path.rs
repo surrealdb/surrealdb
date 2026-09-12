@@ -8,9 +8,10 @@ use std::sync::Arc;
 
 use super::IndexCandidate;
 use crate::catalog::IndexDefinition;
+use crate::expr::BinaryOperator;
+use crate::expr::logical::LogicalExpr;
 use crate::expr::operator::MatchesOperator;
 use crate::expr::with::With;
-use crate::expr::{BinaryOperator, Cond};
 use crate::kvs::Direction;
 use crate::val::{Number, Range, Value};
 
@@ -202,7 +203,7 @@ pub struct KnnPrefilterPlan {
 	/// the whole stripped WHERE is covered. MATCHES conjuncts never appear
 	/// here: they are not evaluable through the plain in-traversal residual
 	/// (no query executor).
-	pub residual: Option<Cond>,
+	pub residual: Option<LogicalExpr>,
 	/// `true` when a MATCHES conjunct could not be covered by `root` (its
 	/// full-text index does not carry shared doc-IDs). Such a conjunct is
 	/// absent from `residual` too, so the scan must keep its MATCHES-aware
@@ -463,8 +464,9 @@ mod tests {
 	use crate::catalog::{FullTextParams, Index, IndexId, Scoring};
 	use crate::exec::index::IndexCandidate;
 	use crate::exec::planner::util::strip_index_conditions;
+	use crate::expr::Idiom;
+	use crate::expr::logical::lower_expr;
 	use crate::expr::operator::{BooleanOperator, MatchesOperator};
-	use crate::expr::{Cond, Expr, Idiom};
 
 	// ------------------------------------------------------------------
 	// Fixtures
@@ -545,14 +547,15 @@ mod tests {
 
 	/// Parse `snippet` as the WHERE clause of a SELECT so the tests state
 	/// predicates as source text rather than hand-built AST nodes.
-	fn parse_cond(snippet: &str) -> Cond {
+	fn parse_cond(snippet: &str) -> LogicalExpr {
 		let src = format!("SELECT * FROM t WHERE {snippet}");
 		let ast = crate::syn::parse(&src).expect("parse");
 		let mut exprs = ast.expressions;
 		assert_eq!(exprs.len(), 1, "expected one statement from {src:?}");
-		let top: crate::expr::TopLevelExpr = exprs.remove(0).into();
-		match top {
-			crate::expr::TopLevelExpr::Expr(Expr::Select(s)) => s.cond.expect("WHERE"),
+		match exprs.remove(0) {
+			crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Select(s)) => {
+				lower_expr(s.cond.expect("WHERE").0).expect("lowers")
+			}
 			other => panic!("expected SELECT, got {other:?}"),
 		}
 	}
@@ -563,7 +566,7 @@ mod tests {
 	fn residual(cond: &str, access: &BTreeAccess, cols: &[&str]) -> Option<String> {
 		let cols: Vec<Idiom> =
 			cols.iter().map(|c| Idiom::from_str(c).expect("valid idiom")).collect();
-		strip_index_conditions(&parse_cond(cond), access, &cols).map(|c| c.0.to_sql())
+		strip_index_conditions(&parse_cond(cond), access, &cols).map(|c| c.to_sql())
 	}
 
 	// ------------------------------------------------------------------

@@ -20,8 +20,7 @@ use crate::exec::{
 	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
 	buffer_stream, monitor_stream,
 };
-use crate::expr::idiom::Idiom;
-use crate::expr::part::{DestructurePart, Part};
+use crate::expr::logical::{LogicalDestructureField, LogicalExpr, LogicalLiteral};
 use crate::val::{Object, Strand, Value};
 
 // ---------------------------------------------------------------------------
@@ -31,12 +30,11 @@ use crate::val::{Object, Strand, Value};
 /// Wrap an output name string into a single-part [`FieldPath`].
 ///
 /// The name is treated as an opaque flat key. Callers that need a nested
-/// output path must supply a structurally multi-part [`FieldPath`] directly
-/// via [`FieldSelection::from_field_path`] or
-/// [`FieldSelection::with_alias_path`] — typically by calling
-/// `idiom_to_field_path` on the parsed idiom, which preserves the
-/// distinction between `AS foo.bar` (nested) and `` AS `foo.bar` ``
-/// (flat, single Part::Field whose identifier contains a dot).
+/// output path must supply a structurally multi-part [`FieldPath`] via
+/// [`FieldSelection::from_field_path`] or [`FieldSelection::with_alias_path`],
+/// built from the alias or from `LogicalExpr::output_path` of the field, which
+/// preserves the distinction between `AS foo.bar` (nested) and
+/// `` AS `foo.bar` `` (flat, a single key whose identifier contains a dot).
 fn parse_output_path(name: &str) -> FieldPath {
 	FieldPath::field(name.to_string())
 }
@@ -90,12 +88,10 @@ impl FieldSelection {
 	///
 	/// The name is treated as an opaque flat key (a single-part
 	/// [`FieldPath`]). Callers that need a nested output path must supply
-	/// a structurally multi-part [`FieldPath`] directly via
+	/// a structurally multi-part [`FieldPath`] via
 	/// [`FieldSelection::from_field_path`] or
-	/// [`FieldSelection::with_alias_path`] — typically by calling
-	/// `idiom_to_field_path` on the parsed idiom, which preserves the
-	/// distinction between `AS foo.bar` (nested) and `` AS `foo.bar` ``
-	/// (flat).
+	/// [`FieldSelection::with_alias_path`], which preserves the distinction
+	/// between `AS foo.bar` (nested) and `` AS `foo.bar` `` (flat).
 	pub fn new(output_name: &str, expr: Arc<dyn PhysicalExpr>) -> Self {
 		Self {
 			output_path: parse_output_path(output_name),
@@ -105,7 +101,7 @@ impl FieldSelection {
 	}
 
 	/// Create a new field selection with an explicit alias whose output path
-	/// was derived directly from the parsed alias idiom.
+	/// was built from the alias's output path.
 	///
 	/// Used when the user specified an alias in the query
 	/// (e.g., `SELECT expr AS alias`). Preserves the single-part vs
@@ -120,8 +116,9 @@ impl FieldSelection {
 		}
 	}
 
-	/// Create a new field selection from a FieldPath directly.
-	/// Used for graph traversals without aliases where the path represents nested structure.
+	/// Create a new field selection from a [`FieldPath`] directly: the path an
+	/// unaliased expression names itself by (`LogicalExpr::output_path`),
+	/// where a multi-part path lands the value in a nested object.
 	pub fn from_field_path(output_path: FieldPath, expr: Arc<dyn PhysicalExpr>) -> Self {
 		Self {
 			output_path,
@@ -145,10 +142,26 @@ pub struct Project {
 	pub input: Arc<dyn ExecOperator>,
 	/// The fields to select/project (shared across batches via Arc)
 	pub fields: Arc<[FieldSelection]>,
-	/// Fields to omit from output (for SELECT * OMIT) (shared across batches via Arc)
-	pub omit: Arc<[Idiom]>,
+	/// Paths to omit from output (for SELECT * OMIT) (shared across batches via Arc)
+	pub omit: Arc<[LogicalExpr]>,
 	/// Whether to include all fields from input (for SELECT *, field1, field2)
 	pub include_all: bool,
+	/// Whether every field expression is free of effects that evaluating it
+	/// out of the order it was written in would expose: it stages no write,
+	/// advances no counter, reaches nothing outside the transaction and runs
+	/// no body the plan cannot see.
+	///
+	/// It decides how a batch is evaluated, never what the answer is. `true`
+	/// licenses the faster column-at-a-time shape, which evaluates one field
+	/// for every row of the batch before the next; `false` — the safe answer,
+	/// and the default — evaluates a row at a time, each field in written
+	/// order, so a call that writes or advances a sequence is made in the
+	/// statement's own order.
+	///
+	/// Read only by the `include_all == false` path. The `include_all` path is
+	/// a row at a time whatever this says, because dereferencing a record id
+	/// and dropping the rows that miss are per-row decisions.
+	pub(crate) effect_free_columns: bool,
 	/// Per-operator metrics for EXPLAIN ANALYZE
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -158,7 +171,7 @@ impl Project {
 	pub(crate) fn new(
 		input: Arc<dyn ExecOperator>,
 		fields: Vec<FieldSelection>,
-		omit: Vec<Idiom>,
+		omit: Vec<LogicalExpr>,
 		include_all: bool,
 	) -> Self {
 		Self {
@@ -166,8 +179,17 @@ impl Project {
 			fields: fields.into(),
 			omit: omit.into(),
 			include_all,
+			effect_free_columns: false,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Declare every field expression effect-free; see
+	/// [`Self::effect_free_columns`]. Only the planner, which holds the
+	/// expressions as written, can answer this.
+	pub(crate) fn with_effect_free_columns(mut self) -> Self {
+		self.effect_free_columns = true;
+		self
 	}
 }
 impl ExecOperator for Project {
@@ -232,6 +254,7 @@ impl ExecOperator for Project {
 		let fields = Arc::clone(&self.fields);
 		let omit = Arc::clone(&self.omit);
 		let include_all = self.include_all;
+		let effect_free_columns = self.effect_free_columns;
 		let ctx = ctx.clone();
 
 		// Create a stream that projects fields
@@ -324,38 +347,59 @@ impl ExecOperator for Project {
 					}
 					values
 				} else {
-					// --- Batch per-field evaluation for non-include_all ---
-					// Evaluate each field expression across all rows in one batch call,
-					// then assemble per-row objects from the results.
+					// --- non-include_all: build one output object per row ---
+					//
+					// A field at a time is the faster shape — `evaluate_batch`
+					// lets an I/O-bound expression (a subquery, a lookup)
+					// overlap its rows — but it evaluates one field for the
+					// whole batch before the next, so two fields' effects
+					// interleave differently from the statement as written.
+					// That is invisible where the fields have no effect to
+					// reorder, which is what `effect_free_columns` answers;
+					// where they may, the batch is evaluated a row at a time,
+					// each field in written order, which is the per-row
+					// engine's order.
 					let batch_len = batch.len();
 					let mut objects: Vec<Object> =
 						(0..batch_len).map(|_| Object::default()).collect();
 
-					for field in fields.iter() {
-						if field.expr.is_projection_function() {
-							// Projection functions return multiple field bindings;
-							// handle per-row since they need special object assembly.
-							for (i, value) in batch.values().iter().enumerate() {
-								evaluate_and_set_field(
-									&mut objects[i],
-									field,
-									eval_ctx.with_value_and_doc(value),
-								)
-								.await?;
+					if effect_free_columns {
+						for field in fields.iter() {
+							if field.expr.is_projection_function() {
+								// Projection functions return multiple field bindings;
+								// handle per-row since they need special object assembly.
+								for (i, value) in batch.values().iter().enumerate() {
+									evaluate_and_set_field(
+										&mut objects[i],
+										field,
+										eval_ctx.with_value_and_doc(value),
+									)
+									.await?;
+								}
+							} else {
+								// Batch evaluation: use evaluate_batch which allows
+								// I/O-bound expressions (subqueries, lookups) to
+								// parallelize. For simple field accesses, the default
+								// sequential implementation is used.
+								let field_values = field
+									.expr
+									.evaluate_batch(eval_ctx.clone(), batch.values())
+									.await?;
+								for (i, field_value) in field_values.into_iter().enumerate() {
+									set_field_on_object(
+										&mut objects[i],
+										&field.output_path,
+										field_value,
+									);
+								}
 							}
-						} else {
-							// Batch evaluation: use evaluate_batch which allows
-							// I/O-bound expressions (subqueries, lookups) to
-							// parallelize. For simple field accesses, the default
-							// sequential implementation is used.
-							let field_values =
-								field.expr.evaluate_batch(eval_ctx.clone(), batch.values()).await?;
-							for (i, field_value) in field_values.into_iter().enumerate() {
-								set_field_on_object(
-									&mut objects[i],
-									&field.output_path,
-									field_value,
-								);
+						}
+					} else {
+						for (i, value) in batch.values().iter().enumerate() {
+							let row_ctx = eval_ctx.with_value_and_doc(value);
+							for field in fields.iter() {
+								evaluate_and_set_field(&mut objects[i], field, row_ctx.clone())
+									.await?;
 							}
 						}
 					}
@@ -475,104 +519,277 @@ async fn evaluate_and_set_field(
 // OMIT helpers
 // ---------------------------------------------------------------------------
 
-/// Synchronously remove a field from a value by idiom path.
+/// Synchronously remove the location a path expression denotes from a value.
+///
+/// The path is applied from its root, following the value through field
+/// accesses, array indices and `.*` fan-out, and the outermost step decides
+/// what is removed: a field is deleted from its object, an index removes the
+/// element it numbers or the key it spells, `[$]` removes the last element,
+/// `.*` empties the object or array, and a destructure deletes the listed
+/// fields. A `Broadcast` applies its body to each value its base reaches.
+///
+/// The walk is structural, so it only reaches what a path names without
+/// evaluating any of its steps. [`omit_path_is_expressible`] is the statement
+/// of which paths those are, and the planner declines the rest: a path this
+/// walker cannot perform would remove nothing at all, where the per-row
+/// engine evaluates the step and removes what it names.
 #[inline]
-pub(crate) fn omit_field_sync(value: &mut Value, idiom: &Idiom) {
-	// For simple single-part idioms, directly remove from object
-	if idiom.len() == 1 {
-		if let Some(Part::Field(field_name)) = idiom.first()
-			&& let Value::Object(obj) = value
-		{
-			obj.remove(field_name);
-		}
-	} else {
-		// For nested paths, traverse and remove
-		omit_nested_field(value, idiom, 0);
-	}
-}
-
-/// Recursively traverse and remove a nested field.
-fn omit_nested_field(value: &mut Value, idiom: &Idiom, depth: usize) {
-	let Some(part) = idiom.get(depth) else {
-		return;
-	};
-	let is_last = depth == idiom.len() - 1;
-
-	match part {
-		Part::Field(field_name) => {
+pub(crate) fn omit_field_sync(value: &mut Value, path: &LogicalExpr) {
+	match path {
+		LogicalExpr::Field(name) => {
 			if let Value::Object(obj) = value {
-				if is_last {
-					obj.remove(field_name);
-				} else if let Some(nested) = obj.get_mut(field_name) {
-					omit_nested_field(nested, idiom, depth + 1);
-				}
-			}
-		}
-		Part::All => {
-			if is_last {
-				match value {
-					Value::Object(obj) => obj.clear(),
-					Value::Array(arr) => arr.clear(),
-					_ => {}
-				}
-			} else {
-				match value {
-					Value::Object(obj) => {
-						for (_, v) in obj.iter_mut() {
-							omit_nested_field(v, idiom, depth + 1);
-						}
-					}
-					Value::Array(arr) => {
-						for v in arr.iter_mut() {
-							omit_nested_field(v, idiom, depth + 1);
-						}
-					}
-					_ => {}
-				}
-			}
-		}
-		Part::Value(expr) => {
-			// Handle array index access: [0], [1], etc.
-			if let crate::expr::Expr::Literal(crate::expr::Literal::Integer(idx)) = expr
-				&& let Value::Array(arr) = value
-				&& let Some(nested) = arr.get_mut(*idx as usize)
-			{
-				if is_last {
-					// Can't "remove" an array element by index, set to None
-					*nested = Value::None;
-				} else {
-					omit_nested_field(nested, idiom, depth + 1);
-				}
-			}
-		}
-		Part::Destructure(destructure_parts) => {
-			// Destructure in OMIT: remove the listed fields from the current object.
-			// E.g., OMIT obj.c.{ d, f } removes d and f from obj.c.
-			if let Value::Object(obj) = value {
-				omit_destructure_fields(obj, destructure_parts);
-			}
-		}
-		_ => {
-			// Other part types are not supported for omit
-		}
-	}
-}
-
-/// Recursively remove fields described by destructure parts from an object.
-fn omit_destructure_fields(obj: &mut Object, parts: &[DestructurePart]) {
-	for dp in parts {
-		match dp {
-			DestructurePart::Field(name) | DestructurePart::All(name) => {
 				obj.remove(name.as_str());
 			}
-			DestructurePart::Destructure(name, nested) => {
+		}
+		LogicalExpr::Access {
+			base,
+			field,
+		} => for_each_target(value, base, &mut |target| {
+			if let Value::Object(obj) = target {
+				obj.remove(field.as_str());
+			}
+		}),
+		LogicalExpr::Each(base) => for_each_target(value, base, &mut |target| match target {
+			Value::Object(obj) => obj.clear(),
+			Value::Array(arr) => arr.clear(),
+			_ => {}
+		}),
+		LogicalExpr::Index {
+			base,
+			index,
+		} => {
+			let Some(idx) = literal_index(index) else {
+				return;
+			};
+			// An index numbers a position in an array and spells a key in an
+			// object, and removes what it names in either.
+			for_each_target(value, base, &mut |target| match target {
+				Value::Array(arr) if idx < arr.len() => {
+					arr.remove(idx);
+				}
+				Value::Object(obj) => {
+					obj.remove(idx.to_string().as_str());
+				}
+				_ => {}
+			})
+		}
+		LogicalExpr::First(base) => for_each_target(value, base, &mut |target| {
+			if let Value::Array(arr) = target
+				&& !arr.is_empty()
+			{
+				arr.remove(0);
+			}
+		}),
+		LogicalExpr::Last(base) => for_each_target(value, base, &mut |target| {
+			if let Value::Array(arr) = target
+				&& let Some(last) = arr.len().checked_sub(1)
+			{
+				arr.remove(last);
+			}
+		}),
+		LogicalExpr::Destructure {
+			base,
+			fields,
+		} => for_each_target(value, base, &mut |target| {
+			// OMIT obj.c.{ d, f } removes d and f from obj.c.
+			if let Value::Object(obj) = target {
+				omit_destructure_fields(obj, fields);
+			}
+		}),
+		LogicalExpr::Broadcast {
+			base,
+			body,
+			..
+		} => for_each_target(value, base, &mut |target| omit_field_sync(target, body)),
+		_ => {}
+	}
+}
+
+/// Whether [`omit_field_sync`] can perform the removal `path` describes.
+///
+/// The walker is structural: it follows a path through a value without
+/// evaluating any of its steps. A step whose meaning comes from evaluation —
+/// a filter, a method, a lookup, a recursion, an index that is not written
+/// down as a non-negative integer — therefore names no location it can reach,
+/// and applying such a path would remove nothing at all. The planner declines
+/// a statement holding one so it runs on the per-row engine, which evaluates
+/// the step and removes what it names.
+pub(crate) fn omit_path_is_expressible(path: &LogicalExpr) -> bool {
+	match path {
+		LogicalExpr::Field(_) => true,
+		LogicalExpr::Access {
+			base,
+			..
+		}
+		| LogicalExpr::Each(base)
+		| LogicalExpr::First(base)
+		| LogicalExpr::Last(base) => omit_target_is_reachable(base),
+		LogicalExpr::Index {
+			base,
+			index,
+		} => literal_index(index).is_some() && omit_target_is_reachable(base),
+		LogicalExpr::Destructure {
+			base,
+			fields,
+		} => omit_target_is_reachable(base) && omit_destructure_is_expressible(fields),
+		LogicalExpr::Broadcast {
+			base,
+			body,
+			..
+		} => omit_target_is_reachable(base) && omit_path_is_expressible(body),
+		_ => false,
+	}
+}
+
+/// Whether [`for_each_target`] can reach the values `path` names.
+fn omit_target_is_reachable(path: &LogicalExpr) -> bool {
+	match path {
+		LogicalExpr::Current | LogicalExpr::Field(_) => true,
+		LogicalExpr::Access {
+			base,
+			..
+		}
+		| LogicalExpr::Each(base)
+		| LogicalExpr::First(base)
+		| LogicalExpr::Last(base) => omit_target_is_reachable(base),
+		LogicalExpr::Index {
+			base,
+			index,
+		} => literal_index(index).is_some() && omit_target_is_reachable(base),
+		LogicalExpr::Broadcast {
+			base,
+			body,
+			..
+		} => omit_target_is_reachable(base) && omit_target_is_reachable(body),
+		_ => false,
+	}
+}
+
+/// Whether every entry of a destructure step names a location
+/// [`omit_destructure_fields`] removes. An aliased entry does not: it names an
+/// expression, which the per-row engine rejects outright.
+fn omit_destructure_is_expressible(fields: &[LogicalDestructureField]) -> bool {
+	fields.iter().all(|field| match field {
+		LogicalDestructureField::Field(_) | LogicalDestructureField::All(_) => true,
+		LogicalDestructureField::Destructure(_, nested) => omit_destructure_is_expressible(nested),
+		LogicalDestructureField::Aliased(..) => false,
+	})
+}
+
+/// The non-negative literal integer an index step holds, if any.
+fn literal_index(index: &LogicalExpr) -> Option<usize> {
+	match index {
+		LogicalExpr::Literal(LogicalLiteral::Integer(idx)) => usize::try_from(*idx).ok(),
+		_ => None,
+	}
+}
+
+/// Calls `f` on every value `path` reaches inside `value`, following field
+/// accesses into objects, literal indices into arrays and objects, `[$]` into
+/// the last element of an array, `.*` into every child of an object or array,
+/// and a `Broadcast` body into each value its base reaches. `Current` is
+/// `value` itself. Any other step reaches nothing, and the planner declines a
+/// path holding one — see [`omit_path_is_expressible`].
+fn for_each_target(value: &mut Value, path: &LogicalExpr, f: &mut dyn FnMut(&mut Value)) {
+	match path {
+		LogicalExpr::Current => f(value),
+		LogicalExpr::Field(name) => {
+			if let Value::Object(obj) = value
+				&& let Some(nested) = obj.get_mut(name.as_str())
+			{
+				f(nested);
+			}
+		}
+		LogicalExpr::Access {
+			base,
+			field,
+		} => for_each_target(value, base, &mut |target| {
+			if let Value::Object(obj) = target
+				&& let Some(nested) = obj.get_mut(field.as_str())
+			{
+				f(nested);
+			}
+		}),
+		LogicalExpr::Each(base) => for_each_target(value, base, &mut |target| match target {
+			Value::Object(obj) => {
+				for (_, v) in obj.iter_mut() {
+					f(v);
+				}
+			}
+			Value::Array(arr) => {
+				for v in arr.iter_mut() {
+					f(v);
+				}
+			}
+			_ => {}
+		}),
+		LogicalExpr::Index {
+			base,
+			index,
+		} => {
+			let Some(idx) = literal_index(index) else {
+				return;
+			};
+			for_each_target(value, base, &mut |target| match target {
+				Value::Array(arr) => {
+					if let Some(nested) = arr.get_mut(idx) {
+						f(nested);
+					}
+				}
+				Value::Object(obj) => {
+					if let Some(nested) = obj.get_mut(idx.to_string().as_str()) {
+						f(nested);
+					}
+				}
+				_ => {}
+			})
+		}
+		LogicalExpr::First(base) => for_each_target(value, base, &mut |target| {
+			if let Value::Array(arr) = target
+				&& let Some(nested) = arr.first_mut()
+			{
+				f(nested);
+			}
+		}),
+		LogicalExpr::Last(base) => for_each_target(value, base, &mut |target| {
+			if let Value::Array(arr) = target
+				&& let Some(nested) = arr.last_mut()
+			{
+				f(nested);
+			}
+		}),
+		LogicalExpr::Broadcast {
+			base,
+			body,
+			..
+		} => for_each_target(value, base, &mut |target| for_each_target(target, body, f)),
+		_ => {}
+	}
+}
+
+/// Recursively remove fields described by destructure fields from an object.
+fn omit_destructure_fields(obj: &mut Object, fields: &[LogicalDestructureField]) {
+	for field in fields {
+		match field {
+			LogicalDestructureField::Field(name) => {
+				obj.remove(name.as_str());
+			}
+			// `{ a.* }` names the contents of `a` rather than `a` itself, so
+			// the container it holds is emptied and the field stays.
+			LogicalDestructureField::All(name) => match obj.get_mut(name.as_str()) {
+				Some(Value::Object(inner)) => inner.clear(),
+				Some(Value::Array(inner)) => inner.clear(),
+				_ => {}
+			},
+			LogicalDestructureField::Destructure(name, nested) => {
 				if let Some(Value::Object(inner)) = obj.get_mut(name.as_str()) {
 					omit_destructure_fields(inner, nested);
 				}
 			}
-			DestructurePart::Aliased(name, _) => {
-				obj.remove(name.as_str());
-			}
+			// An aliased entry names an expression rather than a location to
+			// remove. The planner declines such a path, leaving the per-row
+			// engine to raise the error this walker has no way to report.
+			LogicalDestructureField::Aliased(..) => {}
 		}
 	}
 }
@@ -752,7 +969,11 @@ async fn apply_projections(
 				other => return Ok(other),
 			}
 		}
-		Value::Geometry(geo) if has_all || has_includes => geo.as_object(),
+		// A geometry answers `type` and `coordinates` like an object, so a
+		// projection naming fields reads them off one. `*` does not expand it:
+		// the row is the geometry, and `SELECT *`, `SELECT * OMIT …` and
+		// `SELECT *, type` all yield the geometry as it stands.
+		Value::Geometry(geo) if has_includes && !has_all => geo.as_object(),
 		other => return Ok(other),
 	};
 
@@ -816,6 +1037,8 @@ fn apply_projections_to_object(
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_types::ToSql;
+
 	use super::*;
 
 	#[test]
@@ -855,6 +1078,97 @@ mod tests {
 			assert_eq!(result_obj.get("new_name"), Some(&Value::from(42)));
 		} else {
 			panic!("Expected Object");
+		}
+	}
+
+	fn omit_path(sql: &str) -> LogicalExpr {
+		crate::expr::logical::lower_expr(crate::sql::Expr::Idiom(
+			crate::syn::idiom(sql).expect("idiom"),
+		))
+		.expect("lowers")
+	}
+
+	fn omitted(value: Value, sql: &str) -> String {
+		let mut value = value;
+		omit_field_sync(&mut value, &omit_path(sql));
+		value.to_sql()
+	}
+
+	#[test]
+	fn omit_removes_the_location_a_path_denotes() {
+		let row = || {
+			crate::val::convert_public::convert_public_value_to_internal(
+				crate::syn::value(
+					"{ a: { b: 1, c: [10, 20] }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }",
+				)
+				.expect("value"),
+			)
+		};
+		assert_eq!(omitted(row(), "a"), "{ d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }");
+		assert_eq!(
+			omitted(row(), "a.b"),
+			"{ a: { c: [10, 20] }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }"
+		);
+		assert_eq!(
+			omitted(row(), "a.c[0]"),
+			"{ a: { b: 1, c: [20] }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }"
+		);
+		assert_eq!(
+			omitted(row(), "a.c[$]"),
+			"{ a: { b: 1, c: [10] }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }"
+		);
+		assert_eq!(
+			omitted(row(), "d.*.e"),
+			"{ a: { b: 1, c: [10, 20] }, d: [{ f: 2 }, { f: 4 }] }"
+		);
+		assert_eq!(
+			omitted(row(), "d[1].f"),
+			"{ a: { b: 1, c: [10, 20] }, d: [{ e: 1, f: 2 }, { e: 3 }] }"
+		);
+		assert_eq!(omitted(row(), "a.*"), "{ a: {  }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }");
+		assert_eq!(
+			omitted(row(), "a.{ b }"),
+			"{ a: { c: [10, 20] }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }"
+		);
+		// A destructure entry naming the contents of a field empties that
+		// field rather than removing it.
+		assert_eq!(
+			omitted(row(), "a.{ c.* }"),
+			"{ a: { b: 1, c: [] }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }"
+		);
+	}
+
+	#[test]
+	fn omit_declines_a_path_the_walk_cannot_reach() {
+		// Every shape the walk performs.
+		for sql in [
+			"a",
+			"a.b",
+			"a.c[0]",
+			"a.c[$]",
+			"d.*.e",
+			"d[1].f",
+			"a.*",
+			"a.{ b }",
+			"a.{ c.* }",
+			"a.{ b.{ c } }",
+		] {
+			assert!(omit_path_is_expressible(&omit_path(sql)), "{sql} is expressible");
+		}
+		// Every shape it cannot: a step whose meaning comes from evaluating
+		// it, and a destructure entry naming an expression rather than a
+		// location.
+		for sql in [
+			"d[WHERE e = 1].f",
+			"d[WHERE e = 1]",
+			"a.c[$p]",
+			"a.c.len()",
+			"a.{ b }.c",
+			"a.{ b: c }",
+			"a.{1}.b",
+			"a.b.@",
+		] {
+			assert!(!omit_path_is_expressible(&omit_path(sql)), "{sql} is not expressible");
 		}
 	}
 

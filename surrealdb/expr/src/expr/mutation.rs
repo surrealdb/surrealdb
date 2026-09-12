@@ -42,14 +42,6 @@ impl Visitor for MutationScanner {
 			| Expr::Alter(_) => Err(FoundMutation),
 
 			// A GQL plan carries its mutations in its stages.
-			Expr::Match(plan) => {
-				if plan.has_mutations() {
-					Err(FoundMutation)
-				} else {
-					expr.visit(self)
-				}
-			}
-
 			// Everything else delegates to the default traversal, which
 			// descends into blocks, subqueries, idiom parts, closure bodies and
 			// call arguments — so a write buried in any of them is still found.

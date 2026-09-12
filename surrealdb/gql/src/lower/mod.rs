@@ -1,10 +1,11 @@
 //! Lowering of the GQL AST onto the declarative [`MatchPlan`] IR.
 //!
 //! Implements the normative design in `doc/gql/V2_DESIGN.md` §8: a parsed
-//! [`GqlQuery`] becomes an [`Expr::Match`] holding a [`MatchPlan`] (the
-//! language-neutral binding-table plan node), wrapped in a [`LogicalPlan`]. No
-//! SurrealQL surface AST is produced; the streaming execution planner compiles
-//! the [`MatchPlan`] into operators.
+//! [`GqlQuery`] becomes a [`LogicalOp::Match`] holding a [`MatchPlan`] (the
+//! language-neutral binding-table plan node) whose scalars are the logical
+//! plan's [`LogicalExpr`]. No SurrealQL surface AST and no expression-layer
+//! value is produced; the streaming execution planner compiles the
+//! [`MatchPlan`] into operators.
 //!
 //! Layout: [`binding`] runs the variable-resolution semantic pass over the
 //! whole query (the binding registry, hidden bindings, anchorability, and the
@@ -13,7 +14,7 @@
 //! with their dependency sets, [`expr`] lowers expressions with uniform binding
 //! addressing and the three-valued-logic guards, [`naming`] owns the
 //! column-name and reserved-name rules, and this module dispatches and
-//! assembles the output spec (R7/R8) and the final [`LogicalPlan`].
+//! assembles the output spec (R7/R8) and the final [`LogicalOp::Match`].
 
 mod binding;
 mod expr;
@@ -29,9 +30,9 @@ use surrealdb_types::ToSql;
 
 use self::binding::Registry;
 use self::expr::Scope;
+use crate::expr::Param;
+use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalMatch, LogicalOp};
 use crate::expr::match_plan::{MatchColumn, MatchOrder, MatchOutput, MatchPlan, MatchStage};
-use crate::expr::plan::{LogicalPlan, TopLevelExpr};
-use crate::expr::{Expr, Idiom, Literal, Param};
 use crate::gql::ast::{
 	GqlExpr, GqlGroupItem, GqlLiteral, GqlQuery, GqlStep, LinearQuery, MatchItem, OrderItem,
 	ReturnClause, ReturnItems, SetQuantifier,
@@ -39,12 +40,12 @@ use crate::gql::ast::{
 use crate::syn::error::{SyntaxError, bail, syntax_error};
 use crate::syn::token::Span;
 
-/// Lowers a parsed GQL query into a [`LogicalPlan`] carrying a single
-/// [`Expr::Match`].
+/// Lowers a parsed GQL query into the single already-planned operator it
+/// runs as: [`LogicalOp::Match`].
 ///
 /// Runs on a [`reblessive`] stack: the GQL AST contains arbitrarily deep
 /// expression chains which the machine stack must not recurse over.
-pub(super) fn lower(query: GqlQuery) -> Result<LogicalPlan, SyntaxError> {
+pub(super) fn lower(query: GqlQuery) -> Result<LogicalOp, SyntaxError> {
 	let LinearQuery {
 		steps,
 		ret,
@@ -52,9 +53,9 @@ pub(super) fn lower(query: GqlQuery) -> Result<LogicalPlan, SyntaxError> {
 	} = query.program;
 	let mut stack = Stack::new();
 	let plan = stack.enter(|stk| lower_program(stk, &steps, ret.as_ref(), span)).finish()?;
-	Ok(LogicalPlan {
-		expressions: vec![TopLevelExpr::Expr(Expr::Match(Box::new(plan)))],
-	})
+	Ok(LogicalOp::Match(LogicalMatch {
+		plan: Box::new(plan),
+	}))
 }
 
 /// Lowers a whole linear query — `MATCH`/`OPTIONAL` reads and
@@ -152,7 +153,7 @@ fn reject_leading_optional(steps: &[GqlStep]) -> Result<(), SyntaxError> {
 /// binding-row value expression.
 struct Column {
 	name: String,
-	expr: Expr,
+	expr: LogicalExpr,
 	/// A sort-only column materialised so an aggregating query can ORDER BY a
 	/// value it does not project (see [`MatchColumn::hidden`]); dropped before
 	/// the rows are returned. `false` for user-projected columns.
@@ -220,14 +221,14 @@ async fn lower_group_keys(
 	stk: &mut Stk,
 	items: &[GqlGroupItem],
 	registry: &Registry,
-) -> Result<Vec<Expr>, SyntaxError> {
+) -> Result<Vec<LogicalExpr>, SyntaxError> {
 	let scope = Scope {
 		registry,
 		allow_aggregates: false,
 	};
 	let mut keys = Vec::with_capacity(items.len());
 	for item in items {
-		keys.push(expr::lower_value(stk, &item.expr, &scope).await?.into());
+		keys.push(expr::lower_value(stk, &item.expr, &scope).await?);
 	}
 	Ok(keys)
 }
@@ -240,7 +241,7 @@ async fn lower_return_items(
 	stk: &mut Stk,
 	ret: &ReturnClause,
 	registry: &Registry,
-	group_keys: &[Expr],
+	group_keys: &[LogicalExpr],
 ) -> Result<(Vec<Column>, bool), SyntaxError> {
 	// Aggregates are permitted in RETURN value position.
 	let scope = Scope {
@@ -277,7 +278,7 @@ async fn lower_return_items(
 				// variable surfaces its composite value, never a field).
 				columns.push(Column {
 					name: name.to_owned(),
-					expr: Expr::Idiom(Idiom::field(name)),
+					expr: LogicalExpr::Field(name.into()),
 					hidden: false,
 				});
 			}
@@ -298,8 +299,7 @@ async fn lower_return_items(
 					);
 				}
 				let is_aggregate = expr::gql_contains_aggregate(&item.expr);
-				// `lower_value` builds `sql::Expr`; the IR is `expr::Expr`.
-				let lowered: Expr = expr::lower_value(stk, &item.expr, &scope).await?.into();
+				let lowered = expr::lower_value(stk, &item.expr, &scope).await?;
 
 				// Strict GQL/SQL: when aggregating, a non-aggregate column must be
 				// determined by the GROUP BY keys — either a key itself or a value
@@ -339,7 +339,7 @@ async fn lower_order_item(
 	stk: &mut Stk,
 	item: &OrderItem,
 	columns: &mut Vec<Column>,
-	group_keys: &[Expr],
+	group_keys: &[LogicalExpr],
 	distinct: bool,
 	aggregating: bool,
 	registry: &Registry,
@@ -357,7 +357,7 @@ async fn lower_order_item(
 	if distinct {
 		let column = order_output_column(stk, item, columns, &scope).await?;
 		return Ok(MatchOrder {
-			expr: Expr::Idiom(Idiom::field(column)),
+			expr: LogicalExpr::Field(column.into()),
 			ascending,
 		});
 	}
@@ -365,7 +365,7 @@ async fn lower_order_item(
 	if aggregating {
 		let column = lower_aggregating_order(stk, item, columns, group_keys, &scope).await?;
 		return Ok(MatchOrder {
-			expr: Expr::Idiom(Idiom::field(column)),
+			expr: LogicalExpr::Field(column.into()),
 			ascending,
 		});
 	}
@@ -381,7 +381,7 @@ async fn lower_order_item(
 			ascending,
 		});
 	}
-	let lowered: Expr = expr::lower_value(stk, &item.expr, &scope).await?.into();
+	let lowered = expr::lower_value(stk, &item.expr, &scope).await?;
 	Ok(MatchOrder {
 		expr: lowered,
 		ascending,
@@ -397,7 +397,7 @@ async fn lower_aggregating_order(
 	stk: &mut Stk,
 	item: &OrderItem,
 	columns: &mut Vec<Column>,
-	group_keys: &[Expr],
+	group_keys: &[LogicalExpr],
 	scope: &Scope<'_>,
 ) -> Result<String, SyntaxError> {
 	// A key naming a projected column by alias / verbatim text.
@@ -407,7 +407,7 @@ async fn lower_aggregating_order(
 		return Ok(column.name.clone());
 	}
 	let is_aggregate = expr::gql_contains_aggregate(&item.expr);
-	let lowered: Expr = expr::lower_value(stk, &item.expr, scope).await?.into();
+	let lowered = expr::lower_value(stk, &item.expr, scope).await?;
 	// Reuse a column (projected or already-materialised) with the same expression.
 	if let Some(column) = columns.iter().find(|c| c.expr == lowered) {
 		return Ok(column.name.clone());
@@ -445,7 +445,7 @@ async fn order_output_column(
 	{
 		return Ok(column.name.clone());
 	}
-	let lowered: Expr = expr::lower_value(stk, &item.expr, scope).await?.into();
+	let lowered = expr::lower_value(stk, &item.expr, scope).await?;
 	if let Some(column) = columns.iter().find(|c| c.expr == lowered) {
 		return Ok(column.name.clone());
 	}
@@ -456,11 +456,11 @@ async fn order_output_column(
 }
 
 /// Whether an aggregating-query value expression is determined by the GROUP BY
-/// keys: it equals a key, or every leaf is a constant or an idiom prefixed by a
-/// grouping-key idiom (so the value is constant within each group and the
+/// keys: it equals a key, or every leaf is a constant or a path prefixed by a
+/// grouping-key path (so the value is constant within each group and the
 /// `Aggregate`'s first-value fold is exact). Walks on an explicit stack so a deep
 /// operator spine cannot overflow.
-fn column_is_grouped(expr: &Expr, keys: &[Expr]) -> bool {
+fn column_is_grouped(expr: &LogicalExpr, keys: &[LogicalExpr]) -> bool {
 	let mut stack = vec![expr];
 	while let Some(e) = stack.pop() {
 		// A sub-expression equal to a whole grouping key is covered outright.
@@ -468,20 +468,33 @@ fn column_is_grouped(expr: &Expr, keys: &[Expr]) -> bool {
 			continue;
 		}
 		match e {
-			Expr::Literal(Literal::Array(items)) => stack.extend(items.iter()),
-			Expr::Literal(Literal::Object(entries)) => {
-				stack.extend(entries.iter().map(|entry| &entry.value));
-			}
-			Expr::Literal(_) | Expr::Param(_) | Expr::Constant(_) => {}
-			Expr::Idiom(idiom) => {
-				let covered = keys.iter().any(
-					|key| matches!(key, Expr::Idiom(key) if !key.0.is_empty() && idiom.0.starts_with(&key.0)),
-				);
+			LogicalExpr::Array(items) => stack.extend(items.iter()),
+			LogicalExpr::Object(entries) => stack.extend(entries.iter().map(|(_, value)| value)),
+			LogicalExpr::Literal(_) | LogicalExpr::Param(_) | LogicalExpr::Constant(_) => {}
+			// A field path is covered when a key is a prefix of it: the key
+			// itself, or one of the bases its accesses descend from.
+			LogicalExpr::Field(_)
+			| LogicalExpr::Access {
+				..
+			} => {
+				let mut prefix = e;
+				let mut covered = false;
+				while let LogicalExpr::Access {
+					base,
+					..
+				} = prefix
+				{
+					prefix = base;
+					if keys.contains(prefix) {
+						covered = true;
+						break;
+					}
+				}
 				if !covered {
 					return false;
 				}
 			}
-			Expr::Binary {
+			LogicalExpr::Binary {
 				left,
 				right,
 				..
@@ -489,12 +502,16 @@ fn column_is_grouped(expr: &Expr, keys: &[Expr]) -> bool {
 				stack.push(left);
 				stack.push(right);
 			}
-			Expr::Prefix {
+			LogicalExpr::Prefix {
 				expr,
 				..
 			}
-			| Expr::Postfix {
+			| LogicalExpr::Postfix {
 				expr,
+				..
+			}
+			| LogicalExpr::Invoke {
+				target: expr,
 				..
 			} => stack.push(expr),
 			// Anything else (function calls, subqueries, tables, …) is not a value
@@ -524,15 +541,17 @@ fn order_key_name(expr: &GqlExpr) -> Option<String> {
 
 /// Lowers a SKIP/LIMIT count: an unsigned integer literal or a parameter. The
 /// parser only produces these two forms.
-fn lower_count(expr: &GqlExpr) -> Result<Expr, SyntaxError> {
+fn lower_count(expr: &GqlExpr) -> Result<LogicalExpr, SyntaxError> {
 	match expr {
-		GqlExpr::Literal(GqlLiteral::Integer(i), _) => Ok(Expr::Literal(Literal::Integer(*i))),
+		GqlExpr::Literal(GqlLiteral::Integer(i), _) => {
+			Ok(LogicalExpr::Literal(LogicalLiteral::Integer(*i)))
+		}
 		GqlExpr::Param {
 			name,
 			span,
 		} => {
 			naming::validate_param_name(name, *span)?;
-			Ok(Expr::Param(Param::from(name.clone())))
+			Ok(LogicalExpr::Param(Param::from(name.clone())))
 		}
 		other => Err(syntax_error!(
 			"Expected an unsigned integer or a parameter",
@@ -541,8 +560,9 @@ fn lower_count(expr: &GqlExpr) -> Result<Expr, SyntaxError> {
 	}
 }
 
-/// A lowered, prepared GQL query: a [`LogicalPlan`] containing the single
-/// top-level [`Expr::Match`].
+/// A lowered, prepared GQL query: the single top-level [`LogicalOp::Match`]
+/// the query runs as. It is a plan, not a statement, so it is submitted to the
+/// executor as one and never enters a SurrealQL AST.
 ///
 /// Renders (`Debug`/`ToSql`) via the [`MatchPlan`]'s deterministic GQL-ish
 /// rendering rather than the SurrealQL surface, so EXPLAIN and logs show the
@@ -552,7 +572,7 @@ fn lower_count(expr: &GqlExpr) -> Result<Expr, SyntaxError> {
 /// repeatedly (e.g. the language-test bench harness, which keeps parse+lowering
 /// out of the timed loop).
 #[derive(Clone)]
-pub struct PreparedGqlQuery(pub LogicalPlan);
+pub struct PreparedGqlQuery(pub LogicalOp);
 
 impl std::fmt::Debug for PreparedGqlQuery {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -562,18 +582,15 @@ impl std::fmt::Debug for PreparedGqlQuery {
 
 impl ToSql for PreparedGqlQuery {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		// Render the embedded `MatchPlan` directly via its own `ToSql`. The
-		// `LogicalPlan`/`Ast` rendering round-trips through
-		// `From<expr::Expr> for sql::Expr`, which has no `sql` surface for
-		// `Expr::Match` (it logs + `debug_assert!`s + emits a `None`
-		// placeholder); going straight to the `MatchPlan` keeps the GQL-ish
-		// rendering and avoids that placeholder path.
-		match self.0.expressions.as_slice() {
-			[TopLevelExpr::Expr(Expr::Match(plan))] => plan.fmt_sql(f, fmt),
-			// A `PreparedGqlQuery` is only ever a single top-level `Expr::Match`
-			// by construction; fall back to the plan rendering otherwise so the
-			// method never panics.
-			_ => self.0.fmt_sql(f, fmt),
+		// Render the embedded `MatchPlan` directly via its own `ToSql`, which
+		// keeps the GQL-ish rendering. A `PreparedGqlQuery` is only ever a
+		// `LogicalOp::Match` by construction; any other operator renders as
+		// the plan it is so the method never panics.
+		match &self.0 {
+			LogicalOp::Match(LogicalMatch {
+				plan,
+			}) => plan.fmt_sql(f, fmt),
+			other => other.fmt_sql(f, fmt),
 		}
 	}
 }

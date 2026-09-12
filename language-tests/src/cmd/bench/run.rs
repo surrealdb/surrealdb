@@ -1049,7 +1049,7 @@ impl BenchStatement {
 				// Submitting the plan takes it by value, so each iteration
 				// executes a fresh clone of the once-lowered plan.
 				let _ =
-					dbs.run(QueryRequest::new(QuerySource::Plan(plan.clone().0), session)).await?;
+					dbs.run(QueryRequest::new(QuerySource::Plan(vec![plan.clone().0]), session)).await?;
 			}
 			Self::GraphQl {
 				schema,

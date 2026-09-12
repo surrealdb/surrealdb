@@ -12,8 +12,20 @@ pub fn ensure_formats(s: &str) {
 	let parsed = crate::syn::parse(s).unwrap();
 	let parsed_formated = crate::syn::parse(&parsed.to_sql()).unwrap();
 
-	let plan: crate::expr::LogicalPlan = parsed.clone().into();
-	let parsed_formated_plan = crate::syn::parse(&plan.to_sql()).unwrap();
+	// Render each statement through its expression-layer form, which a bare
+	// expression has; the other top-level kinds render from the surface form.
+	let lowered = parsed
+		.expressions
+		.iter()
+		.map(|stmt| match stmt {
+			crate::sql::TopLevelExpr::Expr(expr) => {
+				format!("{};", crate::expr::Expr::from(expr.clone()).to_sql())
+			}
+			other => format!("{};", other.to_sql()),
+		})
+		.collect::<Vec<_>>()
+		.join("\n");
+	let parsed_formated_plan = crate::syn::parse(&lowered).unwrap();
 
 	assert_eq!(parsed, parsed_formated, "formatting the sql type changed the query");
 	assert_eq!(parsed, parsed_formated_plan, "formatting the expr type changed the query");

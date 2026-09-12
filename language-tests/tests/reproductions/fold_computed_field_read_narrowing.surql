@@ -15,16 +15,27 @@ value = "[{ a: 5, id: t:1 }]"
 value = "NONE"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Rt] [projections: id]\n    EmptyScan [ctx: Rt]\n''''
+value = '''
+'SelectProject [ctx: Rt] [projections: id]
+    EmptyScan [ctx: Rt]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]\n    TableScan [ctx: Db] [table: t, direction: Forward, predicate: bad INSIDE [], pre_decode_filter: no (computed fields)]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: bad INSIDE []]
+        ProjectLayer [ctx: Db] [columns: bad = 2 @computed]
+            TableScan [ctx: Db] [table: t, direction: Forward]
+''''
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Rt] [projections: id]\n    EmptyScan [ctx: Rt]\n''''
+value = '''
+'SelectProject [ctx: Rt] [projections: id]
+    EmptyScan [ctx: Rt]
+''''
 
 [[test.results]]
 value = "NONE"
@@ -33,7 +44,10 @@ value = "NONE"
 value = "[{ a: 5, id: guarded_tb:1 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Rt] [projections: id]\n    EmptyScan [ctx: Rt]\n''''
+value = '''
+'SelectProject [ctx: Rt] [projections: id]
+    EmptyScan [ctx: Rt]
+''''
 
 */
 

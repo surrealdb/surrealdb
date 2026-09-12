@@ -35,7 +35,8 @@ pub use reference::*;
 pub use sequence::*;
 pub use user::*;
 
-use crate::catalog::{ExprText, FromStored};
+use crate::catalog::{ExprText, FromStored, LogicalBody};
+use crate::expr::logical::{LogicalPermission, LogicalPermissionRef};
 pub use crate::expr::permission::{Permission, Permissions};
 use crate::expr::statements::info::InfoStructure;
 use crate::val::Value;
@@ -160,6 +161,74 @@ impl FromStored for Permissions {
 			create: Permission::from_stored(&stored.create)?,
 			update: Permission::from_stored(&stored.update)?,
 			delete: Permission::from_stored(&stored.delete)?,
+		})
+	}
+}
+
+/// A `PERMISSIONS` clause with its guard compiled to the logical form on first
+/// use, for the streaming engine's analyzer.
+///
+/// Carried on a runtime definition beside the [`Permission`] the legacy engine
+/// evaluates. Both are compiled from the same stored text and neither is
+/// derived from the other; see [`LogicalBody`].
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub enum LogicalPermissionBody {
+	None,
+	#[default]
+	Full,
+	Specific(LogicalBody),
+}
+
+impl LogicalPermissionBody {
+	/// The body of a stored permission, compiled lazily.
+	pub fn from_stored(stored: &StoredPermission) -> Self {
+		match stored {
+			StoredPermission::None => LogicalPermissionBody::None,
+			StoredPermission::Full => LogicalPermissionBody::Full,
+			StoredPermission::Specific(text) => {
+				LogicalPermissionBody::Specific(LogicalBody::new(text))
+			}
+		}
+	}
+
+	/// The body of a permission a `DEFINE` statement produced, over the text
+	/// `to_stored` writes for it.
+	pub fn of(permission: &Permission) -> Self {
+		match permission {
+			Permission::None => LogicalPermissionBody::None,
+			Permission::Full => LogicalPermissionBody::Full,
+			Permission::Specific(expr) => LogicalPermissionBody::Specific(LogicalBody::of(expr)),
+		}
+	}
+
+	/// The permission in logical form, compiling the guard on first call.
+	///
+	/// The guard is copied out of the body, so this is for a caller that keeps
+	/// it — one putting it into a plan. A caller that only reads it takes
+	/// [`Self::logical_ref`], which is the same clause without the copy.
+	pub fn logical(&self) -> anyhow::Result<LogicalPermission> {
+		Ok(match self.logical_ref()? {
+			LogicalPermissionRef::None => LogicalPermission::None,
+			LogicalPermissionRef::Full => LogicalPermission::Full,
+			LogicalPermissionRef::Specific(guard) => LogicalPermission::Specific(guard.clone()),
+		})
+	}
+
+	/// The permission in logical form, compiling the guard on first call, with
+	/// the guard borrowed from this body rather than copied out of it.
+	///
+	/// A stored clause is judged per evaluation — a `DEFINE PARAM` guard
+	/// against the row the parameter is read on, a function's against the
+	/// caller's frame — so a caller on that path reads the clause far more
+	/// often than any statement plans it, and copying the guard out to read it
+	/// puts the copy in a row loop.
+	pub fn logical_ref(&self) -> anyhow::Result<LogicalPermissionRef<'_>> {
+		Ok(match self {
+			LogicalPermissionBody::None => LogicalPermissionRef::None,
+			LogicalPermissionBody::Full => LogicalPermissionRef::Full,
+			LogicalPermissionBody::Specific(body) => {
+				LogicalPermissionRef::Specific(body.logical()?)
+			}
 		})
 	}
 }

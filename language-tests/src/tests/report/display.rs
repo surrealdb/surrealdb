@@ -360,14 +360,16 @@ impl TestReport {
 							writeln!(f, "> Got a different value then was expected")?;
 							f.indent(|f| {
 								writeln!(f, "= Expected:")?;
-								f.indent(|f| writeln!(f, "- Value: {}", expected.to_sql()))?;
+								f.indent(|f| Self::display_labelled_value("Value", expected, f))?;
 								writeln!(f, "= Got:")?;
-								f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))?;
+								f.indent(|f| Self::display_labelled_value("Value", got, f))?;
 								writeln!(f, "= Diff:")?;
 								f.indent(|f| {
+									// Two strings are diffed as their text, so a
+									// plan's lines stay lines in the diff too.
 									Self::display_diff(
-										&got.to_sql(),
-										&expected.to_sql(),
+										&Self::diffable(got),
+										&Self::diffable(expected),
 										use_color,
 										f,
 									)
@@ -387,7 +389,7 @@ impl TestReport {
 									f.indent(|f| writeln!(f, "- Any error"))?;
 								}
 								writeln!(f, "= Got:")?;
-								f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))
+								f.indent(|f| Self::display_labelled_value("Value", got, f))
 							})
 						}
 						ValueMismatchKind::ExpectedValue {
@@ -398,7 +400,9 @@ impl TestReport {
 							f.indent(|f| {
 								writeln!(f, "= Expected:")?;
 								if let Some(expected) = expected {
-									f.indent(|f| writeln!(f, "- Value: {}", expected.to_sql()))?;
+									f.indent(|f| {
+										Self::display_labelled_value("Value", expected, f)
+									})?;
 								} else {
 									f.indent(|f| writeln!(f, "- Any value"))?;
 								}
@@ -436,7 +440,7 @@ impl TestReport {
 						writeln!(f, "> Matcher expected a value but got an error")?;
 						f.indent(|f| {
 							writeln!(f, "= Got:")?;
-							f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))
+							f.indent(|f| Self::display_labelled_value("Value", got, f))
 						})?
 					}
 					MatcherMismatch::UnexpectedError {
@@ -454,7 +458,7 @@ impl TestReport {
 						writeln!(f, "> Matching expression did not return a boolean.")?;
 						f.indent(|f| {
 							writeln!(f, "= Matching expression returned value:")?;
-							f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))
+							f.indent(|f| Self::display_labelled_value("Value", got, f))
 						})?
 					}
 				},
@@ -469,11 +473,35 @@ impl TestReport {
 		}
 		Ok(())
 	}
+	/// The text a value is diffed as: a string as its own text, so a plan's
+	/// lines stay lines, and every other value as the SurrealQL it renders.
+	fn diffable(value: &SurValue) -> String {
+		match value {
+			SurValue::String(text) => text.as_str().to_owned(),
+			_ => value.to_sql(),
+		}
+	}
+
+	/// A value beneath its label: on the label's line, or — for a string
+	/// whose text spans lines, which is what an `EXPLAIN` renders — as the
+	/// text itself on the lines beneath, so a plan reads as the tree it is.
+	fn display_labelled_value(label: &str, value: &SurValue, f: &mut Fmt) -> fmt::Result {
+		match value {
+			SurValue::String(text) if text.as_str().contains('\n') => {
+				writeln!(f, "- {label}:")?;
+				// A rendering that already ends in a newline would otherwise show a
+				// blank line beneath it.
+				let text = text.as_str();
+				let text = text.strip_suffix('\n').unwrap_or(text);
+				f.indent(|f| writeln!(f, "{text}"))
+			}
+			_ => writeln!(f, "- {label}: {}", value.to_sql()),
+		}
+	}
+
 	fn display_value(v: &Result<SurValue, String>, f: &mut Fmt) -> fmt::Result {
 		match v {
-			Ok(x) => {
-				writeln!(f, "- Value: {}", x.to_sql())
-			}
+			Ok(x) => Self::display_labelled_value("Value", x, f),
 			Err(e) => {
 				writeln!(f, "- Error: {e}")
 			}
@@ -494,7 +522,7 @@ impl TestReport {
 				None => writeln!(f, "- Any Error"),
 			},
 			TestValueExpectation::Value(v) => match v {
-				Some(v) => writeln!(f, "- Value: {}", v.expected.to_sql()),
+				Some(v) => Self::display_labelled_value("Value", &v.expected, f),
 				None => writeln!(f, "- Any value"),
 			},
 			TestValueExpectation::Matcher(m) => match m.matcher_value_type {

@@ -12,9 +12,10 @@ value = "'OK'"
 value = "[{ active: true, distance: 2f, id: pts:3, point: [3, 0] }, { active: true, distance: 3f, id: pts2:2, point: [4, 0] }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *, distance] {rows: 2}
+value = '''
+'SelectProject [ctx: Db] [projections: *, distance] {rows: 2}
     SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2}
-        Compute [ctx: Db] [fields: distance = vector::distance::euclidean(...)] {rows: 2}
+        Compute [ctx: Db] [fields: distance = vector::distance::euclidean(point, [1, 0])] {rows: 2}
             KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 2] {rows: 2}
                 Filter [ctx: Db] [predicate: active = true] {rows: 3}
                     Union [ctx: Db] [inputs: 2] {rows: 5}

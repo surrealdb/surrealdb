@@ -13,6 +13,11 @@ use crate::val::{Array, Value};
 #[derive(Debug, Clone)]
 pub struct ScalarSubquery {
 	pub(crate) plan: Arc<dyn ExecOperator>,
+	/// Whether the plan is a statement — a block, `RETURN`, `LET`, `FOR` —
+	/// whose expressions read the enclosing row as their document, the way
+	/// `$this` denotes it. A relational plan (a nested `SELECT`) supplies its
+	/// own rows and reaches the enclosing one only through `$parent`/`$this`.
+	pub(crate) inherits_row: bool,
 }
 impl PhysicalExpr for ScalarSubquery {
 	fn name(&self) -> &'static str {
@@ -41,9 +46,15 @@ impl PhysicalExpr for ScalarSubquery {
 			// should denote (issue #7154).
 			let outer_row = ctx.document_root.or(ctx.current_value);
 			let subquery_ctx = if let Some(parent_value) = outer_row {
-				ctx.exec_ctx
+				let derived = ctx
+					.exec_ctx
 					.with_param("parent", parent_value.clone())
-					.with_param("this", parent_value.clone())
+					.with_param("this", parent_value.clone());
+				if self.inherits_row {
+					derived.with_current_row(Arc::new(parent_value.clone()))
+				} else {
+					derived
+				}
 			} else {
 				ctx.exec_ctx.clone()
 			};
@@ -55,6 +66,15 @@ impl PhysicalExpr for ScalarSubquery {
 				subquery_ctx.with_skip_fetch_perms(true)
 			} else {
 				subquery_ctx
+			};
+
+			// A statement plan evaluated inside a computed-field body inherits
+			// the record being computed, so a dereference of that record in
+			// the plan's own expressions is answered from the row rather than
+			// by re-fetching it, which would evaluate the body again.
+			let subquery_ctx = match &ctx.computing_record {
+				Some(record) => subquery_ctx.with_computing_record(Some(Arc::clone(record))),
+				None => subquery_ctx,
 			};
 
 			// Execute the subquery plan with the derived context

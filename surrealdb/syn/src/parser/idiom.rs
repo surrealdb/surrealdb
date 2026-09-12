@@ -87,8 +87,29 @@ impl Parser<'_> {
 		stk: &mut Stk,
 		start: Vec<Part>,
 	) -> ParseResult<Idiom> {
+		let restore_to = self.settings.expr_recursion_limit;
+		let res = self.parse_remaining_idiom_parts(stk, start).await;
+		self.settings.expr_recursion_limit = restore_to;
+		res.map(Idiom)
+	}
+
+	/// The part loop of [`Self::parse_remaining_idiom`]. Every part is charged
+	/// against the expression-depth budget: a path lowers to one expression
+	/// node per part, so an unbounded part run is the same denial-of-service
+	/// vector as an unbounded operator chain (see [`Self::enter_expr_depth`]).
+	/// The caller restores the budget so that sibling expressions are not
+	/// charged for one another; a nested expression inside a part sees the
+	/// budget the parts before it have consumed.
+	async fn parse_remaining_idiom_parts(
+		&mut self,
+		stk: &mut Stk,
+		start: Vec<Part>,
+	) -> ParseResult<Vec<Part>> {
 		let mut res = start;
 		loop {
+			if self.is_part_start() {
+				self.enter_expr_depth()?;
+			}
 			match self.peek_kind() {
 				t!("...") => {
 					self.pop_peek();
@@ -143,7 +164,15 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-		Ok(Idiom(res))
+		Ok(res)
+	}
+
+	/// Whether the next token can begin an idiom part, which is what the part
+	/// loops charge against the expression-depth budget. A `<` that turns out
+	/// to be a comparison rather than a lookup is charged once and restored
+	/// with the rest when the loop returns.
+	fn is_part_start(&mut self) -> bool {
+		matches!(self.peek_kind(), t!("...") | t!(".") | t!("[") | t!("->") | t!("<"))
 	}
 
 	/// Parses the remaining idiom parts after the start: Any part like `...`,
@@ -159,8 +188,24 @@ impl Parser<'_> {
 		stk: &mut Stk,
 		start: Vec<Part>,
 	) -> ParseResult<Expr> {
+		let restore_to = self.settings.expr_recursion_limit;
+		let res = self.parse_remaining_value_idiom_parts(stk, start).await;
+		self.settings.expr_recursion_limit = restore_to;
+		res
+	}
+
+	/// The part loop of [`Self::parse_remaining_value_idiom`]; parts are
+	/// charged as in [`Self::parse_remaining_idiom_parts`].
+	async fn parse_remaining_value_idiom_parts(
+		&mut self,
+		stk: &mut Stk,
+		start: Vec<Part>,
+	) -> ParseResult<Expr> {
 		let mut res = start;
 		loop {
+			if self.is_part_start() {
+				self.enter_expr_depth()?;
+			}
 			match self.peek_kind() {
 				t!("...") => {
 					self.pop_peek();
@@ -301,8 +346,26 @@ impl Parser<'_> {
 			_ => self.parse_destructure_part(stk).await,
 		}
 	}
-	/// Parse a destructure part, expects `.{` to already be parsed
+	/// Parse a destructure part, expects `.{` to already be parsed.
+	///
+	/// Every nesting level is charged against the expression-depth budget. The
+	/// parse itself recurses on the heap (`stk`), but a destructure nests one
+	/// [`DestructurePart::Destructure`] per level and the consumers of the tree
+	/// it builds do not: lowering, `ToSql` and `Drop` each recurse once per
+	/// level on the native stack, which is the denial-of-service vector
+	/// [`Self::enter_expr_depth`] bounds. The budget is restored on return so
+	/// that the sibling fields of one destructure are not charged for one
+	/// another's depth.
 	pub(super) async fn parse_destructure_part(&mut self, stk: &mut Stk) -> ParseResult<Part> {
+		let restore_to = self.settings.expr_recursion_limit;
+		self.enter_expr_depth()?;
+		let res = self.parse_destructure_part_fields(stk).await;
+		self.settings.expr_recursion_limit = restore_to;
+		res
+	}
+
+	/// The field loop of [`Self::parse_destructure_part`].
+	async fn parse_destructure_part_fields(&mut self, stk: &mut Stk) -> ParseResult<Part> {
 		let start = self.last_span();
 		let mut destructured: Vec<DestructurePart> = Vec::new();
 		loop {
@@ -508,11 +571,30 @@ impl Parser<'_> {
 	/// Basic idioms differ from normal idioms in that they are more
 	/// restrictive. Flatten, graphs, conditions and indexing by param is not
 	/// allowed.
+	///
+	/// This is the `ORDER BY`, `GROUP BY` and `SPLIT` target, and its parts
+	/// are charged against the expression-depth budget as the other part loops
+	/// charge theirs: a path lowers to one expression node per part, and the
+	/// passes over that tree recurse per node, so an unbounded part run
+	/// overflows the stack rather than reporting a parse error. The caller
+	/// restores the budget so that sibling targets are not charged for one
+	/// another.
 	pub(super) fn parse_basic_idiom(&mut self) -> ParseResult<Idiom> {
+		let restore_to = self.settings.expr_recursion_limit;
+		let res = self.parse_basic_idiom_parts();
+		self.settings.expr_recursion_limit = restore_to;
+		res.map(Idiom)
+	}
+
+	/// The part loop of [`Self::parse_basic_idiom`].
+	fn parse_basic_idiom_parts(&mut self) -> ParseResult<Vec<Part>> {
 		let start: Strand = self.parse_ident_str()?.into();
 		let mut parts = vec![Part::Field(start)];
 		loop {
 			let token = self.peek();
+			if matches!(token.kind, t!(".") | t!("[")) {
+				self.enter_expr_depth()?;
+			}
 			let part = match token.kind {
 				t!(".") => {
 					self.pop_peek();
@@ -559,7 +641,7 @@ impl Parser<'_> {
 			};
 			parts.push(part);
 		}
-		Ok(Idiom(parts))
+		Ok(parts)
 	}
 
 	/// Parses a list of what values seperated by comma's

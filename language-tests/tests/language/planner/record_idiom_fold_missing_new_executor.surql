@@ -21,7 +21,10 @@ value = "[{ id: ticket:t3 }]"
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { projections: 'id' }, children: [{ attributes: { access: '= NONE', direction: 'Forward', index: 'idx_owner' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [index: idx_owner, access: = NONE, direction: Forward]
+''''
 
 [[test.results]]
 value = "[{ id: ticket:t2 }, { id: ticket:t3 }]"
@@ -34,5 +37,5 @@ CREATE ticket:t3;
 
 LET $ghost = ticket:nope;
 
-SELECT id FROM ticket WHERE owner = $ghost.owner EXPLAIN;
+EXPLAIN SELECT id FROM ticket WHERE owner = $ghost.owner;
 SELECT id FROM ticket WHERE owner = $ghost.owner ORDER BY id;

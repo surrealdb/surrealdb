@@ -45,8 +45,8 @@ pub use self::session::{AuthPrincipalSnapshot, Session, SessionData};
 pub(crate) use self::session::{durable_session, restore_session};
 pub(crate) use self::sort_error::SortError;
 pub(crate) use self::statement::{
-	FOR_UPDATE_TARGETS_ERROR, FOR_UPDATE_VERSION_ERROR, Statement, check_for_update_targets,
-	validate_for_update,
+	FOR_UPDATE_GROUP_ERROR, FOR_UPDATE_LIMIT_ERROR, FOR_UPDATE_TARGETS_ERROR,
+	FOR_UPDATE_VERSION_ERROR, Statement, validate_for_update, validate_for_update_ast,
 };
 pub(crate) use self::statement_counters::StatementCounters;
 pub use self::stream::{QueryItemStream, QueryStreamJob};

@@ -15,10 +15,19 @@ value = "NONE"
 value = "[{ distance: 10f, id: pts:1 }, { distance: 30f, id: pts:3 }, { distance: 50f, id: pts:5 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 3}\n    Filter [ctx: Db] [predicate: category = 'a'] {rows: 3}\n        KnnScan [ctx: Db] [index: pt_hnsw, k: 3, ef: 40, dimension: 1, predicate: category = 'a'] {rows: 3}\n\nTotal rows: 3"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id] {rows: 3}
+    Filter [ctx: Db] [predicate: category = 'a'] {rows: 3}
+        KnnScan [ctx: Db] [index: pt_hnsw, k: 3, ef: 40, dimension: 1, predicate: category = 'a'] {rows: 3}
+
+Total rows: 3"'''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id] {rows: 3}\n    KnnScan [ctx: Db] [index: pt_hnsw, k: 3, ef: 40, dimension: 1] {rows: 3}\n\nTotal rows: 3''''
+value = '''
+'SelectProject [ctx: Db] [projections: id] {rows: 3}
+    KnnScan [ctx: Db] [index: pt_hnsw, k: 3, ef: 40, dimension: 1] {rows: 3}
+
+Total rows: 3''''
 */
 
 {

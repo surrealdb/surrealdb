@@ -6,6 +6,8 @@ use chrono::{DateTime, Utc};
 #[cfg(feature = "jwks")]
 use jsonwebtoken::jwk::JwkSet;
 
+use super::catalog::TableSnapshot;
+use super::function::FunctionSnapshot;
 use crate::catalog;
 
 /// A cached JWKS document together with the time it was stored.
@@ -21,11 +23,19 @@ pub struct CachedJwks {
 /// `cache_*_ts` stamps, so the per-record document pipeline never reparses
 /// definition text between schema changes. The stored (text) forms are
 /// cached per transaction (see `cache::tx`), not here.
+///
+/// The planner's entry is a table's definition, fields and indexes together,
+/// keyed by the table's catalog version, which one read validates; see
+/// [`TableSnapshot`].
 #[derive(Clone, Debug)]
 pub enum Entry {
 	/// A cached JWKS document and the time it was stored
 	#[cfg(feature = "jwks")]
 	Jwk(Arc<CachedJwks>),
+	/// One table's definition, fields and indexes, as of one catalog version.
+	Catalog(Arc<TableSnapshot>),
+	/// One function's compiled definition and body, under one content hash.
+	Function(Arc<FunctionSnapshot>),
 	/// The compiled field definitions specified on a table.
 	Fds(Arc<[catalog::FieldDefinition]>),
 	/// The compiled event definitions specified on a table.
@@ -46,6 +56,24 @@ impl Entry {
 		match self {
 			Entry::Jwk(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Jwk"),
+		}
+	}
+	/// Converts this cache entry into a [`TableSnapshot`].
+	/// Fails with a typed internal error if called on a cache entry that is not an
+	/// [`Entry::Catalog`].
+	pub fn try_into_catalog(self) -> Result<Arc<TableSnapshot>> {
+		match self {
+			Entry::Catalog(v) => Ok(v),
+			_ => fail!("Unable to convert type into Entry::Catalog"),
+		}
+	}
+	/// Converts this cache entry into a [`FunctionSnapshot`].
+	/// Fails with a typed internal error if called on a cache entry that is not an
+	/// [`Entry::Function`].
+	pub fn try_into_function(self) -> Result<Arc<FunctionSnapshot>> {
+		match self {
+			Entry::Function(v) => Ok(v),
+			_ => fail!("Unable to convert type into Entry::Function"),
 		}
 	}
 	/// Converts this cache entry into a slice of [`catalog::FieldDefinition`].

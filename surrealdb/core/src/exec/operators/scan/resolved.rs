@@ -1,74 +1,232 @@
 //! Plan-time resolved table context.
 //!
-//! When the table name is known at planning time and a transaction is available,
-//! the planner resolves table definitions and field state eagerly. The result is
-//! bundled into [`ResolvedTableContext`] and passed directly to scan operators,
-//! eliminating all per-query runtime KV lookups from the hot path.
+//! When a table source is planned with a transaction at hand, the planner
+//! reads the table's definition once and hands the scan a
+//! [`ResolvedTableContext`], so `execute()` performs no catalog lookups of its
+//! own. The context also states who enforces what the schema declares for the
+//! rows — the table `SELECT` permission, the computed fields and the
+//! field-level `SELECT` permissions — as a [`RowEnforcement`]:
 //!
-//! Permission checks (`should_check_perms`, `validate_record_user_access`) are
-//! still done at execution time because they depend on auth context that is set
-//! up by the executor, but these are pure CPU operations with zero KV overhead.
+//! - A source the analyzer resolved (`LogicalOp::Source(LogicalSource { schema: Some(_), .. })`)
+//!   carries those declarations in the plan, as a `PermissionFilter` and a stack of projection
+//!   layers above the scan. The scan is planned [`EnforcementMode::Planned`] and yields rows as
+//!   stored; a scan that reduced them itself would hand the nodes above an already-cut row, and a
+//!   computed field's own guard, written to read a stored field raw, would be judged against the
+//!   cut.
+//! - A source the analyzer did not resolve carries nothing, so the scan is planned
+//!   [`EnforcementMode::Runtime`] and applies all three per row, as the scan pipeline does.
+//!
+//! The session-level gates (`should_check_perms`, `validate_record_user_access`)
+//! remain the scan's, evaluated at execution time against the authority the
+//! executor set up.
 
+use std::borrow::Cow;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use surrealdb_strand::TableName;
 
 use super::pipeline::{FieldState, build_field_state_raw, filter_field_state_for_projection};
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
+use crate::catalog::{DatabaseId, NamespaceId, Permission, TableDefinition};
 use crate::err::{EngineError, Error};
-use crate::exec::permission::{PhysicalPermission, convert_permission_to_physical};
+use crate::exec::permission::{PhysicalPermission, table_select_permission_physical};
 use crate::exec::planner::Planner;
+use crate::expr::logical::{LogicalOp, LogicalSource, Schema};
 
-/// Plan-time resolved table metadata that replaces runtime KV lookups.
+/// How a `Source` node asks its scan to be planned.
 ///
-/// Contains the table definition, pre-compiled SELECT permission, and
-/// pre-built field state. When an operator has a `ResolvedTableContext`,
-/// its `execute()` performs zero async work for metadata resolution --
-/// only the synchronous `should_check_perms` call remains.
+/// Decided by the physical planner from the node's `schema`: a resolved schema
+/// means the analyzer inserted above the source whatever the read needs, and
+/// nothing else may apply it again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EnforcementMode {
+	/// The plan enforces; the scan yields rows as stored.
+	Planned,
+	/// The scan enforces per row.
+	Runtime,
+}
+
+impl EnforcementMode {
+	/// The mode for a source with the given `schema`.
+	pub(crate) fn for_source(schema: Option<&Arc<Schema>>) -> Self {
+		if schema.is_some() {
+			Self::Planned
+		} else {
+			Self::Runtime
+		}
+	}
+
+	/// The mode for a pipeline's sources: [`Self::Planned`] when there is one
+	/// source and the analyzer resolved it, [`Self::Runtime`] otherwise.
+	pub(crate) fn of_sources(sources: &[LogicalOp]) -> Self {
+		match sources {
+			[
+				LogicalOp::Source(LogicalSource {
+					schema,
+					..
+				}),
+			] => Self::for_source(schema.as_ref()),
+			_ => Self::Runtime,
+		}
+	}
+}
+
+/// Who applies the schema-derived behaviours to the rows a scan reads.
+#[derive(Debug, Clone)]
+pub(crate) enum RowEnforcement {
+	/// The plan enforces: a `PermissionFilter` and the projection layers above
+	/// this scan apply the table permission, computed fields and field
+	/// permissions, so rows leave the scan as stored. `select_permission` is
+	/// `Deny` for a permission of `NONE`, which keeps its short-circuit — no
+	/// row could pass the filter above, so the scan may stop before reading
+	/// any — and otherwise `Allow`: the plan's filter judges a conditional
+	/// guard, and the scan does not compile it. The one exception is a top-k
+	/// scan (KNN), which applies the guard to its candidates so that k counts
+	/// rows the caller may see; its context carries the compiled guard, set by
+	/// [`ResolvedTableContext::with_candidate_guard`].
+	Planned {
+		select_permission: PhysicalPermission,
+	},
+	/// The scan enforces per row: the analyzer did not resolve this source, so
+	/// nothing above the scan applies what the schema declares.
+	Runtime {
+		select_permission: PhysicalPermission,
+		/// The table's whole field state; scans narrow it to their projection
+		/// with [`ResolvedTableContext::field_state_for_projection`].
+		field_state: Arc<FieldState>,
+	},
+}
+
+/// Plan-time resolved table metadata, in place of runtime catalog lookups.
+///
+/// Carries the table definition and the [`RowEnforcement`] the scan was
+/// planned under. With one of these, a scan's `execute()` performs no async
+/// metadata resolution; only the synchronous session gates remain.
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedTableContext {
 	/// The resolved table definition (used for ns_id/db_id/table_id).
 	pub table_def: Arc<TableDefinition>,
-	/// Pre-compiled SELECT permission (Full/None/Conditional with PhysicalExpr).
-	/// Compiled at plan time so operators don't need to call
-	/// `convert_permission_to_physical` at execute time.
-	pub select_permission: PhysicalPermission,
-	/// Pre-built field state with all computed fields and field-level permissions.
-	/// Stored as Arc for cheap cloning; operators filter by `needed_fields` at use time.
-	pub field_state: Arc<FieldState>,
+	/// Who enforces the schema-derived behaviours on the rows.
+	pub enforcement: RowEnforcement,
 }
 
 impl ResolvedTableContext {
-	/// Get a field state filtered for a specific projection.
-	pub fn field_state_for_projection(
-		&self,
-		needed_fields: Option<&std::collections::HashSet<String>>,
-	) -> FieldState {
-		filter_field_state_for_projection(&self.field_state, needed_fields)
+	/// The table permission this scan applies to every row it reads.
+	///
+	/// `Allow` when the session is not permission-checked, and when the plan
+	/// enforces — except for a `NONE` permission, which stays `Deny`: the
+	/// filter above admits no row, so stopping before the read changes nothing
+	/// the plan observes.
+	pub(crate) fn select_permission(&self, check_perms: bool) -> PhysicalPermission {
+		if !check_perms {
+			return PhysicalPermission::Allow;
+		}
+		match &self.enforcement {
+			RowEnforcement::Runtime {
+				select_permission,
+				..
+			} => select_permission.clone(),
+			RowEnforcement::Planned {
+				select_permission: PhysicalPermission::Deny,
+			} => PhysicalPermission::Deny,
+			RowEnforcement::Planned {
+				..
+			} => PhysicalPermission::Allow,
+		}
 	}
 
-	/// Get the SELECT permission, respecting the `check_perms` flag.
-	/// When `check_perms` is false, returns `Allow` regardless of the
-	/// pre-compiled permission.
-	pub fn select_permission(&self, check_perms: bool) -> PhysicalPermission {
-		if check_perms {
-			self.select_permission.clone()
-		} else {
-			PhysicalPermission::Allow
+	/// The table permission a top-k scan applies to its candidates, in either
+	/// mode: the k neighbours it returns have to be k the caller may see, and a
+	/// filter above the scan cannot widen a result already cut to k. `Allow`
+	/// when the session is not permission-checked. A planned context carries
+	/// the guard only once [`Self::with_candidate_guard`] has compiled it.
+	pub(crate) fn candidate_permission(&self, check_perms: bool) -> PhysicalPermission {
+		if !check_perms {
+			return PhysicalPermission::Allow;
+		}
+		match &self.enforcement {
+			RowEnforcement::Planned {
+				select_permission,
+			}
+			| RowEnforcement::Runtime {
+				select_permission,
+				..
+			} => select_permission.clone(),
+		}
+	}
+
+	/// This context with the table's conditional `SELECT` guard compiled for a
+	/// top-k scan's candidates. A planned context otherwise carries no
+	/// compiled guard — the plan's filter judges it — so a top-k scan planned
+	/// under the plan's enforcement asks for it here; a runtime context and a
+	/// planned one whose permission is unconditional are returned unchanged.
+	pub(crate) async fn with_candidate_guard(self, planner: &Planner<'_>) -> Result<Self, Error> {
+		if !matches!(
+			(&self.enforcement, &self.table_def.permissions.select),
+			(
+				RowEnforcement::Planned {
+					select_permission: PhysicalPermission::Allow,
+				},
+				Permission::Specific(_)
+			)
+		) {
+			return Ok(self);
+		}
+		let select_permission =
+			table_select_permission_physical(Some(&self.table_def), planner).await?;
+		Ok(Self {
+			table_def: self.table_def,
+			enforcement: RowEnforcement::Planned {
+				select_permission,
+			},
+		})
+	}
+
+	/// The field state this scan applies, narrowed to `needed_fields`. Empty
+	/// when the plan enforces.
+	pub(crate) fn field_state_for_projection(
+		&self,
+		needed_fields: Option<&HashSet<String>>,
+	) -> FieldState {
+		match &self.enforcement {
+			RowEnforcement::Planned {
+				..
+			} => FieldState::empty(),
+			RowEnforcement::Runtime {
+				field_state,
+				..
+			} => filter_field_state_for_projection(field_state, needed_fields),
+		}
+	}
+
+	/// The table's whole field state, unnarrowed by any projection — what a
+	/// plan-time eligibility check reads. Empty when the plan enforces.
+	pub(crate) fn field_state(&self) -> Cow<'_, FieldState> {
+		match &self.enforcement {
+			RowEnforcement::Planned {
+				..
+			} => Cow::Owned(FieldState::empty()),
+			RowEnforcement::Runtime {
+				field_state,
+				..
+			} => Cow::Borrowed(field_state),
 		}
 	}
 }
 
 /// Resolve table context at plan time.
 ///
-/// Performs the expensive KV lookups (table definition, field definitions) and
-/// PhysicalExpr compilation eagerly during planning. Returns `None` if the
-/// table does not exist.
+/// Reads the table definition as of `version` — the stamp the scan will read
+/// its rows at, `None` for the transaction's current state. Under
+/// [`EnforcementMode::Runtime`] it compiles the table's `SELECT` permission,
+/// reads the field definitions at that stamp and builds the field state;
+/// under [`EnforcementMode::Planned`] the plan's nodes enforce, so only
+/// whether the permission is `NONE` is kept (see [`RowEnforcement::Planned`]).
+/// Returns `None` if the table does not exist at that version.
 ///
-/// The `check_perms` flag controls whether field-level permissions are compiled
-/// into the field state. Since the planner doesn't have auth context, this
-/// should be `true` (conservative) -- the operator will skip permission
-/// evaluation at runtime if it determines checks aren't needed.
+/// The field state is compiled with field-level permissions included, since
+/// the planner has no auth context; the scan skips their evaluation at runtime
+/// when the session is not permission-checked.
 ///
 /// `planner` provides the transaction, ns/db context, and the
 /// [`crate::exec::planner::CycleGuard`] used to break compile-time cycles
@@ -76,6 +234,7 @@ impl ResolvedTableContext {
 /// only legitimate one is `try_resolve_table_ctx`) is responsible for
 /// pushing `(ns_id, db_id, table_name)` onto the guard *before* invoking
 /// this function.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn resolve_table_context(
 	planner: &Planner<'_>,
 	ns: &str,
@@ -83,6 +242,8 @@ pub(crate) async fn resolve_table_context(
 	ns_id: NamespaceId,
 	db_id: DatabaseId,
 	table_name: &TableName,
+	mode: EnforcementMode,
+	version: Option<u64>,
 ) -> Result<Option<ResolvedTableContext>, Error> {
 	use crate::catalog::providers::TableProvider;
 
@@ -92,7 +253,7 @@ pub(crate) async fn resolve_table_context(
 
 	// Look up table definition
 	let table_def = match txn
-		.get_tb_by_name(ns, db, table_name, None)
+		.get_tb_by_name(ns, db, table_name, version)
 		.await
 		.map_err(|e| EngineError::Internal(e.to_string()))?
 	{
@@ -100,26 +261,314 @@ pub(crate) async fn resolve_table_context(
 		None => return Ok(None),
 	};
 
-	// Pre-compile SELECT permission and field state at plan time. Inner
-	// subqueries inherit the planner's `CycleGuard` via
-	// `planner.physical_expr(...)` → SELECT planning →
-	// `try_resolve_table_ctx` → guard check. A self-referential permission
-	// like `WHERE (SELECT FROM same_table) != NONE` will fall back to
-	// runtime resolution for the inner subtree only; the outer `table_def`
-	// here is fully resolved.
-	let select_permission =
-		convert_permission_to_physical(&table_def.permissions.select, planner).await?;
-
-	let field_state = build_field_state_raw(planner, ns_id, db_id, table_name, true, None)
-		.await
-		.map_err(|cf| match cf {
-			crate::expr::ControlFlow::Err(e) => EngineError::Internal(e.to_string()),
-			_ => EngineError::Internal("Unexpected control flow in field state resolution".into()),
-		})?;
+	let enforcement = match mode {
+		EnforcementMode::Planned => RowEnforcement::Planned {
+			select_permission: planned_select_permission(&table_def),
+		},
+		EnforcementMode::Runtime => {
+			// Pre-compile the SELECT permission at plan time. Inner subqueries
+			// inherit the planner's `CycleGuard` via `planner.physical_expr(...)`
+			// → SELECT planning → `try_resolve_table_ctx` → guard check. A
+			// self-referential permission like `WHERE (SELECT FROM same_table)
+			// != NONE` will fall back to runtime resolution for the inner
+			// subtree only; the outer `table_def` here is fully resolved.
+			let select_permission =
+				table_select_permission_physical(Some(&table_def), planner).await?;
+			let field_state =
+				build_field_state_raw(planner, ns_id, db_id, table_name, true, version)
+					.await
+					.map_err(|cf| match cf {
+						crate::expr::ControlFlow::Err(e) => EngineError::Internal(e.to_string()),
+						_ => EngineError::Internal(
+							"Unexpected control flow in field state resolution".into(),
+						),
+					})?;
+			RowEnforcement::Runtime {
+				select_permission,
+				field_state: Arc::new(field_state),
+			}
+		}
+	};
 
 	Ok(Some(ResolvedTableContext {
 		table_def,
-		select_permission,
-		field_state: Arc::new(field_state),
+		enforcement,
 	}))
+}
+
+/// The table permission a scan keeps under [`EnforcementMode::Planned`]:
+/// `Deny` for a permission of `NONE` — the plan's filter above admits no row,
+/// so the scan may stop before reading any — and `Allow` otherwise, the plan
+/// judging a conditional guard. Read off the definition the scan runs with,
+/// whether resolved when the plan was made or when it runs.
+pub(crate) fn planned_select_permission(table_def: &TableDefinition) -> PhysicalPermission {
+	match table_def.permissions.select {
+		Permission::None => PhysicalPermission::Deny,
+		Permission::Full | Permission::Specific(_) => PhysicalPermission::Allow,
+	}
+}
+
+/// Fixtures shared by the scan operators' enforcement tests.
+///
+/// Each scan asserts the same contract: planned under
+/// [`EnforcementMode::Planned`] it yields the stored record — the restricted
+/// field present, the computed field absent — and planned under
+/// [`EnforcementMode::Runtime`] it reduces the record for a permission-checked
+/// caller. The helpers here build both contexts for a table from a live
+/// database context, the way the planner would, so each scan's test states only
+/// how that scan is constructed.
+#[cfg(test)]
+pub(crate) mod test_support {
+	use std::sync::Arc;
+
+	use super::*;
+	use crate::dbs::Session;
+	use crate::exec::ExecutionContext;
+	use crate::exec::index::access_path::IndexRef;
+	use crate::exec::operators::scan::pipeline::build_field_state;
+	use crate::exec::permission::table_select_permission_physical_runtime;
+	use crate::val::Value;
+
+	/// A table with a stored field the anonymous caller may not select, a
+	/// computed field, and a plain indexed field. The one stored record reads
+	/// as `{ id: t:1, n: 1, secret: 's' }` from storage.
+	pub(crate) const RESTRICTED_TABLE: &str = "
+		DEFINE TABLE t SCHEMALESS PERMISSIONS FULL;
+		DEFINE FIELD secret ON t TYPE string PERMISSIONS FOR select NONE;
+		DEFINE FIELD label ON t COMPUTED 'computed';
+		DEFINE FIELD n ON t TYPE int;
+		DEFINE INDEX n_idx ON t FIELDS n;
+		CREATE t:1 SET n = 1, secret = 's';
+	";
+
+	/// An anonymous session on `test`/`test`: permission-checked when server
+	/// auth is enabled.
+	pub(crate) fn anonymous() -> Session {
+		Session::default().with_ns("test").with_db("test")
+	}
+
+	/// Both contexts for `table`, resolved against `ctx`'s transaction.
+	pub(crate) async fn contexts(
+		ctx: &ExecutionContext,
+		table: &str,
+	) -> (ResolvedTableContext, ResolvedTableContext) {
+		let table = TableName::from(table);
+		let db_ctx = ctx.database().expect("a database context");
+		let table_def = db_ctx
+			.get_table_def(&table, None)
+			.await
+			.expect("catalog read")
+			.expect("the table is defined");
+		let select_permission = table_select_permission_physical_runtime(Some(&table_def), ctx)
+			.await
+			.expect("the permission compiles");
+		let field_state = build_field_state(ctx, &table, true, None).await.expect("field state");
+		let planned = ResolvedTableContext {
+			table_def: Arc::clone(&table_def),
+			enforcement: RowEnforcement::Planned {
+				select_permission: select_permission.clone(),
+			},
+		};
+		let runtime = ResolvedTableContext {
+			table_def,
+			enforcement: RowEnforcement::Runtime {
+				select_permission,
+				field_state: Arc::new(field_state),
+			},
+		};
+		(planned, runtime)
+	}
+
+	/// The index `name` on `table`, as the access-path chooser hands it to a
+	/// scan.
+	pub(crate) async fn index_ref(ctx: &ExecutionContext, table: &str, name: &str) -> IndexRef {
+		let indexes = ctx
+			.database()
+			.expect("a database context")
+			.get_table_indexes(&TableName::from(table), None)
+			.await
+			.expect("catalog read");
+		let idx =
+			indexes.iter().position(|ix| ix.name.as_str() == name).expect("the index is defined");
+		IndexRef::new(indexes, idx)
+	}
+
+	/// A field of an object row, `NONE` when absent.
+	pub(crate) fn field(row: &Value, name: &str) -> Value {
+		match row {
+			Value::Object(obj) => obj.get(name).cloned().unwrap_or(Value::None),
+			_ => Value::None,
+		}
+	}
+
+	/// Assert `rows` is the one stored record of [`RESTRICTED_TABLE`], as
+	/// stored: the restricted field present, the computed field absent.
+	pub(crate) fn assert_as_stored(rows: &[Value]) {
+		assert_eq!(rows.len(), 1, "one stored record, got {rows:?}");
+		assert_eq!(field(&rows[0], "secret"), Value::from("s"), "restricted field kept: {rows:?}");
+		assert_eq!(field(&rows[0], "label"), Value::None, "computed field not derived: {rows:?}");
+	}
+
+	/// Assert `rows` is the one stored record of [`RESTRICTED_TABLE`], reduced
+	/// for a checked caller: the restricted field cut, the computed field
+	/// derived.
+	pub(crate) fn assert_reduced(rows: &[Value]) {
+		assert_eq!(rows.len(), 1, "one stored record, got {rows:?}");
+		assert_eq!(field(&rows[0], "secret"), Value::None, "restricted field cut: {rows:?}");
+		assert_eq!(
+			field(&rows[0], "label"),
+			Value::from("computed"),
+			"computed field derived: {rows:?}"
+		);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::test_util::TestDb;
+	use crate::expr::logical::SourceRef;
+	use crate::kvs::TransactionType;
+
+	fn source(schema: Option<Arc<Schema>>) -> LogicalOp {
+		LogicalOp::Source(LogicalSource {
+			source: SourceRef::Table("t".into()),
+			schema,
+			with: None,
+			for_update: false,
+		})
+	}
+
+	#[test]
+	fn a_resolved_source_is_planned_and_an_unresolved_one_is_runtime() {
+		let schema = Arc::new(Schema::open());
+		assert_eq!(EnforcementMode::for_source(Some(&schema)), EnforcementMode::Planned);
+		assert_eq!(EnforcementMode::for_source(None), EnforcementMode::Runtime);
+
+		assert_eq!(
+			EnforcementMode::of_sources(&[source(Some(Arc::clone(&schema)))]),
+			EnforcementMode::Planned
+		);
+		assert_eq!(EnforcementMode::of_sources(&[source(None)]), EnforcementMode::Runtime);
+		// Several sources are combined above the scans; each is planned on its own.
+		assert_eq!(
+			EnforcementMode::of_sources(&[source(Some(Arc::clone(&schema))), source(Some(schema))]),
+			EnforcementMode::Runtime
+		);
+		assert_eq!(EnforcementMode::of_sources(&[]), EnforcementMode::Runtime);
+	}
+
+	#[tokio::test]
+	async fn a_planned_context_hands_the_scan_nothing_to_enforce() {
+		let db = TestDb::new_with_auth(test_support::RESTRICTED_TABLE).await;
+		let ctx = db.exec_ctx_as(&test_support::anonymous(), TransactionType::Read).await;
+		let (planned, runtime) = test_support::contexts(&ctx, "t").await;
+
+		assert!(matches!(planned.select_permission(true), PhysicalPermission::Allow));
+		assert!(planned.field_state_for_projection(None).computed_fields.is_empty());
+		assert!(planned.field_state_for_projection(None).field_permissions.is_empty());
+		assert!(planned.field_state().computed_fields.is_empty());
+
+		assert_eq!(runtime.field_state_for_projection(None).computed_fields.len(), 1);
+		assert_eq!(runtime.field_state_for_projection(None).field_permissions.len(), 1);
+		assert_eq!(runtime.field_state().computed_fields.len(), 1);
+	}
+
+	#[tokio::test]
+	async fn the_table_permission_is_kept_for_candidates_and_for_none() {
+		let db = TestDb::new("DEFINE TABLE t;").await;
+		let ctx = db.exec_ctx().await;
+		let conditional = PhysicalPermission::Conditional(
+			crate::exec::operators::test_util::physical_expr("flag = true", &ctx).await,
+		);
+		let table_def = ctx
+			.database()
+			.expect("a database context")
+			.get_table_def(&TableName::from("t"), None)
+			.await
+			.expect("catalog read")
+			.expect("the table is defined");
+		let planned = |select_permission: PhysicalPermission| ResolvedTableContext {
+			table_def: Arc::clone(&table_def),
+			enforcement: RowEnforcement::Planned {
+				select_permission,
+			},
+		};
+
+		// A conditional permission is the filter's above the scan, not the scan's.
+		let ctx_cond = planned(conditional.clone());
+		assert!(matches!(ctx_cond.select_permission(true), PhysicalPermission::Allow));
+		// A top-k scan applies it to its candidates regardless.
+		assert!(matches!(ctx_cond.candidate_permission(true), PhysicalPermission::Conditional(_)));
+		// Neither applies when the session is not checked.
+		assert!(matches!(ctx_cond.candidate_permission(false), PhysicalPermission::Allow));
+		assert!(matches!(ctx_cond.select_permission(false), PhysicalPermission::Allow));
+
+		// `NONE` keeps its short-circuit for a checked session.
+		let ctx_none = planned(PhysicalPermission::Deny);
+		assert!(matches!(ctx_none.select_permission(true), PhysicalPermission::Deny));
+		assert!(matches!(ctx_none.select_permission(false), PhysicalPermission::Allow));
+	}
+
+	/// A planned context does not compile a conditional table guard — the
+	/// plan's filter judges it — until a top-k scan asks for its candidates'
+	/// guard; a `NONE` permission keeps its short-circuit without compiling.
+	#[tokio::test]
+	async fn a_planned_context_compiles_the_guard_only_for_candidates() {
+		let db = TestDb::new(
+			"DEFINE TABLE guarded SCHEMALESS PERMISSIONS FOR select WHERE flag = true;
+			 DEFINE TABLE hidden SCHEMALESS PERMISSIONS FOR select NONE;
+			 DEFINE TABLE open SCHEMALESS PERMISSIONS FULL;",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let planner = Planner::with_txn(
+			ctx.ctx(),
+			ctx.function_registry(),
+			ctx.try_txn().expect("a transaction"),
+			Some("test".to_owned()),
+			Some("test".to_owned()),
+		);
+		let db_ctx = ctx.database().expect("a database context");
+		let (ns_id, db_id) = (db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id);
+		let resolve = |table: &'static str, mode| {
+			let planner = &planner;
+			async move {
+				resolve_table_context(
+					planner,
+					"test",
+					"test",
+					ns_id,
+					db_id,
+					&TableName::from(table),
+					mode,
+					None,
+				)
+				.await
+				.expect("catalog read")
+				.expect("the table is defined")
+			}
+		};
+
+		let guarded = resolve("guarded", EnforcementMode::Planned).await;
+		assert!(matches!(guarded.select_permission(true), PhysicalPermission::Allow));
+		assert!(matches!(guarded.candidate_permission(true), PhysicalPermission::Allow));
+		let guarded = guarded.with_candidate_guard(&planner).await.expect("the guard compiles");
+		assert!(matches!(guarded.select_permission(true), PhysicalPermission::Allow));
+		assert!(matches!(guarded.candidate_permission(true), PhysicalPermission::Conditional(_)));
+
+		let hidden = resolve("hidden", EnforcementMode::Planned).await;
+		assert!(matches!(hidden.select_permission(true), PhysicalPermission::Deny));
+		let hidden = hidden.with_candidate_guard(&planner).await.expect("nothing to compile");
+		assert!(matches!(hidden.candidate_permission(true), PhysicalPermission::Deny));
+
+		let open = resolve("open", EnforcementMode::Planned).await;
+		let open = open.with_candidate_guard(&planner).await.expect("nothing to compile");
+		assert!(matches!(open.candidate_permission(true), PhysicalPermission::Allow));
+
+		// Under runtime enforcement the scan applies the guard itself, so it
+		// is compiled up front.
+		let runtime = resolve("guarded", EnforcementMode::Runtime).await;
+		assert!(matches!(runtime.select_permission(true), PhysicalPermission::Conditional(_)));
+	}
 }

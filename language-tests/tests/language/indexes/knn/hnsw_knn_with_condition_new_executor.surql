@@ -15,13 +15,14 @@ value = "[{ flag: true, id: pts:1, point: [10f] }, { flag: false, id: pts:2, poi
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, flag, distance] {rows: 2}
+value = '''
+'SelectProject [ctx: Db] [projections: id, flag, distance] {rows: 2}
     SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2}
-        Compute [ctx: Db] [fields: distance = vector::distance::knn(...)] {rows: 2}
+        Compute [ctx: Db] [fields: distance = vector::distance::knn()] {rows: 2}
             Filter [ctx: Db] [predicate: flag = true] {rows: 2}
                 KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: flag = true] {rows: 2}
 
-Total rows: 2"'''
+Total rows: 2''''
 
 [[test.results]]
 value = "[{ distance: 6f, flag: true, id: pts:5 }, { distance: 14f, flag: true, id: pts:3 }]"

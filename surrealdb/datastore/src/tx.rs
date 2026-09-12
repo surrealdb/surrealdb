@@ -61,12 +61,12 @@ use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
 	AdjacencyEdgeTablePrefix, AdjacencyKey, AnalyzerKey, AnalyzerPrefix, ApiKey, ApiPrefix,
 	BucketKey, BucketPrefix, BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey,
-	ChangeFeedKey, ChangefeedFenceKey, DatabaseKey, DatabasePrefix, DbAccessMethodKey,
-	DbAccessMethodPrefix, DbAccessRoot, DbConfigKey, DbConfigPrefix, DbGrantKey, DbGrantPrefix,
-	DbUserKey, DbUserPrefix, DocLookupKey, DocStatsBatchKey, EventKey, EventPrefix, FieldKey,
-	FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, GraphFoldKey, GraphPointerKey,
-	IdxRoot, IndexCompactionKey, IndexCountKey, IndexDefKey, IndexDefPrefix, IndexNameKey,
-	LiveEventsKey, MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey,
+	CatalogVersionKey, ChangeFeedKey, ChangefeedFenceKey, DatabaseKey, DatabasePrefix,
+	DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot, DbConfigKey, DbConfigPrefix, DbGrantKey,
+	DbGrantPrefix, DbUserKey, DbUserPrefix, DocLookupKey, DocStatsBatchKey, EventKey, EventPrefix,
+	FieldKey, FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, GraphFoldKey,
+	GraphPointerKey, IdxRoot, IndexCompactionKey, IndexCountKey, IndexDefKey, IndexDefPrefix,
+	IndexNameKey, LiveEventsKey, MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey,
 	NamespacePrefix, NodeKey, NodePrefix, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot,
 	NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix, ParamKey, ParamPrefix, ReclaimKey,
 	ReclaimTbPrefix, RecordKey, RootAccessMethodKey, RootAccessMethodPrefix, RootAccessRoot,
@@ -80,6 +80,7 @@ use crate::testing::{
 	maybe_inject_retryable_conflict,
 };
 use crate::triggers::CommitTriggers;
+use crate::values::catalog_version::CatalogVersion;
 use crate::values::changefeed::Changefeed;
 use crate::values::fulltext::DocLengthAndCount;
 use crate::values::graph::{AdjacencyBlock, BlockEntries, GraphFoldScope};
@@ -978,7 +979,7 @@ impl Transaction {
 	/// The counters this transaction has accumulated so far. Only the
 	/// commit/cancel event carries them in a normal build; tests read them
 	/// mid-transaction to assert what a code path counted.
-	#[cfg(feature = "test-hooks")]
+	#[cfg(any(test, feature = "test-hooks"))]
 	#[doc(hidden)]
 	pub fn metrics_snapshot_for_test(&self) -> surrealdb_observe::TransactionMetricsSnapshot {
 		self.metrics.snapshot()
@@ -1970,6 +1971,7 @@ impl Transaction {
 			ix: ix_def.index_id,
 		};
 		self.del_key(&name_lookup_key).await?;
+		self.bump_catalog_version(ns, db, tb).await?;
 		self.enqueue_index_reclaim(ns, db, tb, ix_def.index_id, false).await?;
 		// Invalidate the cached list of all indexes for this table.
 		self.cache.remove(&cache::tx::Lookup::Ixs(ns, db, tb.as_ref()));
@@ -1992,6 +1994,15 @@ impl Transaction {
 	/// every folded edge on the table. The locked read registers the key
 	/// for commit-time validation on every backend, so the second
 	/// committer conflicts and retries from a fresh read instead.
+	///
+	/// The same locked read is what makes a catalog version name one
+	/// committed state of the table: every DDL statement reaches the table
+	/// through this method, and the version [`Self::bump_catalog_version`]
+	/// writes alongside is a blind write, so two DDL transactions on one
+	/// table conflict here and never both commit under versions that each
+	/// name a state the other overwrote. A DDL path that wrote a table
+	/// definition without this read would break that identity on a
+	/// last-writer-wins backend.
 	pub async fn replace_tb(
 		&self,
 		ns: &str,
@@ -2050,6 +2061,80 @@ impl Transaction {
 		};
 		let next = self.get_key(&key, None).await?.unwrap_or(0).wrapping_add(1);
 		self.set_key(&key, &next).await
+	}
+
+	/// The identity of `tb`'s catalog entry as this transaction sees it, or
+	/// `None` for a table no catalog write has stamped yet.
+	///
+	/// The answer is the transaction's snapshot plus its own uncommitted catalog
+	/// writes: a transaction that has run DDL on the table sees the version it
+	/// minted, and no other transaction can see that version until this one
+	/// commits. Two transactions that read the same `Some` value see the same
+	/// table definition, fields and indexes, which is what lets
+	/// [`crate::cache::ds::TableSnapshot`] share what one of them loaded.
+	///
+	/// Storage is read once per table per transaction: the answer, `None`
+	/// included, is held in the transaction cache, and
+	/// [`Self::bump_catalog_version`] replaces it with the version it mints.
+	/// Under snapshot isolation nothing else can change the stored value this
+	/// transaction sees, so the cached answer is the stored one for the life of
+	/// the transaction, or until [`Self::clear_cache`] drops it.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn catalog_version(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<Option<Uuid>> {
+		let qey = cache::tx::Lookup::Cv(ns, db, tb.as_str());
+		if let Some(entry) = self.cache.get(&qey) {
+			return Ok(*entry.try_into_type::<Option<Uuid>>()?);
+		}
+		let key = CatalogVersionKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		let version = self.get_key(&key, None).await?.map(|v| v.0);
+		self.cache.insert(qey, cache::tx::Entry::Any(Arc::new(version)));
+		Ok(version)
+	}
+
+	/// Stamp `tb`'s catalog entry with a fresh version.
+	///
+	/// Called by every provider method that writes a table definition, a field
+	/// or an index — the one place the write happens, so no DDL path can forget
+	/// it. The stamp is a fresh uuid, never an increment: a version this
+	/// transaction mints is visible only to it until commit, and if it rolls back
+	/// the value is gone with it and can never be reused by a later writer. The
+	/// key is the table's own, so catalog writes to different tables never
+	/// conflict over it. The transaction cache is updated in step, so a read of
+	/// [`Self::catalog_version`] later in this transaction answers with the
+	/// minted version.
+	///
+	/// The write is blind: nothing here reads the version first, so on its
+	/// own it detects no concurrent DDL. That a version names one committed
+	/// state of the table rests on every DDL path writing the table through
+	/// [`Self::replace_tb`], whose locked read of the definition is what two
+	/// DDL transactions on the same table conflict over.
+	async fn bump_catalog_version(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<()> {
+		let version = CatalogVersion::fresh();
+		let key = CatalogVersionKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		self.set_key(&key, &version).await?;
+		self.cache.insert(
+			cache::tx::Lookup::Cv(ns, db, tb.as_str()),
+			cache::tx::Entry::Any(Arc::new(Some(version.0))),
+		);
+		Ok(())
 	}
 
 	/// Enqueue background reclaim of an index-data prefix by its stable id.
@@ -3430,24 +3515,41 @@ impl Transaction {
 	/// change the set of live queries on a table (LIVE / KILL) must call this in
 	/// the same transaction as the live-query row write. The table's committed
 	/// IDs are taken from `tb`, so no namespace/database name lookup is needed.
+	///
+	/// The table's catalog version is left as it is: the live-query stamp is
+	/// not part of the catalog a bound statement depends on, so a registration
+	/// neither evicts the node-wide [`crate::cache::ds::TableSnapshot`] nor
+	/// conflicts with anything but writes to this table. Consequently a
+	/// definition read from that snapshot carries the `cache_lives_ts` of the
+	/// last catalog write, not of the last registration; the live-query cache
+	/// must key on a definition read through the transaction.
+	///
+	/// The stamp is written under a locked read of the definition
+	/// ([`Self::getu_key`]), as [`Self::replace_tb`] writes every DDL change,
+	/// and the value written is the one that read returned. A registration
+	/// that races a catalog write to the same table therefore conflicts at
+	/// commit instead of overwriting it: on a last-writer-wins backend a blind
+	/// rewrite of the whole definition would revert a concurrently committed
+	/// `ALTER TABLE` while the table's version still named the newer state, so
+	/// the node-wide snapshot and a read through the transaction would
+	/// disagree on the table's permissions.
 	pub async fn bump_table_lives_cache(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<()> {
-		let Some(existing) = self.get_tb(ns, db, tb, None).await? else {
+		let key = TableKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		let Some(mut stored) = self.getu_key(&key).await? else {
 			// The table is gone (e.g. removed in the same batch); nothing to do.
 			return Ok(());
 		};
-		let mut updated = (*existing).clone();
-		updated.cache_lives_ts = uuid::Uuid::now_v7();
-		let key = TableKey {
-			ns: updated.namespace_id,
-			db: updated.database_id,
-			tb: Cow::Borrowed(tb),
-		};
-		self.set_key(&key, &updated.to_stored()).await?;
+		stored.cache_lives_ts = uuid::Uuid::now_v7();
+		self.set_key(&key, &stored).await?;
 		// Every cached view of this table now carries a stale `cache_lives_ts`:
 		// the by-id and by-name definitions, the database's table list, and the
 		// table's compiled live-query list. A re-read within this transaction
@@ -4923,6 +5025,8 @@ impl TableProvider for Transaction {
 				}
 			}
 
+			self.bump_catalog_version(tb.namespace_id, tb.database_id, &tb_name).await?;
+
 			// Invalidate the cached list of all tables for this database
 			let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
 			self.cache.remove(&list_key);
@@ -4963,6 +5067,7 @@ impl TableProvider for Transaction {
 				tb: Cow::Borrowed(&tb_name),
 			};
 			self.del_key(&key).await?;
+			self.bump_catalog_version(tb.namespace_id, tb.database_id, &tb_name).await?;
 
 			// Invalidate the cached list of all tables for this database
 			let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
@@ -4999,6 +5104,7 @@ impl TableProvider for Transaction {
 				tb: Cow::Borrowed(&tb_name),
 			};
 			self.clr_key(&key).await?;
+			self.bump_catalog_version(tb.namespace_id, tb.database_id, &tb_name).await?;
 
 			// Invalidate the cached list of all tables for this database
 			let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
@@ -5357,6 +5463,7 @@ impl TableProvider for Transaction {
 				fd: Cow::Borrowed(&name),
 			};
 			self.set_key(&key, &stored).await?;
+			self.bump_catalog_version(ns, db, tb).await?;
 
 			// Invalidate the cached list of all fields for this table
 			let list_key = cache::tx::Lookup::Fds(ns, db, tb.as_ref());
@@ -5373,6 +5480,34 @@ impl TableProvider for Transaction {
 			let qey = cache::tx::Lookup::Fd(ns, db, tb.as_str(), &name);
 			let entry = cache::tx::Entry::Any(Arc::new(fd.clone()));
 			self.cache.insert(qey, entry);
+			Ok(())
+		})
+	}
+
+	fn del_tb_field<'a>(
+		&'a self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		fd: &'a str,
+	) -> BoxProviderFut<'a, Result<()>> {
+		Box::pin(async move {
+			let key = FieldKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
+				fd: Cow::Borrowed(fd),
+			};
+			self.del_key(&key).await?;
+			self.bump_catalog_version(ns, db, tb).await?;
+
+			// Invalidate the cached list of all fields for this table
+			self.cache.remove(&cache::tx::Lookup::Fds(ns, db, tb.as_ref()));
+			// The removed field may have been the one REFERENCE that could target
+			// some table, so the database-wide reference-target summary is stale.
+			self.cache.remove(&cache::tx::Lookup::DbReferenceTargets(ns, db));
+			// Invalidate the cached field entry
+			self.cache.remove(&cache::tx::Lookup::Fd(ns, db, tb.as_str(), fd));
 			Ok(())
 		})
 	}
@@ -5471,6 +5606,7 @@ impl TableProvider for Transaction {
 				ix: ix.index_id,
 			};
 			self.set_key(&name_lookup_key, &ix.name.to_string()).await?;
+			self.bump_catalog_version(ns, db, tb).await?;
 
 			// Invalidate the cached list of all indexes for this table
 			let list_key = cache::tx::Lookup::Ixs(ns, db, tb.as_ref());
@@ -5523,6 +5659,7 @@ impl TableProvider for Transaction {
 				ix: ix.index_id,
 			};
 			self.del_key(&name_lookup_key).await?;
+			self.bump_catalog_version(ns, db, tb).await?;
 
 			// Invalidate the cached list of all indexes for this table
 			let list_key = cache::tx::Lookup::Ixs(ns, db, tb.as_ref());

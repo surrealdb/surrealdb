@@ -8,25 +8,25 @@ reason = "Test EXPLAIN with IF/ELSE statements"
 [[test.results]]
 # EXPLAIN simple IF statement
 value = """\
-"IfElse [ctx: Rt] [branches: 1]
+"Expr [ctx: Rt] [expr: IF true THEN (Expr) END]
 """"
 
 [[test.results]]
 # EXPLAIN IF/ELSE statement
 value = """\
-"IfElse [ctx: Rt] [branches: 1, has_else: true]
+"Expr [ctx: Rt] [expr: IF true THEN (Expr) ELSE (Expr) END]
 """"
 
 [[test.results]]
 # EXPLAIN IF/ELSE IF/ELSE statement
 value = """\
-"IfElse [ctx: Rt] [branches: 2, has_else: true]
+"Expr [ctx: Rt] [expr: IF $x > 10 THEN (Expr) ELSE IF $x > 5 THEN (Expr) ELSE (Expr) END]
 """"
 
 [[test.results]]
 # EXPLAIN IF/ELSE IF (no final else)
 value = """\
-"IfElse [ctx: Rt] [branches: 2]
+"Expr [ctx: Rt] [expr: IF $x > 10 THEN (Expr) ELSE IF $x > 5 THEN (Expr) END]
 """"
 
 */

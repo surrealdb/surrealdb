@@ -4,18 +4,17 @@
 //! [`MatchPlan`] (binding table, pattern, NNF-split predicates with their
 //! dependency sets, and the output spec), verified against the construction
 //! rules of `doc/gql/V2_DESIGN.md` §8. Predicate, column and order slots
-//! render via [`Expr`]'s `ToSql` so the 3VL guard shapes stay literally
+//! render via [`LogicalExpr`]'s `ToSql` so the 3VL guard shapes stay literally
 //! visible. Each rejection test pins both the error message and the source
 //! slice its span covers.
 
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::expr::Expr;
+use crate::expr::logical::LogicalExpr;
 use crate::expr::match_plan::{
 	BindingDef, BindingId, BindingKind, DetachMode, EdgeQuantifier, ExpandDirection,
 	MatchClausePlan, MatchPlan, MatchStage, MutationStage, NodeStep, PatternPlan, UpdateData,
 };
-use crate::expr::plan::TopLevelExpr;
 use crate::gql::{GqlParserSettings, lower, parse_str, parse_to_plan_with_settings};
 
 // ------------------------------------------------------------------------
@@ -32,9 +31,9 @@ fn lower_plan(source: &str) -> MatchPlan {
 		Ok(prepared) => prepared,
 		Err(e) => panic!("failed to lower {source:?}: {:?}", e.render_on(source)),
 	};
-	match prepared.0.expressions.as_slice() {
-		[TopLevelExpr::Expr(Expr::Match(plan))] => (**plan).clone(),
-		other => panic!("unexpected lowered plan for {source:?}: {other:?}"),
+	match prepared.0 {
+		crate::expr::logical::LogicalOp::Match(m) => *m.plan,
+		other => panic!("expected a MATCH plan for {source:?}, got {other:?}"),
 	}
 }
 
@@ -43,9 +42,9 @@ fn render(source: &str) -> String {
 	render_plan(&lower_plan(source))
 }
 
-/// Renders an [`Expr`] (predicate / column / order slot) the way the IR does:
-/// single-line via `ToSql`, so guard shapes stay diffable.
-fn render_expr(expr: &Expr) -> String {
+/// Renders a [`LogicalExpr`] (predicate / column / order slot) the way the IR
+/// does: single-line via `ToSql`, so guard shapes stay diffable.
+fn render_expr(expr: &LogicalExpr) -> String {
 	let mut out = String::new();
 	expr.fmt_sql(&mut out, SqlFormat::SingleLine);
 	out
@@ -91,13 +90,12 @@ fn render_mutation(plan: &MatchPlan, mutation: &MutationStage, out: &mut String)
 			UpdateData::Set(items) => {
 				let assigns: Vec<String> = items
 					.iter()
-					.map(|(idiom, expr)| format!("{} = {}", idiom.to_sql(), render_expr(expr)))
+					.map(|(property, expr)| format!("{property} = {}", render_expr(expr)))
 					.collect();
 				out.push_str(&format!("SET [{}] {}\n", name(*target), assigns.join(", ")));
 			}
-			UpdateData::Unset(paths) => {
-				let paths: Vec<String> = paths.iter().map(|idiom| idiom.to_sql()).collect();
-				out.push_str(&format!("REMOVE [{}] {}\n", name(*target), paths.join(", ")));
+			UpdateData::Unset(properties) => {
+				out.push_str(&format!("REMOVE [{}] {}\n", name(*target), properties.join(", ")));
 			}
 			UpdateData::Content(expr) => {
 				out.push_str(&format!("SET [{}] = {}\n", name(*target), render_expr(expr)));
@@ -1616,12 +1614,13 @@ fn prepared_query_debug_renders_via_match_plan() {
 fn deep_linear_chains_lower_without_overflowing() {
 	// The lowering must process linear chains (binary spines, `NOT` prefixes,
 	// property postfixes) without machine-stack recursion (the reblessive
-	// guarantee). Such chains exceed the default parse-time expression budget,
-	// so the deep cases raise the limit explicitly. The NOT chain collapses
-	// under NNF to a bounded predicate and the property chain to a flat idiom,
-	// so both render fine; a deep binary spine lowers to an equally deep tree
-	// whose recursive rendering is a depth shared with syn-parsed SurrealQL, so
-	// it is kept modest and only the lowering (not the rendering) is asserted.
+	// guarantee). Every such chain is charged against the parse-time
+	// expression budget, so the deep cases raise the limit explicitly. The
+	// NOT chain collapses under NNF to a bounded predicate and the property
+	// chain lowers to an `Access` nest that renders iteratively, so both
+	// render fine; a deep binary spine lowers to an equally deep tree whose
+	// recursive rendering is a depth shared with syn-parsed SurrealQL, so it
+	// is kept modest and only the lowering (not the rendering) is asserted.
 	let deep = GqlParserSettings {
 		expr_recursion_limit: 100_000,
 		..Default::default()
@@ -1633,13 +1632,14 @@ fn deep_linear_chains_lower_without_overflowing() {
 	assert!(prepared.to_sql().contains("n.flag = false"), "unexpected: {}", prepared.to_sql());
 
 	let props = format!("MATCH (n:person) RETURN n{} AS x", ".p".repeat(50_000));
-	assert!(render(&props).contains("RETURN n.p.p.p"));
+	let prepared =
+		parse_to_plan_with_settings(&props, deep.clone()).expect("property chain should lower");
+	assert!(prepared.to_sql().contains("RETURN n.p.p.p"), "unexpected: {}", prepared.to_sql());
 
 	// The binary spine lowers without machine-stack recursion; rendering a
-	// pathologically deep tree (the recursive `sql::Expr` → `expr::Expr`
-	// conversion and the `ToSql` walk) is a depth shared with syn-parsed
-	// SurrealQL and out of scope here, so the spine depth is kept modest and
-	// rendered only to confirm the shape.
+	// pathologically deep tree (the recursive `ToSql` walk) is a depth shared
+	// with syn-parsed SurrealQL and out of scope here, so the spine depth is
+	// kept modest and rendered only to confirm the shape.
 	let spine = format!("MATCH (n:person) RETURN 1{} AS x", " + 1".repeat(100));
 	let prepared = parse_to_plan_with_settings(&spine, deep).expect("binary spine should lower");
 	assert!(prepared.to_sql().contains("RETURN 1 + 1 + "));

@@ -58,11 +58,17 @@ impl ResolvedMutability {
 }
 
 /// Resolve the mutability of an expression with the given [`FunctionFacts`]
-/// against the catalog snapshot `txn` reads from.
+/// against the catalog snapshot `txn` reads from, at `version`.
+///
+/// `version` is the stamp the bodies are read at, and must be the stamp the
+/// call will run against: a definition that writes is a definition that
+/// writes at the moment it is invoked, and a function redefined since then
+/// says nothing about it. `None` reads current state.
 pub(crate) async fn resolve_mutability(
 	txn: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
+	version: Option<u64>,
 	root: &FunctionFacts,
 ) -> anyhow::Result<ResolvedMutability> {
 	let mut resolved = ResolvedMutability {
@@ -81,7 +87,7 @@ pub(crate) async fn resolve_mutability(
 		let Some(name) = pending.pop() else {
 			break;
 		};
-		let facts = match txn.get_db_function(ns, db, &name, None).await {
+		let facts = match txn.get_db_function(ns, db, &name, version).await {
 			Ok(def) => def.block.function_facts(),
 			Err(e) => {
 				if matches!(e.downcast_ref::<CatalogError>(), Some(CatalogError::FcNotFound { .. }))
@@ -138,7 +144,7 @@ mod tests {
 		let txn = ds.transaction(TransactionType::Read).await.unwrap();
 		let db = txn.get_db_by_name("test", "test", None).await.unwrap().unwrap();
 		let resolved =
-			resolve_mutability(&txn, db.namespace_id, db.database_id, &facts).await.unwrap();
+			resolve_mutability(&txn, db.namespace_id, db.database_id, None, &facts).await.unwrap();
 		txn.cancel().await.unwrap();
 		resolved
 	}

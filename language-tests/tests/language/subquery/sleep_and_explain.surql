@@ -12,7 +12,11 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 1}\n    RecordIdScan [ctx: Db] [record_id: subq:a] {rows: 1}\n\nTotal rows: 1''''
+value = '''
+'Project [ctx: Db] {rows: 1}
+    RecordIdScan [ctx: Db] [record_id: subq:a] {rows: 1}
+
+Total rows: 1''''
 
 */
 

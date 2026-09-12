@@ -140,23 +140,34 @@ pub(crate) struct MatchColumn { pub name: String, pub expr: Expr }
 pub(crate) struct MatchOrder { pub expr: Expr, pub ascending: bool }
 ```
 
-### Variant plumbing (`Expr::Match(Box<MatchPlan>)`)
+### Variant plumbing (`LogicalOp::Match(LogicalMatch { plan: Box<MatchPlan> })`)
 
-- `expr/expression.rs`: variant; `read_only() → true`; `is_static() → false`;
-  `needs_parentheses() → true`; `compute()` arm → hard error "GQL MATCH requires
-  the streaming execution engine; it cannot run under the compute-only planner
-  strategy" (precedent: the `Expr::Explain` compute arm). **`impl ToSql for Expr`
-  must special-case Match BEFORE the sql conversion** (it round-trips via
-  `From<expr::Expr> for sql::Expr`), delegating to a dedicated deterministic
+A `MatchPlan` is a relational plan, so it is carried by the logical plan and not
+by the expression AST. `Expr` has no variant that can hold one, which is what
+makes most of the invariants below structural rather than guarded.
+
+- `expr/logical/mod.rs`: variant, an opaque leaf — `children()` is empty and no
+  binding pass rewrites through it, because binding-table semantics are not row
+  semantics. `read_only()` is false for a plan carrying mutation stages
+  (`MatchPlan::has_mutations`); its scalars are reached through
+  `MatchPlan::visit_exprs`, which the plan's own `visit_scalars` arm delegates
+  to.
+- `dbs/top_level.rs`: `TopLevelStatement::Plan(Box<LogicalOp>)` is the
+  executor's carrier for a front end that emits a plan rather than a statement,
+  and `QuerySource::Plan(Vec<LogicalOp>)` is how one is submitted. A plan has
+  no SurrealQL surface form, so `impl ToSql for TopLevelStatement` renders it
+  directly; a `Match` node's attribute is the deterministic
   `impl ToSql for MatchPlan` (GQL-ish rendering; never panics).
-- `sql/expression.rs` `From<expr::Expr> for sql::Expr`: Match arm →
-  `sql::Expr::Literal(Literal::None)` + `tracing::error!` + `debug_assert!(false)`,
-  with the documented invariant: **`Expr::Match` is only constructed by the GQL
-  lowering at top level and never enters a `sql::Ast`, the catalog, or `Revisioned`
-  serialization** (which serializes Expr as SurrealQL text). `From<sql::Expr>`
-  needs no arm.
-- `expr/visit.rs`: Visit + MutVisitor arms walking every reachable Expr
-  (predicates, columns, order, skip, limit).
+- **A plan is only constructed by a front end at top level and never enters a
+  `sql::Ast`, the catalog, or `Revisioned` serialization** (which serializes as
+  SurrealQL text). The invariant is structural: no `sql::Expr` or `expr::Expr`
+  variant can carry a plan, and no SurrealQL parses to one.
+- Compute-only refusal: hard error "GQL MATCH requires the streaming execution
+  engine; it cannot run under the compute-only planner strategy", raised at the
+  two entries that could otherwise route around the streaming engine — the
+  executor's `TopLevelStatement::Plan` arm under
+  `NewPlannerStrategy::ComputeOnly`, and `fnc::eval::run_eval` (the legacy
+  `compute`-path `eval` adapter).
 
 ## 3. Binding rows
 
@@ -334,11 +345,11 @@ Project [columns: p, b]
   in `language-tests/src/tests/schema/mod.rs` + `cmd/run/mod.rs`); one pinned test
   `errors/compute_only_strategy.gql` (`planner-strategy = ["compute-only"]`)
   asserts the compute-arm error.
-- `gql/mod.rs`: `pub struct PreparedGqlQuery(pub(crate) LogicalPlan)`
-  (+Debug+ToSql via MatchPlan renderer); `lower` / `parse_to_plan_with_settings`
-  (replaces `parse_to_ast_with_settings`) / `parse_with_capabilities` return it;
-  experimental gate unchanged.
-- `kvs/ds.rs`: `parse_gql` lowers the text and returns its `LogicalPlan`,
+- `gql/mod.rs`: `pub struct PreparedGqlQuery(pub LogicalOp)` — the single
+  `LogicalOp::Match` the query runs as (+Debug+ToSql via MatchPlan renderer);
+  `lower` / `parse_to_plan_with_settings` / `parse_with_capabilities` return
+  it; experimental gate unchanged.
+- `kvs/ds.rs`: `parse_gql` lowers the text and returns its `LogicalOp`s,
   reached from `statements_for` when the request names `Dialect::Gql`. There is
   no GQL-specific entry point: every dialect goes through `Datastore::run` /
   `run_streaming` with a `QueryRequest`.
@@ -369,8 +380,8 @@ Project [columns: p, b]
   validation per R6 (max<min stays rejected; cross-variable refs inside a
   quantified edge's inline predicate rejected: "a predicate inside a quantified
   edge may only reference that edge").
-- `lower/expr.rs`: guards/NNF/literals/params verbatim (~480L; still building
-  sql::Expr → `.into()` per slot is acceptable); Role×ScopeKind deleted → uniform
+- `lower/expr.rs`: guards/NNF/literals/params verbatim (builds `LogicalExpr`
+  directly); Role×ScopeKind deleted → uniform
   binding addressing; `nullable()` amendment (Variable nullable iff optional-bound).
 - `lower/mod.rs` rewritten: output spec per R7/R8 (column naming + dup-check +
   lower_count reused).
@@ -419,9 +430,9 @@ graph-specific traversal operators.
 When that frontend lands, the expected shape is:
 
 - A composable **`Expr::Join`** logical node (a binary relational operator whose children are
-  sub-`Expr`s) lives in `Expr` *alongside* `Expr::Match` — both are single-statement logical
+  sub-`Expr`s) lives in `Expr` *alongside* `LogicalOp::Match` — both are single-statement logical
   units in the common `Expr` layer; convergence happens there, not by collapsing one into the
-  other. (`Expr::Match` is a whole `MATCH…RETURN` query block; `Expr::Join` is one operator
+  other. (`LogicalOp::Match` is a whole `MATCH…RETURN` query block; `Expr::Join` is one operator
   within a SELECT.)
 - Both lower to the same `operators/join/` family. Today that family is `HashJoin` only
   (equi-join / cross); the relational planner additionally needs nested-loop (theta joins),

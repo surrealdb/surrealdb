@@ -80,13 +80,6 @@ pub enum Expr {
 		analyze: bool,
 		statement: Box<Expr>,
 	},
-	/// An GQL `MATCH` query, lowered to its declarative binding-table plan.
-	///
-	/// Only constructed by the GQL lowering at top level. It runs exclusively
-	/// under the streaming execution planner; see the `compute` and
-	/// `From<expr::Expr> for sql::Expr` arms for the invariants it relies on.
-	// Constructed by the GQL lowering, which lands as a sibling piece of PR-A.
-	Match(Box<crate::expr::match_plan::MatchPlan>),
 }
 
 impl Expr {
@@ -156,9 +149,6 @@ impl Expr {
 			// it can also be invoked (call operator, closure-taking builtins),
 			// so a writing body makes the expression writable.
 			Expr::Closure(c) => c.body.read_only(),
-			// A GQL query is read-only unless it carries mutation stages; a
-			// mutation-bearing plan must run under a write transaction.
-			Expr::Match(plan) => !plan.has_mutations(),
 			Expr::Create(_)
 			| Expr::Update(_)
 			| Expr::Delete(_)
@@ -368,8 +358,6 @@ impl Expr {
 			| Expr::Explain {
 				..
 			} => false,
-			// GQL MATCH reads from the datastore, so it is never static.
-			Expr::Match(_) => false,
 		}
 	}
 
@@ -427,10 +415,6 @@ impl Expr {
 				..
 			} => true,
 
-			// GQL MATCH renders as a multi-clause statement; parenthesize it
-			// when nested.
-			Expr::Match(_) => true,
-
 			Expr::Literal(_)
 			| Expr::Param(_)
 			| Expr::Idiom(_)
@@ -454,13 +438,6 @@ impl Expr {
 
 impl ToSql for Expr {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		// `Expr::Match` cannot round-trip through `sql::Expr` (it has no SurrealQL
-		// surface). Render it directly via the dedicated `MatchPlan` renderer
-		// before the conversion would replace it with a placeholder.
-		if let Expr::Match(plan) = self {
-			plan.fmt_sql(f, fmt);
-			return;
-		}
 		let sql_expr: crate::sql::Expr = self.clone().into();
 		sql_expr.fmt_sql(f, fmt);
 	}
@@ -474,9 +451,6 @@ impl Expr {
 	/// including the parenthesization `CoverStmts` applies to statement-shaped
 	/// sub-expressions (e.g. a nested `SELECT`), so the stored text is safe to
 	/// splice back in after that keyword with no further wrapping.
-	///
-	/// `Expr::Match` never reaches a stored definition (see `ToSql`'s carve-out
-	/// above), so unlike `ToSql::fmt_sql` this does not special-case it.
 	pub fn to_stored_sql(&self) -> String {
 		let sql_expr: crate::sql::Expr = self.clone().into();
 		crate::sql::CoverStmts(&sql_expr).to_sql()
@@ -500,22 +474,6 @@ impl SerializeRevisioned for Expr {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		// `Expr::Match` renders GQL-ish text via `to_sql()`, which the
-		// SurrealQL-only `deserialize_revisioned` path below cannot round-trip.
-		// The invariant (V2_DESIGN §2; SECURITY_GUIDE §15a) is that `Expr::Match`
-		// is only ever the top-level expr of a `PreparedGqlQuery` consumed
-		// directly by the planner — it never nests into a `sql::Ast`, the
-		// catalog, or a cached/revisioned `Expr`, so this path is unreachable by
-		// construction. Mirror the `From<expr::Expr> for sql::Expr` arm and fail
-		// loud (in debug) rather than silently emit unparseable bytes, so a
-		// future regression that nests `Expr::Match` is caught here.
-		if matches!(self, Expr::Match(_)) {
-			tracing::error!(
-				"Expr::Match reached Revisioned serialization; it must never enter a \
-				 sql::Ast, the catalog, or Revisioned serialization"
-			);
-			debug_assert!(false, "Expr::Match must not be Revisioned-serialized");
-		}
 		SerializeRevisioned::serialize_revisioned(&self.to_sql(), writer)
 	}
 }

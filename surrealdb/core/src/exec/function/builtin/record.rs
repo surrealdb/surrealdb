@@ -6,13 +6,14 @@ use reblessive::tree::TreeStack;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
+use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
 use crate::val::Value;
 use crate::{define_pure_function, register_functions};
 
-define_pure_function!(RecordId, "record::id", (record: Any) -> Any, crate::fnc::record::id);
-define_pure_function!(RecordTb, "record::tb", (record: Any) -> String, crate::fnc::record::tb);
-define_pure_function!(RecordTable, "record::table", (record: Any) -> String, crate::fnc::record::tb);
+define_pure_function!(RecordId, "record::id", effects: EffectSet::PURE, (record: Any) -> Any, crate::fnc::record::id);
+define_pure_function!(RecordTb, "record::tb", effects: EffectSet::PURE, (record: Any) -> String, crate::fnc::record::tb);
+define_pure_function!(RecordTable, "record::table", effects: EffectSet::PURE, (record: Any) -> String, crate::fnc::record::tb);
 
 // =========================================================================
 // record::exists - Check if a record exists in the database
@@ -24,6 +25,10 @@ pub struct RecordExists;
 impl ScalarFunction for RecordExists {
 	fn name(&self) -> &'static str {
 		"record::exists"
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::READS_DATA
 	}
 
 	fn signature(&self) -> Signature {
@@ -77,6 +82,10 @@ pub struct RecordIsEdge;
 impl ScalarFunction for RecordIsEdge {
 	fn name(&self) -> &'static str {
 		"record::is_edge"
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::READS_DATA
 	}
 
 	fn signature(&self) -> Signature {

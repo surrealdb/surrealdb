@@ -5,9 +5,10 @@ use reblessive::tree::TreeStack;
 
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
+use crate::exec::physical_expr::function::StreamingClosureEvaluator;
 use crate::expr::Kind;
+use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
-use crate::fnc::closure::LegacyClosureEvaluator;
 use crate::val::{ClosureEvaluator, Value};
 
 // =========================================================================
@@ -20,6 +21,10 @@ pub struct ValueDiff;
 impl ScalarFunction for ValueDiff {
 	fn name(&self) -> &'static str {
 		"value::diff"
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::PURE
 	}
 
 	fn signature(&self) -> Signature {
@@ -62,6 +67,10 @@ impl ScalarFunction for ValuePatch {
 		"value::patch"
 	}
 
+	fn effects(&self) -> EffectSet {
+		EffectSet::PURE
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new().arg("value", Kind::Any).arg("patch", Kind::Any).returns(Kind::Any)
 	}
@@ -102,6 +111,10 @@ impl ScalarFunction for ValueChain {
 		"value::chain"
 	}
 
+	fn effects(&self) -> EffectSet {
+		EffectSet::PURE
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new().arg("value", Kind::Any).arg("closure", Kind::Any).returns(Kind::Any)
 	}
@@ -124,16 +137,9 @@ impl ScalarFunction for ValueChain {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
-			use crate::doc::CursorDoc;
 			let args = FromArgs::from_args("value::chain", args)?;
-			let frozen = ctx.exec_ctx.ctx();
-			let opt = ctx.exec_ctx.options();
-			let doc = ctx
-				.document_root
-				.or(ctx.current_value)
-				.map(|v| CursorDoc::new(None, None, v.clone()));
-			let evaluator = opt.map(|o| LegacyClosureEvaluator::new(frozen, o, doc.as_ref()));
-			let ev = evaluator.as_ref().map(|e| e as &dyn ClosureEvaluator);
+			let evaluator = StreamingClosureEvaluator::new(ctx);
+			let ev = Some(&evaluator as &dyn ClosureEvaluator);
 			let mut stack = TreeStack::new();
 			stack
 				.enter(|stk| async move { crate::fnc::value::chain((stk, ev), args).await })
@@ -151,6 +157,10 @@ pub struct ValueExpect;
 impl ScalarFunction for ValueExpect {
 	fn name(&self) -> &'static str {
 		"value::expect"
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::PURE
 	}
 
 	fn signature(&self) -> Signature {
@@ -179,16 +189,9 @@ impl ScalarFunction for ValueExpect {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
-			use crate::doc::CursorDoc;
 			let args = FromArgs::from_args("value::expect", args)?;
-			let frozen = ctx.exec_ctx.ctx();
-			let opt = ctx.exec_ctx.options();
-			let doc = ctx
-				.document_root
-				.or(ctx.current_value)
-				.map(|v| CursorDoc::new(None, None, v.clone()));
-			let evaluator = opt.map(|o| LegacyClosureEvaluator::new(frozen, o, doc.as_ref()));
-			let ev = evaluator.as_ref().map(|e| e as &dyn ClosureEvaluator);
+			let evaluator = StreamingClosureEvaluator::new(ctx);
+			let ev = Some(&evaluator as &dyn ClosureEvaluator);
 			let mut stack = TreeStack::new();
 			stack
 				.enter(|stk| async move { crate::fnc::value::expect((stk, ev), args).await })

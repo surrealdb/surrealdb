@@ -28,10 +28,20 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"VersionScope [ctx: Db] [version: $ts]\n    SelectProject [ctx: Db] [projections: id]\n        Filter [ctx: Db] [predicate: category = 'a']\n            KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: category = 'a']\n"'''
+value = '''
+"VersionScope [ctx: Db] [version: $ts]
+    SelectProject [ctx: Db] [projections: id]
+        Filter [ctx: Db] [predicate: category = 'a']
+            KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: category = 'a']
+"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: category = 'a']\n        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1]\n            BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a']\n"'''
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: category = 'a']
+        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1]
+            BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a']
+"'''
 */
 
 DEFINE FIELD category ON pts TYPE string;

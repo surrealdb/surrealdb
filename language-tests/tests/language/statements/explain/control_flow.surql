@@ -12,7 +12,7 @@ value = '''"Return [ctx: Rt]
 
 [[test.results]]
 value = ''''Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: 1 + 2]
+    Expr [ctx: Rt] [expr: 3]
 ''''
 
 [[test.results]]

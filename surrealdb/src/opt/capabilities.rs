@@ -18,8 +18,9 @@ pub enum PlannerStrategy {
 	BestEffort,
 	/// Skip the new planner entirely; always use the compute executor.
 	ComputeOnly,
-	/// Require the new planner for all read-only statements.
-	/// Unimplemented features become hard errors instead of falling back.
+	/// The streaming engine for every read-only statement it can plan. Planned
+	/// identically to [`PlannerStrategy::BestEffort`]; the distinct name lets a
+	/// deployment state which engine it means to exercise.
 	AllReadOnly,
 }
 
@@ -223,8 +224,10 @@ impl Capabilities {
 	///   fall back to compute on unimplemented features.
 	/// - [`PlannerStrategy::ComputeOnly`]: Skip the new planner entirely; always use the compute
 	///   executor.
-	/// - [`PlannerStrategy::AllReadOnly`]: Require the new planner for all read-only statements.
-	///   Unimplemented features become hard errors.
+	/// - [`PlannerStrategy::AllReadOnly`]: The streaming engine for every read-only statement it
+	///   can plan; planned identically to `BestEffort`, and a statement the planner declines runs
+	///   on the compute executor, the decline logged as a warning (a debug line under `BestEffort`)
+	///   naming the statement kind and the planner's reason.
 	pub fn with_planner_strategy(self, strategy: PlannerStrategy) -> Self {
 		Self {
 			cap: self.cap.with_planner_strategy(strategy.into()),

@@ -40,6 +40,12 @@ value = "[{ name: 'carol' }, { name: 'alice' }]"
 [[test.results]]
 value = "[{ age: 20, name: 'bob' }, { age: 30, name: 'alice' }, { age: 40, name: 'carol' }]"
 
+[[test.results]]
+value = "[{ name: 'bob', years: 20 }, { name: 'alice', years: 30 }, { name: 'carol', years: 40 }]"
+
+[[test.results]]
+value = "[{ name: 'bob', years: 20 }, { name: 'alice', years: 30 }, { name: 'carol', years: 40 }]"
+
 */
 
 CREATE t:1 SET name = "alice", age = 30;
@@ -63,3 +69,8 @@ SELECT name FROM t ORDER BY age DESC LIMIT 2;
 
 -- A projected ordering field still works.
 SELECT name, age FROM t ORDER BY age ASC;
+
+-- A renamed selector: the sort reads the record, so the source name orders
+-- the rows as readily as the name they are projected under.
+SELECT name, age AS years FROM t ORDER BY age ASC;
+SELECT name, age AS years FROM t ORDER BY years ASC;

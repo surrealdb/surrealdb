@@ -55,19 +55,48 @@ value = "[]"
 value = "[person:2, person:4]"
 
 [[test.results]]
-value = ''''ProjectValue [ctx: Db] [expr: id]\n    Filter [ctx: Db] [predicate: flag = true AND ->wrote->doc CONTAINS doc:x]\n      predicate.lookup: GraphEdgeScan [ctx: Db] [direction: ->, tables: wrote, output: TargetVertex]\n          CurrentValueSource [ctx: Rt]\n        BitmapResolve [ctx: Db] [table: person]\n            BitmapAnd [ctx: Db]\n                BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true]\n                BitmapGraphScan [ctx: Db] [source: doc:x, direction: <-, edges: wrote]\n''''
+value = '''
+'ProjectValue [ctx: Db] [expr: id]
+    Filter [ctx: Db] [predicate: flag = true AND ->wrote->doc CONTAINS doc:x]
+      predicate.lookup: GraphEdgeScan [ctx: Db] [direction: ->, tables: wrote, output: TargetVertex]
+          CurrentValueSource [ctx: Rt]
+        BitmapResolve [ctx: Db] [table: person]
+            BitmapAnd [ctx: Db]
+                BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true]
+                BitmapGraphScan [ctx: Db] [source: doc:x, direction: <-, edges: wrote]
+''''
 
 [[test.results]]
 value = "[person:2, person:4]"
 
 [[test.results]]
-value = ''''ProjectValue [ctx: Db] [expr: id]\n    TableScan [ctx: Db] [table: person, direction: Forward, predicate: ->wrote->doc CONTAINS doc:x, pre_decode_filter: no (unsupported predicate)]\n''''
+value = '''
+'ProjectValue [ctx: Db] [expr: id]
+    TableScan [ctx: Db] [table: person, direction: Forward, predicate: ->wrote->doc CONTAINS doc:x, pre_decode_filter: no (unsupported predicate)]
+''''
 
 [[test.results]]
-value = ''''ProjectValue [ctx: Db] [expr: id]\n    Filter [ctx: Db] [predicate: ->wrote->doc->wrote->doc CONTAINS doc:x]\n      predicate.lookup: GraphEdgeScan [ctx: Db] [direction: ->, tables: wrote, output: TargetVertex]\n          GraphEdgeScan [ctx: Db] [direction: ->, tables: wrote, output: TargetVertex]\n              CurrentValueSource [ctx: Rt]\n        IndexScan [ctx: Db] [index: idx_flag, access: = true, direction: Forward]\n''''
+value = '''
+'ProjectValue [ctx: Db] [expr: id]
+    Filter [ctx: Db] [predicate: ->wrote->doc->wrote->doc CONTAINS doc:x]
+      predicate.lookup: GraphEdgeScan [ctx: Db] [direction: ->, tables: wrote, output: TargetVertex]
+          GraphEdgeScan [ctx: Db] [direction: ->, tables: wrote, output: TargetVertex]
+              CurrentValueSource [ctx: Rt]
+        IndexScan [ctx: Db] [index: idx_flag, access: = true, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''ProjectValue [ctx: Db] [expr: id] {rows: 2}\n    Filter [ctx: Db] [predicate: flag = true AND ->wrote->doc CONTAINS doc:x] {rows: 2}\n      predicate.lookup: GraphEdgeScan [ctx: Db] [direction: ->, tables: wrote, output: TargetVertex] {rows: 2}\n          CurrentValueSource [ctx: Rt] {rows: 2}\n        BitmapResolve [ctx: Db] [table: person] {rows: 2}\n            BitmapAnd [ctx: Db] {rows: 2}\n                BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true] {rows: 3}\n                BitmapGraphScan [ctx: Db] [source: doc:x, direction: <-, edges: wrote] {rows: 4}\n\nTotal rows: 2''''
+value = '''
+'ProjectValue [ctx: Db] [expr: id] {rows: 2}
+    Filter [ctx: Db] [predicate: flag = true AND ->wrote->doc CONTAINS doc:x] {rows: 2}
+      predicate.lookup: GraphEdgeScan [ctx: Db] [direction: ->, tables: wrote, output: TargetVertex] {rows: 2}
+          CurrentValueSource [ctx: Rt] {rows: 2}
+        BitmapResolve [ctx: Db] [table: person] {rows: 2}
+            BitmapAnd [ctx: Db] {rows: 2}
+                BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true] {rows: 3}
+                BitmapGraphScan [ctx: Db] [source: doc:x, direction: <-, edges: wrote] {rows: 4}
+
+Total rows: 2''''
 */
 
 DEFINE FIELD flag ON person TYPE bool;

@@ -5,7 +5,8 @@
 //! language standardised as ISO/IEC 39075:2024). Queries are lexed and parsed
 //! into a GQL-specific AST ([`ast::GqlQuery`]) which is then lowered to a
 //! [`MatchPlan`](crate::expr::match_plan::MatchPlan) — a language-neutral
-//! binding-table IR embedded as [`Expr::Match`](crate::expr::Expr::Match) —
+//! binding-table IR carried by
+//! [`LogicalOp::Match`](crate::expr::logical::LogicalOp::Match) —
 //! and executed by the streaming engine. No SurrealQL surface AST is produced
 //! along the way; the GQL front-end shares the parser conventions, error
 //! types and execution operators of SurrealQL but not its statement AST.
@@ -52,9 +53,9 @@ pub fn settings_from_capabilities_config(
 	}
 }
 
-/// Parses a GQL query and lowers it into a [`PreparedGqlQuery`] (a
-/// [`MatchPlan`](crate::expr::match_plan::MatchPlan) embedded in a logical
-/// plan).
+/// Parses a GQL query and lowers it into a [`PreparedGqlQuery`] (the
+/// [`LogicalOp::Match`](crate::expr::logical::LogicalOp::Match) carrying its
+/// [`MatchPlan`](crate::expr::match_plan::MatchPlan)).
 ///
 /// Like [`crate::syn::parse_with_capabilities`], this derives syntax gating
 /// from the capabilities.

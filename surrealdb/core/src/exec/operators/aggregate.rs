@@ -18,7 +18,7 @@ use crate::exec::{
 	FlowResultExt as _, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
 	monitor_stream,
 };
-use crate::expr::idiom::Idiom;
+use crate::expr::logical::LogicalExpr;
 use crate::val::{Object, Value};
 
 /// Aggregates values by grouping keys.
@@ -31,8 +31,8 @@ use crate::val::{Object, Value};
 #[derive(Debug, Clone)]
 pub struct Aggregate {
 	pub(crate) input: Arc<dyn ExecOperator>,
-	/// The original GROUP BY idioms (for display/debugging purposes).
-	pub(crate) group_by: Vec<Idiom>,
+	/// The GROUP BY keys as written, for EXPLAIN.
+	pub(crate) group_by: Vec<LogicalExpr>,
 	/// Physical expressions to evaluate for computing group keys.
 	/// These are the actual expressions that determine grouping.
 	/// For `GROUP BY country, year` where `year` is an alias for `time::year(time)`,
@@ -41,6 +41,20 @@ pub struct Aggregate {
 	/// The aggregate expressions to compute for each group.
 	/// These are the selected fields that may contain aggregate functions.
 	pub(crate) aggregates: Vec<AggregateField>,
+	/// Whether every expression this operator evaluates per row — each group
+	/// key and each aggregate's first argument — is free of effects that
+	/// evaluating it a second time, or out of the order it was written in,
+	/// would expose: it stages no write, advances no counter, reaches nothing
+	/// outside the transaction and runs no body the plan cannot see.
+	///
+	/// It decides how a batch is evaluated, never what the answer is. `true`
+	/// licenses the faster column-at-a-time shape, which evaluates one
+	/// expression for every row of the batch before the next and evaluates a
+	/// column again from its first row when it fails part-way; `false` — the
+	/// safe answer, and the default — evaluates a row at a time, each column in
+	/// written order, so a call that writes or advances a sequence is made once
+	/// per row and in the statement's own order.
+	pub(crate) effect_free_columns: bool,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -49,7 +63,7 @@ impl Aggregate {
 	/// Create a new Aggregate operator.
 	pub(crate) fn new(
 		input: Arc<dyn ExecOperator>,
-		group_by: Vec<Idiom>,
+		group_by: Vec<LogicalExpr>,
 		group_by_exprs: Vec<Arc<dyn PhysicalExpr>>,
 		aggregates: Vec<AggregateField>,
 	) -> Self {
@@ -58,8 +72,17 @@ impl Aggregate {
 			group_by,
 			group_by_exprs,
 			aggregates,
+			effect_free_columns: false,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Declare every expression the operator evaluates per row effect-free; see
+	/// [`Self::effect_free_columns`]. Only the planner, which holds the
+	/// expressions as written, can answer this.
+	pub(crate) fn with_effect_free_columns(mut self) -> Self {
+		self.effect_free_columns = true;
+		self
 	}
 }
 
@@ -104,9 +127,9 @@ impl AggregateField {
 	/// The name is treated as an opaque flat key. Callers that need a
 	/// nested output path (e.g. for `AS foo.bar`) must supply the path
 	/// components directly via [`AggregateField::with_output_path`] —
-	/// typically by walking the parsed alias idiom's [`crate::expr::part::Part`]s
-	/// so that `AS foo.bar` nests as `[foo, bar]` while
-	/// `` AS `foo.bar` `` stays a single flat key `"foo.bar"`.
+	/// typically the keys of the alias's [`crate::expr::logical::OutputPath`],
+	/// so that `AS foo.bar` nests as `[foo, bar]` while `` AS `foo.bar` ``
+	/// stays a single flat key `"foo.bar"`.
 	pub fn new(
 		name: String,
 		is_group_key: bool,
@@ -126,7 +149,7 @@ impl AggregateField {
 	/// Create a new AggregateField from a pre-built nested output path.
 	///
 	/// Used when the output path was derived structurally from the parsed
-	/// alias idiom, preserving the distinction between multi-part aliases
+	/// alias, preserving the distinction between multi-part aliases
 	/// (`AS foo.bar` → `["foo", "bar"]`) and single-part aliases whose
 	/// identifier happens to contain a dot (`` AS `foo.bar` `` →
 	/// `["foo.bar"]`).
@@ -223,6 +246,15 @@ pub fn aggregate_field_name(idx: usize) -> String {
 	format!("_a{}", idx)
 }
 
+/// Generate a synthetic field name for the grouping key at the given index.
+///
+/// A post-expression is evaluated against the group's answers rather than
+/// against a row, so a key it names is placed in that document under this name
+/// and the planner rewrites the read to match.
+pub fn group_key_field_name(idx: usize) -> String {
+	format!("_g{}", idx)
+}
+
 /// Key for grouping - a tuple of values corresponding to GROUP BY expressions
 type GroupKey = Vec<Value>;
 
@@ -286,10 +318,6 @@ impl GroupMap {
 			index: BTreeMap::new(),
 			states: Vec::new(),
 		}
-	}
-
-	fn is_empty(&self) -> bool {
-		self.states.is_empty()
 	}
 
 	/// Look up the state for `key`, creating it if absent.
@@ -480,34 +508,11 @@ impl ExecOperator for Aggregate {
 		);
 		let group_by_exprs = self.group_by_exprs.clone();
 		let aggregates = self.aggregates.clone();
+		let effect_free_columns = self.effect_free_columns;
 		let ctx = ctx.clone();
 
 		// Collect all input batches, then group and aggregate
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
-			// Pre-evaluate extra_args for each aggregate (evaluated once, not per-row)
-			// This is needed for functions like array::join(txt, " ") where " " is evaluated once
-			// Structure: evaluated_extra_args[field_idx][aggregate_idx] = Vec<Value>
-			let eval_ctx_for_args = EvalContext::from_exec_ctx(&ctx);
-			let mut evaluated_extra_args: Vec<Vec<Vec<Value>>> =
-				Vec::with_capacity(aggregates.len());
-			for agg in &aggregates {
-				if let Some(info) = &agg.aggregate_expr_info {
-					let mut field_args = Vec::with_capacity(info.aggregates.len());
-					for extracted in &info.aggregates {
-						let mut args = Vec::with_capacity(extracted.extra_args.len());
-						for extra_arg in &extracted.extra_args {
-							let value =
-								extra_arg.evaluate(eval_ctx_for_args.clone()).await.or_none()?;
-							args.push(value);
-						}
-						field_args.push(args);
-					}
-					evaluated_extra_args.push(field_args);
-				} else {
-					evaluated_extra_args.push(vec![]);
-				}
-			}
-
 			// Accumulate all values into groups. See `GroupMap` for why the group
 			// identity relation has to be `Ord` rather than a hash, and how the
 			// per-row probe avoids cloning the group-by values.
@@ -522,61 +527,101 @@ impl ExecOperator for Aggregate {
 					)))?;
 				}
 				let batch = batch_result?;
+				// An empty batch holds no row to dispatch and no column to
+				// evaluate, so there is nothing here to do with it. It does
+				// not decide whether `GROUP ALL` has a group either: that
+				// group is opened below if no row opened it first.
+				if batch.is_empty() {
+					continue;
+				}
 				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
-				// Phase 1: Batch evaluate group-by key expressions across all rows
+				// Phases 1 and 2: every row's group key, and every row's
+				// argument to every aggregate.
+				//
+				// A column at a time is the faster shape — a column of record
+				// dereferences overlaps its reads, and a `GROUP ALL` argument
+				// column folds into its accumulator whole — but it evaluates
+				// one expression for the whole batch before the next, and a
+				// column that fails part-way is evaluated again from its first
+				// row, since a failed `evaluate_batch` does not say how far it
+				// got. Neither is visible where the expressions have no effect
+				// to repeat or reorder, which is what `effect_free_columns`
+				// answers; where they may, the batch is evaluated a row at a
+				// time, each column in the order it was written, so a call that
+				// writes, advances a sequence or reaches outside the
+				// transaction is made once per row and in the statement's own
+				// order.
 				let mut group_key_columns: Vec<Vec<Value>> =
 					Vec::with_capacity(group_by_exprs.len());
-				for expr in &group_by_exprs {
-					let keys = match expr.evaluate_batch(eval_ctx.clone(), batch.values()).await {
-						Ok(v) => v,
-						Err(_) => {
-							// Fallback: evaluate per-row, replacing ignorable errors with None
-							let mut keys = Vec::with_capacity(batch.len());
-							for value in batch.values() {
-								let v =
-									expr.evaluate(eval_ctx.with_value(value)).await.or_none()?;
-								keys.push(v);
-							}
-							keys
-						}
-					};
-					group_key_columns.push(keys);
-				}
-
-				// Phase 2: Batch evaluate aggregate argument expressions
 				let mut agg_arg_columns: Vec<Vec<Vec<Value>>> =
 					Vec::with_capacity(aggregates.len());
-				for agg in &aggregates {
-					if let Some(info) = &agg.aggregate_expr_info {
+
+				if effect_free_columns {
+					for expr in &group_by_exprs {
+						let keys = match expr.evaluate_batch(eval_ctx.clone(), batch.values()).await
+						{
+							Ok(v) => v,
+							// The column is evaluated again, a row at a time,
+							// so that a row whose error is ignorable yields
+							// `NONE` rather than ending the statement.
+							Err(_) => evaluate_column(expr, &eval_ctx, batch.values()).await?,
+						};
+						group_key_columns.push(keys);
+					}
+
+					for agg in &aggregates {
+						let Some(info) = &agg.aggregate_expr_info else {
+							agg_arg_columns.push(vec![]);
+							continue;
+						};
 						let mut field_cols = Vec::with_capacity(info.aggregates.len());
 						for extracted in &info.aggregates {
-							let col = match extracted
-								.argument_expr
+							let expr = &extracted.argument_expr;
+							let col = match expr
 								.evaluate_batch(eval_ctx.clone(), batch.values())
 								.await
 							{
 								Ok(v) => v,
-								Err(_) => {
-									// Fallback: evaluate per-row, replacing ignorable errors with
-									// None
-									let mut col = Vec::with_capacity(batch.len());
-									for value in batch.values() {
-										let v = extracted
-											.argument_expr
-											.evaluate(eval_ctx.with_value(value))
-											.await
-											.or_none()?;
-										col.push(v);
-									}
-									col
-								}
+								Err(_) => evaluate_column(expr, &eval_ctx, batch.values()).await?,
 							};
 							field_cols.push(col);
 						}
 						agg_arg_columns.push(field_cols);
-					} else {
-						agg_arg_columns.push(vec![]);
+					}
+				} else {
+					group_key_columns
+						.resize_with(group_by_exprs.len(), || Vec::with_capacity(batch.len()));
+					for agg in &aggregates {
+						let arg_count = agg
+							.aggregate_expr_info
+							.as_ref()
+							.map_or(0, |info| info.aggregates.len());
+						agg_arg_columns.push(
+							(0..arg_count).map(|_| Vec::with_capacity(batch.len())).collect(),
+						);
+					}
+
+					for value in batch.values() {
+						let row_ctx = eval_ctx.with_value_and_doc(value);
+						for (key_idx, expr) in group_by_exprs.iter().enumerate() {
+							group_key_columns[key_idx]
+								.push(expr.evaluate(row_ctx.clone()).await.or_none()?);
+						}
+						for (field_idx, agg) in aggregates.iter().enumerate() {
+							let Some(info) = &agg.aggregate_expr_info else {
+								continue;
+							};
+							for (agg_idx, extracted) in info.aggregates.iter().enumerate() {
+								agg_arg_columns[field_idx][agg_idx].push(
+									extracted
+										.argument_expr
+										.evaluate(row_ctx.clone())
+										.await
+										.or_none()?,
+								);
+							}
+						}
 					}
 				}
 
@@ -584,9 +629,7 @@ impl ExecOperator for Aggregate {
 				if group_by_exprs.is_empty() {
 					// GROUP ALL fast path: single group, pass entire columns
 					// to update_batch to avoid per-row virtual dispatch.
-					let state = groups.entry_for_row(&[], || {
-						create_group_state(&aggregates, &evaluated_extra_args)
-					});
+					let state = groups.entry_for_row(&[], || create_group_state(&aggregates));
 
 					for (field_idx, agg) in aggregates.iter().enumerate() {
 						if agg.is_group_key {
@@ -628,9 +671,7 @@ impl ExecOperator for Aggregate {
 
 					for (row_idx, value) in batch.values().iter().enumerate() {
 						let key = &key_rows[row_idx * key_width..(row_idx + 1) * key_width];
-						let state = groups.entry_for_row(key, || {
-							create_group_state(&aggregates, &evaluated_extra_args)
-						});
+						let state = groups.entry_for_row(key, || create_group_state(&aggregates));
 
 						for (field_idx, agg) in aggregates.iter().enumerate() {
 							if agg.is_group_key {
@@ -669,35 +710,44 @@ impl ExecOperator for Aggregate {
 				}
 			}
 
-			// GROUP ALL on empty input: produce one row with default aggregate
-			// values (e.g. COUNT() = 0) when the scan ran in an authorised
-			// context.  When permission checks are active and 0 rows passed
-			// filtering the old compute path returns [] — replicate that.
-			if group_by_exprs.is_empty() && groups.is_empty() {
-				let perms_active = ctx.should_check_perms(crate::iam::Action::View).unwrap_or(true);
-				if !perms_active {
-					let state = groups.entry_for_row(&[], || {
-						create_group_state(&aggregates, &evaluated_extra_args)
-					});
-					// A non-aggregate field carries an expression the row
-					// cannot influence, so it has a value even for a group no
-					// row reached — but the per-row evaluation above never ran
-					// to produce one. Evaluate it against the row-less context
-					// so `SELECT 7 ... GROUP ALL` over an empty table still
-					// reports 7 rather than NONE.
-					let empty_group_ctx = EvalContext::from_exec_ctx(&ctx);
-					for (field_idx, agg) in aggregates.iter().enumerate() {
-						if let Some(expr) = &agg.fallback_expr {
-							match expr.evaluate(empty_group_ctx.clone()).await {
-								Ok(field_value) => {
-									state.first_values[field_idx] = Some(field_value);
-								}
-								Err(cf) if cf.is_ignorable() => {
-									tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
-								}
-								Err(cf) => Err(cf)?,
-							}
+			// `GROUP ALL` names one group over the whole input, and that
+			// group belongs to the statement rather than to the data: the
+			// grand total of no rows is a row of identities — `count()` is 0,
+			// `math::sum` is 0 — which is what SQL answers. The group is
+			// opened whatever reaches it, so the answer cannot depend on
+			// whether a batch arrived or on what the caller was allowed to
+			// read; `entry_for_row` opens it here only if no row opened it
+			// first, and the columns it owes are evaluated the same way.
+			//
+			// A `GROUP BY` key can only be learned from a row, so an input
+			// that yields none leaves no group and produces no row.
+			if group_by_exprs.is_empty() {
+				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+				let state = groups.entry_for_row(&[], || create_group_state(&aggregates));
+
+				// A column the row cannot influence still has a value for the
+				// group — a literal, a parameter — and no row arrived to
+				// evaluate it against. It is evaluated once here, against no
+				// row, as an aggregate's extra arguments are evaluated once
+				// for the group below. A column
+				// that does read the row has nothing to read, and reports what
+				// it collected from no rows.
+				for (field_idx, agg) in aggregates.iter().enumerate() {
+					if agg.is_group_key || agg.aggregate_expr_info.is_some() {
+						continue;
+					}
+					let Some(expr) = &agg.fallback_expr else {
+						continue;
+					};
+					if !agg.fallback_is_constant || state.first_values[field_idx].is_some() {
+						continue;
+					}
+					match expr.evaluate(eval_ctx.clone()).await {
+						Ok(field_value) => state.first_values[field_idx] = Some(field_value),
+						Err(cf) if cf.is_ignorable() => {
+							tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
 						}
+						Err(cf) => Err(cf)?,
 					}
 				}
 			}
@@ -705,7 +755,16 @@ impl ExecOperator for Aggregate {
 			// Now compute final results for each group, in group-key order.
 			let ordered_groups = groups.into_key_order();
 			let mut results = Vec::with_capacity(ordered_groups.len());
-			for (group_key, state) in ordered_groups {
+			for (group_key, mut state) in ordered_groups {
+				// An aggregate's arguments after the first — the separator of
+				// `array::join(txt, ' ')` — describe the group rather than a
+				// row, so each group evaluates its own, here, in group-key
+				// order. That is what an argument that writes, draws from a
+				// sequence or reads the clock is owed: one evaluation per
+				// group, in the order the groups are reported, and none at all
+				// for a `GROUP BY` whose input yielded no row and so opened no
+				// group.
+				bind_extra_args(&aggregates, &mut state, &group_key, &ctx).await?;
 				let result =
 					compute_group_result_async(&group_key, state, &aggregates, &ctx).await?;
 				results.push(result);
@@ -719,31 +778,87 @@ impl ExecOperator for Aggregate {
 	}
 }
 
+/// Evaluate `expr` for every row of `values`, answering `NONE` for a row whose
+/// error is ignorable.
+///
+/// A value an expression cannot use is skipped rather than ending the
+/// statement: the group folds the rows it can read, which is the streaming
+/// engine's answer for an aggregate over a wrong-kind value.
+async fn evaluate_column<'a>(
+	expr: &Arc<dyn PhysicalExpr>,
+	ctx: &EvalContext<'a>,
+	values: &'a [Value],
+) -> FlowResult<Vec<Value>> {
+	let mut column = Vec::with_capacity(values.len());
+	for value in values {
+		column.push(expr.evaluate(ctx.with_value_and_doc(value)).await.or_none()?);
+	}
+	Ok(column)
+}
+
+/// Evaluate every aggregate's arguments after the first for one group and bind
+/// them to that group's accumulators.
+///
+/// These describe the group, not a row, so each is evaluated once per group,
+/// immediately before the group is finalized, against the group's own keys
+/// rather than against a row. A grouping key named in one is still the group's
+/// value, and the planner has rewritten that read to the key's placeholder, so
+/// the document carries the keys under those names — the same arrangement a
+/// post-expression is evaluated under. An argument reading anything else off
+/// the row answers `NONE` here, which is what makes it a group-level argument
+/// rather than a per-row one.
+async fn bind_extra_args(
+	aggregates: &[AggregateField],
+	state: &mut GroupState,
+	group_key: &GroupKey,
+	ctx: &ExecutionContext,
+) -> FlowResult<()> {
+	// The keys are the whole document: the aggregates are not finalized yet,
+	// and an argument that named one would be reading a value the group has
+	// not finished folding.
+	let mut key_doc = Object::default();
+	for (idx, key_value) in group_key.iter().enumerate() {
+		key_doc.insert(group_key_field_name(idx), key_value.clone());
+	}
+	// The key document is the root of this evaluation, not merely the value
+	// the argument starts from: a nested expression is evaluated against the
+	// root rather than against the position a path has reached, so a key read
+	// from inside one finds the same document.
+	let doc_value = Value::Object(key_doc);
+	let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value_and_doc(&doc_value);
+	for (field_idx, agg) in aggregates.iter().enumerate() {
+		let Some(info) = &agg.aggregate_expr_info else {
+			continue;
+		};
+		for (agg_idx, extracted) in info.aggregates.iter().enumerate() {
+			if extracted.extra_args.is_empty() {
+				continue;
+			}
+			let mut args = Vec::with_capacity(extracted.extra_args.len());
+			for extra_arg in &extracted.extra_args {
+				args.push(extra_arg.evaluate(eval_ctx.clone()).await.or_none()?);
+			}
+			if let Some(acc) = state.accumulators[field_idx].get_mut(agg_idx) {
+				acc.set_extra_args(&args);
+			}
+		}
+	}
+	Ok(())
+}
+
 /// Create initial group state with accumulators for each aggregate field.
 ///
-/// The `evaluated_extra_args` parameter contains the pre-evaluated extra arguments
-/// for each aggregate field: `evaluated_extra_args[field_idx][aggregate_idx] = Vec<Value>`.
-fn create_group_state(
-	aggregates: &[AggregateField],
-	evaluated_extra_args: &[Vec<Vec<Value>>],
-) -> GroupState {
+/// An aggregate's arguments after the first are not known here: they belong to
+/// the group and are bound by [`bind_extra_args`] before it is finalized.
+fn create_group_state(aggregates: &[AggregateField]) -> GroupState {
 	let accumulators = aggregates
 		.iter()
-		.enumerate()
-		.map(|(i, agg)| {
+		.map(|agg| {
 			if let Some(info) = &agg.aggregate_expr_info {
 				// Create an accumulator for each extracted aggregate
 				info.aggregates
 					.iter()
-					.enumerate()
-					.map(|(agg_idx, extracted)| {
-						let extra_args = evaluated_extra_args
-							.get(i)
-							.and_then(|field_args| field_args.get(agg_idx))
-							.map(|v| v.as_slice())
-							.unwrap_or(&[]);
-						extracted.function.create_accumulator_with_args(extra_args)
-					})
+					.map(|extracted| extracted.function.create_accumulator())
 					.collect()
 			} else {
 				// Non-aggregate field - no accumulators
@@ -778,7 +893,7 @@ async fn compute_single_field_value(
 		Ok(group_key.get(idx).cloned().unwrap_or(Value::None))
 	} else if let Some(info) = &agg.aggregate_expr_info {
 		// Compute the aggregate value(s)
-		compute_aggregate_field_value(info, accumulators, ctx).await
+		compute_aggregate_field_value(info, group_key, accumulators, ctx).await
 	} else {
 		// Return first value for non-aggregate fields
 		Ok(first_value)
@@ -866,6 +981,7 @@ fn set_nested_value(obj: &mut Object, path: &[String], value: Value) {
 /// aggregate value directly.
 async fn compute_aggregate_field_value(
 	info: &AggregateExprInfo,
+	group_key: &GroupKey,
 	accumulators: &[Box<dyn Accumulator>],
 	ctx: &ExecutionContext,
 ) -> FlowResult<Value> {
@@ -888,8 +1004,21 @@ async fn compute_aggregate_field_value(
 
 	// If there's a post-expression, evaluate it against the aggregate document
 	if let Some(post_expr) = &info.post_expr {
+		// The post-expression is evaluated once for the group, so the row is
+		// gone by the time it runs. A grouping key it names is still the
+		// group's own value, and the planner has rewritten that read to the
+		// key's placeholder; the document carries the keys beside the
+		// aggregates so the read finds one.
+		for (idx, key_value) in group_key.iter().enumerate() {
+			agg_doc.insert(group_key_field_name(idx), key_value.clone());
+		}
+		// The aggregate document is the root of this evaluation, not merely
+		// the value the expression starts from: a nested expression — a
+		// method's argument, a dynamic index — is evaluated against the root
+		// rather than against the position the path has reached, so a key read
+		// from inside one has to find the same document.
 		let doc_value = Value::Object(agg_doc);
-		let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&doc_value);
+		let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value_and_doc(&doc_value);
 		match post_expr.evaluate(eval_ctx).await {
 			Ok(v) => Ok(v),
 			Err(cf) if cf.is_ignorable() => {
@@ -921,7 +1050,7 @@ mod tests {
 	use crate::exec::operators::{SortDirection, Union};
 	use crate::exec::ordering::SortProperty;
 	use crate::exec::{CardinalityHint, OutputOrdering};
-	use crate::expr::{ControlFlow, Expr};
+	use crate::expr::ControlFlow;
 	use crate::iam::{Action, Auth, Role};
 	use crate::val::Number;
 
@@ -930,24 +1059,46 @@ mod tests {
 	// =========================================================================
 
 	/// Build the operator over `input`. `group_by` holds the GROUP BY sources;
-	/// an empty slice is GROUP ALL. Non-idiom sources are given a display idiom
-	/// spelled from the source text, the way the planner does for computed keys.
+	/// an empty slice is GROUP ALL. Each source is both the key as written and
+	/// the compiled expression the operator evaluates per row.
+	///
+	/// The batch is evaluated a column at a time, which is what the planner
+	/// answers for the effect-free sources these tests use; `aggregate_over_rows`
+	/// is the same operator evaluating a row at a time.
 	async fn aggregate_over(
 		input: Arc<dyn ExecOperator>,
 		group_by: &[&str],
 		fields: Vec<AggregateField>,
 		ctx: &ExecutionContext,
 	) -> Arc<dyn ExecOperator> {
-		let mut idioms = Vec::with_capacity(group_by.len());
+		Arc::new(build_aggregate(input, group_by, fields, ctx).await.with_effect_free_columns())
+	}
+
+	/// [`aggregate_over`] with the row-at-a-time shape, which the planner
+	/// chooses where an expression may write, advance a sequence or reach
+	/// outside the transaction.
+	async fn aggregate_over_rows(
+		input: Arc<dyn ExecOperator>,
+		group_by: &[&str],
+		fields: Vec<AggregateField>,
+		ctx: &ExecutionContext,
+	) -> Arc<dyn ExecOperator> {
+		Arc::new(build_aggregate(input, group_by, fields, ctx).await)
+	}
+
+	async fn build_aggregate(
+		input: Arc<dyn ExecOperator>,
+		group_by: &[&str],
+		fields: Vec<AggregateField>,
+		ctx: &ExecutionContext,
+	) -> Aggregate {
+		let mut keys = Vec::with_capacity(group_by.len());
 		let mut exprs = Vec::with_capacity(group_by.len());
 		for src in group_by {
-			idioms.push(match parse_expr(src) {
-				Expr::Idiom(idiom) => idiom,
-				_ => Idiom::field(src.to_string()),
-			});
+			keys.push(parse_expr(src));
 			exprs.push(physical_expr(src, ctx).await);
 		}
-		Arc::new(Aggregate::new(input, idioms, exprs, fields))
+		Aggregate::new(input, keys, exprs, fields)
 	}
 
 	/// Input rows from SurrealQL object literals.
@@ -1236,68 +1387,49 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn group_all_with_no_input_batches_emits_the_accumulator_identities_when_perms_are_off() {
-		// An input that never yields a batch leaves the group map empty. With
-		// permission enforcement off, the operator then synthesises the single
-		// group, so `count()` reports 0 rather than yielding no row at all.
-		let ctx = root_ctx_with_auth(Auth::for_root(Role::Owner));
-		assert!(!ctx.should_check_perms(Action::View).unwrap());
+	async fn group_all_over_no_row_emits_the_identity_row_whatever_the_permissions() {
+		// `GROUP ALL`'s group belongs to the statement, so an input carrying
+		// no row still reports the grand total of none: `count()` 0 and
+		// `math::sum` 0. Neither the shape of the input nor the caller's
+		// permissions may change that — an input that never yields a batch and
+		// one that yields an empty batch answer alike, checked or unchecked —
+		// because an answer that varied with either would make the same
+		// statement mean two things.
+		for checked in [false, true] {
+			let ctx = if checked {
+				root_ctx()
+			} else {
+				root_ctx_with_auth(Auth::for_root(Role::Owner))
+			};
+			assert_eq!(ctx.should_check_perms(Action::View).unwrap(), checked);
 
-		let op = aggregate_over(
-			ScriptedSource::new(vec![]),
-			&[],
-			vec![count_star("total", &ctx).await, agg_of("sum", "math::sum", "score", &ctx).await],
-			&ctx,
-		)
-		.await;
+			for input in [vec![], vec![batch(vec![])]] {
+				let op = aggregate_over(
+					ScriptedSource::new(input),
+					&[],
+					vec![
+						count_star("total", &ctx).await,
+						agg_of("sum", "math::sum", "score", &ctx).await,
+					],
+					&ctx,
+				)
+				.await;
 
-		let out = collect(&op, &ctx).await;
-		assert_eq!(out, rows(&["{ total: 0, sum: 0 }"]).await);
-	}
-
-	#[tokio::test]
-	async fn group_all_with_no_input_batches_emits_nothing_when_perms_are_on() {
-		// Under an identity whose reads are permission-checked, zero rows cannot
-		// be distinguished from "everything was filtered out", so the identity
-		// row is suppressed and the output is empty.
-		let ctx = root_ctx();
-		assert!(ctx.should_check_perms(Action::View).unwrap());
-
-		let op = aggregate_over(
-			ScriptedSource::new(vec![]),
-			&[],
-			vec![count_star("total", &ctx).await],
-			&ctx,
-		)
-		.await;
-
-		assert!(collect(&op, &ctx).await.is_empty());
-	}
-
-	#[tokio::test]
-	async fn group_all_emits_the_identity_row_for_an_empty_batch_whatever_the_perms() {
-		// The permission gate above only guards the *no batch at all* case. As
-		// soon as one batch arrives the GROUP ALL branch creates its single group
-		// before looking at any row, so an input that yields one empty batch
-		// produces `count() = 0` even while permission checks are active.
-		let ctx = root_ctx();
-		assert!(ctx.should_check_perms(Action::View).unwrap());
-
-		let op = aggregate_over(
-			ScriptedSource::new(vec![batch(vec![])]),
-			&[],
-			vec![count_star("total", &ctx).await],
-			&ctx,
-		)
-		.await;
-
-		assert_eq!(collect(&op, &ctx).await, rows(&["{ total: 0 }"]).await);
+				assert_eq!(
+					collect(&op, &ctx).await,
+					rows(&["{ total: 0, sum: 0 }"]).await,
+					"GROUP ALL over no row should report the grand total of none \
+					 (perms checked: {checked})"
+				);
+			}
+		}
 	}
 
 	#[tokio::test]
 	async fn group_by_over_empty_input_emits_nothing() {
-		// The identity-row fallback is GROUP ALL only: with grouping keys and no
-		// rows there is no group to report.
+		// Grouping keys are the other half of that rule: a key can only be
+		// learned from a row, so an input carrying none leaves no group to
+		// report and nothing is invented in its place.
 		let ctx = root_ctx_with_auth(Auth::for_root(Role::Owner));
 		let op = aggregate_over(
 			ScriptedSource::new(vec![batch(vec![])]),
@@ -1308,6 +1440,42 @@ mod tests {
 		.await;
 
 		assert!(collect(&op, &ctx).await.is_empty());
+	}
+
+	#[tokio::test]
+	async fn a_row_at_a_time_reports_what_a_column_at_a_time_reports() {
+		// How a batch is evaluated is a choice about effects and never about
+		// the answer: the row-at-a-time shape, taken where an expression may
+		// write or advance a sequence, folds the same values into the same
+		// groups as the column-at-a-time shape, for a named key and for
+		// `GROUP ALL` alike.
+		let ctx = root_ctx();
+		let srcs = &["{ c: 'us', n: 1 }", "{ c: 'de', n: 2 }", "{ c: 'us', n: 3 }"];
+
+		for (group_by, expected) in [
+			(&["c"][..], &["{ c: 'de', total: 1, sum: 2 }", "{ c: 'us', total: 2, sum: 4 }"][..]),
+			(&[][..], &["{ total: 3, sum: 6 }"][..]),
+		] {
+			let mut fields = Vec::new();
+			if !group_by.is_empty() {
+				fields.push(key("c", 0));
+			}
+			fields.push(count_star("total", &ctx).await);
+			fields.push(agg_of("sum", "math::sum", "n", &ctx).await);
+
+			let by_row = aggregate_over_rows(
+				ValuesOperator::new(rows(srcs).await),
+				group_by,
+				fields.clone(),
+				&ctx,
+			)
+			.await;
+			let by_column =
+				aggregate_over(ValuesOperator::new(rows(srcs).await), group_by, fields, &ctx).await;
+
+			assert_eq!(collect(&by_row, &ctx).await, rows(expected).await);
+			assert_eq!(collect(&by_column, &ctx).await, collect(&by_row, &ctx).await);
+		}
 	}
 
 	// =========================================================================
@@ -1492,13 +1660,14 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn extra_args_are_evaluated_once_and_reused_by_every_group() {
+	async fn every_group_evaluates_its_own_extra_args() {
 		let ctx = root_ctx();
 		let input = ValuesOperator::new(
 			rows(&["{ c: 'a', w: 'x' }", "{ c: 'b', w: 'z' }", "{ c: 'a', w: 'y' }"]).await,
 		);
 		// `array::join(w, '-')`: the separator is an extra argument, evaluated
-		// once before any row is read and handed to each group's accumulator.
+		// once for each group and bound to that group's accumulator before it
+		// is finalized.
 		let joined = single(
 			"joined",
 			ExtractedAggregate {
@@ -1511,6 +1680,36 @@ mod tests {
 		let op = aggregate_over(input, &["c"], vec![key("c", 0), joined], &ctx).await;
 		let out = collect(&op, &ctx).await;
 		assert_eq!(out, rows(&["{ c: 'a', joined: 'x-y' }", "{ c: 'b', joined: 'z' }"]).await);
+	}
+
+	#[tokio::test]
+	async fn an_extra_arg_is_evaluated_once_per_group_in_group_key_order() {
+		let ctx = root_ctx();
+		// The groups interleave in the input and the second group is the one
+		// seen first, so an argument evaluated when a group is opened would
+		// hand `0` to `b`. It is evaluated per group in group-key order
+		// instead, which is the order the groups are reported in.
+		let input = ValuesOperator::new(
+			rows(&[
+				"{ c: 'b', w: 'p' }",
+				"{ c: 'a', w: 'x' }",
+				"{ c: 'b', w: 'q' }",
+				"{ c: 'a', w: 'y' }",
+			])
+			.await,
+		);
+		let joined = single(
+			"joined",
+			ExtractedAggregate {
+				function: aggregate_fn("array::join", &ctx),
+				argument_expr: physical_expr("w", &ctx).await,
+				extra_args: vec![physical_expr("rand::int(0, 0).to_string()", &ctx).await],
+			},
+		);
+
+		let op = aggregate_over(input, &["c"], vec![key("c", 0), joined], &ctx).await;
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out, rows(&["{ c: 'a', joined: 'x0y' }", "{ c: 'b', joined: 'p0q' }"]).await);
 	}
 
 	#[tokio::test]
@@ -2103,7 +2302,7 @@ mod tests {
 	}
 
 	fn empty_state() -> GroupState {
-		create_group_state(&[], &[])
+		create_group_state(&[])
 	}
 
 	fn group_count(keys: &[Vec<Value>]) -> usize {

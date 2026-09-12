@@ -223,6 +223,22 @@ keyspace! {
 				/// conflict token, and over-bumping only costs a retried page.
 				changefeed_fence = ["!cf"] => u64;
 
+				/// The identity of one table's catalog entry: rewritten with a
+				/// fresh uuid by every catalog write that changes the table's
+				/// definition, its fields or its indexes, in the same transaction
+				/// as that write. Keyed per table, beside the table definition
+				/// rather than under the table's own prefix, so that catalog writes
+				/// to different tables share no key and the stamp of a removed
+				/// table outlives the removal of its data.
+				///
+				/// Read by [`crate::Transaction::catalog_version`] and used as the
+				/// key of the node-wide [`crate::cache::ds::TableSnapshot`]: a
+				/// snapshot of the table built under one value is valid for every
+				/// reader that sees the same value. A table with no value yet has
+				/// no shareable snapshot, and its readers load through their own
+				/// transaction.
+				catalog_version = ["!cv", @, tb: Table] => crate::values::catalog_version::CatalogVersion;
+
 				/// A user-defined function. The tag is `!fn`, not `!fc`.
 				function = ["!fn", @, fc: Str] => surrealdb_catalog::StoredFunctionDefinition;
 
@@ -2231,6 +2247,7 @@ mod tests {
 			"/**!az",
 			"/**!bu",
 			"/**!cg",
+			"/**!cv",
 			"/**!fn",
 			"/**!md",
 			"/**!ml",

@@ -16,9 +16,8 @@ impl Weighter<Key, Entry> for Weight {
 			// the JWKS refresh cooldown.
 			#[cfg(feature = "jwks")]
 			Entry::Jwk(_) => 0,
-			// For the moment all other entries have the same weight, and can
-			// be evicted when necessary. In the future we will compute the
-			// actual size of the value in memory and use that for the weight.
+			// All other entries, the per-table catalog snapshot included, have
+			// the same weight, and can be evicted when necessary.
 			_ => 1,
 		}
 	}

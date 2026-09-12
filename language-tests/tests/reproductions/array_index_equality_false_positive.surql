@@ -28,7 +28,10 @@ value = "[{ id: doc:scalar, tags: 'public' }]"
 value = "[{ id: doc:scalar, tags: 'public' }]"
 
 [[test.results]]
-value = "{ attributes: { projections: 'id, tags' }, children: [{ attributes: { access: \"= 'public'\", direction: 'Forward', index: 'idx_tags' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"
+value = '''
+"SelectProject [ctx: Db] [projections: id, tags]
+    IndexScan [ctx: Db] [index: idx_tags, access: = 'public', direction: Forward]
+"'''
 */
 
 DEFINE TABLE doc SCHEMALESS;
@@ -43,4 +46,4 @@ SELECT id, tags FROM doc WHERE tags = 'public' ORDER BY id;
 SELECT id, tags FROM doc WITH NOINDEX WHERE tags = 'public' ORDER BY id;
 
 -- Confirm the index is actually chosen so the recheck path is exercised.
-SELECT id, tags FROM doc WHERE tags = 'public' EXPLAIN;
+EXPLAIN SELECT id, tags FROM doc WHERE tags = 'public';

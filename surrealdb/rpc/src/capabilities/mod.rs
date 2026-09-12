@@ -617,18 +617,28 @@ impl<T: Hash + Eq + PartialEq + Ord> Hash for Targets<T> {
 	}
 }
 
-/// Which planner a session's read-only statements go through.
+/// Which engine a session's read-only statements go through.
+///
+/// The engine is chosen per statement by the core planner's `engine_for`: a
+/// write or a schema statement always runs on the compute executor, and a
+/// read-only statement runs on the streaming engine unless the session is
+/// `ComputeOnly`. A read-only statement the streaming engine declines — no
+/// logical form, or a shape its planner does not compile — runs on the
+/// compute executor under either of the other two settings, since every
+/// decline the planner makes is for a statement it has no plan for.
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum NewPlannerStrategy {
-	/// Try the new planner for read-only statements, fall back to compute on Unimplemented.
+	/// The streaming engine for every read-only statement it can plan, the
+	/// compute executor for the rest.
 	#[default]
 	BestEffortReadOnlyStatements,
-	/// Skip the new planner entirely; always use the compute executor.
+	/// The compute executor for every statement. A GQL `MATCH`, which has no
+	/// compute form, is refused under this setting.
 	ComputeOnly,
-	/// Require the new planner for all read-only statements.
-	/// Promotes `exec::Error::PlannerUnimplemented` to `exec::Error::Query` (hard error)
-	/// instead of falling back.
+	/// The streaming engine for every read-only statement it can plan. Planned
+	/// identically to `BestEffortReadOnlyStatements`; the distinct name lets a
+	/// test or a deployment state which engine it means to exercise.
 	AllReadOnlyStatements,
 }
 

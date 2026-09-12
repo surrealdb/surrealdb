@@ -3,6 +3,7 @@
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::dbs::QueryType;
+use crate::expr::logical::LogicalOp;
 use crate::expr::statements::OptionStatement;
 use crate::observe::StatementType;
 use crate::{expr, sql};
@@ -15,21 +16,21 @@ use crate::{expr, sql};
 /// reach, and a streamed batch converts nothing before its first statement
 /// runs.
 ///
-/// A caller that builds the expression tree itself hands in that form
-/// directly: the GQL front end, the GraphQL bridge, and model upload all lower
-/// their own statements. There is no surface syntax behind those, so nothing
-/// converts and rendering them as text goes the long way round.
+/// A front end that emits a plan rather than a statement hands the plan in
+/// directly: GQL lowers a `MATCH` query to a [`LogicalOp::Match`]. There is no
+/// surface syntax behind a plan, so nothing converts it, and it runs on the
+/// streaming engine or fails.
 pub(crate) enum TopLevelStatement {
 	/// A statement in surface form, as the parser produced it.
 	Ast(sql::TopLevelExpr),
-	/// A statement that arrived already lowered.
-	Plan(expr::TopLevelExpr),
+	/// A plan that arrived already lowered.
+	Plan(Box<LogicalOp>),
 }
 
 /// What the executor's drivers act on before a statement is converted.
 ///
-/// Both forms of a [`TopLevelStatement`] collapse to this, so a driver matches
-/// one small enum rather than two large ones. Only what a driver has to
+/// A [`TopLevelStatement`] collapses to this, so a driver matches one small
+/// enum rather than the surface statement's. Only what a driver has to
 /// recognise itself appears here: the transaction-control statements, which it
 /// runs rather than hands to an engine, and `OPTION`, which changes the
 /// options every later statement in the batch runs under.
@@ -59,28 +60,19 @@ impl TopLevelStatement {
 				| sql::TopLevelExpr::Show(_)
 				| sql::TopLevelExpr::Expr(_) => Dispatch::Runnable,
 			},
-			TopLevelStatement::Plan(stmt) => match stmt {
-				expr::TopLevelExpr::Begin => Dispatch::Begin,
-				expr::TopLevelExpr::Cancel => Dispatch::Cancel,
-				expr::TopLevelExpr::Commit => Dispatch::Commit,
-				expr::TopLevelExpr::Option(stmt) => Dispatch::Option(stmt.clone()),
-				expr::TopLevelExpr::Access(_)
-				| expr::TopLevelExpr::Kill(_)
-				| expr::TopLevelExpr::Live(_)
-				| expr::TopLevelExpr::Use(_)
-				| expr::TopLevelExpr::Show(_)
-				| expr::TopLevelExpr::Expr(_) => Dispatch::Runnable,
-			},
+			// A plan is something an engine runs; no driver acts on it first.
+			TopLevelStatement::Plan(_) => Dispatch::Runnable,
 		}
 	}
 
 	/// Whether this statement can run inside a read-only transaction. See
 	/// [`sql::read_only`](crate::sql::read_only) for the one-sided contract
-	/// the predicate upholds.
+	/// the predicate upholds; [`LogicalOp::read_only`] upholds the same one
+	/// for a plan.
 	pub(crate) fn read_only(&self) -> bool {
 		match self {
 			TopLevelStatement::Ast(stmt) => stmt.read_only(),
-			TopLevelStatement::Plan(stmt) => stmt.read_only(),
+			TopLevelStatement::Plan(op) => op.read_only(),
 		}
 	}
 
@@ -105,7 +97,8 @@ impl TopLevelStatement {
 	pub(crate) fn statement_type(&self) -> StatementType {
 		match self {
 			TopLevelStatement::Ast(stmt) => sql_statement_type(stmt),
-			TopLevelStatement::Plan(stmt) => expr_statement_type(stmt),
+			// A plan carries no statement kind to classify.
+			TopLevelStatement::Plan(_) => StatementType::Other,
 		}
 	}
 
@@ -113,17 +106,6 @@ impl TopLevelStatement {
 	/// transport whether the returned id names a new subscription.
 	pub(crate) fn query_type(&self) -> QueryType {
 		query_type(self.statement_type())
-	}
-
-	/// The statement in the form the engines take.
-	///
-	/// This is the conversion the executor defers: it happens here, once, when
-	/// a statement is about to run.
-	pub(crate) fn into_expr(self) -> expr::TopLevelExpr {
-		match self {
-			TopLevelStatement::Ast(stmt) => stmt.into(),
-			TopLevelStatement::Plan(stmt) => stmt,
-		}
 	}
 }
 
@@ -133,11 +115,16 @@ impl TopLevelStatement {
 /// directly. Lowering `DEFINE USER ... PASSWORD 'secret'` replaces the
 /// password with the Argon2 hash and SCRAM verifier derived from it, so the
 /// lowered form carries no plaintext credential. Statement text reaches the
-/// tracing span, the slow log and any observer that asks for it; rendering the
-/// surface form would put the plaintext password in all three. A `DEFINE USER`
+/// tracing span and any observer that asks for it; rendering the surface form
+/// would put the plaintext password in both. The slow log prints a statement
+/// the legacy engine ran in this form as well, and one the streaming engine
+/// ran as written: a statement with a logical form holds no DDL, so its
+/// surface text names no credential. A `DEFINE USER`
 /// nested inside a block, a function body or an `IF` branch is reached the
 /// same way, which is why this is a property of the whole render rather than a
-/// carve-out for one statement kind.
+/// carve-out for one statement kind: every top-level kind that carries an
+/// expression goes through its lowered form, whatever position the credential
+/// sits in.
 ///
 /// Rendering costs a lowering, and lowering a `PASSWORD` derives its Argon2
 /// hash and SCRAM verifier under a fresh salt. So the text names a credential
@@ -145,23 +132,63 @@ impl TopLevelStatement {
 /// statement rendered at several sites derives one per site. Both follow from
 /// rendering through a form the surface statement does not itself hold; a
 /// render that redacted the credential instead would need neither.
+///
+/// A plan has no surface form and holds no credential; it renders as the plan
+/// it is.
 impl ToSql for TopLevelStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			TopLevelStatement::Ast(stmt) => {
-				let lowered: expr::TopLevelExpr = stmt.clone().into();
-				lowered.fmt_sql(f, fmt);
-			}
-			TopLevelStatement::Plan(stmt) => stmt.fmt_sql(f, fmt),
+			TopLevelStatement::Ast(stmt) => match stmt {
+				// No payload, so nothing to lower.
+				sql::TopLevelExpr::Begin
+				| sql::TopLevelExpr::Cancel
+				| sql::TopLevelExpr::Commit => stmt.fmt_sql(f, fmt),
+				sql::TopLevelExpr::Access(stmt) => {
+					render_lowered::<_, expr::statements::AccessStatement>(&**stmt, f, fmt)
+				}
+				sql::TopLevelExpr::Kill(stmt) => {
+					render_lowered::<_, expr::statements::KillStatement>(stmt, f, fmt)
+				}
+				sql::TopLevelExpr::Live(stmt) => {
+					render_lowered::<_, expr::statements::LiveStatement>(&**stmt, f, fmt)
+				}
+				sql::TopLevelExpr::Option(stmt) => {
+					render_lowered::<_, OptionStatement>(stmt, f, fmt)
+				}
+				sql::TopLevelExpr::Use(stmt) => {
+					render_lowered::<_, expr::statements::UseStatement>(stmt, f, fmt)
+				}
+				sql::TopLevelExpr::Show(stmt) => {
+					render_lowered::<_, expr::statements::ShowStatement>(stmt, f, fmt)
+				}
+				// The expression layer renders a bare expression itself.
+				sql::TopLevelExpr::Expr(expr) => expr::Expr::from(expr.clone()).fmt_sql(f, fmt),
+			},
+			TopLevelStatement::Plan(op) => op.fmt_sql(f, fmt),
 		}
 	}
 }
 
+/// Render a statement through its lowered form: convert it to the expression
+/// layer and back, and render the surface form that returns. The lowering is
+/// what replaces a plaintext credential with the derived hash and verifier,
+/// and the expression layer renders these statement kinds by converting back
+/// to the surface form, so the round trip yields the text the lowered form
+/// renders.
+fn render_lowered<S, L>(stmt: &S, f: &mut String, fmt: SqlFormat)
+where
+	S: Clone + Into<L> + ToSql,
+	L: Into<S>,
+{
+	let lowered: L = stmt.clone().into();
+	let surface: S = lowered.into();
+	surface.fmt_sql(f, fmt);
+}
+
 /// The statement kinds that only read.
 ///
-/// Derived from [`StatementType`] rather than matched on each form, so the
-/// surface and lowered answers agree by construction instead of by a test.
-/// Every kind here has exactly one classifier arm producing it, on each side.
+/// Derived from [`StatementType`] rather than matched on the statement, so
+/// every kind here has exactly one classifier arm producing it.
 fn kind_reads_only(kind: StatementType) -> bool {
 	matches!(
 		kind,
@@ -174,8 +201,8 @@ fn kind_reads_only(kind: StatementType) -> bool {
 }
 
 /// The statement kinds whose result names a subscription. Derived for the same
-/// reason as [`kind_reads_only`]; neither `Expr` enum has a `Live` or `Kill`
-/// variant, so these two kinds come only from the top level.
+/// reason as [`kind_reads_only`]; no `Expr` variant is a `LIVE` or `KILL`, so
+/// these two kinds come only from the top level.
 fn query_type(kind: StatementType) -> QueryType {
 	match kind {
 		StatementType::Live => QueryType::Live,
@@ -248,72 +275,5 @@ fn sql_expr_statement_type(expr: &sql::Expr) -> StatementType {
 		}
 		| sql::Expr::FunctionCall(_)
 		| sql::Expr::Closure(_) => StatementType::Other,
-	}
-}
-
-/// Classify a lowered [`expr::TopLevelExpr`] into its bounded
-/// [`StatementType`] category.
-fn expr_statement_type(expr: &expr::TopLevelExpr) -> StatementType {
-	match expr {
-		expr::TopLevelExpr::Begin => StatementType::Begin,
-		expr::TopLevelExpr::Cancel => StatementType::Cancel,
-		expr::TopLevelExpr::Commit => StatementType::Commit,
-		expr::TopLevelExpr::Access(_) => StatementType::Access,
-		expr::TopLevelExpr::Kill(_) => StatementType::Kill,
-		expr::TopLevelExpr::Live(_) => StatementType::Live,
-		expr::TopLevelExpr::Option(_) => StatementType::Option,
-		expr::TopLevelExpr::Use(_) => StatementType::Use,
-		expr::TopLevelExpr::Show(_) => StatementType::Show,
-		expr::TopLevelExpr::Expr(expr) => expr_expr_statement_type(expr),
-	}
-}
-
-/// Classify a bare [`expr::Expr`] into its bounded [`StatementType`] category.
-fn expr_expr_statement_type(expr: &expr::Expr) -> StatementType {
-	match expr {
-		expr::Expr::Select(_) => StatementType::Select,
-		expr::Expr::Create(_) => StatementType::Create,
-		expr::Expr::Update(_) => StatementType::Update,
-		expr::Expr::Upsert(_) => StatementType::Upsert,
-		expr::Expr::Delete(_) => StatementType::Delete,
-		expr::Expr::Relate(_) => StatementType::Relate,
-		expr::Expr::Insert(_) => StatementType::Insert,
-		expr::Expr::Define(_) => StatementType::Define,
-		expr::Expr::Remove(_) => StatementType::Remove,
-		expr::Expr::Rebuild(_) => StatementType::Rebuild,
-		expr::Expr::Alter(_) => StatementType::Alter,
-		expr::Expr::Info(_) => StatementType::Info,
-		expr::Expr::Foreach(_) => StatementType::Foreach,
-		expr::Expr::IfElse(_) => StatementType::IfElse,
-		expr::Expr::Sleep(_) => StatementType::Sleep,
-		expr::Expr::Explain {
-			..
-		} => StatementType::Explain,
-		expr::Expr::Let(_) => StatementType::Let,
-		expr::Expr::Return(_) => StatementType::Return,
-		expr::Expr::Break => StatementType::Break,
-		expr::Expr::Continue => StatementType::Continue,
-		expr::Expr::Throw(_) => StatementType::Throw,
-		expr::Expr::Block(_) => StatementType::Block,
-		// Enumerated rather than using a wildcard, as above.
-		expr::Expr::Literal(_)
-		| expr::Expr::Param(_)
-		| expr::Expr::Idiom(_)
-		| expr::Expr::Table(_)
-		| expr::Expr::Mock(_)
-		| expr::Expr::Constant(_)
-		| expr::Expr::Prefix {
-			..
-		}
-		| expr::Expr::Postfix {
-			..
-		}
-		| expr::Expr::Binary {
-			..
-		}
-		| expr::Expr::FunctionCall(_)
-		| expr::Expr::Closure(_) => StatementType::Other,
-		// GQL MATCH is not a SurrealQL statement-shaped expression.
-		expr::Expr::Match(_) => StatementType::Other,
 	}
 }

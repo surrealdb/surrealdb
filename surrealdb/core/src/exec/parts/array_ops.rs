@@ -163,7 +163,9 @@ pub(crate) fn evaluate_flatten(value: &Value) -> anyhow::Result<Value> {
 // FirstPart -- [0]
 // ============================================================================
 
-/// First element - `[0]` or `.first()`.
+/// First element of a collection, `[0]`. A value that is not one has no
+/// end to read and answers `NONE`; the `first()` method is a registered
+/// function and raises for such a value instead.
 #[derive(Debug, Clone)]
 pub struct FirstPart;
 impl PhysicalExpr for FirstPart {
@@ -185,7 +187,8 @@ impl PhysicalExpr for FirstPart {
 			match value {
 				Value::Array(arr) => Ok(arr.first().cloned().unwrap_or(Value::None)),
 				Value::Set(set) => Ok(set.first().cloned().unwrap_or(Value::None)),
-				other => Ok(other),
+				// A value that is not a collection has no end to read.
+				_ => Ok(Value::None),
 			}
 		})
 	}
@@ -205,7 +208,9 @@ impl ToSql for FirstPart {
 // LastPart -- [$]
 // ============================================================================
 
-/// Last element - `[$]` or `.last()`.
+/// Last element of a collection, `[$]`. A value that is not one has no
+/// end to read and answers `NONE`; the `last()` method is a registered
+/// function and raises for such a value instead.
 #[derive(Debug, Clone)]
 pub struct LastPart;
 impl PhysicalExpr for LastPart {
@@ -227,7 +232,8 @@ impl PhysicalExpr for LastPart {
 			match value {
 				Value::Array(arr) => Ok(arr.last().cloned().unwrap_or(Value::None)),
 				Value::Set(set) => Ok(set.last().cloned().unwrap_or(Value::None)),
-				other => Ok(other),
+				// A value that is not a collection has no end to read.
+				_ => Ok(Value::None),
 			}
 		})
 	}
@@ -449,14 +455,14 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn first_and_last_pass_non_collections_through_unchanged() {
+	async fn first_and_last_of_a_non_collection_are_none() {
 		let ctx = root_ctx();
-		// A scalar is its own first and last element — it is not NONE, which is
-		// what a numeric index on the same value would give.
+		// A value that is not a collection has no end to read, which is what a
+		// numeric index on the same value answers too.
 		for src in ["NONE", "NULL", "42", "'text'", "{ a: 1 }"] {
 			let value = val(src).await;
-			assert_eq!(eval_part(&FirstPart, &value, &ctx).await, value, "first of {src}");
-			assert_eq!(eval_part(&LastPart, &value, &ctx).await, value, "last of {src}");
+			assert_eq!(eval_part(&FirstPart, &value, &ctx).await, Value::None, "first of {src}");
+			assert_eq!(eval_part(&LastPart, &value, &ctx).await, Value::None, "last of {src}");
 		}
 	}
 }

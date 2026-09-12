@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use common::fmt::QuoteStr;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -158,5 +159,82 @@ impl ToSql for SetLiteral {
 			elem.fmt_sql(f, fmt);
 		}
 		f.push_str("}>");
+	}
+}
+
+/// The object `base` with `field` set to `value`.
+///
+/// The plan-text form of a nested field permission: a guard on `a.b` is the
+/// column `a := set_field(a, 'b', IF p THEN a.b ELSE NONE END)`, and a guard
+/// on `arr.*.secret` broadcasts the same form over each element. A `NONE`
+/// value removes the key, which is the cut of a nested position the caller
+/// may not read; any other value replaces it. Other keys are untouched and,
+/// when the form is applied to array elements, no index shifts.
+///
+/// A `base` that is not an object is returned unchanged, and `value` is not
+/// evaluated: there is no position to set, and a guard on a position that
+/// does not exist is never judged.
+#[derive(Debug, Clone)]
+pub struct SetFieldExpr {
+	pub(crate) base: Arc<dyn PhysicalExpr>,
+	pub(crate) field: Strand,
+	pub(crate) value: Arc<dyn PhysicalExpr>,
+}
+
+impl PhysicalExpr for SetFieldExpr {
+	fn name(&self) -> &'static str {
+		"SetField"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		self.base.required_context().max(self.value.required_context())
+	}
+
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let base = self.base.evaluate(ctx.clone()).await?;
+			let Value::Object(mut object) = base else {
+				return Ok(base);
+			};
+			match self.value.evaluate(ctx).await? {
+				Value::None => {
+					object.remove(self.field.as_str());
+				}
+				value => {
+					object.insert(self.field.as_str(), value);
+				}
+			}
+			Ok(Value::Object(object))
+		})
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		self.base.access_mode().combine(self.value.access_mode())
+	}
+}
+
+impl ToSql for SetFieldExpr {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("set_field(");
+		fmt_covered(&*self.base, f, fmt);
+		write_sql!(f, fmt, ", {}, ", QuoteStr(self.field.as_str()));
+		fmt_covered(&*self.value, f, fmt);
+		f.push(')');
+	}
+}
+
+/// Render an operand of a call, parenthesised when it is an `IF`, which is
+/// how the logical plan renders the same position.
+fn fmt_covered(expr: &dyn PhysicalExpr, f: &mut String, fmt: SqlFormat) {
+	if expr.as_any().is::<crate::exec::physical_expr::IfElseExpr>() {
+		f.push('(');
+		expr.fmt_sql(f, fmt);
+		f.push(')');
+	} else {
+		expr.fmt_sql(f, fmt);
 	}
 }

@@ -192,7 +192,7 @@ impl ToSql for BinaryOp {
 ///
 /// Eliminates async_trait dispatch and per-record `Value::clone()` by inlining
 /// field access and storing the literal value directly. Created at plan time
-/// when the planner detects a simple `IdiomExpr(FieldPart)` on one side and a
+/// when the planner detects a simple field read (a `Step` of one `FieldPart`) on one side and a
 /// `Literal` on the other.
 #[derive(Debug, Clone)]
 pub struct SimpleBinaryOp {
@@ -454,12 +454,53 @@ impl ToSql for UnaryOp {
 	}
 }
 
+/// The open-ended range a [`PostfixOp`] builds from its operand.
+///
+/// These are the only postfix operators: a closure call lowers to
+/// `LogicalExpr::Invoke`, which compiles to `ClosureCallExec`, and a method
+/// call lowers to the path `operand.method(args)`, so neither reaches here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostfixRangeOp {
+	/// `value..` — the range from `value` inclusive, unbounded above.
+	Range,
+	/// `value>..` — the range from `value` exclusive, unbounded above.
+	RangeSkip,
+}
+
+impl ToSql for PostfixRangeOp {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(match self {
+			PostfixRangeOp::Range => "..",
+			PostfixRangeOp::RangeSkip => ">..",
+		});
+	}
+}
+
 /// Postfix operation - expr op (e.g., value.., value>..)
 #[derive(Debug, Clone)]
 pub struct PostfixOp {
-	pub(crate) op: crate::expr::operator::PostfixOperator,
+	pub(crate) op: PostfixRangeOp,
 	pub(crate) expr: Arc<dyn PhysicalExpr>,
 }
+
+impl PostfixOp {
+	/// `expr..`
+	pub(crate) fn range(expr: Arc<dyn PhysicalExpr>) -> Self {
+		Self {
+			op: PostfixRangeOp::Range,
+			expr,
+		}
+	}
+
+	/// `expr>..`
+	pub(crate) fn range_skip(expr: Arc<dyn PhysicalExpr>) -> Self {
+		Self {
+			op: PostfixRangeOp::RangeSkip,
+			expr,
+		}
+	}
+}
+
 impl PhysicalExpr for PostfixOp {
 	fn name(&self) -> &'static str {
 		"PostfixOp"
@@ -476,37 +517,22 @@ impl PhysicalExpr for PostfixOp {
 
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
-			use crate::expr::operator::PostfixOperator;
-
 			let value = self.expr.evaluate(ctx).await?;
 
-			Ok(match &self.op {
-				PostfixOperator::Range => {
+			Ok(match self.op {
+				PostfixRangeOp::Range => {
 					// value.. creates range with included start, unbounded end
 					Value::Range(Box::new(crate::val::Range {
 						start: std::ops::Bound::Included(value),
 						end: std::ops::Bound::Unbounded,
 					}))
 				}
-				PostfixOperator::RangeSkip => {
+				PostfixRangeOp::RangeSkip => {
 					// value>.. creates range with excluded start, unbounded end
 					Value::Range(Box::new(crate::val::Range {
 						start: std::ops::Bound::Excluded(value),
 						end: std::ops::Bound::Unbounded,
 					}))
-				}
-				PostfixOperator::MethodCall(..) => {
-					return Err(anyhow::anyhow!(
-						"Method calls not yet supported in physical expressions"
-					)
-					.into());
-				}
-				PostfixOperator::Call(..) => {
-					// Closure calls are handled by ClosureCallExec in the planner
-					// This branch should never be reached
-					unreachable!(
-						"PostfixOperator::Call should be converted to ClosureCallExec by the planner"
-					)
 				}
 			})
 		})
@@ -545,7 +571,7 @@ mod tests {
 	use crate::exec::{ContextLevel, EvalContext};
 	use crate::expr::ControlFlow;
 	use crate::expr::operator::{
-		BinaryOperator, BooleanOperator, MatchesOperator, NearestNeighbor, PostfixOperator,
+		BinaryOperator, BooleanOperator, MatchesOperator, NearestNeighbor,
 	};
 
 	/// Compile and evaluate `src` in scalar context, asserting it produced a
@@ -1330,19 +1356,6 @@ mod tests {
 	async fn the_postfix_range_operators_leave_the_end_unbounded() {
 		assert_eq!(bounds(ok("5..").await), (Bound::Included(5), Bound::Unbounded));
 		assert_eq!(bounds(ok("5>..").await), (Bound::Excluded(5), Bound::Unbounded));
-	}
-
-	#[tokio::test]
-	async fn a_method_call_postfix_is_rejected_by_the_physical_layer() {
-		// Method calls are not lowered here; the arm must fail loudly rather
-		// than answer something.
-		let ctx = root_ctx();
-		let call = PostfixOp {
-			op: PostfixOperator::MethodCall("len".to_owned(), vec![]),
-			expr: physical_expr("'abc'", &ctx).await,
-		};
-		let err = call.evaluate(EvalContext::from_exec_ctx(&ctx)).await.unwrap_err();
-		assert!(err.to_string().contains("Method calls not yet supported"), "got {err}");
 	}
 
 	#[tokio::test]

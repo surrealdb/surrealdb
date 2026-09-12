@@ -1,8 +1,9 @@
 //! The GQL dialect of SurrealQL.
 //!
 //! Lexer, parser and AST for GQL queries, and the lowering that turns a
-//! parsed query into a `PreparedGqlQuery` — a match plan embedded in the
-//! expression layer's logical plan.
+//! parsed query into a `PreparedGqlQuery` — the `LogicalOp::Match` operator
+//! the streaming engine runs, whose scalars are the logical plan's
+//! `LogicalExpr`.
 //!
 //! This crate is an internal implementation detail of SurrealDB: its API is
 //! unstable and changes without notice. Depend on the `surrealdb` SDK or
@@ -17,7 +18,6 @@ pub mod token;
 // The module tree spells intra-layer paths as `crate::gql::<name>` and names
 // its neighbours as `crate::<layer>`; these aliases keep those paths valid.
 pub use surrealdb_expr::{expr, val};
-pub(crate) use surrealdb_sql as sql;
 pub(crate) use surrealdb_syn as syn;
 
 pub use self::lower::PreparedGqlQuery;
@@ -51,8 +51,8 @@ pub struct GqlParserSettings {
 	/// Bounds the depth of the expression operator tree, including flat
 	/// left-associative spines (`1 + 1 + 1 + …`) and prefix chains, which
 	/// are otherwise unbounded and overflow the call stack when the lowered
-	/// `sql::Expr` tree is later walked recursively (dropped, formatted, or
-	/// converted to `expr::Expr`). Mirrors
+	/// `LogicalExpr` tree is later walked recursively (dropped, formatted or
+	/// compiled). Mirrors
 	/// [`crate::syn::parser::ParserSettings::expr_recursion_limit`].
 	pub expr_recursion_limit: usize,
 }
@@ -86,8 +86,8 @@ pub fn parse_with_settings(
 }
 
 /// Lowers a parsed GQL query into a [`PreparedGqlQuery`] (the declarative
-/// [`MatchPlan`](crate::expr::match_plan::MatchPlan) embedded in a logical
-/// plan; `doc/gql/V2_DESIGN.md` §8).
+/// [`MatchPlan`](crate::expr::match_plan::MatchPlan) carried by a
+/// `LogicalOp::Match`; `doc/gql/V2_DESIGN.md` §8).
 ///
 /// The returned plan executes through the streaming execution engine; no
 /// SurrealQL surface AST is generated.

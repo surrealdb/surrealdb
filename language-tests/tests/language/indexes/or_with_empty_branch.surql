@@ -29,13 +29,20 @@ value = "[{ a: 7, b: 3, id: t:r3 }]"
 value = "[{ id: t:r1 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: a > 10 AND a < 5 OR b = 1]\n        IndexScan [ctx: Db] [index: idx_b, access: = 1, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: a > 10 AND a < 5 OR b = 1]
+        IndexScan [ctx: Db] [index: idx_b, access: = 1, direction: Forward]
+''''
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Rt] [projections: id]\n    EmptyScan [ctx: Rt]\n''''
+value = '''
+'SelectProject [ctx: Rt] [projections: id]
+    EmptyScan [ctx: Rt]
+''''
 */
 DEFINE TABLE t;
 DEFINE INDEX idx_a ON t FIELDS a;

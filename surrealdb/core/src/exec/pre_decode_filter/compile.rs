@@ -20,8 +20,8 @@ use crate::exec::operators::scan::pipeline::FieldState;
 use crate::exec::permission::PhysicalPermission;
 use crate::exec::physical_expr::record_id::PhysicalRecordIdKey;
 use crate::exec::physical_expr::{
-	ArrayLiteral, BinaryOp, IdiomExpr, ObjectLiteral, PhysicalExpr, RecordIdExpr, SetLiteral,
-	SimpleBinaryOp, UnaryOp,
+	ArrayLiteral, BinaryOp, ObjectLiteral, PhysicalExpr, RecordIdExpr, SetLiteral, SimpleBinaryOp,
+	Step, UnaryOp,
 };
 use crate::exec::planner::is_simple_binary_eligible;
 use crate::expr::operator::{BinaryOperator, PrefixOperator};
@@ -636,7 +636,7 @@ fn compile_field_lit_pair(
 
 fn resolve_static_path(e: &Arc<dyn PhysicalExpr>) -> Option<Vec<PathSegment>> {
 	let e: &dyn PhysicalExpr = e.as_ref();
-	if let Some(id) = e.downcast_ref::<IdiomExpr>() {
+	if let Some(id) = e.downcast_ref::<Step>() {
 		id.try_static_object_field_path()
 			.map(|parts| parts.into_iter().map(PathSegment::from).collect())
 	} else {
@@ -1143,7 +1143,7 @@ mod tests {
 	use super::{PathSegment, PredNode, compile_expr, compile_predicate_shape};
 	use crate::exec::parts::field::FieldPart;
 	use crate::exec::physical_expr::{
-		ArrayLiteral, BinaryOp, IdiomExpr, Literal, PhysicalExpr, SimpleBinaryOp, UnaryOp,
+		ArrayLiteral, BinaryOp, Literal, PhysicalExpr, SimpleBinaryOp, Step, UnaryOp,
 	};
 	use crate::expr::operator::{BinaryOperator, PrefixOperator};
 	use crate::val::{Number, Object, Value};
@@ -1242,7 +1242,7 @@ mod tests {
 
 	#[test]
 	fn compile_contain_field_literal_pair_via_binary_op() {
-		let left = Arc::new(IdiomExpr::new(
+		let left = Arc::new(Step::new(
 			"a".into(),
 			None,
 			vec![Arc::new(FieldPart {
@@ -1286,7 +1286,7 @@ mod tests {
 
 	#[test]
 	fn compile_in_planner_array_literal_rhs_builds_set_membership() {
-		let left = Arc::new(IdiomExpr::new(
+		let left = Arc::new(Step::new(
 			"v".into(),
 			None,
 			vec![Arc::new(FieldPart {
@@ -1570,9 +1570,9 @@ mod tests {
 		use crate::exec::ContextLevel;
 		use crate::exec::parts::field::FieldPart;
 		use crate::exec::physical_expr::function::BuiltinFunctionExec;
-		use crate::exec::physical_expr::{IdiomExpr, Literal};
+		use crate::exec::physical_expr::{Literal, Step};
 
-		let tags_idiom = Arc::new(IdiomExpr::new(
+		let tags_idiom = Arc::new(Step::new(
 			"tags".into(),
 			None,
 			vec![Arc::new(FieldPart {
@@ -1742,9 +1742,9 @@ mod tests {
 		use crate::exec::ContextLevel;
 		use crate::exec::parts::field::FieldPart;
 		use crate::exec::physical_expr::function::BuiltinFunctionExec;
-		use crate::exec::physical_expr::{IdiomExpr, Literal};
+		use crate::exec::physical_expr::{Literal, Step};
 
-		let tags_idiom = Arc::new(IdiomExpr::new(
+		let tags_idiom = Arc::new(Step::new(
 			"tags".into(),
 			None,
 			vec![Arc::new(FieldPart {
@@ -1835,7 +1835,7 @@ mod tests {
 
 	#[test]
 	fn compile_nested_shared_prefix_becomes_navigate_and_fused_inner() {
-		let left_idiom = Arc::new(IdiomExpr::new(
+		let left_idiom = Arc::new(Step::new(
 			"outer.x".into(),
 			None,
 			vec![
@@ -1847,7 +1847,7 @@ mod tests {
 				}) as Arc<dyn crate::exec::PhysicalExpr>,
 			],
 		));
-		let right_idiom = Arc::new(IdiomExpr::new(
+		let right_idiom = Arc::new(Step::new(
 			"outer.y".into(),
 			None,
 			vec![
@@ -1911,7 +1911,7 @@ mod tests {
 	#[test]
 	fn compile_two_level_shared_prefix_nests_navigate_then_fuse() {
 		let mk_idiom = |a: &str, b: &str, c: &str| {
-			Arc::new(IdiomExpr::new(
+			Arc::new(Step::new(
 				format!("{a}.{b}.{c}"),
 				None,
 				vec![
@@ -1983,7 +1983,7 @@ mod tests {
 			.collect();
 		let joined = parts.join(".");
 		Arc::new(BinaryOp {
-			left: Arc::new(IdiomExpr::new(joined, None, path_parts)),
+			left: Arc::new(Step::new(joined, None, path_parts)),
 			op: BinaryOperator::Equal,
 			right: Arc::new(Literal(Value::Number(Number::Int(lit)))),
 		}) as Arc<dyn crate::exec::PhysicalExpr>

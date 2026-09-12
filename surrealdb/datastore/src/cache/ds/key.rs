@@ -8,6 +8,13 @@ pub enum Key {
 	/// A cache key for a JWKS document (hashed URL or stable id)
 	#[cfg(feature = "jwks")]
 	Jwk(String),
+	/// A cache key for one table's catalog entry under one catalog version
+	Catalog(NamespaceId, DatabaseId, String, Uuid),
+	/// A cache key for the catalog entry of a table no catalog write has
+	/// stamped, under the content hash of its definition
+	CatalogUnstamped(NamespaceId, DatabaseId, String, u64),
+	/// A cache key for one function's compiled definition under one content hash
+	Function(NamespaceId, DatabaseId, String, u64),
 	/// A cache key for fields (on a table)
 	Fds(NamespaceId, DatabaseId, String, Uuid),
 	/// A cache key for events (on a table)
@@ -25,6 +32,9 @@ impl<'a> From<Lookup<'a>> for Key {
 		match value {
 			#[cfg(feature = "jwks")]
 			Lookup::Jwk(a) => Key::Jwk(a.to_string()),
+			Lookup::Catalog(a, b, c, d) => Key::Catalog(a, b, c.to_string(), d),
+			Lookup::CatalogUnstamped(a, b, c, d) => Key::CatalogUnstamped(a, b, c.to_string(), d),
+			Lookup::Function(a, b, c, d) => Key::Function(a, b, c.to_string(), d),
 			Lookup::Fds(a, b, c, d) => Key::Fds(a, b, c.to_string(), d),
 			Lookup::Evs(a, b, c, d) => Key::Evs(a, b, c.to_string(), d),
 			Lookup::Fts(a, b, c, d) => Key::Fts(a, b, c.to_string(), d),

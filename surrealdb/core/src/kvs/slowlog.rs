@@ -6,8 +6,9 @@
 //! includes the normalized SQL statement and any selected bound parameters.
 //!
 //! Key behaviors:
-//! - Parameters are extracted by traversing the AST using `VisitExpression` and looking for
-//!   `Expr::Param` nodes. For each parameter, we lookup its value in the current `Context`.
+//! - Parameters are extracted by visiting the value the caller names as the parameter source — the
+//!   statement in expression form, or the plan of a statement the streaming engine ran — for
+//!   `$param` references. For each parameter, we lookup its value in the current `Context`.
 //! - Optional filters can be applied to control which parameters are logged:
 //!   - `param_deny` takes precedence and excludes any matching parameter names.
 //!   - If `param_allow` is non-empty, only those parameter names are included.
@@ -126,32 +127,31 @@ impl SlowLog {
 	/// Check whether the supplied statement should be slow-logged and emit a
 	/// log line if the threshold is exceeded.
 	///
-	/// This function:
-	/// - Computes elapsed time since `start` and returns early if under the threshold.
-	/// - Traverses the statement AST to collect `$param` names via `VisitExpression`.
-	/// - Applies deny-list then allow-list filtering to parameter names, and looks up their current
-	///   values from the `Context`.
-	/// - Renders the SQL and parameter values, collapsing whitespace so the output is a single line
-	///   suitable for log processing.
-	pub(crate) fn check_log<S: SlowLogVisit + ToSql>(
+	/// `stm` is rendered as the entry's query text. `params` is walked for
+	/// the `$param` references whose current values the entry lists, after
+	/// the deny-list and then the allow-list; it is `stm` itself for a
+	/// statement in expression form, and the plan of a statement the
+	/// streaming engine ran, whose text is the surface statement. Both
+	/// renderings collapse whitespace so the entry is a single line.
+	pub(crate) fn check_log<T: ToSql, P: SlowLogVisit>(
 		&self,
 		ctx: &FrozenContext,
 		start: &Instant,
-		stm: &S,
+		stm: &T,
+		params: &P,
 	) {
 		let elapsed = start.elapsed();
 		if elapsed < self.0.duration {
 			return;
 		}
 
-		// Extract params
-		let params = self.extract_params(ctx, stm);
+		let params = self.extract_params(ctx, params);
 		// Ensure the query is logged on a single line by collapsing whitespace
 		let stm = stm.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
 		warn!("Slow query detected - time: {elapsed:#?} - query: {stm} - params: [ {params} ]");
 	}
 
-	fn extract_params<S: SlowLogVisit + ToSql>(&self, ctx: &FrozenContext, stm: &S) -> String {
+	fn extract_params<P: SlowLogVisit>(&self, ctx: &FrozenContext, params: &P) -> String {
 		let mut visitor = ParamVisitor {
 			params: String::new(),
 			slow_log: self,
@@ -159,7 +159,7 @@ impl SlowLog {
 		};
 
 		// no errors can happen
-		let _ = stm.visit(&mut visitor);
+		let _ = params.visit(&mut visitor);
 
 		visitor.params
 	}

@@ -76,7 +76,7 @@ value = "[{ a: 1, id: ex_fp:1 }]"
 [[test.results]]
 value = """
 'SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: ex_fp, direction: Forward, predicate: a = 1, pre_decode_filter: deferred (runtime field state)]
+    TableScan [ctx: Db] [table: ex_fp, direction: Forward, predicate: a = 1, pre_decode_filter: yes]
 '"""
 */
 

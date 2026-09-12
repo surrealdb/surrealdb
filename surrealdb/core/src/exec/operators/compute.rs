@@ -36,8 +36,22 @@ use crate::val::{Object, Strand, Value};
 pub struct Compute {
 	/// The input plan to compute from
 	pub input: Arc<dyn ExecOperator>,
-	/// Fields to compute: (internal_name, expression)
+	/// Fields to compute, in the order the statement wrote them:
+	/// (internal_name, expression).
 	pub fields: Vec<(Strand, Arc<dyn PhysicalExpr>)>,
+	/// Whether every field expression is free of effects that evaluating it a
+	/// second time, or out of the order it was written in, would expose: it
+	/// stages no write, advances no counter, reaches nothing outside the
+	/// transaction and runs no body the plan cannot see.
+	///
+	/// It decides how a batch is evaluated, never what the answer is. `true`
+	/// licenses the faster field-at-a-time shape, which evaluates one field
+	/// for every row of the batch before the next and evaluates a field again
+	/// from its first row when a row signals `RETURN`; `false` — the safe
+	/// answer, and the default — evaluates a row at a time, each field in
+	/// written order, so a call that writes or advances a sequence is made
+	/// once per row and in the statement's own order.
+	pub(crate) effect_free_columns: bool,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -51,8 +65,17 @@ impl Compute {
 		Self {
 			input,
 			fields,
+			effect_free_columns: false,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Declare every field expression effect-free; see
+	/// [`Self::effect_free_columns`]. Only the planner, which holds the
+	/// expressions as written, can answer this.
+	pub(crate) fn with_effect_free_columns(mut self) -> Self {
+		self.effect_free_columns = true;
+		self
 	}
 }
 impl ExecOperator for Compute {
@@ -121,6 +144,7 @@ impl ExecOperator for Compute {
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let fields = self.fields.clone();
+		let effect_free_columns = self.effect_free_columns;
 		let ctx = ctx.clone();
 
 		// Create a stream that computes fields for each batch
@@ -132,7 +156,7 @@ impl ExecOperator for Compute {
 				let batch = batch_result?;
 				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
-				compute_batch(batch.into_values(), &fields, eval_ctx).await
+				compute_batch(batch.into_values(), &fields, eval_ctx, effect_free_columns).await
 			}
 		});
 
@@ -140,10 +164,7 @@ impl ExecOperator for Compute {
 	}
 }
 
-/// Compute all fields across a batch of values using per-field batch evaluation.
-///
-/// For each field expression, evaluates it across all rows in one `evaluate_batch` call,
-/// then merges the results into the per-row output objects.
+/// Compute all fields across a batch of values.
 ///
 /// Takes `values` by value so per-row Objects can be moved out of the input batch
 /// instead of deep-cloned. The seed pass for non-Object inputs (RecordId fetches,
@@ -151,13 +172,20 @@ impl ExecOperator for Compute {
 /// field expression evaluation; the Object payloads themselves are moved out of
 /// the input batch in a final pass once expression evaluation is complete.
 ///
-/// If a field's batch evaluation hits a `ControlFlow::Return` signal (rare -- only from
-/// explicit RETURN statements in function bodies), that field falls back to per-row
-/// evaluation where RETURN values are caught and used as field values.
+/// `effect_free_columns` chooses the shape of the field evaluation between those
+/// two passes, and never what it answers. A field at a time is the faster shape —
+/// `evaluate_batch` lets an I/O-bound expression overlap its rows — but it
+/// evaluates one field for the whole batch before the next, and a field that a
+/// row ends with `RETURN` is evaluated again from its first row, since a failed
+/// `evaluate_batch` does not say how far it got. Neither is visible where the
+/// fields have no effect to repeat or reorder; where they may, the batch is
+/// evaluated a row at a time, each field in written order, which is the per-row
+/// engine's order.
 async fn compute_batch(
 	values: Vec<Value>,
 	fields: &[(Strand, Arc<dyn PhysicalExpr>)],
 	eval_ctx: EvalContext<'_>,
+	effect_free_columns: bool,
 ) -> Result<ValueBatch, ControlFlow> {
 	// Run side-effectful per-row work (RecordId fetches, Geometry → object
 	// conversion) in input order, before field-expression evaluation, so that
@@ -185,30 +213,35 @@ async fn compute_batch(
 		seeded.push(row);
 	}
 
-	// Evaluate each field expression across all rows while we still hold the
-	// input values by reference; results are merged into the output objects
-	// after the values have been consumed.
+	// Evaluate every field expression while we still hold the input values by
+	// reference; results are merged into the output objects after the values
+	// have been consumed. Either shape fills `field_results` as
+	// `[field_idx][row_idx]`.
 	let mut field_results: Vec<Vec<Value>> = Vec::with_capacity(fields.len());
-	for (_name, expr) in fields {
-		let computed = match expr.evaluate_batch(eval_ctx.clone(), &values).await {
-			Ok(v) => v,
-			Err(ControlFlow::Return(_)) => {
-				// Batch evaluation hit a RETURN signal. Fall back to per-row
-				// evaluation for this field only, catching RETURN as a value.
-				let mut per_row = Vec::with_capacity(values.len());
-				for value in values.iter() {
-					let v = match expr.evaluate(eval_ctx.with_value(value)).await {
-						Ok(v) => v,
-						Err(ControlFlow::Return(v)) => v,
-						Err(e) => return Err(e),
-					};
-					per_row.push(v);
-				}
-				per_row
+	if effect_free_columns {
+		for (_name, expr) in fields {
+			let computed = match expr.evaluate_batch(eval_ctx.clone(), &values).await {
+				Ok(v) => v,
+				// The field is evaluated again, a row at a time, so that the
+				// row signalling RETURN yields the value it returned.
+				Err(ControlFlow::Return(_)) => evaluate_field(expr, &eval_ctx, &values).await?,
+				Err(e) => return Err(e),
+			};
+			field_results.push(computed);
+		}
+	} else {
+		field_results.resize_with(fields.len(), || Vec::with_capacity(values.len()));
+		for value in values.iter() {
+			let row_ctx = eval_ctx.with_value_and_doc(value);
+			for (field_idx, (_name, expr)) in fields.iter().enumerate() {
+				let v = match expr.evaluate(row_ctx.clone()).await {
+					Ok(v) => v,
+					Err(ControlFlow::Return(v)) => v,
+					Err(e) => return Err(e),
+				};
+				field_results[field_idx].push(v);
 			}
-			Err(e) => return Err(e),
-		};
-		field_results.push(computed);
+		}
 	}
 
 	// Consume the input values and materialize the output Objects, moving any
@@ -236,6 +269,29 @@ async fn compute_batch(
 	}
 
 	Ok(ValueBatch::new(objects.into_iter().map(Value::Object).collect()))
+}
+
+/// Evaluate `expr` for every row of `values` in order, taking the value a row
+/// signals `RETURN` with as that row's value.
+///
+/// The row is bound as both the current value and the document root, which is
+/// what a nested expression — a method's arguments, a dynamic index — is
+/// evaluated against, so a row reports the same here as in one batch call.
+async fn evaluate_field<'a>(
+	expr: &Arc<dyn PhysicalExpr>,
+	ctx: &EvalContext<'a>,
+	values: &'a [Value],
+) -> Result<Vec<Value>, ControlFlow> {
+	let mut column = Vec::with_capacity(values.len());
+	for value in values {
+		let v = match expr.evaluate(ctx.with_value_and_doc(value)).await {
+			Ok(v) => v,
+			Err(ControlFlow::Return(v)) => v,
+			Err(e) => return Err(e),
+		};
+		column.push(v);
+	}
+	Ok(column)
 }
 
 #[cfg(test)]

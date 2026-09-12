@@ -1,17 +1,15 @@
 //! Method call and closure field call parts.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::function::MethodDescriptor;
-use crate::exec::physical_expr::function::validate_return;
-use crate::exec::physical_expr::{BlockPhysicalExpr, EvalContext, PhysicalExpr};
+use crate::exec::physical_expr::function::helpers::invoke_closure;
+use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut, CombineAccessModes, ContextLevel, Error as ExecError};
 use crate::expr::FlowResult;
-use crate::val::{Closure, Value};
+use crate::val::Value;
 
 // ============================================================================
 // MethodPart
@@ -28,6 +26,15 @@ use crate::val::{Closure, Value};
 /// when the descriptor has no implementation for that type, the call falls back
 /// to closure-field-call semantics (see [`ClosureFieldCallPart`]), so a closure
 /// stored under a name that collides with a registered method is still callable.
+///
+/// # Evaluation frame
+///
+/// The receiver is the chain's current value and nothing else: the arguments,
+/// and the call itself, evaluate in the frame the idiom was entered from — the
+/// document root, when the context has one — so `tags.slice(offset, len)`
+/// reads `offset` and `len` from the record and not from `tags`, and the body
+/// of a closure argument reads the record too. Without a document root the
+/// arguments evaluate in the context as given, as a dynamic index does.
 #[derive(Debug, Clone)]
 pub struct MethodPart {
 	pub descriptor: Arc<MethodDescriptor>,
@@ -49,6 +56,7 @@ impl PhysicalExpr for MethodPart {
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
 			let value = ctx.current_value.cloned().unwrap_or(Value::None);
+			let ctx = call_frame(&ctx);
 
 			// Resolve the function for this value's type. Builtin dispatch on
 			// the receiver type takes precedence; when the descriptor has no
@@ -170,7 +178,7 @@ impl PhysicalExpr for ClosureFieldCallPart {
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
 			let value = ctx.current_value.cloned().unwrap_or(Value::None);
-			closure_field_call(&self.field, &value, &self.args, ctx).await
+			closure_field_call(&self.field, &value, &self.args, call_frame(&ctx)).await
 		})
 	}
 
@@ -182,7 +190,20 @@ impl PhysicalExpr for ClosureFieldCallPart {
 	}
 }
 
+/// The frame a method's arguments and its call evaluate in; see the
+/// evaluation-frame contract on [`MethodPart`]. The receiver the part was
+/// handed as the current value is only the chain's position, never the frame.
+fn call_frame<'a>(ctx: &EvalContext<'a>) -> EvalContext<'a> {
+	match ctx.document_root {
+		Some(doc) => ctx.with_value(doc),
+		None => ctx.clone(),
+	}
+}
+
 /// Shared semantics for `.name(args)` resolved against a closure field.
+///
+/// The arguments are evaluated in `ctx`, which the callers have already moved
+/// to the call frame; the receiver arrives as `value`.
 ///
 /// Looks up `name` as a field on an object receiver and invokes the closure it
 /// holds with the evaluated arguments. A non-object receiver, a missing field,
@@ -196,8 +217,6 @@ async fn closure_field_call(
 	args: &[Arc<dyn PhysicalExpr>],
 	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
-	use crate::expr::Error as ExprError;
-
 	// Get the field value from the object
 	let field_value = match value {
 		Value::Object(obj) => obj.get(field).cloned(),
@@ -223,95 +242,10 @@ async fn closure_field_call(
 		evaluated_args.push(arg_expr.evaluate(ctx.clone()).await?);
 	}
 
-	// Invoke the closure
-	match closure.as_ref() {
-		Closure::Expr {
-			args: arg_spec,
-			returns,
-			body,
-			captures,
-		} => {
-			// Create isolated execution context with captured variables
-			let mut isolated_ctx = ctx.exec_ctx.clone();
-			for (name, value) in captures.clone() {
-				isolated_ctx = isolated_ctx.with_param(name, value);
-			}
-
-			// Check for missing required arguments
-			if arg_spec.len() > evaluated_args.len()
-				&& let Some((param, kind)) =
-					arg_spec[evaluated_args.len()..].iter().find(|(_, k)| !k.can_be_none())
-			{
-				return Err(ExprError::InvalidFunctionArguments {
-					name: "ANONYMOUS".to_string(),
-					message: format!(
-						"Expected a value of type '{}' for argument {}",
-						kind.to_sql(),
-						param.to_sql()
-					),
-				}
-				.into());
-			}
-
-			// Bind arguments to parameter names with type coercion
-			let mut local_params: HashMap<Strand, Value> = HashMap::new();
-			for ((param, kind), arg_value) in arg_spec.iter().zip(evaluated_args) {
-				let coerced = arg_value.coerce_to_kind(kind).map_err(|_| {
-					ExprError::InvalidFunctionArguments {
-						name: "ANONYMOUS".to_string(),
-						message: format!(
-							"Expected a value of type '{}' for argument {}",
-							kind.to_sql(),
-							param.to_sql()
-						),
-					}
-				})?;
-				local_params.insert(param.clone().into_strand(), coerced);
-			}
-
-			// Add parameters to the execution context
-			for (name, value) in &local_params {
-				isolated_ctx = isolated_ctx.with_param(name.clone(), value.clone());
-			}
-
-			// Execute the closure body
-			let block_expr = BlockPhysicalExpr {
-				block: crate::expr::Block(vec![body.clone()]),
-				// A closure body is evaluated wherever the closure is
-				// called, which need not be the statement that wrote
-				// it, so it inherits no MATCHES registrations.
-				matches_scope: None,
-			};
-			let eval_ctx = EvalContext {
-				exec_ctx: &isolated_ctx,
-				current_value: ctx.current_value,
-				local_params: Some(&local_params),
-				recursion_ctx: None,
-				document_root: ctx.document_root,
-				skip_fetch_perms: ctx.skip_fetch_perms,
-				computing_record: ctx.computing_record.clone(),
-				// The closure body is one re-entry deeper — continue the
-				// depth count so nested recursion stays bounded.
-				plan_depth: ctx.plan_depth + 1,
-			};
-
-			let result = match block_expr.evaluate(eval_ctx).await {
-				Ok(v) => v,
-				Err(crate::expr::ControlFlow::Return(v)) => v,
-				Err(crate::expr::ControlFlow::Break) | Err(crate::expr::ControlFlow::Continue) => {
-					return Err(ExecError::InvalidControlFlow.into());
-				}
-				Err(e) => return Err(e),
-			};
-
-			// Coerce return value to declared type if specified
-			Ok(validate_return("ANONYMOUS", returns.as_ref(), result)?)
-		}
-		Closure::Builtin(_) => {
-			Err(anyhow::anyhow!("Builtin closures are not yet supported in the streaming executor")
-				.into())
-		}
-	}
+	// Invoke the closure. A body the streaming engine compiled runs natively;
+	// any other closure value goes through the legacy evaluator in the
+	// caller's frame.
+	invoke_closure(&closure, evaluated_args, &ctx).await
 }
 
 impl ToSql for ClosureFieldCallPart {
@@ -463,33 +397,59 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn an_argument_idiom_resolves_against_the_receiver_not_the_document_row() {
-		// Arguments are evaluated with the part's own `EvalContext`, whose
-		// current value is the receiver. A bare field name in an argument
-		// therefore looks the field up on the *receiver*: with a string receiver
-		// there is no such field and the argument arrives as NONE, which the
-		// function then rejects on type.
+	async fn an_argument_idiom_resolves_against_the_document_row_not_the_receiver() {
+		// `sep` is a field of the row, not of the string the chain stands on:
+		// the arguments evaluate in the row's frame, as the legacy engine
+		// computes them with the cursor document.
 		let ctx = root_ctx();
 		let row = val("{ text: 'a-b', sep: '-' }").await;
+		assert_eq!(eval_on("text.split(sep)", &row, &ctx).await.unwrap(), val("['a', 'b']").await);
 
-		let err = eval_on("text.split(sep)", &row, &ctx).await.unwrap_err();
-		assert!(
-			err.to_string().contains("Expected `string` but found `NONE`"),
-			"`sep` resolved against the row rather than the receiver: {err}"
-		);
-
-		// `$parent` is the reader that does reach the enclosing row.
+		// `$parent` names the same row.
 		let with_parent = eval_on("text.split($parent.sep)", &row, &ctx).await.unwrap();
 		assert_eq!(with_parent, val("['a', 'b']").await);
 	}
 
 	#[tokio::test]
-	async fn an_argument_idiom_reads_fields_of_an_object_receiver() {
-		// The mirror image of the rule above: when the receiver is an object, a
-		// bare field name in an argument resolves against it.
+	async fn an_argument_idiom_does_not_read_fields_of_an_object_receiver() {
+		// The receiver and the row both have an `extra` field; the argument is
+		// the row's. Were it the receiver's, the result would be
+		// `{ a: 1, b: 2, extra: { b: 2 } }`.
 		let ctx = root_ctx();
-		let out = call("{ a: 1, extra: { b: 2 } }", ".extend(extra)", &ctx).await.unwrap();
-		assert_eq!(out, val("{ a: 1, b: 2, extra: { b: 2 } }").await);
+		let row = val("{ cfg: { a: 1, extra: { b: 2 } }, extra: { c: 3 } }").await;
+		let out = eval_on("cfg.extend(extra)", &row, &ctx).await.unwrap();
+		assert_eq!(out, val("{ a: 1, c: 3, extra: { b: 2 } }").await);
+
+		// A field only the receiver has is out of reach: the argument is NONE,
+		// which the function rejects on type.
+		let row = val("{ cfg: { a: 1, extra: { b: 2 } } }").await;
+		let err = eval_on("cfg.extend(extra)", &row, &ctx).await.unwrap_err();
+		assert!(
+			err.to_string().contains("found `NONE`"),
+			"`extra` resolved against the receiver rather than the row: {err}"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_closure_argument_reads_the_document_row_in_its_body() {
+		// The closure is invoked by the builtin in the call's frame, so a bare
+		// field in its body is the row's.
+		let ctx = root_ctx();
+		let row = val("{ tags: ['a', 'b'], suffix: '!' }").await;
+		let out = eval_on("tags.map(|$t| $t + suffix)", &row, &ctx).await.unwrap();
+		assert_eq!(out, val("['a!', 'b!']").await);
+	}
+
+	#[tokio::test]
+	async fn a_closure_field_call_evaluates_its_arguments_against_the_document_row() {
+		// Both routes to a closure field -- an unregistered name, and a
+		// registered method with no implementation for an object receiver --
+		// read `n` from the row, not from the object holding the closure.
+		let ctx = root_ctx();
+		let row = val("{ obj: { double: |$x: number| $x * 2, n: 100 }, n: 4 }").await;
+		assert_eq!(eval_on("obj.double(n)", &row, &ctx).await.unwrap(), Value::from(8));
+		let row = val("{ obj: { get: |$x: number| $x * 2, n: 100 }, n: 4 }").await;
+		assert_eq!(eval_on("obj.get(n)", &row, &ctx).await.unwrap(), Value::from(8));
 	}
 
 	// =========================================================================

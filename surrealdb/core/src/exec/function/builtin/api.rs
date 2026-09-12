@@ -7,6 +7,7 @@ use crate::err::EngineError;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
+use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
 use crate::val::Value;
 
@@ -20,6 +21,10 @@ pub struct ApiInvoke;
 impl ScalarFunction for ApiInvoke {
 	fn name(&self) -> &'static str {
 		"api::invoke"
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::OPAQUE_BODY | EffectSet::WRITES_DATA
 	}
 
 	fn signature(&self) -> Signature {
@@ -71,13 +76,17 @@ impl ScalarFunction for ApiInvoke {
 /// Helper macro for API middleware functions, which wrap the legacy
 /// `fnc::api::*` implementations behind a reblessive `TreeStack`.
 macro_rules! define_api_middleware_function {
-	($struct_name:ident, $func_name:literal, $impl_path:path, $sig:expr) => {
+	($struct_name:ident, $func_name:literal, effects: $effects:expr, $impl_path:path, $sig:expr) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
 
 		impl ScalarFunction for $struct_name {
 			fn name(&self) -> &'static str {
 				$func_name
+			}
+
+			fn effects(&self) -> EffectSet {
+				$effects
 			}
 
 			fn signature(&self) -> Signature {
@@ -131,6 +140,7 @@ macro_rules! define_api_middleware_function {
 define_api_middleware_function!(
 	ApiReqBody,
 	"api::req::body",
+	effects: EffectSet::OPAQUE_BODY,
 	crate::fnc::api::req::body,
 	Signature::new()
 		.arg("request", Kind::Object)
@@ -142,6 +152,7 @@ define_api_middleware_function!(
 define_api_middleware_function!(
 	ApiReqMaxBody,
 	"api::req::max_body",
+	effects: EffectSet::OPAQUE_BODY,
 	crate::fnc::api::req::max_body,
 	Signature::new()
 		.arg("request", Kind::Object)
@@ -153,6 +164,7 @@ define_api_middleware_function!(
 define_api_middleware_function!(
 	ApiResBody,
 	"api::res::body",
+	effects: EffectSet::OPAQUE_BODY,
 	crate::fnc::api::res::body,
 	Signature::new()
 		.arg("request", Kind::Object)
@@ -164,6 +176,7 @@ define_api_middleware_function!(
 define_api_middleware_function!(
 	ApiResStatus,
 	"api::res::status",
+	effects: EffectSet::OPAQUE_BODY,
 	crate::fnc::api::res::status,
 	Signature::new()
 		.arg("request", Kind::Any)
@@ -175,6 +188,7 @@ define_api_middleware_function!(
 define_api_middleware_function!(
 	ApiResHeader,
 	"api::res::header",
+	effects: EffectSet::OPAQUE_BODY,
 	crate::fnc::api::res::header,
 	Signature::new()
 		.arg("request", Kind::Any)
@@ -187,6 +201,7 @@ define_api_middleware_function!(
 define_api_middleware_function!(
 	ApiResHeaders,
 	"api::res::headers",
+	effects: EffectSet::OPAQUE_BODY,
 	crate::fnc::api::res::headers,
 	Signature::new()
 		.arg("request", Kind::Any)
@@ -198,6 +213,7 @@ define_api_middleware_function!(
 define_api_middleware_function!(
 	ApiTimeout,
 	"api::timeout",
+	effects: EffectSet::OPAQUE_BODY,
 	crate::fnc::api::timeout,
 	Signature::new()
 		.arg("request", Kind::Any)
@@ -206,6 +222,11 @@ define_api_middleware_function!(
 		.returns(Kind::Any)
 );
 
+// Each middleware function runs the `next` continuation it is handed, whose
+// body is invisible from the call, which `EffectSet::OPAQUE_BODY` declares.
+// `api::invoke` runs a whole endpoint that may write, so it declares
+// `WRITES_DATA` as well; `is_writer_builtin` names the same functions, and the
+// registry's guard test holds the two in agreement.
 pub fn register(registry: &mut FunctionRegistry) {
 	registry.register(ApiInvoke);
 	registry.register(ApiReqBody);

@@ -693,13 +693,14 @@ pub struct AccessDefinition {
 	/// O(rows x payload_size), because the payload is materialised once.
 	///
 	/// It does NOT reach O(rows). Resolving `$session.<constant path>` to a
-	/// literal happens in `exec/planner/idiom.rs`, during physical-expression
-	/// construction — after index analysis has chosen the plan — so the
-	/// predicate cannot drive an index and `IN` still walks the payload once
-	/// per row. What that fold removes is a per-row deep clone of the whole
-	/// `$session` object, which is worth having and is not the same thing.
-	/// See the ALTITUDE note on `plan_idiom` for why the fold sits there and
-	/// what it would take to lift it.
+	/// literal happens in the executor's constant-fold pass
+	/// (`exec/logical/fold.rs`, a field access on a constant object) for a
+	/// bound plan, and at path compilation (`exec/planner/path.rs`,
+	/// `FoldedPath`) for a clause compiled outside binding, such as a stored
+	/// permission a runtime-enforcing scan compiles directly. `IN` still walks
+	/// the payload once per row. What the fold removes is a per-row deep clone
+	/// of the whole `$session` object, which is worth having and is not the
+	/// same thing.
 	///
 	/// The payload size is therefore a first-order term: a clause that
 	/// materialises thousands of entries trades one problem for another.

@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
-use crate::catalog::{Error as CatalogError, FunctionDefinition};
+use crate::catalog::{self, Error as CatalogError, FunctionDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -67,7 +67,9 @@ pub(crate) async fn define_function_statement_compute(
 			name: this.name.clone(),
 			args: this.args.clone(),
 			block: this.block.clone(),
+			body: catalog::LogicalBlockBody::of(&this.block),
 			permissions: this.permissions.clone(),
+			permissions_body: catalog::LogicalPermissionBody::of(&this.permissions),
 			returns: this.returns.clone(),
 			comment,
 			auth_limit: AuthLimit::new_from_auth(&opt.auth).into(),

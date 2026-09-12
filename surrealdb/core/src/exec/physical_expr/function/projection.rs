@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::helpers::{args_access_mode, args_required_context, evaluate_args};
+use super::helpers::{args_access_mode, args_required_context, evaluate_args, fmt_call_args};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut};
 use crate::expr::FlowResult;
@@ -89,8 +89,8 @@ impl PhysicalExpr for ProjectionFunctionExec {
 }
 
 impl ToSql for ProjectionFunctionExec {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push_str(&self.name);
-		f.push_str("(...)");
+		fmt_call_args(f, fmt, &self.arguments);
 	}
 }

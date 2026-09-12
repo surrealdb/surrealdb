@@ -141,21 +141,29 @@ async fn rocksdb_plain_select_does_not_conflict_with_concurrent_write() {
 
 /// A pushed-down `LIMIT 0` must not skip the locked read: the lock is a
 /// side effect of evaluating the FROM target, independent of how many rows
-/// the statement returns. A non-foldable function-call source plans as a
-/// DynamicScan with the limit pushed into the scan (no outer Limit
-/// operator), while a literal or constant-folded source plans as a
-/// RecordIdScan below a Limit operator — both plans must register the key,
-/// on both executor paths.
+/// the statement returns. A function-call source the planner cannot inline
+/// (a body of more than one statement) plans as a DynamicScan with the
+/// limit pushed into the scan (no outer Limit operator); a call the rules
+/// inline to a record id, like a literal or constant-folded source, plans
+/// as a RecordIdScan below a Limit operator — every plan must register the
+/// key, on both executor paths.
 #[tokio::test]
 async fn rocksdb_select_for_update_limit_zero_still_locks() {
 	for strategy in STRATEGIES {
 		for (label, lock_stmt) in [
-			("dynamic", "LET $a = SELECT * FROM fn::rid() LIMIT 0 FOR UPDATE;"),
+			("dynamic", "LET $a = SELECT * FROM fn::dynamic_rid() LIMIT 0 FOR UPDATE;"),
+			("inlined", "LET $a = SELECT * FROM fn::rid() LIMIT 0 FOR UPDATE;"),
 			("literal", "LET $a = SELECT * FROM item:one LIMIT 0 FOR UPDATE;"),
 		] {
 			let (_dir, ds, ses) = rocksdb_ds(strategy).await;
 			run(&ds, &ses, "CREATE item:one SET value = 1;").await;
 			run(&ds, &ses, "DEFINE FUNCTION fn::rid() { RETURN item:one };").await;
+			run(
+				&ds,
+				&ses,
+				"DEFINE FUNCTION fn::dynamic_rid() { LET $rid = item:one; RETURN $rid; };",
+			)
+			.await;
 
 			// tx1 takes a locked read whose row is discarded by LIMIT 0.
 			let tx1 = Arc::new(ds.transaction(Write).await.unwrap());

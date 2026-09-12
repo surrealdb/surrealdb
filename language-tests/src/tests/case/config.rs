@@ -107,7 +107,7 @@ impl CaseConfig {
 				.context("Could not deserialize test case config")?;
 
 			// `planner-strategy` defaults are dialect-aware. A `.gql` test
-			// lowers to an `Expr::Match` that only runs on the streaming
+			// lowers to a `LogicalOp::Match` that only runs on the streaming
 			// engine; the `compute-only` strategy hard-errors on it. So when a
 			// GQL test does not pin its own strategy, default it away from
 			// `compute-only`. Explicit presence is detected from the raw TOML
@@ -138,7 +138,7 @@ impl CaseConfig {
 }
 
 /// The planner strategies a `.gql` test runs under when it does not pin its
-/// own `planner-strategy`. `compute-only` is omitted because `Expr::Match`
+/// own `planner-strategy`. `compute-only` is omitted because a lowered plan
 /// only executes on the streaming engine.
 fn default_gql_planner_strategy() -> Vec<NewPlannerStrategyConfig> {
 	vec![NewPlannerStrategyConfig::AllRo, NewPlannerStrategyConfig::BestEffortRo]

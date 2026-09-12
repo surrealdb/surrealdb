@@ -7,7 +7,7 @@
 //!   mutating it, and only then commits to building a `SelectProject` (with an optional upstream
 //!   `Compute` operator for non-trivial expressions).
 //! - **`plan_projections`** (the slow path): falls back to the full `Project` operator when the
-//!   fast path declines (projection function, multi-part alias, multi-part output idiom,
+//!   fast path declines (projection function, multi-part alias, multi-part output path,
 //!   source-field shadowing).
 //!
 //! [`ProjectedField`] is the type the classification phase returns.
@@ -24,27 +24,28 @@ use std::sync::Arc;
 use surrealdb_types::ToSql;
 
 use super::super::Planner;
-use super::super::util::{derive_field_name, idiom_to_field_name, idiom_to_field_path};
 use crate::err::Error;
 use crate::exec::expression_registry::{ComputePoint, ExpressionRegistry};
+use crate::exec::field_path::{FieldPath, FieldPathPart};
+use crate::exec::logical::is_effect_free;
 use crate::exec::operators::{
 	Compute, FieldSelection, Project, ProjectValue, Projection, SelectProject,
+	omit_path_is_expressible,
 };
 use crate::exec::{ExecOperator, OperatorMetrics};
-use crate::expr::field::{Field, Fields};
-use crate::expr::{Expr, Idiom};
+use crate::expr::logical::{LogicalExpr, LogicalField, LogicalFields, OutputPath, OutputPathPart};
 
 /// Classification of a single SELECT field for the fast projection path.
 ///
 /// Pre-classifying every field separately from registry mutation lets the
 /// planner detect disqualifying conditions (projection functions, multi-part
-/// aliases, multi-part output idioms, source-field shadowing by Compute
+/// aliases, multi-part output paths, source-field shadowing by Compute
 /// outputs) before committing any expressions to the [`ExpressionRegistry`].
 /// If any field rejects the fast path, the SELECT falls back to
 /// [`Planner::plan_projections`] with the registry unchanged by what would
 /// have been the fast path's `Project`-point entries.
 pub(super) enum ProjectedField {
-	/// `Field::All` — wildcard, served by `Projection::All`.
+	/// `LogicalField::All` — wildcard, served by `Projection::All`.
 	All,
 	/// Direct read of a source field by name.
 	Include(String),
@@ -60,10 +61,36 @@ pub(super) enum ProjectedField {
 		expr_key: String,
 		physical: Arc<dyn crate::exec::PhysicalExpr>,
 		output_name: String,
+		/// Whether the expression as written is effect-free; see
+		/// [`Compute::effect_free_columns`].
+		effect_free: bool,
 	},
 	/// This field — and therefore the whole SELECT — must use the full
 	/// `Project` operator. The string is a short reason for diagnostics.
 	Fallback(&'static str),
+}
+
+/// The name of a bare field read, or `None` for any other expression.
+fn single_field_name(expr: &LogicalExpr) -> Option<&str> {
+	match expr {
+		LogicalExpr::Field(name) => Some(name.as_str()),
+		_ => None,
+	}
+}
+
+/// Where a projected value lands, as the path the `Project` operator writes
+/// to: one key per [`OutputPath`] part, a lookup key included.
+fn output_field_path(path: &OutputPath) -> FieldPath {
+	FieldPath(
+		path.parts()
+			.iter()
+			.map(|part| match part {
+				OutputPathPart::Field(name) | OutputPathPart::Lookup(name) => {
+					FieldPathPart::Field(name.clone())
+				}
+			})
+			.collect(),
+	)
 }
 
 impl<'ctx> Planner<'ctx> {
@@ -75,24 +102,35 @@ impl<'ctx> Planner<'ctx> {
 	/// fast path can't model.
 	pub(crate) async fn plan_projections(
 		&self,
-		fields: Fields,
-		omit: Vec<Expr>,
+		fields: LogicalFields,
+		omit: Vec<LogicalExpr>,
 		input: Arc<dyn ExecOperator>,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
-			Fields::Value(selector) => {
+			LogicalFields::Value {
+				expr,
+				alias: _,
+			} => {
 				let omit_fields = if !omit.is_empty() {
 					self.plan_omit(omit).await?
 				} else {
 					vec![]
 				};
-				let expr = self.physical_expr(selector.expr).await?;
-				Ok(Arc::new(ProjectValue::new(input, expr, omit_fields)) as Arc<dyn ExecOperator>)
+				// `ProjectValue` holds one expression, so what this answers is
+				// whether evaluating it again is free, not whether two columns
+				// may be interleaved; see `ProjectValue::repeat_is_free`.
+				let effect_free = is_effect_free(&expr, self.function_registry());
+				let expr = self.physical_expr(expr).await?;
+				let mut project = ProjectValue::new(input, expr, omit_fields);
+				if effect_free {
+					project = project.with_repeat_is_free();
+				}
+				Ok(Arc::new(project) as Arc<dyn ExecOperator>)
 			}
 
-			Fields::Select(field_list) => {
+			LogicalFields::Select(field_list) => {
 				let is_select_all =
-					field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
+					field_list.len() == 1 && matches!(field_list.first(), Some(LogicalField::All));
 
 				if is_select_all {
 					let omit_fields = if !omit.is_empty() {
@@ -104,32 +142,49 @@ impl<'ctx> Planner<'ctx> {
 						as Arc<dyn ExecOperator>);
 				}
 
-				let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
+				let has_wildcard = field_list.iter().any(|f| matches!(f, LogicalField::All));
+
+				// Judged from the expressions as written, before they are
+				// compiled away; see `Project::effect_free_columns`.
+				let effect_free_columns = field_list.iter().all(|field| match field {
+					LogicalField::All => true,
+					LogicalField::Single {
+						expr,
+						..
+					} => is_effect_free(expr, self.function_registry()),
+				});
 
 				let mut field_selections = Vec::with_capacity(field_list.len());
 
 				for field in field_list {
-					if let Field::Single(selector) = field {
-						let field_selection = if let Some(alias) = &selector.alias {
-							// Build the output path directly from the alias
-							// idiom so `AS foo.bar` produces a nested
-							// `[foo, bar]` path, while `` AS `foo.bar` ``
-							// (a single Part::Field containing a dot) stays
-							// a flat key `"foo.bar"`.
-							let output_path = idiom_to_field_path(alias);
-							let expr = self.physical_expr(selector.expr).await?;
+					if let LogicalField::Single {
+						expr,
+						alias,
+						..
+					} = field
+					{
+						let field_selection = if let Some(alias) = &alias {
+							// The alias is already the output path: `AS foo.bar`
+							// is the nested `[foo, bar]`, while `` AS `foo.bar` ``
+							// (one identifier containing a dot) is the flat key
+							// `"foo.bar"`.
+							let output_path = output_field_path(alias);
+							let expr = self.physical_expr(expr).await?;
 							FieldSelection::with_alias_path(output_path, expr)
 						} else {
-							let output_name_or_path = match &selector.expr {
-								Expr::Idiom(idiom) => Ok(idiom_to_field_path(idiom)),
-								_ => Err(derive_field_name(&selector.expr)),
-							};
-							let expr = self.physical_expr(selector.expr).await?;
-							match output_name_or_path {
-								Ok(output_path) => {
-									FieldSelection::from_field_path(output_path, expr)
-								}
-								Err(output_name) => FieldSelection::new(output_name.as_str(), expr),
+							// A path lands at the position its field reads and
+							// lookups spell out; any other expression lands under
+							// its derived name as one flat key.
+							let output_path = expr.output_path();
+							let is_path = expr.is_path();
+							let expr = self.physical_expr(expr).await?;
+							if is_path {
+								FieldSelection::from_field_path(
+									output_field_path(&output_path),
+									expr,
+								)
+							} else {
+								FieldSelection::new(&output_path.name(), expr)
 							}
 						};
 
@@ -143,27 +198,33 @@ impl<'ctx> Planner<'ctx> {
 					vec![]
 				};
 
-				Ok(Arc::new(Project::new(input, field_selections, omit_fields, has_wildcard))
-					as Arc<dyn ExecOperator>)
+				let mut project = Project::new(input, field_selections, omit_fields, has_wildcard);
+				if effect_free_columns {
+					project = project.with_effect_free_columns();
+				}
+				Ok(Arc::new(project) as Arc<dyn ExecOperator>)
 			}
 		}
 	}
 
 	/// Plan projections with the fast path: use `SelectProject` for simple field
 	/// selection and `Compute` for complex expressions, avoiding the full
-	/// IdiomExpr/PhysicalExpr/async evaluation chain in `Project`.
+	/// per-row `PhysicalExpr` evaluation and object construction in `Project`.
 	///
 	/// Falls back to [`plan_projections`] when projection functions, nested
 	/// output paths, or shadowing make the fast path inapplicable.
 	pub(crate) async fn plan_projections_fast(
 		&self,
-		fields: Fields,
-		omit: Vec<Expr>,
+		fields: LogicalFields,
+		omit: Vec<LogicalExpr>,
 		input: Arc<dyn ExecOperator>,
 		registry: &mut ExpressionRegistry,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
-			Fields::Value(selector) => {
+			LogicalFields::Value {
+				expr,
+				alias,
+			} => {
 				let omit_fields = if !omit.is_empty() {
 					self.plan_omit(omit).await?
 				} else {
@@ -176,26 +237,31 @@ impl<'ctx> Planner<'ctx> {
 				// pre-computed field before evaluation, so we must fall
 				// through to re-evaluate the expression directly.
 				// SELECT VALUE aliases are guaranteed single-part by the parser.
-				if let Some(ref alias) = selector.alias
-					&& alias.len() == 1
-					&& let Some(crate::expr::part::Part::Field(name)) = alias.first()
+				if let Some(name) = alias.as_ref().and_then(OutputPath::as_field)
 					&& registry.contains_name(name)
-					&& !omit_fields.iter().any(|f| {
-						f.len() == 1
-							&& matches!(f.first(), Some(crate::expr::part::Part::Field(n)) if n == name)
-					}) {
-					let idiom = Idiom(vec![crate::expr::part::Part::Field(name.clone())]);
-					let expr = self.physical_expr(Expr::Idiom(idiom)).await?;
-					return Ok(Arc::new(ProjectValue::new(input, expr, omit_fields))
-						as Arc<dyn ExecOperator>);
+					&& !omit_fields.iter().any(|f| single_field_name(f) == Some(name))
+				{
+					// A bare field read of what `Compute` already evaluated.
+					let expr = self.physical_expr(LogicalExpr::Field(name.into())).await?;
+					return Ok(Arc::new(
+						ProjectValue::new(input, expr, omit_fields).with_repeat_is_free(),
+					) as Arc<dyn ExecOperator>);
 				}
-				let expr = self.physical_expr(selector.expr).await?;
-				Ok(Arc::new(ProjectValue::new(input, expr, omit_fields)) as Arc<dyn ExecOperator>)
+				// `ProjectValue` holds one expression, so what this answers is
+				// whether evaluating it again is free, not whether two columns
+				// may be interleaved; see `ProjectValue::repeat_is_free`.
+				let effect_free = is_effect_free(&expr, self.function_registry());
+				let expr = self.physical_expr(expr).await?;
+				let mut project = ProjectValue::new(input, expr, omit_fields);
+				if effect_free {
+					project = project.with_repeat_is_free();
+				}
+				Ok(Arc::new(project) as Arc<dyn ExecOperator>)
 			}
 
-			Fields::Select(ref field_list) => {
+			LogicalFields::Select(ref field_list) => {
 				let is_select_all =
-					field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
+					field_list.len() == 1 && matches!(field_list.first(), Some(LogicalField::All));
 
 				if is_select_all {
 					if Self::has_complex_omit(&omit) {
@@ -204,8 +270,8 @@ impl<'ctx> Planner<'ctx> {
 
 					let mut projections = vec![Projection::All];
 					for expr in &omit {
-						if let Expr::Idiom(idiom) = expr {
-							projections.push(Projection::Omit(idiom_to_field_name(idiom).into()));
+						if let LogicalExpr::Field(name) = expr {
+							projections.push(Projection::Omit(name.as_str().into()));
 						}
 					}
 					return Ok(Arc::new(SelectProject::new(
@@ -215,7 +281,7 @@ impl<'ctx> Planner<'ctx> {
 					)) as Arc<dyn ExecOperator>);
 				}
 
-				let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
+				let has_wildcard = field_list.iter().any(|f| matches!(f, LogicalField::All));
 
 				// Bail out early if OMIT contains complex expressions (nested
 				// paths, function calls, params) — the fast SelectProject path
@@ -227,7 +293,7 @@ impl<'ctx> Planner<'ctx> {
 
 				// Pre-classify every field WITHOUT touching the registry. This
 				// keeps the disqualifying checks (projection functions,
-				// multi-part aliases, multi-part output idioms, shadowing)
+				// multi-part aliases, multi-part output paths, shadowing)
 				// separate from registry mutation. If any check rejects the
 				// fast path, we hand off to `plan_projections` with the
 				// registry untouched by what would have been the fast path's
@@ -279,12 +345,14 @@ impl<'ctx> Planner<'ctx> {
 							expr_key,
 							physical,
 							output_name,
+							effect_free,
 						} => {
 							let internal_name = simulated_registry.register_physical(
 								expr_key.clone(),
 								Arc::clone(physical),
 								ComputePoint::Project,
 								Some(output_name.clone()),
+								*effect_free,
 							);
 							simple_source_fields.contains(&internal_name)
 						}
@@ -338,6 +406,7 @@ impl<'ctx> Planner<'ctx> {
 							expr_key,
 							physical,
 							output_name,
+							effect_free,
 						} => {
 							Self::register_and_push_projection(
 								&mut projections,
@@ -345,6 +414,7 @@ impl<'ctx> Planner<'ctx> {
 								expr_key,
 								physical,
 								output_name,
+								effect_free,
 							);
 						}
 						ProjectedField::Fallback(reason) => {
@@ -362,8 +432,8 @@ impl<'ctx> Planner<'ctx> {
 
 				// Add OMIT projections (all simple / top-level)
 				for expr in &omit {
-					if let Expr::Idiom(idiom) = expr {
-						projections.push(Projection::Omit(idiom_to_field_name(idiom).into()));
+					if let LogicalExpr::Field(name) = expr {
+						projections.push(Projection::Omit(name.as_str().into()));
 					}
 				}
 
@@ -374,7 +444,11 @@ impl<'ctx> Planner<'ctx> {
 						.into_iter()
 						.map(|(name, expr)| (crate::val::Strand::new(name), expr))
 						.collect();
-					Arc::new(Compute::new(input, compute_fields)) as Arc<dyn ExecOperator>
+					let mut compute = Compute::new(input, compute_fields);
+					if registry.point_is_effect_free(ComputePoint::Project) {
+						compute = compute.with_effect_free_columns();
+					}
+					Arc::new(compute) as Arc<dyn ExecOperator>
 				} else {
 					input
 				};
@@ -398,13 +472,17 @@ impl<'ctx> Planner<'ctx> {
 	/// only after every classification has succeeded and shadowing has been
 	/// ruled out, so a discarded fast-path attempt leaves no leftover
 	/// `Project`-point entries in the registry.
-	async fn classify_select_field(&self, field: &Field) -> Result<ProjectedField, Error> {
-		let selector = match field {
-			Field::All => return Ok(ProjectedField::All),
-			Field::Single(s) => s,
+	async fn classify_select_field(&self, field: &LogicalField) -> Result<ProjectedField, Error> {
+		let (expr, alias) = match field {
+			LogicalField::All => return Ok(ProjectedField::All),
+			LogicalField::Single {
+				expr,
+				alias,
+				..
+			} => (expr, alias),
 		};
 
-		let physical = self.physical_expr(selector.expr.clone()).await?;
+		let physical = self.physical_expr(expr.clone()).await?;
 
 		// Projection functions produce dynamic field bindings and require
 		// the full Project operator.
@@ -412,16 +490,18 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(ProjectedField::Fallback("projection function"));
 		}
 
-		if let Some(alias) = &selector.alias {
+		if let Some(alias) = alias {
 			// Multi-part aliases (e.g. `AS status.events`) require nested
-			// object construction. Single-part aliases whose identifier
-			// contains a dot (e.g. `` `foo.bar` ``) stay on the fast path —
-			// SelectProject renames them into a flat key.
-			if alias.0.len() > 1 {
+			// object construction, and so does an alias written with a step
+			// past its key (`AS arr[0]`, `AS arr[$]`): `SelectProject` can
+			// only rename into one bare key. Single-part aliases whose
+			// identifier contains a dot (e.g. `` `foo.bar` ``) stay on the
+			// fast path — SelectProject renames them into a flat key.
+			if alias.parts().len() > 1 || !alias.exact {
 				return Ok(ProjectedField::Fallback("multi-part alias"));
 			}
 
-			let output_name = idiom_to_field_name(alias);
+			let output_name = alias.name();
 			if let Some(field_name) = physical.try_simple_field() {
 				return Ok(ProjectedField::Rename {
 					from: field_name.to_string(),
@@ -429,29 +509,31 @@ impl<'ctx> Planner<'ctx> {
 				});
 			}
 			Ok(ProjectedField::Compute {
-				expr_key: selector.expr.to_sql(),
+				expr_key: expr.to_sql(),
 				physical,
 				output_name,
+				// Judged from the expression as written; see
+				// `Compute::effect_free_columns`.
+				effect_free: is_effect_free(expr, self.function_registry()),
 			})
 		} else {
 			if let Some(field_name) = physical.try_simple_field() {
 				return Ok(ProjectedField::Include(field_name.to_string()));
 			}
-			if let Expr::Idiom(idiom) = &selector.expr {
-				let path = idiom_to_field_path(idiom);
-				if path.len() > 1 {
-					return Ok(ProjectedField::Fallback("multi-part output idiom"));
-				}
-				return Ok(ProjectedField::Compute {
-					expr_key: selector.expr.to_sql(),
-					physical,
-					output_name: idiom_to_field_name(idiom),
-				});
+			// A path whose output is nested (`a.b`, `->likes.name`) needs the
+			// full operator's object construction; any other expression lands
+			// under one flat key.
+			let output_path = expr.output_path();
+			if output_path.parts().len() > 1 {
+				return Ok(ProjectedField::Fallback("multi-part output path"));
 			}
 			Ok(ProjectedField::Compute {
-				expr_key: selector.expr.to_sql(),
+				expr_key: expr.to_sql(),
 				physical,
-				output_name: derive_field_name(&selector.expr),
+				output_name: output_path.name(),
+				// Judged from the expression as written; see
+				// `Compute::effect_free_columns`.
+				effect_free: is_effect_free(expr, self.function_registry()),
 			})
 		}
 	}
@@ -459,21 +541,22 @@ impl<'ctx> Planner<'ctx> {
 	/// Register a complex expression in the `ExpressionRegistry` and push the
 	/// corresponding `Include` or `Rename` projection.
 	///
-	/// Deduplicates the identical pattern that appeared three times in
-	/// [`plan_projections_fast`] (aliased expr, unaliased idiom, unaliased
-	/// non-idiom).
+	/// One implementation for both shapes that need it (aliased and
+	/// unaliased expressions).
 	fn register_and_push_projection(
 		projections: &mut Vec<Projection>,
 		registry: &mut ExpressionRegistry,
 		expr_key: String,
 		physical: Arc<dyn crate::exec::PhysicalExpr>,
 		output_name: String,
+		effect_free: bool,
 	) {
 		let internal_name = registry.register_physical(
 			expr_key,
 			physical,
 			ComputePoint::Project,
 			Some(output_name.clone()),
+			effect_free,
 		);
 		if internal_name == output_name {
 			projections.push(Projection::Include(output_name.into()));
@@ -487,28 +570,38 @@ impl<'ctx> Planner<'ctx> {
 
 	/// Check whether any OMIT expression requires the full `Project` operator.
 	///
-	/// `SelectProject` only handles flat `Projection::Omit` with simple idioms.
+	/// `SelectProject` only handles flat `Projection::Omit` of bare fields.
 	/// Nested paths like `opts.age`, function calls like `type::field(...)`, and
 	/// parameters all require the full `Project` operator via [`plan_omit`].
-	fn has_complex_omit(omit: &[Expr]) -> bool {
-		omit.iter().any(|e| {
-			if let Expr::Idiom(idiom) = e {
-				idiom.len() > 1
-			} else {
-				true
-			}
-		})
+	fn has_complex_omit(omit: &[LogicalExpr]) -> bool {
+		omit.iter().any(|e| !matches!(e, LogicalExpr::Field(_)))
 	}
 
-	/// Plan OMIT fields — convert expressions to idioms.
+	/// Plan OMIT fields — resolve each expression to the paths it names.
+	///
+	/// A resolved path the projection walker cannot perform is declined rather
+	/// than planned: that walk is structural, so a path holding a step which
+	/// needs evaluation would remove nothing. The statement is owed the
+	/// removal, so it runs on the per-row engine instead. Which paths those
+	/// are is stated by [`omit_path_is_expressible`].
 	pub(crate) async fn plan_omit(
 		&self,
-		omit: Vec<Expr>,
-	) -> Result<Vec<crate::expr::idiom::Idiom>, Error> {
+		omit: Vec<LogicalExpr>,
+	) -> Result<Vec<LogicalExpr>, Error> {
 		let mut fields = Vec::with_capacity(omit.len());
 		for expr in omit {
-			let mut idioms = self.resolve_field_idioms(expr).await?;
-			fields.append(&mut idioms);
+			let mut paths = self.resolve_field_paths(expr).await?;
+			for path in &paths {
+				if !omit_path_is_expressible(path) {
+					return Err(crate::exec::Error::PlannerUnsupported(format!(
+						"an OMIT path of this shape names no location to remove without \
+						 evaluating it: {}",
+						path.to_sql()
+					))
+					.into());
+				}
+			}
+			fields.append(&mut paths);
 		}
 		Ok(fields)
 	}

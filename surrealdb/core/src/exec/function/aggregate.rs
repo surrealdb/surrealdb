@@ -67,6 +67,19 @@ pub trait Accumulator: Send + Sync + Debug {
 	/// Returns self as Any for downcasting in merge operations.
 	#[allow(unused)]
 	fn as_any(&self) -> &dyn Any;
+
+	/// Bind the aggregate's arguments after the first.
+	///
+	/// `array::join(txt, sep)`'s separator describes the group rather than any
+	/// one row, so it is evaluated once for the group and bound here rather
+	/// than at construction: a group is not known to exist until a row opens
+	/// it, and the groups are bound in group-key order, which is where a
+	/// separator that writes, draws or reads the clock has its effect.
+	///
+	/// Called once per group, immediately before [`Self::finalize`]. The
+	/// default implementation ignores the arguments, which is what every
+	/// aggregate taking only the accumulated one wants.
+	fn set_extra_args(&mut self, _args: &[Value]) {}
 }
 
 /// An aggregate function that operates over groups of values.
@@ -83,18 +96,6 @@ pub trait AggregateFunction: Send + Sync + Debug {
 	///
 	/// Called once per group during query execution.
 	fn create_accumulator(&self) -> Box<dyn Accumulator>;
-
-	/// Create a new accumulator instance with additional arguments.
-	///
-	/// Called once per group during query execution. The `args` parameter
-	/// contains the evaluated values of any extra arguments (beyond the first
-	/// accumulated argument). For example, `array::join(txt, " ")` would
-	/// receive `[" "]` as args.
-	///
-	/// The default implementation ignores the args and delegates to `create_accumulator`.
-	fn create_accumulator_with_args(&self, _args: &[Value]) -> Box<dyn Accumulator> {
-		self.create_accumulator()
-	}
 
 	/// The function signature describing arguments and return type.
 	#[allow(unused)]

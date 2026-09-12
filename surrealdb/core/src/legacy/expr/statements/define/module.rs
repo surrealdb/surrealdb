@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
-use crate::catalog::{Error as CatalogError, ModuleDefinition, ModuleName};
+use crate::catalog::{self, Error as CatalogError, ModuleDefinition, ModuleName};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -92,6 +92,7 @@ pub(crate) async fn define_module_statement_compute(
 			unsigned: this.unsigned,
 			comment,
 			permissions: this.permissions.clone(),
+			permissions_body: catalog::LogicalPermissionBody::of(&this.permissions),
 		},
 	)
 	.await?;

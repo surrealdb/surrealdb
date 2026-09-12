@@ -9,13 +9,15 @@ pub(crate) mod fetch;
 mod filter;
 mod foreach;
 mod graph;
-mod ifelse;
 mod info;
 mod join;
 mod knn_topk;
+mod layer;
+pub(crate) mod legacy_bridge;
 mod let_plan;
-mod limit;
+pub(crate) mod limit;
 mod mutate;
+mod permission_filter;
 mod project;
 mod project_value;
 pub(crate) mod recursion;
@@ -36,6 +38,7 @@ pub(crate) mod test_util;
 
 pub use aggregate::{
 	Aggregate, AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
+	group_key_field_name,
 };
 pub use bind::Bind;
 pub use compute::Compute;
@@ -47,33 +50,37 @@ pub use fetch::Fetch;
 pub(crate) use fetch::FetchStep;
 pub use filter::Filter;
 pub use foreach::ForeachPlan;
+use futures::StreamExt;
 pub use graph::{
 	DistinctEdges, EdgeBinding, EndpointBind, EndpointField, Expand, ExpandDir, PathExpand,
 	PathMode, ShortestPathExpand, ShortestSelector,
 };
-pub use ifelse::IfElsePlan;
 pub use info::{
 	DatabaseInfoPlan, IndexInfoPlan, NamespaceInfoPlan, RootInfoPlan, TableInfoPlan, UserInfoPlan,
 };
-pub use join::{HashJoin, JoinType};
+pub use join::{HashJoin, JoinFrame, JoinType, LookupJoin, RecordBatchFetch};
 pub use knn_topk::KnnTopK;
 pub(crate) use knn_topk::{KnnTopKHeap, KnnVectorSource, extract_vector};
+pub(crate) use layer::LayerColumn;
+pub use layer::ProjectLayer;
 pub use let_plan::LetPlan;
 pub use limit::Limit;
 pub use mutate::{DeleteBinding, DrainSink, InsertGraph, SingleRowScan, UpdateBinding};
 pub(crate) use mutate::{InsertEdgeOp, InsertNodeOp};
+pub use permission_filter::PermissionFilterExec;
+pub(crate) use project::omit_path_is_expressible;
 pub use project::{FieldSelection, Project, Projection, SelectProject};
 pub use project_value::ProjectValue;
 pub use recursion::RecursionOp;
 pub use r#return::ReturnPlan;
-// Scan operators (storage I/O)
-pub use scan::CountScan;
 pub(crate) use scan::{BitmapNode, KnnPrefilter};
 pub use scan::{
 	BitmapResolve, DynamicScan, EdgeTableSpec, EmptyScan, FullTextScan, GraphEdgeScan,
 	GraphScanOutput, IndexScan, KnnScan, RecordIdScan, ReferenceScan, ReferenceScanOutput,
 	TableScan, UnionIndexScan,
 };
+// Scan operators (storage I/O)
+pub use scan::{CountOutput, CountScan};
 pub use sequence::SequencePlan;
 pub use sleep::SleepPlan;
 #[cfg(all(storage, not(target_family = "wasm")))]
@@ -88,7 +95,70 @@ pub use unwrap_exactly_one::UnwrapExactlyOne;
 pub use version_scope::VersionScope;
 
 use crate::err::EngineError;
-use crate::exec::{ExecutionContext, FlowResult};
+use crate::exe::FlowResultExt as _;
+use crate::exec::{
+	EvalContext, ExecutionContext, FlowResult, OutputShape, PhysicalExpr, ValueBatchStream,
+};
+use crate::val::Value;
+
+/// Collect values from a stream into the single value an expression evaluates
+/// to, shaped by the plan's declared [`OutputShape`] rather than how many rows
+/// it happened to produce.
+///
+/// - `OutputShape::Scalar` (e.g. `SELECT ONLY`, or any non-query expression) → the one emitted
+///   value, or `Value::None` if the plan emitted none.
+/// - `OutputShape::Rows` (e.g. an ordinary `SELECT`) → always `Value::Array`, regardless of row
+///   count. A caller using the result as a `FOR` range, or any other array-shaped context, must see
+///   `[]` for zero rows and `[x]` for one — never `NONE` or the bare element — the same contract
+///   [`ScalarSubquery`](crate::exec::physical_expr::subquery::ScalarSubquery) already applies to a
+///   subquery expression.
+///
+/// Propagates control flow signals (BREAK, CONTINUE, RETURN, errors).
+pub(crate) async fn collect_shaped_value(
+	stream: ValueBatchStream,
+	shape: OutputShape,
+) -> FlowResult<Value> {
+	let mut values = collect_stream(stream).await?;
+	if shape.is_scalar() {
+		Ok(values.pop().unwrap_or(Value::None))
+	} else {
+		Ok(Value::Array(crate::val::Array(values)))
+	}
+}
+
+/// Collect all values from a stream into a `Vec`.
+///
+/// Propagates control flow signals directly.
+pub(crate) async fn collect_stream(mut stream: ValueBatchStream) -> FlowResult<Vec<Value>> {
+	let mut results = Vec::new();
+	while let Some(batch_result) = stream.next().await {
+		results.extend(batch_result?.into_values());
+	}
+	Ok(results)
+}
+
+/// Evaluate a statement's `FROM` source expression into the value to iterate.
+///
+/// The source is a value position, not a statement body, so a `RETURN` raised
+/// while evaluating it names that value and must not escape as the enclosing
+/// statement's own result: `SELECT * FROM (RETURN t:1)` iterates the record
+/// `t:1` and answers with a row, exactly as `SELECT * FROM t:1` does. The
+/// signal can come from the expression itself, from a block written there, or
+/// from anywhere inside it — a function argument, an array element.
+///
+/// `BREAK` and `CONTINUE` have no enclosing loop to act on in this position and
+/// are rejected as invalid control flow rather than reaching one further out.
+///
+/// This is where the boundary is drawn for a source expression the planner
+/// compiled as one. A record-id source draws its own, per key, because its key
+/// is the only part of it that is an expression.
+#[inline]
+pub(crate) async fn evaluate_from_source(
+	expr: &dyn PhysicalExpr,
+	ctx: EvalContext<'_>,
+) -> FlowResult<Value> {
+	Ok(expr.evaluate(ctx).await.catch_return()?)
+}
 
 /// Cancellation poll shared by the streaming operators' hot loops.
 ///

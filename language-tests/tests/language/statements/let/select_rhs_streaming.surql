@@ -15,7 +15,11 @@ value = "NONE"
 value = "5"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 5}\n    TableScan [ctx: Db] [table: seeded, direction: Forward] {rows: 5}\n\nTotal rows: 5''''
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 5}
+    TableScan [ctx: Db] [table: seeded, direction: Forward] {rows: 5}
+
+Total rows: 5''''
 
 */
 

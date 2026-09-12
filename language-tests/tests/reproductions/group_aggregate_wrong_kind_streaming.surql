@@ -23,6 +23,10 @@ an answer at all:
 - An absent value is skipped rather than ordered. Legacy orders it, and because `NONE` sorts below
   every other value that makes the minimum of any sparsely populated column `NONE` — the fourth
   query. Ignoring nulls is what SQL specifies for an aggregate.
+- When every row of the group is missing the value there is nothing left to skip to, so the group
+  reports the aggregate's answer over no values — the last two queries. Legacy hands the absent
+  value to the scalar form and raises on its type, which is the same reduction that makes the first
+  two queries differ.
 
 Legacy is the wrong answer in the first, second and fourth: erroring over
 heterogeneous data is hostile in a schemaless store, and a `NONE` minimum
@@ -58,6 +62,12 @@ error = "Incorrect arguments for function math::sum(). Argument 1 was the wrong 
 
 [[test.results]]
 value = "[{ hi: 'pear', lo: 'pear' }]"
+
+[[test.results]]
+value = "[{ t: 0 }]"
+
+[[test.results]]
+value = "[{ lo: NONE }]"
 */
 
 CREATE s:1 SET g = 1, n = 10;
@@ -78,3 +88,8 @@ SELECT math::sum(n) AS t FROM s WHERE g = 2 GROUP ALL;
 -- One row carries `w` and one does not. The absent value is skipped, not
 -- ordered below `'pear'`.
 SELECT array::min(w) AS lo, array::max(w) AS hi FROM s WHERE g = 3 GROUP ALL;
+
+-- Every row of the group is missing the value, so there is nothing to fold
+-- and nothing to skip to.
+SELECT math::sum(nope) AS t FROM s WHERE g = 3 GROUP ALL;
+SELECT time::min(nope) AS lo FROM s WHERE g = 3 GROUP ALL;

@@ -522,8 +522,8 @@ async fn run_test_body(
 		Dialect::Gql => {
 			// GQL has no capability-gated syntax; the default recursion
 			// limit matches `parser::ParserSettings::default()` above.
-			// Lowering produces a `PreparedGqlQuery` (a `MatchPlan` embedded
-			// in a logical plan), which is submitted as an already-lowered
+			// Lowering produces a `PreparedGqlQuery` (the `LogicalOp::Match`
+			// carrying a `MatchPlan`), which is submitted as an already-lowered
 			// `QuerySource::Plan`. It executes through the streaming engine,
 			// so `.gql` cases default away from the compute-only strategy
 			// (see `Dialect::Gql` default in the schema's planner-strategy
@@ -540,7 +540,7 @@ async fn run_test_body(
 			};
 
 			let start = Instant::now();
-			let result = dbs.run(QueryRequest::new(QuerySource::Plan(query.0), &*session)).await;
+			let result = dbs.run(QueryRequest::new(QuerySource::Plan(vec![query.0]), &*session)).await;
 			let did_timeout = start.elapsed() > timeout_duration;
 			let result = result
 				.map(|x| x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect())

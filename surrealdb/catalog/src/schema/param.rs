@@ -4,7 +4,8 @@ use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::catalog::{FromStored, Permission, StoredPermission};
+use crate::catalog::{FromStored, LogicalPermissionBody, Permission, StoredPermission};
+use crate::expr::logical::LogicalPermission;
 use crate::expr::statements::info::InfoStructure;
 use crate::sql;
 use crate::sql::statements::define::{DefineKind, DefineParamStatement};
@@ -59,12 +60,28 @@ impl InfoStructure for ParamDefinition {
 }
 
 /// Runtime form of [`crate::catalog::StoredParamDefinition`].
+///
+/// `permissions` and `permissions_body` name the same clause, compiled from
+/// the same stored text for the legacy and the streaming engine respectively;
+/// a constructor sets both from one source ([`LogicalPermissionBody::of`] for
+/// the permission a `DEFINE` statement produced).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParamDefinition {
 	pub name: Strand,
 	pub value: Value,
 	pub permissions: Permission,
+	/// The `PERMISSIONS` clause in logical form; see
+	/// [`Self::permissions_logical`].
+	pub permissions_body: LogicalPermissionBody,
 	pub comment: Option<String>,
+}
+
+impl ParamDefinition {
+	/// The `PERMISSIONS` clause in logical form, compiling its guard on first
+	/// call.
+	pub fn permissions_logical(&self) -> anyhow::Result<LogicalPermission> {
+		self.permissions_body.logical()
+	}
 }
 
 impl FromStored for ParamDefinition {
@@ -76,6 +93,7 @@ impl FromStored for ParamDefinition {
 				name: stored.name.clone(),
 				value: stored.value.clone(),
 				permissions: Permission::from_stored(&stored.permissions)?,
+				permissions_body: LogicalPermissionBody::from_stored(&stored.permissions),
 				comment: stored.comment.clone(),
 			})
 		}

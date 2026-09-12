@@ -61,8 +61,8 @@ use surrealdb_types::ToSql;
 use super::planner::Planner;
 use crate::err::Error;
 use crate::exec::PhysicalExpr;
-use crate::expr::part::Part;
-use crate::expr::{Expr, Idiom};
+use crate::exec::logical::is_effect_free;
+use crate::expr::logical::{LogicalExpr, LogicalField, LogicalFields, OutputPath, OutputPathPart};
 
 /// Identifies when an expression must be computed in the execution pipeline.
 ///
@@ -96,6 +96,19 @@ pub struct ExpressionInfo {
 	pub expr: Arc<dyn PhysicalExpr>,
 	/// Where this expression must be computed
 	pub compute_point: ComputePoint,
+	/// Position in the registration sequence, which orders the fields of the
+	/// `Compute` operator built from a compute point, and so the order their
+	/// effects happen in. The planner registers a point's expressions as the
+	/// statement writes them — ORDER BY keys as listed, SELECT fields left to
+	/// right — so within one point this is written order.
+	///
+	/// Assigned once: promoting an expression to an earlier compute point
+	/// keeps the position its first registration gave it.
+	pub order: usize,
+	/// Whether the expression is free of effects that evaluating it a second
+	/// time, or out of the order it was written in, would expose; see
+	/// [`Compute::effect_free_columns`](crate::exec::operators::Compute::effect_free_columns).
+	pub effect_free: bool,
 }
 
 /// Registry that tracks all expressions needing computation in a query.
@@ -110,6 +123,8 @@ pub struct ExpressionRegistry {
 	expressions: HashMap<String, ExpressionInfo>,
 	/// Counter for generating synthetic field names.
 	counter: usize,
+	/// Counter handing out [`ExpressionInfo::order`] positions.
+	next_order: usize,
 	/// Field names that synthetic `_eN` generation must avoid. This does NOT
 	/// affect alias-based names — those are user-chosen and accepted unless the
 	/// name is also present in `used_internal_names` as a protected source field.
@@ -132,6 +147,7 @@ impl ExpressionRegistry {
 		Self {
 			expressions: HashMap::new(),
 			counter: 0,
+			next_order: 0,
 			reserved_names: HashSet::new(),
 			used_internal_names: HashSet::new(),
 		}
@@ -163,9 +179,17 @@ impl ExpressionRegistry {
 		Self {
 			expressions: HashMap::new(),
 			counter: 0,
+			next_order: 0,
 			reserved_names: reserved_names.into_iter().collect(),
 			used_internal_names: protected_names.into_iter().collect(),
 		}
+	}
+
+	/// Hand out the next [`ExpressionInfo::order`] position.
+	fn next_order(&mut self) -> usize {
+		let order = self.next_order;
+		self.next_order += 1;
+		order
 	}
 
 	/// Register an expression and return its internal field name.
@@ -185,7 +209,7 @@ impl ExpressionRegistry {
 	/// resolution and sort elimination.
 	pub async fn register(
 		&mut self,
-		expr: &Expr,
+		expr: &LogicalExpr,
 		compute_point: ComputePoint,
 		alias: Option<String>,
 		planner: &Planner<'_>,
@@ -210,17 +234,23 @@ impl ExpressionRegistry {
 			return Ok(self.expressions[&dedup_key].internal_name.clone());
 		}
 
+		// Judged from the expression as written, before it is compiled away.
+		let effect_free = is_effect_free(expr, planner.function_registry());
+
 		// Convert to physical expression via the live planner so the
 		// transaction and ns/db propagate into nested subqueries.
 		let physical_expr = planner.physical_expr(expr.clone()).await?;
 
 		// Determine internal name
 		let internal_name = self.choose_internal_name(&alias);
+		let order = self.next_order();
 
 		let info = ExpressionInfo {
 			internal_name: internal_name.clone(),
 			expr: physical_expr,
 			compute_point,
+			order,
+			effect_free,
 		};
 
 		self.expressions.insert(dedup_key, info);
@@ -239,6 +269,7 @@ impl ExpressionRegistry {
 		physical_expr: Arc<dyn PhysicalExpr>,
 		compute_point: ComputePoint,
 		alias: Option<String>,
+		effect_free: bool,
 	) -> String {
 		// Include alias in the dedup key (same logic as `register`)
 		let dedup_key = match &alias {
@@ -258,11 +289,14 @@ impl ExpressionRegistry {
 		}
 
 		let internal_name = self.choose_internal_name(&alias);
+		let order = self.next_order();
 
 		let info = ExpressionInfo {
 			internal_name: internal_name.clone(),
 			expr: physical_expr,
 			compute_point,
+			order,
+			effect_free,
 		};
 
 		self.expressions.insert(dedup_key, info);
@@ -302,10 +336,13 @@ impl ExpressionRegistry {
 		}
 	}
 
-	/// Get all expressions that need to be computed at a specific point.
+	/// Get all expressions that need to be computed at a specific point, in
+	/// the order the statement wrote them.
 	///
-	/// Returns expressions sorted by internal name for deterministic
-	/// iteration order (HashMap iteration is non-deterministic).
+	/// [`ExpressionInfo::order`] is what makes that order deterministic:
+	/// `HashMap` iteration is not, and the order a compute point's expressions
+	/// come back in is the order the `Compute` operator built from them
+	/// evaluates their effects in.
 	pub fn get_expressions_for_point(
 		&self,
 		point: ComputePoint,
@@ -314,10 +351,21 @@ impl ExpressionRegistry {
 			.expressions
 			.values()
 			.filter(|info| info.compute_point == point)
-			.map(|info| (info.internal_name.clone(), Arc::clone(&info.expr)))
+			.map(|info| (info.order, info.internal_name.clone(), Arc::clone(&info.expr)))
 			.collect();
-		exprs.sort_by(|(a, _), (b, _)| a.cmp(b));
-		exprs
+		exprs.sort_by_key(|(order, _, _)| *order);
+		exprs.into_iter().map(|(_, name, expr)| (name, expr)).collect()
+	}
+
+	/// Whether every expression registered at `point` is effect-free, which is
+	/// what licenses the `Compute` operator built from them to evaluate a
+	/// batch a field at a time; see
+	/// [`Compute::effect_free_columns`](crate::exec::operators::Compute::effect_free_columns).
+	pub fn point_is_effect_free(&self, point: ComputePoint) -> bool {
+		self.expressions
+			.values()
+			.filter(|info| info.compute_point == point)
+			.all(|info| info.effect_free)
 	}
 
 	/// Check if there are any expressions registered for a specific compute point.
@@ -335,74 +383,110 @@ impl ExpressionRegistry {
 // Alias Resolution
 // ============================================================================
 
-use crate::expr::field::{Field, Fields};
+/// The output path an ORDER BY key spells when it is a plain chain of field
+/// reads (`x`, `b.c`) or lookups, `None` for any other shape. Unlike
+/// [`LogicalExpr::output_path`], a step that would contribute nothing to the
+/// name (`[0]`, `[WHERE …]`, `.*`) disqualifies the key, so `ORDER BY b[0].c`
+/// does not resolve to `AS b.c`.
+fn exact_output_path(expr: &LogicalExpr) -> Option<OutputPath> {
+	let mut parts = Vec::new();
+	let mut current = expr;
+	loop {
+		match current {
+			LogicalExpr::Field(name) => {
+				parts.push(OutputPathPart::Field(name.as_str().to_owned()));
+				break;
+			}
+			LogicalExpr::Access {
+				base,
+				field,
+			} => {
+				parts.push(OutputPathPart::Field(field.as_str().to_owned()));
+				current = base;
+			}
+			LogicalExpr::Lookup {
+				base,
+				lookup,
+			} => {
+				parts.push(OutputPathPart::Lookup(lookup.to_sql()));
+				current = base;
+			}
+			LogicalExpr::Current => break,
+			_ => return None,
+		}
+	}
+	if parts.is_empty() {
+		return None;
+	}
+	parts.reverse();
+	Some(OutputPath::keys(parts))
+}
 
-/// Resolve an idiom reference in ORDER BY to the underlying SELECT expression.
+/// The name of a single-field read, `None` for any other shape.
+fn single_field_name(expr: &LogicalExpr) -> Option<&str> {
+	match expr {
+		LogicalExpr::Field(name) => Some(name.as_str()),
+		_ => None,
+	}
+}
+
+/// Resolve a path reference in ORDER BY to the underlying SELECT expression.
 ///
 /// Supports both single-part aliases (`ORDER BY x` matching `AS x`) and
 /// nested aliases (`ORDER BY b.c` matching `AS b.c`).
 ///
 /// Returns the resolved expression and a flat string name for registry use.
-pub fn resolve_order_by_alias(order_idiom: &Idiom, fields: &Fields) -> Option<(Expr, String)> {
+pub fn resolve_order_by_alias(
+	order_value: &LogicalExpr,
+	fields: &LogicalFields,
+) -> Option<(LogicalExpr, String)> {
+	let order_name = single_field_name(order_value);
 	match fields {
-		Fields::Value(selector) => {
+		LogicalFields::Value {
+			expr,
+			alias,
+		} => {
 			// SELECT VALUE aliases are guaranteed single-part by the parser.
-			if let Some(ref alias) = selector.alias
-				&& alias.len() == 1
-				&& let Some(Part::Field(alias_name)) = alias.first()
-				&& order_idiom.len() == 1
-				&& let Some(Part::Field(order_name)) = order_idiom.first()
-				&& alias_name == order_name
+			if let Some(alias) = alias
+				&& let Some(alias_name) = alias.as_field()
+				&& order_name == Some(alias_name)
 			{
-				return Some((selector.expr.clone(), alias_name.as_str().to_owned()));
+				return Some((expr.clone(), alias_name.to_owned()));
 			}
 			// Unaliased single-part field match
-			if order_idiom.len() == 1
-				&& let Some(Part::Field(name)) = order_idiom.first()
-				&& let Expr::Idiom(ref expr_idiom) = selector.expr
-				&& expr_idiom.len() == 1
-				&& let Some(Part::Field(expr_name)) = expr_idiom.first()
-				&& name == expr_name
+			if let Some(name) = order_name
+				&& single_field_name(expr) == Some(name)
 			{
-				return Some((selector.expr.clone(), name.as_str().to_owned()));
+				return Some((expr.clone(), name.to_owned()));
 			}
 			None
 		}
-		Fields::Select(field_list) => {
+		LogicalFields::Select(field_list) => {
+			let order_path = exact_output_path(order_value);
 			for field in field_list {
-				if let Field::Single(selector) = field {
+				if let LogicalField::Single {
+					expr,
+					alias,
+					..
+				} = field
+				{
 					// Alias match (any depth)
-					if let Some(ref alias) = selector.alias
-						&& *order_idiom == *alias
+					if let Some(alias) = alias
+						&& order_path.as_ref() == Some(alias)
 					{
-						return Some((selector.expr.clone(), idiom_to_flat_name(alias)));
+						return Some((expr.clone(), alias.name()));
 					}
 					// Unaliased single-part field match
-					if order_idiom.len() == 1
-						&& let Some(Part::Field(order_name)) = order_idiom.first()
-						&& selector.alias.is_none()
-						&& let Expr::Idiom(ref expr_idiom) = selector.expr
-						&& expr_idiom.len() == 1
-						&& let Some(Part::Field(name)) = expr_idiom.first()
-						&& name.as_str() == order_name.as_str()
+					if let Some(name) = order_name
+						&& alias.is_none() && single_field_name(expr) == Some(name)
 					{
-						return Some((selector.expr.clone(), order_name.as_str().to_owned()));
+						return Some((expr.clone(), name.to_owned()));
 					}
 				}
 			}
 			None
 		}
 	}
-}
-
-/// Convert an alias idiom to a flat string for registry internal names.
-pub(crate) fn idiom_to_flat_name(idiom: &Idiom) -> String {
-	if idiom.len() == 1
-		&& let Some(Part::Field(name)) = idiom.first()
-	{
-		return name.as_str().to_owned();
-	}
-	idiom.to_sql()
 }
 
 #[cfg(test)]
@@ -473,6 +557,7 @@ mod tests {
 			literal_expr(42),
 			ComputePoint::Sort,
 			Some("doubled".into()),
+			true,
 		);
 		assert_eq!(name1, "doubled");
 
@@ -482,6 +567,7 @@ mod tests {
 			literal_expr(99),
 			ComputePoint::Project,
 			Some("doubled".into()),
+			true,
 		);
 		assert_eq!(name2, "doubled");
 
@@ -489,6 +575,59 @@ mod tests {
 		let sort_exprs = registry.get_expressions_for_point(ComputePoint::Sort);
 		assert_eq!(sort_exprs.len(), 1);
 		assert_eq!(sort_exprs[0].0, "doubled");
+	}
+
+	#[test]
+	fn a_compute_point_reports_its_expressions_in_registration_order() {
+		// The planner registers in the order the statement writes, and the
+		// order a point's expressions come back in is the order the `Compute`
+		// operator built from them evaluates their effects in — so it follows
+		// registration and not how the internal names happen to sort.
+		let mut registry = ExpressionRegistry::new();
+		for (key, alias) in [("expr_b", "b"), ("expr_a", "a"), ("expr_c", "c")] {
+			registry.register_physical(
+				key.into(),
+				literal_expr(1),
+				ComputePoint::Project,
+				Some(alias.into()),
+				true,
+			);
+		}
+
+		let names: Vec<String> = registry
+			.get_expressions_for_point(ComputePoint::Project)
+			.into_iter()
+			.map(|(name, _)| name)
+			.collect();
+		assert_eq!(names, vec!["b", "a", "c"]);
+	}
+
+	#[test]
+	fn a_point_is_effect_free_only_while_every_expression_is() {
+		let mut registry = ExpressionRegistry::new();
+		registry.register_physical(
+			"expr_a".into(),
+			literal_expr(1),
+			ComputePoint::Project,
+			Some("a".into()),
+			true,
+		);
+		assert!(registry.point_is_effect_free(ComputePoint::Project));
+
+		// One expression that may write or advance a counter is enough to take
+		// the whole point off the column-at-a-time shape.
+		registry.register_physical(
+			"expr_b".into(),
+			literal_expr(2),
+			ComputePoint::Project,
+			Some("b".into()),
+			false,
+		);
+		assert!(!registry.point_is_effect_free(ComputePoint::Project));
+
+		// A point with nothing registered has nothing that could have an
+		// effect, and an empty `Compute` is never built anyway.
+		assert!(registry.point_is_effect_free(ComputePoint::Sort));
 	}
 
 	#[test]
@@ -501,6 +640,7 @@ mod tests {
 			literal_expr(1),
 			ComputePoint::Project,
 			Some("total".into()),
+			true,
 		);
 		assert!(registry.has_expressions_for_point(ComputePoint::Project));
 		assert!(!registry.has_expressions_for_point(ComputePoint::Sort));
@@ -511,6 +651,7 @@ mod tests {
 			literal_expr(1),
 			ComputePoint::Sort,
 			Some("total".into()),
+			true,
 		);
 
 		// Expression should now be at the earlier (Sort) point
@@ -527,6 +668,7 @@ mod tests {
 			literal_expr(1),
 			ComputePoint::Project,
 			Some("total".into()),
+			true,
 		);
 		assert_eq!(name1, "total");
 
@@ -536,6 +678,7 @@ mod tests {
 			literal_expr(2),
 			ComputePoint::Project,
 			Some("total".into()),
+			true,
 		);
 		assert_eq!(name2, "_e0"); // Falls back to synthetic
 	}

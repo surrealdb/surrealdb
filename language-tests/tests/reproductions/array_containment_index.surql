@@ -34,7 +34,10 @@ value = "[{ name: 'Climate Org' }, { name: 'Green Edu' }]"
 value = "[{ name: 'Education Org' }, { name: 'Green Edu' }]"
 
 [[test.results]]
-value = """{ attributes: { projections: 'name' }, children: [{ attributes: { access: "= 'climate'", direction: 'Forward', index: 'org_topics' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = '''
+"SelectProject [ctx: Db] [projections: name]
+    IndexScan [ctx: Db] [index: org_topics, access: = 'climate', direction: Forward]
+"'''
 */
 
 -- Define index on array field elements
@@ -54,4 +57,4 @@ SELECT name FROM organization WHERE mission_topic_tags CONTAINS "climate";
 SELECT name FROM organization WHERE "education" INSIDE mission_topic_tags;
 
 -- Verify index usage via EXPLAIN
-SELECT name FROM organization WHERE mission_topic_tags CONTAINS "climate" EXPLAIN;
+EXPLAIN SELECT name FROM organization WHERE mission_topic_tags CONTAINS "climate";

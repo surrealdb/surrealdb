@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::helpers::{args_access_mode, args_required_context, evaluate_args};
+use super::helpers::{args_access_mode, args_required_context, evaluate_args, fmt_call_args};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut};
 use crate::expr::FlowResult;
@@ -80,9 +80,12 @@ impl PhysicalExpr for BuiltinFunctionExec {
 			} else {
 				// Surface the plan-time nesting depth so `eval::*` can continue
 				// counting toward `max_computation_depth` when it re-plans its
-				// query string. Harmless for every other builtin (they ignore it).
+				// query string. The count only ever deepens: a call reached
+				// through a runtime re-entry (a closure body) that is already
+				// deeper than this node was planned keeps that depth. Harmless
+				// for every other builtin (they ignore it).
 				let mut ctx = ctx;
-				ctx.plan_depth = self.plan_depth;
+				ctx.plan_depth = ctx.plan_depth.max(self.plan_depth);
 				Ok(func.invoke_async(&ctx, args).await?)
 			}
 		})
@@ -99,8 +102,8 @@ impl PhysicalExpr for BuiltinFunctionExec {
 }
 
 impl ToSql for BuiltinFunctionExec {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push_str(&self.name);
-		f.push_str("(...)");
+		fmt_call_args(f, fmt, &self.arguments);
 	}
 }

@@ -48,8 +48,8 @@ documentation; the former is derived from reading the grammar.
   ORDER BY / SKIP-OFFSET / LIMIT), with the grammar production names each section
   derives from and a v1 -> v2 behaviour-change table (§(h)).
 - `LOWERING.md` — the normative contract for lowering the parsed GQL AST onto
-  the `MatchPlan` IR (`surrealdb/core/src/expr/match_plan.rs`), embedded into the
-  logical plan as `Expr::Match` and executed by the streaming engine; implemented
+  the `MatchPlan` IR (`surrealdb/core/src/expr/match_plan.rs`), carried by the
+  logical plan as `LogicalOp::Match` and executed by the streaming engine; implemented
   by `surrealdb/core/src/gql/lower/`.
 
 ## Updating

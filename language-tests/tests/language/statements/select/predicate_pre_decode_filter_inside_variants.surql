@@ -26,10 +26,16 @@ value = "[{ bag: [1, 2, 3], id: pdiv:1 }, { bag: [1, 5], id: pdiv:3 }]"
 value = "[{ bag: [1, 2, 3], id: pdiv:1 }, { bag: [10], id: pdiv:2 }, { bag: [1, 5], id: pdiv:3 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: pdiv, direction: Forward, predicate: [1, 2] ALLINSIDE bag, pre_decode_filter: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: pdiv, direction: Forward, predicate: [1, 2] ALLINSIDE bag, pre_decode_filter: yes]
+''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: pdiv, direction: Forward, predicate: [1, 99] ANYINSIDE bag, pre_decode_filter: yes]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: pdiv, direction: Forward, predicate: [1, 99] ANYINSIDE bag, pre_decode_filter: yes]
+''''
 */
 
 CREATE ONLY pdiv:1 SET bag = [1, 2, 3];

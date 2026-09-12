@@ -12,12 +12,14 @@ use futures::StreamExt;
 use tracing::instrument;
 
 use super::common::resolve_version_stamp;
-use super::pipeline::{ScanPipeline, build_field_state, filter_and_process_batch, kv_scan_stream};
-use super::resolved::ResolvedTableContext;
+use super::pipeline::{
+	FieldState, ScanPipeline, build_field_state, filter_and_process_batch, kv_scan_stream,
+};
+use super::resolved::{EnforcementMode, ResolvedTableContext, planned_select_permission};
 use crate::err::EngineError;
 use crate::exec::operators::scan::count::record_key_range;
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
+	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
 	validate_record_user_access,
 };
 use crate::exec::pre_decode_filter::{PreDecodeFilterStatus, pre_decode_filter_for_execute};
@@ -55,8 +57,18 @@ pub struct RecordIdScan {
 	/// Applied after computed fields, before field-level permissions.
 	pub(crate) predicate: Option<Arc<dyn PhysicalExpr>>,
 	/// Plan-time resolved table context. When present, `execute_record_lookup`
-	/// skips runtime `get_table_def()` and `build_field_state()` entirely.
+	/// skips runtime `get_table_def()` and `build_field_state()` entirely, and
+	/// its enforcement mode says whether the lookup applies the table
+	/// permission, computed fields and field permissions itself or yields the
+	/// record as stored for the plan above it to apply them.
 	pub(crate) resolved: Option<ResolvedTableContext>,
+	/// The mode the lookup was planned under. A resolved context agrees with
+	/// it; without one the lookup resolves its table when it runs and, under
+	/// [`EnforcementMode::Planned`], still yields the record as stored: the
+	/// table was not in the catalog when the plan was made, and the plan above
+	/// the lookup was built from that absence — a permission-checked caller is
+	/// denied there — so nothing is applied here.
+	pub(crate) mode: EnforcementMode,
 	/// Whether the lookup is a locked read (`SELECT ... FOR UPDATE`),
 	/// registering the record key for commit-time conflict detection.
 	pub(crate) for_update: bool,
@@ -79,6 +91,7 @@ impl RecordIdScan {
 			needed_fields,
 			predicate,
 			resolved: None,
+			mode: EnforcementMode::Runtime,
 			for_update: false,
 			pre_decode_filter_status: PreDecodeFilterStatus::NotApplicable,
 			metrics: Arc::new(OperatorMetrics::new()),
@@ -88,6 +101,12 @@ impl RecordIdScan {
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
+		self
+	}
+
+	/// Set the mode the lookup was planned under; see [`Self::mode`].
+	pub(crate) fn with_enforcement_mode(mut self, mode: EnforcementMode) -> Self {
+		self.mode = mode;
 		self
 	}
 
@@ -199,6 +218,7 @@ impl ExecOperator for RecordIdScan {
 		let needed_fields = self.needed_fields.clone();
 		let predicate = self.predicate.clone();
 		let resolved = self.resolved.clone();
+		let mode = self.mode;
 		let for_update = self.for_update;
 		let pre_decode_filter_status = self.pre_decode_filter_status.clone();
 		let ctx = ctx.clone();
@@ -244,6 +264,7 @@ impl ExecOperator for RecordIdScan {
 				None,
 				0,
 				resolved.as_ref(),
+				mode,
 				&pre_decode_filter_status,
 			)
 			.await?;
@@ -279,6 +300,11 @@ impl ExecOperator for RecordIdScan {
 /// `version` and with range keys — both are rejected here so a locked read
 /// is never silently downgraded.
 ///
+/// `resolved` is the plan-time table context, when one was resolved; without
+/// one the table is resolved here and `mode` says who enforces what it
+/// declares — the lookup per record under [`EnforcementMode::Runtime`], the
+/// plan above under [`EnforcementMode::Planned`] (see `RecordIdScan::mode`).
+///
 /// This is the single implementation of RecordId-based data access, shared
 /// by `RecordIdScan` (plan-time) and `DynamicScan` (runtime-discovered).
 #[allow(clippy::too_many_arguments)]
@@ -295,6 +321,7 @@ pub(crate) async fn execute_record_lookup(
 	limit: Option<usize>,
 	start: usize,
 	resolved: Option<&ResolvedTableContext>,
+	mode: EnforcementMode,
 	pre_decode_filter_status: &PreDecodeFilterStatus,
 ) -> Result<Vec<Value>, ControlFlow> {
 	let db_ctx = ctx.database().context("RecordLookup requires database context")?;
@@ -322,30 +349,38 @@ pub(crate) async fn execute_record_lookup(
 		let fs = res.field_state_for_projection(needed_fields);
 		(perm, fs)
 	} else {
-		// Runtime fallback
-		let table_def =
-			db_ctx.get_table_def(&rid.table, version).await.context("Failed to get table")?;
-
-		if table_def.is_none() {
+		// Runtime resolution: the table was not in the catalog when the plan
+		// was made, or the record id was only known at runtime.
+		let Some(table_def) =
+			db_ctx.get_table_def(&rid.table, version).await.context("Failed to get table")?
+		else {
 			return Err(ControlFlow::Err(anyhow::Error::new(crate::catalog::Error::TbNotFound {
 				name: rid.table.clone(),
 			})));
-		}
-
-		let perm = if check_perms {
-			let catalog_perm = match &table_def {
-				Some(def) => def.permissions.select.clone(),
-				None => crate::catalog::Permission::None,
-			};
-			convert_permission_to_physical_runtime(&catalog_perm, ctx)
-				.await
-				.context("Failed to convert permission")?
-		} else {
-			PhysicalPermission::Allow
 		};
 
-		let fs = build_field_state(ctx, &rid.table, check_perms, needed_fields).await?;
-		(perm, fs)
+		match mode {
+			// The plan above enforces; see `RecordIdScan::mode`.
+			EnforcementMode::Planned => (
+				if check_perms {
+					planned_select_permission(&table_def)
+				} else {
+					PhysicalPermission::Allow
+				},
+				FieldState::empty(),
+			),
+			EnforcementMode::Runtime => {
+				let perm = if check_perms {
+					table_select_permission_physical_runtime(Some(&*table_def), ctx)
+						.await
+						.context("Failed to convert permission")?
+				} else {
+					PhysicalPermission::Allow
+				};
+				let fs = build_field_state(ctx, &rid.table, check_perms, needed_fields).await?;
+				(perm, fs)
+			}
+		}
 	};
 
 	// Early exit if denied
@@ -461,5 +496,58 @@ pub(crate) async fn execute_record_lookup(
 			}
 			Ok(batch)
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::scan::resolved::test_support::{
+		RESTRICTED_TABLE, anonymous, assert_as_stored, assert_reduced, contexts,
+	};
+	use crate::exec::operators::test_util::{TestDb, collect};
+	use crate::exec::physical_expr::Literal;
+	use crate::kvs::TransactionType;
+
+	/// Under the plan's enforcement the lookup yields the record as stored,
+	/// for the nodes above it to reduce; under its own it reduces the record
+	/// for a permission-checked caller.
+	#[tokio::test]
+	async fn a_planned_lookup_yields_the_stored_record_and_a_runtime_lookup_reduces_it() {
+		let db = TestDb::new_with_auth(RESTRICTED_TABLE).await;
+		let ctx = db.exec_ctx_as(&anonymous(), TransactionType::Read).await;
+		let (planned, runtime) = contexts(&ctx, "t").await;
+		let rid = Value::RecordId(RecordId {
+			table: "t".into(),
+			key: RecordIdKey::Number(1),
+		});
+		let scan = |tc: ResolvedTableContext| -> Arc<dyn ExecOperator> {
+			Arc::new(
+				RecordIdScan::new(Arc::new(Literal(rid.clone())), None, None, None)
+					.with_resolved(tc),
+			)
+		};
+		assert_as_stored(&collect(&scan(planned), &ctx).await);
+		assert_reduced(&collect(&scan(runtime), &ctx).await);
+	}
+
+	/// Without a plan-time context the lookup resolves its table when it
+	/// runs, and the mode it was planned under still decides who enforces.
+	#[tokio::test]
+	async fn a_lookup_resolving_its_table_at_runtime_enforces_by_its_planned_mode() {
+		let db = TestDb::new_with_auth(RESTRICTED_TABLE).await;
+		let ctx = db.exec_ctx_as(&anonymous(), TransactionType::Read).await;
+		let rid = Value::RecordId(RecordId {
+			table: "t".into(),
+			key: RecordIdKey::Number(1),
+		});
+		let scan = |mode: EnforcementMode| -> Arc<dyn ExecOperator> {
+			Arc::new(
+				RecordIdScan::new(Arc::new(Literal(rid.clone())), None, None, None)
+					.with_enforcement_mode(mode),
+			)
+		};
+		assert_as_stored(&collect(&scan(EnforcementMode::Planned), &ctx).await);
+		assert_reduced(&collect(&scan(EnforcementMode::Runtime), &ctx).await);
 	}
 }

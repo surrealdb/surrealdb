@@ -18,6 +18,7 @@ use crate::exec::ContextLevel;
 use crate::exec::function::index::{IndexContext, IndexContextKind, IndexFunction};
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
+use crate::expr::logical::EffectSet;
 use crate::expr::{Error, Kind};
 use crate::fnc::args::{FromArgs, Optional};
 use crate::idx::ft::analyzer::Analyzer;
@@ -40,6 +41,10 @@ pub struct SearchAnalyze;
 impl ScalarFunction for SearchAnalyze {
 	fn name(&self) -> &'static str {
 		"search::analyze"
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::READS_CATALOG
 	}
 
 	fn signature(&self) -> Signature {
@@ -184,7 +189,7 @@ impl IndexFunction for SearchHighlight {
 
 			// Get the full-text index resources (lazy init); no index on
 			// the scan table covering the idiom → NONE (legacy parity).
-			let Some((fti, qt, _scorer)) = match_ctx.ft_resources(ctx).await? else {
+			let Some(ft) = match_ctx.ft_resources(ctx).await? else {
 				return Ok(Value::None);
 			};
 
@@ -197,7 +202,7 @@ impl IndexFunction for SearchHighlight {
 				partial,
 			};
 
-			fti.highlight(&tx, &rid, qt, hlp, &match_ctx.idiom, doc).await
+			ft.index.highlight(&tx, &rid, &ft.terms, hlp, &ft.column, doc).await
 		})
 	}
 }
@@ -254,11 +259,11 @@ impl IndexFunction for SearchScore {
 
 			// Get the full-text index resources (lazy init); no index on
 			// the scan table covering the idiom → NONE (legacy parity).
-			let Some((fti, qt, scorer)) = match_ctx.ft_resources(ctx).await? else {
+			let Some(ft) = match_ctx.ft_resources(ctx).await? else {
 				return Ok(Value::None);
 			};
 
-			let scorer = match scorer {
+			let scorer = match &ft.scorer {
 				Some(s) => s,
 				None => return Ok(Value::None),
 			};
@@ -266,13 +271,13 @@ impl IndexFunction for SearchScore {
 			let tx = ctx.txn();
 
 			// Get the document ID from the record ID
-			let doc_id = match fti.get_doc_id(&tx, &rid).await? {
+			let doc_id = match ft.index.get_doc_id(&tx, &rid).await? {
 				Some(id) => id,
 				None => return Ok(Value::None),
 			};
 
 			// Compute the BM25 score
-			let score = scorer.score(fti, &tx, qt, doc_id).await?;
+			let score = scorer.score(&ft.index, &tx, &ft.terms, doc_id).await?;
 			Ok(Value::Number(Number::Float(score as f64)))
 		})
 	}
@@ -338,13 +343,13 @@ impl IndexFunction for SearchOffsets {
 
 			// Get the full-text index resources (lazy init); no index on
 			// the scan table covering the idiom → NONE (legacy parity).
-			let Some((fti, qt, _scorer)) = match_ctx.ft_resources(ctx).await? else {
+			let Some(ft) = match_ctx.ft_resources(ctx).await? else {
 				return Ok(Value::None);
 			};
 
 			let tx = ctx.txn();
 
-			fti.read_offsets(&tx, &rid, qt, partial).await
+			ft.index.read_offsets(&tx, &rid, &ft.terms, partial).await
 		})
 	}
 }
@@ -388,6 +393,10 @@ impl Ord for FusionDoc {
 impl ScalarFunction for SearchRrf {
 	fn name(&self) -> &'static str {
 		"search::rrf"
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::PURE
 	}
 
 	fn signature(&self) -> Signature {
@@ -527,6 +536,10 @@ enum LinearNorm {
 impl ScalarFunction for SearchLinear {
 	fn name(&self) -> &'static str {
 		"search::linear"
+	}
+
+	fn effects(&self) -> EffectSet {
+		EffectSet::PURE
 	}
 
 	fn signature(&self) -> Signature {

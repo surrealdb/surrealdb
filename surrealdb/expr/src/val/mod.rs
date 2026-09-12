@@ -654,6 +654,44 @@ impl Value {
 			Value::Table(t) => expr::Expr::Table(t),
 		}
 	}
+
+	/// Turns this value into a surface-syntax literal evaluating to the same
+	/// value.
+	///
+	/// The counterpart of [`Self::into_literal`] for a caller assembling a
+	/// statement in the form the parser produces: a front end that builds a
+	/// statement programmatically hands the executor the surface AST, and this
+	/// is how a runtime value enters one. A set becomes an array literal, as
+	/// in [`Self::into_literal`]. A closure's body was never surface syntax, so
+	/// it is rendered through its expression form.
+	pub fn into_sql_literal(self) -> crate::sql::Expr {
+		use crate::sql::{Expr, Literal};
+		match self {
+			Value::None => Expr::Literal(Literal::None),
+			Value::Null => Expr::Literal(Literal::Null),
+			Value::Bool(x) => Expr::Literal(Literal::Bool(x)),
+			Value::Number(Number::Int(i)) => Expr::Literal(Literal::Integer(i)),
+			Value::Number(Number::Float(f)) => Expr::Literal(Literal::Float(f)),
+			Value::Number(Number::Decimal(d)) => Expr::Literal(Literal::Decimal(d)),
+			Value::String(strand) => Expr::Literal(Literal::String(strand)),
+			Value::Duration(duration) => Expr::Literal(Literal::Duration(duration.0)),
+			Value::Datetime(datetime) => Expr::Literal(Literal::Datetime(datetime.0)),
+			Value::Uuid(uuid) => Expr::Literal(Literal::Uuid(uuid.0)),
+			Value::Array(array) => Expr::Literal(Literal::Array(array.into_sql_literal())),
+			Value::Set(set) => Expr::Literal(Literal::Array(set.into_sql_literal())),
+			Value::Object(object) => Expr::Literal(Literal::Object(object.into_sql_literal())),
+			Value::Geometry(geometry) => Expr::Literal(Literal::Geometry(geometry.into())),
+			Value::Bytes(bytes) => Expr::Literal(Literal::Bytes(bytes.into())),
+			Value::RecordId(record_id) => {
+				Expr::Literal(Literal::RecordId(record_id.into_sql_literal()))
+			}
+			Value::Regex(regex) => Expr::Literal(Literal::Regex(regex.into())),
+			Value::File(file) => Expr::Literal(Literal::File(file.into())),
+			Value::Closure(closure) => closure.into_expr().into(),
+			Value::Range(range) => range.into_sql_literal(),
+			Value::Table(t) => Expr::Table(t.into()),
+		}
+	}
 }
 
 impl ToSql for Value {

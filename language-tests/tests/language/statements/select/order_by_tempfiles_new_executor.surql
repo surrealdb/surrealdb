@@ -12,7 +12,11 @@ value = "NONE"
 value = "[{ id: ord:01, n: 1 }, { id: ord:02, n: 2 }, { id: ord:03, n: 3 }, { id: ord:04, n: 4 }, { id: ord:05, n: 5 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id, n]\n    ExternalSortByKey [ctx: Db] [sort_keys: n ASC]\n        TableScan [ctx: Db] [table: ord, direction: Forward]\n''''
+value = '''
+'SelectProject [ctx: Db] [projections: id, n]
+    ExternalSortByKey [ctx: Db] [sort_keys: n ASC]
+        TableScan [ctx: Db] [table: ord, direction: Forward]
+''''
 
 */
 

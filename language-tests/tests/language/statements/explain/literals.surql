@@ -12,12 +12,12 @@ Total rows: 1''''
 
 [[test.results]]
 value = ''''Return [ctx: Rt]
-    IfElse [ctx: Rt] [branches: 1, has_else: true]
+    Expr [ctx: Rt] [expr: IF true THEN (Return) ELSE (Expr) END]
 ''''
 
 [[test.results]]
 value = ''''Return [ctx: Rt] {rows: 0}
-    IfElse [ctx: Rt] [branches: 1, has_else: true] {rows: 0}
+    Expr [ctx: Rt] [expr: IF true THEN (Return) ELSE (Expr) END] {rows: 0}
 
 Total rows: 0''''
 

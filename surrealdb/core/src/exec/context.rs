@@ -28,6 +28,8 @@ use crate::dbs::{Capabilities, Options};
 use crate::err::Error;
 use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
+use crate::exec::permission::action_is_checked;
+use crate::exec::physical_expr::ComputingRecord;
 use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
 use crate::kvs::index::filter_online_indexes;
@@ -100,6 +102,43 @@ pub(crate) struct SessionInfo {
 	pub exp: Option<Datetime>,
 }
 
+impl SessionInfo {
+	/// The session a [`FrozenContext`] carries as its `$session` value, or
+	/// `None` when the context has no session bound.
+	///
+	/// `$session` is an object keyed by the session paths (`ns`, `db`, `id`,
+	/// `ip`, `or`, `ac`, `rd`, `tk`); a field of the wrong shape reads as
+	/// absent. The expiry is not part of that object and is always `None`
+	/// here.
+	pub(crate) fn from_context(ctx: &FrozenContext) -> Option<Self> {
+		use crate::expr::paths::{AC, DB, ID, IP, NS, OR, RD, TK};
+
+		let session = ctx.value("session")?;
+		let strand = |path: &[crate::expr::Part]| match session.pick(path) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+		let value = |path: &[crate::expr::Part]| match session.pick(path) {
+			Value::None => None,
+			v => Some(v),
+		};
+		Some(Self {
+			ns: strand(NS.as_ref()),
+			db: strand(DB.as_ref()),
+			id: match session.pick(ID.as_ref()) {
+				Value::Uuid(u) => Some(*u.as_ref()),
+				_ => None,
+			},
+			ip: strand(IP.as_ref()),
+			origin: strand(OR.as_ref()),
+			ac: strand(AC.as_ref()),
+			rd: value(RD.as_ref()),
+			token: value(TK.as_ref()),
+			exp: None,
+		})
+	}
+}
+
 /// Root-level context - always available.
 ///
 /// Wraps a `FrozenContext` (the single source of truth for params, txn,
@@ -149,18 +188,42 @@ pub struct RootContext {
 	/// explicit DAG input binding -- operators read it via `CurrentValueSource`,
 	/// and it is set by `LookupPart` before executing the lookup's operator chain.
 	pub(crate) current_value: Option<Arc<Value>>,
+	/// The enclosing row a statement evaluated in scalar position reads as its
+	/// document.
+	///
+	/// A block, `RETURN`, `LET` or `FOR` written where a scalar is expected —
+	/// a projection, a `WHERE`, an `IF` branch, a function body — runs as a
+	/// plan of its own, but its expressions evaluate against the row of the
+	/// statement that holds it, exactly as `$this` denotes that row. Set by
+	/// `ScalarSubquery` for such plans and read by the operators that evaluate
+	/// a scalar without a row of their own (`ExprPlan`, a `FOR` range).
+	/// `RecursePart` sets it too, so the recursion operator can evaluate the
+	/// recursed path's expressions against the idiom's document root. A
+	/// relational plan never sets it: its scans supply their own rows.
+	pub(crate) current_row: Option<Arc<Value>>,
 	/// When true, RecordId dereferences bypass permission checks.
 	///
 	/// Propagated from `EvalContext` at subquery / lookup / recursion boundaries
 	/// so that permission predicate evaluation does not re-enter table permissions
 	/// and recurse infinitely on cyclic record links.
 	pub(crate) skip_fetch_perms: bool,
+	/// The record whose computed fields are being evaluated, when a statement
+	/// plan runs in scalar position inside one of those bodies.
+	///
+	/// A `COMPUTED` body written as a block is a plan of its own, and the
+	/// `EvalContext` its expressions rebuild from this context must answer a
+	/// dereference of the record being computed from the row rather than by
+	/// re-fetching it, which would evaluate the same body again without end.
+	/// Set by `ScalarSubquery` from the evaluating expression's context; read
+	/// by `EvalContext::from_exec_ctx`.
+	pub(crate) computing_record: Option<Arc<ComputingRecord>>,
 	/// When true, a write reached from here is rejected.
 	///
 	/// Set while evaluating a `COMPUTED` field body, which runs on every read of
 	/// the field and under the definer's auth. The streaming engine plans no
-	/// writes of its own, so enforcement is the legacy fallback's
-	/// (`plan_or_compute::legacy_fallback_options`); this flag is what tells it.
+	/// writes of its own, so enforcement is the legacy bridge's
+	/// (`operators::legacy_bridge::legacy_options_for_frame`); this flag is
+	/// what tells it.
 	pub(crate) computing_field: bool,
 	/// Evaluated VERSION timestamp for time-travel queries.
 	///
@@ -180,6 +243,7 @@ impl std::fmt::Debug for RootContext {
 			.field("session", &self.session)
 			.field("current_value", &self.current_value.as_ref().map(|_| "<Value>"))
 			.field("skip_fetch_perms", &self.skip_fetch_perms)
+			.field("computing_record", &self.computing_record.as_ref().map(|r| &r.rid))
 			.field("computing_field", &self.computing_field)
 			.field("version_stamp", &self.version_stamp)
 			.field("ctx", &"<FrozenContext>")
@@ -250,6 +314,13 @@ pub struct DatabaseContext {
 	/// runtime index analysis within the same query execution.
 	pub(crate) index_def_cache:
 		Arc<tokio::sync::RwLock<HashMap<TableName, Arc<[IndexDefinition]>>>>,
+	/// The compiled table `SELECT` permission a record read by id — a `FETCH`
+	/// target, a record dereference — is checked against, keyed by table.
+	/// Compiled once per table per execution by
+	/// `exec::operators::fetch::table_select_permission`; a versioned read
+	/// bypasses it, as [`Self::get_table_def`] bypasses its cache.
+	pub(crate) select_permission_cache:
+		Arc<tokio::sync::RwLock<HashMap<TableName, crate::exec::permission::PhysicalPermission>>>,
 }
 
 impl std::fmt::Debug for DatabaseContext {
@@ -272,6 +343,13 @@ impl DatabaseContext {
 	/// Get the database name
 	pub fn db_name(&self) -> &str {
 		&self.db.name
+	}
+
+	/// [`ExecutionContext::should_check_perms`] for a context known to be at
+	/// database level: the same gate, with the namespace and database this
+	/// context is in as the level the principal is compared against.
+	pub(crate) fn should_check_perms(&self, action: Action) -> Result<bool, Error> {
+		Ok(should_check_perms_at(&self.ns_ctx.root, Some((self.ns_name(), self.db_name())), action))
 	}
 
 	/// Get the namespace definition
@@ -397,6 +475,20 @@ pub enum ExecutionContext {
 	Database(DatabaseContext),
 }
 
+/// The gate behind [`ExecutionContext::should_check_perms`] and
+/// [`DatabaseContext::should_check_perms`]: the permission-frame bypass, then
+/// the role-and-level rule shared with the plan-time gates.
+fn should_check_perms_at(root: &RootContext, level: Option<(&str, &str)>, action: Action) -> bool {
+	if root.skip_fetch_perms {
+		return false;
+	}
+	let (ns, db) = match level {
+		Some((ns, db)) => (Some(ns), Some(db)),
+		None => (None, None),
+	};
+	action_is_checked(root.ctx.auth_enabled(), &root.auth, action, ns, db)
+}
+
 impl ExecutionContext {
 	/// Get root-level access (always succeeds).
 	///
@@ -503,55 +595,26 @@ impl ExecutionContext {
 		self.root().ctx.auth_enabled()
 	}
 
-	/// Check if permissions should be checked for the given action.
+	/// Whether permission checks apply to `action` in this context.
 	///
-	/// This mirrors the logic in `Options::check_perms()` but adapted for
-	/// the execution context. Returns `true` if permission checks should
-	/// be performed, `false` if they should be bypassed.
+	/// The one gate every permission check in the streaming engine consults:
+	/// the scan, graph, reference and join operators through
+	/// [`DatabaseContext::should_check_perms`], and the reads of a `DEFINE
+	/// FUNCTION`, `DEFINE PARAM`, module or model `PERMISSIONS` clause
+	/// directly. Returns `false`, bypassing every check, when:
 	///
-	/// Permission checks are bypassed when:
-	/// - Auth is disabled and user is anonymous
-	/// - User has sufficient role (Editor for Edit, Viewer for View) AND the target database is
-	///   within the user's auth level
+	/// - the context is inside a permission predicate (`skip_fetch_perms`). A definer-authored
+	///   predicate reads freely, as the legacy engine evaluates one with `perms = false`; exempting
+	///   it here disables the whole-scan `Deny` short-circuits, the per-row table and field
+	///   permission filtering, edge and target enforcement, and the function and parameter
+	///   permission checks in one place;
+	/// - server auth is disabled and the session is anonymous;
+	/// - the principal's role and actor level exempt it
+	///   ([`crate::exec::permission::action_is_checked`]). Without a database context a namespace
+	///   or database user's level cannot be compared, so only a root user with the role is exempt.
 	pub fn should_check_perms(&self, action: Action) -> Result<bool, Error> {
-		let root = self.root();
-
-		// Check if server auth is disabled
-		if !root.ctx.auth_enabled() && root.auth.is_anon() {
-			return Ok(false);
-		}
-
-		// For database-level operations, check if we can bypass based on role and level
-		if let Ok(db_ctx) = self.database() {
-			let ns = db_ctx.ns_name();
-			let db = db_ctx.db_name();
-
-			match action {
-				Action::Edit => {
-					let allowed = root.auth.has_editor_role();
-					let db_in_actor_level = root.auth.is_root()
-						|| root.auth.is_ns_check(ns)
-						|| root.auth.is_db_check(ns, db);
-					Ok(!allowed || !db_in_actor_level)
-				}
-				Action::View => {
-					let allowed = root.auth.has_viewer_role();
-					let db_in_actor_level = root.auth.is_root()
-						|| root.auth.is_ns_check(ns)
-						|| root.auth.is_db_check(ns, db);
-					Ok(!allowed || !db_in_actor_level)
-				}
-			}
-		} else {
-			// Without database context we cannot verify namespace/database-level
-			// users, but root users with the appropriate role should still bypass
-			// permission checks regardless of context level.
-			let has_role = match action {
-				Action::Edit => root.auth.has_editor_role(),
-				Action::View => root.auth.has_viewer_role(),
-			};
-			Ok(!has_role || !root.auth.is_root())
-		}
+		let level = self.database().ok().map(|db_ctx| (db_ctx.ns_name(), db_ctx.db_name()));
+		Ok(should_check_perms_at(self.root(), level, action))
 	}
 
 	/// Rebuild this ExecutionContext with a new FrozenContext, preserving
@@ -571,7 +634,9 @@ impl ExecutionContext {
 				auth: Arc::clone(&r.auth),
 				session: r.session.clone(),
 				current_value: r.current_value.clone(),
+				current_row: r.current_row.clone(),
 				skip_fetch_perms: r.skip_fetch_perms,
+				computing_record: r.computing_record.clone(),
 				computing_field: r.computing_field,
 				version_stamp: r.version_stamp,
 			}),
@@ -585,7 +650,9 @@ impl ExecutionContext {
 					auth: Arc::clone(&n.root.auth),
 					session: n.root.session.clone(),
 					current_value: n.root.current_value.clone(),
+					current_row: n.root.current_row.clone(),
 					skip_fetch_perms: n.root.skip_fetch_perms,
+					computing_record: n.root.computing_record.clone(),
 					computing_field: n.root.computing_field,
 					version_stamp: n.root.version_stamp,
 				},
@@ -602,7 +669,9 @@ impl ExecutionContext {
 						auth: Arc::clone(&d.ns_ctx.root.auth),
 						session: d.ns_ctx.root.session.clone(),
 						current_value: d.ns_ctx.root.current_value.clone(),
+						current_row: d.ns_ctx.root.current_row.clone(),
 						skip_fetch_perms: d.ns_ctx.root.skip_fetch_perms,
+						computing_record: d.ns_ctx.root.computing_record.clone(),
 						computing_field: d.ns_ctx.root.computing_field,
 						version_stamp: d.ns_ctx.root.version_stamp,
 					},
@@ -612,6 +681,7 @@ impl ExecutionContext {
 				field_state_cache: Arc::clone(&d.field_state_cache),
 				table_def_cache: Arc::clone(&d.table_def_cache),
 				index_def_cache: Arc::clone(&d.index_def_cache),
+				select_permission_cache: Arc::clone(&d.select_permission_cache),
 			}),
 		}
 	}
@@ -640,6 +710,25 @@ impl ExecutionContext {
 		self.root().current_value.as_deref()
 	}
 
+	/// Derive a context whose statements read `row` as the enclosing document;
+	/// see [`RootContext::current_row`].
+	pub(crate) fn with_current_row(&self, row: Arc<Value>) -> Self {
+		let mut new = self.clone();
+		let root = match &mut new {
+			Self::Root(r) => r,
+			Self::Namespace(n) => &mut n.root,
+			Self::Database(d) => &mut d.ns_ctx.root,
+		};
+		root.current_row = Some(row);
+		new
+	}
+
+	/// The enclosing row a statement in scalar position evaluates against, if
+	/// any; see [`RootContext::current_row`].
+	pub(crate) fn current_row(&self) -> Option<&Value> {
+		self.root().current_row.as_deref()
+	}
+
 	/// Derive a context that skips permission checks on RecordId dereferences.
 	///
 	/// Used at subquery / lookup / recursion boundaries when the parent
@@ -656,6 +745,59 @@ impl ExecutionContext {
 			Self::Database(d) => &mut d.ns_ctx.root,
 		};
 		root.skip_fetch_perms = skip;
+		new
+	}
+
+	/// Enter a compiled body one re-entry deeper, consuming one unit of the
+	/// computation-depth budget.
+	///
+	/// The budget is the dive of the [`Options`] this context carries — the
+	/// same count the legacy evaluator decrements per expression — so one
+	/// bound, `max_computation_depth`, covers a chain of re-entries whichever
+	/// engine each hop runs on: a compiled closure that invokes itself, a body
+	/// that hands a sub-computation to the legacy evaluator (which starts from
+	/// the reduced budget), or a legacy statement that calls back into a
+	/// compiled closure (whose context is rebuilt from the legacy options). The
+	/// count lives here rather than on an `EvalContext` because the operators a
+	/// body's blocks and subqueries run through rebuild their `EvalContext`
+	/// from this context, and a count kept there would restart at each of
+	/// them. Fails with [`ExecError::ComputationDepthExceeded`] once the budget
+	/// is spent; a context built without options — only a test harness builds
+	/// one — has no budget and is returned unchanged.
+	pub(crate) fn dive(&self) -> anyhow::Result<Self> {
+		let Some(options) = self.options() else {
+			return Ok(self.clone());
+		};
+		let options = options.dive(1).map_err(anyhow::Error::new)?;
+		let mut new = self.clone();
+		let root = match &mut new {
+			Self::Root(r) => r,
+			Self::Namespace(n) => &mut n.root,
+			Self::Database(d) => &mut d.ns_ctx.root,
+		};
+		root.options = Some(options);
+		Ok(new)
+	}
+
+	/// Derive a context whose statements in scalar position evaluate inside
+	/// the computed-field body of `record`; see
+	/// [`RootContext::computing_record`].
+	pub(crate) fn with_computing_record(self, record: Option<Arc<ComputingRecord>>) -> Self {
+		let same = match (&record, &self.root().computing_record) {
+			(None, None) => true,
+			(Some(a), Some(b)) => Arc::ptr_eq(a, b),
+			_ => false,
+		};
+		if same {
+			return self;
+		}
+		let mut new = self;
+		let root = match &mut new {
+			Self::Root(r) => r,
+			Self::Namespace(n) => &mut n.root,
+			Self::Database(d) => &mut d.ns_ctx.root,
+		};
+		root.computing_record = record;
 		new
 	}
 
@@ -759,6 +901,7 @@ impl ExecutionContext {
 			field_state_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
 			table_def_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
 			index_def_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+			select_permission_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
 		})
 	}
 

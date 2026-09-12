@@ -277,6 +277,14 @@ async fn run_import(ds: &Datastore, ses: &Session, statements: Vec<String>) {
 	assert!(errors.is_empty(), "import errors: {:?}", errors.first().map(|e| &e.result));
 }
 
+/// The conversion the executor performs on a bare expression before the legacy
+/// engine runs it, so a parse-only run prices the same work as an import.
+fn price_conversion(stmt: surrealdb_sql::TopLevelExpr) {
+	if let surrealdb_sql::TopLevelExpr::Expr(expr) = stmt {
+		std::hint::black_box(surrealdb_expr::expr::Expr::from(expr));
+	}
+}
+
 /// Parse and convert every statement without executing any of them.
 ///
 /// Mirrors `Datastore::execute_import`'s incremental buffering so the measured
@@ -288,14 +296,14 @@ fn run_parse_only(statements: &[String]) -> usize {
 	for s in statements {
 		buffer.extend_from_slice(s.as_bytes());
 		while let Some(stmt) = stream.parse_partial(&mut buffer).unwrap() {
-			// The import path converts every parsed statement into the
-			// execution AST before dispatch, so price that here too.
-			std::hint::black_box(surrealdb_expr::expr::TopLevelExpr::from(stmt));
+			// The executor converts a bare expression into the execution AST
+			// when it dispatches it, so price that here too.
+			price_conversion(stmt);
 			parsed += 1;
 		}
 	}
 	while let Some(stmt) = stream.parse_complete(&mut buffer).unwrap() {
-		std::hint::black_box(surrealdb_expr::expr::TopLevelExpr::from(stmt));
+		price_conversion(stmt);
 		parsed += 1;
 	}
 	parsed

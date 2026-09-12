@@ -11,27 +11,27 @@
 //!   belong to the current row's table.
 //! - `$parent` denotes the *outer* SELECT's iteration row. Field accesses through it belong to the
 //!   outer row, not the current row.
-//! - SELECT subqueries are *not* descended into during analysis: their `$parent` rescopes to the
-//!   current SELECT's `$this` and so does not contribute to the current SELECT's outer-row
+//! - A SELECT in scalar position is *not* descended into during analysis: its `$parent` rescopes to
+//!   the current SELECT's `$this` and so does not contribute to the current SELECT's outer-row
 //!   dependency. This is load-bearing for nested-subquery patterns and pinned by the
 //!   `parent_nested_subqueries.surql` and `7184_parent_in_nested_subquery_graph_where.surql`
-//!   reproductions.
+//!   reproductions. A block, `LET`, `RETURN` or `FOR` in scalar position runs in the enclosing
+//!   scope and is descended into.
 //!
 //! This module is plan-time only. Runtime sites (`parts/filter.rs`,
 //! `parts/lookup.rs`, `physical_expr/subquery.rs`, etc.) consume the flags
 //! produced here via `WherePart::needs_parent` and friends; they do their
 //! own per-row binding through `EvalContext::current_value` /
-//! `document_root`. Don't migrate them as part of the same refactor.
+//! `document_root`.
 
-use crate::expr::expression::Expr;
-use crate::expr::idiom::Idiom;
-use crate::expr::part::Part;
-use crate::expr::visit::{Visit, Visitor};
+use std::ops::ControlFlow;
 
-/// Row-scoped parameter names.
-///
-/// Source of truth — `util.rs::SELECT_ITERATION_PARAMS` re-exports this.
-pub(crate) const ROW_SCOPED_PARAMS: &[&str] = &["this", "self", "parent"];
+use crate::expr::logical::{LogicalExpr, LogicalOp, LogicalSource, SourceRef};
+
+/// Row-scoped parameter names: the logical layer's `ITERATION_PARAMS`,
+/// which its effect fold reads too. `util::SELECT_ITERATION_PARAMS` re-exports
+/// this, and the binding passes receive it as `BindContext::row_scoped`.
+pub(crate) const ROW_SCOPED_PARAMS: &[&str] = crate::expr::logical::ITERATION_PARAMS;
 
 /// Variants of row-scoped parameter references.
 ///
@@ -58,40 +58,32 @@ impl RowScopeKind {
 	}
 }
 
-/// Classification of an `Idiom`'s starting anchor.
+/// Whose row a path's field reads are about, decided by the expression the
+/// path starts from ([`LogicalExpr::path_root`]).
 ///
-/// Determines whose row the idiom's field accesses are about:
-///
-/// - `ThisRow`: idiom is rooted at `$this`/`$self`, or has no explicit `Part::Start`
-///   (default-rooted at `$this`). Subsequent `Part::Field` names denote columns of the *current*
-///   row's table.
-/// - `OuterRow`: idiom is rooted at `$parent`. Subsequent `Part::Field` names denote columns of the
-///   *outer* row.
-/// - `Opaque`: idiom is rooted at any other `Part::Start(Expr::*)` (computed start, parameter-bound
-///   table, etc.). Static analysis of field membership is not possible; callers fall back to "all
-///   fields needed."
+/// - `ThisRow`: the path starts at a field of the row, at the row itself (a leading lookup, `@`) or
+///   at `$this`/`$self`. Its field reads name columns of the *current* row's table.
+/// - `OuterRow`: the path starts at `$parent`. Its field reads name columns of the *outer* row.
+/// - `Opaque`: the path starts at any other expression (another parameter, a computed value). Which
+///   fields it reads cannot be known statically; callers fall back to "all fields needed".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IdiomRoot {
+pub(crate) enum PathRoot {
 	ThisRow,
 	OuterRow,
 	Opaque,
 }
 
-/// Classify an `Idiom`'s starting anchor without descending into nested
-/// expressions.
-pub(crate) fn classify_idiom_root(idiom: &Idiom) -> IdiomRoot {
-	match idiom.0.first() {
-		None => IdiomRoot::ThisRow,
-		Some(Part::Start(Expr::Param(p))) => match RowScopeKind::from_param_name(p.as_str()) {
-			Some(RowScopeKind::This | RowScopeKind::Self_) => IdiomRoot::ThisRow,
-			Some(RowScopeKind::Parent) => IdiomRoot::OuterRow,
-			None => IdiomRoot::Opaque,
+/// Classify the expression a path starts from, without descending into the
+/// steps applied to it. An expression that is not a path is its own root.
+pub(crate) fn classify_path_root(path: &LogicalExpr) -> PathRoot {
+	match path.path_root() {
+		LogicalExpr::Field(_) | LogicalExpr::Doc | LogicalExpr::Current => PathRoot::ThisRow,
+		LogicalExpr::Param(p) => match RowScopeKind::from_param_name(p.as_str()) {
+			Some(RowScopeKind::This | RowScopeKind::Self_) => PathRoot::ThisRow,
+			Some(RowScopeKind::Parent) => PathRoot::OuterRow,
+			None => PathRoot::Opaque,
 		},
-		Some(Part::Start(_)) => IdiomRoot::Opaque,
-		// First part is something other than Part::Start (e.g.
-		// Part::Field, Part::Lookup) — idiom is unrooted, defaults to
-		// $this scope.
-		Some(_) => IdiomRoot::ThisRow,
+		_ => PathRoot::Opaque,
 	}
 }
 
@@ -114,12 +106,11 @@ pub(crate) enum AnalysisScope {
 }
 
 /// Returns `true` when `expr` references `$parent` within the current
-/// SELECT scope (subqueries skipped). Replaces the inline
-/// `ast_expr_references_parent` visitor in `idiom.rs`.
-pub(crate) fn references_parent(expr: &Expr) -> bool {
+/// SELECT scope (SELECT subqueries skipped).
+pub(crate) fn references_parent(expr: &LogicalExpr) -> bool {
 	let mut walker =
 		ParamWalker::new(|kind| kind == RowScopeKind::Parent, AnalysisScope::CurrentSelect);
-	let _ = walker.visit_expr(expr);
+	let _ = walker.walk_expr(expr);
 	walker.found
 }
 
@@ -130,16 +121,36 @@ pub(crate) fn references_parent(expr: &Expr) -> bool {
 /// `$this` from `$parent` in GROUP BY errors). The `scope` parameter
 /// matters: see [`AnalysisScope`].
 pub(crate) fn first_row_scoped_reference(
-	expr: &Expr,
+	expr: &LogicalExpr,
 	scope: AnalysisScope,
 ) -> Option<RowScopeKind> {
 	let mut walker = ParamWalker::new(|_| true, scope);
-	let _ = walker.visit_expr(expr);
+	let _ = walker.walk_expr(expr);
 	walker.first_kind
 }
 
-/// Shared visitor backing the public analysis functions. The
-/// `AnalysisScope` parameter controls whether `visit_select` descends.
+/// Whether a plan in scalar position rescopes the row parameters.
+///
+/// A SELECT — any relational operator — binds `$this` to its own rows and
+/// `$parent` to the enclosing row, so a reference inside it is about the
+/// subquery's rows. The statement operators (a bare expression, a block,
+/// `LET`, `RETURN`, `FOR`, `INFO`, `SLEEP`) run in the enclosing scope and
+/// do not.
+fn rescopes_row_params(op: &LogicalOp) -> bool {
+	!matches!(
+		op,
+		LogicalOp::Eval(_)
+			| LogicalOp::Sequence(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Sleep(_)
+	)
+}
+
+/// Shared walker backing the public analysis functions. The
+/// `AnalysisScope` decides whether a rescoping subquery is entered.
 struct ParamWalker<F: FnMut(RowScopeKind) -> bool> {
 	predicate: F,
 	scope: AnalysisScope,
@@ -156,64 +167,71 @@ impl<F: FnMut(RowScopeKind) -> bool> ParamWalker<F> {
 			first_kind: None,
 		}
 	}
-}
 
-impl<F: FnMut(RowScopeKind) -> bool> Visitor for ParamWalker<F> {
-	type Error = std::convert::Infallible;
-
-	fn visit_expr(&mut self, e: &Expr) -> Result<(), Self::Error> {
-		if self.found {
-			return Ok(());
-		}
-		if let Expr::Param(p) = e
-			&& let Some(kind) = RowScopeKind::from_param_name(p.as_str())
-		{
+	/// Records one parameter reference. Breaks when the predicate accepts it.
+	fn visit_param(&mut self, name: &str) -> ControlFlow<()> {
+		if let Some(kind) = RowScopeKind::from_param_name(name) {
 			if self.first_kind.is_none() {
 				self.first_kind = Some(kind);
 			}
 			if (self.predicate)(kind) {
 				self.found = true;
-				return Ok(());
+				return ControlFlow::Break(());
 			}
 		}
-		e.visit(self)
+		ControlFlow::Continue(())
 	}
 
-	fn visit_select(
-		&mut self,
-		s: &crate::expr::statements::SelectStatement,
-	) -> Result<(), Self::Error> {
-		match self.scope {
-			AnalysisScope::CurrentSelect => Ok(()),
-			AnalysisScope::Recursive => s.visit(self),
+	/// Walks a scalar and, through each `Subquery` it meets, the plan inside
+	/// according to [`Self::walk_op`]. Breaks at the first parameter the
+	/// predicate accepts.
+	fn walk_expr(&mut self, expr: &LogicalExpr) -> ControlFlow<()> {
+		expr.visit(&mut |e| match e {
+			LogicalExpr::Param(p) => self.visit_param(p.as_str()),
+			LogicalExpr::Subquery(op) => self.walk_op(op),
+			_ => ControlFlow::Continue(()),
+		})
+	}
+
+	/// Walks every parameter a plan reads — a `FROM $param` source and every
+	/// scalar — each node's own before its inputs'. Under
+	/// [`AnalysisScope::CurrentSelect`] a rescoping plan is a leaf.
+	fn walk_op(&mut self, op: &LogicalOp) -> ControlFlow<()> {
+		if self.scope == AnalysisScope::CurrentSelect && rescopes_row_params(op) {
+			return ControlFlow::Continue(());
 		}
+		if let LogicalOp::Source(LogicalSource {
+			source: SourceRef::Param(param),
+			..
+		}) = op
+		{
+			self.visit_param(param.as_str())?;
+		}
+		for scalar in op.scalars() {
+			self.walk_expr(scalar)?;
+		}
+		for child in op.children() {
+			self.walk_op(child)?;
+		}
+		ControlFlow::Continue(())
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::syn;
+	use crate::expr::logical::lower_expr;
 
-	fn parse_expr(src: &str) -> Expr {
+	fn parse_expr(src: &str) -> LogicalExpr {
 		// Wrap in a RETURN so it parses as a single top-level statement,
-		// convert from the parser AST to the runtime AST, and peel off
-		// the OutputStatement wrapper to get the inner expression.
-		let ast = syn::parse(&format!("RETURN {src};")).expect("parse");
+		// then lower the returned expression.
+		let ast = crate::syn::parse(&format!("RETURN {src};")).expect("parse");
 		let mut exprs = ast.expressions;
 		assert_eq!(exprs.len(), 1, "expected one statement");
-		let top: crate::expr::TopLevelExpr = exprs.remove(0).into();
-		match top {
-			crate::expr::TopLevelExpr::Expr(Expr::Return(ret)) => ret.what.clone(),
-			other => panic!("unexpected statement shape: {other:?}"),
-		}
-	}
-
-	fn parse_idiom(src: &str) -> Idiom {
-		match parse_expr(src) {
-			Expr::Idiom(i) => i,
-			other => panic!("expected Idiom, got {other:?}"),
-		}
+		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Return(out)) = exprs.remove(0) else {
+			panic!("unexpected statement shape");
+		};
+		lower_expr(out.what).expect("lowers")
 	}
 
 	// 1. Top-level $parent.x
@@ -250,15 +268,13 @@ mod tests {
 		assert!(!references_parent(&e));
 	}
 
-	// 5. $parent inside DML subquery body — same scoping rule applies.
+	// 5. $parent inside a block in scalar position — a block runs in the enclosing scope, so its
+	//    `$parent` IS the outer SELECT's `$parent`.
 	#[test]
-	fn references_parent_skips_create_subquery() {
-		let e = parse_expr("(CREATE x SET y = $parent.id)");
-		// Note: CREATE is a statement-level construct; the parser may wrap
-		// it as Expr::Create. The ParamWalker doesn't have a special-case
-		// for CREATE/UPDATE/DELETE here because they don't rescope the same
-		// way SELECT subqueries do — $parent inside a CREATE SET expression
-		// IS the outer SELECT's $parent.
+	fn references_parent_enters_block() {
+		let e = parse_expr("{ RETURN $parent.id }");
+		assert!(references_parent(&e));
+		let e = parse_expr("{ LET $x = $parent.id; RETURN $x }");
 		assert!(references_parent(&e));
 	}
 
@@ -285,31 +301,34 @@ mod tests {
 		assert!(first_row_scoped_reference(&e, AnalysisScope::Recursive).is_none());
 	}
 
-	// 9. classify_idiom_root: $this rooted idiom → ThisRow.
+	// 9. classify_path_root: a path from $this → ThisRow.
 	#[test]
-	fn classify_idiom_root_this() {
-		assert_eq!(classify_idiom_root(&parse_idiom("$this.cat")), IdiomRoot::ThisRow);
-		assert_eq!(classify_idiom_root(&parse_idiom("$self.cat")), IdiomRoot::ThisRow);
+	fn classify_path_root_this() {
+		assert_eq!(classify_path_root(&parse_expr("$this.cat")), PathRoot::ThisRow);
+		assert_eq!(classify_path_root(&parse_expr("$self.cat")), PathRoot::ThisRow);
+		assert_eq!(classify_path_root(&parse_expr("$this.a.b[0]")), PathRoot::ThisRow);
 	}
 
-	// 10. classify_idiom_root: $parent rooted → OuterRow.
+	// 10. classify_path_root: a path from $parent → OuterRow.
 	#[test]
-	fn classify_idiom_root_parent() {
-		assert_eq!(classify_idiom_root(&parse_idiom("$parent.cat")), IdiomRoot::OuterRow);
+	fn classify_path_root_parent() {
+		assert_eq!(classify_path_root(&parse_expr("$parent.cat")), PathRoot::OuterRow);
 	}
 
-	// 11. classify_idiom_root: unrooted (bare field) → ThisRow.
+	// 11. classify_path_root: a path from the row (a field, a lookup) → ThisRow.
 	#[test]
-	fn classify_idiom_root_unrooted() {
-		assert_eq!(classify_idiom_root(&parse_idiom("name")), IdiomRoot::ThisRow);
-		assert_eq!(classify_idiom_root(&parse_idiom("user.name")), IdiomRoot::ThisRow);
+	fn classify_path_root_unrooted() {
+		assert_eq!(classify_path_root(&parse_expr("name")), PathRoot::ThisRow);
+		assert_eq!(classify_path_root(&parse_expr("user.name")), PathRoot::ThisRow);
+		assert_eq!(classify_path_root(&parse_expr("->likes->person")), PathRoot::ThisRow);
 	}
 
-	// 12. classify_idiom_root: opaque starts.
+	// 12. classify_path_root: opaque starts.
 	#[test]
-	fn classify_idiom_root_opaque() {
+	fn classify_path_root_opaque() {
 		// $param (non-row-scoped) → opaque
-		assert_eq!(classify_idiom_root(&parse_idiom("$other.cat")), IdiomRoot::Opaque);
+		assert_eq!(classify_path_root(&parse_expr("$other.cat")), PathRoot::Opaque);
+		assert_eq!(classify_path_root(&parse_expr("(SELECT * FROM t).cat")), PathRoot::Opaque);
 	}
 
 	// 13. first_row_scoped_reference distinguishes $this from $parent.
@@ -321,6 +340,13 @@ mod tests {
 			first_row_scoped_reference(&e, AnalysisScope::CurrentSelect),
 			Some(RowScopeKind::This),
 		);
+	}
+
+	// 14. $parent inside a WHERE part and inside a closure body.
+	#[test]
+	fn references_parent_in_where_part() {
+		assert!(references_parent(&parse_expr("foo[WHERE bar = $parent.id]")));
+		assert!(references_parent(&parse_expr("array::find(foo, |$x| $x.bar = $parent.id)")));
 	}
 
 	// 15. AnalysisScope::Recursive descends into SELECT subqueries. GROUP BY validation depends on
@@ -338,10 +364,34 @@ mod tests {
 		);
 	}
 
-	// 14. $parent inside a Part::Where predicate.
+	// 17. A row parameter as the `FROM` source of a subquery is a reference like any other: the
+	//     recursive walk finds it (GROUP BY validation), the current-scope walk does not (the
+	//     subquery rescopes it).
 	#[test]
-	fn references_parent_in_where_part() {
-		assert!(references_parent(&parse_expr("foo[WHERE bar = $parent.id]")));
-		assert!(references_parent(&parse_expr("array::find(foo, |$x| $x.bar = $parent.id)")));
+	fn param_source_of_a_subquery_is_a_reference() {
+		let e = parse_expr("(SELECT id FROM $parent)");
+		assert!(!references_parent(&e), "current-scope walk skips subqueries");
+		assert_eq!(
+			first_row_scoped_reference(&e, AnalysisScope::Recursive),
+			Some(RowScopeKind::Parent),
+		);
+		let e = parse_expr("(SELECT count() FROM $this GROUP ALL)");
+		assert_eq!(
+			first_row_scoped_reference(&e, AnalysisScope::Recursive),
+			Some(RowScopeKind::This),
+		);
+		let e = parse_expr("(SELECT id FROM $other)");
+		assert!(first_row_scoped_reference(&e, AnalysisScope::Recursive).is_none());
+	}
+
+	// 16. A SELECT nested inside a block is still a SELECT scope.
+	#[test]
+	fn select_inside_block_still_rescopes() {
+		let e = parse_expr("{ RETURN (SELECT * FROM t WHERE a = $parent.id) }");
+		assert!(!references_parent(&e));
+		assert_eq!(
+			first_row_scoped_reference(&e, AnalysisScope::Recursive),
+			Some(RowScopeKind::Parent),
+		);
 	}
 }

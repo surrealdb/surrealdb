@@ -26,6 +26,136 @@ struct Recalculation {
 	arg: usize,
 }
 
+/// Recomputes the extremes a stored aggregation stat can no longer maintain
+/// from the change alone, because the value leaving the group was the extreme.
+///
+/// The rows read are the group's, as the view defines it: every table the view
+/// selects from, narrowed by an equality per group key and by the view's own
+/// condition. An extreme is only meaningful over exactly the rows the view
+/// holds, so the statement has to name the same rows the view's own query
+/// would.
+///
+/// Returns one value per entry in `recalculations`, in order. `GROUP ALL`
+/// answers with one row whatever reaches it, so an extreme reported over no
+/// rows is the aggregate's answer for no values rather than the group's; a
+/// count accompanies the extremes to tell the two apart, and a group whose rows
+/// the statement cannot find errors rather than storing that bound.
+#[allow(clippy::too_many_arguments)]
+async fn recalculate_aggregates(
+	stk: &mut Stk,
+	ctx: &FrozenContext,
+	opt: &Options,
+	recalculations: &[Recalculation],
+	aggr: &AggregationAnalysis,
+	group: &[Value],
+	tables: &[TableName],
+	condition: Option<&Expr>,
+) -> Result<Vec<Value>> {
+	let mut exprs: Vec<Expr> = recalculations
+		.iter()
+		.map(|x| {
+			Expr::FunctionCall(Box::new(FunctionCall {
+				receiver: Function::Normal(x.function.clone()),
+				arguments: vec![aggr.aggregate_arguments[x.arg].clone()],
+			}))
+		})
+		.collect();
+	exprs.push(Expr::FunctionCall(Box::new(FunctionCall {
+		receiver: Function::Normal("count".to_string()),
+		arguments: Vec::new(),
+	})));
+
+	// The view's own condition, narrowed further to the group being
+	// recalculated by an equality per group key.
+	// The group-key equalities lead and the view's condition is ANDed last:
+	// `&&` short-circuits left to right, so a row of another group is rejected
+	// on a key comparison without the view's condition being evaluated for it.
+	let mut cond: Option<Expr> = None;
+	for (idx, g) in aggr.group_expressions.iter().enumerate() {
+		let expr = Expr::Binary {
+			left: Box::new(g.clone()),
+			op: BinaryOperator::Equal,
+			right: Box::new(group[idx].clone().into_literal()),
+		};
+		cond = Some(match cond {
+			Some(c) => Expr::Binary {
+				left: Box::new(c),
+				op: BinaryOperator::And,
+				right: Box::new(expr),
+			},
+			None => expr,
+		});
+	}
+	if let Some(view_cond) = condition.cloned() {
+		cond = Some(match cond {
+			Some(c) => Expr::Binary {
+				left: Box::new(c),
+				op: BinaryOperator::And,
+				right: Box::new(view_cond),
+			},
+			None => view_cond,
+		});
+	}
+
+	let recalc_stmt = SelectStatement {
+		// SELECT VALUE [recalc1, recalc2, .., count()]
+		fields: Fields::Value(Box::new(Selector {
+			expr: Expr::Literal(Literal::Array(exprs)),
+			alias: None,
+		})),
+		// FROM source1, source2, .. — `ONLY` is rejected for several targets
+		// without a limit, so the single `GROUP ALL` row is taken below.
+		only: false,
+		what: tables.iter().cloned().map(Expr::Table).collect(),
+		// WHERE group_expr1 = group_value1 && .. && view_cond
+		cond: cond.map(Cond),
+		// GROUP ALL
+		group: Some(Groups(Vec::new())),
+		omit: vec![],
+		with: None,
+		split: None,
+		order: None,
+		limit: None,
+		start: None,
+		fetch: None,
+		version: Expr::Literal(Literal::None),
+		timeout: Expr::Literal(Literal::None),
+		explain: None,
+		tempfiles: false,
+		for_update: false,
+	};
+
+	let value = stk
+		.run(|stk| crate::legacy::select_statement_compute(&recalc_stmt, stk, ctx, opt, None))
+		.await?;
+
+	// `GROUP ALL` collapses whatever reaches it into exactly one row.
+	let Value::Array(Array(mut rows)) = value else {
+		fail!("Aggregate recalculation select statement returned an invalid result");
+	};
+	if rows.len() != 1 {
+		fail!("Aggregate recalculation select statement returned an invalid result");
+	}
+	let Some(Value::Array(Array(mut values))) = rows.pop() else {
+		fail!("Aggregate recalculation select statement returned an invalid result");
+	};
+	if values.len() != recalculations.len() + 1 {
+		fail!("Aggregate recalculation select statement returned an invalid result");
+	}
+
+	// A group the statement finds empty while the stored count says it still
+	// has rows is a disagreement this path cannot resolve, so the write that
+	// provoked it fails rather than recording a bound no row holds.
+	let Some(Value::Number(rows)) = values.pop() else {
+		fail!("Aggregate recalculation select statement returned no row count");
+	};
+	if rows.as_int() == 0 {
+		fail!("Aggregate recalculation found no row for the group it recalculates");
+	}
+
+	Ok(values)
+}
+
 impl Document {
 	/// Processes any DEFINE TABLE AS clauses which
 	/// have been defined for the table which this
@@ -129,10 +259,13 @@ impl Document {
 			ViewDefinition::Aggregated {
 				analysis,
 				condition,
+				tables,
 				..
 			} => {
-				self.process_aggregate_view(stk, ctx, opt, table_name, analysis, condition, action)
-					.await
+				self.process_aggregate_view(
+					stk, ctx, opt, table_name, analysis, condition, tables, action,
+				)
+				.await
 			}
 		}
 	}
@@ -147,6 +280,7 @@ impl Document {
 		view_table_name: &TableName,
 		aggr: &AggregationAnalysis,
 		condition: &Option<Expr>,
+		tables: &[TableName],
 		action: Action,
 	) -> Result<()> {
 		match action {
@@ -234,6 +368,8 @@ impl Document {
 								before,
 								view_table_name,
 								aggr,
+								condition.as_ref(),
+								tables,
 							)
 							.await?;
 							self.process_view_record_create(
@@ -253,6 +389,8 @@ impl Document {
 								before,
 								view_table_name,
 								aggr,
+								condition.as_ref(),
+								tables,
 							)
 							.await?;
 						}
@@ -265,6 +403,8 @@ impl Document {
 							before,
 							view_table_name,
 							aggr,
+							condition.as_ref(),
+							tables,
 						)
 						.await?;
 					}
@@ -301,8 +441,17 @@ impl Document {
 					);
 				}
 
-				self.process_view_record_delete(stk, ctx, opt, group, view_table_name, aggr)
-					.await?;
+				self.process_view_record_delete(
+					stk,
+					ctx,
+					opt,
+					group,
+					view_table_name,
+					aggr,
+					condition.as_ref(),
+					tables,
+				)
+				.await?;
 			}
 		}
 
@@ -433,6 +582,7 @@ impl Document {
 
 	/// Run the computation for when a record within the table on which the view is generated
 	/// is deleted.
+	#[allow(clippy::too_many_arguments)]
 	async fn process_view_record_delete(
 		&self,
 		stk: &mut Stk,
@@ -441,6 +591,8 @@ impl Document {
 		group: Vec<Value>,
 		view_table_name: &TableName,
 		aggr: &AggregationAnalysis,
+		condition: Option<&Expr>,
+		tables: &[TableName],
 	) -> Result<()> {
 		let db = self.doc_ctx.db();
 
@@ -650,77 +802,17 @@ impl Document {
 		}
 
 		if !recalculations.is_empty() {
-			// Build the expression which recalculates the values
-			let exprs = recalculations
-				.iter()
-				.map(|x| {
-					Expr::FunctionCall(Box::new(FunctionCall {
-						receiver: Function::Normal(x.function.clone()),
-						arguments: vec![aggr.aggregate_arguments[x.arg].clone()],
-					}))
-				})
-				.collect();
-
-			// Build condition which filters out all values not belonging to the group.
-			let mut condition = None;
-			for (idx, g) in aggr.group_expressions.iter().enumerate() {
-				let expr = Expr::Binary {
-					left: Box::new(g.clone()),
-					op: BinaryOperator::Equal,
-					right: Box::new(group[idx].clone().into_literal()),
-				};
-				if let Some(c) = condition {
-					condition = Some(Expr::Binary {
-						left: Box::new(c),
-						op: BinaryOperator::And,
-						right: Box::new(expr),
-					})
-				} else {
-					condition = Some(expr)
-				}
-			}
-
-			let table_name = self.id()?.table.clone();
-
-			let recalc_stmt = SelectStatement {
-				// SELECT VALUE [recalc1, recalc2,..]
-				fields: Fields::Value(Box::new(Selector {
-					expr: Expr::Literal(Literal::Array(exprs)),
-					alias: None,
-				})),
-				// FROM ONLY table
-				only: true,
-				what: vec![Expr::Table(table_name.clone())],
-				// WHERE group_expr1 = group_value1 && group_expr2 = group_value2 && ..
-				cond: condition.map(Cond),
-				// GROUP ALL
-				group: Some(Groups(Vec::new())),
-				omit: vec![],
-				with: None,
-				split: None,
-				order: None,
-				limit: None,
-				start: None,
-				fetch: None,
-				version: Expr::Literal(Literal::None),
-				timeout: Expr::Literal(Literal::None),
-				explain: None,
-				tempfiles: false,
-				for_update: false,
-			};
-
-			let value = stk
-				.run(|stk| {
-					crate::legacy::select_statement_compute(&recalc_stmt, stk, ctx, opt, None)
-				})
-				.await?;
-
-			let Value::Array(Array(values)) = value else {
-				fail!("Aggregate recalculation select statement return an invalid result");
-			};
-			if values.len() != recalculations.len() {
-				fail!("Aggregate recalculation select statement return an invalid result");
-			}
+			let values = recalculate_aggregates(
+				stk,
+				ctx,
+				opt,
+				&recalculations,
+				aggr,
+				&group,
+				tables,
+				condition,
+			)
+			.await?;
 
 			for (idx, v) in values.into_iter().enumerate() {
 				match &mut meta.aggregation_stats[recalculations[idx].stat] {
@@ -820,6 +912,7 @@ impl Document {
 
 	/// Process an update to a entry in the materialized, aggregated view.
 	/// Only called for updates to values that remain within the same group.
+	#[allow(clippy::too_many_arguments)]
 	async fn process_view_record_update(
 		&self,
 		stk: &mut Stk,
@@ -828,6 +921,8 @@ impl Document {
 		group: Vec<Value>,
 		view_table_name: &TableName,
 		aggr: &AggregationAnalysis,
+		condition: Option<&Expr>,
+		tables: &[TableName],
 	) -> Result<()> {
 		let db = self.doc_ctx.db();
 
@@ -1082,77 +1177,17 @@ impl Document {
 		}
 
 		if !recalculations.is_empty() {
-			// Build the expression which recalculates the values
-			let exprs = recalculations
-				.iter()
-				.map(|x| {
-					Expr::FunctionCall(Box::new(FunctionCall {
-						receiver: Function::Normal(x.function.clone()),
-						arguments: vec![aggr.aggregate_arguments[x.arg].clone()],
-					}))
-				})
-				.collect();
-
-			// Build condition which filters out all values not belonging to the group.
-			let mut condition = None;
-			for (idx, g) in aggr.group_expressions.iter().enumerate() {
-				let expr = Expr::Binary {
-					left: Box::new(g.clone()),
-					op: BinaryOperator::Equal,
-					right: Box::new(group[idx].clone().into_literal()),
-				};
-				if let Some(c) = condition {
-					condition = Some(Expr::Binary {
-						left: Box::new(c),
-						op: BinaryOperator::And,
-						right: Box::new(expr),
-					})
-				} else {
-					condition = Some(expr)
-				}
-			}
-
-			let table_name = self.id()?.table.clone();
-
-			let recalc_stmt = SelectStatement {
-				// SELECT VALUE [recalc1, recalc2,..]
-				fields: Fields::Value(Box::new(Selector {
-					expr: Expr::Literal(Literal::Array(exprs)),
-					alias: None,
-				})),
-				// FROM ONLY table
-				only: true,
-				what: vec![Expr::Table(table_name.clone())],
-				// WHERE group_expr1 = group_value1 && group_expr2 = group_value2 && ..
-				cond: condition.map(Cond),
-				// GROUP ALL
-				group: Some(Groups(Vec::new())),
-				omit: vec![],
-				with: None,
-				split: None,
-				order: None,
-				limit: None,
-				start: None,
-				fetch: None,
-				version: Expr::Literal(Literal::None),
-				timeout: Expr::Literal(Literal::None),
-				explain: None,
-				tempfiles: false,
-				for_update: false,
-			};
-
-			let value = stk
-				.run(|stk| {
-					crate::legacy::select_statement_compute(&recalc_stmt, stk, ctx, opt, None)
-				})
-				.await?;
-
-			let Value::Array(Array(values)) = value else {
-				fail!("Aggregate recalculation select statement return an invalid result");
-			};
-			if values.len() != recalculations.len() {
-				fail!("Aggregate recalculation select statement return an invalid result");
-			}
+			let values = recalculate_aggregates(
+				stk,
+				ctx,
+				opt,
+				&recalculations,
+				aggr,
+				&group,
+				tables,
+				condition,
+			)
+			.await?;
 
 			for (idx, v) in values.into_iter().enumerate() {
 				match &mut meta.aggregation_stats[recalculations[idx].stat] {

@@ -2,12 +2,18 @@
 
 use std::sync::Arc;
 
-use crate::catalog::Permission;
+use reblessive::tree::TreeStack;
+use surrealdb_types::{SqlFormat, ToSql};
+
+use super::closure::CompiledClosure;
+use crate::doc::CursorDoc;
+use crate::exec::operators::legacy_bridge::legacy_options_for_frame;
+use crate::exec::permission::CompiledGuard;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{AccessMode, CombineAccessModes, Error as ExecError};
-use crate::expr::{Error as ExprError, FlowResult, Kind};
-use crate::val::Value;
+use crate::expr::logical::LogicalPermissionRef;
+use crate::expr::{ControlFlow, Error as ExprError, FlowResult, Kind};
+use crate::val::{Closure, Value};
 
 /// Evaluate all argument expressions to values.
 pub(crate) async fn evaluate_args(
@@ -21,48 +27,79 @@ pub(crate) async fn evaluate_args(
 	Ok(values)
 }
 
-/// Check function permission.
-pub(crate) async fn check_permission(
-	permission: &Permission,
+/// Check a function's `PERMISSIONS` clause for the caller.
+///
+/// A conditional permission is judged on every call and evaluated in the
+/// permission frame: reads inside it are not themselves permission-checked,
+/// which is what stops a predicate that follows a record link from recursing
+/// into itself. `guard` is the calling node's memo of the compilation, which
+/// [`CompiledGuard`] reuses only while `definition` is the definition the call
+/// found; a predicate that fails to compile or to evaluate denies.
+pub(crate) async fn check_permission<D>(
+	guard: &CompiledGuard<D>,
+	permission: LogicalPermissionRef<'_>,
+	definition: &Arc<D>,
 	func_name: &str,
 	ctx: &EvalContext<'_>,
 ) -> FlowResult<()> {
-	match permission {
-		Permission::Full => Ok(()),
-		Permission::None => Err(ExecError::FunctionPermissions {
-			name: func_name.to_string(),
-		}
-		.into()),
-		Permission::Specific(expr) => {
-			// Plan and evaluate the permission expression.
-			match expr_to_physical_expr(
-				expr.clone(),
-				ctx.exec_ctx.ctx(),
-				ctx.exec_ctx.function_registry(),
-			)
-			.await
-			{
-				Ok(phys_expr) => {
-					let result = phys_expr.evaluate(ctx.clone()).await?;
-					if !result.is_truthy() {
-						Err(ExecError::FunctionPermissions {
-							name: func_name.to_string(),
-						}
-						.into())
-					} else {
-						Ok(())
-					}
-				}
-				Err(_) => {
-					// If we can't plan the expression, deny by default
-					Err(ExecError::FunctionPermissions {
-						name: func_name.to_string(),
-					}
-					.into())
-				}
+	guard
+		.check(permission, definition, ctx, ctx.exec_ctx.try_txn(), || {
+			ExecError::FunctionPermissions {
+				name: func_name.to_string(),
 			}
-		}
+		})
+		.await
+}
+
+/// Invoke a closure value with `args` from a streaming expression.
+///
+/// A [`CompiledClosure`] — the value the streaming engine creates — evaluates
+/// its compiled body directly. Any other closure can only be run by the legacy
+/// evaluator: a `Closure::Expr` (a surface-syntax body, as stored by `DEFINE
+/// PARAM` or created by a legacy statement) and a natively implemented
+/// builtin closure (API middleware). Those are handed to
+/// `legacy::closure_invoke` through the engine's one legacy bridge, in the
+/// evaluation frame the caller is in, with the caller's document root — or
+/// its current value, when there is no root — as the cursor document. Both
+/// forms therefore see the same document: the row the statement is
+/// evaluating, whichever position of an idiom chain the call sits at (see
+/// [`CompiledClosure::invoke`]).
+pub(crate) async fn invoke_closure(
+	closure: &Closure,
+	args: Vec<Value>,
+	ctx: &EvalContext<'_>,
+) -> FlowResult<Value> {
+	if let Closure::Builtin(obj) = closure
+		&& let Some(compiled) = obj.as_any().downcast_ref::<CompiledClosure>()
+	{
+		return compiled.invoke(ctx, args).await;
 	}
+
+	let Some(options) = ctx.exec_ctx.options() else {
+		return Err(ExecError::Thrown(
+			"Options not available to invoke a closure through the legacy evaluator".into(),
+		)
+		.into());
+	};
+	let options = legacy_options_for_frame(
+		options,
+		ctx.skip_fetch_perms,
+		ctx.exec_ctx.root().computing_field,
+		ctx.exec_ctx.version_stamp(),
+	)
+	.with_dive_consumed(ctx.plan_depth + 1);
+	let frozen = ctx.exec_ctx.ctx();
+	let doc =
+		ctx.document_root.or(ctx.current_value).map(|v| CursorDoc::new(None, None, v.clone()));
+
+	let mut stack = TreeStack::new();
+	stack
+		.enter(|stk| {
+			crate::legacy::closure_invoke(closure, stk, frozen, &options, doc.as_ref(), args)
+		})
+		.finish()
+		.await
+		.map_err(ControlFlow::Err)
 }
 
 /// Validate argument count against expected signature.
@@ -111,6 +148,19 @@ pub(crate) fn validate_return(
 		}),
 		None => Ok(result),
 	}
+}
+
+/// Renders a call's argument list, `(a, b, c)`, in the form the plan is
+/// printed in.
+pub(crate) fn fmt_call_args(f: &mut String, fmt: SqlFormat, args: &[Arc<dyn PhysicalExpr>]) {
+	f.push('(');
+	for (i, arg) in args.iter().enumerate() {
+		if i > 0 {
+			f.push_str(", ");
+		}
+		arg.fmt_sql(f, fmt);
+	}
+	f.push(')');
 }
 
 /// Helper to compute access mode from arguments.

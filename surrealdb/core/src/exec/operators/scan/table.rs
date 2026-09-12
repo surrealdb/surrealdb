@@ -11,12 +11,15 @@ use common::future::stream::Yielder;
 use futures::StreamExt;
 use surrealdb_strand::TableName;
 
-use super::pipeline::{ScanPipeline, build_field_state, eval_limit_expr, kv_scan_stream};
-use super::resolved::ResolvedTableContext;
+use super::pipeline::{
+	FieldState, ScanPipeline, build_field_state, eval_limit_expr, kv_scan_stream,
+};
+use super::resolved::{EnforcementMode, ResolvedTableContext, planned_select_permission};
 use crate::err::EngineError;
+use crate::exec::operators::limit::PagingClause;
 use crate::exec::operators::scan::common::resolve_version_stamp;
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
+	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
 	validate_record_user_access,
 };
 use crate::exec::pre_decode_filter::{PreDecodeFilterStatus, pre_decode_filter_for_execute};
@@ -49,8 +52,18 @@ pub struct TableScan {
 	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
 	pub(crate) needed_fields: Option<std::collections::HashSet<String>>,
 	/// Plan-time resolved table context. When present, `execute()` skips
-	/// all runtime metadata lookups (table def, permissions, field state).
+	/// all runtime metadata lookups (table def, permissions, field state), and
+	/// its enforcement mode says whether the scan applies the table
+	/// permission, computed fields and field permissions itself or yields rows
+	/// as stored for the plan above it to apply them.
 	pub(crate) resolved: Option<ResolvedTableContext>,
+	/// The mode the scan was planned under. A resolved context agrees with it;
+	/// without one the scan resolves its table when it runs and, under
+	/// [`EnforcementMode::Planned`], still yields rows as stored: the table was
+	/// not in the catalog when the plan was made, and the plan above the scan
+	/// was built from that absence — a permission-checked caller is denied
+	/// there — so nothing is applied here.
+	pub(crate) mode: EnforcementMode,
 	/// Predicate pre-decode filter status (plan-time); see [`PreDecodeFilterStatus`].
 	pub(crate) pre_decode_filter_status: PreDecodeFilterStatus,
 	/// TopK threshold pushdown status (plan-time); see [`TopKPushdownStatus`].
@@ -77,6 +90,7 @@ impl TableScan {
 			start,
 			needed_fields,
 			resolved: None,
+			mode: EnforcementMode::Runtime,
 			pre_decode_filter_status: PreDecodeFilterStatus::NotApplicable,
 			topk_pushdown_status: TopKPushdownStatus::NotApplicable,
 			metrics: Arc::new(OperatorMetrics::new()),
@@ -86,6 +100,12 @@ impl TableScan {
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
+		self
+	}
+
+	/// Set the mode the scan was planned under; see [`Self::mode`].
+	pub(crate) fn with_enforcement_mode(mut self, mode: EnforcementMode) -> Self {
+		self.mode = mode;
 		self
 	}
 
@@ -172,6 +192,7 @@ impl ExecOperator for TableScan {
 		let check_perms = should_check_perms(&db_ctx, Action::View)?;
 
 		let resolved = self.resolved.clone();
+		let mode = self.mode;
 		let table_name = self.table_name.clone();
 		let direction = self.direction;
 		let version_expr = self.version.clone();
@@ -193,11 +214,11 @@ impl ExecOperator for TableScan {
 
 				// Evaluate pushed-down LIMIT and START expressions
 				let limit_val: Option<usize> = match &limit_expr {
-					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+					Some(expr) => Some(eval_limit_expr(&**expr, &ctx, PagingClause::Limit).await?),
 					None => None,
 				};
 				let start_val: usize = match &start_expr {
-					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+					Some(expr) => eval_limit_expr(&**expr, &ctx, PagingClause::Start).await?,
 					None => 0,
 				};
 
@@ -215,50 +236,61 @@ impl ExecOperator for TableScan {
 					let fs = res.field_state_for_projection(needed_fields.as_ref());
 					(perm, fs)
 				} else {
-					// Runtime fallback (DynamicScan path or no txn at plan time)
-					let table_def = db_ctx
+					// Runtime resolution: the table was not in the catalog when
+					// the plan was made, or the plan was made without one.
+					let Some(table_def) = db_ctx
 						.get_table_def(&table_name, version)
 						.await
-						.context("Failed to get table")?;
-
-					if table_def.is_none() {
-						Err(ControlFlow::Err(anyhow::Error::new(
+						.context("Failed to get table")?
+					else {
+						return Err(ControlFlow::Err(anyhow::Error::new(
 							crate::catalog::Error::TbNotFound {
 								name: table_name.clone(),
 							},
-						)))?;
-					}
+						)));
+					};
 
 					// Fail closed: a record-range scan over a lightweight
 					// relation would be wrong-empty. Statically-planned scans
 					// were declined at plan time; only runtime-resolved paths
 					// reach this.
-					if table_def.as_ref().is_some_and(|def| {
-						crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some()
-					}) {
-						Err(ControlFlow::Err(anyhow::anyhow!(
+					if crate::kvs::lightweight::lightweight_relation(&table_def.table_type)
+						.is_some()
+					{
+						return Err(ControlFlow::Err(anyhow::anyhow!(
 							"a LIGHTWEIGHT relation cannot be scanned by this execution path; \
 							 reference the table statically so the record-less scan can serve it"
-						)))?;
+						)));
 					}
 
-					let perm = if check_perms {
-						let catalog_perm = match &table_def {
-							Some(def) => def.permissions.select.clone(),
-							None => crate::catalog::Permission::None,
-						};
-						convert_permission_to_physical_runtime(&catalog_perm, &ctx)
-							.await
-							.context("Failed to convert permission")?
-					} else {
-						PhysicalPermission::Allow
-					};
-
-					let fs =
-						build_field_state(&ctx, &table_name, check_perms, needed_fields.as_ref())
+					match mode {
+						// The plan above enforces; see `TableScan::mode`.
+						EnforcementMode::Planned => (
+							if check_perms {
+								planned_select_permission(&table_def)
+							} else {
+								PhysicalPermission::Allow
+							},
+							FieldState::empty(),
+						),
+						EnforcementMode::Runtime => {
+							let perm = if check_perms {
+								table_select_permission_physical_runtime(Some(&*table_def), &ctx)
+									.await
+									.context("Failed to convert permission")?
+							} else {
+								PhysicalPermission::Allow
+							};
+							let fs = build_field_state(
+								&ctx,
+								&table_name,
+								check_perms,
+								needed_fields.as_ref(),
+							)
 							.await?;
-
-					(perm, fs)
+							(perm, fs)
+						}
+					}
 				};
 
 				if matches!(select_permission, PhysicalPermission::Deny) {
@@ -344,5 +376,49 @@ impl ExecOperator for TableScan {
 			});
 
 		Ok(monitor_stream(Box::pin(stream), "TableScan", &self.metrics))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::scan::resolved::test_support::{
+		RESTRICTED_TABLE, anonymous, assert_as_stored, assert_reduced, contexts,
+	};
+	use crate::exec::operators::test_util::{TestDb, collect};
+	use crate::kvs::TransactionType;
+
+	/// Under the plan's enforcement the scan yields the record as stored, for
+	/// the nodes above it to reduce; under its own it reduces the record for a
+	/// permission-checked caller.
+	#[tokio::test]
+	async fn a_planned_scan_yields_the_stored_record_and_a_runtime_scan_reduces_it() {
+		let db = TestDb::new_with_auth(RESTRICTED_TABLE).await;
+		let ctx = db.exec_ctx_as(&anonymous(), TransactionType::Read).await;
+		let (planned, runtime) = contexts(&ctx, "t").await;
+		let scan = |tc: ResolvedTableContext| -> Arc<dyn ExecOperator> {
+			Arc::new(
+				TableScan::new("t".into(), Direction::Forward, None, None, None, None, None)
+					.with_resolved(tc),
+			)
+		};
+		assert_as_stored(&collect(&scan(planned), &ctx).await);
+		assert_reduced(&collect(&scan(runtime), &ctx).await);
+	}
+
+	/// Without a plan-time context the scan resolves its table when it runs,
+	/// and the mode it was planned under still decides who enforces.
+	#[tokio::test]
+	async fn a_scan_resolving_its_table_at_runtime_enforces_by_its_planned_mode() {
+		let db = TestDb::new_with_auth(RESTRICTED_TABLE).await;
+		let ctx = db.exec_ctx_as(&anonymous(), TransactionType::Read).await;
+		let scan = |mode: EnforcementMode| -> Arc<dyn ExecOperator> {
+			Arc::new(
+				TableScan::new("t".into(), Direction::Forward, None, None, None, None, None)
+					.with_enforcement_mode(mode),
+			)
+		};
+		assert_as_stored(&collect(&scan(EnforcementMode::Planned), &ctx).await);
+		assert_reduced(&collect(&scan(EnforcementMode::Runtime), &ctx).await);
 	}
 }

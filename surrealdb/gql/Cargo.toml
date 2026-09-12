@@ -17,7 +17,6 @@ categories.workspace = true
 phf = { workspace = true, features = ["macros", "unicase"] }
 reblessive = { workspace = true, features = ["tree"] }
 surrealdb-expr = { workspace = true }
-surrealdb-sql = { workspace = true }
 surrealdb-strand = { workspace = true }
 surrealdb-syn = { workspace = true }
 surrealdb-types = { workspace = true }
