@@ -214,6 +214,22 @@ util/                                # import-only datasets (never run on their 
   references-5000.surql              # 5k users (+ `friends` link array) + 15k comments whose `author` is a record REFERENCE
   records-100000-perms-full.surql    # imports records-100000 + RECORD access + table PERMISSIONS … FULL (baseline)
   records-100000-perms-where.surql   # imports records-100000 + RECORD access + row-level PERMISSIONS … WHERE
+  records-10000-perms-semijoin.surql # 10k + table PERMISSIONS … WHERE age IN (SELECT … FROM allow) (subquery policy)
+  records-10000-fieldperms-one.surql  # 10k + perms-full + ONE field-level SELECT permission (always satisfied)
+  records-10000-fieldperms-many.surql # 10k + perms-full + EIGHT field-level SELECT permissions (always satisfied)
+  records-10000-indexed-perms-full.surql      # 10k + indexes + perms-full (baseline for the indexed fast paths)
+  records-10000-indexed-fieldperms-one.surql  # …+ a field permission on the indexed `number` field
+  records-10000-computed.surql       # 10k + three read-time COMPUTED fields (owner)
+  records-10000-bucket-stored.surql  # 10k with `bucket` alone stored, equal to what records-10000-computed derives
+  records-10000-computed-stored.surql # 10k with all three of those fields stored (the whole stored twin)
+  records-10000-computed-chain.surql # 10k + a three-deep COMPUTED dependency chain (rank1 → rank2 → rank3)
+  records-10000-computed-flat.surql  # 10k + that whole chain inlined into a single COMPUTED `rank3`
+  records-10000-computed-perms.surql # imports records-10000-computed + perms-full, + a NONE-tolerant COMPUTED field
+  records-10000-computed-guarded-open.surql   # …+ a field permission that withholds nothing
+  records-10000-computed-guarded-cut.surql    # …+ one that withholds a field for half the rows (forces re-derivation)
+  records-10000-computed-deps-static.surql    # …+ a field permission whose dependencies are statically resolvable
+  records-10000-computed-deps-opaque.surql    # …+ one written with `$auth` (dependencies unresolvable)
+  records-10000-perms-where-computed.surql    # row-level table permission + COMPUTED fields on the same table
   events-timeseries-100000.surql     # 100k events with timestamps spread across one year (bounded, for bucketing)
   geo-points-100000.surql            # 100k places each with a `location` point spread across the globe
   recursion-functions.surql          # recursive user functions (fn::fib branching, fn::sum_to linear)
@@ -236,8 +252,16 @@ vector/                              # KNN: HNSW vs DiskANN vs brute-force
 references/                          # record references: reverse (`<~`) traversal/count/filtered, FETCH single + array
 mutate/                              # UPDATE/DELETE … WHERE, batch UPSERT, explicit transaction
 crud/                                # batch create/read/update/delete (100, 1000)
-permissions/                         # per-record table permission cost as a RECORD user: SELECT + UPDATE,
-                                     #   each over a row-level `WHERE` vs. `FULL` permission matrix
+permissions/                         # per-record permission cost as a RECORD user: table-level SELECT +
+                                     #   UPDATE over a row-level `WHERE` vs. `FULL` matrix; a table policy
+                                     #   written as a subquery vs. a scalar predicate; and the field-level
+                                     #   guards that withhold the scan fast paths — full read, filter scan
+                                     #   (pre-decode filter), ORDER BY … LIMIT (TopK threshold probe),
+                                     #   indexed COUNT, and COUNT fallback
+computed/                            # read-time COMPUTED field materialisation: full read, selective
+                                     #   projection, dependency chain, filter / COUNT / ORDER BY … LIMIT
+                                     #   over a computed key, and the intersection with field permissions
+                                     #   (unreduced-record clone, re-derivation against the reduced record)
 timeseries/                          # temporal bucketing: GROUP BY time::group(…) by day / hour (± per-bucket stats)
 geo/                                 # FULL-SCAN geo functions (no spatial index yet, #219): geo::distance
                                      #   proximity & nearest-N, point-in-polygon containment (INSIDE)
@@ -289,6 +313,33 @@ sessions take a fast path that skips them entirely (so the existing `scans/` and
 allows every action with no predicate; the `where` variant attaches a row-level
 `WHERE` clause that is satisfied by every row, so both arms return the same data
 and the delta isolates the per-record predicate-evaluation cost.
+
+Field-level permissions are measured the same way, and every guard in these
+datasets is written so that it is **satisfied by every row** unless the bench is
+specifically about withholding: the arms then return identical documents and the
+delta is the enforcement machinery, not a different result set. Enforcing them
+costs more than the guard predicates, because it withdraws the scan-side fast
+paths that read a field straight from revision-encoded bytes — the pre-decode
+WHERE filter, the TopK threshold probe, and the indexed-COUNT paths all require
+every field they touch to carry an `Allow` SELECT permission. Read-time COMPUTED
+fields disqualify the same paths, which is why `computed/` and `permissions/`
+share a shape: each bench pairs the restricted or computed arm against an
+otherwise identical one whose field is plain and stored.
+
+Where the two features meet, a table pays more than the sum: a row carrying both
+computed fields and a restricted field is cloned per record so guards and
+re-derivation each have the view they must read, and withholding a stored field
+re-derives *every* computed field on the table. `computed/guarded_reread` measures
+the three tiers (no guard / guard satisfied / guard withholding), and
+`computed/select_projected` measures the projection pruning that a guard written
+with a parameter gives up.
+
+Not every combination costs anything, and one arm is there to pin that: the
+conditional-permission COUNT fallback judges the table permission against the
+decoded record without ever building field state, so computed fields on that
+table are free to it. `permissions/count_scan[where_computed]` is a control that
+should stay level with `where`; a count that genuinely needs a derived value —
+because its WHERE reads one — is `computed/count_filter`.
 
 ### Profiling & flamegraphs
 
