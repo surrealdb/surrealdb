@@ -102,6 +102,12 @@ impl ScalarFunction for ValuePatch {
 // =========================================================================
 // value::chain - Chain a value through a closure
 // =========================================================================
+//
+// `value::chain` and `value::expect` run the closure they are handed, in
+// their second argument, against the row the call is evaluated against.
+// Both declare that position through `closure_args`, so a closure arriving
+// there as a value is judged as running a body the call cannot see; the
+// builtins themselves are pure.
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ValueChain;
@@ -113,6 +119,10 @@ impl ScalarFunction for ValueChain {
 
 	fn effects(&self) -> EffectSet {
 		EffectSet::PURE
+	}
+
+	fn closure_args(&self) -> &'static [usize] {
+		&[1]
 	}
 
 	fn signature(&self) -> Signature {
@@ -161,6 +171,10 @@ impl ScalarFunction for ValueExpect {
 
 	fn effects(&self) -> EffectSet {
 		EffectSet::PURE
+	}
+
+	fn closure_args(&self) -> &'static [usize] {
+		&[1]
 	}
 
 	fn signature(&self) -> Signature {

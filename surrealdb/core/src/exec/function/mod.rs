@@ -136,6 +136,30 @@ pub trait ScalarFunction: Send + Sync + Debug {
 	/// context: `rand::float` needs no context and still draws entropy.
 	fn effects(&self) -> EffectSet;
 
+	/// The argument positions in which this builtin accepts a closure it
+	/// then runs — `check` of `array::any`, `mapper` of `array::fold`, the
+	/// `closure` of `value::chain`. Empty for a builtin that runs nothing it
+	/// is handed.
+	///
+	/// A body run this way evaluates against the row the call is evaluated
+	/// against, exactly as applying the closure directly would. When the
+	/// closure is written in the call its body is in the expression and is
+	/// judged as a child; when it arrives as a value — a parameter, a field
+	/// of an object — nothing in the call says what it reads, and the
+	/// effect fold treats the call as running an unseen body
+	/// ([`EffectSet::OPAQUE_BODY`]) and as reading the row opaquely. Only the
+	/// positions named here are judged, so a value in any other position —
+	/// the array `array::any` searches, the seed `array::fold` starts from —
+	/// leaves the call transparent.
+	///
+	/// SECURITY: a closure-running builtin that omits its position here lets
+	/// a body reach a field-permission layer unguarded. The
+	/// `define_*_closure_function!` macros declare the position themselves,
+	/// and the registry's guard test pins every declaration by name.
+	fn closure_args(&self) -> &'static [usize] {
+		&[]
+	}
+
 	/// Whether a second call with the same arguments answers the same and
 	/// leaves nothing behind: [`EffectSet::is_deterministic`] of the declared
 	/// effects.

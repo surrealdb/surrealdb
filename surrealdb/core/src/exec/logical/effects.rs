@@ -31,6 +31,10 @@ impl EffectOracle for Oracle<'_> {
 		self.registry.get(name).map(|function| function.effects())
 	}
 
+	fn closure_args(&self, name: &str) -> Option<&'static [usize]> {
+		self.registry.get(name).map(|function| function.closure_args())
+	}
+
 	fn method_always_dispatches(&self, name: &str) -> bool {
 		self.registry.get_method(name).is_some_and(|d| d.dispatches_for_an_object())
 	}
@@ -53,6 +57,10 @@ pub(super) struct ParamsOnly<'a>(pub(super) &'a HashSet<String>);
 
 impl EffectOracle for ParamsOnly<'_> {
 	fn builtin(&self, _name: &str) -> Option<EffectSet> {
+		None
+	}
+
+	fn closure_args(&self, _name: &str) -> Option<&'static [usize]> {
 		None
 	}
 

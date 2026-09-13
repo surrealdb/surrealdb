@@ -7,7 +7,7 @@ auth = { namespace = "test", database = "test", access = "user", rid = "user:rea
 reason = "a closure invoked at runtime reads the row through a body the predicate does not hold, so the fields it may reach keep their guard columns"
 
 [[test.results]]
-value = "[{ id: t:1, public: 'a' }, { id: t:2, public: 'b' }]"
+value = "[{ id: t:1, public: 'a', tags: ['x'] }, { id: t:2, public: 'b', tags: ['y'] }]"
 
 [[test.results]]
 value = "[]"

@@ -661,4 +661,68 @@ mod tests {
 			);
 		}
 	}
+
+	/// Every builtin that runs a closure it is handed, with the argument
+	/// positions the closure may arrive in ([`ScalarFunction::closure_args`]).
+	///
+	/// Kept sorted, and asserted against the registry below. A closure a
+	/// builtin runs evaluates against the row, so a builtin that runs one
+	/// without declaring the position lets a body reach a field-permission
+	/// layer unguarded; one that declares a position it never runs a body in
+	/// withholds a transparent call from the rules. Either is a deliberate
+	/// edit here.
+	const CLOSURE_ARGS: &[(&str, &[usize])] = &[
+		("array::all", &[1]),
+		("array::any", &[1]),
+		("array::every", &[1]),
+		("array::filter", &[1]),
+		("array::filter_index", &[1]),
+		("array::find", &[1]),
+		("array::find_index", &[1]),
+		("array::fold", &[2]),
+		("array::includes", &[1]),
+		("array::index_of", &[1]),
+		("array::map", &[1]),
+		("array::reduce", &[1]),
+		("array::some", &[1]),
+		("set::all", &[1]),
+		("set::any", &[1]),
+		("set::filter", &[1]),
+		("set::find", &[1]),
+		("set::fold", &[2]),
+		("set::map", &[1]),
+		("set::reduce", &[1]),
+		("value::chain", &[1]),
+		("value::expect", &[1]),
+	];
+
+	#[test]
+	fn every_closure_position_is_pinned() {
+		let registry = FunctionRegistry::with_builtins();
+
+		assert!(CLOSURE_ARGS.is_sorted_by_key(|(name, _)| *name), "keep `CLOSURE_ARGS` sorted");
+		let mut actual: Vec<(&str, &[usize])> = registry
+			.scalar_functions()
+			.filter(|f| !f.closure_args().is_empty())
+			.map(|f| (f.name(), f.closure_args()))
+			.collect();
+		actual.sort_unstable_by_key(|(name, _)| *name);
+		assert_eq!(
+			actual, CLOSURE_ARGS,
+			"a closure position moved; `CLOSURE_ARGS` names every builtin that runs a closure \
+			 it is handed, with the positions it accepts one in"
+		);
+
+		// Every declared position is one the signature accepts an argument in.
+		for f in registry.scalar_functions() {
+			let (_, upper) = f.signature().arity();
+			for &slot in f.closure_args() {
+				assert!(
+					upper.is_none_or(|upper| slot < upper),
+					"{}: closure position {slot} is past the declared arguments",
+					f.name()
+				);
+			}
+		}
+	}
 }

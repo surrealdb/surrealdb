@@ -79,9 +79,16 @@ define_pure_function!(ArraySortDesc, "array::sort::desc", effects: EffectSet::PU
 // Closure-based array functions (require async execution with TreeStack)
 // =========================================================================
 
-/// Helper macro for creating closure-based array functions
+/// A builtin that runs the closure it is handed over the elements of
+/// an array. The closure is the final argument, written `|name: Kind|`, or
+/// `?|name: Kind|` when it may be omitted; the macro declares its position
+/// through [`ScalarFunction::closure_args`], which is what tells the effect
+/// fold that a closure arriving there as a value runs a body the call cannot
+/// see. A body written in the call is judged as a child of the call, and the
+/// array argument never carries a body, so the declared effects are
+/// those of the builtin alone: `PURE`.
 macro_rules! define_array_closure_function {
-	($struct_name:ident, $func_name:literal, effects: $effects:expr, $impl_path:path, $($arg:ident: $kind:ident),+, ?$oarg:ident: $okind:ident => $ret:ident) => {
+	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident,)+ ?|$carg:ident: $ckind:ident| => $ret:ident) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
 
@@ -91,13 +98,18 @@ macro_rules! define_array_closure_function {
 			}
 
 			fn effects(&self) -> EffectSet {
-				$effects
+				EffectSet::PURE
+			}
+
+			fn closure_args(&self) -> &'static [usize] {
+				const SLOTS: [usize; 1] = [[$(stringify!($arg)),+].len()];
+				&SLOTS
 			}
 
 			fn signature(&self) -> Signature {
 				Signature::new()
 					$(.arg(stringify!($arg), Kind::$kind))+
-					.optional(stringify!($oarg), Kind::$okind)
+					.optional(stringify!($carg), Kind::$ckind)
 					.returns(Kind::$ret)
 			}
 
@@ -133,7 +145,7 @@ macro_rules! define_array_closure_function {
 			}
 		}
 	};
-	($struct_name:ident, $func_name:literal, effects: $effects:expr, $impl_path:path, $($arg:ident: $kind:ident),+ => $ret:ident) => {
+	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident,)+ |$carg:ident: $ckind:ident| => $ret:ident) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
 
@@ -143,12 +155,18 @@ macro_rules! define_array_closure_function {
 			}
 
 			fn effects(&self) -> EffectSet {
-				$effects
+				EffectSet::PURE
+			}
+
+			fn closure_args(&self) -> &'static [usize] {
+				const SLOTS: [usize; 1] = [[$(stringify!($arg)),+].len()];
+				&SLOTS
 			}
 
 			fn signature(&self) -> Signature {
 				Signature::new()
 					$(.arg(stringify!($arg), Kind::$kind))+
+					.arg(stringify!($carg), Kind::$ckind)
 					.returns(Kind::$ret)
 			}
 
@@ -187,43 +205,43 @@ macro_rules! define_array_closure_function {
 }
 
 // array::all - Check if all elements match a condition
-define_array_closure_function!(ArrayAll, "array::all", effects: EffectSet::PURE, crate::fnc::array::all, array: Any, ?check: Any => Any);
+define_array_closure_function!(ArrayAll, "array::all", crate::fnc::array::all, array: Any, ?|check: Any| => Any);
 
 // array::any - Check if any element matches a condition
-define_array_closure_function!(ArrayAny, "array::any", effects: EffectSet::PURE, crate::fnc::array::any, array: Any, ?check: Any => Any);
+define_array_closure_function!(ArrayAny, "array::any", crate::fnc::array::any, array: Any, ?|check: Any| => Any);
 
 // array::every - Alias for array::all
-define_array_closure_function!(ArrayEvery, "array::every", effects: EffectSet::PURE, crate::fnc::array::all, array: Any, ?check: Any => Any);
+define_array_closure_function!(ArrayEvery, "array::every", crate::fnc::array::all, array: Any, ?|check: Any| => Any);
 
 // array::filter - Filter elements by closure/value
-define_array_closure_function!(ArrayFilter, "array::filter", effects: EffectSet::PURE, crate::fnc::array::filter, array: Any, check: Any => Any);
+define_array_closure_function!(ArrayFilter, "array::filter", crate::fnc::array::filter, array: Any, |check: Any| => Any);
 
 // array::filter_index - Get indices of matching elements
-define_array_closure_function!(ArrayFilterIndex, "array::filter_index", effects: EffectSet::PURE, crate::fnc::array::filter_index, array: Any, check: Any => Any);
+define_array_closure_function!(ArrayFilterIndex, "array::filter_index", crate::fnc::array::filter_index, array: Any, |check: Any| => Any);
 
 // array::find - Find first matching element
-define_array_closure_function!(ArrayFind, "array::find", effects: EffectSet::PURE, crate::fnc::array::find, array: Any, check: Any => Any);
+define_array_closure_function!(ArrayFind, "array::find", crate::fnc::array::find, array: Any, |check: Any| => Any);
 
 // array::find_index - Find index of first matching element
-define_array_closure_function!(ArrayFindIndex, "array::find_index", effects: EffectSet::PURE, crate::fnc::array::find_index, array: Any, check: Any => Any);
+define_array_closure_function!(ArrayFindIndex, "array::find_index", crate::fnc::array::find_index, array: Any, |check: Any| => Any);
 
 // array::fold - Fold with accumulator and closure
-define_array_closure_function!(ArrayFold, "array::fold", effects: EffectSet::PURE, crate::fnc::array::fold, array: Any, init: Any, mapper: Any => Any);
+define_array_closure_function!(ArrayFold, "array::fold", crate::fnc::array::fold, array: Any, init: Any, |mapper: Any| => Any);
 
 // array::includes - Alias for array::any
-define_array_closure_function!(ArrayIncludes, "array::includes", effects: EffectSet::PURE, crate::fnc::array::any, array: Any, ?check: Any => Any);
+define_array_closure_function!(ArrayIncludes, "array::includes", crate::fnc::array::any, array: Any, ?|check: Any| => Any);
 
 // array::index_of - Alias for array::find_index
-define_array_closure_function!(ArrayIndexOf, "array::index_of", effects: EffectSet::PURE, crate::fnc::array::find_index, array: Any, check: Any => Any);
+define_array_closure_function!(ArrayIndexOf, "array::index_of", crate::fnc::array::find_index, array: Any, |check: Any| => Any);
 
 // array::map - Transform elements with closure
-define_array_closure_function!(ArrayMap, "array::map", effects: EffectSet::PURE, crate::fnc::array::map, array: Any, mapper: Any => Any);
+define_array_closure_function!(ArrayMap, "array::map", crate::fnc::array::map, array: Any, |mapper: Any| => Any);
 
 // array::reduce - Reduce array with closure
-define_array_closure_function!(ArrayReduce, "array::reduce", effects: EffectSet::PURE, crate::fnc::array::reduce, array: Any, mapper: Any => Any);
+define_array_closure_function!(ArrayReduce, "array::reduce", crate::fnc::array::reduce, array: Any, |mapper: Any| => Any);
 
 // array::some - Alias for array::any
-define_array_closure_function!(ArraySome, "array::some", effects: EffectSet::PURE, crate::fnc::array::any, array: Any, ?check: Any => Any);
+define_array_closure_function!(ArraySome, "array::some", crate::fnc::array::any, array: Any, ?|check: Any| => Any);
 
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(

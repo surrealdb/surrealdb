@@ -39,9 +39,16 @@ define_pure_function!(SetSlice, "set::slice", effects: EffectSet::PURE, (set: An
 // Closure-based set functions (require async execution with TreeStack)
 // =========================================================================
 
-/// Helper macro for creating closure-based set functions
+/// A builtin that runs the closure it is handed over the elements of
+/// a set. The closure is the final argument, written `|name: Kind|`, or
+/// `?|name: Kind|` when it may be omitted; the macro declares its position
+/// through [`ScalarFunction::closure_args`], which is what tells the effect
+/// fold that a closure arriving there as a value runs a body the call cannot
+/// see. A body written in the call is judged as a child of the call, and the
+/// set argument never carries a body, so the declared effects are
+/// those of the builtin alone: `PURE`.
 macro_rules! define_set_closure_function {
-	($struct_name:ident, $func_name:literal, effects: $effects:expr, $impl_path:path, $($arg:ident: $kind:ident),+, ?$oarg:ident: $okind:ident => $ret:ident) => {
+	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident,)+ ?|$carg:ident: $ckind:ident| => $ret:ident) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
 
@@ -51,13 +58,18 @@ macro_rules! define_set_closure_function {
 			}
 
 			fn effects(&self) -> EffectSet {
-				$effects
+				EffectSet::PURE
+			}
+
+			fn closure_args(&self) -> &'static [usize] {
+				const SLOTS: [usize; 1] = [[$(stringify!($arg)),+].len()];
+				&SLOTS
 			}
 
 			fn signature(&self) -> Signature {
 				Signature::new()
 					$(.arg(stringify!($arg), Kind::$kind))+
-					.optional(stringify!($oarg), Kind::$okind)
+					.optional(stringify!($carg), Kind::$ckind)
 					.returns(Kind::$ret)
 			}
 
@@ -93,7 +105,7 @@ macro_rules! define_set_closure_function {
 			}
 		}
 	};
-	($struct_name:ident, $func_name:literal, effects: $effects:expr, $impl_path:path, $($arg:ident: $kind:ident),+ => $ret:ident) => {
+	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident,)+ |$carg:ident: $ckind:ident| => $ret:ident) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
 
@@ -103,12 +115,18 @@ macro_rules! define_set_closure_function {
 			}
 
 			fn effects(&self) -> EffectSet {
-				$effects
+				EffectSet::PURE
+			}
+
+			fn closure_args(&self) -> &'static [usize] {
+				const SLOTS: [usize; 1] = [[$(stringify!($arg)),+].len()];
+				&SLOTS
 			}
 
 			fn signature(&self) -> Signature {
 				Signature::new()
 					$(.arg(stringify!($arg), Kind::$kind))+
+					.arg(stringify!($carg), Kind::$ckind)
 					.returns(Kind::$ret)
 			}
 
@@ -147,25 +165,25 @@ macro_rules! define_set_closure_function {
 }
 
 // array::all - Check if all elements match a condition
-define_set_closure_function!(SetAll, "set::all", effects: EffectSet::PURE, crate::fnc::set::all, set: Any, ?check: Any => Any);
+define_set_closure_function!(SetAll, "set::all", crate::fnc::set::all, set: Any, ?|check: Any| => Any);
 
 // set::any - Check if any element matches a condition
-define_set_closure_function!(SetAny, "set::any", effects: EffectSet::PURE, crate::fnc::set::any, set: Any, ?check: Any => Any);
+define_set_closure_function!(SetAny, "set::any", crate::fnc::set::any, set: Any, ?|check: Any| => Any);
 
 // set::filter - Filter elements by closure/value
-define_set_closure_function!(SetFilter, "set::filter", effects: EffectSet::PURE, crate::fnc::set::filter, set: Any, check: Any => Any);
+define_set_closure_function!(SetFilter, "set::filter", crate::fnc::set::filter, set: Any, |check: Any| => Any);
 
 // set::find - Find first matching element
-define_set_closure_function!(SetFind, "set::find", effects: EffectSet::PURE, crate::fnc::set::find, set: Any, check: Any => Any);
+define_set_closure_function!(SetFind, "set::find", crate::fnc::set::find, set: Any, |check: Any| => Any);
 
 // set::fold - Fold with accumulator and closure
-define_set_closure_function!(SetFold, "set::fold", effects: EffectSet::PURE, crate::fnc::set::fold, set: Any, init: Any, mapper: Any => Any);
+define_set_closure_function!(SetFold, "set::fold", crate::fnc::set::fold, set: Any, init: Any, |mapper: Any| => Any);
 
 // set::map - Transform elements with closure
-define_set_closure_function!(SetMap, "set::map", effects: EffectSet::PURE, crate::fnc::set::map, set: Any, mapper: Any => Any);
+define_set_closure_function!(SetMap, "set::map", crate::fnc::set::map, set: Any, |mapper: Any| => Any);
 
 // set::reduce - Reduce set with closure
-define_set_closure_function!(SetReduce, "set::reduce", effects: EffectSet::PURE, crate::fnc::set::reduce, set: Any, mapper: Any => Any);
+define_set_closure_function!(SetReduce, "set::reduce", crate::fnc::set::reduce, set: Any, |mapper: Any| => Any);
 
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(

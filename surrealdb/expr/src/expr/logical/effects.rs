@@ -213,6 +213,15 @@ pub trait EffectOracle {
 	/// effectful as a body the call site cannot see.
 	fn builtin(&self, name: &str) -> Option<EffectSet>;
 
+	/// The argument positions in which the named builtin accepts a closure it
+	/// then runs against the row — `check` of `array::any`, `mapper` of
+	/// `array::fold` — or `None` for a name the registry does not know.
+	/// Empty for a builtin that runs nothing it is handed.
+	///
+	/// SECURITY: a closure arriving in one of these positions as a value
+	/// runs a body the call site cannot see; see [`invokes_unseen_body`].
+	fn closure_args(&self, name: &str) -> Option<&'static [usize]>;
+
 	/// Whether `.name(args)` is guaranteed to reach a builtin, whatever the
 	/// receiver holds.
 	///
@@ -244,7 +253,9 @@ pub struct Effects {
 	/// The union of the declared effects of every builtin the expression
 	/// calls, with [`EffectSet::OPAQUE_BODY`] for every call whose body the
 	/// call site cannot see — a user-defined, scripted, module or silo
-	/// function, an unknown name, an applied value, an unregistered method —
+	/// function, an unknown name, an applied value, an unregistered method, a
+	/// builtin declaring it, a builtin handed a closure it runs as a value
+	/// rather than written in the call —
 	/// [`EffectSet::READS_ROW`] for a call evaluated against the row, and
 	/// [`EffectSet::READS_EXTERNAL`] for a model.
 	pub set: EffectSet,
@@ -273,9 +284,9 @@ pub struct Effects {
 	/// Whether the expression may read the row other than by a field's name:
 	/// through an iteration parameter, the document, a nested statement, a
 	/// call evaluated against the row, or the invocation of a value whose
-	/// body is not in the expression. What such a read reaches cannot be
-	/// told from the expression, so a node that sets columns on the row
-	/// withholds it.
+	/// body is not in the expression ([`invokes_unseen_body`]). What such a
+	/// read reaches cannot be told from the expression, so a node that sets
+	/// columns on the row withholds it.
 	pub reads_row_opaquely: bool,
 }
 
@@ -354,10 +365,25 @@ pub fn effects_of(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> Effects {
 }
 
 /// Whether `expr` itself invokes a value whose body is not in the
-/// expression: an applied value, or a method whose name the registry does
-/// not define, which calls a closure stored under that name on the receiver.
-/// A registered method is not this: it dispatches on the receiver's type and
-/// evaluates against the receiver, and its arguments are read as written.
+/// expression: an applied value; a method whose name the registry does not
+/// define, which calls a closure stored under that name on the receiver; or
+/// a call to a builtin that runs a closure it is handed — `array::any`,
+/// `array::map`, `value::chain` and the like — with a value that may be a
+/// closure not written in the call in a position the builtin runs one from.
+/// A registered method that always dispatches is not this: it evaluates
+/// against the receiver, and its arguments are read as written.
+///
+/// A body a builtin runs evaluates against the row the call is evaluated
+/// against, exactly as `$pred()` does, so the same judgement applies: when
+/// the closure is written in the call its body is in the expression and is
+/// read like any other child; when it arrives any other way — a parameter, a
+/// field of an object, the result of another call — what it reads cannot be
+/// told from the call. Only the positions the builtin declares
+/// ([`EffectOracle::closure_args`]) are judged, so the array `array::any`
+/// searches or the seed `array::fold` starts from may be a field or a
+/// parameter without making the call opaque. A builtin the registry does
+/// not know, or one declaring [`EffectSet::OPAQUE_BODY`] outright, is judged
+/// in every position: nothing says where its body comes from.
 pub fn invokes_unseen_body(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> bool {
 	match expr {
 		LogicalExpr::Invoke {
@@ -367,6 +393,31 @@ pub fn invokes_unseen_body(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> boo
 			name,
 			..
 		} => !oracle.method_always_dispatches(name.as_str()),
+		LogicalExpr::Call(call) => match &call.receiver {
+			Function::Normal(name) => {
+				let every_position = oracle
+					.builtin(name)
+					.is_none_or(|effects| effects.contains(EffectSet::OPAQUE_BODY));
+				match oracle.closure_args(name) {
+					Some(slots) if !every_position => slots
+						.iter()
+						.filter_map(|&slot| call.args.get(slot))
+						.any(may_carry_unseen_closure),
+					_ => call.args.iter().any(may_carry_unseen_closure),
+				}
+			}
+			// A body of these is not one of the arguments: a user-defined,
+			// scripted, module or silo function runs its own, which
+			// [`call_evaluates_against_row`] accounts for, and a model has
+			// none.
+			Function::Model(_)
+			| Function::Custom(_)
+			| Function::Script(_)
+			| Function::Module(..)
+			| Function::Silo {
+				..
+			} => false,
+		},
 		LogicalExpr::Literal(_)
 		| LogicalExpr::Array(_)
 		| LogicalExpr::Set(_)
@@ -419,13 +470,147 @@ pub fn invokes_unseen_body(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> boo
 		| LogicalExpr::Binary {
 			..
 		}
-		| LogicalExpr::Call(_)
 		| LogicalExpr::Closure(_)
 		| LogicalExpr::If(_)
 		| LogicalExpr::Throw(_)
 		| LogicalExpr::Break
 		| LogicalExpr::Continue
 		| LogicalExpr::Subquery(_) => false,
+	}
+}
+
+/// Whether the value of `arg` may be a closure whose body is not in the
+/// expression: what the argument in a builtin's closure position has to be
+/// for the call to invoke an unseen body.
+///
+/// `false` for a closure written in place — its body is in the expression and
+/// is read as a child — and for what can never evaluate to a closure: a
+/// literal, a record id, a table name, a constant, a container holding only
+/// such, a comparison, an arithmetic, containment, range or index operator,
+/// and `!`. Everything else may: a parameter, a field, a path, a call, a
+/// method, an `IF`, a nested statement, and the operators that yield one of
+/// their operands (`??`, `?:`, `AND`, `OR`), which may if an operand may. A
+/// field is included because a row is not always a stored record — a
+/// projection can put a closure in a column — and being wrong here is a
+/// permission leak, so the unclear cases fall on the opaque side.
+fn may_carry_unseen_closure(arg: &LogicalExpr) -> bool {
+	match arg {
+		LogicalExpr::Closure(_)
+		| LogicalExpr::Literal(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Constant(_) => false,
+		LogicalExpr::Array(items) | LogicalExpr::Set(items) => {
+			items.iter().any(may_carry_unseen_closure)
+		}
+		LogicalExpr::Object(fields) => {
+			fields.iter().any(|(_, value)| may_carry_unseen_closure(value))
+		}
+		LogicalExpr::Binary {
+			left,
+			op,
+			right,
+		} => match op {
+			BinaryOperator::NullCoalescing
+			| BinaryOperator::TenaryCondition
+			| BinaryOperator::And
+			| BinaryOperator::Or => may_carry_unseen_closure(left) || may_carry_unseen_closure(right),
+			BinaryOperator::Equal
+			| BinaryOperator::ExactEqual
+			| BinaryOperator::NotEqual
+			| BinaryOperator::AllEqual
+			| BinaryOperator::AnyEqual
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+			| BinaryOperator::Contain
+			| BinaryOperator::NotContain
+			| BinaryOperator::ContainAll
+			| BinaryOperator::ContainAny
+			| BinaryOperator::ContainNone
+			| BinaryOperator::Inside
+			| BinaryOperator::NotInside
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::NoneInside
+			| BinaryOperator::Outside
+			| BinaryOperator::Intersects
+			| BinaryOperator::Add
+			| BinaryOperator::Subtract
+			| BinaryOperator::Multiply
+			| BinaryOperator::Divide
+			| BinaryOperator::Remainder
+			| BinaryOperator::Power
+			| BinaryOperator::Range
+			| BinaryOperator::RangeInclusive
+			| BinaryOperator::RangeSkip
+			| BinaryOperator::RangeSkipInclusive
+			| BinaryOperator::Matches(_)
+			| BinaryOperator::NearestNeighbor(_) => false,
+		},
+		LogicalExpr::Prefix {
+			op,
+			expr,
+		} => match op {
+			PrefixOperator::Not
+			| PrefixOperator::Positive
+			| PrefixOperator::Negate
+			| PrefixOperator::Range
+			| PrefixOperator::RangeInclusive => false,
+			PrefixOperator::Cast(_) => may_carry_unseen_closure(expr),
+		},
+		LogicalExpr::Param(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Call(_)
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_)
+		| LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_) => true,
 	}
 }
 
@@ -451,12 +636,18 @@ fn node_set(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> EffectSet {
 	match expr {
 		LogicalExpr::Call(call) => match &call.receiver {
 			Function::Normal(name) => {
-				let declared = oracle.builtin(name).unwrap_or(EffectSet::OPAQUE_BODY);
+				let mut set = oracle.builtin(name).unwrap_or(EffectSet::OPAQUE_BODY);
 				if oracle.evaluates_against_row(name) {
-					declared.union(EffectSet::READS_ROW)
-				} else {
-					declared
+					set = set.union(EffectSet::READS_ROW);
 				}
+				// A closure the builtin runs from one of its declared
+				// positions is a body the call site cannot see whenever it is
+				// not written in the call; the builtin itself declares only
+				// what it does besides.
+				if invokes_unseen_body(expr, oracle) {
+					set = set.union(EffectSet::OPAQUE_BODY);
+				}
+				set
 			}
 			Function::Model(_) => EffectSet::READS_EXTERNAL,
 			Function::Custom(_)
@@ -546,6 +737,7 @@ fn node_is_impure(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> bool {
 		LogicalExpr::Call(call) => match &call.receiver {
 			Function::Normal(name) => {
 				oracle.builtin(name).is_none_or(|effects| !effects.is_deterministic())
+					|| invokes_unseen_body(expr, oracle)
 			}
 			Function::Custom(_)
 			| Function::Script(_)
@@ -879,7 +1071,9 @@ fn node_reads_row_opaquely(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> boo
 	match expr {
 		LogicalExpr::Doc | LogicalExpr::Subquery(_) => true,
 		LogicalExpr::Param(param) => ITERATION_PARAMS.contains(&param.as_str()),
-		LogicalExpr::Call(call) => call_evaluates_against_row(call, oracle),
+		LogicalExpr::Call(call) => {
+			call_evaluates_against_row(call, oracle) || invokes_unseen_body(expr, oracle)
+		}
 		LogicalExpr::Invoke {
 			..
 		}
@@ -1073,7 +1267,169 @@ pub fn may_dereference(expr: &LogicalExpr) -> bool {
 
 #[cfg(test)]
 mod tests {
-	use super::EffectSet;
+	use super::{EffectOracle, EffectSet, invokes_unseen_body};
+	use crate::expr::logical::{LogicalCall, LogicalClosure, LogicalExpr, LogicalLiteral};
+	use crate::expr::{BinaryOperator, Function, Param};
+
+	/// An oracle declaring `array::any` and `array::fold` as pure builtins
+	/// running a closure from their last position, `api::invoke` as running
+	/// a body it cannot see outright, and `string::len` as pure, with no
+	/// methods and no projection functions.
+	struct Declared;
+
+	impl EffectOracle for Declared {
+		fn builtin(&self, name: &str) -> Option<EffectSet> {
+			match name {
+				"array::any" | "array::fold" | "string::len" => Some(EffectSet::PURE),
+				"api::invoke" => Some(EffectSet::OPAQUE_BODY),
+				_ => None,
+			}
+		}
+
+		fn closure_args(&self, name: &str) -> Option<&'static [usize]> {
+			match name {
+				"array::any" => Some(&[1]),
+				"array::fold" => Some(&[2]),
+				"string::len" | "api::invoke" => Some(&[]),
+				_ => None,
+			}
+		}
+
+		fn method_always_dispatches(&self, _name: &str) -> bool {
+			false
+		}
+
+		fn evaluates_against_row(&self, _name: &str) -> bool {
+			false
+		}
+
+		fn permission_checked_param(&self, _name: &str) -> bool {
+			false
+		}
+	}
+
+	fn call(name: &str, args: Vec<LogicalExpr>) -> LogicalExpr {
+		LogicalExpr::Call(Box::new(LogicalCall {
+			receiver: Function::Normal(name.to_string()),
+			args,
+		}))
+	}
+
+	fn param(name: &str) -> LogicalExpr {
+		LogicalExpr::Param(Param::from(name.to_string()))
+	}
+
+	fn int(n: i64) -> LogicalExpr {
+		LogicalExpr::Literal(LogicalLiteral::Integer(n))
+	}
+
+	fn closure(body: LogicalExpr) -> LogicalExpr {
+		LogicalExpr::Closure(Box::new(LogicalClosure {
+			args: Vec::new(),
+			returns: None,
+			body,
+		}))
+	}
+
+	#[test]
+	fn a_callback_builtin_handed_a_value_invokes_an_unseen_body() {
+		let one = LogicalExpr::Array(vec![int(1)]);
+		// The closure as a parameter, and read off an object in a parameter.
+		assert!(invokes_unseen_body(
+			&call("array::any", vec![one.clone(), param("pred")]),
+			&Declared
+		));
+		let field = LogicalExpr::Access {
+			base: Box::new(param("o")),
+			field: "check".into(),
+		};
+		assert!(invokes_unseen_body(&call("array::any", vec![one.clone(), field]), &Declared));
+		// The closure as the result of another call.
+		let inner = call("array::any", vec![one.clone(), param("pred")]);
+		assert!(invokes_unseen_body(&call("array::any", vec![one, inner]), &Declared));
+		// A builtin the oracle does not know is as opaque as one declaring it.
+		assert!(invokes_unseen_body(&call("fn::unknown", vec![param("pred")]), &Declared));
+	}
+
+	#[test]
+	fn a_closure_written_in_the_call_is_not_unseen() {
+		let one = LogicalExpr::Array(vec![int(1)]);
+		let body = LogicalExpr::Binary {
+			left: Box::new(LogicalExpr::Field("secret".into())),
+			op: BinaryOperator::Equal,
+			right: Box::new(LogicalExpr::Literal(LogicalLiteral::String("yes".into()))),
+		};
+		assert!(!invokes_unseen_body(
+			&call("array::any", vec![one.clone(), closure(body)]),
+			&Declared
+		));
+		// Nor is a value that can never be a closure: a literal check, a
+		// comparison, a container of literals.
+		assert!(!invokes_unseen_body(&call("array::any", vec![one.clone(), int(1)]), &Declared));
+		let cmp = LogicalExpr::Binary {
+			left: Box::new(param("a")),
+			op: BinaryOperator::MoreThan,
+			right: Box::new(int(1)),
+		};
+		assert!(!invokes_unseen_body(&call("array::any", vec![one.clone(), cmp]), &Declared));
+		// `??` yields an operand, so it carries what its operands may.
+		let coalesce = LogicalExpr::Binary {
+			left: Box::new(param("pred")),
+			op: BinaryOperator::NullCoalescing,
+			right: Box::new(int(1)),
+		};
+		assert!(invokes_unseen_body(&call("array::any", vec![one, coalesce]), &Declared));
+	}
+
+	#[test]
+	fn a_pure_builtin_runs_no_body_whatever_it_is_handed() {
+		assert!(!invokes_unseen_body(&call("string::len", vec![param("pred")]), &Declared));
+		assert!(!invokes_unseen_body(
+			&call("string::len", vec![LogicalExpr::Field("name".into())]),
+			&Declared
+		));
+	}
+
+	#[test]
+	fn only_the_declared_closure_position_is_judged() {
+		let tags = LogicalExpr::Field("tags".into());
+		// The array searched is a field and the check a literal: nothing in
+		// the closure position may be a body, so the call is transparent.
+		assert!(!invokes_unseen_body(&call("array::any", vec![tags.clone(), int(1)]), &Declared));
+		assert!(!invokes_unseen_body(&call("array::any", vec![param("arr"), int(1)]), &Declared));
+		// The same array with a parameter in the closure position is not.
+		assert!(invokes_unseen_body(&call("array::any", vec![tags, param("pred")]), &Declared));
+		// `array::fold` runs its third argument: a parameter seed is not a
+		// body, a parameter mapper is.
+		let body = closure(param("acc"));
+		assert!(!invokes_unseen_body(
+			&call("array::fold", vec![param("arr"), param("init"), body]),
+			&Declared
+		));
+		assert!(invokes_unseen_body(
+			&call("array::fold", vec![param("arr"), int(0), param("f")]),
+			&Declared
+		));
+		// A closure position the call leaves empty carries nothing.
+		assert!(!invokes_unseen_body(&call("array::any", vec![param("arr")]), &Declared));
+		// A builtin declaring an opaque body outright is judged in every
+		// position, having declared none.
+		assert!(invokes_unseen_body(&call("api::invoke", vec![param("req")]), &Declared));
+		assert!(!invokes_unseen_body(&call("api::invoke", vec![int(1)]), &Declared));
+	}
+
+	#[test]
+	fn a_closure_a_builtin_runs_is_an_effect_of_the_call() {
+		use super::effects_of;
+		let tags = LogicalExpr::Field("tags".into());
+		let transparent = effects_of(&call("array::any", vec![tags.clone(), int(1)]), &Declared);
+		assert!(transparent.pure(), "{transparent:?}");
+		assert!(!transparent.reads_row_opaquely);
+		let opaque = effects_of(&call("array::any", vec![tags, param("pred")]), &Declared);
+		assert!(opaque.set.contains(EffectSet::OPAQUE_BODY), "{opaque:?}");
+		assert!(opaque.impure);
+		assert!(opaque.reads_row_opaquely);
+	}
 
 	#[test]
 	fn a_read_of_stable_state_is_deterministic_and_an_effect_is_not() {

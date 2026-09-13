@@ -33,15 +33,25 @@ pub(crate) fn reads_row_opaquely(expr: &LogicalExpr, registry: &FunctionRegistry
 }
 
 /// Whether `expr` itself invokes a value whose body is not in the
-/// expression: `e(args)`, or a method whose name the registry does not
-/// define, which calls a closure stored under that name on the receiver.
+/// expression: `e(args)`; a method whose name the registry does not define,
+/// which calls a closure stored under that name on the receiver; or a call
+/// to a builtin that runs a closure it is handed — `array::any`,
+/// `array::map`, `value::chain` and the rest declaring a closure position
+/// through [`ScalarFunction::closure_args`](crate::exec::function::ScalarFunction::closure_args)
+/// — with a value in that position that may be a closure not written in the
+/// call.
 ///
 /// SECURITY: what such a call reads off the row cannot be told from the call.
 /// `LET $pred = || secret = 'yes'` puts the body nowhere in `WHERE $pred()`,
-/// and `LET $o = { check: || secret = 'yes' }` puts it nowhere in
-/// `WHERE $o.check()`. Judged beneath a field-permission layer either would
-/// read the stored `secret` and leak it through row membership, and the
-/// resolver would emit no guard column for a field nothing appears to read.
+/// `LET $o = { check: || secret = 'yes' }` puts it nowhere in
+/// `WHERE $o.check()`, and `LET $pred = |$x| secret = 'yes'` puts it nowhere
+/// in `WHERE array::any([1], $pred)`, though the builtin runs it against the
+/// row. Judged beneath a field-permission layer each would read the stored
+/// `secret` and leak it through row membership, and the resolver would emit
+/// no guard column for a field nothing appears to read. A closure written in
+/// the call is not this: its body is in the expression, and its reads are
+/// judged like any other child's. Nor is a value outside the closure
+/// position: `array::any(tags, 'x')` reads `tags` by name and nothing else.
 ///
 /// A registered name does not settle it either. A method with no
 /// implementation for the receiver's type degrades to invoking a closure
