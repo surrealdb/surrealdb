@@ -11,7 +11,7 @@ BENCH_DURATION = { value = "30", condition = { env_not_set = [
 BENCH_SAMPLE_SIZE = { value = "10", condition = { env_not_set = [
     "BENCH_SAMPLE_SIZE",
 ] } }
-BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", condition = { env_not_set = [
+BENCH_FEATURES = { value = "allocator,protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", condition = { env_not_set = [
     "BENCH_FEATURES",
 ] } }
 # Configure LLVM profiling output to go to target directory instead of repo root
@@ -1474,19 +1474,19 @@ args = [
 [tasks.bench-lib-mem]
 category = "CI - BENCHMARK"
 description = "Run library benchmarks with the in-memory engine"
-env = { BENCH_DATASTORE_TARGET = "lib-mem", BENCH_LIB_FEATURES = "kv-mem" }
+env = { BENCH_DATASTORE_TARGET = "lib-mem", BENCH_LIB_FEATURES = "allocator,kv-mem" }
 run_task = { name = ["bench-lib-target"] }
 
 [tasks.bench-lib-rocksdb]
 category = "CI - BENCHMARK"
 description = "Run library benchmarks with the RocksDB engine"
-env = { BENCH_DATASTORE_TARGET = "lib-rocksdb", BENCH_LIB_FEATURES = "kv-rocksdb" }
+env = { BENCH_DATASTORE_TARGET = "lib-rocksdb", BENCH_LIB_FEATURES = "allocator,kv-rocksdb" }
 run_task = { name = ["bench-lib-target"] }
 
 [tasks.bench-lib-surrealkv]
 category = "CI - BENCHMARK"
 description = "Run library benchmarks with the SurrealKV engine"
-env = { BENCH_DATASTORE_TARGET = "lib-surrealkv", BENCH_LIB_FEATURES = "kv-surrealkv" }
+env = { BENCH_DATASTORE_TARGET = "lib-surrealkv", BENCH_LIB_FEATURES = "allocator,kv-surrealkv" }
 run_task = { name = ["bench-lib-target"] }
 
 [tasks.bench-sdk-mem]
