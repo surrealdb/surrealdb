@@ -977,15 +977,15 @@ pub(crate) async fn filter_fields_by_permission(
 				// issue #7356). Predicates read from `original` (immutable),
 				// so evaluation order is irrelevant.
 				for path in original.each(&idiom.0).into_iter().rev() {
-					let field_value = original.pick(&path.0);
+					let field_value = original.pick_cow(&path.0);
 					let allowed =
-						check_permission_for_value(perm, original, Some(&field_value), ctx)
+						check_permission_for_value(perm, original, Some(field_value.as_ref()), ctx)
 							.await
 							.map_err(|e| {
-							ControlFlow::Err(anyhow::anyhow!(
-								"Failed to check field permission: {e}"
-							))
-						})?;
+								ControlFlow::Err(anyhow::anyhow!(
+									"Failed to check field permission: {e}"
+								))
+							})?;
 					if !allowed {
 						value.cut(&path.0);
 					}
