@@ -674,6 +674,60 @@ pub async fn signin_ends_the_previous_principals_live_queries(new_db: impl Creat
 	drop(permit);
 }
 
+/// A write inside a client-side transaction reaches live subscribers once the
+/// transaction commits, and not before.
+pub async fn live_select_sees_client_side_transaction(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+
+	let mut stream = db.select(Resource::from(&table)).live().await.unwrap();
+
+	let tx = db.clone().begin().await.unwrap();
+	let _: Value = tx.create(Resource::from(&table)).await.unwrap();
+
+	assert!(
+		tokio::time::timeout(Duration::from_millis(500), stream.next()).await.is_err(),
+		"a notification arrived before the client-side transaction committed",
+	);
+
+	tx.commit().await.unwrap();
+
+	let notification: Notification<Value> =
+		tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap().unwrap();
+	assert_eq!(notification.action, Action::Create);
+
+	drop(permit);
+}
+
+/// A cancelled client-side transaction delivers nothing.
+pub async fn live_select_ignores_cancelled_client_side_transaction(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+
+	let mut stream = db.select(Resource::from(&table)).live().await.unwrap();
+
+	let tx = db.clone().begin().await.unwrap();
+	let _: Value = tx.create(Resource::from(&table)).await.unwrap();
+	tx.cancel().await.unwrap();
+
+	assert!(
+		tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.is_err(),
+		"a cancelled client-side transaction delivered a notification",
+	);
+
+	drop(permit);
+}
+
 define_include_tests!(live => {
 	#[test_log::test(tokio::test)]
 	signin_ends_the_previous_principals_live_queries,
@@ -691,4 +745,8 @@ define_include_tests!(live => {
 	live_query_delete_notifications,
 	#[test_log::test(tokio::test)]
 	live_select_returns_uuid,
+	#[test_log::test(tokio::test)]
+	live_select_sees_client_side_transaction,
+	#[test_log::test(tokio::test)]
+	live_select_ignores_cancelled_client_side_transaction,
 });

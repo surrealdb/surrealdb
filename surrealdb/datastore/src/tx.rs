@@ -1150,6 +1150,12 @@ impl Transaction {
 		}
 	}
 
+	/// Whether this transaction may write; `false` for one opened as
+	/// [`TransactionType::Read`].
+	pub fn writeable(&self) -> bool {
+		self.tr.writeable()
+	}
+
 	/// Queue work to run once this transaction commits.
 	///
 	/// See [`Self::commit_actions`] for why an effect waits.
