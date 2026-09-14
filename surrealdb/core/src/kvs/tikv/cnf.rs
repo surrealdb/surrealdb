@@ -169,6 +169,12 @@ impl Config for TikvConfig {
 			.parse_key_bool("tikv_health_probe", &mut self.health_probe)
 			.parse_key("tikv_shutdown_grace", &mut self.shutdown_grace_secs)
 			.parse_key("tikv_shutdown_gc_timeout", &mut self.shutdown_gc_timeout_secs);
+		if self.grpc_max_decoding_message_size == 0 {
+			self.grpc_max_decoding_message_size = 4 * 1024 * 1024;
+		}
+		if self.grpc_max_encoding_message_size == 0 {
+			self.grpc_max_encoding_message_size = 4 * 1024 * 1024;
+		}
 	}
 }
 
@@ -232,5 +238,15 @@ mod test {
 		assert!(!config.health_probe);
 		assert_eq!(config.shutdown_grace_secs, 60);
 		assert_eq!(config.shutdown_gc_timeout_secs, 5);
+	}
+
+	#[test]
+	fn fallbacks_zero_grpc_message_size() {
+		let map = ConfigMap::empty()
+			.with_key_value("tikv_grpc_max_decoding_message_size", "0")
+			.with_key_value("tikv_grpc_max_encoding_message_size", "0");
+		let config = map.load::<TikvConfig>();
+		assert_eq!(config.grpc_max_decoding_message_size, 4 * 1024 * 1024);
+		assert_eq!(config.grpc_max_encoding_message_size, 4 * 1024 * 1024);
 	}
 }
