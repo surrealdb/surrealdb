@@ -20,6 +20,7 @@ clap = { version = "4.6.1", features = ["derive"] }
 tokio = { version = "1.52.1", features = ["full"] }
 tracing-perfetto = "0.1.5"
 tracing-subscriber = "0.3.23"
+tracing = { workspace = true, features = ["release_max_level_debug"] }
 chrono.workspace = true
 
 [lints]
