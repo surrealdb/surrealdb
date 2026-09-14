@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use super::Planner;
-use super::util::{extract_table_from_context, key_lit_to_expr};
+use super::util::key_lit_to_expr;
 use crate::err::Error;
 use crate::exec::ExecOperator;
 use crate::exec::operators::{
@@ -98,11 +98,9 @@ impl<'ctx> Planner<'ctx> {
 					),
 				})?;
 
-				let match_ctx = matches_ctx
-					.resolve(match_ref, extract_table_from_context(self.ctx))
-					.map_err(|e| Error::Query {
-						message: format!("Index function '{}': {}", name, e),
-					})?;
+				let match_ctx = matches_ctx.resolve(match_ref).map_err(|e| Error::Query {
+					message: format!("Index function '{}': {}", name, e),
+				})?;
 
 				IndexContext::FullText(match_ctx)
 			}

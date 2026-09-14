@@ -208,7 +208,8 @@ impl IndexFunction for SearchHighlight {
 			let doc = ctx.current_value.unwrap_or(&Value::None);
 
 			// Get the full-text index resources (lazy init)
-			let (fti, qt, _scorer) = match_ctx.ft_resources(ctx).await?;
+			let resources = match_ctx.ft_resources(ctx, &rid.table).await?;
+			let (fti, qt, _scorer) = resources.as_ref();
 
 			let tx = ctx.txn();
 
@@ -275,7 +276,8 @@ impl IndexFunction for SearchScore {
 			let rid = extract_record_id(ctx)?;
 
 			// Get the full-text index resources (lazy init)
-			let (fti, qt, scorer) = match_ctx.ft_resources(ctx).await?;
+			let resources = match_ctx.ft_resources(ctx, &rid.table).await?;
+			let (fti, qt, scorer) = resources.as_ref();
 
 			let scorer = match scorer {
 				Some(s) => s,
@@ -356,7 +358,8 @@ impl IndexFunction for SearchOffsets {
 			let rid = extract_record_id(ctx)?;
 
 			// Get the full-text index resources (lazy init)
-			let (fti, qt, _scorer) = match_ctx.ft_resources(ctx).await?;
+			let resources = match_ctx.ft_resources(ctx, &rid.table).await?;
+			let (fti, qt, _scorer) = resources.as_ref();
 
 			let tx = ctx.txn();
 

@@ -159,26 +159,26 @@ pub trait IndexFunction: SendSyncRequirement + Debug {
 /// This captures the field path and query string from a `WHERE field @N@ 'query'`
 /// expression and provides lazy access to the associated full-text index
 /// infrastructure. The expensive FullTextIndex/QueryTerms/Scorer are initialized
-/// only on first use and then cached for all subsequent rows.
+/// on first use per table and version, then cached for subsequent rows.
 pub struct MatchContext {
 	/// The field path from the left side of the MATCHES operator.
 	pub idiom: Idiom,
 	/// The search query string from the right side of the MATCHES operator.
 	pub query: String,
-	/// The table name for index lookup.
-	pub table: TableName,
-	/// Lazily initialized full-text index resources.
-	ft_cache: tokio::sync::OnceCell<(FullTextIndex, QueryTerms, Option<Scorer>)>,
+	/// Lazily initialized resources for each record table and catalog version.
+	ft_cache: tokio::sync::RwLock<FullTextCache>,
 }
+
+type FullTextResources = (FullTextIndex, QueryTerms, Option<Scorer>);
+type FullTextCache = HashMap<(TableName, Option<u64>), Arc<FullTextResources>>;
 
 impl MatchContext {
 	/// Create a new MatchContext from resolved MATCHES clause info.
-	pub fn new(idiom: Idiom, query: String, table: TableName) -> Self {
+	pub fn new(idiom: Idiom, query: String) -> Self {
 		Self {
 			idiom,
 			query,
-			table,
-			ft_cache: tokio::sync::OnceCell::new(),
+			ft_cache: tokio::sync::RwLock::new(HashMap::new()),
 		}
 	}
 
@@ -186,89 +186,102 @@ impl MatchContext {
 	///
 	/// On first call, this looks up the full-text index definition for the
 	/// table/idiom, opens the FullTextIndex, extracts QueryTerms, and
-	/// optionally creates a Scorer. Subsequent calls return the cached result.
+	/// optionally creates a Scorer. Calls reuse the result per table and version.
 	pub async fn ft_resources(
 		&self,
 		ctx: &EvalContext<'_>,
-	) -> Result<&(FullTextIndex, QueryTerms, Option<Scorer>)> {
-		self.ft_cache
-			.get_or_try_init(|| async {
-				use crate::catalog::providers::TableProvider;
+		table: &TableName,
+	) -> Result<Arc<FullTextResources>> {
+		// A reused subquery can evaluate VERSION differently for each outer row.
+		let key = (table.clone(), ctx.exec_ctx.version_stamp());
+		if let Some(resources) = self.ft_cache.read().await.get(&key) {
+			return Ok(Arc::clone(resources));
+		}
+		let mut cache = self.ft_cache.write().await;
+		if let Some(resources) = cache.get(&key) {
+			return Ok(Arc::clone(resources));
+		}
+		let resources = Arc::new(self.load_ft_resources(ctx, table).await?);
+		cache.insert(key, Arc::clone(&resources));
+		Ok(resources)
+	}
 
-				let frozen = ctx.exec_ctx.ctx();
-				let root = ctx.exec_ctx.root();
-				let opt = root
-					.options
-					.as_ref()
-					.ok_or_else(|| anyhow::anyhow!("IndexFunction requires Options context"))?;
-				let tx = ctx.txn();
+	async fn load_ft_resources(
+		&self,
+		ctx: &EvalContext<'_>,
+		table: &TableName,
+	) -> Result<FullTextResources> {
+		use crate::catalog::providers::TableProvider;
 
-				// Get namespace and database IDs from the execution context
-				let db_ctx = ctx.exec_ctx.database().map_err(|e| {
-					anyhow::anyhow!("IndexFunction requires database context: {}", e)
-				})?;
-				let ns_id = db_ctx.ns_ctx.ns.namespace_id;
-				let db_id = db_ctx.db.database_id;
+		let frozen = ctx.exec_ctx.ctx();
+		let root = ctx.exec_ctx.root();
+		let opt = root
+			.options
+			.as_ref()
+			.ok_or_else(|| anyhow::anyhow!("IndexFunction requires Options context"))?;
+		let tx = ctx.txn();
 
-				// Find the full-text index for this table and idiom
-				let indexes = tx
-					.all_tb_indexes(ns_id, db_id, &self.table, ctx.exec_ctx.version_stamp())
-					.await?;
-				let indexes = if ctx.exec_ctx.version_stamp().is_none() {
-					// MATCHES/scoring must only open indexes that durable build
-					// state has published as queryable.
-					filter_online_indexes(tx.as_ref(), ns_id, db_id, indexes).await?
-				} else {
-					indexes
-				};
-				let index_def = indexes
-					.iter()
-					.find(|idx| {
-						matches!(&idx.index, Index::FullText(_))
-							&& idx.cols.iter().any(|col| col.0 == self.idiom.0)
-					})
-					.ok_or_else(|| {
-						anyhow::anyhow!(
-							"No full-text index found for field {:?} on table {}",
-							self.idiom,
-							self.table
-						)
-					})?;
+		// Get namespace and database IDs from the execution context
+		let db_ctx = ctx
+			.exec_ctx
+			.database()
+			.map_err(|e| anyhow::anyhow!("IndexFunction requires database context: {}", e))?;
+		let ns_id = db_ctx.ns_ctx.ns.namespace_id;
+		let db_id = db_ctx.db.database_id;
 
-				let ft_params = match &index_def.index {
-					Index::FullText(params) => params,
-					_ => unreachable!("Already checked for FullText above"),
-				};
-
-				let ikb = IndexKeyBase::new(ns_id, db_id, self.table.clone(), index_def.index_id);
-
-				// Open the full-text index
-				let fti = FullTextIndex::new(
-					frozen.get_index_stores(),
-					tx.as_ref(),
-					ikb,
-					ft_params,
-					&frozen.config.file_allowlist,
-				)
-				.await?;
-
-				// Extract query terms
-				let query_terms = {
-					let mut stack = reblessive::TreeStack::new();
-					stack
-						.enter(|stk| {
-							fti.extract_querying_terms(stk, frozen, opt, self.query.clone())
-						})
-						.finish()
-						.await?
-				};
-
-				// Create scorer if BM25 is configured
-				let scorer = fti.new_scorer(frozen).await?;
-
-				Ok((fti, query_terms, scorer))
+		// Find the full-text index for this table and idiom
+		let indexes = tx.all_tb_indexes(ns_id, db_id, table, ctx.exec_ctx.version_stamp()).await?;
+		let indexes = if ctx.exec_ctx.version_stamp().is_none() {
+			// MATCHES/scoring must only open indexes that durable build
+			// state has published as queryable.
+			filter_online_indexes(tx.as_ref(), ns_id, db_id, indexes).await?
+		} else {
+			indexes
+		};
+		let index_def = indexes
+			.iter()
+			.find(|idx| {
+				matches!(&idx.index, Index::FullText(_))
+					&& idx.cols.iter().any(|col| col.0 == self.idiom.0)
 			})
-			.await
+			.ok_or_else(|| {
+				anyhow::anyhow!(
+					"No full-text index found for field {:?} on table {}",
+					self.idiom,
+					table
+				)
+			})?;
+
+		let ft_params = match &index_def.index {
+			Index::FullText(params) => params,
+			_ => unreachable!("Already checked for FullText above"),
+		};
+
+		let ikb = IndexKeyBase::new(ns_id, db_id, table.clone(), index_def.index_id);
+
+		// Open the full-text index
+		let fti = FullTextIndex::new(
+			frozen.get_index_stores(),
+			tx.as_ref(),
+			ikb,
+			ft_params,
+			&frozen.config.file_allowlist,
+		)
+		.await?;
+
+		// Extract query terms
+		let query_terms = {
+			let mut stack = reblessive::TreeStack::new();
+			stack
+				.enter(|stk| fti.extract_querying_terms(stk, frozen, opt, self.query.clone()))
+				.finish()
+				.await?
+		};
+
+		// Create scorer if BM25 is configured
+		let scorer = fti.new_scorer(frozen).await?;
+
+		Ok((fti, query_terms, scorer))
 	}
 }
 
@@ -277,8 +290,6 @@ impl Debug for MatchContext {
 		f.debug_struct("MatchContext")
 			.field("idiom", &self.idiom)
 			.field("query", &self.query)
-			.field("table", &self.table)
-			.field("initialized", &self.ft_cache.initialized())
 			.finish()
 	}
 }
@@ -405,9 +416,9 @@ impl MatchesContext {
 	/// Create a MatchContext for a given match_ref, resolving against this context.
 	///
 	/// If the match_ref is found, creates a MatchContext with the resolved
-	/// idiom, query, and table name. If not found and there's exactly one
+	/// idiom and query. If not found and there's exactly one
 	/// entry, falls back to that entry (common case: single MATCHES clause).
-	pub fn resolve(&self, match_ref: MatchRef, table: TableName) -> Result<Arc<MatchContext>> {
+	pub fn resolve(&self, match_ref: MatchRef) -> Result<Arc<MatchContext>> {
 		let info = self.get(match_ref).or_else(|| {
 			// Fall back to the single entry if there's only one
 			if self.matches.len() == 1 {
@@ -418,9 +429,7 @@ impl MatchesContext {
 		});
 
 		match info {
-			Some(info) => {
-				Ok(Arc::new(MatchContext::new(info.idiom.clone(), info.query.clone(), table)))
-			}
+			Some(info) => Ok(Arc::new(MatchContext::new(info.idiom.clone(), info.query.clone()))),
 			None => {
 				// If there are no MATCHES clauses at all, provide a clear error
 				if self.matches.is_empty() {
