@@ -261,6 +261,10 @@ async fn router_loop(
 					continue
 				};
 				let Some(session_id) = notification.session.map(|x| x.into_inner()) else {
+					warn!(
+						"Dropping notification for live query '{}': no session id to route it to",
+						notification.id
+					);
 					continue
 				};
 

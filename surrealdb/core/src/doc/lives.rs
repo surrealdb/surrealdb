@@ -18,7 +18,7 @@ use crate::dbs::{MessageBroker, Options, RoutedNotification};
 use crate::doc::{Action, CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
-use crate::expr::paths::{AC, ID, RD, TK};
+use crate::expr::paths::{AC, RD, TK};
 use crate::kvs::Transaction;
 use crate::types::{PublicAction, PublicNotification};
 use crate::val::{Value, convert_value_to_public_value};
@@ -165,6 +165,9 @@ impl Document {
 			Some(v) => v,
 			None => return Ok(()),
 		};
+		// Read the routing id up front: `live_subscription` is partially moved
+		// below when its projection fields are matched on.
+		let session_id = live_subscription.session_id();
 		// Skip notification if the session that created this LIVE query has
 		// expired. `session["exp"]` is a unix timestamp set by
 		// `DURATION FOR SESSION`; absent means no expiry. We coerce via
@@ -392,13 +395,6 @@ impl Document {
 				}
 			}
 		}
-
-		// Extract the session ID from the session value
-		let session_id = match sess.pick(ID.as_ref()) {
-			Value::Uuid(uuid) => Some(uuid.into()),
-			Value::String(s) => s.parse::<crate::val::Uuid>().ok().map(|uuid| uuid.into()),
-			_ => None,
-		};
 
 		// Convert values to the public wire format. A conversion error
 		// (e.g. a closure-valued projection that cannot be serialised)
