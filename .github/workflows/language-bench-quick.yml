@@ -53,6 +53,11 @@ jobs:
       (github.event.action == 'opened' || github.event.action == 'reopened') &&
       !contains(github.event.pull_request.labels.*.name, 'benchmark')
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -75,6 +80,11 @@ jobs:
       ((github.event.action == 'synchronize' || github.event.action == 'reopened' || github.event.action == 'opened') &&
        contains(github.event.pull_request.labels.*.name, 'benchmark'))
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout PR head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

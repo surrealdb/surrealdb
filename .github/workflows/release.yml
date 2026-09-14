@@ -230,6 +230,11 @@ jobs:
       # main when dispatched from main), not from the released/branch commit
       # checked out above, so release tooling never needs backporting onto
       # release lines.
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout CI tooling from the workflow ref
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -655,6 +660,11 @@ jobs:
     steps:
       # Mint a downstream-scoped token (if the app is configured) so we can read
       # the downstream repo's milestone PRs too. No-op when unconfigured.
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Check downstream app configuration
         id: cfg
         env:
@@ -773,6 +783,11 @@ jobs:
     needs: [prepare-vars, check-milestones]
     runs-on: ubuntu-latest
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Summarize the release awaiting approval
         run: |
           {
@@ -824,6 +839,11 @@ jobs:
     steps:
       # The pre-approval facts are in summarize-pending-release; this step runs
       # only once the gate clears, so it records that the release was approved.
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Record approval
         run: echo "✅ Release ${{ needs.prepare-vars.outputs.name }} (${{ needs.prepare-vars.outputs.release-name }}) approved - publishing begins." >> "$GITHUB_STEP_SUMMARY"
 
@@ -844,6 +864,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -914,6 +939,11 @@ jobs:
       # rolling build) from a transient ls error (just retry), so the failure
       # message points at the right fix. This must NOT be continue-on-error even on
       # a dry-run: a missing bundle is a real problem worth surfacing.
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Download bundles from the rolling prefix
         env:
           ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
@@ -983,6 +1013,11 @@ jobs:
     steps:
       # The released source supplies package.json + publish.ts; the built dist/
       # comes from the staged artifact below. Nothing is compiled here.
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1065,6 +1100,11 @@ jobs:
     # variable.
     runs-on: ${{ vars.RUNNER_AMD }}
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1131,6 +1171,11 @@ jobs:
           - name: Dev image
             tag-suffix: -dev
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1184,6 +1229,11 @@ jobs:
       SOURCE_TAG: ${{ needs.prepare-vars.outputs.downstream-source-tag }}
       LATEST: ${{ needs.prepare-vars.outputs.latest }}
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Sanitize tag prefix
         id: tag
         run: |
@@ -1293,6 +1343,11 @@ jobs:
       id-token: write
     steps:
       # Skip the mirror when the DockerHub target variable is unset.
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: DockerHub target configured?
         id: cfg
         env:
@@ -1395,6 +1450,11 @@ jobs:
     steps:
       # No-op green until the downstream App is configured, so this can be merged
       # before the secrets exist.
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Downstream App configured?
         id: cfg
         env:
@@ -1520,6 +1580,11 @@ jobs:
     needs: [prepare-vars, approve, promote]
     runs-on: ubuntu-latest
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1625,6 +1690,11 @@ jobs:
       # ancestry list is computed regardless of side.
       RELEASE_ENGINE: ${{ needs.prepare-vars.outputs.release-engine }}
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1682,6 +1752,11 @@ jobs:
       # downstream-only release must NOT delete an ancestor's engine images, since
       # a later engine promotion of that ancestor still needs them; the next
       # release that includes the engine side cleans them up.
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Prune superseded ECR images
         if: ${{ needs.prepare-vars.outputs.release-engine == 'true' }}
         run: |
@@ -1806,6 +1881,11 @@ jobs:
       pr-url: ${{ steps.bump.outputs.pr-url }}
       merged: ${{ steps.bump.outputs.merged }}
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1903,6 +1983,11 @@ jobs:
     outputs:
       pr-url: ${{ steps.advance.outputs.pr-url }}
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -2009,6 +2094,11 @@ jobs:
       pr-url: ${{ steps.open-pr.outputs.pr-url }}
       merged: ${{ steps.open-pr.outputs.merged }}
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Preflight (Homebrew tap configured?)
         id: preflight
         env:
@@ -2095,6 +2185,11 @@ jobs:
     permissions:
       actions: write
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Dispatch public release sync (push releases; awaits approval)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -2144,6 +2239,11 @@ jobs:
     if: ${{ always() && inputs.release-type == 'versioned' && needs.prepare-vars.result == 'success' && needs.prepare-vars.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Render the PR list
         env:
           RELEASE_NAME: ${{ needs.prepare-vars.outputs.name }}
@@ -2238,6 +2338,11 @@ jobs:
     # the runner's ambient IAM role (no static keys).
     runs-on: ${{ vars.RUNNER_AMD }}
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Write the engine completion manifest
         env:
           NAME: ${{ needs.prepare-vars.outputs.name }}
@@ -2277,6 +2382,11 @@ jobs:
     # the runner's ambient IAM role (no static keys).
     runs-on: ${{ vars.RUNNER_AMD }}
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Write the downstream completion manifest
         env:
           NAME: ${{ needs.prepare-vars.outputs.name }}
