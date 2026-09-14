@@ -815,13 +815,3 @@ impl Visitor for MatchesCollector<'_> {
 		Ok(())
 	}
 }
-
-/// Try to extract the primary table name from the frozen context.
-pub(crate) fn extract_table_from_context(ctx: &crate::ctx::FrozenContext) -> crate::val::TableName {
-	if let Some(mc) = ctx.get_matches_context()
-		&& let Some(table) = mc.table()
-	{
-		return table.clone();
-	}
-	crate::val::TableName::from("unknown".to_string())
-}

@@ -8,6 +8,7 @@
 //! When no full-text index exists for the field, evaluation returns `false`
 //! (matching the old executor's `ExecutorOption::None` path).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
@@ -27,7 +28,7 @@ use crate::val::{TableName, Value};
 ///
 /// Created by the planner when a `BinaryOperator::Matches` is encountered with
 /// an idiom on the left and a string literal on the right. The full-text index
-/// is lazily opened on first evaluation and cached for subsequent rows.
+/// is lazily opened per table and version, then cached for subsequent rows.
 ///
 /// Evaluation mirrors the old executor's `fulltext_matches_with_doc_id` path:
 /// 1. Resolve `RecordId → DocId` via `fti.get_doc_id()`
@@ -46,8 +47,11 @@ pub struct MatchesOp {
 	/// Search query string from the right side (extracted at plan time).
 	pub(crate) query: String,
 	/// Cached full-text index resources. `None` = no FT index found (always `false`).
-	ft_cache: tokio::sync::OnceCell<Option<(FullTextIndex, QueryTerms)>>,
+	ft_cache: tokio::sync::RwLock<MatchCache>,
 }
+
+type MatchResources = (FullTextIndex, QueryTerms);
+type MatchCache = HashMap<(TableName, Option<u64>), Arc<Option<MatchResources>>>;
 
 impl MatchesOp {
 	/// Create a new MatchesOp.
@@ -64,7 +68,7 @@ impl MatchesOp {
 			operator,
 			idiom,
 			query,
-			ft_cache: tokio::sync::OnceCell::new(),
+			ft_cache: tokio::sync::RwLock::new(HashMap::new()),
 		}
 	}
 
@@ -78,103 +82,115 @@ impl MatchesOp {
 	async fn ft_resources(
 		&self,
 		ctx: &EvalContext<'_>,
-	) -> Result<&Option<(FullTextIndex, QueryTerms)>, anyhow::Error> {
-		self.ft_cache
-			.get_or_try_init(|| async {
-				use crate::catalog::providers::TableProvider;
-
-				let frozen = ctx.exec_ctx.ctx();
-				let root = ctx.exec_ctx.root();
-				let opt = root
-					.options
-					.as_ref()
-					.ok_or_else(|| anyhow::anyhow!("MatchesOp requires Options context"))?;
-				let tx = ctx.txn();
-
-				// Get namespace and database IDs from the execution context
-				let db_ctx = ctx
-					.exec_ctx
-					.database()
-					.map_err(|e| anyhow::anyhow!("MatchesOp requires database context: {}", e))?;
-				let ns_id = db_ctx.ns_ctx.ns.namespace_id;
-				let db_id = db_ctx.db.database_id;
-
-				// Determine the table name. We need it to look up the index definition.
-				// Extract from the current value's RecordId if available, otherwise
-				// fall back to the matches context on the FrozenContext.
-				let table_name = if let Some(value) = ctx.current_value {
-					extract_table_from_value(value)
+	) -> Result<Arc<Option<MatchResources>>, anyhow::Error> {
+		// Determine the table name. We need it to look up the index definition.
+		// Extract from the current value's RecordId if available, otherwise
+		// fall back to the matches context on the FrozenContext.
+		let table_name = if let Some(value) = ctx.current_value {
+			extract_table_from_value(value)
+		} else {
+			None
+		};
+		let table_name = match table_name {
+			Some(t) => t,
+			None => {
+				// Try to get it from the matches context (set by the SELECT planner)
+				if let Some(mc) = ctx.exec_ctx.ctx().get_matches_context()
+					&& let Some(table) = mc.table()
+				{
+					table.clone()
 				} else {
-					None
-				};
-				let table_name = match table_name {
-					Some(t) => t,
-					None => {
-						// Try to get it from the matches context (set by the SELECT planner)
-						if let Some(mc) = frozen.get_matches_context()
-							&& let Some(table) = mc.table()
-						{
-							table.clone()
-						} else {
-							// No table name available → cannot find the index
-							return Ok(None);
-						}
-					}
-				};
+					// No table name available → cannot find the index
+					return Ok(Arc::new(None));
+				}
+			}
+		};
 
-				// Find the full-text index for this table and idiom
-				let indexes = tx
-					.all_tb_indexes(ns_id, db_id, &table_name, ctx.exec_ctx.version_stamp())
-					.await?;
-				let indexes = if ctx.exec_ctx.version_stamp().is_none() {
-					// MATCHES must not read a full-text index until durable
-					// state has published it as queryable.
-					filter_online_indexes(tx.as_ref(), ns_id, db_id, indexes).await?
-				} else {
-					indexes
-				};
-				let index_def = indexes.iter().find(|idx| {
-					matches!(&idx.index, Index::FullText(_))
-						&& idx.cols.iter().any(|col| col.0 == self.idiom.0)
-				});
+		// Versioned subqueries can reuse this expression at different timestamps.
+		let key = (table_name.clone(), ctx.exec_ctx.version_stamp());
+		if let Some(resources) = self.ft_cache.read().await.get(&key) {
+			return Ok(Arc::clone(resources));
+		}
+		let mut cache = self.ft_cache.write().await;
+		if let Some(resources) = cache.get(&key) {
+			return Ok(Arc::clone(resources));
+		}
+		let resources = Arc::new(self.load_ft_resources(ctx, &table_name).await?);
+		cache.insert(key, Arc::clone(&resources));
+		Ok(resources)
+	}
 
-				let index_def = match index_def {
-					Some(def) => def,
-					// No full-text index for this field → MATCHES always returns false
-					None => return Ok(None),
-				};
+	async fn load_ft_resources(
+		&self,
+		ctx: &EvalContext<'_>,
+		table_name: &TableName,
+	) -> Result<Option<MatchResources>, anyhow::Error> {
+		use crate::catalog::providers::TableProvider;
 
-				let ft_params = match &index_def.index {
-					Index::FullText(params) => params,
-					_ => unreachable!("Already checked for FullText above"),
-				};
+		let frozen = ctx.exec_ctx.ctx();
+		let root = ctx.exec_ctx.root();
+		let opt = root
+			.options
+			.as_ref()
+			.ok_or_else(|| anyhow::anyhow!("MatchesOp requires Options context"))?;
+		let tx = ctx.txn();
 
-				let ikb = IndexKeyBase::new(ns_id, db_id, table_name, index_def.index_id);
+		// Get namespace and database IDs from the execution context
+		let db_ctx = ctx
+			.exec_ctx
+			.database()
+			.map_err(|e| anyhow::anyhow!("MatchesOp requires database context: {}", e))?;
+		let ns_id = db_ctx.ns_ctx.ns.namespace_id;
+		let db_id = db_ctx.db.database_id;
 
-				// Open the full-text index
-				let fti = FullTextIndex::new(
-					frozen.get_index_stores(),
-					tx.as_ref(),
-					ikb,
-					ft_params,
-					&frozen.config.file_allowlist,
-				)
-				.await?;
+		// Find the full-text index for this table and idiom
+		let indexes =
+			tx.all_tb_indexes(ns_id, db_id, table_name, ctx.exec_ctx.version_stamp()).await?;
+		let indexes = if ctx.exec_ctx.version_stamp().is_none() {
+			// MATCHES must not read a full-text index until durable
+			// state has published it as queryable.
+			filter_online_indexes(tx.as_ref(), ns_id, db_id, indexes).await?
+		} else {
+			indexes
+		};
+		let index_def = indexes.iter().find(|idx| {
+			matches!(&idx.index, Index::FullText(_))
+				&& idx.cols.iter().any(|col| col.0 == self.idiom.0)
+		});
 
-				// Extract query terms
-				let query_terms = {
-					let mut stack = reblessive::TreeStack::new();
-					stack
-						.enter(|stk| {
-							fti.extract_querying_terms(stk, frozen, opt, self.query.clone())
-						})
-						.finish()
-						.await?
-				};
+		let index_def = match index_def {
+			Some(def) => def,
+			// No full-text index for this field → MATCHES always returns false
+			None => return Ok(None),
+		};
 
-				Ok(Some((fti, query_terms)))
-			})
-			.await
+		let ft_params = match &index_def.index {
+			Index::FullText(params) => params,
+			_ => unreachable!("Already checked for FullText above"),
+		};
+
+		let ikb = IndexKeyBase::new(ns_id, db_id, table_name.clone(), index_def.index_id);
+
+		// Open the full-text index
+		let fti = FullTextIndex::new(
+			frozen.get_index_stores(),
+			tx.as_ref(),
+			ikb,
+			ft_params,
+			&frozen.config.file_allowlist,
+		)
+		.await?;
+
+		// Extract query terms
+		let query_terms = {
+			let mut stack = reblessive::TreeStack::new();
+			stack
+				.enter(|stk| fti.extract_querying_terms(stk, frozen, opt, self.query.clone()))
+				.finish()
+				.await?
+		};
+
+		Ok(Some((fti, query_terms)))
 	}
 }
 impl PhysicalExpr for MatchesOp {
@@ -197,7 +213,7 @@ impl PhysicalExpr for MatchesOp {
 		Box::pin(async move {
 			let ft = self.ft_resources(&ctx).await?;
 
-			let (fti, qt) = match ft {
+			let (fti, qt) = match ft.as_ref() {
 				// No full-text index → always false (old executor ExecutorOption::None path)
 				None => return Ok(Value::Bool(false)),
 				Some(resources) => resources,
@@ -245,9 +261,8 @@ impl Clone for MatchesOp {
 			operator: self.operator.clone(),
 			idiom: self.idiom.clone(),
 			query: self.query.clone(),
-			// OnceCell is not Clone — new instance starts uninitialized.
-			// This is fine: the clone will lazily re-init on first evaluate().
-			ft_cache: tokio::sync::OnceCell::new(),
+			// Cloned expressions initialize their own table resources.
+			ft_cache: tokio::sync::RwLock::new(HashMap::new()),
 		}
 	}
 }
@@ -258,7 +273,6 @@ impl std::fmt::Debug for MatchesOp {
 			.field("idiom", &self.idiom)
 			.field("query", &self.query)
 			.field("operator", &self.operator)
-			.field("initialized", &self.ft_cache.initialized())
 			.finish()
 	}
 }
