@@ -579,6 +579,79 @@ async fn receive_all_pending_notifications<S: Stream<Item = Result<Notification<
 	results
 }
 
+/// A killed live query must end its stream.
+///
+/// `Stream::drop` tears a subscription down through its own path, so this
+/// exercises the other one: a `KILL` issued as a query, where the `Killed`
+/// notification is the only termination signal the subscriber ever gets. If it
+/// is not delivered the stream stays open and silent forever, which a consumer
+/// cannot distinguish from an idle subscription.
+#[cfg(not(any(feature = "protocol-ws", feature = "protocol-http")))]
+pub async fn live_query_kill_terminates_stream(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+
+	let mut users = db.select(&table).live().await.unwrap();
+
+	// Confirm the subscription is delivering before killing it.
+	let _: Option<ApiRecordId> = db.create(&table).await.unwrap();
+	let notification: Notification<ApiRecordId> =
+		tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+	assert_eq!(notification.action, Action::Create);
+
+	db.query(format!("KILL u'{}'", notification.query_id)).await.unwrap().check().unwrap();
+
+	assert!(
+		tokio::time::timeout(LQ_TIMEOUT, users.next())
+			.await
+			.expect("stream did not terminate after KILL")
+			.is_none(),
+		"stream must end after KILL, not yield another notification"
+	);
+
+	drop(permit);
+}
+
+/// Removing a table must end the streams subscribed to it.
+///
+/// Unlike `KILL` this is not caller-initiated, so a subscriber has no other way
+/// to learn its subscription is gone.
+#[cfg(not(any(feature = "protocol-ws", feature = "protocol-http")))]
+pub async fn live_query_remove_table_terminates_stream(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+
+	let mut users = db.select(&table).live().await.unwrap();
+
+	// Confirm the subscription is delivering before removing the table.
+	let _: Option<ApiRecordId> = db.create(&table).await.unwrap();
+	let notification: Notification<ApiRecordId> =
+		tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+	assert_eq!(notification.action, Action::Create);
+
+	db.query(format!("REMOVE TABLE {table}")).await.unwrap().check().unwrap();
+
+	assert!(
+		tokio::time::timeout(LQ_TIMEOUT, users.next())
+			.await
+			.expect("stream did not terminate after REMOVE TABLE")
+			.is_none(),
+		"stream must end after REMOVE TABLE, not yield another notification"
+	);
+
+	drop(permit);
+}
+
 /// Test that LIVE SELECT returns UUID via take() method
 /// This is a regression test for https://github.com/surrealdb/surrealdb/issues/6693
 pub async fn live_select_returns_uuid(new_db: impl CreateDb) {
@@ -618,4 +691,15 @@ define_include_tests!(live => {
 	live_query_delete_notifications,
 	#[test_log::test(tokio::test)]
 	live_select_returns_uuid,
+	// Local engines only. Over the remote transports a `KILL` sent as a query
+	// (rather than via the `kill` RPC method, which `tests/ws_integration.rs`
+	// covers) does not terminate the stream either, for reasons unrelated to
+	// notification routing — the server never reaches its kill handling because
+	// `KILL` resolves to `NONE` rather than to the live query id.
+	#[cfg(not(any(feature = "protocol-ws", feature = "protocol-http")))]
+	#[test_log::test(tokio::test)]
+	live_query_kill_terminates_stream,
+	#[cfg(not(any(feature = "protocol-ws", feature = "protocol-http")))]
+	#[test_log::test(tokio::test)]
+	live_query_remove_table_terminates_stream,
 });

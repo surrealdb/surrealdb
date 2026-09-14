@@ -5,6 +5,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
+use crate::expr::paths::ID;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Fetchs, Fields};
 use crate::iam::Auth;
@@ -57,6 +58,18 @@ pub struct SubscriptionDefinition {
 impl_kv_value_revisioned!(SubscriptionDefinition);
 
 impl SubscriptionDefinition {
+	/// The id of the session that opened this subscription.
+	///
+	/// Notifications are routed to subscribers by session, so any notification
+	/// about this subscription must carry this id or it cannot be delivered.
+	pub(crate) fn session_id(&self) -> Option<surrealdb_types::Uuid> {
+		match self.session.as_ref()?.pick(ID.as_ref()) {
+			Value::Uuid(uuid) => Some(uuid.into()),
+			Value::String(s) => s.parse::<crate::val::Uuid>().ok().map(|uuid| uuid.into()),
+			_ => None,
+		}
+	}
+
 	fn to_sql_definition(&self) -> crate::sql::LiveStatement {
 		let fields = match &self.fields {
 			SubscriptionFields::Diff => LiveFields::Diff,
