@@ -2707,7 +2707,40 @@ fn fmt_path(expr: &LogicalExpr, f: &mut String, fmt: SqlFormat, root: BodyRoot) 
 	// Collect the chain from the outermost step down to its root.
 	let mut steps = Vec::new();
 	let mut current = expr;
+	// A fold whose base is itself a path folds over what that whole path
+	// produces, so the base is a group whose parentheses have to survive:
+	// rendered flat, `(a.b).c[0]` reads back as `a.b.c[0]`, which folds over
+	// `a` and maps `.b` inside it instead — a different plan over the same
+	// steps.
+	//
+	// Only a base ending in a step that a following fold would take for its
+	// own needs them. A mapping step is one, and so is a fold already placed;
+	// every other step stays attached to the root it was written on when the
+	// path is read back, and reads the same flat. Neither does a base rooted
+	// at the element need them: it continues the path its body is already
+	// inside rather than standing on its own.
+	let mut grouped = false;
 	let root_expr = loop {
+		if let LogicalExpr::Broadcast {
+			base,
+			..
+		} = current
+			// A mapping step, which a following fold would take for its own,
+			// or a fold already placed over a path. A fold whose body is not a
+			// path renders as a plan form with no surface spelling, which no
+			// parentheses make readable back.
+			&& (matches!(
+				base.as_ref(),
+				LogicalExpr::Access { .. } | LogicalExpr::Destructure { .. }
+			) || matches!(
+				base.as_ref(),
+				LogicalExpr::Broadcast { body, .. } if body.step_base().is_some()
+			)) && !matches!(base.path_root(), LogicalExpr::Current)
+		{
+			steps.push(current);
+			grouped = true;
+			break base.as_ref();
+		}
 		match current.step_base() {
 			Some(base) => {
 				steps.push(current);
@@ -2717,7 +2750,9 @@ fn fmt_path(expr: &LogicalExpr, f: &mut String, fmt: SqlFormat, root: BodyRoot) 
 		}
 	};
 	// The root.
-	if let LogicalExpr::Field(name) = root_expr {
+	if grouped {
+		write_sql!(f, fmt, "({root_expr})");
+	} else if let LogicalExpr::Field(name) = root_expr {
 		EscapeIdent(name.as_str()).fmt_sql(f, fmt);
 	} else if matches!(root_expr, LogicalExpr::Doc) {
 		f.push('@');

@@ -1766,8 +1766,8 @@ mod tests {
 		"(-1.5dec).abs()",
 		"(!a).b",
 		"(a..).len()",
-		"(a.b).c",
 		"(a.b).c[0]",
+		"(a.b[0]).c[0]",
 		"[1, 2][0]",
 		"[1, 2].len()",
 		"[{ a: [1, 2] }, { a: [3, 4] }].a[0]",
@@ -1807,6 +1807,54 @@ mod tests {
 				"pretty rendering of `{sql}` differs from the surface"
 			);
 		}
+	}
+
+	/// Grouping a path changes nothing when only mapping steps follow it.
+	///
+	/// `(a.b).c` and `a.b.c` apply `.c` to the same values, so both lower to
+	/// one chain and the plan holds nothing that says which spelling produced
+	/// it. The plan renders the unparenthesised form, which reads back as the
+	/// same plan.
+	///
+	/// Grouping that does change the meaning is kept: a following step that
+	/// broadcasts folds over the group as a unit, so the plan holds the group
+	/// as the base of that fold and renders its parentheses. `(a.b).c[0]` in
+	/// the corpus above covers that, and it renders byte for byte as written.
+	#[test]
+	fn grouping_a_path_before_a_mapping_step_is_canonicalised_away() {
+		let grouped = lower_idiom("(a.b).c");
+		assert_eq!(shape_of(&grouped), shape_of(&lower_idiom("a.b.c")));
+		assert_eq!(grouped.to_sql(), "a.b.c");
+	}
+
+	/// Every idiom renders as a path that reads back as the plan it came from.
+	///
+	/// Two paths built from the same steps can differ only in where a fold
+	/// sits, so a rendering that drops what separates them names a different
+	/// plan: `(a.b).c[0]` folds over `a.b`, where `a.b.c[0]` folds over `a`
+	/// and maps `.b` within it. Rendering is idempotent for the same reason —
+	/// a plan that read back as itself renders the same way again.
+	#[test]
+	fn a_path_reads_back_as_the_plan_it_was_rendered_from() {
+		for sql in IDIOM_CORPUS {
+			let lowered = lower_idiom(sql);
+			let rendered = lowered.to_sql();
+			let reread = lower_idiom(&rendered);
+			assert_eq!(
+				shape_of(&reread),
+				shape_of(&lowered),
+				"`{sql}` rendered as `{rendered}`, which is a different plan"
+			);
+			assert_eq!(reread.to_sql(), rendered, "rendering `{sql}` is not idempotent");
+		}
+	}
+
+	/// Lowers an idiom written as surface SurrealQL.
+	fn lower_idiom(sql: &str) -> LogicalExpr {
+		let sql::Expr::Return(out) = parse(&format!("RETURN {sql}")) else {
+			panic!("expected a RETURN");
+		};
+		lower_expr(out.what).expect("expression should lower")
 	}
 
 	/// A compact description of a path's structure: each form by its
