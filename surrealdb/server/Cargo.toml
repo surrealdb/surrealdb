@@ -100,7 +100,7 @@ opentelemetry = { version = "0.31.0" }
 opentelemetry-http = { version = "0.31.0" }
 opentelemetry-otlp = { version = "0.31.1", default-features = false, features = ["grpc-tonic", "tls", "tls-roots", "trace", "metrics", "logs", "internal-logs"] }
 opentelemetry-prometheus-text-exporter.workspace = true
-opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "spec_unstable_metrics_views", "experimental_metrics_custom_reader", "experimental_metrics_periodicreader_with_async_runtime", "logs"] }
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio", "spec_unstable_metrics_views", "experimental_metrics_custom_reader", "experimental_metrics_periodicreader_with_async_runtime", "logs"] }
 rustyline = { version = "17.0.2", default-features = false, features = [
     "derive",
     "with-dirs",
