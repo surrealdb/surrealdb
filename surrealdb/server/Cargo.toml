@@ -38,6 +38,7 @@ default = [
     "cli",
 ]
 http = ["surrealdb-core/http"]
+cjk = ["surrealdb-core/cjk"]
 jwks = ["surrealdb-core/jwks"]
 # Build against AWS-LC FIPS 3.0.x (NIST CMVP cert #4816).
 # Restricts TLS to FIPS-approved cipher suites at runtime.

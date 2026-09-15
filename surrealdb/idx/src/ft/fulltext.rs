@@ -362,7 +362,7 @@ impl FullTextIndex {
 	) -> Result<Self> {
 		let az = tx.get_db_analyzer(ikb.0.ns, ikb.0.db, &p.analyzer, None).await?;
 		ixs.mappers().check(&az, allow_list).await?;
-		let analyzer = Analyzer::new(ixs, az)?;
+		let analyzer = Analyzer::new(ixs, az).await?;
 		let mut bm25 = None;
 		if let Scoring::Bm {
 			k1,
@@ -1687,6 +1687,8 @@ mod tests {
 	use crate::IndexKeyBase;
 	use crate::catalog::{AnalyzerDefinition, DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::expr::Tokenizer;
+	#[cfg(feature = "cjk-embed-korean")]
+	use crate::expr::tokenizer::SegmentLanguage;
 	use crate::ft::analyzer::{AnalyzerFunction, BoxAnalyzerFut};
 	use crate::ft::offset::Offset;
 	use crate::index::IndexOperation;
@@ -1727,6 +1729,13 @@ mod tests {
 		/// `highlighting` selects which of the two indexing paths the context
 		/// exercises: offsets are recorded only when highlighting is on.
 		async fn with_highlighting(highlight: bool) -> Self {
+			Self::with_analyzer(highlight, vec![Tokenizer::Blank]).await
+		}
+
+		/// As [`Self::with_highlighting`], with the analyzer's tokenizers chosen
+		/// by the caller. The default corpus is still what `index_doc` writes;
+		/// a test wanting different text passes it to `index_batch_in_one_tx`.
+		async fn with_analyzer(highlight: bool, tokenizers: Vec<Tokenizer>) -> Self {
 			let ds = TestIndexStore::new().await;
 			let tx = ds.env(TransactionType::Write).await.tx();
 			// `DEFINE ANALYZER test TOKENIZERS blank`, as the definition the
@@ -1735,7 +1744,7 @@ mod tests {
 			let az = Arc::new(AnalyzerDefinition {
 				name: "test".into(),
 				function: None,
-				tokenizers: Some(vec![Tokenizer::Blank]),
+				tokenizers: Some(tokenizers),
 				filters: None,
 				comment: None,
 			});
@@ -1745,7 +1754,7 @@ mod tests {
 				az: std::borrow::Cow::Borrowed(az.name.as_str()),
 			};
 			tx.set_key(&az_key, az.as_ref()).await.unwrap();
-			let content = Arc::new(Value::from(Array::from(vec![
+			let default_content = Value::from(Array::from(vec![
 				"Enter a search term",
 				"Welcome",
 				"Docusaurus blogging features are powered by the blog plugin.",
@@ -1771,7 +1780,8 @@ mod tests {
 				"-->",
 				"First Blog Post",
 				"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque elementum dignissim ultricies. Fusce rhoncus ipsum tempor eros aliquam consequat. Lorem ipsum dolor sit amet",
-			])));
+			]));
+			let content = Arc::new(default_content);
 			let ft_params = Arc::new(FullTextParams {
 				analyzer: az.name.clone(),
 				scoring: Default::default(),
@@ -1855,6 +1865,27 @@ mod tests {
 		///
 		/// `content` selects which terms the batch writes, so a test can place
 		/// entries of chosen widths at chosen points in the scan's term order.
+		/// Resolves a query against the index, returning whether `rid`'s document
+		/// is among the hits.
+		///
+		/// Gated with its only caller: the segmentation test is the one place
+		/// that asks whether a query *retrieves* a document rather than what
+		/// terms it produced, and without that feature this would be dead code.
+		#[cfg(feature = "cjk-embed-korean")]
+		async fn query_finds(&self, stk: &mut Stk, query: &str, rid: &RecordId) -> bool {
+			let (ctx, tx) = self.new_read_env().await;
+			let az_fn = NoAnalyzerFunction;
+			let qt = self
+				.fti
+				.extract_querying_terms(stk, &ctx, &az_fn, query.to_string())
+				.await
+				.unwrap();
+			let doc_id = self.fti.get_doc_id(&tx, rid).await.unwrap().unwrap();
+			let found = qt.contains_doc(doc_id);
+			tx.cancel().await.unwrap();
+			found
+		}
+
 		async fn index_batch_in_one_tx(&self, stk: &mut Stk, rids: &[RecordId], content: &Value) {
 			let ctx = self.ds.env(TransactionType::Write).await;
 			let tx = ctx.tx();
@@ -2257,6 +2288,48 @@ mod tests {
 	/// distinct by their remaining fields or a contribution is silently lost;
 	/// and separate transactions must never collapse into each other.
 	///
+	/// A Korean stem finds a document that only ever contained its inflected
+	/// form.
+	///
+	/// This is the property `SEGMENT` exists for, and the only test that pins
+	/// it end to end: the tokenizer tests fix what the analyzer *produces*,
+	/// while this one fixes that those tokens are what the index stores and
+	/// what a query resolves against. `한국어를` is the noun `한국어` with an
+	/// object particle attached, which the character-class tokenizers cannot
+	/// separate — under `TOKENIZERS blank` alone the query below finds nothing.
+	#[cfg(feature = "cjk-embed-korean")]
+	#[test(tokio::test)]
+	async fn korean_stem_retrieves_the_inflected_document() {
+		let test = TestContext::with_analyzer(
+			false,
+			vec![Tokenizer::Blank, Tokenizer::Segment(SegmentLanguage::Korean)],
+		)
+		.await;
+		let doc = RecordId::new("t".into(), "doc1".to_owned());
+		let content = Value::from(Array::from(vec!["한국어를 배우고 있습니다"]));
+		let mut stack = reblessive::TreeStack::new();
+		stack
+			.enter(|stk| test.index_batch_in_one_tx(stk, std::slice::from_ref(&doc), &content))
+			.finish()
+			.await;
+
+		let mut stack = reblessive::TreeStack::new();
+		let (stem, particle, absent) = stack
+			.enter(|stk| async {
+				(
+					test.query_finds(stk, "한국어", &doc).await,
+					test.query_finds(stk, "를", &doc).await,
+					test.query_finds(stk, "일본어", &doc).await,
+				)
+			})
+			.finish()
+			.await;
+
+		assert!(stem, "the stem `한국어` must find the document holding `한국어를`");
+		assert!(particle, "the particle is indexed as its own term, so it matches too");
+		assert!(!absent, "an unrelated word must not match");
+	}
+
 	/// Indexing a document leaves one term delta per distinct term and one
 	/// statistics delta. A remove followed by a re-index of the same record
 	/// within one transaction nets to what the index already said: the term is

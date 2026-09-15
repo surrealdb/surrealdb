@@ -255,6 +255,7 @@ rmcp = { version = "3.1.2", default-features = false }
 roaring = "0.11.3"
 rustls = { version = "0.23.38", default-features = false, features = ["logging", "std", "tls12"] }
 rust_decimal = "1.41.0"
+lindera = { version = "6.0.0", default-features = false, features = ["mmap"] }
 rust-stemmers = "1.2.0" # TODO: Look at the use of this dependency. Last update 5 years ago, unmaintained.
 schemars = "1.2.1"
 scrypt = "0.11.0"
@@ -339,6 +340,9 @@ default = ["surrealdb-server/default"]
 allocator = ["surrealdb-server/allocator"]
 allocation-tracking = ["surrealdb-server/allocation-tracking"]
 http = ["surrealdb-server/http"]
+# Embedded CJK segmentation dictionaries. Enabled for the shipped binaries
+# (and so for the Docker images built from them); see the release workflow.
+cjk = ["surrealdb-server/cjk"]
 jwks = ["surrealdb-server/jwks"]
 ml = ["surrealdb-server/ml"]
 scripting = ["surrealdb-server/scripting"]

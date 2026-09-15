@@ -91,9 +91,13 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 	];
 	/// Fixtures of a type not itself bumped after the newest snapshot that
 	/// nonetheless *embed* one that was, so they carry its revision byte:
-	/// `TableMutation::Def` boxes a `StoredTableDefinition`. The other
-	/// `TableMutations` fixtures embed no definition and keep their pin.
-	const AFTER_NEWEST_SNAPSHOT_EMBEDS_A_BUMPED_TYPE: &[&str] = &["table_mutations_def"];
+	/// `TableMutation::Def` boxes a `StoredTableDefinition`, and an analyzer
+	/// that lists tokenizers holds a `Tokenizer`, which gained the `Segment`
+	/// variant (1 -> 2). The other `TableMutations` fixtures embed no
+	/// definition, and `analyzer_basic` declares no tokenizers, so both keep
+	/// their pin.
+	const AFTER_NEWEST_SNAPSHOT_EMBEDS_A_BUMPED_TYPE: &[&str] =
+		&["table_mutations_def", "analyzer_with_tokenizers"];
 
 	let text_migration_moved_it = TEXT_MIGRATION_BUMPED.contains(&type_name);
 	if AFTER_NEWEST_SNAPSHOT_BUMPED.contains(&type_name)

@@ -25,6 +25,10 @@ allocator = ["surrealdb-core/allocator"]
 allocation-tracking = ["surrealdb-core/allocation-tracking"]
 arbitrary = ["surrealdb-core/arbitrary"]
 http = ["surrealdb-core/http"]
+# Embedded CJK segmentation dictionaries, so an embedded engine can run
+# `TOKENIZERS SEGMENT(...)` the way the shipped server does. Off by default:
+# see `surrealdb-idx` for what enabling one costs.
+cjk = ["surrealdb-core/cjk"]
 jwks = ["surrealdb-core/jwks"]
 ml = ["surrealdb-core/ml", "dep:surrealml-core"]
 scripting = ["surrealdb-core/scripting"]

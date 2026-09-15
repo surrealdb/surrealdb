@@ -41,6 +41,10 @@ kv-tikv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-tikv", "toki
 kv-surrealkv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-surrealkv", "dep:surrealdb-kvs", "tokio/time"]
 scripting = ["surrealdb-engine-local/scripting"]
 http = ["surrealdb-engine-local/http"]
+# Embedded CJK segmentation dictionaries. Without this an embedded engine
+# cannot resolve a `SEGMENT` analyzer that the server resolves fine, so a
+# schema that works in production fails against an in-process test engine.
+cjk = ["surrealdb-engine-local/cjk"]
 native-tls = [
     "dep:native-tls",
     "reqwest?/native-tls",

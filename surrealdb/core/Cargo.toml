@@ -42,6 +42,11 @@ kv-surrealkv = [
     "dep:ext-sort",
 ]
 scripting = ["dep:js", "surrealdb-expr/scripting"]
+# Bake the CJK segmentation dictionaries into the binary, so
+# `TOKENIZERS SEGMENT(...)` works with no files on disk. Adds roughly 150 MB
+# and makes the dictionary crates download their data at build time, so it is
+# off unless a shipment opts in.
+cjk = ["surrealdb-idx/cjk-embed-all"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml-core"]
 jwks = ["dep:reqwest", "surrealdb-datastore/jwks"]

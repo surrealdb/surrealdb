@@ -23,7 +23,7 @@ pub async fn analyze(
 	if let (Some(opt), Value::String(az), Value::String(val)) = (opt, az, val) {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let az = ctx.tx().get_db_analyzer(ns, db, &az, opt.version).await?;
-		let az = Analyzer::new(ctx.get_index_stores(), az)?;
+		let az = Analyzer::new(ctx.get_index_stores(), az).await?;
 		az.analyze(stk, &LegacyAnalyzerFunction::new(ctx, opt), val).await
 	} else {
 		Ok(Value::None)

@@ -12,6 +12,7 @@ use surrealdb_types::ToSql;
 
 use crate::catalog;
 use crate::ft::analyzer::filter::FilteringStage;
+use crate::ft::analyzer::segmenter::Segmenter;
 use crate::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::ft::offset::Offset;
 use crate::ft::{DocLength, TermFrequency};
@@ -20,6 +21,7 @@ use crate::val::Value;
 
 pub(in crate::ft) mod filter;
 pub(crate) mod mapper;
+pub(crate) mod segmenter;
 pub(in crate::ft) mod tokenizer;
 
 /// A boxed future returned by [`AnalyzerFunction::call`].
@@ -62,12 +64,21 @@ pub trait AnalyzerFunction {
 pub struct Analyzer {
 	az: Arc<catalog::AnalyzerDefinition>,
 	filters: Arc<Option<Vec<Filter>>>,
+	/// Resolved from the definition's `SEGMENT(<language>)` tokenizer, when it
+	/// declares one. Held beside the definition rather than looked up per call
+	/// because resolving it loads a dictionary.
+	segmenter: Arc<Option<Segmenter>>,
 }
 
 impl Analyzer {
-	pub fn new(ixs: &IndexStores, az: Arc<catalog::AnalyzerDefinition>) -> Result<Self> {
+	/// Async because resolving a `SEGMENT` tokenizer may load a morphological
+	/// dictionary, which is slow enough that it runs on the blocking pool and
+	/// that concurrent callers wait for one load rather than each doing their
+	/// own.
+	pub async fn new(ixs: &IndexStores, az: Arc<catalog::AnalyzerDefinition>) -> Result<Self> {
 		Ok(Self {
 			filters: Arc::new(Filter::try_from(ixs, &az.filters)?),
+			segmenter: Arc::new(ixs.segmenters().for_definition(&az).await?),
 			az,
 		})
 	}
@@ -138,10 +149,10 @@ impl Analyzer {
 			return Ok(Tokens::new(input));
 		}
 
-		let tokens = if let Some(t) = &self.az.tokenizers {
-			Tokenizer::tokenize(t, input)
-		} else {
-			Tokenizer::tokenize(&[], input)
+		let segmenter = self.segmenter.as_ref().as_ref();
+		let tokens = match &self.az.tokenizers {
+			Some(t) => Tokenizer::tokenize(t, segmenter, input)?,
+			None => Tokenizer::tokenize(&[], segmenter, input)?,
 		};
 		Filter::apply_filters(tokens, &self.filters, stage)
 	}
@@ -256,7 +267,7 @@ mod tests {
 		let ds = TestIndexStore::new().await;
 		let tx = ds.transaction(TransactionType::Read).await.unwrap();
 
-		let a = Analyzer::new(ds.index_stores(), Arc::new(analyzer_definition(def))).unwrap();
+		let a = Analyzer::new(ds.index_stores(), Arc::new(analyzer_definition(def))).await.unwrap();
 		let az_fn = NoAnalyzerFunction;
 		let mut stack = reblessive::TreeStack::new();
 		let tokens = stack

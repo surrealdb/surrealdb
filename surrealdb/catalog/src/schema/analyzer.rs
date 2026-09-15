@@ -67,6 +67,7 @@ fn tokenizer_structure_strand(t: Tokenizer) -> Strand {
 		Tokenizer::Camel => Strand::new_static("CAMEL"),
 		Tokenizer::Class => Strand::new_static("CLASS"),
 		Tokenizer::Punct => Strand::new_static("PUNCT"),
+		Tokenizer::Segment(l) => Strand::new(format!("SEGMENT({l})")),
 	}
 }
 
