@@ -5139,6 +5139,93 @@ async fn index_compaction_leaves_an_index_its_builder_still_owns() -> Result<()>
 	Ok(())
 }
 
+/// `INFO FOR INDEX` must say whether the index is still folding queued writes
+/// into itself, because `status` alone cannot.
+///
+/// An index whose compaction queue is not drained answers a kNN search by
+/// scoring the queued entries by hand, which costs far more than the index it
+/// is standing in for — measured at ~600ms against ~5ms on a 1M-row HNSW index.
+/// Every other field here reads exactly the same in both states: `status` is
+/// `ready`, and `pending` — which counts writes that arrived *during* a
+/// `CONCURRENTLY` build — is 0. Without `compacting`, a caller that builds an
+/// index and then queries has no way to tell the two apart.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn info_for_index_reports_an_undrained_compaction_queue() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];",
+	)
+	.await?;
+
+	let building = index_building_json(&ds, &session, "t", "hx").await?;
+	assert_eq!(
+		building.get("compacting").and_then(|v| v.as_bool()),
+		Some(true),
+		"records were written and not yet folded into the graph: {building}"
+	);
+	// The fields that already existed cannot distinguish this state, which is
+	// the whole reason for the two above.
+	assert_eq!(building.get("status").and_then(|v| v.as_str()), Some("ready"), "{building}");
+	assert_eq!(building.get("pending").and_then(|v| v.as_u64()), Some(0), "{building}");
+
+	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())
+		.await?;
+
+	let building = index_building_json(&ds, &session, "t", "hx").await?;
+	assert_eq!(
+		building.get("compacting").and_then(|v| v.as_bool()),
+		Some(false),
+		"the queue drained, so the index now answers at index speed: {building}"
+	);
+	Ok(())
+}
+
+/// The DiskANN half of [`info_for_index_reports_an_undrained_compaction_queue`].
+///
+/// Worth its own test rather than a parameter: the two engines keep pending
+/// work in different places. HNSW appends to one range; DiskANN writes to a
+/// sharded range and gates each shard on its own guard, so a probe that reads
+/// only the unsharded legacy range reports a settled index no matter how much
+/// is outstanding. That is precisely the shape of the bug this covers.
+#[cfg(all(feature = "kv-mem", diskann))]
+#[tokio::test(flavor = "multi_thread")]
+async fn info_for_index_reports_an_undrained_diskann_pending_set() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX dx ON t FIELDS vec DISKANN DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];",
+	)
+	.await?;
+
+	let building = index_building_json(&ds, &session, "t", "dx").await?;
+	assert_eq!(
+		building.get("compacting").and_then(|v| v.as_bool()),
+		Some(true),
+		"records were written and not yet folded into the graph: {building}"
+	);
+	assert_eq!(building.get("status").and_then(|v| v.as_str()), Some("ready"), "{building}");
+	assert_eq!(building.get("pending").and_then(|v| v.as_u64()), Some(0), "{building}");
+
+	Datastore::index_compaction(Arc::clone(&ds), Duration::from_secs(1), CancellationToken::new())
+		.await?;
+
+	let building = index_building_json(&ds, &session, "t", "dx").await?;
+	assert_eq!(
+		building.get("compacting").and_then(|v| v.as_bool()),
+		Some(false),
+		"the pending set drained, so the index now answers at index speed: {building}"
+	);
+	Ok(())
+}
+
 /// The exclusion must hold cluster-wide, not just for builds on this node. The
 /// `IndexCompaction` task lease can sit on a different node from the one running
 /// the rebuild, and that node's local builder registry knows nothing about it.

@@ -16,9 +16,15 @@ use surrealdb_strand::Strand;
 
 use crate::Transaction;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
-use crate::key::schema::BuildStateKey;
+use crate::catalog::{DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
+use crate::key::schema::{BuildStateKey, HnswPendingLegacyPrefix, HnswRecordPendingPrefix};
+#[cfg(diskann)]
+use crate::key::schema::{DiskannPendingPrefix, DiskannRecordPendingPrefix};
 use crate::val::{Object, TableName, Value};
+#[cfg(diskann)]
+use crate::values::diskann::{
+	DISKANN_PENDING_STATE_SHARDS, DiskAnnPendingState, DiskAnnPendingStateKind,
+};
 use crate::values::index_build::{IndexBuildPhase, IndexBuildReportStatus, IndexBuildState};
 
 pub fn report_status_from_phase(phase: IndexBuildPhase) -> IndexBuildReportStatus {
@@ -33,10 +39,89 @@ pub fn durable_index_error_reason(ix: &IndexDefinition, state: &IndexBuildState)
 	state.error.clone().unwrap_or_else(|| format!("Index {} is in an error state", ix.name))
 }
 
-fn index_building_status_value(ix: &IndexDefinition, state: Option<IndexBuildState>) -> Value {
+/// Whether this index still has record updates waiting to be folded into it.
+///
+/// A vector index answers a kNN search over its graph *plus* any updates not yet
+/// materialised into that graph, and the unmaterialised ones have to be scored
+/// by hand. A large enough set of them turns an indexed search into something
+/// much closer to a scan: measured at ~600ms per query against ~5ms once the
+/// index had absorbed them, on a 1M-row HNSW index.
+///
+/// This reads the per-record pending entries themselves rather than the `!ic`
+/// compaction-trigger queue. The trigger queue cannot answer the question: a
+/// transaction buffers one trigger per index no matter how many records it
+/// wrote, so its depth says nothing about outstanding work, and `index_compaction`
+/// deletes trigger keys even where it declines to fold — during a build takeover,
+/// for instance — so an empty trigger queue does not mean an empty index.
+///
+/// Existence, not depth: the first key is enough to answer it, and counting
+/// would scan a range that after a bulk load is as long as the table. Callers
+/// that need progress rather than a gate are better served by a count added
+/// deliberately, with its cost understood.
+async fn index_has_unmaterialised_updates(
+	tx: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	ix: &IndexDefinition,
+) -> Result<bool> {
+	let tb = Cow::Borrowed(&ix.table_name);
+	// Only the graph indexes defer work this way; everything else is materialised
+	// by the write that caused it. The ranges are separately typed, so they are
+	// probed in place rather than collected — `||` also stops at the first hit.
+	let unmaterialised = match ix.index {
+		Index::Hnsw(_) => {
+			let current = HnswRecordPendingPrefix::new(ns, db, tb.clone(), ix.index_id).range()?;
+			if !tx.keys(current, 1, 0, None).await?.is_empty() {
+				true
+			} else {
+				// Pre-`!hr` data still queues here and is still scored by hand.
+				let legacy = HnswPendingLegacyPrefix::new(ns, db, tb, ix.index_id).range()?;
+				!tx.keys(legacy, 1, 0, None).await?.is_empty()
+			}
+		}
+		// DiskANN is compiled only for 64-bit non-wasm targets, and its pending
+		// keyspace with it, so elsewhere this falls through to the arm below —
+		// where there is no DiskANN index to ask about in the first place.
+		#[cfg(diskann)]
+		Index::DiskAnn(_) => {
+			// Writes land in the sharded `!dw` range, and lookup decides per
+			// shard whether to merge them by reading that shard's `!dy` guard.
+			// So the guards are the question, not `!dw` itself.
+			//
+			// Only `NonEmpty` counts. The guards step `NonEmpty` ->
+			// `MaybeEmpty` -> `Empty` across compaction passes, and a
+			// `MaybeEmpty` shard has already had its updates folded in — the
+			// guard has just not been proved empty yet, so lookup still scans
+			// a range it will find nothing in. Treating that as unsettled
+			// would leave the field true on an index that answers at full
+			// speed, until some later pass happened to close the guard.
+			// There are at most `DISKANN_PENDING_STATE_SHARDS` of these.
+			let guards = DiskannPendingPrefix::new(ns, db, tb.clone(), ix.index_id).range()?;
+			let guards: Vec<(Vec<u8>, DiskAnnPendingState)> =
+				tx.scan(guards, DISKANN_PENDING_STATE_SHARDS.into(), 0, None).await?;
+			if guards.iter().any(|(_, state)| state.kind == DiskAnnPendingStateKind::NonEmpty) {
+				true
+			} else {
+				// Pre-shard data still lands in the unsharded range, which
+				// lookup reads unconditionally alongside the shards.
+				let legacy = DiskannRecordPendingPrefix::new(ns, db, tb, ix.index_id).range()?;
+				!tx.keys(legacy, 1, 0, None).await?.is_empty()
+			}
+		}
+		_ => false,
+	};
+	Ok(unmaterialised)
+}
+
+fn index_building_status_value(
+	ix: &IndexDefinition,
+	state: Option<IndexBuildState>,
+	unmaterialised: bool,
+) -> Value {
 	let Some(state) = state else {
 		let mut out = Object::default();
 		out.insert("status", IndexBuildReportStatus::Ready.as_str().into());
+		out.insert("compacting", unmaterialised.into());
 		return out.into();
 	};
 	let status = state.report_status.unwrap_or_else(|| report_status_from_phase(state.phase));
@@ -54,6 +139,7 @@ fn index_building_status_value(ix: &IndexDefinition, state: Option<IndexBuildSta
 		out.insert("error", durable_index_error_reason(ix, &state).into());
 	}
 	out.insert("status", status.as_str().into());
+	out.insert("compacting", unmaterialised.into());
 	out.into()
 }
 
@@ -74,8 +160,9 @@ pub async fn index_building_info(
 		ix: ix.index_id,
 	};
 	let status = tx.get_key(&state_key, None).await?;
+	let unmaterialised = index_has_unmaterialised_updates(tx, ns, db, ix).await?;
 	let mut out = Object::default();
-	out.insert("building", index_building_status_value(ix, status));
+	out.insert("building", index_building_status_value(ix, status, unmaterialised));
 	Ok(out.into())
 }
 

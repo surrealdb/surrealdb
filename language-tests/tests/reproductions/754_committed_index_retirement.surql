@@ -29,7 +29,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ building: { initial: 2, pending: 0, status: 'ready', updated: 0 } }"
+value = "{ building: { compacting: false, initial: 2, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
 value = "[{ id: user:one }]"
