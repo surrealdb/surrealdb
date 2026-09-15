@@ -245,8 +245,21 @@ macro_rules! poll_next {
 			let Some(ref mut rx) = self.as_mut().rx else {
 				return Poll::Ready(None);
 			};
-			match rx.poll_next_unpin(cx) {
-				Poll::Ready(Some($result)) => $body,
+			let polled = rx.poll_next_unpin(cx);
+			match polled {
+				Poll::Ready(Some($result)) => {
+					// `Killed` is the subscription's own end: the datastore has
+					// removed it, so the stream has nothing left to receive and
+					// nothing left to tear down. Dropping the receiver here is
+					// what tells `Drop` that, which would otherwise ask for a
+					// subscription that is already gone to be killed.
+					if let Ok(notification) = &$result
+						&& matches!(notification.action, Action::Killed)
+					{
+						self.as_mut().rx = None;
+					}
+					$body
+				}
 				Poll::Ready(None) => Poll::Ready(None),
 				Poll::Pending => Poll::Pending,
 			}
@@ -322,14 +335,23 @@ where
 	poll_next_and_convert! {}
 }
 
+/// Ends the live query behind a [`Stream`], on the way out of its `Drop`.
+///
+/// A dropped stream is gone whether or not the engine could end its
+/// subscription, so the failure is reported rather than returned: there is no
+/// caller left to return it to, and a subscription that outlives its stream
+/// goes on being registered -- and, on the engines that capture events per
+/// table, goes on costing every later write.
 pub(crate) fn kill<Client>(client: &Surreal<Client>, uuid: Uuid)
 where
 	Client: Connection,
 {
 	let client = client.clone();
 	spawn(async move {
-		if let Ok(router) = client.inner.router.extract() {
-			router.engine.kill(ctx(client.session_id), uuid).await.ok();
+		if let Ok(router) = client.inner.router.extract()
+			&& let Err(error) = router.engine.kill(ctx(client.session_id), uuid).await
+		{
+			tracing::warn!("Failed to kill live query '{uuid}'; {error}");
 		}
 	});
 }
@@ -364,5 +386,42 @@ where
 				SerializationError::Deserialization,
 			))),
 		},
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use futures::StreamExt;
+
+	use super::*;
+
+	/// A notification for `id`, as the engine delivers one.
+	fn notification(id: Uuid, action: Action) -> CoreNotification {
+		CoreNotification::new(id.into(), None, action, Value::None, Value::None)
+	}
+
+	/// A `Killed` notification ends the stream *and* everything behind it.
+	///
+	/// The subscription is gone from the datastore by the time this arrives --
+	/// it is what the removal queues -- so a stream that has seen one must not
+	/// ask for it to be killed again on the way out of `Drop`: there is nothing
+	/// left to kill, and the attempt fails.
+	#[tokio::test]
+	async fn a_killed_notification_leaves_nothing_to_tear_down() {
+		let id = Uuid::now_v7();
+		let (sender, receiver) = async_channel::unbounded();
+		let mut stream: Stream<Value> = Stream::new(Surreal::init(), id, Some(receiver));
+
+		sender.send(Ok(notification(id, Action::Create))).await.unwrap();
+		sender.send(Ok(notification(id, Action::Killed))).await.unwrap();
+
+		assert!(stream.next().await.is_some(), "the change is delivered");
+		assert!(stream.rx.is_some(), "the subscription is still this stream's to end");
+
+		assert!(stream.next().await.is_none(), "a killed subscription ends the stream");
+		assert!(
+			stream.rx.is_none(),
+			"a stream that has seen the subscription end has nothing left to tear down"
+		);
 	}
 }

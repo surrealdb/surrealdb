@@ -7,7 +7,7 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_datastore::Transaction;
 use surrealdb_engine_api::{SessionError, SessionId, session_error_to_error};
-use surrealdb_types::{Error, HashMap, Notification, Variables};
+use surrealdb_types::{Action, Error, HashMap, Notification, Variables};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -166,14 +166,32 @@ async fn deliver(kvs: &Arc<Datastore>, sessions: &SessionRegistry, notification:
 		}
 	};
 
-	let sender = match state.live_queries.get(&live_query_id) {
+	// A `Killed` notification is the subscription's own end: the datastore
+	// removed it, and this notification is what that removal queued. The
+	// session's registration leaves with the notification rather than
+	// outliving the subscription it names -- the WebSocket transport drops
+	// its registration on the same frame, for the same reason.
+	let ended = matches!(notification.action, Action::Killed);
+	let registration = match ended {
+		true => state.live_queries.take(&live_query_id),
+		false => state.live_queries.get(&live_query_id),
+	};
+
+	let sender = match registration {
 		Some(Some(sender)) => sender,
 		// Registered, but its subscriber has not arrived yet. The notification
 		// has nowhere to go, and the subscriber will see everything from the
 		// point it does arrive.
 		Some(None) => return,
+		// A subscription this session does not hold. For the end of one that
+		// is the ordinary outcome of the session ending it itself: `kill`
+		// drops the registration before the statement it runs queues this
+		// notification. Anything else names a subscription the session never
+		// had, which is worth saying.
 		None => {
-			warn!("Failed to find live query '{live_query_id}' for session '{session_id:?}'");
+			if !ended {
+				warn!("Failed to find live query '{live_query_id}' for session '{session_id:?}'");
+			}
 			return;
 		}
 	};
@@ -186,7 +204,10 @@ async fn deliver(kvs: &Arc<Datastore>, sessions: &SessionRegistry, notification:
 	// a remote JWKS fetch, for a JWT access method -- and reading it out here
 	// would stall delivery to every *other* session behind that one.
 	spawn(async move {
-		if sender.send(Ok(notification)).await.is_err() {
+		// A subscriber that has gone away takes its subscription with it --
+		// unless the subscription is what has already gone, in which case the
+		// registration is dropped above and there is nothing left to kill.
+		if sender.send(Ok(notification)).await.is_err() && !ended {
 			state.live_queries.remove(&live_query_id);
 			let vars = state.vars.read().await.clone();
 			let session = state.session.read().await.clone();
@@ -322,5 +343,82 @@ mod tests {
 
 		sessions.apply(SessionId::Drop(id)).await;
 		assert!(sessions.resolve(id).await.is_err(), "a dropped session must not be waited for");
+	}
+
+	/// A subscription that ends takes its registration with it.
+	///
+	/// The `Killed` notification is what the removal of a subscription queues,
+	/// so delivering one is the moment the session learns its subscription is
+	/// gone. A registration left behind holds the subscriber's channel for as
+	/// long as the session lives, and nothing later arrives to clear it.
+	#[cfg(feature = "kv-mem")]
+	#[test_log::test(tokio::test)]
+	async fn a_killed_notification_takes_the_registration_with_it() {
+		let kvs = Datastore::new("memory").await.unwrap();
+		let sessions = registry();
+		let session = Uuid::now_v7();
+		sessions.apply(SessionId::Initial(session)).await;
+		let state = sessions.resolve(session).await.unwrap();
+
+		let live = Uuid::now_v7();
+		let (sender, subscriber) = async_channel::unbounded();
+		state.live_queries.insert(live, Some(sender));
+
+		deliver(
+			&kvs,
+			&sessions,
+			Notification::new(
+				live.into(),
+				Some(session.into()),
+				Action::Killed,
+				Value::None,
+				Value::None,
+			),
+		)
+		.await;
+
+		assert!(
+			subscriber.recv().await.is_ok(),
+			"the subscriber is still owed the end of its subscription"
+		);
+		assert!(
+			state.live_queries.get(&live).is_none(),
+			"the registration outlived the subscription it names"
+		);
+	}
+
+	/// Every other notification leaves the registration in place: the
+	/// subscription is still running, and more are coming.
+	#[cfg(feature = "kv-mem")]
+	#[test_log::test(tokio::test)]
+	async fn a_change_notification_leaves_the_registration_in_place() {
+		let kvs = Datastore::new("memory").await.unwrap();
+		let sessions = registry();
+		let session = Uuid::now_v7();
+		sessions.apply(SessionId::Initial(session)).await;
+		let state = sessions.resolve(session).await.unwrap();
+
+		let live = Uuid::now_v7();
+		let (sender, subscriber) = async_channel::unbounded();
+		state.live_queries.insert(live, Some(sender));
+
+		deliver(
+			&kvs,
+			&sessions,
+			Notification::new(
+				live.into(),
+				Some(session.into()),
+				Action::Create,
+				Value::None,
+				Value::None,
+			),
+		)
+		.await;
+
+		assert!(subscriber.recv().await.is_ok(), "the change reaches the subscriber");
+		assert!(
+			matches!(state.live_queries.get(&live), Some(Some(_))),
+			"the subscription is still running and still the session's"
+		);
 	}
 }

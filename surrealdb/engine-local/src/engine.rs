@@ -82,15 +82,25 @@ fn transaction_abandoned() -> Error {
 	)
 }
 
+/// The parameter [`kill_live_query`] binds the subscription's id to.
+const KILL_ID_PARAM: &str = "__kill_id";
+
+/// Ends a live query by running the `KILL` statement for it.
+///
+/// The id is bound rather than written into the statement text: `KILL` accepts
+/// a UUID literal or a parameter, and a `Uuid`'s own rendering is neither --
+/// bare hex lexes as a number. Binding also leaves no escaping question behind.
 pub(crate) async fn kill_live_query(
 	kvs: &Datastore,
 	id: Uuid,
 	session: &Session,
-	vars: Variables,
+	mut vars: Variables,
 ) -> Result<Vec<QueryResult>, Error> {
-	let sql = format!("KILL {id}");
+	// The session's variables are the caller's to name, so the binding goes in
+	// last: this statement kills the id it was given.
+	vars.insert(KILL_ID_PARAM.to_string(), Value::Uuid(id.into()));
 
-	let results = kvs.execute(&sql, session, Some(vars)).await?;
+	let results = kvs.execute(&format!("KILL ${KILL_ID_PARAM}"), session, Some(vars)).await?;
 	Ok(results)
 }
 
@@ -963,6 +973,156 @@ mod tests {
 		assert!(
 			matches!(state.live_queries.get(&live), Some(Some(_))),
 			"the subscriber must survive a later recording pass"
+		);
+	}
+}
+
+/// Live-query teardown, against a datastore that can actually register one.
+///
+/// These run against the datastore rather than the session map because the two
+/// disagree exactly where the interesting failure is: `kill` empties the
+/// session map before it reaches the datastore, so a teardown that never
+/// removed the subscription looks, from the subscriber's end, the same as one
+/// that did.
+#[cfg(all(test, feature = "kv-mem"))]
+mod live_query_tests {
+	use std::time::Duration;
+
+	use async_channel::{Receiver, Sender};
+	use surrealdb_engine_api::SessionId;
+	use surrealdb_types::Action;
+	use tokio::time::timeout;
+
+	use super::*;
+
+	/// An engine over a fresh in-memory datastore, holding the datastore's own
+	/// notification channel rather than letting the engine's pump drain it.
+	struct Harness {
+		engine: Arc<LocalEngine>,
+		ctx: EngineContext,
+		notifications: Receiver<Notification>,
+		/// The engine shuts the datastore down when this closes, so the test
+		/// keeps it open for as long as it holds the engine.
+		_sessions: Sender<SessionId>,
+	}
+
+	impl Harness {
+		async fn new() -> Self {
+			let (notify_tx, notifications) = async_channel::bounded(100);
+			let kvs = Datastore::builder()
+				.with_auth(false)
+				.with_notify(notify_tx)
+				.build_with_path("memory")
+				.await
+				.expect("an in-memory datastore should open");
+
+			let (sessions_tx, sessions_rx) = async_channel::unbounded();
+			// No notification pump: this test reads the datastore's end of the
+			// channel itself.
+			let engine = crate::from_datastore(kvs, None, sessions_rx);
+
+			let session = Uuid::now_v7();
+			sessions_tx.send(SessionId::Initial(session)).await.expect("the engine is running");
+			let ctx = EngineContext::new(session);
+			engine
+				.use_ns_db(ctx, Some("test".to_string()), Some("test".to_string()))
+				.await
+				.expect("selecting a namespace and database should succeed");
+
+			let harness = Self {
+				engine,
+				ctx,
+				notifications,
+				_sessions: sessions_tx,
+			};
+			harness.query("DEFINE TABLE person").await;
+			harness
+		}
+
+		/// Runs a statement, failing the test if it does not succeed.
+		async fn query(&self, sql: &'static str) -> Value {
+			let mut results = self
+				.engine
+				.query(self.ctx, Cow::Borrowed(sql), Variables::new())
+				.await
+				.unwrap_or_else(|error| panic!("`{sql}` failed: {error}"));
+			results
+				.remove(0)
+				.result
+				.unwrap_or_else(|error| panic!("`{sql}` returned an error: {error}"))
+		}
+
+		/// The next notification the datastore emits.
+		async fn notification(&self, expected: &str) -> Notification {
+			timeout(Duration::from_secs(10), self.notifications.recv())
+				.await
+				.unwrap_or_else(|_| panic!("timed out waiting for {expected}"))
+				.expect("the notification channel is open")
+		}
+
+		/// Registers a live query on `person` and returns its id.
+		async fn live(&self) -> Uuid {
+			match self.query("LIVE SELECT * FROM person").await {
+				Value::Uuid(id) => id.into_inner(),
+				other => panic!("LIVE SELECT should return a uuid, got {other:?}"),
+			}
+		}
+	}
+
+	/// `kill` has to end the subscription in the datastore, not merely return.
+	///
+	/// Nothing downstream of the call can tell the two apart: the session's own
+	/// entry is gone before the statement runs, and the only caller --
+	/// `Stream::drop`, in the SDK -- has nowhere to report a failure to. What a
+	/// surviving subscription costs is paid by the datastore on every later
+	/// write, so that is where the assertion belongs.
+	#[test_log::test(tokio::test)]
+	async fn kill_removes_the_subscription_from_the_datastore() {
+		let harness = Harness::new().await;
+		let live = harness.live().await;
+
+		// PROOF THE SUBSCRIPTION IS LIVE: without this, the absence of a
+		// notification after the kill would prove nothing.
+		harness.query("CREATE person:one").await;
+		let created = harness.notification("the change on the live subscription").await;
+		assert_eq!(created.id.into_inner(), live, "the notification belongs to this subscription");
+		assert_eq!(created.action, Action::Create);
+
+		harness.engine.kill(harness.ctx, live).await.expect("kill should end the subscription");
+
+		// The datastore queues this as the kill commits, so a `Killed`
+		// notification is the datastore's own account of having run it.
+		let killed = harness.notification("the killed notification").await;
+		assert_eq!(killed.id.into_inner(), live, "the kill names this subscription");
+		assert_eq!(killed.action, Action::Killed);
+		// Where this notification stops. The engine's pump routes by session,
+		// and `KILL` queues its notification without one, so this is as far as
+		// the end of a subscription travels: a subscriber is told by the end of
+		// its stream, never by a notification.
+		assert!(killed.session.is_none(), "the kill notification carries no session");
+
+		// THE POINT: a later change must no longer be captured for it.
+		harness.query("CREATE person:two").await;
+		let leaked = timeout(Duration::from_millis(500), harness.notifications.recv()).await;
+		assert!(
+			leaked.is_err(),
+			"the subscription outlived the kill and is still capturing changes: {:?}",
+			leaked.map(|notification| notification.map(|n| (n.id, n.action))),
+		);
+	}
+
+	/// The datastore's own record of the subscription has to be gone with it: a
+	/// `KILL` of a subscription the node no longer holds fails, so a second one
+	/// failing is what says the first one committed.
+	#[test_log::test(tokio::test)]
+	async fn a_killed_subscription_cannot_be_killed_again() {
+		let harness = Harness::new().await;
+		let live = harness.live().await;
+
+		harness.engine.kill(harness.ctx, live).await.expect("kill should end the subscription");
+		assert!(
+			harness.engine.kill(harness.ctx, live).await.is_err(),
+			"the datastore still holds a subscription the kill was supposed to remove"
 		);
 	}
 }

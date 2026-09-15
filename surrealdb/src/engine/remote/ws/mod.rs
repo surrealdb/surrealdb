@@ -28,7 +28,7 @@ use crate::conn::{Command, RequestData, Route};
 use crate::engine::remote::{RemoteCommand, RouterRequest};
 use crate::engine::{SessionError, session_error_to_error};
 use crate::opt::IntoEndpoint;
-use crate::types::{Array, HashMap, Notification, Number, SurrealValue, Value};
+use crate::types::{Action, Array, HashMap, Notification, Number, SurrealValue, Value};
 use crate::{Connect, Error, Surreal};
 
 pub(crate) const PATH: &str = "rpc";
@@ -688,9 +688,20 @@ where
 {
 	if let Ok(DbResult::Live(notification)) = result {
 		let live_query_id = notification.id.into_inner();
+		// `Killed` is the subscription's own end: the server has removed it,
+		// and this notification is what that removal sends. The registration
+		// leaves with the notification rather than outliving the subscription
+		// it names, holding the subscriber's channel until the connection
+		// closes.
+		let ended = matches!(notification.action, Action::Killed);
+		let registration = match ended {
+			true => session_state.live_queries.take(&live_query_id),
+			false => session_state.live_queries.get(&live_query_id),
+		};
 
-		if let Some(sender) = session_state.live_queries.get(&live_query_id)
+		if let Some(sender) = registration
 			&& sender.send(Ok(notification)).await.is_err()
+			&& !ended
 		{
 			// Receiver dropped, kill the live query
 			session_state.live_queries.remove(&live_query_id);
@@ -1118,11 +1129,12 @@ mod tests {
 
 	use super::{
 		HandleResult, PendingRequest, SessionState, WsMessage, fail_all_pending_requests,
-		handle_parse_error, handle_response_with_id, handle_route, replay_cursor, replay_session,
+		handle_live_notification, handle_parse_error, handle_response_with_id, handle_route,
+		replay_cursor, replay_session,
 	};
 	use crate::conn::{Command, RequestData, Route};
 	use crate::engine::SessionError;
-	use crate::types::{HashMap, Number, Value};
+	use crate::types::{Action, HashMap, Notification, Number, Value};
 
 	type Sessions = HashMap<Uuid, Result<Arc<SessionState>, SessionError>>;
 
@@ -1583,5 +1595,53 @@ mod tests {
 			matches!(sessions.get(&session_id), Some(Err(_))),
 			"the session should be poisoned once its setup is rejected"
 		);
+	}
+
+	/// Delivers one notification for `live` to a session that has it
+	/// registered, and reports whether the registration survived.
+	async fn deliver(action: Action) -> (bool, bool) {
+		let session_state = Arc::new(SessionState::default());
+		let live = Uuid::new_v4();
+		let (sender, subscriber) = async_channel::unbounded();
+		session_state.live_queries.insert(live, sender);
+
+		let sink = RwLock::new(futures::sink::drain::<MockMessage>());
+		let result = handle_live_notification::<MockMessage, _, _>(
+			Ok(DbResult::Live(Notification::new(
+				live.into(),
+				None,
+				action,
+				Value::None,
+				Value::None,
+			))),
+			Uuid::new_v4(),
+			&session_state,
+			&sink,
+		)
+		.await;
+
+		assert_eq!(result, HandleResult::Ok);
+		(subscriber.try_recv().is_ok(), session_state.live_queries.contains_key(&live))
+	}
+
+	/// A `Killed` notification is the subscription's end, so the registration
+	/// goes with it -- otherwise it holds the subscriber's channel until the
+	/// connection closes, and nothing later arrives to clear it.
+	#[tokio::test]
+	async fn a_killed_notification_takes_the_registration_with_it() {
+		let (delivered, registered) = deliver(Action::Killed).await;
+
+		assert!(delivered, "the subscriber is still owed the end of its subscription");
+		assert!(!registered, "the registration outlived the subscription it names");
+	}
+
+	/// Every other notification leaves the registration in place: the
+	/// subscription is still running, and more are coming.
+	#[tokio::test]
+	async fn a_change_notification_leaves_the_registration_in_place() {
+		let (delivered, registered) = deliver(Action::Create).await;
+
+		assert!(delivered, "the change reaches the subscriber");
+		assert!(registered, "the subscription is still running and still the session's");
 	}
 }
