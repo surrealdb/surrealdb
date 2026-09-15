@@ -52,16 +52,6 @@ defaults:
 permissions:
   contents: read
 
-# sccache → S3 backend, shared with the rest of CI. Set at workflow level so the
-# values are in the environment when the sccache-action daemon starts.
-env:
-  SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-  SCCACHE_REGION: us-east-1
-  SCCACHE_S3_KEY_PREFIX: ${{ github.repository }} # scope cache to this repo
-  SCCACHE_IDLE_TIMEOUT: "0" # don't let the daemon exit mid-compile
-  AWS_ACCESS_KEY_ID: ${{ secrets.AMAZON_ACCESS_KEY }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AMAZON_SECRET_KEY }}
-
 jobs:
   compat:
     name: Build + test
@@ -205,6 +195,10 @@ jobs:
         if: steps.preflight.outputs.configured == 'true'
         uses: ./.github/actions/setup-environment
         with:
+          # The kache S3 backend shared with the rest of CI.
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           workspaces: downstream
           cache-key: downstream-compat
           save-cache: ${{ github.event_name == 'push' }}
@@ -484,6 +478,6 @@ jobs:
         working-directory: downstream
         run: cargo nextest run --workspace --exclude surrealdb-integration --exclude s7b-operator --exclude s7b-operator-e2e
 
-      - name: sccache stats
+      - name: kache stats
         if: ${{ always() && steps.preflight.outputs.configured == 'true' }}
-        run: sccache --show-stats || true
+        run: kache stats || true

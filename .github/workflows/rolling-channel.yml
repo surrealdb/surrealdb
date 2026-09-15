@@ -122,15 +122,25 @@ jobs:
       # inside the build-{linux,macos,windows} actions: a nested `uses: ./...`
       # resolves against $GITHUB_WORKSPACE (the built commit checked out above),
       # which would reopen the backport hole for the binary-build tooling.
-      # Compiler caching comes from the shared S3 sccache backend (inputs
-      # below) on every OS, so no per-OS disk-cache persistence is needed.
+      # Compiler caching comes from the shared S3 kache backend (inputs below)
+      # on macOS and Windows, which compile on the runner itself, so no per-OS
+      # disk-cache persistence is needed. The Linux legs compile inside the
+      # builder container instead: it carries neither the kache binary nor the
+      # host's store, and the `docker run` passes an explicit environment that
+      # does not include RUSTC_WRAPPER, so the wrapper could not reach their
+      # compiler. They opt out rather than take a cache backend's failure modes
+      # for a cache they cannot use.
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          enable-kache: ${{ matrix.os != 'linux' }}
           targets: ${{ matrix.arch }}
+          # Both macOS targets build on one arm64 runner, so only the target
+          # triple separates their artifact sets.
+          kache-manifest-key: ${{ matrix.arch }}
 
       - name: Build Linux binary
         if: matrix.os == 'linux'
@@ -411,9 +421,9 @@ jobs:
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
 
       - name: Check crate versions
         uses: ./.ci/.github/actions/check-crate-versions
@@ -455,9 +465,9 @@ jobs:
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           free-disk-space: 'true'
 
       - name: Package crates
@@ -592,9 +602,9 @@ jobs:
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           targets: ${{ matrix.target }}
           cache-key: npm-addon-${{ matrix.target }}
           save-cache: 'true'
@@ -712,9 +722,9 @@ jobs:
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           targets: wasm32-unknown-unknown
           cache-key: npm-wasm
           save-cache: 'true'

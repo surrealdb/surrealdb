@@ -48,8 +48,10 @@ jobs:
             # amd64 leg stays on-demand (no amd spot pool); arm builds spot on PRs.
             runner: runner-arm-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     env:
-      SCCACHE_LOG: ${{ (github.event_name == 'push' || github.event_name == 'merge_group') && 'debug' || '' }}
-      SCCACHE_ERROR_LOG: ${{ (github.event_name == 'push' || github.event_name == 'merge_group') && '/tmp/sccache.log' || '' }}
+      # Verbose cache tracing on the branches whose cache behaviour is worth
+      # inspecting. kache writes it to stderr, so it lands in the build step's
+      # own log; empty leaves the action's default filter in place.
+      KACHE_LOG: ${{ (github.event_name == 'push' || github.event_name == 'merge_group') && 'kache=debug' || '' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,9 +59,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           # The WASI target is needed to pack the Surrealism demo module below.
           targets: wasm32-wasip2
           save-cache: ${{ github.ref == 'refs/heads/main' }}
@@ -92,17 +94,9 @@ jobs:
           name: demo-surli-${{ matrix.name }}
           path: demo.surli
 
-      - name: sccache stats
+      - name: kache stats
         if: ${{ always() }}
-        run: sccache --show-stats || true
-
-      - name: Upload sccache debug log
-        if: ${{ always() && (github.event_name == 'push' || github.event_name == 'merge_group') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
-        with:
-          name: sccache-debug-build-${{ matrix.name }}
-          path: /tmp/sccache.log
-          if-no-files-found: warn
+        run: kache stats || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
@@ -130,13 +124,13 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           toolchain: ${{ steps.info.outputs.toolchain }}
           components: rustfmt
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: "false"
+          enable-kache: "false"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -154,9 +148,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -180,9 +174,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -202,9 +196,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           toolchain: nightly
           components: miri
           save-cache: ${{ github.ref == 'refs/heads/main' }}
@@ -222,9 +216,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -244,9 +238,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -267,9 +261,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           toolchain: ${{ env.msrv }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -289,9 +283,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           components: clippy
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
@@ -314,9 +308,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -337,11 +331,11 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: "false"
+          enable-kache: "false"
 
       - name: Install revision-lock
         run: cargo install revision-lock --version 0.2.0 --locked
@@ -359,9 +353,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -384,11 +378,11 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: "false"
+          enable-kache: "false"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -409,11 +403,11 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: "false"
+          enable-kache: "false"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -434,13 +428,13 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           # This job only runs `cargo package --no-verify`, which compiles
-          # nothing, so sccache would never be exercised (like the other
+          # nothing, so the compile cache would never be exercised (like the other
           # no-compile jobs above).
-          enable-sccache: "false"
+          enable-kache: "false"
 
       # Catches PRs that change a published crate (e.g. surrealism, surrealml)
       # without bumping its version, so it's surfaced at review time instead of
@@ -493,9 +487,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -506,9 +500,9 @@ jobs:
       - name: Run integration tests
         run: cargo make ci-integration-all
 
-      - name: sccache stats
+      - name: kache stats
         if: success() || failure()
-        run: sccache -s || true
+        run: kache stats || true
 
   # ----------------------------------------
   # Workspace tests
@@ -552,11 +546,15 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           cache-key: kvs
+          # Each engine compiles its own feature set, and the manifest default
+          # cannot see the matrix - without this the legs overwrite each other's
+          # manifest and the next run prefetches whichever finished last.
+          kache-manifest-key: kvs-${{ matrix.engine }}-${{ matrix.arch }}
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -585,9 +583,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build local
@@ -612,12 +610,15 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           # Engine-independent deps (see kvs-engines) — one shared cache key.
           cache-key: sdk
+          # The compiled artifacts are not engine-independent, so the manifest
+          # is scoped per engine (see kvs-engines).
+          kache-manifest-key: sdk-${{ matrix.engine }}
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -653,13 +654,16 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: language-tests
           # Engine-independent deps (see kvs-engines) — one shared cache key.
           cache-key: lang
+          # The compiled artifacts are not engine-independent, so the manifest
+          # is scoped per engine (see kvs-engines).
+          kache-manifest-key: lang-${{ matrix.engine }}-${{ matrix.arch }}
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -715,9 +719,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           # The WASI target is needed to build the Surrealism module the upgrade
           # tests load through DEFINE MODULE.
@@ -730,6 +734,9 @@ jobs:
             .
           # Engine-independent deps (see kvs-engines) — one shared cache key.
           cache-key: lang-upgrade
+          # The compiled artifacts are not engine-independent, so the manifest
+          # is scoped per engine (see kvs-engines).
+          kache-manifest-key: lang-upgrade-${{ matrix.engine }}-${{ matrix.arch }}
 
       - name: Resolve upgrade version chain
         id: vers
@@ -785,9 +792,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check tokio-console feature
@@ -812,9 +819,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: language-tests
           cache-key: lang-bench
@@ -891,9 +898,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -951,9 +958,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           # The addon is a release build into its own target triple directory,
           # so it shares nothing with the debug-profile jobs.
@@ -986,9 +993,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           # The module is a release build into its own target triple directory,

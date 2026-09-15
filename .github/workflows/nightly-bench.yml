@@ -19,17 +19,6 @@ defaults:
   run:
     shell: bash
 
-# sccache → S3 backend, consumed by setup-environment's daemon-start step
-# (env-style configuration; call sites may pass the same values as inputs).
-env:
-  SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-  SCCACHE_REGION: us-east-1
-  SCCACHE_S3_KEY_PREFIX: ${{ github.repository }}
-  SCCACHE_IDLE_TIMEOUT: "0"
-  # Dedicated bucket-scoped creds, not the release-publishing AMAZON_* keys.
-  AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
-
 jobs:
   bench:
     name: Nightly benchmark
@@ -80,6 +69,12 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          # The kache S3 compile cache shared with the rest of CI, reached with
+          # dedicated bucket-scoped creds - not the release-publishing AMAZON_*
+          # keys the other workflows pass.
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
+          kache-secret-access-key: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
           save-cache: false
           free-disk-space: 'false'
 

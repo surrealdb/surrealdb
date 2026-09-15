@@ -34,28 +34,71 @@ inputs:
     description: 'Whether to free disk space by removing pre-installed software'
     required: false
     default: 'false'
-  enable-sccache:
-    description: 'Whether to compile via sccache (RUSTC_WRAPPER)'
+  enable-kache:
+    description: 'Whether to compile via kache (RUSTC_WRAPPER)'
     required: false
     default: 'true'
-  sccache-bucket:
+  kache-bucket:
     description: >-
-      S3 bucket for the shared sccache backend. Empty falls back to a
-      SCCACHE_BUCKET already present in the calling job's environment, and
-      with neither the compile runs against a local disk cache only (ephemeral
-      on hosted runners) - the fork-PR / unconfigured-secret path.
+      S3 bucket backing the shared compile cache. Empty compiles against a
+      local, runner-lifetime store only - the fork-PR / unconfigured-secret
+      path. A bucket that is set but unreachable FAILS the job: kache refuses
+      to run against a silently cold remote, so a backend outage reds CI
+      rather than quietly tripling every build.
+
+      Only a push to a PROTECTED branch publishes to the bucket. kache holds
+      pull requests, tags, dispatches and scheduled runs to reads no matter
+      what credential they carry, so a PR cannot poison the shared cache -
+      and cannot warm it either, not even from its own earlier runs. A PR
+      reads what main last published; "Nothing to sync" in a PR's post step
+      is that policy, not a failure.
     required: false
     default: ''
-  sccache-access-key-id:
+  kache-region:
+    description: 'Region of kache-bucket.'
+    required: false
+    default: 'us-east-1'
+  kache-access-key-id:
     description: >-
-      Static access key for the sccache bucket, scoped to the daemon-start
-      step only - it never enters the calling job's environment. Empty falls
-      back to AWS credentials already in the job environment, then to the
-      ambient credential chain (e.g. a private runner's instance role).
+      Static access key for the cache bucket. Empty falls back to whatever the
+      ambient credential chain resolves (e.g. a private runner's instance
+      role).
     required: false
     default: ''
-  sccache-secret-access-key:
-    description: 'Secret half of sccache-access-key-id.'
+  kache-secret-access-key:
+    description: 'Secret half of kache-access-key-id.'
+    required: false
+    default: ''
+  kache-manifest-key:
+    description: >-
+      Scopes the build manifest kache warm-prefetches from, under the branch
+      segment every key already carries. Every build variant sharing the bucket
+      needs its own: an unscoped manifest defaults to the target triple, which
+      all of them then overwrite, and prefetch collapses to nothing. The
+      default - the job plus runner platform - separates jobs but cannot see
+      the matrix, so pass this wherever legs of one job compile different
+      features or cross-compile different targets on one runner.
+
+      The branch segment is the base branch, not the running ref, so a pull
+      request warms from the manifest its target published rather than from
+      one under a ref that only exists for the merge. Cache entries stay
+      shared across branches - they are content-addressed, so the lines that
+      genuinely build the same dependency reuse each other's - and only the
+      prefetch hint list is per-line.
+    required: false
+    default: ''
+  kache-version:
+    description: 'Pin the kache release to install. Empty installs the latest.'
+    required: false
+    default: ''
+  kache-cache-dir:
+    description: >-
+      Local kache store. Defaults beside the workspace under the runner's temp
+      directory, because kache shares artifact bytes by hardlink or reflink and
+      neither can cross a mount: the per-user cache directory is on a different
+      mount from the build tree on these runners, and every store and restore
+      there degrades to a full copy. Point it at a persistent path on a runner
+      whose store should outlive the job.
     required: false
     default: ''
 
@@ -116,77 +159,40 @@ runs:
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 
-    - name: Setup sccache
-      if: inputs.enable-sccache == 'true'
-      uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+    # Installs the kache binary, points RUSTC_WRAPPER at it, and - when a bucket
+    # is configured - starts the daemon that prefetches from S3 while cargo is
+    # still fetching. Credentials reach the daemon as masked job environment
+    # variables, which it holds for the job's lifetime.
+    - name: Setup kache
+      if: inputs.enable-kache == 'true'
+      uses: kunobi-ninja/kache-action@78ff455251aa37139061201a39113a1924994035 # (Actions must be pinned by commit hash) v1
+      with:
+        version: ${{ inputs.kache-version }}
+        s3-bucket: ${{ inputs.kache-bucket }}
+        s3-region: ${{ inputs.kache-region }}
+        # Keyed under the repository so one bucket can serve several, and under
+        # a kache/ segment so these objects stay separable from any other
+        # cache's in the same bucket.
+        s3-prefix: ${{ github.repository }}/kache
+        s3-access-key-id: ${{ inputs.kache-access-key-id }}
+        s3-secret-access-key: ${{ inputs.kache-secret-access-key }}
+        manifest-key: ${{ format('{0}/{1}', github.base_ref || github.ref_name, inputs.kache-manifest-key || format('{0}-{1}-{2}', inputs.cache-key || github.job, runner.os, runner.arch)) }}
+        cache-dir: ${{ inputs.kache-cache-dir || format('{0}/kache', runner.temp) }}
+        # The GitHub Actions cache is a fixed 10GB per repository, already spent
+        # on the registry caches below. A kache store persisted there would
+        # evict them, so a job without a bucket caches locally or not at all -
+        # the same reach the compile cache had before kache.
+        github-cache: 'false'
+        # Every job in a workflow would post its own; the job summary carries
+        # the same report, and the workflows grant read-only token scopes.
+        pr-comment: 'false'
 
-    - name: Start sccache
-      if: inputs.enable-sccache == 'true'
+    - name: Configure cargo for kache
+      if: inputs.enable-kache == 'true'
       shell: bash
-      env:
-        # Inputs arrive under INPUT_* names so the calling job's own
-        # SCCACHE_*/AWS_* environment (the configuration style some workflows
-        # use) stays visible as a fallback - a step-scoped SCCACHE_BUCKET
-        # would override it even when empty.
-        INPUT_SCCACHE_BUCKET: ${{ inputs.sccache-bucket }}
-        INPUT_SCCACHE_ACCESS_KEY_ID: ${{ inputs.sccache-access-key-id }}
-        INPUT_SCCACHE_SECRET_ACCESS_KEY: ${{ inputs.sccache-secret-access-key }}
-      run: |
-        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
-
-        # Backend configuration and credentials live in THIS step's shell and
-        # die with it: the daemon reads them at start and holds them for the
-        # job's lifetime, so no later step in the calling job sees the
-        # credentials. A client-restarted daemon (the daemon should never
-        # exit: idle timeout 0) would lack this environment and fall back to
-        # an uncached local build rather than a broken S3 backend.
-        # sccache treats a present-but-EMPTY SCCACHE_BUCKET as an S3
-        # configuration and refuses to start on it, so the variable must be
-        # unset - not empty - for the local disk cache fallback to engage
-        # (the fork-PR / unconfigured-secret path).
-        if [[ -n "${INPUT_SCCACHE_BUCKET:-${SCCACHE_BUCKET:-}}" ]]; then
-          export SCCACHE_BUCKET="${INPUT_SCCACHE_BUCKET:-${SCCACHE_BUCKET:-}}"
-        else
-          unset SCCACHE_BUCKET
-        fi
-        export SCCACHE_REGION="${SCCACHE_REGION:-us-east-1}" # the bucket's home region
-        export SCCACHE_S3_KEY_PREFIX="${SCCACHE_S3_KEY_PREFIX:-$GITHUB_REPOSITORY}" # scope cache to this repo
-        export SCCACHE_IDLE_TIMEOUT="${SCCACHE_IDLE_TIMEOUT:-0}" # don't let the daemon exit mid-compile
-        # Raised IPC frame limit: only the non-default client-side compile
-        # mode streams cached artifact bytes over the IPC channel; the default
-        # server-side mode does not. A guard, not load-bearing.
-        export SCCACHE_MAX_FRAME_LENGTH="${SCCACHE_MAX_FRAME_LENGTH:-2147483648}"
-        if [[ -n "$INPUT_SCCACHE_ACCESS_KEY_ID" ]]; then
-          export AWS_ACCESS_KEY_ID="$INPUT_SCCACHE_ACCESS_KEY_ID"
-          export AWS_SECRET_ACCESS_KEY="$INPUT_SCCACHE_SECRET_ACCESS_KEY"
-          unset AWS_SESSION_TOKEN
-        elif [[ -n "${SCCACHE_BUCKET:-}" && -z "${AWS_ACCESS_KEY_ID:-}" ]]; then
-          # Materialize whatever the ambient chain resolves (e.g. a private
-          # runner's instance role - sccache cannot consume pod-identity
-          # credentials directly). The CLI's exit status must be checked on
-          # the substitution itself: eval of its (empty) output would succeed
-          # even when the CLI failed. Non-fatal: with no credentials the probe
-          # below falls back to an uncached compile rather than failing.
-          if creds="$(aws configure export-credentials --format env 2>/dev/null)"; then
-            eval "$creds"
-          else
-            echo "::warning title=sccache::no AWS credentials resolved; compiling without the cache"
-          fi
-        fi
-
-        # The S3 backend is read when the server starts. Probe it by starting
-        # the server explicitly: only enable RUSTC_WRAPPER if the backend is
-        # actually reachable. If it isn't - missing S3 perms, a bucket outage,
-        # or a fork PR with no secrets - compile *uncached* rather than failing
-        # every rustc invocation (sccache treats a backend it can't read as
-        # fatal).
-        sccache --stop-server >/dev/null 2>&1 || true
-        if sccache --start-server; then
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "sccache backend reachable — compiler cache enabled"
-        else
-          echo "::warning title=sccache disabled::sccache server failed to start (cache backend unreachable); compiling without the cache"
-        fi
+      # Incremental artifacts are per-machine and defeat a shared cache: they
+      # would be recompiled on every runner and stored by none.
+      run: echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
 
     - name: Setup cache
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

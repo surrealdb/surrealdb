@@ -28,18 +28,6 @@ defaults:
 permissions:
   contents: read
 
-# sccache → S3 backend, consumed by setup-environment's daemon-start step
-# (env-style configuration). Only the `build` job compiles Rust / uses
-# sccache; the env is inert elsewhere. Empty on fork PRs → sccache falls
-# back to a local cache.
-env:
-  SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-  SCCACHE_REGION: us-east-1
-  SCCACHE_S3_KEY_PREFIX: ${{ github.repository }}
-  SCCACHE_IDLE_TIMEOUT: "0"
-  AWS_ACCESS_KEY_ID: ${{ secrets.AMAZON_ACCESS_KEY }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AMAZON_SECRET_KEY }}
-
 jobs:
   # ----------------------------------------
   # Server build (shared by SDK matrices)
@@ -55,6 +43,11 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          # The kache S3 backend shared with the rest of CI. Empty on fork PRs,
+          # which then compile against a runner-local store.
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build binary
@@ -466,6 +459,9 @@ jobs:
       - name: Setup environment
         uses: ./engine/.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           cache-key: node

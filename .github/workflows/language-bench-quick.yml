@@ -35,14 +35,6 @@ env:
   GH_TOKEN: ${{ github.token }}
   MARKER: "<!-- lang-bench-quick -->"
   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-  # sccache → S3 compile cache (read by setup-environment); fail-open if the
-  # backend is unreachable. Consumed by setup-environment's daemon-start step.
-  SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-  SCCACHE_REGION: us-east-1
-  SCCACHE_S3_KEY_PREFIX: ${{ github.repository }}
-  SCCACHE_IDLE_TIMEOUT: "0"
-  AWS_ACCESS_KEY_ID: ${{ secrets.AMAZON_ACCESS_KEY }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AMAZON_SECRET_KEY }}
 
 jobs:
   # Post the opt-in instructions on open/reopen when the label isn't set yet.
@@ -95,9 +87,13 @@ jobs:
           bash .github/scripts/upsert_pr_comment.sh \
             "${{ github.event.pull_request.number }}" "$MARKER" "$RUNNER_TEMP/comment.md"
 
-      - name: Setup environment (toolchain + sccache + cache)
+      - name: Setup environment (toolchain + kache + cache)
         uses: ./.github/actions/setup-environment
         with:
+          # The kache S3 compile cache shared with the rest of CI.
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           workspaces: language-tests
 
       - name: Build benchmark suite
