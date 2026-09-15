@@ -39,9 +39,29 @@ impl Db {
 			db: self.clone(),
 		}))
 	}
+}
 
-	pub fn owned_raw_iter(&self, opt: ReadOptions, keep_alive: &OwnedTx) -> OwnedRawDbIter {
-		let iter = self.0.raw_iterator_opt(opt);
+/// An owned handle on a transaction that can build a database iterator later,
+/// without the transaction's mutex being held at that point.
+///
+/// Building an [`OwnedRawDbIter`] directly needs the [`OwnedTx`] at the moment
+/// the iterator is built, which pins iterator construction to wherever the
+/// caller holds the guard. A handle carries the same keep-alive —
+/// the [`OwnedTxBorrow`] that [`OwnedTx::into_inner`] waits on — but defers
+/// the build, so work dispatched to another thread can construct its own
+/// iterator while the transaction is still guaranteed to outlive it.
+pub struct OwnedTxHandle {
+	db: Db,
+	keep_alive: OwnedTxBorrow,
+}
+
+impl OwnedTxHandle {
+	/// Build the database iterator this handle was taken for, moving the
+	/// keep-alive into it. Consumes the handle, so the borrow is transferred
+	/// rather than duplicated and the transaction is held exactly as long as
+	/// the iterator that reads through its snapshot.
+	pub fn raw_iter(self, opt: ReadOptions) -> OwnedRawDbIter {
+		let iter = self.db.0.raw_iterator_opt(opt);
 
 		// Safety: we increase the lifetime of the iterator here to static
 		// This is safe as we store the resulting value together with a Arc reference to the
@@ -59,7 +79,7 @@ impl Db {
 			// we only use db iterators with snapshots from transactions which are only
 			// alive while the transaction is alive, so we need a pointer to the transaction
 			// to keep it alive. The database is then kept alive via the transaction being alive.
-			_keep_alive: OwnedTxBorrow(ManuallyDrop::new(Arc::clone(&keep_alive.0))),
+			_keep_alive: self.keep_alive,
 		}
 	}
 }
@@ -139,6 +159,15 @@ impl OwnedTx {
 	/// Returns the associated database
 	pub fn db(&self) -> &Db {
 		&self.0.db
+	}
+
+	/// Take an owned handle that keeps this transaction alive and can build a
+	/// database iterator later, off the mutex. See [`OwnedTxHandle`].
+	pub fn handle(&self) -> OwnedTxHandle {
+		OwnedTxHandle {
+			db: self.0.db.clone(),
+			keep_alive: OwnedTxBorrow(ManuallyDrop::new(Arc::clone(&self.0))),
+		}
 	}
 
 	/// Create an iterator which owns the transaction thus ensuring it remains valid.
