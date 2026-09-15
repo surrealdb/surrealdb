@@ -12,9 +12,6 @@ Imported by the guest (`surrealism:plugin/host`):
 
 - **sql** — `(query, vars)` → execute SurrealQL, returns serialized value
 - **run** — `(fnc, version?, args)` → call another surrealism function by FQN
-- **kv-get**, **kv-set**, **kv-del**, **kv-exists** — single-key ops
-- **kv-del-rng**, **kv-get-batch**, **kv-set-batch**, **kv-del-batch** — batch/range ops
-- **kv-keys**, **kv-values**, **kv-entries**, **kv-count** — range queries
 
 All return `result<T, string>`; errors are human-readable strings.
 

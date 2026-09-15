@@ -1,6 +1,3 @@
-#[cfg(feature = "surrealism")]
-use std::sync::Arc;
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -217,7 +214,6 @@ pub(crate) async fn run_on_runtime(
 		ctx,
 		opt,
 		doc,
-		Arc::clone(runtime.kv_store()),
 		module_name,
 		#[cfg(feature = "http")]
 		client,

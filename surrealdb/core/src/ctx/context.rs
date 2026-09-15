@@ -1235,8 +1235,6 @@ impl Context {
 		let max_memory = self.config.surrealism.surrealism_max_memory;
 		let max_execution_time =
 			self.config.surrealism.surrealism_max_execution_time.map(Duration::from_millis);
-		let max_kv_entries = self.config.surrealism.surrealism_max_kv_entries;
-		let max_kv_value_bytes = self.config.surrealism.surrealism_max_kv_value_bytes;
 		#[cfg(feature = "http")]
 		let config = self.config.http.clone();
 
@@ -1335,14 +1333,7 @@ impl Context {
 					crate::surrealism::host::module_allow_net_targets(&package.config.capabilities);
 
 				let runtime = tokio::task::spawn_blocking(move || {
-					Runtime::new(
-						package,
-						max_pool_size,
-						max_memory,
-						max_execution_time,
-						max_kv_entries,
-						max_kv_value_bytes,
-					)
+					Runtime::new(package, max_pool_size, max_memory, max_execution_time)
 				})
 				.await
 				.context("WASM compile task aborted")??;

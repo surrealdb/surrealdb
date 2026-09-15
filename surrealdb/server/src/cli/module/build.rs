@@ -78,7 +78,7 @@ async fn extract_exports(wasm: &[u8], config: &SurrealismConfig) -> Result<Expor
 		logo: None,
 	};
 
-	let runtime = Runtime::new(temp_package, 1, None, None, None, None)?;
+	let runtime = Runtime::new(temp_package, 1, None, None)?;
 	let host = Box::new(DemoHost::new());
 	let mut controller =
 		runtime.new_controller(host).await.prefix_err(|| "Failed to load WASM module")?;

@@ -37,12 +37,6 @@ pub struct SurrealismCapabilities {
 	/// Maximum number of controllers to pool per module. `None` uses server default.
 	#[serde(default)]
 	pub max_pool_size: Option<usize>,
-	/// Maximum number of entries in the per-module KV store. `None` means unlimited.
-	#[serde(default)]
-	pub max_kv_entries: Option<usize>,
-	/// Maximum size in bytes for a single KV value. `None` means unlimited.
-	#[serde(default)]
-	pub max_kv_value_bytes: Option<usize>,
 	/// Whether to enforce execution timeouts via epoch-based interruption.
 	///
 	/// When `true` (default), WASM is compiled with epoch checks at every loop
@@ -81,8 +75,6 @@ impl Default for SurrealismCapabilities {
 			max_memory_bytes: None,
 			max_execution_time: None,
 			max_pool_size: None,
-			max_kv_entries: None,
-			max_kv_value_bytes: None,
 			strict_timeout: true,
 		}
 	}
@@ -314,22 +306,6 @@ allow_scripting = false
 		assert!(deserialized.targets.allows("http::get"));
 		assert!(deserialized.targets.allows("fn::check"));
 		assert!(!deserialized.targets.allows("string::len"));
-	}
-
-	#[test]
-	fn kv_limits_parse() {
-		let toml_str = r#"
-[capabilities]
-max_kv_entries = 1000
-max_kv_value_bytes = 65536
-"#;
-		#[derive(Deserialize)]
-		struct Wrapper {
-			capabilities: SurrealismCapabilities,
-		}
-		let w: Wrapper = toml::from_str(toml_str).unwrap();
-		assert_eq!(w.capabilities.max_kv_entries, Some(1000));
-		assert_eq!(w.capabilities.max_kv_value_bytes, Some(65536));
 	}
 
 	#[test]

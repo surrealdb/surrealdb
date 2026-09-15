@@ -247,10 +247,6 @@ mod tests {
 		assert_eq!(c.surrealism_max_memory, Some(7));
 		let c: SurrealismConfig = map_with("surrealism_max_execution_time", "7").load();
 		assert_eq!(c.surrealism_max_execution_time, Some(7));
-		let c: SurrealismConfig = map_with("surrealism_max_kv_entries", "7").load();
-		assert_eq!(c.surrealism_max_kv_entries, Some(7));
-		let c: SurrealismConfig = map_with("surrealism_max_kv_value_bytes", "7").load();
-		assert_eq!(c.surrealism_max_kv_value_bytes, Some(7));
 		let c: SurrealismConfig = map_with("surrealism_max_fs_bytes", "7").load();
 		assert_eq!(c.surrealism_max_fs_bytes, 7);
 		let c: SurrealismConfig = map_with("surrealism_log_level", "trace").load();

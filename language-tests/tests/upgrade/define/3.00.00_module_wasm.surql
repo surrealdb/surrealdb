@@ -7,13 +7,15 @@ allow-experimental = ["files", "surrealism"]
 
 [test]
 upgrade = true
-# The import writes the pre-3.4 module spelling, which only a released binary
-# parses, and the assertions below are how the current build renders and runs
-# it. The lower bound is the fixture's, not the feature's: the module is built by
-# the current toolchain, and 3.0.x cannot parse a component of that vintage
-# ("failed to parse WebAssembly module"). These gates also keep the ordinary
-# runner away, since it matches both against its own version.
-importing-version = ">=3.1.0, <3.3.0-0"
+# The fixture is built by the current toolchain and loaded by the source binary,
+# so the source has to accept the ABI the current toolchain stamps. That ABI is
+# now 3, which no released binary accepts — the check is an equality, so a 3.2.x
+# binary refuses the fixture outright ("Unsupported ABI version: expected 2, got
+# 3"). The lower bound is therefore the first release that can load an ABI 3
+# module, and until one ships no source version matches and this pair runs
+# nowhere. These gates also keep the ordinary runner away, since it matches both
+# against its own version.
+importing-version = ">=3.4.0"
 version = ">=3.4.0-a"
 reason = """
 A Surrealism module is a wasm object living in a bucket outside the key-value
@@ -23,7 +25,13 @@ calls into it against the very object that binary was using.
 
 The values the old binary computed are stored alongside, so the two runs are
 compared rather than merely both succeeding: a module that silently stopped
-executing would have to return exactly what its predecessor did to pass."""
+executing would have to return exactly what its predecessor did to pass.
+
+Both halves need one ABI. The object is what the two binaries share, so a run
+needs a source binary that loads the ABI the current toolchain stamps; an object
+built at the older ABI cannot stand in, because the reading binary refuses that
+one just as firmly. Restore the coverage by lowering `importing-version` to the
+first release that ships ABI 3, once there is one."""
 
 [[test.results]]
 match = '''string::contains($result.modules['mod::demo'], 'demo.surli') AND string::contains($result.modules['mod::demo'], 'UNSIGNED') AND string::contains($result.buckets.mods, 'file:')'''

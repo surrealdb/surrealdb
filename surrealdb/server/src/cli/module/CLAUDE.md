@@ -28,7 +28,7 @@ Pipeline:
 4. Validate the `surrealism` SDK version matches the server's expected version.
 5. Run `wasm-opt` to optimize the binary (skip in debug mode).
 6. Instantiate with a `DemoHost` to extract the exports manifest (function signatures).
-7. Stamp `abi = 2` into the config.
+7. Stamp `abi = 3` into the config.
 8. Pack into a `.surli` archive via `SurrealismPackage`.
 
 ### `run` (`run.rs`)

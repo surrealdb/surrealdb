@@ -9,7 +9,6 @@ pub mod controller;
 pub mod epoch;
 pub mod exports;
 pub mod host;
-pub mod kv;
 pub mod net_allow;
 pub mod package;
 pub mod runtime;

@@ -9,7 +9,7 @@
 //! them because it is where a module is fetched, unpacked, compiled, pooled
 //! and invoked.
 //!
-//! The memory, execution-time, KV and pool ceilings are read while a module is
+//! The memory, execution-time and pool ceilings are read while a module is
 //! compiled into a cached runtime, so a module already in the cache keeps the
 //! ceilings it was built with until it is evicted.
 
@@ -29,14 +29,6 @@ pub(crate) struct SurrealismConfig {
 	/// (default: none / unlimited). Combined with module config and query context timeout
 	/// via `min()` to produce the effective deadline.
 	pub surrealism_max_execution_time: Option<u64>,
-	/// Per-module KV store entry count ceiling for Surrealism WASM modules (default: none /
-	/// unlimited). Effective limit is `min(this, module_config.max_kv_entries)` when both are
-	/// set.
-	pub surrealism_max_kv_entries: Option<usize>,
-	/// Per-module KV store maximum value size in bytes for Surrealism WASM modules
-	/// (default: none / unlimited). Effective limit is
-	/// `min(this, module_config.max_kv_value_bytes)` when both are set.
-	pub surrealism_max_kv_value_bytes: Option<usize>,
 	/// Maximum aggregate size in bytes for attached filesystem entries in `.surli` archives
 	/// (default: 100 MiB). Applied when unpacking module archives during `DEFINE MODULE` or
 	/// eager loading.
@@ -67,8 +59,6 @@ impl Default for SurrealismConfig {
 			surrealism_cache_size: 100,
 			surrealism_max_memory: None,
 			surrealism_max_execution_time: None,
-			surrealism_max_kv_entries: None,
-			surrealism_max_kv_value_bytes: None,
 			surrealism_max_fs_bytes: 100 * 1024 * 1024,
 			surrealism_max_pool_size: 8,
 			surrealism_log_level: "debug".to_string(),
@@ -84,11 +74,6 @@ impl cnf::Config for SurrealismConfig {
 			.parse_key_option(
 				"surrealism_max_execution_time",
 				&mut self.surrealism_max_execution_time,
-			)
-			.parse_key_option("surrealism_max_kv_entries", &mut self.surrealism_max_kv_entries)
-			.parse_key_option(
-				"surrealism_max_kv_value_bytes",
-				&mut self.surrealism_max_kv_value_bytes,
 			)
 			.parse_key("surrealism_max_fs_bytes", &mut self.surrealism_max_fs_bytes)
 			.parse_key_with("surrealism_log_level", &mut self.surrealism_log_level, |s| {

@@ -29,7 +29,7 @@ impl std::fmt::Display for Target {
 pub struct AbiVersion(pub u32);
 
 impl AbiVersion {
-	pub const CURRENT: Self = Self(2);
+	pub const CURRENT: Self = Self(3);
 }
 
 impl Serialize for AbiVersion {
@@ -45,7 +45,7 @@ impl<'de> Deserialize<'de> for AbiVersion {
 			type Value = AbiVersion;
 
 			fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-				write!(f, "an integer ABI version (2) or legacy string (\"p1\", \"p2\")")
+				write!(f, "an integer ABI version or legacy string (\"p1\", \"p2\")")
 			}
 
 			fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<AbiVersion, E> {
@@ -152,7 +152,7 @@ version = "0.1.0"
 	#[test]
 	fn parse_full_config() {
 		let toml = r#"
-abi = 2
+abi = 3
 
 [package]
 organisation = "acme"

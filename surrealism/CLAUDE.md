@@ -10,7 +10,7 @@ Surrealism is SurrealDB's WASM plugin system. Guest modules are compiled to WASM
 
 | Crate | Role |
 |-------|------|
-| **surrealism** | Guest SDK. Used by plugin authors. Provides `#[surrealism]` attr, bindings to host imports (sql, run, kv-*). |
+| **surrealism** | Guest SDK. Used by plugin authors. Provides `#[surrealism]` attr, bindings to host imports (sql, run). |
 | **surrealism-runtime** | Host. Compiles, instantiates, and executes guest modules. Integrates with SurrealDB. |
 | **surrealism-types** | Shared types and encoding. Used by both host and guest. |
 | **surrealism-macros** | Proc macros. Expands `#[surrealism]` into WIT exports and inventory registration. |
@@ -43,7 +43,7 @@ The keyword before the executable is `FROM`, not `AS`: what follows is the modul
 - **Capabilities-based:** Modules declare needs in `surrealism.toml` (`[capabilities]`). Server validates at load time and can further restrict.
 - **Runtime scoping:** When a module calls `sql()` or `run()`, the host creates a derived context whose capabilities are narrowed to the module's declared `allow_scripting`, `allow_functions`, and `allow_net`. Server deny-lists are always preserved.
 - **Deny-by-default for functions:** `allow_functions` defaults to empty (deny all). Use `["*"]` to allow all, or specific patterns like `["http::*", "fn::user_exists"]`.
-- **Module isolation:** Each module gets its own KV store; no cross-module access. WASM linear memory is per-instance.
+- **Module isolation:** WASM linear memory is per-instance, and a module is cached per namespace/database, so its instances and statics never span a tenant boundary.
 - **`strict_timeout = false`:** Disables epoch-based timeout enforcement entirely. The module can run indefinitely and monopolise a thread. Only trusted modules should set this. Future code-signing support will gate which modules may request it; until then the server operator accepts full responsibility.
 
 ## Archive Format
@@ -57,7 +57,9 @@ The keyword before the executable is `FROM`, not `AS`: what follows is the modul
 
 ## ABI Versioning
 
-ABI version 2 is current. Stored in `surrealism.toml`. Build tool stamps `abi = 2`; user values are ignored. Older `p1`/`1` for Preview 1 is legacy.
+ABI version 3 is current. Stored in `surrealism.toml`. Build tool stamps `abi = 3`; user values are ignored. Older `p1`/`1` for Preview 1 is legacy.
+
+An archive whose `abi` does not match is rejected at load with `UnsupportedAbi`, so a module built against an older SDK must be rebuilt rather than failing later with a missing-import error from the linker.
 
 ## Common Commands
 

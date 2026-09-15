@@ -50,59 +50,6 @@ interface host {
     /// `version` optionally pins a specific module version; `none` resolves the latest.
     /// Cross-module calls are subject to the caller's capability grants.
     run: func(fnc: string, version: option<string>, args: serialized-args) -> result<serialized-value, string>;
-
-    // ── Key-value store ──────────────────────────────────────────────
-    //
-    // Per-module in-memory storage, scoped to the module's identity.
-    // Modules cannot read or write keys belonging to other modules.
-    // Keys are UTF-8 strings (max 1024 bytes); values are serialized
-    // SurrealDB values.
-    //
-    // IMPORTANT: The KV store is volatile — data lives only in process
-    // memory and is lost on server restart, module eviction from cache,
-    // or Runtime drop. Do not use it for durable state.
-    //
-    // Range parameters are FlatBuffers-encoded range descriptors that
-    // specify a key prefix or inclusive/exclusive bounds.
-
-    /// Get a single key. Returns `none` if the key does not exist.
-    kv-get: func(key: string) -> result<option<serialized-value>, string>;
-
-    /// Set a single key, creating or overwriting it.
-    kv-set: func(key: string, value: serialized-value) -> result<_, string>;
-
-    /// Delete a single key. No-op if the key does not exist.
-    kv-del: func(key: string) -> result<_, string>;
-
-    /// Check whether a key exists without fetching its value.
-    kv-exists: func(key: string) -> result<bool, string>;
-
-    /// Delete all keys that fall within the given range.
-    kv-del-rng: func(range: serialized-value) -> result<_, string>;
-
-    /// Batch-get multiple keys in a single host call.
-    /// Returns a serialized list of optional values, positionally matching the input keys.
-    kv-get-batch: func(keys: list<string>) -> result<serialized-value, string>;
-
-    /// Batch-set multiple key-value pairs atomically.
-    /// `entries` is a serialized list of (key, value) tuples.
-    kv-set-batch: func(entries: serialized-value) -> result<_, string>;
-
-    /// Batch-delete multiple keys in a single host call.
-    kv-del-batch: func(keys: list<string>) -> result<_, string>;
-
-    /// List all keys within the given range.
-    kv-keys: func(range: serialized-value) -> result<list<string>, string>;
-
-    /// List all values within the given range (keys are not returned).
-    kv-values: func(range: serialized-value) -> result<serialized-value, string>;
-
-    /// List all key-value entries within the given range.
-    /// Returns a serialized list of (key, value) tuples.
-    kv-entries: func(range: serialized-value) -> result<serialized-value, string>;
-
-    /// Count the number of entries within the given range.
-    kv-count: func(range: serialized-value) -> result<u64, string>;
 }
 
 /// The `plugin` world is the top-level contract that every surrealism guest
@@ -112,7 +59,7 @@ interface host {
 ///
 /// 1. The host instantiates the WASM component.
 /// 2. The host calls `init` (if exported). The module may use this to set up
-///    state, warm caches, or validate its KV schema. If `init` returns an error
+///    state or warm caches. If `init` returns an error
 ///    the module is considered unhealthy and will not receive `invoke` calls.
 /// 3. For each incoming request the host calls `invoke` with the target
 ///    function name and serialized arguments.
@@ -157,7 +104,7 @@ world plugin {
     /// Optional initialization hook called once after instantiation.
     ///
     /// If this returns an error, the host marks the module as failed and will
-    /// not route any `invoke` calls to it. Host imports (`sql`, `kv-*`, `run`)
-    /// are available during `init`.
+    /// not route any `invoke` calls to it. Host imports (`sql`, `run`) are
+    /// available during `init`.
     export init: func() -> result<_, string>;
 }

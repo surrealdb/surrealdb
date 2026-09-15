@@ -1,6 +1,6 @@
 //! InvocationContext trait and WIT host implementation.
 //!
-//! Implementations supply `sql`/`run`/`kv`/stdio per call. Host functions
+//! Implementations supply `sql`/`run`/stdio per call. Host functions
 //! decode FlatBuffers, call the context, and encode results.
 
 use std::sync::Arc;
@@ -11,7 +11,6 @@ use surrealism_types::err::{PrefixErr, SurrealismResult};
 use wasmtime::StoreContextMut;
 
 use crate::config::SurrealismConfig;
-use crate::kv::KVStore;
 use crate::store::StoreData;
 
 // ============================================================================
@@ -35,8 +34,6 @@ pub trait InvocationContext: Send + Sync {
 		version: Option<String>,
 		args: Vec<surrealdb_types::Value>,
 	) -> Result<surrealdb_types::Value>;
-
-	fn kv(&mut self) -> Result<&dyn KVStore>;
 
 	fn stdout(&mut self, output: &str) -> Result<()> {
 		print!("{}", output);
@@ -93,21 +90,11 @@ impl InvocationContext for NullContext {
 	) -> Result<surrealdb_types::Value> {
 		bail!("no active invocation context")
 	}
-
-	fn kv(&mut self) -> Result<&dyn KVStore> {
-		bail!("no active invocation context")
-	}
 }
 
 // ============================================================================
 // Helper
 // ============================================================================
-
-fn decode_range_bounds(
-	bytes: &[u8],
-) -> Result<(std::ops::Bound<String>, std::ops::Bound<String>), String> {
-	surrealdb_types::decode_string_range(bytes).map_err(|e| e.to_string())
-}
 
 fn stringify<E: std::fmt::Display>(e: E) -> String {
 	e.to_string()
@@ -165,105 +152,6 @@ pub fn implement_host_functions(
 			let config = Arc::clone(&store.data().config);
 			let val = store.data_mut().context.run(&config, fnc, version, args).await.map_err(stringify)?;
 			surrealdb_types::encode(&val).map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-get",
-		|store, (key: String)| -> Result<Option<Vec<u8>>> {
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			match kv.get(key).await.map_err(stringify)? {
-				Some(v) => surrealdb_types::encode(&v).map(Some).map_err(stringify),
-				None => Ok(None),
-			}
-		}
-	);
-
-	register_host_fn!(host, "kv-set",
-		|store, (key: String, value_bytes: Vec<u8>)| -> Result<()> {
-			let value: surrealdb_types::Value =
-				surrealdb_types::decode(&value_bytes).map_err(stringify)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.set(key, value).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-del",
-		|store, (key: String)| -> Result<()> {
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.del(key).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-exists",
-		|store, (key: String)| -> Result<bool> {
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.exists(key).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-del-rng",
-		|store, (range_bytes: Vec<u8>)| -> Result<()> {
-			let (start, end) = decode_range_bounds(&range_bytes)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.del_rng(start, end).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-get-batch",
-		|store, (keys: Vec<String>)| -> Result<Vec<u8>> {
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			let vals = kv.get_batch(keys).await.map_err(stringify)?;
-			surrealdb_types::encode_optional_values(&vals).map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-set-batch",
-		|store, (entries_bytes: Vec<u8>)| -> Result<()> {
-			let entries = surrealdb_types::decode_string_key_values(&entries_bytes)
-				.map_err(stringify)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.set_batch(entries).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-del-batch",
-		|store, (keys: Vec<String>)| -> Result<()> {
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.del_batch(keys).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-keys",
-		|store, (range_bytes: Vec<u8>)| -> Result<Vec<String>> {
-			let (start, end) = decode_range_bounds(&range_bytes)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.keys(start, end).await.map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-values",
-		|store, (range_bytes: Vec<u8>)| -> Result<Vec<u8>> {
-			let (start, end) = decode_range_bounds(&range_bytes)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			let vals = kv.values(start, end).await.map_err(stringify)?;
-			surrealdb_types::encode_value_list(&vals).map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-entries",
-		|store, (range_bytes: Vec<u8>)| -> Result<Vec<u8>> {
-			let (start, end) = decode_range_bounds(&range_bytes)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			let entries = kv.entries(start, end).await.map_err(stringify)?;
-			surrealdb_types::encode_string_key_values(&entries).map_err(stringify)
-		}
-	);
-
-	register_host_fn!(host, "kv-count",
-		|store, (range_bytes: Vec<u8>)| -> Result<u64> {
-			let (start, end) = decode_range_bounds(&range_bytes)?;
-			let kv = store.data_mut().context.kv().map_err(stringify)?;
-			kv.count(start, end).await.map_err(stringify)
 		}
 	);
 

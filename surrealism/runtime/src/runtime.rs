@@ -15,18 +15,18 @@
 //! # Instance Reuse
 //!
 //! Controllers are pooled inside the Runtime. Between invocations, the host `InvocationContext`
-//! (which carries per-request auth, permissions, KV store) is swapped out. The WASM linear memory
+//! (which carries per-request auth and permissions) is swapped out. The WASM linear memory
 //! persists, so Rust statics (`OnceLock`, etc.) survive across calls. Security is enforced by the
 //! host context, not by memory isolation — the module never sees user identity directly.
 //!
 //! # Concurrency Patterns
 //!
-//! ```no_run
+//! ```ignore
 //! use std::sync::Arc;
 //! use surrealism_runtime::{runtime::Runtime, package::SurrealismPackage};
 //!
 //! // Compile once (expensive)
-//! let runtime = Arc::new(Runtime::new(package, 8, None, None, None, None)?);
+//! let runtime = Arc::new(Runtime::new(package, 8, None, None)?);
 //!
 //! // For each concurrent request:
 //! let runtime = runtime.clone();
@@ -58,7 +58,6 @@ use crate::controller::Controller;
 use crate::epoch::{self, EngineHandle};
 use crate::exports::ExportsManifest;
 use crate::host::{InvocationContext, implement_host_functions};
-use crate::kv::BTreeMapStore;
 use crate::net_allow::{ResolvedNetAllow, resolve_allow_net};
 use crate::package::{AttachedFs, SurrealismPackage};
 use crate::store::StoreData;
@@ -84,9 +83,6 @@ pub struct Runtime {
 	controller_slots: Arc<Semaphore>,
 	/// Function signatures loaded from the exports manifest at build time.
 	exports: ExportsManifest,
-	/// Per-module KV store shared across all invocations. Persists for the
-	/// lifetime of the Runtime and is passed to each `InvocationContext`.
-	kv_store: Arc<BTreeMapStore>,
 	/// Effective pool size ceiling: `min(server_cap, module_config.unwrap_or(server_cap))`.
 	max_pool_size: usize,
 	/// Effective memory limit: `min(server_cap, module_config)` when both set.
@@ -118,9 +114,8 @@ impl Runtime {
 	/// Compile the WASM and prepare the runtime.
 	/// This is expensive — do it once and share via `Arc<Runtime>`.
 	///
-	/// `server_pool_size`, `server_max_memory`, `server_max_execution_time`,
-	/// `server_max_kv_entries`, and `server_max_kv_value_bytes` are the
-	/// server-level ceilings from environment variables.
+	/// `server_pool_size`, `server_max_memory` and `server_max_execution_time`
+	/// are the server-level ceilings from environment variables.
 	pub fn new(
 		SurrealismPackage {
 			wasm,
@@ -132,8 +127,6 @@ impl Runtime {
 		server_pool_size: usize,
 		server_max_memory: Option<usize>,
 		server_max_execution_time: Option<Duration>,
-		server_max_kv_entries: Option<usize>,
-		server_max_kv_value_bytes: Option<usize>,
 	) -> SurrealismResult<Self> {
 		if config.abi != AbiVersion::CURRENT {
 			return Err(SurrealismError::UnsupportedAbi {
@@ -160,19 +153,6 @@ impl Runtime {
 				(Some(s), Some(m)) => Some(s.min(m)),
 				(s, m) => s.or(m),
 			};
-
-		let max_kv_entries = match (server_max_kv_entries, config.capabilities.max_kv_entries) {
-			(Some(s), Some(m)) => Some(s.min(m)),
-			(s, m) => s.or(m),
-		};
-
-		let max_kv_value_bytes =
-			match (server_max_kv_value_bytes, config.capabilities.max_kv_value_bytes) {
-				(Some(s), Some(m)) => Some(s.min(m)),
-				(s, m) => s.or(m),
-			};
-
-		let kv_store = Arc::new(BTreeMapStore::with_limits(max_kv_entries, max_kv_value_bytes));
 
 		let config = Arc::new(config);
 		let wasm_size = wasm.len();
@@ -213,7 +193,6 @@ impl Runtime {
 			pool: parking_lot::Mutex::new(Vec::new()),
 			controller_slots,
 			exports,
-			kv_store,
 			max_pool_size,
 			max_memory_bytes,
 			module_execution_time,
@@ -224,12 +203,6 @@ impl Runtime {
 	/// Returns the size of the original WASM binary in bytes.
 	pub fn wasm_size(&self) -> usize {
 		self.wasm_size
-	}
-
-	/// Returns the per-module KV store. This store is shared across all
-	/// invocations and persists for the lifetime of the Runtime.
-	pub fn kv_store(&self) -> &Arc<BTreeMapStore> {
-		&self.kv_store
 	}
 
 	/// Returns the module configuration.

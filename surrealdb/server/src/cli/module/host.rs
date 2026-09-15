@@ -5,17 +5,12 @@ use async_trait::async_trait;
 use surrealdb_types::ToSql;
 use surrealism_runtime::config::SurrealismConfig;
 use surrealism_runtime::host::InvocationContext;
-use surrealism_runtime::kv::{BTreeMapStore, KVStore};
 
-pub struct DemoHost {
-	kv: BTreeMapStore,
-}
+pub struct DemoHost;
 
 impl DemoHost {
 	pub fn new() -> Self {
-		Self {
-			kv: BTreeMapStore::new(),
-		}
+		Self
 	}
 }
 
@@ -23,10 +18,6 @@ use super::parse_value;
 
 #[async_trait]
 impl InvocationContext for DemoHost {
-	fn kv(&mut self) -> Result<&dyn KVStore> {
-		Ok(&self.kv)
-	}
-
 	async fn sql(
 		&mut self,
 		_config: &SurrealismConfig,

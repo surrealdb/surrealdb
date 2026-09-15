@@ -8,7 +8,6 @@ use reblessive::TreeStack;
 use surrealism_runtime::capabilities::{FunctionTargets, SurrealismCapabilities};
 use surrealism_runtime::config::SurrealismConfig;
 use surrealism_runtime::host::InvocationContext;
-use surrealism_runtime::kv::{BTreeMapStore, KVStore};
 
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
@@ -31,7 +30,6 @@ pub(crate) struct Host {
 	pub(crate) ctx: FrozenContext,
 	pub(crate) opt: Options,
 	pub(crate) doc: Option<CursorDoc>,
-	kv: Arc<BTreeMapStore>,
 	module_name: String,
 	#[cfg(feature = "http")]
 	/// Surrealism modules have their own http limitations so it needs it's own client.
@@ -43,7 +41,6 @@ impl Host {
 		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-		kv: Arc<BTreeMapStore>,
 		module_name: String,
 		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 	) -> Self {
@@ -52,7 +49,6 @@ impl Host {
 			ctx: Arc::clone(ctx),
 			opt: opt.clone(),
 			doc: doc.cloned(),
-			kv,
 			module_name,
 			#[cfg(feature = "http")]
 			http_client,
@@ -253,10 +249,6 @@ impl InvocationContext for Host {
 			.catch_return()?;
 
 		convert_value_to_public_value(res)
-	}
-
-	fn kv(&mut self) -> Result<&dyn KVStore> {
-		Ok(&*self.kv)
 	}
 
 	fn stdout(&mut self, output: &str) -> Result<()> {

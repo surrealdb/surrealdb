@@ -582,28 +582,6 @@ mod surrealism_integration {
 	}
 
 	// -------------------------------------------------------------------
-	// KV store tests
-	// -------------------------------------------------------------------
-
-	async fn check_kv_operations(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
-		let ns = Ulid::new().to_string();
-		let db = Ulid::new().to_string();
-
-		setup_module(&addr, &ns, &db, bucket_dir).await;
-
-		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::test_kv();").await;
-		assert_eq!(results[0].status, "OK", "test_kv failed: {:?}", results[0].result);
-
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn module_kv_operations() -> Result<(), Box<dyn std::error::Error>> {
-		check_kv_operations(&DEMO_DIR.canonical).await
-	}
-
-	// -------------------------------------------------------------------
 	// I/O tests (stdout / stderr piping)
 	// -------------------------------------------------------------------
 
@@ -1008,52 +986,6 @@ mod surrealism_integration {
 	}
 
 	// -------------------------------------------------------------------
-	// KV persistence across invocations
-	// -------------------------------------------------------------------
-
-	async fn check_kv_persistence(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
-		let ns = Ulid::new().to_string();
-		let db = Ulid::new().to_string();
-
-		setup_module(&addr, &ns, &db, bucket_dir).await;
-
-		// Set a KV value in one invocation
-		let results =
-			sql_query(&addr, &ns, &db, "RETURN mod::demo::kv_set_value('persist_test', 42);").await;
-		assert_eq!(results[0].status, "OK", "kv_set_value: {:?}", results[0].result);
-
-		// Read it back in a separate invocation -- should persist across calls
-		let results =
-			sql_query(&addr, &ns, &db, "RETURN mod::demo::kv_get_value('persist_test');").await;
-		assert_eq!(results[0].status, "OK", "kv_get_value: {:?}", results[0].result);
-		assert_eq!(results[0].result, serde_json::json!(42));
-
-		// Overwrite and verify
-		let results =
-			sql_query(&addr, &ns, &db, "RETURN mod::demo::kv_set_value('persist_test', 99);").await;
-		assert_eq!(results[0].status, "OK", "kv_set_value(99): {:?}", results[0].result);
-
-		let results =
-			sql_query(&addr, &ns, &db, "RETURN mod::demo::kv_get_value('persist_test');").await;
-		assert_eq!(results[0].status, "OK", "kv_get_value(99): {:?}", results[0].result);
-		assert_eq!(results[0].result, serde_json::json!(99));
-
-		// Non-existent key should return None/null
-		let results =
-			sql_query(&addr, &ns, &db, "RETURN mod::demo::kv_get_value('nonexistent');").await;
-		assert_eq!(results[0].status, "OK", "kv_get_value(nonexistent): {:?}", results[0].result);
-		assert_eq!(results[0].result, serde_json::Value::Null);
-
-		Ok(())
-	}
-
-	#[test(tokio::test)]
-	async fn module_kv_persistence() -> Result<(), Box<dyn std::error::Error>> {
-		check_kv_persistence(&DEMO_DIR.canonical).await
-	}
-
-	// -------------------------------------------------------------------
 	// Error propagation tests
 	// -------------------------------------------------------------------
 
@@ -1303,38 +1235,27 @@ mod surrealism_integration {
 		let (ns_a, db_a) = &tenants[0];
 		let (ns_b, db_b) = &tenants[1];
 
-		let results = sql_query(
-			&addr,
-			ns_a,
-			db_a,
-			"RETURN silo::surrealdb::demo::<1.0.0>::kv_set_value('tenant_secret', 42);",
-		)
-		.await;
-		assert_eq!(results[0].status, "OK", "kv_set_value: {:?}", results[0].result);
+		let results =
+			sql_query(&addr, ns_a, db_a, "RETURN silo::surrealdb::demo::<1.0.0>::set_state(42);")
+				.await;
+		assert_eq!(results[0].status, "OK", "set_state: {:?}", results[0].result);
 
 		// The writing tenant still sees its own value.
-		let results = sql_query(
-			&addr,
-			ns_a,
-			db_a,
-			"RETURN silo::surrealdb::demo::<1.0.0>::kv_get_value('tenant_secret');",
-		)
-		.await;
-		assert_eq!(results[0].status, "OK", "kv_get_value: {:?}", results[0].result);
+		let results =
+			sql_query(&addr, ns_a, db_a, "RETURN silo::surrealdb::demo::<1.0.0>::get_state();")
+				.await;
+		assert_eq!(results[0].status, "OK", "get_state: {:?}", results[0].result);
 		assert_eq!(results[0].result, serde_json::json!(42));
 
-		// The other tenant must not.
-		let results = sql_query(
-			&addr,
-			ns_b,
-			db_b,
-			"RETURN silo::surrealdb::demo::<1.0.0>::kv_get_value('tenant_secret');",
-		)
-		.await;
-		assert_eq!(results[0].status, "OK", "kv_get_value: {:?}", results[0].result);
+		// The other tenant must not: a module is cached per namespace/database,
+		// so it gets its own instances and its own linear memory.
+		let results =
+			sql_query(&addr, ns_b, db_b, "RETURN silo::surrealdb::demo::<1.0.0>::get_state();")
+				.await;
+		assert_eq!(results[0].status, "OK", "get_state: {:?}", results[0].result);
 		assert_eq!(
 			results[0].result,
-			serde_json::Value::Null,
+			serde_json::json!(0),
 			"silo module state leaked across the namespace/database boundary"
 		);
 
