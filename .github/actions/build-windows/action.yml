@@ -44,10 +44,10 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    # sccache configuration (the S3 backend, idle timeout, and the raised IPC
-    # frame limit for large cached .rlibs) is supplied to setup-environment as
-    # inputs at the call site and read by the daemon it starts - this action
-    # assumes setup-environment ran before it and configures nothing itself.
+    # Compile-cache configuration (the S3 backend and the Windows store
+    # location) is supplied to setup-environment as inputs at the call site and
+    # read by the kache daemon it starts - this action assumes
+    # setup-environment ran before it and configures nothing itself.
 
     - name: Output package versions
       shell: bash
