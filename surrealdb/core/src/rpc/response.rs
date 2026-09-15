@@ -8,7 +8,8 @@ use crate::dbs;
 use crate::dbs::{QueryResult, QueryType};
 use crate::rpc::request::SESSION_ID;
 use crate::types::{
-	PublicArray, PublicKind, PublicNotification, PublicObject, PublicValue, SurrealValue,
+	PublicAction, PublicArray, PublicKind, PublicNotification, PublicObject, PublicValue,
+	SurrealValue,
 };
 
 /// Query statistics.
@@ -106,29 +107,15 @@ impl SurrealValue for DbResult {
 					let PublicValue::Uuid(uuid) = id else {
 						return Err(TypesError::internal("Expected UUID for id field".to_string()));
 					};
-					let PublicValue::String(action_str) = action else {
-						return Err(TypesError::internal(
-							"Expected string for action field".to_string(),
-						));
-					};
-
 					let session = match obj.remove(SESSION_ID) {
 						Some(session) => SurrealValue::from_value(session)?,
 						None => None,
 					};
 
-					// Parse action string to PublicAction
-					let action = match action_str.as_str() {
-						"CREATE" => crate::types::PublicAction::Create,
-						"UPDATE" => crate::types::PublicAction::Update,
-						"DELETE" => crate::types::PublicAction::Delete,
-						_ => {
-							return Err(TypesError::internal(format!(
-								"Invalid action: {}",
-								action_str
-							)));
-						}
-					};
+					// Decode through `Action`'s own conversion, the inverse of what
+					// `into_value` writes. A second, hand-written list of variants here
+					// silently went stale as the enum grew.
+					let action = PublicAction::from_value(action)?;
 
 					Ok(DbResult::Live(PublicNotification::new(
 						uuid, session, action, record, result,
@@ -242,5 +229,62 @@ impl SurrealValue for DbResponse {
 			session_id,
 			result,
 		})
+	}
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+	use crate::rpc::DbResult;
+	use crate::types::{PublicAction, PublicNotification, PublicUuid, PublicValue, SurrealValue};
+
+	/// Every `Action` must survive the encode/decode round-trip used on the
+	/// wire. A notification whose action fails to decode is dropped whole by
+	/// the client, and for `Killed` that means the subscriber's live stream
+	/// never terminates.
+	#[test]
+	fn live_notification_round_trips_every_action() {
+		for action in [
+			PublicAction::Create,
+			PublicAction::Update,
+			PublicAction::Delete,
+			PublicAction::Killed,
+			PublicAction::Error,
+		] {
+			let notification = PublicNotification::new(
+				PublicUuid::new_v4(),
+				Some(PublicUuid::new_v4()),
+				action,
+				PublicValue::None,
+				PublicValue::None,
+			);
+
+			let encoded = DbResult::Live(notification.clone()).into_value();
+			let decoded = DbResult::from_value(encoded)
+				.unwrap_or_else(|e| panic!("{action} failed to decode: {e}"));
+
+			match decoded {
+				DbResult::Live(got) => assert_eq!(got, notification, "{action} round-trip"),
+				other => panic!("{action} decoded to the wrong variant: {other:?}"),
+			}
+		}
+	}
+
+	/// Pins the wire spelling independently of `into_value`, so a rename on
+	/// either side cannot silently pass the round-trip test above.
+	#[test]
+	fn live_notification_decodes_killed_wire_value() {
+		let decoded = DbResult::from_value(PublicValue::Object(surrealdb_types::object! {
+			id: PublicValue::Uuid(PublicUuid::new_v4()),
+			action: PublicValue::String("KILLED".to_owned()),
+			record: PublicValue::None,
+			result: PublicValue::None,
+		}))
+		.expect("a KILLED notification must decode");
+
+		match decoded {
+			DbResult::Live(got) => assert_eq!(got.action, PublicAction::Killed),
+			other => panic!("expected a live notification, got {other:?}"),
+		}
 	}
 }
