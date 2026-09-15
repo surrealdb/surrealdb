@@ -12,7 +12,7 @@ value = "NONE"
 value = "{ events: {  }, fields: {  }, indexes: { info_idx: 'DEFINE INDEX info_idx ON info_tbl FIELDS v' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
+value = "{ building: { compacting: false, initial: 0, pending: 0, status: 'ready', updated: 0 } }"
 
 */
 

@@ -14,7 +14,7 @@ value = "NONE"
 value = "{ events: {  }, fields: {  }, indexes: { idx: 'DEFINE INDEX idx ON t COUNT' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
+value = "{ building: { compacting: false, initial: 0, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
 value = "'OK'"
@@ -35,7 +35,7 @@ value = "[{ count: 3 }]"
 value = "NONE"
 
 [[test.results]]
-value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+value = "{ building: { compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
 value = "[{ count: 3 }]"

@@ -45,7 +45,7 @@ value = "NONE"
 match = "'status' in $result.building"
 
 [[test.results]]
-value = "{ building: { initial: 1, pending: 0, status: 'ready', updated: 0 } }"
+value = "{ building: { compacting: false, initial: 1, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
 value = "{ events: {  }, fields: {  }, indexes: { ft_title: 'DEFINE INDEX ft_title ON book FIELDS title FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS', idx_author: 'DEFINE INDEX idx_author ON book FIELDS author', uniq_isbn: 'DEFINE INDEX uniq_isbn ON book FIELDS isbn UNIQUE' }, lives: {  }, tables: {  } }"
