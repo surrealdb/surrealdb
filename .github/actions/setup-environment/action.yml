@@ -87,6 +87,15 @@ inputs:
       prefetch hint list is per-line.
     required: false
     default: ''
+  kache-branch:
+    description: >-
+      Release line the manifest is keyed under. Defaults to the base branch,
+      which is the line being built whenever the workflow ref is that line.
+      Pass it where the two differ: a rolling rebuild dispatched from one line
+      to rebuild another compiles that other line's sources, and would
+      otherwise warm from - and be keyed under - the dispatching line.
+    required: false
+    default: ''
   kache-version:
     description: 'Pin the kache release to install. Empty installs the latest.'
     required: false
@@ -176,7 +185,7 @@ runs:
         s3-prefix: ${{ github.repository }}/kache
         s3-access-key-id: ${{ inputs.kache-access-key-id }}
         s3-secret-access-key: ${{ inputs.kache-secret-access-key }}
-        manifest-key: ${{ format('{0}/{1}', github.base_ref || github.ref_name, inputs.kache-manifest-key || format('{0}-{1}-{2}', inputs.cache-key || github.job, runner.os, runner.arch)) }}
+        manifest-key: ${{ format('{0}/{1}', inputs.kache-branch || github.base_ref || github.ref_name, inputs.kache-manifest-key || format('{0}-{1}-{2}', inputs.cache-key || github.job, runner.os, runner.arch)) }}
         cache-dir: ${{ inputs.kache-cache-dir || format('{0}/kache', runner.temp) }}
         # The GitHub Actions cache is a fixed 10GB per repository, already spent
         # on the registry caches below. A kache store persisted there would
