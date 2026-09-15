@@ -214,6 +214,19 @@ jobs:
         with:
           preset: test
 
+      # The downstream generates its replication gRPC stubs in a build script
+      # (tonic-prost-build), which shells out to `protoc`. No engine crate needs
+      # it, so the runner image ships none and the downstream `cargo check`
+      # aborts in that build script without this. Installed from the upstream
+      # release (the same pinned action as the cargo tools above) rather than
+      # apt, so it does not depend on the runner's package lists; the action
+      # puts it on PATH, which is where prost-build looks.
+      - name: Install protoc for the downstream build
+        if: steps.preflight.outputs.configured == 'true'
+        uses: ./.github/actions/install-tools
+        with:
+          tools: protoc
+
       # The downstream pulls in surrealdb-librocksdb-sys (the rust-rocksdb fork)
       # with its `cloud`+`aws` cargo features — from the downstream's own
       # dependency graph, not this engine (this engine's rocksdb is the crates.io
