@@ -72,13 +72,11 @@ LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1
 # Versions the cumulative walk carries one datastore through.
 #
 # Deliberately not the same list as the adjacent-pair chain. A walk must not pass
-# through a release that demands a manual repair, for two reasons. The property
-# the walk measures is that a structure created once survives being maintained by
-# every release in turn; a release that forces a `REBUILD INDEX` replaces that
-# structure, so everything after it reads what the rebuild wrote rather than what
-# the original writer left. And rebuilding an index first written before 3.2.1 on
-# any later binary never returns, so a walk that starts at 3.1.0 and crosses a
-# 3.3.0 beta hangs until the run's timeout instead of failing.
+# through a release that demands a manual repair. The property the walk measures
+# is that a structure created once survives being maintained by every release in
+# turn; a release that forces a `REBUILD INDEX` replaces that structure, so
+# everything after it reads what the rebuild wrote rather than what the original
+# writer left.
 #
 # Repairs are a pairwise concern, and the pairwise axis covers them properly; the
 # chain runner refuses to schedule a test whose repair would fire mid-walk.
