@@ -127,6 +127,7 @@ impl Document {
 			record_strategy: RecordStrategy::KeysAndValues,
 			input_data: None,
 			mutated: false,
+			matched: false,
 			modified: OnceCell::new(),
 		};
 		// Run the identical matching/permission/projection/FETCH pipeline the

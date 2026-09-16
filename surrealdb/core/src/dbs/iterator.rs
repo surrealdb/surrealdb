@@ -214,6 +214,10 @@ pub(crate) struct Iterator {
 	entries: Vec<Iterable>,
 	/// Should we always return a record?
 	guaranteed: Option<Iterable>,
+	/// Whether any iterated document was matched by the statement.
+	/// Set from each document's `matched` flag as it is processed, and read
+	/// only to decide whether the `guaranteed` fallback still applies.
+	matched: bool,
 	/// Set if the iterator can be cancelled once it reaches start/limit
 	cancel_on_limit: Option<u32>,
 	/// Precomputed number of accepted results after which we can stop iterating early.
@@ -234,6 +238,7 @@ impl Clone for Iterator {
 			results: Results::default(),
 			entries: self.entries.clone(),
 			guaranteed: None,
+			matched: false,
 			cancel_on_limit: None,
 			cancel_threshold: None,
 		}
@@ -815,8 +820,14 @@ impl Iterator {
 			if let Some(e) = self.error.take() {
 				return Err(e);
 			}
-			// If no results, then create a record
-			if self.results.is_empty() && !opt.import {
+			// If nothing matched, then create a record. The test is on what
+			// the statement matched rather than on what it returned: `RETURN
+			// NONE` empties the results by construction, so an UPSERT that
+			// updated every row it scanned would otherwise be read as one
+			// that matched nothing. `OPTION IMPORT` suppresses the fallback
+			// outright — an import replays writes the exporter already made,
+			// and a generated record id would not be one of them.
+			if !self.matched && !opt.import {
 				// Check if a guaranteed record response is expected
 				if let Some(guaranteed) = self.guaranteed.take() {
 					// Ingest the pre-defined guaranteed record yield
@@ -1260,17 +1271,21 @@ impl Iterator {
 		}
 		// Get the record strategy
 		let rs = pro.record_strategy;
-		// Extract the value
-		let res = {
+		// Extract the value, along with whether the document it came from was
+		// matched by the statement. The two count shortcuts answer from the
+		// scan without building a `Document`, so no condition gate ran and
+		// nothing is recorded as matched; both are reachable only from a
+		// `SELECT`, which has no guaranteed record to suppress.
+		let (res, matched) = {
 			// Check if this is a count all
 			let is_count_all = stm.expr().is_some_and(Fields::is_count_all_only);
 			// Check if this is a count() with a GROUP ALL
 			if is_count_all && let Operable::Count(count) = pro.val {
-				Ok(Value::from(count))
+				(Ok(Value::from(count)), false)
 			}
 			// Check if this is a count() over specific fields
 			else if is_count_all && matches!(pro.record_strategy, RecordStrategy::KeysOnly) {
-				Ok(Value::from(map! { "count".to_string() => Value::from(1) }))
+				(Ok(Value::from(map! { "count".to_string() => Value::from(1) })), false)
 			}
 			// Otherwise process the document value
 			else {
@@ -1291,11 +1306,9 @@ impl Iterator {
 						Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await,
 						Statement::Insert(_) => doc.insert(stk, ctx, opt, stm).await,
 						stm => {
-							return Err(IgnoreError::from(anyhow::Error::new(
-								EngineError::unreachable(format_args!(
-									"Unexpected statement type: {stm:?}"
-								)),
-							)));
+							Err(IgnoreError::from(anyhow::Error::new(EngineError::unreachable(
+								format_args!("Unexpected statement type: {stm:?}"),
+							))))
 						}
 					};
 					// Bump the per-statement affected-row counter when a real
@@ -1311,11 +1324,15 @@ impl Iterator {
 					{
 						counters.record_affected();
 					}
-					res
+					(res, doc.matched)
 				})
 				.await
 			}
 		};
+		// Carry the document's match forward before the result is handled:
+		// every `IgnoreError::Ignore` below drops the row's output, and a
+		// matched row must still count as matched.
+		self.matched |= matched;
 		// Handle the result
 		match res {
 			Err(IgnoreError::Ignore) => {

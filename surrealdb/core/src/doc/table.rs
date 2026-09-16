@@ -1326,6 +1326,7 @@ impl Document {
 			record_strategy: RecordStrategy::KeysAndValues,
 			input_data: None,
 			mutated: false,
+			matched: false,
 			modified: tokio::sync::OnceCell::new(),
 			id: Some(id),
 		};

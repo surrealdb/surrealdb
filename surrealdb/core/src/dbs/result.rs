@@ -154,10 +154,6 @@ impl Results {
 		Ok(())
 	}
 
-	pub(super) fn is_empty(&self) -> bool {
-		self.len() == 0
-	}
-
 	pub(super) fn len(&self) -> usize {
 		match self {
 			Self::None => 0,

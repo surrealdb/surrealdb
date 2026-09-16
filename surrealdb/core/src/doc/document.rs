@@ -55,6 +55,22 @@ pub(crate) struct Document {
 	/// calls suppressed by `!self.changed()`, so the counter never
 	/// inflates from rows that were filtered or unchanged.
 	pub(crate) mutated: bool,
+	/// Whether the statement's WHERE condition accepted this document.
+	/// Set by `check_where_condition` on every accepting return — the
+	/// condition evaluated truthy, the statement carries no condition, or
+	/// the plan's index access already answered it for a key-only scan.
+	/// Consumed once per row by the iterator's dispatch, which needs to
+	/// know whether the statement reached a record: an
+	/// `UPSERT <table> ... WHERE` creates its guaranteed record only when
+	/// none did.
+	///
+	/// Independent of [`Self::mutated`]: a matched record whose data clause
+	/// changes nothing is never written, so `mutated` stays `false` while
+	/// the statement did match. The gates ahead of the condition
+	/// (`check_record_exists`, the update-permission gate,
+	/// `check_table_not_view`) leave it `false`, so a record the caller may
+	/// not update is a record the statement did not match.
+	pub(crate) matched: bool,
 	/// Memoized result of [`Self::is_modified`]. Populated on first
 	/// access, after all mutation phases have run, and reused by the
 	/// post-mutation gates (`process_table_views` / `process_table_events`
@@ -935,6 +951,7 @@ impl Document {
 			record_strategy: pro.record_strategy,
 			input_data: None,
 			mutated: false,
+			matched: false,
 			modified: OnceCell::new(),
 		}
 	}

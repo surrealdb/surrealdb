@@ -372,12 +372,16 @@ impl Document {
 		opt: &Options,
 		cond: Option<&Cond>,
 	) -> Result<(), IgnoreError> {
-		// Exit early for key-only iteration
+		// Exit early for key-only iteration. The plan's index access returns
+		// exactly the records the condition matches, so reaching this document
+		// at all is the match.
 		if self.is_key_only_iteration() {
+			self.matched = true;
 			return Ok(());
 		}
 		// Get the WHERE clause from the statement
 		let Some(cond) = cond else {
+			self.matched = true;
 			return Ok(());
 		};
 		// Materialise the pre-mutation snapshot. On a mutating statement the
@@ -393,6 +397,12 @@ impl Document {
 		{
 			return Err(IgnoreError::Ignore);
 		}
+		// Record the match before carrying on. Everything downstream of this
+		// point may still resolve to `IgnoreError::Ignore` — `RETURN NONE` and
+		// `OPTION IMPORT` both do, after the write has happened — so the flag,
+		// not the statement's output, is what tells a statement that matched
+		// records apart from one that matched none.
+		self.matched = true;
 		// Carry on
 		Ok(())
 	}
