@@ -17,7 +17,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: person:1, name: 'x', nested: { secret: 'nested-shh' }, open: 'visible', secret: 'shh' }]"
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ details: [{ secret: 'shh-a', title: 'A' }, { secret: 'shh-b', title: 'B' }], id: person:1, name: 'x', nested: { secret: 'nested-shh' }, open: 'visible', secret: 'shh' }]"
 
 */
 
@@ -35,4 +41,10 @@ DEFINE FIELD secret ON person TYPE string PERMISSIONS FOR select NONE;
 DEFINE FIELD nested ON person TYPE object PERMISSIONS FOR select FULL;
 DEFINE FIELD nested.secret ON person TYPE string PERMISSIONS FOR select NONE;
 
-CREATE person:1 SET name = 'x', secret = 'shh', open = 'visible', nested = { secret: 'nested-shh' };
+-- The same restriction inside an array, which a pointer reaches through a
+-- numeric reference token rather than a field name.
+DEFINE FIELD details ON person TYPE array<object> PERMISSIONS FOR select FULL;
+DEFINE FIELD details[*].secret ON person TYPE string PERMISSIONS FOR select NONE;
+
+CREATE person:1 SET name = 'x', secret = 'shh', open = 'visible', nested = { secret: 'nested-shh' },
+    details = [{ title: 'A', secret: 'shh-a' }, { title: 'B', secret: 'shh-b' }];

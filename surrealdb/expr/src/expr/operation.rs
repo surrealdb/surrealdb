@@ -4,6 +4,7 @@ use revision::revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::expr::part::Part;
 use crate::val::{Array, Object, Value};
 
 #[derive(Debug)]
@@ -65,7 +66,65 @@ fn reject_root_from(op: &str, from: Vec<Strand>) -> Result<Vec<Strand>, PatchErr
 	}
 }
 
+/// Reject a `copy` or `move` whose `from` pointer is a proper prefix of its
+/// `path`.
+///
+/// The destination lies inside the value the operation reads, so the write
+/// lands in the value it came from. For `copy` that nests another snapshot of
+/// the source inside itself on every application, which doubles the document a
+/// caller builds from a patch whose own size never grows. For `move` (RFC 6902
+/// §4.4) the source is removed before the destination is written, so the write
+/// names a location the removal has just taken away.
+///
+/// An equal pair is not a proper prefix: it names one location, and copying or
+/// moving a value onto itself leaves it where it is.
+fn reject_nested_destination(op: &str, path: &[Strand], from: &[Strand]) -> Result<(), PatchError> {
+	if path.len() > from.len() && path.starts_with(from) {
+		return Err(PatchError {
+			message: format!("'{op}' operation requires a 'path' that is not inside 'from'"),
+		});
+	}
+	Ok(())
+}
+
 impl Operation {
+	/// The array index a JSON Pointer reference token names, if it names one.
+	///
+	/// RFC 6901 §4 spells an array index as `0` or `[1-9][0-9]*`. `str::parse`
+	/// is wider than that grammar — it also accepts a leading `+` and leading
+	/// zeroes — and those spellings name distinct object members, so the
+	/// parsed value is re-rendered and compared to reject them. The result is
+	/// bounded by `usize` on the target, which is the range an index part can
+	/// address.
+	pub fn array_index(token: &str) -> Option<usize> {
+		let index: usize = token.parse().ok()?;
+		(index.to_string() == token).then_some(index)
+	}
+
+	/// Maps the reference tokens of a JSON Pointer to the parts that select
+	/// the value it points at.
+	///
+	/// A token spelled as an array index becomes an index part, which selects
+	/// the element at that position in an array and the member of that name in
+	/// an object — the two readings RFC 6901 gives a token, and they agree
+	/// only because the spelling is canonical, so the member name an index
+	/// part derives is the token itself. Every other token becomes a field
+	/// part carrying it verbatim, which keeps members named `007`, `+3` or
+	/// `-1` addressable.
+	///
+	/// Every pointer that `Value::patch` resolves is mapped here, so that a
+	/// caller deciding whether a pointer may be applied — see
+	/// `Document::check_patch_read_pointers` — judges the same location the
+	/// patch will reach.
+	pub fn path_to_parts(path: &[Strand]) -> Vec<Part> {
+		path.iter()
+			.map(|p| match Self::array_index(p.as_str()).and_then(|i| i64::try_from(i).ok()) {
+				Some(i) => Part::index_int(i),
+				None => Part::Field(p.clone()),
+			})
+			.collect()
+	}
+
 	/// Converts a value to a JSON path.
 	fn value_to_jsonpath(val: &Value) -> Vec<Strand> {
 		// Per RFC 6901, an empty JSON Pointer ("") refers to the root document.
@@ -193,7 +252,7 @@ impl Operation {
 
 		let value = || {
 			object.get("value").cloned().ok_or_else(|| PatchError {
-				message: "Key 'from' missing".to_owned(),
+				message: "Key 'value' missing".to_owned(),
 			})
 		};
 
@@ -217,6 +276,7 @@ impl Operation {
 			}),
 			"copy" => {
 				let from = reject_root_from("copy", from()?)?;
+				reject_nested_destination("copy", &path, &from)?;
 				Ok(Operation::Copy {
 					path,
 					from,
@@ -224,6 +284,7 @@ impl Operation {
 			}
 			"move" => {
 				let from = reject_root_from("move", from()?)?;
+				reject_nested_destination("move", &path, &from)?;
 				Ok(Operation::Move {
 					path,
 					from,
