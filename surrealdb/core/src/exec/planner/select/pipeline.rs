@@ -28,14 +28,14 @@ use super::super::util::{
 use crate::err::Error;
 use crate::exec::expression_registry::{ComputePoint, ExpressionRegistry, resolve_order_by_alias};
 use crate::exec::field_path::FieldPath;
-use crate::exec::logical::is_effect_free;
+use crate::exec::logical::{BatchRetry, ColumnEffects, columns_may_run_column_major};
 use crate::exec::operators::{
 	Aggregate, Compute, Filter, Limit, RandomShuffle, Sort, SortByKey, SortDirection, SortKey,
 	SortTopK, SortTopKByKey, Split,
 };
 #[cfg(all(storage, not(target_family = "wasm")))]
 use crate::exec::operators::{ExternalSort, ExternalSortByKey};
-use crate::exec::planner::aggregate::aggregate_columns_are_effect_free;
+use crate::exec::planner::aggregate::aggregate_may_run_column_major;
 use crate::exec::topk_pushdown::{TopKPushdownHandle, TopKPushdownReason};
 use crate::exec::{ExecOperator, PhysicalExpr};
 use crate::expr::logical::{LogicalExpr, LogicalField, LogicalFields, LogicalOrdering};
@@ -340,15 +340,15 @@ impl<'ctx> Planner<'ctx> {
 			let agg_fields = fields.clone().unwrap_or_else(LogicalFields::all);
 			check_forbidden_group_by_params(&agg_fields)?;
 
-			let effect_free_columns =
-				aggregate_columns_are_effect_free(&agg_fields, &group_by, self.function_registry());
+			let column_major =
+				aggregate_may_run_column_major(&agg_fields, &group_by, self.function_registry());
 
 			let (aggregates, group_by_exprs) =
 				self.plan_aggregation(&agg_fields, &group_by).await?;
 
 			let mut aggregate = Aggregate::new(split_op, group_by, group_by_exprs, aggregates);
-			if effect_free_columns {
-				aggregate = aggregate.with_effect_free_columns();
+			if column_major {
+				aggregate = aggregate.with_column_major();
 			}
 
 			(Arc::new(aggregate) as Arc<dyn ExecOperator>, true)
@@ -435,7 +435,7 @@ impl<'ctx> Planner<'ctx> {
 					let omit_fields = self.plan_omit(all_omit).await?;
 					Arc::new(
 						crate::exec::operators::Project::new(limited, vec![], omit_fields, true)
-							.with_effect_free_columns(),
+							.with_column_major(),
 					) as Arc<dyn ExecOperator>
 				} else {
 					limited
@@ -539,17 +539,20 @@ impl<'ctx> Planner<'ctx> {
 				// These operators evaluate the keys themselves, so the shape
 				// of that evaluation is judged here rather than at a `Compute`
 				// the way `plan_sort_consolidated`'s keys are; see
-				// `Sort::effect_free_columns`.
-				let effect_free_columns = order_list
+				// `Sort::column_major`. A sort passes a failed key column on
+				// as the batch's, so it repeats nothing.
+				let key_effects: Vec<ColumnEffects> = order_list
 					.iter()
-					.all(|field| is_effect_free(&field.value, self.function_registry()));
+					.map(|field| ColumnEffects::of(&field.value, self.function_registry()))
+					.collect();
+				let column_major = columns_may_run_column_major(&key_effects, BatchRetry::None);
 				let order_by = self.convert_order_list(order_list).await?;
 
 				#[cfg(all(storage, not(target_family = "wasm")))]
 				if tempfiles && let Some(temp_dir) = self.ctx.temporary_directory() {
 					let mut sort = ExternalSort::new(input, order_by, temp_dir.to_path_buf());
-					if effect_free_columns {
-						sort = sort.with_effect_free_columns();
+					if column_major {
+						sort = sort.with_column_major();
 					}
 					return Ok(Arc::new(sort) as Arc<dyn ExecOperator>);
 				}
@@ -559,15 +562,15 @@ impl<'ctx> Planner<'ctx> {
 						<= self.ctx.config.exec.max_order_limit_priority_queue_size as usize
 				{
 					let mut topk = SortTopK::new(input, order_by, effective_limit);
-					if effect_free_columns {
-						topk = topk.with_effect_free_columns();
+					if column_major {
+						topk = topk.with_column_major();
 					}
 					return Ok(Arc::new(topk) as Arc<dyn ExecOperator>);
 				}
 
 				let mut sort = Sort::new(input, order_by);
-				if effect_free_columns {
-					sort = sort.with_effect_free_columns();
+				if column_major {
+					sort = sort.with_column_major();
 				}
 				Ok(Arc::new(sort) as Arc<dyn ExecOperator>)
 			}
@@ -661,8 +664,8 @@ impl<'ctx> Planner<'ctx> {
 						.map(|(name, expr)| (crate::val::Strand::new(name), expr))
 						.collect();
 					let mut compute = Compute::new(input, compute_fields);
-					if registry.point_is_effect_free(ComputePoint::Sort) {
-						compute = compute.with_effect_free_columns();
+					if registry.point_may_run_column_major(ComputePoint::Sort) {
+						compute = compute.with_column_major();
 					}
 					Arc::new(compute) as Arc<dyn ExecOperator>
 				} else {

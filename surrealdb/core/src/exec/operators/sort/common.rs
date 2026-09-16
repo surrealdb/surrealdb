@@ -138,7 +138,7 @@ pub fn compare_keys_by_sort_key<A: Borrow<Value>, B: Borrow<Value>>(
 
 /// The ORDER BY keys of `values`, as one column per field.
 ///
-/// `effect_free_columns` chooses the shape, exactly as it does in the
+/// `column_major` chooses the shape, exactly as it does in the
 /// projection operators: where no key has an effect to reorder, each key is
 /// evaluated for the whole batch in one call, which lets a key reading through
 /// a lookup overlap its fetches. Where one may, the keys of a row are evaluated
@@ -153,10 +153,10 @@ pub(crate) async fn evaluate_key_columns(
 	order_by: &[OrderByField],
 	values: &[Value],
 	ctx: crate::exec::EvalContext<'_>,
-	effect_free_columns: bool,
+	column_major: bool,
 ) -> crate::exec::FlowResult<Vec<Vec<Value>>> {
 	let mut key_columns: Vec<Vec<Value>> = Vec::with_capacity(order_by.len());
-	if effect_free_columns {
+	if column_major {
 		for field in order_by {
 			key_columns.push(field.expr.evaluate_batch(ctx.clone(), values).await?);
 		}

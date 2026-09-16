@@ -41,20 +41,21 @@ pub struct Aggregate {
 	/// The aggregate expressions to compute for each group.
 	/// These are the selected fields that may contain aggregate functions.
 	pub(crate) aggregates: Vec<AggregateField>,
-	/// Whether every expression this operator evaluates per row — each group
-	/// key and each aggregate's first argument — is free of effects that
-	/// evaluating it a second time, or out of the order it was written in,
-	/// would expose: it stages no write, advances no counter, reaches nothing
-	/// outside the transaction and runs no body the plan cannot see.
+	/// Whether a batch may be evaluated one column at a time — each group key
+	/// and each aggregate's first argument for every row before the next —
+	/// rather than a row at a time with the columns in written order.
 	///
 	/// It decides how a batch is evaluated, never what the answer is. `true`
-	/// licenses the faster column-at-a-time shape, which evaluates one
-	/// expression for every row of the batch before the next and evaluates a
-	/// column again from its first row when it fails part-way; `false` — the
-	/// safe answer, and the default — evaluates a row at a time, each column in
-	/// written order, so a call that writes or advances a sequence is made once
-	/// per row and in the statement's own order.
-	pub(crate) effect_free_columns: bool,
+	/// licenses the faster column-at-a-time shape; `false` — the safe answer,
+	/// and the default — evaluates a row at a time, each column in written
+	/// order, so a call that writes or advances a sequence is made once per
+	/// row and in the statement's own order. This operator evaluates a column
+	/// again from its first row whenever it fails part-way, so that a row
+	/// whose error is ignorable yields `NONE`; the planner answers it with
+	/// [`BatchRetry::OnFailure`](crate::exec::logical::BatchRetry::OnFailure),
+	/// which is the strictest of the three and leaves a column that fetches a
+	/// record on the row-at-a-time shape.
+	pub(crate) column_major: bool,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -72,16 +73,16 @@ impl Aggregate {
 			group_by,
 			group_by_exprs,
 			aggregates,
-			effect_free_columns: false,
+			column_major: false,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
 
 	/// Declare every expression the operator evaluates per row effect-free; see
-	/// [`Self::effect_free_columns`]. Only the planner, which holds the
+	/// [`Self::column_major`]. Only the planner, which holds the
 	/// expressions as written, can answer this.
-	pub(crate) fn with_effect_free_columns(mut self) -> Self {
-		self.effect_free_columns = true;
+	pub(crate) fn with_column_major(mut self) -> Self {
+		self.column_major = true;
 		self
 	}
 }
@@ -508,7 +509,7 @@ impl ExecOperator for Aggregate {
 		);
 		let group_by_exprs = self.group_by_exprs.clone();
 		let aggregates = self.aggregates.clone();
-		let effect_free_columns = self.effect_free_columns;
+		let column_major = self.column_major;
 		let ctx = ctx.clone();
 
 		// Collect all input batches, then group and aggregate
@@ -546,7 +547,7 @@ impl ExecOperator for Aggregate {
 				// column that fails part-way is evaluated again from its first
 				// row, since a failed `evaluate_batch` does not say how far it
 				// got. Neither is visible where the expressions have no effect
-				// to repeat or reorder, which is what `effect_free_columns`
+				// to repeat or reorder, which is what `column_major`
 				// answers; where they may, the batch is evaluated a row at a
 				// time, each column in the order it was written, so a call that
 				// writes, advances a sequence or reaches outside the
@@ -557,7 +558,7 @@ impl ExecOperator for Aggregate {
 				let mut agg_arg_columns: Vec<Vec<Vec<Value>>> =
 					Vec::with_capacity(aggregates.len());
 
-				if effect_free_columns {
+				if column_major {
 					for expr in &group_by_exprs {
 						let keys = match expr.evaluate_batch(eval_ctx.clone(), batch.values()).await
 						{
@@ -1071,7 +1072,7 @@ mod tests {
 		fields: Vec<AggregateField>,
 		ctx: &ExecutionContext,
 	) -> Arc<dyn ExecOperator> {
-		Arc::new(build_aggregate(input, group_by, fields, ctx).await.with_effect_free_columns())
+		Arc::new(build_aggregate(input, group_by, fields, ctx).await.with_column_major())
 	}
 
 	/// [`aggregate_over`] with the row-at-a-time shape, which the planner

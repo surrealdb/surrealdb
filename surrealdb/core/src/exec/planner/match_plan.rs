@@ -62,7 +62,7 @@ use surrealdb_strand::TableName;
 use super::Planner;
 use crate::err::{EngineError, Error};
 use crate::exec::ExecOperator;
-use crate::exec::logical::is_effect_free;
+use crate::exec::logical::{BatchRetry, ColumnEffects, columns_may_run_column_major};
 use crate::exec::operators::{
 	Aggregate, AggregateField, Bind, DeleteBinding, Distinct, DistinctEdges, DrainSink,
 	EdgeBinding, EndpointBind, EndpointField, Expand, ExpandDir, FieldSelection, Filter, HashJoin,
@@ -1435,16 +1435,20 @@ impl<'ctx> Planner<'ctx> {
 		// The logical keys double as the EXPLAIN display, length-aligned with the
 		// physical keys so the operator renders `GROUP ALL` only when there are
 		// genuinely no keys.
-		// Whether the operator may evaluate a batch one column at a time rather
-		// than one row at a time; see `Aggregate::effect_free_columns`.
-		let effect_free_columns = group_keys
+		// Whether the operator may evaluate a batch one column at a time
+		// rather than one row at a time; see `Aggregate::column_major`. An
+		// aggregate evaluates a column again on any failure, so nothing a
+		// repetition could expose may be in reach of one.
+		let column_effects: Vec<ColumnEffects> = group_keys
 			.iter()
 			.chain(output.columns.iter().map(|column| &column.expr))
-			.all(|expr| is_effect_free(expr, self.function_registry()));
+			.map(|expr| ColumnEffects::of(expr, self.function_registry()))
+			.collect();
+		let column_major = columns_may_run_column_major(&column_effects, BatchRetry::OnFailure);
 
 		let mut aggregate = Aggregate::new(input, group_keys.to_vec(), group_by_exprs, aggregates);
-		if effect_free_columns {
-			aggregate = aggregate.with_effect_free_columns();
+		if column_major {
+			aggregate = aggregate.with_column_major();
 		}
 		Ok(Arc::new(aggregate) as Arc<dyn ExecOperator>)
 	}
@@ -1465,7 +1469,7 @@ impl<'ctx> Planner<'ctx> {
 		}
 		// Every field is a bare read of a name the `Aggregate` already
 		// produced, so none of them has an effect to reorder.
-		Ok(Arc::new(Project::new(input, fields, Vec::new(), false).with_effect_free_columns())
+		Ok(Arc::new(Project::new(input, fields, Vec::new(), false).with_column_major())
 			as Arc<dyn ExecOperator>)
 	}
 
@@ -1481,9 +1485,14 @@ impl<'ctx> Planner<'ctx> {
 		}
 		// `Sort` evaluates its keys itself, so the shape of that evaluation is
 		// judged here, as it is for the projection and the aggregate above;
-		// see `Sort::effect_free_columns`.
-		let effect_free_columns =
-			output.order.iter().all(|order| is_effect_free(&order.expr, self.function_registry()));
+		// see `Sort::column_major`. A sort passes a failed key column on as
+		// the batch's, so it repeats nothing.
+		let key_effects: Vec<ColumnEffects> = output
+			.order
+			.iter()
+			.map(|order| ColumnEffects::of(&order.expr, self.function_registry()))
+			.collect();
+		let column_major = columns_may_run_column_major(&key_effects, BatchRetry::None);
 		let mut order_by = Vec::with_capacity(output.order.len());
 		for order in output.order.iter() {
 			let expr = self.physical_expr(order.expr.clone()).await?;
@@ -1499,8 +1508,8 @@ impl<'ctx> Planner<'ctx> {
 			});
 		}
 		let mut sort = Sort::new(input, order_by);
-		if effect_free_columns {
-			sort = sort.with_effect_free_columns();
+		if column_major {
+			sort = sort.with_column_major();
 		}
 		Ok(Arc::new(sort) as Arc<dyn ExecOperator>)
 	}
@@ -1534,12 +1543,15 @@ impl<'ctx> Planner<'ctx> {
 		input: Arc<dyn ExecOperator>,
 		output: &MatchOutput,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		// Judged from the columns as written; see
-		// `Project::effect_free_columns`.
-		let effect_free_columns = output
+		// Judged from the columns as written; see `Project::column_major`.
+		// A projection passes a failed column on as the batch's, so it
+		// repeats nothing.
+		let column_effects: Vec<ColumnEffects> = output
 			.columns
 			.iter()
-			.all(|column| is_effect_free(&column.expr, self.function_registry()));
+			.map(|column| ColumnEffects::of(&column.expr, self.function_registry()))
+			.collect();
+		let column_major = columns_may_run_column_major(&column_effects, BatchRetry::None);
 
 		let mut fields = Vec::with_capacity(output.columns.len());
 		for column in output.columns.iter() {
@@ -1547,8 +1559,8 @@ impl<'ctx> Planner<'ctx> {
 			fields.push(FieldSelection::new(&column.name, expr));
 		}
 		let mut project = Project::new(input, fields, Vec::new(), false);
-		if effect_free_columns {
-			project = project.with_effect_free_columns();
+		if column_major {
+			project = project.with_column_major();
 		}
 		Ok(Arc::new(project) as Arc<dyn ExecOperator>)
 	}

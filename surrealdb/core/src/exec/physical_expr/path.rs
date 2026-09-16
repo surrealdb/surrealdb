@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::exec::parts::AllPart;
+use crate::exec::parts::{AllPart, LookupPart};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut, CombineAccessModes, ContextLevel, ExecOperator};
 use crate::expr::FlowResult;
@@ -173,6 +173,9 @@ pub struct Step {
 	root: Option<Arc<dyn PhysicalExpr>>,
 	/// The parts, in application order. Never empty.
 	parts: Vec<Arc<dyn PhysicalExpr>>,
+	/// Whether evaluating the run executes a lookup plan; see
+	/// [`runs_lookup_plan`].
+	runs_lookup_plan: bool,
 }
 
 impl Step {
@@ -183,10 +186,12 @@ impl Step {
 		parts: Vec<Arc<dyn PhysicalExpr>>,
 	) -> Self {
 		debug_assert!(!parts.is_empty(), "a step holds at least one part");
+		let runs_lookup_plan = root.iter().chain(parts.iter()).any(runs_lookup_plan);
 		Self {
 			display,
 			root,
 			parts,
+			runs_lookup_plan,
 		}
 	}
 
@@ -280,21 +285,14 @@ impl PhysicalExpr for Step {
 	) -> BoxFut<'a, FlowResult<Vec<Value>>> {
 		Box::pin(async move {
 			#[cfg(not(target_family = "wasm"))]
-			{
-				let threshold = ctx.exec_ctx.root().ctx.config.exec.fan_out_row_threshold.max(2);
-				if self.access_mode() == AccessMode::ReadOnly
-					&& ctx.recursion_ctx.is_none()
-					&& values.len() >= threshold
-					&& self.parts.iter().any(|p| p.name() == "Lookup")
-				{
-					return crate::exec::fan_out::evaluate_rows_spawned(
-						Arc::new(self.clone()),
-						&ctx,
-						values,
-						crate::exec::fan_out::SpawnedDocRoot::RowValue,
-					)
-					.await;
-				}
+			if spawning_pays(self, self.runs_lookup_plan, &ctx, values) {
+				return crate::exec::fan_out::evaluate_rows_spawned(
+					Arc::new(self.clone()),
+					&ctx,
+					values,
+					crate::exec::fan_out::SpawnedDocRoot::RowValue,
+				)
+				.await;
 			}
 			let mut results = Vec::with_capacity(values.len());
 			for value in values {
@@ -364,6 +362,12 @@ pub struct Broadcast {
 	flatten: bool,
 	/// Whether the body's first step over the current value is `.*`.
 	leading_each: bool,
+	/// Whether the base is the current value itself, which the broadcast
+	/// then reads in place rather than evaluating into an owned copy.
+	base_is_current: bool,
+	/// Whether evaluating the broadcast executes a lookup plan; see
+	/// [`runs_lookup_plan`].
+	runs_lookup_plan: bool,
 }
 
 impl Broadcast {
@@ -374,12 +378,16 @@ impl Broadcast {
 		flatten: bool,
 	) -> Self {
 		let leading_each = has_leading_each(&body);
+		let base_is_current = base.downcast_ref::<Current>().is_some();
+		let runs_lookup_plan = runs_lookup_plan(&base) || runs_lookup_plan(&body);
 		Self {
 			display,
 			base,
 			body,
 			flatten,
 			leading_each,
+			base_is_current,
+			runs_lookup_plan,
 		}
 	}
 
@@ -392,14 +400,25 @@ impl Broadcast {
 		skip_leading_each: bool,
 	) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
+			if self.base_is_current {
+				return self.map_over_ref(ctx.current_value.unwrap_or(&Value::None), ctx).await;
+			}
 			let base = evaluate_plain(&*self.base, ctx.clone(), skip_leading_each).await?;
-			self.map_over(base, ctx).await
+			self.map_over_ref(&base, ctx).await
 		})
 	}
 
 	/// The body applied to `base`: once per element when `base` is an array,
 	/// and once with `base` itself otherwise.
-	fn map_over<'a>(&'a self, base: Value, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+	///
+	/// The base is borrowed rather than owned, so a broadcast over the row
+	/// itself — which is what a path starting with a lookup compiles to —
+	/// reads it in place instead of cloning it once per row.
+	fn map_over_ref<'a>(
+		&'a self,
+		base: &'a Value,
+		ctx: EvalContext<'a>,
+	) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
 			match base {
 				Value::Array(arr) => {
@@ -416,7 +435,7 @@ impl Broadcast {
 						result
 					})
 				}
-				other => self.body.evaluate(ctx.with_value(&other)).await,
+				other => self.body.evaluate(ctx.with_value(other)).await,
 			}
 		})
 	}
@@ -437,8 +456,39 @@ impl PhysicalExpr for Broadcast {
 
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
+			if self.base_is_current {
+				return self.map_over_ref(ctx.current_value.unwrap_or(&Value::None), ctx).await;
+			}
 			let base = self.base.evaluate(ctx.clone()).await?;
-			self.map_over(base, ctx).await
+			self.map_over_ref(&base, ctx).await
+		})
+	}
+
+	/// A broadcast whose base or body executes a lookup plan carries the same
+	/// per-row scan work a [`Step`] does — a path that begins with a run of
+	/// hops compiles to one of these — so its batches spawn on the same
+	/// terms; see [`Step::evaluate_batch`].
+	fn evaluate_batch<'a>(
+		&'a self,
+		ctx: EvalContext<'a>,
+		values: &'a [Value],
+	) -> BoxFut<'a, FlowResult<Vec<Value>>> {
+		Box::pin(async move {
+			#[cfg(not(target_family = "wasm"))]
+			if spawning_pays(self, self.runs_lookup_plan, &ctx, values) {
+				return crate::exec::fan_out::evaluate_rows_spawned(
+					Arc::new(self.clone()),
+					&ctx,
+					values,
+					crate::exec::fan_out::SpawnedDocRoot::RowValue,
+				)
+				.await;
+			}
+			let mut results = Vec::with_capacity(values.len());
+			for value in values {
+				results.push(self.evaluate(ctx.with_value_and_doc(value)).await?);
+			}
+			Ok(results)
 		})
 	}
 
@@ -457,6 +507,49 @@ impl ToSql for Broadcast {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str(&self.display);
 	}
+}
+
+/// Whether evaluating `expr` against one value executes a lookup plan — a
+/// graph or reference traversal.
+///
+/// A path compiles to a nest of [`Step`] and [`Broadcast`] nodes, and a run
+/// of hops can sit at any depth in it: `->knows->person` is a lookup part
+/// inside the body of a broadcast over the row. Both nodes answer this from
+/// a flag they compute once, so the walk stops at the first nested node
+/// rather than descending the whole path on every batch.
+///
+/// The walk follows the path's own structure and does not enter the
+/// expressions a part holds — a `[WHERE …]` predicate, an index, a method's
+/// arguments. A lookup reached only through one of those keeps the
+/// sequential default.
+fn runs_lookup_plan(expr: &Arc<dyn PhysicalExpr>) -> bool {
+	if let Some(step) = expr.downcast_ref::<Step>() {
+		return step.runs_lookup_plan;
+	}
+	if let Some(broadcast) = expr.downcast_ref::<Broadcast>() {
+		return broadcast.runs_lookup_plan;
+	}
+	expr.downcast_ref::<LookupPart>().is_some()
+}
+
+/// Whether a batch of `values` is worth spawning across runtime tasks.
+///
+/// Running a scan plan per row is CPU-bound work on an embedded backend, so
+/// the rows overlap only on separate tasks; everything else is too cheap for
+/// task dispatch to pay. A writing evaluation and a recursion are excluded
+/// because neither survives the context reconstruction the spawned rows are
+/// rebuilt from — see [`crate::exec::fan_out::evaluate_rows_spawned`].
+#[cfg(not(target_family = "wasm"))]
+fn spawning_pays(
+	expr: &dyn PhysicalExpr,
+	runs_lookup_plan: bool,
+	ctx: &EvalContext<'_>,
+	values: &[Value],
+) -> bool {
+	runs_lookup_plan
+		&& values.len() >= ctx.exec_ctx.root().ctx.config.exec.fan_out_row_threshold.max(2)
+		&& ctx.recursion_ctx.is_none()
+		&& expr.access_mode() == AccessMode::ReadOnly
 }
 
 /// Whether the first step a body applies to the current value is `.*`,

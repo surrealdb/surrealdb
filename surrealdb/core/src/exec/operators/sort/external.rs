@@ -45,9 +45,11 @@ pub struct ExternalSort {
 	/// step that fetches the record its base names and so runs that record's
 	/// `COMPUTED` bodies. Two such keys of the same row must be evaluated in
 	/// the order the statement wrote them, which a column-at-a-time pass does
-	/// not do. The planner answers this from the key expressions as written;
-	/// see [`is_effect_free`](crate::exec::logical::is_effect_free).
-	pub(crate) effect_free_columns: bool,
+	/// not do. A sort passes a failed key column on as the batch's, so it
+	/// repeats nothing; the planner answers this from the key expressions as
+	/// written, with
+	/// [`BatchRetry::None`](crate::exec::logical::BatchRetry::None).
+	pub(crate) column_major: bool,
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
@@ -62,15 +64,15 @@ impl ExternalSort {
 			input,
 			order_by,
 			temp_dir,
-			effect_free_columns: false,
+			column_major: false,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
 	/// Let the operator evaluate a batch a column at a time; see
-	/// [`Self::effect_free_columns`]. Only the planner, which holds the
+	/// [`Self::column_major`]. Only the planner, which holds the
 	/// function registry the answer is read from, may set this.
-	pub(crate) fn with_effect_free_columns(mut self) -> Self {
-		self.effect_free_columns = true;
+	pub(crate) fn with_column_major(mut self) -> Self {
+		self.column_major = true;
 		self
 	}
 }
@@ -160,7 +162,7 @@ impl ExecOperator for ExternalSort {
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let order_by = Arc::new(self.order_by.clone());
-		let effect_free_columns = self.effect_free_columns;
+		let column_major = self.column_major;
 		let temp_dir = self.temp_dir.clone();
 		let ctx = ctx.clone();
 
@@ -195,7 +197,7 @@ impl ExecOperator for ExternalSort {
 					&order_by,
 					batch.values(),
 					eval_ctx.clone(),
-					effect_free_columns,
+					column_major,
 				)
 				.await?;
 

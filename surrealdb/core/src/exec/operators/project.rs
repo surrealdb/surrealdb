@@ -146,22 +146,23 @@ pub struct Project {
 	pub omit: Arc<[LogicalExpr]>,
 	/// Whether to include all fields from input (for SELECT *, field1, field2)
 	pub include_all: bool,
-	/// Whether every field expression is free of effects that evaluating it
-	/// out of the order it was written in would expose: it stages no write,
-	/// advances no counter, reaches nothing outside the transaction and runs
-	/// no body the plan cannot see.
+	/// Whether a batch may be evaluated one field at a time — each field for
+	/// every row before the next — rather than a row at a time with the
+	/// fields in written order.
 	///
 	/// It decides how a batch is evaluated, never what the answer is. `true`
-	/// licenses the faster column-at-a-time shape, which evaluates one field
-	/// for every row of the batch before the next; `false` — the safe answer,
+	/// licenses the faster column-at-a-time shape, which is what lets a field
+	/// reading through a lookup overlap its rows; `false` — the safe answer,
 	/// and the default — evaluates a row at a time, each field in written
 	/// order, so a call that writes or advances a sequence is made in the
-	/// statement's own order.
+	/// statement's own order. This operator passes a failed field call on as
+	/// the batch's, so it repeats nothing, and the planner answers it with
+	/// [`BatchRetry::None`](crate::exec::logical::BatchRetry::None).
 	///
 	/// Read only by the `include_all == false` path. The `include_all` path is
 	/// a row at a time whatever this says, because dereferencing a record id
 	/// and dropping the rows that miss are per-row decisions.
-	pub(crate) effect_free_columns: bool,
+	pub(crate) column_major: bool,
 	/// Per-operator metrics for EXPLAIN ANALYZE
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -179,16 +180,16 @@ impl Project {
 			fields: fields.into(),
 			omit: omit.into(),
 			include_all,
-			effect_free_columns: false,
+			column_major: false,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
 
-	/// Declare every field expression effect-free; see
-	/// [`Self::effect_free_columns`]. Only the planner, which holds the
-	/// expressions as written, can answer this.
-	pub(crate) fn with_effect_free_columns(mut self) -> Self {
-		self.effect_free_columns = true;
+	/// Declare the batch free to run a field at a time; see
+	/// [`Self::column_major`]. Only the planner, which holds the expressions
+	/// as written, can answer this.
+	pub(crate) fn with_column_major(mut self) -> Self {
+		self.column_major = true;
 		self
 	}
 }
@@ -254,7 +255,7 @@ impl ExecOperator for Project {
 		let fields = Arc::clone(&self.fields);
 		let omit = Arc::clone(&self.omit);
 		let include_all = self.include_all;
-		let effect_free_columns = self.effect_free_columns;
+		let column_major = self.column_major;
 		let ctx = ctx.clone();
 
 		// Create a stream that projects fields
@@ -355,7 +356,7 @@ impl ExecOperator for Project {
 					// whole batch before the next, so two fields' effects
 					// interleave differently from the statement as written.
 					// That is invisible where the fields have no effect to
-					// reorder, which is what `effect_free_columns` answers;
+					// reorder, which is what `column_major` answers;
 					// where they may, the batch is evaluated a row at a time,
 					// each field in written order, which is the per-row
 					// engine's order.
@@ -363,7 +364,7 @@ impl ExecOperator for Project {
 					let mut objects: Vec<Object> =
 						(0..batch_len).map(|_| Object::default()).collect();
 
-					if effect_free_columns {
+					if column_major {
 						for field in fields.iter() {
 							if field.expr.is_projection_function() {
 								// Projection functions return multiple field bindings;

@@ -11,7 +11,7 @@ use surrealdb_types::ToSql;
 use super::Planner;
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
-use crate::exec::logical::is_effect_free;
+use crate::exec::logical::{BatchRetry, ColumnEffects, columns_may_run_column_major};
 use crate::exec::operators::{
 	AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
 	group_key_field_name,
@@ -47,7 +47,9 @@ fn output_path_keys(path: &OutputPath) -> Vec<String> {
 
 /// Whether an [`Aggregate`](crate::exec::operators::Aggregate) over `fields`
 /// grouped by `group_by` may evaluate a batch one column at a time; see
-/// [`Aggregate::with_effect_free_columns`](crate::exec::operators::Aggregate::with_effect_free_columns).
+/// [`Aggregate::with_column_major`](crate::exec::operators::Aggregate::with_column_major).
+/// An aggregate evaluates a column again on any failure, so nothing a
+/// repetition could expose may be in reach of one.
 ///
 /// Every key and every field is judged, rather than only the expressions the
 /// operator ends up evaluating per row: a field reducing to one value per group
@@ -55,25 +57,29 @@ fn output_path_keys(path: &OutputPath) -> Vec<String> {
 /// matters and keeps the answer readable from the statement as written. A key
 /// written as a field's alias is answered by that field's expression, so
 /// judging every field covers both readings of the key.
-pub(crate) fn aggregate_columns_are_effect_free(
+pub(crate) fn aggregate_may_run_column_major(
 	fields: &LogicalFields,
 	group_by: &[LogicalExpr],
 	registry: &FunctionRegistry,
 ) -> bool {
-	let fields_are_free = match fields {
+	let mut columns: Vec<ColumnEffects> = match fields {
 		LogicalFields::Value {
 			expr,
 			..
-		} => is_effect_free(expr, registry),
-		LogicalFields::Select(field_list) => field_list.iter().all(|field| match field {
-			LogicalField::All => true,
-			LogicalField::Single {
-				expr,
-				..
-			} => is_effect_free(expr, registry),
-		}),
+		} => vec![ColumnEffects::of(expr, registry)],
+		LogicalFields::Select(field_list) => field_list
+			.iter()
+			.map(|field| match field {
+				LogicalField::All => ColumnEffects::INERT,
+				LogicalField::Single {
+					expr,
+					..
+				} => ColumnEffects::of(expr, registry),
+			})
+			.collect(),
 	};
-	fields_are_free && group_by.iter().all(|key| is_effect_free(key, registry))
+	columns.extend(group_by.iter().map(|key| ColumnEffects::of(key, registry)));
+	columns_may_run_column_major(&columns, BatchRetry::OnFailure)
 }
 
 // ============================================================================

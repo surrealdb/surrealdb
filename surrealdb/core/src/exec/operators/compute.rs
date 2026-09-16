@@ -39,19 +39,20 @@ pub struct Compute {
 	/// Fields to compute, in the order the statement wrote them:
 	/// (internal_name, expression).
 	pub fields: Vec<(Strand, Arc<dyn PhysicalExpr>)>,
-	/// Whether every field expression is free of effects that evaluating it a
-	/// second time, or out of the order it was written in, would expose: it
-	/// stages no write, advances no counter, reaches nothing outside the
-	/// transaction and runs no body the plan cannot see.
+	/// Whether a batch may be evaluated one field at a time — each field for
+	/// every row before the next — rather than a row at a time with the
+	/// fields in written order.
 	///
 	/// It decides how a batch is evaluated, never what the answer is. `true`
-	/// licenses the faster field-at-a-time shape, which evaluates one field
-	/// for every row of the batch before the next and evaluates a field again
-	/// from its first row when a row signals `RETURN`; `false` — the safe
-	/// answer, and the default — evaluates a row at a time, each field in
-	/// written order, so a call that writes or advances a sequence is made
-	/// once per row and in the statement's own order.
-	pub(crate) effect_free_columns: bool,
+	/// licenses the faster field-at-a-time shape, which is what lets a field
+	/// reading through a lookup overlap its rows; `false` — the safe answer,
+	/// and the default — evaluates a row at a time, each field in written
+	/// order, so a call that writes or advances a sequence is made once per
+	/// row and in the statement's own order. This operator evaluates a field
+	/// again from its first row when a row signals `RETURN`, so the planner
+	/// answers it with
+	/// [`BatchRetry::OnSignal`](crate::exec::logical::BatchRetry::OnSignal).
+	pub(crate) column_major: bool,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -65,16 +66,16 @@ impl Compute {
 		Self {
 			input,
 			fields,
-			effect_free_columns: false,
+			column_major: false,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
 
-	/// Declare every field expression effect-free; see
-	/// [`Self::effect_free_columns`]. Only the planner, which holds the
-	/// expressions as written, can answer this.
-	pub(crate) fn with_effect_free_columns(mut self) -> Self {
-		self.effect_free_columns = true;
+	/// Declare the batch free to run a field at a time; see
+	/// [`Self::column_major`]. Only the planner, which holds the expressions
+	/// as written, can answer this.
+	pub(crate) fn with_column_major(mut self) -> Self {
+		self.column_major = true;
 		self
 	}
 }
@@ -144,7 +145,7 @@ impl ExecOperator for Compute {
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let fields = self.fields.clone();
-		let effect_free_columns = self.effect_free_columns;
+		let column_major = self.column_major;
 		let ctx = ctx.clone();
 
 		// Create a stream that computes fields for each batch
@@ -156,7 +157,7 @@ impl ExecOperator for Compute {
 				let batch = batch_result?;
 				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
-				compute_batch(batch.into_values(), &fields, eval_ctx, effect_free_columns).await
+				compute_batch(batch.into_values(), &fields, eval_ctx, column_major).await
 			}
 		});
 
@@ -172,7 +173,7 @@ impl ExecOperator for Compute {
 /// field expression evaluation; the Object payloads themselves are moved out of
 /// the input batch in a final pass once expression evaluation is complete.
 ///
-/// `effect_free_columns` chooses the shape of the field evaluation between those
+/// `column_major` chooses the shape of the field evaluation between those
 /// two passes, and never what it answers. A field at a time is the faster shape —
 /// `evaluate_batch` lets an I/O-bound expression overlap its rows — but it
 /// evaluates one field for the whole batch before the next, and a field that a
@@ -185,7 +186,7 @@ async fn compute_batch(
 	values: Vec<Value>,
 	fields: &[(Strand, Arc<dyn PhysicalExpr>)],
 	eval_ctx: EvalContext<'_>,
-	effect_free_columns: bool,
+	column_major: bool,
 ) -> Result<ValueBatch, ControlFlow> {
 	// Run side-effectful per-row work (RecordId fetches, Geometry → object
 	// conversion) in input order, before field-expression evaluation, so that
@@ -218,7 +219,7 @@ async fn compute_batch(
 	// have been consumed. Either shape fills `field_results` as
 	// `[field_idx][row_idx]`.
 	let mut field_results: Vec<Vec<Value>> = Vec::with_capacity(fields.len());
-	if effect_free_columns {
+	if column_major {
 		for (_name, expr) in fields {
 			let computed = match expr.evaluate_batch(eval_ctx.clone(), &values).await {
 				Ok(v) => v,

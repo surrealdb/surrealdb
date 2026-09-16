@@ -61,7 +61,7 @@ use surrealdb_types::ToSql;
 use super::planner::Planner;
 use crate::err::Error;
 use crate::exec::PhysicalExpr;
-use crate::exec::logical::is_effect_free;
+use crate::exec::logical::{BatchRetry, ColumnEffects, columns_may_run_column_major};
 use crate::expr::logical::{LogicalExpr, LogicalField, LogicalFields, OutputPath, OutputPathPart};
 
 /// Identifies when an expression must be computed in the execution pipeline.
@@ -105,10 +105,11 @@ pub struct ExpressionInfo {
 	/// Assigned once: promoting an expression to an earlier compute point
 	/// keeps the position its first registration gave it.
 	pub order: usize,
-	/// Whether the expression is free of effects that evaluating it a second
-	/// time, or out of the order it was written in, would expose; see
-	/// [`Compute::effect_free_columns`](crate::exec::operators::Compute::effect_free_columns).
-	pub effect_free: bool,
+	/// What evaluating the expression does beyond producing its value, which
+	/// is what decides the shape of the `Compute` operator built from the
+	/// point's expressions; see
+	/// [`Compute::column_major`](crate::exec::operators::Compute::column_major).
+	pub effects: ColumnEffects,
 }
 
 /// Registry that tracks all expressions needing computation in a query.
@@ -235,7 +236,7 @@ impl ExpressionRegistry {
 		}
 
 		// Judged from the expression as written, before it is compiled away.
-		let effect_free = is_effect_free(expr, planner.function_registry());
+		let effects = ColumnEffects::of(expr, planner.function_registry());
 
 		// Convert to physical expression via the live planner so the
 		// transaction and ns/db propagate into nested subqueries.
@@ -250,7 +251,7 @@ impl ExpressionRegistry {
 			expr: physical_expr,
 			compute_point,
 			order,
-			effect_free,
+			effects,
 		};
 
 		self.expressions.insert(dedup_key, info);
@@ -269,7 +270,7 @@ impl ExpressionRegistry {
 		physical_expr: Arc<dyn PhysicalExpr>,
 		compute_point: ComputePoint,
 		alias: Option<String>,
-		effect_free: bool,
+		effects: ColumnEffects,
 	) -> String {
 		// Include alias in the dedup key (same logic as `register`)
 		let dedup_key = match &alias {
@@ -296,7 +297,7 @@ impl ExpressionRegistry {
 			expr: physical_expr,
 			compute_point,
 			order,
-			effect_free,
+			effects,
 		};
 
 		self.expressions.insert(dedup_key, info);
@@ -357,15 +358,21 @@ impl ExpressionRegistry {
 		exprs.into_iter().map(|(_, name, expr)| (name, expr)).collect()
 	}
 
-	/// Whether every expression registered at `point` is effect-free, which is
-	/// what licenses the `Compute` operator built from them to evaluate a
-	/// batch a field at a time; see
-	/// [`Compute::effect_free_columns`](crate::exec::operators::Compute::effect_free_columns).
-	pub fn point_is_effect_free(&self, point: ComputePoint) -> bool {
-		self.expressions
+	/// Whether the `Compute` operator built from `point`'s expressions may
+	/// evaluate a batch a field at a time; see
+	/// [`Compute::column_major`](crate::exec::operators::Compute::column_major).
+	/// `Compute` evaluates a field again when its batch call ended in a
+	/// signal, which is the repetition the rule weighs.
+	pub fn point_may_run_column_major(&self, point: ComputePoint) -> bool {
+		let mut columns: Vec<(usize, ColumnEffects)> = self
+			.expressions
 			.values()
 			.filter(|info| info.compute_point == point)
-			.all(|info| info.effect_free)
+			.map(|info| (info.order, info.effects))
+			.collect();
+		columns.sort_by_key(|(order, _)| *order);
+		let columns: Vec<ColumnEffects> = columns.into_iter().map(|(_, e)| e).collect();
+		columns_may_run_column_major(&columns, BatchRetry::OnSignal)
 	}
 
 	/// Check if there are any expressions registered for a specific compute point.
@@ -495,6 +502,14 @@ mod tests {
 	use crate::exec::physical_expr::Literal;
 	use crate::val::{Number, Value};
 
+	/// A column whose evaluation has an effect to reorder — what a record
+	/// dereference or a call the plan cannot see through answers.
+	const EFFECTFUL: ColumnEffects = ColumnEffects {
+		effect_free: false,
+		may_signal: false,
+		may_raise: true,
+	};
+
 	fn literal_expr(n: i64) -> Arc<dyn PhysicalExpr> {
 		Arc::new(Literal(Value::Number(Number::Int(n))))
 	}
@@ -557,7 +572,7 @@ mod tests {
 			literal_expr(42),
 			ComputePoint::Sort,
 			Some("doubled".into()),
-			true,
+			ColumnEffects::INERT,
 		);
 		assert_eq!(name1, "doubled");
 
@@ -567,7 +582,7 @@ mod tests {
 			literal_expr(99),
 			ComputePoint::Project,
 			Some("doubled".into()),
-			true,
+			ColumnEffects::INERT,
 		);
 		assert_eq!(name2, "doubled");
 
@@ -590,7 +605,7 @@ mod tests {
 				literal_expr(1),
 				ComputePoint::Project,
 				Some(alias.into()),
-				true,
+				ColumnEffects::INERT,
 			);
 		}
 
@@ -603,31 +618,44 @@ mod tests {
 	}
 
 	#[test]
-	fn a_point_is_effect_free_only_while_every_expression_is() {
+	fn a_point_runs_column_major_while_at_most_one_expression_has_effects() {
 		let mut registry = ExpressionRegistry::new();
 		registry.register_physical(
 			"expr_a".into(),
 			literal_expr(1),
 			ComputePoint::Project,
 			Some("a".into()),
-			true,
+			ColumnEffects::INERT,
 		);
-		assert!(registry.point_is_effect_free(ComputePoint::Project));
+		assert!(registry.point_may_run_column_major(ComputePoint::Project));
 
-		// One expression that may write or advance a counter is enough to take
-		// the whole point off the column-at-a-time shape.
+		// One expression with effects still runs column-major: there is no
+		// second effect for it to be reordered against, and `Compute` only
+		// evaluates a column twice when the first call ended in a signal.
 		registry.register_physical(
 			"expr_b".into(),
 			literal_expr(2),
 			ComputePoint::Project,
 			Some("b".into()),
-			false,
+			EFFECTFUL,
 		);
-		assert!(!registry.point_is_effect_free(ComputePoint::Project));
+		assert!(registry.point_may_run_column_major(ComputePoint::Project));
+
+		// A second one takes the whole point off the column-at-a-time shape:
+		// the two effects would happen in the order the batch ran the columns
+		// rather than the order the statement writes them.
+		registry.register_physical(
+			"expr_c".into(),
+			literal_expr(3),
+			ComputePoint::Project,
+			Some("c".into()),
+			EFFECTFUL,
+		);
+		assert!(!registry.point_may_run_column_major(ComputePoint::Project));
 
 		// A point with nothing registered has nothing that could have an
 		// effect, and an empty `Compute` is never built anyway.
-		assert!(registry.point_is_effect_free(ComputePoint::Sort));
+		assert!(registry.point_may_run_column_major(ComputePoint::Sort));
 	}
 
 	#[test]
@@ -640,7 +668,7 @@ mod tests {
 			literal_expr(1),
 			ComputePoint::Project,
 			Some("total".into()),
-			true,
+			ColumnEffects::INERT,
 		);
 		assert!(registry.has_expressions_for_point(ComputePoint::Project));
 		assert!(!registry.has_expressions_for_point(ComputePoint::Sort));
@@ -651,7 +679,7 @@ mod tests {
 			literal_expr(1),
 			ComputePoint::Sort,
 			Some("total".into()),
-			true,
+			ColumnEffects::INERT,
 		);
 
 		// Expression should now be at the earlier (Sort) point
@@ -668,7 +696,7 @@ mod tests {
 			literal_expr(1),
 			ComputePoint::Project,
 			Some("total".into()),
-			true,
+			ColumnEffects::INERT,
 		);
 		assert_eq!(name1, "total");
 
@@ -678,7 +706,7 @@ mod tests {
 			literal_expr(2),
 			ComputePoint::Project,
 			Some("total".into()),
-			true,
+			ColumnEffects::INERT,
 		);
 		assert_eq!(name2, "_e0"); // Falls back to synthetic
 	}

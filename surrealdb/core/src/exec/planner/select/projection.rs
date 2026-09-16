@@ -27,7 +27,10 @@ use super::super::Planner;
 use crate::err::Error;
 use crate::exec::expression_registry::{ComputePoint, ExpressionRegistry};
 use crate::exec::field_path::{FieldPath, FieldPathPart};
-use crate::exec::logical::is_effect_free;
+use crate::exec::logical::{
+	BatchRetry, ColumnEffects, columns_may_run_column_major, is_effect_free,
+	may_signal_control_flow,
+};
 use crate::exec::operators::{
 	Compute, FieldSelection, Project, ProjectValue, Projection, SelectProject,
 	omit_path_is_expressible,
@@ -61,9 +64,9 @@ pub(super) enum ProjectedField {
 		expr_key: String,
 		physical: Arc<dyn crate::exec::PhysicalExpr>,
 		output_name: String,
-		/// Whether the expression as written is effect-free; see
-		/// [`Compute::effect_free_columns`].
-		effect_free: bool,
+		/// What evaluating the expression as written does beyond producing
+		/// its value; see [`Compute::column_major`].
+		effects: ColumnEffects,
 	},
 	/// This field — and therefore the whole SELECT — must use the full
 	/// `Project` operator. The string is a short reason for diagnostics.
@@ -119,10 +122,11 @@ impl<'ctx> Planner<'ctx> {
 				// `ProjectValue` holds one expression, so what this answers is
 				// whether evaluating it again is free, not whether two columns
 				// may be interleaved; see `ProjectValue::repeat_is_free`.
-				let effect_free = is_effect_free(&expr, self.function_registry());
+				let repeat_is_free = is_effect_free(&expr, self.function_registry())
+					|| !may_signal_control_flow(&expr);
 				let expr = self.physical_expr(expr).await?;
 				let mut project = ProjectValue::new(input, expr, omit_fields);
-				if effect_free {
+				if repeat_is_free {
 					project = project.with_repeat_is_free();
 				}
 				Ok(Arc::new(project) as Arc<dyn ExecOperator>)
@@ -145,14 +149,20 @@ impl<'ctx> Planner<'ctx> {
 				let has_wildcard = field_list.iter().any(|f| matches!(f, LogicalField::All));
 
 				// Judged from the expressions as written, before they are
-				// compiled away; see `Project::effect_free_columns`.
-				let effect_free_columns = field_list.iter().all(|field| match field {
-					LogicalField::All => true,
-					LogicalField::Single {
-						expr,
-						..
-					} => is_effect_free(expr, self.function_registry()),
-				});
+				// compiled away; see `Project::column_major`. A projection
+				// passes a failed column on as the batch's, so it repeats
+				// nothing.
+				let column_effects: Vec<ColumnEffects> = field_list
+					.iter()
+					.map(|field| match field {
+						LogicalField::All => ColumnEffects::INERT,
+						LogicalField::Single {
+							expr,
+							..
+						} => ColumnEffects::of(expr, self.function_registry()),
+					})
+					.collect();
+				let column_major = columns_may_run_column_major(&column_effects, BatchRetry::None);
 
 				let mut field_selections = Vec::with_capacity(field_list.len());
 
@@ -199,8 +209,8 @@ impl<'ctx> Planner<'ctx> {
 				};
 
 				let mut project = Project::new(input, field_selections, omit_fields, has_wildcard);
-				if effect_free_columns {
-					project = project.with_effect_free_columns();
+				if column_major {
+					project = project.with_column_major();
 				}
 				Ok(Arc::new(project) as Arc<dyn ExecOperator>)
 			}
@@ -250,10 +260,11 @@ impl<'ctx> Planner<'ctx> {
 				// `ProjectValue` holds one expression, so what this answers is
 				// whether evaluating it again is free, not whether two columns
 				// may be interleaved; see `ProjectValue::repeat_is_free`.
-				let effect_free = is_effect_free(&expr, self.function_registry());
+				let repeat_is_free = is_effect_free(&expr, self.function_registry())
+					|| !may_signal_control_flow(&expr);
 				let expr = self.physical_expr(expr).await?;
 				let mut project = ProjectValue::new(input, expr, omit_fields);
-				if effect_free {
+				if repeat_is_free {
 					project = project.with_repeat_is_free();
 				}
 				Ok(Arc::new(project) as Arc<dyn ExecOperator>)
@@ -345,14 +356,14 @@ impl<'ctx> Planner<'ctx> {
 							expr_key,
 							physical,
 							output_name,
-							effect_free,
+							effects,
 						} => {
 							let internal_name = simulated_registry.register_physical(
 								expr_key.clone(),
 								Arc::clone(physical),
 								ComputePoint::Project,
 								Some(output_name.clone()),
-								*effect_free,
+								*effects,
 							);
 							simple_source_fields.contains(&internal_name)
 						}
@@ -406,7 +417,7 @@ impl<'ctx> Planner<'ctx> {
 							expr_key,
 							physical,
 							output_name,
-							effect_free,
+							effects,
 						} => {
 							Self::register_and_push_projection(
 								&mut projections,
@@ -414,7 +425,7 @@ impl<'ctx> Planner<'ctx> {
 								expr_key,
 								physical,
 								output_name,
-								effect_free,
+								effects,
 							);
 						}
 						ProjectedField::Fallback(reason) => {
@@ -445,8 +456,8 @@ impl<'ctx> Planner<'ctx> {
 						.map(|(name, expr)| (crate::val::Strand::new(name), expr))
 						.collect();
 					let mut compute = Compute::new(input, compute_fields);
-					if registry.point_is_effect_free(ComputePoint::Project) {
-						compute = compute.with_effect_free_columns();
+					if registry.point_may_run_column_major(ComputePoint::Project) {
+						compute = compute.with_column_major();
 					}
 					Arc::new(compute) as Arc<dyn ExecOperator>
 				} else {
@@ -513,8 +524,8 @@ impl<'ctx> Planner<'ctx> {
 				physical,
 				output_name,
 				// Judged from the expression as written; see
-				// `Compute::effect_free_columns`.
-				effect_free: is_effect_free(expr, self.function_registry()),
+				// `Compute::column_major`.
+				effects: ColumnEffects::of(expr, self.function_registry()),
 			})
 		} else {
 			if let Some(field_name) = physical.try_simple_field() {
@@ -532,8 +543,8 @@ impl<'ctx> Planner<'ctx> {
 				physical,
 				output_name: output_path.name(),
 				// Judged from the expression as written; see
-				// `Compute::effect_free_columns`.
-				effect_free: is_effect_free(expr, self.function_registry()),
+				// `Compute::column_major`.
+				effects: ColumnEffects::of(expr, self.function_registry()),
 			})
 		}
 	}
@@ -549,14 +560,14 @@ impl<'ctx> Planner<'ctx> {
 		expr_key: String,
 		physical: Arc<dyn crate::exec::PhysicalExpr>,
 		output_name: String,
-		effect_free: bool,
+		effects: ColumnEffects,
 	) {
 		let internal_name = registry.register_physical(
 			expr_key,
 			physical,
 			ComputePoint::Project,
 			Some(output_name.clone()),
-			effect_free,
+			effects,
 		);
 		if internal_name == output_name {
 			projections.push(Projection::Include(output_name.into()));

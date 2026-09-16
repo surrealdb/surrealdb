@@ -659,6 +659,232 @@ pub(crate) fn is_effect_free(expr: &LogicalExpr, registry: &FunctionRegistry) ->
 	effects_of(expr, &Oracle::new(registry)).effect_free()
 }
 
+/// Whether evaluating `expr` can end in `RETURN`, `BREAK` or `CONTINUE`
+/// reaching the caller in place of a value.
+///
+/// An operator that evaluates a column for a whole batch learns only that the
+/// call ended in a signal, not which row raised it, so it evaluates the column
+/// again a row at a time to find out — which repeats whatever the rows it did
+/// reach already did. Where no node in the column can produce a signal at all,
+/// that second evaluation is unreachable, and the column may be evaluated as a
+/// batch however much it dereferences.
+///
+/// The signal comes from a `RETURN` in a body the column encloses, so the
+/// nodes that can carry one are the bare signals themselves and every node
+/// whose body the expression does not contain: a nested statement, a call, a
+/// closure, a method, an applied value. A graph or reference lookup is not
+/// among them — its plan turns a signal reaching the traversal into an error —
+/// and neither is any other path step, operator or literal.
+pub(crate) fn may_signal_control_flow(expr: &LogicalExpr) -> bool {
+	expr.visit(&mut |e| match e {
+		// A signal of its own, or a body the expression does not contain and
+		// so cannot be read for one.
+		LogicalExpr::Break
+		| LogicalExpr::Continue
+		| LogicalExpr::Subquery(_)
+		| LogicalExpr::Call(_)
+		| LogicalExpr::Closure(_)
+		| LogicalExpr::Method {
+			..
+		}
+		| LogicalExpr::Invoke {
+			..
+		}
+		| LogicalExpr::Postfix {
+			..
+		} => ControlFlow::Break(()),
+		// Everything the expression evaluates itself: a value, a read, a
+		// path step, an operator. `Throw` raises rather than signals, and a
+		// lookup's plan turns a signal reaching the traversal into an error.
+		LogicalExpr::Literal(_)
+		| LogicalExpr::Array(_)
+		| LogicalExpr::Set(_)
+		| LogicalExpr::Object(_)
+		| LogicalExpr::RecordId(_)
+		| LogicalExpr::Param(_)
+		| LogicalExpr::Table(_)
+		| LogicalExpr::Constant(_)
+		| LogicalExpr::Field(_)
+		| LogicalExpr::Doc
+		| LogicalExpr::Current
+		| LogicalExpr::Access {
+			..
+		}
+		| LogicalExpr::Index {
+			..
+		}
+		| LogicalExpr::First(_)
+		| LogicalExpr::Last(_)
+		| LogicalExpr::Each(_)
+		| LogicalExpr::Flatten {
+			..
+		}
+		| LogicalExpr::Filter {
+			..
+		}
+		| LogicalExpr::Destructure {
+			..
+		}
+		| LogicalExpr::Optional {
+			..
+		}
+		| LogicalExpr::Lookup {
+			..
+		}
+		| LogicalExpr::Recurse(_)
+		| LogicalExpr::RepeatRecurse(_)
+		| LogicalExpr::Broadcast {
+			..
+		}
+		| LogicalExpr::SetField {
+			..
+		}
+		| LogicalExpr::Prefix {
+			..
+		}
+		| LogicalExpr::Binary {
+			..
+		}
+		| LogicalExpr::If(_)
+		| LogicalExpr::Throw(_) => ControlFlow::Continue(()),
+	})
+	.is_break()
+}
+
+/// Whether evaluating `expr` may raise, judged without the bind pass's
+/// parameter classification: every parameter a bound plan still carries and
+/// that is not answered from the row is taken to be a fetch that may deny the
+/// caller. This is [`plan_may_raise`]'s treatment of the same question, for a
+/// caller holding one expression rather than an operator.
+///
+/// The names answered from the row are `$this`, `$self` and `$parent`. `$value`
+/// is not among them: a layer binds it for the layer's own columns, and this
+/// judges a statement's columns — a projection, a sort key, an aggregate
+/// argument — where it is an ordinary name, so reading it fetches a
+/// `DEFINE PARAM` whose `PERMISSIONS` may deny the caller.
+fn column_may_raise(expr: &LogicalExpr) -> bool {
+	let mut checked: HashSet<String> = HashSet::new();
+	let _ = expr.visit(&mut |e| {
+		if let LogicalExpr::Param(param) = e
+			&& !crate::exec::planner::util::SELECT_ITERATION_PARAMS.contains(&param.as_str())
+		{
+			checked.insert(param.to_string());
+		}
+		ControlFlow::<()>::Continue(())
+	});
+	may_raise(expr, &checked)
+}
+
+/// What an operator does with a column whose batch call failed part-way,
+/// which decides whether column-major evaluation can repeat one.
+///
+/// `evaluate_batch` reports a failure for the batch, not for the row that
+/// caused it, so an operator that needs to know which row it was evaluates
+/// the column again from its first row — repeating whatever the rows it did
+/// reach already did.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum BatchRetry {
+	/// Nothing is repeated: the failure is passed on as the batch's.
+	None,
+	/// The column is evaluated again when the call ended in a signal, so
+	/// that the row signalling `RETURN` yields the value it returned.
+	OnSignal,
+	/// The column is evaluated again on any failure, so that a row whose
+	/// error is ignorable yields `NONE` rather than ending the statement.
+	OnFailure,
+}
+
+/// What [`columns_may_run_column_major`] reads of one column, judged from the
+/// expression as written and carried where the expression itself is not — a
+/// registry holds only the compiled form.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ColumnEffects {
+	/// [`is_effect_free`]: whether the column has an effect to reorder or
+	/// repeat at all.
+	pub(crate) effect_free: bool,
+	/// [`may_signal_control_flow`].
+	pub(crate) may_signal: bool,
+	/// [`column_may_raise`].
+	pub(crate) may_raise: bool,
+}
+
+impl ColumnEffects {
+	/// What a column made of `expr` does.
+	pub(crate) fn of(expr: &LogicalExpr, registry: &FunctionRegistry) -> Self {
+		Self {
+			effect_free: is_effect_free(expr, registry),
+			may_signal: may_signal_control_flow(expr),
+			may_raise: column_may_raise(expr),
+		}
+	}
+
+	/// A column that does nothing and cannot fail: `SELECT *`, whose value
+	/// the row already holds.
+	pub(crate) const INERT: Self = Self {
+		effect_free: true,
+		may_signal: false,
+		may_raise: false,
+	};
+}
+
+/// Whether a batch of rows may be evaluated one column at a time — each
+/// column for the whole batch before the next — rather than a row at a time
+/// with the columns in written order.
+///
+/// A column at a time is the faster shape: it is what lets a column of record
+/// dereferences overlap its rows. What it changes is the order two columns'
+/// effects happen in, and whether a column that failed part-way is evaluated
+/// again; [`is_effect_free`] states which columns have an effect to reorder,
+/// and `retry` what the operator would repeat.
+///
+/// Neither is reachable when **at most one column has effects**:
+///
+/// - With no effectful column there is no effect to reorder or repeat, whatever the columns do
+///   otherwise. This is the shape a projection of plain reads and arithmetic has, and the only one
+///   admitted before.
+/// - With exactly one, there is no second effect for it to reorder against. What remains is that
+///   another column raising could stop it before a row it would have reached in written order, so
+///   the others must be total as well as effect-free; and that the operator could evaluate it
+///   twice, so whatever `retry` repeats on must be out of its reach.
+///
+/// Two effectful columns are declined: `SELECT link.n AS a, other.n AS b`
+/// would report the two fetches in the order the batch ran them rather than
+/// the order the statement writes them.
+///
+/// What this does **not** answer is the order the rows of one column are
+/// evaluated in. A batch call is free to overlap them, and a graph or
+/// reference traversal does: [`crate::exec::fan_out`] is where that decision
+/// lives, and it is gated on the work's [`AccessMode`](crate::exec::AccessMode)
+/// and an empty recursion context, not on anything here. So a column of
+/// traversals derives its targets' `COMPUTED` fields in whatever order the
+/// scheduler runs the rows in, and on a failure the rows already in flight
+/// finish — which is true of a single row's traversal as well, since the graph
+/// scan overlaps the sources within one lookup. Admitting a column to a batch
+/// call subjects it to that contract; it does not create it.
+pub(crate) fn columns_may_run_column_major(columns: &[ColumnEffects], retry: BatchRetry) -> bool {
+	let mut effectful = None;
+	for (i, column) in columns.iter().enumerate() {
+		if column.effect_free {
+			continue;
+		}
+		if effectful.is_some() {
+			return false;
+		}
+		effectful = Some(i);
+	}
+	let Some(effectful) = effectful else {
+		return true;
+	};
+	let column = columns[effectful];
+	let repeat_is_out_of_reach = match retry {
+		BatchRetry::None => true,
+		BatchRetry::OnSignal => !column.may_signal,
+		BatchRetry::OnFailure => !column.may_signal && !column.may_raise,
+	};
+	repeat_is_out_of_reach
+		&& columns.iter().enumerate().all(|(i, c)| i == effectful || !c.may_raise)
+}
+
 /// Whether every row a value source built from `expr` materialises into
 /// itself.
 ///

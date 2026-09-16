@@ -47,12 +47,13 @@ pub struct ProjectValue {
 	/// did reach already did happens again. `false`, the default, evaluates a
 	/// row at a time, which makes each row's effects happen once.
 	///
-	/// The planner answers this with the same `is_effect_free` its siblings
-	/// use, which is stronger than this operator needs: an expression that
-	/// cannot signal `RETURN` is never re-evaluated, so repeating is not on
-	/// the table however effectful it is. Narrowing to that would need a
-	/// predicate the layer does not have yet, and under-approximating it
-	/// duplicates effects, so the stronger answer stands.
+	/// So the planner sets this where the expression has no effect to
+	/// repeat, and also where it cannot signal at all: an expression no
+	/// `RETURN` can reach out of is never evaluated a second time, so
+	/// repeating is not on the table however much it dereferences. That
+	/// second answer is what keeps a graph traversal — effectful, since a
+	/// fetch derives the target's `COMPUTED` fields — on the batch shape its
+	/// rows need to overlap on.
 	pub(crate) repeat_is_free: bool,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,

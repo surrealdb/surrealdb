@@ -98,7 +98,10 @@ mod rules;
 use std::convert::Infallible;
 use std::sync::Arc;
 
-pub(crate) use rules::{and, conjuncts, is_effect_free, is_false, plan_may_raise};
+pub(crate) use rules::{
+	BatchRetry, ColumnEffects, and, columns_may_run_column_major, conjuncts, is_effect_free,
+	is_false, may_signal_control_flow, plan_may_raise,
+};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::FrozenContext;
