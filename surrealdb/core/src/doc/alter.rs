@@ -358,6 +358,17 @@ impl Document {
 	/// field-permission kernel, including its wildcard and array-element
 	/// handling.
 	///
+	/// The operations are walked in order against a copy of the record that
+	/// each one is applied to in turn, and every pointer is judged against that
+	/// copy as it stands when its own operation runs. A patch is a sequence,
+	/// not a set: an earlier operation that inserts into or removes from an
+	/// array moves every later element by one, so a pointer judged against the
+	/// record as it was before the patch names a different value by the time it
+	/// is read — which is enough to walk a restricted field into range of a
+	/// pointer that resolved to nothing when the patch arrived. The reduced
+	/// view is recomputed alongside for the same reason: a `PERMISSIONS FOR
+	/// select` predicate reads the record, so what it permits moves with it.
+	///
 	/// `add` and `change` also read a pointer, but each writes its result back
 	/// to the same path it read, so neither carries a value out of the field it
 	/// came from.
@@ -368,18 +379,17 @@ impl Document {
 		opt: &Options,
 		ops: &Value,
 	) -> Result<()> {
-		// Nothing to enforce when field permissions do not apply to this actor.
-		if !self.reduction_required(ctx, opt)? {
-			return Ok(());
-		}
-		// Collect the pointers that carry a value out of the field they read.
-		// `Value::patch` maps every segment of these to `Part::Field`, so the
-		// same mapping is used here.
-		let pointers: Vec<Vec<Part>> = Operation::value_to_operations(ops.clone())
-			.map_err(Error::InvalidPatch)
-			.map_err(anyhow::Error::new)?
-			.into_iter()
-			.filter_map(|op| match op {
+		/// The pointer an operation reads and then writes somewhere other than
+		/// where it read it, mapped by `Operation::path_to_parts` — the mapping
+		/// `Value::patch` itself uses, so that the location judged here is the
+		/// location the patch reaches. Re-deriving it would let the two drift,
+		/// and a pointer judged at a location the patch does not read enforces
+		/// nothing.
+		///
+		/// Matched exhaustively on purpose: an operation added without being
+		/// classified here would otherwise default to carrying nothing out.
+		fn exposed_read_pointer(op: &Operation) -> Option<Vec<Part>> {
+			let path = match op {
 				Operation::Copy {
 					from,
 					..
@@ -387,27 +397,53 @@ impl Document {
 				| Operation::Move {
 					from,
 					..
-				} => Some(from),
+				} => from,
 				Operation::Test {
 					path,
 					..
-				} => Some(path),
-				_ => None,
-			})
-			.map(|path| path.into_iter().map(Part::Field).collect())
-			.collect();
-		if pointers.is_empty() {
+				} => path,
+				Operation::Add {
+					..
+				}
+				| Operation::Remove {
+					..
+				}
+				| Operation::Replace {
+					..
+				}
+				| Operation::Change {
+					..
+				} => return None,
+			};
+			Some(Operation::path_to_parts(path))
+		}
+		// Nothing to enforce when field permissions do not apply to this actor.
+		if !self.reduction_required(ctx, opt)? {
 			return Ok(());
 		}
-		// Materialise the reduced view, then compare each pointer against it.
-		// The full record is cloned first so the reduced view can be borrowed
-		// mutably without holding a borrow on `self.current`.
-		let full = self.current.doc.as_ref().clone();
-		let reduced = self.reduce_current(stk, ctx, opt).await?.doc.as_ref().clone();
-		for pointer in pointers {
-			if full.pick(&pointer) != reduced.pick(&pointer) {
-				let field = Idiom(pointer);
-				bail!(DocError::PatchPointerNotAllowed(field.to_sql()));
+		let operations = Operation::value_to_operations(ops.clone())
+			.map_err(Error::InvalidPatch)
+			.map_err(anyhow::Error::new)?;
+		// Nothing to enforce when no operation carries a value out of the
+		// location it read, which spares the reduction on the common patch.
+		if !operations.iter().any(|op| exposed_read_pointer(op).is_some()) {
+			return Ok(());
+		}
+		// A copy of the record, advanced one operation at a time so that each
+		// pointer is judged against what its own operation will read.
+		let mut working = self.current.clone();
+		for op in operations {
+			if let Some(pointer) = exposed_read_pointer(&op) {
+				let reduced = self.reduce_to_owned(stk, ctx, opt, &working).await?;
+				if working.doc.as_ref().pick(&pointer) != reduced.doc.as_ref().pick(&pointer) {
+					let field = Idiom(pointer);
+					bail!(DocError::PatchPointerNotAllowed(field.to_sql()));
+				}
+			}
+			// An operation that fails here fails the statement when the patch
+			// is applied for real, so the walk stops and leaves it to report.
+			if working.doc.to_mut().patch(Operation::operations_to_value(vec![op])).is_err() {
+				return Ok(());
 			}
 		}
 		Ok(())

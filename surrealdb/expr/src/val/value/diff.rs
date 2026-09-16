@@ -58,7 +58,11 @@ impl Value {
 						value: b[n].clone(),
 					})
 				}
-				for n in min_len..a.len() {
+				// Descending: the operations apply in order and a `remove`
+				// shifts every later element down, so removing the lowest index
+				// first would leave the indices still to be removed naming
+				// different elements than the ones this diff chose.
+				for n in (min_len..a.len()).rev() {
 					let mut path = path.clone();
 					path.push(n.to_string().into());
 					ops.push(Operation::Remove {
