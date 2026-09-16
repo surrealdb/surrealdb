@@ -246,7 +246,7 @@ InvalidBound	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found samp
 IdiomRecursionLimitExceeded	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Exceeded the idiom recursion limit of 1.' }
 UnsupportedRepeatRecurse	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Tried to use a `@` repeat recurse symbol in a position where it is not supported' }
 RecursionInstructionPlanConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot construct a recursion plan when an instruction is provided' }
-InvalidRecursionTarget	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Expected a record ID during recursive graph traversal, but found `sample`' }
+InvalidRecursionTarget	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Expected a record ID during recursive traversal, but found `sample`' }
 ReferenceTypeConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot use the `REFERENCE` keyword with `TYPE sample`. Specify only a `record` type, or a type containing only records, instead.' }
 ReferenceNestedField	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot use the `REFERENCE` keyword on nested field `sample`. Specify a referencing field at the root level instead.' }
 MismatchedFieldTypes	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot set field `sample` with type `sample` as it mismatched with field `sample` with type `sample`' }

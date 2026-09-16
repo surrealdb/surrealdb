@@ -302,8 +302,8 @@ pub(crate) enum Error {
 	#[error("Cannot construct a recursion plan when an instruction is provided")]
 	RecursionInstructionPlanConflict,
 
-	/// Encountered a non-record-id value during recursive graph traversal
-	#[error("Expected a record ID during recursive graph traversal, but found `{value}`")]
+	/// Encountered a non-record-id value during recursive traversal
+	#[error("Expected a record ID during recursive traversal, but found `{value}`")]
 	InvalidRecursionTarget {
 		value: String,
 	},
