@@ -1379,6 +1379,47 @@ impl Transaction {
 		Ok(())
 	}
 
+	/// The stored bytes to retry a failed comparison against, or `None` if the
+	/// comparison failed for real.
+	///
+	/// A revisioned value encodes at whatever revision this build declares,
+	/// which need not be the revision the stored value was written at. So a
+	/// guarded write whose check value says exactly what is stored is still
+	/// refused, and a caller that retries such a write retries forever.
+	///
+	/// The stored bytes are normalised through the same decode/encode round trip
+	/// and compared against `want`. Equal normal forms mean the two values say
+	/// the same thing, and the retry then fences on the bytes that are actually
+	/// there, so it stays as atomic as the byte comparison it repeats. Anything
+	/// else leaves the original refusal standing, as a genuine mismatch must:
+	/// a different value, nothing stored, or bytes that will not decode — which
+	/// disagree with `want` as surely as a value that decodes to something else.
+	///
+	/// Called only after a comparison has been refused, so the read it costs is
+	/// paid on the failing path rather than on every guarded write.
+	///
+	/// Both `K::encode_key` and `K::ValueType::kv_encode_value` must be
+	/// deterministic. `want` is a second encoding of the check value the caller
+	/// already encoded once, and the retry re-encodes the key and value the
+	/// first attempt consumed, so an encoder whose output varied between calls
+	/// on one value would compare unequal normal forms and refuse a write that
+	/// should succeed. Nothing reached from these value types encodes an
+	/// unordered collection — `Object` is a `VecMap` — so the property holds
+	/// today, and a value type that breaks it breaks `normalised == want`
+	/// regardless of this retry.
+	async fn stored_bytes_matching<K>(&self, key: &K, want: &[u8]) -> Result<Option<Val>>
+	where
+		K: KVKey + Debug,
+	{
+		let Some(stored) = self.get_raw(key, None).await? else {
+			return Ok(None);
+		};
+		let normalised = K::ValueType::kv_decode_value(&stored, key.value_context())
+			.and_then(|v| v.kv_encode_value())
+			.ok();
+		Ok((normalised.as_deref() == Some(want)).then_some(stored))
+	}
+
 	/// Delete a key from the datastore if the current value matches a
 	/// condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
@@ -1387,10 +1428,27 @@ impl Transaction {
 		K: KVKey + Debug,
 	{
 		self.reserve_write_slot()?;
-		let key = key.encode_key()?;
-		let key_bytes = key.len() as u64;
-		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
-		self.tr.delc(key, chk).await.map_err(Error::from)?;
+		let encoded = key.encode_key()?;
+		let key_bytes = encoded.len() as u64;
+		match chk {
+			// Nothing to fence on, so nothing to re-examine.
+			None => self.tr.delc(encoded, None::<Val>).await.map_err(Error::from)?,
+			Some(chk) => {
+				let want = chk.kv_encode_value()?;
+				// The first attempt hands its bytes over rather than copying them; a
+				// retry re-derives them, on a path that has already paid for a read.
+				match self.tr.delc(encoded, Some(want)).await {
+					Err(e) if matches!(e, KvsError::TransactionConditionNotMet) => {
+						let want = chk.kv_encode_value()?;
+						let Some(stored) = self.stored_bytes_matching(key, &want).await? else {
+							return Err(Error::from(e).into());
+						};
+						self.tr.delc(key.encode_key()?, Some(stored)).await.map_err(Error::from)?
+					}
+					other => other.map_err(Error::from)?,
+				}
+			}
+		}
 		self.metrics.record_del(1, key_bytes);
 		Ok(())
 	}
@@ -1452,10 +1510,27 @@ impl Transaction {
 		K: KVKey + Debug,
 	{
 		self.reserve_write_slot()?;
-		let key = key.encode_key()?;
-		let key_bytes = key.len() as u64;
-		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
-		self.tr.clrc(key, chk).await.map_err(Error::from)?;
+		let encoded = key.encode_key()?;
+		let key_bytes = encoded.len() as u64;
+		match chk {
+			// Nothing to fence on, so nothing to re-examine.
+			None => self.tr.clrc(encoded, None::<Val>).await.map_err(Error::from)?,
+			Some(chk) => {
+				let want = chk.kv_encode_value()?;
+				// The first attempt hands its bytes over rather than copying them; a
+				// retry re-derives them, on a path that has already paid for a read.
+				match self.tr.clrc(encoded, Some(want)).await {
+					Err(e) if matches!(e, KvsError::TransactionConditionNotMet) => {
+						let want = chk.kv_encode_value()?;
+						let Some(stored) = self.stored_bytes_matching(key, &want).await? else {
+							return Err(Error::from(e).into());
+						};
+						self.tr.clrc(key.encode_key()?, Some(stored)).await.map_err(Error::from)?
+					}
+					other => other.map_err(Error::from)?,
+				}
+			}
+		}
 		self.metrics.record_del(1, key_bytes);
 		Ok(())
 	}
@@ -1741,12 +1816,34 @@ impl Transaction {
 		K: KVKey + Debug,
 	{
 		self.reserve_write_slot()?;
-		let key = key.encode_key()?;
-		let val = val.kv_encode_value()?;
-		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
-		let key_bytes = key.len() as u64;
-		let value_bytes = val.len() as u64;
-		self.tr.putc(key, val, chk).await.map_err(Error::from)?;
+		let encoded = key.encode_key()?;
+		let encoded_val = val.kv_encode_value()?;
+		let key_bytes = encoded.len() as u64;
+		let value_bytes = encoded_val.len() as u64;
+		match chk {
+			// Nothing to fence on, so nothing to re-examine.
+			None => self.tr.putc(encoded, encoded_val, None).await.map_err(Error::from)?,
+			Some(chk) => {
+				let want = chk.kv_encode_value()?;
+				// The first attempt hands its bytes over rather than copying them:
+				// it is the path every guarded write takes, and the value can be
+				// large. A retry re-derives them, on a path that has already paid
+				// for a read.
+				match self.tr.putc(encoded, encoded_val, Some(want)).await {
+					Err(e) if matches!(e, KvsError::TransactionConditionNotMet) => {
+						let want = chk.kv_encode_value()?;
+						let Some(stored) = self.stored_bytes_matching(key, &want).await? else {
+							return Err(Error::from(e).into());
+						};
+						self.tr
+							.putc(key.encode_key()?, val.kv_encode_value()?, Some(stored))
+							.await
+							.map_err(Error::from)?
+					}
+					other => other.map_err(Error::from)?,
+				}
+			}
+		}
 		self.metrics.record_put(key_bytes, value_bytes);
 		Ok(())
 	}
@@ -5285,3 +5382,297 @@ impl BucketProvider for Transaction {
 // --------------------------------------------------
 
 impl CatalogProvider for Transaction {}
+
+/// A compare-and-swap must fence on the bytes that are stored.
+///
+/// The guarantee is the same on every backend — the typed layer decides which
+/// bytes reach the byte comparison, and the backend only performs it — so the
+/// in-memory store is enough to cover it.
+///
+/// These live inline rather than in `kvs/tests/` so the `#[revisioned]`
+/// fixtures stay inside a `#[cfg(test)]` module block: `revision-lock` scans
+/// sources rather than compiling them, and would otherwise record two
+/// test-only types in `revision.lock` as though they were stored formats.
+#[cfg(all(test, feature = "kv-mem"))]
+mod compare_swap_tests {
+
+	use anyhow::Result;
+	use revision::revisioned;
+
+	use crate::err::Error;
+	use crate::kvs::LockType::Optimistic;
+	use crate::kvs::TransactionType::{Read, Write};
+	use crate::kvs::{Datastore, Error as KvsError, KVKey, KVValue, impl_kv_value_revisioned};
+
+	/// The key both spellings of the state are stored under. `&str` keys encode to
+	/// their own bytes, so a raw write to this string reaches the same key as
+	/// `StateKey`.
+	const KEY: &str = "/!cas-revision-test";
+
+	/// A stored value as an earlier release wrote it: one field, revision 1.
+	#[revisioned(revision = 1)]
+	#[derive(Clone, Debug, PartialEq)]
+	struct StateV1 {
+		generation: u64,
+	}
+
+	/// The same value after a field was added: revision 2. Decoding the earlier
+	/// revision fills the new field with its default, which is what makes the two
+	/// spellings mean the same thing while encoding differently.
+	#[revisioned(revision = 2)]
+	#[derive(Clone, Debug, PartialEq)]
+	struct StateV2 {
+		generation: u64,
+		#[revision(start = 2)]
+		cursor: Option<u64>,
+	}
+
+	impl_kv_value_revisioned!(StateV1);
+	impl_kv_value_revisioned!(StateV2);
+
+	#[derive(Debug)]
+	struct StateKey;
+
+	impl KVKey for StateKey {
+		type ValueType = StateV2;
+
+		fn encode_key(&self) -> Result<Vec<u8>> {
+			Ok(KEY.as_bytes().to_vec())
+		}
+
+		fn value_context(&self) {}
+	}
+
+	async fn datastore() -> Datastore {
+		Datastore::new("memory").await.expect("an in-memory datastore")
+	}
+
+	/// Whether a failure is the comparison being refused rather than the statement
+	/// failing. The typed layer wraps the backend's refusal in `Error::Kvs`.
+	fn is_condition_not_met(err: &anyhow::Error) -> bool {
+		matches!(
+			err.downcast_ref::<Error>(),
+			Some(Error::Kvs(KvsError::TransactionConditionNotMet))
+		)
+	}
+
+	/// A compare-and-swap must fence on what is stored, not on a re-encoding of it.
+	///
+	/// A revisioned value encodes at whatever revision the running build declares,
+	/// which need not be the one it was stored at. Encoding the check value here
+	/// and comparing those bytes therefore never matches a value an earlier release
+	/// wrote, so the swap cannot succeed however often it is retried — and a caller
+	/// that retries a failed acquisition spins instead of making progress.
+	#[tokio::test]
+	async fn a_swap_matches_a_value_stored_at_an_earlier_revision() {
+		let ds = datastore().await;
+
+		// Exactly what the earlier release left behind.
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		tx.set(
+			&KEY,
+			&StateV1 {
+				generation: 7,
+			}
+			.kv_encode_value()
+			.unwrap(),
+		)
+		.await
+		.unwrap();
+		tx.commit().await.unwrap();
+
+		// This build reads it through the current revision ...
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let current = tx.get(&StateKey, None).await.unwrap().expect("the stored state");
+		assert_eq!(
+			current,
+			StateV2 {
+				generation: 7,
+				cursor: None
+			}
+		);
+
+		// ... and swaps it for the next one, fencing on what it just read.
+		let next = StateV2 {
+			generation: 8,
+			cursor: None,
+		};
+		tx.putc(&StateKey, &next, Some(&current)).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		assert_eq!(tx.get(&StateKey, None).await.unwrap(), Some(next));
+		tx.cancel().await.unwrap();
+	}
+
+	/// Fencing on the stored bytes must not make every swap succeed: a check value
+	/// that disagrees with what is stored still fails, and a swap against a key
+	/// holding nothing fails too.
+	#[tokio::test]
+	async fn a_swap_still_fails_when_the_check_value_disagrees() {
+		let ds = datastore().await;
+
+		// Nothing stored: a swap expecting a value must not create one.
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let absent = StateV2 {
+			generation: 1,
+			cursor: None,
+		};
+		assert!(tx.putc(&StateKey, &absent, Some(&absent)).await.is_err());
+		tx.cancel().await.unwrap();
+
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		tx.putc(
+			&StateKey,
+			&StateV2 {
+				generation: 7,
+				cursor: None,
+			},
+			None,
+		)
+		.await
+		.unwrap();
+		tx.commit().await.unwrap();
+
+		// Stored, but the check value names a different state.
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let wrong = StateV2 {
+			generation: 99,
+			cursor: None,
+		};
+		let next = StateV2 {
+			generation: 8,
+			cursor: None,
+		};
+		assert!(tx.putc(&StateKey, &next, Some(&wrong)).await.is_err());
+		tx.cancel().await.unwrap();
+
+		// A field that only the current revision carries still distinguishes.
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let cursor_set = StateV2 {
+			generation: 7,
+			cursor: Some(3),
+		};
+		assert!(tx.putc(&StateKey, &next, Some(&cursor_set)).await.is_err());
+		tx.cancel().await.unwrap();
+
+		// The value is untouched by any of the failed swaps.
+		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		assert_eq!(
+			tx.get(&StateKey, None).await.unwrap(),
+			Some(StateV2 {
+				generation: 7,
+				cursor: None
+			})
+		);
+		tx.cancel().await.unwrap();
+	}
+
+	/// A stored value that will not decode must fail the *comparison*, not the
+	/// statement.
+	///
+	/// Callers treat the refusal as the benign outcome and anything else as fatal,
+	/// and several exist precisely to tolerate a value an older or newer binary
+	/// wrote — a delete that tolerates a foreign index entry, a session sweep that
+	/// skips what it cannot read. Surfacing a decode error here would escape into
+	/// those callers as a failed statement.
+	#[tokio::test]
+	async fn an_undecodable_stored_value_fails_the_comparison_not_the_statement() {
+		let ds = datastore().await;
+		let chk = StateV2 {
+			generation: 7,
+			cursor: None,
+		};
+
+		for which in ["put", "del", "clr"] {
+			// Bytes no revisioned decode will accept.
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			tx.set(&KEY, &b"not a revisioned value".to_vec()).await.unwrap();
+			tx.commit().await.unwrap();
+
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let e = match which {
+				"put" => tx.putc(&StateKey, &chk, Some(&chk)).await,
+				"del" => tx.delc(&StateKey, Some(&chk)).await,
+				_ => tx.clrc(&StateKey, Some(&chk)).await,
+			}
+			.expect_err("an undecodable value cannot satisfy the check");
+			assert!(
+				is_condition_not_met(&e),
+				"{which}: expected the comparison to be refused, got: {e}"
+			);
+			tx.cancel().await.unwrap();
+
+			// And the bytes are still there, untouched by the refusal.
+			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(
+				tx.get(&KEY, None).await.unwrap().as_deref(),
+				Some(b"not a revisioned value".as_slice()),
+				"{which}: the stored value must survive"
+			);
+			tx.cancel().await.unwrap();
+		}
+	}
+
+	/// The conditional deletes fence the same way, and each is worth covering
+	/// because each reaches the backend through a different method.
+	///
+	/// A delete that cannot match a value an earlier release wrote is the same
+	/// defect wearing different clothes: the caller sees a mismatch where the value
+	/// has not changed, and a retrying one never finishes.
+	#[tokio::test]
+	async fn a_conditional_delete_matches_a_value_stored_at_an_earlier_revision() {
+		let ds = datastore().await;
+
+		let stored = StateV2 {
+			generation: 7,
+			cursor: None,
+		};
+		let wrong = StateV2 {
+			generation: 99,
+			cursor: None,
+		};
+
+		for which in ["del", "clr"] {
+			// Exactly what the earlier release left behind.
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			tx.set(
+				&KEY,
+				&StateV1 {
+					generation: 7,
+				}
+				.kv_encode_value()
+				.unwrap(),
+			)
+			.await
+			.unwrap();
+			tx.commit().await.unwrap();
+
+			// A check value that disagrees still fails, and leaves the value.
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let refused = match which {
+				"del" => tx.delc(&StateKey, Some(&wrong)).await,
+				_ => tx.clrc(&StateKey, Some(&wrong)).await,
+			};
+			assert!(refused.is_err(), "{which}: a disagreeing check value must not delete");
+			tx.cancel().await.unwrap();
+
+			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(tx.get(&StateKey, None).await.unwrap().as_ref(), Some(&stored));
+			tx.cancel().await.unwrap();
+
+			// The value this build reads back does match, across the revisions.
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			match which {
+				"del" => tx.delc(&StateKey, Some(&stored)).await,
+				_ => tx.clrc(&StateKey, Some(&stored)).await,
+			}
+			.unwrap_or_else(|e| panic!("{which}: {e}"));
+			tx.commit().await.unwrap();
+
+			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(tx.get(&StateKey, None).await.unwrap(), None, "{which}: not deleted");
+			tx.cancel().await.unwrap();
+		}
+	}
+}
