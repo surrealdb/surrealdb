@@ -71,12 +71,29 @@ inputs:
     default: ''
   kache-manifest-key:
     description: >-
-      Scopes the build manifest kache warm-prefetches from. Every build variant
-      sharing the bucket needs its own: an unscoped manifest defaults to the
-      target triple, which all of them then overwrite, and prefetch collapses
-      to nothing. The default - the job plus runner platform - separates jobs
-      but cannot see the matrix, so pass this wherever legs of one job compile
-      different features or cross-compile different targets on one runner.
+      Scopes the build manifest kache warm-prefetches from, under the branch
+      segment every key already carries. Every build variant sharing the bucket
+      needs its own: an unscoped manifest defaults to the target triple, which
+      all of them then overwrite, and prefetch collapses to nothing. The
+      default - the job plus runner platform - separates jobs but cannot see
+      the matrix, so pass this wherever legs of one job compile different
+      features or cross-compile different targets on one runner.
+
+      The branch segment is the base branch, not the running ref, so a pull
+      request warms from the manifest its target published rather than from
+      one under a ref that only exists for the merge. Cache entries stay
+      shared across branches - they are content-addressed, so the lines that
+      genuinely build the same dependency reuse each other's - and only the
+      prefetch hint list is per-line.
+    required: false
+    default: ''
+  kache-branch:
+    description: >-
+      Release line the manifest is keyed under. Defaults to the base branch,
+      which is the line being built whenever the workflow ref is that line.
+      Pass it where the two differ: a rolling rebuild dispatched from one line
+      to rebuild another compiles that other line's sources, and would
+      otherwise warm from - and be keyed under - the dispatching line.
     required: false
     default: ''
   kache-version:
@@ -168,7 +185,7 @@ runs:
         s3-prefix: ${{ github.repository }}/kache
         s3-access-key-id: ${{ inputs.kache-access-key-id }}
         s3-secret-access-key: ${{ inputs.kache-secret-access-key }}
-        manifest-key: ${{ inputs.kache-manifest-key || format('{0}-{1}-{2}', inputs.cache-key || github.job, runner.os, runner.arch) }}
+        manifest-key: ${{ format('{0}/{1}', inputs.kache-branch || github.base_ref || github.ref_name, inputs.kache-manifest-key || format('{0}-{1}-{2}', inputs.cache-key || github.job, runner.os, runner.arch)) }}
         cache-dir: ${{ inputs.kache-cache-dir || format('{0}/kache', runner.temp) }}
         # The GitHub Actions cache is a fixed 10GB per repository, already spent
         # on the registry caches below. A kache store persisted there would

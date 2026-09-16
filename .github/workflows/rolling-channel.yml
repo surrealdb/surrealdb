@@ -159,6 +159,7 @@ jobs:
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
         with:
+          kache-branch: ${{ inputs.branch }}
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -479,6 +480,7 @@ jobs:
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
         with:
+          kache-branch: ${{ inputs.branch }}
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -528,6 +530,7 @@ jobs:
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
         with:
+          kache-branch: ${{ inputs.branch }}
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -675,6 +678,7 @@ jobs:
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
         with:
+          kache-branch: ${{ inputs.branch }}
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -800,6 +804,7 @@ jobs:
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
         with:
+          kache-branch: ${{ inputs.branch }}
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
