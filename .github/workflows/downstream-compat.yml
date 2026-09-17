@@ -300,6 +300,22 @@ jobs:
         with:
           tools: protoc
 
+      # The downstream's `envtest` crate binds a Go implementation through
+      # rust2go, and that crate's build script shells out to `go build`. No
+      # engine crate needs Go, so the runner image ships none and the downstream
+      # unit suite aborts in that build script without this.
+      #
+      # The version here is a starting point, not a requirement to keep in step
+      # with the downstream: the two steps that run the build script set
+      # `GOTOOLCHAIN=auto`, so the `go` command honours the `go`/`toolchain`
+      # directives in the downstream's own `go.mod` and fetches a newer toolchain
+      # when it asks for one.
+      - name: Install Go for the downstream build
+        if: steps.preflight.outputs.configured == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # (Actions must be pinned by commit hash) v7.0.0
+        with:
+          go-version: '1.25'
+
       # The downstream pulls in surrealdb-librocksdb-sys (the rust-rocksdb fork)
       # with its `cloud`+`aws` cargo features — from the downstream's own
       # dependency graph, not this engine (this engine's rocksdb is the crates.io
@@ -595,12 +611,29 @@ jobs:
       - name: Build downstream (cargo check)
         if: steps.preflight.outputs.configured == 'true'
         working-directory: downstream
-        run: cargo check --workspace --exclude s7b-operator --exclude s7b-operator-e2e
+        # `actions/setup-go` exports `GOTOOLCHAIN=local` for every later step,
+        # which turns the installed version into a ceiling: a `go.mod` asking for
+        # a newer one fails with `go.mod requires go >= …` instead of fetching
+        # it. Set here rather than on that step, whose own `env` would not reach
+        # this one, and at step level so it takes precedence over the export.
+        env:
+          GOTOOLCHAIN: auto
+        # The operator crates are excluded by name, and cargo only *warns* when an
+        # excluded name matches nothing — so a rename in the downstream silently
+        # puts them back in the build. They were `s7b-operator*` and are now
+        # `surrealdb-operator*`; check that warning if this lane starts running
+        # tests it should not.
+        run: cargo check --workspace --exclude surrealdb-operator --exclude surrealdb-operator-e2e
 
       - name: Test downstream (unit suite)
         if: steps.preflight.outputs.configured == 'true'
         working-directory: downstream
-        run: cargo nextest run --workspace --exclude surrealdb-integration --exclude s7b-operator --exclude s7b-operator-e2e
+        env:
+          GOTOOLCHAIN: auto
+        # Same naming caveat as the step above. The operator crates drive a real
+        # Kubernetes API through envtest and need a kubeconfig this runner has no
+        # cluster for, so they are not part of the compatibility signal.
+        run: cargo nextest run --workspace --exclude surrealdb-integration --exclude surrealdb-operator --exclude surrealdb-operator-e2e
 
       - name: kache stats
         if: ${{ always() && steps.preflight.outputs.configured == 'true' }}
