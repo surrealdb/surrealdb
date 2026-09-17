@@ -36,6 +36,7 @@ mod param;
 mod query;
 mod relate;
 mod remove;
+mod round_trip;
 mod select;
 mod sequence;
 mod table;

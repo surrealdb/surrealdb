@@ -13,6 +13,13 @@ pub enum Output {
 	Json(Vec<u8>),
 	Cbor(Vec<u8>),
 	Flatbuffers(Vec<u8>),
+	/// Raw bytes, for a request that negotiated `application/octet-stream`.
+	///
+	/// That content type carries no structure, so what goes in it has to be
+	/// decodable without a schema — UTF-8 text, in practice. It exists so a
+	/// handler answering such a request does not have to switch to another
+	/// content type to say anything at all.
+	OctetStream(Vec<u8>),
 }
 impl Output {
 	// All these methods should not be used.
@@ -71,6 +78,10 @@ impl IntoResponse for Output {
 			}
 			Output::Flatbuffers(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationFlatbuffers))], v)
+					.into_response()
+			}
+			Output::OctetStream(v) => {
+				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationOctetStream))], v)
 					.into_response()
 			}
 			Output::None => StatusCode::OK.into_response(),

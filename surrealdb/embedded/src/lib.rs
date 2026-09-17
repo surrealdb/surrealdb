@@ -255,10 +255,18 @@ impl EmbeddedEngine {
 	}
 
 	/// Imports SurrealQL into the default session's database.
+	///
+	/// An import is not transactional: each statement commits on its own and
+	/// execution carries on past a failure. So the `?` above reports only a
+	/// whole-query failure — a parse error — and the per-statement outcomes
+	/// have to be read out of the results, or a half-applied import returns
+	/// `Ok` and the caller is told a restore succeeded that did not.
 	pub async fn import(&self, sql: &str) -> Result<()> {
 		let session = self.default_session();
 		let session = session.read().await;
-		self.kvs.import(sql, &session).await?;
+		for result in self.kvs.import(sql, &session).await? {
+			result.result?;
+		}
 		Ok(())
 	}
 

@@ -280,6 +280,9 @@ pub(crate) async fn define_access_statement_compute(
 	// Compute the definition
 	let definition =
 		crate::legacy::define_access_statement_to_definition(this, stk, ctx, opt, doc).await?;
+	// A redacted key is refused wherever it came from, before any base-specific
+	// handling, because a restore reaches all three the same way.
+	define_access_statement_reject_redacted(&definition)?;
 	// Check the statement type
 	match &this.base {
 		Base::Root => {
@@ -422,6 +425,57 @@ pub(crate) fn define_access_statement_uses_es512(access_type: &catalog::AccessTy
 		}
 		catalog::AccessType::Bearer(bearer) => jwt_uses_es512(&bearer.jwt),
 	}
+}
+
+/// Whether any symmetric key in this access is the redaction placeholder.
+///
+/// [`catalog::schema::REDACTED`] is what every surface that renders an access
+/// substitutes for its keys, export included. Such text is executable
+/// SurrealQL, so replaying it defines an access whose signing secret is a
+/// string published in the dump, in `INFO FOR DB`, in logs and in this
+/// repository — one anyone can mint tokens with.
+fn define_access_statement_uses_redacted_key(access_type: &catalog::AccessType) -> bool {
+	fn jwt_is_redacted(jwt: &catalog::JwtAccess) -> bool {
+		if let catalog::JwtAccessVerify::Key(ref ver) = jwt.verify
+			&& ver.key == catalog::schema::REDACTED
+		{
+			return true;
+		}
+		if let Some(ref iss) = jwt.issue
+			&& iss.key == catalog::schema::REDACTED
+		{
+			return true;
+		}
+		false
+	}
+
+	match access_type {
+		catalog::AccessType::Jwt(jwt) => jwt_is_redacted(jwt),
+		catalog::AccessType::Record(rec) => {
+			jwt_is_redacted(&rec.jwt)
+				|| rec.bearer.as_ref().is_some_and(|b| jwt_is_redacted(&b.jwt))
+		}
+		catalog::AccessType::Bearer(bearer) => jwt_is_redacted(&bearer.jwt),
+	}
+}
+
+/// Refuses an access whose key is the redaction placeholder.
+///
+/// A dump renders its accesses redacted, so restoring one defines an access
+/// that verifies tokens anyone can forge. Refused rather than accepted, because
+/// an access that fails to restore is a named per-statement failure an operator
+/// can act on, where one that restores with a published key is a silent
+/// authentication bypass. The refusal applies to a literal typed by hand as
+/// well: no caller has a reason to name this string as a secret.
+pub(crate) fn define_access_statement_reject_redacted(
+	definition: &catalog::AccessDefinition,
+) -> Result<()> {
+	if define_access_statement_uses_redacted_key(&definition.access_type) {
+		bail!(ExecError::AccessRedactedKey {
+			ac: definition.name.to_string(),
+		});
+	}
+	Ok(())
 }
 
 /// Check if the access definition uses ES512, which is not currently supported.

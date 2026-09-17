@@ -127,24 +127,39 @@ pub struct ParserSettings {
 	/// Arrays also count towards objects. So `[{foo: [] }]` would be 3 deep.
 	/// Type annotation nesting depth (e.g. `array<option<array<int>>>` in
 	/// `DEFINE FIELD TYPE`, cast expressions, etc.) also counts against this limit.
+	///
+	/// This is the budget a bracketed level is charged to, and the only one
+	/// that bounds how deeply a query's text may nest collections — together
+	/// with `expr_recursion_limit`, which the pratt parser charges for the same
+	/// level, so the effective ceiling is the smaller of the two less the
+	/// framing the enclosing statement contributes. An object entry's value, an
+	/// array element and a set element re-enter the expression parser without
+	/// charging `query_recursion_limit`, because that budget bounds statement
+	/// nesting and a collection literal is not a statement.
 	pub object_recursion_limit: usize,
 	/// Disallow a query from being deeper than the give limit.
 	/// A query recurses when a statement contains another statement within
 	/// itself. Examples are subquery and blocks like block statements and if
 	/// statements and such.
+	///
+	/// A collection literal is not one of those, so it is charged to
+	/// `object_recursion_limit` instead and this budget does not bound how
+	/// deeply a query's text may nest objects and arrays. A parenthesised
+	/// expression is charged here, being the same re-entry a subquery is.
 	pub query_recursion_limit: usize,
 	/// Disallow an expression tree from being deeper than the given limit.
 	///
-	/// Unlike `query_recursion_limit` and `object_recursion_limit`, which only
-	/// bound bracketed/statement nesting, this bounds the depth of the operator
-	/// tree built by the pratt parser. Left-associative infix spines (e.g.
-	/// `1 + 1 + 1 + ...`), prefix chains (e.g. `!!!...x`) and postfix chains are
-	/// parsed iteratively/recursively without consuming the other budgets, so
-	/// without this limit a flat chain of operators in the query text builds an
-	/// arbitrarily deep `Expr` tree. That tree is later walked recursively (its
-	/// `Drop`, `ToSql`, and the `sql::Expr -> expr::Expr` lowering all recurse
-	/// once per node), overflowing the call stack on long enough chains — a
-	/// denial of service reachable from query text alone.
+	/// This bounds the depth of the operator tree built by the pratt parser,
+	/// and is charged once per node — including once per bracketed level,
+	/// which charges `object_recursion_limit` alongside it. What it bounds that
+	/// the other budgets do not is flat operator chains: left-associative infix spines
+	/// (e.g. `1 + 1 + 1 + ...`), prefix chains (e.g. `!!!...x`) and postfix
+	/// chains consume neither of the other budgets, so without this limit a
+	/// flat chain of operators in the query text builds an arbitrarily deep
+	/// `Expr` tree. That tree is later walked recursively (its `Drop`,
+	/// `ToSql`, and the `sql::Expr -> expr::Expr` lowering all recurse once
+	/// per node), overflowing the call stack on long enough chains — a denial
+	/// of service reachable from query text alone.
 	pub expr_recursion_limit: usize,
 	/// Whether the files feature is enabled
 	pub files_enabled: bool,
@@ -212,6 +227,62 @@ impl ParserSettings {
 		surrealism_enabled: true,
 		json_string_escapes: false,
 	};
+
+	/// Settings for reading back a value this engine stored, in the SurrealQL
+	/// an export renders it as — `INSERT [ { … } ];`.
+	///
+	/// `value_depth` is the deepest value the storage layer accepts, the cap
+	/// enforced on every record encode. Deriving the parser's ceiling from it
+	/// is what makes an export importable: a value that was legal to write is
+	/// legal to read back, so the two ends cannot drift apart into an export
+	/// the importer rejects.
+	///
+	/// That guarantee covers a dump's record values, and only those. A dump's
+	/// other half is catalog definition text — a stored permission, a view's
+	/// `AS SELECT`, a computed field, an idiom — which is re-parsed at
+	/// [`Self::STORED_TEXT`], a strictly higher ceiling. A definition stored at
+	/// a depth between the two is rendered into a dump this profile then
+	/// refuses. Raising this ceiling to meet `STORED_TEXT` would close that,
+	/// at the cost of admitting a deeper statement tree on every import,
+	/// including the embedded targets whose stack is smallest.
+	///
+	/// All three budgets take the same number because a bracketed level is
+	/// charged to the object budget and the expression budget alike, and the
+	/// statement framing around a record is charged to the query budget — see
+	/// [`ParserSettings::object_recursion_limit`]. The
+	/// margin above `value_depth` covers the framing an export wraps a record
+	/// in — the `INSERT` array and the statement expression around it — with
+	/// room to spare, so that framing can change without capping the round
+	/// trip again.
+	///
+	/// Like [`Self::STORED_TEXT`], the ceiling is bounded and independent of
+	/// live configuration, and for the same reason: parsing recurses on a
+	/// heap-allocated `reblessive` stack, but the `sql -> expr` lowering that
+	/// follows, `ToSql`, and the value's own `Drop` recurse on the call stack,
+	/// where exhaustion is a SIGSEGV rather than an error. Callers pass a
+	/// compile-time constant, so no configuration can put a value in storage
+	/// that this ceiling cannot read back.
+	///
+	/// Unlike [`Self::STORED_TEXT`] the grammar gates are left off. Import
+	/// text is a fresh statement at the query boundary rather than text this
+	/// engine previously rendered, so it is subject to the experimental-syntax
+	/// gates; callers set `files_enabled` and `surrealism_enabled` from the
+	/// live capabilities.
+	pub const fn for_value_depth(value_depth: usize) -> Self {
+		// Framing allowance, well above the two levels an export's
+		// `INSERT [ … ];` actually adds.
+		let limit = value_depth + 16;
+		ParserSettings {
+			legacy_strands: false,
+			flexible_record_id: true,
+			object_recursion_limit: limit,
+			query_recursion_limit: limit,
+			expr_recursion_limit: limit,
+			files_enabled: false,
+			surrealism_enabled: false,
+			json_string_escapes: false,
+		}
+	}
 
 	pub fn default_with_experimental(enabled: bool) -> Self {
 		ParserSettings {
@@ -730,5 +801,200 @@ impl StatementStream {
 				Err(e.render_on_bytes(slice).offset_location(self.line_offset, self.col_offset))
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod settings_tests {
+	use super::ParserSettings;
+	use crate::parse_with_settings;
+
+	/// `depth` nested object literals, wrapped in the smallest statement that
+	/// can hold one.
+	fn nested_object_query(depth: usize) -> String {
+		format!("RETURN {}1{};", "{ l: ".repeat(depth), " }".repeat(depth))
+	}
+
+	fn parses(source: &str, settings: ParserSettings) -> bool {
+		parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
+			parser.parse_query(stk).await
+		})
+		.is_ok()
+	}
+
+	/// A bracketed level is charged to the object budget and to the expression
+	/// budget, and not to the query budget.
+	///
+	/// The query budget bounds statement nesting — a subquery, a block, an `IF`
+	/// — and a collection literal is none of those. Charging it here as well
+	/// would leave the smaller of the two bounding collection nesting, so the
+	/// documented object limit would not be the one a query meets. Each budget is
+	/// squeezed in turn with the other two generous, so a rejection can only come
+	/// from the budget under test.
+	#[test]
+	fn a_bracketed_level_is_charged_to_the_collection_budgets() {
+		const GENEROUS: usize = 1000;
+		const DEPTH: usize = 20;
+
+		let source = nested_object_query(DEPTH);
+		let generous = ParserSettings {
+			object_recursion_limit: GENEROUS,
+			query_recursion_limit: GENEROUS,
+			expr_recursion_limit: GENEROUS,
+			..Default::default()
+		};
+		assert!(parses(&source, generous.clone()), "all three budgets clear the nesting");
+
+		for (budget, settings) in [
+			(
+				"object",
+				ParserSettings {
+					object_recursion_limit: DEPTH - 1,
+					..generous
+				},
+			),
+			(
+				"expression",
+				ParserSettings {
+					expr_recursion_limit: DEPTH - 1,
+					..generous
+				},
+			),
+		] {
+			assert!(
+				!parses(&source, settings),
+				"the {budget} budget is charged once per bracketed level"
+			);
+		}
+
+		// Squeezed far below the nesting, not merely to `DEPTH - 1`, so this
+		// cannot pass on an off-by-one in what the statement frame costs.
+		assert!(
+			parses(
+				&source,
+				ParserSettings {
+					query_recursion_limit: 4,
+					..generous
+				}
+			),
+			"a collection literal must not be charged to the statement-nesting budget"
+		);
+
+		// The budget still bounds what it is for: a block is a statement holding
+		// statements, and nesting one is charged here.
+		let blocks = format!("RETURN {}1{};", "{ ".repeat(DEPTH), " }".repeat(DEPTH));
+		assert!(parses(&blocks, generous.clone()), "the fixture parses when nothing is squeezed");
+		assert!(
+			!parses(
+				&blocks,
+				ParserSettings {
+					query_recursion_limit: DEPTH - 1,
+					..generous
+				}
+			),
+			"nested blocks are charged to the statement-nesting budget"
+		);
+	}
+
+	/// The default profile's collection nesting is the documented object limit,
+	/// not some smaller budget that binds first.
+	///
+	/// The ceiling a query meets is the one an operator reads in the settings. A
+	/// second budget charged for the same level would silently move it, which is
+	/// what this fixes in place.
+	#[test]
+	fn the_default_profile_nests_collections_to_its_object_limit() {
+		let settings = ParserSettings::default();
+		let limit = settings.object_recursion_limit;
+		// The statement frame costs a level or two, so the assertion is that the
+		// ceiling tracks the object limit rather than sitting at some unrelated
+		// number far below it.
+		assert!(
+			parses(&nested_object_query(limit - 4), settings.clone()),
+			"the default profile rejects collection nesting well inside its object limit of {limit}"
+		);
+		assert!(
+			!parses(&nested_object_query(limit + 1), settings),
+			"the default profile accepts collection nesting past its object limit of {limit}"
+		);
+	}
+
+	/// A set's first element is bounded by the query budget and its later
+	/// elements by the object budget, so the ceiling depends on which position
+	/// the nesting sits in.
+	///
+	/// `{ … , 0 }` and `{ 0, … }` hold the same value, and this pins that they do
+	/// not parse to the same depth. A set is only told apart from a block by the
+	/// token after its first expression, so that expression is charged before
+	/// which budget applies is known, and it is charged as a block's statement —
+	/// the reading that keeps block nesting bounded by the smaller budget, since
+	/// a block's depth is paid for on the call stack when the tree is lowered and
+	/// dropped.
+	///
+	/// This is a pin on current behaviour, not an endorsement: resolving it means
+	/// settling the set/block ambiguity before the first element is parsed.
+	#[test]
+	fn a_sets_first_element_is_bounded_by_the_statement_budget() {
+		/// Builds `{ <nested>, 0 }` when `first`, else `{ 0, <nested> }`.
+		fn nested_set_query(depth: usize, first: bool) -> String {
+			let mut set = "1".to_string();
+			for _ in 0..depth {
+				set = if first {
+					format!("{{ {set}, 0 }}")
+				} else {
+					format!("{{ 0, {set} }}")
+				};
+			}
+			format!("RETURN {set};")
+		}
+
+		let settings = ParserSettings::default();
+		let objects = settings.object_recursion_limit;
+		let queries = settings.query_recursion_limit;
+		assert!(queries < objects, "the pin only says something while the budgets differ");
+
+		// Nesting in a later position reaches the object budget.
+		assert!(
+			parses(&nested_set_query(objects - 4, false), settings.clone()),
+			"a set nesting in a later position is bounded below the object limit of {objects}"
+		);
+		// Nesting in the first position is bounded by the query budget instead.
+		assert!(
+			!parses(&nested_set_query(objects - 4, true), settings.clone()),
+			"a set nesting in the first position reached the object limit of {objects}, so the \
+			 asymmetry this pins is gone"
+		);
+		assert!(
+			parses(&nested_set_query(queries - 4, true), settings),
+			"a set nesting in the first position is bounded below the query limit of {queries}"
+		);
+	}
+
+	/// A value nested to the depth a caller declares storable parses back
+	/// under the profile derived from that same depth, in the shape an export
+	/// renders it: `INSERT [ { … } ];`.
+	#[test]
+	fn value_depth_profile_reads_back_the_deepest_value() {
+		const DEPTH: usize = 256;
+
+		// A value at `DEPTH` is a record object with `DEPTH - 1` levels below
+		// it, and the `INSERT` array the exporter wraps it in is one bracket
+		// more than that.
+		let record = format!("{}'leaf'{}", "{ l: ".repeat(DEPTH - 1), " }".repeat(DEPTH - 1));
+		let source = format!("INSERT [ {record} ];");
+		assert!(parses(&source, ParserSettings::for_value_depth(DEPTH)));
+	}
+
+	/// The margin the profile adds is real headroom on every budget, so a
+	/// value at the declared depth cannot sit exactly on a ceiling and be
+	/// pushed past it by the framing around it.
+	#[test]
+	fn value_depth_profile_exceeds_the_declared_depth() {
+		const DEPTH: usize = 256;
+
+		let settings = ParserSettings::for_value_depth(DEPTH);
+		assert!(settings.object_recursion_limit > DEPTH);
+		assert!(settings.query_recursion_limit > DEPTH);
+		assert!(settings.expr_recursion_limit > DEPTH);
 	}
 }

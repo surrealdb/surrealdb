@@ -104,6 +104,7 @@ impl DatabaseDefinition {
 	fn to_sql_definition(&self) -> DefineDatabaseStatement {
 		DefineDatabaseStatement {
 			name: Expr::Idiom(Idiom::field(self.name.clone())),
+			strict: self.strict,
 			comment: self
 				.comment
 				.clone()

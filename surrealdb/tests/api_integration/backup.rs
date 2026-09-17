@@ -203,9 +203,63 @@ relate person:`a`->`friends2\`;\nDEFINE USER IF NOT EXISTS pwned ON ROOT PASSWOR
 	assert_eq!(export_text, export_text_2);
 }
 
+/// A dump carries the current state of each record and has no grammar for a
+/// record's history, so an export cannot honour `versions`. Asking for it fails
+/// the call and writes nothing, rather than producing a dump that silently lacks
+/// the history the caller asked for — a difference only discovered at restore
+/// time, when the history is needed and gone.
+pub async fn export_versions_is_refused(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	let db_name = Ulid::new().to_string();
+	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
+	let _: Option<ApiRecordId> = db
+		.create("user")
+		.content(Record {
+			name: "User 0".to_owned(),
+		})
+		.await
+		.unwrap();
+	drop(permit);
+
+	let export_file = format!("{db_name}-versions.sql");
+	let error = db
+		.export(&export_file)
+		.with_config()
+		.versions(true)
+		.await
+		.expect_err("a versioned export must be refused");
+	assert!(
+		error.to_string().contains("Versioned export is not supported"),
+		"the refusal must say why: {error}"
+	);
+	// The kind is what a caller branches on, and it has to agree with the one the
+	// datastore and the gRPC transport report for this option: the request named
+	// something the format cannot represent, so it is the caller's to change and
+	// not a server defect to retry.
+	assert!(
+		error.is_validation(),
+		"a refused option must read as a validation failure rather than a server defect: {error:?}"
+	);
+	// The refusal happens before the export is dispatched, so no partial dump is
+	// left behind for an operator to mistake for a backup.
+	assert!(
+		tokio::fs::metadata(&export_file).await.is_err(),
+		"a refused export must not leave a file behind"
+	);
+
+	// The same export without the flag still works, so the refusal is the flag's
+	// and not the export path's.
+	db.export(&export_file).await.unwrap();
+	remove_file(&export_file).await.unwrap();
+}
+
 define_include_tests!(backup => {
 	#[tokio::test]
 	export_import,
+
+	#[tokio::test]
+	export_versions_is_refused,
 
 	#[tokio::test]
 	export_with_config,

@@ -1140,14 +1140,39 @@ pub(crate) async fn initialise_datastore(
 /// supplies root users suppresses creation of the CLI bootstrap user, matching
 /// the historical (pre-early-bind) ordering.
 pub(crate) async fn finish_startup(ds: &Datastore, pending: &PendingStartup) -> Result<()> {
-	// Import the startup file, discarding the per-statement results.
+	// Import the startup file.
+	//
+	// An import is not transactional: each statement commits on its own and
+	// execution carries on past a failure, so the result of the call says only
+	// that the dump parsed. Every statement that did not apply is logged here,
+	// because startup proceeds either way and this is the operator's only
+	// account of what the file actually restored.
+	//
+	// The failures are not returned: `retry_with_timeout` retries on `Err`, and
+	// re-running a dump that has already applied part of itself is worse than
+	// booting with the loss reported.
 	if let Some(file) = &pending.import_file {
 		info!(target: TARGET, file = ?file, "Importing data from file");
 		let sql = fs::read_to_string(file)?;
-		retry_with_timeout("startup", pending.timeout, || async {
+		let results = retry_with_timeout("startup", pending.timeout, || async {
 			ds.startup(&sql, &Session::owner()).await
 		})
 		.await?;
+		let failed = results.iter().filter(|r| r.result.is_err()).count();
+		if failed > 0 {
+			error!(
+				target: TARGET,
+				file = ?file,
+				failed,
+				total = results.len(),
+				"Startup import did not apply in full; the database is partially restored"
+			);
+			for result in results.iter() {
+				if let Err(err) = &result.result {
+					error!(target: TARGET, error = %err, "Startup import statement failed");
+				}
+			}
+		}
 	}
 	// Create the CLI-provided root user if no root user exists yet.
 	if let Some((user, pass)) = &pending.credentials {

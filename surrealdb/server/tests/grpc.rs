@@ -574,6 +574,54 @@ async fn a_database_round_trips_through_export_and_import() {
 	assert_eq!(people.len(), 1);
 }
 
+/// An import whose statements fail is reported as a failure, and says that the
+/// statements before the failure have been applied.
+///
+/// The import is not transactional -- each statement commits on its own and
+/// execution carries on past one that fails -- so a caller that reads only the
+/// outcome has to be told both that it failed and that the database now holds
+/// part of the dump. Reporting success here would leave a half-restored
+/// database behind a call that said it worked.
+#[tokio::test]
+async fn an_import_reports_the_statements_it_could_not_apply() {
+	let server = TestServer::start().await;
+	let restored = server.connect_to_database("partial").await;
+
+	let file = tempfile::NamedTempFile::new().expect("temp file");
+	std::fs::write(file.path(), "OPTION IMPORT;\nCREATE applied:1;\nBREAK;\n").expect("write");
+
+	let error = restored.import(file.path()).await.expect_err("the import must not report success");
+	let message = error.to_string();
+	assert!(
+		message.contains("break or continue statement found outside of loop"),
+		"the failing statement is not named: {message}"
+	);
+	assert!(
+		message.contains("have been applied"),
+		"the report does not say the dump is partially applied: {message}"
+	);
+
+	// The statement before the failure really did apply, which is what the
+	// message promises and the reason the call cannot report plain success.
+	let applied: Vec<Value> = restored.select("applied").await.expect("select");
+	assert_eq!(applied.len(), 1, "the statement before the failure should have been applied");
+}
+
+/// A complete import still reports success, so the failure above is read from
+/// the statements rather than from the call having run at all.
+#[tokio::test]
+async fn a_complete_import_reports_success() {
+	let server = TestServer::start().await;
+	let restored = server.connect_to_database("complete").await;
+
+	let file = tempfile::NamedTempFile::new().expect("temp file");
+	std::fs::write(file.path(), "OPTION IMPORT;\nCREATE applied:1;\n").expect("write");
+
+	restored.import(file.path()).await.expect("a complete import must report success");
+	let applied: Vec<Value> = restored.select("applied").await.expect("select");
+	assert_eq!(applied.len(), 1);
+}
+
 /// The version reported over gRPC comes from the handshake rather than a round
 /// trip, so it has to be the real one.
 #[tokio::test]
@@ -958,6 +1006,49 @@ async fn export_compression_is_negotiated_per_client() {
 	}
 	let text = String::from_utf8(body).expect("the export is utf-8");
 	assert!(text.contains("person:1"), "the uncompressed export must still carry the record");
+}
+
+/// A versioned export is refused as the caller's mistake, before the stream
+/// opens.
+///
+/// A dump carries the current state of each record and has no grammar for a
+/// record's history, so no retry of the same request can succeed. The code is
+/// what this asserts: `INTERNAL` reads as a server fault and invites a client to
+/// try again, where `INVALID_ARGUMENT` tells it to change the request. The
+/// refusal has to arrive as a status rather than an error frame, because a
+/// stream that opened has already reported success.
+#[tokio::test]
+async fn a_versioned_export_is_refused_as_an_invalid_argument() {
+	use surrealdb_protocol::proto::rpc::v1 as rpc;
+
+	let server = TestServer::start().await;
+	let db = server.connect_as_root().await;
+	db.query("CREATE person:1 SET name = 'a'").await.expect("send").check().expect("seed");
+
+	let mut client = SurrealDbServiceClient::connect(format!("http://{}", server.address))
+		.await
+		.expect("a raw gRPC client");
+	let context = authenticate(&mut client).await;
+	let status = client
+		.export_surql(rpc::ExportSurqlRequest {
+			context,
+			config: Some(rpc::ExportConfig {
+				versions: true,
+				..Default::default()
+			}),
+		})
+		.await
+		.expect_err("a versioned export must be refused");
+
+	assert_eq!(
+		status.code(),
+		tonic::Code::InvalidArgument,
+		"a request the format cannot represent must not report a server fault: {status:?}"
+	);
+	assert!(
+		status.message().contains("Versioned export is not supported"),
+		"the refusal must say why: {status:?}"
+	);
 }
 
 /// An import streams a whole database up, so it is the request worth
