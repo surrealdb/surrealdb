@@ -35,6 +35,7 @@
 //! The `fixtures.rs` file MAY be updated when types evolve to reflect how old
 //! serialized data should be interpreted by the current code.
 
+mod ann_pending;
 mod catalog_types_test;
 mod compiled_test;
 mod durable_session;

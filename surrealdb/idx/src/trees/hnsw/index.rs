@@ -25,7 +25,9 @@ use crate::trees::hnsw::{
 	ElementId, HnswRecordPendingUpdate, HnswSearch, VectorId, VectorPendingUpdate,
 };
 use crate::trees::knn::KnnResultBuilder;
-use crate::trees::pending::{PendingBacklogReport, PendingScan, PendingScanStats};
+use crate::trees::pending::{
+	PendingBacklogReport, PendingScan, PendingScanStats, take_pending_record_id,
+};
 use crate::trees::vector::{
 	DistanceExt as _, SerializedVector, SharedVector, Vector, serialized_vector_from_value,
 };
@@ -35,6 +37,16 @@ use crate::{
 	IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
 	read_compaction_generation,
 };
+
+/// The record an HNSW pending entry belongs to.
+///
+/// The rule is [`take_pending_record_id`]; this supplies the key decoder it
+/// falls back to.
+fn pending_record_id(key: &[u8], pending: &mut HnswRecordPendingUpdate) -> Result<RecordIdKey> {
+	take_pending_record_id(&mut pending.id, || {
+		Ok(HnswRecordPendingKey::decode_key(key)?.id.into_owned())
+	})
+}
 
 /// Maximum number of pending key/value pairs captured by one compaction plan.
 const HNSW_COMPACTION_MAX_PENDING_KEYS: usize = 1024;
@@ -377,7 +389,7 @@ impl HnswIndex {
 		};
 		let tx = env.tx();
 		let key = self.ikb.new_hr_key(id);
-		let pending = if let Some(mut pending) = tx.get_key(&key, None).await? {
+		let mut pending = if let Some(mut pending) = tx.get_key(&key, None).await? {
 			pending.new_vectors = new_vectors;
 			pending
 		} else {
@@ -385,8 +397,14 @@ impl HnswIndex {
 				doc_id: HnswDocs::get_doc_id(&self.ikb, self.format_version, &tx, id).await?,
 				old_vectors,
 				new_vectors,
+				id: None,
 			}
 		};
+		// Every write stamps the exact id, whichever branch built the entry, so
+		// compaction and lookup never have to recover it from a key that cannot
+		// spell it. Stamping here rather than per branch keeps that true of a
+		// branch added later.
+		pending.id = Some(id.clone());
 		tx.set_key(&key, &pending).await?;
 		Ok(())
 	}
@@ -491,8 +509,9 @@ impl HnswIndex {
 
 	/// Adds record-keyed pending entries to a compaction plan.
 	///
-	/// The record identity is decoded from each key and combined with the
-	/// stored pending value before being coalesced into the plan.
+	/// The record identity comes from the stored pending value, which keeps it
+	/// exactly. The key spells its id under a codec that omits a number's kind,
+	/// so it answers only for an entry written before the value carried one.
 	async fn collect_record_pending_for_plan(
 		env: &dyn IndexEnv,
 		tx: &Transaction,
@@ -511,9 +530,9 @@ impl HnswIndex {
 				if env.is_done(Some(*count)).await? {
 					bail!(EngineError::QueryCancelled)
 				}
-				let hr = HnswRecordPendingKey::decode_key(key)?;
-				let pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
-				let pending = Self::record_pending_to_operation(hr.id.into_owned(), pending);
+				let mut pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
+				let id = pending_record_id(key, &mut pending)?;
+				let pending = Self::record_pending_to_operation(id, pending);
 				// Copied per entry rather than per batch, for the reason given in
 				// `collect_append_pending_for_plan`.
 				if !builder.add(key.to_vec(), value.to_vec(), pending) {
@@ -901,9 +920,9 @@ impl HnswIndex {
 					if ctx.env.is_done(Some(*checkpoints)).await? {
 						bail!(EngineError::QueryCancelled)
 					}
-					let hr = HnswRecordPendingKey::decode_key(key)?;
-					let pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
-					let pending = Self::record_pending_to_operation(hr.id.into_owned(), pending);
+					let mut pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
+					let id = pending_record_id(key, &mut pending)?;
+					let pending = Self::record_pending_to_operation(id, pending);
 					suppress_legacy_candidate(&pending.id, &scan.batch.ids, &positions, &mut live);
 					if let Some(record) = pending.record {
 						suppress_legacy_candidate(
@@ -1104,9 +1123,9 @@ impl HnswIndex {
 					if env.is_done(Some(checkpoints)).await? {
 						bail!(EngineError::QueryCancelled)
 					}
-					let hr = HnswRecordPendingKey::decode_key(key)?;
-					let pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
-					let pending = Self::record_pending_to_operation(hr.id.into_owned(), pending);
+					let mut pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
+					let id = pending_record_id(key, &mut pending)?;
+					let pending = Self::record_pending_to_operation(id, pending);
 					if let VectorId::DocId(doc_id) = &pending.id {
 						all_existing_docs.insert(*doc_id);
 					}

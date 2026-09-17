@@ -20,6 +20,7 @@ use anyhow::Result;
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
+use surrealdb_expr::val::RecordIdKey;
 use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_kvs::value::KVValue;
 
@@ -162,7 +163,12 @@ pub struct DiskAnnPendingState {
 impl_kv_value_revisioned!(DiskAnnPendingState);
 
 /// Coalesced pending vector state for a single DiskANN indexed record.
-#[revisioned(revision = 1)]
+///
+/// `id` is the record the entry belongs to, kept here because the revisioned
+/// encoding keeps it exactly where the entry's key cannot. `None` means an
+/// entry written before this field existed; what reads it, and what the key
+/// can and cannot spell, is `surrealdb_idx::trees::pending`.
+#[revisioned(revision = 2)]
 pub struct DiskAnnRecordPendingUpdate {
 	/// Existing internal document ID, if the record has already reached the graph.
 	pub doc_id: Option<DocId>,
@@ -170,6 +176,9 @@ pub struct DiskAnnRecordPendingUpdate {
 	pub old_vectors: Vec<SerializedVector>,
 	/// Latest vectors that should represent the record after compaction.
 	pub new_vectors: Vec<SerializedVector>,
+	/// The record this entry belongs to, as it is stored.
+	#[revision(start = 2)]
+	pub id: Option<RecordIdKey>,
 }
 
 impl_kv_value_revisioned!(DiskAnnRecordPendingUpdate);

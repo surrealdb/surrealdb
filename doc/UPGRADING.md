@@ -10,7 +10,7 @@ For the release **process** (how releases are cut and shipped), see
 [`RELEASING.md`](./RELEASING.md). For end-user release notes, see
 <https://surrealdb.com/releases>.
 
-## v3.3.0 — datastore version stamp, startup data migrations, the sequence keyspace move, module re-keying, and rollbacks reported as `cancelled`
+## v3.3.0 — datastore version stamp, startup data migrations, the sequence keyspace move, module re-keying, rollbacks reported as `cancelled`, and ANN pending entries at a new revision
 
 **Impact**:
 
@@ -25,6 +25,61 @@ For the release **process** (how releases are cut and shipped), see
   `surrealdb_transaction_total{outcome="success"}` will read lower after the
   upgrade. Nothing about transaction behaviour changes — only how a rollback is
   labelled.
+- An HNSW or DiskANN index that was written by an earlier release while any
+  indexed record's id held a number inside an array or object — `chunk:[42,
+  'intro']`, `doc:{tenant: 1}` — keeps a stale doc-ID mapping for those records.
+  They are missing from kNN results, with no error; the query simply returns
+  fewer rows than the `k` it asked for. This release stops a record being
+  damaged; it does not repair one already damaged, and `REBUILD INDEX` does not
+  repair it either.
+- In a mixed-version cluster, a node on an older release fails kNN queries
+  against an HNSW or DiskANN index once an upgraded node has written to it, and
+  also fails a write to any record that index already has an update queued for,
+  and its own background compaction of that queue. Upgrade every node, or stop
+  both writing to and querying those indexes from the older ones until you
+  have — routing only reads away is not enough.
+
+### Why an older node cannot read or write an ANN index an upgraded node has written
+
+The pending queue an ANN index writes through carries the record each entry
+belongs to, added at revision 2 of `HnswRecordPendingUpdate` and
+`DiskAnnRecordPendingUpdate`. Without it the record id had to be recovered by
+decoding the queue's key, which spells it with the codec used for indexed
+values — that codec omits a number's kind, so an id holding a number inside an
+array or object came back as a spelling no record is stored under, and the kNN
+hit was dropped after consuming a slot in the result (surrealdb/surrealdb#7437).
+
+A kNN query reads the whole uncompacted queue, so it decodes every entry there,
+and a write to an already-queued record decodes that record's entry before
+folding the new vectors into it. An older node cannot decode a revision-2 entry
+and fails, rather than skipping it, in either case — and in the compaction that
+drains the queue. The window opens on the first write an upgraded node makes to the
+index and closes when every node is upgraded; it does not depend on the ids
+involved. Compaction does not end it: an upgraded node's compaction drains the
+revision-2 entries, so an older node may succeed for a while, and the next write
+from an upgraded node re-arms it. Expect the failures to come and go rather than
+to persist, and do not read a quiet interval as the problem having passed.
+
+Nothing durable is harmed: the entries are the queue's own, the upgraded nodes
+read and compact them normally, and an older node recovers as soon as it is
+upgraded.
+
+### Why an index written before the upgrade keeps returning short
+
+The doc-ID mapping those records were given points at a key spelled the way the
+queue could express it, which for an id holding a number is not the key the
+record is stored under. The mapping is *table*-scoped, so it outlives the index
+and the upgrade both: nothing about installing this release replaces it.
+
+A rebuild does not replace it either. `REBUILD INDEX` re-derives *index*-scoped
+state, while the forward lookup returns an existing mapping without checking
+which record the reverse entry names — so the rebuild resolves the same stale
+mapping and those rows stay missing. Re-writing the record takes that same path
+and changes nothing.
+
+Records indexed under such an id after this release are correct. Repairing the
+ones already damaged needs a forward lookup that rejects a mapping whose reverse
+entry names a different record, which this release does not carry.
 
 ### Startup now applies data migrations
 

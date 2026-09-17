@@ -1274,6 +1274,152 @@ mod tests {
 		Ok(())
 	}
 
+	/// An `!hr` entry written before the value carried the record id must still
+	/// resolve to the record its key names.
+	///
+	/// This is the fallback arm, and it is reachable only from a store an
+	/// earlier release wrote: the production write path stamps the id on every
+	/// entry, so nothing else in the suite constructs one without it. The id
+	/// here is a plain string, which the key's codec spells exactly — a
+	/// compound id holding a number is what the codec cannot express, and that
+	/// is the hazard the stamped id removes rather than something this arm can
+	/// recover.
+	#[tokio::test]
+	async fn hnsw_pending_written_before_the_id_field_resolves_through_its_key() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let id = RecordIdKey::String("written-by-an-older-release".into());
+		let vec = new_i16_vec(1, 1);
+		let docids = TableDocIds::new(NamespaceId(1), DatabaseId(2), "tb".into());
+
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			// Exactly what an earlier release left queued: no `id` on the value.
+			let doc_id = docids.resolve_or_assign(&ctx, &id).await?;
+			tx.set_key(
+				&ikb.new_hr_key(&id),
+				&HnswRecordPendingUpdate {
+					doc_id: Some(doc_id),
+					old_vectors: vec![],
+					new_vectors: vec![serialized(&vec)],
+					id: None,
+				},
+			)
+			.await?;
+			tx.commit().await?;
+			h
+		};
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			assert_eq!(h.index_pendings(&ctx).await?, 1);
+			ctx.tx().commit().await?;
+		}
+
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let tx = ctx.tx();
+		let doc_id = docids.get_doc_id(&tx, &id).await?.expect("mapped after compaction");
+		let mapped = docids.get_record_id(&tx, doc_id).await?.expect("reverse mapping");
+		tx.cancel().await?;
+		assert_eq!(
+			storekey::encode_vec(&mapped).unwrap(),
+			storekey::encode_vec(&id).unwrap(),
+			"compacted under {mapped:?}, which is not the key the record is stored under"
+		);
+		Ok(())
+	}
+
+	/// A record id holding a nested number must survive indexing.
+	///
+	/// The pending key `!hr` encodes its id component with `IndexFormat`, which
+	/// deliberately omits a number's `NumberKind`. Decoding it back therefore
+	/// yields `Decimal` whatever the record was keyed with, so `person:[1]` is
+	/// read out of the queue as `person:[1dec]` — an id no record is stored
+	/// under. The KNN hit still consumes a top-k slot and is then dropped when
+	/// the record fetch misses, so the query silently returns fewer rows than
+	/// the k it was asked for.
+	///
+	/// Comparisons here are on encoded record keys, not `==`: `Number`'s
+	/// equality is cross-variant, so `[1dec] == [1]` and an `assert_eq!` on the
+	/// ids alone passes while the records are addressed by different keys.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_compound_record_id_holding_a_number_survives_indexing() -> Result<()> {
+		fn record_key(id: &RecordIdKey) -> Vec<u8> {
+			storekey::encode_vec(id).unwrap()
+		}
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let id = RecordIdKey::Array(vec![Value::Number(Number::Int(1))].into());
+		let vec = new_i16_vec(1, 1);
+		let docids = TableDocIds::new(NamespaceId(1), DatabaseId(2), "tb".into());
+
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			h.index(&ctx, &id, None, Some(vector_content(&vec))).await?;
+			tx.commit().await?;
+			h
+		};
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			assert_eq!(h.index_pendings(&ctx).await?, 1);
+			ctx.tx().commit().await?;
+		}
+
+		// Compaction must map the doc-ID back to the id the record is stored
+		// under, not to a decimalised spelling of it.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let tx = ctx.tx();
+			let doc_id = docids.get_doc_id(&tx, &id).await?.expect("mapped after compaction");
+			let mapped = docids.get_record_id(&tx, doc_id).await?.expect("reverse mapping");
+			assert_eq!(
+				record_key(&mapped),
+				record_key(&id),
+				"doc-ID maps back to {mapped:?}, which is not the key the record is stored under"
+			);
+			tx.cancel().await?;
+		}
+
+		// And the KNN hit must name that same id.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let mut stack = reblessive::tree::TreeStack::new();
+			let pt = vec![Number::Int(1), Number::Int(1)];
+			let res = stack
+				.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None, None).await })
+				.finish()
+				.await?;
+			ctx.tx().cancel().await?;
+			assert!(
+				res.iter().any(|(rid, _, _)| record_key(&rid.key) == record_key(&id)),
+				"KNN must resolve back to {id:?}, got {res:?}"
+			);
+		}
+		Ok(())
+	}
+
 	/// #548 test scaffold: an HNSW index over `n` distinct 2-D vectors
 	/// (record key `i` → vector `(i, i)` for `i` in `1..=n`), optionally
 	/// compacted into the graph. Each record's shared doc-ID is resolved at
