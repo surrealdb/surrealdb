@@ -22,7 +22,7 @@ use std::borrow::Cow;
 
 use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId, Record};
 use surrealdb_expr::expr::dir::Dir;
-use surrealdb_expr::val::{IndexFormat, RecordId, RecordIdKey, Value};
+use surrealdb_expr::val::{IndexFormat, RecordId, RecordIdKey, RecordIdentity, Value};
 use surrealdb_keyspace_macro::keyspace;
 // The generated code refers to the key error by this name.
 use surrealdb_kvs::key::Error as KeyError;
@@ -61,6 +61,11 @@ keyspace! {
 		var       Str = Cow<'k, str>;
 		var       Table = Cow<'k, TableName>;
 		var       Id = Cow<'k, RecordIdKey>;
+		// A record id addressing a record, rather than one standing for an
+		// equality class. It encodes through the default codec under every
+		// format, so a key that pins `IndexFormat` for its indexed values does
+		// not erase the id's type along with them. See `RecordIdentity`.
+		var       Identity = RecordIdentity;
 		var       Bytes = Cow<'k, [u8]>;
 	}
 
@@ -385,6 +390,24 @@ keyspace! {
 					/// key, and record key back to id.
 					doc_key = ["!dd", @, doc_id: DocId] => RecordIdKey;
 
+					/// Record key back to id. The id is an identity, so it is
+					/// spelled with `Identity`: a doc-ID addresses one record, and
+					/// an id encoded under the value codec is not injective — two
+					/// ids differing only in the numeric variant of a nested value
+					/// share a key and so would share a doc-ID.
+					/// `Identity` is owned where the erased spelling below borrows,
+					/// so each lookup clones the id. The keyspace macro's owned
+					/// path is what a newtype can be built through; the cost is one
+					/// clone per doc-ID lookup, against the reads it guards.
+					#[format(IndexFormat)]
+					doc_lookup_identity = ["!dj", @, id: Identity] => DocId;
+
+					/// The same direction with the id encoded under `IndexFormat`.
+					/// Read as a fallback, and written alongside `!dj` so a node
+					/// still on the previous release keeps resolving records this
+					/// one maps. A fallback hit is only trusted when `!dd` agrees
+					/// that the doc-ID names the id that was asked for, which is
+					/// what keeps a collision on this key from being adopted.
 					#[format(IndexFormat)]
 					doc_lookup = ["!di", @, id: Id] => DocId;
 
@@ -446,7 +469,11 @@ keyspace! {
 						term_docs = ["!td", @, term: Str] => roaring::RoaringTreemap;
 
 						/// Legacy forward mapping from a record key to the private
-						/// full-text doc-ID allocated before format version 1.
+						/// full-text doc-ID allocated before format version 1. Its
+						/// id keeps the erased spelling, which is not injective;
+						/// that is left as it is because the band is only reachable
+						/// for an index still at that version, and rebuilding one
+						/// retires it.
 						#[format(IndexFormat)]
 						ft_doc_lookup = ["!id", @, id: Id] => DocId;
 
@@ -581,6 +608,13 @@ keyspace! {
 
 						/// HNSW graph storage.
 						hnsw_docs_state = ["!hd"] => crate::values::hnsw::HnswDocsState;
+						/// Legacy forward mapping from a record key to the private
+						/// doc-ID this index allocated before the space became
+						/// table-scoped. Its id keeps the erased spelling, which is
+						/// not injective: two ids differing only in a nested
+						/// number's variant share this key. That is left as it is
+						/// because the band is only reachable for an index still at
+						/// the old format version, and rebuilding one retires it.
 						#[format(IndexFormat)]
 						hnsw_doc_lookup = ["!hi", @, id: Id] => DocId;
 						hnsw_doc_key = hnsw_docs_state + [doc_id: DocId] => RecordIdKey;
@@ -611,6 +645,13 @@ keyspace! {
 						/// regardless of configuration, so these cannot collide with
 						/// the keys they coexist with when enabled.
 						diskann_docs_state = ["!dd"] => crate::values::diskann::DiskAnnDocsState;
+						/// Legacy forward mapping from a record key to the private
+						/// doc-ID this index allocated before the space became
+						/// table-scoped. Its id keeps the erased spelling, which is
+						/// not injective: two ids differing only in a nested
+						/// number's variant share this key. That is left as it is
+						/// because the band is only reachable for an index still at
+						/// the old format version, and rebuilding one retires it.
 						#[format(IndexFormat)]
 						diskann_doc_lookup = ["!di", @, id: Id] => DocId;
 						diskann_doc_key = diskann_docs_state + [doc_id: DocId]

@@ -1144,10 +1144,14 @@ impl DiskAnnIndex {
 				// instead of one. Usually that costs a pass and nothing else, since
 				// record-level resolution reads the exact id from the value below. The
 				// exception is a legacy entry written after an uncompacted sharded one
-				// for such an id, which only a mixed 3.2/3.4 cluster produces: the probe
-				// misses, so the legacy entry folds alone under the key's spelling and
-				// carries no doc-ID of its own. Fixing it needs the shard, which needs
-				// the exact id, which only the entry it cannot find carries.
+				// for such an id: the probe misses, so the legacy entry folds alone
+				// under the key's spelling and carries no doc-ID of its own. Fixing it
+				// needs the shard, which needs the exact id, which only the entry it
+				// cannot find carries. Only a node old enough to still write the legacy
+				// layout can produce it, and 3.2.0 was the release that stopped — so it
+				// takes a 3.1.x node running alongside this one, not the adjacent skew.
+				// A 3.2+ node writes `!dw`, reads it, and fails on the revision it
+				// cannot decode rather than leaving this behind.
 				let (shard_key, shard_value) = {
 					let shard_key = ikb.new_dw_key(Self::pending_state_shard(&id), &id);
 					let value = tx.get_key_raw(&shard_key, None).await?;

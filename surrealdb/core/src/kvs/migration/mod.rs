@@ -44,6 +44,7 @@
 //! fix authored on a release branch carries that branch's version, so a store
 //! already stamped past it would skip it forever if the stamp gated selection.
 
+mod doc_lookup_identity;
 mod module_keys;
 mod sequence_defs;
 
@@ -100,6 +101,12 @@ pub(crate) static MIGRATIONS: &[Migration] = &[
 		name: "re-key module definitions to their derived name",
 		version: (3, 4, 0),
 		run: |ds| Box::pin(module_keys::rekey_definitions_to_their_derived_name(ds)),
+	},
+	Migration {
+		id: 3,
+		name: "rebuild forward doc-ID mappings under an injective key",
+		version: (3, 4, 0),
+		run: |ds| Box::pin(doc_lookup_identity::rebuild_forward_doc_ids_under_an_injective_key(ds)),
 	},
 ];
 
@@ -398,7 +405,7 @@ fn describe(registry: &[Migration], ids: &[u32]) -> String {
 }
 
 /// Whether a create-only write failed because the key was already there.
-fn already_exists(err: &anyhow::Error) -> bool {
+pub(super) fn already_exists(err: &anyhow::Error) -> bool {
 	matches!(
 		err.downcast_ref::<crate::kvs::Error>(),
 		Some(crate::kvs::Error::TransactionKeyAlreadyExists)

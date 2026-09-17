@@ -35,7 +35,7 @@ use surrealdb_catalog::{
 	IndexId, LATEST_EDGE_VARIANT, Metadata, NamespaceDefinition, NamespaceId, Record, RecordType,
 	StoredConfigDefinition, StoredTableDefinition, TableDefinition, TableId, TableType,
 };
-use surrealdb_expr::val::{RecordId, RecordIdKey, TableName, Value};
+use surrealdb_expr::val::{RecordId, RecordIdKey, RecordIdentity, TableName, Value};
 use surrealdb_kvs::api::{
 	Batch, KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ValVisitor,
 	ValsBatch,
@@ -63,15 +63,16 @@ use crate::key::schema::{
 	BucketKey, BucketPrefix, BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey,
 	CatalogVersionKey, ChangeFeedKey, ChangefeedFenceKey, DatabaseKey, DatabasePrefix,
 	DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot, DbConfigKey, DbConfigPrefix, DbGrantKey,
-	DbGrantPrefix, DbUserKey, DbUserPrefix, DocLookupKey, DocStatsBatchKey, EventKey, EventPrefix,
-	FieldKey, FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, GraphFoldKey,
-	GraphPointerKey, IdxRoot, IndexCompactionKey, IndexCountKey, IndexDefKey, IndexDefPrefix,
-	IndexNameKey, LiveEventsKey, MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey,
-	NamespacePrefix, NodeKey, NodePrefix, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot,
-	NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix, ParamKey, ParamPrefix, ReclaimKey,
-	ReclaimTbPrefix, RecordKey, RootAccessMethodKey, RootAccessMethodPrefix, RootAccessRoot,
-	RootConfigKey, RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey,
-	SequencePrefix, SubscriptionPrefix, TableKey, TablePrefix, TermChangeBatchKey,
+	DbGrantPrefix, DbUserKey, DbUserPrefix, DocKeyKey, DocLookupIdentityKey, DocLookupKey,
+	DocStatsBatchKey, EventKey, EventPrefix, FieldKey, FieldPrefix, ForeignTablePrefix,
+	FunctionKey, FunctionPrefix, GraphFoldKey, GraphPointerKey, IdxRoot, IndexCompactionKey,
+	IndexCountKey, IndexDefKey, IndexDefPrefix, IndexNameKey, LiveEventsKey, MlModelKey,
+	MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix,
+	NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix, NsUserKey,
+	NsUserPrefix, ParamKey, ParamPrefix, ReclaimKey, ReclaimTbPrefix, RecordKey,
+	RootAccessMethodKey, RootAccessMethodPrefix, RootAccessRoot, RootConfigKey, RootGrantKey,
+	RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionPrefix,
+	TableKey, TablePrefix, TermChangeBatchKey,
 };
 use crate::sequences::Sequences;
 #[cfg(any(test, feature = "test-hooks"))]
@@ -84,6 +85,7 @@ use crate::values::catalog_version::CatalogVersion;
 use crate::values::changefeed::Changefeed;
 use crate::values::fulltext::DocLengthAndCount;
 use crate::values::graph::{AdjacencyBlock, BlockEntries, GraphFoldScope};
+use crate::values::ids::DocId;
 use crate::values::index_build::{
 	BuildGeneration, BuildTicket, BuildTicketMutationSeq, IndexBuildPhase, IndexBuildReportStatus,
 };
@@ -2267,10 +2269,15 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<()> {
-		// All three in one transaction, so a strict subset of them surviving in
+		// All of them in one transaction, so a strict subset surviving in
 		// the queue is itself evidence that the reaper has drained and retired
 		// the rest. `Self::claim_tb_doc_ids_reclaim` reads that.
-		for kind in [ReclaimKind::DocLookup, ReclaimKind::DocKey, ReclaimKind::DocPending] {
+		for kind in [
+			ReclaimKind::DocLookup,
+			ReclaimKind::DocLookupIdentity,
+			ReclaimKind::DocKey,
+			ReclaimKind::DocPending,
+		] {
 			let rc = ReclaimKey {
 				kind,
 				ns,
@@ -2298,7 +2305,7 @@ impl Transaction {
 	/// claim and defines the consumer, or the page advances the state and this
 	/// transaction is rejected.
 	///
-	/// Once a cursor exists, or a strict subset of the three entries survives,
+	/// Once a cursor exists, or a strict subset of the entries survives,
 	/// the space may be torn. In that case no entry is cancelled: the caller must
 	/// not define a consumer, and the background task remains able to finish the
 	/// purge in bounded pages. No queued entries means either no reclaim was ever
@@ -2345,22 +2352,27 @@ impl Transaction {
 		cancel: bool,
 	) -> Result<DocIdsReclaimClaim> {
 		// Whether a surviving entry names a prefix already deleted from, and
-		// which of the three kinds are still queued for this table.
+		// which of the kinds are still queued for this table.
 		let mut started = false;
-		let mut queued = [false; 3];
+		let mut queued = [false; 4];
 		// Exact key/value bytes become compare-delete guards if every entry proves
 		// untouched. An unreadable value is retained and blocks adoption.
 		let mut entries = Vec::new();
-		// The queue is keyed by kind first, so a table's three entries are not
+		// The queue is keyed by kind first, so a table's entries are not
 		// contiguous: each kind is scanned over its own `(kind, ns, db, tb)`
 		// range rather than the whole queue being walked to pick them out. Every
 		// key such a range holds is one of this table's by construction, so none
 		// has to be decoded to be attributed. Each range is still read in batches
 		// so an unexpectedly duplicated queue cannot force one unbounded backend
 		// scan result; normal operation has one entry per kind.
-		for (slot, kind) in [ReclaimKind::DocKey, ReclaimKind::DocLookup, ReclaimKind::DocPending]
-			.into_iter()
-			.enumerate()
+		for (slot, kind) in [
+			ReclaimKind::DocKey,
+			ReclaimKind::DocLookup,
+			ReclaimKind::DocLookupIdentity,
+			ReclaimKind::DocPending,
+		]
+		.into_iter()
+		.enumerate()
 		{
 			let mut window = ReclaimTbPrefix {
 				kind,
@@ -7495,9 +7507,71 @@ impl Transaction {
 		self.block_holds_edge(ns, db, tb, &block, id, r, version).await
 	}
 
+	/// Resolves `id` to the doc-ID this table has mapped it to, or `None`.
+	///
+	/// The forward mapping is spelled two ways. `!dj` keys the record id through
+	/// a lossless encoding and is injective. `!di` keys it through `IndexFormat`,
+	/// which erases a number's kind, so every id with the same decimal expansion
+	/// shares one key — `c:[1]` and `c:[1dec]` land on the same one.
+	///
+	/// A hit on either is therefore adopted only when the reverse mapping `!dd`
+	/// agrees that the doc-ID names the record asked for. `!dd` stores the record
+	/// key as a value and keeps it exactly, so it is what decides. Reading `!di`
+	/// without that check resolves one of a colliding pair to the other's doc-ID.
+	///
+	/// `version` selects the snapshot to resolve against: mappings are removed
+	/// when their record is deleted, so a time-travel read must resolve through
+	/// the state its snapshot saw.
+	pub async fn resolve_doc_id_verified(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordIdKey,
+		version: Option<u64>,
+	) -> Result<Option<DocId>> {
+		Ok(self.resolve_doc_id_mapping(ns, db, tb, id, version).await?.map(|(doc_id, _)| doc_id))
+	}
+
+	/// [`Self::resolve_doc_id_verified`], and which direction answered.
+	///
+	/// `true` means the injective key did; `false` means only the type-erased
+	/// one held the mapping, which is what a record mapped by a node on the
+	/// previous release looks like. A caller in a position to write can publish
+	/// the injective mapping for such a record, and one that only reads can
+	/// ignore the flag.
+	pub async fn resolve_doc_id_mapping(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordIdKey,
+		version: Option<u64>,
+	) -> Result<Option<(DocId, bool)>> {
+		let names_this_record = async |doc_id: DocId| -> Result<bool> {
+			let dd = DocKeyKey::new(ns, db, Cow::Borrowed(tb), doc_id);
+			let Some(mapped) = self.get_key(&dd, version).await? else {
+				return Ok(false);
+			};
+			Ok(mapped.addresses_same_record(id))
+		};
+
+		let dj = DocLookupIdentityKey::new(ns, db, Cow::Borrowed(tb), RecordIdentity(id.clone()));
+		if let Some(doc_id) = self.get_key(&dj, version).await?
+			&& names_this_record(doc_id).await?
+		{
+			return Ok(Some((doc_id, true)));
+		}
+		let di = DocLookupKey::new(ns, db, Cow::Borrowed(tb), Cow::Borrowed(id));
+		let Some(doc_id) = self.get_key(&di, version).await? else {
+			return Ok(None);
+		};
+		Ok(names_this_record(doc_id).await?.then_some((doc_id, false)))
+	}
+
 	/// Whether a decoded packed chunk holds the edge `(id -> r)`, matching
 	/// on the full entry identity. Numeric chunks are matched through the
-	/// forward key→doc-id mappings; a key with no mapping was never
+	/// verified forward key→doc-id mapping; a key with no mapping was never
 	/// compressed and cannot be in a numeric chunk.
 	#[allow(clippy::too_many_arguments)]
 	async fn block_holds_edge(
@@ -7521,13 +7595,12 @@ impl Transaction {
 				}))
 			}
 			BlockEntries::Numeric(entries) => {
-				let lookup = DocLookupKey {
-					ns,
-					db,
-					tb: Cow::Borrowed(tb),
-					id: Cow::Borrowed(id),
-				};
-				let Some(edge_id) = self.get_key(&lookup, version).await? else {
+				// Both sides resolve through the verified injective mapping: a
+				// raw `!di` read would answer one of a numerically colliding
+				// pair with the other's doc-ID, reporting the edge absent or
+				// matching the wrong one.
+				let Some(edge_id) = self.resolve_doc_id_verified(ns, db, tb, id, version).await?
+				else {
 					return Ok(false);
 				};
 				let Some(entry) = entries.iter().find(|e| e.edge == edge_id) else {
@@ -7536,13 +7609,9 @@ impl Transaction {
 				if block.targets.get(entry.target_table as usize) != Some(&r.table) {
 					return Ok(false);
 				}
-				let lookup = DocLookupKey {
-					ns,
-					db,
-					tb: Cow::Borrowed(&r.table),
-					id: Cow::Borrowed(&r.key),
-				};
-				Ok(self.get_key(&lookup, version).await? == Some(entry.target))
+				let target =
+					self.resolve_doc_id_verified(ns, db, &r.table, &r.key, version).await?;
+				Ok(target == Some(entry.target))
 			}
 		}
 	}

@@ -27,6 +27,12 @@ For the release **process** (how releases are cut and shipped), see
   They are missing from kNN results, with no error; the query simply returns
   fewer rows than the `k` it asked for. Run `REBUILD INDEX <name> ON <table>`
   once per affected index.
+- In a mixed-version cluster, two records whose ids differ only in the numeric
+  variant of a nested value — `c:[1]` and `c:[1dec]` — share one forward
+  mapping on nodes still on the older release. Removing either leaves the other
+  looking unmapped there, and that node allocates it a second document id.
+  Upgraded nodes are unaffected, and the second id stops being written once
+  every node is upgraded; the records keep their own ids here throughout.
 - In a mixed-version cluster, a node on an older release fails kNN queries
   against an HNSW or DiskANN index once an upgraded node has written to it, and
   also fails a write to any record that index already has an update queued for,

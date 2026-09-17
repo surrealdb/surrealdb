@@ -34,7 +34,7 @@
 //! [`remove`]: TableDocIds::remove
 //! [`RecordIdKey`]: crate::val::RecordIdKey
 
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 
 use anyhow::Result;
 use surrealdb_datastore::values::diskann::DiskAnnDocsState as DiskAnnDocState;
@@ -49,11 +49,11 @@ use surrealdb_kvs::key::KVKey;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::env::IndexEnv;
 use crate::key::schema::{
-	DiskannDocKeyKey, DiskannDocLookupKey, DocKeyKey, DocKeyPrefix, DocLookupKey, DocLookupPrefix,
-	DocPendingPrefix, FtDocKeyKey, FtDocLookupKey, HnswDocKeyKey, HnswDocLookupKey,
-	HnswDocsStateKey,
+	DiskannDocKeyKey, DiskannDocLookupKey, DocKeyKey, DocKeyPrefix, DocLookupIdentityKey,
+	DocLookupIdentityPrefix, DocLookupKey, DocLookupPrefix, DocPendingPrefix, FtDocKeyKey,
+	FtDocLookupKey, HnswDocKeyKey, HnswDocLookupKey, HnswDocsStateKey,
 };
-use crate::val::{RecordIdKey, TableName};
+use crate::val::{RecordIdKey, RecordIdentity, TableName};
 
 /// The table-level document-ID allocator and record ↔ doc-ID mapping store.
 ///
@@ -501,10 +501,74 @@ impl TableDocIds {
 		}
 	}
 
+	/// The injective forward key for `id`.
+	fn identity_key<'a>(&'a self, id: &'a RecordIdKey) -> DocLookupIdentityKey<'a> {
+		DocLookupIdentityKey::new(
+			self.ns,
+			self.db,
+			Cow::Borrowed(&self.tb),
+			RecordIdentity(id.clone()),
+		)
+	}
+
+	/// The type-erased forward key for `id`, whose hit must be verified.
+	fn erased_key<'a>(&'a self, id: &'a RecordIdKey) -> DocLookupKey<'a> {
+		DocLookupKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), Cow::Borrowed(id))
+	}
+
 	/// Returns the doc-ID mapped to `id`, or `None` if the record has no id yet.
+	///
+	/// Reads the injective `!dj` mapping first and falls back to `!di` for a
+	/// record mapped before `!dj` existed. **A hit on either is adopted only when
+	/// the reverse mapping agrees that the doc-ID names this very record.** The
+	/// reverse mapping is the one direction that has always kept a record id
+	/// exactly, so it is what decides.
+	///
+	/// Both directions need the check, for different reasons. `!di` is shared by
+	/// every id with the same decimal expansion, so a hit there may belong to a
+	/// different record. `!dj` is injective, but a node on the previous release
+	/// purges a record by deleting `!di` and `!dd` alone — it has never heard of
+	/// `!dj` — so during a rolling upgrade a hit there may name a doc-ID whose
+	/// record is gone, or one superseded by a mapping that node has since
+	/// written. Adopting either would hand an index a doc-ID that no `!dd`
+	/// resolves, which is the failure this key exists to remove.
+	///
+	/// The `!dj` check costs a second read on the hit path. It can go when the
+	/// migration that drops `!di` does: past that point no node writes a doc-ID
+	/// mapping this one cannot see.
 	pub async fn get_doc_id(&self, tx: &Transaction, id: &RecordIdKey) -> Result<Option<DocId>> {
-		let key = DocLookupKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), Cow::Borrowed(id));
-		tx.get_key(&key, None).await
+		Ok(self.resolve_verified(tx, id).await?.map(|(doc_id, _)| doc_id))
+	}
+
+	/// [`Self::get_doc_id`], and which direction answered.
+	///
+	/// The rule itself is `Transaction::resolve_doc_id_mapping`, which lives
+	/// beside the three bands it reads. This supplies the table it reads them
+	/// for, and reads the current state rather than a snapshot.
+	async fn resolve_verified(
+		&self,
+		tx: &Transaction,
+		id: &RecordIdKey,
+	) -> Result<Option<(DocId, bool)>> {
+		tx.resolve_doc_id_mapping(self.ns, self.db, &self.tb, id, None).await
+	}
+
+	/// Whether the reverse mapping for `doc_id` names `id` itself.
+	///
+	/// Compared on encoded record keys rather than with `==`: a number's equality
+	/// is cross-variant, so `[1dec] == [1]` while the two address different
+	/// records, and an equality check would accept the very collision this
+	/// guards against.
+	async fn mapping_names(
+		&self,
+		tx: &Transaction,
+		doc_id: DocId,
+		id: &RecordIdKey,
+	) -> Result<bool> {
+		let Some(mapped) = self.get_record_id(tx, doc_id).await? else {
+			return Ok(false);
+		};
+		Ok(mapped.addresses_same_record(id))
 	}
 
 	/// Returns the existing doc-ID for `id`, or allocates, persists, and returns a
@@ -531,9 +595,21 @@ impl TableDocIds {
 	/// invariants).
 	pub async fn resolve_or_assign(&self, env: &dyn IndexEnv, id: &RecordIdKey) -> Result<DocId> {
 		let tx = env.tx();
-		let di = DocLookupKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), Cow::Borrowed(id));
-		// Fast path: the record already has an id in this table's space.
-		if let Some(doc_id) = tx.get_key(&di, None).await? {
+		let dj = self.identity_key(id);
+		let di = self.erased_key(id);
+		// Fast path: the record already has an id in this table's space, under
+		// the injective mapping or — for a record mapped before it existed — the
+		// verified type-erased one.
+		if let Some((doc_id, from_identity)) = self.resolve_verified(&tx, id).await? {
+			if !from_identity {
+				// Only the type-erased key had it: a node on the previous release
+				// mapped this record, or it was created after the migration ran.
+				// Publish the injective mapping now, so the record does not go on
+				// depending on a band that is to be dropped once no supported
+				// upgrade path starts below this release. Written once — the next
+				// resolve answers from `!dj` and takes the branch above.
+				tx.set_key(&dj, &doc_id).await?;
+			}
 			return Ok(doc_id);
 		}
 		// Allocate a fresh, monotonic id from the table-scoped sequence.
@@ -547,15 +623,26 @@ impl TableDocIds {
 				env.config().table_doc_ids_batch_size,
 			)
 			.await?;
-		// Claim the forward mapping. `putc` with no expected value only writes if
-		// `!di` is still absent, and reading it arms the write-conflict check.
-		match tx.put_key(&di, &doc_id).await {
+		// Claim the forward mapping on the injective key. `putc` with no expected
+		// value only writes if `!dj` is still absent, and reading it arms the
+		// write-conflict check. The claim is made here rather than on `!di`
+		// because that key is shared by every id with the same decimal expansion:
+		// claiming it would make one such record's arrival deny the others an id
+		// of their own.
+		match tx.put_key(&dj, &doc_id).await {
 			Ok(()) => {
 				// We won the race: publish the reverse mapping too. Written only
 				// after the forward claim succeeds, so a loser leaves no dangling
 				// `!dd` entry to clean up.
 				let dd = DocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), doc_id);
 				tx.set_key(&dd, id).await?;
+				// Mirror the mapping onto the type-erased key so a node still on
+				// the previous release resolves records this one maps. It is a
+				// blind `set`: a colliding id may already own the key, and the
+				// claim above has already decided this record's doc-ID, so a
+				// conditional write here would fail for no reason. Readers on this
+				// release verify a `!di` hit against `!dd` before trusting it.
+				tx.set_key(&di, &doc_id).await?;
 				Ok(doc_id)
 			}
 			// Another index published the mapping first and it is already visible
@@ -564,9 +651,24 @@ impl TableDocIds {
 			// commit-time conflict above plus the caller's retry; this branch
 			// covers the mapping becoming visible between our two reads.)
 			Err(e) if matches!(storage_error(&e), Some(KvsError::TransactionKeyAlreadyExists)) => {
-				tx.get_key(&di, None).await?.ok_or_else(|| {
+				let claimed = tx.get_key(&dj, None).await?.ok_or_else(|| {
 					anyhow::anyhow!("doc-ID mapping missing after a conditional-create conflict")
-				})
+				})?;
+				if self.mapping_names(&tx, claimed, id).await? {
+					// A sibling index resolved the same record first; its id is
+					// the one to share.
+					return Ok(claimed);
+				}
+				// The claim is stale: a node on the previous release purged this
+				// record by deleting `!di` and `!dd` alone, leaving `!dj` behind,
+				// and the reverse mapping no longer names the record. Adopting it
+				// would hand every index a doc-ID that resolves to nothing, so the
+				// speculative id replaces it instead.
+				tx.set_key(&dj, &doc_id).await?;
+				let dd = DocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), doc_id);
+				tx.set_key(&dd, id).await?;
+				tx.set_key(&di, &doc_id).await?;
+				Ok(doc_id)
 			}
 			Err(e) => Err(e),
 		}
@@ -611,19 +713,79 @@ impl TableDocIds {
 	/// Resolves many record keys to their doc-IDs in one batched read,
 	/// preserving input order. Records with no id in this table's space yield
 	/// `None` in their slot. The mirror of [`Self::get_record_ids_batch`] for
-	/// the forward (`!di`) direction.
+	/// the forward (`!dj`) direction.
+	///
+	/// Reaches the same verdict as [`Self::get_doc_id`], for the same reasons:
+	/// a hit is adopted only when the reverse mapping agrees it names the
+	/// record asked for. The check is batched, so verifying costs one read for
+	/// the whole slice rather than one per hit.
 	pub async fn get_doc_ids_batch(
 		&self,
 		tx: &Transaction,
 		ids: &[RecordIdKey],
 	) -> Result<Vec<Option<DocId>>> {
-		let keys: Vec<DocLookupKey<'_>> = ids
-			.iter()
-			.map(|id| {
-				DocLookupKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), Cow::Borrowed(id))
-			})
-			.collect();
-		tx.get_many_key(keys, None).await
+		// Both directions are read in batches, and so is the verification of
+		// each: four round trips for the whole slice, whatever it holds. The
+		// unresolved slots are not a rare tail to mop up one at a time — the
+		// adjacency fold asks this about records it has not mapped yet, and
+		// resolves every `None` itself.
+		let identity: Vec<DocLookupIdentityKey<'_>> =
+			ids.iter().map(|id| self.identity_key(id)).collect();
+		let hits = tx.get_many_key(identity, None).await?;
+		let mut found = self.verify_batch(tx, ids, hits).await?;
+
+		let missing: Vec<&RecordIdKey> =
+			found.iter().zip(ids).filter_map(|(slot, id)| slot.is_none().then_some(id)).collect();
+		if missing.is_empty() {
+			return Ok(found);
+		}
+
+		// The type-erased key answers for a record mapped before the injective
+		// one existed. Its hits need the same check, and for a second reason:
+		// the key is shared by every id with the same decimal expansion, so a
+		// hit there may belong to another record entirely.
+		let erased: Vec<DocLookupKey<'_>> = missing.iter().map(|id| self.erased_key(id)).collect();
+		let fallback = tx.get_many_key(erased, None).await?;
+		let mut fallback = self.verify_batch(tx, &missing, fallback).await?.into_iter();
+		for slot in found.iter_mut() {
+			if slot.is_none() {
+				*slot = fallback.next().flatten();
+			}
+		}
+		Ok(found)
+	}
+
+	/// Keeps each hit only if the reverse mapping agrees it names the record
+	/// asked for, reading every reverse mapping in one batch.
+	///
+	/// A forward hit is never authoritative on its own. The type-erased key is
+	/// shared by every id with the same decimal expansion; the injective one is
+	/// not, but a node on the previous release purges a record by deleting `!di`
+	/// and `!dd` alone, so a claim can outlive the record it named or the
+	/// doc-ID's reassignment to another.
+	async fn verify_batch(
+		&self,
+		tx: &Transaction,
+		ids: &[impl Borrow<RecordIdKey>],
+		mut found: Vec<Option<DocId>>,
+	) -> Result<Vec<Option<DocId>>> {
+		let claimed: Vec<DocId> = found.iter().flatten().copied().collect();
+		if claimed.is_empty() {
+			return Ok(found);
+		}
+		let mut named = self.get_record_ids_batch(tx, &claimed).await?.into_iter();
+		for (slot, id) in found.iter_mut().zip(ids) {
+			if slot.is_none() {
+				continue;
+			}
+			// `named` advances in step with the slots that filled `claimed`.
+			let agrees =
+				named.next().flatten().is_some_and(|m| m.addresses_same_record(id.borrow()));
+			if !agrees {
+				*slot = None;
+			}
+		}
+		Ok(found)
 	}
 
 	/// Removes both directions of the mapping for `id`. The id is *not* recycled.
@@ -635,15 +797,30 @@ impl TableDocIds {
 	/// mapping (already reclaimed) — the deferred-reclaim sweep uses it to
 	/// restore the mapping of a record re-created concurrently with the sweep.
 	pub async fn remove(&self, tx: &Transaction, id: &RecordIdKey) -> Result<Option<DocId>> {
-		let di = DocLookupKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), Cow::Borrowed(id));
-		if let Some(doc_id) = tx.get_key(&di, None).await? {
+		let Some(doc_id) = self.get_doc_id(tx, id).await? else {
+			return Ok(None);
+		};
+		tx.del_key(&self.identity_key(id)).await?;
+		let dd = DocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), doc_id);
+		tx.del_key(&dd).await?;
+		// The type-erased key may be owned by a different record with the same
+		// decimal expansion, whose mapping must outlive this one; it is this
+		// record's to delete only when the reverse mapping named this record.
+		//
+		// When a colliding record *does* survive, it is left without an erased
+		// mapping, and a node on the previous release — which resolves through
+		// this key alone — mints it a second doc-ID. That is a known limit of
+		// the upgrade window, recorded in `doc/UPGRADING.md`. Keeping the key
+		// instead is worse: it would then name an id whose reverse mapping is
+		// gone, and an older node re-creating any id that spells it adopts that
+		// dead id and writes nothing, so every later hit on the record is
+		// dropped after taking a top-k slot — the defect this release ends,
+		// reintroduced on a far commoner shape than the one it would guard.
+		let di = self.erased_key(id);
+		if tx.get_key(&di, None).await? == Some(doc_id) {
 			tx.del_key(&di).await?;
-			let dd = DocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), doc_id);
-			tx.del_key(&dd).await?;
-			Ok(Some(doc_id))
-		} else {
-			Ok(None)
 		}
+		Ok(Some(doc_id))
 	}
 
 	/// Restores the mapping `id ↔ doc_id`, unless the record has already been
@@ -658,11 +835,22 @@ impl TableDocIds {
 	/// re-indexed with a freshly allocated id after the reclaim, the restore
 	/// yields to it and returns `false`.
 	pub async fn restore(&self, tx: &Transaction, id: &RecordIdKey, doc_id: DocId) -> Result<bool> {
-		let di = DocLookupKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), Cow::Borrowed(id));
-		match tx.put_key(&di, &doc_id).await {
+		// A node on the previous release re-creates a record by publishing `!di`
+		// and `!dd` alone — it has never heard of `!dj`. Its index entries
+		// already reference the id it minted, so claiming the injective key,
+		// which it never wrote, would succeed and bury a live mapping under the
+		// reclaimed one. A mapping the reverse direction confirms wins here.
+		if let Some(current) = tx.get_key(&self.erased_key(id), None).await?
+			&& current != doc_id
+			&& self.mapping_names(tx, current, id).await?
+		{
+			return Ok(false);
+		}
+		match tx.put_key(&self.identity_key(id), &doc_id).await {
 			Ok(()) => {
 				let dd = DocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), doc_id);
 				tx.set_key(&dd, id).await?;
+				tx.set_key(&self.erased_key(id), &doc_id).await?;
 				Ok(true)
 			}
 			// The record already re-acquired a (fresh) id: leave it in place.
@@ -687,6 +875,8 @@ impl TableDocIds {
 	/// The monotonic sequence counter is deliberately left intact, so a doc-ID
 	/// index defined later keeps allocating fresh, never-reused ids.
 	pub async fn remove_all(&self, tx: &Transaction) -> Result<()> {
+		tx.delr(DocLookupIdentityPrefix::new(self.ns, self.db, Cow::Borrowed(&self.tb)).range()?)
+			.await?;
 		tx.delr(DocLookupPrefix::new(self.ns, self.db, Cow::Borrowed(&self.tb)).range()?).await?;
 		tx.delr(DocKeyPrefix::new(self.ns, self.db, Cow::Borrowed(&self.tb)).range()?).await?;
 		tx.delr(DocPendingPrefix::new(self.ns, self.db, Cow::Borrowed(&self.tb)).range()?).await?;
@@ -774,6 +964,144 @@ mod tests {
 		ctx.tx().commit().await.unwrap();
 	}
 
+	/// A record id holding a number and one holding the same number in another
+	/// variant are two records, and must not share a doc-ID.
+	///
+	/// The type-erased forward key cannot tell them apart, so the injective one
+	/// is what keeps them separate. Asserted on encoded record keys rather than
+	/// with `==`, which is cross-variant for numbers and would accept the very
+	/// collision this guards.
+	#[tokio::test]
+	async fn ids_differing_only_in_numeric_variant_keep_distinct_doc_ids() {
+		use crate::val::{Number, Value};
+		let arr = |n: Number| RecordIdKey::Array(vec![Value::Number(n)].into());
+		let int = arr(Number::Int(1));
+		let dec = arr(Number::Decimal(rust_decimal::Decimal::from(1)));
+
+		let ds = TestIndexStore::new().await;
+		let d = TableDocIds::new(NS, DB, "t".into());
+		let (a, b) = {
+			let ctx = ds.env(Write).await;
+			let a = d.resolve_or_assign(&ctx, &int).await.unwrap();
+			let b = d.resolve_or_assign(&ctx, &dec).await.unwrap();
+			finish(ctx).await;
+			(a, b)
+		};
+		assert_ne!(a, b, "two records must not share a doc-ID");
+
+		let ctx = ds.env(Read).await;
+		let tx = ctx.tx();
+		assert_eq!(d.get_doc_id(&tx, &int).await.unwrap(), Some(a));
+		assert_eq!(d.get_doc_id(&tx, &dec).await.unwrap(), Some(b));
+		let encoded = |k: &RecordIdKey| storekey::encode_vec(k).unwrap();
+		assert_eq!(
+			encoded(&d.get_record_id(&tx, a).await.unwrap().unwrap()),
+			encoded(&int),
+			"the reverse mapping must name the record that owns the doc-ID"
+		);
+		assert_eq!(encoded(&d.get_record_id(&tx, b).await.unwrap().unwrap()), encoded(&dec));
+	}
+
+	/// A node on the previous release purges a record by deleting `!di` and
+	/// `!dd` alone — it has never heard of `!dj` — so during a rolling upgrade
+	/// the injective key can outlive the record it named.
+	///
+	/// Such a claim must not be read back as a mapping, and must not be adopted
+	/// when the record is resolved again: both would hand every index a doc-ID
+	/// that no reverse mapping resolves, which is the failure `!dj` exists to
+	/// remove.
+	#[tokio::test]
+	async fn a_claim_the_reverse_mapping_no_longer_names_is_replaced() {
+		let ds = TestIndexStore::new().await;
+		let d = TableDocIds::new(NS, DB, "t".into());
+		let id = rid("purged-by-an-older-node");
+
+		let original = {
+			let ctx = ds.env(Write).await;
+			let doc_id = d.resolve_or_assign(&ctx, &id).await.unwrap();
+			finish(ctx).await;
+			doc_id
+		};
+		// Exactly what such a purge leaves behind: `!di` and `!dd` gone, `!dj` not.
+		{
+			let ctx = ds.env(Write).await;
+			let tx = ctx.tx();
+			tx.del_key(&d.erased_key(&id)).await.unwrap();
+			tx.del_key(&DocKeyKey::new(NS, DB, Cow::Borrowed(&d.tb), original)).await.unwrap();
+			finish(ctx).await;
+		}
+
+		{
+			let ctx = ds.env(Read).await;
+			assert_eq!(
+				d.get_doc_id(&ctx.tx(), &id).await.unwrap(),
+				None,
+				"an orphaned claim is not a mapping"
+			);
+			ctx.tx().cancel().await.unwrap();
+		}
+
+		let fresh = {
+			let ctx = ds.env(Write).await;
+			let doc_id = d.resolve_or_assign(&ctx, &id).await.unwrap();
+			finish(ctx).await;
+			doc_id
+		};
+		assert_ne!(fresh, original, "the record must not adopt the id its purge left behind");
+
+		let ctx = ds.env(Read).await;
+		let tx = ctx.tx();
+		assert_eq!(d.get_doc_id(&tx, &id).await.unwrap(), Some(fresh));
+		assert_eq!(d.get_record_id(&tx, fresh).await.unwrap(), Some(id));
+		tx.cancel().await.unwrap();
+	}
+
+	/// A mapping left under the type-erased key by an older release is adopted
+	/// only by the record the reverse mapping names.
+	///
+	/// Every id with the same decimal expansion shares that key, so a hit on it
+	/// says nothing on its own. A record that did not own the mapping must be
+	/// handed an id of its own rather than inherit one.
+	#[tokio::test]
+	async fn a_type_erased_mapping_is_adopted_only_by_the_record_it_names() {
+		use crate::val::{Number, Value};
+		let arr = |n: Number| RecordIdKey::Array(vec![Value::Number(n)].into());
+		let int = arr(Number::Int(1));
+		let dec = arr(Number::Decimal(rust_decimal::Decimal::from(1)));
+
+		let ds = TestIndexStore::new().await;
+		let d = TableDocIds::new(NS, DB, "t".into());
+		// Exactly what a store written before the injective key looks like: the
+		// erased forward mapping and the reverse one, and no `!dj`.
+		{
+			let ctx = ds.env(Write).await;
+			let tx = ctx.tx();
+			tx.set_key(&d.erased_key(&int), &7u64).await.unwrap();
+			tx.set_key(&DocKeyKey::new(NS, DB, Cow::Borrowed(&d.tb), 7), &int).await.unwrap();
+			finish(ctx).await;
+		}
+
+		let ctx = ds.env(Read).await;
+		let tx = ctx.tx();
+		assert_eq!(
+			d.get_doc_id(&tx, &int).await.unwrap(),
+			Some(7),
+			"the record the reverse mapping names adopts it"
+		);
+		assert_eq!(
+			d.get_doc_id(&tx, &dec).await.unwrap(),
+			None,
+			"a different record on the same erased key must not inherit it"
+		);
+		tx.cancel().await.unwrap();
+
+		// ... and resolving it hands out a fresh id instead.
+		let ctx = ds.env(Write).await;
+		let fresh = d.resolve_or_assign(&ctx, &dec).await.unwrap();
+		finish(ctx).await;
+		assert_ne!(fresh, 7);
+	}
+
 	#[tokio::test]
 	async fn resolve_is_idempotent_and_monotonic() {
 		let ds = TestIndexStore::new().await;
@@ -839,6 +1167,282 @@ mod tests {
 		assert_eq!(d.get_doc_id(&ctx.tx(), &rid("a")).await.unwrap(), Some(2));
 	}
 
+	/// The forward batch answers for a record mapped before the injective key
+	/// existed, through the same verified fallback as the single-record read.
+	#[tokio::test]
+	async fn forward_batch_falls_back_for_a_record_mapped_under_the_erased_key() {
+		let ds = TestIndexStore::new().await;
+		let mapped = rid("mapped-before-dj");
+		let absent = rid("never-mapped");
+
+		// A store as an older release left it: the erased forward key and the
+		// reverse one, and no injective key.
+		{
+			let (ctx, d) = new_op(&ds, Write).await;
+			let tx = ctx.tx();
+			tx.set_key(&d.erased_key(&mapped), &4u64).await.unwrap();
+			tx.set_key(&DocKeyKey::new(NS, DB, Cow::Borrowed(&d.tb), 4), &mapped).await.unwrap();
+			finish(ctx).await;
+		}
+
+		let (ctx, d) = new_op(&ds, Read).await;
+		assert_eq!(
+			d.get_doc_ids_batch(&ctx.tx(), &[mapped, absent]).await.unwrap(),
+			vec![Some(4), None],
+			"order is preserved and the fallback answers for the mapped record"
+		);
+	}
+
+	/// Removing one of two records that share an erased key leaves the survivor
+	/// resolvable on this release, and takes the shared key with it.
+	///
+	/// Taking the key is deliberate. A node on the previous release resolves
+	/// through it alone, so the survivor looks unmapped there and is minted a
+	/// second doc-ID for the length of the window — a known limit, recorded in
+	/// `doc/UPGRADING.md`. Keeping the key would be worse: it would name an id
+	/// whose reverse mapping is gone, and an older node re-creating any id that
+	/// spells it would adopt that dead id and publish nothing, so every later hit
+	/// on that record is dropped after taking a top-k slot.
+	#[tokio::test]
+	async fn removing_a_colliding_record_keeps_the_survivor_resolvable_here() {
+		use crate::val::{Number, Value};
+		let arr = |n: Number| RecordIdKey::Array(vec![Value::Number(n)].into());
+
+		let ds = TestIndexStore::new().await;
+		let d = TableDocIds::new(NS, DB, "t".into());
+		let int = arr(Number::Int(1));
+		let dec = arr(Number::Decimal(rust_decimal::Decimal::from(1)));
+
+		let (int_id, dec_id) = {
+			let ctx = ds.env(Write).await;
+			let a = d.resolve_or_assign(&ctx, &int).await.unwrap();
+			let b = d.resolve_or_assign(&ctx, &dec).await.unwrap();
+			finish(ctx).await;
+			(a, b)
+		};
+		assert_ne!(int_id, dec_id, "they are distinct records");
+
+		{
+			let ctx = ds.env(Write).await;
+			d.remove(&ctx.tx(), &dec).await.unwrap();
+			finish(ctx).await;
+		}
+
+		let ctx = ds.env(Read).await;
+		let tx = ctx.tx();
+		// The survivor keeps its own id, through the injective mapping the
+		// removal did not touch.
+		assert_eq!(d.get_doc_id(&tx, &int).await.unwrap(), Some(int_id));
+		assert_eq!(d.get_doc_id(&tx, &dec).await.unwrap(), None, "the removed record is gone");
+		// And nothing is left naming the dead id.
+		assert_eq!(
+			tx.get_key(&d.erased_key(&dec), None).await.unwrap(),
+			None,
+			"a shared key naming a removed record must not outlive it"
+		);
+		tx.cancel().await.unwrap();
+	}
+
+	/// Resolving a record that only the type-erased key maps publishes the
+	/// injective mapping for it.
+	///
+	/// Nothing else backfills `!dj`: the migration runs once, at the first
+	/// upgraded node's start, and every record a node on the previous release
+	/// creates afterwards is `!di`-only. Left that way, such a record would lose
+	/// its forward mapping entirely when `!di` is dropped, and the next resolve
+	/// would mint it a second id while its postings still reference the first.
+	#[tokio::test]
+	async fn resolving_an_erased_only_record_publishes_the_injective_mapping() {
+		let ds = TestIndexStore::new().await;
+		let d = TableDocIds::new(NS, DB, "t".into());
+		let id = rid("mapped-by-an-older-node");
+
+		// A store as a node on the previous release leaves it: `!di` and `!dd`,
+		// and no `!dj`.
+		{
+			let ctx = ds.env(Write).await;
+			let tx = ctx.tx();
+			tx.set_key(&d.erased_key(&id), &9u64).await.unwrap();
+			tx.set_key(&DocKeyKey::new(NS, DB, Cow::Borrowed(&d.tb), 9), &id).await.unwrap();
+			finish(ctx).await;
+		}
+		{
+			let ctx = ds.env(Read).await;
+			let tx = ctx.tx();
+			assert_eq!(tx.get_key(&d.identity_key(&id), None).await.unwrap(), None);
+			tx.cancel().await.unwrap();
+		}
+
+		let resolved = {
+			let ctx = ds.env(Write).await;
+			let doc_id = d.resolve_or_assign(&ctx, &id).await.unwrap();
+			finish(ctx).await;
+			doc_id
+		};
+		assert_eq!(resolved, 9, "the record keeps the id it was already mapped to");
+
+		let ctx = ds.env(Read).await;
+		let tx = ctx.tx();
+		assert_eq!(
+			tx.get_key(&d.identity_key(&id), None).await.unwrap(),
+			Some(9),
+			"the injective mapping must now name the same id"
+		);
+		tx.cancel().await.unwrap();
+	}
+
+	/// A reclaim repair must not bury a mapping an older node has published.
+	///
+	/// Such a node re-creates a record by writing `!di` and `!dd` with a fresh
+	/// id and no `!dj`, so the injective claim is free for the taking — and
+	/// taking it would point the record back at the reclaimed id while that
+	/// node's index entries reference the new one.
+	#[tokio::test]
+	async fn restore_yields_to_a_mapping_an_older_node_published() {
+		let ds = TestIndexStore::new().await;
+		let d = TableDocIds::new(NS, DB, "t".into());
+		let id = rid("recreated-by-an-older-node");
+
+		let reclaimed = {
+			let ctx = ds.env(Write).await;
+			let doc_id = d.resolve_or_assign(&ctx, &id).await.unwrap();
+			d.remove(&ctx.tx(), &id).await.unwrap();
+			finish(ctx).await;
+			doc_id
+		};
+
+		// What such a node leaves behind when it re-creates the record.
+		let published = reclaimed + 100;
+		{
+			let ctx = ds.env(Write).await;
+			let tx = ctx.tx();
+			tx.set_key(&d.erased_key(&id), &published).await.unwrap();
+			tx.set_key(&DocKeyKey::new(NS, DB, Cow::Borrowed(&d.tb), published), &id)
+				.await
+				.unwrap();
+			finish(ctx).await;
+		}
+
+		{
+			let ctx = ds.env(Write).await;
+			assert!(
+				!d.restore(&ctx.tx(), &id, reclaimed).await.unwrap(),
+				"the repair must yield to the live mapping"
+			);
+			finish(ctx).await;
+		}
+
+		let ctx = ds.env(Read).await;
+		let tx = ctx.tx();
+		assert_eq!(
+			d.get_doc_id(&tx, &id).await.unwrap(),
+			Some(published),
+			"the record keeps the id the older node minted"
+		);
+		assert_eq!(tx.get_key(&d.erased_key(&id), None).await.unwrap(), Some(published));
+		tx.cancel().await.unwrap();
+	}
+
+	/// The batched forward lookup must reach the same verdict as the
+	/// single-record one.
+	///
+	/// A node on the previous release purges a record by deleting `!di` and
+	/// `!dd` alone, so a `!dj` hit can name a doc-ID the reverse mapping has
+	/// disowned, or one it has since given to another record. A batch that
+	/// trusted its hits would hand that orphan to every doc-ID-consuming
+	/// caller.
+	#[tokio::test]
+	async fn the_forward_batch_disowns_a_claim_the_reverse_mapping_no_longer_names() {
+		let ds = TestIndexStore::new().await;
+		let d = TableDocIds::new(NS, DB, "t".into());
+		let purged = rid("purged-by-an-older-node");
+		let superseded = rid("remapped-by-an-older-node");
+		let live = rid("still-here");
+
+		let (orphan, stale, live_id) = {
+			let ctx = ds.env(Write).await;
+			let orphan = d.resolve_or_assign(&ctx, &purged).await.unwrap();
+			let stale = d.resolve_or_assign(&ctx, &superseded).await.unwrap();
+			let live_id = d.resolve_or_assign(&ctx, &live).await.unwrap();
+			finish(ctx).await;
+			(orphan, stale, live_id)
+		};
+
+		{
+			let ctx = ds.env(Write).await;
+			let tx = ctx.tx();
+			// Exactly what such a purge leaves behind: `!di` and `!dd` gone,
+			// `!dj` not.
+			tx.del_key(&d.erased_key(&purged)).await.unwrap();
+			tx.del_key(&DocKeyKey::new(NS, DB, Cow::Borrowed(&d.tb), orphan)).await.unwrap();
+			// And what a remap leaves: the reverse mapping now names someone else.
+			tx.set_key(&DocKeyKey::new(NS, DB, Cow::Borrowed(&d.tb), stale), &live).await.unwrap();
+			finish(ctx).await;
+		}
+
+		let ctx = ds.env(Read).await;
+		let tx = ctx.tx();
+		for (id, what) in [(&purged, "orphaned"), (&superseded, "superseded")] {
+			assert_eq!(
+				d.get_doc_id(&tx, id).await.unwrap(),
+				None,
+				"the single-record path already disowns the {what} claim"
+			);
+		}
+		assert_eq!(
+			d.get_doc_ids_batch(&tx, &[purged.clone(), superseded.clone(), live.clone()])
+				.await
+				.unwrap(),
+			vec![None, None, Some(live_id)],
+			"the batch must agree with it, and must still answer for the record beside them"
+		);
+		tx.cancel().await.unwrap();
+	}
+
+	/// Removing one record must not take the erased mapping another record owns.
+	///
+	/// That key is shared by every id with the same decimal expansion, so it
+	/// belongs to whichever record the reverse mapping names — deleting it
+	/// unconditionally would strand the other one on a node that still reads it.
+	#[tokio::test]
+	async fn removing_one_of_two_colliding_records_leaves_the_other_mapped() {
+		use crate::val::{Number, Value};
+		let arr = |n: Number| RecordIdKey::Array(vec![Value::Number(n)].into());
+		let int = arr(Number::Int(1));
+		let dec = arr(Number::Decimal(rust_decimal::Decimal::from(1)));
+
+		let ds = TestIndexStore::new().await;
+		let (a, b) = {
+			let (ctx, d) = new_op(&ds, Write).await;
+			let a = d.resolve_or_assign(&ctx, &int).await.unwrap();
+			let b = d.resolve_or_assign(&ctx, &dec).await.unwrap();
+			finish(ctx).await;
+			(a, b)
+		};
+		assert_ne!(a, b);
+
+		{
+			let (ctx, d) = new_op(&ds, Write).await;
+			assert_eq!(d.remove(&ctx.tx(), &int).await.unwrap(), Some(a));
+			finish(ctx).await;
+		}
+
+		let (ctx, d) = new_op(&ds, Read).await;
+		let tx = ctx.tx();
+		assert_eq!(d.get_doc_id(&tx, &int).await.unwrap(), None, "the removed record is gone");
+		assert_eq!(d.get_doc_id(&tx, &dec).await.unwrap(), Some(b));
+		// Asserted on the erased key itself. A reader on this release prefers the
+		// injective one, so it cannot see this either way — the record left
+		// holding the erased key is the one a node on the *previous* release
+		// still resolves through, and deleting it there would strand that record
+		// mid-rollout.
+		assert_eq!(
+			tx.get_key(&d.erased_key(&dec), None).await.unwrap(),
+			Some(b),
+			"the surviving record keeps the erased mapping an older node reads"
+		);
+	}
+
 	#[tokio::test]
 	async fn batch_resolve_preserves_order() {
 		let ds = TestIndexStore::new().await;
@@ -872,9 +1476,18 @@ mod tests {
 			d.remove_all(&ctx.tx()).await.unwrap();
 			finish(ctx).await;
 		}
-		// Both directions are gone for every record.
+		// Both directions are gone for every record. The injective key is
+		// asserted directly: `get_doc_id` answers `None` once the reverse mapping
+		// is gone, so reading through it would pass even if that band leaked.
 		{
 			let (ctx, d) = new_op(&ds, Read).await;
+			for name in ["a", "b"] {
+				assert_eq!(
+					ctx.tx().get_key(&d.identity_key(&rid(name)), None).await.unwrap(),
+					None,
+					"the injective band must be purged too"
+				);
+			}
 			assert_eq!(d.get_doc_id(&ctx.tx(), &rid("a")).await.unwrap(), None);
 			assert_eq!(d.get_doc_id(&ctx.tx(), &rid("b")).await.unwrap(), None);
 			assert_eq!(d.get_record_id(&ctx.tx(), 0).await.unwrap(), None);
