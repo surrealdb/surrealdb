@@ -39,7 +39,7 @@ use surrealdb_sql::statements::{
 	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
 	SelectStatement, UpdateStatement, UpsertStatement, UseStatement,
 };
-use surrealdb_sql::tokenizer::Tokenizer;
+use surrealdb_sql::tokenizer::{SegmentLanguage, Tokenizer};
 use surrealdb_sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, EventKind, Explain,
 	Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Idiom, Index, Kind, Literal, Lookup, Mock,
@@ -2122,6 +2122,62 @@ fn parse_define_analyzer() {
 			function: Some("foo::bar".into()),
 		}))),
 	)
+}
+
+#[test]
+fn parse_define_analyzer_segment_tokenizer() {
+	for (clause, expected) in [
+		("SEGMENT(KOREAN)", SegmentLanguage::Korean),
+		("SEGMENT(JAPANESE)", SegmentLanguage::Japanese),
+		("SEGMENT(CHINESE)", SegmentLanguage::Chinese),
+		// Keywords are case-insensitive, as every other tokenizer keyword is.
+		("segment(korean)", SegmentLanguage::Korean),
+	] {
+		let src = format!("DEFINE ANALYZER ana TOKENIZERS CLASS, {clause}");
+		let res = crate::parse_with(src.as_bytes(), async |parser, stk| {
+			parser.parse_expr_inherit(stk).await
+		})
+		.unwrap();
+		assert_eq!(
+			res,
+			Expr::Define(Box::new(DefineStatement::Analyzer(DefineAnalyzerStatement {
+				kind: DefineKind::Default,
+				name: Expr::Idiom(Idiom::field("ana".to_string())),
+				tokenizers: Some(vec![Tokenizer::Class, Tokenizer::Segment(expected)]),
+				filters: None,
+				comment: Expr::Literal(Literal::None),
+				function: None,
+			}))),
+			"failed for {clause}"
+		);
+	}
+}
+
+#[test]
+fn parse_define_analyzer_segment_rejects_non_cjk_language() {
+	// `ENGLISH` lexes as a Snowball language, never as a segmenter language:
+	// there is no English morphological dictionary to segment with.
+	let err = crate::parse_with(
+		r#"DEFINE ANALYZER ana TOKENIZERS SEGMENT(ENGLISH)"#.as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap_err();
+	assert!(
+		err.to_string().contains("CHINESE"),
+		"expected the error to list the accepted languages, got: {err}"
+	);
+}
+
+#[test]
+fn parse_define_analyzer_snowball_rejects_cjk_language() {
+	// The converse: Snowball has no CJK stemming algorithm, and
+	// `Filter::Snowball` cannot represent one.
+	let err = crate::parse_with(
+		r#"DEFINE ANALYZER ana FILTERS SNOWBALL(KOREAN)"#.as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap_err();
+	assert!(err.to_string().contains("a language"), "expected a language-kind error, got: {err}");
 }
 
 #[test]

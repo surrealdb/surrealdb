@@ -1,7 +1,10 @@
+use std::path::PathBuf;
+
 #[cfg(diskann)]
 pub mod diskann;
 pub mod hnsw;
 mod mapper;
+mod segmenter;
 
 use std::sync::Arc;
 
@@ -21,6 +24,7 @@ use crate::trees::hnsw::cache::VectorCache;
 use crate::trees::store::diskann::{DiskAnnIndexes, SharedDiskAnnIndex};
 use crate::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::trees::store::mapper::Mappers;
+use crate::trees::store::segmenter::Segmenters;
 
 #[derive(Clone)]
 pub struct IndexStores(Arc<Inner>);
@@ -33,6 +37,11 @@ struct Inner {
 	diskann_cache: DiskAnnCache,
 	hnsw_indexes: HnswIndexes,
 	mappers: Mappers,
+	/// Behind an `Arc` so a derived store can share it. A segmentation
+	/// dictionary is the one thing here too expensive to hold a second copy
+	/// of, so a store built for a short-lived context keeps its own caches but
+	/// borrows these.
+	segmenters: Arc<Segmenters>,
 	vector_cache: VectorCache,
 	/// Doc-ID → record-key cache for numeric adjacency resolution.
 	adjacency_resolve: crate::adjacency::AdjacencyResolveCache,
@@ -40,6 +49,40 @@ struct Inner {
 
 impl IndexStores {
 	pub fn new(
+		hnsw_cache_size: u64,
+		diskann_cache_size: u64,
+		adjacency_resolve_cache_size: u64,
+		segment_dictionary_path: Option<PathBuf>,
+	) -> Self {
+		#[cfg(not(diskann))]
+		let _ = diskann_cache_size;
+		Self(Arc::new(Inner {
+			#[cfg(diskann)]
+			diskann_indexes: DiskAnnIndexes::default(),
+			#[cfg(diskann)]
+			diskann_cache: DiskAnnCache::new(diskann_cache_size),
+			hnsw_indexes: HnswIndexes::default(),
+			mappers: Mappers::default(),
+			segmenters: Arc::new(Segmenters::new(segment_dictionary_path)),
+			vector_cache: VectorCache::new(hnsw_cache_size),
+			adjacency_resolve: crate::adjacency::AdjacencyResolveCache::new(
+				adjacency_resolve_cache_size,
+			),
+		}))
+	}
+
+	/// Builds a store for a short-lived context derived from this one: its own
+	/// index and vector caches, but this store's segmentation dictionaries.
+	///
+	/// A context built per unit of work — a LIVE query delivery, say — would
+	/// otherwise load its own dictionary and drop it again, so a burst of them
+	/// multiplies peak memory by the number in flight and reloads the same
+	/// dictionary every time. The per-language lock inside [`Segmenters`] only
+	/// coordinates callers sharing one map, so the map itself is what has to be
+	/// shared. The other caches stay separate: they are cheap to rebuild, and
+	/// isolating them is why such a context exists.
+	pub fn derive(
+		&self,
 		hnsw_cache_size: u64,
 		diskann_cache_size: u64,
 		adjacency_resolve_cache_size: u64,
@@ -53,6 +96,7 @@ impl IndexStores {
 			diskann_cache: DiskAnnCache::new(diskann_cache_size),
 			hnsw_indexes: HnswIndexes::default(),
 			mappers: Mappers::default(),
+			segmenters: Arc::clone(&self.0.segmenters),
 			vector_cache: VectorCache::new(hnsw_cache_size),
 			adjacency_resolve: crate::adjacency::AdjacencyResolveCache::new(
 				adjacency_resolve_cache_size,
@@ -177,11 +221,43 @@ impl IndexStores {
 		Ok(())
 	}
 
+	pub fn segmenters(&self) -> &Segmenters {
+		&self.0.segmenters
+	}
+
 	pub fn mappers(&self) -> &Mappers {
 		&self.0.mappers
 	}
 
 	pub(crate) fn vector_cache(&self) -> &VectorCache {
 		&self.0.vector_cache
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::sync::Arc;
+
+	use super::IndexStores;
+
+	/// A derived store shares its parent's dictionaries, and does not share
+	/// everything else by aliasing the whole store.
+	///
+	/// Contexts built per unit of work derive rather than construct precisely
+	/// so that a burst of them cannot each load their own segmentation
+	/// dictionary. Nothing else observes that sharing, so nothing else would
+	/// notice it being lost.
+	#[test]
+	fn derive_shares_the_dictionaries_but_not_the_store() {
+		let parent = IndexStores::new(1024, 1024, 1024, None);
+		let child = parent.derive(1024, 1024, 1024);
+		assert!(
+			!Arc::ptr_eq(&parent.0, &child.0),
+			"a derived store must have its own caches, not alias the parent wholesale"
+		);
+		assert!(
+			Arc::ptr_eq(&parent.0.segmenters, &child.0.segmenters),
+			"a derived store must share the parent's segmentation dictionaries"
+		);
 	}
 }

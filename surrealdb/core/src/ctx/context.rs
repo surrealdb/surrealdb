@@ -176,7 +176,11 @@ impl Context {
 			query_executor: None,
 			iteration_stage: None,
 			capabilities: Arc::clone(&parent.capabilities),
-			index_stores: IndexStores::new(
+			// Derived rather than new: this context is built per unit of work
+			// (one LIVE query delivery), and a segmentation dictionary is far
+			// too expensive to load and drop that often, so those are shared
+			// with the parent while the other caches stay isolated.
+			index_stores: parent.index_stores.derive(
 				parent.config.idx.hnsw_cache_size,
 				parent.config.idx.diskann_cache_size,
 				parent.config.idx.graph_resolve_cache_size,
@@ -484,7 +488,12 @@ impl Context {
 			query_executor: None,
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
-			index_stores: IndexStores::new(256 * 1024 * 1024, 256 * 1024 * 1024, 64 * 1024 * 1024),
+			index_stores: IndexStores::new(
+				256 * 1024 * 1024,
+				256 * 1024 * 1024,
+				64 * 1024 * 1024,
+				None,
+			),
 			cache: None,
 			index_builder: None,
 			sequences: None,

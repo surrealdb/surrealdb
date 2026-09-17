@@ -175,6 +175,12 @@ mod tests {
 		assert_eq!(c.graph_resolve_cache_size, 7);
 		let c: IdxConfig = map_with("graph_inline_props_cap", "7").load();
 		assert_eq!(c.graph_inline_props_cap, 7);
+		let c: IdxConfig = map_with("segment_dictionary_path", "/dictionaries").load();
+		assert_eq!(
+			c.segment_dictionary_path.as_deref(),
+			Some(std::path::Path::new("/dictionaries"))
+		);
+		assert_eq!(IdxConfig::default().segment_dictionary_path, None);
 		// Canonicalizing, so the value has to name a directory that exists.
 		let dir = std::env::temp_dir();
 		let c: IdxConfig = map_with("file_allowlist", &dir.to_string_lossy()).load();

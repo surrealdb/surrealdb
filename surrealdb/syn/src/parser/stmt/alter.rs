@@ -11,7 +11,6 @@ use surrealdb_sql::statements::alter::{
 };
 use surrealdb_sql::statements::define::ApiAction;
 use surrealdb_sql::statements::{AlterStatement, AlterTableStatement};
-use surrealdb_sql::tokenizer::Tokenizer;
 use surrealdb_sql::{ApiMethod, EventKind, TableType};
 
 use crate::error::bail;
@@ -676,22 +675,7 @@ impl Parser<'_> {
 				}
 				t!("TOKENIZERS") => {
 					self.pop_peek();
-					let mut tokenizers = Vec::new();
-					loop {
-						let next = self.next();
-						let tokenizer = match next.kind {
-							t!("BLANK") => Tokenizer::Blank,
-							t!("CAMEL") => Tokenizer::Camel,
-							t!("CLASS") => Tokenizer::Class,
-							t!("PUNCT") => Tokenizer::Punct,
-							_ => unexpected!(self, next, "a tokenizer"),
-						};
-						tokenizers.push(tokenizer);
-						if !self.eat(t!(",")) {
-							break;
-						}
-					}
-					res.tokenizers = AlterKind::Set(tokenizers);
+					res.tokenizers = AlterKind::Set(self.parse_tokenizers()?);
 				}
 				t!("FILTERS") => {
 					self.pop_peek();

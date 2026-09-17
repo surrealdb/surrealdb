@@ -84,6 +84,7 @@ impl TestIndexStore {
 			config.hnsw_cache_size,
 			config.diskann_cache_size,
 			config.graph_resolve_cache_size,
+			config.segment_dictionary_path.clone(),
 		);
 		Self {
 			sequences: Sequences::new(tf.clone(), node_id),

@@ -1157,6 +1157,37 @@ args = [
     "--skip", "database_upgrade",
 ]
 
+[tasks.ci-cjk-test]
+category = "CI - WORKSPACE TESTS"
+description = "Run the surrealdb-idx tests with the embedded dictionaries enabled"
+# The `cjk-embed-*` features are off everywhere else, so every test behind them
+# is invisible to the other lanes: `ci-feature-check-idx` only runs `cargo
+# check`, which does not build test code at all. Without this lane the tests
+# that need an embedded dictionary would compile nowhere and run nowhere.
+#
+# This runs the crate's whole library suite rather than filtering to the
+# segmentation modules. A dictionary is needed wherever it is used, not only
+# where it is parsed — the cache that loads one is tested beside the cache, not
+# beside the tokenizer — so a filter naming modules quietly stops covering a
+# gated test added outside them, which is the very gap this lane exists to
+# close. Re-running the rest of the crate's tests costs seconds against the
+# dictionary download that dominates this lane.
+#
+# Enabling the features makes each dictionary crate's build script download its
+# dictionary, which is why this is its own lane rather than a flag added to the
+# workspace run: the cost lands only here.
+command = "cargo"
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-idx",
+    "--features",
+    "cjk-embed-all",
+    "--lib",
+]
+
 # --------------------------------------------------
 # Workspace tests
 # --------------------------------------------------

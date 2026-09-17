@@ -4,6 +4,7 @@ use reblessive::Stk;
 use surrealdb_sql::changefeed::ChangeFeed;
 use surrealdb_sql::index::{Distance, VectorType};
 use surrealdb_sql::reference::{Reference, ReferenceDeleteStrategy};
+use surrealdb_sql::tokenizer::{SegmentLanguage, Tokenizer};
 use surrealdb_sql::{
 	Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Idiom, Literal,
 	Output, Permission, Permissions, View, With,
@@ -620,6 +621,37 @@ impl Parser<'_> {
 
 		Ok(name)
 	}
+	pub(super) fn parse_tokenizers(&mut self) -> ParseResult<Vec<Tokenizer>> {
+		let mut tokenizers = Vec::new();
+		loop {
+			let next = self.next();
+			let tokenizer = match next.kind {
+				t!("BLANK") => Tokenizer::Blank,
+				t!("CAMEL") => Tokenizer::Camel,
+				t!("CLASS") => Tokenizer::Class,
+				t!("PUNCT") => Tokenizer::Punct,
+				t!("SEGMENT") => {
+					let open_span = expected!(self, t!("(")).span;
+					let next = self.next();
+					let language = match next.kind {
+						t!("CHINESE") => SegmentLanguage::Chinese,
+						t!("JAPANESE") => SegmentLanguage::Japanese,
+						t!("KOREAN") => SegmentLanguage::Korean,
+						_ => unexpected!(self, next, "`CHINESE`, `JAPANESE` or `KOREAN`"),
+					};
+					self.expect_closing_delimiter(t!(")"), open_span)?;
+					Tokenizer::Segment(language)
+				}
+				_ => unexpected!(self, next, "a tokenizer"),
+			};
+			tokenizers.push(tokenizer);
+			if !self.eat(t!(",")) {
+				break;
+			}
+		}
+		Ok(tokenizers)
+	}
+
 	pub(super) fn try_parse_explain(&mut self) -> ParseResult<Option<Explain>> {
 		Ok(self.eat(t!("EXPLAIN")).then(|| Explain(self.eat(t!("FULL")))))
 	}

@@ -70,6 +70,10 @@ pub(crate) async fn alter_analyzer_statement_compute(
 		db,
 		az: Cow::Borrowed(&name),
 	};
+	// An ALTER can introduce a SEGMENT tokenizer, so the dictionary it names
+	// must resolve before the altered definition is stored - the same rule
+	// DEFINE applies.
+	ctx.get_index_stores().segmenters().validate(&az).await?;
 	txn.set_key(&key, &az).await?;
 	txn.clear_cache();
 	Ok(Value::None)

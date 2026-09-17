@@ -527,6 +527,34 @@ jobs:
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
+  # The `cjk-embed-*` features are off in every other lane, so the segmentation
+  # tests behind them are built nowhere else — `Check features` only runs
+  # `cargo check`, which does not build test code. This lane is what makes them
+  # run at all. It is separate because enabling the features makes each
+  # dictionary crate download its dictionary at build time.
+  test-cjk:
+    name: Test CJK segmentation
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          preset: test
+
+      - name: Test CJK segmentation
+        run: cargo make ci-cjk-test
+
   # ----------------------------------------
   # Storage engine tests
   # ----------------------------------------

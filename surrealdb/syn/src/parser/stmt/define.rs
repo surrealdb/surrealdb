@@ -18,7 +18,6 @@ use surrealdb_sql::statements::define::{
 	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineSequenceStatement,
 	DefineStatement, DefineTableStatement, DefineUserStatement,
 };
-use surrealdb_sql::tokenizer::Tokenizer;
 use surrealdb_sql::{
 	AccessType, ApiMethod, DefineModuleStatement, EventKind, Expr, Index, Literal,
 	ModuleExecutable, Param, Permission, Permissions, Scoring, SiloExecutable,
@@ -1440,23 +1439,7 @@ impl Parser<'_> {
 				}
 				t!("TOKENIZERS") => {
 					self.pop_peek();
-					let mut tokenizers = Vec::new();
-
-					loop {
-						let next = self.next();
-						let tokenizer = match next.kind {
-							t!("BLANK") => Tokenizer::Blank,
-							t!("CAMEL") => Tokenizer::Camel,
-							t!("CLASS") => Tokenizer::Class,
-							t!("PUNCT") => Tokenizer::Punct,
-							_ => unexpected!(self, next, "a tokenizer"),
-						};
-						tokenizers.push(tokenizer);
-						if !self.eat(t!(",")) {
-							break;
-						}
-					}
-					res.tokenizers = Some(tokenizers);
+					res.tokenizers = Some(self.parse_tokenizers()?);
 				}
 
 				t!("FUNCTION") => {

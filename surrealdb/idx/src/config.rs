@@ -33,6 +33,15 @@ pub struct IdxConfig {
 	pub diskann_cache_size: u64,
 	/// Specifies a list of paths in which files can be accessed (default: empty)
 	pub file_allowlist: Vec<PathBuf>,
+	/// Directory holding the morphological dictionaries `TOKENIZERS
+	/// SEGMENT(<language>)` reads, one subdirectory per language (`chinese`,
+	/// `japanese`, `korean`). Unset means every language uses the dictionary
+	/// compiled into the binary, which is present only for the `cjk-embed-*`
+	/// features enabled at build time. Not subject to `file_allowlist`: the
+	/// subdirectory names are this engine's own, so the files this key can
+	/// make the engine open are fixed at compile time, whereas the allowlist
+	/// bounds paths a statement supplies. (default: none)
+	pub segment_dictionary_path: Option<PathBuf>,
 	/// How many unfolded per-edge adjacency keys a graph traversal tolerates
 	/// on one (vertex, direction) scope before observing it for a background
 	/// fold into packed blocks. Folding is always on at this built-in
@@ -70,6 +79,7 @@ impl Default for IdxConfig {
 			hnsw_cache_size: 256 * 1024 * 1024,
 			diskann_cache_size: 256 * 1024 * 1024,
 			file_allowlist: Vec::new(),
+			segment_dictionary_path: None,
 			graph_fold_threshold: 64,
 			graph_fold_batch: 1024,
 			graph_numeric_ids: false,
@@ -88,6 +98,7 @@ impl cnf::Config for IdxConfig {
 			.parse_key("graph_numeric_ids", &mut self.graph_numeric_ids)
 			.parse_key("graph_resolve_cache_size", &mut self.graph_resolve_cache_size)
 			.parse_key("graph_inline_props_cap", &mut self.graph_inline_props_cap)
+			.parse_key_option("segment_dictionary_path", &mut self.segment_dictionary_path)
 			.parse_key_with("file_allowlist", &mut self.file_allowlist, |x| {
 				// FIXME: We really shouldn't be doing random, faillable, IO when reading
 				// configuration values. But no way to fix it without restructuring the

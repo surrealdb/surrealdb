@@ -77,6 +77,11 @@ pub(crate) async fn define_analyzer_statement_compute(
 		az: Cow::Borrowed(definition.name.as_str()),
 	};
 	ctx.get_index_stores().mappers().load(&definition, &ctx.config.idx.file_allowlist).await?;
+	// Resolve any SEGMENT tokenizer for the same reason the mappers are loaded
+	// here: a definition naming a dictionary this node cannot load must be
+	// rejected now, not accepted and then found broken at the first index build
+	// or query.
+	ctx.get_index_stores().segmenters().validate(&definition).await?;
 	txn.set_key(&key, &definition).await?;
 	// Clear the cache
 	txn.clear_cache();

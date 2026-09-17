@@ -21,6 +21,27 @@ categories.workspace = true
 kv-rocksdb = ["surrealdb-kvs-any/kv-rocksdb"]
 kv-tikv = ["surrealdb-kvs-any/kv-tikv"]
 
+# Bake a morphological dictionary for `TOKENIZERS SEGMENT(<language>)` into the
+# binary, so `SEGMENT` works with no files on disk. Without these, `SEGMENT`
+# still works: the dictionary is then read from the directory named by the
+# `segment_dictionary_path` config key.
+#
+# Each costs both image size and memory: Korean adds roughly 82 MB, Japanese
+# 45 MB and Chinese 22 MB. An embedded dictionary is part of the binary image,
+# so unlike a file-backed one it cannot be evicted once touched - the first
+# query in a language turns its dictionary into resident memory for the
+# process's lifetime, which is a figure to size memory limits against rather
+# than discover.
+#
+# Enabling one also makes its crate's build script download the dictionary
+# archive at build time. lindera checks the archive against an MD5 constant in
+# that crate's source, so what lands in the binary is pinned transitively by
+# `Cargo.lock` - though by a hash that is not collision-resistant.
+cjk-embed-chinese = ["lindera/embed-cc-cedict"]
+cjk-embed-japanese = ["lindera/embed-ipadic"]
+cjk-embed-korean = ["lindera/embed-ko-dic"]
+cjk-embed-all = ["cjk-embed-chinese", "cjk-embed-japanese", "cjk-embed-korean"]
+
 [dependencies]
 ahash.workspace = true
 anyhow.workspace = true
@@ -30,6 +51,7 @@ dashmap.workspace = true
 deunicode.workspace = true
 fst.workspace = true
 half.workspace = true
+lindera.workspace = true
 ndarray.workspace = true
 ndarray-stats.workspace = true
 parking_lot.workspace = true

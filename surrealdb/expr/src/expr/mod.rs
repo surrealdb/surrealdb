@@ -113,7 +113,7 @@ pub use self::script::Script;
 pub use self::split::{Split, Splits};
 pub use self::start::Start;
 pub use self::statements::{DefineAnalyzerStatement, SelectStatement, SleepStatement};
-pub use self::tokenizer::Tokenizer;
+pub use self::tokenizer::{SegmentLanguage, Tokenizer};
 pub use self::view::View;
 pub use self::with::With;
 

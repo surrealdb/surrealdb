@@ -103,6 +103,27 @@ jobs:
         with:
           ref: ${{ inputs.git-ref }}
 
+      # Read from the sources just checked out, so it must precede the CI-tooling
+      # checkout below. The build actions come from the workflow ref while the
+      # sources come from `git-ref`, so a manual rebuild of a commit older than a
+      # feature would otherwise ask cargo for a feature that commit's manifest
+      # does not define, and every matrix job would fail on it.
+      #
+      # `extra-features` REPLACES the build actions' default rather than
+      # extending it, so the default set is spelled out here too; dropping any of
+      # it would silently ship binaries without TiKV storage, JWKS or ML.
+      - name: Resolve the binary feature set
+        id: features
+        shell: bash
+        run: |
+          features="storage-tikv,jwks,ml"
+          if grep -qE '^cjk = ' Cargo.toml; then
+            features="${features},cjk"
+          else
+            echo "::notice::This commit predates the cjk feature; building without the embedded CJK dictionaries."
+          fi
+          echo "extra=${features}" >> "$GITHUB_OUTPUT"
+
       # CI tooling (first-party actions) comes from the WORKFLOW ref - the
       # pushed commit on this branch, or whichever branch/tag a manual dispatch
       # was run from - NOT from the (possibly older/overridden) commit checked
@@ -148,6 +169,10 @@ jobs:
         uses: ./.ci/.github/actions/build-linux
         with:
           arch: ${{ matrix.arch }}
+          # Resolved above: the default extras, plus `cjk` when this commit has
+          # it. The CJK dictionaries ship inside the released binaries, and the
+          # Docker images repackage these same artifacts and inherit them.
+          extra-features: ${{ steps.features.outputs.extra }}
           platform: ${{ matrix.platform }}
           name: ${{ inputs.name }}
           version-override: ${{ inputs.version-override }}
@@ -172,6 +197,10 @@ jobs:
         uses: ./.ci/.github/actions/build-macos
         with:
           arch: ${{ matrix.arch }}
+          # Resolved above: the default extras, plus `cjk` when this commit has
+          # it. The CJK dictionaries ship inside the released binaries, and the
+          # Docker images repackage these same artifacts and inherit them.
+          extra-features: ${{ steps.features.outputs.extra }}
           platform: ${{ matrix.platform }}
           name: ${{ inputs.name }}
           version-override: ${{ inputs.version-override }}
@@ -184,6 +213,10 @@ jobs:
         uses: ./.ci/.github/actions/build-windows
         with:
           arch: ${{ matrix.arch }}
+          # Resolved above: the default extras, plus `cjk` when this commit has
+          # it. The CJK dictionaries ship inside the released binaries, and the
+          # Docker images repackage these same artifacts and inherit them.
+          extra-features: ${{ steps.features.outputs.extra }}
           platform: ${{ matrix.platform }}
           name: ${{ inputs.name }}
           version-override: ${{ inputs.version-override }}

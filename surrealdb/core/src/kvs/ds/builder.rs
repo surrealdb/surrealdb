@@ -403,6 +403,7 @@ impl Builder {
 				config.idx.hnsw_cache_size,
 				config.idx.diskann_cache_size,
 				config.idx.graph_resolve_cache_size,
+				config.idx.segment_dictionary_path.clone(),
 			),
 			index_builder: IndexBuilder::new(tf.clone()),
 			#[cfg(storage)]

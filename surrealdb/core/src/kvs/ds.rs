@@ -703,6 +703,7 @@ impl Datastore {
 				self.config.idx.hnsw_cache_size,
 				self.config.idx.diskann_cache_size,
 				self.config.idx.graph_resolve_cache_size,
+				self.config.idx.segment_dictionary_path.clone(),
 			),
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(storage)]
@@ -763,6 +764,7 @@ impl Datastore {
 				self.config.idx.hnsw_cache_size,
 				self.config.idx.diskann_cache_size,
 				self.config.idx.graph_resolve_cache_size,
+				self.config.idx.segment_dictionary_path.clone(),
 			),
 			index_builder: IndexBuilder::new(transaction_factory.clone()),
 			#[cfg(storage)]

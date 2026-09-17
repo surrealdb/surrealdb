@@ -101,7 +101,7 @@ impl ScalarFunction for SearchAnalyze {
 				.map_err(|e| anyhow::anyhow!("Analyzer '{}' not found: {}", az, e))?;
 
 			// Create the analyzer
-			let analyzer = Analyzer::new(ctx.exec_ctx.ctx().get_index_stores(), az_def)?;
+			let analyzer = Analyzer::new(ctx.exec_ctx.ctx().get_index_stores(), az_def).await?;
 
 			// Analyze the value using a TreeStack
 			let frozen = ctx.exec_ctx.ctx();
