@@ -99,11 +99,16 @@ impl KVValue for HnswDocsState {
 
 /// Coalesced pending vector state for a single record.
 ///
-/// This value is stored under the record-keyed `!hr` pending key. The key
-/// identifies the record; `doc_id` records the current graph document mapping
-/// when one already exists. `old_vectors` is the graph baseline to remove, and
-/// `new_vectors` is the latest desired indexed state for that record.
-#[revisioned(revision = 1)]
+/// This value is stored under the record-keyed `!hr` pending key. `doc_id`
+/// records the current graph document mapping when one already exists,
+/// `old_vectors` is the graph baseline to remove, and `new_vectors` is the
+/// latest desired indexed state for that record.
+///
+/// `id` is the record the entry belongs to, kept here because the revisioned
+/// encoding keeps it exactly where the entry's key cannot. `None` means an
+/// entry written before this field existed; what reads it, and what the key
+/// can and cannot spell, is `surrealdb_idx::trees::pending`.
+#[revisioned(revision = 2)]
 pub struct HnswRecordPendingUpdate {
 	/// Existing internal document ID, if the record has already reached the graph.
 	pub doc_id: Option<DocId>,
@@ -111,6 +116,9 @@ pub struct HnswRecordPendingUpdate {
 	pub old_vectors: Vec<SerializedVector>,
 	/// Latest vectors that should represent the record after compaction.
 	pub new_vectors: Vec<SerializedVector>,
+	/// The record this entry belongs to, as it is stored.
+	#[revision(start = 2)]
+	pub id: Option<RecordIdKey>,
 }
 
 impl_kv_value_revisioned!(HnswRecordPendingUpdate);
