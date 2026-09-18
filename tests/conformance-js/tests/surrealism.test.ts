@@ -43,7 +43,14 @@ const moduleTest = test.skipIf(!SURLI);
 
 let server: TestServer | undefined;
 let bucketDir: string | undefined;
+let db: Surreal | undefined;
 
+// The explicit timeout is this hook's own, not the suite-wide `--timeout`.
+// Defining the module compiles its wasm against a debug-build server, so this
+// one hook carries a setup cost no other file's does — enough to overrun the
+// 30s the suite passes on the command line when the runner is loaded. Raising
+// the global timeout instead would slacken every other file's budget; this
+// keeps the headroom where it is needed.
 beforeAll(async () => {
 	if (!SURLI) return;
 	if (!existsSync(SURLI)) {
@@ -57,15 +64,17 @@ beforeAll(async () => {
 		args: ["--allow-experimental=files,surrealism", "--allow-net=127.0.0.1,localhost"],
 		env: { SURREAL_BUCKET_FOLDER_ALLOWLIST: bucketDir },
 	});
-});
+	db = await defineModule();
+}, 180_000);
 
 afterAll(async () => {
+	await db?.close();
 	await server?.stop();
 	if (bucketDir) rmSync(bucketDir, { recursive: true, force: true });
 });
 
 /** A root client on a fresh ns/db with the demo module already defined. */
-async function moduleClient(): Promise<Surreal> {
+async function defineModule(): Promise<Surreal> {
 	const { db } = await rootClient(server as TestServer);
 	const responses = await db
 		.query(
@@ -75,6 +84,15 @@ async function moduleClient(): Promise<Surreal> {
 		.responses();
 	for (const r of responses) expect(r.success).toBe(true);
 	return db;
+}
+
+/**
+ * Defining the module compiles its wasm, which dominates this file's runtime,
+ * so it is done once in `beforeAll` and shared. Every test here only reads — it
+ * calls exports or reads the catalog — so none can disturb another.
+ */
+function moduleClient(): Surreal {
+	return db as Surreal;
 }
 
 async function rejects(p: Promise<unknown>): Promise<Error> {
@@ -113,7 +131,7 @@ test("the packed demo module is supplied under CI", () => {
 moduleTest(
 	"module exports are callable as mod:: functions and return typed values",
 	async () => {
-		const db = await moduleClient();
+		const db = moduleClient();
 
 		// Top-level export, both branches of its predicate.
 		expect(await call<boolean>(db, "mod::demo::can_drive(21)")).toBe(true);
@@ -141,7 +159,6 @@ moduleTest(
 		expect(await call<number>(db, "mod::demo::safe_divide(10, 2)")).toBe(5);
 		expect(await call<number>(db, "mod::demo::parse_number('42')")).toBe(42);
 
-		await db.close();
 	},
 	30000,
 );
@@ -149,7 +166,7 @@ moduleTest(
 moduleTest(
 	"a failing module call rejects with an error naming its cause",
 	async () => {
-		const db = await moduleClient();
+		const db = moduleClient();
 
 		// A renamed export is not reachable under its Rust name, at either level.
 		expect(await failure(db, "mod::demo::can_drive_bla(21)")).toContain("can_drive_bla");
@@ -191,7 +208,6 @@ moduleTest(
 			"invalid digit",
 		);
 
-		await db.close();
 	},
 	30000,
 );
@@ -199,7 +215,7 @@ moduleTest(
 moduleTest(
 	"a defined module appears in the database catalog with its export signatures",
 	async () => {
-		const db = await moduleClient();
+		const db = moduleClient();
 
 		// INFO FOR DB keys modules by their storage name.
 		const [info] = await db
@@ -242,7 +258,6 @@ moduleTest(
 		// The default export is the entry with no name.
 		expect(exports.some((e) => e.name === undefined)).toBe(true);
 
-		await db.close();
 	},
 	30000,
 );
