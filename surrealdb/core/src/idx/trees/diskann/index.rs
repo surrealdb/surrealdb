@@ -53,7 +53,9 @@ use crate::idx::trees::diskann::{
 };
 use crate::idx::trees::hnsw::VectorId;
 use crate::idx::trees::knn::KnnResultBuilder;
-use crate::idx::trees::pending::{PendingBacklogReport, PendingScan, PendingScanStats};
+use crate::idx::trees::pending::{
+	PendingBacklogReport, PendingScan, PendingScanStats, take_pending_record_id,
+};
 use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::idx::{
 	IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
@@ -563,6 +565,24 @@ enum PendingLayout {
 	Legacy,
 }
 
+/// The record a DiskANN pending entry belongs to.
+///
+/// The rule is [`take_pending_record_id`]; this supplies the key decoder it
+/// falls back to, which layout decides — the sharded and legacy keys differ,
+/// the shard key carrying a `shard` field ahead of its id.
+fn pending_record_id(
+	key: &[u8],
+	layout: PendingLayout,
+	pending: &mut DiskAnnRecordPendingUpdate,
+) -> Result<RecordIdKey> {
+	take_pending_record_id(&mut pending.id, || {
+		Ok(match layout {
+			PendingLayout::Sharded => DiskAnnRecordPendingShard::decode_key(key)?.id.into_owned(),
+			PendingLayout::Legacy => DiskAnnRecordPending::decode_key(key)?.id.into_owned(),
+		})
+	})
+}
+
 /// Mutable state threaded through the pending scan of one KNN lookup.
 struct DiskAnnPendingScan<'a, 'b> {
 	/// Prepared typed query and limits.
@@ -834,7 +854,7 @@ impl DiskAnnIndex {
 		// The two layouts always chain (each write's `old_vectors` is the previous value), so fold
 		// them into a single `!dw` entry that keeps the chain head's `old_vectors`.
 		let legacy = Self::take_legacy_pending(&tx, &self.ikb, id).await?;
-		let pending = match (tx.get(&key, None).await?, legacy) {
+		let mut pending = match (tx.get(&key, None).await?, legacy) {
 			(Some(mut sharded), None) => {
 				sharded.new_vectors = new_vectors;
 				sharded
@@ -867,14 +887,21 @@ impl DiskAnnIndex {
 						legacy.old_vectors
 					},
 					new_vectors,
+					id: None,
 				}
 			}
 			(None, None) => DiskAnnRecordPendingUpdate {
 				doc_id: DiskAnnDocs::get_doc_id(&self.ikb, &tx, id).await?,
 				old_vectors,
 				new_vectors,
+				id: None,
 			},
 		};
+		// Every write stamps the exact id, whichever arm built the entry, so
+		// compaction and lookup never have to recover it from a key that cannot
+		// spell it. Stamping here rather than per arm keeps that true of an arm
+		// added later.
+		pending.id = Some(id.clone());
 		tx.set(&key, &pending).await?;
 		Self::mark_pending_non_empty(&tx, &self.ikb, id).await?;
 		Ok(())
@@ -1036,20 +1063,55 @@ impl DiskAnnIndex {
 				if ctx.is_done(Some(*count)).await? {
 					bail!(Error::QueryCancelled)
 				}
-				let id = DiskAnnRecordPending::decode_key(&legacy_key)?.id.into_owned();
-				let legacy_update = DiskAnnRecordPendingUpdate::kv_decode_value(&legacy_value, ())?;
-				let legacy_op = Self::record_pending_to_operation(id.clone(), legacy_update);
+				let mut legacy_update =
+					DiskAnnRecordPendingUpdate::kv_decode_value(&legacy_value, ())?;
+				let mut id =
+					pending_record_id(&legacy_key, PendingLayout::Legacy, &mut legacy_update)?;
 				// Probe the record's sharded `!dw` counterpart so a dual-layout record is folded in
 				// here rather than split across passes. Deletes happen only at apply, so the `!dw`
 				// entry is still present for this read.
-				let shard_key = ikb.new_dw_key(Self::pending_state_shard(&id), &id);
-				let shard_entry = match tx.get_raw(&shard_key, None).await? {
-					Some(shard_value) => {
-						let update = DiskAnnRecordPendingUpdate::kv_decode_value(&shard_value, ())?;
+				//
+				// The probe keys on the spelling recovered from the legacy key, and both the shard
+				// and the key's id component come from it, so it finds the counterpart only when
+				// that spelling is what the `!dw` key was written under. It is for every id whose
+				// numeric components survive the codec unchanged — integers, exact decimals and
+				// exactly representable floats. An inexact float does not: it is re-encoded at a
+				// shorter scale, so the probe misses and the pair is folded across two passes
+				// instead of one. Usually that costs a pass and nothing else, since
+				// record-level resolution reads the exact id from the value below. The
+				// exception is a legacy entry written after an uncompacted sharded one
+				// for such an id: the probe misses, so the legacy entry folds alone
+				// under the key's spelling and carries no doc-ID of its own. Fixing it
+				// needs the shard, which needs the exact id, which only the entry it
+				// cannot find carries. Only a node old enough to still write the legacy
+				// layout can produce it, and 3.2.0 was the release that stopped — so it
+				// takes a 3.1.x node running alongside this one, not the adjacent skew.
+				// A 3.2+ node writes `!dw`, reads it, and fails on the revision it
+				// cannot decode rather than leaving this behind.
+				let (shard_key, shard_value) = {
+					let shard_key = ikb.new_dw_key(Self::pending_state_shard(&id), &id);
+					let value = tx.get_raw(&shard_key, None).await?;
+					let encoded = value.is_some().then(|| shard_key.encode_key()).transpose()?;
+					(encoded, value)
+				};
+				let mut shard_update = shard_value
+					.as_ref()
+					.map(|v| DiskAnnRecordPendingUpdate::kv_decode_value(v, ()))
+					.transpose()?;
+				// Nothing writes the legacy layout any more, so its entries never carry the id and
+				// the spelling above is whatever the key could express — decimalised, for an id
+				// holding a number. Both entries name one record, so when the sharded counterpart
+				// carries the exact id, that is the one the pair folds under.
+				if let Some(exact) = shard_update.as_mut().and_then(|u| u.id.take()) {
+					id = exact;
+				}
+				let legacy_op = Self::record_pending_to_operation(id.clone(), legacy_update);
+				let shard_entry = match (shard_key, shard_value, shard_update) {
+					(Some(shard_key), Some(shard_value), Some(update)) => {
 						let op = Self::record_pending_to_operation(id.clone(), update);
-						Some((shard_key.encode_key()?, shard_value, op))
+						Some((shard_key, shard_value, op))
 					}
-					None => None,
+					_ => None,
 				};
 				// Admit the legacy entry and its counterpart atomically: deferring only one of the
 				// pair to a later pass would reintroduce the cross-pass split the fold prevents.
@@ -1104,8 +1166,8 @@ impl DiskAnnIndex {
 					// it.
 					continue;
 				}
-				let id = DiskAnnRecordPendingShard::decode_key(&key)?.id.into_owned();
-				let pending = DiskAnnRecordPendingUpdate::kv_decode_value(&value, ())?;
+				let mut pending = DiskAnnRecordPendingUpdate::kv_decode_value(&value, ())?;
+				let id = pending_record_id(&key, PendingLayout::Sharded, &mut pending)?;
 				let pending = Self::record_pending_to_operation(id, pending);
 				if !builder.add(key, value, pending) {
 					return Ok(false);
@@ -1625,12 +1687,8 @@ impl DiskAnnIndex {
 				if ctx.ctx.is_done(Some(scan.pending.entries())).await? {
 					bail!(Error::QueryCancelled)
 				}
-				let id = match layout {
-					PendingLayout::Sharded => {
-						DiskAnnRecordPendingShard::decode_key(key)?.id.into_owned()
-					}
-					PendingLayout::Legacy => DiskAnnRecordPending::decode_key(key)?.id.into_owned(),
-				};
+				let mut pending = DiskAnnRecordPendingUpdate::kv_decode_value(value, ())?;
+				let id = pending_record_id(key, layout, &mut pending)?;
 				match layout {
 					// A legacy record can collide only with the one shard it hashes
 					// to, so recording the shard is enough to spare every other
@@ -1645,7 +1703,6 @@ impl DiskAnnIndex {
 					}
 					PendingLayout::Sharded => {}
 				}
-				let pending = DiskAnnRecordPendingUpdate::kv_decode_value(value, ())?;
 				let pending = Self::record_pending_to_operation(id, pending);
 				// The suppression bitmap covers every doc-ID the queue mentions,
 				// superseded entries included: the graph entry such an id masks is
@@ -1780,6 +1837,7 @@ mod tests {
 
 	use super::*;
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+	use crate::idx::DocId;
 	use crate::idx::trees::diskann::cache::DiskAnnCache;
 	use crate::idx::trees::pending::{
 		PENDING_MAX_BATCH_KEYS, PENDING_MAX_BYTES, PENDING_MAX_PAGE_BYTES, PENDING_MAX_ROWS,
@@ -1889,6 +1947,7 @@ mod tests {
 			doc_id: None,
 			old_vectors: vec![],
 			new_vectors: vec![SerializedVector::F32(values.to_vec())],
+			id: None,
 		}
 	}
 
@@ -3412,6 +3471,7 @@ mod tests {
 					doc_id: Some(7),
 					old_vectors: vec![SerializedVector::F32(vec![1.0, 0.0, 0.0, 0.0])],
 					new_vectors: vec![],
+					id: None,
 				},
 			)
 			.await?;
@@ -3763,6 +3823,147 @@ mod tests {
 		Ok(())
 	}
 
+	/// A pending entry written before the value carried the record id must be
+	/// stamped with it when a later write reuses it — through either layout.
+	///
+	/// Without that, the reused entry keeps `id: None` and lookup falls back to
+	/// the key, whose codec omits a number's kind. The write that was supposed
+	/// to repair such a record would then still be searched and compacted under
+	/// a decimalised identity no record is stored under.
+	#[tokio::test]
+	async fn diskann_write_stamps_the_id_on_an_entry_that_predates_it() -> Result<()> {
+		use crate::val::{Number, Value};
+		let arr = |n: i64| RecordIdKey::Array(vec![Value::Number(Number::Int(n))].into());
+
+		for (layout, sharded) in [("sharded", true), ("legacy", false)] {
+			let ds = Datastore::new("memory").await?;
+			let ikb = ikb();
+			let index = DiskAnnIndex::new(
+				ikb.clone(),
+				TableId(4),
+				&params(VectorType::F32, Distance::Euclidean),
+				cache(),
+			)
+			.await?;
+			let id = arr(1);
+
+			// Exactly what an older binary left: no id in the value.
+			{
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				let tx = ctx.tx();
+				let mut pending = f32_pending(&[1.0, 2.0, 3.0, 4.0]);
+				pending.id = None;
+				if sharded {
+					let shard = DiskAnnIndex::pending_state_shard(&id);
+					tx.set(&ikb.new_dw_key(shard, &id), &pending).await?;
+				} else {
+					tx.set(&ikb.new_dr_key(&id), &pending).await?;
+				}
+				tx.commit().await?;
+			}
+
+			{
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				index
+					.index(
+						&ctx,
+						&id,
+						Some(f32_content(&[1.0, 2.0, 3.0, 4.0])),
+						Some(f32_content(&[9.0, 9.0, 9.0, 9.0])),
+					)
+					.await?;
+				ctx.tx().commit().await?;
+			}
+
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let shard = DiskAnnIndex::pending_state_shard(&id);
+			let stored: DiskAnnRecordPendingUpdate =
+				ctx.tx().get(&ikb.new_dw_key(shard, &id), None).await?.expect("an entry");
+			ctx.tx().cancel().await?;
+			// Compared as encoded keys, not with `==`: `Number`'s equality is
+			// cross-variant, so an id stamped from the key — the regression this
+			// guards — would satisfy an equality check while addressing a
+			// different record.
+			assert_eq!(
+				stored.id.as_ref().map(storekey::encode_vec).transpose().unwrap(),
+				Some(storekey::encode_vec(&id).unwrap()),
+				"the {layout} arm must stamp the record id on the entry it reuses"
+			);
+		}
+		Ok(())
+	}
+
+	/// A record pending in both layouts folds under the id the value carries,
+	/// not the one the legacy key can spell.
+	///
+	/// Nothing writes the legacy layout any more, so its entries never carry the
+	/// id and the spelling recovered from the key is decimalised for an id
+	/// holding a number. The sharded counterpart does carry the exact id, and
+	/// both entries name one record — so folding the pair under the key-derived
+	/// spelling would map the doc-ID to a key no record is stored under, and the
+	/// KNN hit would be dropped after consuming its top-k slot.
+	#[tokio::test]
+	async fn diskann_dual_layout_folds_under_the_id_the_value_carries() -> Result<()> {
+		use crate::val::{Number, Value};
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let id = RecordIdKey::Array(vec![Value::Number(Number::Int(1))].into());
+
+		// A newer node writes the sharded entry, carrying the exact id.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index.index(&ctx, &id, None, Some(f32_content(&[1.0, 2.0, 3.0, 4.0]))).await?;
+			ctx.tx().commit().await?;
+		}
+		// An older node then writes the legacy entry for the same record, which
+		// cannot carry it.
+		// The pair has to chain, as a real pair does: the legacy write follows the
+		// sharded one, so its `old_vectors` are what that write left.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			tx.set(
+				&ikb.new_dr_key(&id),
+				&DiskAnnRecordPendingUpdate {
+					doc_id: None,
+					old_vectors: vec![SerializedVector::F32(vec![1.0, 2.0, 3.0, 4.0])],
+					new_vectors: vec![SerializedVector::F32(vec![5.0, 6.0, 7.0, 8.0])],
+					id: None,
+				},
+			)
+			.await?;
+			tx.commit().await?;
+		}
+
+		while compact_once(&index, &ds, &ikb).await? {}
+
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let tx = ctx.tx();
+		// Read the index-scoped mapping directly: on this line the forward `!di`
+		// and reverse `!dd` keys are the index's own, resolved by `DiskAnnDocs`.
+		let doc_id: DocId =
+			tx.get(&ikb.new_di_key(&id), None).await?.expect("mapped after compaction");
+		let mapped: RecordIdKey =
+			tx.get(&ikb.new_dd_key(doc_id), None).await?.expect("reverse mapping");
+		tx.cancel().await?;
+		// Encoded, not `==`: `Number`'s equality is cross-variant, so the
+		// decimalised spelling would satisfy an equality check while naming a key
+		// no record is stored under.
+		assert_eq!(
+			storekey::encode_vec(&mapped).unwrap(),
+			storekey::encode_vec(&id).unwrap(),
+			"folded under {mapped:?}, which is not the key the record is stored under"
+		);
+		Ok(())
+	}
+
 	/// Forward migration order: a record left pending in the legacy `!dr` layout and then updated
 	/// by new code must end up with a single sharded entry carrying the new value -- the legacy
 	/// entry is folded in and deleted, so a later reader never returns the stale legacy value.
@@ -3848,6 +4049,7 @@ mod tests {
 					doc_id: None,
 					old_vectors: vec![SerializedVector::F32(vec![1.0, 1.0, 1.0, 1.0])],
 					new_vectors: vec![SerializedVector::F32(vec![2.0, 2.0, 2.0, 2.0])],
+					id: None,
 				},
 			)
 			.await?;
@@ -3857,6 +4059,7 @@ mod tests {
 					doc_id: None,
 					old_vectors: vec![SerializedVector::F32(vec![2.0, 2.0, 2.0, 2.0])],
 					new_vectors: vec![SerializedVector::F32(vec![3.0, 3.0, 3.0, 3.0])],
+					id: None,
 				},
 			)
 			.await?;
@@ -3933,6 +4136,7 @@ mod tests {
 					doc_id: None,
 					old_vectors: vec![SerializedVector::F32(vec![10.0, 10.0, 10.0, 10.0])],
 					new_vectors: vec![SerializedVector::F32(vec![20.0, 20.0, 20.0, 20.0])],
+					id: None,
 				},
 			)
 			.await?;
@@ -3942,6 +4146,7 @@ mod tests {
 					doc_id: None,
 					old_vectors: vec![SerializedVector::F32(vec![20.0, 20.0, 20.0, 20.0])],
 					new_vectors: vec![SerializedVector::F32(vec![30.0, 30.0, 30.0, 30.0])],
+					id: None,
 				},
 			)
 			.await?;
@@ -4019,6 +4224,7 @@ mod tests {
 						doc_id,
 						old_vectors: vec![SerializedVector::F32(b.to_vec())],
 						new_vectors: vec![SerializedVector::F32(a.to_vec())],
+						id: None,
 					},
 				)
 				.await?;
@@ -4085,6 +4291,7 @@ mod tests {
 						doc_id,
 						old_vectors: vec![SerializedVector::F32(b.to_vec())],
 						new_vectors: vec![SerializedVector::F32(a.to_vec())],
+						id: None,
 					},
 				)
 				.await?;
@@ -4196,6 +4403,7 @@ mod tests {
 					doc_id: None,
 					old_vectors: vec![SerializedVector::F32(vec![2.0, 2.0, 2.0, 2.0])],
 					new_vectors: vec![SerializedVector::F32(vec![3.0, 3.0, 3.0, 3.0])],
+					id: None,
 				},
 			)
 			.await?;
@@ -4207,6 +4415,7 @@ mod tests {
 						doc_id: None,
 						old_vectors: vec![],
 						new_vectors: vec![],
+						id: None,
 					},
 				)
 				.await?;
@@ -4281,6 +4490,7 @@ mod tests {
 						doc_id: None,
 						old_vectors: vec![],
 						new_vectors: vec![],
+						id: None,
 					},
 				)
 				.await?;
@@ -4293,6 +4503,7 @@ mod tests {
 					doc_id: None,
 					old_vectors: vec![SerializedVector::F32(vec![1.0, 1.0, 1.0, 1.0])],
 					new_vectors: vec![SerializedVector::F32(vec![2.0, 2.0, 2.0, 2.0])],
+					id: None,
 				},
 			)
 			.await?;

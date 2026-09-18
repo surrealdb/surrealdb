@@ -483,3 +483,71 @@ impl ToSql for RecordId {
 		write_sql!(f, sql_fmt, "{}:{}", EscapeRidKey(&self.table), self.key)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// `IndexFormat` erases a number's [`NumberKind`], so a compound record id
+	/// does not survive a round trip through it: every nested `Int`/`Float`
+	/// decodes back as a `Decimal`, and two ids differing only in numeric
+	/// variant encode to the same bytes.
+	///
+	/// That is intended for an ordinary index key, which is only ever compared
+	/// and ordered. It is not safe for a key whose id component is decoded back
+	/// into a record identity and used to fetch the record: the fetch re-encodes
+	/// the id in the default format, which *does* carry the kind, so the
+	/// decimalised id addresses a key that no record was stored under.
+	///
+	/// The assertions are on encoded bytes rather than on `==`, because
+	/// [`Number`]'s equality is approximate across variants — `Float(1.5)`
+	/// compares equal to `Decimal(1.5)` while their record keys differ.
+	#[test]
+	fn index_format_does_not_round_trip_a_compound_record_id() {
+		fn arr(n: Number) -> RecordIdKey {
+			RecordIdKey::Array(Array::from(vec![Value::Number(n)]))
+		}
+		/// The bytes a record is actually stored and fetched under.
+		fn record_key(key: &RecordIdKey) -> Vec<u8> {
+			storekey::encode_vec(key).unwrap()
+		}
+		/// The id as it comes back out of an `IndexFormat` key.
+		fn through_index_format(key: &RecordIdKey) -> RecordIdKey {
+			let enc = storekey::encode_vec_format::<IndexFormat, _>(key).unwrap();
+			storekey::decode_borrow_format::<IndexFormat, _>(&enc).unwrap()
+		}
+
+		let int = arr(Number::Int(1));
+		let float = arr(Number::Float(1.5));
+		let dec = arr(Number::Decimal(rust_decimal::Decimal::from(1)));
+
+		// An Int comes back as a Decimal, and so addresses a different record key.
+		assert!(matches!(through_index_format(&int), RecordIdKey::Array(ref a)
+			if matches!(a.first(), Some(Value::Number(Number::Decimal(_))))));
+		assert_ne!(
+			record_key(&through_index_format(&int)),
+			record_key(&int),
+			"`[1]` does not address its own record after an IndexFormat round trip"
+		);
+		assert_ne!(
+			record_key(&through_index_format(&float)),
+			record_key(&float),
+			"`[1.5f]` does not address its own record after an IndexFormat round trip"
+		);
+		// A Decimal is the fixed point, which is why only decimal ids survive today.
+		assert_eq!(record_key(&through_index_format(&dec)), record_key(&dec));
+
+		// The encoding is also not injective: `[1]` and `[1dec]` are distinct
+		// records that collide on one key.
+		assert_ne!(record_key(&int), record_key(&dec), "they are distinct records");
+		assert_eq!(
+			storekey::encode_vec_format::<IndexFormat, _>(&int).unwrap(),
+			storekey::encode_vec_format::<IndexFormat, _>(&dec).unwrap(),
+			"`[1]` and `[1dec]` encode to the same IndexFormat key"
+		);
+
+		// The default format carries the kind, so it does round trip.
+		let back: RecordIdKey = storekey::decode_borrow(&record_key(&int)).unwrap();
+		assert_eq!(record_key(&back), record_key(&int));
+	}
+}

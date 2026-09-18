@@ -13,6 +13,10 @@
 //! key decoding, the coalescing rules and the scoring differ, and those stay in
 //! the engines.
 //!
+//! One rule about those engines' keys does live here, beside the scan that
+//! reads them: [`take_pending_record_id`], which decides whether a pending
+//! entry's record id comes from its value or from its key.
+//!
 //! # What the byte budget is and is not
 //!
 //! [`PENDING_MAX_BYTES`] is a **target the page sizer converges to, not a
@@ -48,12 +52,14 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use anyhow::Result;
 use tracing::warn;
 
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::VectorId;
 use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::ValsBatch;
+use crate::val::RecordIdKey;
 
 /// Maximum number of pending entries a kNN scan holds in one scoring batch.
 ///
@@ -98,6 +104,37 @@ pub(crate) const PENDING_PROBE_ROWS: u32 = 4;
 /// Sixteen preserves useful range-scan batching without allowing one narrow page
 /// to turn the next into a 500-value allocation.
 pub(crate) const PENDING_MAX_ROWS: u32 = 16;
+
+/// The record a pending entry belongs to: the id the value carries, or the one
+/// its key spells when the value predates the field.
+///
+/// **The value's id is authoritative.** A pending key spells its id under
+/// `IndexFormat`, the codec for indexed values, which omits a number's kind — an
+/// index key stands for its whole equality class, so a lookup for `1` finds a
+/// row stored as `1f`. A record id is not matched that way; it addresses a
+/// record. So an id holding a number comes back from a key decimalised, naming
+/// no record: compaction would map the doc-ID to a key nothing is stored under
+/// and the kNN hit would be dropped at the record fetch, after taking a top-k
+/// slot.
+///
+/// `decode_fallback` therefore answers only for an entry written before the
+/// value carried an id, and keeps whatever that key could express.
+///
+/// The id is *taken*, not copied: nothing reads the field afterwards, and a
+/// compound `Array`/`Object` id is a deep copy on paths that are O(backlog) by
+/// design.
+///
+/// Each engine keeps its own key decoding — the layouts and their decoders are
+/// index concerns, and DiskANN has two of them — so only this rule is shared.
+pub(crate) fn take_pending_record_id(
+	exact_id: &mut Option<RecordIdKey>,
+	decode_fallback: impl FnOnce() -> Result<RecordIdKey>,
+) -> Result<RecordIdKey> {
+	match exact_id.take() {
+		Some(id) => Ok(id),
+		None => decode_fallback(),
+	}
+}
 
 /// The low bit of [`PendingBacklogReport::state`] records whether a backlog is
 /// currently reported; the remaining bits form its observation generation.
