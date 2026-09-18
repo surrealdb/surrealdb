@@ -79,13 +79,18 @@ jobs:
       - name: Check whether the downstream check is configured
         id: preflight
         env:
-          CLIENT_ID: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld (fork
+          # PRs, or the setup window before the key secret was added), so gating
+          # on the variable lets the token mint run without a key and hard-fail
+          # instead of no-opping. `!= ''` yields a boolean without exposing it.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
         run: |
-          if [ -n "${CLIENT_ID}" ]; then
+          if [ "${HAS_APP}" = "true" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Downstream compatibility::Not configured (DOWNSTREAM_APP_* secrets absent) — skipping."
+            echo "::notice title=Downstream compatibility::Not configured (RELEASE_AUTOMATION_APP_* absent) — skipping."
           fi
 
       # The engine (this PR) is checked out at the workspace root so the local
@@ -106,8 +111,8 @@ jobs:
         if: steps.preflight.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
-          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
 
       # Pick the downstream branch to validate against, in priority order: the
