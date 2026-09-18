@@ -14,6 +14,16 @@ license-file.workspace = true
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+# Off by default, and deliberately so: it gates `math::gated`, whose whole
+# purpose is to be *excluded* from the ordinary build. See its doc comment.
+#
+# Nothing builds the demo with this on, which is the right direction for that
+# guard — feature-off is the state that fails without the fix — but it does mean
+# the gated body is never compiled, so a defect that only appears with the
+# feature on would not be seen here.
+extra = []
+
 [dependencies]
 anyhow.workspace = true
 serde_json.workspace = true

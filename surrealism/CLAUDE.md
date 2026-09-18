@@ -86,10 +86,100 @@ second writer entering before the first has left would unwind the wrong one. A
 handle may hold at most 64 calls in flight; beyond that they are refused.
 
 There is no executor in the guest. The SDK has no tokio dependency and modules
-need no build flags. A plugin may still build its own runtime for a dependency
-that demands one, but must never await a `tx` method inside a nested `block_on`:
-a `tx` call is a component-model subtask that can only complete once the guest
-yields back to the host, which a blocking executor never does.
+need no build flags.
+
+This covers **host imports only**. A future driven by the component model is
+one whose waker the host calls, which means `tx.sql()` and `tx.run()`. Guest
+network I/O is not in that set: WASI p2 socket calls are sync-lowered, so
+`std::net` and sync clients block the task (correct, and no executor needed),
+and a tokio-shaped crate still needs its own runtime. That half becomes
+host-driven when `wasi:io@0.3` arrives, not before.
+
+### Bringing your own runtime
+
+A plugin may run its own executor for a crate that demands one. Two rules:
+
+- Such an export must **not** take a `Transaction`. A `tx` call is a
+  component-model subtask that completes only once the guest returns
+  `CallbackCode::Wait` to the host, and a blocking executor never returns. The
+  await would hang.
+- Declare the export `fn`, not `async fn`. From the host's side it *is*
+  synchronous — it blocks until done — and `async` would imply it yields.
+
+Blocking there is legal: a guest-side executor parks on `wasi:io/poll`, an
+ordinary synchronous host call, and never touches the component model's
+`waitable-set.wait`, which is what would trap.
+
+`#[surrealism]` preserves the attributes you put on a function, so
+`#[tokio::main(flavor = "current_thread")]` composes with it. Order matters —
+`tokio::main` must be the outer attribute, so it strips `async` before
+`#[surrealism]` sees the signature:
+
+```rust
+#[tokio::main(flavor = "current_thread")]   // outermost: runs first
+#[surrealism]                                // sees a plain `fn`
+async fn fetch(url: String) -> anyhow::Result<String> { ... }
+```
+
+The default `multi_thread` flavor needs threads and will not work.
+
+This is the form to reach for. *Using reqwest* below builds the runtime by hand
+instead, which is the same thing spelled out: it is written that way because the
+export there is already a plain `fn`, so the shape this section is about — no
+`Transaction`, not `async` — is visible without knowing what `tokio::main`
+rewrites. Either compiles to the same thing.
+
+### Using reqwest
+
+reqwest works, with two adjustments it cannot make for us. Uncomment the
+`tokio_unstable` line in `.cargo/config.toml`, then:
+
+```toml
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls  = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time"] }
+```
+
+`rustls-no-provider` matters: reqwest's default `rustls` feature pulls
+`aws-lc-sys`, which is C and will not cross-compile. `ring` will.
+
+Root certificates need no entry of their own. `rustls-no-provider` pulls
+`rustls-platform-verifier`, which on `wasm32` depends on `webpki-root-certs` and
+uses it — there is no platform trust store to ask.
+
+reqwest's default resolver is `hyper-util`'s `GaiResolver`, which hands the
+lookup to `tokio::task::spawn_blocking`. There are no threads, so it panics.
+Replace it — `std`'s resolver works here, going through
+`wasi:sockets/ip-name-lookup`, and the guest is single-threaded anyway:
+
+```rust
+struct WasiResolver;
+
+impl reqwest::dns::Resolve for WasiResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            let addrs = std::net::ToSocketAddrs::to_socket_addrs(&(host.as_str(), 0))?;
+            Ok(Box::new(addrs) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+#[surrealism]
+fn fetch(url: String) -> anyhow::Result<String> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    rt.block_on(async {
+        let client = reqwest::Client::builder()
+            .dns_resolver(std::sync::Arc::new(WasiResolver))
+            .build()?;
+        Ok(client.get(&url).send().await?.text().await?)
+    })
+}
+```
+
+Measured working over HTTPS. Prefer a sync client such as `ureq` when you can:
+it needs none of the above and no executor at all.
 
 ## Networking
 
@@ -126,11 +216,11 @@ code, and no pinning a hostname to a literal address.
 | `hyper` 1 | compiles | Runtime-agnostic; needs an IO adapter, so not exercised end to end. |
 | `wstd` 0.6 | partial | Panics on an IPv6 address (`todo!()` in `wstd::net::TcpStream`). Fine over IPv4, which is what the special-address filter leaves for `localhost`. |
 | `tokio` (`net`) | **needs `--cfg tokio_unstable`** | Sockets work once compiled, but only when connecting to a `SocketAddr`. Its `(host, port)` resolution goes through `spawn_blocking`, which needs threads and panics on wasm. |
-| `reqwest` 0.13 | **does not work** | Needs the tokio flag, and then panics in `hyper-util`'s resolver for the same reason. |
+| `reqwest` 0.13 | **works** with setup | Needs the tokio flag, a `rustls`/`ring` provider, and a custom `Resolve`. See *Using reqwest*. |
 
 `--cfg tokio_unstable` is the plugin's to set, not the SDK's: a module that
-wants a tokio-based client opts in itself — and will still hit the resolution
-panic, so prefer a sync client or `wstd` until that is fixed upstream.
+wants a tokio-based client opts in by uncommenting the line `surreal module
+init` leaves in `.cargo/config.toml`.
 
 Reading a response body to EOF (an HTTP/1.0 or `Connection: close` reply) fails
 with WASI `EIO` on the readiness-driven path. Responses carrying

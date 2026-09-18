@@ -1,4 +1,7 @@
 #![allow(clippy::needless_pass_by_value)]
+// Makes `attribute_preserved` a compile-time guard rather than a convention:
+// see its doc comment.
+#![deny(deprecated)]
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -284,6 +287,27 @@ async fn fetch_pokemon(api_base: String, name: String) -> Result<String> {
 		.ok_or_else(|| anyhow::anyhow!("API response missing 'name'"))
 }
 
+/// Deprecated on purpose, so that [`attribute_preserved`] has something its
+/// `#[allow]` must suppress.
+#[deprecated(note = "exists only to give the attribute-preservation guard a target")]
+fn deprecated_helper() -> i64 {
+	1
+}
+
+/// Standing guard that the macro emits the author's own attributes.
+///
+/// The crate denies `deprecated`, so calling [`deprecated_helper`] compiles
+/// only while the `#[allow]` below reaches the emitted function. A macro that
+/// rebuilt the item from its visibility, signature and block would drop it, and
+/// this stops compiling — which is the failure mode that once ate
+/// `#[tokio::main]` and left a tokio-shaped export with no runtime entered,
+/// silently, because nothing else in the tree fails when an attribute is lost.
+#[surrealism]
+#[allow(deprecated)]
+fn attribute_preserved() -> i64 {
+	deprecated_helper()
+}
+
 // ---------------------------------------------------------------------------
 // Module namespace demo: exercises #[surrealism] on mod blocks
 // ---------------------------------------------------------------------------
@@ -299,6 +323,22 @@ mod math {
 	#[surrealism]
 	fn add(a: i64, b: i64) -> i64 {
 		a + b
+	}
+
+	/// An export gated by a Cargo feature, inside a `#[surrealism]` mod.
+	///
+	/// The `extra` feature is off in every ordinary build, so this function is
+	/// absent from the built component — and so must be everything the macro
+	/// emits for it. Inside a mod is where that can go wrong: the mod's own
+	/// attribute macro receives these items with their `#[cfg]` still on them
+	/// and walks them itself, so it emits a registration for a function that
+	/// the later cfg-strip then removes. (A `#[cfg]` on a *free* function is
+	/// evaluated before the attribute macro runs, so that case never reaches
+	/// codegen at all.)
+	#[surrealism]
+	#[cfg(feature = "extra")]
+	fn gated(x: i64) -> i64 {
+		x
 	}
 
 	#[surrealism(name = "multiply")]

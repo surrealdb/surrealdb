@@ -10,10 +10,17 @@
 //! guest as each pending host call resolves. Two `tx` calls awaited together
 //! genuinely overlap.
 //!
-//! A plugin may still build its own runtime for a dependency that demands one,
-//! but must never await a `tx` method inside a nested `block_on`: a `tx` call
-//! is a component-model subtask that can only complete once the guest yields
-//! back to the host, which a blocking executor never does.
+//! This covers host imports only. Guest network I/O is sync-lowered on WASI p2,
+//! so a sync client blocks the task and a tokio-shaped crate needs its own
+//! runtime.
+//!
+//! A plugin may run its own executor for a crate that demands one. Such an
+//! export must not take a [`Transaction`], and should be declared `fn` rather
+//! than `async fn`: a `tx` call completes only once the guest returns to the
+//! host, which a blocking executor never does, so the await would hang.
+//! `#[surrealism]` preserves your attributes, so
+//! `#[tokio::main(flavor = "current_thread")]` composes with it when applied as
+//! the outer attribute.
 
 #[allow(clippy::all, unused)]
 pub mod bindings;

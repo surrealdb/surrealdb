@@ -9,9 +9,13 @@ fn encode_name(name: &str) -> String {
 }
 
 /// Generate the sentinel const for compile-time duplicate detection.
-pub(crate) fn generate_sentinel(export_name: Option<&str>) -> proc_macro2::TokenStream {
+pub(crate) fn generate_sentinel(
+	export_name: Option<&str>,
+	gates: &[&syn::Attribute],
+) -> proc_macro2::TokenStream {
 	let sentinel_ident = format_ident!("{}", sentinel_const_name(export_name));
 	quote! {
+		#(#gates)*
 		#[doc(hidden)]
 		#[allow(dead_code, non_upper_case_globals)]
 		const #sentinel_ident: () = ();
@@ -24,6 +28,7 @@ pub(crate) fn generate_sentinel(export_name: Option<&str>) -> proc_macro2::Token
 pub(crate) fn generate_arg_sentinels(
 	export_name: Option<&str>,
 	arg_wire_names: &[String],
+	gates: &[&syn::Attribute],
 ) -> proc_macro2::TokenStream {
 	let sentinels: Vec<_> = arg_wire_names
 		.iter()
@@ -31,6 +36,7 @@ pub(crate) fn generate_arg_sentinels(
 			let const_name = arg_sentinel_const_name(export_name, arg_name);
 			let ident = format_ident!("{}", const_name);
 			quote! {
+				#(#gates)*
 				#[doc(hidden)]
 				#[allow(dead_code, non_upper_case_globals)]
 				const #ident: () = ();
@@ -56,6 +62,9 @@ pub(crate) fn generate_registration_body(
 	export_name: Option<&str>,
 	tx: Option<&crate::extract::TxParam>,
 	comment: Option<&str>,
+	// The author's `cfg`/`cfg_attr` attributes. Repeated on every item emitted
+	// here, because they gate the function and everything here names it.
+	gates: &[&syn::Attribute],
 ) -> proc_macro2::TokenStream {
 	if is_init {
 		// `init` is sync-lifted, and a sync-lifted export cannot block, so an
@@ -70,10 +79,12 @@ pub(crate) fn generate_registration_body(
 		let init_ident = format_ident!("__sr_init_{}", fn_name);
 
 		quote! {
+			#(#gates)*
 			fn #init_ident() -> Result<(), String> {
 				#init_call
 			}
 
+			#(#gates)*
 			surrealism::inventory::submit!(surrealism::SurrealismInit(#init_ident));
 		}
 	} else {
@@ -132,11 +143,12 @@ pub(crate) fn generate_registration_body(
 
 		let wire_name_strs = arg_wire_names.iter().map(|n| n.as_str()).collect::<Vec<_>>();
 
-		let arg_sentinels = generate_arg_sentinels(export_name, arg_wire_names);
+		let arg_sentinels = generate_arg_sentinels(export_name, arg_wire_names, gates);
 
 		quote! {
 			#arg_sentinels
 
+			#(#gates)*
 			fn #invoke_ident<'__sr>(
 				__sr_tx: Option<&'__sr ::surrealism::bindings::surrealism::plugin::host::Transaction>,
 				raw_args: &'__sr [u8],
@@ -160,6 +172,7 @@ pub(crate) fn generate_registration_body(
 				})
 			}
 
+			#(#gates)*
 			fn #args_ident() -> Result<Vec<u8>, String> {
 				use surrealism::types::args::Args;
 				let kinds = <#tuple_type as Args>::kinds();
@@ -169,12 +182,14 @@ pub(crate) fn generate_registration_body(
 				surrealdb_types::encode_argument_list(&arguments).map_err(|e| e.to_string())
 			}
 
+			#(#gates)*
 			fn #returns_ident() -> Result<Vec<u8>, String> {
 				use surrealdb_types::SurrealValue;
 				let kind = <#result_type as SurrealValue>::kind_of();
 				surrealdb_types::encode_kind(&kind).map_err(|e| e.to_string())
 			}
 
+			#(#gates)*
 			surrealism::inventory::submit!(surrealism::SurrealismEntry {
 				name: #name_expr,
 				comment: #comment_expr,

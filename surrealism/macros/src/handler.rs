@@ -100,10 +100,8 @@ pub(crate) fn handle_function(
 
 	strip_param_name_attrs(&mut input_fn.sig);
 
-	let fn_name = &input_fn.sig.ident;
-	let fn_vis = &input_fn.vis;
-	let fn_sig = &input_fn.sig;
-	let fn_block = &input_fn.block;
+	let fn_name = input_fn.sig.ident.clone();
+	let fn_name = &fn_name;
 
 	let export_name: Option<String> = if is_default {
 		None
@@ -118,7 +116,16 @@ pub(crate) fn handle_function(
 		);
 	}
 
-	let sentinel = generate_sentinel(export_name.as_deref());
+	// Nothing to gate on this path. A `#[cfg]` on a *free* function is resolved
+	// before an attribute macro on it runs — false and the macro is never
+	// invoked, true and the attribute is inert — and a `#[cfg_attr]` is
+	// expanded by then too. So whatever conditional the author wrote has
+	// already been decided, and there is nothing left for the generated items
+	// to repeat. The `#[surrealism] mod` walker is where that is not true, and
+	// where the gates are collected: see `process_mod_items`.
+	let gates: &[&syn::Attribute] = &[];
+
+	let sentinel = generate_sentinel(export_name.as_deref(), gates);
 	let registration = generate_registration_body(
 		fn_name,
 		&parts.arg_patterns,
@@ -132,16 +139,44 @@ pub(crate) fn handle_function(
 		export_name.as_deref(),
 		parts.tx.as_ref(),
 		comment.as_deref(),
+		gates,
 	);
 
+	// Emit the whole item rather than vis/sig/block, so the author's attributes
+	// reach the emitted function — `#[tokio::main]` above all, which is what
+	// enters the runtime a tokio-shaped export needs.
 	let expanded = quote! {
-		#fn_vis #fn_sig #fn_block
+		#input_fn
 
 		#sentinel
 		#registration
 	};
 
 	TokenStream::from(expanded)
+}
+
+/// Whether an attribute decides that the item *exists*, rather than decorating it.
+///
+/// `cfg` does. `cfg_attr` usually does not: it applies an attribute, which is
+/// the function's own business, so it counts only when every attribute it
+/// applies is itself a `cfg`. Copying the general form would stamp the author's
+/// `#[cfg_attr(feature = "x", inline)]` onto a `const` and onto an
+/// `inventory::submit!` invocation — a compile error they never wrote, in a
+/// place they cannot trace it back from.
+///
+/// Asked only of items inside a `#[surrealism] mod`, which is where these
+/// attributes still arrive unexpanded.
+fn is_existence_gate(attr: &syn::Attribute) -> bool {
+	if attr.path().is_ident("cfg") {
+		return true;
+	}
+	if !attr.path().is_ident("cfg_attr") {
+		return false;
+	}
+	// `#[cfg_attr(predicate, attr, ...)]`: the predicate first, then whatever it
+	// applies. Unparseable means unrecognised, which means not copied.
+	attr.parse_args_with(syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated)
+		.is_ok_and(|args| args.iter().skip(1).all(|m| m.path().is_ident("cfg")))
 }
 
 pub(crate) fn handle_module(
@@ -236,7 +271,16 @@ fn process_mod_items(prefix: &str, items: Vec<Item>) -> (Vec<Item>, Vec<proc_mac
 					strip_param_name_attrs(&mut fn_item.sig);
 					let fn_name = &fn_item.sig.ident;
 
-					sentinels.push(generate_sentinel(Some(&export_name)));
+					// A conditional-compilation gate on the function has to
+					// reach everything that names it. This mod's own attribute
+					// macro receives the items with their `#[cfg]` still on
+					// them, so without repeating it the sentinel and the
+					// registration would name a function the later cfg-strip
+					// removes.
+					let gates: Vec<&syn::Attribute> =
+						fn_item.attrs.iter().filter(|a| is_existence_gate(a)).collect();
+
+					sentinels.push(generate_sentinel(Some(&export_name), &gates));
 
 					let registration = generate_registration_body(
 						fn_name,
@@ -251,6 +295,7 @@ fn process_mod_items(prefix: &str, items: Vec<Item>) -> (Vec<Item>, Vec<proc_mac
 						Some(&export_name),
 						parts.tx.as_ref(),
 						comment.as_deref(),
+						&gates,
 					);
 
 					new_items.push(item);

@@ -161,6 +161,7 @@ fn scaffold_rust(path: &Path, name: &str) -> Result<()> {
 	run_cargo_init(path, name)?;
 	rewrite_cargo_toml(path, name)?;
 	write_lib_rs(path)?;
+	super::wasm_target::write_cargo_config(path)?;
 	Ok(())
 }
 
