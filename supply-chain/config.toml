@@ -1124,7 +1124,7 @@ version = "0.21.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls]]
-version = "0.23.25"
+version = "0.23.45"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-pemfile]]

@@ -678,7 +678,7 @@ dependencies = [
  "hyper 1.6.0",
  "hyper-util",
  "pin-project-lite",
- "rustls 0.23.25",
+ "rustls 0.23.45",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "tokio",
@@ -2509,7 +2509,7 @@ dependencies = [
  "http 1.3.1",
  "hyper 1.6.0",
  "hyper-util",
- "rustls 0.23.25",
+ "rustls 0.23.45",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.26.2",
@@ -4210,7 +4210,7 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash 2.1.1",
- "rustls 0.23.25",
+ "rustls 0.23.45",
  "socket2",
  "thiserror 2.0.12",
  "tokio",
@@ -4229,7 +4229,7 @@ dependencies = [
  "rand 0.9.0",
  "ring",
  "rustc-hash 2.1.1",
- "rustls 0.23.25",
+ "rustls 0.23.45",
  "rustls-pki-types",
  "slab",
  "thiserror 2.0.12",
@@ -4550,7 +4550,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "quinn",
- "rustls 0.23.25",
+ "rustls 0.23.45",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "serde",
@@ -4897,15 +4897,15 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.25"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "822ee9188ac4ec04a2f0531e55d035fb2de73f18b41a63c70c2712503b6fb13c"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
- "rustls-webpki 0.103.13",
+ "rustls-webpki 0.103.15",
  "subtle",
  "zeroize",
 ]
@@ -4950,9 +4950,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.13"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -5501,7 +5501,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surreal"
-version = "2.6.5"
+version = "2.7.0"
 dependencies = [
  "arc-swap",
  "argon2",
@@ -5608,7 +5608,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "2.6.5"
+version = "2.7.0"
 dependencies = [
  "arrayvec",
  "async-channel",
@@ -5638,7 +5638,7 @@ dependencies = [
  "revision 0.11.0",
  "ring",
  "rust_decimal",
- "rustls 0.23.25",
+ "rustls 0.23.45",
  "rustls-pki-types",
  "semver",
  "serde",
@@ -5667,7 +5667,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "2.6.5"
+version = "2.7.0"
 dependencies = [
  "addr",
  "affinitypool",
@@ -6262,7 +6262,7 @@ version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e727b36a1a0e8b74c376ac2211e40c2c8af09fb4013c60d910495810f008e9b"
 dependencies = [
- "rustls 0.23.25",
+ "rustls 0.23.45",
  "tokio",
 ]
 
@@ -6286,7 +6286,7 @@ dependencies = [
  "futures-util",
  "log",
  "native-tls",
- "rustls 0.23.25",
+ "rustls 0.23.45",
  "rustls-pki-types",
  "tokio",
  "tokio-native-tls",
@@ -6614,7 +6614,7 @@ dependencies = [
  "log",
  "native-tls",
  "rand 0.8.5",
- "rustls 0.23.25",
+ "rustls 0.23.45",
  "rustls-pki-types",
  "sha1",
  "thiserror 1.0.69",
@@ -6739,7 +6739,7 @@ dependencies = [
  "base64 0.22.1",
  "log",
  "once_cell",
- "rustls 0.23.25",
+ "rustls 0.23.45",
  "rustls-pki-types",
  "url",
  "webpki-roots",
