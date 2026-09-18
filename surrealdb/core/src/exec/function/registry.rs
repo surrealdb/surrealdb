@@ -660,6 +660,20 @@ mod tests {
 				f.name()
 			);
 		}
+
+		// `mutates_state_builtin` is what the runtime write refusal asks about a
+		// call, so a builtin that declares a mutating effect and is missing from
+		// that list is a context that may not modify state being able to. The
+		// list is a name table because the refusal runs in the expression layer,
+		// which cannot see this registry; this is what keeps the two in step.
+		for f in registry.scalar_functions() {
+			assert_eq!(
+				crate::expr::method::mutates_state_builtin(f.name()),
+				f.effects().mutates_state(),
+				"{}: `mutates_state_builtin` and `EffectSet::mutates_state` disagree",
+				f.name()
+			);
+		}
 	}
 
 	/// Every builtin that runs a closure it is handed, with the argument

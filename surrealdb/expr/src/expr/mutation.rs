@@ -23,12 +23,36 @@ impl Visitor for MutationScanner {
 
 	/// Walk an `Expr`, failing on anything that modifies data.
 	///
+	/// The classification itself lives in [`Expr::is_mutation_statement`], so
+	/// the deep walk here and the runtime write refusal cannot disagree about
+	/// what counts as a mutation.
+	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
+		if expr.is_mutation_statement() {
+			return Err(FoundMutation);
+		}
+		// Everything else delegates to the default traversal, which descends
+		// into blocks, subqueries, idiom parts, closure bodies and call
+		// arguments — so a write buried in any of them is still found.
+		expr.visit(self)
+	}
+}
+
+impl Expr {
+	/// Whether this node is itself a data-modifying statement or DDL.
+	///
+	/// Shallow: it classifies this node alone and descends into nothing. Use
+	/// [`contains_mutation`](Self::contains_mutation) to ask about a whole tree.
+	///
 	/// The match is **exhaustive (no `_` arm) on purpose**, matching
 	/// [`crate::expr::computed_deps`]: adding an `Expr` variant should be a
 	/// build error here so a human classifies it, rather than a new statement
 	/// kind silently passing a check whose whole job is to reject writes.
-	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
-		match expr {
+	///
+	/// Both readers of this question call it — the definition-time walk in this
+	/// module, and the runtime write refusal that `Options::no_write` drives —
+	/// so the two cannot drift apart.
+	pub fn is_mutation_statement(&self) -> bool {
+		match self {
 			// Data-modifying statements and DDL.
 			Expr::Create(_)
 			| Expr::Update(_)
@@ -39,12 +63,8 @@ impl Visitor for MutationScanner {
 			| Expr::Define(_)
 			| Expr::Remove(_)
 			| Expr::Rebuild(_)
-			| Expr::Alter(_) => Err(FoundMutation),
+			| Expr::Alter(_) => true,
 
-			// A GQL plan carries its mutations in its stages.
-			// Everything else delegates to the default traversal, which
-			// descends into blocks, subqueries, idiom parts, closure bodies and
-			// call arguments — so a write buried in any of them is still found.
 			Expr::Literal(_)
 			| Expr::Param(_)
 			| Expr::Idiom(_)
@@ -75,12 +95,10 @@ impl Visitor for MutationScanner {
 			| Expr::Sleep(_)
 			| Expr::Explain {
 				..
-			} => expr.visit(self),
+			} => false,
 		}
 	}
-}
 
-impl Expr {
 	/// Whether this expression's own tree contains a data-modifying statement,
 	/// looking through subqueries, idiom parts, blocks and closure bodies.
 	///

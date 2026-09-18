@@ -225,6 +225,19 @@ pub(crate) enum Error {
 	#[error("A COMPUTED clause cannot contain a statement that modifies data")]
 	ComputedFieldSideEffect,
 
+	/// A Surrealism module function that declared read-only access reached a
+	/// data-modifying statement.
+	///
+	/// The guest builds its query as a string at runtime, so however the guest
+	/// language spells the declaration, it cannot prevent this by itself. The
+	/// declaration is what the host acts on, and this is where the mismatch is
+	/// caught.
+	#[error(
+		"A read-only Surrealism function cannot modify data; \
+		 the function must declare that it requires a writeable transaction"
+	)]
+	SurrealismReadOnlySideEffect,
+
 	/// The specified value did not conform to the LET type check
 	#[error("Tried to set `${name}`, but couldn't coerce value: {error}")]
 	SetCoerce {
@@ -407,7 +420,11 @@ impl LeafError for Error {
 			// The definition itself is malformed, so the client can act on it.
 			// `ComputedFieldSideEffect` is the same fault caught at read time
 			// instead of definition time, so it reaches clients the same way.
-			Error::ComputedWrite(_) | Error::ComputedFieldSideEffect => {
+			// `SurrealismReadOnlySideEffect` is likewise the module author's to
+			// fix: the function's declared mode and its query disagree.
+			Error::ComputedWrite(_)
+			| Error::ComputedFieldSideEffect
+			| Error::SurrealismReadOnlySideEffect => {
 				TypesError::validation(message, ValidationError::InvalidRequest)
 			}
 			// A `CONTEXT` clause the access method may not carry: the author of

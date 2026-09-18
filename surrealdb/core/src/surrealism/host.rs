@@ -67,16 +67,26 @@ enum CallOrder<'a> {
 }
 
 impl Host {
+	/// `writeable` comes from the function's entry in the baked exports
+	/// manifest, where the guest declared whether it needs write access. When it
+	/// is `false` the execution frame refuses data-modifying statements, so the
+	/// declaration is enforced rather than merely recorded — the guest builds
+	/// its query as a string, so nothing earlier can settle it.
 	pub(crate) fn new(
 		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
+		writeable: bool,
 		module_name: String,
 		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 	) -> Self {
 		Self {
 			ctx: Arc::clone(ctx),
-			opt: opt.clone(),
+			opt: if writeable {
+				opt.clone()
+			} else {
+				opt.new_for_read_only_module()
+			},
 			doc: doc.cloned(),
 			module_name,
 			#[cfg(feature = "http")]

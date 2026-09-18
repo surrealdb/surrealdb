@@ -1170,11 +1170,10 @@ mod surrealism_integration {
 	/// A write issued by a function that declared a read-only transaction must be
 	/// refused.
 	///
-	/// Ignored because this does not hold yet. `writeable` reaches planning and
-	/// scheduling, but a module call runs through the legacy `run_on_runtime`
-	/// path and is handed the caller's transaction unchanged, so the `CREATE`
-	/// below succeeds. Enabling this test is the acceptance criterion for
-	/// opening a genuinely read-only transaction for non-writeable module calls.
+	/// `Host::new` installs `NoWriteFrame::SurrealismReadOnly` when the
+	/// function's manifest entry is not `writeable`, and the frame fires where
+	/// the write is reached — the same enforcement point that stops a `SELECT`
+	/// `PERMISSIONS` predicate and a `COMPUTED` body from writing.
 	///
 	/// The assertions deliberately check *why* the call failed: an earlier
 	/// version of this test passed only because the demo had not declared
@@ -1196,27 +1195,109 @@ mod surrealism_integration {
 			results[0].result
 		);
 
-		// The refusal must come from the datastore, not from a missing
-		// capability: the demo declares `allow_arbitrary_queries`, so a
-		// `permission denied` here would mean this test is passing for the wrong
-		// reason and proving nothing about read-only enforcement.
+		// The refusal must be the read-only frame, not a missing capability: the
+		// demo declares `allow_arbitrary_queries`, so a `permission denied` here
+		// would mean this test is passing for the wrong reason and proving
+		// nothing about read-only enforcement.
 		let message = results[0].result.to_string();
 		assert!(
-			message.contains("datastore error"),
-			"expected a datastore refusal, got: {message}"
+			message.contains("read-only Surrealism function"),
+			"expected the read-only frame to refuse the write, got: {message}"
 		);
 		assert!(
 			!message.contains("permission denied"),
-			"refused by capability, not by the read-only transaction: {message}"
+			"refused by capability, not by the read-only frame: {message}"
 		);
 
 		Ok(())
 	}
 
 	#[test(tokio::test)]
-	#[ignore = "read-only enforcement for module calls is not implemented yet"]
 	async fn module_read_only_write_refused() -> Result<(), Box<dyn std::error::Error>> {
 		check_read_only_write_refused(&DEMO_DIR.canonical).await
+	}
+
+	/// A read-only function cannot advance a sequence either.
+	///
+	/// `sequence::nextval` is a *call*, not a statement, and it moves a counter
+	/// the transaction does not snapshot. The refusal has to classify calls as
+	/// well as statement forms, or the WIT's promise — that a non-writeable
+	/// function cannot write whatever query string it builds — holds only for
+	/// the strings that happen to contain a `CREATE`.
+	async fn check_read_only_sequence_refused(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+		sql_query(&addr, &ns, &db, "DEFINE SEQUENCE order_no;").await;
+
+		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::sneaky_sequence();").await;
+		assert_ne!(
+			results[0].status, "OK",
+			"advancing a sequence through a read-only transaction must be refused, got: {:?}",
+			results[0].result
+		);
+		let message = results[0].result.to_string();
+		assert!(
+			message.contains("read-only Surrealism function"),
+			"expected the read-only frame to refuse the call, got: {message}"
+		);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_read_only_sequence_refused() -> Result<(), Box<dyn std::error::Error>> {
+		check_read_only_sequence_refused(&DEMO_DIR.canonical).await
+	}
+
+	/// A read-only function cannot write to a bucket through *method* syntax.
+	///
+	/// `f'bucket:/k'.put(..)` is a `Part::Method`. It never becomes an
+	/// `Expr::FunctionCall`, so the refusal in `expr_compute` never sees it —
+	/// the dispatch in `fnc::idiom` is the only point that can, and the only
+	/// point where the receiver's kind is known well enough to name the builtin.
+	/// The call-form fixtures cannot reach this route, so without this the
+	/// whole `file::*` family is refused on paper and reachable in practice.
+	///
+	/// The demo declares `file::*`, so a refusal here is the read-only frame
+	/// rather than the capability gate — which is asserted, not assumed.
+	async fn check_read_only_file_method_refused(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+		let dir = bucket_dir.to_string_lossy();
+		let results =
+			sql_query(&addr, &ns, &db, &format!("DEFINE BUCKET evil BACKEND \"file:{dir}\";"))
+				.await;
+		assert_eq!(results[0].status, "OK", "DEFINE BUCKET: {:?}", results[0].result);
+
+		let results =
+			sql_query(&addr, &ns, &db, "RETURN mod::demo::sneaky_file_method('evil');").await;
+		assert_ne!(
+			results[0].status, "OK",
+			"writing to a bucket through a read-only transaction must be refused, got: {:?}",
+			results[0].result
+		);
+		let message = results[0].result.to_string();
+		assert!(
+			message.contains("read-only Surrealism function"),
+			"expected the read-only frame to refuse the method call, got: {message}"
+		);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_read_only_file_method_refused() -> Result<(), Box<dyn std::error::Error>> {
+		check_read_only_file_method_refused(&DEMO_DIR.canonical).await
 	}
 
 	// -------------------------------------------------------------------

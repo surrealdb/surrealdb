@@ -231,6 +231,7 @@ ParamPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You do
 FunctionPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to run the sample function" }
 PermissionPredicateSideEffect	{ cause: NONE, code: -32000, kind: 'Internal', message: 'A PERMISSIONS clause cannot contain a statement that modifies data' }
 ComputedFieldSideEffect	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'A COMPUTED clause cannot contain a statement that modifies data' }
+SurrealismReadOnlySideEffect	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'A read-only Surrealism function cannot modify data; the function must declare that it requires a writeable transaction' }
 SetCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Tried to set `$sample`, but couldn't coerce value: Expected `sample` but found `NONE`" }
 ReturnCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Couldn't coerce return value from function `sample`: Expected `sample` but found `NONE`" }
 Unimplemented	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Unimplemented functionality: sample' }

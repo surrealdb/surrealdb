@@ -671,7 +671,19 @@ pub async fn idiom(
 	name: &str,
 	mut args: Vec<Value>,
 ) -> Result<Value> {
-	ctx.check_allowed_function(&idiom_name_to_normal(value.kind_of(), name))?;
+	let normal = idiom_name_to_normal(value.kind_of(), name);
+	ctx.check_allowed_function(&normal)?;
+	// A method call never becomes an `Expr::FunctionCall`, so the refusal in
+	// `expr_compute` never sees it: `f'bucket:k'.put('x')` is a `Part::Method`
+	// that dispatches straight to here, and only its arguments go back through
+	// the expression walk. This is also the first point that *can* ask — the
+	// normal name is `(receiver kind, method name)`, and the receiver's kind is
+	// a runtime value.
+	if let Some(frame) = opt.no_write
+		&& frame.refuses_builtin_call(&normal)
+	{
+		return Err(anyhow::Error::new(frame.side_effect_error()));
+	}
 	// The environment through which the closure-taking builtins invoke user
 	// closures. `dispatch!` evaluates each arm inside a closure, so the
 	// evaluator has to outlive that closure rather than be built inside an arm.

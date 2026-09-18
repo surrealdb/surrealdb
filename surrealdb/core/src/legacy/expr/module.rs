@@ -212,6 +212,16 @@ pub(crate) async fn run_on_runtime(
 		#[cfg(feature = "http")]
 		client,
 	} = cached;
+	// The declared mode decides whether writes are permitted for this call, and
+	// whether a handle is lent at all. Read both before building the host, from
+	// the same manifest entry the planner used to pick the statement's access
+	// mode.
+	//
+	// An export the manifest does not name fails here rather than in the guest,
+	// so an unknown name is reported by the host with the manifest's own error.
+	let signature = runtime.get_signature(sub)?;
+	let writeable = signature.writeable;
+	let declares_transaction = signature.declares_transaction;
 	let module_name = module_display_name.as_ref().to_string();
 	// `Arc`, not `Box`: the guest may hold several host calls in flight, and each
 	// one resolves the shared context out of the store's resource table.
@@ -219,16 +229,11 @@ pub(crate) async fn run_on_runtime(
 		ctx,
 		opt,
 		doc,
+		writeable,
 		module_name,
 		#[cfg(feature = "http")]
 		client,
 	));
-	// What the manifest says this export asked for. An export the manifest does
-	// not name cannot be invoked anyway — `invoke` fails on an unknown name —
-	// so treating an absent entry as "declares one" only preserves the error
-	// the guest would raise itself.
-	let signature = runtime.exports().get_signature(sub);
-	let declares_transaction = signature.is_none_or(|f| f.declares_transaction);
 
 	// Read before waiting for a controller, so a `TIMEOUT 1s` query is not held
 	// in the pool queue for the pool's own, much longer, patience — with the

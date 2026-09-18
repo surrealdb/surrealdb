@@ -110,11 +110,10 @@ world plugin {
     /// that declared a transaction parameter then fails rather than proceeding
     /// without one. A function that declared none never touches it.
     ///
-    /// The handle carries the caller's transaction as-is. A function that
-    /// declared a read-only transaction is *not* yet prevented from writing
-    /// through it: the `writeable` flag drives scheduling and planning, and
-    /// nothing currently opens a genuinely read-only datastore transaction for
-    /// a module call. The marker declares intent; enforcement is still to come.
+    /// A function that declared a read-only transaction cannot write through
+    /// it. The host installs a no-write execution frame for the call, and a
+    /// data-modifying statement is refused where it is reached, however deep.
+    /// The declared mode is therefore enforced, not merely recorded.
     ///
     /// `name` identifies the function; pass `none` to call the module's default
     /// export (the unnamed function). Returns an error if the function does not
@@ -134,12 +133,12 @@ world plugin {
 
     /// Return whether the given function is marked as writeable.
     ///
-    /// Derived from the function's transaction parameter:
-    /// `Transaction<ReadWrite>` reports `true`, `Transaction` and no parameter
-    /// report `false`.
+    /// The guest declares whether a function needs write access; how that is
+    /// spelled is the guest language's business.
     ///
-    /// Consumed by planning and scheduling. It does **not** currently stop a
-    /// read-only function from writing — see the note on `transaction`.
+    /// Consumed by planning and scheduling, and by the host to decide whether
+    /// to install the no-write frame for the call. A function that reports
+    /// `false` cannot write, whatever query string it builds.
     export function-writeable: func(name: option<string>) -> result<bool, string>;
 
     /// Return whether the given function declared a transaction parameter.

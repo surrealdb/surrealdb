@@ -67,10 +67,16 @@ impl Part {
 			Part::Start(v) => v.read_only(),
 			Part::Where(v) => v.read_only(),
 			Part::Value(v) => v.read_only(),
-			// A builtin method writes nothing beyond what its arguments
-			// carry, but an unregistered name invokes a closure stored on
-			// the receiver — a runtime value whose body is invisible here —
-			// so it must over-approximate to writable.
+			// A builtin method stages no document write, which is what this
+			// predicate answers about; an unregistered name invokes a closure
+			// stored on the receiver — a runtime value whose body is invisible
+			// here — so it must over-approximate to writable.
+			//
+			// "Stages no document write" is narrower than "changes nothing":
+			// `f'bucket:k'.put(..)` dispatches to `file::put` and writes to a
+			// bucket. That is outside the transaction and takes no savepoint,
+			// so it does not belong here — it is refused, where it must be, by
+			// `NoWriteFrame::refuses_builtin_call` at the dispatch site.
 			Part::Method(name, v) => is_builtin_method(name) && v.iter().all(Expr::read_only),
 			Part::Lookup(v) => v.read_only(),
 			Part::Destructure(v) => v.iter().all(DestructurePart::read_only),

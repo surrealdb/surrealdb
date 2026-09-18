@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
+use tracing::warn;
 
 use crate::err::Error;
 use crate::exec::Error as ExecError;
@@ -88,6 +89,62 @@ pub(crate) enum NoWriteFrame {
 	/// mutation written directly into the body; this frame covers the writes
 	/// that only a call can reach.
 	ComputedField,
+	/// A Surrealism module function that declared read-only access.
+	///
+	/// The guest reaches the datastore through a `transaction` handle, and
+	/// declares in its signature whether it needs write access. That declaration
+	/// reaches the host as the `writeable` flag in the baked exports manifest,
+	/// and the planner already uses it to pick an access mode. Nothing enforced
+	/// it, because the guest composes its query as a string at runtime — so a
+	/// read-only function could still issue `CREATE`. This frame is that
+	/// enforcement, and it fires wherever the write is reached, however deep.
+	///
+	/// How the declaration is spelled is the guest language's business; the host
+	/// sees only the flag.
+	SurrealismReadOnly,
+}
+
+impl NoWriteFrame {
+	/// Whether this frame refuses a *call* to the named builtin.
+	///
+	/// Asked at two points, because a builtin can be reached two ways that do
+	/// not meet: as an `Expr::FunctionCall`, which `expr_compute` sees, and as a
+	/// method on a value (`f'bucket:k'.put(..)`), which dispatches straight
+	/// through `fnc::idiom` with only its arguments going back through the
+	/// expression walk. Both ask this so the answer cannot differ between them.
+	///
+	/// Scoped to [`Self::SurrealismReadOnly`]: see `refuses_under_no_write` in
+	/// `legacy/expr/expression.rs` for why the other two frames permit these
+	/// calls, and `SECURITY_GUIDE.md` for the decision that keeps
+	/// [`Self::PermissionPredicate`] out of it.
+	pub(crate) fn refuses_builtin_call(self, name: &str) -> bool {
+		matches!(self, Self::SurrealismReadOnly) && crate::expr::method::mutates_state_builtin(name)
+	}
+
+	/// The error a refused write raises under this frame, and any operator
+	/// warning that goes with it.
+	///
+	/// Lives here for the same reason [`Self::refuses_builtin_call`] does: the
+	/// two enforcement points must not answer differently. Deciding *whether*
+	/// to refuse in one place and *what to say* in another is how a frame ends
+	/// up refused correctly under the wrong error — and these are not
+	/// interchangeable, because they carry different wire codes and kinds that
+	/// a client may branch on.
+	pub(crate) fn side_effect_error(self) -> ExecError {
+		match self {
+			Self::PermissionPredicate => {
+				// Point the operator at the sanctioned mechanism for write side
+				// effects driven by a read.
+				warn!(
+					"A SELECT PERMISSIONS clause attempted to modify data and was blocked \
+					 (GHSA-66r2-5gwj-gxm2). Move audit-style side effects to a DEFINE EVENT."
+				);
+				ExecError::PermissionPredicateSideEffect
+			}
+			Self::ComputedField => ExecError::ComputedFieldSideEffect,
+			Self::SurrealismReadOnly => ExecError::SurrealismReadOnlySideEffect,
+		}
+	}
 }
 
 impl Options {
@@ -304,6 +361,28 @@ impl Options {
 		}
 	}
 
+	/// Create a new Options object for a Surrealism module function that
+	/// declared read-only access.
+	///
+	/// Leaves `perms` untouched: the guest's reads stay permission-checked
+	/// against its own narrowed capabilities. Only the write rejection is added.
+	///
+	/// Tightens rather than replaces. A module call nested inside a `SELECT`
+	/// PERMISSIONS predicate arrives already carrying
+	/// [`NoWriteFrame::PermissionPredicate`], and overwriting it would refuse
+	/// the write under this frame's error instead — losing the
+	/// GHSA-66r2-5gwj-gxm2 warning that tells an operator a permissions clause
+	/// tried to modify data, and pointing them at the wrong component. The
+	/// outermost frame is the one that explains the refusal, and every frame
+	/// forbids the same thing, so keeping the first is both safe and more
+	/// informative.
+	pub fn new_for_read_only_module(&self) -> Self {
+		Self {
+			no_write: self.no_write.or(Some(NoWriteFrame::SurrealismReadOnly)),
+			..self.clone()
+		}
+	}
+
 	/// Create a new Options object for evaluating a `COMPUTED` field body.
 	///
 	/// Unlike [`Self::new_for_permission_predicate`] this leaves `perms`
@@ -420,3 +499,48 @@ impl Options {
 
 // Keep the execution frame small; add fields only with justification.
 const _: () = assert!(std::mem::size_of::<Options>() <= 128);
+
+#[cfg(test)]
+mod tests {
+	use super::{ExecError, NoWriteFrame};
+
+	/// Every frame raises its own error, and no two share one.
+	///
+	/// The errors are not interchangeable — `PermissionPredicateSideEffect` is
+	/// `-32000` / `Internal` and carries the GHSA warning, while
+	/// `SurrealismReadOnlySideEffect` is `-32600` / `Validation` — so a client
+	/// branching on code or kind takes a different branch for each. That is
+	/// what makes naming a variant at an enforcement point wrong even when the
+	/// scoping happens to make it unreachable, and it is the trap waiting for
+	/// whoever widens `refuses_builtin_call` to cover the predicate frame.
+	///
+	/// Exhaustive by construction: a new variant that forgot to be listed here
+	/// fails the count assertion below.
+	#[test]
+	fn each_frame_raises_its_own_error() {
+		let frames = [
+			NoWriteFrame::PermissionPredicate,
+			NoWriteFrame::ComputedField,
+			NoWriteFrame::SurrealismReadOnly,
+		];
+		for frame in frames {
+			let expected = match frame {
+				NoWriteFrame::PermissionPredicate => ExecError::PermissionPredicateSideEffect,
+				NoWriteFrame::ComputedField => ExecError::ComputedFieldSideEffect,
+				NoWriteFrame::SurrealismReadOnly => ExecError::SurrealismReadOnlySideEffect,
+			};
+			assert_eq!(
+				frame.side_effect_error().to_string(),
+				expected.to_string(),
+				"{frame:?} raised the wrong error"
+			);
+		}
+
+		// Distinct messages, so a client can tell which frame refused.
+		let mut seen: Vec<String> =
+			frames.iter().map(|f| f.side_effect_error().to_string()).collect();
+		seen.sort();
+		seen.dedup();
+		assert_eq!(seen.len(), frames.len(), "two frames report the same error");
+	}
+}

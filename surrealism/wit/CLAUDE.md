@@ -13,8 +13,8 @@ functions are methods on a `transaction` resource the host lends per call.
 
 ```wit
 resource transaction {
-    sql: async func(query, vars) -> result<serialized-value, string>;
-    run: async func(fnc, version?, args) -> result<serialized-value, string>;
+    sql: async func(query, vars) -> result<serialized-value, host-error>;
+    run: async func(fnc, version?, args) -> result<serialized-value, host-error>;
 }
 ```
 
@@ -60,9 +60,10 @@ All `serialized-*` types are FlatBuffer byte buffers. Schemas live in `surrealdb
 
 1. Host instantiates the WASM component.
 2. Host calls **init** if exported. On error, module is marked unhealthy.
-3. Host reads the function's entry in the baked `exports.toml`, lends a matching
-   `transaction` (read-only unless the entry is `writeable`), and calls
-   **invoke** with `(tx?, name?, args)`. The handle is revoked on return.
+3. Host reads the function's entry in the baked `exports.toml`, installs a
+   no-write execution frame unless the entry is `writeable`, lends a
+   `transaction`, and calls **invoke** with `(tx?, name?, args)`. The handle is
+   revoked on return.
 4. Introspection (`list-functions`, `function-args`, `function-returns`,
    `function-writeable`, `function-comment`) is read once by
    `surreal module build`, which bakes the answers into `exports.toml`. The host

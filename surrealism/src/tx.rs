@@ -110,10 +110,10 @@ impl<M: Mode> Transaction<M> {
 	///
 	/// Requires the `allow_arbitrary_queries` capability.
 	///
-	/// The mode marker cannot stop a write: this takes a string, and nothing
-	/// currently opens a read-only datastore transaction for a module call. A
-	/// `Transaction` (read-only) function that issues `CREATE` today succeeds.
-	/// The marker records intent for planning and for the exports manifest.
+	/// This takes a string, so the mode marker cannot reject a write by itself.
+	/// The host does: a function that declared a read-only transaction runs
+	/// under a no-write frame, and a data-modifying statement is refused where
+	/// it is reached. Declare `Transaction<ReadWrite>` to write.
 	pub async fn sql<R: SurrealValue>(&self, query: impl Into<String>) -> Result<R> {
 		self.sql_with_vars(query, Object::new()).await
 	}

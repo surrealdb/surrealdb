@@ -7,11 +7,55 @@ use crate::dbs::{NoWriteFrame, Options};
 use crate::doc::CursorDoc;
 use crate::exec::Error as ExecError;
 use crate::expr::expression::Expr;
+use crate::expr::function::Function;
 use crate::expr::{
 	BinaryOperator, ControlFlow, Error as ExprError, FlowResult, PostfixOperator, PrefixOperator,
 };
 use crate::fnc;
 use crate::val::{Array, Range, Value};
+
+/// Whether reaching this expression under `frame` is a refusal.
+///
+/// A data-modifying statement or DDL is refused under every frame, classified
+/// by [`Expr::is_mutation_statement`] so this cannot drift from the
+/// definition-time walk that shares it.
+///
+/// A *call* to a builtin that leaves something behind — a write staged through
+/// the transaction, a write outside it, a counter advanced — is refused only
+/// under [`NoWriteFrame::SurrealismReadOnly`]. That frame guards a query string
+/// the module author composes at runtime, and the WIT's promise that a
+/// non-writeable function cannot write whatever string it builds has nothing
+/// else holding it up: no definition-time check ever sees the text. The other
+/// two frames guard stored bodies that are also checked when they are defined.
+/// For [`NoWriteFrame::ComputedField`] that is a settled call: a `COMPUTED` body
+/// using `sequence::nextval` to observe how often it runs is an established
+/// idiom, and refusing it would break deployments that rely on it.
+/// [`NoWriteFrame::PermissionPredicate`] is a deliberate deferral rather than a
+/// settled one — see the scope note under the `SELECT PERMISSIONS` invariant in
+/// `SECURITY_GUIDE.md`.
+///
+/// Only the receiver is examined. Arguments are ordinary expressions evaluated
+/// in place, so each one reaches this function on its own.
+///
+/// A builtin called as a *method* never becomes an `Expr::FunctionCall` and so
+/// never reaches here — `fnc::idiom` asks
+/// [`NoWriteFrame::refuses_builtin_call`] instead, where the receiver's kind is
+/// known and the normal name can be formed.
+fn refuses_under_no_write(expr: &Expr, frame: NoWriteFrame) -> bool {
+	if expr.is_mutation_statement() {
+		return true;
+	}
+	match expr {
+		Expr::FunctionCall(call) => match &call.receiver {
+			Function::Normal(name) => frame.refuses_builtin_call(name),
+			// A custom function, script, model, module or silo runs a body this
+			// frame travels into: the statements it reaches arrive here under
+			// the same frame, and a module call opens its own.
+			_ => false,
+		},
+		_ => false,
+	}
+}
 
 /// Process this type returning a computed simple Value
 pub(crate) async fn expr_compute(
@@ -26,43 +70,28 @@ pub(crate) async fn expr_compute(
 	// A stored expression that a *read* evaluates may not modify data: a SELECT
 	// PERMISSIONS predicate runs with permission enforcement disabled
 	// (GHSA-66r2-5gwj-gxm2), and a COMPUTED body runs under the definer's auth
-	// on every read of the field. This catches writes reached directly, through
-	// nested subqueries, or through function/closure bodies, on both the legacy
-	// and streaming execution paths — the streaming engine plans no writes of
-	// its own, so every one of them arrives here.
+	// on every read of the field. A Surrealism module function that declared
+	// read-only access joins them: the guest composes its query as a string, so
+	// only reaching the statement settles whether it writes. This catches writes
+	// reached directly, through nested subqueries, or through function/closure
+	// bodies, on both the legacy and streaming execution paths — the streaming
+	// engine plans no writes of its own, so every one of them arrives here.
 	//
 	// This is the enforcement point for both rules. A definition-time check
 	// cannot stand in for it: whether a called function writes may depend on
 	// which branch its arguments select, so only reaching the statement settles
 	// it. create/update/delete PERMISSIONS clauses are reached from a write and
 	// carry no such frame, so they never land here.
+	//
+	// A statement is not the only way to modify state. A builtin can reach the
+	// datastore with no statement in the expression at all — `sequence::nextval`
+	// advances a counter the transaction does not snapshot, `file::put` writes
+	// to a bucket — so the Surrealism frame refuses those calls too. See
+	// `refuses_under_no_write` for why that half is scoped to one frame.
 	if let Some(frame) = opt.no_write
-		&& matches!(
-			this,
-			Expr::Create(_)
-				| Expr::Update(_)
-				| Expr::Upsert(_)
-				| Expr::Delete(_)
-				| Expr::Relate(_)
-				| Expr::Insert(_)
-				| Expr::Define(_)
-				| Expr::Remove(_)
-				| Expr::Rebuild(_)
-				| Expr::Alter(_)
-		) {
-		let err = match frame {
-			NoWriteFrame::PermissionPredicate => {
-				// Point the operator at the sanctioned mechanism for write side
-				// effects driven by a read.
-				warn!(
-					"A SELECT PERMISSIONS clause attempted to modify data and was blocked \
-					 (GHSA-66r2-5gwj-gxm2). Move audit-style side effects to a DEFINE EVENT."
-				);
-				ExecError::PermissionPredicateSideEffect
-			}
-			NoWriteFrame::ComputedField => ExecError::ComputedFieldSideEffect,
-		};
-		return Err(ControlFlow::Err(anyhow::Error::new(err)));
+		&& refuses_under_no_write(this, frame)
+	{
+		return Err(ControlFlow::Err(anyhow::Error::new(frame.side_effect_error())));
 	}
 
 	match this {

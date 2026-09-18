@@ -158,7 +158,6 @@ moduleTest(
 		// A function returning Result maps its Ok branch to a plain value.
 		expect(await call<number>(db, "mod::demo::safe_divide(10, 2)")).toBe(5);
 		expect(await call<number>(db, "mod::demo::parse_number('42')")).toBe(42);
-
 	},
 	30000,
 );
@@ -207,7 +206,6 @@ moduleTest(
 		expect(await failure(db, "mod::demo::parse_number('not_a_number')")).toContain(
 			"invalid digit",
 		);
-
 	},
 	30000,
 );
@@ -257,7 +255,6 @@ moduleTest(
 
 		// The default export is the entry with no name.
 		expect(exports.some((e) => e.name === undefined)).toBe(true);
-
 	},
 	30000,
 );

@@ -369,6 +369,28 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   (guard reached by a record dereference, where the frame is marked on the
   `EvalContext` alone and the function call carries it onto the body's context).
 
+  **Scope: statements, not side-effecting calls.** This frame blocks statement
+  forms. It does *not* block a call to a builtin that changes something without
+  one — `file::put`, `http::post`, `sequence::nextval`. The Surrealism read-only
+  frame does block those (`NoWriteFrame::refuses_builtin_call`), and the
+  mechanism is shared, so extending it here is a one-line change.
+
+  It is not extended here yet, and the reason is scope rather than safety: a
+  `SELECT` predicate calling `http::post` is the same shape of read-triggered
+  side effect the advisory is about, and closing it would be a behaviour change
+  for any deployment that has such a predicate today. It wants its own change,
+  with its own note in the changelog and its own reproduction — not a quiet
+  widening carried in on a Surrealism PR.
+
+  Whoever takes it: the frame already travels correctly, and both enforcement
+  points ask `NoWriteFrame` for the verdict *and* for the error
+  (`refuses_builtin_call`, `side_effect_error`), so widening the scoping is the
+  whole change — a predicate refused through either path still raises
+  `PermissionPredicateSideEffect` and still logs the GHSA warning.
+  `each_frame_raises_its_own_error` (`dbs/options.rs`) pins that the frames'
+  errors stay distinct, which is what makes naming one at an enforcement point
+  wrong even while the scoping keeps it unreachable.
+
   There is deliberately **no definition-time counterpart**. A `DEFINE`/`ALTER`
   that stores a writing `SELECT` guard is accepted; it fails when a read reaches
   the write. Rejecting at definition time cannot be made sound — whether a called

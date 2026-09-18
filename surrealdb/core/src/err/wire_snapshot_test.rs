@@ -1044,6 +1044,7 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 		),
 		("PermissionPredicateSideEffect", ExecError::PermissionPredicateSideEffect),
 		("ComputedFieldSideEffect", ExecError::ComputedFieldSideEffect),
+		("SurrealismReadOnlySideEffect", ExecError::SurrealismReadOnlySideEffect),
 		(
 			"SetCoerce",
 			ExecError::SetCoerce {

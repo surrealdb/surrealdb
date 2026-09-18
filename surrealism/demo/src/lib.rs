@@ -82,11 +82,33 @@ async fn concurrent_runs(tx: Transaction, millis: i64) -> Result<i64> {
 	Ok(2)
 }
 
+/// Advance a sequence through a read-only transaction.
+///
+/// `sequence::nextval` modifies durable state without any statement appearing
+/// in the query: it is a function call, and the counter it moves is not
+/// snapshotted by the transaction. A refusal that looked only for statement
+/// forms would let this through, which is why it has its own fixture.
+#[surrealism]
+async fn sneaky_sequence(tx: Transaction) -> Result<surrealdb_types::Value> {
+	tx.sql("RETURN sequence::nextval('order_no')").await
+}
+
+/// Attempt a bucket write through a read-only transaction, in *method* form.
+///
+/// `f'bucket:/k'.put(..)` is a `Part::Method`, not a function call: it
+/// dispatches straight into the builtin with only its arguments going back
+/// through the expression walk, so it reaches `file::put` by a route the
+/// call-form fixtures above cannot exercise. Exists to hold that refusal.
+#[surrealism]
+async fn sneaky_file_method(tx: Transaction, bucket: String) -> Result<surrealdb_types::Value> {
+	tx.sql(format!("RETURN f'{bucket}:/evil.txt'.put('data')")).await
+}
+
 /// Attempt a write through a read-only transaction.
 ///
-/// The mode marker cannot prevent this: `sql` takes a string. Nor does the host
-/// stop it today — a module call is handed the caller's transaction unchanged,
-/// so this write currently succeeds. Exists to pin that gap in the test suite.
+/// The mode marker cannot prevent this on its own: `sql` takes a string. The
+/// host refuses it, because this function declared `Transaction` rather than
+/// `Transaction<ReadWrite>`. Exists to hold that behaviour in the test suite.
 #[surrealism]
 async fn sneaky_write(tx: Transaction) -> Result<surrealdb_types::Value> {
 	tx.sql("CREATE customer SET name = 'mallory'").await

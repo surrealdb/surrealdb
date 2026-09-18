@@ -28,9 +28,9 @@ pub struct FunctionExport {
 	pub returns_text: Option<String>,
 	/// Whether this function may perform writes.
 	///
-	/// Derived from the function's transaction parameter: `Transaction<ReadWrite>`
-	/// reports `true`, `Transaction` and no parameter report `false`. Read before
-	/// invoking, to decide which transaction to lend.
+	/// The guest declares this; how it is spelled is the guest language's
+	/// business. Read before invoking, to decide whether the call runs under a
+	/// no-write execution frame.
 	#[serde(default)]
 	pub writeable: bool,
 	/// Whether this function declared a transaction parameter at all.

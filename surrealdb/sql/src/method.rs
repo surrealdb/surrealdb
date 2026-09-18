@@ -296,9 +296,53 @@ pub fn is_writer_builtin(name: &str) -> bool {
 	matches!(name, "api::invoke" | "eval::gql" | "eval::surql")
 }
 
+/// The builtins that leave something behind once the statement is done: a write
+/// staged through the transaction, a write outside it, or a counter advanced.
+///
+/// Read by the runtime write refusal (`Options::no_write`), which guards a
+/// context that may not modify state — a `SELECT` PERMISSIONS predicate, a
+/// `COMPUTED` field body, a Surrealism function that declared a read-only
+/// transaction. The statement forms are classified by
+/// `Expr::is_mutation_statement`; this is the other half, because a call
+/// reaches the datastore without any statement appearing in the expression at
+/// all: `RETURN sequence::nextval('n')` advances a global counter, and
+/// `file::put` writes to a bucket.
+///
+/// Kept sorted, and pinned against `EffectSet::mutates_state` by
+/// `every_effect_declaration_is_pinned` in the exec function registry — so a
+/// builtin that declares a mutating effect and is missing here is a build
+/// failure, not a silent hole.
+pub fn mutates_state_builtin(name: &str) -> bool {
+	MUTATING.binary_search(&name).is_ok()
+}
+
+/// The table [`mutates_state_builtin`] searches.
+///
+/// Module-level rather than function-local so the sortedness guard can assert
+/// about *this* array. A copy of it in the test would let an entry added in the
+/// wrong position pass the guard while `binary_search` answered "does not
+/// mutate" — the permissive direction.
+const MUTATING: &[&str] = &[
+	"api::invoke",
+	"eval::gql",
+	"eval::surql",
+	"file::copy",
+	"file::copy_if_not_exists",
+	"file::delete",
+	"file::put",
+	"file::put_if_not_exists",
+	"file::rename",
+	"file::rename_if_not_exists",
+	"http::delete",
+	"http::patch",
+	"http::post",
+	"http::put",
+	"sequence::nextval",
+];
+
 #[cfg(test)]
 mod tests {
-	use super::BUILTIN_METHOD_NAMES;
+	use super::{BUILTIN_METHOD_NAMES, MUTATING};
 
 	/// Membership is a binary search, which is only correct on a sorted,
 	/// duplicate-free table.
@@ -307,5 +351,22 @@ mod tests {
 		for pair in BUILTIN_METHOD_NAMES.windows(2) {
 			assert!(pair[0] < pair[1], "{:?} must sort strictly before {:?}", pair[0], pair[1]);
 		}
+	}
+
+	/// `mutates_state_builtin` is a binary search too, and an unsorted entry
+	/// would read as "does not mutate" — the permissive direction.
+	///
+	/// Asserted about `MUTATING` itself, not a copy of its contents: a copy
+	/// would stay sorted while the array it stands for did not.
+	#[test]
+	fn the_mutating_table_is_sorted_and_unique() {
+		for pair in MUTATING.windows(2) {
+			assert!(pair[0] < pair[1], "{:?} must sort strictly before {:?}", pair[0], pair[1]);
+		}
+		for name in MUTATING {
+			assert!(super::mutates_state_builtin(name), "{name}");
+		}
+		assert!(!super::mutates_state_builtin("math::abs"));
+		assert!(!super::mutates_state_builtin("http::get"));
 	}
 }
