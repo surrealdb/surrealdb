@@ -13,7 +13,7 @@ use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi::sockets::SocketAddrUse;
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder};
 
-use crate::net_allow::ResolvedNetAllow;
+use crate::net_allow::NetPolicy;
 
 /// Shared swappable callback for forwarding WASI stdio output.
 ///
@@ -67,6 +67,22 @@ impl StdoutStream for CallbackStdoutStream {
 /// On reaching the cap the pending bytes are forwarded as their own chunk, so
 /// the buffer is bounded without any output being discarded.
 const MAX_PENDING_LINE_BYTES: usize = 1 << 20;
+
+/// The most resources one guest instance may hold at once.
+///
+/// Every stream the guest opens and every pollable it subscribes to takes a
+/// host-side table entry, added at the guest's request and charged to no limit
+/// the module declares. A module that leaks handles would otherwise grow host
+/// memory through ordinary queries.
+///
+/// A fixed host ceiling rather than a module declaration or a server setting,
+/// unlike the execution-time and pool limits beside it: those ration what a
+/// trusted module may *use*, and an operator may reasonably want more of them.
+/// This one exists to survive a module that is leaking or trying to, which is
+/// not a budget anyone should be able to raise — least of all the module. It
+/// sits far above what a working module holds at once, so it only bites that
+/// case.
+const MAX_RESOURCE_TABLE_ENTRIES: usize = 4096;
 
 /// Line-buffered [`AsyncWrite`] that forwards complete lines to a [`StdioCallback`].
 ///
@@ -153,7 +169,7 @@ impl AsyncWrite for CallbackWriter {
 
 pub fn build(
 	fs_root: Option<&Path>,
-	allow_net: Arc<Vec<ResolvedNetAllow>>,
+	policy: &Arc<NetPolicy>,
 	stdout_cb: StdioCallback,
 	stderr_cb: StdioCallback,
 ) -> Result<(WasiCtx, ResourceTable)> {
@@ -165,23 +181,26 @@ pub fn build(
 		callback: stderr_cb,
 	});
 
-	if allow_net.is_empty() {
+	if policy.is_empty() {
 		builder.allow_tcp(false);
 		builder.allow_udp(false);
 		builder.allow_ip_name_lookup(false);
 	} else {
-		// Hostnames are resolved at module load in `net_allow`, so guests
-		// don't need runtime DNS. Disabling it prevents DNS tunneling.
-		builder.allow_ip_name_lookup(false);
-		let filters = allow_net;
+		// Name lookup is switched on at this layer and filtered by name in
+		// `crate::dns`, which shadows `wasi:sockets/ip-name-lookup`. WASI has no
+		// per-name hook of its own, so leaving this off would be the only
+		// alternative — and would make hostnames unusable, forcing every plugin
+		// to hard-code addresses.
+		builder.allow_ip_name_lookup(true);
+		let filter = Arc::clone(policy);
 		builder.socket_addr_check(move |addr, reason| {
-			let is_outbound = matches!(
+			let outbound = matches!(
 				reason,
 				SocketAddrUse::TcpConnect
 					| SocketAddrUse::UdpConnect
 					| SocketAddrUse::UdpOutgoingDatagram
 			);
-			let allowed = is_outbound && filters.iter().any(|f| f.matches_socket_addr(&addr));
+			let allowed = outbound && filter.allows_socket_addr(&addr);
 			Box::pin(async move { allowed })
 		});
 	}
@@ -191,7 +210,15 @@ pub fn build(
 			.preopened_dir(root, "/", DirPerms::READ, FilePerms::READ)
 			.prefix_err(|| "Failed to preopen filesystem directory")?;
 	}
-	Ok((builder.build(), ResourceTable::new()))
+	// Bounded, because entries are added at the guest's request — every stream
+	// it opens and every pollable it subscribes to takes one — and nothing
+	// charges them to a limit the module declares. `StoreLimits::memory_size`
+	// covers the guest's linear memory, not the host-side table behind its
+	// handles. Far above what any reasonable module holds at once, so it only
+	// bites a guest that is leaking or trying to.
+	let mut table = ResourceTable::new();
+	table.set_max_capacity(MAX_RESOURCE_TABLE_ENTRIES);
+	Ok((builder.build(), table))
 }
 
 #[cfg(test)]

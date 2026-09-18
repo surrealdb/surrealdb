@@ -11,9 +11,13 @@ use crate::generate::{generate_registration_body, generate_sentinel};
 fn strip_param_name_attrs(sig: &mut syn::Signature) {
 	for arg in &mut sig.inputs {
 		if let FnArg::Typed(pat_type) = arg {
-			pat_type.attrs.retain(
-				|attr| !matches!(&attr.meta, Meta::NameValue(nv) if nv.path.is_ident("name")),
-			);
+			// Both are read by `extract_fn_signature` and are not real
+			// attributes, so they must not reach the emitted function.
+			pat_type.attrs.retain(|attr| match &attr.meta {
+				Meta::NameValue(nv) => !nv.path.is_ident("name"),
+				Meta::Path(p) => !p.is_ident("tx"),
+				Meta::List(_) => true,
+			});
 		}
 	}
 }
@@ -59,7 +63,6 @@ pub(crate) fn handle_function(
 	is_default: bool,
 	export_name_override: Option<String>,
 	is_init: bool,
-	is_writeable: bool,
 	explicit_comment: Option<String>,
 	mut input_fn: ItemFn,
 ) -> TokenStream {
@@ -69,6 +72,31 @@ pub(crate) fn handle_function(
 		Ok(v) => v,
 		Err(e) => return e.to_compile_error().into(),
 	};
+
+	// `init` is sync-lifted by the WIT, and a sync-lifted export cannot block:
+	// the canonical ABI has no `task.return` for it, so it must run to
+	// completion. An `async fn` here would need a nested executor and could
+	// never make progress on a host call, so reject it at the signature.
+	if is_init && parts.is_async {
+		return syn::Error::new_spanned(
+			&input_fn.sig,
+			"#[surrealism(init)] cannot be `async`: `init` is lent no transaction and runs \
+			 synchronously. Move any async work into a regular #[surrealism] function.",
+		)
+		.to_compile_error()
+		.into();
+	}
+
+	// `init` receives no handle, so a transaction parameter can never be filled.
+	if is_init && parts.tx.is_some() {
+		return syn::Error::new_spanned(
+			&input_fn.sig,
+			"#[surrealism(init)] cannot take a `Transaction`: it runs once per instance, under \
+			 whichever request created it, so it must not reach the datastore.",
+		)
+		.to_compile_error()
+		.into();
+	}
 
 	strip_param_name_attrs(&mut input_fn.sig);
 
@@ -102,7 +130,7 @@ pub(crate) fn handle_function(
 		parts.is_async,
 		is_init,
 		export_name.as_deref(),
-		is_writeable,
+		parts.tx.as_ref(),
 		comment.as_deref(),
 	);
 
@@ -120,7 +148,6 @@ pub(crate) fn handle_module(
 	is_default: bool,
 	export_name_override: Option<String>,
 	is_init: bool,
-	is_writeable: bool,
 	_explicit_comment: Option<String>,
 	mut item_mod: ItemMod,
 ) -> TokenStream {
@@ -130,12 +157,6 @@ pub(crate) fn handle_module(
 	if is_init {
 		panic!("#[surrealism(init)] cannot be used on a module");
 	}
-	if is_writeable {
-		panic!(
-			"#[surrealism(writeable)] cannot be used on a module; mark individual functions instead"
-		);
-	}
-
 	let prefix = export_name_override.unwrap_or_else(|| item_mod.ident.to_string());
 
 	let Some((brace, items)) = item_mod.content.take() else {
@@ -228,7 +249,7 @@ fn process_mod_items(prefix: &str, items: Vec<Item>) -> (Vec<Item>, Vec<proc_mac
 						parts.is_async,
 						false,
 						Some(&export_name),
-						inner_attrs.is_writeable,
+						parts.tx.as_ref(),
 						comment.as_deref(),
 					);
 
@@ -256,12 +277,6 @@ fn process_mod_items(prefix: &str, items: Vec<Item>) -> (Vec<Item>, Vec<proc_mac
 					if inner_attrs.is_init {
 						panic!("#[surrealism(init)] cannot be used on a module");
 					}
-					if inner_attrs.is_writeable {
-						panic!(
-							"#[surrealism(writeable)] cannot be used on a module; mark individual functions instead"
-						);
-					}
-
 					let inner_prefix_segment =
 						inner_attrs.export_name.unwrap_or_else(|| inner_mod.ident.to_string());
 					let inner_prefix = format!("{prefix}::{inner_prefix_segment}");

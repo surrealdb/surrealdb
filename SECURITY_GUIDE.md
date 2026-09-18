@@ -890,17 +890,52 @@ Flag when changes touch:
 - WASM/Surrealism capabilities must be validated before instantiation. The guest's
   WASI context is built in one place, `wasi_context.rs` (`build`), and that
   construction must stay deny-by-default: no host environment is inherited, the
-  filesystem is preopened read-only or not at all, sockets are refused outright when
-  the net allowlist is empty, and `allow_ip_name_lookup` stays off even when it is
-  not (hostnames resolve at module load, so runtime DNS would only serve tunneling).
-  Any builder call that inherits host state is a secret-exposure finding.
-- A cached Surrealism `Runtime` is stateful: it owns the module's KV store and pools
-  controllers whose WASM linear memory (heap, statics) survives between invocations,
-  so unlike the JavaScript runtime it is not rebuilt per invocation. Every
-  `SurrealismCacheKey` variant (`surrealism/cache.rs`) must therefore be scoped by
-  namespace and database. A key that identifies a module only by where its bytes come
-  from — for silo packages, organisation/package/version — lets two databases share one
-  runtime, and module-local state written under one tenant becomes readable by another.
+  filesystem is preopened read-only or not at all, and sockets are refused outright
+  when the net allowlist is empty. Any builder call that inherits host state is a
+  secret-exposure finding.
+- Name resolution is filtered rather than switched off. `allow_ip_name_lookup` is on,
+  and `surrealism/runtime/src/dns.rs` shadows `wasi:sockets/ip-name-lookup` with a
+  resolver that checks the name against the module's `NetPolicy` before querying, then
+  drops every special-use address the answer carries and records the rest against the
+  rule whose name produced them, so the later connect is recognised only for that rule
+  and only for a bounded time. Two properties must hold: the shim binds the interface
+  name read off the component's own imports — a literal version would miss a guest
+  built against a different WASI release and fall through to wasmtime's unfiltered
+  resolver, silently — and the operator's `deny_net` reaches this path, not only the
+  SurrealQL one, or a guest socket becomes the way out that the deny list does not
+  cover.
+- A cached Surrealism `Runtime` is stateful: it pools controllers whose WASM linear
+  memory (heap, statics) survives between invocations, so unlike the JavaScript
+  runtime it is not rebuilt per invocation. Every `SurrealismCacheKey` variant
+  (`surrealism/cache.rs`) must therefore be scoped by namespace and database. A key
+  that identifies a module only by where its bytes come from — for silo packages,
+  organisation/package/version — lets two databases share one runtime, and
+  module-local state written under one tenant becomes readable by another.
+- A pooled controller must not carry a guest's open connection across callers. Linear
+  memory is preserved deliberately; a socket is not, because one left in the store's
+  `ResourceTable` stays reachable from the next caller's query through the handle
+  index the guest kept. `Runtime::release_controller` retires a controller that ends
+  its invocation holding a socket it did not start with. Sockets specifically, not
+  table occupancy: WASI pushes the stdio streams and the instance network into that
+  table lazily and never drops them, so counting entries would retire every module
+  that prints.
+- A `transaction` handle is lent only to a function whose manifest entry declares one,
+  and revoked on every path out of `invoke`. The manifest is user-supplied and is no
+  evidence about the component beside it; the property rests on the manifest being the
+  *only* thing consulted, so a component whose body calls `transaction.sql` has to
+  declare the parameter to be given a handle, and a manifest that hides the parameter
+  also withholds it. That makes "declared none, so it cannot query" a property of the
+  host rather than of the generated dispatch.
+- Host calls made during one invocation are ordered by what each one carries, not by
+  what the module claims about itself: a statement that may write runs alone, a read
+  runs alongside other reads. They share the caller's single transaction, whose
+  savepoints form a stack with no handle, so a second writer entering before the first
+  has left unwinds the wrong one. The decision comes off the parsed expression
+  (`Expr::read_only`, which treats every opaque call as writing) because the manifest's
+  `writeable` flag is the module's own claim and is not enforced. That flag is still
+  what `access_mode` reports, and so still what licenses core's per-row fan-out to
+  evaluate two *invocations* side by side — which only refusing the write closes
+  (`Options::no_write`).
 - The `eval::surql` / `eval::gql` functions (`fnc/eval.rs`) evaluate a runtime
   query string in the caller's transaction. They must remain gated by **all** of:
   the function-family capability (enforced by the engine before dispatch), the

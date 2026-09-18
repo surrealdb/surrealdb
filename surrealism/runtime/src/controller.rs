@@ -8,11 +8,12 @@ use std::time::Duration;
 use surrealism_types::args::Args;
 use surrealism_types::err::{SurrealismError, SurrealismResult};
 use tokio::sync::OwnedSemaphorePermit;
+use wasmtime::component::Resource;
 use wasmtime::*;
 use web_time::Instant;
 
 use crate::epoch::EPOCH_TICK_MS;
-use crate::host::{InvocationContext, NullContext};
+use crate::host::{InvocationContext, Transaction};
 use crate::store::StoreData;
 
 fn effective_timeout(
@@ -23,7 +24,9 @@ fn effective_timeout(
 }
 
 /// Per-execution controller. Not thread-safe — use one at a time.
-/// Can be reused across invocations by swapping the host context.
+///
+/// Reusable across invocations: the controller holds no request state, because
+/// host access is granted per call by the `transaction` handle `invoke` lends.
 /// WASM linear memory persists between calls, so Rust statics survive.
 pub struct Controller {
 	store: Store<StoreData>,
@@ -36,6 +39,8 @@ pub struct Controller {
 	list_fn: Option<component::Func>,
 	/// Only present when the module exports the `function-writeable` function.
 	writeable_fn: Option<component::Func>,
+	/// Only present when the module exports `function-declares-transaction`.
+	declares_tx_fn: Option<component::Func>,
 	/// Only present when the module exports the `function-comment` function.
 	comment_fn: Option<component::Func>,
 	init_fn: Option<component::Func>,
@@ -48,6 +53,12 @@ pub struct Controller {
 	/// [`Runtime`](crate::runtime::Runtime)'s controller semaphore. While [`Some`], the permit
 	/// counts toward the concurrent-instance cap.
 	controller_slot: Option<OwnedSemaphorePermit>,
+	/// Sockets open in the store's resource table when this controller was
+	/// clean — after instantiation and `init`, before any invocation.
+	///
+	/// Set by [`Self::mark_resource_baseline`] and compared by
+	/// [`Self::retains_guest_resources`].
+	socket_baseline: usize,
 }
 
 impl fmt::Debug for Controller {
@@ -65,6 +76,7 @@ impl Controller {
 		returns_fn: Option<component::Func>,
 		list_fn: Option<component::Func>,
 		writeable_fn: Option<component::Func>,
+		declares_tx_fn: Option<component::Func>,
 		comment_fn: Option<component::Func>,
 		init_fn: Option<component::Func>,
 		module_execution_time: Option<Duration>,
@@ -78,12 +90,57 @@ impl Controller {
 			returns_fn,
 			list_fn,
 			writeable_fn,
+			declares_tx_fn,
 			comment_fn,
 			init_fn,
 			module_execution_time,
 			epoch_counter,
 			controller_slot: Some(controller_slot),
+			socket_baseline: 0,
 		}
+	}
+
+	/// Record how many sockets are open once instantiation and `init` are done
+	/// and before any invocation runs.
+	pub(crate) fn mark_resource_baseline(&mut self) {
+		self.socket_baseline = self.open_sockets();
+	}
+
+	/// Whether the guest left a socket open in the store's table.
+	///
+	/// A controller is shared by every caller on its namespace and database,
+	/// and linear memory is deliberately preserved across them. An open socket
+	/// is different: a guest that connects during one caller's invocation,
+	/// keeps the handle index in linear memory and never drops it could read
+	/// and write that still-open connection during the next caller's query,
+	/// with whatever it buffered still there. So a controller that ends an
+	/// invocation holding a socket it did not start with is retired rather than
+	/// pooled.
+	///
+	/// Sockets specifically, not table occupancy: WASI pushes the stdio streams
+	/// and the instance network into this same table lazily, on first guest
+	/// use, and never drops them — so a module that merely prints would look
+	/// like it was leaking for ever after, and would never be pooled again.
+	/// Counting is also blind to net-zero churn, where a guest drops one entry
+	/// and opens a socket in the same invocation. A socket's own streams are
+	/// pushed as its children and cannot outlive it, so the socket is the whole
+	/// anchor.
+	///
+	/// The table's occupancy is bounded separately, by its maximum capacity.
+	pub(crate) fn retains_guest_resources(&mut self) -> bool {
+		self.open_sockets() > self.socket_baseline
+	}
+
+	fn open_sockets(&mut self) -> usize {
+		self.store
+			.data_mut()
+			.table
+			.iter_mut()
+			.filter(|entry| {
+				entry.is::<wasmtime_wasi::sockets::TcpSocket>()
+					|| entry.is::<wasmtime_wasi::sockets::UdpSocket>()
+			})
+			.count()
 	}
 
 	/// Attach a semaphore permit after taking this controller from the idle pool.
@@ -98,25 +155,22 @@ impl Controller {
 		self.controller_slot.take()
 	}
 
-	/// Replace the invocation context. Used when reusing a pooled controller
-	/// for a new request with different permissions. Also updates the WASI
-	/// stdio callbacks so guest `println!` output routes through the same
-	/// structured logging path as the WIT `stdout`/`stderr` imports.
-	pub fn set_context(&mut self, context: Box<dyn InvocationContext>) {
+	/// Point the WASI stdio callbacks at this request's logging path, so guest
+	/// `println!` output is attributed to the right module, namespace and
+	/// database. Unlike `sql`/`run`, stdio has no handle to hang off:
+	/// `wasi:cli/stdout` is ambient, so it is still swapped per request.
+	pub fn set_stdio(&mut self, context: &dyn InvocationContext) {
 		let data = self.store.data_mut();
 		*data.stdout_cb.lock() = context.stdout_callback();
 		*data.stderr_cb.lock() = context.stderr_callback();
-		data.context = context;
 	}
 
-	/// Clear the invocation context, replacing it with a NullContext.
-	/// Called before returning a controller to the pool so no per-request state
-	/// (auth, permissions, KV) is retained. Resets WASI stdio to host defaults.
-	pub fn clear_context(&mut self) {
+	/// Reset WASI stdio to the host defaults. Called before returning a
+	/// controller to the pool so no per-request logging context is retained.
+	pub fn clear_stdio(&mut self) {
 		let data = self.store.data_mut();
 		*data.stdout_cb.lock() = Arc::new(|output| print!("{}", output));
 		*data.stderr_cb.lock() = Arc::new(|output| eprint!("{}", output));
-		data.context = Box::new(NullContext);
 	}
 
 	/// Reset the epoch deadline to the maximum safe value. Wasmtime internally
@@ -178,17 +232,25 @@ impl Controller {
 	#[tracing::instrument(skip_all, fields(name))]
 	pub async fn invoke<A: Args>(
 		&mut self,
+		context: Option<Arc<dyn InvocationContext>>,
 		name: Option<String>,
 		args: A,
 	) -> SurrealismResult<surrealdb_types::Value> {
-		self.invoke_with_timeout(name, args, None).await
+		self.invoke_with_timeout(context, name, args, None).await
 	}
 
 	/// Invoke with an optional context-level timeout. The effective deadline is
 	/// `min(context_remaining, module_config, server_cap)`.
+	///
+	/// `context` is lent to the guest as a `transaction` handle for the duration
+	/// of the call and revoked before returning, on every path including a trap
+	/// and including a failure to build the typed view of `invoke`.
+	/// Pass `None` for a function that declared no transaction parameter: it then
+	/// receives no handle and has no route to the datastore.
 	#[tracing::instrument(skip_all, fields(name))]
 	pub async fn invoke_with_timeout<A: Args>(
 		&mut self,
+		context: Option<Arc<dyn InvocationContext>>,
 		name: Option<String>,
 		args: A,
 		context_timeout: Option<Duration>,
@@ -209,27 +271,76 @@ impl Controller {
 		let args_values = args.to_values();
 		let args_bytes = surrealdb_types::encode_value_list(&args_values)?;
 
-		let typed = self
-			.invoke_fn
-			.typed::<(Option<&str>, &[u8]), (Result<Vec<u8>, String>,)>(&self.store)?;
+		// Lend the capability for exactly this call. The counter it carries
+		// bounds how many host calls the guest may hold in flight through it;
+		// which of them may run at the same time is the context's decision,
+		// because only the context can read what each statement does.
+		let owned = match context {
+			Some(context) => Some(
+				self.store
+					.data_mut()
+					.table
+					.push(Transaction {
+						context,
+						in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+					})
+					.map_err(|e| SurrealismError::Other(e.into()))?,
+			),
+			None => None,
+		};
+		let borrowed = owned.as_ref().map(|rep| Resource::<Transaction>::new_borrow(rep.rep()));
 
-		let call_result = typed.call_async(&mut self.store, (name.as_deref(), &args_bytes)).await;
+		// Nothing between lending the handle and revoking it may return early,
+		// or the handle outlives the call it was lent to. So the fallible step
+		// that builds the typed view is folded into the same result the call
+		// produces, rather than propagated with `?` from here.
+		let call_result: SurrealismResult<(Result<Vec<u8>, String>,)> = match self
+			.invoke_fn
+			.typed::<(Option<Resource<Transaction>>, Option<&str>, &[u8]), (Result<Vec<u8>, String>,)>(
+				&self.store,
+			) {
+			Ok(typed) => typed
+				.call_async(&mut self.store, (borrowed, name.as_deref(), &args_bytes))
+				.await
+				.map_err(|e| {
+					if e.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
+						SurrealismError::Timeout {
+							effective,
+							context_timeout,
+							module_limit: self.module_execution_time,
+						}
+					} else {
+						SurrealismError::from(e)
+					}
+				}),
+			Err(e) => Err(SurrealismError::from(e)),
+		};
+
+		// Revoke it before anything else can observe the result, including on the
+		// trap path. A retained handle then refers to nothing and traps on use.
+		//
+		// Logged rather than propagated: the delete can fail for reasons that say
+		// nothing about the call — the destructor already removed the entry, or
+		// borrow accounting still holds a child after an async-lifted `invoke`
+		// unwinds. Letting that replace `call_result` would throw away the
+		// `Trap`/`Timeout` the caller needs, and `run_on_runtime` would then read
+		// the generic error as "not a trap" and return a trapped component to the
+		// pool, where every later invocation fails with `CannotEnterComponent`.
+		if let Some(rep) = owned
+			&& let Err(e) = self.store.data_mut().table.delete(rep)
+		{
+			tracing::error!(
+				name = %display_name,
+				error = %e,
+				"invoke_with_timeout: could not revoke the transaction handle"
+			);
+		}
 
 		if let Err(e) = &call_result {
 			tracing::error!(name = %display_name, error = %e, "invoke_with_timeout: call_async FAILED");
 		}
 
-		let (result,) = call_result.map_err(|e| {
-			if e.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
-				SurrealismError::Timeout {
-					effective,
-					context_timeout,
-					module_limit: self.module_execution_time,
-				}
-			} else {
-				SurrealismError::from(e)
-			}
-		})?;
+		let (result,) = call_result?;
 
 		if let Err(guest_err) = &result {
 			tracing::warn!(name = %display_name, guest_error = %guest_err, "invoke_with_timeout: guest returned Err");
@@ -332,6 +443,28 @@ impl Controller {
 				tracing::error!(name = %display_name, error = %e, error_debug = ?e, "controller.writeable(): WASM TRAP");
 				Err(self.trap_to_timeout(e))
 			}
+		}
+	}
+
+	/// Query whether a function declared a transaction parameter, via the WASM
+	/// export. Only available when the module has the
+	/// `function-declares-transaction` export (build tool).
+	///
+	/// Used to *write* the exports manifest, never to check one: the serve path
+	/// reads [`FunctionExport::declares_transaction`](crate::exports::FunctionExport::declares_transaction)
+	/// and lends the handle on that alone.
+	#[tracing::instrument(skip_all, fields(name))]
+	pub async fn declares_transaction(&mut self, name: Option<String>) -> SurrealismResult<bool> {
+		let Some(func) = self.declares_tx_fn else {
+			return Err(SurrealismError::Other(anyhow::anyhow!(
+				"function-declares-transaction export not available"
+			)));
+		};
+		self.apply_module_deadline();
+		let typed = func.typed::<(Option<&str>,), (Result<bool, String>,)>(&self.store)?;
+		match typed.call_async(&mut self.store, (name.as_deref(),)).await {
+			Ok((result,)) => result.map_err(SurrealismError::FunctionCallError),
+			Err(e) => Err(self.trap_to_timeout(e)),
 		}
 	}
 

@@ -1,13 +1,13 @@
 #![allow(clippy::needless_pass_by_value)]
 
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::TcpStream;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use anyhow::Result;
 use surrealdb_types::SurrealValue;
-use surrealism::surrealism;
+use surrealism::{ReadWrite, Transaction, surrealism};
 
 /// Check whether a person is old enough to drive.
 #[surrealism]
@@ -23,14 +23,70 @@ struct User {
 }
 
 /// Create a new user record if one does not already exist.
-#[surrealism(writeable)]
-fn create_user(user: User) -> Result<String> {
-	let exists: bool =
-		surrealism::run("fn::user_exists".to_string(), None, (user.name.clone(), user.age))?;
+///
+/// Writes are opted into through the parameter type: `Transaction<ReadWrite>` is
+/// what makes this function report `writeable` in the exports manifest, so the
+/// host lends it a writeable transaction.
+#[surrealism]
+async fn create_user(tx: Transaction<ReadWrite>, user: User) -> Result<String> {
+	let exists: bool = tx.run("fn::user_exists", (user.name.clone(), user.age)).await?;
 	if exists {
 		return Ok(format!("User {} already exists", user.name));
 	}
 	Ok(format!("Created user {} of age {}. Enabled? {}", user.name, user.age, user.enabled))
+}
+
+/// Two host calls awaited together, to show that they overlap rather than
+/// running back to back. Each `tx` call is a component-model subtask, so the
+/// host resolves both while the guest waits once.
+#[surrealism]
+async fn concurrent_queries(tx: Transaction) -> Result<Vec<surrealdb_types::Value>> {
+	let (a, b) = futures::future::try_join(
+		tx.sql::<surrealdb_types::Value>("SELECT * FROM ONLY { value: 1 }"),
+		tx.sql::<surrealdb_types::Value>("SELECT * FROM ONLY { value: 2 }"),
+	)
+	.await?;
+	Ok(vec![a, b])
+}
+
+/// Two reads awaited together, each of which takes `millis` to answer.
+///
+/// The host runs the calls of one invocation side by side when neither can
+/// write, so this takes about `millis` rather than twice that. Paired with
+/// [`concurrent_runs`] in the test suite, which measures the same shape for
+/// calls the host has to serialise.
+#[surrealism]
+async fn concurrent_sleeps(tx: Transaction, millis: i64) -> Result<i64> {
+	futures::future::try_join(
+		tx.sql::<surrealdb_types::Value>(format!("SLEEP {millis}ms")),
+		tx.sql::<surrealdb_types::Value>(format!("SLEEP {millis}ms")),
+	)
+	.await?;
+	Ok(2)
+}
+
+/// Two calls to `fn::slow` awaited together, each of which takes `millis`.
+///
+/// A function body is opaque to the host, so it cannot know the call does not
+/// write, and these run one at a time: about twice `millis`.
+#[surrealism]
+async fn concurrent_runs(tx: Transaction, millis: i64) -> Result<i64> {
+	futures::future::try_join(
+		tx.run::<surrealdb_types::Value>("fn::slow", (millis,)),
+		tx.run::<surrealdb_types::Value>("fn::slow", (millis,)),
+	)
+	.await?;
+	Ok(2)
+}
+
+/// Attempt a write through a read-only transaction.
+///
+/// The mode marker cannot prevent this: `sql` takes a string. Nor does the host
+/// stop it today — a module call is handed the caller's transaction unchanged,
+/// so this write currently succeeds. Exists to pin that gap in the test suite.
+#[surrealism]
+async fn sneaky_write(tx: Transaction) -> Result<surrealdb_types::Value> {
+	tx.sql("CREATE customer SET name = 'mallory'").await
 }
 
 #[surrealism(name = "other")]
@@ -170,28 +226,29 @@ async fn async_result(should_fail: bool) -> Result<String> {
 }
 
 /// Fetch a Pokémon's name from a small JSON API by Pokémon name or Pokédex ID.
-/// Requires `allow_net = ["127.0.0.1"]` in surrealism.toml.
+///
+/// `api_base` may name a host rather than an address: the guest resolves it
+/// through `wasi:sockets/ip-name-lookup`, which the host filters against the
+/// module's `allow_net`. Add the host to `allow_net` in `surrealism.toml`.
 #[surrealism]
 async fn fetch_pokemon(api_base: String, name: String) -> Result<String> {
-	surrealism::tokio::task::yield_now().await;
-
-	let url =
-		format!("{}/pokemon/{}", api_base.trim_end_matches('/'), name.trim_start_matches('/'));
-	let url = reqwest::Url::parse(&url).map_err(|e| anyhow::anyhow!("Invalid API URL: {e}"))?;
+	let url = url::Url::parse(&format!(
+		"{}/pokemon/{}",
+		api_base.trim_end_matches('/'),
+		name.trim_start_matches('/')
+	))
+	.map_err(|e| anyhow::anyhow!("Invalid API URL: {e}"))?;
 	let host = url.host_str().ok_or_else(|| anyhow::anyhow!("API URL missing host"))?;
 	let port =
 		url.port_or_known_default().ok_or_else(|| anyhow::anyhow!("API URL missing port"))?;
-	let socket_addr: SocketAddr = format!("{host}:{port}")
-		.parse()
-		.map_err(|e| anyhow::anyhow!("Invalid API socket address: {e}"))?;
-	// Reqwest's native wasip2 connector currently goes through socket2, so
-	// keep the transport minimal while validating WASI socket access.
-	let mut stream =
-		TcpStream::connect(socket_addr).map_err(|e| anyhow::anyhow!("HTTP connect failed: {e}"))?;
-	let path = if let Some(query) = url.query() {
-		format!("{}?{query}", url.path())
-	} else {
-		url.path().to_string()
+
+	// `connect` takes `(host, port)` and resolves the name itself, so this works
+	// against a real hostname and not just a literal address.
+	let mut stream = TcpStream::connect((host, port))
+		.map_err(|e| anyhow::anyhow!("HTTP connect to {host}:{port} failed: {e}"))?;
+	let path = match url.query() {
+		Some(query) => format!("{}?{query}", url.path()),
+		None => url.path().to_string(),
 	};
 	// Build the whole request up front and send it in one `write_all` so it
 	// leaves as a single segment where possible, rather than the several small
@@ -217,14 +274,14 @@ async fn fetch_pokemon(api_base: String, name: String) -> Result<String> {
 		.and_then(|code| code.parse::<u16>().ok())
 		.ok_or_else(|| anyhow::anyhow!("HTTP response missing status"))?;
 	if !(200..300).contains(&status) {
-		anyhow::bail!("Pokémon API returned {status}");
+		anyhow::bail!("API returned HTTP {status}");
 	}
-	let json: serde_json::Value =
-		serde_json::from_str(body).map_err(|e| anyhow::anyhow!("Failed to parse JSON: {e}"))?;
-	json["name"]
+	let parsed: serde_json::Value =
+		serde_json::from_str(body).map_err(|e| anyhow::anyhow!("Invalid JSON from API: {e}"))?;
+	parsed["name"]
 		.as_str()
-		.map(|s| s.to_string())
-		.ok_or_else(|| anyhow::anyhow!("Pokémon API response missing 'name' field"))
+		.map(str::to_string)
+		.ok_or_else(|| anyhow::anyhow!("API response missing 'name'"))
 }
 
 // ---------------------------------------------------------------------------

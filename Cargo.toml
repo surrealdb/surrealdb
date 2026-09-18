@@ -313,9 +313,9 @@ toml = "0.9.12"
 wasm-encoder = "0.245"
 wasm-opt = "0.116.1"
 wasmparser = "0.245"
-wasmtime = { version = "46.0.3", default-features = false, features = ["async", "cranelift", "winch", "runtime", "std", "wat", "component-model", "parallel-compilation"] }
+wasmtime = { version = "46.0.3", default-features = false, features = ["async", "cranelift", "runtime", "std", "wat", "component-model", "component-model-async", "parallel-compilation"] }
 wasmtime-wasi = { version = "46.0.3", features = ["p1", "p2"] }
-wit-bindgen = { version = "0.51", default-features = false, features = ["macros", "realloc"] }
+wit-bindgen = { version = "0.51", default-features = false, features = ["macros", "realloc", "async"] }
 zstd = { version = "0.13.3", default-features = false }
 
 [package]

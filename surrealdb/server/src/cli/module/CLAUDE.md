@@ -24,7 +24,7 @@ Compiles a Rust project into a distributable `.surli` archive.
 Pipeline:
 1. Load and validate `surrealism.toml` config.
 2. Read `cargo metadata` to find the WASM target artifact.
-3. Ensure `.cargo/config.toml` exists, then run `cargo build --target wasm32-wasip2` with `RUSTFLAGS` including `--cfg tokio_unstable` (release or debug).
+3. Run `cargo build --target wasm32-wasip2` (release or debug). No build flags are needed: the guest SDK's `async fn` support comes from the component model's async ABI, not an embedded executor.
 4. Validate the `surrealism` SDK version matches the server's expected version.
 5. Run `wasm-opt` to optimize the binary (skip in debug mode).
 6. Instantiate with a `DemoHost` to extract the exports manifest (function signatures).

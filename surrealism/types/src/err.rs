@@ -22,6 +22,17 @@ pub enum SurrealismError {
 		context_timeout: Option<Duration>,
 		module_limit: Option<Duration>,
 	},
+	#[error(
+		"No Surrealism controller became available within {waited:?}. The module's pool holds \
+		 {pool_size} controller(s), all of them checked out. A function that calls back into its \
+		 own module needs a free slot for the nested call while the outer one is still holding \
+		 its own; raise the module's `max_pool_size` above the call depth, or remove the \
+		 re-entrant call."
+	)]
+	ControllerPoolExhausted {
+		waited: Duration,
+		pool_size: usize,
+	},
 	#[error("Unsupported ABI version: expected {expected}, got {got}")]
 	UnsupportedAbi {
 		expected: u32,
@@ -67,6 +78,10 @@ impl SurrealismError {
 				..
 			} => false,
 			Self::IntConversion(_) => false,
+			// No controller was ever obtained, so no instance ran.
+			Self::ControllerPoolExhausted {
+				..
+			} => false,
 			Self::Other(_) => false,
 		}
 	}
@@ -90,3 +105,42 @@ impl<T, E: Display> PrefixErr<T> for std::result::Result<T, E> {
 		self.map_err(|e| SurrealismError::Other(anyhow::anyhow!("{}: {}", f(), e)))
 	}
 }
+
+/// Why a host call made through a `transaction` handle failed.
+///
+/// Mirrors the `host-error` variant in the WIT. Classifying these lets the host
+/// count capability denials separately from a plugin's own errors, and lets a
+/// plugin match on the class instead of parsing a message.
+///
+/// A denied call never reaches the datastore, so this is an observability and
+/// ergonomics boundary rather than a security one.
+#[derive(thiserror::Error, Debug)]
+pub enum HostCallError {
+	/// The module's declared capabilities forbid this call.
+	#[error("permission denied: {0}")]
+	PermissionDenied(String),
+	/// The query or function name did not parse or resolve.
+	#[error("invalid request: {0}")]
+	InvalidRequest(String),
+	/// The datastore refused or failed the operation. A write attempted through
+	/// a read-only transaction arrives here.
+	#[error("datastore error: {0}")]
+	Datastore(String),
+	/// The host's deadline elapsed while serving this call.
+	#[error("deadline exceeded")]
+	DeadlineExceeded,
+	/// Anything else, including serialization failures.
+	#[error("{0}")]
+	Other(String),
+}
+
+/// Unclassified failures become [`HostCallError::Other`], so an implementation
+/// can keep using `?` on `anyhow` errors and classify only where it matters.
+impl From<anyhow::Error> for HostCallError {
+	fn from(e: anyhow::Error) -> Self {
+		Self::Other(e.to_string())
+	}
+}
+
+/// Convenience alias for a host call's result.
+pub type HostCallResult<T> = Result<T, HostCallError>;

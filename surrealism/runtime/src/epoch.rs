@@ -12,6 +12,9 @@
 //!
 //! Modules opt in via `strict_timeout` in `surrealism.toml` (default `true`
 //! → guarded engine). Compute-heavy trusted modules can set it to `false`.
+//!
+//! Both engines use Cranelift. Winch cannot compile the component model's async
+//! ABI, which `invoke` and the `transaction` methods depend on.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -39,10 +42,18 @@ struct SharedEngines {
 fn base_config() -> Config {
 	let mut cfg = Config::new();
 	cfg.parallel_compilation(true);
-	#[cfg(debug_assertions)]
-	{
-		cfg.strategy(Strategy::Winch);
-	}
+	// The component model's async ABI. `invoke` is lifted async so the guest can
+	// hold several host calls in flight, and `transaction` methods are lowered
+	// async so each one becomes a subtask the host resolves independently.
+	// `concurrency_support` is what `LinkerInstance::func_wrap_concurrent`
+	// checks; it defaults on with the `component-model-async` cargo feature, but
+	// is set explicitly here so the requirement is visible at the call site.
+	//
+	// Cranelift is required in every profile: Winch rejects this feature with
+	// "the wasm_cm_async feature is not supported on this compiler
+	// configuration".
+	cfg.wasm_component_model_async(true);
+	cfg.concurrency_support(true);
 	#[cfg(not(debug_assertions))]
 	{
 		cfg.cranelift_opt_level(OptLevel::Speed);

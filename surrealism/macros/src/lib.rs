@@ -17,23 +17,9 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 	let item2 = item.clone();
 	if let Ok(item_fn) = syn::parse::<ItemFn>(item2) {
-		handle_function(
-			attrs.is_default,
-			attrs.export_name,
-			attrs.is_init,
-			attrs.is_writeable,
-			attrs.comment,
-			item_fn,
-		)
+		handle_function(attrs.is_default, attrs.export_name, attrs.is_init, attrs.comment, item_fn)
 	} else {
 		let item_mod = parse_macro_input!(item as ItemMod);
-		handle_module(
-			attrs.is_default,
-			attrs.export_name,
-			attrs.is_init,
-			attrs.is_writeable,
-			attrs.comment,
-			item_mod,
-		)
+		handle_module(attrs.is_default, attrs.export_name, attrs.is_init, attrs.comment, item_mod)
 	}
 }

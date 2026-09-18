@@ -19,8 +19,9 @@
 //
 // Loading a module needs the `files` and `surrealism` experimental capabilities,
 // and the bucket directory must be on SURREAL_BUCKET_FOLDER_ALLOWLIST. The
-// module declares `allow_net = ["127.0.0.1"]`, so the server must grant at least
-// that. Harness trap (README): variadic capability flags take the `--flag=value`
+// module declares `allow_net = ["localhost", "127.0.0.1"]`, so the server must
+// grant at least those: a module whose declared targets are not all allowed is
+// refused at load. Harness trap (README): variadic capability flags take the `--flag=value`
 // form, or clap's greedy parser swallows the trailing `memory` positional.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { copyFileSync, existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -53,7 +54,7 @@ beforeAll(async () => {
 	bucketDir = realpathSync(mkdtempSync(join(tmpdir(), "surrealism-bucket-")));
 	copyFileSync(SURLI, join(bucketDir, "demo.surli"));
 	server = await startServer({
-		args: ["--allow-experimental=files,surrealism", "--allow-net=127.0.0.1"],
+		args: ["--allow-experimental=files,surrealism", "--allow-net=127.0.0.1,localhost"],
 		env: { SURREAL_BUCKET_FOLDER_ALLOWLIST: bucketDir },
 	});
 });
@@ -231,8 +232,9 @@ moduleTest(
 		expect(canDrive).toBeDefined();
 		expect((canDrive as Export).writeable).toBe(false);
 
-		// `#[surrealism(writeable)]` is reported, so a read-only module call and a
-		// mutating one are distinguishable from the catalog alone.
+		// A function that declared a writeable transaction is reported as such, so a
+		// read-only module call and a mutating one are distinguishable from the
+		// catalog alone.
 		const createUser = exports.find((e) => e.name === "create_user");
 		expect(createUser).toBeDefined();
 		expect((createUser as Export).writeable).toBe(true);

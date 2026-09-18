@@ -1,10 +1,10 @@
 use std::io::BufRead;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use surrealdb_types::ToSql;
 use surrealism_runtime::config::SurrealismConfig;
 use surrealism_runtime::host::InvocationContext;
+use surrealism_runtime::{HostCallError, HostCallResult};
 
 pub struct DemoHost;
 
@@ -19,11 +19,11 @@ use super::parse_value;
 #[async_trait]
 impl InvocationContext for DemoHost {
 	async fn sql(
-		&mut self,
+		&self,
 		_config: &SurrealismConfig,
 		query: String,
 		vars: surrealdb_types::Object,
-	) -> Result<surrealdb_types::Value> {
+	) -> HostCallResult<surrealdb_types::Value> {
 		println!("The module is running a SQL query:");
 		println!("SQL: {query}");
 		println!("Vars: {}", vars.to_sql());
@@ -34,10 +34,10 @@ impl InvocationContext for DemoHost {
 			let line = match stdin.lock().lines().next() {
 				Some(Ok(line)) => line,
 				Some(Err(e)) => {
-					anyhow::bail!("Failed to read from stdin: {e}");
+					return Err(HostCallError::Other(format!("failed to read from stdin: {e}")));
 				}
 				None => {
-					anyhow::bail!("stdin closed unexpectedly");
+					return Err(HostCallError::Other("stdin closed unexpectedly".to_string()));
 				}
 			};
 
@@ -55,12 +55,12 @@ impl InvocationContext for DemoHost {
 	}
 
 	async fn run(
-		&mut self,
+		&self,
 		_config: &SurrealismConfig,
 		fnc: String,
 		version: Option<String>,
 		args: Vec<surrealdb_types::Value>,
-	) -> Result<surrealdb_types::Value> {
+	) -> HostCallResult<surrealdb_types::Value> {
 		let version = version.map(|x| format!("<{x}>")).unwrap_or_default();
 		println!("The module is running a function:");
 		println!(
@@ -74,10 +74,10 @@ impl InvocationContext for DemoHost {
 			let line = match stdin.lock().lines().next() {
 				Some(Ok(line)) => line,
 				Some(Err(e)) => {
-					anyhow::bail!("Failed to read from stdin: {e}");
+					return Err(HostCallError::Other(format!("failed to read from stdin: {e}")));
 				}
 				None => {
-					anyhow::bail!("stdin closed unexpectedly");
+					return Err(HostCallError::Other("stdin closed unexpectedly".to_string()));
 				}
 			};
 
@@ -92,16 +92,6 @@ impl InvocationContext for DemoHost {
 				}
 			}
 		}
-	}
-
-	fn stdout(&mut self, output: &str) -> Result<()> {
-		println!("[surli::out] {}", output);
-		Ok(())
-	}
-
-	fn stderr(&mut self, output: &str) -> Result<()> {
-		eprintln!("[surli::err] {}", output);
-		Ok(())
 	}
 
 	fn stdout_callback(&self) -> std::sync::Arc<dyn Fn(&str) + Send + Sync> {

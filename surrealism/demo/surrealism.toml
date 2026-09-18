@@ -6,8 +6,12 @@ name = "demo"
 version = "1.0.0"
 
 [capabilities]
+allow_arbitrary_queries = true
 allow_functions = ["fn::*"]
-allow_net = ["127.0.0.1"]
+# `localhost` is matched by name by the DNS shim; `127.0.0.1` is the explicit
+# IP rule that readmits the loopback address the name resolves to, which the
+# shim would otherwise reject as special.
+allow_net = ["localhost", "127.0.0.1"]
 
 [attach]
 fs = "fs"

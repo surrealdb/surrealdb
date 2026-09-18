@@ -1,3 +1,6 @@
+#[cfg(feature = "surrealism")]
+use std::sync::Arc;
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -210,7 +213,9 @@ pub(crate) async fn run_on_runtime(
 		client,
 	} = cached;
 	let module_name = module_display_name.as_ref().to_string();
-	let host = Box::new(Host::new(
+	// `Arc`, not `Box`: the guest may hold several host calls in flight, and each
+	// one resolves the shared context out of the store's resource table.
+	let host: Arc<dyn surrealism_runtime::host::InvocationContext> = Arc::new(Host::new(
 		ctx,
 		opt,
 		doc,
@@ -218,10 +223,29 @@ pub(crate) async fn run_on_runtime(
 		#[cfg(feature = "http")]
 		client,
 	));
-	let mut controller = runtime.acquire_controller(host).await?;
+	// What the manifest says this export asked for. An export the manifest does
+	// not name cannot be invoked anyway — `invoke` fails on an unknown name —
+	// so treating an absent entry as "declares one" only preserves the error
+	// the guest would raise itself.
+	let signature = runtime.exports().get_signature(sub);
+	let declares_transaction = signature.is_none_or(|f| f.declares_transaction);
 
+	// Read before waiting for a controller, so a `TIMEOUT 1s` query is not held
+	// in the pool queue for the pool's own, much longer, patience — with the
+	// caller's transaction open the whole time.
 	let ctx_timeout = ctx.timeout();
-	let result = controller.invoke_with_timeout(sub.map(String::from), args, ctx_timeout).await;
+	let mut controller = runtime.acquire_controller(host.as_ref(), ctx_timeout).await?;
+
+	// A function that declared no transaction parameter is lent nothing, which
+	// is what makes "provably cannot query" true of the host rather than of the
+	// generated dispatch. The manifest is user-supplied and says nothing about
+	// the component beside it; what the property rests on is that this is the
+	// only thing consulted, so a component whose body calls `transaction.sql`
+	// must declare the parameter to be given a handle, and a manifest that
+	// hides the parameter withholds it.
+	let lent = declares_transaction.then(|| Arc::clone(&host));
+	let result =
+		controller.invoke_with_timeout(lent, sub.map(String::from), args, ctx_timeout).await;
 
 	if result.as_ref().is_err_and(|e| e.is_trap()) {
 		tracing::error!(

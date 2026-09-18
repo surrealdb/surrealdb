@@ -1332,8 +1332,16 @@ impl Context {
 				let module_net_targets =
 					crate::surrealism::host::module_allow_net_targets(&package.config.capabilities);
 
+				// The operator's deny rules travel with the runtime. The
+				// module's declared `allow_net` narrows the SurrealQL path via
+				// `module_scoped_capabilities`, but the guest's own WASI sockets
+				// are checked by the policy inside the runtime, which has no
+				// other way to learn what the server forbids.
+				let deny_net =
+					crate::surrealism::host::surrealism_deny_net(&self.get_capabilities());
+
 				let runtime = tokio::task::spawn_blocking(move || {
-					Runtime::new(package, max_pool_size, max_memory, max_execution_time)
+					Runtime::new(package, max_pool_size, max_memory, max_execution_time, deny_net)
 				})
 				.await
 				.context("WASM compile task aborted")??;

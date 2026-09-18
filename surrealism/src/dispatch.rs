@@ -1,4 +1,5 @@
 use crate::bindings::Guest;
+use crate::bindings::surrealism::plugin::host;
 use crate::registry::{SurrealismEntry, SurrealismInit};
 
 fn find_entry(name: Option<&str>) -> Result<&'static SurrealismEntry, String> {
@@ -10,8 +11,13 @@ fn find_entry(name: Option<&str>) -> Result<&'static SurrealismEntry, String> {
 struct SurrealismPlugin;
 
 impl Guest for SurrealismPlugin {
-	fn invoke(name: Option<String>, args: Vec<u8>) -> Result<Vec<u8>, String> {
-		(find_entry(name.as_deref())?.invoke)(&args)
+	async fn invoke(
+		tx: Option<&host::Transaction>,
+		name: Option<String>,
+		args: Vec<u8>,
+	) -> Result<Vec<u8>, String> {
+		let entry = find_entry(name.as_deref())?;
+		(entry.invoke)(tx, &args).await
 	}
 
 	fn list_functions() -> Vec<Option<String>> {
@@ -28,6 +34,10 @@ impl Guest for SurrealismPlugin {
 
 	fn function_writeable(name: Option<String>) -> Result<bool, String> {
 		Ok(find_entry(name.as_deref())?.writeable)
+	}
+
+	fn function_declares_transaction(name: Option<String>) -> Result<bool, String> {
+		Ok(find_entry(name.as_deref())?.declares_transaction)
 	}
 
 	fn function_comment(name: Option<String>) -> Result<Option<String>, String> {

@@ -32,24 +32,51 @@ interface types {
 
 /// Host-provided capabilities imported by the guest module.
 ///
-/// All functions return `result<T, string>` where the error variant is a
-/// human-readable message. The host may return errors for permission violations,
-/// serialization failures, or datastore errors.
+/// Every host call returns `result<T, host-error>`, whose variant says what
+/// kind of failure occurred: a capability denial, a malformed request, a
+/// datastore refusal, a deadline, or anything else.
 interface host {
     use types.{serialized-value, serialized-vars, serialized-args};
 
-    /// Execute a SurrealQL query string against the host datastore.
+    /// Why a host call failed.
     ///
-    /// The query runs with the permissions of the module's configured auth scope.
-    /// `vars` supplies bind variables (pass an empty buffer for no variables).
-    /// Returns the query result as a serialized value.
-    sql: func(query: string, vars: serialized-vars) -> result<serialized-value, string>;
+    /// Classified so the host can count and alert on capability denials
+    /// separately from a plugin's own errors, and so a guest can match on the
+    /// class rather than parsing a message. A denied call never runs.
+    variant host-error {
+        /// The module's declared capabilities forbid this call.
+        permission-denied(string),
+        /// The query or function name did not parse or resolve.
+        invalid-request(string),
+        /// The datastore refused or failed the operation. A write attempted
+        /// through a read-only transaction arrives here.
+        datastore(string),
+        /// The host's deadline elapsed while serving this call.
+        deadline-exceeded,
+        /// Anything else, including serialization failures.
+        other(string),
+    }
 
-    /// Call another surrealism function by fully-qualified name (e.g. `"mymod::greet"`).
+    /// A borrowed capability to act inside the calling query's transaction.
     ///
-    /// `version` optionally pins a specific module version; `none` resolves the latest.
-    /// Cross-module calls are subject to the caller's capability grants.
-    run: func(fnc: string, version: option<string>, args: serialized-args) -> result<serialized-value, string>;
+    /// The host owns every handle and revokes it when `invoke` returns, so a
+    /// guest cannot reach the datastore outside the invocation it was lent to.
+    /// Methods carry the caller's auth, the caller's cursor document, and the
+    /// module's capability narrowing.
+    resource transaction {
+        /// Execute a SurrealQL query string against the host datastore.
+        ///
+        /// The query runs with the permissions of the module's configured auth
+        /// scope. `vars` supplies bind variables (pass an empty buffer for no
+        /// variables). Returns the query result as a serialized value.
+        sql: async func(query: string, vars: serialized-vars) -> result<serialized-value, host-error>;
+
+        /// Call another surrealism function by fully-qualified name (e.g. `"mymod::greet"`).
+        ///
+        /// `version` optionally pins a specific module version; `none` resolves
+        /// the latest. Cross-module calls are subject to the caller's grants.
+        run: async func(fnc: string, version: option<string>, args: serialized-args) -> result<serialized-value, host-error>;
+    }
 }
 
 /// The `plugin` world is the top-level contract that every surrealism guest
@@ -59,10 +86,11 @@ interface host {
 ///
 /// 1. The host instantiates the WASM component.
 /// 2. The host calls `init` (if exported). The module may use this to set up
-///    state or warm caches. If `init` returns an error
-///    the module is considered unhealthy and will not receive `invoke` calls.
-/// 3. For each incoming request the host calls `invoke` with the target
-///    function name and serialized arguments.
+///    state or warm caches. If `init` returns an error the module is considered
+///    unhealthy and will not receive `invoke` calls.
+/// 3. For each incoming request the host reads the function's entry in the
+///    baked `exports.toml`, lends a matching transaction, and calls `invoke`.
+///    The handle is revoked when the call returns.
 ///
 /// ## Introspection
 ///
@@ -71,14 +99,27 @@ interface host {
 /// surface without executing any functions.
 world plugin {
     import host;
+    use host.{transaction};
     use types.{serialized-value, serialized-args, serialized-kind, serialized-arguments};
 
     /// Invoke a function exported by this module.
     ///
+    /// `tx` is the capability for this call, lent by the host and revoked when
+    /// the call returns. It is `none` when the host has no transaction to lend —
+    /// for example `surreal module run` outside a datastore — and a function
+    /// that declared a transaction parameter then fails rather than proceeding
+    /// without one. A function that declared none never touches it.
+    ///
+    /// The handle carries the caller's transaction as-is. A function that
+    /// declared a read-only transaction is *not* yet prevented from writing
+    /// through it: the `writeable` flag drives scheduling and planning, and
+    /// nothing currently opens a genuinely read-only datastore transaction for
+    /// a module call. The marker declares intent; enforcement is still to come.
+    ///
     /// `name` identifies the function; pass `none` to call the module's default
     /// export (the unnamed function). Returns an error if the function does not
     /// exist or execution fails.
-    export invoke: func(name: option<string>, args: serialized-args) -> result<serialized-value, string>;
+    export invoke: async func(tx: option<borrow<transaction>>, name: option<string>, args: serialized-args) -> result<serialized-value, string>;
 
     /// Return the names of all functions exported by this module.
     /// A `none` entry represents the default (unnamed) export.
@@ -92,9 +133,23 @@ world plugin {
     export function-returns: func(name: option<string>) -> result<serialized-kind, string>;
 
     /// Return whether the given function is marked as writeable.
-    /// Functions that are not writeable are treated as read-only by the host,
-    /// enabling optimizations such as read-only transactions and parallel execution.
+    ///
+    /// Derived from the function's transaction parameter:
+    /// `Transaction<ReadWrite>` reports `true`, `Transaction` and no parameter
+    /// report `false`.
+    ///
+    /// Consumed by planning and scheduling. It does **not** currently stop a
+    /// read-only function from writing — see the note on `transaction`.
     export function-writeable: func(name: option<string>) -> result<bool, string>;
+
+    /// Return whether the given function declared a transaction parameter.
+    ///
+    /// A function that declared none is lent no handle at all: the host passes
+    /// `none` for `tx`, so it has no route to the datastore whatever its body
+    /// contains. Without this the host would have to lend every function a
+    /// handle and trust the generated dispatch to drop it, which a hand-written
+    /// or non-Rust component need not do.
+    export function-declares-transaction: func(name: option<string>) -> result<bool, string>;
 
     /// Return the comment for the given function, if one was provided.
     /// Sourced from Rust doc comments or an explicit `#[surrealism(comment = "...")]`.
@@ -104,7 +159,12 @@ world plugin {
     /// Optional initialization hook called once after instantiation.
     ///
     /// If this returns an error, the host marks the module as failed and will
-    /// not route any `invoke` calls to it. Host imports (`sql`, `run`) are
-    /// available during `init`.
+    /// not route any `invoke` calls to it.
+    ///
+    /// Lent no transaction, and synchronous by contract. `init` runs once per
+    /// instance, under whichever request happened to create it, and its effects
+    /// persist in linear memory for every later request; it therefore must not
+    /// reach the datastore. A sync-lifted export also cannot block, so the
+    /// `#[surrealism(init)]` macro rejects an `async fn`.
     export init: func() -> result<_, string>;
 }

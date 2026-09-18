@@ -3,11 +3,11 @@ use std::process::Command;
 use std::{fs, mem};
 
 use anyhow::Result;
-use surrealism_runtime::PrefixErr;
 use surrealism_runtime::config::{AbiVersion, SurrealismConfig, Target};
 use surrealism_runtime::exports::{ExportsManifest, FunctionExport};
 use surrealism_runtime::package::SurrealismPackage;
 use surrealism_runtime::runtime::Runtime;
+use surrealism_runtime::{NetDeny, PrefixErr};
 use tempfile::TempDir;
 use wasm_encoder::{ComponentSectionId, Encode, RawSection, Section};
 use wasm_opt::OptimizationOptions;
@@ -78,10 +78,13 @@ async fn extract_exports(wasm: &[u8], config: &SurrealismConfig) -> Result<Expor
 		logo: None,
 	};
 
-	let runtime = Runtime::new(temp_package, 1, None, None)?;
-	let host = Box::new(DemoHost::new());
+	// A local build, so there is no server deny list to apply.
+	let runtime = Runtime::new(temp_package, 1, None, None, NetDeny::Nothing)?;
+	// Signature extraction only calls the sync introspection exports, which are
+	// lent no transaction, so this context is never asked to serve a host call.
+	let host = DemoHost::new();
 	let mut controller =
-		runtime.new_controller(host).await.prefix_err(|| "Failed to load WASM module")?;
+		runtime.new_controller(&host).await.prefix_err(|| "Failed to load WASM module")?;
 
 	let names = controller.list().await.prefix_err(|| "Failed to list functions")?;
 
@@ -100,6 +103,10 @@ async fn extract_exports(wasm: &[u8], config: &SurrealismConfig) -> Result<Expor
 			.writeable(name.clone())
 			.await
 			.prefix_err(|| format!("Failed to get writeable flag for '{display}'"))?;
+		let declares_transaction = controller
+			.declares_transaction(name.clone())
+			.await
+			.prefix_err(|| format!("Failed to get transaction declaration for '{display}'"))?;
 		let comment = controller
 			.comment(name.clone())
 			.await
@@ -115,6 +122,7 @@ async fn extract_exports(wasm: &[u8], config: &SurrealismConfig) -> Result<Expor
 			args_text,
 			returns_text,
 			writeable,
+			declares_transaction,
 			comment,
 		});
 	}
@@ -189,8 +197,6 @@ fn validate_sdk_version(metadata: &serde_json::Value) -> Result<()> {
 
 /// Invoke `cargo build` targeting `wasm32-wasip2`.
 fn build_wasm_module(path: &Path, package_name: &str, debug: bool) -> Result<()> {
-	super::wasm_target::ensure_cargo_config(path)?;
-
 	let target = super::wasm_target::TARGET;
 	let profile = if debug {
 		"debug"
@@ -204,7 +210,6 @@ fn build_wasm_module(path: &Path, package_name: &str, debug: bool) -> Result<()>
 	if !debug {
 		cmd.arg("--release");
 	}
-	super::wasm_target::apply_rustflags(&mut cmd);
 
 	let output = cmd.current_dir(path).output().prefix_err(|| "Failed to execute cargo build")?;
 

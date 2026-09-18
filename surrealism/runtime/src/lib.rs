@@ -6,6 +6,7 @@
 pub mod capabilities;
 pub mod config;
 pub mod controller;
+pub mod dns;
 pub mod epoch;
 pub mod exports;
 pub mod host;
@@ -15,8 +16,8 @@ pub mod runtime;
 pub mod store;
 mod wasi_context;
 
-pub use net_allow::{ResolvedNetAllow, resolve_allow_net};
-pub use surrealism_types::err::{PrefixErr, SurrealismError};
+pub use net_allow::{NetDeny, NetPolicy, NetRule};
+pub use surrealism_types::err::{HostCallError, HostCallResult, PrefixErr, SurrealismError};
 
 /// The version of the Surrealism SDK that this runtime was compiled against.
 /// Used by the build toolchain to verify that a module's `surrealism`

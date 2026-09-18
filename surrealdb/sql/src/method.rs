@@ -283,9 +283,15 @@ pub fn is_builtin_method(name: &str) -> bool {
 /// Whether the named builtin can evaluate arbitrary nested statements, and so
 /// needs a write transaction whatever its arguments look like.
 ///
-/// Every other builtin writes nothing of its own; only its arguments carry
-/// user expressions. Both `read_only` predicates and the planner's access-mode
-/// choice ask this, so a builtin added to one is added to all three.
+/// This is **not** the question of whether a builtin changes anything. Several
+/// do without evaluating a statement — advancing a sequence, writing to a
+/// bucket, a `POST` — and they are not listed here, because what they change is
+/// not staged through the caller's transaction and needs no write transaction
+/// to reach. A caller asking "does this mutate state" wants a different
+/// predicate.
+///
+/// Both `read_only` predicates and the planner's access-mode choice ask this
+/// one, so a builtin added to any of them is added to all three.
 pub fn is_writer_builtin(name: &str) -> bool {
 	matches!(name, "api::invoke" | "eval::gql" | "eval::surql")
 }

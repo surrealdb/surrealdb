@@ -2028,11 +2028,12 @@ name = "demo"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "reqwest 0.13.3",
+ "futures",
  "serde_json",
  "surrealdb",
  "surrealdb-types",
  "surrealism",
+ "url",
 ]
 
 [[package]]
@@ -8189,7 +8190,6 @@ dependencies = [
  "surrealdb-types",
  "surrealism-macros",
  "surrealism-types",
- "tokio",
  "wit-bindgen 0.51.0",
 ]
 
@@ -8213,6 +8213,7 @@ dependencies = [
  "parking_lot",
  "semver",
  "serde",
+ "surrealdb-common",
  "surrealdb-types",
  "surrealism-types",
  "tar",
@@ -9717,7 +9718,6 @@ dependencies = [
  "wasmtime-internal-jit-icache-coherence",
  "wasmtime-internal-unwinder",
  "wasmtime-internal-versioned-export-macros",
- "wasmtime-internal-winch",
  "wat",
  "windows-sys 0.61.2",
 ]
@@ -9871,23 +9871,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "wasmtime-internal-winch"
-version = "46.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "602bbd03c39f2cc204a431b7833b2b8a4146ceddd2720f87a8e3d9ee44a6ff5f"
-dependencies = [
- "cranelift-codegen",
- "gimli",
- "log",
- "object",
- "target-lexicon",
- "wasmparser 0.251.0",
- "wasmtime-environ",
- "wasmtime-internal-cranelift",
- "winch-codegen",
 ]
 
 [[package]]
@@ -10131,25 +10114,6 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
-
-[[package]]
-name = "winch-codegen"
-version = "46.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad6cf276b7796717bda3e48532e99e1cbfa239ddb7eb23553a46935e8ce123de"
-dependencies = [
- "cranelift-assembler-x64",
- "cranelift-codegen",
- "gimli",
- "regalloc2",
- "smallvec",
- "target-lexicon",
- "thiserror 2.0.20",
- "wasmparser 0.251.0",
- "wasmtime-environ",
- "wasmtime-internal-core",
- "wasmtime-internal-cranelift",
-]
 
 [[package]]
 name = "windows"

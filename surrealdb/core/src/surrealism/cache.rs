@@ -66,10 +66,10 @@ impl SurrealismCache {
 /// Identity of a cached module runtime.
 ///
 /// Every variant is scoped by namespace and database. A cached [`Runtime`] is
-/// not stateless — it owns the module's KV store and pools controllers whose
-/// WASM linear memory (heap, statics) survives between invocations — so two
-/// databases resolving the same package must not share one entry, or module
-/// state written under one tenant becomes readable by another.
+/// not stateless — it pools controllers whose WASM linear memory (heap,
+/// statics) survives between invocations — so two databases resolving the same
+/// package must not share one entry, or module state written under one tenant
+/// becomes readable by another.
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub enum SurrealismCacheKey {
 	// NS - DB - BUCKET - KEY

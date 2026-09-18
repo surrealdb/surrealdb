@@ -31,6 +31,7 @@ pub use error::{
 
 pub mod future;
 pub mod mem_registry;
+pub mod net;
 pub mod non_max;
 pub mod range;
 pub mod span;

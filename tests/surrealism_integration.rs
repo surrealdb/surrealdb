@@ -10,7 +10,7 @@ mod surrealism_integration {
 	use std::process::Command;
 	use std::sync::{LazyLock, mpsc};
 	use std::thread;
-	use std::time::Duration;
+	use std::time::{Duration, Instant};
 
 	use serde::Deserialize;
 	use surrealism_runtime::config::{
@@ -103,10 +103,32 @@ mod surrealism_integration {
 		let canonical =
 			std::fs::canonicalize(tmp.path()).expect("Failed to canonicalize temp dir path");
 		build_and_pack_demo(&canonical);
+		repack_without_localhost(&canonical);
 		DemoModuleDir {
 			_tmp: tmp,
 			canonical,
 		}
+	}
+
+	/// The demo, repacked with `localhost` taken out of its `allow_net`.
+	///
+	/// The same component and the same manifest, so the two archives differ in
+	/// exactly one thing: whether the module is allowed to resolve `localhost`.
+	/// That is what lets `check_dns_denied_hostname` point both halves at one
+	/// live listener under one name and attribute the difference to the name
+	/// filter alone. Repacked from the built archive rather than built from a
+	/// second crate, so it costs no second wasm build.
+	fn repack_without_localhost(output_dir: &Path) {
+		use surrealism_runtime::package::UnpackOptions;
+
+		let surli = std::fs::read(output_dir.join("demo.surli")).expect("read demo.surli");
+		let mut package =
+			SurrealismPackage::from_reader(std::io::Cursor::new(surli), &UnpackOptions::default())
+				.expect("unpack demo.surli");
+		package.config.capabilities.allow_net = vec!["127.0.0.1".to_string()];
+		// No attached filesystem is packed here, so drop the declaration with it.
+		package.config.attach.fs = None;
+		package.pack(output_dir.join("restricted.surli"), None).expect("pack restricted.surli");
 	}
 
 	static DEMO_DIR: LazyLock<DemoModuleDir> = LazyLock::new(build_demo_dir);
@@ -126,6 +148,16 @@ mod surrealism_integration {
 		bucket_dir: &Path,
 		extra: HashMap<String, String>,
 	) -> Result<(String, common::Child), Box<dyn std::error::Error>> {
+		start_surrealism_server_full(bucket_dir, extra, "").await
+	}
+
+	/// As [`start_surrealism_server_with`], with extra command-line arguments —
+	/// used to give one server a deny list the others do not have.
+	async fn start_surrealism_server_full(
+		bucket_dir: &Path,
+		extra: HashMap<String, String>,
+		extra_args: &str,
+	) -> Result<(String, common::Child), Box<dyn std::error::Error>> {
 		let mut vars = HashMap::new();
 		vars.insert(
 			"SURREAL_BUCKET_FOLDER_ALLOWLIST".to_string(),
@@ -134,7 +166,14 @@ mod surrealism_integration {
 		vars.extend(extra);
 
 		common::start_server(common::StartServerArguments {
-			args: "--allow-experimental files,surrealism --allow-net 127.0.0.1".to_string(),
+			args: format!(
+				"--allow-experimental files,surrealism --allow-net 127.0.0.1,localhost{}",
+				if extra_args.is_empty() {
+					String::new()
+				} else {
+					format!(" {extra_args}")
+				}
+			),
 			vars: Some(vars),
 			..Default::default()
 		})
@@ -407,10 +446,22 @@ mod surrealism_integration {
 	/// Run the DEFINE BUCKET + DEFINE MODULE setup queries for a fresh
 	/// namespace/database.
 	async fn setup_module(addr: &str, ns: &str, db: &str, bucket_dir: &Path) {
+		setup_named_module(addr, ns, db, bucket_dir, "demo", "demo.surli").await;
+	}
+
+	/// Define one module in the bucket under a chosen name and archive.
+	async fn setup_named_module(
+		addr: &str,
+		ns: &str,
+		db: &str,
+		bucket_dir: &Path,
+		module: &str,
+		archive: &str,
+	) {
 		let dir = bucket_dir.to_string_lossy();
 		let setup = format!(
-			"DEFINE BUCKET test BACKEND \"file:{dir}\";\
-			 DEFINE MODULE mod::demo FROM f\"test:/demo.surli\" UNSIGNED;"
+			"DEFINE BUCKET IF NOT EXISTS test BACKEND \"file:{dir}\";\
+			 DEFINE MODULE mod::{module} FROM f\"test:/{archive}\" UNSIGNED;"
 		);
 		let results = sql_query(addr, ns, db, &setup).await;
 		for (i, r) in results.iter().enumerate() {
@@ -638,7 +689,7 @@ mod surrealism_integration {
 
 		setup_module(&addr, &ns, &db, bucket_dir).await;
 
-		// Define the SurrealQL function that create_user calls via surrealism::run
+		// Define the SurrealQL function that create_user calls via tx.run
 		let define_fn =
 			"DEFINE FUNCTION fn::user_exists($name: string, $age: int) { RETURN false; };";
 		let results = sql_query(&addr, &ns, &db, define_fn).await;
@@ -986,6 +1037,189 @@ mod surrealism_integration {
 	}
 
 	// -------------------------------------------------------------------
+	// Transaction handle tests
+	// -------------------------------------------------------------------
+
+	/// Two reads awaited together must overlap, and two opaque calls must not.
+	///
+	/// This is the regression test for the whole async change, and it has to
+	/// measure overlap rather than observe results: `try_join` returns the same
+	/// values in the same order whether the host ran the subtasks side by side
+	/// or back to back, so an assertion on the results passes just as well with
+	/// a blocking executor in the guest or with every call serialised.
+	///
+	/// The two halves are measured against each other rather than against a
+	/// fixed threshold, so a loaded runner slows both and the comparison holds.
+	/// `concurrent_sleeps` issues two `SLEEP` reads, which the host may overlap
+	/// because neither can write; `concurrent_runs` issues two `fn::slow` calls,
+	/// whose bodies the host cannot see and therefore has to serialise. If the
+	/// host stopped overlapping, or stopped serialising, the two would converge.
+	async fn check_concurrent_host_calls(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+
+		const SLEEP_MS: u64 = 400;
+
+		let results = sql_query(
+			&addr,
+			&ns,
+			&db,
+			&format!("DEFINE FUNCTION fn::slow($ms: int) {{ SLEEP {SLEEP_MS}ms; RETURN $ms; }};"),
+		)
+		.await;
+		assert_eq!(results[0].status, "OK", "DEFINE FUNCTION: {:?}", results[0].result);
+
+		// Warm the module: the first call pays instantiation and `init`, which
+		// would otherwise land entirely on whichever half ran first.
+		let warm = sql_query(&addr, &ns, &db, "RETURN mod::demo::can_drive(21);").await;
+		assert_eq!(warm[0].status, "OK", "warm-up: {:?}", warm[0].result);
+
+		let started = Instant::now();
+		let results = sql_query(
+			&addr,
+			&ns,
+			&db,
+			&format!("RETURN mod::demo::concurrent_sleeps({SLEEP_MS});"),
+		)
+		.await;
+		let overlapped = started.elapsed();
+		assert_eq!(results[0].status, "OK", "concurrent_sleeps: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!(2));
+
+		let started = Instant::now();
+		let results =
+			sql_query(&addr, &ns, &db, &format!("RETURN mod::demo::concurrent_runs({SLEEP_MS});"))
+				.await;
+		let serialised = started.elapsed();
+		assert_eq!(results[0].status, "OK", "concurrent_runs: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!(2));
+
+		// Two overlapping sleeps cost about one of them; two serialised calls
+		// cost both. Half a sleep of separation is far more than the scheduling
+		// noise either measurement carries.
+		assert!(
+			serialised > overlapped + Duration::from_millis(SLEEP_MS / 2),
+			"two reads did not overlap, or two calls were not serialised: \
+			 reads {overlapped:?}, calls {serialised:?}"
+		);
+
+		// The results still come back, in order, through the overlapping path.
+		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::concurrent_queries();").await;
+		assert_eq!(results[0].status, "OK", "concurrent_queries: {:?}", results[0].result);
+		let arr = results[0].result.as_array().expect("concurrent_queries should return an array");
+		assert_eq!(arr.len(), 2, "expected both query results: {:?}", results[0].result);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_concurrent_host_calls() -> Result<(), Box<dyn std::error::Error>> {
+		check_concurrent_host_calls(&DEMO_DIR.canonical).await
+	}
+
+	/// A function that declared no transaction parameter still resolves, and
+	/// its SurrealQL arity does not include the handle.
+	async fn check_pure_function_arity(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+
+		// `can_drive` takes one SurrealQL argument and no transaction.
+		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::can_drive(21);").await;
+		assert_eq!(results[0].status, "OK", "can_drive: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::Value::Bool(true));
+
+		// `create_user` reaches `fn::user_exists` through `tx.run`.
+		let results = sql_query(
+			&addr,
+			&ns,
+			&db,
+			"DEFINE FUNCTION fn::user_exists($name: string, $age: int) { RETURN false; };",
+		)
+		.await;
+		assert_eq!(results[0].status, "OK", "DEFINE FUNCTION: {:?}", results[0].result);
+
+		// `create_user` takes a `Transaction<ReadWrite>` plus one argument; the
+		// handle must not appear as a second SurrealQL argument.
+		let results = sql_query(
+			&addr,
+			&ns,
+			&db,
+			"RETURN mod::demo::create_user({ name: 'ada', age: 36, enabled: true });",
+		)
+		.await;
+		assert_eq!(results[0].status, "OK", "create_user: {:?}", results[0].result);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_pure_function_arity() -> Result<(), Box<dyn std::error::Error>> {
+		check_pure_function_arity(&DEMO_DIR.canonical).await
+	}
+
+	/// A write issued by a function that declared a read-only transaction must be
+	/// refused.
+	///
+	/// Ignored because this does not hold yet. `writeable` reaches planning and
+	/// scheduling, but a module call runs through the legacy `run_on_runtime`
+	/// path and is handed the caller's transaction unchanged, so the `CREATE`
+	/// below succeeds. Enabling this test is the acceptance criterion for
+	/// opening a genuinely read-only transaction for non-writeable module calls.
+	///
+	/// The assertions deliberately check *why* the call failed: an earlier
+	/// version of this test passed only because the demo had not declared
+	/// `allow_arbitrary_queries`, so the write was denied by capability and
+	/// nothing about read-only enforcement was exercised.
+	async fn check_read_only_write_refused(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+
+		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::sneaky_write();").await;
+		assert_ne!(
+			results[0].status, "OK",
+			"a write through a read-only transaction must be refused, got: {:?}",
+			results[0].result
+		);
+
+		// The refusal must come from the datastore, not from a missing
+		// capability: the demo declares `allow_arbitrary_queries`, so a
+		// `permission denied` here would mean this test is passing for the wrong
+		// reason and proving nothing about read-only enforcement.
+		let message = results[0].result.to_string();
+		assert!(
+			message.contains("datastore error"),
+			"expected a datastore refusal, got: {message}"
+		);
+		assert!(
+			!message.contains("permission denied"),
+			"refused by capability, not by the read-only transaction: {message}"
+		);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	#[ignore = "read-only enforcement for module calls is not implemented yet"]
+	async fn module_read_only_write_refused() -> Result<(), Box<dyn std::error::Error>> {
+		check_read_only_write_refused(&DEMO_DIR.canonical).await
+	}
+
+	// -------------------------------------------------------------------
 	// Error propagation tests
 	// -------------------------------------------------------------------
 
@@ -1114,6 +1348,183 @@ mod surrealism_integration {
 	#[test(tokio::test)]
 	async fn module_fetch_pokemon() -> Result<(), Box<dyn std::error::Error>> {
 		check_fetch_pokemon(&DEMO_DIR.canonical).await
+	}
+
+	// -------------------------------------------------------------------
+	// DNS tests (the filtering shim in surrealism_runtime::dns)
+	// -------------------------------------------------------------------
+
+	/// A guest can reach a host by **name**, not just by literal address.
+	///
+	/// This is what the DNS shim buys: `allow_net` entries are matched as names
+	/// at resolution time rather than pre-resolved at module load, so a record
+	/// that rotates does not strand the module on a stale address.
+	async fn check_dns_allowed_hostname(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let api = LocalPokemonApi::start()?;
+		let port = api.base_url().rsplit(':').next().unwrap().to_string();
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+
+		let results = sql_query(
+			&addr,
+			&ns,
+			&db,
+			&format!("RETURN mod::demo::fetch_pokemon('http://localhost:{port}', 'pikachu');"),
+		)
+		.await;
+		assert_eq!(results[0].status, "OK", "fetch by hostname failed: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!("pikachu"));
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_dns_allowed_hostname() -> Result<(), Box<dyn std::error::Error>> {
+		check_dns_allowed_hostname(&DEMO_DIR.canonical).await
+	}
+
+	/// A name outside the module's `allow_net` must not reach a listener that is
+	/// running and reachable under exactly that name.
+	///
+	/// The refused name has to be one that genuinely resolves, or the test
+	/// cannot tell a refusal from an NXDOMAIN that any resolver would produce —
+	/// a reserved `.example` name fails to resolve through wasmtime's own
+	/// resolver too, so a test using one would pass with the name filter
+	/// deleted. So both halves fetch `localhost`, the live listener, through the
+	/// same component; the only difference is that one archive lists
+	/// `localhost` in `allow_net` and the other does not.
+	///
+	/// Deleting the `allows_name` check in `surrealism/runtime/src/dns.rs`, or
+	/// unbinding the shim, makes the denied half start succeeding: the address
+	/// `localhost` resolves to is covered by the `127.0.0.1` rule both archives
+	/// keep, so nothing downstream refuses the connect.
+	async fn check_dns_denied_hostname(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let api = LocalPokemonApi::start()?;
+		let port = api.base_url().rsplit(':').next().unwrap().to_string();
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+		setup_named_module(&addr, &ns, &db, bucket_dir, "restricted", "restricted.surli").await;
+
+		// The control: the module that lists `localhost`.
+		let allowed = sql_query(
+			&addr,
+			&ns,
+			&db,
+			&format!("RETURN mod::demo::fetch_pokemon('http://localhost:{port}', 'pikachu');"),
+		)
+		.await;
+		assert_eq!(
+			allowed[0].status, "OK",
+			"the control fetch through an allowed name must succeed: {:?}",
+			allowed[0].result
+		);
+		assert_eq!(allowed[0].result, serde_json::json!("pikachu"));
+
+		// The same component, the same name, the same listener — without the
+		// name in `allow_net`.
+		let denied = sql_query(
+			&addr,
+			&ns,
+			&db,
+			&format!(
+				"RETURN mod::restricted::fetch_pokemon('http://localhost:{port}', 'pikachu');"
+			),
+		)
+		.await;
+		assert_ne!(
+			denied[0].status, "OK",
+			"a hostname outside allow_net must not resolve, got: {:?}",
+			denied[0].result
+		);
+
+		Ok(())
+	}
+
+	/// A port-bearing `--deny-net` rule binds for a guest socket, as it does for
+	/// `http::*`.
+	///
+	/// Such a rule names a port rather than a host, so the module still loads —
+	/// load-time validation probes the bare name, which a port-bearing target
+	/// cannot match — and the name still resolves. The refusal travels with the
+	/// addresses that resolution produced and lands on the connect.
+	///
+	/// `module_dns_allowed_hostname` is the control: the same fetch, the same
+	/// listener, on a server without the deny rule.
+	async fn check_operator_port_deny(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		let api = LocalPokemonApi::start()?;
+		let port = api.base_url().rsplit(':').next().unwrap().to_string();
+		let (addr, _server) = start_surrealism_server_full(
+			bucket_dir,
+			HashMap::new(),
+			&format!("--deny-net localhost:{port}"),
+		)
+		.await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		// The module declares `allow_net = ["localhost", "127.0.0.1"]` and still
+		// loads: the operator denied one port, not the host.
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+
+		let denied = sql_query(
+			&addr,
+			&ns,
+			&db,
+			&format!("RETURN mod::demo::fetch_pokemon('http://localhost:{port}', 'pikachu');"),
+		)
+		.await;
+		assert_ne!(
+			denied[0].status, "OK",
+			"a port the operator denied must not be reachable, got: {:?}",
+			denied[0].result
+		);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_operator_port_deny() -> Result<(), Box<dyn std::error::Error>> {
+		check_operator_port_deny(&DEMO_DIR.canonical).await
+	}
+
+	#[test(tokio::test)]
+	async fn module_dns_denied_hostname() -> Result<(), Box<dyn std::error::Error>> {
+		check_dns_denied_hostname(&DEMO_DIR.canonical).await
+	}
+
+	/// The filtering resolver is bound for the module the other DNS tests use.
+	///
+	/// Without this, both of those tests pass just as well with the shim
+	/// missing: an allowed name resolves through wasmtime's own resolver, and a
+	/// name under the reserved `.example` TLD fails there too. This asserts the
+	/// shim is what answers, and it is the only check that can — the failure
+	/// mode has no other signal.
+	#[test(tokio::test)]
+	async fn module_dns_filter_is_bound() -> Result<(), Box<dyn std::error::Error>> {
+		use surrealism_runtime::NetDeny;
+		use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
+		use surrealism_runtime::runtime::Runtime;
+
+		let surli = std::fs::read(DEMO_DIR.canonical.join("demo.surli"))?;
+		let package =
+			SurrealismPackage::from_reader(std::io::Cursor::new(surli), &UnpackOptions::default())?;
+		let runtime = Runtime::new(package, 1, None, None, NetDeny::Nothing)?;
+		assert!(
+			runtime.dns_filtered(),
+			"the demo imports wasi:sockets/ip-name-lookup, so the filtering \
+			 resolver must have shadowed it"
+		);
+		Ok(())
 	}
 
 	// -------------------------------------------------------------------
