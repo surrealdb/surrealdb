@@ -1,7 +1,7 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use super::retire_namespace_indexes;
+use super::{kill_namespace_lives, retire_namespace_indexes};
 use crate::catalog::providers::NamespaceProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -59,6 +59,9 @@ impl RemoveNamespaceStatement {
 
 		// Retire index state before deleting the namespace definition. Durable
 		// cleanup is transactional; local builder aborts are deferred until commit.
+		// Announce the subscriptions this removal destroys, while the catalog
+		// entries naming them still exist.
+		kill_namespace_lives(ctx, &txn, ns.namespace_id).await?;
 		retire_namespace_indexes(ctx, &txn, ns.namespace_id).await?;
 		// Remove the sequences
 		if let Some(seq) = ctx.get_sequences() {

@@ -142,7 +142,7 @@ impl RemoveTableStatement {
 						lv.node,
 						PublicNotification::new(
 							lv.id.into(),
-							None,
+							lv.session_id(),
 							PublicAction::Killed,
 							PublicValue::None,
 							PublicValue::None,

@@ -56,16 +56,19 @@ impl KillStatement {
 		// Fetch the live query key
 		let key = crate::key::node::lq::new(nid, lid);
 		// Fetch the live query key if it exists
-		match txn.get(&key, None).await? {
+		let session_id = match txn.get(&key, None).await? {
 			Some(live) => {
+				// Read the subscription before it is deleted below: it carries the
+				// session this live query belongs to, which the notification must
+				// name in order to be routed back to the subscriber.
+				let table_key = crate::key::table::lq::new(live.ns, live.db, &live.tb, lid);
+				let subscription: Option<SubscriptionDefinition> =
+					txn.get(&table_key, None).await?;
 				// Verify that the requesting user is the owner of this live query.
 				// Root-level users may kill any live query; all other users may only
 				// kill live queries they themselves created.
 				if ctx.auth_enabled() && !opt.auth.is_root() {
-					let table_key = crate::key::table::lq::new(live.ns, live.db, &live.tb, lid);
-					let subscription: Option<SubscriptionDefinition> =
-						txn.get(&table_key, None).await?;
-					if let Some(sub) = subscription {
+					if let Some(sub) = &subscription {
 						// For live queries created before auth tracking was introduced
 						// (sub.auth is None), we have no ownership information and
 						// cannot verify the caller is the original owner. Fail closed:
@@ -107,20 +110,21 @@ impl KillStatement {
 				}
 				// Clear the cache
 				txn.clear_cache();
+				subscription.and_then(|sub| sub.session_id())
 			}
 			None => {
 				bail!(Error::KillStatement {
 					value: self.id.to_sql(),
 				});
 			}
-		}
+		};
 		if let Some(sender) = ctx.broker() {
 			sender
 				.send(RoutedNotification::new(
 					nid,
 					PublicNotification::new(
 						lid.into(),
-						None,
+						session_id,
 						PublicAction::Killed,
 						PublicValue::None,
 						PublicValue::None,
@@ -148,7 +152,9 @@ mod tests {
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
-	use crate::types::{PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue};
+	use crate::types::{
+		PublicAction, PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue,
+	};
 
 	async fn new_ds_with_auth() -> Result<(Receiver<PublicNotification>, Datastore)> {
 		let (send, recv) = crate::channel::bounded(1000);
@@ -211,6 +217,32 @@ mod tests {
 		let mut res = ds.execute("KILL $uuid", ses, Some(vars!("uuid": lid.clone()))).await?;
 		res.remove(0).result.map_err(anyhow::Error::from)?;
 		Ok(())
+	}
+
+	/// The `Killed` notification must name the session that owns the
+	/// subscription. Transports route notifications by session, so one that
+	/// names no session is undeliverable and the subscriber's stream never
+	/// terminates.
+	#[tokio::test]
+	async fn test_kill_notification_carries_owning_session_id() {
+		let (recv, ds) = new_ds_with_auth().await.unwrap();
+		let (ns, db, tb) = ("test", "test", "person");
+		setup_table(&ds, ns, db, tb).await;
+
+		let session_id = uuid::Uuid::now_v7();
+		let mut ses = db_session(ns, db, "alice", Role::Owner);
+		ses.id = Some(session_id);
+
+		let lid = start_live_query(&ds, &ses, tb).await;
+		kill_live_query(&ds, &ses, &lid).await.unwrap();
+
+		let notification = recv.recv().await.unwrap();
+		assert_eq!(notification.action, PublicAction::Killed);
+		assert_eq!(
+			notification.session.map(|s| s.into_inner()),
+			Some(session_id),
+			"KILL notification must carry the session that owns the subscription"
+		);
 	}
 
 	/// A user who created a live query can kill it.

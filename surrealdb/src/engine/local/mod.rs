@@ -596,7 +596,7 @@ async fn kill_live_query(
 	session: &Session,
 	vars: Variables,
 ) -> Result<Vec<QueryResult>, TypesError> {
-	let sql = format!("KILL {id}");
+	let sql = format!("KILL u'{id}'");
 
 	let results = kvs.execute(&sql, session, Some(vars)).await?;
 	Ok(results)

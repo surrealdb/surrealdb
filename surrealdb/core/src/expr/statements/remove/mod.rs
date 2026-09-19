@@ -39,11 +39,12 @@ pub(crate) use user::RemoveUserStatement;
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::ctx::FrozenContext;
-use crate::dbs::Options;
+use crate::dbs::{Options, RoutedNotification};
 use crate::doc::CursorDoc;
 use crate::expr::Value;
 use crate::kvs::Transaction;
 use crate::kvs::index::retire_durable_index;
+use crate::types::{PublicAction, PublicNotification, PublicValue};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum RemoveStatement {
@@ -95,6 +96,58 @@ impl RemoveStatement {
 			Self::Config(v) => v.compute(ctx, opt).await,
 		}
 	}
+}
+
+/// Tell every subscriber under `ns`/`db` that its live query is gone.
+///
+/// `REMOVE TABLE` announces this for the one table it destroys. Removing a
+/// database or namespace destroys the same subscriptions without going through
+/// that statement, so it has to walk to them itself — otherwise the
+/// subscriber is never told and its stream stays open forever.
+///
+/// The walk is skipped entirely when nothing is listening, and otherwise
+/// mirrors the table iteration [`retire_database_indexes`] already performs.
+async fn kill_database_lives(
+	ctx: &FrozenContext,
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+) -> Result<()> {
+	let Some(sender) = ctx.broker() else {
+		return Ok(());
+	};
+	for tb in txn.all_tb(ns, db, None).await?.iter() {
+		for lv in txn.all_tb_lives(ns, db, &tb.name, None).await?.iter() {
+			sender
+				.send(RoutedNotification::new(
+					lv.node,
+					PublicNotification::new(
+						lv.id.into(),
+						lv.session_id(),
+						PublicAction::Killed,
+						PublicValue::None,
+						PublicValue::None,
+					),
+				))
+				.await;
+		}
+	}
+	Ok(())
+}
+
+/// Tell every subscriber under `ns` that its live query is gone.
+async fn kill_namespace_lives(
+	ctx: &FrozenContext,
+	txn: &Transaction,
+	ns: NamespaceId,
+) -> Result<()> {
+	if ctx.broker().is_none() {
+		return Ok(());
+	}
+	for db in txn.all_db(ns, None).await?.iter() {
+		kill_database_lives(ctx, txn, ns, db.database_id).await?;
+	}
+	Ok(())
 }
 
 async fn retire_namespace_indexes(
