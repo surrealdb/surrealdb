@@ -253,6 +253,30 @@ pub struct Surreal<C: Connection> {
 	engine: PhantomData<C>,
 }
 
+impl<C> Surreal<C>
+where
+	C: Connection,
+{
+	/// A handle on the same connection whose session is a clone of this one.
+	///
+	/// Unlike `Arc::clone(&self.inner).into()`, which registers a blank
+	/// session, this carries the namespace, database and auth of the session it
+	/// was taken from — so work done through the handle runs with the same
+	/// context as the caller.
+	pub(crate) fn clone_with_session<D>(&self) -> Surreal<D>
+	where
+		D: Connection,
+	{
+		let session_id = Uuid::new_v4();
+		self.inner.clone_session(self.session_id, session_id);
+		Surreal {
+			inner: Arc::clone(&self.inner),
+			session_id,
+			engine: PhantomData,
+		}
+	}
+}
+
 #[doc(hidden)]
 impl<C> From<Arc<Inner>> for Surreal<C>
 where

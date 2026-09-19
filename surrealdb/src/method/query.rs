@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures::StreamExt;
@@ -173,18 +172,16 @@ where
 						)
 						.await
 						.map(|rx| {
-							Stream::new(
-								Arc::clone(&client.inner).into(),
-								live_query_id.into(),
-								Some(rx),
-							)
+							Stream::new(client.clone_with_session(), live_query_id.into(), Some(rx))
 						});
 						indexed_results.live_queries.insert(index, live_stream);
 						indexed_results
 							.results
 							.insert(index, (stats, Ok(Value::Uuid(live_query_id))));
 					}
-					QueryType::Kill => {}
+					QueryType::Kill => {
+						indexed_results.results.insert(index, (stats, result.result));
+					}
 				}
 			}
 

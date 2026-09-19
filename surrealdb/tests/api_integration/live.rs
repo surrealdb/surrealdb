@@ -17,7 +17,7 @@ use futures::{Stream, StreamExt};
 use surrealdb::method::QueryStream;
 use surrealdb::opt::{Config, Resource};
 use surrealdb::types::{Action, RecordId, SurrealValue, Value, object};
-use surrealdb::{Notification, Result};
+use surrealdb::{Notification, Result, Surreal};
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;
@@ -579,6 +579,147 @@ async fn receive_all_pending_notifications<S: Stream<Item = Result<Notification<
 	results
 }
 
+/// The live queries registered on `table`, rendered for substring matching.
+async fn registered_lives<C: surrealdb::Connection>(db: &Surreal<C>, table: &str) -> String {
+	let mut res = db.query(format!("INFO FOR TABLE {table}")).await.unwrap();
+	let info: Value = res.take(0).unwrap();
+	format!("{info:?}")
+}
+
+/// Removing a database must end the streams subscribed beneath it.
+///
+/// `REMOVE TABLE` announces the subscriptions it destroys; a database removal
+/// destroys the same ones without going through that statement.
+pub async fn live_query_remove_database_terminates_stream(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	let namespace = format!("ns_{}", Ulid::new());
+	let database = format!("db_{}", Ulid::new());
+	db.use_ns(&namespace).use_db(&database).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+
+	let mut users = db.select(&table).live().await.unwrap();
+
+	let _: Option<ApiRecordId> = db.create(&table).await.unwrap();
+	let notification: Notification<ApiRecordId> =
+		tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+	assert_eq!(notification.action, Action::Create);
+
+	db.query(format!("REMOVE DATABASE {database}")).await.unwrap().check().unwrap();
+
+	assert!(
+		tokio::time::timeout(LQ_TIMEOUT, users.next())
+			.await
+			.expect("stream did not terminate after REMOVE DATABASE")
+			.is_none(),
+		"stream must end after the database it subscribed to is removed"
+	);
+
+	drop(permit);
+}
+
+/// Removing a namespace must end the streams subscribed beneath it.
+pub async fn live_query_remove_namespace_terminates_stream(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	let namespace = format!("ns_{}", Ulid::new());
+	let database = format!("db_{}", Ulid::new());
+	db.use_ns(&namespace).use_db(&database).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+
+	let mut users = db.select(&table).live().await.unwrap();
+
+	let _: Option<ApiRecordId> = db.create(&table).await.unwrap();
+	let notification: Notification<ApiRecordId> =
+		tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+	assert_eq!(notification.action, Action::Create);
+
+	db.query(format!("REMOVE NAMESPACE {namespace}")).await.unwrap().check().unwrap();
+
+	assert!(
+		tokio::time::timeout(LQ_TIMEOUT, users.next())
+			.await
+			.expect("stream did not terminate after REMOVE NAMESPACE")
+			.is_none(),
+		"stream must end after the namespace it subscribed to is removed"
+	);
+
+	drop(permit);
+}
+
+/// A `KILL` run through `query()` must report its outcome.
+///
+/// The result used to be discarded, so killing an unknown live query returned
+/// `Ok` with nothing in it and the caller had no way to tell it had failed.
+pub async fn live_query_kill_reports_unknown_id(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let unknown = uuid::Uuid::new_v4();
+	let outcome = db.query(format!("KILL u'{unknown}'")).await.unwrap().check();
+	assert!(outcome.is_err(), "killing an unregistered live query must surface an error");
+
+	drop(permit);
+}
+
+/// Dropping a stream must retire its live query.
+///
+/// `Stream::drop` is the teardown path most callers actually use, and it is
+/// fire-and-forget — the kill it issues runs detached and cannot report failure
+/// to anyone. So assert the subscription is really gone rather than trusting
+/// that it ran.
+pub async fn live_query_stream_drop_retires_the_query(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+
+	let live_id = {
+		let mut users = db.select(&table).live().await.unwrap();
+
+		let _: Option<ApiRecordId> = db.create(&table).await.unwrap();
+		let notification: Notification<ApiRecordId> =
+			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
+		assert_eq!(notification.action, Action::Create);
+
+		let registered = registered_lives(&db, &table).await;
+		assert!(
+			registered.contains(&notification.query_id.to_string()),
+			"live query should be registered while its stream is open: {registered}"
+		);
+
+		notification.query_id
+		// stream dropped here
+	};
+
+	// The kill is detached, so give it a bounded chance to land.
+	let started = std::time::Instant::now();
+	loop {
+		let registered = registered_lives(&db, &table).await;
+		if !registered.contains(&live_id.to_string()) {
+			break;
+		}
+		assert!(
+			started.elapsed() < LQ_TIMEOUT,
+			"dropping the stream should have retired {live_id}, still registered: {registered}"
+		);
+		tokio::time::sleep(Duration::from_millis(50)).await;
+	}
+
+	drop(permit);
+}
+
 /// A killed live query must end its stream.
 ///
 /// `Stream::drop` tears a subscription down through its own path, so this
@@ -586,7 +727,6 @@ async fn receive_all_pending_notifications<S: Stream<Item = Result<Notification<
 /// notification is the only termination signal the subscriber ever gets. If it
 /// is not delivered the stream stays open and silent forever, which a consumer
 /// cannot distinguish from an idle subscription.
-#[cfg(not(any(feature = "protocol-ws", feature = "protocol-http")))]
 pub async fn live_query_kill_terminates_stream(new_db: impl CreateDb) {
 	let config = Config::new();
 	let (permit, db) = new_db.create_db(config).await;
@@ -621,7 +761,6 @@ pub async fn live_query_kill_terminates_stream(new_db: impl CreateDb) {
 ///
 /// Unlike `KILL` this is not caller-initiated, so a subscriber has no other way
 /// to learn its subscription is gone.
-#[cfg(not(any(feature = "protocol-ws", feature = "protocol-http")))]
 pub async fn live_query_remove_table_terminates_stream(new_db: impl CreateDb) {
 	let config = Config::new();
 	let (permit, db) = new_db.create_db(config).await;
@@ -691,15 +830,16 @@ define_include_tests!(live => {
 	live_query_delete_notifications,
 	#[test_log::test(tokio::test)]
 	live_select_returns_uuid,
-	// Local engines only. Over the remote transports a `KILL` sent as a query
-	// (rather than via the `kill` RPC method, which `tests/ws_integration.rs`
-	// covers) does not terminate the stream either, for reasons unrelated to
-	// notification routing — the server never reaches its kill handling because
-	// `KILL` resolves to `NONE` rather than to the live query id.
-	#[cfg(not(any(feature = "protocol-ws", feature = "protocol-http")))]
 	#[test_log::test(tokio::test)]
 	live_query_kill_terminates_stream,
-	#[cfg(not(any(feature = "protocol-ws", feature = "protocol-http")))]
 	#[test_log::test(tokio::test)]
 	live_query_remove_table_terminates_stream,
+	#[test_log::test(tokio::test)]
+	live_query_stream_drop_retires_the_query,
+	#[test_log::test(tokio::test)]
+	live_query_kill_reports_unknown_id,
+	#[test_log::test(tokio::test)]
+	live_query_remove_database_terminates_stream,
+	#[test_log::test(tokio::test)]
+	live_query_remove_namespace_terminates_stream,
 });

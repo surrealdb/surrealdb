@@ -1,7 +1,7 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use super::retire_database_indexes;
+use super::{kill_database_lives, retire_database_indexes};
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -60,6 +60,9 @@ impl RemoveDatabaseStatement {
 			}
 		};
 
+		// Announce the subscriptions this removal destroys, while the catalog
+		// entries naming them still exist.
+		kill_database_lives(ctx, &txn, db.namespace_id, db.database_id).await?;
 		// Retire index state before deleting the database definition. Durable
 		// cleanup is transactional; local builder aborts are deferred until commit.
 		retire_database_indexes(ctx, &txn, db.namespace_id, db.database_id).await?;
