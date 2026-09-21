@@ -1,8 +1,10 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Result, bail};
+use common::time::sleep;
 use reblessive::TreeStack;
 use reblessive::tree::Stk;
 pub(crate) use surrealdb_datastore::values::event_queue::AsyncEventRecord;
@@ -22,8 +24,28 @@ use crate::key::schema::{EventQueueKey, EventQueuePrefix};
 use crate::key::{KVKeyDecode, KVValue};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::tasklease::LeaseHandler;
-use crate::kvs::{Datastore, NORMAL_BATCH_SIZE, Transaction, TransactionFactory, TransactionType};
+#[cfg(test)]
+use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
+use crate::kvs::{
+	Datastore, NORMAL_BATCH_SIZE, Transaction, TransactionFactory, TransactionType,
+	is_retryable_transaction_conflict,
+};
 use crate::val::Value;
+
+/// How many times a queued event is re-run in place after its transaction lost
+/// a retryable conflict.
+///
+/// A conflict reports that another writer reached the same keys first, not that
+/// the event is wrong, so it must not spend the `RETRY` budget the definition
+/// set aside for a failing event: the queue is drained by several workers at
+/// once, and contention alone would otherwise exhaust that budget and drop the
+/// event. The count is bounded so an event that keeps losing the race still
+/// reaches a decision rather than holding the drain loop open indefinitely.
+const EVENT_CONFLICT_RETRIES: u32 = 3;
+
+/// How long to wait between those re-runs, so the writer this attempt lost to
+/// has a chance to commit instead of being raced again immediately.
+const EVENT_CONFLICT_RETRY_SLEEP: Duration = Duration::from_millis(50);
 
 impl Document {
 	/// Processes any DEFINE EVENT clauses which
@@ -437,7 +459,7 @@ impl AsyncEventContext {
 	async fn run_event(
 		&mut self,
 		stk: &mut Stk,
-		mut ctx: Context,
+		ctx: Context,
 		mut ev: AsyncEventRecord,
 	) -> Result<()> {
 		// Decode the key *before* opening the transaction. Decoding it after
@@ -449,34 +471,82 @@ impl AsyncEventContext {
 		// steps over such an entry before it reaches here, so this is the second
 		// line of defence rather than the only one.
 		let eq = EventQueueKey::decode_key(&self.k)?;
-		let tx = self.new_write_tx().await?;
-		ctx.set_transaction(Arc::new(tx));
-		let ctx = ctx.freeze();
-		let tx = ctx.tx();
-		match Self::process_event(stk, &ctx, &self.opt, self.lh.as_ref(), &eq, &ev).await {
-			Ok(_) => {
-				// Event processed successfully, delete the event from the queue.
-				catch!(tx, tx.del_key(&eq).await);
-				if let Err(e) = tx.commit().await {
-					// If the commit fails, requeue the event and commit that update.
-					tx.cancel().await?;
-					let tx = self.new_write_tx().await?;
-					return Self::retry_attempt(tx, e, &eq, &mut ev).await;
-				}
-				Ok(())
+		// The base context carries no transaction. Each attempt opens its own and
+		// installs it on a child, so a re-run never reaches the closed transaction
+		// of the attempt before it.
+		let base = ctx.freeze();
+		let mut conflicts = 0;
+		// The error that ends the attempts, if any. Each attempt closes its own
+		// transaction, so nothing past this loop has one left to unwind.
+		let err = loop {
+			let tx = self.new_write_tx().await?;
+			let mut ctx = Context::new_child(&base);
+			ctx.set_transaction(Arc::new(tx));
+			let ctx = ctx.freeze();
+			let Err(e) = self.run_event_once(stk, &ctx, &eq, &ev).await else {
+				return Ok(());
+			};
+			// Contention, not a failure of the event: re-run it rather than
+			// charging an attempt against the definition's `RETRY` budget. See
+			// [`EVENT_CONFLICT_RETRIES`].
+			if is_retryable_transaction_conflict(&e) && conflicts < EVENT_CONFLICT_RETRIES {
+				conflicts += 1;
+				debug!("Retrying the event `{}` after a transaction conflict: {e}", eq.ev);
+				sleep(EVENT_CONFLICT_RETRY_SLEEP).await;
+				continue;
 			}
-			Err(e) => {
-				// Cancel the processing transaction so partial side effects are rolled back.
-				// Requeue or delete in a fresh transaction based on the error type.
-				tx.cancel().await?;
-				if let Some(final_error) = Self::is_final_error(&e).await? {
-					let tx = self.new_write_tx().await?;
-					return Self::final_error(tx, &eq, final_error).await;
-				}
-				let tx = self.new_write_tx().await?;
-				Self::retry_attempt(tx, e, &eq, &mut ev).await
-			}
+			break e;
+		};
+		// Requeue or delete the entry in a fresh transaction based on the error.
+		if let Some(final_error) = Self::is_final_error(&err).await? {
+			let tx = self.new_write_tx().await?;
+			return Self::final_error(tx, &eq, final_error).await;
 		}
+		let tx = self.new_write_tx().await?;
+		Self::retry_attempt(tx, err, &eq, &mut ev).await
+	}
+
+	/// One attempt at a queued event: run it and remove its queue entry in a
+	/// single transaction, so the event is neither run twice nor lost.
+	///
+	/// The transaction the context carries is closed on every path — committed
+	/// once both are staged, cancelled otherwise — and the caller must not close
+	/// it again. `Transaction::commit` finishes the transaction whether or not it
+	/// succeeds, so a cancel after a failed commit reports `TransactionFinished`
+	/// and replaces the error that actually ended the attempt. The caller
+	/// classifies that error to decide the entry's fate, so losing it strands the
+	/// entry: it is then neither re-run nor removed, and every later batch fetches
+	/// and fails it the same way.
+	async fn run_event_once(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		eq: &EventQueueKey<'_>,
+		ev: &AsyncEventRecord,
+	) -> Result<()> {
+		let tx = ctx.tx();
+		if let Err(e) = Self::process_event(stk, ctx, &self.opt, self.lh.as_ref(), eq, ev).await {
+			// Roll back the event's partial side effects. The cancel outcome is
+			// discarded so it cannot displace the error being reported.
+			let _ = tx.cancel().await;
+			return Err(e);
+		}
+		if let Err(e) = tx.del_key(eq).await {
+			let _ = tx.cancel().await;
+			return Err(e);
+		}
+		// Stands in for a commit that lost a retryable conflict. A real one
+		// leaves the transaction finished with its writes discarded, so the
+		// injected one has to as well, or it exercises a state the recovery
+		// path never sees.
+		#[cfg(test)]
+		if let Err(e) =
+			maybe_inject_retryable_conflict(RetryableConflictSite::AsyncEventCommit, ctx.node_id())
+		{
+			let _ = tx.cancel().await;
+			return Err(e);
+		}
+		tx.commit().await
 	}
 
 	/// Update or remove the queued event based on the retry policy.

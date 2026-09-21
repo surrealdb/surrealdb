@@ -6239,7 +6239,8 @@ mod test {
 	use crate::key::schema::{DocKeyPrefix, DocLookupPrefix, IndexCountKey, IndexCountPrefix};
 	use crate::kvs::test_support::{WriteTxSizeObserver, cleanup_sizes};
 	use crate::kvs::testing::{
-		RetryableConflictSite, inject_retryable_conflict, retryable_conflict_count,
+		RetryableConflictSite, inject_retryable_conflict, inject_retryable_conflicts,
+		retryable_conflict_count,
 	};
 	use crate::types::{PublicValue, PublicVariables};
 
@@ -7663,6 +7664,110 @@ mod test {
 			PublicValue::Array(a) => Ok(a.len()),
 			other => panic!("expected an array, got {other:?}"),
 		}
+	}
+
+	/// Defines an async event with the given `RETRY` budget and queues exactly
+	/// one of it.
+	async fn queue_one_async_event(ds: &Datastore, session: &Session, retry: u16) -> Result<()> {
+		execute_all(
+			ds,
+			session,
+			&format!(
+				"DEFINE TABLE person SCHEMALESS;
+				 DEFINE TABLE logged SCHEMALESS;
+				 DEFINE EVENT log ON person ASYNC RETRY {retry} \
+				 THEN (CREATE logged SET who = $after.id);"
+			),
+		)
+		.await?;
+		execute_all(ds, session, "CREATE person:1 RETURN NONE;").await
+	}
+
+	/// Drains the queue the way [`Datastore::event_processing`] does, but with a
+	/// bound, so a queue that stops draining fails the test instead of hanging
+	/// it — which is the shape the failures under test take.
+	async fn drain_event_queue(ds: &Datastore) -> Result<()> {
+		for _ in 0..20 {
+			if process_next_events_batch(ds, None).await? == 0 {
+				return Ok(());
+			}
+		}
+		panic!("the async event queue did not drain");
+	}
+
+	/// A retryable conflict on the commit that ends a queued event reports
+	/// contention, not a failure of the event: the event still has to run, has
+	/// to run exactly once, and must not spend the `RETRY` budget the definition
+	/// reserved for a failing event. `RETRY 0` is what makes that last part
+	/// observable — one charged attempt would drop the event instead of running
+	/// it.
+	///
+	/// It pins the recovery path as well. `Transaction::commit` leaves the
+	/// transaction finished whether or not it succeeds, so cancelling it
+	/// afterwards reports `TransactionFinished` in place of the conflict; the
+	/// entry is then neither re-run nor removed, and every later batch fetches
+	/// and fails it again.
+	#[test_log::test(tokio::test)]
+	async fn a_queued_event_survives_commit_conflicts_without_spending_its_retries() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_one_async_event(&ds, &session, 0).await?;
+
+		let site = RetryableConflictSite::AsyncEventCommit;
+		// Fewer than the in-place bound, so every conflict is absorbed there.
+		let _guard = inject_retryable_conflicts(site, ds.id(), 2);
+
+		// Counting passes is what separates the two failures. Both conflicts are
+		// absorbed within the pass that picked the entry up, so the first pass
+		// finishes the event and the second finds the queue empty. An attempt
+		// that ended by reporting `TransactionFinished` would leave the entry
+		// for a later pass to fetch and fail again, and the second pass would
+		// still find it.
+		assert_eq!(
+			process_next_events_batch(&ds, None).await?,
+			1,
+			"the queued event must be the one entry this pass picks up"
+		);
+		assert_eq!(
+			process_next_events_batch(&ds, None).await?,
+			0,
+			"the entry must be gone: its conflicts belong to the pass that ran it"
+		);
+
+		assert_eq!(
+			retryable_conflict_count(site, ds.id()),
+			0,
+			"both injected conflicts must have been raised, or the commit was never re-driven"
+		);
+		assert_eq!(
+			logged_count(&ds, &session).await?,
+			1,
+			"the event must run exactly once; the conflicting attempts are rolled back"
+		);
+		Ok(())
+	}
+
+	/// Conflicts that outlast the in-place bound fall through to the
+	/// definition's own `RETRY` budget, so an event that never wins the race
+	/// still reaches a decision and its entry leaves the queue. Without that the
+	/// drain loop does not return: it re-scans and re-fails the same entry for
+	/// as long as this node holds the lease.
+	#[test_log::test(tokio::test)]
+	async fn a_queued_event_that_keeps_conflicting_leaves_the_queue() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_one_async_event(&ds, &session, 0).await?;
+
+		let site = RetryableConflictSite::AsyncEventCommit;
+		// More than any run can consume, so no attempt ever commits.
+		let _guard = inject_retryable_conflicts(site, ds.id(), usize::MAX);
+
+		drain_event_queue(&ds).await?;
+
+		assert_eq!(
+			logged_count(&ds, &session).await?,
+			0,
+			"no attempt committed, so the event left nothing behind"
+		);
+		Ok(())
 	}
 
 	/// A cancelled pass must return at the next batch boundary rather than drain

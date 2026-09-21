@@ -38,6 +38,11 @@ pub enum RetryableConflictSite {
 	FullTextCompaction,
 	CountCompaction,
 	HnswCompaction,
+	/// A conflict on the commit that ends a queued async event — the one that
+	/// makes the event's writes durable and removes its queue entry together.
+	/// Raised in place of that commit, and leaving the transaction finished as
+	/// a real commit failure does.
+	AsyncEventCommit,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
