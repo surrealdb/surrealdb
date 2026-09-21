@@ -189,7 +189,7 @@ impl Parse for ast::Info {
 					version,
 				}
 			}
-			T![TABLE] => {
+			T![TABLE] | T![TB] => {
 				let _ = parser.next();
 				let name = parser.parse_enter().await?;
 				let version = if parser.eat(T![VERSION])?.is_some() {

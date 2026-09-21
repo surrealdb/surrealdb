@@ -169,7 +169,9 @@ impl Parse for ast::RemoveParam {
 impl Parse for ast::RemoveTable {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
-		let _ = parser.expect(T![TABLE])?;
+		if parser.eat(T![TB])?.is_none() {
+			let _ = parser.expect(T![TABLE])?;
+		}
 
 		let expunge = if parser.eat(T![AND])?.is_some() {
 			let _ = parser.expect(T![EXPUNGE])?;

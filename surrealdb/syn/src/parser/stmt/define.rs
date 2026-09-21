@@ -50,7 +50,9 @@ impl Parser<'_> {
 			t!("FUNCTION") => self.parse_define_function(stk).await.map(DefineStatement::Function),
 			t!("USER") => self.parse_define_user(stk).await.map(DefineStatement::User),
 			t!("PARAM") => self.parse_define_param(stk).await.map(DefineStatement::Param),
-			t!("TABLE") => self.parse_define_table(stk).await.map(DefineStatement::Table),
+			t!("TABLE") | t!("TB") => {
+				self.parse_define_table(stk).await.map(DefineStatement::Table)
+			}
 			t!("API") => self.parse_define_api(stk).await.map(DefineStatement::Api),
 			t!("EVENT") => {
 				stk.run(|stk| self.parse_define_event(stk)).await.map(DefineStatement::Event)

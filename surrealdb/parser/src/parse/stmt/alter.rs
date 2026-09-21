@@ -109,7 +109,9 @@ impl Parse for ast::AlterDatabase {
 impl Parse for ast::AlterTable {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
-		let _ = parser.expect(T![TABLE])?;
+		if parser.eat(T![TB])?.is_none() {
+			let _ = parser.expect(T![TABLE])?;
+		}
 
 		let if_exists = parse_if_exists(parser)?;
 

@@ -25,7 +25,7 @@ impl Parser<'_> {
 			t!("SYSTEM") => self.parse_alter_system(stk).await.map(AlterStatement::System),
 			t!("NAMESPACE") => self.parse_alter_namespace().await.map(AlterStatement::Namespace),
 			t!("DATABASE") => self.parse_alter_database().await.map(AlterStatement::Database),
-			t!("TABLE") => self.parse_alter_table(stk).await.map(AlterStatement::Table),
+			t!("TABLE") | t!("TB") => self.parse_alter_table(stk).await.map(AlterStatement::Table),
 			t!("EVENT") => self.parse_alter_event(stk).await.map(AlterStatement::Event),
 			t!("INDEX") => self.parse_alter_index(stk).await.map(AlterStatement::Index),
 			t!("FIELD") => {

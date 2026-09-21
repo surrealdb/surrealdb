@@ -209,6 +209,7 @@ keyword! {
 	System => "SYSTEM",
 	Table => "TABLE",
 	Tables => "TABLES",
+	Tb => "TB",
 	TempFiles => "TEMPFILES",
 	TermsCache => "TERMS_CACHE",
 	TermsOrder => "TERMS_ORDER",

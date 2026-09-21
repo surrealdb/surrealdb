@@ -669,10 +669,11 @@ pub enum BaseTokenKind {
 	#[regex(r"(?i)SYSTEM")]
 	KwSystem,
 	#[regex(r"(?i)TABLE")]
-	#[regex(r"(?i)TB")]
 	KwTable,
 	#[regex(r"(?i)TABLES")]
 	KwTables,
+	#[regex(r"(?i)TB")]
+	KwTb,
 	#[regex(r"(?i)TEMPFILES")]
 	KwTempFiles,
 	#[regex(r"(?i)TERMS_CACHE")]
@@ -1175,6 +1176,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwSystem => "keyword `SYSTEM`",
 			BaseTokenKind::KwTable => "keyword `TABLE`",
 			BaseTokenKind::KwTables => "keyword `TABLES`",
+			BaseTokenKind::KwTb => "keyword `TB`",
 			BaseTokenKind::KwTempFiles => "keyword `TEMPFILES`",
 			BaseTokenKind::KwTermsCache => "keyword `TERMSCACHE`",
 			BaseTokenKind::KwTermsOrder => "keyword `TERMSORDER`",
@@ -1500,7 +1502,7 @@ impl BaseTokenKind {
 				| Self::KwSystem
 				| Self::KwTable
 				| Self::KwTables
-				| Self::KwTempFiles
+				| Self::KwTb | Self::KwTempFiles
 				| Self::KwTermsCache
 				| Self::KwTermsOrder
 				| Self::KwText

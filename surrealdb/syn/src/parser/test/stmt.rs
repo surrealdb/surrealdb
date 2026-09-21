@@ -3475,3 +3475,67 @@ fn parse_access_purge() {
 		);
 	}
 }
+
+#[test]
+fn parse_table_named_tb() {
+	// `TB` is a spelling of the `TABLE` keyword only where that keyword is
+	// mandatory. `ON [TABLE] <table>` leaves it optional, so a bare `tb` in
+	// that position is the table name rather than the keyword.
+	let res =
+		crate::parse_with("DEFINE INDEX ix ON tb FIELDS a, b".as_bytes(), async |parser, stk| {
+			parser.parse_expr_inherit(stk).await
+		})
+		.unwrap();
+	assert_eq!(
+		res,
+		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
+			kind: DefineKind::Default,
+			name: Expr::Idiom(Idiom::field("ix".to_string())),
+			what: Expr::Table("tb".into()),
+			cols: vec![
+				Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("a"))])),
+				Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("b"))])),
+			],
+			index: Index::Idx,
+			comment: Expr::Literal(Literal::None),
+			concurrently: false,
+		})))
+	);
+
+	// The keyword-qualified and escaped spellings name that same table.
+	for src in ["DEFINE INDEX ix ON TABLE tb FIELDS a, b", "DEFINE INDEX ix ON `tb` FIELDS a, b"] {
+		let res = crate::parse_with(src.as_bytes(), async |parser, stk| {
+			parser.parse_expr_inherit(stk).await
+		})
+		.unwrap();
+		let Expr::Define(define) = res else {
+			panic!("{src} did not parse as a define statement");
+		};
+		let DefineStatement::Index(index) = *define else {
+			panic!("{src} did not parse as a define index statement");
+		};
+		assert_eq!(index.what, Expr::Table("tb".into()), "{src}");
+	}
+
+	// Every other statement that offers the optional keyword.
+	for src in [
+		"DEFINE FIELD f ON tb TYPE string",
+		"DEFINE EVENT e ON tb WHEN true THEN {}",
+		"REMOVE INDEX ix ON tb",
+		"REMOVE FIELD f ON tb",
+		"REMOVE EVENT e ON tb",
+		"ALTER FIELD f ON tb",
+		"ALTER INDEX ix ON tb COMMENT 'c'",
+		"ALTER EVENT e ON tb",
+		"INFO FOR INDEX ix ON tb",
+		"REBUILD INDEX ix ON tb",
+	] {
+		crate::parse(src).unwrap_or_else(|e| panic!("`{src}` failed to parse: {e}"));
+	}
+
+	// Where the keyword is mandatory, `TB` remains an accepted spelling of it.
+	for src in ["INFO FOR TB tb", "DEFINE TB tb", "REMOVE TB tb", "SHOW CHANGES FOR TB tb SINCE 1"]
+	{
+		crate::parse(src).unwrap_or_else(|e| panic!("`{src}` failed to parse: {e}"));
+	}
+}

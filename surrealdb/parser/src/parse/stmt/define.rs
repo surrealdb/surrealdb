@@ -525,7 +525,9 @@ impl ParseSync for ast::TableKind {
 impl Parse for ast::DefineTable {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let define = parser.expect(T![DEFINE])?;
-		let _ = parser.expect(T![TABLE])?;
+		if parser.eat(T![TB])?.is_none() {
+			let _ = parser.expect(T![TABLE])?;
+		}
 		let kind = parser.parse_sync()?;
 
 		let name = parser.parse_enter().await?;

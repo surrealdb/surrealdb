@@ -721,6 +721,9 @@ macro_rules! T {
 	(TABLES) => {
 		$crate::BaseTokenKind::KwTables
 	};
+	(TB) => {
+		$crate::BaseTokenKind::KwTb
+	};
 	(TEMPFILES) => {
 		$crate::BaseTokenKind::KwTempFiles
 	};

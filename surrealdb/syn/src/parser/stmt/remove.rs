@@ -166,7 +166,7 @@ impl Parser<'_> {
 					if_exists,
 				})
 			}
-			t!("TABLE") => {
+			t!("TABLE") | t!("TB") => {
 				let expunge = if self.eat(t!("AND")) {
 					expected!(self, t!("EXPUNGE"));
 					true

@@ -236,7 +236,7 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Prime
 
 			Ok(ast::PrimeType::Record(ty))
 		}
-		T![TABLE] => {
+		T![TABLE] | T![TB] => {
 			let _ = parser.next();
 
 			let ty = parse_ident_list_type(peek.span, parser)?;

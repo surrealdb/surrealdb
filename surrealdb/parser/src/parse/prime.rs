@@ -733,7 +733,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			match peek.token {
 				T![NAMESPACE] => parser.parse().await.map(Expr::DefineNamespace),
 				T![DATABASE] => parser.parse().await.map(Expr::DefineDatabase),
-				T![TABLE] => parser.parse().await.map(Expr::DefineTable),
+				T![TABLE] | T![TB] => parser.parse().await.map(Expr::DefineTable),
 				T![FUNCTION] => parser.parse().await.map(Expr::DefineFunction),
 				T![MODULE] => parser.parse().await.map(Expr::DefineModule),
 				T![PARAM] => parser.parse().await.map(Expr::DefineParam),
@@ -762,7 +762,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			match peek.token {
 				T![NAMESPACE] => parser.parse().await.map(Expr::RemoveNamespace),
 				T![DATABASE] => parser.parse().await.map(Expr::RemoveDatabase),
-				T![TABLE] => parser.parse().await.map(Expr::RemoveTable),
+				T![TABLE] | T![TB] => parser.parse().await.map(Expr::RemoveTable),
 				T![FUNCTION] => parser.parse().await.map(Expr::RemoveFunction),
 				T![MODULE] => parser.parse().await.map(Expr::RemoveModule),
 				T![PARAM] => parser.parse().await.map(Expr::RemoveParam),
@@ -792,7 +792,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				T![SYSTEM] => parser.parse().await.map(Expr::AlterSystem),
 				T![NAMESPACE] => parser.parse().await.map(Expr::AlterNamespace),
 				T![DATABASE] => parser.parse().await.map(Expr::AlterDatabase),
-				T![TABLE] => parser.parse().await.map(Expr::AlterTable),
+				T![TABLE] | T![TB] => parser.parse().await.map(Expr::AlterTable),
 				T![EVENT] => parser.parse().await.map(Expr::AlterEvent),
 				T![PARAM] => parser.parse().await.map(Expr::AlterParam),
 				T![FIELD] => parser.parse().await.map(Expr::AlterField),
