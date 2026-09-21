@@ -7312,11 +7312,18 @@ mod test {
 		// A backlog of 2.5 batches forces multiple drain iterations.
 		let backlog = batch * 2 + batch / 2;
 		let observer = Arc::new(WriteTxSizeObserver::default());
+		// Background jobs are off so the only transactions observed are the
+		// ones this test drives. The maintenance task runs this very function
+		// on the same datastore, and its lease admits a second pass on the same
+		// node, so one landing inside this drain both conflicts with the
+		// cleanup commit — making it retry and re-observe its keys — and
+		// commits batches of its own that the observer cannot distinguish from
+		// this drain's.
 		let ds = Datastore::builder()
+			.without_maintenance_tasks()
 			.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
 			.build_with_path("memory")
 			.await?;
-		let ds = ds;
 		let session = Session::owner().with_ns("test").with_db("test");
 		{
 			let txn = ds.transaction(Write).await?;
@@ -7392,11 +7399,15 @@ mod test {
 	async fn index_compaction_queue_drain_rotates_across_indexes() -> Result<()> {
 		let batch = INDEX_COMPACTION_QUEUE_BATCH_SIZE as usize;
 		let observer = Arc::new(WriteTxSizeObserver::default());
+		// Background jobs are off, for the same reason as the bounded test
+		// above: the maintenance task runs this very function, and a second
+		// pass inside this drain would both conflict with the cleanup commits
+		// and contribute batches of its own to the observed sequence.
 		let ds = Datastore::builder()
+			.without_maintenance_tasks()
 			.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
 			.build_with_path("memory")
 			.await?;
-		let ds = ds;
 		let session = Session::owner().with_ns("test").with_db("test");
 		{
 			let txn = ds.transaction(Write).await?;
@@ -7439,6 +7450,17 @@ mod test {
 		.await?;
 		assert_eq!(errors, 0);
 		assert_eq!(batches, 3);
+
+		// The queue is fully drained. An abandoned cleanup leaves entries
+		// behind without moving `errors` or `batches`, so the sequence below
+		// cannot stand in for this.
+		let remaining = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn.keys(IndexCompactionPrefix {}.range()?, u32::MAX, 0, None).await;
+			let _ = txn.cancel().await;
+			res?
+		};
+		assert!(remaining.is_empty(), "queue not drained: {} entries left", remaining.len());
 
 		// Rotation signature: after the first full batch of the early index,
 		// the late index is served before the early index's remainder.
