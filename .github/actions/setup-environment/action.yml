@@ -110,6 +110,22 @@ inputs:
       whose store should outlive the job.
     required: false
     default: ''
+  kache-max-size:
+    description: >-
+      Size budget for the local kache store, above which GC evicts by LRU. It
+      must exceed the artifact set a single job imports, because eviction does
+      not spare entries fetched earlier in the same job: a store smaller than
+      the build discards artifacts it has already paid to download, and the
+      job recompiles them.
+
+      kache's own default is 5% of the volume, which sizes the store from the
+      disk rather than from the build and lands far below what this workspace
+      needs. The value here is budgeted against the build instead, with room
+      for the build tree beside it - the store shares a volume with the
+      workspace, and artifact bytes are counted twice wherever the filesystem
+      cannot hardlink or reflink them into place.
+    required: false
+    default: '40GiB'
 
 runs:
   using: 'composite'
@@ -187,6 +203,22 @@ runs:
         s3-secret-access-key: ${{ inputs.kache-secret-access-key }}
         manifest-key: ${{ format('{0}/{1}', inputs.kache-branch || github.base_ref || github.ref_name, inputs.kache-manifest-key || format('{0}-{1}-{2}', inputs.cache-key || github.job, runner.os, runner.arch)) }}
         cache-dir: ${{ inputs.kache-cache-dir || format('{0}/kache', runner.temp) }}
+        max-size: ${{ inputs.kache-max-size }}
+        # Link outputs - binaries, dylibs and proc-macros - are cacheable and
+        # sit on the critical path of every job that builds test harnesses or
+        # a server binary. The action leaves them out by default; the workspace
+        # produces enough of them that the lookup pays for itself.
+        cache-executables: 'true'
+        # Wraps CC/CXX so the C and C++ objects that build scripts compile are
+        # cached alongside the crates that link them. RUSTC_WRAPPER alone never
+        # sees those compiles, so without this the vendored C++ dependencies
+        # are rebuilt from source on every runner regardless of cache state.
+        #
+        # Unix only: the Windows path substitutes `kache clang-cl` for the
+        # compiler driver rather than wrapping cc, and the only Windows build
+        # here ships a release artifact, so it stays on the toolchain's own
+        # driver.
+        cache-c-cpp: ${{ runner.os != 'Windows' }}
         # The GitHub Actions cache is a fixed 10GB per repository, already spent
         # on the registry caches below. A kache store persisted there would
         # evict them, so a job without a bucket caches locally or not at all -
