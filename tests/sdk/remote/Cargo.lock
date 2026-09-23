@@ -2431,7 +2431,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surrealdb"
-version = "3.3.0-beta.5"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2471,7 +2471,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-cnf"
-version = "3.3.0-beta.5"
+version = "3.3.0"
 dependencies = [
  "num-traits",
  "path-clean",
@@ -2482,7 +2482,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-common"
-version = "3.3.0-beta.5"
+version = "3.3.0"
 dependencies = [
  "chrono",
  "futures",
@@ -2499,7 +2499,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-engine-api"
-version = "3.3.0-beta.5"
+version = "3.3.0"
 dependencies = [
  "async-channel",
  "surrealdb-rpc",
@@ -2510,7 +2510,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-iam"
-version = "3.3.0-beta.5"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2529,7 +2529,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-parse-common"
-version = "3.3.0-beta.5"
+version = "3.3.0"
 dependencies = [
  "chrono",
  "logos",
@@ -2557,7 +2557,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-rpc"
-version = "3.3.0-beta.5"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "humantime",
@@ -2577,7 +2577,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-sql"
-version = "3.3.0-beta.5"
+version = "3.3.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -2599,7 +2599,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-strand"
-version = "3.3.0-beta.5"
+version = "3.3.0"
 dependencies = [
  "revision",
  "serde",
@@ -2608,7 +2608,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-syn"
-version = "3.3.0-beta.5"
+version = "3.3.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -2631,7 +2631,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types"
-version = "3.3.0-beta.5"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2662,7 +2662,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types-derive"
-version = "3.3.0-beta.5"
+version = "3.3.0"
 dependencies = [
  "heck",
  "proc-macro2",
