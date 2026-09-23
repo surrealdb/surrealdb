@@ -57,7 +57,7 @@ pub use self::geometry::Geometry;
 pub use self::number::Number;
 pub use self::object::Object;
 pub use self::range::Range;
-pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
+pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange, RecordIdentity};
 pub use self::regex::Regex;
 pub use self::set::Set;
 pub use self::uuid::Uuid;

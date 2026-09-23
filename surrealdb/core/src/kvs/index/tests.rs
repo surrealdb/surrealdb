@@ -26,8 +26,8 @@ use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::key::reclaim::{Expunge, ReclaimKind};
 use crate::key::schema::{
-	DocKeyPrefix, DocLookupPrefix, DocPendingKey, DocPendingPrefix, EntryPrefix, IdxRoot,
-	IndexCountKey, IndexCountPrefix, ReclaimKey, ReclaimPrefix, RecordPrefix,
+	DocKeyPrefix, DocLookupKey, DocLookupPrefix, DocPendingKey, DocPendingPrefix, EntryPrefix,
+	IdxRoot, IndexCountKey, IndexCountPrefix, ReclaimKey, ReclaimPrefix, RecordPrefix,
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key};
 use crate::kvs::index::CleanUncommittedBuild;
@@ -41,7 +41,7 @@ use crate::kvs::tx::{
 	CachedIndexBuildReservationKey, CachedIndexBuildReservationLookup, IndexBuildReservationRelease,
 };
 use crate::kvs::{Datastore, DatastoreError, is_retryable_transaction_conflict, storage_error};
-use crate::val::{RecordId, RecordIdKey, TableName, Value};
+use crate::val::{RecordId, RecordIdKey, RecordIdentity, TableName, Value};
 
 const REPEATED_RETRY_CONFLICTS: usize = 1000;
 
@@ -1098,7 +1098,7 @@ async fn remove_index_commit_aborts_local_builder_after_commit() -> Result<()> {
 	wait_for_finished_builder(&builder).await?;
 	assert_no_index_build_artifacts(&ds, ns, db, &table, ix.index_id).await?;
 	// Scoped to this index's own entries: dropping the table's last doc-ID
-	// consumer also queues the three shared doc-ID prefixes, which this
+	// consumer also queues the table's shared doc-ID prefixes, which this
 	// assertion is not about. One entry, committed with the catalog removal,
 	// owns the data prefix; the retirement queues nothing after it.
 	assert_eq!(
@@ -6756,7 +6756,31 @@ async fn seed_pending_reclaim(
 	id: &RecordIdKey,
 ) -> Result<()> {
 	let tx = ds.transaction(TransactionType::Write).await?;
-	tx.set_key(&DocPendingKey::new(ns, db, Cow::Borrowed(table), Cow::Borrowed(id)), &()).await?;
+	tx.set_key(&DocPendingKey::new(ns, db, Cow::Borrowed(table), RecordIdentity(id.clone())), &())
+		.await?;
+	tx.commit().await
+}
+
+/// Writes a `!dp` marker in the encoding a previous release used for it: the
+/// record id under the index format, which is what `!di` still spells, so the
+/// bytes are that key's with its route tag swapped. Such a marker names an id
+/// this release cannot decode.
+async fn seed_pending_reclaim_in_previous_encoding(
+	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	id: &RecordIdKey,
+) -> Result<()> {
+	let mut key =
+		DocLookupKey::new(ns, db, Cow::Borrowed(table), Cow::Borrowed(id)).encode_key()?.to_vec();
+	let tag = key
+		.windows(3)
+		.position(|w| w == b"!di")
+		.expect("the erased forward key carries its route tag");
+	key[tag..tag + 3].copy_from_slice(b"!dp");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.set(Key::from(key), Vec::new()).await?;
 	tx.commit().await
 }
 
@@ -6787,9 +6811,16 @@ async fn count_pending_reclaims(
 /// mappings) survive while a sibling is still building, are reclaimed once no
 /// sibling is building and the record is gone, and a still-present record keeps
 /// its live mapping while its stale marker is consumed. Both directions of the
-/// mapping are asserted. The end-to-end wiring (a real replayed delete writing
-/// the marker, and a real build completion running the sweep) is covered by
-/// [`deferred_doc_id_reclaim_survives_across_builds`].
+/// mapping are asserted, for a plain id and for one holding a number in a
+/// nested value — which the marker must address as precisely as the mapping
+/// does, or the reclaim is aimed at a different record. A marker a previous
+/// release wrote is translated through the erased mapping its bytes
+/// address, so its reclaim is carried out rather than forfeited; one that
+/// resolves to nothing is still consumed; and one whose two spellings alias —
+/// which decodes cleanly as a record other than its own — is reclaimed through
+/// the same chain, because decoding proves nothing about a marker's spelling. The end-to-end wiring
+/// (a real replayed delete writing the marker, and a real build completion running the sweep) is
+/// covered by [`deferred_doc_id_reclaim_survives_across_builds`].
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 #[test_log::test]
@@ -6897,6 +6928,154 @@ async fn concurrent_doc_id_index_build_reclaims_deferred_mapping() -> Result<()>
 		0,
 		"a stale marker for a live record must still be consumed"
 	);
+
+	// (4) A record id holding a number in a nested value. The marker names one
+	// record, so it must round-trip the id exactly: under the index format `[1]`
+	// and `[1dec]` share a key, and the id read back out of it addresses the
+	// other record, whose mapping the reclaim then declines to touch — leaving
+	// the marked record's mapping behind while consuming its marker.
+	let nested = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(1))].into());
+	let nested_id = assign_shared_doc_id(&ds, &docs, &nested).await?;
+	seed_pending_reclaim(&ds, ns, db, &table, &nested).await?;
+	ia_building.reclaim_deferred_doc_ids().await?;
+	assert_eq!(
+		read_shared_doc_id(&ds, &docs, &nested).await?,
+		None,
+		"a nested-number id must have its forward mapping reclaimed like any other"
+	);
+	assert_eq!(
+		read_shared_record_id(&ds, &docs, nested_id).await?,
+		None,
+		"and its reverse mapping too"
+	);
+	assert_eq!(
+		count_pending_reclaims(&ds, ns, db, &table).await?,
+		0,
+		"its marker must be consumed"
+	);
+
+	// (5) A marker in the spelling a previous release used. Its id does not
+	// decode as an identity here, so the record it names is recovered through
+	// the erased mapping the marker's own bytes address — and the reclaim it was
+	// written for is carried out rather than forfeited. `REBUILD INDEX` does not
+	// clear the doc-ID space, so a forfeited mapping would survive until the
+	// table's last doc-ID index was dropped.
+	let legacy = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(2))].into());
+	let legacy_id = assign_shared_doc_id(&ds, &docs, &legacy).await?;
+	seed_pending_reclaim_in_previous_encoding(&ds, ns, db, &table, &legacy).await?;
+	let readable = RecordIdKey::from("also-gone".to_owned());
+	let readable_id = assign_shared_doc_id(&ds, &docs, &readable).await?;
+	seed_pending_reclaim(&ds, ns, db, &table, &readable).await?;
+	assert_eq!(count_pending_reclaims(&ds, ns, db, &table).await?, 2);
+	ia_building.reclaim_deferred_doc_ids().await?;
+	assert_eq!(
+		count_pending_reclaims(&ds, ns, db, &table).await?,
+		0,
+		"both spellings of a marker must be consumed, whichever the scan returned"
+	);
+	assert_eq!(
+		read_shared_doc_id(&ds, &docs, &legacy).await?,
+		None,
+		"a marker in the previous spelling must still get its mapping reclaimed"
+	);
+	assert_eq!(read_shared_record_id(&ds, &docs, legacy_id).await?, None, "in both directions");
+	assert_eq!(
+		read_shared_doc_id(&ds, &docs, &readable).await?,
+		None,
+		"and the markers beside it are unaffected"
+	);
+	assert_eq!(read_shared_record_id(&ds, &docs, readable_id).await?, None);
+
+	// A float whose exact expansion the index format cannot hold. Decoding the
+	// marker's bytes rounds it to the nearest decimal, which does not encode back
+	// to the key its mapping was written at, so only the bytes as they are find it.
+	for float in [0.1, 0.7] {
+		let id = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Float(float))].into());
+		let doc_id = assign_shared_doc_id(&ds, &docs, &id).await?;
+		seed_pending_reclaim_in_previous_encoding(&ds, ns, db, &table, &id).await?;
+		ia_building.reclaim_deferred_doc_ids().await?;
+		assert_eq!(
+			read_shared_doc_id(&ds, &docs, &id).await?,
+			None,
+			"a float id's marker in the previous spelling must reclaim its mapping"
+		);
+		assert_eq!(read_shared_record_id(&ds, &docs, doc_id).await?, None, "in both directions");
+		assert_eq!(count_pending_reclaims(&ds, ns, db, &table).await?, 0);
+	}
+
+	// A marker whose record has since lost the type-erased key. `[7]` is gone,
+	// and `[7dec]`, which the previous spelling cannot tell from it, is live and
+	// took the key over when it was indexed. The chain through that key leads to
+	// the live record, so the marked one is reached only as another record the
+	// same spelling stands for.
+	let displaced = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(7))].into());
+	let displaced_id = assign_shared_doc_id(&ds, &docs, &displaced).await?;
+	execute_all(&ds, &session, "CREATE t:[7dec] SET a = 'alpha', b = 'beta';").await?;
+	let twin = RecordIdKey::Array(
+		vec![Value::Number(crate::val::Number::Decimal(rust_decimal::Decimal::from(7)))].into(),
+	);
+	let twin_id = read_shared_doc_id(&ds, &docs, &twin).await?.expect("the live twin is indexed");
+	{
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let erased = DocLookupKey::new(ns, db, Cow::Borrowed(&table), Cow::Borrowed(&displaced));
+		let held = tx.get_key(&erased, None).await?;
+		tx.cancel().await?;
+		assert_eq!(held, Some(twin_id), "the premise: the twin holds the erased key");
+	}
+	seed_pending_reclaim_in_previous_encoding(&ds, ns, db, &table, &displaced).await?;
+	ia_building.reclaim_deferred_doc_ids().await?;
+	assert_eq!(
+		read_shared_doc_id(&ds, &docs, &displaced).await?,
+		None,
+		"the marked record's own mapping must be reclaimed"
+	);
+	assert_eq!(read_shared_record_id(&ds, &docs, displaced_id).await?, None, "in both directions");
+	assert_eq!(
+		read_shared_doc_id(&ds, &docs, &twin).await?,
+		Some(twin_id),
+		"and the live record the chain reached keeps its own"
+	);
+	assert_eq!(count_pending_reclaims(&ds, ns, db, &table).await?, 0);
+
+	// A marker whose mapping is already gone resolves to no record. It must still
+	// be consumed, or the sweep meets it again on every pass.
+	seed_pending_reclaim_in_previous_encoding(&ds, ns, db, &table, &legacy).await?;
+	ia_building.reclaim_deferred_doc_ids().await?;
+	assert_eq!(
+		count_pending_reclaims(&ds, ns, db, &table).await?,
+		0,
+		"an unresolvable marker must be consumed, not left to wedge the range"
+	);
+
+	// (6) A marker whose two spellings alias. Under the previous release
+	// `[2, NONE]` encodes to the same bytes as `[2]` does under this one, so this
+	// marker decodes cleanly — as a record it was not written for. Decoding is
+	// therefore no proof of a marker's spelling, and the sweep has to follow both
+	// readings or this record's mapping is stranded while its marker is consumed.
+	let aliased =
+		RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(2)), Value::None].into());
+	let aliased_id = assign_shared_doc_id(&ds, &docs, &aliased).await?;
+	seed_pending_reclaim_in_previous_encoding(&ds, ns, db, &table, &aliased).await?;
+	// The premise: it decodes, and as a different record.
+	{
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let rng = DocPendingPrefix::new(ns, db, Cow::Borrowed(&table)).range()?;
+		let keys = tx.keys(rng, u32::MAX, 0, None).await?;
+		tx.cancel().await?;
+		let decoded = DocPendingKey::decode_key(&keys[0]).expect("the aliased spelling decodes");
+		assert!(
+			!decoded.id.0.addresses_same_record(&aliased),
+			"and decodes as a different record, which is what makes it dangerous"
+		);
+	}
+	ia_building.reclaim_deferred_doc_ids().await?;
+	assert_eq!(
+		read_shared_doc_id(&ds, &docs, &aliased).await?,
+		None,
+		"an aliased marker must still reclaim the mapping of the record it names"
+	);
+	assert_eq!(read_shared_record_id(&ds, &docs, aliased_id).await?, None);
+	assert_eq!(count_pending_reclaims(&ds, ns, db, &table).await?, 0);
 
 	Ok(())
 }
@@ -8477,5 +8656,786 @@ async fn knn_prefilter_performs_zero_in_traversal_fetches() -> Result<()> {
 			.await?;
 	assert!(!plan.contains("prefilter_tier"), "no prefilter expected:\n{plan}");
 	assert!(plan.contains("fetched:"), "in-traversal fetches expected:\n{plan}");
+	Ok(())
+}
+
+/// The bytes a previous release wrote a `!bp` marker at: this release's key up
+/// to the record id, then the id under the index format — which is what `!di`
+/// still spells, so that key supplies the suffix.
+fn primary_append_key_in_previous_encoding(
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	ix: surrealdb_catalog::IndexId,
+	generation: BuildGeneration,
+	id: &RecordIdKey,
+) -> Result<Vec<u8>> {
+	use crate::key::schema::BuildPrimaryGenerationPrefix;
+	let head = BuildPrimaryGenerationPrefix {
+		ns,
+		db,
+		tb: Cow::Borrowed(table),
+		ix,
+		generation,
+	}
+	.encode_bound()?
+	.to_vec();
+	let erased = DocLookupPrefix::new(ns, db, Cow::Borrowed(table)).encode_bound()?.to_vec();
+	let di = DocLookupKey::new(ns, db, Cow::Borrowed(table), Cow::Borrowed(id)).encode_key()?;
+	let mut key = head;
+	key.extend_from_slice(&di[erased.len()..]);
+	Ok(key)
+}
+
+/// A `!bp` marker written by a previous release must sit at this release's key
+/// for its record before the initial scan reads it.
+///
+/// That release encoded the record id under the index format, which drops a
+/// nested value's numeric variant. The scan looks a marker up by the key it
+/// builds for the record, so one left in the old spelling is missed and its
+/// queued mutation baselined as though it did not exist. A build taken over
+/// from an owner on that release keeps its generation, and with it these keys.
+///
+/// Also covers a queue wider than one page, because the rebuild carries its
+/// cursor across commits and a page stepped past uncommitted leaves records
+/// without a marker, and a key whose two spellings alias — which decodes
+/// cleanly as a record other than its own.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn primary_append_markers_from_a_previous_release_are_rebuilt() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ia ON t FIELDS a FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	let (ns, db, table, ia) = get_table_index(&ds, "t", "ia").await?;
+	let ix_id = ia.index_id;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix_id);
+	let building = new_building_for_index(&ds, &session, ns, db, &table, ia).await?;
+
+	// A queued mutation for a record whose id holds a nested number, with its
+	// marker in the spelling the previous release used.
+	let generation: BuildGeneration = 1;
+	let id = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(1))].into());
+	let (ticket, mutation_seq) = (7, 0);
+	{
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.set_key(
+			&ikb.new_bg_key(generation, ticket, mutation_seq),
+			&Appending {
+				old_values: None,
+				new_values: None,
+				id: id.clone(),
+				count_cond_match: None,
+			},
+		)
+		.await?;
+		let legacy =
+			primary_append_key_in_previous_encoding(ns, db, &table, ix_id, generation, &id)?;
+		tx.set(
+			Key::from(legacy),
+			PrimaryAppendingTicket {
+				ticket,
+				mutation_seq,
+			}
+			.kv_encode_value()?,
+		)
+		.await?;
+		tx.commit().await?;
+	}
+
+	// The scan cannot see it: the key it builds for this record is this
+	// release's spelling, which is not the key on disk.
+	{
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert!(
+			tx.get_key(&ikb.new_bp_key(generation, &id), None).await?.is_none(),
+			"the marker must start out invisible to a lookup by record"
+		);
+		tx.cancel().await?;
+	}
+
+	building.build_generation.store(generation, Ordering::Release);
+	own_build(&ds, &ikb, &building, generation).await?;
+	building.rebuild_primary_appendings().await?;
+
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let ptr = tx.get_key(&ikb.new_bp_key(generation, &id), None).await?;
+	let ptr = ptr.expect("the marker must now be found by a lookup for its own record");
+	assert_eq!(
+		(ptr.ticket, ptr.mutation_seq),
+		(ticket, mutation_seq),
+		"and still point at the same queued mutation"
+	);
+	let all = tx.keys(ikb.new_bp_range(generation)?, u32::MAX, 0, None).await?;
+	assert_eq!(all.len(), 1, "the old spelling must not be left beside the new one");
+	tx.cancel().await?;
+
+	// More queued mutations than one page holds, so the rebuild has to carry its
+	// cursor across commits. A page it steps past without committing would leave
+	// its records without a marker, which is the failure the scan cannot see.
+	let span = surrealdb_kvs::consts::INDEXING_BATCH_SIZE as usize + 50;
+	{
+		let tx = ds.transaction(TransactionType::Write).await?;
+		for i in 0..span {
+			let id = RecordIdKey::Array(
+				vec![Value::Number(crate::val::Number::Int(1000 + i as i64))].into(),
+			);
+			let (ticket, mutation_seq) = (1000 + i as u64, 0);
+			tx.set_key(
+				&ikb.new_bg_key(generation, ticket, mutation_seq),
+				&Appending {
+					old_values: None,
+					new_values: None,
+					id: id.clone(),
+					count_cond_match: None,
+				},
+			)
+			.await?;
+			tx.set(
+				Key::from(primary_append_key_in_previous_encoding(
+					ns, db, &table, ix_id, generation, &id,
+				)?),
+				PrimaryAppendingTicket {
+					ticket,
+					mutation_seq,
+				}
+				.kv_encode_value()?,
+			)
+			.await?;
+		}
+		tx.commit().await?;
+	}
+	building.rebuild_primary_appendings().await?;
+
+	let tx = ds.transaction(TransactionType::Read).await?;
+	for i in 0..span {
+		let id = RecordIdKey::Array(
+			vec![Value::Number(crate::val::Number::Int(1000 + i as i64))].into(),
+		);
+		assert!(
+			tx.get_key(&ikb.new_bp_key(generation, &id), None).await?.is_some(),
+			"marker {i} must be found by a lookup for its own record"
+		);
+	}
+	let all = tx.keys(ikb.new_bp_range(generation)?, u32::MAX, 0, None).await?;
+	assert_eq!(
+		all.len(),
+		span + 1,
+		"every marker must end up in exactly one spelling, across page boundaries"
+	);
+	tx.cancel().await?;
+
+	// A marker whose two spellings alias. Under the previous release `[3, NONE]`
+	// encodes to the same bytes as `[3]` does under this one — the `NONE` tag
+	// lands where the number's kind would have been — so this key decodes
+	// cleanly, as the wrong record. Decoding is therefore no evidence of which
+	// spelling a key is in, and only the queued mutation settles it. `[3]` has
+	// no queued mutation, so it must come out of the rebuild with no marker.
+	let three = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(3))].into());
+	let aliased =
+		RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(3)), Value::None].into());
+	let (ticket, mutation_seq) = (99, 0);
+	{
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.set_key(
+			&ikb.new_bg_key(generation, ticket, mutation_seq),
+			&Appending {
+				old_values: None,
+				new_values: None,
+				id: aliased.clone(),
+				count_cond_match: None,
+			},
+		)
+		.await?;
+		let legacy =
+			primary_append_key_in_previous_encoding(ns, db, &table, ix_id, generation, &aliased)?;
+		// The premise: it decodes, and not as the record it was written for.
+		let decoded = crate::key::schema::BuildPrimaryKey::decode_key(&legacy)
+			.expect("the aliased spelling decodes cleanly");
+		assert!(
+			!decoded.id.0.addresses_same_record(&aliased),
+			"and decodes as a different record, which is what makes it dangerous"
+		);
+		tx.set(
+			Key::from(legacy),
+			PrimaryAppendingTicket {
+				ticket,
+				mutation_seq,
+			}
+			.kv_encode_value()?,
+		)
+		.await?;
+		tx.commit().await?;
+	}
+	building.rebuild_primary_appendings().await?;
+
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let ptr = tx.get_key(&ikb.new_bp_key(generation, &aliased), None).await?;
+	let ptr = ptr.expect("an aliased marker must be rebuilt at its own record's key");
+	assert_eq!((ptr.ticket, ptr.mutation_seq), (ticket, mutation_seq));
+	// Left where it was, the old key would read as a marker for `[3]`, and the
+	// scan would baseline `[3]` against `[3, NONE]`'s queued mutation.
+	assert!(
+		tx.get_key(&ikb.new_bp_key(generation, &three), None).await?.is_none(),
+		"the record the old key decodes as has no queued mutation, so no marker"
+	);
+	let all = tx.keys(ikb.new_bp_range(generation)?, u32::MAX, 0, None).await?;
+	assert_eq!(all.len(), span + 2, "one marker per record with a queued mutation");
+	tx.cancel().await?;
+	Ok(())
+}
+
+/// Two markers in the previous spelling whose keys alias must both survive.
+///
+/// The key `[1]`'s marker belongs at is the key `[1, NONE]`'s marker occupies,
+/// so writing `[1]`'s marker while that one is still there destroys the second
+/// record's marker — and the scan then baselines that record as though it had
+/// no queued mutation. Reachable on a single-node upgrade.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn aliasing_markers_from_a_previous_release_both_survive_the_rebuild() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ia ON t FIELDS a FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	let (ns, db, table, ia) = get_table_index(&ds, "t", "ia").await?;
+	let ix_id = ia.index_id;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix_id);
+	let building = new_building_for_index(&ds, &session, ns, db, &table, ia).await?;
+	let generation: BuildGeneration = 1;
+
+	let one = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(1))].into());
+	let one_none =
+		RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(1)), Value::None].into());
+	// The premise: one record's target key is the other's current key.
+	assert_eq!(
+		*ikb.new_bp_key(generation, &one).encode_key()?,
+		*primary_append_key_in_previous_encoding(ns, db, &table, ix_id, generation, &one_none)?,
+		"the two spellings must alias, or this test guards nothing"
+	);
+
+	for (id, ticket) in [(&one, 7u64), (&one_none, 9u64)] {
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.set_key(
+			&ikb.new_bg_key(generation, ticket, 0),
+			&Appending {
+				old_values: None,
+				new_values: None,
+				id: id.clone(),
+				count_cond_match: None,
+			},
+		)
+		.await?;
+		tx.set(
+			Key::from(primary_append_key_in_previous_encoding(
+				ns, db, &table, ix_id, generation, id,
+			)?),
+			PrimaryAppendingTicket {
+				ticket,
+				mutation_seq: 0,
+			}
+			.kv_encode_value()?,
+		)
+		.await?;
+		tx.commit().await?;
+	}
+
+	building.build_generation.store(generation, Ordering::Release);
+	own_build(&ds, &ikb, &building, generation).await?;
+	building.rebuild_primary_appendings().await?;
+
+	let tx = ds.transaction(TransactionType::Read).await?;
+	assert_eq!(
+		tx.keys(ikb.new_bp_range(generation)?, u32::MAX, 0, None).await?.len(),
+		2,
+		"neither marker may be lost"
+	);
+	for (id, ticket) in [(&one, 7u64), (&one_none, 9u64)] {
+		let ptr = tx
+			.get_key(&ikb.new_bp_key(generation, id), None)
+			.await?
+			.expect("each record keeps a marker at its own key");
+		assert_eq!(ptr.ticket, ticket, "and it still names that record's own mutation");
+	}
+	tx.cancel().await?;
+	Ok(())
+}
+
+/// A record with two queued mutations gets a marker naming the earlier one.
+///
+/// A marker names a record's *first* queued mutation and the scan baselines
+/// against it, so naming the later one would apply a delta the baseline already
+/// includes. Here the later one already sits at this release's key — as a write
+/// admitted after the markers are cleared leaves it — and the earlier one is in
+/// the previous spelling.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn the_rebuild_keeps_the_earlier_of_two_markers_for_one_record() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ia ON t FIELDS a FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	let (ns, db, table, ia) = get_table_index(&ds, "t", "ia").await?;
+	let ix_id = ia.index_id;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix_id);
+	let building = new_building_for_index(&ds, &session, ns, db, &table, ia).await?;
+	let generation: BuildGeneration = 1;
+	let id = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(5))].into());
+
+	let tx = ds.transaction(TransactionType::Write).await?;
+	for ticket in [5u64, 9u64] {
+		tx.set_key(
+			&ikb.new_bg_key(generation, ticket, 0),
+			&Appending {
+				old_values: None,
+				new_values: None,
+				id: id.clone(),
+				count_cond_match: None,
+			},
+		)
+		.await?;
+	}
+	// The later mutation already sits at this release's key; the earlier one is
+	// still in the previous spelling.
+	tx.set_key(
+		&ikb.new_bp_key(generation, &id),
+		&PrimaryAppendingTicket {
+			ticket: 9,
+			mutation_seq: 0,
+		},
+	)
+	.await?;
+	tx.set(
+		Key::from(primary_append_key_in_previous_encoding(ns, db, &table, ix_id, generation, &id)?),
+		PrimaryAppendingTicket {
+			ticket: 5,
+			mutation_seq: 0,
+		}
+		.kv_encode_value()?,
+	)
+	.await?;
+	tx.commit().await?;
+
+	building.build_generation.store(generation, Ordering::Release);
+	own_build(&ds, &ikb, &building, generation).await?;
+	building.rebuild_primary_appendings().await?;
+
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let ptr = tx
+		.get_key(&ikb.new_bp_key(generation, &id), None)
+		.await?
+		.expect("the record keeps a marker");
+	assert_eq!(ptr.ticket, 5, "the earlier queued mutation is the one a marker must name");
+	assert_eq!(
+		tx.keys(ikb.new_bp_range(generation)?, u32::MAX, 0, None).await?.len(),
+		1,
+		"and the other spelling is consumed"
+	);
+	tx.cancel().await?;
+
+	// The same with the two mutations a page apart, so the later one is met in a
+	// transaction of its own, after the earlier one's marker has been committed.
+	let far = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(6))].into());
+	let page = surrealdb_kvs::consts::INDEXING_BATCH_SIZE as u64;
+	let tx = ds.transaction(TransactionType::Write).await?;
+	for (ticket, id) in
+		[(20, far.clone()), (21 + page, far.clone())].into_iter().chain((0..page).map(|i| {
+			(21 + i, RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(7))].into()))
+		})) {
+		tx.set_key(
+			&ikb.new_bg_key(generation, ticket, 0),
+			&Appending {
+				old_values: None,
+				new_values: None,
+				id,
+				count_cond_match: None,
+			},
+		)
+		.await?;
+	}
+	tx.commit().await?;
+	building.rebuild_primary_appendings().await?;
+
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let ptr = tx
+		.get_key(&ikb.new_bp_key(generation, &far), None)
+		.await?
+		.expect("the record keeps a marker");
+	assert_eq!(ptr.ticket, 20, "a later page must not replace an earlier page's marker");
+	tx.cancel().await?;
+	Ok(())
+}
+
+/// Publishes `building` as the owner of `generation` in the `Building` phase,
+/// which the marker rebuild renews as it goes.
+async fn own_build(
+	ds: &Datastore,
+	ikb: &IndexKeyBase,
+	building: &Building,
+	generation: BuildGeneration,
+) -> Result<()> {
+	set_durable_build_state(
+		ds,
+		ikb,
+		durable_build_state_for_phase(IndexBuildPhase::Building, generation, Some(building.owner)),
+	)
+	.await
+}
+
+/// Queues a mutation of `id` at `ticket`, and a marker for it in the spelling a
+/// previous release used.
+#[allow(clippy::too_many_arguments)]
+async fn queue_with_marker_in_previous_encoding(
+	tx: &crate::kvs::Transaction,
+	ikb: &IndexKeyBase,
+	(ns, db, table, ix): (NamespaceId, DatabaseId, &TableName, surrealdb_catalog::IndexId),
+	generation: BuildGeneration,
+	ticket: BuildTicket,
+	id: &RecordIdKey,
+	old_values: Option<Vec<Value>>,
+	marker: bool,
+) -> Result<()> {
+	tx.set_key(
+		&ikb.new_bg_key(generation, ticket, 0),
+		&Appending {
+			old_values,
+			new_values: None,
+			id: id.clone(),
+			count_cond_match: None,
+		},
+	)
+	.await?;
+	if marker {
+		tx.set(
+			Key::from(primary_append_key_in_previous_encoding(ns, db, table, ix, generation, id)?),
+			PrimaryAppendingTicket {
+				ticket,
+				mutation_seq: 0,
+			}
+			.kv_encode_value()?,
+		)
+		.await?;
+	}
+	Ok(())
+}
+
+/// The ids `[1]`, `[1, NONE]`, … with `len` links, each of whose keys under this
+/// release is the next one's key under the previous release.
+fn aliasing_chain(len: usize) -> Vec<RecordIdKey> {
+	(0..len)
+		.map(|nones| {
+			let mut id = vec![Value::Number(crate::val::Number::Int(1))];
+			id.extend(std::iter::repeat_n(Value::None, nones));
+			RecordIdKey::Array(id.into())
+		})
+		.collect()
+}
+
+/// A chain of markers in the previous spelling, each occupying the key the one
+/// before it belongs at, all come out of the rebuild at their own keys.
+///
+/// No marker is moved, so the chain's length bounds nothing: the markers are
+/// cleared and each is written afresh from its queued mutation.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_chain_of_aliasing_markers_is_rebuilt() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ia ON t FIELDS a FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	let (ns, db, table, ia) = get_table_index(&ds, "t", "ia").await?;
+	let ix_id = ia.index_id;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix_id);
+	let building = new_building_for_index(&ds, &session, ns, db, &table, ia).await?;
+	let generation: BuildGeneration = 1;
+
+	let chain = aliasing_chain(5);
+	for link in chain.windows(2) {
+		assert_eq!(
+			*ikb.new_bp_key(generation, &link[0]).encode_key()?,
+			*primary_append_key_in_previous_encoding(ns, db, &table, ix_id, generation, &link[1])?,
+			"each link must occupy the key the one before it belongs at"
+		);
+	}
+	let tx = ds.transaction(TransactionType::Write).await?;
+	for (ticket, id) in chain.iter().enumerate() {
+		queue_with_marker_in_previous_encoding(
+			&tx,
+			&ikb,
+			(ns, db, &table, ix_id),
+			generation,
+			ticket as BuildTicket + 1,
+			id,
+			None,
+			true,
+		)
+		.await?;
+	}
+	tx.commit().await?;
+
+	building.build_generation.store(generation, Ordering::Release);
+	own_build(&ds, &ikb, &building, generation).await?;
+	building.rebuild_primary_appendings().await?;
+
+	let tx = ds.transaction(TransactionType::Read).await?;
+	for (ticket, id) in chain.iter().enumerate() {
+		let ptr = tx
+			.get_key(&ikb.new_bp_key(generation, id), None)
+			.await?
+			.expect("every link keeps a marker at its own key");
+		assert_eq!(ptr.ticket, ticket as BuildTicket + 1, "naming its own mutation");
+	}
+	assert_eq!(
+		tx.keys(ikb.new_bp_range(generation)?, u32::MAX, 0, None).await?.len(),
+		chain.len(),
+		"and nothing else is left behind"
+	);
+	tx.cancel().await?;
+	Ok(())
+}
+
+/// A record whose queued mutation has no marker gets one from the rebuild.
+///
+/// A write on this release admitted while an older marker for another record
+/// occupied its key found the key taken and recorded no marker of its own. Only
+/// its queued mutation still says the record has one.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_record_left_without_a_marker_gets_one_from_its_queued_mutation() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ia ON t FIELDS a FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	let (ns, db, table, ia) = get_table_index(&ds, "t", "ia").await?;
+	let ix_id = ia.index_id;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix_id);
+	let building = new_building_for_index(&ds, &session, ns, db, &table, ia).await?;
+	let generation: BuildGeneration = 1;
+	let [one, one_none] = <[RecordIdKey; 2]>::try_from(aliasing_chain(2)).expect("two links");
+
+	let tx = ds.transaction(TransactionType::Write).await?;
+	// `[1, NONE]`'s marker in the previous spelling, at the key `[1]`'s belongs at.
+	queue_with_marker_in_previous_encoding(
+		&tx,
+		&ikb,
+		(ns, db, &table, ix_id),
+		generation,
+		9,
+		&one_none,
+		None,
+		true,
+	)
+	.await?;
+	// `[1]` was written after it and found that key taken.
+	queue_with_marker_in_previous_encoding(
+		&tx,
+		&ikb,
+		(ns, db, &table, ix_id),
+		generation,
+		11,
+		&one,
+		None,
+		false,
+	)
+	.await?;
+	tx.commit().await?;
+
+	building.build_generation.store(generation, Ordering::Release);
+	own_build(&ds, &ikb, &building, generation).await?;
+	building.rebuild_primary_appendings().await?;
+
+	let tx = ds.transaction(TransactionType::Read).await?;
+	for (id, ticket) in [(&one, 11), (&one_none, 9)] {
+		let ptr = tx
+			.get_key(&ikb.new_bp_key(generation, id), None)
+			.await?
+			.expect("each record with a queued mutation has a marker");
+		assert_eq!(ptr.ticket, ticket, "naming its own mutation");
+	}
+	tx.cancel().await?;
+	Ok(())
+}
+
+/// Reads every record of `table` as the initial scan pages them.
+async fn scan_records(
+	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+) -> Result<Vec<(Vec<u8>, crate::kvs::Val)>> {
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let rng = RecordPrefix {
+		ns,
+		db,
+		tb: Cow::Borrowed(table),
+	}
+	.range()?;
+	let values = catch!(tx, tx.batch_keys_vals_raw(rng, u32::MAX, None).await).result;
+	tx.cancel().await?;
+	Ok(values)
+}
+
+/// A COUNT build merges a marker an older node wrote by the record its queued
+/// mutation names, whatever its key decodes as or whether it decodes at all.
+///
+/// The merge counts the queued old state of records the live scan does not see.
+/// An older node spells the id under the index format: `[42, 'intro']` does not
+/// decode under this release's spelling at all, and `[1, NONE]` decodes as
+/// `[1]`, a live record, which would drop a deleted record from the baseline.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_build_merges_older_markers_by_their_queued_mutation() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE INDEX ic ON t COUNT;
+		 CREATE t:[1] SET a = 1;",
+	)
+	.await?;
+	let (ns, db, table, ic) = get_table_index(&ds, "t", "ic").await?;
+	let ix_id = ic.index_id;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix_id);
+	let building = new_building_for_index(&ds, &session, ns, db, &table, ic).await?;
+	let generation: BuildGeneration = 1;
+	let one_none = aliasing_chain(2).pop().expect("two links");
+	let compound = RecordIdKey::Array(
+		vec![Value::Number(crate::val::Number::Int(42)), Value::from("intro")].into(),
+	);
+	// The premise: the aliasing key is the live record's, and sorts in its span.
+	assert_eq!(
+		*ikb.new_bp_key(generation, &aliasing_chain(1)[0]).encode_key()?,
+		*primary_append_key_in_previous_encoding(ns, db, &table, ix_id, generation, &one_none)?,
+	);
+
+	// Both records were deleted during the build, and neither is live.
+	let tx = ds.transaction(TransactionType::Write).await?;
+	for (ticket, id) in [(9, &one_none), (10, &compound)] {
+		queue_with_marker_in_previous_encoding(
+			&tx,
+			&ikb,
+			(ns, db, &table, ix_id),
+			generation,
+			ticket,
+			id,
+			Some(Vec::new()),
+			true,
+		)
+		.await?;
+	}
+	tx.commit().await?;
+	building.build_generation.store(generation, Ordering::Release);
+
+	let values = scan_records(&ds, ns, db, &table).await?;
+	assert_eq!(values.len(), 1, "only `t:[1]` is live");
+	let mut cursor = Some(None);
+	let ctx = building.new_write_tx_ctx().await?;
+	let tx = ctx.tx();
+	let batch =
+		building.index_initial_batch(&ctx, &tx, &values, 0, &mut false, &mut cursor).await?;
+	assert_eq!(batch, 2, "the live record, and the deleted `[1, NONE]` whose key reads as it");
+	let tail = building.index_remaining_count_primary_appendings(&ctx, &tx, &mut cursor, 2).await?;
+	assert_eq!(tail, 1, "the deleted `[42, 'intro']`, whose key does not decode");
+	tx.cancel().await?;
+	Ok(())
+}
+
+/// The scan baselines a record against a marker only when the marker's queued
+/// mutation names that record.
+///
+/// An older node's marker for `[1, NONE]` sits at the key this release builds
+/// for `[1]`. Taking it as `[1]`'s would index `[1]` with another record's
+/// queued old state.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_marker_naming_another_record_is_not_the_scanned_records_baseline() -> Result<()> {
+	use surrealdb_types::Value as PublicValue;
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ia ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 CREATE t:[1] SET a = 'live';",
+	)
+	.await?;
+	let (ns, db, table, ia) = get_table_index(&ds, "t", "ia").await?;
+	let ix_id = ia.index_id;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix_id);
+	let building = new_building_for_index(&ds, &session, ns, db, &table, ia).await?;
+	let generation: BuildGeneration = 1;
+	let one_none = aliasing_chain(2).pop().expect("two links");
+
+	let tx = ds.transaction(TransactionType::Write).await?;
+	queue_with_marker_in_previous_encoding(
+		&tx,
+		&ikb,
+		(ns, db, &table, ix_id),
+		generation,
+		9,
+		&one_none,
+		Some(vec![Value::from("queued")]),
+		true,
+	)
+	.await?;
+	tx.commit().await?;
+	building.build_generation.store(generation, Ordering::Release);
+
+	let values = scan_records(&ds, ns, db, &table).await?;
+	let ctx = building.new_write_tx_ctx().await?;
+	let tx = ctx.tx();
+	building.index_initial_batch(&ctx, &tx, &values, 0, &mut false, &mut None).await?;
+	tx.commit().await?;
+
+	let matches = |sql: &'static str| {
+		let ds = &ds;
+		let session = &session;
+		async move {
+			match ds.execute(sql, session, None).await?.remove(0).result? {
+				PublicValue::Array(rows) => Ok(rows.len()),
+				other => anyhow::bail!("unexpected result: {other:?}"),
+			}
+		}
+	};
+	assert_eq!(
+		matches("SELECT VALUE id FROM t WHERE a @@ 'queued'").await?,
+		0,
+		"`t:[1]` must not be indexed with `[1, NONE]`'s queued state"
+	);
+	assert_eq!(matches("SELECT VALUE id FROM t WHERE a @@ 'live'").await?, 1);
 	Ok(())
 }

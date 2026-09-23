@@ -68,7 +68,7 @@ impl ReclaimState {
 }
 
 impl ReclaimKind {
-	/// Whether this names one of a table's three shared doc-ID prefixes.
+	/// Whether this names one of a table's shared doc-ID prefixes.
 	///
 	/// These differ from every other kind in the queue in that their claim is
 	/// revocable: `DEFINE INDEX` cancels the reclaim in the transaction that
@@ -79,11 +79,23 @@ impl ReclaimKind {
 	/// out-of-transaction range destroy some backends offer cannot see the
 	/// cancellation and so is never used for them.
 	pub fn is_doc_id(&self) -> bool {
-		matches!(self, Self::DocKey | Self::DocLookup | Self::DocPending)
+		matches!(self, Self::DocKey | Self::DocLookup | Self::DocLookupIdentity | Self::DocPending)
 	}
 }
 
 impl_kv_value_revisioned!(ReclaimState);
+
+/// Every table-scoped doc-ID band, for callers that must act on all of them.
+///
+/// Kept beside [`ReclaimKind::is_doc_id`], which it must agree with; the test
+/// below holds them together. A band added to one and not the other is the kind
+/// of omission that goes unnoticed, since nothing else enumerates them.
+pub const ALL_DOC_ID_KINDS: [ReclaimKind; 4] = [
+	ReclaimKind::DocKey,
+	ReclaimKind::DocLookup,
+	ReclaimKind::DocLookupIdentity,
+	ReclaimKind::DocPending,
+];
 
 /// Which kind of resource a queue entry names, and so which prefix the reclaim
 /// task destroys.
@@ -91,10 +103,10 @@ impl_kv_value_revisioned!(ReclaimState);
 /// Encodes itself: the discriminants on disk start at 0, where `storekey`'s
 /// derived numbering would start at 2.
 ///
-/// The three table-scoped doc-ID prefixes are named separately rather than by one
+/// The table-scoped doc-ID prefixes are named separately rather than by one
 /// enclosing range, because the table's key space interleaves them with the
-/// monotonic id sequence (`!dd` < `!dh` < `!di` < `!dp` < `!ds`). A range covering
-/// all three would take the sequence with them, and an id space that restarts can
+/// monotonic id sequence (`!dd` < `!dh` < `!di` < `!dj` < `!dp` < `!ds`). A range covering
+/// all of them would take the sequence with them, and an id space that restarts can
 /// hand a second record an id the first still holds.
 ///
 /// Each also carries its own resume cursor, since a queue entry holds one.
@@ -107,6 +119,8 @@ pub enum ReclaimKind {
 	DocKey,
 	/// A table's record-key to doc-ID direction (`!di`).
 	DocLookup,
+	/// The same direction spelled injectively (`!dj`).
+	DocLookupIdentity,
 	/// A table's pending-index-entry markers (`!dp`).
 	DocPending,
 }
@@ -123,6 +137,7 @@ impl storekey::Encode for ReclaimKind {
 			ReclaimKind::DocKey => w.write_u8(3),
 			ReclaimKind::DocLookup => w.write_u8(4),
 			ReclaimKind::DocPending => w.write_u8(5),
+			ReclaimKind::DocLookupIdentity => w.write_u8(6),
 		}
 	}
 }
@@ -137,6 +152,7 @@ impl<'de> storekey::BorrowDecode<'de> for ReclaimKind {
 			3 => Ok(ReclaimKind::DocKey),
 			4 => Ok(ReclaimKind::DocLookup),
 			5 => Ok(ReclaimKind::DocPending),
+			6 => Ok(ReclaimKind::DocLookupIdentity),
 			_ => Err(storekey::DecodeError::InvalidFormat),
 		}
 	}
@@ -171,6 +187,70 @@ impl<'de> storekey::BorrowDecode<'de> for Expunge {
 			0 => Ok(Expunge::Keep),
 			1 => Ok(Expunge::Expunge),
 			_ => Err(storekey::DecodeError::InvalidFormat),
+		}
+	}
+}
+
+#[cfg(test)]
+mod reclaim_kind_tests {
+	use super::*;
+
+	/// Every table-scoped doc-ID band must be classified as one.
+	///
+	/// The classification is what keeps a band on the guarded paged path, which
+	/// re-reads the claim inside each page's transaction; a band left out takes
+	/// the out-of-transaction range destroy instead, which cannot see a
+	/// concurrent cancellation and can erase mappings a new consumer has just
+	/// committed to. A band added without being listed here is silently wrong,
+	/// so the match is exhaustive rather than a list of the ones we remembered.
+	#[test]
+	fn every_table_scoped_doc_id_band_is_classified_as_one() {
+		for kind in [
+			ReclaimKind::Namespace,
+			ReclaimKind::Database,
+			ReclaimKind::Index,
+			ReclaimKind::DocKey,
+			ReclaimKind::DocLookup,
+			ReclaimKind::DocLookupIdentity,
+			ReclaimKind::DocPending,
+		] {
+			let expected = match kind {
+				// Not table-scoped doc-ID state: these name a whole catalog
+				// subtree and have no claim to race with.
+				ReclaimKind::Namespace | ReclaimKind::Database | ReclaimKind::Index => false,
+				ReclaimKind::DocKey
+				| ReclaimKind::DocLookup
+				| ReclaimKind::DocLookupIdentity
+				| ReclaimKind::DocPending => true,
+			};
+			assert_eq!(kind.is_doc_id(), expected, "{kind:?} is classified wrongly");
+			assert_eq!(
+				ALL_DOC_ID_KINDS.contains(&kind),
+				expected,
+				"{kind:?} must be listed in ALL_DOC_ID_KINDS exactly when it is doc-ID state"
+			);
+		}
+	}
+
+	/// The on-disk tags are a wire format: a tag that moves makes an existing
+	/// queue entry name a different band.
+	#[test]
+	fn the_wire_tags_are_stable() {
+		for (kind, tag) in [
+			(ReclaimKind::Namespace, 0u8),
+			(ReclaimKind::Database, 1),
+			(ReclaimKind::Index, 2),
+			(ReclaimKind::DocKey, 3),
+			(ReclaimKind::DocLookup, 4),
+			(ReclaimKind::DocPending, 5),
+			(ReclaimKind::DocLookupIdentity, 6),
+		] {
+			let encoded = storekey::encode_vec(&kind).expect("encode");
+			assert_eq!(encoded, vec![tag], "{kind:?} must keep tag {tag}");
+			// Decode has its own arm per tag, so round-trip rather than trusting
+			// that adding one implies the other.
+			let decoded: ReclaimKind = storekey::decode_borrow(&encoded).expect("decode");
+			assert_eq!(decoded, kind, "tag {tag} must decode back to {kind:?}");
 		}
 	}
 }

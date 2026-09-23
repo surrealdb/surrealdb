@@ -94,6 +94,14 @@ LANG_UPGRADE_CHAIN = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,
 # without paying for all eighteen. Add the newest release here as well as to the
 # chain above. 3.1.6 rather than 3.1.5 stands for the end of the 3.1 line, and
 # this axis is the only one that carries it all the way to HEAD.
+#
+# 3.3.0-beta.3 earns its place on a different ground from the rest: it is the
+# only published binary that builds an index in the table-level shared doc-ID
+# space, every stable release to 3.2.4 being per-index. Dropping it would leave
+# the shared-space-to-shared-space upgrade with no source at all. Its presence
+# is a statement about the code paths this axis reaches, not about which
+# releases are supported upgrade sources — `doc/UPGRADING.md` answers that, and
+# answers it with stable releases only.
 LANG_UPGRADE_SEEDS = { value = "3.0.0,3.0.5,3.1.0,3.1.6,3.2.0,3.2.4,3.3.0-beta.3", condition = { env_not_set = [
     "LANG_UPGRADE_SEEDS",
 ] } }

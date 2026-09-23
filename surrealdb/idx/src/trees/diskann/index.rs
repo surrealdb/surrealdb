@@ -16,6 +16,7 @@
 //! is transient and never loses or corrupts data; full read consistency during the upgrade would
 //! require gating `!dw` writes on a cluster storage version, which is intentionally not done here.
 
+use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -39,10 +40,12 @@ use surrealdb_kvs::{Direction, Val};
 use tokio::sync::RwLock;
 
 use crate::catalog::{DiskAnnParams, Distance, TableId, VectorType};
-use crate::docids::LegacyVectorDocIds;
+use crate::docids::{LegacyVectorDocIds, TableDocIds};
 use crate::env::IndexEnv;
-use crate::key::schema::{DiskannRecordPendingKey, DiskannRecordPendingShardKey};
-use crate::key::{KVKey, KVKeyDecode, KVValue, Key, TypedRange};
+use crate::key::schema::{
+	DiskannRecordPendingKey, DiskannRecordPendingShardKey, DiskannRecordPendingShardShardPrefix,
+};
+use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key, TypedRange};
 use crate::trees::diskann::cache::DiskAnnCache;
 use crate::trees::diskann::docs::{DiskAnnDocs, DiskAnnVecDocs};
 use crate::trees::diskann::filter::DiskAnnTruthyDocumentFilter;
@@ -56,7 +59,8 @@ use crate::trees::diskann::{
 use crate::trees::hnsw::VectorId;
 use crate::trees::knn::KnnResultBuilder;
 use crate::trees::pending::{
-	PendingBacklogReport, PendingScan, PendingScanStats, take_pending_record_id,
+	PendingBacklogReport, PendingScan, PendingScanStats, take_compacted_record_id,
+	take_pending_record_id,
 };
 use crate::trees::vector::{
 	DistanceExt as _, SerializedVector, Vector, serialized_vector_from_value,
@@ -634,6 +638,37 @@ fn pending_record_id(
 			PendingLayout::Legacy => DiskannRecordPendingKey::decode_key(key)?.id.into_owned(),
 		})
 	})
+}
+
+/// [`pending_record_id`] for compaction of a sharded entry, which maps the
+/// record to a doc-ID; the rule is [`take_compacted_record_id`]. Only the
+/// sharded layout can belong to an index on the table's doc-ID space: nothing
+/// that writes the legacy layout knows that space.
+async fn compacted_record_id(
+	tx: &Transaction,
+	key: &[u8],
+	pending: &mut DiskAnnRecordPendingUpdate,
+) -> Result<RecordIdKey> {
+	take_compacted_record_id(
+		tx,
+		&mut pending.id,
+		|| {
+			let entry = DiskannRecordPendingShardKey::decode_key(key)?;
+			let prefix = DiskannRecordPendingShardShardPrefix {
+				ns: entry.ns,
+				db: entry.db,
+				tb: Cow::Borrowed(entry.tb.as_ref()),
+				ix: entry.ix,
+				shard: entry.shard,
+			}
+			.encode_bound()?;
+			Ok(key.strip_prefix(&*prefix).map(|spelled| {
+				(TableDocIds::new(entry.ns, entry.db, entry.tb.as_ref().clone()), spelled.to_vec())
+			}))
+		},
+		|| Ok(DiskannRecordPendingShardKey::decode_key(key)?.id.into_owned()),
+	)
+	.await
 }
 
 /// Mutable state threaded through the pending scan of one KNN lookup.
@@ -1237,7 +1272,7 @@ impl DiskAnnIndex {
 					continue;
 				}
 				let mut pending = DiskAnnRecordPendingUpdate::kv_decode_value(value, ())?;
-				let id = pending_record_id(key, PendingLayout::Sharded, &mut pending)?;
+				let id = compacted_record_id(tx, key, &mut pending).await?;
 				let pending = Self::record_pending_to_operation(id, pending);
 				// Copied per entry rather than per batch, for the reason given in
 				// `collect_legacy_record_pending`.
@@ -4763,5 +4798,54 @@ mod tests {
 		assert!(compact_once(&index, &ds, &ikb).await?);
 		assert_eq!(knn_len(&index, &ds, &v1).await?, 1);
 		Ok(())
+	}
+
+	/// Compaction takes the record of a sharded entry whose value carries no id
+	/// from the table's mappings, not from the id its key decodes to, which is
+	/// decimalised once it holds a number and names no record.
+	#[tokio::test]
+	async fn compaction_names_the_mapped_record_of_an_entry_without_an_id() {
+		use crate::key::schema::{DocKeyKey, DocLookupKey};
+		let ikb = ikb();
+		let id =
+			RecordIdKey::Array(vec![Value::Number(Number::Int(42)), Value::from("intro")].into());
+		let key = ikb
+			.new_dw_key(DiskAnnIndex::pending_state_shard(&id), &id)
+			.encode_key()
+			.unwrap()
+			.to_vec();
+		let decoded = DiskannRecordPendingShardKey::decode_key(&key).unwrap().id.into_owned();
+		assert!(
+			!decoded.addresses_same_record(&id),
+			"the premise: the key's id is not the record's"
+		);
+		let entry = || DiskAnnRecordPendingUpdate {
+			doc_id: None,
+			old_vectors: Vec::new(),
+			new_vectors: Vec::new(),
+			id: None,
+		};
+
+		let ds = TestIndexStore::new().await;
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		assert!(
+			compacted_record_id(&tx, &key, &mut entry())
+				.await
+				.unwrap()
+				.addresses_same_record(&decoded),
+			"with no mapping at that spelling, the decoded id is all there is"
+		);
+		let tb = crate::val::TableName::from("tb");
+		let (ns, db) = (ikb.ns(), ikb.db());
+		tx.set_key(&DocLookupKey::new(ns, db, Cow::Borrowed(&tb), Cow::Borrowed(&id)), &7u64)
+			.await
+			.unwrap();
+		tx.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&tb), 7), &id).await.unwrap();
+		let named = compacted_record_id(&tx, &key, &mut entry()).await.unwrap();
+		assert!(
+			named.addresses_same_record(&id),
+			"the mapping names the record exactly: {named:?}"
+		);
+		tx.cancel().await.unwrap();
 	}
 }

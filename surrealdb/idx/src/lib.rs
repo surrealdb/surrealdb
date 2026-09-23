@@ -98,7 +98,7 @@ use crate::key::schema::{
 use crate::key::{KVKey, TypedRange};
 use crate::trees::hnsw::{ElementId, VectorPendingUpdate};
 use crate::trees::vector::SerializedVector;
-use crate::val::{RecordIdKey, TableName};
+use crate::val::{RecordIdKey, RecordIdentity, TableName};
 
 /// Reads a compaction generation key.
 ///
@@ -781,7 +781,7 @@ impl IndexKeyBase {
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			generation,
-			id: Cow::Borrowed(id),
+			id: RecordIdentity(id.clone()),
 		}
 	}
 
@@ -815,12 +815,15 @@ impl IndexKeyBase {
 	) -> Result<TypedRange<PrimaryAppendingTicket>> {
 		use std::ops::Bound;
 
+		// The bounds are spelled like the keys they page over, or they would not
+		// line up with them: an identity encodes a nested value's numeric variant
+		// that the index format drops.
 		let start = match after {
-			Some(after) => Bound::Excluded(Cow::Borrowed(after)),
+			Some(after) => Bound::Excluded(RecordIdentity(after.clone())),
 			None => Bound::Unbounded,
 		};
 		let end = match through {
-			Some(through) => Bound::Included(Cow::Borrowed(through)),
+			Some(through) => Bound::Included(RecordIdentity(through.clone())),
 			None => Bound::Unbounded,
 		};
 		BuildPrimaryGenerationPrefix {

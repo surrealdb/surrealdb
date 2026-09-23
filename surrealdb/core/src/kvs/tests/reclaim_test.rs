@@ -31,7 +31,7 @@ use crate::CommunityComposer;
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::dbs::{Capabilities, Session};
-use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
+use crate::key::reclaim::{ALL_DOC_ID_KINDS, Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
 	DbRoot, DocKeyPrefix, DocLookupPrefix, DocPendingPrefix, IdxRoot, NsRoot, ReclaimKey,
 	ReclaimPrefix, ReclaimTbPrefix,
@@ -83,7 +83,7 @@ async fn reclaim_queue_len(ds: &Datastore) -> usize {
 ///
 /// One removal defers more than the object it names — a cascading parent
 /// removal also queues the post-builder reclaim for each index beneath it, and
-/// dropping a table's last doc-ID consumer queues the three shared doc-ID
+/// dropping a table's last doc-ID consumer queues every shared doc-ID
 /// prefixes — so an assertion about what a statement enqueued names the kinds it
 /// is responsible for. The queue's total length is only meaningful where the
 /// expectation is that it is empty.
@@ -101,11 +101,9 @@ fn count_kind(kinds: &[ReclaimKind], kind: ReclaimKind) -> usize {
 	kinds.iter().filter(|k| **k == kind).count()
 }
 
-/// How many of `kinds` name one of the three shared doc-ID prefixes.
+/// How many of `kinds` name a shared doc-ID prefix.
 fn count_doc_kinds(kinds: &[ReclaimKind]) -> usize {
-	count_kind(kinds, ReclaimKind::DocLookup)
-		+ count_kind(kinds, ReclaimKind::DocKey)
-		+ count_kind(kinds, ReclaimKind::DocPending)
+	kinds.iter().filter(|k| k.is_doc_id()).count()
 }
 
 /// The key and value of the single pending reclaim entry (asserts there is
@@ -887,10 +885,10 @@ async fn assert_removal_reclaims_in_bounded_pages(removal: Removal) {
 		"unexpected number of {own_kind:?} entries queued for the removal"
 	);
 	// `REMOVE INDEX` drops the table's last doc-ID consumer, so it enqueues the
-	// three shared doc-ID prefixes alongside the index's own. A parent removal
+	// shared doc-ID prefixes alongside the index's own. A parent removal
 	// takes the whole prefix and has nothing to defer separately.
 	let expected_doc_entries = match removal {
-		Removal::Index => 3,
+		Removal::Index => ALL_DOC_ID_KINDS.len(),
 		_ => 0,
 	};
 	assert_eq!(
@@ -1569,7 +1567,7 @@ async fn reclaim_shares_its_budget_only_with_entries_past_the_grace() {
 		tx.commit().await.unwrap();
 	}
 
-	// Enough for all three pages, if the whole budget reaches the one entry that
+	// Enough pages for all of them, if the whole budget reaches the one entry that
 	// can spend it.
 	Datastore::reclaim_tombstones_with_budget(
 		Arc::clone(&ds),
@@ -1650,7 +1648,7 @@ async fn remove_index_defers_the_shared_doc_id_reclaim() {
 		1,
 		"the removal must enqueue the index prefix"
 	);
-	for kind in [ReclaimKind::DocLookup, ReclaimKind::DocKey, ReclaimKind::DocPending] {
+	for kind in ALL_DOC_ID_KINDS {
 		assert_eq!(
 			count_kind(&kinds, kind),
 			1,
@@ -1767,7 +1765,7 @@ async fn defining_a_doc_id_index_cancels_a_queued_doc_id_reclaim() {
 /// defining a consumer waits for the bounded reclaim rather than adopting it or
 /// purging the remainder in the DDL transaction.
 ///
-/// The three prefixes are reclaimed independently and page by page, so a
+/// The prefixes are reclaimed independently and page by page, so a
 /// surviving `!di` entry may have lost the `!dd` twin that resolves its id.
 /// Adopting one would give the new index entries pointing at a doc-ID that
 /// resolves to no record.
@@ -1859,7 +1857,7 @@ async fn defining_a_doc_id_index_waits_for_a_partly_reclaimed_doc_id_space() {
 ///
 /// Retiring an entry destroys the cursor that recorded what it had deleted, so a
 /// torn space can be left with no survivor carrying a cursor. What still says the
-/// space is torn is the count: the three entries are enqueued together, so a
+/// space is torn is the count: the entries are enqueued together, so a
 /// strict subset of them surviving means the rest were drained and retired.
 #[tokio::test]
 async fn defining_a_doc_id_index_waits_when_a_sibling_entry_has_retired() {
@@ -1893,8 +1891,8 @@ async fn defining_a_doc_id_index_waits_when_a_sibling_entry_has_retired() {
 	);
 	assert_eq!(
 		count_doc_kinds(&kinds),
-		3,
-		"the removal must enqueue the three shared doc-ID prefixes"
+		ALL_DOC_ID_KINDS.len(),
+		"the removal must enqueue every shared doc-ID prefix"
 	);
 
 	// Exactly the state retiring `!dd`'s entry leaves: its prefix drained, its
@@ -1928,8 +1926,8 @@ async fn defining_a_doc_id_index_waits_when_a_sibling_entry_has_retired() {
 	assert_eq!(count_kind(&kinds, ReclaimKind::DocKey), 0, "`!dd`'s entry must be retired");
 	assert_eq!(
 		count_doc_kinds(&kinds),
-		2,
-		"`!dd`'s two siblings must be left queued, never having been reached"
+		ALL_DOC_ID_KINDS.len() - 1,
+		"`!dd`'s siblings must be left queued, never having been reached"
 	);
 
 	let queue_before = reclaim_queue_len(&ds).await;
@@ -2003,7 +2001,7 @@ async fn a_partly_reclaimed_doc_id_space_is_left_whole_when_a_consumer_reappears
 	// The input a reclaim that committed a page and then had a consumer defined
 	// behind its back would have left: a cursor naming what it deleted.
 	let tx = ds.transaction(Write).await.unwrap();
-	for kind in [ReclaimKind::DocLookup, ReclaimKind::DocKey, ReclaimKind::DocPending] {
+	for kind in ALL_DOC_ID_KINDS {
 		let rc = ReclaimKey {
 			kind,
 			ns: ns_id,
@@ -2096,7 +2094,7 @@ async fn a_started_doc_id_reclaim_cannot_be_cancelled() {
 		"the first pass must stop mid-prefix: {after_first_pass} left"
 	);
 
-	// A new consumer may only cancel all three untouched entries. This started,
+	// A new consumer may only cancel entries that are all untouched. This started,
 	// partial set must remain queued for bounded cleanup.
 	let tx = ds.transaction(Write).await.unwrap();
 	let claim = tx.claim_tb_doc_ids_reclaim(ns_id, db_id, &tb).await.unwrap();
@@ -2153,7 +2151,7 @@ async fn a_queued_doc_id_reclaim_is_retired_once_the_table_has_a_consumer_again(
 	// The input a node that queued the space and then had a consumer defined
 	// behind its back would have left committed.
 	let tx = ds.transaction(Write).await.unwrap();
-	for kind in [ReclaimKind::DocLookup, ReclaimKind::DocKey, ReclaimKind::DocPending] {
+	for kind in ALL_DOC_ID_KINDS {
 		let rc = ReclaimKey {
 			kind,
 			ns: ns_id,
@@ -2305,8 +2303,8 @@ async fn rebuilding_a_legacy_index_cancels_a_queued_doc_id_reclaim() {
 	let kinds = reclaim_queue_kinds(&ds).await;
 	assert_eq!(
 		count_doc_kinds(&kinds),
-		3,
-		"dropping the last consumer must queue the three shared doc-ID prefixes"
+		ALL_DOC_ID_KINDS.len(),
+		"dropping the last consumer must queue every shared doc-ID prefix"
 	);
 
 	// Stamping the current format makes the legacy index a consumer.

@@ -82,11 +82,11 @@ use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
 use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
-	BootstrapKey, DbRoot, DocKeyPrefix, DocLookupPrefix, DocPendingPrefix, GraphFoldDirPrefix,
-	GraphFoldKey, GraphFoldPrefix, IdxRoot, IndexCompactionIxPrefix, IndexCompactionKey,
-	IndexCompactionPrefix, MigrationKey, MigrationPrefix, NodeKey, NodeLiveQueryKey,
-	NodeLiveQueryPrefix, NsRoot, ReclaimKey, ReclaimPrefix, SessionKey, SessionPrefix,
-	StorageVersionKey, SubscriptionKey, VersionHistoryPrefix, VersionKey,
+	BootstrapKey, DbRoot, DocKeyPrefix, DocLookupIdentityPrefix, DocLookupPrefix, DocPendingPrefix,
+	GraphFoldDirPrefix, GraphFoldKey, GraphFoldPrefix, IdxRoot, IndexCompactionIxPrefix,
+	IndexCompactionKey, IndexCompactionPrefix, MigrationKey, MigrationPrefix, NodeKey,
+	NodeLiveQueryKey, NodeLiveQueryPrefix, NsRoot, ReclaimKey, ReclaimPrefix, SessionKey,
+	SessionPrefix, StorageVersionKey, SubscriptionKey, VersionHistoryPrefix, VersionKey,
 };
 use crate::key::{
 	AnyRange, KVKey, KVKeyDecode, KVSubspace, KVValue, Key, KeyRange, RawRange, Resumable,
@@ -3609,11 +3609,6 @@ impl Datastore {
 		Ok((count_iteration, count_error))
 	}
 
-	/// Destroy the data prefix a decoded reclaim queue entry names.
-	///
-	/// Resolves the entry's kind to the byte range beneath it and hands that
-	/// range to [`Self::reclaim_range`]. All three kinds name a subtree holding
-	/// keys of more than one type, so the range is resolved as bytes.
 	/// Whether the table a queue entry names still has a consumer of the
 	/// shared doc-ID space: a doc-ID index, or the `graph_doc_ids` marker a
 	/// numeric graph fold records (its blocks resolve through the space). A
@@ -3636,6 +3631,11 @@ impl Datastore {
 		res
 	}
 
+	/// Destroy the data prefix a decoded reclaim queue entry names.
+	///
+	/// Resolves the entry's kind to the byte range beneath it and hands that
+	/// range to [`Self::reclaim_range`]. All of these kinds name a subtree holding
+	/// keys of more than one type, so the range is resolved as bytes.
 	async fn reclaim_decoded(
 		&self,
 		rc: &ReclaimKey<'_>,
@@ -3661,9 +3661,9 @@ impl Datastore {
 				ix: rc.ix,
 			}
 			.raw_range()?,
-			// The three directions of a table's shared doc-ID space, each its
-			// own entry so each carries its own resume cursor. `rc.ix` is unused
-			// for these: the space belongs to the table, not to any one index.
+			// The bands of a table's shared doc-ID space, each its own entry so
+			// each carries its own resume cursor. `rc.ix` is unused for these:
+			// the space belongs to the table, not to any one index.
 			//
 			// The space is only orphaned while the table has no doc-ID consumer.
 			// A consumer present here means one was defined after the entry was
@@ -3706,6 +3706,10 @@ impl Datastore {
 			}
 			ReclaimKind::DocLookup => {
 				DocLookupPrefix::new(rc.ns, rc.db, Cow::Borrowed(rc.tb.as_ref())).raw_range()?
+			}
+			ReclaimKind::DocLookupIdentity => {
+				DocLookupIdentityPrefix::new(rc.ns, rc.db, Cow::Borrowed(rc.tb.as_ref()))
+					.raw_range()?
 			}
 			ReclaimKind::DocPending => {
 				DocPendingPrefix::new(rc.ns, rc.db, Cow::Borrowed(rc.tb.as_ref())).raw_range()?

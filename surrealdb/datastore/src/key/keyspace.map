@@ -148,6 +148,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}!ds                                                                                  DocIdStatePrefix ->  (range)
 /*{ns}*{db}*{tb}!dd{doc_id}                                                                                 DocKeyKey ->  RecordIdKey
 /*{ns}*{db}*{tb}!dd                                                                                      DocKeyPrefix ->  (range)
+/*{ns}*{db}*{tb}!dj{id}                                                                          DocLookupIdentityKey ->  DocId
+/*{ns}*{db}*{tb}!dj                                                                           DocLookupIdentityPrefix ->  (range)
 /*{ns}*{db}*{tb}!di{id}                                                                                  DocLookupKey ->  DocId
 /*{ns}*{db}*{tb}!di                                                                                   DocLookupPrefix ->  (range)
 /*{ns}*{db}*{tb}!dp{id}                                                                                 DocPendingKey ->  ()

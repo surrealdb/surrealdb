@@ -660,10 +660,15 @@ impl BitmapNode {
 				if batch_targets.is_empty() {
 					continue;
 				}
-				// Sorted for lookup locality on LSM backends, deduplicated so
-				// a single multi-get never carries duplicate keys.
+				// Sorted for lookup locality on LSM backends, and rid of repeats
+				// of one record. Equality alone is not enough: it compares
+				// numbers across variants, so it would drop one of `[1]` and
+				// `[1dec]`, two records with a doc-ID each; it only screens
+				// before the exact comparison, which encodes. A repeat that sorts
+				// apart from its twin stays, which the batch read tolerates: it
+				// answers every position it is asked for.
 				batch_targets.sort_unstable();
-				batch_targets.dedup();
+				batch_targets.dedup_by(|a, b| a == b && a.addresses_same_record(b));
 				let ids = bctx
 					.doc_ids
 					.get_doc_ids_batch(bctx.txn, &batch_targets)

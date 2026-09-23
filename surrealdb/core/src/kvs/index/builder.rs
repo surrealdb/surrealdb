@@ -1665,6 +1665,13 @@ impl Building {
 			}
 		}
 		if scanning_initial {
+			// The scan looks a record's `!bp` marker up by the key it builds for
+			// the record, so every marker has to sit at that key before the scan
+			// starts. A build taken over from an owner on a previous release keeps
+			// that owner's generation and the markers it spelled differently;
+			// they are rebuilt from the queued mutations, which carry the ids
+			// losslessly.
+			self.rebuild_primary_appendings().await?;
 			// First pass: index every record, resuming immediately after the
 			// checkpointed record when the previous owner committed batches.
 			let mut range = RecordPrefix {

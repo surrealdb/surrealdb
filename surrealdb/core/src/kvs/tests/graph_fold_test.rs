@@ -547,7 +547,6 @@ async fn numeric_encoding_preserves_semantics_and_the_id_lifecycle() {
 /// How many queued reclaim entries name a shared doc-ID prefix.
 async fn queued_doc_reclaims(ds: &Datastore) -> usize {
 	use crate::key::KVKeyDecode;
-	use crate::key::reclaim::ReclaimKind;
 	use crate::key::schema::{ReclaimKey, ReclaimPrefix};
 
 	let txn = ds.transaction(Read).await.unwrap();
@@ -557,7 +556,7 @@ async fn queued_doc_reclaims(ds: &Datastore) -> usize {
 		.filter(|key| {
 			matches!(
 				ReclaimKey::decode_key(key).unwrap().kind,
-				ReclaimKind::DocLookup | ReclaimKind::DocKey | ReclaimKind::DocPending
+				kind if kind.is_doc_id()
 			)
 		})
 		.count()
@@ -599,6 +598,8 @@ async fn numeric_fold_claims_a_queued_doc_id_reclaim() {
 	use surrealdb_cnf::ConfigMap;
 	use tokio_util::sync::CancellationToken;
 
+	use crate::key::reclaim::ALL_DOC_ID_KINDS;
+
 	let ds = Datastore::builder()
 		.without_maintenance_tasks()
 		.with_config(ConfigMap::empty().with_key_value("graph_numeric_ids", "true"))
@@ -615,8 +616,8 @@ async fn numeric_fold_claims_a_queued_doc_id_reclaim() {
 	run(&ds, &ses, "REMOVE INDEX name_idx ON person;").await;
 	assert_eq!(
 		queued_doc_reclaims(&ds).await,
-		3,
-		"removing the last doc-ID index must queue the three shared prefixes"
+		ALL_DOC_ID_KINDS.len(),
+		"removing the last doc-ID index must queue every shared prefix"
 	);
 
 	// The fold's markers make `person` (and `likes`) consumers again, so
@@ -668,7 +669,7 @@ async fn a_fold_refuses_numeric_over_a_started_doc_id_reclaim() {
 	use uuid::Uuid;
 
 	use crate::catalog::IndexId;
-	use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
+	use crate::key::reclaim::{ALL_DOC_ID_KINDS, Expunge, ReclaimState};
 	use crate::key::schema::ReclaimKey;
 	use crate::val::TableName;
 
@@ -692,7 +693,7 @@ async fn a_fold_refuses_numeric_over_a_started_doc_id_reclaim() {
 	// prefixes, each carrying a committed page cursor.
 	let tb = TableName::from("person");
 	let txn = ds.transaction(Write).await.unwrap();
-	for kind in [ReclaimKind::DocLookup, ReclaimKind::DocKey, ReclaimKind::DocPending] {
+	for kind in ALL_DOC_ID_KINDS {
 		let rc = ReclaimKey {
 			kind,
 			ns,

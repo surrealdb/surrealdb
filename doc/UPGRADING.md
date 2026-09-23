@@ -25,19 +25,55 @@ For the release **process** (how releases are cut and shipped), see
   `surrealdb_transaction_total{outcome="success"}` will read lower after the
   upgrade. Nothing about transaction behaviour changes — only how a rollback is
   labelled.
-- An HNSW or DiskANN index that was written by an earlier release while any
-  indexed record's id held a number inside an array or object — `chunk:[42,
-  'intro']`, `doc:{tenant: 1}` — keeps a stale doc-ID mapping for those records.
-  They are missing from kNN results, with no error; the query simply returns
-  fewer rows than the `k` it asked for. This release stops a record being
-  damaged; it does not repair one already damaged, and `REBUILD INDEX` does not
-  repair it either.
+- An HNSW or DiskANN index that was written by v3.1.0-beta.1 through v3.2.4
+  while any indexed record's id held a number inside an array or object —
+  `chunk:[42, 'intro']`, `doc:{tenant: 1}` — keeps a stale doc-ID mapping for
+  those records. They are missing from kNN results, with no error; the query
+  simply returns fewer rows than the `k` it asked for. The record-keyed pending
+  queue this comes from arrives in v3.1.0-beta.1, so anything older is
+  unaffected; DiskANN itself only exists from v3.1.0-beta.3. Run
+  `REBUILD INDEX <name> ON <table>` once per affected index.
+- Two records whose ids differ only in the numeric variant of a nested value —
+  `c:[1]` and `c:[1dec]`, `c:{k: 1}` and `c:{k: 1f}` — share one forward doc-ID
+  mapping in any index built before this release, so one of the two is absent
+  from that index's results. An index built by v3.2.4 or earlier keeps its own
+  per-index mapping and stays that way until `REBUILD INDEX`: installing this
+  release changes nothing for it, and nodes of either version read it alike.
+  A rebuild separates the two in a full-text index only. A plain index, and an
+  HNSW or DiskANN index, still treat them as one record however they were
+  built — their own entries key the id with the numeric variant dropped — so
+  one of the two is missing from their results, and a kNN query can return the
+  other twice. A unique index is unaffected: its entries are keyed by the
+  indexed values alone.
 - In a mixed-version cluster, a node on an older release fails kNN queries
   against an HNSW or DiskANN index once an upgraded node has written to it, and
   also fails a write to any record that index already has an update queued for,
   and its own background compaction of that queue. Upgrade every node, or stop
   both writing to and querying those indexes from the older ones until you
   have — routing only reads away is not enough.
+- An index whose build is still running while a node on an older release keeps
+  serving writes can finish wrong for records whose ids hold a number inside an
+  array or object. A build records the writes that land while it scans, under a
+  key naming the record; this release spells that name so it addresses one
+  record, and an older node spells it the older way. A build re-derives those
+  keys from the recorded writes when its scan starts — which covers a build
+  carried across a single-node upgrade — so what it cannot account for is what
+  an older node writes after that. For such a record the index can hold a wrong
+  entry, not only miss one: a `COUNT` index can count it twice or not at all,
+  full-text relevance statistics drift, and a `UNIQUE` build can fail, reporting
+  the record as a duplicate of itself. Let builds finish before a rolling
+  upgrade, or run `REBUILD INDEX <name> ON <table>` for any that were in flight
+  once every node runs this release; a rebuild started while an older node still
+  serves writes is exposed to the same thing.
+- A store written by a v3.3.0 pre-release can carry index damage no stable
+  release leaves behind, wherever an indexed record's id holds a number inside
+  an array or object: an HNSW or DiskANN index the pre-release built can map
+  such a record to a spelling no record is stored under, and a full-text, HNSW
+  or DiskANN index can give one doc-ID to two records whose ids differ only in
+  that number's variant. Once every node runs this release, run
+  `REBUILD INDEX <name> ON <table>` once per such index. That repairs the
+  mapping; of such a pair, only a full-text index comes out separated, as the
+  note on those records says.
 
 ### Why an older node cannot read or write an ANN index an upgraded node has written
 
@@ -64,22 +100,23 @@ Nothing durable is harmed: the entries are the queue's own, the upgraded nodes
 read and compact them normally, and an older node recovers as soon as it is
 upgraded.
 
-### Why an index written before the upgrade keeps returning short
+### Why an index written before the upgrade needs rebuilding
 
 The doc-ID mapping those records were given points at a key spelled the way the
 queue could express it, which for an id holding a number is not the key the
-record is stored under. The mapping is *table*-scoped, so it outlives the index
-and the upgrade both: nothing about installing this release replaces it.
+record is stored under. Nothing about installing this release replaces it: an
+index keeps the doc-ID layout it was built with, and one built before
+v3.3.0-beta.1 keeps reading and writing its own, per-index mapping.
 
-A rebuild does not replace it either. `REBUILD INDEX` re-derives *index*-scoped
-state, while the forward lookup returns an existing mapping without checking
-which record the reverse entry names — so the rebuild resolves the same stale
-mapping and those rows stay missing. Re-writing the record takes that same path
-and changes nothing.
+`REBUILD INDEX` is what moves it. The rebuilt index derives its mapping from the
+records themselves and joins the table's shared space, whose forward lookup
+rejects an entry the reverse mapping does not name — so the missing rows come
+back. There is no automatic repair; an index left un-rebuilt keeps returning
+short.
 
-Records indexed under such an id after this release are correct. Repairing the
-ones already damaged needs a forward lookup that rejects a mapping whose reverse
-entry names a different record, which this release does not carry.
+A rebuild also separates two ids differing only in a nested number's kind, which
+the per-index layout cannot: the shared space keys them injectively. That is the
+one repair unavailable on the 3.2 line, where no such space exists.
 
 ### Startup now applies data migrations
 
@@ -146,8 +183,14 @@ timestamp are unaffected, as is every other catalog type.
 Migrations run inside the server's startup budget
 (`--startup-operation-timeout`, default 60s). Migration 1's cost is proportional
 to the number of tables whose names begin with `sq`, not to the number of
-sequences, so it is fast on ordinary databases. If a start times out during
-migration, raise that flag rather than restarting into the same timeout.
+sequences, so it is fast on ordinary databases. Migration 3 reads every table's
+doc-ID mappings, which exist only in a store written by a v3.3.0 pre-release;
+on one of those its cost is proportional to the number of records any
+full-text, HNSW or DiskANN index has mapped, at one round trip per mapping it
+copies. A restart skips what an earlier attempt copied at the cost of a batched
+read, so it does make progress, but each attempt still pays for the rest. If a
+start times out during migration, raise that flag rather than restarting into
+the same timeout.
 
 ### Why a silo module written by an older release cannot be reached
 

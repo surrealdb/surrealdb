@@ -36,7 +36,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::kvs::index::filter_online_indexes;
 use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
-use crate::val::{Number, RecordId, TableName, Value};
+use crate::val::{Number, RecordId, RecordIdentity, TableName, Value};
 
 // =========================================================================
 // IndexContextKind - what kind of index context a function requires
@@ -302,11 +302,17 @@ impl Debug for MatchContext {
 /// This is the KNN equivalent of [`MatchContext`] -- same lifecycle pattern
 /// (plan-time creation, shared via `Arc`, deferred population at execution time).
 pub struct KnnContext {
-	/// Per-row distances keyed by RecordId, populated by the KNN scan operator.
+	/// Per-row distances keyed by the record each row is, populated by the KNN
+	/// scan operator.
+	///
+	/// The key compares record ids by the record they address, not with
+	/// `RecordId`'s own equality, which compares numbers across variants: under
+	/// it `k:[1]` and `k:[1dec]` are one key, and the two records would share
+	/// whichever distance was written last.
 	///
 	/// Uses `tokio::sync::RwLock` so lock acquisition is async and cannot
 	/// block the tokio runtime.
-	distances: tokio::sync::RwLock<HashMap<RecordId, Number>>,
+	distances: tokio::sync::RwLock<HashMap<(TableName, RecordIdentity), Number>>,
 }
 
 impl KnnContext {
@@ -319,12 +325,13 @@ impl KnnContext {
 
 	/// Record the distance for a record. Called by KnnScan after HNSW search.
 	pub async fn insert(&self, rid: RecordId, dist: Number) {
-		self.distances.write().await.insert(rid, dist);
+		self.distances.write().await.insert((rid.table, RecordIdentity(rid.key)), dist);
 	}
 
 	/// Look up the distance for a record. Called by vector::distance::knn().
 	pub async fn get(&self, rid: &RecordId) -> Option<Number> {
-		self.distances.read().await.get(rid).copied()
+		let key = (rid.table.clone(), RecordIdentity(rid.key.clone()));
+		self.distances.read().await.get(&key).copied()
 	}
 }
 

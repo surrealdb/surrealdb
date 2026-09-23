@@ -187,7 +187,133 @@ pub enum RecordIdKey {
 	Range(Box<RecordIdKeyRange>),
 }
 
+/// A record id carried inside a key as an *identity*, encoded losslessly
+/// whatever format the enclosing key pins.
+///
+/// [`IndexFormat`] erases a number's kind deliberately: an index key stands for
+/// its whole equality class, so a lookup for `1` has to find a row stored as
+/// `1f`. A record id in a key is not matched that way — it addresses a record —
+/// so erasing its type is precisely what breaks it. Two distinct records
+/// collapse onto one key, and an id decoded back out names a record that was
+/// never stored under it, because the record itself is addressed by the default
+/// codec, which carries the number's kind.
+///
+/// Encoding and decoding therefore go through the default codec under every
+/// format, so an identity cannot pick up the value encoding by sitting in a key
+/// that pins one. Key layouts that carry a record id use this rather than
+/// [`RecordIdKey`] directly; the bare type stays available for the value side,
+/// where the erasure is what is wanted.
+#[derive(Clone, Debug)]
+pub struct RecordIdentity(pub RecordIdKey);
+
+/// The bytes a record is addressed by.
+///
+/// A key that will not encode cannot be stored under one either, but the
+/// comparisons built on this have to stay total, so that case falls back to the
+/// debug spelling — which distinguishes the numeric variants too, so the
+/// fallback upholds the same property.
+fn addressed_by(key: &RecordIdKey) -> Vec<u8> {
+	storekey::encode_vec(key).unwrap_or_else(|_| format!("{key:?}").into_bytes())
+}
+
+impl RecordIdentity {
+	/// The bytes this identity is addressed by.
+	///
+	/// Equality, ordering and hashing all go through the encoding rather than
+	/// through [`RecordIdKey`]'s own comparison, which is cross-variant: `[1]`
+	/// and `[1dec]` compare equal there while addressing two different records,
+	/// and keeping those apart is what this type exists for. Deriving the
+	/// comparisons would reintroduce, between identities, the collapse the type
+	/// is here to prevent.
+	fn addressed_by(&self) -> Vec<u8> {
+		addressed_by(&self.0)
+	}
+}
+
+impl PartialEq for RecordIdentity {
+	fn eq(&self, other: &Self) -> bool {
+		self.addressed_by() == other.addressed_by()
+	}
+}
+
+impl Eq for RecordIdentity {}
+
+impl PartialOrd for RecordIdentity {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for RecordIdentity {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		self.addressed_by().cmp(&other.addressed_by())
+	}
+}
+
+impl std::hash::Hash for RecordIdentity {
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+		self.addressed_by().hash(state);
+	}
+}
+
+impl RecordIdentity {
+	pub fn into_inner(self) -> RecordIdKey {
+		self.0
+	}
+}
+
+impl AsRef<RecordIdKey> for RecordIdentity {
+	fn as_ref(&self) -> &RecordIdKey {
+		&self.0
+	}
+}
+
+impl From<RecordIdKey> for RecordIdentity {
+	fn from(id: RecordIdKey) -> Self {
+		Self(id)
+	}
+}
+
+impl From<RecordIdentity> for RecordIdKey {
+	fn from(id: RecordIdentity) -> Self {
+		id.0
+	}
+}
+
+impl<F> Encode<F> for RecordIdentity {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> std::result::Result<(), storekey::EncodeError> {
+		Encode::<()>::encode(&self.0, w)
+	}
+}
+
+impl<'de, F> BorrowDecode<'de, F> for RecordIdentity {
+	fn borrow_decode(
+		r: &mut storekey::BorrowReader<'de>,
+	) -> std::result::Result<Self, storekey::DecodeError> {
+		Ok(Self(BorrowDecode::<'de, ()>::borrow_decode(r)?))
+	}
+}
+
 impl RecordIdKey {
+	/// Whether `self` and `other` address the same record.
+	///
+	/// **Not `==`.** [`Number`]'s equality is cross-variant, so `[1] == [1dec]`
+	/// while the two are stored, fetched and indexed under different keys — an
+	/// equality check therefore accepts exactly the collision a caller asking
+	/// this question is trying to rule out. The comparison is on the encoding,
+	/// which is what addresses the record.
+	///
+	/// This is the comparison behind [`RecordIdentity`]'s own equality; it is
+	/// exposed separately for the callers that hold bare keys, chiefly the
+	/// doc-ID mapping, where a forward hit is adopted only once the reverse
+	/// mapping agrees it names the record asked for.
+	pub fn addresses_same_record(&self, other: &Self) -> bool {
+		addressed_by(self) == addressed_by(other)
+	}
+
 	/// [`Value::hash_agrees_with_eq`] for a record id's key.
 	///
 	/// [`RecordIdKey::Number`] is an `i64`, not a [`crate::val::Number`], so plain
@@ -558,7 +684,80 @@ mod tests {
 		let back: RecordIdKey = storekey::decode_borrow(&record_key(&int)).unwrap();
 		assert_eq!(record_key(&back), record_key(&int));
 	}
+
+	/// [`RecordIdentity`] is what a key uses instead, and it holds the property
+	/// the bare type does not: it round trips and stays injective even when the
+	/// enclosing key pins [`IndexFormat`].
+	#[test]
+	fn record_identity_round_trips_under_index_format() {
+		fn arr(n: Number) -> RecordIdKey {
+			RecordIdKey::Array(Array::from(vec![Value::Number(n)]))
+		}
+		fn through_index_format(key: &RecordIdKey) -> RecordIdKey {
+			let id = RecordIdentity(key.clone());
+			let enc = storekey::encode_vec_format::<IndexFormat, _>(&id).unwrap();
+			storekey::decode_borrow_format::<IndexFormat, RecordIdentity>(&enc)
+				.unwrap()
+				.into_inner()
+		}
+
+		let int = arr(Number::Int(1));
+		let float = arr(Number::Float(1.5));
+		let dec = arr(Number::Decimal(rust_decimal::Decimal::from(1)));
+		let nested = RecordIdKey::Object(
+			[("k".to_owned(), Value::Number(Number::Int(2)))].into_iter().collect(),
+		);
+
+		for id in [&int, &float, &dec, &nested] {
+			assert_eq!(
+				storekey::encode_vec(&through_index_format(id)).unwrap(),
+				storekey::encode_vec(id).unwrap(),
+				"{id:?} must address its own record after the round trip"
+			);
+		}
+
+		// And distinct records stay on distinct keys.
+		assert_ne!(
+			storekey::encode_vec_format::<IndexFormat, _>(&RecordIdentity(int)).unwrap(),
+			storekey::encode_vec_format::<IndexFormat, _>(&RecordIdentity(dec)).unwrap(),
+			"`[1]` and `[1dec]` must not share a key"
+		);
+	}
 }
 
 surrealdb_kvs::impl_kv_value_revisioned!(RecordId);
 surrealdb_kvs::impl_kv_value_revisioned!(RecordIdKey);
+
+#[cfg(test)]
+mod record_identity_comparison_tests {
+	use std::collections::HashSet;
+
+	use super::*;
+
+	fn identity(n: Number) -> RecordIdentity {
+		RecordIdentity(RecordIdKey::Array(vec![Value::Number(n)].into()))
+	}
+
+	/// The type exists to keep two ids apart that [`RecordIdKey`] itself calls
+	/// equal, so its own comparison must not inherit that. Deriving it does,
+	/// which would put both records in one slot of any set or map keyed by it.
+	#[test]
+	fn identities_differing_only_in_numeric_variant_are_not_equal() {
+		let int = identity(Number::Int(1));
+		let dec = identity(Number::Decimal(1.into()));
+
+		assert_ne!(int, dec, "the identities must not collapse");
+		assert_ne!(
+			storekey::encode_vec(&int.0).unwrap(),
+			storekey::encode_vec(&dec.0).unwrap(),
+			"...because they are stored under different keys"
+		);
+		assert_eq!(
+			HashSet::from([int.clone(), dec.clone()]).len(),
+			2,
+			"and a set keyed by identity must hold both"
+		);
+		assert_ne!(int.cmp(&dec), std::cmp::Ordering::Equal, "ordering must agree");
+		assert_eq!(int, int.clone(), "an identity still equals itself");
+	}
+}
