@@ -802,10 +802,14 @@ jobs:
       - name: Check downstream app configuration
         id: cfg
         env:
-          CLIENT_ID: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and hard-fail
+          # instead of no-opping. Matches downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
-          if [[ -n "${CLIENT_ID}" && -n "${DOWNSTREAM_REPO}" ]]; then
+          if [[ "${HAS_APP}" == "true" && -n "${DOWNSTREAM_REPO}" ]]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
@@ -816,8 +820,8 @@ jobs:
         if: ${{ steps.cfg.outputs.configured == 'true' }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
-          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
 
       # Full-history checkouts of the released commits, so the backport check can
@@ -1377,14 +1381,18 @@ jobs:
       - name: Downstream App configured?
         id: cfg
         env:
-          CLIENT_ID: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and hard-fail
+          # instead of no-opping. Matches downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
-          if [[ -n "${CLIENT_ID}" ]]; then
+          if [[ "${HAS_APP}" == "true" ]]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Tag downstream::Not configured (DOWNSTREAM_* secrets absent) — skipping the downstream tag."
+            echo "::notice title=Tag downstream::Not configured (RELEASE_AUTOMATION_APP_* absent) — skipping the downstream tag."
           fi
 
       # Repo-scoped, short-lived token for the downstream. Must carry Contents:
@@ -1394,8 +1402,8 @@ jobs:
         if: steps.cfg.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
-          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
 
       # The pin script and toolchain setup come from the workflow ref (this engine
@@ -1752,14 +1760,18 @@ jobs:
       - name: Release-PR App configured?
         id: prapp
         env:
-          CLIENT_ID: ${{ secrets.RELEASE_PR_APP_CLIENT_ID }}
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and hard-fail
+          # instead of no-opping. Matches downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
-          if [[ -n "${CLIENT_ID}" ]]; then
+          if [[ "${HAS_APP}" == "true" ]]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Release-PR App::Not configured; opening the PR with GITHUB_TOKEN, so its CI will not run automatically until RELEASE_PR_APP_* is set."
+            echo "::notice title=Release-PR App::Not configured; opening the PR with GITHUB_TOKEN, so its CI will not run automatically until RELEASE_AUTOMATION_APP_* is set."
           fi
 
       - name: Generate a token to open the PR
@@ -1767,8 +1779,8 @@ jobs:
         if: steps.prapp.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.RELEASE_PR_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_PR_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
 
       - name: Create PR to bump release branch
         id: bump
@@ -1841,14 +1853,18 @@ jobs:
       - name: Release-PR App configured?
         id: prapp
         env:
-          CLIENT_ID: ${{ secrets.RELEASE_PR_APP_CLIENT_ID }}
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and hard-fail
+          # instead of no-opping. Matches downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
-          if [[ -n "${CLIENT_ID}" ]]; then
+          if [[ "${HAS_APP}" == "true" ]]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Release-PR App::Not configured; opening the PR with GITHUB_TOKEN, so its CI will not run automatically until RELEASE_PR_APP_* is set."
+            echo "::notice title=Release-PR App::Not configured; opening the PR with GITHUB_TOKEN, so its CI will not run automatically until RELEASE_AUTOMATION_APP_* is set."
           fi
 
       - name: Generate a token to open the PR
@@ -1856,8 +1872,8 @@ jobs:
         if: steps.prapp.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.RELEASE_PR_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_PR_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
 
       - name: Create PR to advance main
         id: advance
@@ -1909,10 +1925,14 @@ jobs:
       - name: Preflight (Homebrew tap configured?)
         id: preflight
         env:
-          CLIENT_ID: ${{ secrets.DOWNSTREAM_RELEASE_APP_CLIENT_ID }}
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and hard-fail
+          # instead of no-opping. Matches downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
-          if [[ -n "${CLIENT_ID}" ]]; then
+          if [[ "${HAS_APP}" == "true" ]]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
@@ -1924,8 +1944,8 @@ jobs:
         if: steps.preflight.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.DOWNSTREAM_RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.DOWNSTREAM_RELEASE_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           repositories: ${{ env.TAP_REPO }}
 
       - name: Checkout the Homebrew tap

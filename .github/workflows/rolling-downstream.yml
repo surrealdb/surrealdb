@@ -101,13 +101,17 @@ jobs:
       - name: Check whether the downstream build is configured
         id: preflight
         env:
-          CLIENT_ID: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present where secrets are withheld, so gating on the
+          # id would run the token mint keyless and hard-fail. Matches
+          # downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
         run: |
-          if [ -n "${CLIENT_ID}" ]; then
+          if [ "${HAS_APP}" == "true" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Rolling downstream::Not configured (DOWNSTREAM_* secrets absent) — skipping the downstream image build."
+            echo "::notice title=Rolling downstream::Not configured (RELEASE_AUTOMATION_APP_* absent) — skipping the downstream image build."
           fi
 
       - name: Generate a token for the downstream repo
@@ -115,8 +119,8 @@ jobs:
         if: steps.preflight.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
-          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
 
       # Resolve which downstream commit to build. An explicit override (a branch
@@ -292,8 +296,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
-          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
 
       - name: Checkout downstream
@@ -370,8 +374,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
-          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
 
       - name: Checkout downstream
