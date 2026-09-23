@@ -29,7 +29,7 @@ use util::core_capabilities_from_test_config;
 use crate::{
 	cli::{ColorMode, FailureMode},
 	runner::Schedular,
-	tests::{testset::TestId, TestSet},
+	tests::{schema::TestEnv, testset::TestId, TestSet},
 };
 
 #[derive(Debug)]
@@ -276,11 +276,7 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		ds
 	};
 
-	let timeout_duration = config
-		.env
-		.as_ref()
-		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
-		.unwrap_or(Duration::from_secs(1));
+	let timeout_duration = TestEnv::query_timeout(config.env.as_ref());
 
 	let mut ds = ds.with_query_timeout(Some(timeout_duration));
 
@@ -332,11 +328,7 @@ async fn run_test_with_dbs(
 
 	let session = util::session_from_test_config(config);
 
-	let timeout_duration = config
-		.env
-		.as_ref()
-		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
-		.unwrap_or(Duration::from_secs(1));
+	let timeout_duration = TestEnv::query_timeout(config.env.as_ref());
 
 	let mut import_session = Session::owner();
 	if let Some(ns) = session.ns.as_ref() {

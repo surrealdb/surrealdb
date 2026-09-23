@@ -82,6 +82,12 @@ impl error::Error for VersionStampError {}
 impl VersionStamp {
 	pub const ZERO: VersionStamp = VersionStamp([0; 10]);
 
+	/// The versionstamp that sorts above every other one.
+	///
+	/// Used as the exclusive upper bound of a whole versionstamped range, which
+	/// is sound because a store never issues it.
+	pub const MAX: VersionStamp = VersionStamp([0xff; 10]);
+
 	pub const fn from_u64(v: u64) -> Self {
 		let b = v.to_be_bytes();
 		VersionStamp([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], 0, 0])

@@ -1,12 +1,16 @@
 //! How the keys are structured in the key value store
 ///
 /// crate::key::version                  !v
+/// crate::key::version::revision        !vr
 ///
 /// crate::key::root::all                /
 /// crate::key::root::ac                 /!ac{ac}
+/// crate::key::root::ic                 /!ic{ns}{db}{tb}{ix}{nid}{uid}
 /// crate::key::root::nd                 /!nd{nd}
 /// crate::key::root::ni                 /!ni
 /// crate::key::root::ns                 /!ns{ns}
+/// crate::key::root::rc                 /!rc{kind}{ns}{db}{uid}
+/// crate::key::root::tl                 /!tl{task}
 /// crate::key::root::us                 /!us{us}
 ///
 /// crate::key::node::all                /${nd}

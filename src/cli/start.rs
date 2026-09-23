@@ -66,6 +66,13 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_INDEX_COMPACTION_INTERVAL", long = "index-compaction-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "5s")]
 	index_compaction_interval: Duration,
+	#[arg(
+		help = "The interval at which to reclaim the data of removed namespaces and databases. Each pass spends a fixed key budget, so a shorter interval reclaims faster",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_RECLAIM_INTERVAL", long = "reclaim-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "60s")]
+	reclaim_interval: Duration,
 	//
 	// Authentication
 	//
@@ -164,6 +171,7 @@ pub async fn init(
 		node_membership_cleanup_interval,
 		changefeed_gc_interval,
 		index_compaction_interval,
+		reclaim_interval,
 		no_banner,
 		no_identification_headers,
 		..
@@ -192,7 +200,8 @@ pub async fn init(
 		.with_node_membership_check_interval(node_membership_check_interval)
 		.with_node_membership_cleanup_interval(node_membership_cleanup_interval)
 		.with_changefeed_gc_interval(changefeed_gc_interval)
-		.with_index_compaction_interval(index_compaction_interval);
+		.with_index_compaction_interval(index_compaction_interval)
+		.with_reclaim_interval(reclaim_interval);
 	// Configure the config
 	let config = Config {
 		bind: listen_addresses.first().cloned().unwrap(),

@@ -1,4 +1,10 @@
 /**
+[env]
+# The mapper filter reads and parses the whole of tests/data/lemmatization-en.txt
+# (41,758 entries) while the DEFINE ANALYZER statement runs, which does not fit
+# the default budget on a loaded runner.
+timeout = 10000
+
 [test]
 
 [[test.results]]

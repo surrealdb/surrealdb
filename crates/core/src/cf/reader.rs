@@ -6,6 +6,19 @@ use crate::key::debug::Sprintable;
 use crate::kvs::{KeyDecode, Transaction};
 use crate::sql::statements::show::ShowSince;
 use crate::vs::VersionStamp;
+#[cfg(not(target_family = "wasm"))]
+use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(target_family = "wasm")]
+use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+
+/// Seconds since the Unix epoch, on the clock a database's changefeed
+/// timestamps are recorded against.
+fn now() -> Result<u64, Error> {
+	Ok(SystemTime::now()
+		.duration_since(UNIX_EPOCH)
+		.map_err(|e| Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration())))?
+		.as_secs())
+}
 
 // Reads the change feed for a specific database or a table,
 // starting from a specific versionstamp.
@@ -27,15 +40,26 @@ pub async fn read(
 	let beg = match start {
 		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, VersionStamp::from_u64(x))?,
 		ShowSince::Timestamp(x) => {
-			let ts = x.0.timestamp() as u64;
+			// Timestamps are recorded as seconds since the epoch, and a request
+			// from before it is a request from before anything recorded
+			let ts = x.0.timestamp().max(0) as u64;
 			let vs = tx.lock().await.get_versionstamp_from_timestamp(ts, ns, db).await?;
+			// The lookup finds the greatest recorded timestamp at or before the
+			// one asked for, so nothing is found when the request predates every
+			// timestamp this database has recorded, and equally when it has
+			// recorded none — which is what a changefeed defined less than one
+			// collection tick ago looks like, and what one on a database with no
+			// retention looks like for as long as it keeps none.
+			//
+			// A request the timeline cannot place is answered against the clock
+			// the timestamps are recorded on. Everything retained is at or after
+			// a request from the past, so the scan starts at the beginning of the
+			// range rather than failing; nothing can be at or after a request
+			// from the future, so there is nothing to scan for.
 			match vs {
 				Some(vs) => change::prefix_ts(ns, db, vs)?,
-				None => {
-					return Err(Error::Internal(
-						"no versionstamp associated to this timestamp exists yet".to_string(),
-					))
-				}
+				None if ts > now()? => return Ok(Vec::new()),
+				None => change::prefix_ts(ns, db, VersionStamp::ZERO)?,
 			}
 		}
 	};

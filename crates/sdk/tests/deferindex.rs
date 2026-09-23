@@ -256,13 +256,17 @@ async fn multi_index_concurrent_test(
                 real_total_count += count.as_usize();
             }
             info!("Real count: {real_total_count} - Index: count: {index_count} - Index status: {status} - Pending: {pending}");
-            if index_count.as_usize() == real_total_count {
-                if status.0 != "ready" {
-                    panic!("Invalid index status: {status:#}")
-                }
-				if !pending.is_zero() {
-					panic!("Invalid pending number: {pending:#}")
-				}
+            // Neither half of this is a finished build on its own. A status
+            // of 'ready' is also what an index reports before its build has
+            // been picked up, so an index holding nothing reports it. And the
+            // count is taken through a query that unions every term field1 is
+            // drawn from, so an appending update that moves a record between
+            // two of them leaves it unchanged: it can equal the table's while
+            // the build still has entries to apply.
+            if index_count.as_usize() == real_total_count
+                && status.0 == "ready"
+                && pending.is_zero()
+            {
                 // SUCCESS!
                 break;
             }

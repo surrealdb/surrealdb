@@ -10,8 +10,10 @@ pub(crate) trait Categorise {
 #[non_exhaustive]
 #[allow(unused)]
 pub enum Category {
-	/// crate::key::storage::version         /sv
+	/// crate::key::version                  !v
 	Version,
+	/// crate::key::version::revision        !vr
+	VersionRevision,
 	/// crate::key::root::all                /
 	Root,
 	/// crate::key::root::access::ac         /!ac{ac}
@@ -32,6 +34,8 @@ pub enum Category {
 	TaskLease,
 	/// crate::key::root::ic                 /!ic{ns}{db}{tb}{ix}{nid}{uuid}
 	IndexCompaction,
+	/// crate::key::root::rc                 /!rc{kind}{ns}{db}{uid}
+	Reclaim,
 	///
 	/// ------------------------------
 	///
@@ -244,8 +248,10 @@ impl Display for Category {
 			Self::Ref => "Ref",
 			Self::TaskLease => "TaskLease",
 			Self::IndexCompaction => "IndexCompaction",
+			Self::Reclaim => "Reclaim",
 			Self::IndexCountState => "IndexCountState",
 			Self::IndexDeferred => "IndexDeferred",
+			Self::VersionRevision => "VersionRevision",
 		};
 		write!(f, "{}", name)
 	}

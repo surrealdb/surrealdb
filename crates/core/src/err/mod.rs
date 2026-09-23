@@ -341,6 +341,18 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The name of a removed namespace or database is not free to use yet
+	///
+	/// A removal leaves the removed object's data on disk for a background task
+	/// to destroy. Reusing the name has to destroy whatever is left of it first,
+	/// inside the reusing statement's own transaction, and that is capped so
+	/// that the transaction stays bounded. The name becomes usable again once
+	/// the background task has finished with it.
+	#[error("The name '{name}' cannot be reused until the data of the removed namespace or database has been reclaimed")]
+	ReclaimPending {
+		name: String,
+	},
+
 	/// The requested database login does not exist
 	#[error("The database login '{name}' does not exist")]
 	DlNotFound {
@@ -1206,6 +1218,13 @@ pub enum Error {
 	/// There was an outdated storage version stored in the database
 	#[error("The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation")]
 	OutdatedStorageVersion,
+
+	/// The storage layout was changed by a release this one knows nothing about
+	#[error("The data stored on disk was written by a newer version of SurrealDB (storage revision {stored}, this version reads up to {known}) and cannot be read by this one. Run that version, or restore from an export taken before the upgrade")]
+	NewerStorageRevision {
+		stored: u16,
+		known: u16,
+	},
 
 	#[error("Found a non-computed value where they are not allowed")]
 	NonComputed,

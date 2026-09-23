@@ -27,6 +27,7 @@ pub struct Config {
 	pub(crate) node_membership_check_interval: Option<Duration>,
 	pub(crate) node_membership_cleanup_interval: Option<Duration>,
 	pub(crate) changefeed_gc_interval: Option<Duration>,
+	pub(crate) reclaim_interval: Option<Duration>,
 }
 
 impl Config {
@@ -150,6 +151,18 @@ impl Config {
 	/// Set the interval at which the database should run node maintenance tasks
 	pub fn changefeed_gc_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
 		self.changefeed_gc_interval = interval.into().filter(|x| !x.is_zero());
+		self
+	}
+
+	/// Set the interval at which the data of removed namespaces and databases is
+	/// reclaimed
+	///
+	/// `REMOVE NAMESPACE` and `REMOVE DATABASE` delete only the catalog
+	/// definition and enqueue the orphaned data prefix; a background task
+	/// destroys it in bounded batches at this interval. Each pass spends a fixed
+	/// key budget, so a shorter interval reclaims faster.
+	pub fn reclaim_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
+		self.reclaim_interval = interval.into().filter(|x| !x.is_zero());
 		self
 	}
 }

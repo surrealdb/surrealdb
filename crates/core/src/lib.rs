@@ -14,6 +14,11 @@
 
 #![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
+// Every name-addressed read resolves its namespace and database through the
+// catalog before it builds a key, so the document pipeline's futures nest one
+// catalog lookup deeper than the default limit allows rustc to compute a layout
+// for.
+#![recursion_limit = "256"]
 
 #[macro_use]
 extern crate tracing;

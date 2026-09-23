@@ -189,11 +189,14 @@ impl Collected {
 		let val = if rid_only {
 			Operable::Value(Arc::new(Value::Null))
 		} else {
-			// Check that the table exists
+			// Check that the table is reachable
 			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
-			// Fetch the data from the store
-			let val = txn.get_record(ns, db, &v.tb, &v.id, None).await?;
+			let val = match txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await? {
+				// Fetch the data from the store
+				true => txn.get_record(ns, db, &v.tb, &v.id, None).await?,
+				// A database the catalog no longer holds has no records
+				false => Value::None.into(),
+			};
 			// Create a new operable value
 			Operable::Relate(f, val, w, o.map(|v| v.into()))
 		};
@@ -218,11 +221,14 @@ impl Collected {
 		let val = if rid_only {
 			Arc::new(Value::Null)
 		} else {
-			// Check that the table exists
+			// Check that the table is reachable
 			let (ns, db) = opt.ns_db()?;
-			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
-			// Fetch the data from the store
-			txn.get_record(ns, db, &v.tb, &v.id, opt.version).await?
+			match txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await? {
+				// Fetch the data from the store
+				true => txn.get_record(ns, db, &v.tb, &v.id, opt.version).await?,
+				// A database the catalog no longer holds has no records
+				false => Value::None.into(),
+			}
 		};
 		// Parse the data from the store
 		let val = Operable::Value(val);
@@ -246,7 +252,8 @@ impl Collected {
 	) -> Result<Processed, Error> {
 		// if it is skippable we only need the record id
 		if !rid_only {
-			// Check that the table exists
+			// A write target that does not exist yet is defined by the write, so
+			// only strict mode has anything to reject here
 			let (ns, db) = opt.ns_db()?;
 			txn.check_ns_db_tb(ns, db, &v, opt.strict).await?;
 		}
@@ -280,7 +287,8 @@ impl Collected {
 	) -> Result<Processed, Error> {
 		// if it is skippable we only need the record id
 		if !rid_only {
-			// Check that the table exists
+			// A write target that does not exist yet is defined by the write, so
+			// only strict mode has anything to reject here
 			let (ns, db) = opt.ns_db()?;
 			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
 		}
@@ -304,7 +312,8 @@ impl Collected {
 	) -> Result<Processed, Error> {
 		// if it is skippable we only need the record id
 		if !rid_only {
-			// Check that the table exists
+			// A write target that does not exist yet is defined by the write, so
+			// only strict mode has anything to reject here
 			let (ns, db) = opt.ns_db()?;
 			txn.check_ns_db_tb(ns, db, &v.tb, opt.strict).await?;
 		}
@@ -575,9 +584,11 @@ pub(super) trait Collector {
 	) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
-		// Check that the table exists
+		// A database the catalog no longer holds has no records to iterate
 		let (ns, db) = opt.ns_db()?;
-		txn.check_ns_db_tb(ns, db, v, opt.strict).await?;
+		if !txn.check_ns_db_tb(ns, db, v, opt.strict).await? {
+			return Ok(());
+		}
 		// Prepare the start and end keys
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
@@ -615,9 +626,11 @@ pub(super) trait Collector {
 	) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
-		// Check that the table exists
+		// A database the catalog no longer holds has no records to iterate
 		let (ns, db) = opt.ns_db()?;
-		txn.check_ns_db_tb(ns, db, v, opt.strict).await?;
+		if !txn.check_ns_db_tb(ns, db, v, opt.strict).await? {
+			return Ok(());
+		}
 		// Prepare the start and end keys
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
@@ -656,9 +669,12 @@ pub(super) trait Collector {
 	) -> Result<(), Error> {
 		// Get the transaction
 		let txn = ctx.tx();
-		// Check that the table exists
+		// A database the catalog no longer holds has no records to count
 		let (ns, db) = opt.ns_db()?;
-		txn.check_ns_db_tb(ns, db, v, opt.strict).await?;
+		if !txn.check_ns_db_tb(ns, db, v, opt.strict).await? {
+			self.collect(Collected::Count(0)).await?;
+			return Ok(());
+		}
 		// Prepare the start and end keys
 		let beg = thing::prefix(ns, db, v)?;
 		let end = thing::suffix(ns, db, v)?;
@@ -675,10 +691,12 @@ pub(super) trait Collector {
 		opt: &Options,
 		tb: &str,
 		r: IdRange,
-	) -> Result<(Vec<u8>, Vec<u8>), Error> {
-		// Check that the table exists
+	) -> Result<Option<(Vec<u8>, Vec<u8>)>, Error> {
+		// A database the catalog no longer holds has no records in any range
 		let (ns, db) = opt.ns_db()?;
-		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
+		if !txn.check_ns_db_tb(ns, db, tb, opt.strict).await? {
+			return Ok(None);
+		}
 		// Prepare the range start key
 		let beg = match &r.beg {
 			Bound::Unbounded => thing::prefix(ns, db, tb)?,
@@ -699,7 +717,7 @@ pub(super) trait Collector {
 				key
 			}
 		};
-		Ok((beg, end))
+		Ok(Some((beg, end)))
 	}
 
 	async fn collect_range(
@@ -713,7 +731,9 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
-		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
+		let Some((beg, end)) = Self::range_prepare(&txn, opt, tb, r).await? else {
+			return Ok(());
+		};
 		// Optionally skip keys
 		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			// Returns the next range of keys
@@ -752,7 +772,9 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
-		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
+		let Some((beg, end)) = Self::range_prepare(&txn, opt, tb, r).await? else {
+			return Ok(());
+		};
 		// Optionally skip keys
 		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			// Returns the next range of keys
@@ -789,7 +811,11 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
-		let (beg, end) = Self::range_prepare(&txn, opt, tb, r).await?;
+		let Some((beg, end)) = Self::range_prepare(&txn, opt, tb, r).await? else {
+			// A database the catalog no longer holds counts as empty, not as absent
+			self.collect(Collected::Count(0)).await?;
+			return Ok(());
+		};
 		// Create a new iterable range
 		let count = txn.count(beg..end).await?;
 		// Collect the count
@@ -842,8 +868,10 @@ pub(super) trait Collector {
 		};
 		// Get the transaction
 		let txn = ctx.tx();
-		// Check that the table exists
-		txn.check_ns_db_tb(ns, db, tb, opt.strict).await?;
+		// A database the catalog no longer holds has no edges to iterate
+		if !txn.check_ns_db_tb(ns, db, tb, opt.strict).await? {
+			return Ok(());
+		}
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
@@ -874,9 +902,11 @@ pub(super) trait Collector {
 		irf: IteratorRef,
 		rs: RecordStrategy,
 	) -> Result<(), Error> {
-		// Check that the table exists
+		// A database the catalog no longer holds has no index entries to iterate
 		let (ns, db) = opt.ns_db()?;
-		ctx.tx().check_ns_db_tb(ns, db, &table.0, opt.strict).await?;
+		if !ctx.tx().check_ns_db_tb(ns, db, &table.0, opt.strict).await? {
+			return Ok(());
+		}
 		if let Some(exe) = ctx.get_query_executor() {
 			if let Some(iterator) = exe.new_iterator(opt, irf).await? {
 				let txn = ctx.tx();

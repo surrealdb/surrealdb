@@ -78,6 +78,10 @@ pub(crate) async fn run_router(
 
 	let kvs = match Datastore::new(&address.path).await {
 		Ok(kvs) => {
+			if let Err(error) = kvs.check_version().await {
+				conn_tx.send(Err(error.into())).await.ok();
+				return;
+			};
 			if let Err(error) = kvs.bootstrap().await {
 				conn_tx.send(Err(error.into())).await.ok();
 				return;
@@ -128,6 +132,9 @@ pub(crate) async fn run_router(
 	}
 	if let Some(interval) = address.config.changefeed_gc_interval {
 		opt.changefeed_gc_interval = interval;
+	}
+	if let Some(interval) = address.config.reclaim_interval {
+		opt.reclaim_interval = interval;
 	}
 	let tasks = tasks::init(kvs.clone(), canceller.clone(), &opt);
 

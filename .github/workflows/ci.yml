@@ -237,9 +237,9 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
 
       - name: Install revision-lock
-        # Pin to the version that generated the committed revision.lock. 0.2.0
-        # (released after the line was last green) recomputes the lock format
-        # differently and fails the check.
+        # Pin to the version that generated the committed revision.lock. The
+        # lock records the tool version in its first line and --check compares
+        # the whole file, so any other version fails regardless of the hashes.
         run: cargo install revision-lock --version 0.1.0
 
       - name: Check revision.lock

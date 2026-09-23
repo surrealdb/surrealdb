@@ -380,6 +380,127 @@ impl Transactor {
 		expand_inner!(&mut self.inner, v => { v.delp(key).await })
 	}
 
+	/// Delete at most `limit` keys from a prefix range, resuming after a cursor.
+	///
+	/// Scans one page of at most `limit` keys from `rng`, starting strictly
+	/// after `start_after` when it is given, and deletes exactly those keys.
+	///
+	/// Unlike [`Self::delp`] and [`Self::delr`], this issues a bounded number
+	/// of writes and never loops to exhaustion, so a caller can page a prefix
+	/// of any size without the transaction growing without limit.
+	///
+	/// Returns the last key deleted, how many were deleted, and whether the
+	/// range is now drained. The caller must commit that key as the resume
+	/// cursor in the same transaction as these deletions, so the cursor can
+	/// never claim progress that was rolled back.
+	///
+	/// An expunging page enumerates the range's versions rather than its visible
+	/// keys, because a key deleted before the object it belongs to was removed
+	/// has no visible entry and still holds every version it ever had. Whether
+	/// the range is drained is therefore reported rather than inferred from the
+	/// number of keys destroyed: a page can destroy fewer keys than `limit`
+	/// while more remain, once the same key appears under several versions.
+	///
+	/// `limit` bounds the *distinct keys* such a page reads, not the rows and not
+	/// the bytes. Every row [`Self::scan_all_versions`] returns carries the
+	/// resolved value, which this discards, so a page costs one value read per
+	/// version on a backend that keeps versions — `memory`, `surrealkv://` and
+	/// `surrealkv+versioned://`. The others answer
+	/// [`Error::UnsupportedVersionedQueries`] and fall back to reading key names
+	/// alone. Reaching the invisible keys is what requires the versioned scan;
+	/// avoiding the values it brings with them would take an all-versions
+	/// enumeration of key names, which the store API does not offer.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn delp_bounded(
+		&mut self,
+		rng: Range<Key>,
+		start_after: Option<&[u8]>,
+		limit: u32,
+		expunge: bool,
+	) -> Result<(Option<Key>, u64, bool), Error> {
+		let Range {
+			start,
+			end,
+		} = rng;
+		// Resume strictly after the last key whose deletion is already durable.
+		// A cursor from outside the range is ignored rather than followed, so a
+		// stale one can never widen the scan beyond the prefix it belongs to.
+		let beg: Key = match start_after {
+			Some(k) if k >= start.as_slice() => {
+				let mut k = k.to_vec();
+				k.push(0x00);
+				k
+			}
+			_ => start,
+		};
+		if beg >= end {
+			return Ok((None, 0, true));
+		}
+		// Fetch a single bounded page
+		let (keys, drained) = match expunge {
+			true => match self.scan_all_versions(beg.clone()..end.clone(), limit).await {
+				Ok(rows) => {
+					// One row per version, in key order, so the distinct keys
+					// are the runs of it
+					let mut keys: Vec<Key> = Vec::with_capacity(rows.len());
+					for (k, _, _, _) in rows {
+						if keys.last().is_some_and(|last| *last == k) {
+							continue;
+						}
+						keys.push(k);
+					}
+					// Measured against the distinct keys, which is what `limit`
+					// caps. Counting rows would call a range undrained whenever
+					// one key in it happened to carry `limit` versions.
+					let drained = (keys.len() as u32) < limit;
+					(keys, drained)
+				}
+				// A backend that keeps no versions has nothing an all-versions
+				// scan would report that its visible keys do not
+				Err(Error::UnsupportedVersionedQueries) => {
+					let keys = self.keys(beg..end, limit, None).await?;
+					let drained = (keys.len() as u32) < limit;
+					(keys, drained)
+				}
+				Err(e) => return Err(e),
+			},
+			false => {
+				let keys = self.keys(beg..end, limit, None).await?;
+				let drained = (keys.len() as u32) < limit;
+				(keys, drained)
+			}
+		};
+		let count = keys.len() as u64;
+		let last = keys.last().cloned();
+		// Delete exactly the keys in this page
+		for k in keys {
+			match expunge {
+				true => self.clr(k).await?,
+				false => self.del(k).await?,
+			}
+		}
+		Ok((last, count, drained))
+	}
+
+	/// Whether a range holds anything at all, counting the versions of keys
+	/// that a visible scan does not report.
+	///
+	/// A key tombstoned before its prefix was removed has no visible entry and
+	/// every one of its versions, so asking a visible scan whether such a prefix
+	/// is empty answers yes while it still holds the data the next object of
+	/// that name would inherit. A backend which keeps no versions has nothing to
+	/// add to what its visible keys already say.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn any_version_in(&mut self, rng: Range<Key>) -> Result<bool, Error> {
+		match self.scan_all_versions(rng.clone(), 1).await {
+			Ok(rows) => Ok(!rows.is_empty()),
+			Err(Error::UnsupportedVersionedQueries) => {
+				Ok(!self.keys(rng, 1, None).await?.is_empty())
+			}
+			Err(e) => Err(e),
+		}
+	}
+
 	/// Delete all versions of a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn clr<K>(&mut self, key: K) -> Result<(), Error>
@@ -452,6 +573,33 @@ impl Transactor {
 			return Ok(vec![]);
 		}
 		expand_inner!(&mut self.inner, v => { v.keys(beg..end, limit, version).await })
+	}
+
+	/// Retrieve every version of every key in a range.
+	///
+	/// Unlike [`Self::keys`] this reports a key whose only versions are
+	/// deletions, which is the difference between the keys a range appears to
+	/// hold and the bytes it actually holds.
+	///
+	/// Fails with [`Error::UnsupportedVersionedQueries`] on a backend that keeps
+	/// no versions, where the two are the same thing.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn scan_all_versions<K>(
+		&mut self,
+		rng: Range<K>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val, Version, bool)>, Error>
+	where
+		K: KeyEncode + Debug,
+	{
+		let beg: Key = rng.start.encode_owned()?;
+		let end: Key = rng.end.encode_owned()?;
+		let rng = beg.as_slice()..end.as_slice();
+		trace!(target: TARGET, rng = rng.sprint(), limit = limit, "ScanAllVersions");
+		if beg > end {
+			return Ok(vec![]);
+		}
+		expand_inner!(&mut self.inner, v => { v.scan_all_versions(beg..end, limit).await })
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -829,11 +977,26 @@ impl Transactor {
 		ns: &str,
 		db: &str,
 	) -> Result<Option<VersionStamp>, Error> {
+		Ok(self.get_timestamp_entry(ts, ns, db).await?.map(|(_, vs)| vs))
+	}
+
+	/// The latest timestamp entry of a database recorded at or before `ts`,
+	/// as the second it is keyed by and the versionstamp it holds.
+	///
+	/// Callers that need to check later whether that entry is still the one
+	/// there should keep the second returned rather than the one they asked
+	/// about: this walk is O(1) only on a backend that scans in reverse, and
+	/// a point get on the key it found is O(1) on all of them.
+	pub(crate) async fn get_timestamp_entry(
+		&mut self,
+		ts: u64,
+		ns: &str,
+		db: &str,
+	) -> Result<Option<(u64, VersionStamp)>, Error> {
 		let start = crate::key::database::ts::prefix(ns, db)?;
-		let ts_key = crate::key::database::ts::new(ns, db, ts + 1).encode_owned()?;
-		let end = ts_key.encode_owned()?;
-		let ts = if self.supports_reverse_scan() {
-			self.scanr(start..end, 1, None).await?.pop().map(|x| x.1)
+		let end = crate::key::database::ts::new(ns, db, ts.saturating_add(1)).encode_owned()?;
+		let found = if self.supports_reverse_scan() {
+			self.scanr(start..end, 1, None).await?.pop().map(|(k, v)| (k, Some(v)))
 		} else {
 			// Batch keys to avoid large memory usage when the amount of stored
 			// version stamps get's too big.
@@ -843,18 +1006,26 @@ impl Transactor {
 				// Pause and yield execution
 				yield_now!();
 				batch = self.batch_keys(next, *NORMAL_FETCH_SIZE, None).await?;
-				last = batch.result.pop();
+				// A range whose size is an exact multiple of the fetch size ends
+				// in an empty batch, which holds no key to take over from the
+				// one the batch before it found
+				if let Some(key) = batch.result.pop() {
+					last = Some(key);
+				}
 			}
-			if let Some(last) = last {
-				self.get(last, None).await?
-			} else {
-				None
+			match last {
+				Some(last) => {
+					let val = self.get(last.clone(), None).await?;
+					Some((last, val))
+				}
+				None => None,
 			}
 		};
-		if let Some(v) = ts {
-			return Ok(Some(VersionStamp::from_slice(&v)?));
-		}
-		Ok(None)
+		let Some((key, Some(val))) = found else {
+			return Ok(None);
+		};
+		let ts = crate::key::database::ts::Ts::decode(&key)?.ts;
+		Ok(Some((ts, VersionStamp::from_slice(&val)?)))
 	}
 
 	pub(crate) async fn new_save_point(&mut self) {

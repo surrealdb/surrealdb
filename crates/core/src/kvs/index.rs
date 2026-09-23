@@ -270,10 +270,14 @@ impl IndexBuilder {
 	/// The daemon continuously processes queued document updates in a loop,
 	/// indexing them asynchronously. It runs until the index is aborted or an error occurs.
 	fn spawn_deferred_daemon(building: IndexBuilding) {
+		// Marked before the task exists. `start_deferred_index` marks the initial
+		// build complete and then calls this, so a builder whose daemon raised the
+		// flag from inside its own task would report itself finished for as long as
+		// the task took to be scheduled.
+		building.deferred_daemon_running.store(true, Ordering::Release);
 		spawn(async move {
-			// Ensure that the daemon running flag is properly managed
+			// Lowers the flag again however the loop below ends
 			let daemon_guard = DeferredDaemonGuard(building.clone());
-			building.deferred_daemon_running.store(true, Ordering::Relaxed);
 			loop {
 				if building.is_aborted().await {
 					building.set_status(BuildingStatus::Aborted).await;
@@ -372,6 +376,16 @@ impl IndexBuilder {
 		ix: &str,
 	) -> Result<(), Error> {
 		let key = IndexKey::new(ns, db, tb, ix);
+		// Retirement signals and returns. It is reached from the compute of
+		// `REMOVE INDEX`, `REMOVE TABLE`, `REMOVE DATABASE` and `REMOVE NAMESPACE`,
+		// with that statement's write transaction open, and the last of those fans
+		// out over every index of every table of every database: waiting for each
+		// build to stop would put the duration of all of them inside one write
+		// transaction, which is the removal this whole path exists to avoid.
+		//
+		// What the build does with the signal is check it, in every transaction it
+		// writes in, including the one that clears the index prefix, and again
+		// before that one commits.
 		if let Some(b) = self.indexes.write().await.remove(&key) {
 			b.abort();
 		}
@@ -694,17 +708,68 @@ impl Building {
 	/// Run the initial building process
 	async fn run(&self) -> Result<(), Error> {
 		let (ns, db) = self.opt.ns_db()?;
+		// This builds from the records in the database's own key prefix, in
+		// transactions of its own. That prefix outlives the removal of the
+		// database it belongs to, so the catalog is what says whether the records
+		// under it are still part of a database: when it is not, there is nothing
+		// to index and nothing to write, and the build completes over no records
+		// rather than reviving the ones the removal put out of reach.
+		//
+		// This is read in a transaction of the build's own, which is also the one
+		// the records are read in, so the two agree: a build whose database is
+		// not yet committed sees neither the database nor the records it would
+		// have to index.
+		//
+		// It only decides where the records come from. Whether this build may
+		// still write is re-read in each transaction that writes, against that
+		// transaction's own snapshot. That is an ordering check and not a
+		// conflict: every backend on this line validates write sets only, so a
+		// catalog read arms nothing, and a build whose transaction opened before
+		// the removal can still commit after it. What the check gives is that
+		// such writes land in a prefix the removal has already orphaned, which
+		// the reclaim destroys whole. A name reused in that window is the one
+		// case it does not cover, and is what the build's abort is for.
+		let reachable = {
+			let tx = self.new_read_tx().await?;
+			let exists = catch!(tx, tx.db_exists(ns, db).await);
+			tx.cancel().await?;
+			exists
+		};
 		// Remove the index data
-		{
+		if reachable {
 			self.set_status(BuildingStatus::Cleaning).await;
 			let key = crate::key::index::all::new(ns, db, &self.tb, &self.ix.name);
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
+			// Removing an index, its table, or its database retires the builds
+			// under it before the catalog change commits, and this is the first
+			// thing the build writes. A retired build must not reach the delete
+			// below: the name it is keyed by can be held by something else by
+			// then, and the prefix it would clear would be that object's.
+			//
+			// Asking the catalog only whether the database exists does not
+			// answer this. A database removed and defined again under the same
+			// name exists, and a build that started before the removal is not a
+			// build of what holds the name now.
+			if self.is_aborted().await || !catch!(tx, tx.db_exists(ns, db).await) {
+				tx.cancel().await?;
+				return Ok(());
+			}
 			catch!(tx, tx.delp(&key).await);
 			if self.ix.defer {
 				// We need to know we have started building a deferred index
 				// and that the initial build is not done
 				catch!(tx, tx.set(key, revision::to_vec(&false)?, None).await);
+			}
+			// Asked again, because a retirement landing after the check above is a
+			// retirement this transaction has not yet made durable. What is left is
+			// the commit itself: the backends on this line validate write sets only,
+			// so nothing read here conflicts with the removal that retires this
+			// build, and a prefix cleared inside that window is one the reclaim
+			// destroys whole unless the name has been taken again meanwhile.
+			if self.is_aborted().await {
+				tx.cancel().await?;
+				return Ok(());
 			}
 			catch!(tx, tx.commit().await);
 		}
@@ -712,7 +777,7 @@ impl Building {
 		// First iteration, we index every keys
 		let beg = thing::prefix(ns, db, &self.tb)?;
 		let end = thing::suffix(ns, db, &self.tb)?;
-		let mut next = Some(beg..end);
+		let mut next = reachable.then_some(beg..end);
 		let mut initial_count = 0;
 		let mut v1_appending_sentinel = false;
 		// Set the initial status
@@ -744,6 +809,13 @@ impl Building {
 			{
 				let ctx = self.new_write_tx_ctx().await?;
 				let tx = ctx.tx();
+				// The prefix outlives the removal of the database it belongs to,
+				// so what says these records are still part of one is the catalog,
+				// read here rather than once before the build
+				if !catch!(tx, tx.db_exists(ns, db).await) {
+					tx.cancel().await?;
+					return Ok(());
+				}
 				// Index the batch
 				catch!(
 					tx,
@@ -777,12 +849,29 @@ impl Building {
 	/// Persist the deferred index status to storage.
 	/// This records whether the initial build phase has completed, allowing
 	/// the index to be properly restored after a server restart.
+	///
+	/// The flag lives inside the database's own key prefix, which outlives the
+	/// removal of the database, so the catalog is read in the same transaction
+	/// that writes it: a flag written into a removed prefix would sit behind the
+	/// reclaim task's cursor and be inherited by the next database of that name,
+	/// which would then start with a stale record of a build it never ran.
+	///
+	/// The catalog read is against this transaction's own snapshot, so it orders
+	/// this write after a removal it can see rather than conflicting with one it
+	/// cannot: the backends on this line validate write sets only. The abort is
+	/// checked with it, for the same reason every other write of this build
+	/// checks it — a retired build must not write even where the catalog still
+	/// answers, because the name may already belong to its replacement.
 	async fn set_df_status(&self, initial_build_done: bool) -> Result<(), Error> {
 		let (ns, db) = self.opt.ns_db()?;
 		// confirm that the initial build has been successful
 		let key = Df::new(ns, db, &self.ix.what, &self.ix.name);
 		let ctx = self.new_write_tx_ctx().await?;
 		let tx = ctx.tx();
+		if self.is_aborted().await || !catch!(tx, tx.db_exists(ns, db).await) {
+			tx.cancel().await?;
+			return Ok(());
+		}
 		catch!(tx, tx.set(key, revision::to_vec(&initial_build_done)?, None).await);
 		catch!(tx, tx.commit().await);
 		Ok(())
@@ -790,6 +879,20 @@ impl Building {
 
 	/// Loop through the appending queue and index the records.
 	/// This drains stored appends in batches until the queue is empty.
+	///
+	/// Each transaction that writes re-reads the database against its own
+	/// snapshot and stops when it is gone. That orders these writes after a
+	/// removal they can see; it does not conflict with one they cannot, because
+	/// the backends on this line validate write sets only and these writes touch
+	/// no catalog key. Writes that do land after a removal land in a prefix it
+	/// has orphaned, which the reclaim destroys whole.
+	///
+	/// A database that is not there yet reads the same as one that has been
+	/// removed, and the two cannot be told apart from here, so neither is
+	/// written for. Stopping leaves the queue alone: the appends stay where they
+	/// are, for the next run of this loop to index once the database is
+	/// committed, or for the reclaim to destroy along with the prefix they are
+	/// part of.
 	async fn index_appending_loop(&self, initial_count: Option<usize>) -> Result<(), Error> {
 		trace!("{}: index_appending_loop: {:?}", self.ix.name, initial_count);
 		let mut updates_count = initial_count.map(|_| 0);
@@ -839,6 +942,10 @@ impl Building {
 				{
 					let ctx = self.new_write_tx_ctx().await?;
 					let tx = ctx.tx();
+					if !catch!(tx, tx.db_exists(ns, db).await) {
+						tx.cancel().await?;
+						return Ok(());
+					}
 					let indexed = catch!(
 						tx,
 						self.index_appending_range(

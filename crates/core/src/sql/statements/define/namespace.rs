@@ -47,6 +47,9 @@ impl DefineNamespaceStatement {
 		}
 		// Process the statement
 		let key = crate::key::root::ns::new(&self.name);
+		// The name is being reused, so anything a pending reclaim still holds
+		// under it must go first
+		txn.finish_pending_reclaim(&self.name, None).await?;
 		txn.set(
 			key,
 			revision::to_vec(&DefineNamespaceStatement {

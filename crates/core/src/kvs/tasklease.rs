@@ -14,6 +14,8 @@ use uuid::Uuid;
 pub(crate) enum TaskLeaseType {
 	/// Index compaction
 	IndexCompaction,
+	/// Reclaim of the data left behind by a removed namespace or database
+	ReclaimTombstones,
 }
 
 #[revisioned(revision = 1)]

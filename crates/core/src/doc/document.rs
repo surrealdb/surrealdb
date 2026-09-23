@@ -403,8 +403,21 @@ impl Document {
 			Some(cache) if txn.local() => {
 				// Get the cache entry key
 				let key = cache::ds::Lookup::Db(ns, db);
+				// A cached definition is only a definition while the catalog
+				// still holds the database it belongs to. This cache outlives
+				// the transaction that filled it, and a removal that clears it
+				// can be followed by a reader whose snapshot predates the
+				// removal putting the entry straight back, so the gate every
+				// direct catalog read passes has to be paid here too. Without
+				// it a write would take the removed object's definition, land
+				// in the prefix the reclaim task is about to destroy, and never
+				// finish the job that would have saved it.
+				let held = match cache.get(&key) {
+					Some(val) if txn.db_exists(ns, db).await? => Some(val),
+					_ => None,
+				};
 				// Get or update the cache entry
-				match cache.get(&key) {
+				match held {
 					Some(val) => val,
 					None => {
 						let val = txn.get_or_add_db(ns, db, opt.strict).await?;
@@ -438,8 +451,21 @@ impl Document {
 			Some(cache) if txn.local() => {
 				// Get the cache entry key
 				let key = cache::ds::Lookup::Tb(ns, db, &id.tb);
+				// A cached definition is only a definition while the catalog
+				// still holds the database it belongs to. This cache outlives
+				// the transaction that filled it, and a removal that clears it
+				// can be followed by a reader whose snapshot predates the
+				// removal putting the entry straight back, so the gate every
+				// direct catalog read passes has to be paid here too. Without
+				// it a write would take the removed object's definition, land
+				// in the prefix the reclaim task is about to destroy, and never
+				// finish the job that would have saved it.
+				let held = match cache.get(&key) {
+					Some(val) if txn.db_exists(ns, db).await? => Some(val),
+					_ => None,
+				};
 				// Get or update the cache entry
-				match cache.get(&key) {
+				match held {
 					Some(val) => val,
 					None => {
 						let val = match txn.get_tb(ns, db, &id.tb).await {

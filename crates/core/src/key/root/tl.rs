@@ -24,9 +24,15 @@ impl Categorise for Tl {
 }
 
 impl Tl {
+	/// Builds the lease key for a task.
+	///
+	/// Each task owns a distinct discriminant, and a lease outlives the process
+	/// that took it, so a discriminant may be added but never reused or
+	/// renumbered: two tasks sharing one would contend for a single lease.
 	pub(crate) fn new(task: &TaskLeaseType) -> Self {
 		let task = match task {
 			TaskLeaseType::IndexCompaction => 1,
+			TaskLeaseType::ReclaimTombstones => 2,
 		};
 		Self {
 			__: b'/',
@@ -49,5 +55,12 @@ mod tests {
 		let val = Tl::new(&TaskLeaseType::IndexCompaction);
 		let enc = Tl::encode(&val).unwrap();
 		assert_eq!(enc, b"/!tl\0\x01");
+	}
+
+	#[test]
+	fn key_reclaim_tombstones() {
+		let val = Tl::new(&TaskLeaseType::ReclaimTombstones);
+		let enc = Tl::encode(&val).unwrap();
+		assert_eq!(enc, b"/!tl\0\x02");
 	}
 }

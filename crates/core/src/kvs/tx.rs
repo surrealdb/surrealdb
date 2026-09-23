@@ -37,11 +37,35 @@ use crate::sql::Value;
 use futures::lock::Mutex;
 use futures::lock::MutexGuard;
 use futures::stream::Stream;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::Range;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
+
+// The number of keys one page of a name-reuse reclaim deletes.
+// A page is a scan followed by that many deletes, all inside the caller's
+// transaction, so this bounds how much is read in one request rather than how
+// much the transaction may write.
+const REUSE_BATCH_SIZE: u32 = 1_000;
+
+// The number of keys the name-reuse reclaims of one transaction may delete between
+// them. Reusing the name of a removed namespace or database has to destroy whatever
+// its pending reclaim still holds, and that destruction shares the reusing
+// statement's transaction. The cap is what keeps that transaction bounded, so it is
+// spent from an allowance the transaction carries rather than granted per reuse: one
+// statement can reach several names, and one transaction can hold many statements.
+// A reuse with nothing left to spend fails rather than growing the write set without
+// limit, and the name becomes available again once the background reclaim task has
+// drained the job.
+const REUSE_KEY_BUDGET: u64 = 10_000;
+
+// The number of reclaim queue entries read in one page while finishing a reuse.
+// The queue holds one entry per removed object, and a reuse only ever finishes the
+// handful naming the object being reused, so a page this size is read once.
+const REUSE_QUEUE_PAGE_SIZE: u32 = 1_000;
 
 #[non_exhaustive]
 pub struct Transaction {
@@ -59,6 +83,11 @@ pub struct Transaction {
 	writeable: bool,
 	/// For each index, track the pending append batch for cleanup on cancel.
 	pending_index_batches: Mutex<HashMap<SharedIndexKey, (BatchId, BatchIdsCleanQueue)>>,
+	/// What is left of this transaction's name-reuse reclaim allowance.
+	reuse_budget: AtomicU64,
+	/// Whether this transaction has deferred the data of a removed namespace or
+	/// database to the reclaim task.
+	deferred_reclaim: AtomicBool,
 }
 
 impl Transaction {
@@ -72,6 +101,8 @@ impl Transaction {
 			cache: TransactionCache::new(),
 			index_caches: IndexTreeCaches::default(),
 			pending_index_batches: Mutex::new(HashMap::new()),
+			reuse_budget: AtomicU64::new(REUSE_KEY_BUDGET),
+			deferred_reclaim: AtomicBool::new(false),
 		}
 	}
 
@@ -250,6 +281,37 @@ impl Transaction {
 		K: KeyEncode + Debug,
 	{
 		self.lock().await.delp(key).await
+	}
+
+	/// Delete at most `limit` keys from a prefix range, resuming after a cursor.
+	///
+	/// Scans one page of at most `limit` keys from `rng`, starting strictly
+	/// after `start_after` when it is given, and deletes exactly those keys.
+	///
+	/// Unlike [`Self::delp`] and [`Self::delr`], this issues a bounded number
+	/// of writes and never loops to exhaustion, so a caller can page a prefix
+	/// of any size without the transaction growing without limit.
+	///
+	/// Returns the last key deleted, how many were deleted, and whether the
+	/// range is now drained. The caller must commit that key as the resume
+	/// cursor in the same transaction as these deletions, so the cursor can
+	/// never claim progress that was rolled back.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn delp_bounded(
+		&self,
+		rng: Range<Key>,
+		start_after: Option<&[u8]>,
+		limit: u32,
+		expunge: bool,
+	) -> Result<(Option<Key>, u64, bool), Error> {
+		self.lock().await.delp_bounded(rng, start_after, limit, expunge).await
+	}
+
+	/// Whether a range holds anything at all, counting the versions of keys
+	/// that a visible scan does not report.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn any_version_in(&self, rng: Range<Key>) -> Result<bool, Error> {
+		self.lock().await.any_version_in(rng).await
 	}
 
 	/// Delete all versions of a key from the datastore.
@@ -595,6 +657,11 @@ impl Transaction {
 	/// Retrieve all namespace user definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns_users(&self, ns: &str) -> Result<Arc<[DefineUserStatement]>, Error> {
+		// Definitions inside a namespace the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.ns_exists(ns).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Nus(ns);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nus(),
@@ -613,6 +680,11 @@ impl Transaction {
 	/// Retrieve all namespace access definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_ns_accesses(&self, ns: &str) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		// Definitions inside a namespace the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.ns_exists(ns).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Nas(ns);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nas(),
@@ -635,6 +707,11 @@ impl Transaction {
 		ns: &str,
 		na: &str,
 	) -> Result<Arc<[AccessGrant]>, Error> {
+		// Definitions inside a namespace the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.ns_exists(ns).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Ngs(ns, na);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_nag(),
@@ -653,6 +730,11 @@ impl Transaction {
 	/// Retrieve all database definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db(&self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
+		// Definitions inside a namespace the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.ns_exists(ns).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Dbs(ns);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_dbs(),
@@ -675,6 +757,11 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineUserStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Dus(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_dus(),
@@ -697,6 +784,11 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineAccessStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Das(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_das(),
@@ -720,6 +812,11 @@ impl Transaction {
 		db: &str,
 		da: &str,
 	) -> Result<Arc<[AccessGrant]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Dgs(ns, db, da);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_dag(),
@@ -738,6 +835,11 @@ impl Transaction {
 	/// Retrieve all api definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn all_db_apis(&self, ns: &str, db: &str) -> Result<Arc<[ApiDefinition]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Aps(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val,
@@ -761,6 +863,11 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineAnalyzerStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Azs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_azs(),
@@ -783,6 +890,11 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineFunctionStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Fcs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_fcs(),
@@ -805,6 +917,11 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineParamStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Pas(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_pas(),
@@ -827,6 +944,11 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineModelStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Mls(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_mls(),
@@ -849,6 +971,11 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineConfigStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Cgs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_cgs(),
@@ -872,6 +999,11 @@ impl Transaction {
 		db: &str,
 		version: Option<u64>,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Tbs(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_tbs(),
@@ -895,6 +1027,11 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Evs(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_evs(),
@@ -919,6 +1056,11 @@ impl Transaction {
 		tb: &str,
 		version: Option<u64>,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Fds(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_fds(),
@@ -942,6 +1084,11 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Ixs(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_ixs(),
@@ -965,6 +1112,11 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Fts(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_fts(),
@@ -988,6 +1140,11 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[LiveStatement]>, Error> {
+		// Definitions inside a database the catalog no longer holds are not
+		// definitions: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::from(Vec::new()));
+		}
 		let qey = cache::tx::Lookup::Lvs(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_lvs(),
@@ -1112,6 +1269,14 @@ impl Transaction {
 	/// Retrieve a specific namespace user definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_ns_user(&self, ns: &str, us: &str) -> Result<Arc<DefineUserStatement>, Error> {
+		// A credential inside a namespace the catalog no longer holds must not
+		// authenticate: the removed prefix outlives the removal itself
+		if !self.ns_exists(ns).await? {
+			return Err(Error::UserNsNotFound {
+				name: us.to_owned(),
+				ns: ns.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Nu(ns, us);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1137,6 +1302,14 @@ impl Transaction {
 		ns: &str,
 		na: &str,
 	) -> Result<Arc<DefineAccessStatement>, Error> {
+		// A credential inside a namespace the catalog no longer holds must not
+		// authenticate: the removed prefix outlives the removal itself
+		if !self.ns_exists(ns).await? {
+			return Err(Error::AccessNsNotFound {
+				ac: na.to_owned(),
+				ns: ns.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Na(ns, na);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1163,6 +1336,15 @@ impl Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<Arc<AccessGrant>, Error> {
+		// A credential inside a namespace the catalog no longer holds must not
+		// authenticate: the removed prefix outlives the removal itself
+		if !self.ns_exists(ns).await? {
+			return Err(Error::AccessGrantNsNotFound {
+				ac: ac.to_owned(),
+				gr: gr.to_owned(),
+				ns: ns.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Ng(ns, ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1184,8 +1366,18 @@ impl Transaction {
 	}
 
 	/// Retrieve a specific database definition.
+	///
+	/// A database definition lives inside its namespace's key prefix, which
+	/// outlives the removal of that namespace, so reading one back is not
+	/// evidence that the database exists: the namespace is resolved through the
+	/// catalog first, and a database inside an absent namespace is absent.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn get_db(&self, ns: &str, db: &str) -> Result<Arc<DefineDatabaseStatement>, Error> {
+		if !self.ns_exists(ns).await? {
+			return Err(Error::DbNotFound {
+				name: db.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Db(ns, db);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1211,6 +1403,15 @@ impl Transaction {
 		db: &str,
 		us: &str,
 	) -> Result<Arc<DefineUserStatement>, Error> {
+		// A credential inside a database the catalog no longer holds must not
+		// authenticate: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Err(Error::UserDbNotFound {
+				name: us.to_owned(),
+				ns: ns.to_owned(),
+				db: db.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Du(ns, db, us);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1238,6 +1439,15 @@ impl Transaction {
 		db: &str,
 		da: &str,
 	) -> Result<Arc<DefineAccessStatement>, Error> {
+		// A credential inside a database the catalog no longer holds must not
+		// authenticate: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Err(Error::AccessDbNotFound {
+				ac: da.to_owned(),
+				ns: ns.to_owned(),
+				db: db.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Da(ns, db, da);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1266,6 +1476,16 @@ impl Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<Arc<AccessGrant>, Error> {
+		// A credential inside a database the catalog no longer holds must not
+		// authenticate: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Err(Error::AccessGrantDbNotFound {
+				ac: ac.to_owned(),
+				gr: gr.to_owned(),
+				ns: ns.to_owned(),
+				db: db.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Dg(ns, db, ac, gr);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1296,6 +1516,13 @@ impl Transaction {
 		ml: &str,
 		vn: &str,
 	) -> Result<Arc<DefineModelStatement>, Error> {
+		// A definition inside a database the catalog no longer holds is not a
+		// definition: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Err(Error::MlNotFound {
+				name: ml.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Ml(ns, db, ml, vn);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1321,6 +1548,13 @@ impl Transaction {
 		db: &str,
 		ap: &str,
 	) -> Result<Arc<ApiDefinition>, Error> {
+		// A definition inside a database the catalog no longer holds is not a
+		// definition: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Err(Error::ApNotFound {
+				value: ap.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Ap(ns, db, ap);
 		match self.cache.get(&qey) {
 			Some(val) => val,
@@ -1346,6 +1580,13 @@ impl Transaction {
 		db: &str,
 		az: &str,
 	) -> Result<Arc<DefineAnalyzerStatement>, Error> {
+		// A definition inside a database the catalog no longer holds is not a
+		// definition: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Err(Error::AzNotFound {
+				name: az.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Az(ns, db, az);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1371,6 +1612,13 @@ impl Transaction {
 		db: &str,
 		fc: &str,
 	) -> Result<Arc<DefineFunctionStatement>, Error> {
+		// A definition inside a database the catalog no longer holds is not a
+		// definition: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Err(Error::FcNotFound {
+				name: fc.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Fc(ns, db, fc);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1396,6 +1644,13 @@ impl Transaction {
 		db: &str,
 		pa: &str,
 	) -> Result<Arc<DefineParamStatement>, Error> {
+		// A definition inside a database the catalog no longer holds is not a
+		// definition: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Err(Error::PaNotFound {
+				name: pa.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Pa(ns, db, pa);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1438,6 +1693,11 @@ impl Transaction {
 		db: &str,
 		cg: &str,
 	) -> Result<Option<Arc<DefineConfigStatement>>, Error> {
+		// A definition inside a database the catalog no longer holds is not a
+		// definition: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(None);
+		}
 		let qey = cache::tx::Lookup::Cg(ns, db, cg);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Option::Some),
@@ -1464,6 +1724,13 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<DefineTableStatement>, Error> {
+		// A table definition inside a database the catalog no longer holds is not
+		// a definition: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Err(Error::TbNotFound {
+				name: tb.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Tb(ns, db, tb);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1490,6 +1757,13 @@ impl Transaction {
 		tb: &str,
 		ev: &str,
 	) -> Result<Arc<DefineEventStatement>, Error> {
+		// A definition inside a database the catalog no longer holds is not a
+		// definition: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Err(Error::EvNotFound {
+				name: ev.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Ev(ns, db, tb, ev);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1516,6 +1790,13 @@ impl Transaction {
 		tb: &str,
 		fd: &str,
 	) -> Result<Arc<DefineFieldStatement>, Error> {
+		// A definition inside a database the catalog no longer holds is not a
+		// definition: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Err(Error::FdNotFound {
+				name: fd.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Fd(ns, db, tb, fd);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1542,6 +1823,13 @@ impl Transaction {
 		tb: &str,
 		ix: &str,
 	) -> Result<Arc<DefineIndexStatement>, Error> {
+		// A definition inside a database the catalog no longer holds is not a
+		// definition: the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Err(Error::IxNotFound {
+				name: ix.to_owned(),
+			});
+		}
 		let qey = cache::tx::Lookup::Ix(ns, db, tb, ix);
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type(),
@@ -1569,6 +1857,11 @@ impl Transaction {
 		id: &Id,
 		version: Option<u64>,
 	) -> Result<Arc<Value>, Error> {
+		// A record inside a database the catalog no longer holds is not a record:
+		// the removed prefix outlives the removal itself
+		if !self.db_exists(ns, db).await? {
+			return Ok(Arc::new(Value::None));
+		}
 		// Cache is not versioned
 		if version.is_some() {
 			// Fetch the record from the datastore
@@ -1653,39 +1946,6 @@ impl Transaction {
 		Ok(())
 	}
 
-	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_or_add_ns(
-		&self,
-		ns: &str,
-		strict: bool,
-	) -> Result<Arc<DefineNamespaceStatement>, Error> {
-		self.get_or_add_ns_upwards(ns, strict, false).await
-	}
-
-	/// Get or add a database with a default configuration, only if we are in dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_or_add_db(
-		&self,
-		ns: &str,
-		db: &str,
-		strict: bool,
-	) -> Result<Arc<DefineDatabaseStatement>, Error> {
-		self.get_or_add_db_upwards(ns, db, strict, false).await
-	}
-
-	/// Get or add a table with a default configuration, only if we are in dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	pub async fn get_or_add_tb(
-		&self,
-		ns: &str,
-		db: &str,
-		tb: &str,
-		strict: bool,
-	) -> Result<Arc<DefineTableStatement>, Error> {
-		self.get_or_add_tb_upwards(ns, db, tb, strict, false).await
-	}
-
 	/// Ensures that a table, database, and namespace are all fully defined.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	#[inline(always)]
@@ -1696,10 +1956,58 @@ impl Transaction {
 		tb: &str,
 		strict: bool,
 	) -> Result<Arc<DefineTableStatement>, Error> {
-		self.get_or_add_tb_upwards(ns, db, tb, strict, true).await
+		self.get_or_add_tb(ns, db, tb, strict).await
 	}
 
-	/// Ensure a specific table (and database, and namespace) exist.
+	/// Whether the catalog still holds a namespace.
+	///
+	/// A namespace that is absent gives `false`; every other read failure is
+	/// propagated, so a store that cannot be read is never mistaken for one
+	/// whose namespace has been removed.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub(crate) async fn ns_exists(&self, ns: &str) -> Result<bool, Error> {
+		match self.get_ns(ns).await {
+			Ok(_) => Ok(true),
+			Err(Error::NsNotFound {
+				..
+			}) => Ok(false),
+			Err(e) => Err(e),
+		}
+	}
+
+	/// Whether the catalog still holds a database, and the namespace above it.
+	///
+	/// This is the gate on every name-addressed access to a database's data. A
+	/// removal deletes only the catalog definition, so the definitions and
+	/// records inside the removed prefix keep resolving by key until the
+	/// background reclaim task destroys them: reading one is not evidence that
+	/// the object it describes still exists, and only the catalog can answer
+	/// that.
+	///
+	/// A namespace or database that is absent gives `false`; every other read
+	/// failure is propagated.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub(crate) async fn db_exists(&self, ns: &str, db: &str) -> Result<bool, Error> {
+		match self.get_db(ns, db).await {
+			Ok(_) => Ok(true),
+			Err(Error::DbNotFound {
+				..
+			}) => Ok(false),
+			Err(e) => Err(e),
+		}
+	}
+
+	/// Whether the data of a table may be read through its name.
+	///
+	/// Returns `false` when the namespace or the database is absent from the
+	/// catalog, which is what keeps the data of a removed object unreachable
+	/// between the removal committing and the reclaim task destroying it.
+	/// Callers must produce the same result they would for an empty range
+	/// rather than reading one.
+	///
+	/// In strict mode the table itself must be defined as well, and an absent
+	/// namespace, database or table is an error naming the outermost one that
+	/// is missing.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	#[inline(always)]
 	pub(crate) async fn check_ns_db_tb(
@@ -1708,10 +2016,10 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 		strict: bool,
-	) -> Result<(), Error> {
+	) -> Result<bool, Error> {
 		match strict {
 			// Strict mode is disabled
-			false => Ok(()),
+			false => self.db_exists(ns, db).await,
 			// Strict mode is enabled
 			true => {
 				// Check that the table exists
@@ -1750,10 +2058,357 @@ impl Transaction {
 					// Return any other errors
 					Err(err) => Err(err),
 					// Table does exist
-					Ok(_) => Ok(()),
+					Ok(_) => Ok(true),
 				}
 			}
 		}
+	}
+
+	/// Removes a namespace from the catalog and enqueues its data for reclaim.
+	///
+	/// Only the catalog definition is deleted, so the namespace stops existing
+	/// as soon as this transaction commits: every name-addressed read and write
+	/// resolves the namespace through the catalog first, so its data prefix
+	/// becomes unreachable even though it is still on disk. The prefix is
+	/// destroyed later by the background reclaim task, which pages through it
+	/// in bounded batches instead of writing the whole prefix into one
+	/// transaction.
+	///
+	/// Both writes land in the caller's transaction, so a rollback leaves
+	/// neither the removal nor the reclaim job, and no data is ever orphaned
+	/// without a job naming it. Those two keys are the whole write set,
+	/// whatever the namespace held.
+	///
+	/// The catalog definition is cleared rather than deleted, so no version of
+	/// it survives: a namespace of the same name owns the same key, and a
+	/// versioned read of the new one must not return the old definition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn del_ns_deferred(&self, ns: &str) -> Result<(), Error> {
+		// Drop what this transaction already resolved through the catalog, so that a
+		// later statement in it cannot reach the removed namespace from cache
+		self.cache.clear();
+		// The datastore cache is cleared once this commits, not here: a query
+		// running alongside this one resolves from a snapshot taken before the
+		// removal and would put what it found back
+		self.deferred_reclaim.store(true, Ordering::Release);
+		// Delete the catalog definition, making the namespace unreachable
+		self.clr(crate::key::root::ns::new(ns)).await?;
+		// Enqueue the orphaned data prefix for the background reclaim task
+		let job = crate::key::root::rc::ReclaimKey::namespace(Cow::Borrowed(ns), Uuid::now_v7());
+		let val = revision::to_vec(&crate::key::root::rc::ReclaimState::enqueued())?;
+		self.set(&job, val, None).await?;
+		Ok(())
+	}
+
+	/// Removes a database from the catalog and enqueues its data for reclaim.
+	///
+	/// Only the catalog definition is deleted, so the database stops existing
+	/// as soon as this transaction commits: every name-addressed read and write
+	/// resolves the database through the catalog first, so its data prefix
+	/// becomes unreachable even though it is still on disk. The prefix is
+	/// destroyed later by the background reclaim task, which pages through it
+	/// in bounded batches instead of writing the whole prefix into one
+	/// transaction.
+	///
+	/// Both writes land in the caller's transaction, so a rollback leaves
+	/// neither the removal nor the reclaim job, and no data is ever orphaned
+	/// without a job naming it. Those two keys are the whole write set,
+	/// whatever the database held.
+	///
+	/// The catalog definition is cleared rather than deleted, so no version of
+	/// it survives: a database of the same name owns the same key, and a
+	/// versioned read of the new one must not return the old definition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn del_db_deferred(&self, ns: &str, db: &str) -> Result<(), Error> {
+		// Drop what this transaction already resolved through the catalog, so that a
+		// later statement in it cannot reach the removed database from cache
+		self.cache.clear();
+		// The datastore cache is cleared once this commits, not here: a query
+		// running alongside this one resolves from a snapshot taken before the
+		// removal and would put what it found back
+		self.deferred_reclaim.store(true, Ordering::Release);
+		// Delete the catalog definition, making the database unreachable
+		self.clr(crate::key::namespace::db::new(ns, db)).await?;
+		// Enqueue the orphaned data prefix for the background reclaim task
+		let job = crate::key::root::rc::ReclaimKey::database(
+			Cow::Borrowed(ns),
+			Cow::Borrowed(db),
+			Uuid::now_v7(),
+		);
+		let val = revision::to_vec(&crate::key::root::rc::ReclaimState::enqueued())?;
+		self.set(&job, val, None).await?;
+		Ok(())
+	}
+
+	/// The part of `rng` that a paged delete resuming after `cursor` still
+	/// covers, matching how [`Transaction::delp_bounded`] resumes.
+	///
+	/// A cursor from outside the range is ignored rather than followed, so a
+	/// stale one can never widen the window beyond the prefix it belongs to.
+	fn resume_after(rng: &Range<Key>, cursor: Option<&[u8]>) -> Range<Key> {
+		let start = match cursor {
+			Some(k) if k >= rng.start.as_slice() => {
+				let mut k = k.to_vec();
+				k.push(0x00);
+				k
+			}
+			_ => rng.start.clone(),
+		};
+		start..rng.end.clone()
+	}
+
+	/// Empties the prefix a namespace name addresses, or a database name when
+	/// `db` is given, so that the name may be used again.
+	///
+	/// A namespace or database addresses its data by name, so bytes left under
+	/// that name are bytes a new object of the same name would otherwise inherit.
+	/// Taking a name therefore destroys its prefix in the transaction that takes
+	/// it: either the new object exists and the old bytes are gone, or neither
+	/// happened.
+	///
+	/// The prefix is destroyed whether or not a queue entry still describes it.
+	/// An entry is retired once the prefix reads as empty, and a removal writes
+	/// only the catalog row and the entry, so a transaction holding a snapshot
+	/// from before the removal conflicts with neither and may commit into the
+	/// prefix after the entry is gone. Nothing names such a key afterwards, so
+	/// this is the only guard that can catch it. Any entry naming the prefix is
+	/// finished here too, because a reclaim task that kept one would later
+	/// destroy a range inside an object that exists again.
+	///
+	/// Taking either name also finishes any entry naming the namespace itself,
+	/// because a namespace entry's prefix covers every database in it, so an
+	/// entry left behind describes a range inside the database being taken. An
+	/// entry naming a database is left to the reuse of that database's own name,
+	/// or to the reclaim task, which addresses the database rather than the
+	/// namespace and so is unaffected by the namespace existing.
+	///
+	/// Every prefix destroyed here is one the catalog says is orphaned, an
+	/// entry's as much as the name's own. An entry that outlives its object's
+	/// return describes bytes that belong to the live object, and a namespace
+	/// entry covers every database in it, so destroying one would take a whole
+	/// live namespace. Such an entry is left in place: the reclaim task makes
+	/// the same check before it acts on one.
+	///
+	/// This destruction shares the caller's transaction, so it is capped at
+	/// [`REUSE_KEY_BUDGET`] keys, read and deleted in pages of
+	/// [`REUSE_BATCH_SIZE`]. The cap belongs to the transaction rather than to
+	/// the call: one statement can reuse several names, and one transaction can
+	/// hold many statements, so each reuse spends what the ones before it left.
+	/// A reuse which would exceed what is left fails with
+	/// [`Error::ReclaimPending`] rather than growing the caller's transaction
+	/// without limit; the name becomes available again as the background reclaim
+	/// task drains the job, which by default starts on the next tick after the
+	/// removal is first observed.
+	///
+	/// Callers must reach this before writing anything into the prefix, which
+	/// is why every path that resolves a namespace or database name does so
+	/// through the catalog before it constructs a data key.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn finish_pending_reclaim(&self, ns: &str, db: Option<&str>) -> Result<(), Error> {
+		// Taken in full for the duration of the call, so that what it spends is
+		// never lost and nothing else can spend the same allowance alongside it
+		let mut budget = self.reuse_budget.swap(0, Ordering::AcqRel);
+		let res = self.finish_pending_reclaim_with(ns, db, &mut budget).await;
+		self.reuse_budget.store(budget, Ordering::Release);
+		res
+	}
+
+	/// [`Self::finish_pending_reclaim`] with this transaction's remaining key
+	/// budget set first, so that a test can reach the cap without writing
+	/// [`REUSE_KEY_BUDGET`] keys.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub(crate) async fn finish_pending_reclaim_within(
+		&self,
+		ns: &str,
+		db: Option<&str>,
+		budget: u64,
+	) -> Result<(), Error> {
+		self.reuse_budget.store(budget, Ordering::Release);
+		self.finish_pending_reclaim(ns, db).await
+	}
+
+	/// The body of [`Self::finish_pending_reclaim`], spending `budget` in place
+	/// so that what a failed reuse destroyed before it gave up is still counted.
+	async fn finish_pending_reclaim_with(
+		&self,
+		ns: &str,
+		db: Option<&str>,
+		budget: &mut u64,
+	) -> Result<(), Error> {
+		use crate::key::root::rc::ReclaimKey;
+		// A job naming the namespace covers every database inside it, so it has
+		// to be finished whichever of the two is being reused
+		let mut ranges = vec![ReclaimKey::namespace_range(ns)?];
+		if let Some(db) = db {
+			ranges.push(ReclaimKey::database_range(ns, db)?);
+		}
+		let mut described = false;
+		for rng in ranges {
+			let jobs = self.keys(rng, REUSE_QUEUE_PAGE_SIZE, None).await?;
+			// A full page may not be all of them, and a job left behind would name a
+			// range inside an object that exists again
+			if jobs.len() >= REUSE_QUEUE_PAGE_SIZE as usize {
+				return Err(Error::ReclaimPending {
+					name: match db {
+						Some(db) => format!("{ns}/{db}"),
+						None => ns.to_owned(),
+					},
+				});
+			}
+			for key in jobs {
+				let job = ReclaimKey::decode_key(&key)?;
+				let data = job.prefix_range()?;
+				let (job_ns, job_db) = job.target();
+				let name = match job_db {
+					Some(db) => format!("{job_ns}/{db}"),
+					None => job_ns.to_owned(),
+				};
+				// The catalog is the authority on whether the entry's prefix is
+				// orphaned, as it is for the reclaim task, which leaves an entry
+				// alone rather than destroying a prefix whose object exists
+				// again. An entry outliving its object's return describes bytes
+				// that belong to the live object, and a namespace entry's prefix
+				// covers every database in it, so destroying one here would take
+				// a whole live namespace. Leaving it costs nothing: the task
+				// makes the same check before it acts.
+				if self.name_is_taken(job_ns, job_db).await? {
+					warn!(
+						target: "surrealdb::core::kvs::tx",
+						"Reclaim entry naming {name}, which exists again, left alone while its name is taken",
+					);
+					continue;
+				}
+				self.destroy_orphaned(data, &name, budget).await?;
+				// Dropping the job in the same transaction as the data it named
+				// keeps the queue from outliving what it describes. Its key holds
+				// a version for every page the reaper committed against it, and
+				// its uid is never reused, so a tombstone would leave that whole
+				// history on disk for good.
+				self.clr(key).await?;
+				// Definitions read out of the destroyed prefix earlier in this
+				// transaction no longer describe anything. Clearing here rather
+				// than once at the end keeps the catalog reads around it from
+				// being answered out of a cache this has just invalidated.
+				self.cache.clear();
+				// An entry destroyed here named a prefix covering the one this
+				// name addresses, so the sweep below has nothing left to do. One
+				// left alone destroyed nothing, so it does not speak for it.
+				described = true;
+			}
+		}
+		// A prefix nothing describes may still hold bytes. A job is retired once
+		// its prefix reads as empty, and a removal writes only the catalog row
+		// and the queue entry, so a transaction holding a snapshot from before
+		// the removal conflicts with neither and may commit into the prefix after
+		// the job is gone. Nothing names such a key afterwards, which leaves this
+		// as the only side that can catch it.
+		//
+		// The catalog decides whether the prefix is orphaned, exactly as it does
+		// for the reclaim task: this is reached from `DEFINE ... OVERWRITE` on an
+		// object that exists, whose data is live and must not be touched.
+		if !described && !self.name_is_taken(ns, db).await? {
+			let name = match db {
+				Some(db) => format!("{ns}/{db}"),
+				None => ns.to_owned(),
+			};
+			if self.destroy_orphaned(ReclaimKey::prefix_range_of(ns, db)?, &name, budget).await? {
+				self.cache.clear();
+			}
+		}
+		Ok(())
+	}
+
+	/// Whether the catalog holds the namespace, or the database when `db` is
+	/// given, that a name addresses.
+	///
+	/// A namespace or database row is the only authority on whether the prefix
+	/// under that name is live or orphaned, because the data is addressed by the
+	/// name rather than by anything the prefix itself carries.
+	async fn name_is_taken(&self, ns: &str, db: Option<&str>) -> Result<bool, Error> {
+		match db {
+			Some(db) => self.db_exists(ns, db).await,
+			None => self.ns_exists(ns).await,
+		}
+	}
+
+	/// Destroys every version of every key under an orphaned prefix, spending
+	/// `budget` in place, and reports whether anything was there to destroy.
+	///
+	/// Names are reused on this line, so a prefix that was only tombstoned would
+	/// be inherited version-for-version by the object about to take its name: a
+	/// versioned read of the new object would return records that belonged to
+	/// the old one. Every version goes, not just the visible one.
+	///
+	/// This shares the caller's transaction, so it spends `budget` and refuses
+	/// with [`Error::ReclaimPending`] rather than growing the write set without
+	/// limit. `name` is the object named in that refusal.
+	async fn destroy_orphaned(
+		&self,
+		data: Range<Key>,
+		name: &str,
+		budget: &mut u64,
+	) -> Result<bool, Error> {
+		// Ask before writing. A prefix with more visible keys than the budget
+		// has more distinct keys than the budget, so the pages below would refuse
+		// after destroying what they were allowed and rolling all of it back.
+		// This path is reached from the implicit creation every write does
+		// outside strict mode, so that would be paid by each of them, and again
+		// by every retry, for as long as the name is held. Only a refusal is
+		// decided here: a prefix that fits may still hold versions a visible scan
+		// does not report, and it is the pages below that count those.
+		let ask = (*budget).saturating_add(1).min(u32::MAX as u64) as u32;
+		if self.keys(data.clone(), ask, None).await?.len() as u64 > *budget {
+			return Err(Error::ReclaimPending {
+				name: name.to_owned(),
+			});
+		}
+		// Destroy the prefix a page at a time, never exceeding what this
+		// transaction is allowed to write
+		let mut destroyed = false;
+		let mut cursor: Option<Key> = None;
+		loop {
+			let limit = (*budget).min(REUSE_BATCH_SIZE as u64) as u32;
+			if limit == 0 {
+				// A page that exactly drains the range spends its whole limit
+				// and so reads as a full one, which would refuse a prefix that
+				// had in fact already been destroyed. The budget is only exceeded
+				// if something is still there. The pages above destroy versions,
+				// so this asks about versions too: a prefix holding only
+				// tombstoned keys looks empty to a visible scan and would be
+				// inherited whole by the object about to take the name.
+				let rest = Self::resume_after(&data, cursor.as_deref());
+				if !self.any_version_in(rest).await? {
+					break;
+				}
+				return Err(Error::ReclaimPending {
+					name: name.to_owned(),
+				});
+			}
+			let (last, count, drained) =
+				self.delp_bounded(data.clone(), cursor.as_deref(), limit, true).await?;
+			*budget = budget.saturating_sub(count);
+			destroyed |= count > 0;
+			if drained {
+				break;
+			}
+			// Resume strictly after the last key this page deleted
+			cursor = last;
+		}
+		Ok(destroyed)
+	}
+
+	/// Whether this transaction has deferred the data of a removed namespace or
+	/// database to the reclaim task.
+	///
+	/// The datastore cache holds database and table definitions under keys that
+	/// carry no version of their own, so nothing invalidates them but a clear.
+	/// Clearing inside the removing transaction is not enough: a query running
+	/// alongside it resolves those definitions from a snapshot taken before the
+	/// removal and puts them back. A caller which commits this transaction must
+	/// therefore clear the cache again afterwards, so that what a removal leaves
+	/// behind is bounded by the removal rather than by the next unrelated clear.
+	pub fn deferred_reclaim(&self) -> bool {
+		self.deferred_reclaim.load(Ordering::Acquire)
 	}
 
 	/// Clears all keys from the transaction cache.
@@ -1769,11 +2424,10 @@ impl Transaction {
 
 	/// Get or add a namespace with a default configuration, only if we are in dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	async fn get_or_add_ns_upwards(
+	pub async fn get_or_add_ns(
 		&self,
 		ns: &str,
 		strict: bool,
-		_upwards: bool,
 	) -> Result<Arc<DefineNamespaceStatement>, Error> {
 		let qey = cache::tx::Lookup::Ns(ns);
 		match self.cache.get(&qey) {
@@ -1792,6 +2446,9 @@ impl Transaction {
 					Err(Error::NsNotFound {
 						..
 					}) if !strict => {
+						// The name is being reused, so anything a pending
+						// reclaim still holds under it must go first
+						self.finish_pending_reclaim(ns, None).await?;
 						let val = DefineNamespaceStatement {
 							name: ns.to_owned().into(),
 							..Default::default()
@@ -1820,13 +2477,24 @@ impl Transaction {
 
 	/// Get or add a database with a default configuration, only if we are in dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	async fn get_or_add_db_upwards(
+	pub async fn get_or_add_db(
 		&self,
 		ns: &str,
 		db: &str,
 		strict: bool,
-		upwards: bool,
 	) -> Result<Arc<DefineDatabaseStatement>, Error> {
+		// A database definition lives inside the namespace prefix, which outlives
+		// the removal of its namespace, so reading one back is not evidence that
+		// the database exists. The namespace is resolved through the catalog
+		// first, which is also what finishes a reclaim still pending for its name
+		// before this transaction writes anything into that prefix — and what
+		// destroys the stale definition below, so the read that follows sees the
+		// namespace as it is now rather than as it was before the removal.
+		//
+		// This is not the caller's choice: a database row is never trusted on
+		// its own. In strict mode it is also what reports an absent namespace as
+		// such rather than as an absent database.
+		self.get_or_add_ns(ns, strict).await?;
 		let qey = cache::tx::Lookup::Db(ns, db);
 		match self.cache.get(&qey) {
 			// The entry is in the cache
@@ -1844,10 +2512,9 @@ impl Transaction {
 					Err(Error::DbNotFound {
 						..
 					}) if !strict => {
-						// First ensure that a namespace exists
-						if upwards {
-							self.get_or_add_ns_upwards(ns, strict, upwards).await?;
-						}
+						// The name is being reused, so anything a pending
+						// reclaim still holds under it must go first
+						self.finish_pending_reclaim(ns, Some(db)).await?;
 						// Next, dynamically define the database
 						let val = DefineDatabaseStatement {
 							name: db.to_owned().into(),
@@ -1860,15 +2527,13 @@ impl Transaction {
 						self.cache.insert(qey, val.clone());
 						val
 					}
-					// Check to see that the hierarchy exists
+					// The namespace is already resolved above, so an absent
+					// database in strict mode is exactly what it says
 					Err(Error::DbNotFound {
 						name,
-					}) if strict => {
-						self.get_ns(ns).await?;
-						Err(Error::DbNotFound {
-							name,
-						})?
-					}
+					}) if strict => Err(Error::DbNotFound {
+						name,
+					})?,
 					// Store the fetched value in the cache
 					Ok(val) => {
 						let val: DefineDatabaseStatement = revision::from_slice(&val)?;
@@ -1886,14 +2551,19 @@ impl Transaction {
 
 	/// Get or add a table with a default configuration, only if we are in dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	async fn get_or_add_tb_upwards(
+	pub async fn get_or_add_tb(
 		&self,
 		ns: &str,
 		db: &str,
 		tb: &str,
 		strict: bool,
-		upwards: bool,
 	) -> Result<Arc<DefineTableStatement>, Error> {
+		// A table definition lives inside the database prefix, which outlives the
+		// removal of its database, so reading one back is not evidence that the
+		// table exists. The database is resolved through the catalog first, which
+		// is also what finishes a reclaim still pending for its name before this
+		// transaction writes anything into that prefix.
+		self.get_or_add_db(ns, db, strict).await?;
 		let qey = cache::tx::Lookup::Tb(ns, db, tb);
 		match self.cache.get(&qey) {
 			// The entry is in the cache
@@ -1911,11 +2581,7 @@ impl Transaction {
 					Err(Error::TbNotFound {
 						..
 					}) if !strict => {
-						// First ensure that a database exists
-						if upwards {
-							self.get_or_add_db_upwards(ns, db, strict, upwards).await?;
-						}
-						// Next, dynamically define the table
+						// Dynamically define the table
 						let val = DefineTableStatement {
 							name: tb.to_owned().into(),
 							permissions: Permissions::none(),

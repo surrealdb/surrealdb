@@ -1842,38 +1842,76 @@ impl IndexCountThingIterator {
 		}
 	}
 
+	/// Folds at most `limit` of an index's count entries into its aggregate,
+	/// in the caller's transaction. Returns whether the range is now drained.
+	///
+	/// The count of an index is the sum of everything under its range, and the
+	/// aggregate is one more entry in it, distinguished by carrying no uid and
+	/// sorting before every delta. A page therefore reads from the start of the
+	/// range every time, folds the aggregate back in along with the deltas after
+	/// it, and replaces the lot with a single entry: the sum is preserved at
+	/// every commit, and the range is shorter by a page.
+	///
+	/// The write set of one call is the page, so a caller can drain a backlog of
+	/// any size without the transaction growing with it. The queue's length
+	/// tracks write traffic against the index rather than anything the catalog
+	/// bounds, so a store that has never compacted meets this with everything it
+	/// has accumulated.
 	pub(in crate::idx) async fn compaction(
 		&mut self,
 		ic: &IndexCompactionKey<'_>,
 		txn: &Transaction,
-	) -> Result<(), Error> {
+		limit: u32,
+	) -> Result<bool, Error> {
 		let Some(range) = self.0.take() else {
-			return Ok(());
+			return Ok(true);
 		};
+		let keys = txn.keys(range, limit, None).await?;
 		let mut count: i64 = 0;
-		let mut loops = 0;
-		let mut current_range = Some(range.clone());
-		while let Some(r) = current_range {
-			let batch = txn.batch_keys(r, *COUNT_BATCH_SIZE, None).await?;
-			for key in batch.result.iter() {
-				loops += 1;
-				if loops % 1000 == 0 {
-					yield_now!()
-				}
-				let iu = IndexCountKey::decode_key(key)?;
-				if iu.pos {
-					count += iu.count as i64;
-				} else {
-					count -= iu.count as i64;
-				}
+		let mut deltas = 0;
+		for (loops, key) in keys.iter().enumerate() {
+			if loops % 1000 == 0 {
+				yield_now!()
 			}
-			current_range = batch.next;
+			let iu = IndexCountKey::decode_key(key)?;
+			if iu.uid.is_some() {
+				deltas += 1;
+			}
+			if iu.pos {
+				count += iu.count as i64;
+			} else {
+				count -= iu.count as i64;
+			}
 		}
-		txn.delr(range).await?;
+		// Nothing but the aggregate itself, which is already what it should be
+		if deltas == 0 {
+			return Ok(true);
+		}
 		let pos = count.is_positive();
 		let count = count.unsigned_abs();
 		let compact_key = IndexCountKey::new(&ic.ns, &ic.db, &ic.tb, &ic.ix, None, pos, count);
-		txn.put(&compact_key, vec![], None).await?;
-		Ok(())
+		let compact = compact_key.encode()?;
+		// Both the total and the uid are part of a count entry's key, so nothing
+		// this page holds is ever written over: a delta carries a uid of its
+		// own, and an aggregate carrying a different total is a different key.
+		// A tombstone would therefore leave every entry the index has ever
+		// accumulated on disk for good on a backend that retains versions,
+		// which is the growth this fold is for.
+		//
+		// The exception is a page whose deltas cancel out, which arrives at the
+		// total the aggregate already holds: that key is left alone rather than
+		// destroyed and written again.
+		let mut aggregate_holds = false;
+		for key in keys.iter() {
+			if key == &compact {
+				aggregate_holds = true;
+				continue;
+			}
+			txn.clr(key.clone()).await?;
+		}
+		if !aggregate_holds {
+			txn.put(&compact_key, vec![], None).await?;
+		}
+		Ok((keys.len() as u32) < limit)
 	}
 }

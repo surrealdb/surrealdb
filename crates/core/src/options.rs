@@ -19,6 +19,22 @@ pub struct EngineOptions {
 	///
 	/// Default: 5 seconds
 	pub index_compaction_interval: Duration,
+	/// Interval at which the reclaim task drains the reclaim queue
+	///
+	/// `REMOVE NAMESPACE` and `REMOVE DATABASE` delete only the catalog
+	/// definition and enqueue a job naming the orphaned data prefix. The
+	/// reclaim task wakes at this interval to destroy those prefixes in
+	/// bounded, resumable batches, spending a fixed key budget each time, so
+	/// raising the interval slows reclaim down and lowering it speeds reclaim
+	/// up.
+	///
+	/// Reclaim has no disabled state: it is what completes a removal, so a
+	/// queue nothing drains leaves the data of every removed object on disk and
+	/// holds its name against reuse. A zero interval falls back to the default
+	/// rate rather than stopping the task.
+	///
+	/// Default: 60 seconds
+	pub reclaim_interval: Duration,
 }
 
 impl Default for EngineOptions {
@@ -29,6 +45,7 @@ impl Default for EngineOptions {
 			node_membership_cleanup_interval: Duration::from_secs(300),
 			changefeed_gc_interval: Duration::from_secs(10),
 			index_compaction_interval: Duration::from_secs(5),
+			reclaim_interval: Duration::from_secs(60),
 		}
 	}
 }
@@ -53,6 +70,11 @@ impl EngineOptions {
 
 	pub fn with_index_compaction_interval(mut self, interval: Duration) -> Self {
 		self.index_compaction_interval = interval;
+		self
+	}
+
+	pub fn with_reclaim_interval(mut self, interval: Duration) -> Self {
+		self.reclaim_interval = interval;
 		self
 	}
 }

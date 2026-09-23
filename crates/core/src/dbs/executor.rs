@@ -113,6 +113,26 @@ impl Executor {
 
 	/// Executes a statement which needs a transaction with the supplied transaction.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	/// Drops the datastore cache once a transaction that deferred a reclaim has
+	/// committed.
+	///
+	/// The datastore cache holds database and table definitions under keys that
+	/// carry no version of their own, so nothing invalidates them but a clear. A
+	/// removal clears the cache as it runs, but a query running alongside it
+	/// resolves those definitions from a snapshot taken before the removal and
+	/// puts them back; every write that then hits such an entry resolves its
+	/// database without reaching the catalog, and lands in a prefix the reclaim
+	/// task is about to destroy. Clearing again here bounds that to the window
+	/// between a concurrent resolve and its own insert.
+	fn clear_cache_after_deferral(&self, txn: &Transaction) {
+		if !txn.deferred_reclaim() {
+			return;
+		}
+		if let Some(cache) = self.ctx.get_cache() {
+			cache.clear();
+		}
+	}
+
 	async fn execute_transaction_statement(
 		&mut self,
 		txn: Arc<Transaction>,
@@ -241,6 +261,8 @@ impl Executor {
 								message: e.to_string(),
 							});
 						}
+						drop(lock);
+						self.clear_cache_after_deferral(&txn);
 
 						// flush notifications.
 						if let Some(recv) = receiver {
@@ -427,6 +449,8 @@ impl Executor {
 						e
 					} else {
 						// Successfully commited. everything is fine.
+						drop(lock);
+						self.clear_cache_after_deferral(&txn);
 
 						// flush notifications.
 						if let Some(recv) = receiver {

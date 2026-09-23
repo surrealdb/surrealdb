@@ -2,7 +2,7 @@
 
 mod bytes_hack;
 
-use std::{collections::BTreeMap, fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, str::FromStr, time::Duration};
 
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
@@ -94,6 +94,8 @@ pub struct TestEnv {
 	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
+const DEFAULT_TIMEOUT_MS: u64 = 10_000;
+
 impl TestEnv {
 	/// Returns the namespace if the environement specifies one, none otherwise
 	///
@@ -117,8 +119,29 @@ impl TestEnv {
 		}
 	}
 
+	/// The per-query budget, in milliseconds, for a test that does not set one.
+	///
+	/// This is here to stop a runaway query hanging the suite, not to assert how
+	/// fast anything is. A test which does make a claim about speed states its
+	/// own budget, so the default only has to be short enough to catch a query
+	/// that will never finish and long enough that a loaded machine running the
+	/// suite in parallel does not fail a test for the machine's reasons.
 	pub fn timeout(&self) -> Option<u64> {
-		self.timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
+		self.timeout.map(|x| x.into_value(DEFAULT_TIMEOUT_MS)).unwrap_or(Some(DEFAULT_TIMEOUT_MS))
+	}
+
+	/// The per-query budget for a test, whether or not it declares an `[env]`.
+	///
+	/// A file with no `[env]` block deserialises to no environment at all, so
+	/// the budget has to be decided here rather than by [`Self::timeout`]:
+	/// reading it off the environment alone would make the budget depend on
+	/// whether the file happens to carry an unrelated key such as `sequential`.
+	/// A test which explicitly disables its timeout gets none.
+	pub fn query_timeout(env: Option<&Self>) -> Duration {
+		match env {
+			Some(env) => env.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX),
+			None => Duration::from_millis(DEFAULT_TIMEOUT_MS),
+		}
 	}
 
 	pub fn unused_keys(&self) -> Vec<String> {
@@ -439,5 +462,48 @@ impl<T: fmt::Display> Serialize for SchemaTarget<T> {
 impl Capabilities {
 	pub fn unused_keys(&self) -> Vec<String> {
 		self._unused_keys.keys().map(|x| format!("env.capabilities.{x}")).collect()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{TestConfig, TestEnv, DEFAULT_TIMEOUT_MS};
+	use std::time::Duration;
+
+	fn config(source: &str) -> TestConfig {
+		toml::from_str(source).unwrap()
+	}
+
+	/// The budget a test gets must not depend on whether it declares an `[env]`.
+	///
+	/// A file with no block at all deserialises to no environment, and a file
+	/// carrying an unrelated key deserialises to one that sets no timeout. Both
+	/// are asking for the default, so both have to receive it.
+	#[test]
+	fn the_default_budget_does_not_depend_on_an_env_block() {
+		let default = Duration::from_millis(DEFAULT_TIMEOUT_MS);
+		let none = config("");
+		assert!(none.env.is_none(), "a file with no block still deserialised an environment");
+		assert_eq!(TestEnv::query_timeout(none.env.as_ref()), default);
+		let unrelated = config("[env]\nsequential = true\n");
+		assert!(unrelated.env.is_some(), "a file with a block deserialised no environment");
+		assert_eq!(TestEnv::query_timeout(unrelated.env.as_ref()), default);
+	}
+
+	/// A test that states a budget keeps it, and one that disables it gets none.
+	#[test]
+	fn a_stated_budget_is_used_as_given() {
+		let stated = config("[env]\ntimeout = 4000\n");
+		assert_eq!(
+			TestEnv::query_timeout(stated.env.as_ref()),
+			Duration::from_millis(4_000),
+			"a stated budget was overridden by the default"
+		);
+		let disabled = config("[env]\ntimeout = false\n");
+		assert_eq!(
+			TestEnv::query_timeout(disabled.env.as_ref()),
+			Duration::MAX,
+			"a test which disabled its timeout was given one"
+		);
 	}
 }

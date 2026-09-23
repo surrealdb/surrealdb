@@ -158,11 +158,16 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
+	/// Folds at most `limit` of a count index's entries into its aggregate, in
+	/// the caller's transaction. Returns whether the range is now drained.
 	pub(crate) async fn index_count_compaction(
 		ic: &IndexCompactionKey<'_>,
 		tx: &Transaction,
-	) -> Result<(), Error> {
-		IndexCountThingIterator::new(&ic.ns, &ic.db, &ic.tb, &ic.ix)?.compaction(ic, tx).await
+		limit: u32,
+	) -> Result<bool, Error> {
+		IndexCountThingIterator::new(&ic.ns, &ic.db, &ic.tb, &ic.ix)?
+			.compaction(ic, tx, limit)
+			.await
 	}
 
 	/// Construct a consistent uniqueness violation error message.

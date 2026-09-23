@@ -134,6 +134,9 @@ pub(crate) async fn run_router(
 	if let Some(interval) = address.config.changefeed_gc_interval {
 		opt.changefeed_gc_interval = interval;
 	}
+	if let Some(interval) = address.config.reclaim_interval {
+		opt.reclaim_interval = interval;
+	}
 	let tasks = tasks::init(kvs.clone(), canceller.clone(), &opt);
 
 	let mut notifications = kvs.notifications().map(Box::pin);

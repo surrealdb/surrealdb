@@ -21,6 +21,7 @@ macro_rules! include_tests {
 	};
 }
 
+mod changefeed_gc;
 #[cfg(feature = "kv-rocksdb")]
 mod metrics;
 mod multireader;
@@ -30,6 +31,7 @@ mod multiwriter_same_keys_conflict;
 mod raw;
 #[cfg(feature = "kv-rocksdb")]
 mod read_and_deletion_only;
+mod reclaim;
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 mod reverse_iterator;
 mod snapshot;
@@ -82,7 +84,7 @@ mod mem {
 		(ds, Kvs::Mem)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds => raw,reclaim,changefeed_gc,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -103,7 +105,7 @@ mod rocksdb {
 		(ds, Kvs::Rocksdb)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator, read_and_deletion_only, metrics);
+	include_tests!(new_ds => raw,reclaim,changefeed_gc,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator, read_and_deletion_only, metrics);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -124,7 +126,7 @@ mod surrealkv {
 		(ds, Kvs::SurrealKV)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds => raw,reclaim,changefeed_gc,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -146,7 +148,7 @@ mod tikv {
 		(ds, Kvs::Tikv)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp,reverse_iterator);
+	include_tests!(new_ds => raw,reclaim,changefeed_gc,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp,reverse_iterator);
 }
 
 #[cfg(feature = "kv-fdb")]
@@ -168,5 +170,5 @@ mod fdb {
 		(ds, Kvs::Fdb)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp);
+	include_tests!(new_ds => raw,reclaim,changefeed_gc,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp);
 }

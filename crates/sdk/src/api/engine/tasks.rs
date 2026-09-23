@@ -48,7 +48,8 @@ pub fn init(dbs: Arc<Datastore>, canceller: CancellationToken, opts: &EngineOpti
 	let task3 = spawn_task_node_membership_cleanup(dbs.clone(), canceller.clone(), opts);
 	let task4 = spawn_task_changefeed_cleanup(dbs.clone(), canceller.clone(), opts);
 	let task5 = spawn_task_index_compaction(dbs.clone(), canceller.clone(), opts);
-	Tasks(vec![task1, task2, task3, task4, task5])
+	let task6 = spawn_task_reclaim(dbs.clone(), canceller.clone(), opts);
+	Tasks(vec![task1, task2, task3, task4, task5, task6])
 }
 
 fn spawn_task_node_membership_refresh(
@@ -165,8 +166,19 @@ fn spawn_task_changefeed_cleanup(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.changefeed_process().await {
-						error!("Error running changefeed garbage collection: {e}");
+					// A pass collects every range the catalog plans, each
+					// bounded by its own key budget, so a shutdown drops it
+					// where it stands rather than waiting for the plan to
+					// finish. Every page commits on its own, and the tick
+					// after resumes from the start of what is left.
+					tokio::select! {
+						biased;
+						_ = canceller.cancelled() => break,
+						res = dbs.changefeed_process() => {
+							if let Err(e) = res {
+								error!("Error running changefeed garbage collection: {e}");
+							}
+						}
 					}
 				}
 			}
@@ -214,13 +226,98 @@ fn spawn_task_index_compaction(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.index_compaction(interval).await {
-						error!("Error running index compaction: {e}");
+					// The queue entries a pass reads are bounded, but each
+					// index the pass meets folds a drain of its own, so a
+					// shutdown drops the pass where it stands. Each page of a
+					// fold commits before the queue entries that asked for it
+					// are dropped, so nothing is lost by stopping between two.
+					tokio::select! {
+						biased;
+						_ = canceller.cancelled() => break,
+						res = dbs.index_compaction(interval) => {
+							if let Err(e) = res {
+								error!("Error running index compaction: {e}");
+							}
+						}
 					}
 				}
 			}
 		}
 		trace!("Background task exited: Running index compaction");
+	}))
+}
+
+/// Spawns a background task which reclaims the data of removed namespaces and databases
+///
+/// `REMOVE NAMESPACE` and `REMOVE DATABASE` delete only the catalog definition
+/// and enqueue a job naming the orphaned data prefix. This task drains that
+/// queue, destroying each prefix in bounded, resumable batches, so that the
+/// cost of a removal is independent of how much data the removed object held.
+///
+/// The task runs at the interval specified by `opts.reclaim_interval`. A job is
+/// stamped on the pass that first meets it and destroyed by a later one, so no
+/// prefix is destroyed by the pass that first sees the removal that orphaned it.
+///
+/// Reclaim has no disabled state: it is what completes a removal, so a queue
+/// nothing drains leaves the data of every removed object on disk and holds its
+/// name against reuse. A zero interval, which would also panic the interval
+/// timer, falls back to the default rate.
+///
+/// A cancellation abandons a pass in progress rather than waiting for it. Every
+/// page of a pass commits on its own, together with the cursor that accounts for
+/// it, so the next start resumes from the last durable key instead of repeating
+/// the prefix.
+///
+/// # Arguments
+///
+/// * `dbs` - The datastore instance
+/// * `canceller` - Token used to cancel the task when the engine is shutting down
+/// * `opts` - Engine options containing the reclaim interval
+fn spawn_task_reclaim(
+	dbs: Arc<Datastore>,
+	canceller: CancellationToken,
+	opts: &EngineOptions,
+) -> Task {
+	// Get the delay interval from the config
+	let interval = match opts.reclaim_interval.is_zero() {
+		true => EngineOptions::default().reclaim_interval,
+		false => opts.reclaim_interval,
+	};
+	// Spawn a future
+	Box::pin(spawn(async move {
+		// Log the interval frequency
+		trace!("Running data reclaim every {interval:?}");
+		// Create a new time-based interval ticket
+		let mut ticker = interval_ticker(interval).await;
+		// Loop continuously until the task is cancelled
+		loop {
+			tokio::select! {
+				biased;
+				// Check if this has shutdown
+				_ = canceller.cancelled() => break,
+				// Receive a notification on the channel
+				Some(_) = ticker.next() => {
+					// A pass is bounded by a key budget rather than by the clock,
+					// but a large backlog still makes it the longest-running of
+					// these tasks, so a shutdown drops it where it stands
+					tokio::select! {
+						biased;
+						_ = canceller.cancelled() => break,
+						res = dbs.reclaim_tombstones(interval) => match res {
+							Ok((visited, errors)) if errors > 0 => {
+								error!("Data reclaim visited {visited} queue entries, {errors} of which failed");
+							}
+							Ok((visited, _)) if visited > 0 => {
+								trace!("Data reclaim visited {visited} queue entries");
+							}
+							Ok(_) => {}
+							Err(e) => error!("Error running data reclaim: {e}"),
+						},
+					}
+				}
+			}
+		}
+		trace!("Background task exited: Running data reclaim");
 	}))
 }
 
@@ -269,5 +366,17 @@ mod test {
 			.unwrap()
 			.map_err(|e| format!("Resolution failed: {e}"))
 			.unwrap();
+	}
+
+	#[test_log::test(tokio::test)]
+	pub async fn tasks_complete_with_a_zero_reclaim_interval() {
+		// A zero reclaim interval falls back to the default rate, rather than
+		// reaching the interval timer, which panics on a zero period
+		let can = CancellationToken::new();
+		let opt = EngineOptions::default().with_reclaim_interval(Duration::ZERO);
+		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
+		let tasks = tasks::init(dbs.clone(), can.clone(), &opt);
+		can.cancel();
+		tasks.resolve().await.unwrap();
 	}
 }

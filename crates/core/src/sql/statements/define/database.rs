@@ -51,6 +51,9 @@ impl DefineDatabaseStatement {
 		// Process the statement
 		let key = crate::key::namespace::db::new(ns, &self.name);
 		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
+		// The name is being reused, so anything a pending reclaim still holds
+		// under it must go first
+		txn.finish_pending_reclaim(ns, Some(&self.name)).await?;
 		txn.set(
 			key,
 			revision::to_vec(&DefineDatabaseStatement {

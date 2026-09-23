@@ -57,6 +57,12 @@ impl ShowStatement {
 		let txn = ctx.tx();
 		// Process the show query
 		let (ns, db) = opt.ns_db()?;
+		// Changefeed entries live inside the database prefix, which outlives the
+		// removal of its database, so a database the catalog no longer holds has
+		// no changes to show
+		if !txn.db_exists(ns, db).await? {
+			return Ok(Value::from(Vec::<Value>::new()));
+		}
 		let r = crate::cf::read(
 			&txn,
 			ns,
