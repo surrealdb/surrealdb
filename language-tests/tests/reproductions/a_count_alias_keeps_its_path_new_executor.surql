@@ -51,7 +51,7 @@ value = '''
 [[test.results]]
 value = '''
 'Aggregate [ctx: Db] [mode: GROUP ALL]
-    IndexScan [ctx: Db] [index: t_k, access: = 1, direction: Forward]
+    IndexScan [ctx: Db] [index: t_k, access: = 1, direction: Forward, predicate: k = 1]
 ''''
 */
 

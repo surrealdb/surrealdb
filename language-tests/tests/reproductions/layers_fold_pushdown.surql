@@ -40,7 +40,7 @@ value = '''
 "SelectProject [ctx: Db] [projections: id, dbl]
     Filter [ctx: Db] [predicate: dbl > 2]
         ProjectLayer [ctx: Db] [columns: dbl = <computed> : int @computed]
-            IndexScan [ctx: Db] [index: idx_cat, access: = 'a', direction: Forward]
+            IndexScan [ctx: Db] [index: idx_cat, access: = 'a', direction: Forward, predicate: cat = 'a']
 "'''
 
 [[test.results]]

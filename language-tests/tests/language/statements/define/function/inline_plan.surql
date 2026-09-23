@@ -58,7 +58,7 @@ value = '''
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_n, access: = 5, direction: Forward]
+    IndexScan [ctx: Db] [index: idx_n, access: = 5, direction: Forward, predicate: n = 5]
 ''''
 
 [[test.results]]

@@ -21,13 +21,13 @@ value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: secret = 'S3CRET_TOKEN_VALUE']
         ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
-            IndexScan [ctx: Db] [index: idx_category, access: = 'a', direction: Forward]
+            IndexScan [ctx: Db] [index: idx_category, access: = 'a', direction: Forward, predicate: category = 'a']
 "'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_category, access: = 'a', direction: Forward]
+    IndexScan [ctx: Db] [index: idx_category, access: = 'a', direction: Forward, predicate: category = 'a']
 "'''
 
 */

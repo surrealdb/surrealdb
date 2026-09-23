@@ -36,7 +36,7 @@ value = "[{ name: 'Education Org' }, { name: 'Green Edu' }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name]
-    IndexScan [ctx: Db] [index: org_topics, access: = 'climate', direction: Forward]
+    IndexScan [ctx: Db] [index: org_topics, access: = 'climate', direction: Forward, predicate: mission_topic_tags CONTAINS 'climate']
 "'''
 */
 

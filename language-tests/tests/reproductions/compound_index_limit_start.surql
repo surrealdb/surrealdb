@@ -9,16 +9,18 @@ reason = "Compound index scan with LIMIT/START must return the correct number of
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_cat_score, access: [1] MoreThan 20, direction: Forward, limit: 2]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: idx_cat_score, access: [1] MoreThan 20, direction: Forward, limit: 2, predicate: category = 1 AND score > 20]
 ''''
 
 [[test.results]]
 value = "[{ category: 1, id: item:3, score: 30 }, { category: 1, id: item:4, score: 40 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_cat_score, access: [1], direction: Forward, limit: 2, offset: 1]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: idx_cat_score, access: [1], direction: Forward, limit: 2, offset: 1, predicate: category = 1]
 ''''
 
 [[test.results]]
@@ -31,8 +33,9 @@ value = "[{ category: 1, id: item:4, score: 40 }, { category: 1, id: item:5, sco
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_cat_score, access: [1] MoreThan 20, direction: Forward, limit: 2, offset: 1]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: idx_cat_score, access: [1] MoreThan 20, direction: Forward, limit: 2, offset: 1, predicate: category = 1 AND score > 20]
 ''''
 
 [[test.results]]

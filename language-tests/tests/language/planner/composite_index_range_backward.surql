@@ -12,8 +12,9 @@ value = "NONE"
 value = "[{ age: 70, city: 'london', id: record:3 }, { age: 55, city: 'london', id: record:2 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *] {rows: 2}
-    IndexScan [ctx: Db] [index: idx_city_age, access: ['london'] MoreThan 50, direction: Backward] {rows: 2}
+value = '''
+"SelectProject [ctx: Db] [projections: *] {rows: 2}
+    IndexScan [ctx: Db] [index: idx_city_age, access: ['london'] MoreThan 50, direction: Backward, predicate: city = 'london' AND age > 50] {rows: 2}
 
 Total rows: 2"'''
 
@@ -21,8 +22,9 @@ Total rows: 2"'''
 value = "[{ age: 70, city: 'london', id: record:3 }, { age: 55, city: 'london', id: record:2 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *] {rows: 2}
-    IndexScan [ctx: Db] [index: idx_city_age, access: ['london'] MoreThanEqual 55, direction: Backward] {rows: 2}
+value = '''
+"SelectProject [ctx: Db] [projections: *] {rows: 2}
+    IndexScan [ctx: Db] [index: idx_city_age, access: ['london'] MoreThanEqual 55, direction: Backward, predicate: city = 'london' AND age >= 55] {rows: 2}
 
 Total rows: 2"'''
 
@@ -30,8 +32,9 @@ Total rows: 2"'''
 value = "[{ age: 40, city: 'paris', id: record:5 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: idx_city_age, access: ['paris'] LessThan 50, direction: Backward] {rows: 1}
+value = '''
+"SelectProject [ctx: Db] [projections: *] {rows: 1}
+    IndexScan [ctx: Db] [index: idx_city_age, access: ['paris'] LessThan 50, direction: Backward, predicate: city = 'paris' AND age < 50] {rows: 1}
 
 Total rows: 1"'''
 
@@ -39,8 +42,9 @@ Total rows: 1"'''
 value = "[{ age: 60, city: 'paris', id: record:4 }, { age: 40, city: 'paris', id: record:5 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *] {rows: 2}
-    IndexScan [ctx: Db] [index: idx_city_age, access: ['paris'] LessThanEqual 60, direction: Backward] {rows: 2}
+value = '''
+"SelectProject [ctx: Db] [projections: *] {rows: 2}
+    IndexScan [ctx: Db] [index: idx_city_age, access: ['paris'] LessThanEqual 60, direction: Backward, predicate: city = 'paris' AND age <= 60] {rows: 2}
 
 Total rows: 2"'''
 
@@ -48,8 +52,9 @@ Total rows: 2"'''
 value = "[{ age: 70, city: 'london', id: record:3 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: idx_city_age, access: ['london'] MoreThan 50, direction: Backward, limit: 1] {rows: 1}
+value = '''
+"SelectProject [ctx: Db] [projections: *] {rows: 1}
+    IndexScan [ctx: Db] [index: idx_city_age, access: ['london'] MoreThan 50, direction: Backward, limit: 1, predicate: city = 'london' AND age > 50] {rows: 1}
 
 Total rows: 1"'''
 
@@ -57,8 +62,9 @@ Total rows: 1"'''
 value = "[{ age: 60, city: 'paris', id: record:4 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: idx_city_age, access: ['paris'] LessThanEqual 60, direction: Backward, limit: 1] {rows: 1}
+value = '''
+"SelectProject [ctx: Db] [projections: *] {rows: 1}
+    IndexScan [ctx: Db] [index: idx_city_age, access: ['paris'] LessThanEqual 60, direction: Backward, limit: 1, predicate: city = 'paris' AND age <= 60] {rows: 1}
 
 Total rows: 1"'''
 */

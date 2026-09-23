@@ -251,6 +251,33 @@ pub(crate) fn try_literal_to_value(expr: &LogicalExpr) -> Option<Value> {
 	match expr {
 		LogicalExpr::Literal(lit) => Some(leaf_literal_to_value(lit)),
 		LogicalExpr::Table(table) => Some(Value::Table(table.clone())),
+		// A range written between two literals is itself a literal: the
+		// operator says which end is open, and both operands must fold for
+		// the range to have a value at all.
+		LogicalExpr::Binary {
+			left,
+			op:
+				op @ (BinaryOperator::Range
+				| BinaryOperator::RangeInclusive
+				| BinaryOperator::RangeSkip
+				| BinaryOperator::RangeSkipInclusive),
+			right,
+		} => {
+			let start = try_literal_to_value(left)?;
+			let end = try_literal_to_value(right)?;
+			let start = match op {
+				BinaryOperator::Range | BinaryOperator::RangeInclusive => Bound::Included(start),
+				_ => Bound::Excluded(start),
+			};
+			let end = match op {
+				BinaryOperator::Range | BinaryOperator::RangeSkip => Bound::Excluded(end),
+				_ => Bound::Included(end),
+			};
+			Some(Value::Range(Box::new(Range {
+				start,
+				end,
+			})))
+		}
 		LogicalExpr::Array(items) => {
 			let values: Option<Vec<Value>> = items.iter().map(try_literal_to_value).collect();
 			values.map(|v| Value::Array(crate::val::Array(v)))

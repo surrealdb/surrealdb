@@ -23,7 +23,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_owner, access: = NONE, direction: Forward]
+    IndexScan [ctx: Db] [index: idx_owner, access: = NONE, direction: Forward, predicate: owner = NONE]
 ''''
 
 [[test.results]]

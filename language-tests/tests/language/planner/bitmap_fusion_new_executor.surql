@@ -147,22 +147,22 @@ value = '''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: category = 'ml']
-        IndexScan [ctx: Db] [index: idx_published, access: = true, direction: Forward]
+    Filter [ctx: Db] [predicate: published = true]
+        IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Limit [ctx: Db] [limit: 1]
-        Filter [ctx: Db] [predicate: category = 'ml']
-            IndexScan [ctx: Db] [index: idx_published, access: = true, direction: Forward]
+        Filter [ctx: Db] [predicate: published = true]
+            IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]
+    IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward, predicate: category = 'ml']
 "'''
 
 [[test.results]]

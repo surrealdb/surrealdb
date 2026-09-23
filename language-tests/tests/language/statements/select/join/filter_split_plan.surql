@@ -44,7 +44,7 @@ value = "NONE"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     LookupJoin [ctx: Db] [type: Semi, alias: _join0, table: team, on: team = _join0.id]
-        IndexScan [ctx: Db] [index: person_name, access: = 'p1', direction: Forward]
+        IndexScan [ctx: Db] [index: person_name, access: = 'p1', direction: Forward, predicate: name = 'p1']
         Filter [ctx: Db] [predicate: active = true]
             RecordBatchFetch [ctx: Db] [table: team]
 "'''

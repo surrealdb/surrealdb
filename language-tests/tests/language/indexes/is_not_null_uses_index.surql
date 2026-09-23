@@ -31,7 +31,7 @@ value = "[{ id: t:b }, { id: t:c }, { id: t:d }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_score, access: >NONE, direction: Forward]
+    IndexScan [ctx: Db] [index: idx_score, access: >NONE, direction: Forward, predicate: score != NONE]
 ''''
 
 [[test.results]]

@@ -9,7 +9,8 @@ reason = "Large START offsets must correctly skip rows in table and index scans"
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: item, direction: Forward, limit: 3, offset: 7]
 ''''
 
@@ -23,8 +24,9 @@ value = "[{ id: item:10, score: 100 }]"
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_score, access: >0, direction: Forward, limit: 2, offset: 5]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: idx_score, access: >0, direction: Forward, limit: 2, offset: 5, predicate: score > 0]
 ''''
 
 [[test.results]]

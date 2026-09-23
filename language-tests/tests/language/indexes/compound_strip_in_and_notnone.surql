@@ -28,7 +28,7 @@ value = "[{ id: t:r1 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_ab, access: [1, 10], direction: Forward]
+    IndexScan [ctx: Db] [index: idx_ab, access: [1, 10], direction: Forward, predicate: a INSIDE [1] AND b = 10]
 ''''
 
 [[test.results]]
@@ -37,7 +37,7 @@ value = "[{ id: t:r1 }, { id: t:r2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_ab, access: [1] MoreThan NONE, direction: Forward]
+    IndexScan [ctx: Db] [index: idx_ab, access: [1] MoreThan NONE, direction: Forward, predicate: a = 1 AND b != NONE]
 ''''
 */
 DEFINE TABLE t;

@@ -43,7 +43,7 @@ value = '''
 'ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: total = 4]
         ProjectLayer [ctx: Db] [columns: total = price * 2 : int @computed]
-            IndexScan [ctx: Db] [index: idx_price, access: = 2, direction: Forward]
+            IndexScan [ctx: Db] [index: idx_price, access: = 2, direction: Forward, predicate: price = 2]
 ''''
 
 [[test.results]]

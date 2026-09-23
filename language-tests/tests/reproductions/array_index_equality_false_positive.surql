@@ -30,7 +30,7 @@ value = "[{ id: doc:scalar, tags: 'public' }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id, tags]
-    IndexScan [ctx: Db] [index: idx_tags, access: = 'public', direction: Forward]
+    IndexScan [ctx: Db] [index: idx_tags, access: = 'public', direction: Forward, predicate: tags = 'public']
 "'''
 */
 

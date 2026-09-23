@@ -15,13 +15,15 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_ts, access: = d'2025-01-05T00:00:00Z', direction: Forward]
+value = '''
+"SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: idx_ts, access: = d'2025-01-05T00:00:00Z', direction: Forward, predicate: ts = d'2025-01-05T00:00:00Z']
 "'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_ts, access: = d'2025-01-05T00:00:00Z', direction: Forward]
+value = '''
+"SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: idx_ts, access: = d'2025-01-05T00:00:00Z', direction: Forward, predicate: ts = d'2025-01-05T00:00:00Z']
 "'''
 
 [[test.results]]

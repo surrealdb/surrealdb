@@ -44,7 +44,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_owner, access: = person:alice, direction: Forward]
+    IndexScan [ctx: Db] [index: idx_owner, access: = person:alice, direction: Forward, predicate: owner = person:alice]
 ''''
 
 [[test.results]]
@@ -56,7 +56,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_tier, access: = 'gold', direction: Forward]
+    IndexScan [ctx: Db] [index: idx_tier, access: = 'gold', direction: Forward, predicate: tier = 'gold']
 "'''
 
 [[test.results]]
@@ -65,7 +65,7 @@ value = "[{ id: ticket:t1 }, { id: ticket:t3 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_org_label, access: = 'ACME', direction: Forward]
+    IndexScan [ctx: Db] [index: idx_org_label, access: = 'ACME', direction: Forward, predicate: orgLabel = 'ACME']
 "'''
 
 [[test.results]]
@@ -77,7 +77,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_region, access: = 'eu', direction: Forward]
+    IndexScan [ctx: Db] [index: idx_region, access: = 'eu', direction: Forward, predicate: region = 'eu']
 "'''
 
 [[test.results]]

@@ -52,7 +52,7 @@ value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
+    IndexScan [ctx: Db] [index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward, predicate: scanDefinition = scan_definition:a AND createdAt <= d'2026-01-11T00:00:00Z']
 "'''
 
 [[test.results]]
