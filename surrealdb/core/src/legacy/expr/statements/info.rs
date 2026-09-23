@@ -16,7 +16,9 @@ use crate::exe::FlowResultExt;
 use crate::expr::Base;
 use crate::expr::statements::info::{InfoStatement, InfoStructure, process};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::Transaction;
 use crate::kvs::index::index_building_info;
+use crate::kvs::sequences::next_unissued_value;
 use crate::legacy::expr_to_ident;
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, TableName, Value};
@@ -187,7 +189,7 @@ pub(crate) async fn info_statement_compute(
 					"tables" => process(&txn.all_tb(ns, db, version).await?),
 					"users" => process(&txn.all_db_users(ns, db, version).await?),
 					"configs" => process(&txn.all_db_configs(ns, db, version).await?),
-					"sequences" => process(&txn.all_db_sequences(ns, db, version).await?),
+					"sequences" => process_sequences(&txn, ns, db, txn.all_db_sequences(ns, db, version).await?, version).await?,
 				};
 				Value::Object(Object::from(object))
 			} else {
@@ -472,6 +474,39 @@ pub(crate) async fn get_module_exports(
 			Some(surrealism_exports_manifest_to_value(runtime.exports()))
 		}
 	}
+}
+
+/// Renders sequences for `INFO FOR DB STRUCTURE`, each carrying the value an
+/// allocator would resume from alongside its definition.
+///
+/// `resume` is the lowest value no node has issued: the bound an export writes
+/// as `START`, and where a sequence rebuilt from scratch continues. It is not
+/// necessarily what the next `sequence::nextval` returns — a node still holding
+/// a window it claimed earlier serves from that window, below this bound — so
+/// it answers "what is safe to restart from", which is what repositioning a
+/// sequence needs, rather than "what comes next".
+///
+/// The cursors are read at `version`, the same version the definitions were
+/// read at, so a historical `INFO` reports the bound as it stood then.
+pub(crate) async fn process_sequences(
+	tx: &Transaction,
+	ns: crate::catalog::NamespaceId,
+	db: crate::catalog::DatabaseId,
+	sequences: Arc<[crate::catalog::SequenceDefinition]>,
+	version: Option<u64>,
+) -> Result<Value> {
+	let mut values = Vec::with_capacity(sequences.len());
+	for sq in sequences.iter() {
+		let resume = next_unissued_value(tx, ns, db, sq.name.as_str(), sq.start, version).await?;
+		let mut val = sq.clone().structure();
+		if let Value::Object(ref mut obj) = val {
+			// Rendered like `start` and `batch` beside it, which `structure()`
+			// already stringifies.
+			obj.insert("resume", Value::from(resume).structure());
+		}
+		values.push(val);
+	}
+	Ok(Value::Array(values.into()))
 }
 
 /// Process module definitions into structured Values, enriching each with

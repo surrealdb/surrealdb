@@ -59,6 +59,15 @@ pub fn storage_error(err: &anyhow::Error) -> Option<&surrealdb_kvs::Error> {
 	err.chain().find_map(|e| e.downcast_ref::<surrealdb_kvs::Error>())
 }
 
+/// Whether a failure is a conditional write reporting that the value it
+/// required was not there.
+///
+/// Raised by the compare operations themselves — `putc`, `delc`, `clrc` — so it
+/// arrives from the call that performed the write, never from the commit.
+pub fn is_condition_not_met(err: &anyhow::Error) -> bool {
+	matches!(storage_error(err), Some(surrealdb_kvs::Error::TransactionConditionNotMet))
+}
+
 /// Whether a failure is a transaction conflict the caller may retry.
 pub fn is_retryable_transaction_conflict(err: &anyhow::Error) -> bool {
 	storage_error(err).is_some_and(surrealdb_kvs::Error::is_retryable)

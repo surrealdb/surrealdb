@@ -414,21 +414,22 @@ async fn a_view_reading_beyond_its_sources_recomputes_its_rows() -> Result<()> {
 	.await
 }
 
-/// A restored sequence reissues the positions the seeded database already spent.
+/// A restored sequence continues past the positions the seeded database spent.
 ///
-/// This pins a loss, not a repair. A sequence's definition carries its start,
-/// batch and timeout; how far it has been advanced lives in separate state that
-/// the export does not carry. So the restored sequence hands out its start
-/// again, and the second value out of it is a value the restored records already
-/// hold — which is the whole reason to use one.
+/// How far a sequence has advanced is not part of its definition, so an export
+/// carries it the only way the dump format allows: as the `START` of the
+/// definition it writes. The restored sequence therefore continues where the
+/// seeded one had reached, and no value it hands out collides with a record the
+/// restore itself wrote.
 ///
-/// The fixture also asserts that the two catalogs agree, because that is why no
-/// other assertion in the suite can see this: the definitions match exactly, and
-/// the position is not a definition. Repairing the loss fails the expectations
-/// below; they are the record of what is currently lost, and should be replaced
-/// with the continuation the seeded database shows rather than deleted.
+/// The price is that the two catalogs no longer agree for a sequence that has
+/// been drawn from — the target's `START` is the position, the source's is where
+/// it began — so this fixture compares records and the fixed point but not the
+/// catalog, and asserts the divergence it expects instead. A sequence that was
+/// never drawn from exports its declared `START` and round-trips identically;
+/// `round_trip::catalog` covers that.
 #[tokio::test]
-async fn a_restored_sequence_reissues_positions_the_source_already_spent() -> Result<()> {
+async fn a_restored_sequence_continues_past_what_the_source_spent() -> Result<()> {
 	let round_trip = RoundTrip::run(
 		"DEFINE SEQUENCE ticket_no BATCH 10 START 100;
 		 DEFINE SEQUENCE batched BATCH 7;
@@ -439,7 +440,10 @@ async fn a_restored_sequence_reissues_positions_the_source_already_spent() -> Re
 	)
 	.await?;
 
-	round_trip.assert_all().await?;
+	// Not `assert_all`: the catalog no longer matches for a sequence that has
+	// been drawn from, which the closing assertion pins deliberately.
+	round_trip.assert_records_equal().await?;
+	round_trip.assert_fixed_point();
 	// The records carry the positions that were spent, on both sides.
 	assert_target_renders(
 		&round_trip,
@@ -458,23 +462,30 @@ async fn a_restored_sequence_reissues_positions_the_source_already_spent() -> Re
 		"[103, 3]",
 	);
 
-	// The restored one starts over, from the start in its definition. Both
-	// values collide with a record the restore itself wrote.
+	// The restored one continues from the same place, so neither value collides
+	// with a record the restore itself wrote.
 	assert_target_renders(
 		&round_trip,
 		"RETURN [sequence::nextval('ticket_no'), sequence::nextval('batched')]",
-		"[100, 0]",
+		"[103, 3]",
 	)
 	.await?;
+	assert_target_renders(&round_trip, "SELECT VALUE id FROM ticket WHERE n = 103", "[]").await?;
+
+	// And the definitions differ by exactly the position the export carried: the
+	// target's `START` is where the sequence had reached, the source's is where
+	// it began.
 	assert_target_renders(
 		&round_trip,
-		"SELECT VALUE id FROM ticket WHERE n = 100 AND b = 0",
-		"[ticket:1]",
+		"INFO FOR DB.sequences.ticket_no",
+		"'DEFINE SEQUENCE ticket_no BATCH 10 START 103'",
 	)
 	.await?;
-
-	// And the definitions are identical, which is why nothing else reports it.
-	round_trip.assert_query_equal("INFO FOR DB").await
+	assert_eq!(
+		round_trip.source_query("INFO FOR DB.sequences.ticket_no").await?[0].to_sql(),
+		"'DEFINE SEQUENCE ticket_no BATCH 10 START 100'",
+	);
+	Ok(())
 }
 
 // ----------------------------------------------------------------------------

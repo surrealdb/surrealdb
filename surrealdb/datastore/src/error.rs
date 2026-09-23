@@ -59,6 +59,18 @@ pub enum DatastoreError {
 		message: String,
 	},
 
+	/// A value could not be allocated from a sequence, because a
+	/// `DEFINE`/`REMOVE SEQUENCE` kept landing while it was being allocated.
+	///
+	/// The allocator rebuilds itself once against the definition as it stands;
+	/// this is a second reset arriving during that rebuild, which means the
+	/// sequence is being redefined repeatedly rather than once. Retrying is the
+	/// right response, and no value was issued.
+	#[error(
+		"The sequence was redefined or removed while a value was being allocated from it. This transaction can be retried"
+	)]
+	SequenceReset,
+
 	/// The index has been found to be inconsistent
 	#[error("Index is corrupted: {0}")]
 	CorruptedIndex(&'static str),
@@ -136,6 +148,11 @@ impl LeafError for DatastoreError {
 			DatastoreError::QueryNotExecuted {
 				message,
 			} => TypesError::query(message, QueryError::NotExecuted),
+			// Retryable, and for the same reason a write conflict is: another
+			// statement changed what this one was operating on.
+			DatastoreError::SequenceReset => {
+				TypesError::query(message, QueryError::TransactionConflict)
+			}
 			DatastoreError::CorruptedIndex(_)
 			| DatastoreError::IndexAlreadyBuilding {
 				..

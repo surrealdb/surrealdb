@@ -120,7 +120,9 @@ pub(crate) use self::expr::statements::define::user::{
 pub(crate) use self::expr::statements::delete::delete_statement_compute;
 pub(crate) use self::expr::statements::foreach::foreach_statement_compute;
 pub(crate) use self::expr::statements::ifelse::ifelse_statement_compute;
-pub(crate) use self::expr::statements::info::{info_statement_compute, process_modules};
+pub(crate) use self::expr::statements::info::{
+	info_statement_compute, process_modules, process_sequences,
+};
 pub(crate) use self::expr::statements::insert::insert_statement_compute;
 pub(crate) use self::expr::statements::kill::kill_statement_compute;
 pub(crate) use self::expr::statements::live::live_statement_compute;
