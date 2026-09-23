@@ -73,7 +73,7 @@ use crate::key::schema::{
 	RootConfigKey, RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey,
 	SequencePrefix, SubscriptionPrefix, TableKey, TablePrefix, TermChangeBatchKey,
 };
-use crate::sequences::Sequences;
+use crate::sequences::{Sequence, Sequences};
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::testing::{
 	NonRetryableErrorSite, RetryableConflictSite, maybe_inject_non_retryable_error,
@@ -93,6 +93,20 @@ use crate::{
 	TransactionFactory, TransactionType, Transactor, Val, cache, catalog,
 	is_retryable_transaction_conflict, storage_error, util,
 };
+
+/// The slot a transaction holds for a sequence it defined: the allocator it
+/// owns for that sequence, empty until something draws from it.
+///
+/// Its lock is what makes the first draw single-flight. Building the allocator
+/// claims a window and writes it through the transaction, so two draws that
+/// both found the slot empty would both claim — and the second claim would
+/// collide on a row the first created. Whoever takes the lock builds; whoever
+/// waits finds it built.
+pub(crate) type ProvisionalSequence = Arc<Mutex<Option<Sequence>>>;
+
+/// A transaction's provisional slots, with what each held, at one moment. See
+/// `Transaction::provisional_save_points`.
+type ProvisionalSnapshot = Vec<((NamespaceId, DatabaseId, String), Option<Sequence>)>;
 
 pub struct Transaction {
 	/// Is this is a local datastore transaction?
@@ -204,6 +218,50 @@ pub struct Transaction {
 	/// [`Self::pending_index_build_reservations`].
 	cached_index_build_reservations:
 		Mutex<HashMap<CachedIndexBuildReservationKey, CachedIndexBuildReservation>>,
+	/// Allocators for sequences this transaction has defined and not committed.
+	///
+	/// The node's allocator reads definitions through transactions of its own,
+	/// so it cannot see a `DEFINE SEQUENCE` this one has written. From the store
+	/// alone that is indistinguishable from a definition a concurrent
+	/// statement removed or replaced — one wants the caller's view, the other
+	/// must not have it — so the statement records itself here, and what gets
+	/// built from that view is kept here too rather than in the node's map.
+	///
+	/// Owning them is what keeps a definition nobody else can see from being
+	/// served to anybody else: an allocator built from it has no committed
+	/// definition to check its claims against, which is only sound for as long
+	/// as this transaction is open. It goes when this transaction goes,
+	/// whether that is a commit or a rollback, and a save point rollback puts
+	/// it back as it stood when the save point opened — see
+	/// [`Self::provisional_save_points`].
+	///
+	/// A name maps to an empty slot from the moment the statement defines it
+	/// until something draws from it.
+	provisional_sequences: Mutex<HashMap<(NamespaceId, DatabaseId, String), ProvisionalSequence>>,
+	/// Whether [`Self::provisional_sequences`] has ever been written to.
+	///
+	/// Every `sequence::nextval` asks whether this transaction defined the
+	/// sequence it is drawing from, and in all but a `DEFINE SEQUENCE`
+	/// transaction the answer is no. This answers that without taking the
+	/// lock, so the per-id path pays an atomic load rather than a mutex.
+	defines_any_sequence: AtomicBool,
+	/// [`Self::provisional_sequences`] as it stood when each open save point
+	/// opened, innermost last.
+	///
+	/// A save point rollback restores the storage it scopes, which includes
+	/// every row a provisional allocator wrote — but not the allocators, nor the
+	/// record that this transaction defined a sequence, which live here. Left
+	/// in place, a `DEFINE SEQUENCE` the rollback undid would still be served
+	/// from, on a definition that no longer exists; and an allocator built
+	/// inside the scope would keep serving from a window whose claim row is
+	/// gone, leaving what it issues unfenced for other nodes, which claim past
+	/// the rows they can see. Restoring the snapshot puts both back as they
+	/// stood, which is what the storage now says too, so a value drawn inside
+	/// the scope is undone along with everything else written there.
+	///
+	/// The node's own eviction of a redefined sequence is not undone. That costs
+	/// the node one rebuild of its allocator, from the definition as committed.
+	provisional_save_points: Mutex<Vec<ProvisionalSnapshot>>,
 	/// Effects owed once this transaction commits.
 	///
 	/// They are not transactional - stopping a process-local index builder, or
@@ -888,6 +946,9 @@ impl Transaction {
 			guarded_writes: AtomicU64::new(0),
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
+			provisional_sequences: Mutex::new(HashMap::new()),
+			defines_any_sequence: AtomicBool::new(false),
+			provisional_save_points: Mutex::new(Vec::new()),
 			commit_actions: Mutex::new(Vec::new()),
 			rollback_actions: Mutex::new(Vec::new()),
 			graph_doc_ids_settled: Mutex::new(HashMap::new()),
@@ -1161,6 +1222,52 @@ impl Transaction {
 	/// See [`Self::rollback_actions`] for what belongs here.
 	pub async fn on_rollback(&self, action: Box<dyn RollbackAction>) {
 		self.rollback_actions.lock().await.push(action);
+	}
+
+	/// Records that this transaction has defined `sq`, so a draw from it is
+	/// served by this transaction rather than from the node's allocator map.
+	/// See [`Self::provisional_sequences`].
+	pub async fn sequence_defined_here(&self, ns: NamespaceId, db: DatabaseId, sq: String) {
+		self.provisional_sequences.lock().await.insert((ns, db, sq), Arc::new(Mutex::new(None)));
+		self.defines_any_sequence.store(true, Ordering::Release);
+	}
+
+	/// Captures [`Self::provisional_sequences`] for a save point opening now.
+	async fn snapshot_provisional_sequences(&self) -> ProvisionalSnapshot {
+		if !self.defines_any_sequence.load(Ordering::Acquire) {
+			return Vec::new();
+		}
+		let held = self.provisional_sequences.lock().await;
+		let mut snapshot = Vec::with_capacity(held.len());
+		for (key, slot) in held.iter() {
+			snapshot.push((key.clone(), slot.lock().await.clone()));
+		}
+		snapshot
+	}
+
+	/// Puts [`Self::provisional_sequences`] back as `snapshot` captured it.
+	async fn restore_provisional_sequences(&self, snapshot: ProvisionalSnapshot) {
+		if !self.defines_any_sequence.load(Ordering::Acquire) {
+			return;
+		}
+		*self.provisional_sequences.lock().await = snapshot
+			.into_iter()
+			.map(|(key, allocator)| (key, Arc::new(Mutex::new(allocator))))
+			.collect();
+	}
+
+	/// This transaction's slot for `sq`, if this is the transaction that
+	/// defined it. See [`ProvisionalSequence`].
+	pub(crate) async fn provisional_sequence(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		sq: &str,
+	) -> Option<ProvisionalSequence> {
+		if !self.defines_any_sequence.load(Ordering::Acquire) {
+			return None;
+		}
+		self.provisional_sequences.lock().await.get(&(ns, db, sq.to_owned())).cloned()
 	}
 
 	/// The sequence allocators this transaction was opened with.
@@ -2817,7 +2924,8 @@ impl Transaction {
 	/// Set a new save point on the transaction.
 	/// The buffered index deltas are scoped alongside the storage save point.
 	/// They describe writes this transaction has made, so a rollback that undoes
-	/// those writes has to undo the buffered description of them too.
+	/// those writes has to undo the buffered description of them too. So are
+	/// the provisional sequences — see [`Self::provisional_save_points`].
 	pub async fn new_save_point(&self) -> Result<()> {
 		// The storage save point opens first: the buffer's frames mirror its
 		// stack, so a failed open must not leave a frame behind for some outer
@@ -2828,6 +2936,8 @@ impl Transaction {
 		// would leave the first mutation in the transaction's own frame, where a
 		// rollback cannot reach it.
 		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).push_save_point();
+		let snapshot = self.snapshot_provisional_sequences().await;
+		self.provisional_save_points.lock().await.push(snapshot);
 		Ok(())
 	}
 
@@ -2840,6 +2950,9 @@ impl Transaction {
 		if let Some(buffer) = self.index_deltas.get() {
 			buffer.release_save_point();
 		}
+		// Released, the scope folds into the enclosing one, whose snapshot
+		// still describes the state an outer rollback returns to.
+		self.provisional_save_points.lock().await.pop();
 		Ok(())
 	}
 
@@ -2856,6 +2969,10 @@ impl Transaction {
 		// rollback is engine-defined, so no memo of one may outlive it: the
 		// next `graph_doc_ids_settled` call re-issues the locked read.
 		self.graph_doc_ids_settled.lock().await.clear();
+		let snapshot = self.provisional_save_points.lock().await.pop();
+		if let Some(snapshot) = snapshot {
+			self.restore_provisional_sequences(snapshot).await;
+		}
 		Ok(())
 	}
 

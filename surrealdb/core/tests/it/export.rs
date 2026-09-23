@@ -356,3 +356,111 @@ async fn enforced_relation_survives_a_self_restore() -> Result<()> {
 	assert!(err.to_string().contains("person:missing"), "unexpected error: {err}");
 	Ok(())
 }
+
+/// A sequence is exported at the position it reached, not the `START` it was
+/// declared with.
+///
+/// The definition only records where the sequence began, so emitting it verbatim
+/// rewinds the allocator while the exported records keep the ids already taken
+/// from it. Everything downstream of a restore depends on this one value.
+#[tokio::test]
+async fn sequence_exports_its_current_position() -> Result<()> {
+	let ds = ds_with_batch_size(None).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	ds.execute("DEFINE SEQUENCE order_id BATCH 1 START 1", &ses, None).await?.remove(0).result?;
+	for _ in 0..3 {
+		ds.execute("RETURN sequence::nextval('order_id')", &ses, None).await?.remove(0).result?;
+	}
+
+	let sql = export_text(&ds, &ses).await?;
+	assert!(
+		sql.contains("DEFINE SEQUENCE order_id BATCH 1 START 4"),
+		"the dump must carry the position the sequence reached: {sql}"
+	);
+	Ok(())
+}
+
+/// A sequence that has never been used exports its declared `START`.
+///
+/// The position is read from the per-node cursors, which do not exist yet, so
+/// this pins that the declared value is what survives rather than a zero or a
+/// value one past it.
+#[tokio::test]
+async fn unused_sequence_exports_its_declared_start() -> Result<()> {
+	let ds = ds_with_batch_size(None).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	ds.execute("DEFINE SEQUENCE order_id BATCH 10 START 7", &ses, None).await?.remove(0).result?;
+
+	let sql = export_text(&ds, &ses).await?;
+	assert!(
+		sql.contains("DEFINE SEQUENCE order_id BATCH 10 START 7"),
+		"an unused sequence must export its declared start: {sql}"
+	);
+	Ok(())
+}
+
+/// The whole point of exporting the position: a restored database keeps
+/// allocating past the records it was restored with.
+///
+/// Both ways a sequence is consumed are covered, because only one of them
+/// announces itself. Feeding a record id fails loudly on a collision; feeding an
+/// ordinary field produces a duplicate and no error at all, so the count of
+/// distinct values is what catches it.
+#[tokio::test]
+async fn restored_sequence_does_not_collide_with_imported_records() -> Result<()> {
+	let source = ds_with_batch_size(None).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	source
+		.execute(
+			"DEFINE SEQUENCE order_id BATCH 1 START 1;
+			 DEFINE SEQUENCE invoice_no BATCH 1 START 1;
+			 DEFINE TABLE thing SCHEMAFULL;
+			 DEFINE FIELD id ON thing TYPE int DEFAULT sequence::nextval('order_id');
+			 DEFINE TABLE inv SCHEMAFULL;
+			 DEFINE FIELD no ON inv TYPE int DEFAULT sequence::nextval('invoice_no');",
+			&ses,
+			None,
+		)
+		.await?
+		.drain(..)
+		.try_for_each(|r| r.result.map(|_| ()))?;
+	for _ in 0..3 {
+		source
+			.execute("CREATE thing CONTENT {}; CREATE inv CONTENT {};", &ses, None)
+			.await?
+			.drain(..)
+			.try_for_each(|r| r.result.map(|_| ()))?;
+	}
+
+	let sql = export_text(&source, &ses).await?;
+
+	let target = ds_with_batch_size(None).await?;
+	target.execute(&sql, &ses, None).await?.drain(..).try_for_each(|r| r.result.map(|_| ()))?;
+
+	// A record-id sequence: the write must be admitted at all.
+	target
+		.execute("CREATE thing CONTENT {}", &ses, None)
+		.await?
+		.remove(0)
+		.result
+		.map_err(|e| anyhow::anyhow!("restored record-id sequence collided: {e}"))?;
+
+	// A plain-field sequence raises nothing on a repeat, so read the column back
+	// and check the values are distinct. Three restored rows plus one new one.
+	target.execute("CREATE inv CONTENT {}", &ses, None).await?.remove(0).result?;
+	let nos = target
+		.execute("SELECT VALUE no FROM inv", &ses, None)
+		.await?
+		.remove(0)
+		.result?
+		.into_array()
+		.unwrap();
+	let distinct: std::collections::BTreeSet<i64> =
+		nos.iter().map(|v| v.clone().into_int().unwrap()).collect();
+	assert_eq!(
+		(nos.len(), distinct.len()),
+		(4, 4),
+		"the restored sequence must not re-issue a used value: {nos:?}"
+	);
+	Ok(())
+}

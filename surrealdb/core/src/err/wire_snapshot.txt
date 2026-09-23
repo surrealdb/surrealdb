@@ -89,6 +89,7 @@ TransactionTimedout	{ cause: NONE, code: -32004, details: { details: { duration:
 QueryBeyondMemoryThreshold	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The query was not executed due to the memory threshold being reached' }
 TransactionWriteKeysExceeded	{ cause: NONE, code: -32000, kind: 'Query', message: "Transaction exceeded the maximum number of key writes (1). The statement's physical write fan-out (cascaded deletes, index maintenance, graph-edge cleanup) reached the `transaction_max_write_keys` limit and was rolled back. Reduce the operation's scope, or raise or disable the limit" }
 QueryNotExecuted	{ cause: NONE, code: -32003, details: { kind: 'NotExecuted' }, kind: 'Query', message: 'sample' }
+SequenceReset	{ cause: NONE, code: -32009, details: { kind: 'TransactionConflict' }, kind: 'Query', message: 'The sequence was redefined or removed while a value was being allocated from it. This transaction can be retried' }
 CorruptedIndex	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Index is corrupted: sample' }
 IndexAlreadyBuilding	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Database index `sample` is currently building' }
 IndexingBuildingCancelled	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Index building has been cancelled: sample' }

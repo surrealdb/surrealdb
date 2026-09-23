@@ -24,6 +24,7 @@ use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::mean_tokens_per_document;
 use crate::key::schema::{RecordKey, RecordPrefix};
 use crate::key::{KVKeyDecode, KVSubspace, KVValue};
+use crate::kvs::sequences::next_unissued_value;
 use crate::sql::statements::OptionStatement;
 use crate::val::TableName;
 use crate::{catalog, val};
@@ -161,9 +162,22 @@ async fn export_metadata(
 	}
 
 	// Output SEQUENCES
+	//
+	// A definition carries the `START` the sequence was declared with, which is
+	// only where it began. Emitting that verbatim would rewind the sequence on
+	// import while the exported records keep the ids already allocated from it,
+	// so the first `sequence::nextval` after a restore would re-issue a value
+	// that is in use. Each sequence is therefore exported at the position it
+	// reached, which is what an import has to re-establish.
 	if cfg.sequences {
 		let sequences = tx.all_db_sequences(ns, db, None).await?;
-		export_section("SEQUENCES", sequences.iter(), chn).await?;
+		let mut positioned = Vec::with_capacity(sequences.len());
+		for sq in sequences.iter() {
+			let mut sq = sq.clone();
+			sq.start = next_unissued_value(tx, ns, db, sq.name.as_str(), sq.start, None).await?;
+			positioned.push(sq);
+		}
+		export_section("SEQUENCES", positioned.iter(), chn).await?;
 	}
 
 	Ok(())
