@@ -8,6 +8,24 @@ pub use registry::{
 	memory_reporters_allocated_total, register_memory_reporter,
 };
 
+/// The memory ceiling the guard enforces, in bytes, or `0` when it enforces
+/// none.
+///
+/// This is the value [`ALLOC`]'s `is_beyond_threshold` compares tracked bytes
+/// against. It is `0` both when `SURREAL_MEMORY_THRESHOLD` is unset or zero and
+/// when allocation tracking is not compiled in: without tracking there is no
+/// tracked total to compare, so no threshold is ever enforced, and reporting
+/// the configured value would present a disabled guard as an active one.
+/// Exposed so the observability layer can publish the limit alongside the usage
+/// without depending on the configuration module directly.
+pub fn memory_threshold() -> usize {
+	if cfg!(all(feature = "allocator", feature = "allocation-tracking")) {
+		*crate::cnf::MEMORY_THRESHOLD
+	} else {
+		0
+	}
+}
+
 // --------------------------------------------------
 // No global allocator, or allocation tracking
 // --------------------------------------------------

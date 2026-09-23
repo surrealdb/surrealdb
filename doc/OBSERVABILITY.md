@@ -247,6 +247,27 @@ applicable. Sentinel `"-"` values appear when ctx is unresolved.
 | `surrealdb_http_active_requests` | `surrealdb.http` | gauge | `http_request_method, http_route` (attribute-stripped to keep the gauge balanced) |
 | `surrealdb_live_query_active` | `surrealdb.live_query` | gauge | none |
 | `surrealdb_live_query_notifications_total` | `surrealdb.live_query` | counter | none |
+| `surrealdb_process_memory_allocated_bytes` | `surrealdb.process` | gauge | none |
+| `surrealdb_process_memory_threshold_bytes` | `surrealdb.process` | gauge | none |
+
+The two memory gauges are deliberately **not** on the public allowlist,
+unlike `surrealdb_process_memory_bytes`: read together they describe how
+close the instance is to refusing queries, which is closer to capacity
+intelligence than the aggregate RSS figure is.
+
+Read alongside `surrealdb_process_memory_bytes` they answer two different questions:
+
+- `memory_allocated / memory_threshold` — how close this instance is to refusing queries. A
+  sustained ratio near `1` is the signal that preceded a `ServerOverloaded` refusal; alert on it.
+  When the threshold gauge reads `0` the guard is disabled — the threshold is unset, or allocation
+  tracking is not compiled in — and no refusal will ever happen.
+- `memory_bytes − memory_allocated` — an estimate of the resident memory the tracker cannot see
+  (allocator overhead including size-class rounding, RocksDB memory outside its caches, thread
+  stacks), and so of the headroom a threshold must leave below a container memory limit. It errs
+  in both directions: `memory_allocated` counts allocated bytes and `memory_bytes` resident pages,
+  so an allocation not yet written makes it read low — the unsafe direction for sizing a threshold
+  — and pages the allocator retains after a free make it read high. Size headroom from its
+  sustained peak with margin, never from a single sample.
 
 ### Authenticated-only — pipeline self-metrics
 

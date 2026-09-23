@@ -574,6 +574,38 @@ pub fn register_process_metrics(runtime: &ObservabilityRuntime) {
 			obs.observe(snap.memory_bytes as i64, &[]);
 		})
 		.build();
+	// The quantity the memory threshold is actually compared against. Paired
+	// with `PROCESS_MEMORY_THRESHOLD` it shows how close the instance is to
+	// refusing queries. Paired with `PROCESS_MEMORY` (resident set size) it only
+	// approximates the memory the tracker cannot see, since one counts
+	// allocated bytes and the other resident pages. Reports 0 in builds without
+	// allocation tracking compiled in.
+	let _memory_allocated = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_ALLOCATED)
+		.with_description(
+			"Tracked memory of the surreal process: live Rust-heap allocations plus external \
+			 memory reporters. This is the value compared against SURREAL_MEMORY_THRESHOLD",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			let snap = process_snapshot();
+			obs.observe(snap.memory_allocated_bytes as i64, &[]);
+		})
+		.build();
+	// Emitted so a dashboard can plot the limit alongside the usage without the
+	// operator having to restate it. Constant for the process lifetime, since
+	// the threshold is read once from the environment.
+	let _memory_threshold = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_THRESHOLD)
+		.with_description(
+			"SURREAL_MEMORY_THRESHOLD as enforced by the memory guard, in bytes, or 0 when none is \
+			 enforced",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			obs.observe(surrealdb_core::mem::memory_threshold() as i64, &[]);
+		})
+		.build();
 	let _cpu = meter
 		.f64_observable_gauge(names::PROCESS_CPU_PERCENT)
 		.with_description(

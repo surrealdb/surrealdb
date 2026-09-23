@@ -107,6 +107,8 @@ pub mod names {
 	pub static BUILD_INFO: &str = "surrealdb.build.info";
 	pub static PROCESS_UPTIME: &str = "surrealdb.process.uptime";
 	pub static PROCESS_MEMORY: &str = "surrealdb.process.memory";
+	pub static PROCESS_MEMORY_ALLOCATED: &str = "surrealdb.process.memory_allocated";
+	pub static PROCESS_MEMORY_THRESHOLD: &str = "surrealdb.process.memory_threshold";
 	pub static PROCESS_CPU_PERCENT: &str = "surrealdb.process.cpu_percent";
 
 	// --- Statement (scope: STATEMENT) ----------------------------------
@@ -288,6 +290,8 @@ mod tests {
 			names::NETWORK_SENT,
 			names::PROCESS_CPU_PERCENT,
 			names::PROCESS_MEMORY,
+			names::PROCESS_MEMORY_ALLOCATED,
+			names::PROCESS_MEMORY_THRESHOLD,
 			names::PROCESS_UPTIME,
 			names::QUERY_DURATION,
 			names::QUERY_TOTAL,

@@ -101,9 +101,23 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 
 	/// Checks if the current usage exceeds a configured threshold.
 	pub fn is_beyond_threshold(&self) -> bool {
+		self.beyond_threshold_by().is_some()
+	}
+
+	/// The tracked total and the threshold it exceeded, or `None` when the
+	/// guard is disabled or the total is within it.
+	///
+	/// Reporting a refusal needs both figures, and computing the total is not
+	/// cheap - it walks the reporter registry and sums the RocksDB cache across
+	/// its shards. Returning them from the check keeps a refusal to one
+	/// computation rather than one per caller that wants to name the numbers.
+	pub fn beyond_threshold_by(&self) -> Option<(usize, usize)> {
 		match *crate::cnf::MEMORY_THRESHOLD {
-			0 => false,
-			v => self.memory_allocated() > v,
+			0 => None,
+			threshold => {
+				let allocated = self.memory_allocated();
+				(allocated > threshold).then_some((allocated, threshold))
+			}
 		}
 	}
 

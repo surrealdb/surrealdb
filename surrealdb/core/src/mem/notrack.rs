@@ -33,6 +33,12 @@ impl<A: GlobalAlloc> NotrackAlloc<A> {
 	pub fn is_beyond_threshold(&self) -> bool {
 		false
 	}
+
+	/// Always `None`: this allocator tracks nothing, so no total can exceed a
+	/// threshold.
+	pub fn beyond_threshold_by(&self) -> Option<(usize, usize)> {
+		None
+	}
 }
 
 unsafe impl<A: GlobalAlloc> GlobalAlloc for NotrackAlloc<A> {
