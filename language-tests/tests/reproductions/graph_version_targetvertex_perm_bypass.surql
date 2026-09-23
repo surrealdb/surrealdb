@@ -1,6 +1,6 @@
 /**
 [env]
-backend = ["mem"]
+backend = ["mem", "rocksdb", "surrealkv"]
 versioned = true
 timeout = 5000
 imports = ["reproductions/graph_version_targetvertex_perm_bypass_import.surql"]

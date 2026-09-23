@@ -10,7 +10,8 @@ planner-strategy = ["all-ro", "best-effort-ro"]
 backend = ["mem", "rocksdb", "surrealkv"]
 # surrealkv / rocksdb refuse versioned queries unless the datastore was
 # opened with `?versioned=true`; the harness passes that through when
-# `versioned = true` is set on the env. Memory implicitly supports it.
+# `versioned = true` is set on the env. Memory cannot serve them at all, so
+# the runner skips this test there.
 versioned = true
 
 [[test.results]]

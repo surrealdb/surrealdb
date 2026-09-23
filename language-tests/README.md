@@ -837,9 +837,10 @@ temporal queries using the `VERSION` clause.
 Tests with `versioned = true` always get a fresh datastore (they cannot reuse the
 shared datastore pool) since they require different datastore configuration.
 
-The memory backend no longer supports versioning (the surrealmx engine dropped its
-versioned-read API), so versioned tests are automatically skipped on the `mem`
-backend and run only on `rocksdb` and `surrealkv`, which retain native versioning.
+Versioning is available only on the `rocksdb` and `surrealkv` backends, which the
+runner opens with `?versioned=true`. `mem` and `tikv` are opened without it and
+reject a versioned statement, so versioned tests are skipped on those two and a
+test that names neither of the supported backends runs nowhere.
 
 **Examples:**
 
@@ -851,7 +852,7 @@ versioned = true
 ```
 
 ```toml
-# Test with versioning on all backends that support it (mem is skipped)
+# Test with versioning on all backends that support it (mem and tikv are skipped)
 [env]
 versioned = true
 ```

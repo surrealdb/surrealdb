@@ -96,8 +96,8 @@ impl CreateInfo {
 
 		let ds = match self.backend {
 			Backend::Memory => {
-				// The memory backend no longer supports versioning; the runner
-				// filters versioned tests out on this backend (see cmd/run).
+				// Opened without versioning, which this backend cannot serve; the
+				// runner filters versioned tests off it (see cmd/run).
 				builder.build_with_path("mem://").await?
 			}
 			Backend::RocksDb => {
@@ -125,6 +125,8 @@ impl CreateInfo {
 				ds
 			}
 			Backend::TikV => {
+				// Opened without versioning, which this backend cannot serve; the
+				// runner filters versioned tests off it (see cmd/run).
 				let p = "127.0.0.1:2379";
 				let ds = builder.build_with_path(&format!("tikv://{p}")).await?;
 				// Every TiKV datastore in a run aliases the one physical cluster, so a

@@ -129,7 +129,9 @@ pub struct TestEnv {
 	pub backend: Vec<Backend>,
 
 	/// Whether the test requires MVCC versioning to be enabled on the datastore.
-	/// When true, the datastore is created with `?versioned=true` in the connection string.
+	/// When true, the datastore is created with `?versioned=true` in the
+	/// connection string, and the test runs only on the backends that accept it
+	/// (see [`Backend::supports_versioning`]).
 	#[serde(default)]
 	pub versioned: bool,
 	/// Planner strategies to run this test under.

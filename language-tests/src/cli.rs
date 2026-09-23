@@ -44,6 +44,23 @@ pub enum Backend {
 	TikV,
 }
 
+impl Backend {
+	/// Whether the provisioner can open this backend with versioning enabled, and
+	/// so whether a test declaring `env.versioned` can run against it. The others
+	/// are opened without it and reject a versioned statement rather than
+	/// answering it.
+	///
+	/// Matched exhaustively on purpose: a new backend has to state which side it
+	/// is on, because the wrong default silently either skips coverage or feeds
+	/// tests to a store that cannot serve them.
+	pub fn supports_versioning(self) -> bool {
+		match self {
+			Backend::RocksDb | Backend::SurrealKv => true,
+			Backend::Memory | Backend::TikV => false,
+		}
+	}
+}
+
 #[cfg(feature = "bench")]
 impl SurrealValue for Backend {
 	fn kind_of() -> surrealdb_types::Kind {

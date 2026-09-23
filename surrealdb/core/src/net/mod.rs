@@ -22,6 +22,7 @@
 //! without a custom resolver.
 
 use std::error::Error;
+#[cfg(feature = "http")]
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Arc;
