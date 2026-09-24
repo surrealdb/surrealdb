@@ -1316,7 +1316,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-ast"
-version = "3.3.0"
+version = "3.3.1"
 dependencies = [
  "chrono",
  "rust_decimal",
@@ -1326,7 +1326,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-common"
-version = "3.3.0"
+version = "3.3.1"
 dependencies = [
  "chrono",
  "futures",
@@ -1343,7 +1343,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-parse-common"
-version = "3.3.0"
+version = "3.3.1"
 dependencies = [
  "chrono",
  "logos",
@@ -1352,7 +1352,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-parser"
-version = "3.3.0"
+version = "3.3.1"
 dependencies = [
  "bitflags",
  "logos",
@@ -1386,7 +1386,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-token"
-version = "3.3.0"
+version = "3.3.1"
 dependencies = [
  "logos",
  "surrealdb-common",
@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types"
-version = "3.3.0"
+version = "3.3.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1422,7 +1422,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types-derive"
-version = "3.3.0"
+version = "3.3.1"
 dependencies = [
  "heck",
  "proc-macro2",
