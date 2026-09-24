@@ -488,10 +488,51 @@ jobs:
           aws ecr get-login-password --region "$region" \
             | docker login --username AWS --password-stdin "$REGISTRY"
 
-      # Fetch the engine over git, authenticated with this workflow's own
-      # ambient token (contents: read on this repo — the engine IS this repo),
-      # re-pinned to engine-ref before the build. Pushes both the base rolling
-      # tag and the per-arch tag the manifest step stitches together.
+      # The Dockerfile resolves every private git source through ONE credential
+      # (it rewrites github.com to a single token-authenticated HTTPS URL), and
+      # this build fetches two kinds: the engine over git, which is this repo
+      # and all github.token can ever read, and whatever private repos the
+      # downstream itself declares git dependencies on. One credential has to
+      # span both, so github.token stops being sufficient the moment the
+      # downstream has a private dependency of its own.
+      #
+      # The dependency-fetch App covers exactly that span: a read-only
+      # installation over the engine and the downstream's dependency repos. It
+      # carries no `repositories:` restriction because it is single-purpose, so
+      # its installation is itself the allowlist.
+      #
+      # The secrets context is NOT available to a step `if:`, so the gate is
+      # carried through `env` (where it is) into a step output, the same way the
+      # compat workflow's preflight does it. `!= ''` yields a boolean without
+      # exposing the value. With the key absent the mint is skipped and the
+      # build keeps github.token. With it present a failed mint is a real
+      # misconfiguration, and failing here beats falling back to a credential
+      # that cannot fetch the dependencies and would surface as an opaque
+      # failure deep inside the Docker build.
+      - name: Check whether the dependency-fetch App is configured
+        id: dep-scope
+        env:
+          HAS_DEP_APP: ${{ secrets.DEP_FETCH_APP_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          echo "wanted=${HAS_DEP_APP}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate a token for the engine and the downstream's dependencies
+        id: dep-token
+        if: steps.dep-scope.outputs.wanted == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.DEP_FETCH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEP_FETCH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          # Fetching dependencies only ever needs to read.
+          permission-contents: read
+
+      # Fetches the engine over git, re-pinned to engine-ref before the build,
+      # with the token minted above when the App is configured and this
+      # workflow's own ambient token (contents: read on this repo, and the
+      # engine IS this repo) otherwise. Pushes both the base rolling tag and the
+      # per-arch tag the manifest step stitches together.
       - name: Build + push downstream image
         uses: ./downstream-ci/.github/actions/build-docker-image
         with:
@@ -511,7 +552,7 @@ jobs:
           release-version: ${{ inputs.release-version }}
           platform: ${{ matrix.platform.platform }}
           publish: 'true'
-          github-token: ${{ github.token }}
+          github-token: ${{ steps.dep-token.outputs.token || github.token }}
           engine-precise-sha: ${{ inputs.engine-ref }}
           license-enforcement: ${{ matrix.variant.enforcement }}
 

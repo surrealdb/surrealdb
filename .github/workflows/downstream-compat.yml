@@ -75,7 +75,16 @@ jobs:
           # on the variable lets the token mint run without a key and hard-fail
           # instead of no-opping. `!= ''` yields a boolean without exposing it.
           HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+          # Gated separately from HAS_APP: this key authenticates the
+          # downstream's OWN private git sources, which the checkout credential
+          # cannot reach. Absent, the cargo steps fail in resolution rather than
+          # at checkout, so the two are not interchangeable.
+          HAS_DEP_APP: ${{ secrets.DEP_FETCH_APP_PRIVATE_KEY != '' }}
         run: |
+          echo "dep-configured=${HAS_DEP_APP}" >> "$GITHUB_OUTPUT"
+          if [ "${HAS_DEP_APP}" != "true" ]; then
+            echo "::notice title=Downstream compatibility::DEP_FETCH_APP_* absent, so the downstream's own private git dependencies are unauthenticated; the cargo steps will fail in resolution if it has any."
+          fi
           if [ "${HAS_APP}" = "true" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
@@ -94,8 +103,15 @@ jobs:
           # made from this directory would otherwise pick it up and be denied.
           persist-credentials: false
 
-      # Mint a short-lived token scoped to the downstream repo only. The owner
-      # defaults to this repository's owner; the repo name comes from a secret.
+      # Mint a short-lived token scoped to the downstream repo, for the
+      # checkout below. The owner defaults to this repository's owner; the repo
+      # name comes from a secret.
+      #
+      # Deliberately does NOT cover the downstream's own private git
+      # dependencies. This token comes from the release-automation App, which
+      # carries write permissions for the release and cut workflows, so it is
+      # confined to the checkout step and never published to the build. The
+      # dependency credential below is a separate, read-only token.
       - name: Generate a token for the downstream repo
         id: app-token
         if: steps.preflight.outputs.configured == 'true'
@@ -202,6 +218,63 @@ jobs:
           workspaces: downstream
           cache-key: downstream-compat
           save-cache: ${{ github.event_name == 'push' }}
+
+      # Mint the credential cargo presents for the downstream's private git
+      # dependencies. Read-only, and from the dependency-fetch App rather than
+      # the release-automation App above, because of where it ends up: the step
+      # after this publishes it through GIT_CONFIG_GLOBAL, so every later step
+      # inherits it, including `cargo check` and `cargo nextest run` over the
+      # downstream workspace. Build scripts, proc macros and test binaries there
+      # run as this user and can read the file. What reaches them must therefore
+      # be read-only and confined to the repos this job already builds, which is
+      # what this App grants and a release token does not.
+      #
+      # No `repositories:` restriction: the App is single-purpose, so its
+      # installation is itself the allowlist and a list here would only
+      # duplicate it. `permission-contents: read` pins the token regardless of
+      # what the App is granted later.
+      - name: Generate a token for the downstream's private git dependencies
+        id: dep-token
+        if: steps.preflight.outputs.configured == 'true' && steps.preflight.outputs.dep-configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.DEP_FETCH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEP_FETCH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
+
+      # The downstream declares its private git dependencies with ssh:// URLs,
+      # and this runner has no ssh key for them. Rewrite that spelling (and the
+      # scp-style one) to token-authenticated HTTPS so the token minted above is
+      # what cargo presents, and make cargo fetch through the git CLI, since its
+      # builtin fetcher ignores git config. Engine URLs match the rewrite too,
+      # harmlessly: the [patch] step below means they are never fetched. This
+      # mirrors the downstream's own setup-environment action, so both repos
+      # authenticate the same dependencies the same way.
+      #
+      # The rewrite lives in a job-scoped file under $RUNNER_TEMP, published via
+      # GIT_CONFIG_GLOBAL, so the token stays out of ~/.gitconfig, which would
+      # outlive the job on a reused runner. GIT_CONFIG_GLOBAL REPLACES
+      # ~/.gitconfig rather than layering on it, hence the include (git skips it
+      # silently when the file does not exist). The file is recreated rather
+      # than edited so a stale one left by a failed cleanup cannot win the
+      # insteadOf tie with an expired token.
+      - name: Authenticate the downstream's private git dependencies
+        if: steps.preflight.outputs.configured == 'true' && steps.preflight.outputs.dep-configured == 'true'
+        env:
+          TOKEN: ${{ steps.dep-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          cfg="$RUNNER_TEMP/dep.gitconfig"
+          rm -f "$cfg"
+          git config --file "$cfg" include.path "$HOME/.gitconfig"
+          chmod 600 "$cfg"
+          git config --file "$cfg" url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --file "$cfg" --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          {
+            echo "GIT_CONFIG_GLOBAL=$cfg"
+            echo "CARGO_NET_GIT_FETCH_WITH_CLI=true"
+          } >> "$GITHUB_ENV"
 
       - name: Install tools
         if: steps.preflight.outputs.configured == 'true'
@@ -459,6 +532,43 @@ jobs:
               echo "Patching ${crate} (${src_url}) -> ${dir}"
             done
           fi
+
+      # Name the repo when a private git source is unreachable. cargo's failure
+      # for a missing credential is a bare "revision <sha> not found / failed to
+      # authenticate" that names neither the repo nor the remedy, and an App
+      # installation is not guessable from it.
+      # Warns rather than fails: the scan is a grep over manifests, so it must
+      # never be the thing that reddens this job — an unreachable source fails
+      # the cargo step below on its own, with this annotation alongside it.
+      - name: Check the downstream's private git sources are reachable
+        if: steps.preflight.outputs.configured == 'true'
+        env:
+          # The engine's own repo as owner/name, dropped from the scan: the
+          # patch step above redirects those crates to this checkout, so they
+          # are never fetched. github.repository rather than the event payload,
+          # so the value does not depend on the triggering event's shape.
+          ENGINE_REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          # A downstream whose only private source is the engine matches
+          # nothing here, and grep reports that as exit 1, which the runner's
+          # `bash -e -o pipefail` would turn into a failed step. Empty is the
+          # answer the branch below handles, so the status is not one.
+          repos="$(grep -rhoE '(ssh://git@github\.com/|git@github\.com:)[A-Za-z0-9._-]+/[A-Za-z0-9._-]+' \
+                     --include=Cargo.toml --exclude-dir=target --exclude-dir=vendor downstream/ \
+                   | sed -E 's#.*github\.com[:/]##; s#\.git$##' \
+                   | sort -u | grep -vx "${ENGINE_REPO}")" || true
+          if [ -z "${repos}" ]; then
+            echo "No private git sources beyond the engine."
+            exit 0
+          fi
+          for repo in ${repos}; do
+            if git ls-remote "ssh://git@github.com/${repo}.git" HEAD >/dev/null 2>&1; then
+              echo "reachable: ${repo}"
+            else
+              echo "::warning title=Downstream compatibility::the downstream resolves a git dependency from '${repo}', which this job cannot read, so the cargo steps below will fail in resolution. Install the dependency-fetch App (DEP_FETCH_APP_*) on '${repo}' with Contents:read and approve it there. Its installation is the allowlist, so nothing in this repo needs changing once that is done."
+            fi
+          done
 
       # The downstream workspace includes the Kubernetes operator crates
       # (s7b-operator, s7b-operator-e2e). Their build graph is disjoint from the
