@@ -95,10 +95,10 @@ use crate::key::schema::{
 	DiskannRecordPendingPrefix, DiskannRecordPendingShardKey, DiskannRecordPendingShardShardPrefix,
 	DiskannStateKey,
 };
-use crate::key::{KVKey, TypedRange};
+use crate::key::{KVKey, KVSubspace, TypedRange};
 use crate::trees::hnsw::{ElementId, VectorPendingUpdate};
 use crate::trees::vector::SerializedVector;
-use crate::val::{RecordIdKey, RecordIdentity, TableName};
+use crate::val::{IndexFormat, RecordIdKey, RecordIdentity, TableName};
 
 /// Reads a compaction generation key.
 ///
@@ -212,6 +212,76 @@ pub async fn wipe_index_data(
 		tx.set_key(&ikb.new_dg_key(), &generation).await?;
 	}
 	Ok(())
+}
+
+/// A primary-appending marker's key as a previous release spelled it: the
+/// generation's prefix, then the record id under the index format.
+///
+/// No key this release declares has that layout, so the bytes are kept as
+/// built rather than encoded from fields.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviousBuildPrimaryKey(Vec<u8>);
+
+impl PreviousBuildPrimaryKey {
+	/// The key's bytes.
+	pub fn as_bytes(&self) -> &[u8] {
+		&self.0
+	}
+}
+
+impl KVKey for PreviousBuildPrimaryKey {
+	type Value = PrimaryAppendingTicket;
+
+	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
+		buffer.extend_from_slice(&self.0);
+		Ok(())
+	}
+
+	fn value_context(&self) {}
+}
+
+/// A borrowed key reads the same marker, so a batch of keys can be read
+/// without being copied first.
+impl KVKey for &PreviousBuildPrimaryKey {
+	type Value = PrimaryAppendingTicket;
+
+	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
+		buffer.extend_from_slice(&self.0);
+		Ok(())
+	}
+
+	fn value_context(&self) {}
+}
+
+/// A previous release's primary-appending keys for one build generation,
+/// with the generation's prefix encoded once for however many records.
+pub struct PreviousBpSpelling(Vec<u8>);
+
+impl PreviousBpSpelling {
+	/// The key that release wrote `id`'s marker at, given `spelled`, the id's
+	/// bytes under this release's spelling, when the two keys differ.
+	///
+	/// That release spelled the id under the index format, which drops a nested
+	/// number's variant, so only an id holding a number has a key of its own
+	/// there. The key can be another record's under either spelling — `[1, NONE]`'s
+	/// is `[1]`'s under this release, and `[1]` and `[1dec]` share one — so a
+	/// marker found at it is `id`'s only when its queued mutation names `id`.
+	pub fn key(&self, id: &RecordIdKey, spelled: &[u8]) -> Result<Option<PreviousBuildPrimaryKey>> {
+		// A number is the only value the index format spells differently, and
+		// an id holding none passes `hash_agrees_with_eq` without an encode.
+		if id.hash_agrees_with_eq() {
+			return Ok(None);
+		}
+		let erased =
+			storekey::encode_vec_format::<IndexFormat, _>(id).map_err(anyhow::Error::from_boxed)?;
+		if erased == spelled {
+			return Ok(None);
+		}
+		let mut key = Vec::with_capacity(self.0.len() + erased.len());
+		key.extend_from_slice(&self.0);
+		key.extend_from_slice(&erased);
+		Ok(Some(PreviousBuildPrimaryKey(key)))
+	}
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -783,6 +853,30 @@ impl IndexKeyBase {
 			generation,
 			id: RecordIdentity(id.clone()),
 		}
+	}
+
+	/// The key a previous release wrote `id`'s primary-appending marker at,
+	/// when it is not [`Self::new_bp_key`]'s; see [`PreviousBpSpelling::key`].
+	pub fn new_bp_key_in_previous_spelling(
+		&self,
+		generation: BuildGeneration,
+		id: &RecordIdKey,
+	) -> Result<Option<PreviousBuildPrimaryKey>> {
+		let spelled = storekey::encode_vec(id).map_err(anyhow::Error::from_boxed)?;
+		self.previous_bp_spelling(generation)?.key(id, &spelled)
+	}
+
+	/// A previous release's primary-appending keys for `generation`.
+	pub fn previous_bp_spelling(&self, generation: BuildGeneration) -> Result<PreviousBpSpelling> {
+		let prefix = BuildPrimaryGenerationPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			generation,
+		}
+		.encode_bound()?;
+		Ok(PreviousBpSpelling(prefix.to_vec()))
 	}
 
 	/// Range covering primary-appending markers for one build generation.

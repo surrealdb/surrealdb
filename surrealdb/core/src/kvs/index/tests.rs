@@ -8663,19 +8663,17 @@ async fn knn_prefilter_performs_zero_in_traversal_fetches() -> Result<()> {
 /// to the record id, then the id under the index format — which is what `!di`
 /// still spells, so that key supplies the suffix.
 fn primary_append_key_in_previous_encoding(
-	ns: NamespaceId,
-	db: DatabaseId,
-	table: &TableName,
-	ix: surrealdb_catalog::IndexId,
+	ikb: &IndexKeyBase,
 	generation: BuildGeneration,
 	id: &RecordIdKey,
 ) -> Result<Vec<u8>> {
 	use crate::key::schema::BuildPrimaryGenerationPrefix;
+	let (ns, db, table) = (ikb.ns(), ikb.db(), ikb.table());
 	let head = BuildPrimaryGenerationPrefix {
 		ns,
 		db,
 		tb: Cow::Borrowed(table),
-		ix,
+		ix: ikb.index(),
 		generation,
 	}
 	.encode_bound()?
@@ -8735,8 +8733,7 @@ async fn primary_append_markers_from_a_previous_release_are_rebuilt() -> Result<
 			},
 		)
 		.await?;
-		let legacy =
-			primary_append_key_in_previous_encoding(ns, db, &table, ix_id, generation, &id)?;
+		let legacy = primary_append_key_in_previous_encoding(&ikb, generation, &id)?;
 		tx.set(
 			Key::from(legacy),
 			PrimaryAppendingTicket {
@@ -8798,9 +8795,7 @@ async fn primary_append_markers_from_a_previous_release_are_rebuilt() -> Result<
 			)
 			.await?;
 			tx.set(
-				Key::from(primary_append_key_in_previous_encoding(
-					ns, db, &table, ix_id, generation, &id,
-				)?),
+				Key::from(primary_append_key_in_previous_encoding(&ikb, generation, &id)?),
 				PrimaryAppendingTicket {
 					ticket,
 					mutation_seq,
@@ -8853,8 +8848,7 @@ async fn primary_append_markers_from_a_previous_release_are_rebuilt() -> Result<
 			},
 		)
 		.await?;
-		let legacy =
-			primary_append_key_in_previous_encoding(ns, db, &table, ix_id, generation, &aliased)?;
+		let legacy = primary_append_key_in_previous_encoding(&ikb, generation, &aliased)?;
 		// The premise: it decodes, and not as the record it was written for.
 		let decoded = crate::key::schema::BuildPrimaryKey::decode_key(&legacy)
 			.expect("the aliased spelling decodes cleanly");
@@ -8922,7 +8916,7 @@ async fn aliasing_markers_from_a_previous_release_both_survive_the_rebuild() -> 
 	// The premise: one record's target key is the other's current key.
 	assert_eq!(
 		*ikb.new_bp_key(generation, &one).encode_key()?,
-		*primary_append_key_in_previous_encoding(ns, db, &table, ix_id, generation, &one_none)?,
+		*primary_append_key_in_previous_encoding(&ikb, generation, &one_none)?,
 		"the two spellings must alias, or this test guards nothing"
 	);
 
@@ -8939,9 +8933,7 @@ async fn aliasing_markers_from_a_previous_release_both_survive_the_rebuild() -> 
 		)
 		.await?;
 		tx.set(
-			Key::from(primary_append_key_in_previous_encoding(
-				ns, db, &table, ix_id, generation, id,
-			)?),
+			Key::from(primary_append_key_in_previous_encoding(&ikb, generation, id)?),
 			PrimaryAppendingTicket {
 				ticket,
 				mutation_seq: 0,
@@ -9024,7 +9016,7 @@ async fn the_rebuild_keeps_the_earlier_of_two_markers_for_one_record() -> Result
 	)
 	.await?;
 	tx.set(
-		Key::from(primary_append_key_in_previous_encoding(ns, db, &table, ix_id, generation, &id)?),
+		Key::from(primary_append_key_in_previous_encoding(&ikb, generation, &id)?),
 		PrimaryAppendingTicket {
 			ticket: 5,
 			mutation_seq: 0,
@@ -9102,30 +9094,37 @@ async fn own_build(
 
 /// Queues a mutation of `id` at `ticket`, and a marker for it in the spelling a
 /// previous release used.
-#[allow(clippy::too_many_arguments)]
 async fn queue_with_marker_in_previous_encoding(
 	tx: &crate::kvs::Transaction,
 	ikb: &IndexKeyBase,
-	(ns, db, table, ix): (NamespaceId, DatabaseId, &TableName, surrealdb_catalog::IndexId),
 	generation: BuildGeneration,
 	ticket: BuildTicket,
 	id: &RecordIdKey,
 	old_values: Option<Vec<Value>>,
 	marker: bool,
 ) -> Result<()> {
-	tx.set_key(
-		&ikb.new_bg_key(generation, ticket, 0),
-		&Appending {
-			old_values,
-			new_values: None,
-			id: id.clone(),
-			count_cond_match: None,
-		},
-	)
-	.await?;
+	let appending = Appending {
+		old_values,
+		new_values: None,
+		id: id.clone(),
+		count_cond_match: None,
+	};
+	queue_in_previous_encoding(tx, ikb, generation, ticket, appending, marker).await
+}
+
+/// Queues `appending` at `ticket`, and a marker for it in the spelling a
+/// previous release used.
+async fn queue_in_previous_encoding(
+	tx: &crate::kvs::Transaction,
+	ikb: &IndexKeyBase,
+	generation: BuildGeneration,
+	ticket: BuildTicket,
+	appending: Appending,
+	marker: bool,
+) -> Result<()> {
 	if marker {
 		tx.set(
-			Key::from(primary_append_key_in_previous_encoding(ns, db, table, ix, generation, id)?),
+			Key::from(primary_append_key_in_previous_encoding(ikb, generation, &appending.id)?),
 			PrimaryAppendingTicket {
 				ticket,
 				mutation_seq: 0,
@@ -9134,7 +9133,7 @@ async fn queue_with_marker_in_previous_encoding(
 		)
 		.await?;
 	}
-	Ok(())
+	tx.set_key(&ikb.new_bg_key(generation, ticket, 0), &appending).await
 }
 
 /// The ids `[1]`, `[1, NONE]`, … with `len` links, each of whose keys under this
@@ -9177,7 +9176,7 @@ async fn a_chain_of_aliasing_markers_is_rebuilt() -> Result<()> {
 	for link in chain.windows(2) {
 		assert_eq!(
 			*ikb.new_bp_key(generation, &link[0]).encode_key()?,
-			*primary_append_key_in_previous_encoding(ns, db, &table, ix_id, generation, &link[1])?,
+			*primary_append_key_in_previous_encoding(&ikb, generation, &link[1])?,
 			"each link must occupy the key the one before it belongs at"
 		);
 	}
@@ -9186,7 +9185,6 @@ async fn a_chain_of_aliasing_markers_is_rebuilt() -> Result<()> {
 		queue_with_marker_in_previous_encoding(
 			&tx,
 			&ikb,
-			(ns, db, &table, ix_id),
 			generation,
 			ticket as BuildTicket + 1,
 			id,
@@ -9245,29 +9243,9 @@ async fn a_record_left_without_a_marker_gets_one_from_its_queued_mutation() -> R
 
 	let tx = ds.transaction(TransactionType::Write).await?;
 	// `[1, NONE]`'s marker in the previous spelling, at the key `[1]`'s belongs at.
-	queue_with_marker_in_previous_encoding(
-		&tx,
-		&ikb,
-		(ns, db, &table, ix_id),
-		generation,
-		9,
-		&one_none,
-		None,
-		true,
-	)
-	.await?;
+	queue_with_marker_in_previous_encoding(&tx, &ikb, generation, 9, &one_none, None, true).await?;
 	// `[1]` was written after it and found that key taken.
-	queue_with_marker_in_previous_encoding(
-		&tx,
-		&ikb,
-		(ns, db, &table, ix_id),
-		generation,
-		11,
-		&one,
-		None,
-		false,
-	)
-	.await?;
+	queue_with_marker_in_previous_encoding(&tx, &ikb, generation, 11, &one, None, false).await?;
 	tx.commit().await?;
 
 	building.build_generation.store(generation, Ordering::Release);
@@ -9305,6 +9283,226 @@ async fn scan_records(
 	Ok(values)
 }
 
+/// A queued mutation of `id` from one state to another, each present or
+/// absent, which is all a COUNT index without a predicate reads of them.
+fn mutation(id: &RecordIdKey, old: bool, new: bool) -> Appending {
+	Appending {
+		old_values: old.then(Vec::new),
+		new_values: new.then(Vec::new),
+		id: id.clone(),
+		count_cond_match: None,
+	}
+}
+
+/// The ids `[n, s]` the COUNT tests mark: the older spelling of each sorts
+/// after the keys of every `[n, …]` record under this release.
+fn number_then_string(n: i64, s: &str) -> RecordIdKey {
+	RecordIdKey::Array(vec![Value::Number(crate::val::Number::Int(n)), Value::from(s)].into())
+}
+
+/// The generation the COUNT tests' builds own.
+const COUNT_GENERATION: BuildGeneration = 1;
+
+/// A build of the COUNT index `ic` on table `t`, owning [`COUNT_GENERATION`],
+/// over what `sql` defined and wrote.
+struct CountBuild {
+	ds: Arc<Datastore>,
+	session: Session,
+	ikb: IndexKeyBase,
+	building: Building,
+}
+
+impl CountBuild {
+	async fn new(sql: &str) -> Result<Self> {
+		let (ds, session) = new_index_test_ds().await?;
+		execute_all(&ds, &session, sql).await?;
+		let (ns, db, table, ic) = get_table_index(&ds, "t", "ic").await?;
+		let ikb = IndexKeyBase::new(ns, db, table.clone(), ic.index_id);
+		let building = new_building_for_index(&ds, &session, ns, db, &table, ic).await?;
+		building.build_generation.store(COUNT_GENERATION, Ordering::Release);
+		Ok(Self {
+			ds,
+			session,
+			ikb,
+			building,
+		})
+	}
+
+	/// The key this release marks `id` at.
+	fn own_key(&self, id: &RecordIdKey) -> Result<Vec<u8>> {
+		Ok(self.ikb.new_bp_key(COUNT_GENERATION, id).encode_key()?.to_vec())
+	}
+
+	/// The key an older node marks `id` at.
+	fn older_key(&self, id: &RecordIdKey) -> Result<Vec<u8>> {
+		primary_append_key_in_previous_encoding(&self.ikb, COUNT_GENERATION, id)
+	}
+
+	/// Queues `appending` at `ticket`, marked the way an older node marks it.
+	async fn queue_older(
+		&self,
+		tx: &crate::kvs::Transaction,
+		ticket: BuildTicket,
+		appending: Appending,
+	) -> Result<()> {
+		queue_in_previous_encoding(tx, &self.ikb, COUNT_GENERATION, ticket, appending, true).await
+	}
+
+	/// Queues `appending` at `ticket`, marked at its record's own key.
+	async fn queue_own(
+		&self,
+		tx: &crate::kvs::Transaction,
+		ticket: BuildTicket,
+		appending: Appending,
+	) -> Result<()> {
+		let ptr = PrimaryAppendingTicket {
+			ticket,
+			mutation_seq: 0,
+		};
+		tx.set_key(&self.ikb.new_bp_key(COUNT_GENERATION, &appending.id), &ptr).await?;
+		self.queue_unmarked(tx, ticket, appending).await
+	}
+
+	/// Queues `appending` at `ticket` unmarked, as a writer queues a later
+	/// mutation of a record that already has a marker.
+	async fn queue_unmarked(
+		&self,
+		tx: &crate::kvs::Transaction,
+		ticket: BuildTicket,
+		appending: Appending,
+	) -> Result<()> {
+		tx.set_key(&self.ikb.new_bg_key(COUNT_GENERATION, ticket, 0), &appending).await
+	}
+
+	/// The table's live records, as the initial scan pages them.
+	async fn records(&self) -> Result<Vec<(Vec<u8>, crate::kvs::Val)>> {
+		scan_records(&self.ds, self.ikb.ns(), self.ikb.db(), self.ikb.table()).await
+	}
+
+	/// Runs the initial scan over `batches` of the table's records, in order,
+	/// returning what each batch and the tail after them indexed, and the
+	/// count they baselined.
+	async fn scan_in_batches(
+		&self,
+		batches: &[&[(Vec<u8>, crate::kvs::Val)]],
+	) -> Result<(Vec<usize>, i64)> {
+		let mut scan = CountScan::start(&self.building).await?;
+		let mut indexed = Vec::new();
+		for values in batches {
+			indexed.push(scan.batch(values).await?);
+		}
+		indexed.push(scan.tail().await?);
+		let baseline = scan.baseline();
+		scan.cancel().await?;
+		Ok((indexed, baseline))
+	}
+}
+
+/// A COUNT build's initial scan and its merge of queued old states, driven a
+/// batch at a time in one transaction, as the builder drives them.
+struct CountScan<'a> {
+	building: &'a Building,
+	ctx: crate::ctx::FrozenContext,
+	progress: Option<super::replay::CountPrimaryProgress>,
+	indexed: usize,
+}
+
+impl<'a> CountScan<'a> {
+	async fn start(building: &'a Building) -> Result<Self> {
+		Ok(Self {
+			building,
+			ctx: building.new_write_tx_ctx().await?,
+			progress: Some(super::replay::CountPrimaryProgress::default()),
+			indexed: 0,
+		})
+	}
+
+	/// Scans `values`, the next batch of records, returning what it indexed.
+	async fn batch(&mut self, values: &[(Vec<u8>, crate::kvs::Val)]) -> Result<usize> {
+		let tx = self.ctx.tx();
+		let n = self
+			.building
+			.index_initial_batch(
+				&self.ctx,
+				&tx,
+				values,
+				self.indexed,
+				&mut false,
+				&mut self.progress,
+			)
+			.await?;
+		self.indexed += n;
+		Ok(n)
+	}
+
+	/// Merges the queued old states past the last batch, returning what it
+	/// indexed.
+	async fn tail(&mut self) -> Result<usize> {
+		let tx = self.ctx.tx();
+		let n = self
+			.building
+			.index_remaining_count_primary_appendings(
+				&self.ctx,
+				&tx,
+				&mut self.progress,
+				self.indexed,
+			)
+			.await?;
+		self.indexed += n;
+		Ok(n)
+	}
+
+	/// The count the scan has baselined so far.
+	fn baseline(&self) -> i64 {
+		let building = self.building;
+		self.ctx.tx().pending_count_delta(
+			building.ix_key.ns,
+			building.ix_key.db,
+			building.ikb.table(),
+			building.ix.index_id,
+		)
+	}
+
+	async fn cancel(self) -> Result<()> {
+		self.ctx.tx().cancel().await
+	}
+}
+
+/// The key a COUNT build reads an older node's marker at is the one that node
+/// writes it at, and there is one only for an id holding a number.
+#[test]
+fn a_markers_older_spelling_is_the_key_an_older_node_writes() -> Result<()> {
+	let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), TableName::from("t"), IndexId(3));
+	let older = |id: &RecordIdKey| -> Result<Option<Vec<u8>>> {
+		let key = ikb.new_bp_key_in_previous_spelling(COUNT_GENERATION, id)?;
+		Ok(key.map(|key| key.as_bytes().to_vec()))
+	};
+	for id in [&aliasing_chain(1)[0], &aliasing_chain(2)[1], &number_then_string(42, "intro")] {
+		let written = primary_append_key_in_previous_encoding(&ikb, COUNT_GENERATION, id)?;
+		assert_eq!(older(id)?, Some(written), "{id:?}");
+	}
+	// The bytes v3.2.4 writes for this marker, whose `Bp` key encodes every
+	// field under the index format: a change to how that format spells a number
+	// would otherwise move the key the scan reads and the helper above alike.
+	assert_eq!(
+		older(&number_then_string(42, "intro"))?,
+		Some(
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*t\x00!bp\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x01\
+			  \x05\x05\xa0\x19\x1aS\x0f\x01\x00\x00\x06intro\x00\x00"
+				.to_vec()
+		)
+	);
+	let plain = [
+		RecordIdKey::String("plain".into()),
+		RecordIdKey::Number(7),
+		RecordIdKey::Array(vec![Value::from("a"), Value::None].into()),
+	];
+	for id in &plain {
+		assert_eq!(older(id)?, None, "{id:?}");
+	}
+	Ok(())
+}
+
 /// A COUNT build merges a marker an older node wrote by the record its queued
 /// mutation names, whatever its key decodes as or whether it decodes at all.
 ///
@@ -9316,59 +9514,714 @@ async fn scan_records(
 #[tokio::test(flavor = "multi_thread")]
 #[test_log::test]
 async fn a_count_build_merges_older_markers_by_their_queued_mutation() -> Result<()> {
-	let (ds, session) = new_index_test_ds().await?;
-	execute_all(
-		&ds,
-		&session,
+	let b = CountBuild::new(
 		"DEFINE TABLE t SCHEMALESS;
 		 DEFINE INDEX ic ON t COUNT;
 		 CREATE t:[1] SET a = 1;",
 	)
 	.await?;
-	let (ns, db, table, ic) = get_table_index(&ds, "t", "ic").await?;
-	let ix_id = ic.index_id;
-	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix_id);
-	let building = new_building_for_index(&ds, &session, ns, db, &table, ic).await?;
-	let generation: BuildGeneration = 1;
-	let one_none = aliasing_chain(2).pop().expect("two links");
-	let compound = RecordIdKey::Array(
-		vec![Value::Number(crate::val::Number::Int(42)), Value::from("intro")].into(),
-	);
+	let (one_none, intro) =
+		(aliasing_chain(2).pop().expect("two links"), number_then_string(42, "intro"));
 	// The premise: the aliasing key is the live record's, and sorts in its span.
-	assert_eq!(
-		*ikb.new_bp_key(generation, &aliasing_chain(1)[0]).encode_key()?,
-		*primary_append_key_in_previous_encoding(ns, db, &table, ix_id, generation, &one_none)?,
-	);
+	assert_eq!(b.own_key(&aliasing_chain(1)[0])?, b.older_key(&one_none)?);
 
 	// Both records were deleted during the build, and neither is live.
-	let tx = ds.transaction(TransactionType::Write).await?;
-	for (ticket, id) in [(9, &one_none), (10, &compound)] {
-		queue_with_marker_in_previous_encoding(
-			&tx,
-			&ikb,
-			(ns, db, &table, ix_id),
-			generation,
-			ticket,
-			id,
-			Some(Vec::new()),
-			true,
-		)
-		.await?;
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_older(&tx, 9, mutation(&one_none, true, false)).await?;
+	b.queue_older(&tx, 10, mutation(&intro, true, false)).await?;
+	tx.commit().await?;
+
+	let values = b.records().await?;
+	assert_eq!(values.len(), 1, "only `t:[1]` is live");
+	let mut scan = CountScan::start(&b.building).await?;
+	assert_eq!(
+		scan.batch(&values).await?,
+		1,
+		"the live record only: `[1, NONE]`'s marker reads as `[1]` but waits for its own span"
+	);
+	assert_eq!(
+		scan.tail().await?,
+		2,
+		"the deleted `[1, NONE]` in its own span, and the deleted `[42, 'intro']`, whose key \
+		 does not decode"
+	);
+	assert_eq!(scan.baseline(), 3);
+	scan.cancel().await
+}
+
+/// A marker an older node wrote in a span before its record's is taken up in
+/// the record's own span.
+///
+/// `[1, NONE]`'s marker in the older spelling sits at `[1]`'s key, in the span
+/// of the batch that scans `[1]`. `[1, NONE]` is live, and baselined from that
+/// marker's queued old state when a batch later scans it: counting that state
+/// with `[1]`'s batch as well would count the record twice.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_build_takes_an_early_marker_up_in_its_records_span() -> Result<()> {
+	let b = CountBuild::new(
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE INDEX ic ON t COUNT;
+		 CREATE t:[1] SET a = 1;
+		 CREATE t:[1, NONE] SET a = 1;",
+	)
+	.await?;
+	let one_none = aliasing_chain(2).pop().expect("two links");
+
+	// An update of the live `[1, NONE]`, queued by an older node.
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_older(&tx, 9, mutation(&one_none, true, true)).await?;
+	tx.commit().await?;
+
+	let values = b.records().await?;
+	assert_eq!(values.len(), 2, "`[1]` and `[1, NONE]` are both live");
+	let (indexed, baseline) = b.scan_in_batches(&[&values[..1], &values[1..]]).await?;
+	assert_eq!(indexed, vec![1, 1, 0], "each live record once, and the marker not at all");
+	assert_eq!(baseline, 2);
+	Ok(())
+}
+
+/// A marker an older node wrote in a span after its record's counts only for a
+/// record that is gone.
+///
+/// The older spelling of `[42, 'intro']` sorts after the keys of every
+/// `[42, …]` record, so with `[42, 'k']` ending a batch the markers of
+/// `[42, 'intro']` and `[42, 'b']` fall in the next span, after their records'
+/// own span. The scan baselined `[42, 'intro']` there from its marker's queued
+/// old state, so the marker counts for nothing where it sorts; `[42, 'b']` is
+/// gone, so its queued old state is what the baseline needs.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_build_counts_a_late_marker_only_for_a_record_that_is_gone() -> Result<()> {
+	let b = CountBuild::new(
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE INDEX ic ON t COUNT;
+		 CREATE t:[42, 'intro'] SET a = 1;
+		 CREATE t:[42, 'k'] SET a = 1;
+		 CREATE t:[43, 'x'] SET a = 1;",
+	)
+	.await?;
+	let (live, gone) = (number_then_string(42, "intro"), number_then_string(42, "b"));
+	// The premise: both older keys land after `[42, 'k']` and before `[43, 'x']`.
+	for marked in [&live, &gone] {
+		let old = b.older_key(marked)?;
+		assert!(old > b.own_key(&number_then_string(42, "k"))?);
+		assert!(old < b.own_key(&number_then_string(43, "x"))?);
 	}
+
+	// An update of the live record and a delete of the other, queued by an older node.
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_older(&tx, 9, mutation(&live, true, true)).await?;
+	b.queue_older(&tx, 10, mutation(&gone, true, false)).await?;
+	tx.commit().await?;
+
+	let values = b.records().await?;
+	assert_eq!(values.len(), 3);
+	let (indexed, baseline) = b.scan_in_batches(&[&values[..2], &values[2..]]).await?;
+	assert_eq!(
+		indexed,
+		vec![2, 2, 0],
+		"the two live `[42, …]`, then `[43, 'x']` and the gone `[42, 'b']`, and nothing twice"
+	);
+	assert_eq!(baseline, 4);
+	Ok(())
+}
+
+/// A marker an older node wrote is ignored for a record whose own key holds a
+/// marker for it, and only then.
+///
+/// `[42, 'b']` has both, and must be counted once. The key `[1]`'s marker would
+/// sit at holds `[1, NONE]`'s marker in the older spelling instead, which names
+/// another record: `[1]`'s own marker, in the older spelling elsewhere, is still
+/// the one that counts it.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_build_trusts_an_own_key_marker_only_for_its_own_record() -> Result<()> {
+	let b = CountBuild::new("DEFINE TABLE t SCHEMALESS; DEFINE INDEX ic ON t COUNT;").await?;
+	let [one, one_none] = <[RecordIdKey; 2]>::try_from(aliasing_chain(2)).expect("two links");
+	let both = number_then_string(42, "b");
+
+	// Every record was deleted during the build; none is live.
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_older(&tx, 1, mutation(&one, true, false)).await?;
+	b.queue_older(&tx, 2, mutation(&one_none, true, false)).await?;
+	// `[42, 'b']`'s own marker, and a later mutation marked in the older spelling.
+	b.queue_own(&tx, 3, mutation(&both, true, false)).await?;
+	b.queue_older(&tx, 4, mutation(&both, true, false)).await?;
+	tx.commit().await?;
+
+	let (indexed, baseline) = b.scan_in_batches(&[]).await?;
+	assert_eq!(indexed, vec![3], "`[1]`, `[1, NONE]` and `[42, 'b']`, each once");
+	assert_eq!(baseline, 3);
+	Ok(())
+}
+
+/// A COUNT WHERE build baselines a record an older node changed from the
+/// predicate state its queued mutation carries, not from the record as scanned.
+///
+/// Every record matched until an older node updated it to stop matching, and
+/// this release then deleted `[42, 'e']` and `[44, 'd']`, marking that at their
+/// own keys. Replay subtracts each of them once, so each has to be in the
+/// baseline. The older markers sort in a span before their record's
+/// (`[1, NONE]`), after it (`[42, 'intro']`, `[42, 'e']`) or in it
+/// (`[44, 'd']`); the deleted records' own markers are the later of their two.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_where_build_baselines_a_changed_record_from_its_queued_state() -> Result<()> {
+	let b = CountBuild::new(
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE INDEX ic ON t COUNT WHERE a = 1;
+		 CREATE t:[1] SET a = 1;
+		 CREATE t:[1, NONE] SET a = 2;
+		 CREATE t:[42, 'intro'] SET a = 2;
+		 CREATE t:[42, 'k'] SET a = 1;
+		 CREATE t:[43, 'x'] SET a = 1;
+		 CREATE t:[45, 'z'] SET a = 1;",
+	)
+	.await?;
+	let one_none = aliasing_chain(2).pop().expect("two links");
+	let intro = number_then_string(42, "intro");
+	let (late, in_span) = (number_then_string(42, "e"), number_then_string(44, "d"));
+	let stopped_matching = |id: &RecordIdKey| Appending {
+		count_cond_match: Some((true, false)),
+		..mutation(id, true, true)
+	};
+	let deleted = |id: &RecordIdKey| Appending {
+		count_cond_match: Some((false, false)),
+		..mutation(id, true, false)
+	};
+
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	for (ticket, changed) in [(1, &one_none), (2, &intro), (3, &late), (5, &in_span)] {
+		b.queue_older(&tx, ticket, stopped_matching(changed)).await?;
+	}
+	b.queue_own(&tx, 4, deleted(&late)).await?;
+	b.queue_own(&tx, 6, deleted(&in_span)).await?;
+	tx.commit().await?;
+
+	let values = b.records().await?;
+	assert_eq!(values.len(), 6, "every record but `[42, 'e']` and `[44, 'd']` is live");
+	let (indexed, baseline) =
+		b.scan_in_batches(&[&values[..1], &values[1..4], &values[4..]]).await?;
+	assert_eq!(baseline, 8, "each record, as it stood before its queued mutations");
+	assert_eq!(
+		indexed,
+		vec![1, 4, 3, 0],
+		"`[1]`; `[1, NONE]`, `[42, 'intro']`, `[42, 'k']` and the gone `[42, 'e']`; \
+		 `[43, 'x']`, `[45, 'z']` and the gone `[44, 'd']`"
+	);
+	Ok(())
+}
+
+/// A COUNT build baselines a record from the first of its queued mutations when
+/// both an older node and this release marked one.
+///
+/// An older node deleted `[42, 'b']` and this release recreated it; this release
+/// created `[42, 'c']` and an older node then updated it. Each record's own
+/// marker is this release's, which is the later mutation for `[42, 'b']` only.
+/// `t:plain`, which both releases spell alike, shares their batch.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_build_baselines_from_the_first_of_two_markers() -> Result<()> {
+	let b = CountBuild::new(
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE INDEX ic ON t COUNT;
+		 CREATE t:plain SET a = 1;
+		 CREATE t:[42, 'b'] SET a = 1;
+		 CREATE t:[42, 'c'] SET a = 1;
+		 CREATE t:[42, 'k'] SET a = 1;",
+	)
+	.await?;
+	let (recreated, created) = (number_then_string(42, "b"), number_then_string(42, "c"));
+
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_older(&tx, 1, mutation(&recreated, true, false)).await?;
+	b.queue_own(&tx, 2, mutation(&recreated, false, true)).await?;
+	b.queue_own(&tx, 3, mutation(&created, false, true)).await?;
+	b.queue_older(&tx, 4, mutation(&created, true, true)).await?;
+	tx.commit().await?;
+
+	let values = b.records().await?;
+	assert_eq!(values.len(), 4);
+	let (indexed, baseline) = b.scan_in_batches(&[&values]).await?;
+	assert_eq!(baseline, 3, "all but `[42, 'c']`, which did not exist yet");
+	assert_eq!(indexed, vec![4, 0], "the live records once, and the older markers not at all");
+	Ok(())
+}
+
+/// A COUNT build baselines a record an older node created as absent.
+///
+/// The older node's marker for `[42, 'n']` sorts after the record's span, so
+/// the scan finds it only by reading the older spelling; indexing the record as
+/// it stands would count the create twice, once there and once in replay.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_build_baselines_a_record_an_older_node_created_as_absent() -> Result<()> {
+	let b = CountBuild::new(
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE INDEX ic ON t COUNT;
+		 CREATE t:[42, 'k'] SET a = 1;
+		 CREATE t:[42, 'n'] SET a = 1;",
+	)
+	.await?;
+
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_older(&tx, 1, mutation(&number_then_string(42, "n"), false, true)).await?;
+	tx.commit().await?;
+
+	let values = b.records().await?;
+	assert_eq!(values.len(), 2);
+	let (indexed, baseline) = b.scan_in_batches(&[&values]).await?;
+	assert_eq!(baseline, 1, "`[42, 'k']` only");
+	assert_eq!(indexed, vec![2, 0]);
+	Ok(())
+}
+
+/// A marker an older node wrote that sorts after its record's span is skipped
+/// when that span settled the record, whatever became of the record since.
+///
+/// `[42, 'a']`'s span baselined it from its older marker, and `[42, 'c']`'s
+/// from the record as it stood; both records are then deleted before the merge
+/// reaches their older markers. `[42, 'c']` was first updated by this release,
+/// which marked it at its own key before the older node's delete.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_build_skips_a_late_marker_its_records_span_settled() -> Result<()> {
+	let b = CountBuild::new(
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE INDEX ic ON t COUNT;
+		 CREATE t:[42, 'a'] SET a = 1;
+		 CREATE t:[42, 'c'] SET a = 1;
+		 CREATE t:[42, 'k'] SET a = 1;",
+	)
+	.await?;
+	let (taken, updated) = (number_then_string(42, "a"), number_then_string(42, "c"));
+
+	// An older node's update of `[42, 'a']`, before the scan.
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_older(&tx, 1, mutation(&taken, true, true)).await?;
+	tx.commit().await?;
+
+	let values = b.records().await?;
+	assert_eq!(values.len(), 3);
+	let mut scan = CountScan::start(&b.building).await?;
+	assert_eq!(scan.batch(&values).await?, 3);
+
+	// After the batch: the older node deletes `[42, 'a']`, whose older key
+	// already holds its marker; this release updates `[42, 'c']` and an older
+	// node deletes it.
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_unmarked(&tx, 2, mutation(&taken, true, false)).await?;
+	b.queue_own(&tx, 3, mutation(&updated, true, true)).await?;
+	b.queue_older(&tx, 4, mutation(&updated, true, false)).await?;
+	tx.commit().await?;
+	execute_all(&b.ds, &b.session, "DELETE t:[42, 'a']; DELETE t:[42, 'c'];").await?;
+
+	assert_eq!(scan.tail().await?, 0, "neither older marker counts where it sorts");
+	assert_eq!(scan.baseline(), 3, "each record once, as its span had it");
+	scan.cancel().await
+}
+
+/// A marker an older node wrote that sorts after its record's span still counts
+/// when the record's own key marks only a later mutation.
+///
+/// An older node deleted `[42, 'g']` before its span, which found nothing to
+/// count. This release then recreated and deleted it, marking the recreate at
+/// the record's own key: that marker stands for nothing before the delete.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_build_counts_a_late_marker_whose_own_marker_came_after() -> Result<()> {
+	let b = CountBuild::new(
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE INDEX ic ON t COUNT;
+		 CREATE t:[42, 'k'] SET a = 1;",
+	)
+	.await?;
+	let gone = number_then_string(42, "g");
+
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_older(&tx, 1, mutation(&gone, true, false)).await?;
+	tx.commit().await?;
+
+	let values = b.records().await?;
+	assert_eq!(values.len(), 1, "only `[42, 'k']` is live");
+	let mut scan = CountScan::start(&b.building).await?;
+	assert_eq!(scan.batch(&values).await?, 1);
+
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_own(&tx, 2, mutation(&gone, false, true)).await?;
+	b.queue_unmarked(&tx, 3, mutation(&gone, true, false)).await?;
+	tx.commit().await?;
+
+	assert_eq!(scan.tail().await?, 1, "`[42, 'g']`, as it stood before the older node's delete");
+	assert_eq!(scan.baseline(), 2);
+	scan.cancel().await
+}
+
+/// A marker an older node wrote in a span before its record's is not counted
+/// when, by the record's span, the record's own key marks a mutation of it.
+///
+/// An older node deleted `[1, NONE]`, marking that at `[1]`'s key, which the
+/// merge meets with `[1]`'s batch and sets aside. This release then recreated
+/// and deleted the record, marking it at its own key, which the merge meets in
+/// the record's span and takes up together with the older marker.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_build_takes_an_early_marker_up_once_its_record_has_its_own() -> Result<()> {
+	let b = CountBuild::new(
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE INDEX ic ON t COUNT;
+		 CREATE t:[1] SET a = 1;",
+	)
+	.await?;
+	let one_none = aliasing_chain(2).pop().expect("two links");
+
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_older(&tx, 1, mutation(&one_none, true, false)).await?;
+	tx.commit().await?;
+
+	let values = b.records().await?;
+	assert_eq!(values.len(), 1, "only `[1]` is live");
+	let mut scan = CountScan::start(&b.building).await?;
+	assert_eq!(scan.batch(&values).await?, 1, "`[1]`, with `[1, NONE]`'s marker set aside");
+
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_own(&tx, 2, mutation(&one_none, false, true)).await?;
+	b.queue_unmarked(&tx, 3, mutation(&one_none, true, false)).await?;
+	tx.commit().await?;
+
+	assert_eq!(scan.tail().await?, 1, "`[1, NONE]` once");
+	assert_eq!(scan.baseline(), 2);
+	scan.cancel().await
+}
+
+/// A marker an older node wrote after its record's span is skipped while the
+/// record is there, since that span baselined the record as it stood.
+///
+/// The scan baselines `[42, 'a']` live, and an older node's update of it is
+/// marked only afterwards, at a key that sorts after the span.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_build_skips_a_late_marker_written_after_its_records_span() -> Result<()> {
+	let b = CountBuild::new(
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE INDEX ic ON t COUNT;
+		 CREATE t:[42, 'a'] SET a = 1;
+		 CREATE t:[42, 'k'] SET a = 1;",
+	)
+	.await?;
+	let values = b.records().await?;
+	let mut scan = CountScan::start(&b.building).await?;
+	assert_eq!(scan.batch(&values).await?, 2);
+
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_older(&tx, 1, mutation(&number_then_string(42, "a"), true, true)).await?;
+	tx.commit().await?;
+
+	assert_eq!(scan.tail().await?, 0, "`[42, 'a']` was there when its span was scanned");
+	assert_eq!(scan.baseline(), 2);
+	scan.cancel().await
+}
+
+/// A marker set aside for its record's span defers only to a marker at the
+/// record's own key that names the record.
+///
+/// `[1, NONE]`'s older marker sits at `[1]`'s key, and `[1, NONE]`'s own key
+/// holds the older marker of `[1, NONE, NONE]`. Both records are gone.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_set_aside_marker_defers_only_to_its_own_records_marker() -> Result<()> {
+	let b = CountBuild::new(
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE INDEX ic ON t COUNT;
+		 CREATE t:[1] SET a = 1;",
+	)
+	.await?;
+	let [_, one_none, one_none_none] =
+		<[RecordIdKey; 3]>::try_from(aliasing_chain(3)).expect("three links");
+	// The premise: the two older markers sit at `[1]`'s and `[1, NONE]`'s keys.
+	assert_eq!(b.older_key(&one_none_none)?, b.own_key(&one_none)?);
+
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_older(&tx, 1, mutation(&one_none, true, false)).await?;
+	b.queue_older(&tx, 2, mutation(&one_none_none, true, false)).await?;
+	tx.commit().await?;
+
+	let values = b.records().await?;
+	assert_eq!(values.len(), 1, "only `[1]` is live");
+	let (indexed, baseline) = b.scan_in_batches(&[&values]).await?;
+	assert_eq!(indexed, vec![1, 2], "`[1]`, then `[1, NONE]` and `[1, NONE, NONE]`");
+	assert_eq!(baseline, 3);
+	Ok(())
+}
+
+/// A marker met after its record's span defers only to an earlier marker at the
+/// record's own key that names the record.
+///
+/// `[42, 'a']`'s own key holds the older marker of `[42, NONE, 'a']`, another
+/// record's earlier mutation, and `[42, 'a']`'s own older marker sorts after
+/// the span. Both records are gone.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_late_marker_defers_only_to_its_own_records_marker() -> Result<()> {
+	let b = CountBuild::new(
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE INDEX ic ON t COUNT;
+		 CREATE t:[42, 'k'] SET a = 1;",
+	)
+	.await?;
+	let late = number_then_string(42, "a");
+	let alias = RecordIdKey::Array(
+		vec![Value::Number(crate::val::Number::Int(42)), Value::None, Value::from("a")].into(),
+	);
+	// The premise: the other record's older marker sits at `[42, 'a']`'s key.
+	assert_eq!(b.older_key(&alias)?, b.own_key(&late)?);
+
+	let tx = b.ds.transaction(TransactionType::Write).await?;
+	b.queue_older(&tx, 1, mutation(&alias, true, false)).await?;
+	b.queue_older(&tx, 2, mutation(&late, true, false)).await?;
+	tx.commit().await?;
+
+	let values = b.records().await?;
+	assert_eq!(values.len(), 1, "only `[42, 'k']` is live");
+	let (indexed, baseline) = b.scan_in_batches(&[&values]).await?;
+	assert_eq!(indexed, vec![2, 1], "`[42, 'k']` and `[42, NONE, 'a']`, then `[42, 'a']`");
+	assert_eq!(baseline, 3);
+	Ok(())
+}
+
+/// Leaves a generation-2 build of `ikb`'s index `Building` under an expired
+/// owner with no index data, checkpointed after `cursor` if one is given, so
+/// that a takeover picks it up.
+async fn strand_count_build(
+	ds: &Datastore,
+	ikb: &IndexKeyBase,
+	cursor: Option<RecordIdKey>,
+) -> Result<()> {
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.del_prefix_key(&IdxRoot {
+		ns: ikb.ns(),
+		db: ikb.db(),
+		tb: Cow::Borrowed(ikb.table()),
+		ix: ikb.index(),
+	})
+	.await?;
+	tx.set_key(
+		&ikb.new_bs_key(),
+		&IndexBuildState {
+			generation: 2,
+			phase: IndexBuildPhase::Building,
+			owner: Some(Uuid::new_v4()),
+			next_ticket: 0,
+			initial_complete: false,
+			updated_at: expired,
+			owner_heartbeat_at: Some(expired),
+			error: None,
+			report_status: Some(IndexBuildReportStatus::Indexing),
+			initial: cursor.as_ref().map(|_| 1),
+			updated: None,
+			pending: None,
+			initial_cursor: cursor,
+		},
+	)
+	.await?;
+	tx.commit().await
+}
+
+/// Takes over the build of `ix` on `table` and runs it to the end.
+async fn take_over_build(
+	ds: &Datastore,
+	session: &Session,
+	(ns, db, table, ix): (NamespaceId, DatabaseId, &TableName, &Arc<IndexDefinition>),
+) -> Result<()> {
+	let build = new_building_for_index(ds, session, ns, db, table, Arc::clone(ix)).await?;
+	let acquired = build
+		.acquire_build_state()
+		.await?
+		.expect("expired build state should be available for takeover");
+	build.run_acquired(acquired).await
+}
+
+/// A COUNT build taken over from a checkpoint rescans when resuming would leave
+/// an older node's marker unmet.
+///
+/// An older node deleted `[42, 'intro']` before the scan, and its marker sorts
+/// after `[42, 'k']`, where the previous owner's last batch ended: the next span
+/// would have counted the record. A resume rebuilds that marker at the
+/// record's own key, behind the checkpoint, where nothing meets it again.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_takeover_rescans_rather_than_leave_an_older_marker_unmet() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 CREATE t:[42, 'k'] SET a = 1;
+		 CREATE t:[43, 'x'] SET a = 1;
+		 DEFINE INDEX ic ON t COUNT;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ic").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	strand_count_build(&ds, &ikb, Some(number_then_string(42, "k"))).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
+	let delete = mutation(&number_then_string(42, "intro"), true, false);
+	queue_in_previous_encoding(&tx, &ikb, 2, 1, delete, true).await?;
+	tx.commit().await?;
+
+	take_over_build(&ds, &session, (ns, db, &table, &ix)).await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online);
+	// A resume would report 1 checkpointed and `[43, 'x']`.
+	assert_eq!(state.initial, Some(3), "both live records and `[42, 'intro']`, rescanned");
+	assert_eq!(count_query_value(&ds, &session, "SELECT count() FROM t GROUP ALL").await?, 2);
+	Ok(())
+}
+
+/// A COUNT takeover of a checkpoint a previous release's owner wrote rescans
+/// when one of its markers names a record at or before the cursor.
+///
+/// That owner's merge covered its markers in the index format's order, which
+/// puts the gone `[1, 'z']`'s marker after `[1f]`'s key under this release,
+/// although the record sorts before `[1f]`. Resuming after `[1f]` would never
+/// count it.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_count_takeover_rescans_a_checkpoint_that_would_lose_a_record() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 CREATE t:[1, 'a'] SET a = 1;
+		 CREATE t:[1f] SET a = 1;
+		 CREATE t:[2] SET a = 1;
+		 DEFINE INDEX ic ON t COUNT;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ic").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let float = RecordIdKey::Array(vec![Value::Number(crate::val::Number::Float(1.0))].into());
+	let gone = RecordIdKey::Array(
+		vec![Value::Number(crate::val::Number::Int(1)), Value::from("z")].into(),
+	);
+	// The premise: the gone record sorts before the cursor, its older key after.
+	assert!(RecordIdentity(gone.clone()) < RecordIdentity(float.clone()));
+	assert!(
+		primary_append_key_in_previous_encoding(&ikb, 2, &gone)?
+			> ikb.new_bp_key(2, &float).encode_key()?.to_vec()
+	);
+	strand_count_build(&ds, &ikb, Some(float)).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
+	queue_in_previous_encoding(&tx, &ikb, 2, 1, mutation(&gone, true, false), true).await?;
+	tx.commit().await?;
+
+	take_over_build(&ds, &session, (ns, db, &table, &ix)).await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online);
+	assert_eq!(state.initial, Some(4), "the three live records and `[1, 'z']`, rescanned");
+	assert_eq!(count_query_value(&ds, &session, "SELECT count() FROM t GROUP ALL").await?, 3);
+	Ok(())
+}
+
+/// A COUNT build's batch that fails to commit is retried from the merge's
+/// progress before it, so the retry merges the same span.
+///
+/// `t:b` is deleted while the build is in flight, marked at its own key in the
+/// batch's span, and the batch's first commit is refused.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_retried_count_batch_merges_its_span_again() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 CREATE t:b SET a = 1;
+		 CREATE t:k SET a = 1;
+		 DEFINE INDEX ic ON t COUNT;",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "ic").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	strand_count_build(&ds, &ikb, None).await?;
+	execute_all_retrying_conflicts(&ds, &session, "DELETE t:b RETURN NONE").await?;
+
+	let site = RetryableConflictSite::ConcurrentIndexInitialBatch;
+	let _guard = inject_retryable_conflict(site, ds.id());
+	take_over_build(&ds, &session, (ns, db, &table, &ix)).await?;
+
+	assert_eq!(retryable_conflict_count(site, ds.id()), 0, "the batch was retried");
+	assert_eq!(count_query_value(&ds, &session, "SELECT count() FROM t GROUP ALL").await?, 1);
+	Ok(())
+}
+
+/// A build of any kind baselines a record from the queued old state an older
+/// node marked under its spelling.
+///
+/// An older node updated `[42, 'intro']` from 'old' to 'new', marking it at a
+/// key only that spelling gives the record. Indexing the record as it stands
+/// would leave replay removing an 'old' that was never indexed.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_build_of_any_kind_baselines_from_an_older_marker() -> Result<()> {
+	use surrealdb_types::Value as PublicValue;
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ia ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 CREATE t:[42, 'intro'] SET a = 'new';",
+	)
+	.await?;
+	let (ns, db, table, ia) = get_table_index(&ds, "t", "ia").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ia.index_id);
+	let building = new_building_for_index(&ds, &session, ns, db, &table, ia).await?;
+	let generation: BuildGeneration = 1;
+
+	let tx = ds.transaction(TransactionType::Write).await?;
+	let update = Appending {
+		old_values: Some(vec![Value::from("old")]),
+		new_values: Some(vec![Value::from("new")]),
+		..mutation(&number_then_string(42, "intro"), true, true)
+	};
+	queue_in_previous_encoding(&tx, &ikb, generation, 9, update, true).await?;
 	tx.commit().await?;
 	building.build_generation.store(generation, Ordering::Release);
 
 	let values = scan_records(&ds, ns, db, &table).await?;
-	assert_eq!(values.len(), 1, "only `t:[1]` is live");
-	let mut cursor = Some(None);
 	let ctx = building.new_write_tx_ctx().await?;
 	let tx = ctx.tx();
-	let batch =
-		building.index_initial_batch(&ctx, &tx, &values, 0, &mut false, &mut cursor).await?;
-	assert_eq!(batch, 2, "the live record, and the deleted `[1, NONE]` whose key reads as it");
-	let tail = building.index_remaining_count_primary_appendings(&ctx, &tx, &mut cursor, 2).await?;
-	assert_eq!(tail, 1, "the deleted `[42, 'intro']`, whose key does not decode");
-	tx.cancel().await?;
+	building.index_initial_batch(&ctx, &tx, &values, 0, &mut false, &mut None).await?;
+	tx.commit().await?;
+
+	let res = ds.execute("SELECT VALUE id FROM t WHERE a @@ 'old'", &session, None).await?;
+	let PublicValue::Array(rows) = res.into_iter().next().expect("one result").result? else {
+		anyhow::bail!("unexpected result shape");
+	};
+	assert_eq!(rows.len(), 1, "`[42, 'intro']` is baselined from its queued old state");
 	Ok(())
 }
 
@@ -9404,7 +10257,6 @@ async fn a_marker_naming_another_record_is_not_the_scanned_records_baseline() ->
 	queue_with_marker_in_previous_encoding(
 		&tx,
 		&ikb,
-		(ns, db, &table, ix_id),
 		generation,
 		9,
 		&one_none,

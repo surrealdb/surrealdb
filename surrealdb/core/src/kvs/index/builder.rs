@@ -19,6 +19,7 @@ use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local as spawn;
 use web_time::Instant;
 
+use super::replay::CountPrimaryProgress;
 use super::state::{
 	build_owner_expired, delete_durable_build_artifacts, delete_stale_build_queues,
 	durable_index_error_reason, durable_report_count, is_condition_not_met,
@@ -1545,7 +1546,8 @@ impl Building {
 	/// Takeover from `Building` with an incomplete initial scan resumes the
 	/// scan after the last per-batch checkpoint when one exists, and only
 	/// restarts it (after cleaning index data for this generation) when the
-	/// previous owner never committed a batch. Takeover from `Closing`, or
+	/// previous owner never committed a batch, or when resuming a COUNT build
+	/// would leave an older node's marker unmet. Takeover from `Closing`, or
 	/// from `Building` after `initial_complete`, skips the initial scan and
 	/// only drains durable appendings and reservations.
 	pub(super) async fn run_acquired(&self, acquired: AcquiredBuild) -> Result<()> {
@@ -1556,11 +1558,21 @@ impl Building {
 		// Resume from the durable per-batch checkpoint when one exists: every
 		// record up to the cursor was committed atomically with the cursor, so
 		// the partial index data is consistent and does not need to be wiped.
-		let resume_cursor = if scanning_initial {
+		let mut resume_cursor = if scanning_initial {
 			acquired.initial_cursor.clone()
 		} else {
 			None
 		};
+		// A COUNT build's merge counts a gone record from an older node's marker
+		// that sorts past the record's span only when a later span meets it. The
+		// rebuild of the markers that starts a resumed scan would move such a
+		// marker behind the cursor, so a build holding one rescans instead.
+		if matches!(self.ix.index, Index::Count(_))
+			&& let Some(cursor) = &resume_cursor
+			&& self.resume_strands_an_older_marker(generation, cursor).await?
+		{
+			resume_cursor = None;
+		}
 		let restarting_initial_scan = scanning_initial && resume_cursor.is_none();
 		// A restarted incomplete scan discards previous progress because it first
 		// cleans index data. Resumed and checkpoint-continued builds keep the
@@ -1695,10 +1707,16 @@ impl Building {
 			let mut next = Some(range);
 			let mut v1_appending_sentinel = false;
 			// On resume the COUNT primary-appending catch-up also continues from
-			// the checkpoint: `!bp` markers at or before the cursor were baselined
-			// atomically with the batch that covered them.
-			let mut count_primary_cursor =
-				matches!(self.ix.index, Index::Count(_)).then(|| resume_cursor.clone());
+			// the checkpoint: records at or before the cursor were baselined
+			// atomically with the batch that covered them, the rebuild above left
+			// every marker at its record's own key, and a build whose checkpoint
+			// left an older node's marker unmet was rescanned instead. A
+			// checkpoint an owner on a previous release wrote covered its markers
+			// in the index format's order, so a gone record whose two spellings
+			// sort on opposite sides of the cursor can be counted twice or not at
+			// all.
+			let mut count_progress = matches!(self.ix.index, Index::Count(_))
+				.then(|| CountPrimaryProgress::resuming_at(resume_cursor.clone()));
 			// Batches are fetched by record count, so their memory footprint is
 			// unbounded for large documents. The scan starts with a small probe
 			// batch and then sizes each batch from the record sizes observed so
@@ -1773,12 +1791,13 @@ impl Building {
 						}
 						let ctx = self.new_write_tx_ctx().await?;
 						let tx = ctx.tx();
-						let saved_count_primary_cursor = count_primary_cursor.clone();
+						// The merge's progress for this attempt, kept only once
+						// the batch commits.
+						let mut attempt = count_progress.clone();
 						if let Err(err) = self
 							.maintain_build_ownership(&tx, generation, &[IndexBuildPhase::Building])
 							.await
 						{
-							count_primary_cursor = saved_count_primary_cursor;
 							if self
 								.cancel_and_retryable_conflict(
 									&tx,
@@ -1799,13 +1818,12 @@ impl Building {
 								&values,
 								initial_count,
 								&mut v1_appending_sentinel,
-								&mut count_primary_cursor,
+								&mut attempt,
 							)
 							.await
 						{
 							Ok(indexed) => indexed,
 							Err(err) => {
-								count_primary_cursor = saved_count_primary_cursor;
 								if self
 									.cancel_and_retryable_conflict(
 										&tx,
@@ -1841,7 +1859,6 @@ impl Building {
 							)
 							.await
 						{
-							count_primary_cursor = saved_count_primary_cursor;
 							if self
 								.cancel_and_retryable_conflict(
 									&tx,
@@ -1859,7 +1876,6 @@ impl Building {
 							RetryableConflictSite::ConcurrentIndexInitialBatch,
 							self.ctx.node_id(),
 						) {
-							count_primary_cursor = saved_count_primary_cursor;
 							if self
 								.cancel_and_retryable_conflict(
 									&tx,
@@ -1876,7 +1892,6 @@ impl Building {
 						if let Err(err) =
 							maybe_inject_initial_batch_commit_error(self.ctx.node_id())
 						{
-							count_primary_cursor = saved_count_primary_cursor;
 							if self
 								.cancel_and_retryable_conflict(
 									&tx,
@@ -1890,9 +1905,11 @@ impl Building {
 							return Err(err);
 						}
 						match tx.commit().await {
-							Ok(()) => break indexed,
+							Ok(()) => {
+								count_progress = attempt;
+								break indexed;
+							}
 							Err(err) => {
-								count_primary_cursor = saved_count_primary_cursor;
 								if self
 									.cancel_and_retryable_conflict(
 										&tx,
@@ -1920,19 +1937,19 @@ impl Building {
 					}
 				}
 			}
-			if count_primary_cursor.is_some() {
+			if count_progress.is_some() {
 				let indexed = loop {
 					if self.is_aborted().await {
 						return Ok(());
 					}
 					let ctx = self.new_write_tx_ctx().await?;
 					let tx = ctx.tx();
-					let saved_count_primary_cursor = count_primary_cursor.clone();
+					// Each attempt at the tail starts from the scan's progress.
+					let mut attempt = count_progress.clone();
 					if let Err(err) = self
 						.maintain_build_ownership(&tx, generation, &[IndexBuildPhase::Building])
 						.await
 					{
-						count_primary_cursor = saved_count_primary_cursor;
 						if self
 							.cancel_and_retryable_conflict(
 								&tx,
@@ -1949,14 +1966,13 @@ impl Building {
 						.index_remaining_count_primary_appendings(
 							&ctx,
 							&tx,
-							&mut count_primary_cursor,
+							&mut attempt,
 							initial_count,
 						)
 						.await
 					{
 						Ok(indexed) => indexed,
 						Err(err) => {
-							count_primary_cursor = saved_count_primary_cursor;
 							if self
 								.cancel_and_retryable_conflict(
 									&tx,
@@ -1985,7 +2001,6 @@ impl Building {
 					if let Err(err) =
 						self.complete_initial_scan(&tx, generation, initial_count + indexed).await
 					{
-						count_primary_cursor = saved_count_primary_cursor;
 						if self
 							.cancel_and_retryable_conflict(
 								&tx,
@@ -2008,7 +2023,6 @@ impl Building {
 							break indexed;
 						}
 						Err(err) => {
-							count_primary_cursor = saved_count_primary_cursor;
 							if self
 								.cancel_and_retryable_conflict(
 									&tx,
