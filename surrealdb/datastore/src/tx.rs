@@ -57,7 +57,7 @@ use crate::cache::tx::TransactionCache;
 // The transaction holds the queue because only it knows when the outcome is
 // settled; what to run belongs to the layer that registered it.
 use crate::close::{CommitAction, RollbackAction};
-use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
+use crate::key::reclaim::{ALL_DOC_ID_KINDS, Expunge, ReclaimState};
 use crate::key::schema::{
 	AdjacencyEdgeTablePrefix, AdjacencyKey, AnalyzerKey, AnalyzerPrefix, ApiKey, ApiPrefix,
 	BucketKey, BucketPrefix, BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey,
@@ -299,8 +299,8 @@ pub enum DocIdsReclaimClaim {
 	/// No reclaim had started. Any queued entries were cancelled by this
 	/// transaction, so the mappings that remain are internally consistent.
 	Available,
-	/// At least one reclaim page committed, or one of the three prefix entries
-	/// was already retired. The surviving mappings may be torn and must not be
+	/// At least one reclaim page committed, or an entry of the queued set has
+	/// already been retired. The surviving mappings may be torn and must not be
 	/// adopted; the queued reclaim is left intact so the background task can
 	/// finish it in bounded pages.
 	InProgress,
@@ -2350,13 +2350,13 @@ impl Transaction {
 	/// [`surrealdb_idx::docids::TableDocIds::remove_all`], for the callers that
 	/// drop the table's last doc-ID-consuming index. The space holds one entry
 	/// per record in each direction, so deleting it inline would put a write per
-	/// record into the caller's transaction; the three prefixes are destroyed
-	/// later by [`crate::Datastore::reclaim_tombstones`] instead.
+	/// record into the caller's transaction; the prefixes are destroyed later by
+	/// [`crate::Datastore::reclaim_tombstones`] instead.
 	///
-	/// Each of the three prefixes is enqueued separately, because the table's key
-	/// space interleaves them with the doc-ID sequence counter (`!dd` < `!dh` <
-	/// `!di` < `!dp` < `!ds`) and the counter must survive: a monotonic counter
-	/// is what stops a later index handing a second record an id the first still
+	/// Each prefix is enqueued separately, because the table's key space
+	/// interleaves them with the doc-ID sequence counter (`!dd` < `!dh` < `!di` <
+	/// `!dj` < `!dp` < `!ds`) and the counter must survive: a monotonic counter is
+	/// what stops a later index handing a second record an id the first still
 	/// holds. Separate entries also give each prefix its own resume cursor.
 	///
 	/// The caller must guarantee no doc-ID-consuming index can adopt a surviving
@@ -2379,12 +2379,7 @@ impl Transaction {
 		// All of them in one transaction, so a strict subset surviving in
 		// the queue is itself evidence that the reaper has drained and retired
 		// the rest. `Self::claim_tb_doc_ids_reclaim` reads that.
-		for kind in [
-			ReclaimKind::DocLookup,
-			ReclaimKind::DocLookupIdentity,
-			ReclaimKind::DocKey,
-			ReclaimKind::DocPending,
-		] {
+		for kind in ALL_DOC_ID_KINDS {
 			let rc = ReclaimKey {
 				kind,
 				ns,
@@ -2404,25 +2399,26 @@ impl Transaction {
 	/// internally consistent.
 	///
 	/// `DEFINE INDEX` calls this before defining a doc-ID-consuming index, and
-	/// the graph fold before recording a table's `graph_doc_ids` marker. If all
-	/// three reclaim entries still exist and none carries a cursor, no deletion
-	/// has committed and they are conditionally cancelled in this transaction.
-	/// The conditional deletes make the cancellation atomic with a concurrent
-	/// page on last-writer-wins backends: either this transaction removes the
-	/// claim and defines the consumer, or the page advances the state and this
-	/// transaction is rejected.
+	/// the graph fold before recording a table's `graph_doc_ids` marker. If every
+	/// entry of the set still exists and none carries a cursor, no deletion has
+	/// committed and they are conditionally cancelled in this transaction. The
+	/// conditional deletes make the cancellation atomic with a concurrent page on
+	/// last-writer-wins backends: either this transaction removes the claim and
+	/// defines the consumer, or the page advances the state and this transaction
+	/// is rejected.
 	///
-	/// Once a cursor exists, or a strict subset of the entries survives,
-	/// the space may be torn. In that case no entry is cancelled: the caller must
-	/// not define a consumer, and the background task remains able to finish the
+	/// Once a cursor exists, or a strict subset of the entries survives, the
+	/// space may be torn. In that case no entry is cancelled: the caller must not
+	/// define a consumer, and the background task remains able to finish the
 	/// purge in bounded pages. No queued entries means either no reclaim was ever
 	/// needed or it completed, both of which are safe for a new consumer.
 	///
 	/// Two things say the space is torn. A surviving entry carrying a resume
-	/// cursor names a prefix the reaper has deleted from. And because the three
-	/// entries are enqueued in one transaction, a strict subset of them surviving
-	/// means the reaper drained and retired the rest — a tear no surviving
-	/// cursor records, since retiring an entry destroys its cursor with it.
+	/// cursor names a prefix the reaper has deleted from. And because the set —
+	/// one entry per kind in [`ALL_DOC_ID_KINDS`] — is enqueued in one
+	/// transaction, a strict subset of it surviving means the reaper drained and
+	/// retired the rest: a tear no surviving cursor records, since retiring an
+	/// entry destroys its cursor with it.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn claim_tb_doc_ids_reclaim(
 		&self,
@@ -2459,9 +2455,10 @@ impl Transaction {
 		cancel: bool,
 	) -> Result<DocIdsReclaimClaim> {
 		// Whether a surviving entry names a prefix already deleted from, and
-		// which of the kinds are still queued for this table.
+		// which of the kinds are still queued for this table, slot for slot with
+		// `ALL_DOC_ID_KINDS`.
 		let mut started = false;
-		let mut queued = [false; 4];
+		let mut queued = [false; ALL_DOC_ID_KINDS.len()];
 		// Exact key/value bytes become compare-delete guards if every entry proves
 		// untouched. An unreadable value is retained and blocks adoption.
 		let mut entries = Vec::new();
@@ -2472,15 +2469,7 @@ impl Transaction {
 		// has to be decoded to be attributed. Each range is still read in batches
 		// so an unexpectedly duplicated queue cannot force one unbounded backend
 		// scan result; normal operation has one entry per kind.
-		for (slot, kind) in [
-			ReclaimKind::DocKey,
-			ReclaimKind::DocLookup,
-			ReclaimKind::DocLookupIdentity,
-			ReclaimKind::DocPending,
-		]
-		.into_iter()
-		.enumerate()
-		{
+		for (slot, kind) in ALL_DOC_ID_KINDS.into_iter().enumerate() {
 			let mut window = ReclaimTbPrefix {
 				kind,
 				ns,
@@ -2511,7 +2500,7 @@ impl Transaction {
 				window = window.resume_after(&last, Direction::Forward);
 			}
 		}
-		// A strict subset of the three surviving means the reaper drained and
+		// A strict subset of the set surviving means the reaper drained and
 		// retired the rest, so the space is torn whatever the survivors' cursors
 		// say. Leave every surviving entry intact: finishing them in bounded pages
 		// is the recovery path.

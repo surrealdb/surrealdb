@@ -63,8 +63,8 @@ use crate::kvs::{DatastoreError, TransactionType};
 const TARGET: &str = "surrealdb::core::kvs::migration";
 
 /// How long a migration lease is held before another node may take it over.
-/// Renewed between migrations, so this bounds one migration's runtime, not the
-/// whole run.
+/// Renewed between migrations, and between the batches of one that walks user
+/// data, so this bounds the time between renewals, not the whole run.
 const LEASE_DURATION: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// How long a node that lost the lease waits for the holder to finish before
@@ -99,13 +99,13 @@ pub(crate) static MIGRATIONS: &[Migration] = &[
 	Migration {
 		id: 2,
 		name: "re-key module definitions to their derived name",
-		version: (3, 4, 0),
+		version: (3, 3, 0),
 		run: |ds| Box::pin(module_keys::rekey_definitions_to_their_derived_name(ds)),
 	},
 	Migration {
 		id: 3,
 		name: "rebuild forward doc-ID mappings under an injective key",
-		version: (3, 4, 0),
+		version: (3, 3, 0),
 		run: |ds| Box::pin(doc_lookup_identity::rebuild_forward_doc_ids_under_an_injective_key(ds)),
 	},
 ];
@@ -263,13 +263,7 @@ async fn unapplied(ds: &Datastore, ids: &[u32]) -> Result<Vec<u32>> {
 /// guarantee: it can expire under a migration that outruns it, which is why
 /// migrations must tolerate a second node repeating them.
 async fn apply(ds: &Datastore, registry: &[Migration], pending: &[u32]) -> Result<()> {
-	let lease = LeaseHandler::new(
-		ds.sequences().clone(),
-		ds.id(),
-		ds.transaction_factory().clone(),
-		TaskLeaseType::DataMigration,
-		LEASE_DURATION,
-	)?;
+	let lease = lease(ds)?;
 	let deadline = web_time::Instant::now() + WAIT_FOR_HOLDER;
 
 	loop {
@@ -311,6 +305,20 @@ async fn apply(ds: &Datastore, registry: &[Migration], pending: &[u32]) -> Resul
 		);
 		common::time::sleep(WAIT_POLL_INTERVAL).await;
 	}
+}
+
+/// This node's handle on the migration lease.
+///
+/// Every handle names the same stored lease, so a migration that runs long can
+/// renew it from a handle of its own between batches.
+pub(super) fn lease(ds: &Datastore) -> Result<LeaseHandler> {
+	LeaseHandler::new(
+		ds.sequences().clone(),
+		ds.id(),
+		ds.transaction_factory().clone(),
+		TaskLeaseType::DataMigration,
+		LEASE_DURATION,
+	)
 }
 
 /// Writes a migration's ledger entry.

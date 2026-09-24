@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -13,10 +14,10 @@ use surrealdb_kvs::{Direction, Val};
 use tokio::sync::RwLock;
 
 use crate::catalog::{Distance, HnswParams, TableId, VectorType};
-use crate::docids::LegacyVectorDocIds;
+use crate::docids::{LegacyVectorDocIds, TableDocIds};
 use crate::env::IndexEnv;
-use crate::key::schema::HnswRecordPendingKey;
-use crate::key::{KVKeyDecode, KVValue, Key, Resumable};
+use crate::key::schema::{HnswRecordPendingKey, HnswRecordPendingPrefix};
+use crate::key::{KVKeyDecode, KVSubspace, KVValue, Key, Resumable};
 use crate::trees::hnsw::cache::VectorCache;
 use crate::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::trees::hnsw::filter::HnswTruthyDocumentFilter;
@@ -26,7 +27,8 @@ use crate::trees::hnsw::{
 };
 use crate::trees::knn::KnnResultBuilder;
 use crate::trees::pending::{
-	PendingBacklogReport, PendingScan, PendingScanStats, take_pending_record_id,
+	PendingBacklogReport, PendingScan, PendingScanStats, take_compacted_record_id,
+	take_pending_record_id,
 };
 use crate::trees::vector::{
 	DistanceExt as _, SerializedVector, SharedVector, Vector, serialized_vector_from_value,
@@ -46,6 +48,34 @@ fn pending_record_id(key: &[u8], pending: &mut HnswRecordPendingUpdate) -> Resul
 	take_pending_record_id(&mut pending.id, || {
 		Ok(HnswRecordPendingKey::decode_key(key)?.id.into_owned())
 	})
+}
+
+/// [`pending_record_id`] for compaction, which maps the record to a doc-ID; the
+/// rule is [`take_compacted_record_id`].
+async fn compacted_record_id(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+	key: &[u8],
+	pending: &mut HnswRecordPendingUpdate,
+) -> Result<RecordIdKey> {
+	take_compacted_record_id(
+		tx,
+		&mut pending.id,
+		|| {
+			let prefix = HnswRecordPendingPrefix {
+				ns: ikb.ns(),
+				db: ikb.db(),
+				tb: Cow::Borrowed(ikb.table()),
+				ix: ikb.index(),
+			}
+			.encode_bound()?;
+			Ok(key.strip_prefix(&*prefix).map(|spelled| {
+				(TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone()), spelled.to_vec())
+			}))
+		},
+		|| Ok(HnswRecordPendingKey::decode_key(key)?.id.into_owned()),
+	)
+	.await
 }
 
 /// Maximum number of pending key/value pairs captured by one compaction plan.
@@ -531,7 +561,7 @@ impl HnswIndex {
 					bail!(EngineError::QueryCancelled)
 				}
 				let mut pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
-				let id = pending_record_id(key, &mut pending)?;
+				let id = compacted_record_id(tx, ikb, key, &mut pending).await?;
 				let pending = Self::record_pending_to_operation(id, pending);
 				// Copied per entry rather than per batch, for the reason given in
 				// `collect_append_pending_for_plan`.
@@ -1328,5 +1358,63 @@ impl HnswIndex {
 	#[cfg(test)]
 	pub(super) async fn check_hnsw_properties(&self, expected_count: usize) {
 		self.hnsw.read().await.check_hnsw_properties(expected_count).await
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_kvs::TransactionType;
+
+	use super::*;
+	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+	use crate::key::KVKey;
+	use crate::key::schema::{DocKeyKey, DocLookupKey};
+	use crate::test_env::TestIndexStore;
+
+	/// Compaction takes the record of an entry whose value carries no id from
+	/// the table's mappings, not from the id its key decodes to.
+	///
+	/// The key spells the id under the index format, so `[42, 'intro']` decodes
+	/// as `[42dec, 'intro']`, a record that does not exist; resolving that would
+	/// mint it a doc-ID of its own.
+	#[tokio::test]
+	async fn compaction_names_the_mapped_record_of_an_entry_without_an_id() {
+		let (ns, db) = (NamespaceId(1), DatabaseId(2));
+		let ikb = IndexKeyBase::new(ns, db, "tb".into(), IndexId(3));
+		let id =
+			RecordIdKey::Array(vec![Value::Number(Number::Int(42)), Value::from("intro")].into());
+		let key = ikb.new_hr_key(&id).encode_key().unwrap().to_vec();
+		let decoded = HnswRecordPendingKey::decode_key(&key).unwrap().id.into_owned();
+		assert!(
+			!decoded.addresses_same_record(&id),
+			"the premise: the key's id is not the record's"
+		);
+		let entry = || HnswRecordPendingUpdate {
+			doc_id: None,
+			old_vectors: Vec::new(),
+			new_vectors: Vec::new(),
+			id: None,
+		};
+
+		let ds = TestIndexStore::new().await;
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		assert!(
+			compacted_record_id(&tx, &ikb, &key, &mut entry())
+				.await
+				.unwrap()
+				.addresses_same_record(&decoded),
+			"with no mapping at that spelling, the decoded id is all there is"
+		);
+		let tb = crate::val::TableName::from("tb");
+		tx.set_key(&DocLookupKey::new(ns, db, Cow::Borrowed(&tb), Cow::Borrowed(&id)), &7u64)
+			.await
+			.unwrap();
+		tx.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&tb), 7), &id).await.unwrap();
+		let named = compacted_record_id(&tx, &ikb, &key, &mut entry()).await.unwrap();
+		assert!(
+			named.addresses_same_record(&id),
+			"the mapping names the record exactly: {named:?}"
+		);
+		tx.cancel().await.unwrap();
 	}
 }

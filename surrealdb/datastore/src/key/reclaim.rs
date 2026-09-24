@@ -68,7 +68,7 @@ impl ReclaimState {
 }
 
 impl ReclaimKind {
-	/// Whether this names one of a table's three shared doc-ID prefixes.
+	/// Whether this names one of a table's shared doc-ID prefixes.
 	///
 	/// These differ from every other kind in the queue in that their claim is
 	/// revocable: `DEFINE INDEX` cancels the reclaim in the transaction that

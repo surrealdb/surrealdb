@@ -83,7 +83,7 @@ async fn reclaim_queue_len(ds: &Datastore) -> usize {
 ///
 /// One removal defers more than the object it names — a cascading parent
 /// removal also queues the post-builder reclaim for each index beneath it, and
-/// dropping a table's last doc-ID consumer queues the three shared doc-ID
+/// dropping a table's last doc-ID consumer queues every shared doc-ID
 /// prefixes — so an assertion about what a statement enqueued names the kinds it
 /// is responsible for. The queue's total length is only meaningful where the
 /// expectation is that it is empty.
@@ -101,7 +101,7 @@ fn count_kind(kinds: &[ReclaimKind], kind: ReclaimKind) -> usize {
 	kinds.iter().filter(|k| **k == kind).count()
 }
 
-/// How many of `kinds` name one of the three shared doc-ID prefixes.
+/// How many of `kinds` name a shared doc-ID prefix.
 fn count_doc_kinds(kinds: &[ReclaimKind]) -> usize {
 	kinds.iter().filter(|k| k.is_doc_id()).count()
 }
@@ -885,7 +885,7 @@ async fn assert_removal_reclaims_in_bounded_pages(removal: Removal) {
 		"unexpected number of {own_kind:?} entries queued for the removal"
 	);
 	// `REMOVE INDEX` drops the table's last doc-ID consumer, so it enqueues the
-	// three shared doc-ID prefixes alongside the index's own. A parent removal
+	// shared doc-ID prefixes alongside the index's own. A parent removal
 	// takes the whole prefix and has nothing to defer separately.
 	let expected_doc_entries = match removal {
 		Removal::Index => ALL_DOC_ID_KINDS.len(),
@@ -1567,7 +1567,7 @@ async fn reclaim_shares_its_budget_only_with_entries_past_the_grace() {
 		tx.commit().await.unwrap();
 	}
 
-	// Enough for all of them pages, if the whole budget reaches the one entry that
+	// Enough pages for all of them, if the whole budget reaches the one entry that
 	// can spend it.
 	Datastore::reclaim_tombstones_with_budget(
 		Arc::clone(&ds),
@@ -1765,7 +1765,7 @@ async fn defining_a_doc_id_index_cancels_a_queued_doc_id_reclaim() {
 /// defining a consumer waits for the bounded reclaim rather than adopting it or
 /// purging the remainder in the DDL transaction.
 ///
-/// The three prefixes are reclaimed independently and page by page, so a
+/// The prefixes are reclaimed independently and page by page, so a
 /// surviving `!di` entry may have lost the `!dd` twin that resolves its id.
 /// Adopting one would give the new index entries pointing at a doc-ID that
 /// resolves to no record.
@@ -2094,7 +2094,7 @@ async fn a_started_doc_id_reclaim_cannot_be_cancelled() {
 		"the first pass must stop mid-prefix: {after_first_pass} left"
 	);
 
-	// A new consumer may only cancel all of them untouched entries. This started,
+	// A new consumer may only cancel entries that are all untouched. This started,
 	// partial set must remain queued for bounded cleanup.
 	let tx = ds.transaction(Write).await.unwrap();
 	let claim = tx.claim_tb_doc_ids_reclaim(ns_id, db_id, &tb).await.unwrap();

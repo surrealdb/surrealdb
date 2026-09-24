@@ -30,7 +30,7 @@ use crate::idx::index::IndexOperation;
 use crate::key::schema::DocPendingKey;
 use crate::kvs::index::{ConsumeResult, IndexMutation};
 use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
-use crate::val::{RecordId, Value};
+use crate::val::{RecordId, RecordIdentity, Value};
 
 impl Document {
 	pub(super) async fn store_index_data(
@@ -123,7 +123,7 @@ impl Document {
 			db.namespace_id,
 			db.database_id,
 			Cow::Borrowed(&rid.table),
-			Cow::Borrowed(&rid.key),
+			RecordIdentity(rid.key.clone()),
 		);
 		ctx.tx().set_key(&dp, &()).await
 	}

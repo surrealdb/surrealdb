@@ -392,9 +392,11 @@ keyspace! {
 
 					/// Record key back to id. The id is an identity, so it is
 					/// spelled with `Identity`: a doc-ID addresses one record, and
-					/// an id encoded under the value codec is not injective — two
-					/// ids differing only in the numeric variant of a nested value
-					/// share a key and so would share a doc-ID.
+					/// the index format this route declares is not injective over
+					/// ids — it drops the numeric variant of a nested value, so two
+					/// ids differing only in that share a key, and so would share a
+					/// doc-ID. `Identity` encodes losslessly regardless of the
+					/// route's format, which is what keeps them apart.
 					/// `Identity` is owned where the erased spelling below borrows,
 					/// so each lookup clones the id. The keyspace macro's owned
 					/// path is what a newtype can be built through; the cost is one
@@ -411,9 +413,19 @@ keyspace! {
 					#[format(IndexFormat)]
 					doc_lookup = ["!di", @, id: Id] => DocId;
 
-					/// Records whose index entries are still pending.
+					/// Records whose shared doc-ID mapping is waiting to be
+					/// reclaimed, because an index build enqueued their delete and
+					/// may still need the mapping to replay it.
+					///
+					/// The id is an identity, for the reason `!dj` above gives, and
+					/// for a second one: the sweep that drains these markers decodes
+					/// the id back out of this key and reclaims the mapping filed
+					/// under it. An id the index format had flattened decodes to a
+					/// different record than the one marked, whose mapping the
+					/// reclaim then declines to touch while consuming the marker, so
+					/// the mapping the marker existed to release is kept for good.
 					#[format(IndexFormat)]
-					doc_pending = ["!dp", @, id: Id] => ();
+					doc_pending = ["!dp", @, id: Identity] => ();
 
 					/// The index id allocator's reserved batch and its state.
 					index_id_batch = ["!ih", @, start: i64] => crate::sequences::BatchValue;
@@ -436,11 +448,21 @@ keyspace! {
 									@, ticket: BuildTicket,
 									@, mutation_seq: BuildTicketMutationSeq] => Appending;
 
-					/// Primary-key appends recorded during a build. Encoded under the
-					/// index format because the record id is part of the key.
+					/// Primary-key appends recorded during a build: the record a
+					/// queued mutation belongs to, mapped to its first one.
+					///
+					/// The id is an identity, for the reason `!dj` gives. The key is
+					/// claimed put-if-absent and looked up by record, so under the
+					/// index format one of two records differing only in a nested
+					/// value's numeric variant would find the other's claim and
+					/// record none of its own. A reader takes the record from the
+					/// queued mutation a marker points at, never from the key: an
+					/// older release spelled the id under the index format, and a
+					/// build carried across an upgrade keeps that release's markers
+					/// until its initial scan rebuilds them from `!bg`.
 					#[format(IndexFormat)]
 					build_primary = ["!bp", ix: IndexId, @, generation: BuildGeneration,
-									 @, id: Id] => PrimaryAppendingTicket;
+									 @, id: Identity] => PrimaryAppendingTicket;
 
 					idx = ["+", ix: IndexId] (format_generic) {
 						/// Index entries.
@@ -456,6 +478,16 @@ keyspace! {
 						/// the discriminant of a retired `Option` field: `0x03` where
 						/// a record id follows, `0x02` where the index is unique and
 						/// the values alone identify the row.
+						///
+						/// The id keeps the erased spelling. Two records whose ids
+						/// differ only in a nested value's numeric variant therefore
+						/// share one entry, the later write replacing the earlier, and
+						/// the index finds one of the two. The value carries the exact
+						/// id, so a record on its own reads back as itself. Spelling the
+						/// id as an identity changes every entry's key, so it takes a
+						/// format bump, and a rebuild of each index to reach.
+						/// TODO(surrealdb/surrealdb#7437): spell the id as an identity
+						/// behind a format bump.
 						#[format(IndexFormat)]
 						entry = ["*", @, fd: [Value..], @open, @, raw 0x03, id: Id]
 							=> crate::values::entry::IndexEntryValue (derive(-Eq));
@@ -629,6 +661,16 @@ keyspace! {
 						hnsw_layer = ["!hl", layer: u16, @, chunk: u32] => Vec<u8>;
 						hnsw_node = ["!hn", layer: u16, @, node: ElementId] => Vec<u8>;
 
+						/// Record-keyed HNSW pending updates: one coalesced entry per
+						/// record, drained into the graph by compaction.
+						///
+						/// The id keeps the erased spelling. Two records whose ids
+						/// differ only in a nested value's numeric variant therefore
+						/// share one entry, and a write to either folds into it; the
+						/// value names the exact record it was last written for. Such
+						/// a pair is indexed as one record, however the index was built.
+						/// TODO(surrealdb/surrealdb#7437): hold one update per record
+						/// that shares the key.
 						#[format(IndexFormat)]
 						hnsw_record_pending = ["!hr", @, id: Id]
 							=> crate::values::hnsw::HnswRecordPendingUpdate;
@@ -680,12 +722,20 @@ keyspace! {
 						diskann_pending = ["!dy", @, shard: u16]
 							=> crate::values::diskann::DiskAnnPendingState;
 
-						/// The sharded successor to the legacy pending layout, under a
-						/// distinct tag so the two never overlap during a dual read.
+						/// Legacy unsharded record-keyed DiskANN pending updates, read
+						/// and drained but never written.
 						#[cfg(diskann)]
 						#[format(IndexFormat)]
 						diskann_record_pending = ["!dr", @, id: Id]
 							=> crate::values::diskann::DiskAnnRecordPendingUpdate;
+						/// The sharded successor to the legacy pending layout, under a
+						/// distinct tag so the two never overlap during a dual read.
+						///
+						/// The id keeps the erased spelling, with the consequence `!hr`
+						/// describes: two records whose ids differ only in a nested
+						/// value's numeric variant share one entry, and are indexed as
+						/// one record. TODO(surrealdb/surrealdb#7437): hold one update
+						/// per record that shares the key.
 						#[cfg(diskann)]
 						#[format(IndexFormat)]
 						diskann_record_pending_shard = ["!dw", shard: u16, @, id: Id]
@@ -1438,14 +1488,15 @@ mod tests {
 			     \x00\x00\x00\x0d")
 		);
 
-		// Encoded under the index format, because the record id is part of the key.
+		// The record id is part of the key, so it is spelled as an identity: a
+		// plain id's bytes are unchanged by that, and a nested number's are not.
 		let primary = BuildPrimaryKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			Cow::Borrowed(&tb),
 			IndexId(3),
 			7,
-			Cow::Borrowed(&id),
+			RecordIdentity(id),
 		);
 		assert_eq!(
 			of(&primary.encode_key().unwrap()),
@@ -2413,5 +2464,140 @@ mod tests {
 			}
 		}
 		panic!("{report}");
+	}
+
+	/// Every key that names a record must address exactly one.
+	///
+	/// A record id carries a number's kind; the index format these routes declare
+	/// does not. A route that lets the format reach the id therefore files two
+	/// records under one key, and hands back the wrong one of the two when the id
+	/// is decoded again. `Identity` is what holds them apart, and this pins which
+	/// routes have it.
+	///
+	/// It also pins the routes that still let the format reach the id, so that
+	/// each is a recorded decision: `!di`, the compatibility fallback, and the
+	/// b-tree `entry` and the ANN pending queues, whose route docs say what that
+	/// costs. Moving one of those onto an identity fails its assertion here.
+	#[test]
+	fn keys_that_name_a_record_address_exactly_one() {
+		use surrealdb_expr::val::{Number, Value};
+
+		let tb = TableName::from("t");
+		let arr = |n: Number| RecordIdKey::Array(vec![Value::Number(n)].into());
+		let int = arr(Number::Int(1));
+		let dec = arr(Number::Decimal(1.into()));
+		assert!(
+			!int.addresses_same_record(&dec),
+			"the two ids this test is built on must address different records"
+		);
+
+		let dj = |id: &RecordIdKey| {
+			DocLookupIdentityKey::new(
+				NamespaceId(1),
+				DatabaseId(1),
+				Cow::Borrowed(&tb),
+				RecordIdentity(id.clone()),
+			)
+			.encode_key()
+			.unwrap()
+			.to_vec()
+		};
+		let dp = |id: &RecordIdKey| {
+			DocPendingKey::new(
+				NamespaceId(1),
+				DatabaseId(1),
+				Cow::Borrowed(&tb),
+				RecordIdentity(id.clone()),
+			)
+			.encode_key()
+			.unwrap()
+			.to_vec()
+		};
+		let bp = |id: &RecordIdKey| {
+			BuildPrimaryKey::new(
+				NamespaceId(1),
+				DatabaseId(1),
+				Cow::Borrowed(&tb),
+				IndexId(3),
+				7,
+				RecordIdentity(id.clone()),
+			)
+			.encode_key()
+			.unwrap()
+			.to_vec()
+		};
+
+		assert_ne!(dj(&int), dj(&dec), "!dj must separate them");
+		assert_ne!(dp(&int), dp(&dec), "!dp must separate them");
+		assert_ne!(bp(&int), bp(&dec), "!bp must separate them");
+
+		// And each decodes back to the record it was written for, which is what
+		// the readers of these keys rely on.
+		assert!(
+			DocPendingKey::decode_key(&dp(&int)).unwrap().id.0.addresses_same_record(&int),
+			"!dp must decode back to the record it named"
+		);
+		assert!(
+			BuildPrimaryKey::decode_key(&bp(&int)).unwrap().id.0.addresses_same_record(&int),
+			"!bp must decode back to the record it named"
+		);
+
+		// The erased forward key is deliberately not injective: it is the
+		// compatibility fallback, and a hit on it is only trusted once the reverse
+		// mapping agrees. Pinned so its role is not mistaken for an oversight.
+		let di = |id: &RecordIdKey| {
+			DocLookupKey::new(NamespaceId(1), DatabaseId(1), Cow::Borrowed(&tb), Cow::Borrowed(id))
+				.encode_key()
+				.unwrap()
+				.to_vec()
+		};
+		assert_eq!(di(&int), di(&dec), "!di is the erased key and stays erased");
+
+		// Still erased, and documented as such on their routes.
+		let fd = vec![Value::from("v")];
+		let entry = |id: &RecordIdKey| {
+			EntryKey::new(
+				NamespaceId(1),
+				DatabaseId(1),
+				Cow::Borrowed(&tb),
+				IndexId(3),
+				Cow::Borrowed(&fd),
+				Cow::Borrowed(id),
+			)
+			.encode_key()
+			.unwrap()
+			.to_vec()
+		};
+		assert_eq!(entry(&int), entry(&dec), "the b-tree entry still shares one key");
+		let hr = |id: &RecordIdKey| {
+			HnswRecordPendingKey::new(
+				NamespaceId(1),
+				DatabaseId(1),
+				Cow::Borrowed(&tb),
+				IndexId(3),
+				Cow::Borrowed(id),
+			)
+			.encode_key()
+			.unwrap()
+			.to_vec()
+		};
+		assert_eq!(hr(&int), hr(&dec), "the HNSW pending queue still shares one key");
+		#[cfg(diskann)]
+		{
+			let dw = |id: &RecordIdKey| {
+				DiskannRecordPendingShardKey::new(
+					NamespaceId(1),
+					DatabaseId(1),
+					Cow::Borrowed(&tb),
+					IndexId(3),
+					0,
+					Cow::Borrowed(id),
+				)
+				.encode_key()
+				.unwrap()
+				.to_vec()
+			};
+			assert_eq!(dw(&int), dw(&dec), "the DiskANN pending queue still shares one key");
+		}
 	}
 }

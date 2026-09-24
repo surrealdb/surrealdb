@@ -43,6 +43,9 @@ pub enum RetryableConflictSite {
 	/// Raised in place of that commit, and leaving the transaction finished as
 	/// a real commit failure does.
 	AsyncEventCommit,
+	/// A conflict on the commit of one batch of the migration that copies the
+	/// table-scoped doc-ID mappings under their injective key.
+	DocLookupIdentityMigration,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

@@ -17,10 +17,13 @@
 //!
 //! `!di` is left in place, and this release keeps writing it alongside `!dj`.
 //! A migration runs as soon as the first upgraded node starts, while the rest
-//! of a cluster may still be on the previous release, which resolves doc-IDs at
-//! `!di` and nowhere else. Removing it would strand every record those nodes
-//! hold — and a record they then failed to resolve would be handed a *second*
-//! doc-ID, which is the one thing the shared space exists to prevent.
+//! of a cluster may still run a release that predates `!dj` and resolves
+//! doc-IDs at `!di` and nowhere else — a 3.3 pre-release, the only kind that
+//! has a table-scoped doc-ID space without it. Removing it would strand every
+//! record those nodes hold — and a record they then failed to resolve would be
+//! handed a *second* doc-ID, which is the one thing the shared space exists to
+//! prevent. A store from a stable release before those has no `!dd` at all, so
+//! the walk below finds nothing to copy.
 //!
 //! What the older nodes cannot see is the disambiguation itself: a colliding
 //! pair still shares one `!di` key there, so they keep returning one of the two.
@@ -32,9 +35,9 @@
 //! asked for. That is what keeps a pre-existing collision from being inherited
 //! by the record that did not own it.
 //!
-//! TODO(3.5): once no supported upgrade path starts below 3.4, reconcile `!dj`
-//! from `!dd` *with overwrite*, then delete the `!di` band and drop the mirrored
-//! write in `TableDocIds::resolve_or_assign`.
+//! TODO(3.4, surrealdb/surrealdb#7437): once no supported upgrade path starts
+//! below 3.3, reconcile `!dj` from `!dd` *with overwrite*, then delete the
+//! `!di` band and drop the mirrored write in `TableDocIds::resolve_or_assign`.
 //!
 //! The overwrite is what this migration cannot do. Its puts are create-only, so
 //! they treat any existing `!dj` as the fresher answer — which an entry a node
@@ -49,18 +52,41 @@
 //! batch writes the same bytes it would have written on any earlier attempt.
 //! Re-running after an interruption converges, and two nodes running this at
 //! once do the same work in the same order and reach the same state.
+//!
+//! # Cost
+//!
+//! The walk runs at startup, inside the version check, so it counts against
+//! the server's startup operation timeout. A batch reads the reverse mappings
+//! it copies, and re-checks both directions, in one batched read each, so a
+//! mapping already copied costs no round trip of its own: a walk interrupted
+//! by the timeout picks up at batch rate where the last one stopped writing.
+//! A mapping it does copy costs the create-only put's read. The migration
+//! lease is renewed between batches, so a long walk keeps it rather than
+//! handing it to another starting node.
+//!
+//! # Best effort
+//!
+//! Nothing reads `!dj` without falling back: a record without one still
+//! resolves through the verified `!di` fallback, publishes its own `!dj` the
+//! next time it is written, and is reconciled from `!dd` before `!di` is
+//! retired. So a batch that keeps losing its commit, and an entry that does
+//! not decode, are skipped with a warning rather than failing the start, which
+//! is where this runs.
 
 use std::borrow::Cow;
 use std::time::Duration;
 
 use anyhow::Result;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::schema::{DocKeyKey, DocKeyPrefix, DocLookupIdentityKey};
 use crate::key::{KVKeyDecode, KVValue, Resumable};
 use crate::kvs::ds::Datastore;
+use crate::kvs::tasklease::LeaseHandler;
+#[cfg(test)]
+use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
 use crate::kvs::{Direction, TransactionType};
 use crate::val::{RecordIdKey, RecordIdentity, TableName};
 
@@ -88,9 +114,10 @@ pub(super) async fn rebuild_forward_doc_ids_under_an_injective_key(ds: &Datastor
 	.await;
 	txn.cancel().await?;
 
+	let lease = super::lease(ds)?;
 	let mut copied = 0usize;
 	for (ns, db, tb) in tables? {
-		copied += migrate_table(ds, ns, db, &tb).await?;
+		copied += migrate_table(ds, &lease, ns, db, &tb).await?;
 	}
 	if copied > 0 {
 		debug!(target: TARGET, count = copied, "Rebuilt forward doc-ID mappings under an injective key");
@@ -101,6 +128,7 @@ pub(super) async fn rebuild_forward_doc_ids_under_an_injective_key(ds: &Datastor
 /// Copies one table's mappings, returning how many were written.
 async fn migrate_table(
 	ds: &Datastore,
+	lease: &LeaseHandler,
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &TableName,
@@ -108,13 +136,39 @@ async fn migrate_table(
 	let mut copied = 0usize;
 	let mut resume: Option<Vec<u8>> = None;
 	loop {
-		let batch = read_batch(ds, ns, db, tb, resume.as_deref()).await?;
-		if batch.is_empty() {
+		let Some((batch, last)) = read_batch(ds, ns, db, tb, resume.as_deref()).await? else {
 			return Ok(copied);
+		};
+		resume = Some(last);
+		match write_batch_with_retry(ds, ns, db, tb, &batch).await {
+			Ok(written) => copied += written,
+			Err(e) if is_write_conflict(&e) => {
+				warn!(
+					target: TARGET,
+					table = %tb,
+					mappings = batch.len(),
+					error = %e,
+					"Skipped a batch of doc-ID mappings after repeated write conflicts; \
+					 they resolve through the verified fallback until written again"
+				);
+			}
+			Err(e) => return Err(e),
 		}
-		resume = Some(batch.last().expect("a non-empty batch has a last entry").0.clone());
-		copied += write_batch_with_retry(ds, ns, db, tb, &batch).await?;
+		// A lost renewal is not fatal: the batches are safe to repeat on
+		// another node that takes the lease over.
+		let _ = lease.try_maintain_lease().await;
 	}
+}
+
+/// Whether `e` is a commit lost to a concurrent writer, the one failure a batch
+/// can retry.
+///
+/// Both classes count. A racing writer surfaces at commit as a retryable
+/// transaction conflict; a create-only put losing its race surfaces as a
+/// conditional-write failure.
+fn is_write_conflict(e: &anyhow::Error) -> bool {
+	surrealdb_datastore::is_retryable_transaction_conflict(e)
+		|| crate::kvs::is_conditional_write_conflict(e)
 }
 
 /// How many times one batch is retried before its conflict is surfaced.
@@ -125,17 +179,12 @@ const RETRY_BACKOFF: Duration = Duration::from_millis(10);
 
 /// [`write_batch`], retried on a commit conflict.
 ///
-/// The batch reads every `!dd` it copies, which arms the write-conflict check
-/// against anyone deleting those records — and this migration is the first to
-/// read user-band keys rather than catalog ones, so a live workload can lose it
-/// that race. It runs during [`Datastore::new`], where a returned error fails
-/// the node's start, so a conflict this batch can simply retry must not.
-///
-/// Both conflict classes are retried. A racing delete surfaces at commit as a
-/// retryable transaction conflict, which is the one this exists for; a
-/// create-only put losing its race surfaces as a conditional-write failure.
-/// Matching only the latter would leave the guard inert for the very case it
-/// was added for.
+/// The batch writes `!dj` keys it has read, which arms the write-conflict check
+/// against a writer on this release touching the same records — a resolve
+/// publishing a mapping, or a purge deleting one — and this migration is the
+/// first to write user-band keys rather than catalog ones, so a live workload
+/// can lose it that race. The conflict is retried here, and one that outlasts
+/// the retries is returned for the caller to skip (see [`is_write_conflict`]).
 ///
 /// Retrying is safe because the batch is idempotent: the forward mappings are
 /// written with create-only puts, and each is re-checked against `!dd` inside
@@ -149,11 +198,7 @@ async fn write_batch_with_retry(
 ) -> Result<usize> {
 	for attempt in 1..=WRITE_ATTEMPTS {
 		match write_batch(ds, ns, db, tb, batch).await {
-			Err(e)
-				if attempt < WRITE_ATTEMPTS
-					&& (surrealdb_datastore::is_retryable_transaction_conflict(&e)
-						|| crate::kvs::is_conditional_write_conflict(&e)) =>
-			{
+			Err(e) if attempt < WRITE_ATTEMPTS && is_write_conflict(&e) => {
 				trace!(
 					target: "surrealdb::core::kvs::migration",
 					"Retrying a doc-ID mapping batch after a write conflict (attempt {attempt})"
@@ -165,7 +210,7 @@ async fn write_batch_with_retry(
 				// table from retrying in step.
 				let base = RETRY_BACKOFF * (1 << (attempt - 1));
 				let jitter = Duration::from_millis(rand::random::<u64>() % 20);
-				tokio::time::sleep(base + jitter).await;
+				crate::common::time::sleep(base + jitter).await;
 			}
 			other => return other,
 		}
@@ -173,18 +218,20 @@ async fn write_batch_with_retry(
 	unreachable!("the final attempt returns rather than looping")
 }
 
-/// Reads up to [`BATCH`] reverse mappings, starting after `resume`.
+/// Reads up to [`BATCH`] reverse mappings, starting after `resume`, with the raw
+/// key of the last one read; `None` once the table has none left.
 ///
-/// The raw `!dd` key of each entry is carried back so the next batch can resume
-/// from it: the doc-ID is recoverable from the key, but resuming on re-encoded
-/// bytes would assume an encoding rather than observe one.
+/// The next batch resumes from that raw key: the doc-ID is recoverable from the
+/// key, but resuming on re-encoded bytes would assume an encoding rather than
+/// observe one. An entry that does not decode is left out of the batch with a
+/// warning, and the batch still resumes past it.
 async fn read_batch(
 	ds: &Datastore,
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &TableName,
 	resume: Option<&[u8]>,
-) -> Result<Vec<(Vec<u8>, u64, RecordIdKey)>> {
+) -> Result<Option<(Vec<(Vec<u8>, u64, RecordIdKey)>, Vec<u8>)>> {
 	let txn = ds.transaction(TransactionType::Read).await?;
 	let collected = async {
 		let range = DocKeyPrefix::new(ns, db, Cow::Borrowed(tb)).range()?;
@@ -195,13 +242,26 @@ async fn read_batch(
 		// A cursor rather than a whole-range read: a table's doc-ID space is as
 		// large as the table, and only one batch of it may be resident.
 		let mut cursor = txn.open_vals_cursor(range, Direction::Forward, 0, None).await?;
+		let page = cursor.next_batch(BATCH as u32).await?;
+		let Some((last, _)) = page.iter().last() else {
+			return Ok(None);
+		};
+		let last = last.to_vec();
 		let mut out = Vec::new();
-		for (key, value) in cursor.next_batch(BATCH as u32).await?.iter() {
-			let doc_id = DocKeyKey::decode_key(key)?.doc_id;
-			let id = RecordIdKey::kv_decode_value(value, ())?;
-			out.push((key.to_vec(), doc_id, id));
+		for (key, value) in page.iter() {
+			let decoded = DocKeyKey::decode_key(key)
+				.and_then(|k| RecordIdKey::kv_decode_value(value, ()).map(|id| (k.doc_id, id)));
+			match decoded {
+				Ok((doc_id, id)) => out.push((key.to_vec(), doc_id, id)),
+				Err(e) => warn!(
+					target: TARGET,
+					table = %tb,
+					error = %e,
+					"Skipped a doc-ID mapping that does not decode"
+				),
+			}
 		}
-		Ok::<_, anyhow::Error>(out)
+		Ok::<_, anyhow::Error>(Some((out, last)))
 	}
 	.await;
 	txn.cancel().await?;
@@ -217,8 +277,14 @@ async fn read_batch(
 /// or deleted and re-created, so it owns a newer one. Deriving `!dj` from the
 /// stale pair either way would point it at a doc-ID that resolves to nothing,
 /// which is the failure this migration exists to remove rather than introduce.
-/// Reading `!dd` here also arms the write-conflict check, so a racing writer
-/// loses the commit rather than the mapping.
+/// The reverse mapping is only read, so a delete of it between that read and
+/// this commit still wins: it leaves a `!dj` naming a doc-ID with no reverse
+/// mapping, which every reader verifies away and the record's next resolve
+/// replaces. A purge on this release deletes `!dj` as well, which the
+/// create-only put below does conflict with.
+///
+/// Both directions are read for the whole batch at once, so only a mapping
+/// that is written costs a round trip of its own.
 async fn write_batch(
 	ds: &Datastore,
 	ns: NamespaceId,
@@ -228,22 +294,37 @@ async fn write_batch(
 ) -> Result<usize> {
 	let txn = ds.transaction(TransactionType::Write).await?;
 	let written = async {
+		#[cfg(test)]
+		maybe_inject_retryable_conflict(
+			RetryableConflictSite::DocLookupIdentityMigration,
+			ds.id(),
+		)?;
+		let forward = |id: &RecordIdKey| {
+			DocLookupIdentityKey::new(ns, db, Cow::Borrowed(tb), RecordIdentity(id.clone()))
+		};
+		let reverse = batch
+			.iter()
+			.map(|(_, doc_id, _)| DocKeyKey::new(ns, db, Cow::Borrowed(tb), *doc_id))
+			.collect();
+		let current = txn.get_many_key(reverse, None).await?;
+		let published =
+			txn.get_many_key(batch.iter().map(|(_, _, id)| forward(id)).collect(), None).await?;
 		let mut written = 0usize;
-		for (_, doc_id, id) in batch {
-			let dd = DocKeyKey::new(ns, db, Cow::Borrowed(tb), *doc_id);
-			match txn.get_key(&dd, None).await? {
-				Some(current) if current.addresses_same_record(id) => {}
+		for (((_, doc_id, id), current), published) in batch.iter().zip(current).zip(published) {
+			if !current.is_some_and(|current| current.addresses_same_record(id)) {
 				// The record has moved on since the scan; whoever moved it owns
 				// the mapping now.
-				_ => continue,
+				continue;
 			}
-			let key =
-				DocLookupIdentityKey::new(ns, db, Cow::Borrowed(tb), RecordIdentity(id.clone()));
-			// A conditional create rather than a set. A record resolved since the
-			// scan has already published its own mapping and that one is fresher
-			// than anything derived here, so an existing key is left alone — which
-			// is also what makes a re-run converge instead of rewriting the band.
-			match txn.put_key(&key, doc_id).await {
+			if published.is_some() {
+				// Resolved since the scan, or copied by an earlier attempt: the
+				// mapping there is at least as fresh as anything derived here,
+				// and leaving it is what makes a re-run converge.
+				continue;
+			}
+			// Still a conditional create: a mapping published after the read
+			// above is fresher than this one too.
+			match txn.put_key(&forward(id), doc_id).await {
 				Ok(()) => written += 1,
 				Err(e) if super::already_exists(&e) => {}
 				Err(e) => return Err(e),
@@ -402,5 +483,103 @@ mod tests {
 			"a re-created record keeps the doc-ID it was given, not the stale one"
 		);
 		txn.cancel().await.unwrap();
+	}
+
+	/// The namespace and database ids of the only ones `ds` defines.
+	async fn only_ns_db(ds: &Datastore) -> (NamespaceId, DatabaseId) {
+		let txn = ds.transaction(TransactionType::Read).await.unwrap();
+		let ns = txn.all_ns(None).await.unwrap()[0].namespace_id;
+		let db = txn.all_db(ns, None).await.unwrap()[0].database_id;
+		txn.cancel().await.unwrap();
+		(ns, db)
+	}
+
+	async fn injective(
+		ds: &Datastore,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordIdKey,
+	) -> Option<u64> {
+		let txn = ds.transaction(TransactionType::Read).await.unwrap();
+		let dj = DocLookupIdentityKey::new(ns, db, Cow::Borrowed(tb), RecordIdentity(id.clone()));
+		let found = txn.get_key(&dj, None).await.unwrap();
+		txn.cancel().await.unwrap();
+		found
+	}
+
+	/// A batch that keeps losing its commit is skipped, and the start goes on.
+	///
+	/// The records it leaves behind are not stranded — they resolve through the
+	/// verified fallback — so failing the start for them would trade a slower
+	/// lookup for a node that does not come up. The next run copies them.
+	#[tokio::test]
+	async fn a_batch_that_keeps_losing_its_commit_is_skipped_not_fatal() {
+		let ds = crate::kvs::Datastore::new("memory").await.unwrap();
+		ds.execute(
+			"DEFINE NAMESPACE n; USE NS n; DEFINE DATABASE d; USE NS n DB d; DEFINE TABLE a; DEFINE TABLE b;",
+			&Default::default(),
+			None,
+		)
+		.await
+		.unwrap();
+		let (ns, db) = only_ns_db(&ds).await;
+		let (a, b): (TableName, TableName) = ("a".into(), "b".into());
+		let id = arr(Number::Int(1));
+		{
+			let txn = ds.transaction(TransactionType::Write).await.unwrap();
+			txn.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&a), 7), &id).await.unwrap();
+			txn.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&b), 8), &id).await.unwrap();
+			txn.commit().await.unwrap();
+		}
+
+		// Every attempt at the first table's only batch conflicts; the second
+		// table's batch comes after the injections are spent.
+		let _guard = crate::kvs::testing::inject_retryable_conflicts(
+			RetryableConflictSite::DocLookupIdentityMigration,
+			ds.id(),
+			WRITE_ATTEMPTS,
+		);
+		rebuild_forward_doc_ids_under_an_injective_key(&ds)
+			.await
+			.expect("a batch lost to conflicts must not fail the migration");
+		assert_eq!(injective(&ds, ns, db, &a, &id).await, None, "the lost batch is skipped");
+		assert_eq!(injective(&ds, ns, db, &b, &id).await, Some(8), "and the walk goes on past it");
+
+		rebuild_forward_doc_ids_under_an_injective_key(&ds).await.unwrap();
+		assert_eq!(injective(&ds, ns, db, &a, &id).await, Some(7), "a later run copies it");
+	}
+
+	/// A reverse mapping that does not decode is skipped, and the rest of its
+	/// batch is still copied.
+	#[tokio::test]
+	async fn a_reverse_mapping_that_does_not_decode_is_skipped_not_fatal() {
+		let ds = crate::kvs::Datastore::new("memory").await.unwrap();
+		ds.execute(
+			"DEFINE NAMESPACE n; USE NS n; DEFINE DATABASE d; USE NS n DB d; DEFINE TABLE t;",
+			&Default::default(),
+			None,
+		)
+		.await
+		.unwrap();
+		let (ns, db) = only_ns_db(&ds).await;
+		let tb: TableName = "t".into();
+		let (before, after) = (arr(Number::Int(1)), arr(Number::Int(2)));
+		{
+			let txn = ds.transaction(TransactionType::Write).await.unwrap();
+			txn.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&tb), 4), &before).await.unwrap();
+			let garbage =
+				crate::key::KVKey::encode_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&tb), 5))
+					.unwrap();
+			txn.set(garbage, vec![0xff; 3]).await.unwrap();
+			txn.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&tb), 6), &after).await.unwrap();
+			txn.commit().await.unwrap();
+		}
+
+		rebuild_forward_doc_ids_under_an_injective_key(&ds)
+			.await
+			.expect("an undecodable entry must not fail the migration");
+		assert_eq!(injective(&ds, ns, db, &tb, &before).await, Some(4));
+		assert_eq!(injective(&ds, ns, db, &tb, &after).await, Some(6));
 	}
 }

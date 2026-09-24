@@ -19,6 +19,11 @@ The forward mapping therefore has a second, injective key, `!dj`, spelled with
 release keeps resolving records this one maps, and a `!di` hit is adopted only
 when `!dd` agrees the doc-ID names the record that was asked for — which is
 what stops a record inheriting a collision it did not own.
+
+That makes the doc-ID mapping whole, which is all a full-text index reads, so
+the full-text index is what this pins. A plain index and the HNSW and DiskANN
+pending queues key the id under `IndexFormat` themselves and still treat the
+pair as one record; their routes in the keyspace say so.
 """
 issue = 7437
 

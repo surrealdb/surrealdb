@@ -23,13 +23,15 @@ format instead of reading it."""
 importing-version = ">=3.0.1"
 
 [[test.repair]]
-since = ">=3.3.0-beta.1, <3.4.0"
+since = ">=3.3.0-beta.1, <3.3.0-beta.4"
 script = "upgrade/define/3.00.00_index_hnsw_rebuild.surql"
 unrepaired = "broken"
 reason = """
-The 3.3.0 betas moved vector indexes onto a table-level shared doc-ID space and
-refuse to serve an index still stamped with the per-index format, so
-`REBUILD INDEX` is a required manual step when upgrading onto one of them."""
+3.3.0-beta.1 through beta.3 moved vector indexes onto a table-level shared
+doc-ID space and refuse to serve an index still stamped with the per-index
+format, so `REBUILD INDEX` is a required manual step when upgrading onto one
+of them. 3.3.0-beta.4 preserves the per-index layout until an explicit
+rebuild instead, so no repair is required upgrading onto it or later."""
 
 [[test.results]]
 match = '''string::starts_with($result.indexes.hnsw_pts, "DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12")'''
