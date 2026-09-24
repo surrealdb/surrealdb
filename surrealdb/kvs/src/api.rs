@@ -538,6 +538,22 @@ pub trait Transactable: Send + Sync {
 		Box::pin(async move { Err(Error::UnsupportedLockedReads) })
 	}
 
+	/// Whether a [`Self::getu`] registration conflicts only with writes.
+	///
+	/// When this returns [`true`], a locked read is invalidated only by
+	/// another transaction committing a write to the key, never by another
+	/// transaction's locked read of it: any number of overlapping
+	/// transactions may hold a locked read of one key and all of them
+	/// commit. Callers rely on this to take a locked read of a key that
+	/// many concurrent writers read, without making those writers conflict
+	/// with one another. An engine that does not guarantee it returns
+	/// [`false`], which is the default: among them are engines whose locked
+	/// read counts as a write of the key for conflict detection, so that two
+	/// locked reads of one key conflict.
+	fn shared_locked_reads(&self) -> bool {
+		false
+	}
+
 	/// Insert or update a key in the datastore.
 	fn set<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>>;
 

@@ -70,6 +70,14 @@ impl Transactor {
 		self.inner.writeable()
 	}
 
+	/// Whether a locked read ([`Self::getu`]) conflicts only with writes,
+	/// never with another transaction's locked read of the same key.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::shared_locked_reads`].
+	pub fn shared_locked_reads(&self) -> bool {
+		self.inner.shared_locked_reads()
+	}
+
 	/// Cancel a transaction.
 	///
 	/// This reverses all changes made within the transaction.
