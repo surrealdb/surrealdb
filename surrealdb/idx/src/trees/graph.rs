@@ -10,6 +10,17 @@ use bytes::{Buf, BytesMut};
 use crate::trees::dynamicset::DynamicSet;
 use crate::trees::hnsw::ElementId;
 
+/// Serializes one node's edge list in the layout [`UndirectedGraph::load_node`]
+/// reads back: the edge count, then each edge, all big-endian.
+pub(super) fn encode_edges<'a>(len: usize, edges: impl Iterator<Item = &'a ElementId>) -> Vec<u8> {
+	let mut buf = Vec::with_capacity(2 + len * 8);
+	buf.extend_from_slice(&(len as u16).to_be_bytes());
+	for &e in edges {
+		buf.extend_from_slice(&e.to_be_bytes());
+	}
+	buf
+}
+
 #[derive(Debug)]
 pub(super) struct UndirectedGraph<S>
 where
@@ -102,14 +113,7 @@ where
 	/// Serializes a single node's edge list into a byte buffer.
 	/// Returns `None` if the node does not exist in the graph.
 	pub(super) fn node_to_val(&self, node: ElementId) -> Option<Vec<u8>> {
-		self.nodes.get(&node).map(|edges| {
-			let mut buf = Vec::with_capacity(2 + edges.len() * 8);
-			buf.extend_from_slice(&(edges.len() as u16).to_be_bytes());
-			for &e in edges.iter() {
-				buf.extend_from_slice(&e.to_be_bytes());
-			}
-			buf
-		})
+		self.nodes.get(&node).map(|edges| encode_edges(edges.len(), edges.iter()))
 	}
 
 	/// Deserializes a single node's edge list from a byte buffer

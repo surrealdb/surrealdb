@@ -161,6 +161,17 @@ mod tests {
 		assert_eq!(c.table_doc_ids_batch_size, 7);
 		let c: IdxConfig = map_with("hnsw_cache_size", "7").load();
 		assert_eq!(c.hnsw_cache_size, 7);
+		{
+			use crate::idx::config::BuildParallelism;
+			let c: IdxConfig = map_with("hnsw_build_parallelism", "7").load();
+			assert_eq!(
+				c.hnsw_build_parallelism,
+				BuildParallelism::Fixed(std::num::NonZeroUsize::new(7).expect("non-zero"))
+			);
+			let c: IdxConfig = map_with("hnsw_build_parallelism", "serial").load();
+			assert_eq!(c.hnsw_build_parallelism, BuildParallelism::Serial);
+			assert_eq!(IdxConfig::default().hnsw_build_parallelism, BuildParallelism::Auto);
+		}
 		let c: IdxConfig = map_with("diskann_cache_size", "7").load();
 		assert_eq!(c.diskann_cache_size, 7);
 		// The fold threshold is a built-in constant, not a config key: a map

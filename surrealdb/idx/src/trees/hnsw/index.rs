@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use ahash::HashMap;
 use anyhow::{Result, bail};
@@ -11,17 +12,23 @@ use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
 use surrealdb_datastore::Transaction;
 use surrealdb_kvs::{Direction, Val};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockReadGuard};
+use tracing::debug;
+use web_time::Instant;
 
 use crate::catalog::{Distance, HnswParams, TableId, VectorType};
+use crate::config::BuildParallelism;
 use crate::docids::{LegacyVectorDocIds, TableDocIds};
 use crate::env::IndexEnv;
 use crate::key::schema::{HnswRecordPendingKey, HnswRecordPendingPrefix};
 use crate::key::{KVKeyDecode, KVSubspace, KVValue, Key, Resumable};
+use crate::trees::hnsw::batch::{
+	self, GraphBase, InvalidateResident, PublishBatch, RollBackBatch, Staged, Staging,
+};
 use crate::trees::hnsw::cache::VectorCache;
-use crate::trees::hnsw::docs::{HnswDocs, VecDocs};
+use crate::trees::hnsw::docs::{ElementSink, HnswDocs, InPlace, VecDocs};
 use crate::trees::hnsw::filter::HnswTruthyDocumentFilter;
-use crate::trees::hnsw::flavor::HnswFlavor;
+use crate::trees::hnsw::flavor::{HnswFlavor, with_hnsw};
 use crate::trees::hnsw::{
 	ElementId, HnswRecordPendingUpdate, HnswSearch, VectorId, VectorPendingUpdate,
 };
@@ -254,13 +261,66 @@ impl PendingPlanBuilder {
 	}
 }
 
+/// What applying a compaction plan did.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HnswCompactionOutcome {
+	/// Nothing was applied: the plan was empty, another compactor advanced the
+	/// generation first, or a captured pending changed before the write.
+	Skipped,
+	/// The plan was applied into the transaction only, and the resident graph
+	/// takes it when that transaction commits. A transaction that does not
+	/// commit leaves the resident graph as it stood, so nothing needs
+	/// discarding.
+	Staged,
+	/// The plan was applied to the resident graph in place, as it was written
+	/// into the transaction. A transaction that does not commit invalidates the
+	/// resident graph for every holder of the index; a caller still discards
+	/// the process-local index, so the next access starts from a new one.
+	InPlace,
+}
+
+impl HnswCompactionOutcome {
+	/// Whether the plan was applied, so the transaction has a batch to commit.
+	pub fn applied(self) -> bool {
+		!matches!(self, Self::Skipped)
+	}
+}
+
+/// The resident graph, and how far it has been reconciled with the index's
+/// invalidations.
+///
+/// A batch that reached the graph and did not commit leaves it holding state
+/// the store never took, which its layer versions cannot reveal. Such a batch
+/// advances [`HnswIndex::invalidations`], and a graph whose `reconciled_at`
+/// trails that count reloads every layer at its next state check.
+pub(super) struct ResidentGraph {
+	pub(super) graph: HnswFlavor,
+	/// The index's invalidation count when this graph last reloaded in full.
+	reconciled_at: u64,
+}
+
+impl std::ops::Deref for ResidentGraph {
+	type Target = HnswFlavor;
+
+	fn deref(&self) -> &HnswFlavor {
+		&self.graph
+	}
+}
+
+impl std::ops::DerefMut for ResidentGraph {
+	fn deref_mut(&mut self) -> &mut HnswFlavor {
+		&mut self.graph
+	}
+}
+
 /// High-level HNSW index supporting concurrent reads and writes.
 ///
 /// Writes are handled through a two-phase approach:
 /// 1. **Enqueueing**: The [`index`](Self::index) method converts document changes into record-keyed
 ///    [`HnswRecordPendingUpdate`] entries stored in the key-value store.
-/// 2. **Applying**: Compaction prepares a bounded pending snapshot and applies it under a graph
-///    write lock after the captured keys are conditionally deleted.
+/// 2. **Applying**: Compaction prepares a bounded pending snapshot and applies it after the
+///    captured keys are conditionally deleted — staged and published on commit when it only adds
+///    vectors, in place under the graph write lock otherwise (see [`Self::apply_compaction`]).
 ///
 /// Reads via [`knn_search`](Self::knn_search) scan pending updates
 /// conservatively, then search the committed graph under a read lock and merge
@@ -279,7 +339,11 @@ pub struct HnswIndex {
 	/// Shared HNSW cache used for hot vector/doc mapping lookups.
 	vector_cache: VectorCache,
 	/// The HNSW graph, protected by a read-write lock for concurrent access.
-	hnsw: RwLock<HnswFlavor>,
+	/// Shared, so a committed staged batch can publish into it.
+	hnsw: Arc<RwLock<ResidentGraph>>,
+	/// How many batches have reached the resident graph and not committed.
+	/// Shared with those batches' rollback actions, which advance it.
+	invalidations: Arc<AtomicU64>,
 	/// Vector-to-document mappings.
 	vec_docs: VecDocs,
 	/// The stored index format that selects shared or legacy doc-ID mappings.
@@ -341,13 +405,11 @@ impl HnswIndex {
 			vector_type: p.vector_type,
 			distance: p.distance.clone(),
 			table_id: tb,
-			hnsw: RwLock::new(HnswFlavor::new(
-				tb,
-				ikb.clone(),
-				p,
-				vector_cache.clone(),
-				format_version,
-			)?),
+			hnsw: Arc::new(RwLock::new(ResidentGraph {
+				graph: HnswFlavor::new(tb, ikb.clone(), p, vector_cache.clone(), format_version)?,
+				reconciled_at: 0,
+			})),
+			invalidations: Arc::new(AtomicU64::new(0)),
 			vec_docs: VecDocs::new(
 				ikb.clone(),
 				tb,
@@ -361,6 +423,12 @@ impl HnswIndex {
 			pending_backlog_reported: PendingBacklogReport::default(),
 			pending_scan_stats: PendingScanStats::default(),
 		})
+	}
+
+	/// The resident graph, for the tests that build a batch over it directly.
+	#[cfg(test)]
+	pub(super) fn resident(&self) -> Arc<RwLock<ResidentGraph>> {
+		Arc::clone(&self.hnsw)
 	}
 
 	/// What the kNN pending scans on this index materialised.
@@ -581,12 +649,24 @@ impl HnswIndex {
 	///
 	/// The write phase first advances the generation and conditionally deletes
 	/// only the exact pending values observed by the read phase. The graph is
-	/// mutated only after those guards succeed.
+	/// changed only after those guards succeed, in one of two ways:
+	///
+	/// * A plan whose operations only add vectors is **staged**, unless the index engines are
+	///   configured for [`BuildParallelism::Serial`]: its graph changes are built on
+	///   `hnsw_build_parallelism` tasks against the committed graph, written into the transaction,
+	///   and taken by the resident graph when the transaction commits.
+	/// * Any other plan is applied **in place**, one operation at a time, under the graph write
+	///   lock.
+	///
+	/// A transaction may carry more than one apply for an index. Each then
+	/// reads the graph back through that transaction, and every batch's
+	/// rollback action accounts for what that can bring into the resident
+	/// graph; see [`HnswCompactionOutcome`].
 	pub(crate) async fn apply_compaction(
 		&self,
 		env: &dyn IndexEnv,
 		plan: HnswCompactionPlan,
-	) -> Result<bool> {
+	) -> Result<HnswCompactionOutcome> {
 		let HnswCompactionPlan {
 			generation,
 			captured_keys,
@@ -595,26 +675,154 @@ impl HnswIndex {
 		} = plan;
 		let tx = env.tx();
 		if captured_keys.is_empty() {
-			return Ok(false);
+			return Ok(HnswCompactionOutcome::Skipped);
 		}
 		if !bump_compaction_generation(&tx, &self.ikb.new_hg_key(), generation).await? {
-			return Ok(false);
+			return Ok(HnswCompactionOutcome::Skipped);
 		}
 		for captured in &captured_keys {
 			match tx.del_compare(Key::from(&captured.key), Some(&captured.value)).await {
 				Ok(()) => {}
-				Err(e) if is_transaction_condition_not_met(&e) => return Ok(false),
+				Err(e) if is_transaction_condition_not_met(&e) => {
+					return Ok(HnswCompactionOutcome::Skipped);
+				}
 				Err(e) => return Err(e),
 			}
 		}
+		let parallelism = env.config().hnsw_build_parallelism;
+		if parallelism != BuildParallelism::Serial
+			&& pending.iter().all(|pending| pending.old_vectors.is_empty())
+		{
+			self.apply_staged(env, pending, parallelism.tasks()).await?;
+			return Ok(HnswCompactionOutcome::Staged);
+		}
+		self.apply_in_place(env, pending).await?;
+		Ok(HnswCompactionOutcome::InPlace)
+	}
+
+	/// Applies a plan to the resident graph, one operation at a time, under
+	/// the graph write lock.
+	async fn apply_in_place(
+		&self,
+		env: &dyn IndexEnv,
+		pending: Vec<PendingOperation>,
+	) -> Result<()> {
 		let mut hnsw = self.hnsw.write().await;
-		hnsw.check_state(env).await?;
-		let mut ctx = self.new_hnsw_context(env);
+		self.reconcile(&mut hnsw, env).await?;
+		// Registered before the first operation reaches the graph: from here
+		// on, a transaction that does not commit leaves the resident graph and
+		// the vector cache holding what the store never took.
+		env.tx()
+			.on_rollback(Box::new(InvalidateResident {
+				invalidations: Arc::clone(&self.invalidations),
+				elements: hnsw.elements().view(None),
+			}))
+			.await;
+		let ctx = self.new_hnsw_context(env);
 		let docs = HnswDocs::with_format_version(self.ikb.clone(), self.format_version);
 		for pending in pending {
-			self.apply_pending_operation(&mut ctx, &docs, &mut hnsw, pending).await?;
+			self.apply_pending_operation(&ctx, &docs, &mut hnsw.graph, pending).await?;
 		}
-		Ok(true)
+		Ok(())
+	}
+
+	/// Stages a plan whose operations only add vectors.
+	///
+	/// Step 0 runs here, serially, under the graph write lock: document ids are
+	/// resolved and every vector is matched against the vector-to-documents
+	/// mapping through the transaction, so a vector the index already holds —
+	/// committed or earlier in this batch — only gains the document, and every
+	/// other vector is allocated as a new element. The lock is then downgraded,
+	/// and the new elements are linked into the graph on `tasks` tasks by
+	/// [`batch::build`]. The resident graph and the caches take the batch from
+	/// a commit action; see the `batch` module.
+	async fn apply_staged(
+		&self,
+		env: &dyn IndexEnv,
+		pending: Vec<PendingOperation>,
+		tasks: usize,
+	) -> Result<()> {
+		let tx = env.tx();
+		let started = Instant::now();
+		let mut resident = Arc::clone(&self.hnsw).write_owned().await;
+		self.reconcile(&mut resident, env).await?;
+		let base = with_hnsw!(&resident.graph, h => GraphBase::of(h));
+		let mut staging = Staging::new(base.next_element_id());
+		{
+			let ctx = self.new_hnsw_context(env);
+			let docs = HnswDocs::with_format_version(self.ikb.clone(), self.format_version);
+			let mut sink = Staged {
+				graph: &mut resident.graph,
+				staging: &mut staging,
+			};
+			for pending in pending {
+				self.add_pending_vectors(&ctx, &docs, &mut sink, pending).await?;
+			}
+		}
+		let adds_nothing = staging.adds_nothing();
+		let (elements, doc_sets) = staging.into_parts();
+		let first = base.next_element_id();
+		let new_elements = first..first + elements.len() as ElementId;
+		let vectors: Vec<(ElementId, SharedVector)> =
+			elements.iter().map(|e| (e.id, e.vector.clone())).collect();
+		let committed = resident.elements().view(None);
+		let allocated = started.elapsed();
+		let staged = if adds_nothing {
+			drop(resident);
+			None
+		} else {
+			let started = Instant::now();
+			let resident = Arc::new(resident.downgrade());
+			let staged =
+				batch::build(Arc::clone(&resident), Arc::clone(&tx), base.clone(), elements, tasks)
+					.await?;
+			let built = started.elapsed();
+			let started = Instant::now();
+			with_hnsw!(&resident.graph, h => staged.write(h, &tx).await)?;
+			debug!(
+				target: "surrealdb::idx::hnsw",
+				allocate_ms = allocated.as_millis() as u64,
+				build_ms = built.as_millis() as u64,
+				write_ms = started.elapsed().as_millis() as u64,
+				"staged HNSW batch"
+			);
+			Some(staged)
+		};
+		tx.on_rollback(Box::new(RollBackBatch {
+			resident: Arc::clone(&self.hnsw),
+			invalidations: Arc::clone(&self.invalidations),
+			base,
+			elements: committed.view(None),
+			new_elements,
+			vec_docs: self.vec_docs.clone(),
+			doc_sets: doc_sets.iter().map(|(element, _)| *element).collect(),
+		}))
+		.await;
+		tx.on_commit(Box::new(PublishBatch {
+			resident: Arc::clone(&self.hnsw),
+			staged,
+			elements: committed,
+			vectors,
+			vec_docs: self.vec_docs.clone(),
+			doc_sets,
+		}))
+		.await;
+		Ok(())
+	}
+
+	/// Brings the resident graph level with `env`'s view of the store.
+	///
+	/// A graph the index has been invalidated behind since it last reloaded in
+	/// full reloads every layer; any other reloads the layers whose version
+	/// moved.
+	async fn reconcile(&self, resident: &mut ResidentGraph, env: &dyn IndexEnv) -> Result<()> {
+		let invalidations = self.invalidations.load(Ordering::Acquire);
+		if resident.reconciled_at != invalidations {
+			resident.graph.reload(env).await?;
+			resident.reconciled_at = invalidations;
+			return Ok(());
+		}
+		resident.graph.check_state(env).await
 	}
 
 	/// Drains and applies one batch of pending vector updates to the HNSW graph.
@@ -626,32 +834,47 @@ impl HnswIndex {
 	pub(crate) async fn index_pendings(&self, env: &dyn IndexEnv) -> Result<usize> {
 		let plan = Self::prepare_compaction(env, &self.ikb).await?;
 		let count = plan.len();
-		if self.apply_compaction(env, plan).await? {
+		if self.apply_compaction(env, plan).await?.applied() {
 			Ok(count)
 		} else {
 			Ok(0)
 		}
 	}
 
-	/// Applies a coalesced pending operation to the HNSW graph.
+	/// Applies a coalesced pending operation to the HNSW graph in place.
 	///
-	/// The operation removes the graph baseline for resolved documents and
-	/// inserts the desired vectors, resolving a document ID for new records only
-	/// when vectors remain to index.
+	/// The operation removes the graph baseline for resolved documents, then
+	/// adds the desired vectors as [`Self::add_pending_vectors`] does.
 	async fn apply_pending_operation(
 		&self,
-		ctx: &mut HnswContext<'_>,
+		ctx: &HnswContext<'_>,
 		docs: &HnswDocs,
 		hnsw: &mut HnswFlavor,
+		mut pending: PendingOperation,
+	) -> Result<()> {
+		if let VectorId::DocId(doc_id) = &pending.id {
+			// Remove the graph baseline under the doc-ID those vectors live under.
+			for vector in std::mem::take(&mut pending.old_vectors) {
+				let vector = Vector::from(vector);
+				self.vec_docs.remove(ctx, &vector, *doc_id, hnsw).await?;
+			}
+		}
+		self.add_pending_vectors(ctx, docs, &mut InPlace(hnsw), pending).await
+	}
+
+	/// Everything a coalesced pending operation does apart from removing its
+	/// graph baseline: resolving the document ID its desired vectors belong
+	/// under — for new records only when vectors remain to index — and adding
+	/// those vectors through `sink`.
+	async fn add_pending_vectors<K: ElementSink>(
+		&self,
+		ctx: &HnswContext<'_>,
+		docs: &HnswDocs,
+		sink: &mut K,
 		pending: PendingOperation,
 	) -> Result<()> {
 		match pending.id {
 			VectorId::DocId(doc_id) => {
-				// Remove the graph baseline under the doc-ID those vectors live under.
-				for vector in pending.old_vectors {
-					let vector = Vector::from(vector);
-					self.vec_docs.remove(ctx, &vector, doc_id, hnsw).await?;
-				}
 				if pending.new_vectors.is_empty() {
 					if self.format_version < crate::catalog::DOC_IDS_FORMAT_VERSION {
 						let legacy = LegacyVectorDocIds::Hnsw(self.ikb.clone());
@@ -674,7 +897,7 @@ impl HnswIndex {
 					};
 					for vector in pending.new_vectors {
 						let vector = Vector::from(vector);
-						self.vec_docs.insert(ctx, vector, insert_doc_id, hnsw).await?;
+						self.vec_docs.insert(ctx, vector, insert_doc_id, sink).await?;
 					}
 				}
 			}
@@ -683,7 +906,7 @@ impl HnswIndex {
 					let doc_id = docs.resolve(ctx.env, &id).await?;
 					for vector in pending.new_vectors {
 						let vector = Vector::from(vector);
-						self.vec_docs.insert(ctx, vector, doc_id, hnsw).await?;
+						self.vec_docs.insert(ctx, vector, doc_id, sink).await?;
 					}
 				}
 			}
@@ -691,29 +914,40 @@ impl HnswIndex {
 		Ok(())
 	}
 
-	/// Ensures the in-memory graph layers are up-to-date with the persisted state.
+	/// Brings the in-memory graph level with `env`'s view of the store.
 	///
-	/// Concurrent kNN searches all invoke this before reading the graph. To keep
-	/// them from serialising on a single write lock, we validate under a shared
-	/// read lock first and only escalate to a write lock when an actual reload
-	/// is required. The write-lock branch double-checks because another task may
-	/// have refreshed the state while we waited.
+	/// A graph search reconciles on its own (see [`Self::reconciled`]); this is
+	/// for callers that want the graph current without searching it.
 	pub async fn check_state(&self, env: &dyn IndexEnv) -> Result<()> {
-		// Fast path: validate under a read lock. Multiple readers run concurrently,
-		// so steady-state (no peer writer bumped the version) no longer serialises.
+		self.reconciled(env).await.map(drop)
+	}
+
+	/// The resident graph as of `env`'s snapshot, under a read guard the caller
+	/// holds for as long as it reads the graph.
+	///
+	/// While the guard is held no batch can publish into the graph, no in-place
+	/// apply can change it and no other reader can reload it, so a search that
+	/// walks the graph under it reads the topology of the same snapshot its
+	/// pendings and doc-ID lookups come from. A graph from another snapshot
+	/// would pair the search's pendings with nodes for the same records, whose
+	/// doc-IDs the search cannot resolve, or point it at an entry point whose
+	/// vector its snapshot does not hold.
+	///
+	/// Validation runs under the shared read lock, so concurrent searches of an
+	/// unchanged graph do not serialise. A graph that needs reloading takes the
+	/// write lock, reconciles — a no-op if another task already did — and
+	/// downgrades without letting a writer in between.
+	async fn reconciled(&self, env: &dyn IndexEnv) -> Result<RwLockReadGuard<'_, ResidentGraph>> {
+		let guard = self.hnsw.read().await;
+		if guard.reconciled_at == self.invalidations.load(Ordering::Acquire)
+			&& !guard.needs_state_reload(env).await?
 		{
-			let guard = self.hnsw.read().await;
-			if !guard.needs_state_reload(env).await? {
-				return Ok(());
-			}
+			return Ok(guard);
 		}
-		// Slow path: a reload is required. Acquire the write lock and re-validate
-		// before reloading — a concurrent task may have already refreshed.
+		drop(guard);
 		let mut guard = self.hnsw.write().await;
-		if guard.needs_state_reload(env).await? {
-			guard.check_state(env).await?;
-		}
-		Ok(())
+		self.reconcile(&mut guard, env).await?;
+		Ok(guard.downgrade())
 	}
 
 	/// Performs a k-nearest neighbor search, combining pending and committed results.
@@ -839,7 +1073,7 @@ impl HnswIndex {
 		allow_list: Option<&RoaringTreemap>,
 		builder: &mut KnnResultBuilder,
 	) -> Result<()> {
-		let hnsw = self.hnsw.read().await;
+		let hnsw = self.reconciled(ctx.env).await?;
 		// Do the search. The allow-list routes through the filtered chain even
 		// without a truthy filter: the unfiltered chain suppresses elements
 		// from the traversal frontier itself, which is fine for a handful of
@@ -1358,6 +1592,21 @@ impl HnswIndex {
 	#[cfg(test)]
 	pub(super) async fn check_hnsw_properties(&self, expected_count: usize) {
 		self.hnsw.read().await.check_hnsw_properties(expected_count).await
+	}
+
+	/// Each resident layer's node count and mean out-degree, layer 0 first.
+	#[cfg(test)]
+	pub(super) async fn degree_profile(&self) -> Vec<(usize, f64)> {
+		let resident = self.hnsw.read().await;
+		with_hnsw!(&resident.graph, h => h.degree_profile())
+	}
+
+	/// The resident graph's entry point and every layer's adjacency, layer 0
+	/// first: two indexes hold the same graph exactly when these are equal.
+	#[cfg(test)]
+	pub(super) async fn adjacency(&self) -> super::Adjacency {
+		let resident = self.hnsw.read().await;
+		with_hnsw!(&resident.graph, h => h.adjacency())
 	}
 }
 

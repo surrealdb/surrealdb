@@ -677,6 +677,12 @@ impl Sequences {
 		}
 	}
 
+	/// The factory these allocators open their own transactions from: the
+	/// datastore's.
+	pub(crate) fn transaction_factory(&self) -> &TransactionFactory {
+		&self.tf
+	}
+
 	/// Cleans up all sequences associated with a removed namespace.
 	///
 	/// This method is called when a namespace is deleted to remove all cached

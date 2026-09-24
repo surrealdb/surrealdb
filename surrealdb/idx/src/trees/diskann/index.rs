@@ -2421,6 +2421,58 @@ mod tests {
 		Ok(())
 	}
 
+	/// A search reads the graph as of its own snapshot, even when a compaction
+	/// commits between the search's transaction opening and the search. The
+	/// snapshot still holds the records' pendings and none of the doc-IDs the
+	/// compaction assigned, so every record must come back exactly once, from
+	/// its pending.
+	#[tokio::test]
+	async fn diskann_search_reads_the_graph_as_of_its_snapshot() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let index = new_index(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 0..5_i64 {
+				let v = 10.0 * i as f32;
+				index
+					.index(
+						&ctx,
+						&RecordIdKey::Number(i),
+						None,
+						Some(f32_content(&[v, 0.0, 0.0, 0.0])),
+					)
+					.await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		let query = new_ctx(&ds, TransactionType::Read).await;
+		index.check_state().await?;
+		while compact_once(&index, &ds, &ikb).await? {}
+		let pt = f32_query(&[0.0, 0.0, 0.0, 0.0]);
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| async { index.knn_search(&query, stk, &pt, 5, 8, None, None).await })
+			.finish()
+			.await?;
+		query.tx().cancel().await?;
+		let keys: Vec<i64> = res
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect();
+		assert_eq!(keys, vec![0, 1, 2, 3, 4], "every record, nearest first: {res:?}");
+		Ok(())
+	}
+
 	async fn compact_once(
 		index: &DiskAnnIndex,
 		ds: &TestIndexStore,

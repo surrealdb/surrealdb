@@ -67,10 +67,57 @@ impl Weighter<HnswCacheKey, HnswCacheValue> for HnswCacheWeighter {
 	}
 }
 
+/// How many independently locked parts one index's tracked ids are split over.
+///
+/// Every cache insert and every eviction updates the tracker of the index it
+/// belongs to, so tasks filling the cache for one index at once would otherwise
+/// queue on a single lock. Element and document ids are allocated
+/// sequentially, so taking them modulo this spreads one index's traffic evenly.
+const TRACKER_SHARDS: usize = 64;
+
+/// The ids one index holds in one cache family, split over independently
+/// locked shards by id.
+struct TrackedIds(Box<[RwLock<RoaringTreemap>]>);
+
+impl Default for TrackedIds {
+	fn default() -> Self {
+		Self((0..TRACKER_SHARDS).map(|_| RwLock::default()).collect())
+	}
+}
+
+impl TrackedIds {
+	fn shard(&self, id: u64) -> &RwLock<RoaringTreemap> {
+		&self.0[(id % TRACKER_SHARDS as u64) as usize]
+	}
+
+	fn is_empty(&self) -> bool {
+		self.0.iter().all(|shard| shard.read().is_empty())
+	}
+
+	/// Every tracked id.
+	fn ids(&self) -> Vec<u64> {
+		let mut ids = Vec::new();
+		for shard in self.0.iter() {
+			ids.extend(shard.read().iter());
+		}
+		ids
+	}
+
+	#[cfg(test)]
+	fn len(&self) -> u64 {
+		self.0.iter().map(|shard| shard.read().len()).sum()
+	}
+}
+
 /// Tracks which element IDs are cached for each index.
 /// Wrapped in Arc to share ownership between VectorCache and VectorCacheLifecycle.
+///
+/// Inserts and evictions — the paths every cache fill takes — hold the map only
+/// shared, so they contend only on the one tracker shard their id falls in.
+/// Removing an element holds its index's entry exclusively, which is what lets
+/// it drop an entry it has emptied without racing an insert into it.
 #[derive(Clone, Default)]
-struct IdsPerIndex(Arc<DashMap<HnswCacheIndex, RwLock<RoaringTreemap>>>);
+struct IdsPerIndex(Arc<DashMap<HnswCacheIndex, TrackedIds>>);
 
 impl IdsPerIndex {
 	fn insert(
@@ -82,11 +129,14 @@ impl IdsPerIndex {
 		format_version: u16,
 		element_id: ElementId,
 	) {
-		self.0
-			.entry((namespace_id, database_id, table_id, index_id, format_version))
-			.or_default()
-			.write()
-			.insert(element_id);
+		let index = (namespace_id, database_id, table_id, index_id, format_version);
+		// The shared guard is held across the shard write, so an index entry
+		// cannot be removed between being found and being written to.
+		if let Some(ids) = self.0.get(&index) {
+			ids.shard(element_id).write().insert(element_id);
+			return;
+		}
+		self.0.entry(index).or_default().shard(element_id).write().insert(element_id);
 	}
 
 	#[cfg(test)]
@@ -101,7 +151,7 @@ impl IdsPerIndex {
 		if let Some(elements_ids) =
 			self.0.get(&(namespace_id, database_id, table_id, index_id, format_version))
 		{
-			elements_ids.read().len()
+			elements_ids.len()
 		} else {
 			0
 		}
@@ -113,7 +163,7 @@ impl IdsPerIndex {
 		table_id: TableId,
 		index_id: IndexId,
 		format_version: u16,
-	) -> Option<RwLock<RoaringTreemap>> {
+	) -> Option<TrackedIds> {
 		self.0
 			.remove(&(namespace_id, database_id, table_id, index_id, format_version))
 			.map(|entry| entry.1)
@@ -127,24 +177,20 @@ impl IdsPerIndex {
 		format_version: u16,
 		element_id: ElementId,
 	) {
-		if let Entry::Occupied(mut entry) =
+		if let Entry::Occupied(entry) =
 			self.0.entry((namespace_id, database_id, table_id, index_id, format_version))
 		{
-			let is_empty = {
-				let mut elements_ids = entry.get_mut().write();
-				elements_ids.remove(element_id);
-				elements_ids.is_empty()
-			};
+			entry.get().shard(element_id).write().remove(element_id);
 			// Clean up the index entry if no elements remain to prevent memory leaks
-			if is_empty {
+			if entry.get().is_empty() {
 				entry.remove_entry();
 			}
 		}
 	}
 
 	fn evict_element(&self, key: VectorCacheKey) {
-		if let Entry::Occupied(mut entry) = self.0.entry((key.0, key.1, key.2, key.3, key.4)) {
-			entry.get_mut().write().remove(key.5);
+		if let Some(ids) = self.0.get(&(key.0, key.1, key.2, key.3, key.4)) {
+			ids.shard(key.5).write().remove(key.5);
 			// Note: We intentionally don't clean up empty index entries here to avoid potential
 			// race conditions. Empty entries are cleaned up during remove_element() calls.
 		}
@@ -407,7 +453,7 @@ impl VectorCache {
 			index_id,
 			format_version,
 		) {
-			let ids: Vec<ElementId> = elements_ids.read().iter().collect();
+			let ids: Vec<ElementId> = elements_ids.ids();
 			for element_id in ids {
 				self.0.cache.remove(&HnswCacheKey::Vector((
 					namespace_id,
@@ -432,7 +478,7 @@ impl VectorCache {
 			index_id,
 			format_version,
 		) {
-			let ids: Vec<ElementId> = elements_ids.read().iter().collect();
+			let ids: Vec<ElementId> = elements_ids.ids();
 			for (count, element_id) in ids.into_iter().enumerate() {
 				self.0.cache.remove(&HnswCacheKey::DocSet((
 					namespace_id,
@@ -454,7 +500,7 @@ impl VectorCache {
 			index_id,
 			format_version,
 		) {
-			let ids: Vec<DocId> = doc_ids.read().iter().collect();
+			let ids: Vec<DocId> = doc_ids.ids();
 			for (count, doc_id) in ids.into_iter().enumerate() {
 				self.0.cache.remove(&HnswCacheKey::DocId((
 					namespace_id,

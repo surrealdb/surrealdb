@@ -14,9 +14,55 @@
 //! reads it and therefore the owner of its invariant: an empty allowlist denies
 //! every path, so file access must be configured explicitly.
 
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use surrealdb_cnf as cnf;
+
+/// How many tasks one graph-construction batch may run on.
+///
+/// A property of the machine rather than of any index, so it is configuration
+/// and never part of an index definition: the graph a batch builds does not
+/// depend on it.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum BuildParallelism {
+	/// As many tasks as the machine reports available parallelism.
+	#[default]
+	Auto,
+	/// No spawned tasks: the batch runs on the task applying it.
+	Serial,
+	/// Exactly this many tasks.
+	Fixed(NonZeroUsize),
+}
+
+impl BuildParallelism {
+	/// The number of tasks a batch runs on; at least one.
+	pub fn tasks(self) -> usize {
+		match self {
+			Self::Auto => std::thread::available_parallelism().map_or(1, NonZeroUsize::get),
+			Self::Serial => 1,
+			Self::Fixed(n) => n.get(),
+		}
+	}
+}
+
+impl FromStr for BuildParallelism {
+	type Err = ();
+
+	/// Accepts `auto`, `serial`, or a task count; `0` means `auto`.
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let s = s.trim();
+		if s.eq_ignore_ascii_case("auto") {
+			return Ok(Self::Auto);
+		}
+		if s.eq_ignore_ascii_case("serial") {
+			return Ok(Self::Serial);
+		}
+		let n: usize = s.parse().map_err(|_| ())?;
+		Ok(NonZeroUsize::new(n).map_or(Self::Auto, Self::Fixed))
+	}
+}
 
 /// Configuration of the index engines.
 #[derive(Clone, Debug)]
@@ -29,6 +75,10 @@ pub struct IdxConfig {
 	pub table_doc_ids_batch_size: u32,
 	/// The maximum total size of the HNSW ANN cache (default: 256 MiB)
 	pub hnsw_cache_size: u64,
+	/// How many tasks one HNSW compaction batch builds its graph changes on:
+	/// `auto`, `serial` or a task count. Batches that remove vectors always
+	/// apply serially. (default: auto)
+	pub hnsw_build_parallelism: BuildParallelism,
 	/// The maximum total size of the DiskANN ANN cache (default: 256 MiB)
 	pub diskann_cache_size: u64,
 	/// Specifies a list of paths in which files can be accessed (default: empty)
@@ -77,6 +127,7 @@ impl Default for IdxConfig {
 		Self {
 			table_doc_ids_batch_size: 1000,
 			hnsw_cache_size: 256 * 1024 * 1024,
+			hnsw_build_parallelism: BuildParallelism::Auto,
 			diskann_cache_size: 256 * 1024 * 1024,
 			file_allowlist: Vec::new(),
 			segment_dictionary_path: None,
@@ -93,6 +144,7 @@ impl cnf::Config for IdxConfig {
 	fn parse(&mut self, map: &cnf::ConfigMap) {
 		map.parse_key("table_doc_ids_batch_size", &mut self.table_doc_ids_batch_size)
 			.parse_key("hnsw_cache_size", &mut self.hnsw_cache_size)
+			.parse_key("hnsw_build_parallelism", &mut self.hnsw_build_parallelism)
 			.parse_key("diskann_cache_size", &mut self.diskann_cache_size)
 			.parse_key("graph_fold_batch", &mut self.graph_fold_batch)
 			.parse_key("graph_numeric_ids", &mut self.graph_numeric_ids)

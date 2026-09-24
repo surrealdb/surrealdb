@@ -1,3 +1,4 @@
+mod batch;
 pub(crate) mod cache;
 pub(crate) mod docs;
 mod elements;
@@ -54,6 +55,11 @@ impl HnswSearch {
 		}
 	}
 }
+
+/// A graph's entry point and every layer's `(node, edges)` lists, layer 0
+/// first, all in id order.
+#[cfg(test)]
+type Adjacency = (Option<ElementId>, Vec<Vec<(ElementId, Vec<ElementId>)>>);
 
 /// Core HNSW (Hierarchical Navigable Small World) graph implementation.
 ///
@@ -170,20 +176,28 @@ where
 	/// reloading any layers that have changed. Also handles layer migration
 	/// from the legacy `Hl` format to the current `Hn` format.
 	async fn check_state(&mut self, env: &dyn IndexEnv) -> Result<()> {
+		self.sync_state(env, false).await
+	}
+
+	/// [`Self::check_state`], reloading every layer when `reload_all` is set
+	/// rather than only the layers whose version moved — for a graph whose
+	/// versions can no longer be trusted to identify what it holds.
+	async fn sync_state(&mut self, env: &dyn IndexEnv, reload_all: bool) -> Result<()> {
 		let tx = env.tx();
 		// Read the state
 		let mut st: HnswState = tx.get_key(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
 		// Possible migration
 		let mut migrated = false;
 		let force_migration = tx.writeable() && st.layer0.chunks > 0;
+		let force = reload_all || force_migration;
 		// Compare versions
-		if st.layer0.version != self.state.layer0.version || force_migration {
+		if st.layer0.version != self.state.layer0.version || force {
 			migrated |= self.layer0.load(env, &tx, &mut st.layer0).await?;
 		}
 		for ((new_stl, stl), layer) in
 			st.layers.iter_mut().zip(self.state.layers.iter_mut()).zip(self.layers.iter_mut())
 		{
-			if new_stl.version != stl.version || force_migration {
+			if new_stl.version != stl.version || force {
 				migrated |= layer.load(env, &tx, new_stl).await?;
 			}
 		}
@@ -578,6 +592,23 @@ where
 	async fn check_hnsw_properties(&self, expected_count: usize) {
 		check_hnsw_props(self, expected_count).await;
 	}
+
+	/// Each layer's node count and mean out-degree, layer 0 first.
+	#[cfg(test)]
+	fn degree_profile(&self) -> Vec<(usize, f64)> {
+		let mean = |(nodes, edges): (usize, usize)| (nodes, edges as f64 / nodes.max(1) as f64);
+		let mut profile = vec![mean(self.layer0.degree_totals())];
+		profile.extend(self.layers.iter().map(|layer| mean(layer.degree_totals())));
+		profile
+	}
+
+	/// The entry point and every layer's adjacency, layer 0 first.
+	#[cfg(test)]
+	fn adjacency(&self) -> Adjacency {
+		let mut layers = vec![self.layer0.adjacency()];
+		layers.extend(self.layers.iter().map(|layer| layer.adjacency()));
+		(self.state.enter_point, layers)
+	}
 }
 
 #[cfg(test)]
@@ -616,6 +647,7 @@ mod tests {
 		DOC_IDS_FORMAT_VERSION, DatabaseId, Distance, HnswParams, IndexId, NamespaceId,
 		StoredTableDefinition, TableId, VectorType,
 	};
+	use crate::config::BuildParallelism;
 	use crate::docids::{DocId, TableDocIds};
 	use crate::error::Error;
 	use crate::key::schema::HnswPendingLegacyKey;
@@ -952,10 +984,17 @@ mod tests {
 		SerializedVector::from(vector.deref())
 	}
 
+	/// Builds, searches and empties an index one record at a time, applying
+	/// and checking each record inside the transaction that writes it. That
+	/// reads the graph back before the transaction commits, which only the
+	/// in-place apply supports, so the index engines are configured serial.
 	async fn test_hnsw_index(collection_size: usize, unique: bool, p: HnswParams) {
 		info!("test_hnsw_index - coll size: {collection_size} - params: {p:?}");
 
-		let ds = TestIndexStore::new().await;
+		let ds = TestIndexStore::with_idx_config(|c| {
+			c.hnsw_build_parallelism = BuildParallelism::Serial;
+		})
+		.await;
 
 		let collection = TestCollection::new(
 			unique,
@@ -1013,6 +1052,93 @@ mod tests {
 		}
 	}
 
+	/// Builds a whole collection as staged batches — every record written
+	/// first, then compacted and committed batch by batch — and checks the
+	/// published graph, its answers, and its removal.
+	async fn test_hnsw_index_staged(collection_size: usize, unique: bool, p: HnswParams) {
+		info!("test_hnsw_index_staged - coll size: {collection_size} - params: {p:?}");
+
+		let ds = TestIndexStore::with_idx_config(|c| {
+			c.hnsw_build_parallelism = BuildParallelism::Fixed(4.try_into().unwrap());
+		})
+		.await;
+		let collection = TestCollection::new(
+			unique,
+			collection_size,
+			p.vector_type,
+			p.dimension as usize,
+			&p.distance,
+		);
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let mut h = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&ctx.tx(),
+				ikb,
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await
+			.unwrap();
+			ctx.tx().cancel().await.unwrap();
+			h
+		};
+
+		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for (doc_id, obj) in collection.to_vec_ref() {
+				let content = vec![Value::from(obj.deref())];
+				h.index(&ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content))
+					.await
+					.unwrap();
+				map.entry(obj.clone()).or_default().insert(*doc_id);
+			}
+			ctx.tx().commit().await.unwrap();
+		}
+		compact_committed(&ds, &h).await;
+		h.check_hnsw_properties(map.len()).await;
+
+		{
+			let mut stack = reblessive::tree::TreeStack::new();
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			stack
+				.enter(|stk| async {
+					find_collection_hnsw_index(&ctx, stk, &mut h, &collection).await;
+				})
+				.finish()
+				.await;
+			ctx.tx().cancel().await.unwrap();
+		}
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for (doc_id, obj) in collection.to_vec_ref() {
+				let content = vec![Value::from(obj.deref())];
+				h.index(&ctx, &RecordIdKey::Number(*doc_id as i64), Some(content), None)
+					.await
+					.unwrap();
+			}
+			ctx.tx().commit().await.unwrap();
+		}
+		compact_committed(&ds, &h).await;
+		h.check_hnsw_properties(0).await;
+	}
+
+	/// Compacts every pending update, one committed transaction per batch.
+	async fn compact_committed(ds: &TestIndexStore, h: &HnswIndex) {
+		loop {
+			let ctx = new_ctx(ds, TransactionType::Write).await;
+			let compacted = h.index_pendings(&ctx).await.unwrap();
+			ctx.tx().commit().await.unwrap();
+			if compacted == 0 {
+				break;
+			}
+		}
+	}
+
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn tests_hnsw_index() -> Result<()> {
 		let mut futures = Vec::new();
@@ -1050,8 +1176,13 @@ mod tests {
 							keep,
 							use_hashed_vector,
 						);
+						let staged = p.clone();
 						let f = tokio::spawn(async move {
 							test_hnsw_index(30, unique, p).await;
+						});
+						futures.push(f);
+						let f = tokio::spawn(async move {
+							test_hnsw_index_staged(30, unique, staged).await;
 						});
 						futures.push(f);
 					}
@@ -1060,6 +1191,46 @@ mod tests {
 		}
 		for f in futures {
 			f.await.expect("Task error");
+		}
+		Ok(())
+	}
+
+	/// With the level draws fixed, the graph a build produces is the same
+	/// whatever share of the index's vectors the vector cache holds. A cache
+	/// too small for more than a few vectors, where nearly every read misses
+	/// and every fill evicts, must build the same graph as one that holds every
+	/// vector. This holds for staged batches on several tasks and for in-place
+	/// batches alike.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn graph_does_not_depend_on_the_vector_cache_size() -> Result<()> {
+		// The level draws are a build's only randomness. The seed is
+		// process-wide, so every index built afterwards in this process draws
+		// from it too; no test depends on its levels being unseeded.
+		surrealdb_cnf::set_default_hnsw_build_seed(0x5EED_CAC4E);
+		let p = new_params(8, VectorType::F32, Distance::Euclidean, 6, 50, false, false, true);
+		// Three batches, so later batches search the graph earlier ones built.
+		let collection =
+			TestCollection::new(false, 2_500, p.vector_type, p.dimension as usize, &p.distance);
+		let roomy = crate::config::IdxConfig::default().hnsw_cache_size;
+		for parallelism in
+			[BuildParallelism::Fixed(8.try_into().unwrap()), BuildParallelism::Serial]
+		{
+			let mut graphs = Vec::new();
+			for cache_size in [4 * 1024, roomy] {
+				let ds = TestIndexStore::with_idx_config(|c| {
+					c.hnsw_build_parallelism = parallelism;
+					c.hnsw_cache_size = cache_size;
+				})
+				.await;
+				let h = build_compacted(&ds, &p, &collection).await?;
+				graphs.push(h.adjacency().await);
+			}
+			let (_, layers) = &graphs[1];
+			assert_eq!(layers[0].len(), 2_500, "{parallelism:?}: every vector is a layer-0 node");
+			assert!(
+				graphs[0] == graphs[1],
+				"{parallelism:?}: the graph built through a 4 KiB vector cache differs from the one built through {roomy} bytes"
+			);
 		}
 		Ok(())
 	}
@@ -1142,6 +1313,68 @@ mod tests {
 		assert!(pending.old_vectors.is_empty());
 		assert_eq!(pending.new_vectors, vec![serialized(&second)]);
 		tx.cancel().await?;
+		Ok(())
+	}
+
+	/// A search reads the graph as of its own snapshot, even when a compaction
+	/// commits between the executor's state check and the search. The search's
+	/// snapshot predates the batch, so it still holds the records' pendings and
+	/// cannot resolve the doc-IDs the batch assigned: a walk over the batch's
+	/// nodes would put a second, unresolvable copy of each record in the
+	/// candidate list and push the resolvable pending copies out of the top k.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_search_reads_the_graph_as_of_its_snapshot() -> Result<()> {
+		for parallelism in
+			[BuildParallelism::Serial, BuildParallelism::Fixed(4.try_into().unwrap())]
+		{
+			let ds =
+				TestIndexStore::with_idx_config(|c| c.hnsw_build_parallelism = parallelism).await;
+			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+			let p = new_params(2, VectorType::F32, Distance::Euclidean, 4, 16, false, false, true);
+			let h = {
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				let h = HnswIndex::new(
+					ds.index_stores().vector_cache().clone(),
+					&ctx.tx(),
+					ikb.clone(),
+					TableId(3),
+					&p,
+					DOC_IDS_FORMAT_VERSION,
+				)
+				.await?;
+				ctx.tx().commit().await?;
+				h
+			};
+			{
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				for i in 0..5_i64 {
+					let v: SharedVector =
+						Vector::F32(Array1::from_vec(vec![10.0 * i as f32, 0.0])).into();
+					h.index(&ctx, &RecordIdKey::Number(i), None, Some(vector_content(&v))).await?;
+				}
+				ctx.tx().commit().await?;
+			}
+			// The executor checks the resident graph against the query's
+			// snapshot before it searches.
+			let query = new_ctx(&ds, TransactionType::Read).await;
+			h.check_state(&query).await?;
+			// A batch commits, and its nodes reach the resident graph, before
+			// the search walks it.
+			compact_committed(&ds, &h).await;
+			let pt = vec![Number::Float(0.0), Number::Float(0.0)];
+			let mut stack = reblessive::tree::TreeStack::new();
+			let res = stack
+				.enter(|stk| async { h.knn_search(&query, stk, &pt, 5, 40, None, None).await })
+				.finish()
+				.await?;
+			query.tx().cancel().await?;
+			let ids: Vec<RecordIdKey> = res.iter().map(|(rid, _, _)| rid.key.clone()).collect();
+			assert_eq!(
+				ids,
+				(0..5_i64).map(RecordIdKey::Number).collect::<Vec<_>>(),
+				"{parallelism:?}: every record, nearest first: {res:?}"
+			);
+		}
 		Ok(())
 	}
 
@@ -2730,7 +2963,7 @@ mod tests {
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			assert!(h.apply_compaction(&ctx, plan).await?);
+			assert!(h.apply_compaction(&ctx, plan).await?.applied());
 			ctx.tx().commit().await?;
 		}
 
@@ -2780,7 +3013,7 @@ mod tests {
 		}
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			assert!(!h.apply_compaction(&ctx, plan).await?);
+			assert!(!h.apply_compaction(&ctx, plan).await?.applied());
 			ctx.tx().cancel().await?;
 		}
 
@@ -2834,7 +3067,7 @@ mod tests {
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			assert!(!h.apply_compaction(&ctx, plan).await?);
+			assert!(!h.apply_compaction(&ctx, plan).await?.applied());
 			ctx.tx().cancel().await?;
 		}
 
@@ -2891,7 +3124,7 @@ mod tests {
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			assert!(h.apply_compaction(&ctx, plan).await?);
+			assert!(h.apply_compaction(&ctx, plan).await?.applied());
 			ctx.tx().commit().await?;
 		}
 
@@ -2944,12 +3177,12 @@ mod tests {
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			assert!(h.apply_compaction(&ctx, plan_1).await?);
+			assert!(h.apply_compaction(&ctx, plan_1).await?.applied());
 			ctx.tx().commit().await?;
 		}
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			assert!(!h.apply_compaction(&ctx, plan_2).await?);
+			assert!(!h.apply_compaction(&ctx, plan_2).await?.applied());
 			ctx.tx().cancel().await?;
 		}
 		Ok(())
@@ -2961,11 +3194,14 @@ mod tests {
 		queries_file: &str,
 		query_limit: usize,
 		p: HnswParams,
+		parallelism: BuildParallelism,
 		tests_ef_recall: &[(usize, f64)],
 	) -> Result<()> {
 		info!("Build data collection");
 
-		let ds = Arc::new(TestIndexStore::new().await);
+		let ds = Arc::new(
+			TestIndexStore::with_idx_config(|c| c.hnsw_build_parallelism = parallelism).await,
+		);
 		let tx = ds.transaction(TransactionType::Write).await?;
 		let db = tx.ensure_ns_db(None, "myns", "mydb").await?;
 		tx.commit().await?;
@@ -3061,6 +3297,9 @@ mod tests {
 		Ok(())
 	}
 
+	/// The collection compacts as one batch over an empty graph, so on the
+	/// default configuration this measures a staged batch whose elements find
+	/// each other through their intra-batch candidates alone.
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_recall_euclidean() -> Result<()> {
 		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, false, false);
@@ -3070,6 +3309,24 @@ mod tests {
 			"hnsw-random-5000-20-euclidean.gz",
 			300,
 			p,
+			BuildParallelism::Auto,
+			&[(10, 0.98), (40, 1.0)],
+		)
+		.await
+	}
+
+	/// [`test_recall_euclidean`] with every insertion applied one at a time,
+	/// the path the staged batch's recall is judged against.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_recall_euclidean_serial() -> Result<()> {
+		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, false, false);
+		test_recall(
+			"hnsw-random-9000-20-euclidean.gz",
+			1000,
+			"hnsw-random-5000-20-euclidean.gz",
+			300,
+			p,
+			BuildParallelism::Serial,
 			&[(10, 0.98), (40, 1.0)],
 		)
 		.await
@@ -3084,6 +3341,7 @@ mod tests {
 			"hnsw-random-5000-20-euclidean.gz",
 			200,
 			p,
+			BuildParallelism::Auto,
 			&[(10, 0.98), (40, 1.0)],
 		)
 		.await
@@ -3098,6 +3356,7 @@ mod tests {
 			"hnsw-random-5000-20-euclidean.gz",
 			100,
 			p,
+			BuildParallelism::Auto,
 			&[(10, 0.98), (40, 1.0)],
 		)
 		.await
@@ -3364,6 +3623,186 @@ mod tests {
 				})
 				.finish()
 				.await;
+		}
+		Ok(())
+	}
+
+	/// Builds `collection` into a fresh index the way compaction does — every
+	/// record written first, then compacted batch by batch, each batch in its
+	/// own committed transaction — and returns the index.
+	async fn build_compacted(
+		ds: &TestIndexStore,
+		p: &HnswParams,
+		collection: &TestCollection,
+	) -> Result<HnswIndex> {
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		let h = HnswIndex::new(
+			ds.index_stores().vector_cache().clone(),
+			&ctx.tx(),
+			ikb,
+			TableId(3),
+			p,
+			DOC_IDS_FORMAT_VERSION,
+		)
+		.await?;
+		for (doc_id, obj) in collection.to_vec_ref() {
+			let content = vec![Value::from(obj.deref())];
+			h.index(&ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await?;
+		}
+		ctx.tx().commit().await?;
+		compact_committed(ds, &h).await;
+		Ok(h)
+	}
+
+	/// Recall@10 of `h` over `queries` at each `ef`, against brute force over
+	/// `collection`.
+	async fn recall_ladder(
+		ds: &TestIndexStore,
+		h: &HnswIndex,
+		collection: &TestCollection,
+		queries: &TestCollection,
+		dist: &Distance,
+		efs: &[usize],
+	) -> Vec<f64> {
+		let knn = 10;
+		let mut ladder = Vec::with_capacity(efs.len());
+		for &ef in efs {
+			let mut stack = reblessive::tree::TreeStack::new();
+			let recall = stack
+				.enter(|stk| async {
+					let mut total = 0.0;
+					for (_, pt) in queries.to_vec_ref() {
+						let search = HnswSearch::new(pt.clone(), knn, ef);
+						let qctx = new_ctx(ds, TransactionType::Read).await;
+						let qctx = h.new_hnsw_context(&qctx);
+						let mut builder = KnnResultBuilder::new(knn);
+						h.search_graph(&qctx, stk, &search, None, &mut None, None, &mut builder)
+							.await
+							.unwrap();
+						qctx.tx.cancel().await.unwrap();
+						total += compute_recall(&collection.knn(pt, dist, knn), &builder.collect());
+					}
+					total / queries.to_vec_ref().len() as f64
+				})
+				.finish()
+				.await;
+			ladder.push(recall);
+		}
+		ladder
+	}
+
+	/// Recall@10 of a staged build against the one-at-a-time build of the same
+	/// collection, at 768-d cosine with the parameters of the drain benchmark
+	/// (M 16, EFC 200), over queries disjoint from the indexed vectors.
+	/// Prints both ladders. Ignored by default (slow at 768d): run with
+	/// `cargo test -p surrealdb-idx --release diag_recall_staged -- --ignored --nocapture`.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[ignore = "diagnostic (slow, high-dim): staged against serial Recall@10"]
+	async fn diag_recall_staged_against_serial() -> Result<()> {
+		const COLLECTION: usize = 20_000;
+		const QUERIES: usize = 200;
+		const DIMENSION: usize = 768;
+		let efs = [10, 16, 32, 64, 128];
+		let p =
+			new_params(DIMENSION, VectorType::F32, Distance::Cosine, 16, 200, false, false, true);
+		let mut rng = get_seed_rnd();
+		let item_gen = RandomItemGenerator::new(&p.distance, DIMENSION);
+		let mut gen_set = |n: usize| {
+			TestCollection::NonUnique(
+				(0..n)
+					.map(|i| {
+						(i as DocId, new_random_vec(&mut rng, p.vector_type, DIMENSION, &item_gen))
+					})
+					.collect(),
+			)
+		};
+		let collection = gen_set(COLLECTION);
+		let queries = gen_set(QUERIES);
+		let mut ladders = Vec::new();
+		for parallelism in [BuildParallelism::Serial, BuildParallelism::Auto] {
+			let ds =
+				TestIndexStore::with_idx_config(|c| c.hnsw_build_parallelism = parallelism).await;
+			let started = web_time::Instant::now();
+			let h = build_compacted(&ds, &p, &collection).await?;
+			let built = started.elapsed();
+			let ladder = recall_ladder(&ds, &h, &collection, &queries, &p.distance, &efs).await;
+			info!(
+				"{parallelism:?}: built {COLLECTION} in {built:?}; Recall@10 at ef {efs:?} = {ladder:.4?}"
+			);
+			ladders.push(ladder);
+		}
+		for (i, ef) in efs.iter().enumerate() {
+			assert!(
+				ladders[1][i] >= ladders[0][i] - 0.02,
+				"ef {ef}: staged Recall@10 {:.4} fell below serial {:.4}",
+				ladders[1][i],
+				ladders[0][i]
+			);
+		}
+		Ok(())
+	}
+
+	/// [`diag_recall_staged_against_serial`] on clustered data shaped like the
+	/// drain benchmark's corpus: unit vectors around 200 unit centroids, with
+	/// noise of length ~0.35, so a query has many same-cluster candidates to
+	/// confuse the graph. `DIAG_RECALL_ROWS` sets the collection size (default
+	/// 50 000). Ignored by default (slow at 768d): run with
+	/// `cargo test -p surrealdb-idx --release diag_recall_clustered -- --ignored --nocapture`.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[ignore = "diagnostic (slow, high-dim): staged against serial Recall@10 on clustered data"]
+	async fn diag_recall_clustered_staged_against_serial() -> Result<()> {
+		const QUERIES: usize = 400;
+		const DIMENSION: usize = 768;
+		const CLUSTERS: usize = 200;
+		const SIGMA: f32 = 0.35;
+		let rows: usize =
+			std::env::var("DIAG_RECALL_ROWS").ok().and_then(|v| v.parse().ok()).unwrap_or(50_000);
+		let efs = [10, 16, 32, 64];
+		let p =
+			new_params(DIMENSION, VectorType::F32, Distance::Cosine, 16, 200, false, false, true);
+		use rand::Rng as _;
+		let mut rng = get_seed_rnd();
+		let normal = |rng: &mut SmallRng| -> f32 {
+			// Box-Muller.
+			let u1: f32 = rng.random_range(f32::EPSILON..1.0);
+			let u2: f32 = rng.random_range(0.0..1.0);
+			(-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
+		};
+		let unit = |v: Vec<f32>| {
+			let n = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+			v.into_iter().map(|x| x / n).collect::<Vec<f32>>()
+		};
+		let centroids: Vec<Vec<f32>> = (0..CLUSTERS)
+			.map(|_| unit((0..DIMENSION).map(|_| normal(&mut rng)).collect()))
+			.collect();
+		let scale = SIGMA / (DIMENSION as f32).sqrt();
+		let point = |rng: &mut SmallRng| -> SharedVector {
+			let c = &centroids[rng.random_range(0..CLUSTERS)];
+			let v: Vec<f32> = c.iter().map(|x| x + scale * normal(rng)).collect();
+			Vector::F32(Array1::from_vec(unit(v))).into()
+		};
+		let collection =
+			TestCollection::NonUnique((0..rows).map(|i| (i as DocId, point(&mut rng))).collect());
+		let queries = TestCollection::NonUnique(
+			(0..QUERIES).map(|i| (i as DocId, point(&mut rng))).collect(),
+		);
+		let mut ladders = Vec::new();
+		for parallelism in [BuildParallelism::Serial, BuildParallelism::Auto] {
+			let ds =
+				TestIndexStore::with_idx_config(|c| c.hnsw_build_parallelism = parallelism).await;
+			let started = web_time::Instant::now();
+			let h = build_compacted(&ds, &p, &collection).await?;
+			let built = started.elapsed();
+			let ladder = recall_ladder(&ds, &h, &collection, &queries, &p.distance, &efs).await;
+			info!(
+				"{parallelism:?}: built {rows} in {built:?}; Recall@10 at ef {efs:?} = {ladder:.4?}"
+			);
+			info!(
+				"{parallelism:?}: (nodes, mean degree) per layer = {:.2?}",
+				h.degree_profile().await
+			);
+			ladders.push(ladder);
 		}
 		Ok(())
 	}

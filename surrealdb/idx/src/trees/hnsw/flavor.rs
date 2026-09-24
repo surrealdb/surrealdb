@@ -13,6 +13,31 @@ use crate::trees::hnsw::index::HnswContext;
 use crate::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::trees::vector::{SharedVector, Vector};
 
+/// Evaluates `$body` with `$h` bound to the concrete [`Hnsw`] inside a
+/// flavor, whichever variant it is. `$flavor` is a reference (shared or
+/// mutable), and `$h` takes the same kind.
+macro_rules! with_hnsw {
+	($flavor:expr, $h:ident => $body:expr) => {
+		match $flavor {
+			$crate::trees::hnsw::flavor::HnswFlavor::H5_9($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H5_17($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H5_25($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H5set($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H9_17($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H9_25($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H9set($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H13_25($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H13set($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H17set($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H21set($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H25set($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::H29set($h) => $body,
+			$crate::trees::hnsw::flavor::HnswFlavor::Hset($h) => $body,
+		}
+	};
+}
+pub(super) use with_hnsw;
+
 /// Type-erased dispatch enum for [`Hnsw`] instances with different neighbor set sizes.
 ///
 /// Each variant is a concrete `Hnsw<L0, L>` parameterized with fixed-size
@@ -177,6 +202,21 @@ impl HnswFlavor {
 			HnswFlavor::H29set(h) => h.needs_state_reload(env).await,
 			HnswFlavor::Hset(h) => h.needs_state_reload(env).await,
 		}
+	}
+
+	/// Reloads every layer from the key-value store, whatever its version.
+	pub(super) async fn reload(&mut self, env: &dyn IndexEnv) -> Result<()> {
+		with_hnsw!(self, h => h.sync_state(env, true).await)
+	}
+
+	/// Draws the level a new element is inserted up to.
+	pub(super) fn draw_level(&mut self) -> usize {
+		with_hnsw!(self, h => h.get_random_level())
+	}
+
+	/// The graph's committed element vectors, for reads outside the graph.
+	pub(super) fn elements(&self) -> &crate::trees::hnsw::elements::HnswElements {
+		with_hnsw!(self, h => &h.elements)
 	}
 
 	/// Loads and synchronizes the in-memory graph state from the key-value store.

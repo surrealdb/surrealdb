@@ -167,7 +167,47 @@ impl HnswDocs {
 	}
 }
 
+/// Where [`VecDocs::insert`] puts a vector the index does not hold yet, and
+/// where it records the document set an element carries after the write.
+///
+/// The mapping rules are the same either way; only this differs. Applying in
+/// place adds the element to the resident graph and caches its set at once. A
+/// staged batch allocates the element and holds the set back until its
+/// transaction commits.
+pub(super) trait ElementSink {
+	/// Adds `vector` to the index as a new element and returns its id.
+	async fn add_element(
+		&mut self,
+		ctx: &HnswContext<'_>,
+		vector: Vector,
+		ser_vec: &SerializedVector,
+	) -> Result<ElementId>;
+
+	/// Records the document set `element` carries after this write.
+	async fn record_doc_set(&mut self, vec_docs: &VecDocs, element: ElementId, docs: Ids64);
+}
+
+/// Adds elements straight to the resident graph, caching their document sets
+/// as it goes: the in-place apply.
+pub(super) struct InPlace<'a>(pub(super) &'a mut HnswFlavor);
+
+impl ElementSink for InPlace<'_> {
+	async fn add_element(
+		&mut self,
+		ctx: &HnswContext<'_>,
+		vector: Vector,
+		_ser_vec: &SerializedVector,
+	) -> Result<ElementId> {
+		self.0.insert(ctx, vector).await
+	}
+
+	async fn record_doc_set(&mut self, vec_docs: &VecDocs, element: ElementId, docs: Ids64) {
+		vec_docs.insert_cached_doc_set(element, docs).await;
+	}
+}
+
 /// Manages the mapping between vectors and document IDs in the HNSW index.
+#[derive(Clone)]
 pub(crate) struct VecDocs {
 	ikb: IndexKeyBase,
 	table_id: TableId,
@@ -203,12 +243,12 @@ impl VecDocs {
 		self.cache.get_doc_set(index, element_id).await
 	}
 
-	async fn insert_cached_doc_set(&self, element_id: ElementId, docs: Ids64) {
+	pub(super) async fn insert_cached_doc_set(&self, element_id: ElementId, docs: Ids64) {
 		let index = self.cache_index();
 		self.cache.insert_doc_set(index, element_id, docs).await;
 	}
 
-	async fn remove_cached_doc_set(&self, element_id: ElementId) {
+	pub(super) async fn remove_cached_doc_set(&self, element_id: ElementId) {
 		let index = self.cache_index();
 		self.cache.remove_doc_set(index, element_id).await;
 	}
@@ -262,23 +302,23 @@ impl VecDocs {
 	}
 
 	/// Inserts a vector and its associated document ID using its hash.
-	async fn insert_hashed(
+	async fn insert_hashed<K: ElementSink>(
 		&self,
 		ctx: &HnswContext<'_>,
 		o: Vector,
 		ser_vec: SerializedVector,
 		doc_id: DocId,
-		h: &mut HnswFlavor,
+		sink: &mut K,
 	) -> Result<()> {
 		let key = self.ikb.new_hh_key(ser_vec.compute_hash());
 		match ctx.tx.get_key(&key, None).await? {
 			None => {
 				//  We don't have the vector, we insert it in the graph
-				let element_id = h.insert(ctx, o).await?;
+				let element_id = sink.add_element(ctx, o, &ser_vec).await?;
 				let docs = Ids64::One(doc_id);
 				let ehd = ElementHashedDocs::new(element_id, ser_vec, doc_id);
 				ctx.tx.set_key(&key, &ehd).await?;
-				self.insert_cached_doc_set(element_id, docs).await;
+				sink.record_doc_set(self, element_id, docs).await;
 			}
 			Some(mut ehd) => {
 				if let Some(ed) = ehd.get_element_docs(&ser_vec) {
@@ -288,15 +328,15 @@ impl VecDocs {
 						let element_id = ed.e_id;
 						let docs = ed.docs.clone();
 						ctx.tx.set_key(&key, &ehd).await?;
-						self.insert_cached_doc_set(element_id, docs).await;
+						sink.record_doc_set(self, element_id, docs).await;
 					};
 				} else {
 					//  We don't have the vector, we insert it in the graph
-					let element_id = h.insert(ctx, o).await?;
+					let element_id = sink.add_element(ctx, o, &ser_vec).await?;
 					let docs = Ids64::One(doc_id);
 					ehd.add(element_id, ser_vec, doc_id);
 					ctx.tx.set_key(&key, &ehd).await?;
-					self.insert_cached_doc_set(element_id, docs).await;
+					sink.record_doc_set(self, element_id, docs).await;
 				}
 			}
 		};
@@ -304,16 +344,20 @@ impl VecDocs {
 	}
 
 	/// Inserts a vector and its associated document ID.
-	pub(super) async fn insert(
+	///
+	/// A vector the index already holds — committed, or written earlier in the
+	/// same transaction — gains the document; any other vector goes to `sink`
+	/// as a new element.
+	pub(super) async fn insert<K: ElementSink>(
 		&self,
-		ctx: &mut HnswContext<'_>,
+		ctx: &HnswContext<'_>,
 		vec: Vector,
 		doc_id: DocId,
-		h: &mut HnswFlavor,
+		sink: &mut K,
 	) -> Result<()> {
 		let ser_vec = SerializedVector::from(&vec);
 		if self.use_hashed_vector {
-			return self.insert_hashed(ctx, vec, ser_vec, doc_id, h).await;
+			return self.insert_hashed(ctx, vec, ser_vec, doc_id, sink).await;
 		}
 		let key = self.ikb.new_hv_key(&ser_vec);
 		if let Some(ed) = match ctx.tx.get_key(&key, None).await? {
@@ -326,13 +370,13 @@ impl VecDocs {
 			}
 			None => {
 				//  We don't have the vector, we insert it in the graph
-				let element_id = h.insert(ctx, vec).await?;
+				let element_id = sink.add_element(ctx, vec, &ser_vec).await?;
 				let ed = ElementDocs::new(element_id, doc_id);
 				Some(ed)
 			}
 		} {
 			ctx.tx.set_key(&key, &ed).await?;
-			self.insert_cached_doc_set(ed.e_id, ed.docs.clone()).await;
+			sink.record_doc_set(self, ed.e_id, ed.docs.clone()).await;
 		}
 		Ok(())
 	}
