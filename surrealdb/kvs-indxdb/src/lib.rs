@@ -12,6 +12,8 @@
 //! This backend only exists on WASM targets; on native targets this crate
 //! compiles to nothing.
 #![cfg(target_family = "wasm")]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 // The unsafe `Send`/`Sync` impls in `ffi` and `send_future` are sound only
 // because wasm without threads is single-threaded. Turn that precondition

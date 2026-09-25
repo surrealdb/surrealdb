@@ -16,6 +16,9 @@
 //! release. Depend on it only if you implement an engine; application code
 //! should use the [`surrealdb`](https://docs.rs/surrealdb) crate.
 
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
+
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::future::Future;

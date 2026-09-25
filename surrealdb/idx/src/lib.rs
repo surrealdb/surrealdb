@@ -15,6 +15,8 @@
 
 // This triggers because we have regex's in our Value type which have a unsafecell inside.
 #![allow(clippy::mutable_key_type)]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 #[macro_use]
 mod mac;

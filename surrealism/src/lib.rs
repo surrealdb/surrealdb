@@ -22,6 +22,9 @@
 //! `#[tokio::main(flavor = "current_thread")]` composes with it when applied as
 //! the outer attribute.
 
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
+
 #[allow(clippy::all, unused)]
 pub mod bindings;
 mod dispatch;

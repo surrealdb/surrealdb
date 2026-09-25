@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![recursion_limit = "256"]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 //! Measures how INSERT (`CREATE`) latency scales with the number of active
 //! live-query subscribers on the written table.

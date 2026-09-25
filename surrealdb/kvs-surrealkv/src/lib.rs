@@ -1,3 +1,6 @@
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
+
 mod background_flusher;
 mod cnf;
 mod commit_coordinator;

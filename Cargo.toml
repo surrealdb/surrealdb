@@ -445,6 +445,14 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 
 [workspace.lints.clippy]
 
+# Checks for items referred to through a path rather than a `use` import.
+# Deep inline paths obscure which crate an item comes from and make dependency churn harder to see.
+# `crate`, `self`, `std`, `core` and `alloc` are exempted via `absolute-paths-allowed-crates` in
+# `.clippy.toml`; `use` declarations and macro expansions are never flagged.
+# Crate roots that still carry violations opt out with `#![allow(clippy::absolute_paths)]`.
+# https://rust-lang.github.io/rust-clippy/master/#absolute_paths
+absolute_paths = "warn"
+
 # Checks for usage of `#[allow]` attribute and suggests replacing it with `#[expect]`.
 # `#[expect]` attributes suppress the lint emission, but emit a warning if the expectation is unfulfilled.
 # This is useful to be notified when the lint is no longer triggered.

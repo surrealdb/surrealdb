@@ -3,6 +3,8 @@
 //! This crate is **SurrealDB internal API** and does not promise stability.
 
 #![forbid(unsafe_code)]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 mod revision_impl;
 mod search;

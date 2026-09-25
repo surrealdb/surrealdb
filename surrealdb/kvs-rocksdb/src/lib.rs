@@ -2,6 +2,8 @@
 // back to a synchronous type (parking_lot or std). Tokio mutex guards are not
 // flagged by this lint, so the current `inner.lock().await` sites are fine.
 #![deny(clippy::await_holding_lock)]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 mod background_flusher;
 mod cnf;

@@ -23,6 +23,8 @@
 // The engine's futures nest deeply enough that computing their layout exceeds
 // the default limit, as they do for the shims that hold one.
 #![recursion_limit = "256"]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 use std::pin::Pin;
 use std::sync::Arc;

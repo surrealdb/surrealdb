@@ -2,6 +2,8 @@
 // Makes `attribute_preserved` a compile-time guard rather than a convention:
 // see its doc comment.
 #![deny(deprecated)]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 use std::io::{Read, Write};
 use std::net::TcpStream;

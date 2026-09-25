@@ -12,6 +12,8 @@
 // An RPC request's futures nest a `Value` tree deeply enough that laying out
 // `execute`'s state machine exceeds the default query depth.
 #![recursion_limit = "256"]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 mod app;
 mod err;

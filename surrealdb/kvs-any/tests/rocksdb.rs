@@ -3,6 +3,8 @@
 //! Generic backend behaviour lives in the shared `kvs` suite target.
 #![cfg(feature = "kv-rocksdb")]
 #![allow(clippy::unwrap_used)]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};

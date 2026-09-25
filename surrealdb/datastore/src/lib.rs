@@ -12,6 +12,10 @@
 // crate-wide because nested modules do not inherit a file-level `use`.
 // The moved modules spell their neighbours the way core did - `catalog::X`,
 // `expr::X`, `val::X` - so the same aliases keep those paths valid here.
+
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
+
 pub use surrealdb_catalog as catalog;
 pub use surrealdb_expr::{expr, val};
 

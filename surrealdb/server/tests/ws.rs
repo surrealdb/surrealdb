@@ -7,6 +7,9 @@
 //! the frame envelopes, their ordering, their correlation by request id -- as
 //! any SDK would observe them, without an SDK's own accumulation in between.
 
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;

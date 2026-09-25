@@ -11,6 +11,9 @@
 //! the protocol from the connection preface, which is what lets `grpc://` and
 //! `http://` share a port.
 
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;

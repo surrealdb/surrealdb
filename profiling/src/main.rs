@@ -2,6 +2,9 @@
 //!
 //! This is used to profile specific queries in isolation.
 
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
+
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};

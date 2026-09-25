@@ -1,5 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
+use syn::punctuated::Punctuated;
 use syn::{Expr, ExprLit, FnArg, Item, ItemFn, ItemMod, Lit, Meta};
 
 use crate::attr::parse_surrealism_attr;
@@ -175,7 +176,7 @@ fn is_existence_gate(attr: &syn::Attribute) -> bool {
 	}
 	// `#[cfg_attr(predicate, attr, ...)]`: the predicate first, then whatever it
 	// applies. Unparseable means unrecognised, which means not copied.
-	attr.parse_args_with(syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated)
+	attr.parse_args_with(Punctuated::<Meta, syn::Token![,]>::parse_terminated)
 		.is_ok_and(|args| args.iter().skip(1).all(|m| m.path().is_ident("cfg")))
 }
 

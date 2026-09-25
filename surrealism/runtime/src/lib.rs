@@ -3,6 +3,9 @@
 //! Runs on the SurrealDB server. Loads `.surli` packages, manages the
 //! controller pool, and executes guest functions with epoch-based timeouts.
 
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
+
 pub mod capabilities;
 pub mod config;
 pub mod controller;

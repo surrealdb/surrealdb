@@ -13,6 +13,9 @@
 //! **This crate is an internal implementation detail of SurrealDB.** Its API is
 //! unstable and changes without notice.
 
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
+
 pub mod args;
 pub mod array;
 pub mod bytes;

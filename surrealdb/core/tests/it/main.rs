@@ -4,6 +4,8 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::regex_creation_in_loops)]
 #![allow(clippy::clone_on_ref_ptr)]
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
 
 // Shared helpers, compiled once for the whole `it` binary instead of once per
 // integration test crate.

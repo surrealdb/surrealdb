@@ -8,6 +8,9 @@
 //! unstable and changes without notice. Depend on the `surrealdb` SDK or
 //! `surrealdb-core` instead.
 
+// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+#![allow(clippy::absolute_paths)]
+
 #[macro_use]
 extern crate surrealdb_collections;
 #[macro_use]
