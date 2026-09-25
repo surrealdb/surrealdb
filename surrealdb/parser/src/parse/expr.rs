@@ -500,7 +500,21 @@ impl Parse for ast::Destructure {
 								break;
 							}
 
+							// `...` must be the pattern's last entry: it stands
+							// for every field not named above it, so anything
+							// after it would be unreachable.
+							if let Some(rest) = parser.eat(T![...])? {
+								let item = ast::DestructureItem::Rest(rest.span);
+								parser.push_list(item, &mut head, &mut tail);
+								let _ = parser.expect_closing_delimiter(
+									BaseTokenKind::CloseBrace,
+									peek.span,
+								)?;
+								break;
+							}
+
 							let item = parser.parse_enter::<ast::Destructure>().await?;
+							let item = ast::DestructureItem::Field(item);
 							parser.push_list(item, &mut head, &mut tail);
 
 							if parser.eat(T![,])?.is_none() {
@@ -660,7 +674,7 @@ async fn parse_dot_brace_postfix(
 ) -> ParseResult<Expr> {
 	let brace_token = parser.expect(BaseTokenKind::OpenBrace)?;
 
-	let peek = parser.peek_expect("`*`, `..`, an integer, or an identifier")?;
+	let peek = parser.peek_expect("`*`, `..`, an integer, an identifier, or `...`")?;
 	match peek.token {
 		T![*] | T![..] | BaseTokenKind::Int => {
 			let left = parser.push(lhs);
@@ -693,7 +707,7 @@ async fn parse_dot_brace_postfix(
 			let expr = parser.push(expr);
 			Ok(Expr::Idiom(expr))
 		}
-		x if x.is_identifier() => {
+		x if x.is_identifier() || matches!(x, T![...]) => {
 			let left = parser.push(lhs);
 
 			let mut head = None;
@@ -703,7 +717,19 @@ async fn parse_dot_brace_postfix(
 					break;
 				}
 
+				// `...` must be the pattern's last entry: it stands for every
+				// field not named above it, so anything after it would be
+				// unreachable.
+				if let Some(rest) = parser.eat(T![...])? {
+					let item = ast::DestructureItem::Rest(rest.span);
+					parser.push_list(item, &mut head, &mut cur);
+					let _ = parser
+						.expect_closing_delimiter(BaseTokenKind::CloseBrace, brace_token.span)?;
+					break;
+				}
+
 				let item = parser.parse::<ast::Destructure>().await?;
+				let item = ast::DestructureItem::Field(item);
 				parser.push_list(item, &mut head, &mut cur);
 
 				if parser.eat(T![,])?.is_none() {
@@ -725,7 +751,7 @@ async fn parse_dot_brace_postfix(
 			let expr = parser.push(expr);
 			Ok(Expr::Idiom(expr))
 		}
-		_ => Err(parser.unexpected("`*`, `..` or an identifier")),
+		_ => Err(parser.unexpected("`*`, `..`, an identifier, or `...`")),
 	}
 }
 

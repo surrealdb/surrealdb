@@ -12,7 +12,9 @@ use crate::exe::{FlowResultExt as _, try_join_all_buffered};
 use crate::exec::Error as ExecError;
 use crate::expr::field::Fields;
 use crate::expr::idiom::recursion::Recursion;
-use crate::expr::part::{FindRecursionPlan, Next, Part, Recurse, SplitByRepeatRecurse};
+use crate::expr::part::{
+	DestructurePart, FindRecursionPlan, Next, Part, Recurse, SplitByRepeatRecurse,
+};
 use crate::expr::statements::select::SelectStatement;
 use crate::expr::{ControlFlow, Error as ExprError, Expr, FlowResult, Idiom, Literal, Lookup};
 use crate::fnc::idiom;
@@ -320,6 +322,18 @@ pub(crate) async fn value_get(
 					let cur_doc = CursorDoc::from(this.clone());
 					let mut obj = Object::default();
 					for p in p.iter() {
+						// A rest entry copies every field of the source object
+						// the earlier entries did not already claim, rather
+						// than naming one field itself.
+						if matches!(p, DestructurePart::Rest) {
+							for (key, val) in v.iter() {
+								if !obj.contains_key(key.as_str()) {
+									obj.insert(key.clone(), val.clone());
+								}
+							}
+							continue;
+						}
+
 						let idiom = p.idiom();
 						obj.insert(
 							p.field(),

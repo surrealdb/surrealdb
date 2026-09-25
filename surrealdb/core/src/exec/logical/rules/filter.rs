@@ -408,7 +408,9 @@ fn is_path(expr: &LogicalExpr) -> bool {
 
 fn destructure_field_is_path(field: &LogicalDestructureField) -> bool {
 	match field {
-		LogicalDestructureField::All(_) | LogicalDestructureField::Field(_) => true,
+		LogicalDestructureField::All(_)
+		| LogicalDestructureField::Field(_)
+		| LogicalDestructureField::Rest => true,
 		LogicalDestructureField::Aliased(_, body) => is_path(body),
 		LogicalDestructureField::Destructure(_, fields) => {
 			fields.iter().all(destructure_field_is_path)

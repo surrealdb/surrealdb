@@ -74,6 +74,7 @@ impl From<DestructurePart> for crate::expr::part::DestructurePart {
 			DestructurePart::Destructure(v, d) => {
 				Self::Destructure(v, d.into_iter().map(Into::into).collect())
 			}
+			DestructurePart::Rest => Self::Rest,
 		}
 	}
 }
@@ -87,6 +88,7 @@ impl From<crate::expr::part::DestructurePart> for DestructurePart {
 			crate::expr::part::DestructurePart::Destructure(v, d) => {
 				Self::Destructure(v, d.into_iter().map(Into::<DestructurePart>::into).collect())
 			}
+			crate::expr::part::DestructurePart::Rest => Self::Rest,
 		}
 	}
 }

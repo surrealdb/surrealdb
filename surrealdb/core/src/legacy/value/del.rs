@@ -110,10 +110,15 @@ pub(crate) async fn value_del(
 				}
 				Part::Destructure(parts) => {
 					for part in parts {
+						let unsupported = match part {
+							DestructurePart::Aliased(_, _) => Some("An aliased"),
+							DestructurePart::Rest => Some("A rest"),
+							_ => None,
+						};
 						ensure!(
-							!matches!(part, DestructurePart::Aliased(_, _)),
+							unsupported.is_none(),
 							Error::UnsupportedDestructure {
-								variant: "An aliased".into(),
+								variant: unsupported.unwrap_or_default().into(),
 							}
 						);
 

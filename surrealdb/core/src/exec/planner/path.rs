@@ -443,6 +443,7 @@ impl<'ctx> Planner<'ctx> {
 							parts: self.physical_destructure(nested).await?,
 						}
 					}
+					LogicalDestructureField::Rest => DestructureField::Rest,
 				};
 				out.push(field);
 			}
@@ -544,7 +545,9 @@ fn contains_repeat_recurse(expr: &LogicalExpr) -> bool {
 		fields.iter().any(|field| match field {
 			LogicalDestructureField::Aliased(_, body) => contains_repeat_recurse(body),
 			LogicalDestructureField::Destructure(_, nested) => destructure_contains(nested),
-			LogicalDestructureField::All(_) | LogicalDestructureField::Field(_) => false,
+			LogicalDestructureField::All(_)
+			| LogicalDestructureField::Field(_)
+			| LogicalDestructureField::Rest => false,
 		})
 	}
 	let mut current = expr;

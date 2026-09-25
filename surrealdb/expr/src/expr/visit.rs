@@ -1597,7 +1597,8 @@ implement_visitor! {
 	fn visit_destructure_part(this, p: &DestructurePart) {
 		match p {
 			DestructurePart::All(_) |
-				DestructurePart::Field(_) => {},
+				DestructurePart::Field(_) |
+				DestructurePart::Rest => {},
 				DestructurePart::Aliased(_, idiom) => {
 					this.visit_idiom(idiom)?;
 				},
@@ -3139,7 +3140,8 @@ implement_visitor_mut! {
 	fn visit_mut_destructure_part(this, p: &mut DestructurePart) {
 		match p {
 			DestructurePart::All(_) |
-				DestructurePart::Field(_) => {},
+				DestructurePart::Field(_) |
+				DestructurePart::Rest => {},
 				DestructurePart::Aliased(_, idiom) => {
 					this.visit_mut_idiom(idiom)?;
 				},

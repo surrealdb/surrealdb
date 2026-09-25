@@ -170,6 +170,8 @@ library! {
 
 		destructure: Vec<Destructure>,
 		destructures: Vec<NodeList<Destructure>>,
+		destructure_item: Vec<DestructureItem>,
+		destructure_items: Vec<NodeList<DestructureItem>>,
 
 		place: Vec<Place>,
 		places: Vec<NodeList<Place>>,
@@ -2123,7 +2125,7 @@ impl_vis_type! {
 		/// { field : EXPR }
 		Expr(NodeId<Expr>),
 		/// { field.{ .. } }
-		Destructure(Option<NodeListId<Destructure>>),
+		Destructure(Option<NodeListId<DestructureItem>>),
 	}
 }
 
@@ -2131,6 +2133,16 @@ ast_type! {
 	pub struct Destructure {
 		pub field: NodeId<Ident>,
 		pub op: Option<Spanned<DestructureOperator>>,
+	}
+}
+
+ast_type! {
+	/// One entry of a `.{ .. }` destructure list: a named field, or the
+	/// trailing `...` standing for every field the other entries did not
+	/// name.
+	pub enum DestructureItem {
+		Field(Destructure),
+		Rest(Span),
 	}
 }
 
@@ -2246,7 +2258,7 @@ impl_vis_type! {
 		/// `.@`
 		Repeat,
 		/// `.{ .. }`
-		Destructure(Option<NodeListId<Destructure>>),
+		Destructure(Option<NodeListId<DestructureItem>>),
 		/// (1, $bar)
 		Call(Option<NodeListId<Expr>>),
 		/// `<-`, `->` or `<->`

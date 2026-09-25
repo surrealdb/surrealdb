@@ -164,6 +164,14 @@ impl Parse for ast::Place {
 								break;
 							}
 
+							if parser.eat(T![...])?.is_some() {
+								let _ = parser.expect_closing_delimiter(
+									BaseTokenKind::CloseBrace,
+									peek.span,
+								)?;
+								break;
+							}
+
 							let _ = parser.parse_enter::<ast::Destructure>().await?;
 
 							if parser.eat(T![,])?.is_none() {

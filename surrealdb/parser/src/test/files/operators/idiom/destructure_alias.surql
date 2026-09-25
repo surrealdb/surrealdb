@@ -12,23 +12,25 @@ Query
                             .parts: None
                     .op: IdiomOperator::Destructure
                         Some
-                            -Destructure
-                                .field: Ident
-                                    .text: "field1"
-                                .op: Some
-                                DestructureOperator::Expr
-                                    Expr::Builtin
-                                        Builtin::True
-                            -Destructure
-                                .field: Ident
-                                    .text: "field2"
-                                .op: Some
-                                DestructureOperator::Expr
-                                    Expr::Binary
-                                        BinaryExpr
-                                            .left: Expr::Integer
-                                                +1
-                                            .op: BinaryOperator::Add
-                                            .right: Expr::Integer
-                                                +1
+                            -DestructureItem::Field
+                                Destructure
+                                    .field: Ident
+                                        .text: "field1"
+                                    .op: Some
+                                    DestructureOperator::Expr
+                                        Expr::Builtin
+                                            Builtin::True
+                            -DestructureItem::Field
+                                Destructure
+                                    .field: Ident
+                                        .text: "field2"
+                                    .op: Some
+                                    DestructureOperator::Expr
+                                        Expr::Binary
+                                            BinaryExpr
+                                                .left: Expr::Integer
+                                                    +1
+                                                .op: BinaryOperator::Add
+                                                .right: Expr::Integer
+                                                    +1
 */

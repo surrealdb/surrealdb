@@ -90,6 +90,10 @@ pub enum DestructurePart {
 	Field(Strand),
 	Aliased(Strand, Idiom),
 	Destructure(Strand, Vec<DestructurePart>),
+	/// `...`: every field of the destructured object not named by another
+	/// entry in the same pattern, kept as-is. Only valid as the pattern's
+	/// last entry.
+	Rest,
 }
 
 impl ToSql for DestructurePart {
@@ -109,6 +113,7 @@ impl ToSql for DestructurePart {
 					Part::Destructure(d.clone())
 				)
 			}
+			DestructurePart::Rest => f.push_str("..."),
 		}
 	}
 }

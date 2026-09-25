@@ -1048,6 +1048,7 @@ fn lower_destructure(
 				sql::part::DestructurePart::Destructure(name, parts) => {
 					LogicalDestructureField::Destructure(name, lower_destructure(parts)?)
 				}
+				sql::part::DestructurePart::Rest => LogicalDestructureField::Rest,
 			})
 		})
 		.collect()
@@ -2058,7 +2059,8 @@ mod tests {
 				LogicalDestructureField::Aliased(_, body) => shape_of(body),
 				other @ (LogicalDestructureField::All(_)
 				| LogicalDestructureField::Field(_)
-				| LogicalDestructureField::Destructure(..)) => {
+				| LogicalDestructureField::Destructure(..)
+				| LogicalDestructureField::Rest) => {
 					panic!("expected an alias, got {other:?}")
 				}
 			})

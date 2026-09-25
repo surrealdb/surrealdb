@@ -6,7 +6,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::exe::FlowResultExt as _;
 use crate::expr::field::{Field, Fields};
-use crate::expr::part::Next;
+use crate::expr::part::{DestructurePart, Next};
 use crate::expr::statements::select::SelectStatement;
 use crate::expr::{Expr, Idiom, Literal, Lookup, Part};
 use crate::val::Value;
@@ -177,7 +177,39 @@ pub(crate) async fn value_fetch(
 					.await?;
 				}
 				Value::Object(_) => {
+					// A rest entry has no field of its own: its targets are
+					// the object's fields the other entries did not already
+					// name, gathered here since `p.path()` cannot see them.
+					let rest_fields: Vec<_> = if let Value::Object(obj) = &*this {
+						let named: std::collections::HashSet<&str> = p
+							.iter()
+							.filter(|d| !matches!(d, DestructurePart::Rest))
+							.map(|d| d.field())
+							.collect();
+						obj.keys().filter(|k| !named.contains(k.as_str())).cloned().collect()
+					} else {
+						unreachable!("matched on Value::Object above")
+					};
+
 					for p in p.iter() {
+						if matches!(p, DestructurePart::Rest) {
+							for field in &rest_fields {
+								let mut destructure_path = vec![Part::Field(field.clone())];
+								destructure_path.extend_from_slice(path);
+								stk.run(|stk| {
+									crate::legacy::value_fetch(
+										this,
+										stk,
+										ctx,
+										opt,
+										&destructure_path,
+									)
+								})
+								.await?;
+							}
+							continue;
+						}
+
 						let mut destructure_path = p.path();
 						destructure_path.extend_from_slice(path);
 						stk.run(|stk| {

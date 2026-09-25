@@ -668,12 +668,13 @@ fn omit_target_is_reachable(path: &LogicalExpr) -> bool {
 
 /// Whether every entry of a destructure step names a location
 /// [`omit_destructure_fields`] removes. An aliased entry does not: it names an
-/// expression, which the per-row engine rejects outright.
+/// expression, which the per-row engine rejects outright. Neither does a rest
+/// entry: it names no single field to remove.
 fn omit_destructure_is_expressible(fields: &[LogicalDestructureField]) -> bool {
 	fields.iter().all(|field| match field {
 		LogicalDestructureField::Field(_) | LogicalDestructureField::All(_) => true,
 		LogicalDestructureField::Destructure(_, nested) => omit_destructure_is_expressible(nested),
-		LogicalDestructureField::Aliased(..) => false,
+		LogicalDestructureField::Aliased(..) | LogicalDestructureField::Rest => false,
 	})
 }
 
@@ -788,9 +789,11 @@ fn omit_destructure_fields(obj: &mut Object, fields: &[LogicalDestructureField])
 				}
 			}
 			// An aliased entry names an expression rather than a location to
-			// remove. The planner declines such a path, leaving the per-row
-			// engine to raise the error this walker has no way to report.
-			LogicalDestructureField::Aliased(..) => {}
+			// remove, and a rest entry names no single field at all. The
+			// planner declines such a path (see `omit_destructure_is_expressible`),
+			// leaving the per-row engine to raise the error this walker has no
+			// way to report.
+			LogicalDestructureField::Aliased(..) | LogicalDestructureField::Rest => {}
 		}
 	}
 }

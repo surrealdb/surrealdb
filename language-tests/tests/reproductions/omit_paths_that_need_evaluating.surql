@@ -17,7 +17,9 @@ reason = """
 	Removal by index is a removal: the element leaves the array, rather than
 	being left in place as `NONE`. A destructure entry naming the contents of a
 	field (`{ c.* }`) empties that field instead of removing it, and one naming
-	an expression is rejected, as it is anywhere else.
+	an expression is rejected, as it is anywhere else. A rest entry (`...`)
+	names every field the pattern did not already claim rather than one
+	location, so it is rejected the same way.
 """
 
 [[test.results]]
@@ -64,6 +66,9 @@ value = "[[1]]"
 
 [[test.results]]
 value = "[{ tags: [] }]"
+
+[[test.results]]
+error = "A rest destructuring method is not supported here"
 */
 
 -- A filter selects the elements to remove.
@@ -106,3 +111,6 @@ SELECT * OMIT tags.len() FROM [{ tags: [1, 2] }];
 -- beneath paging.
 SELECT VALUE tags OMIT tags[WHERE $this > 1] FROM [{ tags: [1, 2, 3] }];
 SELECT * OMIT tags[WHERE true] FROM [{ tags: [1, 2] }] LIMIT 5;
+
+-- A rest entry names every remaining field rather than one location.
+SELECT * OMIT a.{ b, ... } FROM [{ a: { b: 1, c: 2 } }];

@@ -192,10 +192,11 @@ Query
                                     .parts: None
                             .op: IdiomOperator::Destructure
                                 Some
-                                    -Destructure
-                                        .field: Ident
-                                            .text: "b"
-                                        .op: None
+                                    -DestructureItem::Field
+                                        Destructure
+                                            .field: Ident
+                                                .text: "b"
+                                            .op: None
                     .table: Expr::Path
                         Path
                             .start: Ident
@@ -228,13 +229,14 @@ Query
                                     .parts: None
                             .op: IdiomOperator::Destructure
                                 Some
-                                    -Destructure
-                                        .field: Ident
-                                            .text: "b"
-                                        .op: Some
-                                        DestructureOperator::Expr
-                                            Expr::Integer
-                                                +1
+                                    -DestructureItem::Field
+                                        Destructure
+                                            .field: Ident
+                                                .text: "b"
+                                            .op: Some
+                                            DestructureOperator::Expr
+                                                Expr::Integer
+                                                    +1
                     .table: Expr::Path
                         Path
                             .start: Ident

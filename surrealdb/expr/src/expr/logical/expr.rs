@@ -447,6 +447,10 @@ pub enum LogicalDestructureField {
 	Aliased(Strand, LogicalExpr),
 	/// `f.{ … }`: a nested destructure of the field.
 	Destructure(Strand, Vec<LogicalDestructureField>),
+	/// `...`: every field of the destructured object not named by another
+	/// entry in the same pattern, kept as-is. Only valid as the pattern's
+	/// last entry.
+	Rest,
 }
 
 /// The `+instruction` of a `.{n+instruction}` recursion.
@@ -1345,7 +1349,9 @@ impl LogicalExpr {
 impl LogicalDestructureField {
 	fn for_each_expr<'a>(&'a self, out: &mut dyn FnMut(&'a LogicalExpr)) {
 		match self {
-			LogicalDestructureField::All(_) | LogicalDestructureField::Field(_) => {}
+			LogicalDestructureField::All(_)
+			| LogicalDestructureField::Field(_)
+			| LogicalDestructureField::Rest => {}
 			LogicalDestructureField::Aliased(_, body) => out(body),
 			LogicalDestructureField::Destructure(_, fields) => {
 				for field in fields {
@@ -1357,7 +1363,9 @@ impl LogicalDestructureField {
 
 	fn exprs_mut<'a>(&'a mut self, out: &mut Vec<&'a mut LogicalExpr>) {
 		match self {
-			LogicalDestructureField::All(_) | LogicalDestructureField::Field(_) => {}
+			LogicalDestructureField::All(_)
+			| LogicalDestructureField::Field(_)
+			| LogicalDestructureField::Rest => {}
 			LogicalDestructureField::Aliased(_, body) => out.push(body),
 			LogicalDestructureField::Destructure(_, fields) => {
 				fields.iter_mut().for_each(|field| field.exprs_mut(out))
@@ -3295,6 +3303,7 @@ impl ToSql for LogicalDestructureField {
 				write_sql!(f, fmt, "{}", EscapeKwFreeIdent(name.as_str()));
 				fmt_destructure(fields, f, fmt);
 			}
+			LogicalDestructureField::Rest => f.push_str("..."),
 		}
 	}
 }

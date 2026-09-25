@@ -357,6 +357,10 @@ pub enum DestructurePart {
 	Field(Strand),
 	Aliased(Strand, Idiom),
 	Destructure(Strand, Vec<DestructurePart>),
+	/// `...`: every field of the destructured object not named by another
+	/// entry in the same pattern, kept as-is. Only valid as the pattern's
+	/// last entry.
+	Rest,
 }
 
 impl DestructurePart {
@@ -364,21 +368,31 @@ impl DestructurePart {
 	/// transaction.
 	pub fn read_only(&self) -> bool {
 		match self {
-			DestructurePart::All(_) | DestructurePart::Field(_) => true,
+			DestructurePart::All(_) | DestructurePart::Field(_) | DestructurePart::Rest => true,
 			DestructurePart::Aliased(_, v) => v.read_only(),
 			DestructurePart::Destructure(_, v) => v.iter().all(DestructurePart::read_only),
 		}
 	}
 
+	/// The name a caller matching this entry against an object would look up.
+	///
+	/// Never called on [`DestructurePart::Rest`]: it names no single field,
+	/// and every caller that walks a pattern's entries filters it out first.
 	pub fn field(&self) -> &str {
 		match self {
 			DestructurePart::All(v) => v.as_str(),
 			DestructurePart::Field(v) => v.as_str(),
 			DestructurePart::Aliased(v, _) => v.as_str(),
 			DestructurePart::Destructure(v, _) => v.as_str(),
+			DestructurePart::Rest => "",
 		}
 	}
 
+	/// The path from the destructured value to what this entry contributes.
+	///
+	/// Never called on [`DestructurePart::Rest`]: unlike every other entry it
+	/// contributes the destructured value's own remaining fields rather than
+	/// one path reachable from it.
 	pub fn path(&self) -> Vec<Part> {
 		match self {
 			DestructurePart::All(v) => vec![Part::Field(v.clone()), Part::All],
@@ -387,6 +401,7 @@ impl DestructurePart {
 			DestructurePart::Destructure(f, d) => {
 				vec![Part::Field(f.clone()), Part::Destructure(d.clone())]
 			}
+			DestructurePart::Rest => Vec::new(),
 		}
 	}
 

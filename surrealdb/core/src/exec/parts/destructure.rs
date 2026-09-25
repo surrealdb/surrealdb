@@ -34,6 +34,9 @@ pub enum DestructureField {
 		field: Strand,
 		parts: Vec<DestructureField>,
 	},
+	/// Include every field of the source object not named by another entry
+	/// in the same pattern, unchanged.
+	Rest,
 }
 impl PhysicalExpr for DestructurePart {
 	fn name(&self) -> &'static str {
@@ -58,6 +61,7 @@ impl PhysicalExpr for DestructurePart {
 						parts,
 						..
 					} => field_context(parts),
+					DestructureField::Rest => ContextLevel::Root,
 				})
 				.max()
 				.unwrap_or(ContextLevel::Root)
@@ -87,6 +91,7 @@ impl PhysicalExpr for DestructurePart {
 						parts,
 						..
 					} => field_access(parts),
+					DestructureField::Rest => AccessMode::ReadOnly,
 				})
 				.combine_all()
 		}
@@ -139,6 +144,7 @@ impl ToSql for DestructureField {
 				}
 				f.push('}');
 			}
+			DestructureField::Rest => f.push_str("..."),
 		}
 	}
 }
@@ -201,6 +207,16 @@ async fn evaluate_destructure(
 						let v = Box::pin(evaluate_destructure(&nested_value, parts, ctx.clone()))
 							.await?;
 						result.insert(name.clone(), v);
+					}
+					// Copies every key the earlier entries did not already
+					// claim. Only valid as this pattern's last entry, so
+					// nothing inserted afterwards can be shadowed by it.
+					DestructureField::Rest => {
+						for (key, v) in obj.iter() {
+							if !result.contains_key(key.as_str()) {
+								result.insert(key.clone(), v.clone());
+							}
+						}
 					}
 				}
 			}
@@ -332,6 +348,29 @@ mod tests {
 
 		let out = shape("{ a: 1 }", ".{ inner.* }", &ctx).await;
 		assert_eq!(out, val("{}").await);
+	}
+
+	#[tokio::test]
+	async fn a_rest_field_keeps_every_field_the_pattern_did_not_already_name() {
+		let ctx = root_ctx();
+		let out = shape("{ a: 1, b: 2, c: 3 }", ".{ a, ... }", &ctx).await;
+		assert_eq!(out, val("{ a: 1, b: 2, c: 3 }").await);
+	}
+
+	#[tokio::test]
+	async fn a_rest_field_does_not_shadow_an_earlier_alias() {
+		let ctx = root_ctx();
+		// `a` is renamed to `z`; the rest marker still sees `a` on the source
+		// object and copies it too, since it was never claimed under that name.
+		let out = shape("{ a: 1, b: 2 }", ".{ z: a, ... }", &ctx).await;
+		assert_eq!(out, val("{ z: 1, a: 1, b: 2 }").await);
+	}
+
+	#[tokio::test]
+	async fn a_rest_field_alone_is_the_identity() {
+		let ctx = root_ctx();
+		let out = shape("{ a: 1, b: 2 }", ".{ ... }", &ctx).await;
+		assert_eq!(out, val("{ a: 1, b: 2 }").await);
 	}
 
 	// =========================================================================
@@ -496,5 +535,12 @@ mod tests {
 		let ctx = root_ctx();
 		let part = compile_destructure("v.{ a, z: b, inner.{ c }, spread.* }", &ctx).await;
 		assert_eq!(part.to_sql(), "{a, z: .b, inner: {c}, spread.*}");
+	}
+
+	#[tokio::test]
+	async fn sql_rendering_covers_a_trailing_rest_field() {
+		let ctx = root_ctx();
+		let part = compile_destructure("v.{ a, ... }", &ctx).await;
+		assert_eq!(part.to_sql(), "{a, ...}");
 	}
 }

@@ -12,14 +12,16 @@ Query
                             .parts: None
                     .op: IdiomOperator::Destructure
                         Some
-                            -Destructure
-                                .field: Ident
-                                    .text: "b"
-                                .op: Some
-                                DestructureOperator::Destructure
-                                    Some
-                                        -Destructure
-                                            .field: Ident
-                                                .text: "c"
-                                            .op: None
+                            -DestructureItem::Field
+                                Destructure
+                                    .field: Ident
+                                        .text: "b"
+                                    .op: Some
+                                    DestructureOperator::Destructure
+                                        Some
+                                            -DestructureItem::Field
+                                                Destructure
+                                                    .field: Ident
+                                                        .text: "c"
+                                                    .op: None
 */

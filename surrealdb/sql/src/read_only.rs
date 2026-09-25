@@ -262,7 +262,7 @@ impl Part {
 impl DestructurePart {
 	pub fn read_only(&self) -> bool {
 		match self {
-			DestructurePart::All(_) | DestructurePart::Field(_) => true,
+			DestructurePart::All(_) | DestructurePart::Field(_) | DestructurePart::Rest => true,
 			DestructurePart::Aliased(_, v) => v.read_only(),
 			DestructurePart::Destructure(_, v) => v.iter().all(DestructurePart::read_only),
 		}

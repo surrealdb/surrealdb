@@ -374,6 +374,15 @@ impl Parser<'_> {
 				break;
 			}
 
+			if self.eat(t!("...")) {
+				// `...` must be the pattern's last entry: it stands for every
+				// field not named above it, so anything after it would be
+				// unreachable.
+				destructured.push(DestructurePart::Rest);
+				self.expect_closing_delimiter(t!("}"), start)?;
+				break;
+			}
+
 			let field: Strand = self.parse_ident_str()?.into();
 			let part = match self.peek_kind() {
 				t!(":") => {

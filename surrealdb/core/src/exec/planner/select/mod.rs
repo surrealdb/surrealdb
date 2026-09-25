@@ -3821,7 +3821,9 @@ impl NeededFieldExtractor {
 	fn visit_destructure(&mut self, fields: &[LogicalDestructureField]) {
 		for field in fields {
 			match field {
-				LogicalDestructureField::All(_) | LogicalDestructureField::Field(_) => {}
+				LogicalDestructureField::All(_)
+				| LogicalDestructureField::Field(_)
+				| LogicalDestructureField::Rest => {}
 				LogicalDestructureField::Aliased(_, body) => self.visit_body(body),
 				LogicalDestructureField::Destructure(_, nested) => self.visit_destructure(nested),
 			}
