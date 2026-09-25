@@ -294,6 +294,13 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// A locked read joins the transaction's lock set, which commit checks
+	/// against the writes of transactions that committed after this one's
+	/// snapshot. The lock set is never visible to other transactions.
+	fn shared_locked_reads(&self) -> bool {
+		true
+	}
+
 	/// Fetch multiple keys from the database.
 	#[instrument(
 		level = "trace",

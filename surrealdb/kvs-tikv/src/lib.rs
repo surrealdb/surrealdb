@@ -948,6 +948,14 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// A locked read is prewritten as a `Lock` mutation, and its commit
+	/// records a lock-type write of the key. That record conflicts with any
+	/// overlapping transaction that locked or wrote the same key, so two
+	/// locked reads of one key do not both commit.
+	fn shared_locked_reads(&self) -> bool {
+		false
+	}
+
 	/// Fetch many keys from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")))]
 	fn getm<'a>(

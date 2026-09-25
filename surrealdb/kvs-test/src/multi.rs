@@ -401,3 +401,82 @@ async fn getu_absent_key_conflict(b: &TestBackend) {
 }
 
 kvs_test!(getu_absent_key_conflict, except = [surrealds]);
+
+/// On a backend that declares shared locked reads, two overlapping
+/// transactions that both `getu` the same key, and each write only a key of
+/// their own, both commit: a locked read is invalidated by a committed write
+/// to its key, never by another transaction's locked read of it. Callers rely
+/// on the declaration to take a locked read of a key that concurrent writers
+/// all read without making those writers conflict with one another. Backends
+/// that do not declare it are skipped; [`getu_exclusive_read_conflicts`] pins
+/// one whose locked reads do conflict.
+async fn getu_shared_read_commits(b: &TestBackend) {
+	// Create a new datastore
+	let ds = b.create_ds().await;
+	// Only a backend that declares shared locked reads promises this
+	let tx = ds.transaction(Write).await.unwrap();
+	if !tx.shared_locked_reads() {
+		tx.cancel().await.unwrap();
+		return;
+	}
+	// Insert an initial key
+	tx.set("test".as_bytes().into(), "some text".as_bytes().to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// Two overlapping writeable transactions both read the key for update
+	let tx1 = ds.transaction(Write).await.unwrap();
+	let tx2 = ds.transaction(Write).await.unwrap();
+	let val = tx1.getu("test".as_bytes().into()).await.unwrap().unwrap();
+	assert_eq!(val, b"some text");
+	let val = tx2.getu("test".as_bytes().into()).await.unwrap().unwrap();
+	assert_eq!(val, b"some text");
+	// Each writes a key of its own, and both commits succeed
+	tx1.set("one".as_bytes().into(), "1".as_bytes().to_vec()).await.unwrap();
+	tx2.set("two".as_bytes().into(), "2".as_bytes().to_vec()).await.unwrap();
+	tx1.commit().await.unwrap();
+	tx2.commit().await.unwrap();
+	// Check that both transactions' writes persisted and the read key is unchanged
+	let tx = ds.transaction(Read).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap().unwrap();
+	assert_eq!(val, b"some text");
+	let val = tx.get("one".as_bytes().into(), None).await.unwrap().unwrap();
+	assert_eq!(val, b"1");
+	let val = tx.get("two".as_bytes().into(), None).await.unwrap().unwrap();
+	assert_eq!(val, b"2");
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(getu_shared_read_commits);
+
+/// TiKV prewrites a locked read as a lock of the key and records a
+/// lock-type write when it commits, so a locked read there behaves as a write
+/// for conflict detection. Of two overlapping transactions that both `getu`
+/// one key, the second to commit is rejected, which is why the backend does
+/// not declare shared locked reads.
+async fn getu_exclusive_read_conflicts(b: &TestBackend) {
+	// Create a new datastore
+	let ds = b.create_ds().await;
+	// Insert an initial key
+	let tx = ds.transaction(Write).await.unwrap();
+	assert!(!tx.shared_locked_reads());
+	tx.set("test".as_bytes().into(), "some text".as_bytes().to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// Two overlapping writeable transactions both read the key for update
+	let tx1 = ds.transaction(Write).await.unwrap();
+	let tx2 = ds.transaction(Write).await.unwrap();
+	tx1.getu("test".as_bytes().into()).await.unwrap();
+	tx2.getu("test".as_bytes().into()).await.unwrap();
+	// Each writes a key of its own, and only the first commit succeeds
+	tx1.set("one".as_bytes().into(), "1".as_bytes().to_vec()).await.unwrap();
+	tx2.set("two".as_bytes().into(), "2".as_bytes().to_vec()).await.unwrap();
+	tx1.commit().await.unwrap();
+	tx2.commit().await.unwrap_err();
+	// Check that only the first transaction's write persisted
+	let tx = ds.transaction(Read).await.unwrap();
+	let val = tx.get("one".as_bytes().into(), None).await.unwrap().unwrap();
+	assert_eq!(val, b"1");
+	let val = tx.get("two".as_bytes().into(), None).await.unwrap();
+	assert!(val.is_none());
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(getu_exclusive_read_conflicts, only = [tikv]);

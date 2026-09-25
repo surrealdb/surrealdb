@@ -1992,6 +1992,13 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// The optimistic transaction database takes no lock for a locked read:
+	/// it tracks the key and validates it at commit against writes that
+	/// landed after this transaction's snapshot.
+	fn shared_locked_reads(&self) -> bool {
+		true
+	}
+
 	/// Fetch many keys from the datastore.
 	///
 	/// Bounded by `keys.len()`, so the call flows through the same

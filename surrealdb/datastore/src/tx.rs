@@ -1212,6 +1212,20 @@ impl Transaction {
 		}
 	}
 
+	/// Whether this transaction may write; `false` for one opened as
+	/// [`TransactionType::Read`].
+	pub fn writeable(&self) -> bool {
+		self.tr.writeable()
+	}
+
+	/// Whether a locked read ([`Self::getu_key`]) conflicts only with writes,
+	/// never with another transaction's locked read of the same key.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::shared_locked_reads`].
+	pub fn shared_locked_reads(&self) -> bool {
+		self.tr.shared_locked_reads()
+	}
+
 	/// Queue work to run once this transaction commits.
 	///
 	/// See [`Self::commit_actions`] for why an effect waits.
