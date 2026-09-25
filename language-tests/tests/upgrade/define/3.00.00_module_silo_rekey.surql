@@ -8,12 +8,11 @@ allow-experimental = ["surrealism"]
 [test]
 upgrade = true
 # The import writes the released silo spelling, which only a released binary
-# parses, and re-keying it is something only this build's migration does. So
-# the source must predate the spelling change, and the target must be at or
-# after the prerelease that carries the migration — an unanchored ">=3.3.0"
-# would also schedule the 3.2.4 -> 3.3.0-beta.3 adjacent pair, and beta.3
-# already writes the new spelling without yet re-keying old rows, so that hop
-# fails. These gates also keep the ordinary runner away, since it matches both
+# parses, and re-keying it is what migration 2 does. So the source must predate
+# the spelling change, and the target must be at or after the prerelease that
+# carries the migration — an unanchored ">=3.3.0" would also admit
+# 3.3.0-beta.3, which already writes the new spelling without yet re-keying old
+# rows. These gates also keep the ordinary runner away, since it matches both
 # against its own version.
 importing-version = "<3.3.0-0"
 version = ">=3.3.0-beta.4"
@@ -29,12 +28,12 @@ listing paths scan the band and recompute each name from the value, so the
 module renders exactly as it should while every point operation on the name just
 rendered answers that no such module exists.
 
-Only the seed axis reaches this. An adjacent pair cannot: 3.3.0-beta.3 already
-derives the name this build derives, so the hop that lands here has no writer
-able to produce the drift, and the hop onto 3.3.0-beta.3 has no reader able to
-resolve it. A cumulative walk cannot either — it arrives through every binary in
-turn, where this state has to reach this build straight from the release that
-wrote it.
+The seed axis reaches this from every seed older than 3.3, and the adjacent pair
+onto 3.3.0 reaches it on the first stable release that re-keys. The pair that
+lands on this build cannot: 3.3.0 already derives the name this build derives,
+so it has no drift to hand over. A cumulative walk cannot either — it arrives
+through every binary in turn, where this state has to reach the re-keying
+release straight from the release that wrote it.
 
 What running it as an upgrade adds over unit coverage of the re-keying itself is
 the two ends nothing else exercises. First, that a real released `DEFINE MODULE`

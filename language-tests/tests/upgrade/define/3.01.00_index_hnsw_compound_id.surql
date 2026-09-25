@@ -42,12 +42,21 @@ test without the key.
 `introduced` is the release that first wrote the record-keyed pending layout:
 3.0.x queued vectors under a layout carrying the id in its value, so a store
 that release wrote has nothing to repair and would not show the damage this
-declares. `version` bounds the target to the checkout carrying the fix, which
-also keeps this clear of 3.3.0-beta.1 through beta.3, where a pre-shared-doc-ID
-index is refused outright rather than degraded; beta.4 onwards preserves it. A backport must lower both bounds to its
-own line or the test silently never runs there.
+declares. `version` bounds the target to the releases carrying the fix, 3.3.0
+and this checkout, which also keeps this clear of 3.3.0-beta.1 through beta.3,
+where a pre-shared-doc-ID index is refused outright rather than degraded;
+beta.4 onwards preserves it. A backport must lower both bounds to its own line
+or the test silently never runs there.
+
+`importing-version` bounds the source to the releases that still write the
+damage. 3.3.0 carries the id in the pending value, so a store it wrote reads
+back whole before any rebuild and the declared damage never appears. The bound
+is the version the 3.3 line carried when that fix landed there; it was never
+published, so it admits every released 3.3 beta, all of which predate the fix,
+and excludes 3.3.0.
 """
 version = ">=3.3.0-beta.5"
+importing-version = "<3.3.0-beta.5"
 
 [[test.repair]]
 since = ">=3.3.0-beta.5"

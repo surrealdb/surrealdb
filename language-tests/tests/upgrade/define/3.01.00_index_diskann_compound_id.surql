@@ -24,11 +24,14 @@ the doc-ID was recorded under the decimalised spelling before this hop began.
 
 `introduced` matches the sibling DiskANN upgrade test: DISKANN syntax arrived
 in 3.1.0-beta.3, and the record-keyed pending layout that carries the defect
-is present from that line. `version` bounds the target to the checkout
-carrying the fix; a backport must lower it, and the repair's `since`, to its
-own line or neither runs there.
+is present from that line. `version` bounds the target to the releases
+carrying the fix, 3.3.0 and this checkout; a backport must lower it, and the
+repair's `since`, to its own line or neither runs there. `importing-version`
+bounds the source to the releases that still write the damage, for the reason
+the HNSW sibling gives: 3.3.0 carries the fix, so a store it wrote shows none.
 """
 version = ">=3.3.0-beta.5"
+importing-version = "<3.3.0-beta.5"
 
 [[test.repair]]
 since = ">=3.3.0-beta.5"
