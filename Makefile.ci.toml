@@ -43,8 +43,7 @@ LLVM_PROFILE_FILE = { value = "target/llvm-cov-target/%p-%m.profraw", condition 
 # The chain lists every *stable* release on the 3.x line in order. Betas are
 # omitted: once a minor goes stable nobody upgrades from its betas, and a beta
 # left in the chain only displaces the stable that shipped after it. A beta
-# belongs here only while its minor is unreleased, which is why 3.3.0-beta.3 is
-# listed — the 3.3 line has no stable release yet. Each new release must be
+# belongs here only while its minor is unreleased. Each new release must be
 # appended before `..`, or the last hop silently widens into a multi-release
 # jump and the versions users actually upgrade from stop being covered.
 #
@@ -65,7 +64,7 @@ LLVM_PROFILE_FILE = { value = "target/llvm-cov-target/%p-%m.profraw", condition 
 # Every numeric entry must have a published binary at
 #   https://download.surrealdb.com/v{ver}/surreal-v{ver}.{platform}.{tgz|exe}
 # Override `LANG_UPGRADE_VERSIONS` to test alternative chains locally.
-LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0,3.2.1,3.2.2,3.2.3,3.2.4,3.3.0-beta.3,..;3.1.5,3.1.6,3.2.2", condition = { env_not_set = [
+LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0,3.2.1,3.2.2,3.2.3,3.2.4,3.3.0,..;3.1.5,3.1.6,3.2.2", condition = { env_not_set = [
     "LANG_UPGRADE_VERSIONS",
 ] } }
 
@@ -85,24 +84,26 @@ LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1
 # walk cannot skip a version. A release that can only be upgraded onto a target
 # further down the list therefore cannot take part at all — 3.1.6 is omitted for
 # that reason, and the pair and seed axes carry it instead.
-LANG_UPGRADE_CHAIN = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0,3.2.1,3.2.2,3.2.3,3.2.4,..", condition = { env_not_set = [
+LANG_UPGRADE_CHAIN = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0,3.2.1,3.2.2,3.2.3,3.2.4,3.3.0,..", condition = { env_not_set = [
     "LANG_UPGRADE_CHAIN",
 ] } }
 
 # Seeds for the every-release-to-HEAD axis. One release per minor plus the ends
 # of each line: enough to cover every stored format the 3.x series produced
-# without paying for all eighteen. Add the newest release here as well as to the
+# without paying for all nineteen. Add the newest release here as well as to the
 # chain above. 3.1.6 rather than 3.1.5 stands for the end of the 3.1 line, and
 # this axis is the only one that carries it all the way to HEAD.
 #
-# 3.3.0-beta.3 earns its place on a different ground from the rest: it is the
-# only published binary that builds an index in the table-level shared doc-ID
-# space, every stable release to 3.2.4 being per-index. Dropping it would leave
-# the shared-space-to-shared-space upgrade with no source at all. Its presence
-# is a statement about the code paths this axis reaches, not about which
-# releases are supported upgrade sources — `doc/UPGRADING.md` answers that, and
-# answers it with stable releases only.
-LANG_UPGRADE_SEEDS = { value = "3.0.0,3.0.5,3.1.0,3.1.6,3.2.0,3.2.4,3.3.0-beta.3", condition = { env_not_set = [
+# 3.3.0-beta.3 earns its place on a different ground from the rest. The 3.3
+# pre-releases are the only published binaries with a table-level shared doc-ID
+# space but no injective forward mapping (`!dj`): every stable release to 3.2.4
+# is per-index, and 3.3.0 writes `!dj` alongside `!di`. So it is the only seed
+# that gives migration 3 (the injective forward doc-ID rebuild) a mapping to
+# rebuild, and dropping it would leave that rebuild with no released source at
+# all. Its presence is a statement about the code paths this axis reaches, not
+# about which releases are supported upgrade sources — `doc/UPGRADING.md`
+# answers that, and answers it with stable releases only.
+LANG_UPGRADE_SEEDS = { value = "3.0.0,3.0.5,3.1.0,3.1.6,3.2.0,3.2.4,3.3.0-beta.3,3.3.0", condition = { env_not_set = [
     "LANG_UPGRADE_SEEDS",
 ] } }
 

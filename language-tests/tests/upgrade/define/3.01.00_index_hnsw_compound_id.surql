@@ -46,8 +46,16 @@ declares. `version` bounds the target to the checkout carrying the fix, which
 also keeps this clear of the 3.3.0 betas, where a pre-shared-doc-ID index is
 refused outright rather than degraded. A backport must lower both bounds to its
 own line or the test silently never runs there.
+
+`importing-version` bounds the source to the releases that still write the
+damage. 3.3.0 carries the id in the pending value, so a store it wrote reads
+back whole before any rebuild and the declared damage never appears. The bound
+is the version the 3.3 line carried when that fix landed there; it was never
+published, so it admits every released 3.3 beta, all of which predate the fix,
+and excludes 3.3.0.
 """
 version = ">=3.4.0-a"
+importing-version = "<3.3.0-beta.5"
 
 [[test.repair]]
 since = ">=3.4.0-a"

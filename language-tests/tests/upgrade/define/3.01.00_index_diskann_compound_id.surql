@@ -26,9 +26,12 @@ the doc-ID was recorded under the decimalised spelling before this hop began.
 in 3.1.0-beta.3, and the record-keyed pending layout that carries the defect
 is present from that line. `version` bounds the target to the checkout
 carrying the fix; a backport must lower it, and the repair's `since`, to its
-own line or neither runs there.
+own line or neither runs there. `importing-version` bounds the source to the
+releases that still write the damage, for the reason the HNSW sibling gives:
+3.3.0 carries the fix, so a store it wrote shows none.
 """
 version = ">=3.4.0-a"
+importing-version = "<3.3.0-beta.5"
 
 [[test.repair]]
 since = ">=3.4.0-a"
