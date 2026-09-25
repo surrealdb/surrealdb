@@ -135,9 +135,10 @@ fn extract_merge_key(mode: &MergeMode, value: &Value) -> Option<MergeKey> {
 	}
 }
 
-/// Extract the record ID from a row, if present.  Used by the dedup
-/// path when the merge mode is `ByIndexKeyDedup`.
-fn extract_rid(value: &Value) -> Option<RecordId> {
+/// Extract the record ID from a row, if present: the identity the union's
+/// dedup paths and [`DistinctRecords`](crate::exec::operators::DistinctRecords)
+/// collapse repeats by.
+pub(crate) fn extract_rid(value: &Value) -> Option<RecordId> {
 	match value {
 		Value::Object(obj) => match obj.get("id") {
 			Some(Value::RecordId(rid)) => Some(rid.clone()),
