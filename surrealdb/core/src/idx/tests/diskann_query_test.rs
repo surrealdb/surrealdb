@@ -228,3 +228,406 @@ async fn test_diskann_filtered_knn_skips_missing_record() -> Result<()> {
 	);
 	Ok(())
 }
+
+/// One completed transaction: when it finished relative to the window, whether
+/// it was writable, and what it cost.
+#[cfg(feature = "kv-rocksdb")]
+struct TxRecord {
+	at: std::time::Duration,
+	write: bool,
+	metrics: crate::observe::TransactionMetricsSnapshot,
+}
+
+/// Records every transaction completed inside an open window.
+///
+/// Per-transaction rather than aggregate: a build's transactions are not all
+/// alike — the backfill scan commits one bounded batch per group of records
+/// while the pending drain commits one compaction frame at a time — and the
+/// shape of the sequence is what says where one phase ended and the next began.
+/// No phase marker is observable from the driver, so the timeline stands in for
+/// one.
+#[cfg(feature = "kv-rocksdb")]
+#[derive(Default)]
+struct BuildTxTimeline {
+	start: std::sync::Mutex<Option<web_time::Instant>>,
+	entries: std::sync::Mutex<Vec<TxRecord>>,
+}
+
+#[cfg(feature = "kv-rocksdb")]
+impl crate::observe::ExecutionObserver for BuildTxTimeline {
+	fn on_transaction_complete(&self, event: &crate::observe::TransactionEvent) {
+		// Transactions completing outside an open window belong to the test's
+		// own setup, not to the job being described.
+		let Some(start) = *self.start.lock().unwrap() else {
+			return;
+		};
+		self.entries.lock().unwrap().push(TxRecord {
+			at: start.elapsed(),
+			write: event.safe.write,
+			metrics: event.safe.metrics,
+		});
+	}
+}
+
+#[cfg(feature = "kv-rocksdb")]
+impl BuildTxTimeline {
+	/// Opens a recording window, discarding anything recorded before it.
+	fn open(&self) {
+		self.entries.lock().unwrap().clear();
+		*self.start.lock().unwrap() = Some(web_time::Instant::now());
+	}
+
+	/// Closes the window and takes what it recorded.
+	fn close(&self) -> Vec<TxRecord> {
+		*self.start.lock().unwrap() = None;
+		std::mem::take(&mut *self.entries.lock().unwrap())
+	}
+}
+
+/// Prints `entries` as ten equal slices of `window`, so the shape of a long job
+/// — where its transactions cluster, how large they are, how many reads each
+/// costs — is readable without a profiler.
+///
+/// Two things to know when reading the output. A transaction lands in the slice
+/// it *completed* in, so a compaction frame that spent a minute mutating the
+/// graph shows up as one large entry at its commit, and the slices it occupied
+/// look empty rather than busy. And the datastore's background maintenance runs
+/// throughout: the node heartbeat and the other periodic jobs commit small
+/// transactions of their own, which are the small constant term in every slice.
+#[cfg(feature = "kv-rocksdb")]
+fn print_tx_timeline(window: std::time::Duration, entries: &[TxRecord]) {
+	let slice = (window / 10).max(std::time::Duration::from_millis(1));
+	eprintln!("timeline       ten slices of {slice:?}");
+	eprintln!(
+		"  {:>10}  {:>7} {:>7} {:>13} {:>12} {:>13}",
+		"through", "writes", "reads", "keys_written", "ops_get", "keys_read"
+	);
+	for i in 1..=10 {
+		let lo = slice * (i - 1);
+		let hi = slice * i;
+		let mut writes = 0u64;
+		let mut reads = 0u64;
+		let mut keys_written = 0u64;
+		let mut ops_get = 0u64;
+		let mut keys_read = 0u64;
+		for tx in entries.iter().filter(|tx| tx.at >= lo && tx.at < hi) {
+			if tx.write {
+				writes += 1;
+			} else {
+				reads += 1;
+			}
+			keys_written += tx.metrics.keys_written;
+			ops_get += u64::from(tx.metrics.ops_get);
+			keys_read += tx.metrics.keys_read;
+		}
+		eprintln!(
+			"  {:>10?}  {writes:>7} {reads:>7} {keys_written:>13} {ops_get:>12} {keys_read:>13}",
+			hi
+		);
+	}
+}
+
+/// Diagnostic: the whole reference workload — 200 000 × 768-dim `F32` vectors
+/// indexed by `DEFINE INDEX … DISKANN DIMENSION 768 DIST COSINE TYPE F32` at the
+/// DDL defaults (`DEGREE 64`, `L_BUILD 100`, `ALPHA 1.2`) — on RocksDB, end to
+/// end.
+///
+/// Reports; asserts nothing. What it prints is the baseline a change to the
+/// build path is judged against:
+///
+/// - wall-clock for the row load and for the `DEFINE INDEX` that builds the graph;
+/// - the KV operation and key counts the build issued, as a per-slice timeline. The backfill scan
+///   commits a bounded batch per group of records and the pending drain commits one compaction
+///   frame at a time, so the slice where transaction shape changes is the scan/drain boundary — the
+///   driver has no phase marker to read instead;
+/// - process RSS before the build, at its peak across it, and the growth between — next to the
+///   DiskANN cache budget the graph is competing for. The growth is the figure that describes the
+///   build: the process is also holding the corpus for the ground truth below;
+/// - Recall@10 over held-out queries, so a build that got faster by building a worse graph is
+///   visible in the same run as the time it saved.
+///
+/// The corpus is clustered rather than uniform, and its clusters are small
+/// relative to `k`: at 768 dimensions a uniform draw puts every pair of points
+/// at nearly the same distance, while clusters of `k` or more members make the
+/// top-`k` one cluster's interior and the query trivial. Neither says anything
+/// about how well the graph connects.
+///
+/// Ignored: tens of minutes and tens of gigabytes of RocksDB. Run it as
+///
+/// ```text
+/// cargo test --release -p surrealdb-core --lib --features kv-rocksdb \
+///     diag_diskann_build_rocksdb_200k -- --ignored --nocapture
+/// ```
+///
+/// `--lib` is required, not tidiness: without it cargo also builds this package's integration
+/// test targets, and `count_index_backlog_repro` exceeds rustc's query depth limit in release,
+/// so the run fails to compile before reaching this test. This diagnostic lives in the lib's
+/// `cfg(test)` tree, so restricting the target set costs nothing.
+#[cfg(feature = "kv-rocksdb")]
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "diagnostic (tens of minutes, tens of GiB): the 200k x 768 DiskANN build on RocksDB"]
+async fn diag_diskann_build_rocksdb_200k() -> Result<()> {
+	let dir = tempfile::tempdir()?;
+	let path = format!("rocksdb:{}", dir.path().display());
+	let timeline = Arc::new(BuildTxTimeline::default());
+	let ds = Datastore::builder()
+		.with_observer(Arc::clone(&timeline) as Arc<dyn crate::observe::ExecutionObserver>)
+		.build_with_path(&path)
+		.await?;
+	let measured = measure_reference_build(&ds, &timeline, &path).await;
+	// A datastore that is only dropped keeps RocksDB open for the rest of the
+	// process, so it is closed — whether or not the measurement succeeded —
+	// before `dir` drops and removes the directory under it.
+	let closed = ds.shutdown().await;
+	measured.and(closed)
+}
+
+/// The body of [`diag_diskann_build_rocksdb_200k`], run against the datastore
+/// that test owns and closes.
+#[cfg(feature = "kv-rocksdb")]
+async fn measure_reference_build(
+	ds: &Datastore,
+	timeline: &BuildTxTimeline,
+	path: &str,
+) -> Result<()> {
+	use std::sync::atomic::{AtomicU64, Ordering};
+	use std::time::Duration;
+
+	use rand::rngs::SmallRng;
+	use rand::{Rng, SeedableRng};
+	use surrealdb_types::{Array, Value, Variables, object};
+	use web_time::Instant;
+
+	/// The reference workload. Lowering `ROWS` keeps the shape and makes the run
+	/// affordable, at the cost of leaving the cache-miss regime the figures are
+	/// about.
+	const ROWS: usize = 200_000;
+	const DIM: usize = 768;
+	const QUERIES: usize = 500;
+	/// Far more clusters than the graph's 64-edge budget, and far fewer members
+	/// per cluster than `K`, so answering a query means hopping between clusters
+	/// rather than walking one cluster's interior.
+	const CLUSTERS: usize = 80_000;
+	const SPREAD: f32 = 0.35;
+	/// Rows per `INSERT`. Bounds the load phase's peak — one statement carrying
+	/// every row would hold the whole corpus as `Value`s at once.
+	const LOAD_BATCH: usize = 1_000;
+	const K: usize = 10;
+	const EF: usize = 100;
+	const SEED: u64 = 0x0D15_C0FF_EE5E_ED01;
+	/// Separate stream for the centroids. Deriving them from `SEED` itself would
+	/// give centroid 0 the same draw sequence as the member noise, making the
+	/// first member a scaled copy of its own centroid rather than a perturbed
+	/// one.
+	const CENTROID_SEED: u64 = 0x51E5_C0DE_0DDB_0A11;
+
+	let session = Session::owner().with_ns("test").with_db("test");
+	{
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.ensure_ns_db(None, "test", "test").await?;
+		tx.commit().await?;
+	}
+
+	// One RNG stream for the corpus and the queries, so the queries come from the
+	// same distribution without being copies of indexed rows — a query that is
+	// its own nearest neighbour scores a guaranteed hit.
+	//
+	// A centroid is derived from its index rather than stored: at the reference
+	// size the centroid table would be a quarter of a gigabyte of the process's
+	// own memory, and process memory is one of the figures this run reports.
+	let centroid = |cluster: usize| -> Vec<f32> {
+		let mut rng = SmallRng::seed_from_u64(CENTROID_SEED.wrapping_add(cluster as u64));
+		(0..DIM).map(|_| rng.random_range(-1.0f32..=1.0)).collect()
+	};
+	let mut rng = SmallRng::seed_from_u64(SEED);
+	let mut drawn = 0usize;
+	let draw = |rng: &mut SmallRng, drawn: &mut usize| -> Vec<f32> {
+		let centroid = centroid(*drawn % CLUSTERS);
+		*drawn += 1;
+		centroid.iter().map(|c| c + rng.random_range(-SPREAD..=SPREAD)).collect()
+	};
+	let as_value = |v: &[f32]| {
+		Value::Array(Array::from(v.iter().map(|c| f64::from(*c)).collect::<Vec<f64>>()))
+	};
+
+	eprintln!("Loading {ROWS} x {DIM} rows into {path}");
+	let load_start = Instant::now();
+	let mut corpus: Vec<Vec<f32>> = Vec::with_capacity(ROWS);
+	let mut batch: Vec<Value> = Vec::with_capacity(LOAD_BATCH);
+	for id in 0..ROWS {
+		let vector = draw(&mut rng, &mut drawn);
+		batch.push(Value::Object(object! {
+			id: id as i64,
+			vec: as_value(&vector),
+		}));
+		corpus.push(vector);
+		if batch.len() == LOAD_BATCH || id + 1 == ROWS {
+			let mut vars = Variables::new();
+			vars.insert("rows", Value::Array(Array::from(std::mem::take(&mut batch))));
+			batch = Vec::with_capacity(LOAD_BATCH);
+			for response in ds.execute("INSERT INTO emb $rows", &session, Some(vars)).await? {
+				response.result?;
+			}
+		}
+	}
+	let load_elapsed = load_start.elapsed();
+	eprintln!("Loaded in {load_elapsed:?}");
+
+	// RSS the build starts from. The test process is holding the corpus for the
+	// ground truth below — around 600 MiB at the reference size — so what the
+	// build itself costs is the growth above this line, not the peak.
+	let base_rss = crate::observe::refresh_process_snapshot().await.memory_bytes;
+
+	// Peak RSS across the build, sampled from a task of its own: the build is one
+	// awaited statement, with nothing inside it to hang a sample off.
+	let peak_rss = Arc::new(AtomicU64::new(0));
+	let sampler_stop = tokio_util::sync::CancellationToken::new();
+	let sampler = tokio::spawn({
+		let peak_rss = Arc::clone(&peak_rss);
+		let stop = sampler_stop.clone();
+		async move {
+			loop {
+				let snapshot = crate::observe::refresh_process_snapshot().await;
+				peak_rss.fetch_max(snapshot.memory_bytes, Ordering::Relaxed);
+				tokio::select! {
+					() = stop.cancelled() => break,
+					_ = tokio::time::sleep(Duration::from_secs(1)) => {}
+				}
+			}
+		}
+	});
+
+	eprintln!("Building the index");
+	timeline.open();
+	let build_start = Instant::now();
+	for response in ds
+		.execute(
+			"DEFINE INDEX emb_diskann ON emb FIELDS vec \
+			 DISKANN DIMENSION 768 DIST COSINE TYPE F32",
+			&session,
+			None,
+		)
+		.await?
+	{
+		response.result?;
+	}
+	let build_elapsed = build_start.elapsed();
+	let entries = timeline.close();
+	sampler_stop.cancel();
+	let _ = sampler.await;
+
+	let mut write_txs = 0u64;
+	let mut read_txs = 0u64;
+	let mut keys_read = 0u64;
+	let mut keys_written = 0u64;
+	let mut bytes_read = 0u64;
+	let mut bytes_written = 0u64;
+	let mut ops_get = 0u64;
+	let mut ops_scan = 0u64;
+	let mut ops_write = 0u64;
+	for tx in &entries {
+		if tx.write {
+			write_txs += 1;
+		} else {
+			read_txs += 1;
+		}
+		keys_read += tx.metrics.keys_read;
+		keys_written += tx.metrics.keys_written;
+		bytes_read += tx.metrics.value_bytes_read;
+		bytes_written += tx.metrics.value_bytes_written;
+		ops_get += u64::from(tx.metrics.ops_get);
+		ops_scan += u64::from(tx.metrics.ops_scan);
+		ops_write += u64::from(tx.metrics.ops_set)
+			+ u64::from(tx.metrics.ops_put)
+			+ u64::from(tx.metrics.ops_del);
+	}
+
+	eprintln!("=== diag_diskann_build_rocksdb_200k ===");
+	eprintln!("workload       {ROWS} x {DIM} DEGREE=64 L_BUILD=100 ALPHA=1.2 DIST=COSINE rocksdb");
+	eprintln!("load           {load_elapsed:?}");
+	eprintln!("DEFINE INDEX   {build_elapsed:?}");
+	eprintln!("transactions   {write_txs} write, {read_txs} read");
+	eprintln!("kv ops         get={ops_get} scan={ops_scan} write={ops_write}");
+	eprintln!(
+		"kv keys        read={keys_read} written={keys_written} ({:.1} reads per row)",
+		keys_read as f64 / ROWS as f64
+	);
+	eprintln!("kv value bytes read={bytes_read} written={bytes_written}");
+	let peak_rss = peak_rss.load(Ordering::Relaxed);
+	eprintln!(
+		"RSS            {} MiB peak, {} MiB before the build, {} MiB growth \
+		 (DiskANN cache budget {} MiB)",
+		peak_rss / (1024 * 1024),
+		base_rss / (1024 * 1024),
+		peak_rss.saturating_sub(base_rss) / (1024 * 1024),
+		ds.config().idx.diskann_cache_size / (1024 * 1024),
+	);
+	print_tx_timeline(build_elapsed, &entries);
+
+	// Recall@K against brute force over the same corpus and metric. A build that
+	// got faster by producing a worse graph shows up here, in the same run as
+	// the time it saved.
+	let knn = format!("SELECT VALUE record::id(id) FROM emb WHERE vec <|{K},{EF}|> $q");
+
+	// The plan, once. A KNN whose right-hand side does not resolve to a value at
+	// planning time falls back to a table scan with the operator evaluated per
+	// row: exact by construction, so recall would read 1.0 while measuring
+	// nothing about the graph.
+	{
+		let mut vars = Variables::new();
+		vars.insert("q", as_value(&draw(&mut rng, &mut drawn)));
+		let plan =
+			ds.execute(&format!("{knn} EXPLAIN"), &session, Some(vars)).await?.remove(0).result?;
+		eprintln!("knn plan       {plan:?}");
+	}
+
+	eprintln!("Measuring Recall@{K} at ef={EF} over {QUERIES} held-out queries");
+	let mut total_recall = 0.0;
+	let mut scored: Vec<(f64, usize)> = Vec::with_capacity(ROWS);
+	for _ in 0..QUERIES {
+		let query = draw(&mut rng, &mut drawn);
+		scored.clear();
+		scored.extend(corpus.iter().enumerate().map(|(id, v)| (cosine_distance(v, &query), id)));
+		// Partial selection, not a sort: fully ordering every row for each of the
+		// queries costs more than the searches being measured, and only the
+		// top-`K` set is compared. Ties at the `K`-th distance do not arise on
+		// continuous float draws.
+		scored.select_nth_unstable_by(K, |a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+		let truth: std::collections::HashSet<usize> =
+			scored[..K].iter().map(|(_, id)| *id).collect();
+
+		let mut vars = Variables::new();
+		vars.insert("q", as_value(&query));
+		let got =
+			ds.execute(&knn, &session, Some(vars)).await?.remove(0).result?.into_t::<Vec<i64>>()?;
+		// Set intersection, not matching entries: counting entries would score a graph that
+		// returns one true neighbour repeatedly as perfect. A duplicate is a defect, so it fails.
+		let seen: std::collections::HashSet<usize> = got.iter().map(|id| *id as usize).collect();
+		assert_eq!(seen.len(), got.len(), "index returned duplicate ids: {got:?}");
+		let hits = seen.iter().filter(|id| truth.contains(id)).count();
+		total_recall += hits as f64 / K as f64;
+	}
+	eprintln!("Recall@{K} (ef={EF}) = {:.4}", total_recall / QUERIES as f64);
+	Ok(())
+}
+
+/// Cosine distance, matching `DIST COSINE`: `1 - cos(a, b)`, over `TYPE F32` vectors.
+///
+/// The index's graph search scores candidates with the `diskann-vector` crate's SIMD cosine
+/// kernel, which this crate does not depend on. This mirrors that kernel's precision — the dot
+/// product and both squared norms accumulate in `f32` — but not its summation order, and it
+/// divides in `f64`. The ground truth and the index can therefore rank two candidates
+/// differently only when their distances agree to within `f32` rounding: a near-tie at the
+/// `k`th neighbour, which continuous random draws make rare.
+#[cfg(feature = "kv-rocksdb")]
+fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
+	let mut dot = 0.0f32;
+	let mut norm_a = 0.0f32;
+	let mut norm_b = 0.0f32;
+	for (x, y) in a.iter().zip(b.iter()) {
+		dot += *x * *y;
+		norm_a += *x * *x;
+		norm_b += *y * *y;
+	}
+	1.0 - f64::from(dot) / (f64::from(norm_a).sqrt() * f64::from(norm_b).sqrt())
+}

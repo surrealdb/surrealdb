@@ -143,8 +143,9 @@ By default benches run on the in-memory engine. `--backend surrealkv` (always
 available) or `--backend rocksdb` (build with `--features backend-rocksdb`) run
 them on the file-backed engines instead, in a temporary directory that's removed
 afterwards. TiKV is unsupported (it needs an external cluster). Mutating
-(`rebuild = true`) benches only run on `mem` — on a file backend they'd re-import
-the dataset to disk every iteration — and are skipped (with a notice) otherwise:
+(`rebuild = true`) benches run on `mem` only — on a file backend they'd re-import
+the dataset to disk every iteration — and are skipped (with a notice) otherwise,
+unless the bench sets `rebuild-file-backend = true` (see below):
 
 ```bash
 cargo make bench -- scans/count --backend surrealkv
@@ -154,11 +155,12 @@ cargo make bench -- scans/count --backend surrealkv
 
 ```toml
 [bench]
-run = true               # include this file in `bench run`
-rebuild = false          # see below; defaults to false
-warmup = "2s"            # warmup duration
-sample-size = 50         # number of samples (note: kebab-case keys)
-measurement-time = "20s" # target total measurement window
+run = true                    # include this file in `bench run`
+rebuild = false               # see below; defaults to false
+rebuild-file-backend = false  # see below; defaults to false
+warmup = "2s"                 # warmup duration
+sample-size = 50              # number of samples (note: kebab-case keys)
+measurement-time = "20s"      # target total measurement window
 ```
 
 `rebuild` controls datastore lifecycle:
@@ -172,6 +174,16 @@ measurement-time = "20s" # target total measurement window
   iteration. Required for **mutating** benches (CREATE / UPDATE / DELETE) which
   need a clean slate each time, otherwise state accumulates across iterations and
   the workload drifts.
+
+`rebuild-file-backend = true` lets a `rebuild = true` bench also run under
+`--backend rocksdb` / `--backend surrealkv`, where rebuild benches are otherwise
+skipped. Set it when the bench's subject is the storage layer — an index build,
+say, whose cost is dominated by KV reads and which therefore measures the wrong
+thing on `mem`. Each iteration builds a fresh datastore in a directory of its
+own, and shuts it down and reclaims the directory once its statement has been
+timed, so a run holds one copy of the dataset on disk rather than one per sample.
+The re-import and the shutdown are paid every iteration, outside the timed
+region, so keep `sample-size` small on a large dataset.
 
 **Dataset sharing.** Read-only (`rebuild = false`) benches that resolve to the
 same dataset — same effective import chain, capabilities, backend, and target

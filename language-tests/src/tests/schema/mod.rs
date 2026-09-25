@@ -1031,6 +1031,19 @@ pub struct BenchDetails {
 	/// slate per iteration.
 	#[serde(default)]
 	pub rebuild: bool,
+	/// Lets a `rebuild = true` bench also run on the file-backed engines
+	/// (`--backend rocksdb`, `--backend surrealkv`), not just on `mem`.
+	///
+	/// Rebuilding re-imports the dataset before every measured iteration, and on
+	/// a file backend that writes the whole dataset to disk each time — so
+	/// expensive for most mutating benches that the file backends skip them.
+	/// A bench whose subject is the storage layer itself measures the wrong thing
+	/// on `mem` and opts in here; each iteration then builds a fresh datastore
+	/// in a directory of its own, and shuts it down and reclaims the directory
+	/// once its statement has been timed, so the run holds one dataset on disk
+	/// rather than one per sample.
+	#[serde(default)]
+	pub rebuild_file_backend: bool,
 	/// Folds the imported graph adjacency into packed blocks before the warmup,
 	/// so the timed statement reads the folded layout. The datastore is built
 	/// with `graph_fold_threshold = 1`, the bench statement is executed once as

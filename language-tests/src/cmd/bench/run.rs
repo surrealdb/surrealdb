@@ -157,6 +157,33 @@ impl Drop for CleanupDir {
 	}
 }
 
+/// Closes a datastore the run has finished with and reclaims the directory it
+/// was built in.
+///
+/// Dropping the last `Arc<Datastore>` does not close a file-backed engine: its
+/// own background threads — RocksDB's commit coordinator among them — hold a
+/// handle to the store until `shutdown` stops them. A store that is only
+/// dropped stays open for the rest of the process, its memory resident, its
+/// background work still running and its files still held, and removing its
+/// directory then unlinks files it has open without freeing their space. So a
+/// file-backed store is shut down first, closes when `dbs` — which must be its
+/// last handle — drops, and only then is the temp root emptied. Only one
+/// datastore is live at a time, so emptying the whole root is safe.
+///
+/// On the in-memory backend dropping `dbs` frees the store and there is no
+/// directory, so nothing else is done.
+async fn retire_datastore(dbs: Arc<Datastore>, config: &BenchConfig) {
+	let Some(root) = config.bench_root.as_deref() else {
+		return;
+	};
+	if let Err(e) = dbs.shutdown().await {
+		println!("Warning: could not shut down a bench datastore: {e}");
+	}
+	drop(dbs);
+	let _ = std::fs::remove_dir_all(root);
+	let _ = std::fs::create_dir_all(root);
+}
+
 /// Creates (clean) the temp root for this run's file-backed datastores.
 fn make_bench_root() -> Result<PathBuf> {
 	let root = std::env::temp_dir().join(format!("surreal_bench_{}", std::process::id()));
@@ -625,14 +652,6 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 			}
 		}
 
-		// The group's datastore has dropped (run_group returned), so reclaim the
-		// file-backed store dir(s) before the next group. Only one group is live at
-		// a time, so wiping the whole root here is safe.
-		if let Some(root) = config.bench_root.as_deref() {
-			let _ = std::fs::remove_dir_all(root);
-			let _ = std::fs::create_dir_all(root);
-		}
-
 		release_freed_heap();
 
 		idx = end;
@@ -640,11 +659,15 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 
 	// Mutating benches: rebuild a fresh datastore each iteration (never grouped).
 	// On a file backend that re-imports the dataset to disk every iteration, which
-	// is impractically slow, so they are restricted to the in-memory backend.
+	// is impractically slow for most of them, so they run on the in-memory backend
+	// unless the bench sets `rebuild-file-backend` — the opt-in for a bench whose
+	// subject is the storage layer, where `mem` measures the wrong thing.
 	for run in rebuild.into_iter() {
-		if cfg.backend != Backend::Memory {
+		if cfg.backend != Backend::Memory
+			&& !run.case.test.config.parsed.bench.rebuild_file_backend
+		{
 			println!(
-				"Skipping {} (`rebuild = true` benches only run on the `mem` backend)",
+				"Skipping {} (`rebuild = true` benches run on the `mem` backend unless they set `rebuild-file-backend`)",
 				run.name()
 			);
 			continue;
@@ -703,11 +726,6 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 				}
 				measurements.push((run.name(), measurement, rows, compare));
 			}
-		}
-
-		if let Some(root) = config.bench_root.as_deref() {
-			let _ = std::fs::remove_dir_all(root);
-			let _ = std::fs::create_dir_all(root);
 		}
 
 		release_freed_heap();
@@ -1114,7 +1132,9 @@ fn pin_hnsw_build_seed() {
 /// execute timed read-only statements.
 ///
 /// Returns `Ok(Err(..))` when an import fails so the caller can surface it as an
-/// [`BenchRunResult::Import`] / [`GroupOutcome::ImportFailed`].
+/// [`BenchRunResult::Import`] / [`GroupOutcome::ImportFailed`]. A datastore that
+/// fails to populate, through an import failure or an error, is retired here, so
+/// neither path leaves it open.
 ///
 /// Shared by the grouped read-only path (built once per dataset group, then reused
 /// across the group's benches) and, via [`prepare`], the per-iteration rebuild
@@ -1129,7 +1149,28 @@ async fn build_and_populate(
 	let dbs = builder_from_config(&run.case.test.config.parsed)
 		.build_with_path(&datastore_conn(config))
 		.await?;
+	match populate(run, config, token, &dbs).await {
+		Ok(None) => Ok(Ok(dbs)),
+		Ok(Some(e)) => {
+			retire_datastore(dbs, config).await;
+			Ok(Err(e))
+		}
+		Err(e) => {
+			retire_datastore(dbs, config).await;
+			Err(e)
+		}
+	}
+}
 
+/// Everything [`build_and_populate`] does once the datastore exists: reseed,
+/// import, compact and, for a graph-fold bench, fold. Returns the failure when
+/// an import fails.
+async fn populate(
+	run: &TestRun<BenchRunConfig>,
+	config: &BenchConfig,
+	token: &tokio_util::sync::CancellationToken,
+	dbs: &Arc<Datastore>,
+) -> Result<Option<ImportFailure>> {
 	// The import session only targets the namespace/database — data lands as owner
 	// (see `run_imports_list`), so it is independent of the bench's own auth. The
 	// timed statement gets its own session per bench.
@@ -1141,8 +1182,8 @@ async fn build_and_populate(
 	// Use the per-variant dataset import chain (from `[bench].datasets`) when one
 	// was selected, otherwise fall back to the bench's own resolved imports.
 	let imports = run.config.imports.as_deref().unwrap_or(&run.case.imports);
-	if let Some(e) = util::run_imports_list(imports, session, &dbs).await? {
-		return Ok(Err(e));
+	if let Some(e) = util::run_imports_list(imports, session, dbs).await? {
+		return Ok(Some(e));
 	}
 
 	Datastore::index_compaction(dbs.clone(), Duration::from_secs(1), token.clone()).await?;
@@ -1200,7 +1241,25 @@ async fn build_and_populate(
 		}
 	}
 
-	Ok(Ok(dbs))
+	Ok(None)
+}
+
+/// Prepares the bench statement against a datastore [`prepare`] just built and
+/// runs it once, returning the rows it produced and how long the statement took
+/// — the preparation is not timed.
+///
+/// The statement is dropped before this returns, whatever the outcome: a GraphQL
+/// statement's schema holds handles to the datastore, and the caller retires
+/// `dbs` next, which needs the last one.
+async fn execute_on_fresh(
+	run: &TestRun<BenchRunConfig>,
+	dbs: &Arc<Datastore>,
+	session: &Session,
+) -> Result<(Option<i64>, Duration)> {
+	let statement = BenchStatement::prepare(run, dbs, session).await?;
+	let start = Instant::now();
+	let produced = statement.execute(run, dbs, session).await?;
+	Ok((produced, start.elapsed()))
 }
 
 /// Builds a populated datastore plus the per-bench execute session. Used by the
@@ -1256,12 +1315,20 @@ async fn run_group(
 
 	// Each member runs against the shared `dbs`; its per-bench result (`Ok` or
 	// `InsufficientSamples`) is returned to `run()` for storing/printing.
-	let mut results = Vec::with_capacity(group.len());
-	for (run, baseline) in group.iter().zip(baselines) {
-		results.push(run_bench(run, config, baseline, quick, Some(dbs.clone())).await?);
+	let ran = async {
+		let mut results = Vec::with_capacity(group.len());
+		for (run, baseline) in group.iter().zip(baselines) {
+			results.push(run_bench(run, config, baseline, quick, Some(dbs.clone())).await?);
+		}
+		anyhow::Ok(results)
 	}
+	.await;
+	// Every member's handle dropped with its `run_bench`, so this is the last.
+	// Retired before any member's error propagates, so a failed run leaves no
+	// store open.
+	retire_datastore(dbs, config).await;
 
-	Ok(GroupOutcome::Ran(results))
+	Ok(GroupOutcome::Ran(ran?))
 }
 
 /// Emits a sentinel line on stderr delimiting the measured region of a bench,
@@ -1357,8 +1424,9 @@ async fn run_bench(
 				Ok(prepared) => prepared,
 				Err(e) => return Ok(BenchRunResult::Import(e)),
 			};
-			let statement = BenchStatement::prepare(run, &dbs, &session).await?;
-			statement.execute(run, &dbs, &session).await?;
+			let executed = execute_on_fresh(run, &dbs, &session).await;
+			retire_datastore(dbs, config).await;
+			executed?;
 		}
 
 		count += 1;
@@ -1416,11 +1484,14 @@ async fn run_bench(
 					Ok(prepared) => prepared,
 					Err(e) => return Ok(BenchRunResult::Import(e)),
 				};
-				let statement = BenchStatement::prepare(run, &dbs, &session).await?;
-
-				let start = Instant::now();
-				let produced = statement.execute(run, &dbs, &session).await?;
-				sample_duration += start.elapsed().as_secs_f64();
+				let executed = execute_on_fresh(run, &dbs, &session).await;
+				// Outside the timed region, as the import is: closing a file-backed
+				// store flushes it and drains its background work, so none of that
+				// work runs into the next iteration's measurement. Retired before an
+				// error propagates, so a failed run leaves no store open.
+				retire_datastore(dbs, config).await;
+				let (produced, elapsed) = executed?;
+				sample_duration += elapsed.as_secs_f64();
 				rows = produced;
 			}
 		}
