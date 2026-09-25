@@ -156,7 +156,7 @@ impl Parser<'_> {
 					Ok(Kind::Record(Vec::new()))
 				}
 			}
-			t!("TABLE") => {
+			t!("TABLE") | t!("TB") => {
 				let span = this.peek().span;
 				if this.eat(t!("<")) {
 					let mut tables = vec![this.parse_ident_str()?.into()];

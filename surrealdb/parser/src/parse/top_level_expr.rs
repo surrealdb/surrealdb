@@ -264,7 +264,7 @@ impl Parse for ast::Show {
 
 		let peek = parser.peek_expect("keyword `TABLE` or `DATABASE`")?;
 		let target = match peek.token {
-			T![TABLE] => {
+			T![TABLE] | T![TB] => {
 				let _ = parser.next();
 				ast::ShowTarget::Table(parser.parse_sync()?)
 			}

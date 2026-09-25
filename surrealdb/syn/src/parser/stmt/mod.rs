@@ -444,7 +444,7 @@ impl Parser<'_> {
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::Db(structure, version)
 			}
-			t!("TABLE") => {
+			t!("TABLE") | t!("TB") => {
 				let ident = stk.run(|stk| self.parse_expr_table(stk)).await?;
 				let version = if self.eat(t!("VERSION")) {
 					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
@@ -619,7 +619,7 @@ impl Parser<'_> {
 
 		let next = self.next();
 		let table = match next.kind {
-			t!("TABLE") => {
+			t!("TABLE") | t!("TB") => {
 				let table: surrealdb_sql::TableName = self.parse_ident_str()?.into();
 				Some(table)
 			}
