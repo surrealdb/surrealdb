@@ -4443,7 +4443,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
- "vart",
  "web-time",
 ]
 
@@ -5275,12 +5274,6 @@ dependencies = [
  "serde_core",
  "wasm-bindgen",
 ]
-
-[[package]]
-name = "vart"
-version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1982d899e57d646498709735f16e9224cf1e8680676ad687f930cf8b5b555ae"
 
 [[package]]
 name = "version_check"

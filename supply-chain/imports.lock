@@ -1349,13 +1349,6 @@ user-id = 3204
 user-login = "KodrAus"
 user-name = "Ashley Mannix"
 
-[[publisher.vart]]
-version = "0.9.3"
-when = "2025-09-05"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
 [[publisher.walkdir]]
 version = "2.5.0"
 when = "2024-03-01"
@@ -1497,11 +1490,6 @@ version = "46.0.3"
 when = "2026-08-20"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
-[[publisher.wasmtime-internal-winch]]
-version = "46.0.3"
-when = "2026-08-20"
-trusted-publisher = "github:bytecodealliance/wasmtime"
-
 [[publisher.wasmtime-internal-wit-bindgen]]
 version = "46.0.3"
 when = "2026-08-20"
@@ -1548,11 +1536,6 @@ when = "2024-08-02"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
-
-[[publisher.winch-codegen]]
-version = "46.0.3"
-when = "2026-08-20"
-trusted-publisher = "github:bytecodealliance/wasmtime"
 
 [[publisher.windows]]
 version = "0.61.3"
@@ -2151,14 +2134,6 @@ start = "2026-01-07"
 end = "2027-01-08"
 notes = "The Bytecode Alliance is the author of this crate"
 
-[[audits.bytecode-alliance.wildcard-audits.wasmtime-internal-winch]]
-who = "Alex Crichton <alex@alexcrichton.com>"
-criteria = "safe-to-deploy"
-trusted-publisher = "github:bytecodealliance/wasmtime"
-start = "2026-01-07"
-end = "2027-01-08"
-notes = "The Bytecode Alliance is the author of this crate"
-
 [[audits.bytecode-alliance.wildcard-audits.wasmtime-internal-wit-bindgen]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
@@ -2216,14 +2191,6 @@ end = "2027-01-08"
 notes = "The Bytecode Alliance is the author of this crate"
 
 [[audits.bytecode-alliance.wildcard-audits.wiggle-macro]]
-who = "Alex Crichton <alex@alexcrichton.com>"
-criteria = "safe-to-deploy"
-trusted-publisher = "github:bytecodealliance/wasmtime"
-start = "2026-01-07"
-end = "2027-01-08"
-notes = "The Bytecode Alliance is the author of this crate"
-
-[[audits.bytecode-alliance.wildcard-audits.winch-codegen]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 trusted-publisher = "github:bytecodealliance/wasmtime"
