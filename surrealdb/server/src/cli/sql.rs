@@ -205,15 +205,29 @@ pub async fn init(
 			&capabilities,
 			&ParserConfig::default(),
 		) {
-			Ok(mut query) => {
+			Ok(query) => {
 				let init_length = query.num_statements();
 				let vars = query.get_let_statements();
 
+				// The parse validates the line and tells us how many results to
+				// expect; the server gets the user's own text. Re-rendering the
+				// AST would send something the user did not write, so any gap
+				// in `ToSql` would silently rewrite their query.
+				//
+				// The capture expressions are appended on their own lines so a
+				// trailing line comment cannot swallow them. They are the final
+				// top-level expressions, and so the final results. A name comes
+				// back from `get_let_statements` unescaped, so it is rendered
+				// as a `Param` rather than interpolated: `$`a-b`` reads the
+				// variable, `$a-b` is a subtraction.
+				let mut request = line.trim_end().to_string();
+				request.push_str("\n;");
 				for var in &vars {
-					query.add_param(var.clone());
+					request.push('\n');
+					request.push_str(&surrealdb_sql::Param::new(var.clone()).to_sql());
+					request.push(';');
 				}
-
-				query.add_param("session".to_string());
+				request.push_str("\n$session;");
 
 				// Extract the namespace and database from the current prompt
 				let (prompt_ns, _) = split_prompt(&prompt)?;
@@ -223,7 +237,7 @@ pub async fn init(
 					continue;
 				}
 				// Run the query provided
-				let mut result = client.query(query.to_sql()).with_stats().await;
+				let mut result = client.query(request).with_stats().await;
 
 				let mut use_ns = None;
 				let mut use_db = None;

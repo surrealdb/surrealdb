@@ -535,52 +535,66 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		.await
 		.map_err(crate::std_error_to_types_error)?;
 
-	if res.error_for_status_ref().is_err() {
-		let res = res.text().await.map_err(crate::std_error_to_types_error)?;
+	let status = res.status();
+	let bytes = res.bytes().await.map_err(crate::std_error_to_types_error)?;
 
-		match res.parse::<serde_json::Value>() {
-			Ok(body) => {
-				let error_msg = format!(
-					"\n{}",
-					serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into())
-				);
-				return Err(Error::connection(
-					format!("HTTP error: {error_msg}"),
-					ConnectionError::ConnectionFailed,
-				));
+	// A dump that reached execution is answered with the array of statements
+	// that failed - empty when the whole dump applied - and the status says
+	// whether it applied in full. Read that array first, so that a caller whose
+	// import failed is told which statement failed rather than which status the
+	// transport carried. A request rejected before execution is answered with
+	// an error document instead, and is reported from that document.
+	match surrealdb_types::decode::<Value>(&bytes) {
+		Ok(Value::Array(arr)) => {
+			for val in arr.into_vec() {
+				let result = QueryResult::from_value(val)
+					.map_err(|e| Error::internal(format!("Failed to parse query result: {e}")))?;
+				result.result?;
 			}
-			Err(_) => {
-				return Err(Error::connection(
-					format!("HTTP error: {res}"),
-					ConnectionError::ConnectionFailed,
-				));
+			// The import applied in full only when the server also said so. A
+			// failure it reported without attributing it to a statement is
+			// still a failure, and must not be returned as success.
+			if status.is_success() {
+				Ok(())
+			} else {
+				Err(Error::internal(format!(
+					"The server reported a failed import with HTTP status {status}, and the import may have been partially applied"
+				)))
+			}
+		}
+		decoded => {
+			if !status.is_success() {
+				let body = String::from_utf8_lossy(&bytes);
+
+				return match body.parse::<serde_json::Value>() {
+					Ok(body) => {
+						let error_msg = format!(
+							"\n{}",
+							serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into())
+						);
+						Err(Error::connection(
+							format!("HTTP error: {error_msg}"),
+							ConnectionError::ConnectionFailed,
+						))
+					}
+					Err(_) => Err(Error::connection(
+						format!("HTTP error: {body}"),
+						ConnectionError::ConnectionFailed,
+					)),
+				};
+			}
+
+			match decoded {
+				Ok(_) => Err(Error::internal("Expected array response from import".to_string())),
+				Err(e) => Err(crate::Error::serialization(
+					format!(
+						"The server returned an unexpected response: Failed to deserialize flatbuffers payload: {e:?}"
+					),
+					SerializationError::Deserialization,
+				)),
 			}
 		}
 	}
-
-	let bytes = res.bytes().await.map_err(crate::std_error_to_types_error)?;
-
-	let value: Value = surrealdb_types::decode(&bytes)
-		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x:?}"))
-		.map_err(|e| {
-			crate::Error::serialization(
-				format!("The server returned an unexpected response: {e}"),
-				SerializationError::Deserialization,
-			)
-		})?;
-
-	// Convert Value::Array to Vec<QueryResult>
-	let Value::Array(arr) = value else {
-		return Err(Error::internal("Expected array response from import".to_string()));
-	};
-
-	for val in arr.into_vec() {
-		let result = QueryResult::from_value(val)
-			.map_err(|e| Error::internal(format!("Failed to parse query result: {e}")))?;
-		result.result?;
-	}
-
-	Ok(())
 }
 
 pub(crate) async fn health(request: RequestBuilder) -> Result<()> {

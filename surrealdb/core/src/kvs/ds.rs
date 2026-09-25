@@ -119,7 +119,7 @@ use crate::surrealism::cache::SurrealismCache;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::syn::{ParseError, ParserConfig};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
-use crate::val::convert_value_to_public_value;
+use crate::val::{MAX_VALUE_DEPTH, convert_value_to_public_value};
 use crate::{CommunityComposer, syn};
 
 mod builder;
@@ -1321,15 +1321,19 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Performs a database import from SQL
+	/// Performs a database import from SQL, for a startup script.
+	///
+	/// Delegates to [`Self::import`] rather than repeating it, so that a dump
+	/// restored by `--import-file` is parsed under the same profile as one
+	/// restored by `surreal import`. Parsed under the datastore's configured
+	/// query limits instead, this entry point would refuse depths that an
+	/// export is required to be able to write back.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore startup import script");
-		// Check if the session has expired
-		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Execute the SQL import
-		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
+		self.import(sql, sess).await
 	}
 
 	/// Starts this datastore's maintenance tasks, if they are not already
@@ -5356,6 +5360,28 @@ impl Datastore {
 		self.run(QueryRequest::new(ast, sess).with_variables(vars)).await
 	}
 
+	/// The parser settings an import is read under.
+	///
+	/// An import is this engine's own export read back, so its depth ceiling
+	/// is derived from the deepest value the storage layer accepts
+	/// ([`MAX_VALUE_DEPTH`]) rather than from the configured query limits:
+	/// whatever was legal to write has to be legal to restore, on any node and
+	/// under any configuration. A ceiling below that caps a restore short of
+	/// what the writer accepts, and the shortfall shows up only as one failed
+	/// statement inside an otherwise successful restore.
+	///
+	/// The grammar gates are derived from the caller's live capabilities:
+	/// import text is a fresh statement at the query boundary, not text this
+	/// engine previously rendered, so the experimental-syntax gates apply to
+	/// it as they do to any other operator-supplied query.
+	fn import_parser_settings(capabilities: &Capabilities) -> ParserSettings {
+		ParserSettings {
+			files_enabled: capabilities.allows_experimental(&ExperimentalTarget::Files),
+			surrealism_enabled: capabilities.allows_experimental(&ExperimentalTarget::Surrealism),
+			..ParserSettings::for_value_depth(MAX_VALUE_DEPTH)
+		}
+	}
+
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn execute_import<S>(
 		&self,
@@ -5392,13 +5418,7 @@ impl Datastore {
 		}
 		// Process all statements
 
-		let parser_settings = ParserSettings {
-			files_enabled: ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
-			surrealism_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::Surrealism),
-			..Default::default()
-		};
+		let parser_settings = Self::import_parser_settings(&ctx.get_capabilities());
 		let mut statements_stream = StatementStream::new_with_settings(parser_settings);
 		let mut buffer = BytesMut::new();
 		let mut parse_size = 4096;
@@ -5537,12 +5557,30 @@ impl Datastore {
 	}
 
 	/// Performs a database import from SQL
+	///
+	/// The text is parsed under [`Self::import_parser_settings`] rather than
+	/// the datastore's configured query limits, so that this entry point and
+	/// [`Self::execute_import`] restore the same exports. Everything after
+	/// parsing is an ordinary query execution.
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
+		// Parse the import under the import profile.
+		//
+		// Classified as the caller's mistake, as `Datastore::execute` classifies
+		// the same failure: a truncated or hand-edited dump is a malformed
+		// request, and retrying it unchanged cannot succeed. Left to rise as a
+		// bare `ParseError` it reaches every transport as an unclassified
+		// internal fault, which reads as a server problem worth retrying.
+		let ast = syn::parse_with_settings(
+			sql.as_bytes(),
+			Self::import_parser_settings(&self.capabilities.load()),
+			async |parser, stk| parser.parse_query(stk).await,
+		)
+		.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Execute the SQL import
-		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
+		self.process(ast, sess, None).await.map_err(|e| anyhow::anyhow!(e))
 	}
 
 	/// Performs a database import from SQL
@@ -5579,6 +5617,28 @@ impl Datastore {
 	) -> Result<impl Future<Output = Result<()>> + 'static> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
+		// A dump carries the current state of each record and has no grammar for a
+		// record's history, so an export cannot answer a request for versions.
+		//
+		// Refused here rather than inside the returned job, because a transport that
+		// streams the export has already sent a success status and opened the body by
+		// the time that job runs: a refusal raised in there reaches the caller as an
+		// empty dump that claims to have succeeded. Every caller awaits this function
+		// before it awaits the job, so this is the last point common to all of them
+		// that still precedes a response.
+		//
+		// Raised as a structured validation error rather than a bare message, so each
+		// transport classifies it as the caller's mistake: the request named an option
+		// the format has no representation for, and retrying it unchanged cannot
+		// succeed.
+		if cfg.versions {
+			bail!(TypesError::validation(
+				"Versioned export is not supported: a dump carries the current state of each \
+				 record only"
+					.to_owned(),
+				surrealdb_types::ValidationError::InvalidRequest,
+			));
+		}
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
@@ -8481,5 +8541,159 @@ mod test {
 		);
 		let _ = txn.cancel().await;
 		Ok((forward.len(), reverse.len()))
+	}
+
+	/// A record nested to [`MAX_VALUE_DEPTH`], the deepest the storage layer
+	/// accepts.
+	///
+	/// It is grown one level per statement so no statement in the source is
+	/// itself deeply nested: the depth reaches storage without ever passing
+	/// through the query parser, which is what a restore has to read back.
+	async fn seed_deepest_storable_record(ds: &Datastore, session: &Session) -> Result<()> {
+		execute_all(ds, session, "CREATE deep:1 SET data = 'leaf' RETURN NONE;").await?;
+		// The record object is the first level and the leaf the last, so the
+		// wrappers between them carry the rest.
+		for _ in 0..MAX_VALUE_DEPTH - 2 {
+			execute_all(ds, session, "UPDATE deep:1 SET data = { l: data } RETURN NONE;").await?;
+		}
+		Ok(())
+	}
+
+	/// The SurrealQL an export renders a database as.
+	async fn export_sql(ds: &Datastore, session: &Session) -> Result<String> {
+		let (tx, rx) = crate::channel::bounded::<Vec<u8>>(16);
+		let task = ds.export(session, tx).await?;
+		let collector = tokio::spawn(async move {
+			let mut out = Vec::new();
+			while let Ok(chunk) = rx.recv().await {
+				out.extend_from_slice(&chunk);
+			}
+			out
+		});
+		task.await?;
+		Ok(String::from_utf8(collector.await?)?)
+	}
+
+	async fn empty_datastore(session: &Session) -> Result<Arc<Datastore>> {
+		let ds = Datastore::new("memory").await?;
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, session.ns().unwrap().as_ref(), session.db().unwrap().as_ref())
+			.await?;
+		txn.commit().await?;
+		Ok(ds)
+	}
+
+	/// A record at the deepest depth the storage layer accepts survives an
+	/// export and a restore through both import entry points: what the writer
+	/// accepted, an import can read back.
+	///
+	/// The comparison is between exports rather than query results: a
+	/// statement result nests the record one level further than storage does,
+	/// which the public-value conversion rejects, so a `SELECT` cannot observe
+	/// a record at this depth at all.
+	#[tokio::test]
+	async fn deepest_storable_record_survives_the_round_trip() -> Result<()> {
+		let session = Session::owner().with_ns("test").with_db("test");
+		let source = empty_datastore(&session).await?;
+		seed_deepest_storable_record(&source, &session).await?;
+		let sql = export_sql(&source, &session).await?;
+
+		let text_target = empty_datastore(&session).await?;
+		for result in text_target.import(&sql, &session).await? {
+			result.result?;
+		}
+		assert_eq!(export_sql(&text_target, &session).await?, sql, "restored from text");
+
+		let stream_target = empty_datastore(&session).await?;
+		let bytes = Bytes::from(sql.clone().into_bytes());
+		let stream = futures::stream::once(async move { Ok(bytes) });
+		for result in stream_target.import_stream(&session, stream).await? {
+			result.result?;
+		}
+		assert_eq!(export_sql(&stream_target, &session).await?, sql, "restored from a stream");
+
+		Ok(())
+	}
+
+	/// Every depth budget an import is read under stays above the deepest
+	/// value the storage layer accepts. Raising [`MAX_VALUE_DEPTH`] without
+	/// the parser profile, or narrowing the profile, would re-open the gap
+	/// where a record can be written but the export of it cannot be restored.
+	#[test]
+	fn import_profile_clears_the_storable_value_depth() {
+		let settings = Datastore::import_parser_settings(&Capabilities::default());
+		for (budget, limit) in [
+			("object", settings.object_recursion_limit),
+			("query", settings.query_recursion_limit),
+			("expression", settings.expr_recursion_limit),
+		] {
+			assert!(
+				limit > MAX_VALUE_DEPTH,
+				"the {budget} budget ({limit}) must clear the storable value depth \
+				 ({MAX_VALUE_DEPTH})"
+			);
+		}
+	}
+
+	/// The deepest literal the import profile accepts is formatted, lowered
+	/// and dropped within the call stack a worker thread running statements is
+	/// guaranteed.
+	///
+	/// Parsing recurses on a heap-allocated `reblessive` stack, so depth alone
+	/// costs nothing there; the `sql -> expr` lowering that follows, `ToSql`
+	/// and the tree's own `Drop` recurse on the call stack, where exhaustion
+	/// aborts the process rather than returning an error. A ceiling raised
+	/// past what those survive fails here instead.
+	///
+	/// The budget is a fraction of `SURREAL_RUNTIME_STACK_SIZE`, which the
+	/// server sizes well above this in both profiles precisely because these
+	/// walks recurse. It cannot be set to the smallest stack an embedded
+	/// caller might supply: frames are several times larger without
+	/// optimisation, and this test runs unoptimised.
+	///
+	/// So what this bounds is the server. `SURREAL_RUNTIME_STACK_SIZE` is a
+	/// server-only setting, and [`Datastore::import`] is also the embedded
+	/// path — `EmbeddedEngine::import`, and `SurrealWasmEngine::import` under
+	/// it. A wasm build takes the linker's default shadow stack, which this
+	/// repository does not raise, and there a stack overflow is an unrecoverable
+	/// trap rather than an abort a supervisor can restart. An embedded caller
+	/// that accepts untrusted dumps is not covered by what is asserted here.
+	#[test]
+	fn import_profile_ceiling_is_stack_safe() {
+		std::thread::Builder::new()
+			.stack_size(8 * 1024 * 1024)
+			.spawn(|| {
+				let settings = Datastore::import_parser_settings(&Capabilities::default());
+				let parse = |depth: usize| {
+					let source = format!("{}'leaf'{}", "{ l: ".repeat(depth), " }".repeat(depth));
+					crate::syn::parse_with_settings(
+						source.as_bytes(),
+						settings.clone(),
+						async |parser, stk| parser.parse_expr_field(stk).await,
+					)
+				};
+
+				// The deepest literal the profile accepts, so the tree the
+				// recursive consumers below are handed is its worst case.
+				let mut depth = settings.expr_recursion_limit;
+				while parse(depth).is_err() {
+					depth -= 1;
+					assert!(
+						depth > MAX_VALUE_DEPTH,
+						"the profile accepts a literal at the storable value depth"
+					);
+				}
+				assert!(parse(depth + 1).is_err(), "the search stopped at the ceiling");
+
+				let expr = parse(depth).expect("the deepest accepted literal parses");
+				// `ToSql` recurses once per node.
+				assert!(surrealdb_types::ToSql::to_sql(&expr).contains("leaf"));
+				// The lowering recurses once per node, and dropping what it
+				// produces recurses once per node again.
+				drop(crate::expr::Expr::from(expr));
+			})
+			.unwrap()
+			.join()
+			.unwrap();
 	}
 }

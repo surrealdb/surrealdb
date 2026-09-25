@@ -239,6 +239,7 @@ PlannerUnsupported	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Plan
 PlannerUnimplemented	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Planner not yet implemented: sample' }
 AccessLevelMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The access method cannot be defined on the requested level' }
 AccessUnsupportedAlgorithm	{ cause: NONE, code: -32000, kind: 'Validation', message: 'The ES512 algorithm is not currently supported. Please use ES384 or another supported algorithm' }
+AccessRedactedKey	{ cause: NONE, code: -32000, kind: 'Validation', message: "The access method 'sample' names the redaction placeholder as its key, which is published wherever an access is rendered; restore it from a definition carrying the real key, or define it again" }
 AccessRecordTokenDurationRequired	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Tokens issued by record access methods can be consumed by third parties and must have an expiration; DURATION FOR TOKEN cannot be NONE on TYPE RECORD access' }
 AccessContextNotReadOnly	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'A CONTEXT clause is evaluated on every authentication and its result is exposed to the client; it must be read-only' }
 AccessContextRequiresRecord	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: "A CONTEXT clause is evaluated with the authenticated record's own permissions, so it can only be defined on an access method that authenticates a record" }

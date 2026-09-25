@@ -2,7 +2,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::reference::Reference;
-use crate::{CoverStmts, Expr, Kind, Literal, Permissions};
+use crate::{CoverStmts, Expr, FieldPermissions, Kind, Literal, Permissions};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -117,6 +117,6 @@ impl ToSql for DefineFieldStatement {
 		} else {
 			f.push(' ');
 		}
-		self.permissions.fmt_sql(f, sql_fmt);
+		FieldPermissions(&self.permissions).fmt_sql(f, sql_fmt);
 	}
 }

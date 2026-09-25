@@ -1882,6 +1882,21 @@ fn convert_notification(
 fn export_config(config: DbExportConfig) -> EngineResult<rpc::ExportConfig> {
 	use surrealdb_rpc::export::TableConfig;
 
+	// The wire format carries no field for the database's own definition, so this
+	// transport cannot ask a server to leave it out. Sending the request without
+	// it would answer with a dump carrying `DEFINE DATABASE OVERWRITE`, whose
+	// restore rewrites the target's `STRICT` flag, `COMMENT` and `CHANGEFEED` —
+	// the opposite of what was asked for, and visible only once it has happened.
+	// Refusing says so while the caller can still choose another endpoint.
+	if !config.database_definition {
+		return Err(Error::validation(
+			"Excluding the database definition from an export is not supported over gRPC: the \
+			 protocol carries no field for it"
+				.to_string(),
+			ValidationError::InvalidRequest,
+		));
+	}
+
 	let tables = match config.tables {
 		TableConfig::All => rpc::export_config::Tables::from(true),
 		TableConfig::None => rpc::export_config::Tables::from(false),
@@ -1892,9 +1907,8 @@ fn export_config(config: DbExportConfig) -> EngineResult<rpc::ExportConfig> {
 				},
 			)),
 		},
-		// The wire format can name the tables to include but not the ones to
-		// leave out. Exporting everything instead would be the opposite of
-		// what the caller asked for, so this fails.
+		// The wire format names an exclusion as its own selection rather than as
+		// the complement of an inclusion, so the list crosses intact.
 		TableConfig::Exclude(excluded) => rpc::export_config::Tables {
 			selection: Some(rpc::export_config::tables::Selection::Excluded(
 				rpc::export_config::ExcludedTables {
@@ -2142,7 +2156,22 @@ fn status_to_error(status: tonic::Status) -> Error {
 	match status.code() {
 		Code::InvalidArgument | Code::OutOfRange => Error::validation(message, None),
 		Code::Unimplemented => Error::configuration(message, None),
+		// A request the server executed and could not carry out.
 		Code::DeadlineExceeded | Code::Aborted => Error::query(message, None),
+		// `FailedPrecondition` covers two unlike outcomes. An import whose
+		// statements ran and failed reports it, and the database holds part of
+		// a dump; so do the guards that refuse a request before executing
+		// anything, which leave no state. Only the second is marked, and only
+		// by a server new enough to mark it — so an unmarked status is read as
+		// the first, which is the safe way to be wrong: it tells a caller state
+		// may have been written when none was, rather than the reverse.
+		Code::FailedPrecondition => {
+			if status.metadata().contains_key("surreal-rejected-before-execution") {
+				Error::validation(message, None)
+			} else {
+				Error::query(message, None)
+			}
+		}
 		Code::PermissionDenied | Code::Unauthenticated => Error::not_allowed(message, None),
 		Code::NotFound => Error::not_found(message, None),
 		Code::AlreadyExists => Error::already_exists(message, None),
@@ -2794,6 +2823,35 @@ mod tests {
 			..Default::default()
 		});
 		assert!(!features.contains(&ExtraFeatures::Backup));
+	}
+
+	/// An export that deselects the database's own definition is refused rather
+	/// than sent without the selection.
+	///
+	/// The wire format has no field for it, so the request cannot be expressed
+	/// and the server cannot tell a deselected field from an absent one. Sending
+	/// it anyway answers with a dump carrying `DEFINE DATABASE OVERWRITE`, whose
+	/// restore rewrites the target's `STRICT` flag, `COMMENT` and `CHANGEFEED` —
+	/// so the caller would learn their selection was dropped only after it had
+	/// cost them. The default must still cross, or this would refuse every
+	/// export.
+	#[test]
+	fn an_export_deselecting_the_database_definition_is_refused() {
+		let refused = export_config(DbExportConfig {
+			database_definition: false,
+			..Default::default()
+		})
+		.expect_err("a selection this transport cannot carry must not be silently dropped");
+		assert!(
+			refused.is_validation(),
+			"the caller must be told to change the request: {refused:?}"
+		);
+		assert!(
+			refused.to_string().contains("database definition"),
+			"the refusal must say which selection could not be carried: {refused}"
+		);
+
+		export_config(DbExportConfig::default()).expect("the default selection must still cross");
 	}
 
 	/// The record id and value a notification carries are decoded, and an

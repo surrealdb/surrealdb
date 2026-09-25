@@ -1,6 +1,13 @@
 #![allow(clippy::unwrap_used)]
 #![cfg(any(feature = "kv-mem", feature = "kv-surrealkv", feature = "kv-rocksdb"))]
 
+//! Export and import of records that have accumulated many versions.
+//!
+//! A dump carries the current state of each record and has no grammar for a
+//! record's history, so these assert that the latest state of a much-updated
+//! record survives a round trip — not that its history does. An export asked for
+//! versions is refused outright; that contract lives in `backup.rs`.
+
 use surrealdb::opt::Config;
 use surrealdb_types::SurrealValue;
 use tokio::fs::remove_file;
@@ -64,7 +71,7 @@ pub async fn export_import_versions_with_inserts_updates_deletes(new_db: impl Cr
 
 	// Export the database to a file
 	let export_file = format!("{db_name}.sql");
-	db.export(&export_file).with_config().versions(true).await.unwrap();
+	db.export(&export_file).with_config().await.unwrap();
 
 	// Remove the table to simulate a fresh import
 	db.query("REMOVE TABLE user").await.unwrap();
@@ -150,7 +157,7 @@ pub async fn export_import_different_data_types(new_db: impl CreateDb) {
 
 	// Export the database to a file
 	let export_file = "different_data_types_backup.sql";
-	db.export(export_file).with_config().versions(true).await.unwrap();
+	db.export(export_file).with_config().await.unwrap();
 
 	// Remove the table to simulate a fresh import
 	db.query("REMOVE TABLE user").await.unwrap();
@@ -203,7 +210,7 @@ pub async fn export_import_multiple_tables(new_db: impl CreateDb) {
 
 	// Export the database to a file
 	let export_file = "multiple_tables_backup.sql";
-	db.export(export_file).with_config().versions(true).await.unwrap();
+	db.export(export_file).with_config().await.unwrap();
 
 	// Remove the tables to simulate a fresh import
 	db.query("REMOVE TABLE user").await.unwrap();
@@ -268,7 +275,7 @@ pub async fn export_import_versioned_records(new_db: impl CreateDb) {
 
 	// Export the database to a file
 	let export_file = "versioned_records_backup.sql";
-	db.export(export_file).with_config().versions(true).await.unwrap();
+	db.export(export_file).with_config().await.unwrap();
 
 	// Remove the table to simulate a fresh import
 	db.query("REMOVE TABLE user").await.unwrap();
@@ -340,7 +347,7 @@ pub async fn export_import_versioned_range_queries(new_db: impl CreateDb) {
 
 	// Export the database to a file
 	let export_file = "versioned_range_queries_backup.sql";
-	db.export(export_file).with_config().versions(true).await.unwrap();
+	db.export(export_file).with_config().await.unwrap();
 
 	// Remove the table to simulate a fresh import
 	db.query("REMOVE TABLE user").await.unwrap();

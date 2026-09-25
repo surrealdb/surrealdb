@@ -55,7 +55,7 @@ impl Parser<'_> {
 							return Ok(None)
 						}
 
-						let value = stk.run(|stk| this.parse_expr_inherit(stk)).await?;
+						let value = stk.run(|stk| this.parse_expr_collection_element(stk)).await?;
 						let res = vec![ObjectEntry {
 							key: key.into(),
 							value,
@@ -75,7 +75,18 @@ impl Parser<'_> {
 		}
 
 		let statement_peek = self.peek();
-		// It's either a set or a block.
+		// It's either a set or a block, and which one is only known from the token
+		// after this expression: a `,` makes it a set, anything else a block. The
+		// expression has to be parsed to reach that token, so it is charged before
+		// the answer exists, and the two answers want different budgets — a block's
+		// statement belongs to the query budget, a set's element to the object one.
+		//
+		// Charged to the query budget, which is the block reading. A set therefore
+		// bounds its first element by the query budget and every later element by
+		// the object budget, so nesting in the first position hits the smaller
+		// ceiling. Reading it as a set instead would lift block nesting to the
+		// object budget, and blocks are the shape whose depth the call stack pays
+		// for when the parsed tree is lowered and dropped.
 		let first_expr = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
 
 		let first_expr_span = statement_peek.span.covers(self.last_span());
@@ -163,7 +174,7 @@ impl Parser<'_> {
 				return Ok(res);
 			}
 
-			let value = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			let value = stk.run(|ctx| self.parse_expr_collection_element(ctx)).await?;
 			res.push(value);
 
 			if !self.eat(t!(",")) {
@@ -232,7 +243,7 @@ impl Parser<'_> {
 	async fn parse_object_entry(&mut self, stk: &mut Stk) -> ParseResult<(String, Expr)> {
 		let text = self.parse_object_key()?;
 		expected!(self, t!(":"));
-		let value = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+		let value = stk.run(|ctx| self.parse_expr_collection_element(ctx)).await?;
 		Ok((text, value))
 	}
 

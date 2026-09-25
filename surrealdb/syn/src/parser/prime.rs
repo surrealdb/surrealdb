@@ -354,7 +354,7 @@ impl Parser<'_> {
 					break;
 				}
 
-				let value = stk.run(|ctx| this.parse_expr_inherit(ctx)).await?;
+				let value = stk.run(|ctx| this.parse_expr_collection_element(ctx)).await?;
 				exprs.push(value);
 
 

@@ -7,6 +7,12 @@ use surrealdb_types::SurrealValue;
 #[surreal(crate = "surrealdb_types")]
 #[surreal(default)]
 pub struct Config {
+	/// Whether the database's own definition — its `STRICT` flag, `COMMENT` and
+	/// `CHANGEFEED` — is carried.
+	///
+	/// Restoring it rewrites those clauses on the target database, so a selective
+	/// export turns it off along with every other section it did not ask for.
+	pub database_definition: bool,
 	pub users: bool,
 	pub accesses: bool,
 	pub params: bool,
@@ -25,6 +31,7 @@ pub struct Config {
 impl Default for Config {
 	fn default() -> Config {
 		Config {
+			database_definition: true,
 			users: true,
 			accesses: true,
 			params: true,

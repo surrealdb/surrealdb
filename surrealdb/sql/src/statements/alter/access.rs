@@ -61,19 +61,46 @@ impl ToSql for AlterAccessStatement {
 		);
 		if has_duration {
 			f.push_str(" DURATION");
+			// Each altered clause is separated from the previous one, never
+			// terminated: a trailing comma leaves the parser expecting a
+			// fourth `FOR`.
+			let mut written = false;
+			let mut separate = |f: &mut String| {
+				if std::mem::replace(&mut written, true) {
+					f.push(',');
+				}
+			};
 			match self.grant_duration {
-				AlterKind::Set(d) => write_sql!(f, fmt, " FOR GRANT {},", SqlDuration(d)),
-				AlterKind::Drop => f.push_str(" FOR GRANT NONE,"),
+				AlterKind::Set(d) => {
+					separate(f);
+					write_sql!(f, fmt, " FOR GRANT {}", SqlDuration(d))
+				}
+				AlterKind::Drop => {
+					separate(f);
+					f.push_str(" FOR GRANT NONE")
+				}
 				AlterKind::None => {}
 			}
 			match self.token_duration {
-				AlterKind::Set(d) => write_sql!(f, fmt, " FOR TOKEN {},", SqlDuration(d)),
-				AlterKind::Drop => f.push_str(" FOR TOKEN NONE,"),
+				AlterKind::Set(d) => {
+					separate(f);
+					write_sql!(f, fmt, " FOR TOKEN {}", SqlDuration(d))
+				}
+				AlterKind::Drop => {
+					separate(f);
+					f.push_str(" FOR TOKEN NONE")
+				}
 				AlterKind::None => {}
 			}
 			match self.session_duration {
-				AlterKind::Set(d) => write_sql!(f, fmt, " FOR SESSION {}", SqlDuration(d)),
-				AlterKind::Drop => f.push_str(" FOR SESSION NONE"),
+				AlterKind::Set(d) => {
+					separate(f);
+					write_sql!(f, fmt, " FOR SESSION {}", SqlDuration(d))
+				}
+				AlterKind::Drop => {
+					separate(f);
+					f.push_str(" FOR SESSION NONE")
+				}
 				AlterKind::None => {}
 			}
 		}

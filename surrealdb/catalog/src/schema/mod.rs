@@ -43,8 +43,20 @@ use crate::val::Value;
 /// Placeholder substituted for a secret when a catalog definition is serialised
 /// through `INFO FOR …`. Credentials (Argon2 hashes, SCRAM verifiers, symmetric
 /// and issuer keys) are offline-crackable or directly replayable, so metadata
-/// surfaces must never return their real values. Export goes through the
-/// `from_definition` paths and is intentionally not redacted.
+/// surfaces must never return their real values.
+///
+/// Export does not treat its two kinds of secret alike, and a reader deciding
+/// whether a dump carries real key material has to know which:
+///
+/// - an access is redacted (`kvs::export` calls [`DefineAccessStatement::redact`]), so a dump names
+///   this placeholder as the signing secret and a database restored from it verifies tokens anyone
+///   can forge;
+/// - a user is not, so a dump carries the real `PASSHASH` and `PASSSCRAM` — to any principal
+///   holding `View` on the database, which is less than `INFO FOR DB` requires of the same values.
+///
+/// Neither half is the intended end state: the first trades disclosure for
+/// forgery, and the second discloses to a lower bar than the metadata surface
+/// it mirrors.
 pub const REDACTED: &str = "[REDACTED]";
 
 #[revisioned(revision = 1)]

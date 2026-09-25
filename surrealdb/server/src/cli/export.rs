@@ -21,9 +21,23 @@ pub struct DatabaseConnectionArguments {
 
 #[derive(Args, Debug)]
 struct ExportConfigArguments {
-	/// Whether only specific resources should be exported
+	/// Whether only specific resources should be exported. Deselects every
+	/// section the wire format can express leaving out, so that what follows on
+	/// the command line is all the dump carries. The database's own definition
+	/// is the exception — gRPC has no field for excluding it, so it rides along
+	/// unless `--database-definition false` asks for it to be left out
 	#[arg(long)]
 	only: bool,
+	/// Whether the database's own definition — its STRICT flag, COMMENT and
+	/// CHANGEFEED — should be exported. Restoring it rewrites those clauses on
+	/// the target database. Not carried over gRPC, which has no field for the
+	/// exclusion and refuses the export rather than answering with the section
+	/// anyway.
+	///
+	/// Not `--database`, which this command already takes for the database to
+	/// export from.
+	#[arg(long = "database-definition", num_args = 0..=1, default_missing_value = "true")]
+	database_definition: Option<bool>,
 	/// Whether users should be exported
 	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	users: Option<bool>,
@@ -46,7 +60,9 @@ struct ExportConfigArguments {
 	#[arg(long, value_parser = super::validator::export_tables_exclude)]
 	#[arg(conflicts_with = "tables")]
 	tables_exclude: Option<TableConfig>,
-	/// Whether versions should be exported
+	/// Whether versions should be exported. Versioned export is not supported: a
+	/// dump carries the current state of each record only, and asking for
+	/// versions fails the export rather than writing one without them
 	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	versions: Option<bool>,
 	/// Whether records should be exported
@@ -64,6 +80,9 @@ struct ExportConfigArguments {
 	/// Whether configs should be exported
 	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	configs: Option<bool>,
+	/// Whether sequences should be exported
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
+	sequences: Option<bool>,
 }
 
 #[derive(Args, Debug)]
@@ -165,6 +184,20 @@ fn apply_config<C: Connection, R>(
 	let mut export = export.with_config();
 
 	if config.only {
+		// Every section the wire format can express leaving out. A section left
+		// selected is a section the dump carries and a restore applies, and
+		// several of them overwrite what the target already holds — `configs`
+		// replaces its GraphQL and API configuration — so a dump asked for a
+		// few tables must not carry them.
+		//
+		// The database's own definition is the exception, and not by choice:
+		// the gRPC wire format has no field for it, so a client asked to leave
+		// it out refuses the export rather than answering with one that carries
+		// it. Deselecting it here, on the caller's behalf, would make a plain
+		// `--only` fail over gRPC while the same command succeeded over HTTP.
+		// `--database-definition false` still drops it, and is then the
+		// caller's own request to refuse. Closing this needs the field on the
+		// wire, not a client-side default.
 		export = export
 			.users(false)
 			.accesses(false)
@@ -173,7 +206,16 @@ fn apply_config<C: Connection, R>(
 			.analyzers(false)
 			.tables(false)
 			.versions(false)
-			.records(false);
+			.records(false)
+			.apis(false)
+			.buckets(false)
+			.modules(false)
+			.configs(false)
+			.sequences(false);
+	}
+
+	if let Some(value) = config.database_definition {
+		export = export.database_definition(value);
 	}
 
 	if let Some(value) = config.users {
@@ -225,6 +267,10 @@ fn apply_config<C: Connection, R>(
 
 	if let Some(value) = config.configs {
 		export = export.configs(value);
+	}
+
+	if let Some(value) = config.sequences {
+		export = export.sequences(value);
 	}
 
 	export

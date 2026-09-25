@@ -88,6 +88,73 @@ mod cli_integration {
 		assert!(common::run("version --turbo").output().is_err());
 	}
 
+	/// `--only` deselects every section except the database's own definition,
+	/// and the dump it writes is the same over every transport.
+	///
+	/// The gRPC wire format carries no field for that section, so a client asked
+	/// to leave it out refuses the export rather than answering with it anyway.
+	/// Deselecting it on the caller's behalf would make a plain `--only` a
+	/// transport-dependent command — a dump over HTTP, a refusal and no file at
+	/// all over gRPC — so `--only` leaves that one section alone. Excluding it
+	/// stays available, explicitly, and the refusal then belongs to a caller who
+	/// asked for it.
+	#[test(tokio::test)]
+	async fn export_only_writes_the_same_dump_over_every_transport() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let creds = format!("--user {USER} --pass {PASS}");
+		let ns = Ulid::new();
+		let db = Ulid::new();
+
+		// A clause of the database's own, so the section `--only` must not drop
+		// is one the export actually has something to write.
+		let args =
+			format!("sql --endpoint http://{addr} {creds} --ns {ns} --db {db} --hide-welcome");
+		common::run(&args)
+			.input(&format!("DEFINE DATABASE OVERWRITE `{db}` COMMENT 'kept'; CREATE thing:one;\n"))
+			.output()
+			.unwrap();
+
+		let mut dumps = Vec::new();
+		for scheme in ["http", "grpc"] {
+			let dump = common::tmp_file("only.surql");
+			let args = format!(
+				"export --endpoint {scheme}://{addr} {creds} --ns {ns} --db {db} --only --tables \
+				 thing --records true {dump}"
+			);
+			common::run(&args).output().unwrap_or_else(|err| {
+				panic!("`--only` must not be refused over {scheme}: {err:?}")
+			});
+			dumps.push(std::fs::read_to_string(&dump).unwrap());
+		}
+		assert_eq!(dumps[0], dumps[1], "`--only` wrote a different dump over gRPC than over HTTP");
+		assert!(
+			dumps[0].contains("DEFINE DATABASE OVERWRITE $session.db COMMENT 'kept'"),
+			"`--only` leaves the database definition selected, so the dump carries it: {}",
+			dumps[0]
+		);
+
+		// Asking for the exclusion is still the caller's to make, and is still
+		// what the gRPC transport cannot express.
+		let dump = common::tmp_file("only-no-db.surql");
+		let args = format!(
+			"export --endpoint http://{addr} {creds} --ns {ns} --db {db} --only --tables thing \
+			 --database-definition false {dump}"
+		);
+		common::run(&args).output().unwrap();
+		assert!(
+			!std::fs::read_to_string(&dump).unwrap().contains("DEFINE DATABASE"),
+			"an explicit exclusion must still drop the section"
+		);
+		let args = format!(
+			"export --endpoint grpc://{addr} {creds} --ns {ns} --db {db} --only --tables thing \
+			 --database-definition false {dump}"
+		);
+		assert!(
+			common::run(&args).output().is_err(),
+			"gRPC carries no field for the exclusion, so asking for it must still be refused"
+		);
+	}
+
 	#[test(tokio::test)]
 	async fn all_commands() {
 		// Commands without credentials when auth is disabled, should succeed
@@ -1054,6 +1121,73 @@ mod cli_integration {
 					assert!(e.to_string().contains("server failed to start"))
 				}
 			}
+		}
+	}
+
+	/// The shell parses each line to validate it and to count the results it
+	/// should expect, then sends the line itself. Rendering the parsed
+	/// statements back instead would put every gap in `ToSql` between the user
+	/// and the server, silently changing what they asked for or sending
+	/// something the server rejects.
+	///
+	/// The probe is a parenthesised equality as a statement of its own, which
+	/// the renderer writes back without its parentheses — the server reads that
+	/// as an assignment and refuses it. The shell must not depend on the
+	/// renderer being faithful, which is what this asserts; the appended
+	/// capture expressions still have to line up with the results.
+	#[test(tokio::test)]
+	async fn shell_sends_the_statement_it_was_given() {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let ns = Ulid::new();
+		let db = Ulid::new();
+		let args =
+			format!("sql --endpoint http://{addr} --user {USER} --pass {PASS} --ns {ns} --db {db}");
+
+		info!("* A statement the renderer does not round-trip still reaches the server");
+		{
+			let output =
+				common::run(&args).input("LET $p = 1;\n($p = 1);\n").output().expect("success");
+			assert!(
+				output.contains("true"),
+				"the shell sent something other than what it was given: {output}"
+			);
+		}
+
+		info!("* A LET is still read back into the session");
+		{
+			let output = common::run(&args)
+				.input("LET $x = 41;\nRETURN $x + 1;\n")
+				.output()
+				.expect("success");
+			assert!(output.contains("42"), "the session variable was lost: {output}");
+		}
+
+		info!("* A LET whose name needs escaping is read back too");
+		{
+			let output = common::run(&args)
+				.input("LET $`R-X` = 41;\nRETURN $`R-X` + 1;\n")
+				.output()
+				.expect("success");
+			assert!(
+				output.contains("42"),
+				"the capture expression did not name the variable: {output}"
+			);
+		}
+
+		info!("* A trailing line comment cannot swallow the statements the shell appends");
+		{
+			let output = common::run(&args).input("RETURN 7 -- seven\n").output().expect("success");
+			assert!(output.contains('7'), "the commented line did not run: {output}");
+		}
+
+		info!("* A USE still switches the session");
+		{
+			let db2 = Ulid::new();
+			let output = common::run(&args)
+				.input(&format!("USE DB `{db2}`;\nCREATE ONLY thing:one;\n"))
+				.output()
+				.expect("success");
+			assert!(output.contains("thing:one"), "the USE did not take effect: {output}");
 		}
 	}
 

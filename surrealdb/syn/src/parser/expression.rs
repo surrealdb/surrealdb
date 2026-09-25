@@ -65,6 +65,26 @@ impl Parser<'_> {
 		})
 	}
 
+	/// Parses the expression forming one element of a bracketed collection: an
+	/// object entry's value, an array element, or a set element.
+	///
+	/// Inherits how loose identifiers are parsed from its caller, exactly as
+	/// [`Parser::parse_expr_inherit`] does, and differs from it in charging
+	/// nothing to the query-recursion budget. The collection has already
+	/// charged this syntactic level to the object-recursion budget, and a level
+	/// charges one budget: charging both would leave the smaller of the two
+	/// bounding collection nesting, which is not what that budget bounds.
+	///
+	/// The level is still charged to the expression budget by the pratt parser
+	/// below, so collection nesting is bounded by the smaller of the object and
+	/// expression budgets and no level goes uncharged.
+	pub(super) async fn parse_expr_collection_element(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<Expr> {
+		self.pratt_parse_expr(stk, BindingPower::Base).await
+	}
+
 	/// Returns the binding power of an infix operator.
 	///
 	/// Binding power is the opposite of precedence: a higher binding power

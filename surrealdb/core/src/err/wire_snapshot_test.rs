@@ -1064,6 +1064,12 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 		("PlannerUnimplemented", ExecError::PlannerUnimplemented("sample".to_string())),
 		("AccessLevelMismatch", ExecError::AccessLevelMismatch),
 		("AccessUnsupportedAlgorithm", ExecError::AccessUnsupportedAlgorithm),
+		(
+			"AccessRedactedKey",
+			ExecError::AccessRedactedKey {
+				ac: "sample".to_string(),
+			},
+		),
 		("AccessRecordTokenDurationRequired", ExecError::AccessRecordTokenDurationRequired),
 		("AccessContextNotReadOnly", ExecError::AccessContextNotReadOnly),
 		("AccessContextRequiresRecord", ExecError::AccessContextRequiresRecord),

@@ -10,7 +10,7 @@ For the release **process** (how releases are cut and shipped), see
 [`RELEASING.md`](./RELEASING.md). For end-user release notes, see
 <https://surrealdb.com/releases>.
 
-## v3.3.0 — datastore version stamp, startup data migrations, the sequence keyspace move, module re-keying, rollbacks reported as `cancelled`, and ANN pending entries at a new revision
+## v3.3.0 — datastore version stamp, startup data migrations, the sequence keyspace move, module re-keying, rollbacks reported as `cancelled`, ANN pending entries at a new revision, and export/import contract changes
 
 **Impact**:
 
@@ -74,6 +74,21 @@ For the release **process** (how releases are cut and shipped), see
   `REBUILD INDEX <name> ON <table>` once per such index. That repairs the
   mapping; of such a pair, only a full-text index comes out separated, as the
   note on those records says.
+- `surreal export --versions` now fails instead of writing a dump. A backup
+  script pinned to it exits non-zero and produces no file.
+- `POST /import` answers `422` where it answered `200` for an import that only
+  partly applied. A client that checked only the status was previously told
+  every failure was a success.
+- A dump's `DEFINE ACCESS` statements are refused on import where the access has
+  a signing key, because a dump carries the redaction placeholder in place of
+  one. A restore that reported success now reports one failure per such access,
+  and the accesses are not created.
+- An export now carries `DEFINE DATABASE OVERWRITE` for a database that has a
+  `COMMENT`, `CHANGEFEED` or `STRICT` clause of its own, which rewrites those
+  clauses on the target when the dump is restored.
+- Restoring a dump written by an **older** release can now exceed
+  `SURREAL_TRANSACTION_MAX_WRITE_KEYS`, where that guard is set. The dump is
+  unchanged; what it costs to apply is not.
 
 ### Why an older node cannot read or write an ANN index an upgraded node has written
 
@@ -282,6 +297,100 @@ surrealdb_transaction_total{outcome=~"success|cancelled"}
 To count only work that reached durability, which is what the label now means,
 keep filtering on `outcome="success"`. See the metric catalogue in
 [`OBSERVABILITY.md`](./OBSERVABILITY.md) for the full attribute set.
+
+
+### `--versions` is refused rather than ignored
+
+A dump carries the current state of each record and has no grammar for a
+record's history, so a versioned export was never possible. The flag was
+accepted and then ignored: `surreal export --versions` wrote an ordinary dump
+and reported success, and so did `.versions(true)` on the SDK builder and the
+equivalent gRPC field.
+
+All three now fail before any part of the response is sent, as a validation
+error naming the option. There is no deprecation window, because the previous
+behaviour was to silently answer a different question from the one asked.
+
+**What to do**: drop `--versions` from backup scripts. The dump it produced was
+already the one you get without it.
+
+### `POST /import` reports a partial import
+
+An import is not transactional: each statement commits on its own and execution
+carries on past a failure. The endpoint previously returned `200` regardless,
+so a dump that half-applied was indistinguishable from one that applied whole.
+
+It now answers `422` when at least one statement did not apply, with the
+failures in the body, in the format the request negotiated —
+`application/octet-stream` has no structure to carry them in, so it gets the
+messages as UTF-8 text, one per line. A `2xx` continues to mean every statement
+applied. A request rejected *before* execution keeps its own `4xx` and leaves
+no state behind.
+
+The same distinction reaches gRPC as `failed_precondition`, and the embedded
+engine — the WASM and Node SDKs — now returns the first per-statement failure
+instead of resolving successfully.
+
+**What to do**: a client that branches on the status needs no change to keep
+working, but one that treated `200` as "restored whole" was wrong before and is
+now told so. `surreal start --import-file` logs the failures and still starts;
+it does not fail the boot.
+
+### A dump's access definitions no longer restore
+
+An export renders `DEFINE ACCESS` with the redaction placeholder in place of the
+signing key, as every surface that renders an access does. That text is
+executable SurrealQL, so replaying it defined an access whose secret was the
+placeholder itself — a string published in the dump, in `INFO FOR DB` and in
+this repository, which anyone can mint tokens with.
+
+`DEFINE ACCESS` now refuses a definition naming the placeholder as its key, as a
+validation error naming the access. Restoring a dump therefore reports one
+failure for each access that had a key, and the database comes back without
+them. An access verified by a JWKS URL carries no key and is unaffected.
+
+**What to do**: re-create the affected accesses after the restore, from wherever
+the real keys are kept — no dump has ever carried them. Where a dump is the only
+record that an access existed, read its name and clauses out of the dump and
+supply the key from your own store.
+
+### An export can rewrite the target database's own clauses
+
+An export carries a `DEFINE DATABASE OVERWRITE` line only when the database
+holds a `COMMENT`, `CHANGEFEED` or `STRICT` clause of its own, and that line
+names `$session.db` rather than a literal, so a restore lands in whichever
+database the operator selected. Restoring such a dump therefore replaces those
+three clauses on the target.
+
+The statement authorises at namespace level, so a principal scoped to a single
+database (`DEFINE USER … ON DATABASE`) cannot replay it even against their own
+database, and the import is not transactional, so what they are left with is a
+restore that mostly happened.
+
+**What to do**: restore as a namespace- or root-level principal, or take the
+dump from a database that carries none of those three clauses.
+
+### An old dump can now overrun the write-key guard
+
+`SURREAL_TRANSACTION_MAX_WRITE_KEYS` defaults to `0` (disabled), so this affects
+deployments that set it.
+
+An export groups records into `INSERT` statements sized so that each one stays
+within that guard on the way back in, and the estimate is written into the dump
+as the grouping itself. Before this release, an import wrote no reference keys
+at all — a `REFERENCE` field cost nothing — so dumps were grouped as though
+references were free. An import now writes them, and the exporter accounts for
+them when sizing new dumps.
+
+A dump written by an older release still carries the old grouping. A table with
+`TYPE array<record<tag>> REFERENCE` holding ~20 ids was grouped at roughly
+10,000 records per `INSERT`; applying that statement now writes ~420,000 keys
+in one transaction.
+
+**What to do**: where the guard is set, re-take backups on this release rather
+than restoring pre-upgrade dumps, or raise the guard for the duration of a
+restore from an older dump. The hazard is in the old dump rather than in
+anything visible on the new node.
 
 ## v3.1.0 — rev-2 on-disk wire format for `Value`, `Array`, `Object`, `Set`
 

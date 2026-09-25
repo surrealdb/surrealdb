@@ -357,6 +357,180 @@ async fn enforced_relation_survives_a_self_restore() -> Result<()> {
 	Ok(())
 }
 
+/// Seeds `targets` referenced records and `records` referring ones, each holding
+/// every target in one `array<record<…>>` `REFERENCE` field.
+///
+/// The referring table is named so it sorts before the referenced one, which is
+/// the order an export emits and therefore the order the keys are written in.
+async fn seed_referring_records(
+	ds: &Datastore,
+	ses: &Session,
+	targets: usize,
+	records: usize,
+) -> Result<()> {
+	const SCHEMA: &str = "DEFINE TABLE zz_person SCHEMALESS;
+		 DEFINE TABLE aa_comment SCHEMALESS;
+		 DEFINE FIELD authors ON aa_comment TYPE array<record<zz_person>> REFERENCE";
+	ds.execute(SCHEMA, ses, None).await?;
+	for i in 0..targets {
+		ds.execute(&format!("CREATE zz_person:{i}"), ses, None).await?.remove(0).result?;
+	}
+	let authors: Vec<String> = (0..targets).map(|i| format!("zz_person:{i}")).collect();
+	let authors = authors.join(", ");
+	for i in 0..records {
+		let sql = format!("CREATE aa_comment:{i} SET authors = [{authors}]");
+		ds.execute(&sql, ses, None).await?.remove(0).result?;
+	}
+	Ok(())
+}
+
+/// The number of referring records each `INSERT` line of the fixture above
+/// carries, ignoring the referenced table's own lines.
+fn referring_group_sizes(sql: &str) -> Vec<usize> {
+	sql.lines()
+		.filter(|l| l.starts_with("INSERT ["))
+		.map(|l| l.matches("id: aa_comment:").count())
+		.filter(|n| *n > 0)
+		.collect()
+}
+
+/// A `REFERENCE` field writes one back-reference key per record id it holds, and
+/// those keys are written on the import path like any other. So a record whose
+/// reference field names many ids costs far more keys than its field count
+/// suggests, and the grouping has to follow the id count the same way it follows
+/// an array index's fan-out.
+///
+/// The target arms the write-cardinality guard at the budget the grouping is
+/// sized against, so a group charged as though its references were free fails
+/// here rather than passing on the estimate being unenforced.
+#[tokio::test]
+async fn a_reference_bearing_group_fits_its_own_import() -> Result<()> {
+	let source = ds_with_batch_size(Some(1000)).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	seed_referring_records(&source, &ses, 200, 120).await?;
+
+	let sql = export_text(&source, &ses).await?;
+	let groups = referring_group_sizes(&sql);
+
+	let target = ds_with_write_keys_limit(20_000).await?;
+	let mut res = target.execute(&sql, &ses, None).await?;
+	for r in res.drain(..) {
+		r.result.map_err(|e| {
+			anyhow::anyhow!(
+				"a group the exporter sized must import within the budget: {e} ({groups:?})"
+			)
+		})?;
+	}
+
+	// Asserted after the import so a group sized as though references were free
+	// reports the overrun it causes rather than the fixture shape.
+	assert!(
+		groups.len() > 1,
+		"the fixture must split into groups the budget decides, got {groups:?}"
+	);
+
+	// The back-references have to answer on the replayed side, which is what
+	// proves the reference keys the budget accounts for were actually written.
+	const REFS: &str = "SELECT VALUE count(<~aa_comment) FROM ONLY zz_person:0";
+	let restored = target.execute(REFS, &ses, None).await?.remove(0).result?;
+	assert_eq!(restored, source.execute(REFS, &ses, None).await?.remove(0).result?);
+	assert_eq!(
+		restored,
+		Value::Number(surrealdb_types::Number::Int(120)),
+		"every referring record must be linked back"
+	);
+	Ok(())
+}
+
+/// The grouping follows how many ids a reference field holds, not how many
+/// reference fields there are: the same row count over a longer author list must
+/// be split into more statements.
+#[tokio::test]
+async fn grouping_follows_reference_fan_out() -> Result<()> {
+	let mut sizes = Vec::new();
+	for targets in [1usize, 200] {
+		let ds = ds_with_batch_size(Some(1000)).await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		seed_referring_records(&ds, &ses, targets, 120).await?;
+		let sql = export_text(&ds, &ses).await?;
+		let groups = referring_group_sizes(&sql);
+		assert_eq!(
+			groups.iter().sum::<usize>(),
+			120,
+			"every referring record must still be exported: {groups:?}"
+		);
+		sizes.push(*groups.iter().max().expect("the export must carry referring records"));
+	}
+	let (one_author, many_authors) = (sizes[0], sizes[1]);
+	assert_eq!(one_author, 120, "a single-id reference must not tighten the grouping");
+	assert!(
+		many_authors < one_author,
+		"a 200-id reference must group more tightly: {one_author} vs {many_authors}"
+	);
+	Ok(())
+}
+
+/// A view whose rows cannot be recomputed inside one transaction keeps them.
+///
+/// Recomputing a view is a single `DEFINE TABLE ... AS SELECT`, and a target
+/// enforcing `transaction_max_write_keys` rejects one whose rows outgrow the
+/// limit — even where the source built those same rows through writes that were
+/// each well within it, one source record at a time. Nothing in the catalog
+/// predicts that, so it is the case the dump cannot classify: it carries every
+/// view's rows ahead of its definition, and what the rejection then costs is the
+/// definition rather than the table and its data.
+#[tokio::test]
+async fn a_view_too_large_to_recompute_keeps_its_rows() -> Result<()> {
+	let source = ds_with_batch_size(Some(10)).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	source
+		.execute("DEFINE TABLE src SCHEMALESS; DEFINE TABLE v AS SELECT n FROM src;", &ses, None)
+		.await?;
+	// Built one record at a time, so every write the source made is one a
+	// limited target would also have accepted.
+	for i in 0..200 {
+		source.execute(&format!("CREATE src:{i} SET n = {i}"), &ses, None).await?;
+	}
+
+	let sql = export_text(&source, &ses).await?;
+	assert!(
+		sql.contains("-- TABLE DATA: v"),
+		"the dump must carry the view's rows, since nothing here can tell whether its \
+		 definition will replay:\n{sql}"
+	);
+
+	// A limit every emitted `INSERT` fits inside, and the whole view does not.
+	let target = ds_with_write_keys_limit(100).await?;
+	let errors: Vec<String> = target
+		.execute(&sql, &ses, None)
+		.await?
+		.into_iter()
+		.filter_map(|r| r.result.err().map(|e| e.to_string()))
+		.collect();
+	assert_eq!(
+		errors.len(),
+		1,
+		"only the view's own definition may exceed the limit — the grouping sizes every \
+		 `INSERT` against it: {errors:?}"
+	);
+	assert!(
+		errors[0].contains("maximum number of key writes"),
+		"the rejection must be the write-key guard: {errors:?}"
+	);
+
+	let restored = target.execute("SELECT VALUE n FROM v ORDER BY n", &ses, None).await?;
+	let restored = restored.into_iter().next().expect("one statement").result?;
+	let Value::Array(rows) = &restored else {
+		anyhow::bail!("`SELECT` must answer with an array, got {restored:?}");
+	};
+	assert_eq!(
+		rows.len(),
+		200,
+		"the rows the definition could not recompute must survive it: {restored:?}"
+	);
+	Ok(())
+}
+
 /// A sequence is exported at the position it reached, not the `START` it was
 /// declared with.
 ///

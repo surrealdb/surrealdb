@@ -757,6 +757,202 @@ mod http_integration {
 		Ok(())
 	}
 
+	/// A versioned export is refused with a failing status, before any body.
+	///
+	/// The export runs as a job the transport streams, so a refusal raised inside
+	/// that job arrives after the status line has been sent and the body opened:
+	/// it reaches the caller as an empty dump that reports success. The status is
+	/// what this asserts, because it is the only part an operator scripting
+	/// `POST /export` sees before they have a file they believe is a backup.
+	#[test(tokio::test)]
+	async fn export_endpoint_refuses_versions() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = &format!("http://{addr}/export");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		let res = client
+			.post(url)
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "application/json")
+			.body(r#"{"versions":true}"#)
+			.send()
+			.await?;
+		let status = res.status();
+		let body = res.text().await?;
+		assert_ne!(
+			status, 200,
+			"a versioned export answered success, so a caller keeps an empty dump as a backup; \
+			 body: {body}"
+		);
+		assert!(
+			body.contains("Versioned export is not supported"),
+			"the refusal must say why; status {status}, body: {body}"
+		);
+
+		Ok(())
+	}
+
+	/// An export that was not asked for the database's own definition does not
+	/// carry it, and one left at the default still does.
+	///
+	/// `DEFINE DATABASE OVERWRITE` rewrites the target's `STRICT` flag, `COMMENT`
+	/// and `CHANGEFEED` — clauses an export scoped to a few tables was never
+	/// asked to touch, and which the caller would only discover had moved after
+	/// restoring. Driven over HTTP because the flag has to survive the serialized
+	/// config to reach the exporter, which is the path `surreal export` takes.
+	#[test(tokio::test)]
+	async fn export_endpoint_carries_database_clauses_only_when_selected()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = &format!("http://{addr}/export");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.body(format!(
+				"DEFINE DATABASE OVERWRITE `{db}` COMMENT 'seeded'; DEFINE TABLE person;"
+			))
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+		// Left at the default, the dump carries the clause.
+		let body = client.get(url).basic_auth(USER, Some(PASS)).send().await?.text().await?;
+		assert!(
+			body.contains("DEFINE DATABASE"),
+			"a full export dropped the database's own definition: {body}"
+		);
+
+		// Deselected, it does not — and the tables still come through, so the
+		// flag turned off the section rather than the export.
+		let body = client
+			.post(url)
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "application/json")
+			.body(r#"{"database_definition":false,"tables":["person"]}"#)
+			.send()
+			.await?
+			.text()
+			.await?;
+		assert!(
+			!body.contains("DEFINE DATABASE"),
+			"an export that deselected the database definition still rewrites the target's \
+			 clauses: {body}"
+		);
+		assert!(body.contains("DEFINE TABLE person"), "the selected table is missing: {body}");
+
+		Ok(())
+	}
+
+	/// A database holding no clauses of its own exports no `DEFINE DATABASE`, so
+	/// restoring it leaves a clause already on the target in place.
+	///
+	/// This pins a trade rather than a repair. `DEFINE DATABASE` is authorized at
+	/// `Edit` on `Database` in the *namespace* — a database-level `OWNER` is
+	/// refused it — so a dump carrying the line can only be restored by a
+	/// namespace-level principal. Emitting it unconditionally would let a restore
+	/// clear a target's clauses, and would put every restore behind that floor,
+	/// including a database-level principal restoring their own database.
+	///
+	/// Repairing this should fail here, so the floor is raised on purpose rather
+	/// than as a side effect.
+	#[test(tokio::test)]
+	async fn export_omits_database_clauses_a_source_does_not_hold()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		// A source holding no clause of its own exports no `DEFINE DATABASE`.
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.body("DEFINE TABLE person;")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		let dump = client
+			.get(format!("http://{addr}/export"))
+			.basic_auth(USER, Some(PASS))
+			.send()
+			.await?
+			.text()
+			.await?;
+		assert!(
+			!dump.contains("DEFINE DATABASE"),
+			"a database holding no clauses exported a definition for them: {dump}"
+		);
+
+		// Restored over a target that holds one, the target keeps it.
+		let target = Ulid::new().to_string();
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.body(format!("DEFINE DATABASE `{target}` COMMENT 'set on the target';"))
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		let res = client
+			.post(format!("http://{addr}/import"))
+			.basic_auth(USER, Some(PASS))
+			.header("surreal-db", &target)
+			.body(dump)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "the import failed: {}", res.text().await?);
+
+		let info = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.header("surreal-db", &target)
+			.body("INFO FOR NS;")
+			.send()
+			.await?
+			.text()
+			.await?;
+		assert!(
+			info.contains("set on the target"),
+			"the restore cleared a clause the source did not carry, so the authorization floor \
+			 this pins has moved: {info}"
+		);
+
+		Ok(())
+	}
+
 	#[test(tokio::test)]
 	async fn health_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
@@ -996,6 +1192,104 @@ mod http_integration {
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
 			let body = res.text().await?;
 			assert!(body.contains("foo:bvklxkhtxumyrfzqoc5i"), "body: {body}");
+		}
+
+		Ok(())
+	}
+
+	/// A client that reads only the status line can tell a failed import from a
+	/// complete one.
+	///
+	/// The endpoint applies a dump statement by statement, committing each on
+	/// its own and carrying on past one that fails, so a restore can lose part
+	/// of a database and still run to the end. Which statements were lost is in
+	/// the response body, but the thing a restore pipeline gates on — a shell
+	/// script, a deployment step, a health check — is the status, and a status
+	/// that reads the same either way turns a partial restore into a silent
+	/// one.
+	///
+	/// The complete import is asserted alongside it, because a handler that
+	/// reported every import as a failure would satisfy the failing half on its
+	/// own.
+	#[test(tokio::test)]
+	async fn import_endpoint_status_separates_a_failed_import_from_a_complete_one()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = &format!("http://{addr}/import");
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Create namespace and database
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		// A dump every statement of which applies
+		let complete_status = {
+			let data = r#"
+				OPTION IMPORT;
+				DEFINE TABLE whole SCHEMALESS PERMISSIONS NONE;
+				INSERT { id: whole:1 };
+				INSERT { id: whole:2 };
+			"#;
+			let res = client.post(url).basic_auth(USER, Some(PASS)).body(data).send().await?;
+			let status = res.status();
+			let body = res.text().await?;
+			assert_eq!(status, 200, "body: {body}");
+			// The body names the statements that did not apply, so a complete
+			// import names none.
+			assert_eq!(body, "[]", "a complete import must name no failed statement");
+			status
+		};
+
+		// The same dump with one statement that cannot apply, between two that
+		// can
+		{
+			let data = r#"
+				OPTION IMPORT;
+				DEFINE TABLE part SCHEMALESS PERMISSIONS NONE;
+				INSERT { id: part:1 };
+				INSERT { id: part:1 };
+				INSERT { id: part:2 };
+			"#;
+			let res = client.post(url).basic_auth(USER, Some(PASS)).body(data).send().await?;
+			let status = res.status();
+			let body = res.text().await?;
+			assert_ne!(
+				status, complete_status,
+				"a failed import answered with the status of a complete one, so a caller reading \
+				 the status line cannot tell them apart. body: {body}"
+			);
+			assert_eq!(status, 422, "body: {body}");
+			// The dump was executed and part of it is now in the database,
+			// which is what separates this from the 400 a body that is not a
+			// dump is answered with.
+			assert!(
+				body.contains("already exists"),
+				"the response must still name the statement that did not apply, body: {body}"
+			);
+		}
+
+		// The statements either side of the failure applied, which is the
+		// database the status is reporting on
+		{
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body("SELECT VALUE id FROM part ORDER BY id")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+			let body = res.text().await?;
+			assert!(body.contains("part:1") && body.contains("part:2"), "body: {body}");
 		}
 
 		Ok(())

@@ -449,6 +449,7 @@ impl Parser<'_> {
 		};
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
+		let base_token = self.peek();
 		let base = self.parse_base()?;
 
 		let mut res = DefineAccessStatement {
@@ -600,6 +601,17 @@ impl Parser<'_> {
 				}
 				_ => break,
 			}
+		}
+
+		// The statement defaults to `TYPE RECORD`, which only the database
+		// level accepts. Without this the default slips past the check on the
+		// explicit clause, storing an access that no `DEFINE ACCESS` can
+		// express and that `INFO` renders as unparseable text.
+		if !matches!(res.base, Base::Db) && matches!(res.access_type, AccessType::Record(_)) {
+			bail!(
+				"Missing access type",
+				@base_token.span => "An access defined at this level must specify a TYPE"
+			)
 		}
 
 		Ok(res)

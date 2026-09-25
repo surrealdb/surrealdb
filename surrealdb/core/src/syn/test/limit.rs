@@ -290,12 +290,35 @@ fn expr_depth_rejects_pathological_chain_without_overflow() {
 		.unwrap();
 }
 
-/// Confirms the default `expr_recursion_limit` is small enough that the deepest
-/// `Expr` tree the parser will accept can still be lowered, formatted, and
-/// dropped — all of which recurse once per node — without overflowing a 2 MiB
-/// stack (the conservative default worker-thread size). If the default limit
-/// were raised past the safe ceiling this test would abort the process,
-/// catching the regression.
+/// `n` levels of nested object literal, `{ a: { a: … { a: 1 } … } }`.
+///
+/// A flat operator chain and a nested collection reach their depth through
+/// different budgets and different parser paths, so both shapes are needed to
+/// bound what the default profile admits.
+fn nested_object(n: usize) -> String {
+	let mut s = String::with_capacity(n * 6 + 2);
+	for _ in 0..n {
+		s.push_str("{ a: ");
+	}
+	s.push('1');
+	for _ in 0..n {
+		s.push_str(" }");
+	}
+	s
+}
+
+/// Confirms the default limits are small enough that the deepest `Expr` tree
+/// the parser will accept can still be lowered, formatted, and dropped — all of
+/// which recurse once per node — without overflowing a 2 MiB stack (the
+/// conservative default worker-thread size). If a default limit were raised
+/// past the safe ceiling this test would abort the process, catching the
+/// regression.
+///
+/// Both accepted shapes are exercised. A flat operator chain is bounded by the
+/// expression budget; a nested collection is bounded by the object budget,
+/// which is the larger of the two, so the deepest tree the parser accepts is a
+/// collection rather than a chain. Testing only the chain would leave the
+/// deeper shape unbounded.
 #[test]
 fn expr_depth_default_limit_is_stack_safe() {
 	std::thread::Builder::new()
@@ -311,6 +334,17 @@ fn expr_depth_default_limit_is_stack_safe() {
 			// `sql::Expr -> expr::Expr` lowering recurses once per node.
 			let lowered = crate::expr::Expr::from(expr);
 			// Dropping the lowered tree recurses once per node.
+			drop(lowered);
+
+			// The same, for the deepest collection the default object budget
+			// admits. `syn::expr` parses a bare expression, so the statement
+			// framing the object budget also charges is not in the way here;
+			// the depth is the object nesting itself.
+			let depth = crate::syn::ParserSettings::default().object_recursion_limit - 4;
+			let expr = crate::syn::expr(&nested_object(depth)).expect("a near-limit object parses");
+			let formatted = surrealdb_types::ToSql::to_sql(&expr);
+			assert!(formatted.contains("a:"));
+			let lowered = crate::expr::Expr::from(expr);
 			drop(lowered);
 		})
 		.unwrap()

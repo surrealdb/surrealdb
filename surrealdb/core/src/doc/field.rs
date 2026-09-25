@@ -477,16 +477,25 @@ impl Document {
 	/// Processes reference clauses for all REFERENCE fields on this table.
 	/// Called after permission checks succeed so that reference keys are
 	/// only written for operations that are actually permitted.
+	///
+	/// A reference key is derived mechanically from the record's own stored
+	/// field value: it names the record ids that value already holds. So it is
+	/// maintained on every write path, a restore under `OPTION IMPORT`
+	/// included — the key set it produces there is the one the exported record
+	/// carried, not a recomputation. This is unlike the surrounding field,
+	/// event and view processing, which a restore defers because it would
+	/// derive fresh values over the ones the export captured.
+	///
+	/// Neither the referenced record nor its table need exist yet. An export
+	/// orders tables by name, so a referencing table is often replayed first;
+	/// the keys are written regardless and read correctly once the target
+	/// table arrives.
 	pub(super) async fn process_table_references(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<()> {
-		// Check import
-		if opt.import {
-			return Ok(());
-		}
 		// Get the record id
 		let rid = self.id()?;
 		// Loop through all field statements
@@ -527,16 +536,16 @@ impl Document {
 	/// have been defined on the table for this
 	/// record, with a `REFERENCE` clause, and remove
 	/// all possible references this record has made.
+	///
+	/// Runs on every delete, a delete under `OPTION IMPORT` included. Nothing
+	/// else rewrites a reference key, so a key left behind here names a record
+	/// that no longer exists and a back-reference query would report it.
 	pub(super) async fn cleanup_table_references(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<()> {
-		// Check import
-		if opt.import {
-			return Ok(());
-		}
 		// Get the record id
 		let rid = self.id()?;
 		// Loop through all field statements

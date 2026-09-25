@@ -9,6 +9,7 @@ use async_channel::Receiver;
 use futures::{Stream, StreamExt};
 use semver::Version;
 use surrealdb_rpc::export::{Config as DbExportConfig, TableConfig};
+use surrealdb_types::ValidationError;
 
 use crate::conn::{MlExportConfig, ctx};
 use crate::method::{BoxFuture, ExportConfig as Config, Model, OnceLockExt};
@@ -65,6 +66,18 @@ impl<C, R> Export<'_, C, R, Config>
 where
 	C: Connection,
 {
+	/// Whether to export the database's own definition — its `STRICT` flag,
+	/// `COMMENT` and `CHANGEFEED`
+	///
+	/// Restoring it rewrites those clauses on the target database, so an export
+	/// scoped to particular resources should leave it off.
+	pub fn database_definition(mut self, database_definition: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.database_definition = database_definition;
+		}
+		self
+	}
+
 	/// Whether to export users from the database
 	pub fn users(mut self, users: bool) -> Self {
 		if let Some(cfg) = self.db_config.as_mut() {
@@ -175,6 +188,14 @@ where
 		}
 		self
 	}
+
+	/// Whether to export sequences from the database
+	pub fn sequences(mut self, sequences: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.sequences = sequences;
+		}
+		self
+	}
 }
 
 impl<C, R, T> Export<'_, C, R, T>
@@ -189,6 +210,29 @@ where
 			..self
 		}
 	}
+}
+
+/// Refuses an export that asks for record history.
+///
+/// A dump carries the current state of each record and has no grammar for a
+/// record's history, so `versions` cannot be honoured. The engine refuses it too,
+/// before it answers; the check is repeated here so the refusal does not depend
+/// on the server being new enough to make it, since one that validates only once
+/// it is already streaming delivers a short file instead of a failed call.
+///
+/// Classified as a validation failure, matching what the datastore and the gRPC
+/// transport report for the same option: the request named something the format
+/// cannot represent, so a caller reading the kind is told to change the request
+/// rather than to retry it.
+fn reject_versions(config: Option<&DbExportConfig>) -> Result<()> {
+	if config.is_some_and(|cfg| cfg.versions) {
+		return Err(Error::validation(
+			"Versioned export is not supported: a dump carries the current state of each record only"
+				.to_string(),
+			ValidationError::InvalidRequest,
+		));
+	}
+	Ok(())
 }
 
 impl<'r, Client, T> IntoFuture for Export<'r, Client, PathBuf, T>
@@ -214,6 +258,8 @@ where
 					.export_ml_file(ctx(self.client.session_id), self.target, config)
 					.await;
 			}
+
+			reject_versions(self.db_config.as_ref())?;
 
 			router
 				.engine
@@ -251,6 +297,8 @@ where
 					rx,
 				});
 			}
+
+			reject_versions(self.db_config.as_ref())?;
 
 			router.engine.export_bytes(ctx(self.client.session_id), tx, self.db_config).await?;
 

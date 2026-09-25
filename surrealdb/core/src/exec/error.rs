@@ -268,6 +268,19 @@ pub(crate) enum Error {
 	)]
 	AccessUnsupportedAlgorithm,
 
+	/// The access names the redaction placeholder as its key.
+	///
+	/// Every surface that renders an access substitutes that placeholder for
+	/// the real key, export included, so the text of a rendered access is not
+	/// a definition that can be replayed — defining from it would sign tokens
+	/// with a published string.
+	#[error(
+		"The access method '{ac}' names the redaction placeholder as its key, which is published wherever an access is rendered; restore it from a definition carrying the real key, or define it again"
+	)]
+	AccessRedactedKey {
+		ac: String,
+	},
+
 	#[error(
 		"Tokens issued by record access methods can be consumed by third parties and must have an expiration; DURATION FOR TOKEN cannot be NONE on TYPE RECORD access"
 	)]
@@ -396,6 +409,11 @@ impl LeafError for Error {
 				},
 			),
 			Error::AccessUnsupportedAlgorithm => TypesError::validation(message, None),
+			// The statement carries a key that cannot be a real one, which the
+			// caller can see and correct in the text they sent.
+			Error::AccessRedactedKey {
+				..
+			} => TypesError::validation(message, None),
 			// The definition itself is malformed, so the client can act on it.
 			// `ComputedFieldSideEffect` is the same fault caught at read time
 			// instead of definition time, so it reaches clients the same way.

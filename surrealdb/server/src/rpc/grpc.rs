@@ -1431,7 +1431,7 @@ impl SurrealDbService for GrpcService {
 		// the live query once this request returned.
 		let Some(session_id) = session.client else {
 			self.release(&session).await;
-			return Err(Status::failed_precondition("Subscribing requires an attached session"));
+			return Err(rejected_before_execution("Subscribing requires an attached session"));
 		};
 		let (live_query_id, owned) = match request.subscribe_to {
 			Some(rpc::subscribe_request::SubscribeTo::LiveQueryId(id)) => (to_uuid(&id)?, false),
@@ -1931,7 +1931,18 @@ impl GrpcService {
 			Ok(Err(status)) => return Err(status),
 			Err(err) => return Err(Status::internal(format!("Import framing task failed: {err}"))),
 		}
-		result.map_err(|err| Status::invalid_argument(err.to_string()))?;
+		// A whole-stream failure rejects the dump before any of it runs, so it
+		// is the request that was wrong and nothing was applied.
+		let results = result.map_err(|err| Status::invalid_argument(err.to_string()))?;
+		// Per-statement failures are the other case. The import is not
+		// transactional — each statement commits on its own and execution
+		// carries on past one that fails — so the dump has been executed and
+		// the database holds part of it. `failed_precondition` is what says
+		// that: the request was well formed, and the state it left behind has
+		// to be dealt with before another attempt.
+		if let Some(status) = import_failure_status(&results) {
+			return Err(status);
+		}
 		Ok(Response::new(checked_response(rpc::ImportSurqlResponse {})?))
 	}
 
@@ -1956,7 +1967,7 @@ impl GrpcService {
 		};
 		let session = self.session_for(begin.context.as_ref(), RouteTarget::Ml).await?;
 		let (namespace, database) =
-			check_ns_db(&session).map_err(|err| Status::failed_precondition(err.to_string()))?;
+			check_ns_db(&session).map_err(|err| rejected_before_execution(err.to_string()))?;
 		self.kvs()
 			.check(
 				&session,
@@ -2046,7 +2057,7 @@ impl GrpcService {
 		config: export::Config,
 	) -> Result<Export, Status> {
 		let (namespace, database) =
-			check_ns_db(&session).map_err(|err| Status::failed_precondition(err.to_string()))?;
+			check_ns_db(&session).map_err(|err| rejected_before_execution(err.to_string()))?;
 		self.kvs()
 			.check(
 				&session,
@@ -2055,11 +2066,17 @@ impl GrpcService {
 			)
 			.map_err(|err| Status::permission_denied(err.to_string()))?;
 		let (sender, chunks) = surrealdb::channel::bounded(1);
-		let task = self
-			.kvs()
-			.export_with_config(&session, sender, config)
-			.await
-			.map_err(|err| Status::internal(err.to_string()))?;
+		// A config the export cannot honour is refused here, before any chunk is
+		// sent, and it is the caller's to correct — so a structured error keeps its
+		// classification instead of arriving as `INTERNAL`, which reads as a server
+		// fault worth retrying.
+		let task =
+			self.kvs().export_with_config(&session, sender, config).await.map_err(|err| {
+				match err.downcast_ref::<TypesError>() {
+					Some(err) => to_status(err),
+					None => Status::internal(err.to_string()),
+				}
+			})?;
 		Ok(Export {
 			chunks,
 			outcome: tokio::spawn(task),
@@ -2076,7 +2093,7 @@ impl GrpcService {
 		version: String,
 	) -> Result<Export, Status> {
 		let (namespace, database) =
-			check_ns_db(&session).map_err(|err| Status::failed_precondition(err.to_string()))?;
+			check_ns_db(&session).map_err(|err| rejected_before_execution(err.to_string()))?;
 		self.kvs()
 			.check(
 				&session,
@@ -3197,6 +3214,14 @@ fn from_proto_export_config(config: rpc::ExportConfig) -> export::Config {
 		}
 	};
 	export::Config {
+		// The proto carries no field for the database's own definition, so a
+		// request to leave it out is one this transport cannot express and this
+		// side cannot detect — an absent field and a deselected one arrive alike.
+		// The SDK's own gRPC engine refuses such a request before sending it; a
+		// raw client gets the default, which is what it has always got. Read from
+		// `default()` rather than written here, so this follows that default and
+		// so the compiler points here if the proto gains a field to read instead.
+		database_definition: export::Config::default().database_definition,
 		users: config.users,
 		accesses: config.accesses,
 		params: config.params,
@@ -3280,6 +3305,27 @@ fn to_proto_details(details: &TypesErrorDetails) -> Option<(String, Option<Value
 /// leave a client with nothing stable to classify it by. Dropping them here
 /// would push clients back onto substring matching, which is the failure this
 /// part of the schema exists to prevent.
+/// Metadata key marking a `FAILED_PRECONDITION` the server raised *before*
+/// executing anything.
+///
+/// That code carries two unlike outcomes. A request refused up front — no
+/// namespace selected, no session attached — wrote nothing and is safe to retry
+/// once corrected. An import whose statements ran and failed left the database
+/// holding part of a dump, and a blind retry applies it twice. A client that
+/// branches on the code alone cannot tell them apart.
+///
+/// The marker rides on the refusals rather than on the partial import so that
+/// an older server, which sets neither, is read the safe way round: its
+/// unmarked partial-import status still says state may have been written.
+pub(crate) const REJECTED_BEFORE_EXECUTION: &str = "surreal-rejected-before-execution";
+
+/// A `FAILED_PRECONDITION` for a request that wrote nothing.
+fn rejected_before_execution(message: impl Into<String>) -> Status {
+	let mut status = Status::failed_precondition(message.into());
+	status.metadata_mut().insert(REJECTED_BEFORE_EXECUTION, "1".parse().expect("a literal 1"));
+	status
+}
+
 /// The suffix that marks an error message this server had to cut short.
 ///
 /// Present so a reader can tell a trimmed message from one that simply ended,
@@ -3441,6 +3487,43 @@ fn to_status(error: &TypesError) -> Status {
 	} else {
 		Status::internal(message)
 	}
+}
+
+/// The status reporting the statements an import could not apply, or `None`
+/// when it applied in full.
+///
+/// The import path suppresses the results of statements that succeeded, so
+/// `results` holds one entry per failure. The verdict is read from the entries
+/// themselves rather than from the length, so a successful result arriving here
+/// could never be mistaken for a complete import.
+///
+/// The message is bounded because a gRPC status rides in an HTTP/2 trailer,
+/// which a peer may refuse or truncate if it grows: one failure verbatim, a
+/// count of the rest, and the fact that the dump is partially applied. The
+/// statements are not enumerated — a dump that fails at its first statement
+/// fails at every one after it, so the list is as long as the dump.
+fn import_failure_status(results: &[QueryResult]) -> Option<Status> {
+	/// Bytes of the first failure to quote. The framing below it adds roughly a
+	/// hundred more, and `grpc-message` is percent-encoded on the wire, so this
+	/// is the quoted text's budget rather than the trailer's.
+	const FIRST_FAILURE_BUDGET: usize = 512;
+
+	let mut failures = results.iter().filter_map(|r| r.result.as_ref().err());
+	let first = failures.next()?;
+	let further = failures.count();
+
+	let first = first.to_string();
+	let mut message = truncate_on_boundary(&first, FIRST_FAILURE_BUDGET).to_owned();
+	if message.len() < first.len() {
+		message.push_str(TRUNCATION_MARKER);
+	}
+	if further > 0 {
+		message.push_str(&format!(" (and {further} further statements failed)"));
+	}
+	message.push_str(
+		"; the import is not transactional, so the statements before this one have been applied",
+	);
+	Some(Status::failed_precondition(message))
 }
 
 #[cfg(test)]

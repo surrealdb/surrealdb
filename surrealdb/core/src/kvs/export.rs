@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use anyhow::Result;
@@ -10,7 +11,9 @@ use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, TableProvider,
 	UserProvider,
 };
-use crate::catalog::{DatabaseId, Error, NamespaceId, Record, TableDefinition};
+use crate::catalog::{
+	DatabaseId, Error, NamespaceId, Record, TableDefinition, TableType, ViewDefinition,
+};
 use crate::expr::access::AccessDuration;
 use crate::expr::access_type::{
 	AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess, JwtAccessIssue,
@@ -26,6 +29,8 @@ use crate::key::schema::{RecordKey, RecordPrefix};
 use crate::key::{KVKeyDecode, KVSubspace, KVValue};
 use crate::kvs::sequences::next_unissued_value;
 use crate::sql::statements::OptionStatement;
+use crate::sql::statements::define::{DefineDatabaseStatement, DefineKind as SqlDefineKind};
+use crate::sql::{Expr as SqlExpr, Idiom as SqlIdiom, Literal as SqlLiteral, Param, Part};
 use crate::val::TableName;
 use crate::{catalog, val};
 
@@ -60,7 +65,28 @@ impl<F: fmt::Display> fmt::Display for InlineCommentDisplay<F> {
 	}
 }
 
+/// Renders a config definition as the `DEFINE CONFIG` statement that recreates it.
+///
+/// A config definition's own `ToSql` is its body alone — `GRAPHQL …`, `API …` —
+/// which is the form `INFO FOR DB` reports and is not a statement. An export is
+/// replayed as SurrealQL, so it carries the statement instead; the body on its own
+/// fails to parse, and because the config section precedes every table, a dump
+/// carrying one restores nothing at all.
+struct DefineConfig<'a>(&'a catalog::ConfigDefinition);
+
+impl ToSql for DefineConfig<'_> {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		f.push_str("DEFINE CONFIG OVERWRITE ");
+		self.0.fmt_sql(f, fmt);
+	}
+}
+
 /// Writes the full database contents as binary SQL.
+///
+/// Runs as a job a transport has already begun streaming, so a failure raised in
+/// here cannot change the status the caller was given. `Datastore::export_with_config`
+/// rejects a config this cannot honour — `versions`, which a dump has no grammar
+/// for — before handing the job over, and that is where a new such rejection goes.
 pub(crate) async fn export(
 	tx: &Transaction,
 	ns: &str,
@@ -75,22 +101,83 @@ pub(crate) async fn export(
 		})
 	})?;
 
-	// Output USERS, ACCESSES, PARAMS, FUNCTIONS, ANALYZERS
-	export_metadata(tx, &cfg, &chn, db.namespace_id, db.database_id).await?;
+	// Output OPTIONS, DATABASE, USERS, ACCESSES, PARAMS, FUNCTIONS, ANALYZERS
+	export_metadata(tx, &cfg, &chn, &db).await?;
 	// Output TABLES
 	export_tables(tx, &cfg, &chn, db.namespace_id, db.database_id, batch_size).await?;
 	Ok(())
+}
+
+/// The `DEFINE DATABASE` line carrying the clauses held by the database itself,
+/// or `None` for a database that holds none of them.
+///
+/// Emitted only when there is a clause to carry, because `DEFINE DATABASE` is
+/// authorized at `Edit` on `Database` in the namespace: a dump holding the line
+/// can only be restored by a namespace-level principal — a database-level
+/// `OWNER` is refused it — where one without it restores under database-level
+/// rights. Gating on the clauses confines that floor to the dumps that would
+/// otherwise lose one.
+///
+/// The cost of the gate is that a clause is cleared on the target only by a dump
+/// that carries some other clause. Restoring a database that holds none of them
+/// over a target that holds one leaves the target's in place, so the two differ
+/// in a clause the source does not have. Emitting the line unconditionally would
+/// settle that and put every restore behind namespace-level rights, including
+/// the one this exists for: a database-level principal restoring their own
+/// database.
+///
+/// The name is the session's own database rather than the exported name, because
+/// a restore must not write outside its target: `DEFINE DATABASE` does not
+/// switch the session, so a literal name would reconfigure whichever database
+/// bears that name in the target namespace instead of the one being restored
+/// into. `$session.db` is a context value rather than a function call, so it
+/// resolves whatever the capability policy allows, a `DEFINE PARAM` in the
+/// dump's own parameters section cannot shadow it, and the name reaches the
+/// statement as a value, needing no escaping.
+fn define_database_statement_from_definition(
+	def: &catalog::DatabaseDefinition,
+) -> Option<DefineDatabaseStatement> {
+	if def.comment.is_none() && def.changefeed.is_none() && !def.strict {
+		return None;
+	}
+	Some(DefineDatabaseStatement {
+		kind: SqlDefineKind::Overwrite,
+		id: None,
+		name: SqlExpr::Idiom(SqlIdiom(vec![
+			Part::Start(SqlExpr::Param(Param::new("session"))),
+			Part::Field("db".into()),
+		])),
+		strict: def.strict,
+		comment: def
+			.comment
+			.clone()
+			.map(|v| SqlExpr::Literal(SqlLiteral::String(v.into())))
+			.unwrap_or(SqlExpr::Literal(SqlLiteral::None)),
+		changefeed: def.changefeed.map(|v| v.into()),
+	})
 }
 
 async fn export_metadata(
 	tx: &Transaction,
 	cfg: &Config,
 	chn: &Sender<Vec<u8>>,
-	ns: NamespaceId,
-	db: DatabaseId,
+	def: &catalog::DatabaseDefinition,
 ) -> Result<()> {
+	let (ns, db) = (def.namespace_id, def.database_id);
+
 	// Output OPTIONS
 	export_section("OPTION", [OptionStatement::import()].into_iter(), chn).await?;
+
+	// Output DATABASE
+	//
+	// Gated like every other section: the statement rewrites the target
+	// database's own clauses, so an export that was asked for a few tables must
+	// not carry it.
+	if cfg.database_definition
+		&& let Some(stmt) = define_database_statement_from_definition(def)
+	{
+		export_section("DATABASE", std::iter::once(stmt), chn).await?;
+	}
 
 	// Output USERS
 	if cfg.users {
@@ -158,7 +245,7 @@ async fn export_metadata(
 	// Output CONFIGS
 	if cfg.configs {
 		let configs = tx.all_db_configs(ns, db, None).await?;
-		export_section("CONFIGS", configs.iter(), chn).await?;
+		export_section("CONFIGS", configs.iter().map(DefineConfig), chn).await?;
 	}
 
 	// Output SEQUENCES
@@ -231,21 +318,386 @@ async fn export_tables(
 			}
 		}
 	}
-	// Loop over all of the tables in order
-	for table in tables.iter() {
-		// Check if this table is included in the export config
-		if !cfg.tables.includes(table.name.as_str()) {
-			continue;
-		}
-		// Export the table definition structure first
+	// Split the tables the export config selects into the ones holding records
+	// of their own and the views derived from them.
+	let (views, stored): (Vec<&TableDefinition>, Vec<&TableDefinition>) = tables
+		.iter()
+		.filter(|t| cfg.tables.includes(t.name.as_str()))
+		.partition(|t| t.view.is_some());
+	// The table names this dump goes on to define. A view reading a name that is
+	// not among them restores against whatever the target already holds under
+	// it, and fails outright when the target holds nothing.
+	let emitted: HashSet<&str> =
+		stored.iter().chain(views.iter()).map(|t| t.name.as_str()).collect();
+	// The stored tables the emitted views recompute from.
+	//
+	// A view's `DEFINE TABLE ... AS SELECT` clears its table's whole key range
+	// before recomputing, and that range holds more than the view's own rows: a
+	// `REFERENCE` field naming the view writes its backlink there, and a graph
+	// edge with one end in the view writes that end there. Both are written by
+	// another table's records, and clearing them is silent — the definition
+	// succeeded, and what it cleared was never its own.
+	//
+	// So a stored table is emitted before the view definitions when a definition
+	// reads it, and after them when none does. What no order settles is a table
+	// that is both: one a view selects from and one holding a reference or an
+	// edge into a view. Its records have to come first, and the link they write
+	// is cleared.
+	//
+	// First is not a preference there. An import runs no view maintenance —
+	// `process_table_views` returns early under `OPTION IMPORT` — so a
+	// definition placed ahead of its source's records recomputes over an empty
+	// table, and no record written afterwards ever fills it. The rows a view
+	// restores with are the ones its definition recomputes at the moment it
+	// runs, or the ones this dump carried under the plain table when it does
+	// not run at all.
+	let view_sources: HashSet<&str> = views
+		.iter()
+		.filter_map(|table| table.view.as_ref())
+		.flat_map(|view| view.source_tables())
+		.map(|name| name.as_str())
+		.collect();
+	let (read_by_a_view, unread): (Vec<&TableDefinition>, Vec<&TableDefinition>) =
+		stored.into_iter().partition(|table| view_sources.contains(table.name.as_str()));
+	// Emit the tables the views read first, structure then data, in name order.
+	for table in &read_by_a_view {
 		export_table_structure(tx, ns, db, table, chn).await?;
-		// Then export the table data if its desired
+		if cfg.records {
+			export_table_data(tx, ns, db, table, chn, batch_size).await?;
+		}
+	}
+	// A view is derived state: replaying its `DEFINE TABLE` recomputes it from
+	// the tables it selects from, and fails outright when one of them is
+	// absent. So a view's definition follows every table it reads, and a view
+	// this dump can replay carries no records — the definition writes those rows
+	// itself, and an `INSERT` carrying the same ids is refused as a duplicate
+	// record. The read-only rule on view tables does not stand in the way of
+	// that `INSERT`: a restore runs under `OPTION IMPORT`, which exempts it, so
+	// the statement reaches the record and fails on the id.
+	//
+	// Recomputation reproduces the exported rows exactly when the projection is
+	// a function of its source rows, and not when it reads anything else —
+	// `time::now()`, `rand()`, a value from outside the database. Those rows
+	// come back recomputed, and that is the trade this makes rather than an
+	// oversight: what the restore holds is the view, recomputed.
+	for (table, deferral) in order_views(&views) {
+		// A reason the definition is already known not to replay is reported, in
+		// the log and in the dump alike — the log belongs to the server, and an
+		// operator running `surreal export` reads the file.
+		if let Some(reason) = unreplayable_view(table, &emitted, deferral) {
+			warn!("{reason}");
+			chn.send(bytes!("-- ------------------------------")).await?;
+			chn.send(bytes!(format!("-- NOTE: {}.", InlineCommentDisplay(&reason)))).await?;
+			chn.send(bytes!("-- ------------------------------")).await?;
+			chn.send(bytes!("")).await?;
+		}
+		// Every view is emitted as the same table without its `AS SELECT`, then
+		// its records, then the definition, whether or not anything here can see
+		// a reason the definition will not replay.
+		//
+		// The three statements settle every outcome between them: a definition
+		// that replays begins by clearing the table, so its recomputed rows
+		// replace these and nothing collides, and one that fails takes its own
+		// writes back with it, leaving the plain table and these rows behind
+		// under that name.
+		//
+		// It is unconditional because whether the definition replays is not a
+		// property of the database being exported. Some reasons it will not are
+		// visible here — an analysis that no longer accepts the clauses, a
+		// definition cycle, a source this dump does not carry — but others
+		// belong to the target alone: recomputing a view is one transaction, so
+		// a target enforcing `transaction_max_write_keys` rejects a view whose
+		// rows outgrow the limit, even where the source built those same rows
+		// through writes that were each within it. An export that carried the
+		// rows only for the reasons it can name would still lose a view to the
+		// ones it cannot.
+		//
+		// The plain table goes first whether or not a row follows, because it is
+		// what makes the name exist at all. A dump that leaves the name to an
+		// `INSERT` loses an empty view outright — and with it every view reading
+		// that name, whose own definition then finds nothing there.
+		//
+		// It keeps the view's name and nothing that would refuse the view's
+		// rows, because maintaining a view runs the table's triggers and
+		// nothing else: its stored rows never met the table's own rules, and
+		// writing them back through an ordinary `INSERT` is the first time
+		// anything asks them to.
+		//
+		// - `SCHEMAFULL` goes, and the fields are left to the structure after the records: a row
+		//   can carry a field the view does not define, hold a value its declared type rejects,
+		//   ignore a `VALUE` clause and fail its `ASSERT`. A `REFERENCE` among those definitions
+		//   would also write a backlink under the table it points at, which the exported database
+		//   never had and no `DEFINE TABLE ... AS SELECT` clears.
+		// - `DROP` goes, or the table discards every record written to it and reports nothing — the
+		//   one loss here that leaves no trace for the import to report.
+		// - The type becomes `ANY`, because a relation table rejects what a plain `INSERT` writes
+		//   it, `in` and `out` or not. `ANY` stores those two as the fields they were and writes no
+		//   edge, which is what maintaining the view did.
+		//
+		// So a fallback restore is left holding a plain, permissive table
+		// carrying the view's rows and its field definitions. A definition that
+		// replays supersedes all of it: it states the table's own mode, type
+		// and `DROP`, and recomputes the rows under them.
+		let fallback = TableDefinition {
+			view: None,
+			schemafull: false,
+			drop: false,
+			table_type: TableType::Any,
+			..table.clone()
+		};
+		chn.send(bytes!(format!("{};", fallback.to_sql()))).await?;
+		chn.send(bytes!("")).await?;
+		// KNOWN GAP: a view whose source this dump leaves out can still lose
+		// its carried rows on restore, silently.
+		//
+		// `DEFINE TABLE ... AS SELECT` clears the table before recomputing. The
+		// reasoning above covers a target holding *nothing* under the source's
+		// name, where the statement fails and takes its own writes back. It
+		// does not cover a target holding something *else* under that name: the
+		// statement then succeeds, deletes the rows this dump wrote and
+		// replaces them with a recomputation over data this database never had,
+		// while the NOTE above called the outcome merely open.
+		//
+		// Emitting the definition before the records for the flagged cases
+		// makes that loud instead of silent, but it also makes the legitimate
+		// restore loud: against a target that holds the *right* source, the
+		// recomputation lands first and the records that follow collide with
+		// it, so a correct restore reports a failed statement and answers 422.
+		// Measured, not assumed — `a_restore_with_the_source_recomputes_over_the_rows`
+		// fails that way under the reordering.
+		//
+		// The two cases are indistinguishable from here: an export cannot tell
+		// a target's right source from a same-named wrong one. Which failure to
+		// have is a product decision rather than an exporter's, so the order
+		// is unchanged until it is made.
+		if cfg.records {
+			export_table_data(tx, ns, db, table, chn, batch_size).await?;
+		}
+		export_table_structure(tx, ns, db, table, chn).await?;
+	}
+	// The stored tables no view reads, structure and data together, in name
+	// order — after every view definition, so a reference or an edge into a view
+	// is written into a range nothing clears again.
+	//
+	// The structure goes here with the records rather than ahead of the views,
+	// because a definition that reads a name outside the tables it selects from
+	// is one nothing here can order: it finds the name undefined and fails, and
+	// the rows this dump carried stay under the plain table it fell back to. A
+	// dump that defined every name up front would let that definition succeed
+	// against an empty table and recompute the rows away instead.
+	for table in &unread {
+		export_table_structure(tx, ns, db, table, chn).await?;
 		if cfg.records {
 			export_table_data(tx, ns, db, table, chn, batch_size).await?;
 		}
 	}
 
 	Ok(())
+}
+
+/// Why replaying this view's `DEFINE TABLE` may not put its rows back, or
+/// `None` when the dump can replay it.
+///
+/// Three things stop a replay. [`ViewDefinition::Select`] is the classification
+/// a stored view degrades to when the aggregation analysis rejects its clauses:
+/// no write to a source updates such a view, and the same analysis rejects the
+/// `DEFINE TABLE` that would recreate it, so its stored rows are state nothing
+/// can recompute. A definition cycle is the second: the catalog stores one, and
+/// whichever member an order emits first reads a name the dump has not defined
+/// yet. A source this dump does not define is the third: the definition reads
+/// whatever the target holds under that name, and raises `TbNotFound` when the
+/// target holds nothing.
+///
+/// Only the first two are settled here. The third depends on the target, so what
+/// this reports is that the outcome is open, not that the replay will fail.
+fn unreplayable_view(
+	table: &TableDefinition,
+	emitted: &HashSet<&str>,
+	deferral: Deferral,
+) -> Option<String> {
+	let view = table.view.as_ref()?;
+	if matches!(view, ViewDefinition::Select { .. }) {
+		return Some(format!(
+			"Table '{}' is a view this version can no longer maintain, so its definition cannot \
+			 be replayed",
+			InlineCommentDisplay(&table.name)
+		));
+	}
+	match deferral {
+		Deferral::Cycle => {
+			return Some(format!(
+				"Table '{}' is a view in a definition cycle, which no order of this dump can \
+				 replay",
+				InlineCommentDisplay(&table.name)
+			));
+		}
+		Deferral::BehindCycle => {
+			return Some(format!(
+				"Table '{}' is a view reading a definition cycle, so this dump defines a table it \
+				 selects from after it",
+				InlineCommentDisplay(&table.name)
+			));
+		}
+		Deferral::None => {}
+	}
+	let missing: Vec<String> = view
+		.source_tables()
+		.iter()
+		.filter(|t| !emitted.contains(t.as_str()))
+		.map(|t| format!("'{}'", InlineCommentDisplay(t)))
+		.collect();
+	if missing.is_empty() {
+		return None;
+	}
+	Some(format!(
+		"Table '{}' is a view over {}, which this export does not carry",
+		InlineCommentDisplay(&table.name),
+		missing.join(", ")
+	))
+}
+
+/// Orders views so each one follows the views it selects from, pairing each with
+/// whether it is one this order cannot satisfy.
+fn order_views<'a>(views: &[&'a TableDefinition]) -> Vec<(&'a TableDefinition, Deferral)> {
+	let graph: Vec<(&str, &[TableName])> = views
+		.iter()
+		.map(|t| (t.name.as_str(), t.view.as_ref().map_or(&[][..], |v| v.source_tables())))
+		.collect();
+	let order = view_order(&graph);
+	order
+		.order
+		.iter()
+		.map(|&i| {
+			let deferral = if order.cyclic.contains(&i) {
+				Deferral::Cycle
+			} else if order.behind_cycle.contains(&i) {
+				Deferral::BehindCycle
+			} else {
+				Deferral::None
+			};
+			(views[i], deferral)
+		})
+		.collect()
+}
+
+/// Whether the emission order put a view after every table it reads, and if not,
+/// why it could not.
+///
+/// The two failures are distinguished because they say different things about
+/// the schema: a cycle is a property of the definitions themselves, whereas a
+/// view behind one is ordinary and unreplayable only by association.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Deferral {
+	/// Emitted after every table it reads.
+	None,
+	/// On a definition cycle: whichever member is emitted first reads a name the
+	/// dump has not defined yet.
+	Cycle,
+	/// Reads a view on a cycle, directly or through others, so the dump defines
+	/// one of its sources after it.
+	BehindCycle,
+}
+
+/// An emission order for a set of views, and the members of it that order cannot
+/// satisfy.
+struct ViewOrder {
+	/// Positions in the order they are to be emitted.
+	order: Vec<usize>,
+	/// Positions lying on a definition cycle. Named apart because no order
+	/// replays them: whichever member is emitted first reads a name the dump has
+	/// not defined yet.
+	cyclic: HashSet<usize>,
+	/// Positions that read a cycle without being on one. Equally unorderable —
+	/// their sources are never placed — but a cycle is not what their own
+	/// definition says, so they are reported for what they are.
+	behind_cycle: HashSet<usize>,
+}
+
+/// The positions of `views` — each a name and the tables it selects from — in an
+/// order where every view follows the views it reads.
+///
+/// Replaying a view's `DEFINE TABLE` recomputes it from its source tables, so a
+/// view reading another view has to be defined after it. A source that is not
+/// itself one of `views` — a stored table, already emitted, or a table the
+/// export config excludes — places no constraint on the order.
+///
+/// Views that cannot be ordered — a definition cycle, which the catalog stores
+/// and no single-pass order can satisfy — come last in their original order, and
+/// are named in [`ViewOrder::cyclic`] so the caller can carry what their
+/// definitions will not restore rather than the export looping or hiding it.
+fn view_order(views: &[(&str, &[TableName])]) -> ViewOrder {
+	let names: HashSet<&str> = views.iter().map(|(name, _)| *name).collect();
+	let mut emitted: HashSet<&str> = HashSet::new();
+	let mut ordered: Vec<usize> = Vec::with_capacity(views.len());
+	let mut pending: Vec<usize> = (0..views.len()).collect();
+	while !pending.is_empty() {
+		let placed = ordered.len();
+		let mut deferred = Vec::new();
+		for i in pending {
+			let (name, sources) = views[i];
+			let ready =
+				sources.iter().all(|s| !names.contains(s.as_str()) || emitted.contains(s.as_str()));
+			if ready {
+				emitted.insert(name);
+				ordered.push(i);
+			} else {
+				deferred.push(i);
+			}
+		}
+		if ordered.len() == placed {
+			// Nothing became ready, so nothing left can be ordered after all of
+			// its sources. Some of those lie on a cycle and the rest only read
+			// one, and the two are reported apart.
+			let cyclic = cyclic_members(views, &deferred);
+			let behind_cycle = deferred.iter().copied().filter(|i| !cyclic.contains(i)).collect();
+			ordered.extend(deferred);
+			return ViewOrder {
+				order: ordered,
+				cyclic,
+				behind_cycle,
+			};
+		}
+		pending = deferred;
+	}
+	ViewOrder {
+		order: ordered,
+		cyclic: HashSet::new(),
+		behind_cycle: HashSet::new(),
+	}
+}
+
+/// The members of `stuck` that lie on a definition cycle.
+///
+/// Every position in `stuck` is unorderable, but only one with a path back to
+/// itself through the others is in a cycle. The rest merely read one, and
+/// reporting those as cyclic tells an operator something untrue about their
+/// schema. `stuck` holds what one pass of [`view_order`] could not place, which
+/// is at most the dump's views, so the walk is bounded by that.
+fn cyclic_members(views: &[(&str, &[TableName])], stuck: &[usize]) -> HashSet<usize> {
+	let position: HashMap<&str, usize> = stuck.iter().map(|&i| (views[i].0, i)).collect();
+	let mut cyclic = HashSet::new();
+	for &start in stuck {
+		// Walk the sources that are themselves still stuck. `start` is on a
+		// cycle exactly when the walk arrives back at it.
+		let mut seen: HashSet<usize> = HashSet::new();
+		let mut frontier = vec![start];
+		while let Some(i) = frontier.pop() {
+			for source in views[i].1 {
+				let Some(&next) = position.get(source.as_str()) else {
+					continue;
+				};
+				if next == start {
+					cyclic.insert(start);
+					frontier.clear();
+					break;
+				}
+				if seen.insert(next) {
+					frontier.push(next);
+				}
+			}
+		}
+	}
+	cyclic
 }
 
 async fn export_table_structure(
@@ -328,6 +780,16 @@ const KEYS_PER_RECORD: usize = 2;
 /// plain, unique, and count indexes each write a bounded number of entries.
 const KEYS_PER_VALUE_INDEX: usize = 2;
 
+/// Keys a record writes per record id held in a `REFERENCE` field.
+///
+/// Each referenced id costs a reference key naming the back-link, and, when the
+/// referenced table caps its back-references with `INLINE REFERENCES`, a rewrite
+/// of that record's reference cache. The cache write happens only for a capped
+/// target, so two is the ceiling rather than the going rate — the direction to
+/// err in, since a group sized as though references were free is one whose
+/// re-import can exceed the write-cardinality guard.
+const KEYS_PER_REFERENCE: usize = 2;
+
 /// Keys a full-text index writes per indexed term: its share of the delta log.
 ///
 /// A record's postings are one key, not one per term — a document's whole term
@@ -387,17 +849,67 @@ const FAN_OUT_SAMPLE: usize = 8;
 /// that write far more keys than their count suggests — producing oversized
 /// transactions.
 ///
+/// Counted over the positions the column's path reaches, so a path with a
+/// wildcard is priced across every one of them, and a container at a position
+/// by its length. Nested containers therefore price at the total rather than the
+/// outer length, overstating what the indexer expands: overstating groups
+/// records more tightly and costs throughput that is flat across small
+/// groupings, where understating leaves the oversized transaction that grouping
+/// exists to avoid.
+///
 /// Takes the largest fan-out across the index's columns rather than their
 /// product: the combinator advances one column per step, so the entry count
 /// tracks the longest array rather than every combination of them.
+///
+/// The positions are visited by reference. A length is all this needs, and
+/// reading them out to take it copies a whole array per column, per sampled
+/// record, per batch.
 fn index_fan_out(data: &val::Value, cols: &[Idiom]) -> usize {
-	cols.iter()
-		.map(|col| match data.pick(col) {
+	fn entries(v: &val::Value) -> usize {
+		match v {
 			val::Value::Array(a) => a.len().max(1),
+			val::Value::Set(set) => set.len().max(1),
 			_ => 1,
+		}
+	}
+	cols.iter()
+		.map(|col| {
+			let mut entries_for_column = 0;
+			data.walk_ref(col, &mut |v| entries_for_column += entries(v));
+			entries_for_column.max(1)
 		})
 		.max()
 		.unwrap_or(1)
+}
+
+/// The number of reference keys one record produces for a `REFERENCE` field.
+///
+/// A reference field holds record ids, and one key is written per distinct id it
+/// names — so an `array<record<person>>` holding 20 ids writes 20 keys from a
+/// single field. The count is taken over the field's walked occurrences, the way
+/// the write path collects them, so a path with a wildcard is priced across every
+/// position it reaches.
+///
+/// Floors at one. Unlike an index, a reference field can legitimately hold no id
+/// in every sampled record while later records in the same table hold many, and a
+/// sample that prices those at zero is one that sizes their group as though the
+/// keys were free.
+///
+/// The occurrences are visited by reference. A count is all this needs, and
+/// reading them out to take it copies every id the field holds — hundreds, for
+/// the array-valued field this exists to price — per sampled record, per batch.
+fn reference_fan_out(data: &val::Value, name: &Idiom) -> usize {
+	fn record_ids(v: &val::Value) -> usize {
+		match v {
+			val::Value::Array(a) => a.iter().filter(|v| v.is_record()).count(),
+			val::Value::Set(set) => set.iter().filter(|v| v.is_record()).count(),
+			val::Value::RecordId(_) => 1,
+			_ => 0,
+		}
+	}
+	let mut ids = 0;
+	data.walk_ref(name, &mut |v| ids += record_ids(v));
+	ids.max(1)
 }
 
 /// Estimates the keys one record of `table` writes, given its index set and a
@@ -418,15 +930,26 @@ fn index_fan_out(data: &val::Value, cols: &[Idiom]) -> usize {
 /// Falls back to a fixed allowance where neither is available: a full-text index
 /// with no documents to average, and the vector indexes, whose per-record cost
 /// follows graph connectivity rather than anything visible here.
+///
+/// A `REFERENCE` field is the third such kind and is charged alongside the index
+/// set: its keys are maintained on the import path like any other write, and a
+/// field holding many ids writes one key each from a record the schema makes look
+/// ordinary.
 async fn keys_per_record(
 	tx: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
 	table: &TableName,
 	indexes: &[catalog::IndexDefinition],
+	fields: &[catalog::FieldDefinition],
 	sample: &[val::Value],
 ) -> Result<usize> {
 	let mut keys = KEYS_PER_RECORD;
+	for fd in fields.iter().filter(|fd| fd.reference.is_some()) {
+		let fan_out =
+			sample.iter().map(|data| reference_fan_out(data, &fd.name)).max().unwrap_or(1);
+		keys = keys.saturating_add(KEYS_PER_REFERENCE.saturating_mul(fan_out));
+	}
 	for ix in indexes {
 		// Saturating, so a table whose statistics are implausible sizes its group at
 		// one record rather than wrapping to a large one.
@@ -544,6 +1067,9 @@ async fn export_table_data(
 	// while the `INSERT` size sets the size of a transaction on re-import. The
 	// index set only bears on the second.
 	let indexes = tx.all_tb_indexes(ns, db, &tb_name, None).await?;
+	// A `REFERENCE` field writes back-reference keys on every write path, a
+	// restore included, so its fan-out is part of what one record costs.
+	let fields = tx.all_tb_fields(ns, db, &tb_name, None).await?;
 	// A record's value decodes only with its own key's record id, so the table's
 	// records are read as bytes and decoded per key by `export_regular_data`.
 	let records = RecordPrefix {
@@ -567,7 +1093,7 @@ async fn export_table_data(
 		// element, which the schema does not state.
 		let sample = decode_sample(&batch.result, FAN_OUT_SAMPLE)?;
 		let per_insert = records_per_insert(
-			keys_per_record(tx, ns, db, &tb_name, &indexes, &sample).await?,
+			keys_per_record(tx, ns, db, &tb_name, &indexes, &fields, &sample).await?,
 			batch_size,
 		);
 		for group in batch.result.chunks(per_insert) {
@@ -809,7 +1335,7 @@ pub(crate) fn define_user_statement_from_definition(
 		comment: def
 			.comment
 			.as_ref()
-			.map(|x| Expr::Idiom(Idiom::field(x.clone())))
+			.map(|x| Expr::Literal(Literal::String(x.as_str().into())))
 			.unwrap_or(Expr::Literal(Literal::None)),
 		scram: def.scram.clone(),
 	}
@@ -817,7 +1343,7 @@ pub(crate) fn define_user_statement_from_definition(
 
 #[cfg(test)]
 mod tests {
-	use super::{INSERT_KEY_BUDGET, records_per_insert};
+	use super::{HashSet, INSERT_KEY_BUDGET, TableName, records_per_insert, view_order};
 
 	/// The fewest keys a statement writes once, whatever its group size: one index
 	/// whose maintenance is batched per transaction contributes a delta entry and a
@@ -855,5 +1381,70 @@ mod tests {
 			"a record costing more than the whole budget still gets a statement"
 		);
 		assert_eq!(records_per_insert(0, 10), 10, "a zero estimate must not divide by zero");
+	}
+
+	/// A view's definition recomputes it from its sources, so a view reading
+	/// another view has to come after it however the two sort by name.
+	#[test]
+	fn a_view_follows_the_views_it_reads() {
+		let person = [TableName::from("person")];
+		let zz = [TableName::from("zz_view")];
+		// Name order puts the dependent first, which is the case a plain walk
+		// of the table list gets wrong.
+		let views = [("bb_vv", &zz[..]), ("zz_view", &person[..])];
+		assert_eq!(view_order(&views).order, vec![1, 0]);
+	}
+
+	/// A source that is not itself being emitted here — a stored table, or one
+	/// the export config excludes — places no constraint on the order.
+	#[test]
+	fn a_source_outside_the_set_does_not_defer_a_view() {
+		let person = [TableName::from("person")];
+		let views = [("aa_view", &person[..]), ("zz_view", &person[..])];
+		assert_eq!(view_order(&views).order, vec![0, 1]);
+	}
+
+	/// A view that only reads a cycle is not itself in one. Both are emitted and
+	/// both carry their rows, but the reason the dump states has to be true of
+	/// the table it names.
+	#[test]
+	fn a_view_behind_a_cycle_is_not_reported_as_being_in_it() {
+		let b = [TableName::from("b")];
+		let c = [TableName::from("c")];
+		let d = [TableName::from("d")];
+		let c_again = [TableName::from("c")];
+		// `a` reads `b` reads `c`, and `c` and `d` read each other.
+		let views = [("a", &b[..]), ("b", &c[..]), ("c", &d[..]), ("d", &c_again[..])];
+		let order = view_order(&views);
+		assert_eq!(order.order.len(), 4, "every view is emitted");
+		assert_eq!(
+			order.cyclic,
+			HashSet::<usize>::from([2, 3]),
+			"only the two views that read each other are in the cycle"
+		);
+		assert_eq!(
+			order.behind_cycle,
+			HashSet::<usize>::from([0, 1]),
+			"the chain feeding the cycle is unorderable without being part of it"
+		);
+	}
+
+	/// A cycle cannot be ordered, so its members are emitted rather than
+	/// dropped or spun on.
+	#[test]
+	fn a_cycle_is_emitted_last_rather_than_looping() {
+		let a = [TableName::from("a")];
+		let b = [TableName::from("b")];
+		let base = [TableName::from("base")];
+		let views = [("a", &b[..]), ("b", &a[..]), ("ok", &base[..])];
+		let order = view_order(&views);
+		assert_eq!(order.order.len(), 3, "every view is emitted");
+		assert_eq!(order.order[0], 2, "the orderable view comes first");
+		assert_eq!(order.order[1..], [0, 1], "the cycle keeps its original order");
+		assert_eq!(
+			order.cyclic,
+			HashSet::<usize>::from([0, 1]),
+			"the cycle's members are named, and the view that can be ordered is not"
+		);
 	}
 }
