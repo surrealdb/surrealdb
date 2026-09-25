@@ -85,13 +85,13 @@ value = "[{ id: docs:3, score: 0.8472978472709656f }]"
 value = '''"SelectProject [ctx: Db] [projections: id, score]\n    Compute [ctx: Db] [fields: score = search::score(...)]\n        Filter [ctx: Db] [predicate: published = true AND body @1@ 'roaring']\n            BitmapResolve [ctx: Db] [table: docs]\n                BitmapAnd [ctx: Db]\n                    BitmapFullTextScan [ctx: Db] [index: ft_body, query: roaring]\n                    BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]\n"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: category = 'ml']\n        IndexScan [ctx: Db] [index: idx_published, access: = true, direction: Forward]\n"'''
+value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: published = true]\n        IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]\n"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    Limit [ctx: Db] [limit: 1]\n        Filter [ctx: Db] [predicate: category = 'ml']\n            IndexScan [ctx: Db] [index: idx_published, access: = true, direction: Forward]\n"'''
+value = '''"SelectProject [ctx: Db] [projections: id]\n    Limit [ctx: Db] [limit: 1]\n        Filter [ctx: Db] [predicate: published = true]\n            IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]\n"'''
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id]\n    IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]\n"'''
+value = '''"SelectProject [ctx: Db] [projections: id]\n    IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward, predicate: category = 'ml']\n"'''
 
 [[test.results]]
 value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [predicate: published = true]\n        IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]\n"'''

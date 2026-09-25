@@ -805,14 +805,21 @@ impl<'a> TreeBuilder<'a> {
 						return Some(iop);
 					}
 				}
-				(BinaryOperator::Contain, v, IdiomPosition::Left) => {
-					if col == 0 && ixr.cols[0].0.contains(&Part::All) {
-						return Some(IndexOperator::Equality(v));
-					}
-				}
-				(BinaryOperator::Inside, v, IdiomPosition::Right) => {
-					if col == 0 && ixr.cols[0].0.contains(&Part::All) {
-						return Some(IndexOperator::Equality(v));
+				(BinaryOperator::Contain, v, IdiomPosition::Left)
+				| (BinaryOperator::Inside, v, IdiomPosition::Right) => {
+					if ixr.cols.get(col).map(|c| c.0.contains(&Part::All)).unwrap_or(false) {
+						// A containment leaf holds exactly when the column
+						// has an element equal to the value, which is what a
+						// key carrying that value at this position means —
+						// so it pins the column the way an equality does,
+						// and pinning it removes its fan-out: the record's
+						// keys under such a prefix all carry that value
+						// here.
+						let iop = IndexOperator::Equality(v);
+						self.index_map.check_compound(ixr, col, &iop);
+						if col == 0 {
+							return Some(iop);
+						}
 					}
 				}
 				(BinaryOperator::Inside, v, IdiomPosition::Left) => {

@@ -15,7 +15,7 @@ value = """{ attributes: { projections: 'id' }, children: [{ attributes: { direc
 value = """{ attributes: { projections: 'id' }, children: [{ attributes: { predicate: "secret = 'S3CRET_TOKEN_VALUE'" }, children: [{ attributes: { access: "= 'a'", direction: 'Forward', index: 'idx_category' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', expressions: [{ role: 'predicate', sql: "secret = 'S3CRET_TOKEN_VALUE'" }], operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"""
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "= 'a'", direction: 'Forward', index: 'idx_category' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "= 'a'", direction: 'Forward', index: 'idx_category', predicate: "category = 'a'" }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
 
 */
 

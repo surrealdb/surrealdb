@@ -3,6 +3,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 use std::vec;
 
+use ahash::HashSet;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
@@ -1492,16 +1493,21 @@ pub(super) trait Collector {
 			})
 		};
 
+		// An index over a column holding `*` stores one entry per element, so
+		// the scan can reach one record several times. The statement acts on
+		// records, so the repeats must not reach it.
+		let fans_out = exe.iterator_fans_out(irf);
+
 		let txn = ctx.tx();
 		match rs {
 			RecordStrategy::Count => {
-				self.collect_index_item_count(ctx, &txn, doc_ctx, iterator).await?
+				self.collect_index_item_count(ctx, &txn, doc_ctx, iterator, fans_out).await?
 			}
 			RecordStrategy::KeysOnly => {
-				self.collect_index_item_key(ctx, &txn, doc_ctx, iterator).await?
+				self.collect_index_item_key(ctx, &txn, doc_ctx, iterator, fans_out).await?
 			}
 			RecordStrategy::KeysAndValues => {
-				self.collect_index_item_key_value(ctx, &txn, doc_ctx, iterator).await?
+				self.collect_index_item_key_value(ctx, &txn, doc_ctx, iterator, fans_out).await?
 			}
 		}
 		// Everything ok
@@ -1515,8 +1521,10 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		doc_ctx: DocumentContext,
 		mut iterator: RecordIterator,
+		fans_out: bool,
 	) -> Result<()> {
 		let fetch_size = self.max_fetch_size();
+		let mut seen = FanOutDedupe::new(fans_out);
 		while !ctx.is_done(None).await? {
 			let records: Vec<IndexItemRecord> = iterator.next_batch(ctx, txn, fetch_size).await?;
 			if records.is_empty() {
@@ -1525,6 +1533,9 @@ pub(super) trait Collector {
 			for (count, record) in records.into_iter().enumerate() {
 				if ctx.is_done(Some(count)).await? {
 					break;
+				}
+				if !seen.admit(&record) {
+					continue;
 				}
 				self.collect(Collectable::IndexItemKey(doc_ctx.clone(), record)).await?;
 			}
@@ -1539,8 +1550,10 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		doc_ctx: DocumentContext,
 		mut iterator: RecordIterator,
+		fans_out: bool,
 	) -> Result<()> {
 		let fetch_size = self.max_fetch_size();
+		let mut seen = FanOutDedupe::new(fans_out);
 		while !ctx.is_done(None).await? {
 			let records: Vec<IndexItemRecord> = iterator.next_batch(ctx, txn, fetch_size).await?;
 			if records.is_empty() {
@@ -1549,6 +1562,9 @@ pub(super) trait Collector {
 			for (count, record) in records.into_iter().enumerate() {
 				if ctx.is_done(Some(count)).await? {
 					break;
+				}
+				if !seen.admit(&record) {
+					continue;
 				}
 				self.collect(Collectable::IndexItem(doc_ctx.clone(), record)).await?;
 			}
@@ -1563,7 +1579,30 @@ pub(super) trait Collector {
 		txn: &Transaction,
 		doc_ctx: DocumentContext,
 		mut iterator: RecordIterator,
+		fans_out: bool,
 	) -> Result<()> {
+		// `next_count` counts index entries, which is a row count only while
+		// each record owns one entry in the range. A scan that fans out has to
+		// be walked for its record ids instead, so the same record is counted
+		// once however many entries reach it.
+		if fans_out {
+			let mut seen = FanOutDedupe::new(true);
+			let mut total_count = 0;
+			let fetch_size = self.max_fetch_size();
+			while !ctx.is_done(None).await? {
+				let records: Vec<IndexItemRecord> =
+					iterator.next_batch(ctx, txn, fetch_size).await?;
+				if records.is_empty() {
+					break;
+				}
+				for record in &records {
+					if seen.admit(record) {
+						total_count += 1;
+					}
+				}
+			}
+			return self.collect(Collectable::Count(doc_ctx, total_count)).await;
+		}
 		let mut total_count = 0;
 		let fetch_size = self.max_fetch_size();
 		while !ctx.is_done(None).await? {
@@ -1574,6 +1613,39 @@ pub(super) trait Collector {
 			total_count += count;
 		}
 		self.collect(Collectable::Count(doc_ctx, total_count)).await
+	}
+}
+
+/// Admits each record once out of an index scan that can reach the same
+/// record through several entries.
+///
+/// A column whose idiom holds `*` stores one index entry per element of that
+/// column's value, so a scan that leaves such a column unconstrained walks
+/// past one record several times. Entries for one record are not adjacent in
+/// key order — they differ in the trailing columns, which sort ahead of the
+/// record id — so every id seen so far is kept rather than compared with the
+/// previous one.
+///
+/// Inert when the scan cannot fan out, which is the common case; it then holds
+/// no set at all.
+struct FanOutDedupe(Option<HashSet<Arc<RecordId>>>);
+
+impl FanOutDedupe {
+	fn new(fans_out: bool) -> Self {
+		Self(fans_out.then(HashSet::default))
+	}
+
+	/// Whether `record` is reaching the statement for the first time.
+	fn admit(&mut self, record: &IndexItemRecord) -> bool {
+		match &mut self.0 {
+			Some(seen) => {
+				let id = match record {
+					IndexItemRecord::Key(id, _) | IndexItemRecord::KeyValue(id, _, _) => id,
+				};
+				seen.insert(Arc::clone(id))
+			}
+			None => true,
+		}
 	}
 }
 

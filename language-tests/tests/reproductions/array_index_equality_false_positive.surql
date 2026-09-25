@@ -28,7 +28,7 @@ value = "[{ id: doc:scalar, tags: 'public' }]"
 value = "[{ id: doc:scalar, tags: 'public' }]"
 
 [[test.results]]
-value = "{ attributes: { projections: 'id, tags' }, children: [{ attributes: { access: \"= 'public'\", direction: 'Forward', index: 'idx_tags' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"
+value = "{ attributes: { projections: 'id, tags' }, children: [{ attributes: { access: \"= 'public'\", direction: 'Forward', index: 'idx_tags', predicate: \"tags = 'public'\" }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"
 */
 
 DEFINE TABLE doc SCHEMALESS;

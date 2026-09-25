@@ -218,13 +218,25 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
+	/// A document's entries are written one per combination of its columns'
+	/// elements, so a single document can be an arbitrarily long run of
+	/// writes. The probe therefore runs per entry rather than once per
+	/// document, or nothing could interrupt one document's fan-out and a long
+	/// one would starve the worker it runs on.
+	///
+	/// Only the probe's error is propagated, never its cancellation flag:
+	/// abandoning the loop part-way would leave the index holding some of the
+	/// document's entries while reporting success, and a half-maintained index
+	/// is worse than a slow one. An error aborts the statement, so the
+	/// transaction carrying these writes never commits.
 	async fn index_unique(&mut self) -> Result<()> {
 		let txn = self.env.tx();
 		let value = self.entry_value().await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
-			for o in i {
+			for (entry, o) in i.into_iter().enumerate() {
+				self.env.is_done(Some(entry)).await?;
 				if o.is_any_none_or_null() {
 					// NONE/NULL tuples use the non-unique key format (with
 					// record ID suffix) so multiple such entries can coexist.
@@ -239,7 +251,8 @@ impl<'a> IndexOperation<'a> {
 		// Create the new index data
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
-			for n in i {
+			for (entry, n) in i.into_iter().enumerate() {
+				self.env.is_done(Some(entry)).await?;
 				if n.is_any_none_or_null() {
 					// NONE/NULL tuples are stored with the non-unique key
 					// format so they remain visible to index scans. No
@@ -267,7 +280,8 @@ impl<'a> IndexOperation<'a> {
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
-			for o in i {
+			for (entry, o) in i.into_iter().enumerate() {
+				self.env.is_done(Some(entry)).await?;
 				let key = self.get_non_unique_index_key(&o);
 				Self::del_entry(&txn, &key, &value).await?;
 			}
@@ -275,7 +289,8 @@ impl<'a> IndexOperation<'a> {
 		// Create the new index data
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
-			for n in i {
+			for (entry, n) in i.into_iter().enumerate() {
+				self.env.is_done(Some(entry)).await?;
 				let key = self.get_non_unique_index_key(&n);
 				txn.set_key(&key, &value).await?;
 			}
@@ -634,25 +649,34 @@ impl Iterator for Combinator {
 		if !self.has_next {
 			return None;
 		}
-		let mut o = Vec::with_capacity(self.iterators.len());
-		// Create the combination and advance to the next
+		// Emit the odometer's current reading, then advance it.
+		let o = Array::from(self.iterators.iter().map(|i| i.current().clone()).collect::<Vec<_>>());
+		// Advance the first column that can advance, and wind every column
+		// before it back to its start — the carry is what makes this the
+		// cartesian product of the columns rather than a walk down one
+		// column and along the next. Without the rewind an index over two
+		// array-valued columns of lengths m and n yields m + n - 1 keys
+		// instead of m * n, leaving combinations unindexed: reads served by
+		// the index miss rows and a UNIQUE index stops rejecting a
+		// duplicate combination.
 		self.has_next = false;
 		for i in &mut self.iterators {
-			o.push(i.current().clone());
-			if !self.has_next {
-				// We advance only one iterator per iteration
-				if i.next() {
-					self.has_next = true;
-				}
+			if i.next() {
+				self.has_next = true;
+				break;
 			}
+			i.reset();
 		}
-		let o = Array::from(o);
 		Some(o)
 	}
 }
 
 trait ValuesIterator: Send {
+	/// Advance to this column's next value, reporting whether one existed.
 	fn next(&mut self) -> bool;
+	/// Wind back to this column's first value, so an outer column's carry
+	/// restarts the sweep.
+	fn reset(&mut self);
 	fn current(&self) -> &Value;
 }
 
@@ -697,6 +721,15 @@ impl ValuesIterator for MultiValuesIterator {
 		true
 	}
 
+	fn reset(&mut self) {
+		// An empty source stays exhausted: it has no first value to wind
+		// back to, and `current()` keeps yielding `Value::Null` for it.
+		if !self.vals.is_empty() {
+			self.current = 0;
+			self.done = false;
+		}
+	}
+
 	fn current(&self) -> &Value {
 		self.vals.get(self.current).unwrap_or(&Value::Null)
 	}
@@ -709,7 +742,145 @@ impl ValuesIterator for SingleValueIterator {
 		false
 	}
 
+	fn reset(&mut self) {
+		// One value, always current — nothing to wind back.
+	}
+
 	fn current(&self) -> &Value {
 		&self.0
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	//! The key set one document contributes to a b-tree index.
+	//!
+	//! [`Combinator`] is the odometer that turns the per-column values
+	//! [`Indexable`] collected into the tuples actually written. A column
+	//! holding an array fans out over its elements, so the tuples are the
+	//! cartesian product of the columns — which is what lets a prefix seek
+	//! on the leading columns find every combination of the trailing ones.
+
+	use super::{Combinator, MultiValuesIterator, ValuesIterator};
+	use crate::val::{Array, Value};
+
+	/// Drive the odometer over columns given as either a scalar or an array,
+	/// in the shape `Indexable::new` hands it: `false` marks a column whose
+	/// array value fans out.
+	fn keys(cols: Vec<Value>) -> Vec<Vec<Value>> {
+		let source = cols.into_iter().map(|v| (v, false)).collect();
+		Combinator::new(source).map(|a: Array| a.0).collect()
+	}
+
+	fn arr(vals: &[&str]) -> Value {
+		Value::Array(Array::from(vals.iter().map(|v| Value::from(*v)).collect::<Vec<_>>()))
+	}
+
+	#[test]
+	fn a_single_scalar_column_contributes_one_tuple() {
+		assert_eq!(keys(vec![Value::from("a")]), vec![vec![Value::from("a")]]);
+	}
+
+	#[test]
+	fn every_scalar_column_still_contributes_one_tuple() {
+		assert_eq!(
+			keys(vec![Value::from("a"), Value::from("b"), Value::from("c")]),
+			vec![vec![Value::from("a"), Value::from("b"), Value::from("c")]]
+		);
+	}
+
+	#[test]
+	fn one_array_column_fans_out_over_its_elements() {
+		assert_eq!(
+			keys(vec![arr(&["x", "y", "z"])]),
+			vec![vec![Value::from("x")], vec![Value::from("y")], vec![Value::from("z")]]
+		);
+	}
+
+	#[test]
+	fn an_array_column_fans_out_against_each_scalar_column() {
+		assert_eq!(
+			keys(vec![Value::from("g"), arr(&["x", "y"])]),
+			vec![
+				vec![Value::from("g"), Value::from("x")],
+				vec![Value::from("g"), Value::from("y")]
+			]
+		);
+	}
+
+	#[test]
+	fn two_array_columns_produce_the_full_cartesian_product() {
+		// The odometer's carry is what this pins: without it the walk
+		// yields ['p',1], ['q',1], ['q',2] — three of the four tuples,
+		// leaving ['p',2] unindexed.
+		let got = keys(vec![arr(&["p", "q"]), arr(&["1", "2"])]);
+		assert_eq!(got.len(), 4, "m * n tuples, not m + n - 1: {got:?}");
+		for tuple in [
+			vec![Value::from("p"), Value::from("1")],
+			vec![Value::from("p"), Value::from("2")],
+			vec![Value::from("q"), Value::from("1")],
+			vec![Value::from("q"), Value::from("2")],
+		] {
+			assert!(got.contains(&tuple), "missing {tuple:?} from {got:?}");
+		}
+	}
+
+	#[test]
+	fn three_array_columns_multiply_rather_than_add() {
+		assert_eq!(keys(vec![arr(&["a", "b"]), arr(&["c", "d"]), arr(&["e", "f"])]).len(), 8);
+	}
+
+	#[test]
+	fn the_product_is_ordered_with_the_leading_column_cycling_fastest() {
+		assert_eq!(
+			keys(vec![arr(&["p", "q"]), arr(&["1", "2"])]),
+			vec![
+				vec![Value::from("p"), Value::from("1")],
+				vec![Value::from("q"), Value::from("1")],
+				vec![Value::from("p"), Value::from("2")],
+				vec![Value::from("q"), Value::from("2")]
+			]
+		);
+	}
+
+	#[test]
+	fn an_empty_array_column_contributes_null_and_does_not_annihilate_the_product() {
+		// An empty array has no element to index, but the document must
+		// still get a key or it would vanish from the index entirely.
+		assert_eq!(
+			keys(vec![Value::Array(Array::from(Vec::<Value>::new())), arr(&["x", "y"])]),
+			vec![vec![Value::Null, Value::from("x")], vec![Value::Null, Value::from("y")]]
+		);
+	}
+
+	#[test]
+	fn duplicate_elements_repeat_the_tuple_and_collapse_in_the_store() {
+		// Identical tuples encode to one key, so the store holds a single
+		// entry; the odometer itself does not deduplicate.
+		assert_eq!(
+			keys(vec![arr(&["x", "x"])]),
+			vec![vec![Value::from("x")], vec![Value::from("x")]]
+		);
+	}
+
+	#[test]
+	fn a_reset_column_sweeps_again_from_its_first_value() {
+		let mut it = MultiValuesIterator::new(vec![Value::from("a"), Value::from("b")]);
+		assert_eq!(it.current(), &Value::from("a"));
+		assert!(it.next());
+		assert_eq!(it.current(), &Value::from("b"));
+		assert!(!it.next(), "exhausted at the last element");
+		it.reset();
+		assert_eq!(it.current(), &Value::from("a"), "wound back to the first value");
+		assert!(it.next(), "and can sweep again");
+	}
+
+	#[test]
+	fn resetting_an_empty_column_leaves_it_exhausted() {
+		let mut it = MultiValuesIterator::new(Vec::new());
+		assert!(!it.next());
+		it.reset();
+		assert!(!it.next(), "an empty column has no first value to wind back to");
+		assert_eq!(it.current(), &Value::Null);
 	}
 }

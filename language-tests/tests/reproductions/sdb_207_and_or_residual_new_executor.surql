@@ -42,7 +42,7 @@ value = """{ attributes: { projections: 'id' }, children: [{ attributes: { predi
 value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }]"
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "[scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z'", direction: 'Forward', index: 'scanDefinition_compound_idx' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "[scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z'", direction: 'Forward', index: 'scanDefinition_compound_idx', predicate: "scanDefinition = scan_definition:a AND createdAt <= d'2026-01-11T00:00:00Z'" }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
 
 [[test.results]]
 value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }, { id: canonical_finding:f3 }]"

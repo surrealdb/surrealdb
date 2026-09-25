@@ -10,11 +10,11 @@ use super::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
 };
 use crate::catalog::{Index, IndexDefinition};
-use crate::exec::planner::util::try_literal_to_value;
+use crate::exec::planner::util::{try_expr_to_value, try_literal_to_value};
 use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
-use crate::expr::{BinaryOperator, Cond, Expr, Idiom};
+use crate::expr::{BinaryOperator, Cond, Expr, Function, FunctionCall, Idiom};
 use crate::kvs::Direction;
 use crate::val::{Number, Range, Value};
 
@@ -1430,19 +1430,11 @@ impl<'a> IndexAnalyzer<'a> {
 		right: &Expr,
 	) -> Option<SimpleCondition> {
 		let (idiom, value, position) = match (left, right) {
-			(Expr::Idiom(idiom), Expr::Literal(lit)) => {
-				if let Some(value) = try_literal_to_value(lit) {
-					(idiom.clone(), value, IdiomPosition::Left)
-				} else {
-					return None;
-				}
+			(Expr::Idiom(idiom), rhs) => {
+				(idiom.clone(), try_expr_to_value(rhs)?, IdiomPosition::Left)
 			}
-			(Expr::Literal(lit), Expr::Idiom(idiom)) => {
-				if let Some(value) = try_literal_to_value(lit) {
-					(idiom.clone(), value, IdiomPosition::Right)
-				} else {
-					return None;
-				}
+			(lhs, Expr::Idiom(idiom)) => {
+				(idiom.clone(), try_expr_to_value(lhs)?, IdiomPosition::Right)
 			}
 			_ => return None,
 		};
@@ -1502,16 +1494,50 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 
 			// Try to match conditions to index columns in order.
-			// The prefix collects leading equality conditions. After the
-			// equality prefix, a single range condition on the next column
-			// is captured and encoded into the compound key range so the
-			// index scan is narrowed at the storage level.
+			// The prefix collects leading equality conditions, and a
+			// containment condition on a fanning column pins that column to
+			// one element. After the prefix, a single range condition on the
+			// next column is captured and encoded into the compound key
+			// range so the index scan is narrowed at the storage level.
 			let mut prefix_values = Vec::new();
 			let mut range_condition: Option<(BinaryOperator, Value)> = None;
 
 			for col in &ix_def.cols {
 				// Find a condition that matches this column
 				let matching_cond = conditions.iter().find(|c| idiom_matches(&c.idiom, col));
+
+				// `idiom_matches` vetoes any column holding `*`, so a
+				// fanning column is reached only through the containment
+				// matcher. `field CONTAINS v` / `v INSIDE field` hold
+				// exactly when the column has an element equal to `v`,
+				// which is exactly what a key carrying `v` at this position
+				// means — so the value extends the prefix the way an
+				// equality does.
+				//
+				// Pinning a fanning column also removes its fan-out: the
+				// record's keys under this prefix all carry `v` here, so
+				// only the columns the prefix does not reach can still
+				// multiply them. Whether any do is what `access_fans_out`
+				// asks when it decides to collapse the scan, so there is
+				// nothing for this loop to withhold — an index whose
+				// columns all fan out is served exactly when a containment
+				// leaf pins each of them.
+				let containment_cond = if matching_cond.is_none() {
+					conditions.iter().find(|c| {
+						matches!(
+							(&c.op, c.position),
+							(BinaryOperator::Contain, IdiomPosition::Left)
+								| (BinaryOperator::Inside, IdiomPosition::Right)
+						) && idiom_matches_containment(&c.idiom, col)
+					})
+				} else {
+					None
+				};
+
+				if let Some(cond) = containment_cond {
+					prefix_values.push(cond.value.clone());
+					continue;
+				}
 
 				match matching_cond {
 					Some(cond) => {
@@ -1661,6 +1687,8 @@ impl<'a> IndexAnalyzer<'a> {
 					}
 				}
 			}
+			// A prefix test names a contiguous stretch of the key space.
+			Expr::FunctionCall(call) => self.try_match_prefix_call(call, candidates),
 			// Nested expression in parentheses (but NOT negation).
 			// Do NOT recurse into NOT — negated predicates invert
 			// the result set and index candidates would be wrong.
@@ -1684,20 +1712,14 @@ impl<'a> IndexAnalyzer<'a> {
 	) {
 		// Extract idiom and value from the comparison
 		let (idiom, value, position) = match (left, right) {
-			(Expr::Idiom(idiom), Expr::Literal(lit)) => {
-				if let Some(value) = try_literal_to_value(lit) {
-					(idiom, value, IdiomPosition::Left)
-				} else {
-					return;
-				}
-			}
-			(Expr::Literal(lit), Expr::Idiom(idiom)) => {
-				if let Some(value) = try_literal_to_value(lit) {
-					(idiom, value, IdiomPosition::Right)
-				} else {
-					return;
-				}
-			}
+			(Expr::Idiom(idiom), rhs) => match try_expr_to_value(rhs) {
+				Some(value) => (idiom, value, IdiomPosition::Left),
+				None => return,
+			},
+			(lhs, Expr::Idiom(idiom)) => match try_expr_to_value(lhs) {
+				Some(value) => (idiom, value, IdiomPosition::Right),
+				None => return,
+			},
 			// Parameters are pre-folded into literals before the analyzer
 			// runs (see `resolve_condition_params` in the planner and dynamic
 			// scan). If a bare `Expr::Param` reaches the analyzer it means
@@ -1802,13 +1824,21 @@ impl<'a> IndexAnalyzer<'a> {
 			}),
 			// IN clause (field IN [values])
 			(BinaryOperator::Inside, IdiomPosition::Left) => {
-				// Single-element array: treat as equality (field IN [v] → field = v)
-				if let Value::Array(arr) = value
-					&& arr.len() == 1
-				{
-					Some(BTreeAccess::Equality(arr[0].clone()))
-				} else {
-					None
+				match value {
+					// Single-element array: treat as equality (field IN [v] → field = v)
+					Value::Array(arr) if arr.len() == 1 => {
+						Some(BTreeAccess::Equality(arr[0].clone()))
+					}
+					// A range literal states the bounds directly, so it is
+					// the same access as the two comparisons that spell it
+					// out: `field IN 1..9` reads the keys `>= 1` and `< 9`.
+					// The literal's own bounds carry which end is open, so
+					// every spelling (`..`, `..=`, `>..`, `>..=`) maps
+					// without a case of its own.
+					Value::Range(r) => Some(BTreeAccess::Range {
+						range: (**r).clone(),
+					}),
+					_ => None,
 				}
 			}
 
@@ -1833,6 +1863,69 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 
 			_ => None,
+		}
+	}
+
+	/// Try to match `string::starts_with(<indexed path>, '<literal>')` to a
+	/// b-tree range.
+	///
+	/// The strings carrying a prefix are exactly the strings at or after it
+	/// and before its successor, and the key encoding orders strings the same
+	/// way the predicate compares them, so the prefix is one contiguous range.
+	///
+	/// The upper bound is dropped when no successor can be formed — an empty
+	/// prefix, or one ending at the last scalar value — which widens the range
+	/// rather than narrowing it wrongly.
+	///
+	/// The bounded and the open form both hold exactly the strings carrying
+	/// the prefix, so the range decides the answer on its own; the call is
+	/// left in the residual because nothing here strips it, not because the
+	/// scan needs checking. A sibling conjunct on a later column is the one
+	/// thing the residual still carries.
+	fn try_match_prefix_call(&self, call: &FunctionCall, candidates: &mut Vec<IndexCandidate>) {
+		let Function::Normal(name) = &call.receiver else {
+			return;
+		};
+		if name != "string::starts_with" {
+			return;
+		}
+		let [Expr::Idiom(idiom), literal] = call.arguments.as_slice() else {
+			return;
+		};
+		let Some(Value::String(prefix)) = try_expr_to_value(literal) else {
+			return;
+		};
+		if prefix.as_str().is_empty() {
+			return;
+		}
+		let end = match next_string_after_prefix(prefix.as_str()) {
+			Some(next) => Bound::Excluded(Value::String(next.into())),
+			None => Bound::Unbounded,
+		};
+		let access = BTreeAccess::Range {
+			range: Range {
+				start: Bound::Included(Value::String(prefix)),
+				end,
+			},
+		};
+		for (idx, ix_def) in self.indexes.iter().enumerate() {
+			if ix_def.prepare_remove {
+				continue;
+			}
+			if !matches!(ix_def.index, Index::Idx | Index::Uniq) {
+				continue;
+			}
+			if let Some(With::Index(names)) = self.with_hints
+				&& !names.iter().any(|n| n.as_str() == ix_def.name.as_str())
+			{
+				continue;
+			}
+			if let Some(col) = ix_def.cols.first()
+				&& idiom_matches(idiom, col)
+			{
+				let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
+				candidates.push(IndexCandidate::new(index_ref, access.clone()));
+			}
 		}
 	}
 
@@ -2336,6 +2429,26 @@ pub(crate) fn idiom_matches_containment(expr_idiom: &Idiom, index_col: &Idiom) -
 	let expr_without_all: Vec<&Part> =
 		expr_idiom.0.iter().filter(|p| !matches!(p, Part::All)).collect();
 	col_without_all == expr_without_all
+}
+
+/// The least string greater than every string carrying `prefix`.
+///
+/// Incrementing the last scalar value that can be incremented, and dropping
+/// the ones after it, gives the immediate successor of the whole prefix
+/// stretch. `None` when every scalar value is already the last one, which
+/// leaves the stretch unbounded above.
+fn next_string_after_prefix(prefix: &str) -> Option<String> {
+	let mut chars: Vec<char> = prefix.chars().collect();
+	while let Some(last) = chars.pop() {
+		// `char::from_u32` rejects the surrogate range, so step over it
+		// rather than treating it as the end of the scalar values.
+		let next = (last as u32 + 1..=char::MAX as u32).find_map(char::from_u32);
+		if let Some(next) = next {
+			chars.push(next);
+			return Some(chars.into_iter().collect());
+		}
+	}
+	None
 }
 
 /// Normalize a range operator based on the position of the idiom in the
@@ -2969,6 +3082,62 @@ mod tests {
 	// ------------------------------------------------------------------
 	// 3. Compound prefix building
 	// ------------------------------------------------------------------
+	mod prefix_successor {
+		use super::super::next_string_after_prefix;
+
+		/// The contract: every string carrying the prefix sorts before the
+		/// successor, and the successor itself does not carry the prefix.
+		fn bounds_hold(prefix: &str, carrying: &[&str]) {
+			let next = next_string_after_prefix(prefix).expect("a successor exists");
+			assert!(!next.starts_with(prefix), "{next:?} still carries {prefix:?}");
+			assert!(prefix < next.as_str(), "{prefix:?} must sort before {next:?}");
+			for s in carrying {
+				assert!(s.starts_with(prefix), "fixture {s:?} must carry {prefix:?}");
+				assert!(*s < next.as_str(), "{s:?} must sort before {next:?}");
+			}
+		}
+
+		#[test]
+		fn an_ascii_prefix_increments_its_last_character() {
+			assert_eq!(next_string_after_prefix("alpha").as_deref(), Some("alphb"));
+			bounds_hold("alpha", &["alpha", "alphabet", "alpha\u{10FFFF}"]);
+		}
+
+		#[test]
+		fn a_multibyte_prefix_increments_its_last_scalar_value() {
+			assert_eq!(next_string_after_prefix("hé").as_deref(), Some("hê"));
+			bounds_hold("hé", &["héllo", "héz"]);
+		}
+
+		#[test]
+		fn a_prefix_ending_at_the_last_scalar_value_carries_into_the_one_before() {
+			let next = next_string_after_prefix("a\u{10FFFF}").expect("carries into 'a'");
+			assert_eq!(next, "b");
+			bounds_hold("a\u{10FFFF}", &["a\u{10FFFF}z"]);
+		}
+
+		#[test]
+		fn a_prefix_of_only_last_scalar_values_has_no_successor() {
+			// Nothing sorts after it, so the range stays open above rather
+			// than gaining a bound that would cut the stretch short.
+			assert_eq!(next_string_after_prefix("\u{10FFFF}"), None);
+			assert_eq!(next_string_after_prefix("\u{10FFFF}\u{10FFFF}"), None);
+		}
+
+		#[test]
+		fn the_successor_steps_over_the_surrogate_range() {
+			// D800..DFFF are not scalar values; incrementing D7FF must land
+			// on E000 rather than producing nothing.
+			let next = next_string_after_prefix("\u{D7FF}").expect("a successor exists");
+			assert_eq!(next, "\u{E000}");
+		}
+
+		#[test]
+		fn an_empty_prefix_has_no_successor() {
+			assert_eq!(next_string_after_prefix(""), None);
+		}
+	}
+
 	mod compound {
 		use super::*;
 
@@ -3025,6 +3194,136 @@ mod tests {
 					assert!(range.is_some());
 				}
 				other => panic!("expected Compound, got {other:?}"),
+			}
+		}
+
+		#[test]
+		fn a_containment_extends_the_prefix_over_a_fanning_column() {
+			// `idiom_matches` vetoes a column holding `*`, so the
+			// containment matcher is the only way `emails.*.norm` is reached.
+			let a = analyzer(vec![idx_basic(1, "ix_ae", &["account", "emails.*.norm"])], None);
+			let cond = parse_cond("account = 1 AND emails.*.norm CONTAINS 'x'");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "ix_ae").expect("ix_ae");
+			match &c.access {
+				BTreeAccess::Compound {
+					prefix,
+					range,
+				} => {
+					assert_eq!(prefix.len(), 2, "both columns pinned, not just the account");
+					assert!(range.is_none());
+				}
+				other => panic!("expected Compound, got {other:?}"),
+			}
+		}
+
+		#[test]
+		fn the_reversed_containment_spelling_extends_it_too() {
+			let a = analyzer(vec![idx_basic(1, "ix_ae", &["account", "emails.*.norm"])], None);
+			let cond = parse_cond("account = 1 AND 'x' INSIDE emails.*.norm");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "ix_ae").expect("ix_ae");
+			match &c.access {
+				BTreeAccess::Compound {
+					prefix,
+					..
+				} => assert_eq!(prefix.len(), 2),
+				other => panic!("expected Compound, got {other:?}"),
+			}
+		}
+
+		#[test]
+		fn a_containment_pins_a_fanning_column_before_a_trailing_range() {
+			let a =
+				analyzer(vec![idx_basic(1, "ix_aeb", &["account", "emails.*.norm", "b"])], None);
+			let cond = parse_cond("account = 1 AND emails.*.norm CONTAINS 'x' AND b > 5");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "ix_aeb").expect("ix_aeb");
+			match &c.access {
+				BTreeAccess::Compound {
+					prefix,
+					range,
+				} => {
+					assert_eq!(prefix.len(), 2);
+					assert!(range.is_some(), "the range on b terminates the prefix");
+				}
+				other => panic!("expected Compound, got {other:?}"),
+			}
+		}
+
+		#[test]
+		fn a_containment_on_each_of_two_fanning_columns_pins_both() {
+			// Every column of the index fans out, and a containment leaf
+			// pins each: the prefix addresses one key per record, the same
+			// as an all-equality prefix over scalar columns.
+			let a = analyzer(vec![idx_basic(1, "ix_tn", &["tags.*", "nums.*"])], None);
+			let cond = parse_cond("tags CONTAINS 'x' AND nums CONTAINS 1");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "ix_tn").expect("ix_tn");
+			match &c.access {
+				BTreeAccess::Compound {
+					prefix,
+					range,
+				} => {
+					assert_eq!(prefix.len(), 2, "both fanning columns pinned");
+					assert!(range.is_none());
+				}
+				other => panic!("expected Compound, got {other:?}"),
+			}
+		}
+
+		#[test]
+		fn an_unpinned_second_fanning_column_still_extends_what_it_can() {
+			// Only the leading column has a containment leaf, so the prefix
+			// stops there and `nums.*` keeps contributing a key per element
+			// — which is what the scan's own fan-out check answers for.
+			let a = analyzer(vec![idx_basic(1, "ix_tn", &["tags.*", "nums.*"])], None);
+			let cond = parse_cond("tags CONTAINS 'x' AND other = 7");
+			let cands = a.analyze(Some(&cond), None);
+			for c in &cands {
+				if let BTreeAccess::Compound {
+					prefix,
+					..
+				} = &c.access
+				{
+					assert!(prefix.len() < 2, "an unmatched column cannot be pinned");
+				}
+			}
+		}
+
+		#[test]
+		fn a_multi_value_containment_does_not_extend_the_prefix() {
+			// CONTAINSANY names several values; one prefix cannot hold them,
+			// and the union expansion is the shape that serves it.
+			let a = analyzer(vec![idx_basic(1, "ix_ae", &["account", "emails.*.norm"])], None);
+			let cond = parse_cond("account = 1 AND emails.*.norm CONTAINSANY ['x', 'y']");
+			let cands = a.analyze(Some(&cond), None);
+			for c in &cands {
+				if let BTreeAccess::Compound {
+					prefix,
+					..
+				} = &c.access
+				{
+					assert!(prefix.len() < 2, "a multi-value leaf pins no single element");
+				}
+			}
+		}
+
+		#[test]
+		fn a_containment_on_a_non_fanning_column_does_not_extend_the_prefix() {
+			// `b CONTAINS 'x'` on a scalar column is a predicate about the
+			// column's own value, not about an element the index keyed.
+			let a = analyzer(vec![idx_basic(1, "ix_ab", &["a", "b"])], None);
+			let cond = parse_cond("a = 1 AND b CONTAINS 'x'");
+			let cands = a.analyze(Some(&cond), None);
+			for c in &cands {
+				if let BTreeAccess::Compound {
+					prefix,
+					..
+				} = &c.access
+				{
+					assert!(prefix.len() < 2, "a scalar column is not keyed per element");
+				}
 			}
 		}
 

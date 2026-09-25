@@ -12,13 +12,13 @@ value = "NONE"
 value = "[{ age: 90, id: record:5 }, { age: 50, id: record:2 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, age] {rows: 2}\n    IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Backward, limit: 2] {rows: 2}\n\nTotal rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id, age] {rows: 2}\n    IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Backward, limit: 2, predicate: tags CONTAINS 'omicron'] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ age: 10, id: record:6 }, { age: 20, id: record:1 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, age] {rows: 2}\n    IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Forward, limit: 2] {rows: 2}\n\nTotal rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id, age] {rows: 2}\n    IndexScan [ctx: Db] [index: tag_age, access: ['omicron'], direction: Forward, limit: 2, predicate: 'omicron' INSIDE tags] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "NONE"
@@ -27,13 +27,13 @@ value = "NONE"
 value = "[{ age: 10, id: entry:3, score: 99 }, { age: 20, id: entry:2, score: 30 }, { age: 20, id: entry:1, score: 50 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, age, score] {rows: 3}\n    IndexScan [ctx: Db] [index: tag_age_score, access: ['omicron'], direction: Forward, limit: 3] {rows: 3}\n\nTotal rows: 3"'''
+value = '''"SelectProject [ctx: Db] [projections: id, age, score] {rows: 3}\n    IndexScan [ctx: Db] [index: tag_age_score, access: ['omicron'], direction: Forward, limit: 3, predicate: tags CONTAINS 'omicron'] {rows: 3}\n\nTotal rows: 3"'''
 
 [[test.results]]
 value = "[{ age: 30, id: entry:4, score: 70 }, { age: 20, id: entry:1, score: 50 }, { age: 20, id: entry:2, score: 30 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, age, score] {rows: 3}\n    IndexScan [ctx: Db] [index: tag_age_score, access: ['omicron'], direction: Backward, limit: 3] {rows: 3}\n\nTotal rows: 3"'''
+value = '''"SelectProject [ctx: Db] [projections: id, age, score] {rows: 3}\n    IndexScan [ctx: Db] [index: tag_age_score, access: ['omicron'], direction: Backward, limit: 3, predicate: tags CONTAINS 'omicron'] {rows: 3}\n\nTotal rows: 3"'''
 
 [[test.results]]
 value = "[{ age: 90, id: record:5 }, { age: 50, id: record:2 }, { age: 30, id: record:4 }]"

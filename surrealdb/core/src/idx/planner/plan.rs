@@ -412,9 +412,17 @@ impl PlanBuilder {
 	/// The Count and KeysOnly record strategies skip the per-record
 	/// evaluation of the WHERE clause and therefore require these guarantees.
 	fn scan_exactness(exp: &Expr, io: &IndexOption) -> (bool, bool) {
-		// An index column targeting array elements stores one entry per element
-		let part_all =
-			io.index_reference().cols.first().map(|s| s.0.contains(&Part::All)).unwrap_or(false);
+		// An index column targeting array elements stores one entry per
+		// element, which costs exactness in two ways, so any such column
+		// disqualifies the scan rather than only the leading one.
+		//
+		// At the leading column the entries and the expression disagree about
+		// what is compared: the index holds each element, while a whole-array
+		// equality compares the array, so the scan is broader than the
+		// predicate. At a trailing column a scan seeking the columns before
+		// it leaves this one unconstrained, so it reaches the record once per
+		// element.
+		let part_all = io.index_reference().cols.iter().any(|s| s.0.contains(&Part::All));
 		let exp_op = if let Expr::Binary {
 			op,
 			..
@@ -461,7 +469,7 @@ impl PlanBuilder {
 	/// column does not target array elements (which would return one entry
 	/// per matching element).
 	fn range_scan_exact(ixr: &IndexReference, rq: &UnionRangeQueryBuilder) -> bool {
-		if ixr.cols.first().map(|s| s.0.contains(&Part::All)).unwrap_or(false) {
+		if ixr.cols.iter().any(|s| s.0.contains(&Part::All)) {
 			return false;
 		}
 		let bound_ok = |b: &Bound<Arc<Value>>| match b {

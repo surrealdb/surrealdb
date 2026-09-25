@@ -36,8 +36,9 @@ value = "{ building: { compacting: false, initial: 3, pending: 0, status: 'ready
 value = "{ building: { compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: test, access: = 'testA@surrealdb.com', direction: Forward]
+value = '''
+"SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: test, access: = 'testA@surrealdb.com', direction: Forward, predicate: email = 'testA@surrealdb.com']
 "'''
 
 [[test.results]]

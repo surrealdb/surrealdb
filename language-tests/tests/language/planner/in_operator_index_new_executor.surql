@@ -48,7 +48,7 @@ value = "[{ apprenantUid: '00013483-fedd-43e3-a94e-80728d896f6e' }]"
 value = "[{ apprenantUid: '00013483-fedd-43e3-a94e-80728d896f6e' }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: apprenantUid] {rows: 1}\n    IndexScan [ctx: Db] [index: apprenantUid, access: = '00013483-fedd-43e3-a94e-80728d896f6e', direction: Forward] {rows: 1}\n\nTotal rows: 1"'''
+value = '''"SelectProject [ctx: Db] [projections: apprenantUid] {rows: 1}\n    IndexScan [ctx: Db] [index: apprenantUid, access: = '00013483-fedd-43e3-a94e-80728d896f6e', direction: Forward, predicate: apprenantUid INSIDE ['00013483-fedd-43e3-a94e-80728d896f6e']] {rows: 1}\n\nTotal rows: 1"'''
 
 [[test.results]]
 value = "NONE"

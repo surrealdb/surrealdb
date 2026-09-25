@@ -14,7 +14,7 @@ use crate::dbs::Options;
 use crate::doc::{CursorDoc, DocumentContext};
 use crate::exe::FlowResultExt as _;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
-use crate::expr::{Cond, Expr, Idiom};
+use crate::expr::{Cond, Expr, Idiom, Part};
 use crate::idx::count::IndexCountThingIterator;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
@@ -489,6 +489,26 @@ impl QueryExecutor {
 		} else {
 			None
 		}
+	}
+
+	/// Whether the iterator at `ir` can reach one record through several
+	/// index entries, so the records it yields have to be deduplicated.
+	///
+	/// A column whose idiom holds `*` stores one entry per element of that
+	/// column's value. Reported for any index carrying such a column rather
+	/// than only for the scans that actually leave one unconstrained: the
+	/// cost of an unnecessary dedupe is a hash set over one scan's records,
+	/// while the cost of missing one is a record processed once per element —
+	/// a duplicated row, an inflated count, and a mutating statement applied
+	/// several times to the same record.
+	pub(crate) fn iterator_fans_out(&self, ir: IteratorRef) -> bool {
+		self.0.it_entries.get(ir).is_some_and(|entry| {
+			let cols = match entry {
+				IteratorEntry::Single(_, io) => &io.index_reference().cols,
+				IteratorEntry::Range(_, index_reference, ..) => &index_reference.cols,
+			};
+			cols.iter().any(|c| c.0.contains(&Part::All))
+		})
 	}
 
 	pub(crate) async fn new_iterator(

@@ -842,12 +842,21 @@ async fn resolve_table_scan_stream(
 			access,
 			direction,
 		}) if !cfg.has_pushed_limit
-			|| cfg
+			|| (cfg
 				.order
 				.as_ref()
-				.is_none_or(|o| index_covers_ordering(&index_ref, &access, direction, o)) =>
+				.is_none_or(|o| index_covers_ordering(&index_ref, &access, direction, o))
+				// A pushed LIMIT counts rows, and a scan that fans out reads
+				// several entries per row, so the pipeline would truncate on
+				// entries. Leave that combination to the KV scan.
+				&& !crate::exec::index::access_path::access_fans_out(&index_ref.cols, &access)) =>
 		{
-			let operator = IndexScan::new(
+			// A key range leaving a fanning column open reaches a record
+			// through several entries; the scan yields records, so the
+			// repeats are collapsed before anything above counts them.
+			let fans_out =
+				crate::exec::index::access_path::access_fans_out(&index_ref.cols, &access);
+			let operator: Arc<dyn ExecOperator> = Arc::new(IndexScan::new(
 				index_ref,
 				access,
 				direction,
@@ -857,8 +866,12 @@ async fn resolve_table_scan_stream(
 				cfg.version,
 				None,
 				None,
-			);
-			let stream = operator.execute(ctx)?;
+			));
+			let stream = if fans_out {
+				crate::exec::operators::DistinctRecords::new(operator).execute(ctx)?
+			} else {
+				operator.execute(ctx)?
+			};
 			Ok((stream, 0))
 		}
 

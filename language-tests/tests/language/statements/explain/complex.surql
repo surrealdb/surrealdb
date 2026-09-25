@@ -30,8 +30,7 @@ value = """
 "SelectProject [ctx: Db] [projections: name, price, rating]
     Limit [ctx: Db] [limit: 1, offset: 0]
         SortTopKByKey [ctx: Db] [sort_keys: price ASC, limit: 1]
-            Filter [ctx: Db] [predicate: brand = 'Acme']
-                IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
+            IndexScan [ctx: Db] [index: idx_cat_brand, access: ['electronics', 'Acme'], direction: Forward, predicate: category = 'electronics' AND brand = 'Acme']
 """"
 
 [[test.results]]
@@ -43,7 +42,7 @@ value = """
 [[test.results]]
 value = """
 "Aggregate [ctx: Db] [mode: GROUP ALL]
-    IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
+    IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward, predicate: category = 'electronics']
 """"
 
 [[test.results]]

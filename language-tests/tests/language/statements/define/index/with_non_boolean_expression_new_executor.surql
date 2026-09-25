@@ -23,40 +23,45 @@ value = "NONE"
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward, predicate: v > 1]
 ''''
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward, predicate: v > 1]
 ''''
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward, predicate: v > 1]
 ''''
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward, predicate: v > 1]
 ''''
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward, predicate: v > 1]
 ''''
 
 */

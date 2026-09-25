@@ -21,7 +21,7 @@ value = "[{ id: ticket:t3 }]"
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { projections: 'id' }, children: [{ attributes: { access: '= NONE', direction: 'Forward', index: 'idx_owner' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"
+value = "{ attributes: { projections: 'id' }, children: [{ attributes: { access: '= NONE', direction: 'Forward', index: 'idx_owner', predicate: 'owner = NONE' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
 value = "[{ id: ticket:t2 }, { id: ticket:t3 }]"

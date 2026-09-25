@@ -12,7 +12,7 @@
 use std::collections::HashSet;
 use std::ops::Bound;
 
-use super::literals::try_literal_to_value;
+use super::literals::{try_expr_to_value, try_literal_to_value};
 use crate::catalog::Distance;
 use crate::exec::index::analysis::idiom_matches_containment;
 use crate::expr::operator::NearestNeighbor;
@@ -414,6 +414,13 @@ fn union_covers_leaf(
 		},
 		// CONTAINSALL / ALLINSIDE need intersection; the union does
 		// not cover them.  See `strip_union_index_conditions` rustdoc.
+		//
+		// `field IN [..]` is not covered either, though the union's branches
+		// are its literals: the leaf names the column's own value while the
+		// entries are per element, so a column holding an array satisfies a
+		// branch without satisfying the leaf. The union runs its branches
+		// without a predicate, so stripping it would drop the only check
+		// that separates the two.
 		_ => return false,
 	};
 	if !idiom_matches_containment(idiom, col) {
@@ -465,15 +472,15 @@ impl IndexConditionMatcher<'_> {
 		// only valid when the idiom was the left operand (see the Inside
 		// normalisation below).
 		let (idiom, value, effective_op, idiom_on_left) = match (left, right) {
-			(Expr::Idiom(i), Expr::Literal(lit)) => {
-				if let Some(v) = try_literal_to_value(lit) {
+			(Expr::Idiom(i), rhs) => {
+				if let Some(v) = try_expr_to_value(rhs) {
 					(i, v, op.clone(), true)
 				} else {
 					return false;
 				}
 			}
-			(Expr::Literal(lit), Expr::Idiom(i)) => {
-				if let Some(v) = try_literal_to_value(lit) {
+			(lhs, Expr::Idiom(i)) => {
+				if let Some(v) = try_expr_to_value(lhs) {
 					let flipped = match op {
 						BinaryOperator::LessThan => BinaryOperator::MoreThan,
 						BinaryOperator::LessThanEqual => BinaryOperator::MoreThanEqual,
@@ -535,16 +542,18 @@ impl IndexConditionMatcher<'_> {
 						}
 					}
 				}
-				// CONTAINS / INSIDE leaf on the leading array-element column:
-				// the analyser made it the Compound prefix's first value, so
-				// the scan range already filters to matching rows.
-				if is_containment
-					&& let Some(col) = self.cols.first()
-					&& let Some(val) = prefix.first()
-					&& idiom_matches_containment(idiom, col)
-					&& value == *val
-				{
-					return true;
+				// CONTAINS / INSIDE leaf on an array-element column the
+				// prefix reaches: the analyser pinned that column to this
+				// value, so the scan range already filters to matching
+				// rows. Positional like the equality arm above — the
+				// analyser extends a prefix across any column a containment
+				// leaf pins, not only the leading one.
+				if is_containment {
+					for (col, val) in self.cols.iter().zip(prefix.iter()) {
+						if idiom_matches_containment(idiom, col) && value == *val {
+							return true;
+						}
+					}
 				}
 				// Check range condition on the column after the prefix.
 				if let Some((range_op, range_val)) = range
@@ -590,6 +599,15 @@ impl IndexConditionMatcher<'_> {
 				};
 				if idiom != col {
 					return false;
+				}
+				// A range literal became this access whole, so the leaf is
+				// covered exactly when the literal's bounds are the access's.
+				if matches!(effective_op, BinaryOperator::Inside)
+					&& idiom_on_left
+					&& let Value::Range(r) = &value
+					&& **r == *range
+				{
+					return true;
 				}
 				match &range.start {
 					Bound::Included(x) => {

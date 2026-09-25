@@ -42,7 +42,7 @@ value = "[{ id: ticket:t5, tier: 'pro' }]"
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { projections: 'id' }, children: [{ attributes: { access: '= person:alice', direction: 'Forward', index: 'idx_owner' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"
+value = "{ attributes: { projections: 'id' }, children: [{ attributes: { access: '= person:alice', direction: 'Forward', index: 'idx_owner', predicate: 'owner = person:alice' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
 value = "[{ id: ticket:t1 }, { id: ticket:t2 }]"
@@ -51,13 +51,13 @@ value = "[{ id: ticket:t1 }, { id: ticket:t2 }]"
 value = "NONE"
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "= 'gold'", direction: 'Forward', index: 'idx_tier' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "= 'gold'", direction: 'Forward', index: 'idx_tier', predicate: "tier = 'gold'" }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
 
 [[test.results]]
 value = "[{ id: ticket:t1 }, { id: ticket:t3 }]"
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "= 'ACME'", direction: 'Forward', index: 'idx_org_label' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "= 'ACME'", direction: 'Forward', index: 'idx_org_label', predicate: "orgLabel = 'ACME'" }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
 
 [[test.results]]
 value = "[{ id: ticket:t1 }, { id: ticket:t3 }]"
@@ -66,7 +66,7 @@ value = "[{ id: ticket:t1 }, { id: ticket:t3 }]"
 value = "NONE"
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "= 'eu'", direction: 'Forward', index: 'idx_region' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "= 'eu'", direction: 'Forward', index: 'idx_region', predicate: "region = 'eu'" }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
 
 [[test.results]]
 value = "[{ id: ticket:t1 }, { id: ticket:t3 }, { id: ticket:t4 }]"

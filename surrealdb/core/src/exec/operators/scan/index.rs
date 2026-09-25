@@ -144,6 +144,9 @@ impl ExecOperator for IndexScan {
 		if let Some(ref start) = self.start {
 			attrs.push(("offset".to_string(), start.to_sql()));
 		}
+		if let Some(ref predicate) = self.where_predicate {
+			attrs.push(("predicate".to_string(), predicate.to_sql()));
+		}
 		attrs
 	}
 

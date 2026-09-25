@@ -112,6 +112,33 @@ pub(crate) fn try_literal_to_value(
 pub(crate) fn try_expr_to_value(expr: &Expr) -> Option<crate::val::Value> {
 	match expr {
 		Expr::Literal(lit) => try_literal_to_value(lit),
+		// A range written between two literals is itself a literal: the
+		// operator says which end is open, and both operands must fold for
+		// the range to have a value at all.
+		Expr::Binary {
+			left,
+			op:
+				op @ (BinaryOperator::Range
+				| BinaryOperator::RangeInclusive
+				| BinaryOperator::RangeSkip
+				| BinaryOperator::RangeSkipInclusive),
+			right,
+		} => {
+			let start = try_expr_to_value(left)?;
+			let end = try_expr_to_value(right)?;
+			let start = match op {
+				BinaryOperator::Range | BinaryOperator::RangeInclusive => Bound::Included(start),
+				_ => Bound::Excluded(start),
+			};
+			let end = match op {
+				BinaryOperator::Range | BinaryOperator::RangeSkip => Bound::Excluded(end),
+				_ => Bound::Included(end),
+			};
+			Some(crate::val::Value::Range(Box::new(crate::val::Range {
+				start,
+				end,
+			})))
+		}
 		_ => None,
 	}
 }

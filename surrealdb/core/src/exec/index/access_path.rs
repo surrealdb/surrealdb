@@ -10,7 +10,7 @@ use super::IndexCandidate;
 use crate::catalog::IndexDefinition;
 use crate::expr::operator::MatchesOperator;
 use crate::expr::with::With;
-use crate::expr::{BinaryOperator, Cond};
+use crate::expr::{BinaryOperator, Cond, Idiom, Part};
 use crate::kvs::Direction;
 use crate::val::{Number, Range, Value};
 
@@ -353,6 +353,29 @@ impl BTreeAccess {
 	}
 }
 
+/// Whether `access` leaves one of `cols` that fans out unpinned, so the key
+/// range reaches one record through several index entries.
+///
+/// A column whose idiom flattens (`*`) holds one entry per element. The
+/// columns an equality prefix pins each contribute a single matching entry —
+/// duplicate elements encode to one key — so only the columns from the prefix
+/// onwards can multiply. The column a trailing range merely bounds is among
+/// them: several of its elements can satisfy the bound.
+///
+/// Callers use this for the two things entries-are-not-rows breaks: yielding a
+/// record once per entry, and counting entries as rows.
+pub(crate) fn access_fans_out(cols: &[Idiom], access: &BTreeAccess) -> bool {
+	let pinned = match access {
+		BTreeAccess::Compound {
+			prefix,
+			..
+		} => prefix.len(),
+		BTreeAccess::Equality(_) => 1,
+		_ => 0,
+	};
+	cols.iter().skip(pinned).any(|c| c.0.iter().any(|p| matches!(p, Part::All)))
+}
+
 /// Select the best access path from candidates based on hints and heuristics.
 ///
 /// Selection priority:
@@ -362,7 +385,15 @@ impl BTreeAccess {
 ///    - Prefer unique index for equality (returns 1 row)
 ///    - Prefer compound index that matches more columns
 ///    - Prefer index that covers ORDER BY
-///    - Otherwise, pick first matching index
+///    - Otherwise, pick the first of the tied indexes in catalog order
+///
+/// The final rule is load-bearing rather than arbitrary: two indexes that a
+/// query scores identically must resolve to the same plan on every run, or an
+/// `EXPLAIN` naming one of them is fragile against the order candidates happen
+/// to be pushed in. Catalog order is stable for a given schema and is what
+/// `INFO FOR TABLE` reports — but it is the catalog's own ordering, which is
+/// keyed by index name, so it coincides with definition order only where the
+/// two agree.
 pub fn select_access_path(
 	mut candidates: Vec<IndexCandidate>,
 	with_hints: Option<&With>,
@@ -417,10 +448,13 @@ pub fn select_access_path(
 		return AccessPath::TableScan;
 	}
 
-	// Best effort: score and pick the best candidate
+	// Best effort: highest score wins, and catalog position breaks a tie.
+	// Sorting rather than `max_by_key` makes the choice independent of the
+	// order the analysis passes pushed the candidates in.
+	candidates.sort_by_key(|c| (std::cmp::Reverse(c.score()), c.index_ref.idx));
 	candidates
 		.into_iter()
-		.max_by_key(|c| c.score())
+		.next()
 		.map(|c| c.to_access_path(direction))
 		.unwrap_or(AccessPath::TableScan)
 }
@@ -848,17 +882,28 @@ mod tests {
 		}
 
 		#[test]
-		fn a_score_tie_resolves_to_the_last_candidate() {
-			// The selection rustdoc says "pick first matching index", but
-			// `max_by_key` keeps the last of equally-scoring elements. Both
-			// candidates are non-unique equalities, so they tie at 500.
+		fn a_score_tie_resolves_to_the_first_index_in_catalog_order() {
+			// Both candidates are non-unique equalities, so they tie at 500
+			// and catalog position decides. The fixture lists them in catalog
+			// order, which for a real table is name order.
 			let defs = vec![idx_basic(1, "ix_a1", &["a"]), idx_basic(2, "ix_a2", &["a"])];
 			let candidates = vec![
 				candidate(defs.clone(), 0, BTreeAccess::Equality(num(1))),
 				candidate(defs, 1, BTreeAccess::Equality(num(1))),
 			];
 			let path = select_access_path(candidates, None, Direction::Forward);
-			assert_eq!(scan_index(&path), "ix_a2");
+			assert_eq!(scan_index(&path), "ix_a1");
+		}
+
+		#[test]
+		fn a_score_tie_resolves_the_same_way_whatever_order_candidates_arrive_in() {
+			let defs = vec![idx_basic(1, "ix_a1", &["a"]), idx_basic(2, "ix_a2", &["a"])];
+			let reversed = vec![
+				candidate(defs.clone(), 1, BTreeAccess::Equality(num(1))),
+				candidate(defs, 0, BTreeAccess::Equality(num(1))),
+			];
+			let path = select_access_path(reversed, None, Direction::Forward);
+			assert_eq!(scan_index(&path), "ix_a1");
 		}
 
 		#[test]

@@ -29,7 +29,7 @@ value = "[{ id: t:d, score: 10 }]"
 value = "[{ id: t:b }, { id: t:c }, { id: t:d }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]\n    IndexScan [ctx: Db] [index: idx_score, access: >NONE, direction: Forward]\n''''
+value = ''''SelectProject [ctx: Db] [projections: id]\n    IndexScan [ctx: Db] [index: idx_score, access: >NONE, direction: Forward, predicate: score != NONE]\n''''
 
 [[test.results]]
 value = "[{ id: t:b }, { id: t:c }, { id: t:d }]"

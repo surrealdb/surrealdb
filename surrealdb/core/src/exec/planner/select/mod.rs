@@ -1949,12 +1949,32 @@ impl<'ctx> Planner<'ctx> {
 		// outstanding, so LIMIT/START must stay above the Sort. `order` is
 		// `None` here precisely because it was withheld, and `is_none_or`
 		// would otherwise read that as "nothing to order by".
+		//
+		// A column whose idiom flattens (`*`) holds one index entry per
+		// element, so a key range that does not pin such a column to a
+		// single value reaches the same record through several entries. The
+		// scan yields records rather than entries, so those repeats have to
+		// be collapsed below everything that counts rows — otherwise a
+		// record is returned once per element, `count()` reports entries as
+		// rows, and a mutating statement applies itself once per element.
+		//
+		// A column the prefix pins has no fan-out left; the column a
+		// trailing range merely bounds still has, since several of its
+		// elements can satisfy the bound.
+		let fans_out = crate::exec::index::access_path::access_fans_out(&index_ref.cols, &access);
+		// Nor is an ordering covered when the scan fans out: the record's
+		// position in key order is not one position but one per element, so a
+		// walk of the range does not visit records in the order the index
+		// columns imply.
 		let order_covered = || {
 			!order_withheld
-				&& order
-					.is_none_or(|ord| index_covers_ordering(&index_ref, &access, direction, ord))
+				&& !fans_out && order
+				.is_none_or(|ord| index_covers_ordering(&index_ref, &access, direction, ord))
 		};
+		// LIMIT counts rows, and a fanning scan's entries are not rows, so it
+		// cannot be answered by stopping the scan early.
 		let push = scan_limit.is_some()
+			&& !fans_out
 			&& matches!(filter_action, FilterAction::FullyConsumed)
 			&& order_covered();
 		// `scan_limit` flows to exactly one destination: pushed into the
@@ -1995,8 +2015,15 @@ impl<'ctx> Planner<'ctx> {
 		if let Some(tc) = table_ctx {
 			scan = scan.with_resolved(tc);
 		}
+		// The dedupe sits directly on the scan, below any residual Filter, so
+		// every operator above it sees each matching record exactly once.
+		let operator: Arc<dyn ExecOperator> = if fans_out {
+			Arc::new(crate::exec::operators::DistinctRecords::new(Arc::new(scan)))
+		} else {
+			Arc::new(scan)
+		};
 		Ok(PlannedSource {
-			operator: Arc::new(scan) as Arc<dyn ExecOperator>,
+			operator,
 			filter_action,
 			limit_pushed,
 			topk_pushdown: None,
@@ -2570,6 +2597,8 @@ impl<'ctx> Planner<'ctx> {
 				access,
 				direction,
 			} => {
+				let fans_out =
+					crate::exec::index::access_path::access_fans_out(&index_ref.cols, &access);
 				let mut scan = IndexScan::new(
 					index_ref,
 					access,
@@ -2586,6 +2615,15 @@ impl<'ctx> Planner<'ctx> {
 				}
 				if let Some(tc) = table_ctx {
 					scan = scan.with_resolved(tc.clone());
+				}
+				// A branch whose own key range leaves a fanning column open
+				// reaches a record through several entries. The union's merge
+				// answers for records appearing in more than one branch, not
+				// for one branch reaching a record twice.
+				if fans_out {
+					return Ok(Arc::new(crate::exec::operators::DistinctRecords::new(Arc::new(
+						scan,
+					))));
 				}
 				Ok(Arc::new(scan))
 			}
@@ -2973,6 +3011,15 @@ impl<'ctx> Planner<'ctx> {
 		// Look for a candidate that fully covers the WHERE condition
 		// (no residual filter needed).
 		for candidate in &candidates {
+			// A key-only count counts index entries, so it is only a row
+			// count while each matching record owns exactly one entry in the
+			// range. A scan that fans out counts a record once per element.
+			if crate::exec::index::access_path::access_fans_out(
+				&candidate.index_ref.cols,
+				&candidate.access,
+			) {
+				continue;
+			}
 			// Check: does this index access fully cover the condition?
 			// If strip_index_conditions returns None, the index
 			// consumed the entire WHERE clause.
