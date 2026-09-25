@@ -6251,7 +6251,8 @@ mod test {
 	use crate::key::schema::{DocKeyPrefix, DocLookupPrefix, IndexCountKey, IndexCountPrefix};
 	use crate::kvs::test_support::{WriteTxSizeObserver, cleanup_sizes};
 	use crate::kvs::testing::{
-		RetryableConflictSite, inject_retryable_conflict, inject_retryable_conflicts,
+		NonRetryableErrorSite, RetryableConflictSite, inject_non_retryable_error,
+		inject_non_retryable_errors, inject_retryable_conflict, inject_retryable_conflicts,
 		retryable_conflict_count,
 	};
 	use crate::types::{PublicValue, PublicVariables};
@@ -7874,6 +7875,112 @@ mod test {
 			0,
 			"no attempt committed, so the event left nothing behind"
 		);
+		Ok(())
+	}
+
+	/// Reads the queue the way a batch does, without running anything.
+	async fn fetch_event_queue(ds: &Datastore) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+		let tx = ds.transaction(Read).await?;
+		let res =
+			tx.scan_raw(crate::key::schema::EventQueuePrefix {}.range()?, 1000, 0, None).await;
+		tx.cancel().await?;
+		res
+	}
+
+	/// A batch that fetched an entry another consumer has since run must not
+	/// run it again. Batches overlap once the event-processing lease lapses, so
+	/// two nodes can hold the same entry; only the first to commit runs it.
+	#[test_log::test(tokio::test)]
+	async fn an_event_run_by_an_overlapping_batch_is_not_run_again() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_one_async_event(&ds, &session, 1).await?;
+
+		let stale = fetch_event_queue(&ds).await?;
+		assert_eq!(stale.len(), 1, "the queued event must be the one entry fetched");
+		drain_event_queue(&ds).await?;
+		assert_eq!(logged_count(&ds, &session).await?, 1, "the first batch runs the event");
+
+		crate::doc::process_events_batch(&ds, stale, None).await?;
+
+		assert_eq!(
+			logged_count(&ds, &session).await?,
+			1,
+			"the overlapping batch must find the entry gone rather than run it again"
+		);
+		assert!(
+			fetch_event_queue(&ds).await?.is_empty(),
+			"the overlapping batch must not requeue an entry that already ran"
+		);
+		Ok(())
+	}
+
+	/// A commit that applied but reported an unknown outcome has run the event
+	/// and removed its entry. Requeueing on that report would run the event
+	/// twice: `RETRY 1` is what makes that observable, since a charged attempt
+	/// would put the entry back for a second pass to run.
+	#[test_log::test(tokio::test)]
+	async fn an_event_whose_commit_applied_unknown_is_not_run_again() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_one_async_event(&ds, &session, 1).await?;
+
+		let site = NonRetryableErrorSite::AsyncEventCommitAppliedUnknown;
+		let _guard = inject_non_retryable_error(site, ds.id());
+
+		assert_eq!(process_next_events_batch(&ds, None).await?, 1);
+		assert_eq!(
+			process_next_events_batch(&ds, None).await?,
+			0,
+			"the applied commit removed the entry, so nothing may have put it back"
+		);
+		assert_eq!(logged_count(&ds, &session).await?, 1, "the event must run exactly once");
+		Ok(())
+	}
+
+	/// A commit that reported an unknown outcome without applying has neither
+	/// run the event nor removed its entry. Deleting the entry on that report
+	/// would lose the event: `RETRY 0` is what makes that observable, since a
+	/// charged attempt would exhaust the budget and delete it.
+	#[test_log::test(tokio::test)]
+	async fn an_event_whose_commit_was_discarded_unknown_still_runs() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_one_async_event(&ds, &session, 0).await?;
+
+		let site = NonRetryableErrorSite::AsyncEventCommitDiscardedUnknown;
+		let _guard = inject_non_retryable_error(site, ds.id());
+
+		assert_eq!(process_next_events_batch(&ds, None).await?, 1);
+		assert_eq!(
+			process_next_events_batch(&ds, None).await?,
+			0,
+			"the unknown outcome belongs to the pass that ran the event"
+		);
+		assert_eq!(logged_count(&ds, &session).await?, 1, "the event must still run, once");
+		Ok(())
+	}
+
+	/// An outcome that stays unknown past the in-place bound is never charged
+	/// to the `RETRY` budget: the entry is left as the last commit left it, and
+	/// a later pass runs it or finds it gone. `RETRY 0` is what makes that
+	/// observable, since a charged attempt would delete the entry.
+	#[test_log::test(tokio::test)]
+	async fn an_event_whose_commit_outcome_stays_unknown_is_left_queued() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_one_async_event(&ds, &session, 0).await?;
+
+		let site = NonRetryableErrorSite::AsyncEventCommitDiscardedUnknown;
+		// Every attempt of the first pass: the first run and each in-place re-run.
+		let _guard = inject_non_retryable_errors(site, ds.id(), 4);
+
+		assert_eq!(process_next_events_batch(&ds, None).await?, 1);
+		assert_eq!(logged_count(&ds, &session).await?, 0, "no attempt of the first pass applied");
+		assert_eq!(
+			fetch_event_queue(&ds).await?.len(),
+			1,
+			"an unknown outcome must leave the entry queued rather than delete it"
+		);
+
+		drain_event_queue(&ds).await?;
+		assert_eq!(logged_count(&ds, &session).await?, 1, "a later pass runs the event");
 		Ok(())
 	}
 
