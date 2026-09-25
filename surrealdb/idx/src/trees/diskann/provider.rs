@@ -23,6 +23,17 @@
 //! Adding a new cache write from a writable tx outside an `apply_compaction` frame, or relaxing
 //! the read-only-tx guard, reintroduces the race described in
 //! [issue #7318](https://github.com/surrealdb/surrealdb/issues/7318).
+//!
+//! 3. **A read that will be written back never comes from the cache.** Nothing invalidates a
+//!    process-local entry when *another* process commits, so a cached value can predate a committed
+//!    write. That is tolerable for a value the reader only consumes — the cost is a worse answer
+//!    from an index that is approximate anyway — and not tolerable for one it modifies and
+//!    persists, because the write reverts whatever the stale copy was missing. `!ds` is the sharp
+//!    case, since it carries the element-id allocator and [`DiskAnnProvider::write_state`] persists
+//!    the whole struct: incrementing a stale `next_element_id` reissues an id another process
+//!    already used and rewinds the counter, so every later allocation collides too.
+//!    Read-modify-write callers therefore use [`DiskAnnProvider::read_state_for_update`], which
+//!    always goes to the transaction.
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -205,6 +216,11 @@ impl DiskAnnProvider {
 
 	/// Reads persisted graph state, using the cache for the entry point and next element id.
 	///
+	/// **Read-only.** A caller that intends to write the state back must use
+	/// [`Self::read_state_for_update`] instead: the cached copy may predate a `!ds` write
+	/// committed by another process, and [`Self::write_state`] persists the whole struct, so
+	/// modifying a stale copy silently reverts every field the caller did not touch.
+	///
 	/// The `writeable()` guard around `insert_state` enforces rule (1) of the module-level
 	/// [cache coherency invariant](self): only read-only transactions publish KV state into the
 	/// shared cache. Same rule the doc-id path enforces in `DiskAnnDocs::get_things_batch`
@@ -214,11 +230,40 @@ impl DiskAnnProvider {
 		if let Some(state) = self.cache.get_state(index) {
 			return Ok(state);
 		}
-		let state = context.tx.get_key(&context.ikb.new_ds_key(), None).await?.unwrap_or_default();
+		let state = self.load_state(context).await?;
 		if !context.tx.writeable() {
 			self.cache.insert_state(index, state.clone());
 		}
 		Ok(state)
+	}
+
+	/// Reads persisted graph state for a read-modify-write, always through the transaction.
+	///
+	/// `!ds` holds the element-id allocator alongside the entry point, and
+	/// [`Self::write_state`] persists both. The process-local cache is not invalidated when
+	/// another process commits, so a cached copy can predate a foreign `!ds` write — and a
+	/// caller that increments `next_element_id` from that copy hands out an id the other process
+	/// already used, overwrites the element behind it, and persists a counter that has gone
+	/// backwards, so the collision repeats for every later allocation.
+	///
+	/// Reading through the transaction removes that: the transaction's snapshot includes every
+	/// committed write, and on a writable transaction it also includes this frame's own earlier
+	/// allocations, so successive calls within one frame still see each other. Two *concurrent*
+	/// frames are a separate matter, fenced by the `!dg` conditional bump that lets only one
+	/// commit.
+	///
+	/// Costs one point read per call. Every caller is on a compaction path that performs orders
+	/// of magnitude more KV work per vector, and the search path does not use this.
+	async fn read_state_for_update(
+		&self,
+		context: &DiskAnnProviderContext,
+	) -> Result<DiskAnnState> {
+		self.load_state(context).await
+	}
+
+	/// Reads `!ds` from the transaction, defaulting when the key is absent.
+	async fn load_state(&self, context: &DiskAnnProviderContext) -> Result<DiskAnnState> {
+		Ok(context.tx.get_key(&context.ikb.new_ds_key(), None).await?.unwrap_or_default())
 	}
 
 	/// Persists graph state and refreshes the cached copy atomically from the caller's view.
@@ -313,7 +358,7 @@ impl DiskAnnProvider {
 		&self,
 		context: &DiskAnnProviderContext,
 	) -> Result<ElementId> {
-		let mut state = self.read_state(context).await?;
+		let mut state = self.read_state_for_update(context).await?;
 		let element_id = state.next_element_id;
 		state.next_element_id = state.next_element_id.saturating_add(1);
 		self.write_state(context, &state).await?;
@@ -326,7 +371,7 @@ impl DiskAnnProvider {
 		context: &DiskAnnProviderContext,
 		element_id: ElementId,
 	) -> Result<()> {
-		let mut state = self.read_state(context).await?;
+		let mut state = self.read_state_for_update(context).await?;
 		if state.enter_point.is_none() {
 			state.enter_point = Some(element_id);
 			self.write_state(context, &state).await?;
@@ -340,22 +385,64 @@ impl DiskAnnProvider {
 		context: &DiskAnnProviderContext,
 		element_id: Option<ElementId>,
 	) -> Result<()> {
-		let mut state = self.read_state(context).await?;
+		let mut state = self.read_state_for_update(context).await?;
 		state.enter_point = element_id;
 		self.write_state(context, &state).await
 	}
 
-	/// Returns usable graph starting points, repairing deleted entry points with a fallback scan.
+	/// Returns usable graph starting points for a **search**, repairing a deleted entry point
+	/// with a fallback scan.
+	///
+	/// The stored entry point and its liveness come from the cache. That is sound *only* because
+	/// the caller merely starts a traversal from the result: a stale entry point makes the greedy
+	/// search begin somewhere worse, which costs recall in a structure that is approximate by
+	/// construction.
+	///
+	/// A caller that **persists** the result must use [`Self::valid_starting_points_for_update`].
+	/// Writing a value derived from the cache is the same defect as writing a cached state
+	/// struct back — see rule 3 of the module-level
+	/// [cache coherency invariant](self) — and it is easy to miss here, because the write happens
+	/// one call further out rather than in this function.
 	pub(super) async fn valid_starting_points(
 		&self,
 		context: &DiskAnnProviderContext,
 	) -> ANNResult<Vec<ElementId>> {
-		let state = self.read_state(context).await.map_err(|e| ANNError::message(e.to_string()))?;
+		self.starting_points(context, false).await
+	}
+
+	/// Returns usable graph starting points for a caller that will persist the result.
+	///
+	/// `DiskAnnGraph::remove` hands its result straight to
+	/// [`Self::set_entry_point`]. If the stored entry point came from the cache, and its
+	/// liveness check came from the cache too, a process whose cache predates another process's
+	/// commit will persist a tombstoned entry point over the live one that process committed —
+	/// leaving every later search and insert starting from a deleted node. Reading both through
+	/// the transaction removes that; the fallback scan below is already transactional.
+	pub(super) async fn valid_starting_points_for_update(
+		&self,
+		context: &DiskAnnProviderContext,
+	) -> ANNResult<Vec<ElementId>> {
+		self.starting_points(context, true).await
+	}
+
+	/// Shared body. `for_update` selects transactional reads for the stored entry point and its
+	/// liveness; the fallback scan reads the transaction either way.
+	async fn starting_points(
+		&self,
+		context: &DiskAnnProviderContext,
+		for_update: bool,
+	) -> ANNResult<Vec<ElementId>> {
+		let state = if for_update {
+			self.read_state_for_update(context).await
+		} else {
+			self.read_state(context).await
+		}
+		.map_err(|e| ANNError::message(e.to_string()))?;
 		if let Some(element_id) = state.enter_point
 			&& self
-				.status_by_internal_id(context, element_id)
+				.entry_point_is_live(context, element_id, for_update)
 				.await
-				.is_ok_and(ElementStatus::is_valid)
+				.is_ok_and(|live| live)
 		{
 			return Ok(vec![element_id]);
 		}
@@ -412,6 +499,31 @@ impl DiskAnnProvider {
 			}
 		}
 		Ok(Vec::new())
+	}
+
+	/// Whether an element exists and is not tombstoned.
+	///
+	/// `for_update` reads `!de` through the transaction instead of the cache, for a caller whose
+	/// answer will be persisted: a cached element can report a node live after another process
+	/// has committed its deletion.
+	async fn entry_point_is_live(
+		&self,
+		context: &DiskAnnProviderContext,
+		element_id: ElementId,
+		for_update: bool,
+	) -> ANNResult<bool> {
+		if !for_update {
+			return Ok(self
+				.status_by_internal_id(context, element_id)
+				.await
+				.is_ok_and(ElementStatus::is_valid));
+		}
+		let element: Option<DiskAnnElement> = context
+			.tx
+			.get_key(&context.ikb.new_de_key(element_id), None)
+			.await
+			.map_err(|e| ANNError::message(e.to_string()))?;
+		Ok(element.is_some_and(|e| !e.deleted))
 	}
 
 	/// Returns present, non-deleted vectors for the requested element ids.

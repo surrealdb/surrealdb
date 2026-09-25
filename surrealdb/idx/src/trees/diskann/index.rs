@@ -475,7 +475,14 @@ impl DiskAnnGraph {
 	) -> Result<()> {
 		let provider = self.index.provider();
 		provider.delete(&ctx.provider_context, &element_id).await?;
-		let next = provider.valid_starting_points(&ctx.provider_context).await?.into_iter().next();
+		// `_for_update` because the result is persisted on the next line: a cached entry point,
+		// validated against a cached element, would overwrite a live entry point another process
+		// committed with one it has already deleted.
+		let next = provider
+			.valid_starting_points_for_update(&ctx.provider_context)
+			.await?
+			.into_iter()
+			.next();
 		provider.set_entry_point(&ctx.provider_context, next).await?;
 		Ok(())
 	}
@@ -2118,6 +2125,8 @@ impl DiskAnnIndex {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::BTreeMap;
+
 	use surrealdb_datastore::is_retryable_transaction_conflict;
 	use surrealdb_kvs::TransactionType;
 	#[cfg(feature = "kv-rocksdb")]
@@ -2128,6 +2137,7 @@ mod tests {
 	use crate::docids::TableDocIds;
 	use crate::test_env::{CancelAtCheckpoint, TestIndexEnv, TestIndexStore};
 	use crate::trees::diskann::cache::DiskAnnCache;
+	use crate::trees::diskann::{DiskAnnElement, DiskAnnNode, DiskAnnState};
 	use crate::trees::pending::{
 		PENDING_MAX_BATCH_KEYS, PENDING_MAX_BYTES, PENDING_MAX_PAGE_BYTES, PENDING_MAX_ROWS,
 		PENDING_PROBE_ROWS,
@@ -5129,6 +5139,459 @@ mod tests {
 		ctx.tx().commit().await?;
 		assert!(compact_once(&index, &ds, &ikb).await?);
 		assert_eq!(knn_len(&index, &ds, &v1).await?, 1);
+		Ok(())
+	}
+
+	// ------------------------------------------------------------------
+	// Foreign-generation cache staleness (#1193)
+	// ------------------------------------------------------------------
+
+	/// Two DiskANN handles over one KV store, each with its own [`DiskAnnCache`].
+	///
+	/// This is what two SurrealDB nodes sharing a store look like from the index's point of view.
+	/// [`DiskAnnGraph`] keeps no data of its own: every value it serves comes either from the `!d*`
+	/// keyspace, which both handles share, or from the cache, which neither handle can reach the
+	/// other's copy of. A `Datastore` builds one `IndexStores` — and with it one `DiskAnnCache` and
+	/// one index registry — per handle, so two handles here have exactly the separation two
+	/// datastores over one store have, without the catalog layer in between.
+	///
+	/// `!dg` is the only cross-node signal an index carries, and nothing in the cache is scoped to
+	/// it: only `DocId` entries hold a generation. Every scenario below turns on that gap.
+	struct TwoNodes {
+		ds: TestIndexStore,
+		/// The handle that produces the foreign generations.
+		a: DiskAnnIndex,
+		/// The handle whose cache is warmed before those generations land.
+		b: DiskAnnIndex,
+		/// `b`'s cache, so a control run can drop it at the point a foreign generation lands.
+		b_cache: DiskAnnCache,
+		ikb: IndexKeyBase,
+	}
+
+	/// Degree wide enough that no adjacency list in these scenarios reaches the slacked bound, so
+	/// back-edges are pure appends and a persisted adjacency list can only grow. Any neighbour that
+	/// disappears from one is therefore a lost edge, not a prune.
+	const TWO_NODE_DEGREE: u16 = 64;
+
+	impl TwoNodes {
+		async fn new(ds: TestIndexStore) -> Result<Self> {
+			let ikb = ikb();
+			let p = DiskAnnParams {
+				degree: TWO_NODE_DEGREE,
+				..params(VectorType::F32, Distance::Euclidean)
+			};
+			let b_cache = cache();
+			Ok(Self {
+				a: new_index(ikb.clone(), TableId(4), &p, cache()).await?,
+				b: new_index(ikb.clone(), TableId(4), &p, b_cache.clone()).await?,
+				b_cache,
+				ikb,
+				ds,
+			})
+		}
+
+		/// Drops every entry `b` has cached for this index, standing in for a node that has just
+		/// started or whose entries have aged out. The control runs use it to pin the cache as the
+		/// cause: with it, each scenario behaves as a single node does.
+		async fn clear_b_cache(&self) {
+			self.b_cache
+				.remove_index(
+					self.ikb.ns(),
+					self.ikb.db(),
+					TableId(4),
+					self.ikb.index(),
+					DOC_IDS_FORMAT_VERSION,
+				)
+				.await;
+		}
+
+		/// Appends a pending update. Which handle records it is immaterial —
+		/// [`DiskAnnIndex::index`] only writes `!dw`/`!dy` keys and touches no cache — so every
+		/// scenario writes through `a`.
+		async fn write(&self, id: i64, old: Option<&[f32]>, new: Option<&[f32]>) -> Result<()> {
+			let ctx = new_ctx(&self.ds, TransactionType::Write).await;
+			self.a
+				.index(&ctx, &RecordIdKey::Number(id), old.map(f32_content), new.map(f32_content))
+				.await?;
+			ctx.tx().commit().await
+		}
+
+		/// Drains every pending update through `node`, which is the handle whose cache the
+		/// compaction reads through and writes through, and whose `!dg` bump the fence sees.
+		async fn compact_on(&self, node: &DiskAnnIndex) -> Result<()> {
+			while compact_once(node, &self.ds, &self.ikb).await? {}
+			Ok(())
+		}
+
+		async fn next_element_id(&self) -> Result<ElementId> {
+			let tx = self.ds.transaction(TransactionType::Read).await?;
+			let state: DiskAnnState =
+				tx.get_key(&self.ikb.new_ds_key(), None).await?.unwrap_or_default();
+			tx.cancel().await?;
+			Ok(state.next_element_id)
+		}
+
+		/// The persisted adjacency list and vector of every element below `limit`, read straight
+		/// from KV so the assertion never consults either handle's cache.
+		async fn graph_dump(&self, limit: ElementId) -> Result<GraphDump> {
+			let tx = self.ds.transaction(TransactionType::Read).await?;
+			let mut dump = GraphDump::new();
+			for element_id in 0..limit {
+				let node: Option<DiskAnnNode> =
+					tx.get_key(&self.ikb.new_dn_key(element_id), None).await?;
+				let element: Option<DiskAnnElement> =
+					tx.get_key(&self.ikb.new_de_key(element_id), None).await?;
+				if let Some(node) = node {
+					dump.insert(element_id, (node.neighbors, element.map(|e| e.vector)));
+				}
+			}
+			tx.cancel().await?;
+			Ok(dump)
+		}
+	}
+
+	/// Element id → (adjacency list, vector), as persisted.
+	type GraphDump = BTreeMap<ElementId, (Vec<ElementId>, Option<SerializedVector>)>;
+
+	/// What one compaction left behind in KV.
+	struct CompactionObservation {
+		/// `!ds.next_element_id` before and after the compaction. A compaction only ever
+		/// allocates, so the second value must be at least the first.
+		next_element_id: (ElementId, ElementId),
+		/// Elements whose persisted vector the compaction replaced. A compaction inserting new
+		/// vectors allocates fresh ids, so it must replace none.
+		overwritten_elements: Vec<ElementId>,
+		/// Adjacency edges the compaction dropped, excluding those leaving an element in
+		/// `overwritten_elements`: an element the compaction allocated over was rewritten
+		/// wholesale, so its edges going missing measures the id collision rather than a stale
+		/// adjacency read. What is left is what a read-modify-write of an adjacency list lost.
+		dropped_edges: Vec<(ElementId, ElementId)>,
+	}
+
+	/// Node A builds a graph, node B warms its cache over it, node A commits a further generation,
+	/// and then node B compacts one more vector. Returns what B's compaction did to KV.
+	///
+	/// `keep_b_cache_warm` selects the control: when false, B's cache is dropped at the point A's
+	/// foreign generation lands, which is the only difference between the two runs.
+	async fn two_node_compaction(
+		ds: TestIndexStore,
+		keep_b_cache_warm: bool,
+	) -> Result<CompactionObservation> {
+		let nodes = TwoNodes::new(ds).await?;
+		for i in 1..=12i64 {
+			let v = i as f32;
+			nodes.write(i, None, Some(&[v, v, v, v])).await?;
+		}
+		nodes.compact_on(&nodes.a).await?;
+
+		// One query per vector, so B caches the graph state and the adjacency of every element a
+		// search can reach. This is an ordinary read-only query path: nothing here is contrived.
+		for i in 1..=12i64 {
+			let v = i as f32;
+			knn_len_with_k(&nodes.b, &nodes.ds, &[v, v, v, v], 4).await?;
+		}
+
+		// The foreign generation. A's compaction allocates eight elements interleaved with the
+		// first twelve and writes back-edges to them into the adjacency lists B has cached.
+		for i in 13..=20i64 {
+			let v = (i - 12) as f32 + 0.5;
+			nodes.write(i, None, Some(&[v, v, v, v])).await?;
+		}
+		nodes.compact_on(&nodes.a).await?;
+		if !keep_b_cache_warm {
+			nodes.clear_b_cache().await;
+		}
+
+		let before_id = nodes.next_element_id().await?;
+		// Dump past the current allocation point so elements stay visible even if the compaction
+		// rewinds `next_element_id`.
+		let limit = before_id + 4;
+		let before = nodes.graph_dump(limit).await?;
+
+		nodes.write(21, None, Some(&[6.25f32, 6.25, 6.25, 6.25])).await?;
+		nodes.compact_on(&nodes.b).await?;
+
+		let after_id = nodes.next_element_id().await?;
+		let after = nodes.graph_dump(limit).await?;
+		let overwritten_elements: Vec<ElementId> = before
+			.iter()
+			.filter(|(id, (_, vector))| after.get(id).is_some_and(|(_, current)| current != vector))
+			.map(|(id, _)| *id)
+			.collect();
+		let mut dropped_edges = Vec::new();
+		for (from, (neighbors, _)) in &before {
+			if overwritten_elements.contains(from) {
+				continue;
+			}
+			let current = after.get(from).map(|(neighbors, _)| neighbors);
+			for to in neighbors {
+				if !current.is_some_and(|current| current.contains(to)) {
+					dropped_edges.push((*from, *to));
+				}
+			}
+		}
+		Ok(CompactionObservation {
+			next_element_id: (before_id, after_id),
+			overwritten_elements,
+			dropped_edges,
+		})
+	}
+
+	/// Nearest neighbour each node reports for one query point.
+	struct QueryObservation {
+		a: Vec<i64>,
+		b: Vec<i64>,
+		a_distance: Option<f64>,
+		b_distance: Option<f64>,
+	}
+
+	/// Node B caches document `1` at vector `v`, node A moves that document's vector far away and
+	/// compacts, and both nodes are then queried at `v`.
+	async fn two_node_moved_document(
+		ds: TestIndexStore,
+		keep_b_cache_warm: bool,
+	) -> Result<QueryObservation> {
+		let nodes = TwoNodes::new(ds).await?;
+		for i in 1..=8i64 {
+			let v = i as f32;
+			nodes.write(i, None, Some(&[v, v, v, v])).await?;
+		}
+		nodes.compact_on(&nodes.a).await?;
+		let query = [1.0f32, 1.0, 1.0, 1.0];
+		assert_eq!(
+			knn_keys_with_allow(&nodes.b, &nodes.ds, &query, 1, None).await?,
+			vec![1],
+			"the run needs B's cache warmed with record 1 at the query point"
+		);
+
+		nodes.write(1, Some(&query), Some(&[900.0f32, 900.0, 900.0, 900.0])).await?;
+		nodes.compact_on(&nodes.a).await?;
+		if !keep_b_cache_warm {
+			nodes.clear_b_cache().await;
+		}
+
+		Ok(QueryObservation {
+			a: knn_keys_with_allow(&nodes.a, &nodes.ds, &query, 1, None).await?,
+			a_distance: knn_nearest(&nodes.a, &nodes.ds, &query).await?,
+			b: knn_keys_with_allow(&nodes.b, &nodes.ds, &query, 1, None).await?,
+			b_distance: knn_nearest(&nodes.b, &nodes.ds, &query).await?,
+		})
+	}
+
+	/// Node B caches a graph of eight distant vectors, node A inserts four much nearer ones and
+	/// compacts, and both nodes are then queried at the origin. `k` is larger than the whole index
+	/// on the second query, so a result that still omits the new vectors omits them at every `ef`.
+	async fn two_node_new_vectors(
+		ds: TestIndexStore,
+		keep_b_cache_warm: bool,
+	) -> Result<(QueryObservation, Vec<i64>)> {
+		let nodes = TwoNodes::new(ds).await?;
+		for i in 1..=8i64 {
+			let v = 100.0 + i as f32;
+			nodes.write(i, None, Some(&[v, v, v, v])).await?;
+		}
+		nodes.compact_on(&nodes.a).await?;
+		let query = [0.0f32, 0.0, 0.0, 0.0];
+		assert_eq!(
+			knn_keys_with_allow(&nodes.b, &nodes.ds, &query, 4, None).await?,
+			vec![1, 2, 3, 4],
+			"the run needs B's cache warmed over the pre-existing graph"
+		);
+
+		for i in 9..=12i64 {
+			let v = (i - 8) as f32;
+			nodes.write(i, None, Some(&[v, v, v, v])).await?;
+		}
+		nodes.compact_on(&nodes.a).await?;
+		if !keep_b_cache_warm {
+			nodes.clear_b_cache().await;
+		}
+
+		let observed = QueryObservation {
+			a: knn_keys_with_allow(&nodes.a, &nodes.ds, &query, 4, None).await?,
+			a_distance: knn_nearest(&nodes.a, &nodes.ds, &query).await?,
+			b: knn_keys_with_allow(&nodes.b, &nodes.ds, &query, 4, None).await?,
+			b_distance: knn_nearest(&nodes.b, &nodes.ds, &query).await?,
+		};
+		let b_exhaustive = knn_keys_with_allow(&nodes.b, &nodes.ds, &query, 12, None).await?;
+		Ok((observed, b_exhaustive))
+	}
+
+	/// #1193 prediction 1: a compaction on a node whose cache predates another node's generation
+	/// rewrites adjacency lists from that cache and drops the other node's edges.
+	#[tokio::test]
+	#[ignore = "#1193: node B's compaction rewrites adjacency from its pre-generation cache"]
+	async fn diskann_foreign_generation_compaction_keeps_foreign_edges() -> Result<()> {
+		let observed = two_node_compaction(TestIndexStore::new().await, true).await?;
+		assert!(
+			observed.dropped_edges.is_empty(),
+			"compaction dropped adjacency edges committed by the other node: {:?}",
+			observed.dropped_edges
+		);
+		Ok(())
+	}
+
+	/// The same compaction with node B's cache dropped first: what the cache costs, isolated.
+	#[tokio::test]
+	async fn diskann_cold_cache_compaction_keeps_foreign_edges() -> Result<()> {
+		let observed = two_node_compaction(TestIndexStore::new().await, false).await?;
+		assert!(
+			observed.dropped_edges.is_empty(),
+			"compaction dropped adjacency edges committed by the other node: {:?}",
+			observed.dropped_edges
+		);
+		Ok(())
+	}
+
+	/// A compaction must not re-allocate element ids another process already used.
+	///
+	/// `!ds` carries the allocator alongside the entry point, and the process-local cache is not
+	/// invalidated when another process commits — so a compaction reading it from the cache would
+	/// increment a stale `next_element_id`, overwrite the elements behind the ids it reissued, and
+	/// persist a rewound counter, leaving every later allocation on this index to collide again.
+	/// The read-modify-write paths go through the transaction to prevent that.
+	#[tokio::test]
+	async fn diskann_foreign_generation_compaction_does_not_reuse_element_ids() -> Result<()> {
+		let observed = two_node_compaction(TestIndexStore::new().await, true).await?;
+		let (before, after) = observed.next_element_id;
+		assert!(after >= before, "compaction rewound next_element_id from {before} to {after}");
+		assert!(
+			observed.overwritten_elements.is_empty(),
+			"compaction overwrote the vectors of elements another node allocated: {:?}",
+			observed.overwritten_elements
+		);
+		Ok(())
+	}
+
+	/// The same compaction with node B's cache dropped first.
+	#[tokio::test]
+	async fn diskann_cold_cache_compaction_does_not_reuse_element_ids() -> Result<()> {
+		let observed = two_node_compaction(TestIndexStore::new().await, false).await?;
+		let (before, after) = observed.next_element_id;
+		assert!(after >= before, "compaction rewound next_element_id from {before} to {after}");
+		assert!(
+			observed.overwritten_elements.is_empty(),
+			"compaction overwrote the vectors of elements another node allocated: {:?}",
+			observed.overwritten_elements
+		);
+		Ok(())
+	}
+
+	/// #1193 prediction 2: a document whose vector moved on another node comes back from the stale
+	/// node's cached element and doc set, scored against the vector it no longer has.
+	#[tokio::test]
+	#[ignore = "#1193: node B scores a moved document against its cached pre-move vector"]
+	async fn diskann_foreign_generation_query_scores_moved_document_correctly() -> Result<()> {
+		let observed = two_node_moved_document(TestIndexStore::new().await, true).await?;
+		assert_eq!(
+			(&observed.b, observed.b_distance),
+			(&observed.a, observed.a_distance),
+			"the two nodes disagree about the nearest neighbour of a point one of them moved a \
+			 document away from"
+		);
+		Ok(())
+	}
+
+	/// The same query with node B's cache dropped first.
+	#[tokio::test]
+	async fn diskann_cold_cache_query_scores_moved_document_correctly() -> Result<()> {
+		let observed = two_node_moved_document(TestIndexStore::new().await, false).await?;
+		assert_eq!(
+			(&observed.b, observed.b_distance),
+			(&observed.a, observed.a_distance),
+			"the two nodes disagree about the nearest neighbour of a point one of them moved a \
+			 document away from"
+		);
+		Ok(())
+	}
+
+	/// #1193 prediction 3: vectors another node committed are unreachable from a stale cached
+	/// adjacency, at any `k`, because that adjacency names none of them and the other node's
+	/// compaction has already drained the pendings the lookup path would otherwise merge.
+	#[tokio::test]
+	#[ignore = "#1193: vectors committed by node A are unreachable from node B's cached adjacency"]
+	async fn diskann_foreign_generation_query_reaches_new_vectors() -> Result<()> {
+		let (observed, b_exhaustive) =
+			two_node_new_vectors(TestIndexStore::new().await, true).await?;
+		assert_eq!(
+			observed.b, observed.a,
+			"the two nodes disagree about the nearest neighbours after one of them inserted \
+			 vectors at the query point"
+		);
+		assert_eq!(
+			b_exhaustive,
+			(1..=12).collect::<Vec<i64>>(),
+			"a k larger than the index still did not reach the vectors the other node committed"
+		);
+		Ok(())
+	}
+
+	/// The same query with node B's cache dropped first.
+	#[tokio::test]
+	async fn diskann_cold_cache_query_reaches_new_vectors() -> Result<()> {
+		let (observed, b_exhaustive) =
+			two_node_new_vectors(TestIndexStore::new().await, false).await?;
+		assert_eq!(
+			observed.b, observed.a,
+			"the two nodes disagree about the nearest neighbours after one of them inserted \
+			 vectors at the query point"
+		);
+		assert_eq!(
+			b_exhaustive,
+			(1..=12).collect::<Vec<i64>>(),
+			"a k larger than the index still did not reach the vectors the other node committed"
+		);
+		Ok(())
+	}
+
+	/// Every #1193 scenario against one on-disk RocksDB store, so none of the results above can be
+	/// read as an artefact of the in-memory backend. The hazard is in the process-local cache, not
+	/// in any backend's visibility rules.
+	#[cfg(feature = "kv-rocksdb")]
+	#[tokio::test]
+	#[ignore = "#1193: the in-memory variants of these scenarios, on an on-disk store"]
+	async fn diskann_foreign_generation_rocksdb() -> Result<()> {
+		async fn store(dir: &TempDir) -> TestIndexStore {
+			TestIndexStore::with_path(&format!("rocksdb:{}", dir.path().to_string_lossy())).await
+		}
+
+		let compaction_dir = TempDir::new()?;
+		let compaction = two_node_compaction(store(&compaction_dir).await, true).await?;
+		let (before, after) = compaction.next_element_id;
+		assert!(after >= before, "compaction rewound next_element_id from {before} to {after}");
+		assert!(
+			compaction.overwritten_elements.is_empty(),
+			"compaction overwrote the vectors of elements another node allocated: {:?}",
+			compaction.overwritten_elements
+		);
+		assert!(
+			compaction.dropped_edges.is_empty(),
+			"compaction dropped adjacency edges committed by the other node: {:?}",
+			compaction.dropped_edges
+		);
+
+		let moved_dir = TempDir::new()?;
+		let moved = two_node_moved_document(store(&moved_dir).await, true).await?;
+		assert_eq!(
+			(&moved.b, moved.b_distance),
+			(&moved.a, moved.a_distance),
+			"the two nodes disagree about the nearest neighbour of a point one of them moved a \
+			 document away from"
+		);
+
+		let inserted_dir = TempDir::new()?;
+		let (inserted, b_exhaustive) =
+			two_node_new_vectors(store(&inserted_dir).await, true).await?;
+		assert_eq!(
+			inserted.b, inserted.a,
+			"the two nodes disagree about the nearest neighbours after one of them inserted \
+			 vectors at the query point"
+		);
+		assert_eq!(
+			b_exhaustive,
+			(1..=12).collect::<Vec<i64>>(),
+			"a k larger than the index still did not reach the vectors the other node committed"
+		);
 		Ok(())
 	}
 
