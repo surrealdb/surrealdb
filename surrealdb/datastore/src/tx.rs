@@ -1295,6 +1295,21 @@ impl Transaction {
 		self.sequences.clone()
 	}
 
+	/// Opens a read-only transaction on the same datastore.
+	///
+	/// The new transaction sees the datastore as committed when it opens, and
+	/// none of this transaction's uncommitted writes. An engine that runs one
+	/// transaction's operations one at a time serves several of these
+	/// concurrently, so work that reads committed state on many tasks can read
+	/// it through one each, where reads through a single shared transaction
+	/// would queue. The caller cancels it when done.
+	pub async fn open_read_snapshot(&self) -> Result<Transaction> {
+		self.sequences
+			.transaction_factory()
+			.transaction(TransactionType::Read, self.sequences.clone())
+			.await
+	}
+
 	/// Check if the transaction is local or remote
 	pub fn is_local(&self) -> bool {
 		self.local

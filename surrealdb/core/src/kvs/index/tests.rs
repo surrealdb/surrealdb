@@ -4956,6 +4956,557 @@ async fn distributed_hnsw_index_replays_second_node_insert() -> Result<()> {
 	Ok(())
 }
 
+/// Where a `CONCURRENTLY` build is held while a second node's writes queue
+/// behind it.
+#[cfg(feature = "kv-mem")]
+#[derive(Clone, Copy, Debug)]
+enum BuildPause {
+	/// Before the initial scan reads a row: the scan then finds each record at
+	/// its final value and has to index the queued baseline instead.
+	BeforeScan,
+	/// After the initial scan read its batch, while that batch's commit
+	/// retries: the rows the scan holds are older than the queued writes.
+	InScanBatch,
+}
+
+#[cfg(feature = "kv-mem")]
+impl BuildPause {
+	const ALL: [Self; 2] = [Self::BeforeScan, Self::InScanBatch];
+
+	fn site(self) -> RetryableConflictSite {
+		match self {
+			Self::BeforeScan => RetryableConflictSite::ConcurrentIndexInitialCleanup,
+			Self::InScanBatch => RetryableConflictSite::ConcurrentIndexInitialBatch,
+		}
+	}
+}
+
+/// The records of table `t` and the value each starts with; `f` is the
+/// indexed field. Values are names, spelled per index kind by a literal
+/// function: a word for the scalar kinds, a point for the vector kinds.
+#[cfg(feature = "kv-mem")]
+const TWICE_MODIFIED_SEED: [(&str, &str); 5] =
+	[("twice", "v0"), ("in_one", "w0"), ("gone", "x0"), ("back", "y0"), ("still", "z0")];
+
+/// Every way to change one record twice before a builder has replayed the
+/// first change: two updates in two transactions, two updates in one, an
+/// update then a delete, and a delete then a re-create. Each step is one
+/// transaction, so retrying a conflicted step repeats only that step.
+/// `{name}` is replaced by the literal for that value.
+#[cfg(feature = "kv-mem")]
+const TWICE_MODIFIED_STEPS: [&str; 7] = [
+	"UPDATE t:twice SET f = {v1} RETURN NONE",
+	"UPDATE t:twice SET f = {v2} RETURN NONE",
+	"BEGIN; UPDATE t:in_one SET f = {w1} RETURN NONE; UPDATE t:in_one SET f = {w2} RETURN NONE; COMMIT",
+	"UPDATE t:gone SET f = {x1} RETURN NONE",
+	"DELETE t:gone RETURN NONE",
+	"DELETE t:back RETURN NONE",
+	"CREATE t:back SET f = {y1} RETURN NONE",
+];
+
+/// The records left once every step has committed, with their values.
+#[cfg(feature = "kv-mem")]
+const TWICE_MODIFIED_FINAL: [(&str, &str); 4] =
+	[("back", "y1"), ("in_one", "w2"), ("still", "z0"), ("twice", "v2")];
+
+/// Every value some record held at some point.
+#[cfg(feature = "kv-mem")]
+const TWICE_MODIFIED_HISTORY: [&str; 11] =
+	["v0", "v1", "v2", "w0", "w1", "w2", "x0", "x1", "y0", "y1", "z0"];
+
+#[cfg(feature = "kv-mem")]
+fn word(name: &str) -> String {
+	format!("'{name}'")
+}
+
+/// A 2-d point per value, spaced so that no query point in the history is
+/// equidistant from two of the final records.
+#[cfg(feature = "kv-mem")]
+fn point(name: &str) -> String {
+	let (x, y) = match name {
+		"v0" => (0, 0),
+		"v1" => (10, 0),
+		"v2" => (20, 0),
+		"w0" => (0, 10),
+		"w1" => (0, 20),
+		"w2" => (0, 30),
+		"x0" => (-10, 0),
+		"x1" => (-20, 0),
+		"y0" => (0, -10),
+		"y1" => (0, -25),
+		"z0" => (50, 50),
+		other => unreachable!("no point for {other}"),
+	};
+	format!("[{x}f, {y}f]")
+}
+
+#[cfg(feature = "kv-mem")]
+fn spell(template: &str, literal: fn(&str) -> String) -> String {
+	TWICE_MODIFIED_HISTORY
+		.iter()
+		.fold(template.to_owned(), |sql, name| sql.replace(&format!("{{{name}}}"), &literal(name)))
+}
+
+/// The ids of the records whose final value is `value`, in id order.
+#[cfg(feature = "kv-mem")]
+fn twice_modified_holders(value: &str) -> Vec<String> {
+	TWICE_MODIFIED_FINAL
+		.iter()
+		.filter(|(_, held)| *held == value)
+		.map(|(id, _)| (*id).to_owned())
+		.collect()
+}
+
+/// The number of changes queued behind a build, across every generation.
+#[cfg(feature = "kv-mem")]
+async fn durable_appending_count(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let bg = catch!(tx, tx.keys(ikb.new_bg_all_generations_range()?, u32::MAX, 0, None).await);
+	tx.cancel().await?;
+	Ok(bg.len())
+}
+
+/// A query's rows as JSON, for comparing two queries' answers.
+#[cfg(feature = "kv-mem")]
+async fn query_json(ds: &Datastore, session: &Session, sql: &str) -> Result<serde_json::Value> {
+	let mut results = ds.execute(sql, session, None).await?;
+	Ok(results.remove(0).result?.into_json_value())
+}
+
+/// Seeds `t`, starts `define` (an index named `ix`) held at `pause`, applies
+/// [`TWICE_MODIFIED_STEPS`] through a second node so every write that changes
+/// what the index holds queues behind the build — `queued` of them — then
+/// releases the build and waits for it to publish.
+#[cfg(feature = "kv-mem")]
+async fn build_over_records_modified_twice(
+	define: &str,
+	pause: BuildPause,
+	literal: fn(&str) -> String,
+	queued: usize,
+) -> Result<(Arc<Datastore>, Session)> {
+	let (ds_a, ds_b, session) = new_distributed_index_test_ds().await?;
+	let seed: String = TWICE_MODIFIED_SEED
+		.iter()
+		.map(|(id, value)| format!("CREATE t:{id} SET f = {} RETURN NONE;", literal(value)))
+		.collect();
+	execute_all(&ds_a, &session, &format!("DEFINE TABLE t SCHEMALESS; {seed}")).await?;
+	let site = pause.site();
+	let node_id = ds_a.id();
+	let guard = inject_retryable_conflicts(site, node_id, REPEATED_RETRY_CONFLICTS);
+	execute_all(&ds_a, &session, define).await?;
+	wait_for_retry_conflict(site, node_id, REPEATED_RETRY_CONFLICTS).await?;
+	for step in TWICE_MODIFIED_STEPS {
+		execute_all_retrying_conflicts(&ds_b, &session, &spell(step, literal)).await?;
+	}
+	// The queue keeps one entry per change, a record's changes included:
+	// nothing is merged before the builder replays them in order.
+	let (ns, db, table, ix) = get_table_index(&ds_a, "t", "ix").await?;
+	let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+	assert_eq!(
+		durable_appending_count(&ds_a, &ikb).await?,
+		queued,
+		"{pause:?}: one entry per change"
+	);
+	assert!(
+		retryable_conflict_count(site, node_id) > 0,
+		"{pause:?}: the build must still be held when the last write commits"
+	);
+	drop(guard);
+	wait_for_index_ready(&ds_a, &session, "t", "ix").await?;
+	Ok((ds_a, session))
+}
+
+/// Every value in the history resolves, through the index, to exactly the
+/// records holding it now, and to the same rows a scan finds.
+#[cfg(feature = "kv-mem")]
+async fn assert_equality_lookups_match_the_rows(
+	ds: &Datastore,
+	session: &Session,
+	pause: BuildPause,
+) -> Result<()> {
+	for value in TWICE_MODIFIED_HISTORY {
+		let indexed = format!(
+			"SELECT VALUE record::id(id) FROM t WITH INDEX ix WHERE f = '{value}' ORDER BY id"
+		);
+		let scanned = indexed.replace("WITH INDEX ix", "WITH NOINDEX");
+		let got = query_json(ds, session, &indexed).await?;
+		assert_eq!(got, serde_json::json!(twice_modified_holders(value)), "{pause:?}: {indexed}");
+		assert_eq!(got, query_json(ds, session, &scanned).await?, "{pause:?}: {indexed}");
+	}
+	Ok(())
+}
+
+/// A standard index built while records are changed twice holds exactly one
+/// entry per record, for its final value: no entry for a value a record left,
+/// and none for a deleted record.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_standard_index_replays_records_modified_twice() -> Result<()> {
+	for pause in BuildPause::ALL {
+		let (ds, session) = build_over_records_modified_twice(
+			"DEFINE INDEX ix ON t FIELDS f CONCURRENTLY",
+			pause,
+			word,
+			TWICE_MODIFIED_STEPS.len() + 1,
+		)
+		.await?;
+		assert_equality_lookups_match_the_rows(&ds, &session, pause).await?;
+		let all = query_json(
+			&ds,
+			&session,
+			"SELECT VALUE record::id(id) FROM t WITH INDEX ix WHERE f >= 'a' ORDER BY id",
+		)
+		.await?;
+		let finals: Vec<&str> = TWICE_MODIFIED_FINAL.iter().map(|(id, _)| *id).collect();
+		assert_eq!(all, serde_json::json!(finals), "{pause:?}: one entry per live record");
+	}
+	Ok(())
+}
+
+/// A unique index built while records are changed twice claims exactly the
+/// final values: each is still enforced, and every value a record left, or a
+/// deleted record held, is free to claim again.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_unique_index_replays_records_modified_twice() -> Result<()> {
+	for pause in BuildPause::ALL {
+		let (ds, session) = build_over_records_modified_twice(
+			"DEFINE INDEX ix ON t FIELDS f UNIQUE CONCURRENTLY",
+			pause,
+			word,
+			TWICE_MODIFIED_STEPS.len() + 1,
+		)
+		.await?;
+		assert_equality_lookups_match_the_rows(&ds, &session, pause).await?;
+		for value in TWICE_MODIFIED_HISTORY {
+			let sql = format!("CREATE t:{value}_again SET f = '{value}' RETURN NONE");
+			let created = execute_all(&ds, &session, &sql).await;
+			let held = !twice_modified_holders(value).is_empty();
+			assert_eq!(
+				created.is_err(),
+				held,
+				"{pause:?}: {sql} must fail exactly when a record holds '{value}': {created:?}"
+			);
+		}
+	}
+	Ok(())
+}
+
+/// The total a COUNT index holds: every `!iu` delta it has stored, summed.
+#[cfg(feature = "kv-mem")]
+async fn count_index_total(
+	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	ix: IndexId,
+) -> Result<i64> {
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let rng = IndexCountPrefix {
+		ns,
+		db,
+		tb: Cow::Borrowed(table),
+		ix,
+	}
+	.range()?;
+	let keys = catch!(tx, tx.keys(rng, u32::MAX, 0, None).await);
+	tx.cancel().await?;
+	let mut total = 0;
+	for key in keys {
+		let iu = IndexCountKey::decode_key(&key)?;
+		total += if iu.pos {
+			iu.count as i64
+		} else {
+			-(iu.count as i64)
+		};
+	}
+	Ok(total)
+}
+
+/// A COUNT index built while records are changed twice counts each live
+/// record once, and a conditional COUNT index counts a record whose match
+/// flips twice by its final value alone. The index's stored total is read
+/// directly: an unconditional count query is answered from the table's keys,
+/// not the index.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_count_index_replays_records_modified_twice() -> Result<()> {
+	// An unconditional COUNT index is touched only by the two deletes and the
+	// re-create; a conditional one by every change that flips a match.
+	let cases = [
+		("DEFINE INDEX ix ON t COUNT CONCURRENTLY", "SELECT count() FROM t GROUP ALL", 4, 3),
+		// `twice`, `in_one` and `gone` each match only at their intermediate
+		// value; `back` matches only once it is re-created.
+		(
+			"DEFINE INDEX ix ON t COUNT WHERE f IN ['v1', 'w1', 'x1', 'y1'] CONCURRENTLY",
+			"SELECT count() FROM t WHERE f IN ['v1', 'w1', 'x1', 'y1'] GROUP ALL",
+			1,
+			TWICE_MODIFIED_STEPS.len() + 1,
+		),
+	];
+	for (define, count, expected, queued) in cases {
+		for pause in BuildPause::ALL {
+			let (ds, session) =
+				build_over_records_modified_twice(define, pause, word, queued).await?;
+			let (ns, db, table, ix) = get_table_index(&ds, "t", "ix").await?;
+			assert_eq!(
+				count_index_total(&ds, ns, db, &table, ix.index_id).await?,
+				expected,
+				"{pause:?}: {define}"
+			);
+			assert_eq!(
+				count_query_value(&ds, &session, count).await?,
+				expected,
+				"{pause:?}: {count}"
+			);
+			let scanned = count.replace("FROM t", "FROM t WITH NOINDEX");
+			assert_eq!(
+				count_query_value(&ds, &session, &scanned).await?,
+				expected,
+				"{pause:?}: {scanned}"
+			);
+		}
+	}
+	Ok(())
+}
+
+/// A full-text index built while records are changed twice matches each term
+/// exactly where the rows hold it, and scores every match as an index built
+/// over the final rows does: its document count and lengths carry nothing of
+/// a value a record left or a record that was deleted.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_fulltext_index_replays_records_modified_twice() -> Result<()> {
+	const ANALYZER: &str = "DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;";
+	for pause in BuildPause::ALL {
+		let (ds, session) = build_over_records_modified_twice(
+			&format!(
+				"{ANALYZER} DEFINE INDEX ix ON t FIELDS f FULLTEXT ANALYZER simple BM25 CONCURRENTLY"
+			),
+			pause,
+			word,
+			TWICE_MODIFIED_STEPS.len() + 1,
+		)
+		.await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE INDEX reference ON t FIELDS f FULLTEXT ANALYZER simple BM25",
+		)
+		.await?;
+		for value in TWICE_MODIFIED_HISTORY {
+			let indexed = format!(
+				"SELECT record::id(id) AS rid, search::score(0) AS score FROM t WITH INDEX ix WHERE f @0@ '{value}' ORDER BY rid"
+			);
+			let got = query_json(&ds, &session, &indexed).await?;
+			let ids: Vec<&str> = got
+				.as_array()
+				.into_iter()
+				.flatten()
+				.filter_map(|row| row["rid"].as_str())
+				.collect();
+			assert_eq!(ids, twice_modified_holders(value), "{pause:?}: {indexed}");
+			let reference = indexed.replace("WITH INDEX ix", "WITH INDEX reference");
+			assert_eq!(got, query_json(&ds, &session, &reference).await?, "{pause:?}: {indexed}");
+		}
+	}
+	Ok(())
+}
+
+/// Waits until the index's pending vector updates are folded into its graph.
+#[cfg(feature = "kv-mem")]
+async fn wait_for_index_drained(ds: &Datastore, session: &Session, index: &str) -> Result<()> {
+	timeout(Duration::from_secs(10), async {
+		loop {
+			let building = index_building_json(ds, session, "t", index).await?;
+			if building.get("compacting").and_then(|compacting| compacting.as_bool()) == Some(false)
+			{
+				return Ok(());
+			}
+			sleep(Duration::from_millis(20)).await;
+		}
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("timed out waiting for {index} to drain its pending updates"))?
+}
+
+/// From every point a record ever held, the index's nearest neighbour and its
+/// distance are the brute-force nearest neighbour and distance over the live
+/// rows, and a wide search returns each live record exactly once. Distances are
+/// compared to three decimals: the index scores in the vectors' `F32`, brute
+/// force in the rows' floats. No point is equidistant from two live records.
+#[cfg(feature = "kv-mem")]
+async fn assert_nearest_neighbours_match_brute_force(
+	ds: &Datastore,
+	session: &Session,
+	context: &str,
+	points: &[String],
+	live: &[&str],
+) -> Result<()> {
+	for at in points {
+		let indexed = format!(
+			"SELECT record::id(id) AS id, math::fixed(vector::distance::knn(), 3) AS distance FROM t WITH INDEX ix WHERE f <|1,40|> {at}"
+		);
+		let brute = format!(
+			"SELECT record::id(id) AS id, math::fixed(vector::distance::knn(), 3) AS distance FROM t WITH NOINDEX WHERE f <|1,EUCLIDEAN|> {at}"
+		);
+		assert_eq!(
+			query_json(ds, session, &indexed).await?,
+			query_json(ds, session, &brute).await?,
+			"{context}: nearest neighbour of {at}"
+		);
+	}
+	let wide = query_json(
+		ds,
+		session,
+		"SELECT VALUE record::id(id) FROM t WITH INDEX ix WHERE f <|10,40|> [0f, 0f] ORDER BY id",
+	)
+	.await?;
+	assert_eq!(wide, serde_json::json!(live), "{context}: each live record exactly once");
+	Ok(())
+}
+
+/// Builds a vector index while records are changed twice, then changes
+/// records twice again once it is online, and checks the answers each time:
+/// with the queued changes still pending, once the build has drained them into
+/// the graph, and once compaction has folded the online changes — which
+/// remove vectors the graph holds — in as well.
+#[cfg(feature = "kv-mem")]
+async fn assert_vector_index_replays_records_modified_twice(define: &str) -> Result<()> {
+	for pause in BuildPause::ALL {
+		let (ds, session) =
+			build_over_records_modified_twice(define, pause, point, TWICE_MODIFIED_STEPS.len() + 1)
+				.await?;
+		let history: Vec<String> = TWICE_MODIFIED_HISTORY.iter().map(|name| point(name)).collect();
+		let finals: Vec<&str> = TWICE_MODIFIED_FINAL.iter().map(|(id, _)| *id).collect();
+		let context = format!("{pause:?} after the build");
+		assert_nearest_neighbours_match_brute_force(&ds, &session, &context, &history, &finals)
+			.await?;
+		wait_for_index_drained(&ds, &session, "ix").await?;
+		let context = format!("{pause:?} after the drain");
+		assert_nearest_neighbours_match_brute_force(&ds, &session, &context, &history, &finals)
+			.await?;
+
+		for step in [
+			"UPDATE t:twice SET f = [30f, 0f] RETURN NONE",
+			"UPDATE t:twice SET f = [40f, 0f] RETURN NONE",
+			"BEGIN; UPDATE t:in_one SET f = [0f, 40f] RETURN NONE; UPDATE t:in_one SET f = [0f, 44f] RETURN NONE; COMMIT",
+			"UPDATE t:still SET f = [60f, 60f] RETURN NONE",
+			"DELETE t:still RETURN NONE",
+		] {
+			execute_all(&ds, &session, step).await?;
+		}
+		let online: Vec<String> = [
+			"[20f, 0f]",
+			"[30f, 0f]",
+			"[40f, 0f]",
+			"[0f, 30f]",
+			"[0f, 40f]",
+			"[0f, 44f]",
+			"[50f, 50f]",
+			"[60f, 60f]",
+		]
+		.into_iter()
+		.chain(history.iter().map(String::as_str))
+		.map(str::to_owned)
+		.collect();
+		let live = ["back", "in_one", "twice"];
+		let context = format!("{pause:?} with online changes pending");
+		assert_nearest_neighbours_match_brute_force(&ds, &session, &context, &online, &live)
+			.await?;
+		Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(1),
+			CancellationToken::new(),
+		)
+		.await?;
+		wait_for_index_drained(&ds, &session, "ix").await?;
+		let context = format!("{pause:?} after compacting the online changes");
+		assert_nearest_neighbours_match_brute_force(&ds, &session, &context, &online, &live)
+			.await?;
+	}
+	Ok(())
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_hnsw_index_replays_records_modified_twice() -> Result<()> {
+	assert_vector_index_replays_records_modified_twice(
+		"DEFINE INDEX ix ON t FIELDS f HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4 CONCURRENTLY",
+	)
+	.await
+}
+
+#[cfg(all(feature = "kv-mem", diskann))]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_diskann_index_replays_records_modified_twice() -> Result<()> {
+	assert_vector_index_replays_records_modified_twice(
+		"DEFINE INDEX ix ON t FIELDS f DISKANN DIMENSION 2 DIST EUCLIDEAN TYPE F32 CONCURRENTLY",
+	)
+	.await
+}
+
+/// Records changed twice while the build's own drain is folding pendings into
+/// the graph: every drain batch is built and then fails its commit, so it is
+/// re-planned from the pendings as they stand, until the build is released.
+/// Each record keeps a single pending entry however often it changes, and the
+/// drain that finally commits leaves the graph answering for the final rows.
+#[cfg(feature = "kv-mem")]
+async fn assert_vector_drain_folds_records_modified_twice(
+	define: &str,
+	site: RetryableConflictSite,
+) -> Result<()> {
+	let (ds_a, ds_b, session) = new_distributed_index_test_ds().await?;
+	let seed: String = TWICE_MODIFIED_SEED
+		.iter()
+		.map(|(id, value)| format!("CREATE t:{id} SET f = {} RETURN NONE;", point(value)))
+		.collect();
+	execute_all(&ds_a, &session, &format!("DEFINE TABLE t SCHEMALESS; {seed}")).await?;
+	let node_id = ds_a.id();
+	let guard = inject_retryable_conflicts(site, node_id, REPEATED_RETRY_CONFLICTS);
+	execute_all(&ds_a, &session, define).await?;
+	wait_for_retry_conflict(site, node_id, REPEATED_RETRY_CONFLICTS).await?;
+	for step in TWICE_MODIFIED_STEPS {
+		execute_all_retrying_conflicts(&ds_b, &session, &spell(step, point)).await?;
+	}
+	assert!(
+		retryable_conflict_count(site, node_id) > 0,
+		"the drain must still be retrying when the last write commits"
+	);
+	drop(guard);
+	wait_for_index_drained(&ds_a, &session, "ix").await?;
+	let history: Vec<String> = TWICE_MODIFIED_HISTORY.iter().map(|name| point(name)).collect();
+	let finals: Vec<&str> = TWICE_MODIFIED_FINAL.iter().map(|(id, _)| *id).collect();
+	assert_nearest_neighbours_match_brute_force(
+		&ds_a,
+		&session,
+		"after the drain",
+		&history,
+		&finals,
+	)
+	.await
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn hnsw_build_drain_folds_records_modified_twice() -> Result<()> {
+	assert_vector_drain_folds_records_modified_twice(
+		"DEFINE INDEX ix ON t FIELDS f HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4 CONCURRENTLY",
+		RetryableConflictSite::ConcurrentIndexHnswPendingCompaction,
+	)
+	.await
+}
+
+#[cfg(all(feature = "kv-mem", diskann))]
+#[tokio::test(flavor = "multi_thread")]
+async fn diskann_build_drain_folds_records_modified_twice() -> Result<()> {
+	assert_vector_drain_folds_records_modified_twice(
+		"DEFINE INDEX ix ON t FIELDS f DISKANN DIMENSION 2 DIST EUCLIDEAN TYPE F32 CONCURRENTLY",
+		RetryableConflictSite::ConcurrentIndexDiskAnnPendingCompaction,
+	)
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_indexing_retries_initial_cleanup_commit_conflict() -> Result<()> {
 	let (ds, session) = new_index_test_ds().await?;
@@ -8572,7 +9123,7 @@ async fn a_compaction_plan_prepared_before_a_wipe_cannot_apply() -> Result<()> {
 	)
 	.await?;
 	tx.cancel().await?;
-	assert!(!applied, "a plan prepared before the wipe must be rejected, not applied");
+	assert!(!applied.applied(), "a plan prepared before the wipe must be rejected, not applied");
 
 	// The pendings must survive for whoever compacts next.
 	let tx = ds.transaction(TransactionType::Read).await?;

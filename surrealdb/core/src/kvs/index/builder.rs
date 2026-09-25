@@ -36,6 +36,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
+use crate::idx::trees::hnsw::index::HnswCompactionOutcome;
 use crate::key::schema::{IdxRoot, RecordKey, RecordPrefix};
 use crate::key::{KVKey, KVKeyDecode, Resumable};
 use crate::kvs::sequences::Sequences;
@@ -1436,6 +1437,15 @@ impl Building {
 		}
 	}
 
+	/// What an applied HNSW batch whose commit then failed owes the process-local
+	/// index: discarding it if the batch reached the graph in place, nothing if
+	/// it was staged, because a staged batch publishes only from its commit.
+	async fn discard_failed_hnsw_apply(&self, outcome: HnswCompactionOutcome) {
+		if outcome == HnswCompactionOutcome::InPlace {
+			self.evict_cached_hnsw_index().await;
+		}
+	}
+
 	pub(super) async fn check_prepare_remove_with_tx(
 		&self,
 		last_prepare_remove_check: &mut Instant,
@@ -2121,9 +2131,10 @@ impl Building {
 	/// a commit that queues compaction work wakes it, so the two regularly
 	/// contend for the same batch. A retryable conflict means the other
 	/// compactor won that batch; the plan is re-read and re-applied rather than
-	/// failing the statement that is waiting for the drain. The process-local
-	/// wrapper and caches are discarded first, because a write that reached the
-	/// graph and did not commit leaves them holding state the store never took.
+	/// failing the statement that is waiting for the drain. A batch applied in
+	/// place that did not commit has the process-local wrapper and caches
+	/// discarded first, because they hold state the store never took; a staged
+	/// batch left them untouched and keeps them.
 	async fn compact_hnsw_pendings(&self, last_prepare_remove_check: &mut Instant) -> Result<()> {
 		let Index::Hnsw(p) = &self.ix.index else {
 			return Ok(());
@@ -2135,6 +2146,7 @@ impl Building {
 			self.is_beyond_threshold(None)?;
 			self.check_prepare_remove(last_prepare_remove_check).await?;
 
+			let started = Instant::now();
 			let plan = {
 				let ctx = self.new_read_tx_ctx().await?;
 				let tx = ctx.tx();
@@ -2156,7 +2168,9 @@ impl Building {
 				return Ok(());
 			}
 			let has_more = plan.has_more();
+			let prepared = started.elapsed();
 
+			let started = Instant::now();
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
 			let generation = self.build_generation.load(Ordering::Acquire);
@@ -2174,13 +2188,15 @@ impl Building {
 			)
 			.await;
 			match res {
-				Ok(true) => {
+				Ok(outcome) if outcome.applied() => {
+					let applied = started.elapsed();
+					let started = Instant::now();
 					#[cfg(test)]
 					if let Err(err) = maybe_inject_retryable_conflict(
 						RetryableConflictSite::ConcurrentIndexHnswPendingCompaction,
 						self.ctx.node_id(),
 					) {
-						self.evict_cached_hnsw_index().await;
+						self.discard_failed_hnsw_apply(outcome).await;
 						if self
 							.cancel_and_retryable_conflict(
 								&tx,
@@ -2194,7 +2210,7 @@ impl Building {
 						return Err(err);
 					}
 					if let Err(err) = tx.commit().await {
-						self.evict_cached_hnsw_index().await;
+						self.discard_failed_hnsw_apply(outcome).await;
 						if self
 							.cancel_and_retryable_conflict(
 								&tx,
@@ -2207,8 +2223,17 @@ impl Building {
 						}
 						return Err(err);
 					}
+					debug!(
+						target: "surrealdb::core::kvs::index",
+						index = %self.ix.name,
+						?outcome,
+						prepare_ms = prepared.as_millis() as u64,
+						apply_ms = applied.as_millis() as u64,
+						commit_ms = started.elapsed().as_millis() as u64,
+						"committed HNSW compaction batch"
+					);
 				}
-				Ok(false) => {
+				Ok(_) => {
 					tx.cancel().await?;
 					return Ok(());
 				}

@@ -46,13 +46,12 @@ impl TestIndexStore {
 		Self::with_path("mem://").await
 	}
 
-	/// Opens an in-memory store with a modified engine configuration.
+	/// Opens an in-memory store with a modified engine configuration. The ANN
+	/// caches are sized from the modified configuration.
 	pub(crate) async fn with_idx_config(configure: impl FnOnce(&mut IdxConfig)) -> Self {
-		let mut store = Self::with_path("mem://").await;
-		let mut config = (*store.config).clone();
+		let mut config = IdxConfig::default();
 		configure(&mut config);
-		store.config = Arc::new(config);
-		store
+		Self::open("mem://", config).await
 	}
 
 	/// The engine configuration this store hands out.
@@ -69,6 +68,10 @@ impl TestIndexStore {
 
 	/// Opens a store on `path`, for the tests pinned to a specific backend.
 	pub(crate) async fn with_path(path: &str) -> Self {
+		Self::open(path, IdxConfig::default()).await
+	}
+
+	async fn open(path: &str, config: IdxConfig) -> Self {
 		let builder = surrealdb_kvs_any::Backends::community()
 			.new_transaction_builder(path, Default::default(), ConfigMap::default())
 			.await
@@ -79,7 +82,6 @@ impl TestIndexStore {
 			Arc::new(Default::default()),
 		);
 		let node_id = Uuid::new_v4();
-		let config = IdxConfig::default();
 		let stores = IndexStores::new(
 			config.hnsw_cache_size,
 			config.diskann_cache_size,

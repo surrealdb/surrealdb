@@ -625,12 +625,8 @@ impl ExecOperator for KnnScan {
 							.await
 							.context("Failed to get HNSW index")?;
 
-						// Ensure the HNSW index state is current
-						hnsw_index
-							.check_state(frozen_ctx)
-							.await
-							.context("Failed to check HNSW index state")?;
-
+						// The search brings the graph level with this transaction's
+						// snapshot itself, under the guard it walks the graph with.
 						let mut stack = TreeStack::new();
 						stack
 							.enter(|stk| {

@@ -54,6 +54,7 @@ pub mod ft;
 pub mod index;
 pub mod inline_cache;
 pub mod keys;
+pub(crate) mod parallel;
 #[cfg(test)]
 pub(crate) mod test_env;
 pub mod trees;

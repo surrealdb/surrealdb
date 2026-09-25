@@ -49,11 +49,52 @@ impl Heuristic {
 		S: DynamicSet,
 	{
 		match self {
-			Self::Standard => Self::heuristic(tx, elements, layer, c, res).await,
+			Self::Standard => Self::heuristic(tx, elements, layer.m_max(), c, res).await,
 			Self::Ext => Self::heuristic_ext(tx, elements, layer, q_id, q_pt, c, ignore, res).await,
-			Self::Keep => Self::heuristic_keep(tx, elements, layer, c, res).await,
+			Self::Keep => Self::heuristic_keep(tx, elements, layer.m_max(), c, res).await,
 			Self::ExtAndKeep => {
 				Self::heuristic_ext_keep(tx, elements, layer, q_id, q_pt, c, ignore, res).await
+			}
+		}
+	}
+
+	/// Selects `q`'s neighbours for a staged batch, from candidates that come
+	/// partly from the committed graph and partly from the batch itself.
+	///
+	/// The batch's elements have no edges until the batch publishes, so the
+	/// neighbour-extension variants extend only `graph` candidates, through the
+	/// committed `layer`; `layer` is `None` for a layer the batch creates. The
+	/// batch candidates then join, graph candidates first so equal distances
+	/// resolve the same way on every run, and selection proceeds as for a
+	/// serial insertion.
+	#[expect(clippy::too_many_arguments)]
+	pub(super) async fn select_batch<S>(
+		&self,
+		tx: &Transaction,
+		elements: &HnswElements,
+		layer: Option<&HnswLayer<S>>,
+		m_max: usize,
+		q_id: ElementId,
+		q_pt: &SharedVector,
+		mut graph: DoublePriorityQueue,
+		batch: DoublePriorityQueue,
+		res: &mut S,
+	) -> Result<()>
+	where
+		S: DynamicSet,
+	{
+		if matches!(self, Self::Ext | Self::ExtAndKeep)
+			&& let Some(layer) = layer
+		{
+			Self::extend_candidates(tx, elements, layer, q_id, q_pt, &mut graph, None).await?;
+		}
+		for (dist, id) in batch.to_vec() {
+			graph.push(dist, id);
+		}
+		match self {
+			Self::Standard | Self::Ext => Self::heuristic(tx, elements, m_max, graph, res).await,
+			Self::Keep | Self::ExtAndKeep => {
+				Self::heuristic_keep(tx, elements, m_max, graph, res).await
 			}
 		}
 	}
@@ -61,14 +102,13 @@ impl Heuristic {
 	async fn heuristic<S>(
 		tx: &Transaction,
 		elements: &HnswElements,
-		layer: &HnswLayer<S>,
+		m_max: usize,
 		mut c: DoublePriorityQueue,
 		res: &mut S,
 	) -> Result<()>
 	where
 		S: DynamicSet,
 	{
-		let m_max = layer.m_max();
 		if c.len() <= m_max {
 			c.to_dynamic_set(res);
 		} else {
@@ -84,14 +124,13 @@ impl Heuristic {
 	async fn heuristic_keep<S>(
 		tx: &Transaction,
 		elements: &HnswElements,
-		layer: &HnswLayer<S>,
+		m_max: usize,
 		mut c: DoublePriorityQueue,
 		res: &mut S,
 	) -> Result<()>
 	where
 		S: DynamicSet,
 	{
-		let m_max = layer.m_max();
 		if c.len() <= m_max {
 			c.to_dynamic_set(res);
 			return Ok(());
@@ -169,7 +208,7 @@ impl Heuristic {
 		S: DynamicSet,
 	{
 		Self::extend_candidates(tx, elements, layer, q_id, q_pt, &mut c, ignore).await?;
-		Self::heuristic(tx, elements, layer, c, res).await
+		Self::heuristic(tx, elements, layer.m_max(), c, res).await
 	}
 
 	#[expect(clippy::too_many_arguments)]
@@ -187,7 +226,7 @@ impl Heuristic {
 		S: DynamicSet,
 	{
 		Self::extend_candidates(tx, elements, layer, q_id, q_pt, &mut c, ignore).await?;
-		Self::heuristic_keep(tx, elements, layer, c, res).await
+		Self::heuristic_keep(tx, elements, layer.m_max(), c, res).await
 	}
 
 	async fn is_closer<S>(

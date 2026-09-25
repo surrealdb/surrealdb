@@ -79,6 +79,7 @@ use crate::http::HttpClient;
 use crate::iam::{Action, Auth, PolicyError, Resource, ResourceKind, Role, ScramCredential};
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
+use crate::idx::trees::hnsw::index::HnswCompactionOutcome;
 use crate::idx::trees::store::IndexStores;
 use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
@@ -4385,13 +4386,14 @@ impl Datastore {
 	///
 	/// Pending entries are captured in a read transaction and conditionally
 	/// deleted in a short write transaction before graph mutation. A write that
-	/// reached the graph and then did not commit leaves the process-local
-	/// wrapper holding a topology and caches the store never took, so the
-	/// wrapper is discarded; a write that stopped at the guards left the
-	/// wrapper untouched and keeps it. The discard targets the format version
-	/// the write phase applied through — a `REBUILD INDEX` can bump the catalog
-	/// format after `format_version` was captured, and both the wrapper and the
-	/// cache entries are scoped per format.
+	/// reached the graph in place and then did not commit leaves the
+	/// process-local wrapper holding a topology and caches the store never
+	/// took, so the wrapper is discarded; a write that was staged, or that
+	/// stopped at the guards, left the wrapper untouched and keeps it. The
+	/// discard targets the format version the write phase applied through — a
+	/// `REBUILD INDEX` can bump the catalog format after `format_version` was
+	/// captured, and both the wrapper and the cache entries are scoped per
+	/// format.
 	async fn process_hnsw_compaction(
 		&self,
 		ikb: &IndexKeyBase,
@@ -4444,7 +4446,7 @@ impl Datastore {
 			// recovery below must clear the same format, not the one captured at
 			// dispatch time.
 			let mut applied_format = format_version;
-			let res: Result<bool> = async {
+			let res: Result<HnswCompactionOutcome> = async {
 				// Re-tested inside the write transaction, and under a conflict
 				// registration. The dispatch-time test was a snapshot in a
 				// transaction that has since been cancelled, so a build acquired
@@ -4452,7 +4454,7 @@ impl Datastore {
 				// registration makes such an acquisition conflict this commit
 				// instead, and the retry re-reads it.
 				if build_owner_is_live_locked(&txn, ikb).await? {
-					return Ok(false);
+					return Ok(HnswCompactionOutcome::Skipped);
 				}
 				match txn
 					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
@@ -4474,17 +4476,23 @@ impl Datastore {
 							)
 							.await
 						}
-						_ => Ok(false),
+						_ => Ok(HnswCompactionOutcome::Skipped),
 					},
-					_ => Ok(false),
+					_ => Ok(HnswCompactionOutcome::Skipped),
 				}
 			}
 			.await;
 			match res {
-				Ok(true) => {
+				Ok(outcome) if outcome.applied() => {
+					// Only an in-place batch reaches the graph before its commit; a
+					// staged one publishes from the commit itself, so a transaction
+					// that does not commit leaves its wrapper untouched.
+					let in_place = outcome == HnswCompactionOutcome::InPlace;
 					if let Err(e) = Self::ensure_not_cancelled(canceller) {
 						let _ = txn.cancel().await;
-						self.discard_hnsw_index(tb, ikb, applied_format).await;
+						if in_place {
+							self.discard_hnsw_index(tb, ikb, applied_format).await;
+						}
 						return Err(e);
 					}
 					#[cfg(test)]
@@ -4493,7 +4501,9 @@ impl Datastore {
 						self.id,
 					) {
 						let _ = txn.cancel().await;
-						self.discard_hnsw_index(tb, ikb, applied_format).await;
+						if in_place {
+							self.discard_hnsw_index(tb, ikb, applied_format).await;
+						}
 						if Self::retry_index_operation_conflict(
 							&e,
 							format!(
@@ -4508,7 +4518,9 @@ impl Datastore {
 					}
 					if let Err(e) = txn.commit().await {
 						let _ = txn.cancel().await;
-						self.discard_hnsw_index(tb, ikb, applied_format).await;
+						if in_place {
+							self.discard_hnsw_index(tb, ikb, applied_format).await;
+						}
 						if Self::retry_index_operation_conflict(
 							&e,
 							format!(
@@ -4522,7 +4534,7 @@ impl Datastore {
 						return Err(e);
 					}
 				}
-				Ok(false) => {
+				Ok(_) => {
 					let _ = txn.cancel().await;
 					return Ok(());
 				}
@@ -6184,10 +6196,29 @@ mod test {
 	use crate::types::{PublicValue, PublicVariables};
 
 	async fn new_index_compaction_test_ds() -> Result<(Arc<Datastore>, Session)> {
+		new_index_compaction_test_ds_with_config(ConfigMap::empty()).await
+	}
+
+	/// [`new_index_compaction_test_ds`], with one configuration key set.
+	async fn new_index_compaction_test_ds_with(
+		key: &str,
+		value: &str,
+	) -> Result<(Arc<Datastore>, Session)> {
+		new_index_compaction_test_ds_with_config(ConfigMap::empty().with_key_value(key, value))
+			.await
+	}
+
+	async fn new_index_compaction_test_ds_with_config(
+		config: ConfigMap,
+	) -> Result<(Arc<Datastore>, Session)> {
 		// These tests decide when compaction runs and observe the wake-up that
 		// drives it. `CommitTriggers::index_compaction` is a `notify_one`, so a
 		// background compactor would take the permit a test is waiting on.
-		let ds = Datastore::builder().without_maintenance_tasks().build_with_path("memory").await?;
+		let ds = Datastore::builder()
+			.without_maintenance_tasks()
+			.with_config(config)
+			.build_with_path("memory")
+			.await?;
 		let session = Session::owner().with_ns("test").with_db("test");
 		let txn = ds.transaction(Write).await?;
 		txn.ensure_ns_db(None, "test", "test").await?;
@@ -7146,8 +7177,8 @@ mod test {
 		Ok(())
 	}
 
-	/// A compaction apply that reached the graph and then failed to commit must
-	/// not leave that graph reachable.
+	/// A compaction apply that reached the graph in place and then failed to
+	/// commit must not leave that graph reachable.
 	///
 	/// The apply advances the in-memory version of every layer it writes, and
 	/// that version is a plain per-layer counter: a peer applying the same
@@ -7158,13 +7189,16 @@ mod test {
 	/// versions would keep the copy the store never took. The wrapper goes
 	/// instead, and the next access rebuilds it from persisted state.
 	///
-	/// The injected conflict classifies as retryable, so the compaction rolls
-	/// its write back, discards the wrapper, and applies again; the call
-	/// returns once that attempt commits. That attempt drains the queue, so the
-	/// records the index then answers over come from the graph alone.
+	/// The index engines are configured serial, so the insertion is applied in
+	/// place; see the staged counterpart below for the default. The injected
+	/// conflict classifies as retryable, so the compaction rolls its write
+	/// back, discards the wrapper, and applies again; the call returns once
+	/// that attempt commits. That attempt drains the queue, so the records the
+	/// index then answers over come from the graph alone.
 	#[tokio::test]
 	async fn hnsw_index_compaction_commit_failure_evicts_the_loaded_index() -> Result<()> {
-		let (ds, session) = new_index_compaction_test_ds().await?;
+		let (ds, session) =
+			new_index_compaction_test_ds_with("hnsw_build_parallelism", "serial").await?;
 		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
 		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
 		let site = RetryableConflictSite::HnswCompaction;
@@ -7214,6 +7248,57 @@ mod test {
 			panic!("expected an array result");
 		};
 		assert_eq!(rows.len(), 3, "the recovered index must return every record: {rows:?}");
+		Ok(())
+	}
+
+	/// A staged compaction whose commit fails leaves the loaded index in place.
+	///
+	/// A batch that only adds vectors builds its graph changes into its
+	/// transaction and publishes them into the resident graph from the commit,
+	/// so a commit that fails leaves the resident graph at the committed state:
+	/// there is nothing to discard, and the retry runs on the same wrapper. The
+	/// retry advances layer 0 by exactly one, as the in-place apply does, and
+	/// once it has drained the queue the graph answers for every record.
+	#[tokio::test]
+	async fn hnsw_staged_compaction_commit_failure_keeps_the_loaded_index() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
+		let site = RetryableConflictSite::HnswCompaction;
+		let node_id = ds.id();
+
+		let before = loaded_hnsw_index(&ds, "vec", "hnsw_idx").await?;
+		ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+		let versions = hnsw_layer_versions(&ds, &ikb).await?;
+
+		execute_all(&ds, &session, "CREATE vec:3 SET vector = [8, 9] RETURN NONE;").await?;
+		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, 1, "the record must be staged, not indexed");
+		let _guard = inject_retryable_conflict(site, node_id);
+		ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+		assert_eq!(retryable_conflict_count(site, node_id), 0, "the conflict must have fired");
+		assert_eq!(
+			hnsw_pending_len(&ds, &ikb).await?,
+			0,
+			"the attempt after the rollback must have applied the pending it rolled back"
+		);
+		let applied = hnsw_layer_versions(&ds, &ikb).await?;
+		assert_eq!(
+			applied[0],
+			versions[0] + 1,
+			"one staged batch must advance layer 0 by exactly one: {versions:?} -> {applied:?}"
+		);
+
+		let after = loaded_hnsw_index(&ds, "vec", "hnsw_idx").await?;
+		assert!(
+			Arc::ptr_eq(&before, &after),
+			"a staged batch that did not commit must leave the loaded index in place"
+		);
+		let mut response =
+			ds.execute("SELECT id FROM vec WHERE vector <|3,40|> [1, 2];", &session, None).await?;
+		let PublicValue::Array(rows) = response.remove(0).result? else {
+			panic!("expected an array result");
+		};
+		assert_eq!(rows.len(), 3, "the index must return every record: {rows:?}");
 		Ok(())
 	}
 

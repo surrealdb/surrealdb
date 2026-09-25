@@ -37,7 +37,7 @@ use crate::ft::fulltext::{FullTextCompactionPlan, FullTextIndex};
 use crate::key::schema::{EntryKey, UniqueKey};
 #[cfg(diskann)]
 use crate::trees::diskann::index::{DiskAnnCompactionPlan, DiskAnnIndex};
-use crate::trees::hnsw::index::{HnswCompactionPlan, HnswIndex};
+use crate::trees::hnsw::index::{HnswCompactionOutcome, HnswCompactionPlan, HnswIndex};
 use crate::trees::store::IndexStores;
 use crate::val::{Array, RecordId, TableName, Value};
 use crate::{Error as IdxError, IndexKeyBase, key};
@@ -370,8 +370,10 @@ impl<'a> IndexOperation<'a> {
 
 	/// Applies a prepared HNSW pending compaction plan.
 	///
-	/// Returns `false` when there is no work, another compactor advanced the
-	/// generation first, or a captured pending key changed before the write.
+	/// Reports [`HnswCompactionOutcome::Skipped`] when there is no work, the
+	/// table is gone, another compactor advanced the generation first, or a
+	/// captured pending key changed before the write. What the other outcomes
+	/// owe a caller whose commit then fails is on [`HnswCompactionOutcome`].
 	pub async fn apply_hnsw_compaction(
 		env: &dyn IndexEnv,
 		ixs: &IndexStores,
@@ -379,13 +381,13 @@ impl<'a> IndexOperation<'a> {
 		p: &HnswParams,
 		format_version: u16,
 		plan: HnswCompactionPlan,
-	) -> Result<bool> {
+	) -> Result<HnswCompactionOutcome> {
 		let tx = env.tx();
 		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? {
 			let hnsw = ixs.get_index_hnsw(env, tb.table_id, ikb, p, format_version).await?;
 			return hnsw.apply_compaction(env, plan).await;
 		}
-		Ok(false)
+		Ok(HnswCompactionOutcome::Skipped)
 	}
 
 	#[cfg(diskann)]

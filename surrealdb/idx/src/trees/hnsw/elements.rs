@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use surrealdb_datastore::Transaction;
 
@@ -7,10 +9,40 @@ use crate::trees::hnsw::ElementId;
 use crate::trees::hnsw::cache::VectorCache;
 use crate::trees::vector::{DistanceExt as _, SerializedVector, SharedVector, Vector};
 
+/// The vectors of the elements a staged batch is adding: a contiguous run of
+/// element ids, none of them yet in the store's committed state or in any
+/// process-wide cache.
+pub(super) struct ElementOverlay {
+	/// The first element id the batch allocated.
+	first: ElementId,
+	/// The batch's vectors, in element-id order from `first`.
+	vectors: Vec<SharedVector>,
+}
+
+impl ElementOverlay {
+	pub(super) fn new(first: ElementId, vectors: Vec<SharedVector>) -> Self {
+		Self {
+			first,
+			vectors,
+		}
+	}
+
+	/// The vector of a batch element, or `None` for any other element.
+	pub(super) fn get(&self, id: ElementId) -> Option<&SharedVector> {
+		let offset = id.checked_sub(self.first)?;
+		self.vectors.get(usize::try_from(offset).ok()?)
+	}
+}
+
 /// Manages storage and retrieval of element vectors in the HNSW graph.
 ///
 /// Vectors are stored in the key-value store and cached in-memory via
 /// [`VectorCache`] for fast distance computations during graph traversal.
+///
+/// A view made by [`Self::view`] with an overlay also answers for the elements a
+/// staged batch is adding, straight from the batch, ahead of the cache and the
+/// store. That keeps those vectors out of the process-wide cache until the
+/// batch has committed.
 pub(super) struct HnswElements {
 	/// The table this index belongs to.
 	table_id: TableId,
@@ -26,6 +58,8 @@ pub(super) struct HnswElements {
 	next_element_id: ElementId,
 	/// Distance metric for similarity computations.
 	dist: Distance,
+	/// The vectors of a staged batch, consulted before the cache and the store.
+	overlay: Option<Arc<ElementOverlay>>,
 }
 
 impl HnswElements {
@@ -45,6 +79,73 @@ impl HnswElements {
 			format_version,
 			next_element_id: 0,
 			dist,
+			overlay: None,
+		}
+	}
+
+	/// A view of the same elements, for reads outside the graph. With an
+	/// `overlay` it also answers for a staged batch's own elements, ahead of the
+	/// cache and the store.
+	pub(super) fn view(&self, overlay: Option<Arc<ElementOverlay>>) -> Self {
+		Self {
+			table_id: self.table_id,
+			index_id: self.index_id,
+			ikb: self.ikb.clone(),
+			vector_cache: self.vector_cache.clone(),
+			format_version: self.format_version,
+			next_element_id: self.next_element_id,
+			dist: self.dist.clone(),
+			overlay,
+		}
+	}
+
+	/// Enters committed element vectors into the process-wide cache.
+	pub(super) async fn cache_committed(
+		&self,
+		vectors: impl Iterator<Item = (ElementId, SharedVector)>,
+	) {
+		for (id, vector) in vectors {
+			self.vector_cache
+				.insert(
+					self.ikb.ns(),
+					self.ikb.db(),
+					self.table_id,
+					self.index_id,
+					self.format_version,
+					id,
+					vector,
+				)
+				.await;
+		}
+	}
+
+	/// Drops every cache entry this index holds at its format version: vectors,
+	/// document sets and document ids.
+	pub(super) async fn evict_index(&self) {
+		self.vector_cache
+			.remove_index(
+				self.ikb.ns(),
+				self.ikb.db(),
+				self.table_id,
+				self.index_id,
+				self.format_version,
+			)
+			.await;
+	}
+
+	/// Drops the given elements' vectors from the process-wide cache.
+	pub(super) async fn evict(&self, ids: impl Iterator<Item = ElementId>) {
+		for id in ids {
+			self.vector_cache
+				.remove(
+					self.ikb.ns(),
+					self.ikb.db(),
+					self.table_id,
+					self.index_id,
+					self.format_version,
+					id,
+				)
+				.await;
 		}
 	}
 
@@ -110,12 +211,18 @@ impl HnswElements {
 		Ok(pt)
 	}
 
-	/// Retrieves a vector by element ID, checking the cache first then the key-value store.
+	/// Retrieves a vector by element ID, checking a staged batch's own elements
+	/// first, then the cache, then the key-value store.
 	pub(super) async fn get_vector(
 		&self,
 		tx: &Transaction,
 		e_id: &ElementId,
 	) -> Result<Option<SharedVector>> {
+		if let Some(overlay) = &self.overlay
+			&& let Some(v) = overlay.get(*e_id)
+		{
+			return Ok(Some(v.clone()));
+		}
 		if let Some(v) = self
 			.vector_cache
 			.get(
