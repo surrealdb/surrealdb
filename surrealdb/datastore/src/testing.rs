@@ -41,6 +41,11 @@ pub enum RetryableConflictSite {
 	/// A conflict on the commit of one batch of the migration that copies the
 	/// table-scoped doc-ID mappings under their injective key.
 	DocLookupIdentityMigration,
+	/// A conflict on the commit that ends a queued async event — the one that
+	/// makes the event's writes durable and removes its queue entry together.
+	/// Raised in place of that commit, and leaving the transaction finished as
+	/// a real commit failure does.
+	AsyncEventCommit,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -69,6 +74,14 @@ pub enum NonRetryableErrorSite {
 	/// its sentinel and stamping `!v`, which is the half-initialised state a
 	/// later start has to recognise and finish.
 	VersionBootstrapStamp,
+	/// Simulates the commit that ends a queued async event applying but
+	/// reporting `CommitOutcomeUnknown`: raised after that commit succeeds, so
+	/// the event's writes and the removal of its queue entry are durable.
+	AsyncEventCommitAppliedUnknown,
+	/// Simulates that commit reporting `CommitOutcomeUnknown` without having
+	/// applied: raised in place of it, leaving the transaction finished and its
+	/// writes discarded.
+	AsyncEventCommitDiscardedUnknown,
 }
 
 static RETRYABLE_CONFLICTS: OnceLock<Mutex<HashMap<(RetryableConflictSite, Uuid), usize>>> =
@@ -161,6 +174,12 @@ pub fn maybe_inject_non_retryable_error(site: NonRetryableErrorSite, node_id: Uu
 		// memory threshold.
 		NonRetryableErrorSite::ConcurrentIndexInitialBatchMemoryThreshold => {
 			Err(crate::error::DatastoreError::QueryBeyondMemoryThreshold.into())
+		}
+		// The error a storage engine reports when it cannot tell whether a
+		// commit applied.
+		NonRetryableErrorSite::AsyncEventCommitAppliedUnknown
+		| NonRetryableErrorSite::AsyncEventCommitDiscardedUnknown => {
+			Err(surrealdb_kvs::Error::CommitOutcomeUnknown(format!("injected at {site:?}")).into())
 		}
 		_ => {
 			Err(surrealdb_kvs::Error::Internal(format!("injected non-retryable error at {site:?}"))

@@ -7,6 +7,8 @@
 
 pub(crate) use self::document::*;
 pub(crate) use self::error::Error;
+#[cfg(test)]
+pub(crate) use self::event::process_events_batch;
 pub use self::event::process_next_events_batch;
 pub(crate) use self::lives::DefaultBroker;
 
