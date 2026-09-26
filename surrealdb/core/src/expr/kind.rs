@@ -263,16 +263,33 @@ impl Kind {
 		}
 	}
 
-	/// Returns true if this type permits access to named sub-fields.
+	/// Returns true if this type permits *reading* a named sub-field path.
 	///
 	/// This covers `object`, `any`, literal object types (e.g. `{ key: string }`),
-	/// and union types where every non-none variant permits sub-field access.
+	/// and union types where every variant other than `none` and `null` permits
+	/// sub-field access.
+	///
+	/// `null` is exempted for the same reason as `none`: it carries no named
+	/// sub-fields of its own, and *reading* a sub-field of a `NULL` value yields
+	/// `NONE` rather than an error, so a `null` variant never makes the
+	/// sub-field read path invalid. Every other variant must still permit the
+	/// access on its own, so a union mixing an object with a concrete scalar
+	/// (e.g. `null | string | { city: string }`) is still rejected.
+	///
+	/// This is a read-side predicate only, used to decide whether `DEFINE INDEX`
+	/// may target a sub-field path on a SCHEMAFULL table. It deliberately does
+	/// *not* govern whether a sub-field may be *declared* with `DEFINE FIELD`:
+	/// that goes through [`Kind::allows_nested_kind`], which exempts only `none`
+	/// (matching [`Kind::can_be_none`], the gate the document writer uses to skip
+	/// child fields). Extending the `null` exemption there would admit schemas
+	/// that cannot store `NULL` in the parent at all, because the writer descends
+	/// through a `NULL` parent and fails to coerce the resulting `NONE`.
 	pub(crate) fn allows_sub_fields(&self) -> bool {
 		match self {
 			Kind::Any | Kind::Object | Kind::Array(..) | Kind::Set(..) => true,
 			Kind::Literal(KindLiteral::Object(_) | KindLiteral::Array(_)) => true,
 			Kind::Either(kinds) => {
-				kinds.iter().all(|k| matches!(k, Kind::None) || k.allows_sub_fields())
+				kinds.iter().all(|k| matches!(k, Kind::None | Kind::Null) || k.allows_sub_fields())
 			}
 			_ => false,
 		}

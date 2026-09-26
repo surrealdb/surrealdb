@@ -95,8 +95,11 @@ impl DefineIndexStatement {
 		//    paths (e.g. `document.visible`), we allow the index if either the full path is
 		//    explicitly defined, or the top-level parent field has a type that permits sub-field
 		//    access — this includes `object`, `any`, literal object types (e.g. `{ key: string }`),
-		//    and union types where every non-none variant is object-like. A parent field with no
-		//    explicit type is also accepted, since it is unconstrained.
+		//    and union types where every variant other than `none` and `null` is object-like.
+		//    `none` and `null` variants are both exempt: neither carries named sub-fields, and
+		//    reading a sub-field through either yields `NONE` rather than an error, so such a
+		//    variant never invalidates the indexed path. A parent field with no explicit type is
+		//    also accepted, since it is unconstrained.
 		for idiom in cols.iter() {
 			let fd = idiom.to_raw_string();
 			// Check if the exact field path (e.g. `document.visible`) is defined
