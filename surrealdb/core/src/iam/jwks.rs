@@ -210,6 +210,11 @@ pub(super) async fn config(
 			// involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
 			val.validate_aud = false;
 
+			// Apply the same clock-skew leeway as the static-key path (see
+			// `verify::decode_key`) so JWKS-verified tokens also tolerate minor
+			// clock steps on the "nbf"/"exp" claims per RFC 7519 §4.1.5.
+			val.leeway = crate::iam::verify::JWT_CLOCK_SKEW_LEEWAY_SECS;
+
 			Ok((dec, val))
 		}
 		Err(err) => {
