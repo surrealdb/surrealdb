@@ -23,6 +23,12 @@ use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::{catalog, syn};
 
+/// Leeway (in seconds) applied when validating the time-based JWT claims
+/// ("nbf" and "exp") to account for clock skew between the token issuer and
+/// this server, as anticipated by RFC 7519 §4.1.5. Kept intentionally small so
+/// that expiry is still enforced tightly while tolerating minor clock steps.
+pub(crate) const JWT_CLOCK_SKEW_LEEWAY_SECS: u64 = 5;
+
 /// Returns the decoding key as wel as the method by which to verify the key against
 fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Validation)> {
 	let (dec, mut val) = match alg {
@@ -76,6 +82,15 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 	// Now that the audience claim is validated by default, we could allow users to leverage this.
 	// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
 	val.validate_aud = false;
+
+	// Allow a small leeway when validating the "nbf" and "exp" claims to
+	// tolerate clock skew between the token issuer and this server, as
+	// anticipated by RFC 7519 §4.1.5. Without any leeway, a backward step of
+	// the host clock (e.g. an NTP correction) can retroactively invalidate
+	// tokens this server issued moments earlier, since SurrealDB mints its own
+	// session tokens with `iat == nbf == now`. A few seconds of tolerance
+	// eliminates this failure class without meaningfully weakening validation.
+	val.leeway = JWT_CLOCK_SKEW_LEEWAY_SECS;
 
 	Ok((dec, val))
 }
@@ -164,16 +179,22 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	let token_data = decode_claims_unverified(token)?;
 	// Convert the token to a SurrealQL object value
 	let value = crate::val::Value::from(token_data.claims.clone().into_claims_object());
-	// Check if the auth token can be used
+	// Check if the auth token can be used yet. Apply a small leeway to the
+	// "nbf" (not-before) claim to tolerate clock skew between the token issuer
+	// and this server, as anticipated by RFC 7519 §4.1.5. Without any leeway, a
+	// backward step of the host clock (e.g. an NTP correction) can retroactively
+	// invalidate tokens this server issued moments earlier, since SurrealDB
+	// mints its own session tokens with `iat == nbf == now`.
 	if let Some(nbf) = token_data.claims.nbf
-		&& nbf > Utc::now().timestamp()
+		&& nbf > Utc::now().timestamp() + JWT_CLOCK_SKEW_LEEWAY_SECS as i64
 	{
 		debug!("Token verification failed due to the 'nbf' claim containing a future time");
 		bail!(Error::InvalidAuth);
 	}
-	// Check if the auth token has expired
+	// Check if the auth token has expired. Apply the same leeway on "exp" for
+	// symmetry so a minor clock skew does not reject an otherwise-valid token.
 	if let Some(exp) = token_data.claims.exp
-		&& exp < Utc::now().timestamp()
+		&& exp < Utc::now().timestamp() - JWT_CLOCK_SKEW_LEEWAY_SECS as i64
 	{
 		debug!("Token verification failed due to the 'exp' claim containing a past time");
 		bail!(Error::ExpiredToken);
@@ -1279,6 +1300,71 @@ mod tests {
 			assert!(
 				exp > min_exp && exp < max_exp,
 				"Session expiration is expected to match the defined duration"
+			);
+		}
+	}
+
+	#[rstest]
+	// Within the clock-skew leeway: a slightly-future "nbf" must be accepted.
+	#[case::nbf_now(0, false)]
+	#[case::nbf_one_second_future(1, false)]
+	#[case::nbf_within_leeway(3, false)]
+	// Beyond the leeway: a clearly-future "nbf" must still be rejected.
+	#[case::nbf_beyond_leeway(30, true)]
+	#[tokio::test]
+	async fn test_token_nbf_clock_skew_leeway(
+		#[case] nbf_offset_secs: i64,
+		#[case] expect_error: bool,
+	) {
+		// Regression test for the "nbf" clock-skew issue: SurrealDB mints its own
+		// tokens with `nbf == now`, so a backward host-clock step made an
+		// otherwise-valid, server-issued token read as "not yet valid". A small
+		// leeway (RFC 7519 §4.1.5) must tolerate minor skew while still rejecting
+		// tokens whose "nbf" is clearly in the future.
+		let secret = "a-very-long-shared-secret-for-hs512-token-signing";
+		let now = Utc::now().timestamp();
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(now),
+			nbf: Some(now + nbf_offset_secs),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ac: Some("token".to_string()),
+			..Claims::default()
+		};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!(
+				r#"
+				DEFINE ACCESS token ON DATABASE TYPE JWT
+					ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d
+				;
+			"#
+			)
+			.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS512);
+		let enc = encode(&header, &claims, &key).unwrap();
+
+		let mut sess = Session::default();
+		let res = token(&ds, &mut sess, &enc).await;
+
+		if expect_error {
+			assert!(
+				res.is_err(),
+				"nbf offset of +{nbf_offset_secs}s should be rejected as too far in the future"
+			);
+		} else {
+			assert!(
+				res.is_ok(),
+				"nbf offset of +{nbf_offset_secs}s is within the clock-skew leeway and should be accepted, got: {res:?}"
 			);
 		}
 	}
