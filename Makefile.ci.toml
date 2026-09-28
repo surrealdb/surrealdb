@@ -913,6 +913,26 @@ args = [
     "${_TEST_CRATE}",
 ]
 
+# The whole `surrealdb-idx` suite, built with the lane's backend feature. The
+# crate selects no backend of its own and its tests run on the in-memory store;
+# its `kv-*` features add the tests that race against an on-disk or distributed
+# store, which only a lane supplying that backend can run. Only usable from a
+# lane whose `_TEST_FEATURES` names a backend `surrealdb-idx` declares: cargo
+# rejects any other feature name.
+[tasks.test-idx]
+private = true
+command = "cargo"
+env = { RUST_BACKTRACE = 1 }
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-idx",
+    "--features",
+    "${_TEST_FEATURES}",
+]
+
 [tasks.ci-kvs-mem]
 category = "CI - INTEGRATION TESTS"
 description = "Run KVS integration tests with the in-memory engine"
@@ -932,6 +952,7 @@ run_task = { name = [
     "test-kvs-any",
     "test-kvs-crate",
     "test-datastore",
+    "test-idx",
 ], fork = true, parallel = true }
 
 [tasks.ci-kvs-surrealkv]

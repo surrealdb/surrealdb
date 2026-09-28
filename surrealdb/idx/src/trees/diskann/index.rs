@@ -2127,10 +2127,13 @@ impl DiskAnnIndex {
 mod tests {
 	use std::collections::BTreeMap;
 
+	use rand::rngs::SmallRng;
+	use rand::{Rng, SeedableRng};
 	use surrealdb_datastore::is_retryable_transaction_conflict;
 	use surrealdb_kvs::TransactionType;
 	#[cfg(feature = "kv-rocksdb")]
 	use temp_dir::TempDir;
+	use tracing::info;
 
 	use super::*;
 	use crate::catalog::{DOC_IDS_FORMAT_VERSION, DatabaseId, IndexId, NamespaceId};
@@ -2499,6 +2502,44 @@ mod tests {
 		// and cancels it on Ok(false) / Err, so the test must not double-commit.
 		let applied = index.apply_compaction(&ctx, plan).await?;
 		Ok(applied)
+	}
+
+	/// Drains every pending update through prepare/apply until a prepared plan
+	/// asks for no write phase at all.
+	///
+	/// One prepare pass is capped at [`DISKANN_COMPACTION_MAX_PENDING_KEYS`] keys
+	/// and [`DISKANN_COMPACTION_MAX_PENDING_BYTES`] bytes, so a corpus wider than
+	/// one batch needs several passes, and each drained `!dy` shard takes one
+	/// further pass to step from `MaybeEmpty` to `Empty`. Returns the number of
+	/// passes that captured pending keys, which is what a caller asserts on when
+	/// it cares that the drain was batched. The pass cap turns a drain that fails
+	/// to converge into a failure rather than a hang.
+	async fn compact_all(
+		index: &DiskAnnIndex,
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+	) -> Result<usize> {
+		const MAX_PASSES: usize = 4096;
+		let mut applied = 0;
+		for _ in 0..MAX_PASSES {
+			let plan = {
+				let ctx = new_ctx(ds, TransactionType::Read).await;
+				let plan = DiskAnnIndex::prepare_compaction(&ctx, ikb).await?;
+				ctx.tx().cancel().await?;
+				plan
+			};
+			if !plan.requires_apply() {
+				return Ok(applied);
+			}
+			let had_work = plan.has_work();
+			let ctx = new_ctx(ds, TransactionType::Write).await;
+			// `apply_compaction` owns the write transaction's outcome.
+			index.apply_compaction(&ctx, plan).await?;
+			if had_work {
+				applied += 1;
+			}
+		}
+		bail!("DiskANN compaction did not drain within {MAX_PASSES} passes")
 	}
 
 	fn cached_doc_ids(
@@ -5140,6 +5181,356 @@ mod tests {
 		assert!(compact_once(&index, &ds, &ikb).await?);
 		assert_eq!(knn_len(&index, &ds, &v1).await?, 1);
 		Ok(())
+	}
+
+	// ------------------------------------------------------------------
+	// Recall harness
+	// ------------------------------------------------------------------
+	//
+	// What DiskANN's KNN answers are worth is not covered by any assertion on
+	// key counts or result cardinality: a graph that has lost its long-range
+	// edges still returns `k` rows, just the wrong ones. The harness below
+	// measures Recall@k — the fraction of the exact top-`k` the graph search
+	// actually finds — against a brute-force ground truth over the same corpus
+	// and the same metric, and pins a floor per (dataset, `ef`).
+	//
+	// The floors are the reference point for any later change to how the graph
+	// is built: a build that reorders, batches or parallelises insertion
+	// produces a different graph, and the only thing that says the different
+	// graph is still a good one is that it answers queries as well.
+
+	/// Corpus seed used when `TEST_SEED` is unset.
+	const RECALL_SEED: u64 = 0x0D15_C0FF_EE5E_ED01;
+
+	/// A compaction plan stops at whichever cap it hits first. Every harness
+	/// corpus is `F32` at 768 dimensions or narrower — around 3 KiB of vector per
+	/// pending update at the widest — so the key cap always binds first and
+	/// [`measure_recall`] can assert an exact pass count. A wider corpus would
+	/// hit the byte cap instead, and that assertion would not hold for it.
+	const _: () = assert!(
+		DISKANN_COMPACTION_MAX_PENDING_KEYS * 768 * size_of::<f32>()
+			< DISKANN_COMPACTION_MAX_PENDING_BYTES
+	);
+
+	/// Seeds a recall corpus.
+	///
+	/// Fixed by default: the DiskANN build is deterministic, so a fixed corpus
+	/// makes the measured recall reproducible and the floors below a tripwire
+	/// rather than a guess. `TEST_SEED` overrides it to probe a different draw.
+	/// The floors leave margin for one, but they are set against the default
+	/// corpus: a failure under another seed is not by itself evidence of a
+	/// regression.
+	fn recall_rng() -> SmallRng {
+		let seed = std::env::var("TEST_SEED")
+			.map(|s| s.parse::<u64>().expect("TEST_SEED must parse as u64"))
+			.unwrap_or(RECALL_SEED);
+		SmallRng::seed_from_u64(seed)
+	}
+
+	/// Generator for a corpus with cluster structure.
+	///
+	/// A uniform-random draw is a poor probe for an ANN graph: past a handful of
+	/// dimensions every pair of points sits at nearly the same distance, so a
+	/// badly connected graph answers a KNN query about as well as a well
+	/// connected one and recall stops discriminating between them. Embedding
+	/// corpora are clustered, and a pruned graph loses recall exactly where a
+	/// search has to hop between clusters.
+	///
+	/// A centroid is uniform in `[-1, 1]^dim`; a member is its centroid plus
+	/// per-component noise uniform in `[-spread, spread]`, with membership
+	/// assigned round-robin so no centroid dominates. Both radii scale with
+	/// `sqrt(dim)`, so a given `spread` separates clusters equally well at any
+	/// dimension; a `spread` well below the typical inter-centroid distance is
+	/// what makes the number of clusters — rather than the number of points —
+	/// the parameter the graph's degree has to cope with.
+	///
+	/// Members per cluster must stay **below** the `k` a dataset measures
+	/// Recall@`k` at. A cluster of `k` or more members makes the exact top-`k`
+	/// one cluster's interior, which the search reaches as soon as it reaches
+	/// that cluster at all: recall pins to 1.0 and reports nothing about how the
+	/// graph connects clusters, which is the property under test.
+	struct ClusteredCorpus {
+		centroids: Vec<Vec<f32>>,
+		spread: f32,
+		next: usize,
+	}
+
+	impl ClusteredCorpus {
+		fn new(rng: &mut SmallRng, dim: usize, clusters: usize, spread: f32) -> Self {
+			assert!(clusters > 0, "a clustered corpus needs at least one centroid");
+			let centroids = (0..clusters)
+				.map(|_| (0..dim).map(|_| rng.random_range(-1.0f32..=1.0)).collect())
+				.collect();
+			Self {
+				centroids,
+				spread,
+				next: 0,
+			}
+		}
+
+		/// Draws `count` further members, continuing both the round-robin over
+		/// centroids and the RNG stream.
+		///
+		/// Successive calls therefore return disjoint points from one
+		/// distribution, which is what keeps a held-out query set free of copies
+		/// of indexed vectors: a query that is its own nearest neighbour scores a
+		/// guaranteed hit and turns the average into an over-estimate.
+		fn draw(&mut self, rng: &mut SmallRng, count: usize) -> Vec<Vec<f32>> {
+			let mut out = Vec::with_capacity(count);
+			for _ in 0..count {
+				let centroid = &self.centroids[self.next % self.centroids.len()];
+				self.next += 1;
+				let member = centroid
+					.iter()
+					.map(|c| c + rng.random_range(-self.spread..=self.spread))
+					.collect();
+				out.push(member);
+			}
+			out
+		}
+	}
+
+	/// DiskANN parameters at an arbitrary dimension and graph shape. `DEGREE` and
+	/// `L_BUILD` are what the harness varies; everything else is the DDL default.
+	fn graph_params(
+		dimension: u16,
+		distance: Distance,
+		degree: u16,
+		l_build: u16,
+	) -> DiskAnnParams {
+		DiskAnnParams {
+			dimension,
+			distance,
+			vector_type: VectorType::F32,
+			degree,
+			l_build,
+			alpha: 1.2.into(),
+			use_hashed_vector: false,
+		}
+	}
+
+	/// Exact top-`k` record ids for `query` over `corpus` under `distance`.
+	///
+	/// Ties at the `k`-th distance are broken by record id. The draws are
+	/// continuous floats, so an exact tie at that boundary does not arise; on
+	/// data where it could, the ground truth would be one of several equally
+	/// correct answers and the recall computed against it a lower bound.
+	fn brute_force_top_k(
+		corpus: &[Vector],
+		query: &[f32],
+		distance: &Distance,
+		k: usize,
+	) -> Vec<i64> {
+		let q = Vector::F32(query.to_vec().into());
+		let mut scored: Vec<(f64, i64)> = corpus
+			.iter()
+			.enumerate()
+			.map(|(id, v)| (distance.calculate(v, &q), id as i64))
+			.collect();
+		scored.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+		scored.truncate(k);
+		scored.into_iter().map(|(_, id)| id).collect()
+	}
+
+	/// Fraction of the exact answer the index returned.
+	///
+	/// Counts the intersection of two *sets*, not matching entries in `got`. Counting entries
+	/// would let a graph that returns one true neighbour ten times score 1.0 instead of 0.1 —
+	/// exactly the malformed shape this harness exists to catch. A duplicate in `got` is itself
+	/// a defect rather than a recall loss, so it fails here instead of being scored.
+	fn recall(truth: &[i64], got: &[i64]) -> f64 {
+		let seen: HashSet<i64> = got.iter().copied().collect();
+		assert_eq!(seen.len(), got.len(), "index returned duplicate ids: {got:?}");
+		let truth: HashSet<i64> = truth.iter().copied().collect();
+		let hits = truth.intersection(&seen).count();
+		hits as f64 / truth.len() as f64
+	}
+
+	/// Record ids the index returns for one query, in result order.
+	async fn knn_ids(
+		index: &DiskAnnIndex,
+		ds: &TestIndexStore,
+		query: &[f32],
+		k: usize,
+		ef: usize,
+	) -> Result<Vec<i64>> {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let pt = f32_query(query);
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| async { index.knn_search(&ctx, stk, &pt, k, ef, None, None).await })
+			.finish()
+			.await?;
+		ctx.tx().cancel().await?;
+		Ok(res
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect())
+	}
+
+	/// Builds one DiskANN index over `corpus` and measures Recall@`k` against
+	/// brute-force ground truth at each `(ef, floor)` pair.
+	///
+	/// The corpus goes in through the production path — `index()` enqueues one
+	/// `!dw` pending per record, [`compact_all`] drains them into the graph — so
+	/// the graph measured here is the one a `DEFINE INDEX` builds, not a
+	/// hand-assembled stand-in. Recall is averaged over the query set; the
+	/// per-`ef` floor is asserted on that average.
+	async fn measure_recall(
+		label: &str,
+		params: &DiskAnnParams,
+		corpus: &[Vec<f32>],
+		queries: &[Vec<f32>],
+		k: usize,
+		ef_floors: &[(usize, f64)],
+	) -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let index = new_index(ikb.clone(), TableId(4), params, cache()).await?;
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for (id, v) in corpus.iter().enumerate() {
+				index
+					.index(&ctx, &RecordIdKey::Number(id as i64), None, Some(f32_content(v)))
+					.await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		let passes = compact_all(&index, &ds, &ikb).await?;
+		// Exact-count accounting on the drain, not a timing claim: one
+		// prepare/apply pass captures at most `DISKANN_COMPACTION_MAX_PENDING_KEYS`
+		// pending keys, and a corpus of fresh records is one pending key each, so
+		// the drain takes exactly `ceil(n / cap)` passes that do work. Pinning it
+		// says the graph under measurement was built through the bounded drain
+		// rather than in one unbounded transaction.
+		assert_eq!(
+			passes,
+			corpus.len().div_ceil(DISKANN_COMPACTION_MAX_PENDING_KEYS),
+			"{label}: bounded drain of {} pendings took {passes} passes",
+			corpus.len()
+		);
+
+		let vectors: Vec<Vector> = corpus.iter().map(|v| Vector::F32(v.clone().into())).collect();
+		let truth: Vec<Vec<i64>> =
+			queries.iter().map(|q| brute_force_top_k(&vectors, q, &params.distance, k)).collect();
+
+		for &(ef, floor) in ef_floors {
+			let mut total = 0.0;
+			for (query, truth) in queries.iter().zip(truth.iter()) {
+				let got = knn_ids(&index, &ds, query, k, ef).await?;
+				total += recall(truth, &got);
+			}
+			let measured = total / queries.len() as f64;
+			info!(
+				"{label}: n={} q={} DEGREE={} L_BUILD={} ef={ef} -> Recall@{k}={measured:.4} \
+				 (floor {floor}, {passes} compaction passes)",
+				corpus.len(),
+				queries.len(),
+				params.degree,
+				params.l_build,
+			);
+			assert!(
+				measured >= floor,
+				"{label}: ef={ef} Recall@{k}={measured:.4} below floor {floor}"
+			);
+		}
+		Ok(())
+	}
+
+	/// Recall floor: the report's corpus shape — far more clusters than a node
+	/// has out-edges — at the `DEFINE INDEX … DISKANN` defaults
+	/// (`DEGREE 64`, `L_BUILD 100`, `ALPHA 1.2`).
+	///
+	/// With 2000 centroids against a 64-edge budget the graph cannot hold a
+	/// direct edge to most clusters, so answering a query means hopping between
+	/// them: this is the structure a build that drops long-range edges breaks
+	/// first. At this corpus size a healthy graph saturates — the floors sit just
+	/// under 1.0 and catch a graph that has structurally broken rather than one
+	/// that has drifted. [`diskann_recall_starved_degree`] is the companion with
+	/// headroom in the middle of the curve.
+	#[test_log::test(tokio::test(flavor = "multi_thread"))]
+	async fn diskann_recall_many_clusters_degree_64() -> Result<()> {
+		let mut rng = recall_rng();
+		let mut corpus = ClusteredCorpus::new(&mut rng, 32, 2000, 0.35);
+		let base = corpus.draw(&mut rng, 2500);
+		let queries = corpus.draw(&mut rng, 100);
+		let params = graph_params(32, Distance::Cosine, 64, 100);
+		measure_recall(
+			"many-clusters-degree-64",
+			&params,
+			&base,
+			&queries,
+			10,
+			&[(10, 0.96), (20, 0.97), (40, 0.98), (100, 0.98), (200, 0.98)],
+		)
+		.await
+	}
+
+	/// Recall floor: the same clustered shape against a deliberately starved
+	/// graph budget (`DEGREE 8`, `L_BUILD 24`).
+	///
+	/// Starving the degree is what buys the harness its resolution. A graph
+	/// dense enough to answer every query exactly — which
+	/// [`diskann_recall_many_clusters_degree_64`] is, at a corpus this size —
+	/// reports 1.0 whether the build is good or merely adequate. Here recall
+	/// climbs across the whole `ef` sweep, so a build that produces a slightly
+	/// worse graph moves the number instead of staying pinned at the ceiling.
+	#[test_log::test(tokio::test(flavor = "multi_thread"))]
+	async fn diskann_recall_starved_degree() -> Result<()> {
+		let mut rng = recall_rng();
+		let mut corpus = ClusteredCorpus::new(&mut rng, 64, 1500, 0.35);
+		let base = corpus.draw(&mut rng, 4000);
+		let queries = corpus.draw(&mut rng, 100);
+		let params = graph_params(64, Distance::Cosine, 8, 24);
+		measure_recall(
+			"starved-degree",
+			&params,
+			&base,
+			&queries,
+			10,
+			&[(10, 0.55), (20, 0.67), (40, 0.77), (100, 0.89), (200, 0.94)],
+		)
+		.await
+	}
+
+	/// Diagnostic: the DDL defaults at the reference workload's dimension and an
+	/// order of magnitude more rows than CI can pay for — 20 000 × 768-dim cosine
+	/// vectors, `DEGREE 64` / `L_BUILD 100`.
+	///
+	/// This is what says how much of
+	/// [`diskann_recall_many_clusters_degree_64`]'s saturation is the corpus rather
+	/// than the graph. At the CI dataset's size the shipped configuration answers
+	/// essentially every query exactly, while at this size and dimension recall
+	/// varies with `ef`. So that ceiling is a property of the CI corpus, and its
+	/// floors are a structural tripwire rather than a measurement of graph quality.
+	/// The measured curve belongs in the run's report, not here.
+	///
+	/// Ignored because a 768-dim build is minutes rather than seconds: per-insert
+	/// cost scales with the dimension. Run it against a change to the build path:
+	///
+	/// ```text
+	/// cargo test --release -p surrealdb-idx --lib diag_diskann_recall_768 -- --ignored --nocapture
+	/// ```
+	#[test_log::test(tokio::test(flavor = "multi_thread"))]
+	#[ignore = "diagnostic (slow, 768-dim): DiskANN Recall@10 at the reference workload's dimension"]
+	async fn diag_diskann_recall_768() -> Result<()> {
+		let mut rng = recall_rng();
+		let mut corpus = ClusteredCorpus::new(&mut rng, 768, 8000, 0.35);
+		let base = corpus.draw(&mut rng, 20_000);
+		let queries = corpus.draw(&mut rng, 100);
+		measure_recall(
+			"diag-768-degree-64",
+			&graph_params(768, Distance::Cosine, 64, 100),
+			&base,
+			&queries,
+			10,
+			&[(10, 0.86), (20, 0.88), (40, 0.89), (100, 0.91), (200, 0.94)],
+		)
+		.await
 	}
 
 	// ------------------------------------------------------------------

@@ -19,6 +19,14 @@ test-group = 'serial-kvs'
 filter = 'test(idx::trees::hnsw::tests::)'
 threads-required = 2
 
+# The DiskANN recall harness has to build a several-thousand-vector graph before
+# it can measure anything, and a debug build pays full price for every distance
+# computation. Expected to be slow rather than stuck.
+[[profile.default.overrides]]
+filter = 'test(trees::diskann::index::tests::diskann_recall_)'
+threads-required = 2
+slow-timeout = "120s"
+
 [[profile.default.overrides]]
 filter = 'test(syn::test::test_excessive_size)'
 threads-required = 4
