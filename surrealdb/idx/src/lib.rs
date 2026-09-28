@@ -111,7 +111,13 @@ where
 	tx.get_key(key, None).await
 }
 
-/// Advances a compaction generation with a conditional write.
+/// The generation a compaction advancing from `current` commits at.
+pub(crate) fn next_compaction_generation(current: Option<u64>) -> u64 {
+	current.unwrap_or(0).saturating_add(1)
+}
+
+/// Advances a compaction generation with a conditional write, to
+/// [`next_compaction_generation`] of `current`.
 ///
 /// Returns `false` when the stored generation differs from `current`, so the
 /// caller can skip a plan built from an older snapshot.
@@ -123,7 +129,7 @@ pub(crate) async fn bump_compaction_generation<K>(
 where
 	K: KVKey<Value = u64> + Debug,
 {
-	let next = current.unwrap_or(0).saturating_add(1);
+	let next = next_compaction_generation(current);
 	match tx.put_compare_key(key, &next, current.as_ref()).await {
 		Ok(()) => Ok(true),
 		Err(e) if is_transaction_condition_not_met(&e) => Ok(false),

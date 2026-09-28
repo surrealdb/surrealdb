@@ -7,33 +7,54 @@
 //!
 //! # Cache coherency invariant
 //!
-//! The shared [`DiskAnnCache`] is consulted by both committed and in-flight transactions, so a
-//! single rule keeps cache and KV from diverging:
+//! The shared [`DiskAnnCache`] serves committed and in-flight transactions alike, on this process
+//! and alongside every other process's commits. Every graph entry is stamped with the wrapper that
+//! published it and the `!dg` compaction generation its value holds at, and a transaction reads
+//! through a [`CacheView`] of its own wrapper's entries ([`DiskAnnProviderContext::view`]). Every
+//! commit that writes `!de`, `!dn` or `!ds`, or a vector's document mapping, also advances `!dg`
+//! with a conditional put, so one generation identifies one committed state of all of them, and an
+//! entry stamped at a reader's own generation is exactly what that reader would read from KV.
 //!
-//! 1. **Read-only transactions** are the only path allowed to publish KV-sourced state into the
-//!    cache. The `read_state` / `read_elements` / `read_nodes` paths gate their cache writes on
-//!    `!context.tx.writeable()` for exactly this reason — a writable tx's `tx.get` returns its own
-//!    buffered writes, so caching that view would leak uncommitted state to other transactions.
-//! 2. **Writable transactions** may write through the cache *only* from within a
-//!    `DiskAnnIndex::apply_compaction` frame, because that frame holds the graph write lock across
-//!    the commit and clears the per-index cache via [`DiskAnnCache::remove_index`] on apply or
-//!    commit failure. The mutating call sites are `set_element`, `delete`, `set_neighbors`,
-//!    `append_vector`, and `write_state`.
+//! An entry also holds past its own generation while the wrapper's [`Continuity`] span covers it.
+//! Every generation in the span was committed by one of the wrapper's own frames, and each wrote
+//! through or evicted every entry it changed. So an entry stamped inside the span that no commit
+//! has replaced still holds at every later generation up to the span's head, and a commit costs
+//! the cache only the entries it changed. A frame that finds `!dg` anywhere but the span's head —
+//! another process committed, or the wrapper has not committed yet — reopens the span at its own
+//! snapshot, so nothing from before a commit the wrapper did not make is served past it.
 //!
-//! Adding a new cache write from a writable tx outside an `apply_compaction` frame, or relaxing
-//! the read-only-tx guard, reintroduces the race described in
-//! [issue #7318](https://github.com/surrealdb/surrealdb/issues/7318).
+//! The one write outside these rules is a search on a writable transaction persisting a repaired
+//! entry point (see [`DiskAnnProvider::valid_starting_points`]), which does not advance `!dg`. A
+//! cached `!ds` can therefore hold an older entry point than KV does at the same generation, which
+//! is harmless: every reader checks that an entry point is live before starting from it.
 //!
-//! 3. **A read that will be written back never comes from the cache.** Nothing invalidates a
-//!    process-local entry when *another* process commits, so a cached value can predate a committed
-//!    write. That is tolerable for a value the reader only consumes — the cost is a worse answer
-//!    from an index that is approximate anyway — and not tolerable for one it modifies and
-//!    persists, because the write reverts whatever the stale copy was missing. `!ds` is the sharp
-//!    case, since it carries the element-id allocator and [`DiskAnnProvider::write_state`] persists
-//!    the whole struct: incrementing a stale `next_element_id` reissues an id another process
-//!    already used and rewinds the counter, so every later allocation collides too.
-//!    Read-modify-write callers therefore use [`DiskAnnProvider::read_state_for_update`], which
-//!    always goes to the transaction.
+//! Who publishes which stamp:
+//!
+//! 1. **Read-only transactions** publish what they read from KV, stamped with their snapshot's
+//!    generation — except a reader whose generation is inside the span but behind its head, which
+//!    publishes nothing. What it read holds at its own generation, but a frame since may have
+//!    changed the key, and once that frame's write-through is evicted the stale entry would be
+//!    served across the span. Writable transactions publish nothing they read, since their reads
+//!    include their own buffered writes.
+//! 2. **A compaction frame** (`DiskAnnIndex::apply_compaction`) writes through every value it
+//!    writes, stamped with the generation it commits at, and is served those entries itself. It
+//!    holds the graph write lock across the commit, so no reader is served them early, and it
+//!    extends the span only once the commit has succeeded. A frame that fails to commit leaves its
+//!    generation free for another process to commit with a different graph, so it clears the
+//!    index's entries with [`DiskAnnCache::remove_index`], and closes the span, before it releases
+//!    the lock. A write outside a frame writes nothing through; it evicts.
+//! 3. **A read that will be written back comes from the transaction.**
+//!    [`DiskAnnProvider::write_state`] persists the whole `!ds` struct, so a read-modify-write of
+//!    it uses [`DiskAnnProvider::read_state_for_update`], and the value written back is exactly the
+//!    transaction's, entry point included. Deriving `next_element_id` from anything else hands out
+//!    an id another commit already used and rewinds the allocator, so every later allocation
+//!    collides too.
+//!
+//! Every view is taken under the wrapper's graph lock and used only while it is held, shared by
+//! readers and exclusive for a frame. That orders a reader's fence check and its publish against a
+//! frame's commit and its extension of the span. A wrapper the registry has dropped still runs the
+//! searches holding it, beside its replacement: the two share cache keys but not a lock, so each is
+//! served only the entries it published.
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -60,7 +81,7 @@ use crate::IndexKeyBase;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
 use crate::key::KVValue;
 use crate::key::schema::DiskannElementKey;
-use crate::trees::diskann::cache::DiskAnnCache;
+use crate::trees::diskann::cache::{CacheView, Continuity, DiskAnnCache, Stamp};
 use crate::trees::diskann::{DiskAnnElement, DiskAnnNode, DiskAnnState, ElementId};
 use crate::trees::vector::SerializedVector;
 #[cfg(test)]
@@ -73,6 +94,20 @@ pub(super) struct DiskAnnProviderContext {
 	pub(super) tx: Arc<Transaction>,
 	/// Index key builder for the graph key families.
 	pub(super) ikb: IndexKeyBase,
+	/// What `tx` is served from, and publishes into, the cache.
+	pub(super) view: CacheView,
+}
+
+impl DiskAnnProviderContext {
+	/// The stamp this context publishes a value it read from KV under, or `None` when it must not
+	/// publish (rule 1 of the module-level [cache coherency invariant](self)).
+	fn publication(&self) -> Option<Stamp> {
+		if self.tx.writeable() {
+			None
+		} else {
+			self.view.publication()
+		}
+	}
 }
 
 impl ExecutionContext for DiskAnnProviderContext {}
@@ -177,6 +212,8 @@ pub(super) struct DiskAnnProvider {
 	table_id: TableId,
 	format_version: u16,
 	cache: DiskAnnCache,
+	/// This wrapper's owner id for the graph entries it publishes.
+	owner: u64,
 	dim: usize,
 	metric: Metric,
 }
@@ -195,6 +232,7 @@ impl DiskAnnProvider {
 			ikb,
 			table_id,
 			format_version,
+			owner: cache.new_owner(),
 			cache,
 			dim,
 			metric,
@@ -206,33 +244,59 @@ impl DiskAnnProvider {
 		(self.ikb.ns(), self.ikb.db(), self.table_id, self.ikb.index(), self.format_version)
 	}
 
-	/// Builds the provider context for a specific transaction.
-	pub(super) fn context(&self, tx: Arc<Transaction>) -> DiskAnnProviderContext {
+	/// Builds the provider context for a transaction whose snapshot holds `!dg` at `generation`,
+	/// under a graph lock over which the wrapper's span is `continuity`.
+	pub(super) fn context(
+		&self,
+		tx: Arc<Transaction>,
+		generation: Option<u64>,
+		continuity: Option<Continuity>,
+	) -> DiskAnnProviderContext {
 		DiskAnnProviderContext {
 			tx,
 			ikb: self.ikb.clone(),
+			view: self.reader_view(generation, continuity),
+		}
+	}
+
+	/// The view a transaction that only reads the graph, and whose snapshot holds `!dg` at
+	/// `generation`, reads this wrapper's entries through while the span is `continuity`.
+	pub(super) fn reader_view(
+		&self,
+		generation: Option<u64>,
+		continuity: Option<Continuity>,
+	) -> CacheView {
+		CacheView::reader(self.owner, generation, continuity)
+	}
+
+	/// Builds the provider context for a compaction frame advancing `!dg` from `generation`,
+	/// under the graph write lock over which the wrapper's span is `continuity`.
+	pub(super) fn frame_context(
+		&self,
+		tx: Arc<Transaction>,
+		generation: Option<u64>,
+		continuity: Option<Continuity>,
+	) -> DiskAnnProviderContext {
+		DiskAnnProviderContext {
+			tx,
+			ikb: self.ikb.clone(),
+			view: CacheView::frame(self.owner, generation, continuity),
 		}
 	}
 
 	/// Reads persisted graph state, using the cache for the entry point and next element id.
 	///
 	/// **Read-only.** A caller that intends to write the state back must use
-	/// [`Self::read_state_for_update`] instead: the cached copy may predate a `!ds` write
-	/// committed by another process, and [`Self::write_state`] persists the whole struct, so
-	/// modifying a stale copy silently reverts every field the caller did not touch.
-	///
-	/// The `writeable()` guard around `insert_state` enforces rule (1) of the module-level
-	/// [cache coherency invariant](self): only read-only transactions publish KV state into the
-	/// shared cache. Same rule the doc-id path enforces in `DiskAnnDocs::get_things_batch`
-	/// (`docs.rs`).
+	/// [`Self::read_state_for_update`] instead (rule 3 of the module-level
+	/// [cache coherency invariant](self)).
 	async fn read_state(&self, context: &DiskAnnProviderContext) -> Result<DiskAnnState> {
 		let index = self.cache_index();
-		if let Some(state) = self.cache.get_state(index) {
+		if let Some(state) = self.cache.get_state(index, &context.view) {
 			return Ok(state);
 		}
 		let state = self.load_state(context).await?;
-		if !context.tx.writeable() {
-			self.cache.insert_state(index, state.clone());
+		if let Some(stamp) = context.publication() {
+			self.cache.insert_state(index, stamp, state.clone());
 		}
 		Ok(state)
 	}
@@ -240,17 +304,11 @@ impl DiskAnnProvider {
 	/// Reads persisted graph state for a read-modify-write, always through the transaction.
 	///
 	/// `!ds` holds the element-id allocator alongside the entry point, and
-	/// [`Self::write_state`] persists both. The process-local cache is not invalidated when
-	/// another process commits, so a cached copy can predate a foreign `!ds` write — and a
-	/// caller that increments `next_element_id` from that copy hands out an id the other process
-	/// already used, overwrites the element behind it, and persists a counter that has gone
-	/// backwards, so the collision repeats for every later allocation.
-	///
-	/// Reading through the transaction removes that: the transaction's snapshot includes every
-	/// committed write, and on a writable transaction it also includes this frame's own earlier
-	/// allocations, so successive calls within one frame still see each other. Two *concurrent*
-	/// frames are a separate matter, fenced by the `!dg` conditional bump that lets only one
-	/// commit.
+	/// [`Self::write_state`] persists both, so the value written back must be exactly the
+	/// transaction's. The transaction's snapshot includes every committed write, and on a
+	/// writable transaction also this frame's own earlier allocations, so successive calls within
+	/// one frame see each other. Two *concurrent* frames are fenced by the `!dg` conditional bump
+	/// that lets only one commit.
 	///
 	/// Costs one point read per call. Every caller is on a compaction path that performs orders
 	/// of magnitude more KV work per vector, and the search path does not use this.
@@ -266,15 +324,52 @@ impl DiskAnnProvider {
 		Ok(context.tx.get_key(&context.ikb.new_ds_key(), None).await?.unwrap_or_default())
 	}
 
-	/// Persists graph state and refreshes the cached copy atomically from the caller's view.
+	/// Persists graph state, and writes it through to the cache as
+	/// [`Self::write_element_through`] does an element.
 	async fn write_state(
 		&self,
 		context: &DiskAnnProviderContext,
 		state: &DiskAnnState,
 	) -> Result<()> {
 		context.tx.set_key(&context.ikb.new_ds_key(), state).await?;
-		self.cache.insert_state(self.cache_index(), state.clone());
+		match context.view.write_through() {
+			Some(stamp) => self.cache.insert_state(self.cache_index(), stamp, state.clone()),
+			None => self.cache.remove_state(self.cache_index()),
+		}
 		Ok(())
+	}
+
+	/// Writes one element through to the cache (rule 2 of the module-level
+	/// [cache coherency invariant](self)): at the frame's commit generation inside a compaction
+	/// frame, and outside one by evicting whatever the cache held for it.
+	fn write_element_through(
+		&self,
+		context: &DiskAnnProviderContext,
+		element_id: ElementId,
+		element: DiskAnnElement,
+	) {
+		match context.view.write_through() {
+			Some(stamp) => {
+				self.cache.insert_element(self.cache_index(), element_id, stamp, element);
+			}
+			None => self.cache.remove_element(self.cache_index(), element_id),
+		}
+	}
+
+	/// Writes one adjacency list through to the cache, as [`Self::write_element_through`] does
+	/// an element.
+	fn write_node_through(
+		&self,
+		context: &DiskAnnProviderContext,
+		element_id: ElementId,
+		node: DiskAnnNode,
+	) {
+		match context.view.write_through() {
+			Some(stamp) => {
+				self.cache.insert_node(self.cache_index(), element_id, stamp, node);
+			}
+			None => self.cache.remove_node(self.cache_index(), element_id),
+		}
 	}
 
 	/// Reads element vector/status pairs in input order.
@@ -291,7 +386,7 @@ impl DiskAnnProvider {
 		let mut miss_positions = Vec::new();
 		let mut miss_keys = Vec::new();
 		for (pos, element_id) in element_ids.iter().copied().enumerate() {
-			if let Some(element) = self.cache.get_element(index, element_id) {
+			if let Some(element) = self.cache.get_element(index, element_id, &context.view) {
 				elements[pos] = Some(element);
 			} else {
 				miss_positions.push((pos, element_id));
@@ -301,13 +396,12 @@ impl DiskAnnProvider {
 		if !miss_keys.is_empty() {
 			let fetched: Vec<Option<DiskAnnElement>> =
 				context.tx.get_many_key(miss_keys, None).await?;
-			let cache_misses = !context.tx.writeable();
+			let publish = context.publication();
 			for ((pos, element_id), element) in miss_positions.into_iter().zip(fetched) {
 				if let Some(element) = element {
-					elements[pos] = Some(if cache_misses {
-						self.cache.insert_element(index, element_id, element)
-					} else {
-						Arc::new(element)
+					elements[pos] = Some(match publish {
+						Some(stamp) => self.cache.insert_element(index, element_id, stamp, element),
+						None => Arc::new(element),
 					});
 				}
 			}
@@ -329,7 +423,7 @@ impl DiskAnnProvider {
 		let mut miss_positions = Vec::new();
 		let mut miss_keys = Vec::new();
 		for (pos, element_id) in element_ids.iter().copied().enumerate() {
-			if let Some(node) = self.cache.get_node(index, element_id) {
+			if let Some(node) = self.cache.get_node(index, element_id, &context.view) {
 				nodes[pos] = Some(node);
 			} else {
 				miss_positions.push((pos, element_id));
@@ -339,13 +433,12 @@ impl DiskAnnProvider {
 		if !miss_keys.is_empty() {
 			let fetched: Vec<Option<DiskAnnNode>> =
 				context.tx.get_many_key(miss_keys, None).await?;
-			let cache_misses = !context.tx.writeable();
+			let publish = context.publication();
 			for ((pos, element_id), node) in miss_positions.into_iter().zip(fetched) {
 				if let Some(node) = node {
-					nodes[pos] = Some(if cache_misses {
-						self.cache.insert_node(index, element_id, node)
-					} else {
-						Arc::new(node)
+					nodes[pos] = Some(match publish {
+						Some(stamp) => self.cache.insert_node(index, element_id, stamp, node),
+						None => Arc::new(node),
 					});
 				}
 			}
@@ -454,7 +547,7 @@ impl DiskAnnProvider {
 			.open_vals_cursor(rng, surrealdb_kvs::Direction::Forward, 0, None)
 			.await
 			.map_err(|e| ANNError::message(e.to_string()))?;
-		let cache_misses = !context.tx.writeable();
+		let publish = context.publication();
 		loop {
 			let batch = cursor
 				.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE)
@@ -469,11 +562,11 @@ impl DiskAnnProvider {
 				let element = DiskAnnElement::kv_decode_value(value, ())
 					.map_err(|e| ANNError::message(e.to_string()))?;
 				let deleted = element.deleted;
-				// Only publish non-tombstoned entries into the shared cache, and only from a
-				// read-only tx (writable txs may have buffered uncommitted writes; see
-				// `read_state`). Tombstones aren't useful for any subsequent reader.
-				if !deleted && cache_misses {
-					self.cache.insert_element(self.cache_index(), key.element_id, element);
+				// Only publish non-tombstoned entries into the shared cache, and only where the
+				// context may publish at all (see `DiskAnnProviderContext::publication`).
+				// Tombstones aren't useful for any subsequent reader.
+				if !deleted && let Some(stamp) = publish {
+					self.cache.insert_element(self.cache_index(), key.element_id, stamp, element);
 				}
 				if !deleted {
 					// On a writable tx (i.e. compaction or a record-write path), persist
@@ -597,10 +690,7 @@ where
 			deleted: false,
 		};
 		context.tx.set_key(&key, &element).await.map_err(|e| ANNError::message(e.to_string()))?;
-		// Writable-tx cache write-through: only sound because the caller is inside an
-		// `apply_compaction` frame that clears the per-index cache on commit/apply failure.
-		// See the module-level `Cache coherency invariant` (rule 2).
-		self.cache.insert_element(self.cache_index(), *id, element);
+		self.write_element_through(context, *id, element);
 		Ok(NoopGuard::new(*id))
 	}
 }
@@ -624,8 +714,7 @@ impl Delete for DiskAnnProvider {
 		let mut element = (*element).clone();
 		element.deleted = true;
 		context.tx.set_key(&key, &element).await.map_err(|e| ANNError::message(e.to_string()))?;
-		// Keep the deleted marker hot and visible to subsequent status checks.
-		self.cache.insert_element(self.cache_index(), *gid, element);
+		self.write_element_through(context, *gid, element);
 		Ok(())
 	}
 
@@ -945,8 +1034,7 @@ impl NeighborAccessorMut for DiskAnnNeighborAccessor<'_> {
 			.set_key(&self.context.ikb.new_dn_key(id), &node)
 			.await
 			.map_err(|e| ANNError::message(e.to_string()))?;
-		// Keep cached adjacency coherent with the persisted graph mutation.
-		self.provider.cache.insert_node(self.provider.cache_index(), id, node);
+		self.provider.write_node_through(self.context, id, node);
 		Ok(())
 	}
 
@@ -968,8 +1056,7 @@ impl NeighborAccessorMut for DiskAnnNeighborAccessor<'_> {
 			}
 		}
 		self.context.tx.set_key(&key, &node).await.map_err(|e| ANNError::message(e.to_string()))?;
-		// Keep cached adjacency coherent with the persisted graph mutation.
-		self.provider.cache.insert_node(self.provider.cache_index(), id, node);
+		self.provider.write_node_through(self.context, id, node);
 		Ok(())
 	}
 }
@@ -1062,7 +1149,7 @@ mod tests {
 		let ikb = ikb();
 		let provider =
 			DiskAnnProvider::new(ikb, TableId(4), 0, DiskAnnCache::new(1024 * 1024), 2, Metric::L2);
-		let context = provider.context(tx);
+		let context = provider.context(tx, None, None);
 		Ok((provider, context))
 	}
 
@@ -1102,12 +1189,11 @@ mod tests {
 			Some(SerializedVector::F32(vec![3.0, 4.0]))
 		);
 		assert!(elements[2].is_none());
-		// Provider reads through a writable tx must not publish into the shared cache —
-		// `tx.get` returns the writer's own buffered (possibly uncommitted) writes, and the
-		// cache is process-wide, so leaking that view to other txs is the failure mode
-		// #7318 surfaced.
-		assert!(provider.cache.get_element(provider.cache_index(), 1).is_none());
-		assert!(provider.cache.get_element(provider.cache_index(), 2).is_none());
+		// Provider reads through a writable tx must not publish into the shared cache: `tx.get`
+		// returns the writer's own buffered, possibly uncommitted, writes, and the cache is
+		// process-wide.
+		assert!(provider.cache.get_element(provider.cache_index(), 1, &context.view).is_none());
+		assert!(provider.cache.get_element(provider.cache_index(), 2, &context.view).is_none());
 		Ok(())
 	}
 
@@ -1137,14 +1223,30 @@ mod tests {
 		assert_eq!(nodes[0].as_ref().unwrap().neighbors, vec![2, 3]);
 		assert_eq!(nodes[1].as_ref().unwrap().neighbors, vec![4]);
 
+		// Outside a compaction frame a mutation writes nothing through: the transaction may never
+		// commit, so what the cache held for the node is evicted instead.
 		let mut neighbor_accessor = DiskAnnNeighborAccessor {
 			provider: &provider,
 			context: &context,
 		};
 		neighbor_accessor.set_neighbors(1, &[8, 9]).await.unwrap();
+		let reader_at =
+			|generation| provider.context(Arc::clone(&context.tx), generation, None).view;
+		assert!(provider.cache.get_node(provider.cache_index(), 1, &reader_at(None)).is_none());
+		assert!(provider.cache.get_node(provider.cache_index(), 1, &reader_at(Some(1))).is_none());
 
-		let cached = provider.cache.get_node(provider.cache_index(), 1).unwrap();
+		// Inside one it writes through, at the generation the frame commits at and no other.
+		let frame = provider.frame_context(Arc::clone(&context.tx), None, None);
+		let mut neighbor_accessor = DiskAnnNeighborAccessor {
+			provider: &provider,
+			context: &frame,
+		};
+		neighbor_accessor.set_neighbors(1, &[8, 9]).await.unwrap();
+		let cached =
+			provider.cache.get_node(provider.cache_index(), 1, &reader_at(Some(1))).unwrap();
 		assert_eq!(cached.neighbors, vec![8, 9]);
+		assert!(provider.cache.get_node(provider.cache_index(), 1, &frame.view).is_some());
+		assert!(provider.cache.get_node(provider.cache_index(), 1, &reader_at(None)).is_none());
 		Ok(())
 	}
 

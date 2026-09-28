@@ -46,7 +46,9 @@ use crate::key::schema::{
 	DiskannRecordPendingKey, DiskannRecordPendingShardKey, DiskannRecordPendingShardShardPrefix,
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key, TypedRange};
-use crate::trees::diskann::cache::DiskAnnCache;
+#[cfg(test)]
+use crate::trees::diskann::cache::CacheView;
+use crate::trees::diskann::cache::{Continuity, DiskAnnCache};
 use crate::trees::diskann::docs::{DiskAnnDocs, DiskAnnVecDocs};
 use crate::trees::diskann::filter::DiskAnnTruthyDocumentFilter;
 use crate::trees::diskann::provider::{
@@ -373,6 +375,9 @@ impl<'a> DiskAnnContext<'a> {
 /// Thin wrapper around the upstream DiskANN graph using SurrealDB's provider implementation.
 pub(super) struct DiskAnnGraph {
 	index: RawDiskAnnIndex<DiskAnnProvider>,
+	/// The span over which this wrapper's cached graph has followed every commit to the index.
+	/// Only a compaction frame changes it, under the graph write lock.
+	continuity: Option<Continuity>,
 }
 
 /// Raw graph-search output before document filtering.
@@ -407,7 +412,63 @@ impl DiskAnnGraph {
 			DiskAnnProvider::new(ikb, tb, format_version, cache, p.dimension as usize, metric);
 		Ok(Self {
 			index: RawDiskAnnIndex::new(config, provider, None),
+			continuity: None,
 		})
+	}
+
+	/// The provider context for a transaction that reads the graph, whose snapshot holds `!dg` at
+	/// `generation`. Taken, and used, under the graph lock.
+	pub(super) fn context(
+		&self,
+		tx: Arc<Transaction>,
+		generation: Option<u64>,
+	) -> DiskAnnProviderContext {
+		self.index.provider().context(tx, generation, self.continuity)
+	}
+
+	/// Opens a compaction frame whose snapshot holds `!dg` at `generation`, under the graph write
+	/// lock. Returns `None` when this wrapper has already committed past that snapshot, so the
+	/// frame's conditional bump of `!dg` cannot commit.
+	///
+	/// A snapshot anywhere but the span's head reopens the span there: either the wrapper has not
+	/// committed yet, or another process has committed since, and the wrapper cannot tell which
+	/// entries a commit it did not make changed.
+	fn open_frame(
+		&mut self,
+		tx: Arc<Transaction>,
+		generation: Option<u64>,
+	) -> Option<DiskAnnProviderContext> {
+		match self.continuity {
+			Some(span) if generation < span.head => return None,
+			Some(span) if generation == span.head => {}
+			_ => {
+				self.continuity = Some(Continuity {
+					base: generation,
+					head: generation,
+				})
+			}
+		}
+		Some(self.index.provider().frame_context(tx, generation, self.continuity))
+	}
+
+	/// Extends the span over `committed`, the generation a frame has just committed.
+	fn commit_frame(&mut self, committed: Option<u64>) {
+		if let Some(span) = self.continuity.as_mut() {
+			span.head = committed;
+		}
+	}
+
+	/// Closes the span after a frame failed to commit. The caller clears the index's entries
+	/// before it releases the graph write lock.
+	fn abandon_frame(&mut self) {
+		self.continuity = None;
+	}
+
+	/// The view a search taking the graph lock now would read this wrapper's entries through,
+	/// at `generation`.
+	#[cfg(test)]
+	fn reader_view(&self, generation: Option<u64>) -> CacheView {
+		self.index.provider().reader_view(generation, self.continuity)
 	}
 
 	/// Inserts one vector into the graph and returns its new element ID.
@@ -1324,8 +1385,9 @@ impl DiskAnnIndex {
 	///
 	/// The transaction lifecycle is owned by this method:
 	///   * `Ok(true)` — mutations were applied and the transaction has been committed.
-	///   * `Ok(false)` — the plan was stale (generation drift or captured-key mismatch); the
-	///     transaction has been cancelled and no mutations are in KV or in the process-local cache.
+	///   * `Ok(false)` — the plan was stale (generation drift, captured-key mismatch, or a commit
+	///     this process already made past the plan's snapshot); the transaction has been cancelled
+	///     and no mutations are in KV or in the process-local cache.
 	///   * `Err(_)` — the apply or commit step failed; the transaction has been cancelled and, if
 	///     any graph mutations had been buffered, the per-index [`DiskAnnCache`] has been cleared
 	///     while the graph lock was still held so concurrent KNN searches cannot observe a cache
@@ -1389,9 +1451,13 @@ impl DiskAnnIndex {
 		// `knn_search` (which takes `graph.read()`) cannot observe a cache state
 		// that pre-empts KV.
 		let mut graph = self.graph.write().await;
+		let Some(provider_context) = graph.open_frame(Arc::clone(&tx), generation) else {
+			cancel_silently(&tx).await;
+			return Ok(false);
+		};
+		let committed = provider_context.view.commit_generation();
 		let apply_result: Result<()> = async {
 			let docs = DiskAnnDocs::with_format_version(self.ikb.clone(), self.format_version);
-			let provider_context = graph.index.provider().context(Arc::clone(&tx));
 			let diskann_ctx = self.new_diskann_context(env, provider_context);
 			for pending in pending {
 				self.apply_pending_operation(&diskann_ctx, &docs, &mut graph, pending).await?;
@@ -1412,17 +1478,21 @@ impl DiskAnnIndex {
 		.await;
 		if let Err(e) = apply_result {
 			cancel_silently(&tx).await;
+			graph.abandon_frame();
 			self.clear_local_cache().await;
 			return Err(e);
 		}
 		if let Err(e) = tx.commit().await {
+			graph.abandon_frame();
 			self.clear_local_cache().await;
 			return Err(e);
 		}
+		graph.commit_frame(committed);
 		// Lock is released as `graph` goes out of scope. By the time any
 		// concurrent reader can acquire `graph.read()` the cache and KV are
-		// consistent (commit succeeded) — or, on the error path above, the
-		// cache has been cleared (commit failed) before the lock was released.
+		// consistent and the span covers the committed generation (commit
+		// succeeded) — or, on the error paths above, the cache has been cleared
+		// and the span closed (commit failed) before the lock was released.
 		Ok(true)
 	}
 
@@ -1537,7 +1607,7 @@ impl DiskAnnIndex {
 		vector.check_dimension(self.dim)?;
 		let search = DiskAnnSearch::new(vector, k, ef)?;
 		let graph = self.graph.read().await;
-		let provider_context = graph.index.provider().context(env.tx());
+		let provider_context = graph.context(env.tx(), compaction_generation);
 		let ctx = self.new_diskann_context(env, provider_context);
 		let mut builder = KnnResultBuilder::new(k);
 		// `pending_state` reflects only the sharded `!dy` guard; legacy `!dr` records are not
@@ -1655,8 +1725,10 @@ impl DiskAnnIndex {
 				// pending-update suppression and optional truthy filtering. Warm doc-set cache
 				// hits avoid re-reading the graph vector; misses fetch only the missing vectors
 				// before falling back to Dq/Dh mappings.
-				let mut docs =
-					self.vec_docs.get_docs_by_element_batch(&ctx.tx, &candidates).await?;
+				let mut docs = self
+					.vec_docs
+					.get_docs_by_element_batch(&ctx.tx, &ctx.provider_context.view, &candidates)
+					.await?;
 				// Candidates come back distance-ascending from the graph search; sort
 				// defensively (NaN-safe via `total_cmp`, a no-op when already ordered) so
 				// the `break` on a closed `check_add` gate below stays sound even if the
@@ -2486,6 +2558,56 @@ mod tests {
 		Ok(())
 	}
 
+	/// A search reads the graph as of its own snapshot when a compaction on the same node has since
+	/// deleted a vector the snapshot still holds. The compaction wrote the tombstone through at the
+	/// generation it committed, which is newer than the reader's, so the reader is not served it
+	/// and still finds the record at its old vector.
+	#[tokio::test]
+	async fn diskann_search_behind_a_local_commit_is_not_served_its_tombstones() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let index = new_index(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let at = |x: f32| [x, 0.0, 0.0, 0.0];
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 0..5_i64 {
+				let v = at(10.0 * i as f32);
+				index.index(&ctx, &RecordIdKey::Number(i), None, Some(f32_content(&v))).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		while compact_once(&index, &ds, &ikb).await? {}
+		let query = new_ctx(&ds, TransactionType::Read).await;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let (old, new) = (at(20.0), at(500.0));
+			index
+				.index(
+					&ctx,
+					&RecordIdKey::Number(2),
+					Some(f32_content(&old)),
+					Some(f32_content(&new)),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		while compact_once(&index, &ds, &ikb).await? {}
+		assert_eq!(
+			knn_keys_in(&index, &query, &at(20.0), 1).await?,
+			vec![2],
+			"the reader's snapshot holds record 2 at the queried point"
+		);
+		query.tx().cancel().await?;
+		assert_eq!(knn_keys_with_allow(&index, &ds, &at(500.0), 1, None).await?, vec![2]);
+		Ok(())
+	}
+
 	async fn compact_once(
 		index: &DiskAnnIndex,
 		ds: &TestIndexStore,
@@ -2542,15 +2664,20 @@ mod tests {
 		bail!("DiskANN compaction did not drain within {MAX_PASSES} passes")
 	}
 
-	fn cached_doc_ids(
+	/// The doc set `index` has cached for `element_id`, as a reader at `generation` is served it.
+	async fn cached_doc_ids(
+		index: &DiskAnnIndex,
 		cache: &DiskAnnCache,
 		ikb: &IndexKeyBase,
 		element_id: ElementId,
+		generation: Option<u64>,
 	) -> Option<Vec<u64>> {
+		let view = index.graph.read().await.reader_view(generation);
 		cache
 			.get_doc_set(
 				(ikb.ns(), ikb.db(), TableId(4), ikb.index(), DOC_IDS_FORMAT_VERSION),
 				element_id,
+				&view,
 			)
 			.map(|docs| docs.iter().collect())
 	}
@@ -2681,10 +2808,10 @@ mod tests {
 			ctx.tx().commit().await?;
 		}
 		assert!(compact_once(&index, &ds, &ikb).await?);
-		assert!(cached_doc_ids(&cache, &ikb, 0).is_none());
+		assert!(cached_doc_ids(&index, &cache, &ikb, 0, Some(1)).await.is_none());
 
 		assert_eq!(knn_len(&index, &ds, &vector).await?, 1);
-		assert_eq!(cached_doc_ids(&cache, &ikb, 0), Some(vec![0, 1]));
+		assert_eq!(cached_doc_ids(&index, &cache, &ikb, 0, Some(1)).await, Some(vec![0, 1]));
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
@@ -2692,10 +2819,10 @@ mod tests {
 			ctx.tx().commit().await?;
 		}
 		assert!(compact_once(&index, &ds, &ikb).await?);
-		assert!(cached_doc_ids(&cache, &ikb, 0).is_none());
+		assert!(cached_doc_ids(&index, &cache, &ikb, 0, Some(2)).await.is_none());
 
 		assert_eq!(knn_len(&index, &ds, &vector).await?, 1);
-		assert_eq!(cached_doc_ids(&cache, &ikb, 0), Some(vec![1]));
+		assert_eq!(cached_doc_ids(&index, &cache, &ikb, 0, Some(2)).await, Some(vec![1]));
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
@@ -2703,7 +2830,7 @@ mod tests {
 			ctx.tx().commit().await?;
 		}
 		assert!(compact_once(&index, &ds, &ikb).await?);
-		assert!(cached_doc_ids(&cache, &ikb, 0).is_none());
+		assert!(cached_doc_ids(&index, &cache, &ikb, 0, Some(3)).await.is_none());
 		assert_eq!(knn_len(&index, &ds, &vector).await?, 0);
 		Ok(())
 	}
@@ -5053,13 +5180,75 @@ mod tests {
 		Ok(())
 	}
 
-	/// Regression for the #7318 class of bug: two compactors race on the same `!dr` plan,
-	/// the late one's commit conflicts on `!dg` after it has already mutated the shared
-	/// cache during the apply phase. `apply_compaction` must clear the per-index cache
-	/// before returning the error so subsequent KNN searches can't observe element ids
-	/// from the rolled-back tx.
+	/// Seeds four records and returns two identical compaction plans over them, with an apply
+	/// context for each opened before either commits, so the second's snapshot still sees the
+	/// captured `!dr` keys and the pre-bump `!dg` after the first commits.
+	async fn racing_plans(
+		index: &DiskAnnIndex,
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+	) -> Result<[(DiskAnnCompactionPlan, TestIndexEnv); 2]> {
+		for i in 0..4_i64 {
+			let ctx = new_ctx(ds, TransactionType::Write).await;
+			let v = [i as f32, 0.0, 0.0, 0.0];
+			index.index(&ctx, &RecordIdKey::Number(i), None, Some(f32_content(&v))).await?;
+			ctx.tx().commit().await?;
+		}
+		let mut plans = Vec::new();
+		for _ in 0..2 {
+			let ctx = new_ctx(ds, TransactionType::Read).await;
+			let plan = DiskAnnIndex::prepare_compaction(&ctx, ikb).await?;
+			ctx.tx().cancel().await?;
+			assert!(plan.has_work());
+			plans.push(plan);
+		}
+		let plan_b = plans.pop().expect("two plans");
+		let plan_a = plans.pop().expect("two plans");
+		let ctx_a = new_ctx(ds, TransactionType::Write).await;
+		let ctx_b = new_ctx(ds, TransactionType::Write).await;
+		Ok([(plan_a, ctx_a), (plan_b, ctx_b)])
+	}
+
+	/// Two processes race on the same `!dr` plan. The late one's commit conflicts on `!dg` after
+	/// it has already written through to its own cache during the apply phase, at the generation
+	/// the other process did commit. `apply_compaction` must clear the index's entries before it
+	/// returns the error, or a reader at that generation would be served a graph that was never
+	/// committed.
 	#[tokio::test]
 	async fn diskann_failed_compaction_clears_cache_and_keeps_knn_working() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let index = new_index(ikb.clone(), TableId(4), &p, cache()).await?;
+		let cache_b = cache();
+		let index_b = new_index(ikb.clone(), TableId(4), &p, cache_b.clone()).await?;
+		let [(plan_a, ctx_a), (plan_b, ctx_b)] = racing_plans(&index, &ds, &ikb).await?;
+
+		// Apply A first — succeeds and commits.
+		assert!(index.apply_compaction(&ctx_a, plan_a).await?);
+
+		// Apply B — passes the write-time checks (its snapshot still sees the captured values and
+		// the pre-A generation), writes through during the apply phase, then must fail on commit
+		// because OCC catches the snapshot violation.
+		let res = index_b.apply_compaction(&ctx_b, plan_b).await;
+		assert!(res.is_err(), "expected commit failure, got {res:?}");
+
+		// B's write-throughs were stamped with the generation B would have committed, which is the
+		// generation A did commit. The failed frame cleared them while it still held the graph
+		// write lock, so B's cache holds nothing at all.
+		assert_eq!(cache_b.weight(), 0, "the failed frame left entries in its cache");
+
+		// KNN on B now goes to KV, populates the cache fresh, and returns the elements
+		// committed by A.
+		assert_eq!(knn_len_with_k(&index_b, &ds, &[2.0, 0.0, 0.0, 0.0], 4).await?, 4);
+		Ok(())
+	}
+
+	/// A frame whose snapshot predates a commit its own wrapper made cannot commit: its
+	/// conditional bump of `!dg` expects a generation that has moved on. It is recognised as a
+	/// stale plan before it writes anything, so the cache the committed frame warmed survives.
+	#[tokio::test]
+	async fn diskann_frame_behind_a_local_commit_is_stale() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
 		let cache = cache();
@@ -5070,57 +5259,20 @@ mod tests {
 			cache.clone(),
 		)
 		.await?;
-
-		// Seed a handful of records so the captured plan is non-trivial.
-		for i in 0..4_i64 {
-			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			let v = [i as f32, 0.0, 0.0, 0.0];
-			index.index(&ctx, &RecordIdKey::Number(i), None, Some(f32_content(&v))).await?;
-			ctx.tx().commit().await?;
-		}
-
-		// Two identical plans, both capturing every `!dr` key.
-		let plan_a = {
-			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let plan = DiskAnnIndex::prepare_compaction(&ctx, &ikb).await?;
-			ctx.tx().cancel().await?;
-			plan
-		};
-		let plan_b = {
-			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let plan = DiskAnnIndex::prepare_compaction(&ctx, &ikb).await?;
-			ctx.tx().cancel().await?;
-			plan
-		};
-		assert!(plan_a.has_work());
-		assert!(plan_b.has_work());
-
-		// Open both apply contexts before either commits, so `ctx_b`'s snapshot sees the
-		// captured `!dr` keys and the pre-bump `!dg` even after `ctx_a` commits.
-		let ctx_a = new_ctx(&ds, TransactionType::Write).await;
-		let ctx_b = new_ctx(&ds, TransactionType::Write).await;
-
-		// Apply A first — succeeds and commits.
+		let [(plan_a, ctx_a), (plan_b, ctx_b)] = racing_plans(&index, &ds, &ikb).await?;
 		assert!(index.apply_compaction(&ctx_a, plan_a).await?);
+		assert_eq!(knn_len_with_k(&index, &ds, &[2.0, 0.0, 0.0, 0.0], 4).await?, 4);
+		let warmed = cache.weight();
+		assert!(warmed > 0);
 
-		// Apply B — passes the write-time checks (its snapshot still sees the captured
-		// values and the pre-A generation), mutates the cache during the apply phase,
-		// then must fail on commit because OCC catches the snapshot violation.
-		let res = index.apply_compaction(&ctx_b, plan_b).await;
-		assert!(res.is_err(), "expected commit failure, got {res:?}");
-
-		// Cache must be clean for this index: the post-failure `clear_local_cache` was
-		// triggered while the graph write lock was still held.
+		assert!(!index.apply_compaction(&ctx_b, plan_b).await?, "a stale frame applies nothing");
+		assert_eq!(cache.weight(), warmed, "a stale frame leaves the cache as it found it");
+		let view = index.graph.read().await.reader_view(Some(1));
 		let cache_index = (ikb.ns(), ikb.db(), TableId(4), ikb.index(), DOC_IDS_FORMAT_VERSION);
-		assert!(cache.get_state(cache_index).is_none(), "state cache should be empty");
-		// And no element/node entries either — the retain-based cleanup is authoritative.
-		for id in 0..4 {
-			assert!(cache.get_element(cache_index, id).is_none(), "element {id} cached");
-			assert!(cache.get_node(cache_index, id).is_none(), "node {id} cached");
-		}
-
-		// KNN now goes to KV, populates the cache fresh, and returns the elements
-		// committed by A.
+		assert!(
+			cache.get_state(cache_index, &view).is_some(),
+			"the committed state is still served"
+		);
 		assert_eq!(knn_len_with_k(&index, &ds, &[2.0, 0.0, 0.0, 0.0], 4).await?, 4);
 		Ok(())
 	}
@@ -5534,7 +5686,7 @@ mod tests {
 	}
 
 	// ------------------------------------------------------------------
-	// Foreign-generation cache staleness (#1193)
+	// The graph cache against generations committed elsewhere, or late
 	// ------------------------------------------------------------------
 
 	/// Two DiskANN handles over one KV store, each with its own [`DiskAnnCache`].
@@ -5564,13 +5716,17 @@ mod tests {
 	/// disappears from one is therefore a lost edge, not a prune.
 	const TWO_NODE_DEGREE: u16 = 64;
 
+	fn two_node_params() -> DiskAnnParams {
+		DiskAnnParams {
+			degree: TWO_NODE_DEGREE,
+			..params(VectorType::F32, Distance::Euclidean)
+		}
+	}
+
 	impl TwoNodes {
 		async fn new(ds: TestIndexStore) -> Result<Self> {
 			let ikb = ikb();
-			let p = DiskAnnParams {
-				degree: TWO_NODE_DEGREE,
-				..params(VectorType::F32, Distance::Euclidean)
-			};
+			let p = two_node_params();
 			let b_cache = cache();
 			Ok(Self {
 				a: new_index(ikb.clone(), TableId(4), &p, cache()).await?,
@@ -5808,10 +5964,241 @@ mod tests {
 		Ok((observed, b_exhaustive))
 	}
 
-	/// #1193 prediction 1: a compaction on a node whose cache predates another node's generation
-	/// rewrites adjacency lists from that cache and drops the other node's edges.
+	/// The record keys a KNN search through `ctx` returns, in ascending order.
+	async fn knn_keys_in(
+		index: &DiskAnnIndex,
+		ctx: &TestIndexEnv,
+		values: &[f32],
+		k: usize,
+	) -> Result<Vec<i64>> {
+		let query = f32_query(values);
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| async { index.knn_search(ctx, stk, &query, k, 8, None, None).await })
+			.finish()
+			.await?;
+		let mut keys: Vec<i64> = res
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect();
+		keys.sort();
+		Ok(keys)
+	}
+
+	/// Which wrapper the late reader in [`single_node_late_publish`] searches through.
+	#[derive(Clone, Copy)]
+	enum LateReader {
+		/// The wrapper that compacts.
+		SameWrapper,
+		/// A second wrapper over the same cache, standing in for one the registry dropped while a
+		/// search still held it.
+		DroppedWrapper,
+	}
+
+	/// One node, one cache. A reader opens its snapshot, the node compacts four more vectors into
+	/// the graph, eviction empties every entry that compaction wrote through, and only then does
+	/// the reader search — publishing what its snapshot holds. Returns what a reader opened after
+	/// the compaction finds, and the edges a further compaction on the same node drops.
+	async fn single_node_late_publish(
+		ds: TestIndexStore,
+		reader: LateReader,
+	) -> Result<(Vec<i64>, Vec<(ElementId, ElementId)>)> {
+		let nodes = TwoNodes::new(ds).await?;
+		let dropped = match reader {
+			LateReader::SameWrapper => None,
+			LateReader::DroppedWrapper => Some(
+				new_index(nodes.ikb.clone(), TableId(4), &two_node_params(), nodes.b_cache.clone())
+					.await?,
+			),
+		};
+		let late_index = dropped.as_ref().unwrap_or(&nodes.b);
+		for i in 1..=8i64 {
+			let v = 100.0 + i as f32;
+			nodes.write(i, None, Some(&[v, v, v, v])).await?;
+		}
+		nodes.compact_on(&nodes.b).await?;
+		let late = new_ctx(&nodes.ds, TransactionType::Read).await;
+
+		for i in 9..=12i64 {
+			let v = (i - 8) as f32;
+			nodes.write(i, None, Some(&[v, v, v, v])).await?;
+		}
+		nodes.compact_on(&nodes.b).await?;
+		nodes.clear_b_cache().await;
+
+		let query = [0.0f32, 0.0, 0.0, 0.0];
+		assert_eq!(
+			knn_keys_in(late_index, &late, &query, 12).await?,
+			(1..=8).collect::<Vec<_>>(),
+			"the late reader's snapshot holds only the first eight vectors"
+		);
+		late.tx().cancel().await?;
+
+		let found = knn_keys_with_allow(&nodes.b, &nodes.ds, &query, 12, None).await?;
+		let limit = nodes.next_element_id().await? + 4;
+		let before = nodes.graph_dump(limit).await?;
+		nodes.write(13, None, Some(&[0.5, 0.5, 0.5, 0.5])).await?;
+		nodes.compact_on(&nodes.b).await?;
+		let after = nodes.graph_dump(limit).await?;
+		let dropped = before
+			.iter()
+			.flat_map(|(id, (neighbors, _))| {
+				let kept =
+					after.get(id).map(|(neighbors, _)| neighbors.clone()).unwrap_or_default();
+				neighbors.iter().filter(move |n| !kept.contains(n)).map(move |n| (*id, *n))
+			})
+			.collect();
+		Ok((found, dropped))
+	}
+
+	/// A reader opened after a compaction reaches the vectors that compaction added, however late
+	/// an older reader on the same node publishes what its snapshot held.
 	#[tokio::test]
-	#[ignore = "#1193: node B's compaction rewrites adjacency from its pre-generation cache"]
+	async fn diskann_late_publish_leaves_new_vectors_reachable() -> Result<()> {
+		let (found, _) =
+			single_node_late_publish(TestIndexStore::new().await, LateReader::SameWrapper).await?;
+		assert_eq!(found, (1..=12).collect::<Vec<_>>(), "every committed vector is reachable");
+		Ok(())
+	}
+
+	/// A compaction keeps every edge the previous compaction on the same node committed, however
+	/// late an older reader publishes what its snapshot held.
+	#[tokio::test]
+	async fn diskann_late_publish_leaves_committed_edges_in_place() -> Result<()> {
+		let (_, dropped) =
+			single_node_late_publish(TestIndexStore::new().await, LateReader::SameWrapper).await?;
+		assert!(dropped.is_empty(), "the compaction dropped committed edges: {dropped:?}");
+		Ok(())
+	}
+
+	/// The late publish comes from a wrapper the registry dropped, sharing the cache its
+	/// replacement compacts through but not its graph lock: a reader opened after the compaction
+	/// still reaches the vectors it added.
+	#[tokio::test]
+	async fn diskann_dropped_wrapper_late_publish_leaves_new_vectors_reachable() -> Result<()> {
+		let (found, _) =
+			single_node_late_publish(TestIndexStore::new().await, LateReader::DroppedWrapper)
+				.await?;
+		assert_eq!(found, (1..=12).collect::<Vec<_>>(), "every committed vector is reachable");
+		Ok(())
+	}
+
+	/// The same late publish from a dropped wrapper: the replacement's next compaction keeps every
+	/// edge its previous one committed.
+	#[tokio::test]
+	async fn diskann_dropped_wrapper_late_publish_leaves_committed_edges_in_place() -> Result<()> {
+		let (_, dropped) =
+			single_node_late_publish(TestIndexStore::new().await, LateReader::DroppedWrapper)
+				.await?;
+		assert!(dropped.is_empty(), "the compaction dropped committed edges: {dropped:?}");
+		Ok(())
+	}
+
+	/// The `!dg` generation, and every persisted adjacency list and vector, as a reader opened now
+	/// sees them.
+	async fn committed_graph(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+	) -> Result<(Option<u64>, BTreeMap<ElementId, (Vec<ElementId>, SerializedVector)>)> {
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let generation = read_compaction_generation(&tx, &ikb.new_dg_key()).await?;
+		let state: DiskAnnState = tx.get_key(&ikb.new_ds_key(), None).await?.unwrap_or_default();
+		let mut graph = BTreeMap::new();
+		for element_id in 0..state.next_element_id {
+			let node: Option<DiskAnnNode> = tx.get_key(&ikb.new_dn_key(element_id), None).await?;
+			let element: Option<DiskAnnElement> =
+				tx.get_key(&ikb.new_de_key(element_id), None).await?;
+			if let (Some(node), Some(element)) = (node, element) {
+				graph.insert(element_id, (node.neighbors, element.vector));
+			}
+		}
+		tx.cancel().await?;
+		Ok((generation, graph))
+	}
+
+	/// A compaction on this process costs the cache only the entries it changed. Every element a
+	/// reader cached before it is still served after it, since a compaction never rewrites an
+	/// existing vector, and so is every adjacency list it left as it was. An adjacency list it did
+	/// change is served, if at all, as it committed it.
+	#[tokio::test]
+	async fn diskann_local_compaction_keeps_untouched_entries_served() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let cache = cache();
+		let index = new_index(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache.clone(),
+		)
+		.await?;
+		for i in 1..=48i64 {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let v = [i as f32, 0.0, 0.0, 0.0];
+			index.index(&ctx, &RecordIdKey::Number(i), None, Some(f32_content(&v))).await?;
+			ctx.tx().commit().await?;
+		}
+		while compact_once(&index, &ds, &ikb).await? {}
+		for i in 1..=48i64 {
+			knn_len_with_k(&index, &ds, &[i as f32, 0.0, 0.0, 0.0], 4).await?;
+		}
+		let cache_index = (ikb.ns(), ikb.db(), TableId(4), ikb.index(), DOC_IDS_FORMAT_VERSION);
+		let (generation, before) = committed_graph(&ds, &ikb).await?;
+		let view = index.graph.read().await.reader_view(generation);
+		let cached_elements: Vec<ElementId> = before
+			.keys()
+			.copied()
+			.filter(|id| cache.get_element(cache_index, *id, &view).is_some())
+			.collect();
+		let cached_nodes: Vec<ElementId> = before
+			.keys()
+			.copied()
+			.filter(|id| cache.get_node(cache_index, *id, &view).is_some())
+			.collect();
+		assert!(!cached_elements.is_empty() && !cached_nodes.is_empty(), "the queries cached");
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let far = [1000.0, 0.0, 0.0, 0.0];
+			index.index(&ctx, &RecordIdKey::Number(49), None, Some(f32_content(&far))).await?;
+			ctx.tx().commit().await?;
+		}
+		while compact_once(&index, &ds, &ikb).await? {}
+		let (later, after) = committed_graph(&ds, &ikb).await?;
+		assert!(later > generation, "the compaction committed a generation");
+		let view = index.graph.read().await.reader_view(later);
+		for id in &cached_elements {
+			assert_eq!(
+				cache.get_element(cache_index, *id, &view).map(|e| e.vector.clone()),
+				Some(after[id].1.clone()),
+				"element {id} is no longer served"
+			);
+		}
+		let mut untouched = 0;
+		for id in &cached_nodes {
+			let served = cache.get_node(cache_index, *id, &view).map(|n| n.neighbors.clone());
+			if before[id].0 == after[id].0 {
+				assert_eq!(
+					served,
+					Some(after[id].0.clone()),
+					"untouched adjacency of {id} is gone"
+				);
+				untouched += 1;
+			} else if let Some(served) = served {
+				assert_eq!(served, after[id].0, "adjacency of {id} is served as it was");
+			}
+		}
+		assert!(untouched > 0, "the compaction changed every cached adjacency list");
+		Ok(())
+	}
+
+	/// A compaction on a node whose cache was warmed before another node's generation keeps every
+	/// edge that generation committed: nothing it reads to rewrite an adjacency list comes from an
+	/// entry of an older generation.
+	#[tokio::test]
 	async fn diskann_foreign_generation_compaction_keeps_foreign_edges() -> Result<()> {
 		let observed = two_node_compaction(TestIndexStore::new().await, true).await?;
 		assert!(
@@ -5836,11 +6223,9 @@ mod tests {
 
 	/// A compaction must not re-allocate element ids another process already used.
 	///
-	/// `!ds` carries the allocator alongside the entry point, and the process-local cache is not
-	/// invalidated when another process commits — so a compaction reading it from the cache would
-	/// increment a stale `next_element_id`, overwrite the elements behind the ids it reissued, and
+	/// `!ds` carries the allocator alongside the entry point, so a compaction incrementing an
+	/// older `next_element_id` would overwrite the elements behind the ids it reissued and
 	/// persist a rewound counter, leaving every later allocation on this index to collide again.
-	/// The read-modify-write paths go through the transaction to prevent that.
 	#[tokio::test]
 	async fn diskann_foreign_generation_compaction_does_not_reuse_element_ids() -> Result<()> {
 		let observed = two_node_compaction(TestIndexStore::new().await, true).await?;
@@ -5868,10 +6253,9 @@ mod tests {
 		Ok(())
 	}
 
-	/// #1193 prediction 2: a document whose vector moved on another node comes back from the stale
-	/// node's cached element and doc set, scored against the vector it no longer has.
+	/// A document whose vector moved on another node is scored against the vector it has now: the
+	/// element and doc set a node cached before the move are not served after it.
 	#[tokio::test]
-	#[ignore = "#1193: node B scores a moved document against its cached pre-move vector"]
 	async fn diskann_foreign_generation_query_scores_moved_document_correctly() -> Result<()> {
 		let observed = two_node_moved_document(TestIndexStore::new().await, true).await?;
 		assert_eq!(
@@ -5896,11 +6280,10 @@ mod tests {
 		Ok(())
 	}
 
-	/// #1193 prediction 3: vectors another node committed are unreachable from a stale cached
-	/// adjacency, at any `k`, because that adjacency names none of them and the other node's
-	/// compaction has already drained the pendings the lookup path would otherwise merge.
+	/// Vectors another node committed are reachable, at any `k`. The other node's compaction has
+	/// already drained the pendings the lookup path would merge, so they are reachable only through
+	/// adjacency of their own generation, never through lists cached before it.
 	#[tokio::test]
-	#[ignore = "#1193: vectors committed by node A are unreachable from node B's cached adjacency"]
 	async fn diskann_foreign_generation_query_reaches_new_vectors() -> Result<()> {
 		let (observed, b_exhaustive) =
 			two_node_new_vectors(TestIndexStore::new().await, true).await?;
@@ -5913,6 +6296,65 @@ mod tests {
 			b_exhaustive,
 			(1..=12).collect::<Vec<i64>>(),
 			"a k larger than the index still did not reach the vectors the other node committed"
+		);
+		Ok(())
+	}
+
+	/// Node B commits, and warms its cache over its own generation, before node A commits one of
+	/// its own vectors near the query point. With `b_commits_again`, B then compacts a vector of
+	/// its own on the far side of A's, which rewrites only adjacency lists A created and leaves
+	/// those B cached untouched. Returns what an exhaustive query through B finds at the end.
+	async fn foreign_generation_over_a_local_span(
+		ds: TestIndexStore,
+		b_commits_again: bool,
+	) -> Result<Vec<i64>> {
+		let nodes = TwoNodes::new(ds).await?;
+		for i in 1..=8i64 {
+			let v = 100.0 + i as f32;
+			nodes.write(i, None, Some(&[v, v, v, v])).await?;
+		}
+		nodes.compact_on(&nodes.b).await?;
+		let query = [0.0f32, 0.0, 0.0, 0.0];
+		assert_eq!(
+			knn_keys_with_allow(&nodes.b, &nodes.ds, &query, 4, None).await?,
+			vec![1, 2, 3, 4],
+			"the run needs B's cache warmed over its own generation"
+		);
+		for i in 9..=12i64 {
+			let v = (i - 8) as f32;
+			nodes.write(i, None, Some(&[v, v, v, v])).await?;
+		}
+		nodes.compact_on(&nodes.a).await?;
+		if b_commits_again {
+			nodes.write(13, None, Some(&[-50.0, -50.0, -50.0, -50.0])).await?;
+			nodes.compact_on(&nodes.b).await?;
+		}
+		knn_keys_with_allow(&nodes.b, &nodes.ds, &query, 13, None).await
+	}
+
+	/// A reader at a generation another node committed is beyond the span B's own commit opened,
+	/// so nothing B cached inside that span is served to it: it reaches the vectors the other node
+	/// added, through adjacency lists B had cached without them.
+	#[tokio::test]
+	async fn diskann_foreign_generation_over_a_local_span_query_reaches_new_vectors() -> Result<()>
+	{
+		let found =
+			foreign_generation_over_a_local_span(TestIndexStore::new().await, false).await?;
+		assert_eq!(found, (1..=12).collect::<Vec<i64>>(), "B misses the vectors A committed");
+		Ok(())
+	}
+
+	/// B's next compaction finds A's generation where its span's head should be and reopens the
+	/// span there, rather than stretching it across a commit it did not make: a reader after B's
+	/// commit still reaches the vectors A added.
+	#[tokio::test]
+	async fn diskann_local_commit_over_a_foreign_generation_query_reaches_new_vectors() -> Result<()>
+	{
+		let found = foreign_generation_over_a_local_span(TestIndexStore::new().await, true).await?;
+		assert_eq!(
+			found,
+			(1..=13).collect::<Vec<i64>>(),
+			"B stopped reaching the vectors A committed once B committed on top of them"
 		);
 		Ok(())
 	}
@@ -5935,12 +6377,10 @@ mod tests {
 		Ok(())
 	}
 
-	/// Every #1193 scenario against one on-disk RocksDB store, so none of the results above can be
-	/// read as an artefact of the in-memory backend. The hazard is in the process-local cache, not
-	/// in any backend's visibility rules.
+	/// Every scenario above against one on-disk RocksDB store, so none of them depends on the
+	/// in-memory backend's visibility rules: what they pin lives in the process-local cache.
 	#[cfg(feature = "kv-rocksdb")]
 	#[tokio::test]
-	#[ignore = "#1193: the in-memory variants of these scenarios, on an on-disk store"]
 	async fn diskann_foreign_generation_rocksdb() -> Result<()> {
 		async fn store(dir: &TempDir) -> TestIndexStore {
 			TestIndexStore::with_path(&format!("rocksdb:{}", dir.path().to_string_lossy())).await
