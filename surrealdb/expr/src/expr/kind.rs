@@ -273,7 +273,7 @@ impl Kind {
 			Kind::Any | Kind::Object | Kind::Array(..) | Kind::Set(..) => true,
 			Kind::Literal(KindLiteral::Object(_) | KindLiteral::Array(_)) => true,
 			Kind::Either(kinds) => {
-				kinds.iter().all(|k| matches!(k, Kind::None) || k.allows_sub_fields())
+				kinds.iter().all(|k| matches!(k, Kind::None | Kind::Null) || k.allows_sub_fields())
 			}
 			_ => false,
 		}
