@@ -6474,4 +6474,78 @@ mod tests {
 		);
 		tx.cancel().await.unwrap();
 	}
+
+	/// A record key with its vector before and after one write; `None` is no vector.
+	type SharedVectorWrite = (i64, Option<[f32; 4]>, Option<[f32; 4]>);
+
+	/// A vector shared by more records than the inline document-set variants
+	/// hold keeps every one of them: the set grows into, and shrinks back out
+	/// of, its bitmap form without losing a write, whether each record is
+	/// compacted on its own or all in one batch.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn diskann_vector_shared_by_many_records_keeps_every_record() -> Result<()> {
+		for (hashed, per_record) in [(false, true), (false, false), (true, true), (true, false)] {
+			let ds = TestIndexStore::new().await;
+			let ikb = ikb();
+			let mut p = params(VectorType::F32, Distance::Euclidean);
+			p.use_hashed_vector = hashed;
+			let index = new_index(ikb.clone(), TableId(4), &p, cache()).await?;
+			let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+			let shared = [3.0f32; 4];
+			let apply = |writes: Vec<SharedVectorWrite>| {
+				let (ds, index, docids, ikb) = (&ds, &index, &docids, &ikb);
+				async move {
+					let mut pending = writes.into_iter().peekable();
+					while pending.peek().is_some() {
+						let ctx = new_ctx(ds, TransactionType::Write).await;
+						for (key, old, new) in pending.by_ref().take(if per_record {
+							1
+						} else {
+							usize::MAX
+						}) {
+							let id = RecordIdKey::Number(key);
+							if new.is_some() {
+								docids.resolve_or_assign(&ctx, &id).await?;
+							}
+							index
+								.index(
+									&ctx,
+									&id,
+									old.as_ref().map(|v| f32_content(v)),
+									new.as_ref().map(|v| f32_content(v)),
+								)
+								.await?;
+							if new.is_none() {
+								docids.remove(&ctx.tx(), &id).await?;
+							}
+						}
+						ctx.tx().commit().await?;
+						compact_all(index, ds, ikb).await?;
+					}
+					anyhow::Ok(())
+				}
+			};
+			// A distinct vector alongside, so the graph has more than one element.
+			let mut writes = vec![(100i64, None, Some([9.0f32; 4]))];
+			writes.extend((1..=20).map(|key| (key, None, Some(shared))));
+			apply(writes).await?;
+			let case = format!("hashed {hashed}, per record {per_record}");
+			let mut all: Vec<i64> = (1..=20).collect();
+			all.push(100);
+			assert_eq!(knn_keys_with_allow(&index, &ds, &shared, 50, None).await?, all, "{case}");
+			// Remove 15 of the 20, crossing back out of the bitmap form.
+			apply((1..=15).map(|key| (key, Some(shared), None)).collect()).await?;
+			let mut left: Vec<i64> = (16..=20).collect();
+			left.push(100);
+			assert_eq!(knn_keys_with_allow(&index, &ds, &shared, 50, None).await?, left, "{case}");
+			// And the rest, which removes the shared element itself.
+			apply((16..=20).map(|key| (key, Some(shared), None)).collect()).await?;
+			assert_eq!(
+				knn_keys_with_allow(&index, &ds, &shared, 50, None).await?,
+				vec![100],
+				"{case}"
+			);
+		}
+		Ok(())
+	}
 }

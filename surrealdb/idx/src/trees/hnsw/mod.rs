@@ -3921,6 +3921,124 @@ mod tests {
 		found as f64 / docs.len() as f64
 	}
 
+	/// The keys of the records a KNN over `h` returns for `pt`, sorted.
+	async fn knn_keys(
+		ds: &TestIndexStore,
+		h: &HnswIndex,
+		pt: &[Number],
+		k: usize,
+	) -> Result<Vec<i64>> {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| async { h.knn_search(&ctx, stk, pt, k, 100, None, None).await })
+			.finish()
+			.await?;
+		ctx.tx().cancel().await?;
+		let mut keys: Vec<i64> = res
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect();
+		keys.sort();
+		Ok(keys)
+	}
+
+	/// A record key with its vector before and after one write; `None` is no vector.
+	type SharedVectorWrite = (i64, Option<SharedVector>, Option<SharedVector>);
+
+	/// A vector shared by more records than the inline document-set variants
+	/// hold keeps every one of them: the set grows into, and shrinks back out
+	/// of, its bitmap form without losing a write, whether each record is
+	/// compacted on its own or all in one batch.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_vector_shared_by_many_records_keeps_every_record() -> Result<()> {
+		for (hashed, per_record) in [(false, true), (false, false), (true, true), (true, false)] {
+			let ds = TestIndexStore::new().await;
+			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+			let p = new_params(2, VectorType::I16, Distance::Euclidean, 8, 100, true, true, hashed);
+			let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+			let shared = new_i16_vec(3, 3);
+			let h = {
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				let h = HnswIndex::new(
+					ds.index_stores().vector_cache().clone(),
+					&ctx.tx(),
+					ikb.clone(),
+					TableId(3),
+					&p,
+					DOC_IDS_FORMAT_VERSION,
+				)
+				.await?;
+				ctx.tx().commit().await?;
+				h
+			};
+			// A distinct vector alongside, so the graph has more than one element.
+			let mut writes = vec![(100i64, None, Some(new_i16_vec(9, 9)))];
+			writes.extend((1..=20).map(|key| (key, None, Some(shared.clone()))));
+			let apply = |writes: Vec<SharedVectorWrite>| {
+				let (ds, h, docids) = (&ds, &h, &docids);
+				async move {
+					let mut pending = writes.into_iter().peekable();
+					while pending.peek().is_some() {
+						let ctx = new_ctx(ds, TransactionType::Write).await;
+						for (key, old, new) in pending.by_ref().take(if per_record {
+							1
+						} else {
+							usize::MAX
+						}) {
+							let id = RecordIdKey::Number(key);
+							if new.is_some() {
+								docids.resolve_or_assign(&ctx, &id).await?;
+							}
+							h.index(
+								&ctx,
+								&id,
+								old.as_ref().map(vector_content),
+								new.as_ref().map(vector_content),
+							)
+							.await?;
+							if new.is_none() {
+								docids.remove(&ctx.tx(), &id).await?;
+							}
+						}
+						ctx.tx().commit().await?;
+						compact_committed(ds, h).await;
+					}
+					anyhow::Ok(())
+				}
+			};
+			apply(writes).await?;
+			let pt = vec![Number::Int(3), Number::Int(3)];
+			let mut all: Vec<i64> = (1..=20).collect();
+			all.push(100);
+			assert_eq!(
+				knn_keys(&ds, &h, &pt, 50).await?,
+				all,
+				"hashed {hashed}, per record {per_record}"
+			);
+			// Remove 15 of the 20, crossing back out of the bitmap form.
+			apply((1..=15).map(|key| (key, Some(shared.clone()), None)).collect()).await?;
+			let mut left: Vec<i64> = (16..=20).collect();
+			left.push(100);
+			assert_eq!(
+				knn_keys(&ds, &h, &pt, 50).await?,
+				left,
+				"hashed {hashed}, per record {per_record}"
+			);
+			// And the rest, which removes the shared element itself.
+			apply((16..=20).map(|key| (key, Some(shared.clone()), None)).collect()).await?;
+			assert_eq!(
+				knn_keys(&ds, &h, &pt, 50).await?,
+				vec![100],
+				"hashed {hashed}, per record {per_record}"
+			);
+		}
+		Ok(())
+	}
+
 	fn new_i16_vec(x: isize, y: isize) -> SharedVector {
 		new_padded_i16_vec(2, x, y)
 	}
