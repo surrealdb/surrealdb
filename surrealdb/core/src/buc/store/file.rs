@@ -1,15 +1,13 @@
-use std::future::Future;
 use std::path::{Path as OsPath, PathBuf};
-use std::pin::Pin;
 
 use bytes::Bytes;
+use chrono::Utc;
 use path_clean::PathClean;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use url::Url;
-use web_time::SystemTime;
 
-use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
+use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore, StoreFuture};
 use crate::buc::Config;
 use crate::err::Error;
 
@@ -98,8 +96,13 @@ impl FileStore {
 		// Create a PathBuf from the path, and clean it
 		let path_buf = PathBuf::from(&path_from_url).clean();
 
-		// File backends only support absolute paths as the base
-		if !path_buf.is_absolute() {
+		// File backends only support absolute paths as the base. std counts no
+		// path as absolute in the browser, where OPFS paths are rooted at `/`.
+		#[cfg(not(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown")))]
+		let is_absolute = path_buf.is_absolute();
+		#[cfg(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown"))]
+		let is_absolute = path_buf.has_root();
+		if !is_absolute {
 			return Err(Error::InvalidBucketUrl(format!(
 				"File path '{}' (derived from URL path '{}') is not absolute.",
 				path_buf.display(),
@@ -206,6 +209,54 @@ impl FileStore {
 		Ok(full_path)
 	}
 
+	/// Moves a file onto `target`, replacing what is there.
+	#[cfg(not(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown")))]
+	async fn move_file(source: &OsPath, target: &OsPath) -> Result<(), String> {
+		tokio::fs::rename(source, target).await.map_err(|e| format!("Failed to rename file: {}", e))
+	}
+
+	/// Moves a file onto `target`, replacing what is there.
+	///
+	/// The browser has no move, so this copies and then removes the source. If
+	/// the source cannot be removed, `target` is put back the way it was.
+	#[cfg(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown"))]
+	async fn move_file(source: &OsPath, target: &OsPath) -> Result<(), String> {
+		let fail = |e: std::io::Error| format!("Failed to rename file: {}", e);
+		if source == target {
+			return Ok(());
+		}
+		let data = tokio::fs::read(source).await.map_err(fail)?;
+		let replaced = match tokio::fs::read(target).await {
+			Ok(data) => Some(data),
+			Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+			Err(e) => return Err(fail(e)),
+		};
+		let restore = async || match &replaced {
+			Some(data) => tokio::fs::write(target, data).await,
+			None => tokio::fs::remove_file(target).await,
+		};
+		// A failed write leaves an existing target as it was, but may create an
+		// empty one.
+		if let Err(e) = tokio::fs::write(target, &data).await {
+			if replaced.is_none() {
+				restore().await.ok();
+			}
+			return Err(fail(e));
+		}
+		if let Err(e) = tokio::fs::remove_file(source).await {
+			if let Err(undo) = restore().await {
+				return Err(format!(
+					"Failed to rename file: {}, and could not restore '{}': {}",
+					e,
+					target.display(),
+					undo
+				));
+			}
+			return Err(fail(e));
+		}
+		Ok(())
+	}
+
 	/// Create parent directories for a path if they don't exist
 	async fn ensure_parent_dirs(path: &OsPath) -> Result<(), String> {
 		if let Some(parent) = path.parent() {
@@ -262,11 +313,7 @@ fn is_path_allowed(
 }
 
 impl ObjectStore for FileStore {
-	fn put<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		data: Bytes,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn put<'a>(&'a self, key: &'a ObjectKey, data: Bytes) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			let os_path = self.to_os_path(key).await?;
 			Self::ensure_parent_dirs(&os_path).await?;
@@ -283,11 +330,7 @@ impl ObjectStore for FileStore {
 		})
 	}
 
-	fn put_if_not_exists<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		data: Bytes,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn put_if_not_exists<'a>(&'a self, key: &'a ObjectKey, data: Bytes) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			let os_path = self.to_os_path(key).await?;
 
@@ -310,10 +353,7 @@ impl ObjectStore for FileStore {
 		})
 	}
 
-	fn get<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<Option<Bytes>, String>> + Send + 'a>> {
+	fn get<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, Option<Bytes>> {
 		Box::pin(async move {
 			let os_path = self.to_os_path(key).await?;
 
@@ -330,10 +370,7 @@ impl ObjectStore for FileStore {
 		})
 	}
 
-	fn head<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectMeta>, String>> + Send + 'a>> {
+	fn head<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, Option<ObjectMeta>> {
 		Box::pin(async move {
 			let os_path = self.to_os_path(key).await?;
 
@@ -349,7 +386,7 @@ impl ObjectStore for FileStore {
 			let size = metadata.len();
 
 			// Get modified time if available
-			let updated = metadata.modified().unwrap_or_else(|_| SystemTime::now()).into();
+			let updated = metadata.modified().map_or_else(|_| Utc::now(), Into::into);
 
 			Ok(Some(ObjectMeta {
 				size,
@@ -359,10 +396,7 @@ impl ObjectStore for FileStore {
 		})
 	}
 
-	fn delete<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn delete<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			let os_path = self.to_os_path(key).await?;
 
@@ -379,21 +413,14 @@ impl ObjectStore for FileStore {
 		})
 	}
 
-	fn exists<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send + 'a>> {
+	fn exists<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, bool> {
 		Box::pin(async move {
 			let os_path = self.to_os_path(key).await?;
 			Self::path_exists(&os_path).await
 		})
 	}
 
-	fn copy<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn copy<'a>(&'a self, key: &'a ObjectKey, target: &'a ObjectKey) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			let source_key = self.to_os_path(key).await?;
 			let target_key = self.to_os_path(target).await?;
@@ -417,7 +444,7 @@ impl ObjectStore for FileStore {
 		&'a self,
 		key: &'a ObjectKey,
 		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			let source_key = self.to_os_path(key).await?;
 			let target_key = self.to_os_path(target).await?;
@@ -443,11 +470,7 @@ impl ObjectStore for FileStore {
 		})
 	}
 
-	fn rename<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn rename<'a>(&'a self, key: &'a ObjectKey, target: &'a ObjectKey) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			let source_key = self.to_os_path(key).await?;
 			let target_key = self.to_os_path(target).await?;
@@ -459,9 +482,7 @@ impl ObjectStore for FileStore {
 
 			Self::ensure_parent_dirs(&target_key).await?;
 
-			tokio::fs::rename(&source_key, &target_key)
-				.await
-				.map_err(|e| format!("Failed to rename file: {}", e))?;
+			Self::move_file(&source_key, &target_key).await?;
 
 			Ok(())
 		})
@@ -471,7 +492,7 @@ impl ObjectStore for FileStore {
 		&'a self,
 		key: &'a ObjectKey,
 		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			let source_key = self.to_os_path(key).await?;
 			let target_key = self.to_os_path(target).await?;
@@ -488,18 +509,13 @@ impl ObjectStore for FileStore {
 
 			Self::ensure_parent_dirs(&target_key).await?;
 
-			tokio::fs::rename(&source_key, &target_key)
-				.await
-				.map_err(|e| format!("Failed to rename file: {}", e))?;
+			Self::move_file(&source_key, &target_key).await?;
 
 			Ok(())
 		})
 	}
 
-	fn list<'a>(
-		&'a self,
-		opts: &'a ListOptions,
-	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>> {
+	fn list<'a>(&'a self, opts: &'a ListOptions) -> StoreFuture<'a, Vec<ObjectMeta>> {
 		Box::pin(async move {
 			// If a prefix is provided, combine it with the store prefix
 			// If not, just use the store's prefix
@@ -526,7 +542,7 @@ impl ObjectStore for FileStore {
 				}
 
 				let size = metadata.len();
-				let updated = metadata.modified().unwrap_or_else(|_| SystemTime::now()).into();
+				let updated = metadata.modified().map_or_else(|_| Utc::now(), Into::into);
 				return Ok(vec![ObjectMeta {
 					key: base_key,
 					size,
@@ -594,7 +610,7 @@ impl ObjectStore for FileStore {
 				.into_iter()
 				.map(|(entry_key, metadata)| {
 					let size = metadata.len();
-					let updated = metadata.modified().unwrap_or_else(|_| SystemTime::now()).into();
+					let updated = metadata.modified().map_or_else(|_| Utc::now(), Into::into);
 					ObjectMeta {
 						key: entry_key,
 						size,
@@ -785,5 +801,185 @@ mod tests {
 
 		let allowed = vec![PathBuf::from(OsStr::from_bytes(b"/srv/data/\xFF"))];
 		assert!(!is_path_allowed(OsPath::new("/srv/data/file.txt"), true, &allowed));
+	}
+
+	fn key(path: &str) -> ObjectKey {
+		ObjectKey::new(path.to_string())
+	}
+
+	async fn read(store: &FileStore, path: &str) -> Option<Vec<u8>> {
+		store.get(&key(path)).await.unwrap().map(|b| b.to_vec())
+	}
+
+	/// Every operation resolves keys through `to_os_path`, so none of them may
+	/// reach a file outside the bucket root, even inside the allowlist.
+	#[tokio::test]
+	async fn every_operation_rejects_keys_escaping_the_root() {
+		let dir = TempDir::new().unwrap();
+		let parent = canonical(dir.path()).await;
+		let bucket = parent.join("bucket");
+		std::fs::create_dir(&bucket).unwrap();
+		std::fs::write(parent.join("outside.txt"), b"secret").unwrap();
+		let cfg = Config::for_test(vec![parent.clone()]);
+		let opts = FileStore::parse_url(&build_url(&bucket, ""), &cfg).await.unwrap().unwrap();
+		let store = FileStore::new(opts, cfg);
+
+		let inside = key("/inside.txt");
+		store.put(&inside, Bytes::from_static(b"x")).await.unwrap();
+		let escape = key("/../outside.txt");
+		let data = || Bytes::from_static(b"overwritten");
+		let is_escape = |r: Result<(), String>| {
+			assert!(r.unwrap_err().contains("escapes the bucket root"));
+		};
+
+		is_escape(store.put(&escape, data()).await);
+		is_escape(store.put_if_not_exists(&escape, data()).await);
+		is_escape(store.get(&escape).await.map(drop));
+		is_escape(store.head(&escape).await.map(drop));
+		is_escape(store.exists(&escape).await.map(drop));
+		is_escape(store.delete(&escape).await);
+		is_escape(store.copy(&escape, &inside).await);
+		is_escape(store.copy(&inside, &escape).await);
+		is_escape(store.copy_if_not_exists(&escape, &inside).await);
+		is_escape(store.copy_if_not_exists(&inside, &escape).await);
+		is_escape(store.rename(&escape, &inside).await);
+		is_escape(store.rename(&inside, &escape).await);
+		is_escape(store.rename_if_not_exists(&escape, &inside).await);
+		is_escape(store.rename_if_not_exists(&inside, &escape).await);
+		let opts = ListOptions {
+			prefix: Some(key("/..")),
+			..Default::default()
+		};
+		is_escape(store.list(&opts).await.map(drop));
+
+		assert_eq!(std::fs::read(parent.join("outside.txt")).unwrap(), b"secret");
+		assert!(store.exists(&inside).await.unwrap());
+	}
+
+	#[tokio::test]
+	async fn put_if_not_exists_keeps_existing_data() {
+		let dir = TempDir::new().unwrap();
+		let (store, _) = open_store(dir.path(), "").await;
+
+		store.put_if_not_exists(&key("/a.txt"), Bytes::from_static(b"first")).await.unwrap();
+		store.put_if_not_exists(&key("/a.txt"), Bytes::from_static(b"second")).await.unwrap();
+		assert_eq!(read(&store, "/a.txt").await.as_deref(), Some(&b"first"[..]));
+
+		store.put(&key("/a.txt"), Bytes::from_static(b"third")).await.unwrap();
+		assert_eq!(read(&store, "/a.txt").await.as_deref(), Some(&b"third"[..]));
+	}
+
+	#[tokio::test]
+	async fn copy_and_rename() {
+		let dir = TempDir::new().unwrap();
+		let (store, _) = open_store(dir.path(), "").await;
+		store.put(&key("/src.txt"), Bytes::from_static(b"src")).await.unwrap();
+		store.put(&key("/taken.txt"), Bytes::from_static(b"taken")).await.unwrap();
+
+		// Copies keep the source and create missing parent directories.
+		store.copy(&key("/src.txt"), &key("/nested/copy.txt")).await.unwrap();
+		assert_eq!(read(&store, "/nested/copy.txt").await.as_deref(), Some(&b"src"[..]));
+		assert!(store.exists(&key("/src.txt")).await.unwrap());
+		assert!(store.copy(&key("/missing.txt"), &key("/x.txt")).await.is_err());
+
+		store.copy_if_not_exists(&key("/src.txt"), &key("/taken.txt")).await.unwrap();
+		assert_eq!(read(&store, "/taken.txt").await.as_deref(), Some(&b"taken"[..]));
+		store.copy_if_not_exists(&key("/missing.txt"), &key("/x.txt")).await.unwrap();
+		assert!(!store.exists(&key("/x.txt")).await.unwrap());
+
+		// Renames move the source.
+		store.rename(&key("/nested/copy.txt"), &key("/moved/renamed.txt")).await.unwrap();
+		assert_eq!(read(&store, "/moved/renamed.txt").await.as_deref(), Some(&b"src"[..]));
+		assert!(!store.exists(&key("/nested/copy.txt")).await.unwrap());
+		assert!(store.rename(&key("/missing.txt"), &key("/x.txt")).await.is_err());
+		store.rename(&key("/src.txt"), &key("/src.txt")).await.unwrap();
+		assert_eq!(read(&store, "/src.txt").await.as_deref(), Some(&b"src"[..]));
+
+		store.rename_if_not_exists(&key("/src.txt"), &key("/taken.txt")).await.unwrap();
+		assert_eq!(read(&store, "/taken.txt").await.as_deref(), Some(&b"taken"[..]));
+		assert!(store.exists(&key("/src.txt")).await.unwrap());
+		assert!(store.rename_if_not_exists(&key("/missing.txt"), &key("/x.txt")).await.is_err());
+	}
+
+	#[tokio::test]
+	async fn list_filters_and_paginates() {
+		let dir = TempDir::new().unwrap();
+		let (store, _) = open_store(dir.path(), "").await;
+		for path in ["/c.txt", "/a.txt", "/b.txt", "/dir/d.txt"] {
+			store.put(&key(path), Bytes::from_static(b"x")).await.unwrap();
+		}
+		let list = |opts: ListOptions| {
+			let store = store.clone();
+			async move {
+				let listed = store.list(&opts).await.unwrap();
+				listed.into_iter().map(|m| m.key.to_string()).collect::<Vec<_>>()
+			}
+		};
+
+		// Directories are skipped, entries are sorted.
+		assert_eq!(list(ListOptions::default()).await, ["/a.txt", "/b.txt", "/c.txt"]);
+		let limited = ListOptions {
+			limit: Some(2),
+			..Default::default()
+		};
+		assert_eq!(list(limited).await, ["/a.txt", "/b.txt"]);
+		let after = ListOptions {
+			start: Some(key("/a.txt")),
+			..Default::default()
+		};
+		assert_eq!(list(after).await, ["/b.txt", "/c.txt"]);
+		let prefixed = ListOptions {
+			prefix: Some(key("/dir")),
+			..Default::default()
+		};
+		assert_eq!(list(prefixed).await, ["/dir/d.txt"]);
+		let single = ListOptions {
+			prefix: Some(key("/a.txt")),
+			..Default::default()
+		};
+		assert_eq!(list(single).await, ["/a.txt"]);
+		let missing = ListOptions {
+			prefix: Some(key("/nope")),
+			..Default::default()
+		};
+		assert!(list(missing).await.is_empty());
+	}
+
+	#[tokio::test]
+	async fn head_reports_size_and_modification_time() {
+		let dir = TempDir::new().unwrap();
+		let (store, _) = open_store(dir.path(), "").await;
+		let before = Utc::now() - chrono::Duration::seconds(5);
+		store.put(&key("/a.txt"), Bytes::from_static(b"hello")).await.unwrap();
+
+		let meta = store.head(&key("/a.txt")).await.unwrap().unwrap();
+		assert_eq!(meta.size, 5);
+		assert!(meta.updated >= before && meta.updated <= Utc::now());
+		assert!(store.head(&key("/missing.txt")).await.unwrap().is_none());
+	}
+
+	#[tokio::test]
+	async fn parse_url_validates_the_root() {
+		let dir = TempDir::new().unwrap();
+		let root = canonical(dir.path()).await;
+		let cfg = Config::for_test(vec![root.join("allowed")]);
+
+		// A missing root inside the allowlist is created.
+		let created = root.join("allowed/new");
+		FileStore::parse_url(&build_url(&created, ""), &cfg).await.unwrap().unwrap();
+		assert!(created.is_dir());
+
+		// A root outside the allowlist is denied.
+		let denied = FileStore::parse_url(&build_url(&root.join("other"), ""), &cfg).await;
+		assert!(matches!(denied, Err(Error::FileAccessDenied(_))));
+
+		// A root that is a file is rejected.
+		let file = root.join("allowed/file.txt");
+		std::fs::write(&file, b"x").unwrap();
+		let not_dir = FileStore::parse_url(&build_url(&file, ""), &cfg).await;
+		assert!(matches!(not_dir, Err(Error::InvalidBucketUrl(_))));
+
+		// Other schemes are not file buckets.
+		assert!(FileStore::parse_url("memory", &cfg).await.unwrap().is_none());
 	}
 }

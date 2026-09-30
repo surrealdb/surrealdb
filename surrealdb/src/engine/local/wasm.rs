@@ -85,6 +85,8 @@ pub(crate) async fn run_router(
 		(None, builder)
 	};
 
+	let builder = builder.with_capabilities(address.config.capabilities);
+
 	let kvs = match builder.build_with_path(&address.path).await {
 		Ok(kvs) => {
 			if let Err(error) = kvs.check_version().await {

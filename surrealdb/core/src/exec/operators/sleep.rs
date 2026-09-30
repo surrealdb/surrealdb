@@ -79,15 +79,8 @@ impl ExecOperator for SleepPlan {
 				_ => duration.0,
 			};
 
-			// Sleep with cancellation support.
-			// On WASM we use wasmtimer (no CancellationToken support).
-			// On native we race against the CancellationToken so that
-			// client disconnects and query cancellations stop the sleep
-			// promptly.
-			#[cfg(target_family = "wasm")]
-			wasmtimer::tokio::sleep(effective_duration).await;
-
-			#[cfg(not(target_family = "wasm"))]
+			// Race against the CancellationToken so that client disconnects and
+			// query cancellations stop the sleep promptly.
 			tokio::select! {
 				_ = tokio::time::sleep(effective_duration) => {},
 				_ = ctx.cancellation().cancelled() => {},

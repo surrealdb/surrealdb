@@ -3,6 +3,7 @@
 //! memory, or cloud storage such as S3 or GCS.
 
 use std::sync::{Arc, LazyLock};
+#[cfg(not(target_family = "wasm"))]
 use std::{env, fs};
 
 use anyhow::Result;
@@ -48,15 +49,15 @@ fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {
 				"No {} environment variable found, using default directory {}",
 				env_var, default_dir
 			);
-			let path = env::current_dir()
-				.expect("current directory should be accessible")
-				.join(default_dir);
-			if !path.exists() || !path.is_dir() {
-				fs::create_dir_all(&path)
-					.unwrap_or_else(|_| panic!("Failed to create directory {:?}", path));
-			}
 			#[cfg(not(target_family = "wasm"))]
 			{
+				let path = env::current_dir()
+					.expect("current directory should be accessible")
+					.join(default_dir);
+				if !path.exists() || !path.is_dir() {
+					fs::create_dir_all(&path)
+						.unwrap_or_else(|_| panic!("Failed to create directory {:?}", path));
+				}
 				// As long as the provided path is correct, the following should never panic
 				Arc::new(
 					object_store::local::LocalFileSystem::new_with_prefix(path)

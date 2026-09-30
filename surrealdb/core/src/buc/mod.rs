@@ -19,7 +19,7 @@ pub(crate) use controller::BucketController;
 pub use controller::BucketOperation;
 
 use crate::buc::store::ObjectStore;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(file_buckets)]
 use crate::buc::store::file::FileStore;
 use crate::buc::store::memory::MemoryStore;
 use crate::err::Error;
@@ -61,7 +61,11 @@ impl Config {
 /// Marker trait for bucket store provider requirements.
 pub trait BucketStoreProviderRequirements: Send + Sync + 'static {}
 
+#[cfg(not(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown")))]
 type BoxFuture<'a, R> = Pin<Box<dyn Future<Output = R> + 'a + Send + Sync>>;
+// Browser file stores hold JS handles, see `store::StoreFuture`.
+#[cfg(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown"))]
+type BoxFuture<'a, R> = Pin<Box<dyn Future<Output = R> + 'a>>;
 
 /// Trait for creating connections to bucket storage backends.
 ///
@@ -100,13 +104,13 @@ impl BucketStoreProvider for CommunityComposer {
 		config: Config,
 	) -> BoxFuture<'a, Result<Arc<dyn ObjectStore>>> {
 		Box::pin(async {
-			#[cfg(target_arch = "wasm32")]
+			#[cfg(not(file_buckets))]
 			let _ = config;
 			if MemoryStore::parse_url(url) {
 				return Ok(Arc::new(MemoryStore::new()) as Arc<dyn ObjectStore>);
 			}
 
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(file_buckets)]
 			if let Some(opts) = FileStore::parse_url(url, &config).await? {
 				return Ok(Arc::new(FileStore::new(opts, config)) as Arc<dyn ObjectStore>);
 			}
