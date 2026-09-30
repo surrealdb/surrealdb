@@ -17,9 +17,10 @@ mod controller;
 use anyhow::{Result, bail};
 pub(crate) use controller::BucketController;
 pub use controller::BucketOperation;
+use path_clean::PathClean;
 
 use crate::buc::store::ObjectStore;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(file_buckets)]
 use crate::buc::store::file::FileStore;
 use crate::buc::store::memory::MemoryStore;
 use crate::err::Error;
@@ -46,22 +47,22 @@ impl cnf::Config for Config {
 	}
 }
 
-#[cfg(test)]
 impl Config {
-	/// Test-only helper for building a `Config` with a custom bucket allowlist
-	/// without going through the `cnf::Config` parser.
-	pub(crate) fn for_test(bucket_list: Vec<PathBuf>) -> Self {
-		Self {
-			bucket_list,
-			..Self::default()
-		}
+	/// Replaces the directories file buckets may use.
+	pub(crate) fn with_bucket_list(mut self, bucket_list: Vec<PathBuf>) -> Self {
+		self.bucket_list = bucket_list.into_iter().map(|path| path.clean()).collect();
+		self
 	}
 }
 
 /// Marker trait for bucket store provider requirements.
 pub trait BucketStoreProviderRequirements: Send + Sync + 'static {}
 
+#[cfg(not(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown")))]
 type BoxFuture<'a, R> = Pin<Box<dyn Future<Output = R> + 'a + Send + Sync>>;
+// Browser file stores hold JS handles, see `store::StoreFuture`.
+#[cfg(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown"))]
+type BoxFuture<'a, R> = Pin<Box<dyn Future<Output = R> + 'a>>;
 
 /// Trait for creating connections to bucket storage backends.
 ///
@@ -100,13 +101,13 @@ impl BucketStoreProvider for CommunityComposer {
 		config: Config,
 	) -> BoxFuture<'a, Result<Arc<dyn ObjectStore>>> {
 		Box::pin(async {
-			#[cfg(target_arch = "wasm32")]
+			#[cfg(not(file_buckets))]
 			let _ = config;
 			if MemoryStore::parse_url(url) {
 				return Ok(Arc::new(MemoryStore::new()) as Arc<dyn ObjectStore>);
 			}
 
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(file_buckets)]
 			if let Some(opts) = FileStore::parse_url(url, &config).await? {
 				return Ok(Arc::new(FileStore::new(opts, config)) as Arc<dyn ObjectStore>);
 			}

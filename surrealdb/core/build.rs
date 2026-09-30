@@ -30,4 +30,12 @@ fn main() {
 	if !is_wasm && is_64_bit {
 		println!("cargo:rustc-cfg=diskann");
 	}
+	// File buckets need `tokio::fs`: native tokio, or tokio_with_wasm (OPFS) in the
+	// browser. Other wasm targets such as WASI get tokio without `fs`.
+	println!("cargo::rustc-check-cfg=cfg(file_buckets)");
+	let is_web = std::env::var("CARGO_CFG_TARGET_VENDOR").as_deref() == Ok("unknown")
+		&& std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("unknown");
+	if !is_wasm || is_web {
+		println!("cargo:rustc-cfg=file_buckets");
+	}
 }

@@ -63,29 +63,34 @@ pub(crate) fn extract_allowed_paths(
 	} else {
 		":"
 	};
-	// Split the allowlist string, canonicalize each path, and collect valid paths.
-	input
-		.split(delimiter)
-		.filter_map(|s| {
-			let trimmed = s.trim();
-			if trimmed.is_empty() {
-				None
-			} else {
-				let path = PathBuf::from(trimmed).clean();
-				let path = if canonicalize {
-					let Ok(path) = fs::canonicalize(&path) else {
-						warn!("Failed to canonicalize {subject} path: {}", path.to_string_lossy());
-						return None;
-					};
+	// Split the allowlist string, then clean and canonicalize each path.
+	let paths = input.split(delimiter).map(str::trim).filter(|s| !s.is_empty()).map(PathBuf::from);
+	allowed_paths(paths, canonicalize, subject)
+}
 
-					path
-				} else {
-					path
+/// Cleans each path, and canonicalizes it when asked, skipping paths which fail to.
+pub(crate) fn allowed_paths(
+	paths: impl IntoIterator<Item = PathBuf>,
+	canonicalize: bool,
+	subject: &str,
+) -> Vec<PathBuf> {
+	paths
+		.into_iter()
+		.filter_map(|path| {
+			let path = path.clean();
+			let path = if canonicalize {
+				let Ok(path) = fs::canonicalize(&path) else {
+					warn!("Failed to canonicalize {subject} path: {}", path.to_string_lossy());
+					return None;
 				};
 
-				debug!("Allowed {subject} path: {}", path.to_string_lossy());
-				Some(path)
-			}
+				path
+			} else {
+				path
+			};
+
+			debug!("Allowed {subject} path: {}", path.to_string_lossy());
+			Some(path)
 		})
 		.collect()
 }

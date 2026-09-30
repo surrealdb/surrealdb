@@ -20,9 +20,6 @@ pub async fn sleep(ctx: &FrozenContext, (dur,): (Duration,)) -> Result<Value> {
 	};
 	// Sleep for the specified time, racing against any installed
 	// awaitable cancellation token.
-	#[cfg(target_family = "wasm")]
-	let sleep_fut = wasmtimer::tokio::sleep(dur);
-	#[cfg(not(target_family = "wasm"))]
 	let sleep_fut = tokio::time::sleep(dur);
 	match ctx.cancel_token() {
 		Some(token) => {

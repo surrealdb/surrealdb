@@ -138,11 +138,21 @@ macro_rules! bytes {
 }
 
 /// Pauses and yields execution to the tokio runtime
+#[cfg(not(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown")))]
 macro_rules! yield_now {
 	() => {
 		if tokio::runtime::Handle::try_current().is_ok() {
 			tokio::task::consume_budget().await;
 		}
+	};
+}
+
+/// No-op in the browser, where yielding goes through `setTimeout`, which
+/// browsers clamp to 4ms.
+#[cfg(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown"))]
+macro_rules! yield_now {
+	() => {
+		()
 	};
 }
 

@@ -512,6 +512,50 @@ mod mem {
 		db.query(surql).await.unwrap().check().unwrap();
 	}
 
+	#[test_log::test(tokio::test)]
+	async fn file_buckets_need_an_allowed_folder() {
+		let dir = temp_dir::TempDir::new().unwrap();
+		let allowed = std::fs::canonicalize(dir.path()).unwrap();
+		let surql = format!(
+			"USE NAMESPACE namespace DATABASE database;
+			DEFINE BUCKET b BACKEND 'file://{}/bucket';
+			file::put(f\"b:/a.txt\", 'x');
+			file::get(f\"b:/a.txt\").to_string();",
+			allowed.display()
+		);
+		let capabilities =
+			Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::Files);
+		// File buckets are denied everywhere by default
+		let db =
+			Surreal::new::<Mem>(Config::new().capabilities(capabilities.clone())).await.unwrap();
+		db.query(&surql).await.unwrap().check().unwrap_err();
+		// Folders can be allowed
+		let config = Config::new().capabilities(capabilities).bucket_folder_allowlist([allowed]);
+		let db = Surreal::new::<Mem>(config).await.unwrap();
+		let mut res = db.query(&surql).await.unwrap().check().unwrap();
+		assert_eq!(res.take::<Option<String>>(3).unwrap().as_deref(), Some("x"));
+	}
+
+	#[test_log::test(tokio::test)]
+	async fn analyzer_mappers_need_an_allowed_folder() {
+		let dir = temp_dir::TempDir::new().unwrap();
+		let allowed = std::fs::canonicalize(dir.path()).unwrap();
+		std::fs::write(allowed.join("mapper.txt"), "run\trunning").unwrap();
+		let surql = format!(
+			"USE NAMESPACE namespace DATABASE database;
+			DEFINE ANALYZER a TOKENIZERS blank FILTERS mapper('{}/mapper.txt');
+			search::analyze('a', 'running');",
+			allowed.display()
+		);
+		// Local files are denied everywhere by default
+		let db = Surreal::new::<Mem>(()).await.unwrap();
+		db.query(&surql).await.unwrap().check().unwrap_err();
+		// Folders can be allowed
+		let db = Surreal::new::<Mem>(Config::new().file_allowlist([allowed])).await.unwrap();
+		let mut res = db.query(&surql).await.unwrap().check().unwrap();
+		assert_eq!(res.take::<Vec<String>>(2).unwrap(), ["run"]);
+	}
+
 	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 

@@ -1,4 +1,3 @@
-#[cfg(storage)]
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -26,6 +25,8 @@ pub struct Config {
 	pub(crate) websocket: WebsocketConfig,
 	#[cfg(storage)]
 	pub(crate) temporary_directory: Option<PathBuf>,
+	pub(crate) bucket_folder_allowlist: Option<Vec<PathBuf>>,
+	pub(crate) file_allowlist: Option<Vec<PathBuf>>,
 	pub(crate) node_membership_refresh_interval: Option<Duration>,
 	pub(crate) node_membership_check_interval: Option<Duration>,
 	pub(crate) node_membership_cleanup_interval: Option<Duration>,
@@ -113,6 +114,21 @@ impl Config {
 	#[cfg(storage)]
 	pub fn temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path;
+		self
+	}
+
+	/// Set the directories file buckets may be defined in. In the browser these are OPFS paths.
+	pub fn bucket_folder_allowlist<P: Into<PathBuf>>(
+		mut self,
+		paths: impl IntoIterator<Item = P>,
+	) -> Self {
+		self.bucket_folder_allowlist = Some(paths.into_iter().map(Into::into).collect());
+		self
+	}
+
+	/// Set the directories local files, such as analyzer mappers, may be read from.
+	pub fn file_allowlist<P: Into<PathBuf>>(mut self, paths: impl IntoIterator<Item = P>) -> Self {
+		self.file_allowlist = Some(paths.into_iter().map(Into::into).collect());
 		self
 	}
 

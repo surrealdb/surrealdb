@@ -80,6 +80,8 @@ value = "expected_result"
 
 Located in `surrealdb/tests/` and `tests/`. Follow standard Rust testing conventions.
 
+Browser tests are in `surrealdb/web-tests/tests/`, run with `cargo make ci-web-test`.
+
 ## Code Quality Rules
 
 - Use `anyhow::Result` for fallible APIs, `thiserror` for domain errors

@@ -18,10 +18,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::Stream;
-#[cfg(not(target_family = "wasm"))]
-use tokio::time::Instant;
-#[cfg(not(target_family = "wasm"))]
-use tokio::time::Interval;
+use tokio::time::{Instant, Interval};
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-tikv",
@@ -32,10 +29,6 @@ use tokio::time::Interval;
 	feature = "protocol-ws",
 ))]
 use uuid::Uuid;
-#[cfg(target_family = "wasm")]
-use wasmtimer::std::Instant;
-#[cfg(target_family = "wasm")]
-use wasmtimer::tokio::Interval;
 
 struct IntervalStream {
 	inner: Interval,

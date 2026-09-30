@@ -54,6 +54,8 @@ pub struct Builder {
 	temporary_directory: Option<Arc<PathBuf>>,
 	authenticate: bool,
 	config: ConfigMap,
+	bucket_folder_allowlist: Option<Vec<PathBuf>>,
+	file_allowlist: Option<Vec<PathBuf>>,
 	#[cfg(feature = "surrealism")]
 	lazy_surrealism: bool,
 	observer: Arc<dyn ExecutionObserver>,
@@ -80,6 +82,8 @@ impl Builder {
 			temporary_directory: None,
 			authenticate: false,
 			config: ConfigMap::empty(),
+			bucket_folder_allowlist: None,
+			file_allowlist: None,
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: false,
 			observer: Arc::new(NoopObserver),
@@ -105,6 +109,20 @@ impl Builder {
 	pub fn with_runtime_worker_threads(mut self, count: usize) -> Self {
 		self.config = std::mem::take(&mut self.config)
 			.with_key_value("runtime_worker_threads", count.to_string());
+		self
+	}
+
+	/// Sets the directories file buckets may be defined in. `Some` replaces
+	/// `bucket_folder_allowlist` from the config.
+	pub fn with_bucket_folder_allowlist(mut self, paths: Option<Vec<PathBuf>>) -> Self {
+		self.bucket_folder_allowlist = paths;
+		self
+	}
+
+	/// Sets the directories local files may be read from. `Some` replaces
+	/// `file_allowlist` from the config.
+	pub fn with_file_allowlist(mut self, paths: Option<Vec<PathBuf>>) -> Self {
+		self.file_allowlist = paths;
 		self
 	}
 
@@ -241,7 +259,11 @@ impl Builder {
 		{
 			this.live_query_broker = Some(composer.live_query_broker(channel.clone()));
 		}
-		let buckets = BucketsManager::new(Box::new(composer), this.config.load());
+		let mut bucket_config: crate::buc::Config = this.config.load();
+		if let Some(paths) = this.bucket_folder_allowlist.take() {
+			bucket_config = bucket_config.with_bucket_list(paths);
+		}
+		let buckets = BucketsManager::new(Box::new(composer), bucket_config);
 
 		let datastore = this.build_with_tx_builder_buckets(builder, buckets).await?;
 
@@ -271,7 +293,11 @@ impl Builder {
 	) -> Result<Datastore> {
 		let async_event_trigger = Arc::new(Notify::new());
 		let observer = self.observer;
-		let config = Arc::new(self.config.load::<CommonConfig>());
+		let mut config = self.config.load::<CommonConfig>();
+		if let Some(paths) = self.file_allowlist {
+			config.file_allowlist = crate::iam::file::allowed_paths(paths, true, "file");
+		}
+		let config = Arc::new(config);
 		let tf =
 			TransactionFactory::new(Arc::clone(&async_event_trigger), builder, Arc::clone(&config))
 				.with_observer(Arc::clone(&observer));

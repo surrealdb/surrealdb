@@ -145,6 +145,8 @@ pub(crate) async fn run_router(
 	};
 
 	let builder = builder.with_capabilities(address.config.capabilities);
+	let builder = builder.with_bucket_folder_allowlist(address.config.bucket_folder_allowlist);
+	let builder = builder.with_file_allowlist(address.config.file_allowlist);
 
 	let kvs = match builder.build_with_path(endpoint).await {
 		Ok(kvs) => {

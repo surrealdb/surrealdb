@@ -1229,7 +1229,7 @@ pub(crate) enum Error {
 	GlobalBucketEnforced,
 
 	#[error("Bucket url could not be processed: {0}")]
-	#[cfg_attr(target_family = "wasm", expect(dead_code))]
+	#[cfg_attr(not(file_buckets), expect(dead_code))]
 	InvalidBucketUrl(String),
 
 	#[error("Bucket backend is not supported")]

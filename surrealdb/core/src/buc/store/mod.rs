@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use crate::err::Error;
 use crate::val::{CoerceError, Datetime, File, Number, Object, Value};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(file_buckets)]
 pub(crate) mod file;
 pub(crate) mod memory;
 pub(crate) mod path;
@@ -91,6 +91,13 @@ impl TryFrom<Object> for ListOptions {
 	}
 }
 
+/// Future returned by [`ObjectStore`] operations. Not `Send` in the browser,
+/// where file operations hold JS handles and nothing crosses threads.
+#[cfg(not(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown")))]
+pub type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, String>> + Send + 'a>>;
+#[cfg(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown"))]
+pub type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, String>> + 'a>>;
+
 /// Trait for object storage backends.
 ///
 /// This trait defines the core operations that all object storage implementations
@@ -100,136 +107,81 @@ impl TryFrom<Object> for ListOptions {
 /// All methods return boxed futures to allow for async operations and trait object usage.
 pub trait ObjectStore: Send + Sync + 'static {
 	/// Stores data at the specified key, overwriting any existing data.
-	fn put<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		data: Bytes,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+	fn put<'a>(&'a self, key: &'a ObjectKey, data: Bytes) -> StoreFuture<'a, ()>;
 
 	/// Stores data at the specified key only if the key does not already exist.
-	fn put_if_not_exists<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		data: Bytes,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+	fn put_if_not_exists<'a>(&'a self, key: &'a ObjectKey, data: Bytes) -> StoreFuture<'a, ()>;
 
 	/// Retrieves data from the specified key.
 	///
 	/// Returns `Ok(None)` if the key does not exist.
-	fn get<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<Option<Bytes>, String>> + Send + 'a>>;
+	fn get<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, Option<Bytes>>;
 
 	/// Retrieves metadata for the specified key without fetching the data.
 	///
 	/// Returns `Ok(None)` if the key does not exist.
-	fn head<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectMeta>, String>> + Send + 'a>>;
+	fn head<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, Option<ObjectMeta>>;
 
 	/// Deletes the data at the specified key.
 	///
 	/// This operation is idempotent - deleting a non-existent key is not an error.
-	fn delete<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+	fn delete<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, ()>;
 
 	/// Checks whether data exists at the specified key.
-	fn exists<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send + 'a>>;
+	fn exists<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, bool>;
 
 	/// Copies data from one key to another, overwriting the target if it exists.
-	fn copy<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+	fn copy<'a>(&'a self, key: &'a ObjectKey, target: &'a ObjectKey) -> StoreFuture<'a, ()>;
 
 	/// Copies data from one key to another only if the target does not exist.
 	fn copy_if_not_exists<'a>(
 		&'a self,
 		key: &'a ObjectKey,
 		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+	) -> StoreFuture<'a, ()>;
 
 	/// Moves data from one key to another, overwriting the target if it exists.
-	fn rename<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+	fn rename<'a>(&'a self, key: &'a ObjectKey, target: &'a ObjectKey) -> StoreFuture<'a, ()>;
 
 	/// Moves data from one key to another only if the target does not exist.
 	fn rename_if_not_exists<'a>(
 		&'a self,
 		key: &'a ObjectKey,
 		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+	) -> StoreFuture<'a, ()>;
 
 	/// Lists objects matching the specified options.
 	///
 	/// Results are returned in lexicographical order by key.
-	fn list<'a>(
-		&'a self,
-		prefix: &'a ListOptions,
-	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>>;
+	fn list<'a>(&'a self, prefix: &'a ListOptions) -> StoreFuture<'a, Vec<ObjectMeta>>;
 }
 
 impl ObjectStore for Arc<dyn ObjectStore> {
-	fn put<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		data: Bytes,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn put<'a>(&'a self, key: &'a ObjectKey, data: Bytes) -> StoreFuture<'a, ()> {
 		(**self).put(key, data)
 	}
 
-	fn put_if_not_exists<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		data: Bytes,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn put_if_not_exists<'a>(&'a self, key: &'a ObjectKey, data: Bytes) -> StoreFuture<'a, ()> {
 		(**self).put_if_not_exists(key, data)
 	}
 
-	fn get<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<Option<Bytes>, String>> + Send + 'a>> {
+	fn get<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, Option<Bytes>> {
 		(**self).get(key)
 	}
 
-	fn head<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectMeta>, String>> + Send + 'a>> {
+	fn head<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, Option<ObjectMeta>> {
 		(**self).head(key)
 	}
 
-	fn delete<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn delete<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, ()> {
 		(**self).delete(key)
 	}
 
-	fn exists<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send + 'a>> {
+	fn exists<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, bool> {
 		(**self).exists(key)
 	}
 
-	fn copy<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn copy<'a>(&'a self, key: &'a ObjectKey, target: &'a ObjectKey) -> StoreFuture<'a, ()> {
 		(**self).copy(key, target)
 	}
 
@@ -237,15 +189,11 @@ impl ObjectStore for Arc<dyn ObjectStore> {
 		&'a self,
 		key: &'a ObjectKey,
 		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	) -> StoreFuture<'a, ()> {
 		(**self).copy_if_not_exists(key, target)
 	}
 
-	fn rename<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn rename<'a>(&'a self, key: &'a ObjectKey, target: &'a ObjectKey) -> StoreFuture<'a, ()> {
 		(**self).rename(key, target)
 	}
 
@@ -253,14 +201,11 @@ impl ObjectStore for Arc<dyn ObjectStore> {
 		&'a self,
 		key: &'a ObjectKey,
 		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	) -> StoreFuture<'a, ()> {
 		(**self).rename_if_not_exists(key, target)
 	}
 
-	fn list<'a>(
-		&'a self,
-		opts: &'a ListOptions,
-	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>> {
+	fn list<'a>(&'a self, opts: &'a ListOptions) -> StoreFuture<'a, Vec<ObjectMeta>> {
 		(**self).list(opts)
 	}
 }

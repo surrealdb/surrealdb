@@ -3,14 +3,11 @@
 //! This module provides a simple in-memory implementation of the [`ObjectStore`] trait,
 //! useful for testing and development environments where persistence is not required.
 
-use std::future::Future;
-use std::pin::Pin;
-
 use bytes::Bytes;
 use dashmap::DashMap;
 use url::Url;
 
-use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
+use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore, StoreFuture};
 use crate::val::Datetime;
 
 /// Internal storage entry containing data and metadata.
@@ -69,22 +66,14 @@ impl MemoryStore {
 }
 
 impl ObjectStore for MemoryStore {
-	fn put<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		data: Bytes,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn put<'a>(&'a self, key: &'a ObjectKey, data: Bytes) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			self.store.insert(key.clone(), data.into());
 			Ok(())
 		})
 	}
 
-	fn put_if_not_exists<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		data: Bytes,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn put_if_not_exists<'a>(&'a self, key: &'a ObjectKey, data: Bytes) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			self.store.entry(key.clone()).or_insert_with(|| data.into());
 
@@ -92,20 +81,14 @@ impl ObjectStore for MemoryStore {
 		})
 	}
 
-	fn get<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<Option<Bytes>, String>> + Send + 'a>> {
+	fn get<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, Option<Bytes>> {
 		Box::pin(async move {
 			let data = self.store.get(key).map(|v| v.bytes.clone());
 			Ok(data)
 		})
 	}
 
-	fn head<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectMeta>, String>> + Send + 'a>> {
+	fn head<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, Option<ObjectMeta>> {
 		Box::pin(async move {
 			let data = self.store.get(key).map(|v| ObjectMeta {
 				size: v.bytes.len() as u64,
@@ -117,31 +100,21 @@ impl ObjectStore for MemoryStore {
 		})
 	}
 
-	fn delete<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn delete<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			self.store.remove(key);
 			Ok(())
 		})
 	}
 
-	fn exists<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send + 'a>> {
+	fn exists<'a>(&'a self, key: &'a ObjectKey) -> StoreFuture<'a, bool> {
 		Box::pin(async move {
 			let exists = self.store.contains_key(key);
 			Ok(exists)
 		})
 	}
 
-	fn copy<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn copy<'a>(&'a self, key: &'a ObjectKey, target: &'a ObjectKey) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			// This is intentionally somewhat verbosely written to ensure the lock is being
 			// properly handled.
@@ -162,7 +135,7 @@ impl ObjectStore for MemoryStore {
 		&'a self,
 		key: &'a ObjectKey,
 		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			if !self.store.contains_key(target) {
 				// This is intentionally somewhat verbosely written to ensure the lock is being
@@ -181,11 +154,7 @@ impl ObjectStore for MemoryStore {
 		})
 	}
 
-	fn rename<'a>(
-		&'a self,
-		key: &'a ObjectKey,
-		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	fn rename<'a>(&'a self, key: &'a ObjectKey, target: &'a ObjectKey) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			let Some((_, data)) = self.store.remove(key) else {
 				return Err(format!("Source key does not exist: {}", key.as_str()));
@@ -201,7 +170,7 @@ impl ObjectStore for MemoryStore {
 		&'a self,
 		key: &'a ObjectKey,
 		target: &'a ObjectKey,
-	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+	) -> StoreFuture<'a, ()> {
 		Box::pin(async move {
 			// Check if target already exists
 			if self.store.contains_key(target) {
@@ -219,10 +188,7 @@ impl ObjectStore for MemoryStore {
 		})
 	}
 
-	fn list<'a>(
-		&'a self,
-		opts: &'a ListOptions,
-	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>> {
+	fn list<'a>(&'a self, opts: &'a ListOptions) -> StoreFuture<'a, Vec<ObjectMeta>> {
 		Box::pin(async move {
 			let mut objects = Vec::new();
 
