@@ -720,19 +720,41 @@ impl DiskAnnIndex {
 
 	/// Marks the sharded `!dy` pending-state guard non-empty after writing a sharded `!dw` update.
 	///
-	/// Single-shot: within one transaction the `tx.get` snapshot and the `tx.putc` condition check
-	/// see the same value, so a retry on `TransactionConditionNotMet` would deterministically
-	/// reach the same outcome (sister function [`Self::clear_pending_state_if_current`] uses the
-	/// same single-shot shape for the inverse direction). The old code wrapped this in a
-	/// 32-iteration retry loop on the same tx, which couldn't help and would just spin to the
-	/// `bail!` at the end.
+	/// Lookup and compaction skip a shard whose guard is `Empty`, so a transaction that writes a
+	/// `!dw` entry must not commit while its shard's guard is `Empty`. A guard that is not
+	/// `NonEmpty` is set `NonEmpty` with a compare-and-swap, which conflicts with a concurrent
+	/// compaction step of that guard. A guard that already reads `NonEmpty` is left unwritten, so
+	/// writers into one shard never conflict with one another over it. Compaction can still step
+	/// that guard `NonEmpty → MaybeEmpty → Empty` over two passes while the writer is open:
+	///
+	/// * Where locked reads are shared ([`Transaction::shared_locked_reads`]), the guard is read
+	///   locked. A step committed after this transaction's snapshot then fails its commit with a
+	///   retryable conflict, and the retry finds the stepped guard and sets it `NonEmpty`. The
+	///   refusal has to cover the first step, to `MaybeEmpty`, and not only the step to `Empty`:
+	///   the pass that empties the shard checks its `!dw` range in a snapshot, and nothing
+	///   validates that check at commit, so the pass cannot see a writer that commits while it is
+	///   open. The first step always commits after the snapshot of a writer that read the guard
+	///   `NonEmpty`, so refusing the writer over it covers that interleaving as well.
+	/// * Elsewhere the guard is read plain. A writer is then covered by the engine's own read
+	///   validation where it has one, and otherwise only while at most one compaction pass steps
+	///   its shard's guard: that pass leaves it `MaybeEmpty`, which lookup and compaction still
+	///   scan.
+	///
+	/// Single-shot: within one transaction the read and the `putc` condition check see the same
+	/// value, so retrying on `TransactionConditionNotMet` inside the transaction would reach the
+	/// same outcome ([`Self::clear_pending_state_if_current`] has the same shape for the inverse
+	/// direction).
 	async fn mark_pending_non_empty(
 		tx: &Transaction,
 		ikb: &IndexKeyBase,
 		id: &RecordIdKey,
 	) -> Result<()> {
 		let key = ikb.new_dy_key(Self::pending_state_shard(id));
-		let current: Option<DiskAnnPendingState> = tx.get(&key, None).await?;
+		let current: Option<DiskAnnPendingState> = if tx.shared_locked_reads() {
+			tx.getu(&key).await?
+		} else {
+			tx.get(&key, None).await?
+		};
 		if current.as_ref().is_some_and(|state| state.kind == DiskAnnPendingStateKind::NonEmpty) {
 			return Ok(());
 		}
@@ -749,7 +771,8 @@ impl DiskAnnIndex {
 	/// Only the shards in `shards` are stepped (NonEmpty → MaybeEmpty → Empty). Each `putc` is
 	/// conditioned on the snapshot value observed during prepare, so a concurrent writer that
 	/// bumped a shard between prepare and apply aborts that shard's clear without losing its
-	/// update.
+	/// update. A writer that found the guard `NonEmpty` and left it unwritten is covered from its
+	/// own side instead; see [`Self::mark_pending_non_empty`].
 	async fn clear_pending_state_if_current(
 		tx: &Transaction,
 		ikb: &IndexKeyBase,
@@ -1003,8 +1026,11 @@ impl DiskAnnIndex {
 			builder.has_more = true;
 			return Ok(builder.into_plan(Vec::new()));
 		}
-		// Phase 2: sharded `!dw` per shard that may hold data. A write sets the `!dw` key and bumps
-		// its `!dy` shard atomically, so absent/Empty shards cannot hold a committed entry.
+		// Phase 2: sharded `!dw` per shard that may hold data. A write commits its `!dw` key only
+		// in a transaction that read or set its `!dy` shard `NonEmpty`, and
+		// `mark_pending_non_empty` keeps that transaction from committing once the guard is
+		// stepped to `Empty`, within the engine limits it documents. Absent/Empty shards
+		// therefore hold no committed entry.
 		let mut cleared_shards = Vec::new();
 		for (shard, state) in pending_state.iter().enumerate() {
 			if state.as_ref().is_none_or(|s| s.kind == DiskAnnPendingStateKind::Empty) {
@@ -1615,10 +1641,13 @@ impl DiskAnnIndex {
 		let rng = self.ikb.new_dr_range()?;
 		self.scan_pending_range(ctx, stk, &mut scan, rng, PendingLayout::Legacy, false).await?;
 		// Phase 2: the sharded ranges of every shard that may hold data. A write
-		// sets the `!dw` key and bumps its `!dy` shard in the same transaction, so
-		// a shard that is absent or confirmed `Empty` cannot hold a committed `!dw`
-		// entry. Skipping those shards keeps the scan proportional to the
-		// un-compacted backlog of the few active shards rather than the whole index.
+		// commits its `!dw` key only in a transaction that read or set its `!dy`
+		// shard `NonEmpty`, and `mark_pending_non_empty` keeps that transaction from
+		// committing once the guard is stepped to `Empty`, within the engine limits
+		// it documents. A shard that is absent or confirmed `Empty` therefore holds
+		// no committed `!dw` entry. Skipping those shards keeps the scan proportional
+		// to the un-compacted backlog of the few active shards rather than the whole
+		// index.
 		for shard in 0..DISKANN_PENDING_STATE_SHARDS {
 			let state = pending_state.get(usize::from(shard)).and_then(|state| state.as_ref());
 			if state.is_none_or(|state| state.kind == DiskAnnPendingStateKind::Empty) {
@@ -3665,6 +3694,273 @@ mod tests {
 		}
 
 		assert_eq!(knn_len_with_k(&index, &ds, &[4.0, 3.0, 2.0, 1.0], 2).await?, 2);
+		Ok(())
+	}
+
+	/// A writer that finds its shard's `!dy` guard `NonEmpty` leaves the guard
+	/// alone. Compaction passes that step the shard to `Empty` while the writer
+	/// is still open must not hide the writer's pending once it commits: search
+	/// and compaction both skip a shard whose guard is `Empty`. The writer's
+	/// commit may instead be refused as retryable, in which case the retried
+	/// write must be the one that stays visible.
+	#[cfg(feature = "kv-rocksdb")]
+	#[tokio::test]
+	async fn diskann_pending_written_while_its_shard_empties_stays_visible() -> Result<()> {
+		let dir = TempDir::new()?;
+		let path = format!("rocksdb:{}", dir.path().to_string_lossy());
+		let ds = Datastore::new(&path).await?;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		// Records 1 and 33 share a shard; record 1 marks it non-empty.
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		assert_eq!(shard, DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(33)));
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index
+				.index(
+					&ctx,
+					&RecordIdKey::Number(1),
+					None,
+					Some(f32_content(&[1.0, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		let writer = new_ctx(&ds, TransactionType::Write).await;
+		assert!(
+			writer.tx().shared_locked_reads(),
+			"the store must share locked reads for the writer to take the locked path"
+		);
+		index
+			.index(
+				&writer,
+				&RecordIdKey::Number(33),
+				None,
+				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		for _ in 0..3 {
+			compact_once(&index, &ds, &ikb).await?;
+		}
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let state = DiskAnnIndex::read_pending_state(&ctx.tx(), &ikb).await?;
+			ctx.tx().cancel().await?;
+			assert_eq!(
+				state[shard as usize].as_ref().map(|state| state.kind),
+				Some(DiskAnnPendingStateKind::Empty),
+				"the shard must reach Empty while the writer is open for this to test anything"
+			);
+		}
+		match writer.tx().commit().await {
+			Ok(()) => {}
+			// Retried as a client does, in a fresh transaction.
+			Err(e) if crate::kvs::is_retryable_transaction_conflict(&e) => {
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				index
+					.index(
+						&ctx,
+						&RecordIdKey::Number(33),
+						None,
+						Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+					)
+					.await?;
+				ctx.tx().commit().await?;
+			}
+			Err(e) => return Err(e),
+		}
+		let query = [33.0, 0.0, 0.0, 0.0];
+		assert_eq!(
+			knn_keys(&index, &ds, &query, 2).await?,
+			vec![1, 33],
+			"search must see the committed pending"
+		);
+		while compact_once(&index, &ds, &ikb).await? {}
+		assert_eq!(
+			knn_keys(&index, &ds, &query, 2).await?,
+			vec![1, 33],
+			"compaction must fold the committed pending into the graph"
+		);
+		Ok(())
+	}
+
+	/// A writer that found its shard's guard `NonEmpty` and commits while the
+	/// pass that empties the shard is open, after that pass has checked the
+	/// shard's `!dw` range but before it commits, must not end up under an
+	/// `Empty` guard. The pass's range check never sees the writer's pending,
+	/// so one of the two transactions has to be refused.
+	#[cfg(feature = "kv-rocksdb")]
+	#[tokio::test]
+	async fn diskann_writer_committing_inside_the_emptying_pass_stays_visible() -> Result<()> {
+		let dir = TempDir::new()?;
+		let path = format!("rocksdb:{}", dir.path().to_string_lossy());
+		let ds = Datastore::new(&path).await?;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		// Records 1 and 33 share a shard; record 1 marks it non-empty.
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		assert_eq!(shard, DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(33)));
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index
+				.index(
+					&ctx,
+					&RecordIdKey::Number(1),
+					None,
+					Some(f32_content(&[1.0, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		let writer = new_ctx(&ds, TransactionType::Write).await;
+		assert!(
+			writer.tx().shared_locked_reads(),
+			"the store must share locked reads for the writer to take the locked path"
+		);
+		index
+			.index(
+				&writer,
+				&RecordIdKey::Number(33),
+				None,
+				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		// The first pass drains record 1 and steps the guard to `MaybeEmpty`.
+		assert!(compact_once(&index, &ds, &ikb).await?);
+		// The emptying pass plans and opens its apply before the writer commits.
+		let plan = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let plan = DiskAnnIndex::prepare_compaction(&ctx, &ikb).await?;
+			ctx.tx().cancel().await?;
+			plan
+		};
+		let emptying = new_ctx(&ds, TransactionType::Write).await;
+		match writer.tx().commit().await {
+			Ok(()) => {}
+			// Retried as a client does, in a fresh transaction.
+			Err(e) if crate::kvs::is_retryable_transaction_conflict(&e) => {
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				index
+					.index(
+						&ctx,
+						&RecordIdKey::Number(33),
+						None,
+						Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+					)
+					.await?;
+				ctx.tx().commit().await?;
+			}
+			Err(e) => return Err(e),
+		}
+		// The pass then applies over what it planned; a refusal is equally correct.
+		match index.apply_compaction(&emptying, plan).await {
+			Ok(_) => {}
+			Err(e) if crate::kvs::is_retryable_transaction_conflict(&e) => {}
+			Err(e) => return Err(e),
+		}
+		let query = [33.0, 0.0, 0.0, 0.0];
+		assert_eq!(
+			knn_keys(&index, &ds, &query, 2).await?,
+			vec![1, 33],
+			"search must see the committed pending"
+		);
+		while compact_once(&index, &ds, &ikb).await? {}
+		assert_eq!(
+			knn_keys(&index, &ds, &query, 2).await?,
+			vec![1, 33],
+			"compaction must fold the committed pending into the graph"
+		);
+		Ok(())
+	}
+
+	/// Overlapping writers into a shard whose `!dy` guard already reads
+	/// `NonEmpty` all commit: each takes a locked read of the guard and leaves
+	/// it unwritten, and locked reads do not conflict with one another.
+	#[cfg(feature = "kv-rocksdb")]
+	#[tokio::test]
+	async fn diskann_overlapping_writers_into_a_non_empty_shard_all_commit() -> Result<()> {
+		let dir = TempDir::new()?;
+		let path = format!("rocksdb:{}", dir.path().to_string_lossy());
+		let ds = Datastore::new(&path).await?;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		// Records 1, 33 and 65 share a shard; record 1 marks it non-empty.
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		for id in [33, 65] {
+			assert_eq!(shard, DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(id)));
+		}
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index
+				.index(
+					&ctx,
+					&RecordIdKey::Number(1),
+					None,
+					Some(f32_content(&[1.0, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		let guard = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let state = DiskAnnIndex::read_pending_state(&ctx.tx(), &ikb).await?;
+			ctx.tx().cancel().await?;
+			state[shard as usize].clone().expect("record 1 sets its shard's guard")
+		};
+		assert_eq!(guard.kind, DiskAnnPendingStateKind::NonEmpty);
+		let first = new_ctx(&ds, TransactionType::Write).await;
+		let second = new_ctx(&ds, TransactionType::Write).await;
+		assert!(
+			first.tx().shared_locked_reads(),
+			"the store must share locked reads for the writers to take the locked path"
+		);
+		index
+			.index(
+				&first,
+				&RecordIdKey::Number(33),
+				None,
+				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		index
+			.index(
+				&second,
+				&RecordIdKey::Number(65),
+				None,
+				Some(f32_content(&[65.0, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		first.tx().commit().await?;
+		second.tx().commit().await?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let state = DiskAnnIndex::read_pending_state(&ctx.tx(), &ikb).await?;
+			ctx.tx().cancel().await?;
+			assert_eq!(state[shard as usize], Some(guard), "neither writer rewrites the guard");
+		}
+		assert_eq!(
+			knn_keys(&index, &ds, &[33.0, 0.0, 0.0, 0.0], 3).await?,
+			vec![1, 33, 65],
+			"search must see both writers' pendings"
+		);
 		Ok(())
 	}
 

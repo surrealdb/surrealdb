@@ -34,6 +34,8 @@ mod metrics;
 #[cfg(feature = "kv-mem")]
 mod changefeed_gc_test;
 mod conditional_write_fences;
+#[cfg(feature = "kv-rocksdb")]
+mod locked_reads;
 mod multireader;
 mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
@@ -136,7 +138,8 @@ mod rocksdb {
 		conditional_write_fences,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
-		metrics
+		metrics,
+		locked_reads
 	);
 }
 

@@ -532,6 +532,38 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// Fetch a key from the datastore.
 	fn get(&self, key: Key, version: Option<u64>) -> BoxFut<'_, Result<Option<Val>>>;
 
+	/// Fetch a key from the datastore, registering the key for
+	/// commit-time conflict detection.
+	///
+	/// A transaction that reads a key with this method commits
+	/// successfully only if no other transaction commits a write to the
+	/// key after this transaction's snapshot was established. The
+	/// registration is only validated when the transaction commits, so
+	/// implementations must reject calls on non-writeable transactions
+	/// with [`crate::kvs::Error::TransactionReadonly`]. The default
+	/// implementation rejects the call with
+	/// [`crate::kvs::Error::UnsupportedLockedReads`], so that an engine
+	/// without a conflict-tracked read path never silently serves an
+	/// unvalidated read.
+	fn getu(&self, _key: Key) -> BoxFut<'_, Result<Option<Val>>> {
+		Box::pin(async move { Err(Error::UnsupportedLockedReads) })
+	}
+
+	/// Whether a [`Self::getu`] registration conflicts only with writes.
+	///
+	/// When this returns [`true`], a locked read is invalidated only by
+	/// another transaction committing a write to the key, never by another
+	/// transaction's locked read of it: any number of overlapping
+	/// transactions may hold a locked read of one key and all of them
+	/// commit. Callers rely on this to take a locked read of a key that
+	/// many concurrent writers read, without making those writers conflict
+	/// with one another. An engine that does not guarantee it, including
+	/// one without locked reads at all, returns [`false`], which is the
+	/// default.
+	fn shared_locked_reads(&self) -> bool {
+		false
+	}
+
 	/// Insert or update a key in the datastore.
 	fn set(&self, key: Key, val: Val) -> BoxFut<'_, Result<()>>;
 

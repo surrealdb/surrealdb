@@ -124,6 +124,25 @@ impl Transactor {
 		self.inner.get(key, version).await
 	}
 
+	/// Fetch a key from the datastore, registering the key for
+	/// commit-time conflict detection.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn getu<K>(&self, key: K) -> Result<Option<Val>>
+	where
+		K: IntoBytes + Debug,
+	{
+		let key = key.into_vec();
+		self.inner.getu(key).await
+	}
+
+	/// Whether a locked read ([`Self::getu`]) conflicts only with writes,
+	/// never with another transaction's locked read of the same key.
+	///
+	/// See [`crate::kvs::api::Transactable::shared_locked_reads`].
+	pub fn shared_locked_reads(&self) -> bool {
+		self.inner.shared_locked_reads()
+	}
+
 	/// Fetch many keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn getm<K>(&self, keys: Vec<K>, version: Option<u64>) -> Result<GetMultiResult>

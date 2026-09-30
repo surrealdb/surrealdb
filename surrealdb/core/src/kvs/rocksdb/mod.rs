@@ -2075,6 +2075,40 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// Fetch a key from the database, registering the key for
+	/// commit-time conflict detection.
+	fn getu(&self, key: Key) -> BoxFut<'_, Result<Option<Val>>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable, as the conflict
+			// registration is only validated when the transaction commits
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			self.run_blocking(move |guard| {
+				let inner = guard
+					.as_ref()
+					.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+				// Read through the snapshot read options so that commit-time
+				// conflict detection validates the key against the
+				// transaction snapshot rather than the read timestamp.
+				let res = inner.tx.get_for_update_opt(key, true, &self.read_options)?;
+				Ok(res)
+			})
+			.await
+		})
+	}
+
+	/// The optimistic transaction database takes no lock for a locked read:
+	/// it tracks the key and validates it at commit against writes that
+	/// landed after this transaction's snapshot.
+	fn shared_locked_reads(&self) -> bool {
+		true
+	}
+
 	/// Fetch many keys from the datastore.
 	///
 	/// Bounded by `keys.len()`, so the call flows through the same

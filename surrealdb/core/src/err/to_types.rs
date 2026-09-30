@@ -326,7 +326,9 @@ pub fn into_types_error(error: Error) -> TypesError {
 			KvsError::TransactionFinished
 			| KvsError::TransactionReadonly
 			| KvsError::TransactionConditionNotMet => TypesError::query(message, None),
-			KvsError::UnsupportedVersionedQueries => TypesError::configuration(message, None),
+			KvsError::UnsupportedVersionedQueries | KvsError::UnsupportedLockedReads => {
+				TypesError::configuration(message, None)
+			}
 			KvsError::Datastore(_)
 			| KvsError::Transaction(_)
 			| KvsError::TimestampInvalid(_)

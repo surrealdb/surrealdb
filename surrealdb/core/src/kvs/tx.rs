@@ -1295,6 +1295,38 @@ impl Transaction {
 		val.map(|v| K::ValueType::kv_decode_value(&v, key.value_context())).transpose()
 	}
 
+	/// Fetch a key from the datastore, registering the key for
+	/// commit-time conflict detection.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn getu<K>(&self, key: &K) -> Result<Option<K::ValueType>>
+	where
+		K: KVKey + Debug,
+	{
+		// The conflict registration is only validated when the transaction
+		// commits, which read-only transactions never do, so a locked read
+		// on one must fail rather than silently lose its guarantee.
+		if !self.tr.writeable() {
+			return Err(Error::from(crate::kvs::Error::TransactionReadonly).into());
+		}
+		let encoded = key.encode_key()?;
+		let key_bytes = encoded.len() as u64;
+		let val = self.tr.getu(encoded).await.map_err(Error::from)?;
+		let (keys_found, value_bytes) = match &val {
+			Some(v) => (1, v.len() as u64),
+			None => (0, 0),
+		};
+		self.metrics.record_get(keys_found, key_bytes, value_bytes);
+		val.map(|v| K::ValueType::kv_decode_value(&v, key.value_context())).transpose()
+	}
+
+	/// Whether a locked read ([`Self::getu`]) conflicts only with writes,
+	/// never with another transaction's locked read of the same key.
+	///
+	/// See [`crate::kvs::api::Transactable::shared_locked_reads`].
+	pub fn shared_locked_reads(&self) -> bool {
+		self.tr.shared_locked_reads()
+	}
+
 	/// Retrieve a batch set of keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn getm<K>(
