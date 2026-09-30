@@ -162,8 +162,10 @@ impl Ord for FloatKey {
 /// Ids64 is a collection able to store u64 identifiers in an optimised way.
 /// The enumerations are optimised in a way that, depending on the number of
 /// identifiers, the most memory efficient variant is used.
-/// When identifiers are added or removed, the method returned the most
-/// appropriate variant (if required).
+///
+/// [`Self::insert`] and [`Self::remove`] return the updated set exactly when
+/// they change it, and `None` exactly when they do not, whatever the variant:
+/// callers persist the set on `Some` and skip the write on `None`.
 #[derive(Debug, Clone, PartialEq)]
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize)]
@@ -230,6 +232,7 @@ impl Ids64 {
 		}
 	}
 
+	/// Adds `d`, returning the updated set when `d` was not already present.
 	pub(super) fn insert(&mut self, d: DocId) -> Option<Self> {
 		if !self.contains(d) {
 			match self {
@@ -246,7 +249,7 @@ impl Ids64 {
 				]))),
 				Self::Bits(b) => {
 					b.insert(d);
-					None
+					Some(Self::Bits(b.clone()))
 				}
 			}
 		} else {
@@ -254,7 +257,11 @@ impl Ids64 {
 		}
 	}
 
+	/// Removes `d`, returning the updated set when `d` was present.
 	pub(super) fn remove(&mut self, d: DocId) -> Option<Self> {
+		if !self.contains(d) {
+			return None;
+		}
 		match self {
 			Self::Empty => None,
 			Self::One(i) => {
@@ -314,11 +321,12 @@ impl Ids64 {
 				}
 			}
 			Self::Bits(b) => {
-				if !b.remove(d) || b.len() != 8 {
-					None
-				} else {
+				b.remove(d);
+				if b.len() == 8 {
 					let v: Vec<DocId> = b.iter().collect();
 					Some(Self::Vec8([v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]]))
+				} else {
+					Some(Self::Bits(b.clone()))
 				}
 			}
 		}
@@ -732,12 +740,12 @@ pub(super) mod tests {
 		assert_eq!(ids, Ids64::Vec8([10, 20, 30, 40, 50, 60, 70, 80]));
 		let mut ids = ids.insert(90).expect("Ids64::Bits");
 		assert_eq!(ids, Ids64::Bits(RoaringTreemap::from([10, 20, 30, 40, 50, 60, 70, 80, 90])));
-		assert_eq!(ids.insert(100), None);
+		let mut ids = ids.insert(100).expect("Ids64::Bits");
 		assert_eq!(
 			ids,
 			Ids64::Bits(RoaringTreemap::from([10, 20, 30, 40, 50, 60, 70, 80, 90, 100]))
 		);
-		assert_eq!(ids.remove(10), None);
+		let mut ids = ids.remove(10).expect("Ids64::Bits");
 		assert_eq!(ids, Ids64::Bits(RoaringTreemap::from([20, 30, 40, 50, 60, 70, 80, 90, 100])));
 		let mut ids = ids.remove(20).expect("Ids64::Vec8");
 		assert_eq!(ids, Ids64::Vec8([30, 40, 50, 60, 70, 80, 90, 100]));
@@ -931,5 +939,35 @@ pub(super) mod tests {
 		};
 		info!("{duration_btree_set:?} {duration_binary_heap:?}");
 		assert!(duration_btree_set > duration_binary_heap);
+	}
+
+	/// Every set of every size reports each change it makes and only those:
+	/// the set a `Some` returns is exactly the set after the change, a `None`
+	/// leaves the set untouched, and no id outside the set is lost or gained.
+	#[test]
+	fn insert_and_remove_report_exactly_their_changes() {
+		let mut ids = Ids64::Empty;
+		let mut expected = std::collections::BTreeSet::new();
+		let as_set = |ids: &Ids64| ids.iter().collect::<std::collections::BTreeSet<_>>();
+		for d in 1..=20u64 {
+			let before = ids.clone();
+			assert_eq!(ids.remove(1_000), None, "removing an absent id from {before:?}");
+			assert_eq!(ids, before, "a no-op remove changed {before:?}");
+			ids = ids.insert(d).unwrap_or_else(|| panic!("inserting {d} into {before:?}"));
+			expected.insert(d);
+			assert_eq!(as_set(&ids), expected);
+			let before = ids.clone();
+			assert_eq!(ids.insert(d), None, "re-inserting {d} into {before:?}");
+			assert_eq!(ids, before, "a no-op insert changed {before:?}");
+		}
+		for d in (1..=20u64).rev() {
+			let before = ids.clone();
+			assert_eq!(ids.remove(1_000), None, "removing an absent id from {before:?}");
+			ids = ids.remove(d).unwrap_or_else(|| panic!("removing {d} from {before:?}"));
+			expected.remove(&d);
+			assert_eq!(as_set(&ids), expected);
+			assert_eq!(ids.len(), expected.len() as u64);
+		}
+		assert_eq!(ids, Ids64::Empty);
 	}
 }

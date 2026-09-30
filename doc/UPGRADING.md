@@ -10,7 +10,7 @@ For the release **process** (how releases are cut and shipped), see
 [`RELEASING.md`](./RELEASING.md). For end-user release notes, see
 <https://surrealdb.com/releases>.
 
-## v3.2.5 — ANN pending entries at a new revision
+## v3.2.5 — ANN pending entries at a new revision, and vector indexes that lost records sharing a vector
 
 **Impact**:
 
@@ -26,6 +26,10 @@ For the release **process** (how releases are cut and shipped), see
   and its own background compaction of that queue. Upgrade every node, or stop
   both writing to and querying those indexes from the older ones until you
   have — routing only reads away is not enough.
+- An HNSW or DiskANN index in which more than nine records share one identical
+  vector is missing those records from KNN results, and may keep returning
+  fewer than `k` rows after such records are deleted. This release stops the
+  loss; an index already affected keeps it until `REBUILD INDEX`.
 
 ### Why an older node cannot read or write an ANN index an upgraded node has written
 
@@ -71,6 +75,22 @@ nested value — `c:[1]` and `c:[1dec]`, `c:{k: 1}` and `c:{k: 1f}` — still sh
 one forward doc-ID entry, because that key uses the same kind-erasing codec. One
 of the two stays absent from that index's results after a rebuild as before it.
 Mixing such ids in one indexed table is the only way to reach it.
+
+### Vector indexes that lost records sharing a vector
+
+HNSW and DiskANN keep, for every distinct vector, the set of records holding
+it. Once that set grew past nine records, every later addition to it and every
+removal from it was applied in memory but never written back, on every release
+since 3.0.0. The index therefore silently omitted the tenth and later records
+holding that vector from KNN results. It also kept records deleted from such a
+set: they are dropped when the result is built, so a query could return fewer
+than `k` rows, and the vector itself stayed in the graph after its last record
+was gone. This release writes every change.
+
+**What to do**: rebuild each HNSW and DiskANN index whose table may hold more
+than nine records with an identical value in the indexed field — duplicated
+embeddings, placeholder or default vectors — with `REBUILD INDEX`. An index
+where every vector is shared by at most nine records was never affected.
 
 ## v3.1.0 — rev-2 on-disk wire format for `Value`, `Array`, `Object`, `Set`
 
