@@ -264,6 +264,23 @@ args = [
     "wasm32-unknown-unknown",
 ]
 
+[tasks.ci-web-test]
+# Runs in headless Chrome. Needs the LLVM Clang noted above, chromedriver on the
+# PATH (or in CHROMEDRIVER), and wasm-bindgen-test-runner from the
+# wasm-bindgen-cli release matching the locked wasm-bindgen.
+category = "CI - WASM TESTS"
+description = "Run browser tests (WASM)"
+command = "cargo"
+env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js"', CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER = "wasm-bindgen-test-runner" }
+args = [
+    "test",
+    "--locked",
+    "--package",
+    "surrealdb-web-tests",
+    "--target",
+    "wasm32-unknown-unknown",
+]
+
 # --------------------------------------------------
 # Integration Tests
 # --------------------------------------------------

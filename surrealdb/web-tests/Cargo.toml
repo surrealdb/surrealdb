@@ -1,0 +1,20 @@
+[package]
+name = "surrealdb-web-tests"
+publish = false
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
+
+# Browser-only tests, run in headless Chrome by `cargo make ci-web-test`.
+[target.'cfg(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown"))'.dev-dependencies]
+surrealdb = { workspace = true, features = ["kv-mem"] }
+wasm-bindgen-test.workspace = true
+
+[lints]
+workspace = true

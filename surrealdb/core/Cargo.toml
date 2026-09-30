@@ -189,14 +189,9 @@ getrandom = { workspace = true, features = ["wasm_js"] }
 jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers"] }
-tokio = { workspace = true, default-features = false, features = [
-    "rt",
-    "sync",
-] }
 tokio-util.workspace = true
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures.workspace = true
-wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 
 # DISKANN DEPENDENCY CONFIGURATION
 # DiskANN (Microsoft's `diskann` crate) is 64-bit-only by design: its `IntoUsize`
@@ -228,6 +223,30 @@ tokio-tungstenite = { workspace = true, optional = true }
 tokio-util.workspace = true
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 surrealism-runtime = { workspace = true, optional = true }
+
+# WEB DEPENDENCY CONFIGURATION
+# tokio's `time` panics on wasm32-unknown-unknown (no runtime, no clock), so
+# tokio is aliased to tokio_with_wasm there, under the cfg it uses internally.
+# As tokio_with_wasm asks, its features match the native tokio ones, less
+# `io-std`, which it lacks. 0.10 is the first release with `Instant` and
+# `timeout_at`.
+[target.'cfg(all(target_family = "wasm", target_vendor = "unknown", target_os = "unknown"))'.dependencies]
+tokio = { package = "tokio_with_wasm", version = "0.10.1", default-features = false, features = [
+    "macros",
+    "io-util",
+    "fs",
+    "rt-multi-thread",
+    "time",
+    "sync",
+] }
+
+# OTHER WASM DEPENDENCY CONFIGURATION
+# WASI and other non-web wasm targets keep real tokio.
+[target.'cfg(all(target_family = "wasm", not(all(target_vendor = "unknown", target_os = "unknown"))))'.dependencies]
+tokio = { workspace = true, default-features = false, features = [
+    "rt",
+    "sync",
+] }
 
 # OS-SPECIFIC ALLOCATOR DEPENDENCIES
 [target.'cfg(all(any(target_arch = "x86_64", target_arch = "x86"), any(target_os = "linux", target_os = "macos"), not(target_env = "msvc")))'.dependencies]

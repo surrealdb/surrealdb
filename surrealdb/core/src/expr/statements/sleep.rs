@@ -43,9 +43,6 @@ impl SleepStatement {
 	/// to the executor's normal yield, which sees the cancel flag and
 	/// bails with `Error::QueryCancelled`.
 	async fn sleep(&self, ctx: &FrozenContext) {
-		#[cfg(target_family = "wasm")]
-		let sleep_fut = wasmtimer::tokio::sleep(self.duration.0);
-		#[cfg(not(target_family = "wasm"))]
 		let sleep_fut = tokio::time::sleep(self.duration.0);
 		match ctx.cancel_token() {
 			Some(token) => {

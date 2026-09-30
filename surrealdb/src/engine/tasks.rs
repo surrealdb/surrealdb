@@ -8,12 +8,11 @@ use surrealdb_core::err::{is_query_cancelled, is_query_timedout};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
 #[cfg(not(target_family = "wasm"))]
-use tokio::{spawn, time, time::MissedTickBehavior};
+use tokio::spawn;
+use tokio::time::{self, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
-#[cfg(target_family = "wasm")]
-use wasmtimer::tokio::{self as time, MissedTickBehavior};
 
 use crate::Error;
 use crate::engine::IntervalStream;
