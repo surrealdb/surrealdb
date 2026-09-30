@@ -10,6 +10,31 @@ For the release **process** (how releases are cut and shipped), see
 [`RELEASING.md`](./RELEASING.md). For end-user release notes, see
 <https://surrealdb.com/releases>.
 
+## v3.3.1 — vector indexes that lost records sharing a vector
+
+**Impact**:
+
+- An HNSW or DiskANN index in which more than nine records share one identical
+  vector is missing those records from KNN results, and may keep returning
+  fewer than `k` rows after such records are deleted. This release stops the
+  loss; an index already affected keeps it until `REBUILD INDEX`.
+
+### Vector indexes that lost records sharing a vector
+
+HNSW and DiskANN keep, for every distinct vector, the set of records holding
+it. Once that set grew past nine records, every later addition to it and every
+removal from it was applied in memory but never written back, on every release
+since 3.0.0. The index therefore silently omitted the tenth and later records
+holding that vector from KNN results. It also kept records deleted from such a
+set: they are dropped when the result is built, so a query could return fewer
+than `k` rows, and the vector itself stayed in the graph after its last record
+was gone. This release writes every change.
+
+**What to do**: rebuild each HNSW and DiskANN index whose table may hold more
+than nine records with an identical value in the indexed field — duplicated
+embeddings, placeholder or default vectors — with `REBUILD INDEX`. An index
+where every vector is shared by at most nine records was never affected.
+
 ## v3.3.0 — datastore version stamp, startup data migrations, the sequence keyspace move, module re-keying, rollbacks reported as `cancelled`, ANN pending entries at a new revision, and export/import contract changes
 
 **Impact**:
