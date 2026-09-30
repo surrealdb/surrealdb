@@ -6,10 +6,10 @@ use async_channel::{Receiver, Sender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::{FutureExt, SinkExt, StreamExt};
 use tokio::sync::{RwLock, watch};
+use tokio::time;
+use tokio::time::MissedTickBehavior;
 use tokio_tungstenite_wasm::{Message, WebSocketStream, connect_with_protocols};
 use wasm_bindgen_futures::spawn_local;
-use wasmtimer::tokio as time;
-use wasmtimer::tokio::MissedTickBehavior;
 
 use super::{
 	HandleResult, PATH, PING_INTERVAL, SessionState, WsMessage, create_ping_message,

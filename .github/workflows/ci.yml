@@ -241,6 +241,42 @@ jobs:
       - name: Check wasm
         run: cargo make ci-check-wasm
 
+  test-web:
+    name: Test web
+    # Chrome has no Linux arm64 build.
+    runs-on: runner-amd-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          # Must match the wasm-bindgen version in Cargo.lock.
+          tools: cargo-make,wasm-bindgen@0.2.129
+
+      - name: Setup Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
+        with:
+          install-chromedriver: true
+
+      - name: Point the test runner at Chrome
+        run: |
+          echo '{"goog:chromeOptions":{"binary":"${{ steps.chrome.outputs.chrome-path }}"}}' \
+            > surrealdb/web-tests/webdriver.json
+
+      - name: Test web
+        run: cargo make ci-web-test
+        env:
+          CHROMEDRIVER: ${{ steps.chrome.outputs.chromedriver-path }}
+
   check-revision:
     name: Check revision
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
@@ -637,6 +673,7 @@ jobs:
       # SDK tests
       - sdk-build
       - sdk-engines
+      - test-web
       # KVS tests
       - kvs-engines
       # SurrealQL language tests
@@ -666,6 +703,7 @@ jobs:
             "${{ needs.test.result }}"
             "${{ needs.sdk-build.result }}"
             "${{ needs.sdk-engines.result }}"
+            "${{ needs.test-web.result }}"
             "${{ needs.kvs-engines.result }}"
             "${{ needs.lang-tests.result }}"
             "${{ needs.lang-upgrade-tests.result }}"

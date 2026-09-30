@@ -67,6 +67,7 @@ The SurrealDB repository follows a specific structure for organizing crates:
 - **`surrealism/`** - WebAssembly runtime for executing user-defined functions
 - **`language-tests/`** - Test framework for SurrealQL language testing using `.surql` files
 - **`fuzz/`** - Fuzzing tests for security and stability
+- **`surrealdb/web-tests/`** - Tests that run in a headless browser
 - **`profiling/`** - Performance profiling utilities
 
 ### Adding a new crate
@@ -148,6 +149,8 @@ To run all tests manually, use the SurrealDB command-line from your terminal:
 ```bash
 cargo test
 ```
+
+Browser tests are not part of `cargo test`. Run them with `cargo make ci-web-test`, which needs Chrome, chromedriver and `wasm-bindgen-test-runner` (see `Makefile.ci.toml`).
 
 Many tests have recently moved to the [language-tests](https://github.com/surrealdb/surrealdb/tree/main/language-tests) crate which allows a test to be created using only SurrealQL via a .toml file which includes the queries and expected output. An example of a test:
 

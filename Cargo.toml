@@ -16,6 +16,7 @@ members = [
     "surrealdb/token",
     "surrealdb/types",
     "surrealdb/types/derive",
+    "surrealdb/web-tests",
     # SurrealML crates
     "surrealml/core",
     # Surrealism crates
@@ -204,7 +205,6 @@ unicase = "2.9.0"
 url = "2.5.8"
 uuid = "1.23.1"
 wasm-bindgen-futures = "0.4.58"
-wasmtimer = { version = "0.4.3", default-features = false }
 
 # Dev dependencies
 criterion = "0.8"
@@ -216,6 +216,7 @@ temp-dir = "0.2"
 test-log = "0.2"
 time = "0.3"
 tracing-subscriber = "0.3"
+wasm-bindgen-test = "0.3"
 wiremock = "0.6"
 
 # SurrealML specific dependencies
