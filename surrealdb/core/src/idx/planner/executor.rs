@@ -717,13 +717,7 @@ impl QueryExecutor {
 			}
 			IndexOperator::Union(values) => {
 				let fds = Self::union_to_fds(values);
-				Some(RecordIterator::UniqueUnion(UniqueUnionThingIterator::new(
-					irf,
-					ns,
-					db,
-					io.index_reference(),
-					&fds,
-				)?))
+				Some(Self::new_unique_union_iterator(irf, ns, db, io.index_reference(), &fds)?)
 			}
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(ns, db, irf, ios).await?;
@@ -783,6 +777,25 @@ impl QueryExecutor {
 			Ok(RecordIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, fd)?))
 		} else {
 			Ok(RecordIterator::UniqueEqual(UniqueEqualThingIterator::new(irf, ns, db, ix, fd)?))
+		}
+	}
+
+	/// The union counterpart of [`Self::new_unique_equal_iterator`]. A value of
+	/// an `IN` on a composite unique index may name only a prefix of the
+	/// index's columns, which matches any number of entries rather than the
+	/// one key a unique lookup reads, so each value is scanned as a prefix as
+	/// on a standard index.
+	fn new_unique_union_iterator(
+		irf: IteratorRef,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &IndexDefinition,
+		fds: &[Array],
+	) -> Result<RecordIterator> {
+		if ix.cols.len() > 1 {
+			Ok(RecordIterator::IndexUnion(IndexUnionThingIterator::new(irf, ns, db, ix, fds)?))
+		} else {
+			Ok(RecordIterator::UniqueUnion(UniqueUnionThingIterator::new(irf, ns, db, ix, fds)?))
 		}
 	}
 
