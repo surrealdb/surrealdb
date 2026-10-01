@@ -58,10 +58,19 @@ impl MemoryManager {
 		info!(target: TARGET, "Memory manager: block cache size: {block_cache_size}B");
 		// Configure the in-memory cache options
 		let cache = Cache::new_lru_cache(config.block_cache_size);
-		// Create a new write buffer manager with the cache
+		// Create a write buffer manager that charges memtable memory to the
+		// cache and requests flushes as memtables approach the budget, but
+		// never stalls writers. An `OptimisticTransactionDB` keeps flushed
+		// memtables resident as history for conflict checking, and trims that
+		// history only as writes grow the live memtable, so a completed flush
+		// need not free anything. A manager that stalled writers at its budget
+		// would wait for memory that only a write can release, and park every
+		// writer for good. Memtable memory is bounded instead by the memtable
+		// count and the history size, and exceeds the budget whenever the
+		// history alone fills it or a single commit is larger than it.
 		let write_buffer_manager = WriteBufferManager::new_write_buffer_manager_with_cache(
 			total_memory_limit,
-			true,
+			false,
 			cache.clone(),
 		);
 		// The options take their own handle on the write buffer manager, and an

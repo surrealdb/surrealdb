@@ -930,6 +930,103 @@ async fn memory_reporter_observes_memtable_charge() {
 	ds.shutdown().await.unwrap();
 }
 
+/// Commit each `(step, mib)` in order, as one transaction of `mib` MiB of
+/// 1 KiB values, on a datastore whose memtable history can fill its write
+/// buffer budget, and fail if the writers park.
+///
+/// `MemoryManager::configure` sizes the write buffer manager at
+/// `max_write_buffer_number * write_buffer_size + block_cache_size`. An
+/// `OptimisticTransactionDB` keeps flushed memtables resident as history for
+/// commit-time conflict checking, sized to `max(2, max_write_buffer_number) *
+/// write_buffer_size`. A flush moves its memtable into that history rather
+/// than freeing it, and the history is trimmed only as later writes grow the
+/// live memtable. A manager that stalls writers once memtable memory reaches
+/// its budget can therefore park them with nothing left to release the
+/// stall: the flush has finished, and only a write can free memory.
+///
+/// The configuration is small but real: a 16 MiB write buffer, one memtable
+/// (which RocksDB raises to two) and a 16 MiB block cache, so the history
+/// limit alone matches the 32 MiB budget.
+///
+/// A parked writer never returns from `commit`, and it may be the tokio
+/// worker that drives the runtime's timers. The steps therefore run on their
+/// own thread and runtime and report progress over a channel, and the calling
+/// thread judges it with a plain `recv_timeout`.
+fn assert_commits_are_not_parked(steps: Vec<(String, usize)>) {
+	use std::sync::mpsc::{self, RecvTimeoutError};
+	use std::time::Duration;
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	const MIB: usize = 1024 * 1024;
+	/// Orders of magnitude longer than any step takes. A parked writer never
+	/// returns, so this bounds only how long a regression takes to report.
+	const STALL_TIMEOUT: Duration = Duration::from_secs(60);
+
+	let dir = TempDir::new().unwrap();
+	let path = dir.path().to_string_lossy().to_string();
+	let config = RocksDbConfig {
+		write_buffer_size: 16 * MIB,
+		max_write_buffer_number: 1,
+		min_write_buffer_number_to_merge: 1,
+		block_cache_size: 16 * MIB,
+		..RocksDbConfig::default()
+	};
+
+	let (progress, observed) = mpsc::channel();
+	let workload = std::thread::spawn(move || {
+		let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+		runtime.block_on(async move {
+			let ds = RocksDbDatastore::new(&path, config).await.unwrap();
+			for (step, mib) in steps {
+				let tx = ds.transaction(TransactionType::Write).await.unwrap();
+				for m in 0..mib {
+					for i in 0..1024 {
+						let key = format!("stall/{step}/{m:03}/{i:04}").into_bytes();
+						tx.set(key.into(), vec![0u8; 1024]).await.unwrap();
+					}
+					progress.send(format!("staged {} MiB of {step}", m + 1)).unwrap();
+				}
+				tx.commit().await.unwrap();
+				progress.send(format!("committed {step}")).unwrap();
+			}
+			ds.shutdown().await.unwrap();
+		});
+	});
+
+	// The channel disconnects once the workload returns or panics.
+	let mut last = String::from("opening the datastore");
+	loop {
+		match observed.recv_timeout(STALL_TIMEOUT) {
+			Ok(step) => last = step,
+			Err(RecvTimeoutError::Disconnected) => break,
+			Err(RecvTimeoutError::Timeout) => {
+				panic!("writers are parked: no progress within {STALL_TIMEOUT:?} after {last}")
+			}
+		}
+	}
+	if let Err(panic) = workload.join() {
+		std::panic::resume_unwind(panic);
+	}
+}
+
+/// Steady 1 MiB commits, twice the budget in all, fill the history until it
+/// and the live memtable reach the budget.
+#[test]
+fn steady_commits_are_not_parked_by_memtable_history() {
+	assert_commits_are_not_parked((0..64).map(|c| (format!("steady-{c:02}"), 1)).collect());
+}
+
+/// A commit twice the budget lands in a single memtable, which exceeds the
+/// budget on its own. The commits behind it outlast that memtable's flush and
+/// its stay in the history, and every one of them must land.
+#[test]
+fn commits_behind_one_larger_than_the_budget_are_not_parked() {
+	let large = std::iter::once(("large".to_string(), 64));
+	let behind = (0..48).map(|c| (format!("behind-large-{c:02}"), 1));
+	assert_commits_are_not_parked(large.chain(behind).collect());
+}
+
 /// Pins the snapshot-lifetime contract documented on `attach_snapshot`: the
 /// pointer a `ReadOptions` retains is the transaction-owned snapshot, not the
 /// short-lived wrapper that `tx.snapshot()` hands over.
