@@ -30,7 +30,7 @@ use crate::catalog::{
 use crate::count::{IndexCountCompactionPlan, IndexCountThingIterator};
 use crate::docids::{DocId, TableDocIds};
 use crate::entry::IndexEntryValue;
-use crate::env::IndexEnv;
+use crate::env::{IndexEnv, expect_not_done};
 use crate::expr::Part;
 use crate::ft::analyzer::AnalyzerFunction;
 use crate::ft::fulltext::{FullTextCompactionPlan, FullTextIndex};
@@ -220,15 +220,23 @@ impl<'a> IndexOperation<'a> {
 
 	/// A document's entries are written one per combination of its columns'
 	/// elements, so a single document can be an arbitrarily long run of
-	/// writes. The probe therefore runs per entry rather than once per
-	/// document, or nothing could interrupt one document's fan-out and a long
-	/// one would starve the worker it runs on.
+	/// writes. The cancellation checkpoint therefore runs per entry rather
+	/// than once per document, or nothing could interrupt one document's
+	/// fan-out and a long one would starve the worker it runs on.
 	///
-	/// Only the probe's error is propagated, never its cancellation flag:
-	/// abandoning the loop part-way would leave the index holding some of the
-	/// document's entries while reporting success, and a half-maintained index
-	/// is worse than a slow one. An error aborts the statement, so the
-	/// transaction carrying these writes never commits.
+	/// A query that is cancelled or times out stops the loop with an error —
+	/// `QueryCancelled` or `QueryTimedout`, whichever stopped it — and never
+	/// with an early `Ok`, which would report a half-maintained index as
+	/// maintained. See [`Self::checkpoint`] for what the stop does to the
+	/// transaction.
+	///
+	/// A uniqueness conflict (`IndexExists`) also stops the loop part-way but
+	/// leaves the transaction committable, because `INSERT ... ON DUPLICATE KEY
+	/// UPDATE` and `UPSERT` recover from it by rolling back to a save point
+	/// taken ahead of the write. Only the caller aborting or rolling back keeps
+	/// the entries written before a conflict out of a commit.
+	///
+	/// [`Self::index_non_unique`] keeps the same contract.
 	async fn index_unique(&mut self) -> Result<()> {
 		let txn = self.env.tx();
 		let value = self.entry_value().await?;
@@ -236,7 +244,7 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for (entry, o) in i.into_iter().enumerate() {
-				self.env.is_done(Some(entry)).await?;
+				self.checkpoint(&txn, entry).await?;
 				if o.is_any_none_or_null() {
 					// NONE/NULL tuples use the non-unique key format (with
 					// record ID suffix) so multiple such entries can coexist.
@@ -252,7 +260,7 @@ impl<'a> IndexOperation<'a> {
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for (entry, n) in i.into_iter().enumerate() {
-				self.env.is_done(Some(entry)).await?;
+				self.checkpoint(&txn, entry).await?;
 				if n.is_any_none_or_null() {
 					// NONE/NULL tuples are stored with the non-unique key
 					// format so they remain visible to index scans. No
@@ -273,6 +281,23 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
+	/// The cancellation checkpoint a b-tree fan-out runs before its `entry`-th
+	/// write.
+	///
+	/// A stop poisons `txn` before it is reported (see
+	/// [`Transaction::poison_interrupted_write`]): the document's record and the
+	/// entries written so far are in the transaction, and not every caller that
+	/// sees the statement fail discards it.
+	async fn checkpoint(&self, txn: &Transaction, entry: usize) -> Result<()> {
+		let stopped = expect_not_done(self.env, Some(entry)).await;
+		if stopped.is_err() {
+			txn.poison_interrupted_write();
+		}
+		stopped
+	}
+
+	/// Maintains a non-unique index's entries under the contract on
+	/// [`Self::index_unique`].
 	async fn index_non_unique(&mut self) -> Result<()> {
 		// Lock the transaction
 		let txn = self.env.tx();
@@ -281,7 +306,7 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for (entry, o) in i.into_iter().enumerate() {
-				self.env.is_done(Some(entry)).await?;
+				self.checkpoint(&txn, entry).await?;
 				let key = self.get_non_unique_index_key(&o);
 				Self::del_entry(&txn, &key, &value).await?;
 			}
@@ -290,7 +315,7 @@ impl<'a> IndexOperation<'a> {
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for (entry, n) in i.into_iter().enumerate() {
-				self.env.is_done(Some(entry)).await?;
+				self.checkpoint(&txn, entry).await?;
 				let key = self.get_non_unique_index_key(&n);
 				txn.set_key(&key, &value).await?;
 			}
@@ -882,5 +907,209 @@ mod tests {
 		it.reset();
 		assert!(!it.next(), "an empty column has no first value to wind back to");
 		assert_eq!(it.current(), &Value::Null);
+	}
+}
+
+#[cfg(test)]
+mod interrupted_fan_out {
+	//! What a b-tree index write leaves behind when the query stops part-way
+	//! through one document's fan-out.
+	//!
+	//! The fixture document has two array columns of `SIDE` elements each, so
+	//! it contributes `SIDE * SIDE` entries and the checkpoint runs once per
+	//! entry. A write stopped at the `AT`-th checkpoint has written the
+	//! `AT - 1` entries before it: the error must name why the write stopped,
+	//! and those entries must reach no committed state even when the caller
+	//! commits anyway, as a client-owned transaction can.
+
+	use std::ops::Bound;
+	use std::time::Duration;
+
+	use anyhow::Result;
+	use common::EngineError;
+	use reblessive::tree::{Stk, TreeStack};
+	use surrealdb_datastore::{DatastoreError, Transaction};
+	use surrealdb_kvs::TransactionType;
+	use surrealdb_strand::Strand;
+
+	use super::IndexOperation;
+	use crate::catalog::{
+		DatabaseId, INDEX_FORMAT_VERSION, Index, IndexDefinition, IndexId, NamespaceId, TableId,
+	};
+	use crate::env::IndexEnv;
+	use crate::expr::Idiom;
+	use crate::ft::analyzer::{AnalyzerFunction, BoxAnalyzerFut};
+	use crate::keys::compute_index_range;
+	use crate::test_env::{CancelAtCheckpoint, TestIndexStore};
+	use crate::val::{Array, RecordId, RecordIdKey, TableName, Value};
+
+	const NS: NamespaceId = NamespaceId(1);
+	const DB: DatabaseId = DatabaseId(2);
+	const TB: TableId = TableId(3);
+	const SIDE: i32 = 8;
+	const ENTRIES: usize = (SIDE * SIDE) as usize;
+	const AT: usize = 20;
+
+	/// Stands in for the evaluator behind an analyzer's `FUNCTION` clause,
+	/// which a b-tree index never reaches.
+	struct NoAnalyzerFunction;
+
+	impl AnalyzerFunction for NoAnalyzerFunction {
+		fn call<'a>(
+			&'a self,
+			_stk: &'a mut Stk,
+			name: &'a str,
+			_input: Strand,
+		) -> BoxAnalyzerFut<'a> {
+			unreachable!("a b-tree index calls no analyzer FUNCTION {name}")
+		}
+	}
+
+	fn definition(index: Index) -> IndexDefinition {
+		IndexDefinition {
+			index_id: IndexId(4),
+			name: "ix".into(),
+			table_name: TableName::from("t"),
+			cols: vec![Idiom::field("a"), Idiom::field("b")],
+			index,
+			count_cond: None,
+			prepare_remove: false,
+			format_version: INDEX_FORMAT_VERSION,
+			comment: None,
+		}
+	}
+
+	fn record() -> RecordId {
+		RecordId::new(TableName::from("t"), RecordIdKey::from("doc".to_owned()))
+	}
+
+	/// The indexed values of the fixture document: two `SIDE`-element arrays.
+	fn columns() -> Vec<Value> {
+		let side = || Value::Array(Array::from((0..SIDE).map(Value::from).collect::<Vec<_>>()));
+		vec![side(), side()]
+	}
+
+	/// Runs one document's index write: a create when `o` is `None`, a delete
+	/// when `n` is.
+	async fn write(
+		env: &dyn IndexEnv,
+		ix: &IndexDefinition,
+		o: Option<Vec<Value>>,
+		n: Option<Vec<Value>>,
+	) -> Result<()> {
+		let rid = record();
+		let mut op = IndexOperation::new(env, NS, DB, TB, ix, o, n, &rid);
+		let mut require_compaction = false;
+		TreeStack::new()
+			.enter(|stk| op.compute(stk, &NoAnalyzerFunction, &mut require_compaction))
+			.finish()
+			.await
+	}
+
+	/// The index's entries as `tx` sees them, unique and non-unique alike.
+	async fn entries(tx: &Transaction, ix: &IndexDefinition) -> usize {
+		let range = compute_index_range(NS, DB, ix, Bound::Unbounded, Bound::Unbounded).unwrap();
+		tx.count(range, None).await.unwrap()
+	}
+
+	async fn committed_entries(ds: &TestIndexStore, ix: &IndexDefinition) -> usize {
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
+		let n = entries(&tx, ix).await;
+		tx.cancel().await.unwrap();
+		n
+	}
+
+	/// Commits the whole fixture document, so a delete has entries to remove.
+	async fn committed_document(ix: &IndexDefinition) -> TestIndexStore {
+		let ds = TestIndexStore::new().await;
+		let env = ds.env(TransactionType::Write).await;
+		write(&env, ix, None, Some(columns())).await.unwrap();
+		env.tx().commit().await.unwrap();
+		assert_eq!(committed_entries(&ds, ix).await, ENTRIES, "one entry per combination");
+		ds
+	}
+
+	fn assert_cancelled(err: &anyhow::Error) {
+		assert!(
+			matches!(err.downcast_ref::<EngineError>(), Some(EngineError::QueryCancelled)),
+			"expected a cancellation, got {err:#}"
+		);
+	}
+
+	/// Commits the stopped write's transaction as a caller that carries on past
+	/// the failed statement would, and asserts the commit is refused.
+	async fn assert_commit_refused(tx: &Transaction) {
+		let err = tx.commit().await.unwrap_err();
+		assert!(
+			matches!(
+				err.downcast_ref::<DatastoreError>(),
+				Some(DatastoreError::QueryNotExecuted { .. })
+			),
+			"expected the commit to be refused, got {err:#}"
+		);
+	}
+
+	async fn cancelled_create_refuses_the_commit(index: Index) {
+		let ix = definition(index);
+		let ds = TestIndexStore::new().await;
+		let env = CancelAtCheckpoint::new(ds.env(TransactionType::Write).await, AT);
+		let err = write(&env, &ix, None, Some(columns())).await.unwrap_err();
+		assert_cancelled(&err);
+		assert_eq!(entries(&env.tx(), &ix).await, AT - 1, "stopped at the checkpoint that fired");
+		assert_commit_refused(&env.tx()).await;
+		assert_eq!(committed_entries(&ds, &ix).await, 0);
+	}
+
+	async fn cancelled_delete_refuses_the_commit(index: Index) {
+		let ix = definition(index);
+		let ds = committed_document(&ix).await;
+		let env = CancelAtCheckpoint::new(ds.env(TransactionType::Write).await, AT);
+		let err = write(&env, &ix, Some(columns()), None).await.unwrap_err();
+		assert_cancelled(&err);
+		assert_eq!(
+			entries(&env.tx(), &ix).await,
+			ENTRIES - (AT - 1),
+			"stopped at the checkpoint that fired"
+		);
+		assert_commit_refused(&env.tx()).await;
+		assert_eq!(committed_entries(&ds, &ix).await, ENTRIES, "the committed document is intact");
+	}
+
+	#[tokio::test]
+	async fn cancelling_a_unique_create_mid_fan_out_fails_it_and_refuses_the_commit() {
+		cancelled_create_refuses_the_commit(Index::Uniq).await;
+	}
+
+	#[tokio::test]
+	async fn cancelling_a_non_unique_create_mid_fan_out_fails_it_and_refuses_the_commit() {
+		cancelled_create_refuses_the_commit(Index::Idx).await;
+	}
+
+	#[tokio::test]
+	async fn cancelling_a_unique_delete_mid_fan_out_fails_it_and_refuses_the_commit() {
+		cancelled_delete_refuses_the_commit(Index::Uniq).await;
+	}
+
+	#[tokio::test]
+	async fn cancelling_a_non_unique_delete_mid_fan_out_fails_it_and_refuses_the_commit() {
+		cancelled_delete_refuses_the_commit(Index::Idx).await;
+	}
+
+	#[tokio::test]
+	async fn a_deadline_mid_fan_out_is_reported_as_a_timeout_not_a_cancellation() {
+		let timeout = Duration::from_millis(250);
+		for index in [Index::Uniq, Index::Idx] {
+			let ix = definition(index);
+			let ds = TestIndexStore::new().await;
+			let env =
+				CancelAtCheckpoint::timing_out(ds.env(TransactionType::Write).await, AT, timeout);
+			let err = write(&env, &ix, None, Some(columns())).await.unwrap_err();
+			match err.downcast_ref::<EngineError>() {
+				Some(EngineError::QueryTimedout(d)) => assert_eq!(*d, timeout),
+				_ => panic!("expected a timeout, got {err:#}"),
+			}
+			assert_commit_refused(&env.tx()).await;
+			assert_eq!(committed_entries(&ds, &ix).await, 0);
+		}
 	}
 }

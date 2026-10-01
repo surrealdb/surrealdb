@@ -19,7 +19,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
+use common::EngineError;
 use surrealdb_datastore::Transaction;
 use surrealdb_datastore::sequences::Sequences;
 use uuid::Uuid;
@@ -56,6 +57,9 @@ pub trait IndexEnv: CancellationProbe {
 	/// cancellation flag, while the deadline and memory checks run on a
 	/// back-off schedule. Pass `None` outside a loop, for a full check every
 	/// time.
+	///
+	/// A loop that must stop by failing rather than by returning early uses
+	/// [`expect_not_done`], which also names which of the two stopped it.
 	fn is_done(&self, count: Option<usize>) -> BoxEnvFut<'_>;
 
 	/// The process-local registry of loaded indexes and their caches.
@@ -103,4 +107,24 @@ impl<T: IndexEnv> IndexEnv for Arc<T> {
 	fn config(&self) -> &IdxConfig {
 		T::config(self)
 	}
+}
+
+/// The checkpoint [`IndexEnv::is_done`] performs, as an error: `Ok` while the
+/// query may continue, and once it may not, [`EngineError::QueryTimedout`] if it
+/// ran past its deadline or [`EngineError::QueryCancelled`] if it was
+/// cancelled. Errors `is_done` itself raises, such as the memory threshold,
+/// propagate unchanged.
+///
+/// `is_done` reports a cancellation and a deadline alike, so the two are told
+/// apart by the environment's [`CancellationProbe::expect_not_timedout`], which
+/// names a deadline with the timeout's duration. Whatever stopped the query
+/// without that probe claiming it is reported as a cancellation. The probe runs
+/// only after `is_done` has answered `true`, so a loop that passes this
+/// checkpoint pays exactly what `is_done` costs.
+pub async fn expect_not_done(env: &dyn IndexEnv, count: Option<usize>) -> Result<()> {
+	if !env.is_done(count).await? {
+		return Ok(());
+	}
+	env.expect_not_timedout().await?;
+	bail!(EngineError::QueryCancelled)
 }
