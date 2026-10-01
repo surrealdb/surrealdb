@@ -376,6 +376,55 @@ pub(crate) fn access_fans_out(cols: &[Idiom], access: &BTreeAccess) -> bool {
 	cols.iter().skip(pinned).any(|c| c.0.iter().any(|p| matches!(p, Part::All)))
 }
 
+/// The order a b-tree scan over `access` yields its rows in, stated as the
+/// sort properties an ORDER BY is matched against.
+///
+/// A key orders its entries by the index columns and then, in a non-unique
+/// index, by the record id. The columns the access pins hold one value across
+/// the scan and order nothing, so the claim starts after them. It then claims
+/// each free column in turn and stops at the first it cannot state as a field
+/// path — which includes every column holding `*`, whose record sits at one key
+/// position per element rather than at one place in the order. The id is
+/// claimed only when every free column was: it orders the entries that agree
+/// on all of them, and says nothing across a column the claim left out.
+pub(crate) fn scan_ordering(
+	index_ref: &IndexRef,
+	access: &BTreeAccess,
+	direction: Direction,
+) -> Vec<crate::exec::ordering::SortProperty> {
+	use crate::exec::field_path::FieldPath;
+	use crate::exec::field_path_convert::field_path_from_idiom;
+	use crate::exec::operators::SortDirection;
+	use crate::exec::ordering::SortProperty;
+
+	let direction = match direction {
+		Direction::Forward => SortDirection::Asc,
+		Direction::Backward => SortDirection::Desc,
+	};
+	let property = |path| SortProperty {
+		path,
+		direction,
+		collate: false,
+		numeric: false,
+	};
+	let ix_def = index_ref.definition();
+	let pinned = match access {
+		BTreeAccess::Compound {
+			prefix,
+			..
+		} => prefix.len(),
+		BTreeAccess::Equality(_) => ix_def.cols.len(),
+		_ => 0,
+	};
+	let free = ix_def.cols.iter().skip(pinned);
+	let mut ordering: Vec<SortProperty> =
+		free.clone().map_while(|col| field_path_from_idiom(col).ok().map(property)).collect();
+	if !index_ref.is_unique() && !ix_def.cols.is_empty() && ordering.len() == free.len() {
+		ordering.push(property(FieldPath::field("id")));
+	}
+	ordering
+}
+
 /// Select the best access path from candidates based on hints and heuristics.
 ///
 /// Selection priority:

@@ -3,7 +3,7 @@
 planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
-reason = "Compound-index prefix construction, end to end: how far a prefix reaches for equality-only, equality-plus-range, gapped, reversed-order, contradictory and `!= NONE` conditions on two- and three-column indexes, and the containment extension by which a single-value CONTAINS / INSIDE pins a fanning column exactly as an equality pins a scalar one. Every indexed query is paired with its WITH NOINDEX oracle, and every fanning shape additionally with count() GROUP ALL, because a plan that looks right can still return the wrong rows. This file owns the containment extension and the inexact-prefix-over-a-fanning-column shape for the whole EXPLAIN matrix: array_fanout_oracle.surql pins what the fan-out KEY SET contains and defers prefix construction here. An index column whose idiom holds `*` stores one entry per element of that column's value, so a key range leaving such a column unpinned reaches a record through several entries and the scan is collapsed by a `Distinct` directly above it; where every fanning column IS pinned no `Distinct` appears, whether or not the prefix goes on to reach the index's trailing scalar columns. How far the prefix reaches and whether a `Distinct` follows are decided separately, and the file pins all three combinations: C1 and C2 are the pair on an index with ONE fanning column -- the most load-bearing contrast in the file -- and C10 and C11 restate it on an index with TWO, where pinning one of them extends the prefix across it and still leaves the `Distinct` standing for the other. Those four carry an EXPLAIN ANALYZE, where the scan's own `{rows: N}` counts index entries and the node above it counts records. Two cases -- E1 and E2 -- record WRONG answers, pinned rather than blessed: a scan over an unpinned fanning column carries no sort operator, so an explicit ORDER BY is dropped and the rows arrive in index-key order ascending, or, with the scan direction merely flipped, in reverse index-key order descending. Each says so where it stands and names the oracle as the correct answer; every other expectation in the file is correct. Narrowed to the streaming strategies because a prefix EXPLAIN is rejected under compute-only; both are pinned because they plan identically by contract, so recording the pair costs nothing and states the intent."
+reason = "Compound-index prefix construction, end to end: how far a prefix reaches for equality-only, equality-plus-range, gapped, reversed-order, contradictory and `!= NONE` conditions on two- and three-column indexes, and the containment extension by which a single-value CONTAINS / INSIDE pins a fanning column exactly as an equality pins a scalar one. Every indexed query is paired with its WITH NOINDEX oracle, and every fanning shape additionally with count() GROUP ALL, because a plan that looks right can still return the wrong rows. This file owns the containment extension and the inexact-prefix-over-a-fanning-column shape for the whole EXPLAIN matrix: array_fanout_oracle.surql pins what the fan-out KEY SET contains and defers prefix construction here. An index column whose idiom holds `*` stores one entry per element of that column's value, so a key range leaving such a column unpinned reaches a record through several entries and the scan is collapsed by a `Distinct` directly above it; where every fanning column IS pinned no `Distinct` appears, whether or not the prefix goes on to reach the index's trailing scalar columns. How far the prefix reaches and whether a `Distinct` follows are decided separately, and the file pins all three combinations: C1 and C2 are the pair on an index with ONE fanning column -- the most load-bearing contrast in the file -- and C10 and C11 restate it on an index with TWO, where pinning one of them extends the prefix across it and still leaves the `Distinct` standing for the other. Those four carry an EXPLAIN ANALYZE, where the scan's own `{rows: N}` counts index entries and the node above it counts records. E1 and E2 pin what an explicit ORDER BY costs a scan over an unpinned fanning column: the scan claims no ordering past that column, so a sort is planned above the collapse and the rows match the oracle's order ascending and descending. Narrowed to the streaming strategies because a prefix EXPLAIN is rejected under compute-only; both are pinned because they plan identically by contract, so recording the pair costs nothing and states the intent."
 
 [[test.results]]
 value = "NONE"
@@ -487,12 +487,13 @@ value = "NONE"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [index: fan_ord_ae, access: ['acme'], direction: Forward, predicate: account = 'acme']
+    SortByKey [ctx: Db] [sort_keys: id ASC]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [index: fan_ord_ae, access: ['acme'], direction: Forward, predicate: account = 'acme']
 "'''
 
 [[test.results]]
-value = "[fan_ord:3, fan_ord:4, fan_ord:2, fan_ord:1]"
+value = "[fan_ord:1, fan_ord:2, fan_ord:3, fan_ord:4]"
 
 [[test.results]]
 value = "[fan_ord:1, fan_ord:2, fan_ord:3, fan_ord:4]"
@@ -506,12 +507,13 @@ value = "[{ count: 4 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [index: fan_ord_ae, access: ['acme'], direction: Backward, predicate: account = 'acme']
+    SortByKey [ctx: Db] [sort_keys: id DESC]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [index: fan_ord_ae, access: ['acme'], direction: Backward, predicate: account = 'acme']
 "'''
 
 [[test.results]]
-value = "[fan_ord:1, fan_ord:4, fan_ord:2, fan_ord:3]"
+value = "[fan_ord:4, fan_ord:3, fan_ord:2, fan_ord:1]"
 
 [[test.results]]
 value = "[fan_ord:4, fan_ord:3, fan_ord:2, fan_ord:1]"
@@ -951,8 +953,8 @@ SELECT VALUE id FROM cp2x WITH NOINDEX WHERE a = 1 AND b = 20 ORDER BY id;
 -- D3: the fanning equivalent of D2 on the containment index — an EXACT prefix
 -- over an index carrying a `*` column. No sort operator is inserted and none
 -- is needed: pinning every indexed column leaves the record id as the only
--- varying part of the key, so index order IS id order. E1 is the same absent
--- sort operator where the fanning column is unpinned, and there it is wrong.
+-- varying part of the key, so index order IS id order. E1 is the contrast: with
+-- the fanning column unpinned, index order is not id order and a sort is added.
 EXPLAIN SELECT VALUE id FROM fan_std WHERE account = $acct AND emails.*.norm CONTAINS $email ORDER BY id;
 SELECT VALUE id FROM fan_std WHERE account = $acct AND emails.*.norm CONTAINS $email ORDER BY id;
 SELECT VALUE id FROM fan_std WITH NOINDEX WHERE account = $acct AND emails.*.norm CONTAINS $email ORDER BY id;
@@ -981,19 +983,18 @@ SELECT count() FROM fan_std WITH NOINDEX WHERE account = $acct AND emails.*.norm
 
 -- E1: an inexact prefix on a fanning index with an explicit `ORDER BY id`.
 --
--- DEFECT PINNED, in the ordering alone. The `Distinct` above the scan holds
--- record uniqueness — each of the four records appears once and `count()` is
--- 4, matching the oracle — but the plan carries no sort operator, so the
--- ORDER BY is dropped and the rows arrive in index-key order:
--- [fan_ord:3, fan_ord:4, fan_ord:2, fan_ord:1] where the oracle's
--- [fan_ord:1, fan_ord:2, fan_ord:3, fan_ord:4] is the correct answer.
+-- The `DistinctRecords` above the scan holds record uniqueness — each of the
+-- four records appears once and `count()` is 4, matching the oracle — and a
+-- `SortByKey` above that restores id order. The scan walks index-key order,
+-- [fan_ord:3, fan_ord:4, fan_ord:2, fan_ord:1] for this data, because a
+-- record's key position is one per element of the unpinned `emails.*.norm`;
+-- the scan claims no ordering past a column it cannot state, and so no
+-- record-id tail either.
 --
--- The loss is attributable, and two other cases in this file are what
--- attribute it. D1 is the identical inexact-prefix shape on a scalar compound
--- index and DOES receive a `SortByKey`, so the loss needs a `*` column to
--- occur. D3 reaches a fanning index through an exact prefix and is correctly
--- ordered with no sort operator, so it is prefix inexactness and not the
--- fanning index itself that costs the ordering.
+-- D1 is the same inexact-prefix shape on a scalar compound index, and is
+-- sorted too, because its free column orders ahead of the id. D3 reaches a fanning index through an exact prefix and
+-- needs no sort, so it is prefix inexactness and not the fanning index itself
+-- that costs the ordering.
 EXPLAIN SELECT VALUE id FROM fan_ord WHERE account = $acct ORDER BY id;
 SELECT VALUE id FROM fan_ord WHERE account = $acct ORDER BY id;
 SELECT VALUE id FROM fan_ord WITH NOINDEX WHERE account = $acct ORDER BY id;
@@ -1003,10 +1004,9 @@ SELECT count() FROM fan_ord WITH NOINDEX WHERE account = $acct GROUP ALL;
 -- E2: the same shape ordered DESCENDING, where index-key order cannot
 -- coincide with the requested order even by accident.
 --
--- DEFECT PINNED, the same one as E1. The scan direction flips to `Backward`
--- in place of a sort, so the rows come back in reverse index-key order —
--- [fan_ord:1, fan_ord:4, fan_ord:2, fan_ord:3] against the oracle's correct
--- [fan_ord:4, fan_ord:3, fan_ord:2, fan_ord:1]. A flipped scan direction
+-- The scan direction flips to `Backward`, which alone would deliver reverse
+-- index-key order, [fan_ord:1, fan_ord:4, fan_ord:2, fan_ord:3]; the
+-- `SortByKey` above it is what answers the ORDER BY. A flipped scan direction
 -- serves an ORDER BY only when the varying tail of the key IS the sort key,
 -- which an unpinned fanning column is what denies.
 EXPLAIN SELECT VALUE id FROM fan_ord WHERE account = $acct ORDER BY id DESC;

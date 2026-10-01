@@ -25,29 +25,25 @@ directly above the IndexScan and below any residual Filter, and that node is
 what makes each matching record reach the rest of the plan exactly once; under
 EXPLAIN ANALYZE the scan still reports the entry count in its own {rows: N}
 while the Distinct above it reports the record count. A scan that pins its
-fanning column does not fan out and carries no Distinct. Shape E asserts both
-sides of that contrast, because the node's presence is the only thing in the
-plan text separating an exact seek from a seek-then-collapse.
+fanning column does not fan out and carries no Distinct. Shape E asserts the
+pinned side; compound_prefix.surql asserts the contrast, because the node's
+presence is the only thing in the plan text separating an exact seek from a
+seek-then-collapse.
 
 Both streaming strategies are pinned because a prefix EXPLAIN errors under
 compute-only; all-ro and best-effort-ro plan identically by contract, so
 pinning both records that and costs nothing.
 
-Three shapes record WRONG answers. They are pinned deliberately, each
+Two shapes record WRONG answers. They are pinned deliberately, each
 labelled at its case:
 
-1. A full-range read of a `tags.*` index under `SELECT id FROM t ORDER BY id`
-   is planned with no sort operator, as though the scan delivered id order. It
-   delivers element order, so the rows come back ordered by each record's first
-   matching element. Correct: ascending by id, which is what the oracle
-   returns. The row set itself is correct, because the scan is deduped.
-2. The record dedupe keys off the `*` in a column idiom, so a plain (non-`*`)
+1. The record dedupe keys off the `*` in a column idiom, so a plain (non-`*`)
    column whose VALUE is an array is not covered by it: such a column fans out
    on write all the same, so a range predicate emits the record once per
    qualifying element, and drops a record whose whole-array comparison is true
    while all of its elements fall outside the range. Correct: the oracle's
    distinct row set.
-3. IndexCountScan on such a plain column counts index entries, not records, and
+2. IndexCountScan on such a plain column counts index entries, not records, and
    does not apply the per-record recheck that the row path applies. Correct:
    the oracle's count.
 
@@ -416,12 +412,11 @@ value = "[{ id: sh_flatten:1 }, { id: sh_flatten:2 }, { id: sh_flatten:3 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [index: idx, access: , direction: Forward]
+    TableScan [ctx: Db] [table: sh_flatten, direction: Forward]
 ''''
 
 [[test.results]]
-value = "[{ id: sh_flatten:1 }, { id: sh_flatten:3 }, { id: sh_flatten:2 }]"
+value = "[{ id: sh_flatten:1 }, { id: sh_flatten:2 }, { id: sh_flatten:3 }]"
 
 [[test.results]]
 value = "[{ id: sh_flatten:1 }, { id: sh_flatten:2 }, { id: sh_flatten:3 }]"
@@ -429,8 +424,7 @@ value = "[{ id: sh_flatten:1 }, { id: sh_flatten:2 }, { id: sh_flatten:3 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 3}
-    DistinctRecords [ctx: Db] {rows: 3}
-        IndexScan [ctx: Db] [index: idx, access: , direction: Forward] {rows: 5}
+    TableScan [ctx: Db] [table: sh_flatten, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 
@@ -933,9 +927,8 @@ SELECT id FROM sh_compound_nested WITH NOINDEX WHERE a.b = 1 AND a.c > 'x';
 -- through at most one entry and carries no `Distinct` (E1). A range that
 -- leaves it unpinned is wrapped in `Distinct [ctx: Db]`, directly above the
 -- IndexScan and below any residual Filter, and that is what makes each
--- matching record reach the rest of the plan exactly once (E6). Both sides of
--- that contrast are asserted, because the node is the only thing in the plan
--- text that separates an exact seek from a seek-then-collapse.
+-- matching record reach the rest of the plan exactly once; this shape reaches
+-- no such range, and compound_prefix.surql asserts that side of the contrast.
 -- ===========================================================================
 
 DEFINE TABLE sh_flatten SCHEMALESS;
@@ -980,27 +973,18 @@ EXPLAIN SELECT id FROM sh_flatten WHERE tags.* > 'c';
 SELECT id FROM sh_flatten WHERE tags.* > 'c';
 SELECT id FROM sh_flatten WITH NOINDEX WHERE tags.* > 'c';
 
--- E6: an unfiltered `ORDER BY id` is planned as a full-range read of the
--- `tags.*` index. The EMPTY `access:` is that full range - the scan reads every
--- entry the index holds - rather than a bound the plan text failed to print;
--- E7 pins how many entries it is, and E8 pins the record count independently.
--- Nothing pins the flatten column here, so the scan fans out and the `Distinct`
--- above it collapses a record's entries into one row: the row SET is the
--- oracle's.
---
--- DEFECT PINNED: the row ORDER is not. The plan carries no sort operator, as
--- though the scan delivered id order, and it delivers element order - so the
--- rows come back ordered by each record's first matching element. Correct
--- answer: the oracle's, ascending by id.
+-- E6: an unfiltered `ORDER BY id` is not served by the `tags.*` index. A
+-- full-range read of it walks element order - a record sits at one key
+-- position per element - so the scan claims no ordering past the flatten
+-- column, and none by record id either. With nothing to gain from the index,
+-- the plan is a table scan, which delivers id order: the rows and their order
+-- are the oracle's.
 EXPLAIN SELECT id FROM sh_flatten ORDER BY id;
 SELECT id FROM sh_flatten ORDER BY id;
 SELECT id FROM sh_flatten WITH NOINDEX ORDER BY id;
 
--- E7: E6 under ANALYZE, which is what makes its empty `access:` unambiguous.
--- The IndexScan reports the number of entries it read and the `Distinct` above
--- it reports the number of records those entries resolved to, so a full-range
--- read over a fanning column is legible in the plan text and cannot be confused
--- with a seek that read nothing.
+-- E7: E6 under ANALYZE. The table scan reads each record once, so its row
+-- count is the record count E8 reaches without the index.
 EXPLAIN ANALYZE SELECT id FROM sh_flatten ORDER BY id;
 
 -- E8: the count over the same table, which is planned as a CountScan rather
@@ -1011,8 +995,7 @@ EXPLAIN SELECT count() FROM sh_flatten GROUP ALL;
 SELECT count() FROM sh_flatten GROUP ALL;
 SELECT count() FROM sh_flatten WITH NOINDEX GROUP ALL;
 
--- E9: the same shape with no ORDER BY is planned as a table scan, which
--- localises E6's ordering defect to the sort-elimination path.
+-- E9: the same shape with no ORDER BY is planned as a table scan, as E6 is.
 EXPLAIN SELECT id FROM sh_flatten;
 SELECT id FROM sh_flatten;
 SELECT id FROM sh_flatten WITH NOINDEX;
@@ -1202,9 +1185,8 @@ EXPLAIN SELECT id FROM sh_arrayvalue WHERE tags CONTAINS 'tan';
 SELECT id FROM sh_arrayvalue WHERE tags CONTAINS 'tan';
 SELECT id FROM sh_arrayvalue WITH NOINDEX WHERE tags CONTAINS 'tan';
 
--- J6: an unfiltered ORDER BY id over this shape is planned as a table scan, so
--- it does not reproduce E6's ordering defect even though the entry layout is
--- the same.
+-- J6: an unfiltered ORDER BY id over this shape is planned as a table scan,
+-- as E6 is over a flatten column with the same entry layout.
 EXPLAIN SELECT id FROM sh_arrayvalue ORDER BY id;
 SELECT id FROM sh_arrayvalue ORDER BY id;
 SELECT id FROM sh_arrayvalue WITH NOINDEX ORDER BY id;

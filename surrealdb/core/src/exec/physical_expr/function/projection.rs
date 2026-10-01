@@ -39,6 +39,13 @@ impl PhysicalExpr for ProjectionFunctionExec {
 
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
+			// Outside projection position the call is an ordinary one and
+			// carries the capability check. In projection position it does
+			// not: the projection operator reaches the bindings through
+			// `evaluate_projection`, where the call names the output shape and
+			// both engines allow it whatever the deny list says.
+			ctx.check_allowed_function(&self.name)?;
+
 			// When evaluated as a regular expression (not in projection context),
 			// return the first value from the projection bindings, or None if empty.
 			// This handles cases like: RETURN type::field("name")

@@ -49,6 +49,12 @@ impl PhysicalExpr for IndexFunctionExec {
 
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
+			// Binding a function to an index operator at plan time does not
+			// change which registry entry runs, so it carries the same
+			// capability check a direct call makes, in the same place: before
+			// the arguments.
+			ctx.check_allowed_function(&self.name)?;
+
 			// Look up the index function in the registry
 			let registry = ctx.exec_ctx.function_registry();
 			let func = registry.get_index_function(&self.name).ok_or_else(|| {

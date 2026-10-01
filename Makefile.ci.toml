@@ -975,6 +975,7 @@ run_task = { name = [
     "test-kvs",
     "test-kvs-any",
     "test-kvs-crate",
+    "test-idx",
     "stop-tikv",
 ], fork = true, parallel = false }
 

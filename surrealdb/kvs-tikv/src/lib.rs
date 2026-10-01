@@ -66,11 +66,31 @@ fn commit_error(e: tikv::Error) -> Error {
 	}
 }
 
+/// Classify a batch of per-key errors, each already converted by `kvs_error`.
+///
+/// The batch is a conflict only when every error in it is one. Any other
+/// failure is one a retry would meet again, so it takes precedence: a single
+/// kind of failure is reported as itself, a mix as the generic variant carrying
+/// all of them.
+fn classify_batch(errs: Vec<Error>) -> Error {
+	let (conflicts, mut failures): (Vec<Error>, Vec<Error>) =
+		errs.into_iter().partition(|e| matches!(e, Error::TransactionConflict(_)));
+	if failures.is_empty() {
+		conflicts
+			.into_iter()
+			.next()
+			.unwrap_or_else(|| Error::Transaction("empty batch of key errors".to_string()))
+	} else if failures
+		.iter()
+		.all(|e| std::mem::discriminant(e) == std::mem::discriminant(&failures[0]))
+	{
+		failures.swap_remove(0)
+	} else {
+		Error::Transaction(format!("multiple key errors: {failures:?}"))
+	}
+}
+
 /// Convert a TiKV engine error into the generic KVS error type.
-#[expect(
-	clippy::needless_pass_by_value,
-	reason = "by-value so it can be passed directly to `Result::map_err`"
-)]
 fn kvs_error(e: tikv::Error) -> Error {
 	const TIKV_TARGET: &str = "surrealdb::core::kvs::tikv";
 	match e {
@@ -114,6 +134,14 @@ fn kvs_error(e: tikv::Error) -> Error {
 				);
 				Error::Transaction(e.to_string())
 			}
+		}
+		// Async commit and 1PC report per-key prewrite failures batched into one
+		// error, so the classification is recovered from the inner errors; left
+		// to fall through, a plain write conflict would surface as the
+		// non-retryable `Transaction` variant and fail every caller that retries
+		// on conflict.
+		tikv::Error::MultipleKeyErrors(errs) | tikv::Error::ExtractedErrors(errs) => {
+			classify_batch(errs.into_iter().map(kvs_error).collect())
 		}
 		tikv::Error::RegionError(ref re) => {
 			// Most region errors carry a region id in their nested
@@ -1735,7 +1763,71 @@ mod tests {
 	use surrealdb_kvs::err::Error;
 	use tonic::{Code, Status};
 
-	use super::{TikvConfig, commit_error, kvs_error, safepoint_from, validate_tls_paths};
+	use super::{
+		TikvConfig, classify_batch, commit_error, kvs_error, safepoint_from, validate_tls_paths,
+	};
+
+	#[test]
+	fn batched_errors_keep_the_classification_of_what_they_carry() {
+		// Real batches carry `KeyError` and `RegionError` entries, whose proto
+		// payloads are private to the client, so they are exercised against a
+		// live cluster instead (surrealdb-idx's `tikv_concurrency` tests). The
+		// variants below never arrive inside a batch; they stand in for those
+		// entries because they are constructible. What is checked here is the
+		// unwrapping: both batched variants, nested, reach the inner
+		// classification. The precedence between classifications is covered by
+		// `a_batch_is_retryable_only_when_every_error_is_a_conflict`.
+		let duplicate = tikv::Error::MultipleKeyErrors(vec![
+			tikv::Error::DuplicateKeyInsertion,
+			tikv::Error::DuplicateKeyInsertion,
+		]);
+		assert!(matches!(kvs_error(duplicate), Error::TransactionKeyAlreadyExists));
+
+		// Distinct failures in one batch are reported together, generically.
+		let mixed = tikv::Error::MultipleKeyErrors(vec![
+			tikv::Error::StringError("stand-in for an opaque inner error".into()),
+			tikv::Error::DuplicateKeyInsertion,
+		]);
+		assert!(matches!(kvs_error(mixed), Error::Transaction(_)));
+
+		let nested = tikv::Error::ExtractedErrors(vec![tikv::Error::MultipleKeyErrors(vec![
+			tikv::Error::DuplicateKeyInsertion,
+		])]);
+		assert!(matches!(kvs_error(nested), Error::TransactionKeyAlreadyExists));
+
+		// Nothing classifiable inside stays the generic, non-retryable variant.
+		let opaque = tikv::Error::MultipleKeyErrors(vec![tikv::Error::StringError(
+			"stand-in for an opaque inner error".into(),
+		)]);
+		assert!(matches!(kvs_error(opaque), Error::Transaction(_)));
+	}
+
+	#[test]
+	fn a_batch_is_retryable_only_when_every_error_is_a_conflict() {
+		let conflict = || Error::TransactionConflict("k".into());
+		assert!(matches!(
+			classify_batch(vec![conflict(), conflict()]),
+			Error::TransactionConflict(_)
+		));
+		// A failure a retry would meet again wins over a conflict beside it.
+		assert!(matches!(
+			classify_batch(vec![conflict(), Error::TransactionKeyTooLarge]),
+			Error::TransactionKeyTooLarge
+		));
+		assert!(matches!(
+			classify_batch(vec![Error::TransactionKeyAlreadyExists, conflict()]),
+			Error::TransactionKeyAlreadyExists
+		));
+		assert!(matches!(
+			classify_batch(vec![
+				conflict(),
+				Error::TransactionKeyTooLarge,
+				Error::TransactionKeyAlreadyExists
+			]),
+			Error::Transaction(_)
+		));
+		assert!(matches!(classify_batch(vec![]), Error::Transaction(_)));
+	}
 
 	#[test]
 	fn transport_failures_during_commit_leave_the_outcome_unknown() {

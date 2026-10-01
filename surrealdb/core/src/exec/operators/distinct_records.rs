@@ -27,11 +27,12 @@ use ahash::HashSet;
 use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
+use super::scan::extract_rid;
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
 	OutputOrdering, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
-use crate::val::{RecordId, Value};
+use crate::val::RecordId;
 
 /// Emits the first row carrying each record id, dropping later rows that carry
 /// one already seen.
@@ -96,7 +97,7 @@ impl ExecOperator for DistinctRecords {
 				for value in batch.into_values() {
 					// A row carrying no id cannot be a repeat of one that
 					// does, so it passes rather than being dropped.
-					match record_id_of(&value) {
+					match extract_rid(&value) {
 						Some(rid) => {
 							if seen.insert(rid) {
 								values.push(value);
@@ -116,22 +117,11 @@ impl ExecOperator for DistinctRecords {
 	}
 }
 
-/// The record id a row carries, if it carries one.
-fn record_id_of(value: &Value) -> Option<RecordId> {
-	match value {
-		Value::Object(obj) => match obj.get("id") {
-			Some(Value::RecordId(rid)) => Some(rid.clone()),
-			_ => None,
-		},
-		_ => None,
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::exec::operators::test_util::{ValuesOperator, collect, root_ctx};
-	use crate::val::Object;
+	use crate::val::{Object, Value};
 
 	fn row(table: &str, id: i64, tag: &str) -> Value {
 		let mut o = Object::default();

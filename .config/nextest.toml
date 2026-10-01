@@ -7,8 +7,11 @@ fail-fast = false
 slow-timeout = "15s"
 global-timeout = "30m"
 
+# Tests against the shared TiKV playground. The idx ones wipe its whole
+# keyspace on entry, and their `#[serial_test::serial]` only serialises within
+# one process, which nextest does not share between tests.
 [[profile.default.overrides]]
-filter = 'test(tikv::) + package(surrealdb-kvs-tikv)'
+filter = 'test(tikv::) + test(tikv_concurrency::) + package(surrealdb-kvs-tikv)'
 test-group = 'serial-kvs'
 
 [[profile.default.overrides]]

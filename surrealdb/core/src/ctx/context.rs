@@ -1547,6 +1547,47 @@ mod tests {
 		assert!(matches!(result.unwrap(), Some(Reason::Timedout(_))));
 	}
 
+	/// The index engines stop a loop through `expect_not_done`, which must name
+	/// the reason this context gives, not just that it is done.
+	#[tokio::test]
+	async fn index_checkpoint_names_a_deadline_as_a_timeout() {
+		let mut ctx = Context::new_test();
+		ctx.add_timeout(Duration::from_nanos(1)).unwrap();
+		tokio::time::sleep(Duration::from_millis(10)).await;
+		let ctx = ctx.freeze();
+		let err = crate::idx::env::expect_not_done(&ctx, None).await.unwrap_err();
+		assert!(crate::err::is_query_timedout(&err), "expected a timeout, got {err:#}");
+	}
+
+	#[tokio::test]
+	async fn index_checkpoint_names_a_cancellation_as_a_cancellation() {
+		let mut ctx = Context::new_test();
+		ctx.add_cancel().cancel();
+		let ctx = ctx.freeze();
+		let err = crate::idx::env::expect_not_done(&ctx, None).await.unwrap_err();
+		assert!(crate::err::is_query_cancelled(&err), "expected a cancellation, got {err:#}");
+	}
+
+	/// A child context carries a statement's `TIMEOUT` while its parent carries
+	/// none, so the reason comes from whichever context set the deadline.
+	#[tokio::test]
+	async fn index_checkpoint_names_a_statement_deadline_as_a_timeout() {
+		let parent = Context::new_test().freeze();
+		let mut ctx = Context::new_child(&parent);
+		ctx.add_timeout(Duration::from_nanos(1)).unwrap();
+		tokio::time::sleep(Duration::from_millis(10)).await;
+		let ctx = ctx.freeze();
+		let err = crate::idx::env::expect_not_done(&ctx, Some(64)).await.unwrap_err();
+		assert!(crate::err::is_query_timedout(&err), "expected a timeout, got {err:#}");
+		assert!(parent.done(true).unwrap().is_none(), "the parent is not done");
+	}
+
+	#[tokio::test]
+	async fn index_checkpoint_passes_a_live_context() {
+		let ctx = Context::new_test().freeze();
+		crate::idx::env::expect_not_done(&ctx, None).await.unwrap();
+	}
+
 	#[tokio::test]
 	async fn test_context_no_deadline() {
 		// Test that a context without deadline or cancellation returns None

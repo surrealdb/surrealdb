@@ -173,72 +173,16 @@ impl ExecOperator for IndexScan {
 	}
 
 	fn output_ordering(&self) -> crate::exec::OutputOrdering {
-		use crate::exec::operators::SortDirection;
-		use crate::exec::ordering::SortProperty;
-
-		let dir = match self.direction {
-			Direction::Forward => SortDirection::Asc,
-			Direction::Backward => SortDirection::Desc,
-		};
-
-		// For compound access with an equality prefix, the prefix columns all
-		// have the same value within the scan and do not define ordering.
-		// Skip them so that the effective ordering starts from the first
-		// non-equality column. This allows `satisfies()` to match ORDER BY
-		// on the column after the prefix (e.g. `ORDER BY modified DESC`
-		// with `idx(IsVisible, modified)` and `WHERE IsVisible = true`).
-		//
-		// For single-column Equality access (`WHERE col = val`), ALL index
-		// columns are constant, so we skip them all.  The effective ordering
-		// is then just the implicit record-id tail for non-unique indexes.
-		let skip_cols = match &self.access {
-			BTreeAccess::Compound {
-				prefix,
-				..
-			} => prefix.len(),
-			BTreeAccess::Equality(_) => self.index_ref.definition().cols.len(),
-			_ => 0,
-		};
-
-		let ix_def = self.index_ref.definition();
-		let mut cols: Vec<SortProperty> = ix_def
-			.cols
-			.iter()
-			.skip(skip_cols)
-			.filter_map(|s| {
-				crate::exec::field_path_convert::field_path_from_idiom(s).ok().map(|path| {
-					SortProperty {
-						path,
-						direction: dir,
-						collate: false,
-						numeric: false,
-					}
-				})
-			})
-			.collect();
-
-		// For non-unique indexes (Idx), the record ID is stored in the BTree
-		// key after the field values.  This means entries are implicitly
-		// sorted by record ID after the declared index columns.  Expose
-		// this so that ORDER BY (col DESC, id DESC) is recognised as
-		// satisfied by a backward index scan.
-		//
-		// When all index columns are skipped (e.g., single-column Equality),
-		// the effective ordering is *only* by record ID.  We still append
-		// the `id` property so `ORDER BY id` can be satisfied.
-		if !self.index_ref.is_unique() {
-			// Only append if the index actually has columns (guards against
-			// degenerate case of zero-column index definitions).
-			if !ix_def.cols.is_empty() {
-				cols.push(SortProperty {
-					path: crate::exec::field_path::FieldPath::field("id"),
-					direction: dir,
-					collate: false,
-					numeric: false,
-				});
-			}
-		}
-
+		// The pinned prefix orders nothing, so the claim begins at the first
+		// free column (`ORDER BY modified DESC` is met by
+		// `idx(IsVisible, modified)` under `WHERE IsVisible = true`), and a
+		// non-unique index's record-id tail lets a fully pinned scan answer
+		// `ORDER BY id`. See `scan_ordering` for where the claim stops.
+		let cols = crate::exec::index::access_path::scan_ordering(
+			&self.index_ref,
+			&self.access,
+			self.direction,
+		);
 		if cols.is_empty() {
 			crate::exec::OutputOrdering::Unordered
 		} else {

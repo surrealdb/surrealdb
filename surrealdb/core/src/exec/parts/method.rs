@@ -62,6 +62,13 @@ impl PhysicalExpr for MethodPart {
 				return closure_field_call(self.descriptor.name, &value, &self.args, ctx).await;
 			};
 
+			// A method is the registry entry it resolves to, so it carries
+			// that entry's capability check rather than the method name's:
+			// `.len()` on a string is `string::len`. The receiver type decides
+			// which entry runs, so the check follows the resolve; it precedes
+			// the arguments, where the direct-call path puts it.
+			ctx.check_allowed_function(func.name())?;
+
 			// Build the arguments: receiver value first, then method arguments
 			let mut func_args = Vec::with_capacity(1 + self.args.len());
 			func_args.push(value);

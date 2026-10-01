@@ -26,11 +26,12 @@ the ordinary language-test runner replays this file too and then the import is
 written by this checkout. So the entry set of a record the OLD writer produced
 is deliberately not asserted: it recorded m + n - 1 of a record's m * n element
 combinations rather than the product, which leaves a combination it skipped
-free for a second record to claim, and no read reveals it — reads deduplicate
-by record id and no access path pins both fanning columns. Anyone relying on
-uniqueness over an index whose columns both fan out needs
-`REBUILD INDEX tagged_pair ON tagged` after upgrading. That is release-note
-material, not something an axis of this suite can observe."""
+unindexed. A seek pinning both fanning columns misses the record there, and a
+second record can claim that combination under UNIQUE. The read is asserted,
+with its declared repair, in 3.00.00_index_compound_fanout.surql; the stolen
+claim is a write, which that body cannot carry. Anyone relying on an index
+whose columns both fan out needs `REBUILD INDEX tagged_pair ON tagged` after
+upgrading."""
 
 [[test.results]]
 match = '''string::contains($result, "IndexScan") AND string::contains($result, "tagged_pair")'''

@@ -444,11 +444,15 @@ fn union_covers_leaf(
 	// stays linear.  A hash/`Eq` disagreement across numeric kinds can only
 	// miss a match, which leaves the leaf in the residual filter — the safe
 	// direction.
+	//
+	// A NONE or NULL branch never covers the leaf: an empty array is keyed as
+	// NULL at its column and an absent field as NONE, so such a branch admits
+	// rows holding no matching element.
 	if branch_values.is_empty() {
 		return false;
 	}
 	let leaf_values: HashSet<&Value> = arr.0.iter().collect();
-	branch_values.iter().all(|v| leaf_values.contains(*v))
+	branch_values.iter().all(|v| !v.is_nullish() && leaf_values.contains(*v))
 }
 
 /// Decides whether a single binary comparison leaf is covered by a chosen
@@ -526,8 +530,14 @@ impl IndexConditionMatcher<'_> {
 		// `try_match_containment` so a containment leaf is stripped from the
 		// residual, which in turn enables `strip_index_conditions` to report
 		// `FullyConsumed` and the SELECT planner to push LIMIT into the scan.
-		let is_containment = (matches!(effective_op, BinaryOperator::Contain) && idiom_on_left)
-			|| (matches!(effective_op, BinaryOperator::Inside) && !idiom_on_left);
+		//
+		// A NONE or NULL value is never covered: an empty array has no
+		// element to index and is keyed as NULL at its column, and an absent
+		// field is keyed as NONE, so an entry carrying either does not prove
+		// the column holds such an element.
+		let is_containment = ((matches!(effective_op, BinaryOperator::Contain) && idiom_on_left)
+			|| (matches!(effective_op, BinaryOperator::Inside) && !idiom_on_left))
+			&& !value.is_nullish();
 
 		match self.access {
 			BTreeAccess::Compound {

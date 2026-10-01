@@ -40,3 +40,4 @@ pub use record_id::RecordIdScan;
 pub use reference::{ReferenceScan, ReferenceScanOutput};
 pub use table::TableScan;
 pub use union_index::UnionIndexScan;
+pub(crate) use union_index::extract_rid;

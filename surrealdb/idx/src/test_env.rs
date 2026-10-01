@@ -14,8 +14,10 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
+use common::EngineError;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_datastore::sequences::Sequences;
 use surrealdb_datastore::triggers::CommitTriggers;
@@ -179,14 +181,20 @@ impl IndexEnv for TestIndexEnv {
 }
 
 /// A [`TestIndexEnv`] whose cancellation checkpoint reports done on the `at`-th
-/// counted call, for the tests that pin what a scan has accounted for when a
-/// deadline stops it.
+/// counted call and every call after it, for the tests that pin what a scan has
+/// accounted for when the query stops it.
 ///
 /// A scan loop checks cancellation once per entry, so the call index *is* the
-/// entry index: reporting done on call `n` stands for a deadline that had
-/// expired by the time the scan reached its `n`th entry. Which entry that call
-/// belongs to is what a reordering of the loop body changes, and what the
-/// ordering tests read back off the engine's own accounting.
+/// entry index: reporting done on call `n` stands for a query stopped by the
+/// time the scan reached its `n`th entry. Which entry that call belongs to is
+/// what a reordering of the loop body changes, and what the ordering tests read
+/// back off the engine's own accounting.
+///
+/// Built with [`Self::new`] the stop is a cancellation, which
+/// [`CancellationProbe::expect_not_timedout`] does not report. Built with
+/// [`Self::timing_out`] it is a deadline: once the checkpoint has fired, that
+/// probe reports the query timed out, as the query context does past its
+/// deadline.
 ///
 /// Only counted calls are the ones a scan loop makes (`Some(count)`); a
 /// single-operation check (`None`) passes through untouched, so an unrelated
@@ -195,6 +203,7 @@ pub(crate) struct CancelAtCheckpoint {
 	inner: TestIndexEnv,
 	at: usize,
 	calls: AtomicUsize,
+	timeout: Option<Duration>,
 }
 
 impl CancelAtCheckpoint {
@@ -203,7 +212,21 @@ impl CancelAtCheckpoint {
 			inner,
 			at,
 			calls: AtomicUsize::new(0),
+			timeout: None,
 		}
+	}
+
+	/// A checkpoint that stands for a deadline of `timeout` expiring by the
+	/// `at`-th counted call.
+	pub(crate) fn timing_out(inner: TestIndexEnv, at: usize, timeout: Duration) -> Self {
+		Self {
+			timeout: Some(timeout),
+			..Self::new(inner, at)
+		}
+	}
+
+	fn fired(&self) -> bool {
+		self.calls.load(Ordering::Relaxed) >= self.at
 	}
 
 	/// The operation's transaction, for the assertions that read keys directly.
@@ -214,7 +237,14 @@ impl CancelAtCheckpoint {
 
 impl CancellationProbe for CancelAtCheckpoint {
 	fn expect_not_timedout(&self) -> BoxProviderFut<'_, Result<()>> {
-		self.inner.expect_not_timedout()
+		Box::pin(async move {
+			if let Some(timeout) = self.timeout
+				&& self.fired()
+			{
+				bail!(EngineError::QueryTimedout(timeout));
+			}
+			self.inner.expect_not_timedout().await
+		})
 	}
 }
 

@@ -34,8 +34,9 @@ pub(crate) fn order_is_scan_compatible(order: Option<&crate::expr::order::Orderi
 
 /// Check if an index + scan direction satisfies the given ORDER BY.
 ///
-/// Builds the same `SortProperty` vector that `IndexScan::output_ordering()`
-/// would produce and checks whether it satisfies the ORDER BY requirements.
+/// Matches the ORDER BY against
+/// [`scan_ordering`](crate::exec::index::access_path::scan_ordering), the
+/// ordering `IndexScan::output_ordering()` claims, so the two cannot disagree.
 /// This allows the planner to decide on limit pushdown before the IndexScan
 /// operator is created.
 ///
@@ -88,28 +89,22 @@ pub(crate) fn index_covers_ordering(
 
 	// Determine which index columns are equality-pinned (constant value).
 	let ix_def = index_ref.definition();
-	let (skip_cols, equality_field_paths) = match access {
+	let equality_field_paths: Vec<_> = match access {
 		BTreeAccess::Compound {
 			prefix,
 			..
-		} => {
-			let paths: Vec<_> = ix_def
-				.cols
-				.iter()
-				.take(prefix.len())
-				.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
-				.collect();
-			(prefix.len(), paths)
-		}
-		BTreeAccess::Equality(_) => {
-			let paths: Vec<_> = ix_def
-				.cols
-				.iter()
-				.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
-				.collect();
-			(ix_def.cols.len(), paths)
-		}
-		_ => (0, vec![]),
+		} => ix_def
+			.cols
+			.iter()
+			.take(prefix.len())
+			.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
+			.collect(),
+		BTreeAccess::Equality(_) => ix_def
+			.cols
+			.iter()
+			.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
+			.collect(),
+		_ => vec![],
 	};
 
 	// Strip leading ORDER BY fields that reference equality-pinned columns.
@@ -118,43 +113,8 @@ pub(crate) fn index_covers_ordering(
 	let required: Vec<SortProperty> =
 		required.into_iter().skip_while(|prop| equality_field_paths.contains(&prop.path)).collect();
 
-	// Build the index ordering (same as IndexScan::output_ordering())
-	let dir = match direction {
-		crate::kvs::Direction::Forward => SortDirection::Asc,
-		crate::kvs::Direction::Backward => SortDirection::Desc,
-	};
-	let mut cols: Vec<SortProperty> = ix_def
-		.cols
-		.iter()
-		.skip(skip_cols)
-		.filter_map(|s| {
-			crate::exec::field_path_convert::field_path_from_idiom(s).ok().map(|path| {
-				SortProperty {
-					path,
-					direction: dir,
-					collate: false,
-					numeric: false,
-				}
-			})
-		})
-		.collect();
-
-	// For non-unique indexes (Idx), the record ID is stored in the BTree
-	// key after the field values.  Entries are implicitly sorted by record
-	// ID, so we append an `id` property to the effective ordering.  This
-	// allows `ORDER BY col DESC, id DESC` to be satisfied by a backward
-	// compound index scan.
-	//
-	// When all index columns are skipped (Equality), the ordering is
-	// *only* by record ID — we still append it.
-	if !index_ref.is_unique() && !ix_def.cols.is_empty() {
-		cols.push(SortProperty {
-			path: crate::exec::field_path::FieldPath::field("id"),
-			direction: dir,
-			collate: false,
-			numeric: false,
-		});
-	}
+	// The ordering the scan itself will claim.
+	let cols = crate::exec::index::access_path::scan_ordering(index_ref, access, direction);
 
 	// If all required fields were stripped (all constant), the ordering
 	// is trivially satisfied.

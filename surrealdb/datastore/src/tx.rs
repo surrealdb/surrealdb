@@ -191,6 +191,9 @@ pub struct Transaction {
 	/// — a caller may hold a cursor, and cancel waits for every cursor to drop,
 	/// which that caller cannot do until the call it is blocked in returns.
 	save_point_poisoned: AtomicBool,
+	/// Set when a record's write stopped part-way because its query could not
+	/// continue. See [`Self::poison_interrupted_write`].
+	interrupted_write_poisoned: AtomicBool,
 	/// Number of write slots reserved against the write-cardinality guard.
 	/// Each write operation atomically reserves its slot *before* the
 	/// storage call, so concurrent writes on the same transaction (e.g.
@@ -945,6 +948,7 @@ impl Transaction {
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),
 			save_point_poisoned: AtomicBool::new(false),
+			interrupted_write_poisoned: AtomicBool::new(false),
 			guarded_writes: AtomicU64::new(0),
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
@@ -1403,7 +1407,7 @@ impl Transaction {
 
 	/// The reason this transaction may not commit, if there is one.
 	///
-	/// Two conditions poison a transaction, and both mean its writes are a state no
+	/// Three conditions poison a transaction, and all mean its writes are a state no
 	/// caller asked for:
 	///
 	/// - A tripped write-cardinality guard leaves the writes buffered before the failing
@@ -1411,8 +1415,10 @@ impl Transaction {
 	///   atomic-rollback contract.
 	/// - A save point the storage layer could not close leaves it unknown which of that scope's
 	///   writes survive. See [`Self::save_point_poisoned`].
+	/// - A record's write stopped part-way leaves the record disagreeing with its index entries.
+	///   See [`Self::poison_interrupted_write`].
 	///
-	/// Either is reachable at an explicit COMMIT: a client-owned (RPC/SDK)
+	/// Each is reachable at an explicit COMMIT: a client-owned (RPC/SDK)
 	/// transaction survives the statement error that set the flag. An explicit
 	/// CANCEL behaves as normal.
 	fn poisoned(&self) -> Result<()> {
@@ -1431,7 +1437,36 @@ impl Transaction {
 			}
 			.into());
 		}
+		if self.interrupted_write_poisoned.load(Ordering::Relaxed) {
+			return Err(crate::error::DatastoreError::QueryNotExecuted {
+				message: "A record's write was stopped part-way, leaving the transaction holding \
+				          only some of that record's index entries"
+					.to_string(),
+			}
+			.into());
+		}
 		Ok(())
+	}
+
+	/// Refuses this transaction's COMMIT, because a record's write stopped
+	/// part-way when its query could not continue.
+	///
+	/// A record and its index entries are separate keys, and one index can take
+	/// many entries, so a write stopped among them leaves the transaction holding a
+	/// record that disagrees with what indexes it. That is a failure the statement
+	/// reports, but not every caller that sees a statement fail discards its
+	/// transaction: a client-owned (RPC/SDK) transaction survives the error and can
+	/// still issue COMMIT, and a caller that turns the error into a value carries on
+	/// to commit. The flag makes the refusal the transaction's own, whatever the
+	/// caller does with the error.
+	///
+	/// A rollback to a save point does not clear it, even one taken ahead of the
+	/// stopped write, matching the write-cardinality guard. A statement that rolls
+	/// back past the stopped write and completes — an `INSERT IGNORE` skipping the
+	/// row — still has its transaction's commit refused: that costs the caller a
+	/// retry, where committing a half-indexed record would cost a corrupt index.
+	pub fn poison_interrupted_write(&self) {
+		self.interrupted_write_poisoned.store(true, Ordering::Relaxed);
 	}
 
 	/// Cancel without draining the registered close-time actions. See
