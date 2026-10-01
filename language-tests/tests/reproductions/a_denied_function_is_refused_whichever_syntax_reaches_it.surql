@@ -1,28 +1,21 @@
 /**
-[env]
-planner-strategy = ["compute-only"]
-
 [env.capabilities]
 deny-functions = ["string::len", "search::score", "type::field"]
 
 [test]
 reason = """
-Half of a pair. Same queries as
-`denied_function_physical_expr_streaming.surql`, pinned to the legacy compute
-path; the two files' expected results are the divergence.
+A denied function must not execute whichever syntax reaches it. Method syntax
+resolves to the same registry entry as the direct call and is refused; a
+function bound to a MATCHES predicate at plan time is refused, the binding
+being no exemption; and a projection function outside projection position is an
+ordinary call and is refused.
 
-A denied function must not execute whichever syntax reaches it. This side is
-the intended contract: method syntax resolves to the same registry entry as
-the direct call and is refused, an index function bound to a MATCHES predicate
-is refused, and a projection function is refused outside projection position.
+`SELECT type::field('a') FROM t` is the one exception, on every engine: in
+projection position the call names a field of the output shape rather than
+computing a value, and it is allowed whatever the deny list says.
 
-Three receivers on the streaming side reach the function without a capability
-check and so return a value here where this file errors: method dispatch,
-`IndexFunctionExec` and `ProjectionFunctionExec`.
-
-`SELECT type::field('a') FROM t` is the exception both engines agree on: it is
-allowed in projection position on either path, so gating it on one side only
-would create a divergence in the other direction.
+The two direct calls pin the deny list as genuinely in force — without them a
+passing file could just mean the capability never applied.
 """
 
 [[test.results]]
@@ -76,7 +69,7 @@ RETURN 'abcd'.len();
 SELECT s.len() AS n FROM t;
 
 -- A projection function outside projection position is an ordinary call and
--- is denied; in projection position it is allowed on both paths.
+-- is denied; in projection position it is allowed on every engine.
 RETURN type::field('a');
 SELECT type::field('a') FROM t;
 SELECT * FROM t WHERE type::field('a') = 5;
