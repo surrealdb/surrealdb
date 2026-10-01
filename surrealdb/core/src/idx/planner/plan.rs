@@ -856,33 +856,65 @@ mod tests {
 	use std::collections::HashSet;
 	use std::sync::Arc;
 
+	use crate::catalog::{Index, IndexDefinition, IndexId};
 	use crate::expr::Idiom;
 	use crate::idx::planner::plan::{IndexOperator, IndexOption};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
-	use crate::val::{Array, Value};
+	use crate::val::{Array, Strand, Value};
+
+	fn index_def(table: &str, index_id: u32, name: &str) -> IndexDefinition {
+		IndexDefinition {
+			index_id: IndexId(index_id),
+			name: Strand::from(name),
+			table_name: table.into(),
+			cols: vec![Idiom::field("test".to_owned())],
+			index: Index::Idx,
+			count_cond: None,
+			prepare_remove: false,
+			format_version: 1,
+			comment: None,
+		}
+	}
+
+	fn index_option(ixr: IndexReference) -> IndexOption {
+		IndexOption::new(
+			ixr,
+			Some(Idiom::field("test".to_owned()).into()),
+			IdiomPosition::Right,
+			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
+		)
+	}
 
 	#[expect(clippy::mutable_key_type)]
 	#[test]
 	fn test_hash_index_option() {
 		let mut set = HashSet::new();
-		let io1 = IndexOption::new(
-			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::field("test".to_owned()).into()),
-			IdiomPosition::Right,
-			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
-		);
-
-		let io2 = IndexOption::new(
-			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::field("test".to_owned()).into()),
-			IdiomPosition::Right,
-			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
-		);
+		let indexes = Arc::new([index_def("t", 1, "ix")]);
+		let io1 = index_option(IndexReference::new(Arc::clone(&indexes) as _, 0));
+		let io2 = index_option(IndexReference::new(indexes as _, 0));
 
 		set.insert(io1);
 		set.insert(io2.clone());
 		set.insert(io2);
 
 		assert_eq!(set.len(), 1);
+	}
+
+	/// `index_id` is allocated per table, so two indexes sharing one are still
+	/// distinct entries. Conflating them lets a condition over a linked record
+	/// merge the two tables' index options into one malformed compound key.
+	#[expect(clippy::mutable_key_type)]
+	#[test]
+	fn index_options_on_different_tables_are_distinct() {
+		let local = Arc::new([index_def("edge", 1, "idx_edge")]);
+		let remote = Arc::new([index_def("node", 1, "idx_node")]);
+		let io1 = index_option(IndexReference::new(local as _, 0));
+		let io2 = index_option(IndexReference::new(remote as _, 0));
+
+		let mut set = HashSet::new();
+		set.insert(io1);
+		set.insert(io2);
+
+		assert_eq!(set.len(), 2);
 	}
 }

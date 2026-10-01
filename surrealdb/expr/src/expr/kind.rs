@@ -267,13 +267,17 @@ impl Kind {
 	/// Returns true if this type permits access to named sub-fields.
 	///
 	/// This covers `object`, `any`, literal object types (e.g. `{ key: string }`),
-	/// and union types where every non-none variant permits sub-field access.
+	/// and union types where every variant other than `none` and `null` permits
+	/// sub-field access and at least one variant does.
 	pub fn allows_sub_fields(&self) -> bool {
 		match self {
 			Kind::Any | Kind::Object | Kind::Array(..) | Kind::Set(..) => true,
 			Kind::Literal(KindLiteral::Object(_) | KindLiteral::Array(_)) => true,
 			Kind::Either(kinds) => {
-				kinds.iter().all(|k| matches!(k, Kind::None) || k.allows_sub_fields())
+				kinds.iter().any(|k| k.allows_sub_fields())
+					&& kinds
+						.iter()
+						.all(|k| matches!(k, Kind::None | Kind::Null) || k.allows_sub_fields())
 			}
 			_ => false,
 		}

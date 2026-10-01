@@ -944,15 +944,21 @@ impl IndexReference {
 	}
 }
 
+// A reference is identified by the index it points at, never by its position:
+// `idx` is an offset into one table's index array, and a condition reaching a
+// linked record resolves indexes on several tables at once. Two indexes on
+// different tables routinely share an offset, and `index_id` is only unique
+// within a table, so the table name is part of the identity as well.
 impl Hash for IndexReference {
 	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-		state.write_usize(self.idx);
+		self.table_name.hash(state);
+		self.index_id.hash(state);
 	}
 }
 
 impl PartialEq for IndexReference {
 	fn eq(&self, other: &Self) -> bool {
-		self.idx == other.idx
+		self.index_id == other.index_id && self.table_name == other.table_name
 	}
 }
 
