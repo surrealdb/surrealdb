@@ -1180,3 +1180,84 @@ async fn reads_survive_a_concurrent_cancel() {
 
 	ds.shutdown().await.unwrap();
 }
+
+/// A savepoint rollback while a writable-transaction scan cursor is open must
+/// neither panic nor disturb the scan: the cursor carries on from the first
+/// entry it had not yielded, in the view left by the rollback.
+///
+/// Covers both directions and both cursor kinds, since each drives its own
+/// fill path, and a write kept from before the savepoint alongside one
+/// discarded by it.
+#[tokio::test(flavor = "multi_thread")]
+async fn cursor_survives_savepoint_rollback() {
+	use surrealdb_kvs::Direction;
+	use surrealdb_kvs::api::Transactable;
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
+	let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
+	let key = |i: usize| format!("sp/key_{i:04}").into_bytes();
+	{
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		for i in (0..20).step_by(2) {
+			tx.set(key(i).into(), b"v".to_vec()).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+	}
+
+	for dir in [Direction::Forward, Direction::Backward] {
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		let tx_ref = tx.as_ref();
+		// Kept: written before the savepoint, ahead of the cursor.
+		tx.set(key(5).into(), b"v".to_vec()).await.unwrap();
+		let mut keys_cursor =
+			Transactable::open_keys_cursor(tx_ref, prefix_byte_range("sp/"), dir, 0, None)
+				.await
+				.unwrap();
+		let mut vals_cursor =
+			Transactable::open_vals_cursor(tx_ref, prefix_byte_range("sp/"), dir, 0, None)
+				.await
+				.unwrap();
+		let mut seen_keys: Vec<Vec<u8>> = Vec::new();
+		let mut seen_vals: Vec<Vec<u8>> = Vec::new();
+		for batch in [3, 3] {
+			let b = keys_cursor.next_batch(batch).await.unwrap();
+			seen_keys.extend(b.iter().map(|k| k.to_vec()));
+			let b = vals_cursor.next_batch(batch).await.unwrap();
+			seen_vals.extend(b.iter().map(|(k, _)| k.to_vec()));
+			if seen_keys.len() == 3 {
+				// Discarded: written after the savepoint, ahead of the cursor.
+				tx.new_save_point().await.unwrap();
+				tx.set(key(7).into(), b"v".to_vec()).await.unwrap();
+				tx.set(key(13).into(), b"v".to_vec()).await.unwrap();
+				tx.rollback_to_save_point().await.unwrap();
+			}
+		}
+		loop {
+			let b = keys_cursor.next_batch(4).await.unwrap();
+			if b.is_empty() {
+				break;
+			}
+			seen_keys.extend(b.iter().map(|k| k.to_vec()));
+		}
+		loop {
+			let b = vals_cursor.next_batch(4).await.unwrap();
+			if b.is_empty() {
+				break;
+			}
+			seen_vals.extend(b.iter().map(|(k, _)| k.to_vec()));
+		}
+		let mut expected: Vec<Vec<u8>> =
+			(0..20).step_by(2).chain(std::iter::once(5)).map(key).collect();
+		expected.sort();
+		if dir == Direction::Backward {
+			expected.reverse();
+		}
+		assert_eq!(seen_keys, expected, "keys cursor, {dir:?}");
+		assert_eq!(seen_vals, expected, "vals cursor, {dir:?}");
+		drop(keys_cursor);
+		drop(vals_cursor);
+		tx.cancel().await.unwrap();
+	}
+}

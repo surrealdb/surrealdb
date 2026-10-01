@@ -38,6 +38,53 @@ pub(super) enum ScanIter {
 	Tx(OwnedRawTxIter),
 }
 
+/// Where a writable-transaction cursor resumes if its iterator has to be
+/// rebuilt.
+///
+/// A savepoint rollback rebuilds the write-batch index that a
+/// [`ScanIter::Tx`] iterator points into, so the iterator must not be used
+/// afterwards. The cursor notices through `epoch` (compared against the
+/// transaction's rollback epoch on each batch), builds a new iterator, and
+/// seeks it to `next`, the first entry the previous iterator had not yet
+/// yielded. Unused by read-only cursors, whose iterators read the database
+/// directly and are unaffected by savepoints.
+pub(super) struct TxResume {
+	/// The transaction's rollback epoch when the iterator was last built.
+	pub(super) epoch: u64,
+	/// The version the scan reads at, needed to rebuild its `ReadOptions`.
+	pub(super) version: Option<u64>,
+	/// Key of the first entry not yet yielded, valid when `has_next`.
+	pub(super) next: Vec<u8>,
+	/// Whether the iterator was positioned on an entry when last advanced.
+	/// When false a rebuilt iterator is left unseeked, which is exhausted.
+	pub(super) has_next: bool,
+}
+
+impl TxResume {
+	pub(super) fn new(epoch: u64, version: Option<u64>) -> Self {
+		Self {
+			epoch,
+			version,
+			next: Vec::new(),
+			has_next: false,
+		}
+	}
+
+	/// Record where `iter` stopped after a batch.
+	pub(super) fn note(&mut self, iter: &ScanIter) {
+		if let ScanIter::Tx(it) = iter {
+			self.next.clear();
+			match it.key() {
+				Some(k) => {
+					self.next.extend_from_slice(k);
+					self.has_next = true;
+				}
+				None => self.has_next = false,
+			}
+		}
+	}
+}
+
 /// Per-keys-cursor state. Owned directly by `RocksDbKeysCursor` — no
 /// per-transaction map, no per-batch lock lookup.
 ///
@@ -46,6 +93,8 @@ pub(super) enum ScanIter {
 pub(crate) struct ScanStateKeys {
 	/// The underlying iterator.
 	pub(super) iter: ScanIter,
+	/// Resume point for rebuilding a writable transaction's iterator.
+	pub(super) resume: TxResume,
 	/// Iteration direction, fixed at open time.
 	pub(super) dir: Direction,
 	/// Whether `next_batch` has been called at least once. Controls the
@@ -77,6 +126,8 @@ pub(crate) struct ScanStateKeys {
 pub(crate) struct ScanStateVals {
 	/// The underlying iterator.
 	pub(super) iter: ScanIter,
+	/// Resume point for rebuilding a writable transaction's iterator.
+	pub(super) resume: TxResume,
 	/// Iteration direction, fixed at open time.
 	pub(super) dir: Direction,
 	/// First-batch-not-yet-issued flag; see [`ScanStateKeys::started`].

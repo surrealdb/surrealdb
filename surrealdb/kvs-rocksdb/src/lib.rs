@@ -20,7 +20,7 @@ mod tests;
 
 use std::ops::Range;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::time::Duration;
 
 use background_flusher::BackgroundFlusher;
@@ -37,7 +37,9 @@ use rocksdb::{
 	OptimisticTransactionOptions, Options, ReadOptions, UniversalCompactOptions,
 	UniversalCompactionStopStyle, WaitForCompactOptions, WriteOptions, properties,
 };
-use scan_cursor::{RocksDbKeysCursor, RocksDbValsCursor, ScanIter, ScanStateKeys, ScanStateVals};
+use scan_cursor::{
+	RocksDbKeysCursor, RocksDbValsCursor, ScanIter, ScanStateKeys, ScanStateVals, TxResume,
+};
 use surrealdb_kvs::api::{
 	BoxFut, GetMultiResult, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult, ScanChunkStats,
 	ScanCursorKeys, ScanCursorVals, ScanResult, Transactable, ValVisitor, ValsBatch,
@@ -185,6 +187,11 @@ pub struct Transaction {
 	/// and the engine's savepoint stack cannot drift apart between the two.
 	/// Nothing acquires the pair in the opposite order, so they cannot deadlock.
 	savepoints: Mutex<SavepointStack>,
+	/// Incremented, under `inner`, by every savepoint rollback that reverts
+	/// writes. A writable scan iterator built under an earlier value points
+	/// into write-batch state the rollback rebuilt, so its cursor replaces it
+	/// before the next read. See [`TxResume`].
+	rollback_epoch: AtomicU64,
 	/// The current transaction state
 	transaction_state: Arc<AtomicU8>,
 	/// Reference to the disk space manager for checking current operational state during commit.
@@ -848,6 +855,7 @@ impl Datastore {
 			read_options: ro,
 			inner: Mutex::new(Some(tx)),
 			savepoints: Mutex::new(SavepointStack::default()),
+			rollback_epoch: AtomicU64::new(0),
 			transaction_state: Arc::new(Default::default()),
 			disk_space_manager: self.disk_space_manager.clone(),
 			commit_coordinator: self.commit_coordinator.clone(),
@@ -1282,6 +1290,45 @@ impl Transaction {
 			ScanIter::Db(iter)
 		}
 	}
+
+	/// Prepare a cursor for its next batch.
+	///
+	/// Read-only cursors need nothing. A writable cursor takes `inner`, which
+	/// the caller holds for the batch so a savepoint rollback cannot run under
+	/// the iterator, and, if a rollback has run since the iterator was built,
+	/// replaces the iterator (see [`TxResume`]). The replacement reads the
+	/// same snapshot and bounds and continues at the first entry the old
+	/// iterator had not yielded, in the post-rollback view of the
+	/// transaction's writes.
+	async fn sync_tx_iter(
+		&self,
+		iter: &mut ScanIter,
+		resume: &mut TxResume,
+		dir: Direction,
+		start: &[u8],
+		end: &[u8],
+	) -> Result<Option<tokio::sync::MutexGuard<'_, Option<OwnedTx>>>> {
+		if !self.write {
+			return Ok(None);
+		}
+		let guard = self.inner.lock().await;
+		let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+		let epoch = self.rollback_epoch.load(Ordering::Acquire);
+		if epoch != resume.epoch {
+			let rng = start.to_vec()..end.to_vec();
+			let mut fresh = self.build_scan_iter(&rng, resume.version, inner);
+			if resume.has_next {
+				match (&mut fresh, dir) {
+					(ScanIter::Tx(it), Direction::Forward) => it.seek(&resume.next),
+					(ScanIter::Tx(it), Direction::Backward) => it.seek_for_prev(&resume.next),
+					(ScanIter::Db(_), _) => {}
+				}
+			}
+			*iter = fresh;
+			resume.epoch = epoch;
+		}
+		Ok(Some(guard))
+	}
 }
 
 /// First-call seek + leading-skip shared by the keys/vals `fill`/`visit`
@@ -1347,14 +1394,16 @@ fn fill_keys_into_state(state: &mut ScanStateKeys, limit: u32) -> Result<u64> {
 	)? {
 		return Ok(0);
 	}
-	match &mut state.iter {
+	let out = match &mut state.iter {
 		ScanIter::Db(iter) => {
 			fill_keys_inner(iter, limit, state.dir, &mut state.key_buf, &mut state.key_spans)
 		}
 		ScanIter::Tx(iter) => {
 			fill_keys_inner(iter, limit, state.dir, &mut state.key_buf, &mut state.key_spans)
 		}
-	}
+	};
+	state.resume.note(&state.iter);
+	out
 }
 
 /// Same as [`fill_keys_into_state`], for key+value pairs. Fills
@@ -1371,7 +1420,7 @@ fn fill_vals_into_state(state: &mut ScanStateVals, limit: u32) -> Result<(u64, u
 	)? {
 		return Ok((0, 0));
 	}
-	match &mut state.iter {
+	let out = match &mut state.iter {
 		ScanIter::Db(iter) => fill_vals_inner(
 			iter,
 			limit,
@@ -1388,7 +1437,9 @@ fn fill_vals_into_state(state: &mut ScanStateVals, limit: u32) -> Result<(u64, u
 			&mut state.val_buf,
 			&mut state.spans,
 		),
-	}
+	};
+	state.resume.note(&state.iter);
+	out
 }
 
 /// Estimate the bytes/items a keys-only batch will need and reserve
@@ -1566,6 +1617,19 @@ pub(crate) async fn cursor_next_keys<'s>(
 	if cursor.tx.done.load(Ordering::Relaxed) {
 		return Err(Error::TransactionFinished);
 	}
+	// A writable scan holds `inner` across the batch so a savepoint rollback
+	// cannot rebuild the write-batch index under the iterator, and first
+	// replaces an iterator a rollback has invalidated.
+	let _inner = cursor
+		.tx
+		.sync_tx_iter(
+			&mut cursor.state.iter,
+			&mut cursor.state.resume,
+			cursor.state.dir,
+			&cursor.state.start,
+			&cursor.state.end,
+		)
+		.await?;
 	// Reset the reusable buffers before each batch. The allocations
 	// themselves persist via Vec's capacity.
 	cursor.state.key_buf.clear();
@@ -1596,6 +1660,19 @@ pub(crate) async fn cursor_next_vals<'s>(
 	if cursor.tx.done.load(Ordering::Relaxed) {
 		return Err(Error::TransactionFinished);
 	}
+	// A writable scan holds `inner` across the batch so a savepoint rollback
+	// cannot rebuild the write-batch index under the iterator, and first
+	// replaces an iterator a rollback has invalidated.
+	let _inner = cursor
+		.tx
+		.sync_tx_iter(
+			&mut cursor.state.iter,
+			&mut cursor.state.resume,
+			cursor.state.dir,
+			&cursor.state.start,
+			&cursor.state.end,
+		)
+		.await?;
 	cursor.state.key_buf.clear();
 	cursor.state.val_buf.clear();
 	cursor.state.spans.clear();
@@ -1669,10 +1746,12 @@ fn visit_vals_into_state(
 	)? {
 		return Ok(ScanChunkStats::default());
 	}
-	match &mut state.iter {
+	let out = match &mut state.iter {
 		ScanIter::Db(iter) => visit_vals_inner(iter, limit, state.dir, f),
 		ScanIter::Tx(iter) => visit_vals_inner(iter, limit, state.dir, f),
-	}
+	};
+	state.resume.note(&state.iter);
+	out
 }
 
 /// Drive the visitor over the next chunk of `(key, value)` pairs. Like
@@ -1694,6 +1773,19 @@ pub(crate) async fn cursor_for_each_vals(
 	if cursor.tx.done.load(Ordering::Relaxed) {
 		return Err(Error::TransactionFinished);
 	}
+	// A writable scan holds `inner` across the batch so a savepoint rollback
+	// cannot rebuild the write-batch index under the iterator, and first
+	// replaces an iterator a rollback has invalidated.
+	let _inner = cursor
+		.tx
+		.sync_tx_iter(
+			&mut cursor.state.iter,
+			&mut cursor.state.resume,
+			cursor.state.dir,
+			&cursor.state.start,
+			&cursor.state.end,
+		)
+		.await?;
 	let state: &mut ScanStateVals = &mut cursor.state;
 	cursor
 		.tx
@@ -1747,10 +1839,12 @@ fn visit_keys_into_state(
 	)? {
 		return Ok(ScanChunkStats::default());
 	}
-	match &mut state.iter {
+	let out = match &mut state.iter {
 		ScanIter::Db(iter) => visit_keys_inner(iter, limit, state.dir, f),
 		ScanIter::Tx(iter) => visit_keys_inner(iter, limit, state.dir, f),
-	}
+	};
+	state.resume.note(&state.iter);
+	out
 }
 
 /// Drive the keys visitor over the next chunk. Dispatched through
@@ -1763,6 +1857,19 @@ pub(crate) async fn cursor_for_each_keys(
 	if cursor.tx.done.load(Ordering::Relaxed) {
 		return Err(Error::TransactionFinished);
 	}
+	// A writable scan holds `inner` across the batch so a savepoint rollback
+	// cannot rebuild the write-batch index under the iterator, and first
+	// replaces an iterator a rollback has invalidated.
+	let _inner = cursor
+		.tx
+		.sync_tx_iter(
+			&mut cursor.state.iter,
+			&mut cursor.state.resume,
+			cursor.state.dir,
+			&cursor.state.start,
+			&cursor.state.end,
+		)
+		.await?;
 	let state: &mut ScanStateKeys = &mut cursor.state;
 	cursor
 		.tx
@@ -2565,11 +2672,13 @@ impl Transactable for Transaction {
 			let guard = self.inner.lock().await;
 			let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 			let iter = self.build_scan_iter(&rng, version, inner);
+			let epoch = self.rollback_epoch.load(Ordering::Acquire);
 			drop(guard);
 			Ok(Box::new(RocksDbKeysCursor {
 				tx: self,
 				state: ScanStateKeys {
 					iter,
+					resume: TxResume::new(epoch, version),
 					dir,
 					started: false,
 					skip,
@@ -2603,11 +2712,13 @@ impl Transactable for Transaction {
 			let guard = self.inner.lock().await;
 			let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 			let iter = self.build_scan_iter(&rng, version, inner);
+			let epoch = self.rollback_epoch.load(Ordering::Acquire);
 			drop(guard);
 			Ok(Box::new(RocksDbValsCursor {
 				tx: self,
 				state: ScanStateVals {
 					iter,
+					resume: TxResume::new(epoch, version),
 					dir,
 					started: false,
 					skip,
@@ -2651,14 +2762,18 @@ impl Transactable for Transaction {
 			// stack guard is held across the unwind so the count and the engine
 			// cannot diverge partway through.
 			let mut savepoints = self.savepoints.lock().await;
-			let mut guard = self.inner.lock().await;
-			let Some(state) = guard.as_mut() else {
+			let guard = self.inner.lock().await;
+			let Some(state) = guard.as_ref() else {
 				return Err(Error::TransactionFinished);
 			};
 			let unwind = savepoints.take()?;
-			let borrow = state.get_mut();
+			if unwind > 0 {
+				// Cursors replace their iterators once they see the new
+				// epoch, and only read once they hold `inner`, which is held here.
+				self.rollback_epoch.fetch_add(1, Ordering::Release);
+			}
 			for _ in 0..unwind {
-				borrow.rollback_to_savepoint().map_err(kvs_error)?;
+				state.rollback_to_savepoint_keeping_cursors().map_err(kvs_error)?;
 			}
 			Ok(())
 		})
