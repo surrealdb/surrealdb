@@ -209,14 +209,18 @@ impl OwnedTx {
 		}
 	}
 
-	/// Wait until we can take sole ownership of the transaction and then return it.
-	pub fn get_mut(&mut self) -> &mut CommitTx {
-		if Arc::strong_count(&self.0) != 1 {
-			//TODO: This needs to be properly fixed but for now panicing is better then
-			// segfaulting.
-			panic!("Cursor alive while trying to rollback transaction");
-		}
-		Arc::get_mut(&mut self.0).expect("strong count to still be 1")
+	/// Roll back to the most recent savepoint while cursors may be alive.
+	///
+	/// Rolling back rebuilds the write-batch index that iterators created by
+	/// [`Self::owned_raw_iter`] point into, so the caller must guarantee that
+	/// no such iterator is read afterwards and none is read concurrently:
+	/// writable scan cursors hold this transaction's `inner` lock for every
+	/// batch and replace their iterator when the transaction's rollback epoch
+	/// moves. Dropping a stale iterator is sound; it only releases its
+	/// reference to the database iterator and holds no ownership of the
+	/// write-batch entries.
+	pub fn rollback_to_savepoint_keeping_cursors(&self) -> Result<(), rocksdb::Error> {
+		self.0.rollback_to_savepoint()
 	}
 
 	/// Function shadowing `Transaction::<_,_>::rollback` to make it less likely to accidentally
@@ -239,8 +243,7 @@ impl OwnedTx {
 	///
 	/// See [`OwnedTx::rollback`] for reason
 	///
-	/// To call rollback to a savepoint you should first call `Self::get_mut` and then call
-	/// rollback_to_savepoint on that.
+	/// To roll back to a savepoint call [`Self::rollback_to_savepoint_keeping_cursors`].
 	#[expect(private_bounds)]
 	#[expect(dead_code)]
 	pub fn rollback_to_savepoint<T: DoNotUseThisMethod>(&self) {
