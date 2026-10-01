@@ -78,6 +78,12 @@ impl BucketsManager {
 		db: DatabaseId,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
+		// The name occupies one segment of the prefix below, and the prefix is
+		// never re-checked downstream: `PrefixedStore` only validates the object
+		// key, and the filesystem backend only checks containment in its own
+		// root. A name carrying extra segments resolves onto another bucket,
+		// database or namespace sharing the backend once the key is normalised.
+		check_prefix_segment(bu)?;
 		// Obtain the URL for the global bucket
 		let Some(ref url) = self.0.config.global_bucket else {
 			bail!(Error::NoGlobalBucket);
@@ -162,6 +168,15 @@ impl BucketsManager {
 	}
 }
 
+/// Rejects a bucket name that would not stay within one segment of the global
+/// bucket's key prefix.
+fn check_prefix_segment(bu: &str) -> Result<()> {
+	if bu.is_empty() || bu == "." || bu == ".." || bu.contains('/') || bu.contains('\\') {
+		bail!(Error::InvalidBucketName(bu.to_owned()));
+	}
+	Ok(())
+}
+
 /// Key for caching bucket connections.
 ///
 /// Uniquely identifies a bucket by its namespace, database, and bucket name.
@@ -180,5 +195,59 @@ impl BucketConnectionKey {
 			db,
 			bu: bu.into(),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::buc::store::memory::MemoryStore;
+	use crate::buc::{BoxFuture, BucketStoreProviderRequirements};
+
+	struct MemoryProvider;
+
+	impl BucketStoreProviderRequirements for MemoryProvider {}
+
+	impl BucketStoreProvider for MemoryProvider {
+		fn connect<'a>(
+			&self,
+			_url: &'a str,
+			_global: bool,
+			_readonly: bool,
+			_config: Config,
+		) -> BoxFuture<'a, Result<Arc<dyn ObjectStore>>> {
+			Box::pin(async { Ok(Arc::new(MemoryStore::new()) as Arc<dyn ObjectStore>) })
+		}
+	}
+
+	fn manager() -> BucketsManager {
+		let config = Config {
+			global_bucket: Some("memory".to_owned()),
+			..Config::default()
+		};
+		BucketsManager::new(Box::new(MemoryProvider), config)
+	}
+
+	/// Regression: the bucket name becomes one segment of the global bucket's
+	/// `/{ns}/{db}/{bu}` key prefix, so a name carrying a separator or a `..`
+	/// segment would resolve onto another bucket, database or namespace that
+	/// shares the backend.
+	#[tokio::test]
+	async fn global_bucket_rejects_name_that_is_not_a_single_segment() {
+		let manager = manager();
+		for name in ["", ".", "..", "../../2/1/victim", "a/b", "a\\b"] {
+			let Err(err) = manager.connect_global(NamespaceId(1), DatabaseId(1), name).await else {
+				panic!("name {name:?} should be rejected");
+			};
+			assert!(
+				err.to_string().contains("must be a single path segment"),
+				"unexpected error for name {name:?}: {err}"
+			);
+		}
+	}
+
+	#[tokio::test]
+	async fn global_bucket_accepts_ordinary_name() {
+		assert!(manager().connect_global(NamespaceId(1), DatabaseId(1), "data").await.is_ok());
 	}
 }

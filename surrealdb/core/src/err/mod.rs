@@ -1222,6 +1222,11 @@ pub(crate) enum Error {
 	#[error("No global bucket has been configured")]
 	NoGlobalBucket,
 
+	#[error(
+		"Bucket name `{0}` must be a single path segment, without a path separator or a `.`/`..` segment"
+	)]
+	InvalidBucketName(String),
+
 	#[error("Bucket `{0}` is unavailable")]
 	BucketUnavailable(String),
 
