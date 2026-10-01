@@ -30,6 +30,14 @@ pub(crate) async fn define_param_statement_compute(
 		.await
 		.catch_return()?;
 
+	// SECURITY: a stored param is rendered back recursively by INFO/EXPORT (via
+	// `ToSql` and the public-value conversion), so bound its nesting the same way
+	// a stored record is. `StoredParamDefinition` is a plain revisioned encode with
+	// no depth guard of its own, so without this a `DEFINE PARAM ... VALUE` of a
+	// value past the cap would persist and then abort the process when it is read
+	// back for display.
+	crate::val::check_value_depth(&value)?;
+
 	// Fetch the transaction
 	let txn = ctx.tx();
 

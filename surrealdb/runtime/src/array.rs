@@ -12,7 +12,7 @@ use surrealdb_expr::expr::Error;
 use surrealdb_expr::val::array::{
 	Clump, Combine, Complement, Difference, Flatten, Intersect, Matches, Union, Uniq, Windows,
 };
-use surrealdb_expr::val::{Array, Closure, ClosureEvaluator, Value};
+use surrealdb_expr::val::{Array, Closure, ClosureEvaluator, Value, check_value_depth};
 
 use crate::args::{Optional, Rest};
 
@@ -420,7 +420,25 @@ pub async fn fold(
 	if let Some(ev) = ev {
 		let mut accum = init;
 		for (i, val) in array.into_iter().enumerate() {
-			accum = ev.invoke(stk, &mapper, vec![accum, val, i.into()]).await?
+			accum = ev.invoke(stk, &mapper, vec![accum, val, i.into()]).await?;
+			// SECURITY: fold threads a caller-controlled accumulator through a
+			// flat loop, so a closure that wraps it each turn (`|$a, $_| [$a]`)
+			// grows the value's nesting depth without bound. The per-compute
+			// `dive` budget resets every iteration and does not constrain this,
+			// and the value need never be stored, so the storage-write guard does
+			// not see it either - it is built purely in memory. Left unchecked the
+			// next iteration's clone of the accumulator (reading `$a` to wrap it)
+			// recurses deep enough to overflow the stack, an unconditional process
+			// abort under the release profile's `panic = "abort"`. Checking each
+			// iteration keeps the accumulator within one closure's nesting of the
+			// cap and rejects the attack before it is ever built that deep. The
+			// walk early-bails as soon as the cap is exceeded, so the deep-narrow
+			// attack costs O(cap); a fold that legitimately grows a large flat
+			// collection is walked in full, O(accumulator size), but that is the
+			// same order as the work the fold body already does to build it, a
+			// constant-factor overhead rather than a change in complexity. For the
+			// common scalar accumulator (sum, product, count) the walk is O(1).
+			check_value_depth(&accum)?;
 		}
 		Ok(accum)
 	} else {
@@ -693,6 +711,9 @@ pub async fn reduce(
 				};
 				for (idx, val) in iter.enumerate() {
 					accum = ev.invoke(stk, &mapper, vec![accum, val, idx.into()]).await?;
+					// SECURITY: bound the accumulator's nesting depth, as in
+					// `fold` above; reduce threads it through the same flat loop.
+					check_value_depth(&accum)?;
 				}
 				Ok(accum)
 			}

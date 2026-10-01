@@ -184,6 +184,10 @@ impl BuiltinClosureObj for CompiledClosure {
 		self
 	}
 
+	fn captured_values(&self) -> Vec<&Value> {
+		self.captures.0.values().collect()
+	}
+
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		ToSql::fmt_sql(self, f, fmt)
 	}

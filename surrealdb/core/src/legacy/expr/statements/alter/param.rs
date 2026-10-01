@@ -44,6 +44,13 @@ pub(crate) async fn alter_param_statement_compute(
 			.run(|stk| crate::legacy::expr_compute(v, stk, ctx, opt, doc))
 			.await
 			.catch_return()?;
+		// SECURITY: an altered param value persists in a plain revisioned encode with
+		// no depth guard of its own and is rendered back recursively by INFO/EXPORT,
+		// exactly like a value set by DEFINE PARAM, so bound its nesting here too. `$p`
+		// in the new value resolves to the current stored value, so without this
+		// `ALTER PARAM $p VALUE [$p]` repeated across statements would grow the stored
+		// value one level per statement until it aborts the process on read-back.
+		crate::val::check_value_depth(&pa.value)?;
 	}
 
 	match this.comment {

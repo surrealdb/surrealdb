@@ -144,6 +144,15 @@ impl ExecOperator for LetPlan {
 
 			// Apply declared type coercion (mirrors `SetStatement::compute`).
 			let coerced = self.coerce(computed_value).map_err(|e| ControlFlow::Err(e.into()))?;
+
+			// SECURITY: a block threads one child context through every statement, so
+			// a LET rebinding its own parameter (`{ LET $a = 1; LET $a = [$a]; ... }`)
+			// accumulates nesting across statements without any storage write to catch
+			// it, bypassing the top-level LET guard in the executor. Cap it here, where
+			// a block LET binds on the streaming engine, mirroring the legacy
+			// `SetStatement::compute` guard.
+			crate::val::check_value_depth(&coerced)?;
+
 			Ok(input.with_param(self.name.clone(), coerced))
 		})
 	}

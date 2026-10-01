@@ -159,12 +159,29 @@ fn write(this: &mut Value, path: &[Strand], value: Value, mode: Write) -> Result
 impl Value {
 	pub fn patch(&mut self, ops: Value) -> Result<()> {
 		let mut this = self.clone();
-		// Create a new object for testing and patching
-		// Loop over the patch operations and apply them
-		for operation in Operation::value_to_operations(ops)
+		let operations = Operation::value_to_operations(ops)
 			.map_err(Error::InvalidPatch)
-			.map_err(anyhow::Error::new)?
-		{
+			.map_err(anyhow::Error::new)?;
+
+		// SECURITY: applying an operation walks `Value::put` / `cut` / `pick` once
+		// per path segment, and those are natively recursive with no `Stk`. A
+		// JSON-Pointer path is split from an arbitrary string with no length
+		// bound, so a path of a few thousand segments overflows the host stack and
+		// aborts the process (`panic = "abort"`) while the value is being built -
+		// before `check_value_depth`, which inspects a finished value, could ever
+		// see it. Bound the path to the value depth cap here, matching the depth a
+		// patch could otherwise build, so an over-long path is rejected up front.
+		for op in &operations {
+			ensure!(
+				op.max_path_len() <= crate::val::MAX_VALUE_DEPTH,
+				Error::ValueTooDeep {
+					max: crate::val::MAX_VALUE_DEPTH,
+				}
+			);
+		}
+
+		// Loop over the patch operations and apply them
+		for operation in operations {
 			match operation {
 				// Add a value
 				Operation::Add {
@@ -287,6 +304,52 @@ mod tests {
 		let res = parse_val!("{ test: { other: null, something: 123 }, temp: true }");
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
+	}
+
+	// Applying a patch op walks `put` / `cut` / `pick` once per path segment, so a
+	// JSON-Pointer path longer than the value depth cap is rejected before it can
+	// overflow the stack. The path is split from an arbitrary string, so its
+	// length is caller-controlled.
+	#[tokio::test]
+	async fn patch_rejects_path_past_depth_cap() {
+		use crate::val::MAX_VALUE_DEPTH;
+		let ops = parse_val!(&format!(
+			"[{{ op: 'add', path: '{}', value: 1 }}]",
+			"/a".repeat(MAX_VALUE_DEPTH + 1)
+		));
+		let mut val = parse_val!("{ existing: 1 }");
+		let before = val.clone();
+		let err = val.patch(ops).unwrap_err();
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+		// Failed closed: a rejected patch leaves the value untouched.
+		assert_eq!(val, before);
+	}
+
+	// The `from` pointer of copy/move drives the same recursion through `pick`, so
+	// it is bounded on the same footing as `path`.
+	#[tokio::test]
+	async fn patch_rejects_from_path_past_depth_cap() {
+		use crate::val::MAX_VALUE_DEPTH;
+		let ops = parse_val!(&format!(
+			"[{{ op: 'copy', path: '/x', from: '{}' }}]",
+			"/a".repeat(MAX_VALUE_DEPTH + 1)
+		));
+		let mut val = parse_val!("{ }");
+		let err = val.patch(ops).unwrap_err();
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+	}
+
+	// A path exactly at the cap still applies: its recursion is bounded and safe,
+	// and the resulting value sits at the same depth the storage guard allows.
+	#[tokio::test]
+	async fn patch_accepts_path_at_depth_cap() {
+		use crate::val::MAX_VALUE_DEPTH;
+		let ops = parse_val!(&format!(
+			"[{{ op: 'add', path: '{}', value: 1 }}]",
+			"/a".repeat(MAX_VALUE_DEPTH)
+		));
+		let mut val = parse_val!("{ }");
+		val.patch(ops).expect("a path at the cap must apply");
 	}
 
 	#[tokio::test]

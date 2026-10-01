@@ -48,11 +48,9 @@ refused, with a typed error rather than a torn write. And the refusal is
 confined to the row that crosses the bound: data the same old binary wrote
 within it is returned in full, from a server still serving.
 
-The body never returns the over-deep value itself. The bound is applied while a
-result is converted for the caller, and a conversion that fails ends the whole
-batch rather than the one statement — so that the value nests past the bound is
-established by the write refusal, which walks the same tree and reports per
-statement."""
+The body never returns the over-deep value itself. That the value nests past the
+bound is established by the write refusal, which walks the same tree and reports
+per statement, rather than by reading the value back."""
 
 [[test.results]]
 value = "[{ count: 1 }]"
