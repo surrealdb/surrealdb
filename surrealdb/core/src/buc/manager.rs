@@ -83,6 +83,19 @@ impl BucketsManager {
 			bail!(Error::NoGlobalBucket);
 		};
 
+		// SECURITY: `bu` becomes the last segment of the key prefix below, so it
+		// has to be a single path segment. A name carrying a path separator or a
+		// `..` segment reshapes the prefix, and the bucket's keys then resolve
+		// under a different `/{ns}/{db}/{bu}` triple on any backend that
+		// normalises paths: `FileStore::to_os_path` collapses `..` through
+		// `path_clean` before its root check, so the rewritten path stays inside
+		// the allowlisted root and one database can read, write and delete
+		// another namespace's or database's objects. Object keys are already
+		// checked in `PrefixedStore`; the prefix needs the same guarantee.
+		if bu.contains(['/', '\\']) || bu == "." || bu == ".." {
+			bail!(Error::InvalidBucketName(bu.to_owned()));
+		}
+
 		// Connect to the global bucket
 		let global = self.0.provider.connect(url, true, false, self.0.config.clone()).await?;
 
@@ -180,5 +193,75 @@ impl BucketConnectionKey {
 			db,
 			bu: bu.into(),
 		}
+	}
+}
+
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests {
+	use surrealdb_types::vars;
+	use temp_dir::TempDir;
+
+	use crate::cnf::ConfigMap;
+	use crate::dbs::Session;
+	use crate::dbs::capabilities::{Capabilities, ExperimentalTarget, Targets};
+	use crate::kvs::{Builder, Datastore};
+
+	/// A datastore whose global bucket is a `file://` backend rooted at `root`.
+	async fn datastore(root: &str) -> Datastore {
+		let config = ConfigMap::empty()
+			.with_key_value("global_bucket", format!("file://{root}"))
+			.with_key_value("bucket_folder_allowlist", root.to_owned());
+		Builder::new()
+			.with_config(config)
+			.with_capabilities(
+				Capabilities::all().with_experimental(Targets::<ExperimentalTarget>::All),
+			)
+			.build_with_path("memory")
+			.await
+			.expect("in-memory datastore with a file:// global bucket")
+	}
+
+	/// Buckets on the global backend are separated only by the `/{ns}/{db}/{bu}`
+	/// key prefix, so a name that is not a single path segment escapes that
+	/// separation: the filesystem backend collapses `..` before checking its
+	/// root, which puts `../../9/9/other` in namespace 9 / database 9's keyspace
+	/// and makes `x/../victim` an alias for bucket `victim`.
+	#[tokio::test]
+	async fn global_bucket_name_must_be_a_single_path_segment() {
+		let dir = TempDir::new().unwrap();
+		let root = tokio::fs::canonicalize(dir.path()).await.unwrap();
+		let ds = datastore(&root.to_string_lossy()).await;
+		let ses = Session::owner().with_ns("tenant").with_db("app");
+
+		for name in ["x/../victim", "../../9/9/other", "..", ".", "a\\..\\b"] {
+			let vars = vars! { "name": name };
+			let res = ds.execute("DEFINE BUCKET $name", &ses, Some(vars)).await.unwrap();
+			let err = res
+				.into_iter()
+				.next()
+				.expect("one statement")
+				.result
+				.expect_err(&format!("bucket name `{name}` should be rejected"));
+			assert!(
+				err.to_string().contains("single path segment"),
+				"unexpected error for `{name}`: {err}"
+			);
+		}
+
+		// A single-segment name still round-trips through the global bucket.
+		let res = ds
+			.execute(
+				r#"
+				DEFINE BUCKET victim;
+				file::put(type::file("victim", "/secret.txt"), "s3cret");
+				file::get(type::file("victim", "/secret.txt"));
+				"#,
+				&ses,
+				None,
+			)
+			.await
+			.unwrap();
+		let got = res.into_iter().next_back().expect("three statements").result.unwrap();
+		assert_eq!(got, surrealdb_types::Value::Bytes(b"s3cret".to_vec().into()));
 	}
 }
