@@ -375,7 +375,10 @@ jobs:
           done
           if [ -n "${stamp_ver}" ] && [ "${stamp_ver}" != "mixed" ] && [ "${stamp_ver}" != "${workspace_ver}" ]; then
             sed -i -E "s/^version = \"${workspace_ver}\"$/version = \"${stamp_ver}\"/" "${ENGINE}/Cargo.toml"
-            sed -i -E "/path = \"surrealdb/ s|version = \"${workspace_ver}\"|version = \"${stamp_ver}\"|" "${ENGINE}/Cargo.toml"
+            # Internal requirements may carry a range operator (e.g. `~3.2.5`);
+            # strip it so the requirement stamps to the bare locked version, the
+            # same uniform form as the workspace version stamped above.
+            sed -i -E "/path = \"surrealdb/ s|version = \"[~^=]?${workspace_ver}\"|version = \"${stamp_ver}\"|" "${ENGINE}/Cargo.toml"
             echo "Stamped engine workspace version ${workspace_ver} -> ${stamp_ver} (matches downstream lock)"
           fi
 
