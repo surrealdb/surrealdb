@@ -403,6 +403,10 @@ impl Number {
 		}
 	}
 
+	/// The number as an `f64`. Inlined so that per-component loops in other
+	/// crates (the vector functions' norms and distances) compile it into the
+	/// loop whatever link-time optimisation decides.
+	#[inline]
 	pub fn to_float(self) -> f64 {
 		match self {
 			Number::Int(v) => v as f64,
@@ -1220,6 +1224,7 @@ impl Sort for Vec<Number> {
 }
 
 impl ToFloat for Number {
+	#[inline]
 	fn to_float(&self) -> f64 {
 		Number::to_float(*self)
 	}
@@ -1272,53 +1277,64 @@ impl<'de> BorrowDecode<'de, IndexFormat> for Number {
 	}
 }
 
+/// Conversion to `f64`. The implementations are marked `#[inline]` so that the
+/// per-component loops of the vector functions, in other crates, compile them
+/// into the loop whatever link-time optimisation decides.
 pub trait ToFloat {
 	fn to_float(&self) -> f64;
 }
 
 impl ToFloat for f64 {
+	#[inline]
 	fn to_float(&self) -> f64 {
 		*self
 	}
 }
 
 impl ToFloat for f32 {
+	#[inline]
 	fn to_float(&self) -> f64 {
 		*self as f64
 	}
 }
 
 impl ToFloat for half::f16 {
+	#[inline]
 	fn to_float(&self) -> f64 {
 		f64::from(*self)
 	}
 }
 
 impl ToFloat for i64 {
+	#[inline]
 	fn to_float(&self) -> f64 {
 		*self as f64
 	}
 }
 
 impl ToFloat for i32 {
+	#[inline]
 	fn to_float(&self) -> f64 {
 		*self as f64
 	}
 }
 
 impl ToFloat for i16 {
+	#[inline]
 	fn to_float(&self) -> f64 {
 		*self as f64
 	}
 }
 
 impl ToFloat for i8 {
+	#[inline]
 	fn to_float(&self) -> f64 {
 		*self as f64
 	}
 }
 
 impl ToFloat for u8 {
+	#[inline]
 	fn to_float(&self) -> f64 {
 		*self as f64
 	}

@@ -25,7 +25,7 @@ Total rows: 3"'''
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 3}
-    KnnScan [ctx: Db] [index: pt_hnsw, k: 3, ef: 40, dimension: 1] {rows: 3}
+    KnnScan [ctx: Db] [index: pt_hnsw, k: 3, ef: 40, dimension: 1, records: not read] {rows: 3}
 
 Total rows: 3''''
 */
