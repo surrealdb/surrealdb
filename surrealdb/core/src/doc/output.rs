@@ -60,6 +60,7 @@ impl Document {
 				stmt.order.as_ref(),
 				stmt.group.as_ref(),
 				stmt.split.as_ref(),
+				crate::exec::planner::KnnRowReads::Operands,
 			)
 		};
 		// Augment with deps of field-level select permissions

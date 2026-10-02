@@ -35,7 +35,7 @@ use crate::idx::trees::vector::{score_raw_vector, typed_query_vector};
 use crate::idx::trees::{KnnCondFilter, KnnIteratorResult};
 use crate::kvs::{CachePolicy, Transaction};
 use crate::legacy::knn::LegacyCondition;
-use crate::val::{Number, TableName, Value};
+use crate::val::{Number, Object, RecordId, TableName, Value};
 
 /// Execution strategy chosen by the KNN prefilter triage (#548), keyed on
 /// the allow-list cardinality.
@@ -196,6 +196,16 @@ pub struct KnnScan {
 	/// The [`PrefilterTier`] actually taken, recorded during `execute()` for
 	/// EXPLAIN ANALYZE (`0` = no prefilter ran).
 	pub(crate) tier: Arc<std::sync::atomic::AtomicU8>,
+	/// Whether the scan read no record at all: the search scored its
+	/// candidates without reading them, and the rows were built from the
+	/// record ids it returned (see [`emits_record_ids_only`]). Recorded during
+	/// `execute()` for EXPLAIN ANALYZE.
+	pub(crate) records_unread: Arc<std::sync::atomic::AtomicBool>,
+	/// Whether every field of the table reads as stored for every caller — none
+	/// is `COMPUTED`, none carries a field `SELECT` permission other than
+	/// `FULL` — decided when the scan is planned, in the transaction it runs
+	/// in. `false` unless the planner established it.
+	pub(crate) fields_read_as_stored: bool,
 	/// Projection-aware field set for computed-field materialization.
 	/// Outer `None` = sub-operator mode (parent handles fields).
 	/// `Some(None)` = all fields, `Some(Some(set))` = specific fields.
@@ -230,6 +240,8 @@ impl KnnScan {
 			prefilter,
 			matches_condition: None,
 			tier: Arc::new(std::sync::atomic::AtomicU8::new(0)),
+			records_unread: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+			fields_read_as_stored: false,
 			needed_fields,
 		}
 	}
@@ -237,6 +249,13 @@ impl KnnScan {
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
+		self
+	}
+
+	/// Records that every field of the table reads as stored for every caller
+	/// (see [`Self::fields_read_as_stored`]).
+	pub(crate) fn with_fields_read_as_stored(mut self, read_as_stored: bool) -> Self {
+		self.fields_read_as_stored = read_as_stored;
 		self
 	}
 
@@ -286,6 +305,9 @@ impl ExecOperator for KnnScan {
 			PrefilterTier::label(self.tier.load(std::sync::atomic::Ordering::Relaxed))
 		{
 			attrs.push(("prefilter_tier".to_string(), label.to_string()));
+		}
+		if self.records_unread.load(std::sync::atomic::Ordering::Relaxed) {
+			attrs.push(("records".to_string(), "not read".to_string()));
 		}
 		attrs
 	}
@@ -338,6 +360,8 @@ impl ExecOperator for KnnScan {
 		let matches_condition = self.matches_condition.clone();
 		let prefilter = self.prefilter.clone();
 		let tier_cell = Arc::clone(&self.tier);
+		let records_unread = Arc::clone(&self.records_unread);
+		let fields_read_as_stored = self.fields_read_as_stored;
 		let op_metrics = Arc::clone(&self.metrics);
 		let resolved = self.resolved.clone();
 		let needed_fields = self.needed_fields.clone();
@@ -483,7 +507,11 @@ impl ExecOperator for KnnScan {
 			}
 			tier_cell.store(tier.map_or(0, |t| t as u8), std::sync::atomic::Ordering::Relaxed);
 
+			// Whether the search read records, to score its candidates or to
+			// filter them.
+			let search_read_records;
 			let knn_results = if matches!(tier, Some(PrefilterTier::Exact)) {
+				search_read_records = true;
 				// Exact tier: no graph access — resolve, fetch and score the
 				// allow-list members directly (bounded by the exact-tier
 				// threshold), reusing the brute-force KnnTopK machinery.
@@ -610,6 +638,8 @@ impl ExecOperator for KnnScan {
 						_ => None,
 					}
 				};
+				// A filter reads each candidate's record inside the search.
+				search_read_records = cond_filter.is_some();
 				match &index_def.index {
 					Index::Hnsw(hnsw_params) => {
 						// Obtain the shared HNSW index
@@ -723,6 +753,20 @@ impl ExecOperator for KnnScan {
 				}
 			}
 
+			if emits_record_ids_only(
+				needed_fields.as_ref(),
+				&select_permission,
+				version,
+				fields_read_as_stored,
+			) {
+				records_unread.store(!search_read_records, std::sync::atomic::Ordering::Relaxed);
+				let values: Vec<Value> = rids.into_iter().map(record_id_row).collect();
+				if !values.is_empty() {
+					yielder.emit(ValueBatch::new(values)).await;
+				}
+				return Ok(());
+			}
+
 			// Table-level permissions are handled by fetch_and_filter_records_batch.
 			// The pipeline handles computed fields and field-level permissions.
 			let mut pipeline = ScanPipeline::new(
@@ -758,6 +802,40 @@ impl ExecOperator for KnnScan {
 
 		Ok(monitor_stream(Box::pin(stream), "KnnScan", &self.metrics))
 	}
+}
+
+/// Whether the rows of a KNN result can be emitted as `{ id }` objects built
+/// from the record ids the search returned, without reading the records.
+///
+/// That holds when nothing downstream reads more of a row than its id:
+///
+/// - the pipeline needs no field but `id` (`needed_fields`, in which a KNN operator counts as
+///   reading only the id it tests for membership). An empty set qualifies: a pipeline reading no
+///   field — `count()`, a constant projection — needs only one row per result, which a `{ id }` row
+///   is;
+/// - the table permission admits every row, so no candidate has to be judged against its content;
+/// - every field of the table reads as stored for every caller (`fields_read_as_stored`, decided
+///   when the scan is planned), so no projection layer above the scan and no scan-side derivation
+///   evaluates against the row, whichever of the two enforces;
+/// - the read is at the current version, the one the index describes: a record id it returns names
+///   a record that exists in this transaction's snapshot.
+fn emits_record_ids_only(
+	needed_fields: Option<&Option<HashSet<String>>>,
+	select_permission: &PhysicalPermission,
+	version: Option<u64>,
+	fields_read_as_stored: bool,
+) -> bool {
+	matches!(needed_fields, Some(Some(needed)) if needed.iter().all(|f| f == "id"))
+		&& fields_read_as_stored
+		&& version.is_none()
+		&& matches!(select_permission, PhysicalPermission::Allow)
+}
+
+/// The row of a record the pipeline reads only the id of.
+fn record_id_row(rid: RecordId) -> Value {
+	let mut row = Object::default();
+	row.insert("id", Value::RecordId(rid));
+	Value::Object(row)
 }
 
 /// Number of allow-list members resolved and fetched per batch on the exact

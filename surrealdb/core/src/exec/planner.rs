@@ -72,6 +72,7 @@ pub(crate) mod util;
 use std::sync::Arc;
 
 pub(crate) use cycle_guard::CycleGuard;
+pub(crate) use select::KnnRowReads;
 
 // Re-exports for external callers
 use self::util::literal_to_value;

@@ -377,6 +377,7 @@ impl<'ctx> Planner<'ctx> {
 	/// Returns `None` if all fields are needed (SELECT *, wildcard present, or
 	/// opaque expressions prevent static analysis). Returns `Some(set)` with
 	/// the root field names needed by projections, WHERE, ORDER, GROUP, SPLIT.
+	/// `knn` says what a KNN operator in those clauses reads from a row.
 	pub(crate) fn extract_needed_fields(
 		fields: &Fields,
 		omit: &[Expr],
@@ -384,6 +385,7 @@ impl<'ctx> Planner<'ctx> {
 		order: Option<&crate::expr::order::Ordering>,
 		group: Option<&crate::expr::group::Groups>,
 		split: Option<&crate::expr::split::Splits>,
+		knn: KnnRowReads,
 	) -> Option<std::collections::HashSet<String>> {
 		use crate::expr::visit::{Visit, Visitor};
 		use crate::expr::{Expr, Part};
@@ -439,6 +441,8 @@ impl<'ctx> Planner<'ctx> {
 			/// At depth ≥ 2 we don't model the chain and conservatively
 			/// fall back to "all fields needed" via `has_opaque`.
 			filter_depth: u32,
+			/// What a KNN operator reads from a row.
+			knn: KnnRowReads,
 		}
 
 		impl Visitor for NeededFieldExtractor {
@@ -555,6 +559,12 @@ impl<'ctx> Planner<'ctx> {
 					Expr::Param(_) => {
 						self.has_opaque = true;
 					}
+					Expr::Binary {
+						op: crate::expr::operator::BinaryOperator::NearestNeighbor(_),
+						..
+					} if self.knn == KnnRowReads::RecordId => {
+						self.fields.insert("id".to_owned());
+					}
 					_ => {
 						expr.visit(self)?;
 					}
@@ -567,6 +577,7 @@ impl<'ctx> Planner<'ctx> {
 			fields: std::collections::HashSet::new(),
 			has_opaque: false,
 			filter_depth: 0,
+			knn,
 		};
 
 		// Walk projection expressions
@@ -878,6 +889,7 @@ impl<'ctx> Planner<'ctx> {
 				order.as_ref(),
 				group.as_ref(),
 				split.as_ref(),
+				KnnRowReads::Operands,
 			);
 
 			// Extract the literal RecordId once and reuse — the outer guard
@@ -1003,6 +1015,14 @@ impl<'ctx> Planner<'ctx> {
 		}
 		pp.set_planning_scopes(own_matches_context, has_knn_early, self);
 
+		// A `<|k, DIST|>` form is served by the brute-force source, which
+		// scores each row's vector field; every other KNN form is answered by
+		// an index and only tests the row's id against its result.
+		let knn_reads = if cond.as_ref().is_some_and(|c| has_knn_k_operator(&c.0)) {
+			KnnRowReads::Operands
+		} else {
+			KnnRowReads::RecordId
+		};
 		let needed_fields = Self::extract_needed_fields(
 			&fields,
 			&omit,
@@ -1010,7 +1030,25 @@ impl<'ctx> Planner<'ctx> {
 			order.as_ref(),
 			group.as_ref(),
 			split.as_ref(),
-		);
+			knn_reads,
+		)
+		// A clause reading the row other than by a field's name —
+		// `type::field`, `@`, `$this`, a nested statement, a closure — reaches
+		// fields no name in it shows. An index-backed KNN may build its rows
+		// from record ids alone, so there every field is then needed.
+		.filter(|_| {
+			!(has_knn_early
+				&& knn_reads == KnnRowReads::RecordId
+				&& clauses_read_row_opaquely(
+					&fields,
+					&omit,
+					cond.as_ref(),
+					order.as_ref(),
+					group.as_ref(),
+					split.as_ref(),
+					self.function_registry(),
+				))
+		});
 		// After source resolution, params that resolved to tables are now
 		// Expr::Table, so we only need to check concrete types here.
 		let source_is_single_scan = what.len() == 1
@@ -2135,6 +2173,16 @@ impl<'ctx> Planner<'ctx> {
 			}
 			None => None,
 		};
+		// Rows needing nothing but their id may be built from the search's
+		// record ids when every field of the table reads as stored. A
+		// versioned read always reads its records, so it never asks.
+		let fields_read_as_stored = if version.is_none()
+			&& needed_fields.as_ref().is_some_and(|needed| needed.iter().all(|f| f == "id"))
+		{
+			self.fields_read_as_stored(&table).await
+		} else {
+			false
+		};
 		let mut scan = KnnScan::new(
 			index_ref,
 			vector,
@@ -2147,7 +2195,8 @@ impl<'ctx> Planner<'ctx> {
 			prefilter,
 			Some(needed_fields),
 		)
-		.with_matches_condition(matches_condition);
+		.with_matches_condition(matches_condition)
+		.with_fields_read_as_stored(fields_read_as_stored);
 		if let Some(tc) = table_ctx {
 			scan = scan.with_resolved(tc);
 		}
@@ -2157,6 +2206,34 @@ impl<'ctx> Planner<'ctx> {
 			limit_pushed: false,
 			topk_pushdown: None,
 		})
+	}
+
+	/// Whether every field of `table` reads as stored for every caller: none
+	/// is `COMPUTED`, and none carries a field `SELECT` permission other than
+	/// `FULL`. `false` without catalog access, or when the field list cannot
+	/// be read.
+	async fn fields_read_as_stored(&self, table: &TableName) -> bool {
+		let Some(txn) = self.txn.as_ref() else {
+			return false;
+		};
+		let Some((ns_id, db_id)) = self.ns_db_ids().await else {
+			return false;
+		};
+		match txn.all_tb_fields(ns_id, db_id, table, None).await {
+			Ok(fields) => fields.iter().all(|fd| {
+				fd.computed.is_none()
+					&& matches!(fd.select_permission, crate::catalog::Permission::Full)
+			}),
+			Err(e) => {
+				tracing::warn!(
+					table = %table,
+					error = %e,
+					"plan-time field list failed in fields_read_as_stored; \
+					 KNN rows will be read from their records",
+				);
+				false
+			}
+		}
 	}
 
 	/// Build a `BitmapResolve` for [`AccessPath::BitmapFusion`].
@@ -3479,6 +3556,214 @@ impl<'ctx> Planner<'ctx> {
 
 /// Convert a plan-level [`BitmapPlan`] tree into the executable
 /// [`BitmapNode`] operator tree.
+/// What a KNN operator (`<|k, …|>`) reads from the rows it is evaluated
+/// against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KnnRowReads {
+	/// Its operands: the brute-force source scores the vector field of every
+	/// row.
+	Operands,
+	/// Only the row's `id`. An index-backed KNN source ranks the candidates,
+	/// and the operator is evaluated as membership of the row's id in that
+	/// result (`KnnMembershipOp`), without evaluating either operand.
+	RecordId,
+}
+
+/// Whether an expression of the clauses reads the row other than by a
+/// field's name ([`reads_row_opaquely`]). A wildcard (`*`) projection reads
+/// the whole row, so it counts as one.
+fn clauses_read_row_opaquely(
+	fields: &Fields,
+	omit: &[Expr],
+	cond: Option<&Cond>,
+	order: Option<&crate::expr::order::Ordering>,
+	group: Option<&crate::expr::group::Groups>,
+	split: Option<&crate::expr::split::Splits>,
+	registry: &crate::exec::function::FunctionRegistry,
+) -> bool {
+	let projected = match fields {
+		Fields::Value(selector) => reads_row_opaquely(&selector.expr, registry),
+		Fields::Select(list) => list.iter().any(|field| match field {
+			Field::Single(selector) => reads_row_opaquely(&selector.expr, registry),
+			Field::All => true,
+		}),
+	};
+	let idiom_reads = |idiom: &Idiom| idiom_reads_row_opaquely(idiom, registry);
+	let ordered = || match order {
+		Some(crate::expr::order::Ordering::Order(list)) => {
+			list.iter().any(|o| idiom_reads(&o.value))
+		}
+		Some(crate::expr::order::Ordering::Random) | None => false,
+	};
+	projected
+		|| omit.iter().any(|expr| reads_row_opaquely(expr, registry))
+		|| cond.is_some_and(|c| reads_row_opaquely(&c.0, registry))
+		|| ordered()
+		|| group.is_some_and(|g| g.0.iter().any(|g| idiom_reads(&g.0)))
+		|| split.is_some_and(|s| s.iter().any(|s| idiom_reads(&s.0)))
+}
+
+/// Whether `expr` may read the row other than by a field's name, so that
+/// which fields it reaches cannot be told from the names in it:
+///
+/// - the document (`@`), or a row parameter (`$this`, `$self`, `$parent`) used other than as the
+///   start of a field access;
+/// - a nested statement or block, which evaluates with the row in scope;
+/// - a closure, whose body runs against values the expression does not show;
+/// - a projection function (`type::field`, `type::fields`), which reads fields by the names its
+///   arguments evaluate to, and a user-defined, script, module or silo function, which runs a body
+///   the expression does not contain.
+fn reads_row_opaquely(expr: &Expr, registry: &crate::exec::function::FunctionRegistry) -> bool {
+	use crate::expr::visit::Visitor;
+
+	let mut walker = OpaqueReads {
+		registry,
+		found: false,
+	};
+	let _ = walker.visit_expr(expr);
+	walker.found
+}
+
+/// [`reads_row_opaquely`] for an idiom of an `ORDER BY`, `GROUP BY` or
+/// `SPLIT` clause.
+fn idiom_reads_row_opaquely(
+	idiom: &Idiom,
+	registry: &crate::exec::function::FunctionRegistry,
+) -> bool {
+	use crate::expr::visit::Visitor;
+
+	let mut walker = OpaqueReads {
+		registry,
+		found: false,
+	};
+	let _ = walker.visit_idiom(idiom);
+	walker.found
+}
+
+/// The walker behind [`reads_row_opaquely`]: sets `found` on the first read
+/// of the row other than by a field's name.
+struct OpaqueReads<'a> {
+	registry: &'a crate::exec::function::FunctionRegistry,
+	found: bool,
+}
+
+impl OpaqueReads<'_> {
+	fn is_row_param(param: &crate::expr::Param) -> bool {
+		super::row_scope::RowScopeKind::from_param_name(param.as_str()).is_some()
+	}
+
+	/// Whether evaluating `expr` itself, apart from its children, reads the
+	/// row other than by a field's name. Exhaustive over [`Expr`], so a new
+	/// variant has to be classified here.
+	fn node_reads_row_opaquely(&self, expr: &Expr) -> bool {
+		use crate::expr::Function;
+
+		match expr {
+			Expr::Param(param) => Self::is_row_param(param),
+			Expr::FunctionCall(call) => match &call.receiver {
+				Function::Normal(name) => self.registry.is_projection(name),
+				Function::Model(_) => false,
+				Function::Custom(_)
+				| Function::Script(_)
+				| Function::Module(..)
+				| Function::Silo {
+					..
+				} => true,
+			},
+			// A closure's body, and a statement or block nested in the
+			// expression, evaluate with the row in scope.
+			Expr::Closure(_)
+			| Expr::Block(_)
+			| Expr::Return(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Upsert(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			}
+			| Expr::Match(_) => true,
+			Expr::Literal(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Throw(_)
+			| Expr::IfElse(_) => false,
+		}
+	}
+}
+
+impl crate::expr::visit::Visitor for OpaqueReads<'_> {
+	type Error = std::convert::Infallible;
+
+	fn visit_idiom(&mut self, idiom: &Idiom) -> Result<(), Self::Error> {
+		use crate::expr::part::Part;
+		use crate::expr::visit::Visit;
+
+		// A row parameter starting the idiom reads the row by name only when
+		// a field access follows it.
+		if let Some(Part::Start(Expr::Param(param))) = idiom.0.first()
+			&& Self::is_row_param(param)
+		{
+			if !matches!(idiom.0.get(1), Some(Part::Field(_))) {
+				self.found = true;
+				return Ok(());
+			}
+			for part in idiom.0.iter().skip(1) {
+				self.visit_part(part)?;
+			}
+			return Ok(());
+		}
+		idiom.visit(self)
+	}
+
+	fn visit_part(&mut self, part: &crate::expr::part::Part) -> Result<(), Self::Error> {
+		use crate::expr::visit::Visit;
+
+		if matches!(part, crate::expr::part::Part::Doc) {
+			self.found = true;
+			return Ok(());
+		}
+		part.visit(self)
+	}
+
+	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
+		use crate::expr::visit::Visit;
+
+		if self.found {
+			return Ok(());
+		}
+		if self.node_reads_row_opaquely(expr) {
+			self.found = true;
+			return Ok(());
+		}
+		expr.visit(self)
+	}
+}
+
 fn bitmap_plan_to_node(plan: BitmapPlan) -> Arc<BitmapNode> {
 	match plan {
 		BitmapPlan::BTree {
@@ -4123,6 +4408,7 @@ mod tests {
 			stmt.order.as_ref(),
 			stmt.group.as_ref(),
 			stmt.split.as_ref(),
+			KnnRowReads::Operands,
 		)
 		.expect("non-wildcard projection should produce a Some(set)");
 		assert!(
@@ -4153,6 +4439,7 @@ mod tests {
 			stmt.order.as_ref(),
 			stmt.group.as_ref(),
 			stmt.split.as_ref(),
+			KnnRowReads::Operands,
 		)
 		.expect("non-wildcard projection should produce a Some(set)");
 		assert!(needed.contains("cat"), "got {needed:?}");
@@ -4175,6 +4462,7 @@ mod tests {
 			stmt.order.as_ref(),
 			stmt.group.as_ref(),
 			stmt.split.as_ref(),
+			KnnRowReads::Operands,
 		)
 		.expect("non-wildcard projection should produce a Some(set)");
 		assert!(needed.contains("name"), "got {needed:?}");
@@ -4200,6 +4488,7 @@ mod tests {
 			stmt.order.as_ref(),
 			stmt.group.as_ref(),
 			stmt.split.as_ref(),
+			KnnRowReads::Operands,
 		)
 		.expect("non-wildcard projection should produce a Some(set)");
 		assert!(needed.contains("name"), "got {needed:?}");
@@ -4228,6 +4517,7 @@ mod tests {
 			stmt.order.as_ref(),
 			stmt.group.as_ref(),
 			stmt.split.as_ref(),
+			KnnRowReads::Operands,
 		)
 		.expect("non-wildcard projection should produce a Some(set)");
 		assert!(needed.contains("name"), "got {needed:?}");
@@ -4254,11 +4544,93 @@ mod tests {
 			stmt.order.as_ref(),
 			stmt.group.as_ref(),
 			stmt.split.as_ref(),
+			KnnRowReads::Operands,
 		)
 		.expect("non-wildcard projection should produce a Some(set)");
 		assert!(
 			needed.contains("parent"),
 			"bare `parent.sub` is a real column path: got {needed:?}",
 		);
+	}
+	fn needed_fields_with(sql: &str, knn: KnnRowReads) -> Option<HashSet<String>> {
+		let stmt = parse_select(sql);
+		Planner::extract_needed_fields(
+			&stmt.fields,
+			&stmt.omit,
+			stmt.cond.as_ref(),
+			stmt.order.as_ref(),
+			stmt.group.as_ref(),
+			stmt.split.as_ref(),
+			knn,
+		)
+	}
+
+	/// An index-backed KNN operator reads only the id it tests for
+	/// membership: neither its vector field nor its query parameter, which
+	/// would otherwise make the set opaque. The rest of the clause is read as
+	/// usual.
+	#[test]
+	fn an_index_knn_reads_only_the_row_id() {
+		let fields = |sql| needed_fields_with(sql, KnnRowReads::RecordId);
+		let set = |names: &[&str]| Some(names.iter().map(|n| n.to_string()).collect());
+		assert_eq!(fields("SELECT id FROM t WHERE v <|3,40|> $q"), set(&["id"]));
+		assert_eq!(
+			fields("SELECT id, name FROM t WHERE v <|3,40|> $q AND n > 1"),
+			set(&["id", "name", "n"])
+		);
+		assert_eq!(fields("SELECT id FROM t WHERE v <|3,40|> $q AND n > $m"), None);
+		// A brute-force KNN scores the vector of every row, so its operands are read.
+		assert_eq!(
+			needed_fields_with("SELECT id FROM t WHERE v <|3,40|> $q", KnnRowReads::Operands),
+			None
+		);
+		assert_eq!(
+			needed_fields_with(
+				"SELECT id FROM t WHERE v <|3,EUCLIDEAN|> [1, 2]",
+				KnnRowReads::Operands
+			),
+			set(&["id", "v"])
+		);
+	}
+
+	/// A clause reaching the row other than by a field's name reads it
+	/// opaquely; a field access, also through a row parameter, does not.
+	#[test]
+	fn clauses_reading_the_row_opaquely() {
+		let registry = crate::exec::function::FunctionRegistry::with_builtins();
+		let opaque = |sql| {
+			let stmt = parse_select(sql);
+			clauses_read_row_opaquely(
+				&stmt.fields,
+				&stmt.omit,
+				stmt.cond.as_ref(),
+				stmt.order.as_ref(),
+				stmt.group.as_ref(),
+				stmt.split.as_ref(),
+				&registry,
+			)
+		};
+		for sql in [
+			"SELECT id FROM t WHERE v <|3,40|> $q",
+			"SELECT id, name FROM t WHERE v <|3,40|> $q AND $this.n > 1",
+			"SELECT id, ->likes->post AS liked FROM t WHERE v <|3,40|> $q",
+			"SELECT id FROM t WHERE v <|3,40|> $q ORDER BY name",
+			"SELECT id, IF n > 1 THEN 'a' ELSE 'b' END AS c FROM t WHERE v <|3,40|> $q",
+		] {
+			assert!(!opaque(sql), "{sql}");
+		}
+		for sql in [
+			"SELECT id, type::field('secret') AS s FROM t WHERE v <|3,40|> $q",
+			"SELECT id FROM t WHERE v <|3,40|> $q AND type::field('secret') = 1",
+			"SELECT id, @.secret AS doc FROM t WHERE v <|3,40|> $q",
+			"SELECT id, $this AS doc FROM t WHERE v <|3,40|> $q",
+			"SELECT id, $this.keys() AS k FROM t WHERE v <|3,40|> $q",
+			"SELECT id, (SELECT VALUE $parent.secret FROM ONLY 1) AS s FROM t WHERE v <|3,40|> $q",
+			"SELECT id FROM t WHERE v <|3,40|> $q AND array::any([1], |$x| secret = $x)",
+			"SELECT id, fn::read() AS r FROM t WHERE v <|3,40|> $q",
+			"SELECT * FROM t WHERE v <|3,40|> $q",
+		] {
+			assert!(opaque(sql), "{sql}");
+		}
 	}
 }
