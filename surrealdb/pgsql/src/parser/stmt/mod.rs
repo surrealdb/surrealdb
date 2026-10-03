@@ -17,6 +17,13 @@ use crate::parser::Parser;
 impl<'a> Parser<'a> {
 	/// Parse a single top-level SQL statement.
 	pub fn parse_statement(&mut self) -> ParseResult<Statement> {
+		self.enter_recursion(self.peek().span)?;
+		let res = self.parse_statement_inner();
+		self.leave_recursion();
+		res
+	}
+
+	fn parse_statement_inner(&mut self) -> ParseResult<Statement> {
 		if self.peek().is_eof() || self.peek().kind == TokenKind::Semi {
 			return Ok(Statement::Empty);
 		}

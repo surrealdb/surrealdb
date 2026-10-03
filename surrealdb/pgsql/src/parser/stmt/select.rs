@@ -18,6 +18,13 @@ impl<'a> Parser<'a> {
 	///
 	/// gram.y: SelectStmt
 	pub fn parse_select_stmt(&mut self) -> ParseResult<SelectStmt> {
+		self.enter_recursion(self.peek().span)?;
+		let res = self.parse_select_stmt_inner();
+		self.leave_recursion();
+		res
+	}
+
+	fn parse_select_stmt_inner(&mut self) -> ParseResult<SelectStmt> {
 		let with = if self.peek().kind == TokenKind::Keyword(Keyword::With) {
 			Some(self.parse_with_clause()?)
 		} else {

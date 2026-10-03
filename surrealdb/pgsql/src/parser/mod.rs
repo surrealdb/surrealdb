@@ -10,7 +10,22 @@ use crate::lexer::token::{Token, TokenKind};
 use crate::span::Span;
 
 /// Maximum recursion depth allowed during parsing before aborting.
-pub const MAX_RECURSION_DEPTH: u32 = 256;
+pub const MAX_RECURSION_DEPTH: u32 = 128;
+
+/// Configuration settings for PostgreSQL parser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParserSettings {
+	/// Maximum recursion depth allowed during parsing.
+	pub max_recursion_depth: u32,
+}
+
+impl Default for ParserSettings {
+	fn default() -> Self {
+		Self {
+			max_recursion_depth: MAX_RECURSION_DEPTH,
+		}
+	}
+}
 
 /// Parser for PostgreSQL SQL grammar.
 #[derive(Debug, Clone)]
@@ -18,17 +33,24 @@ pub struct Parser<'a> {
 	lexer: Lexer<'a>,
 	current: Token<'a>,
 	depth: u32,
+	settings: ParserSettings,
 }
 
 impl<'a> Parser<'a> {
-	/// Create a new parser initialized to the first token of `src`.
+	/// Create a new parser initialized to the first token of `src` with default settings.
 	pub fn new(src: &'a str) -> ParseResult<Self> {
+		Self::with_settings(src, ParserSettings::default())
+	}
+
+	/// Create a new parser initialized with custom settings.
+	pub fn with_settings(src: &'a str, settings: ParserSettings) -> ParseResult<Self> {
 		let mut lexer = Lexer::new(src);
 		let current = lexer.next_token()?;
 		Ok(Self {
 			lexer,
 			current,
 			depth: 0,
+			settings,
 		})
 	}
 
@@ -84,7 +106,7 @@ impl<'a> Parser<'a> {
 	#[inline]
 	pub fn enter_recursion(&mut self, span: Span) -> ParseResult<()> {
 		self.depth = self.depth.saturating_add(1);
-		if self.depth > MAX_RECURSION_DEPTH {
+		if self.depth > self.settings.max_recursion_depth {
 			Err(ParseError::new(span, ErrorKind::RecursionLimitExceeded))
 		} else {
 			Ok(())

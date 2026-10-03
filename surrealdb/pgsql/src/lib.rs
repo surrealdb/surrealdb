@@ -35,24 +35,48 @@ pub use lexer::Lexer;
 pub use lexer::keyword::{Keyword, KeywordCategory};
 pub use lexer::split::{StatementBoundary, split_statements};
 pub use lexer::token::{Token, TokenKind};
-pub use parser::Parser;
+pub use parser::{MAX_RECURSION_DEPTH, Parser, ParserSettings};
 pub use printer::ToPgSql;
 pub use span::Span;
 
-/// Parse a single PostgreSQL expression from string input.
+/// Parse a single PostgreSQL expression from string input with default settings.
 pub fn parse_expr(src: &str) -> ParseResult<Expr> {
 	let mut parser = Parser::new(src)?;
 	parser.parse_expr()
 }
 
-/// Parse a single PostgreSQL statement from string input.
+/// Parse a single PostgreSQL expression from string input with custom settings.
+pub fn parse_expr_with_settings(src: &str, settings: ParserSettings) -> ParseResult<Expr> {
+	let mut parser = Parser::with_settings(src, settings)?;
+	parser.parse_expr()
+}
+
+/// Parse a single PostgreSQL statement from string input with default settings.
 pub fn parse_statement(src: &str) -> ParseResult<Statement> {
 	let mut parser = Parser::new(src)?;
 	parser.parse_statement()
 }
 
-/// Parse multiple PostgreSQL statements from string input.
+/// Parse a single PostgreSQL statement from string input with custom settings.
+pub fn parse_statement_with_settings(
+	src: &str,
+	settings: ParserSettings,
+) -> ParseResult<Statement> {
+	let mut parser = Parser::with_settings(src, settings)?;
+	parser.parse_statement()
+}
+
+/// Parse multiple PostgreSQL statements from string input with default settings.
 pub fn parse_statements(src: &str) -> ParseResult<Vec<Statement>> {
 	let mut parser = Parser::new(src)?;
+	parser.parse_statements()
+}
+
+/// Parse multiple PostgreSQL statements from string input with custom settings.
+pub fn parse_statements_with_settings(
+	src: &str,
+	settings: ParserSettings,
+) -> ParseResult<Vec<Statement>> {
+	let mut parser = Parser::with_settings(src, settings)?;
 	parser.parse_statements()
 }

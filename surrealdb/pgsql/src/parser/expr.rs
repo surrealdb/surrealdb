@@ -24,7 +24,12 @@ impl<'a> Parser<'a> {
 	/// Parse an expression with minimum binding power.
 	pub fn parse_expr_bp(&mut self, min_bp: u8) -> ParseResult<Expr> {
 		self.enter_recursion(self.peek().span)?;
+		let res = self.parse_expr_bp_inner(min_bp);
+		self.leave_recursion();
+		res
+	}
 
+	fn parse_expr_bp_inner(&mut self, min_bp: u8) -> ParseResult<Expr> {
 		// Prefix / Prefix operator handling
 		let mut left = if let Some(prefix_bp) = prefix_binding_power(&self.peek().kind) {
 			let op_tok = self.bump()?;
@@ -283,7 +288,6 @@ impl<'a> Parser<'a> {
 			};
 		}
 
-		self.leave_recursion();
 		Ok(left)
 	}
 
