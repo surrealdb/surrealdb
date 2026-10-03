@@ -14,13 +14,16 @@ categories.workspace = true
 [dependencies]
 surrealdb-core = { workspace = true }
 surrealdb-mysql = { workspace = true }
+surrealdb-types = { workspace = true }
 
 anyhow = { workspace = true }
+rand = { workspace = true }
+sha1 = { workspace = true }
+tokio = { workspace = true, features = ["net", "sync", "time", "io-util"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-
-[package.metadata.cargo-machete]
-ignored = ["surrealdb-mysql"]
+uuid = { workspace = true, features = ["v4"] }
 
 [lints]
 workspace = true
+

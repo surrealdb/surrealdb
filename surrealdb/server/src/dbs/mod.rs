@@ -2090,6 +2090,7 @@ mod tests {
 		Ok(Config {
 			bind: "127.0.0.1:0".parse()?,
 			postgres_bind: None,
+			mysql_bind: None,
 			path,
 			client_ip: ClientIp::None,
 			user: None,

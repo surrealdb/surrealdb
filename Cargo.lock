@@ -7731,10 +7731,15 @@ name = "surrealdb-mywire"
 version = "3.4.0-nightly"
 dependencies = [
  "anyhow",
+ "rand 0.9.4",
+ "sha1",
  "surrealdb-core",
  "surrealdb-mysql",
+ "surrealdb-types",
+ "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

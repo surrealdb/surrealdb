@@ -37,6 +37,7 @@ impl ConfigCheck for CommunityComposer {
 pub struct Config {
 	pub bind: SocketAddr,
 	pub postgres_bind: Option<SocketAddr>,
+	pub mysql_bind: Option<SocketAddr>,
 	pub path: String,
 	pub client_ip: ClientIp,
 	pub user: Option<String>,

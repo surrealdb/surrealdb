@@ -233,6 +233,12 @@ pub struct StartCommandArguments {
 	)]
 	#[arg(env = "SURREAL_POSTGRES_BIND", long = "postgres-bind")]
 	postgres_bind: Option<SocketAddr>,
+	#[arg(
+		help = "The hostname or IP address to listen for MySQL wire protocol connections on",
+		help_heading = "MySQL server"
+	)]
+	#[arg(env = "SURREAL_MYSQL_BIND", long = "mysql-bind")]
+	mysql_bind: Option<SocketAddr>,
 	//
 	// Database options
 	#[command(flatten)]
@@ -309,6 +315,7 @@ pub async fn init<
 		no_identification_headers,
 		allow_origin,
 		postgres_bind,
+		mysql_bind,
 		..
 	}: StartCommandArguments,
 	runtime: ObservabilityRuntime,
@@ -370,6 +377,7 @@ pub async fn init<
 	let config = Config {
 		bind,
 		postgres_bind,
+		mysql_bind,
 		client_ip,
 		path,
 		user,
@@ -568,6 +576,23 @@ pub async fn init<
 	if config.postgres_bind.is_some() {
 		return Err(anyhow::anyhow!(
 			"The --postgres-bind option requires a binary built with the 'postgres' feature"
+		));
+	}
+	// Start the MySQL wire protocol listener when configured
+	#[cfg(feature = "mysql")]
+	if let Some(mysql_addr) = config.mysql_bind {
+		crate::mysql::start(
+			mysql_addr,
+			Arc::clone(&datastore),
+			Arc::clone(&ready),
+			canceller.clone(),
+		)
+		.await?;
+	}
+	#[cfg(not(feature = "mysql"))]
+	if config.mysql_bind.is_some() {
+		return Err(anyhow::anyhow!(
+			"The --mysql-bind option requires a binary built with the 'mysql' feature"
 		));
 	}
 	// Build and run the HTTP server using the provided RouterFactory implementation
