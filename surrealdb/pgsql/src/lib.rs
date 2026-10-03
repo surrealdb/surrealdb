@@ -21,3 +21,26 @@
 //!
 //! Shared base for PostgreSQL 17, 18, and 19 grammar parsing, AST representation,
 //! and faithful printing. Unrelated to `surrealdb-sql` (SurrealQL).
+
+pub mod ast;
+pub mod error;
+pub mod lexer;
+pub mod parser;
+pub mod span;
+
+pub use ast::{
+	BinaryOperator, ColumnRef, Expr, Literal, QualifiedName, TypeName, UnaryOperator, WhenClause,
+};
+pub use error::{ErrorKind, ParseError, ParseResult};
+pub use lexer::Lexer;
+pub use lexer::keyword::{Keyword, KeywordCategory};
+pub use lexer::split::{StatementBoundary, split_statements};
+pub use lexer::token::{Token, TokenKind};
+pub use parser::Parser;
+pub use span::Span;
+
+/// Parse a single PostgreSQL expression from string input.
+pub fn parse_expr(src: &str) -> ParseResult<Expr> {
+	let mut parser = Parser::new(src)?;
+	parser.parse_expr()
+}
