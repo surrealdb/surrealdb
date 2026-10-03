@@ -17,6 +17,6 @@ mod tests {
 	#[test]
 	fn test_translate_query() {
 		let res = translate_query("SELECT 1").unwrap();
-		assert_eq!(res, "SELECT 1;");
+		assert_eq!(res, "RETURN [{ \"col_1\": 1 }];");
 	}
 }

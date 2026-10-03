@@ -24,6 +24,9 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
+[dev-dependencies]
+surrealdb-core = { workspace = true, features = ["kv-mem"] }
+
 [lints]
 workspace = true
 

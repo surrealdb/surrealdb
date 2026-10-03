@@ -63,6 +63,26 @@ fn translate_select(
 	ctx: &TranslationContext,
 	out: &mut String,
 ) -> Result<(), TranslationError> {
+	if select.from.is_empty() {
+		out.push_str("RETURN [{ ");
+		for (i, target) in select.targets.iter().enumerate() {
+			if i > 0 {
+				out.push_str(", ");
+			}
+			let key = target.alias.clone().unwrap_or_else(|| {
+				if select.targets.len() == 1 {
+					"?column?".to_string()
+				} else {
+					format!("?column?_{}", i + 1)
+				}
+			});
+			write!(out, "{key:?}: ")?;
+			translate_expr(&target.expr, ctx, out)?;
+		}
+		out.push_str(" }];");
+		return Ok(());
+	}
+
 	out.push_str("SELECT ");
 
 	if select.distinct.is_some() {

@@ -579,6 +579,9 @@ jobs:
       - name: Run surrealdb-pgsql CI checks
         run: cargo make ci-pgsql
 
+      - name: Run wire protocol integration tests
+        run: cargo make ci-wire
+
   # ----------------------------------------
   # Integration tests
   # ----------------------------------------

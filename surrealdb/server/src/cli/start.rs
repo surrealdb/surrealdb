@@ -562,7 +562,7 @@ pub async fn init<
 	// Start the Postgres wire protocol listener when configured
 	#[cfg(feature = "postgres")]
 	if let Some(postgres_addr) = config.postgres_bind {
-		crate::pg::start(
+		let _ = crate::pg::start(
 			postgres_addr,
 			Arc::clone(&datastore),
 			Arc::clone(&ready),
@@ -581,7 +581,7 @@ pub async fn init<
 	// Start the MySQL wire protocol listener when configured
 	#[cfg(feature = "mysql")]
 	if let Some(mysql_addr) = config.mysql_bind {
-		crate::mysql::start(
+		let _ = crate::mysql::start(
 			mysql_addr,
 			Arc::clone(&datastore),
 			Arc::clone(&ready),

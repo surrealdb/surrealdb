@@ -36,5 +36,8 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
 
+[dev-dependencies]
+surrealdb-core = { workspace = true, features = ["kv-mem"] }
+
 [lints]
 workspace = true

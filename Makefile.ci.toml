@@ -654,6 +654,22 @@ script = '''
     echo "✅ SQL front-end checks passed successfully!"
 '''
 
+[tasks.ci-wire]
+category = "CI - INTEGRATION TESTS"
+description = "Run wire protocol end-to-end integration tests for PostgreSQL and MySQL"
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "Running PostgreSQL wire protocol e2e tests..."
+    cargo test --locked -p surrealdb-pgwire --test e2e
+
+    echo "Running MySQL wire protocol e2e tests..."
+    cargo test --locked -p surrealdb-mywire --test e2e
+
+    echo "✅ Wire protocol integration tests passed successfully!"
+'''
+
 # --------------------------------------------------
 # Integration Tests
 # --------------------------------------------------

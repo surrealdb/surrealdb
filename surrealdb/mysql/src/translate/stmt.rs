@@ -39,6 +39,40 @@ pub fn translate_select(
 	ctx: &TranslationContext,
 	out: &mut String,
 ) -> Result<(), TranslationError> {
+	if sel.from.is_none() {
+		out.push_str("RETURN [{ ");
+		for (i, p) in sel.projection.iter().enumerate() {
+			if i > 0 {
+				out.push_str(", ");
+			}
+			match p {
+				SelectItem::Expr {
+					expr,
+					alias,
+					..
+				} => {
+					let key = alias.clone().unwrap_or_else(|| {
+						if sel.projection.len() == 1 {
+							"col_1".to_string()
+						} else {
+							format!("col_{}", i + 1)
+						}
+					});
+					write!(out, "{key:?}: ")?;
+					translate_expr(expr, ctx, out)?;
+				}
+				SelectItem::Wildcard(_) => {
+					out.push_str("\"*\": true");
+				}
+				SelectItem::QualifiedWildcard(tbl, _) => {
+					write!(out, "\"{tbl}.*\": true")?;
+				}
+			}
+		}
+		out.push_str(" }];");
+		return Ok(());
+	}
+
 	out.push_str("SELECT ");
 	if sel.distinct {
 		out.push_str("DISTINCT ");

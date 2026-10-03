@@ -41,7 +41,7 @@ pub async fn start(
 	ds: Arc<Datastore>,
 	ready: Arc<AtomicBool>,
 	shutdown: CancellationToken,
-) -> Result<()> {
+) -> Result<SocketAddr> {
 	let listener = TcpListener::bind(addr)
 		.await
 		.with_context(|| format!("Failed to bind the MySQL listener on {addr}"))?;
@@ -101,5 +101,5 @@ pub async fn start(
 		}
 	});
 
-	Ok(())
+	Ok(bound_addr)
 }

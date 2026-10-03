@@ -6,11 +6,14 @@ use surrealdb_pgsql::{ParamStyle, TranslationContext, translate_sql, translate_s
 fn test_translate_simple_select() {
 	let sql = "SELECT 1;";
 	let surrealql = translate_sql(sql).expect("translate");
-	assert_eq!(surrealql, "SELECT 1;");
+	assert_eq!(surrealql, "RETURN [{ \"?column?\": 1 }];");
 
 	let sql = "SELECT 1, 'hello', true, NULL;";
 	let surrealql = translate_sql(sql).expect("translate");
-	assert_eq!(surrealql, "SELECT 1, 'hello', true, NONE;");
+	assert_eq!(
+		surrealql,
+		"RETURN [{ \"?column?_1\": 1, \"?column?_2\": 'hello', \"?column?_3\": true, \"?column?_4\": NONE }];"
+	);
 }
 
 #[test]
@@ -58,7 +61,10 @@ fn test_translate_functions_and_builtins() {
 fn test_translate_introspection() {
 	let sql = "SELECT current_database(), current_schema(), version();";
 	let surrealql = translate_sql(sql).expect("translate");
-	assert_eq!(surrealql, "SELECT db(), 'public', 'SurrealDB (PostgreSQL Frontend)';");
+	assert_eq!(
+		surrealql,
+		"RETURN [{ \"?column?_1\": db(), \"?column?_2\": 'public', \"?column?_3\": 'SurrealDB (PostgreSQL Frontend)' }];"
+	);
 }
 
 #[test]

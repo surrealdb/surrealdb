@@ -78,7 +78,7 @@ pub async fn start(
 	shutdown: CancellationToken,
 	crt: Option<PathBuf>,
 	key: Option<PathBuf>,
-) -> Result<()> {
+) -> Result<SocketAddr> {
 	let acceptor = match (crt, key) {
 		(Some(crt), Some(key)) => {
 			let config = RustlsConfig::from_pem_file(&crt, &key)
@@ -98,9 +98,10 @@ pub async fn start(
 	let listener = TcpListener::bind(addr)
 		.await
 		.with_context(|| format!("Failed to bind the postgres listener on {addr}"))?;
-	info!(target: LOG, "Started postgres wire protocol server on {}", addr);
+	let bound_addr = listener.local_addr()?;
+	info!(target: LOG, "Started postgres wire protocol server on {bound_addr}");
 	tokio::spawn(accept_loop(listener, ds, ready, shutdown, acceptor));
-	Ok(())
+	Ok(bound_addr)
 }
 
 async fn accept_loop(
