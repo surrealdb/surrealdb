@@ -369,4 +369,193 @@ impl Expr {
 			} => *span,
 		}
 	}
+
+	/// Recursively set all spans in this expression to zero for semantic equality comparisons.
+	pub fn normalize_spans(&mut self) {
+		let zero = Span::empty(0);
+		match self {
+			Self::Literal {
+				span,
+				..
+			} => *span = zero,
+			Self::ColumnRef(col) => col.span = zero,
+			Self::Param {
+				span,
+				..
+			} => *span = zero,
+			Self::UnaryOp {
+				expr,
+				span,
+				..
+			} => {
+				*span = zero;
+				expr.normalize_spans();
+			}
+			Self::BinaryOp {
+				left,
+				right,
+				span,
+				..
+			} => {
+				*span = zero;
+				left.normalize_spans();
+				right.normalize_spans();
+			}
+			Self::TypeCast {
+				expr,
+				data_type,
+				span,
+			} => {
+				*span = zero;
+				data_type.span = zero;
+				expr.normalize_spans();
+			}
+			Self::FunctionCall {
+				name,
+				args,
+				span,
+				..
+			} => {
+				*span = zero;
+				name.span = zero;
+				for arg in args {
+					arg.normalize_spans();
+				}
+			}
+			Self::Subscript {
+				expr,
+				index,
+				span,
+			} => {
+				*span = zero;
+				expr.normalize_spans();
+				index.normalize_spans();
+			}
+			Self::Slice {
+				expr,
+				lower,
+				upper,
+				span,
+			} => {
+				*span = zero;
+				expr.normalize_spans();
+				if let Some(l) = lower {
+					l.normalize_spans();
+				}
+				if let Some(u) = upper {
+					u.normalize_spans();
+				}
+			}
+			Self::Between {
+				expr,
+				low,
+				high,
+				span,
+				..
+			} => {
+				*span = zero;
+				expr.normalize_spans();
+				low.normalize_spans();
+				high.normalize_spans();
+			}
+			Self::InList {
+				expr,
+				list,
+				span,
+				..
+			} => {
+				*span = zero;
+				expr.normalize_spans();
+				for item in list {
+					item.normalize_spans();
+				}
+			}
+			Self::IsNull {
+				expr,
+				span,
+				..
+			}
+			| Self::IsTrue {
+				expr,
+				span,
+				..
+			}
+			| Self::IsFalse {
+				expr,
+				span,
+				..
+			}
+			| Self::IsUnknown {
+				expr,
+				span,
+				..
+			} => {
+				*span = zero;
+				expr.normalize_spans();
+			}
+			Self::IsDistinctFrom {
+				left,
+				right,
+				span,
+				..
+			} => {
+				*span = zero;
+				left.normalize_spans();
+				right.normalize_spans();
+			}
+			Self::Case {
+				operand,
+				branches,
+				else_expr,
+				span,
+			} => {
+				*span = zero;
+				if let Some(op) = operand {
+					op.normalize_spans();
+				}
+				for branch in branches {
+					branch.span = zero;
+					branch.when.normalize_spans();
+					branch.then.normalize_spans();
+				}
+				if let Some(el) = else_expr {
+					el.normalize_spans();
+				}
+			}
+			Self::Collate {
+				expr,
+				collation,
+				span,
+			} => {
+				*span = zero;
+				collation.span = zero;
+				expr.normalize_spans();
+			}
+			Self::ArrayConstructor {
+				elements,
+				span,
+			} => {
+				*span = zero;
+				for elem in elements {
+					elem.normalize_spans();
+				}
+			}
+			Self::Row {
+				fields,
+				span,
+			} => {
+				*span = zero;
+				for field in fields {
+					field.normalize_spans();
+				}
+			}
+			Self::Grouping {
+				expr,
+				span,
+			} => {
+				*span = zero;
+				expr.normalize_spans();
+			}
+		}
+	}
 }

@@ -655,7 +655,8 @@ impl<'a> Parser<'a> {
 		if self.eat(&TokenKind::LParen)? {
 			while self.peek().kind != TokenKind::RParen {
 				let tok = self.bump()?;
-				modifiers.push(tok.kind.to_string());
+				let mod_str = tok.span.slice(self.src()).unwrap_or("");
+				modifiers.push(mod_str.to_string());
 				if !self.eat(&TokenKind::Comma)? {
 					break;
 				}

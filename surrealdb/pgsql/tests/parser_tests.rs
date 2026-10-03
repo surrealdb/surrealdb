@@ -152,7 +152,7 @@ fn test_parse_typecast() {
 			..
 		} => {
 			assert_eq!(data_type.name.parts, vec!["varchar"]);
-			assert_eq!(data_type.modifiers, vec!["integer 255"]);
+			assert_eq!(data_type.modifiers, vec!["255"]);
 			assert!(matches!(
 				*expr,
 				Expr::Literal {

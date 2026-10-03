@@ -465,6 +465,48 @@ pub enum Statement {
 	Empty,
 }
 
+impl SelectStmt {
+	/// Recursively set all spans in this SELECT statement to zero for semantic equality
+	/// comparisons.
+	pub fn normalize_spans(&mut self) {
+		let zero = Span::empty(0);
+		self.span = zero;
+		if let Some(DistinctClause::On(exprs)) = &mut self.distinct {
+			for e in exprs {
+				e.normalize_spans();
+			}
+		}
+		for t in &mut self.targets {
+			t.span = zero;
+			t.expr.normalize_spans();
+		}
+		for r in &mut self.from {
+			normalize_table_ref(r);
+		}
+		if let Some(w) = &mut self.where_clause {
+			w.normalize_spans();
+		}
+		for g in &mut self.group_by {
+			g.normalize_spans();
+		}
+		if let Some(h) = &mut self.having {
+			h.normalize_spans();
+		}
+		for o in &mut self.order_by {
+			o.expr.normalize_spans();
+		}
+		if let Some(l) = &mut self.limit {
+			l.normalize_spans();
+		}
+		if let Some(o) = &mut self.offset {
+			o.normalize_spans();
+		}
+		if let Some(op) = &mut self.set_op {
+			op.right.normalize_spans();
+		}
+	}
+}
+
 impl Statement {
 	/// Return the span of the statement.
 	pub const fn span(&self) -> Span {
@@ -503,6 +545,187 @@ impl Statement {
 			Self::Reset(s) => s.span,
 			Self::Explain(s) => s.span,
 			Self::Empty => Span::empty(0),
+		}
+	}
+
+	/// Recursively set all spans in this statement to zero for semantic equality comparisons.
+	pub fn normalize_spans(&mut self) {
+		let zero = Span::empty(0);
+		match self {
+			Self::Select(s) => s.normalize_spans(),
+			Self::Insert(s) => {
+				s.span = zero;
+				s.relation.span = zero;
+				if let Some(rows) = &mut s.values {
+					for row in rows {
+						for val in row {
+							val.normalize_spans();
+						}
+					}
+				}
+				if let Some(q) = &mut s.query {
+					q.normalize_spans();
+				}
+				if let Some(c) = &mut s.on_conflict {
+					c.span = zero;
+					if let OnConflictAction::DoUpdate(updates) = &mut c.action {
+						for u in updates {
+							u.span = zero;
+							u.value.normalize_spans();
+						}
+					}
+				}
+				if let Some(ret) = &mut s.returning {
+					for t in ret {
+						t.span = zero;
+						t.expr.normalize_spans();
+					}
+				}
+			}
+			Self::Update(s) => {
+				s.span = zero;
+				s.relation.span = zero;
+				for a in &mut s.assignments {
+					a.span = zero;
+					a.value.normalize_spans();
+				}
+				if let Some(from) = &mut s.from {
+					for r in from {
+						normalize_table_ref(r);
+					}
+				}
+				if let Some(w) = &mut s.where_clause {
+					w.normalize_spans();
+				}
+				if let Some(ret) = &mut s.returning {
+					for t in ret {
+						t.span = zero;
+						t.expr.normalize_spans();
+					}
+				}
+			}
+			Self::Delete(s) => {
+				s.span = zero;
+				s.relation.span = zero;
+				if let Some(using) = &mut s.using {
+					for r in using {
+						normalize_table_ref(r);
+					}
+				}
+				if let Some(w) = &mut s.where_clause {
+					w.normalize_spans();
+				}
+				if let Some(ret) = &mut s.returning {
+					for t in ret {
+						t.span = zero;
+						t.expr.normalize_spans();
+					}
+				}
+			}
+			Self::CreateTable(s) => {
+				s.span = zero;
+				s.name.span = zero;
+				for col in &mut s.columns {
+					col.span = zero;
+					col.data_type.span = zero;
+					for c in &mut col.constraints {
+						match c {
+							ColumnConstraint::Default(e) => e.normalize_spans(),
+							ColumnConstraint::References {
+								table,
+								..
+							} => table.span = zero,
+							_ => {}
+						}
+					}
+				}
+				for c in &mut s.constraints {
+					if let TableConstraint::ForeignKey {
+						ref_table,
+						..
+					} = c
+					{
+						ref_table.span = zero;
+					}
+				}
+			}
+			Self::Drop(s) => {
+				s.span = zero;
+				for n in &mut s.names {
+					n.span = zero;
+				}
+			}
+			Self::Transaction(tx) => match tx {
+				TransactionStmt::Begin {
+					span,
+				}
+				| TransactionStmt::Commit {
+					span,
+				}
+				| TransactionStmt::Rollback {
+					span,
+				}
+				| TransactionStmt::Savepoint {
+					span,
+					..
+				}
+				| TransactionStmt::ReleaseSavepoint {
+					span,
+					..
+				}
+				| TransactionStmt::RollbackToSavepoint {
+					span,
+					..
+				} => *span = zero,
+			},
+			Self::Set(s) => s.span = zero,
+			Self::Show(s) => s.span = zero,
+			Self::Reset(s) => s.span = zero,
+			Self::Explain(s) => {
+				s.span = zero;
+				s.statement.normalize_spans();
+			}
+			Self::Empty => {}
+		}
+	}
+}
+
+fn normalize_table_ref(r: &mut TableRef) {
+	let zero = Span::empty(0);
+	match r {
+		TableRef::Table {
+			name,
+			alias,
+			span,
+		} => {
+			*span = zero;
+			name.span = zero;
+			if let Some(a) = alias {
+				a.span = zero;
+			}
+		}
+		TableRef::Subquery {
+			query,
+			alias,
+			span,
+		} => {
+			*span = zero;
+			alias.span = zero;
+			query.normalize_spans();
+		}
+		TableRef::Join {
+			left,
+			right,
+			condition,
+			span,
+			..
+		} => {
+			*span = zero;
+			normalize_table_ref(left);
+			normalize_table_ref(right);
+			if let Some(JoinCondition::On(e)) = condition {
+				e.normalize_spans();
+			}
 		}
 	}
 }

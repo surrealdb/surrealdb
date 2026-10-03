@@ -26,6 +26,7 @@ pub mod ast;
 pub mod error;
 pub mod lexer;
 pub mod parser;
+pub mod printer;
 pub mod span;
 
 pub use ast::*;
@@ -35,6 +36,7 @@ pub use lexer::keyword::{Keyword, KeywordCategory};
 pub use lexer::split::{StatementBoundary, split_statements};
 pub use lexer::token::{Token, TokenKind};
 pub use parser::Parser;
+pub use printer::ToPgSql;
 pub use span::Span;
 
 /// Parse a single PostgreSQL expression from string input.
