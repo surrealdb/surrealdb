@@ -1055,24 +1055,447 @@ impl Keyword {
 
 	/// Lookup a keyword from an ASCII case-insensitive string.
 	pub fn from_str_ignore_ascii_case(s: &str) -> Option<Self> {
-		// Fast match based on length and characters
-		match s.len() {
-			2 => match_len_2(s),
-			3 => match_len_3(s),
-			4 => match_len_4(s),
-			5 => match_len_5(s),
-			6 => match_len_6(s),
-			7 => match_len_7(s),
-			8 => match_len_8(s),
-			9 => match_len_9(s),
-			10 => match_len_10(s),
-			11 => match_len_11(s),
-			12 => match_len_12(s),
-			13 => match_len_13(s),
-			14 => match_len_14(s),
-			15 => match_len_15(s),
-			16 => match_len_16(s),
-			17 => match_len_17(s),
+		if s.len() > 32 {
+			return None;
+		}
+		let mut buf = [0u8; 32];
+		let slice = buf.get_mut(..s.len())?;
+		slice.copy_from_slice(s.as_bytes());
+		slice.make_ascii_lowercase();
+		let lower = core::str::from_utf8(slice).ok()?;
+
+		match lower {
+			"all" => Some(Self::All),
+			"analyse" => Some(Self::Analyse),
+			"analyze" => Some(Self::Analyze),
+			"and" => Some(Self::And),
+			"any" => Some(Self::Any),
+			"array" => Some(Self::Array),
+			"as" => Some(Self::As),
+			"asc" => Some(Self::Asc),
+			"asymmetric" => Some(Self::Asymmetric),
+			"authorization" => Some(Self::Authorization),
+			"binary" => Some(Self::Binary),
+			"both" => Some(Self::Both),
+			"case" => Some(Self::Case),
+			"cast" => Some(Self::Cast),
+			"check" => Some(Self::Check),
+			"collate" => Some(Self::Collate),
+			"collation" => Some(Self::Collation),
+			"column" => Some(Self::Column),
+			"concurrently" => Some(Self::Concurrently),
+			"constraint" => Some(Self::Constraint),
+			"create" => Some(Self::Create),
+			"cross" => Some(Self::Cross),
+			"current_catalog" => Some(Self::CurrentCatalog),
+			"current_date" => Some(Self::CurrentDate),
+			"current_role" => Some(Self::CurrentRole),
+			"current_schema" => Some(Self::CurrentSchema),
+			"current_time" => Some(Self::CurrentTime),
+			"current_timestamp" => Some(Self::CurrentTimestamp),
+			"current_user" => Some(Self::CurrentUser),
+			"default" => Some(Self::Default),
+			"deferrable" => Some(Self::Deferrable),
+			"desc" => Some(Self::Desc),
+			"distinct" => Some(Self::Distinct),
+			"do" => Some(Self::Do),
+			"else" => Some(Self::Else),
+			"end" => Some(Self::End),
+			"except" => Some(Self::Except),
+			"false" => Some(Self::False),
+			"fetch" => Some(Self::Fetch),
+			"for" => Some(Self::For),
+			"foreign" => Some(Self::Foreign),
+			"freeze" => Some(Self::Freeze),
+			"from" => Some(Self::From),
+			"full" => Some(Self::Full),
+			"grant" => Some(Self::Grant),
+			"group" => Some(Self::Group),
+			"having" => Some(Self::Having),
+			"ilike" => Some(Self::Ilike),
+			"in" => Some(Self::In),
+			"initially" => Some(Self::Initially),
+			"inner" => Some(Self::Inner),
+			"intersect" => Some(Self::Intersect),
+			"into" => Some(Self::Into),
+			"is" => Some(Self::Is),
+			"isnull" => Some(Self::Isnull),
+			"join" => Some(Self::Join),
+			"lateral" => Some(Self::Lateral),
+			"leading" => Some(Self::Leading),
+			"left" => Some(Self::Left),
+			"like" => Some(Self::Like),
+			"limit" => Some(Self::Limit),
+			"localtime" => Some(Self::Localtime),
+			"localtimestamp" => Some(Self::Localtimestamp),
+			"natural" => Some(Self::Natural),
+			"not" => Some(Self::Not),
+			"notnull" => Some(Self::Notnull),
+			"null" => Some(Self::Null),
+			"on" => Some(Self::On),
+			"only" => Some(Self::Only),
+			"or" => Some(Self::Or),
+			"order" => Some(Self::Order),
+			"outer" => Some(Self::Outer),
+			"overlaps" => Some(Self::Overlaps),
+			"placing" => Some(Self::Placing),
+			"primary" => Some(Self::Primary),
+			"references" => Some(Self::References),
+			"returning" => Some(Self::Returning),
+			"right" => Some(Self::Right),
+			"select" => Some(Self::Select),
+			"session_user" => Some(Self::SessionUser),
+			"similar" => Some(Self::Similar),
+			"some" => Some(Self::Some),
+			"symmetric" => Some(Self::Symmetric),
+			"table" => Some(Self::Table),
+			"tablesample" => Some(Self::Tablesample),
+			"then" => Some(Self::Then),
+			"to" => Some(Self::To),
+			"trailing" => Some(Self::Trailing),
+			"true" => Some(Self::True),
+			"union" => Some(Self::Union),
+			"unique" => Some(Self::Unique),
+			"user" => Some(Self::User),
+			"using" => Some(Self::Using),
+			"variadic" => Some(Self::Variadic),
+			"verbose" => Some(Self::Verbose),
+			"when" => Some(Self::When),
+			"where" => Some(Self::Where),
+			"window" => Some(Self::Window),
+			"with" => Some(Self::With),
+			"bigint" => Some(Self::Bigint),
+			"bit" => Some(Self::Bit),
+			"boolean" => Some(Self::Boolean),
+			"char" => Some(Self::Char),
+			"character" => Some(Self::Character),
+			"coalesce" => Some(Self::Coalesce),
+			"dec" => Some(Self::Dec),
+			"decimal" => Some(Self::Decimal),
+			"exists" => Some(Self::Exists),
+			"extract" => Some(Self::Extract),
+			"float" => Some(Self::Float),
+			"greatest" => Some(Self::Greatest),
+			"grouping" => Some(Self::Grouping),
+			"inout" => Some(Self::Inout),
+			"int" => Some(Self::Int),
+			"integer" => Some(Self::Integer),
+			"interval" => Some(Self::Interval),
+			"least" => Some(Self::Least),
+			"national" => Some(Self::National),
+			"nchar" => Some(Self::Nchar),
+			"none" => Some(Self::None),
+			"nullif" => Some(Self::Nullif),
+			"numeric" => Some(Self::Numeric),
+			"out" => Some(Self::Out),
+			"overlay" => Some(Self::Overlay),
+			"position" => Some(Self::Position),
+			"precision" => Some(Self::Precision),
+			"real" => Some(Self::Real),
+			"row" => Some(Self::Row),
+			"setof" => Some(Self::Setof),
+			"smallint" => Some(Self::Smallint),
+			"substring" => Some(Self::Substring),
+			"time" => Some(Self::Time),
+			"timestamp" => Some(Self::Timestamp),
+			"treat" => Some(Self::Treat),
+			"trim" => Some(Self::Trim),
+			"values" => Some(Self::Values),
+			"varchar" => Some(Self::Varchar),
+			"xmlattributes" => Some(Self::Xmlattributes),
+			"xmlconcat" => Some(Self::Xmlconcat),
+			"xmlelement" => Some(Self::Xmlelement),
+			"xmlexists" => Some(Self::Xmlexists),
+			"xmlforest" => Some(Self::Xmlforest),
+			"xmlnamespaces" => Some(Self::Xmlnamespaces),
+			"xmlparse" => Some(Self::Xmlparse),
+			"xmlpi" => Some(Self::Xmlpi),
+			"xmlroot" => Some(Self::Xmlroot),
+			"xmlserialize" => Some(Self::Xmlserialize),
+			"xmltable" => Some(Self::Xmltable),
+			"abort" => Some(Self::Abort),
+			"absolute" => Some(Self::Absolute),
+			"access" => Some(Self::Access),
+			"action" => Some(Self::Action),
+			"add" => Some(Self::Add),
+			"admin" => Some(Self::Admin),
+			"after" => Some(Self::After),
+			"aggregate" => Some(Self::Aggregate),
+			"also" => Some(Self::Also),
+			"alter" => Some(Self::Alter),
+			"always" => Some(Self::Always),
+			"assertion" => Some(Self::Assertion),
+			"assignment" => Some(Self::Assignment),
+			"at" => Some(Self::At),
+			"attach" => Some(Self::Attach),
+			"attribute" => Some(Self::Attribute),
+			"backward" => Some(Self::Backward),
+			"before" => Some(Self::Before),
+			"begin" => Some(Self::Begin),
+			"between" => Some(Self::Between),
+			"by" => Some(Self::By),
+			"cache" => Some(Self::Cache),
+			"call" => Some(Self::Call),
+			"cascade" => Some(Self::Cascade),
+			"cascaded" => Some(Self::Cascaded),
+			"catalog" => Some(Self::Catalog),
+			"chain" => Some(Self::Chain),
+			"characteristics" => Some(Self::Characteristics),
+			"checkpoint" => Some(Self::Checkpoint),
+			"close" => Some(Self::Close),
+			"cluster" => Some(Self::Cluster),
+			"comment" => Some(Self::Comment),
+			"commit" => Some(Self::Commit),
+			"committed" => Some(Self::Committed),
+			"configuration" => Some(Self::Configuration),
+			"conflict" => Some(Self::Conflict),
+			"connection" => Some(Self::Connection),
+			"constraints" => Some(Self::Constraints),
+			"content" => Some(Self::Content),
+			"continue" => Some(Self::Continue),
+			"conversion" => Some(Self::Conversion),
+			"copy" => Some(Self::Copy),
+			"cost" => Some(Self::Cost),
+			"csv" => Some(Self::Csv),
+			"cube" => Some(Self::Cube),
+			"current" => Some(Self::Current),
+			"cursor" => Some(Self::Cursor),
+			"cycle" => Some(Self::Cycle),
+			"data" => Some(Self::Data),
+			"database" => Some(Self::Database),
+			"day" => Some(Self::Day),
+			"deallocate" => Some(Self::Deallocate),
+			"declare" => Some(Self::Declare),
+			"defaults" => Some(Self::Defaults),
+			"deferred" => Some(Self::Deferred),
+			"definer" => Some(Self::Definer),
+			"delete" => Some(Self::Delete),
+			"delimiters" => Some(Self::Delimiters),
+			"depends" => Some(Self::Depends),
+			"detach" => Some(Self::Detach),
+			"dictionary" => Some(Self::Dictionary),
+			"disable" => Some(Self::Disable),
+			"discard" => Some(Self::Discard),
+			"document" => Some(Self::Document),
+			"drop" => Some(Self::Drop),
+			"each" => Some(Self::Each),
+			"enable" => Some(Self::Enable),
+			"encoding" => Some(Self::Encoding),
+			"encrypted" => Some(Self::Encrypted),
+			"enum" => Some(Self::Enum),
+			"escape" => Some(Self::Escape),
+			"event" => Some(Self::Event),
+			"exclude" => Some(Self::Exclude),
+			"excluding" => Some(Self::Excluding),
+			"exclusive" => Some(Self::Exclusive),
+			"execute" => Some(Self::Execute),
+			"explain" => Some(Self::Explain),
+			"extension" => Some(Self::Extension),
+			"external" => Some(Self::External),
+			"family" => Some(Self::Family),
+			"filter" => Some(Self::Filter),
+			"finalize" => Some(Self::Finalize),
+			"first" => Some(Self::First),
+			"following" => Some(Self::Following),
+			"force" => Some(Self::Force),
+			"forward" => Some(Self::Forward),
+			"function" => Some(Self::Function),
+			"functions" => Some(Self::Functions),
+			"generated" => Some(Self::Generated),
+			"global" => Some(Self::Global),
+			"granted" => Some(Self::Granted),
+			"groups" => Some(Self::Groups),
+			"handler" => Some(Self::Handler),
+			"header" => Some(Self::Header),
+			"hold" => Some(Self::Hold),
+			"hour" => Some(Self::Hour),
+			"identity" => Some(Self::Identity),
+			"if" => Some(Self::If),
+			"immediate" => Some(Self::Immediate),
+			"immutable" => Some(Self::Immutable),
+			"implicit" => Some(Self::Implicit),
+			"import" => Some(Self::Import),
+			"include" => Some(Self::Include),
+			"including" => Some(Self::Including),
+			"increment" => Some(Self::Increment),
+			"index" => Some(Self::Index),
+			"indexes" => Some(Self::Indexes),
+			"inherit" => Some(Self::Inherit),
+			"inherits" => Some(Self::Inherits),
+			"inline" => Some(Self::Inline),
+			"insensitive" => Some(Self::Insensitive),
+			"insert" => Some(Self::Insert),
+			"instead" => Some(Self::Instead),
+			"invoker" => Some(Self::Invoker),
+			"isolation" => Some(Self::Isolation),
+			"key" => Some(Self::Key),
+			"label" => Some(Self::Label),
+			"language" => Some(Self::Language),
+			"large" => Some(Self::Large),
+			"last" => Some(Self::Last),
+			"leakproof" => Some(Self::Leakproof),
+			"level" => Some(Self::Level),
+			"listen" => Some(Self::Listen),
+			"load" => Some(Self::Load),
+			"local" => Some(Self::Local),
+			"location" => Some(Self::Location),
+			"lock" => Some(Self::Lock),
+			"locked" => Some(Self::Locked),
+			"logged" => Some(Self::Logged),
+			"mapping" => Some(Self::Mapping),
+			"match" => Some(Self::Match),
+			"matched" => Some(Self::Matched),
+			"materialized" => Some(Self::Materialized),
+			"maxvalue" => Some(Self::Maxvalue),
+			"merge" => Some(Self::Merge),
+			"method" => Some(Self::Method),
+			"minute" => Some(Self::Minute),
+			"minvalue" => Some(Self::Minvalue),
+			"mode" => Some(Self::Mode),
+			"month" => Some(Self::Month),
+			"move" => Some(Self::Move),
+			"name" => Some(Self::Name),
+			"names" => Some(Self::Names),
+			"next" => Some(Self::Next),
+			"no" => Some(Self::No),
+			"nothing" => Some(Self::Nothing),
+			"notify" => Some(Self::Notify),
+			"nowait" => Some(Self::Nowait),
+			"nulls" => Some(Self::Nulls),
+			"object" => Some(Self::Object),
+			"of" => Some(Self::Of),
+			"off" => Some(Self::Off),
+			"offset" => Some(Self::Offset),
+			"oids" => Some(Self::Oids),
+			"operator" => Some(Self::Operator),
+			"option" => Some(Self::Option),
+			"options" => Some(Self::Options),
+			"ordinality" => Some(Self::Ordinality),
+			"others" => Some(Self::Others),
+			"over" => Some(Self::Over),
+			"overriding" => Some(Self::Overriding),
+			"owned" => Some(Self::Owned),
+			"owner" => Some(Self::Owner),
+			"parallel" => Some(Self::Parallel),
+			"parser" => Some(Self::Parser),
+			"partial" => Some(Self::Partial),
+			"partition" => Some(Self::Partition),
+			"passing" => Some(Self::Passing),
+			"password" => Some(Self::Password),
+			"plans" => Some(Self::Plans),
+			"policy" => Some(Self::Policy),
+			"preceding" => Some(Self::Preceding),
+			"prepare" => Some(Self::Prepare),
+			"prepared" => Some(Self::Prepared),
+			"preserve" => Some(Self::Preserve),
+			"prior" => Some(Self::Prior),
+			"privileges" => Some(Self::Privileges),
+			"procedural" => Some(Self::Procedural),
+			"procedure" => Some(Self::Procedure),
+			"procedures" => Some(Self::Procedures),
+			"program" => Some(Self::Program),
+			"publication" => Some(Self::Publication),
+			"quote" => Some(Self::Quote),
+			"range" => Some(Self::Range),
+			"read" => Some(Self::Read),
+			"reassign" => Some(Self::Reassign),
+			"recheck" => Some(Self::Recheck),
+			"recursive" => Some(Self::Recursive),
+			"ref" => Some(Self::Ref),
+			"refresh" => Some(Self::Refresh),
+			"reindex" => Some(Self::Reindex),
+			"relative" => Some(Self::Relative),
+			"release" => Some(Self::Release),
+			"rename" => Some(Self::Rename),
+			"replace" => Some(Self::Replace),
+			"replica" => Some(Self::Replica),
+			"reset" => Some(Self::Reset),
+			"restart" => Some(Self::Restart),
+			"restrict" => Some(Self::Restrict),
+			"returns" => Some(Self::Returns),
+			"revoke" => Some(Self::Revoke),
+			"role" => Some(Self::Role),
+			"rollback" => Some(Self::Rollback),
+			"rollup" => Some(Self::Rollup),
+			"routine" => Some(Self::Routine),
+			"routines" => Some(Self::Routines),
+			"rows" => Some(Self::Rows),
+			"rule" => Some(Self::Rule),
+			"savepoint" => Some(Self::Savepoint),
+			"schema" => Some(Self::Schema),
+			"schemas" => Some(Self::Schemas),
+			"scroll" => Some(Self::Scroll),
+			"search" => Some(Self::Search),
+			"second" => Some(Self::Second),
+			"security" => Some(Self::Security),
+			"sequence" => Some(Self::Sequence),
+			"sequences" => Some(Self::Sequences),
+			"serializable" => Some(Self::Serializable),
+			"server" => Some(Self::Server),
+			"session" => Some(Self::Session),
+			"set" => Some(Self::Set),
+			"sets" => Some(Self::Sets),
+			"share" => Some(Self::Share),
+			"show" => Some(Self::Show),
+			"simple" => Some(Self::Simple),
+			"skip" => Some(Self::Skip),
+			"snapshot" => Some(Self::Snapshot),
+			"sql" => Some(Self::Sql),
+			"stable" => Some(Self::Stable),
+			"standalone" => Some(Self::Standalone),
+			"start" => Some(Self::Start),
+			"statement" => Some(Self::Statement),
+			"statistics" => Some(Self::Statistics),
+			"stdin" => Some(Self::Stdin),
+			"stdout" => Some(Self::Stdout),
+			"storage" => Some(Self::Storage),
+			"stored" => Some(Self::Stored),
+			"strict" => Some(Self::Strict),
+			"strip" => Some(Self::Strip),
+			"subscription" => Some(Self::Subscription),
+			"support" => Some(Self::Support),
+			"sysid" => Some(Self::Sysid),
+			"system" => Some(Self::System),
+			"tables" => Some(Self::Tables),
+			"tablespace" => Some(Self::Tablespace),
+			"target" => Some(Self::Target),
+			"temp" => Some(Self::Temp),
+			"template" => Some(Self::Template),
+			"temporary" => Some(Self::Temporary),
+			"text" => Some(Self::Text),
+			"ties" => Some(Self::Ties),
+			"transaction" => Some(Self::Transaction),
+			"transform" => Some(Self::Transform),
+			"trigger" => Some(Self::Trigger),
+			"truncate" => Some(Self::Truncate),
+			"trusted" => Some(Self::Trusted),
+			"type" => Some(Self::Type),
+			"types" => Some(Self::Types),
+			"unbounded" => Some(Self::Unbounded),
+			"uncommitted" => Some(Self::Uncommitted),
+			"unencrypted" => Some(Self::Unencrypted),
+			"unknown" => Some(Self::Unknown),
+			"unlisten" => Some(Self::Unlisten),
+			"unlogged" => Some(Self::Unlogged),
+			"until" => Some(Self::Until),
+			"update" => Some(Self::Update),
+			"vacuum" => Some(Self::Vacuum),
+			"valid" => Some(Self::Valid),
+			"validate" => Some(Self::Validate),
+			"validator" => Some(Self::Validator),
+			"value" => Some(Self::Value),
+			"version" => Some(Self::Version),
+			"view" => Some(Self::View),
+			"views" => Some(Self::Views),
+			"volatile" => Some(Self::Volatile),
+			"whitespace" => Some(Self::Whitespace),
+			"without" => Some(Self::Without),
+			"work" => Some(Self::Work),
+			"wrapper" => Some(Self::Wrapper),
+			"write" => Some(Self::Write),
+			"xml" => Some(Self::Xml),
+			"year" => Some(Self::Year),
+			"zone" => Some(Self::Zone),
 			_ => None,
 		}
 	}
@@ -1081,913 +1504,5 @@ impl Keyword {
 impl fmt::Display for Keyword {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.write_str(self.as_str())
-	}
-}
-
-fn match_len_2(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("as") {
-		Some(Keyword::As)
-	} else if s.eq_ignore_ascii_case("at") {
-		Some(Keyword::At)
-	} else if s.eq_ignore_ascii_case("by") {
-		Some(Keyword::By)
-	} else if s.eq_ignore_ascii_case("do") {
-		Some(Keyword::Do)
-	} else if s.eq_ignore_ascii_case("if") {
-		Some(Keyword::If)
-	} else if s.eq_ignore_ascii_case("in") {
-		Some(Keyword::In)
-	} else if s.eq_ignore_ascii_case("is") {
-		Some(Keyword::Is)
-	} else if s.eq_ignore_ascii_case("no") {
-		Some(Keyword::No)
-	} else if s.eq_ignore_ascii_case("of") {
-		Some(Keyword::Of)
-	} else if s.eq_ignore_ascii_case("on") {
-		Some(Keyword::On)
-	} else if s.eq_ignore_ascii_case("or") {
-		Some(Keyword::Or)
-	} else if s.eq_ignore_ascii_case("to") {
-		Some(Keyword::To)
-	} else {
-		None
-	}
-}
-
-fn match_len_3(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("add") {
-		Some(Keyword::Add)
-	} else if s.eq_ignore_ascii_case("all") {
-		Some(Keyword::All)
-	} else if s.eq_ignore_ascii_case("and") {
-		Some(Keyword::And)
-	} else if s.eq_ignore_ascii_case("any") {
-		Some(Keyword::Any)
-	} else if s.eq_ignore_ascii_case("asc") {
-		Some(Keyword::Asc)
-	} else if s.eq_ignore_ascii_case("bit") {
-		Some(Keyword::Bit)
-	} else if s.eq_ignore_ascii_case("csv") {
-		Some(Keyword::Csv)
-	} else if s.eq_ignore_ascii_case("day") {
-		Some(Keyword::Day)
-	} else if s.eq_ignore_ascii_case("dec") {
-		Some(Keyword::Dec)
-	} else if s.eq_ignore_ascii_case("end") {
-		Some(Keyword::End)
-	} else if s.eq_ignore_ascii_case("for") {
-		Some(Keyword::For)
-	} else if s.eq_ignore_ascii_case("int") {
-		Some(Keyword::Int)
-	} else if s.eq_ignore_ascii_case("key") {
-		Some(Keyword::Key)
-	} else if s.eq_ignore_ascii_case("not") {
-		Some(Keyword::Not)
-	} else if s.eq_ignore_ascii_case("off") {
-		Some(Keyword::Off)
-	} else if s.eq_ignore_ascii_case("out") {
-		Some(Keyword::Out)
-	} else if s.eq_ignore_ascii_case("ref") {
-		Some(Keyword::Ref)
-	} else if s.eq_ignore_ascii_case("row") {
-		Some(Keyword::Row)
-	} else if s.eq_ignore_ascii_case("set") {
-		Some(Keyword::Set)
-	} else if s.eq_ignore_ascii_case("sql") {
-		Some(Keyword::Sql)
-	} else if s.eq_ignore_ascii_case("xml") {
-		Some(Keyword::Xml)
-	} else {
-		None
-	}
-}
-
-fn match_len_4(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("also") {
-		Some(Keyword::Also)
-	} else if s.eq_ignore_ascii_case("both") {
-		Some(Keyword::Both)
-	} else if s.eq_ignore_ascii_case("call") {
-		Some(Keyword::Call)
-	} else if s.eq_ignore_ascii_case("case") {
-		Some(Keyword::Case)
-	} else if s.eq_ignore_ascii_case("cast") {
-		Some(Keyword::Cast)
-	} else if s.eq_ignore_ascii_case("char") {
-		Some(Keyword::Char)
-	} else if s.eq_ignore_ascii_case("copy") {
-		Some(Keyword::Copy)
-	} else if s.eq_ignore_ascii_case("cost") {
-		Some(Keyword::Cost)
-	} else if s.eq_ignore_ascii_case("cube") {
-		Some(Keyword::Cube)
-	} else if s.eq_ignore_ascii_case("data") {
-		Some(Keyword::Data)
-	} else if s.eq_ignore_ascii_case("desc") {
-		Some(Keyword::Desc)
-	} else if s.eq_ignore_ascii_case("drop") {
-		Some(Keyword::Drop)
-	} else if s.eq_ignore_ascii_case("each") {
-		Some(Keyword::Each)
-	} else if s.eq_ignore_ascii_case("else") {
-		Some(Keyword::Else)
-	} else if s.eq_ignore_ascii_case("enum") {
-		Some(Keyword::Enum)
-	} else if s.eq_ignore_ascii_case("from") {
-		Some(Keyword::From)
-	} else if s.eq_ignore_ascii_case("full") {
-		Some(Keyword::Full)
-	} else if s.eq_ignore_ascii_case("hold") {
-		Some(Keyword::Hold)
-	} else if s.eq_ignore_ascii_case("hour") {
-		Some(Keyword::Hour)
-	} else if s.eq_ignore_ascii_case("into") {
-		Some(Keyword::Into)
-	} else if s.eq_ignore_ascii_case("join") {
-		Some(Keyword::Join)
-	} else if s.eq_ignore_ascii_case("last") {
-		Some(Keyword::Last)
-	} else if s.eq_ignore_ascii_case("left") {
-		Some(Keyword::Left)
-	} else if s.eq_ignore_ascii_case("like") {
-		Some(Keyword::Like)
-	} else if s.eq_ignore_ascii_case("load") {
-		Some(Keyword::Load)
-	} else if s.eq_ignore_ascii_case("lock") {
-		Some(Keyword::Lock)
-	} else if s.eq_ignore_ascii_case("mode") {
-		Some(Keyword::Mode)
-	} else if s.eq_ignore_ascii_case("move") {
-		Some(Keyword::Move)
-	} else if s.eq_ignore_ascii_case("name") {
-		Some(Keyword::Name)
-	} else if s.eq_ignore_ascii_case("next") {
-		Some(Keyword::Next)
-	} else if s.eq_ignore_ascii_case("none") {
-		Some(Keyword::None)
-	} else if s.eq_ignore_ascii_case("null") {
-		Some(Keyword::Null)
-	} else if s.eq_ignore_ascii_case("oids") {
-		Some(Keyword::Oids)
-	} else if s.eq_ignore_ascii_case("only") {
-		Some(Keyword::Only)
-	} else if s.eq_ignore_ascii_case("over") {
-		Some(Keyword::Over)
-	} else if s.eq_ignore_ascii_case("real") {
-		Some(Keyword::Real)
-	} else if s.eq_ignore_ascii_case("role") {
-		Some(Keyword::Role)
-	} else if s.eq_ignore_ascii_case("rows") {
-		Some(Keyword::Rows)
-	} else if s.eq_ignore_ascii_case("rule") {
-		Some(Keyword::Rule)
-	} else if s.eq_ignore_ascii_case("sets") {
-		Some(Keyword::Sets)
-	} else if s.eq_ignore_ascii_case("show") {
-		Some(Keyword::Show)
-	} else if s.eq_ignore_ascii_case("skip") {
-		Some(Keyword::Skip)
-	} else if s.eq_ignore_ascii_case("some") {
-		Some(Keyword::Some)
-	} else if s.eq_ignore_ascii_case("temp") {
-		Some(Keyword::Temp)
-	} else if s.eq_ignore_ascii_case("text") {
-		Some(Keyword::Text)
-	} else if s.eq_ignore_ascii_case("then") {
-		Some(Keyword::Then)
-	} else if s.eq_ignore_ascii_case("ties") {
-		Some(Keyword::Ties)
-	} else if s.eq_ignore_ascii_case("time") {
-		Some(Keyword::Time)
-	} else if s.eq_ignore_ascii_case("true") {
-		Some(Keyword::True)
-	} else if s.eq_ignore_ascii_case("type") {
-		Some(Keyword::Type)
-	} else if s.eq_ignore_ascii_case("trim") {
-		Some(Keyword::Trim)
-	} else if s.eq_ignore_ascii_case("user") {
-		Some(Keyword::User)
-	} else if s.eq_ignore_ascii_case("view") {
-		Some(Keyword::View)
-	} else if s.eq_ignore_ascii_case("when") {
-		Some(Keyword::When)
-	} else if s.eq_ignore_ascii_case("with") {
-		Some(Keyword::With)
-	} else if s.eq_ignore_ascii_case("work") {
-		Some(Keyword::Work)
-	} else if s.eq_ignore_ascii_case("year") {
-		Some(Keyword::Year)
-	} else if s.eq_ignore_ascii_case("zone") {
-		Some(Keyword::Zone)
-	} else {
-		None
-	}
-}
-
-fn match_len_5(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("abort") {
-		Some(Keyword::Abort)
-	} else if s.eq_ignore_ascii_case("after") {
-		Some(Keyword::After)
-	} else if s.eq_ignore_ascii_case("alter") {
-		Some(Keyword::Alter)
-	} else if s.eq_ignore_ascii_case("array") {
-		Some(Keyword::Array)
-	} else if s.eq_ignore_ascii_case("begin") {
-		Some(Keyword::Begin)
-	} else if s.eq_ignore_ascii_case("cache") {
-		Some(Keyword::Cache)
-	} else if s.eq_ignore_ascii_case("check") {
-		Some(Keyword::Check)
-	} else if s.eq_ignore_ascii_case("close") {
-		Some(Keyword::Close)
-	} else if s.eq_ignore_ascii_case("cross") {
-		Some(Keyword::Cross)
-	} else if s.eq_ignore_ascii_case("cycle") {
-		Some(Keyword::Cycle)
-	} else if s.eq_ignore_ascii_case("defer") {
-		None
-	} else if s.eq_ignore_ascii_case("event") {
-		Some(Keyword::Event)
-	} else if s.eq_ignore_ascii_case("false") {
-		Some(Keyword::False)
-	} else if s.eq_ignore_ascii_case("fetch") {
-		Some(Keyword::Fetch)
-	} else if s.eq_ignore_ascii_case("first") {
-		Some(Keyword::First)
-	} else if s.eq_ignore_ascii_case("float") {
-		Some(Keyword::Float)
-	} else if s.eq_ignore_ascii_case("force") {
-		Some(Keyword::Force)
-	} else if s.eq_ignore_ascii_case("grant") {
-		Some(Keyword::Grant)
-	} else if s.eq_ignore_ascii_case("group") {
-		Some(Keyword::Group)
-	} else if s.eq_ignore_ascii_case("ilike") {
-		Some(Keyword::Ilike)
-	} else if s.eq_ignore_ascii_case("index") {
-		Some(Keyword::Index)
-	} else if s.eq_ignore_ascii_case("inout") {
-		Some(Keyword::Inout)
-	} else if s.eq_ignore_ascii_case("inner") {
-		Some(Keyword::Inner)
-	} else if s.eq_ignore_ascii_case("least") {
-		Some(Keyword::Least)
-	} else if s.eq_ignore_ascii_case("level") {
-		Some(Keyword::Level)
-	} else if s.eq_ignore_ascii_case("limit") {
-		Some(Keyword::Limit)
-	} else if s.eq_ignore_ascii_case("local") {
-		Some(Keyword::Local)
-	} else if s.eq_ignore_ascii_case("match") {
-		Some(Keyword::Match)
-	} else if s.eq_ignore_ascii_case("merge") {
-		Some(Keyword::Merge)
-	} else if s.eq_ignore_ascii_case("month") {
-		Some(Keyword::Month)
-	} else if s.eq_ignore_ascii_case("names") {
-		Some(Keyword::Names)
-	} else if s.eq_ignore_ascii_case("nchar") {
-		Some(Keyword::Nchar)
-	} else if s.eq_ignore_ascii_case("nulls") {
-		Some(Keyword::Nulls)
-	} else if s.eq_ignore_ascii_case("order") {
-		Some(Keyword::Order)
-	} else if s.eq_ignore_ascii_case("outer") {
-		Some(Keyword::Outer)
-	} else if s.eq_ignore_ascii_case("owned") {
-		Some(Keyword::Owned)
-	} else if s.eq_ignore_ascii_case("owner") {
-		Some(Keyword::Owner)
-	} else if s.eq_ignore_ascii_case("plans") {
-		Some(Keyword::Plans)
-	} else if s.eq_ignore_ascii_case("prior") {
-		Some(Keyword::Prior)
-	} else if s.eq_ignore_ascii_case("quote") {
-		Some(Keyword::Quote)
-	} else if s.eq_ignore_ascii_case("range") {
-		Some(Keyword::Range)
-	} else if s.eq_ignore_ascii_case("reset") {
-		Some(Keyword::Reset)
-	} else if s.eq_ignore_ascii_case("right") {
-		Some(Keyword::Right)
-	} else if s.eq_ignore_ascii_case("setof") {
-		Some(Keyword::Setof)
-	} else if s.eq_ignore_ascii_case("share") {
-		Some(Keyword::Share)
-	} else if s.eq_ignore_ascii_case("strip") {
-		Some(Keyword::Strip)
-	} else if s.eq_ignore_ascii_case("sysid") {
-		Some(Keyword::Sysid)
-	} else if s.eq_ignore_ascii_case("table") {
-		Some(Keyword::Table)
-	} else if s.eq_ignore_ascii_case("treat") {
-		Some(Keyword::Treat)
-	} else if s.eq_ignore_ascii_case("types") {
-		Some(Keyword::Types)
-	} else if s.eq_ignore_ascii_case("union") {
-		Some(Keyword::Union)
-	} else if s.eq_ignore_ascii_case("until") {
-		Some(Keyword::Until)
-	} else if s.eq_ignore_ascii_case("valid") {
-		Some(Keyword::Valid)
-	} else if s.eq_ignore_ascii_case("value") {
-		Some(Keyword::Value)
-	} else if s.eq_ignore_ascii_case("views") {
-		Some(Keyword::Views)
-	} else if s.eq_ignore_ascii_case("where") {
-		Some(Keyword::Where)
-	} else if s.eq_ignore_ascii_case("write") {
-		Some(Keyword::Write)
-	} else {
-		None
-	}
-}
-
-fn match_len_6(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("access") {
-		Some(Keyword::Access)
-	} else if s.eq_ignore_ascii_case("action") {
-		Some(Keyword::Action)
-	} else if s.eq_ignore_ascii_case("always") {
-		Some(Keyword::Always)
-	} else if s.eq_ignore_ascii_case("attach") {
-		Some(Keyword::Attach)
-	} else if s.eq_ignore_ascii_case("before") {
-		Some(Keyword::Before)
-	} else if s.eq_ignore_ascii_case("bigint") {
-		Some(Keyword::Bigint)
-	} else if s.eq_ignore_ascii_case("binary") {
-		Some(Keyword::Binary)
-	} else if s.eq_ignore_ascii_case("cannot") {
-		None
-	} else if s.eq_ignore_ascii_case("column") {
-		Some(Keyword::Column)
-	} else if s.eq_ignore_ascii_case("commit") {
-		Some(Keyword::Commit)
-	} else if s.eq_ignore_ascii_case("create") {
-		Some(Keyword::Create)
-	} else if s.eq_ignore_ascii_case("cursor") {
-		Some(Keyword::Cursor)
-	} else if s.eq_ignore_ascii_case("delete") {
-		Some(Keyword::Delete)
-	} else if s.eq_ignore_ascii_case("detach") {
-		Some(Keyword::Detach)
-	} else if s.eq_ignore_ascii_case("enable") {
-		Some(Keyword::Enable)
-	} else if s.eq_ignore_ascii_case("escape") {
-		Some(Keyword::Escape)
-	} else if s.eq_ignore_ascii_case("except") {
-		Some(Keyword::Except)
-	} else if s.eq_ignore_ascii_case("exists") {
-		Some(Keyword::Exists)
-	} else if s.eq_ignore_ascii_case("filter") {
-		Some(Keyword::Filter)
-	} else if s.eq_ignore_ascii_case("freeze") {
-		Some(Keyword::Freeze)
-	} else if s.eq_ignore_ascii_case("global") {
-		Some(Keyword::Global)
-	} else if s.eq_ignore_ascii_case("groups") {
-		Some(Keyword::Groups)
-	} else if s.eq_ignore_ascii_case("having") {
-		Some(Keyword::Having)
-	} else if s.eq_ignore_ascii_case("header") {
-		Some(Keyword::Header)
-	} else if s.eq_ignore_ascii_case("isnull") {
-		Some(Keyword::Isnull)
-	} else if s.eq_ignore_ascii_case("listen") {
-		Some(Keyword::Listen)
-	} else if s.eq_ignore_ascii_case("locked") {
-		Some(Keyword::Locked)
-	} else if s.eq_ignore_ascii_case("logged") {
-		Some(Keyword::Logged)
-	} else if s.eq_ignore_ascii_case("method") {
-		Some(Keyword::Method)
-	} else if s.eq_ignore_ascii_case("minute") {
-		Some(Keyword::Minute)
-	} else if s.eq_ignore_ascii_case("notify") {
-		Some(Keyword::Notify)
-	} else if s.eq_ignore_ascii_case("nowait") {
-		Some(Keyword::Nowait)
-	} else if s.eq_ignore_ascii_case("nullif") {
-		Some(Keyword::Nullif)
-	} else if s.eq_ignore_ascii_case("object") {
-		Some(Keyword::Object)
-	} else if s.eq_ignore_ascii_case("offset") {
-		Some(Keyword::Offset)
-	} else if s.eq_ignore_ascii_case("option") {
-		Some(Keyword::Option)
-	} else if s.eq_ignore_ascii_case("others") {
-		Some(Keyword::Others)
-	} else if s.eq_ignore_ascii_case("parser") {
-		Some(Keyword::Parser)
-	} else if s.eq_ignore_ascii_case("policy") {
-		Some(Keyword::Policy)
-	} else if s.eq_ignore_ascii_case("repeat") {
-		None
-	} else if s.eq_ignore_ascii_case("revoke") {
-		Some(Keyword::Revoke)
-	} else if s.eq_ignore_ascii_case("rollup") {
-		Some(Keyword::Rollup)
-	} else if s.eq_ignore_ascii_case("schema") {
-		Some(Keyword::Schema)
-	} else if s.eq_ignore_ascii_case("scroll") {
-		Some(Keyword::Scroll)
-	} else if s.eq_ignore_ascii_case("search") {
-		Some(Keyword::Search)
-	} else if s.eq_ignore_ascii_case("second") {
-		Some(Keyword::Second)
-	} else if s.eq_ignore_ascii_case("select") {
-		Some(Keyword::Select)
-	} else if s.eq_ignore_ascii_case("server") {
-		Some(Keyword::Server)
-	} else if s.eq_ignore_ascii_case("simple") {
-		Some(Keyword::Simple)
-	} else if s.eq_ignore_ascii_case("stable") {
-		Some(Keyword::Stable)
-	} else if s.eq_ignore_ascii_case("strict") {
-		Some(Keyword::Strict)
-	} else if s.eq_ignore_ascii_case("system") {
-		Some(Keyword::System)
-	} else if s.eq_ignore_ascii_case("tables") {
-		Some(Keyword::Tables)
-	} else if s.eq_ignore_ascii_case("target") {
-		Some(Keyword::Target)
-	} else if s.eq_ignore_ascii_case("unique") {
-		Some(Keyword::Unique)
-	} else if s.eq_ignore_ascii_case("update") {
-		Some(Keyword::Update)
-	} else if s.eq_ignore_ascii_case("vacuum") {
-		Some(Keyword::Vacuum)
-	} else if s.eq_ignore_ascii_case("values") {
-		Some(Keyword::Values)
-	} else if s.eq_ignore_ascii_case("window") {
-		Some(Keyword::Window)
-	} else {
-		None
-	}
-}
-
-fn match_len_7(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("analyse") {
-		Some(Keyword::Analyse)
-	} else if s.eq_ignore_ascii_case("analyze") {
-		Some(Keyword::Analyze)
-	} else if s.eq_ignore_ascii_case("between") {
-		Some(Keyword::Between)
-	} else if s.eq_ignore_ascii_case("boolean") {
-		Some(Keyword::Boolean)
-	} else if s.eq_ignore_ascii_case("cascade") {
-		Some(Keyword::Cascade)
-	} else if s.eq_ignore_ascii_case("catalog") {
-		Some(Keyword::Catalog)
-	} else if s.eq_ignore_ascii_case("cluster") {
-		Some(Keyword::Cluster)
-	} else if s.eq_ignore_ascii_case("comment") {
-		Some(Keyword::Comment)
-	} else if s.eq_ignore_ascii_case("collate") {
-		Some(Keyword::Collate)
-	} else if s.eq_ignore_ascii_case("content") {
-		Some(Keyword::Content)
-	} else if s.eq_ignore_ascii_case("current") {
-		Some(Keyword::Current)
-	} else if s.eq_ignore_ascii_case("declare") {
-		Some(Keyword::Declare)
-	} else if s.eq_ignore_ascii_case("decimal") {
-		Some(Keyword::Decimal)
-	} else if s.eq_ignore_ascii_case("definer") {
-		Some(Keyword::Definer)
-	} else if s.eq_ignore_ascii_case("depends") {
-		Some(Keyword::Depends)
-	} else if s.eq_ignore_ascii_case("disable") {
-		Some(Keyword::Disable)
-	} else if s.eq_ignore_ascii_case("discard") {
-		Some(Keyword::Discard)
-	} else if s.eq_ignore_ascii_case("exclude") {
-		Some(Keyword::Exclude)
-	} else if s.eq_ignore_ascii_case("execute") {
-		Some(Keyword::Execute)
-	} else if s.eq_ignore_ascii_case("explain") {
-		Some(Keyword::Explain)
-	} else if s.eq_ignore_ascii_case("extract") {
-		Some(Keyword::Extract)
-	} else if s.eq_ignore_ascii_case("foreign") {
-		Some(Keyword::Foreign)
-	} else if s.eq_ignore_ascii_case("forward") {
-		Some(Keyword::Forward)
-	} else if s.eq_ignore_ascii_case("handler") {
-		Some(Keyword::Handler)
-	} else if s.eq_ignore_ascii_case("indexes") {
-		Some(Keyword::Indexes)
-	} else if s.eq_ignore_ascii_case("inherit") {
-		Some(Keyword::Inherit)
-	} else if s.eq_ignore_ascii_case("instead") {
-		Some(Keyword::Instead)
-	} else if s.eq_ignore_ascii_case("integer") {
-		Some(Keyword::Integer)
-	} else if s.eq_ignore_ascii_case("invoker") {
-		Some(Keyword::Invoker)
-	} else if s.eq_ignore_ascii_case("lateral") {
-		Some(Keyword::Lateral)
-	} else if s.eq_ignore_ascii_case("leading") {
-		Some(Keyword::Leading)
-	} else if s.eq_ignore_ascii_case("mapping") {
-		Some(Keyword::Mapping)
-	} else if s.eq_ignore_ascii_case("matched") {
-		Some(Keyword::Matched)
-	} else if s.eq_ignore_ascii_case("natural") {
-		Some(Keyword::Natural)
-	} else if s.eq_ignore_ascii_case("nothing") {
-		Some(Keyword::Nothing)
-	} else if s.eq_ignore_ascii_case("notnull") {
-		Some(Keyword::Notnull)
-	} else if s.eq_ignore_ascii_case("numeric") {
-		Some(Keyword::Numeric)
-	} else if s.eq_ignore_ascii_case("options") {
-		Some(Keyword::Options)
-	} else if s.eq_ignore_ascii_case("overlay") {
-		Some(Keyword::Overlay)
-	} else if s.eq_ignore_ascii_case("partial") {
-		Some(Keyword::Partial)
-	} else if s.eq_ignore_ascii_case("passing") {
-		Some(Keyword::Passing)
-	} else if s.eq_ignore_ascii_case("placing") {
-		Some(Keyword::Placing)
-	} else if s.eq_ignore_ascii_case("prepare") {
-		Some(Keyword::Prepare)
-	} else if s.eq_ignore_ascii_case("primary") {
-		Some(Keyword::Primary)
-	} else if s.eq_ignore_ascii_case("refresh") {
-		Some(Keyword::Refresh)
-	} else if s.eq_ignore_ascii_case("reindex") {
-		Some(Keyword::Reindex)
-	} else if s.eq_ignore_ascii_case("release") {
-		Some(Keyword::Release)
-	} else if s.eq_ignore_ascii_case("replace") {
-		Some(Keyword::Replace)
-	} else if s.eq_ignore_ascii_case("replica") {
-		Some(Keyword::Replica)
-	} else if s.eq_ignore_ascii_case("restart") {
-		Some(Keyword::Restart)
-	} else if s.eq_ignore_ascii_case("returns") {
-		Some(Keyword::Returns)
-	} else if s.eq_ignore_ascii_case("routine") {
-		Some(Keyword::Routine)
-	} else if s.eq_ignore_ascii_case("schemas") {
-		Some(Keyword::Schemas)
-	} else if s.eq_ignore_ascii_case("session") {
-		Some(Keyword::Session)
-	} else if s.eq_ignore_ascii_case("similar") {
-		Some(Keyword::Similar)
-	} else if s.eq_ignore_ascii_case("storage") {
-		Some(Keyword::Storage)
-	} else if s.eq_ignore_ascii_case("support") {
-		Some(Keyword::Support)
-	} else if s.eq_ignore_ascii_case("trigger") {
-		Some(Keyword::Trigger)
-	} else if s.eq_ignore_ascii_case("unknown") {
-		Some(Keyword::Unknown)
-	} else if s.eq_ignore_ascii_case("unlogged") {
-		Some(Keyword::Unlogged)
-	} else if s.eq_ignore_ascii_case("varchar") {
-		Some(Keyword::Varchar)
-	} else if s.eq_ignore_ascii_case("verbose") {
-		Some(Keyword::Verbose)
-	} else if s.eq_ignore_ascii_case("version") {
-		Some(Keyword::Version)
-	} else if s.eq_ignore_ascii_case("without") {
-		Some(Keyword::Without)
-	} else if s.eq_ignore_ascii_case("wrapper") {
-		Some(Keyword::Wrapper)
-	} else {
-		None
-	}
-}
-
-fn match_len_8(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("backward") {
-		Some(Keyword::Backward)
-	} else if s.eq_ignore_ascii_case("cascaded") {
-		Some(Keyword::Cascaded)
-	} else if s.eq_ignore_ascii_case("coalesce") {
-		Some(Keyword::Coalesce)
-	} else if s.eq_ignore_ascii_case("conflict") {
-		Some(Keyword::Conflict)
-	} else if s.eq_ignore_ascii_case("continue") {
-		Some(Keyword::Continue)
-	} else if s.eq_ignore_ascii_case("database") {
-		Some(Keyword::Database)
-	} else if s.eq_ignore_ascii_case("defaults") {
-		Some(Keyword::Defaults)
-	} else if s.eq_ignore_ascii_case("deferred") {
-		Some(Keyword::Deferred)
-	} else if s.eq_ignore_ascii_case("distinct") {
-		Some(Keyword::Distinct)
-	} else if s.eq_ignore_ascii_case("document") {
-		Some(Keyword::Document)
-	} else if s.eq_ignore_ascii_case("encoding") {
-		Some(Keyword::Encoding)
-	} else if s.eq_ignore_ascii_case("finalize") {
-		Some(Keyword::Finalize)
-	} else if s.eq_ignore_ascii_case("function") {
-		Some(Keyword::Function)
-	} else if s.eq_ignore_ascii_case("greatest") {
-		Some(Keyword::Greatest)
-	} else if s.eq_ignore_ascii_case("grouping") {
-		Some(Keyword::Grouping)
-	} else if s.eq_ignore_ascii_case("identity") {
-		Some(Keyword::Identity)
-	} else if s.eq_ignore_ascii_case("implicit") {
-		Some(Keyword::Implicit)
-	} else if s.eq_ignore_ascii_case("inherits") {
-		Some(Keyword::Inherits)
-	} else if s.eq_ignore_ascii_case("interval") {
-		Some(Keyword::Interval)
-	} else if s.eq_ignore_ascii_case("location") {
-		Some(Keyword::Location)
-	} else if s.eq_ignore_ascii_case("maxvalue") {
-		Some(Keyword::Maxvalue)
-	} else if s.eq_ignore_ascii_case("minvalue") {
-		Some(Keyword::Minvalue)
-	} else if s.eq_ignore_ascii_case("national") {
-		Some(Keyword::National)
-	} else if s.eq_ignore_ascii_case("operator") {
-		Some(Keyword::Operator)
-	} else if s.eq_ignore_ascii_case("overlaps") {
-		Some(Keyword::Overlaps)
-	} else if s.eq_ignore_ascii_case("parallel") {
-		Some(Keyword::Parallel)
-	} else if s.eq_ignore_ascii_case("password") {
-		Some(Keyword::Password)
-	} else if s.eq_ignore_ascii_case("position") {
-		Some(Keyword::Position)
-	} else if s.eq_ignore_ascii_case("prepared") {
-		Some(Keyword::Prepared)
-	} else if s.eq_ignore_ascii_case("preserve") {
-		Some(Keyword::Preserve)
-	} else if s.eq_ignore_ascii_case("relative") {
-		Some(Keyword::Relative)
-	} else if s.eq_ignore_ascii_case("restrict") {
-		Some(Keyword::Restrict)
-	} else if s.eq_ignore_ascii_case("rollback") {
-		Some(Keyword::Rollback)
-	} else if s.eq_ignore_ascii_case("routines") {
-		Some(Keyword::Routines)
-	} else if s.eq_ignore_ascii_case("security") {
-		Some(Keyword::Security)
-	} else if s.eq_ignore_ascii_case("sequence") {
-		Some(Keyword::Sequence)
-	} else if s.eq_ignore_ascii_case("smallint") {
-		Some(Keyword::Smallint)
-	} else if s.eq_ignore_ascii_case("snapshot") {
-		Some(Keyword::Snapshot)
-	} else if s.eq_ignore_ascii_case("template") {
-		Some(Keyword::Template)
-	} else if s.eq_ignore_ascii_case("trailing") {
-		Some(Keyword::Trailing)
-	} else if s.eq_ignore_ascii_case("truncate") {
-		Some(Keyword::Truncate)
-	} else if s.eq_ignore_ascii_case("unlisten") {
-		Some(Keyword::Unlisten)
-	} else if s.eq_ignore_ascii_case("validate") {
-		Some(Keyword::Validate)
-	} else if s.eq_ignore_ascii_case("variadic") {
-		Some(Keyword::Variadic)
-	} else if s.eq_ignore_ascii_case("volatile") {
-		Some(Keyword::Volatile)
-	} else if s.eq_ignore_ascii_case("xmlparse") {
-		Some(Keyword::Xmlparse)
-	} else if s.eq_ignore_ascii_case("xmltable") {
-		Some(Keyword::Xmltable)
-	} else {
-		None
-	}
-}
-
-fn match_len_9(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("aggregate") {
-		Some(Keyword::Aggregate)
-	} else if s.eq_ignore_ascii_case("assertion") {
-		Some(Keyword::Assertion)
-	} else if s.eq_ignore_ascii_case("character") {
-		Some(Keyword::Character)
-	} else if s.eq_ignore_ascii_case("collation") {
-		Some(Keyword::Collation)
-	} else if s.eq_ignore_ascii_case("committed") {
-		Some(Keyword::Committed)
-	} else if s.eq_ignore_ascii_case("encrypted") {
-		Some(Keyword::Encrypted)
-	} else if s.eq_ignore_ascii_case("excluding") {
-		Some(Keyword::Excluding)
-	} else if s.eq_ignore_ascii_case("exclusive") {
-		Some(Keyword::Exclusive)
-	} else if s.eq_ignore_ascii_case("extension") {
-		Some(Keyword::Extension)
-	} else if s.eq_ignore_ascii_case("following") {
-		Some(Keyword::Following)
-	} else if s.eq_ignore_ascii_case("functions") {
-		Some(Keyword::Functions)
-	} else if s.eq_ignore_ascii_case("generated") {
-		Some(Keyword::Generated)
-	} else if s.eq_ignore_ascii_case("immediate") {
-		Some(Keyword::Immediate)
-	} else if s.eq_ignore_ascii_case("immutable") {
-		Some(Keyword::Immutable)
-	} else if s.eq_ignore_ascii_case("including") {
-		Some(Keyword::Including)
-	} else if s.eq_ignore_ascii_case("increment") {
-		Some(Keyword::Increment)
-	} else if s.eq_ignore_ascii_case("initially") {
-		Some(Keyword::Initially)
-	} else if s.eq_ignore_ascii_case("intersect") {
-		Some(Keyword::Intersect)
-	} else if s.eq_ignore_ascii_case("isolation") {
-		Some(Keyword::Isolation)
-	} else if s.eq_ignore_ascii_case("leakproof") {
-		Some(Keyword::Leakproof)
-	} else if s.eq_ignore_ascii_case("localtime") {
-		Some(Keyword::Localtime)
-	} else if s.eq_ignore_ascii_case("partition") {
-		Some(Keyword::Partition)
-	} else if s.eq_ignore_ascii_case("preceding") {
-		Some(Keyword::Preceding)
-	} else if s.eq_ignore_ascii_case("precision") {
-		Some(Keyword::Precision)
-	} else if s.eq_ignore_ascii_case("procedure") {
-		Some(Keyword::Procedure)
-	} else if s.eq_ignore_ascii_case("recursing") {
-		None
-	} else if s.eq_ignore_ascii_case("recursive") {
-		Some(Keyword::Recursive)
-	} else if s.eq_ignore_ascii_case("returning") {
-		Some(Keyword::Returning)
-	} else if s.eq_ignore_ascii_case("savepoint") {
-		Some(Keyword::Savepoint)
-	} else if s.eq_ignore_ascii_case("sequences") {
-		Some(Keyword::Sequences)
-	} else if s.eq_ignore_ascii_case("statement") {
-		Some(Keyword::Statement)
-	} else if s.eq_ignore_ascii_case("substring") {
-		Some(Keyword::Substring)
-	} else if s.eq_ignore_ascii_case("symmetric") {
-		Some(Keyword::Symmetric)
-	} else if s.eq_ignore_ascii_case("temporary") {
-		Some(Keyword::Temporary)
-	} else if s.eq_ignore_ascii_case("timestamp") {
-		Some(Keyword::Timestamp)
-	} else if s.eq_ignore_ascii_case("transform") {
-		Some(Keyword::Transform)
-	} else if s.eq_ignore_ascii_case("unbounded") {
-		Some(Keyword::Unbounded)
-	} else if s.eq_ignore_ascii_case("validator") {
-		Some(Keyword::Validator)
-	} else if s.eq_ignore_ascii_case("xmlconcat") {
-		Some(Keyword::Xmlconcat)
-	} else if s.eq_ignore_ascii_case("xmlelement") {
-		Some(Keyword::Xmlelement)
-	} else if s.eq_ignore_ascii_case("xmlexists") {
-		Some(Keyword::Xmlexists)
-	} else if s.eq_ignore_ascii_case("xmlforest") {
-		Some(Keyword::Xmlforest)
-	} else {
-		None
-	}
-}
-
-fn match_len_10(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("asymmetric") {
-		Some(Keyword::Asymmetric)
-	} else if s.eq_ignore_ascii_case("checkpoint") {
-		Some(Keyword::Checkpoint)
-	} else if s.eq_ignore_ascii_case("connection") {
-		Some(Keyword::Connection)
-	} else if s.eq_ignore_ascii_case("constraint") {
-		Some(Keyword::Constraint)
-	} else if s.eq_ignore_ascii_case("conversion") {
-		Some(Keyword::Conversion)
-	} else if s.eq_ignore_ascii_case("deallocate") {
-		Some(Keyword::Deallocate)
-	} else if s.eq_ignore_ascii_case("deferrable") {
-		Some(Keyword::Deferrable)
-	} else if s.eq_ignore_ascii_case("delimiters") {
-		Some(Keyword::Delimiters)
-	} else if s.eq_ignore_ascii_case("dictionary") {
-		Some(Keyword::Dictionary)
-	} else if s.eq_ignore_ascii_case("ordinality") {
-		Some(Keyword::Ordinality)
-	} else if s.eq_ignore_ascii_case("overriding") {
-		Some(Keyword::Overriding)
-	} else if s.eq_ignore_ascii_case("privileges") {
-		Some(Keyword::Privileges)
-	} else if s.eq_ignore_ascii_case("procedural") {
-		Some(Keyword::Procedural)
-	} else if s.eq_ignore_ascii_case("procedures") {
-		Some(Keyword::Procedures)
-	} else if s.eq_ignore_ascii_case("references") {
-		Some(Keyword::References)
-	} else if s.eq_ignore_ascii_case("standalone") {
-		Some(Keyword::Standalone)
-	} else if s.eq_ignore_ascii_case("statistics") {
-		Some(Keyword::Statistics)
-	} else if s.eq_ignore_ascii_case("whitespace") {
-		Some(Keyword::Whitespace)
-	} else {
-		None
-	}
-}
-
-fn match_len_11(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("assignment") {
-		Some(Keyword::Assignment)
-	} else if s.eq_ignore_ascii_case("constraints") {
-		Some(Keyword::Constraints)
-	} else if s.eq_ignore_ascii_case("insensitive") {
-		Some(Keyword::Insensitive)
-	} else if s.eq_ignore_ascii_case("publication") {
-		Some(Keyword::Publication)
-	} else if s.eq_ignore_ascii_case("tablesample") {
-		Some(Keyword::Tablesample)
-	} else if s.eq_ignore_ascii_case("tablespace") {
-		Some(Keyword::Tablespace)
-	} else if s.eq_ignore_ascii_case("transaction") {
-		Some(Keyword::Transaction)
-	} else if s.eq_ignore_ascii_case("uncommitted") {
-		Some(Keyword::Uncommitted)
-	} else if s.eq_ignore_ascii_case("unencrypted") {
-		Some(Keyword::Unencrypted)
-	} else {
-		None
-	}
-}
-
-fn match_len_12(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("concurrently") {
-		Some(Keyword::Concurrently)
-	} else if s.eq_ignore_ascii_case("current_date") {
-		Some(Keyword::CurrentDate)
-	} else if s.eq_ignore_ascii_case("current_role") {
-		Some(Keyword::CurrentRole)
-	} else if s.eq_ignore_ascii_case("current_time") {
-		Some(Keyword::CurrentTime)
-	} else if s.eq_ignore_ascii_case("current_user") {
-		Some(Keyword::CurrentUser)
-	} else if s.eq_ignore_ascii_case("materialized") {
-		Some(Keyword::Materialized)
-	} else if s.eq_ignore_ascii_case("serializable") {
-		Some(Keyword::Serializable)
-	} else if s.eq_ignore_ascii_case("session_user") {
-		Some(Keyword::SessionUser)
-	} else if s.eq_ignore_ascii_case("subscription") {
-		Some(Keyword::Subscription)
-	} else if s.eq_ignore_ascii_case("xmlserialize") {
-		Some(Keyword::Xmlserialize)
-	} else {
-		None
-	}
-}
-
-fn match_len_13(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("authorization") {
-		Some(Keyword::Authorization)
-	} else if s.eq_ignore_ascii_case("configuration") {
-		Some(Keyword::Configuration)
-	} else if s.eq_ignore_ascii_case("xmlattributes") {
-		Some(Keyword::Xmlattributes)
-	} else if s.eq_ignore_ascii_case("xmlnamespaces") {
-		Some(Keyword::Xmlnamespaces)
-	} else {
-		None
-	}
-}
-
-fn match_len_14(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("current_schema") {
-		Some(Keyword::CurrentSchema)
-	} else if s.eq_ignore_ascii_case("localtimestamp") {
-		Some(Keyword::Localtimestamp)
-	} else {
-		None
-	}
-}
-
-fn match_len_15(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("characteristics") {
-		Some(Keyword::Characteristics)
-	} else if s.eq_ignore_ascii_case("current_catalog") {
-		Some(Keyword::CurrentCatalog)
-	} else {
-		None
-	}
-}
-
-fn match_len_16(_s: &str) -> Option<Keyword> {
-	None
-}
-
-fn match_len_17(s: &str) -> Option<Keyword> {
-	if s.eq_ignore_ascii_case("current_timestamp") {
-		Some(Keyword::CurrentTimestamp)
-	} else {
-		None
 	}
 }

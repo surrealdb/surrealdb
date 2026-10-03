@@ -90,6 +90,10 @@ pub enum ErrorKind {
 	/// Invalid operator or expression syntax.
 	#[error("invalid expression syntax: {0}")]
 	InvalidExpression(&'static str),
+
+	/// Invalid statement syntax.
+	#[error("invalid statement syntax: {0}")]
+	InvalidStatement(&'static str),
 }
 
 /// Convenience alias for lexer/parser results.

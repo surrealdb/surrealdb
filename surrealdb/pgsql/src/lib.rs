@@ -28,9 +28,7 @@ pub mod lexer;
 pub mod parser;
 pub mod span;
 
-pub use ast::{
-	BinaryOperator, ColumnRef, Expr, Literal, QualifiedName, TypeName, UnaryOperator, WhenClause,
-};
+pub use ast::*;
 pub use error::{ErrorKind, ParseError, ParseResult};
 pub use lexer::Lexer;
 pub use lexer::keyword::{Keyword, KeywordCategory};
@@ -43,4 +41,16 @@ pub use span::Span;
 pub fn parse_expr(src: &str) -> ParseResult<Expr> {
 	let mut parser = Parser::new(src)?;
 	parser.parse_expr()
+}
+
+/// Parse a single PostgreSQL statement from string input.
+pub fn parse_statement(src: &str) -> ParseResult<Statement> {
+	let mut parser = Parser::new(src)?;
+	parser.parse_statement()
+}
+
+/// Parse multiple PostgreSQL statements from string input.
+pub fn parse_statements(src: &str) -> ParseResult<Vec<Statement>> {
+	let mut parser = Parser::new(src)?;
+	parser.parse_statements()
 }

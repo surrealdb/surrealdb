@@ -2,6 +2,7 @@
 
 pub mod expr;
 pub mod precedence;
+pub mod stmt;
 
 use crate::error::{ErrorKind, ParseError, ParseResult};
 use crate::lexer::Lexer;
