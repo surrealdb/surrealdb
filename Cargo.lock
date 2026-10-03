@@ -7778,6 +7778,7 @@ name = "surrealdb-pgsql"
 version = "3.4.0-nightly"
 dependencies = [
  "reblessive",
+ "serde_json",
  "surrealdb-sqlfront-derive",
  "surrealdb-sqlfront-spec",
  "thiserror 2.0.20",

@@ -22,6 +22,7 @@ surrealdb-sqlfront-derive = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 surrealdb-sqlfront-spec = { workspace = true }
 
 [package.metadata.cargo-machete]

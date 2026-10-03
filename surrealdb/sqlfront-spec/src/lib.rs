@@ -216,3 +216,77 @@ impl SuiteSummary {
 		Self::parse(&content)
 	}
 }
+
+/// Tracks candidate conformance results against a suite manifest baseline.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConformanceRatchet {
+	/// Total number of SQL statements evaluated.
+	pub total_evaluated: u64,
+	/// Statements successfully parsed by the candidate.
+	pub parse_success: u64,
+	/// Statements rejected or failed to parse.
+	pub parse_failure: u64,
+	/// Statements whose structural projection matched the reference.
+	pub projection_success: u64,
+	/// Statements whose structural projection mismatched.
+	pub projection_mismatch: u64,
+}
+
+impl ConformanceRatchet {
+	/// Create a new empty conformance ratchet.
+	pub fn new() -> Self {
+		Self::default()
+	}
+
+	/// Record a statement that parsed successfully.
+	pub fn record_parse_success(&mut self) {
+		self.total_evaluated += 1;
+		self.parse_success += 1;
+	}
+
+	/// Record a statement that failed to parse.
+	pub fn record_parse_failure(&mut self) {
+		self.total_evaluated += 1;
+		self.parse_failure += 1;
+	}
+
+	/// Record a successful structural projection comparison.
+	pub fn record_projection_success(&mut self) {
+		self.projection_success += 1;
+	}
+
+	/// Record a projection comparison mismatch.
+	pub fn record_projection_mismatch(&mut self) {
+		self.projection_mismatch += 1;
+	}
+
+	/// Compute the candidate parse acceptance rate as a percentage [0.0, 100.0].
+	pub fn parse_rate(&self) -> f64 {
+		if self.total_evaluated == 0 {
+			0.0
+		} else {
+			(self.parse_success as f64 / self.total_evaluated as f64) * 100.0
+		}
+	}
+
+	/// Compute the candidate projection match rate as a percentage [0.0, 100.0].
+	pub fn projection_rate(&self) -> f64 {
+		if self.total_evaluated == 0 {
+			0.0
+		} else {
+			(self.projection_success as f64 / self.total_evaluated as f64) * 100.0
+		}
+	}
+
+	/// Asserts that candidate parse success meets or exceeds the required floor.
+	pub fn assert_floor(&self, min_accepted: u64) -> Result<(), String> {
+		if self.parse_success < min_accepted {
+			Err(format!(
+				"Conformance ratchet failed: accepted {} statements, below required floor of {}",
+				self.parse_success, min_accepted
+			))
+		} else {
+			Ok(())
+		}
+	}
+}
