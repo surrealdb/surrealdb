@@ -11,6 +11,10 @@ use anyhow::Result;
 use surrealdb_core::kvs::Datastore;
 use tokio_util::sync::CancellationToken;
 
+pub mod query;
+
+pub use query::translate_query;
+
 pub const LOG: &str = "surrealdb::mywire";
 
 /// Bind the MySQL wire protocol listener and spawn its accept loop.
