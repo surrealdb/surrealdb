@@ -74,9 +74,15 @@ graphql = ["dep:async-graphql", "surrealdb-catalog/graphql"]
 # GQL support
 gql = ["dep:surrealdb-gql"]
 
+# PostgreSQL support
+postgres = ["dep:surrealdb-pgsql"]
+
+# MySQL support
+mysql = ["dep:surrealdb-mysql"]
+
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
-features = ["kv-mem", "kv-rocksdb", "http", "scripting", "graphql", "gql"]
+features = ["kv-mem", "kv-rocksdb", "http", "scripting", "graphql", "gql", "postgres", "mysql"]
 targets = []
 
 [dependencies]
@@ -84,6 +90,8 @@ surrealdb-catalog = { workspace = true }
 surrealdb-datastore = { workspace = true }
 surrealdb-expr = { workspace = true }
 surrealdb-gql = { workspace = true, optional = true }
+surrealdb-pgsql = { workspace = true, optional = true }
+surrealdb-mysql = { workspace = true, optional = true }
 surrealdb-sql = { workspace = true }
 surrealdb-strand = { workspace = true }
 surrealdb-syn = { workspace = true }

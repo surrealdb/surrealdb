@@ -892,44 +892,33 @@ impl Connection {
 				// surrealdb-pgsql.
 				let (rewritten, positional) = rewrite_positional_params(query);
 				let config = self.ds.parser_config();
-				let (query, ast, positional) = match syn::parse_with_capabilities(
+				let (query, ast, positional, is_pgsql) = match syn::parse_with_capabilities(
 					&rewritten,
 					&self.ds.get_capabilities(),
 					&config,
 				) {
-					Ok(ast) => (rewritten, ast, positional),
+					Ok(ast) => (rewritten, Some(ast), positional, false),
 					Err(err) => {
-						if let Ok(lowered) = surrealdb_pgsql::translate_sql(query) {
-							let (lowered_rewritten, lowered_pos) =
-								rewrite_positional_params(&lowered);
-							if let Ok(ast) = syn::parse_with_capabilities(
-								&lowered_rewritten,
-								&self.ds.get_capabilities(),
-								&config,
-							) {
-								(lowered_rewritten, ast, positional.max(lowered_pos))
-							} else {
-								return Err(PgError::syntax(err.to_string()));
-							}
+						if let Ok(stmts) = surrealdb_pgsql::parse_statements(query) {
+							let empty = stmts.is_empty();
+							(query.to_string(), None, param_types.len().max(positional), !empty)
 						} else {
 							return Err(PgError::syntax(err.to_string()));
 						}
 					}
 				};
-				let empty = ast.num_statements() == 0;
+				let empty = ast.as_ref().map(|a| a.num_statements() == 0).unwrap_or(!is_pgsql);
 				// Report at least as many parameters as the query references,
 				// so a driver relying on ParameterDescription sees them all.
 				let param_count = param_types.len().max(positional);
 				let parsed = if empty {
 					None
 				} else {
-					Some(ast)
+					ast
 				};
 				(query, parsed, param_count, empty)
 			}
-			// GQL uses a different parser and parameter syntax; store the query
-			// verbatim and let its executor parse it.
-			Dialect::Gql => {
+			Dialect::Gql | Dialect::PgSql | Dialect::MySql => {
 				let empty = query.trim().is_empty();
 				(query.to_string(), None, param_types.len(), empty)
 			}
@@ -1297,9 +1286,17 @@ impl Connection {
 				)
 				.await
 				.map_err(|e| PgError::from(&e)),
-			// An empty SurrealQL statement has no AST; empty portals are
-			// short-circuited before execution, so this yields no value.
-			(Dialect::SurrealQl, _, None) => Ok(Vec::new()),
+			(Dialect::SurrealQl, transaction, None) => self
+				.ds
+				.run(
+					QueryRequest::new(QuerySource::pgsql(query), &self.session)
+						.with_variables(Some(params))
+						.with_optional_transaction(transaction)
+						.with_cancel(cancel),
+				)
+				.await
+				.map_err(|e| PgError::from(&e)),
+			_ => Ok(Vec::new()),
 		}?;
 		let mut last = Value::None;
 		for result in results {
@@ -1367,12 +1364,66 @@ impl Connection {
 				);
 			}
 			Dialect::Gql => self.run_gql(sql, &mut out).await?,
+			Dialect::PgSql => self.run_pgsql(sql, &mut out).await?,
+			Dialect::MySql => self.run_mysql(sql, &mut out).await?,
 			Dialect::SurrealQl if self.transaction.is_some() => {
 				self.run_in_transaction(sql, &mut out).await?;
 			}
 			Dialect::SurrealQl => self.run_surrealql_autocommit(sql, &mut out).await?,
 		}
 		self.finish_query(out).await
+	}
+
+	async fn run_pgsql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
+		let cancel = self.arm_cancel();
+		let req = QueryRequest::new(QuerySource::pgsql(sql), &self.session)
+			.with_optional_transaction(self.transaction.clone())
+			.with_cancel(cancel);
+		match self.ds.run(req).await {
+			Ok(results) => {
+				for result in results {
+					match result.result {
+						Ok(value) => {
+							if !self.emit_result(value, out).await? {
+								break;
+							}
+						}
+						Err(err) => {
+							self.note_simple_error(&PgError::from(&err), out);
+							break;
+						}
+					}
+				}
+			}
+			Err(err) => self.note_simple_error(&PgError::from(&err), out),
+		}
+		Ok(())
+	}
+
+	async fn run_mysql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
+		let cancel = self.arm_cancel();
+		let req = QueryRequest::new(QuerySource::mysql(sql), &self.session)
+			.with_optional_transaction(self.transaction.clone())
+			.with_cancel(cancel);
+		match self.ds.run(req).await {
+			Ok(results) => {
+				for result in results {
+					match result.result {
+						Ok(value) => {
+							if !self.emit_result(value, out).await? {
+								break;
+							}
+						}
+						Err(err) => {
+							self.note_simple_error(&PgError::from(&err), out);
+							break;
+						}
+					}
+				}
+			}
+			Err(err) => self.note_simple_error(&PgError::from(&err), out),
+		}
+		Ok(())
 	}
 
 	/// Execute SurrealQL outside any interactive transaction: one execution
@@ -1388,21 +1439,30 @@ impl Connection {
 		let ast = match syn::parse_with_capabilities(sql, &self.ds.get_capabilities(), &config) {
 			Ok(ast) => ast,
 			Err(err) => {
-				if let Ok(lowered) = surrealdb_pgsql::translate_sql(sql) {
-					match syn::parse_with_capabilities(
-						&lowered,
-						&self.ds.get_capabilities(),
-						&config,
-					) {
-						Ok(ast) => ast,
-						Err(_) => {
-							msg::write_error_response(out, &PgError::syntax(err.to_string()));
-							return Ok(());
+				let cancel = self.arm_cancel();
+				let req =
+					QueryRequest::new(QuerySource::pgsql(sql), &self.session).with_cancel(cancel);
+				match self.ds.run(req).await {
+					Ok(results) => {
+						for result in results {
+							match result.result {
+								Ok(value) => {
+									if !self.emit_result(value, out).await? {
+										break;
+									}
+								}
+								Err(err) => {
+									self.note_simple_error(&PgError::from(&err), out);
+									break;
+								}
+							}
 						}
+						return Ok(());
 					}
-				} else {
-					msg::write_error_response(out, &PgError::syntax(err.to_string()));
-					return Ok(());
+					Err(_) => {
+						msg::write_error_response(out, &PgError::syntax(err.to_string()));
+						return Ok(());
+					}
 				}
 			}
 		};
@@ -1662,10 +1722,7 @@ impl Connection {
 		let allowed = match dialect {
 			// The port's own language, gated only by `RouteTarget::Postgres`,
 			// which the connection already passed.
-			Dialect::SurrealQl => true,
-			// Gated on `RouteTarget::Gql`, the same capability that gates the
-			// `/gql` HTTP route, so denying `gql` closes the GQL entry surface
-			// on this port as well as over HTTP.
+			Dialect::SurrealQl | Dialect::PgSql | Dialect::MySql => true,
 			Dialect::Gql => self.ds.allows_http_route(&RouteTarget::Gql),
 		};
 		if !allowed {
@@ -2346,6 +2403,8 @@ fn dialect_name(dialect: Dialect) -> &'static str {
 	match dialect {
 		Dialect::SurrealQl => "surrealql",
 		Dialect::Gql => "gql",
+		Dialect::PgSql => "pgsql",
+		Dialect::MySql => "mysql",
 	}
 }
 

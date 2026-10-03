@@ -124,8 +124,8 @@ surrealdb-kvs-surrealkv = { version = "3.4.0-nightly", path = "surrealdb/kvs-sur
 # demand it from crates.io, where a publish=false crate can never appear -
 # breaking every crate that dev-depends on it (surrealdb-kvs-any, -kvs-indxdb).
 surrealdb-kvs-test = { path = "surrealdb/kvs-test" }
-surrealdb-mysql = { path = "surrealdb/mysql" }
-surrealdb-pgsql = { path = "surrealdb/pgsql" }
+surrealdb-mysql = { version = "3.4.0-nightly", path = "surrealdb/mysql" }
+surrealdb-pgsql = { version = "3.4.0-nightly", path = "surrealdb/pgsql" }
 surrealdb-sqlfront-derive = { path = "surrealdb/sqlfront-derive" }
 surrealdb-sqlfront-spec = { path = "surrealdb/sqlfront-spec" }
 surrealdb-kvs-tikv = { version = "3.4.0-nightly", path = "surrealdb/kvs-tikv" }

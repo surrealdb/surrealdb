@@ -12,7 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-surrealdb-core = { workspace = true }
+surrealdb-core = { workspace = true, features = ["mysql"] }
 surrealdb-mysql = { workspace = true }
 surrealdb-types = { workspace = true }
 

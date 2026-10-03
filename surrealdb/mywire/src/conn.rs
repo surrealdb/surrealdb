@@ -8,8 +8,7 @@ use std::time::Duration;
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::basic;
-use surrealdb_core::kvs::{Datastore, QueryRequest};
-use surrealdb_core::syn;
+use surrealdb_core::kvs::{Datastore, QueryRequest, QuerySource};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::OwnedSemaphorePermit;
@@ -20,7 +19,6 @@ use crate::auth::*;
 use crate::codec::*;
 use crate::constants::*;
 use crate::msg::*;
-use crate::query::translate_query;
 use crate::typing::*;
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
@@ -267,27 +265,13 @@ impl Connection {
 			return Ok(());
 		}
 
-		// Translate MySQL query if needed
-		let config = self.ds.parser_config();
-		let translated;
-		let query_to_run =
-			match syn::parse_with_capabilities(trimmed, &self.ds.get_capabilities(), &config) {
-				Ok(_) => trimmed,
-				Err(_) => match translate_query(trimmed) {
-					Ok(lowered) => {
-						translated = lowered;
-						&translated
-					}
-					Err(err) => {
-						let err_pkt = ErrPacket::syntax(format!("MySQL translation error: {err}"));
-						self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
-						return Ok(());
-					}
-				},
-			};
-
-		// Execute against datastore
-		let res = self.ds.run(QueryRequest::new(query_to_run, &self.session)).await;
+		// Execute against datastore with MySQL dialect (direct LogicalPlan lowering for SELECT,
+		// falling back to transactional engine for mutations/DDL, or SurrealQL fallback).
+		let req = QueryRequest::new(QuerySource::mysql(trimmed), &self.session);
+		let res = match self.ds.run(req).await {
+			Ok(r) => Ok(r),
+			Err(_) => self.ds.run(QueryRequest::new(trimmed, &self.session)).await,
+		};
 		match res {
 			Ok(results) => {
 				let mut res_seq = seq.wrapping_add(1);

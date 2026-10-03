@@ -5207,6 +5207,14 @@ impl Datastore {
 				text,
 				dialect: Dialect::Gql,
 			} => return Ok(planned(self.parse_gql(text)?)),
+			QuerySource::Text {
+				text,
+				dialect: Dialect::PgSql,
+			} => return self.parse_pgsql(text),
+			QuerySource::Text {
+				text,
+				dialect: Dialect::MySql,
+			} => return self.parse_mysql(text),
 			QuerySource::Ast(ast) => ast,
 			QuerySource::Plan(plans) => return Ok(planned(plans)),
 		};
@@ -5231,6 +5239,36 @@ impl Datastore {
 	fn parse_gql(&self, _text: &str) -> std::result::Result<Vec<LogicalOp>, TypesError> {
 		Err(TypesError::configuration(
 			"This build does not support GQL queries".to_string(),
+			surrealdb_types::ConfigurationError::DialectNotSupported,
+		))
+	}
+
+	/// Parse and lower PostgreSQL SQL query text to statements and plans.
+	#[cfg(feature = "postgres")]
+	fn parse_pgsql(&self, text: &str) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		crate::pgsql::parse_to_statements(text, &self.capabilities.load(), &self.parser_config)
+			.map_err(|e| TypesError::validation(e.to_string(), None))
+	}
+
+	#[cfg(not(feature = "postgres"))]
+	fn parse_pgsql(&self, _text: &str) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		Err(TypesError::configuration(
+			"This build does not support PostgreSQL queries".to_string(),
+			surrealdb_types::ConfigurationError::DialectNotSupported,
+		))
+	}
+
+	/// Parse and lower MySQL SQL query text to statements and plans.
+	#[cfg(feature = "mysql")]
+	fn parse_mysql(&self, text: &str) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		crate::mysql::parse_to_statements(text, &self.capabilities.load(), &self.parser_config)
+			.map_err(|e| TypesError::validation(e.to_string(), None))
+	}
+
+	#[cfg(not(feature = "mysql"))]
+	fn parse_mysql(&self, _text: &str) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		Err(TypesError::configuration(
+			"This build does not support MySQL queries".to_string(),
 			surrealdb_types::ConfigurationError::DialectNotSupported,
 		))
 	}
@@ -6433,6 +6471,70 @@ mod test {
 		let err =
 			ds.run(QueryRequest::new(QuerySource::gql("MATCH RETURN"), &ses)).await.unwrap_err();
 		assert!(!err.to_string().contains("experimental"), "unexpected error: {err}");
+		Ok(())
+	}
+
+	#[cfg(feature = "postgres")]
+	#[tokio::test]
+	async fn pgsql_text_parses_lowers_and_executes() -> Result<()> {
+		use crate::dbs::capabilities::Targets;
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::all().with_experimental(Targets::All))
+			.build_with_path("memory")
+			.await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, "test", "test").await?;
+		txn.commit().await?;
+		execute_all(&ds, &ses, "CREATE person:tobie SET name = 'Tobie';").await?;
+
+		let mut res = ds
+			.run(QueryRequest::new(
+				QuerySource::pgsql("SELECT name FROM person WHERE name = 'Tobie'"),
+				&ses,
+			))
+			.await?;
+		assert_eq!(res.len(), 1);
+		let val = res.remove(0).result?;
+		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { name: "Tobie" }]));
+
+		let mut res =
+			ds.run(QueryRequest::new(QuerySource::pgsql("SELECT 1 AS num;"), &ses)).await?;
+		assert_eq!(res.len(), 1);
+		let val = res.remove(0).result?;
+		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { num: 1 }]));
+		Ok(())
+	}
+
+	#[cfg(feature = "mysql")]
+	#[tokio::test]
+	async fn mysql_text_parses_lowers_and_executes() -> Result<()> {
+		use crate::dbs::capabilities::Targets;
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::all().with_experimental(Targets::All))
+			.build_with_path("memory")
+			.await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, "test", "test").await?;
+		txn.commit().await?;
+		execute_all(&ds, &ses, "CREATE person:tobie SET name = 'Tobie';").await?;
+
+		let mut res = ds
+			.run(QueryRequest::new(
+				QuerySource::mysql("SELECT name FROM person WHERE name = 'Tobie'"),
+				&ses,
+			))
+			.await?;
+		assert_eq!(res.len(), 1);
+		let val = res.remove(0).result?;
+		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { name: "Tobie" }]));
+
+		let mut res =
+			ds.run(QueryRequest::new(QuerySource::mysql("SELECT 1 AS num;"), &ses)).await?;
+		assert_eq!(res.len(), 1);
+		let val = res.remove(0).result?;
+		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { num: 1 }]));
 		Ok(())
 	}
 

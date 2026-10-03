@@ -69,9 +69,9 @@ gql = ["surrealdb-core/gql"]
 # MCP (Model Context Protocol) server support
 mcp = ["dep:surrealdb-mcp", "surrealdb-mcp/server-http", "surrealdb-mcp/transport-io"]
 # Postgres wire protocol support
-postgres = ["dep:surrealdb-pgwire"]
+postgres = ["dep:surrealdb-pgwire", "surrealdb-core/postgres"]
 # MySQL wire protocol support
-mysql = ["dep:surrealdb-mywire"]
+mysql = ["dep:surrealdb-mywire", "surrealdb-core/mysql"]
 # Interactive CLI support (SQL shell)
 cli = ["dep:rustyline"]
 # Tokio Console support, off by default for production builds.

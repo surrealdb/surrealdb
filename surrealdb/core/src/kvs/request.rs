@@ -37,6 +37,10 @@ pub enum Dialect {
 	/// sent — a connection parameter, a route, a tool call — and so is a
 	/// runtime value on every path that produces one.
 	Gql,
+	/// PostgreSQL SQL dialect.
+	PgSql,
+	/// MySQL SQL dialect.
+	MySql,
 }
 
 /// The form a query arrives in.
@@ -76,6 +80,22 @@ impl<'src> QuerySource<'src> {
 		QuerySource::Text {
 			text,
 			dialect: Dialect::Gql,
+		}
+	}
+
+	/// PostgreSQL SQL text.
+	pub fn pgsql(text: &'src str) -> Self {
+		QuerySource::Text {
+			text,
+			dialect: Dialect::PgSql,
+		}
+	}
+
+	/// MySQL SQL text.
+	pub fn mysql(text: &'src str) -> Self {
+		QuerySource::Text {
+			text,
+			dialect: Dialect::MySql,
 		}
 	}
 

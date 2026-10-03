@@ -72,6 +72,10 @@ pub(crate) use surrealdb_expr::expr;
 pub mod gql;
 #[cfg(feature = "graphql")]
 pub mod graphql;
+#[cfg(feature = "mysql")]
+pub mod mysql;
+#[cfg(feature = "postgres")]
+pub mod pgsql;
 // Gated on either feature: `jwks` builds need `http::config` for their fetch
 // client even when the `http::*` SurrealQL functions are compiled out. The
 // client itself is `http`-gated inside the module.

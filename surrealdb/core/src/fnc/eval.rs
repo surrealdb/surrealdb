@@ -82,6 +82,8 @@ fn func_name(dialect: Dialect) -> &'static str {
 	match dialect {
 		Dialect::SurrealQl => "eval::surql",
 		Dialect::Gql => "eval::gql",
+		Dialect::PgSql => "eval::pgsql",
+		Dialect::MySql => "eval::mysql",
 	}
 }
 
@@ -152,6 +154,42 @@ pub(crate) fn prepare(
 			#[cfg(not(feature = "gql"))]
 			Dialect::Gql => bail!(surrealdb_types::Error::configuration(
 				"This build does not support GQL queries".to_string(),
+				surrealdb_types::ConfigurationError::DialectNotSupported,
+			)),
+			#[cfg(feature = "postgres")]
+			Dialect::PgSql => {
+				let plans = crate::pgsql::parse_to_plan(query, caps, &config).map_err(|e| {
+					ExecError::InvalidFunction {
+						name: name.to_string(),
+						message: e.to_string(),
+					}
+				})?;
+				if let Some(first) = plans.into_iter().next() {
+					return Ok(Prepared::Plan(Box::new(first)));
+				}
+				return Ok(Prepared::Statements(Vec::new()));
+			}
+			#[cfg(not(feature = "postgres"))]
+			Dialect::PgSql => bail!(surrealdb_types::Error::configuration(
+				"This build does not support PostgreSQL queries".to_string(),
+				surrealdb_types::ConfigurationError::DialectNotSupported,
+			)),
+			#[cfg(feature = "mysql")]
+			Dialect::MySql => {
+				let plans = crate::mysql::parse_to_plan(query, caps, &config).map_err(|e| {
+					ExecError::InvalidFunction {
+						name: name.to_string(),
+						message: e.to_string(),
+					}
+				})?;
+				if let Some(first) = plans.into_iter().next() {
+					return Ok(Prepared::Plan(Box::new(first)));
+				}
+				return Ok(Prepared::Statements(Vec::new()));
+			}
+			#[cfg(not(feature = "mysql"))]
+			Dialect::MySql => bail!(surrealdb_types::Error::configuration(
+				"This build does not support MySQL queries".to_string(),
 				surrealdb_types::ConfigurationError::DialectNotSupported,
 			)),
 		};

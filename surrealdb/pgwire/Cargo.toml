@@ -12,7 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-surrealdb-core = { workspace = true }
+surrealdb-core = { workspace = true, features = ["postgres"] }
 surrealdb-datastore = { workspace = true }
 surrealdb-iam = { workspace = true }
 surrealdb-kvs = { workspace = true }
