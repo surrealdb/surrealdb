@@ -1,21 +1,6 @@
 # Default owners for the repository
 * @surrealdb/surrealdb
 
-# Configuration for CI
-/.github/ @surrealdb/ci
-
-# Configuration for deployment
-.dockerignore @surrealdb/ci
-build.rs @surrealdb/ci
-*.nix @surrealdb/ci
-flake.lock @surrealdb/ci
-/.cargo/ @surrealdb/ci
-/.config/ @surrealdb/ci
-/dev/ @surrealdb/ci
-/pkg/ @surrealdb/ci
-Makefile @surrealdb/ci
-Makefile.* @surrealdb/ci
-
 # Configuration for Rust dependencies
 Cargo.lock @surrealdb/security
 Cargo.toml @surrealdb/security
@@ -37,9 +22,6 @@ COPILOT.md @surrealdb/security
 .cursorrules @surrealdb/security
 /.cursor/ @surrealdb/security
 
-# KV Storage Interface
-/surrealdb/core/src/kvs/ @surrealdb/kv
-
 # Observability allowlists — additions change what appears on the
 # unauthenticated `/metrics` endpoint and therefore require security review.
 /surrealdb/server/src/observe/public.rs @surrealdb/security
@@ -48,3 +30,10 @@ COPILOT.md @surrealdb/security
 /surrealdb/server/src/observe/session.rs @surrealdb/security
 /surrealdb/server/src/observe/provider.rs @surrealdb/security
 /doc/OBSERVABILITY.md @surrealdb/security
+
+# SQL front end supply chain, provenance, and security boundaries
+/surrealdb/mysql/deps-allowlist.txt @surrealdb/security
+/surrealdb/mysql/PROVENANCE.md @surrealdb/security
+/surrealdb/pgsql/deps-allowlist.txt @surrealdb/security
+/surrealdb/pgsql/PROVENANCE.md @surrealdb/security
+/scripts/sqlfront-conformance/ @surrealdb/security

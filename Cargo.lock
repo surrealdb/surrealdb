@@ -1999,9 +1999,9 @@ dependencies = [
 
 [[package]]
 name = "der"
-version = "0.8.0"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71fd89660b2dc699704064e59e9dba0147b903e85319429e131620d022be411b"
+checksum = "a878c850e9e421b20262e9b41f9c860e4785fa07541c266b62ff9d1ef998a80a"
 dependencies = [
  "pem-rfc7468 1.0.0",
  "zeroize",
@@ -7717,6 +7717,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-mysql"
+version = "3.4.0-nightly"
+dependencies = [
+ "reblessive",
+ "surrealdb-sqlfront-derive",
+ "surrealdb-sqlfront-spec",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "surrealdb-node"
 version = "3.4.0-nightly"
 dependencies = [
@@ -7761,6 +7771,16 @@ dependencies = [
  "surrealdb-parse-common",
  "surrealdb-token",
  "uuid",
+]
+
+[[package]]
+name = "surrealdb-pgsql"
+version = "3.4.0-nightly"
+dependencies = [
+ "reblessive",
+ "surrealdb-sqlfront-derive",
+ "surrealdb-sqlfront-spec",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -7987,6 +8007,26 @@ dependencies = [
  "surrealdb-types",
  "unicase",
  "uuid",
+]
+
+[[package]]
+name = "surrealdb-sqlfront-derive"
+version = "3.4.0-nightly"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "surrealdb-sqlfront-spec"
+version = "3.4.0-nightly"
+dependencies = [
+ "hex",
+ "libtest-mimic",
+ "serde_json",
+ "sha2 0.10.9",
+ "toml",
 ]
 
 [[package]]
@@ -9189,7 +9229,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dea7109cdcd5864d4eeb1b58a1648dc9bf520360d7af16ec26d0a9354bafcfc0"
 dependencies = [
  "base64 0.22.1",
- "der 0.8.0",
+ "der 0.8.2",
  "log",
  "native-tls",
  "percent-encoding",

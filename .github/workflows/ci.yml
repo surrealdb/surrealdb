@@ -549,6 +549,37 @@ jobs:
         run: ./.github/scripts/check-lockfiles.sh
 
   # ----------------------------------------
+  # PostgreSQL front end
+  # ----------------------------------------
+
+  pgsql:
+    name: PostgreSQL front-end checks
+    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Run surrealdb-pgsql CI checks
+        run: cargo make ci-pgsql
+
+  # ----------------------------------------
   # Integration tests
   # ----------------------------------------
 
@@ -1257,6 +1288,8 @@ jobs:
       - node-engine
       # Embedded browser engine
       - wasm-engine
+      # PostgreSQL front end
+      - pgsql
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1297,6 +1330,7 @@ jobs:
             "${{ needs.mcp-tests.result }}"
             "${{ needs.node-engine.result }}"
             "${{ needs.wasm-engine.result }}"
+            "${{ needs.pgsql.result }}"
           )
 
           # Check if any job failed (skipped is ok for conditional jobs)
@@ -1307,6 +1341,12 @@ jobs:
               failed=true
             fi
           done
+
+          # pgsql must succeed on every run (skipped is NOT allowed)
+          if [[ "${{ needs.pgsql.result }}" != "success" ]]; then
+            echo "❌ pgsql check did not succeed: ${{ needs.pgsql.result }}"
+            failed=true
+          fi
 
           if [[ "$failed" == "true" ]]; then
             echo "❌ One or more required checks failed"

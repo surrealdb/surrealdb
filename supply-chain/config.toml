@@ -104,6 +104,9 @@ audit-as-crates-io = false
 [policy.surrealdb-mcp]
 audit-as-crates-io = false
 
+[policy.surrealdb-mysql]
+audit-as-crates-io = false
+
 [policy.surrealdb-observe]
 audit-as-crates-io = false
 
@@ -111,6 +114,9 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.surrealdb-parser]
+audit-as-crates-io = false
+
+[policy.surrealdb-pgsql]
 audit-as-crates-io = false
 
 [policy.surrealdb-profiling]
@@ -127,6 +133,13 @@ audit-as-crates-io = false
 
 [policy.surrealdb-sql]
 audit-as-crates-io = false
+
+[policy.surrealdb-sqlfront-derive]
+audit-as-crates-io = false
+
+[policy.surrealdb-sqlfront-spec]
+audit-as-crates-io = false
+criteria = "safe-to-run"
 
 [policy.surrealdb-sqon]
 audit-as-crates-io = false
@@ -554,7 +567,7 @@ version = "0.1.4"
 criteria = "safe-to-run"
 
 [[exemptions.der]]
-version = "0.8.0"
+version = "0.8.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.der-parser]]

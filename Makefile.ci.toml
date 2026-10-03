@@ -573,6 +573,87 @@ script = '''
     done
 '''
 
+[tasks.ci-pgsql]
+category = "CI - CHECK"
+description = "Run comprehensive checks for surrealdb-pgsql"
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
+    for fe in pgsql mysql; do
+        pkg="surrealdb-$fe"
+        dir="surrealdb/$fe"
+        echo "Running clippy on $pkg..."
+        cargo clippy --locked -p "$pkg" --all-features --all-targets -- -D warnings
+
+        echo "Running tests on $pkg..."
+        cargo test --locked -p "$pkg" --features fuzzing
+
+        echo "Checking wasm32 compilation for $pkg..."
+        cargo check --locked -p "$pkg" --target wasm32-unknown-unknown
+
+        echo "Verifying weight fence and dependency allowlist for $pkg..."
+        allowlist="$dir/deps-allowlist.txt"
+        actual_deps=$(cargo tree --locked -e normal -p "$pkg" --prefix none --format '{p}' | sed -E 's/ v[0-9].*//' | sort -u)
+        while IFS= read -r dep; do
+            if [[ -n "$dep" ]] && ! grep -q -F -x "$dep" "$allowlist"; then
+                echo "::error::Normal dependency '$dep' is not in $allowlist"
+                exit 1
+            fi
+        done <<< "$actual_deps"
+
+        echo "Checking oracle denylist on all edge kinds for $pkg..."
+        all_edges=$(cargo tree --locked -e normal,dev,build -p "$pkg" --prefix none --format '{p}')
+        for banned in pg_query prost bindgen clang-sys; do
+            if echo "$all_edges" | grep -q "$banned"; then
+                echo "::error::Banned dependency '$banned' found in $pkg dependency tree"
+                exit 1
+            fi
+        done
+
+        echo "Checking import fence for common..."
+        if [[ -d "$dir/src/common" ]]; then
+            if grep -rn "use crate::" "$dir/src/common/" 2>/dev/null | grep -v "use crate::common::"; then
+                echo "::error::Common import fence violated: src/common/ must only import from crate::common::"
+                exit 1
+            fi
+        fi
+
+        echo "Running grep bans on $dir/src..."
+        if grep -rn -E "\b(tracing|log)::(info|warn|debug|trace|error)\b|\b(info|warn|debug|trace|error)!\(" "$dir/src/" 2>/dev/null; then
+            echo "::error::Logging or tracing macros found in $dir/src/"
+            exit 1
+        fi
+
+        if grep -rn -E "\bassert(!|_eq!|_ne!)\(" "$dir/src/" 2>/dev/null; then
+            echo "::error::assert! macros found in non-test src"
+            exit 1
+        fi
+
+        if [[ -d "$dir/src/print" ]] && grep -rn "format!.*'{.*}'" "$dir/src/print/" 2>/dev/null; then
+            echo "::error::Raw '{ interpolation found in print code"
+            exit 1
+        fi
+
+        if grep -rn -E "(/private/tmp/|/Users/|claude-)" "$dir/src/" "$dir/tests/" 2>/dev/null; then
+            echo "::error::Local or session paths found in $dir"
+            exit 1
+        fi
+
+        if grep -rn -E "::=" "$dir/src/" "$dir/docs/" 2>/dev/null; then
+            echo "::error::Prohibited ISO BNF reference found in $dir"
+            exit 1
+        fi
+
+        if [[ -f "$dir/fuzz/Cargo.toml" ]]; then
+            echo "Checking fuzz satellite workspace for $dir..."
+            cargo check --locked --manifest-path "$dir/fuzz/Cargo.toml"
+        fi
+    done
+
+    echo "✅ SQL front-end checks passed successfully!"
+'''
+
 # --------------------------------------------------
 # Integration Tests
 # --------------------------------------------------

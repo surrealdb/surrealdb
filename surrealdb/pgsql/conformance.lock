@@ -1,0 +1,9 @@
+layout = 1
+
+[source]
+repo = "https://github.com/surrealdb/sql-conformance.git"
+commit = "dde2c174a582b3fbe9fd25bb35965ec0fd5195b9"
+manifest_sha256 = "0675b507d223d89fb94a6dec3dae72ab7ed4ff9dc1a459437e3bd828285092a9"
+
+[[dataset]]
+path = "suites/postgresql-v18"

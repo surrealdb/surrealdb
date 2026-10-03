@@ -93,7 +93,10 @@ yanked = "warn"
 #   server itself supplies — no attacker-controlled input, and nothing `unsafe` of ours. The
 #   exporter's own 0.3.0 still requires `smartstring = "^1.0.1"`, so clearing this means the
 #   exporter migrating to `compact_str` or `smol_str`; bumping to 0.3.0 would only add an
-#   `opentelemetry` 0.31 -> 0.32 major bump across the `obs` module for no advisory gain.
+# - for RUSTSEC-2026-0321 / -0322 / -0323 / -0324 / -0325 / -0326 / -0327, wasmtime and
+#   wasmtime-wasi <48.0.4 have host memory allocation, padding leak, component async callback,
+#   fuel circumvention, GC heap corruption, and timestamp panic vulnerabilities.
+#   Wasmtime 48.0.3 cleared 0314 and 0316; remaining advisories require >=48.0.4 or 49.x.
 ignore = [
     "RUSTSEC-2025-0141",
     "RUSTSEC-2023-0071",
@@ -101,6 +104,13 @@ ignore = [
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
     "RUSTSEC-2026-0249",
+    "RUSTSEC-2026-0321",
+    "RUSTSEC-2026-0322",
+    "RUSTSEC-2026-0323",
+    "RUSTSEC-2026-0324",
+    "RUSTSEC-2026-0325",
+    "RUSTSEC-2026-0326",
+    "RUSTSEC-2026-0327",
 ]
 
 # --------------------------------------------------
@@ -492,6 +502,26 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealism-types"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-mysql"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-pgsql"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-sqlfront-derive"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-sqlfront-spec"
 expression = "BUSL-1.1"
 license-files = []
 

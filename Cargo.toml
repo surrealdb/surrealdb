@@ -29,14 +29,18 @@ members = [
     "surrealdb/kvs-test",
     "surrealdb/kvs-tikv",
     "surrealdb/mcp",
+    "surrealdb/mysql",
     "surrealdb/node",
     "surrealdb/observe",
     "surrealdb/parse-common",
     "surrealdb/parser",
+    "surrealdb/pgsql",
     "surrealdb/rpc",
     "surrealdb/runtime",
     "surrealdb/server",
     "surrealdb/sql",
+    "surrealdb/sqlfront-derive",
+    "surrealdb/sqlfront-spec",
     "surrealdb/sqon",
     "surrealdb/strand",
     "surrealdb/syn",
@@ -116,6 +120,10 @@ surrealdb-kvs-surrealkv = { version = "3.4.0-nightly", path = "surrealdb/kvs-sur
 # demand it from crates.io, where a publish=false crate can never appear -
 # breaking every crate that dev-depends on it (surrealdb-kvs-any, -kvs-indxdb).
 surrealdb-kvs-test = { path = "surrealdb/kvs-test" }
+surrealdb-mysql = { path = "surrealdb/mysql" }
+surrealdb-pgsql = { path = "surrealdb/pgsql" }
+surrealdb-sqlfront-derive = { path = "surrealdb/sqlfront-derive" }
+surrealdb-sqlfront-spec = { path = "surrealdb/sqlfront-spec" }
 surrealdb-kvs-tikv = { version = "3.4.0-nightly", path = "surrealdb/kvs-tikv" }
 surrealdb-collections = { version = "3.4.0-nightly", path = "surrealdb/collections" }
 

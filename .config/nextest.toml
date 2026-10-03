@@ -43,6 +43,11 @@ slow-timeout = "120s"
 filter = 'test(access_bearer_purge)'
 slow-timeout = "60s"
 
+# SQL front end tests are deterministic; retries only mask genuine failures.
+[[profile.default.overrides]]
+filter = 'package(surrealdb-mysql) | package(surrealdb-pgsql) | package(surrealdb-sqlfront-derive) | package(surrealdb-sqlfront-spec)'
+retries = 0
+
 [test-groups]
 # Ensure all KVS tests run serially
 serial-kvs = { max-threads = 1 }

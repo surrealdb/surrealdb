@@ -1,0 +1,9 @@
+proc-macro2
+quote
+reblessive
+surrealdb-pgsql
+surrealdb-sqlfront-derive
+syn
+thiserror
+thiserror-impl
+unicode-ident

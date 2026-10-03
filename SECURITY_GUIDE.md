@@ -1097,9 +1097,11 @@ Flag when changes touch:
 
 **Files**: the `surrealdb/syn` crate (SurrealQL lexer/parser, the bulk of the
 grammar), `surrealdb/parser`, `surrealdb/sql` and `surrealdb/expr` (AST and
-expression construction), and the `surrealdb/gql` crate (GQL front-end). The
-same-named modules under `core/src/` are thin remnants of the pre-crate-split
-layout and are not where the grammar lives.
+expression construction), the `surrealdb/gql` crate (GQL front-end), and
+`surrealdb/pgsql` and `surrealdb/mysql` (PostgreSQL and MySQL front-ends; not
+reachable from any entry point until core enables their features). The
+same-named modules under `core/src/` are thin
+remnants of the pre-crate-split layout and are not where the grammar lives.
 
 ### Invariants
 

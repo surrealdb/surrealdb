@@ -1,0 +1,35 @@
+[package]
+name = "surrealdb-pgsql"
+publish = false
+readme = "README.md"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description = "PostgreSQL language front end for SurrealDB"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+fuzzing = []
+conformance-tests = []
+
+[dependencies]
+reblessive = { workspace = true, features = ["tree"] }
+surrealdb-sqlfront-derive = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+surrealdb-sqlfront-spec = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = [
+    "reblessive",
+    "surrealdb-sqlfront-derive",
+    "thiserror",
+]
+
+[lints]
+workspace = true
