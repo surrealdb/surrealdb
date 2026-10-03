@@ -1230,7 +1230,7 @@ the binding-table operators — `exec/operators/graph/` (`expand.rs`, `endpoint.
 `exec/planner/match_plan.rs`, `kvs/ds.rs` (`parse_gql`, reached from
 `statements_for` when the request names `Dialect::Gql`), `rpc/protocol.rs`
 (`gql` method, `QueryForm::Text` carrying `Dialect::Gql`),
-`ntw/gql.rs` (`/gql` route), `pg/conn.rs` (`select_dialect`, the gate for
+`ntw/gql.rs` (`/gql` route), `pgwire/conn.rs` (`select_dialect`, the gate for
 `options=-c dialect=gql` and `SET dialect = 'gql'`, and the `run_gql` /
 `execute_query` paths those select), `fnc/eval.rs` (`eval::gql`)
 
@@ -1268,7 +1268,7 @@ invariants.
   | Entry surface | Gate |
   | --- | --- |
   | `POST /gql` (`ntw/gql.rs`) | `RouteTarget::Gql` |
-  | Postgres `options=-c dialect=gql` / `SET dialect = 'gql'` (`pg/conn.rs`) | `RouteTarget::Gql`, on top of `RouteTarget::Postgres` for the port |
+  | Postgres `options=-c dialect=gql` / `SET dialect = 'gql'` (`pgwire/conn.rs`) | `RouteTarget::Gql`, on top of `RouteTarget::Postgres` for the port |
   | RPC `gql` method (WebSocket, `/rpc`, gRPC) | `MethodTarget` for `gql`, on top of the transport's own route |
   | `eval::gql(…)` from any SurrealQL (`fnc/eval.rs`) | `allows_function_name("eval::gql")`, `allows_query`, and `allows_eval_query` — the last denies every subject by default, including under `--allow-all` |
 
@@ -1387,7 +1387,7 @@ Flag when changes touch:
   `MethodTarget`, `allows_query_by_subject` in the `gql` RPC method, the
   `eval::gql` gates in `fnc/eval.rs`, or the experimental check in
   `Datastore::parse_gql`
-- `pg/conn.rs` dialect gating: `Connection::select_dialect` must stay the only
+- `pgwire/conn.rs` dialect gating: `Connection::select_dialect` must stay the only
   assignment to the connection's dialect, and both selection points
   (`dialect_from_options` at startup, `SET dialect` in session) must route
   through it — a direct assignment reopens GQL on the Postgres port under a

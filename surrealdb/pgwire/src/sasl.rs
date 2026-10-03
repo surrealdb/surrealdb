@@ -8,6 +8,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use rand::TryRngCore;
+use rand::rngs::OsRng;
 use surrealdb_core::iam::verify::ScramAuth;
 use surrealdb_iam::scram;
 
@@ -128,7 +129,7 @@ fn attr(msg: &str, key: char) -> Option<&str> {
 /// exchange's replay and downgrade protection.
 fn generate_nonce() -> Result<String, PgError> {
 	let mut bytes = [0u8; SERVER_NONCE_LEN];
-	rand::rngs::OsRng
+	OsRng
 		.try_fill_bytes(&mut bytes)
 		.map_err(|_| PgError::internal("failed to obtain secure randomness for the SCRAM nonce"))?;
 	Ok(STANDARD.encode(bytes))

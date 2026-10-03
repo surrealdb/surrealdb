@@ -1,0 +1,26 @@
+[package]
+name = "surrealdb-mywire"
+publish = false
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+version.workspace = true
+description = "MySQL wire protocol server for SurrealDB"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+surrealdb-core = { workspace = true }
+surrealdb-mysql = { workspace = true }
+
+anyhow = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["surrealdb-mysql"]
+
+[lints]
+workspace = true

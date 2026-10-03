@@ -940,4 +940,26 @@ mod pg_integration {
 		assert!(result.is_err(), "the sleeping query should have been cancelled");
 		Ok(())
 	}
+
+	#[test(tokio::test)]
+	async fn standard_postgres_ddl_and_dml() {
+		let (port, _server) = start_pg_server(true).await.unwrap();
+		let client = connect_root(port).await.unwrap();
+		let res1 = client.simple_query("CREATE TABLE pg_users (id INT, name VARCHAR(50))").await;
+		if let Err(e) = &res1 {
+			panic!("RES1 error: {e:?}");
+		}
+		let res2 = client.simple_query("INSERT INTO pg_users (id, name) VALUES (1, 'Alice')").await;
+		if let Err(e) = &res2 {
+			panic!("RES2 error: {e:?}");
+		}
+		let res3 = client.simple_query("SELECT id, name FROM pg_users").await;
+		if let Err(e) = &res3 {
+			panic!("RES3 error: {e:?}");
+		}
+		let rows = rows(res3.unwrap());
+		assert_eq!(rows.len(), 1, "expected 1 row, got {:?}", rows.len());
+		assert_eq!(rows[0].get(0), Some("pg_users:1"));
+		assert_eq!(rows[0].get(1), Some("Alice"));
+	}
 }

@@ -305,6 +305,30 @@ allow = ["BUSL-1.1"]
 name = "surrealism-types"
 allow = ["BUSL-1.1"]
 
+[[licenses.exceptions]]
+name = "surrealdb-mysql"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-pgsql"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-pgwire"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-mywire"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-sqlfront-derive"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-sqlfront-spec"
+allow = ["BUSL-1.1"]
+
 [[licenses.clarify]]
 name = "surreal"
 expression = "BUSL-1.1"
@@ -522,6 +546,16 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealdb-sqlfront-spec"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-pgwire"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-mywire"
 expression = "BUSL-1.1"
 license-files = []
 

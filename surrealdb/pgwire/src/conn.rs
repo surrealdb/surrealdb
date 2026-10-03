@@ -19,7 +19,9 @@ use surrealdb_types::{Value, Variables};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::OwnedSemaphorePermit;
+use tokio::time::timeout;
 use tokio_rustls::TlsAcceptor;
+use tokio_rustls::server::TlsStream;
 use tokio_util::either::Either;
 use tokio_util::sync::CancellationToken;
 
@@ -27,12 +29,12 @@ use super::error::PgError;
 use super::msg::{self, DescribeTarget, Frontend, StartupMessage};
 use super::typing::{PgColumn, PgType, ResultShape, shape_result, shape_result_jsonb};
 use super::{CancelRegistry, LOG, encode, sasl};
-use crate::cnf::PKG_VERSION;
+use crate::PKG_VERSION;
 
 /// A client connection stream: plaintext, or upgraded to TLS after an accepted
 /// SSLRequest. `Either` forwards `AsyncRead`/`AsyncWrite` to whichever it is,
 /// so the rest of the connection code is transport-agnostic.
-type PgStream = Either<TcpStream, tokio_rustls::server::TlsStream<TcpStream>>;
+type PgStream = Either<TcpStream, TlsStream<TcpStream>>;
 
 /// Result-format codes are jsonb-single-column for driver-prepared statements
 /// and typed for portal-described flows. `PROTOCOL 3.0` binary result flag.
@@ -150,11 +152,9 @@ pub(super) async fn handle(
 	// Bound the whole negotiation (reads + TLS handshake) by the startup
 	// deadline so an unauthenticated peer cannot hold a connection permit
 	// open indefinitely (slow-loris).
-	let negotiated = tokio::time::timeout(
-		STARTUP_TIMEOUT,
-		negotiate_tls(stream, acceptor.as_deref(), &registry, &shutdown),
-	)
-	.await;
+	let negotiated =
+		timeout(STARTUP_TIMEOUT, negotiate_tls(stream, acceptor.as_deref(), &registry, &shutdown))
+			.await;
 	let Some((stream, prelude)) = negotiated.ok().flatten() else {
 		registry.remove(&(pid, secret));
 		return;
@@ -336,7 +336,7 @@ impl Connection {
 		// Bound the pre-command phase so an idle or slow-loris client cannot
 		// hold a connection (and its resources) open indefinitely before
 		// authenticating.
-		let authed = match tokio::time::timeout(STARTUP_TIMEOUT, self.startup_and_auth()).await {
+		let authed = match timeout(STARTUP_TIMEOUT, self.startup_and_auth()).await {
 			Ok(res) => res?,
 			Err(_) => {
 				let _ = self.report(&PgError::auth_timeout()).await;
@@ -511,7 +511,7 @@ impl Connection {
 		}
 		let mut buf = BytesMut::new();
 		msg::write_authentication_ok(&mut buf);
-		let server_version = format!("16.0-surrealdb.{}", *PKG_VERSION);
+		let server_version = format!("16.0-surrealdb.{}", PKG_VERSION);
 		for (key, value) in [
 			("server_version", server_version.as_str()),
 			("server_encoding", "UTF8"),
@@ -886,14 +886,36 @@ impl Connection {
 		}
 		let (query, parsed, param_count, empty) = match self.dialect {
 			Dialect::SurrealQl => {
-				// Map Postgres `$1..$n` to SurrealQL `$_1..$_n`, then parse once
-				// so syntax errors surface at Parse (as Postgres does) and the
-				// AST can be cached for repeated Execute without re-parsing.
-				let (query, positional) = rewrite_positional_params(query);
+				// Parse once so syntax errors surface at Parse (as Postgres does)
+				// and the AST can be cached for repeated Execute without re-parsing.
+				// If the query is not valid SurrealQL, try translating PostgreSQL SQL via
+				// surrealdb-pgsql.
+				let (rewritten, positional) = rewrite_positional_params(query);
 				let config = self.ds.parser_config();
-				let ast =
-					syn::parse_with_capabilities(&query, &self.ds.get_capabilities(), &config)
-						.map_err(|e| PgError::syntax(e.to_string()))?;
+				let (query, ast, positional) = match syn::parse_with_capabilities(
+					&rewritten,
+					&self.ds.get_capabilities(),
+					&config,
+				) {
+					Ok(ast) => (rewritten, ast, positional),
+					Err(err) => {
+						if let Ok(lowered) = surrealdb_pgsql::translate_sql(query) {
+							let (lowered_rewritten, lowered_pos) =
+								rewrite_positional_params(&lowered);
+							if let Ok(ast) = syn::parse_with_capabilities(
+								&lowered_rewritten,
+								&self.ds.get_capabilities(),
+								&config,
+							) {
+								(lowered_rewritten, ast, positional.max(lowered_pos))
+							} else {
+								return Err(PgError::syntax(err.to_string()));
+							}
+						} else {
+							return Err(PgError::syntax(err.to_string()));
+						}
+					}
+				};
 				let empty = ast.num_statements() == 0;
 				// Report at least as many parameters as the query references,
 				// so a driver relying on ParameterDescription sees them all.
@@ -1366,8 +1388,22 @@ impl Connection {
 		let ast = match syn::parse_with_capabilities(sql, &self.ds.get_capabilities(), &config) {
 			Ok(ast) => ast,
 			Err(err) => {
-				msg::write_error_response(out, &PgError::syntax(err.to_string()));
-				return Ok(());
+				if let Ok(lowered) = surrealdb_pgsql::translate_sql(sql) {
+					match syn::parse_with_capabilities(
+						&lowered,
+						&self.ds.get_capabilities(),
+						&config,
+					) {
+						Ok(ast) => ast,
+						Err(_) => {
+							msg::write_error_response(out, &PgError::syntax(err.to_string()));
+							return Ok(());
+						}
+					}
+				} else {
+					msg::write_error_response(out, &PgError::syntax(err.to_string()));
+					return Ok(());
+				}
 			}
 		};
 		if ast.num_statements() == 0 {
@@ -1460,9 +1496,26 @@ impl Connection {
 	async fn run_in_transaction(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
 		let tx = self.transaction.clone().expect("caller checked transaction is open");
 		let cancel = self.arm_cancel();
+		let config = self.ds.parser_config();
+		let lowered;
+		let query_str =
+			match syn::parse_with_capabilities(sql, &self.ds.get_capabilities(), &config) {
+				Ok(_) => sql,
+				Err(_) => match surrealdb_pgsql::translate_sql(sql) {
+					Ok(translated) => {
+						lowered = translated;
+						lowered.as_str()
+					}
+					Err(_) => sql,
+				},
+			};
 		let results = self
 			.ds
-			.run(QueryRequest::new(sql, &self.session).with_transaction(tx).with_cancel(cancel))
+			.run(
+				QueryRequest::new(query_str, &self.session)
+					.with_transaction(tx)
+					.with_cancel(cancel),
+			)
 			.await;
 		match results {
 			Ok(results) => {
@@ -2444,5 +2497,12 @@ mod tests {
 		assert_eq!(parse_database_param("root", Some("ns/db")), (s("ns"), s("db")));
 		assert_eq!(parse_database_param("root", Some("/db")), (None, s("db")));
 		assert_eq!(parse_database_param("root", Some("root/db")), (s("root"), s("db")));
+	}
+
+	#[test]
+	fn translates_postgres_queries_to_surrealql() {
+		let pg_insert = "INSERT INTO users (id, name) VALUES (1, 'Alice');";
+		let translated_insert = surrealdb_pgsql::translate_sql(pg_insert).unwrap();
+		assert_eq!(translated_insert, "INSERT INTO users (id, name) VALUES (1, 'Alice');");
 	}
 }

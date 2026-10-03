@@ -482,7 +482,7 @@ pub(super) fn write_negotiate_protocol_version(buf: &mut BytesMut, unsupported: 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::pg::typing::PgType;
+	use crate::typing::PgType;
 
 	fn startup_payload(params: &[(&str, &str)]) -> Vec<u8> {
 		let mut payload = PROTOCOL_VERSION_3_0.to_be_bytes().to_vec();

@@ -1,0 +1,40 @@
+[package]
+name = "surrealdb-pgwire"
+publish = false
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+version.workspace = true
+description = "PostgreSQL wire protocol (v3.0) server for SurrealDB"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+surrealdb-core = { workspace = true }
+surrealdb-datastore = { workspace = true }
+surrealdb-iam = { workspace = true }
+surrealdb-kvs = { workspace = true }
+surrealdb-rpc = { workspace = true }
+surrealdb-sql = { workspace = true }
+surrealdb-types = { workspace = true }
+surrealdb-pgsql = { workspace = true }
+
+anyhow = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+dashmap = { workspace = true }
+rand = { workspace = true }
+rust_decimal = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+tokio = { workspace = true, features = ["net", "sync", "time", "io-util"] }
+tokio-rustls = { version = "0.26.4", default-features = false }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
+
+[lints]
+workspace = true

@@ -30,11 +30,13 @@ members = [
     "surrealdb/kvs-tikv",
     "surrealdb/mcp",
     "surrealdb/mysql",
+    "surrealdb/mywire",
     "surrealdb/node",
     "surrealdb/observe",
     "surrealdb/parse-common",
     "surrealdb/parser",
     "surrealdb/pgsql",
+    "surrealdb/pgwire",
     "surrealdb/rpc",
     "surrealdb/runtime",
     "surrealdb/server",
@@ -94,6 +96,8 @@ surrealdb-engine-api = { version = "3.4.0-nightly", path = "surrealdb/engine-api
 surrealdb-engine-local = { version = "3.4.0-nightly", path = "surrealdb/engine-local", default-features = false }
 surrealdb-server = { version = "3.4.0-nightly", path = "surrealdb/server", default-features = false }
 surrealdb-mcp = { version = "3.4.0-nightly", path = "surrealdb/mcp", default-features = false }
+surrealdb-mywire = { version = "3.4.0-nightly", path = "surrealdb/mywire", default-features = false }
+surrealdb-pgwire = { version = "3.4.0-nightly", path = "surrealdb/pgwire", default-features = false }
 surrealdb-types = { version = "3.4.0-nightly", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "3.4.0-nightly", path = "surrealdb/types/derive" }
 ast = { version = "3.4.0-nightly", package = "surrealdb-ast", path = "surrealdb/ast" }

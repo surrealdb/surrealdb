@@ -7727,6 +7727,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-mywire"
+version = "3.4.0-nightly"
+dependencies = [
+ "anyhow",
+ "surrealdb-core",
+ "surrealdb-mysql",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "surrealdb-node"
 version = "3.4.0-nightly"
 dependencies = [
@@ -7782,6 +7793,34 @@ dependencies = [
  "surrealdb-sqlfront-derive",
  "surrealdb-sqlfront-spec",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "surrealdb-pgwire"
+version = "3.4.0-nightly"
+dependencies = [
+ "anyhow",
+ "axum-server",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "rand 0.9.4",
+ "rust_decimal",
+ "serde_json",
+ "surrealdb-core",
+ "surrealdb-datastore",
+ "surrealdb-iam",
+ "surrealdb-kvs",
+ "surrealdb-pgsql",
+ "surrealdb-rpc",
+ "surrealdb-sql",
+ "surrealdb-types",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -7902,10 +7941,8 @@ dependencies = [
  "axum",
  "axum-extra",
  "axum-server",
- "base64 0.22.1",
  "blake3",
  "bytes",
- "chrono",
  "clap",
  "console-subscriber",
  "dashmap",
@@ -7934,7 +7971,6 @@ dependencies = [
  "rcgen",
  "reqwest 0.13.3",
  "rstest",
- "rust_decimal",
  "rustls",
  "rustyline",
  "semver",
@@ -7951,8 +7987,10 @@ dependencies = [
  "surrealdb-iam",
  "surrealdb-kvs",
  "surrealdb-mcp",
+ "surrealdb-mywire",
  "surrealdb-observe",
  "surrealdb-parse-common",
+ "surrealdb-pgwire",
  "surrealdb-protocol",
  "surrealdb-rpc",
  "surrealdb-sql",
@@ -7964,7 +8002,6 @@ dependencies = [
  "test-log",
  "thiserror 2.0.20",
  "tokio",
- "tokio-rustls",
  "tokio-stream",
  "tokio-tungstenite 0.28.0",
  "tokio-util",

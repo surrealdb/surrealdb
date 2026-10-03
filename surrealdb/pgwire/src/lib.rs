@@ -5,6 +5,8 @@
 //! the values they carry. See the `postgres` feature and the
 //! `--postgres-bind` server option.
 
+#![recursion_limit = "512"]
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,28 +14,35 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
+use axum_server::tls_rustls::RustlsConfig;
 use dashmap::DashMap;
 use rand::TryRngCore;
+use rand::rngs::OsRng;
 use surrealdb_core::ctx::CancelHandle;
 use surrealdb_core::kvs::Datastore;
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
+use tokio::time::sleep;
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 
-mod conn;
-mod encode;
-mod error;
-mod msg;
-mod sasl;
-mod typing;
+#[macro_use]
+extern crate tracing;
 
-const LOG: &str = "surrealdb::pg";
+pub mod conn;
+pub mod encode;
+pub mod error;
+pub mod msg;
+pub mod sasl;
+pub mod typing;
+
+pub const LOG: &str = "surrealdb::pg";
+pub const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Maps a connection's (backend pid, secret key) to its cancellation handle so
 /// a Postgres CancelRequest on a side connection can interrupt the in-flight
 /// query. Shared across all connections of one listener.
-pub(super) type CancelRegistry = DashMap<(i32, i32), CancelHandle>;
+pub(crate) type CancelRegistry = DashMap<(i32, i32), CancelHandle>;
 
 /// Monotonic per-process source of backend "process ids". The secret key is
 /// drawn from OS entropy (not the seedable `rnd` module) so CancelRequests
@@ -43,7 +52,7 @@ static NEXT_PID: AtomicI32 = AtomicI32::new(1);
 fn next_backend_key() -> (i32, i32) {
 	let pid = NEXT_PID.fetch_add(1, Ordering::Relaxed);
 	let mut bytes = [0u8; 4];
-	let secret = if rand::rngs::OsRng.try_fill_bytes(&mut bytes).is_ok() {
+	let secret = if OsRng.try_fill_bytes(&mut bytes).is_ok() {
 		i32::from_ne_bytes(bytes)
 	} else {
 		rand::random()
@@ -62,7 +71,7 @@ const MAX_CONNECTIONS: usize = 1024;
 /// is unavailable; the accept loop then runs until `shutdown` fires. When a
 /// TLS certificate and key are configured, SSLRequests are accepted and
 /// upgraded; otherwise they are declined and the connection stays plaintext.
-pub(crate) async fn start(
+pub async fn start(
 	addr: SocketAddr,
 	ds: Arc<Datastore>,
 	ready: Arc<AtomicBool>,
@@ -72,7 +81,7 @@ pub(crate) async fn start(
 ) -> Result<()> {
 	let acceptor = match (crt, key) {
 		(Some(crt), Some(key)) => {
-			let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(&crt, &key)
+			let config = RustlsConfig::from_pem_file(&crt, &key)
 				.await
 				.with_context(|| "Failed to load the postgres TLS certificate and key")?;
 			Some(Arc::new(TlsAcceptor::from(config.get_inner())))
@@ -138,7 +147,7 @@ async fn accept_loop(
 					warn!(target: LOG, "failed to accept postgres connection: {err}");
 					// Back off briefly so a persistent accept error (e.g. file
 					// descriptor exhaustion) does not spin the loop hot.
-					tokio::time::sleep(Duration::from_millis(20)).await;
+					sleep(Duration::from_millis(20)).await;
 				}
 			}
 		}
