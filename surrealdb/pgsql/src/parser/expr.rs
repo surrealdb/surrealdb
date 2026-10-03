@@ -502,6 +502,34 @@ impl<'a> Parser<'a> {
 				let qname = self.parse_qualified_name()?;
 				self.parse_ident_or_func(qname)
 			}
+			TokenKind::Keyword(
+				kw @ (Keyword::CurrentDate
+				| Keyword::CurrentTime
+				| Keyword::CurrentTimestamp
+				| Keyword::CurrentUser
+				| Keyword::CurrentRole
+				| Keyword::CurrentSchema
+				| Keyword::CurrentCatalog
+				| Keyword::Localtime
+				| Keyword::Localtimestamp
+				| Keyword::User
+				| Keyword::SessionUser),
+			) => {
+				let kw_tok = self.bump()?;
+				let mut span = kw_tok.span;
+				if self.peek().kind == TokenKind::LParen {
+					self.bump()?;
+					let r_paren = self.expect(&TokenKind::RParen, "')'")?;
+					span = span.merge(r_paren.span);
+				}
+				Ok(Expr::FunctionCall {
+					name: QualifiedName::single(kw.as_str().to_ascii_lowercase(), kw_tok.span),
+					args: Vec::new(),
+					distinct: false,
+					over: None,
+					span,
+				})
+			}
 
 			_ => Err(ParseError::new(
 				tok.span,

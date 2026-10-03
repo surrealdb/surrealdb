@@ -28,6 +28,7 @@ pub mod lexer;
 pub mod parser;
 pub mod printer;
 pub mod span;
+pub mod translate;
 
 pub use ast::*;
 pub use error::{ErrorKind, ParseError, ParseResult};
@@ -38,6 +39,10 @@ pub use lexer::token::{Token, TokenKind};
 pub use parser::{MAX_RECURSION_DEPTH, Parser, ParserSettings};
 pub use printer::ToPgSql;
 pub use span::Span;
+pub use translate::{
+	ParamStyle, ToSurrealQl, TranslationContext, TranslationError, translate_expr, translate_sql,
+	translate_sql_with_context, translate_statement,
+};
 
 /// Parse a single PostgreSQL expression from string input with default settings.
 pub fn parse_expr(src: &str) -> ParseResult<Expr> {
