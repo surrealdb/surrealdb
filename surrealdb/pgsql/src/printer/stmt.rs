@@ -2,12 +2,15 @@
 
 use core::fmt;
 
+use crate::ast::expr::{NullsOrder, OrderByItem, OrderDirection};
 use crate::ast::stmt::{
-	ColumnConstraint, ColumnDef, CreateTableStmt, DeleteStmt, DistinctClause, DropObjectType,
-	DropStmt, ExplainStmt, InsertStmt, JoinCondition, JoinType, NullsOrder, OnConflictAction,
-	OnConflictClause, OrderByItem, OrderDirection, ResTarget, ResetStmt, SelectStmt, SetClause,
-	SetOpKind, SetOperation, SetStmt, ShowStmt, Statement, TableAlias, TableConstraint, TableRef,
-	TransactionStmt, UpdateStmt,
+	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CommonTableExpr,
+	CreateIndexStmt, CreateSchemaStmt, CreateTableStmt, CreateViewStmt, DeallocateStmt, DeleteStmt,
+	DistinctClause, DropObjectType, DropStmt, ExecuteStmt, ExplainStmt, IndexElem, InsertStmt,
+	JoinCondition, JoinType, LockingClause, LockingStrength, LockingWaitPolicy, OnConflictAction,
+	OnConflictClause, PrepareStmt, ResTarget, ResetStmt, SelectStmt, SetClause, SetOpKind,
+	SetOperation, SetStmt, ShowStmt, Statement, TableAlias, TableConstraint, TableRef,
+	TransactionStmt, UpdateStmt, WindowDef, WithClause,
 };
 use crate::printer::ToPgSql;
 use crate::printer::expr::print_ident;
@@ -160,8 +163,90 @@ impl ToPgSql for SetOperation {
 	}
 }
 
+impl ToPgSql for WithClause {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("WITH ")?;
+		if self.recursive {
+			f.write_str("RECURSIVE ")?;
+		}
+		for (i, cte) in self.ctes.iter().enumerate() {
+			if i > 0 {
+				f.write_str(", ")?;
+			}
+			cte.to_pgsql(f)?;
+		}
+		Ok(())
+	}
+}
+
+impl ToPgSql for CommonTableExpr {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		print_ident(f, &self.name)?;
+		if !self.columns.is_empty() {
+			f.write_str(" (")?;
+			for (i, col) in self.columns.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				print_ident(f, col)?;
+			}
+			f.write_str(")")?;
+		}
+		f.write_str(" AS ")?;
+		if let Some(mat) = self.materialized {
+			if mat {
+				f.write_str("MATERIALIZED ")?;
+			} else {
+				f.write_str("NOT MATERIALIZED ")?;
+			}
+		}
+		f.write_str("(")?;
+		self.query.to_pgsql(f)?;
+		f.write_str(")")
+	}
+}
+
+impl ToPgSql for WindowDef {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		print_ident(f, &self.name)?;
+		f.write_str(" AS ")?;
+		self.spec.to_pgsql(f)
+	}
+}
+
+impl ToPgSql for LockingClause {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self.strength {
+			LockingStrength::Update => f.write_str("FOR UPDATE")?,
+			LockingStrength::NoKeyUpdate => f.write_str("FOR NO KEY UPDATE")?,
+			LockingStrength::Share => f.write_str("FOR SHARE")?,
+			LockingStrength::KeyShare => f.write_str("FOR KEY SHARE")?,
+		}
+		if !self.tables.is_empty() {
+			f.write_str(" OF ")?;
+			for (i, table) in self.tables.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				table.to_pgsql(f)?;
+			}
+		}
+		match self.wait_policy {
+			LockingWaitPolicy::Block => {}
+			LockingWaitPolicy::NoWait => f.write_str(" NOWAIT")?,
+			LockingWaitPolicy::SkipLocked => f.write_str(" SKIP LOCKED")?,
+		}
+		Ok(())
+	}
+}
+
 impl ToPgSql for SelectStmt {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		if let Some(ref w) = self.with {
+			w.to_pgsql(f)?;
+			f.write_str(" ")?;
+		}
+
 		f.write_str("SELECT")?;
 
 		if let Some(ref distinct) = self.distinct {
@@ -218,6 +303,20 @@ impl ToPgSql for SelectStmt {
 			h.to_pgsql(f)?;
 		}
 
+		if !self.window.is_empty() {
+			f.write_str(" WINDOW ")?;
+			for (i, w) in self.window.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				w.to_pgsql(f)?;
+			}
+		}
+
+		if let Some(ref s) = self.set_op {
+			s.to_pgsql(f)?;
+		}
+
 		if !self.order_by.is_empty() {
 			f.write_str(" ORDER BY ")?;
 			for (i, o) in self.order_by.iter().enumerate() {
@@ -238,8 +337,9 @@ impl ToPgSql for SelectStmt {
 			o.to_pgsql(f)?;
 		}
 
-		if let Some(ref s) = self.set_op {
-			s.to_pgsql(f)?;
+		for lock in &self.locking {
+			f.write_str(" ")?;
+			lock.to_pgsql(f)?;
 		}
 
 		Ok(())
@@ -292,6 +392,11 @@ impl ToPgSql for OnConflictClause {
 
 impl ToPgSql for InsertStmt {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		if let Some(ref w) = self.with {
+			w.to_pgsql(f)?;
+			f.write_str(" ")?;
+		}
+
 		f.write_str("INSERT INTO ")?;
 		self.relation.to_pgsql(f)?;
 
@@ -346,6 +451,11 @@ impl ToPgSql for InsertStmt {
 
 impl ToPgSql for UpdateStmt {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		if let Some(ref w) = self.with {
+			w.to_pgsql(f)?;
+			f.write_str(" ")?;
+		}
+
 		f.write_str("UPDATE ")?;
 		self.relation.to_pgsql(f)?;
 		f.write_str(" SET ")?;
@@ -388,6 +498,11 @@ impl ToPgSql for UpdateStmt {
 
 impl ToPgSql for DeleteStmt {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		if let Some(ref w) = self.with {
+			w.to_pgsql(f)?;
+			f.write_str(" ")?;
+		}
+
 		f.write_str("DELETE FROM ")?;
 		self.relation.to_pgsql(f)?;
 
@@ -663,6 +778,274 @@ impl ToPgSql for ExplainStmt {
 	}
 }
 
+impl ToPgSql for IndexElem {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		self.expr.to_pgsql(f)?;
+		if let Some(dir) = self.direction {
+			match dir {
+				OrderDirection::Asc => f.write_str(" ASC")?,
+				OrderDirection::Desc => f.write_str(" DESC")?,
+			}
+		}
+		if let Some(nulls) = self.nulls {
+			match nulls {
+				NullsOrder::First => f.write_str(" NULLS FIRST")?,
+				NullsOrder::Last => f.write_str(" NULLS LAST")?,
+			}
+		}
+		Ok(())
+	}
+}
+
+impl ToPgSql for CreateIndexStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("CREATE ")?;
+		if self.unique {
+			f.write_str("UNIQUE ")?;
+		}
+		f.write_str("INDEX ")?;
+		if self.concurrently {
+			f.write_str("CONCURRENTLY ")?;
+		}
+		if self.if_not_exists {
+			f.write_str("IF NOT EXISTS ")?;
+		}
+		if let Some(ref name) = self.name {
+			print_ident(f, name)?;
+			f.write_str(" ")?;
+		}
+		f.write_str("ON ")?;
+		self.table.to_pgsql(f)?;
+		if let Some(ref method) = self.method {
+			f.write_str(" USING ")?;
+			print_ident(f, method)?;
+		}
+		f.write_str(" (")?;
+		for (i, elem) in self.columns.iter().enumerate() {
+			if i > 0 {
+				f.write_str(", ")?;
+			}
+			elem.to_pgsql(f)?;
+		}
+		f.write_str(")")?;
+		if let Some(ref pred) = self.predicate {
+			f.write_str(" WHERE ")?;
+			pred.to_pgsql(f)?;
+		}
+		Ok(())
+	}
+}
+
+impl ToPgSql for CreateViewStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("CREATE ")?;
+		if self.or_replace {
+			f.write_str("OR REPLACE ")?;
+		}
+		if self.temporary {
+			f.write_str("TEMPORARY ")?;
+		}
+		if self.recursive {
+			f.write_str("RECURSIVE ")?;
+		}
+		f.write_str("VIEW ")?;
+		self.name.to_pgsql(f)?;
+		if !self.columns.is_empty() {
+			f.write_str(" (")?;
+			for (i, col) in self.columns.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				print_ident(f, col)?;
+			}
+			f.write_str(")")?;
+		}
+		f.write_str(" AS ")?;
+		self.query.to_pgsql(f)
+	}
+}
+
+impl ToPgSql for CreateSchemaStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("CREATE SCHEMA ")?;
+		if self.if_not_exists {
+			f.write_str("IF NOT EXISTS ")?;
+		}
+		print_ident(f, &self.name)
+	}
+}
+
+impl ToPgSql for AlterTableAction {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::AddColumn {
+				if_not_exists,
+				column,
+			} => {
+				f.write_str("ADD COLUMN ")?;
+				if *if_not_exists {
+					f.write_str("IF NOT EXISTS ")?;
+				}
+				column.to_pgsql(f)
+			}
+			Self::DropColumn {
+				if_exists,
+				name,
+				cascade,
+			} => {
+				f.write_str("DROP COLUMN ")?;
+				if *if_exists {
+					f.write_str("IF EXISTS ")?;
+				}
+				print_ident(f, name)?;
+				if *cascade {
+					f.write_str(" CASCADE")?;
+				}
+				Ok(())
+			}
+			Self::AlterColumnType {
+				name,
+				data_type,
+			} => {
+				f.write_str("ALTER COLUMN ")?;
+				print_ident(f, name)?;
+				f.write_str(" TYPE ")?;
+				data_type.to_pgsql(f)
+			}
+			Self::SetDefault {
+				column,
+				default,
+			} => {
+				f.write_str("ALTER COLUMN ")?;
+				print_ident(f, column)?;
+				f.write_str(" SET DEFAULT ")?;
+				default.to_pgsql(f)
+			}
+			Self::DropDefault {
+				column,
+			} => {
+				f.write_str("ALTER COLUMN ")?;
+				print_ident(f, column)?;
+				f.write_str(" DROP DEFAULT")
+			}
+			Self::SetNotNull {
+				column,
+			} => {
+				f.write_str("ALTER COLUMN ")?;
+				print_ident(f, column)?;
+				f.write_str(" SET NOT NULL")
+			}
+			Self::DropNotNull {
+				column,
+			} => {
+				f.write_str("ALTER COLUMN ")?;
+				print_ident(f, column)?;
+				f.write_str(" DROP NOT NULL")
+			}
+			Self::AddConstraint(tc) => {
+				f.write_str("ADD ")?;
+				tc.to_pgsql(f)
+			}
+			Self::DropConstraint {
+				if_exists,
+				name,
+				cascade,
+			} => {
+				f.write_str("DROP CONSTRAINT ")?;
+				if *if_exists {
+					f.write_str("IF EXISTS ")?;
+				}
+				print_ident(f, name)?;
+				if *cascade {
+					f.write_str(" CASCADE")?;
+				}
+				Ok(())
+			}
+			Self::RenameColumn {
+				old_name,
+				new_name,
+			} => {
+				f.write_str("RENAME COLUMN ")?;
+				print_ident(f, old_name)?;
+				f.write_str(" TO ")?;
+				print_ident(f, new_name)
+			}
+			Self::RenameTable {
+				new_name,
+			} => {
+				f.write_str("RENAME TO ")?;
+				print_ident(f, new_name)
+			}
+		}
+	}
+}
+
+impl ToPgSql for AlterTableStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("ALTER TABLE ")?;
+		if self.if_exists {
+			f.write_str("IF EXISTS ")?;
+		}
+		self.name.to_pgsql(f)?;
+		f.write_str(" ")?;
+		for (i, action) in self.actions.iter().enumerate() {
+			if i > 0 {
+				f.write_str(", ")?;
+			}
+			action.to_pgsql(f)?;
+		}
+		Ok(())
+	}
+}
+
+impl ToPgSql for PrepareStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("PREPARE ")?;
+		print_ident(f, &self.name)?;
+		if !self.param_types.is_empty() {
+			f.write_str(" (")?;
+			for (i, t) in self.param_types.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				t.to_pgsql(f)?;
+			}
+			f.write_str(")")?;
+		}
+		f.write_str(" AS ")?;
+		self.statement.to_pgsql(f)
+	}
+}
+
+impl ToPgSql for ExecuteStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("EXECUTE ")?;
+		print_ident(f, &self.name)?;
+		if !self.params.is_empty() {
+			f.write_str(" (")?;
+			for (i, p) in self.params.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				p.to_pgsql(f)?;
+			}
+			f.write_str(")")?;
+		}
+		Ok(())
+	}
+}
+
+impl ToPgSql for DeallocateStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("DEALLOCATE ")?;
+		if let Some(ref name) = self.name {
+			print_ident(f, name)
+		} else {
+			f.write_str("ALL")
+		}
+	}
+}
+
 impl ToPgSql for Statement {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
@@ -671,12 +1054,19 @@ impl ToPgSql for Statement {
 			Self::Update(s) => s.to_pgsql(f),
 			Self::Delete(s) => s.to_pgsql(f),
 			Self::CreateTable(s) => s.to_pgsql(f),
+			Self::CreateIndex(s) => s.to_pgsql(f),
+			Self::CreateView(s) => s.to_pgsql(f),
+			Self::AlterTable(s) => s.to_pgsql(f),
+			Self::CreateSchema(s) => s.to_pgsql(f),
 			Self::Drop(s) => s.to_pgsql(f),
 			Self::Transaction(tx) => tx.to_pgsql(f),
 			Self::Set(s) => s.to_pgsql(f),
 			Self::Show(s) => s.to_pgsql(f),
 			Self::Reset(s) => s.to_pgsql(f),
 			Self::Explain(s) => s.to_pgsql(f),
+			Self::Prepare(s) => s.to_pgsql(f),
+			Self::Execute(s) => s.to_pgsql(f),
+			Self::Deallocate(s) => s.to_pgsql(f),
 			Self::Empty => Ok(()),
 		}
 	}

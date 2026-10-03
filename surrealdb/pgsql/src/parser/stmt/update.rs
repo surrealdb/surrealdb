@@ -13,7 +13,14 @@ impl<'a> Parser<'a> {
 	///
 	/// gram.y: UpdateStmt
 	pub fn parse_update_stmt(&mut self) -> ParseResult<UpdateStmt> {
+		let with = if self.peek().kind == TokenKind::Keyword(Keyword::With) {
+			Some(self.parse_with_clause()?)
+		} else {
+			None
+		};
+
 		let update_tok = self.expect(&TokenKind::Keyword(Keyword::Update), "'UPDATE'")?;
+		let start_span = with.as_ref().map(|w| w.span).unwrap_or(update_tok.span);
 
 		// Target table name
 		let relation = self.parse_qualified_name()?;
@@ -58,9 +65,10 @@ impl<'a> Parser<'a> {
 		};
 
 		let end_span = self.peek().span;
-		let span = update_tok.span.merge(end_span);
+		let span = start_span.merge(end_span);
 
 		Ok(UpdateStmt {
+			with,
 			relation,
 			assignments,
 			from,

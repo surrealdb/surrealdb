@@ -8,7 +8,7 @@ pub mod select;
 pub mod tx;
 pub mod update;
 
-use crate::ast::stmt::Statement;
+use crate::ast::stmt::{CommonTableExpr, Statement, WithClause};
 use crate::error::{ErrorKind, ParseError, ParseResult};
 use crate::lexer::keyword::Keyword;
 use crate::lexer::token::TokenKind;
@@ -22,6 +22,42 @@ impl<'a> Parser<'a> {
 		}
 
 		match &self.peek().kind {
+			TokenKind::Keyword(Keyword::With) => {
+				let with = self.parse_with_clause()?;
+				match &self.peek().kind {
+					TokenKind::Keyword(Keyword::Select) => {
+						let mut s = self.parse_select_stmt()?;
+						s.span = with.span.merge(s.span);
+						s.with = Some(with);
+						Ok(Statement::Select(Box::new(s)))
+					}
+					TokenKind::Keyword(Keyword::Insert) => {
+						let mut s = self.parse_insert_stmt()?;
+						s.span = with.span.merge(s.span);
+						s.with = Some(with);
+						Ok(Statement::Insert(Box::new(s)))
+					}
+					TokenKind::Keyword(Keyword::Update) => {
+						let mut s = self.parse_update_stmt()?;
+						s.span = with.span.merge(s.span);
+						s.with = Some(with);
+						Ok(Statement::Update(Box::new(s)))
+					}
+					TokenKind::Keyword(Keyword::Delete) => {
+						let mut s = self.parse_delete_stmt()?;
+						s.span = with.span.merge(s.span);
+						s.with = Some(with);
+						Ok(Statement::Delete(Box::new(s)))
+					}
+					_ => Err(ParseError::new(
+						self.peek().span,
+						ErrorKind::UnexpectedToken {
+							expected: "SELECT, INSERT, UPDATE, or DELETE after WITH clause",
+							found: self.peek().kind.to_string(),
+						},
+					)),
+				}
+			}
 			TokenKind::Keyword(Keyword::Select) => {
 				let s = self.parse_select_stmt()?;
 				Ok(Statement::Select(Box::new(s)))
@@ -38,13 +74,26 @@ impl<'a> Parser<'a> {
 				let s = self.parse_delete_stmt()?;
 				Ok(Statement::Delete(Box::new(s)))
 			}
-			TokenKind::Keyword(Keyword::Create) => {
-				let s = self.parse_create_table_stmt()?;
-				Ok(Statement::CreateTable(Box::new(s)))
+			TokenKind::Keyword(Keyword::Create) => self.parse_create_stmt(),
+			TokenKind::Keyword(Keyword::Alter) => {
+				let s = self.parse_alter_table_stmt()?;
+				Ok(Statement::AlterTable(Box::new(s)))
 			}
 			TokenKind::Keyword(Keyword::Drop) => {
 				let s = self.parse_drop_stmt()?;
 				Ok(Statement::Drop(Box::new(s)))
+			}
+			TokenKind::Keyword(Keyword::Prepare) => {
+				let s = self.parse_prepare_stmt()?;
+				Ok(Statement::Prepare(Box::new(s)))
+			}
+			TokenKind::Keyword(Keyword::Execute) => {
+				let s = self.parse_execute_stmt()?;
+				Ok(Statement::Execute(s))
+			}
+			TokenKind::Keyword(Keyword::Deallocate) => {
+				let s = self.parse_deallocate_stmt()?;
+				Ok(Statement::Deallocate(s))
 			}
 			TokenKind::Keyword(
 				Keyword::Begin
@@ -83,6 +132,66 @@ impl<'a> Parser<'a> {
 				},
 			)),
 		}
+	}
+
+	/// Parse a `WITH [RECURSIVE] cte_name AS (...)` clause.
+	pub fn parse_with_clause(&mut self) -> ParseResult<WithClause> {
+		let with_tok = self.expect(&TokenKind::Keyword(Keyword::With), "'WITH'")?;
+		let recursive = self.eat(&TokenKind::Keyword(Keyword::Recursive))?;
+
+		let mut ctes = Vec::new();
+		loop {
+			let (name, name_span) = self.parse_ident()?;
+			let mut columns = Vec::new();
+
+			if self.eat(&TokenKind::LParen)? {
+				loop {
+					let (col, _) = self.parse_ident()?;
+					columns.push(col);
+					if !self.eat(&TokenKind::Comma)? {
+						break;
+					}
+				}
+				self.expect(&TokenKind::RParen, "')'")?;
+			}
+
+			self.expect(&TokenKind::Keyword(Keyword::As), "'AS'")?;
+
+			let materialized = if self.eat(&TokenKind::Keyword(Keyword::Materialized))? {
+				Some(true)
+			} else if self.eat(&TokenKind::Keyword(Keyword::Not))? {
+				self.expect(&TokenKind::Keyword(Keyword::Materialized), "'MATERIALIZED'")?;
+				Some(false)
+			} else {
+				None
+			};
+
+			self.expect(&TokenKind::LParen, "'('")?;
+			let query = self.parse_statement()?;
+			let rparen = self.expect(&TokenKind::RParen, "')'")?;
+
+			let span = name_span.merge(rparen.span);
+			ctes.push(CommonTableExpr {
+				name,
+				columns,
+				materialized,
+				query: Box::new(query),
+				span,
+			});
+
+			if !self.eat(&TokenKind::Comma)? {
+				break;
+			}
+		}
+
+		let end_span = ctes.last().map(|c| c.span).unwrap_or(with_tok.span);
+		let span = with_tok.span.merge(end_span);
+
+		Ok(WithClause {
+			recursive,
+			ctes,
+			span,
+		})
 	}
 
 	/// Parse a sequence of statements separated by semicolons.

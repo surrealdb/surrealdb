@@ -2,7 +2,9 @@
 //!
 //! gram.y: VariableSetStmt, VariableShowStmt, VariableResetStmt, ExplainStmt
 
-use crate::ast::stmt::{ExplainStmt, ResetStmt, SetStmt, ShowStmt};
+use crate::ast::stmt::{
+	DeallocateStmt, ExecuteStmt, ExplainStmt, PrepareStmt, ResetStmt, SetStmt, ShowStmt,
+};
 use crate::error::ParseResult;
 use crate::lexer::keyword::Keyword;
 use crate::lexer::token::TokenKind;
@@ -120,6 +122,85 @@ impl<'a> Parser<'a> {
 		Ok(ExplainStmt {
 			options,
 			statement,
+			span,
+		})
+	}
+
+	/// Parse a PostgreSQL `PREPARE` statement.
+	///
+	/// gram.y: PrepareStmt
+	pub fn parse_prepare_stmt(&mut self) -> ParseResult<PrepareStmt> {
+		let prep_tok = self.expect(&TokenKind::Keyword(Keyword::Prepare), "'PREPARE'")?;
+		let (name, _) = self.parse_ident()?;
+
+		let mut param_types = Vec::new();
+		if self.eat(&TokenKind::LParen)? {
+			loop {
+				param_types.push(self.parse_type_name()?);
+				if !self.eat(&TokenKind::Comma)? {
+					break;
+				}
+			}
+			self.expect(&TokenKind::RParen, "')'")?;
+		}
+
+		self.expect(&TokenKind::Keyword(Keyword::As), "'AS'")?;
+		let statement = Box::new(self.parse_statement()?);
+		let span = prep_tok.span.merge(statement.span());
+
+		Ok(PrepareStmt {
+			name,
+			param_types,
+			statement,
+			span,
+		})
+	}
+
+	/// Parse a PostgreSQL `EXECUTE` statement.
+	///
+	/// gram.y: ExecuteStmt
+	pub fn parse_execute_stmt(&mut self) -> ParseResult<ExecuteStmt> {
+		let exec_tok = self.expect(&TokenKind::Keyword(Keyword::Execute), "'EXECUTE'")?;
+		let (name, name_span) = self.parse_ident()?;
+
+		let mut params = Vec::new();
+		let mut end_span = name_span;
+		if self.eat(&TokenKind::LParen)? {
+			loop {
+				params.push(self.parse_expr()?);
+				if !self.eat(&TokenKind::Comma)? {
+					break;
+				}
+			}
+			let rparen = self.expect(&TokenKind::RParen, "')'")?;
+			end_span = rparen.span;
+		}
+
+		let span = exec_tok.span.merge(end_span);
+		Ok(ExecuteStmt {
+			name,
+			params,
+			span,
+		})
+	}
+
+	/// Parse a PostgreSQL `DEALLOCATE` statement.
+	///
+	/// gram.y: DeallocateStmt
+	pub fn parse_deallocate_stmt(&mut self) -> ParseResult<DeallocateStmt> {
+		let dealloc_tok = self.expect(&TokenKind::Keyword(Keyword::Deallocate), "'DEALLOCATE'")?;
+		self.eat(&TokenKind::Keyword(Keyword::Prepare))?;
+
+		let (name, end_span) = if self.eat(&TokenKind::Keyword(Keyword::All))? {
+			(None, self.peek().span)
+		} else {
+			let (n, nspan) = self.parse_ident()?;
+			(Some(n), nspan)
+		};
+
+		let span = dealloc_tok.span.merge(end_span);
+		Ok(DeallocateStmt {
+			name,
 			span,
 		})
 	}

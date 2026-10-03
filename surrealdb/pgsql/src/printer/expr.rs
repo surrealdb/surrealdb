@@ -2,7 +2,10 @@
 
 use core::fmt;
 
-use crate::ast::expr::{ColumnRef, Expr, QualifiedName, TypeName, WhenClause};
+use crate::ast::expr::{
+	ColumnRef, Expr, QualifiedName, TypeName, WhenClause, WindowFrame, WindowFrameBound,
+	WindowFrameExclusion, WindowFrameUnits, WindowSpec,
+};
 use crate::ast::literal::Literal;
 use crate::ast::op::{BinaryOperator, UnaryOperator};
 use crate::lexer::keyword::{Keyword, KeywordCategory};
@@ -462,6 +465,7 @@ impl ToPgSql for Expr {
 				name,
 				args,
 				distinct,
+				over,
 				..
 			} => {
 				name.to_pgsql(f)?;
@@ -475,7 +479,12 @@ impl ToPgSql for Expr {
 					}
 					arg.to_pgsql(f)?;
 				}
-				f.write_str(")")
+				f.write_str(")")?;
+				if let Some(spec) = over {
+					f.write_str(" OVER ")?;
+					spec.to_pgsql(f)?;
+				}
+				Ok(())
 			}
 
 			Self::Case {
@@ -546,6 +555,104 @@ impl ToPgSql for Expr {
 				f.write_str("(")?;
 				expr.to_pgsql(f)?;
 				f.write_str(")")
+			}
+		}
+	}
+}
+
+impl ToPgSql for WindowSpec {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("(")?;
+		let mut has_prev = false;
+
+		if let Some(ref name) = self.window_name {
+			print_ident(f, name)?;
+			has_prev = true;
+		}
+
+		if !self.partition_by.is_empty() {
+			if has_prev {
+				f.write_str(" ")?;
+			}
+			f.write_str("PARTITION BY ")?;
+			for (i, expr) in self.partition_by.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				expr.to_pgsql(f)?;
+			}
+			has_prev = true;
+		}
+
+		if !self.order_by.is_empty() {
+			if has_prev {
+				f.write_str(" ")?;
+			}
+			f.write_str("ORDER BY ")?;
+			for (i, item) in self.order_by.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				item.to_pgsql(f)?;
+			}
+			has_prev = true;
+		}
+
+		if let Some(ref frame) = self.frame {
+			if has_prev {
+				f.write_str(" ")?;
+			}
+			frame.to_pgsql(f)?;
+		}
+
+		f.write_str(")")
+	}
+}
+
+impl ToPgSql for WindowFrame {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self.units {
+			WindowFrameUnits::Rows => f.write_str("ROWS ")?,
+			WindowFrameUnits::Range => f.write_str("RANGE ")?,
+			WindowFrameUnits::Groups => f.write_str("GROUPS ")?,
+		}
+
+		if let Some(ref end) = self.end {
+			f.write_str("BETWEEN ")?;
+			self.start.to_pgsql(f)?;
+			f.write_str(" AND ")?;
+			end.to_pgsql(f)?;
+		} else {
+			self.start.to_pgsql(f)?;
+		}
+
+		if let Some(ref excl) = self.exclusion {
+			f.write_str(" ")?;
+			match excl {
+				WindowFrameExclusion::CurrentRow => f.write_str("EXCLUDE CURRENT ROW")?,
+				WindowFrameExclusion::Group => f.write_str("EXCLUDE GROUP")?,
+				WindowFrameExclusion::Ties => f.write_str("EXCLUDE TIES")?,
+				WindowFrameExclusion::NoOthers => f.write_str("EXCLUDE NO OTHERS")?,
+			}
+		}
+
+		Ok(())
+	}
+}
+
+impl ToPgSql for WindowFrameBound {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::UnboundedPreceding => f.write_str("UNBOUNDED PRECEDING"),
+			Self::UnboundedFollowing => f.write_str("UNBOUNDED FOLLOWING"),
+			Self::CurrentRow => f.write_str("CURRENT ROW"),
+			Self::Preceding(expr) => {
+				expr.to_pgsql(f)?;
+				f.write_str(" PRECEDING")
+			}
+			Self::Following(expr) => {
+				expr.to_pgsql(f)?;
+				f.write_str(" FOLLOWING")
 			}
 		}
 	}

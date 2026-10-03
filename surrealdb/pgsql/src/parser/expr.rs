@@ -1,6 +1,9 @@
 //! Expression parser implementing PostgreSQL `a_expr`, `b_expr`, and `c_expr`.
 
-use crate::ast::expr::{ColumnRef, Expr, QualifiedName, TypeName, WhenClause};
+use crate::ast::expr::{
+	ColumnRef, Expr, NullsOrder, OrderByItem, OrderDirection, QualifiedName, TypeName, WhenClause,
+	WindowFrame, WindowFrameBound, WindowFrameExclusion, WindowFrameUnits, WindowSpec,
+};
 use crate::ast::literal::Literal;
 use crate::ast::op::{BinaryOperator, UnaryOperator};
 use crate::error::{ErrorKind, ParseError, ParseResult};
@@ -531,11 +534,19 @@ impl<'a> Parser<'a> {
 			}
 
 			let r_paren = self.expect(&TokenKind::RParen, "')'")?;
-			let span = qname.span.merge(r_paren.span);
+			let mut span = qname.span.merge(r_paren.span);
+			let over = if self.eat(&TokenKind::Keyword(Keyword::Over))? {
+				let spec = self.parse_window_spec()?;
+				span = span.merge(spec.span);
+				Some(spec)
+			} else {
+				None
+			};
 			Ok(Expr::FunctionCall {
 				name: qname,
 				args,
 				distinct,
+				over,
 				span,
 			})
 		} else {
@@ -685,6 +696,213 @@ impl<'a> Parser<'a> {
 			array_bounds,
 			span,
 		})
+	}
+
+	/// Parse items in an `ORDER BY` clause.
+	pub fn parse_order_by_clause(&mut self) -> ParseResult<Vec<OrderByItem>> {
+		let mut items = Vec::new();
+
+		loop {
+			let expr = self.parse_expr()?;
+			let mut span = expr.span();
+
+			let direction = if self.eat(&TokenKind::Keyword(Keyword::Asc))? {
+				Some(OrderDirection::Asc)
+			} else if self.eat(&TokenKind::Keyword(Keyword::Desc))? {
+				Some(OrderDirection::Desc)
+			} else {
+				None
+			};
+
+			let nulls = if self.eat(&TokenKind::Keyword(Keyword::Nulls))? {
+				if self.eat(&TokenKind::Keyword(Keyword::First))? {
+					Some(NullsOrder::First)
+				} else if self.eat(&TokenKind::Keyword(Keyword::Last))? {
+					Some(NullsOrder::Last)
+				} else {
+					return Err(ParseError::new(
+						self.peek().span,
+						ErrorKind::UnexpectedToken {
+							expected: "FIRST or LAST",
+							found: self.peek().kind.to_string(),
+						},
+					));
+				}
+			} else {
+				None
+			};
+
+			span = span.merge(self.peek().span);
+			items.push(OrderByItem {
+				expr,
+				direction,
+				nulls,
+				span,
+			});
+
+			if !self.eat(&TokenKind::Comma)? {
+				break;
+			}
+		}
+
+		Ok(items)
+	}
+
+	/// Parse a window specification in an `OVER` clause or `WINDOW` definition.
+	pub fn parse_window_spec(&mut self) -> ParseResult<WindowSpec> {
+		if self.eat(&TokenKind::LParen)? {
+			let start_span = self.peek().span;
+			let mut window_name = None;
+			let mut partition_by = Vec::new();
+			let mut order_by = Vec::new();
+			let mut frame = None;
+
+			// Optional existing window name
+			if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::QuotedIdent(_))
+				&& !matches!(
+					self.peek().kind,
+					TokenKind::Keyword(
+						Keyword::Partition
+							| Keyword::Order | Keyword::Rows
+							| Keyword::Range | Keyword::Groups
+					)
+				) {
+				let (ident, _) = self.parse_ident()?;
+				window_name = Some(ident);
+			}
+
+			// Optional PARTITION BY
+			if self.eat(&TokenKind::Keyword(Keyword::Partition))? {
+				self.expect(&TokenKind::Keyword(Keyword::By), "'BY'")?;
+				loop {
+					partition_by.push(self.parse_expr()?);
+					if !self.eat(&TokenKind::Comma)? {
+						break;
+					}
+				}
+			}
+
+			// Optional ORDER BY
+			if self.eat(&TokenKind::Keyword(Keyword::Order))? {
+				self.expect(&TokenKind::Keyword(Keyword::By), "'BY'")?;
+				order_by = self.parse_order_by_clause()?;
+			}
+
+			// Optional frame specification: ROWS | RANGE | GROUPS
+			let frame_units = if self.eat(&TokenKind::Keyword(Keyword::Rows))? {
+				Some(WindowFrameUnits::Rows)
+			} else if self.eat(&TokenKind::Keyword(Keyword::Range))? {
+				Some(WindowFrameUnits::Range)
+			} else if self.eat(&TokenKind::Keyword(Keyword::Groups))? {
+				Some(WindowFrameUnits::Groups)
+			} else {
+				None
+			};
+
+			if let Some(units) = frame_units {
+				let frame_start_span = self.peek().span;
+				let (start, end) = if self.eat(&TokenKind::Keyword(Keyword::Between))? {
+					let start = self.parse_window_frame_bound()?;
+					self.expect(&TokenKind::Keyword(Keyword::And), "'AND'")?;
+					let end = self.parse_window_frame_bound()?;
+					(start, Some(end))
+				} else {
+					let start = self.parse_window_frame_bound()?;
+					(start, None)
+				};
+
+				let exclusion = if self.eat(&TokenKind::Keyword(Keyword::Exclude))? {
+					if self.eat(&TokenKind::Keyword(Keyword::Current))? {
+						self.expect(&TokenKind::Keyword(Keyword::Row), "'ROW'")?;
+						Some(WindowFrameExclusion::CurrentRow)
+					} else if self.eat(&TokenKind::Keyword(Keyword::Group))? {
+						Some(WindowFrameExclusion::Group)
+					} else if self.eat(&TokenKind::Keyword(Keyword::Ties))? {
+						Some(WindowFrameExclusion::Ties)
+					} else if self.eat(&TokenKind::Keyword(Keyword::No))? {
+						self.expect(&TokenKind::Keyword(Keyword::Others), "'OTHERS'")?;
+						Some(WindowFrameExclusion::NoOthers)
+					} else {
+						return Err(ParseError::new(
+							self.peek().span,
+							ErrorKind::UnexpectedToken {
+								expected: "CURRENT ROW, GROUP, TIES, or NO OTHERS",
+								found: self.peek().kind.to_string(),
+							},
+						));
+					}
+				} else {
+					None
+				};
+
+				let frame_span = frame_start_span.merge(self.peek().span);
+				frame = Some(WindowFrame {
+					units,
+					start,
+					end,
+					exclusion,
+					span: frame_span,
+				});
+			}
+
+			let rparen = self.expect(&TokenKind::RParen, "')'")?;
+			let span = start_span.merge(rparen.span);
+
+			Ok(WindowSpec {
+				window_name,
+				partition_by,
+				order_by,
+				frame,
+				span,
+			})
+		} else {
+			// Single window name: OVER win_name
+			let tok = self.peek().clone();
+			let (name, _) = self.parse_ident()?;
+			Ok(WindowSpec {
+				window_name: Some(name),
+				partition_by: Vec::new(),
+				order_by: Vec::new(),
+				frame: None,
+				span: tok.span,
+			})
+		}
+	}
+
+	fn parse_window_frame_bound(&mut self) -> ParseResult<WindowFrameBound> {
+		if self.eat(&TokenKind::Keyword(Keyword::Current))? {
+			self.expect(&TokenKind::Keyword(Keyword::Row), "'ROW'")?;
+			Ok(WindowFrameBound::CurrentRow)
+		} else if self.eat(&TokenKind::Keyword(Keyword::Unbounded))? {
+			if self.eat(&TokenKind::Keyword(Keyword::Preceding))? {
+				Ok(WindowFrameBound::UnboundedPreceding)
+			} else if self.eat(&TokenKind::Keyword(Keyword::Following))? {
+				Ok(WindowFrameBound::UnboundedFollowing)
+			} else {
+				Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::UnexpectedToken {
+						expected: "PRECEDING or FOLLOWING",
+						found: self.peek().kind.to_string(),
+					},
+				))
+			}
+		} else {
+			let expr = self.parse_expr()?;
+			if self.eat(&TokenKind::Keyword(Keyword::Preceding))? {
+				Ok(WindowFrameBound::Preceding(Box::new(expr)))
+			} else if self.eat(&TokenKind::Keyword(Keyword::Following))? {
+				Ok(WindowFrameBound::Following(Box::new(expr)))
+			} else {
+				Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::UnexpectedToken {
+						expected: "PRECEDING or FOLLOWING",
+						found: self.peek().kind.to_string(),
+					},
+				))
+			}
+		}
 	}
 }
 

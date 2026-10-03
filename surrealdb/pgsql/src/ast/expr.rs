@@ -53,6 +53,136 @@ pub struct TypeName {
 	pub span: Span,
 }
 
+/// Direction of sorting in `ORDER BY`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderDirection {
+	/// Ascending sort (`ASC`).
+	Asc,
+	/// Descending sort (`DESC`).
+	Desc,
+}
+
+/// Ordering of NULL values in `ORDER BY`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NullsOrder {
+	/// NULL values sort first (`NULLS FIRST`).
+	First,
+	/// NULL values sort last (`NULLS LAST`).
+	Last,
+}
+
+/// An item in an `ORDER BY` clause.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderByItem {
+	/// Expression to order by.
+	pub expr: Expr,
+	/// Sort direction (`ASC` or `DESC`).
+	pub direction: Option<OrderDirection>,
+	/// Null ordering (`NULLS FIRST` or `NULLS LAST`).
+	pub nulls: Option<NullsOrder>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// Units for a window frame specification (`ROWS`, `RANGE`, `GROUPS`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowFrameUnits {
+	/// Physical row count frame.
+	Rows,
+	/// Value offset frame.
+	Range,
+	/// Peer group offset frame.
+	Groups,
+}
+
+/// A bound in a window frame specification.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WindowFrameBound {
+	/// `CURRENT ROW`.
+	CurrentRow,
+	/// `UNBOUNDED PRECEDING`.
+	UnboundedPreceding,
+	/// `UNBOUNDED FOLLOWING`.
+	UnboundedFollowing,
+	/// `<expr> PRECEDING`.
+	Preceding(Box<Expr>),
+	/// `<expr> FOLLOWING`.
+	Following(Box<Expr>),
+}
+
+/// Exclusion clause in a window frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowFrameExclusion {
+	/// `EXCLUDE CURRENT ROW`.
+	CurrentRow,
+	/// `EXCLUDE GROUP`.
+	Group,
+	/// `EXCLUDE TIES`.
+	Ties,
+	/// `EXCLUDE NO OTHERS`.
+	NoOthers,
+}
+
+/// Specification of a window frame (`ROWS BETWEEN ... AND ...`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowFrame {
+	/// Units (`ROWS`, `RANGE`, or `GROUPS`).
+	pub units: WindowFrameUnits,
+	/// Start bound.
+	pub start: WindowFrameBound,
+	/// End bound (optional when not using `BETWEEN`).
+	pub end: Option<WindowFrameBound>,
+	/// Optional frame exclusion.
+	pub exclusion: Option<WindowFrameExclusion>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// Specification of a window in an `OVER` clause or `WINDOW` definition.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowSpec {
+	/// Existing window name referenced: `OVER (existing_win ...)`.
+	pub window_name: Option<String>,
+	/// `PARTITION BY` expressions.
+	pub partition_by: Vec<Expr>,
+	/// `ORDER BY` specifications.
+	pub order_by: Vec<OrderByItem>,
+	/// Window frame specification.
+	pub frame: Option<WindowFrame>,
+	/// Source span.
+	pub span: Span,
+}
+
+impl WindowSpec {
+	/// Recursively set all spans in this window specification to zero for semantic equality
+	/// comparisons.
+	pub fn normalize_spans(&mut self) {
+		let zero = Span::empty(0);
+		self.span = zero;
+		for expr in &mut self.partition_by {
+			expr.normalize_spans();
+		}
+		for item in &mut self.order_by {
+			item.span = zero;
+			item.expr.normalize_spans();
+		}
+		if let Some(frame) = &mut self.frame {
+			frame.span = zero;
+			match &mut frame.start {
+				WindowFrameBound::Preceding(e) | WindowFrameBound::Following(e) => {
+					e.normalize_spans();
+				}
+				_ => {}
+			}
+			if let Some(WindowFrameBound::Preceding(e) | WindowFrameBound::Following(e)) =
+				&mut frame.end
+			{
+				e.normalize_spans();
+			}
+		}
+	}
+}
+
 /// A `WHEN ... THEN ...` branch in a CASE expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WhenClause {
@@ -128,6 +258,8 @@ pub enum Expr {
 		args: Vec<Expr>,
 		/// True if `DISTINCT` modifier was used.
 		distinct: bool,
+		/// Optional `OVER (...)` window specification.
+		over: Option<WindowSpec>,
 		/// Source span.
 		span: Span,
 	},
@@ -413,6 +545,7 @@ impl Expr {
 			Self::FunctionCall {
 				name,
 				args,
+				over,
 				span,
 				..
 			} => {
@@ -420,6 +553,9 @@ impl Expr {
 				name.span = zero;
 				for arg in args {
 					arg.normalize_spans();
+				}
+				if let Some(spec) = over {
+					spec.normalize_spans();
 				}
 			}
 			Self::Subscript {

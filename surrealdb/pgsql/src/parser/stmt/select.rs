@@ -4,11 +4,11 @@
 
 use crate::ast::expr::{ColumnRef, Expr};
 use crate::ast::stmt::{
-	DistinctClause, JoinCondition, JoinType, NullsOrder, OrderByItem, OrderDirection, ResTarget,
-	SelectStmt, SetOpKind, SetOperation, TableAlias, TableRef,
+	DistinctClause, JoinCondition, JoinType, LockingClause, LockingStrength, LockingWaitPolicy,
+	ResTarget, SelectStmt, SetOpKind, SetOperation, TableAlias, TableRef, WindowDef,
 };
 use crate::error::{ErrorKind, ParseError, ParseResult};
-use crate::lexer::keyword::Keyword;
+use crate::lexer::keyword::{Keyword, KeywordCategory};
 use crate::lexer::token::TokenKind;
 use crate::parser::Parser;
 use crate::span::Span;
@@ -18,8 +18,14 @@ impl<'a> Parser<'a> {
 	///
 	/// gram.y: SelectStmt
 	pub fn parse_select_stmt(&mut self) -> ParseResult<SelectStmt> {
+		let with = if self.peek().kind == TokenKind::Keyword(Keyword::With) {
+			Some(self.parse_with_clause()?)
+		} else {
+			None
+		};
+
 		let start_tok = self.expect(&TokenKind::Keyword(Keyword::Select), "'SELECT'")?;
-		let start_span = start_tok.span;
+		let start_span = with.as_ref().map(|w| w.span).unwrap_or(start_tok.span);
 
 		// 1. DISTINCT or DISTINCT ON (expr, ...)
 		let distinct = if self.eat(&TokenKind::Keyword(Keyword::Distinct))? {
@@ -81,7 +87,30 @@ impl<'a> Parser<'a> {
 			None
 		};
 
-		// 7. Optional ORDER BY clause
+		// 7. Optional WINDOW clause
+		let window = if self.eat(&TokenKind::Keyword(Keyword::Window))? {
+			let mut windows = Vec::new();
+			loop {
+				let win_tok = self.peek().clone();
+				let (name, _) = self.parse_ident()?;
+				self.expect(&TokenKind::Keyword(Keyword::As), "'AS'")?;
+				let spec = self.parse_window_spec()?;
+				let span = win_tok.span.merge(spec.span);
+				windows.push(WindowDef {
+					name,
+					spec,
+					span,
+				});
+				if !self.eat(&TokenKind::Comma)? {
+					break;
+				}
+			}
+			windows
+		} else {
+			Vec::new()
+		};
+
+		// 8. Optional ORDER BY clause
 		let order_by = if self.eat(&TokenKind::Keyword(Keyword::Order))? {
 			self.expect(&TokenKind::Keyword(Keyword::By), "'BY'")?;
 			self.parse_order_by_clause()?
@@ -89,7 +118,7 @@ impl<'a> Parser<'a> {
 			Vec::new()
 		};
 
-		// 8. Optional LIMIT and OFFSET clauses (can appear in either order in PG)
+		// 9. Optional LIMIT and OFFSET clauses (can appear in either order in PG)
 		let mut limit = None;
 		let mut offset = None;
 
@@ -111,19 +140,75 @@ impl<'a> Parser<'a> {
 			break;
 		}
 
+		// 10. Optional FOR UPDATE / SHARE locking clauses
+		let mut locking = Vec::new();
+		while self.eat(&TokenKind::Keyword(Keyword::For))? {
+			let for_tok = self.peek().clone();
+			let strength = if self.eat(&TokenKind::Keyword(Keyword::Update))? {
+				LockingStrength::Update
+			} else if self.eat(&TokenKind::Keyword(Keyword::Share))? {
+				LockingStrength::Share
+			} else if self.eat(&TokenKind::Keyword(Keyword::No))? {
+				self.expect(&TokenKind::Keyword(Keyword::Key), "'KEY'")?;
+				self.expect(&TokenKind::Keyword(Keyword::Update), "'UPDATE'")?;
+				LockingStrength::NoKeyUpdate
+			} else if self.eat(&TokenKind::Keyword(Keyword::Key))? {
+				self.expect(&TokenKind::Keyword(Keyword::Share), "'SHARE'")?;
+				LockingStrength::KeyShare
+			} else {
+				return Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::UnexpectedToken {
+						expected: "UPDATE, SHARE, NO KEY UPDATE, or KEY SHARE",
+						found: self.peek().kind.to_string(),
+					},
+				));
+			};
+
+			let mut tables = Vec::new();
+			if self.eat(&TokenKind::Keyword(Keyword::Of))? {
+				loop {
+					tables.push(self.parse_qualified_name()?);
+					if !self.eat(&TokenKind::Comma)? {
+						break;
+					}
+				}
+			}
+
+			let wait_policy = if self.eat(&TokenKind::Keyword(Keyword::Nowait))? {
+				LockingWaitPolicy::NoWait
+			} else if self.eat(&TokenKind::Keyword(Keyword::Skip))? {
+				self.expect(&TokenKind::Keyword(Keyword::Locked), "'LOCKED'")?;
+				LockingWaitPolicy::SkipLocked
+			} else {
+				LockingWaitPolicy::Block
+			};
+
+			let span = for_tok.span.merge(self.peek().span);
+			locking.push(LockingClause {
+				strength,
+				tables,
+				wait_policy,
+				span,
+			});
+		}
+
 		let end_span = self.peek().span;
 		let span = start_span.merge(end_span);
 
 		let mut stmt = SelectStmt {
+			with,
 			distinct,
 			targets,
 			from,
 			where_clause,
 			group_by,
 			having,
+			window,
 			order_by,
 			limit,
 			offset,
+			locking,
 			set_op: None,
 			span,
 		};
@@ -381,75 +466,30 @@ impl<'a> Parser<'a> {
 		Ok(())
 	}
 
-	/// Parse items in an `ORDER BY` clause.
-	fn parse_order_by_clause(&mut self) -> ParseResult<Vec<OrderByItem>> {
-		let mut items = Vec::new();
-
-		loop {
-			let expr = self.parse_expr()?;
-			let mut span = expr.span();
-
-			let direction = if self.eat(&TokenKind::Keyword(Keyword::Asc))? {
-				Some(OrderDirection::Asc)
-			} else if self.eat(&TokenKind::Keyword(Keyword::Desc))? {
-				Some(OrderDirection::Desc)
-			} else {
-				None
-			};
-
-			let nulls = if self.eat(&TokenKind::Keyword(Keyword::Nulls))? {
-				if self.eat(&TokenKind::Keyword(Keyword::First))? {
-					Some(NullsOrder::First)
-				} else if self.eat(&TokenKind::Keyword(Keyword::Last))? {
-					Some(NullsOrder::Last)
-				} else {
-					return Err(ParseError::new(
-						self.peek().span,
-						ErrorKind::UnexpectedToken {
-							expected: "FIRST or LAST",
-							found: self.peek().kind.to_string(),
-						},
-					));
-				}
-			} else {
-				None
-			};
-
-			span = span.merge(self.peek().span);
-			items.push(OrderByItem {
-				expr,
-				direction,
-				nulls,
-				span,
-			});
-
-			if !self.eat(&TokenKind::Comma)? {
-				break;
-			}
-		}
-
-		Ok(items)
-	}
-
 	/// Determine if current token can be an unquoted/quoted identifier alias.
 	fn is_table_or_col_alias_start(&self) -> bool {
 		match &self.peek().kind {
 			TokenKind::Ident(_) | TokenKind::QuotedIdent(_) => true,
 			TokenKind::Keyword(kw) => {
+				if kw.category() == KeywordCategory::Reserved {
+					return false;
+				}
 				// Reject keywords that start other clauses
 				!matches!(
 					kw,
 					Keyword::From
 						| Keyword::Where | Keyword::Group
-						| Keyword::Having | Keyword::Order
-						| Keyword::Limit | Keyword::Offset
-						| Keyword::Union | Keyword::Intersect
+						| Keyword::Having | Keyword::Window
+						| Keyword::Order | Keyword::Limit
+						| Keyword::Offset | Keyword::Union
+						| Keyword::Intersect
 						| Keyword::Except | Keyword::Join
 						| Keyword::Inner | Keyword::Left
 						| Keyword::Right | Keyword::Full
 						| Keyword::Cross | Keyword::On
 						| Keyword::Using | Keyword::Set
 						| Keyword::Values | Keyword::Returning
+						| Keyword::For
 				)
 			}
 			_ => false,

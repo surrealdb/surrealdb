@@ -1,6 +1,7 @@
 //! Statement AST representations for PostgreSQL.
 
 use crate::ast::expr::{Expr, QualifiedName, TypeName};
+pub use crate::ast::expr::{NullsOrder, OrderByItem, OrderDirection, WindowSpec};
 use crate::span::Span;
 
 /// A target item in a SELECT projection list (e.g. `col AS alias`, `*`, `tbl.*`).
@@ -25,33 +26,76 @@ pub struct TableAlias {
 	pub span: Span,
 }
 
-/// Sort direction for `ORDER BY`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OrderDirection {
-	/// Ascending sort (`ASC`).
-	Asc,
-	/// Descending sort (`DESC`).
-	Desc,
-}
-
-/// Ordering of NULL values in `ORDER BY`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NullsOrder {
-	/// NULL values sort first (`NULLS FIRST`).
-	First,
-	/// NULL values sort last (`NULLS LAST`).
-	Last,
-}
-
-/// An item in an `ORDER BY` clause.
+/// A `WITH` clause (Common Table Expression list).
 #[derive(Debug, Clone, PartialEq)]
-pub struct OrderByItem {
-	/// Expression to order by.
-	pub expr: Expr,
-	/// Sort direction (`ASC` or `DESC`).
-	pub direction: Option<OrderDirection>,
-	/// Null ordering (`NULLS FIRST` or `NULLS LAST`).
-	pub nulls: Option<NullsOrder>,
+pub struct WithClause {
+	/// True if `WITH RECURSIVE`.
+	pub recursive: bool,
+	/// CTE definitions.
+	pub ctes: Vec<CommonTableExpr>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// A single Common Table Expression (CTE).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommonTableExpr {
+	/// CTE name.
+	pub name: String,
+	/// Optional column alias names: `name(c1, c2, ...)`.
+	pub columns: Vec<String>,
+	/// Optional `MATERIALIZED` (Some(true)) or `NOT MATERIALIZED` (Some(false)).
+	pub materialized: Option<bool>,
+	/// The query definition.
+	pub query: Box<Statement>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// Named window definition in a `SELECT` statement (`WINDOW name AS (spec)`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowDef {
+	/// Window name.
+	pub name: String,
+	/// Window specification.
+	pub spec: WindowSpec,
+	/// Source span.
+	pub span: Span,
+}
+
+/// Locking strength in `FOR UPDATE`, `FOR SHARE`, etc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockingStrength {
+	/// `FOR UPDATE`.
+	Update,
+	/// `FOR NO KEY UPDATE`.
+	NoKeyUpdate,
+	/// `FOR SHARE`.
+	Share,
+	/// `FOR KEY SHARE`.
+	KeyShare,
+}
+
+/// Locking wait policy (`NOWAIT`, `SKIP LOCKED`, or default blocking).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockingWaitPolicy {
+	/// Wait until lock is available.
+	Block,
+	/// Fail immediately if locked (`NOWAIT`).
+	NoWait,
+	/// Skip locked rows (`SKIP LOCKED`).
+	SkipLocked,
+}
+
+/// A `FOR UPDATE / SHARE` locking clause.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LockingClause {
+	/// Locking strength (`UPDATE`, `SHARE`, etc.).
+	pub strength: LockingStrength,
+	/// Optional table names: `OF tbl1, tbl2`.
+	pub tables: Vec<QualifiedName>,
+	/// Wait policy (`NOWAIT`, `SKIP LOCKED`, or default).
+	pub wait_policy: LockingWaitPolicy,
 	/// Source span.
 	pub span: Span,
 }
@@ -152,6 +196,8 @@ pub enum DistinctClause {
 /// Implements `gram.y: SelectStmt`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectStmt {
+	/// Optional `WITH` clause.
+	pub with: Option<WithClause>,
 	/// Optional `DISTINCT` or `DISTINCT ON` clause.
 	pub distinct: Option<DistinctClause>,
 	/// Target projection list (`SELECT target1, target2, ...`).
@@ -164,12 +210,16 @@ pub struct SelectStmt {
 	pub group_by: Vec<Expr>,
 	/// `HAVING` condition.
 	pub having: Option<Expr>,
+	/// `WINDOW` definitions (`WINDOW name AS (...)`).
+	pub window: Vec<WindowDef>,
 	/// `ORDER BY` specifications.
 	pub order_by: Vec<OrderByItem>,
 	/// `LIMIT` expression.
 	pub limit: Option<Expr>,
 	/// `OFFSET` expression.
 	pub offset: Option<Expr>,
+	/// `FOR UPDATE / SHARE` locking clauses.
+	pub locking: Vec<LockingClause>,
 	/// Optional chained set operation (`UNION`, etc.).
 	pub set_op: Option<SetOperation>,
 	/// Statement span.
@@ -212,6 +262,8 @@ pub struct OnConflictClause {
 /// Implements `gram.y: InsertStmt`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertStmt {
+	/// Optional `WITH` clause.
+	pub with: Option<WithClause>,
 	/// Target table name.
 	pub relation: QualifiedName,
 	/// Explicit column list (e.g. `INSERT INTO t (a, b)`).
@@ -233,6 +285,8 @@ pub struct InsertStmt {
 /// Implements `gram.y: UpdateStmt`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateStmt {
+	/// Optional `WITH` clause.
+	pub with: Option<WithClause>,
 	/// Target table name.
 	pub relation: QualifiedName,
 	/// Assignments (`SET col1 = val1, col2 = val2`).
@@ -252,6 +306,8 @@ pub struct UpdateStmt {
 /// Implements `gram.y: DeleteStmt`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeleteStmt {
+	/// Optional `WITH` clause.
+	pub with: Option<WithClause>,
 	/// Target table name.
 	pub relation: QualifiedName,
 	/// Optional `USING` clause.
@@ -436,6 +492,173 @@ pub struct ExplainStmt {
 	pub span: Span,
 }
 
+/// A PostgreSQL `CREATE INDEX` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateIndexStmt {
+	/// `UNIQUE` index.
+	pub unique: bool,
+	/// `CONCURRENTLY` index creation.
+	pub concurrently: bool,
+	/// `IF NOT EXISTS` clause.
+	pub if_not_exists: bool,
+	/// Index name (optional in PG).
+	pub name: Option<String>,
+	/// Target table name.
+	pub table: QualifiedName,
+	/// Access method (`btree`, `hash`, `gin`, `gist`, etc.).
+	pub method: Option<String>,
+	/// Indexed columns or expressions.
+	pub columns: Vec<IndexElem>,
+	/// Partial index `WHERE` predicate.
+	pub predicate: Option<Expr>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// An element in an index definition (column name or expression with sort options).
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndexElem {
+	/// Column or expression.
+	pub expr: Expr,
+	/// Sort direction.
+	pub direction: Option<OrderDirection>,
+	/// Nulls ordering.
+	pub nulls: Option<NullsOrder>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// A PostgreSQL `CREATE VIEW` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateViewStmt {
+	/// `OR REPLACE`.
+	pub or_replace: bool,
+	/// `TEMP` or `TEMPORARY`.
+	pub temporary: bool,
+	/// `RECURSIVE`.
+	pub recursive: bool,
+	/// View name.
+	pub name: QualifiedName,
+	/// Optional column aliases.
+	pub columns: Vec<String>,
+	/// Query defining the view.
+	pub query: Box<SelectStmt>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// Action in an `ALTER TABLE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AlterTableAction {
+	/// `ADD [COLUMN] [IF NOT EXISTS] col_def`.
+	AddColumn {
+		if_not_exists: bool,
+		column: ColumnDef,
+	},
+	/// `DROP [COLUMN] [IF EXISTS] col_name [CASCADE | RESTRICT]`.
+	DropColumn {
+		if_exists: bool,
+		name: String,
+		cascade: bool,
+	},
+	/// `ALTER [COLUMN] col_name TYPE data_type`.
+	AlterColumnType {
+		name: String,
+		data_type: TypeName,
+	},
+	/// `ALTER [COLUMN] col_name SET DEFAULT expr`.
+	SetDefault {
+		column: String,
+		default: Expr,
+	},
+	/// `ALTER [COLUMN] col_name DROP DEFAULT`.
+	DropDefault {
+		column: String,
+	},
+	/// `ALTER [COLUMN] col_name SET NOT NULL`.
+	SetNotNull {
+		column: String,
+	},
+	/// `ALTER [COLUMN] col_name DROP NOT NULL`.
+	DropNotNull {
+		column: String,
+	},
+	/// `ADD table_constraint`.
+	AddConstraint(TableConstraint),
+	/// `DROP CONSTRAINT [IF EXISTS] name [CASCADE | RESTRICT]`.
+	DropConstraint {
+		if_exists: bool,
+		name: String,
+		cascade: bool,
+	},
+	/// `RENAME [COLUMN] old_name TO new_name`.
+	RenameColumn {
+		old_name: String,
+		new_name: String,
+	},
+	/// `RENAME TO new_table_name`.
+	RenameTable {
+		new_name: String,
+	},
+}
+
+/// A PostgreSQL `ALTER TABLE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlterTableStmt {
+	/// `IF EXISTS`.
+	pub if_exists: bool,
+	/// Target table name.
+	pub name: QualifiedName,
+	/// Alter actions.
+	pub actions: Vec<AlterTableAction>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// A PostgreSQL `CREATE SCHEMA` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateSchemaStmt {
+	/// `IF NOT EXISTS`.
+	pub if_not_exists: bool,
+	/// Schema name.
+	pub name: String,
+	/// Source span.
+	pub span: Span,
+}
+
+/// A PostgreSQL `PREPARE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrepareStmt {
+	/// Prepared statement name.
+	pub name: String,
+	/// Argument type names.
+	pub param_types: Vec<TypeName>,
+	/// Prepared query statement.
+	pub statement: Box<Statement>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// A PostgreSQL `EXECUTE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExecuteStmt {
+	/// Prepared statement name to execute.
+	pub name: String,
+	/// Arguments passed to the statement.
+	pub params: Vec<Expr>,
+	/// Source span.
+	pub span: Span,
+}
+
+/// A PostgreSQL `DEALLOCATE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeallocateStmt {
+	/// Statement name, or `None` if `DEALLOCATE ALL`.
+	pub name: Option<String>,
+	/// Source span.
+	pub span: Span,
+}
+
 /// Top-level PostgreSQL statement AST node.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
@@ -449,6 +672,14 @@ pub enum Statement {
 	Delete(Box<DeleteStmt>),
 	/// `CREATE TABLE` DDL.
 	CreateTable(Box<CreateTableStmt>),
+	/// `CREATE INDEX` DDL.
+	CreateIndex(Box<CreateIndexStmt>),
+	/// `CREATE VIEW` DDL.
+	CreateView(Box<CreateViewStmt>),
+	/// `ALTER TABLE` DDL.
+	AlterTable(Box<AlterTableStmt>),
+	/// `CREATE SCHEMA` DDL.
+	CreateSchema(CreateSchemaStmt),
 	/// `DROP` DDL.
 	Drop(Box<DropStmt>),
 	/// Transaction control statement.
@@ -461,6 +692,12 @@ pub enum Statement {
 	Reset(ResetStmt),
 	/// `EXPLAIN` query plan analysis.
 	Explain(Box<ExplainStmt>),
+	/// `PREPARE` statement.
+	Prepare(Box<PrepareStmt>),
+	/// `EXECUTE` statement.
+	Execute(ExecuteStmt),
+	/// `DEALLOCATE` statement.
+	Deallocate(DeallocateStmt),
 	/// Empty statement (e.g. standalone semicolon `;`).
 	Empty,
 }
@@ -471,6 +708,13 @@ impl SelectStmt {
 	pub fn normalize_spans(&mut self) {
 		let zero = Span::empty(0);
 		self.span = zero;
+		if let Some(w) = &mut self.with {
+			w.span = zero;
+			for cte in &mut w.ctes {
+				cte.span = zero;
+				cte.query.normalize_spans();
+			}
+		}
 		if let Some(DistinctClause::On(exprs)) = &mut self.distinct {
 			for e in exprs {
 				e.normalize_spans();
@@ -492,7 +736,12 @@ impl SelectStmt {
 		if let Some(h) = &mut self.having {
 			h.normalize_spans();
 		}
+		for win in &mut self.window {
+			win.span = zero;
+			win.spec.normalize_spans();
+		}
 		for o in &mut self.order_by {
+			o.span = zero;
 			o.expr.normalize_spans();
 		}
 		if let Some(l) = &mut self.limit {
@@ -500,6 +749,12 @@ impl SelectStmt {
 		}
 		if let Some(o) = &mut self.offset {
 			o.normalize_spans();
+		}
+		for lock in &mut self.locking {
+			lock.span = zero;
+			for t in &mut lock.tables {
+				t.span = zero;
+			}
 		}
 		if let Some(op) = &mut self.set_op {
 			op.right.normalize_spans();
@@ -516,6 +771,10 @@ impl Statement {
 			Self::Update(s) => s.span,
 			Self::Delete(s) => s.span,
 			Self::CreateTable(s) => s.span,
+			Self::CreateIndex(s) => s.span,
+			Self::CreateView(s) => s.span,
+			Self::AlterTable(s) => s.span,
+			Self::CreateSchema(s) => s.span,
 			Self::Drop(s) => s.span,
 			Self::Transaction(tx) => match tx {
 				TransactionStmt::Begin {
@@ -544,6 +803,9 @@ impl Statement {
 			Self::Show(s) => s.span,
 			Self::Reset(s) => s.span,
 			Self::Explain(s) => s.span,
+			Self::Prepare(s) => s.span,
+			Self::Execute(s) => s.span,
+			Self::Deallocate(s) => s.span,
 			Self::Empty => Span::empty(0),
 		}
 	}
@@ -555,6 +817,13 @@ impl Statement {
 			Self::Select(s) => s.normalize_spans(),
 			Self::Insert(s) => {
 				s.span = zero;
+				if let Some(w) = &mut s.with {
+					w.span = zero;
+					for cte in &mut w.ctes {
+						cte.span = zero;
+						cte.query.normalize_spans();
+					}
+				}
 				s.relation.span = zero;
 				if let Some(rows) = &mut s.values {
 					for row in rows {
@@ -584,6 +853,13 @@ impl Statement {
 			}
 			Self::Update(s) => {
 				s.span = zero;
+				if let Some(w) = &mut s.with {
+					w.span = zero;
+					for cte in &mut w.ctes {
+						cte.span = zero;
+						cte.query.normalize_spans();
+					}
+				}
 				s.relation.span = zero;
 				for a in &mut s.assignments {
 					a.span = zero;
@@ -606,6 +882,13 @@ impl Statement {
 			}
 			Self::Delete(s) => {
 				s.span = zero;
+				if let Some(w) = &mut s.with {
+					w.span = zero;
+					for cte in &mut w.ctes {
+						cte.span = zero;
+						cte.query.normalize_spans();
+					}
+				}
 				s.relation.span = zero;
 				if let Some(using) = &mut s.using {
 					for r in using {
@@ -649,6 +932,56 @@ impl Statement {
 					}
 				}
 			}
+			Self::CreateIndex(s) => {
+				s.span = zero;
+				s.table.span = zero;
+				for col in &mut s.columns {
+					col.span = zero;
+					col.expr.normalize_spans();
+				}
+				if let Some(pred) = &mut s.predicate {
+					pred.normalize_spans();
+				}
+			}
+			Self::CreateView(s) => {
+				s.span = zero;
+				s.name.span = zero;
+				s.query.normalize_spans();
+			}
+			Self::AlterTable(s) => {
+				s.span = zero;
+				s.name.span = zero;
+				for a in &mut s.actions {
+					match a {
+						AlterTableAction::AddColumn {
+							column,
+							..
+						} => {
+							column.span = zero;
+							column.data_type.span = zero;
+							for c in &mut column.constraints {
+								if let ColumnConstraint::Default(e) = c {
+									e.normalize_spans();
+								}
+							}
+						}
+						AlterTableAction::AlterColumnType {
+							data_type,
+							..
+						} => {
+							data_type.span = zero;
+						}
+						AlterTableAction::SetDefault {
+							default,
+							..
+						} => {
+							default.normalize_spans();
+						}
+						_ => {}
+					}
+				}
+			}
+			Self::CreateSchema(s) => s.span = zero,
 			Self::Drop(s) => {
 				s.span = zero;
 				for n in &mut s.names {
@@ -685,6 +1018,20 @@ impl Statement {
 				s.span = zero;
 				s.statement.normalize_spans();
 			}
+			Self::Prepare(s) => {
+				s.span = zero;
+				for t in &mut s.param_types {
+					t.span = zero;
+				}
+				s.statement.normalize_spans();
+			}
+			Self::Execute(s) => {
+				s.span = zero;
+				for p in &mut s.params {
+					p.normalize_spans();
+				}
+			}
+			Self::Deallocate(s) => s.span = zero,
 			Self::Empty => {}
 		}
 	}
