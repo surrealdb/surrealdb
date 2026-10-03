@@ -158,6 +158,21 @@ pub enum TableRef {
 		/// Source span.
 		span: Span,
 	},
+	/// SQL:2023 Part 16 GRAPH_TABLE reference.
+	GraphTable {
+		/// Graph name.
+		graph_name: QualifiedName,
+		/// Pattern to match.
+		pattern: crate::ast::graph::GraphPattern,
+		/// Columns to project.
+		columns: Vec<crate::ast::graph::GraphColumnDef>,
+		/// Optional table alias.
+		alias: Option<TableAlias>,
+		/// Source span.
+		span: Span,
+	},
+	/// SQL/JSON JSON_TABLE reference.
+	JsonTable(crate::ast::json::JsonTable),
 }
 
 /// Set operation kind (e.g. `UNION`, `INTERSECT`, `EXCEPT`).
@@ -698,6 +713,10 @@ pub enum Statement {
 	Execute(ExecuteStmt),
 	/// `DEALLOCATE` statement.
 	Deallocate(DeallocateStmt),
+	/// `CREATE PROPERTY GRAPH` DDL (SQL:2023 Part 16).
+	CreatePropertyGraph(Box<crate::ast::graph::CreatePropertyGraphStmt>),
+	/// `DROP PROPERTY GRAPH` DDL (SQL:2023 Part 16).
+	DropPropertyGraph(Box<crate::ast::graph::DropPropertyGraphStmt>),
 	/// Empty statement (e.g. standalone semicolon `;`).
 	Empty,
 }
@@ -806,6 +825,8 @@ impl Statement {
 			Self::Prepare(s) => s.span,
 			Self::Execute(s) => s.span,
 			Self::Deallocate(s) => s.span,
+			Self::CreatePropertyGraph(s) => s.span,
+			Self::DropPropertyGraph(s) => s.span,
 			Self::Empty => Span::empty(0),
 		}
 	}
@@ -1032,6 +1053,8 @@ impl Statement {
 				}
 			}
 			Self::Deallocate(s) => s.span = zero,
+			Self::CreatePropertyGraph(s) => s.normalize_spans(),
+			Self::DropPropertyGraph(s) => s.normalize_spans(),
 			Self::Empty => {}
 		}
 	}
@@ -1073,6 +1096,26 @@ fn normalize_table_ref(r: &mut TableRef) {
 			if let Some(JoinCondition::On(e)) = condition {
 				e.normalize_spans();
 			}
+		}
+		TableRef::GraphTable {
+			graph_name,
+			pattern,
+			columns,
+			alias,
+			span,
+		} => {
+			*span = zero;
+			graph_name.span = zero;
+			pattern.normalize_spans();
+			for col in columns {
+				col.normalize_spans();
+			}
+			if let Some(a) = alias {
+				a.span = zero;
+			}
+		}
+		TableRef::JsonTable(t) => {
+			t.normalize_spans();
 		}
 	}
 }

@@ -2,6 +2,7 @@
 
 pub mod ddl;
 pub mod delete;
+pub mod graph;
 pub mod insert;
 pub mod misc;
 pub mod select;
@@ -86,10 +87,7 @@ impl<'a> Parser<'a> {
 				let s = self.parse_alter_table_stmt()?;
 				Ok(Statement::AlterTable(Box::new(s)))
 			}
-			TokenKind::Keyword(Keyword::Drop) => {
-				let s = self.parse_drop_stmt()?;
-				Ok(Statement::Drop(Box::new(s)))
-			}
+			TokenKind::Keyword(Keyword::Drop) => self.parse_drop_stmt(),
 			TokenKind::Keyword(Keyword::Prepare) => {
 				let s = self.parse_prepare_stmt()?;
 				Ok(Statement::Prepare(Box::new(s)))

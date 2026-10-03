@@ -334,6 +334,91 @@ pub fn translate_expr(
 			out.push(')');
 			Ok(())
 		}
+		Expr::IsBound {
+			expr,
+			negated,
+			..
+		} => {
+			out.push('(');
+			translate_expr(expr, ctx, out)?;
+			if *negated {
+				out.push_str(" IS NONE)");
+			} else {
+				out.push_str(" IS NOT NONE)");
+			}
+			Ok(())
+		}
+		Expr::JsonObject {
+			fields,
+			..
+		} => {
+			out.push('{');
+			for (i, (k, v)) in fields.iter().enumerate() {
+				if i > 0 {
+					out.push_str(", ");
+				}
+				translate_expr(k, ctx, out)?;
+				out.push_str(": ");
+				translate_expr(v, ctx, out)?;
+			}
+			out.push('}');
+			Ok(())
+		}
+		Expr::JsonArray {
+			elements,
+			..
+		} => {
+			out.push('[');
+			for (i, el) in elements.iter().enumerate() {
+				if i > 0 {
+					out.push_str(", ");
+				}
+				translate_expr(el, ctx, out)?;
+			}
+			out.push(']');
+			Ok(())
+		}
+		Expr::JsonExists {
+			context,
+			path,
+			..
+		} => {
+			out.push('(');
+			translate_expr(context, ctx, out)?;
+			let clean_path = path.trim_start_matches("$.");
+			if !clean_path.is_empty() {
+				out.push('.');
+				out.push_str(clean_path);
+			}
+			out.push_str(" != NONE)");
+			Ok(())
+		}
+		Expr::JsonValue {
+			context,
+			path,
+			..
+		} => {
+			translate_expr(context, ctx, out)?;
+			let clean_path = path.trim_start_matches("$.");
+			if !clean_path.is_empty() {
+				out.push('.');
+				out.push_str(clean_path);
+			}
+			Ok(())
+		}
+		Expr::JsonQuery {
+			context,
+			path,
+			..
+		} => {
+			translate_expr(context, ctx, out)?;
+			let clean_path = path.trim_start_matches("$.");
+			if !clean_path.is_empty() {
+				out.push('.');
+				out.push_str(clean_path);
+			}
+			Ok(())
+		}
 	}
 }
 

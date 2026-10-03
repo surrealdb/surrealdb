@@ -199,11 +199,20 @@ impl<'a> Parser<'a> {
 							span,
 						};
 					}
+					TokenKind::Keyword(Keyword::Bound) => {
+						let bound_tok = self.bump()?;
+						let span = left.span().merge(bound_tok.span);
+						left = Expr::IsBound {
+							expr: Box::new(left),
+							negated,
+							span,
+						};
+					}
 					_ => {
 						return Err(ParseError::new(
 							self.peek().span,
 							ErrorKind::UnexpectedToken {
-								expected: "NULL, TRUE, FALSE, UNKNOWN, or DISTINCT FROM",
+								expected: "NULL, TRUE, FALSE, UNKNOWN, DISTINCT FROM, or BOUND",
 								found: self.peek().kind.to_string(),
 							},
 						));
@@ -488,6 +497,19 @@ impl<'a> Parser<'a> {
 				})
 			}
 
+			// SQL/JSON expressions
+			TokenKind::Keyword(
+				kw @ (Keyword::JsonObject
+				| Keyword::JsonArray
+				| Keyword::JsonExists
+				| Keyword::JsonValue
+				| Keyword::JsonQuery),
+			) => {
+				let kw = *kw;
+				let tok = self.bump()?;
+				self.parse_json_expr(kw, tok.span)
+			}
+
 			// CASE [operand] WHEN ... THEN ... [ELSE ...] END
 			TokenKind::Keyword(Keyword::Case) => self.parse_case_expr(),
 
@@ -643,6 +665,106 @@ impl<'a> Parser<'a> {
 		})
 	}
 
+	#[inline(never)]
+	fn parse_json_expr(&mut self, kw: Keyword, start_span: Span) -> ParseResult<Expr> {
+		match kw {
+			Keyword::JsonObject => {
+				self.expect(&TokenKind::LParen, "'('")?;
+				let mut fields = Vec::new();
+				while self.peek().kind != TokenKind::RParen {
+					let key = self.parse_expr()?;
+					if self.eat(&TokenKind::Colon)?
+						|| self.eat(&TokenKind::Keyword(Keyword::Value))?
+						|| self.eat(&TokenKind::Comma)?
+					{
+						let val = self.parse_expr()?;
+						fields.push((key, val));
+					} else {
+						return Err(ParseError::new(
+							self.peek().span,
+							ErrorKind::UnexpectedToken {
+								expected: "':' or 'VALUE' or ',' between JSON_OBJECT key and value",
+								found: self.peek().kind.to_string(),
+							},
+						));
+					}
+					if !self.eat(&TokenKind::Comma)? {
+						break;
+					}
+				}
+				let end = self.expect(&TokenKind::RParen, "')'")?.span;
+				Ok(Expr::JsonObject {
+					fields,
+					span: start_span.merge(end),
+				})
+			}
+			Keyword::JsonArray => {
+				self.expect(&TokenKind::LParen, "'('")?;
+				let mut elements = Vec::new();
+				while self.peek().kind != TokenKind::RParen {
+					elements.push(self.parse_expr()?);
+					if !self.eat(&TokenKind::Comma)? {
+						break;
+					}
+				}
+				let end = self.expect(&TokenKind::RParen, "')'")?.span;
+				Ok(Expr::JsonArray {
+					elements,
+					span: start_span.merge(end),
+				})
+			}
+			Keyword::JsonExists => {
+				self.expect(&TokenKind::LParen, "'('")?;
+				let context = Box::new(self.parse_expr()?);
+				self.expect(&TokenKind::Comma, "','")?;
+				let (path, _) = self.parse_string_constant()?;
+				let end = self.expect(&TokenKind::RParen, "')'")?.span;
+				Ok(Expr::JsonExists {
+					context,
+					path,
+					span: start_span.merge(end),
+				})
+			}
+			Keyword::JsonValue => {
+				self.expect(&TokenKind::LParen, "'('")?;
+				let context = Box::new(self.parse_expr()?);
+				self.expect(&TokenKind::Comma, "','")?;
+				let (path, _) = self.parse_string_constant()?;
+				let returning = if self.eat(&TokenKind::Keyword(Keyword::Returning))? {
+					Some(self.parse_type_name()?)
+				} else {
+					None
+				};
+				let end = self.expect(&TokenKind::RParen, "')'")?.span;
+				Ok(Expr::JsonValue {
+					context,
+					path,
+					returning,
+					span: start_span.merge(end),
+				})
+			}
+			Keyword::JsonQuery => {
+				self.expect(&TokenKind::LParen, "'('")?;
+				let context = Box::new(self.parse_expr()?);
+				self.expect(&TokenKind::Comma, "','")?;
+				let (path, _) = self.parse_string_constant()?;
+				let end = self.expect(&TokenKind::RParen, "')'")?.span;
+				Ok(Expr::JsonQuery {
+					context,
+					path,
+					span: start_span.merge(end),
+				})
+			}
+			_ => Err(ParseError::new(
+				start_span,
+				ErrorKind::UnexpectedToken {
+					expected: "JSON expression",
+					found: kw.as_str().to_string(),
+				},
+			)),
+		}
+	}
+
 	/// Parse a qualified name (`ident` or `ident.ident...`).
 	pub fn parse_qualified_name(&mut self) -> ParseResult<QualifiedName> {
 		let (first, start_span) = self.parse_ident()?;
@@ -681,6 +803,31 @@ impl<'a> Parser<'a> {
 				tok.span,
 				ErrorKind::UnexpectedToken {
 					expected: "identifier",
+					found: tok.kind.to_string(),
+				},
+			)),
+		}
+	}
+
+	/// Parse a single string constant or dollar-quoted string token.
+	pub fn parse_string_constant(&mut self) -> ParseResult<(String, Span)> {
+		let tok = self.peek().clone();
+		match &tok.kind {
+			TokenKind::StringConstant(s) => {
+				self.bump()?;
+				Ok((s.clone(), tok.span))
+			}
+			TokenKind::DollarQuotedString {
+				content,
+				..
+			} => {
+				self.bump()?;
+				Ok((content.to_string(), tok.span))
+			}
+			_ => Err(ParseError::new(
+				tok.span,
+				ErrorKind::UnexpectedToken {
+					expected: "string literal",
 					found: tok.kind.to_string(),
 				},
 			)),

@@ -64,6 +64,11 @@ impl ToPgQueryJson for Statement {
 			Self::Execute(s) => s.to_pg_query_json(),
 			Self::Deallocate(s) => s.to_pg_query_json(),
 			Self::Explain(s) => s.to_pg_query_json(),
+			Self::CreatePropertyGraph(_) | Self::DropPropertyGraph(_) => {
+				json!({
+					"PropertyGraphStmt": {}
+				})
+			}
 			Self::Empty => Value::Null,
 		};
 
@@ -244,6 +249,10 @@ impl ToPgQueryJson for TableRef {
 				obj.insert("alias".to_string(), pg_node("Alias", Value::Object(alias_obj)));
 				pg_node("RangeSubselect", Value::Object(obj))
 			}
+			Self::GraphTable {
+				..
+			}
+			| Self::JsonTable(_) => pg_node("RangeTableFunc", Value::Object(serde_json::Map::new())),
 		}
 	}
 }
@@ -608,6 +617,24 @@ impl ToPgQueryJson for Expr {
 				expr,
 				..
 			} => expr.to_pg_query_json(),
+			Self::IsBound {
+				..
+			}
+			| Self::JsonObject {
+				..
+			}
+			| Self::JsonArray {
+				..
+			}
+			| Self::JsonExists {
+				..
+			}
+			| Self::JsonValue {
+				..
+			}
+			| Self::JsonQuery {
+				..
+			} => pg_node("JsonExpr", Value::Object(serde_json::Map::new())),
 		}
 	}
 }

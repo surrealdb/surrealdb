@@ -412,6 +412,64 @@ pub enum Expr {
 		/// Source span.
 		span: Span,
 	},
+
+	/// `IS [NOT] BOUND (var)` graph expression.
+	IsBound {
+		/// Variable expression.
+		expr: Box<Expr>,
+		/// True if `IS NOT BOUND`.
+		negated: bool,
+		/// Source span.
+		span: Span,
+	},
+
+	/// `JSON_OBJECT(...)` constructor.
+	JsonObject {
+		/// Key-value pairs.
+		fields: Vec<(Expr, Expr)>,
+		/// Source span.
+		span: Span,
+	},
+
+	/// `JSON_ARRAY(...)` constructor.
+	JsonArray {
+		/// Array elements.
+		elements: Vec<Expr>,
+		/// Source span.
+		span: Span,
+	},
+
+	/// `JSON_EXISTS(context, path)` predicate.
+	JsonExists {
+		/// Context item expression.
+		context: Box<Expr>,
+		/// JSON path string.
+		path: String,
+		/// Source span.
+		span: Span,
+	},
+
+	/// `JSON_VALUE(context, path [RETURNING type])` expression.
+	JsonValue {
+		/// Context item expression.
+		context: Box<Expr>,
+		/// JSON path string.
+		path: String,
+		/// Optional return type.
+		returning: Option<TypeName>,
+		/// Source span.
+		span: Span,
+	},
+
+	/// `JSON_QUERY(context, path)` expression.
+	JsonQuery {
+		/// Context item expression.
+		context: Box<Expr>,
+		/// JSON path string.
+		path: String,
+		/// Source span.
+		span: Span,
+	},
 }
 
 impl Expr {
@@ -496,6 +554,30 @@ impl Expr {
 				..
 			} => *span,
 			Self::Grouping {
+				span,
+				..
+			} => *span,
+			Self::IsBound {
+				span,
+				..
+			} => *span,
+			Self::JsonObject {
+				span,
+				..
+			} => *span,
+			Self::JsonArray {
+				span,
+				..
+			} => *span,
+			Self::JsonExists {
+				span,
+				..
+			} => *span,
+			Self::JsonValue {
+				span,
+				..
+			} => *span,
+			Self::JsonQuery {
 				span,
 				..
 			} => *span,
@@ -691,6 +773,62 @@ impl Expr {
 			} => {
 				*span = zero;
 				expr.normalize_spans();
+			}
+			Self::IsBound {
+				expr,
+				span,
+				..
+			} => {
+				*span = zero;
+				expr.normalize_spans();
+			}
+			Self::JsonObject {
+				fields,
+				span,
+			} => {
+				*span = zero;
+				for (k, v) in fields {
+					k.normalize_spans();
+					v.normalize_spans();
+				}
+			}
+			Self::JsonArray {
+				elements,
+				span,
+			} => {
+				*span = zero;
+				for el in elements {
+					el.normalize_spans();
+				}
+			}
+			Self::JsonExists {
+				context,
+				span,
+				..
+			} => {
+				*span = zero;
+				context.normalize_spans();
+			}
+			Self::JsonValue {
+				context,
+				returning,
+				span,
+				..
+			} => {
+				*span = zero;
+				context.normalize_spans();
+				if let Some(r) = returning {
+					r.span = zero;
+					r.name.span = zero;
+				}
+			}
+			Self::JsonQuery {
+				context,
+				span,
+				..
+			} => {
+				*span = zero;
+				context.normalize_spans();
 			}
 		}
 	}

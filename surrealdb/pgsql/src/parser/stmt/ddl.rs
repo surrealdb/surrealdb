@@ -58,6 +58,13 @@ impl<'a> Parser<'a> {
 			return Ok(Statement::CreateSchema(s));
 		}
 
+		if self.peek().kind == TokenKind::Keyword(Keyword::Property) {
+			let prop_tok = self.bump()?;
+			let s =
+				self.parse_create_property_graph_stmt_tail(create_tok.span.merge(prop_tok.span))?;
+			return Ok(Statement::CreatePropertyGraph(Box::new(s)));
+		}
+
 		// Otherwise CREATE TABLE
 		let s = self.parse_create_table_stmt_tail(create_tok.span, temporary)?;
 		Ok(Statement::CreateTable(Box::new(s)))
@@ -576,8 +583,13 @@ impl<'a> Parser<'a> {
 	/// Parse a PostgreSQL `DROP` statement (`DROP TABLE ...`, `DROP INDEX ...`).
 	///
 	/// gram.y: DropStmt
-	pub fn parse_drop_stmt(&mut self) -> ParseResult<DropStmt> {
+	pub fn parse_drop_stmt(&mut self) -> ParseResult<Statement> {
 		let drop_tok = self.expect(&TokenKind::Keyword(Keyword::Drop), "'DROP'")?;
+
+		if self.eat(&TokenKind::Keyword(Keyword::Property))? {
+			let s = self.parse_drop_property_graph_stmt_tail(drop_tok.span)?;
+			return Ok(Statement::DropPropertyGraph(Box::new(s)));
+		}
 
 		let object_type = match &self.peek().kind {
 			TokenKind::Keyword(Keyword::Table) => {
@@ -604,7 +616,7 @@ impl<'a> Parser<'a> {
 				return Err(ParseError::new(
 					self.peek().span,
 					ErrorKind::UnexpectedToken {
-						expected: "TABLE, INDEX, VIEW, SCHEMA, or TYPE",
+						expected: "TABLE, INDEX, VIEW, SCHEMA, TYPE, or PROPERTY GRAPH",
 						found: self.peek().kind.to_string(),
 					},
 				));
@@ -639,13 +651,13 @@ impl<'a> Parser<'a> {
 		let end_span = self.peek().span;
 		let span = drop_tok.span.merge(end_span);
 
-		Ok(DropStmt {
+		Ok(Statement::Drop(Box::new(DropStmt {
 			object_type,
 			if_exists,
 			names,
 			cascade,
 			span,
-		})
+		})))
 	}
 
 	/// Helper to parse a parenthesized column name list: `(col1, col2, ...)`.

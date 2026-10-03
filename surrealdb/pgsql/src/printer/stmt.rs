@@ -3,6 +3,12 @@
 use core::fmt;
 
 use crate::ast::expr::{NullsOrder, OrderByItem, OrderDirection};
+use crate::ast::graph::{
+	CreatePropertyGraphStmt, DropPropertyGraphStmt, EdgeTableDef, GraphColumnDef,
+	GraphEdgeDirection, GraphEdgePattern, GraphElementPattern, GraphPathPattern, GraphPattern,
+	GraphQuantifier, GraphVertexPattern, VertexTableDef,
+};
+use crate::ast::json::{JsonTable, JsonTableColumn};
 use crate::ast::stmt::{
 	AlterTableAction, AlterTableStmt, ColumnConstraint, ColumnDef, CommonTableExpr,
 	CreateIndexStmt, CreateSchemaStmt, CreateTableStmt, CreateViewStmt, DeallocateStmt, DeleteStmt,
@@ -137,6 +143,34 @@ impl ToPgSql for TableRef {
 				}
 				Ok(())
 			}
+			Self::GraphTable {
+				graph_name,
+				pattern,
+				columns,
+				alias,
+				..
+			} => {
+				f.write_str("GRAPH_TABLE(")?;
+				graph_name.to_pgsql(f)?;
+				f.write_str(", MATCH ")?;
+				pattern.to_pgsql(f)?;
+				if !columns.is_empty() {
+					f.write_str(" COLUMNS (")?;
+					for (i, col) in columns.iter().enumerate() {
+						if i > 0 {
+							f.write_str(", ")?;
+						}
+						col.to_pgsql(f)?;
+					}
+					f.write_str(")")?;
+				}
+				f.write_str(")")?;
+				if let Some(a) = alias {
+					a.to_pgsql(f)?;
+				}
+				Ok(())
+			}
+			Self::JsonTable(jt) => jt.to_pgsql(f),
 		}
 	}
 }
@@ -1067,7 +1101,295 @@ impl ToPgSql for Statement {
 			Self::Prepare(s) => s.to_pgsql(f),
 			Self::Execute(s) => s.to_pgsql(f),
 			Self::Deallocate(s) => s.to_pgsql(f),
+			Self::CreatePropertyGraph(s) => s.to_pgsql(f),
+			Self::DropPropertyGraph(s) => s.to_pgsql(f),
 			Self::Empty => Ok(()),
 		}
+	}
+}
+
+impl ToPgSql for CreatePropertyGraphStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("CREATE PROPERTY GRAPH ")?;
+		if self.if_not_exists {
+			f.write_str("IF NOT EXISTS ")?;
+		}
+		self.name.to_pgsql(f)?;
+		f.write_str(" VERTEX TABLES (")?;
+		for (i, vt) in self.vertex_tables.iter().enumerate() {
+			if i > 0 {
+				f.write_str(", ")?;
+			}
+			vt.to_pgsql(f)?;
+		}
+		f.write_str(")")?;
+		if !self.edge_tables.is_empty() {
+			f.write_str(" EDGE TABLES (")?;
+			for (i, et) in self.edge_tables.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				et.to_pgsql(f)?;
+			}
+			f.write_str(")")?;
+		}
+		Ok(())
+	}
+}
+
+impl ToPgSql for VertexTableDef {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		self.table_name.to_pgsql(f)?;
+		if !self.key_columns.is_empty() {
+			f.write_str(" KEY (")?;
+			for (i, col) in self.key_columns.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				print_ident(f, col)?;
+			}
+			f.write_str(")")?;
+		}
+		if let Some(ref l) = self.label {
+			f.write_str(" LABEL ")?;
+			print_ident(f, l)?;
+		}
+		if !self.properties.is_empty() {
+			f.write_str(" PROPERTIES (")?;
+			for (i, prop) in self.properties.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				print_ident(f, prop)?;
+			}
+			f.write_str(")")?;
+		}
+		Ok(())
+	}
+}
+
+impl ToPgSql for EdgeTableDef {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		self.table_name.to_pgsql(f)?;
+		if !self.key_columns.is_empty() {
+			f.write_str(" KEY (")?;
+			for (i, col) in self.key_columns.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				print_ident(f, col)?;
+			}
+			f.write_str(")")?;
+		}
+		f.write_str(" SOURCE KEY (")?;
+		for (i, col) in self.source_key.iter().enumerate() {
+			if i > 0 {
+				f.write_str(", ")?;
+			}
+			print_ident(f, col)?;
+		}
+		f.write_str(") REFERENCES ")?;
+		self.source_table.to_pgsql(f)?;
+		if !self.source_references.is_empty() {
+			f.write_str(" (")?;
+			for (i, col) in self.source_references.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				print_ident(f, col)?;
+			}
+			f.write_str(")")?;
+		}
+
+		f.write_str(" TARGET KEY (")?;
+		for (i, col) in self.target_key.iter().enumerate() {
+			if i > 0 {
+				f.write_str(", ")?;
+			}
+			print_ident(f, col)?;
+		}
+		f.write_str(") REFERENCES ")?;
+		self.target_table.to_pgsql(f)?;
+		if !self.target_references.is_empty() {
+			f.write_str(" (")?;
+			for (i, col) in self.target_references.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				print_ident(f, col)?;
+			}
+			f.write_str(")")?;
+		}
+
+		if let Some(ref l) = self.label {
+			f.write_str(" LABEL ")?;
+			print_ident(f, l)?;
+		}
+		if !self.properties.is_empty() {
+			f.write_str(" PROPERTIES (")?;
+			for (i, prop) in self.properties.iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				print_ident(f, prop)?;
+			}
+			f.write_str(")")?;
+		}
+		Ok(())
+	}
+}
+
+impl ToPgSql for DropPropertyGraphStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("DROP PROPERTY GRAPH ")?;
+		if self.if_exists {
+			f.write_str("IF EXISTS ")?;
+		}
+		self.name.to_pgsql(f)?;
+		if self.cascade {
+			f.write_str(" CASCADE")
+		} else {
+			f.write_str(" RESTRICT")
+		}
+	}
+}
+
+impl ToPgSql for GraphPattern {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		for (i, path) in self.paths.iter().enumerate() {
+			if i > 0 {
+				f.write_str(", ")?;
+			}
+			path.to_pgsql(f)?;
+		}
+		if let Some(ref w) = self.where_clause {
+			f.write_str(" WHERE ")?;
+			w.to_pgsql(f)?;
+		}
+		Ok(())
+	}
+}
+
+impl ToPgSql for GraphPathPattern {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		if let Some(ref var) = self.path_variable {
+			print_ident(f, var)?;
+			f.write_str(" = ")?;
+		}
+		for elem in &self.elements {
+			elem.to_pgsql(f)?;
+		}
+		Ok(())
+	}
+}
+
+impl ToPgSql for GraphElementPattern {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Vertex(v) => v.to_pgsql(f),
+			Self::Edge(e) => e.to_pgsql(f),
+		}
+	}
+}
+
+impl ToPgSql for GraphVertexPattern {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("(")?;
+		if let Some(ref var) = self.variable {
+			print_ident(f, var)?;
+		}
+		for l in &self.labels {
+			f.write_str(":")?;
+			print_ident(f, l)?;
+		}
+		if let Some(ref w) = self.where_clause {
+			f.write_str(" WHERE ")?;
+			w.to_pgsql(f)?;
+		}
+		f.write_str(")")
+	}
+}
+
+impl ToPgSql for GraphEdgePattern {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self.direction {
+			GraphEdgeDirection::Right => f.write_str("-[")?,
+			GraphEdgeDirection::Left => f.write_str("<-[")?,
+			GraphEdgeDirection::Any => f.write_str("-[")?,
+			GraphEdgeDirection::Bidirectional => f.write_str("<-[")?,
+		}
+		if let Some(ref var) = self.variable {
+			print_ident(f, var)?;
+		}
+		for l in &self.labels {
+			f.write_str(":")?;
+			print_ident(f, l)?;
+		}
+		if let Some(q) = self.quantifier {
+			match q {
+				GraphQuantifier::ZeroOrMore => f.write_str("*")?,
+				GraphQuantifier::OneOrMore => f.write_str("+")?,
+				GraphQuantifier::ZeroOrOne => f.write_str("?")?,
+				GraphQuantifier::Exact(n) => write!(f, "{{{n}}}")?,
+				GraphQuantifier::Range(min, Some(max)) => write!(f, "{{{min}, {max}}}")?,
+				GraphQuantifier::Range(min, None) => write!(f, "{{{min},}}")?,
+			}
+		}
+		if let Some(ref w) = self.where_clause {
+			f.write_str(" WHERE ")?;
+			w.to_pgsql(f)?;
+		}
+		match self.direction {
+			GraphEdgeDirection::Right => f.write_str("]->"),
+			GraphEdgeDirection::Left => f.write_str("]-"),
+			GraphEdgeDirection::Any => f.write_str("]-"),
+			GraphEdgeDirection::Bidirectional => f.write_str("]->"),
+		}
+	}
+}
+
+impl ToPgSql for GraphColumnDef {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		self.expr.to_pgsql(f)?;
+		if let Some(ref a) = self.alias {
+			f.write_str(" AS ")?;
+			print_ident(f, a)?;
+		}
+		Ok(())
+	}
+}
+
+impl ToPgSql for JsonTable {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("JSON_TABLE(")?;
+		self.context_item.to_pgsql(f)?;
+		f.write_str(", '")?;
+		f.write_str(&self.path)?;
+		f.write_str("' COLUMNS (")?;
+		for (i, col) in self.columns.iter().enumerate() {
+			if i > 0 {
+				f.write_str(", ")?;
+			}
+			col.to_pgsql(f)?;
+		}
+		f.write_str("))")?;
+		if let Some(ref a) = self.alias {
+			a.to_pgsql(f)?;
+		}
+		Ok(())
+	}
+}
+
+impl ToPgSql for JsonTableColumn {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		print_ident(f, &self.name)?;
+		f.write_str(" ")?;
+		self.data_type.to_pgsql(f)?;
+		if let Some(ref p) = self.path {
+			f.write_str(" PATH '")?;
+			f.write_str(p)?;
+			f.write_str("'")?;
+		}
+		Ok(())
 	}
 }

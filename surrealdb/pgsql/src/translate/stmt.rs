@@ -48,6 +48,8 @@ pub fn translate_statement(
 			Ok(())
 		}
 		Statement::AlterTable(s) => translate_alter_table(s, ctx, out),
+		Statement::CreatePropertyGraph(s) => translate_create_property_graph(s, out),
+		Statement::DropPropertyGraph(s) => translate_drop_property_graph(s, out),
 		Statement::Prepare(_) | Statement::Execute(_) | Statement::Deallocate(_) => {
 			// Prepared statements are managed directly by the wire protocol layer.
 			out.push_str("-- PREPARED STATEMENT PROTOCOL");
@@ -221,6 +223,57 @@ fn translate_table_ref(
 			out.push_str(inner.trim_end_matches(';'));
 			out.push(')');
 			write!(out, " AS {}", alias.name)?;
+			Ok(())
+		}
+		TableRef::GraphTable {
+			pattern,
+			columns,
+			alias,
+			..
+		} => {
+			out.push('(');
+			out.push_str("SELECT ");
+			if columns.is_empty() {
+				out.push('*');
+			} else {
+				for (i, col) in columns.iter().enumerate() {
+					if i > 0 {
+						out.push_str(", ");
+					}
+					translate_expr(&col.expr, ctx, out)?;
+					if let Some(ref a) = col.alias {
+						write!(out, " AS {a}")?;
+					}
+				}
+			}
+			out.push_str(" FROM ");
+			translate_graph_pattern(pattern, ctx, out)?;
+			out.push(')');
+			if let Some(a) = alias {
+				write!(out, " AS {}", a.name)?;
+			}
+			Ok(())
+		}
+		TableRef::JsonTable(jt) => {
+			out.push('(');
+			out.push_str("SELECT ");
+			for (i, col) in jt.columns.iter().enumerate() {
+				if i > 0 {
+					out.push_str(", ");
+				}
+				if let Some(ref p) = col.path {
+					let field = p.trim_start_matches("$.");
+					write!(out, "{field} AS {}", col.name)?;
+				} else {
+					write!(out, "{} AS {}", col.name, col.name)?;
+				}
+			}
+			out.push_str(" FROM ");
+			translate_expr(&jt.context_item, ctx, out)?;
+			out.push(')');
+			if let Some(a) = &jt.alias {
+				write!(out, " AS {}", a.name)?;
+			}
 			Ok(())
 		}
 	}
@@ -571,6 +624,95 @@ fn translate_alter_table(
 				writeln!(out, "-- ALTER TABLE {tbl_name} action")?;
 			}
 		}
+	}
+	Ok(())
+}
+
+fn translate_create_property_graph(
+	stmt: &crate::ast::graph::CreatePropertyGraphStmt,
+	out: &mut String,
+) -> Result<(), TranslationError> {
+	for vt in &stmt.vertex_tables {
+		let name = vt.table_name.parts.last().map(|s| s.as_str()).unwrap_or("vertex");
+		writeln!(out, "DEFINE TABLE {name} TYPE NORMAL;")?;
+	}
+	for et in &stmt.edge_tables {
+		let name = et.table_name.parts.last().map(|s| s.as_str()).unwrap_or("edge");
+		let src = et.source_table.parts.last().map(|s| s.as_str()).unwrap_or("any");
+		let tgt = et.target_table.parts.last().map(|s| s.as_str()).unwrap_or("any");
+		writeln!(out, "DEFINE TABLE {name} TYPE RELATION IN {src} OUT {tgt};")?;
+	}
+	Ok(())
+}
+
+fn translate_drop_property_graph(
+	stmt: &crate::ast::graph::DropPropertyGraphStmt,
+	out: &mut String,
+) -> Result<(), TranslationError> {
+	let name = stmt.name.parts.last().map(|s| s.as_str()).unwrap_or("graph");
+	writeln!(out, "-- DROP PROPERTY GRAPH {name};")?;
+	Ok(())
+}
+
+fn translate_graph_pattern(
+	pattern: &crate::ast::graph::GraphPattern,
+	ctx: &TranslationContext,
+	out: &mut String,
+) -> Result<(), TranslationError> {
+	for (i, path) in pattern.paths.iter().enumerate() {
+		if i > 0 {
+			out.push_str(", ");
+		}
+		for elem in &path.elements {
+			match elem {
+				crate::ast::graph::GraphElementPattern::Vertex(v) => {
+					if let Some(ref var) = v.variable {
+						out.push_str(var);
+					} else if let Some(first_label) = v.labels.first() {
+						out.push_str(first_label);
+					} else {
+						out.push('*');
+					}
+				}
+				crate::ast::graph::GraphElementPattern::Edge(e) => {
+					let label = e.labels.first().map(|s| s.as_str()).unwrap_or("");
+					match e.direction {
+						crate::ast::graph::GraphEdgeDirection::Right => {
+							if label.is_empty() {
+								out.push_str("->");
+							} else {
+								write!(out, "->{label}->")?;
+							}
+						}
+						crate::ast::graph::GraphEdgeDirection::Left => {
+							if label.is_empty() {
+								out.push_str("<-");
+							} else {
+								write!(out, "<-{label}<-")?;
+							}
+						}
+						crate::ast::graph::GraphEdgeDirection::Any => {
+							if label.is_empty() {
+								out.push_str("<->");
+							} else {
+								write!(out, "<->{label}<->")?;
+							}
+						}
+						crate::ast::graph::GraphEdgeDirection::Bidirectional => {
+							if label.is_empty() {
+								out.push_str("<->");
+							} else {
+								write!(out, "<->{label}<->")?;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if let Some(ref w) = pattern.where_clause {
+		out.push_str(" WHERE ");
+		translate_expr(w, ctx, out)?;
 	}
 	Ok(())
 }

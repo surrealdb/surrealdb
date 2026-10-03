@@ -303,9 +303,10 @@ impl<'a> Parser<'a> {
 		Ok(refs)
 	}
 
-	/// Parse a single table reference or join chain.
-	pub fn parse_table_ref(&mut self) -> ParseResult<TableRef> {
-		let mut left = if self.eat(&TokenKind::LParen)? {
+	/// Parse a single table reference factor (table, subquery, GRAPH_TABLE, JSON_TABLE,
+	/// parenthesized join).
+	pub fn parse_table_factor(&mut self) -> ParseResult<TableRef> {
+		if self.eat(&TokenKind::LParen)? {
 			if self.peek().kind == TokenKind::Keyword(Keyword::Select) {
 				// Subquery: `(SELECT ...) AS alias`
 				let query = self.parse_select_stmt()?;
@@ -317,17 +318,23 @@ impl<'a> Parser<'a> {
 					)
 				})?;
 				let span = query.span.merge(alias.span);
-				TableRef::Subquery {
+				Ok(TableRef::Subquery {
 					query: Box::new(query),
 					alias,
 					span,
-				}
+				})
 			} else {
 				// Parenthesized join: `(t1 JOIN t2 ON ...)`
 				let inner = self.parse_table_ref()?;
 				self.expect(&TokenKind::RParen, "')'")?;
-				inner
+				Ok(inner)
 			}
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::GraphTable) {
+			let tok = self.bump()?;
+			self.parse_graph_table_tail(tok.span)
+		} else if self.peek().kind == TokenKind::Keyword(Keyword::JsonTable) {
+			let tok = self.bump()?;
+			self.parse_json_table_tail(tok.span)
 		} else {
 			// Plain table name
 			let name = self.parse_qualified_name()?;
@@ -337,34 +344,65 @@ impl<'a> Parser<'a> {
 			} else {
 				name.span
 			};
-			TableRef::Table {
+			Ok(TableRef::Table {
 				name,
 				alias,
 				span,
+			})
+		}
+	}
+
+	/// Parse `JSON_TABLE(...)` table factor tail.
+	pub fn parse_json_table_tail(&mut self, start_span: Span) -> ParseResult<TableRef> {
+		self.expect(&TokenKind::LParen, "'('")?;
+		let context_item = Box::new(self.parse_expr()?);
+		self.expect(&TokenKind::Comma, "','")?;
+		let (path, _) = self.parse_string_constant()?;
+		self.expect(&TokenKind::Keyword(Keyword::Columns), "'COLUMNS'")?;
+		self.expect(&TokenKind::LParen, "'('")?;
+		let mut columns = Vec::new();
+		loop {
+			let col_start = self.peek().span;
+			let (name, _) = self.parse_ident()?;
+			let data_type = self.parse_type_name()?;
+			let path = if self.eat(&TokenKind::Keyword(Keyword::Path))? {
+				Some(self.parse_string_constant()?.0)
+			} else {
+				None
+			};
+			let col_end = self.peek().span;
+			columns.push(crate::ast::json::JsonTableColumn {
+				name,
+				data_type,
+				path,
+				span: col_start.merge(col_end),
+			});
+			if !self.eat(&TokenKind::Comma)? {
+				break;
 			}
-		};
+		}
+		self.expect(&TokenKind::RParen, "')'")?;
+		let rparen = self.expect(&TokenKind::RParen, "')'")?;
+		let alias = self.parse_table_alias()?;
+		let end_span = alias.as_ref().map(|a| a.span).unwrap_or(rparen.span);
+
+		Ok(TableRef::JsonTable(crate::ast::json::JsonTable {
+			context_item,
+			path,
+			columns,
+			alias,
+			span: start_span.merge(end_span),
+		}))
+	}
+
+	/// Parse a single table reference or join chain.
+	pub fn parse_table_ref(&mut self) -> ParseResult<TableRef> {
+		let mut left = self.parse_table_factor()?;
 
 		// Parse joined relations
 		while let Some(join_type) = self.peek_join_type()? {
 			self.consume_join_type(join_type)?;
-			let right = if self.eat(&TokenKind::LParen)? {
-				let inner = self.parse_table_ref()?;
-				self.expect(&TokenKind::RParen, "')'")?;
-				inner
-			} else {
-				let name = self.parse_qualified_name()?;
-				let alias = self.parse_table_alias()?;
-				let span = if let Some(ref a) = alias {
-					name.span.merge(a.span)
-				} else {
-					name.span
-				};
-				TableRef::Table {
-					name,
-					alias,
-					span,
-				}
-			};
+			let right = self.parse_table_factor()?;
 
 			let condition = if join_type == JoinType::Cross {
 				None
@@ -400,7 +438,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Parse optional table alias `[AS] name [(col1, col2)]`.
-	fn parse_table_alias(&mut self) -> ParseResult<Option<TableAlias>> {
+	pub(crate) fn parse_table_alias(&mut self) -> ParseResult<Option<TableAlias>> {
 		let has_as = self.eat(&TokenKind::Keyword(Keyword::As))?;
 		if has_as || self.is_table_or_col_alias_start() {
 			let (name, start_span) = self.parse_ident()?;
@@ -519,7 +557,12 @@ impl TableRef {
 			| Self::Join {
 				span,
 				..
+			}
+			| Self::GraphTable {
+				span,
+				..
 			} => *span,
+			Self::JsonTable(t) => t.span,
 		}
 	}
 }

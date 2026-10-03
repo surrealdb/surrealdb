@@ -192,6 +192,9 @@ pub fn expr_precedence(expr: &Expr) -> u8 {
 		}
 		| Expr::IsDistinctFrom {
 			..
+		}
+		| Expr::IsBound {
+			..
 		} => 30,
 		Expr::Between {
 			..
@@ -231,6 +234,21 @@ pub fn expr_precedence(expr: &Expr) -> u8 {
 			..
 		}
 		| Expr::Grouping {
+			..
+		}
+		| Expr::JsonObject {
+			..
+		}
+		| Expr::JsonArray {
+			..
+		}
+		| Expr::JsonExists {
+			..
+		}
+		| Expr::JsonValue {
+			..
+		}
+		| Expr::JsonQuery {
 			..
 		} => 255,
 	}
@@ -555,6 +573,91 @@ impl ToPgSql for Expr {
 				f.write_str("(")?;
 				expr.to_pgsql(f)?;
 				f.write_str(")")
+			}
+
+			Self::IsBound {
+				expr,
+				negated,
+				..
+			} => {
+				expr.to_pgsql(f)?;
+				if *negated {
+					f.write_str(" IS NOT BOUND")
+				} else {
+					f.write_str(" IS BOUND")
+				}
+			}
+
+			Self::JsonObject {
+				fields,
+				..
+			} => {
+				f.write_str("JSON_OBJECT(")?;
+				for (i, (k, v)) in fields.iter().enumerate() {
+					if i > 0 {
+						f.write_str(", ")?;
+					}
+					k.to_pgsql(f)?;
+					f.write_str(": ")?;
+					v.to_pgsql(f)?;
+				}
+				f.write_str(")")
+			}
+
+			Self::JsonArray {
+				elements,
+				..
+			} => {
+				f.write_str("JSON_ARRAY(")?;
+				for (i, el) in elements.iter().enumerate() {
+					if i > 0 {
+						f.write_str(", ")?;
+					}
+					el.to_pgsql(f)?;
+				}
+				f.write_str(")")
+			}
+
+			Self::JsonExists {
+				context,
+				path,
+				..
+			} => {
+				f.write_str("JSON_EXISTS(")?;
+				context.to_pgsql(f)?;
+				f.write_str(", '")?;
+				f.write_str(path)?;
+				f.write_str("')")
+			}
+
+			Self::JsonValue {
+				context,
+				path,
+				returning,
+				..
+			} => {
+				f.write_str("JSON_VALUE(")?;
+				context.to_pgsql(f)?;
+				f.write_str(", '")?;
+				f.write_str(path)?;
+				f.write_str("'")?;
+				if let Some(ret) = returning {
+					f.write_str(" RETURNING ")?;
+					ret.to_pgsql(f)?;
+				}
+				f.write_str(")")
+			}
+
+			Self::JsonQuery {
+				context,
+				path,
+				..
+			} => {
+				f.write_str("JSON_QUERY(")?;
+				context.to_pgsql(f)?;
+				f.write_str(", '")?;
+				f.write_str(path)?;
+				f.write_str("')")
 			}
 		}
 	}
