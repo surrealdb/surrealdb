@@ -4,6 +4,7 @@
 
 use crate::ast::stmt::{
 	DeallocateStmt, ExecuteStmt, ExplainStmt, PrepareStmt, ResetStmt, SetStmt, ShowStmt,
+	TruncateStmt,
 };
 use crate::error::ParseResult;
 use crate::lexer::keyword::Keyword;
@@ -232,6 +233,28 @@ impl<'a> Parser<'a> {
 		let span = dealloc_tok.span.merge(end_span);
 		Ok(DeallocateStmt {
 			name,
+			span,
+		})
+	}
+
+	/// Parse a PostgreSQL `TRUNCATE` statement.
+	///
+	/// gram.y: TruncateStmt
+	pub fn parse_truncate_stmt(&mut self) -> ParseResult<TruncateStmt> {
+		let start = self.expect(&TokenKind::Keyword(Keyword::Truncate), "'TRUNCATE'")?.span;
+		self.eat(&TokenKind::Keyword(Keyword::Table))?;
+		self.eat(&TokenKind::Keyword(Keyword::Only))?;
+		let table = self.parse_qualified_name()?;
+		if self.eat(&TokenKind::Keyword(Keyword::Restart))?
+			|| self.eat(&TokenKind::Keyword(Keyword::Continue))?
+		{
+			let _ = self.eat(&TokenKind::Keyword(Keyword::Identity));
+		}
+		let _ = self.eat(&TokenKind::Keyword(Keyword::Cascade))?;
+		let _ = self.eat(&TokenKind::Keyword(Keyword::Restrict))?;
+		let span = start.merge(table.span);
+		Ok(TruncateStmt {
+			table,
 			span,
 		})
 	}

@@ -273,9 +273,9 @@ impl BoundExpr {
 				branches,
 				else_expr,
 			} => {
-				operand.as_ref().map_or(false, |o| o.has_params())
+				operand.as_ref().is_some_and(|o| o.has_params())
 					|| branches.iter().any(|(w, t)| w.has_params() || t.has_params())
-					|| else_expr.as_ref().map_or(false, |e| e.has_params())
+					|| else_expr.as_ref().is_some_and(|e| e.has_params())
 			}
 			BoundExpr::Between {
 				expr,
@@ -305,7 +305,7 @@ impl BoundSelect {
 	/// Check if this SELECT statement contains any parameter placeholders.
 	pub fn has_params(&self) -> bool {
 		self.targets.iter().any(|t| t.expr.has_params())
-			|| self.where_clause.as_ref().map_or(false, |w| w.has_params())
-			|| self.having.as_ref().map_or(false, |h| h.has_params())
+			|| self.where_clause.as_ref().is_some_and(|w| w.has_params())
+			|| self.having.as_ref().is_some_and(|h| h.has_params())
 	}
 }

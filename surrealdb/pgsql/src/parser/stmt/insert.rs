@@ -65,6 +65,9 @@ impl<'a> Parser<'a> {
 		} else if self.peek().kind == TokenKind::Keyword(Keyword::Select) {
 			let select_stmt = self.parse_select_stmt()?;
 			(None, Some(Box::new(select_stmt)))
+		} else if self.eat(&TokenKind::Keyword(Keyword::Default))? {
+			self.expect(&TokenKind::Keyword(Keyword::Values), "'VALUES' after 'DEFAULT'")?;
+			(Some(Vec::new()), None)
 		} else {
 			(None, None)
 		};

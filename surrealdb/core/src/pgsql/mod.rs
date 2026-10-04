@@ -52,6 +52,34 @@ pub(crate) fn parse_to_statements(
 					.map_err(|e| anyhow::anyhow!("PostgreSQL SELECT lowering error: {e}"))?;
 				statements.push(TopLevelStatement::Plan(Box::new(plan)));
 			}
+			surrealdb_pgsql::ast::stmt::Statement::Insert(insert) => {
+				let expr = surrealdb_sqlplan::lower_pgsql_insert(insert)
+					.map_err(|e| anyhow::anyhow!("PostgreSQL INSERT lowering error: {e}"))?;
+				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
+					crate::sql::Expr::from(expr),
+				)));
+			}
+			surrealdb_pgsql::ast::stmt::Statement::Update(update) => {
+				let expr = surrealdb_sqlplan::lower_pgsql_update(update)
+					.map_err(|e| anyhow::anyhow!("PostgreSQL UPDATE lowering error: {e}"))?;
+				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
+					crate::sql::Expr::from(expr),
+				)));
+			}
+			surrealdb_pgsql::ast::stmt::Statement::Delete(delete) => {
+				let expr = surrealdb_sqlplan::lower_pgsql_delete(delete)
+					.map_err(|e| anyhow::anyhow!("PostgreSQL DELETE lowering error: {e}"))?;
+				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
+					crate::sql::Expr::from(expr),
+				)));
+			}
+			surrealdb_pgsql::ast::stmt::Statement::Truncate(truncate) => {
+				let expr = surrealdb_sqlplan::lower_pgsql_truncate(truncate)
+					.map_err(|e| anyhow::anyhow!("PostgreSQL TRUNCATE lowering error: {e}"))?;
+				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
+					crate::sql::Expr::from(expr),
+				)));
+			}
 			_ => {
 				let mut surql_text = String::new();
 				surrealdb_pgsql::translate::translate_statement(

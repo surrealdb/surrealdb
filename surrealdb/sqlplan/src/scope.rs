@@ -68,21 +68,21 @@ impl QueryScope {
 	pub fn register_relation(
 		&mut self,
 		schema: Option<String>,
-		table_name: String,
+		table_name: &str,
 		alias: Option<String>,
 		catalog: &dyn BinderCatalog,
 		policy: &DialectPolicy,
 	) -> usize {
 		let relation_index = self.relations.len();
-		let exposed_name = alias.unwrap_or_else(|| table_name.clone());
+		let exposed_name = alias.unwrap_or_else(|| table_name.to_string());
 
 		// Query catalog for known columns if available
 		let known_columns =
-			catalog.get_table(schema.as_deref(), &table_name).map(|t| t.column_names());
+			catalog.get_table(schema.as_deref(), table_name).map(|t| t.column_names());
 
 		let entry = RelationEntry {
 			relation_index,
-			table_name: table_name.clone(),
+			table_name: table_name.to_string(),
 			schema: schema.clone(),
 			exposed_name: exposed_name.clone(),
 			known_columns,
@@ -95,7 +95,7 @@ impl QueryScope {
 		self.name_to_relation.insert(key_exposed, relation_index);
 
 		// Also register under table_name if exposed_name was an alias
-		let key_table = policy.fold_identifier(&table_name).into_owned();
+		let key_table = policy.fold_identifier(table_name).into_owned();
 		self.name_to_relation.entry(key_table).or_insert(relation_index);
 
 		// If schema was provided, also register under "schema.table"
@@ -109,18 +109,18 @@ impl QueryScope {
 	}
 
 	/// Register a subquery relation with a required alias.
-	pub fn register_subquery(&mut self, alias: String, policy: &DialectPolicy) -> usize {
+	pub fn register_subquery(&mut self, alias: &str, policy: &DialectPolicy) -> usize {
 		let relation_index = self.relations.len();
 		let entry = RelationEntry {
 			relation_index,
-			table_name: alias.clone(),
+			table_name: alias.to_string(),
 			schema: None,
-			exposed_name: alias.clone(),
+			exposed_name: alias.to_string(),
 			known_columns: None,
 		};
 
 		self.relations.push(entry);
-		let key = policy.fold_identifier(&alias).into_owned();
+		let key = policy.fold_identifier(alias).into_owned();
 		self.name_to_relation.insert(key, relation_index);
 		relation_index
 	}
@@ -187,10 +187,12 @@ impl QueryScope {
 		// Multiple relations in scope: check known columns across relations
 		let mut matching_relations = Vec::new();
 		for rel in &self.relations {
-			if let Some(cols) = &rel.known_columns {
-				if cols.iter().any(|c| policy.idents_match(c, col_name)) {
-					matching_relations.push(rel);
-				}
+			if rel
+				.known_columns
+				.as_ref()
+				.is_some_and(|cols| cols.iter().any(|c| policy.idents_match(c, col_name)))
+			{
+				matching_relations.push(rel);
 			}
 		}
 
@@ -234,10 +236,10 @@ impl QueryScope {
 		}
 
 		// Check parent scope for correlated subqueries
-		if let Some(parent) = &self.parent {
-			if let Ok(col) = parent.resolve_qualified_column(prefix, col_name, policy) {
-				return Ok(col);
-			}
+		if let Some(Ok(col)) =
+			self.parent.as_ref().map(|p| p.resolve_qualified_column(prefix, col_name, policy))
+		{
+			return Ok(col);
 		}
 
 		Err(PlanError::MissingFromClauseEntry(prefix.to_string()))
@@ -281,14 +283,14 @@ impl QueryScope {
 	/// Look up a target expression by its alias.
 	pub fn find_target_by_alias(&self, alias: &str, policy: &DialectPolicy) -> Option<BoundExpr> {
 		for target in &self.targets {
-			if let Some(a) = &target.alias {
-				if policy.idents_match(a, alias) {
-					return Some(BoundExpr::Column(BoundColumnRef {
-						relation_index: 0,
-						relation_name: String::new(),
-						column: a.clone(),
-					}));
-				}
+			if let Some(a) = &target.alias
+				&& policy.idents_match(a, alias)
+			{
+				return Some(BoundExpr::Column(BoundColumnRef {
+					relation_index: 0,
+					relation_name: String::new(),
+					column: a.clone(),
+				}));
 			}
 		}
 		None

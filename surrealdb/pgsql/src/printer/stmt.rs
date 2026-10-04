@@ -16,7 +16,7 @@ use crate::ast::stmt::{
 	JoinCondition, JoinType, LockingClause, LockingStrength, LockingWaitPolicy, OnConflictAction,
 	OnConflictClause, PrepareStmt, ResTarget, ResetStmt, SelectStmt, SetClause, SetOpKind,
 	SetOperation, SetStmt, ShowStmt, Statement, TableAlias, TableConstraint, TableRef,
-	TransactionStmt, UpdateStmt, WindowDef, WithClause,
+	TransactionStmt, TruncateStmt, UpdateStmt, WindowDef, WithClause,
 };
 use crate::printer::ToPgSql;
 use crate::printer::expr::print_ident;
@@ -569,6 +569,13 @@ impl ToPgSql for DeleteStmt {
 	}
 }
 
+impl ToPgSql for TruncateStmt {
+	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("TRUNCATE TABLE ")?;
+		self.table.to_pgsql(f)
+	}
+}
+
 impl ToPgSql for ColumnConstraint {
 	fn to_pgsql(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
@@ -1087,6 +1094,7 @@ impl ToPgSql for Statement {
 			Self::Insert(s) => s.to_pgsql(f),
 			Self::Update(s) => s.to_pgsql(f),
 			Self::Delete(s) => s.to_pgsql(f),
+			Self::Truncate(s) => s.to_pgsql(f),
 			Self::CreateTable(s) => s.to_pgsql(f),
 			Self::CreateIndex(s) => s.to_pgsql(f),
 			Self::CreateView(s) => s.to_pgsql(f),

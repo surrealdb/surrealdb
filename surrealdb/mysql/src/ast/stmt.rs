@@ -249,6 +249,7 @@ pub struct InsertStmt {
 	pub table: QualifiedName,
 	pub columns: Vec<String>,
 	pub values: Vec<Vec<Expr>>,
+	pub query: Option<Box<SelectStmt>>,
 	pub on_duplicate_key_update: Vec<(String, Expr)>,
 	pub span: Span,
 }
@@ -259,6 +260,14 @@ pub struct ReplaceStmt {
 	pub table: QualifiedName,
 	pub columns: Vec<String>,
 	pub values: Vec<Vec<Expr>>,
+	pub query: Option<Box<SelectStmt>>,
+	pub span: Span,
+}
+
+/// A MySQL `TRUNCATE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TruncateStmt {
+	pub table: QualifiedName,
 	pub span: Span,
 }
 
@@ -442,6 +451,7 @@ pub enum Statement {
 	Update(Box<UpdateStmt>),
 	Delete(Box<DeleteStmt>),
 	Replace(Box<ReplaceStmt>),
+	Truncate(Box<TruncateStmt>),
 	CreateTable(Box<CreateTableStmt>),
 	DropTable(Box<DropTableStmt>),
 	Use(UseStmt),
@@ -461,6 +471,7 @@ impl Statement {
 			Self::Update(s) => s.span,
 			Self::Delete(s) => s.span,
 			Self::Replace(s) => s.span,
+			Self::Truncate(s) => s.span,
 			Self::CreateTable(s) => s.span,
 			Self::DropTable(s) => s.span,
 			Self::Use(s) => s.span,
@@ -528,6 +539,9 @@ impl Statement {
 						v.normalize_spans();
 					}
 				}
+				if let Some(q) = &mut s.query {
+					q.normalize_spans();
+				}
 				for (_, v) in &mut s.on_duplicate_key_update {
 					v.normalize_spans();
 				}
@@ -569,6 +583,13 @@ impl Statement {
 						v.normalize_spans();
 					}
 				}
+				if let Some(q) = &mut s.query {
+					q.normalize_spans();
+				}
+			}
+			Self::Truncate(s) => {
+				s.span = zero;
+				s.table.span = zero;
 			}
 			Self::CreateTable(s) => {
 				s.span = zero;

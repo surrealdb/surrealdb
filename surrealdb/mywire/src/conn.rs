@@ -9,7 +9,11 @@ use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::basic;
 use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
+use surrealdb_mysql::ast::stmt::Statement as MyStatement;
 use surrealdb_rpc::capabilities::RouteTarget;
+use surrealdb_sqlplan::binder::mysql::bind_select;
+use surrealdb_sqlplan::catalog::MemoryCatalog;
+use surrealdb_sqlplan::dialect::DialectPolicy;
 use tokio::io::{ReadHalf, WriteHalf, split};
 use tokio::net::TcpStream;
 use tokio::sync::OwnedSemaphorePermit;
@@ -455,10 +459,10 @@ impl Connection {
 		// Fail-closed execution: NEVER fall back to SurrealQL on error!
 		let descriptor = if self.dialect == Dialect::MySql {
 			if let Ok(stmts) = surrealdb_mysql::parse_statements(trimmed) {
-				if let Some(surrealdb_mysql::ast::stmt::Statement::Select(select)) = stmts.first() {
-					let catalog = surrealdb_sqlplan::catalog::MemoryCatalog::new();
-					let policy = surrealdb_sqlplan::dialect::DialectPolicy::mysql();
-					surrealdb_sqlplan::binder::mysql::bind_select(select, &catalog, &policy, None)
+				if let Some(MyStatement::Select(select)) = stmts.first() {
+					let catalog = MemoryCatalog::new();
+					let policy = DialectPolicy::mysql();
+					bind_select(select, &catalog, &policy, None)
 						.ok()
 						.map(|bound| bound.describe(&catalog, &policy))
 				} else {

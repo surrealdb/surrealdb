@@ -413,12 +413,22 @@ impl<'a> Parser<'a> {
 			TokenKind::Keyword(Keyword::Cast) => self.parse_cast_expr(),
 			TokenKind::Keyword(Keyword::Convert) => self.parse_convert_expr(),
 
+			// DEFAULT keyword
+			TokenKind::Keyword(Keyword::Default) => {
+				self.bump();
+				Ok(Expr::ColumnRef(ColumnRef {
+					fields: vec!["DEFAULT".to_string()],
+					span: tok.span,
+				}))
+			}
+
 			// Identifiers, Functions, or Column References
 			TokenKind::Ident(_)
 			| TokenKind::Keyword(Keyword::If)
 			| TokenKind::Keyword(Keyword::Ifnull)
 			| TokenKind::Keyword(Keyword::Nullif)
-			| TokenKind::Keyword(Keyword::Coalesce) => {
+			| TokenKind::Keyword(Keyword::Coalesce)
+			| TokenKind::Keyword(Keyword::Values) => {
 				let (name, name_span) = self.parse_ident()?;
 
 				// Check for function call: name(...)

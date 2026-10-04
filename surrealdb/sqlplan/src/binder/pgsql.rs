@@ -72,7 +72,7 @@ pub fn bind_select(
 	}
 
 	// Register targets in scope for positional GROUP BY / ORDER BY resolution
-	scope.targets = targets.clone();
+	scope.targets.clone_from(&targets);
 
 	// 3. Bind WHERE clause
 	let where_clause =
@@ -94,11 +94,11 @@ pub fn bind_select(
 			}
 			Expr::ColumnRef(col) if col.fields.len() == 1 => {
 				let col_name = &col.fields[0];
-				if policy.group_by_alias {
-					if let Some(target_expr) = scope.find_target_by_alias(col_name, policy) {
-						group_by.push(target_expr);
-						continue;
-					}
+				if policy.group_by_alias
+					&& let Some(target_expr) = scope.find_target_by_alias(col_name, policy)
+				{
+					group_by.push(target_expr);
+					continue;
 				}
 				group_by.push(bind_expr(g, &scope, policy)?);
 			}
@@ -210,7 +210,7 @@ fn bind_table_ref(
 
 			let relation_index = scope.register_relation(
 				schema.clone(),
-				table_name.clone(),
+				&table_name,
 				alias_name.clone(),
 				catalog,
 				policy,
@@ -220,7 +220,7 @@ fn bind_table_ref(
 
 			Ok(BoundTableSource::Table {
 				schema,
-				name: table_name,
+				name: table_name.clone(),
 				relation_index,
 				alias: exposed_name,
 			})
@@ -232,7 +232,7 @@ fn bind_table_ref(
 		} => {
 			let sub_alias = alias.name.clone();
 			let bound_sub = bind_select(query, catalog, policy, scope.parent.clone())?;
-			let relation_index = scope.register_subquery(sub_alias.clone(), policy);
+			let relation_index = scope.register_subquery(&sub_alias, policy);
 
 			Ok(BoundTableSource::Subquery {
 				query: Box::new(bound_sub),

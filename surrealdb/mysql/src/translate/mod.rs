@@ -8,9 +8,7 @@ pub mod stmt;
 pub use context::{ParamStyle, TranslationContext};
 pub use error::TranslationError;
 pub use expr::translate_expr;
-pub use stmt::{
-	translate_delete, translate_insert, translate_select, translate_statement, translate_update,
-};
+pub use stmt::{translate_select, translate_statement};
 
 use crate::ast::stmt::Statement;
 use crate::parser::parse_statements;

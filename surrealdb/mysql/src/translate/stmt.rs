@@ -3,9 +3,9 @@
 use std::fmt::Write;
 
 use crate::ast::stmt::{
-	CreateTableStmt, DeleteStmt, DescribeStmt, DropTableStmt, ExplainStmt, InsertStmt, JoinType,
-	LimitClause, OrderByExpr, QualifiedName, ReplaceStmt, SelectItem, SelectStmt, SetStmt,
-	ShowStmt, Statement, TableRef, TransactionStmt, UpdateStmt, UseStmt, VariableTarget,
+	CreateTableStmt, DescribeStmt, DropTableStmt, ExplainStmt, JoinType, LimitClause, OrderByExpr,
+	QualifiedName, SelectItem, SelectStmt, SetStmt, ShowStmt, Statement, TableRef, TransactionStmt,
+	UseStmt, VariableTarget,
 };
 use crate::translate::context::TranslationContext;
 use crate::translate::error::TranslationError;
@@ -19,10 +19,13 @@ pub fn translate_statement(
 ) -> Result<(), TranslationError> {
 	match stmt {
 		Statement::Select(s) => translate_select(s, ctx, out),
-		Statement::Insert(s) => translate_insert(s, ctx, out),
-		Statement::Replace(s) => translate_replace(s, ctx, out),
-		Statement::Update(s) => translate_update(s, ctx, out),
-		Statement::Delete(s) => translate_delete(s, ctx, out),
+		Statement::Insert(_)
+		| Statement::Replace(_)
+		| Statement::Update(_)
+		| Statement::Delete(_)
+		| Statement::Truncate(_) => Err(TranslationError::Unsupported(
+			"DML statements must be lowered via surrealdb_sqlplan typed write lowering".into(),
+		)),
 		Statement::CreateTable(s) => translate_create_table(s, ctx, out),
 		Statement::DropTable(s) => translate_drop_table(s, out),
 		Statement::Use(s) => translate_use(s, out),
@@ -245,132 +248,6 @@ fn translate_qualified_name(
 		}
 		out.push_str(part);
 	}
-	Ok(())
-}
-
-pub fn translate_insert(
-	ins: &InsertStmt,
-	ctx: &TranslationContext,
-	out: &mut String,
-) -> Result<(), TranslationError> {
-	out.push_str("INSERT INTO ");
-	translate_qualified_name(&ins.table, out)?;
-	if !ins.columns.is_empty() {
-		out.push_str(" (");
-		for (i, col) in ins.columns.iter().enumerate() {
-			if i > 0 {
-				out.push_str(", ");
-			}
-			out.push_str(col);
-		}
-		out.push(')');
-	}
-	out.push_str(" VALUES ");
-	for (i, row) in ins.values.iter().enumerate() {
-		if i > 0 {
-			out.push_str(", ");
-		}
-		out.push('(');
-		for (j, val) in row.iter().enumerate() {
-			if j > 0 {
-				out.push_str(", ");
-			}
-			translate_expr(val, ctx, out)?;
-		}
-		out.push(')');
-	}
-	if !ins.on_duplicate_key_update.is_empty() {
-		out.push_str(" ON DUPLICATE KEY UPDATE ");
-		for (i, (col, val)) in ins.on_duplicate_key_update.iter().enumerate() {
-			if i > 0 {
-				out.push_str(", ");
-			}
-			write!(out, "{col} = ")?;
-			translate_expr(val, ctx, out)?;
-		}
-	}
-	out.push(';');
-	Ok(())
-}
-
-pub fn translate_replace(
-	rep: &ReplaceStmt,
-	ctx: &TranslationContext,
-	out: &mut String,
-) -> Result<(), TranslationError> {
-	out.push_str("UPSERT INTO ");
-	translate_qualified_name(&rep.table, out)?;
-	if !rep.columns.is_empty() {
-		out.push_str(" (");
-		for (i, col) in rep.columns.iter().enumerate() {
-			if i > 0 {
-				out.push_str(", ");
-			}
-			out.push_str(col);
-		}
-		out.push(')');
-	}
-	out.push_str(" VALUES ");
-	for (i, row) in rep.values.iter().enumerate() {
-		if i > 0 {
-			out.push_str(", ");
-		}
-		out.push('(');
-		for (j, val) in row.iter().enumerate() {
-			if j > 0 {
-				out.push_str(", ");
-			}
-			translate_expr(val, ctx, out)?;
-		}
-		out.push(')');
-	}
-	out.push(';');
-	Ok(())
-}
-
-pub fn translate_update(
-	upd: &UpdateStmt,
-	ctx: &TranslationContext,
-	out: &mut String,
-) -> Result<(), TranslationError> {
-	out.push_str("UPDATE ");
-	translate_table_ref(&upd.table, ctx, out)?;
-	out.push_str(" SET ");
-	for (i, (col, val)) in upd.assignments.iter().enumerate() {
-		if i > 0 {
-			out.push_str(", ");
-		}
-		write!(out, "{col} = ")?;
-		translate_expr(val, ctx, out)?;
-	}
-	if let Some(w) = &upd.where_clause {
-		out.push_str(" WHERE ");
-		translate_expr(w, ctx, out)?;
-	}
-	if let Some(lim) = &upd.limit {
-		out.push_str(" LIMIT ");
-		translate_expr(lim, ctx, out)?;
-	}
-	out.push(';');
-	Ok(())
-}
-
-pub fn translate_delete(
-	del: &DeleteStmt,
-	ctx: &TranslationContext,
-	out: &mut String,
-) -> Result<(), TranslationError> {
-	out.push_str("DELETE FROM ");
-	translate_qualified_name(&del.table, out)?;
-	if let Some(w) = &del.where_clause {
-		out.push_str(" WHERE ");
-		translate_expr(w, ctx, out)?;
-	}
-	if let Some(lim) = &del.limit {
-		out.push_str(" LIMIT ");
-		translate_expr(lim, ctx, out)?;
-	}
-	out.push(';');
 	Ok(())
 }
 

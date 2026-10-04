@@ -50,6 +50,19 @@ impl ToPgQueryJson for Statement {
 			Self::Insert(s) => s.to_pg_query_json(),
 			Self::Update(s) => s.to_pg_query_json(),
 			Self::Delete(s) => s.to_pg_query_json(),
+			Self::Truncate(s) => {
+				let tbl_json = TableRef::Table {
+					name: s.table.clone(),
+					alias: None,
+					span: s.table.span,
+				}
+				.to_pg_query_json();
+				json!({
+					"TruncateStmt": {
+						"relations": [tbl_json],
+					}
+				})
+			}
 			Self::CreateTable(s) => s.to_pg_query_json(),
 			Self::Drop(s) => s.to_pg_query_json(),
 			Self::Transaction(s) => s.to_pg_query_json(),

@@ -39,36 +39,44 @@ impl<'a> Parser<'a> {
 			Vec::new()
 		};
 
-		// VALUES / VALUE (row1), (row2)...
-		if self.peek_keyword() == Some(Keyword::Values)
+		// VALUES / VALUE / SELECT / DEFAULT VALUES
+		let (values, query) = if self.peek_keyword() == Some(Keyword::Values)
 			|| self.peek_keyword() == Some(Keyword::Value)
 		{
 			self.bump();
-		} else {
-			self.expect_keyword(Keyword::Values, "VALUES in INSERT")?;
-		}
-
-		let mut values = Vec::new();
-		loop {
-			self.expect(&TokenKind::LParen, "'(' starting row values")?;
-			let mut row = Vec::new();
+			let mut values = Vec::new();
 			loop {
-				row.push(self.parse_expr()?);
+				self.expect(&TokenKind::LParen, "'(' starting row values")?;
+				let mut row = Vec::new();
+				loop {
+					row.push(self.parse_expr()?);
+					if self.peek().kind == TokenKind::Comma {
+						self.bump();
+					} else {
+						break;
+					}
+				}
+				self.expect(&TokenKind::RParen, "')' closing row values")?;
+				values.push(row);
+
 				if self.peek().kind == TokenKind::Comma {
 					self.bump();
 				} else {
 					break;
 				}
 			}
-			self.expect(&TokenKind::RParen, "')' closing row values")?;
-			values.push(row);
-
-			if self.peek().kind == TokenKind::Comma {
-				self.bump();
-			} else {
-				break;
-			}
-		}
+			(values, None)
+		} else if self.peek_keyword() == Some(Keyword::Select) {
+			let select = self.parse_select_stmt()?;
+			(Vec::new(), Some(Box::new(select)))
+		} else if self.peek_keyword() == Some(Keyword::Default) {
+			self.bump();
+			self.expect_keyword(Keyword::Values, "VALUES after DEFAULT in INSERT")?;
+			(Vec::new(), None)
+		} else {
+			self.expect_keyword(Keyword::Values, "VALUES or SELECT in INSERT")?;
+			(Vec::new(), None)
+		};
 
 		// ON DUPLICATE KEY UPDATE col = expr, ...
 		let mut on_duplicate_key_update = Vec::new();
@@ -104,6 +112,7 @@ impl<'a> Parser<'a> {
 			table,
 			columns,
 			values,
+			query,
 			on_duplicate_key_update,
 			span,
 		})

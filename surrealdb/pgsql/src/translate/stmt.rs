@@ -29,9 +29,14 @@ pub fn translate_statement(
 ) -> Result<(), TranslationError> {
 	match stmt {
 		Statement::Select(s) => translate_select(s, ctx, out),
-		Statement::Insert(s) => translate_insert(s, ctx, out),
-		Statement::Update(s) => translate_update(s, ctx, out),
-		Statement::Delete(s) => translate_delete(s, ctx, out),
+		Statement::Insert(_)
+		| Statement::Update(_)
+		| Statement::Delete(_)
+		| Statement::Truncate(_) => {
+			Err(TranslationError::Unsupported(
+				"DML statements must be lowered via surrealdb_sqlplan typed write lowering".into(),
+			))
+		}
 		Statement::CreateTable(s) => translate_create_table(s, ctx, out),
 		Statement::Drop(s) => translate_drop(s, out),
 		Statement::Transaction(s) => translate_transaction(s, out),
@@ -297,118 +302,6 @@ fn translate_table_ref(
 			Ok(())
 		}
 	}
-}
-
-fn translate_insert(
-	insert: &InsertStmt,
-	ctx: &TranslationContext,
-	out: &mut String,
-) -> Result<(), TranslationError> {
-	let tbl_name = match insert.relation.parts.last() {
-		Some(p) => p.as_str(),
-		None => {
-			return Err(TranslationError::Invalid("Empty relation name".to_string()));
-		}
-	};
-
-	write!(out, "INSERT INTO {tbl_name}")?;
-
-	if !insert.columns.is_empty() {
-		out.push_str(" (");
-		let mut first = true;
-		for col in &insert.columns {
-			if !first {
-				out.push_str(", ");
-			}
-			first = false;
-			out.push_str(col);
-		}
-		out.push(')');
-	}
-
-	if let Some(values) = &insert.values {
-		out.push_str(" VALUES ");
-		let mut first_row = true;
-		for row in values {
-			if !first_row {
-				out.push_str(", ");
-			}
-			first_row = false;
-			out.push('(');
-			let mut first_val = true;
-			for val in row {
-				if !first_val {
-					out.push_str(", ");
-				}
-				first_val = false;
-				translate_expr(val, ctx, out)?;
-			}
-			out.push(')');
-		}
-	} else if let Some(query) = &insert.query {
-		out.push(' ');
-		translate_select(query, ctx, out)?;
-		return Ok(());
-	}
-
-	out.push(';');
-	Ok(())
-}
-
-fn translate_update(
-	update: &UpdateStmt,
-	ctx: &TranslationContext,
-	out: &mut String,
-) -> Result<(), TranslationError> {
-	let tbl_name = match update.relation.parts.last() {
-		Some(p) => p.as_str(),
-		None => {
-			return Err(TranslationError::Invalid("Empty relation name".to_string()));
-		}
-	};
-
-	write!(out, "UPDATE {tbl_name} SET ")?;
-
-	let mut first = true;
-	for assign in &update.assignments {
-		if !first {
-			out.push_str(", ");
-		}
-		first = false;
-		write!(out, "{} = ", assign.column)?;
-		translate_expr(&assign.value, ctx, out)?;
-	}
-
-	if let Some(where_clause) = &update.where_clause {
-		out.push_str(" WHERE ");
-		translate_expr(where_clause, ctx, out)?;
-	}
-
-	out.push(';');
-	Ok(())
-}
-
-fn translate_delete(
-	delete: &DeleteStmt,
-	ctx: &TranslationContext,
-	out: &mut String,
-) -> Result<(), TranslationError> {
-	let tbl_name = match delete.relation.parts.last() {
-		Some(p) => p.as_str(),
-		None => {
-			return Err(TranslationError::Invalid("Empty relation name".to_string()));
-		}
-	};
-
-	write!(out, "DELETE FROM {tbl_name}")?;
-
-	if let Some(where_clause) = &delete.where_clause {
-		out.push_str(" WHERE ");
-		translate_expr(where_clause, ctx, out)?;
-	}
-
-	out.push(';');
-	Ok(())
 }
 
 fn translate_create_table(

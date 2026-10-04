@@ -219,12 +219,11 @@ impl BoundSelect {
 			},
 			BoundExpr::Column(col) => {
 				if !col.relation_name.is_empty() {
-					if let Some(tbl) = catalog.get_table(None, &col.relation_name) {
-						if let Some(c) = tbl.find_column(&col.column, true) {
-							if let Some(dt) = &c.data_type {
-								return SqlType::from_name(dt);
-							}
-						}
+					let dt = catalog.get_table(None, &col.relation_name).and_then(|tbl| {
+						tbl.find_column(&col.column, true).and_then(|c| c.data_type.clone())
+					});
+					if let Some(dt) = dt {
+						return SqlType::from_name(&dt);
 					}
 				}
 				SqlType::Unknown

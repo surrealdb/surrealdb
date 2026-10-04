@@ -27,31 +27,36 @@ fn test_translate_variables_and_null_safe_equal() {
 }
 
 #[test]
-fn test_translate_insert() {
-	let sql = "INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob') ON DUPLICATE KEY UPDATE name = 'Updated'";
-	let surql = translate_sql(sql).unwrap();
-	assert_eq!(
-		surql,
-		"INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob') ON DUPLICATE KEY UPDATE name = 'Updated';"
-	);
-}
+fn test_translate_dml_unsupported_for_typed_lowering() {
+	let insert_sql = "INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob') ON DUPLICATE KEY UPDATE name = 'Updated'";
+	assert!(matches!(
+		translate_sql(insert_sql),
+		Err(surrealdb_mysql::TranslationError::Unsupported(_))
+	));
 
-#[test]
-fn test_translate_replace() {
-	let sql = "REPLACE INTO users (id, name) VALUES (1, 'Alice')";
-	let surql = translate_sql(sql).unwrap();
-	assert_eq!(surql, "UPSERT INTO users (id, name) VALUES (1, 'Alice');");
-}
+	let replace_sql = "REPLACE INTO users (id, name) VALUES (1, 'Alice')";
+	assert!(matches!(
+		translate_sql(replace_sql),
+		Err(surrealdb_mysql::TranslationError::Unsupported(_))
+	));
 
-#[test]
-fn test_translate_update_delete() {
-	let sql = "UPDATE users SET name = 'Bob' WHERE id = 1";
-	let surql = translate_sql(sql).unwrap();
-	assert_eq!(surql, "UPDATE users SET name = 'Bob' WHERE (id == 1);");
+	let update_sql = "UPDATE users SET name = 'Bob' WHERE id = 1";
+	assert!(matches!(
+		translate_sql(update_sql),
+		Err(surrealdb_mysql::TranslationError::Unsupported(_))
+	));
 
-	let sql = "DELETE FROM users WHERE id = 1";
-	let surql = translate_sql(sql).unwrap();
-	assert_eq!(surql, "DELETE FROM users WHERE (id == 1);");
+	let delete_sql = "DELETE FROM users WHERE id = 1";
+	assert!(matches!(
+		translate_sql(delete_sql),
+		Err(surrealdb_mysql::TranslationError::Unsupported(_))
+	));
+
+	let truncate_sql = "TRUNCATE TABLE users";
+	assert!(matches!(
+		translate_sql(truncate_sql),
+		Err(surrealdb_mysql::TranslationError::Unsupported(_))
+	));
 }
 
 #[test]

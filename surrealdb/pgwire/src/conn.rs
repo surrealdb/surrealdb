@@ -13,8 +13,12 @@ use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
 use surrealdb_core::syn;
 use surrealdb_datastore::Transaction;
 use surrealdb_kvs::TransactionType;
+use surrealdb_pgsql::ast::stmt::Statement as PgStatement;
 use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_sql::Ast;
+use surrealdb_sqlplan::binder::pgsql::bind_select;
+use surrealdb_sqlplan::catalog::MemoryCatalog;
+use surrealdb_sqlplan::dialect::DialectPolicy;
 use surrealdb_types::{Value, Variables};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -968,18 +972,14 @@ impl Connection {
 				let (_, positional) = rewrite_positional_params(query);
 				let mut param_count = param_types.len().max(positional);
 				let mut descriptor = None;
-				if !empty {
-					if let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] {
-						let catalog = surrealdb_sqlplan::catalog::MemoryCatalog::new();
-						let policy = surrealdb_sqlplan::dialect::DialectPolicy::postgres();
-						if let Ok(bound) = surrealdb_sqlplan::binder::pgsql::bind_select(
-							select, &catalog, &policy, None,
-						) {
-							let desc = bound.describe(&catalog, &policy);
-							let param_desc = bound.describe_parameters(&catalog);
-							param_count = param_count.max(param_desc.param_types.len());
-							descriptor = Some(desc);
-						}
+				if !empty && let PgStatement::Select(select) = &stmts[0] {
+					let catalog = MemoryCatalog::new();
+					let policy = DialectPolicy::postgres();
+					if let Ok(bound) = bind_select(select, &catalog, &policy, None) {
+						let desc = bound.describe(&catalog, &policy);
+						let param_desc = bound.describe_parameters(&catalog);
+						param_count = param_count.max(param_desc.param_types.len());
+						descriptor = Some(desc);
 					}
 				}
 				(query.to_string(), None, param_count, empty, descriptor)
@@ -1544,10 +1544,10 @@ impl Connection {
 
 	async fn run_pgsql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
 		let descriptor = if let Ok(stmts) = surrealdb_pgsql::parse_statements(sql) {
-			if let Some(surrealdb_pgsql::ast::stmt::Statement::Select(select)) = stmts.first() {
-				let catalog = surrealdb_sqlplan::catalog::MemoryCatalog::new();
-				let policy = surrealdb_sqlplan::dialect::DialectPolicy::postgres();
-				surrealdb_sqlplan::binder::pgsql::bind_select(select, &catalog, &policy, None)
+			if let Some(PgStatement::Select(select)) = stmts.first() {
+				let catalog = MemoryCatalog::new();
+				let policy = DialectPolicy::postgres();
+				bind_select(select, &catalog, &policy, None)
 					.ok()
 					.map(|bound| bound.describe(&catalog, &policy))
 			} else {
@@ -2983,7 +2983,10 @@ mod tests {
 	#[test]
 	fn translates_postgres_queries_to_surrealql() {
 		let pg_insert = "INSERT INTO users (id, name) VALUES (1, 'Alice');";
-		let translated_insert = surrealdb_pgsql::translate_sql(pg_insert).unwrap();
-		assert_eq!(translated_insert, "INSERT INTO users (id, name) VALUES (1, 'Alice');");
+		let translated_insert = surrealdb_pgsql::translate_sql(pg_insert);
+		assert!(matches!(
+			translated_insert,
+			Err(surrealdb_pgsql::TranslationError::Unsupported(_))
+		));
 	}
 }

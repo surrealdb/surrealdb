@@ -1,5 +1,7 @@
 //! `surrealdb-sqlplan` - SQL planner, binder, and bound IR for SurrealDB.
 
+#![allow(clippy::absolute_paths)]
+
 pub mod binder;
 pub mod catalog;
 pub mod descriptor;
@@ -22,6 +24,11 @@ pub use ir::{
 	BoundUnaryOp,
 };
 pub use lower::lower_bound_select;
+pub use lower::write::{
+	lower_mysql_delete, lower_mysql_expr, lower_mysql_insert, lower_mysql_replace,
+	lower_mysql_truncate, lower_mysql_update, lower_pgsql_delete, lower_pgsql_expr,
+	lower_pgsql_insert, lower_pgsql_truncate, lower_pgsql_update,
+};
 pub use scope::{QueryScope, RelationEntry};
 pub use semantics::{fold_expr, fold_select};
 use surrealdb_expr::expr::logical::LogicalOp;

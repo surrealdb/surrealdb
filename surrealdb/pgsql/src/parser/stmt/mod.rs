@@ -82,6 +82,10 @@ impl<'a> Parser<'a> {
 				let s = self.parse_delete_stmt()?;
 				Ok(Statement::Delete(Box::new(s)))
 			}
+			TokenKind::Keyword(Keyword::Truncate) => {
+				let s = self.parse_truncate_stmt()?;
+				Ok(Statement::Truncate(Box::new(s)))
+			}
 			TokenKind::Keyword(Keyword::Create) => self.parse_create_stmt(),
 			TokenKind::Keyword(Keyword::Alter) => {
 				let s = self.parse_alter_table_stmt()?;

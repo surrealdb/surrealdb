@@ -52,6 +52,41 @@ pub(crate) fn parse_to_statements(
 					.map_err(|e| anyhow::anyhow!("MySQL SELECT lowering error: {e}"))?;
 				statements.push(TopLevelStatement::Plan(Box::new(plan)));
 			}
+			surrealdb_mysql::ast::stmt::Statement::Insert(insert) => {
+				let expr = surrealdb_sqlplan::lower_mysql_insert(insert)
+					.map_err(|e| anyhow::anyhow!("MySQL INSERT lowering error: {e}"))?;
+				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
+					crate::sql::Expr::from(expr),
+				)));
+			}
+			surrealdb_mysql::ast::stmt::Statement::Replace(replace) => {
+				let expr = surrealdb_sqlplan::lower_mysql_replace(replace)
+					.map_err(|e| anyhow::anyhow!("MySQL REPLACE lowering error: {e}"))?;
+				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
+					crate::sql::Expr::from(expr),
+				)));
+			}
+			surrealdb_mysql::ast::stmt::Statement::Update(update) => {
+				let expr = surrealdb_sqlplan::lower_mysql_update(update)
+					.map_err(|e| anyhow::anyhow!("MySQL UPDATE lowering error: {e}"))?;
+				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
+					crate::sql::Expr::from(expr),
+				)));
+			}
+			surrealdb_mysql::ast::stmt::Statement::Delete(delete) => {
+				let expr = surrealdb_sqlplan::lower_mysql_delete(delete)
+					.map_err(|e| anyhow::anyhow!("MySQL DELETE lowering error: {e}"))?;
+				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
+					crate::sql::Expr::from(expr),
+				)));
+			}
+			surrealdb_mysql::ast::stmt::Statement::Truncate(truncate) => {
+				let expr = surrealdb_sqlplan::lower_mysql_truncate(truncate)
+					.map_err(|e| anyhow::anyhow!("MySQL TRUNCATE lowering error: {e}"))?;
+				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
+					crate::sql::Expr::from(expr),
+				)));
+			}
 			_ => {
 				let mut surql_text = String::new();
 				surrealdb_mysql::translate::translate_statement(

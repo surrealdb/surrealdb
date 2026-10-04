@@ -674,6 +674,15 @@ pub struct DeallocateStmt {
 	pub span: Span,
 }
 
+/// A PostgreSQL `TRUNCATE` statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TruncateStmt {
+	/// Target table name.
+	pub table: QualifiedName,
+	/// Source span.
+	pub span: Span,
+}
+
 /// Top-level PostgreSQL statement AST node.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
@@ -685,6 +694,8 @@ pub enum Statement {
 	Update(Box<UpdateStmt>),
 	/// `DELETE` query.
 	Delete(Box<DeleteStmt>),
+	/// `TRUNCATE` query.
+	Truncate(Box<TruncateStmt>),
 	/// `CREATE TABLE` DDL.
 	CreateTable(Box<CreateTableStmt>),
 	/// `CREATE INDEX` DDL.
@@ -789,6 +800,7 @@ impl Statement {
 			Self::Insert(s) => s.span,
 			Self::Update(s) => s.span,
 			Self::Delete(s) => s.span,
+			Self::Truncate(s) => s.span,
 			Self::CreateTable(s) => s.span,
 			Self::CreateIndex(s) => s.span,
 			Self::CreateView(s) => s.span,
@@ -925,6 +937,10 @@ impl Statement {
 						t.expr.normalize_spans();
 					}
 				}
+			}
+			Self::Truncate(s) => {
+				s.span = zero;
+				s.table.span = zero;
 			}
 			Self::CreateTable(s) => {
 				s.span = zero;

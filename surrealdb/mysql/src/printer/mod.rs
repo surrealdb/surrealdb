@@ -4,8 +4,8 @@ use crate::ast::expr::{ColumnRef, Expr, TruthValue};
 use crate::ast::stmt::{
 	ColumnDef, CreateTableStmt, DeleteStmt, DescribeStmt, DropTableStmt, ExplainStmt, InsertStmt,
 	JoinCondition, JoinType, LockType, QualifiedName, ReplaceStmt, SelectItem, SelectStmt, SetStmt,
-	ShowStmt, Statement, TableConstraint, TableRef, TransactionStmt, UpdateStmt, UseStmt,
-	VariableTarget,
+	ShowStmt, Statement, TableConstraint, TableRef, TransactionStmt, TruncateStmt, UpdateStmt,
+	UseStmt, VariableTarget,
 };
 
 /// Trait for AST nodes that can be formatted as MySQL SQL syntax.
@@ -441,19 +441,26 @@ impl ToMySql for InsertStmt {
 			}
 			write!(f, ")")?;
 		}
-		write!(f, " VALUES ")?;
-		for (i, row) in self.values.iter().enumerate() {
-			if i > 0 {
-				write!(f, ", ")?;
-			}
-			write!(f, "(")?;
-			for (j, val) in row.iter().enumerate() {
-				if j > 0 {
+		if let Some(q) = &self.query {
+			write!(f, " ")?;
+			q.fmt_mysql(f)?;
+		} else if self.values.is_empty() {
+			write!(f, " DEFAULT VALUES")?;
+		} else {
+			write!(f, " VALUES ")?;
+			for (i, row) in self.values.iter().enumerate() {
+				if i > 0 {
 					write!(f, ", ")?;
 				}
-				val.fmt_mysql(f)?;
+				write!(f, "(")?;
+				for (j, val) in row.iter().enumerate() {
+					if j > 0 {
+						write!(f, ", ")?;
+					}
+					val.fmt_mysql(f)?;
+				}
+				write!(f, ")")?;
 			}
-			write!(f, ")")?;
 		}
 		if !self.on_duplicate_key_update.is_empty() {
 			write!(f, " ON DUPLICATE KEY UPDATE ")?;
@@ -483,21 +490,35 @@ impl ToMySql for ReplaceStmt {
 			}
 			write!(f, ")")?;
 		}
-		write!(f, " VALUES ")?;
-		for (i, row) in self.values.iter().enumerate() {
-			if i > 0 {
-				write!(f, ", ")?;
-			}
-			write!(f, "(")?;
-			for (j, val) in row.iter().enumerate() {
-				if j > 0 {
+		if let Some(q) = &self.query {
+			write!(f, " ")?;
+			q.fmt_mysql(f)?;
+		} else if self.values.is_empty() {
+			write!(f, " DEFAULT VALUES")?;
+		} else {
+			write!(f, " VALUES ")?;
+			for (i, row) in self.values.iter().enumerate() {
+				if i > 0 {
 					write!(f, ", ")?;
 				}
-				val.fmt_mysql(f)?;
+				write!(f, "(")?;
+				for (j, val) in row.iter().enumerate() {
+					if j > 0 {
+						write!(f, ", ")?;
+					}
+					val.fmt_mysql(f)?;
+				}
+				write!(f, ")")?;
 			}
-			write!(f, ")")?;
 		}
 		Ok(())
+	}
+}
+
+impl ToMySql for TruncateStmt {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "TRUNCATE TABLE ")?;
+		self.table.fmt_mysql(f)
 	}
 }
 
@@ -868,6 +889,7 @@ impl ToMySql for Statement {
 			Self::Update(s) => s.fmt_mysql(f),
 			Self::Delete(s) => s.fmt_mysql(f),
 			Self::Replace(s) => s.fmt_mysql(f),
+			Self::Truncate(s) => s.fmt_mysql(f),
 			Self::CreateTable(s) => s.fmt_mysql(f),
 			Self::DropTable(s) => s.fmt_mysql(f),
 			Self::Use(s) => s.fmt_mysql(f),

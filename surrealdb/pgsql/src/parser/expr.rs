@@ -422,6 +422,15 @@ impl<'a> Parser<'a> {
 				})
 			}
 
+			// DEFAULT keyword (e.g. in INSERT VALUES (..., DEFAULT, ...))
+			TokenKind::Keyword(Keyword::Default) => {
+				let t = self.bump()?;
+				Ok(Expr::ColumnRef(ColumnRef {
+					fields: vec!["DEFAULT".to_string()],
+					span: t.span,
+				}))
+			}
+
 			// Positional parameter `$1`, `$2`
 			TokenKind::Param(id) => {
 				self.bump()?;

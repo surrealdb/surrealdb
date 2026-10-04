@@ -31,6 +31,18 @@ impl<'a> Parser<'a> {
 			Some(Keyword::Update) => Ok(Statement::Update(Box::new(self.parse_update_stmt()?))),
 			Some(Keyword::Delete) => Ok(Statement::Delete(Box::new(self.parse_delete_stmt()?))),
 			Some(Keyword::Replace) => Ok(Statement::Replace(Box::new(self.parse_replace_stmt()?))),
+			Some(Keyword::Truncate) => {
+				let start = self.bump().span;
+				if self.peek_keyword() == Some(Keyword::Table) {
+					self.bump();
+				}
+				let table = self.parse_qualified_name()?;
+				let span = start.merge(table.span);
+				Ok(Statement::Truncate(Box::new(crate::ast::stmt::TruncateStmt {
+					table,
+					span,
+				})))
+			}
 			Some(Keyword::Create) => {
 				Ok(Statement::CreateTable(Box::new(self.parse_create_stmt()?)))
 			}

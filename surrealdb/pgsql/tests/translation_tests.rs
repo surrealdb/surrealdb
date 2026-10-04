@@ -119,30 +119,31 @@ fn test_translate_case_expression() {
 }
 
 #[test]
-fn test_translate_insert() {
-	let sql = "INSERT INTO users (id, name, active) VALUES (1, 'Alice', true), (2, 'Bob', false);";
-	let surrealql = translate_sql(sql).expect("translate");
-	assert_eq!(
-		surrealql,
-		"INSERT INTO users (id, name, active) VALUES (1, 'Alice', true), (2, 'Bob', false);"
-	);
-}
+fn test_translate_dml_unsupported_for_typed_lowering() {
+	let insert_sql =
+		"INSERT INTO users (id, name, active) VALUES (1, 'Alice', true), (2, 'Bob', false);";
+	assert!(matches!(
+		translate_sql(insert_sql),
+		Err(surrealdb_pgsql::TranslationError::Unsupported(_))
+	));
 
-#[test]
-fn test_translate_update() {
-	let sql = "UPDATE users SET name = 'Alice', updated_at = now() WHERE id = 1;";
-	let surrealql = translate_sql(sql).expect("translate");
-	assert_eq!(
-		surrealql,
-		"UPDATE users SET name = 'Alice', updated_at = time::now() WHERE (id = 1);"
-	);
-}
+	let update_sql = "UPDATE users SET name = 'Alice', updated_at = now() WHERE id = 1;";
+	assert!(matches!(
+		translate_sql(update_sql),
+		Err(surrealdb_pgsql::TranslationError::Unsupported(_))
+	));
 
-#[test]
-fn test_translate_delete() {
-	let sql = "DELETE FROM users WHERE id = 1;";
-	let surrealql = translate_sql(sql).expect("translate");
-	assert_eq!(surrealql, "DELETE FROM users WHERE (id = 1);");
+	let delete_sql = "DELETE FROM users WHERE id = 1;";
+	assert!(matches!(
+		translate_sql(delete_sql),
+		Err(surrealdb_pgsql::TranslationError::Unsupported(_))
+	));
+
+	let truncate_sql = "TRUNCATE TABLE users;";
+	assert!(matches!(
+		translate_sql(truncate_sql),
+		Err(surrealdb_pgsql::TranslationError::Unsupported(_))
+	));
 }
 
 #[test]
