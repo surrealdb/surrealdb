@@ -20,8 +20,7 @@ impl<'a> Parser<'a> {
 				let start_tok = self.bump()?;
 				self.eat(&TokenKind::Keyword(Keyword::Work))?;
 				self.eat(&TokenKind::Keyword(Keyword::Transaction))?;
-				// Consume any optional transaction modes (e.g. READ ONLY, ISOLATION LEVEL)
-				self.skip_until_semi_or_eof();
+				self.expect_tx_stmt_end()?;
 				let span = start_tok.span.merge(self.peek().span);
 				Ok(TransactionStmt::Begin {
 					span,
@@ -32,7 +31,7 @@ impl<'a> Parser<'a> {
 				let start_tok = self.bump()?;
 				self.eat(&TokenKind::Keyword(Keyword::Work))?;
 				self.eat(&TokenKind::Keyword(Keyword::Transaction))?;
-				self.skip_until_semi_or_eof();
+				self.expect_tx_stmt_end()?;
 				let span = start_tok.span.merge(self.peek().span);
 				Ok(TransactionStmt::Commit {
 					span,
@@ -48,6 +47,7 @@ impl<'a> Parser<'a> {
 				if self.eat(&TokenKind::Keyword(Keyword::To))? {
 					self.eat(&TokenKind::Keyword(Keyword::Savepoint))?;
 					let (name, name_span) = self.parse_ident()?;
+					self.expect_tx_stmt_end()?;
 					let span = start_tok.span.merge(name_span);
 					return Ok(TransactionStmt::RollbackToSavepoint {
 						name,
@@ -55,7 +55,7 @@ impl<'a> Parser<'a> {
 					});
 				}
 
-				self.skip_until_semi_or_eof();
+				self.expect_tx_stmt_end()?;
 				let span = start_tok.span.merge(self.peek().span);
 				Ok(TransactionStmt::Rollback {
 					span,
@@ -65,6 +65,7 @@ impl<'a> Parser<'a> {
 			TokenKind::Keyword(Keyword::Savepoint) => {
 				let start_tok = self.bump()?;
 				let (name, name_span) = self.parse_ident()?;
+				self.expect_tx_stmt_end()?;
 				let span = start_tok.span.merge(name_span);
 				Ok(TransactionStmt::Savepoint {
 					name,
@@ -76,6 +77,7 @@ impl<'a> Parser<'a> {
 				let start_tok = self.bump()?;
 				self.eat(&TokenKind::Keyword(Keyword::Savepoint))?;
 				let (name, name_span) = self.parse_ident()?;
+				self.expect_tx_stmt_end()?;
 				let span = start_tok.span.merge(name_span);
 				Ok(TransactionStmt::ReleaseSavepoint {
 					name,
@@ -93,10 +95,18 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// Skip tokens until the next semicolon or EOF for trailing transaction clauses.
-	fn skip_until_semi_or_eof(&mut self) {
-		while self.peek().kind != TokenKind::Semi && !self.peek().is_eof() {
-			let _ = self.bump();
+	/// Verify that a transaction statement has no unexpected trailing clauses or tokens before `;`
+	/// or EOF.
+	fn expect_tx_stmt_end(&self) -> ParseResult<()> {
+		if self.peek().kind != TokenKind::Semi && !self.peek().is_eof() {
+			Err(crate::error::ParseError::new(
+				self.peek().span,
+				crate::error::ErrorKind::InvalidStatement(
+					"unsupported transaction mode or unexpected token after transaction statement",
+				),
+			))
+		} else {
+			Ok(())
 		}
 	}
 }

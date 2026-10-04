@@ -475,6 +475,13 @@ impl<'a> Lexer<'a> {
 				offset: start,
 			});
 		}
+		if let Some((_, ch)) = self.peek()
+			&& (ch.is_alphabetic() || ch == '_' || ch == '$')
+		{
+			return Err(LexError::InvalidHex {
+				offset: start,
+			});
+		}
 		let bytes = decode_hex(&hex).map_err(|_| LexError::InvalidHex {
 			offset: start,
 		})?;
@@ -571,6 +578,14 @@ impl<'a> Lexer<'a> {
 			} else {
 				break;
 			}
+		}
+
+		if let Some((_, ch)) = self.peek()
+			&& (ch.is_alphabetic() || ch == '$')
+		{
+			return Err(LexError::InvalidNumber {
+				offset: start,
+			});
 		}
 
 		let end = self.offset();

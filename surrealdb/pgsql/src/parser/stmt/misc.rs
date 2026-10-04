@@ -17,9 +17,15 @@ impl<'a> Parser<'a> {
 	pub fn parse_set_stmt(&mut self) -> ParseResult<SetStmt> {
 		let set_tok = self.expect(&TokenKind::Keyword(Keyword::Set), "'SET'")?;
 
-		// Optional SESSION or LOCAL
+		// Reject SET LOCAL
+		if self.eat(&TokenKind::Keyword(Keyword::Local))? {
+			return Err(crate::error::ParseError::new(
+				set_tok.span,
+				crate::error::ErrorKind::InvalidStatement("SET LOCAL is not supported"),
+			));
+		}
+		// Optional SESSION
 		self.eat(&TokenKind::Keyword(Keyword::Session))?;
-		self.eat(&TokenKind::Keyword(Keyword::Local))?;
 
 		let (name, _name_span) = self.parse_ident()?;
 
@@ -28,13 +34,38 @@ impl<'a> Parser<'a> {
 			self.expect(&TokenKind::Operator("="), "'TO' or '='")?;
 		}
 
-		// Read value until semicolon or EOF
+		// Read value tokens strictly without swallowing next statements
 		let start_val_span = self.peek().span;
 		let mut end_val_span = start_val_span;
 
-		while self.peek().kind != TokenKind::Semi && !self.peek().is_eof() {
+		let mut has_val = false;
+		while let TokenKind::Ident(_)
+		| TokenKind::Keyword(_)
+		| TokenKind::StringConstant(_)
+		| TokenKind::Integer(_)
+		| TokenKind::IntegerRaw(_)
+		| TokenKind::Float(_)
+		| TokenKind::FloatRaw(_) = &self.peek().kind
+		{
 			let tok = self.bump()?;
 			end_val_span = tok.span;
+			has_val = true;
+			if self.peek().kind == TokenKind::Comma {
+				let tok = self.bump()?;
+				end_val_span = tok.span;
+			} else {
+				break;
+			}
+		}
+
+		if !has_val {
+			return Err(crate::error::ParseError::new(
+				self.peek().span,
+				crate::error::ErrorKind::UnexpectedToken {
+					expected: "variable value",
+					found: self.peek().kind.to_string(),
+				},
+			));
 		}
 
 		let val_span = start_val_span.merge(end_val_span);

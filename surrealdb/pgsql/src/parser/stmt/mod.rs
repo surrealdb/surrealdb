@@ -213,8 +213,16 @@ impl<'a> Parser<'a> {
 				stmts.push(stmt);
 			}
 
-			// Eat optional trailing semicolon
-			self.eat(&TokenKind::Semi)?;
+			// Require semicolon between statements if not at EOF
+			if !self.peek().is_eof() && !self.eat(&TokenKind::Semi)? {
+				return Err(ParseError::new(
+					self.peek().span,
+					ErrorKind::UnexpectedToken {
+						expected: ";",
+						found: self.peek().kind.to_string(),
+					},
+				));
+			}
 		}
 
 		Ok(stmts)

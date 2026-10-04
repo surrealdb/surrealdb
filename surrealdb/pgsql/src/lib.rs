@@ -46,20 +46,28 @@ pub use translate::{
 
 /// Parse a single PostgreSQL expression from string input with default settings.
 pub fn parse_expr(src: &str) -> ParseResult<Expr> {
-	let mut parser = Parser::new(src)?;
-	parser.parse_expr()
+	parse_expr_with_settings(src, ParserSettings::default())
 }
 
 /// Parse a single PostgreSQL expression from string input with custom settings.
 pub fn parse_expr_with_settings(src: &str, settings: ParserSettings) -> ParseResult<Expr> {
 	let mut parser = Parser::with_settings(src, settings)?;
-	parser.parse_expr()
+	let expr = parser.parse_expr()?;
+	if !parser.peek().is_eof() {
+		return Err(ParseError::new(
+			parser.peek().span,
+			ErrorKind::UnexpectedToken {
+				expected: "end of input",
+				found: parser.peek().kind.to_string(),
+			},
+		));
+	}
+	Ok(expr)
 }
 
 /// Parse a single PostgreSQL statement from string input with default settings.
 pub fn parse_statement(src: &str) -> ParseResult<Statement> {
-	let mut parser = Parser::new(src)?;
-	parser.parse_statement()
+	parse_statement_with_settings(src, ParserSettings::default())
 }
 
 /// Parse a single PostgreSQL statement from string input with custom settings.
@@ -68,7 +76,18 @@ pub fn parse_statement_with_settings(
 	settings: ParserSettings,
 ) -> ParseResult<Statement> {
 	let mut parser = Parser::with_settings(src, settings)?;
-	parser.parse_statement()
+	let stmt = parser.parse_statement()?;
+	while parser.eat(&TokenKind::Semi)? {}
+	if !parser.peek().is_eof() {
+		return Err(ParseError::new(
+			parser.peek().span,
+			ErrorKind::UnexpectedToken {
+				expected: "end of input",
+				found: parser.peek().kind.to_string(),
+			},
+		));
+	}
+	Ok(stmt)
 }
 
 /// Parse multiple PostgreSQL statements from string input with default settings.

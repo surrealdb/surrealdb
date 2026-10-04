@@ -10,7 +10,7 @@ use crate::error::{ErrorKind, ParseError, ParseResult};
 use crate::lexer::keyword::Keyword;
 use crate::lexer::token::TokenKind;
 use crate::parser::Parser;
-use crate::parser::precedence::{infix_binding_power, prefix_binding_power};
+use crate::parser::precedence::prefix_binding_power;
 use crate::span::Span;
 
 impl<'a> Parser<'a> {
@@ -24,12 +24,13 @@ impl<'a> Parser<'a> {
 	/// Parse an expression with minimum binding power.
 	pub fn parse_expr_bp(&mut self, min_bp: u8) -> ParseResult<Expr> {
 		self.enter_recursion(self.peek().span)?;
-		let res = self.parse_expr_bp_inner(min_bp);
-		self.leave_recursion();
+		let mut loop_depth: u32 = 0;
+		let res = self.parse_expr_bp_inner(min_bp, &mut loop_depth);
+		self.leave_recursion_by(1 + loop_depth);
 		res
 	}
 
-	fn parse_expr_bp_inner(&mut self, min_bp: u8) -> ParseResult<Expr> {
+	fn parse_expr_bp_inner(&mut self, min_bp: u8, loop_depth: &mut u32) -> ParseResult<Expr> {
 		// Prefix / Prefix operator handling
 		let mut left = if let Some(prefix_bp) = prefix_binding_power(&self.peek().kind) {
 			let op_tok = self.bump()?;
@@ -60,10 +61,15 @@ impl<'a> Parser<'a> {
 		};
 
 		// Infix / Postfix operator loop
-		while let Some((l_bp, r_bp, _assoc)) = infix_binding_power(&self.peek().kind) {
+		while let Some((l_bp, r_bp, _assoc)) = self.peek_infix_bp()? {
 			if l_bp < min_bp {
 				break;
 			}
+
+			self.enter_recursion(self.peek().span)?;
+			*loop_depth += 1;
+
+			let negated = self.eat(&TokenKind::Keyword(Keyword::Not))?;
 
 			let op_tok = self.peek().clone();
 
@@ -255,7 +261,7 @@ impl<'a> Parser<'a> {
 					expr: Box::new(left),
 					low: Box::new(low),
 					high: Box::new(high),
-					negated: false,
+					negated,
 					symmetric,
 					span,
 				};
@@ -278,7 +284,7 @@ impl<'a> Parser<'a> {
 				left = Expr::InList {
 					expr: Box::new(left),
 					list,
-					negated: false,
+					negated,
 					span,
 				};
 				continue;
@@ -286,7 +292,19 @@ impl<'a> Parser<'a> {
 
 			// 8. General Binary Operator
 			self.bump()?; // consume operator
-			let binary_op = token_to_binary_op(&op_tok.kind)?;
+			let binary_op = match (&op_tok.kind, negated) {
+				(TokenKind::Keyword(Keyword::Like), true) => BinaryOperator::NotLike,
+				(TokenKind::Keyword(Keyword::Ilike), true) => BinaryOperator::NotILike,
+				(TokenKind::Keyword(Keyword::Similar), true) => {
+					self.expect(&TokenKind::Keyword(Keyword::To), "'TO'")?;
+					BinaryOperator::NotSimilarTo
+				}
+				(TokenKind::Keyword(Keyword::Similar), false) => {
+					self.expect(&TokenKind::Keyword(Keyword::To), "'TO'")?;
+					BinaryOperator::SimilarTo
+				}
+				_ => token_to_binary_op(&op_tok.kind)?,
+			};
 			let right = self.parse_expr_bp(r_bp)?;
 			let span = left.span().merge(right.span());
 			left = Expr::BinaryOp {

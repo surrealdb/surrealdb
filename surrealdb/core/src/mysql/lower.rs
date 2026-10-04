@@ -453,6 +453,25 @@ pub fn lower_expr(expr: &Expr) -> Result<LogicalExpr, LowerError> {
 				Ok(is_null)
 			}
 		}
+		Expr::InList {
+			expr,
+			list,
+			negated,
+			..
+		} => {
+			let val = lower_expr(expr)?;
+			let items = list.iter().map(lower_expr).collect::<Result<Vec<_>, _>>()?;
+			let op = if *negated {
+				BinaryOperator::NotInside
+			} else {
+				BinaryOperator::Inside
+			};
+			Ok(LogicalExpr::Binary {
+				left: Box::new(val),
+				op,
+				right: Box::new(LogicalExpr::Array(items)),
+			})
+		}
 		Expr::Cast {
 			expr,
 			..

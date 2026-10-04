@@ -12,6 +12,14 @@ use crate::parser::error::{ErrorKind, ParseError, ParseResult};
 impl<'a> Parser<'a> {
 	/// Parse a SELECT statement.
 	pub fn parse_select_stmt(&mut self) -> ParseResult<SelectStmt> {
+		self.check_recursion_limit()?;
+		self.recursion_depth += 1;
+		let res = self.parse_select_stmt_inner();
+		self.recursion_depth -= 1;
+		res
+	}
+
+	fn parse_select_stmt_inner(&mut self) -> ParseResult<SelectStmt> {
 		let start = self.expect_keyword(Keyword::Select, "SELECT")?.span;
 
 		// Distinct / All
@@ -195,6 +203,7 @@ impl<'a> Parser<'a> {
 
 	pub(crate) fn parse_table_references(&mut self) -> ParseResult<TableRef> {
 		let mut left = self.parse_table_factor()?;
+		let mut join_depth = 0;
 
 		loop {
 			let join_type = if self.peek_keyword() == Some(Keyword::Inner) {
@@ -231,6 +240,10 @@ impl<'a> Parser<'a> {
 			} else {
 				break;
 			};
+
+			self.check_recursion_limit()?;
+			self.recursion_depth += 1;
+			join_depth += 1;
 
 			let right = self.parse_table_factor()?;
 
@@ -278,6 +291,7 @@ impl<'a> Parser<'a> {
 			};
 		}
 
+		self.recursion_depth = self.recursion_depth.saturating_sub(join_depth);
 		Ok(left)
 	}
 

@@ -19,12 +19,47 @@ impl<'a> Parser<'a> {
 	/// gram.y: SelectStmt
 	pub fn parse_select_stmt(&mut self) -> ParseResult<SelectStmt> {
 		self.enter_recursion(self.peek().span)?;
-		let res = self.parse_select_stmt_inner();
-		self.leave_recursion();
-		res
+		let mut root = self.parse_select_single()?;
+		let mut set_depth: u32 = 0;
+
+		// Iterative loop over set operations: UNION, INTERSECT, EXCEPT
+		let mut current = &mut root;
+		loop {
+			let set_op_kind = match &self.peek().kind {
+				TokenKind::Keyword(Keyword::Union) => Some(SetOpKind::Union),
+				TokenKind::Keyword(Keyword::Intersect) => Some(SetOpKind::Intersect),
+				TokenKind::Keyword(Keyword::Except) => Some(SetOpKind::Except),
+				_ => None,
+			};
+
+			let Some(op) = set_op_kind else {
+				break;
+			};
+
+			self.enter_recursion(self.peek().span)?;
+			set_depth = set_depth.saturating_add(1);
+
+			self.bump()?; // consume UNION / INTERSECT / EXCEPT
+			let all = self.eat(&TokenKind::Keyword(Keyword::All))?;
+			let right = self.parse_select_single()?;
+			current.span = current.span.merge(right.span);
+			current.set_op = Some(SetOperation {
+				op,
+				all,
+				right: Box::new(right),
+			});
+			if let Some(ref mut so) = current.set_op {
+				current = so.right.as_mut();
+			} else {
+				break;
+			}
+		}
+
+		self.leave_recursion_by(1 + set_depth);
+		Ok(root)
 	}
 
-	fn parse_select_stmt_inner(&mut self) -> ParseResult<SelectStmt> {
+	fn parse_select_single(&mut self) -> ParseResult<SelectStmt> {
 		let with = if self.peek().kind == TokenKind::Keyword(Keyword::With) {
 			Some(self.parse_with_clause()?)
 		} else {
@@ -203,7 +238,7 @@ impl<'a> Parser<'a> {
 		let end_span = self.peek().span;
 		let span = start_span.merge(end_span);
 
-		let mut stmt = SelectStmt {
+		let stmt = SelectStmt {
 			with,
 			distinct,
 			targets,
@@ -219,26 +254,6 @@ impl<'a> Parser<'a> {
 			set_op: None,
 			span,
 		};
-
-		// 9. Optional Set Operations: UNION, INTERSECT, EXCEPT
-		let set_op_kind = match &self.peek().kind {
-			TokenKind::Keyword(Keyword::Union) => Some(SetOpKind::Union),
-			TokenKind::Keyword(Keyword::Intersect) => Some(SetOpKind::Intersect),
-			TokenKind::Keyword(Keyword::Except) => Some(SetOpKind::Except),
-			_ => None,
-		};
-
-		if let Some(op) = set_op_kind {
-			self.bump()?; // consume UNION / INTERSECT / EXCEPT
-			let all = self.eat(&TokenKind::Keyword(Keyword::All))?;
-			let right = self.parse_select_stmt()?;
-			stmt.span = stmt.span.merge(right.span);
-			stmt.set_op = Some(SetOperation {
-				op,
-				all,
-				right: Box::new(right),
-			});
-		}
 
 		Ok(stmt)
 	}
@@ -398,9 +413,12 @@ impl<'a> Parser<'a> {
 	/// Parse a single table reference or join chain.
 	pub fn parse_table_ref(&mut self) -> ParseResult<TableRef> {
 		let mut left = self.parse_table_factor()?;
+		let mut join_depth: u32 = 0;
 
 		// Parse joined relations
 		while let Some(join_type) = self.peek_join_type()? {
+			self.enter_recursion(self.peek().span)?;
+			join_depth += 1;
 			self.consume_join_type(join_type)?;
 			let right = self.parse_table_factor()?;
 
@@ -434,6 +452,7 @@ impl<'a> Parser<'a> {
 			};
 		}
 
+		self.leave_recursion_by(join_depth);
 		Ok(left)
 	}
 

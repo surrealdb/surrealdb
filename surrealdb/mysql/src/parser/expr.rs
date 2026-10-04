@@ -36,12 +36,13 @@ impl<'a> Parser<'a> {
 	pub fn parse_expr_bp(&mut self, min_bp: u8) -> ParseResult<Expr> {
 		self.check_recursion_limit()?;
 		self.recursion_depth += 1;
-		let res = self.parse_expr_bp_inner(min_bp);
-		self.recursion_depth -= 1;
+		let mut loop_depth: usize = 0;
+		let res = self.parse_expr_bp_inner(min_bp, &mut loop_depth);
+		self.recursion_depth = self.recursion_depth.saturating_sub(1 + loop_depth);
 		res
 	}
 
-	fn parse_expr_bp_inner(&mut self, min_bp: u8) -> ParseResult<Expr> {
+	fn parse_expr_bp_inner(&mut self, min_bp: u8, loop_depth: &mut usize) -> ParseResult<Expr> {
 		let mut lhs = self.parse_prefix()?;
 
 		loop {
@@ -51,6 +52,9 @@ impl<'a> Parser<'a> {
 				if bp < min_bp {
 					break;
 				}
+				self.check_recursion_limit()?;
+				self.recursion_depth += 1;
+				*loop_depth += 1;
 				self.bump(); // consume operator
 				let rhs = self.parse_expr_bp(bp + 1)?;
 				let span = lhs.span().merge(rhs.span());
@@ -65,6 +69,9 @@ impl<'a> Parser<'a> {
 
 			// IS [NOT] NULL / TRUE / FALSE / UNKNOWN
 			if self.peek_keyword() == Some(Keyword::Is) && min_bp <= PREC_CMP {
+				self.check_recursion_limit()?;
+				self.recursion_depth += 1;
+				*loop_depth += 1;
 				let is_span = self.bump().span;
 				let negated = if self.peek_keyword() == Some(Keyword::Not) {
 					self.bump();
@@ -130,6 +137,9 @@ impl<'a> Parser<'a> {
 			let is_not_between = self.peek_keyword() == Some(Keyword::Not)
 				&& self.peek_nth_keyword(1) == Some(Keyword::Between);
 			if (is_between || is_not_between) && min_bp <= PREC_BETWEEN {
+				self.check_recursion_limit()?;
+				self.recursion_depth += 1;
+				*loop_depth += 1;
 				let negated = if is_not_between {
 					self.bump(); // NOT
 					self.bump(); // BETWEEN
@@ -157,6 +167,9 @@ impl<'a> Parser<'a> {
 			let is_not_in = self.peek_keyword() == Some(Keyword::Not)
 				&& self.peek_nth_keyword(1) == Some(Keyword::In);
 			if (is_in || is_not_in) && min_bp <= PREC_CMP {
+				self.check_recursion_limit()?;
+				self.recursion_depth += 1;
+				*loop_depth += 1;
 				let negated = if is_not_in {
 					self.bump(); // NOT
 					self.bump(); // IN
@@ -202,6 +215,9 @@ impl<'a> Parser<'a> {
 
 			// COLLATE collation_name
 			if self.peek_keyword() == Some(Keyword::Collate) && min_bp <= PREC_COLLATE {
+				self.check_recursion_limit()?;
+				self.recursion_depth += 1;
+				*loop_depth += 1;
 				self.bump(); // COLLATE
 				let (collate_name, collate_span) = self.parse_ident()?;
 				let span = lhs.span().merge(collate_span);

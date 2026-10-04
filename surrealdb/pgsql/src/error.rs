@@ -87,6 +87,23 @@ pub enum ErrorKind {
 	#[error("parser recursion depth limit exceeded")]
 	RecursionLimitExceeded,
 
+	/// Input size limit exceeded.
+	#[error("input size limit exceeded: {actual} bytes exceeds maximum of {max} bytes")]
+	InputSizeLimitExceeded {
+		/// Maximum allowed input size in bytes.
+		max: usize,
+		/// Actual input size in bytes.
+		actual: usize,
+	},
+
+	/// Work limit exceeded (too many parsing steps).
+	#[error("parser work limit exceeded")]
+	WorkLimitExceeded,
+
+	/// Invalid character or sequence in literal.
+	#[error("invalid character in literal: {0}")]
+	InvalidCharacter(&'static str),
+
 	/// Invalid operator or expression syntax.
 	#[error("invalid expression syntax: {0}")]
 	InvalidExpression(&'static str),

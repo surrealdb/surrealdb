@@ -11,18 +11,28 @@ use crate::span::Span;
 
 /// Maximum recursion depth allowed during parsing before aborting.
 pub const MAX_RECURSION_DEPTH: u32 = 128;
+/// Maximum input size in bytes (16 MiB).
+pub const DEFAULT_MAX_INPUT_BYTES: usize = 16 * 1024 * 1024;
+/// Maximum work counter (steps/tokens) allowed during parsing.
+pub const DEFAULT_MAX_WORK_COUNT: usize = 100_000;
 
 /// Configuration settings for PostgreSQL parser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParserSettings {
 	/// Maximum recursion depth allowed during parsing.
 	pub max_recursion_depth: u32,
+	/// Maximum input size in bytes.
+	pub max_input_bytes: usize,
+	/// Maximum parsing work count.
+	pub max_work_count: usize,
 }
 
 impl Default for ParserSettings {
 	fn default() -> Self {
 		Self {
 			max_recursion_depth: MAX_RECURSION_DEPTH,
+			max_input_bytes: DEFAULT_MAX_INPUT_BYTES,
+			max_work_count: DEFAULT_MAX_WORK_COUNT,
 		}
 	}
 }
@@ -32,7 +42,9 @@ impl Default for ParserSettings {
 pub struct Parser<'a> {
 	lexer: Lexer<'a>,
 	current: Token<'a>,
+	peeked: Option<Token<'a>>,
 	depth: u32,
+	work_count: usize,
 	settings: ParserSettings,
 }
 
@@ -44,12 +56,23 @@ impl<'a> Parser<'a> {
 
 	/// Create a new parser initialized with custom settings.
 	pub fn with_settings(src: &'a str, settings: ParserSettings) -> ParseResult<Self> {
+		if src.len() > settings.max_input_bytes {
+			return Err(ParseError::new(
+				Span::empty(0),
+				ErrorKind::InputSizeLimitExceeded {
+					max: settings.max_input_bytes,
+					actual: src.len(),
+				},
+			));
+		}
 		let mut lexer = Lexer::new(src);
 		let current = lexer.next_token()?;
 		Ok(Self {
 			lexer,
 			current,
+			peeked: None,
 			depth: 0,
+			work_count: 0,
 			settings,
 		})
 	}
@@ -66,9 +89,42 @@ impl<'a> Parser<'a> {
 		&self.current
 	}
 
+	/// Reference to the next lookahead token (2nd token).
+	pub fn peek2(&mut self) -> ParseResult<&Token<'a>> {
+		if self.peeked.is_none() {
+			self.peeked = Some(self.lexer.next_token()?);
+		}
+		if let Some(tok) = &self.peeked {
+			Ok(tok)
+		} else {
+			Err(ParseError::new(
+				self.current.span,
+				ErrorKind::UnexpectedToken {
+					expected: "token",
+					found: "none".to_string(),
+				},
+			))
+		}
+	}
+
+	/// Record work step, erroring if work limit exceeded.
+	#[inline]
+	pub fn record_work(&mut self) -> ParseResult<()> {
+		self.work_count = self.work_count.saturating_add(1);
+		if self.work_count > self.settings.max_work_count {
+			Err(ParseError::new(self.current.span, ErrorKind::WorkLimitExceeded))
+		} else {
+			Ok(())
+		}
+	}
+
 	/// Consume and return the current token, advancing to the next.
 	pub fn bump(&mut self) -> ParseResult<Token<'a>> {
-		let next = self.lexer.next_token()?;
+		self.record_work()?;
+		let next = match self.peeked.take() {
+			Some(tok) => tok,
+			None => self.lexer.next_token()?,
+		};
 		let prev = std::mem::replace(&mut self.current, next);
 		Ok(prev)
 	}
@@ -117,5 +173,31 @@ impl<'a> Parser<'a> {
 	#[inline]
 	pub fn leave_recursion(&mut self) {
 		self.depth = self.depth.saturating_sub(1);
+	}
+
+	/// Decrease recursion depth counter by a given amount.
+	#[inline]
+	pub fn leave_recursion_by(&mut self, n: u32) {
+		self.depth = self.depth.saturating_sub(n);
+	}
+
+	/// Return infix binding power taking 2-token lookahead into account (e.g. `NOT IN`, `NOT
+	/// BETWEEN`).
+	pub fn peek_infix_bp(&mut self) -> ParseResult<Option<(u8, u8, precedence::Associativity)>> {
+		if self.peek().kind == TokenKind::Keyword(crate::lexer::keyword::Keyword::Not) {
+			let next_tok = self.peek2()?;
+			match &next_tok.kind {
+				TokenKind::Keyword(
+					crate::lexer::keyword::Keyword::Between
+					| crate::lexer::keyword::Keyword::In
+					| crate::lexer::keyword::Keyword::Like
+					| crate::lexer::keyword::Keyword::Ilike
+					| crate::lexer::keyword::Keyword::Similar,
+				) => Ok(Some((40, 41, precedence::Associativity::None))),
+				_ => Ok(None),
+			}
+		} else {
+			Ok(precedence::infix_binding_power(&self.peek().kind))
+		}
 	}
 }

@@ -266,7 +266,7 @@ impl<'a> Lexer<'a> {
 				}
 			} else if is_escape && c == '\\' {
 				// Handle escape sequence
-				if let Some(escaped_char) = self.lex_escape_sequence()? {
+				if let Some(escaped_char) = self.lex_escape_sequence(start)? {
 					content.push(escaped_char);
 				}
 			} else {
@@ -279,7 +279,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	/// Helper for C-style escape sequences in `E'...'`.
-	fn lex_escape_sequence(&mut self) -> ParseResult<Option<char>> {
+	fn lex_escape_sequence(&mut self, start: u32) -> ParseResult<Option<char>> {
 		let Some(c) = self.cursor.bump() else {
 			return Ok(None);
 		};
@@ -293,6 +293,15 @@ impl<'a> Lexer<'a> {
 			'\\' => Ok(Some('\\')),
 			'\'' => Ok(Some('\'')),
 			'"' => Ok(Some('"')),
+			'0' if self.cursor.peek().is_none()
+				|| !matches!(self.cursor.peek(), Some('0'..='7')) =>
+			{
+				// Single \0 -> null character
+				Err(ParseError::new(
+					Span::new(start, self.cursor.pos()),
+					ErrorKind::InvalidCharacter("null character not permitted in string literal"),
+				))
+			}
 			'x' => {
 				// Hex byte: \xh or \xhh
 				let mut val: u32 = 0;
@@ -305,6 +314,22 @@ impl<'a> Lexer<'a> {
 					} else {
 						break;
 					}
+				}
+				if digits == 0 {
+					return Err(ParseError::new(
+						Span::new(start, self.cursor.pos()),
+						ErrorKind::InvalidCharacter(
+							"invalid hex escape sequence in string literal",
+						),
+					));
+				}
+				if val == 0 {
+					return Err(ParseError::new(
+						Span::new(start, self.cursor.pos()),
+						ErrorKind::InvalidCharacter(
+							"null character not permitted in string literal",
+						),
+					));
 				}
 				Ok(char::from_u32(val))
 			}
@@ -321,6 +346,14 @@ impl<'a> Lexer<'a> {
 						break;
 					}
 				}
+				if val == 0 {
+					return Err(ParseError::new(
+						Span::new(start, self.cursor.pos()),
+						ErrorKind::InvalidCharacter(
+							"null character not permitted in string literal",
+						),
+					));
+				}
 				Ok(char::from_u32(val))
 			}
 			'u' => {
@@ -330,10 +363,36 @@ impl<'a> Lexer<'a> {
 					if let Some(digit) = self.cursor.bump().and_then(|ch| ch.to_digit(16)) {
 						val = (val * 16) + digit;
 					} else {
-						return Ok(None);
+						return Err(ParseError::new(
+							Span::new(start, self.cursor.pos()),
+							ErrorKind::InvalidCharacter(
+								"invalid unicode escape sequence in string literal",
+							),
+						));
 					}
 				}
-				Ok(char::from_u32(val))
+				if val == 0 {
+					return Err(ParseError::new(
+						Span::new(start, self.cursor.pos()),
+						ErrorKind::InvalidCharacter(
+							"null character not permitted in string literal",
+						),
+					));
+				}
+				if (0xD800..=0xDFFF).contains(&val) {
+					return Err(ParseError::new(
+						Span::new(start, self.cursor.pos()),
+						ErrorKind::InvalidCharacter(
+							"Unicode surrogate not permitted in string literal",
+						),
+					));
+				}
+				char::from_u32(val).map(Some).ok_or_else(|| {
+					ParseError::new(
+						Span::new(start, self.cursor.pos()),
+						ErrorKind::InvalidCharacter("invalid Unicode code point in string literal"),
+					)
+				})
 			}
 			'U' => {
 				// 8-digit hex codepoint: \UXXXXXXXX
@@ -342,10 +401,36 @@ impl<'a> Lexer<'a> {
 					if let Some(digit) = self.cursor.bump().and_then(|ch| ch.to_digit(16)) {
 						val = (val * 16) + digit;
 					} else {
-						return Ok(None);
+						return Err(ParseError::new(
+							Span::new(start, self.cursor.pos()),
+							ErrorKind::InvalidCharacter(
+								"invalid unicode escape sequence in string literal",
+							),
+						));
 					}
 				}
-				Ok(char::from_u32(val))
+				if val == 0 {
+					return Err(ParseError::new(
+						Span::new(start, self.cursor.pos()),
+						ErrorKind::InvalidCharacter(
+							"null character not permitted in string literal",
+						),
+					));
+				}
+				if (0xD800..=0xDFFF).contains(&val) {
+					return Err(ParseError::new(
+						Span::new(start, self.cursor.pos()),
+						ErrorKind::InvalidCharacter(
+							"Unicode surrogate not permitted in string literal",
+						),
+					));
+				}
+				char::from_u32(val).map(Some).ok_or_else(|| {
+					ParseError::new(
+						Span::new(start, self.cursor.pos()),
+						ErrorKind::InvalidCharacter("invalid Unicode code point in string literal"),
+					)
+				})
 			}
 			other => Ok(Some(other)),
 		}
@@ -468,6 +553,7 @@ impl<'a> Lexer<'a> {
 			match self.cursor.peek_char_at(1) {
 				Some('x' | 'X') => {
 					self.cursor.advance_bytes(2);
+					let digits_start = self.cursor.pos();
 					while let Some(c) = self.cursor.peek() {
 						if c.is_ascii_hexdigit() || c == '_' {
 							self.cursor.bump();
@@ -475,12 +561,27 @@ impl<'a> Lexer<'a> {
 							break;
 						}
 					}
+					if self.cursor.pos() == digits_start {
+						return Err(ParseError::new(
+							Span::new(start, self.cursor.pos() + 1),
+							ErrorKind::InvalidDigit,
+						));
+					}
+					if let Some(c) = self.cursor.peek()
+						&& (c.is_alphabetic() || c == '$')
+					{
+						return Err(ParseError::new(
+							Span::new(start, self.cursor.pos() + 1),
+							ErrorKind::InvalidDigit,
+						));
+					}
 					let raw = self.cursor.slice_from(start).unwrap_or("");
 					let span = Span::new(start, self.cursor.pos());
 					return Ok(Token::new(TokenKind::IntegerRaw(raw), span));
 				}
 				Some('o' | 'O') => {
 					self.cursor.advance_bytes(2);
+					let digits_start = self.cursor.pos();
 					while let Some(c) = self.cursor.peek() {
 						if matches!(c, '0'..='7' | '_') {
 							self.cursor.bump();
@@ -488,18 +589,47 @@ impl<'a> Lexer<'a> {
 							break;
 						}
 					}
+					if self.cursor.pos() == digits_start {
+						return Err(ParseError::new(
+							Span::new(start, self.cursor.pos() + 1),
+							ErrorKind::InvalidDigit,
+						));
+					}
+					if let Some(c) = self.cursor.peek()
+						&& (c.is_alphabetic() || c == '$')
+					{
+						return Err(ParseError::new(
+							Span::new(start, self.cursor.pos() + 1),
+							ErrorKind::InvalidDigit,
+						));
+					}
 					let raw = self.cursor.slice_from(start).unwrap_or("");
 					let span = Span::new(start, self.cursor.pos());
 					return Ok(Token::new(TokenKind::IntegerRaw(raw), span));
 				}
 				Some('b' | 'B') => {
 					self.cursor.advance_bytes(2);
+					let digits_start = self.cursor.pos();
 					while let Some(c) = self.cursor.peek() {
 						if matches!(c, '0' | '1' | '_') {
 							self.cursor.bump();
 						} else {
 							break;
 						}
+					}
+					if self.cursor.pos() == digits_start {
+						return Err(ParseError::new(
+							Span::new(start, self.cursor.pos() + 1),
+							ErrorKind::InvalidDigit,
+						));
+					}
+					if let Some(c) = self.cursor.peek()
+						&& (c.is_alphabetic() || c == '$')
+					{
+						return Err(ParseError::new(
+							Span::new(start, self.cursor.pos() + 1),
+							ErrorKind::InvalidDigit,
+						));
 					}
 					let raw = self.cursor.slice_from(start).unwrap_or("");
 					let span = Span::new(start, self.cursor.pos());
@@ -547,6 +677,15 @@ impl<'a> Lexer<'a> {
 					break;
 				}
 			}
+		}
+
+		if let Some(c) = self.cursor.peek()
+			&& (c.is_alphabetic() || c == '$')
+		{
+			return Err(ParseError::new(
+				Span::new(start, self.cursor.pos() + 1),
+				ErrorKind::InvalidDigit,
+			));
 		}
 
 		let raw = self.cursor.slice_from(start).unwrap_or("");

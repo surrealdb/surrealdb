@@ -39,6 +39,15 @@ pub enum ErrorKind {
 	#[error("Recursion limit exceeded")]
 	RecursionLimitExceeded,
 
+	#[error("Input size limit exceeded: {actual} bytes exceeds maximum of {max} bytes")]
+	InputSizeLimitExceeded {
+		max: usize,
+		actual: usize,
+	},
+
+	#[error("Parser work limit exceeded")]
+	WorkLimitExceeded,
+
 	#[error("Lexer error: {0}")]
 	Lexer(String),
 
