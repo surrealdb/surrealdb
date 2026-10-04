@@ -23,7 +23,9 @@ pub fn translate_expr(
 			..
 		} => {
 			match &ctx.param_style {
-				ParamStyle::UnderscoreIndexed => write!(out, "$_{id}")?,
+				ParamStyle::UnderscoreIndexed => {
+					write!(out, "${}", crate::translate::context::positional_param_name(*id))?
+				}
 				ParamStyle::Verbatim => write!(out, "${id}")?,
 				ParamStyle::NamedPrefix(p) => write!(out, "${p}{id}")?,
 			}

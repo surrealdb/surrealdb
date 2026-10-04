@@ -136,6 +136,7 @@ async fn connect_and_handshake(addr: std::net::SocketAddr) -> TcpStream {
 	stream
 }
 
+#[derive(Debug)]
 enum QueryResult {
 	Ok,
 	Error {
@@ -365,6 +366,52 @@ async fn test_mywire_dialect_switching_and_fail_closed() {
 			assert_eq!(rows.len(), 1);
 		}
 		_ => panic!("Expected ResultSet from SELECT"),
+	}
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_parameter_placeholder_rejection() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// In MySQL text protocol (COM_QUERY), unbound '?' parameter placeholders
+	// must be rejected fail-closed rather than returning silent NULL.
+	let mut q = vec![COM_QUERY];
+	q.extend_from_slice(b"SELECT ?;");
+	write_packet(&mut stream, 0, &q).await;
+
+	let res = read_query_response(&mut stream).await;
+	match res {
+		QueryResult::Error {
+			code,
+			message,
+			..
+		} => {
+			assert_eq!(code, 1064);
+			assert!(
+				message.contains("parameter placeholder") || message.contains("not supported"),
+				"Expected error mentioning parameter placeholders, got: {message}"
+			);
+		}
+		_ => panic!("Expected Error packet for SELECT ?, got: {res:?}"),
+	}
+
+	// Also in INSERT VALUES (?)
+	let mut q2 = vec![COM_QUERY];
+	q2.extend_from_slice(b"INSERT INTO person (name) VALUES (?);");
+	write_packet(&mut stream, 0, &q2).await;
+
+	let res2 = read_query_response(&mut stream).await;
+	match res2 {
+		QueryResult::Error {
+			code,
+			..
+		} => {
+			assert_eq!(code, 1064);
+		}
+		_ => panic!("Expected Error packet for INSERT VALUES (?), got: {res2:?}"),
 	}
 
 	shutdown.cancel();

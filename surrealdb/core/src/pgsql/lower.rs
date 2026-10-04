@@ -310,7 +310,9 @@ pub fn lower_expr(expr: &Expr) -> Result<LogicalExpr, LowerError> {
 		Expr::Param {
 			id,
 			..
-		} => Ok(LogicalExpr::Param(surrealdb_expr::expr::Param::from(format!("param_{id}")))),
+		} => Ok(LogicalExpr::Param(surrealdb_expr::expr::Param::from(
+			surrealdb_types::positional_param_name(*id as usize),
+		))),
 		Expr::UnaryOp {
 			op,
 			expr,
@@ -374,6 +376,7 @@ pub fn lower_expr(expr: &Expr) -> Result<LogicalExpr, LowerError> {
 				"avg" => "math::mean",
 				"min" => "math::min",
 				"max" => "math::max",
+				"abs" => "math::abs",
 				"lower" => "string::lowercase",
 				"upper" => "string::uppercase",
 				"length" => "string::len",

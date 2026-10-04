@@ -1,5 +1,14 @@
 //! Translation context and configuration options for MySQL to SurrealQL.
 
+/// Prefix used for positional parameters when translating to SurrealQL (e.g. `$_1`).
+pub const POSITIONAL_PARAM_PREFIX: &str = "_";
+
+/// Generate a parameter identifier for a 1-based positional parameter index.
+#[inline]
+pub fn positional_param_name(id: usize) -> String {
+	format!("{POSITIONAL_PARAM_PREFIX}{id}")
+}
+
 /// Parameter rewriting style when translating MySQL `?` positional parameters.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ParamStyle {

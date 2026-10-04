@@ -5,7 +5,7 @@ use std::fmt::Write;
 use crate::ast::expr::{Expr, TruthValue};
 use crate::ast::literal::Literal;
 use crate::ast::operator::{BinaryOperator, UnaryOperator};
-use crate::translate::context::{ParamStyle, TranslationContext};
+use crate::translate::context::TranslationContext;
 use crate::translate::error::TranslationError;
 use crate::translate::stmt::translate_select;
 
@@ -42,13 +42,9 @@ pub fn translate_expr(
 			write!(out, "$__{name}")?;
 			Ok(())
 		}
-		Expr::Param(idx, _) => {
-			match &ctx.param_style {
-				ParamStyle::UnderscoreIndexed => write!(out, "$_{idx}")?,
-				ParamStyle::NamedPrefix(p) => write!(out, "${p}{idx}")?,
-			}
-			Ok(())
-		}
+		Expr::Param(idx, _) => Err(TranslationError::Unsupported(format!(
+			"parameter placeholder '?{idx}' is not supported in simple queries without prepared statements"
+		))),
 		Expr::UnaryOp {
 			op,
 			expr,

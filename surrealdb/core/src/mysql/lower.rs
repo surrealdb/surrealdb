@@ -281,9 +281,9 @@ pub fn lower_expr(expr: &Expr) -> Result<LogicalExpr, LowerError> {
 		Expr::UserVar(name, _) => {
 			Ok(LogicalExpr::Param(surrealdb_expr::expr::Param::from(name.clone())))
 		}
-		Expr::Param(idx, _) => {
-			Ok(LogicalExpr::Param(surrealdb_expr::expr::Param::from(format!("param_{idx}"))))
-		}
+		Expr::Param(idx, _) => Err(LowerError::UnsupportedExpr(format!(
+			"parameter placeholder '?{idx}' is not supported in simple queries without prepared statements"
+		))),
 		Expr::UnaryOp {
 			op,
 			expr,
@@ -354,6 +354,7 @@ pub fn lower_expr(expr: &Expr) -> Result<LogicalExpr, LowerError> {
 				"avg" => "math::mean",
 				"min" => "math::min",
 				"max" => "math::max",
+				"abs" => "math::abs",
 				"lower" => "string::lowercase",
 				"upper" => "string::uppercase",
 				"length" => "string::len",

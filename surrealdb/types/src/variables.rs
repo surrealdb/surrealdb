@@ -6,6 +6,15 @@ use serde::{Deserialize, Serialize};
 use crate as surrealdb_types;
 use crate::{Object, SurrealValue, Value};
 
+/// Prefix used for positional query parameter variable names (e.g. `_1`, `_2`).
+pub const POSITIONAL_PARAM_PREFIX: &str = "_";
+
+/// Generate a variable name for a 1-based positional parameter index.
+#[inline]
+pub fn positional_param_name(index: usize) -> String {
+	format!("{POSITIONAL_PARAM_PREFIX}{index}")
+}
+
 /// Represents a set of variables that can be used in a query.
 #[derive(Clone, Debug, Default, Eq, PartialEq, SurrealValue, Serialize, Deserialize)]
 #[surreal(crate = "crate")]

@@ -906,7 +906,8 @@ impl Connection {
 				let stmts = surrealdb_pgsql::parse_statements(query)
 					.map_err(|err| PgError::syntax(err.to_string()))?;
 				let empty = stmts.is_empty();
-				let param_count = param_types.len();
+				let (_, positional) = rewrite_positional_params(query);
+				let param_count = param_types.len().max(positional);
 				(query.to_string(), None, param_count, empty)
 			}
 			Dialect::Gql | Dialect::MySql => {
@@ -971,7 +972,9 @@ impl Connection {
 			let value = encode::decode_param(raw.as_deref(), oid, format)?;
 			// Positional `$1..$n` were rewritten to `$_1..$_n`, so bind to the
 			// matching `_1.._n` variable names.
-			vars.insert(format!("_{}", i + 1), value);
+			let param_num = i + 1;
+			vars.insert(surrealdb_types::positional_param_name(param_num), value.clone());
+			vars.insert(format!("param_{param_num}"), value);
 		}
 		self.portals.insert(
 			portal,
