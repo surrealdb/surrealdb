@@ -246,8 +246,13 @@ impl BoundSelect {
 				| BoundBinaryOp::GreaterThanEqual
 				| BoundBinaryOp::And
 				| BoundBinaryOp::Or
-				| BoundBinaryOp::NullSafeEqual => SqlType::Bool,
+				| BoundBinaryOp::NullSafeEqual
+				| BoundBinaryOp::DistinctFrom
+				| BoundBinaryOp::Like
+				| BoundBinaryOp::ILike
+				| BoundBinaryOp::Regexp => SqlType::Bool,
 				BoundBinaryOp::Concat => SqlType::Text,
+				BoundBinaryOp::IntDiv => SqlType::Int8,
 				BoundBinaryOp::Add
 				| BoundBinaryOp::Subtract
 				| BoundBinaryOp::Multiply

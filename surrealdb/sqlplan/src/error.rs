@@ -40,6 +40,12 @@ pub enum PlanError {
 	#[error("parameter ${0} out of range")]
 	ParameterOutOfRange(usize),
 
+	#[error("division by zero")]
+	DivisionByZero,
+
+	#[error("invalid input syntax for type: {0}")]
+	InvalidTextRepresentation(String),
+
 	#[error("unsupported statement: {0}")]
 	UnsupportedStatement(String),
 
@@ -67,6 +73,8 @@ impl PlanError {
 			Self::AggregateNotAllowed(_) | Self::WindowNotAllowed(_) => "42803", // grouping_error
 			Self::SubqueryMustHaveAlias => "42601", // syntax_error
 			Self::ParameterOutOfRange(_) => "22023", // invalid_parameter_value
+			Self::DivisionByZero => "22012",        // division_by_zero
+			Self::InvalidTextRepresentation(_) => "22P02", // invalid_text_representation
 			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => "0A000", /* feature_not_supported */
 			Self::Custom(_) => "42000",
 		}
@@ -84,6 +92,8 @@ impl PlanError {
 			Self::AggregateNotAllowed(_) | Self::WindowNotAllowed(_) => 1111, // ER_INVALID_GROUP_FUNC_USE
 			Self::SubqueryMustHaveAlias => 1248, // ER_DERIVED_MUST_HAVE_ALIAS
 			Self::ParameterOutOfRange(_) => 1210, // ER_WRONG_ARGUMENTS
+			Self::DivisionByZero => 1365,        // ER_DIVISION_BY_ZERO
+			Self::InvalidTextRepresentation(_) => 1264, // ER_DATA_OUT_OF_RANGE
 			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => 1235, // ER_NOT_SUPPORTED_YET
 			Self::Custom(_) => 1064,
 		}

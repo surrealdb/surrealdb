@@ -126,6 +126,16 @@ pub enum BoundBinaryOp {
 	Concat,
 	/// Null-safe equal (`<=>` in MySQL, `IS NOT DISTINCT FROM` in PostgreSQL).
 	NullSafeEqual,
+	/// Null-safe not equal (`IS DISTINCT FROM` in PostgreSQL).
+	DistinctFrom,
+	/// SQL pattern matching (`LIKE`).
+	Like,
+	/// Case-insensitive SQL pattern matching (`ILIKE`).
+	ILike,
+	/// Regular expression match (`REGEXP` / `~`).
+	Regexp,
+	/// Integer division (`DIV` in MySQL).
+	IntDiv,
 }
 
 /// Unary operator in Bound IR.

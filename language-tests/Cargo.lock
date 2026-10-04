@@ -5548,6 +5548,7 @@ dependencies = [
 name = "surrealdb-sqlplan"
 version = "3.4.0-nightly"
 dependencies = [
+ "regex",
  "surrealdb-expr",
  "surrealdb-mysql",
  "surrealdb-pgsql",

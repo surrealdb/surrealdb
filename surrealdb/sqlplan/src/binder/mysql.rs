@@ -351,6 +351,9 @@ pub fn bind_expr(
 				BinaryOperator::And => BoundBinaryOp::And,
 				BinaryOperator::Or => BoundBinaryOp::Or,
 				BinaryOperator::NullSafeEqual => BoundBinaryOp::NullSafeEqual,
+				BinaryOperator::IntDiv => BoundBinaryOp::IntDiv,
+				BinaryOperator::Like => BoundBinaryOp::Like,
+				BinaryOperator::Regexp | BinaryOperator::Rlike => BoundBinaryOp::Regexp,
 				_ => return Err(PlanError::UnsupportedExpression(format!("Binary op {op:?}"))),
 			};
 			Ok(BoundExpr::Binary {

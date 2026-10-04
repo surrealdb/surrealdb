@@ -777,7 +777,12 @@ impl JoinShape {
 				let mut seen = Object::default();
 				seen.insert(alias.clone(), row.clone());
 				let seen = Value::Object(seen);
-				Ok(Some(evaluate_keys(build_keys, eval, &seen).await?))
+				let keys = evaluate_keys(build_keys, eval, &seen).await?;
+				if keys.iter().any(|k| matches!(k, Value::Null | Value::None)) {
+					Ok(None)
+				} else {
+					Ok(Some(keys))
+				}
 			}
 		}
 	}
@@ -792,7 +797,14 @@ impl JoinShape {
 			JoinShape::Documents {
 				probe_keys,
 				..
-			} => Ok(Some(evaluate_keys(probe_keys, eval, row).await?)),
+			} => {
+				let keys = evaluate_keys(probe_keys, eval, row).await?;
+				if keys.iter().any(|k| matches!(k, Value::Null | Value::None)) {
+					Ok(None)
+				} else {
+					Ok(Some(keys))
+				}
+			}
 		}
 	}
 

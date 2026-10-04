@@ -37,6 +37,12 @@ pub struct QueryScope {
 	pub targets: Vec<BoundTarget>,
 }
 
+impl Default for QueryScope {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl QueryScope {
 	/// Create an empty root scope.
 	pub fn new() -> Self {

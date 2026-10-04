@@ -18,6 +18,7 @@ surrealdb-mysql = { workspace = true }
 surrealdb-pgsql = { workspace = true }
 surrealdb-strand = { workspace = true }
 surrealdb-types = { workspace = true }
+regex = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

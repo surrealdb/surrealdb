@@ -390,6 +390,30 @@ pub fn bind_expr(
 				surrealdb_pgsql::ast::op::BinaryOperator::And => BoundBinaryOp::And,
 				surrealdb_pgsql::ast::op::BinaryOperator::Or => BoundBinaryOp::Or,
 				surrealdb_pgsql::ast::op::BinaryOperator::Concat => BoundBinaryOp::Concat,
+				surrealdb_pgsql::ast::op::BinaryOperator::Like => BoundBinaryOp::Like,
+				surrealdb_pgsql::ast::op::BinaryOperator::NotLike => {
+					return Ok(BoundExpr::Unary {
+						op: BoundUnaryOp::Not,
+						expr: Box::new(BoundExpr::Binary {
+							left: Box::new(l),
+							op: BoundBinaryOp::Like,
+							right: Box::new(r),
+						}),
+					});
+				}
+				surrealdb_pgsql::ast::op::BinaryOperator::ILike => BoundBinaryOp::ILike,
+				surrealdb_pgsql::ast::op::BinaryOperator::NotILike => {
+					return Ok(BoundExpr::Unary {
+						op: BoundUnaryOp::Not,
+						expr: Box::new(BoundExpr::Binary {
+							left: Box::new(l),
+							op: BoundBinaryOp::ILike,
+							right: Box::new(r),
+						}),
+					});
+				}
+				surrealdb_pgsql::ast::op::BinaryOperator::RegexMatch
+				| surrealdb_pgsql::ast::op::BinaryOperator::RegexMatchCi => BoundBinaryOp::Regexp,
 				_ => return Err(PlanError::UnsupportedExpression(format!("Binary op {op:?}"))),
 			};
 			Ok(BoundExpr::Binary {
@@ -499,6 +523,25 @@ pub fn bind_expr(
 			expr,
 			..
 		} => bind_expr(expr, scope, policy),
+		Expr::IsDistinctFrom {
+			left,
+			right,
+			negated,
+			..
+		} => {
+			let l = bind_expr(left, scope, policy)?;
+			let r = bind_expr(right, scope, policy)?;
+			let op = if *negated {
+				BoundBinaryOp::NullSafeEqual
+			} else {
+				BoundBinaryOp::DistinctFrom
+			};
+			Ok(BoundExpr::Binary {
+				left: Box::new(l),
+				op,
+				right: Box::new(r),
+			})
+		}
 		_ => Err(PlanError::UnsupportedExpression(format!("{expr:?}"))),
 	}
 }
