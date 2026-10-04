@@ -37,22 +37,26 @@ pub fn translate_statement(
 				"DML statements must be lowered via surrealdb_sqlplan typed write lowering".into(),
 			))
 		}
-		Statement::CreateTable(s) => translate_create_table(s, ctx, out),
-		Statement::Drop(s) => translate_drop(s, out),
+		Statement::CreateTable(_)
+		| Statement::CreateIndex(_)
+		| Statement::CreateView(_)
+		| Statement::AlterTable(_)
+		| Statement::Drop(_) => {
+			Err(TranslationError::Unsupported(
+				"DDL statements must be lowered via surrealdb_sqlplan typed DDL lowering".into(),
+			))
+		}
 		Statement::Transaction(s) => translate_transaction(s, out),
 		Statement::Set(s) => translate_set(s, out),
 		Statement::Show(s) => translate_show(s, out),
 		Statement::Reset(s) => translate_reset(s, out),
 		Statement::Explain(s) => translate_explain(s, ctx, out),
 		Statement::Empty => Ok(()),
-		Statement::CreateIndex(s) => translate_create_index(s, ctx, out),
-		Statement::CreateView(s) => translate_create_view(s, ctx, out),
 		Statement::CreateSchema(_) => {
 			// In SurrealDB, schemas are namespaces or databases.
 			out.push_str("-- CREATE SCHEMA (handled at connection scope)");
 			Ok(())
 		}
-		Statement::AlterTable(s) => translate_alter_table(s, ctx, out),
 		Statement::CreatePropertyGraph(s) => translate_create_property_graph(s, out),
 		Statement::DropPropertyGraph(s) => translate_drop_property_graph(s, out),
 		Statement::Prepare(_) | Statement::Execute(_) | Statement::Deallocate(_) => {
@@ -304,91 +308,6 @@ fn translate_table_ref(
 	}
 }
 
-fn translate_create_table(
-	create: &CreateTableStmt,
-	_ctx: &TranslationContext,
-	out: &mut String,
-) -> Result<(), TranslationError> {
-	let tbl_name = match create.name.parts.last() {
-		Some(p) => p.as_str(),
-		None => {
-			return Err(TranslationError::Invalid("Empty table name".to_string()));
-		}
-	};
-
-	writeln!(out, "DEFINE TABLE {tbl_name} SCHEMAFULL;")?;
-
-	for col in &create.columns {
-		let col_type = match col.data_type.name.parts.last() {
-			Some(t) => match t.to_ascii_lowercase().as_str() {
-				"int" | "integer" | "int2" | "int4" | "int8" | "bigint" | "smallint" => "int",
-				"float" | "float4" | "float8" | "real" | "numeric" | "decimal" => "float",
-				"text" | "varchar" | "char" | "bpchar" | "string" => "string",
-				"bool" | "boolean" => "bool",
-				"date" | "time" | "timestamp" | "timestamptz" => "datetime",
-				"json" | "jsonb" => "object",
-				"bytea" => "bytes",
-				_ => "string",
-			},
-			None => "string",
-		};
-
-		write!(out, "DEFINE FIELD {} ON TABLE {tbl_name} TYPE {col_type}", col.name)?;
-
-		for con in &col.constraints {
-			if matches!(con, ColumnConstraint::NotNull) {
-				out.push_str(" ASSERT $value != NONE");
-			}
-		}
-		writeln!(out, ";")?;
-
-		for con in &col.constraints {
-			if matches!(con, ColumnConstraint::PrimaryKey) {
-				writeln!(
-					out,
-					"DEFINE INDEX {tbl_name}_{}_pk ON TABLE {tbl_name} COLUMNS {} UNIQUE;",
-					col.name, col.name
-				)?;
-			}
-		}
-	}
-
-	for con in &create.constraints {
-		if let TableConstraint::PrimaryKey(cols) = con {
-			let cols_joined = cols.join(", ");
-			let cols_name = cols.join("_");
-			writeln!(
-				out,
-				"DEFINE INDEX {tbl_name}_{cols_name}_pk ON TABLE {tbl_name} COLUMNS {cols_joined} UNIQUE;"
-			)?;
-		}
-	}
-
-	Ok(())
-}
-
-fn translate_drop(drop: &DropStmt, out: &mut String) -> Result<(), TranslationError> {
-	let mut first = true;
-	for name in &drop.names {
-		if !first {
-			out.push('\n');
-		}
-		first = false;
-		let tbl_name = match name.parts.last() {
-			Some(p) => p.as_str(),
-			None => {
-				return Err(TranslationError::Invalid("Empty object name".to_string()));
-			}
-		};
-		write!(out, "REMOVE TABLE ")?;
-		if drop.if_exists {
-			out.push_str("IF EXISTS ");
-		}
-		write!(out, "{tbl_name};")?;
-	}
-	Ok(())
-}
-
 fn translate_transaction(tx: &TransactionStmt, out: &mut String) -> Result<(), TranslationError> {
 	match tx {
 		TransactionStmt::Begin {
@@ -447,106 +366,6 @@ fn translate_explain(
 ) -> Result<(), TranslationError> {
 	out.push_str("EXPLAIN ");
 	translate_statement(&explain.statement, ctx, out)?;
-	Ok(())
-}
-
-fn translate_create_index(
-	idx: &CreateIndexStmt,
-	_ctx: &TranslationContext,
-	out: &mut String,
-) -> Result<(), TranslationError> {
-	let tbl_name = match idx.table.parts.last() {
-		Some(p) => p.as_str(),
-		None => {
-			return Err(TranslationError::Invalid("Empty table name".to_string()));
-		}
-	};
-	let idx_name = match &idx.name {
-		Some(n) => n.clone(),
-		None => format!("{tbl_name}_idx"),
-	};
-
-	write!(out, "DEFINE INDEX {idx_name} ON TABLE {tbl_name} COLUMNS ")?;
-	let mut first = true;
-	for col in &idx.columns {
-		if !first {
-			out.push_str(", ");
-		}
-		first = false;
-		if let Expr::ColumnRef(cr) = &col.expr
-			&& let Some(name) = cr.fields.last()
-		{
-			out.push_str(name);
-		}
-	}
-	if idx.unique {
-		out.push_str(" UNIQUE");
-	}
-	out.push(';');
-	Ok(())
-}
-
-fn translate_create_view(
-	view: &CreateViewStmt,
-	ctx: &TranslationContext,
-	out: &mut String,
-) -> Result<(), TranslationError> {
-	let view_name = match view.name.parts.last() {
-		Some(p) => p.as_str(),
-		None => {
-			return Err(TranslationError::Invalid("Empty view name".to_string()));
-		}
-	};
-
-	write!(out, "DEFINE TABLE {view_name} AS ")?;
-	let mut query_sql = String::new();
-	translate_select(&view.query, ctx, &mut query_sql)?;
-	out.push_str(query_sql.trim_end_matches(';'));
-	out.push(';');
-	Ok(())
-}
-
-fn translate_alter_table(
-	alter: &AlterTableStmt,
-	_ctx: &TranslationContext,
-	out: &mut String,
-) -> Result<(), TranslationError> {
-	let tbl_name = match alter.name.parts.last() {
-		Some(p) => p.as_str(),
-		None => {
-			return Err(TranslationError::Invalid("Empty table name".to_string()));
-		}
-	};
-
-	for action in &alter.actions {
-		match action {
-			AlterTableAction::AddColumn {
-				column,
-				..
-			} => {
-				writeln!(out, "DEFINE FIELD {} ON TABLE {tbl_name};", column.name)?;
-			}
-			AlterTableAction::DropColumn {
-				name,
-				..
-			} => {
-				writeln!(out, "REMOVE FIELD {name} ON TABLE {tbl_name};")?;
-			}
-			AlterTableAction::AlterColumnType {
-				name,
-				data_type,
-			} => {
-				let type_str = match data_type.name.parts.last() {
-					Some(t) => t.as_str(),
-					None => "any",
-				};
-				writeln!(out, "DEFINE FIELD {name} ON TABLE {tbl_name} TYPE {type_str};")?;
-			}
-			_ => {
-				writeln!(out, "-- ALTER TABLE {tbl_name} action")?;
-			}
-		}
-	}
 	Ok(())
 }
 

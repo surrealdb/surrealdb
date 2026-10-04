@@ -841,3 +841,64 @@ async fn test_mywire_honest_session_fail_closed() {
 
 	shutdown.cancel();
 }
+
+#[tokio::test]
+async fn test_mywire_ddl_matrix() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. CREATE TABLE with constraints
+	let res = query_mysql(
+		&mut stream,
+		"CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(100) UNIQUE);",
+	)
+	.await;
+	assert!(
+		matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }),
+		"CREATE TABLE users failed"
+	);
+
+	// 2. INSERT into users
+	let res = query_mysql(
+		&mut stream,
+		"INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@mysql.com');",
+	)
+	.await;
+	assert!(
+		matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }),
+		"INSERT into users failed"
+	);
+
+	// 3. SELECT from users
+	let res = query_mysql(&mut stream, "SELECT name, email FROM users;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 1);
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("Alice"));
+			assert_eq!(cols[1].as_deref(), Some("alice@mysql.com"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 4. DROP TABLE
+	let res = query_mysql(&mut stream, "DROP TABLE users;").await;
+	assert!(
+		matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }),
+		"DROP TABLE users failed"
+	);
+
+	// 5. Multiple table drop
+	let _ = query_mysql(&mut stream, "CREATE TABLE t1 (id INT PRIMARY KEY);").await;
+	let _ = query_mysql(&mut stream, "CREATE TABLE t2 (id INT PRIMARY KEY);").await;
+	let res = query_mysql(&mut stream, "DROP TABLE t1, t2;").await;
+	assert!(
+		matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }),
+		"DROP TABLE t1, t2 failed"
+	);
+
+	shutdown.cancel();
+}

@@ -87,6 +87,16 @@ pub(crate) fn parse_to_statements(
 					crate::sql::Expr::from(expr),
 				)));
 			}
+			surrealdb_mysql::ast::stmt::Statement::CreateTable(_)
+			| surrealdb_mysql::ast::stmt::Statement::DropTable(_) => {
+				let exprs = surrealdb_sqlplan::lower_mysql_ddl(&stmt)
+					.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
+				for expr in exprs {
+					statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
+						crate::sql::Expr::from(expr),
+					)));
+				}
+			}
 			_ => {
 				let mut surql_text = String::new();
 				surrealdb_mysql::translate::translate_statement(

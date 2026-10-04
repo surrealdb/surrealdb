@@ -80,6 +80,19 @@ pub(crate) fn parse_to_statements(
 					crate::sql::Expr::from(expr),
 				)));
 			}
+			surrealdb_pgsql::ast::stmt::Statement::CreateTable(_)
+			| surrealdb_pgsql::ast::stmt::Statement::CreateIndex(_)
+			| surrealdb_pgsql::ast::stmt::Statement::CreateView(_)
+			| surrealdb_pgsql::ast::stmt::Statement::AlterTable(_)
+			| surrealdb_pgsql::ast::stmt::Statement::Drop(_) => {
+				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(&stmt)
+					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
+				for expr in exprs {
+					statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
+						crate::sql::Expr::from(expr),
+					)));
+				}
+			}
 			_ => {
 				let mut surql_text = String::new();
 				surrealdb_pgsql::translate::translate_statement(

@@ -98,3 +98,18 @@ fn test_translate_transactions() {
 	let surql = translate_sql(sql).unwrap();
 	assert_eq!(surql, "CANCEL TRANSACTION;");
 }
+
+#[test]
+fn test_translate_ddl_unsupported_for_typed_lowering() {
+	let create_sql = "CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100))";
+	assert!(matches!(
+		translate_sql(create_sql),
+		Err(surrealdb_mysql::TranslationError::Unsupported(_))
+	));
+
+	let drop_sql = "DROP TABLE IF EXISTS users";
+	assert!(matches!(
+		translate_sql(drop_sql),
+		Err(surrealdb_mysql::TranslationError::Unsupported(_))
+	));
+}

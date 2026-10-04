@@ -3,9 +3,8 @@
 use std::fmt::Write;
 
 use crate::ast::stmt::{
-	CreateTableStmt, DescribeStmt, DropTableStmt, ExplainStmt, JoinType, LimitClause, OrderByExpr,
-	QualifiedName, SelectItem, SelectStmt, SetStmt, ShowStmt, Statement, TableRef, TransactionStmt,
-	UseStmt, VariableTarget,
+	DescribeStmt, ExplainStmt, JoinType, LimitClause, OrderByExpr, QualifiedName, SelectItem,
+	SelectStmt, SetStmt, ShowStmt, Statement, TableRef, TransactionStmt, UseStmt, VariableTarget,
 };
 use crate::translate::context::TranslationContext;
 use crate::translate::error::TranslationError;
@@ -26,8 +25,9 @@ pub fn translate_statement(
 		| Statement::Truncate(_) => Err(TranslationError::Unsupported(
 			"DML statements must be lowered via surrealdb_sqlplan typed write lowering".into(),
 		)),
-		Statement::CreateTable(s) => translate_create_table(s, ctx, out),
-		Statement::DropTable(s) => translate_drop_table(s, out),
+		Statement::CreateTable(_) | Statement::DropTable(_) => Err(TranslationError::Unsupported(
+			"DDL statements must be lowered via surrealdb_sqlplan typed DDL lowering".into(),
+		)),
 		Statement::Use(s) => translate_use(s, out),
 		Statement::Set(s) => translate_set(s, ctx, out),
 		Statement::Show(s) => translate_show(s, out),
@@ -247,62 +247,6 @@ fn translate_qualified_name(
 			out.push(':');
 		}
 		out.push_str(part);
-	}
-	Ok(())
-}
-
-pub fn translate_create_table(
-	crt: &CreateTableStmt,
-	ctx: &TranslationContext,
-	out: &mut String,
-) -> Result<(), TranslationError> {
-	out.push_str("DEFINE TABLE ");
-	translate_qualified_name(&crt.name, out)?;
-	out.push_str(" SCHEMAFULL;\n");
-	for col in &crt.columns {
-		write!(out, "DEFINE FIELD {} ON TABLE ", col.name)?;
-		translate_qualified_name(&crt.name, out)?;
-		writeln!(out, " TYPE {};", map_mysql_type_to_surreal(&col.data_type))?;
-		if let Some(def) = &col.default {
-			write!(out, "DEFINE FIELD {} ON TABLE ", col.name)?;
-			translate_qualified_name(&crt.name, out)?;
-			out.push_str(" DEFAULT ");
-			translate_expr(def, ctx, out)?;
-			out.push_str(";\n");
-		}
-	}
-	Ok(())
-}
-
-fn map_mysql_type_to_surreal(data_type: &str) -> &'static str {
-	let lower = data_type.to_ascii_lowercase();
-	if lower.starts_with("int")
-		|| lower.starts_with("tinyint")
-		|| lower.starts_with("smallint")
-		|| lower.starts_with("bigint")
-	{
-		"int"
-	} else if lower.starts_with("float")
-		|| lower.starts_with("double")
-		|| lower.starts_with("decimal")
-	{
-		"float"
-	} else if lower.starts_with("bool") {
-		"bool"
-	} else if lower.starts_with("json") {
-		"object"
-	} else if lower.starts_with("datetime") || lower.starts_with("timestamp") {
-		"datetime"
-	} else {
-		"string"
-	}
-}
-
-pub fn translate_drop_table(drp: &DropTableStmt, out: &mut String) -> Result<(), TranslationError> {
-	for name in &drp.names {
-		out.push_str("REMOVE TABLE ");
-		translate_qualified_name(name, out)?;
-		out.push_str(";\n");
 	}
 	Ok(())
 }

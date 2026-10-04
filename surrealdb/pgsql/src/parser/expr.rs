@@ -863,10 +863,31 @@ impl<'a> Parser<'a> {
 
 	/// Parse a PostgreSQL data type name (e.g. `INTEGER`, `VARCHAR(255)`, `TEXT[]`).
 	pub fn parse_type_name(&mut self) -> ParseResult<TypeName> {
-		let name = self.parse_qualified_name()?;
+		let mut name = self.parse_qualified_name()?;
 		let mut modifiers = Vec::new();
 		let mut array_bounds = Vec::new();
 		let mut end_span = name.span;
+
+		// Check for multi-word types like DOUBLE PRECISION or CHARACTER VARYING
+		if let Some(last_mut) = name.parts.last_mut() {
+			if last_mut.eq_ignore_ascii_case("double")
+				&& let Some(tok_text) = self.peek().span.slice(self.src())
+				&& tok_text.eq_ignore_ascii_case("precision")
+			{
+				let prec_tok = self.bump()?;
+				end_span = end_span.merge(prec_tok.span);
+				name.span = end_span;
+				last_mut.push_str(" precision");
+			} else if last_mut.eq_ignore_ascii_case("character")
+				&& let Some(tok_text) = self.peek().span.slice(self.src())
+				&& tok_text.eq_ignore_ascii_case("varying")
+			{
+				let var_tok = self.bump()?;
+				end_span = end_span.merge(var_tok.span);
+				name.span = end_span;
+				last_mut.push_str(" varying");
+			}
+		}
 
 		// Check for modifiers e.g. `(255)` or `(10, 2)`
 		if self.eat(&TokenKind::LParen)? {

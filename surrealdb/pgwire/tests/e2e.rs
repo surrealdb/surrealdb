@@ -810,3 +810,71 @@ async fn test_pgwire_honest_session_fail_closed() {
 
 	shutdown.cancel();
 }
+
+#[tokio::test]
+async fn test_pgwire_ddl_matrix() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. CREATE TABLE with constraints, types, defaults
+	let (_, last) = run_simple_query(
+		&mut stream,
+		"CREATE TABLE accounts (
+			id SERIAL PRIMARY KEY,
+			username VARCHAR(50) NOT NULL,
+			email TEXT UNIQUE,
+			balance NUMERIC(10, 2) DEFAULT 100.50,
+			is_active BOOLEAN DEFAULT true
+		);",
+	)
+	.await;
+	assert_eq!(last, b'C', "CREATE TABLE accounts failed");
+
+	// Verify insertion into the created table
+	let (_, last) = run_simple_query(
+		&mut stream,
+		"INSERT INTO accounts (id, username, email) VALUES (1, 'alice', 'alice@example.com');",
+	)
+	.await;
+	assert_eq!(last, b'C', "INSERT into accounts failed");
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT username, email FROM accounts;").await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 1);
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("alice"));
+	assert_eq!(cols[1].as_deref(), Some("alice@example.com"));
+
+	// 2. CREATE INDEX
+	let (_, last) =
+		run_simple_query(&mut stream, "CREATE INDEX idx_accounts_username ON accounts (username);")
+			.await;
+	assert_eq!(last, b'C', "CREATE INDEX failed");
+
+	// 3. CREATE VIEW
+	let (_, last) = run_simple_query(
+		&mut stream,
+		"CREATE VIEW v_active_accounts AS SELECT id, username FROM accounts WHERE is_active = true;",
+	)
+	.await;
+	assert_eq!(last, b'C', "CREATE VIEW failed");
+
+	// 4. ALTER TABLE ADD COLUMN
+	let (_, last) =
+		run_simple_query(&mut stream, "ALTER TABLE accounts ADD COLUMN bio TEXT;").await;
+	assert_eq!(last, b'C', "ALTER TABLE ADD COLUMN failed");
+
+	// 5. ALTER TABLE DROP COLUMN
+	let (_, last) = run_simple_query(&mut stream, "ALTER TABLE accounts DROP COLUMN bio;").await;
+	assert_eq!(last, b'C', "ALTER TABLE DROP COLUMN failed");
+
+	// 6. DROP VIEW
+	let (_, last) = run_simple_query(&mut stream, "DROP VIEW v_active_accounts;").await;
+	assert_eq!(last, b'C', "DROP VIEW failed");
+
+	// 7. DROP TABLE
+	let (_, last) = run_simple_query(&mut stream, "DROP TABLE accounts;").await;
+	assert_eq!(last, b'C', "DROP TABLE failed");
+
+	shutdown.cancel();
+}

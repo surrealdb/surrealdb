@@ -42,14 +42,26 @@ impl<'a> Parser<'a> {
 		let mut constraints = Vec::new();
 
 		loop {
-			// Check table constraints: PRIMARY KEY, UNIQUE, FOREIGN KEY, CONSTRAINT
+			// Check optional CONSTRAINT [symbol] prefix
+			let constraint_name = if self.peek_keyword() == Some(Keyword::Constraint) {
+				self.bump();
+				if self.peek_keyword().is_none() && self.peek().kind != TokenKind::LParen {
+					Some(self.parse_ident()?.0)
+				} else {
+					None
+				}
+			} else {
+				None
+			};
+
+			// Check table constraints: PRIMARY KEY, UNIQUE, FOREIGN KEY
 			if self.peek_keyword() == Some(Keyword::Primary) {
 				let c_start = self.bump().span;
 				self.expect_keyword(Keyword::Key, "KEY after PRIMARY")?;
 				let cols = self.parse_column_name_list()?;
 				let c_end = self.peek().span;
 				constraints.push(TableConstraint::PrimaryKey {
-					name: None,
+					name: constraint_name,
 					columns: cols,
 					span: c_start.merge(c_end),
 				});
@@ -60,10 +72,15 @@ impl<'a> Parser<'a> {
 				{
 					self.bump();
 				}
+				let name = if self.peek().kind != TokenKind::LParen {
+					Some(self.parse_ident()?.0)
+				} else {
+					constraint_name
+				};
 				let cols = self.parse_column_name_list()?;
 				let c_end = self.peek().span;
 				constraints.push(TableConstraint::Unique {
-					name: None,
+					name,
 					columns: cols,
 					span: c_start.merge(c_end),
 				});
@@ -76,7 +93,7 @@ impl<'a> Parser<'a> {
 				let ref_cols = self.parse_column_name_list()?;
 				let c_end = self.peek().span;
 				constraints.push(TableConstraint::ForeignKey {
-					name: None,
+					name: constraint_name,
 					columns: cols,
 					ref_table,
 					ref_columns: ref_cols,

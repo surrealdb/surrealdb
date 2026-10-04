@@ -154,20 +154,36 @@ fn test_translate_transactions() {
 }
 
 #[test]
-fn test_translate_create_and_drop_table() {
-	let sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT NOT NULL, email TEXT);";
-	let surrealql = translate_sql(sql).expect("translate");
-	assert!(surrealql.contains("DEFINE TABLE users SCHEMAFULL;"));
-	assert!(surrealql.contains("DEFINE FIELD id ON TABLE users TYPE int;"));
-	assert!(surrealql.contains("DEFINE INDEX users_id_pk ON TABLE users COLUMNS id UNIQUE;"));
-	assert!(
-		surrealql.contains("DEFINE FIELD name ON TABLE users TYPE string ASSERT $value != NONE;")
-	);
-	assert!(surrealql.contains("DEFINE FIELD email ON TABLE users TYPE string;"));
+fn test_translate_ddl_unsupported_for_typed_lowering() {
+	let create_sql = "CREATE TABLE users (id INT PRIMARY KEY, name TEXT NOT NULL, email TEXT);";
+	assert!(matches!(
+		translate_sql(create_sql),
+		Err(surrealdb_pgsql::TranslationError::Unsupported(_))
+	));
 
-	let sql = "DROP TABLE IF EXISTS users;";
-	let surrealql = translate_sql(sql).expect("translate");
-	assert_eq!(surrealql, "REMOVE TABLE IF EXISTS users;");
+	let drop_sql = "DROP TABLE IF EXISTS users;";
+	assert!(matches!(
+		translate_sql(drop_sql),
+		Err(surrealdb_pgsql::TranslationError::Unsupported(_))
+	));
+
+	let index_sql = "CREATE INDEX idx_users_email ON users (email);";
+	assert!(matches!(
+		translate_sql(index_sql),
+		Err(surrealdb_pgsql::TranslationError::Unsupported(_))
+	));
+
+	let view_sql = "CREATE VIEW v_users AS SELECT id, name FROM users;";
+	assert!(matches!(
+		translate_sql(view_sql),
+		Err(surrealdb_pgsql::TranslationError::Unsupported(_))
+	));
+
+	let alter_sql = "ALTER TABLE users ADD COLUMN phone VARCHAR(20);";
+	assert!(matches!(
+		translate_sql(alter_sql),
+		Err(surrealdb_pgsql::TranslationError::Unsupported(_))
+	));
 }
 
 #[test]
