@@ -416,3 +416,428 @@ async fn test_mywire_parameter_placeholder_rejection() {
 
 	shutdown.cancel();
 }
+
+fn decode_mysql_text_row(payload: &[u8]) -> Vec<Option<String>> {
+	let mut cols = Vec::new();
+	let mut offset = 0;
+	while offset < payload.len() {
+		let b = payload[offset];
+		if b == 0xfb {
+			cols.push(None);
+			offset += 1;
+		} else {
+			let (len, len_bytes) = match b {
+				0xfc => {
+					let l = (payload[offset + 1] as usize) | ((payload[offset + 2] as usize) << 8);
+					(l, 3)
+				}
+				0xfd => {
+					let l = (payload[offset + 1] as usize)
+						| ((payload[offset + 2] as usize) << 8)
+						| ((payload[offset + 3] as usize) << 16);
+					(l, 4)
+				}
+				0xfe => {
+					let mut l = 0usize;
+					for i in 0..8 {
+						l |= (payload[offset + 1 + i] as usize) << (i * 8);
+					}
+					(l, 9)
+				}
+				_ => (b as usize, 1),
+			};
+			offset += len_bytes;
+			let s = String::from_utf8_lossy(&payload[offset..offset + len]).to_string();
+			cols.push(Some(s));
+			offset += len;
+		}
+	}
+	cols
+}
+
+async fn query_mysql(stream: &mut TcpStream, sql: &str) -> QueryResult {
+	let mut q = vec![COM_QUERY];
+	q.extend_from_slice(sql.as_bytes());
+	write_packet(stream, 0, &q).await;
+	read_query_response(stream).await
+}
+
+#[tokio::test]
+async fn test_mywire_query_matrix_arithmetic_and_expressions() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. Basic arithmetic operations
+	let res = query_mysql(&mut stream, "SELECT 1 + 2 * 3;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("7"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SELECT 100 - 35;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("65"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SELECT 50 / 2;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("25"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SELECT 17 % 5;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("2"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 2. Parentheses & precedence
+	let res = query_mysql(&mut stream, "SELECT (10 + 20) * 3 / 2;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("45"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_query_matrix_booleans_and_comparisons() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. Comparisons
+	let res = query_mysql(&mut stream, "SELECT 1 = 1;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("1"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SELECT 1 != 2;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("1"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SELECT 5 > 3;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("1"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SELECT 2 < 4;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("1"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 2. BETWEEN & IN
+	let res = query_mysql(&mut stream, "SELECT 5 BETWEEN 1 AND 10;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("1"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SELECT 15 BETWEEN 1 AND 10;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("0"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SELECT 3 IN (1, 2, 3);").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("1"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SELECT 4 IN (1, 2, 3);").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("0"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 3. IS NULL / IS NOT NULL
+	let res = query_mysql(&mut stream, "SELECT NULL IS NULL;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("1"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SELECT 1 IS NOT NULL;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("1"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 4. CASE expressions
+	let res =
+		query_mysql(&mut stream, "SELECT CASE WHEN 1 = 1 THEN 'alpha' ELSE 'beta' END;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("alpha"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_query_matrix_crud_and_clauses() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. CREATE TABLE
+	let res = query_mysql(&mut stream, "CREATE TABLE items (id int, name text, qty int);").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	// 2. INSERT multiple rows
+	let inserts = [
+		"INSERT INTO items (id, name, qty) VALUES (1, 'Apples', 10);",
+		"INSERT INTO items (id, name, qty) VALUES (2, 'Oranges', 20);",
+		"INSERT INTO items (id, name, qty) VALUES (3, 'Bananas', 30);",
+	];
+	for q in inserts {
+		let res = query_mysql(&mut stream, q).await;
+		assert!(
+			matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }),
+			"Failed insert: {q}"
+		);
+	}
+
+	// 3. SELECT WHERE filter
+	let res = query_mysql(&mut stream, "SELECT name FROM items WHERE qty > 15;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 2, "Expected Oranges and Bananas");
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 4. SELECT ORDER BY ASC / DESC
+	let res = query_mysql(&mut stream, "SELECT name FROM items ORDER BY qty ASC;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("Apples"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SELECT name FROM items ORDER BY qty DESC;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("Bananas"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 5. SELECT LIMIT and OFFSET
+	let res =
+		query_mysql(&mut stream, "SELECT name FROM items ORDER BY qty ASC LIMIT 1 OFFSET 1;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 1);
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("Oranges"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 6. UPDATE
+	let res = query_mysql(&mut stream, "UPDATE items SET qty = 15 WHERE name = 'Apples';").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	let res = query_mysql(&mut stream, "SELECT qty FROM items WHERE name = 'Apples';").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("15"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 7. DELETE
+	let res = query_mysql(&mut stream, "DELETE FROM items WHERE name = 'Bananas';").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	let res = query_mysql(&mut stream, "SELECT name FROM items;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 2, "Expected 2 items remaining after delete");
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 8. DROP TABLE
+	let res = query_mysql(&mut stream, "DROP TABLE items;").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_honest_session_fail_closed() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. Unmodelled SET statements must return code 1235 (ER_NOT_SUPPORTED_YET)
+	let res = query_mysql(&mut stream, "SET ROLE admin;").await;
+	match res {
+		QueryResult::Error {
+			code,
+			..
+		} => assert_eq!(code, 1235),
+		other => panic!("Expected Error 1235 for SET ROLE, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;").await;
+	match res {
+		QueryResult::Error {
+			code,
+			..
+		} => assert_eq!(code, 1235),
+		other => panic!("Expected Error 1235 for SET TRANSACTION, got {other:?}"),
+	}
+
+	let res = query_mysql(&mut stream, "SET unknown_variable = 1;").await;
+	match res {
+		QueryResult::Error {
+			code,
+			..
+		} => assert_eq!(code, 1235),
+		other => panic!("Expected Error 1235 for unknown SET, got {other:?}"),
+	}
+
+	// 2. Driver noise SET statements should succeed with OK packet
+	let res = query_mysql(&mut stream, "SET autocommit = 1;").await;
+	assert!(matches!(res, QueryResult::Ok));
+
+	let res = query_mysql(&mut stream, "SET NAMES utf8mb4;").await;
+	assert!(matches!(res, QueryResult::Ok));
+
+	// 3. GROUP BY ordinal must fail closed
+	let res = query_mysql(&mut stream, "SELECT 1 GROUP BY 1;").await;
+	match res {
+		QueryResult::Error {
+			..
+		} => {}
+		other => panic!("Expected Error for GROUP BY ordinal, got {other:?}"),
+	}
+
+	shutdown.cancel();
+}

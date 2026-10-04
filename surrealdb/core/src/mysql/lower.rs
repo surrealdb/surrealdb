@@ -68,8 +68,23 @@ pub fn lower_select(select: &SelectStmt) -> Result<LogicalOp, LowerError> {
 
 	// 3. GROUP BY & Projection preparation
 	let fields = lower_projection(&select.projection)?;
+	for g in &select.group_by {
+		if matches!(g, Expr::Literal(Literal::Integer(_), _)) {
+			return Err(LowerError::UnsupportedExpr(
+				"GROUP BY ordinal is not supported; use column names".into(),
+			));
+		}
+	}
 	let grouped = !select.group_by.is_empty();
-	if grouped {
+	let has_aggregates = select.projection.iter().any(|t| match t {
+		surrealdb_mysql::ast::stmt::SelectItem::Expr {
+			expr,
+			..
+		} => mysql_expr_contains_aggregate(expr),
+		_ => false,
+	});
+	let is_aggregate = grouped || has_aggregates;
+	if is_aggregate {
 		let group = select.group_by.iter().map(lower_expr).collect::<Result<Vec<_>, _>>()?;
 		op = LogicalOp::Aggregate(LogicalAggregate {
 			input: Box::new(op),
@@ -115,7 +130,7 @@ pub fn lower_select(select: &SelectStmt) -> Result<LogicalOp, LowerError> {
 	}
 
 	// 8. Projection
-	if !grouped {
+	if !is_aggregate {
 		op = LogicalOp::Project(LogicalProject {
 			input: Box::new(op),
 			fields,
@@ -480,6 +495,53 @@ pub fn lower_expr(expr: &Expr) -> Result<LogicalExpr, LowerError> {
 	}
 }
 
+fn mysql_expr_contains_aggregate(expr: &Expr) -> bool {
+	match expr {
+		Expr::FunctionCall {
+			name,
+			args,
+			..
+		} => {
+			let fn_lower = name.to_ascii_lowercase();
+			if matches!(fn_lower.as_str(), "count" | "sum" | "avg" | "min" | "max" | "group_concat")
+			{
+				return true;
+			}
+			args.iter().any(mysql_expr_contains_aggregate)
+		}
+		Expr::UnaryOp {
+			expr,
+			..
+		} => mysql_expr_contains_aggregate(expr),
+		Expr::BinaryOp {
+			left,
+			right,
+			..
+		} => mysql_expr_contains_aggregate(left) || mysql_expr_contains_aggregate(right),
+		Expr::Cast {
+			expr,
+			..
+		} => mysql_expr_contains_aggregate(expr),
+		Expr::Case {
+			operand,
+			branches,
+			else_expr,
+			..
+		} => {
+			operand.as_ref().is_some_and(|e| mysql_expr_contains_aggregate(e))
+				|| branches.iter().any(|b| {
+					mysql_expr_contains_aggregate(&b.when) || mysql_expr_contains_aggregate(&b.then)
+				}) || else_expr.as_ref().is_some_and(|e| mysql_expr_contains_aggregate(e))
+		}
+		Expr::InList {
+			expr,
+			list,
+			..
+		} => mysql_expr_contains_aggregate(expr) || list.iter().any(mysql_expr_contains_aggregate),
+		_ => false,
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -545,5 +607,35 @@ mod tests {
 			},
 			other => panic!("expected Project, got {other:?}"),
 		}
+	}
+
+	#[test]
+	fn test_lower_aggregate_without_group_by() {
+		let stmts = surrealdb_mysql::parse_statements("SELECT count(*) FROM users").expect("parse");
+		let op = lower_stmt(&stmts[0]).expect("lower");
+		match op {
+			LogicalOp::Project(proj) => match proj.input.as_ref() {
+				LogicalOp::Aggregate(agg) => {
+					assert!(agg.group.is_empty(), "whole-table aggregate has empty group");
+					assert!(matches!(agg.input.as_ref(), LogicalOp::Source(_)));
+				}
+				other => panic!("expected Aggregate, got {other:?}"),
+			},
+			other => panic!("expected Project, got {other:?}"),
+		}
+	}
+
+	#[test]
+	fn test_lower_group_by_ordinal_rejected() {
+		let stmts = surrealdb_mysql::parse_statements("SELECT id, name FROM users GROUP BY 1")
+			.expect("parse");
+		let Statement::Select(ref select) = stmts[0] else {
+			panic!("expected select")
+		};
+		let err = lower_select(select).expect_err("should reject ordinal");
+		assert!(
+			matches!(&err, LowerError::UnsupportedExpr(msg) if msg.contains("GROUP BY ordinal")),
+			"expected GROUP BY ordinal rejection, got {err:?}"
+		);
 	}
 }

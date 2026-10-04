@@ -307,38 +307,29 @@ async fn test_pgwire_e2e_transactions() {
 #[tokio::test]
 async fn test_pgwire_dialect_switching_and_fail_closed() {
 	let (addr, shutdown) = start_test_pg_server().await;
-	let mut stream = connect_and_handshake(addr).await;
+	// Connect without options: default dialect is SurrealQL
+	let mut stream = connect_and_handshake_with_options(addr, None).await;
 
-	// In default PostgreSQL dialect: SurrealQL query is rejected with error 'E'
-	let (_, last) = run_simple_query(&mut stream, "CREATE person SET name = 'Invalid';").await;
-	assert_eq!(last, b'E', "SurrealQL CREATE SET must fail in default PostgreSQL dialect");
-
-	// Switch dialect to SurrealQL via SET dialect = 'surrealql'
-	let (_, last) = run_simple_query(&mut stream, "SET dialect = 'surrealql';").await;
-	assert_eq!(last, b'C', "SET dialect = 'surrealql' must succeed");
-
-	// Now SurrealQL CREATE SET succeeds!
+	// In default SurrealQL dialect: SurrealQL query succeeds!
 	let (_, last) = run_simple_query(&mut stream, "CREATE person SET name = 'Surreal';").await;
-	assert_eq!(last, b'C', "SurrealQL query must succeed when dialect = surrealql");
+	assert_eq!(last, b'C', "SurrealQL CREATE SET must succeed in default SurrealQL dialect");
 
 	// In SurrealQL dialect, invalid SurrealQL must fail closed without fallback to PostgreSQL
 	let (_, last) = run_simple_query(&mut stream, "SELECT @@version_comment;").await;
 	assert_eq!(last, b'E', "Invalid query must fail closed in SurrealQL dialect");
 
-	// Switch dialect back to PostgreSQL via SET dialect = 'pgsql'
+	// Switch dialect to PostgreSQL via SET dialect = 'pgsql'
 	let (_, last) = run_simple_query(&mut stream, "SET dialect = 'pgsql';").await;
 	assert_eq!(last, b'C', "SET dialect = 'pgsql' must succeed");
 
-	// Now PostgreSQL queries work again
+	// Now PostgreSQL queries work
 	let (rows, last) = run_simple_query(&mut stream, "SELECT name FROM person;").await;
 	assert_eq!(last, b'C');
 	assert_eq!(rows.len(), 1);
 
-	// Also verify that a connection without startup options starts in SurrealQL dialect
-	let mut default_stream = connect_and_handshake_with_options(addr, None).await;
-	let (_, last) =
-		run_simple_query(&mut default_stream, "CREATE item SET title = 'SurrealDefault';").await;
-	assert_eq!(last, b'C', "Connection without startup options must default to SurrealQL dialect");
+	// In PostgreSQL dialect: SurrealQL query is rejected with error 'E'
+	let (_, last) = run_simple_query(&mut stream, "CREATE person SET name = 'Invalid';").await;
+	assert_eq!(last, b'E', "SurrealQL CREATE SET must fail in PostgreSQL dialect");
 
 	shutdown.cancel();
 }
@@ -476,6 +467,346 @@ async fn test_pgwire_parameter_binding_across_positions() {
 		Some("9876543210"),
 		"Binary format INT8 parameter should decode to 9876543210"
 	);
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_query_matrix_arithmetic_and_expressions() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. Basic arithmetic operations
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 1 + 2 * 3 AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("7"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 100 - 35 AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("65"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 50 / 2 AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("25"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 17 % 5 AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("2"));
+
+	// 2. Parentheses & precedence
+	let (rows, last) = run_simple_query(&mut stream, "SELECT (10 + 20) * 3 / 2 AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("45"));
+
+	// 3. Unary negation
+	let (rows, last) = run_simple_query(&mut stream, "SELECT -42 AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("-42"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT -(-10) AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("10"));
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_query_matrix_booleans_and_comparisons() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. Boolean logic
+	let (rows, last) = run_simple_query(&mut stream, "SELECT true AND false AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("f"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT false OR true AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("t"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT NOT false AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("t"));
+
+	// 2. Comparisons
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 1 = 1 AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("t"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 1 <> 2 AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("t"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 5 > 3 AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("t"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 2 < 4 AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("t"));
+
+	// 3. BETWEEN & IN
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 5 BETWEEN 1 AND 10 AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("t"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 15 BETWEEN 1 AND 10 AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("f"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 3 IN (1, 2, 3) AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("t"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 4 IN (1, 2, 3) AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("f"));
+
+	// 4. IS NULL / IS NOT NULL
+	let (rows, last) = run_simple_query(&mut stream, "SELECT NULL IS NULL AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("t"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 1 IS NOT NULL AS res;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("t"));
+
+	// 5. CASE expressions
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT CASE WHEN 1 = 1 THEN 'alpha' ELSE 'beta' END AS res;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("alpha"));
+
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT CASE WHEN 1 = 2 THEN 'no' WHEN 2 = 2 THEN 'yes' ELSE 'fallback' END AS res;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("yes"));
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_query_matrix_strings_and_typecasts() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. String concatenation
+	let (rows, last) =
+		run_simple_query(&mut stream, "SELECT 'hello' || ' ' || 'world' AS msg;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("hello world"));
+
+	// 2. Typecasts
+	let (rows, last) = run_simple_query(&mut stream, "SELECT '42'::int4 AS val;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("42"));
+
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 100::text AS txt;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("100"));
+
+	// 3. Dollar quoted strings
+	let (rows, last) =
+		run_simple_query(&mut stream, "SELECT $$dollar quoted string$$ AS dqs;").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("dollar quoted string"));
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_query_matrix_crud_and_clauses() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. CREATE TABLE
+	let (_, last) = run_simple_query(
+		&mut stream,
+		"CREATE TABLE products (id int, title text, price int, in_stock boolean);",
+	)
+	.await;
+	assert_eq!(last, b'C');
+
+	// 2. INSERT multiple rows
+	let inserts = [
+		"INSERT INTO products (id, title, price, in_stock) VALUES (1, 'Widget', 10, true);",
+		"INSERT INTO products (id, title, price, in_stock) VALUES (2, 'Gadget', 25, false);",
+		"INSERT INTO products (id, title, price, in_stock) VALUES (3, 'Doohickey', 50, true);",
+		"INSERT INTO products (id, title, price, in_stock) VALUES (4, 'Thingamajig', 15, true);",
+	];
+	for q in inserts {
+		let (_, last) = run_simple_query(&mut stream, q).await;
+		assert_eq!(last, b'C', "Failed insert: {q}");
+	}
+
+	// 3. SELECT WHERE filter
+	let (rows, last) =
+		run_simple_query(&mut stream, "SELECT title FROM products WHERE price > 20;").await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2, "Expected 2 products with price > 20");
+
+	// 4. SELECT WHERE compound condition
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT title FROM products WHERE in_stock = true AND price < 30;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2, "Expected Widget and Thingamajig");
+
+	// 5. SELECT ORDER BY ASC / DESC
+	let (rows, last) =
+		run_simple_query(&mut stream, "SELECT title FROM products ORDER BY price ASC;").await;
+	assert_eq!(last, b'C');
+	let first_title = decode_data_row(&rows[0]);
+	assert_eq!(first_title[0].as_deref(), Some("Widget"), "Cheapest should be Widget (10)");
+
+	let (rows, last) =
+		run_simple_query(&mut stream, "SELECT title FROM products ORDER BY price DESC;").await;
+	assert_eq!(last, b'C');
+	let first_title = decode_data_row(&rows[0]);
+	assert_eq!(
+		first_title[0].as_deref(),
+		Some("Doohickey"),
+		"Most expensive should be Doohickey (50)"
+	);
+
+	// 6. SELECT LIMIT and OFFSET
+	let (rows, last) =
+		run_simple_query(&mut stream, "SELECT title FROM products ORDER BY price ASC LIMIT 2;")
+			.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2);
+
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT title FROM products ORDER BY price ASC LIMIT 2 OFFSET 2;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2);
+	let first_title = decode_data_row(&rows[0]);
+	assert_eq!(first_title[0].as_deref(), Some("Gadget"), "3rd cheapest should be Gadget (25)");
+
+	// 7. UPDATE
+	let (_, last) =
+		run_simple_query(&mut stream, "UPDATE products SET price = 12 WHERE title = 'Widget';")
+			.await;
+	assert_eq!(last, b'C');
+
+	let (rows, last) =
+		run_simple_query(&mut stream, "SELECT price FROM products WHERE title = 'Widget';").await;
+	assert_eq!(last, b'C');
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("12"), "Widget price should be updated to 12");
+
+	// 8. DELETE
+	let (_, last) =
+		run_simple_query(&mut stream, "DELETE FROM products WHERE title = 'Thingamajig';").await;
+	assert_eq!(last, b'C');
+
+	let (rows, last) =
+		run_simple_query(&mut stream, "SELECT title FROM products WHERE title = 'Thingamajig';")
+			.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 0, "Thingamajig should be deleted");
+
+	// 9. DROP TABLE
+	let (_, last) = run_simple_query(&mut stream, "DROP TABLE products;").await;
+	assert_eq!(last, b'C');
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_multi_statement_simple_query() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// Multi-statement simple query: SET followed by SELECT
+	let (rows, last) =
+		run_simple_query(&mut stream, "SET client_encoding = 'UTF8'; SELECT 1 AS num;").await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 1, "SELECT 1 should return 1 row after SET statement");
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("1"));
+
+	// Sequential SELECT statements in single query packet
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 1 AS a; SELECT 2 AS b;").await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2, "Both SELECT statements should have executed");
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_pgwire_honest_session_fail_closed() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. SAVEPOINT statements must fail closed
+	let (_, last) = run_simple_query(&mut stream, "SAVEPOINT sp1;").await;
+	assert_eq!(last, b'E', "SAVEPOINT must fail closed");
+
+	let (_, last) = run_simple_query(&mut stream, "RELEASE SAVEPOINT sp1;").await;
+	assert_eq!(last, b'E', "RELEASE SAVEPOINT must fail closed");
+
+	let (_, last) = run_simple_query(&mut stream, "ROLLBACK TO SAVEPOINT sp1;").await;
+	assert_eq!(last, b'E', "ROLLBACK TO SAVEPOINT must fail closed");
+
+	// 2. PREPARE / DEALLOCATE in simple query must fail closed
+	let (_, last) = run_simple_query(&mut stream, "PREPARE p1 AS SELECT 1;").await;
+	assert_eq!(last, b'E', "SQL PREPARE must fail closed");
+
+	let (_, last) = run_simple_query(&mut stream, "DEALLOCATE p1;").await;
+	assert_eq!(last, b'E', "SQL DEALLOCATE must fail closed");
+
+	// 3. Unmodelled SET statements must fail closed
+	let (_, last) = run_simple_query(&mut stream, "SET ROLE admin;").await;
+	assert_eq!(last, b'E', "SET ROLE must fail closed");
+
+	let (_, last) = run_simple_query(&mut stream, "SET SESSION AUTHORIZATION alice;").await;
+	assert_eq!(last, b'E', "SET SESSION AUTHORIZATION must fail closed");
+
+	let (_, last) =
+		run_simple_query(&mut stream, "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;").await;
+	assert_eq!(last, b'E', "SET TRANSACTION ISOLATION LEVEL must fail closed");
+
+	// 4. GROUP BY ordinal must fail closed
+	let (_, last) = run_simple_query(&mut stream, "SELECT 1 GROUP BY 1;").await;
+	assert_eq!(last, b'E', "GROUP BY ordinal must fail closed");
 
 	shutdown.cancel();
 }

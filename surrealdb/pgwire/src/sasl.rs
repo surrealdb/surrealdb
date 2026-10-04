@@ -42,11 +42,12 @@ impl ScramExchange {
 		// The gs2 cbind-flag is the first comma-delimited field: `n` (client uses
 		// no channel binding), `y` (client supports it but the server did not
 		// advertise `-PLUS`), or `p=<name>` (client requires it). We offer only
-		// plain SCRAM-SHA-256, so per RFC 5802 §5 only `n` is acceptable; `y` and
-		// `p=` are rejected to preserve downgrade protection.
-		if client_first.split(',').next() != Some("n") {
+		// plain SCRAM-SHA-256, so per RFC 5802 §5 only `n` and `y` are acceptable;
+		// `p=` is rejected because channel binding is not supported.
+		let flag = client_first.split(',').next();
+		if !matches!(flag, Some("n" | "y")) {
 			return Err(PgError::protocol(
-				"SCRAM channel binding is not supported; expected the 'n' gs2 flag",
+				"SCRAM channel binding is not supported; expected 'n' or 'y' gs2 flag",
 			));
 		}
 		let bare = client_first_bare(client_first)
@@ -159,17 +160,17 @@ mod tests {
 
 	#[test]
 	fn rejects_channel_binding_flags() {
-		// We advertise plain SCRAM-SHA-256, so a client signalling channel
-		// binding (`y` = supported-but-not-advertised, `p=` = required) must be
-		// rejected rather than silently accepted (a downgrade signal).
-		for header in ["y,,n=user,r=abc", "p=tls-server-end-point,,n=user,r=abc"] {
-			assert!(
-				ScramExchange::start(header.as_bytes(), &[0u8; 16], 4096).is_err(),
-				"expected {header:?} to be rejected"
-			);
-		}
-		// The `n` flag (no channel binding) is accepted.
+		// A client requiring channel binding (`p=` = required) must be
+		// rejected since we only offer plain SCRAM-SHA-256.
+		// Flags `n` (no channel binding) and `y` (client supports channel binding
+		// but server does not advertise -PLUS over TLS) are both accepted per RFC 5802.
+		assert!(
+			ScramExchange::start(b"p=tls-server-end-point,,n=user,r=abc", &[0u8; 16], 4096)
+				.is_err(),
+			"expected 'p=' to be rejected"
+		);
 		assert!(ScramExchange::start(b"n,,n=user,r=abc", &[0u8; 16], 4096).is_ok());
+		assert!(ScramExchange::start(b"y,,n=user,r=abc", &[0u8; 16], 4096).is_ok());
 	}
 
 	/// RFC 7677 §3 worked example (user "user", password "pencil"): with the

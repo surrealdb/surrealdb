@@ -402,9 +402,19 @@ impl Connection {
 		}
 
 		if trimmed.starts_with("SET ") || trimmed.starts_with("set ") {
-			let ok = OkPacket::new(0, 0);
-			self.writer.write_packet(seq.wrapping_add(1), &ok.serialize()).await?;
-			return Ok(());
+			if is_mysql_driver_noise_set(trimmed) {
+				let ok = OkPacket::new(0, 0);
+				self.writer.write_packet(seq.wrapping_add(1), &ok.serialize()).await?;
+				return Ok(());
+			} else {
+				let err_pkt = ErrPacket::general(
+					1235,
+					b"42000",
+					format!("SET statement is not supported: {trimmed}"),
+				);
+				self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+				return Ok(());
+			}
 		}
 
 		// Handle common introspection queries from drivers
@@ -459,17 +469,38 @@ impl Connection {
 					return Ok(());
 				}
 
-				for r in results {
-					match r.result {
-						Ok(val) => {
-							self.emit_value_result(val, &mut res_seq).await?;
-						}
-						Err(e) => {
-							let err_pkt = ErrPacket::general(1064, b"42000", e.to_string());
-							self.writer.write_packet(res_seq, &err_pkt.serialize()).await?;
-							return Ok(());
-						}
+				// Check for errors first across all execution results
+				for r in &results {
+					if let Err(e) = &r.result {
+						let err_pkt = ErrPacket::general(1064, b"42000", e.to_string());
+						self.writer.write_packet(res_seq, &err_pkt.serialize()).await?;
+						return Ok(());
 					}
+				}
+
+				// If there's a result with tabular columns (e.g. SELECT), emit that,
+				// otherwise emit the last result (e.g. from DDL/DML multi-statements).
+				let schema = self.current_db.as_deref().unwrap_or("test");
+				let target = results
+					.iter()
+					.rev()
+					.find(|r| {
+						if let Ok(val) = &r.result {
+							let shape = shape_result(schema, "", val.clone());
+							!shape.columns.is_empty()
+						} else {
+							false
+						}
+					})
+					.or_else(|| results.last());
+
+				if let Some(r) = target {
+					if let Ok(val) = &r.result {
+						self.emit_value_result(val.clone(), &mut res_seq).await?;
+					}
+				} else {
+					let ok = OkPacket::new(0, 0);
+					self.writer.write_packet(res_seq, &ok.serialize()).await?;
 				}
 				Ok(())
 			}
@@ -593,6 +624,52 @@ fn parse_mywire_set_dialect(trimmed: &str) -> Option<std::result::Result<Dialect
 	}
 }
 
+/// Returns true if a MySQL SET statement is setting only allowed driver-noise variables.
+fn is_mysql_driver_noise_set(sql: &str) -> bool {
+	let lower = sql.to_ascii_lowercase();
+	let rest = lower.strip_prefix("set ").unwrap_or(&lower).trim();
+	let rest = rest.trim_end_matches(';').trim();
+	if rest.starts_with("names ") {
+		return true;
+	}
+	let rest = rest
+		.strip_prefix("session ")
+		.or_else(|| rest.strip_prefix("global "))
+		.unwrap_or(rest)
+		.trim();
+	let rest = rest
+		.strip_prefix("@@session.")
+		.or_else(|| rest.strip_prefix("@@global."))
+		.or_else(|| rest.strip_prefix("@@"))
+		.unwrap_or(rest)
+		.trim();
+
+	const ALLOWED_VARS: &[&str] = &[
+		"autocommit",
+		"character_set_client",
+		"character_set_connection",
+		"character_set_results",
+		"character_set_server",
+		"collation_connection",
+		"collation_server",
+		"sql_mode",
+		"time_zone",
+		"max_allowed_packet",
+		"net_write_timeout",
+		"wait_timeout",
+		"interactive_timeout",
+	];
+
+	for part in rest.split(',') {
+		let var = part.split('=').next().unwrap_or("").trim();
+		let var = var.trim_matches('`').trim();
+		if var.is_empty() || !ALLOWED_VARS.contains(&var) {
+			return false;
+		}
+	}
+	true
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -608,5 +685,21 @@ mod tests {
 		assert_eq!(parse_mywire_set_dialect("SET dialect = gql"), Some(Ok(Dialect::Gql)));
 		assert!(parse_mywire_set_dialect("SET dialect = unknown").unwrap().is_err());
 		assert!(parse_mywire_set_dialect("SET autocommit = 1").is_none());
+	}
+
+	#[test]
+	fn test_is_mysql_driver_noise_set() {
+		assert!(is_mysql_driver_noise_set("SET autocommit = 1"));
+		assert!(is_mysql_driver_noise_set("SET NAMES utf8mb4"));
+		assert!(is_mysql_driver_noise_set("SET NAMES 'utf8mb4'"));
+		assert!(is_mysql_driver_noise_set("SET SESSION sql_mode = 'TRADITIONAL'"));
+		assert!(is_mysql_driver_noise_set("SET @@session.time_zone = 'UTC'"));
+		assert!(is_mysql_driver_noise_set(
+			"SET `character_set_client` = utf8mb4, `character_set_connection` = utf8mb4"
+		));
+		// Unmodelled/unhonoured settings return false
+		assert!(!is_mysql_driver_noise_set("SET ROLE admin"));
+		assert!(!is_mysql_driver_noise_set("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"));
+		assert!(!is_mysql_driver_noise_set("SET arbitrary_setting = 1"));
 	}
 }

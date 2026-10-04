@@ -51,9 +51,9 @@ pub fn translate_statement(
 		Statement::CreatePropertyGraph(s) => translate_create_property_graph(s, out),
 		Statement::DropPropertyGraph(s) => translate_drop_property_graph(s, out),
 		Statement::Prepare(_) | Statement::Execute(_) | Statement::Deallocate(_) => {
-			// Prepared statements are managed directly by the wire protocol layer.
-			out.push_str("-- PREPARED STATEMENT PROTOCOL");
-			Ok(())
+			Err(TranslationError::Unsupported(
+				"SQL PREPARE/EXECUTE/DEALLOCATE statements are not supported; use extended query protocol".into(),
+			))
 		}
 	}
 }
@@ -500,42 +500,51 @@ fn translate_transaction(tx: &TransactionStmt, out: &mut String) -> Result<(), T
 	match tx {
 		TransactionStmt::Begin {
 			..
-		} => out.push_str("BEGIN TRANSACTION;"),
+		} => {
+			out.push_str("BEGIN TRANSACTION;");
+			Ok(())
+		}
 		TransactionStmt::Commit {
 			..
-		} => out.push_str("COMMIT TRANSACTION;"),
+		} => {
+			out.push_str("COMMIT TRANSACTION;");
+			Ok(())
+		}
 		TransactionStmt::Rollback {
 			..
-		} => out.push_str("CANCEL TRANSACTION;"),
+		} => {
+			out.push_str("CANCEL TRANSACTION;");
+			Ok(())
+		}
 		TransactionStmt::Savepoint {
 			name,
 			..
-		} => write!(out, "-- SAVEPOINT {name};")?,
+		} => Err(TranslationError::Unsupported(format!("SAVEPOINT {name} is not supported"))),
 		TransactionStmt::ReleaseSavepoint {
 			name,
 			..
-		} => write!(out, "-- RELEASE SAVEPOINT {name};")?,
+		} => {
+			Err(TranslationError::Unsupported(format!("RELEASE SAVEPOINT {name} is not supported")))
+		}
 		TransactionStmt::RollbackToSavepoint {
 			name,
 			..
-		} => write!(out, "-- ROLLBACK TO SAVEPOINT {name};")?,
+		} => Err(TranslationError::Unsupported(format!(
+			"ROLLBACK TO SAVEPOINT {name} is not supported"
+		))),
 	}
-	Ok(())
 }
 
-fn translate_set(set: &SetStmt, out: &mut String) -> Result<(), TranslationError> {
-	write!(out, "-- SET {} = '{}';", set.name, set.value)?;
-	Ok(())
+fn translate_set(set: &SetStmt, _out: &mut String) -> Result<(), TranslationError> {
+	Err(TranslationError::Unsupported(format!("SET {} is not supported", set.name)))
 }
 
-fn translate_show(show: &ShowStmt, out: &mut String) -> Result<(), TranslationError> {
-	write!(out, "-- SHOW {};", show.name)?;
-	Ok(())
+fn translate_show(show: &ShowStmt, _out: &mut String) -> Result<(), TranslationError> {
+	Err(TranslationError::Unsupported(format!("SHOW {} is not supported", show.name)))
 }
 
-fn translate_reset(reset: &ResetStmt, out: &mut String) -> Result<(), TranslationError> {
-	write!(out, "-- RESET {};", reset.name)?;
-	Ok(())
+fn translate_reset(reset: &ResetStmt, _out: &mut String) -> Result<(), TranslationError> {
+	Err(TranslationError::Unsupported(format!("RESET {} is not supported", reset.name)))
 }
 
 fn translate_explain(

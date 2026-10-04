@@ -29,6 +29,7 @@ dashmap = { workspace = true }
 rand = { workspace = true }
 rust_decimal = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 tokio = { workspace = true, features = ["net", "sync", "time", "io-util"] }
 tokio-rustls = { version = "0.26.4", default-features = false }

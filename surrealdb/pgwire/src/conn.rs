@@ -481,7 +481,13 @@ impl Connection {
 				};
 			let authenticated = match scram {
 				Some(scram) => self.authenticate_scram(&user, &scram).await?,
-				None => self.authenticate_cleartext(&user, ns.as_deref(), db.as_deref()).await?,
+				None => {
+					if self.is_tls() {
+						self.authenticate_cleartext(&user, ns.as_deref(), db.as_deref()).await?
+					} else {
+						self.authenticate_scram_mock(&user).await?
+					}
+				}
 			};
 			if !authenticated {
 				return Ok(false);
@@ -571,20 +577,10 @@ impl Connection {
 		ns: Option<&str>,
 		db: Option<&str>,
 	) -> Result<bool> {
-		// Never ask for a cleartext password over an unencrypted connection. A
-		// user without SCRAM material (e.g. imported with only a password hash)
-		// can authenticate only once the link is encrypted; refuse rather than
-		// expose the password to an on-path observer.
+		// Never ask for a cleartext password over an unencrypted connection.
+		// Report the standard generic authentication failure to avoid user enumeration.
 		if !self.is_tls() {
-			self.report(
-				&PgError::invalid_password(
-					"password authentication requires an encrypted connection for this user; \
-					 connect with TLS (sslmode=require) or define the user with a password so \
-					 SCRAM material is generated",
-				)
-				.fatal(),
-			)
-			.await?;
+			self.report(&auth_failed(user)).await?;
 			return Ok(false);
 		}
 		let mut buf = BytesMut::new();
@@ -678,6 +674,64 @@ impl Connection {
 			return Ok(false);
 		}
 		Ok(true)
+	}
+
+	/// Run a mock SCRAM exchange for unknown users over unencrypted connections,
+	/// ensuring unknown and known-bad users are indistinguishable (S-12).
+	async fn authenticate_scram_mock(&mut self, user: &str) -> Result<bool> {
+		let mut buf = BytesMut::new();
+		msg::write_authentication_sasl(&mut buf, &[sasl::MECHANISM]);
+		self.stream.write_all(&buf).await?;
+		self.stream.flush().await?;
+		let Some((tag, payload)) = self.read_message(MAX_AUTH_MESSAGE_SIZE).await? else {
+			return Ok(false);
+		};
+		if tag != b'p' {
+			self.report(&PgError::protocol("expected a SASL response message").fatal()).await?;
+			return Ok(false);
+		}
+		let (mechanism, client_first) = match msg::parse_sasl_initial(&payload) {
+			Ok(parsed) => parsed,
+			Err(err) => {
+				self.report(&err.fatal()).await?;
+				return Ok(false);
+			}
+		};
+		if mechanism != sasl::MECHANISM {
+			self.report(
+				&PgError::protocol(format!("unsupported SASL mechanism \"{mechanism}\"")).fatal(),
+			)
+			.await?;
+			return Ok(false);
+		}
+		use sha2::{Digest, Sha256};
+		let mut hasher = Sha256::new();
+		hasher.update(b"mock_salt_pgwire:");
+		hasher.update(user.as_bytes());
+		let mock_salt = &hasher.finalize()[..16];
+
+		let (_exchange, server_first) =
+			match sasl::ScramExchange::start(&client_first, mock_salt, 4096) {
+				Ok(started) => started,
+				Err(err) => {
+					self.report(&err.fatal()).await?;
+					return Ok(false);
+				}
+			};
+		let mut buf = BytesMut::new();
+		msg::write_authentication_sasl_continue(&mut buf, server_first.as_bytes());
+		self.stream.write_all(&buf).await?;
+		self.stream.flush().await?;
+
+		let Some((tag, _payload)) = self.read_message(MAX_AUTH_MESSAGE_SIZE).await? else {
+			return Ok(false);
+		};
+		if tag != b'p' {
+			self.report(&PgError::protocol("expected a SASL response message").fatal()).await?;
+			return Ok(false);
+		}
+		self.report(&auth_failed(user)).await?;
+		Ok(false)
 	}
 
 	async fn command_loop(&mut self) -> Result<()> {
@@ -1323,11 +1377,32 @@ impl Connection {
 
 	async fn simple_query(&mut self, sql: &str) -> Result<()> {
 		let mut out = BytesMut::new();
-		let trimmed = sql.trim();
+		let mut remaining = sql;
+
+		// Intercept leading `SET` statements (e.g. `SET client_encoding = 'UTF8'; <rest>`).
+		while !remaining.trim().is_empty() {
+			let (first, rest) = split_first_statement(remaining);
+			let trimmed_first = first.trim();
+			if let Some(set) = parse_set(trimmed_first).filter(|set| self.should_intercept_set(set))
+			{
+				if let Err(err) = self.handle_set(set, &mut out) {
+					self.note_simple_error(&err, &mut out);
+					return self.finish_query(out).await;
+				}
+				remaining = rest;
+			} else {
+				break;
+			}
+		}
+
+		let trimmed = remaining.trim();
 		if trimmed.is_empty() {
-			msg::write_empty_query_response(&mut out);
+			if out.is_empty() {
+				msg::write_empty_query_response(&mut out);
+			}
 			return self.finish_query(out).await;
 		}
+
 		// Transaction-control statements are intercepted (they manage the
 		// connection's interactive transaction rather than run in the executor).
 		if let Some(op) = transaction_control(trimmed) {
@@ -1336,6 +1411,7 @@ impl Connection {
 			}
 			return self.finish_query(out).await;
 		}
+
 		// Inside a failed transaction, everything but COMMIT/ROLLBACK is refused.
 		if self.txn_failed {
 			msg::write_error_response(
@@ -1346,43 +1422,88 @@ impl Connection {
 			);
 			return self.finish_query(out).await;
 		}
-		// `SET` is not SurrealQL; intercept it for dialect switching and the GUC
-		// no-op allowlist before it reaches the parser. In the GQL dialect only a
-		// `SET dialect` is intercepted (see `should_intercept_set`); other `SET`
-		// is a GQL mutation clause and reaches the executor.
-		if let Some(set) = parse_set(trimmed).filter(|set| self.should_intercept_set(set)) {
-			if let Err(err) = self.handle_set(set, &mut out) {
-				self.note_simple_error(&err, &mut out);
-			}
-			return self.finish_query(out).await;
-		}
-		// The dialect gate is re-checked here, not just where the dialect was
-		// selected, so a runtime capability change applies to this query. It
-		// runs after the `SET` interception above so a client refused here can
-		// still switch back to a dialect it is allowed to use.
+
 		if let Err(err) = self.check_current_dialect() {
 			self.note_simple_error(&err, &mut out);
 			return self.finish_query(out).await;
 		}
+
 		match self.dialect {
-			// GQL has no transaction-aware execution path, so running it inside
-			// an interactive transaction would silently auto-commit outside the
-			// block. Refuse rather than mislead.
-			Dialect::Gql if self.transaction.is_some() => {
-				self.note_simple_error(
-					&PgError::feature_not_supported(
-						"GQL queries cannot run inside an interactive transaction",
-					),
-					&mut out,
-				);
+			Dialect::SurrealQl => {
+				if self.transaction.is_some() {
+					let _ = self.run_in_transaction(trimmed, &mut out).await;
+				} else {
+					let _ = self.run_surrealql_autocommit(trimmed, &mut out).await;
+				}
 			}
-			Dialect::Gql => self.run_gql(sql, &mut out).await?,
-			Dialect::PgSql => self.run_pgsql(sql, &mut out).await?,
-			Dialect::MySql => self.run_mysql(sql, &mut out).await?,
-			Dialect::SurrealQl if self.transaction.is_some() => {
-				self.run_in_transaction(sql, &mut out).await?;
+			Dialect::PgSql => {
+				for stmt in split_statements(remaining) {
+					let trimmed_stmt = stmt.trim();
+					if trimmed_stmt.is_empty() {
+						continue;
+					}
+					if let Some(op) = transaction_control(trimmed_stmt) {
+						if let Err(err) = self.handle_transaction_control(op, &mut out).await {
+							msg::write_error_response(&mut out, &err);
+							break;
+						}
+						continue;
+					}
+					if self.txn_failed {
+						msg::write_error_response(
+							&mut out,
+							&PgError::in_failed_transaction(
+								"current transaction is aborted, commands ignored until end of transaction block",
+							),
+						);
+						break;
+					}
+					let res = self.run_pgsql(trimmed_stmt, &mut out).await;
+					if res.is_err() || self.txn_failed {
+						break;
+					}
+				}
 			}
-			Dialect::SurrealQl => self.run_surrealql_autocommit(sql, &mut out).await?,
+			Dialect::MySql => {
+				for stmt in split_statements(remaining) {
+					let trimmed_stmt = stmt.trim();
+					if trimmed_stmt.is_empty() {
+						continue;
+					}
+					if let Some(op) = transaction_control(trimmed_stmt) {
+						if let Err(err) = self.handle_transaction_control(op, &mut out).await {
+							msg::write_error_response(&mut out, &err);
+							break;
+						}
+						continue;
+					}
+					if self.txn_failed {
+						msg::write_error_response(
+							&mut out,
+							&PgError::in_failed_transaction(
+								"current transaction is aborted, commands ignored until end of transaction block",
+							),
+						);
+						break;
+					}
+					let res = self.run_mysql(trimmed_stmt, &mut out).await;
+					if res.is_err() || self.txn_failed {
+						break;
+					}
+				}
+			}
+			Dialect::Gql => {
+				if self.transaction.is_some() {
+					self.note_simple_error(
+						&PgError::feature_not_supported(
+							"GQL queries cannot run inside an interactive transaction",
+						),
+						&mut out,
+					);
+				} else {
+					let _ = self.run_gql(trimmed, &mut out).await;
+				}
+			}
 		}
 		self.finish_query(out).await
 	}
@@ -1753,9 +1874,12 @@ impl Connection {
 			value,
 		} = set;
 		if name.is_empty() {
-			// Unmodelled SET syntax — accept as a no-op.
-			msg::write_command_complete(out, "SET");
-			return Ok(());
+			let msg = if !value.is_empty() {
+				format!("SET {value} is not supported")
+			} else {
+				"this form of SET statement is not supported".to_string()
+			};
+			return Err(PgError::feature_not_supported(msg));
 		}
 		if name.eq_ignore_ascii_case("dialect") {
 			let dialect = parse_dialect(&value)
@@ -2338,12 +2462,27 @@ fn is_no_op_guc(name: &str) -> bool {
 
 /// Recognise a `SET name = value` / `SET name TO value` statement.
 fn parse_set(trimmed: &str) -> Option<SetStatement> {
-	let rest = trimmed.trim_end_matches(';').trim();
+	let stripped = strip_sql_comments(trimmed);
+	let rest = stripped.trim().trim_end_matches(';').trim();
+	if rest.contains(';') {
+		return None;
+	}
 	let mut words = rest.splitn(2, char::is_whitespace);
 	if !words.next()?.eq_ignore_ascii_case("SET") {
 		return None;
 	}
 	let assignment = words.next().unwrap_or("").trim();
+	let first_word = assignment.split_whitespace().next().unwrap_or("");
+	if first_word.eq_ignore_ascii_case("ROLE")
+		|| first_word.eq_ignore_ascii_case("SESSION")
+		|| first_word.eq_ignore_ascii_case("TRANSACTION")
+		|| first_word.eq_ignore_ascii_case("LOCAL")
+	{
+		return Some(SetStatement {
+			name: String::new(),
+			value: assignment.to_string(),
+		});
+	}
 	// Split on the first `=` or a ` TO ` keyword.
 	let split = assignment.find('=').map(|i| (assignment[..i].trim(), assignment[i + 1..].trim()));
 	let split = split.or_else(|| {
@@ -2357,12 +2496,204 @@ fn parse_set(trimmed: &str) -> Option<SetStatement> {
 			name: name.to_string(),
 			value: value.to_string(),
 		},
-		// Unmodelled SET syntax: accept as a no-op.
 		None => SetStatement {
 			name: String::new(),
-			value: String::new(),
+			value: assignment.to_string(),
 		},
 	})
+}
+
+/// Split the first statement before the first unquoted semicolon, returning
+/// `(first_stmt, remainder)`. If no semicolon is found, returns `(sql, "")`.
+fn split_first_statement(sql: &str) -> (&str, &str) {
+	let bytes = sql.as_bytes();
+	let mut i = 0;
+	let len = bytes.len();
+
+	while i < len {
+		match bytes[i] {
+			b'-' if i + 1 < len && bytes[i + 1] == b'-' => {
+				i += 2;
+				while i < len && bytes[i] != b'\n' {
+					i += 1;
+				}
+			}
+			b'#' => {
+				i += 1;
+				while i < len && bytes[i] != b'\n' {
+					i += 1;
+				}
+			}
+			b'/' if i + 1 < len && bytes[i + 1] == b'*' => {
+				i += 2;
+				while i < len && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+					i += 1;
+				}
+				if i + 1 < len {
+					i += 2;
+				}
+			}
+			b'\'' => {
+				i += 1;
+				while i < len {
+					if bytes[i] == b'\'' {
+						if i + 1 < len && bytes[i + 1] == b'\'' {
+							i += 2;
+						} else {
+							i += 1;
+							break;
+						}
+					} else if bytes[i] == b'\\' {
+						i += 2;
+					} else {
+						i += 1;
+					}
+				}
+			}
+			b'"' => {
+				i += 1;
+				while i < len {
+					if bytes[i] == b'"' {
+						if i + 1 < len && bytes[i + 1] == b'"' {
+							i += 2;
+						} else {
+							i += 1;
+							break;
+						}
+					} else {
+						i += 1;
+					}
+				}
+			}
+			b'$' => {
+				let tag_start = i;
+				let mut j = i + 1;
+				while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+					j += 1;
+				}
+				if j < len && bytes[j] == b'$' {
+					let tag = &sql[tag_start..=j];
+					i = j + 1;
+					if let Some(pos) = sql[i..].find(tag) {
+						i += pos + tag.len();
+					} else {
+						i = len;
+					}
+				} else {
+					i += 1;
+				}
+			}
+			b';' => {
+				return (&sql[..i], &sql[i + 1..]);
+			}
+			_ => {
+				i += 1;
+			}
+		}
+	}
+	(sql, "")
+}
+
+/// Split a SQL string containing multiple statements separated by semicolons into individual
+/// statement slices, respecting single quotes, double quotes, dollar quotes, and SQL comments.
+fn split_statements(sql: &str) -> Vec<&str> {
+	let bytes = sql.as_bytes();
+	let mut stmts = Vec::new();
+	let mut start = 0;
+	let mut i = 0;
+	let len = bytes.len();
+
+	while i < len {
+		match bytes[i] {
+			b'-' if i + 1 < len && bytes[i + 1] == b'-' => {
+				i += 2;
+				while i < len && bytes[i] != b'\n' {
+					i += 1;
+				}
+			}
+			b'#' => {
+				i += 1;
+				while i < len && bytes[i] != b'\n' {
+					i += 1;
+				}
+			}
+			b'/' if i + 1 < len && bytes[i + 1] == b'*' => {
+				i += 2;
+				while i + 1 < len && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+					i += 1;
+				}
+				if i + 1 < len {
+					i += 2;
+				}
+			}
+			b'\'' => {
+				i += 1;
+				while i < len {
+					if bytes[i] == b'\'' {
+						if i + 1 < len && bytes[i + 1] == b'\'' {
+							i += 2;
+						} else {
+							i += 1;
+							break;
+						}
+					} else if bytes[i] == b'\\' {
+						i += 2;
+					} else {
+						i += 1;
+					}
+				}
+			}
+			b'"' => {
+				i += 1;
+				while i < len {
+					if bytes[i] == b'"' {
+						if i + 1 < len && bytes[i + 1] == b'"' {
+							i += 2;
+						} else {
+							i += 1;
+							break;
+						}
+					} else {
+						i += 1;
+					}
+				}
+			}
+			b'$' => {
+				let tag_start = i;
+				let mut j = i + 1;
+				while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+					j += 1;
+				}
+				if j < len && bytes[j] == b'$' {
+					let tag = &sql[tag_start..=j];
+					i = j + 1;
+					if let Some(pos) = sql[i..].find(tag) {
+						i += pos + tag.len();
+					} else {
+						i = len;
+					}
+				} else {
+					i += 1;
+				}
+			}
+			b';' => {
+				let stmt = sql[start..i].trim();
+				if !stmt.is_empty() {
+					stmts.push(stmt);
+				}
+				i += 1;
+				start = i;
+			}
+			_ => {
+				i += 1;
+			}
+		}
+	}
+	let trailing = sql[start..].trim();
+	if !trailing.is_empty() {
+		stmts.push(trailing);
+	}
+	stmts
 }
 
 /// Parse a Postgres `options` startup string for a `-c dialect=<name>` (or
@@ -2408,8 +2739,8 @@ fn dialect_name(dialect: Dialect) -> &'static str {
 mod tests {
 	use super::{
 		Dialect, TxnOp, dialect_from_options, dialect_name, parse_database_param, parse_dialect,
-		parse_set, rewrite_positional_params, row_within_wire_limit, transaction_control,
-		wire_row_fits,
+		parse_set, rewrite_positional_params, row_within_wire_limit, split_statements,
+		transaction_control, wire_row_fits,
 	};
 
 	fn rewrite(query: &str) -> String {
@@ -2432,10 +2763,12 @@ mod tests {
 
 	#[test]
 	fn recognises_transaction_preambles() {
-		// Modifier clauses that drivers/ORMs attach are still recognised.
+		// Comment stripping still allows clean transaction control.
+		assert_eq!(transaction_control("BEGIN /* jdbc */"), Some(TxnOp::Begin));
+		assert_eq!(transaction_control("COMMIT -- done"), Some(TxnOp::Commit));
+		// Modifiers like isolation levels, read only, chain are recognised.
 		assert_eq!(transaction_control("BEGIN ISOLATION LEVEL SERIALIZABLE"), Some(TxnOp::Begin));
 		assert_eq!(transaction_control("START TRANSACTION READ WRITE"), Some(TxnOp::Begin));
-		assert_eq!(transaction_control("BEGIN /* jdbc */"), Some(TxnOp::Begin));
 		assert_eq!(transaction_control("ROLLBACK AND NO CHAIN"), Some(TxnOp::Rollback));
 		// `START` without `TRANSACTION` is not a transaction statement.
 		assert_eq!(transaction_control("START"), None);
@@ -2443,6 +2776,24 @@ mod tests {
 		assert_eq!(transaction_control("BEGIN something weird"), None);
 		// `COMMIT; SELECT 1` is multi-statement — not intercepted here.
 		assert_eq!(transaction_control("COMMIT; SELECT 1"), None);
+	}
+
+	#[test]
+	fn test_split_statements() {
+		assert_eq!(split_statements("SELECT 1;"), vec!["SELECT 1"]);
+		assert_eq!(
+			split_statements("SET client_encoding = 'UTF8'; SELECT 1;"),
+			vec!["SET client_encoding = 'UTF8'", "SELECT 1"]
+		);
+		assert_eq!(
+			split_statements("SELECT 'hello;world'; SELECT $$semi;colon$$;"),
+			vec!["SELECT 'hello;world'", "SELECT $$semi;colon$$"]
+		);
+		assert_eq!(
+			split_statements("BEGIN; INSERT INTO t VALUES (1); COMMIT;"),
+			vec!["BEGIN", "INSERT INTO t VALUES (1)", "COMMIT"]
+		);
+		assert!(split_statements("; ; ; ").is_empty());
 	}
 
 	#[test]
@@ -2464,8 +2815,15 @@ mod tests {
 		let set = parse_set("SET extra_float_digits TO 3").unwrap();
 		assert_eq!(set.name, "extra_float_digits");
 		assert_eq!(set.value, "3");
-		// Unmodelled SET syntax parses with an empty name (accepted as no-op).
-		assert_eq!(parse_set("SET TIME ZONE 'UTC'").unwrap().name, "");
+		// Unmodelled SET syntax parses with an empty name (rejected by handle_set).
+		let set = parse_set("SET TIME ZONE 'UTC'").unwrap();
+		assert_eq!(set.name, "");
+		assert_eq!(set.value, "TIME ZONE 'UTC'");
+		let set = parse_set("SET ROLE admin").unwrap();
+		assert_eq!(set.name, "");
+		assert_eq!(set.value, "ROLE admin");
+		// Multi-statement SET is not a standalone SET statement.
+		assert!(parse_set("SET a = 1; SELECT 1").is_none());
 		// Not a SET statement.
 		assert!(parse_set("SELECT 1").is_none());
 	}

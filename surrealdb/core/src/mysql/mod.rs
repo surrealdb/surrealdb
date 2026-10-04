@@ -46,11 +46,13 @@ pub(crate) fn parse_to_statements(
 
 	let mut statements = Vec::new();
 	for stmt in stmts {
-		match lower::lower_stmt(&stmt) {
-			Ok(plan) => {
+		match &stmt {
+			surrealdb_mysql::ast::stmt::Statement::Select(select) => {
+				let plan = lower::lower_select(select)
+					.map_err(|e| anyhow::anyhow!("MySQL SELECT lowering error: {e}"))?;
 				statements.push(TopLevelStatement::Plan(Box::new(plan)));
 			}
-			Err(_) => {
+			_ => {
 				let mut surql_text = String::new();
 				surrealdb_mysql::translate::translate_statement(
 					&stmt,
