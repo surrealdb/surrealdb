@@ -5103,10 +5103,13 @@ dependencies = [
  "surrealdb-idx",
  "surrealdb-kvs",
  "surrealdb-kvs-any",
+ "surrealdb-mysql",
  "surrealdb-observe",
+ "surrealdb-pgsql",
  "surrealdb-rpc",
  "surrealdb-runtime",
  "surrealdb-sql",
+ "surrealdb-sqlplan",
  "surrealdb-strand",
  "surrealdb-syn",
  "surrealdb-types",
@@ -5388,6 +5391,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-mysql"
+version = "3.4.0-nightly"
+dependencies = [
+ "reblessive",
+ "surrealdb-sqlfront-derive",
+ "thiserror",
+]
+
+[[package]]
 name = "surrealdb-observe"
 version = "3.4.0-nightly"
 dependencies = [
@@ -5404,6 +5416,15 @@ dependencies = [
  "chrono",
  "logos",
  "uuid",
+]
+
+[[package]]
+name = "surrealdb-pgsql"
+version = "3.4.0-nightly"
+dependencies = [
+ "reblessive",
+ "surrealdb-sqlfront-derive",
+ "thiserror",
 ]
 
 [[package]]
@@ -5512,6 +5533,28 @@ dependencies = [
  "surrealdb-types",
  "unicase",
  "uuid",
+]
+
+[[package]]
+name = "surrealdb-sqlfront-derive"
+version = "3.4.0-nightly"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "surrealdb-sqlplan"
+version = "3.4.0-nightly"
+dependencies = [
+ "surrealdb-expr",
+ "surrealdb-mysql",
+ "surrealdb-pgsql",
+ "surrealdb-strand",
+ "surrealdb-types",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]

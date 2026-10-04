@@ -7285,6 +7285,7 @@ dependencies = [
  "surrealdb-rpc",
  "surrealdb-runtime",
  "surrealdb-sql",
+ "surrealdb-sqlplan",
  "surrealdb-strand",
  "surrealdb-syn",
  "surrealdb-types",
@@ -8076,6 +8077,20 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "toml",
+]
+
+[[package]]
+name = "surrealdb-sqlplan"
+version = "3.4.0-nightly"
+dependencies = [
+ "surrealdb-expr",
+ "surrealdb-mysql",
+ "surrealdb-pgsql",
+ "surrealdb-strand",
+ "surrealdb-types",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

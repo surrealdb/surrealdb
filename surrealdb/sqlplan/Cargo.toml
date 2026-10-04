@@ -1,0 +1,31 @@
+[package]
+name = "surrealdb-sqlplan"
+publish = false
+readme = "README.md"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description = "SQL planner, binder, and bound IR for SurrealDB"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+surrealdb-expr = { workspace = true }
+surrealdb-mysql = { workspace = true }
+surrealdb-pgsql = { workspace = true }
+surrealdb-strand = { workspace = true }
+surrealdb-types = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+
+[package.metadata.cargo-machete]
+ignored = []
+
+[lints]
+workspace = true

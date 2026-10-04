@@ -75,10 +75,10 @@ graphql = ["dep:async-graphql", "surrealdb-catalog/graphql"]
 gql = ["dep:surrealdb-gql"]
 
 # PostgreSQL support
-postgres = ["dep:surrealdb-pgsql"]
+postgres = ["dep:surrealdb-pgsql", "dep:surrealdb-sqlplan"]
 
 # MySQL support
-mysql = ["dep:surrealdb-mysql"]
+mysql = ["dep:surrealdb-mysql", "dep:surrealdb-sqlplan"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -92,6 +92,7 @@ surrealdb-expr = { workspace = true }
 surrealdb-gql = { workspace = true, optional = true }
 surrealdb-pgsql = { workspace = true, optional = true }
 surrealdb-mysql = { workspace = true, optional = true }
+surrealdb-sqlplan = { workspace = true, optional = true }
 surrealdb-sql = { workspace = true }
 surrealdb-strand = { workspace = true }
 surrealdb-syn = { workspace = true }

@@ -40,12 +40,15 @@ pub struct Origin {
 }
 
 /// The query language a test case is written in, derived from the file
-/// extension: `.surql` is SurrealQL, `.gql` is GQL, `.graphql` is GraphQL.
+/// extension: `.surql` is SurrealQL, `.gql` is GQL, `.graphql` is GraphQL,
+/// `.pgsql` is PostgreSQL, `.mysql` is MySQL.
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Dialect {
 	SurrealQl,
 	Gql,
 	GraphQl,
+	PgSql,
+	MySql,
 }
 
 /// A single test case, which might produce multiple test runs depending on configuration.
@@ -275,6 +278,10 @@ impl CaseSet {
 				Dialect::Gql
 			} else if path.ends_with(".graphql") {
 				Dialect::GraphQl
+			} else if path.ends_with(".pgsql") {
+				Dialect::PgSql
+			} else if path.ends_with(".mysql") {
+				Dialect::MySql
 			} else {
 				return Ok(());
 			};

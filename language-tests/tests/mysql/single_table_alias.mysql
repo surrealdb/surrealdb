@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_schema.surql"]
+
+[test]
+reason = "MySQL single table alias resolution (u.name, u.age) with WHERE and ORDER BY"
+
+[[test.results]]
+value = "[{ age: 25, name: 'Bob' }, { age: 30, name: 'Alice' }]"
+*/
+
+SELECT u.name, u.age FROM users u WHERE u.age <= 30 ORDER BY u.age ASC;

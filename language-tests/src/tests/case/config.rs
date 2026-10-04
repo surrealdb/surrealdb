@@ -107,13 +107,15 @@ impl CaseConfig {
 				.context("Could not deserialize test case config")?;
 
 			// `planner-strategy` defaults are dialect-aware. A `.gql` test
-			// lowers to a `LogicalOp::Match` that only runs on the streaming
+			// lowers to a `LogicalOp` pipeline that only runs on the streaming
 			// engine; the `compute-only` strategy hard-errors on it. So when a
-			// GQL test does not pin its own strategy, default it away from
+			// test in these dialects does not pin its own strategy, default it away from
 			// `compute-only`. Explicit presence is detected from the raw TOML
 			// (serde defaults erase the omitted-vs-default distinction).
-			if dialect == Dialect::Gql && !planner_strategy_present(&toml) {
-				config.env.planner_strategy = default_gql_planner_strategy();
+			if matches!(dialect, Dialect::Gql | Dialect::PgSql | Dialect::MySql)
+				&& !planner_strategy_present(&toml)
+			{
+				config.env.planner_strategy = default_streaming_planner_strategy();
 			}
 
 			Ok(Self {
@@ -123,10 +125,10 @@ impl CaseConfig {
 			})
 		} else {
 			let mut parsed = TestConfig::default();
-			// No config block: a `.gql` test still needs the dialect-aware
+			// No config block: dialect still needs the dialect-aware
 			// strategy default (see the configured branch above).
-			if dialect == Dialect::Gql {
-				parsed.env.planner_strategy = default_gql_planner_strategy();
+			if matches!(dialect, Dialect::Gql | Dialect::PgSql | Dialect::MySql) {
+				parsed.env.planner_strategy = default_streaming_planner_strategy();
 			}
 			Ok(Self {
 				range: None,
@@ -137,10 +139,10 @@ impl CaseConfig {
 	}
 }
 
-/// The planner strategies a `.gql` test runs under when it does not pin its
+/// The planner strategies a streaming test runs under when it does not pin its
 /// own `planner-strategy`. `compute-only` is omitted because a lowered plan
 /// only executes on the streaming engine.
-fn default_gql_planner_strategy() -> Vec<NewPlannerStrategyConfig> {
+fn default_streaming_planner_strategy() -> Vec<NewPlannerStrategyConfig> {
 	vec![NewPlannerStrategyConfig::AllRo, NewPlannerStrategyConfig::BestEffortRo]
 }
 

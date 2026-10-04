@@ -565,6 +565,34 @@ async fn run_test_body(
 				Err(e) => (false, Ok(vec![Err(e)])),
 			}
 		}
+		Dialect::PgSql => {
+			let start = Instant::now();
+			let result = dbs
+				.run(QueryRequest::new(
+					QuerySource::pgsql(&run.case.test.source),
+					&*session,
+				))
+				.await;
+			let did_timeout = start.elapsed() > timeout_duration;
+			let result = result
+				.map(|x| x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect())
+				.map_err(|e| anyhow::anyhow!(e));
+			(did_timeout, result)
+		}
+		Dialect::MySql => {
+			let start = Instant::now();
+			let result = dbs
+				.run(QueryRequest::new(
+					QuerySource::mysql(&run.case.test.source),
+					&*session,
+				))
+				.await;
+			let did_timeout = start.elapsed() > timeout_duration;
+			let result = result
+				.map(|x| x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect())
+				.map_err(|e| anyhow::anyhow!(e));
+			(did_timeout, result)
+		}
 	};
 
 	Ok(BodyOutcome::Executed {
