@@ -945,6 +945,7 @@ mod pg_integration {
 	async fn standard_postgres_ddl_and_dml() {
 		let (port, _server) = start_pg_server(true).await.unwrap();
 		let client = connect_root(port).await.unwrap();
+		client.simple_query("SET dialect = 'pgsql'").await.unwrap();
 		let res1 = client.simple_query("CREATE TABLE pg_users (id INT, name VARCHAR(50))").await;
 		if let Err(e) = &res1 {
 			panic!("RES1 error: {e:?}");

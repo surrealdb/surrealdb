@@ -8,7 +8,7 @@ use std::time::Duration;
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::basic;
-use surrealdb_core::kvs::{Datastore, QueryRequest, QuerySource};
+use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
 use surrealdb_rpc::capabilities::RouteTarget;
 use tokio::io::{ReadHalf, WriteHalf, split};
 use tokio::net::TcpStream;
@@ -46,6 +46,7 @@ pub struct Connection {
 	current_db: Option<String>,
 	_is_tls: bool,
 	username: String,
+	dialect: Dialect,
 	_permit: OwnedSemaphorePermit,
 }
 
@@ -278,6 +279,7 @@ async fn perform_handshake(
 		} else {
 			username
 		},
+		dialect: Dialect::MySql,
 		_permit: permit,
 	};
 
@@ -290,6 +292,25 @@ async fn perform_handshake(
 }
 
 impl Connection {
+	fn check_dialect(&self, dialect: Dialect) -> Result<()> {
+		let allowed = match dialect {
+			Dialect::MySql => self.ds.allows_http_route(&RouteTarget::MySql),
+			Dialect::PgSql => self.ds.allows_http_route(&RouteTarget::Postgres),
+			Dialect::Gql => self.ds.allows_http_route(&RouteTarget::Gql),
+			Dialect::SurrealQl => self.ds.allows_http_route(&RouteTarget::MySql),
+		};
+		if !allowed {
+			anyhow::bail!("Forbidden: the {dialect:?} dialect is not allowed on this server");
+		}
+		Ok(())
+	}
+
+	fn select_dialect(&mut self, dialect: Dialect) -> Result<()> {
+		self.check_dialect(dialect)?;
+		self.dialect = dialect;
+		Ok(())
+	}
+
 	async fn set_current_db(&mut self, db_name: &str) -> Result<()> {
 		let parts: Vec<&str> = db_name.split('/').collect();
 		let (ns, db) = if parts.len() >= 2 {
@@ -360,6 +381,26 @@ impl Connection {
 			return Ok(());
 		}
 
+		if let Some(res) = parse_mywire_set_dialect(trimmed) {
+			match res {
+				Ok(dialect) => {
+					if let Err(e) = self.select_dialect(dialect) {
+						let err_pkt = ErrPacket::general(1045, b"28000", e.to_string());
+						self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+						return Ok(());
+					}
+					let ok = OkPacket::new(0, 0);
+					self.writer.write_packet(seq.wrapping_add(1), &ok.serialize()).await?;
+					return Ok(());
+				}
+				Err(err_msg) => {
+					let err_pkt = ErrPacket::general(1238, b"42000", err_msg);
+					self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+					return Ok(());
+				}
+			}
+		}
+
 		if trimmed.starts_with("SET ") || trimmed.starts_with("set ") {
 			let ok = OkPacket::new(0, 0);
 			self.writer.write_packet(seq.wrapping_add(1), &ok.serialize()).await?;
@@ -393,13 +434,22 @@ impl Connection {
 			return Ok(());
 		}
 
-		// Execute against datastore with MySQL dialect (direct LogicalPlan lowering for SELECT,
-		// falling back to transactional engine for mutations/DDL, or SurrealQL fallback).
-		let req = QueryRequest::new(QuerySource::mysql(trimmed), &self.session);
-		let res = match self.ds.run(req).await {
-			Ok(r) => Ok(r),
-			Err(_) => self.ds.run(QueryRequest::new(trimmed, &self.session)).await,
+		// Check dialect capability before execution
+		if let Err(e) = self.check_dialect(self.dialect) {
+			let err_pkt = ErrPacket::general(1045, b"28000", e.to_string());
+			self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+			return Ok(());
+		}
+
+		// Execute against datastore with the selected dialect.
+		// Fail-closed execution: NEVER fall back to SurrealQL on error!
+		let req = match self.dialect {
+			Dialect::MySql => QueryRequest::new(QuerySource::mysql(trimmed), &self.session),
+			Dialect::SurrealQl => QueryRequest::new(trimmed, &self.session),
+			Dialect::PgSql => QueryRequest::new(QuerySource::pgsql(trimmed), &self.session),
+			Dialect::Gql => QueryRequest::new(QuerySource::gql(trimmed), &self.session),
 		};
+		let res = self.ds.run(req).await;
 		match res {
 			Ok(results) => {
 				let mut res_seq = seq.wrapping_add(1);
@@ -521,5 +571,42 @@ impl Connection {
 		*seq = seq.wrapping_add(1);
 
 		Ok(())
+	}
+}
+
+/// Parse a `SET dialect = ...` or `SET dialect TO ...` statement.
+fn parse_mywire_set_dialect(trimmed: &str) -> Option<std::result::Result<Dialect, String>> {
+	let lower = trimmed.to_ascii_lowercase();
+	let rest = lower.strip_prefix("set")?.trim();
+	if !rest.starts_with("dialect") {
+		return None;
+	}
+	let after = rest.strip_prefix("dialect")?.trim();
+	let after = after.strip_prefix('=').or_else(|| after.strip_prefix("to"))?.trim();
+	let val = after.trim_matches('\'').trim_matches('"').trim();
+	match val {
+		"mysql" | "sql" => Some(Ok(Dialect::MySql)),
+		"surrealql" | "surql" => Some(Ok(Dialect::SurrealQl)),
+		"postgres" | "postgresql" | "pgsql" => Some(Ok(Dialect::PgSql)),
+		"gql" => Some(Ok(Dialect::Gql)),
+		other => Some(Err(format!("Variable 'dialect' cannot be set to the value of '{other}'"))),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_parse_mywire_set_dialect() {
+		assert_eq!(parse_mywire_set_dialect("SET dialect = 'mysql'"), Some(Ok(Dialect::MySql)));
+		assert_eq!(
+			parse_mywire_set_dialect("set dialect='surrealql'"),
+			Some(Ok(Dialect::SurrealQl))
+		);
+		assert_eq!(parse_mywire_set_dialect("SET dialect TO \"pgsql\""), Some(Ok(Dialect::PgSql)));
+		assert_eq!(parse_mywire_set_dialect("SET dialect = gql"), Some(Ok(Dialect::Gql)));
+		assert!(parse_mywire_set_dialect("SET dialect = unknown").unwrap().is_err());
+		assert!(parse_mywire_set_dialect("SET autocommit = 1").is_none());
 	}
 }

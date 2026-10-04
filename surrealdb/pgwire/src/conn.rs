@@ -888,37 +888,28 @@ impl Connection {
 			Dialect::SurrealQl => {
 				// Parse once so syntax errors surface at Parse (as Postgres does)
 				// and the AST can be cached for repeated Execute without re-parsing.
-				// If the query is not valid SurrealQL, try translating PostgreSQL SQL via
-				// surrealdb-pgsql.
 				let (rewritten, positional) = rewrite_positional_params(query);
 				let config = self.ds.parser_config();
-				let (query, ast, positional, is_pgsql) = match syn::parse_with_capabilities(
-					&rewritten,
-					&self.ds.get_capabilities(),
-					&config,
-				) {
-					Ok(ast) => (rewritten, Some(ast), positional, false),
-					Err(err) => {
-						if let Ok(stmts) = surrealdb_pgsql::parse_statements(query) {
-							let empty = stmts.is_empty();
-							(query.to_string(), None, param_types.len().max(positional), !empty)
-						} else {
-							return Err(PgError::syntax(err.to_string()));
-						}
-					}
-				};
-				let empty = ast.as_ref().map(|a| a.num_statements() == 0).unwrap_or(!is_pgsql);
-				// Report at least as many parameters as the query references,
-				// so a driver relying on ParameterDescription sees them all.
+				let ast =
+					syn::parse_with_capabilities(&rewritten, &self.ds.get_capabilities(), &config)
+						.map_err(|err| PgError::syntax(err.to_string()))?;
+				let empty = ast.num_statements() == 0;
 				let param_count = param_types.len().max(positional);
 				let parsed = if empty {
 					None
 				} else {
-					ast
+					Some(ast)
 				};
-				(query, parsed, param_count, empty)
+				(rewritten, parsed, param_count, empty)
 			}
-			Dialect::Gql | Dialect::PgSql | Dialect::MySql => {
+			Dialect::PgSql => {
+				let stmts = surrealdb_pgsql::parse_statements(query)
+					.map_err(|err| PgError::syntax(err.to_string()))?;
+				let empty = stmts.is_empty();
+				let param_count = param_types.len();
+				(query.to_string(), None, param_count, empty)
+			}
+			Dialect::Gql | Dialect::MySql => {
 				let empty = query.trim().is_empty();
 				(query.to_string(), None, param_types.len(), empty)
 			}
@@ -1276,6 +1267,26 @@ impl Connection {
 				)
 				.await
 				.map_err(|e| PgError::from(&e)),
+			(Dialect::PgSql, transaction, _) => self
+				.ds
+				.run(
+					QueryRequest::new(QuerySource::pgsql(query), &self.session)
+						.with_variables(Some(params))
+						.with_optional_transaction(transaction)
+						.with_cancel(cancel),
+				)
+				.await
+				.map_err(|e| PgError::from(&e)),
+			(Dialect::MySql, transaction, _) => self
+				.ds
+				.run(
+					QueryRequest::new(QuerySource::mysql(query), &self.session)
+						.with_variables(Some(params))
+						.with_optional_transaction(transaction)
+						.with_cancel(cancel),
+				)
+				.await
+				.map_err(|e| PgError::from(&e)),
 			(Dialect::SurrealQl, transaction, Some(ast)) => self
 				.ds
 				.run(
@@ -1289,14 +1300,13 @@ impl Connection {
 			(Dialect::SurrealQl, transaction, None) => self
 				.ds
 				.run(
-					QueryRequest::new(QuerySource::pgsql(query), &self.session)
+					QueryRequest::new(query, &self.session)
 						.with_variables(Some(params))
 						.with_optional_transaction(transaction)
 						.with_cancel(cancel),
 				)
 				.await
 				.map_err(|e| PgError::from(&e)),
-			_ => Ok(Vec::new()),
 		}?;
 		let mut last = Value::None;
 		for result in results {
@@ -1439,31 +1449,8 @@ impl Connection {
 		let ast = match syn::parse_with_capabilities(sql, &self.ds.get_capabilities(), &config) {
 			Ok(ast) => ast,
 			Err(err) => {
-				let cancel = self.arm_cancel();
-				let req =
-					QueryRequest::new(QuerySource::pgsql(sql), &self.session).with_cancel(cancel);
-				match self.ds.run(req).await {
-					Ok(results) => {
-						for result in results {
-							match result.result {
-								Ok(value) => {
-									if !self.emit_result(value, out).await? {
-										break;
-									}
-								}
-								Err(err) => {
-									self.note_simple_error(&PgError::from(&err), out);
-									break;
-								}
-							}
-						}
-						return Ok(());
-					}
-					Err(_) => {
-						msg::write_error_response(out, &PgError::syntax(err.to_string()));
-						return Ok(());
-					}
-				}
+				msg::write_error_response(out, &PgError::syntax(err.to_string()));
+				return Ok(());
 			}
 		};
 		if ast.num_statements() == 0 {
@@ -1720,9 +1707,10 @@ impl Connection {
 	/// cannot be added without deciding what gates it.
 	fn check_dialect(&self, dialect: Dialect) -> Result<(), PgError> {
 		let allowed = match dialect {
-			// The port's own language, gated only by `RouteTarget::Postgres`,
-			// which the connection already passed.
-			Dialect::SurrealQl | Dialect::PgSql | Dialect::MySql => true,
+			Dialect::PgSql | Dialect::SurrealQl => {
+				self.ds.allows_http_route(&RouteTarget::Postgres)
+			}
+			Dialect::MySql => self.ds.allows_http_route(&RouteTarget::MySql),
 			Dialect::Gql => self.ds.allows_http_route(&RouteTarget::Gql),
 		};
 		if !allowed {
@@ -1739,13 +1727,16 @@ impl Connection {
 	}
 
 	/// Whether a `SET` should be intercepted rather than executed. In the
-	/// SurrealQL dialect every `SET` is intercepted (top-level `SET` is not
-	/// SurrealQL). In the GQL dialect `SET` is a mutation clause, so only what a
-	/// driver means as configuration is intercepted — the `dialect` control knob,
-	/// the known GUC allowlist, and unmodelled `SET` syntax (empty name, e.g.
-	/// `SET TIME ZONE ...`); a real `property = value` mutation reaches the executor.
+	/// SurrealQL, PostgreSQL, and MySQL dialects every `SET` is intercepted
+	/// (top-level `SET` is configuration). In the GQL dialect `SET` is a mutation
+	/// clause, so only what a driver means as configuration is intercepted — the
+	/// `dialect` control knob, the known GUC allowlist, and unmodelled `SET` syntax
+	/// (empty name, e.g. `SET TIME ZONE ...`); a real `property = value` mutation reaches the
+	/// executor.
 	fn should_intercept_set(&self, set: &SetStatement) -> bool {
 		self.dialect == Dialect::SurrealQl
+			|| self.dialect == Dialect::PgSql
+			|| self.dialect == Dialect::MySql
 			|| set.name.is_empty()
 			|| set.name.eq_ignore_ascii_case("dialect")
 			|| is_no_op_guc(&set.name)
@@ -2390,8 +2381,10 @@ fn dialect_from_options(options: &str) -> Option<Dialect> {
 
 /// Parse a dialect name (case-insensitive) as used by `options` and `SET`.
 fn parse_dialect(value: &str) -> Option<Dialect> {
-	match value.trim().trim_matches('\'').to_ascii_lowercase().as_str() {
-		"surrealql" | "surql" | "sql" => Some(Dialect::SurrealQl),
+	match value.trim().trim_matches('\'').trim_matches('"').to_ascii_lowercase().as_str() {
+		"surrealql" | "surql" => Some(Dialect::SurrealQl),
+		"postgres" | "postgresql" | "pgsql" | "sql" => Some(Dialect::PgSql),
+		"mysql" => Some(Dialect::MySql),
 		"gql" => Some(Dialect::Gql),
 		_ => None,
 	}
@@ -2479,6 +2472,9 @@ mod tests {
 		assert_eq!(parse_dialect("gql"), Some(Dialect::Gql));
 		assert_eq!(parse_dialect("'GQL'"), Some(Dialect::Gql));
 		assert_eq!(parse_dialect("surrealql"), Some(Dialect::SurrealQl));
+		assert_eq!(parse_dialect("postgres"), Some(Dialect::PgSql));
+		assert_eq!(parse_dialect("pgsql"), Some(Dialect::PgSql));
+		assert_eq!(parse_dialect("mysql"), Some(Dialect::MySql));
 		assert_eq!(parse_dialect("nope"), None);
 	}
 
@@ -2486,7 +2482,7 @@ mod tests {
 	fn dialect_names_round_trip() {
 		// The name a refusal reports must be one a client can actually select,
 		// so it names the setting to change.
-		for dialect in [Dialect::SurrealQl, Dialect::Gql] {
+		for dialect in [Dialect::SurrealQl, Dialect::Gql, Dialect::PgSql, Dialect::MySql] {
 			assert_eq!(parse_dialect(dialect_name(dialect)), Some(dialect));
 		}
 	}

@@ -138,6 +138,10 @@ async fn connect_and_handshake(addr: std::net::SocketAddr) -> TcpStream {
 
 enum QueryResult {
 	Ok,
+	Error {
+		code: u16,
+		message: String,
+	},
 	ResultSet {
 		columns: usize,
 		rows: Vec<Vec<u8>>,
@@ -150,7 +154,16 @@ async fn read_query_response(stream: &mut TcpStream) -> QueryResult {
 		return QueryResult::Ok;
 	}
 	if first[0] == 0xff {
-		panic!("MySQL Error packet: {:?}", String::from_utf8_lossy(&first));
+		let code = if first.len() >= 3 {
+			(first[1] as u16) | ((first[2] as u16) << 8)
+		} else {
+			0
+		};
+		let message = String::from_utf8_lossy(&first[3..]).to_string();
+		return QueryResult::Error {
+			code,
+			message,
+		};
 	}
 
 	let col_count = first[0] as usize;
@@ -223,24 +236,29 @@ async fn test_mywire_e2e_queries() {
 		_ => panic!("Expected ResultSet for @@version_comment"),
 	}
 
-	// 2. CREATE record
-	let mut create_q = vec![COM_QUERY];
-	create_q.extend_from_slice(b"CREATE person SET name = 'Tobie';");
-	write_packet(&mut stream, 0, &create_q).await;
+	// 2. INSERT record (MySQL syntax)
+	let mut insert_q = vec![COM_QUERY];
+	insert_q.extend_from_slice(b"INSERT INTO person (name) VALUES ('Tobie');");
+	write_packet(&mut stream, 0, &insert_q).await;
 
 	let res = read_query_response(&mut stream).await;
 	match res {
+		QueryResult::Ok => {}
 		QueryResult::ResultSet {
-			columns,
 			rows,
+			..
 		} => {
-			assert_eq!(columns, 2, "Expected id and name columns");
-			assert_eq!(rows.len(), 1, "Expected 1 created row");
+			assert!(!rows.is_empty(), "Expected inserted row");
 		}
-		_ => panic!("Expected ResultSet for CREATE"),
+		QueryResult::Error {
+			code,
+			message,
+		} => {
+			panic!("INSERT failed with code {code}: {message}");
+		}
 	}
 
-	// 3. SELECT from person
+	// 3. SELECT from person (MySQL syntax)
 	let mut select_q = vec![COM_QUERY];
 	select_q.extend_from_slice(b"SELECT name FROM person;");
 	write_packet(&mut stream, 0, &select_q).await;
@@ -259,6 +277,95 @@ async fn test_mywire_e2e_queries() {
 
 	// Clean quit
 	write_packet(&mut stream, 0, &[COM_QUIT]).await;
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_mywire_dialect_switching_and_fail_closed() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// In default MySQL dialect: SurrealQL query is rejected with Error packet (1064)
+	let mut fail_q = vec![COM_QUERY];
+	fail_q.extend_from_slice(b"CREATE person SET name = 'Invalid';");
+	write_packet(&mut stream, 0, &fail_q).await;
+
+	let res = read_query_response(&mut stream).await;
+	match res {
+		QueryResult::Error {
+			code,
+			..
+		} => {
+			assert_eq!(code, 1064, "SurrealQL query must fail in MySQL dialect with 1064");
+		}
+		_ => panic!("SurrealQL query should have failed in MySQL dialect"),
+	}
+
+	// Switch dialect to SurrealQL via SET dialect = 'surrealql'
+	let mut set_q = vec![COM_QUERY];
+	set_q.extend_from_slice(b"SET dialect = 'surrealql';");
+	write_packet(&mut stream, 0, &set_q).await;
+
+	let res = read_query_response(&mut stream).await;
+	assert!(matches!(res, QueryResult::Ok), "SET dialect = 'surrealql' must succeed");
+
+	// Now SurrealQL CREATE SET succeeds!
+	let mut surreal_q = vec![COM_QUERY];
+	surreal_q.extend_from_slice(b"CREATE person SET name = 'Surreal';");
+	write_packet(&mut stream, 0, &surreal_q).await;
+
+	let res = read_query_response(&mut stream).await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 1, "Expected created row in SurrealQL mode");
+		}
+		QueryResult::Ok => {}
+		QueryResult::Error {
+			code,
+			message,
+		} => {
+			panic!("CREATE person SET failed in SurrealQL mode: {code} {message}");
+		}
+	}
+
+	// In SurrealQL dialect, invalid SurrealQL must fail closed without fallback to MySQL
+	let mut err_q = vec![COM_QUERY];
+	err_q.extend_from_slice(b"SELECT 1 FROM WHERE;");
+	write_packet(&mut stream, 0, &err_q).await;
+
+	let res = read_query_response(&mut stream).await;
+	assert!(
+		matches!(res, QueryResult::Error { .. }),
+		"Invalid SurrealQL must fail closed in SurrealQL dialect"
+	);
+
+	// Switch dialect back to MySQL via SET dialect = 'mysql'
+	let mut back_q = vec![COM_QUERY];
+	back_q.extend_from_slice(b"SET dialect = 'mysql';");
+	write_packet(&mut stream, 0, &back_q).await;
+
+	let res = read_query_response(&mut stream).await;
+	assert!(matches!(res, QueryResult::Ok), "SET dialect = 'mysql' must succeed");
+
+	// Now MySQL queries work again
+	let mut select_q = vec![COM_QUERY];
+	select_q.extend_from_slice(b"SELECT name FROM person;");
+	write_packet(&mut stream, 0, &select_q).await;
+
+	let res = read_query_response(&mut stream).await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 1);
+		}
+		_ => panic!("Expected ResultSet from SELECT"),
+	}
 
 	shutdown.cancel();
 }

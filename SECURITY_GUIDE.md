@@ -1444,4 +1444,11 @@ Flag when changes touch:
   - Authentication must complete successfully before database selection (`process_use` / `set_current_db`) runs.
   - Errors from `process_use` must never be swallowed; if a database or namespace does not exist or access is denied, an error is returned to the client.
 - **Connection and Resource Limits**: Each listener enforces maximum connection concurrency via a semaphore (`MAX_CONNECTIONS = 1024`), cleanly rejecting connections when capacity is exceeded.
+- **Named Dialect Selection & Fail-Closed Execution**:
+  - `pgwire` defaults to `Dialect::PgSql`. It does not sniff query syntax or fall back to SurrealQL on parse failure.
+  - `mywire` defaults to `Dialect::MySql`. It does not fall back to SurrealQL on parse failure.
+  - Dialect switching is explicit via `SET dialect = '<name>'` (or `options=-c dialect=<name>` on startup for pgwire). Accepted dialects are strictly named (`pgsql` / `postgres`, `mysql`, `gql`, `surrealql`).
+  - Cross-dialect queries and polyglot fallbacks are forbidden: queries execute strictly in the connection's active dialect and fail closed with a syntax error if invalid for that dialect.
+  - Dialect switching is gated by capability (`RouteTarget::Postgres`, `RouteTarget::MySql`, `RouteTarget::Gql`). If a dialect's capability is denied, switching to it is rejected with an insufficient privilege error (`42501` / `28000`).
+  - In `pgwire`, `check_current_dialect` is evaluated per query, ensuring runtime capability revocation immediately halts execution in that dialect without stranding the connection.
 
