@@ -42,6 +42,27 @@ impl PgType {
 			Self::Numeric | Self::Text | Self::Bytea | Self::Jsonb => -1,
 		}
 	}
+
+	pub(super) fn from_sql_type(ty: surrealdb_sqlplan::SqlType) -> Self {
+		match ty {
+			surrealdb_sqlplan::SqlType::Bool => Self::Bool,
+			surrealdb_sqlplan::SqlType::Bytea => Self::Bytea,
+			surrealdb_sqlplan::SqlType::Int2
+			| surrealdb_sqlplan::SqlType::Int4
+			| surrealdb_sqlplan::SqlType::Int8 => Self::Int8,
+			surrealdb_sqlplan::SqlType::Float4 | surrealdb_sqlplan::SqlType::Float8 => Self::Float8,
+			surrealdb_sqlplan::SqlType::Numeric => Self::Numeric,
+			surrealdb_sqlplan::SqlType::Text => Self::Text,
+			surrealdb_sqlplan::SqlType::Date
+			| surrealdb_sqlplan::SqlType::Time
+			| surrealdb_sqlplan::SqlType::Timestamp
+			| surrealdb_sqlplan::SqlType::TimestampTz => Self::Timestamptz,
+			surrealdb_sqlplan::SqlType::Interval => Self::Interval,
+			surrealdb_sqlplan::SqlType::Uuid => Self::Uuid,
+			surrealdb_sqlplan::SqlType::Json => Self::Jsonb,
+			surrealdb_sqlplan::SqlType::Unknown => Self::Text,
+		}
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +184,58 @@ pub(super) fn shape_result(value: Value) -> ResultShape {
 			}],
 			rows,
 		}
+	}
+}
+
+/// Reshape a statement result using a static result descriptor from the query planner.
+pub(super) fn shape_result_with_descriptor(
+	descriptor: &surrealdb_sqlplan::ResultDescriptor,
+	value: Value,
+) -> ResultShape {
+	let values = match value {
+		Value::Array(arr) => arr.into_inner(),
+		v => vec![v],
+	};
+	let columns: Vec<PgColumn> = descriptor
+		.columns
+		.iter()
+		.map(|c| PgColumn {
+			name: c.name.clone(),
+			ty: PgType::from_sql_type(c.ty),
+		})
+		.collect();
+
+	let mut rows = Vec::with_capacity(values.len());
+	for value in values {
+		if let Value::Object(obj) = value {
+			let obj_map = obj.into_inner();
+			let row: Vec<Option<Value>> = descriptor
+				.columns
+				.iter()
+				.enumerate()
+				.map(|(i, col)| {
+					let val = obj_map
+						.get(&col.name)
+						.or_else(|| col.original_column.as_ref().and_then(|orig| obj_map.get(orig)))
+						.or_else(|| {
+							if obj_map.len() == descriptor.columns.len() {
+								obj_map.values().nth(i)
+							} else {
+								None
+							}
+						});
+					val.cloned().and_then(cell)
+				})
+				.collect();
+			rows.push(row);
+		} else if descriptor.columns.len() == 1 {
+			rows.push(vec![cell(value)]);
+		}
+	}
+
+	ResultShape {
+		columns,
+		rows,
 	}
 }
 

@@ -43,26 +43,35 @@ pub(super) fn encode_text(value: Value, ty: PgType) -> Result<Vec<u8>, PgError> 
 		},
 		PgType::Int8 => match value {
 			Value::Number(Number::Int(i)) => Ok(i.to_string().into_bytes()),
+			Value::String(s) if s.parse::<i64>().is_ok() => Ok(s.into_bytes()),
 			v => Err(mismatch(&v, ty)),
 		},
 		PgType::Float8 => match value {
 			Value::Number(Number::Int(i)) => Ok(float_text(i as f64)),
 			Value::Number(Number::Float(f)) => Ok(float_text(f)),
+			Value::String(s) if s.parse::<f64>().is_ok() => Ok(s.into_bytes()),
 			v => Err(mismatch(&v, ty)),
 		},
 		PgType::Numeric => match value {
 			Value::Number(Number::Int(i)) => Ok(i.to_string().into_bytes()),
 			Value::Number(Number::Decimal(d)) => Ok(d.to_string().into_bytes()),
 			Value::Number(Number::Float(f)) => Ok(numeric_float_text(f)),
+			Value::String(s) => Ok(s.into_bytes()),
 			v => Err(mismatch(&v, ty)),
 		},
 		PgType::Text => match value {
 			Value::String(s) => Ok(s.into_bytes()),
+			Value::Number(Number::Int(i)) => Ok(i.to_string().into_bytes()),
+			Value::Number(Number::Float(f)) => Ok(float_text(f)),
+			Value::Number(Number::Decimal(d)) => Ok(d.to_string().into_bytes()),
+			Value::Bool(b) => Ok(b.to_string().into_bytes()),
 			v @ (Value::RecordId(_)
 			| Value::Range(_)
 			| Value::Regex(_)
 			| Value::File(_)
 			| Value::Table(_)) => Ok(v.to_sql().into_bytes()),
+			v @ (Value::Object(_) | Value::Array(_)) => serde_json::to_vec(&v.into_json_value())
+				.map_err(|e| PgError::internal(format!("failed to encode value as json: {e}"))),
 			v => Err(mismatch(&v, ty)),
 		},
 		PgType::Timestamptz => match value {
@@ -203,6 +212,10 @@ pub(super) fn encode_binary(value: Value, ty: PgType) -> Result<Vec<u8>, PgError
 		},
 		PgType::Int8 => match value {
 			Value::Number(Number::Int(i)) => Ok(i.to_be_bytes().to_vec()),
+			Value::String(s) => match s.parse::<i64>() {
+				Ok(i) => Ok(i.to_be_bytes().to_vec()),
+				Err(_) => Err(mismatch(&Value::String(s), ty)),
+			},
 			v => Err(mismatch(&v, ty)),
 		},
 		PgType::Float8 => match value {

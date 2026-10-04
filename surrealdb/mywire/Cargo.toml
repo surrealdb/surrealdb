@@ -14,6 +14,7 @@ categories.workspace = true
 [dependencies]
 surrealdb-core = { workspace = true, features = ["mysql"] }
 surrealdb-mysql = { workspace = true }
+surrealdb-sqlplan = { workspace = true }
 surrealdb-rpc = { workspace = true }
 surrealdb-types = { workspace = true }
 

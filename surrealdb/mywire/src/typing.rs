@@ -158,6 +158,60 @@ pub fn shape_result(schema: &str, table: &str, value: Value) -> ResultShape {
 	}
 }
 
+/// Reshape a SurrealDB query result using a static result descriptor from the query planner.
+pub fn shape_result_with_descriptor(
+	descriptor: &surrealdb_sqlplan::ResultDescriptor,
+	schema: &str,
+	table: &str,
+	value: Value,
+) -> ResultShape {
+	let columns: Vec<ColumnDefinition41> = descriptor
+		.columns
+		.iter()
+		.map(|c| {
+			let tbl = c.table.as_deref().unwrap_or(table);
+			ColumnDefinition41::new(schema, tbl, &c.name, c.ty.to_mysql_type())
+		})
+		.collect();
+
+	let items = match value {
+		Value::Array(items) => items.into_inner(),
+		v => vec![v],
+	};
+
+	let mut rows = Vec::with_capacity(items.len());
+	for item in items {
+		if let Value::Object(obj) = item {
+			let row = descriptor
+				.columns
+				.iter()
+				.enumerate()
+				.map(|(i, col)| {
+					let val = obj
+						.get(&col.name)
+						.or_else(|| col.original_column.as_ref().and_then(|orig| obj.get(orig)))
+						.or_else(|| {
+							if obj.len() == descriptor.columns.len() {
+								obj.values().nth(i)
+							} else {
+								None
+							}
+						});
+					val.and_then(value_to_text)
+				})
+				.collect();
+			rows.push(row);
+		} else if descriptor.columns.len() == 1 {
+			rows.push(vec![value_to_text(&item)]);
+		}
+	}
+
+	ResultShape {
+		columns,
+		rows,
+	}
+}
+
 /// Encode one text row packet into bytes.
 pub fn encode_text_row(row: &[Option<String>]) -> Vec<u8> {
 	let mut buf = Vec::with_capacity(row.len() * 16);

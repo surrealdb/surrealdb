@@ -233,3 +233,69 @@ pub enum BoundDistinct {
 	All,
 	On(Vec<BoundExpr>),
 }
+
+impl BoundExpr {
+	/// Check if this expression contains any parameter placeholders.
+	pub fn has_params(&self) -> bool {
+		match self {
+			BoundExpr::Param {
+				..
+			} => true,
+			BoundExpr::Binary {
+				left,
+				right,
+				..
+			} => left.has_params() || right.has_params(),
+			BoundExpr::Unary {
+				expr,
+				..
+			} => expr.has_params(),
+			BoundExpr::Access {
+				base,
+				..
+			} => base.has_params(),
+			BoundExpr::FunctionCall {
+				args,
+				..
+			} => args.iter().any(|a| a.has_params()),
+			BoundExpr::Case {
+				operand,
+				branches,
+				else_expr,
+			} => {
+				operand.as_ref().map_or(false, |o| o.has_params())
+					|| branches.iter().any(|(w, t)| w.has_params() || t.has_params())
+					|| else_expr.as_ref().map_or(false, |e| e.has_params())
+			}
+			BoundExpr::Between {
+				expr,
+				low,
+				high,
+				..
+			} => expr.has_params() || low.has_params() || high.has_params(),
+			BoundExpr::InList {
+				expr,
+				list,
+				..
+			} => expr.has_params() || list.iter().any(|e| e.has_params()),
+			BoundExpr::IsNull {
+				expr,
+				..
+			} => expr.has_params(),
+			BoundExpr::Cast {
+				expr,
+				..
+			} => expr.has_params(),
+			_ => false,
+		}
+	}
+}
+
+impl BoundSelect {
+	/// Check if this SELECT statement contains any parameter placeholders.
+	pub fn has_params(&self) -> bool {
+		self.targets.iter().any(|t| t.expr.has_params())
+			|| self.where_clause.as_ref().map_or(false, |w| w.has_params())
+			|| self.having.as_ref().map_or(false, |h| h.has_params())
+	}
+}

@@ -329,3 +329,102 @@ fn test_mysql_binding_with_param() {
 		other => panic!("expected binary where clause, got {other:?}"),
 	}
 }
+
+#[test]
+fn test_result_descriptor_basic_select() {
+	let sql = "SELECT id, name, 42, count(id) AS total_count FROM users;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+
+	let mut catalog = MemoryCatalog::new();
+	catalog.add_table(
+		TableSchema::new(
+			"users",
+			vec![
+				ColumnInfo::new("id", 0).with_type("int8"),
+				ColumnInfo::new("name", 1).with_type("text"),
+			],
+		)
+		.with_schema("public"),
+	);
+	let policy = DialectPolicy::postgres();
+
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let desc = bound.describe(&catalog, &policy);
+
+	assert_eq!(desc.columns.len(), 4);
+	assert_eq!(desc.columns[0].name, "id");
+	assert_eq!(desc.columns[0].ty, SqlType::Int8);
+	assert_eq!(desc.columns[0].ty.to_pg_oid(), 20);
+
+	assert_eq!(desc.columns[1].name, "name");
+	assert_eq!(desc.columns[1].ty, SqlType::Text);
+	assert_eq!(desc.columns[1].ty.to_pg_oid(), 25);
+
+	assert_eq!(desc.columns[2].name, "?column?");
+	assert_eq!(desc.columns[2].ty, SqlType::Int8);
+
+	assert_eq!(desc.columns[3].name, "total_count");
+	assert_eq!(desc.columns[3].ty, SqlType::Int8);
+}
+
+#[test]
+fn test_result_descriptor_duplicate_columns() {
+	let sql = "SELECT 1 AS a, 2 AS a, 'hello' AS a;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+
+	let catalog = MemoryCatalog::new();
+	let policy = DialectPolicy::postgres();
+
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let desc = bound.describe(&catalog, &policy);
+
+	assert_eq!(desc.columns.len(), 3);
+	assert_eq!(desc.columns[0].name, "a");
+	assert_eq!(desc.columns[0].ty, SqlType::Int8);
+
+	assert_eq!(desc.columns[1].name, "a");
+	assert_eq!(desc.columns[1].ty, SqlType::Int8);
+
+	assert_eq!(desc.columns[2].name, "a");
+	assert_eq!(desc.columns[2].ty, SqlType::Text);
+}
+
+#[test]
+fn test_parameter_type_inference() {
+	let sql = "SELECT name FROM users WHERE id = $1 AND name = $2;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).expect("parse failed");
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+
+	let mut catalog = MemoryCatalog::new();
+	catalog.add_table(
+		TableSchema::new(
+			"users",
+			vec![
+				ColumnInfo::new("id", 0).with_type("int8"),
+				ColumnInfo::new("name", 1).with_type("text"),
+			],
+		)
+		.with_schema("public"),
+	);
+	let policy = DialectPolicy::postgres();
+
+	let bound = binder::pgsql::bind_select(select, &catalog, &policy, None).expect("bind failed");
+	let params = bound.describe_parameters(&catalog);
+
+	assert_eq!(params.param_types.len(), 2);
+	assert_eq!(params.param_types[0], SqlType::Int8);
+	assert_eq!(params.param_types[0].to_pg_oid(), 20);
+	assert_eq!(params.param_types[1], SqlType::Text);
+	assert_eq!(params.param_types[1].to_pg_oid(), 25);
+}

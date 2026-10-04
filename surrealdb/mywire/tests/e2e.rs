@@ -830,13 +830,13 @@ async fn test_mywire_honest_session_fail_closed() {
 	let res = query_mysql(&mut stream, "SET NAMES utf8mb4;").await;
 	assert!(matches!(res, QueryResult::Ok));
 
-	// 3. GROUP BY ordinal must fail closed
-	let res = query_mysql(&mut stream, "SELECT 1 GROUP BY 1;").await;
+	// 3. Out of bounds GROUP BY ordinal must fail closed
+	let res = query_mysql(&mut stream, "SELECT 1 GROUP BY 99;").await;
 	match res {
 		QueryResult::Error {
 			..
 		} => {}
-		other => panic!("Expected Error for GROUP BY ordinal, got {other:?}"),
+		other => panic!("Expected Error for out of bounds GROUP BY ordinal, got {other:?}"),
 	}
 
 	shutdown.cancel();

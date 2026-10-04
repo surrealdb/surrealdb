@@ -453,6 +453,24 @@ impl Connection {
 
 		// Execute against datastore with the selected dialect.
 		// Fail-closed execution: NEVER fall back to SurrealQL on error!
+		let descriptor = if self.dialect == Dialect::MySql {
+			if let Ok(stmts) = surrealdb_mysql::parse_statements(trimmed) {
+				if let Some(surrealdb_mysql::ast::stmt::Statement::Select(select)) = stmts.first() {
+					let catalog = surrealdb_sqlplan::catalog::MemoryCatalog::new();
+					let policy = surrealdb_sqlplan::dialect::DialectPolicy::mysql();
+					surrealdb_sqlplan::binder::mysql::bind_select(select, &catalog, &policy, None)
+						.ok()
+						.map(|bound| bound.describe(&catalog, &policy))
+				} else {
+					None
+				}
+			} else {
+				None
+			}
+		} else {
+			None
+		};
+
 		let req = match self.dialect {
 			Dialect::MySql => QueryRequest::new(QuerySource::mysql(trimmed), &self.session),
 			Dialect::SurrealQl => QueryRequest::new(trimmed, &self.session),
@@ -496,7 +514,8 @@ impl Connection {
 
 				if let Some(r) = target {
 					if let Ok(val) = &r.result {
-						self.emit_value_result(val.clone(), &mut res_seq).await?;
+						self.emit_value_result(descriptor.as_ref(), val.clone(), &mut res_seq)
+							.await?;
 					}
 				} else {
 					let ok = OkPacket::new(0, 0);
@@ -562,9 +581,18 @@ impl Connection {
 		Ok(())
 	}
 
-	async fn emit_value_result(&mut self, val: surrealdb_types::Value, seq: &mut u8) -> Result<()> {
+	async fn emit_value_result(
+		&mut self,
+		descriptor: Option<&surrealdb_sqlplan::ResultDescriptor>,
+		val: surrealdb_types::Value,
+		seq: &mut u8,
+	) -> Result<()> {
 		let schema = self.current_db.as_deref().unwrap_or("test");
-		let shape = shape_result(schema, "", val);
+		let shape = if let Some(desc) = descriptor {
+			shape_result_with_descriptor(desc, schema, "", val)
+		} else {
+			shape_result(schema, "", val)
+		};
 
 		if shape.columns.is_empty() {
 			let ok = OkPacket::new(0, 0);

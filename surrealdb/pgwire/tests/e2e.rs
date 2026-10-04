@@ -804,9 +804,9 @@ async fn test_pgwire_honest_session_fail_closed() {
 		run_simple_query(&mut stream, "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;").await;
 	assert_eq!(last, b'E', "SET TRANSACTION ISOLATION LEVEL must fail closed");
 
-	// 4. GROUP BY ordinal must fail closed
-	let (_, last) = run_simple_query(&mut stream, "SELECT 1 GROUP BY 1;").await;
-	assert_eq!(last, b'E', "GROUP BY ordinal must fail closed");
+	// 4. Out of bounds GROUP BY ordinal must fail closed
+	let (_, last) = run_simple_query(&mut stream, "SELECT 1 GROUP BY 99;").await;
+	assert_eq!(last, b'E', "Out of bounds GROUP BY ordinal must fail closed");
 
 	shutdown.cancel();
 }

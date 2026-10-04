@@ -51,6 +51,11 @@ pub enum PlanError {
 }
 
 impl PlanError {
+	/// Convenience constructor for unsupported feature errors.
+	pub fn unsupported(msg: impl Into<String>) -> Self {
+		Self::UnsupportedExpression(msg.into())
+	}
+
 	/// Return standard SQLSTATE error code for PostgreSQL.
 	pub fn pg_sqlstate(&self) -> &'static str {
 		match self {

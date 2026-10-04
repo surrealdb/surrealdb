@@ -27,7 +27,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::error::PgError;
 use super::msg::{self, DescribeTarget, Frontend, StartupMessage};
-use super::typing::{PgColumn, PgType, ResultShape, shape_result, shape_result_jsonb};
+use super::typing::{
+	PgColumn, PgType, ResultShape, shape_result, shape_result_jsonb, shape_result_with_descriptor,
+};
 use super::{CancelRegistry, LOG, encode, sasl};
 use crate::PKG_VERSION;
 
@@ -76,6 +78,8 @@ struct PreparedStatement {
 	/// intercepted at Execute rather than run through the executor (mirroring
 	/// the simple-query path); `None` for an ordinary query.
 	control: Option<Control>,
+	/// Static result descriptor from the query planner if available.
+	descriptor: Option<surrealdb_sqlplan::ResultDescriptor>,
 }
 
 /// An extended-protocol statement that is intercepted rather than executed. The
@@ -933,12 +937,13 @@ impl Connection {
 					empty: false,
 					described: false,
 					control: Some(control),
+					descriptor: None,
 				},
 			);
 			msg::write_parse_complete(out);
 			return Ok(());
 		}
-		let (query, parsed, param_count, empty) = match self.dialect {
+		let (query, parsed, param_count, empty, descriptor) = match self.dialect {
 			Dialect::SurrealQl => {
 				// Parse once so syntax errors surface at Parse (as Postgres does)
 				// and the AST can be cached for repeated Execute without re-parsing.
@@ -954,19 +959,34 @@ impl Connection {
 				} else {
 					Some(ast)
 				};
-				(rewritten, parsed, param_count, empty)
+				(rewritten, parsed, param_count, empty, None)
 			}
 			Dialect::PgSql => {
 				let stmts = surrealdb_pgsql::parse_statements(query)
 					.map_err(|err| PgError::syntax(err.to_string()))?;
 				let empty = stmts.is_empty();
 				let (_, positional) = rewrite_positional_params(query);
-				let param_count = param_types.len().max(positional);
-				(query.to_string(), None, param_count, empty)
+				let mut param_count = param_types.len().max(positional);
+				let mut descriptor = None;
+				if !empty {
+					if let surrealdb_pgsql::ast::stmt::Statement::Select(select) = &stmts[0] {
+						let catalog = surrealdb_sqlplan::catalog::MemoryCatalog::new();
+						let policy = surrealdb_sqlplan::dialect::DialectPolicy::postgres();
+						if let Ok(bound) = surrealdb_sqlplan::binder::pgsql::bind_select(
+							select, &catalog, &policy, None,
+						) {
+							let desc = bound.describe(&catalog, &policy);
+							let param_desc = bound.describe_parameters(&catalog);
+							param_count = param_count.max(param_desc.param_types.len());
+							descriptor = Some(desc);
+						}
+					}
+				}
+				(query.to_string(), None, param_count, empty, descriptor)
 			}
 			Dialect::Gql | Dialect::MySql => {
 				let empty = query.trim().is_empty();
-				(query.to_string(), None, param_types.len(), empty)
+				(query.to_string(), None, param_types.len(), empty, None)
 			}
 		};
 		// Reject an absurd parameter count before it reaches the
@@ -986,6 +1006,7 @@ impl Connection {
 				empty,
 				described: false,
 				control: None,
+				descriptor,
 			},
 		);
 		msg::write_parse_complete(out);
@@ -1062,8 +1083,8 @@ impl Connection {
 					msg::write_no_data(out);
 					return Ok(());
 				}
-				// Pin this statement to the single-`jsonb`-column shape: its
-				// column types cannot be known before execution.
+				// If a static descriptor is available, report true columns and types;
+				// otherwise pin this statement to the single-`jsonb`-column shape.
 				stmt.described = true;
 				let empty = stmt.empty;
 				// Report one OID per referenced parameter, using the declared
@@ -1074,6 +1095,16 @@ impl Connection {
 				msg::write_parameter_description(out, &oids);
 				if empty {
 					msg::write_no_data(out);
+				} else if let Some(desc) = &stmt.descriptor {
+					let columns: Vec<PgColumn> = desc
+						.columns
+						.iter()
+						.map(|c| PgColumn {
+							name: c.name.clone(),
+							ty: PgType::from_sql_type(c.ty),
+						})
+						.collect();
+					msg::write_row_description(out, &columns, |_| FORMAT_TEXT);
 				} else {
 					let columns = [PgColumn {
 						name: "result".to_string(),
@@ -1269,11 +1300,14 @@ impl Connection {
 		let Some(stmt) = self.statements.get(&statement) else {
 			return Err(PgError::invalid_statement(&statement));
 		};
-		let jsonb_shape = stmt.described;
+		let jsonb_shape = stmt.described && stmt.descriptor.is_none();
+		let descriptor = stmt.descriptor.clone();
 		let parsed = stmt.parsed.clone();
 		let query = stmt.query.clone();
 		let value = self.execute_query(parsed, &query, params).await?;
-		let shape = if jsonb_shape {
+		let shape = if let Some(desc) = &descriptor {
+			shape_result_with_descriptor(desc, value)
+		} else if jsonb_shape {
 			shape_result_jsonb(value)
 		} else {
 			shape_result(value)
@@ -1509,6 +1543,19 @@ impl Connection {
 	}
 
 	async fn run_pgsql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
+		let descriptor = if let Ok(stmts) = surrealdb_pgsql::parse_statements(sql) {
+			if let Some(surrealdb_pgsql::ast::stmt::Statement::Select(select)) = stmts.first() {
+				let catalog = surrealdb_sqlplan::catalog::MemoryCatalog::new();
+				let policy = surrealdb_sqlplan::dialect::DialectPolicy::postgres();
+				surrealdb_sqlplan::binder::pgsql::bind_select(select, &catalog, &policy, None)
+					.ok()
+					.map(|bound| bound.describe(&catalog, &policy))
+			} else {
+				None
+			}
+		} else {
+			None
+		};
 		let cancel = self.arm_cancel();
 		let req = QueryRequest::new(QuerySource::pgsql(sql), &self.session)
 			.with_optional_transaction(self.transaction.clone())
@@ -1518,7 +1565,12 @@ impl Connection {
 				for result in results {
 					match result.result {
 						Ok(value) => {
-							if !self.emit_result(value, out).await? {
+							let ok = if let Some(desc) = &descriptor {
+								self.emit_result_with_descriptor(desc, value, out).await?
+							} else {
+								self.emit_result(value, out).await?
+							};
+							if !ok {
 								break;
 							}
 						}
@@ -1964,11 +2016,11 @@ impl Connection {
 	/// some rows have streamed yields a partial result then an ErrorResponse —
 	/// a valid Postgres sequence — but such errors are internal invariant
 	/// failures that inferred column types make unreachable in practice.
-	async fn emit_result(&mut self, value: Value, out: &mut BytesMut) -> Result<bool> {
+	async fn emit_shape(&mut self, shape: ResultShape, out: &mut BytesMut) -> Result<bool> {
 		let ResultShape {
 			columns,
 			rows,
-		} = shape_result(value);
+		} = shape;
 		if columns.len() > msg::MAX_COLUMNS {
 			msg::write_error_response(
 				out,
@@ -1999,6 +2051,19 @@ impl Connection {
 		}
 		msg::write_command_complete(out, &format!("SELECT {count}"));
 		Ok(true)
+	}
+
+	async fn emit_result(&mut self, value: Value, out: &mut BytesMut) -> Result<bool> {
+		self.emit_shape(shape_result(value), out).await
+	}
+
+	async fn emit_result_with_descriptor(
+		&mut self,
+		descriptor: &surrealdb_sqlplan::ResultDescriptor,
+		value: Value,
+		out: &mut BytesMut,
+	) -> Result<bool> {
+		self.emit_shape(shape_result_with_descriptor(descriptor, value), out).await
 	}
 
 	/// Fold the trailing `$param` results back into the connection session:

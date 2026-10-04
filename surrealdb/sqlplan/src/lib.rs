@@ -2,6 +2,7 @@
 
 pub mod binder;
 pub mod catalog;
+pub mod descriptor;
 pub mod dialect;
 pub mod error;
 pub mod ir;
@@ -9,6 +10,9 @@ pub mod lower;
 pub mod scope;
 
 pub use catalog::{BinderCatalog, ColumnInfo, EmptyCatalog, MemoryCatalog, TableSchema};
+pub use descriptor::{
+	ParameterDescriptor, ResultColumn, ResultDescriptor, SqlType, StatementDescriptor,
+};
 pub use dialect::{DialectPolicy, NamePolicy, NullOrderPolicy, SqlDialect};
 pub use error::PlanError;
 pub use ir::{
