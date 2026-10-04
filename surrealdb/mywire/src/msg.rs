@@ -153,6 +153,61 @@ impl HandshakeResponse41 {
 	}
 }
 
+/// Protocol::SSLRequest packet sent by client to initiate TLS.
+#[derive(Debug, Clone)]
+pub struct SslRequest {
+	pub capabilities: u32,
+	pub max_packet_size: u32,
+	pub character_set: u8,
+}
+
+impl SslRequest {
+	pub fn is_ssl_request(payload: &[u8]) -> bool {
+		if payload.len() < 32 {
+			return false;
+		}
+		let caps = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+		(caps & CLIENT_SSL) != 0
+	}
+
+	pub fn deserialize(payload: &[u8]) -> Result<Self> {
+		ensure!(payload.len() >= 32, "SSL request payload too short");
+		let capabilities = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+		ensure!((capabilities & CLIENT_SSL) != 0, "CLIENT_SSL must be set in SSLRequest");
+		let max_packet_size = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+		let character_set = payload[8];
+		Ok(Self {
+			capabilities,
+			max_packet_size,
+			character_set,
+		})
+	}
+}
+
+/// Protocol::AuthSwitchRequest packet sent by server to change auth method.
+#[derive(Debug, Clone)]
+pub struct AuthSwitchRequest {
+	pub plugin_name: String,
+	pub auth_plugin_data: Vec<u8>,
+}
+
+impl AuthSwitchRequest {
+	pub fn clear_password() -> Self {
+		Self {
+			plugin_name: "mysql_clear_password".to_string(),
+			auth_plugin_data: Vec::new(),
+		}
+	}
+
+	pub fn serialize(&self) -> Vec<u8> {
+		let mut buf = Vec::with_capacity(32 + self.auth_plugin_data.len());
+		buf.push(0xfe); // AuthSwitchRequest header
+		write_null_terminated_str(&mut buf, &self.plugin_name);
+		buf.extend_from_slice(&self.auth_plugin_data);
+		buf
+	}
+}
+
 /// OK_Packet sent on command success.
 #[derive(Debug, Clone)]
 pub struct OkPacket {

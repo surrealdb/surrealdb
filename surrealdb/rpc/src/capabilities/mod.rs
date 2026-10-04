@@ -321,6 +321,7 @@ pub enum RouteTarget {
 	Mcp,
 	Gql,
 	Postgres,
+	MySql,
 }
 
 // impl display
@@ -343,6 +344,7 @@ impl fmt::Display for RouteTarget {
 			RouteTarget::Mcp => write!(f, "mcp"),
 			RouteTarget::Gql => write!(f, "gql"),
 			RouteTarget::Postgres => write!(f, "postgres"),
+			RouteTarget::MySql => write!(f, "mysql"),
 		}
 	}
 }
@@ -384,6 +386,7 @@ impl std::str::FromStr for RouteTarget {
 			"mcp" => Ok(RouteTarget::Mcp),
 			"gql" => Ok(RouteTarget::Gql),
 			"postgres" => Ok(RouteTarget::Postgres),
+			"mysql" => Ok(RouteTarget::MySql),
 			_ => Err(ParseRouteTargetError),
 		}
 	}
@@ -1443,6 +1446,8 @@ mod tests {
 			assert!(caps.allows_http_route(&RouteTarget::from_str("version").unwrap()));
 			assert!(caps.allows_http_route(&RouteTarget::from_str("export").unwrap()));
 			assert!(caps.allows_http_route(&RouteTarget::from_str("sql").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("postgres").unwrap()));
+			assert!(caps.allows_http_route(&RouteTarget::from_str("mysql").unwrap()));
 		}
 
 		// When all HTTP routes are allowed and denied at the same time

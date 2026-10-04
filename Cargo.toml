@@ -371,6 +371,8 @@ gql = ["surrealdb-server/gql"]
 mcp = ["surrealdb-server/mcp"]
 # Postgres wire protocol support
 postgres = ["surrealdb-server/postgres"]
+# MySQL wire protocol support
+mysql = ["surrealdb-server/mysql"]
 # Interactive SQL CLI support
 cli = ["surrealdb-server/cli"]
 

@@ -586,6 +586,8 @@ pub async fn init<
 			Arc::clone(&datastore),
 			Arc::clone(&ready),
 			canceller.clone(),
+			config.crt.clone(),
+			config.key.clone(),
 		)
 		.await?;
 	}

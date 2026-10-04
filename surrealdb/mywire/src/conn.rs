@@ -9,12 +9,17 @@ use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::basic;
 use surrealdb_core::kvs::{Datastore, QueryRequest, QuerySource};
+use surrealdb_rpc::capabilities::RouteTarget;
+use tokio::io::{ReadHalf, WriteHalf, split};
 use tokio::net::TcpStream;
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::time::timeout;
+use tokio_rustls::TlsAcceptor;
+use tokio_rustls::server::TlsStream;
+use tokio_util::either::Either;
 use tokio_util::sync::CancellationToken;
 
+use crate::LOG;
 use crate::auth::*;
 use crate::codec::*;
 use crate::constants::*;
@@ -24,143 +29,267 @@ use crate::typing::*;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 static NEXT_CONN_ID: AtomicU32 = AtomicU32::new(1);
 
+pub(crate) type MyStream = Either<TcpStream, TlsStream<TcpStream>>;
+
 pub struct Connection {
-	reader: PacketReader<OwnedReadHalf>,
-	writer: PacketWriter<OwnedWriteHalf>,
-	_peer: SocketAddr,
+	reader: PacketReader<ReadHalf<MyStream>>,
+	writer: PacketWriter<WriteHalf<MyStream>>,
+	peer: SocketAddr,
 	ds: Arc<Datastore>,
 	_ready: Arc<AtomicBool>,
 	shutdown: CancellationToken,
 	session: Session,
-	connection_id: u32,
-	auth_salt: [u8; 20],
-	client_capabilities: u32,
+	_connection_id: u32,
+	_auth_salt: [u8; 20],
+	_client_capabilities: u32,
 	current_ns: Option<String>,
 	current_db: Option<String>,
+	_is_tls: bool,
+	username: String,
 	_permit: OwnedSemaphorePermit,
 }
 
-impl Connection {
-	pub fn new(
-		stream: TcpStream,
-		peer: SocketAddr,
-		ds: Arc<Datastore>,
-		ready: Arc<AtomicBool>,
-		shutdown: CancellationToken,
-		permit: OwnedSemaphorePermit,
-	) -> Self {
-		let (read_half, write_half) = stream.into_split();
-		let connection_id = NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed);
-		let auth_salt = generate_auth_salt();
-
-		let session = Session {
-			ip: Some(peer.ip().to_string()),
-			id: Some(uuid::Uuid::new_v4()),
-			..Default::default()
-		};
-
-		Self {
-			reader: PacketReader::new(read_half),
-			writer: PacketWriter::new(write_half),
-			_peer: peer,
-			ds,
-			_ready: ready,
-			shutdown,
-			session,
-			connection_id,
-			auth_salt,
-			client_capabilities: 0,
-			current_ns: None,
-			current_db: None,
-			_permit: permit,
-		}
+/// Handle a single incoming MySQL client connection.
+pub async fn handle(
+	stream: TcpStream,
+	peer: SocketAddr,
+	ds: Arc<Datastore>,
+	ready: Arc<AtomicBool>,
+	shutdown: CancellationToken,
+	permit: OwnedSemaphorePermit,
+	acceptor: Option<Arc<TlsAcceptor>>,
+) {
+	// 1. Check capability: RouteTarget::MySql
+	if !ds.allows_http_route(&RouteTarget::MySql) {
+		let mut writer = PacketWriter::new(stream);
+		let err = ErrPacket::general(
+			1045,
+			b"28000",
+			"MySQL wire protocol connections are disabled by capability configuration",
+		);
+		let _ = writer.write_packet(2, &err.serialize()).await;
+		return;
 	}
 
-	pub async fn run(&mut self) -> Result<()> {
-		// Complete handshake within timeout
-		let authed = match timeout(STARTUP_TIMEOUT, self.handshake()).await {
-			Ok(res) => res?,
-			Err(_) => {
-				let err = ErrPacket::general(1159, b"08S01", "Handshake timeout");
-				let _ = self.writer.write_packet(2, &err.serialize()).await;
-				return Ok(());
-			}
-		};
-
-		if !authed {
-			return Ok(());
-		}
-
-		self.command_loop().await
+	// 2. Check readiness
+	if !ready.load(Ordering::SeqCst) {
+		let mut writer = PacketWriter::new(stream);
+		let err = ErrPacket::general(1045, b"08S01", "The database system is starting up");
+		let _ = writer.write_packet(2, &err.serialize()).await;
+		return;
 	}
 
-	async fn handshake(&mut self) -> Result<bool> {
-		// 1. Send HandshakeV10 packet (seq 0)
-		let handshake = HandshakeV10 {
-			server_version: "8.0.35-SurrealDB".to_string(),
-			connection_id: self.connection_id,
-			auth_plugin_data: self.auth_salt,
-			capabilities: DEFAULT_SERVER_CAPABILITIES,
-			character_set: CHARSET_UTF8MB4_GENERAL_CI as u8,
-			status_flags: SERVER_STATUS_AUTOCOMMIT,
-			auth_plugin_name: AUTH_PLUGIN_MYSQL_NATIVE_PASSWORD.to_string(),
-		};
+	// 3. Run handshake with timeout
+	let conn_res = timeout(
+		STARTUP_TIMEOUT,
+		perform_handshake(stream, peer, ds, ready, shutdown.clone(), permit, acceptor),
+	)
+	.await;
 
-		self.writer.write_packet(0, &handshake.serialize()).await?;
-
-		// 2. Read HandshakeResponse41 (seq 1)
-		let (seq, payload) = self.reader.read_packet().await?;
-		let response = match HandshakeResponse41::deserialize(&payload) {
-			Ok(resp) => resp,
-			Err(e) => {
-				let err = ErrPacket::general(1045, b"28000", format!("Malformed handshake: {e}"));
-				self.writer.write_packet(seq.wrapping_add(1), &err.serialize()).await?;
-				return Ok(false);
+	match conn_res {
+		Ok(Ok(Some(mut conn))) => {
+			if let Err(err) = conn.command_loop().await {
+				debug!(target: LOG, "MySQL connection from {peer} ended with error: {err}");
 			}
-		};
+		}
+		Ok(Ok(None)) => {
+			// Handshake ended cleanly (e.g. auth failed, error packet already sent)
+		}
+		Ok(Err(err)) => {
+			debug!(target: LOG, "MySQL connection handshake from {peer} failed: {err}");
+		}
+		Err(_) => {
+			debug!(target: LOG, "MySQL connection handshake from {peer} timed out");
+		}
+	}
+}
 
-		self.client_capabilities = response.capabilities;
+async fn perform_handshake(
+	mut stream: TcpStream,
+	peer: SocketAddr,
+	ds: Arc<Datastore>,
+	ready: Arc<AtomicBool>,
+	shutdown: CancellationToken,
+	permit: OwnedSemaphorePermit,
+	acceptor: Option<Arc<TlsAcceptor>>,
+) -> Result<Option<Connection>> {
+	let connection_id = NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed);
+	let auth_salt = generate_auth_salt();
 
-		// Set initial database if requested
-		if let Some(ref db) = response.database {
-			self.set_current_db(db).await?;
+	let server_capabilities = if acceptor.is_some() {
+		DEFAULT_SERVER_CAPABILITIES | CLIENT_SSL
+	} else {
+		DEFAULT_SERVER_CAPABILITIES
+	};
+
+	// 1. Send HandshakeV10 packet (seq 0)
+	let handshake = HandshakeV10 {
+		server_version: "8.0.35-SurrealDB".to_string(),
+		connection_id,
+		auth_plugin_data: auth_salt,
+		capabilities: server_capabilities,
+		character_set: CHARSET_UTF8MB4_GENERAL_CI as u8,
+		status_flags: SERVER_STATUS_AUTOCOMMIT,
+		auth_plugin_name: AUTH_PLUGIN_MYSQL_NATIVE_PASSWORD.to_string(),
+	};
+
+	{
+		let mut writer = PacketWriter::new(&mut stream);
+		writer.write_packet(0, &handshake.serialize()).await?;
+	}
+
+	// 2. Read first response packet (seq 1)
+	let (_seq, payload) = {
+		let mut reader = PacketReader::new(&mut stream);
+		reader.read_packet().await?
+	};
+
+	// 3. Negotiate TLS upgrade if SSL requested
+	let (mut reader, mut writer, hs_payload, is_tls) = if SslRequest::is_ssl_request(&payload) {
+		let acceptor = acceptor
+			.as_ref()
+			.ok_or_else(|| anyhow::anyhow!("SSL requested but no TLS certificate configured"))?;
+		let tls_stream = acceptor.accept(stream).await?;
+		let my_stream = Either::Right(tls_stream);
+		let (read_half, write_half) = split(my_stream);
+		let mut reader = PacketReader::new(read_half);
+		let writer = PacketWriter::new(write_half);
+		let (_hs_seq, hs_payload) = reader.read_packet().await?;
+		(reader, writer, hs_payload, true)
+	} else {
+		let my_stream = Either::Left(stream);
+		let (read_half, write_half) = split(my_stream);
+		let reader = PacketReader::new(read_half);
+		let writer = PacketWriter::new(write_half);
+		(reader, writer, payload, false)
+	};
+
+	// 4. Parse HandshakeResponse41
+	let response = match HandshakeResponse41::deserialize(&hs_payload) {
+		Ok(resp) => resp,
+		Err(e) => {
+			let err = ErrPacket::general(1045, b"28000", format!("Malformed handshake: {e}"));
+			let _ = writer.write_packet(2, &err.serialize()).await;
+			return Ok(None);
+		}
+	};
+
+	// 5. Authenticate
+	let username = response.username.trim().to_string();
+	let mut session = Session {
+		ip: Some(peer.ip().to_string()),
+		id: Some(uuid::Uuid::new_v4()),
+		..Default::default()
+	};
+
+	let (auth_ok, final_seq) = if username.is_empty() {
+		// Check if datastore allows unauthenticated queries (guest)
+		(ds.allows_query_by_subject(session.au.as_ref()), 2)
+	} else {
+		// Authenticated user requested.
+		// Enforce TLS or loopback connection
+		let is_secure = is_tls || peer.ip().is_loopback();
+		if !is_secure {
+			let err = ErrPacket::general(
+				1045,
+				b"28000",
+				"Authentication requires an encrypted (TLS) connection or loopback",
+			);
+			let _ = writer.write_packet(2, &err.serialize()).await;
+			return Ok(None);
 		}
 
-		// Authenticate
-		let username = response.username.trim();
-		let scramble = response.auth_response;
-
-		let auth_ok = if username.is_empty() || username == "root" {
-			// Check if datastore allows unauthenticated queries or empty password
-			if self.ds.allows_query_by_subject(self.session.au.as_ref()) {
-				true
+		let (password, resp_seq) = if response.auth_plugin_name.as_deref()
+			== Some("mysql_clear_password")
+			&& !response.auth_response.is_empty()
+		{
+			let clean = if response.auth_response.ends_with(&[0]) {
+				&response.auth_response[..response.auth_response.len() - 1]
 			} else {
-				// Try basic auth with empty or common root password if scramble matches
-				let matches_empty = verify_mysql_native_password(&scramble, &self.auth_salt, "");
-				let matches_root = verify_mysql_native_password(&scramble, &self.auth_salt, "root");
-				if matches_empty {
-					basic(&self.ds, &mut self.session, "root", "", None, None).await.is_ok()
-				} else if matches_root {
-					basic(&self.ds, &mut self.session, "root", "root", None, None).await.is_ok()
+				&response.auth_response[..]
+			};
+			(std::str::from_utf8(clean).unwrap_or("").to_string(), 2)
+		} else {
+			// Send AuthSwitchRequest for mysql_clear_password
+			let auth_switch = AuthSwitchRequest::clear_password();
+			writer.write_packet(2, &auth_switch.serialize()).await?;
+
+			let (_auth_seq, auth_payload) = reader.read_packet().await?;
+			let clean = if auth_payload.ends_with(&[0]) {
+				&auth_payload[..auth_payload.len() - 1]
+			} else {
+				&auth_payload[..]
+			};
+			(std::str::from_utf8(clean).unwrap_or("").to_string(), 3)
+		};
+
+		// Parse namespace/database from response.database if present
+		let (ns_opt, db_opt) = match response.database.as_deref() {
+			Some(db_name) => {
+				let parts: Vec<&str> = db_name.split('/').collect();
+				if parts.len() >= 2 {
+					(Some(parts[0]), Some(parts[1]))
 				} else {
-					false
+					(None, Some(db_name))
 				}
 			}
-		} else {
-			self.ds.allows_query_by_subject(self.session.au.as_ref())
+			None => (None, None),
 		};
 
-		if auth_ok {
-			let ok = OkPacket::new(0, 0);
-			self.writer.write_packet(seq.wrapping_add(1), &ok.serialize()).await?;
-			Ok(true)
+		let ok = if let (Some(ns), Some(db)) = (ns_opt, db_opt) {
+			if basic(&ds, &mut session, &username, &password, Some(ns), Some(db)).await.is_ok() {
+				true
+			} else {
+				basic(&ds, &mut session, &username, &password, None, None).await.is_ok()
+			}
 		} else {
-			let err = ErrPacket::access_denied(format!("Access denied for user '{}'", username));
-			self.writer.write_packet(seq.wrapping_add(1), &err.serialize()).await?;
-			Ok(false)
-		}
+			basic(&ds, &mut session, &username, &password, None, None).await.is_ok()
+		};
+
+		(ok, resp_seq)
+	};
+
+	if !auth_ok {
+		let err = ErrPacket::access_denied(format!("Access denied for user '{}'", username));
+		let _ = writer.write_packet(final_seq, &err.serialize()).await;
+		return Ok(None);
 	}
 
+	// Send OK packet
+	let ok = OkPacket::new(0, 0);
+	writer.write_packet(final_seq, &ok.serialize()).await?;
+
+	let mut conn = Connection {
+		reader,
+		writer,
+		peer,
+		ds,
+		_ready: ready,
+		shutdown,
+		session,
+		_connection_id: connection_id,
+		_auth_salt: auth_salt,
+		_client_capabilities: response.capabilities,
+		current_ns: None,
+		current_db: None,
+		_is_tls: is_tls,
+		username: if username.is_empty() {
+			"unauthenticated".to_string()
+		} else {
+			username
+		},
+		_permit: permit,
+	};
+
+	// 6. Set initial database if requested, without swallowing errors
+	if let Some(ref db) = response.database {
+		conn.set_current_db(db).await?;
+	}
+
+	Ok(Some(conn))
+}
+
+impl Connection {
 	async fn set_current_db(&mut self, db_name: &str) -> Result<()> {
 		let parts: Vec<&str> = db_name.split('/').collect();
 		let (ns, db) = if parts.len() >= 2 {
@@ -172,10 +301,9 @@ impl Connection {
 		self.current_ns = Some(ns.to_string());
 		self.current_db = Some(db.to_string());
 
-		let _ = self
-			.ds
+		self.ds
 			.process_use(None, &mut self.session, Some(ns.to_string()), Some(db.to_string()))
-			.await;
+			.await?;
 		Ok(())
 	}
 
@@ -252,9 +380,9 @@ impl Connection {
 		}
 
 		if lower == "select user()" || lower == "select current_user()" {
-			let user = "root@localhost";
+			let user = format!("{}@{}", self.username, self.peer.ip());
 			let mut res_seq = seq.wrapping_add(1);
-			self.emit_scalar_result("USER()", user, &mut res_seq).await?;
+			self.emit_scalar_result("USER()", &user, &mut res_seq).await?;
 			return Ok(());
 		}
 

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_mywire::auth::compute_mysql_native_password_scramble;
 use surrealdb_mywire::constants::*;
@@ -10,12 +11,20 @@ use tokio_util::sync::CancellationToken;
 
 async fn start_test_mysql_server() -> (std::net::SocketAddr, CancellationToken) {
 	let ds = Datastore::new("memory").await.expect("Failed to create datastore");
+	let session = Session::owner();
+	let _ = ds
+		.run(surrealdb_core::kvs::QueryRequest::new(
+			"DEFINE USER root ON ROOT PASSWORD 'root' ROLES OWNER;",
+			&session,
+		))
+		.await
+		.expect("Failed to define root user");
 	let ready = Arc::new(AtomicBool::new(true));
 	let shutdown = CancellationToken::new();
 
 	let bind_addr: std::net::SocketAddr =
 		"127.0.0.1:0".parse().expect("Failed to parse socket address");
-	let addr = surrealdb_mywire::start(bind_addr, ds, ready, shutdown.clone())
+	let addr = surrealdb_mywire::start(bind_addr, ds, ready, shutdown.clone(), None, None)
 		.await
 		.expect("Failed to start mywire server");
 
@@ -108,10 +117,21 @@ async fn connect_and_handshake(addr: std::net::SocketAddr) -> TcpStream {
 
 	write_packet(&mut stream, 1, &resp).await;
 
-	// 3. Read OK Packet (Seq 2)
-	let (seq, ok_payload) = read_packet(&mut stream).await;
-	assert_eq!(seq, 2, "Handshake OK packet should be seq 2");
-	assert_eq!(ok_payload[0], 0x00, "Expected OK packet (0x00) from handshake");
+	// 3. Read response (either OK packet 0x00 or AuthSwitchRequest 0xFE)
+	let (seq, payload) = read_packet(&mut stream).await;
+	if payload[0] == 0xfe {
+		// AuthSwitchRequest to mysql_clear_password
+		write_packet(&mut stream, seq.wrapping_add(1), b"root\0").await;
+		let (_final_seq, ok_payload) = read_packet(&mut stream).await;
+		assert_eq!(
+			ok_payload[0],
+			0x00,
+			"Handshake OK expected, got error: {:?}",
+			String::from_utf8_lossy(&ok_payload)
+		);
+	} else {
+		assert_eq!(payload[0], 0x00, "Expected OK packet (0x00) from handshake");
+	}
 
 	stream
 }

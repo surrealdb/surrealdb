@@ -7733,12 +7733,15 @@ name = "surrealdb-mywire"
 version = "3.4.0-nightly"
 dependencies = [
  "anyhow",
+ "axum-server",
  "rand 0.9.4",
  "sha1",
  "surrealdb-core",
  "surrealdb-mysql",
+ "surrealdb-rpc",
  "surrealdb-types",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
  "tracing",
  "uuid",

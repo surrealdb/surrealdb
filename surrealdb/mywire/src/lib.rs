@@ -9,13 +9,16 @@
 extern crate tracing;
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use anyhow::{Context as _, Result};
+use axum_server::tls_rustls::RustlsConfig;
 use surrealdb_core::kvs::Datastore;
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
+use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 
 pub mod auth;
@@ -41,7 +44,26 @@ pub async fn start(
 	ds: Arc<Datastore>,
 	ready: Arc<AtomicBool>,
 	shutdown: CancellationToken,
+	crt: Option<PathBuf>,
+	key: Option<PathBuf>,
 ) -> Result<SocketAddr> {
+	let acceptor = match (crt, key) {
+		(Some(crt), Some(key)) => {
+			let config = RustlsConfig::from_pem_file(&crt, &key)
+				.await
+				.with_context(|| "Failed to load the MySQL TLS certificate and key")?;
+			Some(Arc::new(TlsAcceptor::from(config.get_inner())))
+		}
+		_ => {
+			warn!(
+				target: LOG,
+				"The MySQL wire protocol is serving plaintext connections; \
+				 configure --web-crt/--web-key to enable TLS"
+			);
+			None
+		}
+	};
+
 	let listener = TcpListener::bind(addr)
 		.await
 		.with_context(|| format!("Failed to bind the MySQL listener on {addr}"))?;
@@ -73,23 +95,20 @@ pub async fn start(
 							let conn_ds = Arc::clone(&ds);
 							let conn_ready = Arc::clone(&ready);
 							let conn_shutdown = shutdown.clone();
+							let conn_acceptor = acceptor.clone();
 
 							tokio::spawn(async move {
 								debug!(target: LOG, "Accepted MySQL connection from {peer}");
-								let mut connection = Connection::new(
+								conn::handle(
 									stream,
 									peer,
 									conn_ds,
 									conn_ready,
 									conn_shutdown,
 									permit,
-								);
-
-								if let Err(err) = connection.run().await {
-									debug!(target: LOG, "MySQL connection from {peer} ended with error: {err}");
-								} else {
-									debug!(target: LOG, "MySQL connection from {peer} closed cleanly");
-								}
+									conn_acceptor,
+								)
+								.await;
 							});
 						}
 						Err(err) => {

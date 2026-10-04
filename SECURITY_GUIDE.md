@@ -1093,13 +1093,12 @@ Flag when changes touch:
 
 ---
 
-## 15. Query Parser
+## 15. Query Parser and Front-Ends
 
 **Files**: the `surrealdb/syn` crate (SurrealQL lexer/parser, the bulk of the
 grammar), `surrealdb/parser`, `surrealdb/sql` and `surrealdb/expr` (AST and
 expression construction), the `surrealdb/gql` crate (GQL front-end), and
-`surrealdb/pgsql` and `surrealdb/mysql` (PostgreSQL and MySQL front-ends; not
-reachable from any entry point until core enables their features). The
+`surrealdb/pgsql` and `surrealdb/mysql` (PostgreSQL and MySQL front-ends). The
 same-named modules under `core/src/` are thin
 remnants of the pre-crate-split layout and are not where the grammar lives.
 
@@ -1116,6 +1115,8 @@ remnants of the pre-crate-split layout and are not where the grammar lives.
   `Result` types.
 - Parser-produced AST nodes must faithfully represent the input. Ambiguous syntax
   must be resolved in a way that does not silently change query semantics.
+- Wire protocol listeners (`pgwire`, `mywire`) must be capability-gated via
+  `RouteTarget::Postgres` and `RouteTarget::MySql`.
 
 ### Review Triggers
 
@@ -1128,6 +1129,8 @@ Flag when changes touch:
 - AST node construction for security-relevant statements (DEFINE, OPTION, USE)
 - The GQL front-end (`gql/` parsing and lowering, the `gql` RPC method,
   the `/gql` HTTP route)
+- The PostgreSQL and MySQL front-ends (`pgsql/`, `mysql/`, `pgwire/`, `mywire/`)
+- Capability routing for wire protocols (`RouteTarget::Postgres`, `RouteTarget::MySql`)
 
 ---
 
@@ -1423,3 +1426,22 @@ Flag when changes touch:
 - The compute-only refusals (the executor's `TopLevelStatement::Plan` arm,
   `run_logical_plan`, and `fnc::eval::run_eval`), or any path that gives a plan
   a `sql::TopLevelExpr` form
+
+---
+
+## Appendix B: Wire Protocols (pgwire and mywire)
+
+### Invariants
+
+- **Capability Gating**: The wire protocol listeners (`pgwire` on port 5432 / `--pg-bind`, `mywire` on port 3306 / `--mysql-bind`) are capability-gated via `RouteTarget::Postgres` and `RouteTarget::MySql`. If disabled by capabilities, incoming connections are rejected immediately with an authentication error packet (`28000` / 1045) before any query processing.
+- **Readiness Gating**: Incoming connections check datastore readiness (`ready.load(Ordering::SeqCst)`). If the database is still starting up, connections are rejected with code `08S01`.
+- **Authentication**:
+  - `pgwire` authenticates clients via SASL SCRAM-SHA-256 or cleartext password over TLS/loopback against `surrealdb-iam` basic auth.
+  - `mywire` authenticates clients using the `mysql_clear_password` authentication path (via `AuthSwitchRequest`) over TLS or loopback against `surrealdb-iam` basic auth. Plaintext authentication over non-loopback insecure connections is rejected.
+  - Guest access (empty username) is permitted only if `allows_query_by_subject` permits unauthenticated queries. If a username is provided, credentials must match a defined user; no guest fallbacks or hard-coded password guessing (`""`, `"root"`) are permitted.
+  - `USER()` / `CURRENT_USER()` in MySQL wire protocol reports the authenticated user and remote IP (`user@ip`), never a hardcoded `"root@localhost"`.
+- **Database Selection**:
+  - Authentication must complete successfully before database selection (`process_use` / `set_current_db`) runs.
+  - Errors from `process_use` must never be swallowed; if a database or namespace does not exist or access is denied, an error is returned to the client.
+- **Connection and Resource Limits**: Each listener enforces maximum connection concurrency via a semaphore (`MAX_CONNECTIONS = 1024`), cleanly rejecting connections when capacity is exceeded.
+
