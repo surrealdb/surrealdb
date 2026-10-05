@@ -468,9 +468,9 @@ pub fn common_kind(kinds: impl IntoIterator<Item = Kind>) -> Kind {
 impl LogicalExpr {
 	/// The kind `self` is known to evaluate to, against the row `schema`
 	/// describes, or `None` when its kind is declared or inferred rather than
-	/// known: a literal's kind, a cast's target, a record id's, a table's or a
-	/// constant's kind, the `bool` of a comparison, a containment test or a
-	/// `NOT`, the `bool` of an `AND` or `OR` over operands checked to be
+	/// known: a literal's kind, an object literal's `object`, a cast's target,
+	/// a record id's, a table's or a constant's kind, the `bool` of a comparison, a containment
+	/// test or a `NOT`, the `bool` of an `AND` or `OR` over operands checked to be
 	/// `bool`, and the kind of a path to a field the schema marks checked
 	/// ([`FieldSchema::checked`]). Anything else is `None`, a path to a stored
 	/// field in particular: [`Self::kind`] answers with its declared kind,
@@ -552,9 +552,9 @@ impl LogicalExpr {
 				| BinaryOperator::RangeSkip
 				| BinaryOperator::RangeSkipInclusive => None,
 			},
+			LogicalExpr::Object(_) => Some(Kind::Object),
 			LogicalExpr::Array(_)
 			| LogicalExpr::Set(_)
-			| LogicalExpr::Object(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Doc
 			| LogicalExpr::Current

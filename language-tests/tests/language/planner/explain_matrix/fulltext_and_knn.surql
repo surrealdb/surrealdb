@@ -34,7 +34,7 @@ before relying on anything else:
   slower true one. The oracle is the brute-force form `<|k,METRIC|>`, which
   `KnnTopK` computes exactly over a scan.
 
-Four wrong behaviours are pinned rather than hidden, each marked at its case:
+Three wrong behaviours are pinned rather than hidden, each marked at its case:
 
 1. A FULLTEXT index left behind by `ALTER INDEX ... PREPARE REMOVE` is dropped
    from the plan, so the plan reads as a full table scan — but the `@@`
@@ -47,22 +47,7 @@ Four wrong behaviours are pinned rather than hidden, each marked at its case:
    with no error and no diagnostic in the plan beyond the missing `KnnScan`.
    Correct behaviour would be to answer the k nearest by brute force, as
    `<|k,METRIC|>` does over the same data.
-3. Two `@@` conjuncts over the SAME indexed column reduce to one
-   `FullTextScan` for the first term. The second conjunct leaves no trace in
-   the plan — no second scan, no `BitmapAnd`, no `Filter` re-check — so the
-   query returns every row matching the surviving term, which is a SUPERSET of
-   the conjunction: rows that satisfy only one of the two conditions come back.
-   Correct answer: the intersection, [ft2:1]. Swapping the conjuncts changes
-   which term survives (the textually first one) and so which row is wrongly
-   returned. Two facts in the same section make this a defect rather than an
-   operator limit: the same two terms ORed on the same column DO keep both
-   terms (a `BitmapOr` of two `BitmapFullTextScan`s), and the count() path
-   plans the ANDed predicate correctly as an `IndexCountScan` over a
-   `BitmapAnd` of one scan per term and reports the oracle's count — so one
-   predicate yields a right count and wrong rows from one engine, and the
-   intersection the row path needs already exists. Two `@@` conjuncts over
-   DIFFERENT columns are also planned and answered correctly.
-4. Two ANDed KNN operators collapse to a single `KnnScan`, with the second
+3. Two ANDed KNN operators collapse to a single `KnnScan`, with the second
    constraint absent and no residual `Filter`, so the query answers the
    surviving operator's top-K alone. The vec2 fixture orders records under
    `pa` and reverses that order under `pb`, so the two 2-nearest sets are
@@ -339,12 +324,13 @@ value = "'OK'"
 
 [[test.results]]
 value = '''
-'ProjectValue [ctx: Db] [expr: id]
-    FullTextScan [ctx: Db] [index: ft2_title, query: alpha]
-''''
+"ProjectValue [ctx: Db] [expr: id]
+    Filter [ctx: Db] [predicate: title @2@ 'beta']
+        FullTextScan [ctx: Db] [index: ft2_title, query: alpha]
+"'''
 
 [[test.results]]
-value = "[ft2:1, ft2:2]"
+value = "[ft2:1]"
 
 [[test.results]]
 value = "[ft2:1]"
@@ -365,12 +351,13 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-'ProjectValue [ctx: Db] [expr: id]
-    FullTextScan [ctx: Db] [index: ft2_title, query: beta]
-''''
+"ProjectValue [ctx: Db] [expr: id]
+    Filter [ctx: Db] [predicate: title @2@ 'alpha']
+        FullTextScan [ctx: Db] [index: ft2_title, query: beta]
+"'''
 
 [[test.results]]
-value = "[ft2:1, ft2:3]"
+value = "[ft2:1]"
 
 [[test.results]]
 value = '''
@@ -687,53 +674,42 @@ SELECT count() FROM pt WHERE point <|2,EUCLIDEAN|> $q GROUP ALL;
     RETURN 'OK';
 };
 
--- DEFECT. Two `@@` conjuncts over the SAME indexed column reduce to a single
--- FullTextScan for the first term. The second conjunct is absent from the plan
--- entirely -- no second scan, no BitmapAnd, and no Filter re-check above the
--- scan -- so every row matching 'alpha' comes back, ft2:2 included, which does
--- not match 'beta'. Correct answer: [ft2:1], which the oracle returns. The
--- oracle is `string::contains` rather than WITH NOINDEX, for the reason given
--- at the top of this file.
+-- Two `@@` conjuncts over the SAME indexed column: the FullTextScan answers the
+-- first term, and the second conjunct stays in a Filter above it, judged per
+-- row, so ft2:2 — which matches 'alpha' but not 'beta' — is excluded. The
+-- answer is [ft2:1], as the oracle returns. The oracle is `string::contains`
+-- rather than WITH NOINDEX, for the reason given at the top of this file.
 EXPLAIN SELECT VALUE id FROM ft2 WHERE title @1@ 'alpha' AND title @2@ 'beta';
 
 SELECT VALUE id FROM ft2 WHERE title @1@ 'alpha' AND title @2@ 'beta';
 
 SELECT VALUE id FROM ft2 WHERE string::contains(title, 'alpha') AND string::contains(title, 'beta');
 
--- The count path plans the SAME predicate correctly -- an IndexCountScan over
--- a BitmapAnd of one BitmapFullTextScan per term -- and reports the oracle's 1.
--- One predicate therefore yields a right count and wrong rows from one engine,
--- which localises the defect to the row path rather than to the analyzer, and
--- shows that the two-scan intersection the row path needs already exists.
+-- The count path plans the same predicate as an IndexCountScan over a
+-- BitmapAnd of one BitmapFullTextScan per term, and reports the oracle's 1.
 EXPLAIN SELECT count() FROM ft2 WHERE title @1@ 'alpha' AND title @2@ 'beta' GROUP ALL;
 
 SELECT count() FROM ft2 WHERE title @1@ 'alpha' AND title @2@ 'beta' GROUP ALL;
 
 SELECT count() FROM ft2 WHERE string::contains(title, 'alpha') AND string::contains(title, 'beta') GROUP ALL;
 
--- DEFECT, the same shape with the conjuncts swapped: the surviving term is the
--- textually first one, so which row is wrongly returned changes with the
--- spelling. Correct answer is [ft2:1] either way; here ft2:3 comes back, which
--- matches 'beta' but not 'alpha'.
+-- The same shape with the conjuncts swapped: the scan answers the textually
+-- first term and the Filter the second, and the answer is [ft2:1] either way.
 EXPLAIN SELECT VALUE id FROM ft2 WHERE title @1@ 'beta' AND title @2@ 'alpha';
 
 SELECT VALUE id FROM ft2 WHERE title @1@ 'beta' AND title @2@ 'alpha';
 
--- The first contrast that makes the AND case a defect rather than a limit of
--- the operator: the same two terms on the same column, ORed, keep both terms.
--- The plan unions two BitmapFullTextScans and re-checks the predicate, and the
--- rows match the oracle -- so scanning one column's index twice in one query
--- is buildable.
+-- The same two terms on the same column, ORed: the plan unions two
+-- BitmapFullTextScans and re-checks the predicate, and the rows match the
+-- oracle.
 EXPLAIN SELECT VALUE id FROM ft2 WHERE title @1@ 'alpha' OR title @2@ 'beta';
 
 SELECT VALUE id FROM ft2 WHERE title @1@ 'alpha' OR title @2@ 'beta' ORDER BY id;
 
 SELECT VALUE id FROM ft2 WHERE string::contains(title, 'alpha') OR string::contains(title, 'beta') ORDER BY id;
 
--- The second contrast: two `@@` conjuncts over DIFFERENT columns, each with
--- its own index, are planned as a BitmapAnd of the two scans under a Filter
--- re-check and answer correctly. Only reusing ONE column's index twice in a
--- conjunction loses a term.
+-- Two `@@` conjuncts over DIFFERENT columns, each with its own index, are
+-- planned as a BitmapAnd of the two scans under a Filter re-check.
 EXPLAIN SELECT VALUE id FROM ft2 WHERE title @1@ 'alpha' AND body @2@ 'lima';
 
 SELECT VALUE id FROM ft2 WHERE title @1@ 'alpha' AND body @2@ 'lima';

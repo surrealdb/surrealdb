@@ -323,6 +323,16 @@ mod tests {
 	}
 
 	#[test]
+	fn a_broadcast_over_an_object_literal_is_resolved_and_over_an_array_literal_kept() {
+		// A substituted `$o.b[1]`: an object literal is one value whatever its
+		// fields hold, so the body applies to it directly.
+		let predicate = predicate_over("SELECT * FROM t WHERE a = { b: [1, 2] }.b[1]", &typed());
+		assert!(!predicate.any(|e| matches!(e, LogicalExpr::Broadcast { .. })), "{predicate}");
+		let predicate = predicate_over("SELECT * FROM t WHERE a = [{ b: 1 }].b[0]", &typed());
+		assert!(predicate.any(|e| matches!(e, LogicalExpr::Broadcast { .. })), "{predicate}");
+	}
+
+	#[test]
 	fn a_broadcast_over_a_stored_field_is_kept_at_its_declared_kind() {
 		// The declaration is enforced on write; a value stored before it, or
 		// before `DEFINE FIELD OVERWRITE` retyped the field, is still an array

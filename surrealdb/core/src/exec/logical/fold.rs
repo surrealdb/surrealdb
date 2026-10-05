@@ -7,8 +7,11 @@
 //! What folds is decided by `try_fold_to_literal`, the rule shared with the
 //! physical planner: arithmetic on literals, calls to a pure, deterministic,
 //! synchronous built-in whose arguments are all literals, `time::now()` once
-//! per statement by deliberate exception, `x INSIDE []` to `false`, and
-//! AND/OR short-circuits against a boolean literal. The last two eliminate an
+//! per statement by deliberate exception, `x INSIDE []` to `false`,
+//! AND/OR short-circuits against a boolean literal, and a path over a constant
+//! that reads no storage (`{ name: 'x' }.name`, `['a', 'b'][1]`, the shapes a
+//! substituted `$obj.field` or `$arr[1]` takes), so that a comparison or a
+//! MATCHES against one is an index candidate. The last two eliminate an
 //! operand, so they apply only where evaluating it provably reaches nothing,
 //! and a field read reaches something whenever the rows are not plain records
 //! or the field is derived or guarded. [`restricted_fields`] answers that from
@@ -46,12 +49,6 @@
 //!   a call names a table to scan or produces the rows themselves. Folding one here would settle
 //!   that question with a literal before the planner ever saw the call. The driver hands a source
 //!   leaf's scalars to no expression rule.
-//!
-//! A path over a constant (`{ name: 'x' }.name`, the shape a substituted
-//! `$obj.field` takes) is also left whole. Access-path selection reads the
-//! bound plan, and a comparison whose value side is a path is not an index
-//! candidate; the physical planner resolves such a chain to its value once it
-//! compiles the predicate (`planner/path.rs`), after the access path is chosen.
 
 use super::rewrite_deep;
 use super::rules::ExprContext;
@@ -354,14 +351,13 @@ mod tests {
 		assert!(plan.contains("Filter[a > 2 AND b = 2]"), "{plan}");
 	}
 
-	/// A path over a constant object is left to the physical planner, so a
-	/// comparison against `$obj.field` keeps its plan-time shape (a path, not a
-	/// literal) for access-path selection.
+	/// A path over a constant object folds to the value it reads, so a
+	/// comparison against `$obj.field` is a comparison against a literal.
 	#[test]
-	fn a_field_access_on_a_constant_object_is_left_whole() {
+	fn a_field_access_on_a_constant_object_folds() {
 		let plan =
 			folded("SELECT * FROM t WHERE a = { data: { org: 'acme' } }.data.org").to_string();
-		assert!(plan.contains("Filter[a = { data: { org: 'acme' } }.data.org]"), "{plan}");
+		assert!(plan.contains("Filter[a = 'acme']"), "{plan}");
 	}
 
 	#[test]

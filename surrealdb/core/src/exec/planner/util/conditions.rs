@@ -26,9 +26,9 @@ use super::fields::{idiom_is_id, path_steps};
 use super::literals::try_literal_to_value;
 use crate::catalog::Distance;
 use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalRecordIdKey};
-use crate::expr::operator::NearestNeighbor;
+use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::{BinaryOperator, Idiom, Part};
-use crate::val::Number;
+use crate::val::{Number, Value};
 
 // ============================================================================
 // Predicate / Validation Helpers
@@ -195,19 +195,36 @@ pub(crate) fn extract_bruteforce_knn(cond: &LogicalExpr) -> Option<BruteForceKnn
 	params
 }
 
-/// Strip the MATCHES (`@@`) predicate from a WHERE clause, returning the residual.
+/// Strip the MATCHES (`@@`) conjuncts a full-text scan answers from a WHERE
+/// clause, returning the residual.
+///
+/// A conjunct is stripped only when it is the scan's own probe: its operator is
+/// `operator`, its query is the literal string `query`, and its left side is
+/// the index's first column `column`. Every other conjunct — a MATCHES on
+/// another field, with another reference or another query — stays in the
+/// residual, where it is evaluated per row or refused; the scan's rows say
+/// nothing about it.
 ///
 /// Returns `None` when the entire condition is consumed (just a single `@@`),
 /// or `Some(residual)` when additional predicates remain (e.g., `content @@ 'x' AND status = 'a'`).
-pub(crate) fn strip_fts_condition(cond: &LogicalExpr) -> Option<LogicalExpr> {
+pub(crate) fn strip_fts_condition(
+	cond: &LogicalExpr,
+	column: &Idiom,
+	operator: &MatchesOperator,
+	query: &str,
+) -> Option<LogicalExpr> {
 	strip_and_simplify(cond.clone(), |e| {
-		matches!(
-			e,
-			LogicalExpr::Binary {
-				op: BinaryOperator::Matches(_),
-				..
-			}
-		)
+		let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::Matches(op),
+			right,
+		} = e
+		else {
+			return false;
+		};
+		op == operator
+			&& matches!(try_literal_to_value(right), Some(Value::String(s)) if s.as_str() == query)
+			&& idiom_matches_column(left, column)
 	})
 }
 
@@ -510,7 +527,6 @@ pub(crate) fn strip_union_index_conditions(
 	paths: &[crate::exec::index::access_path::AccessPath],
 ) -> Option<LogicalExpr> {
 	use crate::exec::index::access_path::{AccessPath, BTreeAccess};
-	use crate::val::Value;
 
 	// Collect (index_first_column, set_of_branch_values) from the paths.
 	// All branches must agree on the index and its first column.  The
@@ -571,8 +587,6 @@ fn union_covers_leaf(
 	op: &BinaryOperator,
 	right: &LogicalExpr,
 ) -> bool {
-	use crate::val::Value;
-
 	let (idiom, lit) = match op {
 		BinaryOperator::ContainAny if left.is_path() => (left, right),
 		BinaryOperator::AnyInside if right.is_path() => (right, left),
@@ -633,7 +647,6 @@ impl IndexConditionMatcher<'_> {
 	/// Check whether a binary comparison leaf is covered by the access pattern.
 	fn matches_access(&self, left: &LogicalExpr, op: &BinaryOperator, right: &LogicalExpr) -> bool {
 		use crate::exec::index::access_path::BTreeAccess;
-		use crate::val::Value;
 
 		// Extract field, value, and the effective operator (normalized so the
 		// field is always on the left side of the comparison). `idiom_on_left`
@@ -989,7 +1002,6 @@ mod tests {
 	use crate::exec::index::access_path::{AccessPath, BTreeAccess, IndexRef};
 	use crate::expr::logical::lower_expr;
 	use crate::kvs::Direction;
-	use crate::val::Value;
 
 	fn parse_cond(snippet: &str) -> LogicalExpr {
 		let src = format!("SELECT * FROM t WHERE {snippet}");
@@ -1151,9 +1163,34 @@ mod tests {
 		let params = extract_bruteforce_knn(&cond).expect("brute-force KNN");
 		assert_eq!(params.k, 2);
 		assert!(matches!(params.vector, BruteForceKnnVector::Literal(ref v) if v.len() == 2));
-		let cond = parse_cond("title @@ 'x' AND a = 1");
-		assert_eq!(strip_fts_condition(&cond).map(|c| c.to_sql()).as_deref(), Some("a = 1"));
-		assert_eq!(strip_fts_condition(&parse_cond("title @@ 'x'")), None);
+		let title = Idiom::from_str("title").expect("valid idiom");
+		let op = |sql: &str| match parse_cond(sql) {
+			LogicalExpr::Binary {
+				op: BinaryOperator::Matches(op),
+				..
+			} => op,
+			other => panic!("expected a MATCHES, got {}", other.to_sql()),
+		};
+		let (any, first) = (op("title @@ 'x'"), op("title @1@ 'x'"));
+		let strip = |sql: &str, op: &MatchesOperator| {
+			strip_fts_condition(&parse_cond(sql), &title, op, "x").map(|c| c.to_sql())
+		};
+		assert_eq!(strip("title @@ 'x' AND a = 1", &any).as_deref(), Some("a = 1"));
+		assert_eq!(strip("title @@ 'x'", &any), None);
+		// Only the scan's own probe is consumed: a MATCHES on another field,
+		// with another reference or another query, stays in the residual.
+		assert_eq!(
+			strip("title @1@ 'x' AND body @2@ 'y'", &first).as_deref(),
+			Some("body @2@ 'y'")
+		);
+		assert_eq!(
+			strip("title @1@ 'x' AND title @2@ 'x'", &first).as_deref(),
+			Some("title @2@ 'x'")
+		);
+		assert_eq!(
+			strip("title @1@ 'x' AND title @1@ $q", &first).as_deref(),
+			Some("title @1@ $q")
+		);
 	}
 
 	#[test]

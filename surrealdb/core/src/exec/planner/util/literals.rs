@@ -844,6 +844,9 @@ fn record_id_key_is_inert(
 ///   (math::floor, string::lowercase, type::int, etc.)
 /// - Binary arithmetic on two literals (datetime ± duration, number ± number, etc.)
 /// - `AND`/`OR` with a constant boolean operand, and `x INSIDE []`
+/// - A field of an object literal, an index into a literal, and the first or last element of a
+///   collection literal (`{ a: 1 }.a`, `['x', 'y'][1]`) — the shapes a resolved parameter or a
+///   folded record path leaves behind
 ///
 /// Both conditions on a call matter and they are different questions:
 /// `ScalarFunction::is_pure` asks whether it can run without an execution
@@ -954,6 +957,59 @@ pub(crate) fn try_fold_to_literal(
 			try_value_to_logical_expr(result)
 		}
 
+		// A field of a literal, as the runtime field step reads it: an
+		// object's field (what a resolved parameter such as `$session`
+		// becomes), a geometry's GeoJSON field, and `NONE` off any other
+		// scalar. A record id keeps its runtime step, which fetches the
+		// record, and so does an array, which maps the access over elements
+		// that may be record ids.
+		LogicalExpr::Access {
+			base,
+			field,
+		} => match try_literal_to_value(base)? {
+			Value::Object(obj) => {
+				try_value_to_logical_expr(obj.get(field.as_str()).cloned().unwrap_or(Value::None))
+			}
+			Value::Geometry(geo) => try_value_to_logical_expr(
+				geo.as_object().get(field.as_str()).cloned().unwrap_or(Value::None),
+			),
+			Value::RecordId(_) | Value::Array(_) => None,
+			_ => Some(LogicalExpr::Literal(LogicalLiteral::None)),
+		},
+
+		// A literal indexed by a literal. The runtime index step reads no
+		// storage for any base, so its own evaluation is the fold.
+		LogicalExpr::Index {
+			base,
+			index,
+		} => {
+			let base = try_literal_to_value(base)?;
+			let index = try_literal_to_value(index)?;
+			let result = crate::exec::parts::index::evaluate_index(&base, &index).ok()?;
+			try_value_to_logical_expr(result)
+		}
+
+		// An end of a collection literal; a value that is not one answers
+		// `NONE`, as the runtime step does.
+		LogicalExpr::First(base) => match try_literal_to_value(base)? {
+			Value::Array(arr) => {
+				try_value_to_logical_expr(arr.first().cloned().unwrap_or(Value::None))
+			}
+			Value::Set(set) => {
+				try_value_to_logical_expr(set.first().cloned().unwrap_or(Value::None))
+			}
+			_ => Some(LogicalExpr::Literal(LogicalLiteral::None)),
+		},
+		LogicalExpr::Last(base) => match try_literal_to_value(base)? {
+			Value::Array(arr) => {
+				try_value_to_logical_expr(arr.last().cloned().unwrap_or(Value::None))
+			}
+			Value::Set(set) => {
+				try_value_to_logical_expr(set.last().cloned().unwrap_or(Value::None))
+			}
+			_ => Some(LogicalExpr::Literal(LogicalLiteral::None)),
+		},
+
 		// Nothing else folds. A `Subquery` in particular is a plan of its own,
 		// bound and folded when it is planned.
 		LogicalExpr::Literal(_)
@@ -967,14 +1023,6 @@ pub(crate) fn try_fold_to_literal(
 		| LogicalExpr::Field(_)
 		| LogicalExpr::Doc
 		| LogicalExpr::Current
-		| LogicalExpr::Access {
-			..
-		}
-		| LogicalExpr::Index {
-			..
-		}
-		| LogicalExpr::First(_)
-		| LogicalExpr::Last(_)
 		| LogicalExpr::Each(_)
 		| LogicalExpr::Flatten {
 			..
@@ -1182,6 +1230,31 @@ mod tests {
 		assert!(try_literal_to_value(&expr("t:1")).is_some());
 		assert!(try_literal_to_value(&expr("[1, a]")).is_none());
 		assert!(try_literal_to_value(&expr("{ a: 1 }")).is_some());
+	}
+
+	#[test]
+	fn access_on_a_literal_folds_to_its_value() {
+		let registry = FunctionRegistry::with_builtins();
+		let capabilities = Capabilities::all();
+		let fold = |sql: &str| {
+			let mut e = expr(sql);
+			fold_condition_expressions(&mut e, &registry, &capabilities, None);
+			e.to_sql()
+		};
+		assert_eq!(fold("{ a: { b: 'x' } }.a.b"), "'x'");
+		assert_eq!(fold("['x', 'y'][0]"), "'x'");
+		assert_eq!(fold("['x', 'y'][$]"), "'y'");
+		assert_eq!(fold("['x', 'y'][5]"), "NONE");
+		assert_eq!(fold("{ a: 1 }.b"), "NONE");
+		assert_eq!(fold("a = { a: 'x' }.a"), "a = 'x'");
+		assert_eq!(fold("'x'.a"), "NONE");
+		assert_eq!(fold("(1).a"), "NONE");
+		assert_eq!(fold("(1.0, 2.0).type"), "'Point'");
+		// A base that may fetch keeps its runtime step.
+		assert_eq!(fold("t:1.a"), "(t:1).a");
+		assert_eq!(fold("[t:1].a"), "[t:1].a");
+		// A row-dependent operand keeps it too.
+		assert_eq!(fold("['x', 'y'][a]"), "['x', 'y'][a]");
 	}
 
 	#[test]
