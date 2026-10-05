@@ -128,7 +128,7 @@ surrealdb-kvs-test = { path = "surrealdb/kvs-test" }
 surrealdb-mysql = { version = "3.4.0-nightly", path = "surrealdb/mysql" }
 surrealdb-pgsql = { version = "3.4.0-nightly", path = "surrealdb/pgsql" }
 surrealdb-sqlplan = { version = "3.4.0-nightly", path = "surrealdb/sqlplan" }
-surrealdb-sqlfront-derive = { path = "surrealdb/sqlfront-derive" }
+surrealdb-sqlfront-derive = { version = "3.4.0-nightly", path = "surrealdb/sqlfront-derive" }
 surrealdb-sqlfront-spec = { path = "surrealdb/sqlfront-spec" }
 surrealdb-kvs-tikv = { version = "3.4.0-nightly", path = "surrealdb/kvs-tikv" }
 surrealdb-collections = { version = "3.4.0-nightly", path = "surrealdb/collections" }

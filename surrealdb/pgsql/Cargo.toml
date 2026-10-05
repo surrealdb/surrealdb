@@ -1,6 +1,5 @@
 [package]
 name = "surrealdb-pgsql"
-publish = false
 readme = "README.md"
 version.workspace = true
 authors.workspace = true

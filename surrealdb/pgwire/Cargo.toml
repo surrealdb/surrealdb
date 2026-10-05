@@ -1,6 +1,5 @@
 [package]
 name = "surrealdb-pgwire"
-publish = false
 authors.workspace = true
 edition.workspace = true
 license-file.workspace = true

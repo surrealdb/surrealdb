@@ -1,6 +1,5 @@
 [package]
 name = "surrealdb-sqlplan"
-publish = false
 readme = "README.md"
 version.workspace = true
 authors.workspace = true

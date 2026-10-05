@@ -1,6 +1,5 @@
 [package]
 name = "surrealdb-mywire"
-publish = false
 authors.workspace = true
 edition.workspace = true
 license-file.workspace = true

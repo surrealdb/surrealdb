@@ -1,7 +1,6 @@
 [package]
 name = "surrealdb-sqlfront-derive"
 version.workspace = true
-publish = false
 authors.workspace = true
 edition.workspace = true
 license-file.workspace = true

@@ -314,6 +314,10 @@ name = "surrealdb-pgsql"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
+name = "surrealdb-sqlplan"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
 name = "surrealdb-pgwire"
 allow = ["BUSL-1.1"]
 
@@ -536,6 +540,11 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealdb-pgsql"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-sqlplan"
 expression = "BUSL-1.1"
 license-files = []
 
