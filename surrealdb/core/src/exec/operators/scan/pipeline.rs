@@ -64,6 +64,8 @@ pub(crate) struct ScanPipeline {
 	skipped: usize,
 	/// How many rows have been emitted so far.
 	emitted: usize,
+	/// See [`Self::materialised_bytes`].
+	materialised_bytes: usize,
 }
 
 impl ScanPipeline {
@@ -124,7 +126,19 @@ impl ScanPipeline {
 			start,
 			skipped: 0,
 			emitted: 0,
+			materialised_bytes: 0,
 		}
+	}
+
+	/// The approximate size of the last batch [`Self::process_batch`]
+	/// processed once its computed fields were materialised, before any row
+	/// was filtered out; 0 when the pipeline materialises no computed field.
+	///
+	/// A computed field can make a row far wider than the record it was
+	/// fetched as, and the batch held every such row until the filters ran, so
+	/// a scan sizing its batches reads this rather than the surviving rows.
+	pub(crate) fn materialised_bytes(&self) -> usize {
+		self.materialised_bytes
 	}
 
 	/// Returns true when limit or start tracking is active.
@@ -135,14 +149,18 @@ impl ScanPipeline {
 	/// Process a single batch in-place: filter, compute fields, apply
 	/// permissions, then apply limit/start. Returns `false` when the
 	/// limit has been reached and the caller should stop iterating.
+	///
+	/// A batch that materialises computed fields is checked against
+	/// `SURREAL_MEMORY_THRESHOLD`; see [`filter_and_process_batch`].
 	pub(crate) async fn process_batch(
 		&mut self,
 		batch: &mut Vec<Value>,
 		ctx: &ExecutionContext,
 	) -> Result<bool, ControlFlow> {
 		// Phase 1: filter + process, per record
+		self.materialised_bytes = 0;
 		if self.needs_processing {
-			filter_and_process_batch(
+			self.materialised_bytes = filter_and_process_batch(
 				batch,
 				&self.permission,
 				self.predicate.as_ref(),
@@ -329,6 +347,7 @@ pub(crate) fn kv_scan_stream(
 			if stats.rows == 0 {
 				break;
 			}
+			super::common::ensure_below_memory_threshold()?;
 			if !decoded.is_empty() {
 				yielder.emit(ValueBatch::new(decoded)).await;
 			}
@@ -401,6 +420,18 @@ macro_rules! check_perm {
 /// reads as `NONE` there.
 /// Records that fail any check are compacted out via an in-place swap so the
 /// surviving prefix can be truncated at the end with no extra allocation.
+///
+/// Computed fields can make a row far wider than the record it was fetched
+/// as, and a row the predicate rejects still holds them until that truncate,
+/// so a batch that materialises computed fields is checked against
+/// `SURREAL_MEMORY_THRESHOLD` (see
+/// [`super::common::ensure_below_memory_threshold`]) before it is truncated,
+/// while every materialised row is still held.
+///
+/// # Returns
+///
+/// The approximate size of the batch at that point, every row it held
+/// included, when it materialised computed fields; 0 otherwise.
 pub(crate) async fn filter_and_process_batch(
 	batch: &mut Vec<Value>,
 	permission: &PhysicalPermission,
@@ -408,7 +439,7 @@ pub(crate) async fn filter_and_process_batch(
 	ctx: &ExecutionContext,
 	state: &FieldState,
 	check_perms: bool,
-) -> Result<(), ControlFlow> {
+) -> Result<usize, ControlFlow> {
 	let needs_perm_filter = !matches!(permission, PhysicalPermission::Allow);
 
 	// Fast path: when only the predicate is active (no permissions, no
@@ -430,7 +461,7 @@ pub(crate) async fn filter_and_process_batch(
 			}
 		}
 		batch.truncate(write_idx);
-		return Ok(());
+		return Ok(0);
 	}
 
 	let mut write_idx = 0;
@@ -457,8 +488,14 @@ pub(crate) async fn filter_and_process_batch(
 		}
 		write_idx += 1;
 	}
+	let materialised = if state.computed_fields.is_empty() {
+		0
+	} else {
+		super::common::ensure_below_memory_threshold()?;
+		batch.iter().map(super::common::approx_value_size).sum()
+	};
 	batch.truncate(write_idx);
-	Ok(())
+	Ok(materialised)
 }
 
 // =============================================================================
@@ -1173,6 +1210,9 @@ pub(crate) async fn materialise_fields_with_permissions(
 	// fields cut from it, so a clause naming one would read it as `NONE` there
 	// and pass a field the clause was written to deny.
 	let record = value.clone();
+	// The computed values and their snapshot are both live now, and the passes
+	// below may cut them before the batch's own threshold check would see them.
+	super::common::ensure_below_memory_threshold()?;
 	// Stored fields first. `value` still equals `record`, so it doubles as the
 	// snapshot that `each` expansion and the `$value` binding read.
 	let cut = filter_fields_by_permission_inner(
@@ -1193,6 +1233,9 @@ pub(crate) async fn materialise_fields_with_permissions(
 		let stored_view = stored_fields_view(state, value);
 		compute_fields_for_value_against(ctx, state, value, skip_fetch_perms, Some(stored_view))
 			.await?;
+		// The re-derived values are live now, and the computed fields' own
+		// clauses below may cut them.
+		super::common::ensure_below_memory_threshold()?;
 	}
 	// The computed fields' own clauses, against their final values. The
 	// snapshot is left implicit when a re-derivation ran, because `each` and
@@ -1648,6 +1691,34 @@ mod tests {
 		assert_eq!(batch.len(), 1);
 		assert_eq!(pick(&batch[0], "id"), val("t:1").await);
 		assert_eq!(pick(&batch[0], "doubled"), Value::from(6));
+	}
+
+	#[tokio::test]
+	async fn the_materialised_size_counts_rows_the_predicate_rejects() {
+		let db = TestDb::new(
+			"DEFINE TABLE t SCHEMALESS;
+			 DEFINE FIELD wide ON t COMPUTED array::repeat(0.5f, 1024);",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let field_state =
+			build_field_state(&ctx, &TableName::from("t"), false, None).await.unwrap();
+		let predicate = physical_expr("false", &ctx).await;
+		let mut pipeline = ScanPipeline::new(
+			PhysicalPermission::Allow,
+			Some(predicate),
+			field_state,
+			false,
+			None,
+			0,
+		);
+		let mut batch = rows(&["{ id: t:1 }", "{ id: t:2 }"]).await;
+		pipeline.process_batch(&mut batch, &ctx).await.unwrap();
+
+		assert!(batch.is_empty(), "the predicate rejects every row");
+		// Both rows held their computed field until the predicate dropped them.
+		let wide = std::mem::size_of::<Value>() * 1024;
+		assert!(pipeline.materialised_bytes() >= 2 * wide, "{}", pipeline.materialised_bytes());
 	}
 
 	#[tokio::test]

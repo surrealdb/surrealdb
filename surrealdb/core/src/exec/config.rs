@@ -13,11 +13,16 @@
 //! limits so both engines enforce one budget; those reads are downward from
 //! here and leave ownership untouched.
 
+use common::str::ParseBytes;
 use surrealdb_cnf as cnf;
 
 /// Default number of records a scan operator buffers before yielding a batch
 /// downstream. Overridable per deployment via the `scan_batch_size` key.
 const DEFAULT_SCAN_BATCH_SIZE: usize = 1000;
+
+/// Default approximate decoded size, in bytes, a byte-sized scan batch
+/// targets. Overridable per deployment via the `scan_batch_bytes` key.
+pub(crate) const DEFAULT_SCAN_BATCH_BYTES: usize = 2 << 20;
 
 /// Default row count below which a batch is evaluated one row at a time.
 ///
@@ -52,6 +57,15 @@ pub(crate) struct ExecConfig {
 	/// batch (dominant in `FullEdge` mode); the knob still scales that bound
 	/// linearly. (default: 1000)
 	pub scan_batch_size: usize,
+	/// Approximate decoded size, in bytes, of a batch from a scan that sizes
+	/// its batches by bytes as well as rows (bitmap resolves). Every operator
+	/// above a scan buffers whole batches, and the allocator keeps each worker
+	/// thread's freed batch memory, so a query's resident memory tracks this
+	/// budget times the threads that handle its batches. Lower it to bound
+	/// memory on small nodes; raise it to trade memory for fewer, larger
+	/// batches. Accepts a byte count or a size such as `512KiB`; zero and
+	/// unparseable values are ignored. (default: 2 MiB)
+	pub scan_batch_bytes: usize,
 	/// The maximum size of the priority queue triggering usage of the priority
 	/// queue for the result collector.
 	pub max_order_limit_priority_queue_size: u32,
@@ -113,6 +127,7 @@ impl Default for ExecConfig {
 			idiom_recursion_limit: 256,
 			operator_buffer_size: 2,
 			scan_batch_size: DEFAULT_SCAN_BATCH_SIZE,
+			scan_batch_bytes: DEFAULT_SCAN_BATCH_BYTES,
 			max_order_limit_priority_queue_size: 1000,
 			topk_threshold_pushdown_enabled: true,
 			gql_max_join_build_rows: 1_000_000,
@@ -130,6 +145,9 @@ impl cnf::Config for ExecConfig {
 		map.parse_key("max_computation_depth", &mut self.max_computation_depth)
 			.parse_key("operator_buffer_size", &mut self.operator_buffer_size)
 			.parse_key("scan_batch_size", &mut self.scan_batch_size)
+			.parse_key_with("scan_batch_bytes", &mut self.scan_batch_bytes, |x| {
+				x.parse_bytes::<usize>().ok().filter(|&n| n > 0)
+			})
 			.parse_key(
 				"max_order_limit_priority_queue_size",
 				&mut self.max_order_limit_priority_queue_size,
@@ -166,6 +184,18 @@ mod tests {
 		let map = ConfigMap::empty().with_key_value("topk_threshold_pushdown_enabled", "false");
 		config.parse(&map);
 		assert!(!config.topk_threshold_pushdown_enabled, "config map disables the feature");
+	}
+
+	/// The scan batch byte budget defaults to 2 MiB, parses a byte count or a
+	/// size with a suffix, and ignores zero.
+	#[test]
+	fn scan_batch_bytes_parses() {
+		let mut config = ExecConfig::default();
+		assert_eq!(config.scan_batch_bytes, 2 << 20);
+		config.parse(&ConfigMap::empty().with_key_value("scan_batch_bytes", "512KiB"));
+		assert_eq!(config.scan_batch_bytes, 512 << 10);
+		config.parse(&ConfigMap::empty().with_key_value("scan_batch_bytes", "0"));
+		assert_eq!(config.scan_batch_bytes, 512 << 10, "zero is ignored");
 	}
 
 	/// The fan-out threshold defaults to 4 and parses from the config map, which

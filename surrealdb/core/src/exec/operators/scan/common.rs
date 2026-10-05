@@ -9,9 +9,174 @@ use super::pipeline::{FieldState, build_field_state, materialise_fields_with_per
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, table_select_permission};
 use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr};
-use crate::expr::ControlFlow;
-use crate::kvs::{CachePolicy, Transaction};
+use crate::expr::{ControlFlow, FlowResult};
+use crate::kvs::{CachePolicy, DatastoreError, Transaction};
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
+
+/// Fail the query when the process is past `SURREAL_MEMORY_THRESHOLD`.
+///
+/// Scans that materialise records call this once per fetched batch, and
+/// again once computed fields have been materialised into its rows or records
+/// the transaction's cache shares have been cloned out of it, so a query that
+/// keeps decoding records fails with
+/// [`DatastoreError::QueryBeyondMemoryThreshold`] rather than growing the
+/// process until the operating system kills it. Without allocation tracking
+/// the threshold is never reached and this always returns `Ok`.
+pub(crate) fn ensure_below_memory_threshold() -> FlowResult<()> {
+	if crate::mem::ALLOC.is_beyond_threshold() {
+		return Err(ControlFlow::Err(anyhow::Error::new(
+			DatastoreError::QueryBeyondMemoryThreshold,
+		)));
+	}
+	Ok(())
+}
+
+/// A batch of records as a scan fetched it.
+pub(crate) struct FetchedBatch {
+	/// The records that passed the permission check, in fetch order.
+	pub(crate) values: Vec<Value>,
+	/// The approximate decoded size of every record the fetch decoded,
+	/// including those the permission check then dropped.
+	pub(crate) fetched_bytes: usize,
+	/// How many records the fetch decoded.
+	pub(crate) fetched_rows: usize,
+}
+
+/// Decoded bytes a probe batch assumes per row, before any row size is known.
+const PROBE_ROW_BYTES: usize = 64 << 10;
+
+/// The number of rows in the first batch of a scan sized to `budget` bytes.
+///
+/// No row size is known yet, so the probe assumes rows of
+/// `PROBE_ROW_BYTES`, about one 1024-float embedding decoded: a probe of such
+/// rows stays within `budget`, and a smaller budget takes a smaller probe.
+/// The result is never below 1 and never above `max_rows`.
+pub(crate) fn probe_batch_len(budget: usize, max_rows: usize) -> usize {
+	(budget / PROBE_ROW_BYTES).clamp(1, max_rows)
+}
+
+/// The number of rows the next batch may take so that a batch like the one
+/// just fetched stays near `budget` bytes.
+///
+/// A row's size is the average of `fetched_bytes` over `fetched_rows`: what
+/// the fetch held, rows a permission check then dropped included, so a batch
+/// whose survivors are narrow is not taken for a batch of narrow records.
+///
+/// The prediction describes the batch just fetched, not the next one, so the
+/// next batch is at most twice `current`, the length that batch was fetched
+/// with: a run of narrow records grows the batch gradually, and wide records
+/// that follow it are decoded in a batch no larger than twice the last one
+/// before the size shrinks again. The result is never below 1 and never above
+/// `max_rows`, so a batch never grows past the row cap it would have without a
+/// byte budget. A fetch that decoded no record says nothing about row size, so
+/// it keeps `current`.
+pub(crate) fn next_batch_len(
+	fetched_bytes: usize,
+	fetched_rows: usize,
+	current: usize,
+	budget: usize,
+	max_rows: usize,
+) -> usize {
+	if fetched_rows == 0 {
+		return current;
+	}
+	let per_row = (fetched_bytes / fetched_rows).max(1);
+	(budget / per_row).min(current.saturating_mul(2)).clamp(1, max_rows)
+}
+
+/// Approximate in-memory size of a decoded [`Value`], in bytes.
+///
+/// Counts one inline `Value` per node, plus the bytes of strings and byte
+/// buffers, a key slot and the key's bytes per object entry, a coordinate per
+/// geometry point, and the contents of record-id keys and ranges; any other
+/// variant counts only its inline size. It sizes
+/// batches, so it trades precision for a single pass with no allocation.
+/// Recursion is bounded by the value nesting limit enforced at decode.
+pub(crate) fn approx_value_size(value: &Value) -> usize {
+	let inline = std::mem::size_of::<Value>();
+	match value {
+		Value::String(s) => inline + s.len(),
+		Value::Bytes(b) => inline + b.0.len(),
+		Value::Array(a) => inline + a.iter().map(approx_value_size).sum::<usize>(),
+		Value::Set(s) => inline + s.0.iter().map(approx_value_size).sum::<usize>(),
+		Value::Object(o) => {
+			let entry = std::mem::size_of::<surrealdb_strand::Strand>();
+			inline + o.iter().map(|(k, v)| entry + k.len() + approx_value_size(v)).sum::<usize>()
+		}
+		Value::Geometry(g) => inline + geometry_heap_size(g),
+		Value::RecordId(rid) => inline + rid.table.as_str().len() + approx_key_size(&rid.key),
+		Value::Range(r) => {
+			inline
+				+ std::mem::size_of::<crate::val::Range>()
+				+ approx_bound_size(&r.start, approx_value_size)
+				+ approx_bound_size(&r.end, approx_value_size)
+		}
+		_ => inline,
+	}
+}
+
+/// The owned contents of a record-id key, beyond its inline size.
+fn approx_key_size(key: &RecordIdKey) -> usize {
+	match key {
+		RecordIdKey::Number(_) | RecordIdKey::Uuid(_) => 0,
+		RecordIdKey::String(s) => s.len(),
+		RecordIdKey::Array(a) => a.iter().map(approx_value_size).sum(),
+		RecordIdKey::Object(o) => o
+			.iter()
+			.map(|(k, v)| {
+				std::mem::size_of::<surrealdb_strand::Strand>() + k.len() + approx_value_size(v)
+			})
+			.sum(),
+		RecordIdKey::Range(r) => {
+			std::mem::size_of::<crate::val::RecordIdKeyRange>()
+				+ approx_bound_size(&r.start, approx_key_size)
+				+ approx_bound_size(&r.end, approx_key_size)
+		}
+	}
+}
+
+/// The size of a range bound's value, by `size`; 0 for an unbounded end.
+fn approx_bound_size<T>(bound: &std::ops::Bound<T>, size: fn(&T) -> usize) -> usize {
+	match bound {
+		std::ops::Bound::Included(v) | std::ops::Bound::Excluded(v) => size(v),
+		std::ops::Bound::Unbounded => 0,
+	}
+}
+
+/// The heap bytes a geometry owns beyond its inline size: its coordinate
+/// buffers and the containers holding its rings, lines, polygons and members,
+/// so a geometry of many empty parts is not taken for a narrow one.
+fn geometry_heap_size(geometry: &crate::val::Geometry) -> usize {
+	use std::mem::size_of;
+
+	use crate::val::Geometry;
+	fn line(line: &geo::LineString<f64>) -> usize {
+		size_of::<geo::Coord<f64>>() * line.0.len()
+	}
+	fn polygon(polygon: &geo::Polygon<f64>) -> usize {
+		line(polygon.exterior())
+			+ polygon
+				.interiors()
+				.iter()
+				.map(|ring| size_of::<geo::LineString<f64>>() + line(ring))
+				.sum::<usize>()
+	}
+	match geometry {
+		Geometry::Point(_) => 0,
+		Geometry::Line(l) => line(l),
+		Geometry::Polygon(p) => polygon(p),
+		Geometry::MultiPoint(m) => size_of::<geo::Point<f64>>() * m.0.len(),
+		Geometry::MultiLine(m) => {
+			m.0.iter().map(|l| size_of::<geo::LineString<f64>>() + line(l)).sum()
+		}
+		Geometry::MultiPolygon(m) => {
+			m.0.iter().map(|p| size_of::<geo::Polygon<f64>>() + polygon(p)).sum()
+		}
+		Geometry::Collection(c) => {
+			c.iter().map(|g| size_of::<Geometry>() + geometry_heap_size(g)).sum()
+		}
+	}
+}
 
 /// Convert a [`Value`] to a [`RecordIdKey`] for use in key range construction.
 ///
@@ -182,6 +347,7 @@ pub(crate) async fn resolve_record_batch(
 		.get_records(ns_id, db_id, rids, version, cache_policy)
 		.await
 		.context("Failed to fetch records")?;
+	ensure_below_memory_threshold()?;
 
 	// Per-table field state (computed fields + field-level SELECT
 	// permissions), built lazily and reused across the records of this batch.
@@ -245,6 +411,11 @@ pub(crate) async fn resolve_record_batch(
 			values.push(Value::RecordId(rid.clone()));
 		}
 	}
+	if fetch_full {
+		// Computed fields can make the materialised rows far wider than the
+		// records fetched above.
+		ensure_below_memory_threshold()?;
+	}
 	Ok(values)
 }
 
@@ -275,15 +446,83 @@ pub(crate) async fn fetch_and_filter_records_batch(
 	version: Option<u64>,
 	cache_policy: CachePolicy,
 ) -> Result<Vec<Value>, ControlFlow> {
+	let fetched = fetch_and_filter(
+		ctx,
+		txn,
+		ns_id,
+		db_id,
+		rids,
+		select_permission,
+		check_perms,
+		version,
+		cache_policy,
+		false,
+	)
+	.await?;
+	Ok(fetched.values)
+}
+
+/// As [`fetch_and_filter_records_batch`], also measuring every record the
+/// fetch decoded, for a scan that sizes its batches; see [`next_batch_len`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn fetch_and_filter_records_measured(
+	ctx: &ExecutionContext,
+	txn: &Transaction,
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	rids: &[RecordId],
+	select_permission: &crate::exec::permission::PhysicalPermission,
+	check_perms: bool,
+	version: Option<u64>,
+	cache_policy: CachePolicy,
+) -> Result<FetchedBatch, ControlFlow> {
+	fetch_and_filter(
+		ctx,
+		txn,
+		ns_id,
+		db_id,
+		rids,
+		select_permission,
+		check_perms,
+		version,
+		cache_policy,
+		true,
+	)
+	.await
+}
+
+/// The shared body of the fetch helpers above; `measure` fills
+/// [`FetchedBatch::fetched_bytes`], which is 0 otherwise.
+#[allow(clippy::too_many_arguments)]
+async fn fetch_and_filter(
+	ctx: &ExecutionContext,
+	txn: &Transaction,
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	rids: &[RecordId],
+	select_permission: &crate::exec::permission::PhysicalPermission,
+	check_perms: bool,
+	version: Option<u64>,
+	cache_policy: CachePolicy,
+	measure: bool,
+) -> Result<FetchedBatch, ControlFlow> {
 	let records = txn
 		.get_records(ns_id, db_id, rids, version, cache_policy)
 		.await
 		.context("Failed to fetch records")?;
+	ensure_below_memory_threshold()?;
 
 	let mut values = Vec::with_capacity(rids.len());
+	let mut fetched_bytes = 0;
+	let mut fetched_rows = 0;
+	let mut cloned = false;
 	for record in records {
 		if record.data.is_none() {
 			continue;
+		}
+		fetched_rows += 1;
+		if measure {
+			fetched_bytes += approx_value_size(&record.data);
 		}
 
 		if check_perms {
@@ -307,9 +546,126 @@ pub(crate) async fn fetch_and_filter_records_batch(
 		// otherwise fall back to cloning.
 		let value = match Arc::try_unwrap(record) {
 			Ok(rec) => rec.data,
-			Err(arc) => arc.data.clone(),
+			Err(arc) => {
+				cloned = true;
+				arc.data.clone()
+			}
 		};
 		values.push(value);
 	}
-	Ok(values)
+	if cloned {
+		// A record the transaction's cache still shares is cloned above, after
+		// the check that followed the fetch.
+		ensure_below_memory_threshold()?;
+	}
+	Ok(FetchedBatch {
+		values,
+		fetched_bytes,
+		fetched_rows,
+	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	const MAX_ROWS: usize = 1000;
+
+	fn bytes(rows: &[Value]) -> usize {
+		rows.iter().map(approx_value_size).sum()
+	}
+
+	#[test]
+	fn a_record_id_counts_its_key() {
+		let key = RecordIdKey::Array(vec![Value::from("x".repeat(4096))].into());
+		let rid = Value::RecordId(RecordId {
+			table: "t".into(),
+			key,
+		});
+		assert!(approx_value_size(&rid) > 4096, "a wide compound key is sized by its contents");
+	}
+
+	fn row_with_floats(n: usize) -> Value {
+		Value::from(vec![Value::from(0.5f64); n])
+	}
+
+	#[test]
+	fn an_empty_previous_batch_keeps_the_row_cap() {
+		assert_eq!(next_batch_len(0, 0, MAX_ROWS, 1 << 20, MAX_ROWS), MAX_ROWS);
+	}
+
+	#[test]
+	fn narrow_rows_keep_the_row_cap() {
+		let rows = vec![Value::from("narrow"); 10];
+		assert_eq!(next_batch_len(bytes(&rows), rows.len(), 600, 8 << 20, MAX_ROWS), MAX_ROWS);
+	}
+
+	#[test]
+	fn the_probe_follows_the_budget() {
+		assert_eq!(probe_batch_len(2 << 20, 32), 32);
+		assert_eq!(probe_batch_len(256 << 10, 32), 4);
+		assert_eq!(probe_batch_len(8 << 20, 32), 32);
+		assert_eq!(probe_batch_len(1, 32), 1);
+	}
+
+	#[test]
+	fn a_batch_at_most_doubles() {
+		let rows = vec![Value::from("narrow"); 10];
+		assert_eq!(next_batch_len(bytes(&rows), rows.len(), 32, 8 << 20, MAX_ROWS), 64);
+	}
+
+	#[test]
+	fn wide_rows_shrink_the_batch_to_the_budget() {
+		let rows = vec![row_with_floats(1024); 4];
+		let per_row = approx_value_size(&rows[0]);
+		assert_eq!(per_row, std::mem::size_of::<Value>() * 1025);
+		assert_eq!(
+			next_batch_len(bytes(&rows), rows.len(), MAX_ROWS, 8 << 20, MAX_ROWS),
+			(8 << 20) / per_row
+		);
+	}
+
+	#[test]
+	fn a_row_wider_than_the_budget_still_takes_one_row() {
+		let rows = vec![row_with_floats(1024)];
+		assert_eq!(next_batch_len(bytes(&rows), rows.len(), 32, 1, MAX_ROWS), 1);
+	}
+
+	#[test]
+	fn an_empty_batch_keeps_the_current_length() {
+		assert_eq!(next_batch_len(0, 0, 31, 2 << 20, MAX_ROWS), 31);
+	}
+
+	#[test]
+	fn a_geometry_counts_its_containers() {
+		let empty = || geo::Polygon::new(geo::LineString::<f64>::new(vec![]), vec![]);
+		let members: Vec<crate::val::Geometry> =
+			(0..5000).map(|_| crate::val::Geometry::Polygon(empty())).collect();
+		let collection = Value::Geometry(crate::val::Geometry::Collection(members));
+		assert!(
+			approx_value_size(&collection) >= 5000 * std::mem::size_of::<crate::val::Geometry>(),
+			"a collection of 5000 empty polygons is sized by its members"
+		);
+		let rings: Vec<geo::LineString<f64>> =
+			(0..5000).map(|_| geo::LineString::new(vec![])).collect();
+		let polygon = Value::Geometry(crate::val::Geometry::Polygon(geo::Polygon::new(
+			geo::LineString::new(vec![]),
+			rings,
+		)));
+		assert!(
+			approx_value_size(&polygon) >= 5000 * std::mem::size_of::<geo::LineString<f64>>(),
+			"a polygon of 5000 empty interior rings is sized by its rings"
+		);
+	}
+
+	#[test]
+	fn a_geometry_counts_its_coordinates() {
+		let ring: Vec<(f64, f64)> = (0..5000).map(|i| (i as f64, 0.0)).collect();
+		let polygon =
+			Value::Geometry(crate::val::Geometry::Polygon(geo::Polygon::new(ring.into(), vec![])));
+		assert!(
+			approx_value_size(&polygon) >= 5000 * std::mem::size_of::<geo::Coord<f64>>(),
+			"a 5000-point polygon is sized by its coordinates"
+		);
+	}
 }
