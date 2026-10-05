@@ -73,7 +73,7 @@ pub struct Environment {
 impl Default for Environment {
 	fn default() -> Self {
 		Self {
-			sys: System::new_all(),
+			sys: System::new(),
 			#[cfg(target_family = "wasm")]
 			pid: 0.into(),
 			#[cfg(not(target_family = "wasm"))]
