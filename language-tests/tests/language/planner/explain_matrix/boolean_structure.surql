@@ -8,19 +8,17 @@ Plan and row coverage for the BOOLEAN STRUCTURE of a WHERE clause: the index set
 
 planner-strategy is narrowed because a prefix EXPLAIN errors under compute-only. Both streaming strategies are pinned rather than one: they plan identically by contract, so recording both states that intent and costs nothing.
 
-ONE SHAPE RETURNS A WRONG ANSWER AND IS PINNED AS WRONG. `plain = ['red', 'blue'] AND b = true` -- whole-array equality against the array's own value, on a column indexed as a bare `FIELDS plain`, fused with an indexed scalar -- builds a BitmapAnd over idx_b and idx_plain and returns [], losing bs:1, while the WITH NOINDEX oracle returns it. idx_plain holds one entry per element, so the whole-array key the seek asks for is not in it; fusing the leaf into a bitmap intersection neither hides nor repairs the loss, which is what this file adds. Correct answer: [{ id: bs:1 }]. Correct behaviour is either to decline the leaf on this index shape -- which is exactly what the `tags[*]` spelling does with the identical comparison, answering it by scan and returning bs:1, pinned here as the contrast -- or to hold the key the seek asks for. The leaf on its own, and its count() form, belong to the fan-out key model and are pinned once, in array_fanout_oracle.surql.
+One behaviour is intended though it reads like a missed fast path: `plain CONTAINS 'red'` scans the table in every boolean position, while the same shapes over `tags`, indexed as `tags[*]`, fuse and seek. A bare-column index is planned as the element column it behaves as, which keeps whole-array comparisons off its entries, but is never sought for containment, because nothing shows that every value it stores is an array.
 
-Every other shape agrees with the oracle. Two of them emit the same rows in a different order from the oracle because the query has no ORDER BY and the index scan emits in key order, which is not a defect. Five further defects are plan-level only — the rows stay correct, so nothing but the plan assertion would notice them — and are likewise recorded as they currently behave, not as they should:
+Every shape agrees with the oracle. Two of them emit the same rows in a different order from the oracle because the query has no ORDER BY and the index scan emits in key order, which is not a defect. Four defects are plan-level only — the rows stay correct, so nothing but the plan assertion would notice them — and are likewise recorded as they currently behave, not as they should:
 
 1. NOT and ! are the same operator but do not plan the same. Around a standalone leaf the keyword renders `not(...)` and gives up the pre-decode filter (`pre_decode_filter: no (unsupported predicate)`), while the symbol renders `! a = 'x'` and keeps it (`pre_decode_filter: yes`). Correct behaviour is one plan for both spellings, with the pre-decode filter applied.
 
 2. A double negation is not folded back to its positive leaf. Both `NOT (NOT (a = 'x'))` and `!(!(a = 'x'))` scan the table, and the keyword form also loses the pre-decode filter. Correct behaviour is to fold to `a = 'x'` and seek idx_a.
 
-3. An index declared on a bare array column is unreachable by every element test. idx_plain holds one entry per element of `plain`, yet `plain CONTAINS 'red'` scans the table in every boolean position, while the same shapes over `tags`, indexed as `tags[*]`, fuse and seek correctly. Correct behaviour is for CONTAINS to use the per-element entries under both index spellings. This is the same index shape as the wrong answer above, seen from the opposite side: the element test that the entries would serve is declined, and the whole-array test that they cannot serve is accepted.
+3. The index-only count fast path covers AND and AND-NOT fusion but not union. A count over a fused BitmapOr, and a count over a UnionIndexScan of two branches of one index, both fall back to Aggregate over a resolved candidate set even though the union is exact and its cardinality is available. The counts are correct; the fast path is simply not taken.
 
-4. The index-only count fast path covers AND and AND-NOT fusion but not union. A count over a fused BitmapOr, and a count over a UnionIndexScan of two branches of one index, both fall back to Aggregate over a resolved candidate set even though the union is exact and its cardinality is available. The counts are correct; the fast path is simply not taken.
-
-5. An OR of two conjunctions does not fuse per branch. `(a = 'x' AND b = true) OR (a = 'y' AND b = false)` unions idx_a on both branches and keeps both `b` conjuncts as one residual Filter, instead of intersecting each branch and unioning the two results.
+4. An OR of two conjunctions does not fuse per branch. `(a = 'x' AND b = true) OR (a = 'y' AND b = false)` unions idx_a on both branches and keeps both `b` conjuncts as one residual Filter, instead of intersecting each branch and unioning the two results.
 """
 
 [[test.results]]
@@ -670,7 +668,7 @@ value = "[{ count: 5 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_plain, access: = 'red', direction: Forward, predicate: plain = 'red']
+    TableScan [ctx: Db] [table: bs, direction: Forward, predicate: plain = 'red', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -682,11 +680,8 @@ value = "[]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: plain = 'red' AND b = true]
-        BitmapResolve [ctx: Db] [table: bs]
-            BitmapAnd [ctx: Db]
-                BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
-                BitmapIndexScan [ctx: Db] [index: idx_plain, access: = 'red']
+    Filter [ctx: Db] [predicate: plain = 'red']
+        IndexScan [ctx: Db] [index: idx_b, access: = true, direction: Forward]
 "'''
 
 [[test.results]]
@@ -698,11 +693,8 @@ value = "[]"
 [[test.results]]
 value = '''
 "Aggregate [ctx: Db] [mode: GROUP ALL]
-    Filter [ctx: Db] [predicate: plain = 'red' AND b = true]
-        BitmapResolve [ctx: Db] [table: bs]
-            BitmapAnd [ctx: Db]
-                BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
-                BitmapIndexScan [ctx: Db] [index: idx_plain, access: = 'red']
+    Filter [ctx: Db] [predicate: plain = 'red']
+        IndexScan [ctx: Db] [index: idx_b, access: = true, direction: Forward]
 "'''
 
 [[test.results]]
@@ -714,15 +706,12 @@ value = "[{ count: 0 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: plain = ['red', 'blue'] AND b = true]
-        BitmapResolve [ctx: Db] [table: bs]
-            BitmapAnd [ctx: Db]
-                BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
-                BitmapIndexScan [ctx: Db] [index: idx_plain, access: = ['red', 'blue']]
+    Filter [ctx: Db] [predicate: plain = ['red', 'blue']]
+        IndexScan [ctx: Db] [index: idx_b, access: = true, direction: Forward]
 "'''
 
 [[test.results]]
-value = "[]"
+value = "[{ id: bs:1 }]"
 
 [[test.results]]
 value = "[{ id: bs:1 }]"
@@ -975,11 +964,13 @@ SELECT count() FROM bs WITH NOINDEX WHERE b = true AND NOT (tags CONTAINS 'red')
 
 -- The same fan-out shapes against `plain`, whose index is declared on the bare
 -- column rather than on `plain[*]`. The index still holds one entry per element,
--- but no element test reaches it: CONTAINS is not an indexable leaf on this
--- index shape in any boolean position, so every shape below degrades to a table
--- scan while the identical shapes over `tags` fuse and seek. That contrast is
--- what makes this a defect rather than a limitation, and it is recorded as it
--- behaves: boolean structure cannot rescue an unindexable leaf.
+-- and `plain` is declared `array<string>`, so the column is planned as the
+-- element column it behaves as — but it is not sought for containment: a
+-- declared kind does not show that every stored value is an array (records
+-- written before it, or imported, are not coerced), and a string stored whole
+-- holds substrings no element seek reaches. CONTAINS over it is answered from
+-- the document in every boolean position, while the identical shapes over
+-- `tags`, declared as `tags[*]`, seek and fuse.
 EXPLAIN SELECT id FROM bs WHERE plain CONTAINS 'red';
 SELECT id FROM bs WHERE plain CONTAINS 'red';
 SELECT id FROM bs WITH NOINDEX WHERE plain CONTAINS 'red';
@@ -999,22 +990,11 @@ EXPLAIN SELECT count() FROM bs WHERE plain CONTAINS 'red' OR b = false GROUP ALL
 SELECT count() FROM bs WHERE plain CONTAINS 'red' OR b = false GROUP ALL;
 SELECT count() FROM bs WITH NOINDEX WHERE plain CONTAINS 'red' OR b = false GROUP ALL;
 
--- Whole-array equality is the one leaf shape that does reach a bare-column
--- index over an array, and it has two halves that behave differently. Against a
--- scalar the comparison is false for every array value: the scan narrows to the
--- element key and the re-checked `predicate:` then rejects the row, so index and
--- oracle agree on the empty answer. The shape is recorded so that a change
--- letting the index answer it without the re-check would be caught as the wrong
--- answer it would be.
---
--- Against the array's own value the answer is WRONG, and the last shape below
--- is that wrong answer fused into a bitmap intersection: `plain = ['red',
--- 'blue'] AND b = true` builds a BitmapAnd over idx_b and idx_plain and still
--- returns [], because the seek asks for a key the per-element fan-out never
--- wrote. Correct answer: [{ id: bs:1 }], which the oracle returns. The leaf on
--- its own, and its count() form, are pinned in array_fanout_oracle.surql, which
--- owns the fan-out key model; what this file adds is that no boolean position
--- around the leaf repairs the loss.
+-- Whole-array equality is not an access an element column offers, so on the
+-- bare-column index it is left to the scan as it is on `tags[*]`. Against a
+-- scalar the comparison is false for every array value and the answer is
+-- empty; against the array's own value it is bs:1, and in both cases the
+-- other conjunct's index drives the scan beneath a Filter that decides.
 EXPLAIN SELECT id FROM bs WHERE plain = 'red';
 SELECT id FROM bs WHERE plain = 'red';
 SELECT id FROM bs WITH NOINDEX WHERE plain = 'red';

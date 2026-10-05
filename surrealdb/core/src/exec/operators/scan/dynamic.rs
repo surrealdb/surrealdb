@@ -10,10 +10,13 @@ use super::pipeline::{
 	table_read_restricted_fields,
 };
 use super::{FullTextScan, IndexScan, KnnScan};
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, Error, NamespaceId, table_select_permission};
 use crate::err::EngineError;
-use crate::exec::index::access_path::{AccessPath, select_access_path};
-use crate::exec::index::analysis::IndexAnalyzer;
+use crate::exec::index::access_path::{
+	AccessPath, ElementColumns, may_have_array_columns, select_access_path,
+	with_array_columns_as_elements, without_btree_indexes,
+};
 use crate::exec::operators::scan::pipeline::ScanPipeline;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
@@ -648,6 +651,11 @@ fn order_touches_restricted_select_field(
 /// value the actor may not read. Withholding the index leaves the predicate to
 /// be answered from the reduced document.
 ///
+/// A column is governed at, beneath or above a restricted field: an ancestor's
+/// reduction reaches the column, and a column over an ancestor stores the
+/// restricted descendant's values as entries (an index on `acl` holds the
+/// elements a restricted `acl.*` hides).
+///
 /// `field_permissions` is empty when permission enforcement is skipped
 /// (owner/root), so a privileged actor never matches here. Mirrors the
 /// plan-time `RestrictedPrefixes::index_touches` guard in `planner/select`.
@@ -658,8 +666,11 @@ fn index_touches_restricted_select_field(
 	if field_permissions.is_empty() {
 		return false;
 	}
-	cols.iter()
-		.any(|col| field_permissions.iter().any(|(field, _)| col.starts_with(field.0.as_slice())))
+	cols.iter().any(|col| {
+		field_permissions
+			.iter()
+			.any(|(field, _)| crate::exec::planner::util::paths_overlap(&col.0, &field.0))
+	})
 }
 
 /// Configuration bundle for [`resolve_table_scan_stream`].
@@ -806,8 +817,27 @@ async fn resolve_table_scan_stream(
 		} else {
 			indexes
 		};
+		// A column that stores array elements is planned as the element
+		// column it behaves as, as the static planner does. Without the field
+		// list no column can be classified, so the b-tree indexes are
+		// withheld and the scan answers.
+		let columns = if may_have_array_columns(&indexes) {
+			match txn.all_tb_fields(cfg.ns_id, cfg.db_id, &cfg.table_name, version_stamp).await {
+				Ok(fields) => with_array_columns_as_elements(indexes, &fields),
+				Err(e) => {
+					tracing::warn!(
+						table = %cfg.table_name,
+						error = %e,
+						"field list failed in DynamicScan; planning without b-tree indexes",
+					);
+					ElementColumns::unchanged(without_btree_indexes(indexes))
+				}
+			}
+		} else {
+			ElementColumns::unchanged(indexes)
+		};
 
-		let analyzer = IndexAnalyzer::new(indexes, cfg.with.as_ref());
+		let analyzer = columns.analyzer(cfg.with.as_ref());
 		let candidates = analyzer.analyze(resolved_cond.as_ref(), cfg.order.as_ref());
 		if candidates.is_empty() {
 			// No single-index candidates -- try multi-index union for OR conditions
@@ -981,7 +1011,6 @@ async fn resolve_table_scan_stream(
 			// would be wrong-empty, and a runtime-resolved source cannot fall
 			// back to the legacy collectors.
 			{
-				use crate::catalog::providers::TableProvider;
 				if txn.get_tb(cfg.ns_id, cfg.db_id, &cfg.table_name, None).await?.is_some_and(
 					|def| crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some(),
 				) {

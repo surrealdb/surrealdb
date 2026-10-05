@@ -7,10 +7,10 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use super::IndexCandidate;
-use crate::catalog::IndexDefinition;
+use crate::catalog::{FieldDefinition, Index, IndexDefinition};
 use crate::expr::operator::MatchesOperator;
 use crate::expr::with::With;
-use crate::expr::{BinaryOperator, Cond, Idiom, Part};
+use crate::expr::{BinaryOperator, Cond, Idiom, Kind, KindLiteral, Part};
 use crate::kvs::Direction;
 use crate::val::{Number, Range, Value};
 
@@ -376,6 +376,201 @@ pub(crate) fn access_fans_out(cols: &[Idiom], access: &BTreeAccess) -> bool {
 	cols.iter().skip(pinned).any(|c| c.0.iter().any(|p| matches!(p, Part::All)))
 }
 
+/// `indexes` as access-path selection has to see them: every b-tree column
+/// whose declared kind holds only arrays is spelled as the element column it
+/// behaves as, and reported in [`ElementColumns::rewritten`].
+///
+/// The index writer expands an array value into one entry per element in any
+/// column whose idiom does not end in a flatten, so `FIELDS tags` stores what
+/// `FIELDS tags.*` stores whenever `tags` holds an array. Each entry then
+/// carries one element, not the value a comparison reads, and the planner's
+/// fan-out rules all key off `*` in the column: which predicates the column
+/// answers (containment, not equality or ranges over the whole value),
+/// whether a scan needs a record dedupe, which ordering it claims, and whether
+/// counting its entries counts rows. Appending `*` to such a column puts it
+/// under those rules.
+///
+/// Only a column whose declared kind admits nothing but arrays, `NONE` and
+/// `NULL` is rewritten. The kind is the column's own field definition, or the
+/// object literal type of a declared ancestor (`metadata TYPE { tags:
+/// array<string> }` declares `metadata.tags`). A column already holding `*`
+/// or a flatten is left alone: `items[*].tags` stores each item's array whole,
+/// one entry per item, so its entries are not the arrays' elements. A kind
+/// that also admits a scalar (`any`, or a union such as
+/// `array<string> | string`) is taken as written, as is a column no
+/// declaration reaches. A set is a distinct value the writer stores whole, so
+/// `set<…>` is taken as written too.
+///
+/// A rewritten column is not one a containment leaf may seek. A declared kind
+/// is not a guarantee about stored records: `DEFINE FIELD` does not rewrite the
+/// records already there and an import skips coercion, so a string stored
+/// before the kind was declared stays indexed whole, and `CONTAINS` on it is a
+/// substring test an element seek cannot answer. The analyzer is given the
+/// rewritten columns (see [`ElementColumns::analyzer`]) and answers
+/// containment over them by scan; an index declared over elements (`tags.*`)
+/// is what serves containment from the index.
+///
+/// The rewrite is for planning only. Scans encode their keys from the index id
+/// and the query's values; the column idioms reach execution only as the
+/// ordering and constant-field claims, which this makes accurate. Returns
+/// `indexes` itself when no column changes.
+pub(crate) fn with_array_columns_as_elements(
+	indexes: Arc<[IndexDefinition]>,
+	fields: &[FieldDefinition],
+) -> ElementColumns {
+	let as_elements = |col: &Idiom| -> bool {
+		!col.0.iter().any(|p| matches!(p, Part::All | Part::Flatten))
+			&& declared_kind(col, fields).is_some_and(kind_holds_only_arrays)
+	};
+	// Built only once a column changes, so an unchanged list is neither
+	// cloned nor reallocated. The definitions and their rewritten-column flags
+	// are pushed together, so the two stay aligned index for index.
+	let mut changed: Option<(Vec<IndexDefinition>, Vec<ColumnFlags>)> = None;
+	for (i, ix) in indexes.iter().enumerate() {
+		let flags: Box<[bool]> = if matches!(ix.index, Index::Idx | Index::Uniq) {
+			ix.cols.iter().map(as_elements).collect()
+		} else {
+			Box::default()
+		};
+		if flags.contains(&true) {
+			let (defs, masks) = changed.get_or_insert_with(|| {
+				(indexes[..i].to_vec(), indexes[..i].iter().map(|_| Box::default()).collect())
+			});
+			let mut cols = ix.cols.clone();
+			for (col, _) in cols.iter_mut().zip(flags.iter()).filter(|(_, rewrite)| **rewrite) {
+				col.0.push(Part::All);
+			}
+			defs.push(IndexDefinition {
+				cols,
+				..ix.clone()
+			});
+			masks.push(flags);
+		} else if let Some((defs, masks)) = changed.as_mut() {
+			defs.push(ix.clone());
+			masks.push(Box::default());
+		}
+	}
+	match changed {
+		Some((defs, masks)) => ElementColumns {
+			indexes: defs.into(),
+			rewritten: Some(masks.into()),
+		},
+		None => ElementColumns::unchanged(indexes),
+	}
+}
+
+/// One index's per-column flags: whether each column was rewritten.
+pub(crate) type ColumnFlags = Box<[bool]>;
+
+/// What [`with_array_columns_as_elements`] made of a table's indexes.
+pub(crate) struct ElementColumns {
+	/// The indexes, with every rewritten column spelled with `*`.
+	pub(crate) indexes: Arc<[IndexDefinition]>,
+	/// Per index, in order, whether each column was rewritten; a column past
+	/// the end of its index's flags was not. `None` when none was.
+	pub(crate) rewritten: Option<Arc<[ColumnFlags]>>,
+}
+
+impl ElementColumns {
+	/// The indexes unchanged, for a caller that rewrites nothing.
+	pub(crate) fn unchanged(indexes: Arc<[IndexDefinition]>) -> Self {
+		Self {
+			indexes,
+			rewritten: None,
+		}
+	}
+
+	/// An analyzer over these indexes that does not seek a rewritten column
+	/// for containment.
+	pub(crate) fn analyzer<'a>(
+		&self,
+		with: Option<&'a With>,
+	) -> crate::exec::index::analysis::IndexAnalyzer<'a> {
+		let analyzer =
+			crate::exec::index::analysis::IndexAnalyzer::new(Arc::clone(&self.indexes), with);
+		match &self.rewritten {
+			Some(rewritten) => analyzer.without_containment_on(Arc::clone(rewritten)),
+			None => analyzer,
+		}
+	}
+}
+
+/// Whether [`with_array_columns_as_elements`] could change any of `indexes`:
+/// some b-tree index has a column holding neither `*` nor a flatten. Callers
+/// skip reading the field list when it could not.
+pub(crate) fn may_have_array_columns(indexes: &[IndexDefinition]) -> bool {
+	indexes.iter().any(|ix| {
+		matches!(ix.index, Index::Idx | Index::Uniq)
+			&& ix.cols.iter().any(|c| !c.0.iter().any(|p| matches!(p, Part::All | Part::Flatten)))
+	})
+}
+
+/// `indexes` without its b-tree indexes, for a caller that cannot tell which
+/// of their columns store array elements: a b-tree access path planned
+/// without that knowledge can count, order or seek element entries as whole
+/// values.
+pub(crate) fn without_btree_indexes(indexes: Arc<[IndexDefinition]>) -> Arc<[IndexDefinition]> {
+	if !indexes.iter().any(|ix| matches!(ix.index, Index::Idx | Index::Uniq)) {
+		return indexes;
+	}
+	indexes.iter().filter(|ix| !matches!(ix.index, Index::Idx | Index::Uniq)).cloned().collect()
+}
+
+/// The kind declared for the value at `col`: the kind of the field named
+/// `col`, or, when that field declares no kind or only an ancestor is
+/// declared, the kind the ancestor's object literal type gives the remaining
+/// path. `None` when no declaration reaches it.
+fn declared_kind<'a>(col: &Idiom, fields: &'a [FieldDefinition]) -> Option<&'a Kind> {
+	// A definition of the column itself that declares no kind leaves the
+	// ancestor's type in force: the parent still coerces the value.
+	if let Some(kind) =
+		fields.iter().find(|fd| &fd.name == col).and_then(|fd| fd.field_kind.as_ref())
+	{
+		return Some(kind);
+	}
+	(1..col.0.len()).rev().find_map(|n| {
+		let fd = fields.iter().find(|fd| fd.name.0.as_slice() == &col.0[..n])?;
+		col.0[n..].iter().try_fold(fd.field_kind.as_ref()?, |kind, part| match part {
+			Part::Field(name) => object_literal_field(kind, name.as_str()),
+			_ => None,
+		})
+	})
+}
+
+/// The kind an object literal type (or one made optional) declares for
+/// `name`. A `NONE` or `NULL` parent reads its fields as `NONE`, which the
+/// field's own kind need not admit, so only the literal's declaration is
+/// returned; any other alternative leaves the field's kind unknown.
+fn object_literal_field<'a>(kind: &'a Kind, name: &str) -> Option<&'a Kind> {
+	match kind {
+		Kind::Literal(KindLiteral::Object(fields)) => fields.get(name),
+		Kind::Either(kinds) => {
+			let mut objects = kinds.iter().filter(|k| !matches!(k, Kind::None | Kind::Null));
+			match (objects.next(), objects.next()) {
+				(Some(object), None) => object_literal_field(object, name),
+				_ => None,
+			}
+		}
+		_ => None,
+	}
+}
+
+/// Whether every value of `kind` is a `Value::Array`, `NONE` or `NULL`, and
+/// some value is an array. Unions are read through at any depth.
+fn kind_holds_only_arrays(kind: &Kind) -> bool {
+	/// `None` when some value of `kind` is neither an array, `NONE` nor
+	/// `NULL`; otherwise whether some value is an array.
+	fn arrays(kind: &Kind) -> Option<bool> {
+		match kind {
+			Kind::Array(..) | Kind::Literal(KindLiteral::Array(_)) => Some(true),
+			Kind::None | Kind::Null => Some(false),
+			Kind::Either(kinds) => kinds.iter().try_fold(false, |seen, k| Some(arrays(k)? || seen)),
+			_ => None,
+		}
+	}
+	arrays(kind) == Some(true)
+}
+
 /// The order a b-tree scan over `access` yields its rows in, stated as the
 /// sort properties an ORDER BY is matched against.
 ///
@@ -536,6 +731,8 @@ mod tests {
 	//! - [`residual`] — which WHERE conjuncts the chosen shape lets the planner drop from the
 	//!   residual filter. Both directions matter: keeping a covered leaf only costs time, dropping
 	//!   an uncovered one returns wrong rows.
+	//! - [`array_columns`] — which b-tree columns `with_array_columns_as_elements` plans as element
+	//!   columns, from the field kinds declared for them.
 
 	use std::str::FromStr;
 
@@ -1166,6 +1363,227 @@ mod tests {
 				ef: 10,
 			};
 			assert_eq!(residual("a = 5", &knn, &["a"]), Some("a = 5".to_owned()));
+		}
+	}
+
+	mod array_columns {
+		use super::*;
+
+		fn field(name: &str, kind: Option<Kind>) -> FieldDefinition {
+			FieldDefinition {
+				name: Idiom::from_str(name).expect("valid idiom"),
+				field_kind: kind,
+				..Default::default()
+			}
+		}
+
+		/// The columns of the first index after the rewrite, as SurrealQL.
+		fn planned(cols: &[&str], kind: Index, fields: &[FieldDefinition]) -> Vec<String> {
+			let indexes: Arc<[IndexDefinition]> = vec![idx_def(1, "ix", cols, kind)].into();
+			with_array_columns_as_elements(indexes, fields).indexes[0]
+				.cols
+				.iter()
+				.map(|c| c.to_sql())
+				.collect()
+		}
+
+		fn array_of_strings() -> Kind {
+			Kind::Array(Box::new(Kind::String), None)
+		}
+
+		#[test]
+		fn a_column_whose_kind_holds_only_arrays_is_planned_as_its_elements() {
+			let kinds = [
+				array_of_strings(),
+				Kind::Either(vec![Kind::None, array_of_strings()]),
+				Kind::Either(vec![Kind::None, Kind::Null, array_of_strings()]),
+				Kind::Literal(KindLiteral::Array(vec![Kind::String])),
+			];
+			for kind in kinds {
+				let fields = [field("acl", Some(kind.clone()))];
+				assert_eq!(planned(&["acl"], Index::Idx, &fields), ["acl.*"], "{kind:?}");
+				assert_eq!(planned(&["acl"], Index::Uniq, &fields), ["acl.*"], "{kind:?}");
+			}
+		}
+
+		#[test]
+		fn only_the_columns_that_admit_an_array_change() {
+			let fields =
+				[field("acl", Some(array_of_strings())), field("name", Some(Kind::String))];
+			assert_eq!(planned(&["name", "acl"], Index::Idx, &fields), ["name", "acl.*"]);
+		}
+
+		#[test]
+		fn a_column_that_can_store_a_whole_value_is_taken_as_written() {
+			let kinds = [
+				Kind::String,
+				Kind::Either(vec![Kind::None, Kind::Int]),
+				// A set is stored whole, not one entry per element.
+				Kind::Set(Box::new(Kind::String), None),
+				Kind::Object,
+				// A kind that also admits a scalar: a string is stored whole, so an
+				// element seek misses the substring `CONTAINS` finds in it.
+				Kind::Any,
+				Kind::Either(vec![Kind::String, array_of_strings()]),
+				Kind::Either(vec![Kind::None, Kind::Null]),
+			];
+			for kind in kinds {
+				let fields = [field("acl", Some(kind.clone()))];
+				assert_eq!(planned(&["acl"], Index::Idx, &fields), ["acl"], "{kind:?}");
+			}
+		}
+
+		#[test]
+		fn an_undeclared_kind_is_taken_as_written() {
+			assert_eq!(planned(&["acl"], Index::Idx, &[field("acl", None)]), ["acl"]);
+			assert_eq!(planned(&["acl"], Index::Idx, &[]), ["acl"]);
+		}
+
+		#[test]
+		fn a_column_already_over_elements_or_flattened_is_taken_as_written() {
+			let fields = [field("acl", Some(array_of_strings()))];
+			let fields_flat = [field("acl…", Some(array_of_strings()))];
+			assert_eq!(planned(&["acl.*"], Index::Idx, &fields), ["acl.*"]);
+			assert_eq!(planned(&["acl…"], Index::Idx, &fields_flat), ["acl…"]);
+		}
+
+		#[test]
+		fn only_btree_indexes_are_rewritten() {
+			let fields = [field("acl", Some(array_of_strings()))];
+			assert_eq!(planned(&["acl"], Index::Count(None), &fields), ["acl"]);
+		}
+
+		#[test]
+		fn a_union_is_read_through_at_any_depth() {
+			let nested = Kind::Either(vec![
+				Kind::None,
+				Kind::Either(vec![array_of_strings(), Kind::Array(Box::new(Kind::Int), None)]),
+			]);
+			assert_eq!(planned(&["acl"], Index::Idx, &[field("acl", Some(nested))]), ["acl.*"]);
+			let nested_scalar = Kind::Either(vec![
+				array_of_strings(),
+				Kind::Either(vec![Kind::None, Kind::String]),
+			]);
+			assert_eq!(
+				planned(&["acl"], Index::Idx, &[field("acl", Some(nested_scalar))]),
+				["acl"]
+			);
+		}
+
+		#[test]
+		fn an_ancestor_object_literal_declares_the_column_kind() {
+			let object = |kind: Kind| {
+				Kind::Literal(KindLiteral::Object(
+					[(Strand::from("tags"), kind)].into_iter().collect(),
+				))
+			};
+			let declared = [field("metadata", Some(object(array_of_strings())))];
+			assert_eq!(planned(&["metadata.tags"], Index::Idx, &declared), ["metadata.tags.*"]);
+			// An optional parent reads its fields as NONE, which an element
+			// column stores as the column does.
+			let optional = [field(
+				"metadata",
+				Some(Kind::Either(vec![Kind::None, object(array_of_strings())])),
+			)];
+			assert_eq!(planned(&["metadata.tags"], Index::Idx, &optional), ["metadata.tags.*"]);
+			let scalar = [field("metadata", Some(object(Kind::String)))];
+			assert_eq!(planned(&["metadata.tags"], Index::Idx, &scalar), ["metadata.tags"]);
+			// A plain `object` declares nothing about its fields.
+			let opaque = [field("metadata", Some(Kind::Object))];
+			assert_eq!(planned(&["metadata.tags"], Index::Idx, &opaque), ["metadata.tags"]);
+			// The column's own definition wins over its ancestor's literal.
+			let both = [
+				field("metadata", Some(object(array_of_strings()))),
+				field("metadata.tags", Some(Kind::String)),
+			];
+			assert_eq!(planned(&["metadata.tags"], Index::Idx, &both), ["metadata.tags"]);
+			// A definition of the column that declares no kind leaves the
+			// ancestor's literal in force.
+			let untyped_child =
+				[field("metadata", Some(object(array_of_strings()))), field("metadata.tags", None)];
+			assert_eq!(
+				planned(&["metadata.tags"], Index::Idx, &untyped_child),
+				["metadata.tags.*"]
+			);
+		}
+
+		#[test]
+		fn a_column_through_an_element_path_is_taken_as_written() {
+			// `items[*].tags` stores each item's array whole, one entry per
+			// item, so its entries are arrays rather than their elements.
+			let fields = [field("items[*].tags", Some(array_of_strings()))];
+			assert_eq!(planned(&["items[*].tags"], Index::Idx, &fields), ["items.*.tags"]);
+		}
+
+		#[test]
+		fn a_partly_rewritten_list_keeps_every_index_in_place() {
+			let indexes: Arc<[IndexDefinition]> = vec![
+				idx_def(1, "a", &["name"], Index::Idx),
+				idx_def(2, "b", &["acl"], Index::Idx),
+				idx_def(3, "c", &["name"], Index::Uniq),
+			]
+			.into();
+			let fields =
+				[field("acl", Some(array_of_strings())), field("name", Some(Kind::String))];
+			let out = with_array_columns_as_elements(indexes, &fields);
+			let flags: Vec<Vec<bool>> =
+				out.rewritten.as_deref().expect("rewritten").iter().map(|f| f.to_vec()).collect();
+			assert_eq!(flags, [vec![], vec![true], vec![]]);
+			let cols: Vec<_> =
+				out.indexes.iter().map(|ix| (ix.name.as_str(), ix.cols[0].to_sql())).collect();
+			assert_eq!(
+				cols,
+				[("a", "name".to_owned()), ("b", "acl.*".to_owned()), ("c", "name".to_owned())]
+			);
+		}
+
+		#[test]
+		fn the_field_list_is_needed_only_for_a_btree_column_without_elements() {
+			let with = |cols: &[&str], kind: Index| {
+				may_have_array_columns(&[idx_def(1, "ix", cols, kind)])
+			};
+			assert!(with(&["acl"], Index::Idx));
+			assert!(with(&["acl.*", "name"], Index::Uniq));
+			assert!(!with(&["acl.*"], Index::Idx));
+			assert!(!with(&["acl"], Index::Count(None)));
+		}
+
+		#[test]
+		fn withholding_btree_indexes_keeps_the_others() {
+			let indexes: Arc<[IndexDefinition]> = vec![
+				idx_def(1, "a", &["acl"], Index::Idx),
+				idx_ft(2, "b", &["body"]),
+				idx_def(3, "c", &["name"], Index::Uniq),
+			]
+			.into();
+			let names: Vec<_> = without_btree_indexes(indexes)
+				.iter()
+				.map(|ix| ix.name.as_str().to_owned())
+				.collect();
+			assert_eq!(names, ["b"]);
+		}
+
+		#[test]
+		fn an_unchanged_list_is_returned_as_is() {
+			let indexes: Arc<[IndexDefinition]> =
+				vec![idx_def(1, "ix", &["name"], Index::Idx)].into();
+			let fields = [field("name", Some(Kind::String))];
+			let out = with_array_columns_as_elements(Arc::clone(&indexes), &fields);
+			assert!(Arc::ptr_eq(&indexes, &out.indexes));
+			assert!(out.rewritten.is_none());
+		}
+
+		#[test]
+		fn every_column_of_a_wide_index_is_rewritten() {
+			let names: Vec<String> = (0..70).map(|c| format!("c{c}")).collect();
+			let cols: Vec<&str> = names.iter().map(String::as_str).collect();
+			let fields: Vec<_> = names.iter().map(|n| field(n, Some(array_of_strings()))).collect();
+			let indexes: Arc<[IndexDefinition]> = vec![idx_def(1, "ix", &cols, Index::Idx)].into();
+			let out = with_array_columns_as_elements(indexes, &fields);
+			assert_eq!(out.indexes[0].cols[69].to_sql(), "c69.*");
+			let flags = &out.rewritten.as_ref().expect("rewritten")[0];
+			assert_eq!(flags.len(), 70);
+			assert!(flags.iter().all(|f| *f));
 		}
 	}
 }

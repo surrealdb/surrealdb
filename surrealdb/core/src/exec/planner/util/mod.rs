@@ -10,7 +10,8 @@
 //!   after a scan operator has consumed a predicate, record-ID point-lookup detection, and MATCHES
 //!   context collection.
 //! - [`params`] — plan-time bind-parameter resolution and projection function-to-idiom rewriting.
-//! - [`fields`] — field-name and field-path derivation, plus GROUP BY row-scope validation.
+//! - [`fields`] — field-name and field-path derivation, GROUP BY row-scope validation, and the path
+//!   overlap the restricted-field guards compare by.
 //! - [`optimization`] — fast-path eligibility (CountScan/IndexCountScan, ORDER BY pushdown,
 //!   sort-elimination, VERSION extraction, LIMIT helpers).
 
@@ -28,7 +29,8 @@ pub(crate) use conditions::{
 	strip_union_index_conditions,
 };
 pub(crate) use fields::{
-	check_forbidden_group_by_params, derive_field_name, idiom_to_field_name, idiom_to_field_path,
+	check_forbidden_group_by_params, derive_field_name, idiom_read_prefix, idiom_to_field_name,
+	idiom_to_field_path, paths_overlap,
 };
 pub(crate) use literals::{
 	fold_condition_expressions, key_lit_to_expr, literal_to_value, source_field_reads_are_inert,

@@ -32,11 +32,11 @@ use super::util::{
 	extract_bruteforce_knn, extract_count_field_names, extract_matches_context,
 	extract_record_id_point_lookup, extract_version, fold_condition_expressions,
 	has_knn_k_operator, has_knn_ktree_operator, has_knn_operator, has_top_level_or,
-	idiom_to_field_name, index_covers_ordering, is_bounded_topk_downstream, is_count_all_eligible,
-	is_indexed_count_eligible, order_is_scan_compatible, resolve_condition_params,
-	resolve_param_value, resolve_projection_field_idioms, source_field_reads_are_inert,
-	strip_fts_condition, strip_index_conditions, strip_knn_and_matches_from_condition,
-	strip_knn_from_condition, strip_union_index_conditions,
+	idiom_read_prefix, idiom_to_field_name, index_covers_ordering, is_bounded_topk_downstream,
+	is_count_all_eligible, is_indexed_count_eligible, order_is_scan_compatible, paths_overlap,
+	resolve_condition_params, resolve_param_value, resolve_projection_field_idioms,
+	source_field_reads_are_inert, strip_fts_condition, strip_index_conditions,
+	strip_knn_and_matches_from_condition, strip_knn_from_condition, strip_union_index_conditions,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{Index, IndexDefinition};
@@ -3043,6 +3043,42 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
+	/// `indexes` with every b-tree column that stores array elements spelled
+	/// as an element column, resolved against `table_name`'s declared fields;
+	/// see [`with_array_columns_as_elements`](crate::exec::index::access_path::with_array_columns_as_elements).
+	///
+	/// `None` when the field list cannot be read: without it a column's
+	/// fan-out is unknown, so the caller declines its plan-time index path
+	/// rather than plan one that could count or order element entries as
+	/// rows. A declined select plan falls back to `DynamicScan`, which plans
+	/// without b-tree indexes when the list is unreadable there too.
+	async fn with_array_columns_as_elements(
+		&self,
+		txn: &Transaction,
+		ns_id: crate::catalog::NamespaceId,
+		db_id: crate::catalog::DatabaseId,
+		table_name: &TableName,
+		indexes: Arc<[IndexDefinition]>,
+	) -> Option<crate::exec::index::access_path::ElementColumns> {
+		use crate::exec::index::access_path::ElementColumns;
+		if !crate::exec::index::access_path::may_have_array_columns(&indexes) {
+			return Some(ElementColumns::unchanged(indexes));
+		}
+		let fields = match txn.all_tb_fields(ns_id, db_id, table_name, None).await {
+			Ok(fields) => fields,
+			Err(e) => {
+				tracing::warn!(
+					table = %table_name,
+					error = %e,
+					"plan-time field list failed in with_array_columns_as_elements; \
+					 falling back to runtime",
+				);
+				return None;
+			}
+		};
+		Some(crate::exec::index::access_path::with_array_columns_as_elements(indexes, &fields))
+	}
+
 	/// Resolve a B-tree index access path covering the WHERE condition for
 	/// key-only counting.  Returns `Some((IndexRef, BTreeAccess))` when the
 	/// index analysis finds a B-tree index that fully covers the predicate
@@ -3081,8 +3117,10 @@ impl<'ctx> Planner<'ctx> {
 		if indexes.is_empty() {
 			return None;
 		}
+		let columns =
+			self.with_array_columns_as_elements(txn, ns_id, db_id, table_name, indexes).await?;
 
-		let analyzer = IndexAnalyzer::new(indexes, with);
+		let analyzer = columns.analyzer(with);
 		let candidates = analyzer.analyze(Some(cond), None);
 
 		// Look for a candidate that fully covers the WHERE condition
@@ -3144,8 +3182,10 @@ impl<'ctx> Planner<'ctx> {
 		let exact_col = |col: &Idiom| -> bool {
 			fields.iter().find(|fd| &fd.name == col).is_some_and(field_def_excludes_arrays)
 		};
+		let columns =
+			crate::exec::index::access_path::with_array_columns_as_elements(indexes, &fields);
 
-		let analyzer = IndexAnalyzer::new(indexes, with);
+		let analyzer = columns.analyzer(with);
 		let root = analyzer.try_bitmap_count_fusion(cond, &exact_col)?;
 		Some(bitmap_plan_to_node(root))
 	}
@@ -3251,7 +3291,20 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(Some((AccessPath::TableScan, direction)));
 		}
 
-		let analyzer = IndexAnalyzer::new(indexes, with);
+		let Some(columns) = self
+			.with_array_columns_as_elements(
+				txn,
+				db_def.namespace_id,
+				db_def.database_id,
+				table_name,
+				indexes,
+			)
+			.await
+		else {
+			return Ok(None);
+		};
+
+		let analyzer = columns.analyzer(with);
 		let candidates = analyzer.analyze(analysis_cond, order);
 
 		// Bitmap candidate fusion (issue #547): when the WHERE clause is an
@@ -3863,8 +3916,9 @@ enum RestrictedPrefixes {
 	/// The actor sees the table with full field permissions, or no field is
 	/// restricted — index fast paths are safe.
 	None,
-	/// These field-path prefixes are governed by a non-`Full` SELECT
-	/// permission.
+	/// These declared fields are governed by a non-`Full` SELECT
+	/// permission; a read at, beneath or above one of them is restricted —
+	/// reading `acl` reads the restricted elements `acl.*` holds.
 	Some(Vec<Idiom>),
 }
 
@@ -3874,7 +3928,14 @@ impl RestrictedPrefixes {
 	/// must be conservatively assumed because plan-time context is missing).
 	///
 	/// Used to keep an index fast path from turning index entries into a
-	/// membership oracle for a value the actor cannot read.
+	/// membership oracle for a value the actor cannot read. A read touches a
+	/// restricted field at, beneath or above it: a read of an ancestor reads
+	/// the restricted descendant along with it, and an index over the
+	/// ancestor holds the descendant's values as entries (`acl CONTAINS 'x'`
+	/// over an index on `acl` seeks `acl.*` elements). An idiom is compared as
+	/// one read, at its [`idiom_read_prefix`], so the base of `meta.public`
+	/// is not a read of the whole `meta`, and `meta.public` does not touch a
+	/// restricted `meta.secret`.
 	fn cond_touches(&self, cond: &Cond) -> bool {
 		let prefixes = match self {
 			RestrictedPrefixes::AssumeRestricted => return true,
@@ -3883,6 +3944,7 @@ impl RestrictedPrefixes {
 		};
 		let mut checker = RestrictedIdiomChecker {
 			restricted_prefixes: prefixes,
+			reads_above: true,
 			found: false,
 		};
 		use crate::expr::visit::Visitor;
@@ -3904,15 +3966,16 @@ impl RestrictedPrefixes {
 	/// reduced document instead.
 	///
 	/// An ancestor field definition governs the column too — reducing an
-	/// ancestor implicitly reduces its descendants — which `starts_with`
-	/// covers.
+	/// ancestor implicitly reduces its descendants — and so does a restricted
+	/// descendant, whose values a column over the ancestor stores: an index on
+	/// `acl` holds the elements a restricted `acl.*` hides.
 	fn index_touches(&self, cols: &[Idiom]) -> bool {
 		let prefixes = match self {
 			RestrictedPrefixes::AssumeRestricted => return true,
 			RestrictedPrefixes::None => return false,
 			RestrictedPrefixes::Some(p) => p,
 		};
-		cols.iter().any(|col| prefixes.iter().any(|prefix| col.starts_with(prefix.0.as_slice())))
+		cols.iter().any(|col| prefixes.iter().any(|prefix| paths_overlap(&col.0, &prefix.0)))
 	}
 
 	/// SECURITY (value-ordering oracle): returns `true` when any top-level
@@ -3956,6 +4019,7 @@ impl RestrictedPrefixes {
 		};
 		let mut checker = RestrictedIdiomChecker {
 			restricted_prefixes: prefixes,
+			reads_above: false,
 			found: false,
 		};
 		use crate::expr::visit::Visitor;
@@ -3975,6 +4039,12 @@ impl RestrictedPrefixes {
 /// will perform their own permission resolution.
 struct RestrictedIdiomChecker<'a> {
 	restricted_prefixes: &'a [Idiom],
+	/// Whether an idiom above a restricted field touches it, as well as one
+	/// at or beneath it. When set, an idiom is compared at its
+	/// [`idiom_read_prefix`], and one that does not start from the row's
+	/// fields touches nothing; when unset, the whole idiom is matched by its
+	/// leading parts.
+	reads_above: bool,
 	found: bool,
 }
 
@@ -3985,12 +4055,14 @@ impl crate::expr::visit::Visitor for RestrictedIdiomChecker<'_> {
 		if self.found {
 			return Ok(());
 		}
-		for prefix in self.restricted_prefixes {
-			if idiom.starts_with(prefix.0.as_slice()) {
-				self.found = true;
-				return Ok(());
-			}
-		}
+		let touches = if self.reads_above {
+			idiom_read_prefix(idiom).is_some_and(|read| {
+				self.restricted_prefixes.iter().any(|prefix| paths_overlap(read, &prefix.0))
+			})
+		} else {
+			self.restricted_prefixes.iter().any(|prefix| idiom.starts_with(prefix.0.as_slice()))
+		};
+		self.found = touches;
 		Ok(())
 	}
 
@@ -4379,6 +4451,42 @@ mod tests {
 			crate::expr::TopLevelExpr::Expr(crate::expr::Expr::Select(s)) => *s,
 			other => panic!("expected SELECT, got {other:?}"),
 		}
+	}
+
+	#[test]
+	fn restricted_prefix_matches_by_leading_parts() {
+		let secret: Idiom = syn::idiom("meta.secret").expect("idiom").into();
+		let restricted = RestrictedPrefixes::Some(vec![secret]);
+		let stmt = parse_select("SELECT * FROM t WHERE meta.secret.inner = 1 ORDER BY meta");
+		assert!(restricted.cond_touches(stmt.cond.as_ref().expect("WHERE")));
+		// Ordering by the parent of a restricted child is the documented gap.
+		assert!(!restricted.order_touches(stmt.order.as_ref().expect("ORDER BY")));
+		let stmt = parse_select("SELECT * FROM t WHERE meta.public = 1 ORDER BY meta.secret");
+		assert!(!restricted.cond_touches(stmt.cond.as_ref().expect("WHERE")));
+		assert!(restricted.order_touches(stmt.order.as_ref().expect("ORDER BY")));
+		// A read of the whole parent reads the restricted child with it.
+		let stmt = parse_select("SELECT * FROM t WHERE meta CONTAINS 'x'");
+		assert!(restricted.cond_touches(stmt.cond.as_ref().expect("WHERE")));
+		// A path that steps off the declared fields reads its prefix whole.
+		let stmt = parse_select("SELECT * FROM t WHERE meta.len() = 2");
+		assert!(restricted.cond_touches(stmt.cond.as_ref().expect("WHERE")));
+		// A parameter's fields are not the row's.
+		let stmt = parse_select("SELECT * FROM t WHERE $meta CONTAINS 'x'");
+		assert!(!restricted.cond_touches(stmt.cond.as_ref().expect("WHERE")));
+		// A nested statement resolves its own permissions.
+		let stmt = parse_select("SELECT * FROM t WHERE (SELECT meta.secret FROM u) != NONE");
+		assert!(!restricted.cond_touches(stmt.cond.as_ref().expect("WHERE")));
+	}
+
+	#[test]
+	fn restricted_prefix_matches_an_index_column_above_or_beneath() {
+		let elements: Idiom = syn::idiom("acl.*").expect("idiom").into();
+		let restricted = RestrictedPrefixes::Some(vec![elements]);
+		let col = |s: &str| -> Idiom { syn::idiom(s).expect("idiom").into() };
+		assert!(restricted.index_touches(&[col("acl")]));
+		assert!(restricted.index_touches(&[col("acl[*]")]));
+		assert!(restricted.index_touches(&[col("acl.*.name")]));
+		assert!(!restricted.index_touches(&[col("other")]));
 	}
 
 	/// Locks in the fix for the `$parent`-in-method-arg case. Pre-fix,

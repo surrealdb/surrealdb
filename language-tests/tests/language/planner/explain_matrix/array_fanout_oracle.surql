@@ -47,11 +47,14 @@ reason = """
 
 	Three behaviours recorded here are wrong, and are recorded as they are so a
 	fix is recognisable rather than being bent out of the suite. All three are
-	the same gap: the write path expands any array VALUE, while the dedupe and
-	the count guard key off a column IDIOM spelling `.*`, so a plain column
-	whose value happens to be an array fans out unguarded. Each of the three
-	has a `.*` counterpart elsewhere in the file which behaves correctly over
-	the same shape, so the gap is legible as the difference between the two.
+	the same gap: the write path expands any array VALUE, while the planner's
+	fan-out guards key off a column spelling `.*`. A plain column whose field
+	declares a kind admitting an array is planned as its `.*` spelling and is
+	guarded (reproductions/7539_*); a plain column with no declared kind, as
+	every table here is, is planned as written, so when its value happens to be
+	an array it fans out unguarded. Each of the three has a `.*` counterpart
+	elsewhere in the file which behaves correctly over the same shape, so the
+	gap is legible as the difference between the two.
 
 	1. Whole-array equality against a plain index over that array column
 	   (`tags = ['x', 'y']`) seeks the single key `['x', 'y']`, which the
@@ -74,10 +77,11 @@ reason = """
 	   over the same shape is the sparse case below, which gets both.
 
 	One behaviour is correct but easy to mistake for a defect, so it is pinned
-	as intended: a containment predicate on a non-flattening array column is not
-	served by the index at all — a table scan, with the right rows and the right
-	count — because a containment leaf is matched to a column only when the
-	column flattens.
+	as intended: a containment predicate on a non-flattening column with no
+	declared kind is not served by the index at all — a table scan, with the
+	right rows and the right count — because a containment leaf is matched to a
+	column only when the column flattens, and nothing declares that this one's
+	values are arrays.
 
 	One behaviour is recorded without being judged: under UNIQUE over a fanning
 	column, a record whose own array repeats an element is rejected as colliding

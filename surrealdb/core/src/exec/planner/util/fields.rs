@@ -8,12 +8,14 @@
 //!   the flat string form.
 //! - **GROUP BY validation.** Reject row-scoped parameters (`$this`, `$self`, `$parent`) in grouped
 //!   projections, where the iteration document has been collapsed away.
+//! - **Path overlap.** Which declared position an idiom reads, and whether two paths lie at or
+//!   beneath one another, as the restricted-field guards compare them.
 
 use crate::err::Error;
 use crate::exec::Error as ExecError;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::expr::field::{Field, Fields};
-use crate::expr::{Expr, Idiom};
+use crate::expr::{Expr, Idiom, Part};
 
 /// Derive a field name from an expression for projection output.
 pub(crate) fn derive_field_name(expr: &Expr) -> String {
@@ -148,4 +150,32 @@ fn check_expr_for_forbidden_params(expr: &Expr) -> Result<(), Error> {
 			message: "Found a `$parent` parameter refering to the document of a GROUP select statement\nSelect statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string(),
 		}.into()),
 	}
+}
+
+/// Whether one of two paths lies at or beneath the other. A read or an index
+/// column at `a` reaches every value at `b` when `b` extends `a`, and is
+/// governed by `b` when `a` extends `b`; the restricted-field guards treat
+/// either as touching.
+pub(crate) fn paths_overlap<T: PartialEq>(a: &[T], b: &[T]) -> bool {
+	a.starts_with(b) || b.starts_with(a)
+}
+
+/// The declared position `idiom` reads before its first part that is not a
+/// field read: the leading run of [`Part::Field`] and [`Part::All`] parts.
+/// `a.b[0].c`, `a.b[WHERE x]` and `a.b.len()` all read beneath `a.b`; the
+/// parts after the index, the filter or the method reach positions the schema
+/// does not declare.
+///
+/// `None` when the idiom does not start from the row's fields: a parameter,
+/// a start expression, `@`, or a leading lookup.
+pub(crate) fn idiom_read_prefix(idiom: &Idiom) -> Option<&[Part]> {
+	if !matches!(idiom.0.first(), Some(Part::Field(_))) {
+		return None;
+	}
+	let len = idiom
+		.0
+		.iter()
+		.position(|p| !matches!(p, Part::Field(_) | Part::All))
+		.unwrap_or(idiom.0.len());
+	Some(&idiom.0[..len])
 }
