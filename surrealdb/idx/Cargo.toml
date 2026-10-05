@@ -72,7 +72,6 @@ surrealdb-types.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 uuid = { workspace = true }
-vart.workspace = true
 web-time.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
