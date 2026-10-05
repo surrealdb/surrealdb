@@ -966,6 +966,8 @@ enum BenchRunResult {
 /// prepared datastore.
 enum BenchStatement {
 	SurrealQl,
+	PgSql,
+	MySql,
 	/// A parsed-and-lowered GQL plan. Parse + lowering happen once in
 	/// `prepare`, so the timed iterations measure plan execution only (mirroring
 	/// the GraphQL arm, which generates its schema up front). The plan is cloned
@@ -995,6 +997,8 @@ impl BenchStatement {
 	) -> Result<Self> {
 		match run.case.test.dialect {
 			Dialect::SurrealQl => Ok(Self::SurrealQl),
+			Dialect::PgSql => Ok(Self::PgSql),
+			Dialect::MySql => Ok(Self::MySql),
 			Dialect::Gql => {
 				// Parse + lower the `.gql` source once, exactly as the run path
 				// does (see `cmd::run::run_test_with_dbs`), so the timed loop
@@ -1054,6 +1058,42 @@ impl BenchStatement {
 						Err(error) => bail!("bench statement {idx} returned an error: {error}"),
 						// One row for a non-array result, so a bench selecting a
 						// single record still counts as work rather than as zero.
+						Ok(value) => {
+							rows += value.as_array().map_or(1, |a| a.len() as i64);
+						}
+					}
+				}
+				return Ok(Some(rows));
+			}
+			Self::PgSql => {
+				let results = dbs
+					.run(QueryRequest::new(
+						QuerySource::pgsql(&run.case.test.source),
+						session,
+					))
+					.await?;
+				let mut rows = 0i64;
+				for (idx, result) in results.iter().enumerate() {
+					match &result.result {
+						Err(error) => bail!("bench statement {idx} returned an error: {error}"),
+						Ok(value) => {
+							rows += value.as_array().map_or(1, |a| a.len() as i64);
+						}
+					}
+				}
+				return Ok(Some(rows));
+			}
+			Self::MySql => {
+				let results = dbs
+					.run(QueryRequest::new(
+						QuerySource::mysql(&run.case.test.source),
+						session,
+					))
+					.await?;
+				let mut rows = 0i64;
+				for (idx, result) in results.iter().enumerate() {
+					match &result.result {
+						Err(error) => bail!("bench statement {idx} returned an error: {error}"),
 						Ok(value) => {
 							rows += value.as_array().map_or(1, |a| a.len() as i64);
 						}

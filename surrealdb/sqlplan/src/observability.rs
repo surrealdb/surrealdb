@@ -65,6 +65,7 @@ impl SqlPlanMetrics {
 
 	/// Record an unsupported-feature error encountered for a specific construct.
 	pub fn record_unsupported_feature(&self, construct: &str) {
+		tracing::warn!(construct = %construct, "unsupported SQL construct encountered");
 		if let Ok(mut map) = self.unsupported_constructs.write() {
 			let entry = map.entry(construct.to_string()).or_insert(0);
 			*entry = entry.saturating_add(1);
@@ -73,6 +74,7 @@ impl SqlPlanMetrics {
 
 	/// Record a result equivalence mismatch detected against oracle.
 	pub fn record_mismatch(&self) {
+		tracing::error!("result equivalence mismatch detected against oracle");
 		self.mismatches_detected.fetch_add(1, Ordering::Relaxed);
 	}
 

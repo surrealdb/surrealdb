@@ -26,7 +26,7 @@ tracing = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 
 [package.metadata.cargo-machete]
-ignored = []
+ignored = ["tracing"]
 
 [lints]
 workspace = true
