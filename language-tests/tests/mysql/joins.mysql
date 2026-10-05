@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["mysql/_schema.surql"]
+
+[test]
+reason = "MySQL INNER JOIN across tables with WHERE and ORDER BY"
+
+[[test.results]]
+value = "[{ name: 'Bob', total: 150 }, { name: 'Alice', total: 200 }]"
+*/
+
+SELECT u.name, o.total FROM users u JOIN orders o ON u.user_id = o.user_id WHERE o.total >= 150 ORDER BY o.total ASC;

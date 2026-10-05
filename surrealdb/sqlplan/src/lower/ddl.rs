@@ -128,10 +128,28 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 	let mut index_counter = 0;
 
 	for col in &create.columns {
+		let is_id = col.name == "id";
+		let is_table_pk = create.constraints.iter().any(|c| match c {
+			PgTableConstraint::PrimaryKey(cols) => cols.iter().any(|c| c == &col.name),
+			_ => false,
+		});
+		let is_not_null = is_id
+			|| is_table_pk
+			|| col
+				.constraints
+				.iter()
+				.any(|c| matches!(c, ColumnConstraint::NotNull | ColumnConstraint::PrimaryKey));
+		let base_kind = map_pgsql_type(&col.data_type);
+		let field_kind = if is_not_null || matches!(base_kind, Kind::Any) {
+			base_kind
+		} else {
+			Kind::either(vec![Kind::None, Kind::Null, base_kind])
+		};
+
 		let mut field_def = DefineFieldStatement {
 			name: Expr::Idiom(Idiom::field(col.name.as_str())),
 			what: Expr::Table(TableName::from(tbl_name)),
-			field_kind: Some(map_pgsql_type(&col.data_type)),
+			field_kind: Some(field_kind),
 			kind: if create.if_not_exists {
 				DefineKind::IfNotExists
 			} else {
@@ -611,10 +629,19 @@ pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>,
 	exprs.push(Expr::Define(Box::new(DefineStatement::Table(table_def))));
 
 	for col in &create.columns {
+		let is_id = col.name == "id";
+		let is_not_null = is_id || col.not_null || col.primary_key;
+		let base_kind = map_mysql_type(&col.data_type);
+		let field_kind = if is_not_null || matches!(base_kind, Kind::Any) {
+			base_kind
+		} else {
+			Kind::either(vec![Kind::None, Kind::Null, base_kind])
+		};
+
 		let mut field_def = DefineFieldStatement {
 			name: Expr::Idiom(Idiom::field(col.name.as_str())),
 			what: Expr::Table(TableName::from(tbl_name)),
-			field_kind: Some(map_mysql_type(&col.data_type)),
+			field_kind: Some(field_kind),
 			kind: if create.if_not_exists {
 				DefineKind::IfNotExists
 			} else {

@@ -13,8 +13,9 @@ use crate::catalog::BinderCatalog;
 use crate::dialect::DialectPolicy;
 use crate::error::PlanError;
 use crate::ir::{
-	BoundBinaryOp, BoundDistinct, BoundExpr, BoundJoinCondition, BoundJoinType, BoundLiteral,
-	BoundOrder, BoundOrderDirection, BoundSelect, BoundTableSource, BoundTarget, BoundUnaryOp,
+	BoundBinaryOp, BoundColumnRef, BoundDistinct, BoundExpr, BoundJoinCondition, BoundJoinType,
+	BoundLiteral, BoundOrder, BoundOrderDirection, BoundSelect, BoundTableSource, BoundTarget,
+	BoundUnaryOp,
 };
 use crate::scope::QueryScope;
 
@@ -356,8 +357,18 @@ pub fn bind_expr(
 			..
 		} => {
 			let fn_name = name.to_lowercase();
-			let bound_args =
-				args.iter().map(|a| bind_expr(a, scope, policy)).collect::<Result<Vec<_>, _>>()?;
+			let bound_args = if fn_name == "count"
+				&& args.len() == 1
+				&& matches!(&args[0], Expr::ColumnRef(col) if col.fields.len() == 1 && col.fields[0] == "*")
+			{
+				vec![BoundExpr::Column(BoundColumnRef {
+					relation_index: 0,
+					relation_name: String::new(),
+					column: "*".to_string(),
+				})]
+			} else {
+				args.iter().map(|a| bind_expr(a, scope, policy)).collect::<Result<Vec<_>, _>>()?
+			};
 			Ok(BoundExpr::FunctionCall {
 				name: fn_name,
 				args: bound_args,

@@ -213,6 +213,39 @@ impl<'a> Parser<'a> {
 				continue;
 			}
 
+			// NOT LIKE / NOT REGEXP / NOT RLIKE
+			let is_not_like = self.peek_keyword() == Some(Keyword::Not)
+				&& matches!(
+					self.peek_nth_keyword(1),
+					Some(Keyword::Like | Keyword::Regexp | Keyword::Rlike)
+				);
+			if is_not_like && min_bp <= PREC_CMP {
+				self.check_recursion_limit()?;
+				self.recursion_depth += 1;
+				*loop_depth += 1;
+				self.bump(); // NOT
+				let op = match self.bump().kind {
+					TokenKind::Keyword(Keyword::Like) => BinaryOperator::Like,
+					TokenKind::Keyword(Keyword::Regexp) => BinaryOperator::Regexp,
+					TokenKind::Keyword(Keyword::Rlike) => BinaryOperator::Rlike,
+					_ => unreachable!(),
+				};
+				let rhs = self.parse_expr_bp(PREC_CMP + 1)?;
+				let span = lhs.span().merge(rhs.span());
+				let inner = Expr::BinaryOp {
+					left: Box::new(lhs),
+					op,
+					right: Box::new(rhs),
+					span,
+				};
+				lhs = Expr::UnaryOp {
+					op: UnaryOperator::Not,
+					expr: Box::new(inner),
+					span,
+				};
+				continue;
+			}
+
 			// COLLATE collation_name
 			if self.peek_keyword() == Some(Keyword::Collate) && min_bp <= PREC_COLLATE {
 				self.check_recursion_limit()?;

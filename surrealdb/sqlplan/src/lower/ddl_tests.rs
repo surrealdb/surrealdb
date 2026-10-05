@@ -144,7 +144,10 @@ fn test_lower_pgsql_create_table_simple() {
 	match &exprs[3] {
 		Expr::Define(d) => match &**d {
 			DefineStatement::Field(f) => {
-				assert_eq!(f.field_kind, Some(Kind::String));
+				assert_eq!(
+					f.field_kind,
+					Some(Kind::either(vec![Kind::None, Kind::Null, Kind::String]))
+				);
 			}
 			_ => panic!("Expected DefineField email"),
 		},
@@ -155,7 +158,10 @@ fn test_lower_pgsql_create_table_simple() {
 	match &exprs[4] {
 		Expr::Define(d) => match &**d {
 			DefineStatement::Field(f) => {
-				assert_eq!(f.field_kind, Some(Kind::Int));
+				assert_eq!(
+					f.field_kind,
+					Some(Kind::either(vec![Kind::None, Kind::Null, Kind::Int]))
+				);
 				assert!(matches!(
 					f.default,
 					surrealdb_expr::expr::statements::define::DefineDefault::Set(_)

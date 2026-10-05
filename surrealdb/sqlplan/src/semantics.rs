@@ -730,7 +730,8 @@ pub fn eval_cast(
 	let norm_type = target_type.to_lowercase();
 	match norm_type.as_str() {
 		"text" | "varchar" | "char" | "string" => Ok(BoundLiteral::String(literal_to_string(lit))),
-		"int" | "integer" | "int2" | "int4" | "int8" | "bigint" | "smallint" => match lit {
+		"int" | "integer" | "int2" | "int4" | "int8" | "bigint" | "smallint" | "signed"
+		| "unsigned" => match lit {
 			BoundLiteral::Integer(i) => Ok(BoundLiteral::Integer(*i)),
 			BoundLiteral::Float(f) => Ok(BoundLiteral::Integer(*f as i64)),
 			BoundLiteral::Boolean(b) => Ok(BoundLiteral::Integer(if *b {

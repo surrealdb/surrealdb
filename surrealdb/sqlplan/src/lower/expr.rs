@@ -4,7 +4,7 @@ use surrealdb_expr::expr::logical::{
 	LogicalCall, LogicalExpr, LogicalField, LogicalIf, LogicalLiteral, LogicalOrder, OutputPath,
 	RelationAlias,
 };
-use surrealdb_expr::expr::{BinaryOperator, Function, Param, PrefixOperator};
+use surrealdb_expr::expr::{BinaryOperator, Function, Kind, Param, PrefixOperator};
 use surrealdb_strand::Strand;
 
 use crate::dialect::{DialectPolicy, SqlDialect};
@@ -107,8 +107,14 @@ pub fn lower_bound_expr(
 				"length" => "string::len",
 				other => other,
 			};
-			let lower_args =
-				args.iter().map(|a| lower_bound_expr(a, policy)).collect::<Result<Vec<_>, _>>()?;
+			let lower_args = if mapped_fn == "count"
+				&& args.len() == 1
+				&& matches!(&args[0], BoundExpr::Column(col) if col.column == "*")
+			{
+				Vec::new()
+			} else {
+				args.iter().map(|a| lower_bound_expr(a, policy)).collect::<Result<Vec<_>, _>>()?
+			};
 			Ok(LogicalExpr::Call(Box::new(LogicalCall {
 				receiver: Function::Normal(mapped_fn.to_string()),
 				args: lower_args,
@@ -210,8 +216,34 @@ pub fn lower_bound_expr(
 		}
 		BoundExpr::Cast {
 			expr,
-			..
-		} => lower_bound_expr(expr, policy),
+			target_type,
+		} => {
+			let lowered = lower_bound_expr(expr, policy)?;
+			let clean_type = target_type.to_lowercase();
+			let base_type = clean_type.split('(').next().unwrap_or(&clean_type).trim();
+			let kind = match base_type {
+				"int" | "integer" | "int4" | "int8" | "int2" | "smallint" | "bigint" | "signed"
+				| "unsigned" => Kind::Int,
+				"float" | "float8" | "float4" | "double" | "real" | "double precision" => {
+					Kind::Float
+				}
+				"numeric" | "decimal" | "dec" => Kind::Decimal,
+				"text" | "varchar" | "char" | "character varying" | "bpchar" | "string" => {
+					Kind::String
+				}
+				"bool" | "boolean" => Kind::Bool,
+				"date" | "datetime" | "timestamp" | "timestamptz" => Kind::Datetime,
+				_ => Kind::Any,
+			};
+			if matches!(kind, Kind::Any) {
+				Ok(lowered)
+			} else {
+				Ok(LogicalExpr::Prefix {
+					op: PrefixOperator::Cast(kind),
+					expr: Box::new(lowered),
+				})
+			}
+		}
 	}
 }
 
