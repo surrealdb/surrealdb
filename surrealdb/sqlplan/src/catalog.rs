@@ -80,6 +80,11 @@ pub trait BinderCatalog: Send + Sync {
 	fn table_exists(&self, schema: Option<&str>, name: &str) -> bool {
 		self.get_table(schema, name).is_some()
 	}
+
+	/// Current active database name, if known.
+	fn current_database(&self) -> Option<&str> {
+		None
+	}
 }
 
 /// An empty or schemaless catalog.
@@ -100,13 +105,26 @@ impl BinderCatalog for EmptyCatalog {
 #[derive(Debug, Default, Clone)]
 pub struct MemoryCatalog {
 	tables: HashMap<(Option<String>, String), TableSchema>,
+	current_db: Option<String>,
 }
 
 impl MemoryCatalog {
 	pub fn new() -> Self {
 		Self {
 			tables: HashMap::new(),
+			current_db: None,
 		}
+	}
+
+	/// Set the active database name.
+	pub fn with_database(mut self, db: impl Into<String>) -> Self {
+		self.current_db = Some(db.into());
+		self
+	}
+
+	/// Set the active database name mutably.
+	pub fn set_database(&mut self, db: Option<String>) {
+		self.current_db = db;
 	}
 
 	/// Register a table schema.
@@ -133,6 +151,10 @@ impl MemoryCatalog {
 }
 
 impl BinderCatalog for MemoryCatalog {
+	fn current_database(&self) -> Option<&str> {
+		self.current_db.as_deref()
+	}
+
 	fn get_table(&self, schema: Option<&str>, name: &str) -> Option<TableSchema> {
 		let key = (schema.map(|s| s.to_string()), name.to_string());
 		if let Some(tbl) = self.tables.get(&key) {

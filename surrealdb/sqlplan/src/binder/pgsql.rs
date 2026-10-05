@@ -205,7 +205,7 @@ fn bind_table_ref(
 			alias,
 			..
 		} => {
-			let (schema, table_name) = resolve_table_qualified_name(name, policy)?;
+			let (schema, table_name) = resolve_table_qualified_name(name, policy, Some(catalog))?;
 			let alias_name = alias.as_ref().map(|a| a.name.clone());
 
 			let relation_index = scope.register_relation(
@@ -291,30 +291,11 @@ fn bind_table_ref(
 pub fn resolve_table_qualified_name(
 	name: &QualifiedName,
 	policy: &DialectPolicy,
+	catalog: Option<&dyn BinderCatalog>,
 ) -> Result<(Option<String>, String), PlanError> {
-	match name.parts.len() {
-		0 => Err(PlanError::Custom("empty table name".into())),
-		1 => {
-			let tbl = policy.fold_identifier(&name.parts[0]).into_owned();
-			Ok((None, tbl))
-		}
-		2 => {
-			let schema = policy.fold_identifier(&name.parts[0]).into_owned();
-			let table = policy.fold_identifier(&name.parts[1]).into_owned();
-			if schema == "public" {
-				// PostgreSQL public schema is elided to plain table name
-				Ok((Some("public".to_string()), table))
-			} else {
-				// Other schemas are dotted table names: schema.table
-				let dotted = format!("{schema}.{table}");
-				Ok((Some(schema), dotted))
-			}
-		}
-		_ => Err(PlanError::Custom(format!(
-			"cross-database qualification not supported: {}",
-			name.parts.join(".")
-		))),
-	}
+	let folded_parts: Vec<String> =
+		name.parts.iter().map(|p| policy.fold_identifier(p).into_owned()).collect();
+	crate::namespace::resolve_pgsql_table_name(&folded_parts, catalog)
 }
 
 /// Bind a PostgreSQL expression into BoundExpr.

@@ -9,7 +9,7 @@ use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::basic;
 use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
-use surrealdb_mysql::ast::stmt::Statement as MyStatement;
+use surrealdb_mysql::ast::stmt::{Statement as MyStatement, TableRef};
 use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_sqlplan::binder::mysql::bind_select;
 use surrealdb_sqlplan::catalog::MemoryCatalog;
@@ -318,17 +318,15 @@ impl Connection {
 	async fn set_current_db(&mut self, db_name: &str) -> Result<()> {
 		let parts: Vec<&str> = db_name.split('/').collect();
 		let (ns, db) = if parts.len() >= 2 {
-			(parts[0], parts[1])
+			(parts[0].to_string(), parts[1].to_string())
 		} else {
-			("test", db_name)
+			(self.current_ns.clone().unwrap_or_else(|| "test".to_string()), db_name.to_string())
 		};
 
-		self.current_ns = Some(ns.to_string());
-		self.current_db = Some(db.to_string());
+		self.current_ns = Some(ns.clone());
+		self.current_db = Some(db.clone());
 
-		self.ds
-			.process_use(None, &mut self.session, Some(ns.to_string()), Some(db.to_string()))
-			.await?;
+		self.ds.process_use(None, &mut self.session, Some(ns), Some(db)).await?;
 		Ok(())
 	}
 
@@ -448,6 +446,24 @@ impl Connection {
 			return Ok(());
 		}
 
+		// Handle USE <db>
+		if lower.starts_with("use ")
+			&& let Ok(MyStatement::Use(use_stmt)) = surrealdb_mysql::parse_statement(trimmed)
+		{
+			if let Err(e) = self.set_current_db(&use_stmt.database).await {
+				let err_pkt = ErrPacket::general(
+					1049,
+					b"42000",
+					format!("Unknown database '{}': {e}", use_stmt.database),
+				);
+				self.writer.write_packet(seq.wrapping_add(1), &err_pkt.serialize()).await?;
+				return Ok(());
+			}
+			let ok = OkPacket::new(0, 0);
+			self.writer.write_packet(seq.wrapping_add(1), &ok.serialize()).await?;
+			return Ok(());
+		}
+
 		// Check dialect capability before execution
 		if let Err(e) = self.check_dialect(self.dialect) {
 			let err_pkt = ErrPacket::general(1045, b"28000", e.to_string());
@@ -455,12 +471,145 @@ impl Connection {
 			return Ok(());
 		}
 
+		// Cross-database and namespace validation for MySQL dialect
+		if self.dialect == Dialect::MySql {
+			let cur_db = self.current_db.clone().unwrap_or_else(|| "test".to_string());
+			let catalog = MemoryCatalog::new().with_database(&cur_db);
+			if let Ok(stmts) = surrealdb_mysql::parse_statements(trimmed) {
+				for stmt in &stmts {
+					match stmt {
+						MyStatement::Select(select) => {
+							let policy = DialectPolicy::mysql();
+							if let Err(e) = bind_select(select, &catalog, &policy, None) {
+								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								self.writer
+									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+									.await?;
+								return Ok(());
+							}
+						}
+						MyStatement::Insert(insert) => {
+							if let Err(e) = surrealdb_sqlplan::resolve_mysql_table_name(
+								&insert.table.parts,
+								Some(&catalog),
+							) {
+								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								self.writer
+									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+									.await?;
+								return Ok(());
+							}
+						}
+						MyStatement::Replace(replace) => {
+							if let Err(e) = surrealdb_sqlplan::resolve_mysql_table_name(
+								&replace.table.parts,
+								Some(&catalog),
+							) {
+								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								self.writer
+									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+									.await?;
+								return Ok(());
+							}
+						}
+						MyStatement::Update(update) => {
+							fn check_tref(
+								t: &TableRef,
+								cat: &MemoryCatalog,
+							) -> Result<(), surrealdb_sqlplan::PlanError> {
+								match t {
+									TableRef::Table {
+										name,
+										..
+									} => {
+										surrealdb_sqlplan::resolve_mysql_table_name(
+											&name.parts,
+											Some(cat),
+										)?;
+									}
+									TableRef::Join {
+										left,
+										right,
+										..
+									} => {
+										check_tref(left, cat)?;
+										check_tref(right, cat)?;
+									}
+									_ => {}
+								}
+								Ok(())
+							}
+							if let Err(e) = check_tref(&update.table, &catalog) {
+								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								self.writer
+									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+									.await?;
+								return Ok(());
+							}
+						}
+						MyStatement::Delete(delete) => {
+							if let Err(e) = surrealdb_sqlplan::resolve_mysql_table_name(
+								&delete.table.parts,
+								Some(&catalog),
+							) {
+								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								self.writer
+									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+									.await?;
+								return Ok(());
+							}
+						}
+						MyStatement::Truncate(truncate) => {
+							if let Err(e) = surrealdb_sqlplan::resolve_mysql_table_name(
+								&truncate.table.parts,
+								Some(&catalog),
+							) {
+								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								self.writer
+									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+									.await?;
+								return Ok(());
+							}
+						}
+						MyStatement::CreateTable(create) => {
+							if let Err(e) = surrealdb_sqlplan::resolve_mysql_table_name(
+								&create.name.parts,
+								Some(&catalog),
+							) {
+								let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+								self.writer
+									.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+									.await?;
+								return Ok(());
+							}
+						}
+						MyStatement::DropTable(drop) => {
+							for name in &drop.names {
+								if let Err(e) = surrealdb_sqlplan::resolve_mysql_table_name(
+									&name.parts,
+									Some(&catalog),
+								) {
+									let err_pkt = ErrPacket::general(1105, b"HY000", e.to_string());
+									self.writer
+										.write_packet(seq.wrapping_add(1), &err_pkt.serialize())
+										.await?;
+									return Ok(());
+								}
+							}
+						}
+						_ => {}
+					}
+				}
+			}
+		}
+
 		// Execute against datastore with the selected dialect.
 		// Fail-closed execution: NEVER fall back to SurrealQL on error!
 		let descriptor = if self.dialect == Dialect::MySql {
 			if let Ok(stmts) = surrealdb_mysql::parse_statements(trimmed) {
 				if let Some(MyStatement::Select(select)) = stmts.first() {
-					let catalog = MemoryCatalog::new();
+					let cur_db = self.current_db.clone().unwrap_or_else(|| "test".to_string());
+					let catalog = MemoryCatalog::new().with_database(&cur_db);
 					let policy = DialectPolicy::mysql();
 					bind_select(select, &catalog, &policy, None)
 						.ok()

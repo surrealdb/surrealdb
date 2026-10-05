@@ -105,10 +105,9 @@ fn not_null_assertion() -> Expr {
 
 /// Lower a PostgreSQL CREATE TABLE statement into SurrealDB expressions.
 pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>, PlanError> {
-	let tbl_name = match create.name.parts.last() {
-		Some(p) => p.as_str(),
-		None => return Err(PlanError::Custom("Empty table name".to_string())),
-	};
+	let (_, tbl_name_str) = crate::namespace::resolve_pgsql_table_name(&create.name.parts, None)?;
+	let tbl_name = tbl_name_str.as_str();
+	let safe_idx_prefix = tbl_name.replace('.', "_");
 
 	let mut exprs = Vec::new();
 	let mut index_exprs = Vec::new();
@@ -160,7 +159,10 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 				ColumnConstraint::PrimaryKey => {
 					index_counter += 1;
 					let idx = DefineIndexStatement {
-						name: Expr::Idiom(Idiom::field(format!("{tbl_name}_{}_pk", col.name))),
+						name: Expr::Idiom(Idiom::field(format!(
+							"{safe_idx_prefix}_{}_pk",
+							col.name
+						))),
 						what: Expr::Table(TableName::from(tbl_name)),
 						cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::from(
 							col.name.as_str(),
@@ -178,7 +180,10 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 				ColumnConstraint::Unique => {
 					index_counter += 1;
 					let idx = DefineIndexStatement {
-						name: Expr::Idiom(Idiom::field(format!("{tbl_name}_{}_uniq", col.name))),
+						name: Expr::Idiom(Idiom::field(format!(
+							"{safe_idx_prefix}_{}_uniq",
+							col.name
+						))),
 						what: Expr::Table(TableName::from(tbl_name)),
 						cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::from(
 							col.name.as_str(),
@@ -204,7 +209,7 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 		match con {
 			PgTableConstraint::PrimaryKey(cols) => {
 				index_counter += 1;
-				let idx_name = format!("{tbl_name}_{}_pk", cols.join("_"));
+				let idx_name = format!("{safe_idx_prefix}_{}_pk", cols.join("_"));
 				let idx = DefineIndexStatement {
 					name: Expr::Idiom(Idiom::field(idx_name)),
 					what: Expr::Table(TableName::from(tbl_name)),
@@ -224,7 +229,7 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 			}
 			PgTableConstraint::Unique(cols) => {
 				index_counter += 1;
-				let idx_name = format!("{tbl_name}_{}_uniq", cols.join("_"));
+				let idx_name = format!("{safe_idx_prefix}_{}_uniq", cols.join("_"));
 				let idx = DefineIndexStatement {
 					name: Expr::Idiom(Idiom::field(idx_name)),
 					what: Expr::Table(TableName::from(tbl_name)),
@@ -269,10 +274,8 @@ pub fn lower_pgsql_create_table(create: &PgCreateTableStmt) -> Result<Vec<Expr>,
 
 /// Lower a PostgreSQL CREATE INDEX statement into SurrealDB expressions.
 pub fn lower_pgsql_create_index(idx: &CreateIndexStmt) -> Result<Vec<Expr>, PlanError> {
-	let tbl = match idx.table.parts.last() {
-		Some(p) => p.as_str(),
-		None => return Err(PlanError::Custom("Empty table name for index".to_string())),
-	};
+	let (_, tbl_str) = crate::namespace::resolve_pgsql_table_name(&idx.table.parts, None)?;
+	let tbl = tbl_str.as_str();
 
 	let mut cols = Vec::new();
 	for col in &idx.columns {
@@ -294,7 +297,8 @@ pub fn lower_pgsql_create_index(idx: &CreateIndexStmt) -> Result<Vec<Expr>, Plan
 					_ => None,
 				})
 				.collect();
-			format!("{tbl}_{}_idx", col_names.join("_"))
+			let safe_tbl = tbl.replace('.', "_");
+			format!("{safe_tbl}_{}_idx", col_names.join("_"))
 		}
 	};
 
@@ -321,19 +325,17 @@ pub fn lower_pgsql_create_index(idx: &CreateIndexStmt) -> Result<Vec<Expr>, Plan
 
 /// Lower a PostgreSQL CREATE VIEW statement into SurrealDB expressions.
 pub fn lower_pgsql_create_view(view: &CreateViewStmt) -> Result<Vec<Expr>, PlanError> {
-	let view_name = match view.name.parts.last() {
-		Some(p) => p.as_str(),
-		None => return Err(PlanError::Custom("Empty view name".to_string())),
-	};
+	let (_, view_name_str) = crate::namespace::resolve_pgsql_table_name(&view.name.parts, None)?;
+	let view_name = view_name_str.as_str();
 
 	let mut from_tables = Vec::new();
 	for tr in &view.query.from {
 		if let PgTableRef::Table {
 			name,
 			..
-		} = tr && let Some(t) = name.parts.last()
+		} = tr && let Ok((_, t)) = crate::namespace::resolve_pgsql_table_name(&name.parts, None)
 		{
-			from_tables.push(TableName::from(t.as_str()));
+			from_tables.push(TableName::from(t));
 		}
 	}
 
@@ -382,10 +384,8 @@ pub fn lower_pgsql_create_view(view: &CreateViewStmt) -> Result<Vec<Expr>, PlanE
 
 /// Lower a PostgreSQL ALTER TABLE statement into SurrealDB expressions.
 pub fn lower_pgsql_alter_table(alter: &AlterTableStmt) -> Result<Vec<Expr>, PlanError> {
-	let tbl_name = match alter.name.parts.last() {
-		Some(p) => p.as_str(),
-		None => return Err(PlanError::Custom("Empty table name".to_string())),
-	};
+	let (_, tbl_name_str) = crate::namespace::resolve_pgsql_table_name(&alter.name.parts, None)?;
+	let tbl_name = tbl_name_str.as_str();
 
 	let mut exprs = Vec::new();
 
@@ -543,10 +543,8 @@ pub fn lower_pgsql_drop(drop: &PgDropStmt) -> Result<Vec<Expr>, PlanError> {
 	let mut exprs = Vec::new();
 
 	for name in &drop.names {
-		let obj_name = match name.parts.last() {
-			Some(p) => p.as_str(),
-			None => return Err(PlanError::Custom("Empty object name in DROP".to_string())),
-		};
+		let (_, obj_name_str) = crate::namespace::resolve_pgsql_table_name(&name.parts, None)?;
+		let obj_name = obj_name_str.as_str();
 
 		match drop.object_type {
 			DropObjectType::Table | DropObjectType::View => {
@@ -593,10 +591,8 @@ pub fn lower_pgsql_ddl(stmt: &PgStatement) -> Result<Vec<Expr>, PlanError> {
 
 /// Lower a MySQL CREATE TABLE statement into SurrealDB expressions.
 pub fn lower_mysql_create_table(create: &MyCreateTableStmt) -> Result<Vec<Expr>, PlanError> {
-	let tbl_name = match create.name.parts.last() {
-		Some(p) => p.as_str(),
-		None => return Err(PlanError::Custom("Empty table name".to_string())),
-	};
+	let (_, tbl_name_str) = crate::namespace::resolve_mysql_table_name(&create.name.parts, None)?;
+	let tbl_name = tbl_name_str.as_str();
 
 	let mut exprs = Vec::new();
 	let mut index_exprs = Vec::new();
@@ -750,10 +746,8 @@ pub fn lower_mysql_drop_table(drop: &MyDropTableStmt) -> Result<Vec<Expr>, PlanE
 	let mut exprs = Vec::new();
 
 	for name in &drop.names {
-		let tbl_name = match name.parts.last() {
-			Some(p) => p.as_str(),
-			None => return Err(PlanError::Custom("Empty table name in DROP TABLE".to_string())),
-		};
+		let (_, tbl_name_str) = crate::namespace::resolve_mysql_table_name(&name.parts, None)?;
+		let tbl_name = tbl_name_str.as_str();
 
 		let rem = RemoveTableStatement {
 			name: Expr::Table(TableName::from(tbl_name)),
@@ -764,6 +758,18 @@ pub fn lower_mysql_drop_table(drop: &MyDropTableStmt) -> Result<Vec<Expr>, PlanE
 	}
 
 	Ok(exprs)
+}
+
+/// Lower a MySQL `USE` statement into a SurrealDB `UseStatement`.
+pub fn lower_mysql_use(
+	use_stmt: &surrealdb_mysql::ast::stmt::UseStmt,
+) -> Result<surrealdb_expr::expr::statements::UseStatement, PlanError> {
+	if use_stmt.database.trim().is_empty() {
+		return Err(PlanError::Custom("empty database name in USE".into()));
+	}
+	Ok(surrealdb_expr::expr::statements::UseStatement::Db(Expr::Idiom(Idiom::field(
+		use_stmt.database.clone(),
+	))))
 }
 
 /// Lower a MySQL DDL statement.

@@ -902,3 +902,110 @@ async fn test_mywire_ddl_matrix() {
 
 	shutdown.cancel();
 }
+
+#[tokio::test]
+async fn test_mywire_database_namespaces_decision_d4() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. Initial database is "test"
+	let res = query_mysql(&mut stream, "SELECT DATABASE();").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("test"));
+		}
+		other => panic!("Expected ResultSet for SELECT DATABASE(), got {other:?}"),
+	}
+
+	// 2. Create table in "test" database
+	let res =
+		query_mysql(&mut stream, "CREATE TABLE accounts (user_id INT, name VARCHAR(50));").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	// 3. Insert with bare table and active db qualified name
+	let res =
+		query_mysql(&mut stream, "INSERT INTO accounts (user_id, name) VALUES (1, 'Alice');").await;
+	assert!(
+		matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }),
+		"INSERT accounts failed: {res:?}"
+	);
+
+	let res =
+		query_mysql(&mut stream, "INSERT INTO test.accounts (user_id, name) VALUES (2, 'Bob');")
+			.await;
+	assert!(
+		matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }),
+		"INSERT test.accounts failed: {res:?}"
+	);
+
+	// 4. Query accounts
+	let res =
+		query_mysql(&mut stream, "SELECT user_id, name FROM test.accounts ORDER BY user_id;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 2);
+			let cols0 = decode_mysql_text_row(&rows[0]);
+			let cols1 = decode_mysql_text_row(&rows[1]);
+			assert_eq!(cols0[1].as_deref(), Some("Alice"));
+			assert_eq!(cols1[1].as_deref(), Some("Bob"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 5. Switch database using text `USE analytics;`
+	let res = query_mysql(&mut stream, "USE analytics;").await;
+	assert!(matches!(res, QueryResult::Ok), "USE analytics failed");
+
+	// 6. SELECT DATABASE() reflects new active database
+	let res = query_mysql(&mut stream, "SELECT DATABASE();").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("analytics"));
+		}
+		other => panic!("Expected ResultSet for SELECT DATABASE(), got {other:?}"),
+	}
+
+	// 7. Create table and insert in new database "analytics"
+	let res =
+		query_mysql(&mut stream, "CREATE TABLE events (event_id INT, action VARCHAR(50));").await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	let res =
+		query_mysql(&mut stream, "INSERT INTO events (event_id, action) VALUES (10, 'click');")
+			.await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	let res = query_mysql(&mut stream, "SELECT event_id, action FROM events;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 1);
+			let cols0 = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols0[1].as_deref(), Some("click"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 8. Cross-database reference rejection: while connected to "analytics",
+	// referencing "test.accounts" must be strictly rejected
+	let res = query_mysql(&mut stream, "SELECT * FROM test.accounts;").await;
+	assert!(matches!(res, QueryResult::Error { .. }), "Cross-database query should be rejected");
+
+	let res = query_mysql(&mut stream, "INSERT INTO test.accounts VALUES (3, 'Charlie');").await;
+	assert!(matches!(res, QueryResult::Error { .. }), "Cross-database write should be rejected");
+
+	shutdown.cancel();
+}

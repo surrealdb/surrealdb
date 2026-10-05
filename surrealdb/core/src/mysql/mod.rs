@@ -97,6 +97,13 @@ pub(crate) fn parse_to_statements(
 					)));
 				}
 			}
+			surrealdb_mysql::ast::stmt::Statement::Use(use_stmt) => {
+				let use_expr = surrealdb_sqlplan::lower_mysql_use(use_stmt)
+					.map_err(|e| anyhow::anyhow!("MySQL USE lowering error: {e}"))?;
+				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Use(
+					crate::sql::statements::UseStatement::from(use_expr),
+				)));
+			}
 			_ => {
 				let mut surql_text = String::new();
 				surrealdb_mysql::translate::translate_statement(

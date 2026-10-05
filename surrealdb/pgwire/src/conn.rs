@@ -973,7 +973,10 @@ impl Connection {
 				let mut param_count = param_types.len().max(positional);
 				let mut descriptor = None;
 				if !empty && let PgStatement::Select(select) = &stmts[0] {
-					let catalog = MemoryCatalog::new();
+					let mut catalog = MemoryCatalog::new();
+					if let Some(db) = &self.session.db {
+						catalog.set_database(Some(db.clone()));
+					}
 					let policy = DialectPolicy::postgres();
 					if let Ok(bound) = bind_select(select, &catalog, &policy, None) {
 						let desc = bound.describe(&catalog, &policy);
@@ -1543,19 +1546,94 @@ impl Connection {
 	}
 
 	async fn run_pgsql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
-		let descriptor = if let Ok(stmts) = surrealdb_pgsql::parse_statements(sql) {
-			if let Some(PgStatement::Select(select)) = stmts.first() {
-				let catalog = MemoryCatalog::new();
-				let policy = DialectPolicy::postgres();
-				bind_select(select, &catalog, &policy, None)
-					.ok()
-					.map(|bound| bound.describe(&catalog, &policy))
-			} else {
-				None
+		let mut descriptor = None;
+		if let Ok(stmts) = surrealdb_pgsql::parse_statements(sql) {
+			let mut catalog = MemoryCatalog::new();
+			if let Some(db) = &self.session.db {
+				catalog.set_database(Some(db.clone()));
 			}
-		} else {
-			None
-		};
+			let policy = DialectPolicy::postgres();
+			for stmt in &stmts {
+				match stmt {
+					PgStatement::Select(select) => {
+						match bind_select(select, &catalog, &policy, None) {
+							Ok(bound) => {
+								if descriptor.is_none() {
+									descriptor = Some(bound.describe(&catalog, &policy));
+								}
+							}
+							Err(e) => {
+								self.note_simple_error(
+									&PgError::undefined_table(e.to_string()),
+									out,
+								);
+								return Ok(());
+							}
+						}
+					}
+					PgStatement::Insert(insert) => {
+						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
+							&insert.relation.parts,
+							Some(&catalog),
+						) {
+							self.note_simple_error(&PgError::undefined_table(e.to_string()), out);
+							return Ok(());
+						}
+					}
+					PgStatement::Update(update) => {
+						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
+							&update.relation.parts,
+							Some(&catalog),
+						) {
+							self.note_simple_error(&PgError::undefined_table(e.to_string()), out);
+							return Ok(());
+						}
+					}
+					PgStatement::Delete(delete) => {
+						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
+							&delete.relation.parts,
+							Some(&catalog),
+						) {
+							self.note_simple_error(&PgError::undefined_table(e.to_string()), out);
+							return Ok(());
+						}
+					}
+					PgStatement::Truncate(truncate) => {
+						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
+							&truncate.table.parts,
+							Some(&catalog),
+						) {
+							self.note_simple_error(&PgError::undefined_table(e.to_string()), out);
+							return Ok(());
+						}
+					}
+					PgStatement::CreateTable(create) => {
+						if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
+							&create.name.parts,
+							Some(&catalog),
+						) {
+							self.note_simple_error(&PgError::undefined_table(e.to_string()), out);
+							return Ok(());
+						}
+					}
+					PgStatement::Drop(drop) => {
+						for name in &drop.names {
+							if let Err(e) = surrealdb_sqlplan::resolve_pgsql_table_name(
+								&name.parts,
+								Some(&catalog),
+							) {
+								self.note_simple_error(
+									&PgError::undefined_table(e.to_string()),
+									out,
+								);
+								return Ok(());
+							}
+						}
+					}
+					_ => {}
+				}
+			}
+		}
 		let cancel = self.arm_cancel();
 		let req = QueryRequest::new(QuerySource::pgsql(sql), &self.session)
 			.with_optional_transaction(self.transaction.clone())

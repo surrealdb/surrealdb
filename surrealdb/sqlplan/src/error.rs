@@ -89,12 +89,12 @@ impl PlanError {
 			Self::MissingFromClauseEntry(_) => 1054, // ER_BAD_FIELD_ERROR
 			Self::InvalidGroupByPosition(_) | Self::InvalidOrderByPosition(_) => 1054,
 			Self::ColumnNotInGroupBy(_) => 1055, // ER_WRONG_FIELD_WITH_GROUP
-			Self::AggregateNotAllowed(_) | Self::WindowNotAllowed(_) => 1111, // ER_INVALID_GROUP_FUNC_USE
+			Self::AggregateNotAllowed(_) | Self::WindowNotAllowed(_) => 1111, /* ER_INVALID_GROUP_FUNC_USE */
 			Self::SubqueryMustHaveAlias => 1248, // ER_DERIVED_MUST_HAVE_ALIAS
 			Self::ParameterOutOfRange(_) => 1210, // ER_WRONG_ARGUMENTS
 			Self::DivisionByZero => 1365,        // ER_DIVISION_BY_ZERO
 			Self::InvalidTextRepresentation(_) => 1264, // ER_DATA_OUT_OF_RANGE
-			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => 1235, // ER_NOT_SUPPORTED_YET
+			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => 1235, /* ER_NOT_SUPPORTED_YET */
 			Self::Custom(_) => 1064,
 		}
 	}

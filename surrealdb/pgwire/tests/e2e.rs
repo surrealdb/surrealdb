@@ -878,3 +878,91 @@ async fn test_pgwire_ddl_matrix() {
 
 	shutdown.cancel();
 }
+
+#[tokio::test]
+async fn test_pgwire_schema_namespaces_decision_d4() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. Create table in public schema (implicit and explicit public)
+	let (_, last) =
+		run_simple_query(&mut stream, "CREATE TABLE public.users (user_id INT, name VARCHAR(50));")
+			.await;
+	assert_eq!(last, b'C', "CREATE TABLE public.users failed");
+
+	// 2. Create table in custom schema (auth.accounts) -> dotted table name
+	let (_, last) = run_simple_query(
+		&mut stream,
+		"CREATE TABLE auth.accounts (account_id INT, user_id INT, username VARCHAR(50));",
+	)
+	.await;
+	assert_eq!(last, b'C', "CREATE TABLE auth.accounts failed");
+
+	// 3. Insert into public schema via both bare name and public.users
+	let (_, last) =
+		run_simple_query(&mut stream, "INSERT INTO users (user_id, name) VALUES (1, 'Alice');")
+			.await;
+	assert_eq!(last, b'C', "INSERT INTO users failed");
+
+	let (_, last) = run_simple_query(
+		&mut stream,
+		"INSERT INTO public.users (user_id, name) VALUES (2, 'Bob');",
+	)
+	.await;
+	assert_eq!(last, b'C', "INSERT INTO public.users failed");
+
+	// 4. Insert into custom schema
+	let (_, last) = run_simple_query(
+		&mut stream,
+		"INSERT INTO auth.accounts (account_id, user_id, username) VALUES (10, 1, 'alice_admin'), (20, 2, 'bob_user');",
+	)
+	.await;
+	assert_eq!(last, b'C', "INSERT INTO auth.accounts failed");
+
+	// 5. Query both tables: both 'users' and 'public.users' resolve to the same table
+	let (rows, last) =
+		run_simple_query(&mut stream, "SELECT user_id, name FROM users ORDER BY user_id;").await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2);
+	let cols0 = decode_data_row(&rows[0]);
+	let cols1 = decode_data_row(&rows[1]);
+	assert_eq!(cols0[1].as_deref(), Some("Alice"));
+	assert_eq!(cols1[1].as_deref(), Some("Bob"));
+
+	let (rows, last) =
+		run_simple_query(&mut stream, "SELECT user_id, name FROM public.users ORDER BY user_id;")
+			.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2);
+
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT account_id, username FROM auth.accounts ORDER BY account_id;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2);
+	let cols0 = decode_data_row(&rows[0]);
+	assert_eq!(cols0[1].as_deref(), Some("alice_admin"));
+
+	// 6. Cross-schema join: joins across schemas work because dotted table names coexist
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT u.name, a.username FROM users u JOIN auth.accounts a ON u.user_id = a.user_id ORDER BY u.user_id;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2);
+	let cols0 = decode_data_row(&rows[0]);
+	let cols1 = decode_data_row(&rows[1]);
+	assert_eq!(cols0[0].as_deref(), Some("Alice"));
+	assert_eq!(cols0[1].as_deref(), Some("alice_admin"));
+	assert_eq!(cols1[0].as_deref(), Some("Bob"));
+	assert_eq!(cols1[1].as_deref(), Some("bob_user"));
+
+	// 7. Verify cross-database reference rejection (3-part with wrong db, or 4-part name)
+	let (_, last) = run_simple_query(&mut stream, "SELECT * FROM otherdb.public.users;").await;
+	assert_eq!(last, b'E', "Cross-database reference should be rejected with ErrorResponse");
+
+	shutdown.cancel();
+}

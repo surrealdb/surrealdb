@@ -317,7 +317,7 @@ fn lower_pgsql_select_stmt(
 			..
 		} = t
 		{
-			let t_name = name.parts.last().cloned().unwrap_or_default();
+			let (_, t_name) = crate::namespace::resolve_pgsql_table_name(&name.parts, None)?;
 			what.push(Expr::Table(TableName::from(t_name)));
 		}
 	}
@@ -356,7 +356,7 @@ fn lower_pgsql_select_stmt(
 pub fn lower_pgsql_insert(
 	insert: &surrealdb_pgsql::ast::stmt::InsertStmt,
 ) -> Result<Expr, PlanError> {
-	let table_name = insert.relation.parts.last().cloned().unwrap_or_default();
+	let (_, table_name) = crate::namespace::resolve_pgsql_table_name(&insert.relation.parts, None)?;
 	let into = Some(Expr::Table(TableName::from(table_name)));
 
 	let mut ignore = false;
@@ -427,7 +427,7 @@ pub fn lower_pgsql_insert(
 pub fn lower_pgsql_update(
 	update: &surrealdb_pgsql::ast::stmt::UpdateStmt,
 ) -> Result<Expr, PlanError> {
-	let table_name = update.relation.parts.last().cloned().unwrap_or_default();
+	let (_, table_name) = crate::namespace::resolve_pgsql_table_name(&update.relation.parts, None)?;
 	let mut what = vec![Expr::Table(TableName::from(table_name))];
 
 	if let Some(from_tables) = &update.from {
@@ -437,7 +437,7 @@ pub fn lower_pgsql_update(
 				..
 			} = t
 			{
-				let t_name = name.parts.last().cloned().unwrap_or_default();
+				let (_, t_name) = crate::namespace::resolve_pgsql_table_name(&name.parts, None)?;
 				what.push(Expr::Table(TableName::from(t_name)));
 			}
 		}
@@ -473,7 +473,7 @@ pub fn lower_pgsql_update(
 pub fn lower_pgsql_delete(
 	delete: &surrealdb_pgsql::ast::stmt::DeleteStmt,
 ) -> Result<Expr, PlanError> {
-	let table_name = delete.relation.parts.last().cloned().unwrap_or_default();
+	let (_, table_name) = crate::namespace::resolve_pgsql_table_name(&delete.relation.parts, None)?;
 	let mut what = vec![Expr::Table(TableName::from(table_name))];
 
 	if let Some(using_tables) = &delete.using {
@@ -483,7 +483,7 @@ pub fn lower_pgsql_delete(
 				..
 			} = t
 			{
-				let t_name = name.parts.last().cloned().unwrap_or_default();
+				let (_, t_name) = crate::namespace::resolve_pgsql_table_name(&name.parts, None)?;
 				what.push(Expr::Table(TableName::from(t_name)));
 			}
 		}
@@ -508,7 +508,7 @@ pub fn lower_pgsql_delete(
 pub fn lower_pgsql_truncate(
 	truncate: &surrealdb_pgsql::ast::stmt::TruncateStmt,
 ) -> Result<Expr, PlanError> {
-	let table_name = truncate.table.parts.last().cloned().unwrap_or_default();
+	let (_, table_name) = crate::namespace::resolve_pgsql_table_name(&truncate.table.parts, None)?;
 	Ok(Expr::Delete(Box::new(DeleteStatement {
 		what: vec![Expr::Table(TableName::from(table_name))],
 		cond: None,
@@ -768,8 +768,9 @@ fn collect_mysql_tables(tref: &surrealdb_mysql::ast::stmt::TableRef, out: &mut V
 			name,
 			..
 		} => {
-			let t_name = name.parts.last().cloned().unwrap_or_default();
-			out.push(Expr::Table(TableName::from(t_name)));
+			if let Ok((_, t_name)) = crate::namespace::resolve_mysql_table_name(&name.parts, None) {
+				out.push(Expr::Table(TableName::from(t_name)));
+			}
 		}
 		surrealdb_mysql::ast::stmt::TableRef::Join {
 			left,
@@ -856,7 +857,7 @@ fn lower_mysql_select_stmt(
 pub fn lower_mysql_insert(
 	insert: &surrealdb_mysql::ast::stmt::InsertStmt,
 ) -> Result<Expr, PlanError> {
-	let table_name = insert.table.parts.last().cloned().unwrap_or_default();
+	let (_, table_name) = crate::namespace::resolve_mysql_table_name(&insert.table.parts, None)?;
 	let into = Some(Expr::Table(TableName::from(table_name)));
 
 	let mut update = None;
@@ -911,7 +912,7 @@ pub fn lower_mysql_insert(
 pub fn lower_mysql_replace(
 	replace: &surrealdb_mysql::ast::stmt::ReplaceStmt,
 ) -> Result<Expr, PlanError> {
-	let table_name = replace.table.parts.last().cloned().unwrap_or_default();
+	let (_, table_name) = crate::namespace::resolve_mysql_table_name(&replace.table.parts, None)?;
 	let into = Some(Expr::Table(TableName::from(table_name)));
 
 	let mut update_assignments = Vec::with_capacity(replace.columns.len());
@@ -1000,7 +1001,7 @@ pub fn lower_mysql_update(
 pub fn lower_mysql_delete(
 	delete: &surrealdb_mysql::ast::stmt::DeleteStmt,
 ) -> Result<Expr, PlanError> {
-	let table_name = delete.table.parts.last().cloned().unwrap_or_default();
+	let (_, table_name) = crate::namespace::resolve_mysql_table_name(&delete.table.parts, None)?;
 	let what = vec![Expr::Table(TableName::from(table_name))];
 
 	let cond = match &delete.where_clause {
@@ -1020,7 +1021,7 @@ pub fn lower_mysql_delete(
 pub fn lower_mysql_truncate(
 	truncate: &surrealdb_mysql::ast::stmt::TruncateStmt,
 ) -> Result<Expr, PlanError> {
-	let table_name = truncate.table.parts.last().cloned().unwrap_or_default();
+	let (_, table_name) = crate::namespace::resolve_mysql_table_name(&truncate.table.parts, None)?;
 	Ok(Expr::Delete(Box::new(DeleteStatement {
 		what: vec![Expr::Table(TableName::from(table_name))],
 		cond: None,

@@ -100,6 +100,11 @@ impl PgError {
 		Self::new("42704", message)
 	}
 
+	/// `42P01 undefined_table`
+	pub(super) fn undefined_table(message: impl Into<String>) -> Self {
+		Self::new("42P01", message)
+	}
+
 	/// `26000 invalid_sql_statement_name`
 	pub(super) fn invalid_statement(name: &str) -> Self {
 		Self::new("26000", format!("prepared statement \"{name}\" does not exist"))

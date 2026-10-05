@@ -191,7 +191,7 @@ fn bind_table_ref(
 			alias,
 			..
 		} => {
-			let (schema, table_name) = resolve_table_qualified_name(name, policy)?;
+			let (schema, table_name) = resolve_table_qualified_name(name, policy, Some(catalog))?;
 			let alias_name = alias.clone();
 
 			let relation_index = scope.register_relation(
@@ -263,24 +263,11 @@ fn bind_table_ref(
 pub fn resolve_table_qualified_name(
 	name: &QualifiedName,
 	policy: &DialectPolicy,
+	catalog: Option<&dyn BinderCatalog>,
 ) -> Result<(Option<String>, String), PlanError> {
-	match name.parts.len() {
-		0 => Err(PlanError::Custom("empty table name".into())),
-		1 => {
-			let tbl = policy.fold_identifier(&name.parts[0]).into_owned();
-			Ok((None, tbl))
-		}
-		2 => {
-			let schema = policy.fold_identifier(&name.parts[0]).into_owned();
-			let table = policy.fold_identifier(&name.parts[1]).into_owned();
-			let dotted = format!("{schema}.{table}");
-			Ok((Some(schema), dotted))
-		}
-		_ => Err(PlanError::Custom(format!(
-			"database qualification not supported: {}",
-			name.parts.join(".")
-		))),
-	}
+	let folded_parts: Vec<String> =
+		name.parts.iter().map(|p| policy.fold_identifier(p).into_owned()).collect();
+	crate::namespace::resolve_mysql_table_name(&folded_parts, catalog)
 }
 
 pub fn bind_expr(
