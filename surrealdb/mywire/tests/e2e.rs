@@ -1009,3 +1009,188 @@ async fn test_mywire_database_namespaces_decision_d4() {
 
 	shutdown.cancel();
 }
+
+#[tokio::test]
+async fn test_mywire_query_matrix_aggregations_and_group_by() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// Seed test data
+	let res = query_mysql(
+		&mut stream,
+		"CREATE TABLE items (id INT, category VARCHAR(50), price INT, in_stock BOOLEAN);",
+	)
+	.await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	for q in [
+		"INSERT INTO items (id, category, price, in_stock) VALUES (1, 'electronics', 100, true);",
+		"INSERT INTO items (id, category, price, in_stock) VALUES (2, 'electronics', 200, true);",
+		"INSERT INTO items (id, category, price, in_stock) VALUES (3, 'books', 15, false);",
+		"INSERT INTO items (id, category, price, in_stock) VALUES (4, 'books', 20, true);",
+		"INSERT INTO items (id, category, price, in_stock) VALUES (5, 'clothing', 50, true);",
+	] {
+		let res = query_mysql(&mut stream, q).await;
+		assert!(
+			matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }),
+			"Failed {q}: {res:?}"
+		);
+	}
+
+	// 1. Global aggregations without GROUP BY
+	let res =
+		query_mysql(&mut stream, "SELECT count(*), sum(price), min(price), max(price) FROM items;")
+			.await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 1);
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("5"), "count(*)");
+			assert_eq!(cols[1].as_deref(), Some("385"), "sum(price)");
+			assert_eq!(cols[2].as_deref(), Some("15"), "min(price)");
+			assert_eq!(cols[3].as_deref(), Some("200"), "max(price)");
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 2. Single-column GROUP BY
+	let res = query_mysql(
+		&mut stream,
+		"SELECT category, count(*), sum(price) FROM items GROUP BY category ORDER BY category ASC;",
+	)
+	.await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 3);
+			let r0 = decode_mysql_text_row(&rows[0]);
+			assert_eq!(r0[0].as_deref(), Some("books"));
+			assert_eq!(r0[1].as_deref(), Some("2"));
+			assert_eq!(r0[2].as_deref(), Some("35"));
+			let r1 = decode_mysql_text_row(&rows[1]);
+			assert_eq!(r1[0].as_deref(), Some("clothing"));
+			assert_eq!(r1[1].as_deref(), Some("1"));
+			assert_eq!(r1[2].as_deref(), Some("50"));
+			let r2 = decode_mysql_text_row(&rows[2]);
+			assert_eq!(r2[0].as_deref(), Some("electronics"));
+			assert_eq!(r2[1].as_deref(), Some("2"));
+			assert_eq!(r2[2].as_deref(), Some("300"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 3. Positional GROUP BY 1
+	let res =
+		query_mysql(&mut stream, "SELECT category, count(*) FROM items GROUP BY 1 ORDER BY 1 ASC;")
+			.await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 3);
+			let r0 = decode_mysql_text_row(&rows[0]);
+			assert_eq!(r0[0].as_deref(), Some("books"));
+			let r1 = decode_mysql_text_row(&rows[1]);
+			assert_eq!(r1[0].as_deref(), Some("clothing"));
+			let r2 = decode_mysql_text_row(&rows[2]);
+			assert_eq!(r2[0].as_deref(), Some("electronics"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 4. GROUP BY alias (MySQL feature)
+	let res = query_mysql(
+		&mut stream,
+		"SELECT category AS cat, count(*) FROM items GROUP BY cat ORDER BY cat ASC;",
+	)
+	.await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 3);
+			let r0 = decode_mysql_text_row(&rows[0]);
+			assert_eq!(r0[0].as_deref(), Some("books"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 5. HAVING clause with aggregate present in targets
+	let res = query_mysql(
+		&mut stream,
+		"SELECT category, count(*) AS cnt FROM items GROUP BY category HAVING count(*) > 1 ORDER BY category ASC;",
+	)
+	.await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 2);
+			let r0 = decode_mysql_text_row(&rows[0]);
+			assert_eq!(r0[0].as_deref(), Some("books"));
+			let r1 = decode_mysql_text_row(&rows[1]);
+			assert_eq!(r1[0].as_deref(), Some("electronics"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 6. HAVING clause with aggregate NOT present in targets
+	let res = query_mysql(
+		&mut stream,
+		"SELECT category FROM items GROUP BY category HAVING count(*) > 1 ORDER BY category ASC;",
+	)
+	.await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 2);
+			let r0 = decode_mysql_text_row(&rows[0]);
+			assert_eq!(r0[0].as_deref(), Some("books"));
+			let r1 = decode_mysql_text_row(&rows[1]);
+			assert_eq!(r1[0].as_deref(), Some("electronics"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 7. Global COUNT(DISTINCT col)
+	let res = query_mysql(&mut stream, "SELECT count(DISTINCT category) FROM items;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 1);
+			let cols = decode_mysql_text_row(&rows[0]);
+			assert_eq!(cols[0].as_deref(), Some("3"), "3 distinct categories");
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 8. Multi-column GROUP BY
+	let res = query_mysql(
+		&mut stream,
+		"SELECT category, in_stock, count(*) FROM items GROUP BY category, in_stock ORDER BY category ASC, in_stock ASC;",
+	)
+	.await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 4);
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	shutdown.cancel();
+}

@@ -751,6 +751,141 @@ async fn test_pgwire_query_matrix_crud_and_clauses() {
 }
 
 #[tokio::test]
+async fn test_pgwire_query_matrix_aggregations_and_group_by() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	let (_, last) = run_simple_query(
+		&mut stream,
+		"CREATE TABLE items (id int, category text, price int, in_stock boolean);",
+	)
+	.await;
+	assert_eq!(last, b'C');
+
+	let inserts = [
+		"INSERT INTO items (id, category, price, in_stock) VALUES (1, 'electronics', 100, true);",
+		"INSERT INTO items (id, category, price, in_stock) VALUES (2, 'electronics', 200, true);",
+		"INSERT INTO items (id, category, price, in_stock) VALUES (3, 'books', 30, false);",
+		"INSERT INTO items (id, category, price, in_stock) VALUES (4, 'books', 20, true);",
+		"INSERT INTO items (id, category, price, in_stock) VALUES (5, 'clothing', 50, true);",
+	];
+	for q in inserts {
+		let (_, last) = run_simple_query(&mut stream, q).await;
+		assert_eq!(last, b'C');
+	}
+
+	// 1. Global aggregations without GROUP BY
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT count(*), sum(price), min(price), max(price) FROM items;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 1);
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("5"), "count(*) should be 5");
+	assert_eq!(cols[1].as_deref(), Some("400"), "sum(price) should be 400");
+	assert_eq!(cols[2].as_deref(), Some("20"), "min(price) should be 20");
+	assert_eq!(cols[3].as_deref(), Some("200"), "max(price) should be 200");
+
+	// 2. GROUP BY single column
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT category, count(*) FROM items GROUP BY category ORDER BY category ASC;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 3);
+	let row0 = decode_data_row(&rows[0]);
+	assert_eq!(row0[0].as_deref(), Some("books"));
+	assert_eq!(row0[1].as_deref(), Some("2"));
+
+	// 3. GROUP BY positional 1
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT category, count(*) FROM items GROUP BY 1 ORDER BY 1 ASC;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 3);
+	let row0 = decode_data_row(&rows[0]);
+	assert_eq!(row0[0].as_deref(), Some("books"));
+	assert_eq!(row0[1].as_deref(), Some("2"));
+
+	// 4. HAVING clause with aggregate present in targets
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT category, count(*) as cnt FROM items GROUP BY category HAVING count(*) > 1 ORDER BY category ASC;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2, "books and electronics have count > 1");
+	let r0 = decode_data_row(&rows[0]);
+	assert_eq!(r0[0].as_deref(), Some("books"));
+	let r1 = decode_data_row(&rows[1]);
+	assert_eq!(r1[0].as_deref(), Some("electronics"));
+
+	// 5. HAVING clause with aggregate NOT present in targets
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT category FROM items GROUP BY category HAVING count(*) > 1 ORDER BY category ASC;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2);
+	let r0 = decode_data_row(&rows[0]);
+	assert_eq!(r0[0].as_deref(), Some("books"));
+	let r1 = decode_data_row(&rows[1]);
+	assert_eq!(r1[0].as_deref(), Some("electronics"));
+
+	// 6. Global COUNT(DISTINCT col)
+	let (rows, last) =
+		run_simple_query(&mut stream, "SELECT count(DISTINCT category) FROM items;").await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 1);
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("3"), "3 distinct categories");
+
+	// 7. Grouped COUNT(DISTINCT col)
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT in_stock, count(DISTINCT category) FROM items GROUP BY in_stock ORDER BY in_stock ASC;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2);
+	let r_false = decode_data_row(&rows[0]);
+	assert_eq!(r_false[0].as_deref(), Some("false"));
+	assert_eq!(r_false[1].as_deref(), Some("1"));
+	let r_true = decode_data_row(&rows[1]);
+	assert_eq!(r_true[0].as_deref(), Some("true"));
+	assert_eq!(r_true[1].as_deref(), Some("3"));
+
+	// 8. Multi-column GROUP BY
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT category, in_stock, count(*) FROM items GROUP BY category, in_stock ORDER BY category ASC, in_stock ASC;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 4);
+
+	// 9. Aggregates with FILTER (WHERE ...) clause (PostgreSQL standard)
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT count(*) FILTER (WHERE price > 50), sum(price) FILTER (WHERE in_stock = true) FROM items;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 1);
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("2"), "count(*) FILTER (WHERE price > 50)");
+	assert_eq!(cols[1].as_deref(), Some("370"), "sum(price) FILTER (WHERE in_stock = true)");
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
 async fn test_pgwire_multi_statement_simple_query() {
 	let (addr, shutdown) = start_test_pg_server().await;
 	let mut stream = connect_and_handshake(addr).await;

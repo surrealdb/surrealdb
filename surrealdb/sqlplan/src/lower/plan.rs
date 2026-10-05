@@ -1,16 +1,18 @@
 //! Lowering from BoundSelect to SurrealDB `LogicalOp`.
 
 use surrealdb_expr::expr::logical::{
-	EvalFrame, JoinKind, LogicalAggregate, LogicalDistinct, LogicalExpr, LogicalFields,
-	LogicalFilter, LogicalJoin, LogicalLimit, LogicalOp, LogicalOrdering, LogicalProject,
-	LogicalSort, LogicalSource, LogicalSubquery, LogicalValues, RelationAlias, SourceRef,
+	EvalFrame, JoinKind, LogicalAggregate, LogicalDistinct, LogicalExpr, LogicalField,
+	LogicalFields, LogicalFilter, LogicalJoin, LogicalLimit, LogicalOp, LogicalOrdering,
+	LogicalProject, LogicalSort, LogicalSource, LogicalSubquery, LogicalValues, OutputPath,
+	RelationAlias, SourceRef,
 };
 use surrealdb_strand::TableName;
 
 use crate::dialect::DialectPolicy;
 use crate::error::PlanError;
 use crate::ir::{
-	BoundBinaryOp, BoundExpr, BoundJoinCondition, BoundJoinType, BoundSelect, BoundTableSource,
+	BoundBinaryOp, BoundColumnRef, BoundExpr, BoundJoinCondition, BoundJoinType, BoundOrder,
+	BoundSelect, BoundTableSource, BoundTarget,
 };
 use crate::lower::expr::{
 	bound_expr_contains_aggregate, lower_bound_expr, lower_bound_order, lower_bound_target,
@@ -42,17 +44,76 @@ pub fn lower_bound_select(
 	}
 
 	// 3. GROUP BY & Aggregation
+	let grouped = !select.group_by.is_empty();
+	let has_aggregates = select.targets.iter().any(|t| bound_expr_contains_aggregate(&t.expr));
+	let has_having_agg = select.having.as_ref().is_some_and(bound_expr_contains_aggregate);
+	let has_order_agg = select.order_by.iter().any(|o| bound_expr_contains_aggregate(&o.expr));
+	let is_aggregate =
+		grouped || has_aggregates || has_having_agg || has_order_agg || select.having.is_some();
+
+	let mut aggregate_targets = select.targets.clone();
+	let mut agg_mapping: Vec<(BoundExpr, String)> = Vec::new();
+	for t in &select.targets {
+		let col_name = target_output_name(t);
+		agg_mapping.push((t.expr.clone(), col_name));
+	}
+
+	let mut synthetic_idx = 0;
+	if let Some(having_expr) = &select.having {
+		let mut having_aggs = Vec::new();
+		collect_aggregate_exprs(having_expr, &mut having_aggs);
+		for agg in having_aggs {
+			if !agg_mapping.iter().any(|(e, _)| e == &agg) {
+				let syn_name = format!("__sql_having_{}", synthetic_idx);
+				synthetic_idx += 1;
+				aggregate_targets.push(BoundTarget {
+					expr: agg.clone(),
+					alias: Some(syn_name.clone()),
+					is_wildcard: false,
+					table_wildcard: None,
+				});
+				agg_mapping.push((agg, syn_name));
+			}
+		}
+	}
+
+	let mut order_syn_idx = 0;
+	for o in &select.order_by {
+		let mut order_aggs = Vec::new();
+		collect_aggregate_exprs(&o.expr, &mut order_aggs);
+		for agg in order_aggs {
+			if !agg_mapping.iter().any(|(e, _)| e == &agg) {
+				let syn_name = format!("__sql_order_{}", order_syn_idx);
+				order_syn_idx += 1;
+				aggregate_targets.push(BoundTarget {
+					expr: agg.clone(),
+					alias: Some(syn_name.clone()),
+					is_wildcard: false,
+					table_wildcard: None,
+				});
+				agg_mapping.push((agg, syn_name));
+			}
+		}
+	}
+
 	let fields = LogicalFields::Select(
-		select
-			.targets
+		aggregate_targets
 			.iter()
 			.map(|t| lower_bound_target(t, policy))
 			.collect::<Result<Vec<_>, _>>()?,
 	);
 
-	let grouped = !select.group_by.is_empty();
-	let has_aggregates = select.targets.iter().any(|t| bound_expr_contains_aggregate(&t.expr));
-	let is_aggregate = grouped || has_aggregates;
+	let rewritten_having =
+		select.having.as_ref().map(|h| rewrite_aggregates_to_columns(h, &agg_mapping));
+
+	let mut rewritten_order_by = Vec::new();
+	for o in &select.order_by {
+		rewritten_order_by.push(BoundOrder {
+			expr: rewrite_aggregates_to_columns(&o.expr, &agg_mapping),
+			direction: o.direction,
+			nulls_first: o.nulls_first,
+		});
+	}
 
 	if is_aggregate {
 		let group = select
@@ -68,7 +129,7 @@ pub fn lower_bound_select(
 	}
 
 	// 4. HAVING clause
-	if let Some(having_expr) = &select.having {
+	if let Some(having_expr) = &rewritten_having {
 		op = LogicalOp::Filter(LogicalFilter {
 			input: Box::new(op),
 			predicate: lower_bound_expr(having_expr, policy)?,
@@ -83,9 +144,9 @@ pub fn lower_bound_select(
 	}
 
 	// 6. ORDER BY clause
-	if !select.order_by.is_empty() {
+	if !rewritten_order_by.is_empty() {
 		let mut orders = Vec::new();
-		for o in &select.order_by {
+		for o in &rewritten_order_by {
 			orders.extend(lower_bound_order(o, policy)?);
 		}
 		op = LogicalOp::Sort(LogicalSort {
@@ -106,11 +167,26 @@ pub fn lower_bound_select(
 		});
 	}
 
-	// 8. Projection (for non-aggregate queries)
+	// 8. Projection
 	if !is_aggregate {
 		op = LogicalOp::Project(LogicalProject {
 			input: Box::new(op),
 			fields,
+			omit: vec![],
+		});
+	} else if aggregate_targets.len() > select.targets.len() {
+		let project_fields = select
+			.targets
+			.iter()
+			.map(|t| {
+				let col_name = target_output_name(t);
+				let alias = t.alias.as_ref().map(|a| OutputPath::field(a.clone()));
+				LogicalField::user(LogicalExpr::Field(col_name.into()), alias)
+			})
+			.collect::<Vec<_>>();
+		op = LogicalOp::Project(LogicalProject {
+			input: Box::new(op),
+			fields: LogicalFields::Select(project_fields),
 			omit: vec![],
 		});
 	} else {
@@ -122,6 +198,195 @@ pub fn lower_bound_select(
 	}
 
 	Ok(op)
+}
+
+fn target_output_name(target: &BoundTarget) -> String {
+	match &target.alias {
+		Some(a) => a.clone(),
+		None => match &target.expr {
+			BoundExpr::Column(col) if col.column != "*" => col.column.clone(),
+			BoundExpr::FunctionCall {
+				name,
+				..
+			} => name.clone(),
+			_ => "col".to_string(),
+		},
+	}
+}
+
+fn collect_aggregate_exprs(expr: &BoundExpr, acc: &mut Vec<BoundExpr>) {
+	match expr {
+		BoundExpr::FunctionCall {
+			name,
+			..
+		} if matches!(name.as_str(), "count" | "sum" | "avg" | "min" | "max")
+			&& !acc.contains(expr) =>
+		{
+			acc.push(expr.clone());
+		}
+		BoundExpr::Binary {
+			left,
+			right,
+			..
+		} => {
+			collect_aggregate_exprs(left, acc);
+			collect_aggregate_exprs(right, acc);
+		}
+		BoundExpr::Unary {
+			expr,
+			..
+		} => {
+			collect_aggregate_exprs(expr, acc);
+		}
+		BoundExpr::Access {
+			base,
+			..
+		} => {
+			collect_aggregate_exprs(base, acc);
+		}
+		BoundExpr::Between {
+			expr,
+			low,
+			high,
+			..
+		} => {
+			collect_aggregate_exprs(expr, acc);
+			collect_aggregate_exprs(low, acc);
+			collect_aggregate_exprs(high, acc);
+		}
+		BoundExpr::InList {
+			expr,
+			list,
+			..
+		} => {
+			collect_aggregate_exprs(expr, acc);
+			for item in list {
+				collect_aggregate_exprs(item, acc);
+			}
+		}
+		BoundExpr::IsNull {
+			expr,
+			..
+		} => {
+			collect_aggregate_exprs(expr, acc);
+		}
+		BoundExpr::Cast {
+			expr,
+			..
+		} => {
+			collect_aggregate_exprs(expr, acc);
+		}
+		BoundExpr::Case {
+			operand,
+			branches,
+			else_expr,
+		} => {
+			if let Some(op) = operand {
+				collect_aggregate_exprs(op, acc);
+			}
+			for (c, v) in branches {
+				collect_aggregate_exprs(c, acc);
+				collect_aggregate_exprs(v, acc);
+			}
+			if let Some(el) = else_expr {
+				collect_aggregate_exprs(el, acc);
+			}
+		}
+		_ => {}
+	}
+}
+
+fn rewrite_aggregates_to_columns(expr: &BoundExpr, mapping: &[(BoundExpr, String)]) -> BoundExpr {
+	for (agg, col_name) in mapping {
+		if expr == agg {
+			return BoundExpr::Column(BoundColumnRef {
+				relation_index: 0,
+				relation_name: String::new(),
+				column: col_name.clone(),
+			});
+		}
+	}
+	match expr {
+		BoundExpr::Binary {
+			left,
+			op,
+			right,
+		} => BoundExpr::Binary {
+			left: Box::new(rewrite_aggregates_to_columns(left, mapping)),
+			op: *op,
+			right: Box::new(rewrite_aggregates_to_columns(right, mapping)),
+		},
+		BoundExpr::Unary {
+			op,
+			expr,
+		} => BoundExpr::Unary {
+			op: *op,
+			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping)),
+		},
+		BoundExpr::Access {
+			base,
+			field,
+		} => BoundExpr::Access {
+			base: Box::new(rewrite_aggregates_to_columns(base, mapping)),
+			field: field.clone(),
+		},
+		BoundExpr::Between {
+			expr,
+			low,
+			high,
+			negated,
+		} => BoundExpr::Between {
+			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping)),
+			low: Box::new(rewrite_aggregates_to_columns(low, mapping)),
+			high: Box::new(rewrite_aggregates_to_columns(high, mapping)),
+			negated: *negated,
+		},
+		BoundExpr::InList {
+			expr,
+			list,
+			negated,
+		} => BoundExpr::InList {
+			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping)),
+			list: list.iter().map(|item| rewrite_aggregates_to_columns(item, mapping)).collect(),
+			negated: *negated,
+		},
+		BoundExpr::IsNull {
+			expr,
+			negated,
+		} => BoundExpr::IsNull {
+			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping)),
+			negated: *negated,
+		},
+		BoundExpr::Cast {
+			expr,
+			target_type,
+		} => BoundExpr::Cast {
+			expr: Box::new(rewrite_aggregates_to_columns(expr, mapping)),
+			target_type: target_type.clone(),
+		},
+		BoundExpr::Case {
+			operand,
+			branches,
+			else_expr,
+		} => BoundExpr::Case {
+			operand: operand
+				.as_ref()
+				.map(|op| Box::new(rewrite_aggregates_to_columns(op, mapping))),
+			branches: branches
+				.iter()
+				.map(|(c, v)| {
+					(
+						rewrite_aggregates_to_columns(c, mapping),
+						rewrite_aggregates_to_columns(v, mapping),
+					)
+				})
+				.collect(),
+			else_expr: else_expr
+				.as_ref()
+				.map(|el| Box::new(rewrite_aggregates_to_columns(el, mapping))),
+		},
+		_ => expr.clone(),
+	}
 }
 
 fn lower_table_source(

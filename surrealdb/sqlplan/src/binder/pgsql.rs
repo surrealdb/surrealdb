@@ -408,10 +408,37 @@ pub fn bind_expr(
 			name,
 			args,
 			distinct,
+			filter,
 			..
 		} => {
 			let fn_name = name.parts.last().map(|s| s.to_lowercase()).unwrap_or_default();
-			let bound_args = if fn_name == "count"
+			let bound_args = if let Some(cond) = filter {
+				let bound_cond = bind_expr(cond, scope, policy)?;
+				if fn_name == "count"
+					&& (args.is_empty()
+						|| (args.len() == 1
+							&& matches!(&args[0], Expr::ColumnRef(col) if col.fields.len() == 1 && col.fields[0] == "*")))
+				{
+					// COUNT(*) FILTER (WHERE cond) -> count(CASE WHEN cond THEN 1 ELSE NULL END)
+					vec![BoundExpr::Case {
+						operand: None,
+						branches: vec![(bound_cond, BoundExpr::Literal(BoundLiteral::Integer(1)))],
+						else_expr: Some(Box::new(BoundExpr::Literal(BoundLiteral::Null))),
+					}]
+				} else if args.len() == 1 {
+					let bound_arg = bind_expr(&args[0], scope, policy)?;
+					// AGG(arg) FILTER (WHERE cond) -> agg(CASE WHEN cond THEN arg ELSE NULL END)
+					vec![BoundExpr::Case {
+						operand: None,
+						branches: vec![(bound_cond, bound_arg)],
+						else_expr: Some(Box::new(BoundExpr::Literal(BoundLiteral::Null))),
+					}]
+				} else {
+					return Err(PlanError::UnsupportedExpression(
+						"FILTER (WHERE ...) only supported on single-argument aggregates".into(),
+					));
+				}
+			} else if fn_name == "count"
 				&& args.len() == 1
 				&& matches!(&args[0], Expr::ColumnRef(col) if col.fields.len() == 1 && col.fields[0] == "*")
 			{

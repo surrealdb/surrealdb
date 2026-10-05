@@ -258,6 +258,8 @@ pub enum Expr {
 		args: Vec<Expr>,
 		/// True if `DISTINCT` modifier was used.
 		distinct: bool,
+		/// Optional `FILTER (WHERE ...)` clause for aggregate functions.
+		filter: Option<Box<Expr>>,
 		/// Optional `OVER (...)` window specification.
 		over: Option<WindowSpec>,
 		/// Source span.
@@ -627,6 +629,7 @@ impl Expr {
 			Self::FunctionCall {
 				name,
 				args,
+				filter,
 				over,
 				span,
 				..
@@ -635,6 +638,9 @@ impl Expr {
 				name.span = zero;
 				for arg in args {
 					arg.normalize_spans();
+				}
+				if let Some(f) = filter {
+					f.normalize_spans();
 				}
 				if let Some(spec) = over {
 					spec.normalize_spans();

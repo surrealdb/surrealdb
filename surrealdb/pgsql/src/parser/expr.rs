@@ -575,6 +575,7 @@ impl<'a> Parser<'a> {
 					name: QualifiedName::single(kw.as_str().to_ascii_lowercase(), kw_tok.span),
 					args: Vec::new(),
 					distinct: false,
+					filter: None,
 					over: None,
 					span,
 				})
@@ -616,6 +617,16 @@ impl<'a> Parser<'a> {
 
 			let r_paren = self.expect(&TokenKind::RParen, "')'")?;
 			let mut span = qname.span.merge(r_paren.span);
+			let filter = if self.eat(&TokenKind::Keyword(Keyword::Filter))? {
+				self.expect(&TokenKind::LParen, "'('")?;
+				self.expect(&TokenKind::Keyword(Keyword::Where), "'WHERE'")?;
+				let cond = self.parse_expr()?;
+				let r_filter = self.expect(&TokenKind::RParen, "')'")?;
+				span = span.merge(r_filter.span);
+				Some(Box::new(cond))
+			} else {
+				None
+			};
 			let over = if self.eat(&TokenKind::Keyword(Keyword::Over))? {
 				let spec = self.parse_window_spec()?;
 				span = span.merge(spec.span);
@@ -627,6 +638,7 @@ impl<'a> Parser<'a> {
 				name: qname,
 				args,
 				distinct,
+				filter,
 				over,
 				span,
 			})

@@ -483,6 +483,7 @@ impl ToPgSql for Expr {
 				name,
 				args,
 				distinct,
+				filter,
 				over,
 				..
 			} => {
@@ -498,6 +499,11 @@ impl ToPgSql for Expr {
 					arg.to_pgsql(f)?;
 				}
 				f.write_str(")")?;
+				if let Some(cond) = filter {
+					f.write_str(" FILTER (WHERE ")?;
+					cond.to_pgsql(f)?;
+					f.write_str(")")?;
+				}
 				if let Some(spec) = over {
 					f.write_str(" OVER ")?;
 					spec.to_pgsql(f)?;

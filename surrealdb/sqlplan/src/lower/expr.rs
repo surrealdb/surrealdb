@@ -93,8 +93,69 @@ pub fn lower_bound_expr(
 		BoundExpr::FunctionCall {
 			name,
 			args,
-			distinct: _,
+			distinct,
 		} => {
+			if *distinct {
+				match name.as_str() {
+					"count" => {
+						let lowered_arg = if args.len() == 1 {
+							lower_bound_expr(&args[0], policy)?
+						} else {
+							return Err(PlanError::UnsupportedExpression(
+								"COUNT(DISTINCT) requires 1 argument".into(),
+							));
+						};
+						let group_call = LogicalExpr::Call(Box::new(LogicalCall {
+							receiver: Function::Normal("array::group".to_string()),
+							args: vec![lowered_arg],
+						}));
+						return Ok(LogicalExpr::Call(Box::new(LogicalCall {
+							receiver: Function::Normal("array::len".to_string()),
+							args: vec![group_call],
+						})));
+					}
+					"sum" => {
+						let lowered_arg = if args.len() == 1 {
+							lower_bound_expr(&args[0], policy)?
+						} else {
+							return Err(PlanError::UnsupportedExpression(
+								"SUM(DISTINCT) requires 1 argument".into(),
+							));
+						};
+						let group_call = LogicalExpr::Call(Box::new(LogicalCall {
+							receiver: Function::Normal("array::group".to_string()),
+							args: vec![lowered_arg],
+						}));
+						return Ok(LogicalExpr::Call(Box::new(LogicalCall {
+							receiver: Function::Normal("math::sum".to_string()),
+							args: vec![group_call],
+						})));
+					}
+					"avg" => {
+						let lowered_arg = if args.len() == 1 {
+							lower_bound_expr(&args[0], policy)?
+						} else {
+							return Err(PlanError::UnsupportedExpression(
+								"AVG(DISTINCT) requires 1 argument".into(),
+							));
+						};
+						let group_call = LogicalExpr::Call(Box::new(LogicalCall {
+							receiver: Function::Normal("array::group".to_string()),
+							args: vec![lowered_arg],
+						}));
+						return Ok(LogicalExpr::Call(Box::new(LogicalCall {
+							receiver: Function::Normal("math::mean".to_string()),
+							args: vec![group_call],
+						})));
+					}
+					"min" | "max" => {
+						// MIN(DISTINCT x) is identical to MIN(x)
+						// MAX(DISTINCT x) is identical to MAX(x)
+					}
+					_ => {}
+				}
+			}
+
 			let mapped_fn = match name.as_str() {
 				"count" => "count",
 				"sum" => "math::sum",
@@ -108,10 +169,19 @@ pub fn lower_bound_expr(
 				other => other,
 			};
 			let lower_args = if mapped_fn == "count"
-				&& args.len() == 1
-				&& matches!(&args[0], BoundExpr::Column(col) if col.column == "*")
+				&& (args.is_empty()
+					|| (args.len() == 1
+						&& (matches!(&args[0], BoundExpr::Column(col) if col.column == "*")
+							|| matches!(&args[0], BoundExpr::Literal(BoundLiteral::Integer(_))))))
 			{
 				Vec::new()
+			} else if mapped_fn == "count" && args.len() == 1 {
+				let inner = lower_bound_expr(&args[0], policy)?;
+				let not_null = is_not_null_expr(inner);
+				vec![LogicalExpr::If(Box::new(LogicalIf {
+					branches: vec![(not_null, LogicalExpr::Literal(LogicalLiteral::Bool(true)))],
+					otherwise: Some(LogicalExpr::Literal(LogicalLiteral::Null)),
+				}))]
 			} else {
 				args.iter().map(|a| lower_bound_expr(a, policy)).collect::<Result<Vec<_>, _>>()?
 			};
@@ -493,6 +563,23 @@ pub fn is_null_expr(expr: LogicalExpr) -> LogicalExpr {
 		right: Box::new(LogicalExpr::Binary {
 			left: Box::new(expr),
 			op: BinaryOperator::Equal,
+			right: Box::new(LogicalExpr::Literal(LogicalLiteral::None)),
+		}),
+	}
+}
+
+/// Helper to create `(expr != NULL && expr != NONE)`.
+pub fn is_not_null_expr(expr: LogicalExpr) -> LogicalExpr {
+	LogicalExpr::Binary {
+		left: Box::new(LogicalExpr::Binary {
+			left: Box::new(expr.clone()),
+			op: BinaryOperator::NotEqual,
+			right: Box::new(LogicalExpr::Literal(LogicalLiteral::Null)),
+		}),
+		op: BinaryOperator::And,
+		right: Box::new(LogicalExpr::Binary {
+			left: Box::new(expr),
+			op: BinaryOperator::NotEqual,
 			right: Box::new(LogicalExpr::Literal(LogicalLiteral::None)),
 		}),
 	}
