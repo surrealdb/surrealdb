@@ -592,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-ast"
-version = "3.1.0-alpha"
+version = "3.2.6"
 dependencies = [
  "chrono",
  "rust_decimal",
@@ -602,14 +602,14 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-common"
-version = "3.1.0-alpha"
+version = "3.2.6"
 dependencies = [
  "hashbrown 0.16.1",
 ]
 
 [[package]]
 name = "surrealdb-parser"
-version = "3.1.0-alpha"
+version = "3.2.6"
 dependencies = [
  "bitflags",
  "chrono",
@@ -624,7 +624,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-token"
-version = "3.1.0-alpha"
+version = "3.2.6"
 dependencies = [
  "logos",
  "surrealdb-common",
