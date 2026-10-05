@@ -55,11 +55,149 @@ impl<'a> Parser<'a> {
 			}
 		}
 
+		// Optional outer ORDER BY and LIMIT after set operations
+		if root.set_op.is_some() {
+			if self.eat(&TokenKind::Keyword(Keyword::Order))? {
+				self.expect(&TokenKind::Keyword(Keyword::By), "'BY'")?;
+				root.order_by = self.parse_order_by_clause()?;
+			}
+			loop {
+				if root.limit.is_none() && self.eat(&TokenKind::Keyword(Keyword::Limit))? {
+					root.limit = Some(self.parse_expr()?);
+					continue;
+				}
+				if root.offset.is_none() && self.eat(&TokenKind::Keyword(Keyword::Offset))? {
+					root.offset = Some(self.parse_expr()?);
+					if self.peek().kind == TokenKind::Keyword(Keyword::Row)
+						|| self.peek().kind == TokenKind::Keyword(Keyword::Rows)
+					{
+						self.bump()?;
+					}
+					continue;
+				}
+				break;
+			}
+
+			// If outer order_by, limit or offset was not parsed separately, hoist from rightmost
+			// child
+			if root.order_by.is_empty() && root.limit.is_none() && root.offset.is_none() {
+				let mut curr = &mut root.set_op;
+				let mut hoisted_order = None;
+				let mut hoisted_limit = None;
+				let mut hoisted_offset = None;
+				while let Some(so) = curr {
+					if so.right.set_op.is_none() {
+						hoisted_order = Some(std::mem::take(&mut so.right.order_by));
+						hoisted_limit = so.right.limit.take();
+						hoisted_offset = so.right.offset.take();
+						break;
+					}
+					curr = &mut so.right.set_op;
+				}
+				if let Some(o) = hoisted_order {
+					root.order_by = o;
+				}
+				if hoisted_limit.is_some() {
+					root.limit = hoisted_limit;
+				}
+				if hoisted_offset.is_some() {
+					root.offset = hoisted_offset;
+				}
+			}
+		}
+
 		self.leave_recursion_by(1 + set_depth);
 		Ok(root)
 	}
 
 	fn parse_select_single(&mut self) -> ParseResult<SelectStmt> {
+		if self.eat(&TokenKind::LParen)? {
+			let stmt = self.parse_select_stmt()?;
+			self.expect(&TokenKind::RParen, "')'")?;
+			return Ok(stmt);
+		}
+
+		if self.eat(&TokenKind::Keyword(Keyword::Values))? {
+			let mut rows = Vec::new();
+			loop {
+				self.expect(&TokenKind::LParen, "'('")?;
+				let mut row = Vec::new();
+				while self.peek().kind != TokenKind::RParen {
+					row.push(self.parse_expr()?);
+					if !self.eat(&TokenKind::Comma)? {
+						break;
+					}
+				}
+				self.expect(&TokenKind::RParen, "')'")?;
+				rows.push(row);
+				if !self.eat(&TokenKind::Comma)? {
+					break;
+				}
+			}
+			let mut root: Option<SelectStmt> = None;
+			for (row_idx, row) in rows.into_iter().enumerate() {
+				let targets = row
+					.into_iter()
+					.enumerate()
+					.map(|(col_idx, expr)| ResTarget {
+						expr,
+						alias: if row_idx == 0 {
+							Some(format!("column{}", col_idx + 1))
+						} else {
+							None
+						},
+						span: Span::empty(0),
+					})
+					.collect();
+				let stmt = SelectStmt {
+					distinct: None,
+					targets,
+					from: vec![],
+					where_clause: None,
+					group_by: vec![],
+					having: None,
+					window: vec![],
+					order_by: vec![],
+					limit: None,
+					offset: None,
+					locking: vec![],
+					set_op: None,
+					with: None,
+					span: Span::empty(0),
+				};
+				if let Some(mut prev) = root {
+					let mut curr = &mut prev;
+					while let Some(ref mut so) = curr.set_op {
+						curr = so.right.as_mut();
+					}
+					curr.set_op = Some(SetOperation {
+						op: SetOpKind::Union,
+						all: true,
+						right: Box::new(stmt),
+					});
+					root = Some(prev);
+				} else {
+					root = Some(stmt);
+				}
+			}
+			return Ok(root.unwrap_or_else(|| SelectStmt {
+				distinct: None,
+				targets: vec![],
+				from: vec![],
+				where_clause: None,
+				group_by: vec![],
+				having: None,
+				window: vec![],
+				order_by: vec![],
+				limit: None,
+				offset: None,
+				locking: vec![],
+				set_op: None,
+				with: None,
+				span: Span::empty(0),
+			}));
+		}
+
 		let with = if self.peek().kind == TokenKind::Keyword(Keyword::With) {
 			Some(self.parse_with_clause()?)
 		} else {

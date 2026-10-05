@@ -196,6 +196,28 @@ impl TableRef {
 	}
 }
 
+/// A set operation kind in MySQL (e.g. `UNION`, `INTERSECT`, `EXCEPT`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetOpKind {
+	Union,
+	Intersect,
+	Except,
+}
+
+/// A set operation chaining two queries in MySQL.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetOperation {
+	pub op: SetOpKind,
+	pub all: bool,
+	pub right: Box<SelectStmt>,
+}
+
+impl SetOperation {
+	pub fn normalize_spans(&mut self) {
+		self.right.normalize_spans();
+	}
+}
+
 /// A MySQL `SELECT` statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectStmt {
@@ -208,6 +230,7 @@ pub struct SelectStmt {
 	pub order_by: Vec<OrderByExpr>,
 	pub limit: Option<LimitClause>,
 	pub lock: Option<LockClause>,
+	pub set_op: Option<SetOperation>,
 	pub span: Span,
 }
 
@@ -238,6 +261,9 @@ impl SelectStmt {
 		}
 		if let Some(lk) = &mut self.lock {
 			lk.span = zero;
+		}
+		if let Some(s) = &mut self.set_op {
+			s.normalize_spans();
 		}
 	}
 }

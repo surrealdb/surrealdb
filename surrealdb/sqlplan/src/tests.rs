@@ -786,3 +786,184 @@ fn test_null_ordering_lowering() {
 		other => panic!("expected Project, got {other:?}"),
 	}
 }
+
+#[test]
+fn test_set_operations_union_all_and_distinct() {
+	let mut catalog = MemoryCatalog::new();
+	catalog.add_table(
+		TableSchema::new("t1", vec![ColumnInfo::new("a", 0).with_type("int4")])
+			.with_schema("public"),
+	);
+	catalog.add_table(
+		TableSchema::new("t2", vec![ColumnInfo::new("a", 0).with_type("int4")])
+			.with_schema("public"),
+	);
+	let pg_policy = DialectPolicy::postgres();
+
+	// 1. UNION ALL
+	let sql = "SELECT a FROM t1 UNION ALL SELECT a FROM t2;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
+	let op = lower_bound_select(&bound, &pg_policy).unwrap();
+	assert!(matches!(op, LogicalOp::UnionAll(_)));
+
+	// 2. UNION (distinct)
+	let sql = "SELECT a FROM t1 UNION SELECT a FROM t2;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
+	let op = lower_bound_select(&bound, &pg_policy).unwrap();
+	assert!(matches!(op, LogicalOp::Distinct(_)));
+
+	// 3. INTERSECT
+	let sql = "SELECT a FROM t1 INTERSECT SELECT a FROM t2;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
+	let op = lower_bound_select(&bound, &pg_policy).unwrap();
+	match op {
+		LogicalOp::Distinct(d) => match *d.input {
+			LogicalOp::Join(j) => assert_eq!(j.kind, surrealdb_expr::expr::logical::JoinKind::Semi),
+			other => panic!("expected Join under Distinct, got {other:?}"),
+		},
+		other => panic!("expected Distinct, got {other:?}"),
+	}
+
+	// 4. EXCEPT
+	let sql = "SELECT a FROM t1 EXCEPT SELECT a FROM t2;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
+	let op = lower_bound_select(&bound, &pg_policy).unwrap();
+	match op {
+		LogicalOp::Distinct(d) => match *d.input {
+			LogicalOp::Join(j) => assert_eq!(j.kind, surrealdb_expr::expr::logical::JoinKind::Anti),
+			other => panic!("expected Join under Distinct, got {other:?}"),
+		},
+		other => panic!("expected Distinct, got {other:?}"),
+	}
+
+	// 5. MySQL UNION with outer ORDER BY & LIMIT
+	let my_policy = DialectPolicy::mysql();
+	let sql = "SELECT a FROM t1 UNION ALL SELECT a FROM t2 ORDER BY a DESC LIMIT 5;";
+	let stmts = surrealdb_mysql::parse_statements(sql).unwrap();
+	let select = match &stmts[0] {
+		surrealdb_mysql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+	let bound = binder::mysql::bind_select(select, &catalog, &my_policy, None).unwrap();
+	let op = lower_bound_select(&bound, &my_policy).unwrap();
+	match op {
+		LogicalOp::Limit(lim) => match *lim.input {
+			LogicalOp::Sort(sort) => match *sort.input {
+				LogicalOp::UnionAll(_) => {}
+				other => panic!("expected UnionAll under Sort, got {other:?}"),
+			},
+			other => panic!("expected Sort under Limit, got {other:?}"),
+		},
+		other => panic!("expected Limit, got {other:?}"),
+	}
+}
+
+#[test]
+fn test_joins_multi_table_using_and_right() {
+	let mut catalog = MemoryCatalog::new();
+	catalog.add_table(
+		TableSchema::new(
+			"users",
+			vec![
+				ColumnInfo::new("id", 0).with_type("int4"),
+				ColumnInfo::new("dept_id", 1).with_type("int4"),
+			],
+		)
+		.with_schema("public"),
+	);
+	catalog.add_table(
+		TableSchema::new(
+			"departments",
+			vec![
+				ColumnInfo::new("id", 0).with_type("int4"),
+				ColumnInfo::new("dept_id", 1).with_type("int4"),
+				ColumnInfo::new("name", 2).with_type("text"),
+			],
+		)
+		.with_schema("public"),
+	);
+	let pg_policy = DialectPolicy::postgres();
+
+	// 1. USING join
+	let sql = "SELECT users.id, departments.name FROM users JOIN departments USING (dept_id);";
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
+	let op = lower_bound_select(&bound, &pg_policy).unwrap();
+	match op {
+		LogicalOp::Project(proj) => match *proj.input {
+			LogicalOp::Join(j) => {
+				assert_eq!(j.kind, surrealdb_expr::expr::logical::JoinKind::Inner);
+				assert_eq!(j.on.len(), 1);
+			}
+			other => panic!("expected Join under Project, got {other:?}"),
+		},
+		other => panic!("expected Project, got {other:?}"),
+	}
+
+	// 2. RIGHT JOIN rewrite
+	let sql =
+		"SELECT users.id FROM users RIGHT JOIN departments ON users.dept_id = departments.dept_id;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
+	// Confirm bound source is inverted to Left join
+	match &bound.from {
+		Some(crate::ir::BoundTableSource::Join {
+			join_type,
+			..
+		}) => {
+			assert_eq!(*join_type, crate::ir::BoundJoinType::Left);
+		}
+		other => panic!("expected Left join in bound IR, got {other:?}"),
+	}
+
+	// 3. Multi-condition ON
+	let sql = "SELECT users.id FROM users JOIN departments ON users.id = departments.id AND users.dept_id = departments.dept_id;";
+	let stmts = surrealdb_pgsql::parse_statements(sql).unwrap();
+	let select = match &stmts[0] {
+		surrealdb_pgsql::ast::stmt::Statement::Select(s) => s,
+		_ => panic!("expected SELECT"),
+	};
+	let bound = binder::pgsql::bind_select(select, &catalog, &pg_policy, None).unwrap();
+	let op = lower_bound_select(&bound, &pg_policy).unwrap();
+	match op {
+		LogicalOp::Project(proj) => match *proj.input {
+			LogicalOp::Join(j) => {
+				assert_eq!(
+					j.on.len(),
+					2,
+					"Expected 2 equi-join pairs extracted from AND condition"
+				);
+			}
+			other => panic!("expected Join under Project, got {other:?}"),
+		},
+		other => panic!("expected Project, got {other:?}"),
+	}
+}

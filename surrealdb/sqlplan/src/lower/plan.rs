@@ -1,10 +1,11 @@
 //! Lowering from BoundSelect to SurrealDB `LogicalOp`.
 
+use surrealdb_expr::expr::BinaryOperator;
 use surrealdb_expr::expr::logical::{
 	EvalFrame, JoinKind, LogicalAggregate, LogicalDistinct, LogicalExpr, LogicalField,
 	LogicalFields, LogicalFilter, LogicalJoin, LogicalLimit, LogicalOp, LogicalOrdering,
-	LogicalProject, LogicalSort, LogicalSource, LogicalSubquery, LogicalValues, OutputPath,
-	RelationAlias, SourceRef,
+	LogicalProject, LogicalSort, LogicalSource, LogicalSubquery, LogicalUnionAll, LogicalValues,
+	OutputPath, RelationAlias, SourceRef,
 };
 use surrealdb_strand::TableName;
 
@@ -12,7 +13,7 @@ use crate::dialect::DialectPolicy;
 use crate::error::PlanError;
 use crate::ir::{
 	BoundBinaryOp, BoundColumnRef, BoundExpr, BoundJoinCondition, BoundJoinType, BoundOrder,
-	BoundSelect, BoundTableSource, BoundTarget,
+	BoundSelect, BoundSetOpKind, BoundTableSource, BoundTarget,
 };
 use crate::lower::expr::{
 	bound_expr_contains_aggregate, lower_bound_expr, lower_bound_order, lower_bound_target,
@@ -143,8 +144,8 @@ pub fn lower_bound_select(
 		});
 	}
 
-	// 6. ORDER BY clause
-	if !rewritten_order_by.is_empty() {
+	// 6. ORDER BY clause (if not deferred to set_op)
+	if select.set_op.is_none() && !rewritten_order_by.is_empty() {
 		let mut orders = Vec::new();
 		for o in &rewritten_order_by {
 			orders.extend(lower_bound_order(o, policy)?);
@@ -156,8 +157,8 @@ pub fn lower_bound_select(
 		});
 	}
 
-	// 7. LIMIT & OFFSET clause
-	if select.limit.is_some() || select.offset.is_some() {
+	// 7. LIMIT & OFFSET clause (if not deferred to set_op)
+	if select.set_op.is_none() && (select.limit.is_some() || select.offset.is_some()) {
 		let limit = select.limit.as_ref().map(|l| lower_bound_expr(l, policy)).transpose()?;
 		let start = select.offset.as_ref().map(|o| lower_bound_expr(o, policy)).transpose()?;
 		op = LogicalOp::Limit(LogicalLimit {
@@ -195,6 +196,107 @@ pub fn lower_bound_select(
 			fields: LogicalFields::all(),
 			omit: vec![],
 		});
+	}
+
+	// 9. Set Operation (UNION, INTERSECT, EXCEPT)
+	if let Some(set_op) = &select.set_op {
+		let right_op = lower_bound_select(&set_op.right, policy)?;
+		match set_op.op {
+			BoundSetOpKind::Union => {
+				let union_all = LogicalOp::UnionAll(LogicalUnionAll {
+					inputs: vec![op, right_op],
+				});
+				op = if set_op.all {
+					union_all
+				} else {
+					LogicalOp::Distinct(LogicalDistinct {
+						input: Box::new(union_all),
+					})
+				};
+			}
+			BoundSetOpKind::Intersect => {
+				let mut on = Vec::new();
+				for (i, t) in select.targets.iter().enumerate() {
+					let left_name = target_output_name(t);
+					let right_name = if i < set_op.right.targets.len() {
+						target_output_name(&set_op.right.targets[i])
+					} else {
+						left_name.clone()
+					};
+					let alias = RelationAlias::new(0);
+					on.push((LogicalExpr::Field(left_name.into()), alias.access(right_name)));
+				}
+				let semi_join = LogicalOp::Join(LogicalJoin::new(
+					op,
+					right_op,
+					JoinKind::Semi,
+					on,
+					None,
+					RelationAlias::new(0),
+					EvalFrame::caller(),
+				));
+				op = if set_op.all {
+					semi_join
+				} else {
+					LogicalOp::Distinct(LogicalDistinct {
+						input: Box::new(semi_join),
+					})
+				};
+			}
+			BoundSetOpKind::Except => {
+				let mut on = Vec::new();
+				for (i, t) in select.targets.iter().enumerate() {
+					let left_name = target_output_name(t);
+					let right_name = if i < set_op.right.targets.len() {
+						target_output_name(&set_op.right.targets[i])
+					} else {
+						left_name.clone()
+					};
+					let alias = RelationAlias::new(0);
+					on.push((LogicalExpr::Field(left_name.into()), alias.access(right_name)));
+				}
+				let anti_join = LogicalOp::Join(LogicalJoin::new(
+					op,
+					right_op,
+					JoinKind::Anti,
+					on,
+					None,
+					RelationAlias::new(0),
+					EvalFrame::caller(),
+				));
+				op = if set_op.all {
+					anti_join
+				} else {
+					LogicalOp::Distinct(LogicalDistinct {
+						input: Box::new(anti_join),
+					})
+				};
+			}
+		}
+
+		// Apply outer ORDER BY after set operation
+		if !rewritten_order_by.is_empty() {
+			let mut orders = Vec::new();
+			for o in &rewritten_order_by {
+				orders.extend(lower_bound_order(o, policy)?);
+			}
+			op = LogicalOp::Sort(LogicalSort {
+				input: Box::new(op),
+				ordering: LogicalOrdering::Order(orders),
+				tempfiles: false,
+			});
+		}
+
+		// Apply outer LIMIT & OFFSET after set operation
+		if select.limit.is_some() || select.offset.is_some() {
+			let limit = select.limit.as_ref().map(|l| lower_bound_expr(l, policy)).transpose()?;
+			let start = select.offset.as_ref().map(|o| lower_bound_expr(o, policy)).transpose()?;
+			op = LogicalOp::Limit(LogicalLimit {
+				input: Box::new(op),
+				start,
+				limit,
+			});
+		}
 	}
 
 	Ok(op)
@@ -437,36 +539,56 @@ fn lower_table_source(
 				}
 			};
 
+			let alias_idx = *join_counter;
+			*join_counter += 1;
+
 			let mut on = Vec::new();
 			let mut filter = None;
 
 			if let Some(cond) = condition {
 				match cond {
 					BoundJoinCondition::On(expr) => {
-						if let BoundExpr::Binary {
-							left,
-							op: BoundBinaryOp::Equal,
-							right,
-						} = expr
-						{
-							let l = lower_bound_expr(left, policy)?;
-							let r = lower_bound_expr(right, policy)?;
-							on.push((l, r));
-						} else {
-							let cond_expr = lower_bound_expr(expr, policy)?;
-							filter = Some(cond_expr);
+						let mut equi_pairs = Vec::new();
+						let mut residual = Vec::new();
+						extract_equi_conditions(expr, &mut equi_pairs, &mut residual);
+
+						for (l, r) in equi_pairs {
+							let (probe, build) =
+								if expr_max_relation_index(&l) > expr_max_relation_index(&r) {
+									(r, l)
+								} else {
+									(l, r)
+								};
+							let probe_expr = lower_bound_expr(&probe, policy)?;
+							let build_expr = lower_bound_expr(&build, policy)?;
+							on.push((probe_expr, build_expr));
+						}
+
+						if !residual.is_empty() {
+							let mut combined: Option<LogicalExpr> = None;
+							for res in residual {
+								let lowered = lower_bound_expr(&res, policy)?;
+								combined = match combined {
+									Some(c) => Some(LogicalExpr::Binary {
+										left: Box::new(c),
+										op: BinaryOperator::And,
+										right: Box::new(lowered),
+									}),
+									None => Some(lowered),
+								};
+							}
+							filter = combined;
 						}
 					}
-					BoundJoinCondition::Using(_) => {
-						return Err(PlanError::UnsupportedStatement(
-							"USING join condition not supported yet".into(),
-						));
+					BoundJoinCondition::Using(cols) => {
+						for col in cols {
+							let left_key = LogicalExpr::Field(col.clone().into());
+							let right_key = RelationAlias::new(alias_idx).access(col.clone());
+							on.push((left_key, right_key));
+						}
 					}
 				}
 			}
-
-			let alias_idx = *join_counter;
-			*join_counter += 1;
 
 			Ok(LogicalOp::Join(LogicalJoin::new(
 				left_op,
@@ -478,5 +600,52 @@ fn lower_table_source(
 				EvalFrame::caller(),
 			)))
 		}
+	}
+}
+
+fn extract_equi_conditions(
+	expr: &BoundExpr,
+	on: &mut Vec<(BoundExpr, BoundExpr)>,
+	residual: &mut Vec<BoundExpr>,
+) {
+	match expr {
+		BoundExpr::Binary {
+			left,
+			op: BoundBinaryOp::And,
+			right,
+		} => {
+			extract_equi_conditions(left, on, residual);
+			extract_equi_conditions(right, on, residual);
+		}
+		BoundExpr::Binary {
+			left,
+			op: BoundBinaryOp::Equal,
+			right,
+		} => {
+			on.push((*left.clone(), *right.clone()));
+		}
+		other => {
+			residual.push(other.clone());
+		}
+	}
+}
+
+fn expr_max_relation_index(expr: &BoundExpr) -> usize {
+	match expr {
+		BoundExpr::Column(col) => col.relation_index,
+		BoundExpr::Access {
+			base,
+			..
+		} => expr_max_relation_index(base),
+		BoundExpr::Binary {
+			left,
+			right,
+			..
+		} => expr_max_relation_index(left).max(expr_max_relation_index(right)),
+		BoundExpr::Unary {
+			expr,
+			..
+		} => expr_max_relation_index(expr),
+		_ => 0,
 	}
 }

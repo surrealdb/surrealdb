@@ -11,6 +11,7 @@ pub mod update;
 
 use crate::ast::stmt::Statement;
 use crate::lexer::keyword::Keyword;
+use crate::lexer::token::TokenKind;
 use crate::parser::Parser;
 use crate::parser::error::{ErrorKind, ParseError, ParseResult};
 
@@ -25,6 +26,9 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_statement_inner(&mut self) -> ParseResult<Statement> {
+		if self.peek().kind == TokenKind::LParen {
+			return Ok(Statement::Select(Box::new(self.parse_select_stmt()?)));
+		}
 		match self.peek_keyword() {
 			Some(Keyword::Select) => Ok(Statement::Select(Box::new(self.parse_select_stmt()?))),
 			Some(Keyword::Insert) => Ok(Statement::Insert(Box::new(self.parse_insert_stmt()?))),

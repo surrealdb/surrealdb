@@ -66,7 +66,9 @@ impl<'a> Parser<'a> {
 					)),
 				}
 			}
-			TokenKind::Keyword(Keyword::Select) => {
+			TokenKind::Keyword(Keyword::Select)
+			| TokenKind::LParen
+			| TokenKind::Keyword(Keyword::Values) => {
 				let s = self.parse_select_stmt()?;
 				Ok(Statement::Select(Box::new(s)))
 			}

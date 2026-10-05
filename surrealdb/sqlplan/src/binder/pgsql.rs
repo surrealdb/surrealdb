@@ -4,15 +4,17 @@ use std::sync::Arc;
 
 use surrealdb_pgsql::ast::expr::{Expr, NullsOrder, OrderDirection, QualifiedName};
 use surrealdb_pgsql::ast::literal::Literal as PgLiteral;
-use surrealdb_pgsql::ast::stmt::{DistinctClause, JoinCondition, JoinType, SelectStmt, TableRef};
+use surrealdb_pgsql::ast::stmt::{
+	DistinctClause, JoinCondition, JoinType, SelectStmt, SetOpKind, TableRef,
+};
 
 use crate::catalog::BinderCatalog;
 use crate::dialect::DialectPolicy;
 use crate::error::PlanError;
 use crate::ir::{
 	BoundBinaryOp, BoundColumnRef, BoundDistinct, BoundExpr, BoundJoinCondition, BoundJoinType,
-	BoundLiteral, BoundOrder, BoundOrderDirection, BoundSelect, BoundTableSource, BoundTarget,
-	BoundUnaryOp,
+	BoundLiteral, BoundOrder, BoundOrderDirection, BoundSelect, BoundSetOpKind, BoundSetOperation,
+	BoundTableSource, BoundTarget, BoundUnaryOp,
 };
 use crate::scope::QueryScope;
 
@@ -180,6 +182,23 @@ pub fn bind_select(
 
 	let for_update = !select.locking.is_empty();
 
+	let set_op = match &select.set_op {
+		Some(so) => {
+			let bound_right = bind_select(&so.right, catalog, policy, None)?;
+			let op = match so.op {
+				SetOpKind::Union => BoundSetOpKind::Union,
+				SetOpKind::Intersect => BoundSetOpKind::Intersect,
+				SetOpKind::Except => BoundSetOpKind::Except,
+			};
+			Some(BoundSetOperation {
+				op,
+				all: so.all,
+				right: Box::new(bound_right),
+			})
+		}
+		None => None,
+	};
+
 	Ok(BoundSelect {
 		from: from_source,
 		where_clause,
@@ -190,6 +209,7 @@ pub fn bind_select(
 		limit,
 		offset,
 		distinct,
+		set_op,
 		for_update,
 	})
 }
@@ -248,6 +268,26 @@ fn bind_table_ref(
 			condition,
 			..
 		} => {
+			if *join_type == JoinType::Right {
+				let bound_left = bind_table_ref(right, scope, catalog, policy)?;
+				let bound_right = bind_table_ref(left, scope, catalog, policy)?;
+				let bound_condition = match condition {
+					Some(JoinCondition::On(expr)) => {
+						Some(BoundJoinCondition::On(bind_expr(expr, scope, policy)?))
+					}
+					Some(JoinCondition::Using(cols)) => {
+						Some(BoundJoinCondition::Using(cols.clone()))
+					}
+					None => None,
+				};
+				return Ok(BoundTableSource::Join {
+					left: Box::new(bound_left),
+					join_type: BoundJoinType::Left,
+					right: Box::new(bound_right),
+					condition: bound_condition,
+				});
+			}
+
 			let bound_left = bind_table_ref(left, scope, catalog, policy)?;
 			let bound_right = bind_table_ref(right, scope, catalog, policy)?;
 

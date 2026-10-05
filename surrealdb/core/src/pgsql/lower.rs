@@ -1,7 +1,7 @@
 //! PostgreSQL AST to SurrealDB `LogicalOp` plan lowering.
 
-use surrealdb_expr::expr::logical::{LogicalDistinct, LogicalOp, LogicalUnionAll};
-use surrealdb_pgsql::ast::stmt::{SelectStmt, SetOpKind, Statement};
+use surrealdb_expr::expr::logical::LogicalOp;
+use surrealdb_pgsql::ast::stmt::{SelectStmt, Statement};
 use thiserror::Error;
 
 /// Error type for lowering failures.
@@ -52,33 +52,7 @@ pub fn lower_stmt(stmt: &Statement) -> Result<LogicalOp, NoLogicalForm<'_>> {
 pub fn lower_select(select: &SelectStmt) -> Result<LogicalOp, LowerError> {
 	let policy = surrealdb_sqlplan::DialectPolicy::postgres();
 	let catalog = surrealdb_sqlplan::EmptyCatalog;
-	let mut op = surrealdb_sqlplan::bind_and_lower_pgsql(select, &catalog, &policy)?;
-
-	// SET OPERATION (UNION, INTERSECT, EXCEPT)
-	if let Some(set_op) = &select.set_op {
-		let right_op = lower_select(&set_op.right)?;
-		match set_op.op {
-			SetOpKind::Union => {
-				let union_op = LogicalOp::UnionAll(LogicalUnionAll {
-					inputs: vec![op, right_op],
-				});
-				op = if set_op.all {
-					union_op
-				} else {
-					LogicalOp::Distinct(LogicalDistinct {
-						input: Box::new(union_op),
-					})
-				};
-			}
-			_ => {
-				return Err(LowerError::UnsupportedStmt(format!(
-					"Set operation {:?} not yet supported in streaming engine",
-					set_op.op
-				)));
-			}
-		}
-	}
-
+	let op = surrealdb_sqlplan::bind_and_lower_pgsql(select, &catalog, &policy)?;
 	Ok(op)
 }
 

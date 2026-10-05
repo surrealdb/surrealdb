@@ -1194,3 +1194,111 @@ async fn test_mywire_query_matrix_aggregations_and_group_by() {
 
 	shutdown.cancel();
 }
+
+#[tokio::test]
+async fn test_mywire_set_operations_and_joins() {
+	let (addr, shutdown) = start_test_mysql_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. UNION ALL with outer ORDER BY
+	let res =
+		query_mysql(&mut stream, "SELECT 10 AS num UNION ALL SELECT 20 AS num ORDER BY num ASC;")
+			.await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 2);
+			let r0 = decode_mysql_text_row(&rows[0]);
+			let r1 = decode_mysql_text_row(&rows[1]);
+			assert_eq!(r0[0].as_deref(), Some("10"));
+			assert_eq!(r1[0].as_deref(), Some("20"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 2. UNION (distinct)
+	let res =
+		query_mysql(&mut stream, "SELECT 1 AS x UNION SELECT 1 AS x UNION SELECT 2 AS x;").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 2, "Duplicate 1 must be deduplicated by UNION");
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 3. Parenthesised query
+	let res = query_mysql(&mut stream, "(SELECT 100 AS val) UNION ALL (SELECT 200 AS val);").await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 2);
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// 4. Table joins with USING and multi-equi conditions
+	let res =
+		query_mysql(&mut stream, "CREATE TABLE employees (id int, dept_id int, name text);").await;
+	assert!(matches!(res, QueryResult::Ok));
+
+	let res = query_mysql(&mut stream, "CREATE TABLE depts (dept_id int, dept_name text);").await;
+	assert!(matches!(res, QueryResult::Ok));
+
+	let res = query_mysql(
+		&mut stream,
+		"INSERT INTO employees (id, dept_id, name) VALUES (1, 10, 'Alice'), (2, 20, 'Bob'), (3, 99, 'Charlie');",
+	)
+	.await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	let res = query_mysql(
+		&mut stream,
+		"INSERT INTO depts (dept_id, dept_name) VALUES (10, 'Engineering'), (20, 'Sales'), (30, 'HR');",
+	)
+	.await;
+	assert!(matches!(res, QueryResult::Ok | QueryResult::ResultSet { .. }));
+
+	// Inner join with USING (dept_id)
+	let res = query_mysql(
+		&mut stream,
+		"SELECT employees.name, depts.dept_name FROM employees JOIN depts USING (dept_id) ORDER BY employees.id ASC;",
+	)
+	.await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 2);
+			let r0 = decode_mysql_text_row(&rows[0]);
+			assert_eq!(r0[0].as_deref(), Some("Alice"));
+			assert_eq!(r0[1].as_deref(), Some("Engineering"));
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	// RIGHT OUTER JOIN rewrite
+	let res = query_mysql(
+		&mut stream,
+		"SELECT employees.name, depts.dept_name FROM employees RIGHT JOIN depts ON employees.dept_id = depts.dept_id ORDER BY depts.dept_id ASC;",
+	)
+	.await;
+	match res {
+		QueryResult::ResultSet {
+			rows,
+			..
+		} => {
+			assert_eq!(rows.len(), 3, "All 3 departments should be present");
+		}
+		other => panic!("Expected ResultSet, got {other:?}"),
+	}
+
+	shutdown.cancel();
+}

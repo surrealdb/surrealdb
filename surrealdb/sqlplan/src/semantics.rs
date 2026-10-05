@@ -49,6 +49,11 @@ pub fn fold_select(select: &mut BoundSelect, policy: &DialectPolicy) -> Result<(
 		fold_table_source(from, policy)?;
 	}
 
+	// 8. Fold set_op recursively if present
+	if let Some(set_op) = &mut select.set_op {
+		fold_select(&mut set_op.right, policy)?;
+	}
+
 	Ok(())
 }
 

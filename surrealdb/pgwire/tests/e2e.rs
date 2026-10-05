@@ -1341,3 +1341,93 @@ async fn test_prepared_statement_byte_limit_rejection() {
 
 	shutdown.cancel();
 }
+
+#[tokio::test]
+async fn test_pgwire_set_operations_and_joins() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// 1. UNION ALL with outer ORDER BY
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT 10 AS num UNION ALL SELECT 20 AS num ORDER BY num ASC;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2);
+	let r0 = decode_data_row(&rows[0]);
+	let r1 = decode_data_row(&rows[1]);
+	assert_eq!(r0[0].as_deref(), Some("10"));
+	assert_eq!(r1[0].as_deref(), Some("20"));
+
+	// 2. UNION (distinct)
+	let (rows, last) =
+		run_simple_query(&mut stream, "SELECT 1 AS x UNION SELECT 1 AS x UNION SELECT 2 AS x;")
+			.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2, "Duplicate 1 must be deduplicated by UNION");
+
+	// 3. Parenthesised query
+	let (rows, last) =
+		run_simple_query(&mut stream, "(SELECT 100 AS val) UNION ALL (SELECT 200 AS val);").await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2);
+
+	// 4. Bare VALUES statement
+	let (rows, last) = run_simple_query(&mut stream, "VALUES (1, 'alice'), (2, 'bob');").await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2);
+	let r0 = decode_data_row(&rows[0]);
+	assert_eq!(r0[0].as_deref(), Some("1"));
+	assert_eq!(r0[1].as_deref(), Some("alice"));
+	let r1 = decode_data_row(&rows[1]);
+	assert_eq!(r1[0].as_deref(), Some("2"));
+	assert_eq!(r1[1].as_deref(), Some("bob"));
+
+	// 5. Table joins with USING and multi-equi conditions
+	let (_, last) =
+		run_simple_query(&mut stream, "CREATE TABLE employees (id int, dept_id int, name text);")
+			.await;
+	assert_eq!(last, b'C');
+
+	let (_, last) =
+		run_simple_query(&mut stream, "CREATE TABLE depts (dept_id int, dept_name text);").await;
+	assert_eq!(last, b'C');
+
+	let (_, last) = run_simple_query(
+		&mut stream,
+		"INSERT INTO employees (id, dept_id, name) VALUES (1, 10, 'Alice'), (2, 20, 'Bob'), (3, 99, 'Charlie');",
+	)
+	.await;
+	assert_eq!(last, b'C');
+
+	let (_, last) = run_simple_query(
+		&mut stream,
+		"INSERT INTO depts (dept_id, dept_name) VALUES (10, 'Engineering'), (20, 'Sales'), (30, 'HR');",
+	)
+	.await;
+	assert_eq!(last, b'C');
+
+	// Inner join with USING (dept_id)
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT employees.name, depts.dept_name FROM employees JOIN depts USING (dept_id) ORDER BY employees.id ASC;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 2);
+	let r0 = decode_data_row(&rows[0]);
+	assert_eq!(r0[0].as_deref(), Some("Alice"));
+	assert_eq!(r0[1].as_deref(), Some("Engineering"));
+
+	// RIGHT OUTER JOIN rewrite
+	let (rows, last) = run_simple_query(
+		&mut stream,
+		"SELECT employees.name, depts.dept_name FROM employees RIGHT JOIN depts ON employees.dept_id = depts.dept_id ORDER BY depts.dept_id ASC;",
+	)
+	.await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 3, "All 3 departments should be present");
+
+	shutdown.cancel();
+}

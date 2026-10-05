@@ -2,7 +2,7 @@
 
 use crate::ast::stmt::{
 	JoinCondition, JoinType, LimitClause, LockClause, LockType, OrderByExpr, SelectItem,
-	SelectStmt, TableRef,
+	SelectStmt, SetOpKind, SetOperation, TableRef,
 };
 use crate::lexer::keyword::Keyword;
 use crate::lexer::token::TokenKind;
@@ -14,12 +14,114 @@ impl<'a> Parser<'a> {
 	pub fn parse_select_stmt(&mut self) -> ParseResult<SelectStmt> {
 		self.check_recursion_limit()?;
 		self.recursion_depth += 1;
-		let res = self.parse_select_stmt_inner();
+		let mut root = self.parse_select_stmt_inner()?;
+
+		let mut current = &mut root;
+		loop {
+			let set_op_kind = match self.peek_keyword() {
+				Some(Keyword::Union) => Some(SetOpKind::Union),
+				Some(Keyword::Intersect) => Some(SetOpKind::Intersect),
+				Some(Keyword::Except) => Some(SetOpKind::Except),
+				_ => None,
+			};
+			let Some(op) = set_op_kind else {
+				break;
+			};
+			self.bump();
+			let all = if self.peek_keyword() == Some(Keyword::All) {
+				self.bump();
+				true
+			} else if self.peek_keyword() == Some(Keyword::Distinct) {
+				self.bump();
+				false
+			} else {
+				false
+			};
+			let right = self.parse_select_stmt_inner()?;
+			current.span = current.span.merge(right.span);
+			current.set_op = Some(SetOperation {
+				op,
+				all,
+				right: Box::new(right),
+			});
+			if let Some(ref mut so) = current.set_op {
+				current = so.right.as_mut();
+			} else {
+				break;
+			}
+		}
+
+		// Optional outer ORDER BY and LIMIT after set operations
+		if root.set_op.is_some() {
+			if self.peek_keyword() == Some(Keyword::Order) {
+				self.bump();
+				self.expect_keyword(Keyword::By, "BY after ORDER")?;
+				root.order_by = self.parse_order_by_list()?;
+			}
+			if self.peek_keyword() == Some(Keyword::Limit) {
+				let limit_start = self.bump().span;
+				let first = self.parse_expr()?;
+				if self.peek().kind == TokenKind::Comma {
+					self.bump();
+					let second = self.parse_expr()?;
+					let span = limit_start.merge(second.span());
+					root.limit = Some(LimitClause {
+						offset: Some(first),
+						count: second,
+						span,
+					});
+				} else if self.peek_keyword() == Some(Keyword::Offset) {
+					self.bump();
+					let off = self.parse_expr()?;
+					let span = limit_start.merge(off.span());
+					root.limit = Some(LimitClause {
+						offset: Some(off),
+						count: first,
+						span,
+					});
+				} else {
+					let span = limit_start.merge(first.span());
+					root.limit = Some(LimitClause {
+						offset: None,
+						count: first,
+						span,
+					});
+				}
+			}
+
+			// If outer order_by or limit was not parsed separately, hoist from rightmost child
+			if root.order_by.is_empty() && root.limit.is_none() {
+				let mut curr = &mut root.set_op;
+				let mut hoisted_order = None;
+				let mut hoisted_limit = None;
+				while let Some(so) = curr {
+					if so.right.set_op.is_none() {
+						hoisted_order = Some(std::mem::take(&mut so.right.order_by));
+						hoisted_limit = so.right.limit.take();
+						break;
+					}
+					curr = &mut so.right.set_op;
+				}
+				if let Some(o) = hoisted_order {
+					root.order_by = o;
+				}
+				if hoisted_limit.is_some() {
+					root.limit = hoisted_limit;
+				}
+			}
+		}
+
 		self.recursion_depth -= 1;
-		res
+		Ok(root)
 	}
 
 	fn parse_select_stmt_inner(&mut self) -> ParseResult<SelectStmt> {
+		if self.peek().kind == TokenKind::LParen {
+			self.bump();
+			let stmt = self.parse_select_stmt()?;
+			self.expect(&TokenKind::RParen, ")")?;
+			return Ok(stmt);
+		}
 		let start = self.expect_keyword(Keyword::Select, "SELECT")?.span;
 
 		// Distinct / All
@@ -169,6 +271,7 @@ impl<'a> Parser<'a> {
 			order_by,
 			limit,
 			lock,
+			set_op: None,
 			span,
 		})
 	}

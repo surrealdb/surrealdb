@@ -3,9 +3,9 @@
 use crate::ast::expr::{ColumnRef, Expr, TruthValue};
 use crate::ast::stmt::{
 	ColumnDef, CreateTableStmt, DeleteStmt, DescribeStmt, DropTableStmt, ExplainStmt, InsertStmt,
-	JoinCondition, JoinType, LockType, QualifiedName, ReplaceStmt, SelectItem, SelectStmt, SetStmt,
-	ShowStmt, Statement, TableConstraint, TableRef, TransactionStmt, TruncateStmt, UpdateStmt,
-	UseStmt, VariableTarget,
+	JoinCondition, JoinType, LockType, QualifiedName, ReplaceStmt, SelectItem, SelectStmt,
+	SetOpKind, SetOperation, SetStmt, ShowStmt, Statement, TableConstraint, TableRef,
+	TransactionStmt, TruncateStmt, UpdateStmt, UseStmt, VariableTarget,
 };
 
 /// Trait for AST nodes that can be formatted as MySQL SQL syntax.
@@ -352,6 +352,20 @@ impl ToMySql for TableRef {
 	}
 }
 
+impl ToMySql for SetOperation {
+	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self.op {
+			SetOpKind::Union => write!(f, " UNION ")?,
+			SetOpKind::Intersect => write!(f, " INTERSECT ")?,
+			SetOpKind::Except => write!(f, " EXCEPT ")?,
+		}
+		if self.all {
+			write!(f, "ALL ")?;
+		}
+		self.right.fmt_mysql(f)
+	}
+}
+
 impl ToMySql for SelectStmt {
 	fn fmt_mysql(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "SELECT ")?;
@@ -384,6 +398,9 @@ impl ToMySql for SelectStmt {
 		if let Some(h) = &self.having {
 			write!(f, " HAVING ")?;
 			h.fmt_mysql(f)?;
+		}
+		if let Some(set_op) = &self.set_op {
+			set_op.fmt_mysql(f)?;
 		}
 		if !self.order_by.is_empty() {
 			write!(f, " ORDER BY ")?;

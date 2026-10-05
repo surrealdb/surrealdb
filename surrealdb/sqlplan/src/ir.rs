@@ -21,8 +21,26 @@ pub struct BoundSelect {
 	pub offset: Option<BoundExpr>,
 	/// Optional DISTINCT modifier.
 	pub distinct: Option<BoundDistinct>,
+	/// Optional set operation (UNION, INTERSECT, EXCEPT).
+	pub set_op: Option<BoundSetOperation>,
 	/// Whether row locking (`FOR UPDATE` / `FOR SHARE`) was requested.
 	pub for_update: bool,
+}
+
+/// A set operation kind in Bound IR (e.g. `UNION`, `INTERSECT`, `EXCEPT`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundSetOpKind {
+	Union,
+	Intersect,
+	Except,
+}
+
+/// A set operation chaining two queries in Bound IR.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundSetOperation {
+	pub op: BoundSetOpKind,
+	pub all: bool,
+	pub right: Box<BoundSelect>,
 }
 
 /// A target item in the SELECT projection list.
@@ -307,5 +325,6 @@ impl BoundSelect {
 		self.targets.iter().any(|t| t.expr.has_params())
 			|| self.where_clause.as_ref().is_some_and(|w| w.has_params())
 			|| self.having.as_ref().is_some_and(|h| h.has_params())
+			|| self.set_op.as_ref().is_some_and(|s| s.right.has_params())
 	}
 }
