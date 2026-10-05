@@ -10,6 +10,7 @@ pub mod error;
 pub mod ir;
 pub mod lower;
 pub mod namespace;
+pub mod observability;
 pub mod scope;
 pub mod semantics;
 
@@ -36,9 +37,12 @@ pub use lower::write::{
 	lower_pgsql_insert, lower_pgsql_truncate, lower_pgsql_update,
 };
 pub use namespace::{resolve_mysql_table_name, resolve_pgsql_table_name};
+pub use observability::{
+	SqlPlanMetrics, SqlPlanMetricsSnapshot, global_metrics, redact_sql_credentials,
+};
 pub use scope::{QueryScope, RelationEntry};
 pub use semantics::{fold_expr, fold_select};
-use surrealdb_expr::expr::logical::LogicalOp;
+pub use surrealdb_expr::expr::logical::LogicalOp;
 use surrealdb_mysql::ast::stmt::SelectStmt as MySelectStmt;
 use surrealdb_pgsql::ast::stmt::SelectStmt as PgSelectStmt;
 

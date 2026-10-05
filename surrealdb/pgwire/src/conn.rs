@@ -10,15 +10,21 @@ use surrealdb_core::ctx::CancelHandle;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::{self, ScramAuth, basic};
 use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
+use surrealdb_core::pgsql::lower::lower_stmt;
 use surrealdb_core::syn;
 use surrealdb_datastore::Transaction;
 use surrealdb_kvs::TransactionType;
 use surrealdb_pgsql::ast::stmt::Statement as PgStatement;
 use surrealdb_rpc::capabilities::RouteTarget;
-use surrealdb_sql::Ast;
+use surrealdb_sql::{Ast, Expr, TopLevelExpr};
 use surrealdb_sqlplan::binder::pgsql::bind_select;
 use surrealdb_sqlplan::catalog::MemoryCatalog;
 use surrealdb_sqlplan::dialect::DialectPolicy;
+use surrealdb_sqlplan::observability::global_metrics;
+use surrealdb_sqlplan::{
+	LogicalOp, SqlDialect, lower_pgsql_ddl, lower_pgsql_delete, lower_pgsql_insert,
+	lower_pgsql_truncate, lower_pgsql_update,
+};
 use surrealdb_types::{Value, Variables};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -47,9 +53,17 @@ type PgStream = Either<TcpStream, TlsStream<TcpStream>>;
 const FORMAT_TEXT: i16 = 0;
 const FORMAT_BINARY: i16 = 1;
 
-/// Upper bound on live prepared statements / portals per connection, so a
-/// client cannot accumulate them without limit.
+/// Upper bound on live prepared statements per connection.
 const MAX_PREPARED: usize = 1024;
+
+/// Upper memory bound (32 MiB) on total live prepared statements per connection.
+const MAX_PREPARED_BYTES: usize = 32 * 1024 * 1024;
+
+/// Upper bound on live portals per connection.
+const MAX_PORTALS: usize = 1024;
+
+/// Upper memory bound (64 MiB) on total live portals per connection.
+const MAX_PORTAL_BYTES: usize = 64 * 1024 * 1024;
 
 /// Upper bound on the parameters a prepared statement may reference. The client
 /// controls the positional index in the query text (`$n`), so without a cap a
@@ -57,15 +71,24 @@ const MAX_PREPARED: usize = 1024;
 /// allocation; `i16::MAX` also keeps the on-wire parameter count in range.
 const MAX_PARAMS: usize = i16::MAX as usize;
 
+/// Pre-parsed and pre-bound plan execution artifact.
+#[derive(Clone)]
+enum CachedPlan {
+	SurrealQl(Ast),
+	PgSelect {
+		plan: LogicalOp,
+	},
+	PgAst(Ast),
+}
+
 /// A parsed, not-yet-bound prepared statement.
 struct PreparedStatement {
 	/// The (positional-rewritten) query text; used for GQL, and as the source
 	/// for error messages.
 	query: String,
-	/// The parsed SurrealQL AST, cached at Parse so repeated Execute does not
-	/// re-parse. `None` for the GQL dialect (parsed by its own executor) and
-	/// for empty queries.
-	parsed: Option<Ast>,
+	/// Pre-parsed and pre-bound query plan (SurrealQL AST or PgSQL LogicalOp/AST),
+	/// cached at Parse so repeated Execute does not re-parse or re-bind.
+	cached_plan: Option<CachedPlan>,
 	/// Client-declared parameter type OIDs (`0` = unspecified); may be shorter
 	/// than the number of `$n` placeholders in the query.
 	param_types: Vec<i32>,
@@ -84,6 +107,23 @@ struct PreparedStatement {
 	control: Option<Control>,
 	/// Static result descriptor from the query planner if available.
 	descriptor: Option<surrealdb_sqlplan::ResultDescriptor>,
+}
+
+impl PreparedStatement {
+	fn estimated_size(&self) -> usize {
+		std::mem::size_of::<Self>()
+			+ self.query.capacity()
+			+ self.param_types.capacity() * std::mem::size_of::<i32>()
+			+ if self.cached_plan.is_some() {
+				1024
+			} else {
+				0
+			} + if self.descriptor.is_some() {
+			512
+		} else {
+			0
+		}
+	}
 }
 
 /// An extended-protocol statement that is intercepted rather than executed. The
@@ -120,6 +160,32 @@ struct Portal {
 	/// For a control-statement portal: whether its side effect has already run,
 	/// so a re-Execute before Sync does not repeat `BEGIN`/`COMMIT`/etc.
 	control_ran: bool,
+}
+
+impl Portal {
+	fn estimated_size(&self) -> usize {
+		let mut size = std::mem::size_of::<Self>()
+			+ self.statement.capacity()
+			+ self.result_formats.capacity() * std::mem::size_of::<i16>();
+		if let Some(executed) = &self.executed {
+			size += std::mem::size_of::<Executed>()
+				+ executed.columns.capacity() * std::mem::size_of::<PgColumn>();
+			for row in &executed.rows {
+				size += std::mem::size_of::<Vec<Option<Value>>>()
+					+ row.capacity() * std::mem::size_of::<Option<Value>>();
+				for v in row.iter().flatten() {
+					size += match v {
+						Value::String(s) => s.len(),
+						Value::Bytes(b) => b.len(),
+						Value::Array(a) => a.len() * 32,
+						Value::Object(o) => o.len() * 64,
+						_ => 16,
+					};
+				}
+			}
+		}
+		size
+	}
 }
 
 /// A portal's materialized result, drained across one or more Execute calls.
@@ -177,6 +243,8 @@ pub(super) async fn handle(
 		session: Session::default(),
 		statements: HashMap::new(),
 		portals: HashMap::new(),
+		prepared_bytes: 0,
+		portal_bytes: 0,
 		dialect: Dialect::SurrealQl,
 		transaction: None,
 		txn_failed: false,
@@ -317,6 +385,8 @@ struct Connection {
 	session: Session,
 	statements: HashMap<String, PreparedStatement>,
 	portals: HashMap<String, Portal>,
+	prepared_bytes: usize,
+	portal_bytes: usize,
 	/// The query language this connection speaks. Chosen at startup via
 	/// `options=-c dialect=...` and switchable in-session with `SET dialect`.
 	/// Only ever assigned through [`Connection::select_dialect`], which applies
@@ -872,6 +942,7 @@ impl Connection {
 					skip_until_sync = false;
 					// End of the implicit transaction: portals do not survive it.
 					self.portals.clear();
+					self.portal_bytes = 0;
 					let status = self.ready_status();
 					msg::write_ready_for_query(&mut out, status);
 					self.flush(&mut out).await?;
@@ -907,6 +978,55 @@ impl Connection {
 		Ok(())
 	}
 
+	fn insert_statement(&mut self, name: String, stmt: PreparedStatement) -> Result<(), PgError> {
+		let size = stmt.estimated_size();
+		let old_size = self.statements.get(&name).map(|s| s.estimated_size()).unwrap_or(0);
+		let new_total = (self.prepared_bytes + size).saturating_sub(old_size);
+		if new_total > MAX_PREPARED_BYTES {
+			return Err(PgError::too_many_prepared("prepared statement cache byte limit exceeded"));
+		}
+		self.prepared_bytes = new_total;
+		global_metrics().record_prepared_stmt(size);
+		if old_size > 0 {
+			global_metrics().record_closed_stmt(old_size);
+		}
+		self.statements.insert(name, stmt);
+		Ok(())
+	}
+
+	fn remove_statement(&mut self, name: &str) -> Option<PreparedStatement> {
+		if let Some(stmt) = self.statements.remove(name) {
+			let size = stmt.estimated_size();
+			self.prepared_bytes = self.prepared_bytes.saturating_sub(size);
+			global_metrics().record_closed_stmt(size);
+			Some(stmt)
+		} else {
+			None
+		}
+	}
+
+	fn insert_portal(&mut self, name: String, portal: Portal) -> Result<(), PgError> {
+		let size = portal.estimated_size();
+		let old_size = self.portals.get(&name).map(|p| p.estimated_size()).unwrap_or(0);
+		let new_total = (self.portal_bytes + size).saturating_sub(old_size);
+		if new_total > MAX_PORTAL_BYTES {
+			return Err(PgError::too_many_prepared("portal memory limit exceeded"));
+		}
+		self.portal_bytes = new_total;
+		self.portals.insert(name, portal);
+		Ok(())
+	}
+
+	fn remove_portal(&mut self, name: &str) -> Option<Portal> {
+		if let Some(portal) = self.portals.remove(name) {
+			let size = portal.estimated_size();
+			self.portal_bytes = self.portal_bytes.saturating_sub(size);
+			Some(portal)
+		} else {
+			None
+		}
+	}
+
 	fn handle_parse(
 		&mut self,
 		name: String,
@@ -931,11 +1051,11 @@ impl Connection {
 		if let Some(control) = transaction_control(query).map(Control::Transaction).or_else(|| {
 			parse_set(query).filter(|set| self.should_intercept_set(set)).map(Control::Set)
 		}) {
-			self.statements.insert(
+			self.insert_statement(
 				name,
 				PreparedStatement {
 					query: query.to_string(),
-					parsed: None,
+					cached_plan: None,
 					param_types: Vec::new(),
 					param_count: 0,
 					empty: false,
@@ -943,11 +1063,11 @@ impl Connection {
 					control: Some(control),
 					descriptor: None,
 				},
-			);
+			)?;
 			msg::write_parse_complete(out);
 			return Ok(());
 		}
-		let (query, parsed, param_count, empty, descriptor) = match self.dialect {
+		let (query, cached_plan, param_count, empty, descriptor) = match self.dialect {
 			Dialect::SurrealQl => {
 				// Parse once so syntax errors surface at Parse (as Postgres does)
 				// and the AST can be cached for repeated Execute without re-parsing.
@@ -958,38 +1078,94 @@ impl Connection {
 						.map_err(|err| PgError::syntax(err.to_string()))?;
 				let empty = ast.num_statements() == 0;
 				let param_count = param_types.len().max(positional);
-				let parsed = if empty {
+				let cached_plan = if empty {
 					None
 				} else {
-					Some(ast)
+					Some(CachedPlan::SurrealQl(ast))
 				};
-				(rewritten, parsed, param_count, empty, None)
+				(rewritten, cached_plan, param_count, empty, None)
 			}
 			Dialect::PgSql => {
+				global_metrics().record_query(SqlDialect::Postgres);
 				let stmts = surrealdb_pgsql::parse_statements(query)
 					.map_err(|err| PgError::syntax(err.to_string()))?;
 				let empty = stmts.is_empty();
 				let (_, positional) = rewrite_positional_params(query);
 				let mut param_count = param_types.len().max(positional);
 				let mut descriptor = None;
-				if !empty && let PgStatement::Select(select) = &stmts[0] {
-					let mut catalog = MemoryCatalog::new();
-					if let Some(db) = &self.session.db {
-						catalog.set_database(Some(db.clone()));
-					}
-					let policy = DialectPolicy::postgres();
-					if let Ok(bound) = bind_select(select, &catalog, &policy, None) {
-						let desc = bound.describe(&catalog, &policy);
-						let param_desc = bound.describe_parameters(&catalog);
-						param_count = param_count.max(param_desc.param_types.len());
-						descriptor = Some(desc);
+				let mut cached_plan = None;
+				if !empty {
+					match &stmts[0] {
+						PgStatement::Select(select) => {
+							let mut catalog = MemoryCatalog::new();
+							if let Some(db) = &self.session.db {
+								catalog.set_database(Some(db.clone()));
+							}
+							let policy = DialectPolicy::postgres();
+							if let Ok(bound) = bind_select(select, &catalog, &policy, None) {
+								let desc = bound.describe(&catalog, &policy);
+								let param_desc = bound.describe_parameters(&catalog);
+								param_count = param_count.max(param_desc.param_types.len());
+								descriptor = Some(desc);
+							}
+							if let Ok(op) = lower_stmt(&stmts[0]) {
+								cached_plan = Some(CachedPlan::PgSelect {
+									plan: op,
+								});
+							}
+						}
+						PgStatement::Insert(insert) => {
+							if let Ok(expr) = lower_pgsql_insert(insert) {
+								cached_plan = Some(CachedPlan::PgAst(Ast {
+									expressions: vec![TopLevelExpr::Expr(Expr::from(expr))],
+								}));
+							}
+						}
+						PgStatement::Update(update) => {
+							if let Ok(expr) = lower_pgsql_update(update) {
+								cached_plan = Some(CachedPlan::PgAst(Ast {
+									expressions: vec![TopLevelExpr::Expr(Expr::from(expr))],
+								}));
+							}
+						}
+						PgStatement::Delete(delete) => {
+							if let Ok(expr) = lower_pgsql_delete(delete) {
+								cached_plan = Some(CachedPlan::PgAst(Ast {
+									expressions: vec![TopLevelExpr::Expr(Expr::from(expr))],
+								}));
+							}
+						}
+						PgStatement::Truncate(truncate) => {
+							if let Ok(expr) = lower_pgsql_truncate(truncate) {
+								cached_plan = Some(CachedPlan::PgAst(Ast {
+									expressions: vec![TopLevelExpr::Expr(Expr::from(expr))],
+								}));
+							}
+						}
+						PgStatement::CreateTable(_)
+						| PgStatement::CreateIndex(_)
+						| PgStatement::CreateView(_)
+						| PgStatement::AlterTable(_)
+						| PgStatement::Drop(_) => {
+							if let Ok(exprs) = lower_pgsql_ddl(&stmts[0]) {
+								cached_plan = Some(CachedPlan::PgAst(Ast {
+									expressions: exprs
+										.into_iter()
+										.map(|e| TopLevelExpr::Expr(Expr::from(e)))
+										.collect(),
+								}));
+							}
+						}
+						_ => {}
 					}
 				}
-				(query.to_string(), None, param_count, empty, descriptor)
+				(query.to_string(), cached_plan, param_count, empty, descriptor)
 			}
 			Dialect::Gql | Dialect::MySql => {
+				let (_, positional) = rewrite_positional_params(query);
+				let param_count = param_types.len().max(positional);
 				let empty = query.trim().is_empty();
-				(query.to_string(), None, param_types.len(), empty, None)
+				(query.to_string(), None, param_count, empty, None)
 			}
 		};
 		// Reject an absurd parameter count before it reaches the
@@ -999,11 +1175,11 @@ impl Connection {
 				"statement references {param_count} parameters, exceeding the maximum of {MAX_PARAMS}"
 			)));
 		}
-		self.statements.insert(
+		self.insert_statement(
 			name,
 			PreparedStatement {
 				query,
-				parsed,
+				cached_plan,
 				param_count,
 				param_types,
 				empty,
@@ -1011,7 +1187,7 @@ impl Connection {
 				control: None,
 				descriptor,
 			},
-		);
+		)?;
 		msg::write_parse_complete(out);
 		Ok(())
 	}
@@ -1036,7 +1212,7 @@ impl Connection {
 				stmt.param_count
 			)));
 		}
-		if !self.portals.contains_key(&portal) && self.portals.len() >= MAX_PREPARED {
+		if !self.portals.contains_key(&portal) && self.portals.len() >= MAX_PORTALS {
 			return Err(PgError::too_many_prepared("portals"));
 		}
 		// Decode only the parameters the statement actually references (bounded by
@@ -1054,7 +1230,7 @@ impl Connection {
 			vars.insert(surrealdb_types::positional_param_name(param_num), value.clone());
 			vars.insert(format!("param_{param_num}"), value);
 		}
-		self.portals.insert(
+		self.insert_portal(
 			portal,
 			Portal {
 				statement,
@@ -1063,7 +1239,7 @@ impl Connection {
 				executed: None,
 				control_ran: false,
 			},
-		);
+		)?;
 		msg::write_bind_complete(out);
 		Ok(())
 	}
@@ -1277,12 +1453,20 @@ impl Connection {
 	fn handle_close(&mut self, target: DescribeTarget, name: &str, out: &mut BytesMut) {
 		match target {
 			DescribeTarget::Statement => {
-				self.statements.remove(name);
+				self.remove_statement(name);
 				// Drop any portals bound to the closed statement.
-				self.portals.retain(|_, p| p.statement != name);
+				let doomed: Vec<String> = self
+					.portals
+					.iter()
+					.filter(|(_, p)| p.statement == name)
+					.map(|(k, _)| k.clone())
+					.collect();
+				for p in doomed {
+					self.remove_portal(&p);
+				}
 			}
 			DescribeTarget::Portal => {
-				self.portals.remove(name);
+				self.remove_portal(name);
 			}
 		}
 		// Closing a non-existent statement/portal is not an error in Postgres.
@@ -1305,9 +1489,9 @@ impl Connection {
 		};
 		let jsonb_shape = stmt.described && stmt.descriptor.is_none();
 		let descriptor = stmt.descriptor.clone();
-		let parsed = stmt.parsed.clone();
+		let cached_plan = stmt.cached_plan.clone();
 		let query = stmt.query.clone();
-		let value = self.execute_query(parsed, &query, params).await?;
+		let value = self.execute_query(cached_plan, &query, params).await?;
 		let shape = if let Some(desc) = &descriptor {
 			shape_result_with_descriptor(desc, value)
 		} else if jsonb_shape {
@@ -1322,11 +1506,22 @@ impl Connection {
 				msg::MAX_COLUMNS
 			)));
 		}
+		let old_portal_size = {
+			let portal = self.portals.get(portal_name).expect("checked above");
+			portal.estimated_size()
+		};
 		let portal = self.portals.get_mut(portal_name).expect("checked above");
 		portal.executed = Some(Executed {
 			columns: shape.columns,
 			rows: shape.rows.into(),
 		});
+		let new_portal_size = portal.estimated_size();
+		let new_total = (self.portal_bytes + new_portal_size).saturating_sub(old_portal_size);
+		if new_total > MAX_PORTAL_BYTES {
+			portal.executed = None;
+			return Err(PgError::too_many_prepared("portal memory limit exceeded"));
+		}
+		self.portal_bytes = new_total;
 		Ok(())
 	}
 
@@ -1337,7 +1532,7 @@ impl Connection {
 	/// GQL executes its query text through the GQL executor.
 	async fn execute_query(
 		&mut self,
-		parsed: Option<Ast>,
+		cached_plan: Option<CachedPlan>,
 		query: &str,
 		params: Variables,
 	) -> Result<Value, PgError> {
@@ -1348,7 +1543,7 @@ impl Connection {
 			));
 		}
 		let cancel = self.arm_cancel();
-		let results = match (self.dialect, self.transaction.clone(), parsed) {
+		let results = match (self.dialect, self.transaction.clone(), cached_plan) {
 			// GQL is never parsed at Parse time (different parser, different
 			// parameter syntax), so it reaches here as text. It cannot be in a
 			// transaction: the guard above refused that.
@@ -1357,6 +1552,32 @@ impl Connection {
 				.run(
 					QueryRequest::new(QuerySource::gql(query), &self.session)
 						.with_variables(Some(params))
+						.with_cancel(cancel),
+				)
+				.await
+				.map_err(|e| PgError::from(&e)),
+			(
+				Dialect::PgSql,
+				transaction,
+				Some(CachedPlan::PgSelect {
+					plan,
+				}),
+			) => self
+				.ds
+				.run(
+					QueryRequest::new(QuerySource::Plan(vec![plan]), &self.session)
+						.with_variables(Some(params))
+						.with_optional_transaction(transaction)
+						.with_cancel(cancel),
+				)
+				.await
+				.map_err(|e| PgError::from(&e)),
+			(Dialect::PgSql, transaction, Some(CachedPlan::PgAst(ast))) => self
+				.ds
+				.run(
+					QueryRequest::new(ast, &self.session)
+						.with_variables(Some(params))
+						.with_optional_transaction(transaction)
 						.with_cancel(cancel),
 				)
 				.await
@@ -1381,7 +1602,7 @@ impl Connection {
 				)
 				.await
 				.map_err(|e| PgError::from(&e)),
-			(Dialect::SurrealQl, transaction, Some(ast)) => self
+			(Dialect::SurrealQl, transaction, Some(CachedPlan::SurrealQl(ast))) => self
 				.ds
 				.run(
 					QueryRequest::new(ast, &self.session)
@@ -1391,7 +1612,7 @@ impl Connection {
 				)
 				.await
 				.map_err(|e| PgError::from(&e)),
-			(Dialect::SurrealQl, transaction, None) => self
+			(Dialect::SurrealQl, transaction, _) => self
 				.ds
 				.run(
 					QueryRequest::new(query, &self.session)
@@ -1546,6 +1767,7 @@ impl Connection {
 	}
 
 	async fn run_pgsql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
+		global_metrics().record_query(SqlDialect::Postgres);
 		let mut descriptor = None;
 		if let Ok(stmts) = surrealdb_pgsql::parse_statements(sql) {
 			let mut catalog = MemoryCatalog::new();
@@ -1665,6 +1887,7 @@ impl Connection {
 	}
 
 	async fn run_mysql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
+		global_metrics().record_query(SqlDialect::MySql);
 		let cancel = self.arm_cancel();
 		let req = QueryRequest::new(QuerySource::mysql(sql), &self.session)
 			.with_optional_transaction(self.transaction.clone())
@@ -2068,6 +2291,9 @@ impl Connection {
 	/// interactive transaction, poison the transaction so the next Sync reports
 	/// status 'E' — matching the simple-protocol path and Postgres semantics.
 	fn note_extended_error(&mut self, err: &PgError, out: &mut BytesMut) {
+		if err.code == "0A000" {
+			global_metrics().record_unsupported_feature(&err.message);
+		}
 		msg::write_error_response(out, err);
 		if self.transaction.is_some() {
 			self.txn_failed = true;
@@ -2080,6 +2306,9 @@ impl Connection {
 	/// it, so the next statement must be refused with 25P02 until
 	/// `COMMIT`/`ROLLBACK` — an intercepted statement is not an exception.
 	fn note_simple_error(&mut self, err: &PgError, out: &mut BytesMut) {
+		if err.code == "0A000" {
+			global_metrics().record_unsupported_feature(&err.message);
+		}
 		msg::write_error_response(out, err);
 		if self.transaction.is_some() {
 			self.txn_failed = true;

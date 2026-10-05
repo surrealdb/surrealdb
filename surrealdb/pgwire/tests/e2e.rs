@@ -966,3 +966,243 @@ async fn test_pgwire_schema_namespaces_decision_d4() {
 
 	shutdown.cancel();
 }
+
+fn build_parse(stmt_name: &str, sql: &str, param_types: &[i32]) -> BytesMut {
+	let mut parse = BytesMut::new();
+	parse.put_u8(b'P');
+	let mut body = BytesMut::new();
+	body.put_slice(stmt_name.as_bytes());
+	body.put_u8(0);
+	body.put_slice(sql.as_bytes());
+	body.put_u8(0);
+	body.put_i16(param_types.len() as i16);
+	for &oid in param_types {
+		body.put_i32(oid);
+	}
+	parse.put_i32((body.len() + 4) as i32);
+	parse.put(body);
+	parse
+}
+
+fn build_bind(
+	portal_name: &str,
+	stmt_name: &str,
+	param_formats: &[i16],
+	params: &[Option<&[u8]>],
+) -> BytesMut {
+	let mut bind = BytesMut::new();
+	bind.put_u8(b'B');
+	let mut body = BytesMut::new();
+	body.put_slice(portal_name.as_bytes());
+	body.put_u8(0);
+	body.put_slice(stmt_name.as_bytes());
+	body.put_u8(0);
+	body.put_i16(param_formats.len() as i16);
+	for &f in param_formats {
+		body.put_i16(f);
+	}
+	body.put_i16(params.len() as i16);
+	for p in params {
+		match p {
+			Some(bytes) => {
+				body.put_i32(bytes.len() as i32);
+				body.put_slice(bytes);
+			}
+			None => {
+				body.put_i32(-1);
+			}
+		}
+	}
+	body.put_i16(0); // 0 result formats
+	bind.put_i32((body.len() + 4) as i32);
+	bind.put(body);
+	bind
+}
+
+fn build_desc(target: u8, name: &str) -> BytesMut {
+	let mut desc = BytesMut::new();
+	desc.put_u8(b'D');
+	let mut body = BytesMut::new();
+	body.put_u8(target);
+	body.put_slice(name.as_bytes());
+	body.put_u8(0);
+	desc.put_i32((body.len() + 4) as i32);
+	desc.put(body);
+	desc
+}
+
+fn build_exec(portal_name: &str, max_rows: i32) -> BytesMut {
+	let mut exec = BytesMut::new();
+	exec.put_u8(b'E');
+	let mut body = BytesMut::new();
+	body.put_slice(portal_name.as_bytes());
+	body.put_u8(0);
+	body.put_i32(max_rows);
+	exec.put_i32((body.len() + 4) as i32);
+	exec.put(body);
+	exec
+}
+
+fn build_close(target: u8, name: &str) -> BytesMut {
+	let mut close = BytesMut::new();
+	close.put_u8(b'C');
+	let mut body = BytesMut::new();
+	body.put_u8(target);
+	body.put_slice(name.as_bytes());
+	body.put_u8(0);
+	close.put_i32((body.len() + 4) as i32);
+	close.put(body);
+	close
+}
+
+fn build_sync() -> BytesMut {
+	let mut sync = BytesMut::new();
+	sync.put_u8(b'S');
+	sync.put_i32(4);
+	sync
+}
+
+async fn run_extended_batch(
+	stream: &mut TcpStream,
+	packets: &[BytesMut],
+) -> (Vec<Vec<u8>>, Vec<u8>) {
+	for p in packets {
+		stream.write_all(p).await.expect("send packet");
+	}
+	let mut rows = Vec::new();
+	let mut msg_types = Vec::new();
+
+	let res = timeout(Duration::from_secs(5), async {
+		loop {
+			let msg_type = stream.read_u8().await?;
+			let msg_len = stream.read_i32().await? as usize;
+			let mut payload = vec![0u8; msg_len - 4];
+			stream.read_exact(&mut payload).await?;
+
+			msg_types.push(msg_type);
+			if msg_type == b'D' {
+				rows.push(payload);
+			} else if msg_type == b'Z' {
+				break;
+			}
+		}
+		Ok::<_, std::io::Error>(())
+	})
+	.await;
+
+	assert!(res.is_ok(), "Timed out waiting for extended batch response");
+	(rows, msg_types)
+}
+
+#[tokio::test]
+async fn test_prepared_statement_lifecycle_and_caching() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	let initial_prep = surrealdb_sqlplan::global_metrics().snapshot().prepared_statements_active;
+
+	// 1. Parse statement "prep_add"
+	let p1 = build_parse("prep_add", "SELECT ($1::int + $2::int) AS sum;", &[23, 23]);
+	let b1 = build_bind("portal1", "prep_add", &[], &[Some(b"10"), Some(b"20")]);
+	let d1 = build_desc(b'P', "portal1");
+	let e1 = build_exec("portal1", 0);
+	let s1 = build_sync();
+
+	let (rows, msgs) = run_extended_batch(&mut stream, &[p1, b1, d1, e1, s1]).await;
+	assert!(msgs.contains(&b'1'), "Expected ParseComplete '1'");
+	assert!(msgs.contains(&b'2'), "Expected BindComplete '2'");
+	assert!(msgs.contains(&b'C'), "Expected CommandComplete 'C'");
+	assert_eq!(rows.len(), 1);
+	let cols = decode_data_row(&rows[0]);
+	assert_eq!(cols[0].as_deref(), Some("30"));
+
+	// Statement should now be cached
+	let mid_prep = surrealdb_sqlplan::global_metrics().snapshot().prepared_statements_active;
+	assert_eq!(mid_prep, initial_prep + 1);
+
+	// 2. Bind and execute again WITHOUT re-parsing
+	let b2 = build_bind("portal2", "prep_add", &[], &[Some(b"100"), Some(b"250")]);
+	let d2 = build_desc(b'P', "portal2");
+	let e2 = build_exec("portal2", 0);
+	let s2 = build_sync();
+
+	let (rows2, msgs2) = run_extended_batch(&mut stream, &[b2, d2, e2, s2]).await;
+	assert!(!msgs2.contains(&b'1'), "Did not expect ParseComplete since query was not re-parsed");
+	assert!(msgs2.contains(&b'2'), "Expected BindComplete '2'");
+	assert!(msgs2.contains(&b'C'), "Expected CommandComplete 'C'");
+	assert_eq!(rows2.len(), 1);
+	let cols2 = decode_data_row(&rows2[0]);
+	assert_eq!(cols2[0].as_deref(), Some("350"));
+
+	// 3. Close the prepared statement
+	let c1 = build_close(b'S', "prep_add");
+	let s3 = build_sync();
+	let (_, msgs3) = run_extended_batch(&mut stream, &[c1, s3]).await;
+	assert!(msgs3.contains(&b'3'), "Expected CloseComplete '3'");
+
+	let final_prep = surrealdb_sqlplan::global_metrics().snapshot().prepared_statements_active;
+	assert_eq!(final_prep, initial_prep);
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_observability_metrics_and_redaction() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	let snap_before = surrealdb_sqlplan::global_metrics().snapshot();
+
+	// Run a query
+	let (rows, last) = run_simple_query(&mut stream, "SELECT 42 AS val;").await;
+	assert_eq!(last, b'C');
+	assert_eq!(rows.len(), 1);
+
+	let snap_after = surrealdb_sqlplan::global_metrics().snapshot();
+	assert!(
+		snap_after.pgsql_queries > snap_before.pgsql_queries,
+		"Postgres query count should increase"
+	);
+
+	// Test credential redaction
+	let sensitive_sql = "CREATE USER 'developer'@'localhost' IDENTIFIED BY 'ultra_secret_pw_123';";
+	let redacted = surrealdb_sqlplan::redact_sql_credentials(sensitive_sql);
+	assert!(!redacted.contains("ultra_secret_pw_123"));
+	assert!(redacted.contains("'[REDACTED]'"));
+
+	shutdown.cancel();
+}
+
+#[tokio::test]
+async fn test_prepared_statement_byte_limit_rejection() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake(addr).await;
+
+	// Each single message is within MAX_MESSAGE_SIZE (16 MiB),
+	// but cumulative statements exceed MAX_PREPARED_BYTES (32 MiB).
+	let chunk_14mb = "x".repeat(14 * 1024 * 1024);
+	let query1 = format!("SELECT 1; /* {chunk_14mb} */");
+	let p1 = build_parse("stmt1", &query1, &[]);
+	let s1 = build_sync();
+	let (_, msgs1) = run_extended_batch(&mut stream, &[p1, s1]).await;
+	assert!(msgs1.contains(&b'1'), "First 14MB stmt should parse successfully");
+
+	let query2 = format!("SELECT 2; /* {chunk_14mb} */");
+	let p2 = build_parse("stmt2", &query2, &[]);
+	let s2 = build_sync();
+	let (_, msgs2) = run_extended_batch(&mut stream, &[p2, s2]).await;
+	assert!(msgs2.contains(&b'1'), "Second 14MB stmt should parse successfully (total ~28MB)");
+
+	// Third 6MB statement brings total to ~34MB > 32MB limit
+	let chunk_6mb = "y".repeat(6 * 1024 * 1024);
+	let query3 = format!("SELECT 3; /* {chunk_6mb} */");
+	let p3 = build_parse("stmt3", &query3, &[]);
+	let s3 = build_sync();
+	let (_, msgs3) = run_extended_batch(&mut stream, &[p3, s3]).await;
+	assert!(
+		msgs3.contains(&b'E'),
+		"Third stmt should be rejected with ErrorResponse 'E' when exceeding cumulative byte limit"
+	);
+
+	shutdown.cancel();
+}

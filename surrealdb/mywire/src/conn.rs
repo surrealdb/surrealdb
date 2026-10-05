@@ -11,9 +11,11 @@ use surrealdb_core::iam::verify::basic;
 use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
 use surrealdb_mysql::ast::stmt::{Statement as MyStatement, TableRef};
 use surrealdb_rpc::capabilities::RouteTarget;
+use surrealdb_sqlplan::SqlDialect;
 use surrealdb_sqlplan::binder::mysql::bind_select;
 use surrealdb_sqlplan::catalog::MemoryCatalog;
 use surrealdb_sqlplan::dialect::DialectPolicy;
+use surrealdb_sqlplan::observability::global_metrics;
 use tokio::io::{ReadHalf, WriteHalf, split};
 use tokio::net::TcpStream;
 use tokio::sync::OwnedSemaphorePermit;
@@ -623,6 +625,12 @@ impl Connection {
 		} else {
 			None
 		};
+
+		match self.dialect {
+			Dialect::MySql => global_metrics().record_query(SqlDialect::MySql),
+			Dialect::PgSql => global_metrics().record_query(SqlDialect::Postgres),
+			_ => {}
+		}
 
 		let req = match self.dialect {
 			Dialect::MySql => QueryRequest::new(QuerySource::mysql(trimmed), &self.session),
