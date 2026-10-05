@@ -430,7 +430,7 @@ version = "0.10.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.cpp_demangle]]
-version = "0.4.5"
+version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.crawdad]]
