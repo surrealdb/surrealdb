@@ -29,10 +29,12 @@
 //! - Every table the walk fetches from must define no computed fields: the runtime dereference
 //!   evaluates computed fields even when permission checks are disabled (see
 //!   [`process_fetched_record`](crate::exec::operators::fetch)).
-//! - The idiom must be a literal record id start followed by plain field parts, and every
-//!   intermediate value must be an object, a record id (fetched, honouring the
-//!   [`RecordIdKey::Object`] key-component shortcut), or a scalar (which yields `NONE`, as at
-//!   runtime). Arrays and geometries have their own traversal semantics and are left unfolded.
+//! - The idiom must be a literal record id start followed by a plain field part, then any run of
+//!   field, literal index, first and last parts. A field part applies to an object, a record id
+//!   (fetched, honouring the [`RecordIdKey::Object`] key-component shortcut), or a scalar (which
+//!   yields `NONE`, as at runtime); a field of an array or a geometry has its own traversal
+//!   semantics and leaves the idiom unfolded. Every other part reads the value it is applied to
+//!   without storage ([`apply_literal_part`]).
 //! - The folded value must survive the literal round trip (see [`literal_if_round_trips`]):
 //!   `Value::into_literal` is lossy for some variants, and substituting a lossy form changes
 //!   results.
@@ -48,7 +50,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use super::super::Planner;
-use super::super::util::try_literal_to_value;
+use super::super::util::{apply_literal_part, try_literal_to_value};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::visit::{MutVisitor, Visit, VisitMut, Visitor};
@@ -148,9 +150,9 @@ fn literal_if_round_trips(value: &Value) -> Option<Expr> {
 	}
 }
 
-/// Walk the field parts of `idiom` from the literal record id `start`,
-/// mirroring the runtime traversal in
-/// [`evaluate_field`](crate::exec::parts::field). Returns `None` when the
+/// Walk the parts of `idiom` from the literal record id `start`, mirroring
+/// the runtime traversal in [`evaluate_field`](crate::exec::parts::field) for
+/// field parts and in [`apply_literal_part`] for the others. Returns `None` when the
 /// walk cannot be proven equivalent to the runtime walk (computed fields on a
 /// fetched table, array/geometry pivots, storage errors, exhausted fetch
 /// budget) — the caller leaves the idiom unfolded.
@@ -165,9 +167,9 @@ async fn fold_record_walk(
 ) -> Option<Value> {
 	let mut pivot = Value::RecordId(start);
 	for part in idiom.0.iter().skip(1) {
-		// The collector only admits Start + Field idioms.
 		let Part::Field(name) = part else {
-			return None;
+			pivot = apply_literal_part(pivot, part)?;
+			continue;
 		};
 		let name = name.as_str();
 		pivot = match pivot {
@@ -268,15 +270,24 @@ async fn table_has_computed_fields(
 }
 
 /// Extract the record id root of a foldable idiom: a
-/// `Part::Start(Expr::Literal(record id))` followed by one or more plain
-/// `Part::Field` parts. Record id literals with complex keys (objects,
-/// arrays, ranges, generators) are rejected by [`try_literal_to_value`].
+/// `Part::Start(Expr::Literal(record id))` followed by a plain `Part::Field`,
+/// then only field, literal index, first and last parts. Record id literals
+/// with complex keys (objects, arrays, ranges, generators) are rejected by
+/// [`try_literal_to_value`].
 fn candidate_record_root(idiom: &Idiom) -> Option<RecordId> {
 	let mut parts = idiom.0.iter();
 	let Some(Part::Start(Expr::Literal(lit))) = parts.next() else {
 		return None;
 	};
-	if idiom.0.len() < 2 || !parts.all(|p| matches!(p, Part::Field(_))) {
+	if !matches!(parts.next(), Some(Part::Field(_))) {
+		return None;
+	}
+	let foldable = |p: &Part| match p {
+		Part::Field(_) | Part::First | Part::Last => true,
+		Part::Value(index) => matches!(index, Expr::Literal(_)),
+		_ => false,
+	};
+	if !parts.all(foldable) {
 		return None;
 	}
 	match try_literal_to_value(lit) {
@@ -330,7 +341,7 @@ impl Visitor for CandidateCollector {
 			&& let Some(rid) = candidate_record_root(idiom)
 		{
 			self.idioms.push((idiom.clone(), rid));
-			// A Start(literal) + Field idiom contains no nested expressions.
+			// A candidate's only nested expressions are literal indexes.
 			return Ok(());
 		}
 		expr.visit(self)

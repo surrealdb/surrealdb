@@ -2069,8 +2069,9 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Build a `FullTextScan` for [`AccessPath::FullTextSearch`]. The
-	/// MATCHES predicate is stripped from the WHERE clause; any residual
-	/// non-MATCHES conditions are returned in the filter action.
+	/// MATCHES conjunct the scan answers is stripped from the WHERE clause;
+	/// every other condition, including any other MATCHES, is returned in the
+	/// filter action.
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_fulltext_search_source(
 		&self,
@@ -2085,19 +2086,22 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<PlannedSource, Error> {
 		use crate::exec::operators::FullTextScan;
 
+		// A full-text index has exactly one column (`DEFINE INDEX … FULLTEXT`
+		// takes one), which is the column the scan's probe reads. Without one
+		// nothing is known to be answered, and the whole condition is kept.
+		let filter_action = match (cond, index_ref.cols.first()) {
+			(None, _) => FilterAction::FullyConsumed,
+			(Some(c), Some(column)) => match strip_fts_condition(c, column, &operator, &query) {
+				None => FilterAction::FullyConsumed,
+				Some(residual) => FilterAction::Residual(residual),
+			},
+			(Some(c), None) => FilterAction::Residual(c.clone()),
+		};
 		let mut scan =
 			FullTextScan::new(index_ref, query, operator, table, version, Some(needed_fields));
 		if let Some(tc) = table_ctx {
 			scan = scan.with_resolved(tc);
 		}
-		let filter_action = if let Some(c) = cond {
-			match strip_fts_condition(c) {
-				None => FilterAction::FullyConsumed,
-				Some(residual) => FilterAction::Residual(residual),
-			}
-		} else {
-			FilterAction::FullyConsumed
-		};
 		Ok(PlannedSource {
 			operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 			filter_action,

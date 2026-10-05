@@ -7,11 +7,10 @@ reason = """
 Test planner recognition of parameter, datetime, and UUID values in WHERE with
 index (new executor).
 
-`$obj.field` reaches the planner as a constant object literal, because
-`resolve_condition_params` has already substituted the parameter. The planner
-resolves the field chain once, at plan time, so the predicate is a plain
-`field = literal` and the pre-decode filter applies — rather than re-picking the
-field out of a freshly cloned object on every row.
+`$obj.field` reaches the planner as a field of a constant object literal,
+because `resolve_condition_params` has already substituted the parameter. The
+planner folds the field access to its value at plan time, so the predicate is a
+plain `field = literal` and is served by the index exactly as the literal is.
 """
 
 [[test.results]]
@@ -32,7 +31,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Tobie', pre_decode_filter: yes] {rows: 1}
+    IndexScan [ctx: Db] [index: name, access: = 'Tobie', direction: Forward, predicate: name = 'Tobie'] {rows: 1}
 
 Total rows: 1"'''
 
@@ -87,7 +86,7 @@ Total rows: 1"'''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    TableScan [ctx: Db] [table: sessions, direction: Forward, predicate: sessionUid = u'00ad70db-f435-442e-9012-1cd853102084', pre_decode_filter: yes] {rows: 1}
+    IndexScan [ctx: Db] [index: sessionUid, access: = u'00ad70db-f435-442e-9012-1cd853102084', direction: Forward, predicate: sessionUid = u'00ad70db-f435-442e-9012-1cd853102084'] {rows: 1}
 
 Total rows: 1"'''
 

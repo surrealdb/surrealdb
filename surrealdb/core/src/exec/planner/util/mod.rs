@@ -33,8 +33,8 @@ pub(crate) use fields::{
 	idiom_to_field_path, paths_overlap,
 };
 pub(crate) use literals::{
-	fold_condition_expressions, key_lit_to_expr, literal_to_value, source_field_reads_are_inert,
-	try_expr_to_value, try_literal_to_value,
+	apply_literal_part, fold_condition_expressions, key_lit_to_expr, literal_to_value,
+	source_field_reads_are_inert, try_expr_to_value, try_literal_to_value,
 };
 pub(crate) use optimization::{
 	extract_count_field_names, extract_version, get_effective_limit_literal, index_covers_ordering,

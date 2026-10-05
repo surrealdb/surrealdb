@@ -15,10 +15,10 @@ use std::ops::Bound;
 use super::literals::{try_expr_to_value, try_literal_to_value};
 use crate::catalog::Distance;
 use crate::exec::index::analysis::idiom_matches_containment;
-use crate::expr::operator::NearestNeighbor;
+use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::visit::{MutVisitor, Visit, VisitMut, Visitor};
 use crate::expr::{BinaryOperator, Cond, Expr, Idiom, Literal};
-use crate::val::Number;
+use crate::val::{Number, Value};
 
 // ============================================================================
 // Predicate / Validation Helpers
@@ -175,19 +175,40 @@ pub(crate) fn extract_bruteforce_knn(cond: &Cond) -> Option<BruteForceKnnParams>
 	extractor.params
 }
 
-/// Strip the MATCHES (`@@`) predicate from a WHERE clause, returning the residual.
+/// Strip the MATCHES (`@@`) conjuncts a full-text scan answers from a WHERE
+/// clause, returning the residual.
+///
+/// A conjunct is stripped only when it is the scan's own probe: its operator is
+/// `operator`, its query is the literal string `query`, and its left side is
+/// the index's first column `column`. Every other conjunct — a MATCHES on
+/// another field, with another reference or another query — stays in the
+/// residual, where it is evaluated per row or refused; the scan's rows say
+/// nothing about it.
 ///
 /// Returns `None` when the entire condition is consumed (just a single `@@`),
 /// or `Some(residual)` when additional predicates remain (e.g., `content @@ 'x' AND status = 'a'`).
-pub(crate) fn strip_fts_condition(cond: &Cond) -> Option<Cond> {
+pub(crate) fn strip_fts_condition(
+	cond: &Cond,
+	column: &Idiom,
+	operator: &MatchesOperator,
+	query: &str,
+) -> Option<Cond> {
 	strip_and_simplify(cond.0.clone(), |e| {
-		matches!(
-			e,
-			Expr::Binary {
-				op: BinaryOperator::Matches(_),
-				..
-			}
-		)
+		let Expr::Binary {
+			left,
+			op: BinaryOperator::Matches(op),
+			right,
+		} = e
+		else {
+			return false;
+		};
+		op == operator
+			&& matches!(left.as_ref(), Expr::Idiom(idiom) if idiom == column)
+			&& matches!(
+				right.as_ref(),
+				Expr::Literal(lit)
+					if matches!(try_literal_to_value(lit), Some(Value::String(s)) if s.as_str() == query)
+			)
 	})
 	.map(Cond)
 }
@@ -338,7 +359,6 @@ pub(crate) fn strip_union_index_conditions(
 	paths: &[crate::exec::index::access_path::AccessPath],
 ) -> Option<Cond> {
 	use crate::exec::index::access_path::{AccessPath, BTreeAccess};
-	use crate::val::Value;
 
 	// Collect (index_first_column, set_of_branch_values) from the paths.
 	// All branches must agree on the index and its first column.  The
@@ -401,7 +421,6 @@ fn union_covers_leaf(
 	right: &Expr,
 ) -> bool {
 	use crate::exec::index::analysis::idiom_matches_containment;
-	use crate::val::Value;
 
 	let (idiom, lit) = match op {
 		BinaryOperator::ContainAny => match (left, right) {
@@ -499,8 +518,6 @@ impl IndexConditionMatcher<'_> {
 			}
 			_ => return false,
 		};
-
-		use crate::val::Value;
 
 		// Normalise the leaf so the strip path sees the same canonical
 		// form the analyzer produced: a single-element `field IN [v]` is
@@ -985,7 +1002,38 @@ mod tests {
 	use crate::catalog::{Index, IndexDefinition, IndexId};
 	use crate::exec::index::access_path::{AccessPath, BTreeAccess, IndexRef};
 	use crate::kvs::Direction;
-	use crate::val::Value;
+
+	#[test]
+	fn fts_stripper_consumes_only_the_scans_own_probe() {
+		let title = Idiom::from_str("title").expect("valid idiom");
+		let op = |sql: &str| match parse_cond(sql).0 {
+			Expr::Binary {
+				op: BinaryOperator::Matches(op),
+				..
+			} => op,
+			other => panic!("expected a MATCHES, got {}", other.to_sql()),
+		};
+		let (any, first) = (op("title @@ 'x'"), op("title @1@ 'x'"));
+		let strip = |sql: &str, op: &MatchesOperator| {
+			strip_fts_condition(&parse_cond(sql), &title, op, "x").map(|c| c.0.to_sql())
+		};
+		assert_eq!(strip("title @@ 'x' AND a = 1", &any).as_deref(), Some("a = 1"));
+		assert_eq!(strip("title @@ 'x'", &any), None);
+		// Only the scan's own probe is consumed: a MATCHES on another field,
+		// with another reference or another query, stays in the residual.
+		assert_eq!(
+			strip("title @1@ 'x' AND body @2@ 'y'", &first).as_deref(),
+			Some("body @2@ 'y'")
+		);
+		assert_eq!(
+			strip("title @1@ 'x' AND title @2@ 'x'", &first).as_deref(),
+			Some("title @2@ 'x'")
+		);
+		assert_eq!(
+			strip("title @1@ 'x' AND title @1@ $q", &first).as_deref(),
+			Some("title @1@ $q")
+		);
+	}
 
 	fn parse_cond(snippet: &str) -> Cond {
 		let src = format!("SELECT * FROM t WHERE {snippet}");

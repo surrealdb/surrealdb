@@ -151,7 +151,8 @@ pub(crate) fn try_expr_to_value(expr: &Expr) -> Option<crate::val::Value> {
 /// that parameter references have already been replaced with literals.
 ///
 /// Only folds expressions that:
-/// - Contain no field/idiom references (document-independent)
+/// - Contain no field references (document-independent); an idiom qualifies only when it is rooted
+///   at a literal and every part reads that literal (see [`apply_literal_part`])
 /// - Are arithmetic on literals, or calls to a built-in that is both context-free and deterministic
 ///   (math::*, string::*, type::*, etc.) with all arguments already literals. `rand::*` is
 ///   context-free but not deterministic, so it is left for per-row evaluation.
@@ -437,6 +438,9 @@ fn literal_is_inert(
 /// - Calls to a context-free, deterministic function whose arguments are all already literals
 ///   (math::floor, string::lowercase, type::int, etc.)
 /// - Binary arithmetic on two literals (datetime ± duration, number ± number, etc.)
+/// - An idiom rooted at a literal whose every part reads that literal without storage — a field of
+///   an object, an index, the first or last element (`{ a: [1, 2] }.a[1]`, the shape a resolved
+///   `$obj.a[1]` takes); see [`apply_literal_part`]
 ///
 /// Both conditions on a call matter and they are different questions:
 /// [`ScalarFunction::is_pure`] asks whether it can run without an execution
@@ -542,6 +546,97 @@ fn try_fold_to_literal(
 			Some(result.into_literal())
 		}
 
+		// An idiom rooted at a literal, walked part by part as the runtime
+		// walks it. The fold is all or nothing: any part the walk cannot
+		// replicate leaves the whole idiom to its runtime evaluation.
+		Expr::Idiom(idiom) => {
+			let mut parts = idiom.0.iter();
+			let Some(crate::expr::Part::Start(Expr::Literal(root))) = parts.next() else {
+				return None;
+			};
+			let mut value = literal_root_value(root)?;
+			let mut walked = false;
+			for part in parts {
+				value = apply_literal_part(value, part)?;
+				walked = true;
+			}
+			if !walked || substitution_is_lossy(&value) {
+				return None;
+			}
+			Some(value.into_literal())
+		}
+
+		_ => None,
+	}
+}
+
+/// The value of a literal at the root of an idiom: what [`try_literal_to_value`]
+/// accepts, plus object and geometry literals, at any depth. A resolved
+/// parameter such as `$session` or `$obj` reaches the planner as an object
+/// literal, which is the root a field read is folded from.
+fn literal_root_value(lit: &crate::expr::literal::Literal) -> Option<Value> {
+	use crate::expr::literal::Literal;
+
+	let expr_value = |expr: &Expr| match expr {
+		Expr::Literal(lit) => literal_root_value(lit),
+		other => try_expr_to_value(other),
+	};
+	match lit {
+		Literal::Object(entries) => {
+			let mut obj = crate::val::Object::default();
+			for entry in entries {
+				obj.insert(entry.key.clone(), expr_value(&entry.value)?);
+			}
+			Some(Value::Object(obj))
+		}
+		Literal::Array(items) => {
+			let values: Option<Vec<Value>> = items.iter().map(expr_value).collect();
+			values.map(|v| Value::Array(v.into()))
+		}
+		Literal::Geometry(geo) => Some(Value::Geometry(geo.clone())),
+		other => try_literal_to_value(other),
+	}
+}
+
+/// The value of one idiom `part` applied to `value`, when the runtime part
+/// would read it without storage and without mapping over an array; `None`
+/// otherwise.
+///
+/// Mirrors the runtime parts: a field of an object, a geometry's GeoJSON
+/// field, and `NONE` off any other scalar
+/// ([`evaluate_field`](crate::exec::parts::field)); an index by a literal
+/// ([`evaluate_index`](crate::exec::parts::index::evaluate_index)); and the
+/// first or last element of an array or set, with any other value passed
+/// through unchanged. A
+/// field of a record id fetches the record, and a field of an array starts the
+/// array continuation that maps every later part over the elements, so
+/// neither is applied here.
+pub(crate) fn apply_literal_part(value: Value, part: &crate::expr::Part) -> Option<Value> {
+	use crate::expr::Part;
+
+	match part {
+		Part::Field(name) => match value {
+			Value::Object(obj) => Some(obj.get(name.as_str()).cloned().unwrap_or(Value::None)),
+			Value::Geometry(geo) => {
+				Some(geo.as_object().get(name.as_str()).cloned().unwrap_or(Value::None))
+			}
+			Value::RecordId(_) | Value::Array(_) => None,
+			_ => Some(Value::None),
+		},
+		Part::Value(index) => {
+			let index = try_expr_to_value(index)?;
+			crate::exec::parts::index::evaluate_index(&value, &index).ok()
+		}
+		Part::First => Some(match value {
+			Value::Array(arr) => arr.first().cloned().unwrap_or(Value::None),
+			Value::Set(set) => set.first().cloned().unwrap_or(Value::None),
+			other => other,
+		}),
+		Part::Last => Some(match value {
+			Value::Array(arr) => arr.last().cloned().unwrap_or(Value::None),
+			Value::Set(set) => set.last().cloned().unwrap_or(Value::None),
+			other => other,
+		}),
 		_ => None,
 	}
 }
@@ -789,5 +884,52 @@ pub(crate) fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr,
 			message: "Nested range keys cannot be used in graph range bounds".to_string(),
 		}
 		.into()),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_types::ToSql;
+
+	use super::*;
+
+	/// The WHERE condition of `SELECT * FROM t WHERE <snippet>`, folded.
+	fn fold(snippet: &str) -> String {
+		let src = format!("SELECT * FROM t WHERE {snippet}");
+		let mut exprs = crate::syn::parse(&src).expect("parse").expressions;
+		let crate::expr::TopLevelExpr::Expr(Expr::Select(s)) = exprs.remove(0).into() else {
+			panic!("expected a SELECT");
+		};
+		let mut cond = s.cond.expect("WHERE");
+		let registry = FunctionRegistry::with_builtins();
+		fold_condition_expressions(&mut cond, &registry, &Capabilities::all(), None);
+		cond.0.to_sql()
+	}
+
+	#[test]
+	fn an_idiom_over_a_literal_folds_to_its_value() {
+		assert_eq!(fold("a = { a: { b: 'x' } }.a.b"), "a = 'x'");
+		assert_eq!(fold("a = { a: ['x', 'y'] }.a[1]"), "a = 'y'");
+		assert_eq!(fold("a = ['x', 'y'][0]"), "a = 'x'");
+		assert_eq!(fold("a = ['x', 'y'][$]"), "a = 'y'");
+		assert_eq!(fold("a = ['x', 'y'][5]"), "a = NONE");
+		// The last of a value that is not a collection is the value; `[0]` is
+		// an index, which reads nothing off a string.
+		assert_eq!(fold("a = { v: 'alice' }.v[$]"), "a = 'alice'");
+		assert_eq!(fold("a = { v: 'alice' }.v[0]"), "a = NONE");
+		assert_eq!(fold("a = { a: 1 }.b"), "a = NONE");
+		assert_eq!(fold("a = [{ a: 'x' }][0].a"), "a = 'x'");
+		assert_eq!(fold("a = 'x'.a"), "a = NONE");
+		assert_eq!(fold("a = (1.0, 2.0).type"), "a = 'Point'");
+	}
+
+	#[test]
+	fn an_idiom_the_runtime_maps_or_fetches_is_left_whole() {
+		// A field of an array maps every later part over the elements.
+		assert_eq!(fold("a = [{ a: 'x' }].a"), "a = [{ a: 'x' }].a");
+		// A field of a record id fetches the record.
+		assert_eq!(fold("a = t:1.a"), "a = (t:1).a");
+		// A row-dependent index keeps the whole idiom.
+		assert_eq!(fold("a = ['x', 'y'][b]"), "a = ['x', 'y'][b]");
 	}
 }
