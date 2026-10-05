@@ -132,6 +132,9 @@ pub fn into_types_error(error: Error) -> TypesError {
 		QueryNotExecuted {
 			message,
 		} => TypesError::query(message, QueryError::NotExecuted),
+		// Retryable, and for the same reason a write conflict is: another
+		// statement changed what this one was operating on.
+		SequenceReset => TypesError::query(message, QueryError::TransactionConflict),
 		// An expected, caller-actionable resource limit (the statement's
 		// write fan-out crossed `transaction_max_write_keys`), not an
 		// internal fault. Deliberately carries no structured `QueryError`

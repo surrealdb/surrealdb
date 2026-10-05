@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::{Deref, Range};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -58,7 +58,7 @@ use crate::kvs::index::{
 	BuildGeneration, BuildTicket, BuildTicketMutationSeq, IndexBuildPhase, IndexBuildReportStatus,
 	IndexBuildState, IndexBuilder,
 };
-use crate::kvs::sequences::Sequences;
+use crate::kvs::sequences::{Sequence, Sequences};
 #[cfg(test)]
 use crate::kvs::testing::{
 	NonRetryableErrorSite, RetryableConflictSite, maybe_inject_non_retryable_error,
@@ -89,6 +89,106 @@ pub(crate) enum CachePolicy {
 	/// Check cache on read but **skip** population on miss.
 	/// Use for index range scans, non-unique equality scans, and full-text scans.
 	ReadOnly,
+}
+
+/// The slot a transaction holds for a sequence it defined: the allocator it
+/// owns for that sequence, empty until something draws from it.
+///
+/// Its lock is what makes the first draw single-flight. Building the allocator
+/// claims a window and writes it through the transaction, so two draws that
+/// both found the slot empty would both claim — and the second claim would
+/// collide on a row the first created. Whoever takes the lock builds; whoever
+/// waits finds it built.
+pub(crate) type ProvisionalSequence = Arc<Mutex<Option<Sequence>>>;
+
+/// A transaction's provisional slots, with what each held, at one moment. See
+/// [`ProvisionalSequences::save_points`].
+type ProvisionalSnapshot = Vec<((NamespaceId, DatabaseId, String), Option<Sequence>)>;
+
+/// What a transaction that defines a sequence keeps for it. See
+/// `Transaction::provisional`.
+struct ProvisionalSequences {
+	/// Allocators for sequences the transaction has defined and not committed.
+	///
+	/// The node's allocator reads definitions through transactions of its own,
+	/// so it cannot see a `DEFINE SEQUENCE` this one has written. From the store
+	/// alone that is indistinguishable from a definition a concurrent
+	/// statement removed or replaced — one wants the caller's view, the other
+	/// must not have it — so the statement records itself here, and what gets
+	/// built from that view is kept here too rather than in the node's map.
+	///
+	/// Owning them is what keeps a definition nobody else can see from being
+	/// served to anybody else: an allocator built from it has no committed
+	/// definition to check its claims against, which is only sound for as long
+	/// as the transaction is open. It goes when the transaction goes, whether
+	/// that is a commit or a rollback, and a save point rollback puts it back
+	/// as it stood when the save point opened — see [`Self::save_points`].
+	///
+	/// A name maps to an empty slot from the moment the statement defines it
+	/// until something draws from it.
+	slots: Mutex<HashMap<(NamespaceId, DatabaseId, String), ProvisionalSequence>>,
+	/// [`Self::slots`] as they stood when each open save point opened,
+	/// innermost last.
+	///
+	/// A save point rollback restores the storage it scopes, which includes
+	/// every row a provisional allocator wrote — but not the allocators, nor the
+	/// record that the transaction defined a sequence, which live here. Left in
+	/// place, a `DEFINE SEQUENCE` the rollback undid would still be served from,
+	/// on a definition that no longer exists; and an allocator built inside the
+	/// scope would keep serving from a window whose claim row is gone, leaving
+	/// what it issues unfenced for other nodes, which claim past the rows they
+	/// can see. Restoring the snapshot puts both back as they stood, which is
+	/// what the storage now says too, so a value drawn inside the scope is
+	/// undone along with everything else written there.
+	///
+	/// The node's own eviction of a redefined sequence is not undone. That costs
+	/// the node one rebuild of its allocator, from the definition as committed.
+	save_points: Mutex<Vec<ProvisionalSnapshot>>,
+}
+
+impl ProvisionalSequences {
+	/// State created while `open_save_points` save points are open. Each of
+	/// them opened before any slot existed, so each gets an empty snapshot.
+	fn new(open_save_points: usize) -> Self {
+		Self {
+			slots: Mutex::new(HashMap::new()),
+			save_points: Mutex::new(vec![Vec::new(); open_save_points]),
+		}
+	}
+
+	/// Captures [`Self::slots`] for a save point opening now.
+	async fn snapshot(&self) -> ProvisionalSnapshot {
+		let held = self.slots.lock().await;
+		let mut snapshot = Vec::with_capacity(held.len());
+		for (key, slot) in held.iter() {
+			snapshot.push((key.clone(), slot.lock().await.clone()));
+		}
+		snapshot
+	}
+
+	/// Records the snapshot of a save point opening now.
+	async fn open_save_point(&self) {
+		let snapshot = self.snapshot().await;
+		self.save_points.lock().await.push(snapshot);
+	}
+
+	/// Drops the innermost snapshot: released, its scope folds into the
+	/// enclosing one, whose snapshot still describes the state an outer
+	/// rollback returns to.
+	async fn release_save_point(&self) {
+		self.save_points.lock().await.pop();
+	}
+
+	/// Puts [`Self::slots`] back as the innermost snapshot captured them.
+	async fn rollback_to_save_point(&self) {
+		let snapshot = self.save_points.lock().await.pop();
+		if let Some(snapshot) = snapshot {
+			*self.slots.lock().await = snapshot
+				.into_iter()
+				.map(|(key, allocator)| (key, Arc::new(Mutex::new(allocator))))
+				.collect();
+		}
+	}
 }
 
 pub struct Transaction {
@@ -191,6 +291,21 @@ pub struct Transaction {
 	/// state and index data from separate transactions. These cleanups remove that
 	/// provisional state only when the schema transaction does not commit.
 	pending_uncommitted_index_builds: Mutex<Vec<PendingUncommittedIndexBuild>>,
+	/// What this transaction keeps for the sequences it defines, created by
+	/// the first `DEFINE SEQUENCE` it runs. See [`ProvisionalSequences`].
+	///
+	/// Allocated on that first use rather than held inline: most transactions
+	/// never define a sequence, and every future that holds a `Transaction` by
+	/// value carries its size. Unset, it also answers the question every
+	/// `sequence::nextval` asks — did this transaction define the sequence —
+	/// with one atomic load.
+	provisional: OnceLock<Box<ProvisionalSequences>>,
+	/// How many save points are open on this transaction.
+	///
+	/// Kept whether or not [`Self::provisional`] exists yet, so that state
+	/// created inside a save point starts with one snapshot per scope already
+	/// open, and every rollback and release pops the snapshot of its own scope.
+	open_save_points: AtomicUsize,
 }
 
 const INDEX_BUILD_RESERVATION_RELEASE_RETRY_SLEEP: Duration = Duration::from_millis(100);
@@ -822,6 +937,8 @@ impl Transaction {
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
 			pending_index_builder_aborts: Mutex::new(Vec::new()),
 			pending_uncommitted_index_builds: Mutex::new(Vec::new()),
+			provisional: OnceLock::new(),
+			open_save_points: AtomicUsize::new(0),
 		}
 	}
 
@@ -2228,22 +2345,69 @@ impl Transaction {
 	}
 
 	// --------------------------------------------------
+	// Provisional sequence functions
+	// --------------------------------------------------
+
+	/// Records that this transaction has defined `sq`, so a draw from it is
+	/// served by this transaction rather than from the node's allocator map.
+	/// See [`ProvisionalSequences::slots`].
+	pub(crate) async fn sequence_defined_here(&self, ns: NamespaceId, db: DatabaseId, sq: String) {
+		let provisional = self.provisional.get_or_init(|| {
+			Box::new(ProvisionalSequences::new(self.open_save_points.load(Ordering::Acquire)))
+		});
+		provisional.slots.lock().await.insert((ns, db, sq), Arc::new(Mutex::new(None)));
+	}
+
+	/// This transaction's slot for `sq`, if this is the transaction that
+	/// defined it. See [`ProvisionalSequence`].
+	pub(crate) async fn provisional_sequence(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		sq: &str,
+	) -> Option<ProvisionalSequence> {
+		let provisional = self.provisional.get()?;
+		provisional.slots.lock().await.get(&(ns, db, sq.to_owned())).cloned()
+	}
+
+	// --------------------------------------------------
 	// Savepoint functions
 	// --------------------------------------------------
 
 	/// Set a new save point on the transaction.
+	///
+	/// The provisional sequences are scoped alongside the storage save point —
+	/// see [`ProvisionalSequences::save_points`].
 	pub async fn new_save_point(&self) -> Result<()> {
-		Ok(self.inner.new_save_point().await.map_err(Error::from)?)
+		self.inner.new_save_point().await.map_err(Error::from)?;
+		self.open_save_points.fetch_add(1, Ordering::AcqRel);
+		// Boxed, like the two below: only a transaction that defined a sequence
+		// takes this path, and inline it would grow the future of every save
+		// point any document opens.
+		if let Some(provisional) = self.provisional.get() {
+			Box::pin(provisional.open_save_point()).await;
+		}
+		Ok(())
 	}
 
 	/// Release the last save point.
 	pub async fn release_last_save_point(&self) -> Result<()> {
-		Ok(self.inner.release_last_save_point().await.map_err(Error::from)?)
+		self.inner.release_last_save_point().await.map_err(Error::from)?;
+		self.open_save_points.fetch_sub(1, Ordering::AcqRel);
+		if let Some(provisional) = self.provisional.get() {
+			Box::pin(provisional.release_save_point()).await;
+		}
+		Ok(())
 	}
 
 	/// Rollback to the last save point.
 	pub async fn rollback_to_save_point(&self) -> Result<()> {
-		Ok(self.inner.rollback_to_save_point().await.map_err(Error::from)?)
+		self.inner.rollback_to_save_point().await.map_err(Error::from)?;
+		self.open_save_points.fetch_sub(1, Ordering::AcqRel);
+		if let Some(provisional) = self.provisional.get() {
+			Box::pin(provisional.rollback_to_save_point()).await;
+		}
+		Ok(())
 	}
 
 	// --------------------------------------------------

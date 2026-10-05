@@ -160,7 +160,7 @@ async fn execute_database_info(
 			"tables" => process(&txn.all_tb(ns, db, version).await?),
 			"users" => process(&txn.all_db_users(ns, db, version).await?),
 			"configs" => process(&txn.all_db_configs(ns, db, version).await?),
-			"sequences" => process(&txn.all_db_sequences(ns, db, version).await?),
+			"sequences" => crate::expr::statements::info::process_sequences(&txn, ns, db, txn.all_db_sequences(ns, db, version).await?, version).await?,
 		};
 		Ok(Value::Object(Object::from(object)))
 	} else {

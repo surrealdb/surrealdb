@@ -321,6 +321,18 @@ pub(crate) enum Error {
 		name: String,
 	},
 
+	/// A value could not be allocated from a sequence, because a
+	/// `DEFINE`/`REMOVE SEQUENCE` kept landing while it was being allocated.
+	///
+	/// The allocator rebuilds itself once against the definition as it stands;
+	/// this is a second reset arriving during that rebuild, which means the
+	/// sequence is being redefined repeatedly rather than once. Retrying is the
+	/// right response, and no value was issued.
+	#[error(
+		"The sequence was redefined or removed while a value was being allocated from it. This transaction can be retried"
+	)]
+	SequenceReset,
+
 	/// The requested config does not exist
 	#[error("The config for {name} does not exist")]
 	CgNotFound {

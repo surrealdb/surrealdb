@@ -15,6 +15,7 @@ use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement};
 use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::record;
+use crate::kvs::sequences::next_unissued_value;
 use crate::sql::statements::OptionStatement;
 
 #[derive(Clone, Debug, SurrealValue)]
@@ -262,9 +263,24 @@ impl Transaction {
 		}
 
 		// Output SEQUENCES
+		//
+		// A definition carries the `START` the sequence was declared with, which
+		// is only where it began. Emitting that verbatim would rewind the
+		// sequence on import while the exported records keep the ids already
+		// allocated from it, so the first `sequence::nextval` after a restore
+		// would re-issue a value that is in use. Each sequence is therefore
+		// exported at the position it reached, which is what an import has to
+		// re-establish.
 		if cfg.sequences {
 			let sequences = self.all_db_sequences(ns, db, None).await?;
-			self.export_section("SEQUENCES", sequences.iter(), chn).await?;
+			let mut positioned = Vec::with_capacity(sequences.len());
+			for sq in sequences.iter() {
+				let mut sq = sq.clone();
+				sq.start =
+					next_unissued_value(self, ns, db, sq.name.as_str(), sq.start, None).await?;
+				positioned.push(sq);
+			}
+			self.export_section("SEQUENCES", positioned.iter(), chn).await?;
 		}
 
 		Ok(())

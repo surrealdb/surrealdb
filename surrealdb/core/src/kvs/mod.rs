@@ -89,6 +89,21 @@ pub type Val = Vec<u8>;
 /// The Version part of a key-value pair. An alias for [`u64`].
 pub type Version = u64;
 
+/// Whether a failure is a conditional write reporting that the value it
+/// required was not there.
+///
+/// Raised by the compare operations themselves — `putc`, `delc`, `clrc` — so it
+/// arrives from the call that performed the write, never from the commit.
+pub(crate) fn is_condition_not_met(err: &anyhow::Error) -> bool {
+	if let Some(kvs_err) = err.downcast_ref::<self::err::Error>() {
+		return matches!(kvs_err, self::err::Error::TransactionConditionNotMet);
+	}
+	matches!(
+		err.downcast_ref::<crate::err::Error>(),
+		Some(crate::err::Error::Kvs(self::err::Error::TransactionConditionNotMet))
+	)
+}
+
 pub(crate) fn is_retryable_transaction_conflict(err: &anyhow::Error) -> bool {
 	if let Some(kvs_err) = err.downcast_ref::<self::err::Error>() {
 		return kvs_err.is_retryable();

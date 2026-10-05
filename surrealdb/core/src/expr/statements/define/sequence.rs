@@ -118,6 +118,34 @@ impl DefineSequenceStatement {
 		let st_range = Prefix::new_st_range(db.namespace_id, db.database_id, &sq.name)?;
 		txn.delr(st_range).await?;
 
+		// The node's allocator reads definitions through transactions of its
+		// own and so cannot see this one until it commits. Record it, so a
+		// `nextval` later in this transaction is served by the transaction
+		// itself, from the definition written here rather than the one it
+		// replaces. See `Transaction::provisional`.
+		txn.sequence_defined_here(db.namespace_id, db.database_id, name.clone()).await;
+
+		// Drop this node's cached allocator. Clearing the rows above resets the
+		// sequence on disk, but a node that has served `sequence::nextval` still
+		// holds a `Sequence` in memory owning a reserved window and its own
+		// cursor, and the cached path never re-reads `start`. Without this the
+		// new definition would not take effect until the process restarted, and
+		// an operator repositioning with `DEFINE SEQUENCE OVERWRITE ... START
+		// <n>` would keep getting values from the old run with nothing to show
+		// the statement had not applied.
+		//
+		// A draw later in this transaction is served by the transaction itself,
+		// from an allocator it owns and discards when it ends — see
+		// `Transaction::provisional` — so there is nothing here to
+		// unwind afterwards.
+		//
+		// This reaches only the node running the statement. A peer discovers
+		// the reset on its own, when the conditional write of its cursor finds
+		// the row it required gone — see `Sequence::durable`.
+		if let Some(seq) = ctx.get_sequences() {
+			seq.sequence_removed(db.namespace_id, db.database_id, &name).await;
+		}
+
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good
