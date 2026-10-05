@@ -174,15 +174,15 @@ version = "1.0.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.aws-lc-fips-sys]]
-version = "0.13.14"
+version = "0.14.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.aws-lc-rs]]
-version = "1.17.0"
+version = "1.18.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.aws-lc-sys]]
-version = "0.41.0"
+version = "0.45.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.axum-core]]
@@ -334,7 +334,7 @@ version = "0.10.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.cpp_demangle]]
-version = "0.4.5"
+version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.crc32fast]]
@@ -1298,7 +1298,7 @@ version = "4.1.0"
 criteria = "safe-to-run"
 
 [[exemptions.rustls]]
-version = "0.23.40"
+version = "0.23.45"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-platform-verifier-android]]
