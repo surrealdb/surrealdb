@@ -643,12 +643,12 @@ SELECT count() FROM fan WITH NOINDEX WHERE tags = ['x', 'y'] GROUP ALL;
 };
 
 -- A plain column holding an array fans out on write exactly as a `*` column
--- does, but is treated as a scalar when the access path is chosen. `CONTAINS`
--- is therefore not matched to it and the scan answers — the mirror image of
--- the `*` case above, on identical data. The other half of that mirror,
--- whole-array equality against the plain column, IS matched and returns the
--- wrong answer; it is pinned in array_fanout_oracle.surql, which owns the
--- fan-out key model, because column spelling is not an index kind.
+-- does. Its field is declared `array<string>`, so it is planned as the `*`
+-- column it behaves as, but `CONTAINS` is not an element seek on it and the
+-- scan answers: a declared kind does not show that every stored value is an
+-- array, and a string stored whole holds substrings no seek reaches. The `*`
+-- spelling above is what serves containment from the index. Whole-array
+-- comparisons over the plain column are pinned in array_fanout_oracle.surql.
 EXPLAIN SELECT id FROM fanp WHERE tags CONTAINS 'x';
 SELECT id FROM fanp WHERE tags CONTAINS 'x';
 SELECT id FROM fanp WITH NOINDEX WHERE tags CONTAINS 'x';

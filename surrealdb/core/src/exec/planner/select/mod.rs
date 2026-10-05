@@ -66,7 +66,9 @@ use crate::exec::index::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
 };
 use crate::exec::index::analysis::IndexAnalyzer;
-use crate::exec::logical::reads::{reads_at_or_beneath, reads_row_opaquely};
+use crate::exec::logical::reads::{
+	declared_read_prefix, paths_overlap, reads_at_or_beneath, reads_row_opaquely,
+};
 use crate::exec::operators::fetch::{FetchPart, fetch_parts};
 use crate::exec::operators::scan::pipeline::{
 	determine_scan_direction, table_read_restricted_fields,
@@ -3188,6 +3190,42 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
+	/// `indexes` with every b-tree column that stores array elements spelled
+	/// as an element column, resolved against `table_name`'s declared fields;
+	/// see [`with_array_columns_as_elements`](crate::exec::index::access_path::with_array_columns_as_elements).
+	///
+	/// `None` when the field list cannot be read: without it a column's
+	/// fan-out is unknown, so the caller declines its plan-time index path
+	/// rather than plan one that could count or order element entries as
+	/// rows. A declined select plan falls back to `DynamicScan`, which plans
+	/// without b-tree indexes when the list is unreadable there too.
+	async fn with_array_columns_as_elements(
+		&self,
+		txn: &Transaction,
+		ns_id: crate::catalog::NamespaceId,
+		db_id: crate::catalog::DatabaseId,
+		table_name: &TableName,
+		indexes: Arc<[IndexDefinition]>,
+	) -> Option<crate::exec::index::access_path::ElementColumns> {
+		use crate::exec::index::access_path::ElementColumns;
+		if !crate::exec::index::access_path::may_have_array_columns(&indexes) {
+			return Some(ElementColumns::unchanged(indexes));
+		}
+		let fields = match txn.all_tb_fields(ns_id, db_id, table_name, None).await {
+			Ok(fields) => fields,
+			Err(e) => {
+				tracing::warn!(
+					table = %table_name,
+					error = %e,
+					"plan-time field list failed in with_array_columns_as_elements; \
+					 falling back to runtime",
+				);
+				return None;
+			}
+		};
+		Some(crate::exec::index::access_path::with_array_columns_as_elements(indexes, &fields))
+	}
+
 	/// Resolve a B-tree index access path covering the WHERE condition for
 	/// key-only counting.  Returns `Some((IndexRef, BTreeAccess))` when the
 	/// index analysis finds a B-tree index that fully covers the predicate
@@ -3221,8 +3259,10 @@ impl<'ctx> Planner<'ctx> {
 		if indexes.is_empty() {
 			return None;
 		}
+		let columns =
+			self.with_array_columns_as_elements(txn, ns_id, db_id, table_name, indexes).await?;
 
-		let analyzer = IndexAnalyzer::new(indexes, with);
+		let analyzer = columns.analyzer(with);
 		let candidates = analyzer.analyze(Some(cond), None);
 
 		// Look for a candidate that fully covers the WHERE condition
@@ -3279,8 +3319,10 @@ impl<'ctx> Planner<'ctx> {
 		let exact_col = |col: &Idiom| -> bool {
 			fields.iter().find(|fd| &fd.name == col).is_some_and(field_def_excludes_arrays)
 		};
+		let columns =
+			crate::exec::index::access_path::with_array_columns_as_elements(indexes, &fields);
 
-		let analyzer = IndexAnalyzer::new(indexes, with);
+		let analyzer = columns.analyzer(with);
 		let root = analyzer.try_bitmap_count_fusion(cond, &exact_col)?;
 		Some(bitmap_plan_to_node(root))
 	}
@@ -3383,8 +3425,20 @@ impl<'ctx> Planner<'ctx> {
 		if indexes.is_empty() {
 			return Ok(Some((AccessPath::TableScan, direction)));
 		}
+		let Some(columns) = self
+			.with_array_columns_as_elements(
+				txn,
+				db_def.namespace_id,
+				db_def.database_id,
+				table_name,
+				indexes,
+			)
+			.await
+		else {
+			return Ok(None);
+		};
 
-		let analyzer = IndexAnalyzer::new(indexes, with);
+		let analyzer = columns.analyzer(with);
 		let candidates = analyzer.analyze(analysis_cond, order);
 
 		// Bitmap candidate fusion: when the WHERE clause is an AND of several
@@ -4089,7 +4143,8 @@ enum RestrictedPrefixes {
 	/// restricted — index fast paths are safe.
 	None,
 	/// These declared fields are governed by a non-`Full` SELECT
-	/// permission; a read at or beneath one of them is restricted.
+	/// permission; a read at, beneath or above one of them is restricted —
+	/// reading `acl` reads the restricted elements `acl.*` holds.
 	Some(Vec<crate::expr::logical::FieldPath>),
 }
 
@@ -4099,23 +4154,44 @@ impl RestrictedPrefixes {
 	/// must be conservatively assumed because plan-time context is missing).
 	///
 	/// Used to keep an index fast path from turning index entries into a
-	/// membership oracle for a value the actor cannot read. A nested
-	/// statement is not descended into: it operates against its own tables
-	/// and performs its own permission resolution.
+	/// membership oracle for a value the actor cannot read. A read touches a
+	/// restricted field at, beneath or above it: a read of an ancestor
+	/// reads the restricted descendant along with it, and an index over the
+	/// ancestor holds the descendant's values as entries (`acl CONTAINS 'x'`
+	/// over an index on `acl` seeks `acl.*` elements). A nested statement is
+	/// not descended into: it operates against its own tables and performs
+	/// its own permission resolution.
 	fn cond_touches(&self, cond: &LogicalExpr) -> bool {
 		let prefixes = match self {
 			RestrictedPrefixes::AssumeRestricted => return true,
 			RestrictedPrefixes::None => return false,
 			RestrictedPrefixes::Some(p) => p,
 		};
-		fn walk(expr: &LogicalExpr, prefixes: &[crate::expr::logical::FieldPath]) -> bool {
-			match expr {
-				LogicalExpr::Subquery(_) => false,
-				read if prefixes.iter().any(|p| reads_at_or_beneath(read, p)) => true,
-				_ => expr.children().into_iter().any(|child| walk(child, prefixes)),
+		/// `enclosing` is the position the enclosing path reads, when `expr`
+		/// is part of that path: a base of `meta.public` reads `meta`, which
+		/// is not a read of the whole `meta` and so of nothing beneath it.
+		fn walk(
+			expr: &LogicalExpr,
+			prefixes: &[crate::expr::logical::FieldPath],
+			enclosing: Option<&[crate::expr::logical::FieldSegment]>,
+		) -> bool {
+			if matches!(expr, LogicalExpr::Subquery(_)) {
+				return false;
 			}
+			let read = declared_read_prefix(expr);
+			if let Some(read) = read.as_ref() {
+				let read = read.segments();
+				let whole = !enclosing.is_some_and(|e| e.len() > read.len() && e.starts_with(read));
+				if prefixes.iter().any(|p| {
+					read.starts_with(p.segments()) || (whole && p.segments().starts_with(read))
+				}) {
+					return true;
+				}
+			}
+			let enclosing = read.as_ref().map(|r| r.segments());
+			expr.children().into_iter().any(|child| walk(child, prefixes, enclosing))
 		}
-		walk(cond, prefixes)
+		walk(cond, prefixes, None)
 	}
 
 	/// SECURITY: returns `true` when any column of an index is governed by a
@@ -4132,8 +4208,9 @@ impl RestrictedPrefixes {
 	/// reduced document instead.
 	///
 	/// An ancestor field definition governs the column too — reducing an
-	/// ancestor implicitly reduces its descendants — which `starts_with`
-	/// covers.
+	/// ancestor implicitly reduces its descendants — and so does a restricted
+	/// descendant, whose values a column over the ancestor stores: an index on
+	/// `acl` holds the elements a restricted `acl.*` hides.
 	fn index_touches(&self, cols: &[Idiom]) -> bool {
 		let prefixes = match self {
 			RestrictedPrefixes::AssumeRestricted => return true,
@@ -4144,7 +4221,7 @@ impl RestrictedPrefixes {
 			// A column that is not a field path names no position a declared
 			// field can be compared against, so it is taken as touching.
 			crate::expr::logical::FieldPath::from_idiom(col).is_none_or(|col| {
-				prefixes.iter().any(|prefix| col.segments().starts_with(prefix.segments()))
+				prefixes.iter().any(|prefix| paths_overlap(col.segments(), prefix.segments()))
 			})
 		})
 	}
@@ -4783,6 +4860,9 @@ mod tests {
 		let clauses = clauses_of("SELECT * FROM t WHERE meta.public = 1 ORDER BY meta.secret");
 		assert!(!restricted.cond_touches(clauses.cond.as_ref().expect("WHERE")));
 		assert!(restricted.order_touches(clauses.order.as_ref().expect("ORDER BY")));
+		// A read of the whole parent reads the restricted child with it.
+		let clauses = clauses_of("SELECT * FROM t WHERE meta CONTAINS 'x'");
+		assert!(restricted.cond_touches(clauses.cond.as_ref().expect("WHERE")));
 		// A nested statement resolves its own permissions.
 		let clauses = clauses_of("SELECT * FROM t WHERE (SELECT meta.secret FROM u) != NONE");
 		assert!(!restricted.cond_touches(clauses.cond.as_ref().expect("WHERE")));

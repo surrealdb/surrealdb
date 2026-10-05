@@ -26,6 +26,10 @@ pub struct IndexAnalyzer<'a> {
 	pub indexes: Arc<[IndexDefinition]>,
 	/// Optional WITH INDEX/NOINDEX hints
 	pub with_hints: Option<&'a With>,
+	/// Per index of `indexes`, whether a containment leaf may not seek each
+	/// column; a column past the end of its index's flags may be sought.
+	/// `None` withholds nothing.
+	no_containment: Option<Arc<[super::access_path::ColumnFlags]>>,
 }
 
 impl<'a> IndexAnalyzer<'a> {
@@ -34,7 +38,30 @@ impl<'a> IndexAnalyzer<'a> {
 		Self {
 			indexes,
 			with_hints,
+			no_containment: None,
 		}
+	}
+
+	/// Withhold the containment seek from the columns `flags` marks, per
+	/// index of `indexes`.
+	pub(crate) fn without_containment_on(
+		mut self,
+		flags: Arc<[super::access_path::ColumnFlags]>,
+	) -> Self {
+		self.no_containment = Some(flags);
+		self
+	}
+
+	/// Whether a containment leaf over `path` may seek column `col` of index
+	/// `idx`: the column holds elements for the path, and is not withheld.
+	/// Every containment match goes through here.
+	fn seeks_containment(&self, idx: usize, col: usize, path: &LogicalExpr) -> bool {
+		let withheld = self
+			.no_containment
+			.as_ref()
+			.is_some_and(|flags| flags.get(idx).and_then(|f| f.get(col)).copied().unwrap_or(false));
+		!withheld
+			&& self.indexes[idx].cols.get(col).is_some_and(|c| path_matches_containment(path, c))
 	}
 
 	/// Analyze conditions and ORDER BY to find candidate access paths.
@@ -1205,9 +1232,7 @@ impl<'a> IndexAnalyzer<'a> {
 					continue;
 				}
 
-				if let Some(first_col) = ix_def.cols.first()
-					&& path_matches_containment(path, first_col)
-				{
+				if self.seeks_containment(idx, 0, path) {
 					let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
 					let is_composite = ix_def.cols.len() > 1;
 					let paths: Vec<AccessPath> = values
@@ -1507,7 +1532,7 @@ impl<'a> IndexAnalyzer<'a> {
 			let mut prefix_values = Vec::new();
 			let mut range_condition: Option<(BinaryOperator, Value)> = None;
 
-			for col in &ix_def.cols {
+			for (col_idx, col) in ix_def.cols.iter().enumerate() {
 				// Find a condition that matches this column
 				let matching_cond = conditions.iter().find(|c| path_matches_column(&c.path, col));
 
@@ -1533,7 +1558,7 @@ impl<'a> IndexAnalyzer<'a> {
 							(&c.op, c.position),
 							(BinaryOperator::Contain, IdiomPosition::Left)
 								| (BinaryOperator::Inside, IdiomPosition::Right)
-						) && path_matches_containment(&c.path, col)
+						) && self.seeks_containment(idx, col_idx, &c.path)
 					})
 				} else {
 					None
@@ -1974,9 +1999,7 @@ impl<'a> IndexAnalyzer<'a> {
 			if !matches!(ix_def.index, Index::Idx | Index::Uniq) {
 				continue;
 			}
-			if let Some(first_col) = ix_def.cols.first()
-				&& path_matches_containment(path, first_col)
-			{
+			if self.seeks_containment(idx, 0, path) {
 				// Compound indexes need a prefix scan rather than a point
 				// lookup, because the on-disk key includes all columns. The
 				// trailing columns can then be used by `index_covers_ordering`
@@ -2904,6 +2927,47 @@ mod tests {
 			// would inflate the count).
 			let cond = parse_cond("a = 1 AND b = 2");
 			assert!(az.try_bitmap_count_fusion(&cond, &|_| false).is_none());
+		}
+	}
+
+	// ------------------------------------------------------------------
+	mod withheld_containment {
+		use super::*;
+
+		/// Whether a containment leaf finds a candidate on `ix`, with the
+		/// first column withheld or not.
+		fn seeks(cols: &[&str], cond: &str, withheld: bool) -> bool {
+			let mut a = analyzer(vec![idx_basic(1, "ix", cols)], None);
+			if withheld {
+				a = a.without_containment_on(vec![vec![true].into_boxed_slice()].into());
+			}
+			let cond = parse_cond(cond);
+			find_for(&a.analyze(Some(&cond), None), "ix").is_some()
+				|| a.try_containment_expansion(Some(&cond), crate::kvs::Direction::Forward)
+					.is_some()
+		}
+
+		#[test]
+		fn a_withheld_element_column_is_not_sought_for_containment() {
+			for cond in ["acl CONTAINS 'a'", "'a' INSIDE acl", "acl CONTAINSANY ['a', 'b']"] {
+				assert!(seeks(&["acl.*"], cond, false), "{cond}");
+				assert!(!seeks(&["acl.*"], cond, true), "{cond}");
+			}
+		}
+
+		#[test]
+		fn a_withheld_column_still_serves_a_leading_equality() {
+			// Only the containment seek on the withheld column goes; the
+			// compound prefix over the column before it stays.
+			let mut a = analyzer(vec![idx_basic(1, "ix", &["grp", "acl.*"])], None);
+			a = a.without_containment_on(vec![vec![false, true].into_boxed_slice()].into());
+			let cond = parse_cond("grp = 1 AND acl CONTAINS 'a'");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "ix").expect("prefix candidate");
+			assert!(matches!(
+				&c.access,
+				BTreeAccess::Compound { prefix, .. } if prefix.len() == 1
+			));
 		}
 	}
 

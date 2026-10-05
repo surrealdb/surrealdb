@@ -77,6 +77,14 @@ pub(crate) fn reads_beneath(expr: &LogicalExpr, paths: &[FieldPath]) -> bool {
 	.is_break()
 }
 
+/// Whether one of two paths lies at or beneath the other. A read or an index
+/// column at `a` reaches every value at `b` when `b` extends `a`, and is
+/// governed by `b` when `a` extends `b`; the restricted-field guards treat
+/// either as touching.
+pub(crate) fn paths_overlap<T: PartialEq>(a: &[T], b: &[T]) -> bool {
+	a.starts_with(b) || b.starts_with(a)
+}
+
 /// Whether the path `expr` reads the declared field `field` or a position
 /// beneath it: its [`declared_read_prefix`] starts with every segment of
 /// `field`. `false` for anything that is not a path from the row's fields.
