@@ -9,10 +9,14 @@ use std::sync::Arc;
 use common::future::stream::{self, Yielder};
 use reblessive::TreeStack;
 
-use super::common::fetch_and_filter_records_batch;
+use super::common::{
+	DecodeFields, RECORD_PROBE_ROWS, ReadAhead, decode_fields_for_execution, drain_read_ahead,
+	next_batch_len, probe_batch_len, resolve_version_stamp,
+};
 use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
 use crate::catalog::{Error, Index};
+use crate::err::EngineError;
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::permission::{
 	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
@@ -20,7 +24,7 @@ use crate::exec::permission::{
 };
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	PhysicalExpr, ValueBatchStream, monitor_stream,
 };
 use crate::expr::operator::MatchesOperator;
 use crate::expr::{ControlFlow, ControlFlowExt};
@@ -28,15 +32,17 @@ use crate::iam::Action;
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchesHitsIterator;
 use crate::idx::ft::fulltext::FullTextIndex;
-use crate::kvs::CachePolicy;
 use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 
 /// Batch size for full-text result batching.
 ///
+/// The most record ids a full-text scan reads at once.
+///
 /// Smaller than the default
 /// [`ExecConfig::scan_batch_size`](crate::exec::config::ExecConfig::scan_batch_size) because
 /// full-text results are ordered by relevance score, so smaller batches let
-/// downstream operators begin processing sooner.
+/// downstream operators begin processing sooner. Each read below it is sized
+/// from the bytes the read before it held, as the other record scans do.
 const BATCH_SIZE: usize = 100;
 
 /// Full-text search scan operator.
@@ -65,6 +71,9 @@ pub struct FullTextScan {
 	/// Outer `None` = sub-operator mode (parent handles fields).
 	/// `Some(None)` = all fields, `Some(Some(set))` = specific fields.
 	pub(crate) needed_fields: Option<Option<HashSet<String>>>,
+	/// The fields to decode from each fetched record, when the plan reads no
+	/// other field of it; `None` decodes whole records.
+	pub(crate) decode_fields: Option<DecodeFields>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -86,6 +95,7 @@ impl FullTextScan {
 			version,
 			resolved: None,
 			needed_fields,
+			decode_fields: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -93,6 +103,12 @@ impl FullTextScan {
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
+		self
+	}
+
+	/// Decode only `fields` of each fetched record; see [`DecodeFields`].
+	pub(crate) fn with_decode_fields(mut self, fields: DecodeFields) -> Self {
+		self.decode_fields = Some(fields);
 		self
 	}
 }
@@ -137,6 +153,7 @@ impl ExecOperator for FullTextScan {
 		let version_expr = self.version.clone();
 		let resolved = self.resolved.clone();
 		let needed_fields = self.needed_fields.clone();
+		let decode_fields = self.decode_fields.clone();
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -146,19 +163,9 @@ impl ExecOperator for FullTextScan {
 			let db = Arc::clone(&db_ctx.db);
 			let txn = ctx.txn();
 
-			// Evaluate VERSION expression
-			let version: Option<u64> = match &version_expr {
-				Some(expr) => {
-					let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&ctx);
-					let v = expr.evaluate(eval_ctx).await?;
-					Some(
-						v.cast_to::<crate::val::Datetime>()
-							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp(txn.timestamp_impl().as_ref())?,
-					)
-				}
-				None => ctx.version_stamp(),
-			};
+			// The stamp the enclosing `VersionScope` set, rather than the
+			// clause evaluated again; see [`resolve_version_stamp`].
+			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
 
 			// Get the FrozenContext and Options from the root context
 			let root = ctx.root();
@@ -205,8 +212,17 @@ impl ExecOperator for FullTextScan {
 				}
 				None => super::pipeline::FieldState::empty(),
 			};
+			let decode_fields = decode_fields_for_execution(
+				&ctx,
+				&table_name,
+				resolved.as_ref(),
+				&select_permission,
+				check_perms,
+				decode_fields.as_ref(),
+			)
+			.await?;
 
-			// Table-level permissions are handled by fetch_and_filter_records_batch.
+			// Table-level permissions are handled by ReadAhead::decode_batch.
 			// The pipeline handles computed fields and field-level permissions.
 			let mut pipeline = ScanPipeline::new(
 				PhysicalPermission::Allow,
@@ -278,63 +294,43 @@ impl ExecOperator for FullTextScan {
 				}
 			};
 
-			// Iterate over hits, collecting record IDs into batches for
-			// batch-fetching via get_records.
+			// Collect the hits' record IDs in chunks, read each chunk ahead as
+			// stored bytes, and decode it in batches of at most the byte budget.
+			// The first chunk is a small probe and each later one is sized from
+			// the bytes the one before it read, up to `BATCH_SIZE`.
+			let batch_bytes = ctx.root().ctx.config.exec.scan_batch_bytes;
+			let mut chunk_len = probe_batch_len(batch_bytes, RECORD_PROBE_ROWS.min(BATCH_SIZE));
+			let mut read_ahead = ReadAhead::new(
+				&select_permission,
+				check_perms,
+				decode_fields.as_ref(),
+				batch_bytes,
+			);
 			let mut hits_iter = hits_iter;
 			let mut rid_batch = Vec::with_capacity(BATCH_SIZE);
-
 			loop {
-				// Collect up to BATCH_SIZE record IDs from the hits iterator
+				if ctx.cancellation().is_cancelled() {
+					Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
+				}
 				let hit = hits_iter.next(txn.as_ref()).await.context("Failed to get next hit")?;
-
-				match hit {
-					Some((rid, _doc_id)) => {
-						rid_batch.push(rid);
-
-						if rid_batch.len() >= BATCH_SIZE {
-							let mut values = fetch_and_filter_records_batch(
-								&ctx,
-								&txn,
-								ns.namespace_id,
-								db.database_id,
-								&rid_batch,
-								&select_permission,
-								check_perms,
-								version,
-								CachePolicy::ReadOnly,
-							)
-							.await?;
-							pipeline.process_batch(&mut values, &ctx).await?;
-							if !values.is_empty() {
-								yielder.emit(ValueBatch::new(values)).await;
-							}
-							rid_batch.clear();
-						}
-					}
-					None => {
-						// No more hits
+				let exhausted = hit.is_none();
+				if let Some((rid, _doc_id)) = hit {
+					rid_batch.push(rid);
+				}
+				if rid_batch.len() >= chunk_len || (exhausted && !rid_batch.is_empty()) {
+					let rids = std::mem::replace(&mut rid_batch, Vec::with_capacity(BATCH_SIZE));
+					let (read_bytes, read_rows) = read_ahead
+						.read(&txn, ns.namespace_id, db.database_id, rids, version)
+						.await?;
+					chunk_len =
+						next_batch_len(read_bytes, read_rows, chunk_len, batch_bytes, BATCH_SIZE);
+					if !drain_read_ahead(&mut read_ahead, &mut pipeline, &mut yielder, &ctx).await?
+					{
 						break;
 					}
 				}
-			}
-
-			// Yield any remaining records
-			if !rid_batch.is_empty() {
-				let mut values = fetch_and_filter_records_batch(
-					&ctx,
-					&txn,
-					ns.namespace_id,
-					db.database_id,
-					&rid_batch,
-					&select_permission,
-					check_perms,
-					version,
-					CachePolicy::ReadOnly,
-				)
-				.await?;
-				pipeline.process_batch(&mut values, &ctx).await?;
-				if !values.is_empty() {
-					yielder.emit(ValueBatch::new(values)).await;
+				if exhausted {
+					break;
 				}
 			}
 			Ok(())
@@ -389,5 +385,90 @@ mod tests {
 		};
 		assert_as_stored(&collect(&scan(planned), &ctx).await);
 		assert_reduced(&collect(&scan(runtime), &ctx).await);
+	}
+
+	/// Wide matching records are decoded in batches of at most the byte budget
+	/// plus one record, whole or projected, and every match is returned once.
+	#[tokio::test]
+	async fn wide_matches_decode_in_batches_within_the_byte_budget() {
+		const ROWS: usize = 300;
+		let db = TestDb::new(&format!(
+			"DEFINE TABLE t SCHEMALESS;
+			 DEFINE ANALYZER blank TOKENIZERS blank;
+			 DEFINE INDEX body_ft ON t FIELDS body FULLTEXT ANALYZER blank BM25;
+			 FOR $i IN 0..{ROWS} {{ CREATE t SET body = 'hello', emb = array::repeat(0.5f, 1024) }};"
+		))
+		.await;
+		let ctx = db.exec_ctx().await;
+		let index_ref = index_ref(&ctx, "t", "body_ft").await;
+		let size = super::super::common::approx_value_size;
+		for decode in [None, Some(DecodeFields::new(["emb".to_string()]))] {
+			let mut scan = FullTextScan::new(
+				index_ref.clone(),
+				"hello".to_owned(),
+				MatchesOperator {
+					rf: None,
+					operator: BooleanOperator::And,
+				},
+				"t".into(),
+				None,
+				Some(None),
+			);
+			if let Some(fields) = decode.clone() {
+				scan = scan.with_decode_fields(fields);
+			}
+			let scan: Arc<dyn ExecOperator> = Arc::new(scan);
+			let mut stream = scan.execute(&ctx).expect("execute should succeed");
+			let mut batches = Vec::new();
+			while let Some(batch) = futures::StreamExt::next(&mut stream).await {
+				batches.push(batch.expect("batch should be Ok").into_values());
+			}
+			assert_eq!(batches.iter().map(Vec::len).sum::<usize>(), ROWS, "{decode:?}");
+			let widest = batches.iter().flatten().map(size).max().unwrap_or(0);
+			for batch in &batches {
+				let bytes: usize = batch.iter().map(size).sum();
+				assert!(
+					bytes < crate::exec::config::DEFAULT_SCAN_BATCH_BYTES + widest,
+					"{decode:?}: a batch of {} rows holds {bytes} bytes",
+					batch.len()
+				);
+			}
+		}
+	}
+
+	/// Reads of matching records start from the probe and grow by bytes, up
+	/// to `BATCH_SIZE`.
+	#[tokio::test]
+	async fn matches_are_read_from_the_probe_up_to_the_batch_size() {
+		const ROWS: usize = 300;
+		let db = TestDb::new(&format!(
+			"DEFINE TABLE t SCHEMALESS;
+			 DEFINE ANALYZER blank TOKENIZERS blank;
+			 DEFINE INDEX body_ft ON t FIELDS body FULLTEXT ANALYZER blank BM25;
+			 FOR $i IN 0..{ROWS} {{ CREATE t SET body = 'hello' }};"
+		))
+		.await;
+		let ctx = db.exec_ctx().await;
+		let index_ref = index_ref(&ctx, "t", "body_ft").await;
+		let scan: Arc<dyn ExecOperator> = Arc::new(FullTextScan::new(
+			index_ref,
+			"hello".to_owned(),
+			MatchesOperator {
+				rf: None,
+				operator: BooleanOperator::And,
+			},
+			"t".into(),
+			None,
+			Some(None),
+		));
+		let mut stream = scan.execute(&ctx).expect("execute should succeed");
+		let mut lens = Vec::new();
+		while let Some(batch) = futures::StreamExt::next(&mut stream).await {
+			lens.push(batch.expect("batch should be Ok").into_values().len());
+		}
+		assert_eq!(lens.iter().sum::<usize>(), ROWS, "every match once: {lens:?}");
+		// Narrow rows decode within the budget, so each batch is one read.
+		assert_eq!(lens[0], RECORD_PROBE_ROWS, "the first read is the probe: {lens:?}");
+		assert!(lens.iter().all(|&n| n <= BATCH_SIZE), "no read past BATCH_SIZE: {lens:?}");
 	}
 }

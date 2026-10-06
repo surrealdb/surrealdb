@@ -43,6 +43,7 @@ use std::slice;
 use anyhow::Result;
 
 use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
+use crate::exec::index::access_path::BTreeAccess;
 use crate::expr::BinaryOperator;
 use crate::idx::entry::IndexEntryValue;
 use crate::idx::keys::{compute_index_range, entry_range};
@@ -155,11 +156,17 @@ impl IndexEqualIterator {
 	/// Fetch the next batch of matching record IDs.
 	///
 	/// Returns an empty `Vec` when iteration is complete.
-	pub(crate) async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
+	///
+	/// Returns at most `limit` record ids, clamped to `1..=INDEX_BATCH_SIZE`.
+	pub(crate) async fn next_batch(
+		&mut self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<Vec<RecordId>> {
 		let res = if self.reverse {
-			scanr(&mut self.range, tx, INDEX_BATCH_SIZE).await?
+			scanr(&mut self.range, tx, limit.clamp(1, INDEX_BATCH_SIZE)).await?
 		} else {
-			scan(&mut self.range, tx, INDEX_BATCH_SIZE).await?
+			scan(&mut self.range, tx, limit.clamp(1, INDEX_BATCH_SIZE)).await?
 		};
 
 		decode_record_ids(res)
@@ -213,8 +220,10 @@ impl UniqueEqualIterator {
 		})
 	}
 
-	pub async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
-		let res = scan(&mut self.range, tx, INDEX_BATCH_SIZE).await?;
+	/// The next at most `limit` matching record ids, clamped to
+	/// `1..=INDEX_BATCH_SIZE`: a NONE/NULL lookup can match many records.
+	pub async fn next_batch(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<RecordId>> {
+		let res = scan(&mut self.range, tx, limit.clamp(1, INDEX_BATCH_SIZE)).await?;
 		decode_record_ids(res)
 	}
 }
@@ -251,8 +260,14 @@ impl IndexRangeForwardIterator {
 	/// On the first call, if the lower bound is exclusive, any key matching
 	/// the original `beg` is skipped.  Subsequent batches need no such
 	/// check because `beg` has already been advanced past that key.
-	pub(crate) async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
-		let r = scan(&mut self.range, tx, INDEX_BATCH_SIZE).await?;
+	///
+	/// Returns at most `limit` record ids, clamped to `1..=INDEX_BATCH_SIZE`.
+	pub(crate) async fn next_batch(
+		&mut self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<Vec<RecordId>> {
+		let r = scan(&mut self.range, tx, limit.clamp(1, INDEX_BATCH_SIZE)).await?;
 		decode_record_ids(r)
 	}
 }
@@ -294,8 +309,14 @@ impl IndexRangeBackwardIterator {
 	/// `end` are skipped.  On *every* call, if the lower bound is exclusive,
 	/// keys equal to the original `beg` are skipped (because `beg` is fixed
 	/// and the half-open range always includes it).
-	pub(crate) async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
-		let r = scanr(&mut self.range, tx, INDEX_BATCH_SIZE).await?;
+	///
+	/// Returns at most `limit` record ids, clamped to `1..=INDEX_BATCH_SIZE`.
+	pub(crate) async fn next_batch(
+		&mut self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<Vec<RecordId>> {
+		let r = scanr(&mut self.range, tx, limit.clamp(1, INDEX_BATCH_SIZE)).await?;
 		decode_record_ids(r)
 	}
 }
@@ -331,10 +352,16 @@ impl IndexRangeIterator {
 	}
 
 	/// Fetch the next batch, delegating to the inner iterator.
-	pub(crate) async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
+	///
+	/// Returns at most `limit` record ids, clamped to `1..=INDEX_BATCH_SIZE`.
+	pub(crate) async fn next_batch(
+		&mut self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<Vec<RecordId>> {
 		match self {
-			Self::Forward(iter) => iter.next_batch(tx).await,
-			Self::Backward(iter) => iter.next_batch(tx).await,
+			Self::Forward(iter) => iter.next_batch(tx, limit).await,
+			Self::Backward(iter) => iter.next_batch(tx, limit).await,
 		}
 	}
 }
@@ -512,8 +539,14 @@ impl UniqueRangeForwardIterator {
 	/// the original `beg` are skipped.  When the scan is exhausted and
 	/// `end_inclusive` is `true`, a final point-get on `end` retrieves the
 	/// boundary value that the half-open range excluded.
-	pub(crate) async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
-		let r = scan(&mut self.range, tx, INDEX_BATCH_SIZE).await?;
+	///
+	/// Returns at most `limit` record ids, clamped to `1..=INDEX_BATCH_SIZE`.
+	pub(crate) async fn next_batch(
+		&mut self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<Vec<RecordId>> {
+		let r = scan(&mut self.range, tx, limit.clamp(1, INDEX_BATCH_SIZE)).await?;
 		decode_record_ids(r)
 	}
 }
@@ -553,8 +586,14 @@ impl UniqueRangeBackwardIterator {
 	/// half-open range excludes.  If the upper bound is exclusive, keys
 	/// equal to `end` are skipped.  On *every* call, if the lower bound
 	/// is exclusive, keys equal to `beg` are skipped.
-	pub(crate) async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
-		let r = scanr(&mut self.range, tx, INDEX_BATCH_SIZE).await?;
+	///
+	/// Returns at most `limit` record ids, clamped to `1..=INDEX_BATCH_SIZE`.
+	pub(crate) async fn next_batch(
+		&mut self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<Vec<RecordId>> {
+		let r = scanr(&mut self.range, tx, limit.clamp(1, INDEX_BATCH_SIZE)).await?;
 		decode_record_ids(r)
 	}
 }
@@ -590,10 +629,16 @@ impl UniqueRangeIterator {
 	}
 
 	/// Fetch the next batch, delegating to the inner iterator.
-	pub(crate) async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
+	///
+	/// Returns at most `limit` record ids, clamped to `1..=INDEX_BATCH_SIZE`.
+	pub(crate) async fn next_batch(
+		&mut self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<Vec<RecordId>> {
 		match self {
-			Self::Forward(iter) => iter.next_batch(tx).await,
-			Self::Backward(iter) => iter.next_batch(tx).await,
+			Self::Forward(iter) => iter.next_batch(tx, limit).await,
+			Self::Backward(iter) => iter.next_batch(tx, limit).await,
 		}
 	}
 }
@@ -679,14 +724,15 @@ impl CompoundRangeForwardIterator {
 		})
 	}
 
-	/// Fetch the next batch of record IDs in ascending key order,
-	/// capped at `limit` entries.
+	/// Fetch the next batch of record IDs in ascending key order, at most
+	/// `limit` of them, clamped to `1..=INDEX_BATCH_SIZE` so a zero cap cannot
+	/// read nothing and pass for exhaustion.
 	pub(crate) async fn next_batch(
 		&mut self,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<Vec<RecordId>> {
-		let scan_limit = limit.min(INDEX_BATCH_SIZE);
+		let scan_limit = limit.clamp(1, INDEX_BATCH_SIZE);
 		let res = scan(&mut self.range, tx, scan_limit).await?;
 		decode_record_ids(res)
 	}
@@ -723,6 +769,8 @@ impl CompoundRangeIterator {
 	}
 
 	/// Fetch the next batch, delegating to the inner iterator.
+	///
+	/// Returns at most `limit` record ids, clamped to `1..=INDEX_BATCH_SIZE`.
 	pub(crate) async fn next_batch(
 		&mut self,
 		tx: &Transaction,
@@ -731,6 +779,145 @@ impl CompoundRangeIterator {
 		match self {
 			Self::Forward(iter) => iter.next_batch(tx, limit).await,
 			Self::Backward(iter) => iter.next_batch(tx, limit).await,
+		}
+	}
+}
+
+/// A compound-index lookup: an equality prefix alone, or with a range on the
+/// next column, so a scan drives either through one loop.
+pub(crate) enum CompoundIterator {
+	Equal(CompoundEqualIterator),
+	Range(CompoundRangeIterator),
+}
+
+impl CompoundIterator {
+	/// An iterator over the entries matching `prefix`, and `range` on the next
+	/// column when it is given, in `direction`.
+	pub(crate) fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &IndexDefinition,
+		prefix: &[Value],
+		range: Option<&(BinaryOperator, Value)>,
+		direction: Direction,
+	) -> Result<Self> {
+		Ok(match range {
+			None => Self::Equal(CompoundEqualIterator::new(ns, db, ix, prefix, None, direction)?),
+			Some(range) => {
+				Self::Range(CompoundRangeIterator::new(ns, db, ix, prefix, range, direction)?)
+			}
+		})
+	}
+
+	/// Fetch the next batch: at most `limit` record ids, clamped to
+	/// `1..=INDEX_BATCH_SIZE`.
+	pub(crate) async fn next_batch(
+		&mut self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<Vec<RecordId>> {
+		match self {
+			Self::Equal(iter) => iter.next_batch(tx, limit).await,
+			Self::Range(iter) => iter.next_batch(tx, limit).await,
+		}
+	}
+}
+
+/// The iterator a B-tree lookup takes for its access shape, so a caller drives
+/// every shape through one loop.
+pub(crate) enum BTreeIterator {
+	UniqueEqual(UniqueEqualIterator),
+	Equal(IndexEqualIterator),
+	UniqueRange(UniqueRangeIterator),
+	Range(IndexRangeIterator),
+	Compound(CompoundIterator),
+}
+
+impl BTreeIterator {
+	/// The iterator for `access` on `ix`, a unique index when `unique`, in
+	/// `direction`; `None` for an access no B-tree iterator serves (full-text,
+	/// KNN). A unique equality lookup ignores `direction`.
+	pub(crate) fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &IndexDefinition,
+		unique: bool,
+		access: &BTreeAccess,
+		direction: Direction,
+	) -> Result<Option<Self>> {
+		Ok(Some(match (access, unique) {
+			(BTreeAccess::Equality(value), true) => {
+				Self::UniqueEqual(UniqueEqualIterator::new(ns, db, ix, value)?)
+			}
+			(BTreeAccess::Equality(value), false) => {
+				let reverse = matches!(direction, Direction::Backward);
+				Self::Equal(IndexEqualIterator::with_direction(ns, db, ix, value, reverse)?)
+			}
+			(
+				BTreeAccess::Range {
+					range,
+				},
+				true,
+			) => Self::UniqueRange(UniqueRangeIterator::new(
+				ns,
+				db,
+				ix,
+				range.start.as_ref(),
+				range.end.as_ref(),
+				direction,
+			)?),
+			(
+				BTreeAccess::Range {
+					range,
+				},
+				false,
+			) => Self::Range(IndexRangeIterator::new(
+				ns,
+				db,
+				ix,
+				range.start.as_ref(),
+				range.end.as_ref(),
+				direction,
+			)?),
+			(
+				BTreeAccess::Compound {
+					prefix,
+					range,
+				},
+				_,
+			) => Self::Compound(CompoundIterator::new(
+				ns,
+				db,
+				ix,
+				prefix,
+				range.as_ref(),
+				direction,
+			)?),
+			(
+				BTreeAccess::FullText {
+					..
+				}
+				| BTreeAccess::Knn {
+					..
+				},
+				_,
+			) => return Ok(None),
+		}))
+	}
+
+	/// Fetch the next batch: at most `limit` record ids, clamped to
+	/// `1..=INDEX_BATCH_SIZE`; an empty batch once the lookup is exhausted.
+	pub(crate) async fn next_batch(
+		&mut self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<Vec<RecordId>> {
+		match self {
+			Self::UniqueEqual(iter) => iter.next_batch(tx, limit).await,
+			Self::Equal(iter) => iter.next_batch(tx, limit).await,
+			Self::UniqueRange(iter) => iter.next_batch(tx, limit).await,
+			Self::Range(iter) => iter.next_batch(tx, limit).await,
+			Self::Compound(iter) => iter.next_batch(tx, limit).await,
 		}
 	}
 }
@@ -760,14 +947,15 @@ impl CompoundRangeBackwardIterator {
 		})
 	}
 
-	/// Fetch the next batch of record IDs in descending key order,
-	/// capped at `limit` entries.
+	/// Fetch the next batch of record IDs in descending key order, at most
+	/// `limit` of them, clamped to `1..=INDEX_BATCH_SIZE` so a zero cap cannot
+	/// read nothing and pass for exhaustion.
 	pub(crate) async fn next_batch(
 		&mut self,
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<Vec<RecordId>> {
-		let scan_limit = limit.min(INDEX_BATCH_SIZE);
+		let scan_limit = limit.clamp(1, INDEX_BATCH_SIZE);
 
 		let res = scanr(&mut self.range, tx, scan_limit).await?;
 
@@ -979,29 +1167,11 @@ mod tests {
 		}
 	}
 
-	/// Drain an iterator whose `next_batch` takes only the transaction.
+	/// Drain an iterator whose `next_batch` takes a per-batch entry cap.
 	///
 	/// Returns the record ids in emission order plus the per-batch sizes, so a
 	/// test can assert both the result and how it was chunked. An empty batch
 	/// is the documented end-of-iteration signal.
-	macro_rules! drain {
-		($it:expr, $tx:expr) => {{
-			let mut ids: Vec<String> = Vec::new();
-			let mut sizes: Vec<usize> = Vec::new();
-			loop {
-				let batch = $it.next_batch(&$tx).await.expect("batch should scan");
-				if batch.is_empty() {
-					break;
-				}
-				sizes.push(batch.len());
-				ids.extend(batch.iter().map(|r| r.to_sql()));
-			}
-			(ids, sizes)
-		}};
-	}
-
-	/// As [`drain`], for the compound iterators, whose `next_batch` takes a
-	/// caller-supplied per-batch entry cap.
 	macro_rules! drain_capped {
 		($it:expr, $tx:expr, $limit:expr) => {{
 			let mut ids: Vec<String> = Vec::new();
@@ -1053,7 +1223,7 @@ mod tests {
 		let tx = fx.tx();
 		let mut it = IndexEqualIterator::new(fx.ns, fx.db, fx.ix("iv"), &Value::from(1i64))
 			.expect("equality iterator");
-		let (ids, _) = drain!(it, tx);
+		let (ids, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		// A non-unique index stores one entry per (value, record-id) pair, so
 		// both rows on `v = 1` come back, ordered by the record-id suffix.
 		assert_eq!(ids, owned(&["t:a", "t:b"]));
@@ -1067,7 +1237,7 @@ mod tests {
 		let mut it =
 			IndexEqualIterator::with_direction(fx.ns, fx.db, fx.ix("iv"), &Value::from(1i64), true)
 				.expect("reverse equality iterator");
-		let (ids, _) = drain!(it, tx);
+		let (ids, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert_eq!(ids, reversed(&["t:a", "t:b"]));
 	}
 
@@ -1078,7 +1248,7 @@ mod tests {
 		let tx = fx.tx();
 		let mut it = IndexEqualIterator::new(fx.ns, fx.db, fx.ix("iv"), &Value::from(99i64))
 			.expect("equality iterator");
-		let (ids, sizes) = drain!(it, tx);
+		let (ids, sizes) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert!(ids.is_empty(), "no row holds v = 99, got {ids:?}");
 		assert!(sizes.is_empty(), "an exhausted scan yields no batch at all");
 	}
@@ -1091,12 +1261,12 @@ mod tests {
 
 		let mut it = IndexEqualIterator::new(fx.ns, fx.db, fx.ix("iv"), &Value::None)
 			.expect("equality iterator");
-		let (none_ids, _) = drain!(it, tx);
+		let (none_ids, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert_eq!(none_ids, owned(&["t:e"]));
 
 		let mut it = IndexEqualIterator::new(fx.ns, fx.db, fx.ix("iv"), &Value::Null)
 			.expect("equality iterator");
-		let (null_ids, _) = drain!(it, tx);
+		let (null_ids, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert_eq!(null_ids, owned(&["t:f"]), "NULL is a distinct key from NONE");
 	}
 
@@ -1118,7 +1288,7 @@ mod tests {
 			Direction::Forward,
 		)
 		.expect("range iterator");
-		let (forward, _) = drain!(it, tx);
+		let (forward, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert_eq!(forward, owned(&expected));
 
 		let mut it = IndexRangeIterator::new(
@@ -1130,7 +1300,7 @@ mod tests {
 			Direction::Backward,
 		)
 		.expect("range iterator");
-		let (backward, _) = drain!(it, tx);
+		let (backward, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert_eq!(backward, reversed(&expected), "a backward scan is the exact reverse");
 	}
 
@@ -1164,13 +1334,13 @@ mod tests {
 			let mut it =
 				IndexRangeIterator::new(fx.ns, fx.db, fx.ix("iv"), from, to, Direction::Forward)
 					.expect("range iterator");
-			let (forward, _) = drain!(it, tx);
+			let (forward, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 			assert_eq!(forward, owned(&expected), "forward {label}");
 
 			let mut it =
 				IndexRangeIterator::new(fx.ns, fx.db, fx.ix("iv"), from, to, Direction::Backward)
 					.expect("range iterator");
-			let (backward, _) = drain!(it, tx);
+			let (backward, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 			assert_eq!(backward, reversed(&expected), "backward {label}");
 		}
 	}
@@ -1193,7 +1363,7 @@ mod tests {
 			Direction::Forward,
 		)
 		.expect("range iterator");
-		let (ids, _) = drain!(it, tx);
+		let (ids, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert!(ids.is_empty(), "an empty range yields no rows, got {ids:?}");
 	}
 
@@ -1214,7 +1384,7 @@ mod tests {
 
 		let mut it =
 			IndexEqualIterator::new(fx.ns, fx.db, fx.ix("iv"), &value).expect("equality iterator");
-		let (forward, sizes) = drain!(it, tx);
+		let (forward, sizes) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert_eq!(sizes, vec![INDEX_BATCH_SIZE as usize, 100], "a batch caps at INDEX_BATCH_SIZE");
 		assert_eq!(forward.len(), total);
 		let unique: std::collections::HashSet<&String> = forward.iter().collect();
@@ -1224,7 +1394,7 @@ mod tests {
 
 		let mut it = IndexEqualIterator::with_direction(fx.ns, fx.db, fx.ix("iv"), &value, true)
 			.expect("reverse equality iterator");
-		let (backward, sizes) = drain!(it, tx);
+		let (backward, sizes) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert_eq!(sizes, vec![INDEX_BATCH_SIZE as usize, 100]);
 		let mut expected = forward.clone();
 		expected.reverse();
@@ -1260,13 +1430,13 @@ mod tests {
 
 		let mut it = UniqueEqualIterator::new(fx.ns, fx.db, fx.ix("ik"), &Value::from(20i64))
 			.expect("unique equality iterator");
-		let (ids, sizes) = drain!(it, tx);
+		let (ids, sizes) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert_eq!(ids, owned(&["u:2"]));
 		assert_eq!(sizes, vec![1], "a unique key resolves in one batch");
 
 		let mut it = UniqueEqualIterator::new(fx.ns, fx.db, fx.ix("ik"), &Value::from(21i64))
 			.expect("unique equality iterator");
-		let (ids, _) = drain!(it, tx);
+		let (ids, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert!(ids.is_empty(), "no row holds k = 21, got {ids:?}");
 	}
 
@@ -1279,7 +1449,7 @@ mod tests {
 		let tx = fx.tx();
 		let mut it = UniqueEqualIterator::new(fx.ns, fx.db, fx.ix("ik"), &Value::None)
 			.expect("unique equality iterator");
-		let (ids, _) = drain!(it, tx);
+		let (ids, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert_eq!(ids, owned(&["u:4", "u:5"]));
 	}
 
@@ -1307,13 +1477,13 @@ mod tests {
 			let mut it =
 				UniqueRangeIterator::new(fx.ns, fx.db, fx.ix("ik"), from, to, Direction::Forward)
 					.expect("unique range iterator");
-			let (forward, _) = drain!(it, tx);
+			let (forward, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 			assert_eq!(forward, owned(&expected), "forward {label}");
 
 			let mut it =
 				UniqueRangeIterator::new(fx.ns, fx.db, fx.ix("ik"), from, to, Direction::Backward)
 					.expect("unique range iterator");
-			let (backward, _) = drain!(it, tx);
+			let (backward, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 			assert_eq!(backward, reversed(&expected), "backward {label}");
 		}
 	}
@@ -1324,6 +1494,123 @@ mod tests {
 
 	/// `c` with a compound index on `(a, b)`; `c:4` sits under a different
 	/// leading value so a prefix scan must not reach it.
+	/// `BTreeIterator` builds the iterator each access shape needs and reads
+	/// what that iterator reads; full-text and KNN access have none.
+	#[tokio::test]
+	async fn a_btree_iterator_follows_the_access_shape() {
+		use crate::expr::operator::{BooleanOperator, MatchesOperator};
+		use crate::val::Range;
+
+		let from = |v: i64| Range {
+			start: Bound::Included(Value::from(v)),
+			end: Bound::Unbounded,
+		};
+
+		let db = uniq_db().await;
+		let fx = Fixture::new(&db, "u").await;
+		let tx = fx.tx();
+		let mut it = BTreeIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("ik"),
+			true,
+			&BTreeAccess::Equality(Value::from(20)),
+			Direction::Forward,
+		)
+		.expect("iterator")
+		.expect("a B-tree access");
+		assert!(matches!(it, BTreeIterator::UniqueEqual(_)));
+		assert_eq!(drain_capped!(it, tx, INDEX_BATCH_SIZE).0, owned(&["u:2"]));
+		let mut it = BTreeIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("ik"),
+			true,
+			&BTreeAccess::Range {
+				range: from(20),
+			},
+			Direction::Forward,
+		)
+		.expect("iterator")
+		.expect("a B-tree access");
+		assert!(matches!(it, BTreeIterator::UniqueRange(_)));
+		assert_eq!(drain_capped!(it, tx, INDEX_BATCH_SIZE).0, owned(&["u:2", "u:3"]));
+
+		let db = idx_db().await;
+		let fx = Fixture::new(&db, "t").await;
+		let tx = fx.tx();
+		let mut it = BTreeIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("iv"),
+			false,
+			&BTreeAccess::Equality(Value::from(1)),
+			Direction::Forward,
+		)
+		.expect("iterator")
+		.expect("a B-tree access");
+		assert!(matches!(it, BTreeIterator::Equal(_)));
+		assert_eq!(drain_capped!(it, tx, INDEX_BATCH_SIZE).0, owned(&["t:a", "t:b"]));
+		let mut it = BTreeIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("iv"),
+			false,
+			&BTreeAccess::Range {
+				range: from(2),
+			},
+			Direction::Forward,
+		)
+		.expect("iterator")
+		.expect("a B-tree access");
+		assert!(matches!(it, BTreeIterator::Range(_)));
+		assert_eq!(drain_capped!(it, tx, INDEX_BATCH_SIZE).0, owned(&["t:c", "t:d"]));
+
+		let db = compound_db().await;
+		let fx = Fixture::new(&db, "c").await;
+		let tx = fx.tx();
+		let compound = |range| BTreeAccess::Compound {
+			prefix: vec![Value::from(1)],
+			range,
+		};
+		for (range, ids) in [
+			(None, vec!["c:1", "c:2", "c:3"]),
+			(Some((BinaryOperator::MoreThanEqual, Value::from(2))), vec!["c:2", "c:3"]),
+		] {
+			let mut it = BTreeIterator::new(
+				fx.ns,
+				fx.db,
+				fx.ix("iab"),
+				false,
+				&compound(range),
+				Direction::Forward,
+			)
+			.expect("iterator")
+			.expect("a B-tree access");
+			assert!(matches!(it, BTreeIterator::Compound(_)));
+			assert_eq!(drain_capped!(it, tx, INDEX_BATCH_SIZE).0, owned(&ids));
+		}
+
+		let full_text = BTreeAccess::FullText {
+			query: "x".to_owned(),
+			operator: MatchesOperator {
+				rf: None,
+				operator: BooleanOperator::And,
+			},
+		};
+		let knn = BTreeAccess::Knn {
+			vector: Vec::new(),
+			k: 1,
+			ef: 1,
+		};
+		for access in [full_text, knn] {
+			let it =
+				BTreeIterator::new(fx.ns, fx.db, fx.ix("iab"), false, &access, Direction::Forward)
+					.expect("no error");
+			assert!(it.is_none(), "no B-tree iterator serves {access:?}");
+		}
+	}
+
 	async fn compound_db() -> TestDb {
 		let db = TestDb::new("DEFINE TABLE c SCHEMALESS; DEFINE INDEX iab ON c FIELDS a, b;").await;
 		db.run(
@@ -1491,11 +1778,11 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn zero_cap_reads_one_entry_on_equal_and_none_on_range() {
-		// `CompoundEqualIterator` clamps the cap up to 1 while
-		// `CompoundRangeForwardIterator` passes 0 through, where a 0-entry read
-		// is indistinguishable from exhaustion. Neither is the query's LIMIT:
-		// the scan pipeline tracks that itself and truncates the batch.
+	async fn zero_cap_reads_one_entry_on_every_compound_iterator() {
+		// Every compound iterator clamps a zero cap up to 1: a 0-entry read
+		// would be indistinguishable from exhaustion. The cap is not the
+		// query's LIMIT; the scan pipeline tracks that itself and truncates
+		// the batch.
 		let db = compound_db().await;
 		let fx = Fixture::new(&db, "c").await;
 		let tx = fx.tx();
@@ -1517,7 +1804,13 @@ mod tests {
 		let mut it = CompoundRangeForwardIterator::new(fx.ns, fx.db, fx.ix("iab"), &prefix, &range)
 			.expect("compound range iterator");
 		let batch = it.next_batch(&tx, 0).await.expect("batch should scan");
-		assert!(batch.is_empty());
+		assert_eq!(batch.len(), 1);
+
+		let mut it =
+			CompoundRangeBackwardIterator::new(fx.ns, fx.db, fx.ix("iab"), &prefix, &range)
+				.expect("compound range iterator");
+		let batch = it.next_batch(&tx, 0).await.expect("batch should scan");
+		assert_eq!(batch.len(), 1);
 	}
 
 	// ------------------------------------------------------------------
@@ -1535,7 +1828,7 @@ mod tests {
 
 		let mut it = IndexEqualIterator::new(fx.ns, fx.db, ix, &Value::from(1i64))
 			.expect("equality iterator");
-		let (streamed, _) = drain!(it, tx);
+		let (streamed, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert_eq!(streamed.len(), 2, "the fixture has two rows on v = 1");
 
 		let access = BTreeAccess::Equality(Value::from(1i64));

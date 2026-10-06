@@ -5,7 +5,3 @@
 //! support the streaming executor model.
 
 pub mod btree;
-
-pub(crate) use btree::{
-	IndexEqualIterator, IndexRangeIterator, UniqueEqualIterator, UniqueRangeIterator,
-};

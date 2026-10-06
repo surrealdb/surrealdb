@@ -9,16 +9,16 @@ use std::sync::Arc;
 use common::future::stream::{self, Yielder};
 use surrealdb_types::ToSql;
 
-use super::common::{fetch_and_filter_records_batch, resolve_version_stamp};
+use super::common::{
+	DecodeFields, RECORD_PROBE_ROWS, ReadAhead, decode_fields_for_execution, drain_read_ahead,
+	next_batch_len, probe_batch_len, resolve_version_stamp,
+};
 use super::pipeline::{build_field_state, eval_limit_expr};
 use super::resolved::ResolvedTableContext;
 use crate::catalog::Error;
 use crate::err::EngineError;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
-use crate::exec::index::iterator::btree::{CompoundEqualIterator, CompoundRangeIterator};
-use crate::exec::index::iterator::{
-	IndexEqualIterator, IndexRangeIterator, UniqueEqualIterator, UniqueRangeIterator,
-};
+use crate::exec::index::iterator::btree::{BTreeIterator, INDEX_BATCH_SIZE};
 use crate::exec::operators::limit::PagingClause;
 use crate::exec::permission::{
 	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
@@ -26,11 +26,11 @@ use crate::exec::permission::{
 };
 use crate::exec::{
 	AccessMode, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	OperatorMetrics, PhysicalExpr, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::iam::Action;
-use crate::kvs::{CachePolicy, Direction};
+use crate::kvs::Direction;
 
 /// Index scan operator for B-tree indexes (Idx and Uniq).
 ///
@@ -79,6 +79,9 @@ pub struct IndexScan {
 	/// continues until either the range is exhausted or the consumer
 	/// drops the stream.
 	pub(crate) batch_ceiling: Option<usize>,
+	/// The fields to decode from each fetched record, when the plan reads no
+	/// other field of it; `None` decodes whole records.
+	pub(crate) decode_fields: Option<DecodeFields>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -108,6 +111,7 @@ impl IndexScan {
 			needed_fields,
 			where_predicate,
 			batch_ceiling: None,
+			decode_fields: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -129,7 +133,29 @@ impl IndexScan {
 		self.batch_ceiling = ceiling;
 		self
 	}
+
+	/// Decode only `fields` of each fetched record; see [`DecodeFields`].
+	pub(crate) fn with_decode_fields(mut self, fields: DecodeFields) -> Self {
+		self.decode_fields = Some(fields);
+		self
+	}
 }
+
+/// The most index entries a read needs: the rows `pipeline` can still use
+/// under its LIMIT and START, or every entry without a limit; see
+/// [`super::pipeline::ScanPipeline::rows_wanted`].
+fn entries_wanted(pipeline: &super::pipeline::ScanPipeline) -> u32 {
+	pipeline.rows_wanted().map_or(u32::MAX, |n| u32::try_from(n).unwrap_or(u32::MAX))
+}
+
+/// The number of index entries the next read requests, so that a read like
+/// the one that found `read_rows` records in `read_bytes`, requested with
+/// `current` entries, stays near `budget` bytes; see [`next_batch_len`].
+fn next_index_batch_len(read_bytes: usize, read_rows: usize, current: u32, budget: usize) -> u32 {
+	next_batch_len(read_bytes, read_rows, current as usize, budget, INDEX_BATCH_SIZE as usize)
+		as u32
+}
+
 impl ExecOperator for IndexScan {
 	fn name(&self) -> &'static str {
 		"IndexScan"
@@ -239,6 +265,7 @@ impl ExecOperator for IndexScan {
 		let version_expr = self.version.clone();
 		let resolved = self.resolved.clone();
 		let needed_fields = self.needed_fields.clone();
+		let decode_fields = self.decode_fields.clone();
 		let where_predicate = self.where_predicate.clone();
 		let ctx = ctx.clone();
 
@@ -274,7 +301,10 @@ impl ExecOperator for IndexScan {
 			// statement wrote once as many times as there are scans beneath
 			// that operator.
 			let batch_max: u32 = match ceiling {
-				Some(c) => c.saturating_add(start_val).saturating_mul(4).clamp(1, 1000) as u32,
+				Some(c) => c
+					.saturating_add(start_val)
+					.saturating_mul(4)
+					.clamp(1, INDEX_BATCH_SIZE as usize) as u32,
 				None => u32::MAX, // next_batch caps at INDEX_BATCH_SIZE internally
 			};
 
@@ -329,7 +359,7 @@ impl ExecOperator for IndexScan {
 			};
 
 			// Table-level permissions are already handled by
-			// fetch_and_filter_records_batch, so the pipeline uses Allow
+			// ReadAhead::decode_batch, so the pipeline uses Allow
 			// to avoid double-checking.
 			let mut pipeline = super::pipeline::ScanPipeline::new(
 				PhysicalPermission::Allow,
@@ -340,396 +370,91 @@ impl ExecOperator for IndexScan {
 				start_val,
 			);
 
+			let decode_fields = decode_fields_for_execution(
+				&ctx,
+				&table_name,
+				resolved.as_ref(),
+				&select_permission,
+				check_perms,
+				decode_fields.as_ref(),
+			)
+			.await?;
+			// Records are read ahead as stored bytes and decoded in batches of
+			// at most the byte budget. The first read is a small probe; each
+			// later one requests as many entries as keep it near the byte
+			// budget, judged from the bytes the read before it held.
+			let batch_bytes = ctx.root().ctx.config.exec.scan_batch_bytes;
+			let mut chunk_len = probe_batch_len(batch_bytes, RECORD_PROBE_ROWS) as u32;
+			let mut read_ahead = ReadAhead::new(
+				&select_permission,
+				check_perms,
+				decode_fields.as_ref(),
+				batch_bytes,
+			);
+
 			// Create the appropriate iterator based on access type and index uniqueness
 			let is_unique = index_ref.is_unique();
 			let ix = index_ref.definition();
 
 			// Collect record IDs from index and batch-fetch full records
-			match (&access, is_unique) {
-				// Unique equality — single record for non-NULL values,
-				// but NONE/NULL entries use prefix scanning and can
-				// match multiple records requiring pagination.
-				(BTreeAccess::Equality(value), true) => {
-					let mut iter = UniqueEqualIterator::new(ns_id, db_id, ix, value)
-						.context("Failed to create iterator")?;
-
-					loop {
-						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
-						}
-						let rids =
-							iter.next_batch(&txn).await.context("Failed to iterate index")?;
-						if rids.is_empty() {
-							break;
-						}
-
-						let mut values = fetch_and_filter_records_batch(
-							&ctx,
-							&txn,
-							ns_id,
-							db_id,
-							&rids,
-							&select_permission,
-							check_perms,
-							version,
-							CachePolicy::ReadOnly,
-						)
-						.await?;
-
-						let cont = pipeline.process_batch(&mut values, &ctx).await?;
-
-						if !values.is_empty() {
-							yielder.emit(ValueBatch::new(values)).await;
-						}
-						if !cont {
-							break;
-						}
-					}
-				}
-
-				// Non-unique equality - multiple records possible
-				(BTreeAccess::Equality(value), false) => {
-					let reverse = matches!(direction, Direction::Backward);
-					let mut iter =
-						IndexEqualIterator::with_direction(ns_id, db_id, ix, value, reverse)
-							.context("Failed to create iterator")?;
-
-					loop {
-						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
-						}
-						let rids =
-							iter.next_batch(&txn).await.context("Failed to iterate index")?;
-						if rids.is_empty() {
-							break;
-						}
-
-						let mut values = fetch_and_filter_records_batch(
-							&ctx,
-							&txn,
-							ns_id,
-							db_id,
-							&rids,
-							&select_permission,
-							check_perms,
-							version,
-							CachePolicy::ReadOnly,
-						)
-						.await?;
-
-						let cont = pipeline.process_batch(&mut values, &ctx).await?;
-
-						if !values.is_empty() {
-							yielder.emit(ValueBatch::new(values)).await;
-						}
-						if !cont {
-							break;
-						}
-					}
-				}
-
-				// Range scan (unique or non-unique).
-				//
-				// Both branches share the same batch-fetch-yield loop; they
-				// differ only in iterator construction.  We keep them as two
-				// explicit `loop` blocks rather than abstracting over the
-				// iterator type because `async_stream` closures cannot
-				// easily hold trait objects or generics.
-				(
-					BTreeAccess::Range {
-						range,
-					},
-					true,
-				) => {
-					let mut iter = UniqueRangeIterator::new(
-						ns_id,
-						db_id,
-						ix,
-						range.start.as_ref(),
-						range.end.as_ref(),
-						direction,
-					)
-					.context("Failed to create iterator")?;
-
-					loop {
-						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
-						}
-						let rids =
-							iter.next_batch(&txn).await.context("Failed to iterate index")?;
-						if rids.is_empty() {
-							break;
-						}
-
-						let mut values = fetch_and_filter_records_batch(
-							&ctx,
-							&txn,
-							ns_id,
-							db_id,
-							&rids,
-							&select_permission,
-							check_perms,
-							version,
-							CachePolicy::ReadOnly,
-						)
-						.await?;
-
-						let cont = pipeline.process_batch(&mut values, &ctx).await?;
-
-						if !values.is_empty() {
-							yielder.emit(ValueBatch::new(values)).await;
-						}
-						if !cont {
-							break;
-						}
-					}
-				}
-
-				(
-					BTreeAccess::Range {
-						range,
-					},
-					false,
-				) => {
-					let mut iter = IndexRangeIterator::new(
-						ns_id,
-						db_id,
-						ix,
-						range.start.as_ref(),
-						range.end.as_ref(),
-						direction,
-					)
-					.context("Failed to create iterator")?;
-
-					loop {
-						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?
-						}
-						let rids =
-							iter.next_batch(&txn).await.context("Failed to iterate index")?;
-						if rids.is_empty() {
-							break;
-						}
-
-						let mut values = fetch_and_filter_records_batch(
-							&ctx,
-							&txn,
-							ns_id,
-							db_id,
-							&rids,
-							&select_permission,
-							check_perms,
-							version,
-							CachePolicy::ReadOnly,
-						)
-						.await?;
-
-						let cont = pipeline.process_batch(&mut values, &ctx).await?;
-
-						if !values.is_empty() {
-							yielder.emit(ValueBatch::new(values)).await;
-						}
-						if !cont {
-							break;
-						}
-					}
-				}
-
-				// Compound index access — equality prefix only (no range)
-				(
-					BTreeAccess::Compound {
-						prefix,
-						range: None,
-					},
-					_,
-				) => {
-					let mut iter =
-						CompoundEqualIterator::new(ns_id, db_id, ix, prefix, None, direction)
-							.context("Failed to create compound iterator")?;
-
-					// Compute the maximum number of index entries we need.
-					// When a LIMIT + START is pushed down AND permissions
-					// won't filter rows, we can cap the scan at limit+start
-					// index entries. With conditional permissions, rows may
-					// be denied after fetch, so we must not cap — let the
-					// pipeline's limit/start tracking terminate the loop.
-					let can_cap = !matches!(select_permission, PhysicalPermission::Conditional(_));
-					let mut remaining: u32 = match (limit_val, can_cap) {
-						(Some(l), true) => {
-							l.saturating_add(start_val).min(u32::MAX as usize) as u32
-						}
-						_ => u32::MAX,
-					};
-
-					// Fetch the first batch of record IDs sequentially.
-					// Use batch_max to keep batches small when a downstream
-					// LIMIT exists but wasn't pushed (residual filter).
-					let mut rids = iter
-						.next_batch(&txn, remaining.min(batch_max))
-						.await
-						.context("Failed to iterate compound index")?;
-
-					while !rids.is_empty() {
-						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
-						}
-						remaining = remaining.saturating_sub(rids.len() as u32);
-
-						// Overlap: fetch records for the current batch while
-						// scanning the next batch of index entries concurrently.
-						// This halves serial latency on TiKV.
-						let (values_result, next_rids_result) = if remaining > 0 {
-							let fetch_fut = fetch_and_filter_records_batch(
-								&ctx,
-								&txn,
-								ns_id,
-								db_id,
-								&rids,
-								&select_permission,
-								check_perms,
-								version,
-								CachePolicy::ReadOnly,
-							);
-							let scan_fut = iter.next_batch(&txn, remaining.min(batch_max));
-							let (v, n) = futures::join!(fetch_fut, scan_fut);
-							(v, Some(n))
-						} else {
-							// No more entries needed; skip the prefetch.
-							let v = fetch_and_filter_records_batch(
-								&ctx,
-								&txn,
-								ns_id,
-								db_id,
-								&rids,
-								&select_permission,
-								check_perms,
-								version,
-								CachePolicy::ReadOnly,
-							)
-							.await;
-							(v, None)
-						};
-
-						let mut values = values_result?;
-						let cont = pipeline.process_batch(&mut values, &ctx).await?;
-
-						if !values.is_empty() {
-							yielder.emit(ValueBatch::new(values)).await;
-						}
-						if !cont || remaining == 0 {
-							break;
-						}
-
-						rids = match next_rids_result {
-							Some(r) => r.context("Failed to iterate compound index")?,
-							// Iterator exhausted before remaining reached 0 — stop cleanly.
-							None => break,
-						};
-					}
-				}
-
-				// Compound index access — equality prefix with range on next column
-				(
-					BTreeAccess::Compound {
-						prefix,
-						range: Some(range),
-					},
-					_,
-				) => {
-					let mut iter =
-						CompoundRangeIterator::new(ns_id, db_id, ix, prefix, range, direction)
-							.context("Failed to create compound range iterator")?;
-
-					// Same cap logic as the equality-only compound branch:
-					// only cap when permissions won't filter rows post-fetch.
-					let can_cap = !matches!(select_permission, PhysicalPermission::Conditional(_));
-					let mut remaining: u32 = match (limit_val, can_cap) {
-						(Some(l), true) => {
-							l.saturating_add(start_val).min(u32::MAX as usize) as u32
-						}
-						_ => u32::MAX,
-					};
-
-					// Fetch the first batch of record IDs sequentially.
-					// Use batch_max to keep batches small when a downstream
-					// LIMIT exists but wasn't pushed (residual filter).
-					let mut rids = iter
-						.next_batch(&txn, remaining.min(batch_max))
-						.await
-						.context("Failed to iterate compound index")?;
-
-					while !rids.is_empty() {
-						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
-						}
-						remaining = remaining.saturating_sub(rids.len() as u32);
-
-						// Overlap: fetch records for the current batch while
-						// scanning the next batch of index entries concurrently.
-						let (values_result, next_rids_result) = if remaining > 0 {
-							let fetch_fut = fetch_and_filter_records_batch(
-								&ctx,
-								&txn,
-								ns_id,
-								db_id,
-								&rids,
-								&select_permission,
-								check_perms,
-								version,
-								CachePolicy::ReadOnly,
-							);
-							let scan_fut = iter.next_batch(&txn, remaining.min(batch_max));
-							let (v, n) = futures::join!(fetch_fut, scan_fut);
-							(v, Some(n))
-						} else {
-							let v = fetch_and_filter_records_batch(
-								&ctx,
-								&txn,
-								ns_id,
-								db_id,
-								&rids,
-								&select_permission,
-								check_perms,
-								version,
-								CachePolicy::ReadOnly,
-							)
-							.await;
-							(v, None)
-						};
-
-						let mut values = values_result?;
-						let cont = pipeline.process_batch(&mut values, &ctx).await?;
-
-						if !values.is_empty() {
-							yielder.emit(ValueBatch::new(values)).await;
-						}
-						if !cont || remaining == 0 {
-							break;
-						}
-
-						rids = match next_rids_result {
-							Some(r) => r.context("Failed to iterate compound index")?,
-							// Iterator exhausted before remaining reached 0 — stop cleanly.
-							None => break,
-						};
-					}
-				}
-
-				// FullText and KNN should use dedicated operators
-				(
-					BTreeAccess::FullText {
-						..
-					},
-					_,
-				)
-				| (
-					BTreeAccess::Knn {
-						..
-					},
-					_,
-				) => Err(ControlFlow::Err(anyhow::anyhow!(
+			let Some(mut iter) =
+				BTreeIterator::new(ns_id, db_id, ix, is_unique, &access, direction)
+					.context("Failed to create iterator")?
+			else {
+				Err(ControlFlow::Err(anyhow::anyhow!(
 					"IndexScan does not support FullText or KNN access - use dedicated operators"
-				)))?,
+				)))?
+			};
+			// Every lookup overlaps reading each chunk's records with reading
+			// the next chunk of index entries.
+			// Fetch the first batch of record IDs sequentially.
+			// Use batch_max to keep batches small when a downstream
+			// LIMIT exists but wasn't pushed (residual filter).
+			let mut rids = iter
+				.next_batch(&txn, entries_wanted(&pipeline).min(batch_max).min(chunk_len))
+				.await
+				.context("Failed to iterate index")?;
+
+			while !rids.is_empty() {
+				if ctx.cancellation().is_cancelled() {
+					Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
+				}
+				// What the pipeline still wants once this read reaches it,
+				// if every entry in it becomes a row.
+				let wanted_after = entries_wanted(&pipeline).saturating_sub(rids.len() as u32);
+
+				// Overlap: fetch records for the current batch while
+				// scanning the next batch of index entries concurrently.
+				// This halves serial latency on TiKV.
+				let (read_result, next_rids_result) = if wanted_after > 0 {
+					let read_fut = read_ahead.read(&txn, ns_id, db_id, rids, version);
+					let scan_fut =
+						iter.next_batch(&txn, wanted_after.min(batch_max).min(chunk_len));
+					let (r, n) = futures::join!(read_fut, scan_fut);
+					(r, Some(n))
+				} else {
+					// The read covers what the pipeline wants; skip the prefetch.
+					(read_ahead.read(&txn, ns_id, db_id, rids, version).await, None)
+				};
+
+				let (read_bytes, read_rows) = read_result?;
+				chunk_len = next_index_batch_len(read_bytes, read_rows, chunk_len, batch_bytes);
+				let cont =
+					drain_read_ahead(&mut read_ahead, &mut pipeline, &mut yielder, &ctx).await?;
+				if !cont {
+					break;
+				}
+
+				rids = match next_rids_result {
+					Some(r) => r.context("Failed to iterate index")?,
+					// The read was to cover what the pipeline wanted, but some of
+					// its entries did not become rows (a stale entry, a denied or
+					// filtered row): read what it still wants.
+					None => iter
+						.next_batch(&txn, entries_wanted(&pipeline).min(batch_max).min(chunk_len))
+						.await
+						.context("Failed to iterate index")?,
+				};
 			}
 			Ok(())
 		});
@@ -775,5 +500,465 @@ mod tests {
 		};
 		assert_as_stored(&collect(&scan(planned), &ctx).await);
 		assert_reduced(&collect(&scan(runtime), &ctx).await);
+	}
+	/// More than two full batches, so a later batch is short only if sized.
+	const WIDE_ROWS: usize = 2500;
+
+	/// `WIDE_ROWS` records with `n = 1` carrying a 1024-float `emb`.
+	fn wide_table() -> String {
+		format!(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE INDEX n_idx ON t FIELDS n;
+			FOR $i IN 0..{WIDE_ROWS} {{ CREATE t SET n = 1, label = 'x', emb = array::repeat(0.5f, 1024) }};"
+		)
+	}
+
+	/// The batches an equality scan of `n_idx` on `n = 1` yields, decoding
+	/// only `decode` of each record when given.
+	async fn scan_batches(db: &TestDb, decode: Option<&[&str]>) -> Vec<Vec<Value>> {
+		let ctx = db.exec_ctx().await;
+		let index_ref = index_ref(&ctx, "t", "n_idx").await;
+		let mut scan = IndexScan::new(
+			index_ref,
+			BTreeAccess::Equality(Value::from(1)),
+			Direction::Forward,
+			"t".into(),
+			None,
+			None,
+			None,
+			Some(None),
+			None,
+		);
+		if let Some(fields) = decode {
+			scan = scan.with_decode_fields(DecodeFields::new(fields.iter().map(|f| f.to_string())));
+		}
+		let scan: Arc<dyn ExecOperator> = Arc::new(scan);
+		let mut stream = scan.execute(&ctx).expect("execute should succeed");
+		let mut batches = Vec::new();
+		while let Some(batch) = futures::StreamExt::next(&mut stream).await {
+			batches.push(batch.expect("batch should be Ok").into_values());
+		}
+		batches
+	}
+
+	fn field(row: &Value, name: &str) -> Value {
+		match row {
+			Value::Object(obj) => obj.get(name).cloned().unwrap_or(Value::None),
+			_ => Value::None,
+		}
+	}
+
+	/// A scan given a decode set yields each record's id and the listed
+	/// fields, and none of the fields it does not list.
+	#[tokio::test]
+	async fn a_projected_scan_decodes_only_the_listed_fields() {
+		let db = TestDb::new(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE INDEX n_idx ON t FIELDS n;
+			CREATE t:1 SET n = 1, label = 'a', emb = [0.5, 0.5];",
+		)
+		.await;
+		let rows: Vec<Value> =
+			scan_batches(&db, Some(&["n", "label"])).await.into_iter().flatten().collect();
+		assert_eq!(rows.len(), 1, "{rows:?}");
+		assert!(matches!(field(&rows[0], "id"), Value::RecordId(_)), "id kept: {rows:?}");
+		assert_eq!(field(&rows[0], "label"), Value::from("a"), "listed field decoded: {rows:?}");
+		assert_eq!(field(&rows[0], "emb"), Value::None, "unlisted field not decoded: {rows:?}");
+	}
+
+	/// A scan given an exclusion set yields every stored field but the
+	/// excluded ones.
+	#[tokio::test]
+	async fn an_excluding_scan_decodes_every_field_but_the_listed_ones() {
+		let db = TestDb::new(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE INDEX n_idx ON t FIELDS n;
+			CREATE t:1 SET n = 1, label = 'a', emb = [0.5, 0.5];",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let index_ref = index_ref(&ctx, "t", "n_idx").await;
+		let scan: Arc<dyn ExecOperator> = Arc::new(
+			IndexScan::new(
+				index_ref,
+				BTreeAccess::Equality(Value::from(1)),
+				Direction::Forward,
+				"t".into(),
+				None,
+				None,
+				None,
+				Some(None),
+				None,
+			)
+			.with_decode_fields(
+				DecodeFields::excluding(["emb".to_string()]).expect("excludes emb"),
+			),
+		);
+		let rows = collect(&scan, &ctx).await;
+		assert_eq!(rows.len(), 1, "{rows:?}");
+		assert!(matches!(field(&rows[0], "id"), Value::RecordId(_)), "id kept: {rows:?}");
+		assert_eq!(field(&rows[0], "n"), Value::from(1), "kept field decoded: {rows:?}");
+		assert_eq!(field(&rows[0], "label"), Value::from("a"), "kept field decoded: {rows:?}");
+		assert_eq!(field(&rows[0], "emb"), Value::None, "excluded field not decoded: {rows:?}");
+	}
+
+	/// Wide records arrive in batches sized to the byte budget after the
+	/// first, whether whole records are decoded (sized by their decoded size)
+	/// or only some fields (sized by the stored bytes read), and every record
+	/// arrives once.
+	#[tokio::test]
+	async fn wide_records_scan_in_batches_sized_to_the_byte_budget() {
+		let db = TestDb::new(&wide_table()).await;
+		for decode in [None, Some(&["label"][..])] {
+			let batches = scan_batches(&db, decode).await;
+			let lens: Vec<usize> = batches.iter().map(Vec::len).collect();
+			assert_eq!(lens.iter().sum::<usize>(), WIDE_ROWS, "{decode:?}: {lens:?}");
+			assert_eq!(lens[0], RECORD_PROBE_ROWS, "{decode:?}: the first batch is the probe");
+			assert!(
+				lens[1] < INDEX_BATCH_SIZE as usize,
+				"{decode:?}: later batches sized: {lens:?}"
+			);
+		}
+	}
+
+	/// The scan takes its byte budget from the execution config, so a smaller
+	/// `scan_batch_bytes` yields a smaller probe and smaller later batches.
+	///
+	/// Gated like [`TestDb::new_with_config`], which only the in-memory
+	/// backend provides.
+	#[cfg(all(feature = "kv-mem", not(target_family = "wasm")))]
+	#[tokio::test]
+	async fn the_configured_batch_bytes_size_the_batches() {
+		let config = surrealdb_cnf::ConfigMap::empty().with_key_value("scan_batch_bytes", "256KiB");
+		let db = TestDb::new_with_config(&wide_table(), config).await;
+		let lens: Vec<usize> = scan_batches(&db, None).await.iter().map(Vec::len).collect();
+		assert_eq!(lens.iter().sum::<usize>(), WIDE_ROWS, "every record once: {lens:?}");
+		// ~66 KB decoded per record: 256 KiB holds about 4, where the default
+		// 2 MiB holds about 31.
+		assert!(lens[0] <= 4, "the probe follows the configured budget: {lens:?}");
+		assert!(lens[1] <= 8, "later batches follow the configured budget: {lens:?}");
+	}
+
+	/// However many narrow records precede them, wide records decode in
+	/// batches of at most the byte budget plus one record: the read that
+	/// reaches them is sized from the narrow records, but only its stored
+	/// bytes are held until a batch decodes them.
+	#[tokio::test]
+	async fn wide_records_after_a_long_narrow_run_decode_within_the_budget() {
+		// Enough narrow records for the reads to double up to the row cap;
+		// the index lists equal values in record-id order, so the numeric ids
+		// put every narrow record first.
+		const NARROW: usize = 1100;
+		const TOTAL: usize = 1500;
+		let db = TestDb::new(&format!(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE INDEX n_idx ON t FIELDS n;
+			FOR $i IN 0..{NARROW} {{ CREATE type::record('t', $i) SET n = 1, label = 'x' }};
+			FOR $i IN {NARROW}..{TOTAL} {{
+				CREATE type::record('t', $i) SET n = 1, label = 'x', emb = array::repeat(0.5f, 1024)
+			}};"
+		))
+		.await;
+		let batches = scan_batches(&db, None).await;
+
+		assert_eq!(batches.iter().map(Vec::len).sum::<usize>(), TOTAL, "every record once");
+		let size = super::super::common::approx_value_size;
+		let widest = batches.iter().flatten().map(size).max().unwrap_or(0);
+		for batch in &batches {
+			let bytes: usize = batch.iter().map(size).sum();
+			assert!(
+				bytes < crate::exec::config::DEFAULT_SCAN_BATCH_BYTES + widest,
+				"a batch of {} rows holds {bytes} bytes",
+				batch.len()
+			);
+		}
+	}
+
+	/// A computed field can make a row far wider than its stored record, so
+	/// the batches are sized from the materialised rows.
+	#[tokio::test]
+	async fn wide_computed_fields_size_the_batches() {
+		const ROWS: usize = 2500;
+		let db = TestDb::new(&format!(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE FIELD wide ON t COMPUTED array::repeat(0.5f, 1024);
+			DEFINE INDEX n_idx ON t FIELDS n;
+			FOR $i IN 0..{ROWS} {{ CREATE t SET n = 1 }};"
+		))
+		.await;
+		let batches = scan_batches(&db, None).await;
+		let lens: Vec<usize> = batches.iter().map(Vec::len).collect();
+		assert_eq!(lens.iter().sum::<usize>(), ROWS, "every record once: {lens:?}");
+		assert!(
+			batches.iter().flatten().all(|r| field(r, "wide") != Value::None),
+			"wide materialised"
+		);
+		// ~66 KB per materialised row: the default 2 MiB holds about 31.
+		let largest = lens.iter().copied().max().unwrap_or(0);
+		assert!(largest <= 2 * RECORD_PROBE_ROWS, "largest batch {largest}: {lens:?}");
+	}
+
+	/// A NONE lookup on a unique index can match many records, so its reads
+	/// start from the probe and grow by bytes like every other lookup's,
+	/// rather than taking a full row-capped batch at once.
+	#[tokio::test]
+	async fn a_unique_none_lookup_reads_from_the_probe() {
+		const ROWS: usize = 1500;
+		let db = TestDb::new(&format!(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE INDEX slug_idx ON t FIELDS slug UNIQUE;
+			FOR $i IN 0..{ROWS} {{ CREATE t SET n = 1 }};"
+		))
+		.await;
+		let ctx = db.exec_ctx().await;
+		let index_ref = index_ref(&ctx, "t", "slug_idx").await;
+		let scan: Arc<dyn ExecOperator> = Arc::new(IndexScan::new(
+			index_ref,
+			BTreeAccess::Equality(Value::None),
+			Direction::Forward,
+			"t".into(),
+			None,
+			None,
+			None,
+			Some(None),
+			None,
+		));
+		let mut stream = scan.execute(&ctx).expect("execute should succeed");
+		let mut lens = Vec::new();
+		while let Some(batch) = futures::StreamExt::next(&mut stream).await {
+			lens.push(batch.expect("batch should be Ok").into_values().len());
+		}
+		assert_eq!(lens.iter().sum::<usize>(), ROWS, "every record once: {lens:?}");
+		// Narrow rows decode within the budget, so each batch is one read.
+		assert_eq!(lens[0], RECORD_PROBE_ROWS, "the first read is the probe: {lens:?}");
+	}
+
+	/// A batch ceiling caps every read of a single-column lookup, as it caps
+	/// the compound ones, so a residual-filtered LIMIT or a union sub-scan
+	/// reads a few entries at a time.
+	#[tokio::test]
+	async fn a_batch_ceiling_caps_single_column_reads() {
+		const ROWS: usize = 100;
+		let db = TestDb::new(&format!(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE INDEX n_idx ON t FIELDS n;
+			FOR $i IN 0..{ROWS} {{ CREATE t SET n = 1 }};"
+		))
+		.await;
+		let ctx = db.exec_ctx().await;
+		let index_ref = index_ref(&ctx, "t", "n_idx").await;
+		let scan: Arc<dyn ExecOperator> = Arc::new(
+			IndexScan::new(
+				index_ref,
+				BTreeAccess::Equality(Value::from(1)),
+				Direction::Forward,
+				"t".into(),
+				None,
+				None,
+				None,
+				Some(None),
+				None,
+			)
+			.with_batch_ceiling(Some(2)),
+		);
+		let mut stream = scan.execute(&ctx).expect("execute should succeed");
+		let mut lens = Vec::new();
+		while let Some(batch) = futures::StreamExt::next(&mut stream).await {
+			lens.push(batch.expect("batch should be Ok").into_values().len());
+		}
+		assert_eq!(lens.iter().sum::<usize>(), ROWS, "every record once: {lens:?}");
+		// A ceiling of 2 caps reads at 4 × 2 entries; narrow rows decode within
+		// the budget, so each batch is one read.
+		assert!(lens.iter().all(|&n| n <= 8), "reads past the ceiling: {lens:?}");
+	}
+
+	/// A compound lookup under a pushed LIMIT reads until the pipeline has its
+	/// rows, so an index entry whose record is gone does not end the scan
+	/// short.
+	#[tokio::test]
+	async fn a_compound_lookup_under_a_limit_reads_past_a_stale_entry() {
+		let db = TestDb::new(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE INDEX ab ON t FIELDS a, b;
+			FOR $i IN 0..5 { CREATE type::record('t', $i) SET a = 1, b = $i };",
+		)
+		.await;
+		let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Write).await;
+		let index_ref = index_ref(&ctx, "t", "ab").await;
+		let db_ctx = ctx.database().expect("a database context");
+		// Leave t:1's index entry behind with no record.
+		ctx.txn()
+			.del_key(&crate::key::schema::RecordKey {
+				ns: db_ctx.ns_ctx.ns.namespace_id,
+				db: db_ctx.db.database_id,
+				tb: std::borrow::Cow::Owned("t".into()),
+				id: std::borrow::Cow::Owned(crate::val::RecordIdKey::Number(1)),
+			})
+			.await
+			.expect("delete the record");
+		let limit = crate::exec::operators::test_util::physical_expr("3", &ctx).await;
+		let scan: Arc<dyn ExecOperator> = Arc::new(IndexScan::new(
+			index_ref,
+			BTreeAccess::Compound {
+				prefix: vec![Value::from(1)],
+				range: None,
+			},
+			Direction::Forward,
+			"t".into(),
+			Some(limit),
+			None,
+			None,
+			Some(None),
+			None,
+		));
+		let rows = collect(&scan, &ctx).await;
+		assert_eq!(rows.len(), 3, "LIMIT 3 over four live records: {rows:?}");
+	}
+
+	/// A compound range lookup under a pushed LIMIT reads until the pipeline
+	/// has its rows, in either direction, so an index entry whose record is
+	/// gone does not end the scan short.
+	#[tokio::test]
+	async fn a_compound_range_lookup_under_a_limit_reads_past_a_stale_entry() {
+		let db = TestDb::new(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE INDEX ab ON t FIELDS a, b;
+			FOR $i IN 0..5 { CREATE type::record('t', $i) SET a = 1, b = $i };",
+		)
+		.await;
+		let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Write).await;
+		let index_ref = index_ref(&ctx, "t", "ab").await;
+		let db_ctx = ctx.database().expect("a database context");
+		// Leave the index entries of t:1 and t:3 behind with no record, so the
+		// first read meant to cover LIMIT 3 meets a stale entry going forward
+		// and going backward.
+		for id in [1, 3] {
+			ctx.txn()
+				.del_key(&crate::key::schema::RecordKey {
+					ns: db_ctx.ns_ctx.ns.namespace_id,
+					db: db_ctx.db.database_id,
+					tb: std::borrow::Cow::Owned("t".into()),
+					id: std::borrow::Cow::Owned(crate::val::RecordIdKey::Number(id)),
+				})
+				.await
+				.expect("delete the record");
+		}
+		for direction in [Direction::Forward, Direction::Backward] {
+			let limit = crate::exec::operators::test_util::physical_expr("3", &ctx).await;
+			let scan: Arc<dyn ExecOperator> = Arc::new(IndexScan::new(
+				index_ref.clone(),
+				BTreeAccess::Compound {
+					prefix: vec![Value::from(1)],
+					range: Some((
+						crate::expr::operator::BinaryOperator::MoreThanEqual,
+						Value::from(0),
+					)),
+				},
+				direction,
+				"t".into(),
+				Some(limit),
+				None,
+				None,
+				Some(None),
+				None,
+			));
+			let rows = collect(&scan, &ctx).await;
+			assert_eq!(rows.len(), 3, "{direction:?}: LIMIT 3 over three live records: {rows:?}");
+		}
+	}
+
+	/// Delete the records `t:<id>` for `ids`, leaving their index entries
+	/// behind with no record.
+	async fn orphan_index_entries(ctx: &ExecutionContext, ids: &[i64]) {
+		let db_ctx = ctx.database().expect("a database context");
+		for &id in ids {
+			ctx.txn()
+				.del_key(&crate::key::schema::RecordKey {
+					ns: db_ctx.ns_ctx.ns.namespace_id,
+					db: db_ctx.db.database_id,
+					tb: std::borrow::Cow::Owned("t".into()),
+					id: std::borrow::Cow::Owned(crate::val::RecordIdKey::Number(id)),
+				})
+				.await
+				.expect("delete the record");
+		}
+	}
+
+	/// A single-column equality lookup under a pushed LIMIT reads until the
+	/// pipeline has its rows, in either direction, so an index entry whose
+	/// record is gone does not end the scan short.
+	#[tokio::test]
+	async fn an_equality_lookup_under_a_limit_reads_past_a_stale_entry() {
+		let db = TestDb::new(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE INDEX a ON t FIELDS a;
+			FOR $i IN 0..5 { CREATE type::record('t', $i) SET a = 1 };",
+		)
+		.await;
+		let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Write).await;
+		let index_ref = index_ref(&ctx, "t", "a").await;
+		// The first read meant to cover LIMIT 3 meets a stale entry going
+		// forward and going backward.
+		orphan_index_entries(&ctx, &[1, 3]).await;
+		for direction in [Direction::Forward, Direction::Backward] {
+			let limit = crate::exec::operators::test_util::physical_expr("3", &ctx).await;
+			let scan: Arc<dyn ExecOperator> = Arc::new(IndexScan::new(
+				index_ref.clone(),
+				BTreeAccess::Equality(Value::from(1)),
+				direction,
+				"t".into(),
+				Some(limit),
+				None,
+				None,
+				Some(None),
+				None,
+			));
+			let rows = collect(&scan, &ctx).await;
+			assert_eq!(rows.len(), 3, "{direction:?}: LIMIT 3 over three live records: {rows:?}");
+		}
+	}
+
+	/// A single-column range lookup under a pushed LIMIT reads until the
+	/// pipeline has its rows, on a unique and a non-unique index and in either
+	/// direction, so an index entry whose record is gone does not end the scan
+	/// short.
+	#[tokio::test]
+	async fn a_range_lookup_under_a_limit_reads_past_a_stale_entry() {
+		for unique in ["", "UNIQUE"] {
+			let db = TestDb::new(&format!(
+				"DEFINE TABLE t SCHEMALESS;
+				DEFINE INDEX a ON t FIELDS a {unique};
+				FOR $i IN 0..5 {{ CREATE type::record('t', $i) SET a = $i }};"
+			))
+			.await;
+			let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Write).await;
+			let index_ref = index_ref(&ctx, "t", "a").await;
+			orphan_index_entries(&ctx, &[1, 3]).await;
+			for direction in [Direction::Forward, Direction::Backward] {
+				let limit = crate::exec::operators::test_util::physical_expr("3", &ctx).await;
+				let scan: Arc<dyn ExecOperator> = Arc::new(IndexScan::new(
+					index_ref.clone(),
+					BTreeAccess::Range {
+						range: crate::val::Range {
+							start: std::ops::Bound::Included(Value::from(0)),
+							end: std::ops::Bound::Unbounded,
+						},
+					},
+					direction,
+					"t".into(),
+					Some(limit),
+					None,
+					None,
+					Some(None),
+					None,
+				));
+				let rows = collect(&scan, &ctx).await;
+				assert_eq!(
+					rows.len(),
+					3,
+					"{unique:?} {direction:?}: LIMIT 3 over three live records: {rows:?}"
+				);
+			}
+		}
 	}
 }

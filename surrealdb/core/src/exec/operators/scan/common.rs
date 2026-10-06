@@ -3,21 +3,37 @@
 //! Contains helpers that are used by multiple scan operators (reference scan,
 //! graph edge scan, etc.) to avoid code duplication.
 
+use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::sync::Arc;
 
-use super::pipeline::{FieldState, build_field_state, materialise_fields_with_permissions};
+use common::future::stream::Yielder;
+use surrealdb_strand::Strand;
+
+use super::pipeline::{
+	FieldState, ScanPipeline, build_field_state, materialise_fields_with_permissions,
+};
+use super::resolved::ResolvedTableContext;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr};
+use crate::catalog::{DatabaseId, NamespaceId, Record};
+use crate::err::EngineError;
+use crate::exec::object_extract::{
+	PathSegment, project_record_bytes, project_record_bytes_excluding,
+};
+use crate::exec::permission::PhysicalPermission;
+use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr, ValueBatch};
 use crate::expr::{ControlFlow, FlowResult};
+use crate::key::KVValue;
+use crate::key::schema::RecordKey;
 use crate::kvs::{CachePolicy, DatastoreError, Transaction};
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 /// Fail the query when the process is past `SURREAL_MEMORY_THRESHOLD`.
 ///
 /// Scans that materialise records call this once per fetched batch, and
-/// again once computed fields have been materialised into its rows, so a
-/// query that keeps decoding records fails with
+/// again once computed fields have been materialised into its rows or records
+/// the transaction's cache shares have been cloned out of it, so a query that
+/// keeps decoding records fails with
 /// [`DatastoreError::QueryBeyondMemoryThreshold`] rather than growing the
 /// process until the operating system kills it. Without allocation tracking
 /// the threshold is never reached and this always returns `Ok`.
@@ -30,16 +46,12 @@ pub(crate) fn ensure_below_memory_threshold() -> FlowResult<()> {
 	Ok(())
 }
 
-/// A batch of records as a scan fetched it.
-pub(crate) struct FetchedBatch {
-	/// The records that passed the permission check, in fetch order.
-	pub(crate) values: Vec<Value>,
-	/// The approximate decoded size of every record the fetch decoded,
-	/// including those the permission check then dropped.
-	pub(crate) fetched_bytes: usize,
-	/// How many records the fetch decoded.
-	pub(crate) fetched_rows: usize,
-}
+/// The most rows in a scan's first record batch, before any row size is known.
+///
+/// Small enough that many concurrent queries do not each start with a full
+/// row-capped batch; [`probe_batch_len`] takes fewer when `scan_batch_bytes`
+/// is below the default.
+pub(crate) const RECORD_PROBE_ROWS: usize = 32;
 
 /// Decoded bytes a probe batch assumes per row, before any row size is known.
 const PROBE_ROW_BYTES: usize = 64 << 10;
@@ -54,32 +66,32 @@ pub(crate) fn probe_batch_len(budget: usize, max_rows: usize) -> usize {
 	(budget / PROBE_ROW_BYTES).clamp(1, max_rows)
 }
 
-/// The number of rows the next batch may take so that a batch like the one
-/// just fetched stays near `budget` bytes.
+/// The number of records the next read may take so that a read like the one
+/// just made stays near `budget` bytes.
 ///
-/// A row's size is the average of `fetched_bytes` over `fetched_rows`: what
-/// the fetch held, rows a permission check then dropped included, so a batch
-/// whose survivors are narrow is not taken for a batch of narrow records.
+/// A record's size is the average of `read_bytes` over `read_rows`, as
+/// [`ReadAhead::read`] reports them: the bytes the read held, before any
+/// permission check.
 ///
-/// The prediction describes the batch just fetched, not the next one, so the
-/// next batch is at most twice `current`, the length that batch was fetched
-/// with: a run of narrow records grows the batch gradually, and wide records
-/// that follow it are decoded in a batch no larger than twice the last one
-/// before the size shrinks again. The result is never below 1 and never above
-/// `max_rows`, so a batch never grows past the row cap it would have without a
-/// byte budget. A fetch that decoded no record says nothing about row size, so
-/// it keeps `current`.
+/// The prediction describes the read just made, not the next one, so the next
+/// read is at most twice `current`, the length that read was made with: a run
+/// of narrow records grows the read gradually, and wide records that follow
+/// it are read in a chunk no larger than twice the last one before the size
+/// shrinks again. The result is never below 1 and never above `max_rows`, so a
+/// read never grows past the row cap it would have without a byte budget. A
+/// read that found no record says nothing about record size, so it keeps
+/// `current`.
 pub(crate) fn next_batch_len(
-	fetched_bytes: usize,
-	fetched_rows: usize,
+	read_bytes: usize,
+	read_rows: usize,
 	current: usize,
 	budget: usize,
 	max_rows: usize,
 ) -> usize {
-	if fetched_rows == 0 {
+	if read_rows == 0 {
 		return current;
 	}
-	let per_row = (fetched_bytes / fetched_rows).max(1);
+	let per_row = (read_bytes / read_rows).max(1);
 	(budget / per_row).min(current.saturating_mul(2)).clamp(1, max_rows)
 }
 
@@ -114,6 +126,112 @@ pub(crate) fn approx_value_size(value: &Value) -> usize {
 	}
 }
 
+/// The top-level fields a scan decodes from each record it fetches.
+///
+/// Built at plan time from the fields the statement reads off its rows:
+/// either the only fields to decode or, for a `*` projection, the fields
+/// not to decode (`OMIT` targets nothing else reads). A scan decodes this
+/// way when nothing else in the plan reads the stored record (see
+/// [`projected_decode_applies`]), and decodes the whole record otherwise.
+/// `id` is never listed: a fetched row's id is set from its storage key.
+#[derive(Debug, Clone)]
+pub(crate) struct DecodeFields {
+	/// The listed root field names, strictly ascending.
+	keys: Arc<[PathSegment]>,
+	/// Whether `keys` are the fields not to decode rather than the only ones.
+	excluding: bool,
+}
+
+impl DecodeFields {
+	/// Decode only these root fields.
+	pub(crate) fn new(fields: impl IntoIterator<Item = String>) -> Self {
+		Self::with_mode(fields, false)
+	}
+
+	/// Decode every root field except these; `None` when that excludes
+	/// nothing stored, since `id` is never decoded from the record (it is set
+	/// from the storage key), so a whole-record decode is the cheaper read.
+	pub(crate) fn excluding(fields: impl IntoIterator<Item = String>) -> Option<Self> {
+		let fields = Self::with_mode(fields, true);
+		(!fields.keys.is_empty()).then_some(fields)
+	}
+
+	fn with_mode(fields: impl IntoIterator<Item = String>, excluding: bool) -> Self {
+		let mut keys: Vec<PathSegment> =
+			fields.into_iter().filter(|f| f != "id").map(PathSegment::from).collect();
+		keys.sort();
+		keys.dedup();
+		Self {
+			keys: keys.into(),
+			excluding,
+		}
+	}
+
+	/// The listed fields and whether they are excluded.
+	#[cfg(test)]
+	pub(crate) fn listed(&self) -> (Vec<String>, bool) {
+		(self.keys.iter().map(|k| k.as_str().to_string()).collect(), self.excluding)
+	}
+
+	/// Decode this record's data as the set says, or `None` when its data
+	/// cannot be projected and must be decoded in full.
+	fn project(&self, record_bytes: &[u8]) -> Option<crate::val::Object> {
+		if self.excluding {
+			project_record_bytes_excluding(record_bytes, &self.keys)
+		} else {
+			project_record_bytes(record_bytes, &self.keys)
+		}
+	}
+}
+
+/// Whether a scan may decode only its [`DecodeFields`] of each record rather
+/// than the whole record.
+///
+/// Holds when nothing evaluated against a row reads a stored field the
+/// statement does not name: the table defines no computed field, whose body
+/// may read any field, and, when permissions are checked, its SELECT
+/// permission is `FULL` and no field carries a SELECT permission, both of
+/// which are evaluated against the stored record. `table_state` must be the
+/// table's whole field state, not one filtered to a projection, so that
+/// computed fields and permissions evaluated above the scan count too.
+pub(crate) fn projected_decode_applies(
+	select_permission: &PhysicalPermission,
+	check_perms: bool,
+	table_state: &FieldState,
+) -> bool {
+	table_state.computed_fields.is_empty()
+		&& (!check_perms
+			|| (matches!(select_permission, PhysicalPermission::Allow)
+				&& table_state.field_permissions.is_empty()))
+}
+
+/// The decode set a scan uses for one execution: `fields` when
+/// [`projected_decode_applies`] to `table_name`, `None` — decode whole
+/// records — otherwise.
+///
+/// The answer comes from `resolved` when the plan resolved the table, and
+/// from the catalog otherwise.
+pub(crate) async fn decode_fields_for_execution(
+	ctx: &ExecutionContext,
+	table_name: &TableName,
+	resolved: Option<&ResolvedTableContext>,
+	select_permission: &PhysicalPermission,
+	check_perms: bool,
+	fields: Option<&DecodeFields>,
+) -> Result<Option<DecodeFields>, ControlFlow> {
+	let Some(fields) = fields else {
+		return Ok(None);
+	};
+	let applies = match resolved {
+		Some(resolved) => resolved.projected_decode_applies(select_permission, check_perms),
+		None => {
+			let table_state = build_field_state(ctx, table_name, check_perms, None).await?;
+			projected_decode_applies(select_permission, check_perms, &table_state)
+		}
+	};
+	Ok(applies.then(|| fields.clone()))
+}
+
 /// The owned contents of a record-id key, beyond its inline size.
 fn approx_key_size(key: &RecordIdKey) -> usize {
 	match key {
@@ -132,6 +250,269 @@ fn approx_key_size(key: &RecordIdKey) -> usize {
 				+ approx_bound_size(&r.end, approx_key_size)
 		}
 	}
+}
+
+/// A record [`ReadAhead`] holds until a batch decodes it.
+enum ReadAheadRecord {
+	/// The record's stored bytes.
+	Stored(Vec<u8>),
+	/// The record [`Transaction::get_records`] resolved for a record id with
+	/// no stored value (a lightweight edge, or the empty record of a missing
+	/// one).
+	Resolved(Arc<Record>),
+	/// A record id with no stored value, until [`ReadAhead::read`] resolves
+	/// it; never left in place once `read` returns.
+	Pending,
+}
+
+/// Records read from storage ahead of decoding, so a scan decodes each batch
+/// only up to its byte budget.
+///
+/// [`ReadAhead::read`] holds a chunk of records as their stored bytes, a
+/// fraction of their decoded size, and [`ReadAhead::decode_batch`] decodes
+/// them in read order until the batch reaches the budget. A batch therefore
+/// holds at most the budget plus one record of decoded values, however much
+/// wider its records are than the ones the chunk was sized from; the records
+/// a batch does not decode wait for the next one.
+///
+/// The budget counts decoded records, so when the scan's pipeline then
+/// materialises computed fields that widen them, [`ReadAhead::processed`]
+/// caps the rows of the next batch from how wide the processed rows were.
+///
+/// Stored bytes are read rather than going through the transaction's record
+/// cache, so a partially decoded record never enters that cache; the
+/// key-value transaction holds the transaction's own writes, so they are read
+/// all the same.
+pub(crate) struct ReadAhead<'a> {
+	records: VecDeque<(RecordId, ReadAheadRecord)>,
+	select_permission: &'a PhysicalPermission,
+	check_perms: bool,
+	fields: Option<&'a DecodeFields>,
+	budget: usize,
+	/// The most records a batch decodes; see [`ReadAhead::processed`].
+	row_cap: usize,
+	/// The decoded size and record count of the last batch decoded.
+	last_bytes: usize,
+	last_rows: usize,
+}
+
+impl<'a> ReadAhead<'a> {
+	/// An empty read-ahead whose batches decode up to `budget` bytes each.
+	///
+	/// # Arguments
+	///
+	/// * `fields` - When set, decode only these fields of each record whose data is an object, and
+	///   check no permission: callers establish [`projected_decode_applies`] first. Otherwise
+	///   decode whole records and, when `check_perms`, drop those `select_permission` denies.
+	pub(crate) fn new(
+		select_permission: &'a PhysicalPermission,
+		check_perms: bool,
+		fields: Option<&'a DecodeFields>,
+		budget: usize,
+	) -> Self {
+		Self {
+			records: VecDeque::new(),
+			select_permission,
+			check_perms,
+			fields,
+			budget,
+			row_cap: usize::MAX,
+			last_bytes: 0,
+			last_rows: 0,
+		}
+	}
+
+	/// Size the next batch from the last batch decoded, once `pipeline`
+	/// processed it.
+	///
+	/// When the pipeline materialises computed fields, a processed row can be
+	/// far wider than the record it was decoded from, so the next batch
+	/// decodes at most as many records as keep a batch like this one near the
+	/// budget, sized from the larger of the decoded records and
+	/// [`ScanPipeline::materialised_bytes`], rows the filters dropped included;
+	/// see [`next_batch_len`]. Otherwise the decoded size alone bounds a batch
+	/// and this does nothing.
+	pub(crate) fn processed(&mut self, pipeline: &ScanPipeline) {
+		let materialised = pipeline.materialised_bytes();
+		if materialised == 0 || self.last_rows == 0 {
+			return;
+		}
+		let held = self.last_bytes.max(materialised);
+		self.row_cap =
+			next_batch_len(held, self.last_rows, self.last_rows, self.budget, usize::MAX);
+	}
+
+	/// Whether every record read has been decoded.
+	pub(crate) fn is_empty(&self) -> bool {
+		self.records.is_empty()
+	}
+
+	/// Read the records `rids` names, after any records already held.
+	///
+	/// # Returns
+	///
+	/// The bytes read and the number of records found, for sizing the next
+	/// read with [`next_batch_len`]: the stored bytes of each record with a
+	/// stored value, plus the decoded size of each record resolved through
+	/// [`Transaction::get_records`].
+	pub(crate) async fn read(
+		&mut self,
+		txn: &Transaction,
+		ns_id: NamespaceId,
+		db_id: DatabaseId,
+		rids: Vec<RecordId>,
+		version: Option<u64>,
+	) -> Result<(usize, usize), ControlFlow> {
+		let keys: Vec<RecordKey<'_>> = rids
+			.iter()
+			.map(|rid| RecordKey {
+				ns: ns_id,
+				db: db_id,
+				tb: Cow::Borrowed(&rid.table),
+				id: Cow::Borrowed(&rid.key),
+			})
+			.collect();
+		let stored = txn.getm_raw(keys, version).await.context("Failed to fetch records")?;
+		let mut read_bytes = 0;
+		let mut read_rows = 0;
+		let mut miss_at = Vec::new();
+		let mut miss_rids = Vec::new();
+		for (rid, bytes) in rids.into_iter().zip(stored) {
+			let record = match bytes {
+				Some(bytes) => {
+					read_bytes += bytes.len();
+					read_rows += 1;
+					ReadAheadRecord::Stored(bytes)
+				}
+				None => {
+					miss_at.push(self.records.len());
+					miss_rids.push(rid.clone());
+					ReadAheadRecord::Pending
+				}
+			};
+			self.records.push_back((rid, record));
+		}
+		if !miss_rids.is_empty() {
+			let records = txn
+				.get_records(ns_id, db_id, &miss_rids, version, CachePolicy::ReadOnly)
+				.await
+				.context("Failed to fetch records")?;
+			for (i, record) in miss_at.into_iter().zip(records) {
+				if !record.data.is_none() {
+					read_rows += 1;
+					read_bytes += approx_value_size(&record.data);
+				}
+				self.records[i].1 = ReadAheadRecord::Resolved(record);
+			}
+		}
+		ensure_below_memory_threshold()?;
+		Ok((read_bytes, read_rows))
+	}
+
+	/// Decode held records, in read order, until the batch holds the budget
+	/// in decoded values.
+	///
+	/// Decodes at least one record while any is held, and stops after the
+	/// record that brings the decoded size, denied records included, to the
+	/// budget, or at the row cap [`ReadAhead::processed`] sets. A record with
+	/// no data is skipped.
+	///
+	/// # Returns
+	///
+	/// The decoded records the permission check passed, in read order.
+	pub(crate) async fn decode_batch(
+		&mut self,
+		ctx: &ExecutionContext,
+	) -> Result<Vec<Value>, ControlFlow> {
+		let fields = self.fields;
+		let mut values = Vec::new();
+		let mut decoded_bytes = 0;
+		let mut decoded_rows = 0;
+		// The first decoded record is taken whatever the budget, so a batch
+		// always makes progress while records are held.
+		while decoded_rows == 0 || (decoded_bytes < self.budget && decoded_rows < self.row_cap) {
+			let Some((rid, record)) = self.records.pop_front() else {
+				break;
+			};
+			let data = match record {
+				ReadAheadRecord::Stored(bytes) => {
+					match fields.and_then(|fields| fields.project(&bytes)) {
+						Some(mut object) => {
+							object.0.insert(Strand::new_static("id"), Value::RecordId(rid));
+							Value::Object(object)
+						}
+						None => {
+							Record::kv_decode_value(&bytes, rid)
+								.context("Failed to deserialize record")?
+								.data
+						}
+					}
+				}
+				ReadAheadRecord::Resolved(record) => match Arc::try_unwrap(record) {
+					Ok(record) => record.data,
+					Err(record) => record.data.clone(),
+				},
+				ReadAheadRecord::Pending => {
+					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::Internal(
+						"a read-ahead record was left unresolved".into()
+					))));
+				}
+			};
+			if data.is_none() {
+				continue;
+			}
+			decoded_bytes += approx_value_size(&data);
+			decoded_rows += 1;
+			if fields.is_none()
+				&& self.check_perms
+				&& !crate::exec::permission::check_permission_for_value(
+					self.select_permission,
+					&data,
+					None,
+					ctx,
+				)
+				.await
+				.context("Failed to check permission")?
+			{
+				continue;
+			}
+			values.push(data);
+		}
+		ensure_below_memory_threshold()?;
+		self.last_bytes = decoded_bytes;
+		self.last_rows = decoded_rows;
+		Ok(values)
+	}
+}
+
+/// Decode what `read_ahead` holds, a byte budget at a time, through
+/// `pipeline`, emitting each batch the pipeline keeps.
+///
+/// # Returns
+///
+/// Whether the pipeline takes more rows; once it does not, the rest of
+/// `read_ahead` is left undecoded.
+pub(crate) async fn drain_read_ahead(
+	read_ahead: &mut ReadAhead<'_>,
+	pipeline: &mut ScanPipeline,
+	yielder: &mut Yielder<'_, ValueBatch>,
+	ctx: &ExecutionContext,
+) -> FlowResult<bool> {
+	while !read_ahead.is_empty() {
+		if ctx.cancellation().is_cancelled() {
+			return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
+		}
+		let mut values = read_ahead.decode_batch(ctx).await?;
+		let cont = pipeline.process_batch(&mut values, ctx).await?;
+		read_ahead.processed(pipeline);
+		if !values.is_empty() {
+			yielder.emit(ValueBatch::new(values)).await;
+		}
+		if !cont {
+			return Ok(false);
+		}
+	}
+	Ok(true)
 }
 
 /// The size of a range bound's value, by `size`; 0 for an unbounded end.
@@ -446,66 +827,6 @@ pub(crate) async fn fetch_and_filter_records_batch(
 	version: Option<u64>,
 	cache_policy: CachePolicy,
 ) -> Result<Vec<Value>, ControlFlow> {
-	let fetched = fetch_and_filter(
-		ctx,
-		txn,
-		ns_id,
-		db_id,
-		rids,
-		select_permission,
-		check_perms,
-		version,
-		cache_policy,
-		false,
-	)
-	.await?;
-	Ok(fetched.values)
-}
-
-/// As [`fetch_and_filter_records_batch`], also measuring every record the
-/// fetch decoded, for a scan that sizes its batches; see [`next_batch_len`].
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn fetch_and_filter_records_measured(
-	ctx: &ExecutionContext,
-	txn: &Transaction,
-	ns_id: NamespaceId,
-	db_id: DatabaseId,
-	rids: &[RecordId],
-	select_permission: &crate::exec::permission::PhysicalPermission,
-	check_perms: bool,
-	version: Option<u64>,
-	cache_policy: CachePolicy,
-) -> Result<FetchedBatch, ControlFlow> {
-	fetch_and_filter(
-		ctx,
-		txn,
-		ns_id,
-		db_id,
-		rids,
-		select_permission,
-		check_perms,
-		version,
-		cache_policy,
-		true,
-	)
-	.await
-}
-
-/// The shared body of the fetch helpers above; `measure` fills
-/// [`FetchedBatch::fetched_bytes`], which is 0 otherwise.
-#[allow(clippy::too_many_arguments)]
-async fn fetch_and_filter(
-	ctx: &ExecutionContext,
-	txn: &Transaction,
-	ns_id: NamespaceId,
-	db_id: DatabaseId,
-	rids: &[RecordId],
-	select_permission: &crate::exec::permission::PhysicalPermission,
-	check_perms: bool,
-	version: Option<u64>,
-	cache_policy: CachePolicy,
-	measure: bool,
-) -> Result<FetchedBatch, ControlFlow> {
 	let records = txn
 		.get_records(ns_id, db_id, rids, version, cache_policy)
 		.await
@@ -513,15 +834,10 @@ async fn fetch_and_filter(
 	ensure_below_memory_threshold()?;
 
 	let mut values = Vec::with_capacity(rids.len());
-	let mut fetched_bytes = 0;
-	let mut fetched_rows = 0;
+	let mut cloned = false;
 	for record in records {
 		if record.data.is_none() {
 			continue;
-		}
-		fetched_rows += 1;
-		if measure {
-			fetched_bytes += approx_value_size(&record.data);
 		}
 
 		if check_perms {
@@ -545,15 +861,19 @@ async fn fetch_and_filter(
 		// otherwise fall back to cloning.
 		let value = match Arc::try_unwrap(record) {
 			Ok(rec) => rec.data,
-			Err(arc) => arc.data.clone(),
+			Err(arc) => {
+				cloned = true;
+				arc.data.clone()
+			}
 		};
 		values.push(value);
 	}
-	Ok(FetchedBatch {
-		values,
-		fetched_bytes,
-		fetched_rows,
-	})
+	if cloned {
+		// A record the transaction's cache still shares is cloned above, after
+		// the check that followed the fetch.
+		ensure_below_memory_threshold()?;
+	}
+	Ok(values)
 }
 
 #[cfg(test)]
@@ -578,6 +898,82 @@ mod tests {
 
 	fn row_with_floats(n: usize) -> Value {
 		Value::from(vec![Value::from(0.5f64); n])
+	}
+
+	#[test]
+	fn projected_decode_needs_a_full_select_permission_only_when_checked() {
+		let state = FieldState::empty();
+		assert!(projected_decode_applies(&PhysicalPermission::Allow, true, &state));
+		assert!(projected_decode_applies(&PhysicalPermission::Deny, false, &state));
+		assert!(!projected_decode_applies(&PhysicalPermission::Deny, true, &state));
+	}
+
+	/// A read-ahead holding one resolved record per value, keyed `t:0`, `t:1`, ….
+	fn read_ahead_of(
+		permission: &PhysicalPermission,
+		budget: usize,
+		values: Vec<Value>,
+	) -> ReadAhead<'_> {
+		let mut read_ahead = ReadAhead::new(permission, false, None, budget);
+		for (i, value) in values.into_iter().enumerate() {
+			let rid = RecordId {
+				table: "t".into(),
+				key: RecordIdKey::Number(i as i64),
+			};
+			read_ahead
+				.records
+				.push_back((rid, ReadAheadRecord::Resolved(Arc::new(Record::new(value)))));
+		}
+		read_ahead
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_batch_decodes_one_record_whatever_the_budget() -> anyhow::Result<()> {
+		let ctx = crate::exec::operators::test_util::root_ctx();
+		let mut read_ahead =
+			read_ahead_of(&PhysicalPermission::Allow, 0, vec![Value::from(1), Value::from(2)]);
+		for expected in [1, 2] {
+			let values =
+				read_ahead.decode_batch(&ctx).await.map_err(|e| anyhow::anyhow!("{e:?}"))?;
+			assert_eq!(values, vec![Value::from(expected)]);
+		}
+		assert!(read_ahead.is_empty());
+		Ok(())
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_batch_stops_at_the_budget_and_the_row_cap() -> anyhow::Result<()> {
+		let ctx = crate::exec::operators::test_util::root_ctx();
+		let row = row_with_floats(8);
+		let rows = vec![row.clone(); 4];
+
+		// The record that brings the batch to the budget ends it.
+		let mut read_ahead =
+			read_ahead_of(&PhysicalPermission::Allow, approx_value_size(&row) + 1, rows.clone());
+		let values = read_ahead.decode_batch(&ctx).await.map_err(|e| anyhow::anyhow!("{e:?}"))?;
+		assert_eq!(values.len(), 2);
+
+		// Under an ample budget, the row cap ends it.
+		let mut read_ahead = read_ahead_of(&PhysicalPermission::Allow, usize::MAX, rows);
+		read_ahead.row_cap = 3;
+		let values = read_ahead.decode_batch(&ctx).await.map_err(|e| anyhow::anyhow!("{e:?}"))?;
+		assert_eq!(values.len(), 3);
+		Ok(())
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_record_with_no_data_is_skipped_uncounted() -> anyhow::Result<()> {
+		let ctx = crate::exec::operators::test_util::root_ctx();
+		let mut read_ahead = read_ahead_of(
+			&PhysicalPermission::Allow,
+			usize::MAX,
+			vec![Value::None, Value::from(1), Value::None, Value::from(2)],
+		);
+		read_ahead.row_cap = 2;
+		let values = read_ahead.decode_batch(&ctx).await.map_err(|e| anyhow::anyhow!("{e:?}"))?;
+		assert_eq!(values, vec![Value::from(1), Value::from(2)]);
+		assert!(read_ahead.is_empty());
+		Ok(())
 	}
 
 	#[test]
@@ -620,6 +1016,12 @@ mod tests {
 	fn a_row_wider_than_the_budget_still_takes_one_row() {
 		let rows = vec![row_with_floats(1024)];
 		assert_eq!(next_batch_len(bytes(&rows), rows.len(), 32, 1, MAX_ROWS), 1);
+	}
+
+	#[test]
+	fn read_bytes_larger_than_the_decoded_rows_size_the_read() {
+		// Ten narrow projected rows read from 100 KiB of stored records.
+		assert_eq!(next_batch_len(100 << 10, 10, MAX_ROWS, 1 << 20, MAX_ROWS), 102);
 	}
 
 	#[test]

@@ -9,8 +9,9 @@ use surrealdb_strand::Strand;
 
 use super::{
 	Extracted, PathSegment, SlotScanResult, TEST_DEPTH_LIMIT, descend_record_value_path,
-	descend_value_slice_path, extract_field_from_record_bytes, record_data_bytes,
-	rev2_record_data_bytes, scan_record_object_at_path_with_slots,
+	descend_value_slice_path, extract_field_from_record_bytes, project_record_bytes,
+	project_record_bytes_excluding, record_data_bytes, rev2_record_data_bytes,
+	scan_record_object_at_path_with_slots,
 };
 use crate::catalog::{Record, RecordType};
 use crate::val::{Number, Object, Value};
@@ -567,4 +568,84 @@ fn record_data_bytes_falls_back_on_non_rev2_prefix() {
 	bytes[0] = 1; // pretend rev = 1
 	assert!(rev2_record_data_bytes(&bytes).is_none(), "fast path must decline non-rev-2");
 	let _ = record_data_bytes(&bytes); // must not panic
+}
+
+/// A projection decodes exactly the listed fields a full decode would yield,
+/// for every record encoding the sample set covers: a small object (legacy map
+/// body), a wide indexed object (sparse and dense key sets), nested values,
+/// records carrying metadata, and keys the record does not store.
+#[test]
+fn project_record_bytes_matches_a_full_decode_restricted_to_the_keys() {
+	let key_sets: [&[&str]; 6] = [
+		&[],
+		&["a"],
+		&["a", "b"],
+		&["k03"],
+		&["k00", "k05", "k07", "k11", "zz"],
+		&["addr", "missing"],
+	];
+	for bytes in equivalence_sample_records() {
+		let full: Record = revision::from_slice(&bytes).expect("sample decodes");
+		for keys in key_sets {
+			let mut segments: Vec<PathSegment> =
+				keys.iter().copied().map(PathSegment::from).collect();
+			segments.sort();
+			let projected = project_record_bytes(&bytes, &segments);
+			match &full.data {
+				Value::Object(object) => {
+					let mut expected = Object::default();
+					for key in keys {
+						if let Some(v) = object.get(key) {
+							expected.0.insert(Strand::from(*key), v.clone());
+						}
+					}
+					assert_eq!(projected, Some(expected), "keys {keys:?} of {:?}", full.data);
+				}
+				other => assert_eq!(projected, None, "non-object data {other:?} must not project"),
+			}
+		}
+	}
+}
+
+/// Bytes that are not a record project to `None`, so the caller decodes them
+/// in full and surfaces the error, whether or not any key is listed.
+#[test]
+fn project_record_bytes_rejects_bytes_it_cannot_walk() {
+	let garbage = [0xff_u8; 8];
+	assert_eq!(project_record_bytes(&garbage, &[]), None);
+	assert_eq!(project_record_bytes(&garbage, &p(&["a"])), None);
+}
+
+/// Excluding fields decodes everything else a full decode would yield, for
+/// every record encoding the sample set covers, including exclusions the
+/// record does not store and an exclusion of every field.
+#[test]
+fn project_record_bytes_excluding_matches_a_full_decode_without_the_keys() {
+	let key_sets: [&[&str]; 6] = [
+		&[],
+		&["a"],
+		&["a", "b"],
+		&["k03"],
+		&["k00", "k05", "k07", "k11", "zz"],
+		&["addr", "missing"],
+	];
+	for bytes in equivalence_sample_records() {
+		let full: Record = revision::from_slice(&bytes).expect("sample decodes");
+		for keys in key_sets {
+			let mut segments: Vec<PathSegment> =
+				keys.iter().copied().map(PathSegment::from).collect();
+			segments.sort();
+			let projected = project_record_bytes_excluding(&bytes, &segments);
+			match &full.data {
+				Value::Object(object) => {
+					let mut expected = object.clone();
+					for key in keys {
+						expected.0.remove(*key);
+					}
+					assert_eq!(projected, Some(expected), "excluding {keys:?} of {:?}", full.data);
+				}
+				other => assert_eq!(projected, None, "non-object data {other:?} must not project"),
+			}
+		}
+	}
 }

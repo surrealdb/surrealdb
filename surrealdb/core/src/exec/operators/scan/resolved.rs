@@ -27,7 +27,7 @@ use std::sync::Arc;
 use surrealdb_strand::TableName;
 
 use super::pipeline::{FieldState, build_field_state_raw, filter_field_state_for_projection};
-use crate::catalog::{DatabaseId, NamespaceId, Permission, TableDefinition};
+use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId, Permission, TableDefinition};
 use crate::err::{EngineError, Error};
 use crate::exec::permission::{PhysicalPermission, table_select_permission_physical};
 use crate::exec::planner::Planner;
@@ -86,6 +86,9 @@ pub(crate) enum RowEnforcement {
 	/// [`ResolvedTableContext::with_candidate_guard`].
 	Planned {
 		select_permission: PhysicalPermission,
+		/// What the table's field definitions read, for deciding whether the
+		/// scan may decode only part of each record.
+		field_reads: DefinedFieldReads,
 	},
 	/// The scan enforces per row: the analyzer did not resolve this source, so
 	/// nothing above the scan applies what the schema declares.
@@ -95,6 +98,28 @@ pub(crate) enum RowEnforcement {
 		/// with [`ResolvedTableContext::field_state_for_projection`].
 		field_state: Arc<FieldState>,
 	},
+}
+
+/// Whether a table's field definitions evaluate anything against a row beyond
+/// the fields a statement names: a computed field, which may read any stored
+/// field, or a field-level `SELECT` permission, which reads the field it
+/// guards.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct DefinedFieldReads {
+	/// The table defines a computed field.
+	pub(crate) computed: bool,
+	/// A field's `SELECT` permission is not `FULL`.
+	pub(crate) restricted: bool,
+}
+
+impl DefinedFieldReads {
+	/// What `fields`, a table's field definitions, read.
+	pub(crate) fn of(fields: &[FieldDefinition]) -> Self {
+		Self {
+			computed: fields.iter().any(|fd| fd.computed.is_some()),
+			restricted: fields.iter().any(|fd| !matches!(fd.select_permission, Permission::Full)),
+		}
+	}
 }
 
 /// Plan-time resolved table metadata, in place of runtime catalog lookups.
@@ -128,6 +153,7 @@ impl ResolvedTableContext {
 			} => select_permission.clone(),
 			RowEnforcement::Planned {
 				select_permission: PhysicalPermission::Deny,
+				..
 			} => PhysicalPermission::Deny,
 			RowEnforcement::Planned {
 				..
@@ -147,6 +173,7 @@ impl ResolvedTableContext {
 		match &self.enforcement {
 			RowEnforcement::Planned {
 				select_permission,
+				..
 			}
 			| RowEnforcement::Runtime {
 				select_permission,
@@ -161,23 +188,23 @@ impl ResolvedTableContext {
 	/// under the plan's enforcement asks for it here; a runtime context and a
 	/// planned one whose permission is unconditional are returned unchanged.
 	pub(crate) async fn with_candidate_guard(self, planner: &Planner<'_>) -> Result<Self, Error> {
-		if !matches!(
-			(&self.enforcement, &self.table_def.permissions.select),
+		let field_reads = match (&self.enforcement, &self.table_def.permissions.select) {
 			(
 				RowEnforcement::Planned {
 					select_permission: PhysicalPermission::Allow,
+					field_reads,
 				},
-				Permission::Specific(_)
-			)
-		) {
-			return Ok(self);
-		}
+				Permission::Specific(_),
+			) => *field_reads,
+			_ => return Ok(self),
+		};
 		let select_permission =
 			table_select_permission_physical(Some(&self.table_def), planner).await?;
 		Ok(Self {
 			table_def: self.table_def,
 			enforcement: RowEnforcement::Planned {
 				select_permission,
+				field_reads,
 			},
 		})
 	}
@@ -196,6 +223,34 @@ impl ResolvedTableContext {
 				field_state,
 				..
 			} => filter_field_state_for_projection(field_state, needed_fields),
+		}
+	}
+
+	/// Whether a scan of this table may decode only part of each record; see
+	/// [`super::common::projected_decode_applies`], which a runtime context
+	/// answers from its field state and a planned one from the
+	/// [`DefinedFieldReads`] it resolved at plan time.
+	pub(crate) fn projected_decode_applies(
+		&self,
+		select_permission: &PhysicalPermission,
+		check_perms: bool,
+	) -> bool {
+		match &self.enforcement {
+			RowEnforcement::Planned {
+				field_reads,
+				..
+			} => {
+				!field_reads.computed
+					&& (!check_perms
+						|| (matches!(select_permission, PhysicalPermission::Allow)
+							&& !field_reads.restricted))
+			}
+			RowEnforcement::Runtime {
+				field_state,
+				..
+			} => {
+				super::common::projected_decode_applies(select_permission, check_perms, field_state)
+			}
 		}
 	}
 
@@ -262,9 +317,16 @@ pub(crate) async fn resolve_table_context(
 	};
 
 	let enforcement = match mode {
-		EnforcementMode::Planned => RowEnforcement::Planned {
-			select_permission: planned_select_permission(&table_def),
-		},
+		EnforcementMode::Planned => {
+			let fields = txn
+				.all_tb_fields(ns_id, db_id, table_name, version)
+				.await
+				.map_err(|e| EngineError::Internal(e.to_string()))?;
+			RowEnforcement::Planned {
+				select_permission: planned_select_permission(&table_def),
+				field_reads: DefinedFieldReads::of(&fields),
+			}
+		}
 		EnforcementMode::Runtime => {
 			// Pre-compile the SELECT permission at plan time. Inner subqueries
 			// inherit the planner's `CycleGuard` via `planner.physical_expr(...)`
@@ -367,6 +429,10 @@ pub(crate) mod test_support {
 			table_def: Arc::clone(&table_def),
 			enforcement: RowEnforcement::Planned {
 				select_permission: select_permission.clone(),
+				field_reads: DefinedFieldReads {
+					computed: !field_state.computed_fields.is_empty(),
+					restricted: !field_state.field_permissions.is_empty(),
+				},
 			},
 		};
 		let runtime = ResolvedTableContext {
@@ -474,6 +540,71 @@ mod tests {
 		assert_eq!(runtime.field_state().computed_fields.len(), 1);
 	}
 
+	/// The field reads a planned context records come from the table's field
+	/// definitions, and close the projection gate exactly when the table
+	/// defines a computed field or, for a permission-checked caller, a
+	/// restricted one.
+	#[tokio::test]
+	async fn a_planned_context_records_what_the_field_definitions_read() {
+		use crate::catalog::providers::TableProvider;
+
+		let db = TestDb::new(
+			"DEFINE TABLE plain SCHEMALESS;
+			 DEFINE FIELD n ON plain TYPE int;
+			 DEFINE TABLE computed SCHEMALESS;
+			 DEFINE FIELD c ON computed COMPUTED 1;
+			 DEFINE TABLE restricted SCHEMALESS;
+			 DEFINE FIELD secret ON restricted TYPE string PERMISSIONS FOR select NONE;",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let db_ctx = ctx.database().expect("a database context");
+		let reads = |table: &'static str| {
+			let db_ctx = db_ctx.clone();
+			let ctx = ctx.clone();
+			async move {
+				let table_def = db_ctx
+					.get_table_def(&TableName::from(table), None)
+					.await
+					.expect("catalog read")
+					.expect("the table is defined");
+				let fields = ctx
+					.txn()
+					.all_tb_fields(
+						table_def.namespace_id,
+						table_def.database_id,
+						&TableName::from(table),
+						None,
+					)
+					.await
+					.expect("field definitions");
+				let field_reads = DefinedFieldReads::of(&fields);
+				let planned = ResolvedTableContext {
+					table_def,
+					enforcement: RowEnforcement::Planned {
+						select_permission: PhysicalPermission::Allow,
+						field_reads,
+					},
+				};
+				(field_reads, planned)
+			}
+		};
+		let allow = PhysicalPermission::Allow;
+
+		let (plain, ctx_plain) = reads("plain").await;
+		assert!(!plain.computed && !plain.restricted);
+		assert!(ctx_plain.projected_decode_applies(&allow, true));
+
+		let (computed, ctx_computed) = reads("computed").await;
+		assert!(computed.computed && !computed.restricted);
+		assert!(!ctx_computed.projected_decode_applies(&allow, false));
+
+		let (restricted, ctx_restricted) = reads("restricted").await;
+		assert!(!restricted.computed && restricted.restricted);
+		assert!(ctx_restricted.projected_decode_applies(&allow, false));
+		assert!(!ctx_restricted.projected_decode_applies(&allow, true));
+	}
+
 	#[tokio::test]
 	async fn the_table_permission_is_kept_for_candidates_and_for_none() {
 		let db = TestDb::new("DEFINE TABLE t;").await;
@@ -492,6 +623,7 @@ mod tests {
 			table_def: Arc::clone(&table_def),
 			enforcement: RowEnforcement::Planned {
 				select_permission,
+				field_reads: DefinedFieldReads::default(),
 			},
 		};
 

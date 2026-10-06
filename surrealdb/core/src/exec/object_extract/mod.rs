@@ -18,7 +18,7 @@ use surrealdb_strand::Strand;
 use wire_skip::{rev2_optimised_payload_unchecked, skip_value_wire};
 
 use crate::catalog::Record;
-use crate::val::Value;
+use crate::val::{Object, Value};
 
 // Note: there is intentionally no bail on `metadata`. `metadata` flags the
 // record type (plain vs. edge) and carries `aggregation_stats` for
@@ -363,6 +363,131 @@ impl NeedleKey for &[u8] {
 	#[inline]
 	fn key_utf8(&self) -> &[u8] {
 		self
+	}
+}
+
+impl NeedleKey for PathSegment {
+	#[inline]
+	fn key_utf8(&self) -> &[u8] {
+		self.as_bytes()
+	}
+
+	#[inline]
+	fn key_wire(&self) -> Option<&[u8]> {
+		Some(self.wire())
+	}
+}
+
+/// Decode every top-level field of a stored record except `excluded_sorted`.
+///
+/// Returns the record's data as an object holding each stored field not
+/// listed, decoded exactly as a full decode would decode it; listed fields are
+/// skipped on the wire and never decoded. The record's `id` is not added: the
+/// caller sets it from the storage key, as a full decode does.
+///
+/// Returns `None` when the record's data is not an object or its bytes cannot
+/// be walked; the caller then decodes the record in full. `excluded_sorted`
+/// must be strictly ascending.
+pub(crate) fn project_record_bytes_excluding(
+	record_bytes: &[u8],
+	excluded_sorted: &[PathSegment],
+) -> Option<Object> {
+	let data_bytes = record_data_bytes(record_bytes).ok()?;
+	let mut reader: &[u8] = &data_bytes;
+	let value_walker = Value::walk_revisioned(&mut reader).ok()?;
+	if !value_walker.is_object() {
+		return None;
+	}
+	let object_view = value_walker.object_view().ok()?;
+	let map_walker = indexed_map_walker_from_object_bytes(object_view.as_bytes()).ok()?;
+	// Keys are compared on the wire, so an excluded key is never allocated.
+	let excluded =
+		|utf8: &[u8]| excluded_sorted.binary_search_by(|k| k.as_bytes().cmp(utf8)).is_ok();
+
+	let mut out = Object::default();
+	if map_walker.is_indexed() {
+		for (mut key_wire, mut value_wire) in map_walker.entries()? {
+			let (utf8, taken) = strand_wire_utf8(key_wire)?;
+			if taken != key_wire.len() {
+				return None;
+			}
+			if excluded(utf8) {
+				continue;
+			}
+			let key =
+				<Strand as DeserializeRevisioned>::deserialize_revisioned(&mut key_wire).ok()?;
+			let value =
+				<Value as DeserializeRevisioned>::deserialize_revisioned(&mut value_wire).ok()?;
+			out.0.insert(key, value);
+		}
+	} else {
+		let mut body: &[u8] = map_walker.legacy_body()?;
+		for _ in 0..map_walker.len() {
+			let (utf8, taken) = strand_wire_utf8(body)?;
+			if excluded(utf8) {
+				body = &body[taken..];
+				skip_value_wire(&mut body).ok()?;
+				continue;
+			}
+			let key = <Strand as DeserializeRevisioned>::deserialize_revisioned(&mut body).ok()?;
+			let value = <Value as DeserializeRevisioned>::deserialize_revisioned(&mut body).ok()?;
+			out.0.insert(key, value);
+		}
+	}
+	Some(out)
+}
+
+/// The UTF-8 bytes of the `Strand` whose wire form (`<usize varint len ||
+/// utf8>`) starts `wire`, and how many bytes of `wire` that form takes; `None`
+/// when `wire` is too short for the length it declares.
+fn strand_wire_utf8(wire: &[u8]) -> Option<(&[u8], usize)> {
+	let mut rest: &[u8] = wire;
+	let len = <usize as DeserializeRevisioned>::deserialize_revisioned(&mut rest).ok()?;
+	let prefix = wire.len() - rest.len();
+	Some((rest.get(..len)?, prefix + len))
+}
+
+/// Decode only the top-level fields `keys_sorted` of a stored record.
+///
+/// Returns the record's data as an object holding each listed field the
+/// record stores, decoded exactly as a full decode would decode it. Fields
+/// that are not listed are skipped on the wire and never decoded, and a listed
+/// field the record does not store is absent from the object. The record's
+/// `id` is not added: the caller sets it from the storage key, as a full
+/// decode does.
+///
+/// Returns `None` when the record's data is not an object or its bytes cannot
+/// be walked; the caller then decodes the record in full. `keys_sorted` must
+/// be strictly ascending.
+pub(crate) fn project_record_bytes(
+	record_bytes: &[u8],
+	keys_sorted: &[PathSegment],
+) -> Option<Object> {
+	// The slot scan answers an empty needle list without opening the record,
+	// so the contract that a non-object or unwalkable record yields `None` is
+	// checked here first.
+	if keys_sorted.is_empty() {
+		let data_bytes = record_data_bytes(record_bytes).ok()?;
+		let mut reader: &[u8] = &data_bytes;
+		return Value::walk_revisioned(&mut reader).ok()?.is_object().then(Object::default);
+	}
+	// The scan descends no path, so its depth limit is never consulted.
+	let scanned =
+		scan_record_object_at_path_with_slots(record_bytes, &[], keys_sorted, 0, |slots| {
+			let mut out = Object::default();
+			for (key, slot) in keys_sorted.iter().zip(slots) {
+				if let Some(mut bytes) = *slot {
+					let value =
+						<Value as DeserializeRevisioned>::deserialize_revisioned(&mut bytes)
+							.ok()?;
+					out.0.insert(key.as_strand().clone(), value);
+				}
+			}
+			Some(out)
+		});
+	match scanned {
+		SlotScanResult::Found(object) => object,
+		SlotScanResult::Missing | SlotScanResult::Bail => None,
 	}
 }
 

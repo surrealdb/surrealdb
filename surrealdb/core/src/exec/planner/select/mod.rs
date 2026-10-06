@@ -62,14 +62,17 @@ use super::{PlanTimeVersion, Planner};
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{Index, IndexDefinition};
 use crate::err::{EngineError, Error};
+use crate::exec::function::FunctionRegistry;
 use crate::exec::index::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
 };
 use crate::exec::index::analysis::IndexAnalyzer;
+use crate::exec::logical::named_reads;
 use crate::exec::logical::reads::{
 	declared_read_prefix, paths_overlap, reads_at_or_beneath, reads_row_opaquely,
 };
 use crate::exec::operators::fetch::{FetchPart, fetch_parts};
+use crate::exec::operators::scan::common::DecodeFields;
 use crate::exec::operators::scan::pipeline::{
 	determine_scan_direction, table_read_restricted_fields,
 };
@@ -534,6 +537,100 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
+	/// The top-level fields a scan fetching this pipeline's records decodes,
+	/// or `None` when it decodes whole records.
+	///
+	/// Every root field a clause reads off a row, by [`named_reads`]: `None`
+	/// when any clause reads the row other than by a field's name (a row
+	/// parameter, the document, a nested statement, a call evaluated against
+	/// the row, a closure). A `*` projection reads every field but the ones it
+	/// omits, so it decodes all but the top-level `OMIT` targets no clause
+	/// reads; a nested `OMIT` target keeps its root field decoded, and one that
+	/// names no field, or a `*` that leaves nothing out, decodes whole records.
+	/// `search::highlight` and `search::offsets` read the column of the
+	/// full-text index their match reference names, which only a MATCHES in
+	/// this pipeline's condition names, so a pipeline calling either without
+	/// one decodes whole records.
+	pub(crate) fn extract_decode_fields(
+		registry: &FunctionRegistry,
+		fields: Option<&LogicalFields>,
+		omit: &[LogicalExpr],
+		cond: Option<&LogicalExpr>,
+		order: Option<&LogicalOrdering>,
+		group: Option<&[LogicalExpr]>,
+		split: Option<&[LogicalExpr]>,
+	) -> Option<DecodeFields> {
+		let mut roots: HashSet<String> = HashSet::new();
+		let mut exprs: Vec<&LogicalExpr> = Vec::new();
+		let mut wildcard = false;
+		match fields? {
+			LogicalFields::Value {
+				expr,
+				..
+			} => exprs.push(expr),
+			LogicalFields::Select(list) => {
+				for field in list {
+					match field {
+						LogicalField::All => wildcard = true,
+						// An alias names an output field, not a stored one: a
+						// clause reading it is walked like any other read.
+						LogicalField::Single {
+							expr,
+							..
+						} => exprs.push(expr),
+					}
+				}
+			}
+		}
+		// Under `*` an OMIT target is a field not to decode; otherwise it is a
+		// field the projection reads to remove.
+		if !wildcard {
+			exprs.extend(omit);
+		}
+		exprs.extend(cond);
+		if let Some(LogicalOrdering::Order(list)) = order {
+			exprs.extend(list.iter().map(|o| &o.value));
+		}
+		exprs.extend(group.into_iter().flatten());
+		exprs.extend(split.into_iter().flatten());
+
+		let reads_index_column = exprs.iter().any(|e| {
+			e.any(|e| {
+				matches!(e, LogicalExpr::Call(call) if matches!(
+					&call.receiver,
+					Function::Normal(name) if name == "search::highlight" || name == "search::offsets"
+				))
+			})
+		});
+		if reads_index_column && !cond.is_some_and(expr_contains_matches) {
+			return None;
+		}
+		for expr in exprs {
+			roots.extend(named_reads(expr, registry)?);
+		}
+		if !wildcard {
+			return Some(DecodeFields::new(roots));
+		}
+		// A nested OMIT target keeps its root field decoded, for the projection
+		// to cut the nested part from.
+		for expr in omit {
+			if !matches!(expr, LogicalExpr::Field(_)) {
+				roots.extend(named_reads(expr, registry)?);
+			}
+		}
+		let mut excluded = Vec::with_capacity(omit.len());
+		for expr in omit {
+			if let LogicalExpr::Field(name) = expr
+				&& !roots.contains(name.as_str())
+			{
+				excluded.push(name.to_string());
+			}
+		}
+		// Excluding only `id`, which is set from the storage key, excludes
+		// nothing stored: that is a whole-record decode.
+		DecodeFields::excluding(excluded)
+	}
+
 	/// Apply the plan's `LIMIT`/`START` over an operator.
 	///
 	/// A fast path replaces the rows below it but still has to page what it
@@ -822,6 +919,15 @@ impl<'ctx> Planner<'ctx> {
 					self.function_registry(),
 				))
 		});
+		let decode_fields = Self::extract_decode_fields(
+			self.function_registry(),
+			fields.as_ref(),
+			&omit,
+			cond.as_ref(),
+			order.as_ref(),
+			group_keys.as_deref(),
+			split.as_deref(),
+		);
 		// One source whose rows come from one scan, so a compiled predicate
 		// and paging can be offered to that scan. A parameter is not one: it
 		// resolves to a value when the statement runs.
@@ -1175,6 +1281,7 @@ impl<'ctx> Planner<'ctx> {
 					cond_for_index.as_ref(),
 					order.as_ref(),
 					needed_fields,
+					decode_fields,
 					scan_predicate,
 					scan_limit,
 					scan_start,
@@ -1506,6 +1613,7 @@ impl<'ctx> Planner<'ctx> {
 		cond: Option<&LogicalExpr>,
 		order: Option<&LogicalOrdering>,
 		needed_fields: Option<HashSet<String>>,
+		decode_fields: Option<DecodeFields>,
 		scan_predicate: Option<Arc<dyn PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn PhysicalExpr>>,
 		scan_start: Option<Arc<dyn PhysicalExpr>>,
@@ -1539,6 +1647,7 @@ impl<'ctx> Planner<'ctx> {
 					cond,
 					order,
 					needed_fields.clone(),
+					decode_fields.clone(),
 					scan_predicate.clone(),
 					scan_limit.clone(),
 					scan_start.clone(),
@@ -1582,6 +1691,10 @@ impl<'ctx> Planner<'ctx> {
 		cond: Option<&LogicalExpr>,
 		order: Option<&LogicalOrdering>,
 		needed_fields: Option<HashSet<String>>,
+		// The fields a fetching scan decodes; see [`Self::extract_decode_fields`].
+		// Set only where the scan's rows reach the pipeline directly: a chain of
+		// permission or layer nodes above the scan passes `None`.
+		decode_fields: Option<DecodeFields>,
 		scan_predicate: Option<Arc<dyn PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn PhysicalExpr>>,
 		scan_start: Option<Arc<dyn PhysicalExpr>>,
@@ -1811,6 +1924,7 @@ impl<'ctx> Planner<'ctx> {
 								scan_start,
 								limit_hint,
 								needed_fields,
+								decode_fields,
 								version,
 								table_ctx,
 							)
@@ -1829,6 +1943,7 @@ impl<'ctx> Planner<'ctx> {
 								operator,
 								cond,
 								needed_fields,
+								decode_fields,
 								version,
 								table_ctx,
 							)
@@ -1888,6 +2003,7 @@ impl<'ctx> Planner<'ctx> {
 								limit_hint,
 								cond,
 								needed_fields,
+								decode_fields,
 								version,
 								table_ctx,
 								knn_ctx,
@@ -1908,6 +2024,7 @@ impl<'ctx> Planner<'ctx> {
 								order,
 								cond,
 								needed_fields,
+								decode_fields,
 								version,
 								table_ctx,
 								knn_ctx,
@@ -2059,6 +2176,7 @@ impl<'ctx> Planner<'ctx> {
 		scan_start: Option<Arc<dyn PhysicalExpr>>,
 		limit_hint: Option<usize>,
 		needed_fields: Option<HashSet<String>>,
+		decode_fields: Option<DecodeFields>,
 		version: Option<Arc<dyn PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
 	) -> Result<PlannedSource, Error> {
@@ -2155,6 +2273,9 @@ impl<'ctx> Planner<'ctx> {
 		if let Some(tc) = table_ctx {
 			scan = scan.with_resolved(tc);
 		}
+		if let Some(fields) = decode_fields {
+			scan = scan.with_decode_fields(fields);
+		}
 		// The dedupe sits directly on the scan, below any residual Filter, so
 		// every operator above it sees each matching record exactly once.
 		let operator: Arc<dyn ExecOperator> = if fans_out {
@@ -2183,6 +2304,7 @@ impl<'ctx> Planner<'ctx> {
 		operator: crate::expr::operator::MatchesOperator,
 		cond: Option<&LogicalExpr>,
 		needed_fields: Option<HashSet<String>>,
+		decode_fields: Option<DecodeFields>,
 		version: Option<Arc<dyn PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
 	) -> Result<PlannedSource, Error> {
@@ -2203,6 +2325,9 @@ impl<'ctx> Planner<'ctx> {
 			FullTextScan::new(index_ref, query, operator, table, version, Some(needed_fields));
 		if let Some(tc) = table_ctx {
 			scan = scan.with_resolved(tc);
+		}
+		if let Some(fields) = decode_fields {
+			scan = scan.with_decode_fields(fields);
 		}
 		Ok(PlannedSource {
 			operator: Arc::new(scan) as Arc<dyn ExecOperator>,
@@ -2360,6 +2485,7 @@ impl<'ctx> Planner<'ctx> {
 		order: Option<&LogicalOrdering>,
 		cond: Option<&LogicalExpr>,
 		needed_fields: Option<HashSet<String>>,
+		decode_fields: Option<DecodeFields>,
 		version: Option<Arc<dyn PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
 		knn_ctx: Option<Arc<crate::exec::function::KnnContext>>,
@@ -2381,6 +2507,7 @@ impl<'ctx> Planner<'ctx> {
 					None,
 					cond,
 					needed_fields.clone(),
+					decode_fields.clone(),
 					version,
 					table_ctx.clone(),
 					knn_ctx,
@@ -2413,6 +2540,9 @@ impl<'ctx> Planner<'ctx> {
 		}
 		if let Some(tc) = table_ctx {
 			scan = scan.with_resolved(tc);
+		}
+		if let Some(fields) = decode_fields {
+			scan = scan.with_decode_fields(fields);
 		}
 		Ok(PlannedSource::opaque(Arc::new(scan)))
 	}
@@ -2573,6 +2703,9 @@ impl<'ctx> Planner<'ctx> {
 		limit_hint: Option<usize>,
 		cond: Option<&LogicalExpr>,
 		needed_fields: Option<HashSet<String>>,
+		// Handed to each index and full-text sub-scan, which gates it against
+		// the table as a scan of its own would; see [`DecodeFields`].
+		decode_fields: Option<DecodeFields>,
 		version: Option<Arc<dyn PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
 		knn_ctx: Option<Arc<crate::exec::function::KnnContext>>,
@@ -2702,6 +2835,7 @@ impl<'ctx> Planner<'ctx> {
 					table_ctx.as_ref(),
 					knn_ctx.as_ref(),
 					merge_batch_ceiling,
+					decode_fields.as_ref(),
 				)
 				.await?,
 			);
@@ -2764,6 +2898,7 @@ impl<'ctx> Planner<'ctx> {
 		table_ctx: Option<&ResolvedTableContext>,
 		knn_ctx: Option<&Arc<crate::exec::function::KnnContext>>,
 		merge_batch_ceiling: Option<usize>,
+		decode_fields: Option<&DecodeFields>,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		use crate::exec::operators::{FullTextScan, IndexScan, KnnScan};
 
@@ -2792,6 +2927,9 @@ impl<'ctx> Planner<'ctx> {
 				if let Some(tc) = table_ctx {
 					scan = scan.with_resolved(tc.clone());
 				}
+				if let Some(fields) = decode_fields {
+					scan = scan.with_decode_fields(fields.clone());
+				}
 				// A branch whose own key range leaves a fanning column open
 				// reaches a record through several entries. The union's merge
 				// answers for records appearing in more than one branch, not
@@ -2818,6 +2956,9 @@ impl<'ctx> Planner<'ctx> {
 				);
 				if let Some(tc) = table_ctx {
 					scan = scan.with_resolved(tc.clone());
+				}
+				if let Some(fields) = decode_fields {
+					scan = scan.with_decode_fields(fields.clone());
 				}
 				Ok(Arc::new(scan))
 			}
@@ -4655,6 +4796,86 @@ mod tests {
 			panic!("`{sql}` is not a SELECT");
 		};
 		collect_pipeline(lower_select(*select).expect("SELECT lowers")).0
+	}
+
+	/// The decode set `extract_decode_fields` derives for `sql`, as its
+	/// listed fields (sorted) and whether they are excluded; `None` when the
+	/// statement decodes whole records.
+	fn decode_fields(sql: &str) -> Option<(Vec<String>, bool)> {
+		let clauses = clauses_of(sql);
+		Planner::extract_decode_fields(
+			&FunctionRegistry::with_builtins(),
+			clauses.project.as_ref().map(|p| &p.fields),
+			clauses.project.as_ref().map(|p| p.omit.as_slice()).unwrap_or(&[]),
+			clauses.cond.as_ref(),
+			clauses.order.as_ref(),
+			clauses.group.as_ref().map(|g| g.group.as_slice()),
+			clauses.split.as_deref(),
+		)
+		.map(|d| d.listed())
+	}
+
+	fn listed(fields: &[&str], excluding: bool) -> Option<(Vec<String>, bool)> {
+		Some((fields.iter().map(|f| f.to_string()).collect(), excluding))
+	}
+
+	#[test]
+	fn extract_decode_fields_lists_every_field_a_clause_reads() {
+		assert_eq!(
+			decode_fields("SELECT id, title FROM post WHERE grp = 'a' ORDER BY n"),
+			listed(&["grp", "n", "title"], false)
+		);
+	}
+
+	#[test]
+	fn extract_decode_fields_declines_a_read_it_cannot_name() {
+		assert_eq!(decode_fields("SELECT id, type::field('emb') AS e FROM post"), None);
+		assert_eq!(
+			decode_fields("SELECT id, (SELECT VALUE $parent.emb FROM [1]) AS e FROM post"),
+			None
+		);
+		assert_eq!(decode_fields("SELECT * FROM post"), None);
+	}
+
+	#[test]
+	fn extract_decode_fields_excludes_the_omitted_fields_nothing_reads() {
+		assert_eq!(decode_fields("SELECT * OMIT emb FROM post"), listed(&["emb"], true));
+		assert_eq!(
+			decode_fields(
+				"SELECT *, search::score(1) AS s OMIT emb, meta FROM post WHERE title @1@ 'x'"
+			),
+			listed(&["emb", "meta"], true)
+		);
+		// An omitted field another clause reads is decoded.
+		assert_eq!(
+			decode_fields("SELECT * OMIT emb, meta FROM post WHERE emb[0] > 1"),
+			listed(&["meta"], true)
+		);
+		assert_eq!(decode_fields("SELECT *, emb[0] AS e OMIT emb FROM post"), None);
+		// A nested OMIT target keeps its root decoded, and the rest still apply.
+		assert_eq!(decode_fields("SELECT * OMIT meta.x FROM post"), None);
+		assert_eq!(decode_fields("SELECT * OMIT emb, meta.x FROM post"), listed(&["emb"], true));
+		assert_eq!(decode_fields("SELECT * OMIT meta, meta.x FROM post"), None);
+		// `id` is never decoded from the record, so omitting it excludes nothing.
+		assert_eq!(decode_fields("SELECT * OMIT id FROM post"), None);
+		assert_eq!(decode_fields("SELECT * OMIT id, emb FROM post"), listed(&["emb"], true));
+	}
+
+	#[test]
+	fn extract_decode_fields_reads_no_stored_field_for_an_alias() {
+		assert_eq!(
+			decode_fields("SELECT 1 AS computed, title FROM post"),
+			listed(&["title"], false)
+		);
+		assert_eq!(
+			decode_fields("SELECT *, 1 AS secret OMIT secret FROM post"),
+			listed(&["secret"], true)
+		);
+		// A clause reading the alias name reads it like any other field.
+		assert_eq!(
+			decode_fields("SELECT title AS t FROM post ORDER BY t"),
+			listed(&["t", "title"], false)
+		);
 	}
 
 	fn needed_fields(sql: &str) -> HashSet<String> {

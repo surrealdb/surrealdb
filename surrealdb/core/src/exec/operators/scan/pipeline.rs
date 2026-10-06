@@ -142,6 +142,18 @@ impl ScanPipeline {
 		self.materialised_bytes
 	}
 
+	/// How many more rows this pipeline can use: those it has yet to skip for
+	/// the start offset plus those it has yet to emit under the limit; `None`
+	/// without a limit, when it takes every row.
+	///
+	/// It counts the rows the pipeline receives, so rows dropped before them
+	/// (a permission denial, a stale index entry) or by its own filters leave
+	/// the count unspent, and a scan sizing its reads by it never reads short.
+	pub(crate) fn rows_wanted(&self) -> Option<usize> {
+		let limit = self.limit?;
+		Some(self.start.saturating_sub(self.skipped) + limit.saturating_sub(self.emitted))
+	}
+
 	/// Returns true when limit or start tracking is active.
 	fn has_limit(&self) -> bool {
 		self.limit.is_some() || self.start > 0
@@ -1591,6 +1603,20 @@ mod tests {
 		assert!(!pipeline.process_batch(&mut batch, &ctx).await.unwrap());
 		assert_eq!(ns(&batch), vec![Value::from(0), Value::from(1)]);
 		assert_eq!(pipeline.emitted, 2);
+	}
+
+	#[tokio::test]
+	async fn rows_wanted_counts_down_the_start_and_the_limit() {
+		let ctx = root_ctx();
+		let mut pipeline = limit_pipeline(Some(2), 3);
+		assert_eq!(pipeline.rows_wanted(), Some(5));
+		let mut batch = numbered(0, 4).await;
+		assert!(pipeline.process_batch(&mut batch, &ctx).await.unwrap());
+		assert_eq!(pipeline.rows_wanted(), Some(1), "3 skipped and 1 emitted");
+		let mut batch = numbered(4, 4).await;
+		assert!(!pipeline.process_batch(&mut batch, &ctx).await.unwrap());
+		assert_eq!(pipeline.rows_wanted(), Some(0));
+		assert_eq!(limit_pipeline(None, 0).rows_wanted(), None);
 	}
 
 	#[tokio::test]

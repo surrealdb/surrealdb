@@ -36,7 +36,10 @@ use futures::StreamExt;
 use reblessive::TreeStack;
 use roaring::RoaringTreemap;
 
-use super::common::{fetch_and_filter_records_measured, next_batch_len, probe_batch_len};
+use super::common::{
+	DecodeFields, RECORD_PROBE_ROWS, ReadAhead, decode_fields_for_execution, drain_read_ahead,
+	next_batch_len, probe_batch_len,
+};
 use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
 use crate::catalog::{DatabaseId, Error, Index, NamespaceId};
@@ -51,7 +54,7 @@ use crate::exec::permission::{
 };
 use crate::exec::{
 	AccessMode, BoxFut, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	ValueBatchStream, monitor_stream,
 };
 use crate::expr::operator::MatchesOperator;
 use crate::expr::{ControlFlow, ControlFlowExt};
@@ -59,20 +62,13 @@ use crate::iam::Action;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::TableDocIds;
 use crate::idx::ft::fulltext::FullTextIndex;
+use crate::kvs::Transaction;
 use crate::kvs::util::scan;
-use crate::kvs::{CachePolicy, Transaction};
 use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 use crate::val::{RecordId, TableName};
 
 /// Maximum number of doc-IDs resolved and fetched per output batch.
 const RESOLVE_BATCH_SIZE: usize = 1000;
-
-/// The most rows in the first resolved batch, before any row size is known.
-///
-/// Small enough that many concurrent queries do not each start with a full
-/// [`RESOLVE_BATCH_SIZE`] batch; [`probe_batch_len`] takes fewer when
-/// `scan_batch_bytes` is below the default.
-const RESOLVE_PROBE_ROWS: usize = 32;
 
 /// Multiplier applied to the accumulated intersection's cardinality to budget
 /// each droppable AND child: a branch may drain at most `acc.len()` times this
@@ -864,6 +860,9 @@ pub struct BitmapResolve {
 	/// Projection-aware field set for computed-field materialization.
 	/// `None` = all fields, `Some(set)` = specific fields.
 	needed_fields: Option<HashSet<String>>,
+	/// The fields to decode from each fetched record, when the plan reads no
+	/// other field of it; `None` decodes whole records.
+	decode_fields: Option<DecodeFields>,
 	/// Plan-time resolved table context. When present, `execute()` skips
 	/// runtime table def + permission lookup, and its enforcement mode says
 	/// whether the scan applies the table permission, computed fields and
@@ -898,6 +897,7 @@ impl BitmapResolve {
 			root,
 			root_dyn,
 			needed_fields,
+			decode_fields: None,
 			resolved: None,
 			overflow_fallback: None,
 			fallback_taken: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -908,6 +908,13 @@ impl BitmapResolve {
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
+		self
+	}
+
+	/// Decode only `fields` of each fetched record; see
+	/// [`DecodeFields`].
+	pub(crate) fn with_decode_fields(mut self, fields: DecodeFields) -> Self {
+		self.decode_fields = Some(fields);
 		self
 	}
 
@@ -961,6 +968,7 @@ impl ExecOperator for BitmapResolve {
 		let root = Arc::clone(&self.root);
 		let resolved = self.resolved.clone();
 		let needed_fields = self.needed_fields.clone();
+		let decode_fields = self.decode_fields.clone();
 		let overflow_fallback = self.overflow_fallback.clone();
 		let fallback_taken = Arc::clone(&self.fallback_taken);
 		let ctx = ctx.clone();
@@ -1005,8 +1013,17 @@ impl ExecOperator for BitmapResolve {
 			} else {
 				build_field_state(&ctx, &table_name, check_perms, needed_fields.as_ref()).await?
 			};
+			let decode_fields = decode_fields_for_execution(
+				&ctx,
+				&table_name,
+				resolved.as_ref(),
+				&select_permission,
+				check_perms,
+				decode_fields.as_ref(),
+			)
+			.await?;
 
-			// Table-level permissions are handled by fetch_and_filter_records_batch.
+			// Table-level permissions are handled by ReadAhead::decode_batch.
 			// The pipeline handles computed fields and field-level permissions.
 			let mut pipeline = ScanPipeline::new(
 				PhysicalPermission::Allow,
@@ -1059,14 +1076,20 @@ impl ExecOperator for BitmapResolve {
 				}
 			};
 
-			// Resolve surviving doc-IDs to record IDs in batches, then fetch
-			// through the standard permission/field pipeline. The first batch
-			// is a small probe and each later one is sized from the batch
-			// before it, so wide records arrive in proportionally fewer rows
-			// per batch from the start.
+			// Resolve surviving doc-IDs to record IDs in chunks and read each
+			// chunk's stored bytes ahead, then decode them in batches of at
+			// most the byte budget through the standard permission/field
+			// pipeline. The first chunk is a small probe and each later one is
+			// sized from the bytes the one before it read.
 			let mut iter = bitmap.into_iter();
 			let batch_bytes = ctx.root().ctx.config.exec.scan_batch_bytes;
-			let mut chunk_len = probe_batch_len(batch_bytes, RESOLVE_PROBE_ROWS);
+			let mut chunk_len = probe_batch_len(batch_bytes, RECORD_PROBE_ROWS);
+			let mut read_ahead = ReadAhead::new(
+				&select_permission,
+				check_perms,
+				decode_fields.as_ref(),
+				batch_bytes,
+			);
 			loop {
 				if ctx.cancellation().is_cancelled() {
 					Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
@@ -1092,34 +1115,17 @@ impl ExecOperator for BitmapResolve {
 				if rids.is_empty() {
 					continue;
 				}
-				let fetched = fetch_and_filter_records_measured(
-					&ctx,
-					&txn,
-					ns.namespace_id,
-					db.database_id,
-					&rids,
-					&select_permission,
-					check_perms,
-					None,
-					CachePolicy::ReadOnly,
-				)
-				.await?;
-				let mut values = fetched.values;
-				pipeline.process_batch(&mut values, &ctx).await?;
-				// Computed fields are materialised by the pipeline and can make
-				// a row far wider than the record it was computed from, so the
-				// batch is sized from whichever was larger, rows the filters
-				// then dropped included.
-				let held_bytes = fetched.fetched_bytes.max(pipeline.materialised_bytes());
+				let (read_bytes, read_rows) =
+					read_ahead.read(&txn, ns.namespace_id, db.database_id, rids, None).await?;
 				chunk_len = next_batch_len(
-					held_bytes,
-					fetched.fetched_rows,
+					read_bytes,
+					read_rows,
 					chunk_len,
 					batch_bytes,
 					RESOLVE_BATCH_SIZE,
 				);
-				if !values.is_empty() {
-					yielder.emit(ValueBatch::new(values)).await;
+				if !drain_read_ahead(&mut read_ahead, &mut pipeline, &mut yielder, &ctx).await? {
+					break;
 				}
 			}
 			Ok(())
@@ -1156,8 +1162,146 @@ mod tests {
 		assert_reduced(&collect(&scan(runtime), &ctx).await);
 	}
 
-	/// Wide records resolve in batches sized to the byte budget after the
-	/// first, and every matching record is still returned exactly once.
+	/// Resolve every `t` record with `n = 1`, decoding only `fields`.
+	async fn resolve_decoding(setup: &str, fields: &[&str]) -> Vec<Value> {
+		let db = TestDb::new(setup).await;
+		let ctx = db.exec_ctx().await;
+		let index_ref = index_ref(&ctx, "t", "n_idx").await;
+		let root = BitmapNode::btree(index_ref, BTreeAccess::Equality(Value::from(1)));
+		let fields = DecodeFields::new(fields.iter().map(|f| f.to_string()));
+		let scan: Arc<dyn ExecOperator> =
+			Arc::new(BitmapResolve::new("t".into(), root, None).with_decode_fields(fields));
+		collect(&scan, &ctx).await
+	}
+
+	/// A resolve given a decode set yields each record's id and the listed
+	/// fields it stores, and none of the fields it does not list.
+	#[tokio::test]
+	async fn a_projected_resolve_decodes_only_the_listed_fields() {
+		let rows = resolve_decoding(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE INDEX n_idx ON t FIELDS n;
+			CREATE t:1 SET n = 1, label = 'a', emb = [0.5, 0.5];
+			CREATE t:2 SET n = 1, emb = [0.5, 0.5];",
+			&["n", "label"],
+		)
+		.await;
+		assert_eq!(rows.len(), 2, "{rows:?}");
+		for row in &rows {
+			assert!(matches!(field(row, "id"), Value::RecordId(_)), "id kept: {row:?}");
+			assert_eq!(field(row, "n"), Value::from(1), "listed field decoded: {row:?}");
+			assert_eq!(field(row, "emb"), Value::None, "unlisted field not decoded: {row:?}");
+		}
+		let labels: HashSet<Value> = rows.iter().map(|r| field(r, "label")).collect();
+		assert_eq!(
+			labels,
+			HashSet::from([Value::from("a"), Value::None]),
+			"absent field stays absent"
+		);
+	}
+
+	/// A projected resolve sizes its batches by the stored bytes it reads, so
+	/// narrow projected rows of wide records still arrive in smaller batches.
+	#[tokio::test]
+	async fn a_projected_resolve_sizes_batches_by_the_stored_bytes() {
+		const ROWS: usize = 2500;
+		let db = TestDb::new(&format!(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE INDEX n_idx ON t FIELDS n;
+			FOR $i IN 0..{ROWS} {{ CREATE t SET n = 1, emb = array::repeat(0.5f, 2048) }};"
+		))
+		.await;
+		let ctx = db.exec_ctx().await;
+		let index_ref = index_ref(&ctx, "t", "n_idx").await;
+		let root = BitmapNode::btree(index_ref, BTreeAccess::Equality(Value::from(1)));
+		let scan: Arc<dyn ExecOperator> = Arc::new(
+			BitmapResolve::new("t".into(), root, None)
+				.with_decode_fields(DecodeFields::new(["n".to_string()])),
+		);
+
+		let mut stream = scan.execute(&ctx).expect("execute should succeed");
+		let mut lens = Vec::new();
+		while let Some(batch) = stream.next().await {
+			let rows = batch.expect("batch should be Ok").into_values();
+			assert!(rows.iter().all(|r| field(r, "emb") == Value::None), "emb not decoded");
+			lens.push(rows.len());
+		}
+		assert_eq!(lens.iter().sum::<usize>(), ROWS, "every record once: {lens:?}");
+		assert_eq!(lens[0], RECORD_PROBE_ROWS, "the first batch is the probe: {lens:?}");
+		assert!(lens[1] < RESOLVE_BATCH_SIZE, "later batches are sized by stored bytes: {lens:?}");
+	}
+
+	/// A computed field may read any stored field, so a table defining one is
+	/// resolved as whole records whatever the decode set.
+	#[tokio::test]
+	async fn a_table_with_a_computed_field_resolves_whole_records() {
+		let rows = resolve_decoding(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE FIELD first ON t COMPUTED emb[0];
+			DEFINE INDEX n_idx ON t FIELDS n;
+			CREATE t:1 SET n = 1, emb = [0.5, 0.5];",
+			&["n"],
+		)
+		.await;
+		assert_eq!(rows.len(), 1, "{rows:?}");
+		assert_eq!(field(&rows[0], "emb"), Value::from(vec![Value::from(0.5f64); 2]), "{rows:?}");
+	}
+
+	/// A resolve planned with the table resolved gates its decode set on that
+	/// table's field state, under either enforcement, so a computed field
+	/// still makes it decode whole records.
+	#[tokio::test]
+	async fn a_resolved_table_with_a_computed_field_resolves_whole_records() {
+		let db = TestDb::new(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE FIELD first ON t COMPUTED emb[0];
+			DEFINE INDEX n_idx ON t FIELDS n;
+			CREATE t:1 SET n = 1, emb = [0.5, 0.5];",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let (planned, runtime) = contexts(&ctx, "t").await;
+		let index_ref = index_ref(&ctx, "t", "n_idx").await;
+		for tc in [runtime, planned] {
+			let root = BitmapNode::btree(index_ref.clone(), BTreeAccess::Equality(Value::from(1)));
+			let scan: Arc<dyn ExecOperator> = Arc::new(
+				BitmapResolve::new("t".into(), root, None)
+					.with_decode_fields(DecodeFields::new(["n".to_string()]))
+					.with_resolved(tc),
+			);
+			let rows = collect(&scan, &ctx).await;
+			assert_eq!(rows.len(), 1, "{rows:?}");
+			assert_eq!(
+				field(&rows[0], "emb"),
+				Value::from(vec![Value::from(0.5f64); 2]),
+				"{rows:?}"
+			);
+		}
+	}
+
+	/// The decoded size of `rows`, and of the widest of them.
+	fn decoded_bytes(rows: &[Value]) -> (usize, usize) {
+		let sizes = rows.iter().map(super::super::common::approx_value_size);
+		(sizes.clone().sum(), sizes.max().unwrap_or(0))
+	}
+
+	/// The batches a resolve of `n_idx` on `n = 1` over table `t` yields.
+	async fn resolve_batches(db: &TestDb) -> Vec<Vec<Value>> {
+		let ctx = db.exec_ctx().await;
+		let index_ref = index_ref(&ctx, "t", "n_idx").await;
+		let root = BitmapNode::btree(index_ref, BTreeAccess::Equality(Value::from(1)));
+		let scan: Arc<dyn ExecOperator> = Arc::new(BitmapResolve::new("t".into(), root, None));
+		let mut stream = scan.execute(&ctx).expect("execute should succeed");
+		let mut batches = Vec::new();
+		while let Some(batch) = stream.next().await {
+			batches.push(batch.expect("batch should be Ok").into_values());
+		}
+		batches
+	}
+
+	/// Wide records resolve in batches of at most the byte budget plus one
+	/// record of decoded values, and every matching record is still returned
+	/// exactly once.
 	#[tokio::test]
 	async fn wide_records_resolve_in_batches_sized_to_the_byte_budget() {
 		const ROWS: usize = 1400;
@@ -1167,34 +1311,52 @@ mod tests {
 			FOR $i IN 0..{ROWS} {{ CREATE t SET n = 1, emb = array::repeat(0.5f, 1024) }};"
 		))
 		.await;
-		let ctx = db.exec_ctx().await;
-		let index_ref = index_ref(&ctx, "t", "n_idx").await;
-		let root = BitmapNode::btree(index_ref, BTreeAccess::Equality(Value::from(1)));
-		let scan: Arc<dyn ExecOperator> = Arc::new(BitmapResolve::new("t".into(), root, None));
-
-		let mut stream = scan.execute(&ctx).expect("execute should succeed");
-		let mut batches = Vec::new();
-		while let Some(batch) = stream.next().await {
-			batches.push(batch.expect("batch should be Ok").into_values());
-		}
+		let batches = resolve_batches(&db).await;
 
 		let ids: HashSet<Value> = batches.iter().flatten().map(|row| field(row, "id")).collect();
 		assert_eq!(ids.len(), ROWS, "every record once");
 		assert_eq!(batches.iter().map(Vec::len).sum::<usize>(), ROWS, "no record twice");
-		assert_eq!(batches[0].len(), RESOLVE_PROBE_ROWS, "the first batch is the probe");
-		let first_bytes = batches[0].iter().map(super::super::common::approx_value_size).sum();
-		let sized = next_batch_len(
-			first_bytes,
-			batches[0].len(),
-			RESOLVE_PROBE_ROWS,
-			crate::exec::config::DEFAULT_SCAN_BATCH_BYTES,
-			RESOLVE_BATCH_SIZE,
-		);
-		assert!(sized < RESOLVE_BATCH_SIZE, "wide rows shrink the batch, got {sized}");
-		let (last, middle) = batches[1..].split_last().expect("more than one batch");
-		assert!(middle.iter().all(|b| b.len() == sized), "later batches take the sized length");
-		assert!(last.len() <= sized, "the final batch holds the remainder");
+		assert!(batches[0].len() <= RECORD_PROBE_ROWS, "the first read is the probe");
+		for batch in &batches {
+			let (bytes, widest) = decoded_bytes(batch);
+			assert!(
+				bytes < crate::exec::config::DEFAULT_SCAN_BATCH_BYTES + widest,
+				"a batch of {} rows holds {bytes} bytes",
+				batch.len()
+			);
+		}
 	}
+
+	/// However many narrow records precede them, wide records decode in
+	/// batches of at most the byte budget plus one record: the read that
+	/// reaches them is sized from the narrow records, but only its stored
+	/// bytes are held until a batch decodes them.
+	#[tokio::test]
+	async fn wide_records_after_a_long_narrow_run_decode_within_the_budget() {
+		// Enough narrow records for the reads to double up to the row cap.
+		const NARROW: usize = 1100;
+		const WIDE: usize = 400;
+		let db = TestDb::new(&format!(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE INDEX n_idx ON t FIELDS n;
+			FOR $i IN 0..{NARROW} {{ CREATE t SET n = 1 }};
+			FOR $i IN 0..{WIDE} {{ CREATE t SET n = 1, emb = array::repeat(0.5f, 1024) }};"
+		))
+		.await;
+		let batches = resolve_batches(&db).await;
+
+		assert_eq!(batches.iter().map(Vec::len).sum::<usize>(), NARROW + WIDE, "every record once");
+		let widest = batches.iter().map(|b| decoded_bytes(b).1).max().unwrap_or(0);
+		for batch in &batches {
+			let (bytes, _) = decoded_bytes(batch);
+			assert!(
+				bytes < crate::exec::config::DEFAULT_SCAN_BATCH_BYTES + widest,
+				"a batch of {} rows holds {bytes} bytes",
+				batch.len()
+			);
+		}
+	}
+
 	/// The resolve takes its byte budget from the execution config, so a
 	/// smaller `scan_batch_bytes` yields proportionally smaller batches.
 	///
@@ -1231,36 +1393,6 @@ mod tests {
 		assert!(lens[1] <= 8, "later batches follow the configured budget: {lens:?}");
 	}
 
-	/// A computed field can make a row far wider than its stored record, so
-	/// the batches are sized from the materialised rows.
-	#[tokio::test]
-	async fn wide_computed_fields_size_the_batches() {
-		const ROWS: usize = 2500;
-		let db = TestDb::new(&format!(
-			"DEFINE TABLE t SCHEMALESS;
-			DEFINE FIELD wide ON t COMPUTED array::repeat(0.5f, 1024);
-			DEFINE INDEX n_idx ON t FIELDS n;
-			FOR $i IN 0..{ROWS} {{ CREATE t SET n = 1 }};"
-		))
-		.await;
-		let ctx = db.exec_ctx().await;
-		let index_ref = index_ref(&ctx, "t", "n_idx").await;
-		let root = BitmapNode::btree(index_ref, BTreeAccess::Equality(Value::from(1)));
-		let scan: Arc<dyn ExecOperator> = Arc::new(BitmapResolve::new("t".into(), root, None));
-
-		let mut stream = scan.execute(&ctx).expect("execute should succeed");
-		let mut lens = Vec::new();
-		while let Some(batch) = stream.next().await {
-			let rows = batch.expect("batch should be Ok").into_values();
-			assert!(rows.iter().all(|r| field(r, "wide") != Value::None), "wide materialised");
-			lens.push(rows.len());
-		}
-		assert_eq!(lens.iter().sum::<usize>(), ROWS, "every record once: {lens:?}");
-		// ~66 KB per materialised row: the default 2 MiB holds about 31.
-		let largest = lens.iter().copied().max().unwrap_or(0);
-		assert!(largest <= 2 * RESOLVE_PROBE_ROWS, "largest batch {largest}: {lens:?}");
-	}
-
 	/// A run of narrow records grows the batch at most twofold per batch, so
 	/// wide records that follow it are not fetched in a full row-capped batch.
 	#[tokio::test]
@@ -1287,7 +1419,7 @@ mod tests {
 		assert_eq!(lens.iter().sum::<usize>(), NARROW + WIDE, "every record once: {lens:?}");
 		// 32 and 64 narrow rows, then at most 128 before the wide rows shrink it.
 		let largest = lens.iter().copied().max().unwrap_or(0);
-		assert!(largest <= 4 * RESOLVE_PROBE_ROWS, "largest batch {largest}: {lens:?}");
+		assert!(largest <= 4 * RECORD_PROBE_ROWS, "largest batch {largest}: {lens:?}");
 	}
 
 	/// Batches are sized from every record a fetch decoded, so wide records a
@@ -1320,5 +1452,35 @@ mod tests {
 		// Sized from the narrow survivors alone, the requests would double up
 		// to the row cap and yield a handful of batches.
 		assert!(batches.len() > 10, "requests stay small: {} batches", batches.len());
+	}
+
+	/// A computed field can make a row far wider than its stored record, so
+	/// the batches are sized from the materialised rows.
+	#[tokio::test]
+	async fn wide_computed_fields_size_the_batches() {
+		const ROWS: usize = 2500;
+		let db = TestDb::new(&format!(
+			"DEFINE TABLE t SCHEMALESS;
+			DEFINE FIELD wide ON t COMPUTED array::repeat(0.5f, 1024);
+			DEFINE INDEX n_idx ON t FIELDS n;
+			FOR $i IN 0..{ROWS} {{ CREATE t SET n = 1 }};"
+		))
+		.await;
+		let ctx = db.exec_ctx().await;
+		let index_ref = index_ref(&ctx, "t", "n_idx").await;
+		let root = BitmapNode::btree(index_ref, BTreeAccess::Equality(Value::from(1)));
+		let scan: Arc<dyn ExecOperator> = Arc::new(BitmapResolve::new("t".into(), root, None));
+
+		let mut stream = scan.execute(&ctx).expect("execute should succeed");
+		let mut lens = Vec::new();
+		while let Some(batch) = stream.next().await {
+			let rows = batch.expect("batch should be Ok").into_values();
+			assert!(rows.iter().all(|r| field(r, "wide") != Value::None), "wide materialised");
+			lens.push(rows.len());
+		}
+		assert_eq!(lens.iter().sum::<usize>(), ROWS, "every record once: {lens:?}");
+		// ~66 KB per materialised row: the default 2 MiB holds about 31.
+		let largest = lens.iter().copied().max().unwrap_or(0);
+		assert!(largest <= 2 * RECORD_PROBE_ROWS, "largest batch {largest}: {lens:?}");
 	}
 }

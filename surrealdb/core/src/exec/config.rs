@@ -58,7 +58,7 @@ pub(crate) struct ExecConfig {
 	/// linearly. (default: 1000)
 	pub scan_batch_size: usize,
 	/// Approximate decoded size, in bytes, of a batch from a scan that sizes
-	/// its batches by bytes as well as rows (bitmap resolves). Every operator
+	/// its batches by bytes as well as rows (bitmap resolves, index scans). Every operator
 	/// above a scan buffers whole batches, and the allocator keeps each worker
 	/// thread's freed batch memory, so a query's resident memory tracks this
 	/// budget times the threads that handle its batches. Lower it to bound

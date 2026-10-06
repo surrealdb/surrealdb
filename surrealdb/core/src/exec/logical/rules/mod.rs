@@ -969,7 +969,7 @@ pub(super) fn is_row_free(expr: &LogicalExpr, registry: &FunctionRegistry) -> bo
 /// [`reads::reads_row_opaquely`] — through a closure, whose body runs against
 /// whatever row it is later invoked with, or through a step applied to the
 /// row's own `id`, which dereferences the record and so reads it whole.
-pub(super) fn named_reads(
+pub(crate) fn named_reads(
 	expr: &LogicalExpr,
 	registry: &FunctionRegistry,
 ) -> Option<std::collections::HashSet<String>> {

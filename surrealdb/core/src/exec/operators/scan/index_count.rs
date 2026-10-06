@@ -33,6 +33,7 @@ use super::count::CountOutput;
 use crate::catalog::{DatabaseId, Error, Index, NamespaceId};
 use crate::err::EngineError;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
+use crate::exec::index::iterator::btree::INDEX_BATCH_SIZE;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, should_check_perms,
 	table_select_permission_physical_runtime, validate_record_user_access,
@@ -178,19 +179,10 @@ impl ExecOperator for IndexCountScan {
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
 
-			// Evaluate VERSION expression to a timestamp
-			let version: Option<u64> = match &version {
-				Some(expr) => {
-					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-					let v = expr.evaluate(eval_ctx).await?;
-					Some(
-						v.cast_to::<crate::val::Datetime>()
-							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp(txn.timestamp_impl().as_ref())?,
-					)
-				}
-				None => ctx.version_stamp(),
-			};
+			// The stamp the enclosing `VersionScope` set, rather than the
+			// clause evaluated again; see [`super::common::resolve_version_stamp`].
+			let version: Option<u64> =
+				super::common::resolve_version_stamp(&ctx, version.as_ref()).await?;
 
 			// Evaluate source expression to get the table name.
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
@@ -469,148 +461,31 @@ async fn count_btree_index_keys(
 	index_ref: &IndexRef,
 	access: &BTreeAccess,
 ) -> Result<usize, ControlFlow> {
-	use crate::exec::index::iterator::btree::{
-		CompoundEqualIterator, CompoundRangeIterator, IndexEqualIterator, IndexRangeIterator,
-		UniqueEqualIterator, UniqueRangeIterator,
-	};
+	use crate::exec::index::iterator::btree::BTreeIterator;
 	use crate::kvs::Direction;
 
 	let ix = index_ref.definition();
-	let is_unique = index_ref.is_unique();
-	let mut count = 0usize;
-
-	match (access, is_unique) {
-		(BTreeAccess::Equality(value), true) => {
-			let mut iter = UniqueEqualIterator::new(ns_id, db_id, ix, value)
-				.context("Failed to create unique equal iterator")?;
-			loop {
-				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
-				}
-				let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
-				if rids.is_empty() {
-					break;
-				}
-				count += rids.len();
-			}
-		}
-		(BTreeAccess::Equality(value), false) => {
-			// Non-unique equality: iterate all matching entries.
-			let mut iter = IndexEqualIterator::new(ns_id, db_id, ix, value)
-				.context("Failed to create index equal iterator")?;
-			loop {
-				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
-				}
-				let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
-				if rids.is_empty() {
-					break;
-				}
-				count += rids.len();
-			}
-		}
-		(
-			BTreeAccess::Range {
-				range,
-			},
-			true,
-		) => {
-			let mut iter = UniqueRangeIterator::new(
-				ns_id,
-				db_id,
-				ix,
-				range.start.as_ref(),
-				range.end.as_ref(),
-				Direction::Forward,
-			)
-			.context("Failed to create unique range iterator")?;
-			loop {
-				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
-				}
-				let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
-				if rids.is_empty() {
-					break;
-				}
-				count += rids.len();
-			}
-		}
-		(
-			BTreeAccess::Range {
-				range,
-			},
-			false,
-		) => {
-			let mut iter = IndexRangeIterator::new(
-				ns_id,
-				db_id,
-				ix,
-				range.start.as_ref(),
-				range.end.as_ref(),
-				Direction::Forward,
-			)
-			.context("Failed to create index range iterator")?;
-			loop {
-				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
-				}
-				let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
-				if rids.is_empty() {
-					break;
-				}
-				count += rids.len();
-			}
-		}
-		(
-			BTreeAccess::Compound {
-				prefix,
-				range: Some(range),
-			},
-			_,
-		) => {
-			let mut iter =
-				CompoundRangeIterator::new(ns_id, db_id, ix, prefix, range, Direction::Forward)
-					.context("Failed to create compound range iterator")?;
-			loop {
-				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
-				}
-				let rids = iter.next_batch(txn, 1000).await.context("Failed to iterate index")?;
-				if rids.is_empty() {
-					break;
-				}
-				count += rids.len();
-			}
-		}
-		(
-			BTreeAccess::Compound {
-				prefix,
-				range: None,
-			},
-			_,
-		) => {
-			let mut iter =
-				CompoundEqualIterator::new(ns_id, db_id, ix, prefix, None, Direction::Forward)
-					.context("Failed to create compound equal iterator")?;
-			loop {
-				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
-				}
-				let rids = iter.next_batch(txn, 1000).await.context("Failed to iterate index")?;
-				if rids.is_empty() {
-					break;
-				}
-				count += rids.len();
-			}
-		}
+	let Some(mut iter) =
+		BTreeIterator::new(ns_id, db_id, ix, index_ref.is_unique(), access, Direction::Forward)
+			.context("Failed to create index iterator")?
+	else {
 		// FullText and Knn are not supported for counting.
-		_ => {
-			return Err(ControlFlow::Err(anyhow::anyhow!(
-				"Unsupported BTreeAccess type for index key counting"
-			)));
+		return Err(ControlFlow::Err(anyhow::anyhow!(
+			"Unsupported BTreeAccess type for index key counting"
+		)));
+	};
+	let mut count = 0usize;
+	loop {
+		if ctx.cancellation().is_cancelled() {
+			return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 		}
+		let rids =
+			iter.next_batch(txn, INDEX_BATCH_SIZE).await.context("Failed to iterate index")?;
+		if rids.is_empty() {
+			break;
+		}
+		count += rids.len();
 	}
-
 	Ok(count)
 }
 
