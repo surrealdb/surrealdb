@@ -860,7 +860,9 @@ fn apply_binary(op: &BinaryOperator, left: &Value, right: &Value) -> Option<Valu
 
 #[cfg(test)]
 mod tests {
+	use std::collections::hash_map::DefaultHasher;
 	use std::collections::{BTreeMap, HashSet};
+	use std::hash::BuildHasherDefault;
 	use std::sync::Arc;
 
 	use memchr::memmem;
@@ -1493,13 +1495,26 @@ mod tests {
 	fn streaming_array_overlap_all_collapses_equal_literal_spellings() {
 		let float = Value::Number(Number::Float(0.1));
 		let decimal = Value::Number(Number::Decimal("0.1".parse().unwrap()));
-		let set = Arc::new(HashSet::from([float.clone(), decimal.clone()]));
-		// Precondition: the `HashSet` really did keep both spellings.
+		// Precondition: the set really holds both spellings. Whether a set
+		// keeps two values that are equal but hash apart depends on whether
+		// their hashes meet during the probe, which under `RandomState` is a
+		// per-process coin flip, so the set is built under a fixed seed.
+		let mut set: HashSet<Value, BuildHasherDefault<DefaultHasher>> = HashSet::default();
+		set.insert(float.clone());
+		set.insert(decimal.clone());
 		assert_eq!(set.len(), 2);
 
-		let tables = overlap_streaming_from_set(set.as_ref());
+		let tables = overlap_streaming_from_set(&set);
 		assert_eq!(tables.literal_count, 1, "both spellings share one bit");
-		assert_eq!(tables.literal_to_idx.len(), 2, "both spellings stay addressable");
+		// The value map may keep one entry or two for the pair, by the same
+		// coin flip; either way a lookup by each spelling finds the one bit.
+		for spelling in [&float, &decimal] {
+			assert_eq!(
+				tables.literal_to_idx.get(spelling),
+				Some(&0),
+				"{spelling:?} stays addressable"
+			);
+		}
 
 		for element in [&float, &decimal] {
 			let eval: Arc<dyn super::StreamingLeafEvaluator> = Arc::new(ArrayOverlapsLiteralSet {

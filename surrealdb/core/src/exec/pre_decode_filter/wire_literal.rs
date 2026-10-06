@@ -13,6 +13,7 @@
 //! always has a decoded literal to compare against.
 
 use std::collections::HashSet;
+use std::hash::BuildHasher;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -303,7 +304,7 @@ pub(crate) struct LiteralSet {
 }
 
 impl LiteralSet {
-	pub(crate) fn from_set(set: &HashSet<Value>) -> Self {
+	pub(crate) fn from_set<S: BuildHasher>(set: &HashSet<Value, S>) -> Self {
 		let mut out = LiteralSet::default();
 		for v in set {
 			out.hash_eq_mismatch |= !v.hash_agrees_with_eq();
