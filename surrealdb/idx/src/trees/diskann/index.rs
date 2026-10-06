@@ -27,8 +27,10 @@ use anyhow::{Result, bail};
 use common::EngineError;
 use diskann::graph::DiskANNIndex as RawDiskAnnIndex;
 use diskann::graph::config::{Builder, MaxDegree, PruneKind};
+use diskann::graph::glue::{HybridPredicate, Predicate, PredicateMut, SearchAccessor as _};
 use diskann::graph::search::Knn;
 use diskann::graph::search_output_buffer::IdDistance;
+use diskann::neighbor::{Neighbor, NeighborPriorityQueue};
 use diskann::provider::{Delete, Guard, SetElement};
 use diskann_vector::Half;
 use diskann_vector::distance::Metric;
@@ -41,7 +43,7 @@ use tokio::sync::RwLock;
 
 use crate::catalog::{DiskAnnParams, Distance, TableId, VectorType};
 use crate::docids::{LegacyVectorDocIds, TableDocIds};
-use crate::env::IndexEnv;
+use crate::env::{IndexEnv, expect_not_done};
 use crate::key::schema::{
 	DiskannRecordPendingKey, DiskannRecordPendingShardKey, DiskannRecordPendingShardShardPrefix,
 };
@@ -52,14 +54,15 @@ use crate::trees::diskann::cache::{Continuity, DiskAnnCache};
 use crate::trees::diskann::docs::{DiskAnnDocs, DiskAnnVecDocs};
 use crate::trees::diskann::filter::DiskAnnTruthyDocumentFilter;
 use crate::trees::diskann::provider::{
-	DiskAnnProvider, DiskAnnProviderContext, DiskAnnStrategy, DiskAnnVectorElement,
+	DiskAnnProvider, DiskAnnProviderContext, DiskAnnSearchAccessor, DiskAnnStrategy,
+	DiskAnnVectorElement,
 };
 use crate::trees::diskann::{
 	DISKANN_PENDING_STATE_SHARDS, DiskAnnPendingState, DiskAnnPendingStateKind,
 	DiskAnnRecordPendingUpdate, ElementId,
 };
 use crate::trees::hnsw::VectorId;
-use crate::trees::knn::KnnResultBuilder;
+use crate::trees::knn::{Ids64, KnnResultBuilder};
 use crate::trees::pending::{
 	PendingBacklogReport, PendingScan, PendingScanStats, take_compacted_record_id,
 	take_pending_record_id,
@@ -372,6 +375,43 @@ impl<'a> DiskAnnContext<'a> {
 	}
 }
 
+/// Decides which graph elements an inline-filtered search
+/// ([`DiskAnnGraph::search_filtered`]) admits as results.
+pub(super) trait ElementClassifier {
+	/// Returns one verdict per candidate, in input order: `true` admits the
+	/// element as a result. Each candidate carries its raw DiskANN distance.
+	/// The search navigates through every candidate whatever its verdict.
+	async fn classify(&mut self, candidates: &[DiskAnnSearchResult]) -> Result<Vec<bool>>;
+}
+
+/// Output of one inline-filtered walk ([`DiskAnnGraph::search_filtered`]).
+struct FilteredWalk {
+	/// Admitted elements, distance-ascending, with raw DiskANN distances.
+	results: Vec<DiskAnnSearchResult>,
+	/// Whether the walk reached every element reachable from the start points,
+	/// so that a wider search list cannot surface anything new.
+	exhausted: bool,
+}
+
+/// The visited set of an inline-filtered search, as the predicate
+/// [`SearchAccessor::expand_beam`] admits neighbours through: an element is
+/// admitted once, the first time it is offered.
+struct NotVisited<'a>(&'a mut HashSet<ElementId>);
+
+impl Predicate<ElementId> for NotVisited<'_> {
+	fn eval(&self, item: &ElementId) -> bool {
+		!self.0.contains(item)
+	}
+}
+
+impl PredicateMut<ElementId> for NotVisited<'_> {
+	fn eval_mut(&mut self, item: &ElementId) -> bool {
+		self.0.insert(*item)
+	}
+}
+
+impl HybridPredicate<ElementId> for NotVisited<'_> {}
+
 /// Thin wrapper around the upstream DiskANN graph using SurrealDB's provider implementation.
 pub(super) struct DiskAnnGraph {
 	index: RawDiskAnnIndex<DiskAnnProvider>,
@@ -594,6 +634,122 @@ impl DiskAnnGraph {
 			.map(|(id, distance)| (id, distance as f64))
 			.collect())
 	}
+
+	/// Inline-filtered graph search: the greedy walk of [`Self::search`], with
+	/// every element it computes a distance for — start points and expanded
+	/// neighbours alike — offered to `classifier`.
+	///
+	/// Navigation is unfiltered: the search list holds the `l` nearest elements
+	/// visited, admitted or not, so the walk crosses regions the filter rejects
+	/// and terminates exactly as the unfiltered search does, once every element
+	/// in that list has been expanded. The results are every admitted element it
+	/// reached, distance-ascending, so a selective filter finds admitted elements
+	/// that rank far beyond the `l` nearest overall. The walk's length is set by
+	/// `l`, not by how many elements it admits: a pass can admit fewer than `k`
+	/// where a query sits in a dense region the filter rejects, and only a wider
+	/// list walks further. The caller widens `l` and walks again for that case
+	/// (see [`DiskAnnIndex::search_graph`]); [`FilteredWalk::exhausted`] says when
+	/// widening cannot help. The classifier runs in this future, not in the
+	/// upstream search's `Send` futures, so it may hold the non-`Send` reblessive
+	/// stack a SurrealQL condition is evaluated on.
+	async fn search_filtered<C: ElementClassifier>(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		query: &DiskAnnQuery,
+		k: usize,
+		l: usize,
+		classifier: &mut C,
+	) -> Result<FilteredWalk> {
+		match query {
+			DiskAnnQuery::F32(query) => {
+				self.search_filtered_typed(ctx, query, k, l, classifier).await
+			}
+			DiskAnnQuery::F16(query) => {
+				self.search_filtered_typed(ctx, query, k, l, classifier).await
+			}
+			DiskAnnQuery::I8(query) => {
+				self.search_filtered_typed(ctx, query, k, l, classifier).await
+			}
+			DiskAnnQuery::U8(query) => {
+				self.search_filtered_typed(ctx, query, k, l, classifier).await
+			}
+		}
+	}
+
+	/// Typed body of [`Self::search_filtered`].
+	async fn search_filtered_typed<T, C>(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		query: &[T],
+		k: usize,
+		l: usize,
+		classifier: &mut C,
+	) -> Result<FilteredWalk>
+	where
+		T: DiskAnnVectorElement,
+		C: ElementClassifier,
+	{
+		let provider = self.index.provider();
+		if provider.valid_starting_points(&ctx.provider_context).await?.is_empty() {
+			return Ok(FilteredWalk {
+				results: Vec::new(),
+				exhausted: true,
+			});
+		}
+		let limit = l.max(k).max(1);
+		let beam_width = Knn::new_default(limit)?.beam_width().get();
+		let mut accessor = DiskAnnSearchAccessor::<T>::new(provider, &ctx.provider_context, query)?;
+		let mut best = NeighborPriorityQueue::new(limit);
+		let mut visited: HashSet<ElementId> = HashSet::new();
+		let mut matched: Vec<DiskAnnSearchResult> = Vec::new();
+		let mut batch: Vec<(ElementId, f32)> = Vec::new();
+		let mut beam: Vec<ElementId> = Vec::with_capacity(beam_width);
+		let mut hops = 0usize;
+		accessor.start_point_distances(|id, distance| batch.push((id, distance))).await?;
+		for &(id, _) in &batch {
+			visited.insert(id);
+		}
+		loop {
+			// Every visited element navigates; the admitted ones are results.
+			let candidates: Vec<DiskAnnSearchResult> =
+				batch.iter().map(|&(id, distance)| (id, f64::from(distance))).collect();
+			for &(id, distance) in &batch {
+				best.insert(Neighbor::new(id, distance));
+			}
+			if !candidates.is_empty() {
+				let verdicts = classifier.classify(&candidates).await?;
+				matched.extend(
+					candidates.into_iter().zip(verdicts).filter(|(_, ok)| *ok).map(|(c, _)| c),
+				);
+			}
+			hops += 1;
+			expect_not_done(ctx.env, Some(hops)).await?;
+			beam.clear();
+			while beam.len() < beam_width {
+				let Some(closest) = best.closest_notvisited() else {
+					break;
+				};
+				beam.push(*closest.id());
+			}
+			if beam.is_empty() {
+				break;
+			}
+			batch.clear();
+			accessor
+				.expand_beam(beam.iter().copied(), NotVisited(&mut visited), |id, distance| {
+					batch.push((id, distance))
+				})
+				.await?;
+		}
+		matched.sort_by(|a, b| a.1.total_cmp(&b.1));
+		Ok(FilteredWalk {
+			results: matched,
+			// A walk that visited fewer elements than its list holds never filled
+			// the list, so it reached every element it could: a wider list walks
+			// no further.
+			exhausted: visited.len() < limit,
+		})
+	}
 }
 
 /// Cancels `tx` and discards any error from a tx that is already closed.
@@ -674,6 +830,131 @@ struct DiskAnnGraphSearch<'a, 'b> {
 	filter: &'a mut Option<DiskAnnTruthyDocumentFilter<'b>>,
 	/// Shared result builder combining pending and graph candidates.
 	builder: &'a mut KnnResultBuilder,
+}
+
+/// Classifies the elements an inline-filtered graph search visits by the
+/// documents they hold: an element is admitted when one of its documents passes
+/// every admission gate the result builder would apply — no pending update
+/// supersedes it, the allow-list holds it, and the truthy filter (the table's
+/// SELECT permission, then any residual condition) accepts it.
+///
+/// Elements that cannot place in the top k are rejected without evaluating
+/// the filter: those farther than the k nearest admitted so far, or than
+/// the result builder already holds from the pending scan.
+struct GraphCandidateClassifier<'s, 'a, 'b> {
+	/// Index the search runs on, for document lookup and distance conversion.
+	index: &'s DiskAnnIndex,
+	/// Context of the search's transaction.
+	ctx: &'s DiskAnnContext<'a>,
+	/// Stack the filter's condition is evaluated on.
+	stk: &'s mut Stk,
+	/// The truthy filter, whose verdict cache the result admission reuses.
+	filter: &'s mut DiskAnnTruthyDocumentFilter<'b>,
+	/// Document IDs whose pending update supersedes their graph entry.
+	pending_docs: Option<&'s RoaringTreemap>,
+	/// Doc-IDs the index-covered WHERE conjuncts admit.
+	allow_list: Option<&'s RoaringTreemap>,
+	/// The result builder, holding the pending scan's candidates.
+	builder: &'s KnnResultBuilder,
+	/// Result limit.
+	k: usize,
+	/// Public distances of the k nearest elements admitted so far.
+	admitted: Vec<f64>,
+	/// Document sets of the admitted elements, resolved during classification
+	/// and handed to the result admission so it resolves none again.
+	docs: HashMap<ElementId, Ids64>,
+}
+
+impl GraphCandidateClassifier<'_, '_, '_> {
+	/// Whether an element at public distance `distance` can still place in the
+	/// top k.
+	fn can_place(&self, distance: f64) -> bool {
+		if !self.builder.check_add(distance) {
+			return false;
+		}
+		self.admitted.len() < self.k
+			|| self.admitted.iter().copied().fold(f64::NEG_INFINITY, f64::max) >= distance
+	}
+
+	/// Records an admission at public distance `distance`, keeping the k nearest.
+	fn record(&mut self, distance: f64) {
+		if self.admitted.len() < self.k {
+			self.admitted.push(distance);
+		} else if let Some((pos, _)) = self
+			.admitted
+			.iter()
+			.copied()
+			.enumerate()
+			.max_by(|a, b| a.1.total_cmp(&b.1))
+			.filter(|(_, max)| distance < *max)
+		{
+			self.admitted[pos] = distance;
+		}
+	}
+
+	/// Whether a document passes the gates that need no record.
+	fn doc_eligible(&self, doc_id: u64) -> bool {
+		!self.pending_docs.is_some_and(|pending| pending.contains(doc_id))
+			&& self.allow_list.is_none_or(|allow| allow.contains(doc_id))
+	}
+}
+
+impl ElementClassifier for GraphCandidateClassifier<'_, '_, '_> {
+	async fn classify(&mut self, candidates: &[DiskAnnSearchResult]) -> Result<Vec<bool>> {
+		let mut verdicts = vec![false; candidates.len()];
+		// Public distances, ascending, so the top-k bound tightens as elements are
+		// admitted.
+		let mut order: Vec<(usize, ElementId, f64)> = candidates
+			.iter()
+			.enumerate()
+			.map(|(pos, &(id, distance))| (pos, id, self.index.graph_distance(distance)))
+			.filter(|&(_, _, distance)| self.can_place(distance))
+			.collect();
+		if order.is_empty() {
+			return Ok(verdicts);
+		}
+		order.sort_by(|a, b| a.2.total_cmp(&b.2));
+		let lookups: Vec<(ElementId, f64)> =
+			order.iter().map(|&(_, id, distance)| (id, distance)).collect();
+		let docs = self
+			.index
+			.vec_docs
+			.get_docs_by_element_batch(&self.ctx.tx, &self.ctx.provider_context.view, &lookups)
+			.await?;
+		// One multi-get for every record this batch may evaluate.
+		let prefetch: Vec<VectorId> = docs
+			.iter()
+			.filter_map(|(_, _, docs)| docs.as_ref())
+			.flat_map(|docs| docs.iter())
+			.filter(|&doc_id| self.doc_eligible(doc_id))
+			.map(VectorId::DocId)
+			.collect();
+		self.filter.prefetch_records(self.ctx, &prefetch).await?;
+		for (&(pos, id, distance), (_, _, docs)) in order.iter().zip(&docs) {
+			if !self.can_place(distance) {
+				continue;
+			}
+			let Some(docs) = docs else {
+				continue;
+			};
+			for doc_id in docs.iter() {
+				if !self.doc_eligible(doc_id) {
+					continue;
+				}
+				if self
+					.filter
+					.check_vector_id_truthy(self.ctx, self.stk, VectorId::DocId(doc_id))
+					.await?
+				{
+					verdicts[pos] = true;
+					self.record(distance);
+					self.docs.insert(id, docs.clone());
+					break;
+				}
+			}
+		}
+		Ok(verdicts)
+	}
 }
 
 /// Which record-keyed pending layout a scanned range belongs to.
@@ -1601,6 +1882,7 @@ impl DiskAnnIndex {
 				f.cond,
 				f.select_gate,
 				f.metrics,
+				f.version,
 			)
 		});
 		let vector = Vector::try_from_vector(self.vector_type, pt)?;
@@ -1691,26 +1973,69 @@ impl DiskAnnIndex {
 		stk: &mut Stk,
 		state: DiskAnnGraphSearch<'_, '_>,
 	) -> Result<()> {
-		// #548: with an allow-list, this is a *gated post-filter*, not filtered
-		// traversal — `graph.search` walks unaware of the bitmap and returns the
-		// top-`l` candidates overall, so a selective allow-list can leave fewer
-		// than k admissible docs in that list even when the graph holds plenty
-		// (HNSW, by contrast, gates admission during traversal and keeps walking
-		// until `ef` members are found). Compensate by over-querying: retry with
-		// a doubled search list until k allow-list members have been admitted,
-		// the graph is exhausted, the builder's distance gate closes (every
-		// remaining candidate is farther than the k already held), or the retry
-		// ceiling is reached. `admitted` guards retries against re-adding docs
-		// the builder already holds. The pure-residual path (no allow-list)
-		// keeps its pre-existing single-pass semantics.
+		// With a truthy filter (a SELECT permission or a residual condition) the
+		// walk is filtered: `graph.search_filtered` offers every element it reaches
+		// to the filter, together with the allow-list and pending gates, and
+		// returns the admitted ones, so a selective filter finds admitted documents
+		// that rank far beyond the `l` nearest overall. The walk's length is still
+		// set by `l`, so where it admits fewer than k a wider list walks further.
+		//
+		// With an allow-list alone this is a *gated post-filter*: `graph.search`
+		// walks unaware of the bitmap and returns the top-`l` candidates overall,
+		// so a selective allow-list can leave fewer than k admissible docs in that
+		// list even when the graph holds plenty.
+		//
+		// Either way, over-query: retry with a doubled search list until k docs
+		// have been admitted, the graph is exhausted, the builder's distance gate
+		// closes (every remaining candidate is farther than the k already held), or
+		// the retry ceiling is reached. `admitted` guards retries against
+		// re-adding docs the builder already holds; the filter's verdict cache
+		// spares a retry re-evaluating the elements an earlier pass reached.
 		let mut l = state.search.l;
 		let retry_ceiling = l.saturating_mul(ALLOWLIST_OVERQUERY_CEILING_FACTOR);
 		let mut admitted: HashSet<u64> = HashSet::default();
+		let over_query = state.filter.is_some() || state.allow_list.is_some();
 		loop {
-			let results = state.graph.search(ctx, &state.search.query, state.search.k, l).await?;
-			// Fewer results than requested means the traversal ran dry: a wider
-			// list cannot surface anything new.
-			let graph_exhausted = results.len() < l;
+			// A truthy filter (a SELECT permission or a residual condition) is
+			// applied inside the walk, which returns only admitted elements; the
+			// pass below then admits their documents from the filter's verdict
+			// cache. Without one, the walk is unfiltered and the pass below is the
+			// only gate.
+			let (results, graph_exhausted, resolved) = match state.filter.as_mut() {
+				Some(filter) => {
+					let mut classifier = GraphCandidateClassifier {
+						index: self,
+						ctx,
+						stk: &mut *stk,
+						filter,
+						pending_docs: state.pending_docs.as_ref(),
+						allow_list: state.allow_list,
+						builder: state.builder,
+						k: state.search.k,
+						admitted: Vec::new(),
+						docs: HashMap::default(),
+					};
+					let walk = state
+						.graph
+						.search_filtered(
+							ctx,
+							&state.search.query,
+							state.search.k,
+							l,
+							&mut classifier,
+						)
+						.await?;
+					(walk.results, walk.exhausted, Some(classifier.docs))
+				}
+				None => {
+					let results =
+						state.graph.search(ctx, &state.search.query, state.search.k, l).await?;
+					// Fewer results than requested means the traversal ran dry: a
+					// wider list cannot surface anything new.
+					let exhausted = results.len() < l;
+					(results, exhausted, None)
+				}
+			};
 			let mut gate_closed = false;
 			// Keep the distances returned by graph search instead of re-reading each vector only to
 			// recompute the same score. The remaining vector reads are only needed to resolve
@@ -1725,10 +2050,23 @@ impl DiskAnnIndex {
 				// pending-update suppression and optional truthy filtering. Warm doc-set cache
 				// hits avoid re-reading the graph vector; misses fetch only the missing vectors
 				// before falling back to Dq/Dh mappings.
-				let mut docs = self
-					.vec_docs
-					.get_docs_by_element_batch(&ctx.tx, &ctx.provider_context.view, &candidates)
-					.await?;
+				let mut docs = match resolved {
+					// The filtered walk resolved the document set of every element
+					// it admitted.
+					Some(mut resolved) => candidates
+						.into_iter()
+						.map(|(id, distance)| (id, distance, resolved.remove(&id)))
+						.collect(),
+					None => {
+						self.vec_docs
+							.get_docs_by_element_batch(
+								&ctx.tx,
+								&ctx.provider_context.view,
+								&candidates,
+							)
+							.await?
+					}
+				};
 				// Candidates come back distance-ascending from the graph search; sort
 				// defensively (NaN-safe via `total_cmp`, a no-op when already ordered) so
 				// the `break` on a closed `check_add` gate below stays sound even if the
@@ -1821,7 +2159,7 @@ impl DiskAnnIndex {
 							{
 								continue;
 							}
-							if state.allow_list.is_some() {
+							if over_query {
 								admitted.insert(doc_id);
 							}
 							if let Some(evicted_id) =
@@ -1838,9 +2176,9 @@ impl DiskAnnIndex {
 						.min(*surrealdb_cnf::DISKANN_FILTER_PREFETCH_MAX_CHUNK);
 				}
 			}
-			// Over-query only applies to allow-list-gated searches, and stops as
-			// soon as retrying cannot improve the result set.
-			if state.allow_list.is_none()
+			// Over-query only applies to filtered or allow-list-gated searches, and
+			// stops as soon as retrying cannot improve the result set.
+			if !over_query
 				|| admitted.len() >= state.search.k
 				|| gate_closed
 				|| graph_exhausted

@@ -350,7 +350,7 @@ test("FTS @@ over an owner-scoped table filters matches to the signed-in record 
 	});
 }, 30000);
 
-test("HNSW <|K|> KNN filters the K nearest to the rows the record user may SELECT", async () => {
+test("HNSW <|K|> KNN returns the K nearest rows the record user may SELECT", async () => {
 	await withServer(async (server) => {
 		const { db, namespace, database } = await rootClient(server);
 		await db.query(
@@ -382,22 +382,19 @@ test("HNSW <|K|> KNN filters the K nearest to the rows the record user may SELEC
 			.json()) as [string[]];
 		expect(rootRows.map(String)).toEqual(["pt:1", "pt:2"]);
 
-		// The KNN operator selects the K nearest candidates and THEN applies the row
-		// permission — it does not backfill to K after filtering. So alice's K=2
-		// search picks {pt:1, pt:2} and drops bob's closer pt:1, leaving a single
-		// row. Critically pt:1 (a closer neighbour alice may not SELECT) never
-		// leaks, and pt:3 is not pulled in to refill the K slot.
+		// The row permission gates every candidate inside the ANN search, so a
+		// row alice may not SELECT never takes one of the K slots: her K=2 search
+		// returns her two nearest points. Bob's closer pt:1 never leaks.
 		const [aliceK2] = (await alice
 			.query("SELECT VALUE id FROM pt WHERE embedding <|2,100|> [0.0, 0.0, 0.0] ORDER BY id")
 			.json()) as [string[]];
-		expect(aliceK2.map(String)).toEqual(["pt:2"]);
+		expect(aliceK2.map(String)).toEqual(["pt:2", "pt:3"]);
 
-		// Widening K to 3 selects {pt:1, pt:2, pt:3}; filtering bob's pt:1 leaves
-		// alice's two nearest owned points.
+		// Widening K to 3 returns all three of alice's points.
 		const [aliceK3] = (await alice
 			.query("SELECT VALUE id FROM pt WHERE embedding <|3,100|> [0.0, 0.0, 0.0] ORDER BY id")
 			.json()) as [string[]];
-		expect(aliceK3.map(String)).toEqual(["pt:2", "pt:3"]);
+		expect(aliceK3.map(String)).toEqual(["pt:2", "pt:3", "pt:4"]);
 
 		await alice.close();
 		await bob.close();

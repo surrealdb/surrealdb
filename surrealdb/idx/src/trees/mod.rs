@@ -41,4 +41,9 @@ pub struct KnnCondFilter<'a> {
 	/// Counter for the candidates the filter fetches and evaluates
 	/// in-traversal. `None` when the driving executor reports no metrics.
 	pub metrics: Option<Arc<dyn CandidateFetchCounter>>,
+	/// The version stamp the query reads at (`VERSION`), or `None` for the
+	/// transaction's current state. Every candidate record is read at this
+	/// version, so admission sees the same revision as the rows the search
+	/// returns.
+	pub version: Option<u64>,
 }

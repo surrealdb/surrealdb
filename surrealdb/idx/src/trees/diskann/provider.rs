@@ -783,7 +783,7 @@ impl<'a, T> DiskAnnSearchAccessor<'a, T>
 where
 	T: DiskAnnVectorElement,
 {
-	fn new(
+	pub(super) fn new(
 		provider: &'a DiskAnnProvider,
 		context: &'a DiskAnnProviderContext,
 		query: &[T],

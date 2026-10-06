@@ -228,3 +228,201 @@ async fn test_diskann_filtered_knn_skips_missing_record() -> Result<()> {
 	);
 	Ok(())
 }
+
+/// A filtered KNN at a `VERSION` reads each visited candidate's record once.
+/// Versioned reads bypass the transaction record cache, so the records the
+/// windowed prefetch reads must be the ones the filter evaluates; a
+/// second, per-candidate read would double the record keys the query reads.
+/// The same query unversioned reads each record once through the cache. The
+/// versioned run additionally re-reads its K results when it materialises
+/// them and reads its catalog at the version, so it may exceed the
+/// unversioned count by at most 2K keys — far below the hundreds a second
+/// read of every visited candidate adds.
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test(flavor = "multi_thread")]
+async fn diskann_versioned_filtered_knn_reads_each_candidate_once() -> Result<()> {
+	let dir = temp_dir::TempDir::new()?;
+	let path = format!("surrealkv://{}?versioned=true&retention=1h", dir.path().to_string_lossy());
+	// Compaction happens only where this test calls it.
+	let ds = Datastore::builder().without_maintenance_tasks().build_with_path(&path).await?;
+	{
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.ensure_ns_db(None, "test", "test").await?;
+		tx.commit().await?;
+	}
+	let session = Session::owner()
+		.with_ns("test")
+		.with_db("test")
+		.new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
+
+	let mut setup = String::from(
+		"DEFINE INDEX emb ON pts FIELDS vec DISKANN DIMENSION 8 DIST EUCLIDEAN TYPE F32;\n",
+	);
+	for i in 0..500u32 {
+		let mut v = String::new();
+		for j in 0..8u32 {
+			if j > 0 {
+				v.push_str(", ");
+			}
+			let f = ((i.wrapping_mul(7).wrapping_add(j.wrapping_mul(131))) % 1000) as f32 / 1000.0;
+			v.push_str(&format!("{f}f"));
+		}
+		setup.push_str(&format!("CREATE pts:{i} SET vec = [{v}], category = {};\n", i % 20));
+	}
+	for response in ds.execute(&setup, &session, None).await? {
+		response.result?;
+	}
+	Datastore::index_compaction(
+		Arc::clone(&ds),
+		std::time::Duration::from_secs(1),
+		tokio_util::sync::CancellationToken::new(),
+	)
+	.await?;
+	let mut response = ds.execute("RETURN <string> time::now();", &session, None).await?;
+	let surrealdb_types::Value::String(stamp) = response.remove(0).result? else {
+		panic!("Expected a datetime string");
+	};
+
+	async fn run(ds: &Arc<Datastore>, session: &Session, query: &str) -> Result<(usize, u64)> {
+		let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
+		let mut response =
+			ds.run(QueryRequest::new(query, session).with_transaction(Arc::clone(&tx))).await?;
+		let len = match response.remove(0).result? {
+			surrealdb_types::Value::Array(a) => a.len(),
+			_ => 0,
+		};
+		Ok((len, tx.metrics_snapshot_for_test().keys_read))
+	}
+
+	const K: u64 = 10;
+	let query = format!(
+		"SELECT id FROM pts \
+		 WHERE vec <|{K},400|> [0.5f,0.5f,0.5f,0.5f,0.5f,0.5f,0.5f,0.5f] AND category = 7"
+	);
+	let current = format!("{query};");
+	let versioned = format!("{query} VERSION d'{stamp}';");
+	// The first search loads the graph into the process-wide DiskANN cache; warm
+	// it so both measured runs read only candidate records and doc-id maps.
+	run(&ds, &session, &current).await?;
+	run(&ds, &session, &versioned).await?;
+	let (current_len, current_keys) = run(&ds, &session, &current).await?;
+	let (versioned_len, versioned_keys) = run(&ds, &session, &versioned).await?;
+	eprintln!("CURRENT keys_read={current_keys} VERSIONED keys_read={versioned_keys}");
+
+	assert_eq!(current_len as u64, K, "filtered KNN should return K matches");
+	assert_eq!(versioned_len as u64, K, "versioned filtered KNN should return K matches");
+	assert!(
+		versioned_keys <= current_keys + 2 * K,
+		"a versioned filtered KNN should read each candidate record once: \
+		 versioned keys_read={versioned_keys}, current keys_read={current_keys}"
+	);
+	ds.shutdown().await?;
+	Ok(())
+}
+
+/// A filtered KNN over a compacted DiskANN graph finds the admitted documents
+/// nearest the query even when the filter admits 1% of the table: the walk
+/// evaluates the filter on every element it reaches rather than on the `l`
+/// nearest overall, which here hold one of the five. Both truthy filters take
+/// that walk — the table's per-record SELECT permission for a record user's
+/// bare KNN, and a residual condition for the owner — and both match the
+/// brute-force answer. A search list too narrow for one walk to admit K is
+/// widened until it does.
+#[tokio::test(flavor = "multi_thread")]
+async fn diskann_selective_filter_finds_admitted_neighbours_past_the_search_list() -> Result<()> {
+	// Compaction happens only where this test calls it, so the queries below
+	// search the compacted graph rather than the pending queue.
+	let ds = Datastore::builder().without_maintenance_tasks().build_with_path("memory").await?;
+	{
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.ensure_ns_db(None, "test", "test").await?;
+		tx.commit().await?;
+	}
+	let owner = Session::owner()
+		.with_ns("test")
+		.with_db("test")
+		.new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
+	let record = Session::for_record(
+		"test",
+		"test",
+		"user",
+		crate::types::PublicValue::String("user:1".to_owned()),
+	)
+	.new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
+
+	// 1000 pseudo-random 8-d points from a fixed-seed generator, spread like
+	// real embeddings rather than along the few lines a modular lattice traces;
+	// the permission and the residual condition both admit `category = 7`, one
+	// row in a hundred.
+	let mut setup = String::from(
+		"DEFINE TABLE pts SCHEMALESS PERMISSIONS FOR select WHERE category = 7 \
+		 FOR create, update, delete NONE;\n\
+		 DEFINE INDEX emb ON pts FIELDS vec DISKANN DIMENSION 8 DIST EUCLIDEAN TYPE F32;\n",
+	);
+	let mut state = 0x9E37_79B9_7F4A_7C15u64;
+	for i in 0..1000u32 {
+		let mut v = String::new();
+		for j in 0..8u32 {
+			if j > 0 {
+				v.push_str(", ");
+			}
+			// xorshift64*
+			state ^= state >> 12;
+			state ^= state << 25;
+			state ^= state >> 27;
+			let f = (state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 40) as f32 / (1u64 << 24) as f32;
+			v.push_str(&format!("{f}f"));
+		}
+		setup.push_str(&format!("CREATE pts:{i} SET vec = [{v}], category = {};\n", i % 100));
+	}
+	for response in ds.execute(&setup, &owner, None).await? {
+		response.result?;
+	}
+	Datastore::index_compaction(
+		Arc::clone(&ds),
+		std::time::Duration::from_secs(1),
+		tokio_util::sync::CancellationToken::new(),
+	)
+	.await?;
+
+	async fn ids(ds: &Datastore, session: &Session, query: &str) -> Result<Vec<String>> {
+		let mut response = ds.execute(query, session, None).await?;
+		let surrealdb_types::Value::Array(rows) = response.remove(0).result? else {
+			panic!("Expected array result");
+		};
+		let mut ids: Vec<String> = rows.into_iter().map(|v| format!("{v:?}")).collect();
+		ids.sort();
+		Ok(ids)
+	}
+
+	let q = "[0.5f,0.5f,0.5f,0.5f,0.5f,0.5f,0.5f,0.5f]";
+	let truth = ids(
+		&ds,
+		&owner,
+		&format!("SELECT VALUE id FROM pts WHERE vec <|5,EUCLIDEAN|> {q} AND category = 7;"),
+	)
+	.await?;
+	assert_eq!(truth.len(), 5, "brute force should find K admitted rows");
+
+	// A search list too narrow for one walk to reach k visible rows widens and
+	// walks again until it holds k.
+	let narrow =
+		ids(&ds, &record, &format!("SELECT VALUE id FROM pts WHERE vec <|5,10|> {q};")).await?;
+	assert_eq!(narrow.len(), 5, "a narrow search list should still return K visible rows");
+
+	let permitted =
+		ids(&ds, &record, &format!("SELECT VALUE id FROM pts WHERE vec <|5,100|> {q};")).await?;
+	assert_eq!(
+		permitted, truth,
+		"a record user's bare KNN should return its K nearest visible rows"
+	);
+
+	let conditioned = ids(
+		&ds,
+		&owner,
+		&format!("SELECT VALUE id FROM pts WHERE vec <|5,100|> {q} AND category = 7;"),
+	)
+	.await?;
+	assert_eq!(conditioned, truth, "a residual condition should return its K nearest matches");
+	Ok(())
+}

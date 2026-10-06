@@ -984,6 +984,7 @@ impl HnswIndex {
 				compaction_generation,
 				f.select_gate,
 				f.metrics,
+				f.version,
 			)
 		});
 		// Extract the vector

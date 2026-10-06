@@ -215,5 +215,8 @@ pub(crate) async fn knn_cond_filter<'a>(
 		cond: Some(Arc::new(LegacyCondition::new(ctx, opt, cond))),
 		// The legacy executor reports no per-operator metrics.
 		metrics: None,
+		// The legacy executor reads candidates at the transaction's current
+		// state.
+		version: None,
 	}))
 }

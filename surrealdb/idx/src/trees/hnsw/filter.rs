@@ -55,6 +55,16 @@ pub(super) struct HnswTruthyDocumentFilter<'a> {
 	/// Counter for the candidates this filter fetches and evaluates
 	/// in-traversal. `None` when the driving executor reports no metrics.
 	metrics: Option<Arc<dyn CandidateFetchCounter>>,
+	/// The version stamp candidate records are read at
+	/// (`KnnCondFilter::version`).
+	version: Option<u64>,
+	/// Records [`Self::prefetch_records`] read at `version`, awaiting their
+	/// evaluation. Versioned reads bypass the transaction record cache, so
+	/// the prefetched record is handed to the evaluation directly; each entry
+	/// is consumed by the first evaluation of its vector ID, and holds one
+	/// prefetch batch at most: each prefetch drops what the previous one left
+	/// unevaluated.
+	versioned_records: HashMap<VectorId, Arc<Record>>,
 }
 
 impl<'a> HnswTruthyDocumentFilter<'a> {
@@ -68,6 +78,7 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		pending_generation: Option<u64>,
 		select_gate: CachedTableSelect<'a>,
 		metrics: Option<Arc<dyn CandidateFetchCounter>>,
+		version: Option<u64>,
 	) -> Self {
 		Self {
 			ikb,
@@ -79,6 +90,8 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 			cache: Default::default(),
 			permission: select_gate,
 			metrics,
+			version,
+			versioned_records: Default::default(),
 		}
 	}
 
@@ -136,11 +149,19 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 	/// record is never truthy and [`Self::is_record_truthy`] returns for it before
 	/// the SELECT-permission / condition checks, so pre-marking changes neither
 	/// the verdict nor the permission-before-cond ordering.
+	///
+	/// A versioned read (`version` set) bypasses the transaction record cache,
+	/// so the records it returns are kept in `versioned_records` instead and
+	/// handed to the evaluation of their candidate, which then reads nothing.
 	pub(super) async fn prefetch_records(
 		&mut self,
 		ctx: &HnswContext<'_>,
 		ids: &[VectorId],
 	) -> Result<()> {
+		// Each batch is evaluated before the next is prefetched, so a versioned
+		// record the previous batch left unevaluated is not consumed later;
+		// dropping it bounds what the search holds to one batch.
+		self.versioned_records.clear();
 		// Partition the not-yet-cached ids, keeping each paired (via the parallel
 		// `ids_out` / `rids` vecs) with the record id it resolves to. Compact
 		// `DocId`s (committed graph) are resolved in one batch; `RecordKey`s
@@ -200,11 +221,13 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		// `records` is returned in `rids` order, which matches `ids_out`.
 		let records = ctx
 			.tx
-			.get_records(ctx.ikb.ns(), ctx.ikb.db(), &rids, None, CachePolicy::ReadWrite)
+			.get_records(ctx.ikb.ns(), ctx.ikb.db(), &rids, self.version, CachePolicy::ReadWrite)
 			.await?;
 		for (id, record) in ids_out.into_iter().zip(records) {
 			if record.data.is_nullish() {
 				self.cache.insert(id, None);
+			} else if self.version.is_some() {
+				self.versioned_records.insert(id, record);
 			}
 		}
 		Ok(())
@@ -260,6 +283,8 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 			self.cond.as_deref(),
 			Arc::clone(&rid),
 			&self.permission,
+			self.version,
+			self.versioned_records.remove(&id),
 		)
 		.await?;
 		let truthy = record.is_some();
@@ -271,15 +296,24 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 	/// Returns the record data if truthy, or `None` otherwise.
 	///
 	/// A `None` condition means permission-only mode: a record that passes the
-	/// SELECT-permission gate is truthy by definition.
+	/// SELECT-permission gate is truthy by definition. `prefetched` is the
+	/// candidate's record already read at `version`; when absent the record is
+	/// read here.
 	async fn is_record_truthy(
 		ctx: &HnswContext<'_>,
 		stk: &mut Stk,
 		cond: Option<&dyn CandidateCondition>,
 		rid: Arc<RecordId>,
 		permission: &CachedTableSelect<'_>,
+		version: Option<u64>,
+		prefetched: Option<Arc<Record>>,
 	) -> Result<Option<Arc<Record>>> {
-		let val = ctx.tx.get_record(ctx.ikb.ns(), ctx.ikb.db(), &rid.table, &rid.key, None).await?;
+		let val = match prefetched {
+			Some(val) => val,
+			None => {
+				ctx.tx.get_record(ctx.ikb.ns(), ctx.ikb.db(), &rid.table, &rid.key, version).await?
+			}
+		};
 		if val.data.is_nullish() {
 			return Ok(None);
 		}

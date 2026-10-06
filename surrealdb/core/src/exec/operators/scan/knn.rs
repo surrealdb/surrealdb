@@ -13,7 +13,7 @@ use roaring::RoaringTreemap;
 use surrealdb_types::ToSql;
 
 use super::bitmap::BitmapNode;
-use super::common::fetch_and_filter_records_batch;
+use super::common::{fetch_and_filter_records_batch, resolve_version_stamp};
 use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
 use crate::catalog::{DatabaseId, Distance, Error, Index, NamespaceId, VectorType};
@@ -374,19 +374,10 @@ impl ExecOperator for KnnScan {
 			let db = Arc::clone(&db_ctx.db);
 			let txn = ctx.txn();
 
-			// Evaluate VERSION expression
-			let version: Option<u64> = match &version_expr {
-				Some(expr) => {
-					let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&ctx);
-					let v = expr.evaluate(eval_ctx).await?;
-					Some(
-						v.cast_to::<crate::val::Datetime>()
-							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp(txn.timestamp_impl().as_ref())?,
-					)
-				}
-				None => ctx.version_stamp(),
-			};
+			// Resolve VERSION timestamp; see [`resolve_version_stamp`] for why the
+			// enclosing scope's stamp takes precedence over re-evaluating the
+			// expression.
+			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
 
 			// Get the FrozenContext from the root context
 			let root = ctx.root();
@@ -594,12 +585,14 @@ impl ExecOperator for KnnScan {
 				// search on the same physical SELECT permission that filters the
 				// fetched batch below, so hidden rows are skipped before the cond
 				// can probe them and never consume top-K slots (see the
-				// `residual_cond` docs for the threat model). With a fully-covered
-				// WHERE (no in-traversal cond) but a per-record SELECT permission,
-				// a permission-only filter (cond: None) keeps hidden rows from
-				// consuming slots; with unconditional permissions and no cond, no
-				// filter is built at all — admission is pure bitmap membership,
-				// with zero record fetches inside the traversal.
+				// `residual_cond` docs for the threat model). With no in-traversal
+				// cond — a bare KNN, or a WHERE fully covered by the allow-list —
+				// but a per-record SELECT permission, a permission-only filter
+				// (cond: None) keeps hidden rows from consuming slots, so the k
+				// neighbours returned are k the caller may see. With unconditional
+				// permissions and no cond, no filter is built at all — admission
+				// is pure graph order or bitmap membership, with zero record
+				// fetches inside the traversal.
 				let needs_perm_gate = !matches!(select_permission, PhysicalPermission::Allow);
 				let select_gate = || {
 					CachedTableSelect::Gate(Arc::new(PhysicalTableSelect::new(
@@ -616,6 +609,7 @@ impl ExecOperator for KnnScan {
 							ctx.clone(),
 						))),
 						metrics: Some(fetch_counter()),
+						version,
 					})
 				} else {
 					match (&in_traversal_cond, ctx.options()) {
@@ -627,14 +621,14 @@ impl ExecOperator for KnnScan {
 								Arc::new(cond.clone()),
 							))),
 							metrics: Some(fetch_counter()),
+							version,
 						}),
-						(None, Some(_)) if needs_perm_gate && search_allow.is_some() => {
-							Some(KnnCondFilter {
-								select_gate: select_gate(),
-								cond: None,
-								metrics: Some(fetch_counter()),
-							})
-						}
+						(None, _) if needs_perm_gate => Some(KnnCondFilter {
+							select_gate: select_gate(),
+							cond: None,
+							metrics: Some(fetch_counter()),
+							version,
+						}),
 						_ => None,
 					}
 				};
