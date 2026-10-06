@@ -295,3 +295,94 @@ async fn hnsw_query_reads_record_keyed_pending_vectors() -> Result<()> {
 	assert_eq!(result.len(), 2);
 	Ok(())
 }
+
+/// A filtered KNN at a `VERSION` reads each visited candidate's record once.
+/// Versioned reads bypass the transaction record cache, so the records the
+/// per-neighbourhood prefetch reads must be the ones the filter evaluates; a
+/// second, per-candidate read would double the record keys the query reads.
+/// The same query unversioned reads each record once through the cache. The
+/// versioned run additionally re-reads its K results when it materialises
+/// them and reads its catalog at the version, so it may exceed the
+/// unversioned count by at most 2K keys — far below the hundreds a second
+/// read of every visited candidate adds.
+#[cfg(feature = "kv-surrealkv")]
+#[test(tokio::test(flavor = "multi_thread"))]
+async fn hnsw_versioned_filtered_knn_reads_each_candidate_once() -> Result<()> {
+	let dir = temp_dir::TempDir::new()?;
+	let path = format!("surrealkv://{}?versioned=true&retention=1h", dir.path().to_string_lossy());
+	// Compaction happens only where this test calls it.
+	let ds = Datastore::builder().without_maintenance_tasks().build_with_path(&path).await?;
+	{
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.ensure_ns_db(None, "test", "test").await?;
+		tx.commit().await?;
+	}
+	let session = Session::owner()
+		.with_ns("test")
+		.with_db("test")
+		.new_planner_strategy(crate::dbs::NewPlannerStrategy::AllReadOnlyStatements);
+
+	let mut setup = String::from(
+		"DEFINE INDEX emb ON pts FIELDS vec HNSW DIMENSION 8 DIST EUCLIDEAN TYPE F32 EFC 200 M 12;\n",
+	);
+	for i in 0..500u32 {
+		let mut v = String::new();
+		for j in 0..8u32 {
+			if j > 0 {
+				v.push_str(", ");
+			}
+			let f = ((i.wrapping_mul(7).wrapping_add(j.wrapping_mul(131))) % 1000) as f32 / 1000.0;
+			v.push_str(&format!("{f}f"));
+		}
+		setup.push_str(&format!("CREATE pts:{i} SET vec = [{v}], category = {};\n", i % 20));
+	}
+	for response in ds.execute(&setup, &session, None).await? {
+		response.result?;
+	}
+	Datastore::index_compaction(
+		Arc::clone(&ds),
+		std::time::Duration::from_secs(1),
+		tokio_util::sync::CancellationToken::new(),
+	)
+	.await?;
+	let mut response = ds.execute("RETURN <string> time::now();", &session, None).await?;
+	let surrealdb_types::Value::String(stamp) = response.remove(0).result? else {
+		panic!("Expected a datetime string");
+	};
+
+	async fn run(ds: &Arc<Datastore>, session: &Session, query: &str) -> Result<(usize, u64)> {
+		let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
+		let mut response =
+			ds.run(QueryRequest::new(query, session).with_transaction(Arc::clone(&tx))).await?;
+		let len = match response.remove(0).result? {
+			surrealdb_types::Value::Array(a) => a.len(),
+			_ => 0,
+		};
+		Ok((len, tx.metrics_snapshot_for_test().keys_read))
+	}
+
+	const K: u64 = 10;
+	let query = format!(
+		"SELECT id FROM pts \
+		 WHERE vec <|{K},400|> [0.5f,0.5f,0.5f,0.5f,0.5f,0.5f,0.5f,0.5f] AND category = 7"
+	);
+	let current = format!("{query};");
+	let versioned = format!("{query} VERSION d'{stamp}';");
+	// The first search loads the graph into the process-wide HNSW cache; warm
+	// it so both measured runs read only candidate records and doc-id maps.
+	run(&ds, &session, &current).await?;
+	run(&ds, &session, &versioned).await?;
+	let (current_len, current_keys) = run(&ds, &session, &current).await?;
+	let (versioned_len, versioned_keys) = run(&ds, &session, &versioned).await?;
+	eprintln!("CURRENT keys_read={current_keys} VERSIONED keys_read={versioned_keys}");
+
+	assert_eq!(current_len as u64, K, "filtered KNN should return K matches");
+	assert_eq!(versioned_len as u64, K, "versioned filtered KNN should return K matches");
+	assert!(
+		versioned_keys <= current_keys + 2 * K,
+		"a versioned filtered KNN should read each candidate record once: \
+		 versioned keys_read={versioned_keys}, current keys_read={current_keys}"
+	);
+	ds.shutdown().await?;
+	Ok(())
+}
