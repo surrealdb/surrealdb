@@ -10,6 +10,7 @@
 //! per-element decode (rare in scan benchmarks).
 
 use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use memchr::memmem;
@@ -611,7 +612,9 @@ pub(crate) struct OverlapLookupTables {
 /// `PartialEq` for every element type a literal set may hold: the variants whose
 /// `partial_cmp` can return `None` (`Geometry`, `Regex`, `Range`, `Closure`) are
 /// excluded by `literal_hashset_element_safe`.
-pub(crate) fn overlap_streaming_from_set(set: &HashSet<Value>) -> OverlapLookupTables {
+pub(crate) fn overlap_streaming_from_set<S: BuildHasher>(
+	set: &HashSet<Value, S>,
+) -> OverlapLookupTables {
 	use std::collections::BTreeMap;
 
 	use revision::SerializeRevisioned;
