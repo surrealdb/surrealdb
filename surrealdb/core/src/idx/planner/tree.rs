@@ -157,7 +157,10 @@ impl<'a> TreeBuilder<'a> {
 			&& let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await?
 		{
 			for (index_reference, id_col) in &irf {
-				if *id_col == 0 && index_reference.index.supports_order() {
+				if *id_col == 0
+					&& index_reference.index.supports_order()
+					&& !index_reference.cols.iter().any(is_element_column)
+				{
 					self.index_map.order_limit = Some(IndexOption::new(
 						index_reference.clone(),
 						Some(id),
@@ -397,6 +400,13 @@ impl<'a> TreeBuilder<'a> {
 		let mut irs = Vec::new();
 		for (idx, ix) in schema.indexes.iter().enumerate() {
 			if ix.prepare_remove {
+				continue;
+			}
+			// Prefix and record-link scans cannot bind trailing element columns.
+			// Such scans could return several entries for the same record.
+			if matches!(ix.index, Index::Idx | Index::Uniq)
+				&& ix.cols.iter().skip(1).any(is_element_column)
+			{
 				continue;
 			}
 			if let Some(idiom_index) = ix.cols.iter().position(|p| p.eq(i)) {
@@ -721,7 +731,39 @@ impl<'a> TreeBuilder<'a> {
 		p: IdiomPosition,
 		col: IdiomCol,
 	) -> Option<IndexOperator> {
+		// A wildcard projection is a collection, whereas its index entries
+		// represent individual elements. Only membership predicates can seek
+		// those entries; ordinary comparisons must evaluate the collection.
+		let is_element = is_element_column(&ixr.cols[col]);
+		if is_element
+			&& !matches!(
+				(op, p),
+				(
+					BinaryOperator::Contain
+						| BinaryOperator::ContainAny
+						| BinaryOperator::ContainAll,
+					IdiomPosition::Left
+				) | (
+					BinaryOperator::Inside | BinaryOperator::AnyInside | BinaryOperator::AllInside,
+					IdiomPosition::Right
+				)
+			) {
+			return None;
+		}
 		if let Some(v) = n.is_computed() {
+			// Empty collections share NULL placeholder keys with real elements.
+			if is_element
+				&& (v.is_nullish()
+					|| (matches!(
+						op,
+						BinaryOperator::ContainAny
+							| BinaryOperator::ContainAll
+							| BinaryOperator::AnyInside
+							| BinaryOperator::AllInside
+					) && matches!(v.as_ref(), Value::Array(a) if a.iter().any(Value::is_nullish))))
+			{
+				return None;
+			}
 			#[allow(clippy::collapsible_match)]
 			match (op, v, p) {
 				(BinaryOperator::Equal | BinaryOperator::ExactEqual, v, _) => {
@@ -782,6 +824,10 @@ impl<'a> TreeBuilder<'a> {
 		}
 		None
 	}
+}
+
+fn is_element_column(column: &Idiom) -> bool {
+	column.contains(&Part::All) && !matches!(column.last(), Some(Part::Flatten))
 }
 
 /// Store the list of indexes that can be used for a given expression

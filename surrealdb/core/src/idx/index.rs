@@ -532,6 +532,13 @@ impl Indexable {
 		let mut source = Vec::with_capacity(vals.len());
 		for (v, i) in vals.into_iter().zip(ix.cols.iter()) {
 			let f = matches!(i.0.last(), Some(&Part::Flatten));
+			// Wildcard set projections index their elements, like array projections.
+			let v = match v {
+				Value::Set(v) if !f && i.0.contains(&Part::All) => {
+					Value::Array(v.into_iter().collect())
+				}
+				v => v,
+			};
 			source.push((v, f));
 		}
 		Self(source)
@@ -657,5 +664,54 @@ impl ValuesIterator for SingleValueIterator {
 
 	fn current(&self) -> &Value {
 		&self.0
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn index_values(column: &str, value: Value) -> Vec<Array> {
+		let ix = IndexDefinition {
+			index_id: 0.into(),
+			name: "idx".into(),
+			table_name: "test".into(),
+			cols: vec![crate::syn::idiom(column).unwrap().into()],
+			index: Index::Idx,
+			comment: None,
+			prepare_remove: false,
+		};
+		Indexable::new(vec![value], &ix).into_iter().collect()
+	}
+
+	fn set_value() -> Value {
+		Value::Set([Value::from(1234), Value::from(5058)].into_iter().collect())
+	}
+
+	#[test]
+	fn indexable_wildcard_set() {
+		assert_eq!(
+			index_values("values.*", set_value()),
+			vec![Array::from(vec![1234]), Array::from(vec![5058])]
+		);
+	}
+
+	#[test]
+	fn indexable_whole_set() {
+		let value = set_value();
+		assert_eq!(index_values("values", value.clone()), vec![Array(vec![value])]);
+	}
+
+	#[test]
+	fn indexable_flattened_wildcard_set() {
+		let value = set_value();
+		assert_eq!(index_values("values.*…", value.clone()), vec![Array(vec![value])]);
+	}
+
+	#[test]
+	fn indexable_wildcard_nested_set() {
+		let inner = set_value();
+		let outer = Value::Set([inner.clone()].into_iter().collect());
+		assert_eq!(index_values("values.*", outer), vec![Array(vec![inner])]);
 	}
 }

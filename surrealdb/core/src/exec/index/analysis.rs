@@ -11,7 +11,7 @@ use crate::exec::planner::util::try_literal_to_value;
 use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
-use crate::expr::{BinaryOperator, Cond, Expr, Idiom};
+use crate::expr::{BinaryOperator, Cond, Expr, Idiom, Part};
 use crate::idx::planner::ScanDirection;
 use crate::val::{Number, Value};
 
@@ -60,6 +60,23 @@ impl<'a> IndexAnalyzer<'a> {
 		if let Some(ordering) = order {
 			self.analyze_order(ordering, &mut candidates);
 		}
+
+		// Scans return index entries, so each wildcard column must be pinned
+		// to one element to avoid returning a record multiple times.
+		candidates.retain(|candidate| {
+			let bound_columns = match &candidate.access {
+				BTreeAccess::Equality(_) => candidate.index_ref.cols.len(),
+				BTreeAccess::Compound {
+					prefix,
+					..
+				} => prefix.len(),
+				BTreeAccess::Range {
+					..
+				} => 0,
+				_ => return true,
+			};
+			!has_unbound_wildcard(&candidate.index_ref.cols, bound_columns)
+		});
 
 		// Filter out indexes not allowed by WITH hints
 		if let Some(With::Index(names)) = self.with_hints {
@@ -212,6 +229,9 @@ impl<'a> IndexAnalyzer<'a> {
 				if ix_def.prepare_remove {
 					continue;
 				}
+				if has_unbound_wildcard(&ix_def.cols, 1) {
+					continue;
+				}
 				if !matches!(ix_def.index, crate::catalog::Index::Idx | crate::catalog::Index::Uniq)
 				{
 					continue;
@@ -297,12 +317,20 @@ impl<'a> IndexAnalyzer<'a> {
 		Self::collect_containment_expressions(&cond.0, &mut exprs);
 
 		for (idiom, values) in &exprs {
-			if values.is_empty() || values.len() > Self::MAX_IN_EXPANSION_SIZE {
+			// Empty collections can have NULL placeholder keys rather than
+			// actual elements, so nullish probes need the predicate fallback.
+			if values.is_empty()
+				|| values.len() > Self::MAX_IN_EXPANSION_SIZE
+				|| values.iter().any(Value::is_nullish)
+			{
 				continue;
 			}
 
 			for (idx, ix_def) in self.indexes.iter().enumerate() {
 				if ix_def.prepare_remove {
+					continue;
+				}
+				if has_unbound_wildcard(&ix_def.cols, 1) {
 					continue;
 				}
 				if !matches!(ix_def.index, crate::catalog::Index::Idx | crate::catalog::Index::Uniq)
@@ -1056,6 +1084,11 @@ impl<'a> IndexAnalyzer<'a> {
 			_ => return,
 		};
 
+		// A NULL index key can represent an empty collection, not an element.
+		if value.is_nullish() {
+			return;
+		}
+
 		for (idx, ix_def) in self.indexes.iter().enumerate() {
 			if ix_def.prepare_remove {
 				continue;
@@ -1279,6 +1312,13 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 }
 
+fn has_unbound_wildcard(columns: &[Idiom], bound_columns: usize) -> bool {
+	columns
+		.iter()
+		.skip(bound_columns)
+		.any(|column| column.contains(&Part::All) && !matches!(column.last(), Some(Part::Flatten)))
+}
+
 /// Returns `true` if either a forward or backward scan of the index can
 /// satisfy the requested ORDER BY. The analyzer cannot know the final
 /// scan direction (`adjust_direction_for_order` decides later) so we
@@ -1492,24 +1532,14 @@ fn idiom_matches(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
 /// because each array element is indexed individually, and the containment
 /// operator checks membership of a scalar in the indexed array.
 ///
-/// Also handles nested array paths like `marks.*.subject` where both the
-/// expression idiom and the index column contain `Part::All`. The comparison
-/// strips `Part::All` from both sides before checking equality.
-///
-/// Only matches when the index column actually contains `Part::All` --
-/// regular scalar indexes are not valid for containment lookups.
+/// Only plain field paths with a trailing wildcard in the index column match.
+/// Other collection projections must retain predicate evaluation, whose values
+/// can differ from the individual elements stored in the index.
 pub(crate) fn idiom_matches_containment(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
-	use crate::expr::Part;
-
-	if !index_col.0.iter().any(|p| matches!(p, Part::All)) {
+	let Some((Part::All, prefix)) = index_col.split_last() else {
 		return false;
-	}
-
-	let col_without_all: Vec<&Part> =
-		index_col.0.iter().filter(|p| !matches!(p, Part::All)).collect();
-	let expr_without_all: Vec<&Part> =
-		expr_idiom.0.iter().filter(|p| !matches!(p, Part::All)).collect();
-	col_without_all == expr_without_all
+	};
+	expr_idiom.iter().all(|part| matches!(part, Part::Field(_))) && &expr_idiom[..] == prefix
 }
 
 /// Decide whether a `from`/`to` pair describes an unsatisfiable range.
