@@ -142,11 +142,20 @@ test("export({ tables: [...] }) includes only the requested tables", async () =>
 			await db.query("CREATE grp SET name = $n", { n: `Group ${i}` }).collect();
 		}
 
+		// Control for the filtered export below: a pattern that cannot match any
+		// export would satisfy that absence check no matter what the filter did.
+		expect(await db.export()).toMatch(/\bgrp\b/);
+
 		const onlyUsers = await db.export({ tables: ["user"] });
-		expect(onlyUsers).toContain("DEFINE TABLE user");
+		expect(onlyUsers).toMatch(/DEFINE TABLE user\b/);
 		expect(onlyUsers).toMatch(/name: 'User 0'/);
-		// The `grp` table is entirely absent from a user-only export.
-		expect(onlyUsers).not.toContain("grp");
+		// Word-anchored: a generated record id is 20 characters of [0-9a-z]
+		// (ID_CHARS in surrealdb/cnf/src/lib.rs), so an unanchored match reads a
+		// `user` id that merely contains "grp" as a leaked table. Anchoring instead
+		// requires the name to be absent outright, which holds while nothing here
+		// is a view over `grp`: such a view's own definition, and the exporter's
+		// note that the export omits its source, would each name the table.
+		expect(onlyUsers).not.toMatch(/\bgrp\b/);
 		expect(onlyUsers).not.toContain("Group 0");
 
 		// Round-trip the selective export into a fresh database: users present,

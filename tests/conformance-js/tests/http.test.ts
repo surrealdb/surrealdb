@@ -568,6 +568,9 @@ let counter = 0;
 			expect(full).toContain("DEFINE ACCESS myacc");
 			expect(full).toContain("DEFINE PARAM $myparam");
 			expect(full).toContain("DEFINE FUNCTION fn::myfn");
+			// Control for the filtered export below: a pattern that cannot match any
+			// export would satisfy that absence check no matter what the filter did.
+			expect(full).toMatch(/\bbeta\b/);
 
 			// db.export({ records: false }) keeps the schema but drops row data.
 			const noRecords = (await client.export({ records: false })) as string;
@@ -587,10 +590,12 @@ let counter = 0;
 			const onlyAlpha = await exportPost({ tables: ["alpha"] });
 			expect(onlyAlpha.status).toBe(200);
 			const onlyAlphaText = await onlyAlpha.text();
-			expect(onlyAlphaText).toContain("DEFINE TABLE alpha");
+			expect(onlyAlphaText).toMatch(/DEFINE TABLE alpha\b/);
 			expect(onlyAlphaText).toContain("INSERT [ { id: alpha:1");
-			expect(onlyAlphaText).not.toContain("DEFINE TABLE beta");
-			expect(onlyAlphaText).not.toContain("beta:1");
+			// Word-anchored, so a leaked `beta` is caught whichever statement the
+			// exporter writes it in, and a substring of an unrelated identifier is
+			// not mistaken for one.
+			expect(onlyAlphaText).not.toMatch(/\bbeta\b/);
 
 			// users/accesses toggles exclude just those categories; tables remain.
 			const noAuth = await exportPost({ users: false, accesses: false });
