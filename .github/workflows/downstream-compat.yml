@@ -584,10 +584,14 @@ jobs:
           ENGINE_REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
+          # A downstream whose only private source is the engine matches
+          # nothing here, and grep reports that as exit 1, which the runner's
+          # `bash -e -o pipefail` would turn into a failed step. Empty is the
+          # answer the branch below handles, so the status is not one.
           repos="$(grep -rhoE '(ssh://git@github\.com/|git@github\.com:)[A-Za-z0-9._-]+/[A-Za-z0-9._-]+' \
                      --include=Cargo.toml --exclude-dir=target --exclude-dir=vendor downstream/ \
                    | sed -E 's#.*github\.com[:/]##; s#\.git$##' \
-                   | sort -u | grep -vx "${ENGINE_REPO}")"
+                   | sort -u | grep -vx "${ENGINE_REPO}")" || true
           if [ -z "${repos}" ]; then
             echo "No private git sources beyond the engine."
             exit 0
