@@ -38,7 +38,7 @@ use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId, SequenceDefinition, Ta
 use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_kvs::key::{KVKey, KVKeyDecode, TypedRange};
 use surrealdb_strand::TableName;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, OnceCell, RwLock};
 use uuid::Uuid;
 use web_time::Instant;
 
@@ -55,33 +55,67 @@ use crate::{Transaction, TransactionType};
 
 type SequencesMap = Arc<RwLock<HashMap<Arc<SequenceDomain>, Arc<CachedSequence>>>>;
 
-/// An allocator held in a node's map, together with whether it has left it.
+/// A domain's slot in a node's map: the allocator serving it once one has
+/// been built, together with whether the slot has left the map.
 ///
-/// A draw takes an allocator out of the map and locks it afterwards, so it can
-/// still be drawn from once it has been removed — by a statement that redefined
-/// or removed its sequence, or by a draw that found it reset. Removed, it must
-/// not serve again. The next allocator built for the same sequence on this node
-/// writes the same cursor row, and can leave it holding exactly the value the
-/// removed one last wrote; the conditional write that catches a reset then
-/// succeeds, and the removed allocator resumes inside a window the sequence no
-/// longer has while other nodes claim the same values from the new run.
+/// The slot goes into the map empty, and the allocator is built into it after
+/// the map's lock is released. Building reads the store and claims a window,
+/// which can take as long as the backend takes and retries for as long as the
+/// claim keeps failing; the map's lock is shared by every domain on the node,
+/// so building under it would stall catalog ids, doc ids and every other
+/// sequence for that long. Only draws on this one domain wait for the build,
+/// on the cell. A build that fails or is cancelled leaves the cell empty, and
+/// the next draw to reach the slot builds again.
+///
+/// A draw takes a slot out of the map and locks its allocator afterwards, so
+/// it can still be drawn from once the slot has been removed — by a statement
+/// that redefined or removed its sequence, or by a draw that found it reset.
+/// Removed, it must not serve again. The next allocator built for the same
+/// sequence on this node writes the same cursor row, and can leave it holding
+/// exactly the value the removed one last wrote; the conditional write that
+/// catches a reset then succeeds, and the removed allocator resumes inside a
+/// window the sequence no longer has while other nodes claim the same values
+/// from the new run. The mark lives on the slot rather than the allocator so
+/// that it also covers a build still in flight when the slot is removed.
 struct CachedSequence {
-	/// Set when this allocator leaves the map. See [`Sequence::next`].
+	/// Set when this slot leaves the map. See [`Sequence::next`].
 	evicted: AtomicBool,
-	sequence: Mutex<Sequence>,
+	sequence: OnceCell<Mutex<Sequence>>,
 }
 
 impl CachedSequence {
-	fn new(sequence: Sequence) -> Self {
+	fn new() -> Self {
 		Self {
 			evicted: AtomicBool::new(false),
-			sequence: Mutex::new(sequence),
+			sequence: OnceCell::new(),
 		}
 	}
 
-	/// Marks this allocator as no longer the one serving its sequence. Called
-	/// with the map's write lock held, so the mark precedes any allocator built
-	/// to replace it.
+	/// The allocator in this slot, built by this call if no other has built
+	/// it. Concurrent callers wait for one build rather than each running
+	/// their own: two allocators for one domain on one node would resume the
+	/// same owned window and hand out the same ids.
+	///
+	/// Must not be called with the map's lock held. See [`CachedSequence`].
+	async fn get_or_load(
+		&self,
+		ctx: Option<&dyn CancellationProbe>,
+		sqs: &Sequences,
+		seq: &SequenceDomain,
+		start: i64,
+		batch: u32,
+		timeout: Option<Duration>,
+	) -> SequenceResult<&Mutex<Sequence>> {
+		self.sequence
+			.get_or_try_init(|| async {
+				Sequence::load(ctx, sqs, seq, start, batch, timeout).await.map(Mutex::new)
+			})
+			.await
+	}
+
+	/// Marks this slot as no longer the one serving its sequence. Called with
+	/// the map's write lock held, so the mark precedes any slot inserted to
+	/// replace it, and so any allocator built there.
 	fn evict(&self) {
 		self.evicted.store(true, Ordering::Release);
 	}
@@ -844,9 +878,13 @@ impl Sequences {
 		timeout: Option<Duration>,
 	) -> Result<i64> {
 		let sequence = self.sequences.read().await.get(&seq).cloned();
-		if let Some(s) = sequence {
+		// A slot whose allocator is still being built is not yet cached: the
+		// build below waits for it, and gets the build's own single retry.
+		if let Some(s) = sequence
+			&& let Some(allocator) = s.sequence.get()
+		{
 			let res =
-				s.sequence.lock().await.next(self, ctx, &seq, batch, None, Some(&s.evicted)).await;
+				allocator.lock().await.next(self, ctx, &seq, batch, None, Some(&s.evicted)).await;
 			match res {
 				// The sequence was redefined or removed under this allocator,
 				// here or on a peer. Drop it and build it again below, which
@@ -884,6 +922,9 @@ impl Sequences {
 	/// Builds the allocator for a domain that has none cached, and serves one
 	/// value from it.
 	///
+	/// The map's lock is held only to find or insert the domain's slot; the
+	/// build runs after it is released. See [`CachedSequence`].
+	///
 	/// An allocator that reports a reset is removed again before returning, so
 	/// that a caller retrying builds a fresh one rather than finding this one
 	/// in the map.
@@ -895,18 +936,18 @@ impl Sequences {
 		batch: u32,
 		timeout: Option<Duration>,
 	) -> SequenceResult<i64> {
-		let s = match self.sequences.write().await.entry(Arc::clone(seq)) {
-			// Somebody else built one while this call was waiting for the
-			// lock. Serve from theirs rather than replacing it.
-			Entry::Occupied(e) => Arc::clone(e.get()),
-			Entry::Vacant(e) => {
-				let s = Arc::new(CachedSequence::new(
-					Sequence::load(ctx, self, seq, start, batch, timeout).await?,
-				));
-				Arc::clone(e.insert(s))
-			}
-		};
-		let res = s.sequence.lock().await.next(self, ctx, seq, batch, None, Some(&s.evicted)).await;
+		// Somebody else may have inserted a slot while this call was waiting
+		// for the lock. Build into theirs, or wait for their build, rather than
+		// replacing it.
+		let s = Arc::clone(
+			self.sequences
+				.write()
+				.await
+				.entry(Arc::clone(seq))
+				.or_insert_with(|| Arc::new(CachedSequence::new())),
+		);
+		let allocator = s.get_or_load(ctx, self, seq, start, batch, timeout).await?;
+		let res = allocator.lock().await.next(self, ctx, seq, batch, None, Some(&s.evicted)).await;
 		if matches!(res, Err(SequenceError::Reset)) {
 			self.evict_this_allocator(seq, &s).await;
 		}
@@ -1878,7 +1919,9 @@ mod tests {
 	use std::time::Duration;
 
 	use anyhow::Result;
-	use surrealdb_catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
+	use surrealdb_catalog::providers::{
+		BoxProviderFut, CancellationProbe, DatabaseProvider, NamespaceProvider, TableProvider,
+	};
 	use surrealdb_catalog::{
 		DatabaseDefinition, DatabaseId, FromStored, Index, IndexDefinition, IndexId,
 		NamespaceDefinition, NamespaceId, StoredTableDefinition, TableDefinition, TableId,
@@ -2888,6 +2931,8 @@ mod tests {
 		// The held draw proceeds.
 		let from_held = held
 			.sequence
+			.get()
+			.expect("a built allocator")
 			.lock()
 			.await
 			.next(&seqs, None, &domain, 100, None, Some(&held.evicted))
@@ -2971,6 +3016,8 @@ mod tests {
 		// rebuilds, as `next_val` does on a reset.
 		let first = queued
 			.sequence
+			.get()
+			.expect("a built allocator")
 			.lock()
 			.await
 			.next(&peer, None, &domain, 100, None, Some(&queued.evicted))
@@ -2985,6 +3032,8 @@ mod tests {
 		// The next draw still queued on the old allocator.
 		let second = queued
 			.sequence
+			.get()
+			.expect("a built allocator")
 			.lock()
 			.await
 			.next(&peer, None, &domain, 100, None, Some(&queued.evicted))
@@ -3749,5 +3798,141 @@ mod tests {
 		let got = node.next_user_sequence_id(None, &stale, ns, db, name).await.unwrap();
 		stale.cancel().await.unwrap();
 		assert_eq!(got, 500, "the retry allocated from the definition the caller had already read");
+	}
+
+	/// Parks the next commit any transaction from `hook`'s factory makes:
+	/// `parked` is notified once it is held, and it resumes on `release`.
+	///
+	/// A cold allocator only reads until it claims its first window, so armed
+	/// before a cold draw this parks that draw in the middle of its build.
+	fn park_next_commit(
+		hook: &hooked::HookSlot,
+	) -> (Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>) {
+		let parked = Arc::new(tokio::sync::Notify::new());
+		let release = Arc::new(tokio::sync::Notify::new());
+		let (p, r) = (Arc::clone(&parked), Arc::clone(&release));
+		*hook.lock().unwrap() = Some(Box::new(move || {
+			Box::pin(async move {
+				p.notify_one();
+				r.notified().await;
+			})
+		}));
+		(parked, release)
+	}
+
+	/// A build in flight for one domain does not hold up draws on any other.
+	///
+	/// Every domain on a node shares the map, so a build that held the map's
+	/// lock across its reads and its claim would stall every catalog id, doc id
+	/// and sequence draw on the node for as long as the backend took — without
+	/// end, when the claim keeps failing and nothing sets a deadline.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_build_in_flight_does_not_block_other_domains() {
+		let (tf, hook) = hooked::hooked_factory().await;
+		let seqs = Sequences::new(tf, Uuid::from_u128(1));
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let deadline = Duration::from_secs(5);
+		// Warm one domain, so a draw on it needs only the map and its window.
+		seqs.next_table_id(None, ns, db).await.unwrap();
+
+		let (parked, release) = park_next_commit(&hook);
+		let cold = {
+			let seqs = seqs.clone();
+			tokio::spawn(async move { seqs.next_namespace_id(None).await })
+		};
+		tokio::time::timeout(deadline, parked.notified())
+			.await
+			.expect("the cold build never reached its claim");
+
+		tokio::time::timeout(deadline, seqs.next_table_id(None, ns, db))
+			.await
+			.expect("a cached domain waited on another domain's build")
+			.unwrap();
+		tokio::time::timeout(deadline, seqs.next_database_id(None, NamespaceId(9)))
+			.await
+			.expect("a second cold domain waited on another domain's build")
+			.unwrap();
+		assert!(!cold.is_finished(), "the parked build completed before it was released");
+
+		release.notify_one();
+		tokio::time::timeout(deadline, cold).await.unwrap().unwrap().unwrap();
+	}
+
+	/// Concurrent draws on one cold domain share a single build.
+	///
+	/// Two allocators for one domain on one node would both resume the window
+	/// the node owns and hand out the same ids, so a draw that finds a build in
+	/// flight waits for it rather than starting its own.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn concurrent_draws_on_a_cold_domain_share_one_build() {
+		let (tf, hook) = hooked::hooked_factory().await;
+		let seqs = Sequences::new(tf, Uuid::from_u128(1));
+		let deadline = Duration::from_secs(5);
+
+		let (parked, release) = park_next_commit(&hook);
+		let draw = || {
+			let seqs = seqs.clone();
+			tokio::spawn(async move { seqs.next_namespace_id(None).await })
+		};
+		let first = draw();
+		tokio::time::timeout(deadline, parked.notified())
+			.await
+			.expect("the cold build never reached its claim");
+		let second = draw();
+		tokio::time::sleep(Duration::from_millis(200)).await;
+		assert!(!second.is_finished(), "a second draw built its own allocator for the domain");
+
+		release.notify_one();
+		let first = tokio::time::timeout(deadline, first).await.unwrap().unwrap().unwrap();
+		let second = tokio::time::timeout(deadline, second).await.unwrap().unwrap().unwrap();
+		assert_ne!(first, second, "two draws on one domain were handed the same id");
+	}
+
+	/// A build abandoned part-way leaves the domain buildable.
+	///
+	/// The draw that starts a build can be cancelled with its query, and one
+	/// whose build fails returns the error. Either way the slot it was building
+	/// into stays in the map with nothing in it, and the next draw has to build
+	/// there rather than wait on a build nobody is running.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn an_abandoned_build_leaves_the_domain_buildable() {
+		struct TimedOut;
+		impl CancellationProbe for TimedOut {
+			fn expect_not_timedout(&self) -> BoxProviderFut<'_, Result<()>> {
+				Box::pin(async { Err(anyhow::anyhow!("timed out")) })
+			}
+		}
+
+		let (tf, hook) = hooked::hooked_factory().await;
+		let seqs = Sequences::new(tf, Uuid::from_u128(1));
+		let deadline = Duration::from_secs(5);
+
+		// Cancelled while it holds the build.
+		let (parked, _release) = park_next_commit(&hook);
+		let cancelled = {
+			let seqs = seqs.clone();
+			tokio::spawn(async move { seqs.next_namespace_id(None).await })
+		};
+		tokio::time::timeout(deadline, parked.notified())
+			.await
+			.expect("the cold build never reached its claim");
+		cancelled.abort();
+		assert!(cancelled.await.unwrap_err().is_cancelled());
+		tokio::time::timeout(deadline, seqs.next_namespace_id(None))
+			.await
+			.expect("a draw waited on a build whose task was cancelled")
+			.unwrap();
+
+		// Failed before it could claim.
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		seqs.next_table_id(Some(&TimedOut), ns, db)
+			.await
+			.expect_err("a build past its deadline claimed a window");
+		tokio::time::timeout(deadline, seqs.next_table_id(None, ns, db))
+			.await
+			.expect("a draw waited on a build that had failed")
+			.unwrap();
 	}
 }
