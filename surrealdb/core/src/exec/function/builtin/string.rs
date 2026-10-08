@@ -17,7 +17,7 @@ define_pure_function!(StringWords, "string::words", effects: EffectSet::PURE, (v
 define_pure_function!(StringContains, "string::contains", effects: EffectSet::PURE, (value: String, search: String) -> Bool, crate::fnc::string::contains);
 define_pure_function!(StringEndsWith, "string::ends_with", effects: EffectSet::PURE, (value: String, suffix: String) -> Bool, crate::fnc::string::ends_with);
 define_pure_function!(StringMatches, "string::matches", effects: EffectSet::PURE, (value: String, pattern: String) -> Bool, crate::fnc::string::matches);
-define_pure_function!(StringRepeat, "string::repeat", effects: EffectSet::PURE, (value: String, count: Int) -> String, crate::fnc::string::repeat);
+define_pure_function!(StringRepeat, "string::repeat", effects: EffectSet::PURE, metered: crate::fnc::string::repeat_walk, (value: String, count: Int) -> String, crate::fnc::string::repeat);
 define_pure_function!(StringSplit, "string::split", effects: EffectSet::PURE, (value: String, delimiter: String) -> Any, crate::fnc::string::split);
 define_pure_function!(StringStartsWith, "string::starts_with", effects: EffectSet::PURE, (value: String, prefix: String) -> Bool, crate::fnc::string::starts_with);
 
@@ -26,8 +26,8 @@ define_pure_function!(StringReplace, "string::replace", effects: EffectSet::PURE
 define_pure_function!(StringSlice, "string::slice", effects: EffectSet::PURE, (value: String, ?start: Any, ?end: Int) -> String, crate::fnc::string::slice);
 
 // Variadic string functions
-define_pure_function!(StringConcat, "string::concat", effects: EffectSet::PURE, (...values: Any) -> String, crate::fnc::string::concat);
-define_pure_function!(StringJoin, "string::join", effects: EffectSet::PURE, (separator: String, ...values: Any) -> String, crate::fnc::string::join);
+define_pure_function!(StringConcat, "string::concat", effects: EffectSet::PURE, metered: crate::fnc::string::concat_walk, (...values: Any) -> String, crate::fnc::string::concat);
+define_pure_function!(StringJoin, "string::join", effects: EffectSet::PURE, metered: crate::fnc::string::join_walk, (separator: String, ...values: Any) -> String, crate::fnc::string::join);
 
 // String distance functions
 define_pure_function!(StringDistanceDamerauLevenshtein, "string::distance::damerau_levenshtein", effects: EffectSet::PURE, (a: String, b: String) -> Int, crate::fnc::string::distance::damerau_levenshtein);

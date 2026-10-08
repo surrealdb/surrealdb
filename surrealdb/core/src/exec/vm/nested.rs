@@ -39,14 +39,13 @@ use std::sync::Arc;
 use futures::StreamExt;
 
 use super::host::{
-	Out, execute_program_reading, flush, host_scalar, limits_spent, run_group, run_rows,
+	Ended, Out, execute_program_reading, flush, host_scalar, limits_spent, run_group, run_rows,
 	run_value_row,
 };
-use super::interp::{State, Step};
+use super::interp::State;
 use super::plan::ValuesRead;
 use super::program::{BlockInstr, HostScalar, Pipeline, Program, Source};
 use crate::exe::FlowResultExt as _;
-use crate::exec::operators::check_cancelled;
 use crate::exec::operators::fetch::fetch_raw_record;
 use crate::exec::operators::scan::common::resolve_version_stamp;
 use crate::exec::operators::scan::pipeline::kv_scan_stream;
@@ -156,9 +155,11 @@ async fn stream_rows(
 	flush_at: usize,
 ) -> FlowResult<bool> {
 	while let Some(batch) = rows.next().await {
-		check_cancelled(ctx)?;
+		// An empty batch is a reader's hand-off once its refusals spent the
+		// fuel; the rows of any other spend it as they run.
+		super::fuel::tick(ctx, 0).await?;
 		for row in batch?.into_values() {
-			if run_value_row(program, pipeline, row, state, ctx).await? == Step::Stop
+			if run_value_row(program, pipeline, row, state, ctx).await? == Ended::Stop
 				|| limits_spent(pipeline, state)
 			{
 				return Ok(true);
@@ -564,8 +565,8 @@ async fn dispatched(
 						None,
 					);
 					while let Some(batch) = source.next().await {
-						check_cancelled(ctx)?;
 						for raw in batch?.into_values() {
+							super::fuel::tick(ctx, 1).await?;
 							match deref
 								.read(ctx, &rid.table, raw, ctx.root().skip_fetch_perms)
 								.await?
@@ -705,8 +706,12 @@ async fn undispatched_table(
 	Ok(Values::Stream(Box::pin(records.then(move |batch| {
 		let ctx = ctx.clone();
 		async move {
+			let batch = batch?;
+			// The records the permission refuses spend the fuel here, as
+			// their rows never run.
+			let read = batch.len();
 			let mut rows = Vec::new();
-			for mut record in batch?.into_values() {
+			for mut record in batch.into_values() {
 				let rid = match &record {
 					Value::Object(object) => match object.get("id") {
 						Some(Value::RecordId(rid)) => rid.clone(),
@@ -720,6 +725,7 @@ async fn undispatched_table(
 					rows.push(record);
 				}
 			}
+			super::fuel::tick(&ctx, super::fuel::units(read - rows.len())).await?;
 			Ok(crate::exec::ValueBatch::from(rows))
 		}
 	}))))

@@ -11,7 +11,6 @@ pub mod midhinge;
 pub mod mode;
 pub mod nearestrank;
 pub mod percentile;
-pub mod spread;
 pub mod top;
 pub mod trimean;
 pub mod vector;
@@ -20,15 +19,12 @@ pub mod vector;
 /// their element type must satisfy without a second import.
 pub use surrealdb_expr::val::number::ToFloat;
 
-pub fn mean(array: &[Number]) -> Result<Number> {
+pub async fn mean(array: &[Number]) -> Result<Number> {
 	if array.is_empty() {
 		return Ok(f64::NAN.into());
 	}
 	let len = array.len();
-	let mut sum: Number = 0.0f64.into();
-	for n in array {
-		sum = sum.try_add(*n)?;
-	}
+	let sum = crate::fuel::try_fold(array, Number::from(0.0f64), |sum, n| sum.try_add(*n)).await?;
 	match sum {
 		Number::Int(_) => unreachable!(),
 		Number::Float(x) => Ok((x / len as f64).into()),
@@ -36,18 +32,18 @@ pub fn mean(array: &[Number]) -> Result<Number> {
 	}
 }
 
-pub fn variance(array: &[Number]) -> Result<Number> {
+pub async fn variance(array: &[Number]) -> Result<Number> {
 	match array.len() {
 		0 => return Ok(f64::NAN.into()),
 		1 => return Ok(0.0.into()),
 		_ => {}
 	}
-	let mean = mean(array)?;
+	let mean = mean(array).await?;
 	let div = array.len() - 1;
-	let mut sum = Number::from(0.0);
-	for n in array.iter() {
-		sum = sum.try_add((*n - mean).try_pow(2.into())?)?;
-	}
+	let sum = crate::fuel::try_fold(array, Number::from(0.0), |sum, n| {
+		sum.try_add((*n - mean).try_pow(2.into())?)
+	})
+	.await?;
 	match sum {
 		Number::Int(_) => unreachable!(),
 		Number::Float(x) => Ok(Number::from(x / div as f64)),
@@ -55,8 +51,8 @@ pub fn variance(array: &[Number]) -> Result<Number> {
 	}
 }
 
-pub fn deviation(array: &[Number]) -> Result<Number> {
-	match variance(array)? {
+pub async fn deviation(array: &[Number]) -> Result<Number> {
+	match variance(array).await? {
 		Number::Int(_) => unreachable!(),
 		Number::Float(x) => Ok(Number::from(x.sqrt())),
 		Number::Decimal(x) => {

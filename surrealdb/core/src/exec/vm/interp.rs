@@ -1,10 +1,10 @@
 //! The interpreter: a pipeline's body, run synchronously for one row.
 //!
 //! [`run_row`] executes a body from an instruction until the row is done, the
-//! pipeline needs no more rows, or the body needs a step only the host can
-//! take — a read of storage, a call, a nested statement — and says which with
-//! a [`Step`]. Calling it again at the instruction the step names resumes the
-//! row.
+//! pipeline needs no more rows, the body needs a step only the host can take
+//! — a read of storage, a call, a nested statement — or the fuel is spent at
+//! a backward jump ([`super::fuel`]), and says which with a [`Step`]. Calling
+//! it again at the instruction the step names resumes the row.
 //!
 //! What persists across rows — paging counts, the rows a sort was handed, an
 //! aggregate's groups, the output — is in [`State`].
@@ -159,6 +159,13 @@ pub(super) enum Step {
 	Degree {
 		at: usize,
 	},
+	/// The fuel is spent: reach a yield point
+	/// ([`super::fuel::yield_point`]), then resume the row at instruction
+	/// `resume` with the same registers. Every driver of a body matches it:
+	/// a row abandoned here would lose the work done on it so far.
+	Yield {
+		resume: usize,
+	},
 }
 
 /// What the body left for the host to do with the row once it is done.
@@ -243,10 +250,13 @@ pub(super) enum Region {
 pub(super) struct State {
 	pub(super) paging: Vec<Paging>,
 	pub(super) sorts: Vec<Vec<(Vec<Value>, SortRow)>>,
-	/// For each sort that keeps a bounded number of rows, the keys of the last
-	/// row it keeps once it holds that many: a row whose keys do not order
-	/// before these can reach no kept place, and [`Instr::SortPush`] drops it.
-	pub(super) sort_floors: Vec<Option<Vec<Value>>>,
+	/// For each sort that keeps a bounded number of rows, how it keeps them:
+	/// whether it prunes or merges, and a merging sort's rows and merge
+	/// ([`Self::keep_sorted`]).
+	pub(super) sort_arrivals: Vec<Arrivals>,
+	/// Where a bulk instruction's copy of a collection stopped when the fuel
+	/// ran out, for the row to resume it ([`copied`]).
+	pub(super) bulk: Option<Bulk>,
 	pub(super) topk_cells:
 		Vec<Option<std::sync::Arc<crate::exec::topk_pushdown::TopKThresholdCell>>>,
 	/// For each sort of a brute-force KNN whose query vector is computed when
@@ -733,7 +743,7 @@ impl State {
 		let sorts = program.sorts.len();
 		self.paging = paging;
 		self.sorts.resize_with(sorts, Vec::new);
-		self.sort_floors.resize(sorts, None);
+		self.sort_arrivals.resize(sorts, Arrivals::default());
 		self.topk_cells.resize(sorts, None);
 		self.knn_queries.resize(sorts, None);
 		self.sort_spill.resize(sorts, None);
@@ -766,7 +776,8 @@ impl State {
 		let State {
 			paging,
 			sorts,
-			sort_floors,
+			sort_arrivals,
+			bulk,
 			topk_cells,
 			knn_queries,
 			sort_spill,
@@ -825,7 +836,8 @@ impl State {
 		} = self;
 		emptied(paging);
 		emptied(sorts);
-		emptied(sort_floors);
+		emptied(sort_arrivals);
+		*bulk = None;
 		emptied(topk_cells);
 		emptied(knn_queries);
 		emptied(sort_spill);
@@ -1063,7 +1075,8 @@ impl State {
 		Self {
 			paging: Vec::new(),
 			sorts: Vec::new(),
-			sort_floors: Vec::new(),
+			sort_arrivals: Vec::new(),
+			bulk: None,
 			topk_cells: Vec::new(),
 			knn_queries: Vec::new(),
 			sort_spill: Vec::new(),
@@ -1171,38 +1184,265 @@ impl State {
 		std::mem::take(&mut self.output)
 	}
 
-	/// Prune sort `sort` to the rows its order can still reach once it holds a
-	/// quarter more than it keeps, and raise its floor to the last row kept.
-	/// Pruning that often keeps the floor close to the kept rows' own, so few
-	/// rows are taken whole only to be dropped, for a sort per quarter of the
-	/// kept rows.
+	/// Take the row just pushed onto sort `sort` into the rows it keeps, when
+	/// it keeps a bounded number.
 	///
-	/// The sort is stable, so a later row whose keys equal the last kept row's
-	/// orders after it: only a row whose keys order strictly before the floor
+	/// The work a row costs is bounded by the quantum whatever the limit
+	/// ([`Arrivals::run`]):
+	///
+	/// - A sort whose limit, with a quarter more, fits a quantum prunes: once it holds a quarter
+	///   more rows than it keeps it sorts them and keeps the first, a sort of no more than a
+	///   quantum of rows per quarter of the kept rows. The sort is stable, so a row's place among
+	///   equal keys is its arrival.
+	/// - A sort with a larger limit merges ([`Self::merge_arrived`]): it holds its kept rows sorted
+	///   at the front of its buffer and the rows that arrived since behind them, and takes those
+	///   into the kept rows a run of no more than a quantum at a time, the run sorted in one go and
+	///   merged a share per arrival. Each row carries its arrival after its keys, which orders a
+	///   tie ([`super::sort::compare_rows`]), so the rows kept, and the order the sort hands them
+	///   on in, are the stable ones wherever a row lies in the buffer.
+	///
+	/// Once a sort holds as many as it keeps, the last kept row's keys are its
+	/// floor ([`Self::sort_floor`]): [`Instr::SortPush`] drops a row whose
+	/// keys do not order strictly before them, as no later row with equal keys
 	/// can take a kept place.
 	pub(super) fn keep_sorted(&mut self, program: &Program, sort: u16) {
-		let spec = &program.sorts[sort as usize];
+		let at = sort as usize;
+		let spec = &program.sorts[at];
 		if spec.random {
 			return;
 		}
 		let Some(keep) = spec.keep else {
 			return;
 		};
-		let rows = &mut self.sorts[sort as usize];
+		let arrivals = &mut self.sort_arrivals[at];
+		if arrivals.run(keep) == 0 {
+			self.prune(program, sort, keep);
+			return;
+		}
+		let arrival = arrivals.arrived;
+		arrivals.arrived += 1;
+		if let Some((keys, _)) = self.sorts[at].last_mut() {
+			keys.push(Value::from(arrival as i64));
+		}
+		self.merge_arrived(program, sort, keep);
+	}
+
+	/// [`Self::keep_sorted`] for rows a region's batch kept for sort `sort`,
+	/// in the order its own sort held them: they arrived after every row the
+	/// sort holds, `arrived` of them reaching the batch's sort. A merging
+	/// sort's rows carry their arrival in the batch, which is rebased on the
+	/// sort's own.
+	pub(super) fn keep_absorbed(
+		&mut self,
+		program: &Program,
+		sort: u16,
+		rows: Vec<(Vec<Value>, SortRow)>,
+		arrived: u64,
+	) {
+		let at = sort as usize;
+		let spec = &program.sorts[at];
+		let keep = match spec.keep {
+			Some(keep) if !spec.random => keep,
+			_ => {
+				self.sorts[at].extend(rows);
+				return;
+			}
+		};
+		if self.sort_arrivals[at].run(keep) == 0 {
+			for row in rows {
+				self.sorts[at].push(row);
+				self.prune(program, sort, keep);
+			}
+			return;
+		}
+		let width = spec.keys.len();
+		let base = self.sort_arrivals[at].arrived;
+		self.sort_arrivals[at].arrived += arrived.max(rows.len() as u64);
+		for (place, (mut keys, row)) in rows.into_iter().enumerate() {
+			// A row the batch kept unstamped held its place among equal keys
+			// by where it lay, which stamps it.
+			match keys.get_mut(width) {
+				Some(Value::Number(crate::val::Number::Int(arrival))) => *arrival += base as i64,
+				_ => {
+					keys.truncate(width);
+					keys.push(Value::from((base + place as u64) as i64));
+				}
+			}
+			self.sorts[at].push((keys, row));
+			self.merge_arrived(program, sort, keep);
+		}
+	}
+
+	/// Prune sort `sort` to the `keep` rows its order can still reach once it
+	/// holds a quarter more, and take the last kept row as its floor. The
+	/// rows a prune sorts, no more than a quantum, are charged whole.
+	fn prune(&mut self, program: &Program, sort: u16, keep: usize) {
+		let at = sort as usize;
+		let rows = &mut self.sorts[at];
 		if rows.len() < keep.saturating_add((keep / 4).max(16)) {
 			return;
 		}
-		sort_and_keep(rows, &spec.keys, keep);
+		super::fuel::charge(super::fuel::units(rows.len()));
+		#[cfg(test)]
+		LARGEST_PRUNE.with(|largest| largest.set(largest.get().max(rows.len())));
+		sort_and_keep(rows, &program.sorts[at].keys, keep);
 		if keep > 0 && rows.len() == keep {
-			let floor = rows.last().map(|(keys, _)| keys.clone());
-			if let Some(ref f) = floor
-				&& let Some(Some(cell)) = self.topk_cells.get(sort as usize)
-				&& let Some(first_key) = f.first()
+			self.sort_arrivals[at].floored = true;
+			if let Some(Some(cell)) = self.topk_cells.get(at)
+				&& let Some(first_key) = rows[keep - 1].0.first()
 			{
 				cell.publish(first_key.clone());
 			}
-			self.sort_floors[sort as usize] = floor;
 		}
+	}
+
+	/// Advance a merging sort `sort` by the row that just arrived, stamped
+	/// with its arrival: a step of the merge under way, or a run started once
+	/// enough rows have arrived behind the kept ones.
+	///
+	/// The buffer holds the kept rows, sorted, at `0..kept` and the rows that
+	/// arrived since behind them, in no order. A run is taken in one of two
+	/// ways, so that a merge only ever swaps rows within the buffer and the
+	/// buffer holds every row the sort may keep at every point between rows:
+	///
+	/// - While the sort holds fewer than it keeps, the run is the last rows of the buffer, no more
+	///   than fill it, taken once as many again have arrived; nothing is dropped, and the rows the
+	///   merge displaces from the front are arrived rows, which take the run's places.
+	/// - Once it is full, the run is the rows just behind the kept ones. As many rows as the run
+	///   holds are cut from the ends of the two, the greatest, and the merge writes the rest into
+	///   `0..keep`, displacing the kept rows cut into the run's places, so that once it is done the
+	///   cut rows are those at `keep..keep + run` and are removed.
+	///
+	/// A run's start sorts it (no more than a quantum of rows), finds the cut
+	/// by a binary search and takes the merge's first step, which places the
+	/// greatest row kept at `keep - 1`, where it stays as the sort's floor.
+	/// Each later row owes a share of the merge, enough that it is done before
+	/// the next run is due, and the shares are placed a stretch of no more
+	/// than a quantum at a time.
+	fn merge_arrived(&mut self, program: &Program, sort: u16, keep: usize) {
+		let at = sort as usize;
+		let keys = &program.sorts[at].keys;
+		let rows = &mut self.sorts[at];
+		let arrivals = &mut self.sort_arrivals[at];
+		if keep == 0 {
+			rows.clear();
+			return;
+		}
+		if let Some(merge) = &mut arrivals.merge {
+			// An arrival owes its share of the merge, placed a stretch at a
+			// time, so that a gallop's comparisons serve many rows.
+			let stretch =
+				MERGE_STRETCH.max(merge.pace).min(surrealdb_runtime::fuel::quantum() as usize);
+			merge.owed += merge.pace;
+			if merge.owed < stretch.min(merge.len) {
+				return;
+			}
+			let placed = merge.owed.min(stretch);
+			merge.owed -= placed;
+			super::fuel::charge(super::fuel::units(placed));
+			if merge.step(rows, keys, placed) {
+				let merge = *merge;
+				arrivals.merge = None;
+				merge.finish(rows, arrivals);
+			}
+			return;
+		}
+		let most = arrivals.run(keep);
+		let kept = arrivals.kept;
+		let arrived = rows.len() - kept;
+		let full = kept == keep;
+		let (run, start) = if full {
+			if arrived < most {
+				return;
+			}
+			(most, kept)
+		} else {
+			let run = most.min(keep - kept);
+			if arrived < 2 * run {
+				return;
+			}
+			(run, rows.len() - run)
+		};
+		super::fuel::charge(super::fuel::units(2 * run));
+		#[cfg(test)]
+		LARGEST_PRUNE.with(|largest| largest.set(largest.get().max(run)));
+		// Stamped rows order totally, so an unstable sort is a stable one.
+		rows[start..start + run]
+			.sort_unstable_by(|(a, _), (b, _)| super::sort::compare_rows(a, b, keys));
+		// Once full, the run's worth of the greatest rows of the two is cut:
+		// `cut` from the kept rows, found by a binary search for the count
+		// at which every row cut orders after every row kept.
+		let cut = if full {
+			let (mut low, mut high) = (0, run.min(kept));
+			while low < high {
+				let from_kept = low + (high - low) / 2;
+				let from_run = run - from_kept;
+				// Too few cut from the kept rows while the least row cut
+				// from the run orders before the greatest kept row left.
+				if super::sort::compare_rows(
+					&rows[start + run - from_run].0,
+					&rows[kept - from_kept - 1].0,
+					keys,
+				) == Ordering::Less
+				{
+					low = from_kept + 1;
+				} else {
+					high = from_kept;
+				}
+			}
+			low
+		} else {
+			0
+		};
+		let (left, right) = if full {
+			(kept - cut, cut)
+		} else {
+			(kept, run)
+		};
+		let len = left + right;
+		let mut merge = Merge {
+			kept: left,
+			run: right,
+			run_at: start,
+			len,
+			cut: if full {
+				run
+			} else {
+				0
+			},
+			pace: (len.div_ceil(most) + 1).min(surrealdb_runtime::fuel::quantum() as usize),
+			owed: 0,
+		};
+		let done = merge.step(rows, keys, 1);
+		if len == keep {
+			arrivals.floored = true;
+			if let Some(Some(cell)) = self.topk_cells.get(at)
+				&& let Some(first_key) = rows[keep - 1].0.first()
+			{
+				cell.publish(first_key.clone());
+			}
+		}
+		if done {
+			merge.finish(rows, arrivals);
+		} else {
+			arrivals.merge = Some(merge);
+		}
+	}
+
+	/// The keys a row must order strictly before to reach a kept place of
+	/// sort `sort`, once it keeps a bounded number of rows and holds that
+	/// many ([`Self::keep_sorted`]): the last row a prune kept, or the row a
+	/// merge's run placed last. A later row whose keys equal them orders after
+	/// that row, by arrival.
+	#[inline]
+	pub(super) fn sort_floor<'s>(&'s self, program: &Program, sort: u16) -> Option<&'s [Value]> {
+		let at = sort as usize;
+		let spec = &program.sorts[at];
+		let keep = match spec.keep {
+			Some(keep) if keep > 0 && !spec.random => keep,
+			_ => return None,
+		};
+		self.sort_arrivals[at].floored.then(|| self.sorts[at][keep - 1].0.as_slice())
 	}
 
 	/// [`Self::settle`] for a record read in place, from its stored bytes: a
@@ -1336,6 +1576,35 @@ pub(super) fn run_row<'r>(
 			Operand::Field(name) => row.field(&program.fields[name as usize])?,
 		})
 	};
+	// A jump to `target`. A backward one is an iteration of a loop and spends
+	// a unit of fuel; once the fuel is spent the row yields there, and its
+	// driver resumes it at `target` with the same registers.
+	macro_rules! jump {
+		($target:expr) => {{
+			let target: usize = $target;
+			if target <= pc && super::fuel::charge(1) {
+				return Ok(Step::Yield {
+					resume: target,
+				});
+			}
+			pc = target;
+		}};
+	}
+	// The value `operand` names, borrowed where it is held whole — an array,
+	// a set, an object and so on — with `field` holding a field's scalar;
+	// `None` for a scalar held unboxed.
+	macro_rules! peek {
+		($operand:expr, $field:ident) => {
+			match $operand {
+				Operand::Reg(reg) => regs[reg as usize].as_whole(),
+				Operand::Const(index) => Some(&program.consts[index as usize]),
+				Operand::Field(name) => {
+					$field = row.field(&program.fields[name as usize])?;
+					$field.as_whole()
+				}
+			}
+		};
+	}
 	loop {
 		// A body that reaches past its last instruction — on entry, on the
 		// resume after a host step, or after a jump — was lowered wrong, and
@@ -1428,11 +1697,11 @@ pub(super) fn run_row<'r>(
 			Instr::JumpIfPermissionsBypassed {
 				target,
 			} => {
-				pc = if state.permissions_bypassed {
-					*target as usize
+				if state.permissions_bypassed {
+					jump!(*target as usize);
 				} else {
-					pc + 1
-				};
+					pc += 1;
+				}
 			}
 			Instr::WriteProjection {
 				..
@@ -1489,11 +1758,11 @@ pub(super) fn run_row<'r>(
 						answer.is_truthy()
 					}
 				};
-				pc = if holds == *truthy {
-					*target as usize
+				if holds == *truthy {
+					jump!(*target as usize);
 				} else {
-					pc + 1
-				};
+					pc += 1;
+				}
 			}
 			Instr::FilterFieldInt {
 				field,
@@ -1528,7 +1797,9 @@ pub(super) fn run_row<'r>(
 				right,
 				dst,
 			} => {
-				let answer = op.apply_scalar(&read(regs, *left)?, &read(regs, *right)?)?;
+				let (left, right) = (read(regs, *left)?, read(regs, *right)?);
+				let answer = op.apply_scalar(&left, &right)?;
+				charge_walked(&left, &right);
 				regs[*dst as usize] = answer;
 				pc += 1;
 			}
@@ -1539,12 +1810,14 @@ pub(super) fn run_row<'r>(
 				truthy,
 				target,
 			} => {
-				let answer = op.apply_scalar(&read(regs, *left)?, &read(regs, *right)?)?;
-				pc = if answer.is_truthy() == *truthy {
-					*target as usize
+				let (left, right) = (read(regs, *left)?, read(regs, *right)?);
+				let answer = op.apply_scalar(&left, &right)?;
+				charge_walked(&left, &right);
+				if answer.is_truthy() == *truthy {
+					jump!(*target as usize);
 				} else {
-					pc + 1
-				};
+					pc += 1;
+				}
 			}
 			Instr::FilterCompare {
 				op,
@@ -1552,7 +1825,9 @@ pub(super) fn run_row<'r>(
 				right,
 				reject,
 			} => {
-				let answer = op.apply_scalar(&read(regs, *left)?, &read(regs, *right)?)?;
+				let (left, right) = (read(regs, *left)?, read(regs, *right)?);
+				let answer = op.apply_scalar(&left, &right)?;
+				charge_walked(&left, &right);
 				if answer.is_truthy() == *reject {
 					return Ok(Step::Next);
 				}
@@ -1566,6 +1841,7 @@ pub(super) fn run_row<'r>(
 			} => {
 				let answer =
 					op.apply(read(regs, *left)?.to_value(), read(regs, *right)?.to_value())?;
+				super::fuel::charge(super::fuel::weight(&answer));
 				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(answer));
 				pc += 1;
 			}
@@ -1624,12 +1900,24 @@ pub(super) fn run_row<'r>(
 				index,
 				dst,
 			} => {
-				let value = read(regs, *src)?.to_value();
+				// The value is read in place: a step takes a part of it, and
+				// a copy of the whole would be a walk of its own.
+				let (field, held);
+				let value = match peek!(*src, field) {
+					Some(value) => value,
+					None => {
+						held = read(regs, *src)?.to_value();
+						&held
+					}
+				};
 				let index = match index {
 					Some(index) => Some(read(regs, *index)?.to_value()),
 					None => None,
 				};
-				let answer = op.apply(&value, index.as_ref())?;
+				let answer = op.apply(value, index.as_ref())?;
+				// A flatten, or a slice by a range, walks what it answers in
+				// one go: charged whole, the row yields at its next yield point.
+				super::fuel::charge(super::fuel::weight(&answer));
 				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(answer));
 				pc += 1;
 			}
@@ -1678,18 +1966,39 @@ pub(super) fn run_row<'r>(
 				dst,
 				..
 			} => {
-				let base = read(regs, *src)?;
-				let answer = match &base {
-					Scalar::Value(value) => match value.as_ref() {
-						Value::Object(object) => Some(Value::Object(object.clone())),
-						Value::Array(array)
-							if !array.iter().any(|item| matches!(item, Value::RecordId(_))) =>
-						{
-							Some(Value::Array(array.clone()))
+				let field;
+				let base = peek!(*src, field);
+				let answer = match base {
+					// The collection is copied a stretch at a time, a unit an
+					// element, yielding mid-copy once the fuel is spent.
+					Some(Value::Object(object)) => {
+						let entries = object.0.as_slice();
+						match copied(state, Bulk::at(pipeline, pc, entries), entries, |_| false) {
+							Copied::Done(entries) => Some(Value::Object(crate::val::Object(
+								surrealdb_collections::VecMap::from_sorted_vec_unchecked(entries),
+							))),
+							Copied::Spent => {
+								return Ok(Step::Yield {
+									resume: pc,
+								});
+							}
+							Copied::Refused => None,
 						}
-						Value::RecordId(_) | Value::Array(_) => None,
-						_ => Some(Value::None),
-					},
+					}
+					Some(Value::Array(array)) => {
+						match copied(state, Bulk::at(pipeline, pc, &array.0), &array.0, |item| {
+							matches!(item, Value::RecordId(_))
+						}) {
+							Copied::Done(values) => Some(Value::Array(values.into())),
+							Copied::Spent => {
+								return Ok(Step::Yield {
+									resume: pc,
+								});
+							}
+							Copied::Refused => None,
+						}
+					}
+					Some(Value::RecordId(_)) => None,
 					_ => Some(Value::None),
 				};
 				match answer {
@@ -1710,29 +2019,37 @@ pub(super) fn run_row<'r>(
 				dst,
 				none,
 			} => {
-				let base = read(regs, *src)?.to_value();
-				match base {
-					Value::Array(array) => {
-						regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::Array(
-							crate::val::Array::new(),
-						)));
-						regs[*items as usize] =
-							Scalar::Value(std::borrow::Cow::Owned(Value::Array(array)));
-						pc += 1;
+				// The elements the filter walks are copied a stretch at a
+				// time, a unit an element, yielding mid-copy once the fuel is
+				// spent; the loop it begins spends a unit an element again.
+				let field;
+				let base = peek!(*src, field);
+				let (elements, empty) = match base {
+					Some(Value::Array(array)) => {
+						(&array.0[..], Value::Array(crate::val::Array::new()))
 					}
-					Value::Set(set) => {
-						regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::Set(
-							crate::val::Set::new(),
-						)));
-						let elements: Vec<Value> = set.iter().cloned().collect();
+					Some(Value::Set(set)) => {
+						(set.0.iter().as_slice(), Value::Set(crate::val::Set::new()))
+					}
+					_ => {
+						regs[*dst as usize] = Scalar::None;
+						jump!(*none as usize);
+						continue;
+					}
+				};
+				match copied(state, Bulk::at(pipeline, pc, elements), elements, |_| false) {
+					Copied::Done(elements) => {
+						regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(empty));
 						regs[*items as usize] =
 							Scalar::Value(std::borrow::Cow::Owned(Value::Array(elements.into())));
 						pc += 1;
 					}
-					_ => {
-						regs[*dst as usize] = Scalar::None;
-						pc = *none as usize;
+					Copied::Spent => {
+						return Ok(Step::Yield {
+							resume: pc,
+						});
 					}
+					Copied::Refused => unreachable!("a copy that refuses nothing"),
 				}
 			}
 			Instr::MapBegin {
@@ -1740,17 +2057,31 @@ pub(super) fn run_row<'r>(
 				items,
 				dst,
 				other,
-			} => match read(regs, *src)?.to_value() {
-				Value::Array(array) => {
-					regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::Array(
-						crate::val::Array::new(),
-					)));
-					regs[*items as usize] =
-						Scalar::Value(std::borrow::Cow::Owned(Value::Array(array)));
-					pc += 1;
+			} => {
+				// As `FilterBegin`: the array is copied a stretch at a time.
+				let field;
+				let base = peek!(*src, field);
+				let Some(Value::Array(array)) = base else {
+					jump!(*other as usize);
+					continue;
+				};
+				match copied(state, Bulk::at(pipeline, pc, &array.0), &array.0, |_| false) {
+					Copied::Done(elements) => {
+						regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::Array(
+							crate::val::Array::new(),
+						)));
+						regs[*items as usize] =
+							Scalar::Value(std::borrow::Cow::Owned(Value::Array(elements.into())));
+						pc += 1;
+					}
+					Copied::Spent => {
+						return Ok(Step::Yield {
+							resume: pc,
+						});
+					}
+					Copied::Refused => unreachable!("a copy that refuses nothing"),
 				}
-				_ => pc = *other as usize,
-			},
+			}
 			Instr::CollectPush {
 				collection,
 				value,
@@ -1961,7 +2292,7 @@ pub(super) fn run_row<'r>(
 							Scalar::Value(std::borrow::Cow::Owned(Value::Number(distance)));
 						pc += 1;
 					}
-					None => pc = *none as usize,
+					None => jump!(*none as usize),
 				}
 			}
 			Instr::Extract {
@@ -2055,6 +2386,25 @@ pub(super) fn run_row<'r>(
 				call,
 				position,
 			} => {
+				// An array is copied a stretch at a time, as `FilterBegin`
+				// copies one; anything else is converted whole.
+				let field;
+				if let Some(Value::Array(array)) = peek!(*src, field) {
+					match copied(state, Bulk::at(pipeline, pc, &array.0), &array.0, |_| false) {
+						Copied::Done(values) => {
+							regs[*dst as usize] =
+								Scalar::Value(std::borrow::Cow::Owned(Value::Array(values.into())));
+							pc += 1;
+							continue;
+						}
+						Copied::Spent => {
+							return Ok(Step::Yield {
+								resume: pc,
+							});
+						}
+						Copied::Refused => unreachable!("a copy that refuses nothing"),
+					}
+				}
 				let value = read(regs, *src)?.to_value();
 				let array = value.coerce_to::<crate::val::Array>().map_err(|e| {
 					crate::expr::Error::InvalidFunctionArguments {
@@ -2091,7 +2441,7 @@ pub(super) fn run_row<'r>(
 							Scalar::Number(crate::val::Number::Int(at as i64 + 1));
 						pc += 1;
 					}
-					None => pc = *done as usize,
+					None => jump!(*done as usize),
 				}
 			}
 			Instr::ClosureBind {
@@ -2175,19 +2525,19 @@ pub(super) fn run_row<'r>(
 						&owned
 					}
 				};
-				pc = if spec.resolves(value) {
-					pc + 1
+				if spec.resolves(value) {
+					pc += 1;
 				} else if let Some(closure) = closure
 					&& let Value::Object(object) = value
 					&& let Some(Value::Closure(_)) = object.get(spec.name.as_str())
 				{
-					*closure as usize
+					jump!(*closure as usize);
 				} else {
 					return Err(anyhow::Error::new(crate::exec::Error::InvalidFunction {
 						name: spec.name.clone(),
 						message: format!("no such method found for the {} type", value.kind_of()),
 					}));
-				};
+				}
 			}
 			Instr::Method {
 				method,
@@ -2233,55 +2583,55 @@ pub(super) fn run_row<'r>(
 				nullish,
 				target,
 			} => {
-				pc = if read(regs, *cond)?.to_value().is_nullish() == *nullish {
-					*target as usize
+				if read(regs, *cond)?.to_value().is_nullish() == *nullish {
+					jump!(*target as usize);
 				} else {
-					pc + 1
-				};
+					pc += 1;
+				}
 			}
 			Instr::JumpIfNone {
 				cond,
 				none,
 				target,
 			} => {
-				pc = if read(regs, *cond)?.is_none() == *none {
-					*target as usize
+				if read(regs, *cond)?.is_none() == *none {
+					jump!(*target as usize);
 				} else {
-					pc + 1
-				};
+					pc += 1;
+				}
 			}
 			Instr::JumpIfNotRecordId {
 				cond,
 				target,
 			} => {
 				let record = matches!(read(regs, *cond)?, Scalar::Value(value) if matches!(value.as_ref(), Value::RecordId(_)));
-				pc = if record {
-					pc + 1
+				if record {
+					pc += 1;
 				} else {
-					*target as usize
-				};
+					jump!(*target as usize);
+				}
 			}
 			Instr::JumpIfNotObject {
 				cond,
 				target,
 			} => {
 				let object = matches!(read(regs, *cond)?, Scalar::Value(value) if matches!(value.as_ref(), Value::Object(_)));
-				pc = if object {
-					pc + 1
+				if object {
+					pc += 1;
 				} else {
-					*target as usize
-				};
+					jump!(*target as usize);
+				}
 			}
 			Instr::JumpIf {
 				cond,
 				truthy,
 				target,
 			} => {
-				pc = if read(regs, *cond)?.is_truthy() == *truthy {
-					*target as usize
+				if read(regs, *cond)?.is_truthy() == *truthy {
+					jump!(*target as usize);
 				} else {
-					pc + 1
-				};
+					pc += 1;
+				}
 			}
 			Instr::Filter {
 				cond,
@@ -2301,7 +2651,7 @@ pub(super) fn run_row<'r>(
 				let paging = &mut state.paging[*limit as usize];
 				if paging.skip > 0 {
 					paging.skip -= 1;
-					pc = *target as usize;
+					jump!(*target as usize);
 				} else {
 					pc += 1;
 				}
@@ -2319,11 +2669,11 @@ pub(super) fn run_row<'r>(
 				limit,
 				done,
 			} => {
-				pc = if state.paging[*limit as usize].remaining == Some(0) {
-					*done as usize
+				if state.paging[*limit as usize].remaining == Some(0) {
+					jump!(*done as usize);
 				} else {
-					pc + 1
-				};
+					pc += 1;
+				}
 			}
 			Instr::SeedObject {
 				dst,
@@ -2518,11 +2868,11 @@ pub(super) fn run_row<'r>(
 					Err(crate::expr::ControlFlow::Err(error)) => return Err(error),
 					Err(other) => bail!("a distinct set ended its row with {other:?}"),
 				};
-				pc = if fresh {
-					pc + 1
+				if fresh {
+					pc += 1;
 				} else {
-					*target as usize
-				};
+					jump!(*target as usize);
+				}
 			}
 			Instr::JoinProbe {
 				join,
@@ -2545,7 +2895,7 @@ pub(super) fn run_row<'r>(
 			} => {
 				// A row that orders no earlier than the last row the sort keeps
 				// is dropped before its keys are gathered or the row is taken.
-				let reaches = match &state.sort_floors[*sort as usize] {
+				let reaches = match state.sort_floor(program, *sort) {
 					Some(floor) => {
 						let order = &program.sorts[*sort as usize].keys;
 						let mut ordering = Ordering::Equal;
@@ -2560,9 +2910,12 @@ pub(super) fn run_row<'r>(
 					None => true,
 				};
 				if reaches {
-					let keys = (*keys..*keys + *count)
-						.map(|r| std::mem::replace(&mut regs[r as usize], Scalar::None).to_value())
-						.collect();
+					// Room for the arrival a bounded sort stamps after the keys.
+					let mut gathered = Vec::with_capacity(*count as usize + 1);
+					gathered.extend((*keys..*keys + *count).map(|r| {
+						std::mem::replace(&mut regs[r as usize], Scalar::None).to_value()
+					}));
+					let keys = gathered;
 					state.pending = Some(Pending::Sort {
 						sort: *sort,
 						keys,
@@ -2620,7 +2973,7 @@ pub(super) fn run_row<'r>(
 				}) {
 					pc += 1;
 				} else {
-					pc = *done as usize;
+					jump!(*done as usize);
 				}
 			}
 			Instr::GroupFirstSet {
@@ -2700,7 +3053,7 @@ pub(super) fn run_row<'r>(
 			Instr::Jump {
 				target,
 			} => {
-				pc = *target as usize;
+				jump!(*target as usize);
 			}
 			Instr::Next {
 				list,
@@ -2726,7 +3079,7 @@ pub(super) fn run_row<'r>(
 							Scalar::Number(crate::val::Number::Int(index as i64 + 1));
 						pc += 1;
 					}
-					None => pc = *done as usize,
+					None => jump!(*done as usize),
 				}
 			}
 			Instr::Store(_) => {
@@ -2858,6 +3211,304 @@ impl SortRow {
 }
 
 /// Stable sort by `keys`, then drop every row past the first `keep`.
+/// Charge the walk a comparison of two collections makes, whole: an
+/// operator such as `CONTAINS` or `=` reads each operand in one go, and the
+/// row yields at its next yield point.
+#[inline]
+fn charge_walked(left: &Scalar<'_>, right: &Scalar<'_>) {
+	let walked = left
+		.as_whole()
+		.map_or(0, super::fuel::weight)
+		.saturating_add(right.as_whole().map_or(0, super::fuel::weight));
+	if walked > 0 {
+		super::fuel::charge(walked);
+	}
+}
+
+/// A bulk instruction's copy of a collection, stopped where the fuel ran out.
+pub(super) struct Bulk {
+	at: BulkAt,
+	built: Built,
+}
+
+/// The instruction, and the collection, a [`Bulk`] copy belongs to: a row
+/// resumes it only at the instruction that began it, over the same
+/// collection, which its registers still hold.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct BulkAt {
+	pipeline: usize,
+	pc: usize,
+	source: usize,
+	len: usize,
+	/// Whether the copy may stop for a yield: not inside the storage cursor,
+	/// where a body never yields.
+	yields: bool,
+}
+
+impl Bulk {
+	fn at<T>(pipeline: &Pipeline, pc: usize, source: &[T]) -> BulkAt {
+		BulkAt {
+			pipeline: std::ptr::from_ref(pipeline) as usize,
+			pc,
+			source: source.as_ptr() as usize,
+			len: source.len(),
+			yields: !pipeline.in_place,
+		}
+	}
+}
+
+/// What a [`Bulk`] copy has built so far.
+enum Built {
+	Values(Vec<Value>),
+	Entries(Vec<(surrealdb_strand::Strand, Value)>),
+}
+
+/// An element a bulk instruction copies.
+trait Bulked: Clone + Sized {
+	fn built(values: Vec<Self>) -> Built;
+	fn resumed(built: Built) -> Option<Vec<Self>>;
+}
+
+impl Bulked for Value {
+	fn built(values: Vec<Self>) -> Built {
+		Built::Values(values)
+	}
+
+	fn resumed(built: Built) -> Option<Vec<Self>> {
+		match built {
+			Built::Values(values) => Some(values),
+			Built::Entries(_) => None,
+		}
+	}
+}
+
+impl Bulked for (surrealdb_strand::Strand, Value) {
+	fn built(entries: Vec<Self>) -> Built {
+		Built::Entries(entries)
+	}
+
+	fn resumed(built: Built) -> Option<Vec<Self>> {
+		match built {
+			Built::Entries(entries) => Some(entries),
+			Built::Values(_) => None,
+		}
+	}
+}
+
+/// How far a stretch of a bulk copy got.
+enum Copied<T> {
+	Done(T),
+	/// The fuel ran out: the row yields and resumes the copy.
+	Spent,
+	/// An element the instruction does not take whole was met.
+	Refused,
+}
+
+/// A copy of `source` for the bulk instruction `at`, taken a stretch at a
+/// time, a unit an element, from where an earlier stretch stopped: once a
+/// stretch spends the fuel the copy is kept in the state and the row yields,
+/// resuming here. Refused, with nothing kept, at the first element `refuse`
+/// holds for.
+fn copied<T: Bulked>(
+	state: &mut State,
+	at: BulkAt,
+	source: &[T],
+	refuse: impl Fn(&T) -> bool,
+) -> Copied<Vec<T>> {
+	let mut built = match state.bulk.take() {
+		Some(Bulk {
+			at: held,
+			built,
+		}) if held == at => T::resumed(built).unwrap_or_else(|| Vec::with_capacity(source.len())),
+		_ => Vec::with_capacity(source.len()),
+	};
+	while built.len() < source.len() {
+		// A copy that finds the fuel already spent yields before it copies.
+		if at.yields && super::fuel::spent() {
+			state.bulk = Some(Bulk {
+				at,
+				built: T::built(built),
+			});
+			return Copied::Spent;
+		}
+		let from = built.len();
+		let take = surrealdb_runtime::fuel::stretch().min(source.len() - from);
+		let part = &source[from..from + take];
+		if part.iter().any(&refuse) {
+			return Copied::Refused;
+		}
+		built.extend_from_slice(part);
+		if super::fuel::charge(super::fuel::units(take)) && at.yields && built.len() < source.len()
+		{
+			state.bulk = Some(Bulk {
+				at,
+				built: T::built(built),
+			});
+			return Copied::Spent;
+		}
+	}
+	Copied::Done(built)
+}
+
+#[cfg(test)]
+thread_local! {
+	/// The most rows one prune, or one merge's run, of a bounded sort sorted
+	/// on this thread.
+	pub(super) static LARGEST_PRUNE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The most rows a merging sort's arrivals place at once, held to the
+/// quantum ([`State::merge_arrived`]).
+const MERGE_STRETCH: usize = 256;
+
+/// What a sort that keeps a bounded number of rows counts across its rows
+/// ([`State::keep_sorted`]).
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct Arrivals {
+	/// The most rows a run of a merging sort takes, or zero for a sort that
+	/// prunes, decided by its first row: a sort whose limit, with a quarter
+	/// more, exceeds the thread's quantum merges, so that no prune sorts more
+	/// than a quantum of rows.
+	pub(super) run: Option<usize>,
+	/// Whether the sort holds as many rows as it keeps, so that the row at
+	/// `keep - 1` is its floor.
+	pub(super) floored: bool,
+	/// The rows that have reached a merging sort, each stamped with its place
+	/// among them.
+	pub(super) arrived: u64,
+	/// The rows a merging sort holds sorted at the front of its buffer.
+	pub(super) kept: usize,
+	/// A merging sort's merge under way.
+	pub(super) merge: Option<Merge>,
+}
+
+impl Arrivals {
+	/// The most rows a run of a sort keeping `keep` rows takes, or zero when
+	/// it prunes.
+	fn run(&mut self, keep: usize) -> usize {
+		*self.run.get_or_insert_with(|| {
+			let quantum = surrealdb_runtime::fuel::quantum() as usize;
+			let slack = (keep / 4).max(16);
+			if keep.saturating_add(slack) > quantum {
+				slack.min(quantum).max(1)
+			} else {
+				0
+			}
+		})
+	}
+}
+
+/// A merge of a sorted run into a merging sort's kept rows
+/// ([`State::merge_arrived`]), from the greatest row down into `0..len`.
+///
+/// The places not yet written, `kept..kept + run`, hold neither kept nor run
+/// rows, so the rows still to place move into them by swaps: the kept rows
+/// that order after the run's greatest shift up as a block, or the run's
+/// rows that order after the greatest kept row move across as one, each
+/// block's length found by a gallop. The buffer holds the same rows after
+/// every move.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Merge {
+	/// The kept rows still to place, at `0..kept`.
+	kept: usize,
+	/// The run's rows still to place, at `run_at..run_at + run`.
+	run: usize,
+	run_at: usize,
+	/// The rows the merge places, at `0..len`.
+	len: usize,
+	/// The rows cut, at `len..len + cut` once the merge is done.
+	cut: usize,
+	/// The rows an arriving row's share of the merge places.
+	pace: usize,
+	/// The rows the arrivals since the last moves have to place.
+	owed: usize,
+}
+
+impl Merge {
+	/// Place up to `most` rows, answering whether the merge is done.
+	fn step(&mut self, rows: &mut [(Vec<Value>, SortRow)], keys: &[KeyOrder], most: usize) -> bool {
+		let after = |rows: &[(Vec<Value>, SortRow)], a: usize, b: usize| {
+			super::sort::compare_rows(&rows[a].0, &rows[b].0, keys) == Ordering::Greater
+		};
+		let mut left = most;
+		while self.run > 0 && left > 0 {
+			let top = self.run_at + self.run - 1;
+			// The kept rows ordering after the run's greatest shift up by
+			// the run's length, over places not yet written.
+			let shift = gallop(self.kept.min(left), |n| after(rows, self.kept - n, top));
+			if shift > 0 {
+				let mut end = self.kept;
+				let start = self.kept - shift;
+				while end > start {
+					let take = (end - start).min(self.run);
+					let (low, high) = rows.split_at_mut(end);
+					low[end - take..].swap_with_slice(&mut high[self.run - take..self.run]);
+					end -= take;
+				}
+				self.kept -= shift;
+				left -= shift;
+				continue;
+			}
+			// The run's rows ordering after the greatest kept row move
+			// across to the top of the places not yet written.
+			let moved = match self.kept {
+				0 => self.run.min(left),
+				kept => gallop(self.run.min(left), |n| {
+					after(rows, self.run_at + self.run - n, kept - 1)
+				}),
+			};
+			let to = self.kept + self.run - moved;
+			let from = self.run_at + self.run - moved;
+			let (low, high) = rows.split_at_mut(from);
+			low[to..to + moved].swap_with_slice(&mut high[..moved]);
+			self.run -= moved;
+			left -= moved;
+		}
+		self.run == 0
+	}
+
+	/// Take the merged rows as the sort's kept rows, and remove the rows cut:
+	/// the rows that arrived since take their places, in no order.
+	fn finish(self, rows: &mut Vec<(Vec<Value>, SortRow)>, arrivals: &mut Arrivals) {
+		arrivals.kept = self.len;
+		if self.cut == 0 {
+			return;
+		}
+		let behind = rows.len() - (self.len + self.cut);
+		let moved = behind.min(self.cut);
+		let (low, high) = rows.split_at_mut(self.len + self.cut);
+		low[self.len..self.len + moved].swap_with_slice(&mut high[behind - moved..]);
+		rows.truncate(rows.len() - self.cut);
+		super::fuel::charge(super::fuel::units(self.cut));
+	}
+}
+
+/// The length of the prefix of `0..most` for which `holds(n + 1)` holds,
+/// for a `holds` that holds of every length up to some and of none beyond:
+/// found in a number of tests logarithmic in that length.
+fn gallop(most: usize, holds: impl Fn(usize) -> bool) -> usize {
+	// `low` lengths hold; `high` is past the last that may.
+	let (mut low, mut high) = (0, most);
+	let mut probe = 1;
+	while probe <= most {
+		if !holds(probe) {
+			high = probe - 1;
+			break;
+		}
+		low = probe;
+		probe *= 2;
+	}
+	while low < high {
+		let mid = low + (high - low).div_ceil(2);
+		if holds(mid) {
+			low = mid;
+		} else {
+			high = mid - 1;
+		}
+	}
+	low
+}
+
 pub(super) fn sort_and_keep(rows: &mut Vec<(Vec<Value>, SortRow)>, keys: &[KeyOrder], keep: usize) {
 	rows.sort_by(|(a, _), (b, _)| compare_keys(a, b, keys));
 	rows.truncate(keep);

@@ -3725,6 +3725,21 @@ impl Transaction {
 		Ok(n)
 	}
 
+	/// Count the keys in a range or region, examining at most `budget` of
+	/// them, and answer the key to resume at when it holds more
+	/// ([`Transactor::count_bounded`]).
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn count_bounded(
+		&self,
+		rng: impl AnyRange,
+		version: Option<u64>,
+		budget: u32,
+	) -> Result<(usize, Option<Vec<u8>>)> {
+		let (n, resume) = self.tr.count_bounded(rng.into_key_range(), version, budget).await?;
+		self.metrics.record_scan(n as u64, 0, 0);
+		Ok((n, resume.map(|key| key.into_inner().into_owned())))
+	}
+
 	// --------------------------------------------------
 	// Cursor functions
 	// --------------------------------------------------

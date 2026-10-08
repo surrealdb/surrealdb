@@ -396,7 +396,7 @@ pub(crate) async fn sum_index_count_deltas(
 			return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 		}
 		let batch = cursor
-			.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
+			.next_batch(crate::exec::vm::fuel::batch(crate::kvs::NORMAL_BATCH_SIZE))
 			.await
 			.context("Failed to scan index count keys")?;
 		if batch.is_empty() {
@@ -410,6 +410,7 @@ pub(crate) async fn sum_index_count_deltas(
 				count -= iu.count as i64;
 			}
 		}
+		crate::exec::vm::fuel::tick(ctx, crate::exec::vm::fuel::units(batch.len())).await?;
 	}
 	// Add the deltas this transaction has buffered but not yet flushed. Count
 	// deltas are aggregated per transaction and written at commit, so they are
@@ -530,6 +531,8 @@ pub(crate) async fn count_btree_index_keys(
 			break;
 		}
 		count += rids.len();
+		// The index entries a batch read, charged once it returns.
+		crate::exec::vm::fuel::tick(ctx, crate::exec::vm::fuel::units(rids.len())).await?;
 	}
 	Ok(count)
 }

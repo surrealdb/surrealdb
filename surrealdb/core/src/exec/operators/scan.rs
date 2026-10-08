@@ -9,6 +9,7 @@ pub(crate) mod common;
 mod count;
 mod dynamic;
 mod empty;
+pub(crate) mod extents;
 pub(crate) mod fetch;
 mod fulltext;
 mod graph;

@@ -33,7 +33,8 @@ mod types;
 pub mod value;
 
 pub use api::{
-	Batch, GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
+	Batch, CountCost, GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult,
+	Transactable,
 };
 pub use builder::{Metric, Metrics, TransactionBuilder};
 pub use destroy::{DestroyRange, DestroyRangeHandle};

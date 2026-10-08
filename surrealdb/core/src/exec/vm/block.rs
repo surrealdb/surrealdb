@@ -288,17 +288,6 @@ pub(super) async fn step(
 				}
 			}
 		}
-		BlockInstr::Interrupt {
-			timeout,
-		} => {
-			let frame = state.frame.as_ref().unwrap_or(ctx);
-			if *timeout {
-				frame.ctx().expect_not_timedout().await.map_err(ControlFlow::Err)?;
-			}
-			if frame.cancellation().is_cancelled() {
-				return Err(ControlFlow::Err(anyhow!(crate::err::EngineError::QueryCancelled)));
-			}
-		}
 		BlockInstr::Sleep {
 			duration,
 		} => {

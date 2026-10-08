@@ -599,7 +599,7 @@ pub(crate) async fn expand_shortest(
 	}
 
 	while let Some(path) = queue.pop_front() {
-		crate::exec::operators::check_cancelled(ctx)?;
+		crate::exec::vm::fuel::tick(ctx, 1).await?;
 		let depth = path.depth();
 
 		// Enumerate the tip's adjacency, retaining only edges not already on

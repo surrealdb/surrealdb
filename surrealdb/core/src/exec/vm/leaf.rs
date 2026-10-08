@@ -106,6 +106,9 @@ pub(super) fn step(step: &Step) -> Class {
 		}
 		| Step::Signal {
 			..
+		}
+		| Step::Yield {
+			..
 		} => Class::Leaf,
 		Step::FetchRow {
 			..
@@ -219,9 +222,6 @@ fn block(instr: &BlockInstr) -> Class {
 		| BlockInstr::Nested {
 			..
 		} => Class::Kernel(&[Params]),
-		BlockInstr::Interrupt {
-			..
-		} => Class::Kernel(&[Clock]),
 		BlockInstr::Resolve => Class::Kernel(&[Catalog]),
 		BlockInstr::RunAnalyzed {
 			..

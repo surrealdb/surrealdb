@@ -22,6 +22,7 @@ pub mod bytes;
 pub mod count;
 pub mod crypto;
 pub mod duration;
+pub mod fuel;
 pub mod geo;
 pub mod math;
 pub mod not;

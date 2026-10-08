@@ -530,9 +530,6 @@ impl Lowering<'_, '_> {
 			dst: element,
 			done: 0,
 		});
-		self.block(BlockInstr::Interrupt {
-			timeout: true,
-		});
 		self.block(BlockInstr::Save);
 		self.saved += 1;
 		let (bound, scope) = self.bind_slot(name, element)?;

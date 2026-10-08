@@ -299,6 +299,9 @@ pub(crate) fn kv_scan_stream(
 			if batch_size == 0 {
 				break;
 			}
+			// No more records than the fuel left: the batch is charged once it
+			// returns.
+			let batch_size = crate::exec::vm::fuel::batch(batch_size);
 			// Drive the cursor one borrowed row at a time. The visitor runs the
 			// pre-decode filter and decodes survivors straight from the engine's
 			// borrowed bytes; `decode_record` yields a fully owned `Value`, so
@@ -368,7 +371,14 @@ pub(crate) fn kv_scan_stream(
 				break;
 			}
 			super::common::ensure_below_memory_threshold()?;
-			if !decoded.is_empty() {
+			// The records the batch read and refused before decoding spend the
+			// VM's fuel here, since no row of theirs reaches it; once that
+			// spends the fuel, the batch is handed on even when empty, so the
+			// reader reaches its yield point between batches rather than after
+			// the whole range. A record handed on is spent as its row runs.
+			let refused = (stats.rows as usize).saturating_sub(decoded.len());
+			let spent = crate::exec::vm::fuel::charge(crate::exec::vm::fuel::units(refused));
+			if !decoded.is_empty() || spent {
 				yielder.emit(ValueBatch::new(decoded)).await;
 			}
 		}

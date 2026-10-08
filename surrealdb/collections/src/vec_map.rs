@@ -263,6 +263,11 @@ impl<K, V> VecMap<K, V> {
 		}
 	}
 
+	/// The entries, in key order.
+	pub fn as_slice(&self) -> &[(K, V)] {
+		&self.entries
+	}
+
 	pub fn iter_mut(&mut self) -> IterMut<'_, K, V> {
 		IterMut {
 			inner: self.entries.iter_mut(),

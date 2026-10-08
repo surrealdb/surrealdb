@@ -12,7 +12,7 @@ keys. Each assertion rebuilds the expected output from the unsorted scan --
 concatenating the tie groups in key order -- so it states the contract rather
 than a captured permutation.
 
-The paths covered are the full in-memory sort (no LIMIT), the top-k heap
+The paths covered are the full in-memory sort (no LIMIT), the bounded top-k
 (LIMIT, and START paging into a tie group, where an arbitrary tie order can
 otherwise repeat or drop rows between pages) and the disk-backed external sort
 (TEMPFILES, when a temporary directory is configured).

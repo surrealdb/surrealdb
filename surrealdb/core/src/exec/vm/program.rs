@@ -944,11 +944,6 @@ pub(super) enum BlockInstr {
 		dst: Reg,
 		done: Label,
 	},
-	/// Raise when the statement has run out of time (`timeout`) or has been
-	/// cancelled.
-	Interrupt {
-		timeout: bool,
-	},
 	/// `SLEEP` for the duration in `duration`, cut short by the statement's
 	/// remaining time or its cancellation.
 	Sleep {

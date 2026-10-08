@@ -675,8 +675,9 @@ pub(crate) async fn expand_paths(
 
 	while let Some(path) = stack.pop() {
 		// The DFS can run very long (up to the per-source path budget) emitting
-		// nothing; poll cancellation each step.
-		crate::exec::operators::check_cancelled(ctx)?;
+		// nothing: each step is a unit of fuel, and the walk yields once a
+		// quantum is spent.
+		crate::exec::vm::fuel::tick(ctx, 1).await?;
 		let depth = path.depth();
 
 		// Enumerate the tip's adjacency for this direction, retaining only the

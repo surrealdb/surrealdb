@@ -66,10 +66,20 @@ pub fn capitalize((string,): (String,)) -> Result<Value> {
 	Ok(new_str.into())
 }
 
-pub fn concat(Any(args): Any) -> Result<Value> {
-	let strings = args.into_iter().map(Value::into_raw_string).collect::<Vec<_>>();
+pub fn concat(args: Any) -> Result<Value> {
+	crate::fuel::now(concat_walk(args))
+}
+
+pub async fn concat_walk(Any(args): Any) -> Result<Value> {
+	let strings = crate::fuel::map(args, Value::into_raw_string).await;
 	limit("string::concat", strings.iter().map(String::len).sum::<usize>())?;
-	Ok(strings.concat().into())
+	let mut out = String::with_capacity(strings.iter().map(String::len).sum());
+	crate::fuel::walk(strings, |string| {
+		out.push_str(&string);
+		std::ops::ControlFlow::Continue(())
+	})
+	.await;
+	Ok(out.into())
 }
 
 pub fn contains((val, check): (String, String)) -> Result<Value> {
@@ -80,7 +90,11 @@ pub fn ends_with((val, chr): (String, String)) -> Result<Value> {
 	Ok(val.ends_with(&chr).into())
 }
 
-pub fn join(Any(args): Any) -> Result<Value> {
+pub fn join(args: Any) -> Result<Value> {
+	crate::fuel::now(join_walk(args))
+}
+
+pub async fn join_walk(Any(args): Any) -> Result<Value> {
 	let mut args = args.into_iter().map(Value::into_raw_string);
 	let chr = args.next().ok_or_else(|| Error::InvalidFunctionArguments {
 		name: String::from("string::join"),
@@ -89,10 +103,19 @@ pub fn join(Any(args): Any) -> Result<Value> {
 
 	let mut res = args.next().unwrap_or_else(String::new);
 
-	for a in args {
-		limit("string::join", res.len() + a.len() + chr.len())?;
+	let mut failed = None;
+	crate::fuel::walk(args, |a| {
+		if let Err(e) = limit("string::join", res.len() + a.len() + chr.len()) {
+			failed = Some(e);
+			return std::ops::ControlFlow::Break(());
+		}
 		res.push_str(&chr);
 		res.push_str(&a);
+		std::ops::ControlFlow::Continue(())
+	})
+	.await;
+	if let Some(e) = failed {
+		return Err(e);
 	}
 
 	Ok(res.into())
@@ -107,12 +130,30 @@ pub fn lowercase((string,): (String,)) -> Result<Value> {
 	Ok(string.to_lowercase().into())
 }
 
-pub fn repeat((val, num): (String, i64)) -> Result<Value> {
+pub fn repeat(args: (String, i64)) -> Result<Value> {
+	crate::fuel::now(repeat_walk(args))
+}
+
+/// `val` repeated `num` times, built a stretch of bytes at a time: its
+/// output can be far larger than its input.
+pub async fn repeat_walk((val, num): (String, i64)) -> Result<Value> {
 	let count = usize::try_from(num).map_err(|_| {
 		anyhow::Error::new(Error::ArithmeticNegativeOverflow(format!("string::repeat({num})")))
 	})?;
 	limit("string::repeat", val.len().saturating_mul(count))?;
-	Ok(val.repeat(count).into())
+	let mut out = String::with_capacity(val.len().saturating_mul(count));
+	let mut left = count;
+	while left > 0 {
+		let per = (crate::fuel::next_stretch().await * crate::fuel::BYTES_PER_UNIT
+			/ val.len().max(1))
+		.clamp(1, left);
+		for _ in 0..per {
+			out.push_str(&val);
+		}
+		left -= per;
+		crate::fuel::tick(crate::fuel::byte_units(per * val.len())).await;
+	}
+	Ok(out.into())
 }
 
 pub fn matches((val, Cast(regex)): (String, Cast<Regex>)) -> Result<Value> {

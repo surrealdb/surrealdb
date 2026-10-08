@@ -615,6 +615,40 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// Count the keys within a range, examining at most `budget` of them
+	/// ([`Transactable::count_bounded`]): a key iterator walked `budget`
+	/// keys, the next key it yields being the resume key.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn count_bounded<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+		budget: u32,
+	) -> BoxFut<'a, Result<(usize, Option<Key<'static>>)>> {
+		Box::pin(async move {
+			// The memory backend does not support versioned queries.
+			if version.is_some() {
+				return Err(Error::UnsupportedVersionedQueries);
+			}
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let inner = self.inner.read().await;
+			let mut iter =
+				inner.keys_iter(rng.start.into_inner()..rng.end.into_inner()).map_err(kvs_error)?;
+			let budget = budget.max(1) as usize;
+			let mut counted = 0;
+			while counted < budget {
+				if iter.next().is_none() {
+					return Ok((counted, None));
+				}
+				counted += 1;
+			}
+			Ok((counted, iter.next().map(|key| Key::from(key.to_vec()))))
+		})
+	}
+
 	/// Retrieve a range of keys, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
 	fn keysr<'a>(

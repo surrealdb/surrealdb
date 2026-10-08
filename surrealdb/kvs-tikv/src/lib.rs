@@ -1329,6 +1329,49 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// Count the keys within a range, examining at most `budget` of them
+	/// ([`Transactable::count_bounded`]): one key-only scan of `budget` keys,
+	/// resumed just after the last when it comes back full.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn count_bounded<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+		budget: u32,
+	) -> BoxFut<'a, Result<(usize, Option<Key<'static>>)>> {
+		Box::pin(async move {
+			// TiKV does not support versioned queries.
+			if version.is_some() {
+				return Err(Error::UnsupportedVersionedQueries);
+			}
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let budget = budget.max(1);
+			let mut inner = self.inner.write().await;
+			let iter = inner
+				.tx
+				.scan_keys(rng.start.to_vec()..rng.end.to_vec(), budget)
+				.await
+				.map_err(kvs_error)?;
+			let mut counted = 0usize;
+			let mut last: Option<tikv::Key> = None;
+			for key in iter {
+				counted += 1;
+				last = Some(key);
+			}
+			let resume = match last {
+				Some(key) if counted == budget as usize => {
+					let key: Vec<u8> = key.into();
+					Some(Key::from(key).next())
+				}
+				_ => None,
+			};
+			Ok((counted, resume))
+		})
+	}
+
 	/// Retrieve a range of keys from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
 	fn keys<'a>(

@@ -3982,12 +3982,16 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		}
 		self.feeders.push(feeder);
 		// Rows put through a table's enforcement are values: a body that runs
-		// on the stored bytes would see the row before it.
+		// on the stored bytes would see the row before it. A body run inside
+		// the storage cursor cannot yield there, so it holds no backward jump,
+		// which is where the interpreter yields within a row: its cursor
+		// charges each record's unit itself and yields between chunks.
 		let in_place =
 			source.reads_storage()
 				&& !self.uses_eval
 				&& !writes && !splits
-				&& !rebound && enforce.is_none();
+				&& !rebound && enforce.is_none()
+				&& !jumps_back(&self.code);
 		let region = !in_place
 			&& enforce.is_none()
 			&& !writes
@@ -9119,4 +9123,12 @@ pub(super) fn write_table(write: &LogicalWrite) -> Option<surrealdb_strand::Tabl
 	};
 	let first = tables.first()?.clone();
 	(known && tables.iter().all(|table| *table == first)).then_some(first)
+}
+
+/// Whether any instruction of `code` may continue at or before itself: a
+/// loop, at whose backward jump the interpreter spends fuel and may yield.
+pub(super) fn jumps_back(code: &[Instr]) -> bool {
+	code.iter().enumerate().any(|(at, instr)| {
+		instr.clone().labels_mut().into_iter().any(|label| *label as usize <= at)
+	})
 }

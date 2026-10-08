@@ -653,6 +653,8 @@ async fn expand_row<J: CandidateJudge>(
 	let mut start = 0;
 	while start < edge_rids.len() {
 		let end = (start + scan_batch_size).min(edge_rids.len());
+		// A unit per candidate the batch resolves and judges.
+		crate::exec::vm::fuel::tick(ctx, crate::exec::vm::fuel::units(end - start)).await?;
 		let edge_slice = &edge_rids[start..end];
 		let decoded_slice = &decoded_targets[start..end];
 

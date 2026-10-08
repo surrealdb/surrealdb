@@ -43,6 +43,7 @@ pub(crate) mod depth;
 pub(crate) mod explain;
 mod external;
 mod fault;
+pub(crate) mod fuel;
 mod function;
 mod graph;
 mod host;
@@ -105,6 +106,7 @@ mod row;
 mod scalar;
 mod schema_host;
 mod services;
+mod sort;
 pub(crate) mod speculate;
 #[cfg(all(storage, not(target_family = "wasm")))]
 mod spill;
@@ -154,6 +156,8 @@ mod tests_paths;
 mod tests_plain;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_plain_data;
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests_preempt;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_recurse;
 #[cfg(all(test, feature = "kv-mem", not(target_family = "wasm")))]

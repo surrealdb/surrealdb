@@ -29,8 +29,8 @@ use std::borrow::Cow;
 
 use surrealdb_strand::TableName;
 
-use super::host::eval_on_row;
-use super::interp::{PooledState, State, Step};
+use super::host::{Ended, eval_on_row};
+use super::interp::{PooledState, State};
 use super::plan::Plan;
 use super::program::HostScalar;
 use crate::exec::operators::distinct::SeenSet;
@@ -50,7 +50,7 @@ use crate::exec::operators::mutate::{
 	InsertEdgeOp, InsertNodeOp, RowEval, UpdateOp, WritePlans, delete_row, insert_row, update_row,
 };
 use crate::exec::operators::scan::fetch::FetchFieldStateCache;
-use crate::exec::operators::{EdgeBinding, EndpointField, ExpandDir, JoinType, check_cancelled};
+use crate::exec::operators::{EdgeBinding, EndpointField, ExpandDir, JoinType};
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::expr::logical::LogicalExpr;
@@ -367,7 +367,7 @@ pub(super) trait StepSink: Send {
 		&'a mut self,
 		rows: Vec<Value>,
 		state: &'a mut State,
-	) -> futures::future::BoxFuture<'a, FlowResult<Step>>;
+	) -> futures::future::BoxFuture<'a, FlowResult<Ended>>;
 }
 
 /// A sink as the place the full batches of a path expansion go.
@@ -381,7 +381,7 @@ impl PathFlush for SinkFlush<'_> {
 		&'a mut self,
 		rows: Vec<Value>,
 	) -> futures::future::BoxFuture<'a, FlowResult<bool>> {
-		Box::pin(async move { Ok(self.sink.rows(rows, self.state).await? != Step::Stop) })
+		Box::pin(async move { Ok(self.sink.rows(rows, self.state).await? != Ended::Stop) })
 	}
 }
 
@@ -391,7 +391,7 @@ pub(super) enum Stepped {
 	Rows(Vec<Value>),
 	/// It handed what it yields to the sink as it went, and the pipeline below
 	/// answered `Step`.
-	Delivered(Step),
+	Delivered(Ended),
 }
 
 /// Keep `row` for step `step` of split `split` where the step only keeps it:
@@ -446,7 +446,7 @@ pub(super) async fn run_step(
 	ctx: &ExecutionContext,
 	sink: &mut dyn StepSink,
 ) -> FlowResult<Stepped> {
-	check_cancelled(ctx)?;
+	super::fuel::tick(ctx, 1).await?;
 	let mut run = match state.steps[split as usize].take() {
 		Some(run) => Some(run),
 		None => StepRun::start(step, ctx).map(Box::new),
@@ -488,10 +488,10 @@ async fn step_chunks(
 				}
 			};
 			if !more {
-				return Ok(Stepped::Delivered(Step::Stop));
+				return Ok(Stepped::Delivered(Ended::Stop));
 			}
 			if out.is_empty() {
-				return Ok(Stepped::Delivered(Step::Next));
+				return Ok(Stepped::Delivered(Ended::Next));
 			}
 			Ok(Stepped::Delivered(sink.rows(out, state).await?))
 		}
@@ -598,7 +598,7 @@ pub(super) async fn finish_step(
 			op,
 		} => {
 			for mut row in rows {
-				check_cancelled(ctx)?;
+				super::fuel::tick(ctx, 1).await?;
 				update_row(op, target, &mut row, &mut host, &mut plans, ctx).await?;
 				out.push(row);
 			}
@@ -614,7 +614,7 @@ pub(super) async fn finish_step(
 			};
 			let mut deleted: std::collections::HashSet<RecordId> = std::collections::HashSet::new();
 			for mut row in rows {
-				check_cancelled(ctx)?;
+				super::fuel::tick(ctx, 1).await?;
 				delete_row(&mut row, target, *detach, *is_edge, ids, &mut deleted, &mut plans, ctx)
 					.await?;
 				out.push(row);
@@ -625,7 +625,7 @@ pub(super) async fn finish_step(
 			edges,
 		} => {
 			for mut row in rows {
-				check_cancelled(ctx)?;
+				super::fuel::tick(ctx, 1).await?;
 				insert_row(nodes, edges, &mut row, &mut host, &mut plans, ctx).await?;
 				out.push(row);
 			}
@@ -745,7 +745,7 @@ async fn build_table(
 	ran?;
 	let mut built = BuildTable::new();
 	for build_row in rows {
-		check_cancelled(ctx)?;
+		super::fuel::tick(ctx, 1).await?;
 		if let Some(key) = join_key(&build_row, &step.keys) {
 			built.insert(key, build_row, max_rows)?;
 		}
@@ -809,6 +809,7 @@ async fn join_row(
 	match step.join_type {
 		JoinType::Cross => {
 			for build_row in table.all_rows() {
+				super::fuel::tick(ctx, 1).await?;
 				let merged = merge_rows(build_row, &row);
 				if residual.truthy(&merged).await? {
 					emit(&mut out, emitted, max_output_rows, merged)?;
@@ -818,6 +819,7 @@ async fn join_row(
 		JoinType::Inner => {
 			if let Some(key) = join_key(&row, &step.keys) {
 				for build_row in table.matches(&key) {
+					super::fuel::tick(ctx, 1).await?;
 					let merged = merge_rows(build_row, &row);
 					if residual.truthy(&merged).await? {
 						emit(&mut out, emitted, max_output_rows, merged)?;
@@ -829,6 +831,7 @@ async fn join_row(
 			let mut matched = false;
 			if let Some(key) = join_key(&row, &step.keys) {
 				for build_row in table.matches(&key) {
+					super::fuel::tick(ctx, 1).await?;
 					let merged = merge_rows(build_row, &row);
 					if residual.truthy(&merged).await? {
 						emit(&mut out, emitted, max_output_rows, merged)?;
@@ -844,6 +847,7 @@ async fn join_row(
 			let mut matched = false;
 			if let Some(key) = join_key(&row, &step.keys) {
 				for build_row in table.matches(&key) {
+					super::fuel::tick(ctx, 1).await?;
 					if residual.truthy(&merge_rows(build_row, &row)).await? {
 						matched = true;
 						break;

@@ -438,14 +438,40 @@ impl TestDb {
 		Self::build_from(Datastore::builder(), setup, auth_enabled, config).await
 	}
 
+	/// As [`Self::new_with_config`], on a RocksDB datastore in `dir`.
+	#[cfg(feature = "kv-rocksdb")]
+	pub(crate) async fn new_on_rocksdb(
+		setup: &str,
+		dir: &std::path::Path,
+		config: surrealdb_cnf::ConfigMap,
+	) -> Self {
+		let path = format!("rocksdb:{}", dir.display());
+		Self::build_with(
+			Datastore::builder(),
+			&path,
+			setup,
+			false,
+			config,
+			crate::dbs::Capabilities::all(),
+		)
+		.await
+	}
+
 	async fn build_from(
 		builder: crate::kvs::ds::Builder,
 		setup: &str,
 		auth_enabled: bool,
 		config: surrealdb_cnf::ConfigMap,
 	) -> Self {
-		Self::build_with(builder, setup, auth_enabled, config, crate::dbs::Capabilities::all())
-			.await
+		Self::build_with(
+			builder,
+			"memory",
+			setup,
+			auth_enabled,
+			config,
+			crate::dbs::Capabilities::all(),
+		)
+		.await
 	}
 
 	/// As [`Self::new`], or [`Self::new_with_auth`] when `auth_enabled`, with
@@ -457,6 +483,7 @@ impl TestDb {
 	) -> Self {
 		Self::build_with(
 			Datastore::builder(),
+			"memory",
 			setup,
 			auth_enabled,
 			surrealdb_cnf::ConfigMap::empty(),
@@ -467,6 +494,7 @@ impl TestDb {
 
 	async fn build_with(
 		builder: crate::kvs::ds::Builder,
+		path: &str,
 		setup: &str,
 		auth_enabled: bool,
 		config: surrealdb_cnf::ConfigMap,
@@ -476,9 +504,9 @@ impl TestDb {
 			.with_capabilities(capabilities)
 			.with_auth(auth_enabled)
 			.with_config(config)
-			.build_with_path("memory")
+			.build_with_path(path)
 			.await
-			.expect("in-memory datastore");
+			.expect("datastore");
 		{
 			let txn = ds.transaction(TransactionType::Write).await.expect("write transaction");
 			txn.ensure_ns_db(None, "test", "test").await.expect("ensure test/test");
@@ -549,16 +577,37 @@ impl TestDb {
 		self.exec_ctx_with(session, mode, true).await
 	}
 
+	/// As [`Self::exec_ctx`], with programs yielding through `scheduler`.
+	pub(crate) async fn exec_ctx_scheduled(
+		&self,
+		scheduler: Arc<dyn crate::exec::scheduler::Scheduler>,
+	) -> ExecutionContext {
+		self.exec_ctx_full(&Self::owner(), TransactionType::Read, false, Some(scheduler)).await
+	}
+
 	async fn exec_ctx_with(
 		&self,
 		session: &Session,
 		mode: TransactionType,
 		broker: bool,
 	) -> ExecutionContext {
+		self.exec_ctx_full(session, mode, broker, None).await
+	}
+
+	async fn exec_ctx_full(
+		&self,
+		session: &Session,
+		mode: TransactionType,
+		broker: bool,
+		scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
+	) -> ExecutionContext {
 		let txn = Arc::new(self.ds.transaction(mode).await.expect("transaction"));
 		let mut ctx = self.ds.setup_ctx().expect("context from datastore");
 		if broker {
 			ctx.set_broker(self.ds.live_query_broker());
+		}
+		if scheduler.is_some() {
+			ctx.set_scheduler(scheduler);
 		}
 		ctx.attach_session(session).expect("attach session");
 		ctx.set_transaction(Arc::clone(&txn));

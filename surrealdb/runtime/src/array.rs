@@ -1,20 +1,103 @@
 use std::cmp::Ordering;
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::mem::{self};
-use std::ops::Bound;
+use std::ops::{Bound, ControlFlow};
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use common::fail;
 use common::range::TypedRange;
-use rand::seq::SliceRandom;
 use reblessive::tree::Stk;
 use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
 use surrealdb_expr::expr::Error;
-use surrealdb_expr::val::array::{
-	Clump, Combine, Complement, Difference, Flatten, Intersect, Matches, Union, Uniq, Windows,
-};
 use surrealdb_expr::val::{Array, Closure, ClosureEvaluator, Value, check_value_depth};
 
 use crate::args::{Optional, Rest};
+use crate::fuel::{self, units};
+
+/// Continue a walk.
+const ON: ControlFlow<()> = ControlFlow::Continue(());
+
+/// Define each synchronous function as its walk driven to its end at once
+/// ([`fuel::now`]): the units the walk charges stand, and the executor yields
+/// at its next yield point.
+macro_rules! now {
+	($($name:ident = $walk:ident($args:ty);)+) => {
+		$(
+			pub fn $name(args: $args) -> Result<Value> {
+				fuel::now($walk(args))
+			}
+		)+
+	};
+}
+
+now! {
+	add = add_walk((Array, Value));
+	boolean_not = boolean_not_walk((Array,));
+	boolean_or = boolean_or_walk((Array, Array));
+	boolean_and = boolean_and_walk((Array, Array));
+	boolean_xor = boolean_xor_walk((Array, Array));
+	clump = clump_walk((Array, i64));
+	combine = combine_walk((Array, Array));
+	complement = complement_walk((Array, Array));
+	concat = concat_walk(Rest<Array>);
+	difference = difference_walk((Array, Array));
+	distinct = distinct_walk((Array,));
+	fill = fill_walk((Array, Value, Optional<Value>, Optional<i64>));
+	flatten = flatten_walk((Array,));
+	group = group_walk((Array,));
+	intersect = intersect_walk((Array, Array));
+	join = join_walk((Array, String));
+	logical_and = logical_and_walk((Array, Array));
+	logical_or = logical_or_walk((Array, Array));
+	logical_xor = logical_xor_walk((Array, Array));
+	matches = matches_walk((Array, Value));
+	max = max_walk((Array,));
+	min = min_walk((Array,));
+	range = range_walk((Value, Optional<i64>));
+	sequence = sequence_walk((i64, Optional<i64>));
+	repeat = repeat_walk((Value, i64));
+	shuffle = shuffle_walk((Array,));
+	sort = sort_walk((Array, Optional<Value>));
+	sort_natural = sort_natural_walk((Array, Optional<Value>));
+	sort_lexical = sort_lexical_walk((Array, Optional<Value>));
+	sort_natural_lexical = sort_natural_lexical_walk((Array, Optional<Value>));
+	transpose = transpose_walk((Array,));
+	union = union_walk((Array, Array));
+	windows = windows_walk((Array, i64));
+}
+
+/// The distinct elements of `values`, in the order each first appears.
+async fn distinct_of(values: Vec<Value>) -> Vec<Value> {
+	#[expect(clippy::mutable_key_type)]
+	let mut seen = HashSet::with_capacity(values.len());
+	let mut out = Vec::with_capacity(values.len());
+	fuel::walk(values.iter(), |value| {
+		if seen.insert(value) {
+			out.push(value.clone());
+		}
+		ON
+	})
+	.await;
+	out
+}
+
+/// `values` with each array among them replaced by its elements.
+async fn flattened(values: Vec<Value>) -> Vec<Value> {
+	let mut out = Vec::with_capacity(values.len());
+	for value in values {
+		match value {
+			Value::Array(inner) => fuel::extend(&mut out, inner.0).await,
+			value => out.push(value),
+		}
+		fuel::tick(1).await;
+	}
+	out
+}
+
+/// Where `value` first appears in `values`.
+async fn position<'a>(values: impl IntoIterator<Item = &'a Value>, value: &Value) -> Option<usize> {
+	fuel::find(values.into_iter().enumerate(), |&(_, held)| held == value).await.map(|(at, _)| at)
+}
 
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -28,23 +111,18 @@ fn limit(name: &str, n: usize) -> Result<(), Error> {
 	}
 }
 
-pub fn add((mut array, value): (Array, Value)) -> Result<Value> {
-	match value {
-		Value::Array(value) => {
-			for v in value.0 {
-				if !array.0.contains(&v) {
-					array.0.push(v)
-				}
-			}
-			Ok(array.into())
+pub async fn add_walk((mut array, value): (Array, Value)) -> Result<Value> {
+	let values = match value {
+		Value::Array(values) => values.0,
+		value => vec![value],
+	};
+	for value in values {
+		if !fuel::any(array.iter(), |held| *held == value).await {
+			array.0.push(value)
 		}
-		value => {
-			if !array.0.contains(&value) {
-				array.0.push(value)
-			}
-			Ok(array.into())
-		}
+		fuel::tick(1).await;
 	}
+	Ok(array.into())
 }
 
 pub async fn all(
@@ -66,8 +144,8 @@ pub async fn all(
 				Value::None
 			}
 		}
-		Some(value) => array.iter().all(|v: &Value| *v == value).into(),
-		None => array.iter().all(Value::is_truthy).into(),
+		Some(value) => (!fuel::any(array.iter(), |v| *v != value).await).into(),
+		None => (!fuel::any(array.iter(), |v| !v.is_truthy()).await).into(),
 	})
 }
 
@@ -90,8 +168,8 @@ pub async fn any(
 				Value::None
 			}
 		}
-		Some(value) => array.contains(&value).into(),
-		None => array.iter().any(Value::is_truthy).into(),
+		Some(value) => fuel::any(array.iter(), |v| *v == value).await.into(),
+		None => fuel::any(array.iter(), Value::is_truthy).await.into(),
 	})
 }
 
@@ -108,12 +186,16 @@ pub fn at((array, i): (Array, i64)) -> Result<Value> {
 	Ok(array.get(idx).cloned().unwrap_or_default())
 }
 
-pub fn boolean_not((mut array,): (Array,)) -> Result<Value> {
-	array.iter_mut().for_each(|v| *v = (!v.is_truthy()).into());
+pub async fn boolean_not_walk((mut array,): (Array,)) -> Result<Value> {
+	fuel::walk(array.iter_mut(), |v| {
+		*v = (!v.is_truthy()).into();
+		ON
+	})
+	.await;
 	Ok(array.into())
 }
 
-pub fn boolean_or((lh, rh): (Array, Array)) -> Result<Value> {
+pub async fn boolean_or_walk((lh, rh): (Array, Array)) -> Result<Value> {
 	let (mut res, comp) = if lh.len() < rh.len() {
 		(rh, lh)
 	} else {
@@ -121,18 +203,22 @@ pub fn boolean_or((lh, rh): (Array, Array)) -> Result<Value> {
 	};
 
 	let comp_len = comp.len();
-	for (idx, i) in comp.into_iter().enumerate() {
-		res[idx] = (res[idx].is_truthy() || i.is_truthy()).into()
-	}
+	fuel::walk(comp.into_iter().enumerate(), |(idx, i)| {
+		res[idx] = (res[idx].is_truthy() || i.is_truthy()).into();
+		ON
+	})
+	.await;
 
-	for i in &mut res[comp_len..] {
-		*i = i.is_truthy().into()
-	}
+	fuel::walk(&mut res[comp_len..], |i| {
+		*i = i.is_truthy().into();
+		ON
+	})
+	.await;
 
 	Ok(res.into())
 }
 
-pub fn boolean_and((lh, rh): (Array, Array)) -> Result<Value> {
+pub async fn boolean_and_walk((lh, rh): (Array, Array)) -> Result<Value> {
 	let (mut res, comp) = if lh.len() < rh.len() {
 		(rh, lh)
 	} else {
@@ -140,16 +226,22 @@ pub fn boolean_and((lh, rh): (Array, Array)) -> Result<Value> {
 	};
 
 	let comp_len = comp.len();
-	for (idx, i) in comp.into_iter().enumerate() {
-		res[idx] = (res[idx].is_truthy() && i.is_truthy()).into()
-	}
+	fuel::walk(comp.into_iter().enumerate(), |(idx, i)| {
+		res[idx] = (res[idx].is_truthy() && i.is_truthy()).into();
+		ON
+	})
+	.await;
 
-	res[comp_len..].fill(Value::Bool(false));
+	fuel::walk(&mut res[comp_len..], |i| {
+		*i = Value::Bool(false);
+		ON
+	})
+	.await;
 
 	Ok(res.into())
 }
 
-pub fn boolean_xor((lh, rh): (Array, Array)) -> Result<Value> {
+pub async fn boolean_xor_walk((lh, rh): (Array, Array)) -> Result<Value> {
 	let (mut res, comp) = if lh.len() < rh.len() {
 		(rh, lh)
 	} else {
@@ -157,49 +249,98 @@ pub fn boolean_xor((lh, rh): (Array, Array)) -> Result<Value> {
 	};
 
 	let comp_len = comp.len();
-	for (idx, i) in comp.into_iter().enumerate() {
-		res[idx] = (res[idx].is_truthy() ^ i.is_truthy()).into()
-	}
+	fuel::walk(comp.into_iter().enumerate(), |(idx, i)| {
+		res[idx] = (res[idx].is_truthy() ^ i.is_truthy()).into();
+		ON
+	})
+	.await;
 
-	for i in &mut res[comp_len..] {
-		*i = i.is_truthy().into()
-	}
+	fuel::walk(&mut res[comp_len..], |i| {
+		*i = i.is_truthy().into();
+		ON
+	})
+	.await;
 
 	Ok(res.into())
 }
 
-pub fn clump((array, clump_size): (Array, i64)) -> Result<Value> {
+pub async fn clump_walk((array, clump_size): (Array, i64)) -> Result<Value> {
 	let clump_size = clump_size.max(0) as usize;
-	Ok(array.clump(clump_size)?.into())
+	ensure!(
+		clump_size >= 1,
+		Error::InvalidFunctionArguments {
+			name: "array::clump".to_string(),
+			message: "The second argument must be an integer greater than 0".to_string(),
+		}
+	);
+	let mut out = Vec::with_capacity(array.len().div_ceil(clump_size));
+	for chunk in array.0.chunks(clump_size) {
+		out.push(Value::from(chunk.to_vec()));
+		fuel::tick(units(chunk.len())).await;
+	}
+	Ok(out.into())
 }
 
-pub fn combine((array, other): (Array, Array)) -> Result<Value> {
-	Ok(array.combine(other).into())
+pub async fn combine_walk((array, other): (Array, Array)) -> Result<Value> {
+	let mut out = Vec::with_capacity(array.len().saturating_mul(other.len()));
+	for a in array.iter() {
+		let pairs = fuel::map(other.iter(), |b| Value::from(vec![a.clone(), b.clone()])).await;
+		out.extend(pairs);
+		fuel::tick(1).await;
+	}
+	Ok(out.into())
 }
 
-pub fn complement((array, other): (Array, Array)) -> Result<Value> {
-	Ok(array.complement(other).into())
+#[expect(clippy::mutable_key_type)]
+pub async fn complement_walk((array, other): (Array, Array)) -> Result<Value> {
+	let mut set = BTreeSet::new();
+	fuel::walk(other.iter(), |value| {
+		set.insert(value);
+		ON
+	})
+	.await;
+	let mut out = Vec::with_capacity(array.len());
+	fuel::walk(array, |value| {
+		if !set.contains(&value) {
+			out.push(value);
+		}
+		ON
+	})
+	.await;
+	Ok(out.into())
 }
 
-pub fn concat(Rest(arrays): Rest<Array>) -> Result<Value> {
+pub async fn concat_walk(Rest(arrays): Rest<Array>) -> Result<Value> {
 	let len = arrays.iter().map(Array::len).sum();
 	limit("array::concat", mem::size_of::<Value>().saturating_mul(len))?;
-	let mut arr = Array::with_capacity(len);
-	arrays.into_iter().for_each(|mut val| {
-		arr.0.append(&mut val);
-	});
+	let mut arr = Vec::with_capacity(len);
+	for val in arrays {
+		fuel::extend(&mut arr, val.0).await;
+	}
 	Ok(arr.into())
 }
 
-pub fn difference((array, other): (Array, Array)) -> Result<Value> {
-	Ok(array.difference(other).into())
+pub async fn difference_walk((array, other): (Array, Array)) -> Result<Value> {
+	let mut out = Vec::with_capacity(array.len() + other.len());
+	let mut other = VecDeque::from(other.0);
+	for value in array {
+		match position(&other, &value).await {
+			Some(at) => {
+				other.remove(at);
+			}
+			None => out.push(value),
+		}
+		fuel::tick(1).await;
+	}
+	out.extend(other);
+	Ok(out.into())
 }
 
-pub fn distinct((array,): (Array,)) -> Result<Value> {
-	Ok(array.uniq().into())
+pub async fn distinct_walk((array,): (Array,)) -> Result<Value> {
+	Ok(distinct_of(array.0).await.into())
 }
 
-pub fn fill(
+pub async fn fill_walk(
 	(mut array, value, Optional(range_start), Optional(end)): (
 		Array,
 		Value,
@@ -208,7 +349,11 @@ pub fn fill(
 	),
 ) -> Result<Value> {
 	let Some(range_start) = range_start else {
-		array.fill(value);
+		fuel::walk(array.iter_mut(), |held| {
+			*held = value.clone();
+			ON
+		})
+		.await;
 		return Ok(array.into());
 	};
 
@@ -289,7 +434,11 @@ pub fn fill(
 		return Ok(array.into());
 	}
 
-	array[start..=end].fill(value);
+	fuel::walk(&mut array[start..=end], |held| {
+		*held = value.clone();
+		ON
+	})
+	.await;
 
 	Ok(array.into())
 }
@@ -312,7 +461,17 @@ pub async fn filter(
 				Value::None
 			}
 		}
-		value => array.into_iter().filter(|v: &Value| *v == value).collect::<Vec<_>>().into(),
+		value => {
+			let mut out = Vec::new();
+			fuel::walk(array, |v| {
+				if v == value {
+					out.push(v);
+				}
+				ON
+			})
+			.await;
+			out.into()
+		}
 	})
 }
 
@@ -334,18 +493,17 @@ pub async fn filter_index(
 				Value::None
 			}
 		}
-		value => array
-			.iter()
-			.enumerate()
-			.filter_map(|(i, v)| {
+		value => {
+			let mut out = Vec::new();
+			fuel::walk(array.iter().enumerate(), |(i, v)| {
 				if *v == value {
-					Some(Value::from(i))
-				} else {
-					None
+					out.push(Value::from(i));
 				}
+				ON
 			})
-			.collect::<Vec<_>>()
-			.into(),
+			.await;
+			out.into()
+		}
 	})
 }
 
@@ -366,7 +524,7 @@ pub async fn find(
 				Value::None
 			}
 		}
-		value => array.into_iter().find(|v: &Value| *v == value).unwrap_or(Value::None),
+		value => fuel::find(array, |v| *v == value).await.unwrap_or(Value::None),
 	})
 }
 
@@ -387,17 +545,7 @@ pub async fn find_index(
 				Value::None
 			}
 		}
-		value => array
-			.iter()
-			.enumerate()
-			.find_map(|(i, v)| {
-				if *v == value {
-					Some(Value::from(i))
-				} else {
-					None
-				}
-			})
-			.unwrap_or(Value::None),
+		value => position(array.iter(), &value).await.map(Value::from).unwrap_or(Value::None),
 	})
 }
 
@@ -409,8 +557,8 @@ pub fn first((array,): (Array,)) -> Result<Value> {
 	}
 }
 
-pub fn flatten((array,): (Array,)) -> Result<Value> {
-	Ok(array.flatten().into())
+pub async fn flatten_walk((array,): (Array,)) -> Result<Value> {
+	Ok(flattened(array.0).await.into())
 }
 
 pub async fn fold(
@@ -446,8 +594,8 @@ pub async fn fold(
 	}
 }
 
-pub fn group((array,): (Array,)) -> Result<Value> {
-	Ok(array.flatten().uniq().into())
+pub async fn group_walk((array,): (Array,)) -> Result<Value> {
+	Ok(distinct_of(flattened(array.0).await).await.into())
 }
 
 pub fn insert((mut array, value, Optional(index)): (Array, Value, Optional<i64>)) -> Result<Value> {
@@ -473,16 +621,33 @@ pub fn insert((mut array, value, Optional(index)): (Array, Value, Optional<i64>)
 	}
 }
 
-pub fn intersect((array, other): (Array, Array)) -> Result<Value> {
-	Ok(array.intersect(other).into())
+pub async fn intersect_walk((array, mut other): (Array, Array)) -> Result<Value> {
+	let mut out = Vec::new();
+	for value in array {
+		if let Some(at) = position(other.iter(), &value).await {
+			other.remove(at);
+			out.push(value);
+		}
+		fuel::tick(1).await;
+	}
+	Ok(out.into())
 }
 
 pub fn is_empty((array,): (Array,)) -> Result<Value> {
 	Ok(array.is_empty().into())
 }
 
-pub fn join((arr, sep): (Array, String)) -> Result<Value> {
-	Ok(arr.into_iter().map(Value::into_raw_string).collect::<Vec<_>>().join(&sep).into())
+pub async fn join_walk((arr, sep): (Array, String)) -> Result<Value> {
+	let mut out = String::new();
+	fuel::walk(arr.into_iter().enumerate(), |(at, value)| {
+		if at > 0 {
+			out.push_str(&sep);
+		}
+		out.push_str(&value.into_raw_string());
+		ON
+	})
+	.await;
+	Ok(out.into())
 }
 
 pub fn last((array,): (Array,)) -> Result<Value> {
@@ -497,94 +662,106 @@ pub fn len((array,): (Array,)) -> Result<Value> {
 	Ok(array.len().into())
 }
 
-pub fn logical_and((mut lh, mut rh): (Array, Array)) -> Result<Value> {
+pub async fn logical_and_walk((mut lh, mut rh): (Array, Array)) -> Result<Value> {
 	if lh.len() < rh.len() {
 		let lh_len = lh.len();
-		for (idx, b) in lh.into_iter().enumerate() {
+		fuel::walk(lh.into_iter().enumerate(), |(idx, b)| {
 			if !b.is_truthy() {
 				rh[idx] = b;
 			}
-		}
-
-		rh[lh_len..].fill(Value::Null);
+			ON
+		})
+		.await;
+		fuel::walk(&mut rh[lh_len..], |i| {
+			*i = Value::Null;
+			ON
+		})
+		.await;
 		Ok(rh.into())
 	} else {
 		let rh_len = rh.len();
-		for (idx, b) in rh.into_iter().enumerate() {
+		fuel::walk(rh.into_iter().enumerate(), |(idx, b)| {
 			if lh[idx].is_truthy() {
 				lh[idx] = b
 			}
-		}
-
-		for i in &mut lh[rh_len..] {
+			ON
+		})
+		.await;
+		fuel::walk(&mut lh[rh_len..], |i| {
 			if i.is_truthy() {
 				*i = Value::Null
 			}
-		}
+			ON
+		})
+		.await;
 		Ok(lh.into())
 	}
 }
 
-pub fn logical_or((mut lh, mut rh): (Array, Array)) -> Result<Value> {
+pub async fn logical_or_walk((mut lh, mut rh): (Array, Array)) -> Result<Value> {
 	if lh.len() < rh.len() {
-		for (idx, b) in lh.into_iter().enumerate() {
+		fuel::walk(lh.into_iter().enumerate(), |(idx, b)| {
 			if b.is_truthy() {
 				rh[idx] = b;
 			}
-		}
-
+			ON
+		})
+		.await;
 		Ok(rh.into())
 	} else {
 		let rh_len = rh.len();
-		for (idx, b) in rh.into_iter().enumerate() {
+		fuel::walk(rh.into_iter().enumerate(), |(idx, b)| {
 			if !lh[idx].is_truthy() {
 				lh[idx] = b
 			}
-		}
-
-		for i in &mut lh[rh_len..] {
+			ON
+		})
+		.await;
+		fuel::walk(&mut lh[rh_len..], |i| {
 			if !i.is_truthy() {
 				*i = Value::Null
 			}
-		}
-
+			ON
+		})
+		.await;
 		Ok(lh.into())
 	}
 }
 
-pub fn logical_xor((mut lh, mut rh): (Array, Array)) -> Result<Value> {
+pub async fn logical_xor_walk((mut lh, mut rh): (Array, Array)) -> Result<Value> {
 	if lh.len() < rh.len() {
 		let lh_len = lh.len();
-		for (idx, b) in lh.into_iter().enumerate() {
+		fuel::walk(lh.into_iter().enumerate(), |(idx, b)| {
 			let v = b.is_truthy() ^ rh[idx].is_truthy();
 			if b.is_truthy() == v {
 				rh[idx] = b;
 			} else if rh[idx].is_truthy() != v {
 				rh[idx] = v.into();
 			}
-		}
-
-		for i in &mut rh[lh_len..] {
+			ON
+		})
+		.await;
+		fuel::walk(&mut rh[lh_len..], |i| {
 			if !i.is_truthy() {
 				*i = Value::Null;
 			}
-		}
-
+			ON
+		})
+		.await;
 		Ok(rh.into())
 	} else {
-		for (idx, b) in rh.into_iter().enumerate() {
+		fuel::walk(rh.into_iter().enumerate(), |(idx, b)| {
 			let v = b.is_truthy() ^ lh[idx].is_truthy();
-			if lh[idx].is_truthy() == v {
-				continue;
+			if lh[idx].is_truthy() != v {
+				if b.is_truthy() == v {
+					lh[idx] = b;
+				} else {
+					lh[idx] = v.into();
+				}
 			}
-
-			if b.is_truthy() == v {
-				lh[idx] = b;
-			} else {
-				lh[idx] = v.into();
-			}
-		}
-
+			ON
+		})
+		.await;
 		Ok(lh.into())
 	}
 }
@@ -604,16 +781,28 @@ pub async fn map(
 	}
 }
 
-pub fn matches((array, compare_val): (Array, Value)) -> Result<Value> {
-	Ok(array.matches(compare_val).into())
+pub async fn matches_walk((array, compare_val): (Array, Value)) -> Result<Value> {
+	Ok(fuel::map(array.iter(), |value| Value::from(*value == compare_val)).await.into())
 }
 
-pub fn max((array,): (Array,)) -> Result<Value> {
-	Ok(array.into_iter().max().unwrap_or_default())
+pub async fn max_walk((array,): (Array,)) -> Result<Value> {
+	// The last of equal greatest elements, as `Iterator::max` answers.
+	let max = fuel::fold(array, None, |max: Option<Value>, value| match max {
+		Some(max) if max > value => Some(max),
+		_ => Some(value),
+	})
+	.await;
+	Ok(max.unwrap_or_default())
 }
 
-pub fn min((array,): (Array,)) -> Result<Value> {
-	Ok(array.into_iter().min().unwrap_or_default())
+pub async fn min_walk((array,): (Array,)) -> Result<Value> {
+	// The first of equal least elements, as `Iterator::min` answers.
+	let min = fuel::fold(array, None, |min: Option<Value>, value| match min {
+		Some(min) if min <= value => Some(min),
+		_ => Some(value),
+	})
+	.await;
+	Ok(min.unwrap_or_default())
 }
 
 pub fn pop((mut array,): (Array,)) -> Result<Value> {
@@ -630,7 +819,7 @@ pub fn push((mut array, value): (Array, Value)) -> Result<Value> {
 	Ok(array.into())
 }
 
-pub fn range((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Value> {
+pub async fn range_walk((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Value> {
 	let range = if let Some(end) = end {
 		let start =
 			start_range.coerce_to::<i64>().map_err(|e| Error::InvalidFunctionArguments {
@@ -666,10 +855,10 @@ pub fn range((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Val
 		mem::size_of::<Value>().saturating_mul(range.len().unwrap_or(usize::MAX)),
 	)?;
 
-	Ok(range.iter().map(Value::from).collect())
+	Ok(fuel::map(range.iter(), Value::from).await.into())
 }
 
-pub fn sequence((offset_len, Optional(len)): (i64, Optional<i64>)) -> Result<Value> {
+pub async fn sequence_walk((offset_len, Optional(len)): (i64, Optional<i64>)) -> Result<Value> {
 	let (offset, len) = if let Some(len) = len {
 		(offset_len, len)
 	} else {
@@ -687,7 +876,7 @@ pub fn sequence((offset_len, Optional(len)): (i64, Optional<i64>)) -> Result<Val
 		"array::sequence",
 		mem::size_of::<Value>().saturating_mul(range.len().unwrap_or(usize::MAX)),
 	)?;
-	Ok(range.iter().map(Value::from).collect())
+	Ok(fuel::map(range.iter(), Value::from).await.into())
 }
 
 pub async fn reduce(
@@ -738,12 +927,12 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value> {
 	Ok(array.into())
 }
 
-pub fn repeat((value, count): (Value, i64)) -> Result<Value> {
+pub async fn repeat_walk((value, count): (Value, i64)) -> Result<Value> {
 	let count = usize::try_from(count).map_err(|_| {
 		anyhow::Error::new(Error::ArithmeticNegativeOverflow(format!("array::repeat({count})")))
 	})?;
 	limit("array::repeat", mem::size_of::<Value>().saturating_mul(count))?;
-	Ok(Array(std::iter::repeat_n(value, count).collect()).into())
+	Ok(fuel::map(0..count, |_| value.clone()).await.into())
 }
 
 pub fn reverse((mut array,): (Array,)) -> Result<Value> {
@@ -751,9 +940,21 @@ pub fn reverse((mut array,): (Array,)) -> Result<Value> {
 	Ok(array.into())
 }
 
-pub fn shuffle((mut array,): (Array,)) -> Result<Value> {
-	let mut rng = rand::rng();
-	array.shuffle(&mut rng);
+pub async fn shuffle_walk((mut array,): (Array,)) -> Result<Value> {
+	use rand::Rng as _;
+	// A Fisher-Yates shuffle from the back, a stretch of swaps at a time.
+	let mut at = array.len();
+	while at > 1 {
+		let end = at.saturating_sub(fuel::next_stretch().await).max(1);
+		{
+			let mut rng = rand::rng();
+			for i in (end..at).rev() {
+				array.swap(i, rng.random_range(0..=i));
+			}
+		}
+		fuel::tick(units(at - end)).await;
+		at = end;
+	}
 	Ok(array.into())
 }
 
@@ -868,46 +1069,42 @@ fn sort_as_asc(order: &Option<Value>) -> bool {
 	}
 }
 
-pub fn sort((mut array, Optional(order)): (Array, Optional<Value>)) -> Result<Value> {
-	if sort_as_asc(&order) {
-		array.sort_unstable();
-		Ok(array.into())
-	} else {
-		array.sort_unstable_by(|a, b| b.cmp(a));
-		Ok(array.into())
-	}
-}
-
-pub fn sort_natural((mut array, Optional(order)): (Array, Optional<Value>)) -> Result<Value> {
-	if sort_as_asc(&order) {
-		array.sort_unstable_by(|a, b| a.natural_cmp(b).unwrap_or(Ordering::Equal));
-		Ok(array.into())
-	} else {
-		array.sort_unstable_by(|a, b| b.natural_cmp(a).unwrap_or(Ordering::Equal));
-		Ok(array.into())
-	}
-}
-
-pub fn sort_lexical((mut array, Optional(order)): (Array, Optional<Value>)) -> Result<Value> {
-	if sort_as_asc(&order) {
-		array.sort_unstable_by(|a, b| a.lexical_cmp(b).unwrap_or(Ordering::Equal));
-		Ok(array.into())
-	} else {
-		array.sort_unstable_by(|a, b| b.lexical_cmp(a).unwrap_or(Ordering::Equal));
-		Ok(array.into())
-	}
-}
-
-pub fn sort_natural_lexical(
-	(mut array, Optional(order)): (Array, Optional<Value>),
+/// `array` sorted by `cmp`, ascending, or descending unless `order` says
+/// otherwise, a quantum at a time.
+async fn sorted_by(
+	array: Array,
+	order: &Option<Value>,
+	cmp: impl Fn(&Value, &Value) -> Ordering,
 ) -> Result<Value> {
-	if sort_as_asc(&order) {
-		array.sort_unstable_by(|a, b| a.natural_lexical_cmp(b).unwrap_or(Ordering::Equal));
-		Ok(array.into())
+	let quantum = fuel::quantum();
+	let sorted = if sort_as_asc(order) {
+		fuel::sort_by(array.0, |a, b| cmp(a, b), usize::MAX, quantum).await
 	} else {
-		array.sort_unstable_by(|a, b| b.natural_lexical_cmp(a).unwrap_or(Ordering::Equal));
-		Ok(array.into())
-	}
+		fuel::sort_by(array.0, |a, b| cmp(b, a), usize::MAX, quantum).await
+	};
+	Ok(sorted.into())
+}
+
+pub async fn sort_walk((array, Optional(order)): (Array, Optional<Value>)) -> Result<Value> {
+	sorted_by(array, &order, Value::cmp).await
+}
+
+pub async fn sort_natural_walk(
+	(array, Optional(order)): (Array, Optional<Value>),
+) -> Result<Value> {
+	sorted_by(array, &order, |a, b| a.natural_cmp(b).unwrap_or(Ordering::Equal)).await
+}
+
+pub async fn sort_lexical_walk(
+	(array, Optional(order)): (Array, Optional<Value>),
+) -> Result<Value> {
+	sorted_by(array, &order, |a, b| a.lexical_cmp(b).unwrap_or(Ordering::Equal)).await
+}
+
+pub async fn sort_natural_lexical_walk(
+	(array, Optional(order)): (Array, Optional<Value>),
+) -> Result<Value> {
+	sorted_by(array, &order, |a, b| a.natural_lexical_cmp(b).unwrap_or(Ordering::Equal)).await
 }
 
 pub fn swap((mut array, from, to): (Array, i64, i64)) -> Result<Value> {
@@ -945,17 +1142,56 @@ pub fn swap((mut array, from, to): (Array, i64, i64)) -> Result<Value> {
 	Ok(array.into())
 }
 
-pub fn transpose((array,): (Array,)) -> Result<Value> {
-	Ok(array.transpose().into())
+pub async fn transpose_walk((array,): (Array,)) -> Result<Value> {
+	if array.is_empty() {
+		return Ok(array.into());
+	}
+	let height =
+		fuel::fold(array.iter(), 0, |height, x| height.max(x.as_array().map_or(1, Array::len)))
+			.await;
+	let width = array.len();
+	let mut rows = Vec::with_capacity(height);
+	for _ in 0..height {
+		rows.push(vec![Value::None; width]);
+		fuel::tick(units(width)).await;
+	}
+	for (idx, item) in array.into_iter().enumerate() {
+		match item {
+			Value::Array(inner) => {
+				fuel::tick(units(inner.len())).await;
+				for (jdx, value) in inner.into_iter().enumerate() {
+					rows[jdx][idx] = value;
+				}
+			}
+			value => {
+				rows[0][idx] = value;
+			}
+		}
+		fuel::tick(1).await;
+	}
+	Ok(rows.into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
-pub fn union((array, other): (Array, Array)) -> Result<Value> {
-	Ok(array.union(other).into())
+pub async fn union_walk((mut array, other): (Array, Array)) -> Result<Value> {
+	fuel::extend(&mut array.0, other.0).await;
+	Ok(distinct_of(array.0).await.into())
 }
 
-pub fn windows((array, window_size): (Array, i64)) -> Result<Value> {
+pub async fn windows_walk((array, window_size): (Array, i64)) -> Result<Value> {
 	let window_size = window_size.max(0) as usize;
-	Ok(array.windows(window_size)?.into())
+	ensure!(
+		window_size >= 1,
+		Error::InvalidFunctionArguments {
+			name: "array::windows".to_string(),
+			message: "The second argument must be an integer greater than 0".to_string(),
+		}
+	);
+	let mut out = Vec::with_capacity(array.len().saturating_sub(window_size - 1));
+	for window in array.0.windows(window_size) {
+		out.push(Value::from(window.to_vec()));
+		fuel::tick(units(window.len())).await;
+	}
+	Ok(out.into())
 }
 
 pub mod sort {
@@ -963,14 +1199,22 @@ pub mod sort {
 	use anyhow::Result;
 	use surrealdb_expr::val::{Array, Value};
 
-	pub fn asc((mut array,): (Array,)) -> Result<Value> {
-		array.sort_unstable();
-		Ok(array.into())
+	use crate::fuel;
+
+	pub fn asc(args: (Array,)) -> Result<Value> {
+		fuel::now(asc_walk(args))
 	}
 
-	pub fn desc((mut array,): (Array,)) -> Result<Value> {
-		array.sort_unstable_by(|a, b| b.cmp(a));
-		Ok(array.into())
+	pub fn desc(args: (Array,)) -> Result<Value> {
+		fuel::now(desc_walk(args))
+	}
+
+	pub async fn asc_walk((array,): (Array,)) -> Result<Value> {
+		super::sorted_by(array, &None, Value::cmp).await
+	}
+
+	pub async fn desc_walk((array,): (Array,)) -> Result<Value> {
+		super::sorted_by(array, &Some(Value::Bool(false)), Value::cmp).await
 	}
 }
 

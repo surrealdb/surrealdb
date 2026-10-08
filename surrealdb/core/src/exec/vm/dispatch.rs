@@ -560,7 +560,9 @@ impl Deref {
 			match run_unit_inline(program, pipeline, Cow::Owned(raw), &mut inline) {
 				Ok(_) => return Ok(inline.output.pop().unwrap_or(Value::None)),
 				Err(unfinished) => {
-					steps.store(true, std::sync::atomic::Ordering::Relaxed);
+					if !unfinished.yielded {
+						steps.store(true, std::sync::atomic::Ordering::Relaxed);
+					}
 					let raw = unfinished.row.into_owned();
 					match unfinished.resume {
 						Some(start) => {

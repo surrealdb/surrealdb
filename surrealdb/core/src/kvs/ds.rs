@@ -361,6 +361,9 @@ pub struct Datastore {
 	/// `Router`, where the router is the sole notification delivery path. See
 	/// [`crate::lq`].
 	live_query_router: Arc<LiveQueryRouter>,
+	/// How a running program gives up its thread once it has spent its
+	/// quantum; the default scheduler when `None`.
+	scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
 	/// Public HTTP endpoint this datastore publishes on its `Node` catalog row so other
 	/// cluster members can route cross-node messages (e.g. live-query relay) to it.
 	/// `None` in deployments that don't expose such an endpoint.
@@ -704,6 +707,7 @@ impl Datastore {
 			live_query_broker: self.live_query_broker,
 			// Fresh router cursor: a restarted node re-establishes its baseline.
 			live_query_router: Arc::new(LiveQueryRouter::new()),
+			scheduler: self.scheduler,
 			http_endpoint: self.http_endpoint,
 			index_stores: IndexStores::new(
 				self.config.idx.hnsw_cache_size,
@@ -770,6 +774,7 @@ impl Datastore {
 			live_query_broker: self.live_query_broker.clone(),
 			// A fork models a separate node, so it gets its own router cursor.
 			live_query_router: Arc::new(LiveQueryRouter::new()),
+			scheduler: self.scheduler.clone(),
 			http_endpoint: self.http_endpoint.clone(),
 			index_stores: IndexStores::new(
 				self.config.idx.hnsw_cache_size,
@@ -863,6 +868,15 @@ impl Datastore {
 		// Always cancel a read transaction; we don't write through it.
 		let _ = txn.cancel().await;
 		Ok(res.and_then(|node: Node| node.http_endpoint))
+	}
+
+	/// Set the scheduler a running program yields through once it has spent
+	/// its quantum of work, for a host that drives its own event loop. Without
+	/// one, a program yields to the tokio runtime it runs on, or through a
+	/// future that is pending once where there is none.
+	pub fn with_scheduler(mut self, scheduler: Arc<dyn crate::exec::scheduler::Scheduler>) -> Self {
+		self.scheduler = Some(scheduler);
+		self
 	}
 
 	#[cfg(storage)]
@@ -5719,7 +5733,7 @@ impl Datastore {
 	}
 
 	pub fn setup_ctx(&self) -> Result<Context> {
-		let ctx = Context::from_ds(
+		let mut ctx = Context::from_ds(
 			self.id,
 			self.auth_enabled,
 			self.dynamic_configuration.clone(),
@@ -5742,6 +5756,7 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			Arc::clone(&self.surrealism_cache),
 		)?;
+		ctx.set_scheduler(self.scheduler.clone());
 		Ok(ctx)
 	}
 

@@ -400,6 +400,7 @@ impl Builder {
 			transaction_timeout: self.transaction_timeout,
 			live_query_broker: self.live_query_broker,
 			live_query_router: Arc::new(LiveQueryRouter::new()),
+			scheduler: None,
 			http_endpoint: self.http_endpoint,
 			capabilities: ArcSwap::from_pointee(capabilities),
 			index_stores: IndexStores::new(

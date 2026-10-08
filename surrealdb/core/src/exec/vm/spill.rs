@@ -80,13 +80,12 @@ impl Runs {
 	}
 
 	/// The merge of every run with `held`, the rows still in memory, which
-	/// arrived after every run.
+	/// arrived after every run, already in order.
 	pub(super) fn merge(
 		self,
-		mut held: Vec<(Vec<Value>, SortRow)>,
+		held: Vec<(Vec<Value>, SortRow)>,
 		keys: Vec<KeyOrder>,
 	) -> anyhow::Result<Merge> {
-		sort_and_keep(&mut held, &keys, usize::MAX);
 		let mut sources = Vec::with_capacity(self.runs.len() + 1);
 		for path in &self.runs {
 			sources.push(Source::Run(BufReader::new(File::open(path)?)));

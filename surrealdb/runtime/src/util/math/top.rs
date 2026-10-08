@@ -3,26 +3,20 @@ use std::collections::BinaryHeap;
 
 use surrealdb_expr::val::Number;
 
-pub trait Top {
-	/// Find the greatest `k` records from the collection in arbetrary order
-	/// O(n*k*log(k)) time complex
-	fn top(self, k: i64) -> Vec<Number>;
-}
+use crate::fuel;
 
-impl Top for Vec<Number> {
-	fn top(self, k: i64) -> Vec<Number> {
-		// Convert to usize
-		let k = k as usize;
-		// Create a heap to store the numbers
-		let mut heap = BinaryHeap::new();
-		// Iterate and store the top numbers
-		for (i, v) in self.into_iter().enumerate() {
-			heap.push(Reverse(v));
-			if i >= k {
-				heap.pop();
-			}
+/// The greatest `k` numbers of `array`, in no particular order: a walk
+/// keeping them in a heap.
+pub async fn top(array: Vec<Number>, k: i64) -> Vec<Number> {
+	let k = k as usize;
+	let mut heap = BinaryHeap::new();
+	fuel::walk(array.into_iter().enumerate(), |(i, v)| {
+		heap.push(Reverse(v));
+		if i >= k {
+			heap.pop();
 		}
-		// Return the numbers as a vector
-		heap.into_iter().map(|x| x.0).collect()
-	}
+		std::ops::ControlFlow::Continue(())
+	})
+	.await;
+	heap.into_iter().map(|x| x.0).collect()
 }

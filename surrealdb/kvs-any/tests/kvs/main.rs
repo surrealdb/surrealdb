@@ -26,11 +26,18 @@ async fn ds_from_path(path: &str) -> TestDs {
 /// for the lifetime of the datastore.
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv"))]
 async fn ds_on_disk(scheme: &str) -> TestDs {
+	ds_on_disk_with(scheme, "").await
+}
+
+/// [`ds_on_disk`] with the connection string's `query`, such as
+/// `?versioned=true`.
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv"))]
+async fn ds_on_disk_with(scheme: &str, query: &str) -> TestDs {
 	let dir = temp_dir::TempDir::new().unwrap();
 	let path = dir.path().to_string_lossy().to_string();
 	let builder = surrealdb_kvs_any::Backends::community()
 		.new_transaction_builder(
-			&format!("{scheme}:{path}"),
+			&format!("{scheme}:{path}{query}"),
 			CancellationToken::new(),
 			ConfigMap::empty(),
 		)
@@ -53,6 +60,12 @@ fn main() -> ExitCode {
 
 	#[cfg(feature = "kv-surrealkv")]
 	backends.push(TestBackend::new("surrealkv", || ds_on_disk("surrealkv")));
+
+	// SurrealKV with versioning, for the tests of reads as of a version.
+	#[cfg(feature = "kv-surrealkv")]
+	backends.push(TestBackend::new("surrealkv_versioned", || {
+		ds_on_disk_with("surrealkv", "?versioned=true")
+	}));
 
 	// The TiKV backend aliases one shared external cluster, so its tests run
 	// serially and each test starts by wiping the keyspace.

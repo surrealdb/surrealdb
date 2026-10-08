@@ -25,11 +25,11 @@ define_pure_function!(MathSqrt, "math::sqrt", effects: EffectSet::PURE, (value: 
 define_pure_function!(MathTan, "math::tan", effects: EffectSet::PURE, (value: Number) -> Number, crate::fnc::math::tan);
 
 // Two argument math functions
-define_pure_function!(MathBottom, "math::bottom", effects: EffectSet::PURE, (array: Any, count: Int) -> Any, crate::fnc::math::bottom);
+define_pure_function!(MathBottom, "math::bottom", effects: EffectSet::PURE, metered: crate::fnc::math::bottom_walk, (array: Any, count: Int) -> Any, crate::fnc::math::bottom);
 define_pure_function!(MathFixed, "math::fixed", effects: EffectSet::PURE, (value: Number, precision: Int) -> Number, crate::fnc::math::fixed);
 define_pure_function!(MathLog, "math::log", effects: EffectSet::PURE, (value: Number, base: Number) -> Number, crate::fnc::math::log);
 define_pure_function!(MathPow, "math::pow", effects: EffectSet::PURE, (base: Number, exponent: Number) -> Number, crate::fnc::math::pow);
-define_pure_function!(MathTop, "math::top", effects: EffectSet::PURE, (array: Any, count: Int) -> Any, crate::fnc::math::top);
+define_pure_function!(MathTop, "math::top", effects: EffectSet::PURE, metered: crate::fnc::math::top_walk, (array: Any, count: Int) -> Any, crate::fnc::math::top);
 
 // Three argument math functions
 define_pure_function!(MathClamp, "math::clamp", effects: EffectSet::PURE, (value: Number, min: Number, max: Number) -> Number, crate::fnc::math::clamp);
@@ -37,23 +37,23 @@ define_pure_function!(MathLerp, "math::lerp", effects: EffectSet::PURE, (a: Numb
 define_pure_function!(MathLerpangle, "math::lerpangle", effects: EffectSet::PURE, (a: Number, b: Number, t: Number) -> Number, crate::fnc::math::lerpangle);
 
 // Array aggregate math functions (operate on array of numbers)
-define_pure_function!(MathInterquartile, "math::interquartile", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::interquartile);
-define_pure_function!(MathMax, "math::max", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), (array: Any) -> Number, crate::fnc::math::max);
-define_pure_function!(MathMean, "math::mean", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::mean);
-define_pure_function!(MathMedian, "math::median", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::median);
-define_pure_function!(MathMidhinge, "math::midhinge", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::midhinge);
-define_pure_function!(MathMin, "math::min", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), (array: Any) -> Number, crate::fnc::math::min);
-define_pure_function!(MathMode, "math::mode", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), (array: Any) -> Number, crate::fnc::math::mode);
-define_pure_function!(MathProduct, "math::product", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), (array: Any) -> Number, crate::fnc::math::product);
-define_pure_function!(MathSpread, "math::spread", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::spread);
-define_pure_function!(MathStddev, "math::stddev", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::stddev);
-define_pure_function!(MathSum, "math::sum", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), (array: Any) -> Number, crate::fnc::math::sum);
-define_pure_function!(MathTrimean, "math::trimean", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::trimean);
-define_pure_function!(MathVariance, "math::variance", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::variance);
+define_pure_function!(MathInterquartile, "math::interquartile", effects: EffectSet::PURE, metered: crate::fnc::math::interquartile_walk, (array: Any) -> Number, crate::fnc::math::interquartile);
+define_pure_function!(MathMax, "math::max", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), metered: crate::fnc::math::max_walk, (array: Any) -> Number, crate::fnc::math::max);
+define_pure_function!(MathMean, "math::mean", effects: EffectSet::PURE, metered: crate::fnc::math::mean_walk, (array: Any) -> Number, crate::fnc::math::mean);
+define_pure_function!(MathMedian, "math::median", effects: EffectSet::PURE, metered: crate::fnc::math::median_walk, (array: Any) -> Number, crate::fnc::math::median);
+define_pure_function!(MathMidhinge, "math::midhinge", effects: EffectSet::PURE, metered: crate::fnc::math::midhinge_walk, (array: Any) -> Number, crate::fnc::math::midhinge);
+define_pure_function!(MathMin, "math::min", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), metered: crate::fnc::math::min_walk, (array: Any) -> Number, crate::fnc::math::min);
+define_pure_function!(MathMode, "math::mode", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), metered: crate::fnc::math::mode_walk, (array: Any) -> Number, crate::fnc::math::mode);
+define_pure_function!(MathProduct, "math::product", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), metered: crate::fnc::math::product_walk, (array: Any) -> Number, crate::fnc::math::product);
+define_pure_function!(MathSpread, "math::spread", effects: EffectSet::PURE, metered: crate::fnc::math::spread_walk, (array: Any) -> Number, crate::fnc::math::spread);
+define_pure_function!(MathStddev, "math::stddev", effects: EffectSet::PURE, metered: crate::fnc::math::stddev_walk, (array: Any) -> Number, crate::fnc::math::stddev);
+define_pure_function!(MathSum, "math::sum", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), metered: crate::fnc::math::sum_walk, (array: Any) -> Number, crate::fnc::math::sum);
+define_pure_function!(MathTrimean, "math::trimean", effects: EffectSet::PURE, metered: crate::fnc::math::trimean_walk, (array: Any) -> Number, crate::fnc::math::trimean);
+define_pure_function!(MathVariance, "math::variance", effects: EffectSet::PURE, metered: crate::fnc::math::variance_walk, (array: Any) -> Number, crate::fnc::math::variance);
 
 // Two argument array aggregate functions
-define_pure_function!(MathNearestrank, "math::nearestrank", effects: EffectSet::PURE, (array: Any, percentile: Number) -> Number, crate::fnc::math::nearestrank);
-define_pure_function!(MathPercentile, "math::percentile", effects: EffectSet::PURE, (array: Any, percentile: Number) -> Number, crate::fnc::math::percentile);
+define_pure_function!(MathNearestrank, "math::nearestrank", effects: EffectSet::PURE, metered: crate::fnc::math::nearestrank_walk, (array: Any, percentile: Number) -> Number, crate::fnc::math::nearestrank);
+define_pure_function!(MathPercentile, "math::percentile", effects: EffectSet::PURE, metered: crate::fnc::math::percentile_walk, (array: Any, percentile: Number) -> Number, crate::fnc::math::percentile);
 
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(

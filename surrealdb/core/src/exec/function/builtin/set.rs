@@ -14,26 +14,26 @@ use crate::{define_pure_function, register_functions};
 
 // Single set argument functions
 define_pure_function!(SetFirst, "set::first", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (set: Any) -> Any, crate::fnc::set::first);
-define_pure_function!(SetFlatten, "set::flatten", effects: EffectSet::PURE, (set: Any) -> Any, crate::fnc::set::flatten);
+define_pure_function!(SetFlatten, "set::flatten", effects: EffectSet::PURE, metered: crate::fnc::set::flatten_walk, (set: Any) -> Any, crate::fnc::set::flatten);
 define_pure_function!(SetIsEmpty, "set::is_empty", effects: EffectSet::PURE, (set: Any) -> Bool, crate::fnc::set::is_empty);
 define_pure_function!(SetLast, "set::last", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (set: Any) -> Any, crate::fnc::set::last);
 define_pure_function!(SetLen, "set::len", effects: EffectSet::PURE, (set: Any) -> Int, crate::fnc::set::len);
-define_pure_function!(SetMax, "set::max", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (set: Any) -> Any, crate::fnc::set::max);
-define_pure_function!(SetMin, "set::min", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (set: Any) -> Any, crate::fnc::set::min);
+define_pure_function!(SetMax, "set::max", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), metered: crate::fnc::set::max_walk, (set: Any) -> Any, crate::fnc::set::max);
+define_pure_function!(SetMin, "set::min", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), metered: crate::fnc::set::min_walk, (set: Any) -> Any, crate::fnc::set::min);
 
 // Two argument set functions
-define_pure_function!(SetAdd, "set::add", effects: EffectSet::PURE, (set: Any, value: Any) -> Any, crate::fnc::set::add);
-define_pure_function!(SetAt, "set::at", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (set: Any, index: Int) -> Any, crate::fnc::set::at);
-define_pure_function!(SetComplement, "set::complement", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::set::complement);
+define_pure_function!(SetAdd, "set::add", effects: EffectSet::PURE, metered: crate::fnc::set::add_walk, (set: Any, value: Any) -> Any, crate::fnc::set::add);
+define_pure_function!(SetAt, "set::at", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), metered: crate::fnc::set::at_walk, (set: Any, index: Int) -> Any, crate::fnc::set::at);
+define_pure_function!(SetComplement, "set::complement", effects: EffectSet::PURE, metered: crate::fnc::set::complement_walk, (a: Any, b: Any) -> Any, crate::fnc::set::complement);
 define_pure_function!(SetContains, "set::contains", effects: EffectSet::PURE, (set: Any, value: Any) -> Bool, crate::fnc::set::contains);
-define_pure_function!(SetDifference, "set::difference", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::set::difference);
-define_pure_function!(SetIntersect, "set::intersect", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::set::intersect);
-define_pure_function!(SetJoin, "set::join", effects: EffectSet::PURE, (set: Any, separator: String) -> String, crate::fnc::set::join);
-define_pure_function!(SetRemove, "set::remove", effects: EffectSet::PURE, (set: Any, value: Any) -> Any, crate::fnc::set::remove);
-define_pure_function!(SetUnion, "set::union", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::set::union);
+define_pure_function!(SetDifference, "set::difference", effects: EffectSet::PURE, metered: crate::fnc::set::difference_walk, (a: Any, b: Any) -> Any, crate::fnc::set::difference);
+define_pure_function!(SetIntersect, "set::intersect", effects: EffectSet::PURE, metered: crate::fnc::set::intersect_walk, (a: Any, b: Any) -> Any, crate::fnc::set::intersect);
+define_pure_function!(SetJoin, "set::join", effects: EffectSet::PURE, metered: crate::fnc::set::join_walk, (set: Any, separator: String) -> String, crate::fnc::set::join);
+define_pure_function!(SetRemove, "set::remove", effects: EffectSet::PURE, metered: crate::fnc::set::remove_walk, (set: Any, value: Any) -> Any, crate::fnc::set::remove);
+define_pure_function!(SetUnion, "set::union", effects: EffectSet::PURE, metered: crate::fnc::set::union_walk, (a: Any, b: Any) -> Any, crate::fnc::set::union);
 
 // Three argument set functions
-define_pure_function!(SetSlice, "set::slice", effects: EffectSet::PURE, (set: Any, ?start: Any, ?end: Int) -> Any, crate::fnc::set::slice);
+define_pure_function!(SetSlice, "set::slice", effects: EffectSet::PURE, metered: crate::fnc::set::slice_walk, (set: Any, ?start: Any, ?end: Int) -> Any, crate::fnc::set::slice);
 
 // =========================================================================
 // Closure-based set functions (require async execution with TreeStack)

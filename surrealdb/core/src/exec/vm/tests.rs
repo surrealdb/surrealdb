@@ -3800,6 +3800,14 @@ async fn throughput() {
 		"SELECT VALUE i FROM t WHERE n > 2",
 		"SELECT i, s FROM t WHERE n = 3 AND i > 100",
 		"SELECT * FROM t WHERE n = 3 ORDER BY i DESC LIMIT 10",
+		"SELECT * FROM t ORDER BY i DESC LIMIT 10",
+		"SELECT * FROM t ORDER BY i DESC",
+		"SELECT i, s FROM t ORDER BY s, i DESC",
+		"SELECT * FROM t ORDER BY i DESC LIMIT 100",
+		"SELECT * FROM t ORDER BY i DESC LIMIT 1000",
+		"SELECT * FROM t ORDER BY i DESC LIMIT 5000",
+		"SELECT * FROM t ORDER BY i DESC LIMIT 20000",
+		"SELECT * FROM t ORDER BY n DESC, i LIMIT 5000",
 		"SELECT count() FROM t WHERE n = 3 GROUP ALL",
 		"SELECT math::sum(i) AS s, math::max(i) AS hi FROM t WHERE n = 3 GROUP ALL",
 		"SELECT math::sum(i) AS s FROM t GROUP ALL",
@@ -3807,7 +3815,7 @@ async fn throughput() {
 	] {
 		let bound = bind(&ctx, sql).await;
 		let vm = super::plan(&planner(&ctx), &bound).await.expect("covered");
-		for _ in 0..2 {
+		for _ in 0..5 {
 			let started = web_time::Instant::now();
 			let rows = outcome(&vm, &ctx).await.expect("runs").len();
 			let elapsed = started.elapsed();

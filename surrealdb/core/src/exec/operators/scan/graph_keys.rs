@@ -261,13 +261,19 @@ pub(crate) async fn collect_adjacency(
 			.context("Failed to open graph cursor")?,
 		};
 		loop {
-			crate::exec::operators::check_cancelled(ctx)?;
 			// The expand operators consume edge/target identities only, so
 			// the scan variant skips the per-edge key copies.
 			let batch = cursor
-				.next_batch_scan(crate::kvs::NORMAL_BATCH_SIZE)
+				.next_batch_scan(crate::exec::vm::fuel::batch(crate::kvs::NORMAL_BATCH_SIZE))
 				.await
 				.context("Failed to scan graph edge")?;
+			// A unit per edge read, and one for the read itself: a read takes
+			// no more than the fuel left.
+			crate::exec::vm::fuel::tick(
+				ctx,
+				crate::exec::vm::fuel::units(batch.len()).saturating_add(1),
+			)
+			.await?;
 			if batch.is_empty() {
 				break;
 			}

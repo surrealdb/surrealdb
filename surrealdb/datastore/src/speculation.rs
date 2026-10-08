@@ -353,6 +353,15 @@ impl Transactable for Base {
 		self.storage().writeable()
 	}
 
+	/// The view counts through the storage beneath.
+	fn parallel_count(&self) -> bool {
+		self.storage().parallel_count()
+	}
+
+	fn count_cost(&self) -> surrealdb_kvs::CountCost {
+		self.storage().count_cost()
+	}
+
 	/// The view holds nothing to cancel; the transaction beneath is not the
 	/// view's to cancel.
 	fn cancel<'a>(&'a self) -> BoxFut<'a, Result<()>> {
@@ -475,6 +484,14 @@ impl Transactable for Base {
 		self.storage().count(rng, version)
 	}
 
+	fn count_bounded<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+		budget: u32,
+	) -> BoxFut<'a, Result<(usize, Option<Key<'static>>)>> {
+		self.storage().count_bounded(rng, version, budget)
+	}
 	fn open_keys_cursor<'a>(
 		&'a self,
 		rng: KeyRange<'a>,

@@ -1,6 +1,6 @@
 //! Contract tests for the `Transactable` methods that have shared default
-//! implementations (`getm`, `getr`, `delr`, `clrr`, `count`, `replace`,
-//! `clr`, `clrc`). Backends may override any of these, so the contract is
+//! implementations (`getm`, `getr`, `delr`, `clrr`, `count`, `count_bounded`,
+//! `replace`, `clr`, `clrc`). Backends may override any of these, so the contract is
 //! asserted against every backend regardless.
 
 use surrealdb_kvs::KeyRange;
@@ -107,6 +107,131 @@ async fn count(b: &TestBackend) {
 }
 
 kvs_test!(count);
+
+/// The keys `count_bounded` counts over `rng`, call by call under `budget`,
+/// each call resumed at the key the last answered: the count of each call
+/// and the key each resumed at. Every call keeps within its budget, and
+/// every resume key lies within the range, after the one before.
+async fn count_in_calls(
+	tx: &dyn surrealdb_kvs::Transactable,
+	rng: &KeyRange<'static>,
+	version: Option<u64>,
+	budget: u32,
+) -> Vec<(usize, Vec<u8>)> {
+	let mut calls = Vec::new();
+	let mut from = rng.start.as_slice().to_vec();
+	loop {
+		let part = KeyRange::from(from.clone()..rng.end.as_slice().to_vec());
+		let (counted, resume) = tx.count_bounded(part, version, budget).await.unwrap();
+		assert!(counted <= budget.max(1) as usize, "a call counts within its budget of {budget}");
+		calls.push((counted, from.clone()));
+		let Some(resume) = resume else {
+			return calls;
+		};
+		let resume = resume.as_slice().to_vec();
+		assert!(resume > from, "a resume key lies after where the call began");
+		assert!(resume.as_slice() < rng.end.as_slice(), "a resume key lies within the range");
+		from = resume;
+	}
+}
+
+/// Seed `n` keys `c0000`.. with values matching the keys.
+async fn seed_many(ds: &TestDs, n: usize) {
+	let tx = ds.transaction(Write).await.unwrap();
+	for i in 0..n {
+		let key = format!("c{i:04}");
+		tx.set(key.as_bytes().into(), key.clone().into_bytes()).await.unwrap();
+	}
+	tx.commit().await.unwrap();
+}
+
+/// `count_bounded`, called under any budget and resumed at each key it
+/// answers, sums to `count`, and each call counts exactly the keys from where
+/// it began to where it stopped.
+async fn count_bounded(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed_many(&ds, 300).await;
+	let tx = ds.transaction(Read).await.unwrap();
+	for rng in [
+		KeyRange::from(&b"c"[..]..&b"d"[..]),
+		KeyRange::from(&b"c0100"[..]..&b"c0250"[..]),
+		KeyRange::from(&b"x"[..]..&b"z"[..]),
+	] {
+		let whole = tx.count(rng.as_borrowed(), None).await.unwrap();
+		for budget in [0, 1, 2, 7, 64, 149, 150, 151, 299, 300, 301, 10_000] {
+			let calls = count_in_calls(tx.as_ref(), &rng, None, budget).await;
+			let summed: usize = calls.iter().map(|(counted, _)| counted).sum();
+			assert_eq!(summed, whole, "budget {budget} sums to the count over {rng}");
+			// Each call counted exactly the keys up to where the next began.
+			for pair in calls.windows(2) {
+				let (counted, from) = &pair[0];
+				let (_, next) = &pair[1];
+				let keys = tx
+					.keys(KeyRange::from(from.clone()..next.clone()), u32::MAX, 0, None)
+					.await
+					.unwrap()
+					.keys;
+				assert_eq!(keys.len(), *counted, "budget {budget}: a call resumes exactly");
+			}
+		}
+	}
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(count_bounded);
+
+/// `count_bounded` in a writable transaction counts its own buffered writes
+/// and deletes, as `count` does.
+async fn count_bounded_sees_buffered_writes(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed_many(&ds, 100).await;
+	let tx = ds.transaction(Write).await.unwrap();
+	for i in 0..20 {
+		tx.del(format!("c{:04}", i * 3).as_bytes().into()).await.unwrap();
+	}
+	for i in 0..30 {
+		let key = format!("c{:04}x", i * 2);
+		tx.set(key.as_bytes().into(), key.clone().into_bytes()).await.unwrap();
+	}
+	let rng = KeyRange::from(&b"c"[..]..&b"d"[..]);
+	let whole = tx.count(rng.as_borrowed(), None).await.unwrap();
+	assert_eq!(whole, 110);
+	for budget in [1, 9, 50, 1_000] {
+		let calls = count_in_calls(tx.as_ref(), &rng, None, budget).await;
+		let summed: usize = calls.iter().map(|(counted, _)| counted).sum();
+		assert_eq!(summed, whole, "budget {budget} counts the buffered writes");
+	}
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(count_bounded_sees_buffered_writes);
+
+/// On a versioned store, `count_bounded` as of a version sums to `count` as
+/// of it: as of the latest version every live key, as of a version before
+/// any write none, a deleted key at neither.
+async fn count_bounded_at_a_version(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	seed_many(&ds, 120).await;
+	let tx = ds.transaction(Write).await.unwrap();
+	for i in 0..40 {
+		tx.del(format!("c{:04}", i * 3).as_bytes().into()).await.unwrap();
+	}
+	tx.commit().await.unwrap();
+	let tx = ds.transaction(Read).await.unwrap();
+	let rng = KeyRange::from(&b"c"[..]..&b"d"[..]);
+	for (version, expected) in [(u64::MAX, 80), (1, 0)] {
+		let whole = tx.count(rng.as_borrowed(), Some(version)).await.unwrap();
+		assert_eq!(whole, expected, "the count as of {version}");
+		for budget in [1, 7, 79, 80, 81] {
+			let calls = count_in_calls(tx.as_ref(), &rng, Some(version), budget).await;
+			let summed: usize = calls.iter().map(|(counted, _)| counted).sum();
+			assert_eq!(summed, whole, "budget {budget} as of {version}");
+		}
+	}
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(count_bounded_at_a_version, only = [surrealkv_versioned]);
 
 /// `replace` overwrites an existing key without `put`'s exists check.
 async fn replace(b: &TestBackend) {

@@ -1013,7 +1013,9 @@ async fn run_body(
 			match super::host::run_unit_inline(program, pipeline, row, &mut inline) {
 				Ok(_) => return Ok(inline.output.pop().unwrap_or(Value::None)),
 				Err(unfinished) => {
-					held.steps.store(true, Ordering::Relaxed);
+					if !unfinished.yielded {
+						held.steps.store(true, Ordering::Relaxed);
+					}
 					match unfinished.resume {
 						Some(start) => (unfinished.row, start, inline),
 						None => {

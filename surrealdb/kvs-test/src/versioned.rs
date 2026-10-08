@@ -37,8 +37,12 @@ async fn unsupported_error(b: &TestBackend) {
 		tx.scan(rng.as_borrowed(), 10, 0, Some(1)).await,
 		Err(Error::UnsupportedVersionedQueries)
 	));
+	assert!(matches!(
+		tx.count_bounded(rng.as_borrowed(), Some(1), 10).await,
+		Err(Error::UnsupportedVersionedQueries)
+	));
 	assert!(matches!(tx.count(rng, Some(1)).await, Err(Error::UnsupportedVersionedQueries)));
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(unsupported_error);
+kvs_test!(unsupported_error, except = [surrealkv_versioned]);

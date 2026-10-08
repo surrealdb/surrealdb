@@ -53,7 +53,6 @@ use super::program::{
 };
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::exec::operators::check_cancelled;
 use crate::exec::operators::scan::common::{
 	extract_record_ids_into, resolve_record_batch, resolve_version_stamp,
 };
@@ -481,6 +480,7 @@ impl Run<'_> {
 			.context("Failed to fetch records")?;
 		let mut values = Vec::with_capacity(reached.len());
 		for (rid, record) in reached.into_iter().zip(records) {
+			super::fuel::tick(self.ctx, 1).await?;
 			// A record that does not exist discloses nothing.
 			if record.data.is_none() {
 				continue;
@@ -813,7 +813,9 @@ async fn adjacency(
 	else {
 		return Err(ControlFlow::Err(anyhow::anyhow!("an adjacency read of a reference hop")));
 	};
-	check_cancelled(ctx)?;
+	// A source's adjacency is a unit to open, and each entry it yields one
+	// more, spent as the reads go.
+	super::fuel::tick(ctx, 1).await?;
 	if out.len() >= cap {
 		return Ok(());
 	}
@@ -871,6 +873,8 @@ async fn adjacency(
 				if let Some(metrics) = metrics {
 					metrics.add_edges_scanned(selected.len() as u64);
 				}
+				// A unit per entry the cache answers, decoded in one go.
+				super::fuel::tick(ctx, super::fuel::units(selected.len())).await?;
 				for entry in selected {
 					let (edge, target) = decode_cache_entry(entry)?;
 					reach(targets.as_deref(), dir, edge, Some(target), None, out);
@@ -916,15 +920,19 @@ async fn adjacency(
 					.await
 					.context("Failed to open graph cursor")?,
 				};
+				let mut held = out.len();
 				loop {
-					check_cancelled(ctx)?;
+					// The entries the last read pushed, and the read itself.
+					super::fuel::tick(ctx, super::fuel::units(out.len() - held).saturating_add(1))
+						.await?;
+					held = out.len();
 					if out.len() >= cap {
 						break;
 					}
 					// Each read asks storage for no more than the entries still
-					// wanted.
-					let fill =
-						(cap - out.len()).clamp(1, crate::kvs::NORMAL_BATCH_SIZE as usize) as u32;
+					// wanted, nor more than the fuel left.
+					let most = super::fuel::batch(crate::kvs::NORMAL_BATCH_SIZE) as usize;
+					let fill = (cap - out.len()).clamp(1, most) as u32;
 					// A never-folded adjacency is visited in the cursor's own
 					// buffer, and only another shape materializes its batch.
 					let visited = cursor
@@ -983,12 +991,13 @@ async fn adjacency(
 						.context("Failed to open legacy-fallback graph cursor")?;
 					loop {
 						let keys = cursor
-							.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
+							.next_batch(super::fuel::batch(crate::kvs::NORMAL_BATCH_SIZE))
 							.await
 							.context("Failed to scan edge adjacency for legacy graph fallback")?;
 						if keys.is_empty() {
 							break;
 						}
+						super::fuel::tick(ctx, super::fuel::units(keys.len())).await?;
 						for key in &keys {
 							out.push(Entry {
 								id: inner
@@ -1070,7 +1079,7 @@ async fn references(
 	cap: usize,
 	out: &mut Vec<RecordId>,
 ) -> FlowResult<()> {
-	check_cancelled(ctx)?;
+	super::fuel::tick(ctx, 1).await?;
 	if out.len() >= cap {
 		return Ok(());
 	}
@@ -1146,22 +1155,23 @@ async fn references(
 	loop {
 		let mut failed: Option<anyhow::Error> = None;
 		let stats = cursor
-			.for_each(crate::kvs::NORMAL_BATCH_SIZE, &mut |key| match ReferenceKey::decode_key(key)
-			{
-				Ok(decoded) => {
-					out.push(RecordId {
-						table: decoded.foreign_table.into_owned(),
-						key: decoded.foreign_key.into_owned(),
-					});
-					Ok(if out.len() >= cap {
-						std::ops::ControlFlow::Break(())
-					} else {
-						std::ops::ControlFlow::Continue(())
-					})
-				}
-				Err(e) => {
-					failed = Some(e);
-					Ok(std::ops::ControlFlow::Break(()))
+			.for_each(super::fuel::batch(crate::kvs::NORMAL_BATCH_SIZE), &mut |key| {
+				match ReferenceKey::decode_key(key) {
+					Ok(decoded) => {
+						out.push(RecordId {
+							table: decoded.foreign_table.into_owned(),
+							key: decoded.foreign_key.into_owned(),
+						});
+						Ok(if out.len() >= cap {
+							std::ops::ControlFlow::Break(())
+						} else {
+							std::ops::ControlFlow::Continue(())
+						})
+					}
+					Err(e) => {
+						failed = Some(e);
+						Ok(std::ops::ControlFlow::Break(()))
+					}
 				}
 			})
 			.await
@@ -1169,6 +1179,8 @@ async fn references(
 		if let Some(e) = failed {
 			return Err(e).context("Failed to decode ref key")?;
 		}
+		// A unit per reference read, and one for the read itself.
+		super::fuel::tick(ctx, super::fuel::units(stats.rows as usize).saturating_add(1)).await?;
 		if stats.rows == 0 || out.len() >= cap {
 			return Ok(());
 		}

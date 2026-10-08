@@ -36,6 +36,16 @@ pub(crate) enum Scalar<'a> {
 }
 
 impl<'a> Scalar<'a> {
+	/// The value this scalar holds whole — an array, a set, an object and so
+	/// on — borrowed; `None` for a scalar held unboxed.
+	#[inline]
+	pub(crate) fn as_whole(&self) -> Option<&Value> {
+		match self {
+			Scalar::Value(value) => Some(value.as_ref()),
+			_ => None,
+		}
+	}
+
 	/// The scalar that denotes `value`, borrowing its heap parts.
 	pub(crate) fn of(value: &'a Value) -> Self {
 		match value {

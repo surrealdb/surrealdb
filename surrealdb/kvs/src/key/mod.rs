@@ -265,6 +265,17 @@ impl RawRange {
 	pub fn bounds(&self) -> (&[u8], &[u8]) {
 		(self.0.start.as_slice(), self.0.end.as_slice())
 	}
+
+	/// The part of this range from `start` to `end`, each held within the
+	/// range's own bounds: a sub-range of the same keys, for a caller reading
+	/// the range in parts.
+	pub fn part(&self, start: &[u8], end: &[u8]) -> Self {
+		let (lo, hi) = self.bounds();
+		RawRange(KeyRange {
+			start: Key::from(start.max(lo).to_vec()),
+			end: Key::from(end.min(hi).to_vec()),
+		})
+	}
 }
 
 /// A range the datastore can act on, whatever the keys inside it store.

@@ -649,7 +649,16 @@ pub(super) async fn steps(
 ) -> FlowResult<usize> {
 	loop {
 		match pipeline.code.get(at) {
-			Some(Instr::Write(_)) => at = step(program, pipeline, at, state, row).await?,
+			Some(Instr::Write(_)) => {
+				at = step(program, pipeline, at, state, row).await?;
+				// A write instruction is a unit of work. Once the fuel is spent
+				// the body continues at the next, which its driver enters after
+				// its yield point: every write instruction resumes the body with
+				// fresh registers, so stopping between two holds nothing.
+				if super::fuel::charge(1) {
+					return Ok(at);
+				}
+			}
 			Some(Instr::Jump {
 				target,
 			}) => at = *target as usize,
@@ -1146,6 +1155,9 @@ pub(super) fn stream(program: Arc<Program>, ctx: ExecutionContext) -> ValueBatch
 			})
 			.collect();
 		let mut state = State::new(&program, paging, ctx.function_registry())?;
+		// A statement spends no more than its own quantum before its first
+		// yield.
+		super::fuel::cap(super::fuel::quantum(&ctx));
 		if !program.groups.is_empty() {
 			state.program = Some(Arc::clone(&program));
 		}
@@ -1288,7 +1300,6 @@ async fn run_targets(
 	write_state(state)?.per_record = true;
 	let mut guaranteed = None;
 	for target in targets {
-		check_cancelled(ctx)?;
 		let mut subjects = match target {
 			super::program::Target::Scalar(scalar) => {
 				let value =
@@ -1303,7 +1314,9 @@ async fn run_targets(
 		while let Some(subject) =
 			subjects.next(form, deferable).map_err(|err| refused_by(err, form))?
 		{
-			check_cancelled(ctx)?;
+			// A subject is a unit, whether or not a record answers it; each
+			// row it yields is one more as it runs.
+			super::fuel::tick(ctx, 1).await?;
 			let mut rows = match subject {
 				Subject::Row(row) => Rows::One(Some(row)),
 				Subject::Read(id) => Rows::One(Some(Box::new(read_subject(ctx, id).await?))),
@@ -1326,7 +1339,6 @@ async fn run_targets(
 				}
 			};
 			while let Some(row) = rows.next().await? {
-				check_cancelled(ctx)?;
 				write_state(state)?.row = Some(row);
 				run_value_row(program, pipeline, Value::None, state, ctx).await?;
 				flush(state, yielder, flush_at).await?;
@@ -1372,7 +1384,6 @@ async fn run_inserts(
 		None => None,
 	};
 	for value in insert_values(program, rows, state, ctx).await? {
-		check_cancelled(ctx)?;
 		write_state(state)?.row = Some(insert_row(value, &into, relation)?);
 		run_value_row(program, pipeline, Value::None, state, ctx).await?;
 		flush(state, yielder, flush_at).await?;
@@ -1428,7 +1439,6 @@ async fn insert_values(
 		InsertRowsSpec::Tuples(tuples) => {
 			let mut out = Vec::with_capacity(tuples.len());
 			for tuple in tuples {
-				check_cancelled(ctx)?;
 				// A fresh object per row, written through the tuple's places in
 				// the order the statement wrote them.
 				let mut row = Value::empty_object();
@@ -1480,7 +1490,6 @@ async fn run_edges(
 	let tos = relate_endpoints(endpoint(to).await?, RelateSide::To)?;
 	for f in &froms {
 		for t in &tos {
-			check_cancelled(ctx)?;
 			let at = endpoint(through).await?;
 			write_state(state)?.row = Some(relate_row(at, f.clone(), t.clone())?);
 			run_value_row(program, pipeline, Value::None, state, ctx).await?;

@@ -45,6 +45,12 @@
 ///     crate::fnc::string::concat
 /// );
 /// ```
+///
+/// A function whose work grows with its input also names, after any `rule:`,
+/// the walk the executor runs it as (`metered: crate::fnc::array::sort_walk,`):
+/// an `async fn` over the same arguments that charges the fuel meter a
+/// stretch at a time
+/// ([`ScalarFunction::metered`](crate::exec::function::ScalarFunction::metered)).
 #[macro_export]
 macro_rules! define_pure_function {
 	// No arguments: () -> ReturnType
@@ -53,6 +59,7 @@ macro_rules! define_pure_function {
 		$func_name:literal,
 		effects: $effects:expr,
 		$(rule: $rule:expr,)?
+		$(metered: $metered:path,)?
 		() -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -83,6 +90,15 @@ macro_rules! define_pure_function {
 				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 				$impl_path(args)
 			}
+
+			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+				Some(|args| {
+					Box::pin(async move {
+						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+						$metered(args).await
+					})
+				})
+			})?
 		}
 	};
 
@@ -92,6 +108,7 @@ macro_rules! define_pure_function {
 		$func_name:literal,
 		effects: $effects:expr,
 		$(rule: $rule:expr,)?
+		$(metered: $metered:path,)?
 		($arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -124,6 +141,15 @@ macro_rules! define_pure_function {
 				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 				$impl_path(args)
 			}
+
+			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+				Some(|args| {
+					Box::pin(async move {
+						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+						$metered(args).await
+					})
+				})
+			})?
 		}
 	};
 
@@ -133,6 +159,7 @@ macro_rules! define_pure_function {
 		$func_name:literal,
 		effects: $effects:expr,
 		$(rule: $rule:expr,)?
+		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -166,6 +193,15 @@ macro_rules! define_pure_function {
 				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 				$impl_path(args)
 			}
+
+			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+				Some(|args| {
+					Box::pin(async move {
+						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+						$metered(args).await
+					})
+				})
+			})?
 		}
 	};
 
@@ -175,6 +211,7 @@ macro_rules! define_pure_function {
 		$func_name:literal,
 		effects: $effects:expr,
 		$(rule: $rule:expr,)?
+		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -209,6 +246,15 @@ macro_rules! define_pure_function {
 				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 				$impl_path(args)
 			}
+
+			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+				Some(|args| {
+					Box::pin(async move {
+						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+						$metered(args).await
+					})
+				})
+			})?
 		}
 	};
 
@@ -218,6 +264,7 @@ macro_rules! define_pure_function {
 		$func_name:literal,
 		effects: $effects:expr,
 		$(rule: $rule:expr,)?
+		$(metered: $metered:path,)?
 		(... $arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -250,6 +297,15 @@ macro_rules! define_pure_function {
 				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 				$impl_path(args)
 			}
+
+			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+				Some(|args| {
+					Box::pin(async move {
+						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+						$metered(args).await
+					})
+				})
+			})?
 		}
 	};
 
@@ -259,6 +315,7 @@ macro_rules! define_pure_function {
 		$func_name:literal,
 		effects: $effects:expr,
 		$(rule: $rule:expr,)?
+		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, ... $rest_name:ident : $rest_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -292,6 +349,15 @@ macro_rules! define_pure_function {
 				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 				$impl_path(args)
 			}
+
+			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+				Some(|args| {
+					Box::pin(async move {
+						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+						$metered(args).await
+					})
+				})
+			})?
 		}
 	};
 
@@ -301,6 +367,7 @@ macro_rules! define_pure_function {
 		$func_name:literal,
 		effects: $effects:expr,
 		$(rule: $rule:expr,)?
+		$(metered: $metered:path,)?
 		(? $arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -333,6 +400,15 @@ macro_rules! define_pure_function {
 				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 				$impl_path(args)
 			}
+
+			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+				Some(|args| {
+					Box::pin(async move {
+						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+						$metered(args).await
+					})
+				})
+			})?
 		}
 	};
 
@@ -342,6 +418,7 @@ macro_rules! define_pure_function {
 		$func_name:literal,
 		effects: $effects:expr,
 		$(rule: $rule:expr,)?
+		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -375,6 +452,15 @@ macro_rules! define_pure_function {
 				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 				$impl_path(args)
 			}
+
+			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+				Some(|args| {
+					Box::pin(async move {
+						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+						$metered(args).await
+					})
+				})
+			})?
 		}
 	};
 
@@ -384,6 +470,7 @@ macro_rules! define_pure_function {
 		$func_name:literal,
 		effects: $effects:expr,
 		$(rule: $rule:expr,)?
+		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -418,6 +505,15 @@ macro_rules! define_pure_function {
 				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 				$impl_path(args)
 			}
+
+			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+				Some(|args| {
+					Box::pin(async move {
+						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+						$metered(args).await
+					})
+				})
+			})?
 		}
 	};
 
@@ -427,6 +523,7 @@ macro_rules! define_pure_function {
 		$func_name:literal,
 		effects: $effects:expr,
 		$(rule: $rule:expr,)?
+		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -461,6 +558,15 @@ macro_rules! define_pure_function {
 				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 				$impl_path(args)
 			}
+
+			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+				Some(|args| {
+					Box::pin(async move {
+						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+						$metered(args).await
+					})
+				})
+			})?
 		}
 	};
 
@@ -470,6 +576,7 @@ macro_rules! define_pure_function {
 		$func_name:literal,
 		effects: $effects:expr,
 		$(rule: $rule:expr,)?
+		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident, ? $arg4_name:ident : $arg4_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -505,6 +612,15 @@ macro_rules! define_pure_function {
 				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 				$impl_path(args)
 			}
+
+			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+				Some(|args| {
+					Box::pin(async move {
+						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+						$metered(args).await
+					})
+				})
+			})?
 		}
 	};
 
@@ -514,6 +630,7 @@ macro_rules! define_pure_function {
 		$func_name:literal,
 		effects: $effects:expr,
 		$(rule: $rule:expr,)?
+		$(metered: $metered:path,)?
 		(? $arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -547,6 +664,15 @@ macro_rules! define_pure_function {
 				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
 				$impl_path(args)
 			}
+
+			$(fn metered(&self) -> Option<$crate::exec::function::MeteredFn> {
+				Some(|args| {
+					Box::pin(async move {
+						let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+						$metered(args).await
+					})
+				})
+			})?
 		}
 	};
 }

@@ -2,21 +2,24 @@ use std::collections::BTreeMap;
 
 use surrealdb_expr::val::Number;
 
-pub trait Mode {
-	/// Find the most frequent number in collection
-	/// O(n*w) time complex s.t. w = distinct count
-	fn mode(self) -> Number;
-}
+use crate::fuel;
 
-impl Mode for Vec<Number> {
-	fn mode(self) -> Number {
-		// Iterate over all numbers, and get their frequency
-		let frequencies = self.into_iter().fold(BTreeMap::new(), |mut freqs, value| {
-			let entry = freqs.entry(value).or_insert_with(|| 0u32);
-			*entry += 1;
-			freqs
-		});
-		// Get the maximum number by frequency
-		frequencies.into_iter().max_by_key(|(_, n)| *n).map(|(v, _)| v).unwrap_or(Number::NAN)
-	}
+/// The most frequent number in `array`, the greatest of those equally
+/// frequent, or NaN for an empty one: a walk of the numbers counting each,
+/// then of the distinct numbers.
+pub async fn mode(array: Vec<Number>) -> Number {
+	let frequencies = fuel::fold(array, BTreeMap::new(), |mut freqs, value| {
+		*freqs.entry(value).or_insert(0u32) += 1;
+		freqs
+	})
+	.await;
+	let mut best: Option<(Number, u32)> = None;
+	fuel::walk(frequencies, |(value, n)| {
+		if best.is_none_or(|(_, most)| n >= most) {
+			best = Some((value, n));
+		}
+		std::ops::ControlFlow::Continue(())
+	})
+	.await;
+	best.map(|(value, _)| value).unwrap_or(Number::NAN)
 }

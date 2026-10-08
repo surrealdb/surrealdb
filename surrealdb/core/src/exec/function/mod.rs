@@ -82,6 +82,9 @@ pub(crate) fn check_arity(
 
 /// A scalar function that can be invoked during query execution.
 ///
+/// A pure function's walk over its arguments ([`ScalarFunction::metered`]).
+pub type MeteredFn = fn(Vec<Value>) -> BoxFut<'static, Result<Value>>;
+
 /// Scalar functions operate on individual values and return a single value.
 /// They may be:
 /// - Pure: operate only on their arguments with no side effects
@@ -203,6 +206,16 @@ pub trait ScalarFunction: Send + Sync + Debug {
 	/// The default implementation returns an error.
 	fn invoke(&self, _args: Vec<Value>) -> Result<Value> {
 		Err(anyhow::anyhow!("Function '{}' requires context or async execution", self.name()))
+	}
+
+	/// The walk the executor runs this pure function as when its work grows
+	/// with its input: an `async fn` over the same arguments that charges the
+	/// thread's fuel a stretch at a time and, once that is spent, waits for a
+	/// yield point ([`surrealdb_runtime::fuel`]). `None` for a function the
+	/// executor calls through [`Self::invoke`] and charges at the call, by the
+	/// size of its arguments and of its result.
+	fn metered(&self) -> Option<MeteredFn> {
+		None
 	}
 
 	/// Async invocation with context access.

@@ -172,7 +172,8 @@ pub(super) trait Services {
 	fn record_range(&self, table: &TableName, range: &RecordIdKeyRange) -> FlowResult<RawRange>;
 
 	/// The number of keys in `range` as of `version`, counted by key alone:
-	/// no value is read or decoded.
+	/// no value is read or decoded. The keys are charged to the fuel meter as
+	/// they are counted, with a yield point between reads.
 	async fn count_keys(&self, range: RawRange, version: Option<u64>) -> FlowResult<usize>;
 
 	/// Whether record `rid` exists as of `version`, decided by its key alone.
@@ -365,7 +366,6 @@ impl Services for EngineServices<'_> {
 	}
 
 	async fn next_index_rids(&self, cursor: &mut BTreeIterator) -> FlowResult<Vec<RecordId>> {
-		check_cancelled(self.ctx)?;
 		let txn = self.ctx.txn();
 		cursor.next_batch(&txn, INDEX_BATCH_SIZE).await.map_err(ControlFlow::Err)
 	}
@@ -518,7 +518,7 @@ impl Services for EngineServices<'_> {
 
 	async fn count_keys(&self, range: RawRange, version: Option<u64>) -> FlowResult<usize> {
 		check_cancelled(self.ctx)?;
-		self.ctx.txn().count(range, version).await.context("Failed to count records")
+		super::count::count_keys(self.ctx, range, version).await
 	}
 
 	async fn record_exists(&self, rid: &RecordId, version: Option<u64>) -> FlowResult<bool> {

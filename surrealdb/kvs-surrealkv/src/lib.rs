@@ -720,6 +720,81 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// Count the keys within a range, examining at most `budget` of them
+	/// ([`Transactable::count_bounded`]). The current state is counted on the
+	/// range iterator itself, stopping on the key the next call resumes at; a
+	/// version is counted on the history with tombstones visible, as
+	/// [`Self::count`] counts it, each user key examined charged to the budget
+	/// whether it is live or deleted as of the version.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn count_bounded<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+		budget: u32,
+	) -> BoxFut<'a, Result<(usize, Option<Key<'static>>)>> {
+		Box::pin(async move {
+			// Versioned queries require a versioned datastore
+			self.ensure_versioned(version)?;
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let budget = budget.max(1) as usize;
+			let beg = rng.start;
+			let end = rng.end;
+			let inner = self.inner.read().await;
+			let mut counted = 0;
+			let resume = match version {
+				Some(ts) => {
+					// As `count` does: tombstones visible, so a key deleted as
+					// of `ts` is examined, charged to the budget, and not
+					// counted.
+					let opts = HistoryOptions::new().with_tombstones(true);
+					let mut iter = inner
+						.history_with_options(beg.as_slice(), end.as_slice(), &opts)
+						.map_err(kvs_error)?;
+					iter.seek_first().map_err(kvs_error)?;
+					let mut examined = 0;
+					while iter.valid() && examined < budget {
+						let key_ref = iter.key();
+						if key_ref.timestamp() > ts {
+							// A version newer than `ts`: not this key's state.
+							iter.next().map_err(kvs_error)?;
+							continue;
+						}
+						// The latest version as of `ts`; its older versions
+						// are passed over.
+						let user_key = key_ref.user_key().to_vec();
+						let is_tombstone = key_ref.is_tombstone();
+						loop {
+							iter.next().map_err(kvs_error)?;
+							if !iter.valid() || iter.key().user_key() != user_key {
+								break;
+							}
+						}
+						examined += 1;
+						if !is_tombstone {
+							counted += 1;
+						}
+					}
+					iter.valid().then(|| iter.key().user_key().to_vec())
+				}
+				None => {
+					let mut iter =
+						inner.range(beg.as_slice(), end.as_slice()).map_err(kvs_error)?;
+					iter.seek_first().map_err(kvs_error)?;
+					while counted < budget && iter.valid() {
+						counted += 1;
+						iter.next().map_err(kvs_error)?;
+					}
+					iter.valid().then(|| iter.key().user_key().to_vec())
+				}
+			};
+			Ok((counted, resume.map(Key::from)))
+		})
+	}
+
 	/// Retrieve a range of keys, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
 	fn keysr<'a>(

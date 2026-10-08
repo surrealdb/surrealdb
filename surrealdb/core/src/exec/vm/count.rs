@@ -193,3 +193,132 @@ async fn ordinary_rows(
 	.await?;
 	Ok(Counted::Rows(rows))
 }
+
+/// The parts the rest of a key range is divided into once its first call
+/// shows it holds more than one call's keys, where the backend counts in
+/// parallel.
+const COUNT_PARTS: usize = 64;
+
+/// The most calls of a key count in flight at once, each counting part of
+/// the range on the backend's own threads.
+const COUNTS_IN_FLIGHT: usize = 16;
+
+/// The number of keys in `range` as of `version`, counted by key alone, a
+/// unit a key examined, with a yield point between calls.
+///
+/// A backend whose count is [`CountCost::Logarithmic`] answers the range in
+/// one call, charged a unit. Any other counts through
+/// [`count_bounded`](crate::kvs::Transaction::count_bounded), each call
+/// examining no more keys than the fuel left and resumed at the key it
+/// stopped on: one call counting a whole range would be a walk no quantum
+/// bounds. Where the backend counts off the calling thread
+/// ([`Transactor::parallel_count`]), what the first call leaves is divided
+/// into parts over the band its keys occupy, and the parts are counted a
+/// quantum of keys a call, several calls in flight at once, each charged as
+/// it returns.
+///
+/// [`CountCost::Logarithmic`]: surrealdb_kvs::CountCost::Logarithmic
+/// [`Transactor::parallel_count`]: surrealdb_datastore::Transactor::parallel_count
+pub(super) async fn count_keys(
+	ctx: &ExecutionContext,
+	range: crate::key::RawRange,
+	version: Option<u64>,
+) -> FlowResult<usize> {
+	use anyhow::Context as _;
+
+	let txn = ctx.txn();
+	if txn.count_cost() == surrealdb_kvs::CountCost::Logarithmic {
+		let counted = txn.count(range, version).await.context("Failed to count records")?;
+		super::fuel::tick(ctx, 1).await?;
+		return Ok(counted);
+	}
+	let most = super::fuel::batch(crate::kvs::NORMAL_BATCH_SIZE);
+	let (mut counted, mut resume) =
+		txn.count_bounded(range.clone(), version, most).await.context("Failed to count records")?;
+	super::fuel::tick(ctx, super::fuel::units(counted)).await?;
+	if txn.parallel_count() {
+		return match resume {
+			Some(from) => Ok(counted + Box::pin(count_rest(ctx, &range, from, version)).await?),
+			None => Ok(counted),
+		};
+	}
+	let (_, end) = range.bounds();
+	while let Some(from) = resume {
+		let most = super::fuel::batch(crate::kvs::NORMAL_BATCH_SIZE);
+		let (part, next) = txn
+			.count_bounded(range.part(&from, end), version, most)
+			.await
+			.context("Failed to count records")?;
+		counted += part;
+		resume = next;
+		super::fuel::tick(ctx, super::fuel::units(part)).await?;
+	}
+	Ok(counted)
+}
+
+/// The keys of `range` from `from` on, counted in parts over the band they
+/// occupy ([`count_keys`]).
+pub(super) async fn count_rest(
+	ctx: &ExecutionContext,
+	range: &crate::key::RawRange,
+	from: Vec<u8>,
+	version: Option<u64>,
+) -> FlowResult<usize> {
+	use anyhow::Context as _;
+	use futures::stream::FuturesUnordered;
+
+	use crate::kvs::Direction;
+
+	let txn = ctx.txn();
+	// The band runs from `from` to just after the range's last key, found by
+	// one seek from its end.
+	let (_, end) = range.bounds();
+	let mut tail = txn
+		.open_keys_cursor_raw(range.part(&from, end), Direction::Backward, 0, version)
+		.await
+		.context("Failed to count records")?;
+	let mut band_end = None;
+	tail.for_each(1, &mut |key| {
+		band_end = Some(key.to_vec());
+		Ok(std::ops::ControlFlow::Continue(()))
+	})
+	.await
+	.context("Failed to count records")?;
+	drop(tail);
+	let Some(mut band_end) = band_end else {
+		return Ok(0);
+	};
+	band_end.push(0);
+	let budget = super::fuel::quantum(ctx);
+	let in_flight = std::thread::available_parallelism()
+		.map_or(4, std::num::NonZeroUsize::get)
+		.min(COUNTS_IN_FLIGHT);
+	let call = |lo: Vec<u8>, hi: Vec<u8>| {
+		let txn = &txn;
+		let part = range.part(&lo, &hi);
+		async move { (txn.count_bounded(part, version, budget).await, hi) }
+	};
+	let mut parts =
+		crate::exec::operators::scan::extents::split_range(&from, &band_end, COUNT_PARTS)
+			.into_iter();
+	let mut running = FuturesUnordered::new();
+	for (lo, hi) in parts.by_ref().take(in_flight) {
+		running.push(call(lo, hi));
+	}
+	let mut counted = 0;
+	while let Some((part, hi)) = running.next().await {
+		let (part, resume) = part.context("Failed to count records")?;
+		crate::exec::operators::check_cancelled(ctx)?;
+		counted += part;
+		match resume {
+			Some(lo) => running.push(call(lo, hi)),
+			None => {
+				if let Some((lo, hi)) = parts.next() {
+					running.push(call(lo, hi));
+				}
+			}
+		}
+		super::fuel::tick(ctx, super::fuel::units(part)).await?;
+	}
+	Ok(counted)
+}

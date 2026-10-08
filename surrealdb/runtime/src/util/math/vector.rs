@@ -152,8 +152,8 @@ pub trait PearsonSimilarity {
 impl PearsonSimilarity for Vec<Number> {
 	fn pearson_similarity(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::similarity::pearson", self, other)?;
-		let m1 = super::mean(self)?.to_float();
-		let m2 = super::mean(other)?.to_float();
+		let m1 = crate::fuel::now(super::mean(self))?.to_float();
+		let m2 = crate::fuel::now(super::mean(other))?.to_float();
 		let covar: f64 = self
 			.iter()
 			.zip(other.iter())

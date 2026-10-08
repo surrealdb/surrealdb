@@ -34,7 +34,7 @@ use crate::exec::index::access_path::IndexRef;
 use crate::exec::operators::scan::{
 	PrefilterTier, boosted_ef, choose_prefilter_tier, knn_allow_list,
 };
-use crate::exec::operators::{KnnTopKHeap, check_cancelled, extract_vector};
+use crate::exec::operators::{KnnTopKHeap, extract_vector};
 use crate::exec::permission::validate_record_user_access;
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
@@ -212,11 +212,12 @@ async fn exact(
 	let mut members = allow.iter();
 	let mut sizer = BatchSizer::new(ctx, EXACT_BATCH_SIZE);
 	loop {
-		check_cancelled(ctx)?;
 		let chunk: Vec<u64> = members.by_ref().take(sizer.len()).collect();
 		if chunk.is_empty() {
 			break;
 		}
+		// A unit per member resolved, read and ranked.
+		super::fuel::tick(ctx, super::fuel::units(chunk.len())).await?;
 		let rids = services.resolve_doc_ids(table, &chunk).await?;
 		let rows = read_sized(ctx, &mut sizer, &rids, None, CachePolicy::ReadWrite).await?;
 		for row in rows {

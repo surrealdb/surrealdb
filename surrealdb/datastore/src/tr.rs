@@ -170,6 +170,14 @@ impl Transactor {
 		self.inner.kind()
 	}
 
+	/// Whether [`Self::count`] reads off the calling thread, in parallel where
+	/// the transaction allows. A speculating transaction counts what it
+	/// speculated on the calling thread, so it answers `false`.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::parallel_count`].
+	pub fn parallel_count(&self) -> bool {
+		!self.speculating() && self.inner.parallel_count()
+	}
 	/// Check if transaction is finished.
 	///
 	/// If the transaction has been cancelled or committed,
@@ -534,6 +542,33 @@ impl Transactor {
 			return Ok(self.speculative_pairs(&rng, false).await?.len());
 		}
 		self.inner.count(rng, version).await
+	}
+
+	/// Count the keys within a range, examining at most `budget` of them, and
+	/// answer the key to resume at when the range holds more.
+	///
+	/// A range the speculation touches is counted whole, from what the
+	/// speculation holds over what the storage does.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::count_bounded`].
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn count_bounded(
+		&self,
+		rng: KeyRange<'_>,
+		version: Option<u64>,
+		budget: u32,
+	) -> Result<(usize, Option<Key<'static>>)> {
+		if self.speculated(&rng, version) {
+			return Ok((self.speculative_pairs(&rng, false).await?.len(), None));
+		}
+		self.inner.count_bounded(rng, version, budget).await
+	}
+
+	/// How the work of a count grows with the keys a range holds.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::count_cost`].
+	pub fn count_cost(&self) -> surrealdb_kvs::CountCost {
+		self.inner.count_cost()
 	}
 
 	// --------------------------------------------------

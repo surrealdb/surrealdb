@@ -82,7 +82,6 @@ pub(super) async fn step(
 			};
 			ctx.txn().put_key(&key, &record).await.map_err(ControlFlow::Err)?;
 			maintain(program, state, ctx, *order, &table, id.key, &record).await?;
-			yield_now!();
 		}
 		StoreInstr::BackfillGroup {
 			backfill,
@@ -127,7 +126,6 @@ pub(super) async fn step(
 				.await
 				.map_err(ControlFlow::Err)?;
 			maintain(program, state, ctx, *order, &table, key, &record).await?;
-			yield_now!();
 		}
 		_ => return Err(internal("a store instruction taken as a backfill instruction")),
 	}

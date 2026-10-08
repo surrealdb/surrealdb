@@ -36,6 +36,10 @@ const DEFAULT_FAN_OUT_ROW_THRESHOLD: usize = 4;
 /// deployment via the `region_row_threshold` key.
 const DEFAULT_REGION_ROW_THRESHOLD: usize = 256;
 
+/// Default units of work a running program does between two yields to the
+/// host's scheduler. Overridable per deployment via the `vm_quantum` key.
+const DEFAULT_VM_QUANTUM: u32 = 4096;
+
 /// Default number of compiled units of each kind a node keeps. Overridable
 /// per deployment via the `compiled_unit_cache_size` key.
 const DEFAULT_COMPILED_UNIT_CACHE_SIZE: usize = 1024;
@@ -152,6 +156,13 @@ pub(crate) struct ExecConfig {
 	/// recently used evicted first (default: 1024); `0` keeps none and
 	/// compiles each with the plan that needs it (`crate::exec::vm::units`).
 	pub compiled_unit_cache_size: usize,
+	/// The units of work a running program does between two yields to the
+	/// host's scheduler (default: 4096). A unit is a row, a loop iteration
+	/// or a host step, and an instruction that walks an array spends one per
+	/// element (`crate::exec::vm::fuel`). The deadline and the cancellation
+	/// flag are checked once per quantum, so it also bounds how long a
+	/// statement runs past either. Zero is read as one.
+	pub vm_quantum: u32,
 	/// How many function bodies compiled for a call's argument values a node
 	/// keeps, least recently used evicted first (default: 256): a body that
 	/// reads an argument where only a value answers is compiled for the values
@@ -187,6 +198,7 @@ impl Default for ExecConfig {
 			fan_out_row_threshold: DEFAULT_FAN_OUT_ROW_THRESHOLD,
 			region_row_threshold: DEFAULT_REGION_ROW_THRESHOLD,
 			compiled_unit_cache_size: DEFAULT_COMPILED_UNIT_CACHE_SIZE,
+			vm_quantum: DEFAULT_VM_QUANTUM,
 			specialised_body_cache_size: DEFAULT_SPECIALISED_BODY_CACHE_SIZE,
 			specialised_body_max_arg_bytes: DEFAULT_SPECIALISED_BODY_MAX_ARG_BYTES,
 			specialised_body_values: DEFAULT_SPECIALISED_BODY_VALUES,
@@ -214,6 +226,7 @@ impl cnf::Config for ExecConfig {
 			.parse_key("fan_out_row_threshold", &mut self.fan_out_row_threshold)
 			.parse_key("region_row_threshold", &mut self.region_row_threshold)
 			.parse_key("compiled_unit_cache_size", &mut self.compiled_unit_cache_size)
+			.parse_key("vm_quantum", &mut self.vm_quantum)
 			.parse_key("specialised_body_cache_size", &mut self.specialised_body_cache_size)
 			.parse_key("specialised_body_max_arg_bytes", &mut self.specialised_body_max_arg_bytes)
 			.parse_key("specialised_body_values", &mut self.specialised_body_values)

@@ -178,6 +178,10 @@ pub struct Context {
 	live: bool,
 	/// Optional broker for cross-node live query notifications.
 	broker: Option<Arc<dyn MessageBroker>>,
+	/// How a running program gives up its thread once it has spent its
+	/// quantum; the default scheduler when `None`. A child context carries
+	/// its parent's.
+	scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
 	/// The per-layer configuration a running query reads. Crate-internal: these
 	/// are operator knobs, not API.
 	pub(crate) config: Arc<RuntimeConfig>,
@@ -244,6 +248,7 @@ impl Context {
 			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
+			scheduler: parent.scheduler.clone(),
 		}
 	}
 
@@ -304,6 +309,7 @@ impl Context {
 			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
+			scheduler: parent.scheduler.clone(),
 		}
 	}
 
@@ -350,6 +356,7 @@ impl Context {
 			dynamic_configuration: parent.dynamic_configuration.clone(),
 			live: parent.live,
 			broker: parent.broker.clone(),
+			scheduler: parent.scheduler.clone(),
 		}
 	}
 
@@ -413,6 +420,7 @@ impl Context {
 			dynamic_configuration: from.dynamic_configuration.clone(),
 			live: from.live,
 			broker: from.broker.clone(),
+			scheduler: from.scheduler.clone(),
 		}
 	}
 
@@ -467,6 +475,7 @@ impl Context {
 			dynamic_configuration: from.dynamic_configuration.clone(),
 			live: from.live,
 			broker: from.broker.clone(),
+			scheduler: from.scheduler.clone(),
 		}
 	}
 
@@ -531,6 +540,7 @@ impl Context {
 			dynamic_configuration,
 			live: false,
 			broker: None,
+			scheduler: None,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -592,6 +602,7 @@ impl Context {
 			dynamic_configuration: DynamicConfiguration::default(),
 			live: false,
 			broker: None,
+			scheduler: None,
 		}
 	}
 
@@ -719,6 +730,19 @@ impl Context {
 
 	pub(crate) fn set_broker(&mut self, broker: Option<Arc<dyn MessageBroker>>) {
 		self.broker = broker;
+	}
+
+	/// The scheduler a running program yields through, `None` for the
+	/// default.
+	pub(crate) fn scheduler(&self) -> Option<&Arc<dyn crate::exec::scheduler::Scheduler>> {
+		self.scheduler.as_ref()
+	}
+
+	pub(crate) fn set_scheduler(
+		&mut self,
+		scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
+	) {
+		self.scheduler = scheduler;
 	}
 
 	/// IAM check using auth from [`Options`] and the datastore auth toggle on this context.

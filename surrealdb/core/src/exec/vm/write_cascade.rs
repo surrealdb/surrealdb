@@ -198,7 +198,7 @@ pub(super) async fn step(
 		ReferenceInstr::Next {
 			target,
 		} => {
-			yield_now!();
+			crate::exec::vm::fuel::tick(ctx.exec(), 1).await?;
 			let references = references(write)?;
 			references.current = references.keys.next();
 			if references.current.is_none() {

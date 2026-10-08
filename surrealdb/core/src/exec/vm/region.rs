@@ -68,10 +68,10 @@ use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use futures::StreamExt;
 
-use super::host::{Out, flush, run_value_row};
-use super::interp::{Groups, Paging, State, Step};
+use super::host::{Ended, Out, flush, run_value_row};
+use super::interp::{Groups, Paging, State};
 use super::program::{AggregateSink, BlockInstr, Instr, NestedSpec, Pipeline, Program, Source};
-use crate::exec::operators::{GroupState, check_cancelled};
+use crate::exec::operators::GroupState;
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::val::Value;
@@ -378,6 +378,8 @@ pub(super) static HANDED_TO_WORKERS: std::sync::atomic::AtomicUsize =
 struct Partial {
 	output: Vec<Value>,
 	sorts: Vec<Vec<(Vec<Value>, super::interp::SortRow)>>,
+	/// What each bounded sort counted across the batch's rows.
+	arrivals: Vec<super::interp::Arrivals>,
 	groups: Vec<Option<Groups>>,
 	/// For a paged body, how each row the batch ran ended, in row order.
 	ends: Vec<RowEnd>,
@@ -502,7 +504,7 @@ impl<'p> Rows<'p> {
 	) -> FlowResult<bool> {
 		match self {
 			Rows::Serial => {
-				let stop = run_value_row(program, pipeline, row, state, ctx).await? == Step::Stop;
+				let stop = run_value_row(program, pipeline, row, state, ctx).await? == Ended::Stop;
 				flush(state, yielder, flush_at).await?;
 				Ok(stop)
 			}
@@ -698,6 +700,9 @@ impl<'p> Region<'p> {
 		yielder: &mut Out<'_, '_>,
 		flush_at: usize,
 	) -> FlowResult<bool> {
+		// Taking the row is a unit of the driver's work, whether it runs
+		// the row or hands it to a worker.
+		super::fuel::tick(ctx, 1).await?;
 		if self.stopped {
 			return Ok(true);
 		}
@@ -753,7 +758,6 @@ impl<'p> Region<'p> {
 		yielder: &mut Out<'_, '_>,
 		flush_at: usize,
 	) -> FlowResult<()> {
-		check_cancelled(ctx)?;
 		let rows = std::mem::take(&mut self.filling);
 		let place = self.place.take();
 		// The rows in flight ahead of this batch are the most that can reach
@@ -813,6 +817,10 @@ impl<'p> Region<'p> {
 			waiting = false;
 			let batch = self.merging.pop_front().expect("checked above");
 			let partial = batch.partial().await?;
+			// Merging a batch walks its rows, sorted rows and groups once: no
+			// more than a batch's worth, spent whole, the driver yielding at
+			// the next row it takes.
+			super::fuel::charge(super::fuel::units(partial.rows));
 			self.in_flight -= partial.rows;
 			if partial.rows > 0 {
 				let cost = partial.elapsed.as_nanos() as f64 / partial.rows as f64;
@@ -886,14 +894,15 @@ impl<'p> Region<'p> {
 		let Partial {
 			output,
 			mut sorts,
+			arrivals,
 			mut groups,
 			..
 		} = partial;
 		state.output.extend(output);
 		for &sort in &self.sorts {
 			let entries = std::mem::take(&mut sorts[sort as usize]);
-			state.sorts[sort as usize].extend(entries);
-			state.keep_sorted(self.program, sort);
+			let arrived = arrivals.get(sort as usize).map_or(0, |a| a.arrived);
+			state.keep_absorbed(self.program, sort, entries, arrived);
 		}
 		for &aggregate in &self.aggregates {
 			let part = groups[aggregate as usize].take();
@@ -970,10 +979,10 @@ async fn run_row(
 	ctx: &ExecutionContext,
 ) -> FlowResult<()> {
 	match run_value_row(program, pipeline, row, state, ctx).await? {
-		Step::Stop => Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
-			"a region's body stopped its pipeline".to_owned(),
-		)))),
-		_ => Ok(()),
+		Ended::Stop => Err(ControlFlow::Err(anyhow::Error::new(
+			crate::err::EngineError::Internal("a region's body stopped its pipeline".to_owned()),
+		))),
+		Ended::Next => Ok(()),
 	}
 }
 
@@ -1005,6 +1014,9 @@ async fn run_batch(
 		paging[limit as usize].skip = skip;
 	}
 	let mut state = State::sharing(program, paging, under.shared);
+	// A worker's task draws on its own thread's fuel, no more than the
+	// statement's quantum before its first yield.
+	super::fuel::cap(super::fuel::quantum(ctx));
 	state.program = Some(Arc::clone(program));
 	state.frames = under.frames;
 	state.slots = under.slots;
@@ -1013,7 +1025,6 @@ async fn run_batch(
 	let count = rows.len();
 	let mut ends = Vec::new();
 	for row in rows {
-		check_cancelled(ctx)?;
 		let Some((limit, _)) = paged else {
 			run_row(program, pipeline, row, &mut state, ctx).await?;
 			continue;
@@ -1037,6 +1048,7 @@ async fn run_batch(
 	Ok(Partial {
 		output: state.take_output(),
 		sorts: std::mem::take(&mut state.sorts),
+		arrivals: std::mem::take(&mut state.sort_arrivals),
 		groups: std::mem::take(&mut state.groups),
 		ends,
 		rows: count,

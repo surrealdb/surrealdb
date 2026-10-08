@@ -42,6 +42,22 @@ pub struct ScanResult {
 	pub value_bytes: u64,
 }
 
+/// How the work of a backend's count grows with the keys a range holds
+/// ([`Transactable::count_cost`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CountCost {
+	/// A count examines every key it counts: a caller bounds each call with
+	/// [`Transactable::count_bounded`]'s budget and resumes it.
+	Linear,
+	/// A count is answered from summaries the backend keeps, in work
+	/// logarithmic in the keys counted, so one call over a whole range is
+	/// cheap and exact. An order-statistic B-tree, whose nodes hold the counts
+	/// of their subtrees, answers this way, and so does a segment store that
+	/// keeps each page's key count, such as a host's page files in object
+	/// storage.
+	Logarithmic,
+}
+
 /// Per-chunk statistics returned by [`ScanCursorVals::for_each`] /
 /// [`ScanCursorKeys::for_each`].
 ///
@@ -474,6 +490,22 @@ pub trait Transactable: Send + Sync {
 		false
 	}
 
+	/// Whether [`Self::count`] reads its range off the calling thread, and
+	/// in parallel where the transaction allows: a caller may then count a
+	/// range in a few calls, each awaited without holding its thread for the
+	/// keys it reads. `false` for a backend that counts on the calling
+	/// thread, whose caller counts through a keys cursor a batch at a time.
+	fn parallel_count(&self) -> bool {
+		false
+	}
+
+	/// How the work of [`Self::count`] and [`Self::count_bounded`] grows with
+	/// the keys a range holds. [`CountCost::Linear`] unless the backend
+	/// answers a count from summaries it keeps.
+	fn count_cost(&self) -> CountCost {
+		CountCost::Linear
+	}
+
 	/// Check if transaction is finished.
 	///
 	/// If the transaction has been cancelled or committed,
@@ -870,6 +902,48 @@ pub trait Transactable: Send + Sync {
 				len += res.result.len();
 			}
 			Ok(len)
+		})
+	}
+
+	/// Count the keys within a range, examining at most `budget` of them.
+	///
+	/// Answers the keys counted and, when the range holds more, the key the
+	/// count stopped at: counting `[resume, rng.end)` next counts exactly the
+	/// keys this call did not, so a range counted call by call, each resumed at
+	/// the key the last answered, sums to [`Self::count`] of the whole range.
+	/// `None` means the range is exhausted.
+	///
+	/// - **Exact at the snapshot.** The keys counted are those [`Self::count`] counts over the same
+	///   range as of `version` in this transaction, its own buffered writes included; a resumed
+	///   call reads the same snapshot.
+	/// - **Bounded.** A call examines at most `budget` keys (at least one): it never answers more
+	///   than `budget`, and a backend that examines keys it does not count — tombstones, older
+	///   versions — charges them to the budget too, so it may answer fewer than `budget` with a
+	///   resume key.
+	/// - **Resumable.** The resume key is within the range and after every key counted.
+	///
+	/// A backend whose count is [`CountCost::Logarithmic`] may answer a range
+	/// whole whatever the budget.
+	///
+	/// The default reads up to `budget` keys through [`Self::keys`].
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn count_bounded<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+		budget: u32,
+	) -> BoxFut<'a, Result<(usize, Option<Key<'static>>)>> {
+		Box::pin(async move {
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let budget = budget.max(1);
+			let keys = self.keys(rng, budget, 0, version).await?.keys;
+			let resume = match keys.last() {
+				Some(last) if keys.len() == budget as usize => Some(Key::from(last).next()),
+				_ => None,
+			};
+			Ok((keys.len(), resume))
 		})
 	}
 

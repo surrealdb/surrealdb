@@ -34,7 +34,7 @@ use crate::exec::operators::scan::pipeline::kv_scan_stream;
 use crate::exec::operators::scan::{
 	FULL_TEXT_BATCH_SIZE, FusedCandidates, MergeMode, RESOLVE_BATCH_SIZE, record_key_range,
 };
-use crate::exec::operators::{GroupState, SortDirection, check_cancelled};
+use crate::exec::operators::{GroupState, SortDirection};
 use crate::exec::permission::validate_record_user_access;
 use crate::exec::physical_expr::graph_degree::DegreeCounter;
 use crate::exec::{
@@ -44,9 +44,6 @@ use crate::exec::{
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::key::schema::RecordPrefix;
 use crate::val::{RecordIdKey, Value};
-
-/// Rows a pipeline over in-memory rows runs before it yields to other work.
-const ROWS_PER_SLICE: usize = 1024;
 
 /// A statement run by the bytecode VM.
 #[derive(Debug)]
@@ -419,6 +416,8 @@ async fn run_untailed(
 	// enclosing scope evaluated.
 	let version = out_of_line(|| resolve_version_stamp(ctx, None)).await?;
 	let mut state = State::new(program, paging, ctx.function_registry())?;
+	// A statement spends no more than its own quantum before its first yield.
+	super::fuel::cap(super::fuel::quantum(ctx));
 	state.build_budget = ctx.root().ctx.config.exec.gql_max_join_build_rows;
 	state.scan_hint = reads;
 	for (at, spec) in program.sorts.iter().enumerate() {
@@ -636,7 +635,7 @@ async fn start_group(
 	for at in spec.sorts.clone() {
 		let at = at as usize;
 		state.sorts[at].clear();
-		state.sort_floors[at] = None;
+		state.sort_arrivals[at] = Default::default();
 		if let Some(sort_spec) = program.sorts.get(at)
 			&& sort_spec.pushdown
 		{
@@ -884,11 +883,13 @@ pub(super) async fn run_pipelines(
 				#[cfg(all(storage, not(target_family = "wasm")))]
 				if let Some(runs) = state.sort_runs[*sort as usize].take() {
 					let held = std::mem::take(&mut state.sorts[*sort as usize]);
+					let held = super::sort::sorted(held, &spec.keys, usize::MAX, ctx).await?;
 					let mut merge =
 						runs.merge(held, spec.keys.clone()).map_err(ControlFlow::Err)?;
 					loop {
+						let most = ctx.root().ctx.config.exec.scan_batch_size.max(1);
 						let (next, chunk) = merge
-							.next_chunk(ctx.root().ctx.config.exec.scan_batch_size.max(1))
+							.next_chunk(super::fuel::batch(super::fuel::units(most)) as usize)
 							.await
 							.map_err(ControlFlow::Err)?;
 						merge = next;
@@ -905,22 +906,29 @@ pub(super) async fn run_pipelines(
 					}
 					continue;
 				}
-				let mut rows = std::mem::take(&mut state.sorts[*sort as usize]);
-				if spec.random {
-					use rand::seq::SliceRandom;
-					let mut rng = rand::rng();
-					rows.shuffle(&mut rng);
-					if let Some(keep) = spec.keep {
-						rows.truncate(keep);
-					}
+				let rows = std::mem::take(&mut state.sorts[*sort as usize]);
+				let keep = spec.keep.unwrap_or(usize::MAX);
+				let rows = if spec.random {
+					out_of_line(|| super::sort::shuffled(rows, keep, ctx)).await?
 				} else {
-					interp::sort_and_keep(&mut rows, &spec.keys, spec.keep.unwrap_or(usize::MAX));
+					out_of_line(|| super::sort::sorted(rows, &spec.keys, keep, ctx)).await?
+				};
+				// A row held as stored bytes is decoded as the sort hands it
+				// on, a unit each, charged a stretch at a time.
+				let mut decoded = Vec::with_capacity(rows.len());
+				let mut stretch = super::fuel::left().clamp(1, 256);
+				let mut taken = 0;
+				for (keys, row) in rows {
+					decoded.push((keys, row.into_value().map_err(ControlFlow::Err)?));
+					taken += 1;
+					if taken == stretch {
+						super::fuel::tick(ctx, taken).await?;
+						stretch = super::fuel::left().clamp(1, 256);
+						taken = 0;
+					}
 				}
-				let rows = rows
-					.into_iter()
-					.map(|(keys, row)| Ok((keys, row.into_value()?)))
-					.collect::<anyhow::Result<Vec<_>>>()
-					.map_err(ControlFlow::Err)?;
+				super::fuel::tick(ctx, taken).await?;
+				let rows = decoded;
 				// A brute-force KNN publishes the distance it ranked each row
 				// by before any row is yielded, so a projection reading
 				// them finds them.
@@ -979,9 +987,8 @@ pub(super) async fn run_pipelines(
 					})
 					.await?;
 					for row in rows {
-						check_cancelled(ctx)?;
 						if out_of_line(|| run_value_row(program, pipeline, row, state, ctx)).await?
-							== Step::Stop
+							== Ended::Stop
 						{
 							break;
 						}
@@ -1155,7 +1162,7 @@ pub(super) async fn run_storage_source(
 					};
 					let step = run_value_row(program, pipeline, row, state, ctx).await?;
 					flush(state, yielder, flush_at).await?;
-					Ok(step == Step::Stop)
+					Ok(step == Ended::Stop)
 				}
 				other => Err(ControlFlow::Err(anyhow::anyhow!(
 					"a record source evaluated to {other:?}, not a record id"
@@ -1348,13 +1355,15 @@ pub(super) async fn run_storage_source(
 			// are decoded a byte budget at a time.
 			let mut reader = RecordReader::stored(ctx, RESOLVE_BATCH_SIZE, None, decode.clone());
 			loop {
-				read!(check_cancelled(ctx));
 				if reader.is_drained() {
 					let chunk: Vec<u64> = doc_ids.by_ref().take(reader.read_len()).collect();
 					if chunk.is_empty() {
 						return rows.finish(state, ctx, yielder, flush_at).await;
 					}
 					reader.push(read!(services.resolve_doc_ids(table, &chunk).await));
+					// The ids resolved are a unit each, whether or not their
+					// records still exist; each record read is a row of its own.
+					read!(super::fuel::tick(ctx, super::fuel::units(chunk.len())).await);
 				}
 				let records = read!(reader.next_rows(ctx).await);
 				for row in records {
@@ -1362,7 +1371,6 @@ pub(super) async fn run_storage_source(
 						return Ok(true);
 					}
 				}
-				yield_now!();
 			}
 		}
 		// The hits of a full-text query, read a batch at a time: the table's
@@ -1392,11 +1400,11 @@ pub(super) async fn run_storage_source(
 			let txn = ctx.txn();
 			let mut reader = RecordReader::stored(ctx, RESOLVE_BATCH_SIZE, version, decode.clone());
 			loop {
-				read!(check_cancelled(ctx));
 				let rids = read!(hits.next_batch(&txn, FULL_TEXT_BATCH_SIZE).await);
 				if rids.is_empty() {
 					return rows.finish(state, ctx, yielder, flush_at).await;
 				}
+				read!(super::fuel::tick(ctx, super::fuel::units(rids.len())).await);
 				reader.push(rids);
 				while !reader.is_drained() {
 					let records = read!(reader.next_rows(ctx).await);
@@ -1514,7 +1522,7 @@ pub(super) async fn run_storage_source(
 						};
 						let step = run_value_row(program, pipeline, row, state, ctx).await?;
 						flush(state, yielder, flush_at).await?;
-						return Ok(step == Step::Stop);
+						return Ok(step == Ended::Stop);
 					}
 					other => {
 						return Err(ControlFlow::Err(anyhow::anyhow!(
@@ -1527,11 +1535,14 @@ pub(super) async fn run_storage_source(
 			let mut edges = services.scan_lightweight_edges(table, wanted, *direction, version);
 			let mut rows = Rows::of(program, pipeline, ctx);
 			while let Some(batch) = edges.next().await {
-				let rids = match check_cancelled(ctx).and(batch) {
+				let rids = match batch {
 					Ok(rids) => rids,
 					Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
 				};
 				for rid in rids {
+					if let Err(e) = super::fuel::tick(ctx, 1).await {
+						return rows.fail(e, state, ctx, yielder, flush_at).await;
+					}
 					let row = match services.read_record(&rid, version).await {
 						Ok(Some(row)) => row,
 						Ok(None) => continue,
@@ -1736,8 +1747,11 @@ impl IndexRecords {
 				}
 				self.reader.push(batch);
 			}
-			self.rows.extend(self.reader.next_rows(ctx).await?);
-			yield_now!();
+			let rows = self.reader.next_rows(ctx).await?;
+			// The records read are a unit each, which a batch whose records
+			// are all gone spends too.
+			super::fuel::tick(ctx, super::fuel::units(rows.len()).max(1)).await?;
+			self.rows.extend(rows);
 		}
 		Ok(self.rows.front())
 	}
@@ -1877,7 +1891,10 @@ async fn scan_range(
 	}
 	let mut rows = Rows::of(program, pipeline, ctx).reading(first);
 	while let Some(batch) = source.next().await {
-		let batch = match check_cancelled(ctx).and(batch) {
+		// The source spends the records it reads and refuses before decoding
+		// them, and hands on an empty batch once that spends the fuel; the
+		// records it hands on are a unit each as their rows run.
+		let batch = match super::fuel::tick(ctx, 0).await.and(batch) {
 			Ok(batch) => batch,
 			Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
 		};
@@ -1927,19 +1944,32 @@ async fn scan_in_place(
 		.await
 		.context("Failed to open scan cursor")?;
 	loop {
-		check_cancelled(ctx)?;
 		let mut failed = None;
 		let mut stopped = false;
-		let chunk = first.take().map_or(crate::kvs::NORMAL_BATCH_SIZE, |first| {
-			first.clamp(1, crate::kvs::NORMAL_BATCH_SIZE)
-		});
+		let chunk =
+			super::fuel::batch(first.take().map_or(crate::kvs::NORMAL_BATCH_SIZE, |first| {
+				first.clamp(1, crate::kvs::NORMAL_BATCH_SIZE)
+			}));
+		// The body cannot yield inside the cursor, so the chunk counts the
+		// rows it reads against the fuel left and ends once that is spent: a
+		// unit per record read, run or refused. The body holds no backward
+		// jump (`lower`'s in-place rule), so the interpreter answers no
+		// `Step::Yield` here.
+		let budget = super::fuel::left();
+		let mut unspent = budget;
 		let stats = cursor
 			.for_each(chunk, &mut |key, value| {
+				unspent = unspent.saturating_sub(1);
+				let next = if unspent == 0 {
+					std::ops::ControlFlow::Break(())
+				} else {
+					std::ops::ControlFlow::Continue(())
+				};
 				if let (Some(probe), Some(threshold)) =
 					(topk_probe.as_ref(), topk_threshold.as_deref())
 					&& probe.rejects(threshold, value)
 				{
-					return Ok(std::ops::ControlFlow::Continue(()));
+					return Ok(next);
 				}
 				let row = RevisionRow::new(key, value);
 				// A body that holds few registers gets a register file of its
@@ -2055,6 +2085,11 @@ async fn scan_in_place(
 					| Ok(Step::Degree {
 						..
 					}) => Err(anyhow::anyhow!("an in-place pipeline evaluated an expression")),
+					Ok(Step::Yield {
+						..
+					}) => Err(anyhow::anyhow!(
+						"an in-place pipeline yielded inside the storage cursor"
+					)),
 					Err(e) => Err(e),
 				}
 				.and_then(|stop| {
@@ -2064,7 +2099,7 @@ async fn scan_in_place(
 					Ok(stop)
 				});
 				match settled {
-					Ok(false) => Ok(std::ops::ControlFlow::Continue(())),
+					Ok(false) => Ok(next),
 					Ok(true) => {
 						stopped = true;
 						Ok(std::ops::ControlFlow::Break(()))
@@ -2077,6 +2112,7 @@ async fn scan_in_place(
 			})
 			.await
 			.context("Failed to scan record")?;
+		super::fuel::charge(budget - unspent);
 		if let Some(e) = failed {
 			return Err(ControlFlow::Err(e));
 		}
@@ -2089,14 +2125,14 @@ async fn scan_in_place(
 		if stopped || stats.rows == 0 {
 			return Ok(stopped);
 		}
-		// A scan that emits nothing still yields between chunks, so a
-		// `TIMEOUT` around it, or other work, gets its turn.
-		yield_now!();
+		if super::fuel::spent() {
+			out_of_line(|| super::fuel::yield_point(ctx)).await?;
+		}
 	}
 }
 
-/// Run a pipeline over rows held in memory, yielding to other work every
-/// [`ROWS_PER_SLICE`] rows.
+/// Run a pipeline over rows held in memory. Each row spends a unit of fuel
+/// as its body is entered ([`run_body`]), which yields once it is spent.
 pub(super) async fn run_rows(
 	program: &Program,
 	pipeline: &Pipeline,
@@ -2106,14 +2142,10 @@ pub(super) async fn run_rows(
 	yielder: &mut Out<'_, '_>,
 	flush_at: usize,
 ) -> FlowResult<bool> {
-	for (i, (keys, row)) in rows.into_iter().enumerate() {
-		if i % ROWS_PER_SLICE == ROWS_PER_SLICE - 1 {
-			check_cancelled(ctx)?;
-			yield_now!();
-		}
+	for (keys, row) in rows {
 		// A sorted row's keys, which a projection sharing them reads.
 		state.sorted_keys = keys;
-		if run_value_row(program, pipeline, row, state, ctx).await? == Step::Stop {
+		if run_value_row(program, pipeline, row, state, ctx).await? == Ended::Stop {
 			return Ok(true);
 		}
 		flush(state, yielder, flush_at).await?;
@@ -2149,6 +2181,11 @@ pub(super) fn run_image_inline(
 		spilled = (0..pipeline.registers).map(|_| Scalar::None).collect::<Vec<_>>();
 		&mut spilled[..]
 	};
+	// The run is a unit of work; once the fuel is spent the caller runs the
+	// pipeline whole, which yields before it starts.
+	if super::fuel::charge(1) {
+		return None;
+	}
 	let (output, tries) = (state.output.len(), state.tries.len());
 	let rowless = std::mem::replace(&mut state.rowless, false);
 	let undocumented = std::mem::replace(&mut state.undocumented, false);
@@ -2157,6 +2194,8 @@ pub(super) fn run_image_inline(
 	state.undocumented = undocumented;
 	match step {
 		Ok(Step::Next | Step::Stop) if state.output.len() == output + 1 => state.output.pop(),
+		// A yield, like any host step, is left to the caller's run of the
+		// whole pipeline, which takes it.
 		_ => {
 			state.output.truncate(output);
 			state.tries.truncate(tries);
@@ -2176,6 +2215,10 @@ pub(super) struct Unfinished<'r> {
 	/// the stretch itself; `None` where the body is run whole on a fresh
 	/// state, `row` being as it was handed in.
 	pub(super) resume: Option<usize>,
+	/// Whether the body stopped because the fuel was spent rather than for a
+	/// step only the host takes: the body is no less fit to run in place the
+	/// next time.
+	pub(super) yielded: bool,
 }
 
 /// Run `pipeline`'s body over `row`, a unit's one row on a state of the
@@ -2216,6 +2259,18 @@ pub(super) fn run_unit_inline<'r>(
 		return Err(Unfinished {
 			row,
 			resume: None,
+			yielded: false,
+		});
+	}
+	// The run is a unit of work. Once the fuel is spent the body is handed
+	// to the caller's host run, which yields before it enters the body and
+	// never hands it back here, so a spent meter cannot bounce a row between
+	// the two.
+	if super::fuel::charge(1) {
+		return Err(Unfinished {
+			row,
+			resume: resumable.then_some(0),
+			yielded: true,
 		});
 	}
 	let (output, tries) = (state.output.len(), state.tries.len());
@@ -2234,6 +2289,7 @@ pub(super) fn run_unit_inline<'r>(
 				return Err(Unfinished {
 					row,
 					resume: resumable.then_some(0),
+					yielded: false,
 				});
 			}
 		};
@@ -2254,7 +2310,9 @@ pub(super) fn run_unit_inline<'r>(
 				}
 				return Ok(step);
 			}
-			_ => {
+			// A yield, like any host step, hands the row to the host, which
+			// continues it from the start of the stretch.
+			step => {
 				if resumable {
 					state.output.truncate(output);
 					state.tries.truncate(tries);
@@ -2264,6 +2322,7 @@ pub(super) fn run_unit_inline<'r>(
 				return Err(Unfinished {
 					row,
 					resume: resumable.then_some(start),
+					yielded: matches!(step, Ok(Step::Yield { .. })),
 				});
 			}
 		}
@@ -2289,7 +2348,7 @@ pub(super) async fn run_value_row(
 	row: Value,
 	state: &mut State,
 	ctx: &ExecutionContext,
-) -> FlowResult<Step> {
+) -> FlowResult<Ended> {
 	run_cow_row(program, pipeline, Cow::Owned(row), state, ctx).await
 }
 
@@ -2302,7 +2361,7 @@ pub(super) async fn run_cow_row(
 	row: Cow<'_, Value>,
 	state: &mut State,
 	ctx: &ExecutionContext,
-) -> FlowResult<Step> {
+) -> FlowResult<Ended> {
 	run_cow_row_from(program, pipeline, row, state, ctx, 0).await
 }
 
@@ -2316,7 +2375,7 @@ pub(super) async fn run_cow_row_from(
 	state: &mut State,
 	ctx: &ExecutionContext,
 	start: usize,
-) -> FlowResult<Step> {
+) -> FlowResult<Ended> {
 	let mut row = row;
 	// A source whose rows no node of the plan enforces the table's
 	// permission, computed fields and field permissions on is put through
@@ -2327,7 +2386,10 @@ pub(super) async fn run_cow_row_from(
 	{
 		let mut enforced = row.into_owned();
 		if !enforce_row(enforce, &mut enforced, state, ctx).await? {
-			return Ok(Step::Next);
+			// A row the permission refuses never enters the body, which spends
+			// the unit of a row that does.
+			super::fuel::tick(ctx, 1).await?;
+			return Ok(Ended::Next);
 		}
 		row = Cow::Owned(enforced);
 	}
@@ -2403,6 +2465,28 @@ async fn enforce_row(
 	}
 }
 
+/// How a row's run ended, once its driver has taken every step the body
+/// handed it, a yield among them: the pipeline moves to its next row, or
+/// takes no more.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Ended {
+	Next,
+	Stop,
+}
+
+/// Where a stretch of a body, run between the steps that rewrite the row,
+/// left it.
+enum Stretch {
+	/// The row is done.
+	Ended(Ended),
+	/// Land a layer, then continue at the instruction.
+	Land(usize),
+	/// Bind the row under the field, then continue at the instruction.
+	Bind(u32, usize),
+	/// Take the write instruction, which names where the row continues.
+	Write(usize),
+}
+
 async fn run_body(
 	program: &Program,
 	pipeline: &Pipeline,
@@ -2411,7 +2495,7 @@ async fn run_body(
 	ctx: &ExecutionContext,
 	base: usize,
 	mut start: usize,
-) -> FlowResult<Step> {
+) -> FlowResult<Ended> {
 	let step = loop {
 		let step = {
 			let reader = ValueRow(&row);
@@ -2433,15 +2517,26 @@ async fn run_body(
 			// region is caught by the innermost, and the body resumes where it
 			// names.
 			loop {
-				let attempt: FlowResult<Step> = async {
+				let attempt: FlowResult<Stretch> = async {
 					// The instruction whose closures were linked last, and not
 					// yet taken since: an invocation it makes that finds no unit
 					// standing does not link again.
 					let mut relinked: Option<usize> = None;
 					loop {
+						// Each entry into the body — the row's first, and each
+						// resume after a host step — spends a unit of fuel.
+						if super::fuel::charge(1) {
+							out_of_line(|| super::fuel::yield_point(ctx)).await?;
+						}
 						match interp::run_row(program, pipeline, &reader, regs, state, pc)
 							.map_err(ControlFlow::Err)?
 						{
+							Step::Yield {
+								resume,
+							} => {
+								out_of_line(|| super::fuel::yield_point(ctx)).await?;
+								pc = resume;
+							}
 							Step::Param {
 								param,
 								dst,
@@ -3512,7 +3607,18 @@ async fn run_body(
 									None => at + 1,
 								};
 							}
-							done => break Ok(done),
+							Step::Next => break Ok(Stretch::Ended(Ended::Next)),
+							Step::Stop => break Ok(Stretch::Ended(Ended::Stop)),
+							Step::LandRow {
+								resume,
+							} => break Ok(Stretch::Land(resume)),
+							Step::BindRow {
+								name,
+								resume,
+							} => break Ok(Stretch::Bind(name, resume)),
+							Step::Write {
+								at,
+							} => break Ok(Stretch::Write(at)),
 						}
 					}
 				}
@@ -3575,31 +3681,24 @@ async fn run_body(
 		};
 		// A layer rewrites the row, so nothing read from it survives.
 		match step {
-			Step::LandRow {
-				resume,
-			} => {
+			Stretch::Land(resume) => {
 				land(state, &mut row);
 				start = resume;
 			}
-			Step::BindRow {
-				name,
-				resume,
-			} => {
+			Stretch::Bind(name, resume) => {
 				let mut bound = crate::val::Object::default();
 				bound.insert(program.fields[name as usize].as_str(), row.into_owned());
 				row = Cow::Owned(Value::Object(bound));
 				start = resume;
 			}
-			Step::Write {
-				at,
-			} => {
+			Stretch::Write(at) => {
 				// Boxed: a write step's future is large, and this one is part
 				// of every row's. The record's run of write instructions is
 				// taken in the one step.
 				start = out_of_line(|| write::steps(program, pipeline, at, state, row.to_mut()))
 					.await?;
 			}
-			done => break done,
+			Stretch::Ended(ended) => break ended,
 		}
 	};
 	if let Some(Pending::Split {
@@ -3632,7 +3731,7 @@ async fn run_split(
 	row: Value,
 	state: &mut State,
 	ctx: &ExecutionContext,
-) -> FlowResult<Step> {
+) -> FlowResult<Ended> {
 	let spec = &program.splits[split as usize];
 	let mut below = Below {
 		program,
@@ -3646,9 +3745,8 @@ async fn run_split(
 			below.run(rows, state).await
 		}
 		super::program::SplitKind::Step(step) => {
-			check_cancelled(ctx)?;
 			let row = match super::binding::keep_row(step, split, row, state) {
-				Ok(()) => return Ok(Step::Next),
+				Ok(()) => return Ok(Ended::Next),
 				Err(row) => row,
 			};
 			let stepped = out_of_line(|| {
@@ -3675,7 +3773,7 @@ impl Below<'_> {
 	///
 	/// The rows of a call share one future, built out of line, whose size is
 	/// moved once, and not once for each row.
-	async fn run(&self, rows: Vec<Value>, state: &mut State) -> FlowResult<Step> {
+	async fn run(&self, rows: Vec<Value>, state: &mut State) -> FlowResult<Ended> {
 		let mut rows = rows.into_iter();
 		let Some(split) = forwarded_split(self.pipeline) else {
 			return out_of_line(|| self.each(rows, state)).await;
@@ -3684,7 +3782,7 @@ impl Below<'_> {
 		// future built for the row.
 		if let super::program::SplitKind::Step(step) = &self.program.splits[split as usize].kind {
 			while let Some(row) = rows.next() {
-				check_cancelled(self.ctx)?;
+				super::fuel::tick(self.ctx, 1).await?;
 				match super::binding::keep_row(step, split, row, state) {
 					Ok(()) => {}
 					Err(row) => {
@@ -3692,24 +3790,24 @@ impl Below<'_> {
 					}
 				}
 			}
-			return Ok(Step::Next);
+			return Ok(Ended::Next);
 		}
 		match rows.next() {
 			Some(row) => out_of_line(|| self.forward(split, row, rows, state)).await,
-			None => Ok(Step::Next),
+			None => Ok(Ended::Next),
 		}
 	}
 
 	/// `rows` through the pipeline, one row at a time.
-	async fn each(&self, rows: std::vec::IntoIter<Value>, state: &mut State) -> FlowResult<Step> {
+	async fn each(&self, rows: std::vec::IntoIter<Value>, state: &mut State) -> FlowResult<Ended> {
 		for row in rows {
-			check_cancelled(self.ctx)?;
-			if run_value_row(self.program, self.pipeline, row, state, self.ctx).await? == Step::Stop
+			if run_value_row(self.program, self.pipeline, row, state, self.ctx).await?
+				== Ended::Stop
 			{
-				return Ok(Step::Stop);
+				return Ok(Ended::Stop);
 			}
 		}
-		Ok(Step::Next)
+		Ok(Ended::Next)
 	}
 
 	/// `first` and `rest` to split `split`, which the pipeline forwards its
@@ -3720,14 +3818,14 @@ impl Below<'_> {
 		first: Value,
 		rest: std::vec::IntoIter<Value>,
 		state: &mut State,
-	) -> FlowResult<Step> {
+	) -> FlowResult<Ended> {
 		for row in std::iter::once(first).chain(rest) {
-			check_cancelled(self.ctx)?;
-			if run_split(self.program, split, row, state, self.ctx).await? == Step::Stop {
-				return Ok(Step::Stop);
+			super::fuel::tick(self.ctx, 1).await?;
+			if run_split(self.program, split, row, state, self.ctx).await? == Ended::Stop {
+				return Ok(Ended::Stop);
 			}
 		}
-		Ok(Step::Next)
+		Ok(Ended::Next)
 	}
 }
 
@@ -3755,7 +3853,7 @@ impl super::binding::StepSink for Below<'_> {
 		&'a mut self,
 		rows: Vec<Value>,
 		state: &'a mut State,
-	) -> futures::future::BoxFuture<'a, FlowResult<Step>> {
+	) -> futures::future::BoxFuture<'a, FlowResult<Ended>> {
 		crate::exec::vm::host::out_of_line(|| self.run(rows, state))
 	}
 }
@@ -3780,7 +3878,7 @@ async fn run_join(
 	keys: Vec<Value>,
 	state: &mut State,
 	ctx: &ExecutionContext,
-) -> FlowResult<Step> {
+) -> FlowResult<Ended> {
 	use super::plan::JoinMatch;
 	let spec = &program.joins[join as usize];
 	let table = match &state.joins[join as usize] {
@@ -3794,7 +3892,7 @@ async fn run_join(
 	let pipeline = &program.pipelines[spec.pipeline];
 	if spec.kind == JoinMatch::Semi {
 		if table.matches(&keys).next().is_none() {
-			return Ok(Step::Next);
+			return Ok(Ended::Next);
 		}
 		return out_of_line(|| run_value_row(program, pipeline, probe, state, ctx)).await;
 	}
@@ -3805,7 +3903,8 @@ async fn run_join(
 	let mut probe = Some(probe);
 	let mut builds = table.matches(&keys).peekable();
 	while let Some(build) = builds.next() {
-		check_cancelled(ctx)?;
+		// A pairing is a unit, whether or not the residual admits it.
+		super::fuel::tick(ctx, 1).await?;
 		let held = probe.as_ref().expect("the probe row is held until it is paired");
 		let paired = match &spec.residual {
 			Some(residual) => {
@@ -3841,9 +3940,10 @@ async fn run_join(
 			None => crate::exec::operators::with_alias(held, &spec.alias, build.clone()),
 		};
 		matched = true;
-		if out_of_line(|| run_value_row(program, pipeline, paired, state, ctx)).await? == Step::Stop
+		if out_of_line(|| run_value_row(program, pipeline, paired, state, ctx)).await?
+			== Ended::Stop
 		{
-			return Ok(Step::Stop);
+			return Ok(Ended::Stop);
 		}
 	}
 	if !matched
@@ -3851,12 +3951,13 @@ async fn run_join(
 		&& let Some(probe) = probe
 	{
 		let paired = crate::exec::operators::with_alias_owned(probe, &spec.alias, Value::Null);
-		if out_of_line(|| run_value_row(program, pipeline, paired, state, ctx)).await? == Step::Stop
+		if out_of_line(|| run_value_row(program, pipeline, paired, state, ctx)).await?
+			== Ended::Stop
 		{
-			return Ok(Step::Stop);
+			return Ok(Ended::Stop);
 		}
 	}
-	Ok(Step::Next)
+	Ok(Ended::Next)
 }
 
 /// The build table of join `spec`: its build side's rows, each keyed by the
@@ -3877,11 +3978,9 @@ async fn build_join(
 		true => None,
 		false => Some(statement_state(program, ctx).map_err(ControlFlow::Err)?),
 	};
-	for (i, row) in rows.into_iter().enumerate() {
-		if i % ROWS_PER_SLICE == ROWS_PER_SLICE - 1 {
-			check_cancelled(ctx)?;
-			yield_now!();
-		}
+	for row in rows {
+		// A row keyed and held is a unit of the build's work.
+		super::fuel::tick(ctx, 1).await?;
 		let mut key = Vec::with_capacity(spec.build_keys.len());
 		let row = match &mut eval {
 			Some(eval) => {
@@ -3937,6 +4036,8 @@ async fn finish_groups(
 			..
 		}) => {
 			for (key, mut group) in groups.into_key_order() {
+				// A group finished is a unit, whatever its columns evaluate.
+				super::fuel::tick(ctx, 1).await?;
 				finish.bind_extra_args(&mut group, &key).await?;
 				rows.push(finish.result(&key, group).await?);
 			}
@@ -4364,13 +4465,45 @@ async fn call_builtin(
 		})));
 	}
 	refuse_mutating_builtin(func.name(), ctx.exec_ctx)?;
-	if func.is_pure() && !func.is_async() {
-		Ok(func.invoke(args).map_err(ControlFlow::Err)?)
-	} else {
-		let mut ctx = ctx;
-		ctx.plan_depth = ctx.plan_depth.max(call.plan_depth);
-		Ok(func.invoke_async(&ctx, args).await.map_err(ControlFlow::Err)?)
+	let mut ctx = ctx;
+	ctx.plan_depth = ctx.plan_depth.max(call.plan_depth);
+	invoke_builtin(func.as_ref(), args, &ctx).await?.map_err(ControlFlow::Err)
+}
+
+/// Invoke builtin `func` on `args`, its work drawing on the thread's fuel.
+///
+/// The arguments, read and converted whole before the function runs, are
+/// charged first, by their size ([`super::fuel::weight`]); a call whose
+/// arguments outweigh the fuel left reaches a yield point before it starts.
+/// A function that walks its input ([`ScalarFunction::metered`]) then charges
+/// its walk a stretch at a time and yields mid-walk once the fuel is spent;
+/// one that does not is charged its result's size once it returns.
+///
+/// [`ScalarFunction::metered`]: crate::exec::function::ScalarFunction::metered
+async fn invoke_builtin(
+	func: &dyn crate::exec::function::ScalarFunction,
+	args: Vec<Value>,
+	ctx: &EvalContext<'_>,
+) -> FlowResult<anyhow::Result<Value>> {
+	let exec = ctx.exec_ctx;
+	let cost = args.iter().map(super::fuel::weight).fold(0, u32::saturating_add);
+	if cost > 0 {
+		if cost >= super::fuel::left() {
+			out_of_line(|| super::fuel::yield_point(exec)).await?;
+		}
+		super::fuel::charge(cost);
 	}
+	if !func.is_pure() || func.is_async() {
+		return super::fuel::metered(exec, func.invoke_async(ctx, args)).await;
+	}
+	if let Some(walk) = func.metered() {
+		return super::fuel::metered(exec, walk(args)).await;
+	}
+	let result = func.invoke(args);
+	if let Ok(value) = &result {
+		super::fuel::charge(super::fuel::weight(value));
+	}
+	Ok(result)
 }
 
 /// Refuse a call of builtin `name` that the frame `ctx` runs in does not let
@@ -4701,6 +4834,8 @@ struct RecurseBody<'a> {
 impl crate::exec::operators::recursion::DepthBody for RecurseBody<'_> {
 	fn eval<'a>(&'a self, value: &'a Value) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
 		crate::exec::vm::host::out_of_line(|| async move {
+			// A depth is a unit, whatever its body runs.
+			super::fuel::tick(self.ctx, 1).await?;
 			match self.unit {
 				Some((program, units)) => {
 					run_unit(program, units, self.ctx, Some(value), Vec::new()).await
@@ -4796,8 +4931,10 @@ impl crate::exec::operators::recursion::RepeatBody for RepeatUnit<'_> {
 		value: &'a Value,
 		rec: crate::exec::physical_expr::RecursionCtx,
 	) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
-		crate::exec::vm::host::out_of_line(|| {
+		crate::exec::vm::host::out_of_line(|| async move {
+			super::fuel::tick(self.ctx, 1).await?;
 			run_unit_in(self.program, self.units, self.ctx, Some(value), Vec::new(), Some(rec))
+				.await
 		})
 	}
 }
@@ -5053,11 +5190,7 @@ async fn call_method(
 		})));
 	}
 	refuse_mutating_builtin(func.name(), ctx.exec_ctx)?;
-	let result = if func.is_pure() && !func.is_async() {
-		func.invoke(func_args)
-	} else {
-		func.invoke_async(&ctx, func_args).await
-	};
+	let result = invoke_builtin(func.as_ref(), func_args, &ctx).await?;
 	let writing = method.writing || ctx.exec_ctx.root().writing;
 	let resolved = func.name();
 	result.map_err(|e| match e.downcast_ref::<crate::expr::Error>() {

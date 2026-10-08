@@ -1926,6 +1926,12 @@ impl Transactable for Transaction {
 		true
 	}
 
+	/// A count runs on the affinity pool, sharded across it for a read-only
+	/// transaction ([`Transactable::count`]).
+	fn parallel_count(&self) -> bool {
+		true
+	}
+
 	/// Check if closed
 	fn closed(&self) -> bool {
 		self.done.load(Ordering::Relaxed)
@@ -2437,6 +2443,79 @@ impl Transactable for Transaction {
 			let counts = futures::future::try_join_all(tasks).await?;
 			// Return result
 			Ok(counts.into_iter().sum())
+		})
+	}
+
+	/// Count the keys within a range, examining at most `budget` of them
+	/// ([`Transactable::count_bounded`]).
+	///
+	/// The iterator stops after `budget` keys and answers the key it stands
+	/// on as the resume key. It reads as a scan does, readahead sized to what
+	/// it reads rather than to a whole range, since a call reads a budget's
+	/// keys and the next call resumes where it stopped. A writable transaction counts on the inner
+	/// transaction, so its pending writes are counted; a read-only one counts
+	/// against its snapshot on the affinity pool, so calls over disjoint parts
+	/// of a range run in parallel.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn count_bounded<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+		budget: u32,
+	) -> BoxFut<'a, Result<(usize, Option<Key<'static>>)>> {
+		Box::pin(async move {
+			// Versioned queries require a versioned datastore
+			self.ensure_versioned(version)?;
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let rng = rng.start.to_vec()..rng.end.to_vec();
+			let budget = budget.max(1);
+			let guard = self.inner.lock().await;
+			if self.write {
+				// SAFETY: the closure borrows `self` and holds the inner
+				// `MutexGuard`, so the returned future must not be leaked while
+				// those borrows are live. It is awaited inline here and never
+				// stored, so its destructor — which blocks until the worker has
+				// stopped touching the borrows — always runs before they expire.
+				return unsafe {
+					affinitypool::spawn_local(move || -> Result<_> {
+						let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+						let ro = self.scan_read_options(&rng, version, inner);
+						let mut iter = inner.raw_iterator_opt(ro);
+						iter.seek(&rng.start);
+						let mut counted = 0;
+						while counted < budget as usize && iter.valid() {
+							counted += 1;
+							iter.next();
+						}
+						iter.status().map_err(kvs_error)?;
+						Ok((counted, iter.key().map(|key| Key::from(key.to_vec()))))
+					})
+				}
+				.await;
+			}
+			// The snapshot and a keep-alive handle are taken under the lock;
+			// the walk owns both, so it runs on the pool without borrowing.
+			// See `attach_snapshot`.
+			let (ro, handle) = {
+				let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+				(self.scan_read_options(&rng, version, inner), inner.handle())
+			};
+			drop(guard);
+			affinitypool::spawn(move || -> Result<_> {
+				let mut iter = handle.raw_iter(ro);
+				iter.seek(&rng.start);
+				let mut counted = 0;
+				while counted < budget as usize && iter.valid() {
+					counted += 1;
+					iter.next();
+				}
+				iter.status().map_err(kvs_error)?;
+				Ok((counted, iter.key().map(|key| Key::from(key.to_vec()))))
+			})
+			.await
 		})
 	}
 

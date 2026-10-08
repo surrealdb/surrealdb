@@ -6,23 +6,42 @@ use surrealdb_expr::val::{Array, Object, Value};
 use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
-pub fn entries((object,): (Object,)) -> Result<Value> {
-	Ok(Value::Array(Array(
-		object
-			.iter()
-			.map(|(k, v)| {
-				let k = Value::String(k.to_owned());
-				let v = v.clone();
-				Value::Array(Array(vec![k, v]))
-			})
-			.collect(),
-	)))
+use crate::fuel;
+
+/// Define each synchronous function as its walk driven to its end at once
+/// ([`fuel::now`]).
+macro_rules! now {
+	($($name:ident = $walk:ident($args:ty);)+) => {
+		$(
+			pub fn $name(args: $args) -> Result<Value> {
+				fuel::now($walk(args))
+			}
+		)+
+	};
 }
 
-pub fn from_entries((array,): (Array,)) -> Result<Value> {
+now! {
+	entries = entries_walk((Object,));
+	from_entries = from_entries_walk((Array,));
+	extend = extend_walk((Object, Object));
+	keys = keys_walk((Object,));
+	remove = remove_walk((Object, Value));
+	values = values_walk((Object,));
+}
+
+pub async fn entries_walk((object,): (Object,)) -> Result<Value> {
+	let entries = fuel::map(object.iter(), |(k, v)| {
+		Value::Array(Array(vec![Value::String(k.to_owned()), v.clone()]))
+	})
+	.await;
+	Ok(Value::Array(Array(entries)))
+}
+
+pub async fn from_entries_walk((array,): (Array,)) -> Result<Value> {
 	let mut obj: BTreeMap<Strand, Value> = BTreeMap::default();
 
 	for v in array.iter() {
+		fuel::tick(1).await;
 		match v {
 			Value::Array(Array(entry)) if entry.len() == 2 => {
 				let key: Strand = match entry.first() {
@@ -62,8 +81,12 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 	Ok(Value::Object(Object::from(obj)))
 }
 
-pub fn extend((mut object, other): (Object, Object)) -> Result<Value> {
-	object.0.extend(other.0);
+pub async fn extend_walk((mut object, other): (Object, Object)) -> Result<Value> {
+	fuel::walk(other.0, |(key, value)| {
+		object.0.insert(key, value);
+		std::ops::ControlFlow::Continue(())
+	})
+	.await;
 	Ok(Value::Object(object))
 }
 
@@ -75,25 +98,18 @@ pub fn len((object,): (Object,)) -> Result<Value> {
 	Ok(Value::from(object.len()))
 }
 
-pub fn keys((object,): (Object,)) -> Result<Value> {
-	Ok(Value::Array(Array(
-		object
-			.keys()
-			.map(|v| {
-				let strand = v.clone();
-				Value::String(strand)
-			})
-			.collect(),
-	)))
+pub async fn keys_walk((object,): (Object,)) -> Result<Value> {
+	Ok(Value::Array(Array(fuel::map(object.keys(), |k| Value::String(k.clone())).await)))
 }
 
-pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
+pub async fn remove_walk((mut object, targets): (Object, Value)) -> Result<Value> {
 	match targets {
 		Value::String(target) => {
 			object.remove(target.as_str());
 		}
 		Value::Array(targets) => {
 			for target in targets {
+				fuel::tick(1).await;
 				let Value::String(s) = target else {
 					bail!(Error::InvalidFunctionArguments {
 						name: "object::remove".to_string(),
@@ -119,6 +135,6 @@ pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 	Ok(Value::Object(object))
 }
 
-pub fn values((object,): (Object,)) -> Result<Value> {
-	Ok(Value::Array(Array(object.values().map(|v| v.to_owned()).collect())))
+pub async fn values_walk((object,): (Object,)) -> Result<Value> {
+	Ok(Value::Array(Array(fuel::map(object.values(), Value::clone).await)))
 }

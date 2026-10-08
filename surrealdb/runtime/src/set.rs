@@ -1,4 +1,4 @@
-use std::ops::Bound;
+use std::ops::{Bound, ControlFlow};
 
 use anyhow::Result;
 use common::range::TypedRange;
@@ -7,69 +7,119 @@ use surrealdb_expr::expr::Error;
 use surrealdb_expr::val::{Closure, ClosureEvaluator, Set, Value, check_value_depth};
 
 use crate::args::Optional;
+use crate::fuel;
+
+/// Continue a walk.
+const ON: ControlFlow<()> = ControlFlow::Continue(());
+
+/// Define each synchronous function as its walk driven to its end at once
+/// ([`fuel::now`]).
+macro_rules! now {
+	($($name:ident = $walk:ident($args:ty);)+) => {
+		$(
+			pub fn $name(args: $args) -> Result<Value> {
+				fuel::now($walk(args))
+			}
+		)+
+	};
+}
+
+now! {
+	add = add_walk((Set, Value));
+	remove = remove_walk((Set, Value));
+	union = union_walk((Set, Set));
+	intersect = intersect_walk((Set, Set));
+	difference = difference_walk((Set, Set));
+	complement = complement_walk((Set, Set));
+	at = at_walk((Set, i64));
+	flatten = flatten_walk((Set,));
+	join = join_walk((Set, String));
+	max = max_walk((Set,));
+	min = min_walk((Set,));
+	slice = slice_walk((Set, Optional<Value>, Optional<i64>));
+}
+
+/// The elements of `value`: those of an array or a set, or the value itself.
+fn elements(value: Value) -> Vec<Value> {
+	match value {
+		Value::Array(values) => values.0,
+		Value::Set(values) => values.into_iter().collect(),
+		value => vec![value],
+	}
+}
+
+/// The elements of `set` that `other` holds, or does not hold when `held`
+/// is false.
+async fn kept(set: Set, other: &Set, held: bool) -> Set {
+	let mut out = Set::new();
+	fuel::walk(set, |value| {
+		if other.contains(&value) == held {
+			out.insert(value);
+		}
+		ON
+	})
+	.await;
+	out
+}
 
 /// Add value(s) to a set
-pub fn add((mut set, value): (Set, Value)) -> Result<Value> {
-	match value {
-		Value::Array(arr) => {
-			for v in arr.0 {
-				set.insert(v);
-			}
-			Ok(set.into())
-		}
-		Value::Set(other) => {
-			for v in other.0 {
-				set.insert(v);
-			}
-			Ok(set.into())
-		}
-		value => {
-			set.insert(value);
-			Ok(set.into())
-		}
-	}
+pub async fn add_walk((mut set, value): (Set, Value)) -> Result<Value> {
+	fuel::walk(elements(value), |value| {
+		set.insert(value);
+		ON
+	})
+	.await;
+	Ok(set.into())
 }
 
 /// Remove value(s) from a set
-pub fn remove((mut set, value): (Set, Value)) -> Result<Value> {
-	match value {
-		Value::Array(arr) => {
-			for v in arr.0 {
-				set.remove(&v);
-			}
-			Ok(set.into())
-		}
-		Value::Set(other) => {
-			for v in other.0 {
-				set.remove(&v);
-			}
-			Ok(set.into())
-		}
-		value => {
-			set.remove(&value);
-			Ok(set.into())
-		}
-	}
+pub async fn remove_walk((mut set, value): (Set, Value)) -> Result<Value> {
+	fuel::walk(elements(value), |value| {
+		set.remove(&value);
+		ON
+	})
+	.await;
+	Ok(set.into())
 }
 
 /// Return the union of two sets (A ∪ B)
-pub fn union((set1, set2): (Set, Set)) -> Result<Value> {
-	Ok(set1.union(&set2).into())
+pub async fn union_walk((mut set1, set2): (Set, Set)) -> Result<Value> {
+	fuel::walk(set2, |value| {
+		set1.insert(value);
+		ON
+	})
+	.await;
+	Ok(set1.into())
 }
 
 /// Return the intersection of two sets (A ∩ B)
-pub fn intersect((set1, set2): (Set, Set)) -> Result<Value> {
-	Ok(set1.intersection(&set2).into())
+pub async fn intersect_walk((set1, set2): (Set, Set)) -> Result<Value> {
+	Ok(kept(set1, &set2, true).await.into())
 }
 
 /// Return the symmetric difference of two sets (A △ B)
-pub fn difference((set1, set2): (Set, Set)) -> Result<Value> {
-	Ok(set1.symmetric_difference(&set2).into())
+pub async fn difference_walk((set1, set2): (Set, Set)) -> Result<Value> {
+	let mut out = Set::new();
+	fuel::walk(set1.iter(), |value| {
+		if !set2.contains(value) {
+			out.insert(value.clone());
+		}
+		ON
+	})
+	.await;
+	fuel::walk(set2, |value| {
+		if !set1.contains(&value) {
+			out.insert(value);
+		}
+		ON
+	})
+	.await;
+	Ok(out.into())
 }
 
 /// Return the relative complement (A \ B)
-pub fn complement((set1, set2): (Set, Set)) -> Result<Value> {
-	Ok(set1.complement(&set2).into())
+pub async fn complement_walk((set1, set2): (Set, Set)) -> Result<Value> {
+	Ok(kept(set1, &set2, false).await.into())
 }
 
 /// Get the number of elements in the set
@@ -107,8 +157,8 @@ pub async fn all(
 				Value::None
 			}
 		}
-		Some(value) => set.iter().all(|v: &Value| *v == value).into(),
-		None => set.iter().all(Value::is_truthy).into(),
+		Some(value) => (!fuel::any(set.iter(), |v| *v != value).await).into(),
+		None => (!fuel::any(set.iter(), |v| !v.is_truthy()).await).into(),
 	})
 }
 
@@ -133,12 +183,12 @@ pub async fn any(
 			}
 		}
 		Some(value) => set.contains(&value).into(),
-		None => set.iter().any(Value::is_truthy).into(),
+		None => fuel::any(set.iter(), Value::is_truthy).await.into(),
 	})
 }
 
 /// Access element at a specific position in the set (in BTree order)
-pub fn at((set, i): (Set, i64)) -> Result<Value> {
+pub async fn at_walk((set, i): (Set, i64)) -> Result<Value> {
 	let mut idx = i;
 	if idx < 0 {
 		idx += set.len() as i64;
@@ -146,7 +196,9 @@ pub fn at((set, i): (Set, i64)) -> Result<Value> {
 	if idx < 0 {
 		return Ok(Value::None);
 	}
-	Ok(set.iter().nth(idx as usize).cloned().unwrap_or(Value::None))
+	let idx = idx as usize;
+	let found = fuel::find(set.iter().enumerate(), |&(at, _)| at == idx).await;
+	Ok(found.map(|(_, value)| value.clone()).unwrap_or(Value::None))
 }
 
 /// Filter elements in the set that match a condition
@@ -168,7 +220,17 @@ pub async fn filter(
 				Value::None
 			}
 		}
-		value => set.into_iter().filter(|v: &Value| *v == value).collect::<Set>().into(),
+		value => {
+			let mut out = Set::new();
+			fuel::walk(set, |v| {
+				if v == value {
+					out.insert(v);
+				}
+				ON
+			})
+			.await;
+			out.into()
+		}
 	})
 }
 
@@ -190,7 +252,7 @@ pub async fn find(
 				Value::None
 			}
 		}
-		value => set.into_iter().find(|v: &Value| *v == value).unwrap_or(Value::None),
+		value => fuel::find(set, |v| *v == value).await.unwrap_or(Value::None),
 	})
 }
 
@@ -200,8 +262,25 @@ pub fn first((set,): (Set,)) -> Result<Value> {
 }
 
 /// Flatten nested sets and arrays into a single set
-pub fn flatten((set,): (Set,)) -> Result<Value> {
-	Ok(set.flatten().into())
+pub async fn flatten_walk((set,): (Set,)) -> Result<Value> {
+	let mut out = Set::new();
+	for value in set {
+		match value {
+			Value::Array(_) | Value::Set(_) => {
+				let inner = elements(value);
+				fuel::walk(inner, |item| {
+					out.insert(item);
+					ON
+				})
+				.await;
+			}
+			value => {
+				out.insert(value);
+			}
+		}
+		fuel::tick(1).await;
+	}
+	Ok(out.into())
 }
 
 /// Fold over the set with an accumulator
@@ -227,8 +306,17 @@ pub async fn fold(
 }
 
 /// Join set elements into a string with a separator
-pub fn join((set, sep): (Set, String)) -> Result<Value> {
-	Ok(set.into_iter().map(Value::into_raw_string).collect::<Vec<_>>().join(&sep).into())
+pub async fn join_walk((set, sep): (Set, String)) -> Result<Value> {
+	let mut out = String::new();
+	fuel::walk(set.into_iter().enumerate(), |(at, value)| {
+		if at > 0 {
+			out.push_str(&sep);
+		}
+		out.push_str(&value.into_raw_string());
+		ON
+	})
+	.await;
+	Ok(out.into())
 }
 
 /// Get the last element in the set (maximum in BTree order)
@@ -253,13 +341,23 @@ pub async fn map(
 }
 
 /// Get the maximum value in the set
-pub fn max((set,): (Set,)) -> Result<Value> {
-	Ok(set.into_iter().max().unwrap_or(Value::None))
+pub async fn max_walk((set,): (Set,)) -> Result<Value> {
+	let max = fuel::fold(set, None, |max: Option<Value>, value| match max {
+		Some(max) if max > value => Some(max),
+		_ => Some(value),
+	})
+	.await;
+	Ok(max.unwrap_or(Value::None))
 }
 
 /// Get the minimum value in the set
-pub fn min((set,): (Set,)) -> Result<Value> {
-	Ok(set.into_iter().min().unwrap_or(Value::None))
+pub async fn min_walk((set,): (Set,)) -> Result<Value> {
+	let min = fuel::fold(set, None, |min: Option<Value>, value| match min {
+		Some(min) if min <= value => Some(min),
+		_ => Some(value),
+	})
+	.await;
+	Ok(min.unwrap_or(Value::None))
 }
 
 /// Reduce the set using a closure (uses first element as initial value)
@@ -301,7 +399,7 @@ pub async fn reduce(
 }
 
 /// Extract a range of elements from the set by position (in BTree order)
-pub fn slice(
+pub async fn slice_walk(
 	(set, Optional(range_start), Optional(end)): (Set, Optional<Value>, Optional<i64>),
 ) -> Result<Value> {
 	let Some(range_start) = range_start else {
@@ -390,13 +488,17 @@ pub fn slice(
 	}
 
 	let mut result = Set::new();
-	for (i, value) in set.into_iter().enumerate() {
+	fuel::walk(set.into_iter().enumerate(), |(i, value)| {
 		if i >= start && i <= end {
 			result.insert(value);
+			ON
 		} else if i > end {
-			break;
+			ControlFlow::Break(())
+		} else {
+			ON
 		}
-	}
+	})
+	.await;
 
 	Ok(result.into())
 }
