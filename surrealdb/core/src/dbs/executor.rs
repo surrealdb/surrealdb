@@ -122,6 +122,18 @@ fn shape_statement_value(shape: OutputShape, mut values: Vec<Value>) -> Result<V
 	}
 }
 
+/// A batch of rows encoded in `format`.
+fn encode_rows(
+	format: surrealdb_rpc::RowFormat,
+	batch: &crate::exec::ValueBatch,
+) -> Result<surrealdb_rpc::EncodedRows> {
+	let mut frame = crate::exec::vm::row_frame::RowFrame::with_format(format);
+	for row in batch.values() {
+		frame.push_value(row)?;
+	}
+	Ok(frame.take_encoded())
+}
+
 /// Where a streaming execution sends its output.
 ///
 /// Only rows stream: a statement's `QueryResult` is one small entry either way,
@@ -141,6 +153,9 @@ struct StreamSink {
 	/// `BEGIN … COMMIT` block every statement's rows go out as it runs, but
 	/// none of them is final until the block resolves.
 	streamed: HashMap<usize, u64>,
+	/// The encoding rows are sent in, as
+	/// [`QueryStreamItem::Frame`]s; `None` sends them as values.
+	row_format: Option<surrealdb_rpc::RowFormat>,
 	/// How many of [`Executor::results`] have been finalised. Results at or
 	/// past this index are still provisional — inside an unresolved
 	/// `BEGIN … COMMIT` block, they may yet be rewritten into errors.
@@ -480,10 +495,12 @@ impl Executor {
 		ctx: FrozenContext,
 		opt: Options,
 		items: Sender<QueryStreamItem>,
+		row_format: Option<surrealdb_rpc::RowFormat>,
 	) -> Self {
 		let mut this = Self::new(kvs, ctx, opt);
 		this.stream = Some(StreamSink {
 			items,
+			row_format,
 			streamed: HashMap::new(),
 			finalised: 0,
 		});
@@ -1068,9 +1085,20 @@ impl Executor {
 			)
 			.await?;
 
+		// A statement whose rows stream to a consumer that takes them encoded
+		// is run to hand them on encoded, which its operators may do without
+		// building a value for a row.
+		let encoded_format = (stream_rows && matches!(plan.output_shape(), OutputShape::Rows))
+			.then(|| self.stream.as_ref().and_then(|sink| sink.row_format))
+			.flatten();
+
 		// Execute the plan
 		// Handle control flow signals from execute()
-		let mut stream = match plan.execute(&exec_ctx) {
+		let executed = match encoded_format {
+			Some(format) => plan.execute_encoded(&exec_ctx, format),
+			None => plan.execute(&exec_ctx),
+		};
+		let mut stream = match executed {
 			Ok(s) => s,
 			Err(crate::expr::ControlFlow::Return(v)) => {
 				// RETURN - propagate as control flow signal
@@ -1106,18 +1134,52 @@ impl Executor {
 			match batch_result {
 				Ok(batch) => {
 					if streaming {
-						let values = batch
-							.into_iter()
-							.map(convert_value_to_public_value)
-							.collect::<Result<Vec<_>>>()
-							.map_err(ControlFlow::Err)?;
-						streamed += values.len() as u64;
 						let sink = self.stream.as_ref().expect("streaming implies a sink");
-						sink.send(QueryStreamItem::Rows {
-							index,
-							values,
-						})
-						.await;
+						let mut batch = batch;
+						let item = match sink.row_format {
+							// Rows the operators encoded, then any they handed on
+							// as values, encoded here: no public value is built
+							// for them.
+							Some(format) => {
+								let rows = match batch.take_encoded() {
+									Some(mut rows) if rows.format() == format => {
+										if !batch.is_empty() {
+											let values = encode_rows(format, &batch)
+												.map_err(ControlFlow::Err)?;
+											rows.extend(&values)
+												.map_err(|e| ControlFlow::Err(e.into()))?;
+										}
+										rows
+									}
+									Some(_) => {
+										return Err(ControlFlow::Err(anyhow::anyhow!(
+											"Rows encoded in a format other than the stream's"
+										)));
+									}
+									None => {
+										encode_rows(format, &batch).map_err(ControlFlow::Err)?
+									}
+								};
+								streamed += rows.len() as u64;
+								QueryStreamItem::Frame {
+									index,
+									rows,
+								}
+							}
+							None => {
+								let values = batch
+									.into_iter()
+									.map(convert_value_to_public_value)
+									.collect::<Result<Vec<_>>>()
+									.map_err(ControlFlow::Err)?;
+								streamed += values.len() as u64;
+								QueryStreamItem::Rows {
+									index,
+									values,
+								}
+							}
+						};
+						sink.send(item).await;
 						// A consumer that stopped reading wants no more rows, and
 						// the statement is about to be abandoned anyway.
 						if sink.is_closed() {
@@ -2911,8 +2973,9 @@ impl Executor {
 		opt: Options,
 		statements: Vec<TopLevelStatement>,
 		items: Sender<QueryStreamItem>,
+		row_format: Option<surrealdb_rpc::RowFormat>,
 	) -> Result<Vec<QueryResult>> {
-		let mut executor = Self::new_streaming(kvs, ctx, opt, items);
+		let mut executor = Self::new_streaming(kvs, ctx, opt, items, row_format);
 		executor.prepare_request(&statements);
 		let outcome =
 			crate::exec::compiles::request(executor.run_with_transaction(kvs, statements)).await;
@@ -3092,8 +3155,9 @@ impl Executor {
 		opt: Options,
 		statements: Vec<TopLevelStatement>,
 		items: Sender<QueryStreamItem>,
+		row_format: Option<surrealdb_rpc::RowFormat>,
 	) -> Result<Vec<QueryResult>> {
-		let mut this = Executor::new_streaming(kvs, ctx, opt, items);
+		let mut this = Executor::new_streaming(kvs, ctx, opt, items, row_format);
 		this.prepare_request(&statements);
 		let stream = this.counted(futures::stream::iter(statements.into_iter().map(Ok)));
 		let outcome =

@@ -243,6 +243,21 @@ const STREAM_ITEM_BUFFER: usize = 256;
 /// choice.
 fn stream_items_for(item: QueryStreamItem) -> Vec<StreamItem> {
 	match item {
+		// Encoded rows are read as the values they encode.
+		QueryStreamItem::Frame {
+			index,
+			rows,
+		} => match rows.to_values() {
+			Ok(values) => stream_items_for(QueryStreamItem::Rows {
+				index,
+				values,
+			}),
+			Err(error) => vec![StreamItem::StatementEnd {
+				statement: index,
+				stats: DbResultStats::default(),
+				result: Err(error),
+			}],
+		},
 		QueryStreamItem::Rows {
 			index,
 			values,

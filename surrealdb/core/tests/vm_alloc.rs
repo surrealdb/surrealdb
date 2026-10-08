@@ -547,3 +547,314 @@ async fn per_row_frame_allocations() {
 		}
 	}
 }
+
+/// Allocations per row of the read shapes as a CBOR or JSON transport runs
+/// them: on the streaming executor with rows encoded for the wire
+/// (`QueryRequest::with_row_format`), the items drained as they arrive. The
+/// response envelope around the rows costs the same at both sizes.
+#[tokio::test]
+#[ignore = "a measurement, not a check"]
+async fn per_row_wire_allocations() {
+	use surrealdb_core::kvs::QueryRequest;
+	use surrealdb_rpc::{QUERY_STREAM_BUFFER, RowFormat};
+
+	let sample_every: u64 =
+		std::env::var("ALLOC_SAMPLE").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+	let (small, session) = datastore(SMALL).await;
+	let (large, _) = datastore(LARGE).await;
+	let run = |ds: Arc<Datastore>, sql: String, format: RowFormat| {
+		let session = session.clone();
+		async move {
+			let (items, received) = async_channel::bounded(QUERY_STREAM_BUFFER);
+			let job = ds
+				.run_streaming(
+					QueryRequest::new(sql.as_str(), &session).with_row_format(Some(format)),
+					items,
+				)
+				.expect("the query starts");
+			let drain = async {
+				let mut n = 0usize;
+				while let Ok(item) = received.recv().await {
+					n += 1;
+					drop(item);
+				}
+				n
+			};
+			let (ran, _) = futures::join!(job.run, drain);
+			ran.expect("the query runs");
+		}
+	};
+	println!("{:<14} {:>6} {:>12} {:>12}", "shape", "format", "allocs/row", "bytes/row");
+	for shape in selected()
+		.into_iter()
+		.filter(|s| !s.takes_rows && s.name != "update" && s.name != "create_loop")
+	{
+		for format in [RowFormat::Cbor, RowFormat::Json] {
+			let measure = |ds: Arc<Datastore>, n: usize| {
+				let sql = (shape.query)(n);
+				async move {
+					run(Arc::clone(&ds), sql.clone(), format).await;
+					let ((), counts, samples) = count(sample_every, run(ds, sql, format)).await;
+					(counts, samples)
+				}
+			};
+			let (a, sa) = measure(Arc::clone(&small), SMALL).await;
+			let (b, sb) = measure(Arc::clone(&large), LARGE).await;
+			let rows = ((shape.rows)(LARGE) - (shape.rows)(SMALL)) as f64;
+			let per_row = (b.allocs as f64 - a.allocs as f64) / rows;
+			let bytes = (b.bytes as f64 - a.bytes as f64) / rows;
+			println!(
+				"{:<14} {:>6} {per_row:>12.2} {bytes:>12.1}",
+				shape.name,
+				format!("{format:?}")
+			);
+			if sample_every != 0 {
+				let (small_sites, large_sites) = (tally(&sa), tally(&sb));
+				let mut sites: Vec<(String, f64)> = large_sites
+					.iter()
+					.map(|(site, &n)| {
+						let m = small_sites.get(site).copied().unwrap_or(0);
+						(site.clone(), (n - m) as f64 * sample_every as f64 / rows)
+					})
+					.filter(|(_, per)| *per > 0.05)
+					.collect();
+				sites.sort_by(|a, b| b.1.total_cmp(&a.1));
+				for (site, per) in sites.iter().take(10) {
+					println!("{per:>7.2}  {site}");
+				}
+			}
+		}
+	}
+}
+
+// --------------------------------------------------
+// The response path
+// --------------------------------------------------
+
+/// How a response is produced, from the query to the bytes a transport sends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Path {
+	/// The `query` RPC and `/sql` over public values: buffered execution,
+	/// every row converted to the public value, the response encoded whole.
+	Values,
+	/// The `query` RPC and `/sql` over frames: streaming execution with rows
+	/// encoded for the wire, the response written around them.
+	Frames,
+	/// `query_stream` over public values: rows framed as values, each frame
+	/// encoded whole.
+	StreamValues,
+	/// `query_stream` over frames: encoded rows framed and written into each
+	/// frame's message as they are.
+	StreamFrames,
+}
+
+/// Produce the response to `sql` along `path` in `format`, as the server's
+/// response encoders write it (`rpc::format::encoded::encode_response`, which
+/// encodes a response of values exactly as `cbor::encode(res.into_value())`
+/// does). Returns the bytes sent.
+async fn respond(
+	ds: &Arc<Datastore>,
+	session: &Session,
+	sql: &str,
+	path: Path,
+	format: surrealdb_rpc::RowFormat,
+) -> usize {
+	use surrealdb_core::kvs::QueryRequest;
+	use surrealdb_core::rpc::format::encoded::{
+		encode_response, encode_stream_rows, execute_encoded,
+	};
+	use surrealdb_rpc::{DbResponse, DbResult, OutgoingFrame, QUERY_STREAM_BUFFER, StreamFrames};
+
+	let id = Some(Value::Number(Number::Int(1)));
+	match path {
+		Path::Values => {
+			let results = ds.execute(sql, session, None).await.expect("the query runs");
+			let response = DbResponse::success(id, None, DbResult::Query(results));
+			encode_response(format, response).expect("encodes").len()
+		}
+		Path::Frames => {
+			let results =
+				execute_encoded(ds, sql, session, None, format).await.expect("the query runs");
+			let response = DbResponse::success(id, None, DbResult::Encoded(results));
+			encode_response(format, response).expect("encodes").len()
+		}
+		Path::StreamValues | Path::StreamFrames => {
+			let encoded = path == Path::StreamFrames;
+			let (items, received) = async_channel::bounded(QUERY_STREAM_BUFFER);
+			let job = ds
+				.run_streaming(
+					QueryRequest::new(sql, session).with_row_format(encoded.then_some(format)),
+					items,
+				)
+				.expect("the query starts");
+			let mut frames = if encoded {
+				StreamFrames::keeping_encoded_rows()
+			} else {
+				StreamFrames::new()
+			};
+			// Frames are encoded as items arrive, as the WebSocket driver
+			// sends them.
+			let drain = async {
+				let mut sent = 0;
+				while let Ok(item) = received.recv().await {
+					frames.absorb(item);
+					while let Some(frame) = frames.pop_outgoing() {
+						sent += match frame {
+							OutgoingFrame::Frame(frame) => encode_response(
+								format,
+								DbResponse::success(
+									id.clone(),
+									None,
+									DbResult::Other(frame.into_value()),
+								),
+							),
+							OutgoingFrame::Rows {
+								index,
+								rows,
+							} => encode_stream_rows(format, id.clone(), None, index, &rows),
+						}
+						.expect("encodes")
+						.len();
+					}
+				}
+				sent
+			};
+			let (ran, sent) = futures::join!(job.run, drain);
+			ran.expect("the query runs");
+			sent
+		}
+	}
+}
+
+/// The read shapes the response path serves.
+fn read_shapes() -> impl Iterator<Item = &'static Shape> {
+	selected()
+		.into_iter()
+		.filter(|s| !s.takes_rows && s.name != "update" && s.name != "create_loop")
+}
+
+/// Allocations per row of `shape` produced along `path`, between datastores
+/// of `small_n` and `large_n` rows.
+async fn response_allocations(
+	(small, small_n): (&Arc<Datastore>, usize),
+	(large, large_n): (&Arc<Datastore>, usize),
+	session: &Session,
+	shape: &Shape,
+	path: Path,
+	format: surrealdb_rpc::RowFormat,
+) -> (f64, f64) {
+	let counted = |ds: Arc<Datastore>, n: usize| {
+		let sql = (shape.query)(n);
+		async move {
+			respond(&ds, session, &sql, path, format).await;
+			let (_, counts, _) = count(0, respond(&ds, session, &sql, path, format)).await;
+			counts
+		}
+	};
+	let a = counted(Arc::clone(small), small_n).await;
+	let b = counted(Arc::clone(large), large_n).await;
+	let rows = ((shape.rows)(large_n) - (shape.rows)(small_n)) as f64;
+	((b.allocs as f64 - a.allocs as f64) / rows, (b.bytes as f64 - a.bytes as f64) / rows)
+}
+
+/// Allocations per row of the read shapes from the query to the encoded
+/// response bytes, along each [`Path`], in CBOR and JSON.
+///
+/// ```text
+/// cargo test --locked --release -p surrealdb-core --test vm_alloc \
+///     per_row_response_allocations -- --ignored --nocapture --test-threads 1
+/// ```
+#[tokio::test]
+#[ignore = "a measurement, not a check"]
+async fn per_row_response_allocations() {
+	use surrealdb_rpc::RowFormat;
+	let (small, session) = datastore(SMALL).await;
+	let (large, _) = datastore(LARGE).await;
+	println!(
+		"{:<16} {:>6} {:>10} {:>10} {:>12} {:>12}",
+		"shape", "format", "values", "frames", "stream vals", "stream frms"
+	);
+	for shape in read_shapes() {
+		for format in [RowFormat::Cbor, RowFormat::Json] {
+			let mut per_row = Vec::new();
+			for path in [Path::Values, Path::Frames, Path::StreamValues, Path::StreamFrames] {
+				let (allocs, _) = response_allocations(
+					(&small, SMALL),
+					(&large, LARGE),
+					&session,
+					shape,
+					path,
+					format,
+				)
+				.await;
+				per_row.push(allocs);
+			}
+			println!(
+				"{:<16} {:>6} {:>10.2} {:>10.2} {:>12.2} {:>12.2}",
+				shape.name,
+				format!("{format:?}"),
+				per_row[0],
+				per_row[1],
+				per_row[2],
+				per_row[3]
+			);
+		}
+	}
+}
+
+/// The most allocations per row each read shape may make on the frame paths,
+/// from the query to the response bytes. A shape not listed may make none
+/// beyond rounding. Each budget is the sum of the sites that remain, and why.
+const RESPONSE_BUDGETS: &[(&str, f64, &str)] = &[
+	// The sort holds each row's key vector beside its stored bytes.
+	("order", 1.5, "sort key vector per held row"),
+	// A top-k keeps each held row as a value with its key: at the check's
+	// sizes every row is held.
+	("order_limit5000", 2.5, "top-k heap entry (row value and key) per held row"),
+	// The aggregate builds each group's output object as a value.
+	("group_hi", 1.0, "group output object built as a value, then encoded"),
+	// Graph and FETCH rows are built as values and encoded by `push_value`:
+	// the KV cursor setup and range-key encoding per lookup remain.
+	("graph_1hop", 60.0, "kv-mem cursor and range key per lookup; rows built as values"),
+	("graph_2hop", 120.0, "kv-mem cursor and range key per lookup; rows built as values"),
+	("fetch", 40.0, "the fetched record decoded whole; rows built as values"),
+];
+
+/// Rows on the frame paths of the response cost no more allocations than
+/// their shape's budget. Smaller datastores than the measurement's, so the
+/// check is quick; the per-row difference is unchanged.
+#[tokio::test]
+async fn response_allocations_stay_within_budget() {
+	use surrealdb_rpc::RowFormat;
+	const CHECK_SMALL: usize = 2_000;
+	const CHECK_LARGE: usize = 4_000;
+	let (small, session) = datastore(CHECK_SMALL).await;
+	let (large, _) = datastore(CHECK_LARGE).await;
+	let mut over = Vec::new();
+	for shape in read_shapes() {
+		let budget = RESPONSE_BUDGETS
+			.iter()
+			.find(|(name, _, _)| *name == shape.name)
+			.map_or(0.1, |(_, budget, _)| *budget);
+		for format in [RowFormat::Cbor, RowFormat::Json] {
+			for path in [Path::Frames, Path::StreamFrames] {
+				let (allocs, _) = response_allocations(
+					(&small, CHECK_SMALL),
+					(&large, CHECK_LARGE),
+					&session,
+					shape,
+					path,
+					format,
+				)
+				.await;
+				if allocs > budget {
+					over.push(format!(
+						"{} {format:?} {path:?}: {allocs:.2} allocs/row > {budget}",
+						shape.name
+					));
+				}
+			}
+		}
+	}
+	assert!(over.is_empty(), "over budget:\n{}", over.join("\n"));
+}

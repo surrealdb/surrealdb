@@ -103,7 +103,27 @@ impl ExecOperator for RequestStatement {
 		super::host::output_shape(&self.statement)
 	}
 
+	fn execute_encoded(
+		&self,
+		ctx: &ExecutionContext,
+		format: surrealdb_rpc::RowFormat,
+	) -> FlowResult<ValueBatchStream> {
+		self.run(ctx, Some(format))
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
+		self.run(ctx, None)
+	}
+}
+
+impl RequestStatement {
+	/// Run the statement over the request's units, its own rows encoded in
+	/// `format` when given.
+	fn run(
+		&self,
+		ctx: &ExecutionContext,
+		format: Option<surrealdb_rpc::RowFormat>,
+	) -> FlowResult<ValueBatchStream> {
 		// The statement's ids index the request's units, which every program
 		// beneath it shares, closure bodies among them.
 		let ctx = ctx.with_vm_units(Arc::clone(&self.request.units));
@@ -112,7 +132,7 @@ impl ExecOperator for RequestStatement {
 			None => ctx,
 		};
 		let ctx = super::closure::with_units(&self.request, &ctx).unwrap_or(ctx);
-		let stream = super::host::execute_program(&self.statement, &ctx)?;
+		let stream = super::host::execute_program_in(&self.statement, &ctx, None, format)?;
 		let stream: ValueBatchStream = match self.held.is_empty() {
 			true => stream,
 			false => Box::pin(Holding {

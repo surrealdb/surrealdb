@@ -58,6 +58,7 @@ impl Runs {
 	pub(super) async fn spill(
 		&mut self,
 		mut rows: Vec<(Vec<Value>, SortRow)>,
+		slab: Vec<u8>,
 		keys: Vec<KeyOrder>,
 	) -> anyhow::Result<()> {
 		let path = self.dir.path().join(format!("run-{}", self.runs.len()));
@@ -66,7 +67,7 @@ impl Runs {
 			sort_and_keep(&mut rows, &keys, usize::MAX);
 			let mut out = BufWriter::new(File::create(&written)?);
 			for (keys, row) in rows {
-				write_record(&mut out, &keys, &row.into_value()?)?;
+				write_record(&mut out, &keys, &row.into_value_in(&slab)?)?;
 			}
 			out.flush()?;
 			Ok(())
@@ -84,13 +85,14 @@ impl Runs {
 	pub(super) fn merge(
 		self,
 		held: Vec<(Vec<Value>, SortRow)>,
+		slab: Vec<u8>,
 		keys: Vec<KeyOrder>,
 	) -> anyhow::Result<Merge> {
 		let mut sources = Vec::with_capacity(self.runs.len() + 1);
 		for path in &self.runs {
 			sources.push(Source::Run(BufReader::new(File::open(path)?)));
 		}
-		sources.push(Source::Held(held.into_iter()));
+		sources.push(Source::Held(held.into_iter(), slab));
 		let mut merge = Merge {
 			_dir: self.dir,
 			heads: Vec::with_capacity(sources.len()),
@@ -108,15 +110,16 @@ impl Runs {
 /// Where a merge reads rows from: a run on disk, or the rows held in memory.
 enum Source {
 	Run(BufReader<File>),
-	Held(std::vec::IntoIter<(Vec<Value>, SortRow)>),
+	/// The rows held in memory, with the slab their slab rows lie in.
+	Held(std::vec::IntoIter<(Vec<Value>, SortRow)>, Vec<u8>),
 }
 
 impl Source {
 	fn next(&mut self) -> anyhow::Result<Option<(Vec<Value>, Value)>> {
 		match self {
 			Source::Run(reader) => read_record(reader),
-			Source::Held(rows) => match rows.next() {
-				Some((keys, row)) => Ok(Some((keys, row.into_value()?))),
+			Source::Held(rows, slab) => match rows.next() {
+				Some((keys, row)) => Ok(Some((keys, row.into_value_in(slab)?))),
 				None => Ok(None),
 			},
 		}

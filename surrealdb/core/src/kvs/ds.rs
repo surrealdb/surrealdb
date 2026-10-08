@@ -5133,6 +5133,7 @@ impl Datastore {
 			variables,
 			transaction,
 			cancel,
+			row_format: _,
 		} = req;
 		let statements = self.statements_for(source)?;
 		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
@@ -5179,6 +5180,7 @@ impl Datastore {
 			variables,
 			transaction,
 			cancel,
+			row_format,
 		} = req;
 		let statements = self.statements_for(source)?;
 		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
@@ -5192,11 +5194,14 @@ impl Datastore {
 			run: Box::pin(async move {
 				let executed = if in_transaction {
 					Executor::execute_statements_streaming_with_transaction(
-						&kvs, ctx, opt, statements, items,
+						&kvs, ctx, opt, statements, items, row_format,
 					)
 					.await
 				} else {
-					Executor::execute_statements_streaming(&kvs, ctx, opt, statements, items).await
+					Executor::execute_statements_streaming(
+						&kvs, ctx, opt, statements, items, row_format,
+					)
+					.await
 				};
 				executed.map_err(crate::err::anyhow_to_types_error)
 			}),

@@ -138,6 +138,8 @@ impl ToSql for EscapeObjectKey<'_> {
 	}
 }
 
+/// Escapes a record id's string key, as the record id's SurrealQL rendering
+/// writes it.
 pub struct EscapeRecordKey<'a>(pub &'a str);
 impl ToSql for EscapeRecordKey<'_> {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {

@@ -57,8 +57,8 @@ use surrealdb_rpc::capabilities::MethodTarget;
 use surrealdb_rpc::error::{invalid_params, method_not_allowed, stream_exists, too_many_streams};
 use surrealdb_rpc::framing::{live_queries_disowned, stream_stopped};
 use surrealdb_rpc::{
-	DbResponse, DbResult, Method, QUERY_STREAM_BUFFER, QueryResult, QueryStreamFrame,
-	QueryStreamItem, QueryType, StreamFrames,
+	DbResponse, DbResult, Method, OutgoingFrame, QUERY_STREAM_BUFFER, QueryResult,
+	QueryStreamFrame, QueryStreamItem, QueryType, StreamFrames,
 };
 use surrealdb_types::{Array, Error as TypesError, ToSql, Value};
 use tokio::sync::mpsc::Sender;
@@ -338,14 +338,16 @@ impl StreamDriver<'_> {
 		let started = Instant::now();
 		let conn = self.rpc.cancel.token();
 		let mut run = Some(run);
-		let mut frames = StreamFrames::new();
+		// Rows the executor encoded in the connection's format leave as they
+		// are; nothing builds their values.
+		let mut frames = StreamFrames::keeping_encoded_rows();
 		let mut outcome = None;
 		// The stream opens before anything has been produced, which is what lets
 		// a client set up for it while the query is still starting.
 		self.send(
-			QueryStreamFrame::Begin {
+			OutgoingFrame::Frame(QueryStreamFrame::Begin {
 				statements: statement_count,
-			},
+			}),
 			&mut frames,
 		)
 		.await;
@@ -354,7 +356,7 @@ impl StreamDriver<'_> {
 		// channel-closed path.
 		let mut conn_observed = false;
 		let outcome = loop {
-			while let Some(frame) = frames.pop() {
+			while let Some(frame) = frames.pop_outgoing() {
 				self.send(frame, &mut frames).await;
 			}
 			if let Some(outcome) = outcome {
@@ -429,7 +431,7 @@ impl StreamDriver<'_> {
 			time: started.elapsed(),
 			error,
 		};
-		self.send(end, &mut frames).await;
+		self.send(OutgoingFrame::Frame(end), &mut frames).await;
 	}
 
 	/// Send one frame, enforcing the module's send invariants.
@@ -442,12 +444,12 @@ impl StreamDriver<'_> {
 	/// its terminal `End` still gets one short-grace attempt: a client that
 	/// merely fell behind — rather than went away — is told its stream is
 	/// over instead of being left waiting on frames that will never come.
-	async fn send(&mut self, frame: QueryStreamFrame, frames: &mut StreamFrames) {
+	async fn send(&mut self, frame: OutgoingFrame, frames: &mut StreamFrames) {
 		if self.answered {
 			return;
 		}
-		let is_end = matches!(&frame, QueryStreamFrame::End { .. });
-		let is_begin = matches!(&frame, QueryStreamFrame::Begin { .. });
+		let is_end = matches!(&frame, OutgoingFrame::Frame(QueryStreamFrame::End { .. }));
+		let is_begin = matches!(&frame, OutgoingFrame::Frame(QueryStreamFrame::Begin { .. }));
 		if is_end {
 			// The terminal frame is what tells a client its stream is over, and
 			// losing it is unrecoverable -- so it gets at least this grace,
@@ -470,29 +472,30 @@ impl StreamDriver<'_> {
 		// failure fails, and the statement a terminal frame answers, which is
 		// what a successful send makes final.
 		let statement = match &frame {
-			QueryStreamFrame::Rows {
-				index,
-				..
-			}
-			| QueryStreamFrame::Value {
+			OutgoingFrame::Frame(
+				QueryStreamFrame::Rows {
+					index,
+					..
+				}
+				| QueryStreamFrame::Value {
+					index,
+					..
+				},
+			)
+			| OutgoingFrame::Rows {
 				index,
 				..
 			} => Some(*index),
 			_ => None,
 		};
 		let terminal = match &frame {
-			QueryStreamFrame::Finished {
+			OutgoingFrame::Frame(QueryStreamFrame::Finished {
 				index,
 				..
-			} => Some(*index),
+			}) => Some(*index),
 			_ => None,
 		};
-		let response = DbResponse::success(
-			Some(self.id.clone()),
-			self.client_session,
-			DbResult::Other(frame.into_value()),
-		);
-		let message = match self.rpc.format.res_ws(response) {
+		let message = match self.encode(frame) {
 			Ok((_len, message)) => message,
 			Err(error) => {
 				// A value the wire cannot carry fails the statement that
@@ -591,6 +594,36 @@ impl StreamDriver<'_> {
 		} else {
 			self.stop_sending();
 		}
+	}
+
+	/// `frame` as this request's response message in the connection's format.
+	/// Encoded rows are written into the envelope as they are; rows encoded
+	/// in a format the connection does not speak are decoded and sent as the
+	/// values they encode.
+	fn encode(&self, frame: OutgoingFrame) -> Result<(usize, Message), TypesError> {
+		let frame = match frame {
+			OutgoingFrame::Frame(frame) => frame,
+			OutgoingFrame::Rows {
+				index,
+				rows,
+			} => match self.rpc.format.rows_ws(
+				Some(self.id.clone()),
+				self.client_session,
+				index,
+				&rows,
+			) {
+				Some(message) => return message,
+				None => QueryStreamFrame::Rows {
+					index,
+					values: rows.to_values()?,
+				},
+			},
+		};
+		self.rpc.format.res_ws(DbResponse::success(
+			Some(self.id.clone()),
+			self.client_session,
+			DbResult::Other(frame.into_value()),
+		))
 	}
 
 	/// Frames can no longer reach the client: stop the execution and drop

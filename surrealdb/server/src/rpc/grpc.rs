@@ -2554,6 +2554,28 @@ impl QueryFrames {
 			return None;
 		}
 		match item {
+			// gRPC frames carry values: encoded rows are read as the values
+			// they encode.
+			QueryStreamItem::Frame {
+				index,
+				rows,
+			} => match rows.to_values() {
+				Ok(values) => self.absorb(QueryStreamItem::Rows {
+					index,
+					values,
+				}),
+				Err(error) => {
+					let index = index as u32;
+					self.pending.remove(&index);
+					self.queue_terminal(
+						index,
+						rpc::QueryStatementKind::Other,
+						Some(to_proto_error(&error)),
+						0,
+					);
+					None
+				}
+			},
 			QueryStreamItem::Rows {
 				index,
 				values,

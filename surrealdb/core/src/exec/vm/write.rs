@@ -1036,9 +1036,11 @@ async fn show(program: &Program, instr: &WriteInstr, state: &mut State) -> FlowR
 		WriteInstr::SetOutput {
 			output,
 		} => {
-			let shown = |write: &WriteState, image: RecordImage| {
+			// The output stage shows an image and sets the output from it, and
+			// nothing reads a shown image after that: the output takes it.
+			let shown = |write: &mut WriteState, image: RecordImage| {
 				write.shown[slot(image)]
-					.clone()
+					.take()
 					.ok_or_else(|| internal("an image output before the image was shown"))
 			};
 			let value = match output {

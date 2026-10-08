@@ -81,7 +81,7 @@ const fn method_to_auth_action(method: Method) -> Option<AuthAction> {
 /// notifications for it would be produced and silently discarded for the
 /// lifetime of the datastore, and no cleanup path could find it. Deleting the
 /// rows is what keeps it from becoming that orphan.
-async fn settle_detached_live_queries(
+pub(crate) async fn settle_detached_live_queries(
 	kvs: &Datastore,
 	results: Result<Vec<QueryResult>, surrealdb_types::Error>,
 ) {
@@ -182,6 +182,19 @@ pub trait RpcProtocol {
 	/// pre-cancellation behaviour.
 	fn cancel_handle(&self) -> Option<CancelHandle> {
 		None
+	}
+
+	/// The encoding this transport writes responses in, when it can splice
+	/// rows encoded by the executor into them: `query` then answers with
+	/// [`DbResult::Encoded`], whose rows were never built as public values.
+	/// `None` answers with values, which is what a caller that reads results
+	/// (the embedded SDK) needs.
+	///
+	/// By default, the format a stateless transport named for the request
+	/// being dispatched ([`with_response_format`]); a transport with one
+	/// format per connection returns it.
+	fn row_format(&self) -> Option<surrealdb_rpc::RowFormat> {
+		RESPONSE_FORMAT.try_with(|format| *format).ok().flatten()
 	}
 
 	// ------------------------------
@@ -1936,6 +1949,22 @@ pub trait RpcProtocol {
 		// Process the method arguments
 		let (query, vars) = extract_query_params(params, &session)?;
 
+		if let Some(format) = self.row_format() {
+			return Ok(DbResult::Encoded(
+				run_query_encoded(
+					self,
+					txn,
+					session_id,
+					&session,
+					QueryForm::Text(&query, Dialect::SurrealQl),
+					vars,
+					format,
+				)
+				.await
+				.map_err(types_error_from_anyhow)?,
+			));
+		}
+
 		Ok(DbResult::Query(
 			run_query(
 				self,
@@ -1973,6 +2002,10 @@ pub trait RpcProtocol {
 	/// as. A caller registering the `LIVE SELECT`s the execution creates must
 	/// pass it to [`live_query_owner`], because by then the session may be
 	/// acting as someone else.
+	///
+	/// Rows arrive as [`QueryStreamItem::Frame`]s encoded in
+	/// [`Self::row_format`] when the transport has one, and as values
+	/// otherwise.
 	async fn query_stream(
 		&self,
 		txn: Option<Uuid>,
@@ -2036,7 +2069,8 @@ pub trait RpcProtocol {
 			QueryRequest::new(query.as_str(), &session)
 				.with_variables(vars)
 				.with_optional_transaction(transaction)
-				.with_optional_cancel(cancel),
+				.with_optional_cancel(cancel)
+				.with_row_format(self.row_format()),
 			items,
 		)?;
 
@@ -2646,6 +2680,71 @@ where
 	}
 	// Return the result to the client
 	Ok(res)
+}
+
+tokio::task_local! {
+	/// The response format of the request a stateless transport is
+	/// dispatching, which [`RpcProtocol::row_format`] answers by default.
+	static RESPONSE_FORMAT: Option<surrealdb_rpc::RowFormat>;
+}
+
+/// Run `dispatch`, one request's dispatch on a transport shared by requests
+/// that answer in different formats, with `format` as the format its response
+/// is written in.
+pub async fn with_response_format<F: std::future::Future>(
+	format: Option<surrealdb_rpc::RowFormat>,
+	dispatch: F,
+) -> F::Output {
+	RESPONSE_FORMAT.scope(format, dispatch).await
+}
+
+/// [`run_query`] on the streaming executor, with rows encoded in `format`:
+/// the same results, the same live-query registration, with no public value
+/// built for any row. See
+/// [`collect_encoded`](crate::rpc::format::encoded::collect_encoded) for how
+/// the execution is stopped if this future is dropped.
+async fn run_query_encoded<T>(
+	this: &T,
+	txn: Option<Uuid>,
+	session_id: Uuid,
+	session: &Session,
+	query: QueryForm<'_>,
+	vars: Option<PublicVariables>,
+	format: surrealdb_rpc::RowFormat,
+) -> Result<Vec<surrealdb_rpc::EncodedQueryResult>>
+where
+	T: RpcProtocol + ?Sized,
+{
+	if !T::LQ_SUPPORT && session.rt {
+		return Err(bad_lq_config().into());
+	}
+	let source = match query {
+		QueryForm::Text(text, dialect) => QuerySource::in_dialect(text, dialect),
+		QueryForm::Parsed(ast) => QuerySource::Ast(ast),
+	};
+	let transaction = match txn {
+		Some(txn_id) => Some(this.get_tx(txn_id).await.map_err(anyhow::Error::from)?),
+		None => None,
+	};
+	let request = QueryRequest::new(source, session)
+		.with_variables(vars)
+		.with_optional_transaction(transaction);
+	let kvs = this.kvs_arc();
+	let (res, encoded) =
+		crate::rpc::format::encoded::collect_encoded(&kvs, request, this.cancel_handle(), format)
+			.await?;
+	// Registration of each `LIVE SELECT`, as `run_query` does it. A live
+	// statement's value is its id, held on the result whatever streamed.
+	let live_namespace = session.ns.clone();
+	let live_database = session.db.clone();
+	for response in &res {
+		if response.query_type == QueryType::Live
+			&& let Ok(PublicValue::Uuid(lqid)) = &response.result
+		{
+			this.handle_live(lqid, session_id, live_namespace.clone(), live_database.clone()).await;
+		}
+	}
+	Ok(encoded)
 }
 
 #[cfg(test)]

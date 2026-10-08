@@ -15,6 +15,10 @@ mod proto;
 mod sql;
 mod traits;
 pub(crate) mod utils;
+/// The escapers the public record id's SurrealQL rendering uses, for a
+/// server that renders a record id without building one.
+#[doc(hidden)]
+pub use utils::escape::{EscapeRecordKey, EscapeSqonIdent};
 mod value;
 mod variables;
 

@@ -1,5 +1,10 @@
 mod convert;
 
+/// A decoded CBOR item as a public value.
+pub(crate) fn to_value(item: ciborium::Value) -> anyhow::Result<Value> {
+	convert::to_value(item).map_err(|e| anyhow::anyhow!(e))
+}
+
 use surrealdb_types::Value;
 
 pub fn encode(v: Value) -> anyhow::Result<Vec<u8>> {

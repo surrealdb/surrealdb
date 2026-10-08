@@ -181,6 +181,20 @@ pub(crate) trait ExecOperator: Debug + Send + Sync + std::any::Any {
 	/// fully before any execution begins.
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream>;
 
+	/// [`Self::execute`] for a consumer that writes the statement's rows in
+	/// `format`: an operator that can encode its own rows hands them on as
+	/// encoded batches ([`ValueBatch::encoded`]), which no public value is
+	/// built for. Rows of nested statements are never encoded. By default the
+	/// rows are values, as `execute` hands them on.
+	fn execute_encoded(
+		&self,
+		ctx: &ExecutionContext,
+		format: surrealdb_rpc::RowFormat,
+	) -> FlowResult<ValueBatchStream> {
+		let _ = format;
+		self.execute(ctx)
+	}
+
 	/// Returns references to child execution plans for tree traversal.
 	///
 	/// Used for:

@@ -165,6 +165,12 @@ pub struct QueryRequest<'a> {
 	/// letting it run to completion. The caller owns the handle and decides
 	/// when to trip it.
 	pub cancel: Option<CancelHandle>,
+	/// The encoding a streaming execution writes its rows in, for a transport
+	/// that answers in it: rows then arrive as
+	/// [`QueryStreamItem::Frame`](surrealdb_rpc::QueryStreamItem::Frame)s and
+	/// the server builds no public value for them. `None` streams rows as
+	/// values. A buffered execution ignores it.
+	pub row_format: Option<surrealdb_rpc::RowFormat>,
 }
 
 impl<'a> QueryRequest<'a> {
@@ -177,6 +183,7 @@ impl<'a> QueryRequest<'a> {
 			variables: None,
 			transaction: None,
 			cancel: None,
+			row_format: None,
 		}
 	}
 
@@ -208,6 +215,13 @@ impl<'a> QueryRequest<'a> {
 	/// [`Self::cancel`].
 	pub fn with_optional_cancel(mut self, cancel: Option<CancelHandle>) -> Self {
 		self.cancel = cancel;
+		self
+	}
+
+	/// Stream rows encoded in `format`, or as values when `None`. See
+	/// [`Self::row_format`].
+	pub fn with_row_format(mut self, format: Option<surrealdb_rpc::RowFormat>) -> Self {
+		self.row_format = format;
 		self
 	}
 }

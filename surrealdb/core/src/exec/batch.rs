@@ -28,6 +28,11 @@ use crate::val::Value;
 #[non_exhaustive]
 pub struct ValueBatch {
 	values: Vec<Value>,
+	/// Rows already encoded for the wire, which precede `values`. Only a
+	/// statement run with [`ExecOperator::execute_encoded`](super::ExecOperator::execute_encoded)
+	/// produces them, for the consumer that asked; [`Self::values`] and the
+	/// other row accessors do not see them.
+	encoded: Option<surrealdb_rpc::EncodedRows>,
 }
 
 impl ValueBatch {
@@ -35,7 +40,22 @@ impl ValueBatch {
 	pub(crate) fn new(values: Vec<Value>) -> Self {
 		Self {
 			values,
+			encoded: None,
 		}
+	}
+
+	/// A batch holding rows already encoded for the wire.
+	pub(crate) fn encoded(rows: surrealdb_rpc::EncodedRows) -> Self {
+		Self {
+			values: Vec::new(),
+			encoded: Some(rows),
+		}
+	}
+
+	/// The rows already encoded for the wire, which precede the batch's
+	/// values, taken out of it.
+	pub(crate) fn take_encoded(&mut self) -> Option<surrealdb_rpc::EncodedRows> {
+		self.encoded.take()
 	}
 
 	/// A batch holding no values.
@@ -45,12 +65,12 @@ impl ValueBatch {
 
 	/// The number of values in the batch.
 	pub(crate) fn len(&self) -> usize {
-		self.values.len()
+		self.values.len() + self.encoded.as_ref().map_or(0, surrealdb_rpc::EncodedRows::len)
 	}
 
 	/// Whether the batch carries no values.
 	pub(crate) fn is_empty(&self) -> bool {
-		self.values.is_empty()
+		self.len() == 0
 	}
 
 	/// The batch's rows.

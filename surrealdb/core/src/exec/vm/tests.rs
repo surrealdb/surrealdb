@@ -3827,6 +3827,80 @@ async fn throughput() {
 	}
 }
 
+/// Time the read shapes as a CBOR transport answers them, per row, best of
+/// seven runs: the response built from values (`execute`, then the public
+/// value's CBOR encoding) against the response written around rows the
+/// executor encoded (`run_streaming` with a row format). Run in release:
+/// `cargo test --release -p surrealdb-core --lib exec::vm::tests::wire_throughput
+/// -- --ignored --nocapture`; `ALLOC_SHAPES` narrows it by shape name.
+#[tokio::test]
+#[ignore = "a measurement, not a check"]
+async fn wire_throughput() {
+	use surrealdb_rpc::RowFormat;
+	use surrealdb_types::SurrealValue as _;
+
+	const ROWS: usize = 20_000;
+	let db = TestDb::new(&format!(
+		"
+		DEFINE TABLE t SCHEMALESS;
+		FOR $i IN 0..{ROWS} {{
+			CREATE type::record('t', $i) SET a = $i, b = $i % 7, s = 'row', lo = $i % 10,
+				hi = math::floor($i / 2), friend = type::record('t', ($i + 1) % {ROWS});
+		}};
+		"
+	))
+	.await;
+	let ds = db.datastore();
+	let session = TestDb::owner();
+	let only = std::env::var("ALLOC_SHAPES").ok();
+	for (name, sql) in [
+		("scan", "SELECT * FROM t"),
+		("filter", "SELECT * FROM t WHERE b = 3"),
+		("project3", "SELECT a, b, s FROM t"),
+		("order", "SELECT * FROM t ORDER BY a DESC"),
+		("order_limit10", "SELECT * FROM t ORDER BY a DESC LIMIT 10"),
+		("group_hi", "SELECT hi, count() AS c FROM t GROUP BY hi"),
+	] {
+		if only.as_deref().is_some_and(|o| !o.split(',').any(|s| s == name)) {
+			continue;
+		}
+		let mut values = std::time::Duration::MAX;
+		let mut encoded = std::time::Duration::MAX;
+		for _ in 0..7 {
+			let started = web_time::Instant::now();
+			let results = ds.execute(sql, &session, None).await.expect("runs");
+			let value = surrealdb_types::Value::Array(
+				results.into_iter().map(|r| r.into_value()).collect::<Vec<_>>().into(),
+			);
+			let bytes = crate::rpc::format::cbor::encode(value).expect("encodes");
+			std::hint::black_box(bytes);
+			values = values.min(started.elapsed());
+
+			let started = web_time::Instant::now();
+			let results = crate::rpc::format::encoded::execute_encoded(
+				ds,
+				sql,
+				&session,
+				None,
+				RowFormat::Cbor,
+			)
+			.await
+			.expect("runs");
+			let mut bytes = Vec::new();
+			crate::rpc::format::encoded::encode_results(RowFormat::Cbor, &results, &mut bytes)
+				.expect("encodes");
+			std::hint::black_box(bytes);
+			encoded = encoded.min(started.elapsed());
+		}
+		let per_row = |d: std::time::Duration| d.as_nanos() as f64 / ROWS as f64;
+		println!(
+			"{name:<14} values {:>8.1} ns/row   encoded {:>8.1} ns/row",
+			per_row(values),
+			per_row(encoded)
+		);
+	}
+}
+
 /// Time the read shapes of the allocation harness (`tests/vm_alloc.rs`) per
 /// row, best of seven runs. Run in release:
 /// `cargo test --release -p surrealdb-core --lib exec::vm::tests::alloc_shapes_throughput

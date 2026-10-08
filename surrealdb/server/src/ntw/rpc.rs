@@ -263,13 +263,17 @@ async fn post_handler(
 			// Execute the specified method only if the gate allows.
 			let res = match gate_result {
 				Ok(()) => {
-					RpcProtocol::execute(
-						rpc,
-						req.txn.map(Into::into),
-						session_id,
-						client_session,
-						method,
-						req.params,
+					// The shared transport answers this request in `fmt`.
+					surrealdb_core::rpc::with_response_format(
+						fmt.row_format(),
+						RpcProtocol::execute(
+							rpc,
+							req.txn.map(Into::into),
+							session_id,
+							client_session,
+							method,
+							req.params,
+						),
 					)
 					.await
 				}

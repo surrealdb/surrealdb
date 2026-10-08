@@ -22,6 +22,10 @@ use crate::exec::function::{AggregateFunction, FunctionRegistry};
 use crate::exec::operators::{compare_values, first_value_needed};
 use crate::val::{Object, Value};
 
+/// The most top-level fields a projection writes straight into an output
+/// frame; a wider one builds its object.
+const FLAT_FIELDS: usize = 16;
+
 /// How a row's run of a body ended.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Step {
@@ -249,6 +253,11 @@ pub(super) struct State {
 	/// reused by the rows that reach a sort next.
 	pub(super) spare_sort_keys: Vec<Vec<Value>>,
 	pub(super) spare_sort_bytes: Vec<Vec<u8>>,
+	/// For each sort, the stored bytes of the records it holds as
+	/// [`SortRow::Slab`]s, back to back: an unbounded sort keeps every row
+	/// it is handed, so its rows share one buffer rather than holding one
+	/// each.
+	pub(super) sort_slabs: Vec<Vec<u8>>,
 	pub(super) topk_cells:
 		Vec<Option<std::sync::Arc<crate::exec::topk_pushdown::TopKThresholdCell>>>,
 	/// For each sort of a brute-force KNN whose query vector is computed when
@@ -427,6 +436,11 @@ pub(super) struct State {
 	/// [`Step::NeedUnit`] before it is taken. Holds at most
 	/// [`super::closure::LINKED`].
 	pub(super) linked: Vec<(Option<u16>, super::program::ClosureDigest)>,
+	/// For a statement whose rows leave encoded for the wire, the frame they
+	/// are written into, in output order: a stored record emitted as it lies
+	/// is transcoded from its bytes, and [`Self::output`] is drained into the
+	/// frame ahead of it ([`Self::framed_output`]).
+	pub(super) row_frame: Option<super::row_frame::RowFrame>,
 }
 
 /// What the batches of a statement's region share with the statement: its
@@ -723,6 +737,7 @@ impl State {
 		let sorts = program.sorts.len();
 		self.paging = paging;
 		self.sorts.resize_with(sorts, Vec::new);
+		self.sort_slabs.resize_with(sorts, Vec::new);
 		self.sort_arrivals.resize(sorts, Arrivals::default());
 		self.topk_cells.resize(sorts, None);
 		self.knn_queries.resize(sorts, None);
@@ -760,6 +775,7 @@ impl State {
 			bulk,
 			spare_sort_keys,
 			spare_sort_bytes,
+			sort_slabs,
 			topk_cells,
 			knn_queries,
 			sort_spill,
@@ -815,6 +831,7 @@ impl State {
 			parent,
 			degrees,
 			linked,
+			row_frame,
 		} = self;
 		emptied(paging);
 		emptied(sorts);
@@ -822,6 +839,7 @@ impl State {
 		*bulk = None;
 		emptied(spare_sort_keys);
 		emptied(spare_sort_bytes);
+		emptied(sort_slabs);
 		emptied(topk_cells);
 		emptied(knn_queries);
 		emptied(sort_spill);
@@ -874,6 +892,7 @@ impl State {
 		*parent = None;
 		emptied(degrees);
 		emptied(linked);
+		*row_frame = None;
 	}
 
 	/// The descriptor of method `index`, `spec`'s, resolved from `registry` the
@@ -1063,6 +1082,7 @@ impl State {
 			bulk: None,
 			spare_sort_keys: Vec::new(),
 			spare_sort_bytes: Vec::new(),
+			sort_slabs: Vec::new(),
 			topk_cells: Vec::new(),
 			knn_queries: Vec::new(),
 			sort_spill: Vec::new(),
@@ -1118,6 +1138,7 @@ impl State {
 			parent: None,
 			degrees: Vec::new(),
 			linked: Vec::new(),
+			row_frame: None,
 		}
 	}
 
@@ -1449,6 +1470,24 @@ impl State {
 		value: &[u8],
 	) -> anyhow::Result<()> {
 		match self.pending.take() {
+			// A sort that keeps every row appends its records to its slab.
+			Some(Pending::Sort {
+				sort,
+				keys,
+			}) if program.sorts[sort as usize].keep.is_none() => {
+				let slab = &mut self.sort_slabs[sort as usize];
+				let start = slab.len();
+				slab.extend_from_slice(key);
+				slab.extend_from_slice(value);
+				self.sorts[sort as usize].push((
+					keys,
+					SortRow::Slab {
+						start,
+						split: start + key.len(),
+						end: slab.len(),
+					},
+				));
+			}
 			Some(Pending::Sort {
 				sort,
 				keys,
@@ -1467,6 +1506,15 @@ impl State {
 				));
 				self.keep_sorted(program, sort);
 			}
+			// An emitted record of a statement whose rows leave encoded is
+			// transcoded from its stored bytes, after the rows emitted before
+			// it.
+			Some(Pending::Emit) if self.row_frame.is_some() => {
+				self.drain_output_into_frame()?;
+				if let Some(frame) = &mut self.row_frame {
+					frame.push_stored(key, value)?;
+				}
+			}
 			pending => {
 				self.pending = pending;
 				let row = super::row::RevisionRow::new(key, value).record()?;
@@ -1474,6 +1522,32 @@ impl State {
 			}
 		}
 		Ok(())
+	}
+
+	/// Encode the rows [`Self::output`] holds into [`Self::frame`], in order.
+	fn drain_output_into_frame(&mut self) -> anyhow::Result<()> {
+		let Some(frame) = &mut self.row_frame else {
+			return Ok(());
+		};
+		for row in self.output.drain(..) {
+			frame.push_value(&row)?;
+		}
+		Ok(())
+	}
+
+	/// How many rows the statement holds for its output, encoded or not.
+	pub(super) fn output_len(&self) -> usize {
+		self.output.len() + self.row_frame.as_ref().map_or(0, super::row_frame::RowFrame::len)
+	}
+
+	/// For a statement whose rows leave encoded, every row it holds for its
+	/// output, encoded and taken; `None` for one whose rows leave as values.
+	pub(super) fn framed_output(&mut self) -> anyhow::Result<Option<surrealdb_rpc::EncodedRows>> {
+		if self.row_frame.is_none() {
+			return Ok(None);
+		}
+		self.drain_output_into_frame()?;
+		Ok(self.row_frame.as_mut().map(super::row_frame::RowFrame::take_encoded))
 	}
 
 	/// Hand a row the body left pending to where it goes: the output, or a
@@ -2804,6 +2878,36 @@ pub(super) fn run_row<'r>(
 			Instr::BuildObjectEmit {
 				fields,
 			} => {
+				// A statement whose rows leave encoded writes an object of
+				// top-level fields straight into its frame, from the values
+				// where they lie.
+				if state.row_frame.is_some() && fields.len() <= FLAT_FIELDS {
+					let mut flat: [(&str, Scalar<'_>); FLAT_FIELDS] =
+						std::array::from_fn(|_| ("", Scalar::None));
+					let mut written = true;
+					for (at, (path, value)) in fields.iter().enumerate() {
+						match program.paths[*path as usize].0.as_slice() {
+							[FieldPathPart::Field(name)] => {
+								flat[at] = (name.as_str(), read(regs, *value)?);
+							}
+							_ => {
+								written = false;
+								break;
+							}
+						}
+					}
+					let flat = &mut flat[..fields.len()];
+					flat.sort_unstable_by(|a, b| a.0.cmp(b.0));
+					// A key set twice keeps its last value, which the object
+					// built below answers.
+					if written && flat.windows(2).all(|w| w[0].0 != w[1].0) {
+						state.drain_output_into_frame()?;
+						if let Some(frame) = &mut state.row_frame {
+							frame.push_fields(flat)?;
+						}
+						return Ok(Step::Next);
+					}
+				}
 				let mut object = Value::Object(Object::default());
 				for (path, value) in fields.iter() {
 					let value = read_value(regs, *value)?;
@@ -3164,11 +3268,26 @@ pub(crate) enum SortRow {
 		bytes: Vec<u8>,
 		split: usize,
 	},
+	/// The record's key and value bytes in its sort's slab
+	/// ([`State::sort_slabs`]): the key at `start..split`, the value at
+	/// `split..end`.
+	Slab {
+		start: usize,
+		split: usize,
+		end: usize,
+	},
 }
 
 impl SortRow {
-	/// The row, decoded when it is held as stored bytes.
+	/// The row, decoded when it is held as stored bytes. A row held in a
+	/// slab is decoded with [`Self::into_value_in`].
 	pub(super) fn into_value(self) -> anyhow::Result<Value> {
+		self.into_value_in(&[])
+	}
+
+	/// The row, decoded when it is held as stored bytes, those of a slab row
+	/// read from `slab`, its sort's slab.
+	pub(super) fn into_value_in(self, slab: &[u8]) -> anyhow::Result<Value> {
 		match self {
 			SortRow::Value(value) => Ok(value),
 			SortRow::Stored {
@@ -3178,6 +3297,34 @@ impl SortRow {
 				let (key, value) = bytes.split_at(split);
 				super::row::RevisionRow::new(key, value).record()
 			}
+			SortRow::Slab {
+				start,
+				split,
+				end,
+			} => {
+				let (Some(key), Some(value)) = (slab.get(start..split), slab.get(split..end))
+				else {
+					anyhow::bail!("a sorted row outside its sort's slab");
+				};
+				super::row::RevisionRow::new(key, value).record()
+			}
+		}
+	}
+
+	/// The stored key and value bytes of a row held as stored bytes, those of
+	/// a slab row in `slab`; `None` for a row held as a value.
+	pub(super) fn stored<'a>(&'a self, slab: &'a [u8]) -> Option<(&'a [u8], &'a [u8])> {
+		match self {
+			SortRow::Value(_) => None,
+			SortRow::Stored {
+				bytes,
+				split,
+			} => Some(bytes.split_at(*split)),
+			SortRow::Slab {
+				start,
+				split,
+				end,
+			} => Some((slab.get(*start..*split)?, slab.get(*split..*end)?)),
 		}
 	}
 }

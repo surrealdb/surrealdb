@@ -161,7 +161,27 @@ impl ExecOperator for VmOperator {
 		output_shape(&self.program)
 	}
 
+	fn execute_encoded(
+		&self,
+		ctx: &ExecutionContext,
+		format: surrealdb_rpc::RowFormat,
+	) -> FlowResult<ValueBatchStream> {
+		self.run(ctx, Some(format))
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
+		self.run(ctx, None)
+	}
+}
+
+impl VmOperator {
+	/// Run the program under the statements its blocks serve, its own rows
+	/// encoded in `format` when given.
+	fn run(
+		&self,
+		ctx: &ExecutionContext,
+		format: Option<surrealdb_rpc::RowFormat>,
+	) -> FlowResult<ValueBatchStream> {
 		let serving;
 		let ctx = match &self.served {
 			Some(served) => {
@@ -170,7 +190,7 @@ impl ExecOperator for VmOperator {
 			}
 			None => ctx,
 		};
-		let stream = execute_program(&self.program, ctx)?;
+		let stream = execute_program_in(&self.program, ctx, None, format)?;
 		let stream: ValueBatchStream = match &self.held {
 			Some(held) => Box::pin(Holding {
 				stream,
@@ -225,14 +245,25 @@ pub(super) fn execute_program_reading(
 	ctx: &ExecutionContext,
 	reads: Option<u32>,
 ) -> FlowResult<ValueBatchStream> {
+	execute_program_in(program, ctx, reads, None)
+}
+
+/// [`execute_program_reading`], with the statement's own rows encoded in
+/// `format` when given (see [`ExecOperator::execute_encoded`]).
+pub(super) fn execute_program_in(
+	program: &Arc<Program>,
+	ctx: &ExecutionContext,
+	reads: Option<u32>,
+	format: Option<surrealdb_rpc::RowFormat>,
+) -> FlowResult<ValueBatchStream> {
 	// The run's table is set up first: a dispatch shares the reads it links.
 	let unitted = super::closure::with_units(program, ctx);
 	let ctx = unitted.as_ref().unwrap_or(ctx);
 	let dispatched = super::dispatch::with_dispatch(program, ctx);
 	let ctx = dispatched.as_ref().unwrap_or(ctx);
 	match &program.tail {
-		Some(_) => Ok(execute_tailed(program, ctx)),
-		None => execute_untailed(program, ctx, reads),
+		Some(_) => Ok(execute_tailed(program, ctx, format)),
+		None => execute_untailed(program, ctx, reads, format),
 	}
 }
 
@@ -244,7 +275,11 @@ pub(super) fn execute_program_reading(
 /// statement still running at its deadline fails with the timeout error; one
 /// that finishes in time is not failed by the clock. `ONLY` hands on the one
 /// row, `NONE` for none, and fails over more than one.
-fn execute_tailed(program: &Arc<Program>, ctx: &ExecutionContext) -> ValueBatchStream {
+fn execute_tailed(
+	program: &Arc<Program>,
+	ctx: &ExecutionContext,
+	format: Option<surrealdb_rpc::RowFormat>,
+) -> ValueBatchStream {
 	let program = Arc::clone(program);
 	let ctx = ctx.clone();
 	let stream = common::future::stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -285,7 +320,8 @@ fn execute_tailed(program: &Arc<Program>, ctx: &ExecutionContext) -> ValueBatchS
 			None => None,
 		};
 		let input = crate::exec::buffer_stream(
-			execute_untailed(&program, &ctx, None)?,
+			// `ONLY` reads its one row back, so it is never encoded.
+			execute_untailed(&program, &ctx, None, format.filter(|_| !tail.only))?,
 			program.access_mode,
 			cardinality_hint(&program),
 			ctx.root().ctx.config.exec.operator_buffer_size,
@@ -349,6 +385,7 @@ fn execute_untailed(
 	program: &Arc<Program>,
 	ctx: &ExecutionContext,
 	reads: Option<u32>,
+	format: Option<surrealdb_rpc::RowFormat>,
 ) -> FlowResult<ValueBatchStream> {
 	{
 		// The bound plan carries the statement's table and field permissions
@@ -373,8 +410,19 @@ fn execute_untailed(
 		let stream =
 			common::future::stream::try_async_stream(async move |mut stream: Yielder<_>| {
 				let mut yielder = Out::Stream(&mut stream);
+				// Rows leave encoded only for a program whose output is its
+				// own rows alone: one that runs block statements over its
+				// state gathers theirs there too.
+				let format = format.filter(|_| program.groups.is_empty());
 				let mut state =
-					out_of_line(|| run_untailed(&program, &ctx, &mut yielder, reads)).await?;
+					out_of_line(|| run_untailed(&program, &ctx, &mut yielder, reads, format))
+						.await?;
+				if let Some(rows) = state.framed_output().map_err(ControlFlow::Err)? {
+					if !rows.is_empty() {
+						stream.emit(ValueBatch::encoded(rows)).await;
+					}
+					return Ok(());
+				}
 				let rest = state.take_output();
 				if !rest.is_empty() {
 					stream.emit(ValueBatch::new(rest)).await;
@@ -397,6 +445,7 @@ async fn run_untailed(
 	ctx: &ExecutionContext,
 	yielder: &mut Out<'_, '_>,
 	reads: Option<u32>,
+	format: Option<surrealdb_rpc::RowFormat>,
 ) -> FlowResult<interp::PooledState> {
 	let mut paging = Vec::with_capacity(program.limits.len());
 	for spec in &program.limits {
@@ -418,6 +467,7 @@ async fn run_untailed(
 	// enclosing scope evaluated.
 	let version = out_of_line(|| resolve_version_stamp(ctx, None)).await?;
 	let mut state = State::new(program, paging, ctx.function_registry())?;
+	state.row_frame = format.map(super::row_frame::RowFrame::with_format);
 	// A statement spends no more than its own quantum before its first yield.
 	super::fuel::cap(super::fuel::quantum(ctx));
 	state.build_budget = ctx.root().ctx.config.exec.gql_max_join_build_rows;
@@ -637,6 +687,7 @@ async fn start_group(
 	for at in spec.sorts.clone() {
 		let at = at as usize;
 		state.sorts[at].clear();
+		state.sort_slabs[at].clear();
 		state.sort_arrivals[at] = Default::default();
 		if let Some(sort_spec) = program.sorts.get(at)
 			&& sort_spec.pushdown
@@ -885,9 +936,10 @@ pub(super) async fn run_pipelines(
 				#[cfg(all(storage, not(target_family = "wasm")))]
 				if let Some(runs) = state.sort_runs[*sort as usize].take() {
 					let held = std::mem::take(&mut state.sorts[*sort as usize]);
+					let slab = std::mem::take(&mut state.sort_slabs[*sort as usize]);
 					let held = super::sort::sorted(held, &spec.keys, usize::MAX, ctx).await?;
 					let mut merge =
-						runs.merge(held, spec.keys.clone()).map_err(ControlFlow::Err)?;
+						runs.merge(held, slab, spec.keys.clone()).map_err(ControlFlow::Err)?;
 					loop {
 						let most = ctx.root().ctx.config.exec.scan_batch_size.max(1);
 						let (next, chunk) = merge
@@ -909,19 +961,53 @@ pub(super) async fn run_pipelines(
 					continue;
 				}
 				let rows = std::mem::take(&mut state.sorts[*sort as usize]);
+				let slab = std::mem::take(&mut state.sort_slabs[*sort as usize]);
 				let keep = spec.keep.unwrap_or(usize::MAX);
 				let rows = if spec.random {
 					out_of_line(|| super::sort::shuffled(rows, keep, ctx)).await?
 				} else {
 					out_of_line(|| super::sort::sorted(rows, &spec.keys, keep, ctx)).await?
 				};
+				// A statement whose rows leave encoded, and whose body after the
+				// sort hands the host no step, runs a row held as stored bytes
+				// on those bytes, a unit each, charged a stretch at a time.
+				if pipeline.stored_rows && state.row_frame.is_some() && spec.knn_slot.is_none() {
+					let mut stretch = super::fuel::left().clamp(1, 256);
+					let mut taken = 0;
+					for (keys, row) in rows {
+						state.sorted_keys = keys;
+						let stop = match row.stored(&slab) {
+							Some((key, value)) => {
+								in_place_row(program, pipeline, key, value, state)
+									.map_err(ControlFlow::Err)?
+							}
+							None => {
+								let row = row.into_value().map_err(ControlFlow::Err)?;
+								out_of_line(|| run_value_row(program, pipeline, row, state, ctx))
+									.await? == Ended::Stop
+							}
+						};
+						if stop {
+							break;
+						}
+						taken += 1;
+						if taken == stretch {
+							super::fuel::tick(ctx, taken).await?;
+							stretch = super::fuel::left().clamp(1, 256);
+							taken = 0;
+						}
+						flush(state, yielder, flush_at).await?;
+					}
+					super::fuel::tick(ctx, taken).await?;
+					continue;
+				}
 				// A row held as stored bytes is decoded as the sort hands it
 				// on, a unit each, charged a stretch at a time.
 				let mut decoded = Vec::with_capacity(rows.len());
 				let mut stretch = super::fuel::left().clamp(1, 256);
 				let mut taken = 0;
 				for (keys, row) in rows {
-					decoded.push((keys, row.into_value().map_err(ControlFlow::Err)?));
+					decoded.push((keys, row.into_value_in(&slab).map_err(ControlFlow::Err)?));
 					taken += 1;
 					if taken == stretch {
 						super::fuel::tick(ctx, taken).await?;
@@ -1973,133 +2059,7 @@ async fn scan_in_place(
 				{
 					return Ok(next);
 				}
-				let row = RevisionRow::new(key, value);
-				// A body that holds few registers gets a register file of its
-				// size: the file is made and dropped for every record.
-				let step = if pipeline.registers <= SMALL_REGISTERS {
-					let mut regs: [Scalar<'_>; SMALL_REGISTERS] =
-						std::array::from_fn(|_| Scalar::None);
-					interp::run_row(
-						program,
-						pipeline,
-						&row,
-						&mut regs[..pipeline.registers],
-						state,
-						0,
-					)
-				} else {
-					let mut stack;
-					let mut spilled;
-					let regs: &mut [Scalar<'_>] = if pipeline.registers <= STACK_REGISTERS {
-						stack =
-							std::array::from_fn::<Scalar<'_>, STACK_REGISTERS, _>(|_| Scalar::None);
-						&mut stack[..pipeline.registers]
-					} else {
-						spilled = (0..pipeline.registers).map(|_| Scalar::None).collect::<Vec<_>>();
-						&mut spilled[..]
-					};
-					interp::run_row(program, pipeline, &row, regs, state, 0)
-				};
-				let settled = match step {
-					Ok(Step::Next) => Ok(false),
-					Ok(Step::Stop) => Ok(true),
-					Ok(Step::WriteProjection {
-						..
-					})
-					| Ok(Step::LandRow {
-						..
-					})
-					| Ok(Step::BindRow {
-						..
-					})
-					| Ok(Step::Write {
-						..
-					})
-					| Ok(Step::Store {
-						..
-					})
-					| Ok(Step::Block {
-						..
-					})
-					| Ok(Step::Param {
-						..
-					})
-					| Ok(Step::CallAllowed {
-						..
-					})
-					| Ok(Step::Access {
-						..
-					})
-					| Ok(Step::Each {
-						..
-					})
-					| Ok(Step::Fetch {
-						..
-					})
-					| Ok(Step::FetchRow {
-						..
-					})
-					| Ok(Step::Call {
-						..
-					})
-					| Ok(Step::IndexFn {
-						..
-					})
-					| Ok(Step::Matches {
-						..
-					})
-					| Ok(Step::Method {
-						..
-					})
-					| Ok(Step::Subquery {
-						..
-					})
-					| Ok(Step::Lookup {
-						..
-					})
-					| Ok(Step::Destructure {
-						..
-					})
-					| Ok(Step::JudgeCopy {
-						..
-					})
-					| Ok(Step::Omit {
-						..
-					})
-					| Ok(Step::Signal {
-						..
-					})
-					| Ok(Step::Recurse {
-						..
-					})
-					| Ok(Step::Closure {
-						..
-					})
-					| Ok(Step::NeedUnit {
-						..
-					})
-					| Ok(Step::Function {
-						..
-					})
-					| Ok(Step::External {
-						..
-					})
-					| Ok(Step::Degree {
-						..
-					}) => Err(anyhow::anyhow!("an in-place pipeline evaluated an expression")),
-					Ok(Step::Yield {
-						..
-					}) => Err(anyhow::anyhow!(
-						"an in-place pipeline yielded inside the storage cursor"
-					)),
-					Err(e) => Err(e),
-				}
-				.and_then(|stop| {
-					if state.pending.is_some() {
-						state.settle_stored(program, key, value)?;
-					}
-					Ok(stop)
-				});
+				let settled = in_place_row(program, pipeline, key, value, state);
 				match settled {
 					Ok(false) => Ok(next),
 					Ok(true) => {
@@ -2131,6 +2091,136 @@ async fn scan_in_place(
 			out_of_line(|| super::fuel::yield_point(ctx)).await?;
 		}
 	}
+}
+
+/// Run `pipeline`'s body over the stored record `key` names, whose encoded
+/// value is `value`, in place: the body hands the host no step (its pipeline
+/// is [`Pipeline::in_place`] or [`Pipeline::stored_rows`]), and the row it
+/// leaves pending is settled from the stored bytes. Answers whether the
+/// pipeline takes no more rows.
+fn in_place_row(
+	program: &Program,
+	pipeline: &Pipeline,
+	key: &[u8],
+	value: &[u8],
+	state: &mut State,
+) -> anyhow::Result<bool> {
+	let row = RevisionRow::new(key, value);
+	// A body that holds few registers gets a register file of its
+	// size: the file is made and dropped for every record.
+	let step = if pipeline.registers <= SMALL_REGISTERS {
+		let mut regs: [Scalar<'_>; SMALL_REGISTERS] = std::array::from_fn(|_| Scalar::None);
+		interp::run_row(program, pipeline, &row, &mut regs[..pipeline.registers], state, 0)
+	} else {
+		let mut stack;
+		let mut spilled;
+		let regs: &mut [Scalar<'_>] = if pipeline.registers <= STACK_REGISTERS {
+			stack = std::array::from_fn::<Scalar<'_>, STACK_REGISTERS, _>(|_| Scalar::None);
+			&mut stack[..pipeline.registers]
+		} else {
+			spilled = (0..pipeline.registers).map(|_| Scalar::None).collect::<Vec<_>>();
+			&mut spilled[..]
+		};
+		interp::run_row(program, pipeline, &row, regs, state, 0)
+	};
+	match step {
+		Ok(Step::Next) => Ok(false),
+		Ok(Step::Stop) => Ok(true),
+		Ok(Step::WriteProjection {
+			..
+		})
+		| Ok(Step::LandRow {
+			..
+		})
+		| Ok(Step::BindRow {
+			..
+		})
+		| Ok(Step::Write {
+			..
+		})
+		| Ok(Step::Store {
+			..
+		})
+		| Ok(Step::Block {
+			..
+		})
+		| Ok(Step::Param {
+			..
+		})
+		| Ok(Step::CallAllowed {
+			..
+		})
+		| Ok(Step::Access {
+			..
+		})
+		| Ok(Step::Each {
+			..
+		})
+		| Ok(Step::Fetch {
+			..
+		})
+		| Ok(Step::FetchRow {
+			..
+		})
+		| Ok(Step::Call {
+			..
+		})
+		| Ok(Step::IndexFn {
+			..
+		})
+		| Ok(Step::Matches {
+			..
+		})
+		| Ok(Step::Method {
+			..
+		})
+		| Ok(Step::Subquery {
+			..
+		})
+		| Ok(Step::Lookup {
+			..
+		})
+		| Ok(Step::Destructure {
+			..
+		})
+		| Ok(Step::JudgeCopy {
+			..
+		})
+		| Ok(Step::Omit {
+			..
+		})
+		| Ok(Step::Signal {
+			..
+		})
+		| Ok(Step::Recurse {
+			..
+		})
+		| Ok(Step::Closure {
+			..
+		})
+		| Ok(Step::NeedUnit {
+			..
+		})
+		| Ok(Step::Function {
+			..
+		})
+		| Ok(Step::External {
+			..
+		})
+		| Ok(Step::Degree {
+			..
+		}) => Err(anyhow::anyhow!("an in-place pipeline evaluated an expression")),
+		Ok(Step::Yield {
+			..
+		}) => Err(anyhow::anyhow!("an in-place pipeline yielded inside the storage cursor")),
+		Err(e) => Err(e),
+	}
+	.and_then(|stop| {
+		if state.pending.is_some() {
+			state.settle_stored(program, key, value)?;
+		}
+		Ok(stop)
+	})
 }
 
 /// Run a pipeline over rows held in memory. Each row spends a unit of fuel
@@ -4222,9 +4312,12 @@ pub(super) async fn flush(
 	if let Some(write) = &state.write {
 		write.judge_only()?;
 	}
-	if state.output.len() >= flush_at {
+	if state.output_len() >= flush_at {
 		match yielder {
-			Out::Stream(yielder) => yielder.emit(ValueBatch::new(state.take_output())).await,
+			Out::Stream(yielder) => match state.framed_output().map_err(ControlFlow::Err)? {
+				Some(rows) => yielder.emit(ValueBatch::encoded(rows)).await,
+				None => yielder.emit(ValueBatch::new(state.take_output())).await,
+			},
 			Out::Gather(rows) => rows.append(&mut state.output),
 		}
 	}
@@ -4272,11 +4365,12 @@ async fn spill_sorts(state: &mut State) -> FlowResult<()> {
 		}
 		let keys = keys.clone();
 		let rows = std::mem::take(&mut state.sorts[at]);
+		let slab = std::mem::take(&mut state.sort_slabs[at]);
 		let runs = match &mut state.sort_runs[at] {
 			Some(runs) => runs,
 			slot => slot.insert(super::spill::Runs::new(&dir).map_err(ControlFlow::Err)?),
 		};
-		runs.spill(rows, keys).await.map_err(ControlFlow::Err)?;
+		runs.spill(rows, slab, keys).await.map_err(ControlFlow::Err)?;
 	}
 	Ok(())
 }
@@ -4752,7 +4846,7 @@ pub(super) fn gather_program(
 				validate_record_user_access(ctx.database()?)?;
 			}
 			let mut out = Out::Gather(Vec::new());
-			let mut state = run_untailed(&program, ctx, &mut out, None).await?;
+			let mut state = run_untailed(&program, ctx, &mut out, None, None).await?;
 			let mut values = match out {
 				Out::Gather(values) => values,
 				Out::Stream(_) => Vec::new(),

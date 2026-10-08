@@ -10,8 +10,9 @@ use axum_extra::TypedHeader;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use surrealdb_core::dbs::Session;
+use surrealdb_rpc::RowFormat;
 use surrealdb_rpc::capabilities::RouteTarget;
-use surrealdb_types::{Array, SurrealValue, Value, Variables};
+use surrealdb_types::{SurrealValue, Variables};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -59,28 +60,46 @@ async fn post_handler(
 	let sql = bytes_to_utf8(&sql).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Execute the received sql query under the configured wall-clock query
 	// timeout (default off), reusing `--query-timeout` as the guard duration.
+	// JSON and CBOR answers are written around rows the executor encoded in
+	// that format, so no public value is built for a row.
+	let encoded = match output.as_deref() {
+		None | Some(Accept::ApplicationJson) => Some(RowFormat::Json),
+		Some(Accept::ApplicationCbor) => Some(RowFormat::Cbor),
+		_ => None,
+	};
+	if let Some(format) = encoded {
+		let run = surrealdb_core::rpc::format::encoded::execute_encoded(
+			db,
+			sql,
+			&session,
+			Some(vars),
+			format,
+		);
+		return match with_query_timeout(db.query_timeout(), run).await {
+			Ok(res) => {
+				let mut bytes = Vec::new();
+				match surrealdb_core::rpc::format::encoded::encode_results(format, &res, &mut bytes)
+				{
+					Ok(()) => Ok(match format {
+						RowFormat::Json => Output::Json(bytes),
+						RowFormat::Cbor => Output::Cbor(bytes),
+					}),
+					Err(_) => Ok(Output::Fail),
+				}
+			}
+			Err(err) => Err(ResponseError(err.into())),
+		};
+	}
 	match with_query_timeout(db.query_timeout(), db.execute(sql, &session, Some(vars))).await {
 		Ok(res) => match output.as_deref() {
-			// Simple serialization
-			None | Some(Accept::ApplicationJson) => {
-				let v = Value::Array(Array::from(
-					res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
-				));
-				Ok(Output::json_value(&v))
-			}
-			Some(Accept::ApplicationCbor) => {
-				let v = Value::Array(Array::from(
-					res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
-				));
-				Ok(Output::cbor(v))
-			}
 			// Internal serialization
 			Some(Accept::ApplicationFlatbuffers) => {
 				let v = res.into_value();
 				Ok(Output::flatbuffers(&v))
 			}
-			// An unsupported content-type was requested
-			Some(_) => Err(NetError::InvalidType.into()),
+			// An unsupported content-type was requested; JSON and CBOR are
+			// answered above.
+			_ => Err(NetError::InvalidType.into()),
 		},
 		// There was an error when executing the query
 		Err(err) => Err(ResponseError(err.into())),
@@ -135,20 +154,33 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 			let db = &state.datastore;
 			// Execute the received sql query under the configured wall-clock
 			// query timeout (default off).
-			let _ = match with_query_timeout(db.query_timeout(), db.execute(sql, &session, None))
-				.await
-			{
-				// Convert the response to JSON
-				Ok(v) => match surrealdb_core::rpc::format::json::encode_str(Value::Array(
-					Array::from(v.into_iter().map(|x| x.into_value()).collect::<Vec<_>>()),
-				)) {
-					// Send the JSON response to the client
-					Ok(v) => tx.send(Message::Text(v.into())).await,
-					// There was an error converting to JSON
-					Err(e) => {
-						tx.send(Message::Text(format!("Failed to parse JSON: {e}",).into())).await
+			let run = surrealdb_core::rpc::format::encoded::execute_encoded(
+				db,
+				sql,
+				&session,
+				None,
+				RowFormat::Json,
+			);
+			let _ = match with_query_timeout(db.query_timeout(), run).await {
+				// Write the JSON response around the encoded rows
+				Ok(v) => {
+					let mut bytes = Vec::new();
+					match surrealdb_core::rpc::format::encoded::encode_results(
+						RowFormat::Json,
+						&v,
+						&mut bytes,
+					)
+					.and_then(|()| Ok(String::from_utf8(bytes)?))
+					{
+						// Send the JSON response to the client
+						Ok(v) => tx.send(Message::Text(v.into())).await,
+						// There was an error converting to JSON
+						Err(e) => {
+							tx.send(Message::Text(format!("Failed to parse JSON: {e}",).into()))
+								.await
+						}
 					}
-				},
+				}
 				// There was an error when executing the query
 				Err(e) => tx.send(Message::Text(e.to_string().into())).await,
 			};

@@ -536,6 +536,13 @@ where
 		return HandleResult::Ok;
 	};
 
+	// Encoded results are read as the values they encode.
+	let result = result.map(|result| match result {
+		DbResult::Encoded(results) => {
+			DbResult::Query(results.into_iter().map(|result| result.into_query_result()).collect())
+		}
+		other => other,
+	});
 	match result {
 		Ok(DbResult::Query(results)) => {
 			if let Some(command) = pending.command {
@@ -547,6 +554,9 @@ where
 		}
 		Ok(DbResult::Live(_)) => {
 			tracing::error!("Unexpected live query result in response");
+		}
+		Ok(DbResult::Encoded(_)) => {
+			tracing::error!("Unexpected encoded query result in response");
 		}
 		Ok(DbResult::Other(mut value)) => {
 			if let Some(command) = pending.command {

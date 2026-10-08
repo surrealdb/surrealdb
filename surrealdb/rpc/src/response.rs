@@ -44,6 +44,12 @@ pub enum DbResult {
 	Other(PublicValue),
 	/// The query methods, `query` and `query_with` return a `Vec` of responses
 	Query(Vec<QueryResult>),
+	/// A query's responses with their rows already encoded for the wire, for
+	/// a transport that asked for them in its format. Its value is that of
+	/// [`Self::Query`] over the decoded rows. Never deserialized: it is
+	/// produced only where the rows are encoded.
+	#[serde(skip_deserializing)]
+	Encoded(Vec<crate::EncodedQueryResult>),
 	/// Live queries return a notification
 	Live(PublicNotification),
 	// Add new variants here
@@ -68,6 +74,11 @@ impl SurrealValue for DbResult {
 		match self {
 			DbResult::Query(v) => {
 				let converted: Vec<PublicValue> = v.into_iter().map(|x| x.into_value()).collect();
+				PublicValue::Array(PublicArray::from(converted))
+			}
+			DbResult::Encoded(v) => {
+				let converted: Vec<PublicValue> =
+					v.into_iter().map(|x| x.into_query_result().into_value()).collect();
 				PublicValue::Array(PublicArray::from(converted))
 			}
 			DbResult::Live(v) => PublicValue::Object(object! {

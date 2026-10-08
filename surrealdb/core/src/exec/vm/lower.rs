@@ -2556,6 +2556,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	fn push_write_pipeline(&mut self, source: Source) -> Lowered<()> {
 		self.pipelines.push(Pipeline {
 			in_place: false,
+			stored_rows: false,
 			enforce: None,
 			source,
 			code: std::mem::take(&mut self.code),
@@ -3123,6 +3124,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			.map_err(|_| NotCovered::internal("more host pipelines than a program holds"))?;
 		self.host_code.push(Pipeline {
 			in_place: false,
+			stored_rows: false,
 			enforce: None,
 			source: Source::Once,
 			code,
@@ -4090,12 +4092,13 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		// the storage cursor cannot yield there, so it holds no backward jump,
 		// which is where the interpreter yields within a row: its cursor
 		// charges each record's unit itself and yields between chunks.
-		let in_place =
-			source.reads_storage()
-				&& !self.uses_eval
+		let host_free =
+			!self.uses_eval
 				&& !writes && !splits
 				&& !rebound && enforce.is_none()
 				&& !jumps_back(&self.code);
+		let in_place = source.reads_storage() && host_free;
+		let stored_rows = matches!(source, Source::Sorted { .. }) && host_free;
 		let region = !in_place
 			&& enforce.is_none()
 			&& !writes
@@ -4117,6 +4120,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			};
 		self.pipelines.push(Pipeline {
 			in_place,
+			stored_rows,
 			enforce,
 			source,
 			code: std::mem::take(&mut self.code),
@@ -7600,6 +7604,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		self.emit(Instr::EndRow);
 		Ok(Pipeline {
 			in_place: false,
+			stored_rows: false,
 			enforce: None,
 			source: Source::Once,
 			code: std::mem::take(&mut self.code),
@@ -7630,6 +7635,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		self.emit(Instr::EndRow);
 		Ok(Pipeline {
 			in_place: false,
+			stored_rows: false,
 			enforce: None,
 			source: Source::Once,
 			code: std::mem::take(&mut self.code),

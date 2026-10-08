@@ -81,6 +81,10 @@ async fn streamed(ds: &Arc<Datastore>, sql: &str) -> Result<Vec<QueryResult>, St
 					values,
 					..
 				} => statement.values.extend(values),
+				QueryStreamItem::Frame {
+					rows,
+					..
+				} => statement.values.extend(rows.to_values().expect("rows decode")),
 				QueryStreamItem::Value {
 					value,
 					..

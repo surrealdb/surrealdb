@@ -4795,6 +4795,10 @@ pub(crate) struct Pipeline {
 	/// Whether the body holds no instruction that hands back to the host, so
 	/// a scan of a range runs inside the storage cursor, on the stored bytes.
 	pub(super) in_place: bool,
+	/// Whether the body holds no instruction that hands back to the host and
+	/// reads rows a sort hands on, so a sorted record held as its stored bytes
+	/// runs on those bytes, as [`Self::in_place`] does inside a cursor.
+	pub(super) stored_rows: bool,
 	/// What each row the source yields is put through before the body runs,
 	/// where the body holds none of it. Such a pipeline runs on values, never
 	/// on stored bytes or as a region.

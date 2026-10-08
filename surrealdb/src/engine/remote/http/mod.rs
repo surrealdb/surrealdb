@@ -655,6 +655,9 @@ async fn send_request(
 
 	match response.result? {
 		DbResult::Query(results) => Ok(results),
+		DbResult::Encoded(results) => {
+			Ok(results.into_iter().map(|result| result.into_query_result()).collect())
+		}
 		DbResult::Other(value) => {
 			Ok(vec![QueryResultBuilder::started_now().finish_with_result(Ok(value))])
 		}

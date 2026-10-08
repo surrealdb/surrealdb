@@ -55,6 +55,7 @@ mod interp;
 mod knn;
 mod leaf;
 pub(crate) mod row_frame;
+mod row_json;
 pub(crate) use subroutine::Subroutine;
 pub(crate) use write::notify_at;
 #[cfg(test)]

@@ -18,7 +18,7 @@ use std::time::Duration;
 use surrealdb_types::{Error as TypesError, Value};
 use uuid::Uuid;
 
-use crate::{QueryStreamFrame, QueryStreamItem, QueryType};
+use crate::{EncodedRows, QueryStreamFrame, QueryStreamItem, QueryType};
 
 /// The first rows frame a statement sends, in records.
 ///
@@ -62,6 +62,21 @@ pub fn live_queries_disowned(ids: &[Uuid]) -> TypesError {
 	))
 }
 
+/// A frame [`StreamFrames`] hands out: a frame of values, or a `rows` frame
+/// whose rows are already encoded for the wire.
+///
+/// The encoded form is produced only by a [`StreamFrames`] built with
+/// [`StreamFrames::keeping_encoded_rows`]; its rows are the rows a
+/// [`QueryStreamFrame::Rows`] at the same point would hold, encoded.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OutgoingFrame {
+	Frame(QueryStreamFrame),
+	Rows {
+		index: usize,
+		rows: EncodedRows,
+	},
+}
+
 /// Turns a streaming execution's items into wire frames.
 ///
 /// Holds one statement's rows back only until they fill a frame, so the wire
@@ -99,6 +114,127 @@ pub struct StreamFrames {
 	/// produced it, so settlement can tell an id the client learned from one it
 	/// never did.
 	live_queries: Vec<(usize, Uuid)>,
+	/// Whether rows that arrive encoded leave encoded
+	/// ([`OutgoingFrame::Rows`]) rather than decoded into values.
+	keep_encoded: bool,
+}
+
+/// One statement's rows awaiting framing, held as they arrived.
+///
+/// A statement's rows normally arrive all as values or all encoded. If both
+/// kinds arrive, the rows held so far are decoded and the statement continues
+/// on values, so its frames keep the rows' order.
+enum PendingRows {
+	Values(VecDeque<Value>),
+	Encoded(EncodedQueue),
+}
+
+/// Encoded rows awaiting framing: the chunks as they arrived, and how many
+/// rows of the front chunk are already framed. A frame copies its rows out of
+/// the chunks once, so framing a chunk costs time linear in its size.
+#[derive(Default)]
+struct EncodedQueue {
+	chunks: VecDeque<EncodedRows>,
+	taken: usize,
+	len: usize,
+}
+
+impl EncodedQueue {
+	fn push(&mut self, rows: EncodedRows) {
+		if rows.is_empty() {
+			return;
+		}
+		self.len += rows.len();
+		self.chunks.push_back(rows);
+	}
+
+	/// The next `n` rows, `n` at most [`Self::len`] and not zero.
+	fn take(&mut self, n: usize) -> Result<EncodedRows, TypesError> {
+		let mut out = self.chunks.front().expect("rows are queued").empty_like();
+		let mut left = n;
+		while left > 0 {
+			let front = self.chunks.front().expect("rows are queued");
+			let to = (self.taken + left).min(front.len());
+			out.extend_range(front, self.taken, to)?;
+			left -= to - self.taken;
+			if to == front.len() {
+				self.chunks.pop_front();
+				self.taken = 0;
+			} else {
+				self.taken = to;
+			}
+		}
+		self.len -= n;
+		Ok(out)
+	}
+
+	/// Every queued row, decoded.
+	fn into_values(self) -> Result<VecDeque<Value>, TypesError> {
+		let mut values = VecDeque::with_capacity(self.len);
+		for (at, chunk) in self.chunks.into_iter().enumerate() {
+			let skip = if at == 0 {
+				self.taken
+			} else {
+				0
+			};
+			values.extend(chunk.to_values()?.into_iter().skip(skip));
+		}
+		Ok(values)
+	}
+}
+
+impl PendingRows {
+	fn len(&self) -> usize {
+		match self {
+			Self::Values(values) => values.len(),
+			Self::Encoded(queue) => queue.len,
+		}
+	}
+
+	fn clear(&mut self) {
+		*self = Self::Values(VecDeque::new());
+	}
+
+	/// Queue `values`, after any rows already queued.
+	fn push_values(&mut self, values: Vec<Value>) -> Result<(), TypesError> {
+		if let Self::Encoded(queue) = self {
+			*self = Self::Values(std::mem::take(queue).into_values()?);
+		}
+		match self {
+			Self::Values(queue) => queue.extend(values),
+			Self::Encoded(_) => unreachable!("encoded rows were just decoded"),
+		}
+		Ok(())
+	}
+
+	/// Queue `rows` encoded, after any rows already queued; decoded instead
+	/// when values are already queued.
+	fn push_encoded(&mut self, rows: EncodedRows) -> Result<(), TypesError> {
+		match self {
+			Self::Encoded(queue) => queue.push(rows),
+			Self::Values(values) if values.is_empty() => {
+				let mut queue = EncodedQueue::default();
+				queue.push(rows);
+				*self = Self::Encoded(queue);
+			}
+			Self::Values(values) => values.extend(rows.to_values()?),
+		}
+		Ok(())
+	}
+
+	/// The next `n` rows as statement `index`'s frame.
+	fn take(&mut self, index: usize, n: usize) -> Result<OutgoingFrame, TypesError> {
+		match self {
+			Self::Values(values) => Ok(OutgoingFrame::Frame(QueryStreamFrame::Rows {
+				index,
+				values: values.drain(..n).collect(),
+			})),
+			Self::Encoded(queue) => Ok(OutgoingFrame::Rows {
+				index,
+				rows: queue.take(n)?,
+			}),
+		}
+	}
 }
 
 /// One statement's frames on their way to the wire.
@@ -110,7 +246,7 @@ struct PendingStatement {
 	/// off the front of a `VecDeque` leaves the rows behind it where they are,
 	/// where draining the front of a `Vec` shifts every one of them down and
 	/// makes framing a whole result quadratic in its size.
-	values: VecDeque<Value>,
+	rows: PendingRows,
 	/// A single value awaiting its own frame. Emitted before anything else the
 	/// statement produces.
 	single: Option<Value>,
@@ -136,7 +272,7 @@ struct PendingStatement {
 impl Default for PendingStatement {
 	fn default() -> Self {
 		Self {
-			values: VecDeque::new(),
+			rows: PendingRows::Values(VecDeque::new()),
 			single: None,
 			target: QUERY_FIRST_BATCH_RECORDS,
 			is_single: false,
@@ -152,7 +288,9 @@ const _: () = {
 	// observable about the output can catch the swap, while each frame would
 	// shift the rest of the statement's rows down to make room.
 	fn _rows_wait_in_a_deque(pending: &PendingStatement) {
-		let _: &VecDeque<Value> = &pending.values;
+		if let PendingRows::Values(values) = &pending.rows {
+			let _: &VecDeque<Value> = values;
+		}
 	}
 };
 
@@ -170,6 +308,18 @@ impl StreamFrames {
 			terminated: HashSet::new(),
 			delivered: HashSet::new(),
 			live_queries: Vec::new(),
+			keep_encoded: false,
+		}
+	}
+
+	/// Frames whose rows leave as they arrived: rows that arrive encoded go
+	/// out as [`OutgoingFrame::Rows`], read with [`Self::pop_outgoing`], for a
+	/// transport whose wire format they are encoded in. [`Self::new`] decodes
+	/// them into values as they arrive.
+	pub fn keeping_encoded_rows() -> Self {
+		Self {
+			keep_encoded: true,
+			..Self::new()
 		}
 	}
 
@@ -206,53 +356,97 @@ impl StreamFrames {
 		self.pending.entry(index).or_default()
 	}
 
-	/// The next frame, or `None` when nothing is ready.
+	/// The next frame, or `None` when nothing is ready, with any encoded rows
+	/// decoded into values.
 	///
 	/// At most one frame is built per call, so a statement's rows reach the wire
 	/// a frame at a time and the caller's send is what paces production.
 	pub fn pop(&mut self) -> Option<QueryStreamFrame> {
-		for position in 0..self.order.len() {
-			let index = self.order[position];
-			let Some(entry) = self.pending.get_mut(&index) else {
-				continue;
-			};
-			// A single value is not a list, so it is not batched: one frame
-			// carries it whole.
-			if let Some(value) = entry.single.take() {
-				return Some(QueryStreamFrame::Value {
+		loop {
+			match self.pop_outgoing()? {
+				OutgoingFrame::Frame(frame) => return Some(frame),
+				OutgoingFrame::Rows {
 					index,
-					value,
-				});
-			}
-			// A full frame's worth while the statement is open; whatever is
-			// left once its outcome is known.
-			let closing = entry.closing.is_some();
-			if entry.values.len() >= entry.target || (closing && !entry.values.is_empty()) {
-				let take = entry.target.min(entry.values.len());
-				let values: Vec<Value> = entry.values.drain(..take).collect();
-				// Ramp toward the maximum, so the small frames that make the
-				// first row arrive early do not become a per-frame cost on a
-				// long result.
-				entry.target = (entry.target * 2).min(QUERY_BATCH_RECORDS);
-				return Some(QueryStreamFrame::Rows {
-					index,
-					values,
-				});
-			}
-			if let Some((time, query_type, error)) = entry.closing.take() {
-				let single = error.is_none() && entry.is_single;
-				self.pending.remove(&index);
-				self.order.remove(position);
-				return Some(QueryStreamFrame::Finished {
-					index,
-					time,
-					query_type,
-					single,
-					error,
-				});
+					rows,
+				} => match rows.to_values() {
+					Ok(values) => {
+						return Some(QueryStreamFrame::Rows {
+							index,
+							values,
+						});
+					}
+					// Its rows were never delivered, so the retraction holds.
+					Err(error) => {
+						self.retract(index, error);
+					}
+				},
 			}
 		}
-		None
+	}
+
+	/// The next frame, or `None` when nothing is ready; rows that arrived
+	/// encoded go out encoded when this was built
+	/// [`keeping_encoded_rows`](Self::keeping_encoded_rows).
+	///
+	/// At most one frame is built per call, as with [`Self::pop`].
+	pub fn pop_outgoing(&mut self) -> Option<OutgoingFrame> {
+		let mut failed = None;
+		let frame = 'found: {
+			for position in 0..self.order.len() {
+				let index = self.order[position];
+				let Some(entry) = self.pending.get_mut(&index) else {
+					continue;
+				};
+				// A single value is not a list, so it is not batched: one frame
+				// carries it whole.
+				if let Some(value) = entry.single.take() {
+					break 'found Some(OutgoingFrame::Frame(QueryStreamFrame::Value {
+						index,
+						value,
+					}));
+				}
+				// A full frame's worth while the statement is open; whatever is
+				// left once its outcome is known.
+				let closing = entry.closing.is_some();
+				let queued = entry.rows.len();
+				if queued >= entry.target || (closing && queued > 0) {
+					let take = entry.target.min(queued);
+					// Ramp toward the maximum, so the small frames that make the
+					// first row arrive early do not become a per-frame cost on a
+					// long result.
+					entry.target = (entry.target * 2).min(QUERY_BATCH_RECORDS);
+					match entry.rows.take(index, take) {
+						Ok(frame) => break 'found Some(frame),
+						Err(error) => {
+							failed = Some((index, error));
+							break 'found None;
+						}
+					}
+				}
+				if let Some((time, query_type, error)) = entry.closing.take() {
+					let single = error.is_none() && entry.is_single;
+					self.pending.remove(&index);
+					self.order.remove(position);
+					break 'found Some(OutgoingFrame::Frame(QueryStreamFrame::Finished {
+						index,
+						time,
+						query_type,
+						single,
+						error,
+					}));
+				}
+			}
+			None
+		};
+		match failed {
+			// Rows that cannot be framed fail their statement, which has not
+			// finished: its terminal frame is still queued behind them.
+			Some((index, error)) => {
+				self.retract(index, error);
+				self.pop_outgoing()
+			}
+			None => frame,
+		}
 	}
 
 	/// Fold one item into what its statement owes the wire.
@@ -268,7 +462,26 @@ impl StreamFrames {
 			QueryStreamItem::Rows {
 				index,
 				values,
-			} => self.entry(index).values.extend(values),
+			} => {
+				if let Err(error) = self.entry(index).rows.push_values(values) {
+					self.fail(index, error);
+				}
+			}
+			// Encoded rows are kept encoded only for a consumer that sends
+			// them so; any other reads them decoded.
+			QueryStreamItem::Frame {
+				index,
+				rows,
+			} => {
+				let queued = if self.keep_encoded {
+					self.entry(index).rows.push_encoded(rows)
+				} else {
+					rows.to_values().and_then(|values| self.entry(index).rows.push_values(values))
+				};
+				if let Err(error) = queued {
+					self.fail(index, error);
+				}
+			}
 			QueryStreamItem::Value {
 				index,
 				value,
@@ -304,6 +517,11 @@ impl StreamFrames {
 		}
 	}
 
+	/// Fail statement `index` with rows that could not be read.
+	fn fail(&mut self, index: usize, error: TypesError) {
+		self.finished(index, Duration::ZERO, QueryType::Other, Some(error));
+	}
+
 	/// Record a statement's outcome. Its `Finished` frame goes out once the
 	/// statement has emitted everything else it owes.
 	fn finished(
@@ -322,7 +540,7 @@ impl StreamFrames {
 		// A failed statement's rows are retracted by its error, so nothing
 		// residual goes out for it.
 		if failed {
-			entry.values.clear();
+			entry.rows.clear();
 			entry.single = None;
 		}
 		entry.closing = Some((time, query_type, error));
@@ -381,7 +599,7 @@ mod tests {
 
 	/// How many rows are still waiting to be framed, across every statement.
 	fn queued(frames: &StreamFrames) -> usize {
-		frames.pending.values().map(|p| p.values.len()).sum()
+		frames.pending.values().map(|p| p.rows.len()).sum()
 	}
 
 	/// The first frames are small so the first row arrives early, and they
@@ -696,5 +914,159 @@ mod tests {
 			assert_eq!(rows, 16, "statement {index} delivers every row exactly once");
 		}
 		assert_eq!(frames.terminated.len(), 2, "each statement terminates once");
+	}
+
+	/// Decodes JSON rows that are integers, which is all these tests encode.
+	fn decode_ints(
+		_: crate::RowFormat,
+		bytes: &[u8],
+		count: usize,
+	) -> Result<Vec<Value>, TypesError> {
+		let text = std::str::from_utf8(bytes).map_err(|e| TypesError::internal(e.to_string()))?;
+		let values: Vec<Value> = text
+			.split(',')
+			.filter(|t| !t.is_empty())
+			.map(|t| t.parse::<i64>().map(int).map_err(|e| TypesError::internal(e.to_string())))
+			.collect::<Result<_, _>>()?;
+		assert_eq!(values.len(), count, "the rows decode to their count");
+		Ok(values)
+	}
+
+	/// Rows `from..to` as integers encoded in one JSON frame.
+	fn encoded(index: usize, from: usize, to: usize) -> QueryStreamItem {
+		let mut bytes = Vec::new();
+		let mut ends = Vec::new();
+		for i in from..to {
+			if i > from {
+				bytes.push(b',');
+			}
+			bytes.extend_from_slice(i.to_string().as_bytes());
+			ends.push(bytes.len() as u32);
+		}
+		QueryStreamItem::Frame {
+			index,
+			rows: EncodedRows::new(crate::RowFormat::Json, bytes, ends, decode_ints),
+		}
+	}
+
+	/// The frames an encoded stream sends, each rows frame decoded.
+	fn drain_outgoing(frames: &mut StreamFrames) -> Vec<QueryStreamFrame> {
+		std::iter::from_fn(|| frames.pop_outgoing())
+			.map(|frame| match frame {
+				OutgoingFrame::Frame(frame) => frame,
+				OutgoingFrame::Rows {
+					index,
+					rows,
+				} => QueryStreamFrame::Rows {
+					index,
+					values: rows.to_values().expect("rows decode"),
+				},
+			})
+			.collect()
+	}
+
+	/// Encoded rows kept encoded are framed exactly as the same rows arriving
+	/// as values: the same ramp, the same rows in each frame, in order, across
+	/// chunk boundaries that fall anywhere in a frame.
+	#[test]
+	fn encoded_rows_are_framed_as_their_values_are() {
+		const ROWS: usize = 1000;
+		let cuts = [0, 1, 7, 16, 17, 300, 301, 999, ROWS];
+		let mut by_value = StreamFrames::new();
+		let mut by_bytes = StreamFrames::keeping_encoded_rows();
+		let (mut expected, mut actual) = (Vec::new(), Vec::new());
+		for cut in cuts.windows(2) {
+			by_value.absorb(QueryStreamItem::Rows {
+				index: 0,
+				values: (cut[0]..cut[1]).map(|i| int(i as i64)).collect(),
+			});
+			by_bytes.absorb(encoded(0, cut[0], cut[1]));
+			expected.extend(drain(&mut by_value));
+			let before = actual.len();
+			actual.extend(drain_outgoing(&mut by_bytes));
+			assert!(
+				actual.len() == before || queued(&by_bytes) < QUERY_BATCH_RECORDS,
+				"a full frame goes out as soon as it is queued"
+			);
+		}
+		by_value.absorb(finished(0));
+		by_bytes.absorb(finished(0));
+		expected.extend(drain(&mut by_value));
+		actual.extend(drain_outgoing(&mut by_bytes));
+		assert_eq!(actual, expected);
+		assert!(
+			std::iter::from_fn({
+				let mut frames = StreamFrames::keeping_encoded_rows();
+				frames.absorb(encoded(0, 0, 40));
+				move || frames.pop_outgoing()
+			})
+			.all(|frame| matches!(frame, OutgoingFrame::Rows { .. })),
+			"rows kept encoded leave encoded"
+		);
+	}
+
+	/// A default `StreamFrames` reads encoded rows as values, and `pop` of
+	/// one keeping them decodes them on the way out: both hand a value
+	/// consumer the frames it always had.
+	#[test]
+	fn encoded_rows_reach_a_value_consumer_as_values() {
+		let mut by_value = StreamFrames::new();
+		by_value.absorb(rows(0, 40));
+		by_value.absorb(finished(0));
+		let expected = drain(&mut by_value);
+		for mut frames in [StreamFrames::new(), StreamFrames::keeping_encoded_rows()] {
+			frames.absorb(encoded(0, 0, 40));
+			frames.absorb(finished(0));
+			assert_eq!(drain(&mut frames), expected);
+		}
+	}
+
+	/// A statement whose rows arrive both encoded and as values keeps their
+	/// order: what is held encoded is decoded and the statement continues on
+	/// values.
+	#[test]
+	fn mixed_rows_keep_their_order() {
+		let mut frames = StreamFrames::keeping_encoded_rows();
+		frames.absorb(encoded(0, 0, 5));
+		frames.absorb(QueryStreamItem::Rows {
+			index: 0,
+			values: (5..10).map(int).collect(),
+		});
+		frames.absorb(encoded(0, 10, 15));
+		frames.absorb(finished(0));
+		let values: Vec<Value> = drain_outgoing(&mut frames)
+			.into_iter()
+			.flat_map(|frame| match frame {
+				QueryStreamFrame::Rows {
+					values,
+					..
+				} => values,
+				_ => Vec::new(),
+			})
+			.collect();
+		assert_eq!(values, (0..15).map(int).collect::<Vec<_>>());
+	}
+
+	/// Rows that cannot be decoded fail their statement, retracting what it
+	/// held, rather than reaching a value consumer as anything else.
+	#[test]
+	fn undecodable_rows_fail_their_statement() {
+		let mut frames = StreamFrames::new();
+		frames.absorb(QueryStreamItem::Frame {
+			index: 0,
+			rows: EncodedRows::new(crate::RowFormat::Json, b"x".to_vec(), vec![1], decode_ints),
+		});
+		frames.absorb(finished(0));
+		let out = drain(&mut frames);
+		assert!(
+			matches!(
+				out.as_slice(),
+				[QueryStreamFrame::Finished {
+					error: Some(_),
+					..
+				}]
+			),
+			"{out:?}"
+		);
 	}
 }

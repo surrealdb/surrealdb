@@ -21,6 +21,7 @@ use surrealdb_types::{
 	Array, Error, Number, Object, SerializationError, SurrealValue, Value, object,
 };
 
+use crate::encoded::EncodedRows;
 use crate::{QueryResult, QueryType};
 
 /// The channel depth a consumer should give a streaming execution.
@@ -43,6 +44,14 @@ pub enum QueryStreamItem {
 	Rows {
 		index: usize,
 		values: Vec<Value>,
+	},
+	/// Rows produced by statement `index`, already encoded for the wire; more
+	/// may follow. Produced only for an execution that asked for a
+	/// [`RowFormat`](crate::RowFormat), in place of [`Rows`](Self::Rows), and
+	/// counts as rows for every other purpose.
+	Frame {
+		index: usize,
+		rows: EncodedRows,
 	},
 	/// Statement `index` produced a single value that is not a list of rows —
 	/// `SELECT ONLY`, `RETURN 1 + 2`, a block.
@@ -69,6 +78,10 @@ impl QueryStreamItem {
 				index,
 				..
 			}
+			| Self::Frame {
+				index,
+				..
+			}
 			| Self::Value {
 				index,
 				..
@@ -77,6 +90,22 @@ impl QueryStreamItem {
 				index,
 				..
 			} => *index,
+		}
+	}
+
+	/// The item with encoded rows decoded into values: a
+	/// [`Frame`](Self::Frame) becomes the [`Rows`](Self::Rows) it encodes, and
+	/// any other item is returned as it is. For a consumer that reads values.
+	pub fn decode_frame(self) -> Result<Self, Error> {
+		match self {
+			Self::Frame {
+				index,
+				rows,
+			} => Ok(Self::Rows {
+				index,
+				values: rows.to_values()?,
+			}),
+			other => Ok(other),
 		}
 	}
 }

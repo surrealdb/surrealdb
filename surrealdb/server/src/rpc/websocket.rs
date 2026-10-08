@@ -1192,6 +1192,11 @@ impl RpcProtocol for Websocket {
 		Some(self.cancel.clone())
 	}
 
+	/// The connection's format, whose responses splice encoded rows.
+	fn row_format(&self) -> Option<surrealdb_rpc::RowFormat> {
+		self.format.row_format()
+	}
+
 	/// A pointer to all active sessions
 	fn session_map(&self) -> &HashMap<Uuid, Arc<RwLock<Session>>> {
 		&self.sessions
