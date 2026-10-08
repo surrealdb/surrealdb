@@ -563,7 +563,7 @@ impl ExecOperator for DynamicScan {
 						version,
 						storage_limit: effective_storage_limit,
 						pre_skip,
-						has_pushed_limit: effective_storage_limit.is_some(),
+						pages_rows: limit_val.is_some() || start_val > 0,
 						limit_hint: limit_val
 							.map(|l| (l + start_val).min(u32::MAX as usize) as u32),
 						knn_context: knn_context.clone(),
@@ -688,11 +688,14 @@ struct TableScanConfig {
 	storage_limit: Option<usize>,
 	/// Number of KV pairs to skip before decoding (fast-path only).
 	pre_skip: usize,
-	/// Whether the LIMIT was actually pushed into the storage-level scan.
-	/// When true the scan truncates rows, so we must verify that the
-	/// runtime-selected BTree index covers the requested ordering.
-	/// If it doesn't, we fall back to a KV scan for correctness.
-	has_pushed_limit: bool,
+	/// Whether this operator pages the rows it emits: a LIMIT or START the
+	/// planner handed it, applied by the storage scan or, when rows are
+	/// filtered after decoding, by the scan pipeline. Either way the page is
+	/// taken in the order the source delivers, which the planner assumed to
+	/// be record-id order (`order_is_scan_compatible`). A runtime-selected
+	/// B-tree index is therefore used only when it covers the requested
+	/// ordering; otherwise the KV scan answers.
+	pages_rows: bool,
 	/// Hint for the scanner's initial batch size, typically `limit + start`.
 	/// Caps the first fetch to avoid over-reading for small-limit queries.
 	limit_hint: Option<u32>,
@@ -863,15 +866,15 @@ async fn resolve_table_scan_stream(
 
 	match access_path {
 		// B-tree index scan (single-column and compound).
-		// When the LIMIT was pushed into storage, the scan truncates rows
-		// and assumes id-ordered output (via order_is_scan_compatible).
-		// Reject the index if it doesn't cover the requested ordering so
-		// we fall through to the KV scan fallback for correctness.
+		// When this operator pages its rows, the page assumes id-ordered
+		// output (via order_is_scan_compatible). Reject the index if it
+		// doesn't cover the requested ordering so we fall through to the KV
+		// scan fallback for correctness.
 		Some(AccessPath::BTreeScan {
 			index_ref,
 			access,
 			direction,
-		}) if !cfg.has_pushed_limit
+		}) if !cfg.pages_rows
 			|| (cfg
 				.order
 				.as_ref()
