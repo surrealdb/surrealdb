@@ -1291,6 +1291,45 @@ enum DepthNode<'a> {
 	Closure(&'a crate::val::Closure),
 }
 
+/// How far [`within_shallow_depth`] recurses before it leaves a value to the
+/// iterative walk of [`check_value_depth`]. Well below [`MAX_VALUE_DEPTH`],
+/// and shallow enough that the recursion is safe on any thread stack.
+const SHALLOW_VALUE_DEPTH: usize = 32;
+
+/// Whether `value`, standing at `depth`, nests nothing deeper than
+/// [`SHALLOW_VALUE_DEPTH`], decided without allocating. The recursion stops
+/// at that depth, so it is stack-safe on any input. `true` proves the value
+/// within [`MAX_VALUE_DEPTH`]; `false` proves nothing, and leaves the value
+/// to the iterative walk, as does any range, geometry, closure, or record id
+/// with a compound key.
+fn within_shallow_depth(value: &Value, depth: usize) -> bool {
+	use crate::val::RecordIdKey;
+	if depth > SHALLOW_VALUE_DEPTH {
+		return false;
+	}
+	match value {
+		Value::Array(v) => v.0.iter().all(|v| within_shallow_depth(v, depth + 1)),
+		Value::Set(v) => v.0.iter().all(|v| within_shallow_depth(v, depth + 1)),
+		Value::Object(v) => v.0.values().all(|v| within_shallow_depth(v, depth + 1)),
+		Value::RecordId(v) => {
+			matches!(v.key, RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_))
+		}
+		Value::Range(_) | Value::Geometry(_) | Value::Closure(_) => false,
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(_)
+		| Value::String(_)
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Bytes(_)
+		| Value::Table(_)
+		| Value::File(_)
+		| Value::Regex(_) => true,
+	}
+}
+
 /// Rejects a [`Value`] nested deeper than [`MAX_VALUE_DEPTH`].
 ///
 /// Deliberately iterative: a recursive checker would overflow the stack on
@@ -1321,6 +1360,9 @@ pub fn check_value_depth(value: &Value) -> Result<()> {
 			| Value::Geometry(_)
 			| Value::Closure(_)
 	) {
+		return Ok(());
+	}
+	if within_shallow_depth(value, 1) {
 		return Ok(());
 	}
 	// (node, depth of that node)

@@ -301,6 +301,35 @@ pub fn aggregate_field_name(idx: usize) -> String {
 	format!("_a{}", idx)
 }
 
+/// [`aggregate_field_name`] as an object key, which takes no allocation for
+/// the first [`PLACEHOLDER_KEYS`] indexes.
+pub(crate) fn aggregate_field_key(idx: usize) -> surrealdb_strand::Strand {
+	const NAMES: [&str; PLACEHOLDER_KEYS] = [
+		"_a0", "_a1", "_a2", "_a3", "_a4", "_a5", "_a6", "_a7", "_a8", "_a9", "_a10", "_a11",
+		"_a12", "_a13", "_a14", "_a15",
+	];
+	NAMES.get(idx).map_or_else(
+		|| aggregate_field_name(idx).into(),
+		|name| surrealdb_strand::Strand::new_static(name),
+	)
+}
+
+/// [`group_key_field_name`] as an object key, which takes no allocation for
+/// the first [`PLACEHOLDER_KEYS`] indexes.
+pub(crate) fn group_key_field_key(idx: usize) -> surrealdb_strand::Strand {
+	const NAMES: [&str; PLACEHOLDER_KEYS] = [
+		"_g0", "_g1", "_g2", "_g3", "_g4", "_g5", "_g6", "_g7", "_g8", "_g9", "_g10", "_g11",
+		"_g12", "_g13", "_g14", "_g15",
+	];
+	NAMES.get(idx).map_or_else(
+		|| group_key_field_name(idx).into(),
+		|name| surrealdb_strand::Strand::new_static(name),
+	)
+}
+
+/// How many aggregate and grouping-key placeholder names exist as constants.
+const PLACEHOLDER_KEYS: usize = 16;
+
 /// Generate a synthetic field name for the grouping key at the given index.
 ///
 /// A post-expression is evaluated against the group's answers rather than
@@ -388,9 +417,8 @@ impl GroupMap {
 		&mut self.states[idx]
 	}
 
-	/// The index of the state for `key`, creating it if absent, for a caller
-	/// that reaches the state again through [`Self::state_mut`].
-	pub(crate) fn index_for_row<F>(&mut self, key: &[Value], create: F) -> usize
+	/// The index of the state for `key`, creating it if absent.
+	fn index_for_row<F>(&mut self, key: &[Value], create: F) -> usize
 	where
 		F: FnOnce() -> GroupState,
 	{
@@ -403,15 +431,6 @@ impl GroupMap {
 				idx
 			}
 		}
-	}
-
-	/// The state [`Self::index_for_row`] answered `idx` for.
-	pub(crate) fn state_mut(&mut self, idx: usize) -> &mut GroupState {
-		&mut self.states[idx]
-	}
-
-	pub(crate) fn state(&self, idx: usize) -> &GroupState {
-		&self.states[idx]
 	}
 
 	/// Drain the map in group-key order.
@@ -1031,7 +1050,7 @@ pub(crate) fn set_nested_value(obj: &mut Object, path: &[String], value: Value) 
 
 	if path.len() == 1 {
 		// Simple case: just insert at this level
-		obj.insert(path[0].clone(), value);
+		obj.insert(path[0].as_str(), value);
 		return;
 	}
 
@@ -1040,7 +1059,7 @@ pub(crate) fn set_nested_value(obj: &mut Object, path: &[String], value: Value) 
 	let rest = &path[1..];
 
 	// Get or create the nested object
-	let nested = obj.entry(key.clone()).or_insert_with(|| Value::Object(Object::default()));
+	let nested = obj.entry(key.as_str()).or_insert_with(|| Value::Object(Object::default()));
 
 	match nested {
 		Value::Object(nested_obj) => {
@@ -1694,6 +1713,10 @@ mod tests {
 		// post-expression runs once per group against `{ _a0: sum, _a1: count }`.
 		assert_eq!(aggregate_field_name(0), "_a0");
 		assert_eq!(aggregate_field_name(1), "_a1");
+		for idx in [0, 9, 15, 16, 100] {
+			assert_eq!(aggregate_field_key(idx).as_str(), aggregate_field_name(idx));
+			assert_eq!(group_key_field_key(idx).as_str(), group_key_field_name(idx));
+		}
 		let combined = AggregateField::new(
 			"mixed".to_string(),
 			false,

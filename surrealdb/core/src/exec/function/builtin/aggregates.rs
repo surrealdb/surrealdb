@@ -25,7 +25,92 @@ use reject::Rejected;
 pub use time::{TimeMax, TimeMin};
 pub use vector::VectorSum;
 
-use crate::exec::function::FunctionRegistry;
+use crate::exec::function::{Accumulator, FunctionRegistry};
+use crate::val::Value;
+
+/// An aggregate's accumulator held by value: a built-in whose state is
+/// plain data as that data, and any other as its boxed accumulator.
+///
+/// A caller that keeps the states of many groups side by side in one vector
+/// holds a plain state inline, so opening a group allocates nothing for it.
+/// Each variant answers exactly what the accumulator its function creates
+/// answers.
+#[derive(Debug)]
+pub(crate) enum AccumulatorState {
+	Count(count::CountAccumulator),
+	CountField(count::CountFieldAccumulator),
+	Sum(math::SumAccumulator),
+	Mean(math::MeanAccumulator),
+	Min(math::MinAccumulator),
+	Max(math::MaxAccumulator),
+	Boxed(Box<dyn Accumulator>),
+}
+
+impl AccumulatorState {
+	/// A state left behind where one is moved out, which holds nothing.
+	pub(crate) fn placeholder() -> Self {
+		Self::Count(count::CountAccumulator::default())
+	}
+
+	/// The accumulator this state is.
+	pub(crate) fn as_accumulator(&self) -> &dyn Accumulator {
+		match self {
+			Self::Count(a) => a,
+			Self::CountField(a) => a,
+			Self::Sum(a) => a,
+			Self::Mean(a) => a,
+			Self::Min(a) => a,
+			Self::Max(a) => a,
+			Self::Boxed(a) => a.as_ref(),
+		}
+	}
+
+	/// The accumulator this state is, to fold into.
+	pub(crate) fn as_accumulator_mut(&mut self) -> &mut dyn Accumulator {
+		match self {
+			Self::Count(a) => a,
+			Self::CountField(a) => a,
+			Self::Sum(a) => a,
+			Self::Mean(a) => a,
+			Self::Min(a) => a,
+			Self::Max(a) => a,
+			Self::Boxed(a) => a.as_mut(),
+		}
+	}
+
+	/// [`Accumulator::update`].
+	#[inline]
+	pub(crate) fn update(&mut self, value: Value) -> anyhow::Result<()> {
+		self.as_accumulator_mut().update(value)
+	}
+
+	/// [`Accumulator::finalize`].
+	pub(crate) fn finalize(&self) -> anyhow::Result<Value> {
+		self.as_accumulator().finalize()
+	}
+
+	/// [`Accumulator::set_extra_args`].
+	pub(crate) fn set_extra_args(&mut self, args: &[Value]) {
+		self.as_accumulator_mut().set_extra_args(args)
+	}
+
+	/// Fold `other`, a partial state of the same aggregate over the same
+	/// group, into this one: [`Accumulator::merge`], without boxing a plain
+	/// state.
+	pub(crate) fn merge(&mut self, other: Self) -> anyhow::Result<()> {
+		match (self, other) {
+			(Self::Count(a), Self::Count(b)) => a.absorb(&b),
+			(Self::CountField(a), Self::CountField(b)) => a.absorb(&b),
+			(Self::Sum(a), Self::Sum(b)) => a.absorb(&b),
+			(Self::Mean(a), Self::Mean(b)) => a.absorb(&b),
+			(Self::Min(a), Self::Min(b)) => a.absorb(&b),
+			(Self::Max(a), Self::Max(b)) => a.absorb(&b),
+			(Self::Boxed(a), Self::Boxed(b)) => return a.merge(b),
+			_ => anyhow::bail!("Cannot merge incompatible accumulators"),
+		}
+		Ok(())
+	}
+}
 
 /// Register all built-in aggregate functions with the registry.
 pub fn register(registry: &mut FunctionRegistry) {

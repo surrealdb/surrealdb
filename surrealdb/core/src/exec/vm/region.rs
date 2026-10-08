@@ -71,7 +71,6 @@ use futures::StreamExt;
 use super::host::{Ended, Out, flush, run_value_row};
 use super::interp::{Groups, Paging, State};
 use super::program::{AggregateSink, BlockInstr, Instr, NestedSpec, Pipeline, Program, Source};
-use crate::exec::operators::GroupState;
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::val::Value;
@@ -915,47 +914,12 @@ impl<'p> Region<'p> {
 /// Fold a batch's partial groups into the groups the statement has.
 fn merge_groups(main: &mut Option<Groups>, part: Option<Groups>) -> FlowResult<()> {
 	match (main, part) {
-		(Some(Groups::All(main)), Some(Groups::All(part))) => merge_group(main, part),
-		(
-			Some(Groups::By {
-				groups: main,
-				..
-			}),
-			Some(Groups::By {
-				groups: part,
-				..
-			}),
-		) => {
-			for (key, state) in part.into_key_order() {
-				let mut incoming = Some(state);
-				let idx = main.index_for_row(&key, || incoming.take().expect("taken once"));
-				if let Some(state) = incoming {
-					merge_group(main.state_mut(idx), state)?;
-				}
-			}
-			Ok(())
-		}
+		(Some(main), Some(part)) => main.absorb(part).map_err(ControlFlow::Err),
 		(_, None) => Ok(()),
-		_ => Err(ControlFlow::Err(anyhow::anyhow!("a region merged groups of another kind"))),
-	}
-}
-
-/// Fold a later batch's group `part` into `main`: each accumulator merged, and
-/// each non-aggregate column the value `main` has, or else `part`'s.
-fn merge_group(main: &mut GroupState, part: GroupState) -> FlowResult<()> {
-	for (field, accumulators) in part.accumulators.into_iter().enumerate() {
-		for (agg, accumulator) in accumulators.into_iter().enumerate() {
-			if let Some(into) = main.accumulators[field].get_mut(agg) {
-				into.merge(accumulator).map_err(ControlFlow::Err)?;
-			}
+		(None, Some(_)) => {
+			Err(ControlFlow::Err(anyhow::anyhow!("a region merged groups of another kind")))
 		}
 	}
-	for (field, value) in part.first_values.into_iter().enumerate() {
-		if main.first_values[field].is_none() {
-			main.first_values[field] = value;
-		}
-	}
-	Ok(())
 }
 
 /// What a batch runs under besides its rows: the statement's frames, the

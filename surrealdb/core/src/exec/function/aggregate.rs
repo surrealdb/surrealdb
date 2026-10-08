@@ -97,6 +97,13 @@ pub trait AggregateFunction: Send + Sync + Debug {
 	/// Called once per group during query execution.
 	fn create_accumulator(&self) -> Box<dyn Accumulator>;
 
+	/// A new accumulator held by value: the same accumulator
+	/// [`Self::create_accumulator`] makes, as plain state where the function
+	/// has one.
+	fn accumulator_state(&self) -> super::builtin::aggregates::AccumulatorState {
+		super::builtin::aggregates::AccumulatorState::Boxed(self.create_accumulator())
+	}
+
 	/// The function signature describing arguments and return type.
 	#[allow(unused)]
 	fn signature(&self) -> Signature;

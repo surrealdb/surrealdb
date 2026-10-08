@@ -28,15 +28,27 @@ impl AggregateFunction for MathSum {
 		Box::new(SumAccumulator::default())
 	}
 
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::Sum(SumAccumulator::default())
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new().arg("value", Kind::Number).returns(Kind::Number)
 	}
 }
 
 #[derive(Debug, Clone, Default)]
-struct SumAccumulator {
+pub(crate) struct SumAccumulator {
 	sum: Number,
 	rejected: Rejected,
+}
+
+impl SumAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) {
+		self.rejected.merge_from(&other.rejected);
+		self.sum = self.sum + other.sum;
+	}
 }
 
 impl Accumulator for SumAccumulator {
@@ -61,8 +73,7 @@ impl Accumulator for SumAccumulator {
 			.as_any()
 			.downcast_ref::<SumAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.rejected.merge_from(&other.rejected);
-		self.sum = self.sum + other.sum;
+		self.absorb(other);
 		Ok(())
 	}
 
@@ -102,16 +113,29 @@ impl AggregateFunction for MathMean {
 		Box::new(MeanAccumulator::default())
 	}
 
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::Mean(MeanAccumulator::default())
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new().arg("value", Kind::Number).returns(Kind::Number)
 	}
 }
 
 #[derive(Debug, Clone, Default)]
-struct MeanAccumulator {
+pub(crate) struct MeanAccumulator {
 	sum: Number,
 	count: i64,
 	rejected: Rejected,
+}
+
+impl MeanAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) {
+		self.rejected.merge_from(&other.rejected);
+		self.sum = self.sum + other.sum;
+		self.count += other.count;
+	}
 }
 
 impl Accumulator for MeanAccumulator {
@@ -138,9 +162,7 @@ impl Accumulator for MeanAccumulator {
 			.as_any()
 			.downcast_ref::<MeanAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.rejected.merge_from(&other.rejected);
-		self.sum = self.sum + other.sum;
-		self.count += other.count;
+		self.absorb(other);
 		Ok(())
 	}
 
@@ -187,15 +209,38 @@ impl AggregateFunction for MathMin {
 		Box::new(MinAccumulator::default())
 	}
 
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::Min(MinAccumulator::default())
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new().arg("value", Kind::Number).returns(Kind::Number)
 	}
 }
 
 #[derive(Debug, Clone, Default)]
-struct MinAccumulator {
+pub(crate) struct MinAccumulator {
 	min: Option<Number>,
 	rejected: Rejected,
+}
+
+impl MinAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) {
+		self.rejected.merge_from(&other.rejected);
+		if let Some(other_min) = &other.min {
+			self.min = Some(match &self.min {
+				None => *other_min,
+				Some(current) => {
+					if *other_min < *current {
+						*other_min
+					} else {
+						*current
+					}
+				}
+			});
+		}
+	}
 }
 
 impl Accumulator for MinAccumulator {
@@ -238,19 +283,7 @@ impl Accumulator for MinAccumulator {
 			.as_any()
 			.downcast_ref::<MinAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.rejected.merge_from(&other.rejected);
-		if let Some(other_min) = &other.min {
-			self.min = Some(match &self.min {
-				None => *other_min,
-				Some(current) => {
-					if *other_min < *current {
-						*other_min
-					} else {
-						*current
-					}
-				}
-			});
-		}
+		self.absorb(other);
 		Ok(())
 	}
 
@@ -293,15 +326,38 @@ impl AggregateFunction for MathMax {
 		Box::new(MaxAccumulator::default())
 	}
 
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::Max(MaxAccumulator::default())
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new().arg("value", Kind::Number).returns(Kind::Number)
 	}
 }
 
 #[derive(Debug, Clone, Default)]
-struct MaxAccumulator {
+pub(crate) struct MaxAccumulator {
 	max: Option<Number>,
 	rejected: Rejected,
+}
+
+impl MaxAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) {
+		self.rejected.merge_from(&other.rejected);
+		if let Some(other_max) = &other.max {
+			self.max = Some(match &self.max {
+				None => *other_max,
+				Some(current) => {
+					if *other_max > *current {
+						*other_max
+					} else {
+						*current
+					}
+				}
+			});
+		}
+	}
 }
 
 impl Accumulator for MaxAccumulator {
@@ -344,19 +400,7 @@ impl Accumulator for MaxAccumulator {
 			.as_any()
 			.downcast_ref::<MaxAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.rejected.merge_from(&other.rejected);
-		if let Some(other_max) = &other.max {
-			self.max = Some(match &self.max {
-				None => *other_max,
-				Some(current) => {
-					if *other_max > *current {
-						*other_max
-					} else {
-						*current
-					}
-				}
-			});
-		}
+		self.absorb(other);
 		Ok(())
 	}
 

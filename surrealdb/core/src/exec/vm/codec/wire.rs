@@ -85,9 +85,40 @@ pub(super) struct Writer {
 	bytes: Vec<u8>,
 }
 
+/// The most capacity a thread's scratch buffer keeps between encodings.
+const SCRATCH_KEPT: usize = 64 * 1024;
+
+thread_local! {
+	/// The buffer [`Writer::scratch`] writes into, empty between encodings.
+	static SCRATCH: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 impl Writer {
 	pub(super) fn into_bytes(self) -> Vec<u8> {
 		self.bytes
+	}
+
+	/// A writer over this thread's scratch buffer, which grows as an encoding
+	/// needs and keeps its room for the next: [`Self::finish`] answers what
+	/// was written in one allocation of exactly its size. A writer dropped
+	/// unfinished takes the buffer with it, and the next starts empty.
+	pub(super) fn scratch() -> Self {
+		let bytes = SCRATCH.try_with(|s| std::mem::take(&mut *s.borrow_mut())).unwrap_or_default();
+		Self {
+			bytes,
+		}
+	}
+
+	/// What a [`Self::scratch`] writer wrote, copied out; the buffer goes back
+	/// to the thread, emptied, unless it grew past [`SCRATCH_KEPT`].
+	pub(super) fn finish(self) -> Vec<u8> {
+		let mut bytes = self.bytes;
+		let out = bytes.clone();
+		if bytes.capacity() <= SCRATCH_KEPT {
+			bytes.clear();
+			let _ = SCRATCH.try_with(|s| *s.borrow_mut() = bytes);
+		}
+		out
 	}
 
 	pub(super) fn raw(&mut self, bytes: &[u8]) {

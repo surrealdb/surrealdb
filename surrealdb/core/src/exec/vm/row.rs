@@ -293,6 +293,48 @@ pub(super) fn scalar_from_wire(bytes: &[u8]) -> anyhow::Result<Scalar<'_>> {
 	if let Some(s) = strand_payload_str_unchecked(bytes) {
 		return Ok(Scalar::Str(s));
 	}
+	if let Some(v) = int_on_wire(bytes) {
+		return Ok(Scalar::Number(crate::val::Number::Int(v)));
+	}
+	// `NONE`, `NULL` and booleans are whole in their tag and the byte after.
+	if let [2, tag, rest @ ..] = bytes {
+		let tag = Tag(*tag);
+		match (tag.variant_id(), tag.size_class()) {
+			(0, Ok(SizeClass::Inline)) => return Ok(Scalar::None),
+			(1, Ok(SizeClass::Inline)) => return Ok(Scalar::Null),
+			(2, Ok(SizeClass::Fixed)) => {
+				if let Some(b) = rest.first() {
+					return Ok(Scalar::Bool(*b != 0));
+				}
+			}
+			// A number, duration, datetime or uuid is decoded from its payload
+			// by its own type, which reads the slice in place.
+			(variant @ (3 | 5 | 6 | 7), Ok(SizeClass::Varlen)) => {
+				if let Some(len) = rest.get(..4) {
+					let len = u32::from_le_bytes(len.try_into().expect("four bytes")) as usize;
+					if let Some(mut payload) = rest.get(4..4 + len) {
+						use revision::DeserializeRevisioned as D;
+						let scalar = match variant {
+							3 => <crate::val::Number as D>::deserialize_revisioned(&mut payload)
+								.map(Scalar::Number),
+							5 => <crate::val::Duration as D>::deserialize_revisioned(&mut payload)
+								.map(Scalar::Duration),
+							6 => <crate::val::Datetime as D>::deserialize_revisioned(&mut payload)
+								.map(Scalar::Datetime),
+							_ => <crate::val::Uuid as D>::deserialize_revisioned(&mut payload)
+								.map(Scalar::Uuid),
+						};
+						if let Ok(scalar) = scalar
+							&& payload.is_empty()
+						{
+							return Ok(scalar);
+						}
+					}
+				}
+			}
+			_ => {}
+		}
+	}
 	let value: Value = revision::from_slice(bytes)?;
 	Ok(match value {
 		Value::None => Scalar::None,
@@ -330,7 +372,12 @@ mod tests {
 			let bytes = RevisionRow::field_bytes(data_wire, &FieldName::new(name))
 				.expect("walkable")
 				.expect("present");
-			assert_eq!(scalar_from_wire(bytes).expect("decodes").to_value(), *stored, "{name}");
+			let scalar = scalar_from_wire(bytes).expect("decodes");
+			assert_eq!(scalar.to_value(), *stored, "{name}");
+			// A scalar kind is read in place, not decoded into a value.
+			if !matches!(stored, Value::Array(_) | Value::Object(_) | Value::Bytes(_)) {
+				assert!(scalar.as_whole().is_none(), "{name} read in place");
+			}
 		}
 		assert_eq!(RevisionRow::field_bytes(data_wire, &FieldName::new("absent")), Some(None));
 		let Some(Some(s)) = RevisionRow::field_bytes(data_wire, &FieldName::new("s")) else {

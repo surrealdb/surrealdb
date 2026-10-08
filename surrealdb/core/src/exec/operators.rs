@@ -35,7 +35,9 @@ pub use aggregate::{
 	Aggregate, AggregateExprInfo, AggregateField, AggregateId, ExtractedAggregate,
 	aggregate_field_name, group_key_field_name,
 };
-pub(crate) use aggregate::{GroupMap, GroupState, first_value_needed, set_nested_value};
+pub(crate) use aggregate::{
+	aggregate_field_key, first_value_needed, group_key_field_key, set_nested_value,
+};
 #[cfg(test)]
 pub use bind::Bind;
 pub use compute::Compute;

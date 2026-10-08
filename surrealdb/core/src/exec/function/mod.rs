@@ -28,6 +28,7 @@ use std::fmt::Debug;
 
 pub use aggregate::{Accumulator, AggregateFunction};
 use anyhow::Result;
+pub(crate) use builtin::aggregates::AccumulatorState;
 pub use index::{
 	IndexContext, IndexContextKind, IndexFunction, KnnContext, MatchContext, MatchInfo,
 	MatchesContext,

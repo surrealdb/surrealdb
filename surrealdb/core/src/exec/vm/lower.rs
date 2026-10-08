@@ -2608,6 +2608,31 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				self.patch(new, at);
 				self.write_stages(order(creating)?, &mut skips).await?;
 			}
+			// A policy that neither retries nor skips raises every failure of
+			// the creating attempt, which fails the statement, so the attempt
+			// has nothing to be undone for: it runs as a sole order does, with
+			// no savepoint, and a failure leaves what it wrote as a failed
+			// `CREATE` does.
+			Branching::Retry {
+				creating,
+				updating,
+				policy,
+			} if !policy.retry_conflict
+				&& !policy.skip_failures
+				&& !policy.carry_schema_failure =>
+			{
+				let read = self.emit(Instr::Write(WriteInstr::JumpIfNotIterationInitial {
+					target: 0,
+				}));
+				self.write_stages(order(creating)?, &mut skips).await?;
+				done.push(self.emit(Instr::Jump {
+					target: 0,
+				}));
+				// A record its source read has nothing to create.
+				let at = self.here();
+				self.patch(read, at);
+				self.write_stages(order(updating)?, &mut skips).await?;
+			}
 			Branching::Retry {
 				creating,
 				updating,

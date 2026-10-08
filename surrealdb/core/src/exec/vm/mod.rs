@@ -46,6 +46,7 @@ mod fault;
 pub(crate) mod fuel;
 mod function;
 mod graph;
+mod groups;
 mod host;
 pub(crate) use host::out_of_line;
 mod info;
@@ -53,6 +54,7 @@ mod inline;
 mod interp;
 mod knn;
 mod leaf;
+pub(crate) mod row_frame;
 pub(crate) use subroutine::Subroutine;
 pub(crate) use write::notify_at;
 #[cfg(test)]
@@ -100,6 +102,7 @@ pub(crate) type UnitTable = Arc<[Arc<program::Program>]>;
 /// [`program::Program::served`] index: kept beside the program by the
 /// operator that runs it, since a program holds no logical plan.
 pub(crate) type ServedStatements = Arc<[Arc<LogicalOp>]>;
+mod arena;
 mod backfill;
 mod batch;
 mod region;

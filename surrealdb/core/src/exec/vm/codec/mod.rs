@@ -70,9 +70,9 @@ pub(crate) fn encode_id(ty: TypeId, value: &Value) -> Result<Vec<u8>> {
 		};
 		return Ok(s.as_bytes().to_vec());
 	};
-	let mut w = wire::Writer::default();
+	let mut w = wire::Writer::scratch();
 	desc::encode_named(desc, value, &mut w)?;
-	Ok(w.into_bytes())
+	Ok(w.finish())
 }
 
 /// Encode `value` as type `name`, at its current revision.
@@ -84,9 +84,9 @@ pub(crate) fn encode(name: &str, value: &Value) -> Result<Vec<u8>> {
 		return Ok(s.as_bytes().to_vec());
 	}
 	let desc = types::lookup(name)?;
-	let mut w = wire::Writer::default();
+	let mut w = wire::Writer::scratch();
 	desc::encode_named(desc, value, &mut w)?;
-	Ok(w.into_bytes())
+	Ok(w.finish())
 }
 
 /// The bytes [`encode`] writes for a `Record` whose `metadata` and `data`
@@ -94,7 +94,7 @@ pub(crate) fn encode(name: &str, value: &Value) -> Result<Vec<u8>> {
 /// from an object gathering them.
 pub(crate) fn encode_record(metadata: &Value, data: &Value) -> Result<Vec<u8>> {
 	let desc = types::lookup("Record")?;
-	let mut w = wire::Writer::default();
+	let mut w = wire::Writer::scratch();
 	desc::encode_struct(
 		desc,
 		|field| match field.name {
@@ -104,7 +104,7 @@ pub(crate) fn encode_record(metadata: &Value, data: &Value) -> Result<Vec<u8>> {
 		},
 		&mut w,
 	)?;
-	Ok(w.into_bytes())
+	Ok(w.finish())
 }
 
 /// A decoded `Record` as a read from its key sees it: the key is the source

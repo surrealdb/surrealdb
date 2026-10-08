@@ -13,12 +13,13 @@ use std::cmp::Ordering;
 
 use anyhow::bail;
 
+pub(super) use super::groups::Groups;
 use super::program::{Instr, KeyOrder, Operand, Pipeline, Program, ROW, Reg};
 use super::row::RowReader;
 use super::scalar::Scalar;
 use crate::exec::field_path::FieldPathPart;
 use crate::exec::function::{AggregateFunction, FunctionRegistry};
-use crate::exec::operators::{GroupMap, GroupState, compare_values, first_value_needed};
+use crate::exec::operators::{compare_values, first_value_needed};
 use crate::val::{Object, Value};
 
 /// How a row's run of a body ended.
@@ -203,19 +204,6 @@ pub(super) struct Paging {
 	pub(super) remaining: Option<usize>,
 }
 
-/// An aggregate's groups: its one group under `GROUP ALL`, its groups by key
-/// under `GROUP BY`.
-pub(super) enum Groups {
-	All(GroupState),
-	By {
-		groups: GroupMap,
-		/// The key the row being folded is building.
-		key: Vec<Value>,
-		/// The group the row selected.
-		current: usize,
-	},
-}
-
 /// A running program's state across rows and pipelines.
 /// What a run has learned of a user-defined function it calls, so that a call
 /// after the first neither hashes the definition nor the principal again.
@@ -257,6 +245,10 @@ pub(super) struct State {
 	/// Where a bulk instruction's copy of a collection stopped when the fuel
 	/// ran out, for the row to resume it ([`copied`]).
 	pub(super) bulk: Option<Bulk>,
+	/// Key vectors and stored-record buffers of rows a bounded sort pruned,
+	/// reused by the rows that reach a sort next.
+	pub(super) spare_sort_keys: Vec<Vec<Value>>,
+	pub(super) spare_sort_bytes: Vec<Vec<u8>>,
 	pub(super) topk_cells:
 		Vec<Option<std::sync::Arc<crate::exec::topk_pushdown::TopKThresholdCell>>>,
 	/// For each sort of a brute-force KNN whose query vector is computed when
@@ -675,18 +667,6 @@ fn resolve_aggregates(
 		.collect()
 }
 
-/// A group before any row has been folded into it: an accumulator for each
-/// call of each field, and no first value.
-fn new_group_state(functions: &[Vec<std::sync::Arc<dyn AggregateFunction>>]) -> GroupState {
-	GroupState {
-		accumulators: functions
-			.iter()
-			.map(|calls| calls.iter().map(|function| function.create_accumulator()).collect())
-			.collect(),
-		first_values: functions.iter().map(|_| None).collect(),
-	}
-}
-
 impl State {
 	/// A state for a run of `program` with `paging`, taken from the thread's
 	/// spare states. The functions its aggregates name are resolved from
@@ -778,6 +758,8 @@ impl State {
 			sorts,
 			sort_arrivals,
 			bulk,
+			spare_sort_keys,
+			spare_sort_bytes,
 			topk_cells,
 			knn_queries,
 			sort_spill,
@@ -838,6 +820,8 @@ impl State {
 		emptied(sorts);
 		emptied(sort_arrivals);
 		*bulk = None;
+		emptied(spare_sort_keys);
+		emptied(spare_sort_bytes);
 		emptied(topk_cells);
 		emptied(knn_queries);
 		emptied(sort_spill);
@@ -1077,6 +1061,8 @@ impl State {
 			sorts: Vec::new(),
 			sort_arrivals: Vec::new(),
 			bulk: None,
+			spare_sort_keys: Vec::new(),
+			spare_sort_bytes: Vec::new(),
 			topk_cells: Vec::new(),
 			knn_queries: Vec::new(),
 			sort_spill: Vec::new(),
@@ -1285,7 +1271,13 @@ impl State {
 		super::fuel::charge(super::fuel::units(rows.len()));
 		#[cfg(test)]
 		LARGEST_PRUNE.with(|largest| largest.set(largest.get().max(rows.len())));
-		sort_and_keep(rows, &program.sorts[at].keys, keep);
+		rows.sort_by(|(a, _), (b, _)| compare_keys(a, b, &program.sorts[at].keys));
+		// The rows pruned hand their buffers to the rows that reach the sort
+		// next, so a bounded sort allocates for no more rows than one prune
+		// drops.
+		for row in rows.drain(keep.min(rows.len())..) {
+			recycle_sort_row(&mut self.spare_sort_keys, &mut self.spare_sort_bytes, row);
+		}
 		if keep > 0 && rows.len() == keep {
 			self.sort_arrivals[at].floored = true;
 			if let Some(Some(cell)) = self.topk_cells.get(at)
@@ -1325,7 +1317,9 @@ impl State {
 		let rows = &mut self.sorts[at];
 		let arrivals = &mut self.sort_arrivals[at];
 		if keep == 0 {
-			rows.clear();
+			for row in rows.drain(..) {
+				recycle_sort_row(&mut self.spare_sort_keys, &mut self.spare_sort_bytes, row);
+			}
 			return;
 		}
 		if let Some(merge) = &mut arrivals.merge {
@@ -1343,7 +1337,7 @@ impl State {
 			if merge.step(rows, keys, placed) {
 				let merge = *merge;
 				arrivals.merge = None;
-				merge.finish(rows, arrivals);
+				merge.finish(rows, arrivals, &mut self.spare_sort_keys, &mut self.spare_sort_bytes);
 			}
 			return;
 		}
@@ -1423,7 +1417,7 @@ impl State {
 			}
 		}
 		if done {
-			merge.finish(rows, arrivals);
+			merge.finish(rows, arrivals, &mut self.spare_sort_keys, &mut self.spare_sort_bytes);
 		} else {
 			arrivals.merge = Some(merge);
 		}
@@ -1459,11 +1453,16 @@ impl State {
 				sort,
 				keys,
 			}) => {
+				let mut bytes = self.spare_sort_bytes.pop().unwrap_or_default();
+				bytes.clear();
+				bytes.reserve_exact(key.len() + value.len());
+				bytes.extend_from_slice(key);
+				bytes.extend_from_slice(value);
 				self.sorts[sort as usize].push((
 					keys,
 					SortRow::Stored {
-						key: key.to_vec(),
-						value: value.to_vec(),
+						bytes,
+						split: key.len(),
 					},
 				));
 				self.keep_sorted(program, sort);
@@ -1574,6 +1573,15 @@ pub(super) fn run_row<'r>(
 			Operand::Reg(reg) => regs[reg as usize].clone(),
 			Operand::Const(index) => Scalar::of(&program.consts[index as usize]),
 			Operand::Field(name) => row.field(&program.fields[name as usize])?,
+		})
+	};
+	// The value `operand` denotes, owned: a composite a register holds is
+	// cloned once, where `read` followed by `to_value` would clone it twice.
+	let read_value = |regs: &[Scalar<'r>], operand: Operand| -> anyhow::Result<Value> {
+		Ok(match operand {
+			Operand::Reg(reg) => regs[reg as usize].to_value(),
+			Operand::Const(index) => program.consts[index as usize].clone(),
+			Operand::Field(name) => row.field(&program.fields[name as usize])?.to_value(),
 		})
 	};
 	// A jump to `target`. A backward one is an iteration of a loop and spends
@@ -1839,8 +1847,7 @@ pub(super) fn run_row<'r>(
 				right,
 				dst,
 			} => {
-				let answer =
-					op.apply(read(regs, *left)?.to_value(), read(regs, *right)?.to_value())?;
+				let answer = op.apply(read_value(regs, *left)?, read_value(regs, *right)?)?;
 				super::fuel::charge(super::fuel::weight(&answer));
 				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(answer));
 				pc += 1;
@@ -1850,7 +1857,7 @@ pub(super) fn run_row<'r>(
 				src,
 				dst,
 			} => {
-				let answer = op.apply(read(regs, *src)?.to_value(), &program.kinds)?;
+				let answer = op.apply(read_value(regs, *src)?, &program.kinds)?;
 				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(answer));
 				pc += 1;
 			}
@@ -1865,7 +1872,7 @@ pub(super) fn run_row<'r>(
 				array,
 				value,
 			} => {
-				let value = read(regs, *value)?.to_value();
+				let value = read_value(regs, *value)?;
 				match &mut regs[*array as usize] {
 					Scalar::Value(std::borrow::Cow::Owned(Value::Array(items))) => {
 						items.push(value)
@@ -1906,12 +1913,12 @@ pub(super) fn run_row<'r>(
 				let value = match peek!(*src, field) {
 					Some(value) => value,
 					None => {
-						held = read(regs, *src)?.to_value();
+						held = read_value(regs, *src)?;
 						&held
 					}
 				};
 				let index = match index {
-					Some(index) => Some(read(regs, *index)?.to_value()),
+					Some(index) => Some(read_value(regs, *index)?),
 					None => None,
 				};
 				let answer = op.apply(value, index.as_ref())?;
@@ -2086,7 +2093,7 @@ pub(super) fn run_row<'r>(
 				collection,
 				value,
 			} => {
-				let value = read(regs, *value)?.to_value();
+				let value = read_value(regs, *value)?;
 				if let Scalar::Value(std::borrow::Cow::Owned(held)) =
 					&mut regs[*collection as usize]
 				{
@@ -2106,7 +2113,7 @@ pub(super) fn run_row<'r>(
 			Instr::Throw {
 				src,
 			} => {
-				let value = read(regs, *src)?.to_value();
+				let value = read_value(regs, *src)?;
 				return Err(anyhow::Error::new(crate::exec::Error::Thrown(value.to_raw_string())));
 			}
 			Instr::SortKey {
@@ -2263,7 +2270,7 @@ pub(super) fn run_row<'r>(
 				dst,
 				none,
 			} => {
-				let value = read(regs, *src)?.to_value();
+				let value = read_value(regs, *src)?;
 				let query: &Vec<crate::val::Number> = match &rank.vector {
 					super::program::KnnVector::Literal(vector) => vector,
 					super::program::KnnVector::Query(sort) => state
@@ -2300,7 +2307,7 @@ pub(super) fn run_row<'r>(
 				path,
 				dst,
 			} => {
-				let value = read(regs, *src)?.to_value();
+				let value = read_value(regs, *src)?;
 				let key = program.paths[*path as usize].extract(&value).into_owned();
 				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(key));
 				pc += 1;
@@ -2349,7 +2356,7 @@ pub(super) fn run_row<'r>(
 				recv,
 				dst,
 			} => {
-				let recv = read(regs, *recv)?.to_value();
+				let recv = read_value(regs, *recv)?;
 				let closure = match &recv {
 					Value::Object(obj) => match obj.get(name.as_str()) {
 						Some(closure @ Value::Closure(_)) => Some(closure.clone()),
@@ -2405,7 +2412,7 @@ pub(super) fn run_row<'r>(
 						Copied::Refused => unreachable!("a copy that refuses nothing"),
 					}
 				}
-				let value = read(regs, *src)?.to_value();
+				let value = read_value(regs, *src)?;
 				let array = value.coerce_to::<crate::val::Array>().map_err(|e| {
 					crate::expr::Error::InvalidFunctionArguments {
 						name: program.calls[*call as usize].name.clone(),
@@ -2452,7 +2459,7 @@ pub(super) fn run_row<'r>(
 				let spec = &program.closures[*closure as usize];
 				let args = args
 					.iter()
-					.map(|arg| Ok(read(regs, *arg)?.to_value()))
+					.map(|arg| read_value(regs, *arg))
 					.collect::<anyhow::Result<Vec<_>>>()?;
 				let bound =
 					crate::exec::physical_expr::function::bind_closure_args(&spec.args, args)?;
@@ -2467,7 +2474,7 @@ pub(super) fn run_row<'r>(
 				dst,
 			} => {
 				let spec = &program.closures[*closure as usize];
-				let value = read(regs, *src)?.to_value();
+				let value = read_value(regs, *src)?;
 				let value = crate::exec::physical_expr::function::helpers::validate_return(
 					"ANONYMOUS",
 					spec.returns.as_ref(),
@@ -2504,7 +2511,7 @@ pub(super) fn run_row<'r>(
 				dst,
 			} => {
 				let value = program.record_ids[*record as usize]
-					.build(&mut |operand| Ok(read(regs, operand)?.to_value()))?;
+					.build(&mut |operand| read_value(regs, operand))?;
 				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(value));
 				pc += 1;
 			}
@@ -2583,7 +2590,7 @@ pub(super) fn run_row<'r>(
 				nullish,
 				target,
 			} => {
-				if read(regs, *cond)?.to_value().is_nullish() == *nullish {
+				if read_value(regs, *cond)?.is_nullish() == *nullish {
 					jump!(*target as usize);
 				} else {
 					pc += 1;
@@ -2760,7 +2767,7 @@ pub(super) fn run_row<'r>(
 				path,
 				value,
 			} => {
-				let value = read(regs, *value)?.to_value();
+				let value = read_value(regs, *value)?;
 				// An object loaded from a constant or the row is borrowed; it
 				// becomes the register's own before it is changed.
 				if let Scalar::Value(std::borrow::Cow::Borrowed(borrowed)) = &regs[*object as usize]
@@ -2788,7 +2795,7 @@ pub(super) fn run_row<'r>(
 			} => {
 				let mut object = Value::Object(Object::default());
 				for (path, value) in fields.iter() {
-					let value = read(regs, *value)?.to_value();
+					let value = read_value(regs, *value)?;
 					object.set_at_field_path_owned(&program.paths[*path as usize], value);
 				}
 				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(object));
@@ -2799,7 +2806,7 @@ pub(super) fn run_row<'r>(
 			} => {
 				let mut object = Value::Object(Object::default());
 				for (path, value) in fields.iter() {
-					let value = read(regs, *value)?.to_value();
+					let value = read_value(regs, *value)?;
 					object.set_at_field_path_owned(&program.paths[*path as usize], value);
 				}
 				state.output.push(object);
@@ -2821,7 +2828,7 @@ pub(super) fn run_row<'r>(
 						state.output.push(value);
 					}
 					other => {
-						let value = read(regs, *other)?.to_value();
+						let value = read_value(regs, *other)?;
 						state.output.push(value);
 					}
 				}
@@ -2910,8 +2917,11 @@ pub(super) fn run_row<'r>(
 					None => true,
 				};
 				if reaches {
-					// Room for the arrival a bounded sort stamps after the keys.
-					let mut gathered = Vec::with_capacity(*count as usize + 1);
+					// A key vector a bounded sort pruned, with room for the arrival
+					// a merging sort stamps after the keys.
+					let mut gathered = state.spare_sort_keys.pop().unwrap_or_default();
+					gathered.clear();
+					gathered.reserve(*count as usize + 1);
 					gathered.extend((*keys..*keys + *count).map(|r| {
 						std::mem::replace(&mut regs[r as usize], Scalar::None).to_value()
 					}));
@@ -2928,13 +2938,9 @@ pub(super) fn run_row<'r>(
 				index,
 				value,
 			} => {
-				let value = read(regs, *value)?.to_value();
-				if let Some(Groups::By {
-					key,
-					..
-				}) = &mut state.groups[*aggregate as usize]
-				{
-					key[*index as usize] = value;
+				let value = read_value(regs, *value)?;
+				if let Some(groups) = &mut state.groups[*aggregate as usize] {
+					groups.set_key(*index as usize, value);
 				}
 				pc += 1;
 			}
@@ -2942,13 +2948,8 @@ pub(super) fn run_row<'r>(
 				aggregate,
 			} => {
 				let functions = &state.aggregates.functions[*aggregate as usize];
-				if let Some(Groups::By {
-					groups,
-					key,
-					current,
-				}) = &mut state.groups[*aggregate as usize]
-				{
-					*current = groups.index_for_row(key, || new_group_state(functions));
+				if let Some(groups) = &mut state.groups[*aggregate as usize] {
+					groups.select(functions);
 				}
 				pc += 1;
 			}
@@ -2959,17 +2960,8 @@ pub(super) fn run_row<'r>(
 			} => {
 				let constant = program.aggregates[*aggregate as usize].fields[*field as usize]
 					.fallback_is_constant;
-				let group = match &state.groups[*aggregate as usize] {
-					Some(Groups::All(group)) => Some(group),
-					Some(Groups::By {
-						groups,
-						current,
-						..
-					}) => Some(groups.state(*current)),
-					None => None,
-				};
-				if group.is_some_and(|group| {
-					first_value_needed(constant, &group.first_values[*field as usize])
+				if state.groups[*aggregate as usize].as_ref().is_some_and(|groups| {
+					first_value_needed(constant, groups.first(*field as usize))
 				}) {
 					pc += 1;
 				} else {
@@ -2981,18 +2973,9 @@ pub(super) fn run_row<'r>(
 				field,
 				src,
 			} => {
-				let value = read(regs, *src)?.to_value();
-				let group = match &mut state.groups[*aggregate as usize] {
-					Some(Groups::All(group)) => Some(group),
-					Some(Groups::By {
-						groups,
-						current,
-						..
-					}) => Some(groups.state_mut(*current)),
-					None => None,
-				};
-				if let Some(group) = group {
-					group.first_values[*field as usize] = Some(value);
+				let value = read_value(regs, *src)?;
+				if let Some(groups) = &mut state.groups[*aggregate as usize] {
+					*groups.first_mut(*field as usize) = Some(value);
 				}
 				pc += 1;
 			}
@@ -3032,18 +3015,10 @@ pub(super) fn run_row<'r>(
 				agg,
 				value,
 			} => {
-				let value = read(regs, *value)?.to_value();
-				let group = match &mut state.groups[*aggregate as usize] {
-					Some(Groups::All(group)) => Some(group),
-					Some(Groups::By {
-						groups,
-						current,
-						..
-					}) => Some(groups.state_mut(*current)),
-					None => None,
-				};
-				if let Some(accumulator) = group
-					.and_then(|group| group.accumulators[*field as usize].get_mut(*agg as usize))
+				let value = read_value(regs, *value)?;
+				if let Some(accumulator) = state.groups[*aggregate as usize]
+					.as_mut()
+					.and_then(|groups| groups.accumulator(*field as usize, *agg as usize))
 					&& let Err(e) = accumulator.update(value)
 				{
 					tracing::debug!(error = %e, "Accumulator update failed, skipping value");
@@ -3173,15 +3148,7 @@ fn fresh_groups(
 	sink: &super::program::AggregateSink,
 	functions: &[Vec<std::sync::Arc<dyn AggregateFunction>>],
 ) -> Groups {
-	if sink.keys == 0 {
-		Groups::All(new_group_state(functions))
-	} else {
-		Groups::By {
-			groups: GroupMap::new(),
-			key: vec![Value::None; sink.keys],
-			current: 0,
-		}
-	}
+	Groups::new(sink.keys, functions)
 }
 
 /// A row a sort holds: the row, or a record read in place as its stored
@@ -3191,9 +3158,11 @@ fn fresh_groups(
 #[derive(Debug)]
 pub(crate) enum SortRow {
 	Value(Value),
+	/// The record's key and value bytes in one buffer, the key the first
+	/// `split` bytes.
 	Stored {
-		key: Vec<u8>,
-		value: Vec<u8>,
+		bytes: Vec<u8>,
+		split: usize,
 	},
 }
 
@@ -3203,9 +3172,12 @@ impl SortRow {
 		match self {
 			SortRow::Value(value) => Ok(value),
 			SortRow::Stored {
-				key,
-				value,
-			} => super::row::RevisionRow::new(&key, &value).record(),
+				bytes,
+				split,
+			} => {
+				let (key, value) = bytes.split_at(split);
+				super::row::RevisionRow::new(key, value).record()
+			}
 		}
 	}
 }
@@ -3468,8 +3440,15 @@ impl Merge {
 	}
 
 	/// Take the merged rows as the sort's kept rows, and remove the rows cut:
-	/// the rows that arrived since take their places, in no order.
-	fn finish(self, rows: &mut Vec<(Vec<Value>, SortRow)>, arrivals: &mut Arrivals) {
+	/// the rows that arrived since take their places, in no order, and the
+	/// rows cut hand their buffers to the rows that reach the sort next.
+	fn finish(
+		self,
+		rows: &mut Vec<(Vec<Value>, SortRow)>,
+		arrivals: &mut Arrivals,
+		spare_keys: &mut Vec<Vec<Value>>,
+		spare_bytes: &mut Vec<Vec<u8>>,
+	) {
 		arrivals.kept = self.len;
 		if self.cut == 0 {
 			return;
@@ -3478,7 +3457,10 @@ impl Merge {
 		let moved = behind.min(self.cut);
 		let (low, high) = rows.split_at_mut(self.len + self.cut);
 		low[self.len..self.len + moved].swap_with_slice(&mut high[behind - moved..]);
-		rows.truncate(rows.len() - self.cut);
+		let kept = rows.len() - self.cut;
+		for row in rows.drain(kept..) {
+			recycle_sort_row(spare_keys, spare_bytes, row);
+		}
 		super::fuel::charge(super::fuel::units(self.cut));
 	}
 }
@@ -3509,6 +3491,26 @@ fn gallop(most: usize, holds: impl Fn(usize) -> bool) -> usize {
 	low
 }
 
+/// Hand a row a bounded sort dropped to the spare buffers the rows that
+/// reach a sort next reuse: its key vector, and a stored record's bytes.
+fn recycle_sort_row(
+	spare_keys: &mut Vec<Vec<Value>>,
+	spare_bytes: &mut Vec<Vec<u8>>,
+	(keys, row): (Vec<Value>, SortRow),
+) {
+	spare_keys.push(keys);
+	if let SortRow::Stored {
+		bytes,
+		..
+	} = row
+	{
+		spare_bytes.push(bytes);
+	}
+}
+
+/// Sorts `rows` by `keys` and keeps the first `keep`. The spill to disk is
+/// its only caller, so it is compiled where the spill is.
+#[cfg(all(storage, not(target_family = "wasm")))]
 pub(super) fn sort_and_keep(rows: &mut Vec<(Vec<Value>, SortRow)>, keys: &[KeyOrder], keep: usize) {
 	rows.sort_by(|(a, _), (b, _)| compare_keys(a, b, keys));
 	rows.truncate(keep);

@@ -85,6 +85,8 @@ pub(crate) mod physical_expr;
 pub(crate) mod planner;
 pub(crate) mod pre_decode_filter;
 pub(crate) mod reference_purge;
+#[doc(hidden)]
+pub mod row_frame_probe;
 pub mod scheduler;
 pub(crate) mod table_view;
 pub(crate) mod topk_pushdown;

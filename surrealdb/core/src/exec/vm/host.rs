@@ -16,6 +16,7 @@ use common::future::stream::Yielder;
 use futures::StreamExt;
 
 use super::batch::RecordReader;
+use super::groups::GroupMut;
 use super::interp::{self, Groups, Paging, Pending, Region, State, Step};
 use super::program::{Enforce, Instr, Pipeline, Program, STACK_REGISTERS, Source, StoreInstr};
 use super::region::Rows;
@@ -23,8 +24,10 @@ use super::row::{RevisionRow, RowReader, ValueRow};
 use super::scalar::Scalar;
 use super::services::{EngineServices, Services};
 use super::write;
+use crate::exec::function::AccumulatorState;
 use crate::exec::index::access_path::access_repeats_records;
 use crate::exec::index::iterator::btree::BTreeIterator;
+use crate::exec::operators::SortDirection;
 use crate::exec::operators::fetch::fetch_raw_record;
 use crate::exec::operators::limit::{PagingClause, paging_count};
 use crate::exec::operators::scan::common::{
@@ -34,7 +37,6 @@ use crate::exec::operators::scan::pipeline::kv_scan_stream;
 use crate::exec::operators::scan::{
 	FULL_TEXT_BATCH_SIZE, FusedCandidates, MergeMode, RESOLVE_BATCH_SIZE, record_key_range,
 };
-use crate::exec::operators::{GroupState, SortDirection};
 use crate::exec::permission::validate_record_user_access;
 use crate::exec::physical_expr::graph_degree::DegreeCounter;
 use crate::exec::{
@@ -4024,25 +4026,22 @@ async fn finish_groups(
 		ctx,
 		state: None,
 	};
-	let mut rows = Vec::new();
-	match groups {
-		Some(Groups::All(mut group)) => {
+	let Some(groups) = groups else {
+		return Ok(Vec::new());
+	};
+	let all = sink.keys == 0;
+	let mut finished = groups.finish();
+	let mut rows = Vec::with_capacity(finished.len());
+	for at in 0..finished.len() {
+		let (key, mut group) = finished.group(at);
+		if all {
 			finish.constant_columns(&mut group).await?;
-			finish.bind_extra_args(&mut group, &[]).await?;
-			rows.push(finish.result(&[], group).await?);
+		} else {
+			// A group finished is a unit, whatever its columns evaluate.
+			super::fuel::tick(ctx, 1).await?;
 		}
-		Some(Groups::By {
-			groups,
-			..
-		}) => {
-			for (key, mut group) in groups.into_key_order() {
-				// A group finished is a unit, whatever its columns evaluate.
-				super::fuel::tick(ctx, 1).await?;
-				finish.bind_extra_args(&mut group, &key).await?;
-				rows.push(finish.result(&key, group).await?);
-			}
-		}
-		None => {}
+		finish.bind_extra_args(&mut group, key).await?;
+		rows.push(finish.result(key, group).await?);
 	}
 	Ok(rows)
 }
@@ -4079,7 +4078,7 @@ impl Finish<'_> {
 	fn key_document(key: &[Value]) -> crate::val::Object {
 		let mut document = crate::val::Object::default();
 		for (idx, value) in key.iter().enumerate() {
-			document.insert(crate::exec::operators::group_key_field_name(idx), value.clone());
+			document.insert(crate::exec::operators::group_key_field_key(idx), value.clone());
 		}
 		document
 	}
@@ -4087,17 +4086,16 @@ impl Finish<'_> {
 	/// Evaluate, against no row, each column of a `GROUP ALL` the row cannot
 	/// influence and no row has evaluated, once for the group. An error about
 	/// the shape of the data leaves the column without a value.
-	async fn constant_columns(&mut self, group: &mut GroupState) -> FlowResult<()> {
+	async fn constant_columns(&mut self, group: &mut GroupMut<'_>) -> FlowResult<()> {
 		for (field, spec) in self.sink.fields.iter().enumerate() {
 			let Some(pipeline) = spec.finish else {
 				continue;
 			};
-			if spec.is_group_key || spec.aggregate.is_some() || group.first_values[field].is_some()
-			{
+			if spec.is_group_key || spec.aggregate.is_some() || group.first(field).is_some() {
 				continue;
 			}
 			match self.run(pipeline, None).await {
-				Ok(value) => group.first_values[field] = Some(value),
+				Ok(value) => *group.first(field) = Some(value),
 				Err(error) if error.is_ignorable() => {
 					tracing::debug!(error = %error, "Fallback expression evaluation failed (ignorable)");
 				}
@@ -4111,8 +4109,8 @@ impl Finish<'_> {
 	/// group rather than to a row: evaluated once, over a document of the
 	/// group's keys, an argument reading anything else off it answering
 	/// `NONE`.
-	async fn bind_extra_args(&mut self, group: &mut GroupState, key: &[Value]) -> FlowResult<()> {
-		let document = Value::Object(Self::key_document(key));
+	async fn bind_extra_args(&mut self, group: &mut GroupMut<'_>, key: &[Value]) -> FlowResult<()> {
+		let mut document = None;
 		for (field, spec) in self.sink.fields.iter().enumerate() {
 			let Some(aggregate) = &spec.aggregate else {
 				continue;
@@ -4122,6 +4120,8 @@ impl Finish<'_> {
 					continue;
 				}
 				let mut args = Vec::with_capacity(call.extra_args.len());
+				let document =
+					document.get_or_insert_with(|| Value::Object(Self::key_document(key)));
 				for &pipeline in &call.extra_args {
 					args.push(match self.run(pipeline, Some(document.clone())).await {
 						Ok(value) => value,
@@ -4129,7 +4129,7 @@ impl Finish<'_> {
 						Err(error) => return Err(error),
 					});
 				}
-				if let Some(accumulator) = group.accumulators[field].get_mut(call_at) {
+				if let Some(accumulator) = group.accumulators(field).get_mut(call_at) {
 					accumulator.set_extra_args(&args);
 				}
 			}
@@ -4140,19 +4140,19 @@ impl Finish<'_> {
 	/// The answer of one finished group: an object of each field's answer
 	/// placed by its output path, or the one answer itself for `SELECT
 	/// VALUE`.
-	async fn result(&mut self, key: &[Value], group: GroupState) -> FlowResult<Value> {
+	async fn result(&mut self, key: &[Value], mut group: GroupMut<'_>) -> FlowResult<Value> {
 		let fields = &self.sink.fields[..];
-		let mut answers = group.accumulators.into_iter().zip(group.first_values);
 		if fields.len() == 1
 			&& fields[0].output_path.len() == 1
 			&& fields[0].output_path[0].is_empty()
 		{
-			let (accumulators, first) = answers.next().unwrap_or_default();
-			return self.field(&fields[0], key, &accumulators, first.unwrap_or(Value::None)).await;
+			let first = group.first(0).take().unwrap_or(Value::None);
+			return self.field(&fields[0], key, group.accumulators(0), first).await;
 		}
 		let mut result = crate::val::Object::default();
-		for (spec, (accumulators, first)) in fields.iter().zip(answers) {
-			let value = self.field(spec, key, &accumulators, first.unwrap_or(Value::None)).await?;
+		for (field, spec) in fields.iter().enumerate() {
+			let first = group.first(field).take().unwrap_or(Value::None);
+			let value = self.field(spec, key, group.accumulators(field), first).await?;
 			crate::exec::operators::set_nested_value(&mut result, &spec.output_path, value);
 		}
 		Ok(Value::Object(result))
@@ -4164,7 +4164,7 @@ impl Finish<'_> {
 		&mut self,
 		spec: &super::program::AggSpec,
 		key: &[Value],
-		accumulators: &[Box<dyn crate::exec::function::Accumulator>],
+		accumulators: &[AccumulatorState],
 		first: Value,
 	) -> FlowResult<Value> {
 		if let Some(index) = spec.group_key_index {
@@ -4179,18 +4179,27 @@ impl Finish<'_> {
 		// A failure to finalize is raised: an accumulator fails when handed a
 		// value of a kind it cannot fold, which is the argument-type error the
 		// scalar form of the function raises.
+		let Some(post) = aggregate.post else {
+			// With no expression over them, the field answers its first
+			// aggregate's value.
+			let mut answer = Value::Null;
+			for (idx, accumulator) in accumulators.iter().enumerate() {
+				let value = accumulator.finalize().map_err(ControlFlow::Err)?;
+				if idx == 0 {
+					answer = value;
+				}
+			}
+			return Ok(answer);
+		};
 		let mut document = crate::val::Object::default();
 		for (idx, accumulator) in accumulators.iter().enumerate() {
 			let value = accumulator.finalize().map_err(ControlFlow::Err)?;
-			document.insert(crate::exec::operators::aggregate_field_name(idx), value);
+			document.insert(crate::exec::operators::aggregate_field_key(idx), value);
 		}
-		let Some(post) = aggregate.post else {
-			return Ok(document.0.into_values().next().unwrap_or(Value::Null));
-		};
 		// The group's keys sit beside its answers, so a key the expression
 		// names finds its placeholder.
 		for (idx, value) in key.iter().enumerate() {
-			document.insert(crate::exec::operators::group_key_field_name(idx), value.clone());
+			document.insert(crate::exec::operators::group_key_field_key(idx), value.clone());
 		}
 		match self.run(post, Some(Value::Object(document))).await {
 			Ok(value) => Ok(value),

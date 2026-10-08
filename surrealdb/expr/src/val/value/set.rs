@@ -27,10 +27,10 @@ impl Value {
 			// Object with Field/Lookup key
 			(Value::Object(obj), FieldPathPart::Field(key) | FieldPathPart::Lookup(key)) => {
 				if is_last {
-					obj.insert(key.clone(), val);
+					obj.insert(key.as_str(), val);
 				} else {
 					let nested =
-						obj.entry(key.clone()).or_insert_with(|| Value::Object(Object::default()));
+						obj.entry(key.as_str()).or_insert_with(|| Value::Object(Object::default()));
 					nested.set_at_field_path_owned_depth(path, val, depth + 1);
 				}
 			}
@@ -114,11 +114,11 @@ impl Value {
 			(target, FieldPathPart::Field(key) | FieldPathPart::Lookup(key)) => {
 				let mut obj = Object::default();
 				if is_last {
-					obj.insert(key.clone(), val);
+					obj.insert(key.as_str(), val);
 				} else {
 					let mut nested = Value::Object(Object::default());
 					nested.set_at_field_path_owned_depth(path, val, depth + 1);
-					obj.insert(key.clone(), nested);
+					obj.insert(key.as_str(), nested);
 				}
 				*target = Value::Object(obj);
 			}

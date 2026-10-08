@@ -26,6 +26,10 @@ impl AggregateFunction for Count {
 		Box::new(CountAccumulator::default())
 	}
 
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::Count(CountAccumulator::default())
+	}
+
 	fn signature(&self) -> Signature {
 		// count() takes no arguments - we pass a dummy value during evaluation
 		Signature::new().returns(Kind::Int)
@@ -33,8 +37,15 @@ impl AggregateFunction for Count {
 }
 
 #[derive(Debug, Clone, Default)]
-struct CountAccumulator {
+pub(crate) struct CountAccumulator {
 	count: i64,
+}
+
+impl CountAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) {
+		self.count += other.count;
+	}
 }
 
 impl Accumulator for CountAccumulator {
@@ -53,7 +64,7 @@ impl Accumulator for CountAccumulator {
 			.as_any()
 			.downcast_ref::<CountAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.count += other.count;
+		self.absorb(other);
 		Ok(())
 	}
 
@@ -91,14 +102,25 @@ impl AggregateFunction for CountField {
 		Box::new(CountFieldAccumulator::default())
 	}
 
+	fn accumulator_state(&self) -> super::AccumulatorState {
+		super::AccumulatorState::CountField(CountFieldAccumulator::default())
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new().arg("value", Kind::Any).returns(Kind::Int)
 	}
 }
 
 #[derive(Debug, Clone, Default)]
-struct CountFieldAccumulator {
+pub(crate) struct CountFieldAccumulator {
 	count: i64,
+}
+
+impl CountFieldAccumulator {
+	/// Fold `other`, a partial state over the same group, into this one.
+	pub(crate) fn absorb(&mut self, other: &Self) {
+		self.count += other.count;
+	}
 }
 
 impl Accumulator for CountFieldAccumulator {
@@ -120,7 +142,7 @@ impl Accumulator for CountFieldAccumulator {
 			.as_any()
 			.downcast_ref::<CountFieldAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.count += other.count;
+		self.absorb(other);
 		Ok(())
 	}
 

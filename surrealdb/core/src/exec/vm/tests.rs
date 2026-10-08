@@ -3827,6 +3827,58 @@ async fn throughput() {
 	}
 }
 
+/// Time the read shapes of the allocation harness (`tests/vm_alloc.rs`) per
+/// row, best of seven runs. Run in release:
+/// `cargo test --release -p surrealdb-core --lib exec::vm::tests::alloc_shapes_throughput
+/// -- --ignored --nocapture`; `ALLOC_SHAPES` narrows it by shape name.
+#[tokio::test]
+#[ignore = "a measurement, not a check"]
+async fn alloc_shapes_throughput() {
+	const ROWS: usize = 20_000;
+	let db = TestDb::new(&format!(
+		"
+		DEFINE TABLE t SCHEMALESS;
+		FOR $i IN 0..{ROWS} {{
+			CREATE type::record('t', $i) SET a = $i, b = $i % 7, s = 'row', lo = $i % 10,
+				hi = math::floor($i / 2), friend = type::record('t', ($i + 1) % {ROWS});
+		}};
+		FOR $i IN 0..{ROWS} {{
+			RELATE (type::record('t', $i))->knows->(type::record('t', ($i + 1) % {ROWS}));
+			RELATE (type::record('t', $i))->knows->(type::record('t', ($i * 7 + 3) % {ROWS}));
+		}};
+		"
+	))
+	.await;
+	let ctx = db.exec_ctx().await;
+	let only = std::env::var("ALLOC_SHAPES").ok();
+	for (name, sql) in [
+		("scan", "SELECT * FROM t"),
+		("filter", "SELECT * FROM t WHERE b = 3"),
+		("project3", "SELECT a, b, s FROM t"),
+		("order", "SELECT * FROM t ORDER BY a DESC"),
+		("order_limit10", "SELECT * FROM t ORDER BY a DESC LIMIT 10"),
+		("group_lo", "SELECT lo, count() AS c FROM t GROUP BY lo"),
+		("group_hi", "SELECT hi, count() AS c FROM t GROUP BY hi"),
+		("count_all", "SELECT count() FROM t GROUP ALL"),
+		("graph_1hop", "SELECT ->knows->t AS f FROM t"),
+		("graph_2hop", "SELECT ->knows->t->knows->t AS f FROM t"),
+		("fetch", "SELECT * FROM t FETCH friend"),
+	] {
+		if only.as_deref().is_some_and(|o| !o.split(',').any(|s| s == name)) {
+			continue;
+		}
+		let bound = bind(&ctx, sql).await;
+		let vm = super::plan(&planner(&ctx), &bound).await.expect("covered");
+		let mut best = std::time::Duration::MAX;
+		for _ in 0..7 {
+			let started = web_time::Instant::now();
+			outcome(&vm, &ctx).await.expect("runs");
+			best = best.min(started.elapsed());
+		}
+		println!("{name:<14} {:>8.1} ns/row", best.as_nanos() as f64 / ROWS as f64);
+	}
+}
+
 /// Split a scan's cost per row into the cursor, the record decode, and the
 /// rest. Run in release, as `throughput`.
 #[tokio::test]

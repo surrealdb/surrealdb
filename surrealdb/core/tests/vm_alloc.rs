@@ -1,0 +1,549 @@
+#![recursion_limit = "256"]
+// The crate's `allocator` feature installs the crate's own global allocator,
+// and a binary has one, so with it this harness compiles to nothing.
+#![cfg(not(feature = "allocator"))]
+//! Heap allocations per row on the executor's bench shapes.
+//!
+//! This binary installs a counting global allocator, so it is its own
+//! integration-test target: a global allocator is per binary. The measurements
+//! are `#[ignore]`d; run them with a profile that keeps line tables, so the
+//! sampled backtraces symbolise:
+//!
+//! ```text
+//! cargo test --locked --profile profiling -p surrealdb-core --test vm_alloc \
+//!     -- --ignored --nocapture --test-threads 1
+//! ```
+//!
+//! `per_row_allocations` prints, per shape, the allocations and bytes each row
+//! adds. Each shape runs over two datastores that differ only in their row
+//! count (`SMALL` and `LARGE`); every query runs once to warm up and once
+//! counted, and the per-row figure is the difference of the two counted runs
+//! over the difference in rows. Parsing, planning and compiling cost the same
+//! at both sizes, so the difference holds only what execution spends per row,
+//! including the conversion of each result row to the public value type.
+//!
+//! With `ALLOC_SAMPLE=K` set, every `K`th counted allocation captures a
+//! backtrace. The innermost frame inside a `surrealdb` crate names the site;
+//! sites are again differenced across the two sizes and scaled by `K`, which
+//! gives an estimate of each site's allocations per row. `ALLOC_SHAPES` takes
+//! a comma-separated list of shape names to run a subset.
+
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::backtrace::Backtrace;
+use std::cell::Cell;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+use surrealdb_core::dbs::Session;
+use surrealdb_core::exec::row_frame_probe;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_types::{Array, Number, Object, Value, Variables};
+
+// --------------------------------------------------
+// The counting allocator
+// --------------------------------------------------
+
+/// Counts the allocations (`alloc`, `alloc_zeroed` and `realloc` calls) and
+/// the bytes they request while a [`Region`] is open, on every thread.
+/// Deallocations are not counted.
+struct Counting;
+
+static ENABLED: AtomicBool = AtomicBool::new(false);
+static ALLOCS: AtomicU64 = AtomicU64::new(0);
+static BYTES: AtomicU64 = AtomicU64::new(0);
+/// Capture a backtrace every this many counted allocations; zero captures none.
+static SAMPLE_EVERY: AtomicU64 = AtomicU64::new(0);
+static SAMPLES: Mutex<Vec<Backtrace>> = Mutex::new(Vec::new());
+
+thread_local! {
+	/// Set while this thread captures a backtrace, so the allocations the
+	/// capture makes are neither counted nor sampled.
+	static IN_HOOK: Cell<bool> = const { Cell::new(false) };
+}
+
+#[inline]
+fn record(size: usize) {
+	if !ENABLED.load(Ordering::Relaxed) || IN_HOOK.with(Cell::get) {
+		return;
+	}
+	let n = ALLOCS.fetch_add(1, Ordering::Relaxed);
+	BYTES.fetch_add(size as u64, Ordering::Relaxed);
+	let every = SAMPLE_EVERY.load(Ordering::Relaxed);
+	if every != 0 && n.is_multiple_of(every) {
+		IN_HOOK.with(|h| h.set(true));
+		let trace = Backtrace::force_capture();
+		if let Ok(mut samples) = SAMPLES.lock() {
+			samples.push(trace);
+		}
+		IN_HOOK.with(|h| h.set(false));
+	}
+}
+
+unsafe impl GlobalAlloc for Counting {
+	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+		record(layout.size());
+		// SAFETY: forwarded unchanged from the caller's contract.
+		unsafe { System.alloc(layout) }
+	}
+
+	unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+		record(layout.size());
+		// SAFETY: forwarded unchanged from the caller's contract.
+		unsafe { System.alloc_zeroed(layout) }
+	}
+
+	unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+		// SAFETY: forwarded unchanged from the caller's contract.
+		unsafe { System.dealloc(ptr, layout) }
+	}
+
+	unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+		record(new_size);
+		// SAFETY: forwarded unchanged from the caller's contract.
+		unsafe { System.realloc(ptr, layout, new_size) }
+	}
+}
+
+#[global_allocator]
+static GLOBAL: Counting = Counting;
+
+/// What a [`Region`] counted.
+#[derive(Clone, Copy, Debug, Default)]
+struct Counts {
+	allocs: u64,
+	bytes: u64,
+}
+
+/// A scope whose allocations are counted, from [`Region::start`] to
+/// [`Region::finish`]. Regions do not nest, and allocations on every thread
+/// count, so nothing else may run while one is open.
+struct Region;
+
+impl Region {
+	/// Open a region, capturing a backtrace every `sample_every` allocations
+	/// (zero for none).
+	fn start(sample_every: u64) -> Self {
+		ALLOCS.store(0, Ordering::SeqCst);
+		BYTES.store(0, Ordering::SeqCst);
+		SAMPLE_EVERY.store(sample_every, Ordering::SeqCst);
+		ENABLED.store(true, Ordering::SeqCst);
+		Region
+	}
+
+	/// Close the region: its counts and the backtraces it sampled.
+	fn finish(self) -> (Counts, Vec<Backtrace>) {
+		ENABLED.store(false, Ordering::SeqCst);
+		let counts = Counts {
+			allocs: ALLOCS.load(Ordering::SeqCst),
+			bytes: BYTES.load(Ordering::SeqCst),
+		};
+		let samples = std::mem::take(&mut *SAMPLES.lock().expect("samples lock"));
+		(counts, samples)
+	}
+}
+
+/// The allocations `fut` makes while it runs.
+async fn count<F: Future>(sample_every: u64, fut: F) -> (F::Output, Counts, Vec<Backtrace>) {
+	let region = Region::start(sample_every);
+	let out = fut.await;
+	let (counts, samples) = region.finish();
+	(out, counts, samples)
+}
+
+// --------------------------------------------------
+// Site attribution
+// --------------------------------------------------
+
+/// The site a backtrace names: the innermost two frames, in distinct
+/// functions, whose source lies in this workspace (outside this harness), each
+/// as `function (file:line)`. Inlined frames carry only a function's bare name,
+/// so frames are placed by their file rather than their symbol path.
+/// `ALLOC_DEPTH` sets how many frames name a site.
+fn site(trace: &Backtrace) -> String {
+	let depth: usize = std::env::var("ALLOC_DEPTH").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
+	let text = trace.to_string();
+	let mut lines = text.lines().peekable();
+	let mut frames: Vec<String> = Vec::new();
+	while let Some(line) = lines.next() {
+		let Some((_, symbol)) = line.trim().split_once(": ") else {
+			continue;
+		};
+		let Some(at) = lines.peek().and_then(|next| next.trim().strip_prefix("at ")) else {
+			continue;
+		};
+		// The standard library's sources sit under `/rustc/`, registry crates'
+		// under `.cargo/`; everything else is this workspace's.
+		let local = !at.starts_with("/rustc/") && !at.contains("/.cargo/");
+		if !local || at.contains("tests/vm_alloc.rs") {
+			continue;
+		}
+		let at = at.rsplit_once(':').map_or(at, |(head, _column)| head);
+		let at = at.find("surrealdb/").map_or(at, |i| &at[i + "surrealdb/".len()..]);
+		let frame = format!("{} ({at})", strip_generics(trim_symbol(symbol)));
+		// Consecutive frames of one function in one file (inlined helpers,
+		// closures) name the same site.
+		let function = |f: &str| f.rsplit_once(':').map(|(head, _line)| head.to_owned());
+		if frames.last().is_some_and(|last| function(last) == function(&frame)) {
+			continue;
+		}
+		frames.push(frame);
+		if frames.len() == depth {
+			break;
+		}
+	}
+	if frames.is_empty() {
+		// A build whose workspace frames carry no line tables still names
+		// their symbols: take the innermost workspace ones.
+		let symbols: Vec<String> = text
+			.lines()
+			.filter_map(|line| line.trim().split_once(": ").map(|(_, symbol)| symbol))
+			.filter(|symbol| symbol.contains("surrealdb") && !symbol.contains("vm_alloc"))
+			.map(|symbol| strip_generics(trim_symbol(symbol)))
+			.take(depth)
+			.collect();
+		if symbols.is_empty() {
+			return "<outside the workspace>".to_owned();
+		}
+		return symbols.join("\n           <- ");
+	}
+	frames.join("\n           <- ")
+}
+
+/// A symbol without its trailing hash.
+fn trim_symbol(symbol: &str) -> &str {
+	match symbol.rsplit_once("::h") {
+		Some((head, hash)) if hash.len() == 16 && hash.chars().all(|c| c.is_ascii_hexdigit()) => {
+			head
+		}
+		_ => symbol,
+	}
+}
+
+/// A symbol with its generic arguments elided.
+fn strip_generics(symbol: &str) -> String {
+	let mut out = String::new();
+	let mut depth = 0usize;
+	for c in symbol.chars() {
+		match c {
+			'<' => {
+				if depth == 0 {
+					out.push_str("<..>");
+				}
+				depth += 1;
+			}
+			'>' if depth > 0 => depth -= 1,
+			_ if depth == 0 => out.push(c),
+			_ => {}
+		}
+	}
+	out
+}
+
+fn tally(samples: &[Backtrace]) -> HashMap<String, i64> {
+	// `ALLOC_DUMP=text` prints the first sampled backtrace that mentions `text`.
+	if let Ok(needle) = std::env::var("ALLOC_DUMP")
+		&& let Some(trace) =
+			samples.iter().map(ToString::to_string).find(|trace| trace.contains(&needle))
+	{
+		println!("{trace}");
+	}
+	let mut sites = HashMap::new();
+	for trace in samples {
+		*sites.entry(site(trace)).or_insert(0) += 1;
+	}
+	sites
+}
+
+// --------------------------------------------------
+// Shapes
+// --------------------------------------------------
+
+const SMALL: usize = 10_000;
+const LARGE: usize = 20_000;
+
+/// The schema and data a datastore of `n` rows holds: a table `t` of `n`
+/// records, two `knows` edges out of each, an empty indexed table `ix`, and
+/// an empty table `c`.
+fn setup(n: usize) -> String {
+	format!(
+		"
+		DEFINE TABLE t SCHEMALESS;
+		FOR $i IN 0..{n} {{
+			CREATE type::record('t', $i) SET a = $i, b = $i % 7, s = 'row', lo = $i % 10,
+				hi = math::floor($i / 2), friend = type::record('t', ($i + 1) % {n});
+		}};
+		FOR $i IN 0..{n} {{
+			RELATE (type::record('t', $i))->knows->(type::record('t', ($i + 1) % {n}));
+			RELATE (type::record('t', $i))->knows->(type::record('t', ($i * 7 + 3) % {n}));
+		}};
+		DEFINE TABLE ix SCHEMALESS;
+		DEFINE INDEX ix_k ON ix FIELDS k;
+		DEFINE TABLE c SCHEMALESS;
+		"
+	)
+}
+
+/// A bench shape: its name, its query for a datastore of `n` rows, and the
+/// number of rows it processes there.
+struct Shape {
+	name: &'static str,
+	query: fn(usize) -> String,
+	rows: fn(usize) -> usize,
+	/// Whether the query takes `$rows`, `rows(n)` objects to insert.
+	takes_rows: bool,
+}
+
+fn all(n: usize) -> usize {
+	n
+}
+
+fn tenth(n: usize) -> usize {
+	n / 10
+}
+
+const SHAPES: &[Shape] = &[
+	Shape {
+		name: "scan",
+		query: |_| "SELECT * FROM t".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "filter",
+		query: |_| "SELECT * FROM t WHERE b = 3".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "project3",
+		query: |_| "SELECT a, b, s FROM t".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "order",
+		query: |_| "SELECT * FROM t ORDER BY a DESC".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "order_limit10",
+		query: |_| "SELECT * FROM t ORDER BY a DESC LIMIT 10".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "order_limit5000",
+		query: |_| "SELECT * FROM t ORDER BY a DESC LIMIT 5000".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "group_lo",
+		query: |_| "SELECT lo, count() AS c FROM t GROUP BY lo".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "group_hi",
+		query: |_| "SELECT hi, count() AS c FROM t GROUP BY hi".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "count_all",
+		query: |_| "SELECT count() FROM t GROUP ALL".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "graph_1hop",
+		query: |_| "SELECT ->knows->t AS f FROM t".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "graph_2hop",
+		query: |_| "SELECT ->knows->t->knows->t AS f FROM t".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "fetch",
+		query: |_| "SELECT * FROM t FETCH friend".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	Shape {
+		name: "create_loop",
+		query: |n| format!("FOR $i IN 0..{} {{ CREATE c SET n = $i }}", n / 10),
+		rows: tenth,
+		takes_rows: false,
+	},
+	Shape {
+		name: "insert_btree",
+		query: |_| "INSERT INTO ix $rows".into(),
+		rows: tenth,
+		takes_rows: true,
+	},
+	Shape {
+		name: "update",
+		query: |_| "UPDATE t SET a = a + 1".into(),
+		rows: all,
+		takes_rows: false,
+	},
+];
+
+/// `$rows`: `n` objects for `INSERT INTO ix`.
+fn insert_rows(n: usize) -> Variables {
+	let rows: Vec<Value> = (0..n)
+		.map(|i| {
+			let mut object = Object::new();
+			object.insert("k", Value::Number(Number::Int(i as i64)));
+			object.insert("v", Value::String("row".to_owned()));
+			Value::Object(object)
+		})
+		.collect();
+	let mut vars = Variables::new();
+	vars.insert("rows", Value::Array(Array::from(rows)));
+	vars
+}
+
+async fn datastore(n: usize) -> (Arc<Datastore>, Session) {
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.build_with_path("memory")
+		.await
+		.expect("datastore");
+	let session = Session::owner().with_ns("test").with_db("test");
+	ds.execute("DEFINE NS test; USE NS test; DEFINE DB test;", &Session::owner(), None)
+		.await
+		.expect("namespace and database defined");
+	for response in ds.execute(&setup(n), &session, None).await.expect("setup runs") {
+		response.result.expect("setup succeeds");
+	}
+	(ds, session)
+}
+
+/// Run `sql` once to warm up, then once counted.
+async fn measure(
+	ds: &Datastore,
+	session: &Session,
+	sql: &str,
+	vars: Option<Variables>,
+	sample_every: u64,
+) -> (Counts, Vec<Backtrace>) {
+	let run = || async {
+		let responses = ds.execute(sql, session, vars.clone()).await.expect("query runs");
+		for response in &responses {
+			if let Err(e) = &response.result {
+				panic!("`{sql}` failed: {e}");
+			}
+		}
+		responses
+	};
+	drop(run().await);
+	let (responses, counts, samples) = count(sample_every, run()).await;
+	drop(responses);
+	// The counted run clones `vars`; that clone is the harness's, not the query's.
+	let (_, clone_counts, _) = count(0, async { drop(vars.clone()) }).await;
+	let counts = Counts {
+		allocs: counts.allocs.saturating_sub(clone_counts.allocs),
+		bytes: counts.bytes.saturating_sub(clone_counts.bytes),
+	};
+	(counts, samples)
+}
+
+fn selected() -> Vec<&'static Shape> {
+	let only = std::env::var("ALLOC_SHAPES").ok();
+	let only: Option<Vec<&str>> = only.as_deref().map(|s| s.split(',').collect());
+	SHAPES.iter().filter(|s| only.as_ref().is_none_or(|o| o.contains(&s.name))).collect()
+}
+
+#[tokio::test]
+#[ignore = "a measurement, not a check"]
+async fn per_row_allocations() {
+	let sample_every: u64 =
+		std::env::var("ALLOC_SAMPLE").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+	let shapes = selected();
+	let (small, session) = datastore(SMALL).await;
+	let (large, _) = datastore(LARGE).await;
+	println!("{:<14} {:>12} {:>12} {:>14}", "shape", "allocs/row", "bytes/row", "fixed allocs");
+	let mut attributions = Vec::new();
+	for shape in shapes {
+		let (rows_small, rows_large) = ((shape.rows)(SMALL), (shape.rows)(LARGE));
+		let vars = |rows| shape.takes_rows.then(|| insert_rows(rows));
+		let (a, sa) =
+			measure(&small, &session, &(shape.query)(SMALL), vars(rows_small), sample_every).await;
+		let (b, sb) =
+			measure(&large, &session, &(shape.query)(LARGE), vars(rows_large), sample_every).await;
+		let rows = (rows_large - rows_small) as f64;
+		let per_row = (b.allocs as f64 - a.allocs as f64) / rows;
+		let bytes_per_row = (b.bytes as f64 - a.bytes as f64) / rows;
+		let fixed = a.allocs as f64 - per_row * rows_small as f64;
+		println!("{:<14} {per_row:>12.2} {bytes_per_row:>12.1} {fixed:>14.0}", shape.name);
+		if sample_every != 0 {
+			attributions.push((shape.name, per_row, rows, tally(&sa), tally(&sb)));
+		}
+	}
+	for (name, per_row, rows, small_sites, large_sites) in attributions {
+		println!("\n== {name}: {per_row:.2} allocs/row; sites by estimated allocs/row");
+		let mut sites: Vec<(String, f64)> = large_sites
+			.iter()
+			.map(|(site, &n)| {
+				let m = small_sites.get(site).copied().unwrap_or(0);
+				(site.clone(), (n - m) as f64 * sample_every as f64 / rows)
+			})
+			.filter(|(_, per)| *per > 0.05)
+			.collect();
+		sites.sort_by(|a, b| b.1.total_cmp(&a.1));
+		let top: usize = std::env::var("ALLOC_TOP").ok().and_then(|s| s.parse().ok()).unwrap_or(25);
+		for (site, per) in sites.iter().take(top) {
+			println!("{per:>7.2}  {site}");
+		}
+	}
+}
+
+/// Allocations per row of transcoding table `t`'s stored records straight
+/// into an output frame (`exec::row_frame_probe`), against `SELECT * FROM t`
+/// through the executor and the public value conversion.
+#[tokio::test]
+#[ignore = "a measurement, not a check"]
+async fn per_row_frame_allocations() {
+	let sample_every: u64 =
+		std::env::var("ALLOC_SAMPLE").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+	let (small, _) = datastore(SMALL).await;
+	let (large, _) = datastore(LARGE).await;
+	let probe = |ds: Arc<Datastore>| async move {
+		let run = || row_frame_probe::transcode_table(&ds, "test", "test", "t");
+		run().await.expect("transcodes");
+		let ((rows, bytes), counts, samples) =
+			count(sample_every, async { run().await.expect("transcodes") }).await;
+		(rows, bytes, counts, samples)
+	};
+	let (rows_a, _, a, sa) = probe(small).await;
+	let (rows_b, bytes_b, b, sb) = probe(large).await;
+	let rows = (rows_b - rows_a) as f64;
+	let per_row = (b.allocs as f64 - a.allocs as f64) / rows;
+	println!(
+		"scan->frame    allocs/row {per_row:.2}  alloc bytes/row {:.1}  frame bytes/row {:.1}",
+		(b.bytes as f64 - a.bytes as f64) / rows,
+		bytes_b as f64 / rows_b as f64,
+	);
+	if sample_every != 0 {
+		let (small_sites, large_sites) = (tally(&sa), tally(&sb));
+		let mut sites: Vec<(String, f64)> = large_sites
+			.iter()
+			.map(|(site, &n)| {
+				let m = small_sites.get(site).copied().unwrap_or(0);
+				(site.clone(), (n - m) as f64 * sample_every as f64 / rows)
+			})
+			.filter(|(_, per)| *per > 0.05)
+			.collect();
+		sites.sort_by(|a, b| b.1.total_cmp(&a.1));
+		for (site, per) in sites.iter().take(15) {
+			println!("{per:>7.2}  {site}");
+		}
+	}
+}
