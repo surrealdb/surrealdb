@@ -6,6 +6,7 @@ use async_channel::{Receiver, Sender};
 use futures::StreamExt;
 use futures::stream::poll_fn;
 use surrealdb_core::channel::Receiver as CoreReceiver;
+use surrealdb_core::cnf::ConfigMap;
 use surrealdb_core::iam::Level;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
@@ -129,6 +130,7 @@ pub(crate) async fn run_router(
 	};
 
 	let builder = Datastore::builder()
+		.with_config(ConfigMap::from_env())
 		.with_query_timeout(address.config.query_timeout)
 		.with_transaction_timeout(address.config.transaction_timeout)
 		.with_auth(configured_root.is_some());
