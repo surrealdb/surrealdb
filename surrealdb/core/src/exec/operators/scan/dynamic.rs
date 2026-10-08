@@ -634,7 +634,7 @@ impl ExecOperator for DynamicScan {
 						version,
 						storage_limit: effective_storage_limit,
 						pre_skip,
-						has_pushed_limit: effective_storage_limit.is_some(),
+						pages_rows: limit_val.is_some() || start_val > 0,
 						limit_hint: limit_val
 							.map(|l| (l + start_val).min(u32::MAX as usize) as u32),
 						knn_context: knn_context.clone(),
@@ -825,11 +825,14 @@ struct TableScanConfig {
 	storage_limit: Option<usize>,
 	/// Number of KV pairs to skip before decoding (fast-path only).
 	pre_skip: usize,
-	/// Whether the LIMIT was actually pushed into the storage-level scan.
-	/// When true the scan truncates rows, so we must verify that the
-	/// runtime-selected BTree index covers the requested ordering.
-	/// If it doesn't, we fall back to a KV scan for correctness.
-	has_pushed_limit: bool,
+	/// Whether this operator pages the rows it emits: a LIMIT or START the
+	/// planner handed it, applied by the storage scan or, when rows are
+	/// filtered after decoding, by the scan pipeline. Either way the page is
+	/// taken in the order the source delivers, which the planner assumed to
+	/// be record-id order (`order_is_scan_compatible`). A runtime-selected
+	/// B-tree index is therefore used only when it covers the requested
+	/// ordering; otherwise the KV scan answers.
+	pages_rows: bool,
 	/// Hint for the scanner's initial batch size, typically `limit + start`.
 	/// Caps the first fetch to avoid over-reading for small-limit queries.
 	limit_hint: Option<u32>,
@@ -998,15 +1001,15 @@ async fn resolve_table_scan_stream(
 
 	match access_path {
 		// B-tree index scan (single-column and compound).
-		// When the LIMIT was pushed into storage, the scan truncates rows
-		// and assumes id-ordered output (via order_is_scan_compatible).
-		// Reject the index if it doesn't cover the requested ordering so
-		// we fall through to the KV scan fallback for correctness.
+		// When this operator pages its rows, the page assumes id-ordered
+		// output (via order_is_scan_compatible). Reject the index if it
+		// doesn't cover the requested ordering so we fall through to the KV
+		// scan fallback for correctness.
 		Some(AccessPath::BTreeScan {
 			index_ref,
 			access,
 			direction,
-		}) if !cfg.has_pushed_limit
+		}) if !cfg.pages_rows
 			|| (cfg
 				.order
 				.as_ref()
@@ -1360,5 +1363,73 @@ mod tests {
 		let order = LogicalOrdering::Random;
 		let direction = determine_scan_direction(Some(&order));
 		assert!(matches!(direction, Direction::Forward));
+	}
+
+	/// The scan the planner builds for `SELECT id FROM item WHERE category =
+	/// $category ORDER BY id`, paged by `limit` and `start`. Every record
+	/// matches the condition and the predicate, so the predicate leaves the
+	/// paging to the scan pipeline rather than to the storage scan.
+	fn paged_by_id(
+		limit: Option<i64>,
+		start: Option<i64>,
+		predicate: Arc<dyn PhysicalExpr>,
+	) -> Arc<dyn ExecOperator> {
+		use crate::exec::operators::test_util::parse_expr;
+		use crate::exec::physical_expr::Literal;
+		use crate::expr::logical::LogicalOrder;
+
+		let literal = |n: i64| Arc::new(Literal(Value::from(n))) as Arc<dyn PhysicalExpr>;
+		Arc::new(DynamicScan::new(
+			Arc::new(Literal(Value::Table("item".into()))),
+			None,
+			Some(parse_expr("category = category:1")),
+			Some(LogicalOrdering::Order(vec![LogicalOrder {
+				value: LogicalExpr::Field("id".into()),
+				collate: false,
+				numeric: false,
+				direction: true,
+			}])),
+			None,
+			None,
+			Some(predicate),
+			limit.map(literal),
+			start.map(literal),
+		))
+	}
+
+	/// A page taken in record-id order is not one taken in the order of an
+	/// index whose pinned prefix leaves another column before the record id:
+	/// `by_category` lists `item:2` (`flag = false`) before `item:1`. Paging
+	/// after a row filter is still paging, so such an index is not used.
+	#[tokio::test]
+	async fn a_scan_paged_after_its_row_filter_is_paged_in_record_id_order() {
+		use crate::exec::operators::test_util::{TestDb, collect, physical_expr, val};
+
+		let db = TestDb::new(
+			"DEFINE TABLE item SCHEMAFULL;
+			DEFINE FIELD category ON item TYPE record<category>;
+			DEFINE FIELD flag ON item TYPE bool;
+			DEFINE INDEX by_category ON item FIELDS category, flag UNIQUE;
+			CREATE item:1 SET category = category:1, flag = true;
+			CREATE item:2 SET category = category:1, flag = false;",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let predicate = physical_expr("category = category:1", &ctx).await;
+		let ids = |rows: Vec<Value>| -> Vec<Value> {
+			rows.into_iter()
+				.map(|row| match row {
+					Value::Object(object) => object.get("id").cloned().unwrap_or(Value::None),
+					other => other,
+				})
+				.collect()
+		};
+
+		let first = collect(&paged_by_id(Some(1), None, Arc::clone(&predicate)), &ctx).await;
+		assert_eq!(ids(first), vec![val("item:1").await]);
+		let second = collect(&paged_by_id(Some(1), Some(1), Arc::clone(&predicate)), &ctx).await;
+		assert_eq!(ids(second), vec![val("item:2").await]);
+		let after_first = collect(&paged_by_id(None, Some(1), predicate), &ctx).await;
+		assert_eq!(ids(after_first), vec![val("item:2").await]);
 	}
 }
