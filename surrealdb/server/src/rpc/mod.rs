@@ -97,8 +97,18 @@ pub async fn dispatch_live_notification(notification: Notification, state: Arc<R
 	// `web_sockets`. Keeping those locks independent prevents cleanup paths from being blocked
 	// by a client send on the hot notification path.
 	let live_query = state.live_queries.read().await.get(&notification.id).cloned();
+	// Same for `web_sockets`, in a statement of its own: inside the `if let` condition below the
+	// guard would be a temporary that lives until the end of the block, so it would be held across
+	// the `send().await` into the client's bounded channel. A client that stops reading would then
+	// keep the guard, the next disconnect would queue `web_sockets.write()` behind it, and the
+	// fair `RwLock` would park every later `read()`, including the one the upgrade handler takes
+	// before it accepts a new WebSocket.
+	let rpc = match &live_query {
+		Some(entry) => state.web_sockets.read().await.get(&entry.websocket_id).cloned(),
+		None => None,
+	};
 	if let Some(entry) = live_query
-		&& let Some(rpc) = state.web_sockets.read().await.get(&entry.websocket_id).cloned()
+		&& let Some(rpc) = rpc
 	{
 		// Count the notification once we know it will actually be delivered to a client. Drops
 		// (unknown LQ id or disconnected WS) are deliberately not counted.

@@ -1287,6 +1287,68 @@ mod tests {
 		assert!(ctx.user.is_none());
 	}
 
+	#[tokio::test]
+	async fn blocked_live_notification_does_not_hold_web_sockets_lock() {
+		// A client that stopped reading: its response channel is full and
+		// nobody drains it, so delivering a LIVE notification to it waits.
+		// That wait must not hold the `web_sockets` lock. If it does, the
+		// next disconnect's `write()` queues behind it and the fair `RwLock`
+		// parks every later `read()`, including the upgrade handler's, so no
+		// new WebSocket can connect until the slow client drains.
+		let ds = Arc::new(Datastore::builder().build_with_path("memory").await.unwrap());
+		let state = Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds)));
+		let id = Uuid::new_v4();
+		let (tx, _rx) = channel::<Message>(1);
+		tx.try_send(Message::Text("queued".into())).unwrap();
+		let rpc = Arc::new(Websocket {
+			id,
+			format: Format::Json,
+			state: Arc::clone(&state),
+			datastore: ds,
+			sessions: HashMap::new(),
+			transactions: DashMap::new(),
+			shutdown: CancellationToken::new(),
+			cancel: surrealdb_core::ctx::CancelHandle::new(),
+			channel: tx,
+		});
+		state.web_sockets.write().await.insert(id, rpc);
+		let lqid = Uuid::new_v4();
+		state.live_queries.write().await.insert(
+			lqid,
+			crate::rpc::LiveQueryEntry {
+				websocket_id: id,
+				session_id: id,
+				namespace: None,
+				database: None,
+			},
+		);
+		let notification = surrealdb_types::Notification::new(
+			lqid.into(),
+			None,
+			surrealdb_types::Action::Create,
+			Value::None,
+			Value::None,
+		);
+		let dispatch =
+			tokio::spawn(crate::rpc::dispatch_live_notification(notification, Arc::clone(&state)));
+		tokio::time::sleep(Duration::from_millis(100)).await;
+		assert!(!dispatch.is_finished(), "the send should be waiting on the full channel");
+
+		// A disconnect's cleanup gets the write lock while the send waits...
+		let removed = tokio::time::timeout(Duration::from_secs(2), async {
+			state.web_sockets.write().await.remove(&id).is_some()
+		})
+		.await;
+		assert_eq!(removed, Ok(true), "web_sockets lock held across a blocked notification send");
+		// ...and a new connection's lookup is not parked behind anything.
+		let lookup = tokio::time::timeout(Duration::from_secs(2), async {
+			state.web_sockets.read().await.contains_key(&Uuid::new_v4())
+		})
+		.await;
+		assert_eq!(lookup, Ok(false));
+		dispatch.abort();
+	}
+
 	/// Install the W3C trace-context propagator once per process. The
 	/// `extract_trace_context_*` tests share it because
 	/// `set_text_map_propagator` is process-global; running them with no
