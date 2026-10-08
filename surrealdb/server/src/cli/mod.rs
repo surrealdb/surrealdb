@@ -24,6 +24,7 @@ pub(crate) mod validator;
 mod version;
 mod version_client;
 
+use std::io::IsTerminal;
 use std::ops::Deref;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -60,22 +61,30 @@ use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
 use crate::ntw::RouterFactory;
 
-const INFO: &str = "
-To get started using SurrealDB, and for guides on connecting to and building applications
-on top of SurrealDB, check out the SurrealDB documentation (https://surrealdb.com/docs).
+/// Builds the help banner, coloured only when stdout is a terminal and `NO_COLOR` is unset
+fn banner() -> String {
+	let colour = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+	let (pink, bold, dim, ul, r) = if colour {
+		("\x1b[38;2;255;0;160m", "\x1b[1m", "\x1b[2m", "\x1b[4m", "\x1b[0m")
+	} else {
+		("", "", "", "", "")
+	};
+	format!(
+		"{pink}{LOGO}{r}
+  {bold}Your free SurrealDB Cloud instance is waiting.{r}
+  Spin one up in under a minute, no credit card needed:
+  {pink}{ul}https://studio.surrealdb.com{r}
 
-If you have questions or ideas, join the SurrealDB community (https://surrealdb.com/community).
-
-If you find a bug, submit an issue on GitHub (https://github.com/surrealdb/surrealdb/issues).
-
-We would love it if you could star the repository (https://github.com/surrealdb/surrealdb).
-
-----------
-";
+{dim}  Docs        https://surrealdb.com/docs
+  Issues      https://github.com/surrealdb/surrealdb/issues
+  Star us     https://github.com/surrealdb/surrealdb{r}
+"
+	)
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "SurrealDB command-line interface and server", bin_name = "surreal")]
-#[command(version = RELEASE.as_str(), about = INFO, before_help = LOGO)]
+#[command(version = RELEASE.as_str(), about = banner())]
 #[command(disable_version_flag = false, arg_required_else_help = true)]
 struct Cli {
 	//
