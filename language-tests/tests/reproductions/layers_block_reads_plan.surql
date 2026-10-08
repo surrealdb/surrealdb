@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -25,37 +24,31 @@ value = "[{ a: 1, c: 2, id: t:1 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: x]
-    Compute [ctx: Db] [fields: x = (Return)]
-      x.subquery: Return [ctx: Db]
-          Expr [ctx: Db] [expr: c]
-        ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
-            TableScan [ctx: Db] [table: t, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: x]
-    Compute [ctx: Db] [fields: x = IF a > 0 THEN (Expr) ELSE (Expr) END]
-        ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
-            TableScan [ctx: Db] [table: t, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: x]
-    Compute [ctx: Db] [fields: x = (UnwrapExactlyOne)]
-      x.subquery: UnwrapExactlyOne [ctx: Db]
-          ProjectValue [ctx: Db] [expr: c]
-              DynamicScan [ctx: Db] [source: $parent]
-        ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
-            TableScan [ctx: Db] [table: t, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: (Expr) > 1]
-      predicate.subquery: Expr [ctx: Db] [expr: c]
+    Filter [ctx: Db] [predicate: (
+  Sequence
+    Eval[c]
+) > 1]
         ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
             TableScan [ctx: Db] [table: t, direction: Forward]
 ''''

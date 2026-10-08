@@ -299,6 +299,58 @@ async fn test_live_with_variables() -> Result<()> {
 	Ok(())
 }
 
+// A subscription's compiled work inlines the functions and database
+// parameters its clauses read. Redefining one changes no table definition, so
+// a unit held for the table's catalog version must still not be reused.
+#[tokio::test]
+async fn test_live_reads_a_redefined_function_and_param() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+
+	let sql = "
+		DEFINE TABLE lv;
+		DEFINE FUNCTION fn::ok() { RETURN false };
+		DEFINE PARAM $want VALUE 1;
+		LIVE SELECT * FROM lv WHERE fn::ok();
+		LIVE SELECT * FROM lv WHERE v = $want;
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 5);
+	skip_ok(res, 5)?;
+
+	// Compiles and holds both units: the first matches nothing, the second
+	// matches `v = 1`.
+	let res = &mut dbs.execute("CREATE lv:1 SET v = 1", &ses, None).await?;
+	skip_ok(res, 1)?;
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Create);
+	assert_eq!(tmp.result, syn::value("{ id: lv:1, v: 1 }")?);
+	tokio::time::sleep(Duration::from_millis(100)).await;
+	assert!(channel.try_recv().is_err(), "fn::ok() is false, so only one subscription matches");
+
+	let sql = "
+		DEFINE FUNCTION OVERWRITE fn::ok() { RETURN true };
+		DEFINE PARAM OVERWRITE $want VALUE 2;
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	skip_ok(res, 2)?;
+
+	// Both subscriptions now match `v = 2`.
+	let res = &mut dbs.execute("CREATE lv:2 SET v = 2", &ses, None).await?;
+	skip_ok(res, 1)?;
+	for _ in 0..2 {
+		let tmp = tokio::time::timeout(Duration::from_secs(5), channel.recv())
+			.await
+			.expect("both subscriptions read the redefined function and param")?;
+		assert_eq!(tmp.action, Action::Create);
+		assert_eq!(tmp.result, syn::value("{ id: lv:2, v: 2 }")?);
+	}
+	tokio::time::sleep(Duration::from_millis(100)).await;
+	assert!(channel.try_recv().is_err());
+
+	Ok(())
+}
+
 // REMOVE TABLE must invalidate the datastore-wide live-query cache, otherwise
 // a write to a same-name recreated table will be processed against the killed
 // subscription's cached entry and deliver a notification to a client whose
@@ -388,7 +440,9 @@ async fn test_remove_database_kills_live_queries() -> Result<()> {
 	// Exactly one Killed per subscription, in either order.
 	let mut killed = vec![];
 	for _ in 0..2 {
-		let tmp = channel.recv().await?;
+		let tmp = tokio::time::timeout(Duration::from_secs(5), channel.recv())
+			.await
+			.expect("both subscriptions read the redefined function and param")?;
 		assert_eq!(tmp.action, Action::Killed);
 		killed.push(Value::Uuid(tmp.id));
 	}
@@ -740,5 +794,123 @@ async fn live_where_via_params_respects_field_permissions() -> Result<()> {
 	assert_eq!(tmp.action, Action::Create);
 	assert_eq!(tmp.result, syn::value("{ id: test:2, visible: 'xyz' }")?);
 
+	Ok(())
+}
+
+/// A subscriber's table `PERMISSIONS FOR select` that reads a `COMPUTED` field
+/// is judged with that field derived from the notified record, in the
+/// permission's own frame: reads unchecked, so a body following a record the
+/// subscriber may not select still reads it. A computed field is not stored,
+/// so judged against the record as written the clause reads `NONE`, and a
+/// deny-intended clause delivers every record.
+#[tokio::test]
+async fn live_select_permission_reads_computed_fields() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+	let ses_owner = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let ses_record = Session::for_record(
+		"test",
+		"test",
+		"test",
+		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())),
+	)
+	.with_rt(true);
+
+	let sql = "
+		DEFINE TABLE meta SCHEMALESS PERMISSIONS NONE;
+		CREATE meta:secret SET secret = true;
+		CREATE meta:open SET secret = false;
+		DEFINE TABLE doc SCHEMALESS
+			PERMISSIONS FOR select WHERE hidden != true AND locked != true, FOR create, update FULL;
+		DEFINE FIELD hidden ON doc COMPUTED status = 'secret';
+		DEFINE FIELD locked ON doc COMPUTED meta.secret;
+	";
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
+	assert_eq!(res.len(), 6);
+	skip_ok(res, 6)?;
+
+	let res = &mut dbs.execute("LIVE SELECT VALUE id FROM doc;", &ses_record, None).await?;
+	let lqid = res.remove(0).result?;
+	assert_eq!(lqid.kind(), Kind::Uuid);
+
+	// Only `doc:pub` may reach the subscriber: `doc:sec` is hidden, and
+	// `doc:locked` is locked through a record the subscriber may not select.
+	// The writer may not select it either, so `locked` derived as the writer
+	// is `NONE`.
+	let sql = "
+		CREATE doc:sec SET status = 'secret', meta = meta:open;
+		CREATE doc:locked SET status = 'public', meta = meta:secret;
+		CREATE doc:pub SET status = 'public', meta = meta:open;
+	";
+	let res = &mut dbs.execute(sql, &ses_record, None).await?;
+	skip_ok(res, 3)?;
+
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Create);
+	assert_eq!(tmp.result, syn::value("doc:pub").unwrap(), "only the visible record is delivered");
+
+	tokio::time::sleep(Duration::from_millis(500)).await;
+	assert!(channel.try_recv().is_err(), "no hidden record is delivered");
+	Ok(())
+}
+
+// `LIVE` statements sent together over one task, as one connection's requests
+// are, each register in a write transaction that does not yield to the next:
+// they may not conflict with one another on the table's stored definition.
+// Thirty per round, resumed in the order they are woken, share one task's
+// cooperative budget, which runs out within a round: a registration that
+// yields when it does lets a later one commit first. A storage read offloaded
+// under load still yields, hence the small tolerance.
+#[cfg(feature = "kv-rocksdb")]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_lives_on_one_task_do_not_conflict() -> Result<()> {
+	use futures::StreamExt;
+	use surrealdb_core::kvs::Datastore;
+	use surrealdb_rpc::capabilities::Capabilities;
+
+	const ROUNDS: usize = 20;
+	const PER_ROUND: usize = 30;
+
+	let (send, _recv) = surrealdb_core::channel::bounded(1000);
+	let dir = temp_dir::TempDir::new()?;
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.with_capabilities(Capabilities::all())
+		.with_notify(send)
+		.build_with_path(&format!("rocksdb://{}", dir.path().display()))
+		.await?;
+	crate::helpers::new_ns_db(&ds, "test", "test").await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+
+	let mut conflicts = 0;
+	for round in 0..ROUNDS {
+		let res = &mut ds.execute(&format!("DEFINE TABLE person_{round}"), &ses, None).await?;
+		skip_ok(res, 1)?;
+		let sql = format!("LIVE SELECT * FROM person_{round}");
+		// Polled as a connection polls its requests: each is resumed in the
+		// order it is woken, not the order it was sent.
+		let results: Vec<_> = (0..PER_ROUND)
+			.map(|_| ds.execute(&sql, &ses, None))
+			.collect::<futures::stream::FuturesUnordered<_>>()
+			.collect()
+			.await;
+		for result in results {
+			for response in result? {
+				if let Err(e) = response.result {
+					let message = e.to_string().to_lowercase();
+					if message.contains("conflict") || message.contains("resource busy") {
+						conflicts += 1;
+					} else {
+						return Err(anyhow::anyhow!("a LIVE failed: {message}"));
+					}
+				}
+			}
+		}
+	}
+	println!("LIVE conflicts: {conflicts} of {}", ROUNDS * PER_ROUND);
+	assert!(
+		conflicts <= ROUNDS * PER_ROUND / 100,
+		"{conflicts} of {} LIVE statements conflicted",
+		ROUNDS * PER_ROUND
+	);
 	Ok(())
 }

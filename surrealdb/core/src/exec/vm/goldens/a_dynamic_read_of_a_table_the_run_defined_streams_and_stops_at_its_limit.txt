@@ -1,0 +1,12 @@
+### SELECT * FROM type::table('fresh') LIMIT 3
+{ id: fresh:1, n: 1, s: '1' }
+{ id: fresh:2, n: 2, s: '1' }
+{ id: fresh:3, n: 3, s: '1' }
+### SELECT n FROM type::table('fresh') START 2 LIMIT 3
+{ n: 3 }
+{ n: 4 }
+{ n: 5 }
+### SELECT * FROM type::table('fresh') WHERE <int> s > 0 LIMIT 3
+{ id: fresh:1, n: 1, s: '1' }
+{ id: fresh:2, n: 2, s: '1' }
+{ id: fresh:3, n: 3, s: '1' }

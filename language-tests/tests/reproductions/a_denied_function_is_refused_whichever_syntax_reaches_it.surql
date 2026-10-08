@@ -10,7 +10,7 @@ function bound to a MATCHES predicate at plan time is refused, the binding
 being no exemption; and a projection function outside projection position is an
 ordinary call and is refused.
 
-`SELECT type::field('a') FROM t` is the one exception, on every engine: in
+`SELECT type::field('a') FROM t` is the one exception: in
 projection position the call names a field of the output shape rather than
 computing a value, and it is allowed whatever the deny list says.
 

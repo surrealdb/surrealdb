@@ -148,6 +148,12 @@ impl Parse for ast::DefineDatabase {
 	}
 }
 
+/// Parses the string literal of a `GRAPHQL_ALIAS` or `GRAPHQL_DEPRECATED` clause.
+fn parse_graphql_string(parser: &mut Parser<'_, '_>) -> ParseResult<NodeId<ast::StringLit>> {
+	let lit = parser.parse_sync::<ast::StringLit>()?;
+	Ok(parser.push(lit))
+}
+
 impl Parse for ast::DefineFunction {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let define = parser.expect(T![DEFINE])?;
@@ -192,6 +198,8 @@ impl Parse for ast::DefineFunction {
 
 		let mut comment = None;
 		let mut permissions = None;
+		let mut graphql_alias = None;
+		let mut graphql_deprecated = None;
 		while let Some(x) = parser.peek()? {
 			match x.token {
 				T![COMMENT] => {
@@ -202,6 +210,24 @@ impl Parse for ast::DefineFunction {
 				T![PERMISSIONS] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut permissions, x.span, Parser::parse).await?;
+				}
+				T![GRAPHQL_ALIAS] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(
+						parser,
+						&mut graphql_alias,
+						x.span,
+						parse_graphql_string,
+					)?;
+				}
+				T![GRAPHQL_DEPRECATED] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(
+						parser,
+						&mut graphql_deprecated,
+						x.span,
+						parse_graphql_string,
+					)?;
 				}
 				_ => break,
 			}
@@ -216,6 +242,8 @@ impl Parse for ast::DefineFunction {
 			body,
 			comment: comment.map(|x| x.0),
 			permission: permissions.map(|x| x.0),
+			graphql_alias: graphql_alias.map(|x| x.0),
+			graphql_deprecated: graphql_deprecated.map(|x| x.0),
 			span,
 		})
 	}
@@ -1120,7 +1148,8 @@ impl Parse for ast::FieldPermissions {
 						*x = false;
 						res.select = Some(permission.clone())
 					}
-					if parser.eat(T![,])?.is_none() {
+					let _ = parser.eat(T![,])?;
+					if !matches!(parser.peek()?.map(|x| x.token), Some(T![FOR])) {
 						break;
 					}
 				}

@@ -1,0 +1,8 @@
+### SELECT n, (EXPLAIN SELECT * FROM item) AS plan FROM open
+{ n: 10, plan: 'SelectProject [ctx: Db] [projections: *]\n    ProjectLayer [ctx: Db] [columns: twice = n * 2 @computed]\n        TableScan [ctx: Db] [table: item, direction: Forward]\n' }
+{ n: 20, plan: 'SelectProject [ctx: Db] [projections: *]\n    ProjectLayer [ctx: Db] [columns: twice = n * 2 @computed]\n        TableScan [ctx: Db] [table: item, direction: Forward]\n' }
+{ n: 2, plan: 'SelectProject [ctx: Db] [projections: *]\n    ProjectLayer [ctx: Db] [columns: twice = n * 2 @computed]\n        TableScan [ctx: Db] [table: item, direction: Forward]\n' }
+### { LET $plan = (EXPLAIN SELECT * FROM item WHERE n > 1); RETURN $plan }
+'SelectProject [ctx: Db] [projections: *]\n    ProjectLayer [ctx: Db] [columns: twice = n * 2 @computed]\n        TableScan [ctx: Db] [table: item, direction: Forward, predicate: n > 1, pre_decode_filter: yes]\n'
+### RETURN [(EXPLAIN FORMAT JSON SELECT * FROM item), (EXPLAIN SELECT count() FROM item GROUP ALL)]
+[{ attributes: { projections: '*' }, children: [{ attributes: { columns: 'twice = n * 2 @computed' }, children: [{ attributes: { direction: 'Forward', table: 'item' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'ProjectLayer' }], context: 'Db', operator: 'SelectProject' }, 'SelectProject [ctx: Db] [projections: *]\n    CountScan [ctx: Db] [source: item]\n']

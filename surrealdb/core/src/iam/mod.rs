@@ -3,7 +3,6 @@ use std::sync::Once;
 pub(crate) use surrealdb_iam::*;
 
 pub mod access;
-mod action_impls;
 pub mod base;
 pub mod check;
 pub mod clear;

@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -23,8 +22,9 @@ value = "NONE"
 value = "{ events: {  }, fields: {  }, indexes: { i: 'DEFINE INDEX i ON b FIELDS t FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: id]
-    FullTextScan [ctx: Db] [index: i, query: Hello]
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    FullTextScan [ctx: Db] [table: b, index: i, query: Hello]
 ''''
 
 [[test.results]]

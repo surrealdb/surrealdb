@@ -15,12 +15,12 @@ use futures::StreamExt;
 use tracing::instrument;
 
 use crate::exec::field_path::FieldPath;
+use crate::exec::operators::OmitPath;
 use crate::exec::{
 	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
 	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
 	buffer_stream, monitor_stream,
 };
-use crate::expr::logical::{LogicalDestructureField, LogicalExpr, LogicalLiteral};
 use crate::val::{Object, Strand, Value};
 
 // ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ pub struct Project {
 	/// The fields to select/project (shared across batches via Arc)
 	pub fields: Arc<[FieldSelection]>,
 	/// Paths to omit from output (for SELECT * OMIT) (shared across batches via Arc)
-	pub omit: Arc<[LogicalExpr]>,
+	pub omit: Arc<[OmitPath]>,
 	/// Whether to include all fields from input (for SELECT *, field1, field2)
 	pub include_all: bool,
 	/// Whether a batch may be evaluated one field at a time — each field for
@@ -172,7 +172,7 @@ impl Project {
 	pub(crate) fn new(
 		input: Arc<dyn ExecOperator>,
 		fields: Vec<FieldSelection>,
-		omit: Vec<LogicalExpr>,
+		omit: Vec<OmitPath>,
 		include_all: bool,
 	) -> Self {
 		Self {
@@ -248,7 +248,7 @@ impl ExecOperator for Project {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -303,7 +303,7 @@ impl ExecOperator for Project {
 									Value::None => continue,
 									mut raw => {
 										for field in omit.iter() {
-											omit_field_sync(&mut raw, field);
+											field.apply(&mut raw, &eval_ctx).await?;
 										}
 										values.push(raw);
 										continue;
@@ -341,7 +341,7 @@ impl ExecOperator for Project {
 							};
 
 							for field in omit.iter() {
-								omit_field_sync(&mut output_value, field);
+								field.apply(&mut output_value, &eval_ctx).await?;
 							}
 							values.push(output_value);
 						}
@@ -409,7 +409,7 @@ impl ExecOperator for Project {
 					if !omit.is_empty() {
 						for val in &mut values {
 							for field in omit.iter() {
-								omit_field_sync(val, field);
+								field.apply(val, &eval_ctx).await?;
 							}
 						}
 					}
@@ -442,7 +442,7 @@ impl ExecOperator for Project {
 /// - Projection functions without an alias produce one write per binding, keyed by the binding's
 ///   idiom.
 /// - Regular expressions produce one write at `field.output_path`.
-async fn compute_field_writes(
+pub(crate) async fn compute_field_writes(
 	field: &FieldSelection,
 	eval_ctx: EvalContext<'_>,
 	writes: &mut Vec<(FieldPath, Value)>,
@@ -450,22 +450,7 @@ async fn compute_field_writes(
 	if field.expr.is_projection_function()
 		&& let Some(bindings) = field.expr.evaluate_projection(eval_ctx.clone()).await?
 	{
-		if field.has_explicit_alias {
-			let value = if bindings.len() == 1 {
-				bindings.into_iter().next().expect("bindings verified non-empty").1
-			} else {
-				Value::Array(bindings.into_iter().map(|(_, v)| v).collect::<Vec<_>>().into())
-			};
-			writes.push((field.output_path.clone(), value));
-		} else {
-			for (idiom, value) in bindings {
-				if let Ok(path) = crate::exec::field_path_convert::field_path_from_idiom(&idiom)
-					&& !path.is_empty()
-				{
-					writes.push((path, value));
-				}
-			}
-		}
+		projection_writes(bindings, field.has_explicit_alias, &field.output_path, writes);
 		return Ok(());
 	}
 
@@ -474,13 +459,42 @@ async fn compute_field_writes(
 	Ok(())
 }
 
+/// The writes a projection function's `bindings` make at a projection's
+/// root: with an explicit alias, one write at `output_path` — the one
+/// binding's value, or every binding's value in an array; otherwise one write
+/// per binding, keyed by the binding's idiom, skipping an idiom that names no
+/// field path.
+pub(crate) fn projection_writes(
+	bindings: Vec<(crate::expr::idiom::Idiom, Value)>,
+	aliased: bool,
+	output_path: &FieldPath,
+	writes: &mut Vec<(FieldPath, Value)>,
+) {
+	if aliased {
+		let value = if bindings.len() == 1 {
+			bindings.into_iter().next().expect("bindings verified non-empty").1
+		} else {
+			Value::Array(bindings.into_iter().map(|(_, v)| v).collect::<Vec<_>>().into())
+		};
+		writes.push((output_path.clone(), value));
+	} else {
+		for (idiom, value) in bindings {
+			if let Ok(path) = crate::exec::field_path_convert::field_path_from_idiom(&idiom)
+				&& !path.is_empty()
+			{
+				writes.push((path, value));
+			}
+		}
+	}
+}
+
 /// Evaluate a field expression and set the resulting value(s) on the output object.
 ///
 /// For regular expressions, evaluates the expression and sets the result at the output_path.
 /// For projection functions:
 /// - If has_explicit_alias is true, use the alias (output_path) as the field name
 /// - Otherwise, use the dynamic field names from the function result
-async fn evaluate_and_set_field(
+pub(crate) async fn evaluate_and_set_field(
 	obj: &mut Object,
 	field: &FieldSelection,
 	eval_ctx: EvalContext<'_>,
@@ -519,284 +533,6 @@ async fn evaluate_and_set_field(
 // ---------------------------------------------------------------------------
 // OMIT helpers
 // ---------------------------------------------------------------------------
-
-/// Synchronously remove the location a path expression denotes from a value.
-///
-/// The path is applied from its root, following the value through field
-/// accesses, array indices and `.*` fan-out, and the outermost step decides
-/// what is removed: a field is deleted from its object, an index removes the
-/// element it numbers or the key it spells, `[$]` removes the last element,
-/// `.*` empties the object or array, and a destructure deletes the listed
-/// fields. A `Broadcast` applies its body to each value its base reaches.
-///
-/// The walk is structural, so it only reaches what a path names without
-/// evaluating any of its steps. [`omit_path_is_expressible`] is the statement
-/// of which paths those are, and the planner declines the rest: a path this
-/// walker cannot perform would remove nothing at all, where the per-row
-/// engine evaluates the step and removes what it names.
-#[inline]
-pub(crate) fn omit_field_sync(value: &mut Value, path: &LogicalExpr) {
-	match path {
-		LogicalExpr::Field(name) => {
-			if let Value::Object(obj) = value {
-				obj.remove(name.as_str());
-			}
-		}
-		LogicalExpr::Access {
-			base,
-			field,
-		} => for_each_target(value, base, &mut |target| {
-			if let Value::Object(obj) = target {
-				obj.remove(field.as_str());
-			}
-		}),
-		LogicalExpr::Each(base) => for_each_target(value, base, &mut |target| match target {
-			Value::Object(obj) => obj.clear(),
-			Value::Array(arr) => arr.clear(),
-			_ => {}
-		}),
-		LogicalExpr::Index {
-			base,
-			index,
-		} => {
-			let Some(idx) = literal_index(index) else {
-				return;
-			};
-			// An index numbers a position in an array and spells a key in an
-			// object, and removes what it names in either.
-			for_each_target(value, base, &mut |target| match target {
-				Value::Array(arr) if idx < arr.len() => {
-					arr.remove(idx);
-				}
-				Value::Object(obj) => {
-					obj.remove(idx.to_string().as_str());
-				}
-				_ => {}
-			})
-		}
-		LogicalExpr::First(base) => for_each_target(value, base, &mut |target| {
-			if let Value::Array(arr) = target
-				&& !arr.is_empty()
-			{
-				arr.remove(0);
-			}
-		}),
-		LogicalExpr::Last(base) => for_each_target(value, base, &mut |target| {
-			if let Value::Array(arr) = target
-				&& let Some(last) = arr.len().checked_sub(1)
-			{
-				arr.remove(last);
-			}
-		}),
-		LogicalExpr::Destructure {
-			base,
-			fields,
-		} => for_each_target(value, base, &mut |target| {
-			// OMIT obj.c.{ d, f } removes d and f from obj.c.
-			if let Value::Object(obj) = target {
-				omit_destructure_fields(obj, fields);
-			}
-		}),
-		LogicalExpr::Broadcast {
-			base,
-			body,
-			..
-		} => for_each_target(value, base, &mut |target| omit_field_sync(target, body)),
-		_ => {}
-	}
-}
-
-/// Whether [`omit_field_sync`] can perform the removal `path` describes.
-///
-/// The walker is structural: it follows a path through a value without
-/// evaluating any of its steps. A step whose meaning comes from evaluation —
-/// a filter, a method, a lookup, a recursion, an index that is not written
-/// down as a non-negative integer — therefore names no location it can reach,
-/// and applying such a path would remove nothing at all. The planner declines
-/// a statement holding one so it runs on the per-row engine, which evaluates
-/// the step and removes what it names.
-pub(crate) fn omit_path_is_expressible(path: &LogicalExpr) -> bool {
-	match path {
-		LogicalExpr::Field(_) => true,
-		LogicalExpr::Access {
-			base,
-			..
-		}
-		| LogicalExpr::Each(base)
-		| LogicalExpr::First(base)
-		| LogicalExpr::Last(base) => omit_target_is_reachable(base),
-		LogicalExpr::Index {
-			base,
-			index,
-		} => literal_index(index).is_some() && omit_target_is_reachable(base),
-		LogicalExpr::Destructure {
-			base,
-			fields,
-		} => omit_target_is_reachable(base) && omit_destructure_is_expressible(fields),
-		LogicalExpr::Broadcast {
-			base,
-			body,
-			..
-		} => omit_target_is_reachable(base) && omit_path_is_expressible(body),
-		_ => false,
-	}
-}
-
-/// Whether [`for_each_target`] can reach the values `path` names.
-fn omit_target_is_reachable(path: &LogicalExpr) -> bool {
-	match path {
-		LogicalExpr::Current | LogicalExpr::Field(_) => true,
-		LogicalExpr::Access {
-			base,
-			..
-		}
-		| LogicalExpr::Each(base)
-		| LogicalExpr::First(base)
-		| LogicalExpr::Last(base) => omit_target_is_reachable(base),
-		LogicalExpr::Index {
-			base,
-			index,
-		} => literal_index(index).is_some() && omit_target_is_reachable(base),
-		LogicalExpr::Broadcast {
-			base,
-			body,
-			..
-		} => omit_target_is_reachable(base) && omit_target_is_reachable(body),
-		_ => false,
-	}
-}
-
-/// Whether every entry of a destructure step names a location
-/// [`omit_destructure_fields`] removes. An aliased entry does not: it names an
-/// expression, which the per-row engine rejects outright. Neither does a rest
-/// entry: it names no single field to remove.
-fn omit_destructure_is_expressible(fields: &[LogicalDestructureField]) -> bool {
-	fields.iter().all(|field| match field {
-		LogicalDestructureField::Field(_) | LogicalDestructureField::All(_) => true,
-		LogicalDestructureField::Destructure(_, nested) => omit_destructure_is_expressible(nested),
-		LogicalDestructureField::Aliased(..) | LogicalDestructureField::Rest => false,
-	})
-}
-
-/// The non-negative literal integer an index step holds, if any.
-fn literal_index(index: &LogicalExpr) -> Option<usize> {
-	match index {
-		LogicalExpr::Literal(LogicalLiteral::Integer(idx)) => usize::try_from(*idx).ok(),
-		_ => None,
-	}
-}
-
-/// Calls `f` on every value `path` reaches inside `value`, following field
-/// accesses into objects, literal indices into arrays and objects, `[$]` into
-/// the last element of an array, `.*` into every child of an object or array,
-/// and a `Broadcast` body into each value its base reaches. `Current` is
-/// `value` itself. Any other step reaches nothing, and the planner declines a
-/// path holding one — see [`omit_path_is_expressible`].
-fn for_each_target(value: &mut Value, path: &LogicalExpr, f: &mut dyn FnMut(&mut Value)) {
-	match path {
-		LogicalExpr::Current => f(value),
-		LogicalExpr::Field(name) => {
-			if let Value::Object(obj) = value
-				&& let Some(nested) = obj.get_mut(name.as_str())
-			{
-				f(nested);
-			}
-		}
-		LogicalExpr::Access {
-			base,
-			field,
-		} => for_each_target(value, base, &mut |target| {
-			if let Value::Object(obj) = target
-				&& let Some(nested) = obj.get_mut(field.as_str())
-			{
-				f(nested);
-			}
-		}),
-		LogicalExpr::Each(base) => for_each_target(value, base, &mut |target| match target {
-			Value::Object(obj) => {
-				for (_, v) in obj.iter_mut() {
-					f(v);
-				}
-			}
-			Value::Array(arr) => {
-				for v in arr.iter_mut() {
-					f(v);
-				}
-			}
-			_ => {}
-		}),
-		LogicalExpr::Index {
-			base,
-			index,
-		} => {
-			let Some(idx) = literal_index(index) else {
-				return;
-			};
-			for_each_target(value, base, &mut |target| match target {
-				Value::Array(arr) => {
-					if let Some(nested) = arr.get_mut(idx) {
-						f(nested);
-					}
-				}
-				Value::Object(obj) => {
-					if let Some(nested) = obj.get_mut(idx.to_string().as_str()) {
-						f(nested);
-					}
-				}
-				_ => {}
-			})
-		}
-		LogicalExpr::First(base) => for_each_target(value, base, &mut |target| {
-			if let Value::Array(arr) = target
-				&& let Some(nested) = arr.first_mut()
-			{
-				f(nested);
-			}
-		}),
-		LogicalExpr::Last(base) => for_each_target(value, base, &mut |target| {
-			if let Value::Array(arr) = target
-				&& let Some(nested) = arr.last_mut()
-			{
-				f(nested);
-			}
-		}),
-		LogicalExpr::Broadcast {
-			base,
-			body,
-			..
-		} => for_each_target(value, base, &mut |target| for_each_target(target, body, f)),
-		_ => {}
-	}
-}
-
-/// Recursively remove fields described by destructure fields from an object.
-fn omit_destructure_fields(obj: &mut Object, fields: &[LogicalDestructureField]) {
-	for field in fields {
-		match field {
-			LogicalDestructureField::Field(name) => {
-				obj.remove(name.as_str());
-			}
-			// `{ a.* }` names the contents of `a` rather than `a` itself, so
-			// the container it holds is emptied and the field stays.
-			LogicalDestructureField::All(name) => match obj.get_mut(name.as_str()) {
-				Some(Value::Object(inner)) => inner.clear(),
-				Some(Value::Array(inner)) => inner.clear(),
-				_ => {}
-			},
-			LogicalDestructureField::Destructure(name, nested) => {
-				if let Some(Value::Object(inner)) = obj.get_mut(name.as_str()) {
-					omit_destructure_fields(inner, nested);
-				}
-			}
-			// An aliased entry names an expression rather than a location to
-			// remove, and a rest entry names no single field at all. The
-			// planner declines such a path (see `omit_destructure_is_expressible`),
-			// leaving the per-row engine to raise the error this walker has no
-			// way to report.
-			LogicalDestructureField::Aliased(..) | LogicalDestructureField::Rest => {}
-		}
-	}
-}
 
 // ============================================================================
 // SelectProject - Simplified projection without expression evaluation
@@ -917,7 +653,7 @@ impl ExecOperator for SelectProject {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -992,6 +728,20 @@ fn apply_projections_to_object(
 	has_all: bool,
 ) -> Value {
 	if has_all {
+		// `*` keeps every field of the row, and a renamed field reads the row as
+		// it was stored: its value is taken before any projection writes, so
+		// `*, a AS b, b AS c` gives `c` the stored `b`.
+		let mut renamed = projections
+			.iter()
+			.filter_map(|projection| match projection {
+				Projection::Rename {
+					from,
+					..
+				} => Some(input_obj.get(from).cloned().unwrap_or(Value::None)),
+				_ => None,
+			})
+			.collect::<Vec<_>>()
+			.into_iter();
 		let mut output = input_obj;
 		for projection in projections {
 			match projection {
@@ -1001,10 +751,10 @@ fn apply_projections_to_object(
 					}
 				}
 				Projection::Rename {
-					from,
 					to,
+					..
 				} => {
-					let v = output.remove(from).unwrap_or(Value::None);
+					let v = renamed.next().expect("one value per rename");
 					output.insert(to.clone(), v);
 				}
 				Projection::Omit(name) => {
@@ -1041,8 +791,6 @@ fn apply_projections_to_object(
 
 #[cfg(test)]
 mod tests {
-	use surrealdb_types::ToSql;
-
 	use super::*;
 
 	#[test]
@@ -1082,97 +830,6 @@ mod tests {
 			assert_eq!(result_obj.get("new_name"), Some(&Value::from(42)));
 		} else {
 			panic!("Expected Object");
-		}
-	}
-
-	fn omit_path(sql: &str) -> LogicalExpr {
-		crate::expr::logical::lower_expr(crate::sql::Expr::Idiom(
-			crate::syn::idiom(sql).expect("idiom"),
-		))
-		.expect("lowers")
-	}
-
-	fn omitted(value: Value, sql: &str) -> String {
-		let mut value = value;
-		omit_field_sync(&mut value, &omit_path(sql));
-		value.to_sql()
-	}
-
-	#[test]
-	fn omit_removes_the_location_a_path_denotes() {
-		let row = || {
-			crate::val::convert_public::convert_public_value_to_internal(
-				crate::syn::value(
-					"{ a: { b: 1, c: [10, 20] }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }",
-				)
-				.expect("value"),
-			)
-		};
-		assert_eq!(omitted(row(), "a"), "{ d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }");
-		assert_eq!(
-			omitted(row(), "a.b"),
-			"{ a: { c: [10, 20] }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }"
-		);
-		assert_eq!(
-			omitted(row(), "a.c[0]"),
-			"{ a: { b: 1, c: [20] }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }"
-		);
-		assert_eq!(
-			omitted(row(), "a.c[$]"),
-			"{ a: { b: 1, c: [10] }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }"
-		);
-		assert_eq!(
-			omitted(row(), "d.*.e"),
-			"{ a: { b: 1, c: [10, 20] }, d: [{ f: 2 }, { f: 4 }] }"
-		);
-		assert_eq!(
-			omitted(row(), "d[1].f"),
-			"{ a: { b: 1, c: [10, 20] }, d: [{ e: 1, f: 2 }, { e: 3 }] }"
-		);
-		assert_eq!(omitted(row(), "a.*"), "{ a: {  }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }");
-		assert_eq!(
-			omitted(row(), "a.{ b }"),
-			"{ a: { c: [10, 20] }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }"
-		);
-		// A destructure entry naming the contents of a field empties that
-		// field rather than removing it.
-		assert_eq!(
-			omitted(row(), "a.{ c.* }"),
-			"{ a: { b: 1, c: [] }, d: [{ e: 1, f: 2 }, { e: 3, f: 4 }] }"
-		);
-	}
-
-	#[test]
-	fn omit_declines_a_path_the_walk_cannot_reach() {
-		// Every shape the walk performs.
-		for sql in [
-			"a",
-			"a.b",
-			"a.c[0]",
-			"a.c[$]",
-			"d.*.e",
-			"d[1].f",
-			"a.*",
-			"a.{ b }",
-			"a.{ c.* }",
-			"a.{ b.{ c } }",
-		] {
-			assert!(omit_path_is_expressible(&omit_path(sql)), "{sql} is expressible");
-		}
-		// Every shape it cannot: a step whose meaning comes from evaluating
-		// it, and a destructure entry naming an expression rather than a
-		// location.
-		for sql in [
-			"d[WHERE e = 1].f",
-			"d[WHERE e = 1]",
-			"a.c[$p]",
-			"a.c.len()",
-			"a.{ b }.c",
-			"a.{ b: c }",
-			"a.{1}.b",
-			"a.b.@",
-		] {
-			assert!(!omit_path_is_expressible(&omit_path(sql)), "{sql} is not expressible");
 		}
 	}
 

@@ -4,7 +4,7 @@ deny-experimental = ["files"]
 deny-functions = ["math::max"]
 
 [test]
-reason = "type::file, file::bucket and file::key are pure, so they carry no context of their own and are foldable; the experimental gate the legacy dispatcher applies to them must be applied by whoever invokes them"
+reason = "type::file, file::bucket and file::key are pure, so they carry no context of their own and are foldable; the experimental gate must be applied by whoever invokes them"
 
 [[test.results]]
 value = "[{ a: 5, id: t:1 }]"

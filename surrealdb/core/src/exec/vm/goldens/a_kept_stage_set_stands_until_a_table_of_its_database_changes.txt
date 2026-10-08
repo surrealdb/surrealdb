@@ -1,0 +1,11 @@
+### answers
+[{ id: a:1, n: 2 }]
+[{ id: a:1, n: 3 }]
+[{ id: a:1, n: 4 }]
+[{ id: a:1, n: 5 }]
+[{ id: a:1, n: 6 }]
+[{ id: a:1, n: 7 }]
+'Found 8 for field `n`, with record `a:1`, but field must conform to: $value < 6'
+'Found 8 for field `n`, with record `a:1`, but field must conform to: $value < 6'
+[{ n: 5, t: 'a' }, { n: 6, t: 'a' }, { n: 7, t: 'a' }]
+[7]

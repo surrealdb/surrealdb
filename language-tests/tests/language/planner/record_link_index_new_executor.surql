@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Test record ID link traversal with various index types and join plans (new executor)"
+reason = "Test record ID link traversal with various index types and join plans"
 
 [[test.results]]
 value = "NONE"
@@ -183,7 +182,8 @@ value = "[{ id: i:A, t: t:1 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name @@ 'world', pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    Filter [ctx: Db] [predicate: t.name @@ 'world'] {rows: 1}
+        TableScan [ctx: Db] [table: i, direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -217,7 +217,8 @@ value = "[{ id: i:A, t: t:1 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name @@ 'world', pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    Filter [ctx: Db] [predicate: t.name @@ 'world'] {rows: 1}
+        TableScan [ctx: Db] [table: i, direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 

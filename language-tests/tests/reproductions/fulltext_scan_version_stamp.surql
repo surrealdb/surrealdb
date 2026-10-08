@@ -43,7 +43,7 @@ value = "NONE"
 value = '''
 'VersionScope [ctx: Db] [version: $hist]
     SelectProject [ctx: Db] [projections: id]
-        FullTextScan [ctx: Db] [index: body_ft, query: hello]
+        FullTextScan [ctx: Db] [table: t, index: body_ft, query: hello]
 ''''
 
 [[test.results]]

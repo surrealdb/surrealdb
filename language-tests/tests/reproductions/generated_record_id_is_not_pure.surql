@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -25,22 +24,35 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-'ProjectValue [ctx: Db] [expr: k]
-    TableScan [ctx: Db] [table: o, direction: Forward, predicate: k INSIDE (ProjectValue), pre_decode_filter: no (unsupported predicate)]
-''''
-
-[[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: k]
-    TableScan [ctx: Db] [table: o, direction: Forward, predicate: k INSIDE (ProjectValue), pre_decode_filter: no (unsupported predicate)]
-''''
-
-[[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: k]
-    HashJoin [ctx: Db] [type: Semi, alias: _join0, on: k = _join0.k]
+"ProjectValue [ctx: Db] [expr: k]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
         TableScan [ctx: Db] [table: o, direction: Forward]
-        RecordIdScan [ctx: Db] [record_id: r:1, predicate: r:1 = id, pre_decode_filter: yes]
+        Subquery [ctx: Db] [strategy: apply]
+            ProjectValue [ctx: Db] [expr: k]
+                Filter [ctx: Db] [predicate: string::slice(<string> (x:rand()), 2, 3) < 'N']
+                    TableScan [ctx: Db] [table: r, direction: Forward]
+"'''
+
+[[test.results]]
+value = '''
+"ProjectValue [ctx: Db] [expr: k]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
+        TableScan [ctx: Db] [table: o, direction: Forward]
+        Subquery [ctx: Db] [strategy: apply]
+            ProjectValue [ctx: Db] [expr: k]
+                Filter [ctx: Db] [predicate: <string> (x:ulid()) < 'x:z']
+                    TableScan [ctx: Db] [table: r, direction: Forward]
+"'''
+
+[[test.results]]
+value = '''
+'ProjectValue [ctx: Db] [expr: k]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
+        TableScan [ctx: Db] [table: o, direction: Forward]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: k]
+                Filter [ctx: Db] [predicate: (r:1) = id]
+                    RecordIdScan [ctx: Db] [record_id: r:1]
 ''''
 
 [[test.results]]

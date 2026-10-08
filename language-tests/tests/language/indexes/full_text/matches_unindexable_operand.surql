@@ -5,9 +5,7 @@ database = true
 
 [test]
 reason = """
-MATCHES shapes that cannot name a full-text index, identical across the legacy
-and streaming executors (this file deliberately runs under every planner
-strategy as a differential proof).
+MATCHES shapes that cannot name a full-text index.
 
 Two operand shapes carry no index probe: a left operand that is not an idiom,
 and a right operand that does not resolve to a value at plan time. Both follow

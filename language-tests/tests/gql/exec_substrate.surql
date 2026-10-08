@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "Pins the streaming-engine behaviors the GQL v2 MatchPlan operators rely on (V2_DESIGN §3/§4): the 3VL guard trio that the lowering inserts before every comparison, record::tb table filtering on an edge endpoint, RecordId auto-fetch of a one-level-deeper link, the NULL/NONE sort position used for ORDER BY over non-returned bindings (R7), and NULL/NONE equality under SurrealQL's total order. Runs as plain SurrealQL under every planner strategy; if any of these change, the v2 operators (Bind/Expand/PathExpand/Sort/Filter) must be revisited. Modeled on lowering_substrate.surql."
+reason = "Pins the execution behaviors the GQL v2 MatchPlan operators rely on (V2_DESIGN §3/§4): the 3VL guard trio that the lowering inserts before every comparison, record::tb table filtering on an edge endpoint, RecordId auto-fetch of a one-level-deeper link, the NULL/NONE sort position used for ORDER BY over non-returned bindings (R7), and NULL/NONE equality under SurrealQL's total order. Runs as plain SurrealQL; if any of these change, the v2 operators (Bind/Expand/PathExpand/Sort/Filter) must be revisited. Modeled on lowering_substrate.surql."
 
 # Seed statements (5): all RETURN NONE -> empty results.
 [[test.results]]

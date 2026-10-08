@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "EXPLAIN written inside a subquery source describes that subquery's own plan, and the outer statement selects from the description"
@@ -14,8 +13,9 @@ value = "['SelectProject']"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SelectProject [ctx: Db] [projections: *]
-        TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15, pre_decode_filter: yes]
+    Subquery [ctx: Rt]
+        SelectProject [ctx: Db] [projections: *]
+            TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15, pre_decode_filter: yes]
 ''''
 
 */

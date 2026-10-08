@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
-reason = "Range literals as index access paths. A range literal used as the operand of `IN`/`INSIDE` is exactly a BTree range and is read as one, each spelling carrying its own pair of bounds: `lo..hi` seeks `>=lo <hi`, `lo..=hi` seeks `>=lo <=hi`, `lo>..hi` seeks `>lo <hi` and `lo>..=hi` seeks `>lo <=hi`. All four are covered over a standard index and over a UNIQUE one, which keys one record per value rather than fanning out and so constructs its bounds on a separate seek path. The fixture places a row exactly ON the low bound and another exactly ON the high bound, which is what makes the four spellings distinguishable by rows rather than only by rendering: an off-by-one in either direction moves a row in or out of the answer instead of merely mislabelling the plan. Every plan assertion is therefore paired with the same query under `WITH NOINDEX`, which forces a table scan and is the oracle -- EXPLAIN shows which operator ran, not whether it returned the right rows. The index-only count path is pinned for all four spellings too: `count() ... GROUP ALL` is served by IndexCountScan, which derives the same bounds without fetching records, so it can disagree with the row path. Beyond the four spellings the file pins: a range on an unindexed column, which must stay a TableScan, because a column acquiring an index scan it has no index for is exactly the silent regression this suite exists to catch; a range against a compound index's LEADING column, where a range is a key bound rather than a prefix component and so terminates the prefix -- the residual is asserted both ways, the range alone leaving its condition as the scan's own `predicate:` while a trailing equality on the second column becomes a separate `Filter` above a scan carrying no `predicate:` at all, with a fixture row whose leading column lies inside the range while its second column fails the residual, so folding that residual into the key bounds would seek (10, 2) to (20, 2), return it, and break the contract on rows rather than only on the rendered plan; ranges of strings and of datetimes, since bounds are values rather than numbers; a reversed range, whose lower bound sits above its upper one and which therefore addresses no keys, pinned for rows and for count because an index-only count walking it the wrong way would report the complement; the operands swapped so the range is the LEFT operand (`10..=20 CONTAINS n`), a different operator with no index arm; and `INSIDE` as the long spelling of `IN`, which plans identically. Last, `v = 10..=20` compares the field to a range VALUE and must NOT become a range scan: it is the exact-key seek `access: = 10..=20`. Its table stores a row holding that very range, a row holding the neighbouring spelling `10..20`, and a row holding 15, which lies inside the range but is not equal to it -- so lowering `=` into a range scan would return the 15 and miss the range, and matching the range loosely would also return the other spelling. The `IN` query over the same column is asserted beside it so the two readings of one literal sit together. `comparison_operators.surql` already pins the two basic `IN 30..40` / `IN 30..=40` cells against its own fixture; this file is the rest of the axis. `EXPLAIN` is rejected by the compute-only engine, so the planner axis is narrowed to the two streaming strategies; they plan identically by contract, so both are pinned rather than one. Each plan is asserted on the query without `ORDER BY` and the rows on the same query with `ORDER BY id`, which makes the row comparison deterministic without putting a sort wrapper into every plan."
+reason = "Range literals as index access paths. A range literal used as the operand of `IN`/`INSIDE` is exactly a BTree range and is read as one, each spelling carrying its own pair of bounds: `lo..hi` seeks `>=lo <hi`, `lo..=hi` seeks `>=lo <=hi`, `lo>..hi` seeks `>lo <hi` and `lo>..=hi` seeks `>lo <=hi`. All four are covered over a standard index and over a UNIQUE one, which keys one record per value rather than fanning out and so constructs its bounds on a separate seek path. The fixture places a row exactly ON the low bound and another exactly ON the high bound, which is what makes the four spellings distinguishable by rows rather than only by rendering: an off-by-one in either direction moves a row in or out of the answer instead of merely mislabelling the plan. Every plan assertion is therefore paired with the same query under `WITH NOINDEX`, which forces a table scan and is the oracle -- EXPLAIN shows which operator ran, not whether it returned the right rows. The index-only count path is pinned for all four spellings too: `count() ... GROUP ALL` is served by IndexCountScan, which derives the same bounds without fetching records, so it can disagree with the row path. Beyond the four spellings the file pins: a range on an unindexed column, which must stay a TableScan, because a column acquiring an index scan it has no index for is exactly the silent regression this suite exists to catch; a range against a compound index's LEADING column, where a range is a key bound rather than a prefix component and so terminates the prefix -- the residual is asserted both ways, the range alone leaving its condition as the scan's own `predicate:` while a trailing equality on the second column becomes a separate `Filter` above a scan carrying no `predicate:` at all, with a fixture row whose leading column lies inside the range while its second column fails the residual, so folding that residual into the key bounds would seek (10, 2) to (20, 2), return it, and break the contract on rows rather than only on the rendered plan; ranges of strings and of datetimes, since bounds are values rather than numbers; a reversed range, whose lower bound sits above its upper one and which therefore addresses no keys, pinned for rows and for count because an index-only count walking it the wrong way would report the complement; the operands swapped so the range is the LEFT operand (`10..=20 CONTAINS n`), a different operator with no index arm; and `INSIDE` as the long spelling of `IN`, which plans identically. Last, `v = 10..=20` compares the field to a range VALUE and must NOT become a range scan: it is the exact-key seek `access: = 10..=20`. Its table stores a row holding that very range, a row holding the neighbouring spelling `10..20`, and a row holding 15, which lies inside the range but is not equal to it -- so lowering `=` into a range scan would return the 15 and miss the range, and matching the range loosely would also return the other spelling. The `IN` query over the same column is asserted beside it so the two readings of one literal sit together. `comparison_operators.surql` already pins the two basic `IN 30..40` / `IN 30..=40` cells against its own fixture; this file is the rest of the axis. Each plan is asserted on the query without `ORDER BY` and the rows on the same query with `ORDER BY id`, which makes the row comparison deterministic without putting a sort wrapper into every plan."
 
 [[test.results]]
 value = "NONE"
@@ -67,7 +66,7 @@ value = "[{ c1: 15, c2: 1, d: d'2030-01-01T00:00:00Z', id: rng:r6, n: 100, plain
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_n, access: >=10 <20, direction: Forward, predicate: n INSIDE 10 .. 20]
+    IndexScan [ctx: Db] [table: rng, index: idx_n, access: >=10 <20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -79,7 +78,7 @@ value = "[rng:r2, rng:r3]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_n, access: >=10 <=20, direction: Forward, predicate: n INSIDE 10 ..= 20]
+    IndexScan [ctx: Db] [table: rng, index: idx_n, access: >=10 <=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -91,7 +90,7 @@ value = "[rng:r2, rng:r3, rng:r4]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_n, access: >10 <20, direction: Forward, predicate: n INSIDE 10 >.. 20]
+    IndexScan [ctx: Db] [table: rng, index: idx_n, access: >10 <20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -103,7 +102,7 @@ value = "[rng:r3]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_n, access: >10 <=20, direction: Forward, predicate: n INSIDE 10 >..= 20]
+    IndexScan [ctx: Db] [table: rng, index: idx_n, access: >10 <=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -115,7 +114,7 @@ value = "[rng:r3, rng:r4]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_u, access: >=10 <20, direction: Forward, predicate: u INSIDE 10 .. 20]
+    IndexScan [ctx: Db] [table: rng, index: idx_u, access: >=10 <20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -127,7 +126,7 @@ value = "[rng:r2, rng:r3]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_u, access: >=10 <=20, direction: Forward, predicate: u INSIDE 10 ..= 20]
+    IndexScan [ctx: Db] [table: rng, index: idx_u, access: >=10 <=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -139,7 +138,7 @@ value = "[rng:r2, rng:r3, rng:r4]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_u, access: >10 <20, direction: Forward, predicate: u INSIDE 10 >.. 20]
+    IndexScan [ctx: Db] [table: rng, index: idx_u, access: >10 <20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -151,7 +150,7 @@ value = "[rng:r3]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_u, access: >10 <=20, direction: Forward, predicate: u INSIDE 10 >..= 20]
+    IndexScan [ctx: Db] [table: rng, index: idx_u, access: >10 <=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -162,7 +161,8 @@ value = "[rng:r3, rng:r4]"
 
 [[test.results]]
 value = '''
-'IndexCountScan [ctx: Db] [source: rng, condition: n INSIDE 10 .. 20]
+'SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: rng, condition: n INSIDE 10..20]
 ''''
 
 [[test.results]]
@@ -173,7 +173,8 @@ value = "[{ count: 2 }]"
 
 [[test.results]]
 value = '''
-'IndexCountScan [ctx: Db] [source: rng, condition: n INSIDE 10 ..= 20]
+'SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: rng, condition: n INSIDE 10..=20]
 ''''
 
 [[test.results]]
@@ -184,7 +185,8 @@ value = "[{ count: 3 }]"
 
 [[test.results]]
 value = '''
-'IndexCountScan [ctx: Db] [source: rng, condition: n INSIDE 10 >.. 20]
+'SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: rng, condition: n INSIDE 10>..20]
 ''''
 
 [[test.results]]
@@ -195,7 +197,8 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-'IndexCountScan [ctx: Db] [source: rng, condition: n INSIDE 10 >..= 20]
+'SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: rng, condition: n INSIDE 10>..=20]
 ''''
 
 [[test.results]]
@@ -207,7 +210,7 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: rng, direction: Forward, predicate: plain INSIDE 10 ..= 20, pre_decode_filter: no (unsupported predicate)]
+    TableScan [ctx: Db] [table: rng, direction: Forward, predicate: plain INSIDE 10..=20, pre_decode_filter: yes]
 ''''
 
 [[test.results]]
@@ -219,7 +222,7 @@ value = "[rng:r2, rng:r3, rng:r4]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_c, access: >=10 <=20, direction: Forward, predicate: c1 INSIDE 10 ..= 20]
+    IndexScan [ctx: Db] [table: rng, index: idx_c, access: >=10 <=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -231,8 +234,8 @@ value = "[rng:r2, rng:r3, rng:r4, rng:r6]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: c2 = 2]
-        IndexScan [ctx: Db] [index: idx_c, access: >=10 <=20, direction: Forward]
+    Filter [ctx: Db] [predicate: c1 INSIDE 10..=20 AND c2 = 2]
+        IndexScan [ctx: Db] [table: rng, index: idx_c, access: >=10 <=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -244,7 +247,7 @@ value = "[rng:r3, rng:r4]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_s, access: >='bb' <'dd', direction: Forward, predicate: s INSIDE 'bb' .. 'dd']
+    IndexScan [ctx: Db] [table: rng, index: idx_s, access: >='bb' <'dd', direction: Forward]
 "'''
 
 [[test.results]]
@@ -256,7 +259,7 @@ value = "[rng:r2, rng:r3]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_s, access: >='bb' <='dd', direction: Forward, predicate: s INSIDE 'bb' ..= 'dd']
+    IndexScan [ctx: Db] [table: rng, index: idx_s, access: >='bb' <='dd', direction: Forward]
 "'''
 
 [[test.results]]
@@ -268,7 +271,7 @@ value = "[rng:r2, rng:r3, rng:r4]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_s, access: >'bb' <'dd', direction: Forward, predicate: s INSIDE 'bb' >.. 'dd']
+    IndexScan [ctx: Db] [table: rng, index: idx_s, access: >'bb' <'dd', direction: Forward]
 "'''
 
 [[test.results]]
@@ -280,7 +283,7 @@ value = "[rng:r3]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_s, access: >'bb' <='dd', direction: Forward, predicate: s INSIDE 'bb' >..= 'dd']
+    IndexScan [ctx: Db] [table: rng, index: idx_s, access: >'bb' <='dd', direction: Forward]
 "'''
 
 [[test.results]]
@@ -292,7 +295,7 @@ value = "[rng:r3, rng:r4]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_d, access: >=d'2022-01-01T00:00:00Z' <d'2024-01-01T00:00:00Z', direction: Forward, predicate: d INSIDE d'2022-01-01T00:00:00Z' .. d'2024-01-01T00:00:00Z']
+    IndexScan [ctx: Db] [table: rng, index: idx_d, access: >=d'2022-01-01T00:00:00Z' <d'2024-01-01T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]
@@ -304,7 +307,7 @@ value = "[rng:r2, rng:r3]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_d, access: >=d'2022-01-01T00:00:00Z' <=d'2024-01-01T00:00:00Z', direction: Forward, predicate: d INSIDE d'2022-01-01T00:00:00Z' ..= d'2024-01-01T00:00:00Z']
+    IndexScan [ctx: Db] [table: rng, index: idx_d, access: >=d'2022-01-01T00:00:00Z' <=d'2024-01-01T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]
@@ -316,7 +319,7 @@ value = "[rng:r2, rng:r3, rng:r4]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_d, access: >d'2022-01-01T00:00:00Z' <d'2024-01-01T00:00:00Z', direction: Forward, predicate: d INSIDE d'2022-01-01T00:00:00Z' >.. d'2024-01-01T00:00:00Z']
+    IndexScan [ctx: Db] [table: rng, index: idx_d, access: >d'2022-01-01T00:00:00Z' <d'2024-01-01T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]
@@ -328,7 +331,7 @@ value = "[rng:r3]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_d, access: >d'2022-01-01T00:00:00Z' <=d'2024-01-01T00:00:00Z', direction: Forward, predicate: d INSIDE d'2022-01-01T00:00:00Z' >..= d'2024-01-01T00:00:00Z']
+    IndexScan [ctx: Db] [table: rng, index: idx_d, access: >d'2022-01-01T00:00:00Z' <=d'2024-01-01T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]
@@ -340,7 +343,7 @@ value = "[rng:r3, rng:r4]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_n, access: >=20 <10, direction: Forward, predicate: n INSIDE 20 .. 10]
+    IndexScan [ctx: Db] [table: rng, index: idx_n, access: >=20 <10, direction: Forward]
 ''''
 
 [[test.results]]
@@ -351,7 +354,8 @@ value = "[]"
 
 [[test.results]]
 value = '''
-'IndexCountScan [ctx: Db] [source: rng, condition: n INSIDE 20 .. 10]
+'SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: rng, condition: n INSIDE 20..10]
 ''''
 
 [[test.results]]
@@ -363,7 +367,7 @@ value = "[{ count: 0 }]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: rng, direction: Forward, predicate: 10 ..= 20 CONTAINS n, pre_decode_filter: no (unsupported predicate)]
+    TableScan [ctx: Db] [table: rng, direction: Forward, predicate: 10..=20 CONTAINS n, pre_decode_filter: yes]
 ''''
 
 [[test.results]]
@@ -375,7 +379,7 @@ value = "[rng:r2, rng:r3, rng:r4]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_n, access: >=10 <=20, direction: Forward, predicate: n INSIDE 10 ..= 20]
+    IndexScan [ctx: Db] [table: rng, index: idx_n, access: >=10 <=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -402,7 +406,7 @@ value = "[{ id: rv:z, v: 10..20 }]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_v, access: = 10..=20, direction: Forward, predicate: v = 10 ..= 20]
+    IndexScan [ctx: Db] [table: rv, index: idx_v, access: = 10..=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -413,7 +417,9 @@ value = "[rv:x]"
 
 [[test.results]]
 value = '''
-'IndexCountScan [ctx: Db] [source: rv, condition: v = 10 ..= 20]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: rv, index: idx_v, access: = 10..=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -425,7 +431,8 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_v, access: >=10 <=20, direction: Forward, predicate: v INSIDE 10 ..= 20]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: rv, index: idx_v, access: >=10 <=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -436,7 +443,10 @@ value = "[rv:y]"
 
 [[test.results]]
 value = '''
-'IndexCountScan [ctx: Db] [source: rv, condition: v INSIDE 10 ..= 20]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: rv, index: idx_v, access: >=10 <=20, direction: Forward]
 ''''
 
 [[test.results]]

@@ -27,8 +27,8 @@ impl From<surrealdb_sqlplan::PlanError> for LowerError {
 	}
 }
 
-/// Indicates a statement has no direct logical plan representation and must be routed
-/// to the transactional engine via AST translation.
+/// Indicates a statement has no direct logical plan representation and is lowered
+/// to a SurrealQL statement instead.
 #[derive(Debug)]
 pub enum NoLogicalForm<'a> {
 	NonSelectStatement(&'a Statement),
@@ -36,8 +36,8 @@ pub enum NoLogicalForm<'a> {
 
 /// Lower a PostgreSQL statement directly to a `LogicalOp`.
 ///
-/// Returns `Ok(LogicalOp)` for statements that lower to the streaming engine (e.g. `SELECT`),
-/// or `Err(NoLogicalForm)` for statements that must execute on the transactional engine (e.g.
+/// Returns `Ok(LogicalOp)` for statements that lower to the engine (e.g. `SELECT`),
+/// or `Err(NoLogicalForm)` for statements lowered to SurrealQL statements instead (e.g.
 /// `INSERT`, `CREATE`).
 pub fn lower_stmt(stmt: &Statement) -> Result<LogicalOp, NoLogicalForm<'_>> {
 	match stmt {

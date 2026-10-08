@@ -75,7 +75,7 @@ impl ExecOperator for Union {
 		if self.inputs.len() == 1 {
 			let stream = buffer_stream(
 				self.inputs[0].execute(ctx)?,
-				self.inputs[0].access_mode(),
+				self.access_mode().combine(self.inputs[0].access_mode()),
 				self.inputs[0].cardinality_hint(),
 				ctx.root().ctx.config.exec.operator_buffer_size,
 			);
@@ -88,10 +88,13 @@ impl ExecOperator for Union {
 		// begins, preserving atomicity guarantees.
 		let inputs = self.inputs.clone();
 		let ctx = ctx.clone();
+		// Read here, where the operator is still in hand: each input is
+		// buffered from inside the unfold below.
+		let own_mode = self.access_mode();
 
 		let combined = stream::unfold(
 			(inputs, ctx, 0usize, Option::<ValueBatchStream>::None),
-			|(inputs, ctx, mut idx, mut current)| async move {
+			move |(inputs, ctx, mut idx, mut current)| async move {
 				loop {
 					// Poll the current stream if we have one
 					let item = match &mut current {
@@ -117,7 +120,7 @@ impl ExecOperator for Union {
 						Ok(stream) => {
 							current = Some(buffer_stream(
 								stream,
-								inputs[i].access_mode(),
+								own_mode.combine(inputs[i].access_mode()),
 								inputs[i].cardinality_hint(),
 								ctx.root().ctx.config.exec.operator_buffer_size,
 							))

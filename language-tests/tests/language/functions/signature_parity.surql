@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Builtin function signatures behave identically on the legacy compute executor and the streaming executor: optional arguments, arity validation, and functions that previously were missing from the streaming function registry"
+reason = "Builtin function signatures: optional arguments, arity validation, and the presence of every builtin in the function registry"
 
 [[test.results]]
 value = "true"
@@ -75,7 +75,7 @@ RETURN type::is_int(time::day());
 RETURN type::is_bool(time::is_leap_year());
 RETURN type::is_string(time::timezone());
 
--- Arity validation matches the legacy executor
+-- Arity validation
 RETURN time::timezone(d"2024-05-05T12:34:56Z");
 RETURN time::hour(d"2024-05-05T12:34:56Z", d"2024-05-05T12:34:56Z");
 RETURN rand::float(1);

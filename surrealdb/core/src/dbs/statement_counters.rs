@@ -1,30 +1,26 @@
-//! Per-statement side-channel counters tracked by the document path and read
-//! by the executor when emitting [`crate::observe::StatementEvent`]s.
+//! Per-statement side-channel counters tracked by the write path and read by
+//! the executor when emitting [`crate::observe::StatementEvent`]s.
 //!
 //! The post-RETURN [`crate::val::Value`] is not a reliable source for the
-//! number of records affected by a DML statement: `RETURN NONE` causes the
-//! iterator to drop every touched document (see `IgnoreError::Ignore` in
-//! `crate::dbs::iterator`) so the executor sees an empty array, while
+//! number of records affected by a DML statement: `RETURN NONE` drops every
+//! touched record from the output so the executor sees an empty array, while
 //! `RETURN BEFORE` on a fresh `CREATE` collapses to `Value::None`. To honour
 //! the documented contract on
 //! [`crate::observe::StatementEventSafe::result_rows`] -- "rows returned
 //! (SELECT) or affected (CREATE / UPDATE / UPSERT / DELETE / RELATE / INSERT)"
-//! -- the document path increments this counter only after a real KV write
-//! has succeeded (`store_record_data` / `purge` set
-//! [`crate::doc::Document::mutated`], which is then consumed once per row by
-//! [`crate::doc::Document::process`]). The executor reads the snapshot at
-//! statement completion.
+//! -- the write path increments this counter once per record, only after a real
+//! KV write has succeeded. The executor reads the snapshot at statement
+//! completion.
 //!
-//! Pre-mutation `IgnoreError::Ignore` paths -- `check_record_exists`,
-//! `check_where_condition`, permission gates, `ctx.is_done` short-circuits --
-//! and `set_record` no-ops suppressed by `!self.changed()` therefore never
-//! inflate the count, even when the visited row would otherwise have been
-//! counted by the iterator.
+//! Records filtered out before any storage write -- a missing record, a `WHERE`
+//! that rejects it, a permission gate, a cancelled statement -- and writes that
+//! change nothing therefore never inflate the count, even when the visited row
+//! would otherwise have been counted.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Atomic per-statement counter set, shared between the iterator and the
+/// Atomic per-statement counter set, shared between the write path and the
 /// executor for the lifetime of a single top-level statement.
 ///
 /// `Relaxed` ordering is sufficient because the counter is never used to
@@ -35,11 +31,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) struct StatementCounters {
 	/// Records that DML statements (CREATE / UPDATE / UPSERT / DELETE /
 	/// RELATE / INSERT) successfully mutated during the statement.
-	/// Incremented from [`crate::doc::Document::process`] once the
-	/// document path has signalled a real KV write via
-	/// [`crate::doc::Document::mutated`], so the value is unaffected
-	/// by the configured RETURN mode and by pre-mutation `Ignore`
-	/// gates that filter rows before any storage write.
+	/// Incremented by the write path once per record that really reached
+	/// storage, so the value is unaffected by the configured RETURN mode and
+	/// by the gates that filter rows before any storage write.
 	///
 	/// SELECT row counts are derived from the post-RETURN [`crate::val::Value`]
 	/// shape inside [`crate::dbs::executor`], not from this counter.

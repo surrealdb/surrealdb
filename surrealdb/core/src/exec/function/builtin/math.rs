@@ -38,16 +38,16 @@ define_pure_function!(MathLerpangle, "math::lerpangle", effects: EffectSet::PURE
 
 // Array aggregate math functions (operate on array of numbers)
 define_pure_function!(MathInterquartile, "math::interquartile", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::interquartile);
-define_pure_function!(MathMax, "math::max", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::max);
+define_pure_function!(MathMax, "math::max", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), (array: Any) -> Number, crate::fnc::math::max);
 define_pure_function!(MathMean, "math::mean", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::mean);
 define_pure_function!(MathMedian, "math::median", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::median);
 define_pure_function!(MathMidhinge, "math::midhinge", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::midhinge);
-define_pure_function!(MathMin, "math::min", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::min);
-define_pure_function!(MathMode, "math::mode", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::mode);
-define_pure_function!(MathProduct, "math::product", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::product);
+define_pure_function!(MathMin, "math::min", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), (array: Any) -> Number, crate::fnc::math::min);
+define_pure_function!(MathMode, "math::mode", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), (array: Any) -> Number, crate::fnc::math::mode);
+define_pure_function!(MathProduct, "math::product", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), (array: Any) -> Number, crate::fnc::math::product);
 define_pure_function!(MathSpread, "math::spread", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::spread);
 define_pure_function!(MathStddev, "math::stddev", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::stddev);
-define_pure_function!(MathSum, "math::sum", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::sum);
+define_pure_function!(MathSum, "math::sum", effects: EffectSet::PURE, rule: ReturnRule::NumericAggregate(0), (array: Any) -> Number, crate::fnc::math::sum);
 define_pure_function!(MathTrimean, "math::trimean", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::trimean);
 define_pure_function!(MathVariance, "math::variance", effects: EffectSet::PURE, (array: Any) -> Number, crate::fnc::math::variance);
 

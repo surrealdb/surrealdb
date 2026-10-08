@@ -3,8 +3,7 @@
 reason = """
 `array::min` / `array::max` reduce a group to its least and greatest value by
 SurrealDB's own value order, so they answer over any comparable column rather
-than only a numeric one. No planner-strategy override is set: both executors
-owe the same answers here, and do.
+than only a numeric one.
 
 They are the orderable counterpart to `math::min` / `math::max`, which fold
 only numbers and report their identity (`Infinity` / `-Infinity`) for a group

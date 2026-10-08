@@ -44,12 +44,12 @@ pub(crate) mod wire_literal;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-pub(crate) use compile::{
-	field_state_blocks_raw_read, pre_decode_filter_for_execute,
-	pre_decode_filter_status_at_plan_time,
-};
+pub(crate) use compile::{PreDecodeShape, pre_decode_filter_for_execute};
+#[cfg(test)]
+pub(crate) use compile::{field_state_blocks_raw_read, pre_decode_filter_status_at_plan_time};
 use revision::WalkRevisioned;
 pub(crate) use streaming::StreamingLeafEvaluator;
+pub(crate) use wire_cmp::{int_on_wire, strand_payload_str_unchecked};
 use wire_literal::{LiteralSet, LiteralWire, hash_miss_is_decisive};
 
 use crate::exec::object_extract::{
@@ -261,6 +261,8 @@ pub(crate) enum PredNode {
 }
 
 /// Why a pre-decode filter cannot be built for a scan.
+// Constructed or read only by the operator-tree oracle, which test builds compile.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum PreDecodeFilterReason {
 	/// The predicate's physical shape is not supported by [`compile::compile_predicate_shape`]
@@ -279,6 +281,8 @@ pub(crate) enum PreDecodeFilterReason {
 /// ([`TableScan`](crate::exec::operators::scan::table::TableScan),
 /// [`DynamicScan`](crate::exec::operators::scan::dynamic::DynamicScan),
 /// [`RecordIdScan`](crate::exec::operators::scan::record_id::RecordIdScan)).
+// Constructed or read only by the operator-tree oracle, which test builds compile.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone)]
 pub(crate) enum PreDecodeFilterStatus {
 	/// No WHERE predicate pushed into the scan — omit `pre_decode_filter` in EXPLAIN.
@@ -292,6 +296,7 @@ pub(crate) enum PreDecodeFilterStatus {
 }
 
 impl PreDecodeFilterStatus {
+	#[cfg(test)]
 	/// Human-readable value for the `pre_decode_filter` attribute in EXPLAIN output.
 	///
 	/// Returns [`None`] when the scan has no WHERE predicate pushed into it, in which case the

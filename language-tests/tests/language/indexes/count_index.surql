@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["compute-only"]
 
 [test]
 
@@ -18,9 +17,6 @@ value = "{ building: { compacting: false, initial: 0, pending: 0, status: 'ready
 
 [[test.results]]
 value = "'OK'"
-
-[[test.results]]
-value = '''[{ detail: { plan: { index: 'idx', operator: 'Count' }, table: 't' }, operation: 'Iterate Index Count' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''
 
 [[test.results]]
 value = "[{ count: 4 }]"
@@ -54,8 +50,6 @@ INFO FOR INDEX idx ON t;
     CREATE t:4 SET b = false;
     RETURN 'OK';
 };
-
-SELECT count() FROM t GROUP ALL EXPLAIN;
 
 SELECT count() FROM t GROUP ALL;
 

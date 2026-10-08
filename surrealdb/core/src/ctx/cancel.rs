@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 /// Both views are tripped together by [`Self::trip`] so executor-driven
 /// code and bare-await code converge on the same cancel decision. Callers
 /// who only need *one* view can still use it independently — e.g. the
-/// streaming-exec layer holds the token on its own
+/// engine layer holds the token on its own
 /// [`crate::exec::context::ExecutionContext`] for `select!` use.
 #[derive(Clone, Debug)]
 pub struct CancelHandle {

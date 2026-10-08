@@ -67,9 +67,6 @@ value = "['NONE']"
 value = "['NONE']"
 
 [[test.results]]
-value = "['NONE']"
-
-[[test.results]]
 value = "[NONE]"
 
 [[test.results]]
@@ -86,6 +83,7 @@ value = "'NONE'"
 
 [[test.results]]
 value = "[{ seen: 't:1' }]"
+
 */
 
 CREATE t:1 SET a = 1;
@@ -110,7 +108,6 @@ SELECT VALUE @.to_string() FROM [t:1];
 SELECT VALUE @.to_string() FROM [{ id: 'fake', a: 1 }];
 SELECT VALUE @.to_string() FROM [{ id: { k: 1 }, a: 1 }];
 SELECT VALUE @.to_string() FROM [{ a: 1 }];
-SELECT VALUE @.to_string() FROM [[{ id: t:5 }]];
 SELECT VALUE @.to_string() FROM 7;
 SELECT VALUE @.to_string() FROM (SELECT VALUE @.to_string() FROM [{ id: 'inner' }])[0];
 

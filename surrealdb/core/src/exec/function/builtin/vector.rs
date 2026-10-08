@@ -23,7 +23,7 @@ define_pure_function!(VectorSum, "vector::sum", effects: EffectSet::PURE, (vecto
 // Two vector argument functions
 define_pure_function!(VectorAdd, "vector::add", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::vector::add);
 define_pure_function!(VectorAngle, "vector::angle", effects: EffectSet::PURE, (a: Any, b: Any) -> Float, crate::fnc::vector::angle);
-define_pure_function!(VectorCross, "vector::cross", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::vector::cross);
+define_pure_function!(VectorCross, "vector::cross", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (a: Any, b: Any) -> Any, crate::fnc::vector::cross);
 define_pure_function!(VectorDivide, "vector::divide", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::vector::divide);
 define_pure_function!(VectorDot, "vector::dot", effects: EffectSet::PURE, (a: Any, b: Any) -> Float, crate::fnc::vector::dot);
 define_pure_function!(VectorMultiply, "vector::multiply", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::vector::multiply);

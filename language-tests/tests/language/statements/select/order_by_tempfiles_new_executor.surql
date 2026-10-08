@@ -1,9 +1,8 @@
 /**
 [test]
-reason = "Non-grouped ORDER BY + TEMPFILES routes through the disk-backed ExternalSortByKey operator when the datastore has a temporary_directory configured. The EXPLAIN string is the load-bearing assertion that the operator tree contains ExternalSortByKey rather than SortByKey / SortTopKByKey."
+reason = "A keep-all, non-grouped ORDER BY + TEMPFILES sorts through disk when the datastore has a temporary_directory configured. EXPLAIN marks that sort `tempfiles: true`, and that mark is the load-bearing assertion: a sort with a LIMIT or a random key is bounded in memory and carries no mark."
 
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [[test.results]]
 value = "NONE"
@@ -14,7 +13,7 @@ value = "[{ id: ord:01, n: 1 }, { id: ord:02, n: 2 }, { id: ord:03, n: 3 }, { id
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id, n]
-    ExternalSortByKey [ctx: Db] [sort_keys: n ASC]
+    Sort [ctx: Db] [sort_keys: n ASC, tempfiles: true]
         TableScan [ctx: Db] [table: ord, direction: Forward]
 ''''
 

@@ -3,7 +3,6 @@
 reason = "INFO FOR DB / NS accepts a VERSION clause referencing a past timestamp. With no schema changes since that timestamp, the result is an empty info object."
 
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 # Excludes tikv: the TiKV backend does not support versioned / time-travel
 # queries (it returns UnsupportedVersionedQueries), so a VERSION clause
 # cannot be exercised there.

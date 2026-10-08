@@ -3,9 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-# `compute-only` refuses `ORDER BY` on a field outside the selection, so the
-# shape below only runs on the strategies that plan it.
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = "A sort over at most one row is only dropped when its keys are inert: a key naming a computed-field column is the only demand for that column, and `prune` removes a column nothing reads"

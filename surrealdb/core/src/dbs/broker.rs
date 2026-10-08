@@ -155,3 +155,36 @@ impl CommitAction for SendKill {
 		})
 	}
 }
+
+/// The broker an executor installs on its context: it queues each notification
+/// on the executor's channel, and defers the routing decision to `delivery`.
+#[derive(Clone, Debug)]
+pub(crate) struct DefaultBroker {
+	sender: Sender<RoutedNotification>,
+	delivery: Arc<dyn MessageBroker>,
+}
+
+impl DefaultBroker {
+	pub(crate) fn new(
+		sender: Sender<RoutedNotification>,
+		delivery: Arc<dyn MessageBroker>,
+	) -> Arc<Self> {
+		Arc::new(Self {
+			sender,
+			delivery,
+		})
+	}
+}
+impl MessageBroker for DefaultBroker {
+	fn should_emit(&self, node_id: [u8; 16], target_node: [u8; 16]) -> Result<bool> {
+		self.delivery.should_emit(node_id, target_node)
+	}
+
+	fn send(&self, item: RoutedNotification) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+		Box::pin(async move {
+			// If there is an error, we can just ignore it,
+			// as it means that the channel was closed.
+			let _ = self.sender.send(item).await;
+		})
+	}
+}

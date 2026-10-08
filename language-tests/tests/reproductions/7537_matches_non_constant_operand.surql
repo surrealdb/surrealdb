@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """A MATCHES whose query is a row-independent expression — a record path, a field \

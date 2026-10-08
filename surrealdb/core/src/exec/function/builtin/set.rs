@@ -13,17 +13,17 @@ use crate::val::{ClosureEvaluator, Value};
 use crate::{define_pure_function, register_functions};
 
 // Single set argument functions
-define_pure_function!(SetFirst, "set::first", effects: EffectSet::PURE, (set: Any) -> Any, crate::fnc::set::first);
+define_pure_function!(SetFirst, "set::first", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (set: Any) -> Any, crate::fnc::set::first);
 define_pure_function!(SetFlatten, "set::flatten", effects: EffectSet::PURE, (set: Any) -> Any, crate::fnc::set::flatten);
 define_pure_function!(SetIsEmpty, "set::is_empty", effects: EffectSet::PURE, (set: Any) -> Bool, crate::fnc::set::is_empty);
-define_pure_function!(SetLast, "set::last", effects: EffectSet::PURE, (set: Any) -> Any, crate::fnc::set::last);
+define_pure_function!(SetLast, "set::last", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (set: Any) -> Any, crate::fnc::set::last);
 define_pure_function!(SetLen, "set::len", effects: EffectSet::PURE, (set: Any) -> Int, crate::fnc::set::len);
-define_pure_function!(SetMax, "set::max", effects: EffectSet::PURE, (set: Any) -> Any, crate::fnc::set::max);
-define_pure_function!(SetMin, "set::min", effects: EffectSet::PURE, (set: Any) -> Any, crate::fnc::set::min);
+define_pure_function!(SetMax, "set::max", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (set: Any) -> Any, crate::fnc::set::max);
+define_pure_function!(SetMin, "set::min", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (set: Any) -> Any, crate::fnc::set::min);
 
 // Two argument set functions
 define_pure_function!(SetAdd, "set::add", effects: EffectSet::PURE, (set: Any, value: Any) -> Any, crate::fnc::set::add);
-define_pure_function!(SetAt, "set::at", effects: EffectSet::PURE, (set: Any, index: Int) -> Any, crate::fnc::set::at);
+define_pure_function!(SetAt, "set::at", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (set: Any, index: Int) -> Any, crate::fnc::set::at);
 define_pure_function!(SetComplement, "set::complement", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::set::complement);
 define_pure_function!(SetContains, "set::contains", effects: EffectSet::PURE, (set: Any, value: Any) -> Bool, crate::fnc::set::contains);
 define_pure_function!(SetDifference, "set::difference", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::set::difference);

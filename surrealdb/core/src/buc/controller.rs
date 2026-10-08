@@ -2,7 +2,6 @@ use core::fmt;
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
-use reblessive::tree::Stk;
 
 use super::Error;
 use super::store::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
@@ -11,7 +10,6 @@ use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::exe::FlowResultExt;
 use crate::expr::Error as ExprError;
 use crate::iam::Action;
 use crate::val::{Bytes, File, Value};
@@ -25,7 +23,6 @@ fn accept_payload(value: Value) -> Result<bytes::Bytes> {
 
 /// Allows you to control a specific bucket in the context of the current user
 pub(crate) struct BucketController<'a> {
-	stk: &'a mut Stk,
 	ctx: &'a FrozenContext,
 	opt: &'a Options,
 	doc: Option<&'a CursorDoc>,
@@ -41,7 +38,6 @@ impl<'a> BucketController<'a> {
 	/// that can be used to perform operations on the bucket.
 	///
 	/// # Arguments
-	/// * `stk` - The reblessive stack for async recursion
 	/// * `ctx` - The execution context
 	/// * `opt` - The database options
 	/// * `doc` - Optional cursor document for permission evaluation
@@ -50,7 +46,6 @@ impl<'a> BucketController<'a> {
 	/// # Errors
 	/// Returns an error if the bucket doesn't exist or connection fails.
 	pub(crate) async fn new(
-		stk: &'a mut Stk,
 		ctx: &'a FrozenContext,
 		opt: &'a Options,
 		doc: Option<&'a CursorDoc>,
@@ -61,7 +56,6 @@ impl<'a> BucketController<'a> {
 		let store = ctx.get_bucket_store(ns, db, buc).await?;
 
 		Ok(Self {
-			stk,
 			ctx,
 			opt,
 			doc,
@@ -317,11 +311,8 @@ impl<'a> BucketController<'a> {
 					let ctx = ctx.freeze();
 
 					// Process the PERMISSION clause
-					let res = self
-						.stk
-						.run(|stk| crate::legacy::expr_compute(e, stk, &ctx, opt, self.doc))
-						.await
-						.catch_return()?;
+					let exec = crate::exec::entry::frame(&ctx, opt, self.doc).await;
+					let res = crate::exec::entry::scalar(&exec, e).await?;
 					ensure!(
 						res.is_truthy(),
 						Error::BucketPermissions {

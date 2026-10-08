@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Differential check: graph semi-join bitmap branches (all-ro) return identical results to the legacy engine (compute-only). Results are normalized with array::sort because the fused plan resolves in doc-ID order."
+reason = "Graph semi-join bitmap branches return the rows of the traversal they replace. Results are normalized with array::sort because the fused plan resolves in doc-ID order."
 issue = 549
 
 [[test.results]]

@@ -6,8 +6,7 @@
 //! - **Output naming.** [`LogicalExpr::output_path`] is the single source of truth for where a
 //!   projected value lands; `OutputPath::name` is its flat string form.
 //! - **Paths the operators can walk.** `field_path_from_expr` builds a [`FieldPath`] from a path
-//!   expression, rejecting the shapes the streaming operators cannot express (conditions, method
-//!   calls).
+//!   expression, rejecting the shapes the operators cannot express (conditions, method calls).
 //! - **Path steps.** `path_steps` lists a path's steps in the order they apply, for consumers that
 //!   compare a path part by part against a catalog idiom.
 //! - **GROUP BY validation.** Reject row-scoped parameters (`$this`, `$self`, `$parent`) in grouped

@@ -101,7 +101,7 @@ pub(crate) struct OperatorMetrics {
 	/// resolve-stage fetches, which happen outside any traversal.
 	records_fetched: AtomicU64,
 	/// Whether a bitmap branch declined to produce its bitmap (budget
-	/// overflow, a strict-mode propagation, or a permission or legacy-key
+	/// overflow, a strict-mode propagation, or a permission or legacy-format-key
 	/// gate) and was dropped from its parent's composition. Distinguishes a
 	/// dropped branch from a genuinely empty candidate set in EXPLAIN
 	/// ANALYZE, where both otherwise render `rows: 0`. Discloses only that
@@ -273,7 +273,7 @@ impl OperatorMetrics {
 	}
 
 	/// Record one batch of `rows` values, adding `delta_ns` to elapsed time.
-	fn record_batch(&self, rows: u64, delta_ns: u64) {
+	pub(crate) fn record_batch(&self, rows: u64, delta_ns: u64) {
 		self.output_rows.fetch_add(rows, Ordering::Relaxed);
 		self.output_batches.fetch_add(1, Ordering::Relaxed);
 		self.elapsed_ns.fetch_add(delta_ns, Ordering::Relaxed);
@@ -281,7 +281,7 @@ impl OperatorMetrics {
 
 	/// Record elapsed time without a batch (e.g. when `poll_next` returns
 	/// `Pending` or `None`).
-	fn record_elapsed(&self, delta_ns: u64) {
+	pub(crate) fn record_elapsed(&self, delta_ns: u64) {
 		self.elapsed_ns.fetch_add(delta_ns, Ordering::Relaxed);
 	}
 }

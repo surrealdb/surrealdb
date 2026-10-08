@@ -23,32 +23,50 @@
 //!    are conditional.
 
 use std::borrow::Cow;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use surrealdb_types::ToSql;
+#[cfg(test)]
 use tracing::instrument;
 
+#[cfg(test)]
 use super::count::CountOutput;
-use crate::catalog::{DatabaseId, Error, Index, NamespaceId};
+use crate::catalog::{DatabaseId, NamespaceId};
+#[cfg(test)]
+use crate::catalog::{Error, Index};
 use crate::err::EngineError;
+use crate::exec::ExecutionContext;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::index::iterator::btree::INDEX_BATCH_SIZE;
+#[cfg(test)]
 use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, should_check_perms,
-	table_select_permission_physical_runtime, validate_record_user_access,
+	PhysicalPermission, check_permission_for_value, should_check_perms, validate_record_user_access,
 };
+#[cfg(test)]
 use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, FlowResult,
+	OperatorMetrics, PhysicalExpr, ValueBatchStream, monitor_stream,
 };
+#[cfg(test)]
 use crate::expr::logical::LogicalExpr;
 use crate::expr::{ControlFlow, ControlFlowExt};
+#[cfg(test)]
 use crate::iam::Action;
-use crate::key::schema::{IndexCountKey, IndexCountPrefix, RecordKey, RecordPrefix};
-use crate::key::{KVKeyDecode, KVValue};
-use crate::val::{TableName, Value};
+use crate::key::KVKeyDecode;
+#[cfg(test)]
+use crate::key::KVValue;
+use crate::key::schema::{IndexCountKey, IndexCountPrefix};
+#[cfg(test)]
+use crate::key::schema::{RecordKey, RecordPrefix};
+use crate::val::TableName;
+#[cfg(test)]
+use crate::val::Value;
 
+#[cfg(test)]
 /// Optimized operator for `SELECT count() FROM <table> WHERE <cond> GROUP ALL`
 /// when a matching COUNT index exists.
 ///
@@ -70,7 +88,7 @@ pub struct IndexCountScan {
 	/// matching COUNT index exists.  The planner resolves this from the
 	/// same index analysis it performs for regular queries.
 	pub(crate) btree_access: Option<(IndexRef, BTreeAccess)>,
-	/// Optional exact bitmap fusion plan (issue #547) for multi-index AND
+	/// Optional exact bitmap fusion plan for multi-index AND
 	/// conditions no single index covers: the count is the fused bitmap's
 	/// cardinality, with zero record fetches. Only set when every conjunct
 	/// is exactly represented (see `IndexAnalyzer::try_bitmap_count_fusion`).
@@ -81,7 +99,9 @@ pub struct IndexCountScan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl IndexCountScan {
+	#[cfg(test)]
 	pub(crate) fn new(
 		source: Arc<dyn PhysicalExpr>,
 		predicate: Arc<dyn PhysicalExpr>,
@@ -103,12 +123,14 @@ impl IndexCountScan {
 		}
 	}
 
+	#[cfg(test)]
 	/// Set the B-tree index access path for key-only counting.
 	pub(crate) fn with_btree_access(mut self, access: Option<(IndexRef, BTreeAccess)>) -> Self {
 		self.btree_access = access;
 		self
 	}
 
+	#[cfg(test)]
 	/// Set the exact bitmap fusion plan for multi-index counting.
 	pub(crate) fn with_bitmap_plan(mut self, plan: Option<Arc<super::bitmap::BitmapNode>>) -> Self {
 		self.bitmap_plan_dyn = plan.clone().map(|p| p as Arc<dyn ExecOperator>);
@@ -116,6 +138,7 @@ impl IndexCountScan {
 		self
 	}
 }
+#[cfg(test)]
 impl ExecOperator for IndexCountScan {
 	fn name(&self) -> &'static str {
 		"IndexCountScan"
@@ -162,7 +185,9 @@ impl ExecOperator for IndexCountScan {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
 		validate_record_user_access(&db_ctx)?;
-		let check_perms = should_check_perms(&db_ctx, Action::View)?;
+		// Refused here rather than in the stream, so the refusal surfaces when
+		// the plan is executed.
+		should_check_perms(&db_ctx, Action::View)?;
 
 		let source_expr = Arc::clone(&self.source);
 		let predicate_expr = Arc::clone(&self.predicate);
@@ -174,11 +199,6 @@ impl ExecOperator for IndexCountScan {
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
-			let db_ctx = ctx.database().context("IndexCountScan requires database context")?;
-			let txn = ctx.txn();
-			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
-			let db = Arc::clone(&db_ctx.db);
-
 			// The stamp the enclosing `VersionScope` set, rather than the
 			// clause evaluated again; see [`super::common::resolve_version_stamp`].
 			let version: Option<u64> =
@@ -198,108 +218,17 @@ impl ExecOperator for IndexCountScan {
 				}
 			};
 
-			// Verify table exists.
-			let table_def =
-				db_ctx.get_table_def(&table_name, version).await.context("Failed to get table")?;
-
-			if table_def.is_none() {
-				Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
-					name: table_name.clone(),
-				})))?;
-			}
-
-			// Resolve SELECT permission.
-			let select_permission = if check_perms {
-				table_select_permission_physical_runtime(table_def.as_deref(), &ctx)
-					.await
-					.context("Failed to convert permission")?
-			} else {
-				PhysicalPermission::Allow
-			};
-
-			match select_permission {
-				PhysicalPermission::Deny => {
-					// The table is invisible, so no index entry of it is
-					// counted. The `GROUP ALL` this stands in for reports one
-					// row whatever reaches it, and a caller who may read
-					// nothing counts nothing.
-					yielder.emit(output.batch(0)).await;
-					return Ok(());
-				}
-				PhysicalPermission::Conditional(_) => {
-					// Per-record permissions: fall back to full scan + filter + count.
-					let count = count_with_filter_fallback(
-						&ctx,
-						ns.namespace_id,
-						db.database_id,
-						&table_name,
-						version,
-						&select_permission,
-						&predicate_expr,
-					)
-					.await?;
-					yielder.emit(output.batch(count)).await;
-					return Ok(());
-				}
-				PhysicalPermission::Allow => {
-					// Proceed to look for a matching COUNT index.
-				}
-			}
-
-			// Look up all indexes for the table (using the execution-level cache).
-			let indexes = db_ctx
-				.get_table_indexes(&table_name, version)
-				.await
-				.context("Failed to fetch table indexes")?;
-
-			let matching_index = indexes.iter().find(|ix| matches_count_guard(ix, &condition));
-
-			if let Some(ix_def) = matching_index {
-				// Fast path: sum delta counts from the COUNT index.
-				let count = sum_index_count_deltas(
-					&ctx,
-					&txn,
-					ns.namespace_id,
-					db.database_id,
-					&table_name,
-					ix_def.index_id,
-				)
-				.await?;
-				yielder.emit(output.batch(count)).await;
-			} else if let Some((ref ix_ref, ref access)) = btree_access {
-				// Medium path: count entries by iterating B-tree index
-				// keys only — no record value deserialization.
-				let count = count_btree_index_keys(
-					&ctx,
-					&txn,
-					ns.namespace_id,
-					db.database_id,
-					ix_ref,
-					access,
-				)
-				.await?;
-				yielder.emit(output.batch(count)).await;
-			} else if let Some(ref plan) = bitmap_plan {
-				// Bitmap path (issue #547): the count is the cardinality of
-				// the exact fused bitmap over the table's shared doc-ID
-				// space — index entries only, zero record fetches.
-				let count = plan.build_exact_cardinality(&ctx, &table_name).await?;
-				yielder.emit(output.batch(count as usize)).await;
-			} else {
-				// No matching COUNT index found: fall back to full scan + filter + count.
-				let perm = PhysicalPermission::Allow;
-				let count = count_with_filter_fallback(
-					&ctx,
-					ns.namespace_id,
-					db.database_id,
-					&table_name,
-					version,
-					&perm,
-					&predicate_expr,
-				)
-				.await?;
-				yielder.emit(output.batch(count)).await;
-			}
+			let count = count_indexed(
+				&ctx,
+				table_name,
+				&condition,
+				&predicate_expr,
+				btree_access.as_ref(),
+				bitmap_plan.as_ref(),
+				version,
+			)
+			.await?;
+			yielder.emit(output.batch(count)).await;
 			Ok(())
 		});
 
@@ -307,10 +236,125 @@ impl ExecOperator for IndexCountScan {
 	}
 }
 
+#[cfg(test)]
+/// The number of records of `table` that `condition` admits and the caller
+/// may select, as [`IndexCountScan`] counts them: from a `COUNT` index whose
+/// guard is `condition`, else by walking `btree_access`'s keys, else as the
+/// cardinality of `bitmap_plan`'s exact fused bitmap, else by reading and
+/// judging every record with `predicate`. Under a conditional permission every
+/// record is read and judged; a table the caller may not see counts none.
+pub(crate) async fn count_indexed(
+	ctx: &ExecutionContext,
+	table_name: TableName,
+	condition: &LogicalExpr,
+	predicate_expr: &Arc<dyn PhysicalExpr>,
+	btree_access: Option<&(IndexRef, BTreeAccess)>,
+	bitmap_plan: Option<&Arc<super::bitmap::BitmapNode>>,
+	version: Option<u64>,
+) -> FlowResult<usize> {
+	let db_ctx = ctx.database().context("IndexCountScan requires database context")?;
+	let check_perms = should_check_perms(db_ctx, Action::View)?;
+	let txn = ctx.txn();
+	let ns = Arc::clone(&db_ctx.ns_ctx.ns);
+	let db = Arc::clone(&db_ctx.db);
+	// Verify table exists.
+	let table_def =
+		db_ctx.get_table_def(&table_name, version).await.context("Failed to get table")?;
+
+	if table_def.is_none() {
+		Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
+			name: table_name.clone(),
+		})))?;
+	}
+
+	// Resolve SELECT permission.
+	let select_permission = if check_perms {
+		crate::exec::vm::descriptor::select_permission(ctx, &table_name).await?
+	} else {
+		PhysicalPermission::Allow
+	};
+
+	match select_permission {
+		PhysicalPermission::Deny => {
+			// The table is invisible, so no index entry of it is
+			// counted. The `GROUP ALL` this stands in for reports one
+			// row whatever reaches it, and a caller who may read
+			// nothing counts nothing.
+			return Ok(0);
+		}
+		PhysicalPermission::Conditional(_) => {
+			// Per-record permissions: fall back to full scan + filter + count.
+			let count = count_with_filter_fallback(
+				ctx,
+				ns.namespace_id,
+				db.database_id,
+				&table_name,
+				version,
+				&select_permission,
+				predicate_expr,
+			)
+			.await?;
+			return Ok(count);
+		}
+		PhysicalPermission::Allow => {
+			// Proceed to look for a matching COUNT index.
+		}
+	}
+
+	// Look up all indexes for the table (using the execution-level cache).
+	let indexes = db_ctx
+		.get_table_indexes(&table_name, version)
+		.await
+		.context("Failed to fetch table indexes")?;
+
+	let matching_index = indexes.iter().find(|ix| matches_count_guard(ix, condition));
+
+	if let Some(ix_def) = matching_index {
+		// Fast path: sum delta counts from the COUNT index.
+		let count = sum_index_count_deltas(
+			ctx,
+			&txn,
+			ns.namespace_id,
+			db.database_id,
+			&table_name,
+			ix_def.index_id,
+		)
+		.await?;
+		Ok(count)
+	} else if let Some((ix_ref, access)) = btree_access {
+		// Medium path: count entries by iterating B-tree index
+		// keys only — no record value deserialization.
+		let count =
+			count_btree_index_keys(ctx, &txn, ns.namespace_id, db.database_id, ix_ref, access)
+				.await?;
+		Ok(count)
+	} else if let Some(plan) = bitmap_plan {
+		// Bitmap path: the count is the cardinality of
+		// the exact fused bitmap over the table's shared doc-ID
+		// space — index entries only, zero record fetches.
+		Ok(plan.build_exact_cardinality(ctx, &table_name).await? as usize)
+	} else {
+		// No matching COUNT index found: fall back to full scan + filter + count.
+		let perm = PhysicalPermission::Allow;
+		let count = count_with_filter_fallback(
+			ctx,
+			ns.namespace_id,
+			db.database_id,
+			&table_name,
+			version,
+			&perm,
+			predicate_expr,
+		)
+		.await?;
+		Ok(count)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 /// True when `ix` is a guarded COUNT index whose guard is the query's WHERE
 /// clause.
 ///
@@ -375,6 +419,7 @@ pub(crate) async fn sum_index_count_deltas(
 	Ok(count.max(0) as usize)
 }
 
+#[cfg(test)]
 /// Fallback: scan all records, apply the predicate, and count matches.
 ///
 /// Used when no matching COUNT index exists or when per-record permissions
@@ -453,7 +498,7 @@ async fn count_with_filter_fallback(
 /// reading and deserializing record values.  Each index entry corresponds
 /// to exactly one matching record, so we simply count entries in the
 /// appropriate key range.
-async fn count_btree_index_keys(
+pub(crate) async fn count_btree_index_keys(
 	ctx: &ExecutionContext,
 	txn: &crate::kvs::Transaction,
 	ns_id: NamespaceId,

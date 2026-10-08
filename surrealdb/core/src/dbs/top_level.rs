@@ -19,7 +19,7 @@ use crate::{expr, sql};
 /// A front end that emits a plan rather than a statement hands the plan in
 /// directly: GQL lowers a `MATCH` query to a [`LogicalOp::Match`]. There is no
 /// surface syntax behind a plan, so nothing converts it, and it runs on the
-/// streaming engine or fails.
+/// engine or fails.
 pub(crate) enum TopLevelStatement {
 	/// A statement in surface form, as the parser produced it.
 	Ast(sql::TopLevelExpr),
@@ -117,9 +117,9 @@ impl TopLevelStatement {
 /// lowered form carries no plaintext credential. Statement text reaches the
 /// tracing span and any observer that asks for it; rendering the surface form
 /// would put the plaintext password in both. The slow log prints a statement
-/// the legacy engine ran in this form as well, and one the streaming engine
-/// ran as written: a statement with a logical form holds no DDL, so its
-/// surface text names no credential. A `DEFINE USER`
+/// the engine ran in this form: a statement holds either no schema statement
+/// or is one, and the plan carries that statement in the same lowered form.
+/// A `DEFINE USER`
 /// nested inside a block, a function body or an `IF` branch is reached the
 /// same way, which is why this is a property of the whole render rather than a
 /// carve-out for one statement kind: every top-level kind that carries an

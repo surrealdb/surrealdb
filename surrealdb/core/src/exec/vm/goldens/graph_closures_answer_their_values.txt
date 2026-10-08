@@ -1,0 +1,168 @@
+### owner: LET $f = |$x: int| $x * 2; RETURN $f(21);
+NONE
+42
+### owner: LET $k = 10; LET $f = |$x| $x + $k; LET $k = 99; RETURN [$f(1), $k];
+NONE
+NONE
+NONE
+[11, 99]
+### owner: LET $f = |$x: int| $x; RETURN $f('nope');
+NONE
+error: Incorrect arguments for function ANONYMOUS(). Expected a value of type 'int' for argument $x
+### owner: LET $f = |$a, $b: int| $b; RETURN $f(1);
+NONE
+error: Incorrect arguments for function ANONYMOUS(). Expected a value of type 'int' for argument $b
+### owner: LET $f = |$a, $b: option<int>| $b; RETURN $f(1);
+NONE
+NONE
+### owner: LET $f = |$x| { IF $x > 1 { RETURN 'big' }; 'small' }; RETURN [$f(1), $f(5)];
+NONE
+['small', 'big']
+### owner: LET $f = |$x| -> int { $x }; RETURN $f('a');
+NONE
+error: Couldn't coerce return value from function `ANONYMOUS`: Expected `int` but found `'a'`
+### owner: LET $s = 3; RETURN 3($s);
+NONE
+error: There was a problem running the ANONYMOUS() function. 'int' is not a function
+### owner: RETURN (|$x| $x + 1)(1);
+2
+### owner: LET $fact = |$f, $n| IF $n <= 1 { 1 } ELSE { $n * $f($f, $n - 1) }; RETURN $fact($fact, 10);
+NONE
+3628800
+### owner: LET $s = |$s| $s($s); RETURN $s($s);
+NONE
+error: Reached excessive computation depth due to functions, subqueries, or computed values
+### owner: LET $g = || $limit; RETURN $g();
+NONE
+2
+### owner: LET $f = |$x| $x > 1; RETURN [[1, 2, 3].filter($f), array::filter([1, 2, 3], $f)];
+NONE
+[[2, 3], [2, 3]]
+### owner: LET $f = |$x| $x; RETURN $f;
+NONE
+error: Closure values cannot be converted to public value
+### owner: LET $f = |$x| $x; LET $g = $f; RETURN $f == $g;
+NONE
+NONE
+true
+### owner: SELECT VALUE tags.map(|$t| $t + n) FROM person
+[[2, 3, 4], [9], []]
+### owner: SELECT VALUE tags.filter(|$t| $t > $limit) FROM person
+[[3], [4], []]
+### owner: SELECT VALUE tags.all(|$t| $t > 0) FROM person
+[true, true, true]
+### owner: SELECT VALUE tags.any(|$t| $t = 4) FROM person
+[false, true, false]
+### owner: SELECT VALUE tags.find(|$t| $t >= 2) FROM person
+[2, 4, NONE]
+### owner: SELECT VALUE tags.find_index(|$t| $t >= 2) FROM person
+[1, 0, NONE]
+### owner: SELECT VALUE [tags.map(|$t, $i| $i), name.len()] FROM person
+[[[0, 1, 2], 1], [[0], 1], [[], 1]]
+### owner: SELECT VALUE (<set> tags).filter(|$t| $t > 1) FROM person
+[{2, 3}, {4,}, {,}]
+### owner: SELECT VALUE { check: |$x| $x > n } FROM person
+error: Closure values cannot be converted to public value
+### owner: SELECT VALUE tags.fold(0, |$a, $t| $a + $t) FROM person
+[6, 4, 0]
+### owner: SELECT VALUE n.chain(|$v| $v * 3) FROM person
+error: Cannot perform multiplication with 'none' and 'int'
+### owner: SELECT VALUE (|| name)() FROM person
+['a', 'b', 'h']
+### owner: LET $f = |$x| $x.name; SELECT VALUE $f(id) FROM person
+NONE
+['a', 'b', 'h']
+### owner: LET $f = |$x| $x.name; RETURN $f(person:h);
+NONE
+'h'
+### owner: RETURN [1, 2].map(|$x| $x.nope.deeper);
+[NONE, NONE]
+### owner: RETURN [1, 2].map(|$x| <int> 'x' + $x);
+error: Could not cast into `int` using input `'x'`
+### owner: LET $obj = { f: |$x| $x * 3 }; RETURN $obj.f(2);
+NONE
+6
+### record user: LET $f = |$x: int| $x * 2; RETURN $f(21);
+NONE
+42
+### record user: LET $k = 10; LET $f = |$x| $x + $k; LET $k = 99; RETURN [$f(1), $k];
+NONE
+NONE
+NONE
+[11, 99]
+### record user: LET $f = |$x: int| $x; RETURN $f('nope');
+NONE
+error: Incorrect arguments for function ANONYMOUS(). Expected a value of type 'int' for argument $x
+### record user: LET $f = |$a, $b: int| $b; RETURN $f(1);
+NONE
+error: Incorrect arguments for function ANONYMOUS(). Expected a value of type 'int' for argument $b
+### record user: LET $f = |$a, $b: option<int>| $b; RETURN $f(1);
+NONE
+NONE
+### record user: LET $f = |$x| { IF $x > 1 { RETURN 'big' }; 'small' }; RETURN [$f(1), $f(5)];
+NONE
+['small', 'big']
+### record user: LET $f = |$x| -> int { $x }; RETURN $f('a');
+NONE
+error: Couldn't coerce return value from function `ANONYMOUS`: Expected `int` but found `'a'`
+### record user: LET $s = 3; RETURN 3($s);
+NONE
+error: There was a problem running the ANONYMOUS() function. 'int' is not a function
+### record user: RETURN (|$x| $x + 1)(1);
+2
+### record user: LET $fact = |$f, $n| IF $n <= 1 { 1 } ELSE { $n * $f($f, $n - 1) }; RETURN $fact($fact, 10);
+NONE
+3628800
+### record user: LET $s = |$s| $s($s); RETURN $s($s);
+NONE
+error: Reached excessive computation depth due to functions, subqueries, or computed values
+### record user: LET $g = || $limit; RETURN $g();
+NONE
+2
+### record user: LET $f = |$x| $x > 1; RETURN [[1, 2, 3].filter($f), array::filter([1, 2, 3], $f)];
+NONE
+[[2, 3], [2, 3]]
+### record user: LET $f = |$x| $x; RETURN $f;
+NONE
+error: Closure values cannot be converted to public value
+### record user: LET $f = |$x| $x; LET $g = $f; RETURN $f == $g;
+NONE
+NONE
+true
+### record user: SELECT VALUE tags.map(|$t| $t + n) FROM person
+[[2, 3, 4], [9]]
+### record user: SELECT VALUE tags.filter(|$t| $t > $limit) FROM person
+[[3], [4]]
+### record user: SELECT VALUE tags.all(|$t| $t > 0) FROM person
+[true, true]
+### record user: SELECT VALUE tags.any(|$t| $t = 4) FROM person
+[false, true]
+### record user: SELECT VALUE tags.find(|$t| $t >= 2) FROM person
+[2, 4]
+### record user: SELECT VALUE tags.find_index(|$t| $t >= 2) FROM person
+[1, 0]
+### record user: SELECT VALUE [tags.map(|$t, $i| $i), name.len()] FROM person
+[[[0, 1, 2], 1], [[0], 1]]
+### record user: SELECT VALUE (<set> tags).filter(|$t| $t > 1) FROM person
+[{2, 3}, {4,}]
+### record user: SELECT VALUE { check: |$x| $x > n } FROM person
+error: Closure values cannot be converted to public value
+### record user: SELECT VALUE tags.fold(0, |$a, $t| $a + $t) FROM person
+[6, 4]
+### record user: SELECT VALUE n.chain(|$v| $v * 3) FROM person
+[3, 15]
+### record user: SELECT VALUE (|| name)() FROM person
+['a', 'b']
+### record user: LET $f = |$x| $x.name; SELECT VALUE $f(id) FROM person
+NONE
+['a', 'b']
+### record user: LET $f = |$x| $x.name; RETURN $f(person:h);
+NONE
+NONE
+### record user: RETURN [1, 2].map(|$x| $x.nope.deeper);
+[NONE, NONE]
+### record user: RETURN [1, 2].map(|$x| <int> 'x' + $x);
+error: Could not cast into `int` using input `'x'`
+### record user: LET $obj = { f: |$x| $x * 3 }; RETURN $obj.f(2);
+NONE
+6

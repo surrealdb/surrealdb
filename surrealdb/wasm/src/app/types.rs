@@ -38,6 +38,7 @@ export type ConnectionOptions = {
 		functions?: boolean | string[] | CapabilitiesAllowDenyList;
 		network_targets?: boolean | string[] | CapabilitiesAllowDenyList;
 		experimental?: boolean | string[] | CapabilitiesAllowDenyList;
+		/** @deprecated Accepted and ignored: the engine has a single execution path. */
 		planner_strategy?: "best-effort" | "compute-only" | "all-read-only";
 	};
 }

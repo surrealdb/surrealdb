@@ -14,9 +14,9 @@ That element is the row, so it is the predicate's document root as well as its
 current value. A path evaluates each step against the value it has reached, so
 a read of the *row* inside a path — the separator of `text.split(sep)`, the
 index of `a[i]` — is owed the row and not that value. Bound as the current
-value alone, `sep` resolved against the string `text` had reached and arrived
-as `NONE`, so the call raised an argument-type error where the per-row engine
-retained the row.
+value alone, `sep` would resolve against the string `text` had reached and arrive
+as `NONE`, so the call would raise an argument-type error; the row must be
+retained.
 
 Both source shapes are covered, since each judges its predicate in its own
 place: an array source filters its elements, a scalar source judges the single

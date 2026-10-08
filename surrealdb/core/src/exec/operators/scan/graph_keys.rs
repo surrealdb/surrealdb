@@ -116,6 +116,25 @@ pub(crate) async fn compute_graph_ranges(
 	edge_tables: &[EdgeTableSpec],
 	ctx: &ExecutionContext,
 ) -> Result<Vec<GraphRange>, ControlFlow> {
+	let mut evaluated = Vec::with_capacity(edge_tables.len());
+	for spec in edge_tables {
+		let start = eval_fk_bound(&spec.range_start, ctx).await?;
+		let end = eval_fk_bound(&spec.range_end, ctx).await?;
+		evaluated.push((spec.table.clone(), start, end));
+	}
+	graph_ranges(ns_id, db_id, rid, dir, &evaluated)
+}
+
+/// [`compute_graph_ranges`] over edge tables whose bounds are evaluated: each
+/// `(table, start, end)` the edge table and the bounds on its edges' foreign
+/// key.
+pub(crate) fn graph_ranges(
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	rid: &RecordId,
+	dir: Dir,
+	edge_tables: &[(TableName, Bound<RecordIdKey>, Bound<RecordIdKey>)],
+) -> Result<Vec<GraphRange>, ControlFlow> {
 	if edge_tables.is_empty() {
 		// Scan all edges in this direction. The bound is encoded once and
 		// serves both sides of the pair: everything strictly beneath it is
@@ -137,15 +156,13 @@ pub(crate) async fn compute_graph_ranges(
 		}])
 	} else {
 		let mut ranges = Vec::with_capacity(edge_tables.len());
-		for spec in edge_tables {
+		for (table, start, end) in edge_tables {
 			// The spec's bounds constrain the edge's foreign key, the field that
 			// follows the foreign table in the adjacency layout, so the range is
 			// cut on that field of the foreign-table bound — and every key in it
 			// shares the bound's bytes through the edge table, which the decoder
 			// therefore supplies instead of re-decoding per key.
-			let start = eval_fk_bound(&spec.range_start, ctx).await?;
-			let end = eval_fk_bound(&spec.range_end, ctx).await?;
-			let fk_lower = match &start {
+			let fk_lower = match start {
 				Bound::Included(key) | Bound::Excluded(key) => Some(key.clone()),
 				Bound::Unbounded => None,
 			};
@@ -156,16 +173,14 @@ pub(crate) async fn compute_graph_ranges(
 				tb: Cow::Borrowed(&rid.table),
 				id: Cow::Borrowed(&rid.key),
 				dir,
-				foreign_table: Cow::Borrowed(&spec.table),
+				foreign_table: Cow::Borrowed(table),
 			};
-			let decoder = DecodedGraphPrefix::from_foreign_table_bound(
-				prefix.encode_bound()?,
-				spec.table.clone(),
-			);
-			let range = prefix.range_where((as_cow_bound(&start), as_cow_bound(&end)))?;
+			let decoder =
+				DecodedGraphPrefix::from_foreign_table_bound(prefix.encode_bound()?, table.clone());
+			let range = prefix.range_where((as_cow_bound(start), as_cow_bound(end)))?;
 
 			ranges.push(GraphRange {
-				edge_table: Some(spec.table.clone()),
+				edge_table: Some(table.clone()),
 				fk_lower,
 				range,
 				decoder,

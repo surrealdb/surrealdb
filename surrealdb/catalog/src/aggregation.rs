@@ -44,6 +44,7 @@ use std::mem;
 
 use ahash::HashMap;
 use anyhow::{Result, bail, ensure};
+use common::fail;
 use revision::revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
@@ -444,10 +445,413 @@ pub fn group_field_name(idx: usize) -> Strand {
 	format_indexed_strand("_g", idx)
 }
 
-/// Updates the aggregation states from the results in the arguments array.
+/// One stat an incremental update could not maintain from the change alone,
+/// because the value that left the group was the stored extreme.
 ///
-/// Assumes the correct number of arguments are in the arguments array as required by the
-/// aggregation stats.
+/// The extreme has to be recomputed over the group's remaining rows, which the
+/// caller does — this only names what to recompute and where to put it back.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Recalculation {
+	/// The aggregate function that recomputes the extreme.
+	pub function: String,
+	/// Index into the stats of the stat to restore.
+	pub stat: usize,
+	/// Index into the aggregate arguments the stat reads.
+	pub arg: usize,
+}
+
+/// Withdraw one record's contribution from a group's stats.
+///
+/// The counterpart of [`add_to_aggregation_stats`], for a record leaving the
+/// group: counts and sums move down, and the shifted variance state is
+/// withdrawn in a way that resets an emptied group.
+///
+/// An extreme cannot be withdrawn — the stats hold the maximum, not the values
+/// it was drawn from — so a record carrying the stored extreme leaves the stat
+/// as it stands and is reported in the returned [`Recalculation`]s. Pass the
+/// recomputed values back through [`apply_recalculations`]; a caller that
+/// ignores them leaves the group holding an extreme no member has.
+pub fn remove_from_aggregation_stats(
+	arguments: &[Value],
+	stats: &mut [AggregationStat],
+) -> Result<Vec<Recalculation>> {
+	let mut recalculations = Vec::new();
+	for (idx, stat) in stats.iter_mut().enumerate() {
+		match stat {
+			AggregationStat::Count {
+				count,
+			} => {
+				*count -= 1;
+			}
+			AggregationStat::CountValue {
+				arg,
+				count,
+			} => {
+				if arguments[*arg].is_truthy() {
+					*count -= 1;
+				}
+			}
+			AggregationStat::NumberMax {
+				arg,
+				max,
+			} => {
+				let Value::Number(n) = &arguments[*arg] else {
+					fail!("Old record wasn't a number but was created with a number");
+				};
+				if *n == *max {
+					recalculations.push(Recalculation {
+						function: "math::max".to_string(),
+						stat: idx,
+						arg: *arg,
+					})
+				}
+			}
+			AggregationStat::NumberMin {
+				arg,
+				min,
+			} => {
+				let Value::Number(n) = &arguments[*arg] else {
+					fail!("Old record wasn't a number but was created with a number");
+				};
+				if *n == *min {
+					recalculations.push(Recalculation {
+						function: "math::min".to_string(),
+						stat: idx,
+						arg: *arg,
+					})
+				}
+			}
+			AggregationStat::Sum {
+				arg,
+				sum,
+			} => {
+				let Value::Number(n) = &arguments[*arg] else {
+					fail!("Old record wasn't a number but was created with a number");
+				};
+				*sum = *sum - *n;
+			}
+			AggregationStat::Mean {
+				arg,
+				sum,
+				count,
+			} => {
+				let Value::Number(n) = &arguments[*arg] else {
+					fail!("Old record wasn't a number but was created with a number");
+				};
+				*sum = *sum - *n;
+				*count -= 1;
+			}
+			AggregationStat::TimeMax {
+				arg,
+				max,
+			} => {
+				let Value::Datetime(n) = &arguments[*arg] else {
+					fail!("Old record wasn't a datetime but was created with a number");
+				};
+				if *n == *max {
+					recalculations.push(Recalculation {
+						function: "time::max".to_string(),
+						stat: idx,
+						arg: *arg,
+					});
+				}
+			}
+			AggregationStat::TimeMin {
+				arg,
+				min,
+			} => {
+				let Value::Datetime(n) = &arguments[*arg] else {
+					fail!("Old record wasn't a datetime but was created with a number");
+				};
+				if *n == *min {
+					recalculations.push(Recalculation {
+						function: "time::min".to_string(),
+						stat: idx,
+						arg: *arg,
+					});
+				}
+			}
+			AggregationStat::Variance {
+				arg,
+				shift,
+				sum,
+				sum_of_squares,
+				count,
+			}
+			| AggregationStat::StdDev {
+				arg,
+				shift,
+				sum,
+				sum_of_squares,
+				count,
+			} => {
+				let Value::Number(n) = &arguments[*arg] else {
+					fail!("Old record wasn't a number but was created with a number");
+				};
+				shifted_remove(shift, sum, sum_of_squares, count, *n)?;
+			}
+			AggregationStat::Accumulate {
+				..
+			} => fail!("Accumulate aggregation is not supported in materialized views"),
+		}
+	}
+	Ok(recalculations)
+}
+
+/// Move a group's stats from one record's contribution to another's.
+///
+/// A record that stays in its group and changes value. Not a
+/// [`remove_from_aggregation_stats`] followed by an
+/// [`add_to_aggregation_stats`]: the group's membership does not change, so
+/// `Count` stands still, and an extreme the new value exceeds is taken
+/// directly rather than recomputed. Only a new value that *retreats* from the
+/// stored extreme while the old value *was* it needs the group re-read, which
+/// is what the returned [`Recalculation`]s name.
+///
+/// The shifted variance state is the exception: it is withdrawn and re-added,
+/// because the shift and the count must move together with the sums and
+/// [`shifted_remove`] resets an emptied group so the re-add picks a fresh
+/// shift.
+pub fn update_aggregation_stats(
+	before_args: &[Value],
+	after_args: &[Value],
+	stats: &mut [AggregationStat],
+) -> Result<Vec<Recalculation>> {
+	let mut recalculations = Vec::new();
+	for (idx, stat) in stats.iter_mut().enumerate() {
+		match stat {
+			AggregationStat::Count {
+				..
+			} => {}
+			AggregationStat::CountValue {
+				arg,
+				count,
+			} => {
+				if before_args[*arg].is_truthy() {
+					*count -= 1;
+				}
+				if after_args[*arg].is_truthy() {
+					*count += 1;
+				}
+			}
+			AggregationStat::NumberMax {
+				arg,
+				max,
+			} => {
+				let after = number(&after_args[*arg], "math::max")?;
+				let Value::Number(before) = &before_args[*arg] else {
+					fail!("Old record wasn't a number but was created with a number");
+				};
+				if after >= *max {
+					*max = after
+				} else if *before == *max {
+					recalculations.push(Recalculation {
+						function: "math::max".to_string(),
+						stat: idx,
+						arg: *arg,
+					})
+				}
+			}
+			AggregationStat::NumberMin {
+				arg,
+				min,
+			} => {
+				let after = number(&after_args[*arg], "math::min")?;
+				let Value::Number(before) = &before_args[*arg] else {
+					fail!("Old record wasn't a number but was created with a number");
+				};
+				if after <= *min {
+					*min = after
+				} else if *before == *min {
+					recalculations.push(Recalculation {
+						function: "math::min".to_string(),
+						stat: idx,
+						arg: *arg,
+					})
+				}
+			}
+			AggregationStat::Sum {
+				arg,
+				sum,
+			} => {
+				let after = number(&after_args[*arg], "math::sum")?;
+				let Value::Number(before) = &before_args[*arg] else {
+					fail!("Old record wasn't a number but was created with a number");
+				};
+				*sum = *sum - *before;
+				*sum = sum.try_add(after)?;
+			}
+			AggregationStat::Mean {
+				arg,
+				sum,
+				..
+			} => {
+				let after = number(&after_args[*arg], "math::mean")?;
+				let Value::Number(before) = &before_args[*arg] else {
+					fail!("Old record wasn't a number but was created with a number");
+				};
+				*sum = *sum - *before;
+				*sum = sum.try_add(after)?;
+			}
+			AggregationStat::TimeMax {
+				arg,
+				max,
+			} => {
+				let after = datetime(&after_args[*arg], "time::max")?;
+				let Value::Datetime(before) = &before_args[*arg] else {
+					fail!("Old record wasn't a datetime but was created with a number");
+				};
+				if after >= *max {
+					*max = after;
+				} else if *before == *max {
+					recalculations.push(Recalculation {
+						function: "time::max".to_string(),
+						stat: idx,
+						arg: *arg,
+					});
+				}
+			}
+			AggregationStat::TimeMin {
+				arg,
+				min,
+			} => {
+				let after = datetime(&after_args[*arg], "time::min")?;
+				let Value::Datetime(before) = &before_args[*arg] else {
+					fail!("Old record wasn't a datetime but was created with a number");
+				};
+				if after <= *min {
+					*min = after;
+				} else if *before == *min && after != *min {
+					recalculations.push(Recalculation {
+						function: "time::min".to_string(),
+						stat: idx,
+						arg: *arg,
+					});
+				}
+			}
+			AggregationStat::Variance {
+				arg,
+				shift,
+				sum,
+				sum_of_squares,
+				count,
+			}
+			| AggregationStat::StdDev {
+				arg,
+				shift,
+				sum,
+				sum_of_squares,
+				count,
+			} => {
+				let Value::Number(before) = &before_args[*arg] else {
+					fail!("Old record wasn't a number but was created with a number");
+				};
+				let Value::Number(after) = &after_args[*arg] else {
+					fail!("Old record wasn't a number but was created with a number");
+				};
+				shifted_remove(shift, sum, sum_of_squares, count, *before)?;
+				shifted_accumulate(shift, sum, sum_of_squares, count, *after)?;
+			}
+			AggregationStat::Accumulate {
+				..
+			} => fail!("Accumulate aggregation is not supported in materialized views"),
+		}
+	}
+	Ok(recalculations)
+}
+
+/// Put recomputed extremes back into the stats they were withdrawn from.
+///
+/// `values` is positional against `recalculations`, in the order
+/// [`remove_from_aggregation_stats`] or [`update_aggregation_stats`] reported
+/// them.
+///
+/// A value whose type does not match the stat it is restoring, and a
+/// recalculation naming a stat that holds no extreme, are both disagreements
+/// between the recomputation and the stats it was derived from, and are
+/// reported rather than assumed away.
+pub fn apply_recalculations(
+	stats: &mut [AggregationStat],
+	recalculations: &[Recalculation],
+	values: Vec<Value>,
+) -> Result<()> {
+	if values.len() != recalculations.len() {
+		fail!(
+			"An aggregate recalculation returned {} values for {} extremes",
+			values.len(),
+			recalculations.len()
+		)
+	}
+	for (recalculation, value) in recalculations.iter().zip(values) {
+		let Some(stat) = stats.get_mut(recalculation.stat) else {
+			fail!("An aggregate recalculation named a stat the group does not hold")
+		};
+		match stat {
+			AggregationStat::TimeMin {
+				min: stat,
+				..
+			}
+			| AggregationStat::TimeMax {
+				max: stat,
+				..
+			} => {
+				let Value::Datetime(d) = value else {
+					fail!("Got wrong recalculation value")
+				};
+				*stat = d;
+			}
+			AggregationStat::NumberMin {
+				min: stat,
+				..
+			}
+			| AggregationStat::NumberMax {
+				max: stat,
+				..
+			} => {
+				let Value::Number(n) = value else {
+					fail!("Got wrong recalculation value")
+				};
+				*stat = n;
+			}
+			_ => fail!("An aggregate recalculation named a stat that holds no extreme"),
+		}
+	}
+	Ok(())
+}
+
+/// The numeric argument an aggregate was defined over, named by the function
+/// that reads it so a wrong type reports as that function's argument error.
+fn number(value: &Value, function: &str) -> Result<Number> {
+	let Value::Number(n) = value else {
+		bail!(ExprError::InvalidFunctionArguments {
+			name: function.to_string(),
+			message: format!(
+				"Argument 1 was the wrong type. Expected `number` but found `{}`",
+				value.to_sql()
+			),
+		})
+	};
+	Ok(*n)
+}
+
+/// [`number`], for an aggregate over datetimes.
+fn datetime(value: &Value, function: &str) -> Result<Datetime> {
+	let Value::Datetime(d) = value else {
+		bail!(ExprError::InvalidFunctionArguments {
+			name: function.to_string(),
+			message: format!(
+				"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
+				value.to_sql()
+			),
+		})
+	};
+	Ok(*d)
+}
+
+/// Add one record's contribution to a group's stats.
+///
+/// Assumes the correct number of arguments are in the arguments array as
+/// required by the aggregation stats.
 pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationStat]) -> Result<()> {
 	for stat in stats {
 		match stat {
@@ -1286,5 +1690,309 @@ impl AggregationAnalysis {
 			group_expressions,
 			fields,
 		})
+	}
+}
+
+/// A value the select that fills an aggregated view computes for each group.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum BackfillValue {
+	/// The result of the aggregate itself.
+	Aggregate(Aggregation),
+	/// The accurate two-pass sample variance of aggregate argument `n`, from
+	/// which a variance or deviation's shifted state is reconstructed
+	/// ([`shifted_state_from_summary`]).
+	SampleVariance(usize),
+}
+
+impl BackfillValue {
+	/// The expression that computes this value over a group's rows.
+	fn expr(&self, analysis: &AggregationAnalysis) -> Result<Expr> {
+		use crate::expr::FunctionCall;
+		let call = |name: &str, arg: Option<usize>| {
+			Expr::FunctionCall(Box::new(FunctionCall {
+				receiver: Function::Normal(name.to_string()),
+				arguments: arg
+					.map(|arg| analysis.aggregate_arguments[arg].clone())
+					.into_iter()
+					.collect(),
+			}))
+		};
+		Ok(match self {
+			BackfillValue::SampleVariance(arg) => call("math::variance", Some(*arg)),
+			BackfillValue::Aggregate(aggregation) => match aggregation {
+				Aggregation::Count => call("count", None),
+				Aggregation::CountValue(arg) => call("count", Some(*arg)),
+				Aggregation::NumberMax(arg) => call("math::max", Some(*arg)),
+				Aggregation::NumberMin(arg) => call("math::min", Some(*arg)),
+				Aggregation::Sum(arg) => call("math::sum", Some(*arg)),
+				Aggregation::Mean(arg) => call("math::mean", Some(*arg)),
+				Aggregation::DatetimeMax(arg) => call("time::max", Some(*arg)),
+				Aggregation::DatetimeMin(arg) => call("time::min", Some(*arg)),
+				Aggregation::StdDev(_) | Aggregation::Variance(_) => {
+					fail!("A deviation or variance is computed from its mean and sample variance")
+				}
+				Aggregation::Accumulate(_) => {
+					fail!("Accumulate aggregation is not supported in materialized views")
+				}
+			},
+		})
+	}
+}
+
+impl AggregationAnalysis {
+	/// The values the select that fills the view computes per group, in the
+	/// order of the array it answers them in: each aggregate the view stores
+	/// needs its own value, a mean the sum and the count behind it, and a
+	/// variance or deviation the mean, the sample variance and the count.
+	pub fn backfill_values(&self) -> Result<Vec<BackfillValue>> {
+		let mut values = Vec::new();
+		let mut want = |value: BackfillValue| {
+			if !values.contains(&value) {
+				values.push(value);
+			}
+		};
+		for aggregation in self.aggregations.iter() {
+			match aggregation {
+				Aggregation::Count
+				| Aggregation::CountValue(_)
+				| Aggregation::NumberMax(_)
+				| Aggregation::NumberMin(_)
+				| Aggregation::Sum(_)
+				| Aggregation::DatetimeMax(_)
+				| Aggregation::DatetimeMin(_) => {
+					want(BackfillValue::Aggregate(aggregation.clone()));
+				}
+				Aggregation::Mean(arg) => {
+					want(BackfillValue::Aggregate(Aggregation::Sum(*arg)));
+					want(BackfillValue::Aggregate(Aggregation::Count));
+				}
+				Aggregation::StdDev(arg) | Aggregation::Variance(arg) => {
+					want(BackfillValue::Aggregate(Aggregation::Mean(*arg)));
+					want(BackfillValue::SampleVariance(*arg));
+					want(BackfillValue::Aggregate(Aggregation::Count));
+				}
+				Aggregation::Accumulate(_) => {
+					fail!("Accumulate aggregation is not supported in materialized views")
+				}
+			}
+		}
+		Ok(values)
+	}
+
+	/// The select that computes every group of the view over `tables` and
+	/// `condition`: the group keys as `g0`, `g1`, … and the array of `values`
+	/// ([`Self::backfill_values`]) as `a`, grouped by those keys.
+	pub fn backfill_select(
+		&self,
+		values: &[BackfillValue],
+		tables: &[surrealdb_strand::TableName],
+		condition: Option<&Expr>,
+	) -> Result<SelectStatement> {
+		use crate::expr::{Cond, Group, Literal};
+		let mut fields = Vec::new();
+		let mut groups = Vec::new();
+		for (idx, g) in self.group_expressions.iter().enumerate() {
+			let alias = format!("g{}", idx);
+			fields.push(Field::Single(Selector {
+				expr: g.clone(),
+				alias: Some(Idiom::field(alias.clone())),
+			}));
+			groups.push(Group(Idiom::field(alias)));
+		}
+		let computed = values.iter().map(|value| value.expr(self)).collect::<Result<Vec<_>>>()?;
+		fields.push(Field::Single(Selector {
+			expr: Expr::Literal(Literal::Array(computed)),
+			alias: Some(Idiom::field("a".to_string())),
+		}));
+		Ok(SelectStatement {
+			fields: Fields::Select(fields),
+			cond: condition.cloned().map(Cond),
+			group: Some(Groups(groups)),
+			what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
+			omit: vec![],
+			only: false,
+			with: None,
+			split: None,
+			order: None,
+			limit: None,
+			start: None,
+			fetch: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
+			explain: None,
+			tempfiles: false,
+			for_update: false,
+		})
+	}
+}
+
+/// The stats of one group of an aggregated view from the array `a` of the
+/// select that fills it ([`AggregationAnalysis::backfill_select`]), or `None`
+/// for a row that stands for no group.
+///
+/// A view row stands for a group that source rows are in, and the incremental
+/// path keeps it that way: it creates the row with the group's first row and
+/// deletes it with the group's last. `GROUP ALL` answers a query over no rows
+/// with the grand total, which stands for no group and whose extremes are each
+/// aggregate's answer over no values rather than a group's. Every view's
+/// analysis carries a count, which is what tells the two apart.
+pub fn backfill_stats(
+	aggregations: &[Aggregation],
+	values: &[BackfillValue],
+	computed: &[Value],
+) -> Result<Option<Vec<AggregationStat>>> {
+	let at = |value: BackfillValue| -> Result<&Value> {
+		let Some(idx) = values.iter().position(|v| *v == value) else {
+			fail!("a backfill value the view's aggregations did not include")
+		};
+		let Some(value) = computed.get(idx) else {
+			fail!("select result did not contain a value for an aggregation")
+		};
+		Ok(value)
+	};
+	let count_of = || -> Result<i64> {
+		let Value::Number(Number::Int(count)) = at(BackfillValue::Aggregate(Aggregation::Count))?
+		else {
+			fail!("initial select statement did not return the right value")
+		};
+		Ok(*count)
+	};
+	let number_of = |value: BackfillValue| -> Result<Number> {
+		let Value::Number(n) = at(value)? else {
+			fail!("initial select statement did not return the right value")
+		};
+		Ok(*n)
+	};
+	let datetime_of = |value: BackfillValue| -> Result<Datetime> {
+		let Value::Datetime(d) = at(value)? else {
+			fail!("initial select statement did not return the right value")
+		};
+		Ok(*d)
+	};
+	if !values.contains(&BackfillValue::Aggregate(Aggregation::Count)) {
+		fail!("a materialised view's aggregations did not include a count");
+	}
+	if count_of()? == 0 {
+		return Ok(None);
+	}
+	let mut stats = Vec::with_capacity(aggregations.len());
+	for a in aggregations.iter() {
+		stats.push(match *a {
+			Aggregation::Count => AggregationStat::Count {
+				count: count_of()?,
+			},
+			Aggregation::CountValue(arg) => {
+				let Value::Number(Number::Int(count)) =
+					at(BackfillValue::Aggregate(Aggregation::CountValue(arg)))?
+				else {
+					fail!("initial select statement did not return the right value")
+				};
+				AggregationStat::CountValue {
+					arg,
+					count: *count,
+				}
+			}
+			Aggregation::NumberMax(arg) => AggregationStat::NumberMax {
+				arg,
+				max: number_of(BackfillValue::Aggregate(Aggregation::NumberMax(arg)))?,
+			},
+			Aggregation::NumberMin(arg) => AggregationStat::NumberMin {
+				arg,
+				min: number_of(BackfillValue::Aggregate(Aggregation::NumberMin(arg)))?,
+			},
+			// A sum is kept from a float zero, as [`Aggregation::to_stat`] starts
+			// one, so the view holds the type the incremental path gives it.
+			Aggregation::Sum(arg) => AggregationStat::Sum {
+				arg,
+				sum: Number::from(0.0)
+					.try_add(number_of(BackfillValue::Aggregate(Aggregation::Sum(arg)))?)?,
+			},
+			Aggregation::Mean(arg) => AggregationStat::Mean {
+				arg,
+				sum: Number::from(0.0)
+					.try_add(number_of(BackfillValue::Aggregate(Aggregation::Sum(arg)))?)?,
+				count: count_of()?,
+			},
+			Aggregation::DatetimeMax(arg) => AggregationStat::TimeMax {
+				arg,
+				max: datetime_of(BackfillValue::Aggregate(Aggregation::DatetimeMax(arg)))?,
+			},
+			Aggregation::DatetimeMin(arg) => AggregationStat::TimeMin {
+				arg,
+				min: datetime_of(BackfillValue::Aggregate(Aggregation::DatetimeMin(arg)))?,
+			},
+			Aggregation::StdDev(arg) | Aggregation::Variance(arg) => {
+				let mean = number_of(BackfillValue::Aggregate(Aggregation::Mean(arg)))?;
+				let variance = number_of(BackfillValue::SampleVariance(arg))?;
+				let count = count_of()?;
+				let (shift, sum, sum_of_squares) =
+					shifted_state_from_summary(mean, variance, count)?;
+				if matches!(a, Aggregation::StdDev(_)) {
+					AggregationStat::StdDev {
+						arg,
+						shift,
+						sum,
+						sum_of_squares,
+						count,
+					}
+				} else {
+					AggregationStat::Variance {
+						arg,
+						shift,
+						sum,
+						sum_of_squares,
+						count,
+					}
+				}
+			}
+			Aggregation::Accumulate(_) => {
+				fail!("Accumulate aggregation is not supported in materialized views")
+			}
+		});
+	}
+	Ok(Some(stats))
+}
+
+#[cfg(test)]
+mod backfill_tests {
+	use super::*;
+
+	/// A variance needs the mean, the sample variance and the count behind
+	/// it, each once, and a mean needs the sum and the count.
+	#[test]
+	fn a_backfill_computes_each_value_the_stats_are_made_from_once() {
+		let analysis = AggregationAnalysis {
+			aggregate_arguments: vec![Expr::Idiom(Idiom::field("x".to_owned()))],
+			aggregations: vec![Aggregation::Variance(0), Aggregation::Mean(0), Aggregation::Count],
+			group_expressions: Vec::new(),
+			fields: AggregateFields::Fields(Vec::new()),
+		};
+		let values = analysis.backfill_values().expect("the aggregations are computable");
+		assert_eq!(
+			values,
+			vec![
+				BackfillValue::Aggregate(Aggregation::Mean(0)),
+				BackfillValue::SampleVariance(0),
+				BackfillValue::Aggregate(Aggregation::Count),
+				BackfillValue::Aggregate(Aggregation::Sum(0)),
+			]
+		);
+	}
+
+	/// A row with no records in its group stands for no group.
+	#[test]
+	fn a_backfill_row_counting_no_records_has_no_stats() {
+		let values = vec![BackfillValue::Aggregate(Aggregation::Count)];
+		let none = backfill_stats(&[Aggregation::Count], &values, &[Value::from(0i64)]);
+		assert!(matches!(none, Ok(None)));
+		let some = backfill_stats(&[Aggregation::Count], &values, &[Value::from(3i64)])
+			.expect("the count reads")
+			.expect("three records stand for a group");
+		assert!(matches!(
+			some.as_slice(),
+			[AggregationStat::Count {
+				count: 3
+			}]
+		));
 	}
 }

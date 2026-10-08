@@ -115,7 +115,7 @@ impl Literal {
 	///
 	/// This is the shape a `.surql` import consists of almost entirely, and
 	/// answering it without the evaluator is what keeps import off the async
-	/// stack: see the callers in the legacy literal evaluator and in the
+	/// stack: see the callers in the literal evaluator and in the
 	/// planner.
 	pub fn as_static_value(&self) -> Option<crate::val::Value> {
 		use crate::val::Value;

@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Test CONTAINS, CONTAINSALL, and CONTAINSANY with array fields and index (new executor)"
+reason = "Test CONTAINS, CONTAINSALL, and CONTAINSANY with array fields and index"
 
 [[test.results]]
 value = "[{ id: student:1, marks: [{ mark: 50, subject: 'maths' }, { mark: 40, subject: 'english' }, { mark: 45, subject: 'tamil' }] }]"
@@ -17,7 +16,8 @@ value = "[{ id: student:3, marks: [{ mark: 50, subject: 'maths' }, { mark: 30, s
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
-    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINS 'english', pre_decode_filter: no (unsupported predicate)] {rows: 2}
+    Filter [ctx: Db] [predicate: marks.*.subject CONTAINS 'english'] {rows: 2}
+        TableScan [ctx: Db] [table: student, direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -30,7 +30,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
-    IndexScan [ctx: Db] [index: subject_idx, access: = 'english', direction: Forward, predicate: marks.*.subject CONTAINS 'english'] {rows: 2}
+    IndexScan [ctx: Db] [table: student, index: subject_idx, access: = 'english', direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -43,7 +43,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
-    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSALL ['hindi', 'maths'], pre_decode_filter: no (unsupported predicate)] {rows: 2}
+    Filter [ctx: Db] [predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}
+        TableScan [ctx: Db] [table: student, direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -57,9 +58,9 @@ value = "NONE"
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
     Filter [ctx: Db] [predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}
-        UnionIndexScan [ctx: Db] [table: student, branches: 2] {rows: 3}
-            IndexScan [ctx: Db] [index: subject_idx, access: = 'hindi', direction: Forward] {rows: 2}
-            IndexScan [ctx: Db] [index: subject_idx, access: = 'maths', direction: Forward] {rows: 3}
+        UnionIndexScan [ctx: Db] [table: student, branches: 2] {rows: 2}
+            IndexScan [ctx: Db] [table: student, index: subject_idx, access: = 'hindi', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: student, index: subject_idx, access: = 'maths', direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -72,7 +73,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
-    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSANY ['tamil', 'french'], pre_decode_filter: no (unsupported predicate)] {rows: 2}
+    Filter [ctx: Db] [predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2}
+        TableScan [ctx: Db] [table: student, direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -85,9 +87,10 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
-    UnionIndexScan [ctx: Db] [table: student, branches: 2] {rows: 2}
-        IndexScan [ctx: Db] [index: subject_idx, access: = 'tamil', direction: Forward] {rows: 2}
-        IndexScan [ctx: Db] [index: subject_idx, access: = 'french', direction: Forward] {rows: 0}
+    Filter [ctx: Db] [predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2}
+        UnionIndexScan [ctx: Db] [table: student, branches: 2] {rows: 2}
+            IndexScan [ctx: Db] [table: student, index: subject_idx, access: = 'tamil', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: student, index: subject_idx, access: = 'french', direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 

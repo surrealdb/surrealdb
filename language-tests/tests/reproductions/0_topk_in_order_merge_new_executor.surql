@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Streaming executor plan: with a composite index (filter_col, sort_col), `WHERE filter_col IN [...] ORDER BY sort_col` must route through UnionIndexScan with `merge_by_index_key` set. The merge produces globally sorted output so the planner eliminates the outer Sort and a downstream LIMIT cancels the scans early. Regression guard for Phase 2 of the OOM fix."
+reason = "Plan: with a composite index (filter_col, sort_col), `WHERE filter_col IN [...] ORDER BY sort_col` must route through UnionIndexScan with `merge_by_index_key` set. The merge produces globally sorted output so the planner eliminates the outer Sort and a downstream LIMIT cancels the scans early. Regression guard for Phase 2 of the OOM fix."
 
 [[test.results]]
 value = "NONE"
@@ -46,8 +45,10 @@ value = '''
     Limit [ctx: Db] [limit: 3]
         Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
             UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Desc]
-                IndexScan [ctx: Db] [index: idx_status_created, access: [200], direction: Backward]
-                IndexScan [ctx: Db] [index: idx_status_created, access: [201], direction: Backward]
+                DistinctRecords [ctx: Db]
+                    IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [200], direction: Backward]
+                DistinctRecords [ctx: Db]
+                    IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [201], direction: Backward]
 ''''
 
 [[test.results]]
@@ -56,8 +57,10 @@ value = '''
     Limit [ctx: Db] [limit: 3]
         Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
             UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Asc]
-                IndexScan [ctx: Db] [index: idx_status_created, access: [200], direction: Forward]
-                IndexScan [ctx: Db] [index: idx_status_created, access: [201], direction: Forward]
+                DistinctRecords [ctx: Db]
+                    IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [200], direction: Forward]
+                DistinctRecords [ctx: Db]
+                    IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [201], direction: Forward]
 ''''
 
 [[test.results]]
@@ -66,8 +69,10 @@ value = '''
     Limit [ctx: Db] [limit: 3, offset: 2]
         Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
             UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Desc]
-                IndexScan [ctx: Db] [index: idx_status_created, access: [200], direction: Backward]
-                IndexScan [ctx: Db] [index: idx_status_created, access: [201], direction: Backward]
+                DistinctRecords [ctx: Db]
+                    IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [200], direction: Backward]
+                DistinctRecords [ctx: Db]
+                    IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [201], direction: Backward]
 ''''
 
 [[test.results]]
@@ -75,8 +80,10 @@ value = '''
 'SelectProject [ctx: Db] [projections: created_at]
     Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
         UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Asc]
-            IndexScan [ctx: Db] [index: idx_status_created, access: [200], direction: Forward]
-            IndexScan [ctx: Db] [index: idx_status_created, access: [201], direction: Forward]
+            DistinctRecords [ctx: Db]
+                IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [200], direction: Forward]
+            DistinctRecords [ctx: Db]
+                IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [201], direction: Forward]
 ''''
 */
 
@@ -95,7 +102,7 @@ CREATE record:9 SET http_status = 200, created_at = 9 RETURN NONE;
 
 -- DESC: UnionIndexScan should use merge_by_index_key: created_at Desc,
 -- each branch should scan Backward, and the outer Sort should be
--- eliminated (no SortTopKByKey / Sort node in the plan).
+-- eliminated (no Sort node in the plan).
 EXPLAIN SELECT created_at, http_status FROM record
 	WHERE http_status IN [200, 201]
 	ORDER BY created_at DESC

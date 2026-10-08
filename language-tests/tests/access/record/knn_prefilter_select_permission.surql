@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro", "best-effort-ro"]
 imports = ["access/record/knn_prefilter_select_permission_import.surql"]
 
 signin = """{
@@ -15,7 +14,7 @@ signin = """{
 
 [test]
 issue = 548
-reason = "Pre-filtered KNN as a record user: the allow-list bitmap is built from index entries and so contains permission-hidden (bob's) rows — row permissions are never bitmap-evaluated. The per-record SELECT permission must still exclude them on every tier without letting them consume top-K slots: the covered `flag = true` query returns alice's three flagged rows (vec:1, vec:5, vec:9) even though bob's flagged rows sit nearer, identical to the pre-#548 residual-path behaviour pinned by knn_select_permission.surql The query with no WHERE is gated the same way and returns alice's three nearest rows (vec:1, vec:3, vec:5)."
+reason = "Pre-filtered KNN as a record user: the allow-list bitmap is built from index entries and so contains permission-hidden (bob's) rows — row permissions are never bitmap-evaluated. The per-record SELECT permission must still exclude them on every tier without letting them consume top-K slots: the covered `flag = true` query returns alice's three flagged rows (vec:1, vec:5, vec:9) even though bob's flagged rows sit nearer, as knn_select_permission.surql pins for the residual path. The query with no WHERE is gated the same way and returns alice's three nearest rows (vec:1, vec:3, vec:5)."
 
 [[test.results]]
 value = "user:alice"

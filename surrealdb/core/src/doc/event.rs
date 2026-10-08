@@ -1,25 +1,18 @@
-use std::borrow::Cow;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
 use common::time::sleep;
-use reblessive::TreeStack;
-use reblessive::tree::Stk;
 pub(crate) use surrealdb_datastore::values::event_queue::AsyncEventRecord;
 use surrealdb_kvs::TransactionType::Write;
-use surrealdb_kvs::timestamp::HlcTimeStamp;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
-use crate::catalog::{EventDefinition, FromStored, StoredEventDefinition};
+use crate::catalog::{EventDefinition, FromStored};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Session};
-use crate::doc::{Action, CursorDoc, Document, DocumentContext, Error};
-use crate::exe::FlowResultExt as _;
-use crate::iam::AuthLimit;
+use crate::doc::{CursorDoc, Error};
 use crate::key::schema::{EventQueueKey, EventQueuePrefix};
 use crate::key::{KVKeyDecode, KVValue};
 use crate::kvs::sequences::Sequences;
@@ -33,8 +26,6 @@ use crate::kvs::{
 	Datastore, NORMAL_BATCH_SIZE, Transaction, TransactionFactory, TransactionType,
 	is_indeterminate_commit, is_retryable_transaction_conflict,
 };
-use crate::val::Value;
-
 /// How many times a queued event is re-run in place after its transaction lost
 /// a retryable conflict, or its commit ended with an unknown outcome.
 ///
@@ -52,186 +43,6 @@ const EVENT_CONFLICT_RETRIES: u32 = 3;
 /// How long to wait between those re-runs, so the writer this attempt lost to
 /// has a chance to commit instead of being raced again immediately.
 const EVENT_CONFLICT_RETRY_SLEEP: Duration = Duration::from_millis(50);
-
-impl Document {
-	/// Processes any DEFINE EVENT clauses which
-	/// have been defined for the table which this
-	/// record belongs to. This functions loops
-	/// through the events and processes them all
-	/// within the currently running transaction.
-	pub(super) async fn process_table_events(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &FrozenContext,
-		opt: &Options,
-		action: Action,
-	) -> Result<()> {
-		// Check import
-		if opt.import {
-			return Ok(());
-		}
-		// Check if changed
-		if !self.is_modified() {
-			return Ok(());
-		}
-		// Don't run permissions
-		let opt = &opt.new_with_perms(false);
-
-		if self.doc_ctx.ev()?.is_empty() {
-			return Ok(());
-		}
-
-		let input = self.materialize_input_value(stk, ctx, opt).await?;
-
-		self.process_events(stk, ctx, opt, action, input).await
-	}
-
-	pub(super) async fn process_events(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &FrozenContext,
-		opt: &Options,
-		action: Action,
-		input: Option<Arc<Value>>,
-	) -> Result<()> {
-		// Check import
-		if opt.import {
-			return Ok(());
-		}
-		// Check if changed
-		if !self.is_modified() {
-			return Ok(());
-		}
-		// Don't run permissions
-		let opt = &opt.new_with_perms(false);
-
-		// Loop through all event statements
-		for ev in self.doc_ctx.ev()?.iter() {
-			// Limit auth
-			let opt = opt.limited_by(&AuthLimit::try_from(&ev.auth_limit)?);
-			// Get the event action
-			let evt = match action {
-				Action::Create => Value::from("CREATE"),
-				Action::Update => Value::from("UPDATE"),
-				Action::Delete => Value::from("DELETE"),
-			};
-			// Capture documents for the event context
-			let after = self.current.doc.as_arc();
-			let before = self.initial.doc.as_arc();
-			// Populate the relevant event document
-			let doc = if action == Action::Delete {
-				&mut self.initial
-			} else {
-				&mut self.current
-			};
-			// Configure the context
-			let mut ctx = Context::new_child(ctx);
-			ctx.add_value("after", after);
-			ctx.add_value("before", before);
-			ctx.add_value("event", evt.into());
-			ctx.add_value("value", doc.doc.as_arc());
-			ctx.add_value("input", input.clone().unwrap_or_default());
-			// Freeze the context
-			let ctx = ctx.freeze();
-			// Process conditional clause
-			let val = stk
-				.run(|stk| crate::legacy::expr_compute(&ev.when, stk, &ctx, &opt, Some(doc)))
-				.await
-				.catch_return()
-				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {e}", ev.name))?;
-			// Execute event if value is truthy
-			if val.is_truthy() {
-				if ev.is_async() {
-					Self::process_event_async(ctx, opt, ev, &self.doc_ctx, doc).await?;
-				} else {
-					Self::process_event_sync(stk, ctx, opt, None, ev, doc).await?;
-				}
-			}
-		}
-		// Carry on
-		Ok(())
-	}
-
-	async fn process_event_sync(
-		stk: &mut Stk,
-		ctx: FrozenContext,
-		opt: Options,
-		_lh: Option<&LeaseHandler>,
-		ev: &EventDefinition,
-		doc: &CursorDoc,
-	) -> Result<()> {
-		// Evaluate each THEN expression in order.
-		for then in ev.then.iter() {
-			stk.run(|stk| crate::legacy::expr_compute(then, stk, &ctx, &opt, Some(doc)))
-				.await
-				.catch_return()
-				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {e}", ev.name))?;
-		}
-		// Carry on
-		Ok(())
-	}
-
-	async fn process_event_async(
-		ctx: FrozenContext,
-		opt: Options,
-		ev: &EventDefinition,
-		doc_ctx: &DocumentContext,
-		cursor_doc: &mut CursorDoc,
-	) -> Result<()> {
-		let node_id = ctx.node_id();
-		let ts = HlcTimeStamp::next();
-		let db = doc_ctx.db();
-		let tx = ctx.tx();
-		// Persist the event payload so it can be processed out-of-band.
-		// Use the current transaction so enqueue is atomic with the document change.
-		// HLC timestamp + node ID keep the queue key ordered and unique.
-		let key = EventQueueKey {
-			ns: db.namespace_id,
-			db: db.database_id,
-			tb: Cow::Borrowed(&ev.target_table),
-			ev: Cow::Borrowed(&ev.name),
-			ts: ts.0,
-			node_id,
-		};
-		// The queued payload persists the stored (text-form) definition,
-		// rendered from the compiled one the context carries.
-		let event_record = queue_async_event(&opt, &ctx, ev.stored(), cursor_doc)?;
-		tx.put_key(&key, &event_record).await?;
-		tx.trigger_async_event();
-		Ok(())
-	}
-}
-
-/// Build a queued event payload from the current cursor document and context.
-fn queue_async_event(
-	opt: &Options,
-	ctx: &FrozenContext,
-	event_definition: &StoredEventDefinition,
-	cursor_doc: &CursorDoc,
-) -> Result<AsyncEventRecord> {
-	let (ns, db) = opt.arc_ns_db()?;
-	// `async_event_depth` tracks the parent depth; refuse to enqueue above max.
-	if let Some(d) = opt.async_event_depth()
-		&& d >= event_definition.max_depth()
-	{
-		bail!(Error::EvReachMaxDepth(event_definition.name.to_string(), d))
-	}
-	Ok(AsyncEventRecord {
-		attempt: 0,
-		event_depth: opt.async_event_depth().map(|d| d + 1).unwrap_or(0),
-		rid: cursor_doc.rid.clone(),
-		cursor_record: cursor_doc.doc.clone().into_read_only(),
-		fields_computed: cursor_doc.fields_computed,
-		ns,
-		db,
-		perms: opt.perms,
-		auth_enabled: ctx.auth_enabled(),
-		values: ctx.collect_values(HashMap::new()),
-		auth_with_limit: Arc::clone(&opt.auth),
-		event_definition: event_definition.clone(),
-		// session: ctx.value("session").map(|v| Arc::new(v.clone())),
-	})
-}
 
 /// Rebuild the event context when processing a queued event.
 fn build_event_context(record: &AsyncEventRecord, ctx: &FrozenContext) -> FrozenContext {
@@ -277,9 +88,7 @@ async fn build_event_options(
 fn build_event_cursor_doc(record: &AsyncEventRecord) -> CursorDoc {
 	CursorDoc {
 		rid: record.rid.clone(),
-		ir: None,
 		doc: Arc::clone(&record.cursor_record).into(),
-		fields_computed: record.fields_computed,
 	}
 }
 
@@ -319,7 +128,7 @@ pub(crate) async fn process_events_batch(
 	// Best-effort parallel processing; queue order is not preserved.
 	// Limit in-flight event processing to avoid oversubscription.
 	let concurrency: usize = num_cpus::get().max(4);
-	// Cap workers by batch size and reuse one TreeStack per worker.
+	// Cap workers by batch size.
 	let workers = res.len().min(concurrency);
 	// Store the join handles
 	let mut join_handles = Vec::with_capacity(workers);
@@ -331,13 +140,8 @@ pub(crate) async fn process_events_batch(
 		let receiver = receiver.clone();
 		// Spawn a worker
 		let jh = spawn(async move {
-			// Reuse a stack per worker to amortize allocations.
-			let mut stack = TreeStack::new();
 			while let Ok(event_context) = receiver.recv().await {
-				stack
-					.enter(|stk| stk.run(|stk| event_context.run_event_checked(stk)))
-					.finish()
-					.await;
+				event_context.run_event_checked().await;
 			}
 		});
 		join_handles.push(jh);
@@ -348,7 +152,7 @@ pub(crate) async fn process_events_batch(
 		let Some(v) = decode_queued(&k, &v) else {
 			continue;
 		};
-		match AsyncEventContext::new(ds, lh.cloned(), k, v) {
+		match AsyncEventContext::new(ds, k, v) {
 			Ok(event_context) => {
 				sender.send(event_context).await?;
 			}
@@ -378,7 +182,6 @@ pub(crate) async fn process_events_batch(
 	res: Vec<(Vec<u8>, Vec<u8>)>,
 	lh: Option<&LeaseHandler>,
 ) -> Result<()> {
-	let mut stack = TreeStack::new();
 	for (k, v) in res {
 		if let Some(lh) = lh {
 			lh.try_maintain_lease().await?;
@@ -386,8 +189,8 @@ pub(crate) async fn process_events_batch(
 		let Some(v) = decode_queued(&k, &v) else {
 			continue;
 		};
-		let event_context = AsyncEventContext::new(ds, lh.cloned(), k, v)?;
-		stack.enter(|stk| stk.run(|stk| event_context.run_event_checked(stk))).finish().await;
+		let event_context = AsyncEventContext::new(ds, k, v)?;
+		event_context.run_event_checked().await;
 	}
 	Ok(())
 }
@@ -426,33 +229,26 @@ struct AsyncEventContext {
 	opt: Options,
 	tf: TransactionFactory,
 	sequences: Sequences,
-	lh: Option<LeaseHandler>,
 	k: Vec<u8>,
 	v: Option<AsyncEventRecord>,
 }
 
 impl AsyncEventContext {
-	fn new(
-		ds: &Datastore,
-		lh: Option<LeaseHandler>,
-		k: Vec<u8>,
-		v: AsyncEventRecord,
-	) -> Result<Self> {
+	fn new(ds: &Datastore, k: Vec<u8>, v: AsyncEventRecord) -> Result<Self> {
 		Ok(Self {
 			ctx: Some(ds.setup_ctx()?),
 			opt: ds.setup_options(&Session::default()),
 			tf: ds.transaction_factory().clone(),
 			sequences: ds.sequences().clone(),
-			lh,
 			k,
 			v: Some(v),
 		})
 	}
 
-	async fn run_event_checked(mut self, stk: &mut Stk) {
+	async fn run_event_checked(mut self) {
 		if let Some(ctx) = self.ctx.take()
 			&& let Some(v) = self.v.take()
-			&& let Err(e) = self.run_event(stk, ctx, v).await
+			&& let Err(e) = self.run_event(ctx, v).await
 		{
 			error!("Unexpected error while processing an event. Error: {e} - Key: {:?}", self.k);
 		}
@@ -462,12 +258,7 @@ impl AsyncEventContext {
 		self.tf.transaction(Write, self.sequences.clone()).await
 	}
 
-	async fn run_event(
-		&mut self,
-		stk: &mut Stk,
-		ctx: Context,
-		mut ev: AsyncEventRecord,
-	) -> Result<()> {
+	async fn run_event(&mut self, ctx: Context, mut ev: AsyncEventRecord) -> Result<()> {
 		// Decode the key *before* opening the transaction. Decoding it after
 		// would let a decode failure return while the writeable transaction is
 		// still open, tripping `Transactor::drop`'s "a transaction was dropped
@@ -489,7 +280,7 @@ impl AsyncEventContext {
 			let mut ctx = Context::new_child(&base);
 			ctx.set_transaction(Arc::new(tx));
 			let ctx = ctx.freeze();
-			let Err(e) = self.run_event_once(stk, &ctx, &eq, &ev).await else {
+			let Err(e) = self.run_event_once(&ctx, &eq, &ev).await else {
 				return Ok(());
 			};
 			// Contention or an unknown commit outcome, not a failure of the event:
@@ -541,7 +332,6 @@ impl AsyncEventContext {
 	/// and the re-run that follows finds it gone.
 	async fn run_event_once(
 		&self,
-		stk: &mut Stk,
 		ctx: &FrozenContext,
 		eq: &EventQueueKey<'_>,
 		ev: &AsyncEventRecord,
@@ -555,7 +345,7 @@ impl AsyncEventContext {
 				return Err(e);
 			}
 		}
-		if let Err(e) = Self::process_event(stk, ctx, &self.opt, self.lh.as_ref(), eq, ev).await {
+		if let Err(e) = Self::process_event(ctx, &self.opt, eq, ev).await {
 			// Roll back the event's partial side effects. The cancel outcome is
 			// discarded so it cannot displace the error being reported.
 			let _ = tx.cancel().await;
@@ -655,10 +445,8 @@ impl AsyncEventContext {
 
 	/// Execute a queued event using the provided stack scope.
 	async fn process_event(
-		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		lh: Option<&LeaseHandler>,
 		eq: &EventQueueKey<'_>,
 		ev: &AsyncEventRecord,
 	) -> Result<()> {
@@ -668,8 +456,30 @@ impl AsyncEventContext {
 		// The queued payload persists the stored (text-form) definition;
 		// compile it once per dequeued event before execution.
 		let compiled = EventDefinition::from_stored(&ev.event_definition)?;
-		Document::process_event_sync(stk, ctx, opt, lh, &compiled, &doc).await
+		run_event_bodies(&ctx, &opt, &compiled, &doc).await
 	}
+}
+
+/// Run a sync event's `THEN` clauses in order, for their effects, against the
+/// record image the event was queued with.
+///
+/// The frame is rebuilt from the queued context and options, so the clauses
+/// see the `$before`, `$after`, `$event`, `$value` and `$input` bound when the
+/// event fired, and run under the authority the definition recorded. A
+/// clause's value is discarded; a failure is the event's, named by it.
+async fn run_event_bodies(
+	ctx: &FrozenContext,
+	opt: &Options,
+	ev: &EventDefinition,
+	doc: &CursorDoc,
+) -> Result<()> {
+	let exec = crate::exec::entry::frame(ctx, opt, Some(doc)).await;
+	for then in ev.then.iter() {
+		crate::exec::entry::scalar(&exec, then)
+			.await
+			.map_err(|e| anyhow::anyhow!("Error while processing event {}: {e}", ev.name))?;
+	}
+	Ok(())
 }
 
 #[cfg(test)]

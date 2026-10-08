@@ -1,0 +1,6 @@
+### array::map([1, 2, 3], $f)
+error: Invalid statement: LET statements can only appear at the top level of a query or inside a block expression
+### [$f(1), $f(2)]
+error: Invalid statement: LET statements can only appear at the top level of a query or inside a block expression
+### array::map([], $f)
+[]

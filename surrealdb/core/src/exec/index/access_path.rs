@@ -15,29 +15,53 @@ use crate::expr::{BinaryOperator, Idiom, Kind, KindLiteral, Part};
 use crate::kvs::Direction;
 use crate::val::{Number, Range, Value};
 
-/// A reference to an index definition with its position in the schema.
+/// An index definition with the position it holds among its table's indexes.
 ///
-/// This is a lightweight reference that can be cloned efficiently.
-#[derive(Debug, Clone)]
+/// The reference carries the one definition it names, not the table's whole
+/// list, and compares by value: two references are equal when they name equal
+/// definitions at the same position. The position orders the analyzer's
+/// candidates and is otherwise not read. Cloning shares the definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IndexRef {
-	/// The full list of indexes for the table
-	pub(crate) indexes: Arc<[IndexDefinition]>,
-	/// The position of this index in the list
+	/// The position of this index in its table's list when the reference was
+	/// made.
 	pub(crate) idx: usize,
+	definition: Arc<IndexDefinition>,
+	/// Per column, whether its declared kind holds no array; a column past
+	/// the end is not known to, and may hold one.
+	scalar: ColumnFlags,
 }
 
 impl IndexRef {
-	/// Create a new index reference.
-	pub fn new(indexes: Arc<[IndexDefinition]>, idx: usize) -> Self {
+	/// Create a reference to the index at position `idx` of `indexes`.
+	pub fn new(indexes: &[IndexDefinition], idx: usize) -> Self {
 		Self {
-			indexes,
 			idx,
+			definition: Arc::new(indexes[idx].clone()),
+			scalar: ColumnFlags::default(),
 		}
+	}
+
+	/// The same reference, knowing the columns `scalar` marks to be declared
+	/// kinds that hold no array.
+	pub(crate) fn with_scalar_columns(mut self, scalar: ColumnFlags) -> Self {
+		self.scalar = scalar;
+		self
+	}
+
+	/// Whether column `col` may hold an array, which the index writer stores
+	/// as one entry per element: a column spelled with no `*` or flatten that
+	/// is not declared a kind holding no array.
+	fn may_hold_array(&self, col: usize) -> bool {
+		self.definition.cols.get(col).is_some_and(|c| {
+			!c.0.iter().any(|p| matches!(p, Part::All | Part::Flatten))
+				&& !self.scalar.get(col).copied().unwrap_or(false)
+		})
 	}
 
 	/// Get the index definition.
 	pub fn definition(&self) -> &IndexDefinition {
-		&self.indexes[self.idx]
+		&self.definition
 	}
 
 	/// Check if this is a unique index.
@@ -59,14 +83,6 @@ impl std::hash::Hash for IndexRef {
 		self.idx.hash(state);
 	}
 }
-
-impl PartialEq for IndexRef {
-	fn eq(&self, other: &Self) -> bool {
-		self.idx == other.idx
-	}
-}
-
-impl Eq for IndexRef {}
 
 /// Represents a way to access records from a table.
 ///
@@ -128,7 +144,7 @@ pub enum AccessPath {
 	/// apply. Surfaces as a `BitmapResolve` operator over a `BitmapNode`
 	/// tree; the whole WHERE clause stays as the residual filter.
 	///
-	/// `fallback` carries the streaming [`AccessPath::Union`] the OR fusion
+	/// `fallback` carries the [`AccessPath::Union`] the OR fusion
 	/// replaced. An OR may not drop an overflowing branch (the residual
 	/// filter can only narrow the candidate set, never restore dropped
 	/// rows), so instead of draining branches unbudgeted the executor
@@ -221,7 +237,7 @@ pub struct KnnPrefilterPlan {
 /// nodes compose them with set algebra. `NOT` appears only as the subtract
 /// side of [`BitmapPlan::AndNot`] — never standalone (a standalone NOT would
 /// need a table-universe bitmap that is deliberately not maintained).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BitmapPlan {
 	/// Drain a b-tree index range, reading the doc-ID appended to each entry.
 	BTree {
@@ -241,7 +257,7 @@ pub enum BitmapPlan {
 	/// predicate was written in, so a `->edge->` containment anchors at its
 	/// target literal and walks back to the candidate rows. Read entirely
 	/// from adjacency pointer keys, which embed the far vertex; a
-	/// legacy-format key (no embedded target) overflows the branch, so an
+	/// key of the older adjacency layout (no embedded target) overflows the branch, so an
 	/// unmigrated scope degrades to the residual filter instead of
 	/// under-approximating. Never exact: participates only as a droppable,
 	/// budgeted AND conjunct beneath the original-WHERE residual.
@@ -265,7 +281,7 @@ pub enum BitmapPlan {
 }
 
 /// How to access an index.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BTreeAccess {
 	/// Single value equality: `field = value`
 	Equality(Value),
@@ -377,6 +393,53 @@ pub(crate) fn access_fans_out(cols: &[Idiom], access: &BTreeAccess) -> bool {
 	cols.iter().skip(pinned).any(|c| c.0.iter().any(|p| matches!(p, Part::All)))
 }
 
+/// Whether a scan of `index` over `access` may reach one record through
+/// several entries, and so must list each record once.
+///
+/// Beyond what [`access_fans_out`] states for a column spelled with `*`, a
+/// column the access leaves unpinned that may hold an array — no `*` or
+/// flatten in its spelling, and no declared kind holding no array — stores a
+/// record holding an array once per element. A column declared a scalar kind
+/// holds one entry per record, so an index of such columns needs no dedupe.
+pub(crate) fn access_repeats_records(index: &IndexRef, access: &BTreeAccess) -> bool {
+	if access_fans_out(&index.cols, access) {
+		return true;
+	}
+	let pinned = match access {
+		BTreeAccess::Compound {
+			prefix,
+			..
+		} => prefix.len(),
+		BTreeAccess::Equality(_) => 1,
+		_ => 0,
+	};
+	(pinned..index.cols.len()).any(|col| index.may_hold_array(col))
+}
+
+/// Whether a declared field kind guarantees the stored value is never an
+/// array (or set). Array values fan out to one b-tree index entry per
+/// element. Conservative: any kind not on the allowlist (including `any`,
+/// objects, literals and geometry) reports `false`.
+pub(crate) fn field_kind_excludes_arrays(kind: &Kind) -> bool {
+	match kind {
+		Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Record(_) => true,
+		Kind::Either(kinds) => kinds.iter().all(field_kind_excludes_arrays),
+		_ => false,
+	}
+}
+
 /// `indexes` as access-path selection has to see them: every b-tree column
 /// whose declared kind holds only arrays is spelled as the element column it
 /// behaves as, and reported in [`ElementColumns::rewritten`].
@@ -451,12 +514,31 @@ pub(crate) fn with_array_columns_as_elements(
 			masks.push(Box::default());
 		}
 	}
+	// A plain column declared a kind that holds no array keeps one entry per
+	// record; scans over it need no dedupe.
+	let scalar: Vec<ColumnFlags> = indexes
+		.iter()
+		.map(|ix| {
+			ix.cols
+				.iter()
+				.map(|col| {
+					!col.0.iter().any(|p| matches!(p, Part::All | Part::Flatten))
+						&& declared_kind(col, fields).is_some_and(field_kind_excludes_arrays)
+				})
+				.collect()
+		})
+		.collect();
+	let scalar = scalar.iter().any(|flags| flags.contains(&true)).then(|| scalar.into());
 	match changed {
 		Some((defs, masks)) => ElementColumns {
 			indexes: defs.into(),
 			rewritten: Some(masks.into()),
+			scalar,
 		},
-		None => ElementColumns::unchanged(indexes),
+		None => ElementColumns {
+			scalar,
+			..ElementColumns::unchanged(indexes)
+		},
 	}
 }
 
@@ -470,6 +552,9 @@ pub(crate) struct ElementColumns {
 	/// Per index, in order, whether each column was rewritten; a column past
 	/// the end of its index's flags was not. `None` when none was.
 	pub(crate) rewritten: Option<Arc<[ColumnFlags]>>,
+	/// Per index, in order, whether each column is declared a kind that holds
+	/// no array. `None` when none is, or when the fields were not read.
+	pub(crate) scalar: Option<Arc<[ColumnFlags]>>,
 }
 
 impl ElementColumns {
@@ -478,6 +563,7 @@ impl ElementColumns {
 		Self {
 			indexes,
 			rewritten: None,
+			scalar: None,
 		}
 	}
 
@@ -489,6 +575,10 @@ impl ElementColumns {
 	) -> crate::exec::index::analysis::IndexAnalyzer<'a> {
 		let analyzer =
 			crate::exec::index::analysis::IndexAnalyzer::new(Arc::clone(&self.indexes), with);
+		let analyzer = match &self.scalar {
+			Some(scalar) => analyzer.with_scalar_columns(Arc::clone(scalar)),
+			None => analyzer,
+		};
 		match &self.rewritten {
 			Some(rewritten) => analyzer.without_containment_on(Arc::clone(rewritten)),
 			None => analyzer,
@@ -506,6 +596,7 @@ pub(crate) fn may_have_array_columns(indexes: &[IndexDefinition]) -> bool {
 	})
 }
 
+#[cfg(test)]
 /// `indexes` without its b-tree indexes, for a caller that cannot tell which
 /// of their columns store array elements: a b-tree access path planned
 /// without that knowledge can count, order or seek element entries as whole
@@ -793,7 +884,7 @@ mod tests {
 	}
 
 	fn index_ref(defs: Vec<IndexDefinition>, idx: usize) -> IndexRef {
-		IndexRef::new(refs(defs), idx)
+		IndexRef::new(&refs(defs), idx)
 	}
 
 	fn candidate(defs: Vec<IndexDefinition>, idx: usize, access: BTreeAccess) -> IndexCandidate {
@@ -870,7 +961,7 @@ mod tests {
 		}
 
 		#[test]
-		fn identity_is_the_position_alone() {
+		fn identity_is_the_definition_and_its_position() {
 			use std::collections::hash_map::DefaultHasher;
 			use std::hash::{Hash, Hasher};
 
@@ -882,16 +973,30 @@ mod tests {
 
 			let list = vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b"])];
 			let first = index_ref(list.clone(), 0);
-			let second = index_ref(list, 1);
+			let second = index_ref(list.clone(), 1);
 			assert_ne!(first, second);
 			assert_ne!(hash(&first), hash(&second));
 
-			// Equality and hashing ignore the list itself, so refs are only
-			// comparable when they were drawn from the same table's index
-			// list — which is the only way the analyser builds them.
+			// References compare by value, not by the list they were drawn
+			// from: equal definitions at one position are the same reference
+			// whichever list holds them, and a clone shares its definition.
+			let again = index_ref(list, 0);
+			assert_eq!(first, again);
+			assert_eq!(hash(&first), hash(&again));
+			assert_eq!(first, first.clone());
+
+			// A different definition at the same position is a different
+			// index.
 			let other_list = index_ref(vec![idx_uniq(9, "unrelated", &["z"])], 0);
-			assert_eq!(first, other_list);
-			assert_eq!(hash(&first), hash(&other_list));
+			assert_ne!(first, other_list);
+		}
+
+		#[test]
+		fn holds_the_one_definition_it_names() {
+			let list = vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b"])];
+			let r = index_ref(list.clone(), 1);
+			assert_eq!(r.definition(), &list[1]);
+			assert_eq!(r.idx, 1);
 		}
 	}
 

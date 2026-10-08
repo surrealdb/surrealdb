@@ -38,7 +38,7 @@ use surrealdb_kvs::Direction;
 use surrealdb_kvs::consts::NORMAL_BATCH_SIZE;
 
 use super::resolve::{AdjacencyResolveCache, resolve_doc_ids};
-use crate::catalog::providers::{CancellationProbe, TableProvider};
+use crate::catalog::providers::CancellationProbe;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::docids::DocId;
 use crate::expr::Dir;
@@ -1111,7 +1111,7 @@ async fn resolve_numeric_entries(
 	// comes from this read's own snapshot.
 	let edge_ids: Vec<DocId> = entries.iter().map(|e| e.edge).collect();
 	let edge_tb_id =
-		txn.get_tb(ns, db, &chunk_key.edge_table, version).await?.map(|tb| tb.table_id);
+		txn.layout_tb(ns, db, &chunk_key.edge_table, version).await?.map(|tb| tb.table_id);
 	let edge_keys =
 		resolve_doc_ids(txn, ns, db, &chunk_key.edge_table, edge_tb_id, &edge_ids, version, cache)
 			.await?;
@@ -1127,7 +1127,7 @@ async fn resolve_numeric_entries(
 			continue;
 		}
 		let ids: Vec<DocId> = slots.iter().map(|&i| entries[i].target).collect();
-		let table_id = txn.get_tb(ns, db, table, version).await?.map(|tb| tb.table_id);
+		let table_id = txn.layout_tb(ns, db, table, version).await?.map(|tb| tb.table_id);
 		let keys = resolve_doc_ids(txn, ns, db, table, table_id, &ids, version, cache).await?;
 		for (&slot, key) in slots.iter().zip(keys) {
 			target_keys[slot] = key;

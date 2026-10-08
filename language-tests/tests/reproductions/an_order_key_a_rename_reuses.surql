@@ -11,10 +11,8 @@ reason = """
 	own `a` therefore does not supply the ordering, and the sort cannot be
 	eliminated against it.
 
-	The bug this pins was invisible without an index: with no index the
-	streaming engine built the sort over `b` and agreed with the per-row
-	engine, and defining an index over `a` silently reversed the answer. The
-	rows below are the same before and after `DEFINE INDEX`, on either engine.
+	The rows below are the same before and after `DEFINE INDEX`: defining an
+	index over `a` does not change the ordering.
 """
 
 [[test.results]]

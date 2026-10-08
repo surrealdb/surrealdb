@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Pre-decode filter for CONTAINS / CONTAINSNOT on strings and arrays, including nested paths. EXPLAIN asserts pre_decode_filter: yes."
+reason = "Pre-decode filter for CONTAINS / CONTAINSNOT on strings and arrays, including nested paths. EXPLAIN shows the predicate as a filter over the table scan."
 
 [[test.results]]
 value = "{ id: pcf:1, outer: { list: [1, 2, 3] }, s: 'foo_omicron_bar' }"

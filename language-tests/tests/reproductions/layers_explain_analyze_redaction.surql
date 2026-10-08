@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_guarded_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -30,7 +29,7 @@ value = "{ attributes: { projections: '*' }, children: [{ attributes: { predicat
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 0}
     Filter [ctx: Db] [predicate: secret = 'x'] {rows: 0}
-        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission] {rows: 1}
+        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission] {rows: 0}
             ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
                 TableScan [ctx: Db] [table: t, direction: Forward]
 

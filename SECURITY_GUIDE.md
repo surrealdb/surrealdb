@@ -251,10 +251,12 @@ Flag for detailed review when changes touch:
 ## 2. Access Control Enforcement
 
 **Files**: `iam/`, `dbs/options.rs` (`Options` struct, `perms` flag, `with_import`),
-`ctx/context.rs` (`check_perms`, `is_allowed`), document processing pipeline in
-`doc/` (`process_table_fields`, `apply_select_field_permissions` in `doc/output.rs`,
-`reduce_current` / `filter_computed_field_permissions` in `doc/reduce.rs`),
-and the streaming engine's two read paths: the bound plan
+`ctx/context.rs` (`check_perms`, `is_allowed`), the write path the VM lowers
+from the write stages (`exec/vm/lower_write_gate.rs` for the table gates,
+`process_table_fields` in `exec/vm/lower_write_schema.rs` for field writes,
+`DataInstr::Snapshot` in `exec/vm/write_data.rs` for the pre-mutation snapshot,
+`output_stage` and `shown_view` in `exec/vm/lower.rs` for what a write
+returns), and the streaming engine's two read paths: the bound plan
 (`exec/logical/resolve.rs` writes the table permission as a `PermissionFilter`
 and the computed fields and field guards as projection layers above a resolved
 source; `exec/operators/permission_filter.rs`, `exec/operators/layer.rs`) and
@@ -281,17 +283,23 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   (`process_table_fields`) and every read path, including for computed fields,
   reduced documents, and all output modes (AFTER, BEFORE, DIFF, FIELDS). A
   mutating statement's `WHERE` condition and data clause are read paths too:
-  they evaluate against the pre-mutation snapshot
-  (`materialise_current_snapshot` in `doc/compute.rs`), so a field the caller
+  they evaluate against the pre-mutation snapshot (`DataInstr::Snapshot`,
+  derived by `materialise` in `exec/vm/write_data.rs`), so a field the caller
   cannot select must be absent from it — otherwise a data clause reads the
-  value and copies it into a field the caller can select. A COMPUTED field is
-  the case to check, because the reduce kernel runs before any computed field
-  exists and cannot filter one; `filter_reduced_computed_fields` is what
-  enforces their `PERMISSIONS FOR select` on a reduced view, and every site
-  that materialises them on one has to call it. There
-  are three read paths and a new one must join one of them, never neither:
-  the document pipeline (`apply_select_field_permissions` in `doc/output.rs`,
-  `reduce_current` and `filter_computed_field_permissions` in `doc/reduce.rs`);
+  value and copies it into a field the caller can select. For a checked
+  caller the snapshot is the record run through the table's field view
+  (`image_view` in `exec/vm/lower.rs`), or through its guards on stored fields
+  alone when there is no pre-image to derive `COMPUTED` fields from. A
+  COMPUTED field is the case to check: its value must be derived before its
+  own `PERMISSIONS FOR select` is judged, and re-derived once stored fields
+  are cut. `materialise_fields_with_permissions` in
+  `exec/operators/scan/pipeline.rs` is what orders those passes for a view
+  with no layer form (`Enforce::Image`), and every site that materialises
+  computed fields on a reduced view has to go through it or through the
+  bound layers. What a write returns — AFTER, BEFORE, DIFF and FIELDS — is
+  each image put through the same view (`WriteInstr::ShowImage`, emitted by
+  `output_stage` in `exec/vm/lower.rs`). There
+  are two read paths and a new one must join one of them, never neither:
   the streaming engine's bound plan, where a resolved source carries its table
   permission as a `PermissionFilter` and its computed fields and field guards
   as projection layers (`exec/logical/resolve.rs`, run by
@@ -299,6 +307,92 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   streaming engine's runtime path for a source the analyzer left unresolved
   (`resolve_with_field_state` in `exec/operators/scan/fetch.rs`, backed by
   `check_permission_for_value` in `exec/permission.rs`).
+  The bytecode VM (`exec/vm/`) runs every statement, on the bound-plan path.
+  It runs a statement only when its source was resolved
+  (`EnforcementMode::Planned`) and the bound plan holds no column outside the
+  caller's frame; every other statement fails, and nothing falls back to a path
+  that enforces at runtime. Each projection layer it
+  applies where the plan places it, above the `PermissionFilter` and beneath
+  every user predicate, through the `PreparedLayer` the layer operator
+  applies (`ProjectLayer::prepare` in `exec/operators/layer.rs`), so its
+  guards and computed fields are judged in the frames that operator defines.
+  A
+  `PermissionFilter` it applies where the plan places it, beneath every user
+  predicate: a predicate reading only the row's own fields and literals as
+  instructions, any other evaluated in the frame `permission_frame` builds —
+  the same function the permission operator evaluates in — and neither where
+  `skip_fetch_perms` holds. Its scan still checks namespace and database
+  confinement (`validate_record_user_access`), as every scan does. Verified by
+  `a_record_user_reads_through_the_permissions`,
+  `a_table_permission_admits_the_rows_it_names`,
+  `a_projection_layer_derives_and_hides_fields` and
+  `a_principal_outside_the_database_is_refused` (`exec/vm/tests.rs`).
+  Privileged frames hold none of the caller's bindings. A table permission
+  predicate, a read or write guard, a gate, a layer, a `COMPUTED` field, a
+  field's `VALUE`, `ASSERT`, `DEFAULT` or `PERMISSIONS` clause, a function's or
+  a parameter's `PERMISSIONS` guard, an event body, and an index column are
+  definer code: each runs in a frame derived by
+  `ExecutionContext::privileged_frame`, whose context is isolated from the
+  caller's, so no query parameter, session `LET`, block `LET`, `FOR` variable
+  or closure argument of the caller is visible there, nor in any function the
+  frame calls; the session's own values and the database's parameters are. No
+  plan-time step carries a caller's value into such code either: lowering
+  reads the session's values only (`Lowering::caller_value`), the logical
+  parameter resolution substitutes the privileged view throughout a permission
+  predicate and the plans it holds (`exec/logical/params.rs`), the resolver
+  takes no caller value of `FROM $p` or `VERSION $p` inside a definition body
+  (`exec/logical/resolve.rs`), a block's constants are not propagated into a
+  permission predicate or a layer's columns (`exec/vm/map.rs`), and a statement
+  such code holds is bound and planned against `Planner::privileged` and, run as
+  a group of the program, inherits none of the block's slots
+  (`exec/vm/lower.rs`). Ordinary
+  calls of user-defined functions see the caller's bindings; a function body
+  reads every non-argument parameter at run time, so a compiled body is never
+  served with one caller's value for another. Verified by
+  `privilege/privileged_frame_record_user.surql`,
+  `privilege/privileged_frame_import.surql`,
+  `function/caller_bindings_ordinary_call.surql` and
+  `function/body_isolation_record_user.surql`
+  (`language-tests/tests/language/statements/define/`), and by
+  `no_caller_binding_reaches_a_permission_however_it_is_reached`,
+  `a_statement_in_definer_code_reads_no_caller_binding` and
+  `a_permission_reads_its_own_let_and_no_callers` (`exec/vm/tests_body_scope.rs`),
+  which bind the name every way a caller can against every way a read or a
+  write reaches a permission, and check that a permission's own `LET` still
+  reaches the statement it holds.
+  A tenant check (`validate_record_user_access`, and the plan-time
+  `validate_access`) runs before any table's permission clause is consulted,
+  for every statement that reads or writes a table — whether the statement
+  names the table or the run does, and whether or not the table exists where
+  the statement runs — so a principal outside its namespace or database is
+  refused whatever the clause. Verified by
+  `a_principal_outside_its_tenant_is_refused_whatever_the_clause`
+  (`exec/vm/tests_body_scope.rs`).
+  A statement of a block that runs after a catalog change the plan cannot
+  model is planned late-bound (`Planner::late_binding`): its sources are left
+  unresolved and each record is put through the table's enforcement as the
+  catalog stands when it is read (`Plan::Enforced`, the field state
+  `exec/vm/descriptor.rs` compiles per table version, judged by
+  `process_fetched_record` in `exec/operators/fetch.rs`). Its writes run
+  through the bundles of their stages compiled for the frame the write runs in
+  and admitted against it (`serve_stage_bundle` in `exec/vm/fault.rs`); a write over a table or record such a
+  statement left unresolved names it as a target, whose statement gate
+  (`WriteGate`) judges the table's permission when the write runs. Its calls
+  of user-defined functions run call units compiled for the caller's frame,
+  which make the capability, `AUTH LIMIT` and `PERMISSIONS` checks a call
+  makes (`exec/vm/call_unit.rs`). A parameter read whose definition holds a
+  `PERMISSIONS` clause other than the one the program lowered is judged by the
+  clause read now (`exec/vm/param_unit.rs`), never by the stale predicate and
+  never skipped. Every such unit is keyed by the frame it was compiled for
+  (the principal's class and the permission contract), so no principal is
+  served a unit compiled for another class. The class is not the principal:
+  a kept unit is served to every principal of its class, so it reads `$auth`,
+  `$session`, `$token` and `$access` when it runs and never folds the values
+  of the session it was compiled for (`Planner::reading_session_values`; a
+  unit planner's `bind_scoped` leaves them unbound). A `PERMISSIONS` predicate
+  of a definition that such a unit carries compiled is planned the same way
+  (`exec/physical_expr/planned_guard.rs`), and a verdict it keeps for the rest
+  of a statement is kept per principal (`exec/guard_verdicts.rs`).
   The bound plan upholds three rules. The barrier rule (module docs of
   `surrealdb_expr::expr::logical`): a user-written expression never moves
   below a `PermissionFilter` or a join lifted from a permission predicate, and
@@ -313,13 +407,16 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   field is derived against the reduced record the stored guards leave, and a
   guard that does not hold removes the key. Redaction: a plan compiled for a
   caller the definitions are enforced on (`Planner::compiles_for_checked_caller`)
-  renders every definer expression as `<permission>` or `<computed>` in
-  `EXPLAIN`, a permission join hides its right side, its table and its alias,
-  an access path chosen from a permission predicate prints `<permission>` in
-  place of its index and bound, and `EXPLAIN ANALYZE` reports no metrics for
+  renders a layer's permission and computed columns as `<permission>` and
+  `<computed>` in place of the definer's expression (the column's name, kind
+  and frame stay) and a permission filter's predicate as `<permission>`, a
+  permission join hides its right side, its table and
+  its alias, an access path chosen from a permission predicate prints
+  `<permission>` in place of its index, bound and record id, and `EXPLAIN ANALYZE` reports no metrics for
   any operator beneath a permission filter, a layer or a permission join
   (`ExecOperator::hides_metrics_beneath` and `redacts_access_paths_beneath`,
-  applied in `exec/operators/explain.rs`).
+  applied in `exec/operators/explain.rs`; the VM sets them on the nodes it
+  renders in `exec/vm/explain.rs`).
   Two scan paths deliberately sit outside the document pipeline and carry
   `// SECURITY:` comments saying so — `exec/operators/scan/graph.rs` (graph edge
   results) and `exec/operators/scan/reference.rs` (reference scans). A change to
@@ -336,16 +433,72 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   `VERSION` stamp, whose absence the analyzer saw too — from its mode alone,
   resolving the table when it runs. Such a scan must never enforce at runtime
   beneath the plan's nodes: that judges the rows twice, a field guard against
-  an already-cut row. When the planner cannot resolve the context — a
-  `VERSION` only known at runtime, a plan-time cycle, a catalog error, an
-  access path the catalog could not choose — it declines the statement with
-  `PlannerUnsupported` and the legacy engine runs it (`try_resolve_table_ctx`
-  in `exec/planner/select/mod.rs`).
-  Verified by: `a_resolved_source_without_a_table_context_declines_the_statement`
+  an already-cut row. When the planner cannot resolve the context — no
+  database selected, a plan-time cycle, a catalog error, a `VERSION` only
+  known at runtime — the source is still a table scan under
+  `EnforcementMode::Planned`: it resolves its table when it runs, at the
+  stamp it reads at, and yields rows as stored for the plan's nodes to
+  enforce (`try_resolve_table_ctx` in `exec/planner/select/mod.rs`). A scan
+  that cannot yield rows as stored without a context — a lightweight
+  relation's edge scan — refuses the plan instead
+  (`lightweight_needs_context`).
+  Verified by: `a_resolved_source_without_a_table_context_is_a_table_scan`
   (`exec/planner/select/mod.rs`),
   `a_scan_resolving_its_table_at_runtime_enforces_by_its_planned_mode`
   (`exec/operators/scan/table.rs`), end to end by
   `reproductions/planned_source_enforced_once.surql`.
+- A `PERMISSIONS` predicate that reads a COMPUTED field of the row it judges —
+  a table `select`, `create`, `update` or `delete` clause, or a field `create` or
+  `update` clause — reads the value that field computes to: never `NONE`, and
+  never a value the statement assigned to the field's name. A computed field is
+  not stored, so judged against the record as stored, a clause written to deny
+  (`WHERE hidden != true`) admits every row and one written to allow admits
+  none. Each enforcement point derives the fields its predicate reads, with
+  what they read in turn, on a copy of the row, in the predicate's own frame:
+  reads unchecked, writes refused, each body under its field's `AUTH LIMIT`.
+  The copy reaches the predicate alone, and the caller receives each field as
+  the caller reads it. In the VM each body runs in a `FrameMode::Derived` frame
+  (`exec/vm/program.rs`), one under an `AUTH LIMIT` holding a statement or a
+  user-defined function call lowered for the narrowed principal
+  (`narrowed_derivation`). The points are `Lowering::permission` for a plan's
+  `PermissionFilter` and a KNN search's candidates (`Plan::PermissionFilter`'s
+  `computed`, set in `vm/map.rs` from `planner::fold::computed_reads`, judged
+  through `Instr::JudgeCopy`), a graph hop's table permission
+  (`permission_pipeline` in `vm/lower_graph.rs`), the write gates'
+  `GateInstr::Judge` for the create, update, delete and select clauses on
+  either image (`vm/lower_write_gate.rs`), a live subscriber's `select` clause
+  (`lower_subscription` in `vm/lower_write_observe.rs`), and a field's write
+  clauses (`field_permission` in `vm/lower_write_schema.rs`). Every compiled
+  table `SELECT` guard the host's streaming helpers evaluate — a record link
+  the program follows — is a `ComputedFieldGuard`
+  (`table_select_permission_physical`). The decorrelation rule does not lift a
+  permission conjunct that reads a computed field off the outer row into a
+  join, which would read it off the row as stored (`reads_outer_any_of` in
+  `exec/logical/rules/decorrelate.rs`). Deriving in the caller's frame instead
+  is the defect this rules out twice over: a body following a record the
+  caller may not select derives from `NONE`, satisfying a clause written to
+  deny, and a body reading its own table re-enters that table's `SELECT`
+  permission without end. Computed fields are derived in dependency order
+  (`topological_sort_computed_fields`, `Lowering::guard_derivations`), so a
+  field reading another reads it derived.
+  A predicate that calls a user-defined, scripted, module or silo function
+  names no field the function's body reads off the row, so every computed field
+  is derived for it: `extract_computed_deps` marks such a call opaque, as
+  `call_evaluates_against_row` does for a bound plan.
+  Verified by: `a_table_guard_reads_the_computed_fields_it_names`,
+  `a_table_guard_judges_a_batch_on_copies_of_its_rows` (`exec/permission.rs`),
+  `a_permission_membership_reading_a_computed_field_is_not_lifted`
+  (`exec/logical/rules/decorrelate.rs`),
+  `live_select_permission_reads_computed_fields` (`tests/it/live.rs`),
+  `a_call_running_its_own_body_marks_incomplete` (`expr/computed_deps.rs`); end
+  to end by
+  `reproductions/a_table_select_permission_reads_computed_fields.surql`,
+  `reproductions/a_field_write_permission_reads_computed_fields.surql`,
+  `reproductions/a_write_permission_computes_fields_in_dependency_order.surql`,
+  `reproductions/a_permission_derives_the_computed_fields_it_reads_unchecked.surql`,
+  `reproductions/a_permission_reads_computed_fields_through_a_function.surql`,
+  `reproductions/a_write_output_select_permission_reads_computed_fields.surql`
+  and `reproductions/a_permission_derives_a_computed_field_under_its_auth_limit.surql`.
 - Reference cascade operations (ON DELETE CASCADE, UNSET, CUSTOM) must only modify
   records reachable through explicitly defined REFERENCE relationships.
 - A `SELECT` permission expression (the WHERE clause in `PERMISSIONS FOR select`)
@@ -354,20 +507,30 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   closes — and the predicate is evaluated with permission enforcement already
   disabled, so a write reached from one bypasses every gate.
 
-  This is enforced **at runtime only**. Predicate evaluation uses
-  `Options::new_for_permission_predicate` (legacy path) or carries
-  `skip_fetch_perms` (streaming path), both of which set a
-  `NoWriteFrame::PermissionPredicate` so `Expr::compute` blocks
+  This is enforced **at runtime only**. Predicate evaluation carries
+  `skip_fetch_perms` and a `NoWriteFrame::PermissionPredicate`, so the VM refuses
   CREATE/UPDATE/DELETE/RELATE/INSERT/UPSERT and DDL — including writes reached
   through custom-function bodies, `eval`, scripts and closures arriving as data.
   The block logs a warning steering operators to `DEFINE EVENT`, the sanctioned
   definer-authority side-effect mechanism.
-  Verified by: `legacy_options_for_frame` (`exec/operators/legacy_bridge.rs`), the
-  one place a legacy evaluation inside a plan derives its frame, with the unit
+  Verified by: `options_for_frame` (`exec/frame.rs`), the one place the frame an
+  evaluation runs in is turned into the `Options` a callee takes, with the unit
   tests beside it; end to end by `reproductions/perm_predicate_runtime_block.surql`
   (guard reached by a scan) and `reproductions/udf_frame_write.surql`
   (guard reached by a record dereference, where the frame is marked on the
   `EvalContext` alone and the function call carries it onto the body's context).
+- A permission predicate a read applies reaches the caller only as its verdict.
+  It runs with reads unchecked, so a value it computes must never become the
+  value of the statement it guards: a `RETURN`, `BREAK` or `CONTINUE` leaving
+  the predicate is the error "unexpected control flow in a permission
+  predicate". A predicate lowered into a program raises it where the signal
+  leaves a statement evaluated in its frame (`escaped_signal` in
+  `exec/vm/host.rs`); a guard applied to a record read by id or dereferenced is
+  compiled by `read_permission_to_physical` as a predicate unit
+  (`ScalarUnit::predicate` in `exec/scalar_unit.rs`). A write's gate takes a
+  `RETURN` as its verdict, and a `COMPUTED` field derived for a predicate takes
+  it as the field's value; neither hands it to the caller.
+  Verified by: `reproductions/a_return_in_a_permission_block_is_an_error.surql`.
 
   **Scope: statements, not side-effecting calls.** This frame blocks statement
   forms. It does *not* block a call to a builtin that changes something without
@@ -400,9 +563,10 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   - **create/update/delete permission predicates** (table clauses, and the
     create/update field clauses) carry no such frame: they are only ever reached
     from a statement that is already writing, so their side effects run, with
-    permissions bypassed as with any predicate. The frame decision lives in
-    `doc::check::permission_predicate_frame` (`PermissionClauseKind::Read` vs
-    `Write`).
+    permissions bypassed as with any predicate. The frame decision is the
+    clause's `GuardKind` (`Read` for `select`, `Write` otherwise), applied by
+    `permission_frame` in `exec/operators/permission_filter.rs` for a read and
+    by `PermissionSpec::context` in `exec/vm/program.rs` for a write gate.
 - The Auth context within Options must not be mutated by user-controlled operations.
   Only system-internal mechanisms (AuthLimit) may produce derived Options with
   modified auth, and these must never broaden permissions.
@@ -420,8 +584,11 @@ Flag for detailed review when changes touch:
 - `DEFINE EVENT`, `DEFINE TABLE ... AS`, or `DEFINE FIELD ... REFERENCE` processing
 - `Auth`, `AuthLimit`, `Actor`, or role-checking methods
 - `USE` statement handling in the executor
-- `process_table_fields`, `apply_select_field_permissions`, `reduce_current`, or
-  `filter_computed_field_permissions` (document read/write paths)
+- `process_table_fields`, `DataInstr::Snapshot`, `WriteInstr::ShowImage`,
+  `image_view`, `shown_view`, `Enforce`, or `materialise_fields_with_permissions`
+  (the VM's write path and the views it shows a written record through), and
+  `ComputedFieldGuard` or the VM's permission derivations (the computed fields a
+  permission predicate reads)
 - `resolve_with_field_state`, `check_permission_for_value`, `action_is_checked`, or
   `should_check_perms` (streaming runtime read path), or any new scan operator that fetches record contents
 - `exec/logical/resolve.rs` (what the analyzer writes above a source, guard
@@ -492,6 +659,9 @@ relate), Key API, field evaluation, events, views, cascades
   drift during the document processing pipeline, including retry paths.
 - Field-level PERMISSIONS FOR create/update must be evaluated for every field on
   every write with the correct variant based on document state (new vs existing).
+- A write permission predicate, table or field, that reads a COMPUTED field reads
+  the value it computes to from the record being written, not `NONE` and not a
+  value the statement assigned to its name (section 2).
 - Errors from write operations must not disclose record contents, restricted field
   values, secrets, or internal schema details.
 - Any execution triggered during write processing (VALUE, DEFAULT, ASSERT, event
@@ -731,6 +901,11 @@ Flag when changes touch:
   deleting it. KILL must be scoped by namespace and database.
 - Captured auth/session snapshots must be re-validated before notification delivery.
   Expired tokens and revoked permissions must suppress notifications.
+- A subscriber's table `PERMISSIONS FOR select` clause is judged on the notified
+  record with the COMPUTED fields it reads derived for the clause
+  (`lower_subscription`, section 2). The notified record may carry computed
+  values derived as the writer for the record's observers, which say nothing
+  about what the subscriber's clause reads.
 - Per-principal and per-database subscription limits must be enforced.
 - Notifications must be delivered exclusively to the session that created the
   subscription. Routing must be resilient to disconnect/reconnect race conditions.
@@ -980,6 +1155,16 @@ Flag when changes touch:
   expression-nesting depth charged against `max_computation_depth`, carried in as a
   budget so a query reached through nested `eval` calls cannot reset it; there is no
   separate eval-only depth constant.
+- `eval::surql` / `eval::gql` text and embedded JavaScript's `surrealdb.query()` /
+  `surrealdb.value()` run as a nested query (`exec::compiles::nested_query`):
+  compiled by the executor as a query of its own in the caller's transaction, with
+  the caller's session, auth and `Options` (so `perms` and `no_write` carry over).
+  It is the one sanctioned place a running program has code compiled for it; it
+  must never recompile the running program, and a script reaches it only when
+  scripting is allowed. An `eval` program is served from the compile cache
+  (`exec::vm::serve`) to every principal of the frame's class, so it must read
+  `$auth`, `$session`, `$token` and `$access` when it runs and never fold them, and
+  it is served only while the catalog it read is unchanged.
 
 ### Review Triggers
 
@@ -1324,23 +1509,21 @@ invariants.
   poll `ctx.cancellation()` in its hot loops (the streaming buffer/monitor
   wrappers inject none) or a long-running MATCH ignores client disconnect / query
   timeout — a DoS. Dropping a poll is a regression.
-- **Streaming-only execution & no serialization.** The `MatchPlan` must run only under the
-  streaming engine. No `Expr` variant can carry a plan, so there is no path by
-  which one could reach `compute()` at all; the two entry points that could
-  otherwise route around the streaming engine refuse instead, each returning
-  *"GQL MATCH requires the streaming execution engine; it cannot run under the
-  compute-only planner strategy"*: the executor's `TopLevelStatement::Plan` arm when
-  the session is pinned to `NewPlannerStrategy::ComputeOnly`, and `eval`'s
-  legacy `compute`-path adapter (`fnc::eval::run_eval`). A `MatchPlan` must
+- **VM-only execution & no serialization.** The `MatchPlan` must run only under the
+  bytecode VM, as a program of binding steps (`vm::plan_front_end`).
+  No `Expr` variant can carry a plan, so there is no path by which one could be
+  evaluated as an expression; `eval::gql` (`exec/function/builtin/eval.rs`)
+  compiles the plan its text lowers to as a nested query of its own, through
+  `exec::vm::serve::front_end`, and a plan the engine refuses fails. A `MatchPlan` must
   never enter a `sql::Ast`, the catalog, or `Revisioned` serialization:
   `TopLevelStatement::Plan` (`dbs/top_level.rs`) carries the plan apart from
   the surface `sql::TopLevelExpr`, so no conversion of a plan to surface syntax
   exists, and `ToSql` renders the plan directly. A
   mutation-bearing plan reports `read_only() == false` (`LogicalOp::read_only`
   via `MatchPlan::has_mutations`), so the executor opens a write transaction.
-- **Mutation safety.** GQL mutations must execute through the native document pipeline via
-  `exec/operators/legacy_bridge::legacy_compute` — a synthetic core `Create`/`Update`/`Delete`/`Relate`
-  statement per resolved record id — never by writing the KV store directly, so record/field
+- **Mutation safety.** GQL mutations must execute through the write pipeline as a synthetic
+  `Create`/`Update`/`Delete`/`Relate` statement per resolved record id, planned and run by
+  `exec/operators/mutate.rs::run_write` — never by writing the KV store directly, so record/field
   permissions, field validation, events, indexes, references, and live-query notifications all
   apply exactly as for a native mutation. The mutation operators (`exec/operators/mutate.rs`)
   must stay pipeline breakers: they fully drain their input before any write (avoiding the
@@ -1417,15 +1600,15 @@ Flag when changes touch:
 - The lowering's surface (any path that would let GQL construct anything other
   than a single top-level `TopLevelStatement::Plan` holding a `LogicalOp::Match`)
 - The mutation pipeline: `exec/operators/mutate.rs` (a write that bypasses
-  `legacy_compute`, a dropped pipeline-breaker drain, a re-bound RETURN image that
+  `run_write`, a dropped pipeline-breaker drain, a re-bound RETURN image that
   is not permission-filtered, or a `NODETACH` path that skips the edge probe),
   `gql/lower/mutation.rs` (a dropped rejection — label mutation, group/path or
   unbound target, reserved `id`/`in`/`out` keys), and `LogicalOp::read_only`'s
   `Match` arm in `expr/logical/mod.rs` (a mutation plan that reports read-only
   would run in a read transaction)
-- The compute-only refusals (the executor's `TopLevelStatement::Plan` arm,
-  `run_logical_plan`, and `fnc::eval::run_eval`), or any path that gives a plan
-  a `sql::TopLevelExpr` form
+- The executor's `TopLevelStatement::Plan` arm (`run_logical_plan`) and
+  `eval::gql`'s nested query, or any path that gives a plan a `sql::TopLevelExpr`
+  form
 
 ---
 

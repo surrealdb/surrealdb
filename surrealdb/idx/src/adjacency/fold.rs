@@ -53,7 +53,6 @@ use surrealdb_kvs::{Direction, Key};
 use uuid::Uuid;
 
 use super::resolve::resolve_doc_ids;
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::docids::{DocId, TableDocIds};
 use crate::env::IndexEnv;
@@ -230,7 +229,7 @@ pub(super) async fn fold_scope_bounded(
 	// clobber the marker back to false — whichever commits second
 	// conflicts and retries from a fresh read.
 	let tb = txn
-		.get_tb(ns, db, &vertex.table, None)
+		.layout_tb(ns, db, &vertex.table, None)
 		.await?
 		.context("A fold targeted a vertex table that is not defined")?;
 	if !tb.graph_folded {
@@ -423,7 +422,8 @@ async fn fold_edge_table(
 				// table's id comes from this transaction's snapshot.
 				let edge_ids: Vec<DocId> = entries.iter().map(|e| e.edge).collect();
 				let cache = Some(env.index_stores().adjacency_resolve());
-				let edge_tb_id = txn.get_tb(ns, db, edge_table, None).await?.map(|tb| tb.table_id);
+				let edge_tb_id =
+					txn.layout_tb(ns, db, edge_table, None).await?.map(|tb| tb.table_id);
 				let edge_keys =
 					resolve_doc_ids(txn, ns, db, edge_table, edge_tb_id, &edge_ids, None, cache)
 						.await?;
@@ -436,7 +436,7 @@ async fn fold_edge_table(
 						.map(|(i, _)| i)
 						.collect();
 					let ids: Vec<DocId> = slots.iter().map(|&i| entries[i].target).collect();
-					let table_id = txn.get_tb(ns, db, table, None).await?.map(|tb| tb.table_id);
+					let table_id = txn.layout_tb(ns, db, table, None).await?.map(|tb| tb.table_id);
 					let keys =
 						resolve_doc_ids(txn, ns, db, table, table_id, &ids, None, cache).await?;
 					for (&slot, key) in slots.iter().zip(keys) {
@@ -530,7 +530,7 @@ async fn fold_edge_table(
 			Vec::with_capacity(involved.len());
 		let mut compress = true;
 		for table in &involved {
-			match txn.get_tb(ns, db, table, None).await? {
+			match txn.layout_tb(ns, db, table, None).await? {
 				Some(tb) => defined.push((*table, tb)),
 				None => {
 					compress = false;

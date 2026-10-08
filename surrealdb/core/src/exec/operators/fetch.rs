@@ -1,18 +1,22 @@
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use futures::StreamExt;
 use surrealdb_strand::Strand;
 
 use crate::catalog::providers::TableProvider;
+use crate::exec::ExecutionContext;
 use crate::exec::fan_out::{RECORD_DEREFERENCE, evaluate_each};
 use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, should_check_perms,
-	table_select_permission_physical_runtime, validate_record_user_access,
+	PhysicalPermission, check_permission_for_value, should_check_perms, validate_record_user_access,
 };
+#[cfg(test)]
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+#[cfg(test)]
 use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, OutputShape, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, FlowResult, OperatorMetrics,
+	OutputShape, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlowExt;
 use crate::expr::logical::LogicalExpr;
@@ -26,6 +30,7 @@ use crate::val::{RecordId, TableName, Value};
 /// `PhysicalExpr` at plan time instead of being compiled on every row. A step
 /// the fetch cannot walk through ends its path: the value reached so far is
 /// left as it is, unfetched.
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) enum FetchStep {
 	/// `.name`: the field of an object, or of every element of an array.
@@ -121,6 +126,7 @@ pub(crate) fn fetch_parts(expr: &LogicalExpr) -> Vec<FetchPart<'_>> {
 	out
 }
 
+#[cfg(test)]
 /// Fetches related records for specified fields.
 ///
 /// The FETCH clause replaces record IDs with their full record data.
@@ -138,7 +144,9 @@ pub struct Fetch {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl Fetch {
+	#[cfg(test)]
 	pub(crate) fn new(
 		input: Arc<dyn ExecOperator>,
 		fields_sql: String,
@@ -152,6 +160,7 @@ impl Fetch {
 		}
 	}
 }
+#[cfg(test)]
 impl ExecOperator for Fetch {
 	fn name(&self) -> &'static str {
 		"Fetch"
@@ -194,7 +203,7 @@ impl ExecOperator for Fetch {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -222,14 +231,91 @@ impl ExecOperator for Fetch {
 	}
 }
 
+/// A step of a `FETCH` path as the walk reads it, whatever form the path is
+/// held in.
+pub(crate) enum WalkStep<'a> {
+	/// `.name`.
+	Field(&'a Strand),
+	/// `.*`.
+	All,
+	/// The first element of an array.
+	First,
+	/// `[$]`.
+	Last,
+	/// `[e]`, a computed index or key, evaluated by [`FetchIndex`].
+	Index,
+	/// A step the walk does not go through.
+	Unsupported,
+}
+
+/// A step of a `FETCH` path: the walk reads which step it is.
+pub(crate) trait FetchWalk: Sync {
+	fn step(&self) -> WalkStep<'_>;
+}
+
+/// The value of the computed index of a step, evaluated in `ctx`.
+pub(crate) trait FetchIndex<S>: Sync {
+	fn index<'a>(
+		&'a self,
+		ctx: &'a ExecutionContext,
+		step: &'a S,
+	) -> crate::exec::BoxFut<'a, crate::expr::FlowResult<Value>>;
+}
+
+#[cfg(test)]
+impl FetchWalk for FetchStep {
+	fn step(&self) -> WalkStep<'_> {
+		match self {
+			FetchStep::Field(name) => WalkStep::Field(name),
+			FetchStep::All => WalkStep::All,
+			FetchStep::First => WalkStep::First,
+			FetchStep::Last => WalkStep::Last,
+			FetchStep::Index(_) => WalkStep::Index,
+			FetchStep::Unsupported => WalkStep::Unsupported,
+		}
+	}
+}
+
+/// The computed indexes of the operator tree's steps, evaluated as compiled.
+#[cfg(test)]
+struct CompiledIndex;
+
+#[cfg(test)]
+impl FetchIndex<FetchStep> for CompiledIndex {
+	fn index<'a>(
+		&'a self,
+		ctx: &'a ExecutionContext,
+		step: &'a FetchStep,
+	) -> crate::exec::BoxFut<'a, crate::expr::FlowResult<Value>> {
+		Box::pin(async move {
+			match step {
+				FetchStep::Index(expr) => expr.evaluate(EvalContext::from_exec_ctx(ctx)).await,
+				_ => Ok(Value::None),
+			}
+		})
+	}
+}
+
 /// Fetch all specified fields for a value.
-async fn fetch_fields(
+#[cfg(test)]
+pub(crate) async fn fetch_fields(
 	ctx: &ExecutionContext,
-	mut value: Value,
+	value: Value,
 	fields: &[Vec<FetchStep>],
 ) -> crate::expr::FlowResult<Value> {
+	fetch_fields_with(ctx, value, fields, &CompiledIndex).await
+}
+
+/// Fetch all specified fields for a value, over paths of steps held in any
+/// form, their computed indexes evaluated by `index`.
+pub(crate) async fn fetch_fields_with<S: FetchWalk, E: FetchIndex<S>>(
+	ctx: &ExecutionContext,
+	mut value: Value,
+	fields: &[Vec<S>],
+	index: &E,
+) -> crate::expr::FlowResult<Value> {
 	for field in fields {
-		fetch_field_path(ctx, &mut value, field).await?;
+		fetch_field_path(ctx, &mut value, field, index).await?;
 	}
 	Ok(value)
 }
@@ -240,10 +326,11 @@ async fn fetch_fields(
 /// and only recurses for fan-out cases (iterating over array/object elements).
 /// This avoids per-step heap allocation and reduces stack depth compared to
 /// fully recursive traversal.
-fn fetch_field_path<'a>(
+fn fetch_field_path<'a, S: FetchWalk, E: FetchIndex<S>>(
 	ctx: &'a ExecutionContext,
 	value: &'a mut Value,
-	path: &'a [FetchStep],
+	path: &'a [S],
+	index: &'a E,
 ) -> crate::exec::BoxFut<'a, crate::expr::FlowResult<()>> {
 	Box::pin(async move {
 		let mut current = value;
@@ -261,8 +348,8 @@ fn fetch_field_path<'a>(
 				continue;
 			}
 
-			match &path[depth] {
-				FetchStep::Field(name) => match current {
+			match path[depth].step() {
+				WalkStep::Field(name) => match current {
 					Value::Object(obj) => {
 						current = match obj.get_mut(name.as_str()) {
 							Some(child) => child,
@@ -272,20 +359,20 @@ fn fetch_field_path<'a>(
 					}
 					Value::Array(arr) => {
 						// Fan-out: apply the same field path to each array element
-						return fetch_each(ctx, arr.iter_mut(), &path[depth..]).await;
+						return fetch_each(ctx, arr.iter_mut(), &path[depth..], index).await;
 					}
 					_ => return Ok(()),
 				},
-				FetchStep::All => match current {
+				WalkStep::All => match current {
 					Value::Array(arr) => {
-						return fetch_each(ctx, arr.iter_mut(), &path[depth + 1..]).await;
+						return fetch_each(ctx, arr.iter_mut(), &path[depth + 1..], index).await;
 					}
 					Value::Object(obj) => {
-						return fetch_each(ctx, obj.values_mut(), &path[depth + 1..]).await;
+						return fetch_each(ctx, obj.values_mut(), &path[depth + 1..], index).await;
 					}
 					_ => return Ok(()),
 				},
-				FetchStep::First => {
+				WalkStep::First => {
 					current = match current {
 						Value::Array(arr) => match arr.first_mut() {
 							Some(v) => v,
@@ -295,7 +382,7 @@ fn fetch_field_path<'a>(
 					};
 					depth += 1;
 				}
-				FetchStep::Last => {
+				WalkStep::Last => {
 					current = match current {
 						Value::Array(arr) => match arr.last_mut() {
 							Some(v) => v,
@@ -310,8 +397,8 @@ fn fetch_field_path<'a>(
 				// negative/out-of-range skips silently) or key into an object
 				// (string or numeric-as-string key); anything else is a no-op,
 				// matching the other unsupported-part fallthrough below.
-				FetchStep::Index(phys_expr) => {
-					let index_value = phys_expr.evaluate(EvalContext::from_exec_ctx(ctx)).await?;
+				WalkStep::Index => {
+					let index_value = index.index(ctx, &path[depth]).await?;
 					let next = match (&mut *current, &index_value) {
 						(Value::Array(arr), Value::Number(n)) => {
 							n.as_array_index().and_then(|idx| arr.get_mut(idx))
@@ -327,7 +414,7 @@ fn fetch_field_path<'a>(
 					depth += 1;
 				}
 				// The fetch does not walk through any other step.
-				FetchStep::Unsupported => return Ok(()),
+				WalkStep::Unsupported => return Ok(()),
 			}
 		}
 	})
@@ -337,13 +424,14 @@ fn fetch_field_path<'a>(
 ///
 /// Used when traversal encounters a collection (array or object) that
 /// requires applying the remaining field path to each element.
-async fn fetch_each<'a>(
+async fn fetch_each<'a, S: FetchWalk, E: FetchIndex<S>>(
 	ctx: &'a ExecutionContext,
 	values: impl Iterator<Item = &'a mut Value>,
-	remaining_path: &'a [FetchStep],
+	remaining_path: &'a [S],
+	index: &'a E,
 ) -> crate::expr::FlowResult<()> {
 	for item in values {
-		fetch_field_path(ctx, item, remaining_path).await?;
+		fetch_field_path(ctx, item, remaining_path, index).await?;
 	}
 	Ok(())
 }
@@ -451,7 +539,9 @@ pub(crate) async fn process_fetched_record(
 	let check_perms =
 		should_check_perms(db_ctx, Action::View).context("Failed to check permissions")?;
 
-	// 1. Table-level permission check (on raw value, before computing fields)
+	// 1. Table-level permission check, before computing fields for the caller: the guard derives
+	//    the computed fields it reads on a copy of its own (`ComputedFieldGuard`), so `val` is
+	//    still as stored.
 	if check_perms {
 		let select_perm = table_select_permission(ctx, &rid.table).await?;
 
@@ -472,6 +562,7 @@ pub(crate) async fn process_fetched_record(
 	// 2. Build FieldState (computed fields + field permissions)
 	let field_state =
 		super::scan::pipeline::build_field_state(ctx, &rid.table, check_perms, None).await?;
+	let field_state = reading_own_record(ctx, rid, field_state);
 
 	// 3. Evaluate computed fields and apply field-level permissions
 	super::scan::pipeline::materialise_fields_with_permissions(
@@ -487,31 +578,15 @@ pub(crate) async fn process_fetched_record(
 }
 
 /// The table `SELECT` permission a record of `table` read by id is checked
-/// against, compiled once per table per execution and kept on the database
-/// context; every record of the table fetched by this execution — a `FETCH`
-/// target, a record dereference — is checked against the same compiled guard.
-/// A versioned read compiles the permission of the definition at that stamp
-/// and keeps nothing, as `get_table_def` does for the definition.
+/// against: the table descriptor's, compiled once per table version
+/// ([`crate::exec::vm::descriptor::select_permission`]), so every record of
+/// the table fetched — a `FETCH` target, a record dereference — is checked
+/// against the same compiled guard.
 pub(crate) async fn table_select_permission(
 	ctx: &ExecutionContext,
 	table: &TableName,
 ) -> crate::expr::FlowResult<PhysicalPermission> {
-	let db_ctx = ctx.database().context("table_select_permission requires database context")?;
-	let version = ctx.version_stamp();
-	if version.is_none()
-		&& let Some(cached) = db_ctx.select_permission_cache.read().await.get(table)
-	{
-		return Ok(cached.clone());
-	}
-	let table_def =
-		db_ctx.get_table_def(table, version).await.context("Failed to get table definition")?;
-	let permission = table_select_permission_physical_runtime(table_def.as_deref(), ctx)
-		.await
-		.context("Failed to convert permission")?;
-	if version.is_none() {
-		db_ctx.select_permission_cache.write().await.insert(table.clone(), permission.clone());
-	}
-	Ok(permission)
+	crate::exec::vm::descriptor::select_permission(ctx, table).await
 }
 
 /// Fetch a single record by its ID without permission checks, but with
@@ -525,13 +600,37 @@ pub(crate) async fn fetch_record_no_perms(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
 ) -> crate::expr::FlowResult<Value> {
+	// A program lowered with the units that read each table it can reach
+	// reads the record through its table's unit.
+	if let Some(deref) = ctx.vm_deref()
+		&& let Some(fetched) = deref.fetch(ctx, rid, false).await
+	{
+		return fetched;
+	}
 	let Some(mut val) = fetch_raw_record(ctx, rid, ctx.version_stamp()).await? else {
 		return Ok(Value::None);
 	};
 	let field_state =
 		super::scan::pipeline::build_field_state(ctx, &rid.table, false, None).await?;
+	let field_state = reading_own_record(ctx, rid, field_state);
 	super::scan::pipeline::compute_fields_for_value(ctx, &field_state, &mut val, true).await?;
 	Ok(val)
+}
+
+/// `state`, the field state of the table `rid` is a record of, as it applies
+/// to a read of `rid` made from inside one of its own computed fields: the
+/// record is read as stored, with no computed field derived, since deriving
+/// them is what the read is part of. A read of any other record, or of this one
+/// outside its computed fields, derives them all.
+fn reading_own_record(
+	ctx: &ExecutionContext,
+	rid: &RecordId,
+	mut state: super::scan::pipeline::FieldState,
+) -> super::scan::pipeline::FieldState {
+	if ctx.root().computing_record.as_ref().is_some_and(|computing| &computing.rid == rid) {
+		state.computed_fields.clear();
+	}
+	state
 }
 
 /// Fetch a single record by its ID, evaluating computed fields and applying
@@ -543,13 +642,40 @@ pub(crate) async fn fetch_record(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
 ) -> crate::expr::FlowResult<Value> {
+	// A program lowered with the units that read each table it can reach
+	// reads the record through its table's unit.
+	// A computed field whose value does not coerce to its kind fails the
+	// dereference naming the field.
+	if let Some(deref) = ctx.vm_deref()
+		&& let Some(fetched) = deref.fetch(ctx, rid, true).await
+	{
+		return fetched.map_err(computed_coercion);
+	}
 	let Some(mut val) = fetch_raw_record(ctx, rid, ctx.version_stamp()).await? else {
+		require_table(ctx, &rid.table).await?;
 		return Ok(Value::None);
 	};
 	if !process_fetched_record(ctx, rid, &mut val).await? {
 		return Ok(Value::None);
 	}
 	Ok(val)
+}
+
+/// `failure` raised dereferencing a record, a computed field's failed
+/// coercion named as the dereference names it.
+fn computed_coercion(failure: crate::expr::ControlFlow) -> crate::expr::ControlFlow {
+	match failure {
+		crate::expr::ControlFlow::Err(e) => match e.downcast_ref::<crate::doc::Error>() {
+			Some(crate::doc::Error::FieldCoerce {
+				field_name,
+				..
+			}) => crate::expr::ControlFlow::Err(anyhow::anyhow!(
+				"Failed to coerce computed field '{field_name}'"
+			)),
+			_ => crate::expr::ControlFlow::Err(e),
+		},
+		other => other,
+	}
 }
 
 /// Fetch several records by id, overlapping the fetches.
@@ -621,6 +747,34 @@ pub(crate) async fn batch_fetch_in_place(
 		values[idx] = fetched_value;
 	}
 
+	Ok(())
+}
+
+/// Raise `TbNotFound` when `table` does not exist.
+///
+/// Reading a record through a table that does not exist is an error wherever
+/// the read happens — a `FROM` source, a record link followed by a path, a
+/// `FETCH`, a destructure — as it is for a point read (`RecordIdScan`) and a
+/// table scan. A table that exists but holds no such record reads as `NONE`.
+/// Asked only once the record is absent, since a record cannot be present in
+/// a table that is not; the definition lookup is cached per execution.
+pub(crate) async fn require_table(
+	ctx: &ExecutionContext,
+	table: &TableName,
+) -> crate::expr::FlowResult<()> {
+	let db_ctx = ctx.database().context("A record read requires a database context")?;
+	if db_ctx
+		.get_table_def(table, ctx.version_stamp())
+		.await
+		.context("Failed to get table")?
+		.is_none()
+	{
+		return Err(crate::expr::ControlFlow::Err(anyhow::Error::new(
+			crate::catalog::Error::TbNotFound {
+				name: table.clone(),
+			},
+		)));
+	}
 	Ok(())
 }
 

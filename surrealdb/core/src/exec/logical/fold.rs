@@ -7,7 +7,7 @@
 //! What folds is decided by `try_fold_to_literal`, the rule shared with the
 //! physical planner: arithmetic on literals, calls to a pure, deterministic,
 //! synchronous built-in whose arguments are all literals, `time::now()` once
-//! per statement by deliberate exception, `x INSIDE []` to `false`,
+//! per statement in a `WHERE` and nowhere else ([`is_condition`]), `x INSIDE []` to `false`,
 //! AND/OR short-circuits against a boolean literal, and a path over a constant
 //! that reads no storage (`{ name: 'x' }.name`, `['a', 'b'][1]`, the shapes a
 //! substituted `$obj.field` or `$arr[1]` takes), so that a comparison or a
@@ -71,7 +71,14 @@ use crate::expr::logical::{
 /// node are inert to read, and what the caller may execute — so the rule
 /// itself is the fold and nothing else.
 pub(super) fn apply(expr: &mut LogicalExpr, cx: &ExprContext<'_>) -> bool {
-	fold_expressions(expr, cx.registry, cx.capabilities, cx.restricted, cx.aggregates_survive)
+	fold_expressions(
+		expr,
+		cx.registry,
+		cx.capabilities,
+		cx.restricted,
+		cx.aggregates_survive,
+		cx.condition,
+	)
 }
 
 /// The [`ExprContext::restricted`] for the scalars of `node`: what a read off
@@ -95,11 +102,24 @@ pub(super) fn restricted_for(node: &LogicalOp, checks: bool) -> Option<Restricte
 ///
 /// `checks` is whether the caller is permission-checked, which decides
 /// whether a conditional permission makes a table's field reads non-inert.
+#[cfg(test)]
 pub(super) fn fold_constants(
 	op: LogicalOp,
 	registry: &FunctionRegistry,
 	capabilities: &Capabilities,
 	checks: bool,
+) -> LogicalOp {
+	fold_constants_with(op, registry, capabilities, checks, true)
+}
+
+/// [`fold_constants`], folding a `time::now()` in a condition only where
+/// `folds_clock`.
+pub(super) fn fold_constants_with(
+	op: LogicalOp,
+	registry: &FunctionRegistry,
+	capabilities: &Capabilities,
+	checks: bool,
+	folds_clock: bool,
 ) -> LogicalOp {
 	rewrite_deep(op, &mut |mut node| {
 		if !matches!(node, LogicalOp::Filter(_) | LogicalOp::PermissionFilter(_)) {
@@ -111,6 +131,7 @@ pub(super) fn fold_constants(
 			capabilities,
 			restricted: restricted.as_ref(),
 			aggregates_survive: false,
+			condition: folds_clock && is_condition(&node),
 		};
 		let Ok(()) = node.visit_scalars_mut(&mut |scalar| {
 			apply(scalar, &cx);
@@ -128,6 +149,19 @@ pub(super) fn fold_constants(
 /// they were written so that decision reads what the statement said.
 pub(super) fn is_from_leaf(node: &LogicalOp) -> bool {
 	matches!(node, LogicalOp::Source(_) | LogicalOp::Values(_))
+}
+
+/// Whether the scalars of `node` are a condition: a `WHERE`, where
+/// `time::now()` is one value for the statement.
+///
+/// A condition is where one value is needed: `at > time::now() - 1d` becomes
+/// an index range only once the right side is a literal. In a projection or a
+/// data clause each call is evaluated on its own, and `CREATE |t:50| SET at =
+/// time::now()` writes the value each row's call read. A permission predicate
+/// and a mutation's `WHERE` are evaluated per row as well: neither chooses an
+/// access path.
+pub(super) fn is_condition(node: &LogicalOp) -> bool {
+	matches!(node, LogicalOp::Filter(_))
 }
 
 /// Whether a call the aggregate extractor knows must survive folding whole at
@@ -269,6 +303,7 @@ fn restricted_fields(input: &LogicalOp, checks: bool) -> Option<RestrictedFields
 			input,
 		}) => restricted_fields(input, checks),
 		LogicalOp::Match(_)
+		| LogicalOp::Write(_)
 		| LogicalOp::Subquery(_)
 		| LogicalOp::Aggregate(_)
 		// A join's rows carry the matched right row under the alias, whose
@@ -285,6 +320,7 @@ fn restricted_fields(input: &LogicalOp, checks: bool) -> Option<RestrictedFields
 		| LogicalOp::Return(_)
 		| LogicalOp::Foreach(_)
 		| LogicalOp::Info(_)
+		| LogicalOp::Ddl(_)
 		| LogicalOp::Sleep(_) => None,
 	}
 }
@@ -300,7 +336,7 @@ mod tests {
 	use crate::dbs::capabilities::{Capabilities, Targets};
 	use crate::expr::Kind;
 	use crate::expr::logical::{
-		ComputedBody, FieldPath, FieldSchema, LogicalOp, Schema, lower_expr,
+		ComputedBody, FieldPath, FieldSchema, GuardKind, LogicalOp, Schema, lower_expr,
 	};
 
 	fn folded(sql: &str) -> LogicalOp {
@@ -371,7 +407,42 @@ mod tests {
 	/// The driver applies [`apply`] at every node, so these read the whole
 	/// optimiser rather than the pre-pass above.
 	mod as_an_expression_rule {
-		use super::super::super::rules::test_support::rewritten_sql;
+		use super::super::super::lower_test;
+		use super::super::super::rules::test_support::{rewritten, rewritten_sql};
+		use crate::expr::logical::{LogicalExpr, LogicalOp};
+
+		/// `time::now()` is one value for the statement in a `WHERE`, where an
+		/// index range needs a literal, and a call evaluated per row in the
+		/// projection of the same statement.
+		#[test]
+		fn the_clock_folds_in_a_where_and_not_in_a_projection() {
+			let plan = rewritten_sql("SELECT time::now() AS at FROM t WHERE ts < time::now()");
+			assert!(plan.contains("time::now() AS at"), "the projection keeps the call:\n{plan}");
+			assert!(plan.contains("ts < d'"), "the condition folds to a literal:\n{plan}");
+		}
+
+		/// Entropy is drawn per row even in a condition: `WHERE rand::float() <
+		/// 0.1` samples each row, and one draw would keep all of them or none.
+		#[test]
+		fn entropy_is_not_folded_even_in_a_where() {
+			let plan = rewritten_sql("SELECT * FROM t WHERE rand::float() < 0.1");
+			assert!(plan.contains("::float() < 0.1"), "the condition keeps the call:\n{plan}");
+		}
+
+		/// A data clause evaluates `time::now()` once per subject, so each
+		/// created record holds the value its own call read.
+		#[test]
+		fn the_clock_is_not_folded_in_a_data_clause() {
+			let plan = rewritten(lower_test("CREATE |t:3| SET at = time::now()"));
+			let LogicalOp::Write(write) = &plan else {
+				panic!("a CREATE lowers to a write:\n{plan}");
+			};
+			let data = write.data.as_ref().expect("the SET clause is in the plan");
+			assert!(
+				data.values().iter().any(|value| matches!(value, LogicalExpr::Call(_))),
+				"the assignment keeps the call: {data:?}"
+			);
+		}
 
 		#[test]
 		fn an_aggregate_survives_a_projection_that_folds_around_it() {
@@ -587,6 +658,7 @@ mod tests {
 				})),
 				predicate: expr("a > 1 + 1"),
 				auth: None,
+				guard: GuardKind::Read,
 			}),
 			&FunctionRegistry::with_builtins(),
 			&Capabilities::all(),
@@ -610,6 +682,7 @@ mod tests {
 					})),
 					predicate: expr(guard),
 					auth: None,
+					guard: GuardKind::Read,
 				})),
 				predicate: expr(predicate),
 			})),

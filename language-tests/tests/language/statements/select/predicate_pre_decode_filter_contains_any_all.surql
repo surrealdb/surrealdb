@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Pre-decode filter for CONTAINSANY, CONTAINSALL, CONTAINSNONE on arrays, including empty RHS lists. EXPLAIN asserts pre_decode_filter: yes."
+reason = "Pre-decode filter for CONTAINSANY, CONTAINSALL, CONTAINSNONE on arrays, including empty RHS lists. EXPLAIN shows the predicate as a filter over the table scan."
 
 [[test.results]]
 value = "{ id: pcfa:1, tags: ['alpha', 'beta', 'gamma'] }"

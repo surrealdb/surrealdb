@@ -7,8 +7,9 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::auth::AuthLimit;
-use crate::catalog::{ExprText, FromStored};
+use crate::catalog::{ExprText, FromStored, LogicalBody};
 use crate::expr::Expr;
+use crate::expr::logical::LogicalExpr;
 use crate::expr::statements::info::InfoStructure;
 use crate::sql;
 use crate::val::{TableName, Value};
@@ -164,12 +165,25 @@ impl ToSql for EventDefinition {
 }
 
 /// Runtime form of [`StoredEventDefinition`].
+///
+/// The clauses the streaming engine evaluates — `WHEN` and each `THEN` — are
+/// carried twice: as the [`Expr`] the legacy engine evaluates and as a lazily
+/// compiled logical body. Both come from the stored text, so `when_body` names
+/// the same clause as `when` and `then_body` holds one body per entry of
+/// `then`, in order. A constructor that sets one half must set the other from
+/// the same source; [`LogicalBody::of`] does so from the expression a `DEFINE`
+/// statement produced.
 #[derive(Debug)]
 pub struct EventDefinition {
 	pub name: Strand,
 	pub target_table: TableName,
 	pub when: Expr,
 	pub then: Vec<Expr>,
+	/// The `WHEN` clause in logical form; see [`Self::when_logical`].
+	pub when_body: LogicalBody,
+	/// Each `THEN` clause in logical form, in the order they run; see
+	/// [`Self::then_logical`].
+	pub then_body: Vec<LogicalBody>,
 	pub kind: EventKind,
 	pub auth_limit: AuthLimit,
 	pub comment: Option<String>,
@@ -194,6 +208,8 @@ impl Clone for EventDefinition {
 			target_table: self.target_table.clone(),
 			when: self.when.clone(),
 			then: self.then.clone(),
+			when_body: self.when_body.clone(),
+			then_body: self.then_body.clone(),
 			kind: self.kind.clone(),
 			auth_limit: self.auth_limit.clone(),
 			comment: self.comment.clone(),
@@ -202,6 +218,9 @@ impl Clone for EventDefinition {
 	}
 }
 
+/// The logical bodies are derived from `when` and `then`, so they take no part
+/// in equality: two definitions with the same clauses are equal whatever their
+/// compile state.
 impl PartialEq for EventDefinition {
 	fn eq(&self, other: &Self) -> bool {
 		self.name == other.name
@@ -233,16 +252,37 @@ impl EventDefinition {
 		auth_limit: AuthLimit,
 		comment: Option<String>,
 	) -> Self {
+		let when_body = LogicalBody::of(&when);
+		let then_body = then.iter().map(LogicalBody::of).collect();
 		Self {
 			name,
 			target_table,
 			when,
 			then,
+			when_body,
+			then_body,
 			kind,
 			auth_limit,
 			comment,
 			stored: OnceLock::new(),
 		}
+	}
+
+	/// The `WHEN` clause as the logical scalar the streaming engine evaluates,
+	/// compiled on first call.
+	///
+	/// Errs when the clause has no logical form — a write statement, a mock
+	/// record set in scalar position — and the caller then evaluates the
+	/// [`Expr`] half instead.
+	pub fn when_logical(&self) -> anyhow::Result<&LogicalExpr> {
+		self.when_body.logical()
+	}
+
+	/// The `THEN` clauses as the logical scalars the streaming engine
+	/// evaluates, one per clause in the order they run, each compiled on first
+	/// call. An entry errs exactly as [`Self::when_logical`] does.
+	pub fn then_logical(&self) -> impl Iterator<Item = anyhow::Result<&LogicalExpr>> {
+		self.then_body.iter().map(LogicalBody::logical)
 	}
 
 	/// The stored form, rendered once. See [`EventDefinition::stored`].
@@ -261,6 +301,8 @@ impl FromStored for EventDefinition {
 				target_table: TableName::from(stored.target_table.clone()),
 				when: stored.when.compile()?,
 				then: stored.then.iter().map(|t| t.compile()).collect::<anyhow::Result<_>>()?,
+				when_body: LogicalBody::new(&stored.when),
+				then_body: stored.then.iter().map(LogicalBody::new).collect(),
 				kind: stored.kind.clone(),
 				auth_limit: stored.auth_limit.clone(),
 				comment: stored.comment.clone(),
@@ -287,5 +329,37 @@ impl EventDefinition {
 			auth_limit: self.auth_limit.clone(),
 			kind: self.kind.clone(),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// The bodies are carried twice from one source: a definition a `DEFINE`
+	/// built and the same definition read back from storage compile the same
+	/// scalars, one per `THEN` in the order they run.
+	#[test]
+	fn the_when_and_then_clauses_compile_to_their_logical_form() {
+		let when: Expr = ExprText::from_raw("$event != NONE").compile().unwrap();
+		let then: Vec<Expr> = ["$value.a", "$value.b"]
+			.iter()
+			.map(|text| ExprText::from_raw(*text).compile().unwrap())
+			.collect();
+		let definition = EventDefinition::new(
+			Strand::new("ev"),
+			TableName::from("t"),
+			when,
+			then,
+			EventKind::Sync,
+			AuthLimit::new_no_limit(),
+			None,
+		);
+
+		let loaded = EventDefinition::from_stored(&definition.to_stored()).unwrap();
+		assert_eq!(loaded, definition);
+		assert_eq!(loaded.when_logical().unwrap().to_sql(), "$event != NONE");
+		let then: Vec<String> = loaded.then_logical().map(|body| body.unwrap().to_sql()).collect();
+		assert_eq!(then, ["$value.a", "$value.b"]);
 	}
 }

@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -40,40 +39,52 @@ value = "NONE"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    LookupJoin [ctx: Db] [type: Semi, alias: _join0, table: team, on: team = _join0.id]
+    Filter [ctx: Db] [predicate: team INSIDE (subquery)]
         TableScan [ctx: Db] [table: person, direction: Forward]
-        Filter [ctx: Db] [predicate: active = true]
-            RecordBatchFetch [ctx: Db] [table: team]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: id]
+                TableScan [ctx: Db] [table: team, direction: Forward, predicate: active = true, pre_decode_filter: yes]
 ''''
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    LookupJoin [ctx: Db] [type: Anti, alias: _join0, table: team, on: team = _join0.id]
-        TableScan [ctx: Db] [table: person, direction: Forward, predicate: name != 'p1', pre_decode_filter: yes]
-        RecordBatchFetch [ctx: Db] [table: team]
+    Filter [ctx: Db] [predicate: name != 'p1' AND team NOT INSIDE (subquery)]
+        TableScan [ctx: Db] [table: person, direction: Forward]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: id]
+                TableScan [ctx: Db] [table: team, direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    HashJoin [ctx: Db] [type: Semi, alias: _join0, on: team = _join0.team AND id = _join0.who]
+    Filter [ctx: Db] [predicate: team INSIDE (subquery)]
         TableScan [ctx: Db] [table: person, direction: Forward]
-        TableScan [ctx: Db] [table: grant, direction: Forward, predicate: n > 1, pre_decode_filter: yes]
+        Subquery [ctx: Db] [strategy: apply]
+            ProjectValue [ctx: Db] [expr: team]
+                Filter [ctx: Db] [predicate: who = $parent.id]
+                    TableScan [ctx: Db] [table: grant, direction: Forward, predicate: n > 1, pre_decode_filter: yes]
 ''''
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    HashJoin [ctx: Db] [type: Semi, alias: _join0, on: 'A' = _join0.name]
+    Filter [ctx: Db] [predicate: 'A' INSIDE (subquery)]
         TableScan [ctx: Db] [table: person, direction: Forward]
-        TableScan [ctx: Db] [table: team, direction: Forward]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: name]
+                TableScan [ctx: Db] [table: team, direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: person, direction: Forward, predicate: team INSIDE (ProjectValue), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: team INSIDE (subquery)]
+        TableScan [ctx: Db] [table: person, direction: Forward]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: id]
+                TableScan [ctx: Db] [table: team, direction: Forward, predicate: active = true, limit: 1, pre_decode_filter: yes]
 ''''
 
 [[test.results]]
@@ -85,7 +96,11 @@ value = "NONE"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: person, direction: Forward, predicate: team INSIDE (ProjectValue), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: team INSIDE (subquery)]
+        TableScan [ctx: Db] [table: person, direction: Forward]
+        Subquery [ctx: Db] [strategy: apply]
+            ProjectValue [ctx: Db] [expr: id]
+                FullTextScan [ctx: Db] [table: team, index: team_name, query: A]
 ''''
 */
 

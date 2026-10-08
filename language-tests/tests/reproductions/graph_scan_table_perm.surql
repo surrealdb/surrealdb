@@ -4,7 +4,7 @@ imports = ["reproductions/graph_scan_table_perm_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "node:a" }
 
 [test]
-reason = "Streaming graph (`->edge->...`) and reference traversal must enforce the edge/target table's SELECT permission. A record user must not be able to traverse into records on a `PERMISSIONS FOR select NONE` table — neither the IDs (default mode) nor the contents (`FullEdge` mode) should be observable."
+reason = "Graph (`->edge->...`) and reference traversal must enforce the edge/target table's SELECT permission. A record user must not be able to traverse into records on a `PERMISSIONS FOR select NONE` table — neither the IDs (default mode) nor the contents (`FullEdge` mode) should be observable."
 
 [[test.results]]
 value = "[{ edges: [] }]"

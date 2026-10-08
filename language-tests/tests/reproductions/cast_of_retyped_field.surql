@@ -6,8 +6,8 @@ auth = { level = "owner" }
 reason = """
 	A field's declared kind is enforced on write alone: a value stored before
 	`DEFINE FIELD OVERWRITE` retyped the field holds what it held. A cast to
-	the declared kind therefore still converts the stored value, on every
-	planner strategy, rather than being elided as a cast to the value's own
+	the declared kind therefore still converts the stored value
+	rather than being elided as a cast to the value's own
 	kind.
 """
 

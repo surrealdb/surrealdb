@@ -1,0 +1,990 @@
+### owner: SELECT * FROM pal LIMIT 1
+{ id: pal:[person:a, person:b], in: person:a, out: person:b }
+### owner: SELECT * FROM pal ORDER BY in
+{ id: pal:[person:a, person:b], in: person:a, out: person:b }
+{ id: pal:[person:b, person:c], in: person:b, out: person:c }
+{ id: pal:[person:c, person:a], in: person:c, out: person:a }
+### owner: SELECT * FROM pal WHERE in = person:a
+{ id: pal:[person:a, person:b], in: person:a, out: person:b }
+### owner: SELECT count() FROM locked WHERE body @1@ 'alpha' GROUP ALL
+{ count: 8 }
+### owner: SELECT count() FROM locked WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### owner: SELECT count() FROM mine WHERE body @1@ 'alpha' GROUP ALL
+{ count: 8 }
+### owner: SELECT count() FROM mine WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### owner: SELECT count() FROM open WHERE body @1@ 'alpha' GROUP ALL
+{ count: 8 }
+### owner: SELECT count() FROM open WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### owner: SELECT count() FROM pal GROUP ALL
+{ count: 3 }
+### owner: SELECT id FROM locked WHERE emb <|10, 40|> [2.0, 0.0, 0.0] ORDER BY id
+{ id: locked:1 }
+{ id: locked:2 }
+{ id: locked:3 }
+{ id: locked:4 }
+{ id: locked:5 }
+{ id: locked:6 }
+{ id: locked:7 }
+{ id: locked:8 }
+{ id: locked:9 }
+{ id: locked:10 }
+### owner: SELECT id FROM locked WHERE n = 1 AND m = 2 ORDER BY id
+{ id: locked:17 }
+### owner: SELECT id FROM locked WHERE n = 1 OR n = 3 ORDER BY id
+{ id: locked:1 }
+{ id: locked:3 }
+{ id: locked:5 }
+{ id: locked:7 }
+{ id: locked:9 }
+{ id: locked:11 }
+{ id: locked:13 }
+{ id: locked:15 }
+{ id: locked:17 }
+{ id: locked:19 }
+{ id: locked:21 }
+{ id: locked:23 }
+### owner: SELECT id FROM locked WHERE n > 1 ORDER BY n DESC, id LIMIT 4
+{ id: locked:3 }
+{ id: locked:7 }
+{ id: locked:11 }
+{ id: locked:15 }
+### owner: SELECT id FROM mine WHERE emb <|10, 40|> [2.0, 0.0, 0.0] ORDER BY id
+{ id: mine:1 }
+{ id: mine:2 }
+{ id: mine:3 }
+{ id: mine:4 }
+{ id: mine:5 }
+{ id: mine:6 }
+{ id: mine:7 }
+{ id: mine:8 }
+{ id: mine:9 }
+{ id: mine:10 }
+### owner: SELECT id FROM mine WHERE n = 1 AND m = 2 ORDER BY id
+{ id: mine:17 }
+### owner: SELECT id FROM mine WHERE n = 1 OR n = 3 ORDER BY id
+{ id: mine:1 }
+{ id: mine:3 }
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:9 }
+{ id: mine:11 }
+{ id: mine:13 }
+{ id: mine:15 }
+{ id: mine:17 }
+{ id: mine:19 }
+{ id: mine:21 }
+{ id: mine:23 }
+### owner: SELECT id FROM mine WHERE n > 1 ORDER BY n DESC, id LIMIT 4
+{ id: mine:3 }
+{ id: mine:7 }
+{ id: mine:11 }
+{ id: mine:15 }
+### owner: SELECT id FROM open WHERE emb <|10, 40|> [2.0, 0.0, 0.0] ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+### owner: SELECT id FROM open WHERE n = 1 AND m = 2 ORDER BY id
+{ id: open:17 }
+### owner: SELECT id FROM open WHERE n = 1 OR n = 3 ORDER BY id
+{ id: open:1 }
+{ id: open:3 }
+{ id: open:5 }
+{ id: open:7 }
+{ id: open:9 }
+{ id: open:11 }
+{ id: open:13 }
+{ id: open:15 }
+{ id: open:17 }
+{ id: open:19 }
+{ id: open:21 }
+{ id: open:23 }
+### owner: SELECT id FROM open WHERE n > 1 ORDER BY n DESC, id LIMIT 4
+{ id: open:3 }
+{ id: open:7 }
+{ id: open:11 }
+{ id: open:15 }
+### owner: SELECT id FROM pairs WHERE kind = 1 OR kind = 2 LIMIT 3
+{ id: pairs:33 }
+{ id: pairs:5 }
+{ id: pairs:13 }
+### owner: SELECT id, (SELECT VALUE n FROM item ORDER BY n LIMIT 3) AS low FROM grp ORDER BY id
+{ id: grp:0, low: [0, 1, 2] }
+{ id: grp:1, low: [0, 1, 2] }
+{ id: grp:2, low: [0, 1, 2] }
+### owner: SELECT id, (SELECT VALUE n FROM item WHERE g = $parent.g ORDER BY n DESC LIMIT 2) AS top FROM grp ORDER BY id
+{ id: grp:0, top: [100, 99] }
+{ id: grp:1, top: [97, 96] }
+{ id: grp:2, top: [94, 93] }
+### owner: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age
+{ age: 0, id: pairs:33 }
+{ age: 0, id: pairs:22 }
+{ age: 1, id: pairs:30 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+{ age: 3, id: pairs:13 }
+{ age: 3, id: pairs:2 }
+{ age: 4, id: pairs:21 }
+{ age: 4, id: pairs:10 }
+{ age: 5, id: pairs:29 }
+{ age: 5, id: pairs:18 }
+{ age: 6, id: pairs:37 }
+{ age: 6, id: pairs:26 }
+{ age: 7, id: pairs:1 }
+{ age: 7, id: pairs:34 }
+{ age: 8, id: pairs:9 }
+{ age: 9, id: pairs:17 }
+{ age: 9, id: pairs:6 }
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+### owner: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age DESC
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+{ age: 9, id: pairs:17 }
+{ age: 9, id: pairs:6 }
+{ age: 8, id: pairs:9 }
+{ age: 7, id: pairs:1 }
+{ age: 7, id: pairs:34 }
+{ age: 6, id: pairs:37 }
+{ age: 6, id: pairs:26 }
+{ age: 5, id: pairs:29 }
+{ age: 5, id: pairs:18 }
+{ age: 4, id: pairs:21 }
+{ age: 4, id: pairs:10 }
+{ age: 3, id: pairs:13 }
+{ age: 3, id: pairs:2 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+{ age: 1, id: pairs:30 }
+{ age: 0, id: pairs:33 }
+{ age: 0, id: pairs:22 }
+### owner: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age DESC LIMIT 1
+{ age: 10, id: pairs:25 }
+### owner: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age DESC LIMIT 3
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+{ age: 9, id: pairs:17 }
+### owner: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age LIMIT 0
+(no rows)
+### owner: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age LIMIT 3 START 2
+{ age: 1, id: pairs:30 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+### owner: SELECT id, age FROM pairs WHERE kind IN [1, 2, 3] ORDER BY age DESC LIMIT 7
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+{ age: 10, id: pairs:3 }
+{ age: 9, id: pairs:17 }
+{ age: 9, id: pairs:6 }
+{ age: 9, id: pairs:39 }
+{ age: 8, id: pairs:9 }
+### owner: SELECT id, age FROM pairs WHERE kind IN [1, 2, 3] ORDER BY age LIMIT 7 START 4
+{ age: 1, id: pairs:19 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+{ age: 2, id: pairs:27 }
+{ age: 3, id: pairs:13 }
+{ age: 3, id: pairs:2 }
+{ age: 3, id: pairs:35 }
+### owner: SELECT id, label FROM locked WHERE body @1@ 'beta' ORDER BY id LIMIT 5
+{ id: locked:1, label: 'row 1' }
+{ id: locked:2, label: 'row 2' }
+{ id: locked:3, label: 'row 3' }
+{ id: locked:4, label: 'row 0' }
+{ id: locked:5, label: 'row 1' }
+### owner: SELECT id, label FROM mine WHERE body @1@ 'beta' ORDER BY id LIMIT 5
+{ id: mine:1, label: 'row 1' }
+{ id: mine:2, label: 'row 2' }
+{ id: mine:3, label: 'row 3' }
+{ id: mine:4, label: 'row 0' }
+{ id: mine:5, label: 'row 1' }
+### owner: SELECT id, label FROM open WHERE body @1@ 'beta' ORDER BY id LIMIT 5
+{ id: open:1, label: 'row 1' }
+{ id: open:2, label: 'row 2' }
+{ id: open:3, label: 'row 3' }
+{ id: open:4, label: 'row 0' }
+{ id: open:5, label: 'row 1' }
+### owner: SELECT id, n FROM locked WHERE n = 1 OR n = 3 ORDER BY n DESC LIMIT 5
+{ id: locked:23, n: 3 }
+{ id: locked:19, n: 3 }
+{ id: locked:15, n: 3 }
+{ id: locked:11, n: 3 }
+{ id: locked:7, n: 3 }
+### owner: SELECT id, n FROM locked WHERE n IN [0, 2] ORDER BY n LIMIT 3 START 2
+{ id: locked:12, n: 0 }
+{ id: locked:16, n: 0 }
+{ id: locked:20, n: 0 }
+### owner: SELECT id, n FROM mine WHERE n = 1 OR n = 3 ORDER BY n DESC LIMIT 5
+{ id: mine:23, n: 3 }
+{ id: mine:19, n: 3 }
+{ id: mine:15, n: 3 }
+{ id: mine:11, n: 3 }
+{ id: mine:7, n: 3 }
+### owner: SELECT id, n FROM mine WHERE n IN [0, 2] ORDER BY n LIMIT 3 START 2
+{ id: mine:12, n: 0 }
+{ id: mine:16, n: 0 }
+{ id: mine:20, n: 0 }
+### owner: SELECT id, n FROM open WHERE n = 1 OR n = 3 ORDER BY n DESC LIMIT 5
+{ id: open:23, n: 3 }
+{ id: open:19, n: 3 }
+{ id: open:15, n: 3 }
+{ id: open:11, n: 3 }
+{ id: open:7, n: 3 }
+### owner: SELECT id, n FROM open WHERE n IN [0, 2] ORDER BY n LIMIT 3 START 2
+{ id: open:12, n: 0 }
+{ id: open:16, n: 0 }
+{ id: open:20, n: 0 }
+### owner: SELECT id, secret, label FROM locked WHERE body @1@ 'alpha' ORDER BY id
+{ id: locked:3, label: 'row 3', secret: 's' }
+{ id: locked:6, label: 'row 2', secret: 's' }
+{ id: locked:9, label: 'row 1', secret: 's' }
+{ id: locked:12, label: 'row 0', secret: 's' }
+{ id: locked:15, label: 'row 3', secret: 's' }
+{ id: locked:18, label: 'row 2', secret: 's' }
+{ id: locked:21, label: 'row 1', secret: 's' }
+{ id: locked:24, label: 'row 0', secret: 's' }
+### owner: SELECT id, secret, label FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: locked:3, label: 'row 3', secret: 's' }
+{ id: locked:4, label: 'row 0', secret: 's' }
+{ id: locked:5, label: 'row 1', secret: 's' }
+{ id: locked:6, label: 'row 2', secret: 's' }
+### owner: SELECT id, secret, label FROM locked WHERE n = 1 OR m = 2 ORDER BY id
+{ id: locked:1, label: 'row 1', secret: 's' }
+{ id: locked:2, label: 'row 2', secret: 's' }
+{ id: locked:5, label: 'row 1', secret: 's' }
+{ id: locked:7, label: 'row 3', secret: 's' }
+{ id: locked:9, label: 'row 1', secret: 's' }
+{ id: locked:12, label: 'row 0', secret: 's' }
+{ id: locked:13, label: 'row 1', secret: 's' }
+{ id: locked:17, label: 'row 1', secret: 's' }
+{ id: locked:21, label: 'row 1', secret: 's' }
+{ id: locked:22, label: 'row 2', secret: 's' }
+### owner: SELECT id, secret, label FROM locked WHERE n = 1 ORDER BY id
+{ id: locked:1, label: 'row 1', secret: 's' }
+{ id: locked:5, label: 'row 1', secret: 's' }
+{ id: locked:9, label: 'row 1', secret: 's' }
+{ id: locked:13, label: 'row 1', secret: 's' }
+{ id: locked:17, label: 'row 1', secret: 's' }
+{ id: locked:21, label: 'row 1', secret: 's' }
+### owner: SELECT id, secret, label FROM mine WHERE body @1@ 'alpha' ORDER BY id
+{ id: mine:3, label: 'row 3', secret: 's' }
+{ id: mine:6, label: 'row 2', secret: 's' }
+{ id: mine:9, label: 'row 1', secret: 's' }
+{ id: mine:12, label: 'row 0', secret: 's' }
+{ id: mine:15, label: 'row 3', secret: 's' }
+{ id: mine:18, label: 'row 2', secret: 's' }
+{ id: mine:21, label: 'row 1', secret: 's' }
+{ id: mine:24, label: 'row 0', secret: 's' }
+### owner: SELECT id, secret, label FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: mine:3, label: 'row 3', secret: 's' }
+{ id: mine:4, label: 'row 0', secret: 's' }
+{ id: mine:5, label: 'row 1', secret: 's' }
+{ id: mine:6, label: 'row 2', secret: 's' }
+### owner: SELECT id, secret, label FROM mine WHERE n = 1 OR m = 2 ORDER BY id
+{ id: mine:1, label: 'row 1', secret: 's' }
+{ id: mine:2, label: 'row 2', secret: 's' }
+{ id: mine:5, label: 'row 1', secret: 's' }
+{ id: mine:7, label: 'row 3', secret: 's' }
+{ id: mine:9, label: 'row 1', secret: 's' }
+{ id: mine:12, label: 'row 0', secret: 's' }
+{ id: mine:13, label: 'row 1', secret: 's' }
+{ id: mine:17, label: 'row 1', secret: 's' }
+{ id: mine:21, label: 'row 1', secret: 's' }
+{ id: mine:22, label: 'row 2', secret: 's' }
+### owner: SELECT id, secret, label FROM mine WHERE n = 1 ORDER BY id
+{ id: mine:1, label: 'row 1', secret: 's' }
+{ id: mine:5, label: 'row 1', secret: 's' }
+{ id: mine:9, label: 'row 1', secret: 's' }
+{ id: mine:13, label: 'row 1', secret: 's' }
+{ id: mine:17, label: 'row 1', secret: 's' }
+{ id: mine:21, label: 'row 1', secret: 's' }
+### owner: SELECT id, secret, label FROM open WHERE body @1@ 'alpha' ORDER BY id
+{ id: open:3, label: 'row 3', secret: 's' }
+{ id: open:6, label: 'row 2', secret: 's' }
+{ id: open:9, label: 'row 1', secret: 's' }
+{ id: open:12, label: 'row 0', secret: 's' }
+{ id: open:15, label: 'row 3', secret: 's' }
+{ id: open:18, label: 'row 2', secret: 's' }
+{ id: open:21, label: 'row 1', secret: 's' }
+{ id: open:24, label: 'row 0', secret: 's' }
+### owner: SELECT id, secret, label FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: open:3, label: 'row 3', secret: 's' }
+{ id: open:4, label: 'row 0', secret: 's' }
+{ id: open:5, label: 'row 1', secret: 's' }
+{ id: open:6, label: 'row 2', secret: 's' }
+### owner: SELECT id, secret, label FROM open WHERE n = 1 OR m = 2 ORDER BY id
+{ id: open:1, label: 'row 1', secret: 's' }
+{ id: open:2, label: 'row 2', secret: 's' }
+{ id: open:5, label: 'row 1', secret: 's' }
+{ id: open:7, label: 'row 3', secret: 's' }
+{ id: open:9, label: 'row 1', secret: 's' }
+{ id: open:12, label: 'row 0', secret: 's' }
+{ id: open:13, label: 'row 1', secret: 's' }
+{ id: open:17, label: 'row 1', secret: 's' }
+{ id: open:21, label: 'row 1', secret: 's' }
+{ id: open:22, label: 'row 2', secret: 's' }
+### owner: SELECT id, secret, label FROM open WHERE n = 1 ORDER BY id
+{ id: open:1, label: 'row 1', secret: 's' }
+{ id: open:5, label: 'row 1', secret: 's' }
+{ id: open:9, label: 'row 1', secret: 's' }
+{ id: open:13, label: 'row 1', secret: 's' }
+{ id: open:17, label: 'row 1', secret: 's' }
+{ id: open:21, label: 'row 1', secret: 's' }
+### owner: SELECT in, out FROM pal ORDER BY in
+{ in: person:a, out: person:b }
+{ in: person:b, out: person:c }
+{ in: person:c, out: person:a }
+### owner: SELECT in, out FROM private_pal ORDER BY in
+{ in: person:a, out: person:b }
+{ in: person:b, out: person:c }
+### owner: SELECT in, out FROM sealed_pal
+{ in: person:a, out: person:c }
+### owner: SELECT n FROM item ORDER BY n DESC LIMIT 3
+{ n: 100 }
+{ n: 99 }
+{ n: 98 }
+### owner: SELECT n FROM item ORDER BY n DESC LIMIT 7 START 2
+{ n: 98 }
+{ n: 97 }
+{ n: 97 }
+{ n: 96 }
+{ n: 95 }
+{ n: 94 }
+{ n: 94 }
+### owner: SELECT n FROM item ORDER BY n LIMIT 3
+{ n: 0 }
+{ n: 1 }
+{ n: 2 }
+### owner: SELECT n, g FROM item ORDER BY n DESC, g LIMIT 6
+{ g: 0, n: 100 }
+{ g: 0, n: 99 }
+{ g: 0, n: 98 }
+{ g: 0, n: 97 }
+{ g: 1, n: 97 }
+{ g: 1, n: 96 }
+### owner: SELECT n, g FROM item WHERE g = 1 ORDER BY n DESC LIMIT 4
+{ g: 1, n: 97 }
+{ g: 1, n: 96 }
+{ g: 1, n: 95 }
+{ g: 1, n: 94 }
+### owner: [fn::top(1), fn::top(2)]
+[[100, 99, 98, 97, 97, 100, 99, 98, 97, 97], [100, 99, 98, 97, 97, 100, 99, 98, 97, 97, 100, 99, 98, 97, 97]]
+### owner: fn::top(3)
+[100, 99, 98, 97, 97, 100, 99, 98, 97, 97, 100, 99, 98, 97, 97, 100, 99, 98, 97, 97]
+### alice: SELECT * FROM pal LIMIT 1
+{ id: pal:[person:a, person:b], in: person:a, out: person:b }
+### alice: SELECT * FROM pal ORDER BY in
+{ id: pal:[person:a, person:b], in: person:a, out: person:b }
+{ id: pal:[person:b, person:c], in: person:b, out: person:c }
+{ id: pal:[person:c, person:a], in: person:c, out: person:a }
+### alice: SELECT * FROM pal WHERE in = person:a
+{ id: pal:[person:a, person:b], in: person:a, out: person:b }
+### alice: SELECT count() FROM locked WHERE body @1@ 'alpha' GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM locked WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 0 }
+### alice: SELECT count() FROM mine WHERE body @1@ 'alpha' GROUP ALL
+{ count: 4 }
+### alice: SELECT count() FROM mine WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 3 }
+### alice: SELECT count() FROM open WHERE body @1@ 'alpha' GROUP ALL
+{ count: 8 }
+### alice: SELECT count() FROM open WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### alice: SELECT count() FROM pal GROUP ALL
+{ count: 3 }
+### alice: SELECT id FROM locked WHERE emb <|10, 40|> [2.0, 0.0, 0.0] ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE n = 1 AND m = 2 ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE n = 1 OR n = 3 ORDER BY id
+(no rows)
+### alice: SELECT id FROM locked WHERE n > 1 ORDER BY n DESC, id LIMIT 4
+(no rows)
+### alice: SELECT id FROM mine WHERE emb <|10, 40|> [2.0, 0.0, 0.0] ORDER BY id
+{ id: mine:2 }
+{ id: mine:4 }
+{ id: mine:6 }
+{ id: mine:8 }
+{ id: mine:10 }
+{ id: mine:12 }
+{ id: mine:14 }
+{ id: mine:16 }
+{ id: mine:18 }
+{ id: mine:20 }
+### alice: SELECT id FROM mine WHERE n = 1 AND m = 2 ORDER BY id
+(no rows)
+### alice: SELECT id FROM mine WHERE n = 1 OR n = 3 ORDER BY id
+(no rows)
+### alice: SELECT id FROM mine WHERE n > 1 ORDER BY n DESC, id LIMIT 4
+{ id: mine:2 }
+{ id: mine:6 }
+{ id: mine:10 }
+{ id: mine:14 }
+### alice: SELECT id FROM open WHERE emb <|10, 40|> [2.0, 0.0, 0.0] ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+### alice: SELECT id FROM open WHERE n = 1 AND m = 2 ORDER BY id
+{ id: open:17 }
+### alice: SELECT id FROM open WHERE n = 1 OR n = 3 ORDER BY id
+{ id: open:1 }
+{ id: open:3 }
+{ id: open:5 }
+{ id: open:7 }
+{ id: open:9 }
+{ id: open:11 }
+{ id: open:13 }
+{ id: open:15 }
+{ id: open:17 }
+{ id: open:19 }
+{ id: open:21 }
+{ id: open:23 }
+### alice: SELECT id FROM open WHERE n > 1 ORDER BY n DESC, id LIMIT 4
+{ id: open:3 }
+{ id: open:7 }
+{ id: open:11 }
+{ id: open:15 }
+### alice: SELECT id FROM pairs WHERE kind = 1 OR kind = 2 LIMIT 3
+{ id: pairs:33 }
+{ id: pairs:5 }
+{ id: pairs:13 }
+### alice: SELECT id, (SELECT VALUE n FROM item ORDER BY n LIMIT 3) AS low FROM grp ORDER BY id
+{ id: grp:0, low: [0, 1, 2] }
+{ id: grp:1, low: [0, 1, 2] }
+{ id: grp:2, low: [0, 1, 2] }
+### alice: SELECT id, (SELECT VALUE n FROM item WHERE g = $parent.g ORDER BY n DESC LIMIT 2) AS top FROM grp ORDER BY id
+{ id: grp:0, top: [100, 99] }
+{ id: grp:1, top: [97, 96] }
+{ id: grp:2, top: [94, 93] }
+### alice: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age
+{ age: 0, id: pairs:33 }
+{ age: 0, id: pairs:22 }
+{ age: 1, id: pairs:30 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+{ age: 3, id: pairs:13 }
+{ age: 3, id: pairs:2 }
+{ age: 4, id: pairs:21 }
+{ age: 4, id: pairs:10 }
+{ age: 5, id: pairs:29 }
+{ age: 5, id: pairs:18 }
+{ age: 6, id: pairs:37 }
+{ age: 6, id: pairs:26 }
+{ age: 7, id: pairs:1 }
+{ age: 7, id: pairs:34 }
+{ age: 8, id: pairs:9 }
+{ age: 9, id: pairs:17 }
+{ age: 9, id: pairs:6 }
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+### alice: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age DESC
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+{ age: 9, id: pairs:17 }
+{ age: 9, id: pairs:6 }
+{ age: 8, id: pairs:9 }
+{ age: 7, id: pairs:1 }
+{ age: 7, id: pairs:34 }
+{ age: 6, id: pairs:37 }
+{ age: 6, id: pairs:26 }
+{ age: 5, id: pairs:29 }
+{ age: 5, id: pairs:18 }
+{ age: 4, id: pairs:21 }
+{ age: 4, id: pairs:10 }
+{ age: 3, id: pairs:13 }
+{ age: 3, id: pairs:2 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+{ age: 1, id: pairs:30 }
+{ age: 0, id: pairs:33 }
+{ age: 0, id: pairs:22 }
+### alice: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age DESC LIMIT 1
+{ age: 10, id: pairs:25 }
+### alice: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age DESC LIMIT 3
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+{ age: 9, id: pairs:17 }
+### alice: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age LIMIT 0
+(no rows)
+### alice: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age LIMIT 3 START 2
+{ age: 1, id: pairs:30 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+### alice: SELECT id, age FROM pairs WHERE kind IN [1, 2, 3] ORDER BY age DESC LIMIT 7
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+{ age: 10, id: pairs:3 }
+{ age: 9, id: pairs:17 }
+{ age: 9, id: pairs:6 }
+{ age: 9, id: pairs:39 }
+{ age: 8, id: pairs:9 }
+### alice: SELECT id, age FROM pairs WHERE kind IN [1, 2, 3] ORDER BY age LIMIT 7 START 4
+{ age: 1, id: pairs:19 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+{ age: 2, id: pairs:27 }
+{ age: 3, id: pairs:13 }
+{ age: 3, id: pairs:2 }
+{ age: 3, id: pairs:35 }
+### alice: SELECT id, label FROM locked WHERE body @1@ 'beta' ORDER BY id LIMIT 5
+(no rows)
+### alice: SELECT id, label FROM mine WHERE body @1@ 'beta' ORDER BY id LIMIT 5
+{ id: mine:2, label: 'row 2' }
+{ id: mine:4, label: 'row 0' }
+{ id: mine:6, label: 'row 2' }
+{ id: mine:8, label: 'row 0' }
+{ id: mine:10, label: 'row 2' }
+### alice: SELECT id, label FROM open WHERE body @1@ 'beta' ORDER BY id LIMIT 5
+{ id: open:1, label: 'row 1' }
+{ id: open:2, label: 'row 2' }
+{ id: open:3, label: 'row 3' }
+{ id: open:4, label: 'row 0' }
+{ id: open:5, label: 'row 1' }
+### alice: SELECT id, n FROM locked WHERE n = 1 OR n = 3 ORDER BY n DESC LIMIT 5
+(no rows)
+### alice: SELECT id, n FROM locked WHERE n IN [0, 2] ORDER BY n LIMIT 3 START 2
+(no rows)
+### alice: SELECT id, n FROM mine WHERE n = 1 OR n = 3 ORDER BY n DESC LIMIT 5
+(no rows)
+### alice: SELECT id, n FROM mine WHERE n IN [0, 2] ORDER BY n LIMIT 3 START 2
+{ id: mine:12, n: 0 }
+{ id: mine:16, n: 0 }
+{ id: mine:20, n: 0 }
+### alice: SELECT id, n FROM open WHERE n = 1 OR n = 3 ORDER BY n DESC LIMIT 5
+{ id: open:23, n: 3 }
+{ id: open:19, n: 3 }
+{ id: open:15, n: 3 }
+{ id: open:11, n: 3 }
+{ id: open:7, n: 3 }
+### alice: SELECT id, n FROM open WHERE n IN [0, 2] ORDER BY n LIMIT 3 START 2
+{ id: open:12, n: 0 }
+{ id: open:16, n: 0 }
+{ id: open:20, n: 0 }
+### alice: SELECT id, secret, label FROM locked WHERE body @1@ 'alpha' ORDER BY id
+(no rows)
+### alice: SELECT id, secret, label FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+(no rows)
+### alice: SELECT id, secret, label FROM locked WHERE n = 1 OR m = 2 ORDER BY id
+(no rows)
+### alice: SELECT id, secret, label FROM locked WHERE n = 1 ORDER BY id
+(no rows)
+### alice: SELECT id, secret, label FROM mine WHERE body @1@ 'alpha' ORDER BY id
+{ id: mine:6, label: 'row 2', secret: NONE }
+{ id: mine:12, label: 'row 0', secret: NONE }
+{ id: mine:18, label: 'row 2', secret: NONE }
+{ id: mine:24, label: 'row 0', secret: NONE }
+### alice: SELECT id, secret, label FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: mine:2, label: 'row 2', secret: NONE }
+{ id: mine:4, label: 'row 0', secret: NONE }
+{ id: mine:6, label: 'row 2', secret: NONE }
+{ id: mine:8, label: 'row 0', secret: NONE }
+### alice: SELECT id, secret, label FROM mine WHERE n = 1 OR m = 2 ORDER BY id
+{ id: mine:2, label: 'row 2', secret: NONE }
+{ id: mine:12, label: 'row 0', secret: NONE }
+{ id: mine:22, label: 'row 2', secret: NONE }
+### alice: SELECT id, secret, label FROM mine WHERE n = 1 ORDER BY id
+(no rows)
+### alice: SELECT id, secret, label FROM open WHERE body @1@ 'alpha' ORDER BY id
+{ id: open:3, label: 'row 3', secret: NONE }
+{ id: open:6, label: 'row 2', secret: NONE }
+{ id: open:9, label: 'row 1', secret: NONE }
+{ id: open:12, label: 'row 0', secret: NONE }
+{ id: open:15, label: 'row 3', secret: NONE }
+{ id: open:18, label: 'row 2', secret: NONE }
+{ id: open:21, label: 'row 1', secret: NONE }
+{ id: open:24, label: 'row 0', secret: NONE }
+### alice: SELECT id, secret, label FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: open:3, label: 'row 3', secret: NONE }
+{ id: open:4, label: 'row 0', secret: NONE }
+{ id: open:5, label: 'row 1', secret: NONE }
+{ id: open:6, label: 'row 2', secret: NONE }
+### alice: SELECT id, secret, label FROM open WHERE n = 1 OR m = 2 ORDER BY id
+{ id: open:1, label: 'row 1', secret: NONE }
+{ id: open:2, label: 'row 2', secret: NONE }
+{ id: open:5, label: 'row 1', secret: NONE }
+{ id: open:7, label: 'row 3', secret: NONE }
+{ id: open:9, label: 'row 1', secret: NONE }
+{ id: open:12, label: 'row 0', secret: NONE }
+{ id: open:13, label: 'row 1', secret: NONE }
+{ id: open:17, label: 'row 1', secret: NONE }
+{ id: open:21, label: 'row 1', secret: NONE }
+{ id: open:22, label: 'row 2', secret: NONE }
+### alice: SELECT id, secret, label FROM open WHERE n = 1 ORDER BY id
+{ id: open:1, label: 'row 1', secret: NONE }
+{ id: open:5, label: 'row 1', secret: NONE }
+{ id: open:9, label: 'row 1', secret: NONE }
+{ id: open:13, label: 'row 1', secret: NONE }
+{ id: open:17, label: 'row 1', secret: NONE }
+{ id: open:21, label: 'row 1', secret: NONE }
+### alice: SELECT in, out FROM pal ORDER BY in
+{ in: person:a, out: person:b }
+{ in: person:b, out: person:c }
+{ in: person:c, out: person:a }
+### alice: SELECT in, out FROM private_pal ORDER BY in
+{ in: person:a, out: person:b }
+### alice: SELECT in, out FROM sealed_pal
+(no rows)
+### alice: SELECT n FROM item ORDER BY n DESC LIMIT 3
+{ n: 100 }
+{ n: 99 }
+{ n: 98 }
+### alice: SELECT n FROM item ORDER BY n DESC LIMIT 7 START 2
+{ n: 98 }
+{ n: 97 }
+{ n: 97 }
+{ n: 96 }
+{ n: 95 }
+{ n: 94 }
+{ n: 94 }
+### alice: SELECT n FROM item ORDER BY n LIMIT 3
+{ n: 0 }
+{ n: 1 }
+{ n: 2 }
+### alice: SELECT n, g FROM item ORDER BY n DESC, g LIMIT 6
+{ g: 0, n: 100 }
+{ g: 0, n: 99 }
+{ g: 0, n: 98 }
+{ g: 0, n: 97 }
+{ g: 1, n: 97 }
+{ g: 1, n: 96 }
+### alice: SELECT n, g FROM item WHERE g = 1 ORDER BY n DESC LIMIT 4
+{ g: 1, n: 97 }
+{ g: 1, n: 96 }
+{ g: 1, n: 95 }
+{ g: 1, n: 94 }
+### alice: [fn::top(1), fn::top(2)]
+[[100, 99, 98, 97, 97, 100, 99, 98, 97, 97], [100, 99, 98, 97, 97, 100, 99, 98, 97, 97, 100, 99, 98, 97, 97]]
+### alice: fn::top(3)
+[100, 99, 98, 97, 97, 100, 99, 98, 97, 97, 100, 99, 98, 97, 97, 100, 99, 98, 97, 97]
+### bob: SELECT * FROM pal LIMIT 1
+{ id: pal:[person:a, person:b], in: person:a, out: person:b }
+### bob: SELECT * FROM pal ORDER BY in
+{ id: pal:[person:a, person:b], in: person:a, out: person:b }
+{ id: pal:[person:b, person:c], in: person:b, out: person:c }
+{ id: pal:[person:c, person:a], in: person:c, out: person:a }
+### bob: SELECT * FROM pal WHERE in = person:a
+{ id: pal:[person:a, person:b], in: person:a, out: person:b }
+### bob: SELECT count() FROM locked WHERE body @1@ 'alpha' GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM locked WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 0 }
+### bob: SELECT count() FROM mine WHERE body @1@ 'alpha' GROUP ALL
+{ count: 4 }
+### bob: SELECT count() FROM mine WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 7 }
+### bob: SELECT count() FROM open WHERE body @1@ 'alpha' GROUP ALL
+{ count: 8 }
+### bob: SELECT count() FROM open WHERE n = 1 OR m = 2 GROUP ALL
+{ count: 10 }
+### bob: SELECT count() FROM pal GROUP ALL
+{ count: 3 }
+### bob: SELECT id FROM locked WHERE emb <|10, 40|> [2.0, 0.0, 0.0] ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE n = 1 AND m = 2 ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE n = 1 OR n = 3 ORDER BY id
+(no rows)
+### bob: SELECT id FROM locked WHERE n > 1 ORDER BY n DESC, id LIMIT 4
+(no rows)
+### bob: SELECT id FROM mine WHERE emb <|10, 40|> [2.0, 0.0, 0.0] ORDER BY id
+{ id: mine:1 }
+{ id: mine:3 }
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:9 }
+{ id: mine:11 }
+{ id: mine:13 }
+{ id: mine:15 }
+{ id: mine:17 }
+{ id: mine:19 }
+### bob: SELECT id FROM mine WHERE n = 1 AND m = 2 ORDER BY id
+{ id: mine:17 }
+### bob: SELECT id FROM mine WHERE n = 1 OR n = 3 ORDER BY id
+{ id: mine:1 }
+{ id: mine:3 }
+{ id: mine:5 }
+{ id: mine:7 }
+{ id: mine:9 }
+{ id: mine:11 }
+{ id: mine:13 }
+{ id: mine:15 }
+{ id: mine:17 }
+{ id: mine:19 }
+{ id: mine:21 }
+{ id: mine:23 }
+### bob: SELECT id FROM mine WHERE n > 1 ORDER BY n DESC, id LIMIT 4
+{ id: mine:3 }
+{ id: mine:7 }
+{ id: mine:11 }
+{ id: mine:15 }
+### bob: SELECT id FROM open WHERE emb <|10, 40|> [2.0, 0.0, 0.0] ORDER BY id
+{ id: open:1 }
+{ id: open:2 }
+{ id: open:3 }
+{ id: open:4 }
+{ id: open:5 }
+{ id: open:6 }
+{ id: open:7 }
+{ id: open:8 }
+{ id: open:9 }
+{ id: open:10 }
+### bob: SELECT id FROM open WHERE n = 1 AND m = 2 ORDER BY id
+{ id: open:17 }
+### bob: SELECT id FROM open WHERE n = 1 OR n = 3 ORDER BY id
+{ id: open:1 }
+{ id: open:3 }
+{ id: open:5 }
+{ id: open:7 }
+{ id: open:9 }
+{ id: open:11 }
+{ id: open:13 }
+{ id: open:15 }
+{ id: open:17 }
+{ id: open:19 }
+{ id: open:21 }
+{ id: open:23 }
+### bob: SELECT id FROM open WHERE n > 1 ORDER BY n DESC, id LIMIT 4
+{ id: open:3 }
+{ id: open:7 }
+{ id: open:11 }
+{ id: open:15 }
+### bob: SELECT id FROM pairs WHERE kind = 1 OR kind = 2 LIMIT 3
+{ id: pairs:33 }
+{ id: pairs:5 }
+{ id: pairs:13 }
+### bob: SELECT id, (SELECT VALUE n FROM item ORDER BY n LIMIT 3) AS low FROM grp ORDER BY id
+{ id: grp:0, low: [0, 1, 2] }
+{ id: grp:1, low: [0, 1, 2] }
+{ id: grp:2, low: [0, 1, 2] }
+### bob: SELECT id, (SELECT VALUE n FROM item WHERE g = $parent.g ORDER BY n DESC LIMIT 2) AS top FROM grp ORDER BY id
+{ id: grp:0, top: [100, 99] }
+{ id: grp:1, top: [97, 96] }
+{ id: grp:2, top: [94, 93] }
+### bob: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age
+{ age: 0, id: pairs:33 }
+{ age: 0, id: pairs:22 }
+{ age: 1, id: pairs:30 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+{ age: 3, id: pairs:13 }
+{ age: 3, id: pairs:2 }
+{ age: 4, id: pairs:21 }
+{ age: 4, id: pairs:10 }
+{ age: 5, id: pairs:29 }
+{ age: 5, id: pairs:18 }
+{ age: 6, id: pairs:37 }
+{ age: 6, id: pairs:26 }
+{ age: 7, id: pairs:1 }
+{ age: 7, id: pairs:34 }
+{ age: 8, id: pairs:9 }
+{ age: 9, id: pairs:17 }
+{ age: 9, id: pairs:6 }
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+### bob: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age DESC
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+{ age: 9, id: pairs:17 }
+{ age: 9, id: pairs:6 }
+{ age: 8, id: pairs:9 }
+{ age: 7, id: pairs:1 }
+{ age: 7, id: pairs:34 }
+{ age: 6, id: pairs:37 }
+{ age: 6, id: pairs:26 }
+{ age: 5, id: pairs:29 }
+{ age: 5, id: pairs:18 }
+{ age: 4, id: pairs:21 }
+{ age: 4, id: pairs:10 }
+{ age: 3, id: pairs:13 }
+{ age: 3, id: pairs:2 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+{ age: 1, id: pairs:30 }
+{ age: 0, id: pairs:33 }
+{ age: 0, id: pairs:22 }
+### bob: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age DESC LIMIT 1
+{ age: 10, id: pairs:25 }
+### bob: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age DESC LIMIT 3
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+{ age: 9, id: pairs:17 }
+### bob: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age LIMIT 0
+(no rows)
+### bob: SELECT id, age FROM pairs WHERE kind = 1 OR kind = 2 ORDER BY age LIMIT 3 START 2
+{ age: 1, id: pairs:30 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+### bob: SELECT id, age FROM pairs WHERE kind IN [1, 2, 3] ORDER BY age DESC LIMIT 7
+{ age: 10, id: pairs:25 }
+{ age: 10, id: pairs:14 }
+{ age: 10, id: pairs:3 }
+{ age: 9, id: pairs:17 }
+{ age: 9, id: pairs:6 }
+{ age: 9, id: pairs:39 }
+{ age: 8, id: pairs:9 }
+### bob: SELECT id, age FROM pairs WHERE kind IN [1, 2, 3] ORDER BY age LIMIT 7 START 4
+{ age: 1, id: pairs:19 }
+{ age: 2, id: pairs:5 }
+{ age: 2, id: pairs:38 }
+{ age: 2, id: pairs:27 }
+{ age: 3, id: pairs:13 }
+{ age: 3, id: pairs:2 }
+{ age: 3, id: pairs:35 }
+### bob: SELECT id, label FROM locked WHERE body @1@ 'beta' ORDER BY id LIMIT 5
+(no rows)
+### bob: SELECT id, label FROM mine WHERE body @1@ 'beta' ORDER BY id LIMIT 5
+{ id: mine:1, label: 'row 1' }
+{ id: mine:3, label: 'row 3' }
+{ id: mine:5, label: 'row 1' }
+{ id: mine:7, label: 'row 3' }
+{ id: mine:9, label: 'row 1' }
+### bob: SELECT id, label FROM open WHERE body @1@ 'beta' ORDER BY id LIMIT 5
+{ id: open:1, label: 'row 1' }
+{ id: open:2, label: 'row 2' }
+{ id: open:3, label: 'row 3' }
+{ id: open:4, label: 'row 0' }
+{ id: open:5, label: 'row 1' }
+### bob: SELECT id, n FROM locked WHERE n = 1 OR n = 3 ORDER BY n DESC LIMIT 5
+(no rows)
+### bob: SELECT id, n FROM locked WHERE n IN [0, 2] ORDER BY n LIMIT 3 START 2
+(no rows)
+### bob: SELECT id, n FROM mine WHERE n = 1 OR n = 3 ORDER BY n DESC LIMIT 5
+{ id: mine:23, n: 3 }
+{ id: mine:19, n: 3 }
+{ id: mine:15, n: 3 }
+{ id: mine:11, n: 3 }
+{ id: mine:7, n: 3 }
+### bob: SELECT id, n FROM mine WHERE n IN [0, 2] ORDER BY n LIMIT 3 START 2
+(no rows)
+### bob: SELECT id, n FROM open WHERE n = 1 OR n = 3 ORDER BY n DESC LIMIT 5
+{ id: open:23, n: 3 }
+{ id: open:19, n: 3 }
+{ id: open:15, n: 3 }
+{ id: open:11, n: 3 }
+{ id: open:7, n: 3 }
+### bob: SELECT id, n FROM open WHERE n IN [0, 2] ORDER BY n LIMIT 3 START 2
+{ id: open:12, n: 0 }
+{ id: open:16, n: 0 }
+{ id: open:20, n: 0 }
+### bob: SELECT id, secret, label FROM locked WHERE body @1@ 'alpha' ORDER BY id
+(no rows)
+### bob: SELECT id, secret, label FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+(no rows)
+### bob: SELECT id, secret, label FROM locked WHERE n = 1 OR m = 2 ORDER BY id
+(no rows)
+### bob: SELECT id, secret, label FROM locked WHERE n = 1 ORDER BY id
+(no rows)
+### bob: SELECT id, secret, label FROM mine WHERE body @1@ 'alpha' ORDER BY id
+{ id: mine:3, label: 'row 3', secret: NONE }
+{ id: mine:9, label: 'row 1', secret: NONE }
+{ id: mine:15, label: 'row 3', secret: NONE }
+{ id: mine:21, label: 'row 1', secret: NONE }
+### bob: SELECT id, secret, label FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: mine:1, label: 'row 1', secret: NONE }
+{ id: mine:3, label: 'row 3', secret: NONE }
+{ id: mine:5, label: 'row 1', secret: NONE }
+{ id: mine:7, label: 'row 3', secret: NONE }
+### bob: SELECT id, secret, label FROM mine WHERE n = 1 OR m = 2 ORDER BY id
+{ id: mine:1, label: 'row 1', secret: NONE }
+{ id: mine:5, label: 'row 1', secret: NONE }
+{ id: mine:7, label: 'row 3', secret: NONE }
+{ id: mine:9, label: 'row 1', secret: NONE }
+{ id: mine:13, label: 'row 1', secret: NONE }
+{ id: mine:17, label: 'row 1', secret: NONE }
+{ id: mine:21, label: 'row 1', secret: NONE }
+### bob: SELECT id, secret, label FROM mine WHERE n = 1 ORDER BY id
+{ id: mine:1, label: 'row 1', secret: NONE }
+{ id: mine:5, label: 'row 1', secret: NONE }
+{ id: mine:9, label: 'row 1', secret: NONE }
+{ id: mine:13, label: 'row 1', secret: NONE }
+{ id: mine:17, label: 'row 1', secret: NONE }
+{ id: mine:21, label: 'row 1', secret: NONE }
+### bob: SELECT id, secret, label FROM open WHERE body @1@ 'alpha' ORDER BY id
+{ id: open:3, label: 'row 3', secret: NONE }
+{ id: open:6, label: 'row 2', secret: NONE }
+{ id: open:9, label: 'row 1', secret: NONE }
+{ id: open:12, label: 'row 0', secret: NONE }
+{ id: open:15, label: 'row 3', secret: NONE }
+{ id: open:18, label: 'row 2', secret: NONE }
+{ id: open:21, label: 'row 1', secret: NONE }
+{ id: open:24, label: 'row 0', secret: NONE }
+### bob: SELECT id, secret, label FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] ORDER BY id
+{ id: open:3, label: 'row 3', secret: NONE }
+{ id: open:4, label: 'row 0', secret: NONE }
+{ id: open:5, label: 'row 1', secret: NONE }
+{ id: open:6, label: 'row 2', secret: NONE }
+### bob: SELECT id, secret, label FROM open WHERE n = 1 OR m = 2 ORDER BY id
+{ id: open:1, label: 'row 1', secret: NONE }
+{ id: open:2, label: 'row 2', secret: NONE }
+{ id: open:5, label: 'row 1', secret: NONE }
+{ id: open:7, label: 'row 3', secret: NONE }
+{ id: open:9, label: 'row 1', secret: NONE }
+{ id: open:12, label: 'row 0', secret: NONE }
+{ id: open:13, label: 'row 1', secret: NONE }
+{ id: open:17, label: 'row 1', secret: NONE }
+{ id: open:21, label: 'row 1', secret: NONE }
+{ id: open:22, label: 'row 2', secret: NONE }
+### bob: SELECT id, secret, label FROM open WHERE n = 1 ORDER BY id
+{ id: open:1, label: 'row 1', secret: NONE }
+{ id: open:5, label: 'row 1', secret: NONE }
+{ id: open:9, label: 'row 1', secret: NONE }
+{ id: open:13, label: 'row 1', secret: NONE }
+{ id: open:17, label: 'row 1', secret: NONE }
+{ id: open:21, label: 'row 1', secret: NONE }
+### bob: SELECT in, out FROM pal ORDER BY in
+{ in: person:a, out: person:b }
+{ in: person:b, out: person:c }
+{ in: person:c, out: person:a }
+### bob: SELECT in, out FROM private_pal ORDER BY in
+{ in: person:a, out: person:b }
+### bob: SELECT in, out FROM sealed_pal
+(no rows)
+### bob: SELECT n FROM item ORDER BY n DESC LIMIT 3
+{ n: 100 }
+{ n: 99 }
+{ n: 98 }
+### bob: SELECT n FROM item ORDER BY n DESC LIMIT 7 START 2
+{ n: 98 }
+{ n: 97 }
+{ n: 97 }
+{ n: 96 }
+{ n: 95 }
+{ n: 94 }
+{ n: 94 }
+### bob: SELECT n FROM item ORDER BY n LIMIT 3
+{ n: 0 }
+{ n: 1 }
+{ n: 2 }
+### bob: SELECT n, g FROM item ORDER BY n DESC, g LIMIT 6
+{ g: 0, n: 100 }
+{ g: 0, n: 99 }
+{ g: 0, n: 98 }
+{ g: 0, n: 97 }
+{ g: 1, n: 97 }
+{ g: 1, n: 96 }
+### bob: SELECT n, g FROM item WHERE g = 1 ORDER BY n DESC LIMIT 4
+{ g: 1, n: 97 }
+{ g: 1, n: 96 }
+{ g: 1, n: 95 }
+{ g: 1, n: 94 }
+### bob: [fn::top(1), fn::top(2)]
+[[100, 99, 98, 97, 97, 100, 99, 98, 97, 97], [100, 99, 98, 97, 97, 100, 99, 98, 97, 97, 100, 99, 98, 97, 97]]
+### bob: fn::top(3)
+[100, 99, 98, 97, 97, 100, 99, 98, 97, 97, 100, 99, 98, 97, 97, 100, 99, 98, 97, 97]

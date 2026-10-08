@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -30,25 +29,25 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-"Return [ctx: Db]
-    Sequence [ctx: Db] [statements: 2]
+'Return [ctx: Rt]
+    Sequence [ctx: Rt] [statements: 2]
         Let [ctx: Rt] [name: $tb]
-            Expr [ctx: Rt] [expr: company]
+            ExprPlan [ctx: Rt] [expr: company]
         ProjectValue [ctx: Db] [expr: kind]
-            DynamicScan [ctx: Db] [source: $tb]
-"'''
+            Values [ctx: Rt] [expr: $tb]
+''''
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 value = '''
-'Return [ctx: Db]
-    Sequence [ctx: Db] [statements: 2]
+'Return [ctx: Rt]
+    Sequence [ctx: Rt] [statements: 2]
         Let [ctx: Rt] [name: $r]
-            Expr [ctx: Rt] [expr: company:1]
+            ExprPlan [ctx: Rt] [expr: company:1]
         ProjectValue [ctx: Db] [expr: kind]
-            DynamicScan [ctx: Db] [source: $r]
+            Values [ctx: Rt] [expr: $r]
 ''''
 
 [[test.results]]
@@ -68,24 +67,26 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-"Return [ctx: Db]
-    Sequence [ctx: Db] [statements: 2]
-        Foreach [ctx: Db] [param: $loop, range: [company]]
-            Return [ctx: Db]
-                ProjectValue [ctx: Db] [expr: kind]
-                    DynamicScan [ctx: Db] [source: $loop]
+"Return [ctx: Rt]
+    Sequence [ctx: Rt] [statements: 2]
+        Foreach [ctx: Db] [param: $loop]
+            ExprPlan [ctx: Rt] [expr: [company]]
+            Sequence [ctx: Rt] [statements: 1]
+                Return [ctx: Rt]
+                    ProjectValue [ctx: Db] [expr: kind]
+                        Values [ctx: Rt] [expr: $loop]
         Return [ctx: Rt]
-            Expr [ctx: Rt] [expr: 'unreached']
+            ExprPlan [ctx: Rt] [expr: 'unreached']
 "'''
 
 [[test.results]]
 value = '''
-'Return [ctx: Db]
-    Sequence [ctx: Db] [statements: 2]
+'Return [ctx: Rt]
+    Sequence [ctx: Rt] [statements: 2]
         Let [ctx: Rt] [name: $n]
-            Expr [ctx: Rt] [expr: NONE]
+            ExprPlan [ctx: Rt] [expr: NONE]
         SelectProject [ctx: Db] [projections: *]
-            DynamicScan [ctx: Db] [source: $n]
+            Values [ctx: Rt] [expr: $n]
 ''''
 */
 

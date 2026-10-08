@@ -15,6 +15,7 @@
 //! compared against logical paths by [`idiom_matches_column`], which is the
 //! one place that comparison lives.
 
+#[cfg(test)]
 use std::collections::HashSet;
 use std::convert::Infallible;
 use std::ops::{Bound, ControlFlow};
@@ -34,6 +35,7 @@ use crate::val::{Number, Value};
 // Predicate / Validation Helpers
 // ============================================================================
 
+#[cfg(test)]
 /// Check if a condition has a top-level OR operator.
 ///
 /// Used to prevent LIMIT/START pushdown into Scan when the condition may
@@ -54,6 +56,7 @@ pub(crate) fn has_knn_operator(expr: &LogicalExpr) -> bool {
 	scan_knn_operators(expr).found_any
 }
 
+#[cfg(test)]
 /// Check if an expression contains a brute-force KNN operator (`NearestNeighbor::K`).
 ///
 /// Used to distinguish between brute-force KNN with parameter-based vectors
@@ -65,7 +68,7 @@ pub(crate) fn has_knn_k_operator(expr: &LogicalExpr) -> bool {
 /// Check if an expression contains a `KTree` KNN operator (`<|k|>` form).
 ///
 /// `KTree` was backed by the M-Tree index, which has been removed. The
-/// streaming planner uses this to distinguish "unsupported variant" from
+/// planner uses this to distinguish "unsupported variant" from
 /// "KNN nested under OR/NOT" when emitting the user-facing error.
 pub(crate) fn has_knn_ktree_operator(expr: &LogicalExpr) -> bool {
 	scan_knn_operators(expr).found_ktree
@@ -115,19 +118,17 @@ pub(crate) struct BruteForceKnnParams {
 pub(crate) enum BruteForceKnnVector {
 	/// A plan-time literal numeric array.
 	Literal(Vec<Number>),
-	/// A non-literal expression the legacy planner would compute once at
-	/// plan time with no document context (bind parameter, function call,
-	/// array with computed elements, binary of computables). Evaluated once
-	/// at stream open by `KnnTopK` and coerced to `array<number>` with the
-	/// same coercion the legacy tree applies.
+	/// A non-literal expression computable with no document context (bind
+	/// parameter, function call, array with computed elements, binary of
+	/// computables). Evaluated once at stream open by `KnnTopK` and coerced to
+	/// `array<number>`.
 	Deferred(LogicalExpr),
 }
 
-/// Whether the legacy planner's `Tree::eval_value` would compute this
-/// expression at plan time (`Node::Computable` / `Node::Computed`). Fields,
+/// Whether this expression is computable with no document context. Fields,
 /// subqueries, closures, prefix expressions and every other node kind are
-/// `Unsupported` there — a brute-force KNN with such a right-hand side never
-/// registers an executor entry and evaluates to `false` per row instead.
+/// not — a brute-force KNN with such a right-hand side registers no KNN
+/// source and evaluates to `false` per row instead.
 fn is_plan_time_computable(expr: &LogicalExpr) -> bool {
 	match expr {
 		// `Tree::eval_array` fully computes array elements, whatever they are.
@@ -161,8 +162,7 @@ fn is_plan_time_computable(expr: &LogicalExpr) -> bool {
 /// expression, in pre-order, whose left side is a field and whose right side
 /// is a literal vector or a plan-time computable expression (see
 /// [`BruteForceKnnVector`]). Anything else (a field, a subquery, …) on the
-/// right stays in the condition and evaluates to `false` per row, like a
-/// legacy KNN expression without an executor entry.
+/// right stays in the condition and evaluates to `false` per row.
 pub(crate) fn extract_bruteforce_knn(cond: &LogicalExpr) -> Option<BruteForceKnnParams> {
 	let mut params = None;
 	let _ = cond.visit(&mut |e| {
@@ -195,6 +195,43 @@ pub(crate) fn extract_bruteforce_knn(cond: &LogicalExpr) -> Option<BruteForceKnn
 	params
 }
 
+/// Replace each approximate KNN operator (`<|k, ef|>`) in the top-level `AND`
+/// chain of `cond` with the brute-force operator of the same `k` over the
+/// distance `distance_of` names for its field, leaving one `distance_of`
+/// declines as it is.
+///
+/// The brute-force operator ranks the rows themselves, so it answers from
+/// whatever state those rows are read at, where an ANN index answers only for
+/// the state its last write left.
+pub(crate) fn exact_knn_by(
+	cond: &mut LogicalExpr,
+	distance_of: &impl Fn(&LogicalExpr) -> Option<Distance>,
+) {
+	match cond {
+		LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} => {
+			exact_knn_by(left, distance_of);
+			exact_knn_by(right, distance_of);
+		}
+		LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::NearestNeighbor(nn),
+			..
+		} => {
+			if let NearestNeighbor::Approximate(k, _) = nn.as_ref()
+				&& let Some(distance) = distance_of(left)
+			{
+				**nn = NearestNeighbor::K(*k, distance.into());
+			}
+		}
+		_ => {}
+	}
+}
+
+#[cfg(test)]
 /// Strip the MATCHES (`@@`) conjuncts a full-text scan answers from a WHERE
 /// clause, returning the residual.
 ///
@@ -213,19 +250,44 @@ pub(crate) fn strip_fts_condition(
 	operator: &MatchesOperator,
 	query: &str,
 ) -> Option<LogicalExpr> {
+	strip_fts_probes(cond, &[(column, operator, query)])
+}
+
+/// Strip from a WHERE clause the MATCHES (`@@`) conjuncts that every one of
+/// several full-text scans answers, returning the residual.
+///
+/// Each probe is one scan's `(column, operator, query)`, as for
+/// [`strip_fts_condition`]. A conjunct is stripped only when it is the probe of
+/// every scan, because a union of scans lists a row for any one of them and so
+/// says nothing about a conjunct another scan did not read; with no probe
+/// nothing is stripped.
+pub(crate) fn strip_fts_probes(
+	cond: &LogicalExpr,
+	probes: &[(&Idiom, &MatchesOperator, &str)],
+) -> Option<LogicalExpr> {
 	strip_and_simplify(cond.clone(), |e| {
-		let LogicalExpr::Binary {
-			left,
-			op: BinaryOperator::Matches(op),
-			right,
-		} = e
-		else {
-			return false;
-		};
-		op == operator
-			&& matches!(try_literal_to_value(right), Some(Value::String(s)) if s.as_str() == query)
-			&& idiom_matches_column(left, column)
+		!probes.is_empty()
+			&& probes
+				.iter()
+				.all(|(column, operator, query)| is_fts_probe(e, column, operator, query))
 	})
+}
+
+/// Whether `e` is the MATCHES the full-text scan over `column` probes: its
+/// operator is `operator`, its query the literal string `query`, and its left
+/// side the column.
+fn is_fts_probe(e: &LogicalExpr, column: &Idiom, operator: &MatchesOperator, query: &str) -> bool {
+	let LogicalExpr::Binary {
+		left,
+		op: BinaryOperator::Matches(op),
+		right,
+	} = e
+	else {
+		return false;
+	};
+	op == operator
+		&& matches!(try_literal_to_value(right), Some(Value::String(s)) if s.as_str() == query)
+		&& idiom_matches_column(left, column)
 }
 
 /// Whether `e` is a KNN operator a scan operator consumes: `NearestNeighbor::K`
@@ -254,10 +316,10 @@ pub(crate) fn strip_knn_from_condition(cond: &LogicalExpr) -> Option<LogicalExpr
 /// operator from a WHERE clause, returning the in-traversal residual for a
 /// `KnnScan`.
 ///
-/// The residual is evaluated per candidate inside the ANN search through the
-/// legacy compute path, where MATCHES has no query executor and computes to
-/// `false` — leaving a MATCHES conjunct in would reject every candidate and
-/// return zero rows. Dropping a conjunct from the in-traversal residual only
+/// The residual is evaluated per candidate inside the ANN search, where
+/// MATCHES has no full-text index to answer from and computes to `false` —
+/// leaving a MATCHES conjunct in would reject every candidate and return zero
+/// rows. Dropping a conjunct from the in-traversal residual only
 /// admits more candidates (the outer `Filter` re-applies the KNN-stripped
 /// WHERE — with `MATCHES` evaluated through its physical operator — so final
 /// rows stay correct); it can never produce wrong rows.
@@ -498,6 +560,7 @@ pub(crate) fn strip_index_conditions(
 	})
 }
 
+#[cfg(test)]
 /// Strip conditions covered by a union of BTree access paths from a WHERE
 /// clause.
 ///
@@ -577,6 +640,7 @@ pub(crate) fn strip_union_index_conditions(
 	})
 }
 
+#[cfg(test)]
 /// Returns `true` when a `CONTAINSANY` (field-left) or `ANYINSIDE`
 /// (field-right) leaf is implied by the union, i.e. every branch value is one
 /// of the leaf's literals so no branch can admit a row the leaf rejects.
@@ -925,10 +989,15 @@ fn check_id_recordid_pair(
 /// Extract MATCHES clause information from a WHERE condition for index functions.
 ///
 /// Accepts an optional `FrozenContext` to resolve bind parameters (`$query`)
-/// that appear on the right-hand side of `@N@` operators.
+/// that appear on the right-hand side of `@N@` operators. A parameter for
+/// which `shadowed` answers `true` is bound by the plan itself — a function's
+/// argument, a closure's or `FOR` loop's variable — and holds its value only
+/// when the plan runs, so the context's value of that name is never read and
+/// the clause is not extracted.
 pub(crate) fn extract_matches_context(
 	cond: &LogicalExpr,
 	ctx: Option<&crate::ctx::FrozenContext>,
+	shadowed: impl Fn(&str) -> bool,
 ) -> crate::exec::function::MatchesContext {
 	let mut matches = crate::exec::function::MatchesContext::new();
 	let _ = cond.visit(&mut |e| {
@@ -942,6 +1011,7 @@ pub(crate) fn extract_matches_context(
 			// Supports both literal strings and bind parameters.
 			let query_str = match right.as_ref() {
 				LogicalExpr::Literal(LogicalLiteral::String(s)) => Some(s.as_str().to_owned()),
+				LogicalExpr::Param(param) if shadowed(param.as_str()) => None,
 				LogicalExpr::Param(param) => {
 					// Resolve the bind parameter from the frozen context
 					ctx.and_then(|ctx| {
@@ -1032,7 +1102,7 @@ mod tests {
 		values
 			.iter()
 			.map(|v| AccessPath::BTreeScan {
-				index_ref: IndexRef::new(Arc::clone(&indexes), 0),
+				index_ref: IndexRef::new(&indexes, 0),
 				access: BTreeAccess::Equality(Value::from(*v)),
 				direction: Direction::Forward,
 			})

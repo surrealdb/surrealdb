@@ -1,0 +1,457 @@
+### CREATE person:10 SET name = 'x'
+{ id: person:10, name: 'x' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+person: { id: person:10, name: 'x' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### CREATE person SET name = 'y'
+{ id: person:generated, name: 'y' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+person: { id: person:generated, name: 'y' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### CREATE person:1 SET name = 'dup'
+error: Database record `person:1` already exists
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### CREATE ONLY person:11 SET a = 1
+{ a: 1, id: person:11 }
+records:
+person: { a: 1, id: person:11 }
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### CREATE ONLY person:11, person:12 SET a = 1
+error: Expected a single result output when using the ONLY keyword
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### CREATE person:12, person:13 SET a = 1 RETURN NONE
+(no rows)
+records:
+person: { a: 1, id: person:12 }
+person: { a: 1, id: person:13 }
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### CREATE person:14 CONTENT { a: 1 } RETURN a
+{ a: 1 }
+records:
+person: { a: 1, id: person:14 }
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### CREATE |m:1..3| SET a = 1
+{ a: 1, id: m:1 }
+{ a: 1, id: m:2 }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+m: { a: 1, id: m:1 }
+m: { a: 1, id: m:2 }
+### CREATE person:1..3
+error: Cannot execute CREATE statement using value: person:1..3
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### CREATE watched:1 SET v = 1
+{ id: watched:1, v: 1 }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+watched: { id: watched:1, v: 1 }
+log: { id: log:generated, of: watched:1 }
+### CREATE strict:2 SET n = 1
+error: Couldn't coerce value for field `req` of `strict:2`: Expected `string` but found `NONE`
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPDATE person SET seen = true
+{ age: 30, id: person:1, name: 'ann', seen: true }
+{ age: 17, id: person:2, name: 'Bob', seen: true }
+{ age: 45, id: person:3, name: 'cat', seen: true }
+records:
+person: { age: 17, id: person:2, name: 'Bob', seen: true }
+person: { age: 30, id: person:1, name: 'ann', seen: true }
+person: { age: 45, id: person:3, name: 'cat', seen: true }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPDATE person SET age += 1 WHERE age > 20 RETURN AFTER
+{ age: 31, id: person:1, name: 'ann' }
+{ age: 46, id: person:3, name: 'cat' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 31, id: person:1, name: 'ann' }
+person: { age: 46, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPDATE person:1 SET name = 'z' RETURN BEFORE
+{ age: 30, id: person:1, name: 'ann' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'z' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPDATE ONLY person:1 SET n = 1
+{ age: 30, id: person:1, n: 1, name: 'ann' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, n: 1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPDATE ONLY person SET n = 1
+error: Expected a single result output when using the ONLY keyword
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPDATE person:99 SET n = 1
+(no rows)
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPDATE person:1..3 SET r = true
+{ age: 30, id: person:1, name: 'ann', r: true }
+{ age: 17, id: person:2, name: 'Bob', r: true }
+records:
+person: { age: 17, id: person:2, name: 'Bob', r: true }
+person: { age: 30, id: person:1, name: 'ann', r: true }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### DELETE person WHERE age < 20
+(no rows)
+records:
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### DELETE person:1 RETURN BEFORE
+{ age: 30, id: person:1, name: 'ann' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### DELETE ONLY person:2 RETURN BEFORE
+{ age: 17, id: person:2, name: 'Bob' }
+records:
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### DELETE person:99
+(no rows)
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPSERT person:1 SET name = 'u'
+{ age: 30, id: person:1, name: 'u' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'u' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPSERT person:50 SET name = 'new'
+{ id: person:50, name: 'new' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+person: { id: person:50, name: 'new' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPSERT person:1 CONTENT { name: 'c' }
+{ id: person:1, name: 'c' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 45, id: person:3, name: 'cat' }
+person: { id: person:1, name: 'c' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPSERT person SET flag = true WHERE age > 100
+{ flag: true, id: person:generated }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+person: { flag: true, id: person:generated }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPSERT ONLY person SET flag = true WHERE age > 100
+{ flag: true, id: person:generated }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+person: { flag: true, id: person:generated }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPSERT person SET flag = true WHERE age > 20
+{ age: 30, flag: true, id: person:1, name: 'ann' }
+{ age: 45, flag: true, id: person:3, name: 'cat' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, flag: true, id: person:1, name: 'ann' }
+person: { age: 45, flag: true, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPSERT uniq SET email = 'a@x', n += 1
+{ email: 'a@x', id: uniq:1, n: 2 }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 2 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPSERT uniq:2 SET email = 'a@x'
+error: Database index `by_email` already contains 'a@x', with record `uniq:1`
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPSERT strict:1 SET n = 5
+{ id: strict:1, n: 5, req: 'r' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 5, req: 'r' }
+### UPSERT strict:2 SET n = 5
+error: Couldn't coerce value for field `req` of `strict:2`: Expected `string` but found `NONE`
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPSERT strict:2 SET req = 'q', n = 5
+{ id: strict:2, n: 5, req: 'q' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+strict: { id: strict:2, n: 5, req: 'q' }
+### INSERT INTO person { id: 20, name: 'i' }
+{ id: person:20, name: 'i' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+person: { id: person:20, name: 'i' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### INSERT INTO person [{ id: 21 }, { id: 22 }]
+{ id: person:21 }
+{ id: person:22 }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+person: { id: person:21 }
+person: { id: person:22 }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### INSERT INTO person (id, name) VALUES (23, 'a'), (24, 'b')
+{ id: person:23, name: 'a' }
+{ id: person:24, name: 'b' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+person: { id: person:23, name: 'a' }
+person: { id: person:24, name: 'b' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### INSERT INTO person { id: 1, name: 'dup' }
+error: Database record `person:1` already exists
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### INSERT IGNORE INTO person { id: 1, name: 'dup' }
+(no rows)
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### INSERT INTO person { id: 1, name: 'dup' } ON DUPLICATE KEY UPDATE name = 'kept'
+{ age: 30, id: person:1, name: 'kept' }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'kept' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### INSERT INTO uniq { email: 'a@x' } ON DUPLICATE KEY UPDATE n += 10
+{ email: 'a@x', id: uniq:1, n: 11 }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 11 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### INSERT RELATION INTO knows { in: person:1, out: person:2 }
+{ id: knows:generated, in: person:1, out: person:2 }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+knows: { id: knows:generated, in: person:1, out: person:2 }
+### RELATE person:1->knows->person:2
+{ id: knows:generated, in: person:1, out: person:2 }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+knows: { id: knows:generated, in: person:1, out: person:2 }
+### RELATE person:1->knows->[person:2, person:3] SET w = 1
+{ id: knows:generated, in: person:1, out: person:2, w: 1 }
+{ id: knows:generated, in: person:1, out: person:3, w: 1 }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+knows: { id: knows:generated, in: person:1, out: person:2, w: 1 }
+knows: { id: knows:generated, in: person:1, out: person:3, w: 1 }
+### RELATE [person:1, person:2]->knows:k->person:3
+error: Found person:1 for the `in` field, which does not match the existing field value
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### RELATE ONLY person:1->knows->[person:2, person:3]
+error: Expected a single result output when using the ONLY keyword
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### RELATE person:1->knows->(1 + 1)
+error: Cannot execute RELATE statement where property 'id' is: 2
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### (CREATE person:30 SET v = 1).v
+[1]
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+person: { id: person:30, v: 1 }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### CREATE type::record('person', $limit + 1) SET a = 1
+error: Cannot perform addition with 'none' and 'int'
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### CREATE [person:40, type::record('person', 41)][$] SET a = 1
+{ a: 1, id: person:41 }
+records:
+person: { a: 1, id: person:41 }
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### CREATE $limit SET a = 1
+error: Cannot execute CREATE statement using value: NONE
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### UPDATE type::table('person') SET t = 1 WHERE age > 20
+{ age: 30, id: person:1, name: 'ann', t: 1 }
+{ age: 45, id: person:3, name: 'cat', t: 1 }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann', t: 1 }
+person: { age: 45, id: person:3, name: 'cat', t: 1 }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+### RELATE (type::record('person', 1))->knows->([person:2, person:3][0])
+{ id: knows:generated, in: person:1, out: person:2 }
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }
+knows: { id: knows:generated, in: person:1, out: person:2 }
+### RELATE person:1->knows->$limit
+error: Cannot execute RELATE statement where property 'id' is: NONE
+records:
+person: { age: 17, id: person:2, name: 'Bob' }
+person: { age: 30, id: person:1, name: 'ann' }
+person: { age: 45, id: person:3, name: 'cat' }
+uniq: { email: 'a@x', id: uniq:1, n: 1 }
+strict: { id: strict:1, n: 0, req: 'r' }

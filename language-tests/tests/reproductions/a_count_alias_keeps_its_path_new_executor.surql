@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -22,6 +21,9 @@ reason = """
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[{ id: t:1, k: 1 }]"
 
 [[test.results]]
@@ -29,32 +31,39 @@ value = "[{ id: t:2, k: 1 }]"
 
 [[test.results]]
 value = '''
-'CountScan [ctx: Db] [source: t]
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: t]
 ''''
 
 [[test.results]]
 value = '''
-'IndexCountScan [ctx: Db] [source: t, condition: k = 1]
+'SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: t, condition: k = 1]
 ''''
 
 [[test.results]]
 value = '''
-'CountScan [ctx: Db] [source: t]
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: t]
 ''''
 
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: t, direction: Forward]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [mode: GROUP ALL]
-    IndexScan [ctx: Db] [index: t_k, access: = 1, direction: Forward, predicate: k = 1]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: t, index: t_k, access: = 1, direction: Forward]
 ''''
 */
 
+-- Index keys are counted only for a column declared to hold no array.
+DEFINE FIELD k ON t TYPE int;
 DEFINE INDEX t_k ON t FIELDS k;
 CREATE t:1 SET k = 1;
 CREATE t:2 SET k = 1;

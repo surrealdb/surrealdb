@@ -7,7 +7,7 @@ database = true
 reason = """
 A per-record hard failure aborts the whole mutation and rolls it back: a record
 written before the failing one does not survive. This is the error contract the
-streaming write path's stage outcome models, which is why it has no
+write path's stage outcome models, which is why it has no
 partial-success state.
 """
 

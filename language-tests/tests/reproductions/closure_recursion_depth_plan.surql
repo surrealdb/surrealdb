@@ -6,7 +6,6 @@ database = true
 # instant on `mem`; the `eval` case parses and plans a statement per level, so
 # the disk backends add only time, not coverage.
 backend = ["mem"]
-planner-strategy = ["all-ro"]
 
 [env.capabilities]
 allow-eval-query = ["system"]
@@ -28,22 +27,13 @@ value = "NONE"
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: $f($f, 3000)]
+    ExprPlan [ctx: Rt] [expr: ($f)($f, 3000)]
 ''''
 
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: $f($f, 3)]
-''''
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = '''
-'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: $g($g)]
+    ExprPlan [ctx: Rt] [expr: ($f)($f, 3)]
 ''''
 
 [[test.results]]
@@ -52,7 +42,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: $h($h)]
+    ExprPlan [ctx: Rt] [expr: ($g)($g)]
 ''''
 
 [[test.results]]
@@ -61,7 +51,16 @@ value = "NONE"
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: $e($e)]
+    ExprPlan [ctx: Rt] [expr: ($h)($h)]
+''''
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = '''
+'Return [ctx: Rt]
+    ExprPlan [ctx: Rt] [expr: ($e)($e)]
 ''''
 */
 

@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -90,10 +89,6 @@ it is there. Both are marked where they occur, so the file does not claim an
 oracle is doing work it cannot do. Everywhere else the access is strictly wider
 than the answer, and dropping the residual is a row difference the NOINDEX half
 catches.
-
-Narrowed to the streaming strategies because a prefix `EXPLAIN` errors under
-compute-only; the two plan identically by contract, so pinning both costs
-nothing and states the intent.
 """
 
 [[test.results]]
@@ -104,8 +99,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: code INSIDE ['a', 'c']]
         UnionIndexScan [ctx: Db] [table: rsc, branches: 2]
-            IndexScan [ctx: Db] [index: rsc_code, access: = 'a', direction: Forward]
-            IndexScan [ctx: Db] [index: rsc_code, access: = 'c', direction: Forward]
+            IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'a', direction: Forward]
+            IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'c', direction: Forward]
 "'''
 
 [[test.results]]
@@ -119,8 +114,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: code INSIDE ['a', 'c']]
         UnionIndexScan [ctx: Db] [table: rsc, branches: 2]
-            IndexScan [ctx: Db] [index: rsc_code, access: = 'a', direction: Forward]
-            IndexScan [ctx: Db] [index: rsc_code, access: = 'c', direction: Forward]
+            IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'a', direction: Forward]
+            IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'c', direction: Forward]
 "'''
 
 [[test.results]]
@@ -134,8 +129,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: code = 'a' OR code = 'c']
         UnionIndexScan [ctx: Db] [table: rsc, branches: 2]
-            IndexScan [ctx: Db] [index: rsc_code, access: = 'a', direction: Forward]
-            IndexScan [ctx: Db] [index: rsc_code, access: = 'c', direction: Forward]
+            IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'a', direction: Forward]
+            IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'c', direction: Forward]
 "'''
 
 [[test.results]]
@@ -147,7 +142,7 @@ value = "[rsc:1, rsc:3, rsc:5, rsc:6]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: rsc_code, access: = 'a', direction: Forward, predicate: code INSIDE ['a']]
+    IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'a', direction: Forward]
 "'''
 
 [[test.results]]
@@ -164,8 +159,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: country INSIDE ['fr', 'de']]
         UnionIndexScan [ctx: Db] [table: rsv, branches: 2]
-            IndexScan [ctx: Db] [index: rsv_country, access: = 'fr', direction: Forward]
-            IndexScan [ctx: Db] [index: rsv_country, access: = 'de', direction: Forward]
+            IndexScan [ctx: Db] [table: rsv, index: rsv_country, access: = 'fr', direction: Forward]
+            IndexScan [ctx: Db] [table: rsv, index: rsv_country, access: = 'de', direction: Forward]
 "'''
 
 [[test.results]]
@@ -185,8 +180,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: country = 'fr' OR country = 'be']
         UnionIndexScan [ctx: Db] [table: rsv, branches: 2]
-            IndexScan [ctx: Db] [index: rsv_country, access: = 'fr', direction: Forward]
-            IndexScan [ctx: Db] [index: rsv_country, access: = 'be', direction: Forward]
+            IndexScan [ctx: Db] [table: rsv, index: rsv_country, access: = 'fr', direction: Forward]
+            IndexScan [ctx: Db] [table: rsv, index: rsv_country, access: = 'be', direction: Forward]
 "'''
 
 [[test.results]]
@@ -203,8 +198,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: tags CONTAINSALL ['x', 'y']]
         UnionIndexScan [ctx: Db] [table: rsa, branches: 2]
-            IndexScan [ctx: Db] [index: rsa_tags, access: = 'x', direction: Forward]
-            IndexScan [ctx: Db] [index: rsa_tags, access: = 'y', direction: Forward]
+            IndexScan [ctx: Db] [table: rsa, index: rsa_tags, access: = 'x', direction: Forward]
+            IndexScan [ctx: Db] [table: rsa, index: rsa_tags, access: = 'y', direction: Forward]
 "'''
 
 [[test.results]]
@@ -222,9 +217,10 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    UnionIndexScan [ctx: Db] [table: rsa, branches: 2]
-        IndexScan [ctx: Db] [index: rsa_tags, access: = 'x', direction: Forward]
-        IndexScan [ctx: Db] [index: rsa_tags, access: = 'y', direction: Forward]
+    Filter [ctx: Db] [predicate: tags CONTAINSANY ['x', 'y']]
+        UnionIndexScan [ctx: Db] [table: rsa, branches: 2]
+            IndexScan [ctx: Db] [table: rsa, index: rsa_tags, access: = 'x', direction: Forward]
+            IndexScan [ctx: Db] [table: rsa, index: rsa_tags, access: = 'y', direction: Forward]
 "'''
 
 [[test.results]]
@@ -243,7 +239,7 @@ value = "[{ count: 3 }]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: n = 3 OR tags CONTAINS 'z']
-        BitmapResolve [ctx: Db] [table: rsa]
+        BitmapScan [ctx: Db] [table: rsa]
             BitmapOr [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: rsa_n, access: = 3]
                 BitmapIndexScan [ctx: Db] [index: rsa_tags, access: = 'z']
@@ -277,7 +273,7 @@ value = "[rsc:1, rsc:3, rsc:4, rsc:5, rsc:6]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: code INSIDE ['a', 'c'] AND code INSIDE ['a', 'c', 'd']]
-        BitmapResolve [ctx: Db] [table: rsc]
+        BitmapScan [ctx: Db] [table: rsc]
             BitmapAnd [ctx: Db]
                 BitmapOr [ctx: Db]
                     BitmapIndexScan [ctx: Db] [index: rsc_code, access: = 'a']
@@ -297,7 +293,8 @@ value = "[rsc:1, rsc:3, rsc:5, rsc:6]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    EmptyScan [ctx: Rt]
+    Filter [ctx: Db] [predicate: false]
+        Union [ctx: Db]
 ''''
 
 [[test.results]]
@@ -330,7 +327,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: rsf_b_tags, access: [1, 'x'], direction: Forward, predicate: b = 1 AND tags CONTAINS 'x']
+    IndexScan [ctx: Db] [table: rsf, index: rsf_b_tags, access: [1, 'x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -348,7 +345,7 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: rsf_b_tags, access: [1, 'x'], direction: Forward, limit: 2, predicate: b = 1 AND tags CONTAINS 'x']
+    IndexScan [ctx: Db] [table: rsf, index: rsf_b_tags, access: [1, 'x'], direction: Forward, limit: 2]
 "'''
 
 [[test.results]]
@@ -361,8 +358,8 @@ value = "[rsf:1, rsf:2]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Limit [ctx: Db] [limit: 2]
-        Filter [ctx: Db] [predicate: note = 'keep']
-            IndexScan [ctx: Db] [index: rsf_b_tags, access: [1, 'x'], direction: Forward]
+        Filter [ctx: Db] [predicate: b = 1 AND tags CONTAINS 'x' AND note = 'keep']
+            IndexScan [ctx: Db] [table: rsf, index: rsf_b_tags, access: [1, 'x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -380,7 +377,7 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: rsf_b_tags, access: [1, 'x'], direction: Forward, predicate: b = 1 AND 'x' INSIDE tags]
+    IndexScan [ctx: Db] [table: rsf, index: rsf_b_tags, access: [1, 'x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -398,9 +395,9 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: tags CONTAINSANY []]
+    Filter [ctx: Db] [predicate: b = 1 AND tags CONTAINSANY []]
         DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [index: rsf_b_tags, access: [1], direction: Forward]
+            IndexScan [ctx: Db] [table: rsf, index: rsf_b_tags, access: [1], direction: Forward]
 ''''
 
 [[test.results]]
@@ -420,7 +417,7 @@ value = '''
 'ProjectValue [ctx: Db] [expr: id]
     Limit [ctx: Db] [limit: 2]
         DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [index: rsf_b_tags, access: [1], direction: Forward, predicate: b = 1]
+            IndexScan [ctx: Db] [table: rsf, index: rsf_b_tags, access: [1], direction: Forward]
 ''''
 
 [[test.results]]
@@ -441,7 +438,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: rsm_tags_b, access: ['x', 1], direction: Forward, predicate: tags CONTAINS 'x' AND b = 1]
+    IndexScan [ctx: Db] [table: rsm, index: rsm_tags_b, access: ['x', 1], direction: Forward]
 "'''
 
 [[test.results]]
@@ -459,7 +456,7 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: rsm_tags_b, access: ['x', 1], direction: Forward, limit: 2, predicate: tags CONTAINS 'x' AND b = 1]
+    IndexScan [ctx: Db] [table: rsm, index: rsm_tags_b, access: ['x', 1], direction: Forward, limit: 2]
 "'''
 
 [[test.results]]
@@ -471,7 +468,8 @@ value = "[rsm:1, rsm:2]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: rsm_tags_b, access: ['x'], direction: Forward, predicate: tags CONTAINS 'x']
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: rsm, index: rsm_tags_b, access: ['x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -507,8 +505,8 @@ value = "[{ count: 4 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: note = 'keep' AND n = 1]
-        IndexScan [ctx: Db] [index: rsc_code, access: = 'a', direction: Forward]
+    Filter [ctx: Db] [predicate: code = 'a' AND note = 'keep' AND n = 1]
+        IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'a', direction: Forward]
 "'''
 
 [[test.results]]
@@ -522,8 +520,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: code INSIDE ['a', 'c'] AND note = 'keep']
         UnionIndexScan [ctx: Db] [table: rsc, branches: 2]
-            IndexScan [ctx: Db] [index: rsc_code, access: = 'a', direction: Forward]
-            IndexScan [ctx: Db] [index: rsc_code, access: = 'c', direction: Forward]
+            IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'a', direction: Forward]
+            IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'c', direction: Forward]
 "'''
 
 [[test.results]]
@@ -537,8 +535,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: code INSIDE ['a', 'c'] AND code != 'c']
         UnionIndexScan [ctx: Db] [table: rsc, branches: 2]
-            IndexScan [ctx: Db] [index: rsc_code, access: = 'a', direction: Forward]
-            IndexScan [ctx: Db] [index: rsc_code, access: = 'c', direction: Forward]
+            IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'a', direction: Forward]
+            IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'c', direction: Forward]
 "'''
 
 [[test.results]]

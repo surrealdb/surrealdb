@@ -8,7 +8,6 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 use async_channel::Sender;
 use futures::{Stream, StreamExt};
-use reblessive::TreeStack;
 use surrealdb_datastore::close::CommitAction;
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 #[cfg(not(target_family = "wasm"))]
@@ -24,13 +23,12 @@ use crate::catalog::providers::{
 use crate::ctx::reason::Reason;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{
-	Dispatch, Force, MessageBroker, Options, QueryResult, QueryStreamItem, QueryType,
-	RoutedNotification, StatementCounters, TopLevelStatement, items_for_result,
+	DefaultBroker, Dispatch, Force, MessageBroker, Options, QueryResult, QueryStreamItem,
+	QueryType, RoutedNotification, StatementCounters, TopLevelStatement, items_for_result,
 };
-use crate::doc::DefaultBroker;
 use crate::err::{EngineError, Error};
 use crate::exec::function::FunctionRegistry;
-use crate::exec::planner::{Engine, engine_for, plan_statement_inner};
+use crate::exec::planner::plan_statement_inner;
 use crate::exec::{Error as ExecError, OutputShape};
 use crate::expr::logical::{LogicalExpr, LogicalOp, LogicalSource, SourceRef, lower};
 use crate::expr::paths::{DB, NS};
@@ -40,7 +38,6 @@ use crate::expr::{Base, ControlFlow, Expr, FlowResult};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::{ParamVisitor, SlowLogVisit};
 use crate::kvs::{Datastore, DatastoreError, Transaction, TransactionType};
-use crate::legacy::expr_to_ident;
 use crate::observe::{
 	Outcome, QueryCounters, QueryEvent, QueryEventSafe, StatementEvent, StatementEventCtx,
 	StatementEventSafe, StatementType,
@@ -110,42 +107,6 @@ fn shape_statement_value(shape: OutputShape, mut values: Vec<Value>) -> Result<V
 	}
 }
 
-/// The result shape of a statement handled by the compute fallback rather than a
-/// streaming plan. A statement reaches the fallback either because the planner
-/// does not plan its kind (all DML, DDL) or because the whole execution runs in
-/// compute-only mode, so this must classify every row-returning statement, not
-/// only DML. A non-`ONLY` row-returning statement (`SELECT` and the DML family)
-/// yields the array of rows (`Rows`), `ONLY` yields the single row, and
-/// everything else (DDL, INFO, a scalar expression) yields a single value
-/// (`Scalar`). It mirrors what the planner declares for the same statement, so a
-/// result is converted to public at the per-row anchor the storage guard uses
-/// rather than charging the array-of-rows envelope a nesting level, whichever
-/// path ran it.
-fn fallback_result_shape(expr: &crate::expr::Expr) -> OutputShape {
-	use crate::expr::Expr;
-	let only = match expr {
-		Expr::Select(s) => s.only,
-		Expr::Create(s) => s.only,
-		Expr::Update(s) => s.only,
-		Expr::Upsert(s) => s.only,
-		Expr::Delete(s) => s.only,
-		Expr::Relate(s) => s.only,
-		// INSERT has no `ONLY` form; it always yields the array of inserted rows.
-		Expr::Insert(_) => false,
-		// A RETURN's shape is its returned expression's shape, mirroring the
-		// planned `ReturnPlan` (a scalar inner is unwrapped to the single value;
-		// a query inner stays the array of rows).
-		Expr::Return(s) => return fallback_result_shape(&s.what),
-		// DDL, INFO and any other fallback statement is a single value.
-		_ => return OutputShape::Scalar,
-	};
-	if only {
-		OutputShape::Scalar
-	} else {
-		OutputShape::Rows
-	}
-}
-
 /// Where a streaming execution sends its output.
 ///
 /// Only rows stream: a statement's `QueryResult` is one small entry either way,
@@ -202,20 +163,19 @@ struct FlushOnCommit(PreparedBroker);
 
 impl CommitAction for FlushOnCommit {
 	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-		Box::pin(async move {
+		crate::exec::vm::out_of_line(|| async move {
 			Executor::flush_live_query_notifications(self.0);
 		})
 	}
 }
 
-/// An executor which relies on the `compute` methods of the logical expressions.
+/// Executes the statements of a query, one at a time, on the bytecode VM.
 pub struct Executor {
-	stack: TreeStack,
 	results: Vec<QueryResult>,
 	opt: Options,
 	ctx: FrozenContext,
 	/// The datastore's function registry. Seated on the `RootContext` of every
-	/// statement this executor runs, so the streaming planner and every nested
+	/// statement this executor runs, so the planner and every nested
 	/// context derived from it resolve function names through one registry.
 	function_registry: Arc<FunctionRegistry>,
 	/// Cached session info to avoid re-extracting from context on every query.
@@ -235,6 +195,23 @@ pub struct Executor {
 	/// statement in `execute_plan_in_transaction` and set in
 	/// `execute_operator_plan`; statements that never reach a plan stay `Scalar`.
 	result_shape: OutputShape,
+	/// The bare `LIVE` statement converted as it arrived, with the unit
+	/// compiled for it in a read transaction before its write transaction
+	/// opened. [`Executor::run_live`] takes it, so the statement registers
+	/// under the id and unit it arrived with; it is empty outside the one
+	/// statement that set it.
+	arrived_live: Option<(
+		crate::expr::statements::LiveStatement,
+		Option<crate::exec::vm::lower_live::Arrived>,
+	)>,
+}
+
+#[cfg(test)]
+thread_local! {
+	/// A future a test runs between a bare `LIVE` statement's arrival and the
+	/// opening of its write transaction, taken by the next arrival.
+	pub(crate) static AFTER_LIVE_ARRIVAL: std::cell::RefCell<Option<Pin<Box<dyn Future<Output = ()> + Send>>>> =
+		const { std::cell::RefCell::new(None) };
 }
 
 /// Mutable access to a frozen context.
@@ -334,7 +311,6 @@ impl Executor {
 impl Executor {
 	pub fn new(kvs: &Datastore, ctx: FrozenContext, opt: Options) -> Self {
 		Executor {
-			stack: TreeStack::new(),
 			results: Vec::new(),
 			opt,
 			ctx,
@@ -343,6 +319,7 @@ impl Executor {
 			broker_owned_by_executor: false,
 			stream: None,
 			result_shape: OutputShape::Scalar,
+			arrived_live: None,
 		}
 	}
 
@@ -440,7 +417,7 @@ impl Executor {
 				}]
 			} else {
 				// Take the value rather than copy it: it can be a whole
-				// statement's results from the legacy evaluator, and the only
+				// statement's results, and the only
 				// caller that reads them back wants a `LIVE`/`KILL` id, which
 				// is left in place.
 				let owned = match result.query_type {
@@ -527,7 +504,7 @@ impl Executor {
 	/// `stm` is the text the entry prints; `params` is walked for the `$param`
 	/// references whose values the entry lists. They are one value for a
 	/// statement in expression form, and a surface statement paired with its
-	/// plan for one the streaming engine ran.
+	/// plan for one the engine ran.
 	fn check_slow_log<T: ToSql, P: SlowLogVisit>(&self, start: &Instant, stm: &T, params: &P) {
 		if let Some(slow_log) = self.ctx.slow_log() {
 			slow_log.check_log(&self.ctx, start, stm, params);
@@ -687,7 +664,7 @@ impl Executor {
 				return counters.affected();
 			}
 			// Fallback to the value-shape heuristic if no counter was
-			// installed (legacy / test paths).
+			// installed (test paths).
 			return match value {
 				Some(Value::Array(arr)) => arr.len() as u64,
 				Some(Value::None) | Some(Value::Null) | None => 0,
@@ -787,7 +764,7 @@ impl Executor {
 	/// Execute an OperatorPlan and collect results into a Value.
 	///
 	/// This builds an ExecutionContext from the current session state and executes
-	/// the streaming operator plan, collecting all results into an array.
+	/// the operator plan, collecting all results into an array.
 	/// `stream_rows` is set by the callers that run a **top-level** statement,
 	/// whose values are the statement's own result. It is false where the
 	/// values are consumed rather than returned — a `LET` binding them to a
@@ -857,15 +834,15 @@ impl Executor {
 			}
 		}
 
-		// Derive the streaming-exec cancellation token from the legacy
+		// Derive the engine cancellation token from the
 		// context's awaitable cancel handle when one is installed (the WS
 		// RPC layer installs it; embedded callers do not). `child_token()`
 		// gives parent-cancels-child semantics, so the same connection
-		// disconnect that trips the legacy executor's `Context::done`
-		// flag also fires the streaming-exec operators' `select!` against
-		// their token (e.g. `SleepPlan`, long-running scans) — without
+		// disconnect that trips the `Context::done`
+		// flag also fires the engine operators' `select!` against
+		// their token (e.g. a `SLEEP`, long-running scans) — without
 		// linking the two we would silently lose WS cancellation on the
-		// streaming-exec path.
+		// engine path.
 		let cancellation = match self.ctx.cancel_token() {
 			Some(parent) => parent.child_token(),
 			None => CancellationToken::new(),
@@ -873,7 +850,7 @@ impl Executor {
 
 		// If a query timeout is configured, cancel the token when it expires.
 		// This lets operators that check the cancellation token (e.g.
-		// SleepPlan, long-running scans) stop promptly instead of running to
+		// a `SLEEP`, long-running scans) stop promptly instead of running to
 		// completion. The guard stops the task when execution finishes.
 		let _timeout_guard =
 			self.ctx.timeout().map(|timeout| spawn_timeout(timeout, cancellation.clone()));
@@ -883,18 +860,25 @@ impl Executor {
 		// transaction reference which changes between statements.
 		let root_ctx = RootContext {
 			ctx: Context::snapshot(&self.ctx).freeze(),
-			function_registry: Arc::clone(&self.function_registry),
 			options: Some(self.opt.clone()),
 			datastore: None,
-			cancellation,
+			cancellation: Arc::new(cancellation),
 			auth: Arc::clone(&self.opt.auth),
 			session: self.get_session_info(),
 			current_value: None,
 			current_row: None,
 			skip_fetch_perms: false,
+			perms_suppressed: false,
+			caller_perms_suppressed: false,
 			computing_record: None,
-			computing_field: false,
+			no_write: None,
 			version_stamp: None,
+			zero_limits: Vec::new(),
+			topk_thresholds: None,
+			guard_verdicts: Arc::new(crate::exec::guard_verdicts::GuardVerdicts::for_statement(
+				plan.access_mode() != crate::exec::AccessMode::ReadOnly,
+			)),
+			writing: false,
 		};
 
 		// The plan's declared context level is the minimum it needs (see
@@ -1054,17 +1038,11 @@ impl Executor {
 		shape_statement_value(plan.output_shape(), results).map_err(ControlFlow::Err)
 	}
 
-	/// Run a statement on the streaming engine.
+	/// Run a bare expression on the engine.
 	///
-	/// [`engine_for`] accepted the statement, but that is a decision made from
-	/// its kind; the planner can still decline while compiling it — a nested
-	/// DML subquery, or a shape it has no operator for yet — and that decline
-	/// only appears here. Such a statement is handed to the legacy engine
-	/// rather than failed, so the late decline is a fallback and not an error
-	/// the user sees.
-	///
-	/// Driving those declines to zero is what makes the engine choice final at
-	/// [`engine_for`], and this fallback deletable.
+	/// Lowering or planning can refuse a statement — a nested DML subquery or a
+	/// shape no operator exists for — and that refusal is the statement's
+	/// error: `PlannerUnsupported`, carrying the reason.
 	async fn run_on_streaming_engine(
 		&mut self,
 		expr: sql::Expr,
@@ -1091,54 +1069,49 @@ impl Executor {
 				let stream_rows = self.streams_rows();
 				let exec_result =
 					self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
-				// A statement the streaming engine ran is logged as written.
-				// Its lowering succeeded, and a plan has no node for DDL, so
-				// the surface text names no credential; the parameters are
-				// read from the plan, whose scalars name every `$param` the
-				// statement references.
+				// Logged through the lowered form, never the surface text: a
+				// schema statement's surface text names the credential the
+				// conversion has already replaced with its derivation
+				// (`DEFINE USER ... PASSWORD`), and one can sit anywhere an
+				// expression can: inside a block, an `IF` branch, a function
+				// body. Converting here makes the entry safe wherever it sits
+				// rather than only where the statement is one. The parameters
+				// are read from the plan, whose scalars name every `$param`
+				// the statement references.
 				if let Some(op) = logged {
-					self.check_slow_log(start, &expr, &PlanParams(&op));
+					self.check_slow_log(start, &Expr::from(expr.clone()), &PlanParams(&op));
 				}
 				exec_result
 			}
-			Err(Error::Exec(ExecError::PlannerUnsupported(reason))) => {
-				self.log_legacy_fallback(statement_kind(&expr), &reason);
-				self.run_on_legacy_engine(expr.into(), txn, start).await
-			}
-			Err(e) => Err(ControlFlow::Err(anyhow::Error::new(e))),
+			Err(e) => Err(ControlFlow::Err(self.planning_failed(&txn, e).await)),
 		}
 	}
 
-	/// Records that the streaming engine declined a statement of kind `kind`
-	/// for `reason`, the planner's, and that the legacy engine runs it
-	/// instead. Under `AllReadOnlyStatements` — the strategy a deployment or
-	/// a test sets to exercise the streaming engine — the fallback is a
-	/// warning, since the statement did not run where it was meant to; under
-	/// best effort it is the expected course for a shape the planner declines,
-	/// and a debug line. Neither carries the statement's text, which may hold
-	/// credentials or data.
-	fn log_legacy_fallback(&self, kind: &'static str, reason: &str) {
-		match self.ctx.new_planner_strategy() {
-			crate::dbs::NewPlannerStrategy::AllReadOnlyStatements => tracing::warn!(
-				statement = kind,
-				reason,
-				"the streaming engine declined the statement; the legacy engine runs it",
-			),
-			crate::dbs::NewPlannerStrategy::BestEffortReadOnlyStatements
-			| crate::dbs::NewPlannerStrategy::ComputeOnly => tracing::debug!(
-				statement = kind,
-				reason,
-				"the streaming engine declined the statement; the legacy engine runs it",
-			),
+	/// The error a statement the engine did not plan fails with. A decline met
+	/// in a session whose namespace or database does not exist is that
+	/// namespace or database not found, as the context check of a statement
+	/// that reaches it raises it; any other failure is its own.
+	async fn planning_failed(&self, txn: &Transaction, error: Error) -> anyhow::Error {
+		if matches!(error, Error::Exec(ExecError::PlannerUnsupported { .. }))
+			&& let (Ok(ns), Ok(db)) = (self.opt.ns(), self.opt.db())
+		{
+			if let Err(missing) = txn.expect_ns_by_name(ns).await {
+				return missing;
+			}
+			if let Err(missing) = txn.expect_db_by_name(ns, db).await {
+				return missing;
+			}
 		}
+		anyhow::Error::new(error)
 	}
 
 	/// Lower a bare expression to its logical plan.
 	///
-	/// No expression-layer value is built on this path. A statement with no
-	/// logical form — DML and DDL, which the legacy engine owns — is reported
-	/// as `PlannerUnsupported`, the same decline the planner uses, so the
-	/// caller's one fallback arm covers both.
+	/// No expression-layer value is built on this path. A shape with no
+	/// logical form is reported as `PlannerUnsupported`, the same error the
+	/// planner raises. A statement that lowers but holds a write the planner
+	/// cannot compile is refused the same way, by
+	/// [`crate::exec::logical::unplannable_write`] inside `plan_statement_inner`.
 	///
 	/// A `SELECT` is checked against the `FOR UPDATE` rules before lowering,
 	/// on the surface form the parser produced.
@@ -1146,8 +1119,12 @@ impl Executor {
 		if let sql::Expr::Select(select) = expr {
 			crate::dbs::validate_for_update_ast(select)?;
 		}
-		lower(expr.clone())
-			.map_err(|reason| ExecError::PlannerUnsupported(reason.to_string()).into())
+		lower(expr.clone()).map_err(|reason| {
+			ExecError::PlannerUnsupported {
+				reason: reason.to_string(),
+			}
+			.into()
+		})
 	}
 
 	/// Bind a lowered bare expression for `txn` and compile it into the
@@ -1164,50 +1141,27 @@ impl Executor {
 			txn,
 			Some(Arc::clone(&self.opt.auth)),
 			0,
+			Some(Arc::new(self.opt.clone())),
 		)
 		.await
-	}
-
-	/// Run a statement on the legacy `compute()` recursor.
-	async fn run_on_legacy_engine(
-		&mut self,
-		expr: Expr,
-		txn: Arc<Transaction>,
-		start: &Instant,
-	) -> FlowResult<Value> {
-		context_mut(&mut self.ctx)?.set_transaction(txn);
-		// The legacy engine does not run through `execute_operator_plan`, so record
-		// the result shape here as that path does, so a non-`ONLY` row-returning
-		// statement is converted to public per row rather than charging the
-		// array-of-rows envelope a nesting level (which would error a cap-depth
-		// record's own result).
-		self.result_shape = fallback_result_shape(&expr);
-		let res = self
-			.stack
-			.enter(|stk| crate::legacy::expr_compute(&expr, stk, &self.ctx, &self.opt, None))
-			.finish()
-			.await;
-		self.check_slow_log(start, &expr, &expr);
-		res
 	}
 
 	/// Executes a statement which needs a transaction with the supplied
 	/// transaction.
 	///
-	/// A statement is converted no further than the engine that runs it
-	/// requires, and only once it is about to run: a batch that ends before
-	/// reaching a statement converts nothing of it, and a statement the
-	/// streaming engine plans is never converted whole. What a surface
-	/// statement converts is stated on [`Self::run_surface_statement`]; a
-	/// plan converts nothing and goes to [`Self::run_logical_plan`].
+	/// A statement is converted no further than it requires, and only once it
+	/// is about to run: a batch that ends before reaching a statement converts
+	/// nothing of it, and a statement the engine plans is never
+	/// converted whole. What a surface statement converts is stated on
+	/// [`Self::run_surface_statement`]; a plan converts nothing and goes to
+	/// [`Self::run_logical_plan`].
 	///
 	/// The transaction is already open by the time this runs, so whatever does
 	/// convert converts inside it and counts against the transaction timeout.
 	/// That is free for most statements and is not for
 	/// `DEFINE USER`/`ALTER USER ... PASSWORD`, whose conversion derives an
-	/// Argon2 hash and a SCRAM verifier — deliberately expensive, and with no
-	/// yield point. Those go to the legacy engine, which converts on the
-	/// branch that enters it; work added to a `From` impl is added there.
+	/// Argon2 hash and a SCRAM verifier: deliberately expensive, and with no
+	/// yield point. A schema statement converts once, during lowering.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	async fn execute_plan_in_transaction(
 		&mut self,
@@ -1216,7 +1170,7 @@ impl Executor {
 		stmt: TopLevelStatement,
 	) -> FlowResult<Value> {
 		// A statement's result shape defaults to scalar; a statement that reaches
-		// a plan (`execute_operator_plan`) or the compute fallback overrides it. It
+		// a plan (`execute_operator_plan`) overrides it. It
 		// selects how the result is converted to a public value, so it is reset per
 		// statement here rather than inherited from the previous one.
 		self.result_shape = OutputShape::Scalar;
@@ -1240,10 +1194,9 @@ impl Executor {
 	/// Run a statement in the form the parser produced it.
 	///
 	/// Each arm converts its own payload and nothing else, so a statement pays
-	/// for the conversion the engine that runs it needs: `KILL` converts a
-	/// `KillStatement` rather than the statement enclosing it, and a bare
-	/// expression is not converted at all until an engine has been chosen for
-	/// it.
+	/// only for the conversion it needs: `KILL` converts a `KillStatement`
+	/// rather than the statement enclosing it, and a bare expression is
+	/// lowered by the engine without being converted whole.
 	async fn run_surface_statement(
 		&mut self,
 		stmt: sql::TopLevelExpr,
@@ -1264,7 +1217,7 @@ impl Executor {
 				Self::transaction_control_error("Cannot CANCEL without starting a transaction")
 			}
 			sql::TopLevelExpr::Kill(stmt) => self.run_kill(stmt.into(), txn).await,
-			sql::TopLevelExpr::Live(stmt) => self.run_live((*stmt).into(), txn).await,
+			sql::TopLevelExpr::Live(stmt) => self.run_live(*stmt, txn).await,
 			sql::TopLevelExpr::Show(stmt) => self.run_show(stmt.into(), txn).await,
 			sql::TopLevelExpr::Access(stmt) => self.run_access((*stmt).into(), txn).await,
 			sql::TopLevelExpr::Expr(expr) => self.run_bare_expression(expr, txn, start).await,
@@ -1285,70 +1238,59 @@ impl Executor {
 		))))
 	}
 
-	/// Run a bare expression on the engine chosen for it.
-	///
-	/// The choice is made from the surface statement, so the conversion to the
-	/// expression layer happens on the legacy branch only — and, for the
-	/// statement kinds the streaming engine has no logical form for, inside
-	/// [`Self::lower_bare_expression`].
+	/// Run a bare expression on the engine.
 	async fn run_bare_expression(
 		&mut self,
 		expr: sql::Expr,
 		txn: Arc<Transaction>,
 		start: &Instant,
 	) -> FlowResult<Value> {
-		match engine_for(&expr, *self.ctx.new_planner_strategy()) {
-			Engine::Streaming => self.run_on_streaming_engine(expr, txn, start).await,
-			Engine::Legacy(_) => self.run_on_legacy_engine(expr.into(), txn, start).await,
-		}
+		self.run_on_streaming_engine(expr, txn, start).await
 	}
 
-	/// Run a statement that arrived already planned. There is no lowering step
-	/// and no `compute()` behind it, so the plan is compiled and run or the
-	/// query fails.
+	/// Run a statement that arrived already planned. There is no lowering step,
+	/// so the plan is compiled and run or the query fails.
 	async fn run_logical_plan(
 		&mut self,
 		op: Box<crate::expr::logical::LogicalOp>,
 		txn: Arc<Transaction>,
 		start: &Instant,
 	) -> FlowResult<Value> {
-		// A plan runs only under the streaming engine. Nothing can
-		// carry it to the legacy one — no `Expr` variant holds a plan —
-		// so a session pinned to `compute-only` has no engine for it
-		// and is told so rather than being quietly given the other one.
-		if *self.ctx.new_planner_strategy() == crate::dbs::NewPlannerStrategy::ComputeOnly {
-			Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
-				"GQL MATCH requires the streaming execution engine; it cannot run \
-				 under the compute-only planner strategy"
-					.to_string(),
-			))))
-		} else {
-			// Planning consumes the plan, and the slow log needs it after
-			// the query has run; keep a copy only when one is configured.
-			let logged = self.ctx.slow_log().is_some().then(|| op.clone());
-			let planned = crate::exec::planner::plan_logical_inner(
-				*op,
-				&self.ctx,
-				&self.function_registry,
-				Arc::clone(&txn),
-				Some(Arc::clone(&self.opt.auth)),
-				0,
-			)
-			.await;
-			match planned {
-				Ok(plan) => {
-					context_mut(&mut self.ctx)?.set_transaction(Arc::clone(&txn));
-					let stream_rows = self.streams_rows();
-					let exec_result =
-						self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
-					if let Some(op) = logged {
-						self.check_slow_log(start, &op, &PlanParams(&op));
-					}
-					exec_result
+		// Planning consumes the plan, and the slow log needs it after
+		// the query has run; keep a copy only when one is configured.
+		let logged = self.ctx.slow_log().is_some().then(|| op.clone());
+		let planned = crate::exec::planner::plan_logical_inner(
+			*op,
+			&self.ctx,
+			&self.function_registry,
+			Arc::clone(&txn),
+			Some(Arc::clone(&self.opt.auth)),
+			0,
+		)
+		.await;
+		match planned {
+			Ok(plan) => {
+				context_mut(&mut self.ctx)?.set_transaction(Arc::clone(&txn));
+				let stream_rows = self.streams_rows();
+				let exec_result =
+					self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
+				if let Some(op) = logged {
+					self.check_slow_log(start, &op, &PlanParams(&op));
 				}
-				Err(e) => Err(ControlFlow::Err(anyhow::Error::new(e))),
+				exec_result
 			}
+			Err(e) => Err(ControlFlow::Err(self.planning_failed(&txn, e).await)),
 		}
+	}
+
+	/// Resolve one `USE` operand to the name it gives.
+	///
+	/// A bare identifier or table name is the name as written; anything else
+	/// is evaluated against the statement's transaction and must coerce to a
+	/// string, the refusal naming `into`.
+	async fn use_ident(&self, expr: &crate::expr::Expr, into: &str) -> FlowResult<String> {
+		let exec = crate::ddl::frame(&self.ctx, &self.opt, None).await;
+		crate::ddl::scalar::ident(&exec, expr, into).await.map_err(ControlFlow::Err)
 	}
 
 	/// Run a `USE`.
@@ -1360,8 +1302,6 @@ impl Executor {
 		// for a context without one.
 		context_mut(&mut self.ctx)?.set_transaction(Arc::clone(&txn));
 
-		let opt_ref = self.opt.clone();
-
 		let (use_ns, use_db) = match stmt {
 			UseStatement::Default => {
 				if let Some(x) = txn.get_default_config().await? {
@@ -1371,35 +1311,19 @@ impl Executor {
 				}
 			}
 			UseStatement::Ns(ns) => {
-				let ns = self
-					.stack
-					.enter(|stk| expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace"))
-					.finish()
-					.await?;
+				let ns = self.use_ident(&ns, "namespace").await?;
 
 				(Some(ns), None)
 			}
 			UseStatement::Db(db) => {
-				let db = self
-					.stack
-					.enter(|stk| expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database"))
-					.finish()
-					.await?;
+				let db = self.use_ident(&db, "database").await?;
 
 				(None, Some(db))
 			}
 			UseStatement::NsDb(ns, db) => {
-				let ns = self
-					.stack
-					.enter(|stk| expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace"))
-					.finish()
-					.await?;
+				let ns = self.use_ident(&ns, "namespace").await?;
 
-				let db = self
-					.stack
-					.enter(|stk| expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database"))
-					.finish()
-					.await?;
+				let db = self.use_ident(&db, "database").await?;
 
 				(Some(ns), Some(db))
 			}
@@ -1545,14 +1469,9 @@ impl Executor {
 
 	/// Run a top-level `LET`, binding its result into the batch's scope.
 	///
-	/// The right-hand side is what runs, not the `LET` itself: a `LetPlan`
-	/// binds into the operator tree's own context, which never reaches the
-	/// batch scope, so the value is computed here and bound into `self.ctx`
-	/// directly. The engine is chosen for the right-hand side the way
-	/// [`engine_for`] chooses it for a bare statement — a session pinned to
-	/// the legacy engine runs it there, and so does a side with no logical
-	/// form (DML) or one the planner declines — and the legacy branch is the
-	/// only one that converts it, at that point and only then.
+	/// The right-hand side is what runs, not the `LET` itself: the value is
+	/// computed here and bound into `self.ctx`, which is the batch's scope. A
+	/// side the planner refuses fails the statement with `PlannerUnsupported`.
 	async fn run_let(
 		&mut self,
 		stm: sql::statements::SetStatement,
@@ -1568,48 +1487,22 @@ impl Executor {
 		}
 		context_mut(&mut self.ctx)?.set_transaction(Arc::clone(&txn));
 
-		// `None` when the legacy engine runs the side: the session is pinned
-		// to it, or the side has no logical form. A side the streaming engine
-		// ran is slow-logged from its plan, which planning consumes; a copy is
-		// kept only when a slow log is configured. A side the legacy engine
-		// ran has no plan to log from.
-		let mut logged = None;
-		let planned = match engine_for(&stm.what, *self.ctx.new_planner_strategy()) {
-			Engine::Streaming => match lower(stm.what.clone()) {
-				Ok(op) => {
-					if self.ctx.slow_log().is_some() {
-						logged = Some(op.clone());
-					}
-					Some(self.plan_bare_expression(op, Arc::clone(&txn)).await)
-				}
-				Err(reason) => Some(Err(ExecError::PlannerUnsupported(reason.to_string()).into())),
-			},
-			Engine::Legacy(_) => None,
+		// The slow log reads the statement's parameters from the plan, which
+		// planning consumes; a copy is kept only when a slow log is
+		// configured.
+		let op = lower(stm.what.clone()).map_err(|reason| {
+			ControlFlow::Err(anyhow::Error::new(ExecError::PlannerUnsupported {
+				reason: reason.to_string(),
+			}))
+		})?;
+		let logged = self.ctx.slow_log().is_some().then(|| op.clone());
+		let plan = match self.plan_bare_expression(op, Arc::clone(&txn)).await {
+			Ok(plan) => plan,
+			Err(e) => return Err(ControlFlow::Err(self.planning_failed(&txn, e).await)),
 		};
-		// A decline is a fallback to the legacy engine, logged as such; a
-		// statement the engine choice sent there is not.
-		let planned = match planned {
-			Some(Err(Error::Exec(ExecError::PlannerUnsupported(reason)))) => {
-				self.log_legacy_fallback(statement_kind(&stm.what), &reason);
-				None
-			}
-			other => other,
-		};
-		let res = match planned {
-			// The RHS binds to a param rather than being returned, so its
-			// values are not the statement's rows and must not stream.
-			Some(Ok(plan)) => self.execute_operator_plan(plan, Arc::clone(&txn), false).await,
-			None => {
-				let what = Expr::from(stm.what.clone());
-				self.stack
-					.enter(|stk| {
-						crate::legacy::expr_compute(&what, stk, &self.ctx, &self.opt, None)
-					})
-					.finish()
-					.await
-			}
-			Some(Err(e)) => Err(ControlFlow::Err(anyhow::Error::new(e))),
-		};
+		// The RHS binds to a param rather than being returned, so its
+		// values are not the statement's rows and must not stream.
+		let res = self.execute_operator_plan(plan, Arc::clone(&txn), false).await;
 
 		let res = res?;
 		let result = match &stm.kind {
@@ -1637,18 +1530,13 @@ impl Executor {
 		// Set the parameter
 		context_mut(&mut self.ctx)?.add_value(stm.name.clone(), result.into());
 
-		// A `LET` with a logical form is logged as written, with its
-		// parameters read from the plan: a plan has no node for DDL, so the
-		// surface text names no credential. One without is logged in the form
-		// the legacy engine ran, which carries none either.
-		if self.ctx.slow_log().is_some() {
-			match logged {
-				Some(op) => self.check_slow_log(start, &stm, &PlanParams(&op)),
-				None => {
-					let stm = crate::expr::statements::SetStatement::from(stm);
-					self.check_slow_log(start, &stm, &stm);
-				}
-			}
+		// Logged through the expression layer, for the reason the statement
+		// path is: a `DEFINE USER ... PASSWORD` in the value names a credential
+		// the conversion has already replaced with its derivation. The plan
+		// names every `$param` the statement references.
+		if let Some(op) = logged {
+			let stm = crate::expr::statements::SetStatement::from(stm);
+			self.check_slow_log(start, &stm, &PlanParams(&op));
 		}
 		// Finalise transaction, returning nothing unless it couldn't commit
 		Ok(Value::None)
@@ -1666,23 +1554,27 @@ impl Executor {
 			})
 			.map_err(anyhow::Error::new)?
 			.set_transaction(txn);
-		self.stack
-			.enter(|stk| crate::legacy::kill_statement_compute(&s, stk, &self.ctx, &self.opt, None))
-			.finish()
+		crate::exec::kill::kill_statement_compute(&s, &self.ctx, &self.opt)
 			.await
 			.map_err(ControlFlow::Err)
 	}
 
 	/// Run a `LIVE SELECT`.
+	///
+	/// A bare statement registers the conversion and unit it arrived with. A
+	/// statement inside a transaction block or a caller-owned transaction has
+	/// none, and registers without a unit.
 	async fn run_live(
 		&mut self,
-		s: crate::expr::statements::LiveStatement,
+		stmt: sql::statements::LiveStatement,
 		txn: Arc<Transaction>,
 	) -> FlowResult<Value> {
+		let (s, arrived) = match self.arrived_live.take() {
+			Some((s, arrived)) => (s, arrived),
+			None => (stmt.into(), None),
+		};
 		context_mut(&mut self.ctx)?.set_transaction(txn);
-		self.stack
-			.enter(|stk| crate::legacy::live_statement_compute(&s, stk, &self.ctx, &self.opt, None))
-			.finish()
+		crate::exec::live::live_statement_compute(&s, &self.ctx, &self.opt, arrived)
 			.await
 			.map_err(ControlFlow::Err)
 	}
@@ -1694,9 +1586,7 @@ impl Executor {
 		txn: Arc<Transaction>,
 	) -> FlowResult<Value> {
 		context_mut(&mut self.ctx)?.set_transaction(txn);
-		crate::legacy::show_statement_compute(&s, &self.ctx, &self.opt, None)
-			.await
-			.map_err(ControlFlow::Err)
+		crate::cf::reader::show_changes(&s, &self.ctx, &self.opt).await.map_err(ControlFlow::Err)
 	}
 
 	/// Run an `ACCESS` statement.
@@ -1706,12 +1596,57 @@ impl Executor {
 		txn: Arc<Transaction>,
 	) -> FlowResult<Value> {
 		context_mut(&mut self.ctx)?.set_transaction(txn);
-		self.stack
-			.enter(|stk| {
-				crate::legacy::access_statement_compute(&s, stk, &self.ctx, &self.opt, None)
-			})
-			.finish()
+		crate::ddl::access_statement_compute(&s, &self.ctx, &self.opt)
 			.await
+			.map_err(ControlFlow::Err)
+	}
+
+	/// Convert a bare `LIVE` statement as it arrives and compile its unit in a
+	/// read transaction of its own, before the write transaction that
+	/// registers it opens. The read transaction is cancelled before this
+	/// returns, so nothing of it is held while the registration runs.
+	///
+	/// Arrival is best effort and never fails the statement: where the node
+	/// holds no unit cache, realtime is off, no read transaction opens or the
+	/// context cannot hold one, the statement arrives without a unit and
+	/// registration compiles nothing. A node without a unit cache opens no
+	/// transaction here.
+	async fn arrive_live(
+		&mut self,
+		kvs: &Datastore,
+		converted: crate::expr::statements::LiveStatement,
+	) {
+		let arrived = if self.ctx.live_units().is_some() && self.ctx.realtime().is_ok() {
+			self.compile_arrived_live(kvs, &converted).await
+		} else {
+			None
+		};
+		#[cfg(test)]
+		if let Some(hook) = AFTER_LIVE_ARRIVAL.with(|hook| hook.borrow_mut().take()) {
+			hook.await;
+		}
+		self.arrived_live = Some((converted, arrived));
+	}
+
+	/// Compile `converted`'s unit in a read transaction of its own. `None`
+	/// where no read transaction opens or the context cannot hold it, and
+	/// wherever [`crate::exec::live::live_statement_arrive`] yields none.
+	async fn compile_arrived_live(
+		&mut self,
+		kvs: &Datastore,
+		converted: &crate::expr::statements::LiveStatement,
+	) -> Option<crate::exec::vm::lower_live::Arrived> {
+		let txn = kvs.transaction(TransactionType::Read).await.ok()?;
+		let txn = Arc::new(txn.with_tenant_identity(self.ctx.tenant_identity().cloned()));
+		let Ok(ctx) = context_mut(&mut self.ctx) else {
+			let _ = txn.cancel().await;
+			return None;
+		};
+		ctx.set_transaction(Arc::clone(&txn));
+		let arrived =
+			crate::exec::live::live_statement_arrive(converted, &self.ctx, &self.opt).await;
+		let _ = txn.cancel().await;
+		arrived
 	}
 
 	/// Execute a query not wrapped in a transaction block.
@@ -1743,6 +1678,9 @@ impl Executor {
 	) -> Result<Value> {
 		self.broker_owned_by_executor = false;
 		let result = self.execute_plan_impl_inner(kvs, start, stmt).await;
+		// An arrival belongs to the statement that made it, whichever way that
+		// statement ended.
+		self.arrived_live = None;
 		if self.broker_owned_by_executor {
 			self.clear_broker();
 		}
@@ -1763,6 +1701,43 @@ impl Executor {
 		} else {
 			TransactionType::Write
 		};
+		if let TopLevelStatement::Ast(sql::TopLevelExpr::Live(live)) = &stmt {
+			match self.ctx.done(true)? {
+				None => {}
+				Some(Reason::Timedout(d)) => {
+					bail!(EngineError::QueryTimedout(d.0));
+				}
+				Some(Reason::Canceled) => {
+					bail!(EngineError::QueryCancelled);
+				}
+			}
+			self.arrive_live(kvs, (**live).clone().into()).await;
+			// A `LIVE` registration's write transaction runs without
+			// cooperative yields: the statements of one connection share a
+			// task and its coop budget, so a budget-forced yield inside the
+			// window would let the next `LIVE` on that task commit the
+			// table's definition first and fail this one at commit. A storage
+			// read that is offloaded still yields.
+			return tokio::task::unconstrained(self.execute_in_own_transaction(
+				kvs,
+				start,
+				stmt,
+				transaction_type,
+			))
+			.await;
+		}
+		self.execute_in_own_transaction(kvs, start, stmt, transaction_type).await
+	}
+
+	/// Run `stmt` in a transaction of `transaction_type` opened for it alone,
+	/// committing a write transaction it completes and cancelling it otherwise.
+	async fn execute_in_own_transaction(
+		&mut self,
+		kvs: &Datastore,
+		start: &Instant,
+		stmt: TopLevelStatement,
+		transaction_type: TransactionType,
+	) -> Result<Value> {
 		let txn = Arc::new(
 			kvs.transaction(transaction_type)
 				.await?
@@ -3026,56 +3001,10 @@ fn visit_scalar_params<V: Visitor<Error = ()>>(
 	}
 }
 
-/// The kind of a surface statement, for a log line that must not carry its
-/// text: a statement's keyword, or `expression` for a bare value expression.
-fn statement_kind(expr: &sql::Expr) -> &'static str {
-	match expr {
-		sql::Expr::Select(_) => "SELECT",
-		sql::Expr::Let(_) => "LET",
-		sql::Expr::Return(_) => "RETURN",
-		sql::Expr::IfElse(_) => "IF",
-		sql::Expr::Foreach(_) => "FOR",
-		sql::Expr::Info(_) => "INFO",
-		sql::Expr::Sleep(_) => "SLEEP",
-		sql::Expr::Block(_) => "BLOCK",
-		sql::Expr::Explain {
-			..
-		} => "EXPLAIN",
-		sql::Expr::Create(_) => "CREATE",
-		sql::Expr::Update(_) => "UPDATE",
-		sql::Expr::Upsert(_) => "UPSERT",
-		sql::Expr::Delete(_) => "DELETE",
-		sql::Expr::Insert(_) => "INSERT",
-		sql::Expr::Relate(_) => "RELATE",
-		sql::Expr::Define(_) => "DEFINE",
-		sql::Expr::Remove(_) => "REMOVE",
-		sql::Expr::Rebuild(_) => "REBUILD",
-		sql::Expr::Alter(_) => "ALTER",
-		sql::Expr::Throw(_) => "THROW",
-		sql::Expr::Break => "BREAK",
-		sql::Expr::Continue => "CONTINUE",
-		sql::Expr::Literal(_)
-		| sql::Expr::Param(_)
-		| sql::Expr::Idiom(_)
-		| sql::Expr::Table(_)
-		| sql::Expr::Mock(_)
-		| sql::Expr::Constant(_)
-		| sql::Expr::Prefix {
-			..
-		}
-		| sql::Expr::Postfix {
-			..
-		}
-		| sql::Expr::Binary {
-			..
-		}
-		| sql::Expr::FunctionCall(_)
-		| sql::Expr::Closure(_) => "expression",
-	}
-}
-
 #[cfg(test)]
 mod tests {
+	use surrealdb_types::ToSql;
+
 	use super::{shape_statement_value, visit_plan_params};
 	use crate::dbs::Session;
 	use crate::exec::OutputShape;
@@ -3084,6 +3013,33 @@ mod tests {
 	use crate::iam::{Level, Role};
 	use crate::kvs::Datastore;
 	use crate::val::{Array, Value};
+
+	/// The slow log renders a statement the engine ran through its
+	/// lowered form, so a credential is replaced by its derivation wherever in
+	/// the statement it sits.
+	///
+	/// `DEFINE USER … PASSWORD` is the shape that carries one, and a schema
+	/// statement can sit anywhere an expression can. Rendering the surface
+	/// text instead would put the password in the log for every position but
+	/// the top level, which is the position a reader is least likely to check.
+	#[test]
+	fn the_slow_log_renders_no_plaintext_credential_wherever_the_statement_sits() {
+		for src in [
+			"DEFINE USER bob ON ROOT PASSWORD 'hunter2' ROLES OWNER",
+			"{ DEFINE USER bob ON ROOT PASSWORD 'hunter2' ROLES OWNER }",
+			"IF true { DEFINE USER bob ON ROOT PASSWORD 'hunter2' ROLES OWNER }",
+			"LET $x = (DEFINE USER bob ON ROOT PASSWORD 'hunter2' ROLES OWNER)",
+			"FOR $i IN [1] { DEFINE USER bob ON ROOT PASSWORD 'hunter2' ROLES OWNER }",
+		] {
+			let surface = crate::syn::expr(src).expect("statement should parse");
+			let rendered = crate::expr::Expr::from(surface).to_sql();
+			assert!(!rendered.contains("hunter2"), "`{src}` rendered its password: {rendered}");
+			assert!(
+				rendered.contains("PASSHASH"),
+				"`{src}` should render the derivation: {rendered}"
+			);
+		}
+	}
 
 	/// Collects the name of every parameter a plan walk reports.
 	struct Names(Vec<String>);
@@ -3142,36 +3098,10 @@ mod tests {
 		assert_eq!(shaped, Value::from(42i64));
 	}
 
-	/// The compute fallback (all DML, and everything in compute-only mode)
-	/// classifies a statement's result shape the same way the planner would, so a
-	/// non-`ONLY` row-returning statement is converted to public per row rather
-	/// than charging the array-of-rows envelope a depth level. Dropping a
-	/// row-returning arm here would make a record at exactly the depth cap fail
-	/// its own result on the fallback path while the planned path reads it fine.
-	#[test]
-	fn fallback_result_shape_classifies_row_returning_statements() {
-		use super::fallback_result_shape;
-		use crate::exec::operators::test_util::parse_sql_expr;
-
-		// The fallback receives the surface expression lowered to `crate::expr::Expr`
-		// (the form the legacy engine runs), the same `sql::Expr -> Expr` conversion
-		// `run_on_legacy_engine` performs.
-		let expr = |src: &str| crate::expr::Expr::from(parse_sql_expr(src));
-
-		// Row-returning, non-`ONLY`: the array of rows.
-		assert_eq!(fallback_result_shape(&expr("SELECT * FROM t")), OutputShape::Rows);
-		assert_eq!(fallback_result_shape(&expr("CREATE t")), OutputShape::Rows);
-		// `ONLY`: the single row.
-		assert_eq!(fallback_result_shape(&expr("SELECT * FROM ONLY t:1")), OutputShape::Scalar);
-		assert_eq!(fallback_result_shape(&expr("CREATE ONLY t:1")), OutputShape::Scalar);
-		// A scalar expression is a single value.
-		assert_eq!(fallback_result_shape(&expr("1 + 2")), OutputShape::Scalar);
-	}
-
 	/// The declared shape is authoritative: a `Scalar` plan that emits the wrong
 	/// number of values is reported rather than quietly reshaped into an array.
-	/// Falling back would hide the operator's bug behind a result that merely
-	/// looks plausible, and a streaming consumer cannot fall back at all --
+	/// Reshaping would hide the operator's bug behind a result that merely
+	/// looks plausible, and a streaming consumer cannot reshape at all --
 	/// by the time the count is known the values have already been sent.
 	#[test]
 	fn a_scalar_plan_that_emits_the_wrong_count_is_reported() {
@@ -3378,11 +3308,17 @@ mod tests {
 			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
 			assert!(res.is_ok(), "Failed to execute statement with large timeout: {:?}", res);
 		}
-		// With very large timeout
+		// With very large timeout. The namespace and database are defined
+		// first: the statement has to reach its own clause, and a plan resolves
+		// the catalog before any operator runs, so an undefined namespace would
+		// be reported ahead of the timeout rather than the timeout being the
+		// answer.
 		{
 			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::default().with_ns("NS").with_db("DB");
+			ds.execute("DEFINE NAMESPACE NS; DEFINE DATABASE DB", &sess, None).await.unwrap();
 			let stmt = "UPDATE test TIMEOUT 9460800000000000000s"; // 300 billion years
-			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			let res = ds.execute(stmt, &sess, None).await;
 			assert!(res.is_ok(), "Failed to execute statement with very large timeout: {:?}", res);
 			let results = res.unwrap();
 			let err = results[0].result.as_ref().unwrap_err();

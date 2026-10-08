@@ -198,6 +198,21 @@ pub(crate) fn export_tables_exclude(value: &str) -> Result<TableConfig, String> 
 	}))
 }
 
+/// Parse `--planner-strategy` / `SURREAL_PLANNER_STRATEGY`.
+///
+/// The option selects nothing: the engine has a single execution path. The
+/// three names it has ever accepted stay accepted so that an existing
+/// deployment's configuration keeps starting the server; any other value is
+/// refused.
+pub(crate) fn retired_planner_strategy(v: &str) -> Result<String, String> {
+	match v {
+		"best-effort" | "compute-only" | "all-read-only" => Ok(v.to_owned()),
+		_ => Err(format!(
+			"unknown planner strategy: '{v}' (expected 'best-effort', 'compute-only', or 'all-read-only')"
+		)),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -326,5 +341,17 @@ mod tests {
 			)
 		);
 		assert!(eval_query_targets("nonsense").is_err());
+	}
+
+	#[test]
+	fn every_retired_strategy_name_is_still_accepted() {
+		for name in ["best-effort", "compute-only", "all-read-only"] {
+			assert_eq!(retired_planner_strategy(name).unwrap(), name);
+		}
+	}
+
+	#[test]
+	fn an_unknown_strategy_is_refused() {
+		assert!(retired_planner_strategy("nonsense").is_err());
 	}
 }

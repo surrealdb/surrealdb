@@ -2,16 +2,21 @@
 //! `ExecutionContext` so that downstream operators (Fetch, FieldPart) read
 //! records at the correct point in time.
 
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use futures::StreamExt;
 
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, OutputShape, PhysicalExpr, ValueBatchStream, monitor_stream,
 };
 
+#[cfg(test)]
 /// Evaluates the VERSION expression once and propagates the resulting
 /// timestamp onto the `ExecutionContext` before delegating to the inner
 /// operator tree.
@@ -28,7 +33,9 @@ pub struct VersionScope {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl VersionScope {
+	#[cfg(test)]
 	pub(crate) fn new(inner: Arc<dyn ExecOperator>, version: Arc<dyn PhysicalExpr>) -> Self {
 		Self {
 			inner,
@@ -37,6 +44,7 @@ impl VersionScope {
 		}
 	}
 }
+#[cfg(test)]
 impl ExecOperator for VersionScope {
 	fn name(&self) -> &'static str {
 		"VersionScope"

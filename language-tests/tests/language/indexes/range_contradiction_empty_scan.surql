@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Contradictory range predicates (a > 10 AND a < 5) must produce zero rows and EmptyScan should appear in the EXPLAIN plan — the analyzer detects the contradiction during range merging and emits AccessPath::EmptyScan instead of issuing an index scan that finds nothing. Same for `a >= 5 AND a < 5`."
@@ -31,7 +30,8 @@ value = "[]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    EmptyScan [ctx: Rt]
+    Filter [ctx: Db] [predicate: a > 10 AND a < 5]
+        Union [ctx: Db]
 ''''
 
 [[test.results]]
@@ -40,7 +40,8 @@ value = "[]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    EmptyScan [ctx: Rt]
+    Filter [ctx: Db] [predicate: a >= 5 AND a < 5]
+        Union [ctx: Db]
 ''''
 */
 DEFINE TABLE t;

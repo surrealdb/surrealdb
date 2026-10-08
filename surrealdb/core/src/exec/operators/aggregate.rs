@@ -12,7 +12,7 @@ use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
 use crate::err::EngineError;
-use crate::exec::function::{Accumulator, AggregateFunction};
+use crate::exec::function::{Accumulator, AggregateFunction, FunctionRegistry};
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	FlowResultExt as _, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
@@ -182,16 +182,24 @@ impl AggregateField {
 	///
 	/// `None` means it has not been evaluated yet. A stored `NONE` is final for
 	/// a constant fallback and provisional for a first-value one.
-	fn fallback_needs_evaluation(&self, stored: &Option<Value>) -> bool {
-		match stored {
-			None => true,
-			Some(value) => !self.fallback_is_constant && value.is_none(),
-		}
+	pub(crate) fn fallback_needs_evaluation(&self, stored: &Option<Value>) -> bool {
+		first_value_needed(self.fallback_is_constant, stored)
 	}
 
 	/// Check if this is an empty name (used for SELECT VALUE with GROUP BY)
 	pub fn is_empty_name(&self) -> bool {
 		self.output_path.len() == 1 && self.output_path[0].is_empty()
+	}
+}
+
+/// Whether a non-aggregate column of a group, which holds `stored`, still
+/// needs evaluating: `None` means it has not been evaluated yet, and a stored
+/// `NONE` is final for a column with one value for the whole group
+/// (`constant`) and provisional for a first-value one.
+pub(crate) fn first_value_needed(constant: bool, stored: &Option<Value>) -> bool {
+	match stored {
+		None => true,
+		Some(value) => !constant && value.is_none(),
 	}
 }
 
@@ -241,6 +249,52 @@ impl std::fmt::Debug for ExtractedAggregate {
 	}
 }
 
+/// An aggregate function named as data: what a plan holds in place of the
+/// registry's function object, resolved against the registry when a run
+/// starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AggregateId {
+	/// The registry's aggregate of this name, `count()` with no argument
+	/// among them.
+	Named(String),
+	/// `count(expr)`, which counts the truthy values of its argument.
+	CountField,
+	/// The fold that collects each row's value of a projected expression
+	/// carrying no aggregate of its own, duplicates kept.
+	ImplicitCollect,
+}
+
+impl AggregateId {
+	/// The id of the function the registry answers for the call `name`, which
+	/// has an argument when `has_argument`.
+	pub fn of_call(name: &str, has_argument: bool) -> Self {
+		if name == "count" && has_argument {
+			AggregateId::CountField
+		} else {
+			AggregateId::Named(name.to_owned())
+		}
+	}
+
+	/// The function's name, as it is registered.
+	pub fn name(&self) -> &str {
+		match self {
+			AggregateId::Named(name) => name,
+			AggregateId::CountField => "count",
+			AggregateId::ImplicitCollect => "array::collect",
+		}
+	}
+
+	/// The function this id names in `registry`, or `None` for a name the
+	/// registry does not hold.
+	pub fn resolve(&self, registry: &FunctionRegistry) -> Option<Arc<dyn AggregateFunction>> {
+		match self {
+			AggregateId::Named(name) => registry.get_aggregate(name).cloned(),
+			AggregateId::CountField => Some(registry.get_count_aggregate(true)),
+			AggregateId::ImplicitCollect => Some(registry.get_implicit_collect_aggregate()),
+		}
+	}
+}
+
 /// Generate a synthetic field name for an aggregate at the given index.
 /// These names are used in the transformed expression to reference aggregate results.
 pub fn aggregate_field_name(idx: usize) -> String {
@@ -257,15 +311,15 @@ pub fn group_key_field_name(idx: usize) -> String {
 }
 
 /// Key for grouping - a tuple of values corresponding to GROUP BY expressions
-type GroupKey = Vec<Value>;
+pub(crate) type GroupKey = Vec<Value>;
 
 /// Per-group aggregate state using accumulators
-struct GroupState {
+pub(crate) struct GroupState {
 	/// Accumulators for each aggregate field.
 	/// For fields with multiple aggregates (e.g., `SUM(a) + AVG(a)`),
 	/// this contains a Vec of accumulators, one per extracted aggregate.
 	/// Empty Vec for non-aggregate fields.
-	accumulators: Vec<Vec<Box<dyn Accumulator>>>,
+	pub(crate) accumulators: Vec<Vec<Box<dyn Accumulator>>>,
 	/// Value held for each non-aggregate field, `None` until the field's
 	/// expression has been evaluated for this group.
 	///
@@ -275,7 +329,7 @@ struct GroupState {
 	/// otherwise be re-evaluated for every later row. That is wasted work for a
 	/// deterministic expression and wrong for a non-deterministic one, whose
 	/// result would then depend on how many rows the group holds.
-	first_values: Vec<Option<Value>>,
+	pub(crate) first_values: Vec<Option<Value>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -308,13 +362,13 @@ struct GroupState {
 // borrow, so the hit path is one descent plus one indexed load.
 //
 // Spill-to-disk for high-cardinality groups is a future change.
-struct GroupMap {
+pub(crate) struct GroupMap {
 	index: BTreeMap<GroupKey, usize>,
 	states: Vec<GroupState>,
 }
 
 impl GroupMap {
-	fn new() -> Self {
+	pub(crate) fn new() -> Self {
 		Self {
 			index: BTreeMap::new(),
 			states: Vec::new(),
@@ -330,7 +384,17 @@ impl GroupMap {
 	where
 		F: FnOnce() -> GroupState,
 	{
-		let idx = match self.index.get(key) {
+		let idx = self.index_for_row(key, create);
+		&mut self.states[idx]
+	}
+
+	/// The index of the state for `key`, creating it if absent, for a caller
+	/// that reaches the state again through [`Self::state_mut`].
+	pub(crate) fn index_for_row<F>(&mut self, key: &[Value], create: F) -> usize
+	where
+		F: FnOnce() -> GroupState,
+	{
+		match self.index.get(key) {
 			Some(idx) => *idx,
 			None => {
 				let idx = self.states.len();
@@ -338,8 +402,16 @@ impl GroupMap {
 				self.index.insert(key.to_vec(), idx);
 				idx
 			}
-		};
+		}
+	}
+
+	/// The state [`Self::index_for_row`] answered `idx` for.
+	pub(crate) fn state_mut(&mut self, idx: usize) -> &mut GroupState {
 		&mut self.states[idx]
+	}
+
+	pub(crate) fn state(&self, idx: usize) -> &GroupState {
+		&self.states[idx]
 	}
 
 	/// Drain the map in group-key order.
@@ -347,7 +419,7 @@ impl GroupMap {
 	/// `index` is the key-ordered side, so it drives the iteration and claims each
 	/// state by index; every index appears exactly once, which is what lets the
 	/// states be taken rather than cloned.
-	fn into_key_order(self) -> impl ExactSizeIterator<Item = (GroupKey, GroupState)> {
+	pub(crate) fn into_key_order(self) -> impl ExactSizeIterator<Item = (GroupKey, GroupState)> {
 		let mut states: Vec<Option<GroupState>> = self.states.into_iter().map(Some).collect();
 		self.index
 			.into_iter()
@@ -503,7 +575,7 @@ impl ExecOperator for Aggregate {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -723,34 +795,8 @@ impl ExecOperator for Aggregate {
 			// A `GROUP BY` key can only be learned from a row, so an input
 			// that yields none leaves no group and produces no row.
 			if group_by_exprs.is_empty() {
-				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 				let state = groups.entry_for_row(&[], || create_group_state(&aggregates));
-
-				// A column the row cannot influence still has a value for the
-				// group — a literal, a parameter — and no row arrived to
-				// evaluate it against. It is evaluated once here, against no
-				// row, as an aggregate's extra arguments are evaluated once
-				// for the group below. A column
-				// that does read the row has nothing to read, and reports what
-				// it collected from no rows.
-				for (field_idx, agg) in aggregates.iter().enumerate() {
-					if agg.is_group_key || agg.aggregate_expr_info.is_some() {
-						continue;
-					}
-					let Some(expr) = &agg.fallback_expr else {
-						continue;
-					};
-					if !agg.fallback_is_constant || state.first_values[field_idx].is_some() {
-						continue;
-					}
-					match expr.evaluate(eval_ctx.clone()).await {
-						Ok(field_value) => state.first_values[field_idx] = Some(field_value),
-						Err(cf) if cf.is_ignorable() => {
-							tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
-						}
-						Err(cf) => Err(cf)?,
-					}
-				}
+				evaluate_constant_fallbacks(&aggregates, state, &ctx).await?;
 			}
 
 			// Now compute final results for each group, in group-key order.
@@ -783,7 +829,7 @@ impl ExecOperator for Aggregate {
 /// error is ignorable.
 ///
 /// A value an expression cannot use is skipped rather than ending the
-/// statement: the group folds the rows it can read, which is the streaming
+/// statement: the group folds the rows it can read, which is the
 /// engine's answer for an aggregate over a wrong-kind value.
 async fn evaluate_column<'a>(
 	expr: &Arc<dyn PhysicalExpr>,
@@ -808,7 +854,7 @@ async fn evaluate_column<'a>(
 /// post-expression is evaluated under. An argument reading anything else off
 /// the row answers `NONE` here, which is what makes it a group-level argument
 /// rather than a per-row one.
-async fn bind_extra_args(
+pub(crate) async fn bind_extra_args(
 	aggregates: &[AggregateField],
 	state: &mut GroupState,
 	group_key: &GroupKey,
@@ -847,11 +893,45 @@ async fn bind_extra_args(
 	Ok(())
 }
 
+/// Evaluate, against no row, each column of a `GROUP ALL` the row cannot
+/// influence and no row has evaluated.
+///
+/// Such a column still has a value for the group — a literal, a parameter —
+/// and it is evaluated once, as an aggregate's extra arguments are evaluated
+/// once for the group. A column that does read the row has nothing to read,
+/// and reports what it collected from no rows.
+pub(crate) async fn evaluate_constant_fallbacks(
+	aggregates: &[AggregateField],
+	state: &mut GroupState,
+	ctx: &ExecutionContext,
+) -> FlowResult<()> {
+	let eval_ctx = EvalContext::from_exec_ctx(ctx);
+	for (field_idx, agg) in aggregates.iter().enumerate() {
+		if agg.is_group_key || agg.aggregate_expr_info.is_some() {
+			continue;
+		}
+		let Some(expr) = &agg.fallback_expr else {
+			continue;
+		};
+		if !agg.fallback_is_constant || state.first_values[field_idx].is_some() {
+			continue;
+		}
+		match expr.evaluate(eval_ctx.clone()).await {
+			Ok(field_value) => state.first_values[field_idx] = Some(field_value),
+			Err(cf) if cf.is_ignorable() => {
+				tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
+			}
+			Err(cf) => Err(cf)?,
+		}
+	}
+	Ok(())
+}
+
 /// Create initial group state with accumulators for each aggregate field.
 ///
 /// An aggregate's arguments after the first are not known here: they belong to
 /// the group and are bound by [`bind_extra_args`] before it is finalized.
-fn create_group_state(aggregates: &[AggregateField]) -> GroupState {
+pub(crate) fn create_group_state(aggregates: &[AggregateField]) -> GroupState {
 	let accumulators = aggregates
 		.iter()
 		.map(|agg| {
@@ -906,7 +986,7 @@ async fn compute_single_field_value(
 /// For expressions like `SUM(a) + AVG(a)`:
 /// 1. Finalize all accumulators to get `{ _a0: sum_value, _a1: avg_value }`
 /// 2. Evaluate the post-expression against this document to get the final value
-async fn compute_group_result_async(
+pub(crate) async fn compute_group_result_async(
 	group_key: &GroupKey,
 	state: GroupState,
 	aggregates: &[AggregateField],
@@ -944,7 +1024,7 @@ async fn compute_group_result_async(
 ///
 /// For a path like ["address", "city"], this creates or updates:
 /// `{ address: { city: value } }`
-fn set_nested_value(obj: &mut Object, path: &[String], value: Value) {
+pub(crate) fn set_nested_value(obj: &mut Object, path: &[String], value: Value) {
 	if path.is_empty() {
 		return;
 	}

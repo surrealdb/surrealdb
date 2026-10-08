@@ -578,6 +578,146 @@ mod datastore {
 		assert_eq!(RUNS.load(Ordering::SeqCst), 0);
 	}
 
+	fn lease_key() -> TaskLeaseKey {
+		TaskLeaseKey {
+			task_id: TaskLeaseType::DataMigration,
+		}
+	}
+
+	/// Plants a migration lease owned by another node, written just now with
+	/// the full lease duration ahead of it, as a node that has just taken the
+	/// lease leaves it.
+	async fn plant_foreign_lease(ds: &Datastore, owner: uuid::Uuid) -> TaskLease {
+		let lease = TaskLease {
+			owner,
+			expiration: chrono::Utc::now() + chrono::Duration::from_std(LEASE_DURATION).unwrap(),
+		};
+		let txn = ds.transaction(TransactionType::Write).await.unwrap();
+		txn.set_key(&lease_key(), &lease).await.unwrap();
+		txn.commit().await.unwrap();
+		lease
+	}
+
+	/// Records a version transition as `node` would after finishing its pass.
+	async fn plant_history_entry(ds: &Datastore, node: uuid::Uuid, timestamp: u64) {
+		let entry = VersionHistoryEntry {
+			from: None,
+			to: StorageVersion::parse("3.3.0").unwrap(),
+			node,
+			timestamp,
+		};
+		let txn = ds.transaction(TransactionType::Write).await.unwrap();
+		txn.set_key(&VersionHistoryKey::new(timestamp, node), &entry).await.unwrap();
+		txn.commit().await.unwrap();
+	}
+
+	async fn stored_lease(ds: &Datastore) -> Option<TaskLease> {
+		let txn = ds.transaction(TransactionType::Read).await.unwrap();
+		let lease = txn.get_key(&lease_key(), None).await.unwrap();
+		txn.cancel().await.unwrap();
+		lease
+	}
+
+	/// The node that applied the migrations gives the lease up afterwards, so
+	/// a node with migrations of its own does not wait for it to expire.
+	#[tokio::test]
+	async fn the_holder_releases_the_lease_after_its_pass() {
+		fn noop(_: &Datastore) -> MigrationFuture<'_> {
+			Box::pin(async { Ok(()) })
+		}
+		let registry = [Migration {
+			id: 9001,
+			name: "test migration",
+			version: (3, 3, 0),
+			run: noop,
+		}];
+		let current = StorageVersion::parse("3.3.0").unwrap();
+
+		let ds = mem().await;
+		stamp_nothing_but_data(&ds).await;
+		run_with(&ds, &registry, &current, false).await.unwrap();
+
+		assert_eq!(ds.applied_migrations().await.unwrap().len(), 1);
+		assert_eq!(stored_lease(&ds).await, None);
+	}
+
+	/// A release that does not give the lease up leaves it behind after its
+	/// pass. Its version history entry, written after the pass, proves it is no
+	/// longer migrating, so the next node to start runs its own migrations
+	/// straight away instead of waiting out the lease.
+	#[tokio::test]
+	async fn a_lease_left_by_a_finished_holder_does_not_hold_up_startup() {
+		static RUNS: AtomicU32 = AtomicU32::new(0);
+		fn bump(_: &Datastore) -> MigrationFuture<'_> {
+			Box::pin(async {
+				RUNS.fetch_add(1, Ordering::SeqCst);
+				Ok(())
+			})
+		}
+		let registry = [Migration {
+			id: 9001,
+			name: "test migration",
+			version: (3, 4, 0),
+			run: bump,
+		}];
+		let current = StorageVersion::parse("3.4.0").unwrap();
+
+		let ds = mem().await;
+		stamp(&ds, "3.3.0").await;
+		let holder = uuid::Uuid::new_v4();
+		plant_foreign_lease(&ds, holder).await;
+		plant_history_entry(&ds, holder, ds.clock_now().value).await;
+
+		tokio::time::timeout(
+			std::time::Duration::from_secs(1),
+			run_with(&ds, &registry, &current, false),
+		)
+		.await
+		.expect("a lease whose holder has finished must not hold up startup")
+		.unwrap();
+
+		assert_eq!(RUNS.load(Ordering::SeqCst), 1);
+		assert_eq!(ds.applied_migrations().await.unwrap().len(), 1);
+		assert_eq!(stored_lease(&ds).await, None);
+	}
+
+	/// A holder with no history entry since it took the lease may still be
+	/// migrating, so a waiter keeps waiting. An entry from before the lease was
+	/// taken is from an earlier start of a node with the same id and proves
+	/// nothing about this one.
+	#[tokio::test]
+	async fn a_lease_whose_holder_may_still_be_migrating_is_respected() {
+		static RUNS: AtomicU32 = AtomicU32::new(0);
+		fn bump(_: &Datastore) -> MigrationFuture<'_> {
+			Box::pin(async {
+				RUNS.fetch_add(1, Ordering::SeqCst);
+				Ok(())
+			})
+		}
+		let registry = [Migration {
+			id: 9001,
+			name: "test migration",
+			version: (3, 4, 0),
+			run: bump,
+		}];
+		let current = StorageVersion::parse("3.4.0").unwrap();
+
+		let ds = mem().await;
+		stamp(&ds, "3.3.0").await;
+		let holder = uuid::Uuid::new_v4();
+		let earlier = ds.clock_now().value - 2 * LEASE_DURATION.as_millis() as u64;
+		plant_history_entry(&ds, holder, earlier).await;
+		let lease = plant_foreign_lease(&ds, holder).await;
+
+		let waited =
+			tokio::time::timeout(WAIT_POLL_INTERVAL * 2, run_with(&ds, &registry, &current, false))
+				.await;
+
+		assert!(waited.is_err(), "a waiter must not take over from a holder that may be migrating");
+		assert_eq!(RUNS.load(Ordering::SeqCst), 0);
+		assert_eq!(stored_lease(&ds).await, Some(lease));
+	}
+
 	/// Stands in for an upgraded datastore: real data, a major version, and no
 	/// semantic version stamp.
 	async fn stamp_nothing_but_data(ds: &Datastore) {

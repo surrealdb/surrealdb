@@ -30,9 +30,9 @@
 //!
 //! None of the internal bails here are `PlannerUnsupported`:
 //! a `MatchPlan` only reaches the planner because it lowered cleanly, so an
-//! unexpected shape is a real internal failure. There is no compute fallback to
-//! take instead: the plan arrives already planned, and no statement stands
-//! behind it for the legacy path to run.
+//! unexpected shape is a real internal failure. There is nothing to fall back
+//! to: the plan arrives already planned, and no statement stands behind it
+//! to run instead.
 //!
 //! # The plan shape
 //!
@@ -55,28 +55,33 @@
 //! (Sort/Limit/Project, or Project/Distinct/Sort/Limit for DISTINCT) is
 //! unchanged from the single-pattern case.
 
+#[cfg(test)]
 use std::sync::Arc;
 
 use surrealdb_strand::TableName;
 
+#[cfg(test)]
 use super::Planner;
-use crate::err::{EngineError, Error};
-use crate::exec::ExecOperator;
-use crate::exec::logical::{BatchRetry, ColumnEffects, columns_may_run_column_major};
-use crate::exec::operators::{
-	Aggregate, AggregateField, Bind, DeleteBinding, Distinct, DistinctEdges, DrainSink,
-	EdgeBinding, EndpointBind, EndpointField, Expand, ExpandDir, FieldSelection, Filter, HashJoin,
-	InsertEdgeOp, InsertGraph, InsertNodeOp, JoinType, Limit, OrderByField, PathExpand, PathMode,
-	Project, ShortestPathExpand, ShortestSelector, SingleRowScan, Sort, SortDirection,
-	UpdateBinding,
+#[cfg(test)]
+use super::match_backend::TreeBackend;
+use super::match_backend::{
+	BindingBackend, EndpointSpec, ExpandSpec, JoinSpec, PathSpec, Planning,
 };
-use crate::expr::logical::{LogicalExpr, LogicalFilter, LogicalOp, LogicalSource, SourceRef};
+use crate::err::EngineError;
+#[cfg(test)]
+use crate::err::Error;
+#[cfg(test)]
+use crate::exec::ExecOperator;
+use crate::exec::operators::{
+	EdgeBinding, EndpointField, ExpandDir, JoinType, PathMode, ShortestSelector,
+};
+use crate::expr::BinaryOperator;
+use crate::expr::logical::LogicalExpr;
 use crate::expr::match_plan::{
 	BindingId, BindingKind, EdgeStep, ExpandDirection, MatchClausePlan, MatchOutput, MatchPlan,
 	MatchPredicate, MatchStage, MutationStage, NodeStep, PathMode as IrPathMode, PathPrefixPlan,
-	PathSearch, PatternPlan, UpdateData,
+	PathSearch, PatternPlan,
 };
-use crate::expr::{BinaryOperator, Function};
 
 /// How a quantified step's path-search selector routes to a physical operator.
 enum SearchRouting {
@@ -88,6 +93,11 @@ enum SearchRouting {
 	Shortest {
 		selector: ShortestSelector,
 	},
+}
+
+/// The fold of a [`MatchPlan`]'s stages into one node of `backend`.
+pub(crate) struct MatchFold<'a, B: BindingBackend> {
+	pub(crate) backend: &'a B,
 }
 
 /// Resolve a pattern's lowered path-search prefix into the executing path mode
@@ -134,8 +144,8 @@ fn resolve_path_search(search: Option<PathPrefixPlan>) -> (PathMode, SearchRouti
 
 /// A binder stage: the operator built so far, the bindings available on its
 /// rows, and the current "tip" node (what the next step expands from).
-struct ChainStage {
-	operator: Arc<dyn ExecOperator>,
+struct ChainStage<N> {
+	operator: N,
 	/// Bindings available on rows leaving this stage.
 	bound: Vec<BindingId>,
 	/// The most recently bound node (anchor, or the prior step's target). The
@@ -146,8 +156,8 @@ struct ChainStage {
 
 /// One clause planned into a sub-tree, with the metadata the fold needs to
 /// combine it with the accumulator.
-struct PlannedClause {
-	operator: Arc<dyn ExecOperator>,
+struct PlannedClause<N> {
+	operator: N,
 	/// Every binding present on rows leaving this clause.
 	bound: Vec<BindingId>,
 	/// Clause predicates deferred to the clause-combine join (their deps span an
@@ -156,15 +166,31 @@ struct PlannedClause {
 	deferred: Vec<MatchPredicate>,
 }
 
-impl<'ctx> Planner<'ctx> {
+#[cfg(test)]
+impl Planner<'_> {
 	/// Plan a GQL `MATCH` query into a streaming operator tree.
+	pub(crate) async fn plan_match(&self, plan: MatchPlan) -> Result<Arc<dyn ExecOperator>, Error> {
+		let backend = TreeBackend {
+			planner: self,
+		};
+		MatchFold {
+			backend: &backend,
+		}
+		.plan(plan)
+		.await
+		.map_err(Planning::into_error)
+	}
+}
+
+impl<B: BindingBackend> MatchFold<'_, B> {
+	/// Fold a GQL `MATCH` query into one node of the backend.
 	///
 	/// Folds clauses left-to-right over an accumulator `(operator, bound)`: the
 	/// first clause seeds it; each subsequent (non-optional) clause is joined to
 	/// the accumulator with a `HashJoin` — Inner on the node-binding ids the two
 	/// sides share, or Cross when they share none (sequential `MATCH` joins
 	/// exactly like comma-separated patterns, R1).
-	pub(crate) async fn plan_match(&self, plan: MatchPlan) -> Result<Arc<dyn ExecOperator>, Error> {
+	pub(crate) async fn plan(&self, plan: MatchPlan) -> Result<B::Node, Planning> {
 		// Group the ordered stages into fold units: each mandatory read clause is
 		// a unit; a run of read clauses sharing one `optional_group` id is one
 		// OPTIONAL block unit (the all-or-nothing left-join, R3); each write stage
@@ -198,7 +224,7 @@ impl<'ctx> Planner<'ctx> {
 			StageUnit::Mutation(stage) => {
 				// A leading mutation (an `INSERT` with no preceding `MATCH`): seed a
 				// single empty row so it runs exactly once.
-				let seed = Arc::new(SingleRowScan::new()) as Arc<dyn ExecOperator>;
+				let seed = self.backend.single_row()?;
 				self.fold_mutation(&plan, seed, Vec::new(), stage).await?
 			}
 		};
@@ -227,76 +253,51 @@ impl<'ctx> Planner<'ctx> {
 	/// Build one write operator over the accumulator and return it with the
 	/// updated bound set. `INSERT` extends the bound set with its created node /
 	/// edge bindings, so a later read can join or anchor on them; `SET`/`DELETE`
-	/// leave the bound set unchanged (their target was already bound). The
-	/// row-scoped values a stage writes are compiled here, like every other
-	/// scalar, and the operator evaluates them against each binding row.
+	/// leave the bound set unchanged (their target was already bound).
 	async fn fold_mutation(
 		&self,
 		plan: &MatchPlan,
-		op: Arc<dyn ExecOperator>,
+		op: B::Node,
 		mut bound: Vec<BindingId>,
 		stage: &MutationStage,
-	) -> Result<(Arc<dyn ExecOperator>, Vec<BindingId>), Error> {
-		let op = match stage {
-			MutationStage::Update {
-				target,
-				data,
-			} => {
-				let name = binding_name(plan, *target).to_string();
-				let update = match data {
-					UpdateData::Set(assignments) => {
-						let mut compiled = Vec::with_capacity(assignments.len());
-						for (property, value) in assignments {
-							compiled
-								.push((property.clone(), self.physical_expr(value.clone()).await?));
-						}
-						UpdateBinding::set(op, name, compiled)
-					}
-					UpdateData::Unset(properties) => {
-						UpdateBinding::unset(op, name, properties.clone())
-					}
-					UpdateData::Content(object) => {
-						UpdateBinding::content(op, name, self.physical_expr(object.clone()).await?)
-					}
-				};
-				Arc::new(update) as Arc<dyn ExecOperator>
-			}
-			MutationStage::Delete {
-				target,
-				detach,
-			} => {
-				let name = binding_name(plan, *target).to_string();
-				let is_edge = matches!(
-					plan.binding(*target).kind,
-					BindingKind::Edge | BindingKind::EdgeGroup
-				);
-				Arc::new(DeleteBinding::new(op, name, *detach, is_edge)) as Arc<dyn ExecOperator>
-			}
-			MutationStage::Insert(insert) => {
-				let mut nodes = Vec::with_capacity(insert.nodes.len());
-				for n in &insert.nodes {
-					nodes.push(InsertNodeOp {
-						name: binding_name(plan, n.binding).to_string(),
-						table: n.label.clone(),
-						props: self.physical_expr(n.props.clone()).await?,
-					});
-				}
-				let mut edges = Vec::with_capacity(insert.edges.len());
-				for e in &insert.edges {
-					edges.push(InsertEdgeOp {
-						name: binding_name(plan, e.binding).to_string(),
-						table: e.label.clone(),
-						from: binding_name(plan, e.from).to_string(),
-						to: binding_name(plan, e.to).to_string(),
-						props: self.physical_expr(e.props.clone()).await?,
-					});
-				}
-				bound.extend(insert.nodes.iter().map(|n| n.binding));
-				bound.extend(insert.edges.iter().map(|e| e.binding));
-				Arc::new(InsertGraph::new(op, nodes, edges)) as Arc<dyn ExecOperator>
-			}
-		};
+	) -> Result<(B::Node, Vec<BindingId>), Planning> {
+		let op = self.backend.mutate(plan, op, stage).await?;
+		if let MutationStage::Insert(insert) = stage {
+			bound.extend(insert.nodes.iter().map(|n| n.binding));
+			bound.extend(insert.edges.iter().map(|e| e.binding));
+		}
 		Ok((op, bound))
+	}
+
+	/// Join `probe`'s rows to `build`'s: Inner on the node bindings the two
+	/// sides share, Cross when they share none.
+	async fn join_shared(
+		&self,
+		plan: &MatchPlan,
+		build: B::Node,
+		build_bound: &[BindingId],
+		probe: B::Node,
+		probe_bound: &[BindingId],
+	) -> Result<B::Node, Planning> {
+		let shared = shared_bindings(build_bound, probe_bound);
+		let keys = binding_names(plan, &shared);
+		let join_type = if shared.is_empty() {
+			JoinType::Cross
+		} else {
+			JoinType::Inner
+		};
+		self.backend
+			.join(
+				build,
+				probe,
+				JoinSpec {
+					keys,
+					join_type,
+					null_template: Vec::new(),
+					residual: None,
+				},
+			)
+			.await
 	}
 
 	/// Combine a freshly-planned mandatory clause with the accumulator.
@@ -308,21 +309,13 @@ impl<'ctx> Planner<'ctx> {
 	async fn fold_mandatory(
 		&self,
 		plan: &MatchPlan,
-		acc_op: Arc<dyn ExecOperator>,
+		acc_op: B::Node,
 		acc_bound: &[BindingId],
-		clause: PlannedClause,
-	) -> Result<(Arc<dyn ExecOperator>, Vec<BindingId>), Error> {
+		clause: PlannedClause<B::Node>,
+	) -> Result<(B::Node, Vec<BindingId>), Planning> {
 		// Accumulator = build side; new clause = probe side.
-		let shared = shared_bindings(acc_bound, &clause.bound);
-		let keys = binding_names(plan, &shared);
-		let join_type = if shared.is_empty() {
-			JoinType::Cross
-		} else {
-			JoinType::Inner
-		};
 		let join =
-			Arc::new(HashJoin::new(acc_op, clause.operator, keys, join_type, Vec::new(), None))
-				as Arc<dyn ExecOperator>;
+			self.join_shared(plan, acc_op, acc_bound, clause.operator, &clause.bound).await?;
 
 		let bound = union_bindings(acc_bound, &clause.bound);
 		let op = self.place_above(join, &bound, clause.deferred).await?;
@@ -354,15 +347,14 @@ impl<'ctx> Planner<'ctx> {
 	async fn fold_optional(
 		&self,
 		plan: &MatchPlan,
-		acc_op: Arc<dyn ExecOperator>,
+		acc_op: B::Node,
 		acc_bound: &[BindingId],
 		clauses: &[&MatchClausePlan],
-	) -> Result<(Arc<dyn ExecOperator>, Vec<BindingId>), Error> {
+	) -> Result<(B::Node, Vec<BindingId>), Planning> {
 		// The OptionalExpand fast path: a single optional clause, a single
 		// single-hop pattern, source already bound in the accumulator.
-		if let Some(stage) = self
-			.try_optional_expand_fast_path(plan, Arc::clone(&acc_op), acc_bound, clauses)
-			.await?
+		if let Some(stage) =
+			self.try_optional_expand_fast_path(plan, acc_op.clone(), acc_bound, clauses).await?
 		{
 			let bound = union_bindings(acc_bound, &stage.bound);
 			return Ok((stage.operator, bound));
@@ -413,19 +405,19 @@ impl<'ctx> Planner<'ctx> {
 			}
 			residual_exprs.push(predicate.expr);
 		}
-		let residual = match conjoin(residual_exprs) {
-			Some(joined) => Some(self.physical_expr(joined).await?),
-			None => None,
-		};
-
-		let join = Arc::new(HashJoin::new(
-			subplan.operator,
-			acc_op,
-			keys,
-			JoinType::Left,
-			null_template,
-			residual,
-		)) as Arc<dyn ExecOperator>;
+		let join = self
+			.backend
+			.join(
+				subplan.operator,
+				acc_op,
+				JoinSpec {
+					keys,
+					join_type: JoinType::Left,
+					null_template,
+					residual: conjoin(residual_exprs),
+				},
+			)
+			.await?;
 
 		Ok((join, merged_bound))
 	}
@@ -439,10 +431,10 @@ impl<'ctx> Planner<'ctx> {
 	async fn try_optional_expand_fast_path(
 		&self,
 		plan: &MatchPlan,
-		acc_op: Arc<dyn ExecOperator>,
+		acc_op: B::Node,
 		acc_bound: &[BindingId],
 		clauses: &[&MatchClausePlan],
-	) -> Result<Option<ChainStage>, Error> {
+	) -> Result<Option<ChainStage<B::Node>>, Planning> {
 		// A block of exactly one clause, with exactly one pattern.
 		let [clause] = clauses else {
 			return Ok(None);
@@ -504,11 +496,6 @@ impl<'ctx> Planner<'ctx> {
 					.to_string(),
 			).into());
 		}
-		let predicate = match conjoin(predicates) {
-			Some(joined) => Some(self.physical_expr(joined).await?),
-			None => None,
-		};
-
 		let edge_def = plan.binding(edge.binding);
 		let edge_name = edge_def.name.clone();
 		let edge_binding = if edge_def.user_named {
@@ -517,17 +504,22 @@ impl<'ctx> Planner<'ctx> {
 			EdgeBinding::IdOnly(edge_name)
 		};
 
-		let operator = Arc::new(Expand::new(
-			acc_op,
-			source,
-			dir,
-			edge_tables,
-			edge_binding,
-			target_binding,
-			target_label,
-			predicate,
-			true,
-		)) as Arc<dyn ExecOperator>;
+		let operator = self
+			.backend
+			.expand(
+				acc_op,
+				ExpandSpec {
+					source,
+					dir,
+					edge_tables,
+					edge_binding,
+					target_binding,
+					target_label,
+					predicate: conjoin(predicates),
+					optional: true,
+				},
+			)
+			.await?;
 
 		Ok(Some(ChainStage {
 			operator,
@@ -552,7 +544,7 @@ impl<'ctx> Planner<'ctx> {
 		&self,
 		plan: &MatchPlan,
 		clauses: &[&MatchClausePlan],
-	) -> Result<PlannedClause, Error> {
+	) -> Result<PlannedClause<B::Node>, Planning> {
 		let Some((first, rest)) = clauses.split_first() else {
 			return Err(EngineError::Internal(
 				"GQL MATCH planning: an OPTIONAL block must carry at least one clause".to_string(),
@@ -587,7 +579,7 @@ impl<'ctx> Planner<'ctx> {
 					plan,
 					clause,
 					&block_bound,
-					Some((Arc::clone(&block_op), block_bound.clone())),
+					Some((block_op.clone(), block_bound.clone())),
 				)
 				.await?;
 			block_op = planned.operator;
@@ -621,7 +613,7 @@ impl<'ctx> Planner<'ctx> {
 		plan: &MatchPlan,
 		clause: &MatchClausePlan,
 		bound_acc: &[BindingId],
-	) -> Result<PlannedClause, Error> {
+	) -> Result<PlannedClause<B::Node>, Planning> {
 		self.plan_clause_onto(plan, clause, bound_acc, None).await
 	}
 
@@ -639,8 +631,8 @@ impl<'ctx> Planner<'ctx> {
 		plan: &MatchPlan,
 		clause: &MatchClausePlan,
 		bound_acc: &[BindingId],
-		seed: Option<(Arc<dyn ExecOperator>, Vec<BindingId>)>,
-	) -> Result<PlannedClause, Error> {
+		seed: Option<(B::Node, Vec<BindingId>)>,
+	) -> Result<PlannedClause<B::Node>, Planning> {
 		let Some((first_pattern, rest_patterns)) = clause.patterns.split_first() else {
 			return Err(EngineError::Internal(
 				"GQL MATCH planning: a clause must carry at least one pattern".to_string(),
@@ -653,7 +645,7 @@ impl<'ctx> Planner<'ctx> {
 
 		// Bindings visible while planning this clause: earlier clauses' bindings
 		// plus everything bound so far within it.
-		let mut clause_op: Arc<dyn ExecOperator>;
+		let mut clause_op: B::Node;
 		let mut clause_bound: Vec<BindingId>;
 
 		// --- First pattern seeds (or extends) the per-clause accumulator. ---
@@ -674,21 +666,15 @@ impl<'ctx> Planner<'ctx> {
 				// Self-rooted with a seed: HashJoin the stage into the seed on the
 				// node bindings they share (Cross when none shared).
 				Some((seed_op, seed_bound)) => {
-					let shared = shared_bindings(seed_bound, &stage.bound);
-					let keys = binding_names(plan, &shared);
-					let join_type = if shared.is_empty() {
-						JoinType::Cross
-					} else {
-						JoinType::Inner
-					};
-					clause_op = Arc::new(HashJoin::new(
-						Arc::clone(seed_op),
-						stage.operator,
-						keys,
-						join_type,
-						Vec::new(),
-						None,
-					)) as Arc<dyn ExecOperator>;
+					clause_op = self
+						.join_shared(
+							plan,
+							seed_op.clone(),
+							seed_bound,
+							stage.operator,
+							&stage.bound,
+						)
+						.await?;
 					clause_bound = union_bindings(seed_bound, &stage.bound);
 				}
 			},
@@ -703,7 +689,7 @@ impl<'ctx> Planner<'ctx> {
 							plan,
 							first_pattern,
 							seed_bound,
-							Arc::clone(seed_op),
+							seed_op.clone(),
 							&mut pending,
 						)
 						.await?;
@@ -745,33 +731,15 @@ impl<'ctx> Planner<'ctx> {
 			if let Some(stage) = self.plan_pattern_selfrooted(plan, pattern, &mut pending).await? {
 				// Self-anchored pattern: HashJoin into the accumulator on the
 				// node bindings they share (Cross when none shared).
-				let shared = shared_bindings(&clause_bound, &stage.bound);
-				let keys = binding_names(plan, &shared);
-				let join_type = if shared.is_empty() {
-					JoinType::Cross
-				} else {
-					JoinType::Inner
-				};
-				clause_op = Arc::new(HashJoin::new(
-					clause_op,
-					stage.operator,
-					keys,
-					join_type,
-					Vec::new(),
-					None,
-				)) as Arc<dyn ExecOperator>;
+				clause_op = self
+					.join_shared(plan, clause_op, &clause_bound, stage.operator, &stage.bound)
+					.await?;
 				clause_bound = union_bindings(&clause_bound, &stage.bound);
 			} else if shared_node_anchor(plan, pattern, &visible).is_some() {
 				// Bound-variable pattern: expand directly off the clause
 				// accumulator. Within-pattern step conjuncts ride the expansion.
 				let stage = self
-					.expand_bound_pattern(
-						plan,
-						pattern,
-						&visible,
-						Arc::clone(&clause_op),
-						&mut pending,
-					)
+					.expand_bound_pattern(plan, pattern, &visible, clause_op.clone(), &mut pending)
 					.await?;
 				clause_op = stage.operator;
 				clause_bound = union_bindings(&clause_bound, &stage.bound);
@@ -790,7 +758,7 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		// --- DIFFERENT EDGES (R2): one DistinctEdges per MATCH statement. ---
-		clause_op = self.wrap_distinct_edges(plan, clause, clause_op);
+		clause_op = self.wrap_distinct_edges(plan, clause, clause_op)?;
 
 		// Conjuncts still pending after placement reference a binding this clause
 		// does not bound on its own — necessarily one from an EARLIER clause (the
@@ -830,7 +798,7 @@ impl<'ctx> Planner<'ctx> {
 		plan: &MatchPlan,
 		pattern: &PatternPlan,
 		pending: &mut Vec<MatchPredicate>,
-	) -> Result<Option<ChainStage>, Error> {
+	) -> Result<Option<ChainStage<B::Node>>, Planning> {
 		// Labeled start node ⇒ TableScan + Bind, forward steps (PR-A).
 		if pattern.start.label.is_some() {
 			return Ok(Some(self.plan_node_anchored(plan, pattern, pending).await?));
@@ -854,7 +822,7 @@ impl<'ctx> Planner<'ctx> {
 		plan: &MatchPlan,
 		pattern: &PatternPlan,
 		pending: &mut Vec<MatchPredicate>,
-	) -> Result<ChainStage, Error> {
+	) -> Result<ChainStage<B::Node>, Planning> {
 		let Some(anchor_label) = pattern.start.label.clone() else {
 			return Err(EngineError::Internal(
 				"GQL MATCH planning: plan_node_anchored called on an unlabeled start node"
@@ -914,7 +882,7 @@ impl<'ctx> Planner<'ctx> {
 		&self,
 		plan: &MatchPlan,
 		pattern: &PatternPlan,
-	) -> Result<Option<ChainStage>, Error> {
+	) -> Result<Option<ChainStage<B::Node>>, Planning> {
 		let [(edge, far_node)] = pattern.steps.as_slice() else {
 			// Multi-hop unlabeled-node patterns aren't edge-anchorable in PR-B.
 			return Ok(None);
@@ -933,8 +901,8 @@ impl<'ctx> Planner<'ctx> {
 
 		let edge_binding = edge.binding;
 		let edge_name = binding_name(plan, edge_binding).to_string();
-		let scan = self.plan_table_scan(edge_label, Vec::new()).await?;
-		let bind = Arc::new(Bind::new(scan, edge_name.clone())) as Arc<dyn ExecOperator>;
+		let scan = self.backend.scan(edge_label, None).await?;
+		let bind = self.backend.bind(scan, edge_name.clone())?;
 
 		// For a forward edge `(start)-[:e]->(far)`, the edge's `in` is `start` and
 		// its `out` is `far`; an `In` edge swaps the roles. EndpointBind reads the
@@ -946,20 +914,24 @@ impl<'ctx> Planner<'ctx> {
 		};
 
 		// Bottom binds `in`, top binds `out` (worked tree (ii) ordering).
-		let in_bind = Arc::new(EndpointBind::new(
+		let in_bind = self.backend.endpoint(
 			bind,
-			edge_name.clone(),
-			EndpointField::In,
-			binding_name(plan, in_node.binding).to_string(),
-			in_node.label.clone(),
-		)) as Arc<dyn ExecOperator>;
-		let out_bind = Arc::new(EndpointBind::new(
+			EndpointSpec {
+				edge: edge_name.clone(),
+				field: EndpointField::In,
+				name: binding_name(plan, in_node.binding).to_string(),
+				label: in_node.label.clone(),
+			},
+		)?;
+		let out_bind = self.backend.endpoint(
 			in_bind,
-			edge_name,
-			EndpointField::Out,
-			binding_name(plan, out_node.binding).to_string(),
-			out_node.label.clone(),
-		)) as Arc<dyn ExecOperator>;
+			EndpointSpec {
+				edge: edge_name,
+				field: EndpointField::Out,
+				name: binding_name(plan, out_node.binding).to_string(),
+				label: out_node.label.clone(),
+			},
+		)?;
 
 		Ok(Some(ChainStage {
 			operator: out_bind,
@@ -980,9 +952,9 @@ impl<'ctx> Planner<'ctx> {
 		plan: &MatchPlan,
 		pattern: &PatternPlan,
 		visible: &[BindingId],
-		input: Arc<dyn ExecOperator>,
+		input: B::Node,
 		pending: &mut Vec<MatchPredicate>,
-	) -> Result<ChainStage, Error> {
+	) -> Result<ChainStage<B::Node>, Planning> {
 		// Forward: the start node is the shared anchor — expand start → far.
 		if visible.contains(&pattern.start.binding) {
 			let mut stage = ChainStage {
@@ -1050,10 +1022,10 @@ impl<'ctx> Planner<'ctx> {
 	/// Drains the placed predicates from `pending`.
 	async fn place_satisfiable(
 		&self,
-		op: Arc<dyn ExecOperator>,
+		op: B::Node,
 		bound: &[BindingId],
 		pending: &mut Vec<MatchPredicate>,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
+	) -> Result<B::Node, Planning> {
 		let mut ready: Vec<LogicalExpr> = Vec::new();
 		pending.retain(|predicate| {
 			if deps_subset(&predicate.deps, bound) {
@@ -1071,10 +1043,10 @@ impl<'ctx> Planner<'ctx> {
 	/// dep is unsatisfied at this stage.
 	async fn place_above(
 		&self,
-		op: Arc<dyn ExecOperator>,
+		op: B::Node,
 		bound: &[BindingId],
 		predicates: Vec<MatchPredicate>,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
+	) -> Result<B::Node, Planning> {
 		let mut exprs: Vec<LogicalExpr> = Vec::with_capacity(predicates.len());
 		for predicate in predicates {
 			if !deps_subset(&predicate.deps, bound) {
@@ -1098,17 +1070,17 @@ impl<'ctx> Planner<'ctx> {
 		&self,
 		plan: &MatchPlan,
 		clause: &MatchClausePlan,
-		op: Arc<dyn ExecOperator>,
-	) -> Arc<dyn ExecOperator> {
+		op: B::Node,
+	) -> Result<B::Node, Planning> {
 		let edges = clause_edge_bindings(plan, clause);
 		if edges.len() < 2 {
-			return op;
+			return Ok(op);
 		}
 		if edge_tables_pairwise_disjoint(&edges) {
-			return op;
+			return Ok(op);
 		}
 		let names = edges.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>();
-		Arc::new(DistinctEdges::new(op, names)) as Arc<dyn ExecOperator>
+		self.backend.distinct_edges(op, names)
 	}
 
 	/// Build the anchor stage: `TableScan` (via the SELECT source machinery, so
@@ -1120,45 +1092,15 @@ impl<'ctx> Planner<'ctx> {
 		label: TableName,
 		plan: &MatchPlan,
 		pushed: Vec<LogicalExpr>,
-	) -> Result<ChainStage, Error> {
-		let scan = self.plan_table_scan(label, pushed).await?;
+	) -> Result<ChainStage<B::Node>, Planning> {
+		let scan = self.backend.scan(label, conjoin(pushed)).await?;
 		let name = binding_name(plan, binding).to_string();
-		let operator = Arc::new(Bind::new(scan, name)) as Arc<dyn ExecOperator>;
+		let operator = self.backend.bind(scan, name)?;
 		Ok(ChainStage {
 			operator,
 			bound: vec![binding],
 			tip: binding,
 		})
-	}
-
-	/// Plan a scan over `label` filtered by the prefix-stripped `pushed`
-	/// conjuncts.
-	///
-	/// The scan is a plan of its own — a `Filter` over a table `Source` —
-	/// bound and compiled like any other, so the access-path selection and
-	/// predicate pushdown the fold applies to a `SELECT … WHERE` apply here
-	/// too, and any residual the source cannot consume stays a filter directly
-	/// above it.
-	async fn plan_table_scan(
-		&self,
-		label: TableName,
-		pushed: Vec<LogicalExpr>,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
-		let source = LogicalOp::Source(LogicalSource {
-			source: SourceRef::Table(label),
-			schema: None,
-			with: None,
-			for_update: false,
-		});
-		let op = match conjoin(pushed) {
-			Some(predicate) => LogicalOp::Filter(LogicalFilter {
-				input: Box::new(source),
-				predicate,
-			}),
-			None => source,
-		};
-		let bound = self.bind(op).await?;
-		self.plan_logical(bound).await
 	}
 
 	/// Build one step stage from the previous stage's rows: `Expand` for an
@@ -1174,13 +1116,13 @@ impl<'ctx> Planner<'ctx> {
 		&self,
 		plan: &MatchPlan,
 		pattern: &PatternPlan,
-		prev: ChainStage,
+		prev: ChainStage<B::Node>,
 		edge: &EdgeStep,
 		node: &NodeStep,
 		predicates: Vec<LogicalExpr>,
 		direction: ExpandDirection,
 		reversed: bool,
-	) -> Result<ChainStage, Error> {
+	) -> Result<ChainStage<B::Node>, Planning> {
 		let source = binding_name(plan, prev.tip).to_string();
 		let dir = expand_dir(direction);
 		let edge_tables = edge.label.iter().cloned().collect::<Vec<_>>();
@@ -1200,21 +1142,22 @@ impl<'ctx> Planner<'ctx> {
 				} else {
 					EdgeBinding::IdOnly(edge_name)
 				};
-				let predicate = match conjoin(predicates) {
-					Some(joined) => Some(self.physical_expr(joined).await?),
-					None => None,
-				};
-				let operator = Arc::new(Expand::new(
-					prev.operator,
-					source,
-					dir,
-					edge_tables,
-					edge_binding,
-					target_binding,
-					target_label,
-					predicate,
-					false,
-				)) as Arc<dyn ExecOperator>;
+				let operator = self
+					.backend
+					.expand(
+						prev.operator,
+						ExpandSpec {
+							source,
+							dir,
+							edge_tables,
+							edge_binding,
+							target_binding,
+							target_label,
+							predicate: conjoin(predicates),
+							optional: false,
+						},
+					)
+					.await?;
 				Ok(ChainStage {
 					operator,
 					bound,
@@ -1245,39 +1188,31 @@ impl<'ctx> Planner<'ctx> {
 					reversed || source == binding_name(plan, pattern.start.binding),
 					"a forward-anchored quantified step must expand from the pattern's start",
 				);
-				let operator: Arc<dyn ExecOperator> = match routing {
-					SearchRouting::Every => Arc::new(PathExpand::new(
+				let operator = self
+					.backend
+					.path_expand(
 						prev.operator,
-						source,
-						dir,
-						edge_tables,
-						quantifier.min,
-						quantifier.max,
-						target_binding,
-						target_label,
-						group_binding,
-						path_binding,
-						exec_mode,
-						reversed,
-					)) as Arc<dyn ExecOperator>,
-					SearchRouting::Shortest {
-						selector,
-					} => Arc::new(ShortestPathExpand::new(
-						prev.operator,
-						source,
-						dir,
-						edge_tables,
-						quantifier.min,
-						quantifier.max,
-						target_binding,
-						target_label,
-						group_binding,
-						path_binding,
-						exec_mode,
-						selector,
-						reversed,
-					)) as Arc<dyn ExecOperator>,
-				};
+						PathSpec {
+							source,
+							dir,
+							edge_tables,
+							min: quantifier.min,
+							max: quantifier.max,
+							target_binding,
+							target_label,
+							group_binding,
+							path_binding,
+							mode: exec_mode,
+							selector: match routing {
+								SearchRouting::Every => None,
+								SearchRouting::Shortest {
+									selector,
+								} => Some(selector),
+							},
+							reversed,
+						},
+					)
+					.await?;
 				if let Some(id) = pattern.path_var {
 					bound.push(id);
 				}
@@ -1299,14 +1234,13 @@ impl<'ctx> Planner<'ctx> {
 	/// (a Filter neither adds nor drops bindings).
 	async fn maybe_filter(
 		&self,
-		stage: ChainStage,
+		stage: ChainStage<B::Node>,
 		exprs: Vec<LogicalExpr>,
-	) -> Result<ChainStage, Error> {
+	) -> Result<ChainStage<B::Node>, Planning> {
 		let Some(joined) = conjoin(exprs) else {
 			return Ok(stage);
 		};
-		let predicate = self.physical_expr(joined).await?;
-		let operator = Arc::new(Filter::new(stage.operator, predicate)) as Arc<dyn ExecOperator>;
+		let operator = self.backend.filter(stage.operator, joined).await?;
 		Ok(ChainStage {
 			operator,
 			bound: stage.bound,
@@ -1318,14 +1252,13 @@ impl<'ctx> Planner<'ctx> {
 	/// when there are none (operator-level variant for join placement).
 	async fn filter_above(
 		&self,
-		op: Arc<dyn ExecOperator>,
+		op: B::Node,
 		exprs: Vec<LogicalExpr>,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
+	) -> Result<B::Node, Planning> {
 		let Some(joined) = conjoin(exprs) else {
 			return Ok(op);
 		};
-		let predicate = self.physical_expr(joined).await?;
-		Ok(Arc::new(Filter::new(op, predicate)) as Arc<dyn ExecOperator>)
+		self.backend.filter(op, joined).await
 	}
 
 	/// Build the output tail over the binder-chain body.
@@ -1337,232 +1270,64 @@ impl<'ctx> Planner<'ctx> {
 	///   Sort runs over them, and a trailing Project drops any hidden column.
 	/// - DISTINCT ⇒ Project → Distinct → Sort → Limit.
 	/// - Plain ⇒ Sort → Limit → Project.
-	async fn plan_match_tail(
-		&self,
-		plan: &MatchPlan,
-		body: Arc<dyn ExecOperator>,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
+	async fn plan_match_tail(&self, plan: &MatchPlan, body: B::Node) -> Result<B::Node, Planning> {
 		// A mutation-only plan (no `RETURN`) carries no output spec; drive the
 		// mutation chain to completion (the writes happen as its rows are pulled)
 		// and emit no rows, so the query returns an empty result.
 		let Some(output) = plan.output.as_ref() else {
-			return Ok(Arc::new(DrainSink::new(body)) as Arc<dyn ExecOperator>);
+			return self.backend.drain(body);
 		};
 		if let Some(group_keys) = output.group_by.as_ref() {
-			let mut op = self.plan_match_aggregate(body, output, group_keys).await?;
+			let mut op = self.backend.aggregate(body, output, group_keys).await?;
 			if output.distinct {
-				op = Arc::new(Distinct::new(op)) as Arc<dyn ExecOperator>;
+				op = self.backend.distinct(op)?;
 			}
 			op = self.plan_match_sort(op, output).await?;
 			op = self.plan_match_limit(op, output).await?;
 			// Drop any sort-only (hidden) columns the lowering materialised for a
 			// non-projected ORDER BY key.
 			if output.columns.iter().any(|c| c.hidden) {
-				op = self.plan_match_drop_hidden(op, output).await?;
+				op = self.backend.drop_hidden(op, output).await?;
 			}
 			Ok(op)
 		} else if output.distinct {
-			let mut op = self.plan_match_project(body, output).await?;
-			op = Arc::new(Distinct::new(op)) as Arc<dyn ExecOperator>;
+			let mut op = self.backend.project(body, output).await?;
+			op = self.backend.distinct(op)?;
 			op = self.plan_match_sort(op, output).await?;
 			op = self.plan_match_limit(op, output).await?;
 			Ok(op)
 		} else {
 			let mut op = self.plan_match_sort(body, output).await?;
 			op = self.plan_match_limit(op, output).await?;
-			op = self.plan_match_project(op, output).await?;
+			op = self.backend.project(op, output).await?;
 			Ok(op)
 		}
 	}
 
-	/// Build the `Aggregate` operator that folds the binding rows by the GROUP BY
-	/// keys (empty keys ⇒ GROUP ALL, a single group over every row). Classifies
-	/// each column (projected or hidden sort-only) three ways:
-	/// - exactly a grouping key ⇒ pass it through (`is_group_key`);
-	/// - contains an aggregate ⇒ [`Planner::extract_aggregate_info`] (the column carries the fold,
-	///   so the helper's implicit `array::group` fallback never fires);
-	/// - otherwise it is determined by the grouping keys (the lowering guarantees coverage) ⇒ emit
-	///   its first value per group via `fallback_expr`, which is exact because the value is
-	///   constant within a group.
-	async fn plan_match_aggregate(
-		&self,
-		input: Arc<dyn ExecOperator>,
-		output: &MatchOutput,
-		group_keys: &[LogicalExpr],
-	) -> Result<Arc<dyn ExecOperator>, Error> {
-		// Physical group-key expressions (empty for GROUP ALL — the operator's
-		// `group_by_exprs.is_empty()` check then takes the single-group path).
-		let mut group_by_exprs = Vec::with_capacity(group_keys.len());
-		for key in group_keys {
-			group_by_exprs.push(self.physical_expr(key.clone()).await?);
-		}
-
-		let mut aggregates = Vec::with_capacity(output.columns.len());
-		for column in output.columns.iter() {
-			if let Some(idx) = group_keys.iter().position(|k| *k == column.expr) {
-				// A grouping key column: passed through from the group key vector.
-				aggregates.push(AggregateField::new(
-					column.name.clone(),
-					true,
-					Some(idx),
-					None,
-					None,
-				));
-			} else if expr_has_aggregate(self.function_registry(), &column.expr) {
-				let (info, fallback) =
-					self.extract_aggregate_info(column.expr.clone(), group_keys).await?;
-				aggregates.push(AggregateField::new(
-					column.name.clone(),
-					false,
-					None,
-					info,
-					fallback,
-				));
-			} else {
-				// Determined by the grouping keys (constant within each group): emit
-				// the first value seen. The lowering guarantees coverage.
-				let fallback = self.physical_expr(column.expr.clone()).await?;
-				aggregates.push(AggregateField::new(
-					column.name.clone(),
-					false,
-					None,
-					None,
-					Some(fallback),
-				));
-			}
-		}
-
-		// The logical keys double as the EXPLAIN display, length-aligned with the
-		// physical keys so the operator renders `GROUP ALL` only when there are
-		// genuinely no keys.
-		// Whether the operator may evaluate a batch one column at a time
-		// rather than one row at a time; see `Aggregate::column_major`. An
-		// aggregate evaluates a column again on any failure, so nothing a
-		// repetition could expose may be in reach of one.
-		let column_effects: Vec<ColumnEffects> = group_keys
-			.iter()
-			.chain(output.columns.iter().map(|column| &column.expr))
-			.map(|expr| ColumnEffects::of(expr, self.function_registry()))
-			.collect();
-		let column_major = columns_may_run_column_major(&column_effects, BatchRetry::OnFailure);
-
-		let mut aggregate = Aggregate::new(input, group_keys.to_vec(), group_by_exprs, aggregates);
-		if column_major {
-			aggregate = aggregate.with_column_major();
-		}
-		Ok(Arc::new(aggregate) as Arc<dyn ExecOperator>)
-	}
-
-	/// Project away the hidden sort-only columns after an aggregating Sort,
-	/// keeping only the user-projected columns (selected by output name, since the
-	/// `Aggregate` already produced each under its name). Only built when the plan
-	/// actually has hidden columns.
-	async fn plan_match_drop_hidden(
-		&self,
-		input: Arc<dyn ExecOperator>,
-		output: &MatchOutput,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
-		let mut fields = Vec::new();
-		for column in output.columns.iter().filter(|c| !c.hidden) {
-			let expr = self.physical_expr(LogicalExpr::Field(column.name.as_str().into())).await?;
-			fields.push(FieldSelection::new(&column.name, expr));
-		}
-		// Every field is a bare read of a name the `Aggregate` already
-		// produced, so none of them has an effect to reorder.
-		Ok(Arc::new(Project::new(input, fields, Vec::new(), false).with_column_major())
-			as Arc<dyn ExecOperator>)
-	}
-
-	/// Build the `Sort` operator from `MatchOutput::order`, or pass through when
-	/// there is no ORDER BY.
+	/// Order `input` by `MatchOutput::order`, or pass it through when there is
+	/// no ORDER BY.
 	async fn plan_match_sort(
 		&self,
-		input: Arc<dyn ExecOperator>,
+		input: B::Node,
 		output: &MatchOutput,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
+	) -> Result<B::Node, Planning> {
 		if output.order.is_empty() {
 			return Ok(input);
 		}
-		// `Sort` evaluates its keys itself, so the shape of that evaluation is
-		// judged here, as it is for the projection and the aggregate above;
-		// see `Sort::column_major`. A sort passes a failed key column on as
-		// the batch's, so it repeats nothing.
-		let key_effects: Vec<ColumnEffects> = output
-			.order
-			.iter()
-			.map(|order| ColumnEffects::of(&order.expr, self.function_registry()))
-			.collect();
-		let column_major = columns_may_run_column_major(&key_effects, BatchRetry::None);
-		let mut order_by = Vec::with_capacity(output.order.len());
-		for order in output.order.iter() {
-			let expr = self.physical_expr(order.expr.clone()).await?;
-			order_by.push(OrderByField {
-				expr,
-				direction: if order.ascending {
-					SortDirection::Asc
-				} else {
-					SortDirection::Desc
-				},
-				collate: false,
-				numeric: false,
-			});
-		}
-		let mut sort = Sort::new(input, order_by);
-		if column_major {
-			sort = sort.with_column_major();
-		}
-		Ok(Arc::new(sort) as Arc<dyn ExecOperator>)
+		self.backend.sort(input, output).await
 	}
 
-	/// Build the `Limit` operator from `MatchOutput::skip`/`limit`, or pass
-	/// through when neither is present.
+	/// Page `input` by `MatchOutput::skip`/`limit`, or pass it through when
+	/// neither is present.
 	async fn plan_match_limit(
 		&self,
-		input: Arc<dyn ExecOperator>,
+		input: B::Node,
 		output: &MatchOutput,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
-		let limit = match output.limit.as_ref() {
-			Some(e) => Some(self.physical_expr(e.clone()).await?),
-			None => None,
-		};
-		let offset = match output.skip.as_ref() {
-			Some(e) => Some(self.physical_expr(e.clone()).await?),
-			None => None,
-		};
-		if limit.is_none() && offset.is_none() {
+	) -> Result<B::Node, Planning> {
+		if output.limit.is_none() && output.skip.is_none() {
 			return Ok(input);
 		}
-		Ok(Arc::new(Limit::new(input, limit, offset)) as Arc<dyn ExecOperator>)
-	}
-
-	/// Build the `Project` operator from the IR's explicit columns. Column names
-	/// are final (the lowering applied naming + dup-check), so each column is a
-	/// flat `FieldSelection` aliased to its name.
-	async fn plan_match_project(
-		&self,
-		input: Arc<dyn ExecOperator>,
-		output: &MatchOutput,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
-		// Judged from the columns as written; see `Project::column_major`.
-		// A projection passes a failed column on as the batch's, so it
-		// repeats nothing.
-		let column_effects: Vec<ColumnEffects> = output
-			.columns
-			.iter()
-			.map(|column| ColumnEffects::of(&column.expr, self.function_registry()))
-			.collect();
-		let column_major = columns_may_run_column_major(&column_effects, BatchRetry::None);
-
-		let mut fields = Vec::with_capacity(output.columns.len());
-		for column in output.columns.iter() {
-			let expr = self.physical_expr(column.expr.clone()).await?;
-			fields.push(FieldSelection::new(&column.name, expr));
-		}
-		let mut project = Project::new(input, fields, Vec::new(), false);
-		if column_major {
-			project = project.with_column_major();
-		}
-		Ok(Arc::new(project) as Arc<dyn ExecOperator>)
+		self.backend.limit(input, output).await
 	}
 }
 
@@ -1612,23 +1377,6 @@ fn step_bindings(
 		bound.push(id);
 	}
 	bound
-}
-
-/// Whether an expression contains a call to a registered aggregate function.
-/// Used to classify an aggregating query's columns: a non-key column with an
-/// aggregate folds via `extract_aggregate_info`, one without is a value
-/// determined by the grouping keys (first-value).
-fn expr_has_aggregate(
-	registry: &crate::exec::function::FunctionRegistry,
-	expr: &LogicalExpr,
-) -> bool {
-	expr.any(|e| {
-		matches!(
-			e,
-			LogicalExpr::Call(call)
-				if matches!(&call.receiver, Function::Normal(name) if registry.get_aggregate(name.as_str()).is_some())
-		)
-	})
 }
 
 /// The union of two binding sets, preserving `a`'s order then appending the new

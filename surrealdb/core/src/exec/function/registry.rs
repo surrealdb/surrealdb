@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::method::{self, MethodDescriptor, MethodRegistry};
 use super::{AggregateFunction, IndexFunction, ProjectionFunction, ScalarFunction, builtin};
@@ -28,6 +29,14 @@ pub struct FunctionRegistry {
 	index_functions: HashMap<&'static str, Arc<dyn IndexFunction>>,
 	/// Method registry for value dot-syntax method dispatch
 	methods: MethodRegistry,
+	/// The identity of what the registry holds ([`Self::id`]).
+	id: u64,
+}
+
+/// A registry identity no registry has had, in this process.
+fn fresh_id() -> u64 {
+	static NEXT: AtomicU64 = AtomicU64::new(1);
+	NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 impl FunctionRegistry {
@@ -39,7 +48,18 @@ impl FunctionRegistry {
 			projections: HashMap::new(),
 			index_functions: HashMap::new(),
 			methods: MethodRegistry::default(),
+			id: fresh_id(),
 		}
+	}
+
+	/// The identity of what this registry holds: never `0`, never shared with
+	/// another registry of the process, alive or dropped, and renewed by every
+	/// registration. A function resolved from a registry of one id is the
+	/// function that registry of that id answers, so a resolution kept beyond
+	/// a run is checked against it rather than against the registry's address,
+	/// which a later registry may reuse.
+	pub(crate) fn id(&self) -> u64 {
+		self.id
 	}
 
 	// =========================================================================
@@ -50,6 +70,7 @@ impl FunctionRegistry {
 	pub fn register(&mut self, func: impl ScalarFunction + 'static) {
 		let name = func.name();
 		self.functions.insert(name, Arc::new(func));
+		self.id = fresh_id();
 	}
 
 	/// Look up a scalar function by name.
@@ -97,6 +118,7 @@ impl FunctionRegistry {
 	pub fn register_aggregate(&mut self, func: impl AggregateFunction + 'static) {
 		let name = func.name();
 		self.aggregates.insert(name, Arc::new(func));
+		self.id = fresh_id();
 	}
 
 	/// Look up an aggregate function by name.
@@ -145,6 +167,7 @@ impl FunctionRegistry {
 	pub fn register_projection(&mut self, func: impl ProjectionFunction + 'static) {
 		let name = func.name();
 		self.projections.insert(name, Arc::new(func));
+		self.id = fresh_id();
 	}
 
 	/// Look up a projection function by name.
@@ -171,6 +194,7 @@ impl FunctionRegistry {
 	pub fn register_index_function(&mut self, func: impl IndexFunction + 'static) {
 		let name = func.name();
 		self.index_functions.insert(name, Arc::new(func));
+		self.id = fresh_id();
 	}
 
 	/// Look up an index function by name.
@@ -199,6 +223,60 @@ impl FunctionRegistry {
 	}
 
 	// =========================================================================
+	// Row order
+	// =========================================================================
+
+	/// The argument positions, the receiver not counted, at which a builtin
+	/// the method `name` resolves to runs the closure it is handed.
+	pub(crate) fn method_closure_positions(&self, name: &str) -> Vec<usize> {
+		let Some(descriptor) = self.get_method(name) else {
+			return Vec::new();
+		};
+		let mut positions: Vec<usize> = descriptor
+			.type_impls
+			.iter()
+			.map(|(_, function)| function)
+			.chain(descriptor.fallback.iter())
+			.flat_map(|function| function.closure_args().iter().copied())
+			.filter_map(|at| at.checked_sub(1))
+			.collect();
+		positions.sort_unstable();
+		positions.dedup();
+		positions
+	}
+
+	/// Whether calls of the builtin `name` must run one after another in the
+	/// order their rows are read: its declared effects make a second call
+	/// answer differently or leave something behind
+	/// ([`EffectSet::is_deterministic`](crate::expr::logical::EffectSet::is_deterministic)),
+	/// so calls made for several rows at once answer what a serial run would
+	/// not — a sequence's values out of order, requests sent concurrently.
+	///
+	/// A projection or index function reads the row or the index it is bound
+	/// to and keeps no order. A name the registry does not hold keeps it.
+	pub(crate) fn keeps_row_order(&self, name: &str) -> bool {
+		match self.get(name) {
+			Some(function) => !function.is_deterministic(),
+			None => !(self.is_projection(name) || self.is_index_function(name)),
+		}
+	}
+
+	/// [`Self::keeps_row_order`] for the method `name`: whether a builtin it
+	/// may resolve to, for any receiver, keeps row order. A name the registry
+	/// does not hold resolves to a closure the receiver carries, whose body
+	/// cannot be seen, and keeps it.
+	pub(crate) fn method_keeps_row_order(&self, name: &str) -> bool {
+		self.get_method(name).is_none_or(|descriptor| {
+			descriptor
+				.type_impls
+				.iter()
+				.map(|(_, function)| function)
+				.chain(descriptor.fallback.iter())
+				.any(|function| !function.is_deterministic())
+		})
+	}
+
+	// =========================================================================
 	// Combined methods
 	// =========================================================================
 
@@ -208,7 +286,20 @@ impl FunctionRegistry {
 		builtin::register_all(&mut registry);
 		// Build method registry from the registered scalar functions
 		registry.methods = method::build_method_registry(&registry);
+		registry.id = fresh_id();
 		registry
+	}
+}
+
+/// Where the builtins and methods run a closure they are handed, for the
+/// call-graph scan of stored bodies ([`crate::fnc::mutability`]).
+impl crate::expr::function_facts::ClosurePositions for FunctionRegistry {
+	fn function(&self, name: &str) -> Vec<usize> {
+		self.get(name).map_or_else(Vec::new, |function| function.closure_args().to_vec())
+	}
+
+	fn method(&self, name: &str) -> Vec<usize> {
+		self.method_closure_positions(name)
 	}
 }
 
@@ -221,7 +312,7 @@ impl Default for FunctionRegistry {
 /// The experimental target a built-in is gated behind, if any.
 ///
 /// Mirrors the `exp(...)` markers on the corresponding arms of `fnc::dispatch`,
-/// which is where the legacy executor enforces the same gate. Registry entries
+/// which the script bridge reaches by name. Registry entries
 /// that reach a bucket acquire it through their `EvalContext` and check for
 /// themselves; the functions listed here are pure, so they carry no context and
 /// the gate has to be applied by whoever invokes them — the built-in physical
@@ -255,6 +346,17 @@ mod tests {
 
 		// Should have many scalar functions
 		assert!(registry.len() > 100);
+	}
+
+	#[test]
+	fn a_registry_changed_by_a_registration_is_another_registry() {
+		let mut registry = FunctionRegistry::with_builtins();
+		let other = FunctionRegistry::with_builtins();
+		assert_ne!(registry.id(), 0);
+		assert_ne!(registry.id(), other.id());
+		let id = registry.id();
+		registry.register_aggregate(builtin::aggregates::CountField);
+		assert_ne!(registry.id(), id);
 	}
 
 	#[test]

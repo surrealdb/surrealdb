@@ -71,17 +71,21 @@ impl TransactionFactory {
 		write: TransactionType,
 		sequences: Sequences,
 	) -> Result<Transaction> {
+		// The catalog commits finished before the transaction opens, read
+		// before it opens so that its snapshot holds at least those.
+		let settled = self.triggers.catalog_epoch.settled();
 		// Create a new transaction on the datastore
 		let (inner, local) = self.builder.new_transaction(write).await?;
+		let catalog_epoch =
+			settled.filter(|_| inner.sole_writer()).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
 		Ok(Transaction::new(
 			local,
 			sequences,
 			Arc::clone(&self.triggers),
 			Arc::clone(&self.observer),
-			Transactor {
-				inner,
-			},
+			Transactor::new(inner),
 			&self.config,
+			catalog_epoch,
 		))
 	}
 

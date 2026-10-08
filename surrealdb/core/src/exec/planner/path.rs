@@ -227,6 +227,7 @@ impl<'ctx> Planner<'ctx> {
 					| LogicalExpr::RecordId(_)
 					| LogicalExpr::Param(_)
 					| LogicalExpr::Table(_)
+					| LogicalExpr::Mock(_)
 					| LogicalExpr::Constant(_)
 					| LogicalExpr::Prefix {
 						..
@@ -540,7 +541,7 @@ fn extract_body_operator(path: &[Arc<dyn PhysicalExpr>]) -> Option<Arc<dyn ExecO
 /// a destructure alias body, or inside a nested recursion's own body. The
 /// expressions a step holds beside its base — an index, a filter predicate,
 /// method arguments — are not part of the path and are not searched.
-fn contains_repeat_recurse(expr: &LogicalExpr) -> bool {
+pub(crate) fn contains_repeat_recurse(expr: &LogicalExpr) -> bool {
 	fn destructure_contains(fields: &[LogicalDestructureField]) -> bool {
 		fields.iter().any(|field| match field {
 			LogicalDestructureField::Aliased(_, body) => contains_repeat_recurse(body),
@@ -625,6 +626,7 @@ fn contains_repeat_recurse(expr: &LogicalExpr) -> bool {
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::SetField {
 				..

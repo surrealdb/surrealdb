@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_guarded_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -15,22 +14,25 @@ reason = """
 
 [[test.results]]
 value = '''
-'CountScan [ctx: Db] [source: t]
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: t]
 ''''
 
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: n > 1, pre_decode_filter: yes]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: t, direction: Forward, predicate: n > 1, pre_decode_filter: yes]
 ''''
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    Filter [ctx: Db] [predicate: secret = 'hidden']
-        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
-            ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
-                TableScan [ctx: Db] [table: t, direction: Forward]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: secret = 'hidden']
+            ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
+                ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
+                    TableScan [ctx: Db] [table: t, direction: Forward]
 "'''
 
 */

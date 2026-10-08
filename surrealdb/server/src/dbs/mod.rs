@@ -14,7 +14,7 @@ use surrealdb_core::options::EngineOptions;
 use surrealdb_observe::ExecutionObserver;
 use surrealdb_rpc::capabilities::{
 	ArbitraryQueryTarget, Capabilities, EvalQueryTarget, ExperimentalTarget, FuncTarget,
-	MethodTarget, NetTarget, NewPlannerStrategy, RouteTarget, Targets,
+	MethodTarget, NetTarget, RouteTarget, Targets,
 };
 use surrealdb_types::Notification;
 use tokio::time::{Instant, sleep, timeout};
@@ -315,12 +315,12 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(value_parser = super::cli::validator::route_targets)]
 	deny_http: Option<Targets<RouteTarget>>,
 
-	#[arg(
-		help = "Strategy for the streaming query planner: 'best-effort' (default), 'compute-only', or 'all-read-only'"
-	)]
-	#[arg(env = "SURREAL_PLANNER_STRATEGY", long = "planner-strategy")]
-	#[arg(default_value = "best-effort")]
-	planner_strategy: NewPlannerStrategy,
+	// Accepted so that an existing deployment keeps starting, and ignored: the
+	// engine has a single execution path. Hidden from `--help`; `init` logs a
+	// deprecation warning when it is set.
+	#[arg(env = "SURREAL_PLANNER_STRATEGY", long = "planner-strategy", hide = true)]
+	#[arg(value_parser = super::cli::validator::retired_planner_strategy)]
+	planner_strategy: Option<String>,
 }
 
 impl DbsCapabilities {
@@ -667,7 +667,6 @@ fn merge_capabilities(initial: Capabilities, caps: &DbsCapabilities) -> Capabili
 		.without_arbitrary_query(caps.get_deny_arbitrary_query())
 		.with_eval_query(caps.get_allow_eval_query())
 		.without_eval_query(caps.get_deny_eval_query())
-		.with_planner_strategy(caps.planner_strategy)
 }
 
 impl From<DbsCapabilities> for Capabilities {
@@ -864,6 +863,12 @@ pub async fn init<C: TransactionBuilderFactory>(
 	if let Some(true) = strict_mode {
 		warn!(
 			"Strict mode is no longer defined on the server level. Use `DEFINE DATABASE <db> STRICT` instead. Ignoring strict mode flag."
+		);
+	}
+	// Warn about the retired planner strategy option being unused.
+	if capabilities.planner_strategy.is_some() {
+		warn!(
+			"The planner strategy option (`--planner-strategy` / `SURREAL_PLANNER_STRATEGY`) is deprecated and has no effect. Remove it from your configuration."
 		);
 	}
 	// Log specified query timeout
@@ -1855,7 +1860,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
-			planner_strategy: NewPlannerStrategy::default(),
+			planner_strategy: None,
 		};
 		assert_eq!(caps.get_allow_experimental(), Targets::All);
 		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
@@ -1888,7 +1893,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
-			planner_strategy: NewPlannerStrategy::default(),
+			planner_strategy: None,
 		};
 		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
 		assert_eq!(caps.get_allow_eval_query(), Targets::None, "eval is not enabled by allow_all");
@@ -1925,7 +1930,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
-			planner_strategy: NewPlannerStrategy::default(),
+			planner_strategy: None,
 		};
 		assert_eq!(
 			caps.get_allow_funcs(),
@@ -1958,7 +1963,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: Some(Targets::All),
-			planner_strategy: NewPlannerStrategy::default(),
+			planner_strategy: None,
 		};
 		assert_eq!(
 			caps.get_allow_http(),
@@ -1991,7 +1996,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
-			planner_strategy: NewPlannerStrategy::default(),
+			planner_strategy: None,
 		};
 		assert_eq!(
 			caps.get_allow_funcs(),

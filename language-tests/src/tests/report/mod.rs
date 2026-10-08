@@ -375,6 +375,29 @@ impl TestExpectation {
 	}
 }
 
+/// The message the engine answers a statement with when it declines to run
+/// it (the core error `PlannerUnsupported`): a statement the
+/// language accepts that the engine has no plan for. No test may meet one,
+/// whatever it expects, so a test that does fails however its expectations
+/// read.
+const ENGINE_DECLINE: &str = "The engine cannot run this statement:";
+
+/// Every statement of `res` the engine declined to run, as the report names
+/// them; `None` where it declined none.
+fn engine_decline(res: &[Result<SurValue, String>]) -> Option<String> {
+	let declined: Vec<String> = res
+		.iter()
+		.enumerate()
+		.filter_map(|(at, result)| match result {
+			Err(message) if message.contains(ENGINE_DECLINE) => {
+				Some(format!("statement {} was declined by the engine: {message}", at + 1))
+			}
+			_ => None,
+		})
+		.collect();
+	(!declined.is_empty()).then(|| declined.join("\n"))
+}
+
 pub struct TestReport {
 	pub id: TestRunId,
 	pub case: Arc<CaseImports>,
@@ -650,6 +673,9 @@ impl TestReport {
 				res,
 				..
 			} => {
+				if let Some(declined) = engine_decline(&res) {
+					return TestReportKind::Error(TestError::Running(declined));
+				}
 				let expectation = TestExpectation::from_test_config(config);
 				Self::grade_value_results(expectation, res, match_ctx).await
 			}

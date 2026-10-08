@@ -7,15 +7,13 @@ auth = { level = "owner" }
 [test]
 reason = """
 	Counting by key — reading a count from the keys a scan can see, without
-	reading a record — is a fast path the two engines take for different sets
-	of statements. The per-row engine declines it for any `WHERE`, whether or
-	not the predicate survives folding, so `WHERE true` changes which plan it
-	runs; it takes it once per source, where the streaming planner takes it for
-	a single source only and unions plain scans otherwise.
+	reading a record — is a fast path taken for some statements and not for
+	others: whether a `WHERE true` survives folding, and whether one source or
+	several are counted, change which plan runs.
 
 	None of that is visible in an answer. `GROUP ALL` opens its group whether
 	or not a row reaches it, so a source with nothing to count reports a count
-	of zero on either plan, and a source with rows reports the same number
+	of zero on every plan, and a source with rows reports the same number
 	however the rows were counted. This test is what keeps it that way: a fast
 	path that changed an answer would be a bug in the fast path, not a
 	divergence to pin.

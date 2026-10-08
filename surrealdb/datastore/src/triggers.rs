@@ -1,7 +1,8 @@
-//! Wake-ups a committing transaction fires.
+//! Wake-ups a committing transaction fires, and the count of its datastore's
+//! catalog commits ([`CatalogEpoch`]).
 //!
-//! Both are notified after a commit makes the relevant work visible, never
-//! before. They are bundled behind one `Arc` rather than carried as separate
+//! The wake-ups are notified after a commit makes the relevant work visible,
+//! never before. They are bundled behind one `Arc` rather than carried as separate
 //! fields because `TransactionFactory` is held by value inside
 //! `IndexBuildReservationRelease`, and `Transaction` is held by value inside
 //! large async futures: adding a second pointer to either grew those futures
@@ -9,6 +10,7 @@
 //! types the size they were.
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::Mutex;
 use tokio::sync::Notify;
@@ -21,9 +23,54 @@ use crate::values::graph::GraphFoldScope;
 /// through the durable commit-time path instead.
 const GRAPH_FOLD_OBSERVATION_CAP: usize = 4096;
 
+/// How many commits of transactions that stamped a catalog version have
+/// started and finished through one datastore.
+///
+/// Where the datastore is the store's sole writer
+/// ([`surrealdb_kvs::Transactable::sole_writer`]), the catalog a transaction
+/// sees is named by the count of such commits finished before it opened, as
+/// long as none was under way when it opened and none has started since
+/// ([`crate::tx::Transaction::catalog_epoch`]): every catalog write stamps a
+/// version, so a commit that changes the catalog is one of these.
+#[derive(Default)]
+pub(crate) struct CatalogEpoch {
+	started: AtomicU64,
+	finished: AtomicU64,
+}
+
+impl CatalogEpoch {
+	/// The count of finished catalog commits, where none is under way.
+	///
+	/// `finished` is read first: a commit under way when it is read has
+	/// started by the time `started` is, so the two differ.
+	pub(crate) fn settled(&self) -> Option<u64> {
+		let finished = self.finished.load(Ordering::SeqCst);
+		let started = self.started.load(Ordering::SeqCst);
+		(started == finished).then_some(finished)
+	}
+
+	/// Count a catalog commit as under way until the guard is dropped, which
+	/// the caller does once the commit has returned, whether or not it took.
+	pub(crate) fn committing(&self) -> CatalogCommit<'_> {
+		self.started.fetch_add(1, Ordering::SeqCst);
+		CatalogCommit(self)
+	}
+}
+
+/// A catalog commit under way; see [`CatalogEpoch::committing`].
+pub(crate) struct CatalogCommit<'a>(&'a CatalogEpoch);
+
+impl Drop for CatalogCommit<'_> {
+	fn drop(&mut self) {
+		self.0.finished.fetch_add(1, Ordering::SeqCst);
+	}
+}
+
 /// The set of post-commit wake-ups shared by a datastore and its transactions.
 #[derive(Default)]
 pub struct CommitTriggers {
+	/// The catalog commits made through the datastore.
+	pub(crate) catalog_epoch: CatalogEpoch,
 	/// Async event processing, notified when a commit queues events.
 	pub async_event: Notify,
 	/// Index compaction, notified when a commit queues compaction work so the

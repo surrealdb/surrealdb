@@ -8,8 +8,8 @@ use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
 use crate::catalog::{
-	DatabaseId, FromStored, LogicalPermissionBody, NamespaceId, Permission, Permissions,
-	StoredPermissions, StoredViewDefinition, ViewDefinition,
+	DatabaseId, FromStored, LogicalPermissions, NamespaceId, Permission, PermissionKind,
+	Permissions, StoredPermissions, StoredViewDefinition, ViewDefinition,
 };
 use crate::expr::ChangeFeed;
 use crate::expr::logical::LogicalPermission;
@@ -270,13 +270,15 @@ impl InfoStructure for TableDefinition {
 
 /// Runtime form of [`StoredTableDefinition`].
 ///
-/// The `PERMISSIONS FOR select` clause is carried twice: as the [`Permission`]
-/// the legacy engine evaluates, inside `permissions`, and as a lazily compiled
-/// logical body the streaming engine's analyzer reads. Both come from the
-/// stored text, so `select_body` names the same clause as `permissions.select`.
-/// A constructor that sets one half must set the other from the same source:
-/// [`LogicalPermissionBody::of`] does so from the expression a `DEFINE` or
-/// `ALTER` statement produced. The body is not part of the stored form.
+/// Every `PERMISSIONS` clause is carried twice: as the [`Permission`] the
+/// legacy engine evaluates, inside `permissions`, and as a lazily compiled
+/// logical body the streaming engine's analyzer reads, inside
+/// `permissions_body`. Both come from the stored text, so each body names the
+/// same clause as its `permissions` half. A constructor that sets one half
+/// must set the other from the same source: [`LogicalPermissions::of`] does so
+/// from the clauses a `DEFINE` or `ALTER` statement produced, and takes the
+/// whole set at once so no clause can be left behind. The bodies are not part
+/// of the stored form.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TableDefinition {
 	pub namespace_id: NamespaceId,
@@ -287,9 +289,9 @@ pub struct TableDefinition {
 	pub schemafull: bool,
 	pub view: Option<ViewDefinition>,
 	pub permissions: Permissions,
-	/// The `PERMISSIONS FOR select` clause in logical form; see
-	/// [`Self::select_permission_logical`].
-	pub select_body: LogicalPermissionBody,
+	/// The `PERMISSIONS` clauses in logical form; see
+	/// [`Self::permission_logical`].
+	pub permissions_body: LogicalPermissions,
 	pub table_type: TableType,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<String>,
@@ -340,7 +342,7 @@ impl FromStored for TableDefinition {
 				schemafull: stored.schemafull,
 				view: stored.view.as_ref().map(ViewDefinition::from_stored).transpose()?,
 				permissions: Permissions::from_stored(&stored.permissions)?,
-				select_body: LogicalPermissionBody::from_stored(&stored.permissions.select),
+				permissions_body: LogicalPermissions::from_stored(&stored.permissions),
 				table_type: stored.table_type.clone(),
 				changefeed: stored.changefeed,
 				comment: stored.comment.clone(),
@@ -365,14 +367,24 @@ impl FromStored for TableDefinition {
 }
 
 impl TableDefinition {
-	/// The `PERMISSIONS FOR select` clause in logical form, compiling its
-	/// guard on first call and keeping it for the life of the definition, so
-	/// a statement binding this table does not re-lower the clause.
+	/// The `PERMISSIONS FOR select` clause in logical form; see
+	/// [`Self::permission_logical`].
+	pub fn select_permission_logical(&self) -> anyhow::Result<LogicalPermission> {
+		self.permission_logical(PermissionKind::Select)
+	}
+
+	/// One `PERMISSIONS` clause in logical form, compiling its guard on first
+	/// call and keeping it for the life of the definition, so a statement
+	/// binding this table does not re-lower the clause.
+	///
+	/// Which clause governs a statement is the caller's to decide: a read of
+	/// the table is gated by `select`, and a mutation's subjects by the clause
+	/// its statement kind names.
 	///
 	/// Errs when the clause has no logical form; the failure is remembered
 	/// and repeated calls answer the same.
-	pub fn select_permission_logical(&self) -> anyhow::Result<LogicalPermission> {
-		self.select_body.logical()
+	pub fn permission_logical(&self, kind: PermissionKind) -> anyhow::Result<LogicalPermission> {
+		self.permissions_body.clause(kind).logical()
 	}
 
 	/// See [`StoredTableDefinition::allows_normal`]; same predicate on the
@@ -431,10 +443,17 @@ mod tests {
 	use surrealdb_types::ToSql;
 
 	use super::*;
-	use crate::catalog::ExprText;
+	use crate::catalog::{ExprText, LogicalPermissionBody};
 	use crate::expr::Expr;
 
 	fn definition(select: Permission) -> TableDefinition {
+		permissioned(Permissions {
+			select,
+			..Default::default()
+		})
+	}
+
+	fn permissioned(permissions: Permissions) -> TableDefinition {
 		TableDefinition {
 			namespace_id: NamespaceId(1),
 			database_id: DatabaseId(1),
@@ -443,11 +462,8 @@ mod tests {
 			drop: false,
 			schemafull: false,
 			view: None,
-			select_body: LogicalPermissionBody::of(&select),
-			permissions: Permissions {
-				select,
-				..Default::default()
-			},
+			permissions_body: LogicalPermissions::of(&permissions),
+			permissions,
 			table_type: TableType::Any,
 			changefeed: None,
 			comment: None,
@@ -478,7 +494,7 @@ mod tests {
 		let loaded = TableDefinition::from_stored(&def.to_stored()).unwrap();
 		assert_eq!(loaded, def);
 
-		let LogicalPermissionBody::Specific(body) = &loaded.select_body else {
+		let LogicalPermissionBody::Specific(body) = &loaded.permissions_body.select else {
 			panic!("a conditional permission has a body");
 		};
 		let first = body.logical().unwrap();
@@ -501,18 +517,31 @@ mod tests {
 		assert_eq!(none.select_permission_logical().unwrap(), LogicalPermission::None);
 	}
 
-	/// A guard the lowering cannot express compiles as the legacy `Expr` and
-	/// fails as a logical body, and the failure is remembered rather than
-	/// retried.
+	/// Each clause has a body of its own, and a body holds the clause it is
+	/// named for: a caller asking for one clause cannot be answered with
+	/// another's guard.
 	#[test]
-	fn a_guard_with_no_logical_form_fails_to_compile_and_stays_failed() {
-		let guard: Expr = ExprText::from_raw("id IN |t:1..3|").compile().unwrap();
-		let def = definition(Permission::Specific(guard));
+	fn every_clause_carries_its_own_body() {
+		let guard = |text: &str| Permission::Specific(ExprText::from_raw(text).compile().unwrap());
+		let def = permissioned(Permissions {
+			select: guard("readable = true"),
+			create: Permission::Full,
+			update: guard("owner = $auth.id"),
+			delete: Permission::None,
+		});
 		let loaded = TableDefinition::from_stored(&def.to_stored()).unwrap();
-		assert_eq!(loaded.permissions, def.permissions);
-		let first = loaded.select_permission_logical().unwrap_err().to_string();
-		let second = loaded.select_permission_logical().unwrap_err().to_string();
-		assert!(first.contains("no logical form"), "{first}");
-		assert_eq!(first, second);
+		assert_eq!(loaded, def);
+
+		let clause = |kind| loaded.permission_logical(kind).unwrap();
+		let LogicalPermission::Specific(select) = clause(PermissionKind::Select) else {
+			panic!("a conditional permission has a guard");
+		};
+		assert_eq!(select.to_sql(), "readable = true");
+		assert_eq!(clause(PermissionKind::Create), LogicalPermission::Full);
+		let LogicalPermission::Specific(update) = clause(PermissionKind::Update) else {
+			panic!("a conditional permission has a guard");
+		};
+		assert_eq!(update.to_sql(), "owner = $auth.id");
+		assert_eq!(clause(PermissionKind::Delete), LogicalPermission::None);
 	}
 }

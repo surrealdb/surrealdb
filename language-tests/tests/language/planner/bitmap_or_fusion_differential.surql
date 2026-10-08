@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Differential check: top-level OR bitmap union plans (all-ro) return identical results to the legacy engine (compute-only). Results are normalized with array::sort because the fused shapes forbid ORDER BY (an ORDER keeps the streaming union plan), and a bitmap resolve emits in doc-ID order while streaming plans emit branch-merge order."
+reason = "Top-level OR bitmap union plans return the rows of the disjunction they replace. Results are normalized with array::sort because the fused shapes forbid ORDER BY (an ORDER keeps the streaming union plan), and a bitmap resolve emits in doc-ID order while streaming plans emit branch-merge order."
 issue = 550
 
 [[test.results]]

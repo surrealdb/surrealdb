@@ -19,8 +19,6 @@
 
 use std::sync::Arc;
 
-use surrealdb_types::ToSql;
-
 use super::super::Planner;
 use super::super::util::{
 	check_forbidden_group_by_params, field_path_from_expr, get_effective_limit_literal,
@@ -36,9 +34,11 @@ use crate::exec::operators::{
 #[cfg(all(storage, not(target_family = "wasm")))]
 use crate::exec::operators::{ExternalSort, ExternalSortByKey};
 use crate::exec::planner::aggregate::aggregate_may_run_column_major;
-use crate::exec::topk_pushdown::{TopKPushdownHandle, TopKPushdownReason};
+use crate::exec::topk_pushdown::TopKPushdownHandle;
+#[cfg(test)]
+use crate::exec::topk_pushdown::TopKPushdownReason;
 use crate::exec::{ExecOperator, PhysicalExpr};
-use crate::expr::logical::{LogicalExpr, LogicalField, LogicalFields, LogicalOrdering};
+use crate::expr::logical::{LogicalExpr, LogicalFields, LogicalOrdering};
 
 // ============================================================================
 // Pipeline-state types
@@ -51,6 +51,8 @@ use crate::expr::logical::{LogicalExpr, LogicalField, LogicalFields, LogicalOrde
 /// system enforces that exactly one representation is in flight, so
 /// callers can't accidentally provide both a predicate to compile and a
 /// precompiled one.
+// Constructed or read only by the operator-tree oracle, which test builds compile.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Default)]
 pub(crate) enum WhereClauseState {
 	/// No predicate to apply at the pipeline level. Either the source
@@ -88,6 +90,7 @@ pub(crate) struct SelectPipelineConfig {
 	pub topk_pushdown: Option<TopKPushdownHandle>,
 }
 
+#[cfg(test)]
 /// Describes how the WHERE predicate should be handled after source planning.
 pub(crate) enum FilterAction {
 	/// Source did not analyze the predicate. Use the original `cond_for_filter`.
@@ -98,6 +101,7 @@ pub(crate) enum FilterAction {
 	Residual(LogicalExpr),
 }
 
+#[cfg(test)]
 /// Result of planning FROM sources.
 ///
 /// Tracks how the WHERE predicate and limit/start were handled by the
@@ -114,7 +118,9 @@ pub(crate) struct PlannedSource {
 	pub(crate) topk_pushdown: Option<TopKPushdownHandle>,
 }
 
+#[cfg(test)]
 impl PlannedSource {
+	#[cfg(test)]
 	/// A source the pipeline treats as opaque: nothing was pushed into it, so
 	/// every clause above it applies in full.
 	pub(crate) fn opaque(operator: Arc<dyn ExecOperator>) -> Self {
@@ -127,6 +133,7 @@ impl PlannedSource {
 	}
 }
 
+#[cfg(test)]
 /// Determine `FilterAction` when a scan predicate has been compiled.
 ///
 /// When the planner compiled a `scan_predicate` (physical WHERE expression),
@@ -147,6 +154,7 @@ pub(crate) fn filter_action_for_predicate(
 // TopK threshold pushdown request
 // ============================================================================
 
+#[cfg(test)]
 /// First ORDER BY key analysis for TopK threshold pushdown, computed by
 /// [`compute_topk_pushdown_request`] before source planning.
 pub(crate) struct TopKFirstKeySpec {
@@ -157,6 +165,7 @@ pub(crate) struct TopKFirstKeySpec {
 	pub(crate) key_count: usize,
 }
 
+#[cfg(test)]
 /// Whether (and why not) the SELECT's ORDER BY + LIMIT shape allows the scan
 /// to reject rows against the TopK heap's threshold before record decode.
 ///
@@ -176,6 +185,7 @@ pub(crate) enum TopKPushdownRequest {
 	Eligible(TopKFirstKeySpec),
 }
 
+#[cfg(test)]
 /// Analyse the SELECT's ORDER BY / LIMIT / START for TopK threshold pushdown.
 ///
 /// Mirrors [`Planner::plan_sort_consolidated`]'s first-key resolution: any
@@ -299,7 +309,7 @@ impl<'ctx> Planner<'ctx> {
 			order,
 			limit,
 			start,
-			omit,
+			mut omit,
 			tempfiles,
 			topk_pushdown,
 		} = config;
@@ -325,15 +335,43 @@ impl<'ctx> Planner<'ctx> {
 			}
 		};
 
-		let split_op = if let Some(exprs) = split {
-			split_reads_the_projected_row(&exprs, fields.as_ref())?;
+		// Shared expression registry for deduplication across sort and
+		// projection. Expressions computed for ORDER BY are reused by the
+		// projection step. Reserve the SELECT field names so that synthetic
+		// `_eN` names never collide with fields the user explicitly selected.
+		let mut registry = ExpressionRegistry::with_reserved_and_protected_names(
+			fields.as_ref().map(super::collect_field_names).unwrap_or_default(),
+			fields.as_ref().map(super::collect_simple_source_field_names).unwrap_or_default(),
+		);
+
+		// A `SPLIT` names a field of the row the statement returns, so the row
+		// it divides is the projected one: an alias names a field the source
+		// row does not have, a path through a record link exists only once the
+		// projection has built it, a name the projection reuses holds a
+		// different value on either side, and a field reading the split one is
+		// owed the whole of it. The pipeline projects last for every other
+		// shape, because narrow rows sort and page more cheaply; a statement
+		// with a `SPLIT` projects here instead and the tail leaves its rows
+		// alone.
+		//
+		// `SPLIT` and `GROUP` are mutually exclusive in one statement, which
+		// the parser enforces, so the aggregation below never receives rows
+		// this projected for the statement.
+		let (split_op, split_projected) = if let Some(exprs) = split {
+			let projected = match fields.clone() {
+				Some(fields) => {
+					let omit = std::mem::take(&mut omit);
+					self.plan_projections_fast(fields, omit, filtered, &mut registry).await?
+				}
+				None => filtered,
+			};
 			let mut keys = Vec::with_capacity(exprs.len());
 			for expr in &exprs {
 				keys.push(self.physical_expr(expr.clone()).await?);
 			}
-			Arc::new(Split::new(filtered, exprs, keys)?) as Arc<dyn ExecOperator>
+			(Arc::new(Split::new(projected, exprs, keys)?) as Arc<dyn ExecOperator>, true)
 		} else {
-			filtered
+			(filtered, false)
 		};
 
 		let (grouped, skip_projections) = if let Some(group_by) = group {
@@ -353,17 +391,8 @@ impl<'ctx> Planner<'ctx> {
 
 			(Arc::new(aggregate) as Arc<dyn ExecOperator>, true)
 		} else {
-			(split_op, false)
+			(split_op, split_projected)
 		};
-
-		// Shared expression registry for deduplication across sort and projection.
-		// Expressions computed for ORDER BY are reused by the projection step.
-		// Reserve the SELECT field names so that synthetic `_eN` names never
-		// collide with fields the user explicitly selected.
-		let mut registry = ExpressionRegistry::with_reserved_and_protected_names(
-			fields.as_ref().map(super::collect_field_names).unwrap_or_default(),
-			fields.as_ref().map(super::collect_simple_source_field_names).unwrap_or_default(),
-		);
 
 		let (sorted, sort_only_omits) = if let Some(order) = order {
 			// Sort elimination: if the input is already sorted in the required
@@ -693,18 +722,19 @@ impl<'ctx> Planner<'ctx> {
 						<= self.ctx.config.exec.max_order_limit_priority_queue_size as usize
 				{
 					let mut topk = SortTopKByKey::new(computed, sort_keys, effective_limit);
-					// Install the TopK threshold publish side only when the
-					// sort keys actually built here match what the scan-side
-					// probe was compiled against (path, direction, modifiers,
-					// key count). Any divergence — alias resolution or
-					// registry compute differing from the request-time
-					// analysis — leaves the cell unpublished, keeping the
-					// scan probe dormant rather than wrong.
+					// Install the TopK threshold pushdown only when the sort
+					// keys actually built here match what the scan-side probe
+					// was compiled against (path, direction, modifiers, key
+					// count). Any divergence — alias resolution or registry
+					// compute differing from the request-time analysis —
+					// leaves the pushdown without a publisher: the scan finds
+					// no threshold and reads every row rather than the wrong
+					// ones.
 					if let Some(handle) = topk_pushdown
 						&& topk.sort_keys.first() == Some(&handle.expected_first_key)
 						&& topk.sort_keys.len() == handle.expected_key_count
 					{
-						topk = topk.with_threshold_cell(handle.cell);
+						topk = topk.with_topk_pushdown(handle.pushdown);
 					}
 					return Ok((Arc::new(topk) as Arc<dyn ExecOperator>, sort_only_fields));
 				}
@@ -716,87 +746,6 @@ impl<'ctx> Planner<'ctx> {
 			}
 		}
 	}
-}
-
-/// A `SPLIT` names a field of the row the statement returns, so the split
-/// belongs above the projection. The streaming pipeline projects last, and
-/// splits the row the source produced instead, which is the same row only
-/// where the projection hands the split field through untouched.
-///
-/// Where it does not, the two differ and the split silently does nothing or
-/// splits the wrong values: an aliased field (`own AS x … SPLIT x`) is not on
-/// the source row at all; a nested path the projection materialises
-/// (`link.tags`, over a record link) is not reachable on it either; a name the
-/// projection reuses for another value (`other AS own … SPLIT own`) is a
-/// different value before and after; and a second field reading the split one
-/// (`own AS a, own … SPLIT own`) would see the split value where it is owed
-/// the whole.
-///
-/// Such a statement is declined so it runs on the per-row engine, which
-/// projects each row before splitting it.
-fn split_reads_the_projected_row(
-	targets: &[LogicalExpr],
-	fields: Option<&LogicalFields>,
-) -> Result<(), Error> {
-	// No projection at all, or `SELECT *` alone: the row reaching the split is
-	// the row the statement returns.
-	let Some(LogicalFields::Select(field_list)) = fields else {
-		if fields.is_none() {
-			return Ok(());
-		}
-		return Err(unsplittable(targets));
-	};
-	if field_list.iter().all(|field| matches!(field, LogicalField::All)) {
-		return Ok(());
-	}
-
-	for target in targets {
-		let LogicalExpr::Field(name) = target else {
-			return Err(unsplittable(targets));
-		};
-		let name = name.as_str();
-		let mut passed_through = false;
-		for field in field_list {
-			match field {
-				// `*` carries the source row's own fields through under their
-				// own names, the split field among them.
-				LogicalField::All => passed_through = true,
-				LogicalField::Single {
-					expr,
-					alias,
-					..
-				} => {
-					let lands_here = match alias {
-						Some(path) => path.as_field() == Some(name),
-						None => matches!(expr, LogicalExpr::Field(n) if n.as_str() == name),
-					};
-					let reads_it =
-						expr.any(|e| matches!(e, LogicalExpr::Field(n) if n.as_str() == name));
-					if lands_here && matches!(expr, LogicalExpr::Field(n) if n.as_str() == name) {
-						passed_through = true;
-					} else if lands_here || reads_it {
-						// The name holds a different value after the
-						// projection, or another field reads the whole of it.
-						return Err(unsplittable(targets));
-					}
-				}
-			}
-		}
-		if !passed_through {
-			return Err(unsplittable(targets));
-		}
-	}
-	Ok(())
-}
-
-/// The decline [`split_reads_the_projected_row`] raises.
-fn unsplittable(targets: &[LogicalExpr]) -> Error {
-	crate::exec::Error::PlannerUnsupported(format!(
-		"a SPLIT of this shape names a field of the projected row rather than of the row \
-		 beneath it: {}",
-		targets.iter().map(ToSql::to_sql).collect::<Vec<_>>().join(", ")
-	))
-	.into()
 }
 
 #[cfg(test)]
@@ -821,48 +770,32 @@ mod tests {
 		(split, clauses.project.map(|project| project.fields))
 	}
 
-	fn splits_the_projected_row(sql: &str) -> bool {
-		let (targets, fields) = split_and_fields(sql);
-		split_reads_the_projected_row(&targets, fields.as_ref()).is_ok()
-	}
-
+	/// Every `SPLIT` shape reaches the pipeline with its targets and its
+	/// selection intact, whatever the projection does to the split field.
+	/// The pipeline projects before it splits, so no shape is turned away
+	/// for naming a field only the projected row has.
 	#[test]
-	fn split_plans_where_the_projection_hands_the_field_through() {
+	fn every_split_shape_carries_its_targets_and_selection() {
 		for sql in [
-			// The field is carried through under its own name, so the row the
-			// split sees is the row the statement returns.
+			// The field is carried through under its own name.
 			"SELECT id, own FROM t SPLIT own",
-			"SELECT own FROM t SPLIT own",
 			"SELECT * FROM t SPLIT own",
-			"SELECT * FROM t SPLIT link.tags",
 			"SELECT id, own, other FROM t SPLIT own, other",
-			// An unrelated alias does not touch the split field.
-			"SELECT id, own, other AS o FROM t SPLIT own",
-		] {
-			assert!(splits_the_projected_row(sql), "`{sql}` should plan");
-		}
-	}
-
-	#[test]
-	fn split_declines_where_the_projection_makes_a_different_row() {
-		for sql in [
 			// The name exists only after the projection.
 			"SELECT id, own AS x FROM t SPLIT x",
 			"SELECT id, [1, 2, 3] AS x FROM t SPLIT x",
 			"SELECT id, link.tags AS x FROM t SPLIT x",
-			// The target is a path rather than a field of the row.
+			// The target is a path the projection builds.
 			"SELECT id, link.tags FROM t SPLIT link.tags",
 			// The name holds a different value on either side.
 			"SELECT id, other AS own FROM t SPLIT own",
 			"SELECT id, array::distinct(own) AS own FROM t SPLIT own",
 			// Another field is owed the whole of the split value.
 			"SELECT id, own AS a, own FROM t SPLIT own",
-			// One target of several is enough to decline.
-			"SELECT id, own, other AS b FROM t SPLIT own, b",
-			// A `VALUE` projection is not the row the split names.
-			"SELECT VALUE own FROM t SPLIT own",
 		] {
-			assert!(!splits_the_projected_row(sql), "`{sql}` should decline");
+			let (targets, fields) = split_and_fields(sql);
+			assert!(!targets.is_empty(), "`{sql}` carries its SPLIT targets");
+			assert!(fields.is_some(), "`{sql}` carries its selection");
 		}
 	}
 }

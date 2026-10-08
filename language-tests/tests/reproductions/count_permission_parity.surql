@@ -45,10 +45,7 @@ SELECT count() FROM item WHERE n < 2 GROUP ALL;
 -- identity sees nothing, and the count must not over-report either.
 --
 -- The count is read through an index expression rather than asserted as a
--- whole statement result: `GROUP ALL` over a fully filtered table yields
--- `[]` under the compute-only planner and `[{ count: 0 }]` under the
--- read-optimised ones. That shape difference is orthogonal to this fix --
--- the count is 0 either way -- and pinning it here would assert unrelated
--- behaviour.
+-- whole statement result, so the test pins the count itself and not the shape
+-- of a `GROUP ALL` over a fully filtered table.
 RETURN array::len((SELECT id FROM secret));
 RETURN (SELECT count() FROM secret GROUP ALL)[0].count ?? 0;

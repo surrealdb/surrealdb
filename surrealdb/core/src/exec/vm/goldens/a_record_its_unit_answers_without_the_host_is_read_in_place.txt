@@ -1,0 +1,84 @@
+### SELECT n, author FROM post ORDER BY n FETCH author
+{ author: { id: person:0, name: '0' }, n: 0 }
+{ author: { id: person:1, name: '1' }, n: 1 }
+{ author: { id: person:2, name: '2' }, n: 2 }
+{ author: { id: person:3, name: '3' }, n: 3 }
+{ author: { id: person:0, name: '0' }, n: 4 }
+{ author: { id: person:1, name: '1' }, n: 5 }
+{ author: { id: person:2, name: '2' }, n: 6 }
+{ author: { id: person:3, name: '3' }, n: 7 }
+{ author: { id: person:0, name: '0' }, n: 8 }
+{ author: { id: person:1, name: '1' }, n: 9 }
+{ author: { id: person:2, name: '2' }, n: 10 }
+{ author: { id: person:3, name: '3' }, n: 11 }
+{ author: { id: person:0, name: '0' }, n: 12 }
+{ author: { id: person:1, name: '1' }, n: 13 }
+{ author: { id: person:2, name: '2' }, n: 14 }
+{ author: { id: person:3, name: '3' }, n: 15 }
+{ author: { id: person:0, name: '0' }, n: 16 }
+{ author: { id: person:1, name: '1' }, n: 17 }
+{ author: { id: person:2, name: '2' }, n: 18 }
+{ author: { id: person:3, name: '3' }, n: 19 }
+### SELECT n, author.name AS name FROM post ORDER BY n
+{ n: 0, name: '0' }
+{ n: 1, name: '1' }
+{ n: 2, name: '2' }
+{ n: 3, name: '3' }
+{ n: 4, name: '0' }
+{ n: 5, name: '1' }
+{ n: 6, name: '2' }
+{ n: 7, name: '3' }
+{ n: 8, name: '0' }
+{ n: 9, name: '1' }
+{ n: 10, name: '2' }
+{ n: 11, name: '3' }
+{ n: 12, name: '0' }
+{ n: 13, name: '1' }
+{ n: 14, name: '2' }
+{ n: 15, name: '3' }
+{ n: 16, name: '0' }
+{ n: 17, name: '1' }
+{ n: 18, name: '2' }
+{ n: 19, name: '3' }
+### SELECT n, pet FROM post ORDER BY n FETCH pet
+{ n: 0, pet: { id: pet:0, label: 'pet 0', name: '0' } }
+{ n: 1, pet: { id: pet:1, label: 'pet 1', name: '1' } }
+{ n: 2, pet: { id: pet:2, label: 'pet 2', name: '2' } }
+{ n: 3, pet: { id: pet:3, label: 'pet 3', name: '3' } }
+{ n: 4, pet: { id: pet:0, label: 'pet 0', name: '0' } }
+{ n: 5, pet: { id: pet:1, label: 'pet 1', name: '1' } }
+{ n: 6, pet: { id: pet:2, label: 'pet 2', name: '2' } }
+{ n: 7, pet: { id: pet:3, label: 'pet 3', name: '3' } }
+{ n: 8, pet: { id: pet:0, label: 'pet 0', name: '0' } }
+{ n: 9, pet: { id: pet:1, label: 'pet 1', name: '1' } }
+{ n: 10, pet: { id: pet:2, label: 'pet 2', name: '2' } }
+{ n: 11, pet: { id: pet:3, label: 'pet 3', name: '3' } }
+{ n: 12, pet: { id: pet:0, label: 'pet 0', name: '0' } }
+{ n: 13, pet: { id: pet:1, label: 'pet 1', name: '1' } }
+{ n: 14, pet: { id: pet:2, label: 'pet 2', name: '2' } }
+{ n: 15, pet: { id: pet:3, label: 'pet 3', name: '3' } }
+{ n: 16, pet: { id: pet:0, label: 'pet 0', name: '0' } }
+{ n: 17, pet: { id: pet:1, label: 'pet 1', name: '1' } }
+{ n: 18, pet: { id: pet:2, label: 'pet 2', name: '2' } }
+{ n: 19, pet: { id: pet:3, label: 'pet 3', name: '3' } }
+### SELECT n, pet.label AS label FROM post ORDER BY n
+{ label: 'pet 0', n: 0 }
+{ label: 'pet 1', n: 1 }
+{ label: 'pet 2', n: 2 }
+{ label: 'pet 3', n: 3 }
+{ label: 'pet 0', n: 4 }
+{ label: 'pet 1', n: 5 }
+{ label: 'pet 2', n: 6 }
+{ label: 'pet 3', n: 7 }
+{ label: 'pet 0', n: 8 }
+{ label: 'pet 1', n: 9 }
+{ label: 'pet 2', n: 10 }
+{ label: 'pet 3', n: 11 }
+{ label: 'pet 0', n: 12 }
+{ label: 'pet 1', n: 13 }
+{ label: 'pet 2', n: 14 }
+{ label: 'pet 3', n: 15 }
+{ label: 'pet 0', n: 16 }
+{ label: 'pet 1', n: 17 }
+{ label: 'pet 2', n: 18 }
+{ label: 'pet 3', n: 19 }

@@ -32,8 +32,7 @@ use std::sync::Arc;
 use super::pipeline::{FieldState, build_field_state, materialise_fields_with_permissions};
 use crate::catalog::providers::TableProvider;
 use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, should_check_perms,
-	table_select_permission_physical_runtime, validate_record_user_access,
+	PhysicalPermission, check_permission_for_value, should_check_perms, validate_record_user_access,
 };
 use crate::exec::{ControlFlowExt, ExecutionContext};
 use crate::expr::ControlFlow;
@@ -113,16 +112,7 @@ impl FetchFieldStateCache {
 	) -> Result<&'a TableFetchState, ControlFlow> {
 		if !self.tables.contains_key(table) {
 			let permission = if check_perms {
-				let db_ctx =
-					ctx.database().context("MATCH binding fetch requires database context")?;
-				let version = ctx.version_stamp();
-				let table_def = db_ctx
-					.get_table_def(table, version)
-					.await
-					.context("Failed to get table definition")?;
-				table_select_permission_physical_runtime(table_def.as_deref(), ctx)
-					.await
-					.context("Failed to convert permission")?
+				crate::exec::vm::descriptor::select_permission(ctx, table).await?
 			} else {
 				// Permission enforcement is bypassed for this session; treat
 				// the table as unconditionally allowed and skip field-level
@@ -267,7 +257,7 @@ mod tests {
 	// The cache is a plain owned struct; verify it constructs and resolves
 	// `check_perms` lazily without a datastore for the trivial paths. The
 	// full permission/computed-field behavior is exercised by the language
-	// tests over the streaming engine (graph/lookup + gql corpora).
+	// tests over the engine (graph/lookup + gql corpora).
 
 	#[test]
 	fn empty_cache_starts_uninitialised() {

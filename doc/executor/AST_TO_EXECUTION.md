@@ -1,24 +1,25 @@
 # From the surface AST to execution
 
-How a statement gets from the parser to a running operator tree, which engine
-runs it, and where the catalog enters the plan. The contracts live in the
+How a statement gets from the parser to a running program, what runs it, and
+where the catalog enters the plan. The contracts live in the
 module docs named below; this document is the map between them, and the plan
 for where the logical layer goes next ([The target algebra](#the-target-algebra),
 [The steps](#the-steps)).
 
 ## The principle
 
-**`expr::Expr` is the legacy engine's input and nothing else's.** The streaming
-engine's input is `LogicalOp`, a tree of operators whose scalars are
-`LogicalExpr`. Nothing lowers from `expr::Expr`, nothing adapts a value that
-may be "in either form", and no statement is rebuilt from a plan.
+**One engine runs every statement: the bytecode VM** (ADR 0007). Its input is
+`LogicalOp`, a tree of operators whose scalars are `LogicalExpr`. `expr::Expr`
+is the stored and wire form of a statement and is never executed: nothing
+lowers from it to run a statement, nothing adapts a value that may be "in
+either form", and no statement is rebuilt from a plan. A statement the VM does
+not lower is an error; no other executor takes it.
 
 Two consequences shape everything below:
 
-- **One fork, one lowering.** The engine is chosen from the surface statement,
-  at a statement boundary, and lowering takes the surface AST. There is no
-  second place that decides, and no second encoding of a statement between
-  the parser and the engines.
+- **One lowering.** Lowering takes the surface AST at a statement boundary.
+  There is no choice of engine to make, and no second encoding of a statement
+  between the parser and the VM.
 - **The catalog enters the logical plan.** Table permissions, field
   permissions and computed fields are nodes in the bound plan, so
   optimisation sees them as what they are — predicates and expressions — and
@@ -37,46 +38,38 @@ Two consequences shape everything below:
 sql::Ast ─ per statement, in the executor
 │
 ├─ BEGIN / COMMIT / CANCEL / OPTION ──────────────────────── the driver
-├─ USE / KILL / LIVE / SHOW / ACCESS ─ into() ─ expr::…Statement ─ legacy compute
-├─ Expr(e) ─ engine_for(&e)
-│     ├─ Legacy ────── expr::Expr::from(e) ──────────────── legacy compute
-│     └─ Streaming ─── lower(e) ──┬─ LogicalOp ─ bind ──┬─ fold ─ ExecOperator ─ exec
-│                                 │                     │
-│                        NoLogicalForm           PlannerUnsupported
-│                                 │                     │
-│                                 └──────────┬──────────┘
-│                                            └─ expr::Expr::from(e) ─ legacy compute
+├─ Expr(e) ─ lower(e) ─ LogicalOp ─ bind ─ map ─ optimize ─ lower ─ Program ─ VM
+│                │
+│          NoLogicalForm / unsupported ─────────────────── error
 │
-GQL text ─ parse_gql ─ LogicalOp::Match ─────── plan_match ─── ExecOperator ─ exec
+GQL text ─ parse_gql ─ LogicalOp::Match ─────── bind ─ map ─ optimize ─ lower ─ Program ─ VM
 ```
 
-Each arm converts its own payload at the moment that arm runs. A bare
-expression is converted to `expr::Expr` only on a branch that reaches the
-legacy engine.
+`USE`, `LIVE`, `KILL`, `SHOW`, `ACCESS` and every schema statement are
+statements like any other: each lowers to a `LogicalOp` and runs as VM
+instructions. Only the transaction statements (`BEGIN`, `COMMIT`, `CANCEL`) and
+`OPTION` are the driver's.
 
-**The engine is chosen by trying.** `engine_for` (`exec/planner.rs`) is a
-pre-filter that reads statement kinds: DML and DDL have no lowering, so there
-is nothing to try for them, and a session pinned to `compute-only` goes to the
-legacy engine whatever the statement. Every other statement is decided by
-attempting the streaming path, which can decline at two points:
+**A statement the VM cannot run is an error.** Planning has two points at which
+a statement can be refused, and each fails the statement with an error that
+names the construct:
 
 1. **Lowering** (`surrealdb_expr::expr::logical::lower`). Pure, and needs no
-   catalog. A statement with no logical form — a write, a schema statement, a
-   shape lowering does not express — is `NoLogicalForm`, and goes to the
-   legacy engine without touching the transaction.
-2. **Binding and planning** (`exec/logical`, `exec/planner`). Needs the
+   catalog. A statement holding a shape lowering does not express is
+   `NoLogicalForm`, and fails without touching the transaction.
+2. **Binding and lowering to a program** (`exec/logical`, `exec/vm`). Needs the
    catalog, because this is where permissions and computed fields enter the
-   plan, and can still decline partway through: `PlannerUnsupported` for a
-   shape the engine does not run. The executor keeps the surface statement
-   across the call so the fallback can convert it. A catalog body with no
-   logical form is not a decline: the analyzer leaves that table's source
-   unresolved, and the scan evaluates the stored clause itself (below).
+   plan. A plan node or an expression the VM has no instructions for fails the
+   statement, and so does a block holding such a statement: a block is
+   compiled in whole when the query arrives. A stored clause with no logical
+   form is not a refusal: the scan evaluates it itself (below).
 
 A statement boundary is wherever text becomes a statement: the executor for a
 query, and `eval::surql` for the statement it parses. Both make the same
-choice the same way. Inside a plan there is no other fallback; the one bridge
-into the legacy evaluator is `exec/operators/legacy_bridge.rs`, and it names
-its callers.
+choice the same way, and neither falls back: inside a plan there is no
+evaluator other than the VM's. An operator of `exec/operators/` is a host
+service a program calls (a storage scan, an index iterator, a record fetch),
+never a second executor.
 
 A GQL `MATCH` is a plan from the start and has no statement behind it:
 `plan_match` (`exec/planner/match_plan.rs`) compiles it whole, or the query
@@ -124,7 +117,7 @@ the lookups, then rewrites:
 | `resolve` | Each table source gets its schema. The table's `PERMISSIONS FOR select` becomes a `PermissionFilter` above it, and the `COMPUTED` fields and field `PERMISSIONS FOR select` a stack of projection layers above that — `Project[*, body AS c : kind @computed]`, `Project[*, IF p THEN f ELSE NONE END AS f @permission]` — in the order the scan pipeline applies them ([The row is a document](#the-row-is-a-document-and-a-projection-shadows)). Every user expression above the stack reads plain field names; nothing is rewritten. |
 | `params` | Statement-scoped `$param`s become literals. |
 | `fold` | Row-independent subexpressions become literals, under the caller's function capabilities. |
-| `optimise` | The rule set (`exec/logical/rules`), each rule a local rewrite of one node given what its inputs expose, applied bottom-up at every node of every nested plan and repeated to a fixpoint. The rules, in the order tried at a node: `filter` — predicates merge, and move through a user projection by alias substitution, never through a layer column, never below a `PermissionFilter`, and never through a projection any of whose fields is not inert, since beneath it the projection evaluates for the surviving rows alone; `layers` — beneath a chain of layers the conjuncts that read no layer column, by name or opaquely, move to a filter directly above the source or above the chain's topmost permission node, beneath which nothing moves; `join` — a conjunct over a caller-frame join that reads the left row alone moves beneath it on the left, one that reads the alias alone moves into an inner join's right side, and a `Semi` / `Anti` right side takes every conjunct that reads it alone; `prune` — an identity projection over plain rows goes, and a layer column nothing above reads goes, with the reads of the columns kept; `identity` — `Filter[true]`, an empty `Limit`, a `Sort` over at most one row whose keys are inert, an `Only` over an `Only` and a nested `Sequence` go (a key that reads a layer column the chain beneath sets with an expression that writes or may raise is not inert, even where the key itself is a plain path: the sort is the only demand for that column, and once it goes `prune` takes the column and its evaluation with it), `Filter[false]` over rows an inert literal produces becomes no rows (a literal that writes or throws keeps its filter, which reads nothing); `decorrelate` — an `IN` / `NOT IN` / `CONTAINS` / `CONTAINSNOT` subquery in a `Filter` or `PermissionFilter` predicate becomes a `Semi` or `Anti` `Join` in the predicate's frame, where every scalar of the subquery's right side is pure, no correlated conjunct may raise, and the probe side — the predicate whole and the pipeline beneath it — is read-only: the join builds that side once for every outer row where the per-row form builds it afresh for each, so a write on the probe side would leave the two reading different relations, and evaluates a key for every left row where the per-row form over an empty right side evaluates none ([A relation reached from a row is a join](#a-relation-reached-from-a-row-is-a-join)); `inline` — a call to a `DEFINE FUNCTION` whose body is `{ RETURN <expr> }`, with `PERMISSIONS FULL`, an `AUTH LIMIT` that does not narrow the caller, pure arguments already of the declared kinds and a result already of the return kind, becomes the body over its arguments; `kind` — a cast to a kind its operand is *checked* to have goes (a stored field's declared kind is not checked), and a `Broadcast` over a base of definite non-array kind becomes its body. What `inline` reads is gathered before the rules run from the node-level function cache (`cache/ds/function.rs`), content-addressed on the stored definition. Every rule is a strict improvement; cost is the physical planner's, and there is no hash-consing or e-graph. A rule that splits a predicate keeps its rows and not the written order of its conjuncts: a conjunct that can raise (`may_raise` in `exec/logical/rules/mod.rs` names them — casts, arithmetic, calls, indexing, subqueries, and a parameter whose read fetches a `DEFINE PARAM`, since the fetch judges that definition's `PERMISSIONS` clause where it happens) may be judged on rows an earlier conjunct would have refused, and an error it raises is then raised where the legacy engine, judging the predicate whole per document, would have returned rows. The inline rule refuses an argument that may raise at all, since the substituted body may evaluate it later than the call did, or on fewer paths, or not at all; the filter rule refuses a projection holding a field that may raise, since beneath it the field reaches fewer rows; the other splits are not gated on it. |
+| `optimise` | The rule set (`exec/logical/rules`), each rule a local rewrite of one node given what its inputs expose, applied bottom-up at every node of every nested plan and repeated to a fixpoint. The rules, in the order tried at a node: `filter` — predicates merge, and move through a user projection by alias substitution, never through a layer column, never below a `PermissionFilter`, and never through a projection any of whose fields is not inert, since beneath it the projection evaluates for the surviving rows alone; `layers` — beneath a chain of layers the conjuncts that read no layer column, by name or opaquely, move to a filter directly above the source or above the chain's topmost permission node, beneath which nothing moves; `join` — a conjunct over a caller-frame join that reads the left row alone moves beneath it on the left, one that reads the alias alone moves into an inner join's right side, and a `Semi` / `Anti` right side takes every conjunct that reads it alone; `prune` — an identity projection over plain rows goes, and a layer column nothing above reads goes, with the reads of the columns kept; `identity` — `Filter[true]`, an empty `Limit`, a `Sort` over at most one row whose keys are inert, an `Only` over an `Only` and a nested `Sequence` go (a key that reads a layer column the chain beneath sets with an expression that writes or may raise is not inert, even where the key itself is a plain path: the sort is the only demand for that column, and once it goes `prune` takes the column and its evaluation with it), `Filter[false]` over rows an inert literal produces becomes no rows (a literal that writes or throws keeps its filter, which reads nothing); `decorrelate` — an `IN` / `NOT IN` / `CONTAINS` / `CONTAINSNOT` subquery in a `Filter` or `PermissionFilter` predicate becomes a `Semi` or `Anti` `Join` in the predicate's frame, where every scalar of the subquery's right side is pure, no correlated conjunct may raise, and the probe side — the predicate whole and the pipeline beneath it — is read-only: the join builds that side once for every outer row where the per-row form builds it afresh for each, so a write on the probe side would leave the two reading different relations, and evaluates a key for every left row where the per-row form over an empty right side evaluates none ([A relation reached from a row is a join](#a-relation-reached-from-a-row-is-a-join)); `inline` — a call to a `DEFINE FUNCTION` whose body is `{ RETURN <expr> }`, with `PERMISSIONS FULL`, an `AUTH LIMIT` that does not narrow the caller, pure arguments already of the declared kinds and a result already of the return kind, becomes the body over its arguments; `kind` — a cast to a kind its operand is *checked* to have goes (a stored field's declared kind is not checked), and a `Broadcast` over a base of definite non-array kind becomes its body. What `inline` reads is gathered before the rules run from the node-level function cache (`cache/ds/function.rs`), content-addressed on the stored definition. Every rule is a strict improvement; cost is the physical planner's, and there is no hash-consing or e-graph. A rule that splits a predicate keeps its rows and not the written order of its conjuncts: a conjunct that can raise (`may_raise` in `exec/logical/rules/mod.rs` names them — casts, arithmetic, calls, indexing, subqueries, and a parameter whose read fetches a `DEFINE PARAM`, since the fetch judges that definition's `PERMISSIONS` clause where it happens) may be judged on rows an earlier conjunct would have refused, and an error it raises is then raised where judging the predicate whole per document would have returned rows. The inline rule refuses an argument that may raise at all, since the substituted body may evaluate it later than the call did, or on fewer paths, or not at all; the filter rule refuses a projection holding a field that may raise, since beneath it the field reaches fewer rows; the other splits are not gated on it. |
 
 Every node has a `Schema { fields, openness }`: `Source` from the catalog,
 every other node derived from its inputs. A `SCHEMAFULL` table is closed, a
@@ -172,7 +165,7 @@ canonical text, compiled through the one funnel `SurqlText::compile` with
 (`catalog/src/text.rs`); no `expr::Expr` is built on the way, and a
 definition carries each body compiled once for its lifetime
 (`FieldDefinition::{computed_body, select_body}`,
-`TableDefinition::select_body`), so binding a table does not re-lower its
+`TableDefinition::permissions_body`), so binding a table does not re-lower its
 clauses per statement. A body with no logical form leaves every source of
 its table unresolved (`schema: None`, no analyzer node above it); a catalog
 read error is the error it is. Expansion is bounded: a table's bodies are
@@ -181,11 +174,16 @@ unresolved, which the physical planner compiles with runtime enforcement.
 
 ### The physical planner — `exec/planner`
 
+The operators this planner builds are the host services the VM calls, not an
+executor (ADR 0007): a program requests a scan, an index read or a record fetch
+through a host step, and the host runs the operator that serves it. A statement
+is run by the program `exec/vm` lowers from the bound plan.
+
 `Planner::plan_logical` is a bottom-up fold (`planner/fold.rs`): one
 `LogicalOp` in, one `ExecOperator` out. A statement operator compiles
 directly — `Eval` to `ExprPlan`, `Sequence` to `SequencePlan`, `Foreach` to
 `ForeachPlan`, and so on — with branches and bodies compiled eagerly, since
-the engine is already decided for the whole statement. A relational tree is
+the whole statement is planned at once. A relational tree is
 compiled by walking down from its top, collecting clauses into a
 `PipelineClauses` until a leaf or a node the walk does not collect, then
 compiling the leaf with the whole clause set in hand through the access-path
@@ -246,10 +244,10 @@ admitted for a stored field leaves the row as it is. A guard is judged
 against the input row with `$value` bound to the value its column evaluated.
 A source left unresolved is planned in `EnforcementMode::Runtime`, where the
 scan resolves the table's permissions and field state itself, as it does for
-a source the analyzer could not reach. A stored clause with no logical form
-is evaluated there through the legacy bridge
-(`exec::permission::LegacyClause`), in the frame its caller is in, so every
-clause the catalog holds is enforced on every engine.
+a source the analyzer could not reach. A stored clause is lowered
+from its stored text there, in the frame its caller is in, so every clause the
+catalog holds is enforced; one that cannot be lowered fails the statement that
+needs it.
 
 **A source that yields values.** A `FROM` expression that is not a table
 yields a value: an array is that many rows, `NONE` and `NULL` are no rows,
@@ -281,20 +279,18 @@ whose body is being compiled, which the runtime's depth count bounds.
 
 ## What stays `expr::Expr`
 
-The legacy engine and everything it computes — writes, DDL, and any statement
-declined by lowering or planning. The `SerializeRevisioned` wire encoding,
-whose text is SurrealQL. `INFO FOR …` rendering. Under `exec/`, the sites that
-hold one are the bridge and its callers: `operators/legacy_bridge.rs`,
-`operators/mutate.rs` (GQL mutations as synthetic write statements),
-`function/builtin/eval.rs` (a nested statement without a logical form),
-`physical_expr/function/user_defined.rs` (a function body only the legacy
-evaluator runs), `permission.rs` (a stored clause without a logical form,
-evaluated by a scan enforcing at runtime), `field_path_convert.rs` and the
-catalog idioms `logical/resolve.rs` reads from field definitions. A GQL
-`MATCH` plan holds none: its scalars are `LogicalExpr`, compiled through
+`expr::Expr` is the stored and wire form of a statement and is never run. It
+remains in the `SerializeRevisioned` encoding, whose text is SurrealQL; in
+`INFO FOR …` rendering; in the catalog idioms `exec/logical/resolve.rs` reads
+from field definitions; and in `exec/field_path_convert.rs`. A caller outside a
+plan that needs one expression evaluated — a schema statement's names and field
+paths, an `ACCESS` subject, a bucket's `PERMISSIONS` clause, a record access's
+`SIGNIN` — builds the VM's frame with `exec::entry::frame` and evaluates it with
+`exec::entry::scalar`; the pair is the one route in, so a clause is judged
+the same way whichever caller reaches it. A GQL `MATCH` plan holds no
+`expr::Expr`: its scalars are `LogicalExpr`, compiled through
 `Planner::physical_expr` like every other scalar, and `operators/mutate.rs`
-builds its synthetic write statement from the values it has already
-evaluated.
+builds its synthetic write statement from the values it has already evaluated.
 
 ## The target algebra
 
@@ -612,8 +608,8 @@ the plan is.
    changes representation only: every lowered path renders and evaluates as
    the idiom did. The one behaviour change in this area lands as its own
    commit right after it: inside `[WHERE …]` the element is `$this` and the
-   enclosing row is `$parent`, which is the legacy engine's scoping and
-   closes the open question the streaming engine had left.
+   enclosing row is `$parent`, which is the
+   language's scoping.
 2. **Computed fields and field permissions are projection layers.**
    `LogicalField::Single` carries a frame and a kind; `resolve` emits the
    layered projections in the runtime's order, `SetField` and `Broadcast`
@@ -655,7 +651,8 @@ the plan is.
 
 Still open, and small: a source planned in `EnforcementMode::Runtime` compiles
 the table's `PERMISSIONS FOR select` from the `&Permission` it is handed
-rather than reading the body `TableDefinition::select_body` already carries;
+rather than reading the body `TableDefinition::permissions_body` already
+carries;
 changing that changes the `&Permission` signature at every scan call site.
 
 ## Verification

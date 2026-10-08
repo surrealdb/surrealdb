@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
-use reblessive;
 use surrealdb_types::ToSql;
 
 use crate::catalog;
@@ -303,7 +302,7 @@ pub(crate) async fn create_refresh_token_record(
 	// Create a bearer grant to act as the refresh token
 	let grant = run!(
 		tx,
-		crate::legacy::create_grant(ac, Some(Base::Db), catalog::Subject::Record(rid), &ctx, &opt)
+		crate::ddl::create_grant(ac, Some(Base::Db), catalog::Subject::Record(rid), &ctx, &opt)
 			.await
 			.map_err(|e| {
 				warn!("Unexpected error when attempting to create a refresh token: {e}");
@@ -401,19 +400,16 @@ pub async fn revoke_refresh_token_record(
 	let tx = kvs.transaction(Write).await?.enclose();
 	ctx.set_transaction(Arc::clone(&tx));
 	let ctx = ctx.freeze();
-	// Create a bearer grant to act as the refresh token
-	let mut stack = reblessive::tree::TreeStack::new();
+	// Revoke the bearer grant that acted as the refresh token. The statement
+	// names the grant by id and carries no `WHERE`, so the frame it resolves
+	// clauses in has nothing to resolve.
+	let exec = crate::ddl::frame(&ctx, &opt, None).await;
 	run!(
 		tx,
-		stack
-			.enter(|stk| async {
-				crate::legacy::revoke_grant(&stmt, stk, &ctx, &opt).await.map_err(|e| {
-					warn!("Unexpected error when attempting to revoke a refresh token: {e}");
-					anyhow::Error::new(AuthError::UnexpectedAuth)
-				})
-			})
-			.finish()
-			.await
+		crate::ddl::revoke_grant(&stmt, &ctx, &opt, &exec).await.map_err(|e| {
+			warn!("Unexpected error when attempting to revoke a refresh token: {e}");
+			anyhow::Error::new(AuthError::UnexpectedAuth)
+		})
 	)?;
 	Ok(())
 }

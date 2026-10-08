@@ -3,6 +3,7 @@ use surrealdb_expr::val::RecordIdKey;
 use uuid::Uuid;
 
 use super::lookup::Lookup;
+use crate::values::catalog_version::CatalogObjectKind;
 
 #[derive(Hash, Eq, PartialEq)]
 pub enum Key {
@@ -53,8 +54,15 @@ pub enum Key {
 	/// A cache key for the database-wide reference-target summary consumed by
 	/// the DELETE purge gate (which tables any `REFERENCE` field can target).
 	DbReferenceTargets(NamespaceId, DatabaseId),
+	/// A cache key for what identifies the catalog of every table of a
+	/// database, as this transaction sees it.
+	DbCatalog(NamespaceId, DatabaseId),
+	/// A cache key for the `REFERENCE` fields of every table of a database.
+	DbReferenceFields(NamespaceId, DatabaseId),
 	/// A cache key for a table's catalog version, as this transaction sees it.
 	Cv(NamespaceId, DatabaseId, String),
+	/// A cache key for a database-scoped object's catalog version.
+	Ov(NamespaceId, DatabaseId, CatalogObjectKind, String, String),
 	/// A cache key for events (on a table)
 	Evs(NamespaceId, DatabaseId, String),
 	/// A cache key for fieds (on a table)
@@ -151,7 +159,10 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Sqs(a, b) => Key::Sqs(a, b),
 			Lookup::Tbs(a, b) => Key::Tbs(a, b),
 			Lookup::DbReferenceTargets(a, b) => Key::DbReferenceTargets(a, b),
+			Lookup::DbCatalog(a, b) => Key::DbCatalog(a, b),
+			Lookup::DbReferenceFields(a, b) => Key::DbReferenceFields(a, b),
 			Lookup::Cv(a, b, c) => Key::Cv(a, b, c.to_string()),
+			Lookup::Ov(a, b, c, d, e) => Key::Ov(a, b, c, d.to_string(), e.to_string()),
 			Lookup::Evs(a, b, c) => Key::Evs(a, b, c.to_string()),
 			Lookup::Fds(a, b, c) => Key::Fds(a, b, c.to_string()),
 			Lookup::Fts(a, b, c) => Key::Fts(a, b, c.to_string()),

@@ -207,6 +207,11 @@ pub enum LogicalExpr {
 	RecordId(Box<LogicalRecordIdLit>),
 	Param(Param),
 	Table(TableName),
+	/// `|t:10|`, `|t:1..10|`: a generated record set. A leaf that denotes the
+	/// record ids themselves, not records read from storage — the table need
+	/// not exist and nothing is fetched. Carries no sub-expressions: the count
+	/// and the bounds are integers fixed at parse time.
+	Mock(Mock),
 	Constant(Constant),
 	/// `a`: a read of the row's field. The root of a path into the row, and
 	/// the only form index analysis and schema typing need at the root.
@@ -541,6 +546,12 @@ pub struct LogicalClosure {
 	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,
 	pub body: LogicalExpr,
+	/// The body as written, in canonical SurrealQL: the text a closure's
+	/// content digest is taken over, which a stored or shipped reference can
+	/// carry where the tree cannot. Two bodies print alike where the printer
+	/// does not tell them apart (a negated literal and the negative literal),
+	/// so a reader that must know the body is the same compares `body`.
+	pub body_sql: std::sync::Arc<str>,
 }
 
 /// `IF c1 THEN v1 ELSE IF c2 THEN v2 ELSE v3 END`.
@@ -708,6 +719,7 @@ impl SourceRef {
 	pub fn classify(expr: LogicalExpr) -> Self {
 		match expr {
 			LogicalExpr::Table(table) => SourceRef::Table(table),
+			LogicalExpr::Mock(mock) => SourceRef::Mock(mock),
 			LogicalExpr::RecordId(rid) => SourceRef::RecordId(rid),
 			LogicalExpr::Param(param) => SourceRef::Param(param),
 			LogicalExpr::Literal(_)
@@ -895,6 +907,7 @@ impl LogicalExpr {
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::Prefix {
 				..
@@ -950,6 +963,7 @@ impl LogicalExpr {
 			LogicalExpr::Literal(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::Field(_)
 			| LogicalExpr::Doc
@@ -1115,6 +1129,7 @@ impl LogicalExpr {
 			LogicalExpr::Literal(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::Field(_)
 			| LogicalExpr::Doc
@@ -1591,6 +1606,7 @@ impl LogicalExpr {
 			LogicalExpr::Literal(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::Field(_)
 			| LogicalExpr::Doc
@@ -1967,6 +1983,7 @@ impl LogicalExpr {
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::Prefix {
 				..
@@ -2029,6 +2046,7 @@ impl LogicalExpr {
 			| LogicalExpr::Object(_)
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::Prefix {
 				..
@@ -2134,6 +2152,7 @@ impl LogicalExpr {
 			| LogicalExpr::Object(_)
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::Prefix {
 				..
@@ -2301,6 +2320,7 @@ impl LogicalExpr {
 			| LogicalExpr::Object(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::Field(_)
 			| LogicalExpr::Doc
@@ -2445,6 +2465,7 @@ impl LogicalExpr {
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::SetField {
 				..
@@ -2485,6 +2506,7 @@ impl LogicalExpr {
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::SetField {
 				..
@@ -2572,6 +2594,7 @@ impl LogicalExpr {
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::Field(_)
 			| LogicalExpr::Doc
@@ -2711,7 +2734,25 @@ fn fmt_start(start: &LogicalExpr, f: &mut String, fmt: SqlFormat) {
 /// Renders a path: its root, then each step with its prefix, then the bodies
 /// it holds. The steps of a chain are rendered iteratively so that a long
 /// idiom does not recurse once per step.
+/// Whether parsing this step directly onto a field access would attach it to
+/// the access's elements rather than to the access's own value.
+///
+/// [`LogicalExpr::Access`] itself does not: `a.b.c` and `(a.b).c` are one
+/// expression, and so is `.*`, which takes the access's value whole. Every
+/// other step reads as the body of a broadcast over the access, which is a
+/// different expression from the same step applied to the access's result.
+fn binds_onto_a_broadcast(step: &LogicalExpr) -> bool {
+	// Stated as the exceptions, so a step form added later is grouped rather
+	// than run together with what precedes it. That is the safe default: a
+	// grouping that was not needed still reads back as the same expression,
+	// where a missing one does not.
+	!matches!(step, LogicalExpr::Access { .. } | LogicalExpr::Each(_) | LogicalExpr::Flatten { .. })
+}
+
 fn fmt_path(expr: &LogicalExpr, f: &mut String, fmt: SqlFormat, root: BodyRoot) {
+	// Where this path's text begins, so a step that must not extend the chain
+	// to its left can parenthesise everything emitted so far.
+	let start = f.len();
 	// Collect the chain from the outermost step down to its root.
 	let mut steps = Vec::new();
 	let mut current = expr;
@@ -2772,8 +2813,41 @@ fn fmt_path(expr: &LogicalExpr, f: &mut String, fmt: SqlFormat, root: BodyRoot) 
 	// its body.
 	let mut root = root;
 	let on_current = matches!(root_expr, LogicalExpr::Current);
+	// Whether the step just emitted was a field access. Parsing a step onto a
+	// bare field access broadcasts — `a.b[0]` indexes each element of `a.b`,
+	// not the array it is — so a chain that does *not* broadcast has to group
+	// what came before it or its own text would read back as the broadcasting
+	// form. A body over `Current` is the inside of a broadcast already, so the
+	// question does not arise there.
+	//
+	// Every group a chain needs opens at the same place — each wraps all the
+	// text emitted before it, so the groups nest and their opening
+	// parentheses sit together at the start. Count them first and write that
+	// run once, rather than shifting the whole path along for each one: a
+	// chain of n steps would otherwise cost O(n^2) to render.
+	let groups = if on_current {
+		0
+	} else {
+		let mut after_access = false;
+		let mut groups = 0usize;
+		for step in steps.iter().rev() {
+			if after_access && binds_onto_a_broadcast(step) {
+				groups += 1;
+			}
+			after_access = matches!(step, LogicalExpr::Access { .. });
+		}
+		groups
+	};
+	if groups > 0 {
+		f.insert_str(start, &"(".repeat(groups));
+	}
+	let mut after_access = false;
 	for (i, step) in steps.iter().rev().enumerate() {
 		let innermost = i == 0 && on_current;
+		if after_access && !on_current && binds_onto_a_broadcast(step) {
+			f.push(')');
+		}
+		after_access = matches!(step, LogicalExpr::Access { .. });
 		match step {
 			LogicalExpr::Access {
 				field,
@@ -2907,6 +2981,7 @@ fn fmt_path(expr: &LogicalExpr, f: &mut String, fmt: SqlFormat, root: BodyRoot) 
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::Prefix {
 				..
@@ -3013,6 +3088,7 @@ impl ToSql for LogicalExpr {
 			LogicalExpr::RecordId(rid) => rid.fmt_sql(f, fmt),
 			LogicalExpr::Param(param) => param.fmt_sql(f, fmt),
 			LogicalExpr::Table(table) => EscapeIdent(table.as_str()).fmt_sql(f, fmt),
+			LogicalExpr::Mock(mock) => mock.fmt_sql(f, fmt),
 			LogicalExpr::Constant(constant) => constant.fmt_sql(f, fmt),
 			LogicalExpr::Field(_)
 			| LogicalExpr::Doc
@@ -3814,6 +3890,36 @@ mod tests {
 		assert_eq!(expr("`a.b`").output_path().name(), "a.b");
 		assert_eq!(expr("`a.b`").output_path(), OutputPath::field("a.b"));
 		assert!(expr("id").output_path().is_field("id"));
+	}
+
+	/// A step that would otherwise read as a broadcast over the access before
+	/// it groups everything to its left, so a chain of them nests: every
+	/// opening parenthesis sits at the path's start, and each closes just
+	/// before the step that asked for it.
+	///
+	/// Asserted over a chain long enough that the text before a group is much
+	/// larger than the group itself. The run of openers is written once for
+	/// that reason — prepending them one at a time shifts the whole path
+	/// already rendered, which costs O(n^2) in the number of steps.
+	#[test]
+	fn a_chain_of_grouped_steps_opens_all_its_parentheses_at_the_start() {
+		// `a`, then a `.<name>[0]` pair per name: each `[0]` sits directly on
+		// a field access, so each one groups what precedes it.
+		let mut plan = LogicalExpr::Field(Strand::new("a"));
+		let mut expected = String::from("a");
+		for name in ["b", "c", "d", "e", "g", "h", "i", "j"] {
+			plan = LogicalExpr::Access {
+				base: Box::new(plan),
+				field: Strand::new(name),
+			};
+			plan = LogicalExpr::Index {
+				base: Box::new(plan),
+				index: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+			};
+			expected = format!("({expected}.{name})[0]");
+		}
+		assert_eq!(plan.to_sql(), expected);
+		assert_eq!(expr(&expected), plan, "`{expected}` reads back as a different plan");
 	}
 
 	#[test]

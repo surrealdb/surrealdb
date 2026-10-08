@@ -33,8 +33,8 @@ impl PhysicalExpr for IndexPart {
 			// Evaluate the index expression against the document root (if available)
 			// so that dynamic key references like `[field]` or `[$param]` resolve
 			// against the full document rather than the chain's current position.
-			// This matches the old compute path where Part::Value evaluates the
-			// expression with `doc` (the full cursor document).
+			// `Part::Value` evaluates the expression with `doc` (the full cursor
+			// document).
 			let index_ctx = if let Some(doc) = ctx.document_root {
 				ctx.with_value(doc)
 			} else {

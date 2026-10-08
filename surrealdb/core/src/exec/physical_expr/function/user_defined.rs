@@ -13,13 +13,11 @@ use super::helpers::{
 use crate::catalog::FunctionDefinition;
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::capabilities::Error as CapabilitiesError;
-use crate::err::Error;
-use crate::exec::operators::legacy_bridge::{legacy_compute, legacy_handles};
 use crate::exec::permission::CompiledGuard;
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr, ScalarSubquery};
+use crate::exec::physical_expr::{EvalContext, PhysicalExpr, PlannedGuard, ScalarSubquery};
 use crate::exec::{AccessMode, BoxFut, Error as ExecError, ExecOperator, ExecutionContext};
 use crate::expr::logical::LogicalOp;
-use crate::expr::{Block, ControlFlow, Error as ExprError, FlowResult};
+use crate::expr::{ControlFlow, Error as ExprError, FlowResult};
 use crate::kvs::cache::ds::FunctionSnapshot;
 use crate::val::Value;
 
@@ -36,9 +34,14 @@ pub(crate) struct PlannedBody {
 	/// allocation back — the transaction cache hands out one `Arc` per
 	/// definition — is known to match without hashing it.
 	pub(crate) compiled_from: Arc<FunctionDefinition>,
-	/// The body, as [`UserDefinedFunctionExec::run_body`] would plan it for a
-	/// call in the caller's frame.
+	/// The body, as [`FunctionCall::run_body`] would plan it for a call in
+	/// the caller's frame.
 	pub(crate) plan: BodyPlan,
+	/// Whether the body was planned for a principal whose reads are
+	/// permission-checked, so its binding applies table and field guards. A
+	/// body planned for one whose reads are not checked binds no guard, and
+	/// stands for a call in a permission frame as well.
+	pub(crate) checked: bool,
 }
 
 /// Where a call finds the plan of its body.
@@ -56,7 +59,7 @@ pub(crate) enum BodyPlan {
 impl BodyPlan {
 	/// The plan to evaluate; `None` for a recursive edge whose body did not
 	/// finish compiling, which the call then binds and plans for itself.
-	fn resolve(&self) -> Option<Arc<dyn ExecOperator>> {
+	pub(crate) fn resolve(&self) -> Option<Arc<dyn ExecOperator>> {
 		match self {
 			Self::Compiled(plan) => Some(Arc::clone(plan)),
 			Self::Recursive(body) => body.plan(),
@@ -95,9 +98,18 @@ impl RecursiveBody {
 /// These functions are stored in the database and retrieved at runtime.
 #[derive(Debug, Clone)]
 pub struct UserDefinedFunctionExec {
+	/// What the call does apart from evaluating its arguments.
+	pub(crate) call: FunctionCall,
+	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
+}
+
+/// A call of a user-defined function, apart from its arguments: what happens
+/// before they are evaluated ([`Self::enter`]) and after ([`Self::call`]).
+/// The arguments are evaluated between the two, in the frame the entry opens.
+#[derive(Debug, Clone)]
+pub(crate) struct FunctionCall {
 	/// Function name without the "fn::" prefix
 	pub(crate) name: String,
-	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
 	/// Expression-nesting depth recorded when this call was planned. A body
 	/// compiled on call is seeded with it so nested `eval`/UDF recursion
 	/// keeps counting toward `max_computation_depth` instead of resetting.
@@ -107,18 +119,59 @@ pub struct UserDefinedFunctionExec {
 	/// polarity: opaque bodies and undefined callees count as `ReadWrite`).
 	/// `ReadWrite` when the planner had no transaction to resolve against — the
 	/// safe over-approximation, matching `resolve_module_writeable`. Combined
-	/// with the arguments' access modes in [`Self::access_mode`].
+	/// with the arguments' access modes in [`UserDefinedFunctionExec::access_mode`].
 	pub(crate) body_access_mode: AccessMode,
 	/// The body compiled with the plan, when the planner could compile it;
 	/// see [`Self::planned_body`] for when a call evaluates it. `None` leaves
 	/// every call to bind and compile the body itself.
 	pub(crate) body: Option<PlannedBody>,
+	/// The body compiled with the plan without a principal, for a call the
+	/// plan evaluates where reads are not permission-checked — a permission
+	/// predicate — when [`Self::body`] binds guards that frame waives.
+	pub(crate) unchecked_body: Option<PlannedBody>,
 	/// The `PERMISSIONS` clause of the definition this call last found,
 	/// compiled. A call in a projection is made once per row, and compiling
 	/// its guard is plan-time work; see [`CompiledGuard`] for what is kept
 	/// and what is not.
 	pub(crate) permission: CompiledGuard<FunctionDefinition>,
+	/// The `PERMISSIONS` clause compiled with the plan, for the definition
+	/// the planner read; see [`PlannedGuard`].
+	pub(crate) planned_permission: PlannedGuard<FunctionDefinition>,
 }
+
+/// The function a call has entered: its definition, and the caller's context
+/// capped by the definition's `AUTH LIMIT`, which the arguments are evaluated
+/// in and the body runs under.
+pub(crate) struct EnteredCall {
+	pub(crate) definition: Arc<FunctionDefinition>,
+	pub(crate) limited: ExecutionContext,
+}
+
+/// `ctx`, narrowed to `limited`: the same evaluation under the definer's auth.
+pub(crate) fn in_limited<'a>(
+	ctx: &EvalContext<'a>,
+	limited: &'a ExecutionContext,
+) -> EvalContext<'a> {
+	EvalContext {
+		exec_ctx: limited,
+		current_value: ctx.current_value,
+		local_params: ctx.local_params,
+		recursion_ctx: ctx.recursion_ctx.clone(),
+		document_root: ctx.document_root,
+		// The same evaluation, narrowed to the definer's auth: what the
+		// caller could see it can still see.
+		write_before: ctx.write_before,
+		write_after: ctx.write_after,
+		write_value: ctx.write_value,
+		write_input: ctx.write_input,
+		write_event: ctx.write_event,
+		write_reference: ctx.write_reference,
+		skip_fetch_perms: ctx.skip_fetch_perms,
+		computing_record: ctx.computing_record.clone(),
+		plan_depth: ctx.plan_depth,
+	}
+}
+
 impl PhysicalExpr for UserDefinedFunctionExec {
 	fn name(&self) -> &'static str {
 		"UserDefinedFunction"
@@ -136,133 +189,9 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
-			let func_name = format!("fn::{}", self.name);
-
-			// 1. Require database context (propagate core Error so it downcasts to Validation)
-			let db_ctx =
-				ctx.exec_ctx.database().map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?;
-
-			// 2. Check if function is allowed by capabilities
-			if !ctx.capabilities().allows_function_name(&func_name) {
-				return Err(
-					anyhow::Error::new(CapabilitiesError::FunctionNotAllowed(func_name)).into()
-				);
-			}
-
-			// 3. Retrieve function definition
-			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
-			let db_id = db_ctx.db.database_id;
-			let func_def = ctx
-				.txn()
-				.get_db_function(ns_id, db_id, &self.name, ctx.exec_ctx.version_stamp())
-				.await
-				.map_err(|e| anyhow::anyhow!("Function '{}' not found: {}", func_name, e))?;
-
-			// 4. Apply auth limiting — cap the caller's privileges to the definer's auth level.
-			let auth_limit =
-				crate::iam::AuthLimit::try_from(&func_def.auth_limit).map_err(|e| {
-					anyhow::anyhow!("Invalid auth limit on function '{}': {}", func_name, e)
-				})?;
-			let limited_ctx = ctx.exec_ctx.with_limited_auth(&auth_limit);
-			let ctx = EvalContext {
-				exec_ctx: &limited_ctx,
-				current_value: ctx.current_value,
-				local_params: ctx.local_params,
-				recursion_ctx: ctx.recursion_ctx,
-				document_root: ctx.document_root,
-				skip_fetch_perms: ctx.skip_fetch_perms,
-				computing_record: ctx.computing_record,
-				plan_depth: ctx.plan_depth,
-			};
-
-			// 5. Check permissions (with limited auth). Inside a permission
-			// predicate the call is the definer's and is not checked.
-			if !ctx.skip_fetch_perms && ctx.exec_ctx.should_check_perms(crate::iam::Action::View)? {
-				check_permission(
-					&self.permission,
-					func_def.permissions_body.logical_ref()?,
-					&func_def,
-					&func_name,
-					&ctx,
-				)
-				.await?;
-			}
-
-			// 6. Evaluate all arguments
-			let evaluated_args = evaluate_args(&self.arguments, ctx.clone()).await?;
-
-			// 7. Validate argument count
-			validate_arg_count(&func_name, evaluated_args.len(), &func_def.args)?;
-
-			// 8. Create isolated context with function parameters bound
-			let mut local_params: HashMap<Strand, Value> = HashMap::new();
-			for ((param_name, kind), arg_value) in func_def.args.iter().zip(evaluated_args) {
-				let coerced = arg_value.coerce_to_kind(kind).map_err(|e| {
-					ExprError::InvalidFunctionArguments {
-						name: func_name.clone(),
-						message: format!("Failed to coerce argument `${param_name}`: {e}"),
-					}
-				})?;
-				local_params.insert(param_name.as_str().into(), coerced);
-			}
-
-			// 9. Create a new execution context with the parameters, one re-entry deeper: the
-			//    body's plan is shared by every level of a recursion, so the budget that bounds the
-			//    recursion is the context's, consumed per call, not the plan's static depth. The
-			//    call's evaluation frame moves onto it: a call reached from a `PERMISSIONS`
-			//    predicate is marked on the `EvalContext` (a record dereference sets it there and
-			//    nowhere else), and the body — bound, compiled and evaluated from this context
-			//    alone — has to run in that frame.
-			let mut isolated_ctx = limited_ctx.dive().map_err(ControlFlow::Err)?;
-			for (name, value) in &local_params {
-				isolated_ctx = isolated_ctx.with_param(name.clone(), value.clone());
-			}
-			if ctx.skip_fetch_perms {
-				isolated_ctx = isolated_ctx.with_skip_fetch_perms(true);
-			}
-
-			// 10. Run the body: the plan compiled with the statement where it stands for this call,
-			//     otherwise a plan compiled here, in its own scope. The definition is stored apart
-			//     from any caller, so a body inherits no MATCHES registrations from the statement
-			//     that called it, and the arguments are bound as `$name` in the call's context, so
-			//     binding sees them the way it sees a `LET`. The body's logical form and its legacy
-			//     block compile from the same stored text, so the one way the logical form can be
-			//     missing is that the text has none — a body that writes — and that body runs on
-			//     the legacy engine.
-			let result = match self.planned_body(&func_def, &ctx) {
-				Some(plan) => {
-					evaluate_body(plan, &isolated_ctx, &ctx, &local_params, self.plan_depth + 1)
-						.await
-				}
-				None => match func_def.logical_body() {
-					Ok(body) => {
-						self.run_body(
-							body.clone(),
-							&func_def.block,
-							&isolated_ctx,
-							&ctx,
-							&local_params,
-						)
-						.await
-					}
-					Err(reason) => {
-						tracing::debug!("fn::{} body has no logical form: {reason:#}", self.name);
-						run_legacy_body(&func_def.block, &isolated_ctx, self.plan_depth + 1).await
-					}
-				},
-			};
-			let result = match result {
-				Ok(v) => v,
-				Err(ControlFlow::Return(v)) => v,
-				Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
-					// BREAK/CONTINUE inside a function (outside of loop) is an error
-					return Err(ExecError::InvalidControlFlow.into());
-				}
-				Err(e) => return Err(e),
-			};
-
-			// 11. Validate and coerce return type
-			Ok(validate_return(&func_name, func_def.returns.as_ref(), result)?)
+			let entered = self.call.enter(&ctx).await?;
+			let args = evaluate_args(&self.arguments, in_limited(&ctx, &entered.limited)).await?;
+			self.call.call(&entered, &ctx, args).await
 		})
 	}
 
@@ -271,27 +200,202 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 		// graph; combine it with the arguments, which are evaluated at the call
 		// site. A body that provably only reads lets the caller keep its
 		// read-only fast paths (fan-out overlap, buffered read streams).
-		self.body_access_mode.combine(args_access_mode(&self.arguments))
+		self.call.body_access_mode.combine(args_access_mode(&self.arguments))
 	}
 }
 
-impl UserDefinedFunctionExec {
+impl FunctionCall {
+	/// Enter the call, as far as its arguments: the database it is defined
+	/// in, the capability to call it, its definition, the definer's `AUTH
+	/// LIMIT` and its `PERMISSIONS`, checked under that limit. Inside a
+	/// permission predicate the call is the definer's and is not checked.
+	pub(crate) async fn enter(&self, ctx: &EvalContext<'_>) -> FlowResult<EnteredCall> {
+		let func_name = format!("fn::{}", self.name);
+
+		// Require database context (propagate core Error so it downcasts to Validation)
+		let db_ctx =
+			ctx.exec_ctx.database().map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?;
+
+		// Check if function is allowed by capabilities
+		if !ctx.capabilities().allows_function_name(&func_name) {
+			return Err(anyhow::Error::new(CapabilitiesError::FunctionNotAllowed(func_name)).into());
+		}
+
+		// Retrieve function definition. A failed read is reported as
+		// `Function '<name>' not found: <reason>`, the wording clients match on,
+		// and in code a write reaches as the reason alone.
+		let writing = ctx.exec_ctx.root().writing;
+		let ns_id = db_ctx.ns_ctx.ns.namespace_id;
+		let db_id = db_ctx.db.database_id;
+		let txn = ctx.txn();
+		let definition = crate::exec::vm::descriptor::object(txn.get_db_function(
+			ns_id,
+			db_id,
+			&self.name,
+			ctx.exec_ctx.version_stamp(),
+		))
+		.await
+		.map_err(|e| {
+			if writing {
+				e
+			} else {
+				anyhow::anyhow!("Function '{}' not found: {}", func_name, e)
+			}
+		})?;
+
+		// Apply auth limiting — cap the caller's privileges to the definer's auth level.
+		let auth_limit = crate::iam::AuthLimit::try_from(&definition.auth_limit).map_err(|e| {
+			anyhow::anyhow!("Invalid auth limit on function '{}': {}", func_name, e)
+		})?;
+		let limited = ctx.exec_ctx.with_limited_auth(&auth_limit);
+		let narrowed = in_limited(ctx, &limited);
+
+		// Check permissions (with limited auth).
+		if !narrowed.skip_fetch_perms
+			&& narrowed.exec_ctx.should_check_perms(crate::iam::Action::View)?
+		{
+			check_permission(
+				crate::exec::guard_verdicts::GuardKind::Function,
+				(&self.permission, &self.planned_permission),
+				definition.permissions_body.logical_ref()?,
+				Some(&definition.auth_limit),
+				&definition,
+				&func_name,
+				&narrowed,
+			)
+			.await?
+		}
+		Ok(EnteredCall {
+			definition,
+			limited,
+		})
+	}
+
+	/// Complete the call entered as `entered`, from `ctx`, the caller's
+	/// evaluation, with its arguments evaluated: bind them as the definition
+	/// declares, run the body one re-entry deeper under the definer's auth,
+	/// and coerce what it returns.
+	pub(crate) async fn call(
+		&self,
+		entered: &EnteredCall,
+		ctx: &EvalContext<'_>,
+		evaluated_args: Vec<Value>,
+	) -> FlowResult<Value> {
+		let func_def = &entered.definition;
+		let limited_ctx = &entered.limited;
+		let ctx = in_limited(ctx, limited_ctx);
+
+		let local_params: HashMap<Strand, Value> = func_def
+			.args
+			.iter()
+			.map(|(name, _)| Strand::from(name.as_str()))
+			.zip(self.bind_args(entered, evaluated_args)?)
+			.collect();
+
+		// Create a new execution context with the parameters, one re-entry
+		// deeper: the body's plan is shared by every level of a recursion, so
+		// the budget that bounds the recursion is the context's, consumed per
+		// call, not the plan's static depth. The body reads the caller's
+		// bindings unless the call runs in a privileged frame, whose context
+		// holds none of them. The call's evaluation frame moves onto it: a
+		// call reached from a `PERMISSIONS` predicate is marked on the
+		// `EvalContext` (a record dereference sets it there and nowhere
+		// else), and the body — bound, compiled and evaluated from this
+		// context alone — has to run in that frame.
+		let mut isolated_ctx = limited_ctx.dive().map_err(ControlFlow::Err)?;
+		let mut scope = crate::ctx::Context::new_child(isolated_ctx.ctx());
+		for (name, value) in &local_params {
+			scope.add_value(name.clone(), std::sync::Arc::new(value.clone()));
+		}
+		isolated_ctx = isolated_ctx.with_new_ctx(scope.freeze());
+		if ctx.skip_fetch_perms {
+			isolated_ctx = isolated_ctx.with_skip_fetch_perms(true);
+		}
+
+		// Run the body: the plan compiled with the statement where it stands
+		// for this call, otherwise the plan the compile cache serves, in its
+		// own scope. The definition is stored apart from any caller, so a body
+		// inherits no MATCHES registrations from the statement that called it,
+		// and the arguments are bound as `$name` in the call's context, which
+		// the body reads when it runs. A body whose stored text has no logical
+		// form fails the call with `PlannerUnsupported`.
+		let result = match self.planned_body(func_def, &ctx) {
+			Some(plan) => {
+				evaluate_body(plan, &isolated_ctx, &ctx, &local_params, self.plan_depth + 1).await
+			}
+			None => match func_def.logical_body() {
+				Ok(body) => self.run_body(body.clone(), &isolated_ctx, &ctx, &local_params).await,
+				Err(reason) => {
+					Err(ControlFlow::Err(anyhow::Error::new(ExecError::PlannerUnsupported {
+						reason: format!("fn::{} body: {reason:#}", self.name),
+					})))
+				}
+			},
+		};
+		let result = match result {
+			Ok(v) => v,
+			Err(ControlFlow::Return(v)) => v,
+			Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+				// BREAK/CONTINUE inside a function (outside of loop) is an error
+				return Err(ExecError::InvalidControlFlow.into());
+			}
+			Err(e) => return Err(e),
+		};
+
+		self.returned(entered, result)
+	}
+
+	/// The arguments `evaluated_args` bound as the entered definition
+	/// declares them: counted, then each coerced to its parameter's kind.
+	pub(crate) fn bind_args(
+		&self,
+		entered: &EnteredCall,
+		evaluated_args: Vec<Value>,
+	) -> FlowResult<Vec<Value>> {
+		let func_name = format!("fn::{}", self.name);
+		let func_def = &entered.definition;
+		validate_arg_count(&func_name, evaluated_args.len(), &func_def.args)?;
+		let mut bound = Vec::with_capacity(evaluated_args.len());
+		for ((param_name, kind), arg_value) in func_def.args.iter().zip(evaluated_args) {
+			let coerced = arg_value.coerce_to_kind(kind).map_err(|e| {
+				ExprError::InvalidFunctionArguments {
+					name: func_name.clone(),
+					message: format!("Failed to coerce argument `${param_name}`: {e}"),
+				}
+			})?;
+			bound.push(coerced);
+		}
+		Ok(bound)
+	}
+
+	/// `result`, what the body returned, validated and coerced to the entered
+	/// definition's return kind.
+	pub(crate) fn returned(&self, entered: &EnteredCall, result: Value) -> FlowResult<Value> {
+		let func_name = format!("fn::{}", self.name);
+		Ok(validate_return(&func_name, entered.definition.returns.as_ref(), result)?)
+	}
+
 	/// The plan compiled with the statement, when it stands for this call.
 	///
-	/// It was bound for the statement's principal in the caller's frame, from
-	/// the definition it hashes to. A call in a permission frame binds without
-	/// a principal, a `VERSION`ed call reads the definition at the stamp, and
-	/// a definition redefined since hashes differently: each of those binds
-	/// and compiles the body for itself ([`Self::run_body`]).
+	/// [`Self::body`] was bound for the statement's principal in the caller's
+	/// frame, from the definition it hashes to. A call in a permission frame
+	/// takes [`Self::unchecked_body`], bound without a principal, where the
+	/// principal's binding applies guards; a `VERSION`ed call reads the
+	/// definition at the stamp, and a definition redefined since hashes
+	/// differently. A call no planned body stands for binds and compiles the
+	/// body for itself ([`Self::run_body`]).
 	fn planned_body(
 		&self,
 		definition: &Arc<FunctionDefinition>,
 		call: &EvalContext<'_>,
 	) -> Option<Arc<dyn ExecOperator>> {
-		let body = self.body.as_ref()?;
-		if call.skip_fetch_perms || call.exec_ctx.version_stamp().is_some() {
+		if call.exec_ctx.version_stamp().is_some() {
 			return None;
 		}
+		let body = match self.body.as_ref()? {
+			body if call.skip_fetch_perms && body.checked => self.unchecked_body.as_ref()?,
+			body => body,
+		};
 		// The transaction cache hands the same `Arc` back for as long as the
 		// definition stands, so a pointer match settles it; the hash is for a
 		// definition read through another cache or re-read after eviction.
@@ -303,19 +407,21 @@ impl UserDefinedFunctionExec {
 		body.plan.resolve()
 	}
 
-	/// Compile the body's logical plan for this call and evaluate it.
+	/// The body's plan for this call, served from the compile cache by the
+	/// body as stored ([`crate::exec::vm::serve::statement`]), evaluated.
 	///
 	/// The body is one re-entry deeper than the call, so the planner continues
-	/// the depth count at `plan_depth + 1`. The compiled plan is evaluated as a
-	/// scalar subquery of the call: `$this` and `$parent` denote the caller's
+	/// the depth count at `plan_depth + 1`. The arguments are read when the
+	/// plan runs, never folded into it, so one plan serves every call. The compiled plan is
+	/// evaluated as a scalar subquery of the call: `$this` and `$parent` denote the caller's
 	/// row, and a `RETURN` in the body surfaces as `ControlFlow::Return` for
-	/// the caller to unwrap. A plan the planner declines falls back to the
-	/// legacy engine on the stored block.
+	/// the caller to unwrap. A plan the planner declines fails the call with
+	/// `PlannerUnsupported`.
 	///
 	/// A body called from a `PERMISSIONS` predicate is bound without a
 	/// principal. Inside a predicate no read is permission-checked — the
-	/// frame on `isolated_ctx` disables every runtime gate, as the legacy
-	/// engine's `perms = false` does — so binding for the caller would apply
+	/// frame on `isolated_ctx` disables every runtime gate, as
+	/// `perms = false` does — so binding for the caller would apply
 	/// table and field guards the frame is meant to waive and judge the
 	/// predicate on a reduced view. Without a principal the analyzer inserts
 	/// no guard and leaves every source under runtime enforcement, which the
@@ -323,7 +429,6 @@ impl UserDefinedFunctionExec {
 	async fn run_body(
 		&self,
 		body: LogicalOp,
-		block: &Block,
 		isolated_ctx: &ExecutionContext,
 		call: &EvalContext<'_>,
 		local_params: &HashMap<Strand, Value>,
@@ -334,21 +439,16 @@ impl UserDefinedFunctionExec {
 		} else {
 			Some(Arc::clone(&isolated_ctx.root().auth))
 		};
-		let planned = crate::exec::planner::plan_statement_inner(
-			body,
-			isolated_ctx.ctx(),
-			isolated_ctx.function_registry(),
-			call.txn(),
-			principal,
-			depth,
-		)
-		.await;
+		// Served from the compile cache by the body as stored, the arguments
+		// read when it runs rather than folded into its plan, so one plan
+		// serves every call of the definition in the frame
+		// ([`crate::exec::vm::serve`]).
+		let args: Vec<String> = local_params.keys().map(|name| name.as_str().to_owned()).collect();
+		let planned =
+			crate::exec::vm::serve::statement(isolated_ctx, body, principal, depth, args).await;
 		match planned {
 			Ok(plan) => evaluate_body(plan, isolated_ctx, call, local_params, depth).await,
-			Err(Error::Exec(ExecError::PlannerUnsupported(_))) => {
-				run_legacy_body(block, isolated_ctx, depth).await
-			}
-			Err(e) => Err(ControlFlow::Err(anyhow::Error::new(e))),
+			Err(e) => Err(ControlFlow::Err(e)),
 		}
 	}
 }
@@ -375,6 +475,15 @@ async fn evaluate_body(
 		local_params: Some(local_params),
 		recursion_ctx: None,
 		document_root: None,
+		// Cleared: a slot belongs to the stage that bound it, and the body is
+		// evaluated in a context of its own. A binding that crossed the call
+		// would give the body a `$value` it must not see.
+		write_before: None,
+		write_after: None,
+		write_value: None,
+		write_input: None,
+		write_event: None,
+		write_reference: None,
 		skip_fetch_perms: call.skip_fetch_perms,
 		computing_record: call.computing_record.clone(),
 		plan_depth: depth,
@@ -382,30 +491,10 @@ async fn evaluate_body(
 	body.evaluate(eval_ctx).await
 }
 
-/// Evaluate a function body on the legacy engine.
-///
-/// The stored block is the legacy engine's input. The handles come from the
-/// engine's one legacy bridge, which derives the options from the frame
-/// `isolated_ctx` is in — a permission predicate refuses writes and disables
-/// permission checks, a computed field refuses writes, a `VERSION` stamp is
-/// read at — with `depth` already consumed from the dive budget so the count
-/// continues across the engine boundary.
-async fn run_legacy_body(
-	block: &Block,
-	isolated_ctx: &ExecutionContext,
-	depth: u32,
-) -> FlowResult<Value> {
-	let (options, frozen) =
-		legacy_handles(isolated_ctx).map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?;
-	let options = options.with_dive_consumed(depth);
-	let body = crate::expr::Expr::Block(Box::new(block.clone()));
-	legacy_compute(&body, &frozen, &options, None).await
-}
-
 impl ToSql for UserDefinedFunctionExec {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push_str("fn::");
-		f.push_str(&self.name);
+		f.push_str(&self.call.name);
 		fmt_call_args(f, fmt, &self.arguments);
 	}
 }
@@ -415,7 +504,7 @@ impl ToSql for UserDefinedFunctionExec {
 mod tests {
 	use std::sync::Arc;
 
-	use super::{BodyPlan, UserDefinedFunctionExec};
+	use super::UserDefinedFunctionExec;
 	use crate::exec::operators::test_util::{TestDb, val};
 	use crate::exec::planner::Planner;
 	use crate::exec::{AccessMode, EvalContext, ExecutionContext, PhysicalExpr};
@@ -431,7 +520,7 @@ mod tests {
 		let txn = ctx.txn();
 		let planner = Planner::with_txn(
 			ctx.ctx(),
-			&db_ctx.ns_ctx.root.function_registry,
+			db_ctx.ns_ctx.root.ctx.function_registry(),
 			txn,
 			Some("test".to_owned()),
 			Some("test".to_owned()),
@@ -456,7 +545,7 @@ mod tests {
 			.as_any()
 			.downcast_ref::<UserDefinedFunctionExec>()
 			.expect("a user-defined function call");
-		call.body.is_some()
+		call.call.body.is_some()
 	}
 
 	async fn evaluate(expr: &Arc<dyn PhysicalExpr>, ctx: &ExecutionContext) -> Value {
@@ -479,12 +568,10 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn a_recursive_edge_evaluates_the_plan_it_is_inside() {
-		// The body of `down` is compiled with the call site, and the call to
-		// `down` inside it is on the path being compiled, so that one is a
-		// recursive edge: it evaluates the very plan it sits in, bounded by
-		// the depth budget each call consumes; the recursion still terminates
-		// on its own condition.
+	async fn a_recursive_function_ends_on_its_own_condition() {
+		// A call inside the body of `down` names `down` itself: each call
+		// consumes the depth budget, and the recursion stops on the
+		// function's own condition.
 		let db = TestDb::new(
 			"DEFINE FUNCTION fn::down($n: int) { IF $n <= 0 { RETURN 0 }; RETURN fn::down($n - 1) + 1; };
 			 DEFINE FUNCTION fn::tail($n: int) { IF $n <= 0 { RETURN 0 }; RETURN fn::tail($n - 1); };
@@ -492,30 +579,8 @@ mod tests {
 			 DEFINE FUNCTION fn::pong($n: int) { IF $n <= 0 { RETURN 'pong' }; RETURN fn::ping($n - 1); };",
 		)
 		.await;
-		assert!(embeds_body(&db, "fn::down(3)").await);
 		let ctx = db.exec_ctx().await;
-		// `tail`'s recursive call is the whole returned expression, where
-		// `calls_in` can see it; `down`'s sits inside a `+`.
-		let call = physical_of(&ctx, "fn::tail(3)").await;
-		let outer = call
-			.as_any()
-			.downcast_ref::<UserDefinedFunctionExec>()
-			.expect("a user-defined function call");
-		let outer_plan = match &outer.body.as_ref().expect("the outer call carries its body").plan {
-			BodyPlan::Compiled(plan) => Arc::clone(plan),
-			BodyPlan::Recursive(_) => panic!("the outer call is not a recursive edge"),
-		};
-		let mut inner = Vec::new();
-		calls_in(&outer_plan, &mut inner);
-		let inner: Vec<_> = inner.into_iter().filter(|c| c.name == "tail").collect();
-		assert_eq!(inner.len(), 1, "one recursive call inside the body");
-		let edge = inner[0].body.as_ref().expect("the recursive edge carries the body's plan");
-		let BodyPlan::Recursive(shared) = &edge.plan else {
-			panic!("the recursive edge is a recursive edge");
-		};
-		let shared = shared.plan().expect("the body's plan is published once compiled");
-		assert!(Arc::ptr_eq(&shared, &outer_plan), "the edge evaluates the plan it is inside");
-		assert_eq!(evaluate(&call, &ctx).await, Value::from(0));
+		assert_eq!(evaluate(&physical_of(&ctx, "fn::tail(3)").await, &ctx).await, Value::from(0));
 		assert_eq!(evaluate(&physical_of(&ctx, "fn::down(3)").await, &ctx).await, Value::from(3));
 		assert_eq!(
 			evaluate(&physical_of(&ctx, "fn::ping(3)").await, &ctx).await,
@@ -523,29 +588,10 @@ mod tests {
 		);
 	}
 
-	/// Every user-defined call `op` holds: in its operators' expressions, in
-	/// the plans embedded in those expressions, and in its children.
-	fn calls_in(op: &Arc<dyn crate::exec::ExecOperator>, out: &mut Vec<UserDefinedFunctionExec>) {
-		for (_, expr) in op.expressions() {
-			if let Some(call) = expr.as_any().downcast_ref::<UserDefinedFunctionExec>() {
-				out.push(call.clone());
-			}
-			for (_, plan) in expr.embedded_operators() {
-				calls_in(plan, out);
-			}
-		}
-		for child in op.children() {
-			calls_in(child, out);
-		}
-	}
-
 	#[tokio::test]
-	async fn a_recursive_call_inside_a_nested_select_is_the_recursive_edge() {
-		// The body of `nest` is compiled with the call site; the nested
-		// `SELECT` inside it is compiled by a planner derived from the same
-		// scope, so the call to `nest` in its projection is on the path being
-		// compiled and is left to the runtime rather than planned again a
-		// level deeper.
+	async fn a_recursive_call_inside_a_nested_select_ends_on_its_own_condition() {
+		// The call to `nest` in the projection of the nested `SELECT` inside
+		// its own body is a recursive call like any other.
 		let db = TestDb::new(
 			"DEFINE FUNCTION fn::nest($n: int) {
 				IF $n <= 0 { RETURN 0 };
@@ -555,22 +601,6 @@ mod tests {
 		)
 		.await;
 		let ctx = db.exec_ctx().await;
-		let call = physical_of(&ctx, "fn::nest(2)").await;
-		let call = call
-			.as_any()
-			.downcast_ref::<UserDefinedFunctionExec>()
-			.expect("a user-defined function call");
-		let body = call.body.as_ref().expect("the outer call carries its body's plan");
-		let plan = body.plan.resolve().expect("the outer call's body is compiled");
-		let mut inner = Vec::new();
-		calls_in(&plan, &mut inner);
-		let inner: Vec<_> = inner.into_iter().filter(|c| c.name == "nest").collect();
-		assert_eq!(inner.len(), 1, "one recursive call inside the nested SELECT");
-		let edge = inner[0].body.as_ref().expect("the recursive edge carries the body's plan");
-		assert!(
-			matches!(&edge.plan, BodyPlan::Recursive(shared) if shared.plan().is_some_and(|p| Arc::ptr_eq(&p, &plan))),
-			"the recursive edge evaluates the plan it is inside"
-		);
 		assert_eq!(evaluate(&physical_of(&ctx, "fn::nest(2)").await, &ctx).await, Value::from(2));
 	}
 
@@ -617,7 +647,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn a_name_the_statement_binds_is_read_by_the_call() {
+	async fn a_name_the_body_reads_is_the_databases_parameter() {
 		// `$x` is bound nowhere the planner can see, so the body keeps it a
 		// runtime lookup rather than resolving it to `NONE`, and the call
 		// reads what the statement bound.
@@ -650,6 +680,21 @@ mod tests {
 		)
 		.await;
 		assert_eq!(access_mode_of(&db, "fn::sink()").await, AccessMode::ReadWrite);
+	}
+
+	/// A body that writes is compiled with the call site like any other body:
+	/// a mutation in it is no reason to leave it uncompiled. What the embedded
+	/// plan buys is that the compile happened once, with the statement — a
+	/// call that finds none binds and compiles the body again on every
+	/// evaluation.
+	#[tokio::test]
+	async fn a_writing_body_is_planned_with_the_statement() {
+		let db = TestDb::new(
+			"DEFINE TABLE log SCHEMALESS;
+			 DEFINE FUNCTION fn::sink() { CREATE log; RETURN 1; };",
+		)
+		.await;
+		assert!(embeds_body(&db, "fn::sink()").await);
 	}
 
 	#[tokio::test]

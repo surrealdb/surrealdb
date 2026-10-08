@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -20,31 +19,31 @@ value = "NONE"
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: $f == $f]
+    ExprPlan [ctx: Rt] [expr: $f == $f]
 ''''
 
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: array::distinct([$f, $f]).len()]
+    ExprPlan [ctx: Rt] [expr: array::distinct([$f, $f]).len()]
 ''''
 
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: [$f] CONTAINS $f]
+    ExprPlan [ctx: Rt] [expr: [$f] CONTAINS $f]
 ''''
 
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: |$x: any| $x == |$x: any| $x]
+    ExprPlan [ctx: Rt] [expr: (|$x: any| $x) == (|$x: any| $x)]
 ''''
 
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: |$x: any| $x == |$y: any| $y]
+    ExprPlan [ctx: Rt] [expr: (|$x: any| $x) == (|$y: any| $y)]
 ''''
 
 [[test.results]]
@@ -62,7 +61,7 @@ value = '''
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: $g()]
+    ExprPlan [ctx: Rt] [expr: ($g)()]
 ''''
 */
 

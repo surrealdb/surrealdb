@@ -370,6 +370,9 @@ impl Builder {
 		)
 		.with_observer(Arc::clone(&observer));
 		let id = self.id.unwrap_or_else(Uuid::new_v4);
+		// One registry per datastore, shared by the executor and by the index
+		// builder, so a build resolves the same names a query does.
+		let function_registry = Arc::new(FunctionRegistry::with_builtins());
 		let capabilities = self.capabilities;
 		let dynamic_configuration = DynamicConfiguration::default();
 		dynamic_configuration.set_query_timeout(self.query_timeout);
@@ -411,7 +414,11 @@ impl Builder {
 			cache: Arc::new(DatastoreCache::new(config.datastore.datastore_cache_size)),
 			#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
 			graphql_schema_cache: crate::graphql::cache::GraphQLSchemaCache::default(),
-			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			function_registry,
+			live_units: Arc::default(),
+			compiled_units: Arc::new(crate::exec::vm::units::CompiledUnits::for_config(
+				&config.exec,
+			)),
 			buckets,
 			sequences: Sequences::new(tf, id),
 			triggers,

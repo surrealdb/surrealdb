@@ -1,7 +1,6 @@
 /**
 [env]
 imports = ["language/planner/record_idiom_fold_auth_import.surql"]
-planner-strategy = ["all-ro"]
 
 auth = { namespace = "test", database = "test", access = "user", rid = "user:alice" }
 
@@ -11,7 +10,8 @@ reason = "The plan-time record-idiom fold requires permission checks to be prova
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: item, direction: Forward, predicate: due <= (cfg:one).cutoff, pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: due <= (cfg:one).cutoff]
+        TableScan [ctx: Db] [table: item, direction: Forward]
 ''''
 
 [[test.results]]

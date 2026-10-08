@@ -754,6 +754,8 @@ ast_type! {
 		pub body: NodeId<Block>,
 		pub comment: Option<NodeId<Expr>>,
 		pub permission: Option<Permission>,
+		pub graphql_alias: Option<NodeId<StringLit>>,
+		pub graphql_deprecated: Option<NodeId<StringLit>>,
 	}
 }
 ast_type! {

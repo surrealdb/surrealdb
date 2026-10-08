@@ -49,6 +49,14 @@ impl PhysicalExpr for WherePart {
 					local_params: ctx.local_params,
 					recursion_ctx: ctx.recursion_ctx,
 					document_root: ctx.document_root,
+					// Only `$parent` is being added; the filter still runs
+					// within the same record.
+					write_before: ctx.write_before,
+					write_after: ctx.write_after,
+					write_value: ctx.write_value,
+					write_input: ctx.write_input,
+					write_event: ctx.write_event,
+					write_reference: ctx.write_reference,
 					skip_fetch_perms: ctx.skip_fetch_perms,
 					computing_record: ctx.computing_record,
 					plan_depth: ctx.plan_depth,
@@ -109,7 +117,9 @@ impl ToSql for WherePart {
 mod tests {
 	use super::*;
 	use crate::exec::ExecutionContext;
-	use crate::exec::operators::test_util::{eval_on, physical_expr, root_ctx, val};
+	use crate::exec::operators::test_util::{
+		TestDb, eval_on, eval_on_in_txn, physical_expr, root_ctx, val,
+	};
 	use crate::exec::physical_expr::find_part;
 	use crate::expr::ControlFlow;
 	use crate::val::Set;
@@ -311,16 +321,15 @@ mod tests {
 		// The predicate's control flow is not caught here: the signal travels up
 		// to whatever construct owns it, rather than being read as a truthiness
 		// value.
-		let ctx = root_ctx();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
 		let doc = val("{ list: [1, 2, 3] }").await;
-		let err = eval_on("list[WHERE BREAK]", &doc, &ctx).await.unwrap_err();
+		let err = eval_on_in_txn("list[WHERE BREAK]", &doc, &ctx).await.unwrap_err();
 		assert!(matches!(err, ControlFlow::Break), "got {err:?}");
 
 		// A RETURN is not absorbed as the predicate's value either; it leaves
-		// the filter carrying its own value. The legacy `compute` path catches a
-		// RETURN at this site and uses the returned value as the predicate
-		// result instead.
-		let err = eval_on("list[WHERE RETURN true]", &doc, &ctx).await.unwrap_err();
+		// the filter carrying its own value.
+		let err = eval_on_in_txn("list[WHERE RETURN true]", &doc, &ctx).await.unwrap_err();
 		assert!(matches!(&err, ControlFlow::Return(v) if v == &Value::Bool(true)), "got {err:?}");
 	}
 }

@@ -9,8 +9,8 @@
 //! node.
 //!
 //! The executor owns them because it is the lowest layer that reads each one.
-//! The legacy evaluator and the `dbs` result collector read several of the same
-//! limits so both engines enforce one budget; those reads are downward from
+//! The `dbs` result collector and the builtin functions read several of the same
+//! limits so everything enforces one budget; those reads are downward from
 //! here and leave ownership untouched.
 
 use common::str::ParseBytes;
@@ -30,6 +30,30 @@ pub(crate) const DEFAULT_SCAN_BATCH_BYTES: usize = 2 << 20;
 /// shared one, not a measured optimum. Overridable per deployment via the
 /// `fan_out_row_threshold` key.
 const DEFAULT_FAN_OUT_ROW_THRESHOLD: usize = 4;
+
+/// Default row count below which the VM runs a region's batch on the
+/// statement's own task rather than handing it to a worker. Overridable per
+/// deployment via the `region_row_threshold` key.
+const DEFAULT_REGION_ROW_THRESHOLD: usize = 256;
+
+/// Default number of compiled units of each kind a node keeps. Overridable
+/// per deployment via the `compiled_unit_cache_size` key.
+const DEFAULT_COMPILED_UNIT_CACHE_SIZE: usize = 1024;
+
+/// Default number of function bodies compiled for a call's argument values a
+/// node keeps. Overridable per deployment via the
+/// `specialised_body_cache_size` key.
+const DEFAULT_SPECIALISED_BODY_CACHE_SIZE: usize = 256;
+
+/// Default size, in bytes of their encoding, of the largest argument values
+/// a node keeps a function body compiled for. Overridable per deployment via
+/// the `specialised_body_max_arg_bytes` key.
+const DEFAULT_SPECIALISED_BODY_MAX_ARG_BYTES: usize = 4096;
+
+/// Default number of distinct argument values one function's body is
+/// compiled for before its calls run a body that reads them when it runs.
+/// Overridable per deployment via the `specialised_body_values` key.
+const DEFAULT_SPECIALISED_BODY_VALUES: usize = 32;
 
 /// Limits and batch sizes governing query execution.
 #[derive(Clone, Debug)]
@@ -118,6 +142,31 @@ pub(crate) struct ExecConfig {
 	/// more than one core. `benches/fan_out.rs` measures both settings against
 	/// each other per shape and per backend; #860 tracks acting on it.
 	pub fan_out_row_threshold: usize,
+	/// The row count from which the VM may hand a batch of a region's rows to
+	/// a worker of its own (default: 256). Below it the batch runs on the
+	/// statement's task: a worker costs a task spawn, which a small batch does
+	/// not repay. `usize::MAX` runs every region serially.
+	pub region_row_threshold: usize,
+	/// How many compiled units of each kind — function bodies, closure
+	/// bodies, catalog units — a node keeps for later plans to link, least
+	/// recently used evicted first (default: 1024); `0` keeps none and
+	/// compiles each with the plan that needs it (`crate::exec::vm::units`).
+	pub compiled_unit_cache_size: usize,
+	/// How many function bodies compiled for a call's argument values a node
+	/// keeps, least recently used evicted first (default: 256): a body that
+	/// reads an argument where only a value answers is compiled for the values
+	/// each call brings (`crate::exec::vm::call_unit`); `0` keeps none.
+	pub specialised_body_cache_size: usize,
+	/// The size, in bytes of their encoding, of the largest argument values a
+	/// node keeps a function body compiled for (default: 4096). A body
+	/// compiled for larger values holds them, so it is compiled for its call
+	/// alone and not kept: the cache holds at most
+	/// `specialised_body_cache_size` bodies, each folding at most this much.
+	pub specialised_body_max_arg_bytes: usize,
+	/// How many distinct argument values one function's body is compiled for
+	/// before its calls run a body that reads them when it runs, where one
+	/// compiles (default: 32).
+	pub specialised_body_values: usize,
 }
 
 impl Default for ExecConfig {
@@ -136,6 +185,11 @@ impl Default for ExecConfig {
 			external_sorting_buffer_limit: 50_000,
 			generation_allocation_limit: 2 << 20,
 			fan_out_row_threshold: DEFAULT_FAN_OUT_ROW_THRESHOLD,
+			region_row_threshold: DEFAULT_REGION_ROW_THRESHOLD,
+			compiled_unit_cache_size: DEFAULT_COMPILED_UNIT_CACHE_SIZE,
+			specialised_body_cache_size: DEFAULT_SPECIALISED_BODY_CACHE_SIZE,
+			specialised_body_max_arg_bytes: DEFAULT_SPECIALISED_BODY_MAX_ARG_BYTES,
+			specialised_body_values: DEFAULT_SPECIALISED_BODY_VALUES,
 		}
 	}
 }
@@ -158,6 +212,11 @@ impl cnf::Config for ExecConfig {
 			.parse_key("gql_max_output_rows", &mut self.gql_max_output_rows)
 			.parse_key("external_sorting_buffer_limit", &mut self.external_sorting_buffer_limit)
 			.parse_key("fan_out_row_threshold", &mut self.fan_out_row_threshold)
+			.parse_key("region_row_threshold", &mut self.region_row_threshold)
+			.parse_key("compiled_unit_cache_size", &mut self.compiled_unit_cache_size)
+			.parse_key("specialised_body_cache_size", &mut self.specialised_body_cache_size)
+			.parse_key("specialised_body_max_arg_bytes", &mut self.specialised_body_max_arg_bytes)
+			.parse_key("specialised_body_values", &mut self.specialised_body_values)
 			.parse_key_with(
 				"generation_allocation_limit",
 				&mut self.generation_allocation_limit,

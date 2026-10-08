@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -20,7 +19,7 @@ value = "NONE"
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 1}
     Filter [ctx: Db] [predicate: title @0@ 'hello' AND identifier > 0 OR title @1@ 'world' AND identifier < 99] {rows: 1}
-        BitmapResolve [ctx: Db] [table: blog] {rows: 1}
+        BitmapScan [ctx: Db] [table: blog] {rows: 1}
             BitmapOr [ctx: Db] {rows: 1}
                 BitmapFullTextScan [ctx: Db] [index: blog_title, query: hello] {rows: 1}
                 BitmapFullTextScan [ctx: Db] [index: blog_title, query: world] {rows: 1}

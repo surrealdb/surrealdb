@@ -1,4 +1,4 @@
-//! Projection function system for the streaming executor.
+//! Projection function system for the engine.
 //!
 //! This module provides traits for projection functions that produce field bindings
 //! rather than single values. These functions affect the structure of output objects

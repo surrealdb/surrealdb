@@ -28,6 +28,7 @@ extern crate tracing;
 mod mac;
 
 pub mod cache;
+pub mod catalog_reads;
 pub mod close;
 pub mod config;
 pub mod factory;
@@ -35,6 +36,7 @@ pub mod index_state;
 pub mod into;
 pub mod key;
 pub mod sequences;
+pub mod speculation;
 pub mod tasklease;
 pub mod tr;
 pub mod triggers;

@@ -16,27 +16,46 @@
 
 use std::borrow::Cow;
 use std::ops::Bound;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{Yielder, try_async_stream};
+#[cfg(test)]
 use tracing::instrument;
 
-use crate::catalog::{DatabaseId, Error, Index, NamespaceId};
+use crate::catalog::{DatabaseId, NamespaceId};
+#[cfg(test)]
+use crate::catalog::{Error, Index};
+#[cfg(test)]
 use crate::err::EngineError;
+use crate::exec::ValueBatch;
+#[cfg(test)]
 use crate::exec::operators::scan::index_count::sum_index_count_deltas;
+#[cfg(test)]
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, should_check_perms,
 	table_select_permission_physical_runtime, validate_record_user_access,
 };
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatchStream, monitor_stream,
 };
-use crate::expr::{ControlFlow, ControlFlowExt};
+use crate::expr::ControlFlow;
+#[cfg(test)]
+use crate::expr::ControlFlowExt;
+#[cfg(test)]
 use crate::iam::Action;
-use crate::key::schema::{RecordKey, RecordPrefix};
-use crate::key::{KVKeyDecode, KVValue, RawRange};
-use crate::val::{Number, Object, RecordIdKey, RecordIdKeyRange, TableName, Value};
+use crate::key::RawRange;
+#[cfg(test)]
+use crate::key::schema::RecordKey;
+use crate::key::schema::RecordPrefix;
+#[cfg(test)]
+use crate::key::{KVKeyDecode, KVValue};
+#[cfg(test)]
+use crate::val::RecordIdKey;
+use crate::val::{Number, Object, RecordIdKeyRange, TableName, Value};
 
 /// What a count scan answers with: the row the aggregation *and the projection
 /// above it* would have produced, since a count scan stands in for both.
@@ -74,6 +93,7 @@ impl CountOutput {
 		ValueBatch::new(vec![value])
 	}
 
+	#[cfg(test)]
 	/// Whether the shape has somewhere to put the count. `VALUE` is that place
 	/// itself; a field list a matcher accepted always names at least one field.
 	pub(crate) fn is_well_formed(&self) -> bool {
@@ -84,6 +104,7 @@ impl CountOutput {
 	}
 }
 
+#[cfg(test)]
 /// Optimized operator for `SELECT count() FROM <table> GROUP ALL`.
 ///
 /// Counts records by iterating KV keys (`txn.count()`) instead of
@@ -102,7 +123,9 @@ pub struct CountScan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl CountScan {
+	#[cfg(test)]
 	/// Create a new CountScan operator.
 	pub(crate) fn new(
 		source: Arc<dyn PhysicalExpr>,
@@ -118,6 +141,7 @@ impl CountScan {
 		}
 	}
 }
+#[cfg(test)]
 impl ExecOperator for CountScan {
 	fn name(&self) -> &'static str {
 		"CountScan"
@@ -166,7 +190,9 @@ impl ExecOperator for CountScan {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
 		validate_record_user_access(&db_ctx)?;
-		let check_perms = should_check_perms(&db_ctx, Action::View)?;
+		// Refused here rather than in the stream, so the refusal surfaces when
+		// the plan is executed.
+		should_check_perms(&db_ctx, Action::View)?;
 
 		let source_expr = Arc::clone(&self.source);
 		let version = self.version.clone();
@@ -174,10 +200,7 @@ impl ExecOperator for CountScan {
 		let ctx = ctx.clone();
 
 		let stream = try_async_stream(async move |mut yielder: Yielder<_>| {
-			let db_ctx = ctx.database().context("CountScan requires database context")?;
 			let txn = ctx.txn();
-			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
-			let db = Arc::clone(&db_ctx.db);
 
 			// Evaluate VERSION expression to a timestamp
 			let version: Option<u64> = match &version {
@@ -197,117 +220,7 @@ impl ExecOperator for CountScan {
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 			let table_value = source_expr.evaluate(eval_ctx).await?;
 
-			let (table_name, rid) = match table_value {
-				Value::Table(t) => (t, None),
-				Value::RecordId(rid) => (rid.table.clone(), Some(rid)),
-				// Non-table sources are not eligible for CountScan.
-				_ => {
-					Err(ControlFlow::Err(anyhow::anyhow!(
-						"CountScan received a non-table source"
-					)))?;
-					unreachable!()
-				}
-			};
-
-			// Verify that the table exists.
-			let table_def =
-				db_ctx.get_table_def(&table_name, version).await.context("Failed to get table")?;
-
-			if table_def.is_none() {
-				Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
-					name: table_name.clone(),
-				})))?;
-			}
-
-			// Fail closed: a lightweight relation stores no records, so every
-			// key-space count below — point, range, table, or the conditional
-			// permission fallback — would be wrong-zero. Statically-named
-			// sources were declined at plan time; only runtime-resolved
-			// sources reach this.
-			if table_def.as_deref().is_some_and(|def| {
-				crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some()
-			}) {
-				Err(ControlFlow::Err(anyhow::anyhow!(
-					"a LIGHTWEIGHT relation cannot be scanned by this execution path; \
-					 reference the table statically so the record-less scan can serve it"
-				)))?;
-			}
-
-			// Resolve SELECT permission.
-			let select_permission = if check_perms {
-				table_select_permission_physical_runtime(table_def.as_deref(), &ctx)
-					.await
-					.context("Failed to convert permission")?
-			} else {
-				PhysicalPermission::Allow
-			};
-
-			match select_permission {
-				PhysicalPermission::Deny => {
-					// The table is invisible, so no key of it is counted. The
-					// `GROUP ALL` this stands in for reports one row whatever
-					// reaches it, and a caller who may read nothing counts
-					// nothing — the answer an empty table gives, which is what
-					// the caller is entitled to see.
-					yielder.emit(output.batch(0)).await;
-					return Ok(());
-				}
-				PhysicalPermission::Conditional(_) => {
-					// Per-record permissions – fall back to a full scan + count.
-					// This should not normally happen because the planner avoids
-					// emitting CountScan for conditional permissions, but we handle
-					// it defensively.
-					let count = count_with_perm_fallback(
-						&ctx,
-						ns.namespace_id,
-						db.database_id,
-						&table_name,
-						rid.as_ref(),
-						version,
-						&select_permission,
-					)
-					.await?;
-					yielder.emit(output.batch(count)).await;
-					return Ok(());
-				}
-				PhysicalPermission::Allow => {
-					// Proceed with the fast KV count path.
-				}
-			}
-
-			// ── Fast path: count KV keys without deserializing ──────────
-			let count = if let Some(ref rid) = rid {
-				// Range source
-				count_range(ns.namespace_id, db.database_id, &rid.table, &rid.key, &txn, version)
-					.await?
-			} else {
-				// Check for an unconditional COUNT index first (O(deltas) vs O(records))
-				if let None = version
-					&& let Some(indexes) = db_ctx.get_table_indexes(&table_name, version).await.ok()
-					&& let Some(ix_def) =
-						indexes.iter().find(|ix| matches!(&ix.index, Index::Count(None)))
-				{
-					sum_index_count_deltas(
-						&ctx,
-						&txn,
-						ns.namespace_id,
-						db.database_id,
-						&table_name,
-						ix_def.index_id,
-					)
-					.await?
-				} else {
-					// Fallback: iterate all KV keys
-					let range = RecordPrefix {
-						ns: ns.namespace_id,
-						db: db.database_id,
-						tb: Cow::Borrowed(&table_name),
-					}
-					.range()?;
-					txn.count(range, version).await.context("Failed to count table records")?
-				}
-			};
-
+			let count = count_source(&ctx, table_value, version).await?;
 			yielder.emit(output.batch(count)).await;
 			Ok(())
 		});
@@ -320,6 +233,7 @@ impl ExecOperator for CountScan {
 // Helpers
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 /// Count records in a record-id range using `txn.count()`.
 async fn count_range(
 	ns_id: NamespaceId,
@@ -376,6 +290,132 @@ pub(crate) fn record_key_range(
 	.range_where((start, end))?)
 }
 
+#[cfg(test)]
+/// The number of records `source` names that the caller may select, as
+/// [`CountScan`] counts them: a table's or a record range's keys, a table's
+/// unconditional `COUNT` index where there is one, and under a conditional
+/// permission the records it admits. A table the caller may not see counts
+/// none. Read as of `version`.
+pub(crate) async fn count_source(
+	ctx: &ExecutionContext,
+	source: Value,
+	version: Option<u64>,
+) -> FlowResult<usize> {
+	let db_ctx = ctx.database().context("CountScan requires database context")?;
+	let check_perms = should_check_perms(db_ctx, Action::View)?;
+	let txn = ctx.txn();
+	let ns = Arc::clone(&db_ctx.ns_ctx.ns);
+	let db = Arc::clone(&db_ctx.db);
+	let table_value = source;
+	let (table_name, rid) = match table_value {
+		Value::Table(t) => (t, None),
+		Value::RecordId(rid) => (rid.table.clone(), Some(rid)),
+		// Non-table sources are not eligible for CountScan.
+		_ => {
+			Err(ControlFlow::Err(anyhow::anyhow!("CountScan received a non-table source")))?;
+			unreachable!()
+		}
+	};
+
+	// Verify that the table exists.
+	let table_def =
+		db_ctx.get_table_def(&table_name, version).await.context("Failed to get table")?;
+
+	if table_def.is_none() {
+		Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
+			name: table_name.clone(),
+		})))?;
+	}
+
+	// Fail closed: a lightweight relation stores no records, so every
+	// key-space count below — point, range, table, or the conditional
+	// permission fallback — would be wrong-zero. Statically-named
+	// sources were declined at plan time; only runtime-resolved
+	// sources reach this.
+	if table_def
+		.as_deref()
+		.is_some_and(|def| crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some())
+	{
+		Err(ControlFlow::Err(anyhow::anyhow!(
+			"a LIGHTWEIGHT relation cannot be scanned by this execution path; \
+				 reference the table statically so the record-less scan can serve it"
+		)))?;
+	}
+
+	// Resolve SELECT permission.
+	let select_permission = if check_perms {
+		table_select_permission_physical_runtime(table_def.as_deref(), ctx)
+			.await
+			.context("Failed to convert permission")?
+	} else {
+		PhysicalPermission::Allow
+	};
+
+	match select_permission {
+		PhysicalPermission::Deny => {
+			// The table is invisible, so no key of it is counted. The
+			// `GROUP ALL` this stands in for reports one row whatever
+			// reaches it, and a caller who may read nothing counts
+			// nothing — the answer an empty table gives, which is what
+			// the caller is entitled to see.
+			return Ok(0);
+		}
+		PhysicalPermission::Conditional(_) => {
+			// Per-record permissions – fall back to a full scan + count.
+			// This should not normally happen because the planner avoids
+			// emitting CountScan for conditional permissions, but we handle
+			// it defensively.
+			let count = count_with_perm_fallback(
+				ctx,
+				ns.namespace_id,
+				db.database_id,
+				&table_name,
+				rid.as_ref(),
+				version,
+				&select_permission,
+			)
+			.await?;
+			return Ok(count);
+		}
+		PhysicalPermission::Allow => {
+			// Proceed with the fast KV count path.
+		}
+	}
+
+	// ── Fast path: count KV keys without deserializing ──────────
+	let count = if let Some(ref rid) = rid {
+		// Range source
+		count_range(ns.namespace_id, db.database_id, &rid.table, &rid.key, &txn, version).await?
+	} else {
+		// Check for an unconditional COUNT index first (O(deltas) vs O(records))
+		if let None = version
+			&& let Some(indexes) = db_ctx.get_table_indexes(&table_name, version).await.ok()
+			&& let Some(ix_def) = indexes.iter().find(|ix| matches!(&ix.index, Index::Count(None)))
+		{
+			sum_index_count_deltas(
+				ctx,
+				&txn,
+				ns.namespace_id,
+				db.database_id,
+				&table_name,
+				ix_def.index_id,
+			)
+			.await?
+		} else {
+			// Fallback: iterate all KV keys
+			let range = RecordPrefix {
+				ns: ns.namespace_id,
+				db: db.database_id,
+				tb: Cow::Borrowed(&table_name),
+			}
+			.range()?;
+			txn.count(range, version).await.context("Failed to count table records")?
+		}
+	};
+	Ok(count)
+}
+
+#[cfg(test)]
 /// Fallback: scan all records, checking per-record permissions, and count
 /// those that pass.  Used when the table has conditional SELECT permissions.
 async fn count_with_perm_fallback(
@@ -455,6 +495,7 @@ async fn count_with_perm_fallback(
 	Ok(count)
 }
 
+#[cfg(test)]
 /// Check if a single value passes the permission check.
 async fn check_perm_value(
 	ctx: &ExecutionContext,

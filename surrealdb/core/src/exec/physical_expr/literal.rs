@@ -6,7 +6,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseId, Error as CatalogError, NamespaceId, ParamDefinition};
 use crate::exec::permission::CompiledGuard;
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::exec::physical_expr::{EvalContext, PhysicalExpr, PlannedGuard};
 use crate::exec::{AccessMode, BoxFut, Error as ExecError};
 use crate::expr::FlowResult;
 use crate::expr::mock::Mock;
@@ -67,83 +67,25 @@ pub struct Param {
 	/// done again for every row. See [`CompiledGuard`] for what is kept and
 	/// what is not.
 	guard: CompiledGuard<ParamDefinition>,
+	/// The `PERMISSIONS` clause compiled with the plan, for the definition
+	/// the planner read; see [`PlannedGuard`].
+	planned: PlannedGuard<ParamDefinition>,
 }
 
 impl Param {
-	pub(crate) fn new(name: Strand) -> Self {
+	/// A read of `$name` whose `DEFINE PARAM` predicate the plan compiled as
+	/// `planned`.
+	pub(crate) fn with_planned_guard(name: Strand, planned: PlannedGuard<ParamDefinition>) -> Self {
 		Self {
 			name,
 			guard: CompiledGuard::default(),
+			planned,
 		}
 	}
 
-	/// Fetch a `DEFINE PARAM` value and check its `PERMISSIONS` clause.
-	///
-	/// A conditional permission is judged on every read — the clause reads the
-	/// row the parameter is read on — through [`CompiledGuard`], which
-	/// compiles it once for the definition this read found rather than once
-	/// per read. The stored value is already a value; nothing about it is
-	/// compiled.
-	async fn fetch_db_param(
-		&self,
-		ctx: EvalContext<'_>,
-		txn: &Arc<Transaction>,
-		ns_id: NamespaceId,
-		db_id: DatabaseId,
-	) -> anyhow::Result<Value> {
-		match txn.get_db_param(ns_id, db_id, self.name.as_str(), ctx.exec_ctx.version_stamp()).await
-		{
-			Ok(param_def) => {
-				if !ctx.skip_fetch_perms && ctx.exec_ctx.should_check_perms(Action::View)? {
-					let denied = || ExecError::ParamPermissions {
-						name: self.name.to_string(),
-					};
-					self.guard
-						.check(
-							param_def.permissions_body.logical_ref()?,
-							&param_def,
-							&ctx,
-							Some(Arc::clone(txn)),
-							denied,
-						)
-						.await
-						.map_err(|flow| match flow {
-							crate::expr::ControlFlow::Err(e) => e,
-							// A guard raises nothing else: `check` turns every
-							// other signal into a denial before it returns.
-							_ => anyhow::Error::new(denied()),
-						})?;
-				}
-				Ok(param_def.value.clone())
-			}
-			Err(e) => {
-				if matches!(e.downcast_ref(), Some(CatalogError::PaNotFound { .. })) {
-					Ok(Value::None)
-				} else {
-					Err(e)
-				}
-			}
-		}
-	}
-}
-impl PhysicalExpr for Param {
-	fn name(&self) -> &'static str {
-		"Param"
-	}
-
-	fn as_any(&self) -> &dyn std::any::Any {
-		self
-	}
-
-	fn required_context(&self) -> crate::exec::ContextLevel {
-		// Parameters can be local, session-level, or database-defined.
-		// Local and session params work at Root level; database params
-		// will fail at runtime if database context is unavailable.
-		// We report Root to allow simple parameter usage without DB.
-		crate::exec::ContextLevel::Root
-	}
-
-	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+	/// The parameter's value in `ctx`, resolved in the order the type's
+	/// documentation gives.
+	pub(crate) fn read<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
 			// Handle special params $this and $self.
 			// When current_value is available (per-row context), use it directly.
@@ -176,6 +118,15 @@ impl PhysicalExpr for Param {
 				return Ok(value.clone());
 			}
 
+			// A write-path binding ($before, $after, $value, $input, $event,
+			// $reference) sits between the two: a `LET $value = ...` in the
+			// body being evaluated is an inner scope and wins, while the
+			// binding shadows a session or database parameter of the same
+			// name.
+			if let Some(value) = ctx.write_binding(self.name.as_str()) {
+				return Ok(value.clone());
+			}
+
 			// FrozenContext handles scoped parameter lookup via parent-chain,
 			// including protected params ($auth, $access, $token, $session)
 			if let Some(v) = ctx.exec_ctx.value(self.name.as_str()) {
@@ -185,10 +136,15 @@ impl PhysicalExpr for Param {
 			// $parent falls back to document_root when not explicitly bound.
 			// This allows `->edge[WHERE $parent.field]` and similar idiom-level
 			// WHERE clauses to reference the enclosing row being projected/filtered.
-			if self.name.as_str() == "parent"
-				&& let Some(v) = ctx.document_root
-			{
-				return Ok(v.clone());
+			// Code a write reaches has no such fallback: an unbound `$parent`
+			// there is `NONE`.
+			if self.name.as_str() == "parent" {
+				if ctx.exec_ctx.root().writing {
+					return Ok(Value::None);
+				}
+				if let Some(v) = ctx.document_root {
+					return Ok(v.clone());
+				}
 			}
 
 			// Try to fetch from database
@@ -250,6 +206,92 @@ impl PhysicalExpr for Param {
 		})
 	}
 
+	/// Fetch a `DEFINE PARAM` value and check its `PERMISSIONS` clause.
+	///
+	/// A conditional permission is judged on every read — the clause reads the
+	/// row the parameter is read on — through [`CompiledGuard`], which
+	/// compiles it once for the definition this read found rather than once
+	/// per read. The stored value is already a value; nothing about it is
+	/// compiled.
+	async fn fetch_db_param(
+		&self,
+		ctx: EvalContext<'_>,
+		txn: &Arc<Transaction>,
+		ns_id: NamespaceId,
+		db_id: DatabaseId,
+	) -> anyhow::Result<Value> {
+		match txn.get_db_param(ns_id, db_id, self.name.as_str(), ctx.exec_ctx.version_stamp()).await
+		{
+			Ok(param_def) => {
+				if !ctx.skip_fetch_perms && ctx.exec_ctx.should_check_perms(Action::View)? {
+					let denied = || ExecError::ParamPermissions {
+						name: self.name.to_string(),
+					};
+					let permission = param_def.permissions_body.logical_ref()?;
+					let judged = match self.planned.matching(&param_def, permission, None) {
+						Some(matched) => {
+							crate::exec::guard_verdicts::judged(
+								ctx.exec_ctx,
+								matched.scope,
+								crate::exec::guard_verdicts::GuardKind::Param,
+								self.name.as_str(),
+								matched.id,
+								|| {
+									crate::exec::permission::judge_compiled_guard(
+										matched.compiled,
+										&ctx,
+										denied,
+									)
+								},
+							)
+							.await
+						}
+						None => {
+							self.guard
+								.check(permission, &param_def, &ctx, Some(Arc::clone(txn)), denied)
+								.await
+						}
+					};
+					judged.map_err(|flow| match flow {
+						crate::expr::ControlFlow::Err(e) => e,
+						// A guard raises nothing else: `check` turns every
+						// other signal into a denial before it returns.
+						_ => anyhow::Error::new(denied()),
+					})?;
+				}
+				Ok(param_def.value.clone())
+			}
+			Err(e) => {
+				if matches!(e.downcast_ref(), Some(CatalogError::PaNotFound { .. })) {
+					Ok(Value::None)
+				} else {
+					Err(e)
+				}
+			}
+		}
+	}
+}
+impl PhysicalExpr for Param {
+	fn name(&self) -> &'static str {
+		"Param"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Parameters can be local, session-level, or database-defined.
+		// Local and session params work at Root level; database params
+		// will fail at runtime if database context is unavailable.
+		// We report Root to allow simple parameter usage without DB.
+		crate::exec::ContextLevel::Root
+	}
+
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		self.read(ctx)
+	}
+
 	fn access_mode(&self) -> AccessMode {
 		// Parameter references are read-only
 		AccessMode::ReadOnly
@@ -265,8 +307,7 @@ impl ToSql for Param {
 
 /// Mock expression - |table:count| or |table:range|
 ///
-/// Generates an array of RecordIds for testing purposes. Equivalent to
-/// the old executor's `Expr::Mock` compute path.
+/// Generates an array of RecordIds for testing purposes.
 #[derive(Debug, Clone)]
 pub struct MockExpr(pub(crate) Mock);
 impl PhysicalExpr for MockExpr {
@@ -311,5 +352,48 @@ impl PhysicalExpr for MockExpr {
 impl ToSql for MockExpr {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		self.0.fmt_sql(f, fmt);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::collections::HashMap;
+
+	use surrealdb_strand::Strand;
+
+	use crate::exec::operators::test_util::{physical_expr, root_ctx};
+	use crate::exec::physical_expr::EvalContext;
+	use crate::val::Value;
+
+	/// `$value` is a write-path binding, but a `LET $value = ...` in the body
+	/// being evaluated is an inner scope and has to win. Both are populated
+	/// here, so nothing but the order the two are consulted in decides the
+	/// answer.
+	#[tokio::test]
+	async fn a_block_local_let_shadows_the_write_value_binding() {
+		let exec_ctx = root_ctx();
+		let expr = physical_expr("$value", &exec_ctx).await;
+		let bound = Value::from("the write binding");
+
+		let params: HashMap<Strand, Value> =
+			HashMap::from([(Strand::from("value"), Value::from(1))]);
+		let mut shadowed = EvalContext::from_exec_ctx(&exec_ctx);
+		shadowed.write_value = Some(&bound);
+		shadowed.local_params = Some(&params);
+		assert_eq!(
+			expr.evaluate(shadowed).await.expect("evaluation should succeed"),
+			Value::from(1),
+			"a block-local LET must shadow the write binding of the same name"
+		);
+
+		// Without the LET, the same expression reaches the slot: the shadowing
+		// above is the ordering at work, not an unread binding.
+		let mut bare = EvalContext::from_exec_ctx(&exec_ctx);
+		bare.write_value = Some(&bound);
+		assert_eq!(
+			expr.evaluate(bare).await.expect("evaluation should succeed"),
+			bound,
+			"with no LET in scope, $value must resolve to the write binding"
+		);
 	}
 }

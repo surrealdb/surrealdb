@@ -6,7 +6,7 @@ database = true
 [test]
 reason = """
 A record created by a statement is not visited by that same statement's scan, in
-either key direction. The streaming write path relies on this to interleave reads
+either key direction. The write path relies on this to interleave reads
 and writes batch-at-a-time instead of draining its input, so the property is
 pinned rather than assumed. The two cases use separate tables so neither
 statement can observe the other's records.

@@ -15,8 +15,10 @@ use crate::val::{Number, Value};
 
 /// Applies LIMIT and OFFSET (START) to an input stream.
 ///
-/// Evaluates the limit and offset expressions at execution start, then
-/// applies them to the input stream by skipping and limiting values.
+/// Evaluates the limit and offset expressions at execution start, before its
+/// input is opened, then applies them to the input stream by skipping and
+/// limiting values. A limit of zero runs the input with its storage scans
+/// reading no record (see [`crate::exec::zero_limit`]) and emits nothing.
 #[derive(Debug, Clone)]
 pub struct Limit {
 	pub(crate) input: Arc<dyn ExecOperator>,
@@ -24,6 +26,8 @@ pub struct Limit {
 	pub(crate) limit: Option<Arc<dyn PhysicalExpr>>,
 	/// Number of values to skip (START/OFFSET clause)
 	pub(crate) offset: Option<Arc<dyn PhysicalExpr>>,
+	/// The id the storage scans of `input` are bound to.
+	zero_limit: u64,
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
@@ -34,10 +38,15 @@ impl Limit {
 		limit: Option<Arc<dyn PhysicalExpr>>,
 		offset: Option<Arc<dyn PhysicalExpr>>,
 	) -> Self {
+		let zero_limit = crate::exec::zero_limit::next_id();
+		if limit.is_some() {
+			crate::exec::zero_limit::bind_scans(&input, zero_limit);
+		}
 		Self {
 			input,
 			limit,
 			offset,
+			zero_limit,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -140,13 +149,9 @@ impl ExecOperator for Limit {
 
 	#[instrument(name = "Limit::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let mut input_stream = buffer_stream(
-			self.input.execute(ctx)?,
-			self.input.access_mode(),
-			self.input.cardinality_hint(),
-			ctx.root().ctx.config.exec.operator_buffer_size,
-		);
-
+		let input = Arc::clone(&self.input);
+		let access_mode = self.access_mode().combine(self.input.access_mode());
+		let zero_limit = self.zero_limit;
 		let limit_expr = self.limit.clone();
 		let offset_expr = self.offset.clone();
 		let ctx = ctx.clone();
@@ -172,6 +177,29 @@ impl ExecOperator for Limit {
 				}
 				None => 0,
 			};
+
+			// Opened once the clauses are known, so a zero limit reaches the
+			// input's scans before any of them reads.
+			let input_ctx = if limit_value == Some(0) {
+				ctx.with_zero_limit(zero_limit)
+			} else {
+				ctx.clone()
+			};
+			let mut input_stream = buffer_stream(
+				input.execute(&input_ctx)?,
+				access_mode,
+				input.cardinality_hint(),
+				ctx.root().ctx.config.exec.operator_buffer_size,
+			);
+			// Nothing is emitted, but the input is drained: what its scans
+			// check before reading, and the rows of a source that is not a
+			// read of storage, are owed as for any other limit.
+			if limit_value == Some(0) {
+				while let Some(batch) = input_stream.next().await {
+					batch?;
+				}
+				return Ok(());
+			}
 
 			let mut skipped = 0usize;
 			let mut emitted = 0usize;

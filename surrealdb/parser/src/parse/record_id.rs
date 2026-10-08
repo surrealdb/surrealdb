@@ -290,6 +290,37 @@ pub async fn try_parse_record_id_range(
 	Ok(res)
 }
 
+/// Parses the record id key which begins with the peeked `RAND`, `UUID` or `ULID` keyword.
+///
+/// The key is the generator named by `generate` when `()` follows the keyword. Otherwise the
+/// keyword's text is an identifier key. Consumes the keyword and any `()`.
+pub fn parse_keyword_key(
+	parser: &mut Parser<'_, '_>,
+	token: Token,
+	generate: ast::RecordIdKeyGenerate,
+) -> ParseResult<ast::RecordIdKey> {
+	let _ = parser.next();
+	if let Some(x) = parser.peek()?
+		&& let BaseTokenKind::OpenParen = x.token
+	{
+		let _ = parser.next();
+		let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, x.span)?;
+		let span = parser.span_since(token.span);
+		Ok(ast::RecordIdKey::Generate(Spanned {
+			value: generate,
+			span,
+		}))
+	} else {
+		let slice = parser.slice(token.span);
+		let text = parser.push_set_entry(slice);
+		let ident = parser.push(ast::StringLit {
+			text,
+			span: token.span,
+		});
+		Ok(ast::RecordIdKey::String(ident))
+	}
+}
+
 impl Parse for ast::RecordId {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start_span = parser.peek_span();
@@ -323,72 +354,9 @@ impl Parse for ast::RecordId {
 				};
 				ast::RecordIdKey::Range(parser.push(range))
 			}
-			T![RAND] => {
-				let _ = parser.next();
-				if let Some(x) = parser.peek()?
-					&& let BaseTokenKind::OpenParen = x.token
-				{
-					let _ = parser.next();
-					let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, x.span)?;
-					let span = parser.span_since(token.span);
-					ast::RecordIdKey::Generate(Spanned {
-						value: ast::RecordIdKeyGenerate::Rand,
-						span,
-					})
-				} else {
-					let slice = parser.slice(token.span);
-					let text = parser.push_set_entry(slice);
-					let ident = parser.push(ast::StringLit {
-						text,
-						span: token.span,
-					});
-					ast::RecordIdKey::String(ident)
-				}
-			}
-			T![UUID] => {
-				let _ = parser.next();
-				if let Some(x) = parser.peek()?
-					&& let BaseTokenKind::OpenParen = x.token
-				{
-					let _ = parser.next();
-					let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, x.span)?;
-					let span = parser.span_since(token.span);
-					ast::RecordIdKey::Generate(Spanned {
-						value: ast::RecordIdKeyGenerate::Uuid,
-						span,
-					})
-				} else {
-					let slice = parser.slice(token.span);
-					let text = parser.push_set_entry(slice);
-					let ident = parser.push(ast::StringLit {
-						text,
-						span: token.span,
-					});
-					ast::RecordIdKey::String(ident)
-				}
-			}
-			T![ULID] => {
-				let _ = parser.next();
-				if let Some(x) = parser.peek()?
-					&& let BaseTokenKind::OpenParen = x.token
-				{
-					let _ = parser.next();
-					let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, x.span)?;
-					let span = parser.span_since(token.span);
-					ast::RecordIdKey::Generate(Spanned {
-						value: ast::RecordIdKeyGenerate::Ulid,
-						span,
-					})
-				} else {
-					let slice = parser.slice(token.span);
-					let text = parser.push_set_entry(slice);
-					let ident = parser.push(ast::StringLit {
-						text,
-						span: token.span,
-					});
-					ast::RecordIdKey::String(ident)
-				}
-			}
+			T![RAND] => parse_keyword_key(parser, token, ast::RecordIdKeyGenerate::Rand)?,
+			T![UUID] => parse_keyword_key(parser, token, ast::RecordIdKeyGenerate::Uuid)?,
+			T![ULID] => parse_keyword_key(parser, token, ast::RecordIdKeyGenerate::Ulid)?,
 			_ => {
 				let start = parse_peeked_record_id_key(parser).await?;
 

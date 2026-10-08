@@ -88,18 +88,26 @@
 
 mod effects;
 mod fold;
+pub(crate) mod footprint;
 mod functions;
 mod optimise;
 mod params;
+mod properties;
 pub(crate) mod reads;
 mod resolve;
 mod rules;
 use std::convert::Infallible;
 use std::sync::Arc;
 
+pub(crate) use effects::{
+	Needs, effects_of_body, effects_of_expr, effects_of_plan, effects_of_plan_late_bound,
+	needs_of_expr, stored_functions_of,
+};
+#[cfg(test)]
+pub(crate) use rules::plan_may_raise;
 pub(crate) use rules::{
 	BatchRetry, ColumnEffects, and, columns_may_run_column_major, conjuncts, is_effect_free,
-	is_false, may_signal_control_flow, named_reads, plan_may_raise,
+	is_false, may_signal_control_flow, named_reads,
 };
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -108,8 +116,8 @@ use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::With;
 use crate::expr::logical::{
-	LogicalEval, LogicalExpr, LogicalOp, LogicalSource, LogicalValues, RelationAlias, Schema,
-	SourceRef, is_value_literal,
+	LogicalDdl, LogicalDdlStatement, LogicalEval, LogicalExpr, LogicalOp, LogicalSource,
+	LogicalValues, RelationAlias, Schema, SourceRef, is_value_literal,
 };
 use crate::iam::Auth;
 use crate::kvs::Transaction;
@@ -131,11 +139,40 @@ pub(crate) struct BindContext<'a> {
 	/// physical planner keeps runtime enforcement for every source whose
 	/// schema is unresolved.
 	pub auth: Option<Arc<Auth>>,
+	/// Whether the frame this plan is compiled for enforces permissions at
+	/// all, mirroring
+	/// [`RootContext::perms_suppressed`](crate::exec::context::RootContext).
+	/// A suppressed frame reads every row of every table it names whatever
+	/// its principal may select, so the resolve pass plants neither a
+	/// permission filter nor a field guard for it: the plan a write compiles
+	/// to maintain a materialized view computes the view's value and not the
+	/// writer's view of it.
+	pub perms_suppressed: bool,
 	/// Parameter names the statement binds per row (`$this`, `$parent`, …),
 	/// which are never substituted.
 	pub row_scoped: &'a [&'a str],
 	/// Decides which calls fold and which name a projection function.
 	pub registry: &'a FunctionRegistry,
+	/// Whether the plan is read under a `VERSION` its own statements do not
+	/// carry: the body of a function a versioned statement calls. A user-defined
+	/// function it calls is the definition stored at that stamp, which the
+	/// current one this pass would inline is not.
+	pub versioned: bool,
+	/// Whether a `time::now()` in a condition folds to the time of binding,
+	/// one value for the statement. A statement bound before it runs, after
+	/// statements whose time it must not take, evaluates it when it runs.
+	pub folds_clock: bool,
+	/// Whether a catalog definition may be inlined into the plan: a call of a
+	/// user-defined function replaced by its body, a `DEFINE PARAM` read
+	/// replaced by its value. A statement that reads each definition as the
+	/// catalog stands when it is reached inlines none
+	/// ([`CatalogWithin::calls_current`](crate::exec::planner::CatalogWithin)).
+	pub inlines_definitions: bool,
+	/// Whether the statements written in the plan's expressions are bound
+	/// with it. A statement that plans them late-bound leaves them as written
+	/// ([`CatalogWithin::nested_late`](crate::exec::planner::CatalogWithin)):
+	/// each is bound when it is planned, against the catalog it then finds.
+	pub binds_nested: bool,
 }
 
 /// Whether some name of `names` is read in `op`, or a plan nested in it,
@@ -150,12 +187,168 @@ pub(crate) fn reads_in_resolvable_position(op: &LogicalOp, names: &[&str]) -> bo
 /// Bind `op` for one transaction and one principal, every closure body in it
 /// excepted. See the module documentation for the pass order.
 pub(crate) async fn bind(op: LogicalOp, bx: &BindContext<'_>) -> Result<LogicalOp, Error> {
+	bind_with(op, bx, Rules::Run).await
+}
+
+/// Whether [`bind_with`] runs the rewrite rules after binding.
+///
+/// A plan bound either way answers every query identically: the rules rewrite
+/// what a statement does, never what it means. That equality is the property the
+/// differential tests assert, and holding the two plans apart is the only way to
+/// assert it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rules {
+	/// Bind and rewrite: what a query runs.
+	Run,
+	/// Bind only, leaving the plan unrewritten: the reference to compare against.
+	///
+	/// Only the differential property tests ask for this, so nothing
+	/// constructs it outside a test build.
+	#[cfg_attr(
+		not(test),
+		expect(dead_code, reason = "only the differential property tests bind without the rules")
+	)]
+	Skip,
+}
+
+/// [`bind`], with the rewrite rules under the caller's control.
+pub(crate) async fn bind_with(
+	op: LogicalOp,
+	bx: &BindContext<'_>,
+	rules: Rules,
+) -> Result<LogicalOp, Error> {
+	// Statements left as written are taken out of the plan while it is bound,
+	// and put back in its bound form where their places are left.
+	let mut nested = Vec::new();
+	let op = match bx.binds_nested {
+		true => op,
+		false => take_nested(op, &mut nested),
+	};
+	let bound = bind_taken(op, bx, rules).await?;
+	Ok(match nested.is_empty() {
+		true => bound,
+		false => put_nested(bound, &nested),
+	})
+}
+
+/// The prefix of the name of the parameter that holds the place of a
+/// statement [`take_nested`] took out of a plan, followed by its index: a
+/// name no query text can write.
+const NESTED_PLACE: &str = "\u{0}nested";
+
+/// The name of the parameter that holds the place of the statement at
+/// `index` of those [`take_nested`] took out of a plan.
+fn nested_place(index: usize) -> String {
+	format!("{NESTED_PLACE}{index}")
+}
+
+/// `op` with each statement written in its own expressions, closure bodies
+/// apart, replaced by a statement that reads a parameter no plan can name
+/// ([`nested_place`]), the statements taken pushed to `taken` in order.
+fn take_nested(op: LogicalOp, taken: &mut Vec<LogicalOp>) -> LogicalOp {
+	let Ok(op) = op.transform_up(&mut |mut node| {
+		let Ok(()) = node.visit_scalars_mut(&mut |scalar| {
+			visit_binding_mut(scalar, &mut |expr| {
+				if let LogicalExpr::Subquery(plan) = expr {
+					let place = LogicalOp::Eval(LogicalEval {
+						expr: LogicalExpr::Param(crate::expr::Param::from(nested_place(
+							taken.len(),
+						))),
+					});
+					taken.push(std::mem::replace(plan.as_mut(), place));
+				}
+				Ok::<_, Infallible>(())
+			})
+		});
+		Ok::<_, Infallible>(node)
+	});
+	op
+}
+
+/// `op` with each place [`take_nested`] left put back as the statement it
+/// held, from `taken`.
+fn put_nested(op: LogicalOp, taken: &[LogicalOp]) -> LogicalOp {
+	let Ok(op) = op.transform_up(&mut |mut node| {
+		let Ok(()) = node.visit_scalars_mut(&mut |scalar| {
+			visit_binding_mut(scalar, &mut |expr| {
+				if let LogicalExpr::Subquery(plan) = expr
+					&& let LogicalOp::Eval(LogicalEval {
+						expr: LogicalExpr::Param(param),
+					}) = plan.as_ref()
+					&& let Some(statement) = param
+						.as_str()
+						.strip_prefix(NESTED_PLACE)
+						.and_then(|at| at.parse::<usize>().ok())
+						.and_then(|at| taken.get(at))
+				{
+					**plan = statement.clone();
+				}
+				Ok::<_, Infallible>(())
+			})
+		});
+		Ok::<_, Infallible>(node)
+	});
+	op
+}
+
+/// `op` with each `type::field('<path>')` inside an element filter's
+/// predicate (`[WHERE …]`) written as the path it names. The call reads the
+/// path of the current value, which inside the predicate is the element, as
+/// the path does.
+fn element_field_paths(op: LogicalOp) -> LogicalOp {
+	fn in_filters(expr: &mut LogicalExpr) {
+		let Ok(()) = expr.visit_mut(&mut |node| {
+			if let LogicalExpr::Filter {
+				predicate,
+				..
+			} = node
+			{
+				let Ok(()) = predicate.visit_mut(&mut |inner| {
+					if let LogicalExpr::Call(call) = inner
+						&& matches!(&call.receiver, crate::expr::Function::Normal(name) if name == "type::field")
+						&& let [
+							LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::String(
+								path,
+							)),
+						] = call.args.as_slice()
+						&& let Ok(idiom) = crate::syn::idiom(path.as_str())
+						&& let Ok(field) =
+							crate::expr::logical::lower_expr(crate::sql::Expr::Idiom(idiom))
+						&& field.is_path()
+					{
+						*inner = field;
+					}
+					Ok::<_, Infallible>(())
+				});
+			}
+			Ok::<_, Infallible>(())
+		});
+	}
+	rewrite_deep(op, &mut |mut node| {
+		let Ok(()) = node.visit_scalars_mut(&mut |scalar| {
+			in_filters(scalar);
+			Ok::<_, Infallible>(())
+		});
+		node
+	})
+}
+
+/// [`bind_with`] over a plan whose nested statements are bound with it or
+/// taken out.
+async fn bind_taken(op: LogicalOp, bx: &BindContext<'_>, rules: Rules) -> Result<LogicalOp, Error> {
 	let caller = Caller::new(bx);
+	// A statement holding a schema statement among others is bound again,
+	// statement by statement, where each is planned: a `time::now()` its
+	// later statements read is folded there, or when they run, not now.
+	let folds_clock = bx.folds_clock
+		&& (matches!(op, LogicalOp::Ddl(_))
+			|| !crate::exec::planner::fold::changes_the_catalog(&op));
 	let op = resolve::resolve(op, bx, caller.as_ref()).await?;
 	let op = params::resolve_params(op, bx).await;
 	let capabilities = bx.ctx.get_capabilities();
 	let checks = caller.as_ref().is_none_or(Caller::checks_permissions);
-	let op = fold::fold_constants(op, bx.registry, &capabilities, checks);
+	let op = fold::fold_constants_with(op, bx.registry, &capabilities, checks, folds_clock);
+	let op = element_field_paths(op);
 	let functions = functions::Functions::gather(&op, bx, caller.as_ref()).await;
 	let permission_checked_params = params::permission_checked_names(&op, bx).await;
 	let mut cx = rules::RuleContext {
@@ -165,8 +358,12 @@ pub(crate) async fn bind(op: LogicalOp, bx: &BindContext<'_>) -> Result<LogicalO
 		permission_checked_params: &permission_checked_params,
 		next_alias: 0,
 		capabilities: &capabilities,
+		folds_clock,
 	};
-	Ok(optimise::optimise(op, &mut cx))
+	match rules {
+		Rules::Run => Ok(optimise::optimise(op, &mut cx)),
+		Rules::Skip => Ok(op),
+	}
 }
 
 /// The principal a statement runs as, and what the runtime's permission gates
@@ -184,6 +381,9 @@ pub(super) struct Caller {
 	/// level of a namespace or database user is compared against these.
 	ns: Option<String>,
 	db: Option<String>,
+	/// Whether the frame suppresses enforcement, which decides for every
+	/// principal at once: see [`BindContext::perms_suppressed`].
+	perms_suppressed: bool,
 }
 
 impl Caller {
@@ -197,6 +397,7 @@ impl Caller {
 			auth_enabled: bx.ctx.auth_enabled(),
 			ns,
 			db,
+			perms_suppressed: bx.perms_suppressed,
 		})
 	}
 
@@ -205,23 +406,27 @@ impl Caller {
 	}
 
 	/// Whether reads by this principal are permission-checked, as
-	/// `should_check_perms(View)` decides: never when auth is disabled and the
-	/// session is anonymous; otherwise only a viewer whose actor level covers
-	/// the session's namespace and database is exempt.
+	/// `should_check_perms(View)` decides: never in a frame that suppresses
+	/// enforcement, never when auth is disabled and the session is anonymous;
+	/// otherwise only a viewer whose actor level covers the session's
+	/// namespace and database is exempt.
 	pub(super) fn checks_permissions(&self) -> bool {
 		self.checks_permissions_as(&self.auth)
 	}
 
 	/// [`Self::checks_permissions`] for a principal derived from this one — a
-	/// `COMPUTED` body narrowed by its `AUTH LIMIT`.
+	/// `COMPUTED` body narrowed by its `AUTH LIMIT`. Suppression is the
+	/// frame's and outranks the derived principal, as the runtime gate takes
+	/// it before it reads an authority at all.
 	pub(super) fn checks_permissions_as(&self, auth: &Auth) -> bool {
-		crate::exec::permission::action_is_checked(
-			self.auth_enabled,
-			auth,
-			crate::iam::Action::View,
-			self.ns.as_deref(),
-			self.db.as_deref(),
-		)
+		!self.perms_suppressed
+			&& crate::exec::permission::action_is_checked(
+				self.auth_enabled,
+				auth,
+				crate::iam::Action::View,
+				self.ns.as_deref(),
+				self.db.as_deref(),
+			)
 	}
 
 	/// Refuses a namespace or database user reading outside its own scope, as
@@ -377,6 +582,343 @@ fn next_alias_index(op: &LogicalOp) -> usize {
 	next
 }
 
+/// The first write in `op` that no operator can run, named by the form and the
+/// stage it is missing — or `None` when every write it holds can run.
+///
+/// A mutation has a logical form, so a statement holding one reaches the
+/// planner instead of being refused by statement kind. A form is declined
+/// exactly when one of its orders names a stage with no body
+/// ([`WritePlan::resolve`](crate::exec::operators::write::plan::WritePlan)),
+/// so this narrows as stages land and answers `None` once they all have. But
+/// *where* a decline happens is load-bearing, which is why this runs at
+/// [`crate::exec::planner::plan_statement_inner`], before anything is bound
+/// or compiled.
+///
+/// Every caller that can fall back does so on `ExecError::PlannerUnsupported`
+/// alone; each other planning error fails the statement outright. A sibling
+/// branch can raise one of those first — `RETURN IF … { SELECT … @@ … } ELSE
+/// { CREATE person }` compiles the untaken `SELECT`, which raises
+/// `NoIndexFoundForMatch` — so declining only once the walk reaches the write
+/// would make the fallback depend on the order branches are compiled in, and
+/// would fail a statement the compute executor runs to completion.
+///
+/// # The traversal is the write's own, not a bind pass's
+///
+/// It reaches every position a write can be written into, which is more than
+/// any bind pass walks:
+///
+/// - operator children, and the plans nested in operator scalars;
+/// - **closure bodies**, which [`visit_binding`] deliberately does not enter. A bind pass stops
+///   there because a closure resolves where it is invoked; this walk asks a different question —
+///   whether the statement holds a write at all — for which the body counts.
+///   `LogicalExpr::children()` exposes it, so entering it is a matter of not re-applying the
+///   closure guard.
+///
+/// A write in a closure the statement never calls still declines. The
+/// question is whether the statement holds a write anywhere, and the compute
+/// executor runs such a statement to completion; a narrower walk would decline
+/// only some of them, and which ones would depend on compile order.
+///
+/// The per-node declines in [`crate::exec::planner::fold`] remain the
+/// authority for a write that reaches them.
+pub(crate) fn unplannable_write(op: &LogicalOp) -> Option<String> {
+	let mut found = None;
+	write_walk::in_op(op, &mut found, &mut write_walk::cannot_run);
+	found
+}
+
+/// The same question as [`unplannable_write`], asked of a bare expression.
+///
+/// A stored catalog clause is an expression rather than a statement, and it
+/// reaches the planner through [`crate::exec::Planner::physical_expr`] instead
+/// of `plan_statement_inner`, so the statement-level pre-flight never sees it.
+/// A caller compiling such a clause asks here, and carries the clause as an
+/// uncompilable one when the answer is `Some`.
+pub(crate) fn unplannable_write_in_expr(expr: &LogicalExpr) -> Option<String> {
+	let mut found = None;
+	write_walk::in_expr(expr, &mut found, &mut write_walk::cannot_run);
+	found
+}
+
+/// Whether `expr` holds a `LET` of a protected name in a statement it nests,
+/// wherever it stands in it: a statement the operator tree refuses when it
+/// plans it, whether or not it runs.
+pub(crate) fn holds_protected_let(expr: &LogicalExpr) -> bool {
+	use std::ops::ControlFlow;
+	expr.visit_deep(&mut |node| {
+		let LogicalExpr::Subquery(plan) = node else {
+			return ControlFlow::Continue(());
+		};
+		match plan
+			.visit_ops_deep(&mut |op| {
+				if let LogicalOp::Let(stmt) = op
+					&& surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&stmt.name.as_str())
+				{
+					ControlFlow::Break(())
+				} else {
+					ControlFlow::Continue(())
+				}
+			})
+			.is_break()
+		{
+			true => ControlFlow::Break(()),
+			false => ControlFlow::Continue(()),
+		}
+	})
+	.is_break()
+}
+
+/// Whether `expr` holds a `LET` written as an expression — a `LET` in a
+/// statement's clause, an array, an operand or an `IF` arm's value, rather
+/// than a statement of a block or the value of a `RETURN` or another `LET`
+/// — wherever it stands in it: a statement planning refuses
+/// ([`crate::exec::vm::map`]'s `LET_IN_AN_EXPRESSION`) whether or not it runs.
+pub(crate) fn holds_let_expression(expr: &LogicalExpr) -> bool {
+	use std::ops::ControlFlow;
+	expr.visit_deep(&mut |node| {
+		if let LogicalExpr::Subquery(op) = node
+			&& matches!(**op, LogicalOp::Let(_))
+		{
+			ControlFlow::Break(())
+		} else {
+			ControlFlow::Continue(())
+		}
+	})
+	.is_break()
+}
+
+/// Whether `expr` holds a write statement, wherever it stands in it.
+pub(crate) fn holds_write_statement(expr: &LogicalExpr) -> bool {
+	let mut found = None;
+	write_walk::in_expr(expr, &mut found, &mut |_| Some(String::new()));
+	found.is_some()
+}
+
+/// Whether a schema statement changes what the session's namespace and
+/// database resolve to. Every other one leaves name resolution where it was
+/// and changes only the catalog inside it.
+pub(crate) fn changes_name_resolution(ddl: &LogicalDdl) -> bool {
+	use crate::expr::statements::{DefineStatement, RemoveStatement};
+	match &ddl.statement {
+		LogicalDdlStatement::Define(define) => {
+			matches!(**define, DefineStatement::Namespace(_) | DefineStatement::Database(_))
+		}
+		LogicalDdlStatement::Remove(remove) => {
+			matches!(**remove, RemoveStatement::Namespace(_) | RemoveStatement::Database(_))
+		}
+		LogicalDdlStatement::Alter(_) | LogicalDdlStatement::Rebuild(_) => false,
+	}
+}
+
+/// Why a plan cannot be bound by a planner that does not plan what follows
+/// its schema statements late-bound, because a schema statement changes a
+/// name the plan already resolved, if one does.
+///
+/// Such a planner binds the statement against the catalog it finds, once. The
+/// session's namespace and database are resolved into the execution context
+/// before the plan runs, so a block that creates or removes the namespace or
+/// database the session names has been given a context resolved against the
+/// catalog from before it ran, and a table, field or index defined by one of a
+/// block's own statements is resolved by the ones after it only where the block
+/// plans what follows a schema statement late-bound.
+///
+/// The decline is therefore for a namespace or database statement nested
+/// inside another statement, and for any schema statement nested where no
+/// block covers it. The VM plans what follows such a statement late-bound
+/// ([`crate::exec::planner::Planner::late_binding`]), and the planners that
+/// reach it through [`crate::exec::planner::Planner::binding_late_after_schema`]
+/// do not ask.
+pub(crate) fn unplannable_context_change(op: &LogicalOp) -> Option<String> {
+	/// `covered` is whether every operator between here and the root is a
+	/// block, which is the only shape that compiles its statements as it
+	/// reaches them. It never becomes true again once false: a block inside a
+	/// `FOR` is compiled once for every iteration the loop runs, and one
+	/// inside an expression is compiled with the statement holding it.
+	#[expect(
+		clippy::wildcard_enum_match_arm,
+		reason = "every other operator is judged by the schema statements beneath it"
+	)]
+	fn nested(op: &LogicalOp, covered: bool) -> Option<String> {
+		match op {
+			LogicalOp::Ddl(ddl) => {
+				let why = |what: &str| Some(format!("{} {what}", ddl.statement.kind()));
+				if changes_name_resolution(ddl) {
+					// The execution context resolved the session's names
+					// before the plan ran, and no later compilation revisits
+					// it.
+					why("inside another statement changes the name the plan resolved")
+				} else if covered {
+					None
+				} else {
+					why("inside another statement")
+				}
+			}
+			LogicalOp::Sequence(seq) => seq.stmts.iter().find_map(|op| nested(op, covered)),
+			// Nothing below here is covered, however it nests, so the whole
+			// subtree is one question. The walk reaches plans held in scalars
+			// too — an `IF` is an expression, and the block in its branch is a
+			// subquery rather than an operator child.
+			other => {
+				let mut found = None;
+				let mut seen_self = false;
+				let _ = other.visit_ops_deep(&mut |node| {
+					if !seen_self {
+						seen_self = true;
+						return std::ops::ControlFlow::Continue(());
+					}
+					if let LogicalOp::Ddl(ddl) = node {
+						found = nested(node, false);
+						let _ = ddl;
+						return std::ops::ControlFlow::Break(());
+					}
+					std::ops::ControlFlow::Continue(())
+				});
+				found
+			}
+		}
+	}
+
+	// The whole plan: nothing else has resolved anything against it, which is
+	// what gives a schema statement reached from a function body or from
+	// `eval` a compiled route.
+	if matches!(op, LogicalOp::Ddl(_)) {
+		return None;
+	}
+	nested(op, true)
+}
+
+/// The walk both questions share.
+mod write_walk {
+	use surrealdb_types::ToSql;
+
+	use super::{LogicalExpr, LogicalOp};
+	use crate::exec::operators::write::plan::WritePlan;
+	use crate::exec::planner::write::write_facts;
+	use crate::expr::logical::{LogicalWrite, LogicalWriteStatement};
+	use crate::expr::{Data, Expr};
+
+	/// What the walk asks of each write it reaches. `Some` stops the walk and
+	/// becomes the answer.
+	///
+	/// A parameter rather than an inlined test so that the traversal and the
+	/// decision are testable apart: the traversal's job is to reach a write
+	/// wherever it is written, which stays the same question after every form
+	/// can run and [`cannot_run`] has stopped answering `Some` for any of
+	/// them.
+	pub(super) type Decide = dyn FnMut(&LogicalWrite) -> Option<String>;
+
+	/// The production decision, asked of the statement alone: the orders it
+	/// names must resolve, and every clause it carries must have a compiled
+	/// form.
+	///
+	/// Both questions are answered here rather than left to the planner
+	/// because the answer decides whether the caller falls back to the compute
+	/// executor. A decline raised once the fold has reached the write would
+	/// let an unrelated refusal elsewhere in the statement — a `MATCHES` in an
+	/// untaken branch that binds to no index, say — surface first and fail a
+	/// statement the compute executor runs to completion, making the fallback
+	/// depend on the order branches are compiled in.
+	///
+	/// The clause check lowers the statement's scalars a second time, since
+	/// the planner lowers them again when it compiles them. A write's clauses
+	/// are small and the work is per statement rather than per record, which
+	/// is the price of an answer that does not depend on compile order.
+	pub(super) fn cannot_run(write: &LogicalWrite) -> Option<String> {
+		if let Err(missing) = WritePlan::build(write_facts(write)).resolve() {
+			return Some(format!("{} has no {} stage yet", write.statement.kind(), missing.name()));
+		}
+		uncompilable_clause(&write.statement)
+	}
+
+	/// The first clause of the statement the planner would decline, named.
+	///
+	/// The clauses are the expressions the planner compiles once for the
+	/// statement: its condition, its data clause and its `ON DUPLICATE KEY
+	/// UPDATE` clause. A place needs no question of its own: a path made of
+	/// parts no address follows compiles to a step that stops the walk.
+	fn uncompilable_clause(statement: &LogicalWriteStatement) -> Option<String> {
+		if let Some(cond) = statement.cond()
+			&& let Some(why) = unlowerable(cond, "a condition")
+		{
+			return Some(why);
+		}
+		statement
+			.data()
+			.and_then(in_data)
+			.or_else(|| statement.duplicate_update().and_then(in_data))
+	}
+
+	/// The first expression of one data clause the planner would decline.
+	fn in_data(data: &Data) -> Option<String> {
+		match data {
+			Data::EmptyExpression => None,
+			Data::PatchExpression(expr) => unlowerable(expr, "a PATCH clause"),
+			Data::MergeExpression(expr) => unlowerable(expr, "a MERGE clause"),
+			Data::ReplaceExpression(expr) => unlowerable(expr, "a REPLACE clause"),
+			Data::ContentExpression(expr) => unlowerable(expr, "a CONTENT clause"),
+			Data::SingleExpression(expr) => unlowerable(expr, "an INSERT row"),
+			Data::UnsetExpression(_) => None,
+			Data::SetExpression(assignments) | Data::UpdateExpression(assignments) => assignments
+				.iter()
+				.find_map(|assignment| unlowerable(&assignment.value, "an assignment")),
+			Data::ValuesExpression(rows) => {
+				rows.iter().flatten().find_map(|(_, expr)| unlowerable(expr, "an INSERT value"))
+			}
+		}
+	}
+
+	/// Why one clause expression has no logical form, if it has none.
+	fn unlowerable(expr: &Expr, role: &str) -> Option<String> {
+		crate::expr::logical::lower_expr(expr.clone().into())
+			.err()
+			.map(|why| format!("{role} cannot hold {}: {why}", expr.to_sql()))
+	}
+
+	pub(super) fn in_op(op: &LogicalOp, found: &mut Option<String>, decide: &mut Decide) {
+		if found.is_some() {
+			return;
+		}
+		if let LogicalOp::Write(write) = op {
+			// A write the decision admits is walked into rather than returned
+			// from: its clauses may hold a write of a form that still cannot
+			// run.
+			if let Some(why) = decide(write) {
+				*found = Some(why);
+				return;
+			}
+		}
+		for scalar in op.scalars() {
+			in_expr(scalar, found, decide);
+		}
+		for child in op.children() {
+			in_op(child, found, decide);
+		}
+	}
+
+	pub(super) fn in_expr(expr: &LogicalExpr, found: &mut Option<String>, decide: &mut Decide) {
+		if found.is_some() {
+			return;
+		}
+		if let LogicalExpr::Subquery(plan) = expr {
+			in_op(plan, found, decide);
+		}
+		// No closure guard: `children()` yields a closure's body, and a write
+		// in one is the statement's for this question.
+		for child in expr.children() {
+			in_expr(child, found, decide);
+		}
+	}
+
+	/// The traversal alone: the kind of the first write anywhere in `op`,
+	/// whatever its form can or cannot run today.
+	#[cfg(all(test, feature = "kv-mem"))]
+	pub(super) fn first_write(op: &LogicalOp) -> Option<String> {
+		let mut found = None;
+		in_op(op, &mut found, &mut |write| Some(write.statement.kind().to_owned()));
+		found
+	}
+}
+
 /// [`LogicalOp::visit_ops_deep`] for a pass that cannot fail: every node of
 /// the plan in pre-order, including the nodes of every plan nested in a
 /// scalar subquery at any depth, and none from inside a closure body. The
@@ -400,10 +942,13 @@ fn classify_source(
 	with: Option<With>,
 	for_update: bool,
 ) -> LogicalOp {
+	// A source a pass rewrote into a literal is one value, not an array
+	// written in `FROM`.
 	if is_value_literal(&expr) {
 		LogicalOp::Values(LogicalValues {
 			expr,
 			for_update,
+			written: false,
 		})
 	} else {
 		LogicalOp::Source(LogicalSource {
@@ -526,8 +1071,13 @@ pub(super) mod test_fixture {
 				txn: Some(Arc::clone(&bound.txn)),
 				ns_db: bound.ns_db,
 				auth: bound.auth.clone(),
+				perms_suppressed: false,
 				row_scoped: SELECT_ITERATION_PARAMS,
 				registry: &self.registry,
+				versioned: false,
+				folds_clock: true,
+				inlines_definitions: true,
+				binds_nested: true,
 			}
 		}
 
@@ -570,6 +1120,58 @@ pub(super) mod test_fixture {
 mod tests {
 	use super::test_fixture::{Fixture, owner, record_user};
 	use super::*;
+
+	/// A write is found wherever it sits, including a scalar position that
+	/// `children()` does not reach.
+	///
+	/// The depth is the point. `LogicalOp::visit` and `children()` walk the
+	/// operator tree, and a mutation written into a scalar — an `IF` branch, a
+	/// call argument, a `LIMIT` — hangs off a subquery instead, so a walk over
+	/// children alone reports a statement holding one as plannable. It would
+	/// then be declined later, at the node, which is the ordering hazard
+	/// `unplannable_write` exists to avoid.
+	///
+	/// Asked of the traversal alone, so it keeps asserting what it means to
+	/// once every form can run and `unplannable_write` answers `None` for all
+	/// of them.
+	#[test]
+	fn a_write_is_found_through_a_scalar_as_well_as_a_child() {
+		let unplannable_write = |op: &LogicalOp| write_walk::first_write(op);
+		let some = |kind: &str| Some(kind.to_owned());
+		assert_eq!(unplannable_write(&lower_test("CREATE person:tobie")), some("CREATE"));
+		assert_eq!(
+			unplannable_write(&lower_test(
+				"RETURN IF $c { SELECT * FROM t } ELSE { CREATE person:tobie }"
+			)),
+			some("CREATE"),
+			"a write in a scalar position is reached"
+		);
+		assert_eq!(
+			unplannable_write(&lower_test("SELECT id, (CREATE log:1) AS made FROM person")),
+			some("CREATE"),
+			"a write in a projection is reached"
+		);
+		assert_eq!(
+			unplannable_write(&lower_test("SELECT * FROM person LIMIT (CREATE log:1).n")),
+			some("CREATE"),
+			"a write in a LIMIT is reached"
+		);
+		assert_eq!(
+			unplannable_write(&lower_test("RETURN array::map([1], |$x| { CREATE log:1 })")),
+			some("CREATE"),
+			"a write in a closure body is reached, which a bind pass's walk stops short of"
+		);
+
+		// The walk over children alone would answer the first of these and
+		// miss the rest, so the control matters: a plan with no write must
+		// answer `None`, or the assertions above would hold vacuously.
+		assert_eq!(unplannable_write(&lower_test("SELECT * FROM person")), None);
+		assert_eq!(
+			unplannable_write(&lower_test("RETURN IF $c { SELECT * FROM t } ELSE { 1 }")),
+			None
+		);
+		assert_eq!(unplannable_write(&lower_test("RETURN array::map([1], |$x| { $x + 1 })")), None);
+	}
 
 	#[tokio::test]
 	async fn each_pass_feeds_the_next() {

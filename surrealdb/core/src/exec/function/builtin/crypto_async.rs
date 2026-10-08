@@ -1,4 +1,4 @@
-//! Async crypto functions for the streaming executor.
+//! Async crypto functions for the engine.
 //!
 //! These are CPU-intensive crypto functions (argon2, bcrypt, pbkdf2, scrypt)
 //! that are offloaded to a blocking thread pool to avoid blocking the async runtime.

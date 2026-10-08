@@ -53,21 +53,31 @@ impl ScalarFunction for RecordExists {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
-			use crate::doc::CursorDoc;
-			let args = FromArgs::from_args("record::exists", args)?;
-			let frozen = ctx.exec_ctx.ctx();
-			let opt = ctx.exec_ctx.options();
-			let doc = ctx
-				.document_root
-				.or(ctx.current_value)
-				.map(|v| CursorDoc::new(None, None, v.clone()));
-			let mut stack = TreeStack::new();
-			stack
-				.enter(|stk| async move {
-					crate::fnc::record::exists((stk, frozen, opt, doc.as_ref()), args).await
-				})
-				.finish()
-				.await
+			use crate::exe::FlowResultExt as _;
+			let (rid,): (crate::val::RecordId,) = FromArgs::from_args("record::exists", args)?;
+			if ctx.exec_ctx.options().is_none() {
+				return Ok(Value::None);
+			}
+			// A record exists for the caller when reading its `id` finds one:
+			// the read a path step makes, under the caller's permissions, so
+			// a record the caller may not select does not exist for it.
+			let id =
+				crate::exec::parts::field::evaluate_field(&Value::RecordId(rid), "id", ctx.clone())
+					.await
+					.catch_return();
+			match id {
+				Ok(id) => Ok(Value::Bool(!id.is_none())),
+				// An undefined table means the record cannot exist.
+				Err(e)
+					if matches!(
+						e.downcast_ref(),
+						Some(crate::catalog::Error::TbNotFound { .. })
+					) =>
+				{
+					Ok(Value::Bool(false))
+				}
+				Err(e) => Err(e),
+			}
 		})
 	}
 }
@@ -114,10 +124,8 @@ impl ScalarFunction for RecordIsEdge {
 			let args = FromArgs::from_args("record::is_edge", args)?;
 			let frozen = ctx.exec_ctx.ctx();
 			let opt = ctx.exec_ctx.options();
-			let doc = ctx
-				.document_root
-				.or(ctx.current_value)
-				.map(|v| CursorDoc::new(None, None, v.clone()));
+			let doc =
+				ctx.document_root.or(ctx.current_value).map(|v| CursorDoc::new(None, v.clone()));
 			let mut stack = TreeStack::new();
 			stack
 				.enter(|stk| async move {

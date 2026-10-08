@@ -1,7 +1,7 @@
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_rpc::capabilities::{Capabilities, NewPlannerStrategy, Targets};
+use surrealdb_rpc::capabilities::{Capabilities, Targets};
 use surrealdb_types::Value as SurValue;
 
 use crate::tests::TestRun;
@@ -10,8 +10,8 @@ use crate::tests::schema::{
 	AuthLevel, BoolOr, Capabilities as TestCapabilities, SchemaTarget, TestAuth, TestConfig,
 };
 
-/// Builds a `Session` from a test config and a specific planner strategy.
-pub fn session_from_test_config(config: &TestConfig, strategy: NewPlannerStrategy) -> Session {
+/// Builds a `Session` from a test config.
+pub fn session_from_test_config(config: &TestConfig) -> Session {
 	let env = &config.env;
 
 	let ns = env.namespace();
@@ -67,8 +67,6 @@ pub fn session_from_test_config(config: &TestConfig, strategy: NewPlannerStrateg
 
 	session.ns = ns.map(|x| x.to_owned());
 	session.db = db.map(|x| x.to_owned());
-
-	session.new_planner_strategy = strategy;
 
 	session.redact_volatile_explain_attrs = env.redact_volatile_explain_attrs.unwrap_or(true);
 

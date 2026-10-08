@@ -4,7 +4,7 @@ imports = ["reproductions/computed_field_reads_restricted_source_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "account:alice" }
 
 [test]
-reason = "The streaming read path evaluated computed fields against the full record and only then removed the fields the caller may not select, so a readable computed field kept the value it derived from a denied one. The legacy read path re-derives computed fields against the reduced document; this asserts the streaming path does the same, that re-deriving does not reintroduce a computed field whose own permissions deny it, and that a computed field's own clause is answered with the re-derived value. Each query reaches the record through a different one of the four read paths that order compute against permissions."
+reason = "A computed field is derived against the record as the caller may see it: the fields the caller may not select are removed before computed fields are derived, so a readable computed field never keeps a value derived from a denied one; re-deriving does not reintroduce a computed field whose own permissions deny it; and a computed field's own clause is answered with the re-derived value. Each query reaches the record through a different one of the four read paths that order compute against permissions."
 
 # Scanned by record id. `secret` is absent, as its permissions require, and
 # `derived` computes from it, so it must be NONE rather than carrying the value

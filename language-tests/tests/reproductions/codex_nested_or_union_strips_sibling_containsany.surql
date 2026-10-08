@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "A `UnionIndexScan` may only drop a `CONTAINSANY`/`ANYINSIDE` leaf that every branch implies, i.e. one whose literals contain all the union's branch values. The union can be built from a *different* AND conjunct — a nested OR (`try_and_nested_or_union`) or another containment leaf — whose branch values reach outside a sibling leaf's literals; dropping that sibling then admits rows failing it, weakening a WHERE clause that may be carrying access scoping. Each indexed query here must agree with its `WITH NOINDEX` twin, and the EXPLAINs pin which leaves survive in the residual filter."
@@ -32,8 +31,8 @@ value = "[item:has_a, item:has_ab]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: tags CONTAINSANY ['a'] AND tags CONTAINS 'a' OR tags CONTAINS 'b']
-        BitmapResolve [ctx: Db] [table: item]
+    Filter [ctx: Db] [predicate: tags CONTAINSANY ['a'] AND (tags CONTAINS 'a' OR tags CONTAINS 'b')]
+        BitmapScan [ctx: Db] [table: item]
             BitmapAnd [ctx: Db]
                 BitmapOr [ctx: Db]
                     BitmapIndexScan [ctx: Db] [index: ix_tags, access: = 'a']
@@ -52,10 +51,10 @@ value = "[item:has_a, item:has_ab]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Limit [ctx: Db] [limit: 10]
-        Filter [ctx: Db] [predicate: tags CONTAINSANY ['a'] AND tags CONTAINS 'a' OR tags CONTAINS 'b']
+        Filter [ctx: Db] [predicate: tags CONTAINSANY ['a'] AND (tags CONTAINS 'a' OR tags CONTAINS 'b')]
             UnionIndexScan [ctx: Db] [table: item, branches: 2]
-                IndexScan [ctx: Db] [index: ix_tags, access: = 'a', direction: Forward]
-                IndexScan [ctx: Db] [index: ix_tags, access: = 'b', direction: Forward]
+                IndexScan [ctx: Db] [table: item, index: ix_tags, access: = 'a', direction: Forward]
+                IndexScan [ctx: Db] [table: item, index: ix_tags, access: = 'b', direction: Forward]
 "'''
 
 [[test.results]]
@@ -68,10 +67,10 @@ value = "[item:has_a, item:has_ab]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Limit [ctx: Db] [limit: 10]
-        Filter [ctx: Db] [predicate: tags CONTAINSANY ['a']]
+        Filter [ctx: Db] [predicate: tags CONTAINSANY ['a', 'b'] AND tags CONTAINSANY ['a']]
             UnionIndexScan [ctx: Db] [table: item, branches: 2]
-                IndexScan [ctx: Db] [index: ix_tags, access: = 'a', direction: Forward]
-                IndexScan [ctx: Db] [index: ix_tags, access: = 'b', direction: Forward]
+                IndexScan [ctx: Db] [table: item, index: ix_tags, access: = 'a', direction: Forward]
+                IndexScan [ctx: Db] [table: item, index: ix_tags, access: = 'b', direction: Forward]
 "'''
 
 [[test.results]]
@@ -84,10 +83,10 @@ value = "[item:has_a, item:has_ab, item:has_b]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Limit [ctx: Db] [limit: 10]
-        Filter [ctx: Db] [predicate: tags CONTAINS 'a' OR tags CONTAINS 'b']
+        Filter [ctx: Db] [predicate: tags CONTAINSANY ['a', 'b', 'z'] AND (tags CONTAINS 'a' OR tags CONTAINS 'b')]
             UnionIndexScan [ctx: Db] [table: item, branches: 2]
-                IndexScan [ctx: Db] [index: ix_tags, access: = 'a', direction: Forward]
-                IndexScan [ctx: Db] [index: ix_tags, access: = 'b', direction: Forward]
+                IndexScan [ctx: Db] [table: item, index: ix_tags, access: = 'a', direction: Forward]
+                IndexScan [ctx: Db] [table: item, index: ix_tags, access: = 'b', direction: Forward]
 "'''
 */
 

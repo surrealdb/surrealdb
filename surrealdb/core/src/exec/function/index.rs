@@ -1,4 +1,4 @@
-//! Index function system for the streaming executor.
+//! Index function system for the engine.
 //!
 //! This module provides traits for functions that are bound to WHERE clause
 //! predicates via index infrastructure. Unlike scalar functions which operate
@@ -27,6 +27,7 @@ use anyhow::Result;
 
 use super::Signature;
 use crate::catalog::Index;
+use crate::exec::analyzer_function::StreamingAnalyzerFunction;
 use crate::exec::physical_expr::EvalContext;
 use crate::exec::{BoxFut, ContextLevel};
 use crate::expr::Kind;
@@ -36,7 +37,6 @@ use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::kvs::index::filter_online_indexes;
-use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 use crate::val::{Number, RecordId, RecordIdentity, TableName, Value};
 
 // =========================================================================
@@ -163,10 +163,11 @@ pub trait IndexFunction: Send + Sync + Debug {
 /// infrastructure. The expensive FullTextIndex/QueryTerms/Scorer are initialized
 /// only on first use and then cached for all subsequent rows.
 pub struct MatchContext {
-	/// The field read on the left side of the MATCHES operator, as written.
-	/// It names an index column when its declared position
-	/// ([`LogicalExpr::field_path`]) is that column.
-	pub field: LogicalExpr,
+	/// The declared position ([`LogicalExpr::field_path`]) of the field read
+	/// on the left side of the MATCHES operator, which names an index column
+	/// when it is that column; `None` for a field that reads no declared
+	/// position.
+	pub path: Option<FieldPath>,
 	/// The search query string from the right side of the MATCHES operator.
 	pub query: String,
 	/// The table name for index lookup.
@@ -175,8 +176,7 @@ pub struct MatchContext {
 	/// `None` when no full-text index on `table` covers `field` — e.g. a
 	/// MATCHES traversing a record link to an index on another table, or a
 	/// field that reads no declared position — in which case
-	/// score/highlight/offsets yield `NONE`, matching the legacy executor's
-	/// missing-match-ref-entry behaviour.
+	/// score/highlight/offsets yield `NONE`.
 	ft_cache: tokio::sync::OnceCell<Option<FullTextResources>>,
 }
 
@@ -192,9 +192,15 @@ pub struct FullTextResources {
 
 impl MatchContext {
 	/// Create a new MatchContext from resolved MATCHES clause info.
-	pub fn new(field: LogicalExpr, query: String, table: TableName) -> Self {
+	pub fn new(field: &LogicalExpr, query: String, table: TableName) -> Self {
+		Self::of_path(field.field_path(), query, table)
+	}
+
+	/// A MatchContext for a MATCHES clause whose field reads the declared
+	/// position `path`, as [`Self::new`] makes one for the field itself.
+	pub fn of_path(path: Option<FieldPath>, query: String, table: TableName) -> Self {
 		Self {
-			field,
+			path,
 			query,
 			table,
 			ft_cache: tokio::sync::OnceCell::new(),
@@ -214,11 +220,6 @@ impl MatchContext {
 				use crate::catalog::providers::TableProvider;
 
 				let frozen = ctx.exec_ctx.ctx();
-				let root = ctx.exec_ctx.root();
-				let opt = root
-					.options
-					.as_ref()
-					.ok_or_else(|| anyhow::anyhow!("IndexFunction requires Options context"))?;
 				let tx = ctx.txn();
 
 				// Get namespace and database IDs from the execution context
@@ -230,16 +231,27 @@ impl MatchContext {
 
 				// Find the full-text index for this table and field: the
 				// column whose declared position the field reads.
-				let Some(path) = self.field.field_path() else {
+				let Some(path) = &self.path else {
 					return Ok(None);
 				};
-				let indexes = tx
-					.all_tb_indexes(ns_id, db_id, &self.table, ctx.exec_ctx.version_stamp())
-					.await?;
+				let indexes = crate::exec::vm::descriptor::object(tx.all_tb_indexes(
+					ns_id,
+					db_id,
+					&self.table,
+					ctx.exec_ctx.version_stamp(),
+				))
+				.await?;
 				let indexes = if ctx.exec_ctx.version_stamp().is_none() {
 					// MATCHES/scoring must only open indexes that durable build
-					// state has published as queryable.
-					filter_online_indexes(tx.as_ref(), ns_id, db_id, indexes).await?
+					// state has published as queryable. Which ones are is a
+					// catalog fact, loaded as one.
+					crate::exec::vm::descriptor::object(filter_online_indexes(
+						tx.as_ref(),
+						ns_id,
+						db_id,
+						indexes,
+					))
+					.await?
 				} else {
 					indexes
 				};
@@ -249,13 +261,13 @@ impl MatchContext {
 					}
 					idx.cols
 						.iter()
-						.find(|c| FieldPath::from_idiom(c).as_ref() == Some(&path))
+						.find(|c| FieldPath::from_idiom(c).as_ref() == Some(path))
 						.map(|c| (idx, c))
 				}) {
 					Some(found) => found,
 					// No index on this table covers the field (e.g. the
 					// MATCHES traverses a record link) → score/highlight/
-					// offsets yield NONE, like the legacy executor.
+					// offsets yield NONE.
 					None => return Ok(None),
 				};
 
@@ -267,19 +279,19 @@ impl MatchContext {
 				let ikb = IndexKeyBase::new(ns_id, db_id, self.table.clone(), index_def.index_id);
 
 				// Open the full-text index
-				let fti = FullTextIndex::new(
+				let fti = crate::exec::vm::descriptor::object(FullTextIndex::new(
 					frozen.get_index_stores(),
 					tx.as_ref(),
 					ikb,
 					ft_params,
 					&frozen.config.idx.file_allowlist,
 					index_def.format_version,
-				)
+				))
 				.await?;
 
 				// Extract query terms
 				let query_terms = {
-					let az_fn = LegacyAnalyzerFunction::new(frozen, opt);
+					let az_fn = StreamingAnalyzerFunction::new(ctx.exec_ctx);
 					let mut stack = reblessive::TreeStack::new();
 					stack
 						.enter(|stk| {
@@ -306,7 +318,7 @@ impl MatchContext {
 impl Debug for MatchContext {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("MatchContext")
-			.field("field", &self.field)
+			.field("path", &self.path)
 			.field("query", &self.query)
 			.field("table", &self.table)
 			.field("initialized", &self.ft_cache.initialized())
@@ -411,6 +423,7 @@ impl MatchesContext {
 		}
 	}
 
+	#[cfg(test)]
 	/// Set the table name for index lookup.
 	pub fn set_table(&mut self, table: TableName) {
 		self.table = Some(table);
@@ -436,6 +449,14 @@ impl MatchesContext {
 		self.matches.iter().next().map(|(&k, v)| (k, v))
 	}
 
+	/// The clauses held, by match reference ascending.
+	pub fn entries(&self) -> Vec<(MatchRef, &MatchInfo)> {
+		let mut entries: Vec<_> = self.matches.iter().map(|(rf, info)| (*rf, info)).collect();
+		entries.sort_by_key(|(rf, _)| *rf);
+		entries
+	}
+
+	#[cfg(test)]
 	/// Check if the context has no MATCHES entries.
 	pub fn is_empty(&self) -> bool {
 		self.matches.is_empty()
@@ -457,9 +478,7 @@ impl MatchesContext {
 		});
 
 		match info {
-			Some(info) => {
-				Ok(Arc::new(MatchContext::new(info.field.clone(), info.query.clone(), table)))
-			}
+			Some(info) => Ok(Arc::new(MatchContext::new(&info.field, info.query.clone(), table))),
 			None => {
 				// If there are no MATCHES clauses at all, provide a clear error
 				if self.matches.is_empty() {

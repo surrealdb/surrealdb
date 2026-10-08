@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::catalog::providers::CatalogProvider;
-use crate::dbs::{NewPlannerStrategy, Session};
+use crate::dbs::Session;
 use crate::key::schema::RecordKey;
 use crate::kvs::{Datastore, QueryRequest, TransactionType};
 use crate::val::RecordIdKey;
@@ -33,10 +33,7 @@ async fn test_diskann_filtered_knn_batches_record_fetches() -> Result<()> {
 		tx.ensure_ns_db(None, "test", "test").await?;
 		tx.commit().await?;
 	}
-	let session = Session::owner()
-		.with_ns("test")
-		.with_db("test")
-		.new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
+	let session = Session::owner().with_ns("test").with_db("test");
 
 	// 500 deterministic 8-d points with a low-cardinality `category`, plus a
 	// DiskANN index. A selective filter makes the search visit many candidates
@@ -166,10 +163,7 @@ async fn test_diskann_filtered_knn_skips_missing_record() -> Result<()> {
 		tx.commit().await?;
 		db
 	};
-	let session = Session::owner()
-		.with_ns("test")
-		.with_db("test")
-		.new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
+	let session = Session::owner().with_ns("test").with_db("test");
 
 	// 1-D points 10,20,…,120 with alternating category; "a" selects the odd-id
 	// points (10,30,50,…). Nearest "a" matches to query [0] are pts:1 (10),
@@ -632,15 +626,12 @@ fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
 	1.0 - f64::from(dot) / (f64::from(norm_a).sqrt() * f64::from(norm_b).sqrt())
 }
 
-/// A filtered KNN at a `VERSION` reads each visited candidate's record once.
-/// Versioned reads bypass the transaction record cache, so the records the
-/// windowed prefetch reads must be the ones the filter evaluates; a
-/// second, per-candidate read would double the record keys the query reads.
-/// The same query unversioned reads each record once through the cache. The
-/// versioned run additionally re-reads its K results when it materialises
-/// them and reads its catalog at the version, so it may exceed the
-/// unversioned count by at most 2K keys — far below the hundreds a second
-/// read of every visited candidate adds.
+/// A filtered KNN at a `VERSION` is the brute-force search over the records
+/// read at the stamp, since an ANN index describes the present: it reads each
+/// record of the table once and returns K rows. The same query unversioned
+/// walks the index and reads the candidates it visits. The versioned run
+/// additionally reads its catalog at the version, so it may exceed the
+/// table's record count by at most 2K keys.
 #[cfg(feature = "kv-surrealkv")]
 #[tokio::test(flavor = "multi_thread")]
 async fn diskann_versioned_filtered_knn_reads_each_candidate_once() -> Result<()> {
@@ -653,15 +644,12 @@ async fn diskann_versioned_filtered_knn_reads_each_candidate_once() -> Result<()
 		tx.ensure_ns_db(None, "test", "test").await?;
 		tx.commit().await?;
 	}
-	let session = Session::owner()
-		.with_ns("test")
-		.with_db("test")
-		.new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
+	let session = Session::owner().with_ns("test").with_db("test");
 
 	let mut setup = String::from(
 		"DEFINE INDEX emb ON pts FIELDS vec DISKANN DIMENSION 8 DIST EUCLIDEAN TYPE F32;\n",
 	);
-	for i in 0..500u32 {
+	for i in 0..ROWS as u32 {
 		let mut v = String::new();
 		for j in 0..8u32 {
 			if j > 0 {
@@ -698,6 +686,7 @@ async fn diskann_versioned_filtered_knn_reads_each_candidate_once() -> Result<()
 	}
 
 	const K: u64 = 10;
+	const ROWS: u64 = 500;
 	let query = format!(
 		"SELECT id FROM pts \
 		 WHERE vec <|{K},400|> [0.5f,0.5f,0.5f,0.5f,0.5f,0.5f,0.5f,0.5f] AND category = 7"
@@ -715,9 +704,9 @@ async fn diskann_versioned_filtered_knn_reads_each_candidate_once() -> Result<()
 	assert_eq!(current_len as u64, K, "filtered KNN should return K matches");
 	assert_eq!(versioned_len as u64, K, "versioned filtered KNN should return K matches");
 	assert!(
-		versioned_keys <= current_keys + 2 * K,
-		"a versioned filtered KNN should read each candidate record once: \
-		 versioned keys_read={versioned_keys}, current keys_read={current_keys}"
+		versioned_keys <= ROWS + 2 * K,
+		"a versioned filtered KNN should read each record of the table once: \
+		 versioned keys_read={versioned_keys}, table rows={ROWS}"
 	);
 	ds.shutdown().await?;
 	Ok(())
@@ -741,17 +730,13 @@ async fn diskann_selective_filter_finds_admitted_neighbours_past_the_search_list
 		tx.ensure_ns_db(None, "test", "test").await?;
 		tx.commit().await?;
 	}
-	let owner = Session::owner()
-		.with_ns("test")
-		.with_db("test")
-		.new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
+	let owner = Session::owner().with_ns("test").with_db("test");
 	let record = Session::for_record(
 		"test",
 		"test",
 		"user",
 		crate::types::PublicValue::String("user:1".to_owned()),
-	)
-	.new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
+	);
 
 	// 1000 pseudo-random 8-d points from a fixed-seed generator, spread like
 	// real embeddings rather than along the few lines a modular lattice traces;
@@ -828,4 +813,16 @@ async fn diskann_selective_filter_finds_admitted_neighbours_past_the_search_list
 	.await?;
 	assert_eq!(conditioned, truth, "a residual condition should return its K nearest matches");
 	Ok(())
+}
+
+/// The DiskANN search a statement's access path ends in reads each
+/// candidate's record once at a `VERSION` (see
+/// [`super::assert_versioned_search_reads_each_candidate_once`]).
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test(flavor = "multi_thread")]
+async fn diskann_versioned_filtered_search_reads_each_candidate_once() -> Result<()> {
+	super::assert_versioned_search_reads_each_candidate_once(
+		"DEFINE INDEX emb ON pts FIELDS vec DISKANN DIMENSION 8 DIST EUCLIDEAN TYPE F32;",
+	)
+	.await
 }

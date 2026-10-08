@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test EXPLAIN with GROUP BY and GROUP ALL aggregation"
@@ -9,18 +8,24 @@ reason = "Test EXPLAIN with GROUP BY and GROUP ALL aggregation"
 value = "'OK'"
 
 [[test.results]]
-value = ''''CountScan [ctx: Db] [source: sale]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: sale]
 ''''
 
 [[test.results]]
-value = ''''Aggregate [ctx: Db] [by: region]
-    TableScan [ctx: Db] [table: sale, direction: Forward]
-''''
-
-[[test.results]]
-value = ''''Sort [ctx: Db] [order_by: total DESC]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [by: region]
         TableScan [ctx: Db] [table: sale, direction: Forward]
+''''
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Sort [ctx: Db] [sort_keys: total DESC]
+        Aggregate [ctx: Db] [by: region]
+            TableScan [ctx: Db] [table: sale, direction: Forward]
 ''''
 */
 

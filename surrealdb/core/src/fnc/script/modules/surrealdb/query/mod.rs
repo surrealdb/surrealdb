@@ -3,7 +3,6 @@ use std::cell::RefCell;
 use js::class::{JsClass, OwnedBorrow, Readable, Trace};
 use js::prelude::{Coerced, Opt};
 use js::{Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value};
-use reblessive::tree::Stk;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -14,7 +13,6 @@ mod classes;
 pub(crate) use classes::Query;
 
 use crate::ctx::Context;
-use crate::exe::FlowResultExt as _;
 
 /// A class to carry the data to run subqueries.
 #[derive(JsLifetime)]
@@ -84,20 +82,14 @@ pub fn query<'js>(
 			};
 			let context = context.freeze();
 
-			Stk::enter_scope(|stk| {
-				stk.run(|stk| {
-					crate::legacy::expr_compute(
-						&query.query,
-						stk,
-						&context,
-						query_ctx.opt,
-						query_ctx.doc,
-					)
-				})
+			// The text is compiled as a nested query of its own, never into
+			// the program running the script.
+			let value = crate::exec::compiles::nested_query(async {
+				let exec = crate::exec::entry::frame(&context, query_ctx.opt, query_ctx.doc).await;
+				crate::exec::entry::scalar(&exec, &query.query).await
 			})
-			.await
-			.catch_return()
-			.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))
+			.await;
+			value.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))
 		}
 		.await;
 

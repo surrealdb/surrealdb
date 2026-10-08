@@ -9,34 +9,49 @@
 //! table-level and field-level SELECT permissions, builds computed fields,
 //! and applies the full [`ScanPipeline`](super::pipeline::ScanPipeline).
 
+#[cfg(test)]
 use std::cmp::Ordering;
+#[cfg(test)]
 use std::collections::HashSet;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use futures::StreamExt;
+#[cfg(test)]
 use tracing::instrument;
 
+#[cfg(test)]
 use super::pipeline::{ScanPipeline, build_field_state};
+#[cfg(test)]
 use super::resolved::ResolvedTableContext;
+#[cfg(test)]
 use crate::err::EngineError;
 use crate::exec::field_path::FieldPath;
 use crate::exec::operators::SortDirection;
+#[cfg(test)]
 use crate::exec::ordering::{OutputOrdering, SortProperty};
+#[cfg(test)]
 use crate::exec::permission::{
 	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
 	validate_record_user_access,
 };
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
+#[cfg(test)]
 use crate::expr::{ControlFlow, ControlFlowExt};
+#[cfg(test)]
 use crate::iam::Action;
+#[cfg(test)]
 use crate::val::{RecordId, TableName, Value};
 
 /// How [`UnionIndexScan`] combines per-branch sub-streams.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[allow(clippy::enum_variant_names)]
 pub(crate) enum MergeMode {
 	/// K-way merge by record ID. Used when each sub-stream is already
@@ -68,7 +83,7 @@ pub(crate) enum MergeMode {
 }
 
 impl MergeMode {
-	fn direction(&self) -> SortDirection {
+	pub(crate) fn direction(&self) -> SortDirection {
 		match self {
 			MergeMode::ById(d)
 			| MergeMode::ByIndexKey {
@@ -83,6 +98,7 @@ impl MergeMode {
 	}
 }
 
+#[cfg(test)]
 /// Comparison key extracted from a row for k-way merge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MergeKey {
@@ -90,12 +106,14 @@ enum MergeKey {
 	Field(Value),
 }
 
+#[cfg(test)]
 impl PartialOrd for MergeKey {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))
 	}
 }
 
+#[cfg(test)]
 impl Ord for MergeKey {
 	fn cmp(&self, other: &Self) -> Ordering {
 		match (self, other) {
@@ -109,6 +127,7 @@ impl Ord for MergeKey {
 	}
 }
 
+#[cfg(test)]
 /// Extract the comparison key for a row based on the active merge mode.
 ///
 /// Returns `None` when the row does not have a usable key (e.g. an
@@ -135,6 +154,7 @@ fn extract_merge_key(mode: &MergeMode, value: &Value) -> Option<MergeKey> {
 	}
 }
 
+#[cfg(test)]
 /// Extract the record ID from a row, if present: the identity the union's
 /// dedup paths and [`DistinctRecords`](crate::exec::operators::DistinctRecords)
 /// collapse repeats by.
@@ -148,6 +168,7 @@ pub(crate) fn extract_rid(value: &Value) -> Option<RecordId> {
 	}
 }
 
+#[cfg(test)]
 /// Union index scan operator for OR conditions.
 ///
 /// Wraps multiple pre-planned index scan operators (one per OR branch)
@@ -190,7 +211,9 @@ pub struct UnionIndexScan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl UnionIndexScan {
+	#[cfg(test)]
 	pub(crate) fn new(
 		table_name: TableName,
 		inputs: Vec<Arc<dyn ExecOperator>>,
@@ -207,59 +230,24 @@ impl UnionIndexScan {
 		}
 	}
 
+	#[cfg(test)]
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
 		self
 	}
 
-	/// Enable k-way merge by record ID in the given direction.
-	///
-	/// When set, the union iterates all sub-streams simultaneously using
-	/// a merge-sort on record IDs instead of draining them sequentially.
-	/// This produces globally record-ID-sorted output, allowing the
-	/// planner to eliminate the Sort operator for ORDER BY id queries.
-	pub(crate) fn with_merge_by_id(mut self, direction: SortDirection) -> Self {
-		self.merge = Some(MergeMode::ById(direction));
+	#[cfg(test)]
+	/// Combine the branches by `merge`, or drain them in branch order for
+	/// `None`. A merge iterates every sub-stream at once, each already sorted
+	/// by the merge key, so the union delivers that key's order and a
+	/// downstream `LIMIT` stops it after the rows it takes.
+	pub(crate) fn with_merge(mut self, merge: Option<MergeMode>) -> Self {
+		self.merge = merge;
 		self
 	}
 
-	/// Enable k-way merge by an indexed field value.
-	///
-	/// Used when each sub-stream pins the prefix column(s) of a composite
-	/// index to an equality value and is therefore already sorted by the
-	/// next column.  The merge produces a globally-sorted output by
-	/// `path` in `direction` — letting a downstream `ORDER BY` with
-	/// `LIMIT` cancel the scans after just `LIMIT` rows.
-	pub(crate) fn with_merge_by_index_key(
-		mut self,
-		path: FieldPath,
-		direction: SortDirection,
-	) -> Self {
-		self.merge = Some(MergeMode::ByIndexKey {
-			path,
-			direction,
-		});
-		self
-	}
-
-	/// Like `with_merge_by_index_key`, but deduplicates rows by record ID
-	/// during the merge.  Required when branches can overlap on the same
-	/// record (e.g. `field CONTAINSANY [a, b]` on an array-element index
-	/// — a row whose array contains both values appears in both
-	/// branches' prefix ranges).
-	pub(crate) fn with_merge_by_index_key_dedup(
-		mut self,
-		path: FieldPath,
-		direction: SortDirection,
-	) -> Self {
-		self.merge = Some(MergeMode::ByIndexKeyDedup {
-			path,
-			direction,
-		});
-		self
-	}
-
+	#[cfg(test)]
 	/// Mark the scan as feeding a bounded top-k sort. Disables eager
 	/// per-sub-stream prefetch (see [`Self::downstream_topk`]).
 	pub(crate) fn with_downstream_topk(mut self) -> Self {
@@ -267,6 +255,7 @@ impl UnionIndexScan {
 		self
 	}
 }
+#[cfg(test)]
 impl ExecOperator for UnionIndexScan {
 	fn name(&self) -> &'static str {
 		"UnionIndexScan"
@@ -382,7 +371,7 @@ impl ExecOperator for UnionIndexScan {
 			} else {
 				buffer_stream(
 					stream,
-					input.access_mode(),
+					self.access_mode().combine(input.access_mode()),
 					input.cardinality_hint(),
 					ctx.root().ctx.config.exec.operator_buffer_size,
 				)

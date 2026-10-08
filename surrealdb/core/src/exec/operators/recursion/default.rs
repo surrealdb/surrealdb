@@ -59,9 +59,9 @@ use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
-use super::common::{RecursionBounds, is_recursion_target};
+use super::common::{DepthBody, PathBody, RecursionBounds, is_recursion_target};
 use crate::exec::FlowResult;
-use crate::exec::parts::{clean_iteration, evaluate_physical_path, get_final, is_final};
+use crate::exec::parts::{clean_iteration, get_final, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::val::Value;
 
@@ -71,11 +71,10 @@ use crate::val::Value;
 /// or None if min_depth is not reached before termination.
 ///
 /// Fully iterative -- uses a while loop with no recursive calls.
-pub(crate) async fn evaluate_recurse_default(
+pub(crate) async fn evaluate_recurse_default_with(
 	start: &Value,
-	path: &[Arc<dyn PhysicalExpr>],
+	body: &impl DepthBody,
 	bounds: RecursionBounds,
-	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
 	let min_depth = bounds.min;
 	let max_depth = bounds.cap();
@@ -83,7 +82,7 @@ pub(crate) async fn evaluate_recurse_default(
 	let mut depth = 0u32;
 
 	while depth < max_depth {
-		let next = evaluate_physical_path(&current, path, ctx.with_value(&current)).await?;
+		let next = body.eval(&current).await?;
 
 		depth += 1;
 
@@ -128,6 +127,24 @@ pub(crate) async fn evaluate_recurse_default(
 	} else {
 		Ok(Value::None)
 	}
+}
+
+/// [`evaluate_recurse_default_with`] over a body that is a path of physical expressions.
+pub(crate) async fn evaluate_recurse_default(
+	start: &Value,
+	path: &[Arc<dyn PhysicalExpr>],
+	bounds: RecursionBounds,
+	ctx: EvalContext<'_>,
+) -> FlowResult<Value> {
+	evaluate_recurse_default_with(
+		start,
+		&PathBody {
+			path,
+			ctx,
+		},
+		bounds,
+	)
+	.await
 }
 
 #[cfg(test)]

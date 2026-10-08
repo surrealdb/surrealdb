@@ -11,8 +11,7 @@
 //! Keyed on the record id, not the row: ids are already unique, so a whole-row
 //! key would cost a document clone and a structural comparison per distinct row
 //! to answer a question the id answers. [`UnionIndexScan`]'s
-//! `ByIndexKeyDedup` mode and the legacy engine's `FanOutDedupe` key the same
-//! way for the same reason.
+//! `ByIndexKeyDedup` mode keys the same way for the same reason.
 //!
 //! Entries for one record are not adjacent in key order — they differ in the
 //! columns the range leaves open, which sort ahead of the record id — so every
@@ -21,19 +20,27 @@
 //!
 //! [`UnionIndexScan`]: super::UnionIndexScan
 
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use ahash::HashSet;
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use futures::StreamExt;
 
+#[cfg(test)]
 use super::scan::extract_rid;
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
 	OutputOrdering, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
+#[cfg(test)]
 use crate::val::RecordId;
 
+#[cfg(test)]
 /// Emits the first row carrying each record id, dropping later rows that carry
 /// one already seen.
 #[derive(Debug, Clone)]
@@ -42,7 +49,9 @@ pub struct DistinctRecords {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl DistinctRecords {
+	#[cfg(test)]
 	/// Create a new `DistinctRecords` over `input`.
 	pub(crate) fn new(input: Arc<dyn ExecOperator>) -> Self {
 		Self {
@@ -52,6 +61,7 @@ impl DistinctRecords {
 	}
 }
 
+#[cfg(test)]
 impl ExecOperator for DistinctRecords {
 	fn name(&self) -> &'static str {
 		"DistinctRecords"

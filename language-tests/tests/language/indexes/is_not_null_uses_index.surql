@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "`score != NONE` must push down to a BTree index as an exclusive lower bound `> NONE` and return the same rows as the table-scan + filter path (NONE sorts first in BTree key ordering so this is exact). `score != NULL` is intentionally NOT pushed because that would also drop NONE rows even though `NONE != NULL` is true under SurrealQL semantics."
@@ -31,7 +30,8 @@ value = "[{ id: t:b }, { id: t:c }, { id: t:d }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_score, access: >NONE, direction: Forward, predicate: score != NONE]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: t, index: idx_score, access: >NONE, direction: Forward]
 ''''
 
 [[test.results]]

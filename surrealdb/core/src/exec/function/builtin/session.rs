@@ -1,4 +1,4 @@
-//! Session functions for the streaming executor.
+//! Session functions for the engine.
 //!
 //! These functions access session information from the EvalContext.
 

@@ -7,8 +7,8 @@
 //!
 //! Key behaviors:
 //! - Parameters are extracted by visiting the value the caller names as the parameter source — the
-//!   statement in expression form, or the plan of a statement the streaming engine ran — for
-//!   `$param` references. For each parameter, we lookup its value in the current `Context`.
+//!   statement in expression form, or the plan of a statement the engine ran — for `$param`
+//!   references. For each parameter, we lookup its value in the current `Context`.
 //! - Optional filters can be applied to control which parameters are logged:
 //!   - `param_deny` takes precedence and excludes any matching parameter names.
 //!   - If `param_allow` is non-empty, only those parameter names are included.
@@ -131,8 +131,8 @@ impl SlowLog {
 	/// the `$param` references whose current values the entry lists, after
 	/// the deny-list and then the allow-list; it is `stm` itself for a
 	/// statement in expression form, and the plan of a statement the
-	/// streaming engine ran, whose text is the surface statement. Both
-	/// renderings collapse whitespace so the entry is a single line.
+	/// streaming engine ran. Both renderings collapse whitespace so the entry
+	/// is a single line.
 	pub(crate) fn check_log<T: ToSql, P: SlowLogVisit>(
 		&self,
 		ctx: &FrozenContext,

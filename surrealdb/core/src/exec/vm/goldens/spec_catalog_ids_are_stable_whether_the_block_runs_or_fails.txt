@@ -1,0 +1,253 @@
+### { IF (SELECT VALUE n FROM ONLY t:0) = 0 { THROW 'stop' }; DEFINE TABLE a; DEFINE INDEX ia ON a FIELDS n; DEFINE INDEX it ON t FIELDS n; RETURN SELECT * FROM a WHERE n = 1 }
+[false]
+test 0
+test/test 0
+test/test/t 0
+### DEFINE TABLE a; DEFINE INDEX ia ON a FIELDS n; DEFINE INDEX it ON t FIELDS n;
+[true, true, true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/t 0
+test/test/t/it 0
+### { DEFINE TABLE b; DEFINE INDEX ib ON b FIELDS n; CREATE b:1 SET n = 1; RETURN SELECT * FROM b WHERE n = 1 }
+[true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/t 0
+test/test/t/it 0
+### { DEFINE TABLE c; DEFINE INDEX ic ON c FIELDS n; CREATE c:1 SET n = 1; RETURN SELECT * FROM c WHERE n = 1; THROW 'after' }
+[true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/t 0
+test/test/t/it 0
+### DEFINE TABLE c; DEFINE INDEX ic ON c FIELDS n;
+[false, false]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/t 0
+test/test/t/it 0
+### { DEFINE TABLE d; FOR $i IN 0..3 { DEFINE FIELD OVERWRITE m ON counter VALUE $i; CREATE type::record('counter', $i) }; RETURN SELECT * FROM counter ORDER BY id }
+[true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/counter 5
+test/test/d 4
+test/test/t 0
+test/test/t/it 0
+### DEFINE TABLE e;
+[true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/counter 5
+test/test/d 4
+test/test/e 6
+test/test/t 0
+test/test/t/it 0
+### { FOR $i IN [1] { DEFINE TABLE l }; RETURN 1 }
+[true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/counter 5
+test/test/d 4
+test/test/e 6
+test/test/l 7
+test/test/t 0
+test/test/t/it 0
+### DEFINE TABLE l2;
+[true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/counter 5
+test/test/d 4
+test/test/e 6
+test/test/l 7
+test/test/l2 8
+test/test/t 0
+test/test/t/it 0
+### { FOR $i IN [1, 2] { DEFINE TABLE IF NOT EXISTS l3; IF $i = 2 { THROW 'x' } }; RETURN 1 }
+[false]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/counter 5
+test/test/d 4
+test/test/e 6
+test/test/l 7
+test/test/l2 8
+test/test/t 0
+test/test/t/it 0
+### DEFINE TABLE l4;
+[true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/counter 5
+test/test/d 4
+test/test/e 6
+test/test/l 7
+test/test/l2 8
+test/test/l4 10
+test/test/t 0
+test/test/t/it 0
+### { DEFINE TABLE r COMMENT <string> rand(); RETURN 1 }
+[true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/counter 5
+test/test/d 4
+test/test/e 6
+test/test/l 7
+test/test/l2 8
+test/test/l4 10
+test/test/r 11
+test/test/t 0
+test/test/t/it 0
+### { DEFINE TABLE r2; DEFINE INDEX r2i ON r2 FIELDS n COMMENT <string> rand(); RETURN 1 }
+[true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/counter 5
+test/test/d 4
+test/test/e 6
+test/test/l 7
+test/test/l2 8
+test/test/l4 10
+test/test/r 11
+test/test/r2 12
+test/test/r2/r2i 0
+test/test/t 0
+test/test/t/it 0
+### DEFINE TABLE r3;
+[true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/counter 5
+test/test/d 4
+test/test/e 6
+test/test/l 7
+test/test/l2 8
+test/test/l4 10
+test/test/r 11
+test/test/r2 12
+test/test/r2/r2i 0
+test/test/r3 13
+test/test/t 0
+test/test/t/it 0
+### { CREATE g:1; DEFINE FIELD k ON g VALUE 1; CREATE g:2 }
+[true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/counter 5
+test/test/d 4
+test/test/e 6
+test/test/g 14
+test/test/l 7
+test/test/l2 8
+test/test/l4 10
+test/test/r 11
+test/test/r2 12
+test/test/r2/r2i 0
+test/test/r3 13
+test/test/t 0
+test/test/t/it 0
+### DEFINE TABLE h;
+[true]
+test 0
+test/test 0
+test/test/a 1
+test/test/a/ia 0
+test/test/b 2
+test/test/b/ib 0
+test/test/c 3
+test/test/c/ic 0
+test/test/counter 5
+test/test/d 4
+test/test/e 6
+test/test/g 14
+test/test/h 15
+test/test/l 7
+test/test/l2 8
+test/test/l4 10
+test/test/r 11
+test/test/r2 12
+test/test/r2/r2i 0
+test/test/r3 13
+test/test/t 0
+test/test/t/it 0

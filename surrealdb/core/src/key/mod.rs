@@ -2,7 +2,7 @@
 //!
 //! The layout is declared once, in the [`schema`] module, and every key type in
 //! the keyspace is generated from that declaration. What the generated code is
-//! written against — `KVKey`, `KVKeyDecode`, `KVSubspace`, `KVRange` and the
+//! written against — `KVKey`, `KVKeyDecode`, `KVSubspace` and the
 //! `TypedRange`/`RawRange` wrappers — is the storage layer's contract and lives
 //! in [`surrealdb_kvs::key`]; this module re-exports it so a key type and the
 //! traits it implements are named from one place.
@@ -33,7 +33,7 @@
 // core's own `crate::key::…` paths.
 pub(crate) use surrealdb_datastore::key::{reclaim, schema};
 pub(crate) use surrealdb_kvs::key::{
-	AnyRange, Error, KVKey, KVKeyDecode, KVRange, KVSubspace, RawRange, Resumable, TypedRange,
+	AnyRange, Error, KVKey, KVKeyDecode, KVSubspace, RawRange, Resumable, TypedRange,
 };
 pub(crate) use surrealdb_kvs::value::KVValue;
 pub(crate) use surrealdb_kvs::{Key, KeyRange};

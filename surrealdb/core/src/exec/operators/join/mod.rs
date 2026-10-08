@@ -21,12 +21,18 @@
 pub(crate) mod hash_join;
 pub(crate) mod lookup_join;
 
-pub use hash_join::{HashJoin, JoinType};
+#[cfg(test)]
+pub use hash_join::HashJoin;
+pub use hash_join::JoinType;
+#[cfg(test)]
 pub use lookup_join::{LookupJoin, RecordBatchFetch};
+#[cfg(test)]
 use surrealdb_iam::AuthLimit;
 
+#[cfg(test)]
 use crate::exec::ExecutionContext;
 
+#[cfg(test)]
 /// The permission frame a join lifted out of a `PERMISSIONS FOR select`
 /// predicate evaluates in: its keys, residual and right side run with
 /// permission checks bypassed, under the definer's recorded authority, as the
@@ -42,7 +48,9 @@ pub struct JoinFrame {
 	pub(crate) checked_caller: bool,
 }
 
+#[cfg(test)]
 impl JoinFrame {
+	#[cfg(test)]
 	pub(crate) fn new(auth: Option<AuthLimit>, checked_caller: bool) -> Self {
 		Self {
 			auth,
@@ -50,9 +58,18 @@ impl JoinFrame {
 		}
 	}
 
+	#[cfg(test)]
 	/// The context the join's expressions and right side evaluate in.
+	///
+	/// A join carrying this frame was lifted out of a `SELECT` permission
+	/// predicate, which is evaluated with enforcement disabled and must
+	/// therefore be free of observable side effects, so the frame refuses a
+	/// write (GHSA-66r2-5gwj-gxm2).
 	pub(crate) fn context(&self, ctx: &ExecutionContext) -> ExecutionContext {
-		let frame = ctx.clone().with_skip_fetch_perms(true);
+		let frame = ctx
+			.clone()
+			.with_skip_fetch_perms(true)
+			.refusing_writes(crate::dbs::NoWriteFrame::PermissionPredicate);
 		match &self.auth {
 			Some(limit) => frame.with_limited_auth(limit),
 			None => frame,

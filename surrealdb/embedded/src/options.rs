@@ -8,7 +8,6 @@ use std::collections::HashSet;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use surrealdb_rpc::capabilities;
-use surrealdb_rpc::capabilities::NewPlannerStrategy;
 
 #[derive(Deserialize, Default)]
 pub struct Options {
@@ -66,6 +65,7 @@ pub enum CapabilitiesConfig {
 		functions: Option<Targets>,
 		network_targets: Option<Targets>,
 		experimental: Option<Targets>,
+		/// Accepted and ignored: the engine has a single execution path.
 		planner_strategy: Option<PlannerStrategy>,
 	},
 }
@@ -107,6 +107,8 @@ macro_rules! process_targets {
 	}};
 }
 
+/// The retired planner-strategy setting. Accepted when deserialising so that an
+/// existing configuration keeps loading; it selects nothing.
 #[derive(Deserialize, Clone, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum PlannerStrategy {
@@ -114,16 +116,6 @@ pub enum PlannerStrategy {
 	BestEffort,
 	ComputeOnly,
 	AllReadOnly,
-}
-
-impl From<PlannerStrategy> for NewPlannerStrategy {
-	fn from(strategy: PlannerStrategy) -> Self {
-		match strategy {
-			PlannerStrategy::BestEffort => NewPlannerStrategy::BestEffortReadOnlyStatements,
-			PlannerStrategy::ComputeOnly => NewPlannerStrategy::ComputeOnly,
-			PlannerStrategy::AllReadOnly => NewPlannerStrategy::AllReadOnlyStatements,
-		}
-	}
 }
 
 impl TryFrom<CapabilitiesConfig> for capabilities::Capabilities {
@@ -142,7 +134,7 @@ impl TryFrom<CapabilitiesConfig> for capabilities::Capabilities {
 				functions,
 				network_targets,
 				experimental,
-				planner_strategy,
+				planner_strategy: _,
 			} => {
 				let mut capabilities = Self::default();
 
@@ -339,10 +331,6 @@ impl TryFrom<CapabilitiesConfig> for capabilities::Capabilities {
 							}
 						}
 					}
-				}
-
-				if let Some(planner_strategy) = planner_strategy {
-					capabilities = capabilities.with_planner_strategy(planner_strategy.into());
 				}
 
 				capabilities

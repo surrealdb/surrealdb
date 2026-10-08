@@ -232,6 +232,11 @@ impl Transactable for Transaction {
 		"surrealkv"
 	}
 
+	/// SurrealKV holds the exclusive lock of its directory while it is open.
+	fn sole_writer(&self) -> bool {
+		true
+	}
+
 	/// Check if closed
 	fn closed(&self) -> bool {
 		self.done.load(Ordering::Relaxed)

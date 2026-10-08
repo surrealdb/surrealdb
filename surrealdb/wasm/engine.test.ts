@@ -184,7 +184,7 @@ test("creates the configured default namespace and database", async () => {
 	engine.free();
 });
 
-test("accepts every planner strategy the options type declares", async () => {
+test("accepts and ignores the retired planner strategy option", async () => {
 	for (const strategy of ["best-effort", "compute-only", "all-read-only"] as const) {
 		const engine = await connect({ capabilities: { planner_strategy: strategy } });
 		const [returned] = await query<number>(engine, "RETURN 1");

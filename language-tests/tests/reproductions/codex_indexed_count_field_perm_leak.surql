@@ -4,7 +4,7 @@ imports = ["reproductions/codex_indexed_count_field_perm_leak_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:1" }
 
 [test]
-reason = "Indexed `SELECT count() ... GROUP ALL` over a WHERE clause that filters by a SELECT-denied field must not leak the count of matching values. The vulnerable behaviour was that the planner picked the index on `private` and used an index-only count fast path (`Iterate Index Count` in the legacy planner / `IndexCountScan` in the streaming planner) which never applies field-level SELECT permissions. The `WITH NOINDEX` equivalent correctly counts nothing; the indexed query must agree, and `GROUP ALL` reports that as a row of zero rather than as no row at all."
+reason = "Indexed `SELECT count() ... GROUP ALL` over a WHERE clause that filters by a SELECT-denied field must not leak the count of matching values. The vulnerable behaviour was that the planner picked the index on `private` and used an index-only count fast path (`IndexCountScan`) which never applies field-level SELECT permissions. The `WITH NOINDEX` equivalent correctly counts nothing; the indexed query must agree, and `GROUP ALL` reports that as a row of zero rather than as no row at all."
 
 [[test.results]]
 value = "[]"

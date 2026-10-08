@@ -48,7 +48,10 @@ impl PhysicalExpr for ProjectionFunctionExec {
 
 			// When evaluated as a regular expression (not in projection context),
 			// return the first value from the projection bindings, or None if empty.
-			// This handles cases like: RETURN type::field("name")
+			// This handles cases like: RETURN type::field("name"). Outside
+			// projection position it is an ordinary call, refused by the
+			// capability a direct call is refused by.
+			ctx.check_allowed_function(&self.name)?;
 			if let Some(bindings) = self.evaluate_projection(ctx).await? {
 				if bindings.len() == 1 {
 					Ok(bindings.into_iter().next().expect("bindings verified non-empty").1)

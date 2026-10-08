@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "Index-backed COUNT/keys-only scans must answer the whole WHERE clause: the legacy compute-only engine counted a single index branch and dropped the other conjuncts (AND), or summed overlapping branches (OR)"
+reason = "Index-backed COUNT/keys-only scans must answer the whole WHERE clause: every conjunct of an AND applies, and overlapping branches of an OR are counted once"
 
 [[test.results]]
 value = "NONE"

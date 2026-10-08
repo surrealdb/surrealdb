@@ -1,31 +1,29 @@
 //! Closure expressions - closure creation and invocation.
 //!
-//! A closure literal compiles its body once, when the statement holding it is
-//! compiled ([`ClosureExec`]); creating the value captures the parameters the
-//! body references. The value is a [`Closure::Builtin`] carrying a
-//! [`CompiledClosure`], whose body is the compiled expression: nothing turns a
-//! compiled body back into a surface expression. A call binds the arguments as
-//! `$param`s in an isolated child context and evaluates the compiled body
-//! there ([`CompiledClosure::invoke`]), one unit deeper into the
-//! computation-depth budget the context carries ([`ExecutionContext::dive`]),
-//! so a closure that reaches itself through a captured or passed value fails
-//! with the depth error instead of growing the native stack.
+//! A closure literal makes a value ([`ClosureExec`]); creating it captures
+//! the parameters the body references. The value is a [`Closure::Builtin`]
+//! carrying a [`CompiledClosure`]: the closure as written, its digest and its
+//! captures. It holds no compiled body. A call binds the arguments in an
+//! isolated child context, one unit deeper into the computation-depth budget
+//! the context carries ([`ExecutionContext::dive`]), so a closure that reaches
+//! itself through a captured or passed value fails with the depth error
+//! instead of growing the native stack.
 //!
-//! The body carries nothing of the statement that created it beyond its
-//! captures. It is invoked by later statements, each in a transaction of its
-//! own, so it is compiled without the creating statement's catalog: binding
-//! leaves it as lowered, and the physical planner compiles it with no
-//! transaction, namespace, database, principal or `VERSION`. It resolves
-//! tables, permissions, indexes, functions and parameters when it runs, in the
-//! invoking statement's transaction and frame — a field or index defined
-//! between creation and call is seen by the call.
+//! Every invocation runs the body as a VM unit ([`crate::exec::vm::closure`]):
+//! inside a running program the unit the run's table holds for the closure in
+//! the invoking frame, which the instruction handing the value over linked
+//! before the call, and outside one the unit loaded for the invoking frame
+//! from the compile cache. No closure body is evaluated as an operator tree.
+//! Every invocation path — a call, a closure-taking builtin, a stored
+//! closure — goes through [`CompiledClosure::invoke`].
 //!
-//! A closure value can also reach the legacy evaluator — `array::map` run by a
-//! legacy statement, or a `Closure::Expr` stored by `DEFINE PARAM` — so both
-//! evaluators can invoke both closure forms: [`CompiledClosure::invoke_legacy`]
-//! rebuilds a streaming context from the legacy handles, and
-//! [`super::helpers::invoke_closure`] hands a legacy-only closure to the
-//! legacy evaluator through the engine's one bridge.
+//! A literal's body is compiled by the planner that compiles the literal
+//! only to answer what the body does to the transaction and to report the
+//! error compiling it raises; the compilation is never evaluated.
+//!
+//! A closure stored as written (`Closure::Expr`, as `DEFINE PARAM` keeps one)
+//! is invoked as a value of this type ([`CompiledClosure::of_stored`]);
+//! [`crate::exec::closure`] is the route in for every form of closure value.
 
 use std::sync::Arc;
 
@@ -36,13 +34,11 @@ use surrealdb_types::{SqlFormat, ToSql};
 use super::helpers::{
 	args_access_mode, args_required_context, evaluate_args, fmt_call_args, validate_return,
 };
-use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
-use crate::ctx::{Context, FrozenContext};
-use crate::dbs::{NoWriteFrame, Options, Variables};
-use crate::doc::CursorDoc;
-use crate::exec::context::{RootContext, SessionInfo};
-use crate::exec::function::FunctionRegistry;
+use crate::ctx::Context;
+use crate::dbs::Variables;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::exec::vm::ClosureDigest;
+use crate::exec::vm::closure::Invoked;
 use crate::exec::{AccessMode, BoxFut, Error as ExecError, ExecutionContext};
 use crate::expr::logical::{LogicalClosure, LogicalExpr};
 use crate::expr::{ControlFlow, Error as ExprError, FlowResult, Kind, Param};
@@ -55,19 +51,26 @@ use crate::val::{BoxInvokeFut, Closure, ClosureEvaluator, Value};
 
 /// Closure expression - |$x| $x * 2
 ///
-/// Holds the closure as written, for rendering and for the capture walk, and
-/// its body compiled once in its own scope.
+/// Holds the closure as written, for rendering, for the capture walk and for
+/// the values it makes, and what its body does to the transaction, which the
+/// planner answered compiling the body.
 #[derive(Debug, Clone)]
 pub struct ClosureExec {
-	pub(crate) closure: LogicalClosure,
-	pub(crate) body: Arc<dyn PhysicalExpr>,
+	pub(crate) closure: Arc<LogicalClosure>,
+	/// What the body does to the transaction.
+	body_access: AccessMode,
+	/// [`ClosureDigest::of`] `closure`.
+	digest: ClosureDigest,
 }
 
 impl ClosureExec {
-	pub(crate) fn new(closure: LogicalClosure, body: Arc<dyn PhysicalExpr>) -> Self {
+	/// The literal `closure` whose body, compiled, does `body_access` to the
+	/// transaction.
+	pub(crate) fn new(closure: LogicalClosure, body_access: AccessMode) -> Self {
 		Self {
-			closure,
-			body,
+			digest: ClosureDigest::of(&closure),
+			closure: Arc::new(closure),
+			body_access,
 		}
 	}
 
@@ -76,6 +79,14 @@ impl ClosureExec {
 	/// a subquery — so `|| { $a }` captures `$a`. Protected names (`$auth`,
 	/// `$session`, …) are never captured: they describe the caller of the
 	/// closure, not its creator.
+	///
+	/// The lookup resolves a name the way [`super::super::literal::Param`]
+	/// does — block-local parameters, then the write-path bindings, then the
+	/// context chain — because a captured name must hold what the body would
+	/// have read had it run where the closure was written. The write bindings
+	/// are not context values, and [`CompiledClosure::invoke`] clears them, so
+	/// a body naming `$value` reaches its creator's binding through the
+	/// capture or not at all.
 	fn capture(&self, ctx: &EvalContext<'_>) -> Variables {
 		let mut captures = Variables::new();
 		let _ = self.closure.body.visit_deep(&mut |e| {
@@ -85,6 +96,7 @@ impl ClosureExec {
 					let bound = ctx
 						.local_params
 						.and_then(|params| params.get(name))
+						.or_else(|| ctx.write_binding(name))
 						.or_else(|| ctx.exec_ctx.value(name));
 					if let Some(v) = bound {
 						captures.insert(name, v.clone());
@@ -115,14 +127,11 @@ impl PhysicalExpr for ClosureExec {
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
 			let captures = self.capture(&ctx);
-			Ok(Value::Closure(Box::new(Closure::Builtin(Arc::new(CompiledClosure {
-				args: self.closure.args.clone(),
-				returns: self.closure.returns.clone(),
-				body: Arc::clone(&self.body),
+			Ok(Value::Closure(Box::new(Closure::Builtin(Arc::new(CompiledClosure::planned(
+				&self.closure,
+				self.digest,
 				captures,
-				registry: Arc::clone(ctx.exec_ctx.function_registry()),
-				sql: self.closure.to_sql(),
-			})))))
+			))))))
 		})
 	}
 
@@ -133,7 +142,7 @@ impl PhysicalExpr for ClosureExec {
 		// options. A writing body therefore makes the expression writable, so
 		// anything combining this access mode (e.g. `args_access_mode` on the
 		// builtin holding it) is conservative.
-		self.body.access_mode()
+		self.body_access
 	}
 }
 
@@ -143,29 +152,72 @@ impl ToSql for ClosureExec {
 	}
 }
 
+/// `args` bound to a closure's declared parameters `declared`, each coerced
+/// to its kind, in order: a missing argument is an error unless its
+/// parameter can be NONE, and an argument past the declared ones is dropped.
+pub(crate) fn bind_closure_args(
+	declared: &[(Param, Kind)],
+	args: Vec<Value>,
+) -> anyhow::Result<Vec<Value>> {
+	if declared.len() > args.len()
+		&& let Some((param, kind)) = declared[args.len()..].iter().find(|(_, k)| !k.can_be_none())
+	{
+		return Err(ExprError::InvalidFunctionArguments {
+			name: "ANONYMOUS".to_string(),
+			message: format!(
+				"Expected a value of type '{}' for argument {}",
+				kind.to_sql(),
+				param.to_sql()
+			),
+		}
+		.into());
+	}
+	let mut bound = Vec::with_capacity(declared.len());
+	for ((param, kind), value) in declared.iter().zip(args) {
+		let coerced =
+			value.coerce_to_kind(kind).map_err(|_| ExprError::InvalidFunctionArguments {
+				name: "ANONYMOUS".to_string(),
+				message: format!(
+					"Expected a value of type '{}' for argument {}",
+					kind.to_sql(),
+					param.to_sql()
+				),
+			})?;
+		bound.push(coerced);
+	}
+	Ok(bound)
+}
+
 // =============================================================================
-// CompiledClosure - the closure value the streaming engine creates
+// CompiledClosure - the closure value the engine creates
 // =============================================================================
 
-/// A closure value whose body is a compiled expression.
+/// A closure value: the closure as written and the values it captured.
 ///
-/// The only [`BuiltinClosureObj`] the streaming engine constructs. Carried in a
-/// [`Closure::Builtin`] so the value layer holds it without naming the
-/// execution environment; both evaluators downcast to it to invoke.
+/// The only [`BuiltinClosureObj`] the engine constructs for a closure
+/// literal. Carried in a [`Closure::Builtin`] so the value layer holds it
+/// without naming the execution environment; both evaluators downcast to it
+/// to invoke.
 pub struct CompiledClosure {
 	/// The declared parameters, in order.
 	args: Vec<(Param, Kind)>,
 	/// The declared return type, coerced to on the way out.
 	returns: Option<Kind>,
-	/// The body, compiled in its own scope.
-	body: Arc<dyn PhysicalExpr>,
 	/// The parameters captured where the closure was created.
 	captures: Variables,
-	/// The function registry the body was compiled against, so a legacy caller
-	/// can rebuild the streaming context the body needs.
-	registry: Arc<FunctionRegistry>,
 	/// The closure as written, for rendering.
 	sql: String,
+	/// The closure as written, which a unit is lowered from on a compile
+	/// cache's miss, and which compares a value with the closure a unit is
+	/// the body of.
+	logical: Arc<LogicalClosure>,
+	/// [`ClosureDigest::of`] `logical`: the code reference a unit is found
+	/// by.
+	digest: ClosureDigest,
+	/// Whether an invocation spends a unit of the computation-depth budget:
+	/// a call does; a stored clause evaluated as a unit
+	/// ([`crate::exec::scalar_unit`]) does not, as no call is made.
+	dives: bool,
 }
 
 impl std::fmt::Debug for CompiledClosure {
@@ -212,86 +264,179 @@ impl ToSql for CompiledClosure {
 }
 
 impl CompiledClosure {
+	/// The value `closure`, a closure literal, makes where `captures` are
+	/// what the parameters its body reads are bound to there.
+	pub(crate) fn planned(
+		closure: &Arc<LogicalClosure>,
+		digest: ClosureDigest,
+		captures: Variables,
+	) -> Self {
+		Self {
+			args: closure.args.clone(),
+			returns: closure.returns.clone(),
+			captures,
+			sql: closure.to_sql(),
+			logical: Arc::clone(closure),
+			digest,
+			dives: true,
+		}
+	}
+
+	/// This value invoked with no call made: an invocation spends nothing of
+	/// the computation-depth budget.
+	pub(crate) fn without_call(mut self) -> Self {
+		self.dives = false;
+		self
+	}
+
+	/// Whether an invocation spends a unit of the computation-depth budget.
+	pub(crate) fn dives(&self) -> bool {
+		self.dives
+	}
+
+	/// The value a stored closure — a `Closure::Expr`, as `DEFINE PARAM`
+	/// keeps one — invokes as: the closure lowered.
+	pub(crate) fn of_stored(
+		args: &[(Param, Kind)],
+		returns: Option<&Kind>,
+		body: &crate::expr::Expr,
+		captures: &Variables,
+	) -> anyhow::Result<Self> {
+		use crate::expr::logical::lower_expr;
+		let body_sql: Arc<str> = Arc::from(body.to_sql());
+		let logical = Arc::new(LogicalClosure {
+			args: args.to_vec(),
+			returns: returns.cloned(),
+			body: lower_expr(body.clone().into())?,
+			body_sql,
+		});
+		let digest = ClosureDigest::of(&logical);
+		Ok(Self {
+			args: logical.args.clone(),
+			returns: logical.returns.clone(),
+			captures: captures.clone(),
+			sql: logical.to_sql(),
+			logical,
+			digest,
+			dives: true,
+		})
+	}
+
+	/// The closure as written.
+	pub(crate) fn logical(&self) -> &Arc<LogicalClosure> {
+		&self.logical
+	}
+
+	/// [`ClosureDigest::of`] the closure as written.
+	pub(crate) fn digest(&self) -> ClosureDigest {
+		self.digest
+	}
+
 	/// Bind `args` to the declared parameters, coercing each to its kind.
 	fn bind_args(&self, args: Vec<Value>) -> anyhow::Result<Vec<(Strand, Value)>> {
-		// A missing argument is only an error when its parameter cannot be NONE.
-		if self.args.len() > args.len()
-			&& let Some((param, kind)) =
-				self.args[args.len()..].iter().find(|(_, k)| !k.can_be_none())
-		{
-			return Err(ExprError::InvalidFunctionArguments {
-				name: "ANONYMOUS".to_string(),
-				message: format!(
-					"Expected a value of type '{}' for argument {}",
-					kind.to_sql(),
-					param.to_sql()
-				),
-			}
-			.into());
-		}
-		let mut bound = Vec::with_capacity(self.args.len());
-		for ((param, kind), value) in self.args.iter().zip(args) {
-			let coerced =
-				value.coerce_to_kind(kind).map_err(|_| ExprError::InvalidFunctionArguments {
-					name: "ANONYMOUS".to_string(),
-					message: format!(
-						"Expected a value of type '{}' for argument {}",
-						kind.to_sql(),
-						param.to_sql()
-					),
-				})?;
-			bound.push((param.clone().into_strand(), coerced));
-		}
-		Ok(bound)
+		let values = bind_closure_args(&self.args, args)?;
+		Ok(self.args.iter().map(|(param, _)| param.clone().into_strand()).zip(values).collect())
 	}
 
 	/// Invoke the closure from a streaming expression.
 	///
-	/// The body runs in an isolated child of the caller's context — it sees
-	/// the transaction, the capabilities, its captures and its arguments, and
-	/// nothing else of the caller's scope — one re-entry deeper than the call:
-	/// the call consumes one unit of the context's computation-depth budget
+	/// The body runs as a unit ([`crate::exec::vm::closure::run_unit`]) in an
+	/// isolated child of the caller's context — it sees the transaction, the
+	/// capabilities, its captures and its arguments, and nothing else of the
+	/// caller's scope — one re-entry deeper than the call: the call consumes
+	/// one unit of the context's computation-depth budget
 	/// ([`ExecutionContext::dive`]), so a body that invokes its own closure
 	/// again, directly, through a block or subquery of its own, through a
-	/// closure-taking builtin such as `array::map`, or through the legacy
-	/// evaluator, fails with [`ExecError::ComputationDepthExceeded`] once the
-	/// budget is spent.
+	/// closure-taking builtin such as `array::map`, fails with
+	/// [`ExecError::ComputationDepthExceeded`] once the budget is spent.
 	///
 	/// The body evaluates against the caller's document root, and against the
 	/// caller's current value only when there is no root. A method inside an
 	/// idiom chain (`tags.map(|$x| $x + n)`) invokes the closure while the
 	/// chain stands at the receiver, and the body's bare fields and
 	/// `type::field` must still read the row the statement is evaluating, as a
-	/// direct call's would. This is the document the legacy evaluator hands a
-	/// closure it runs (see [`super::helpers::invoke_closure`]). A `RETURN` in
-	/// the body is its value; `BREAK` and `CONTINUE` have no loop to reach and
-	/// are errors.
+	/// direct call's would. A `RETURN` in the body is its value; `BREAK` and
+	/// `CONTINUE` have no loop to reach and are errors.
 	pub(crate) async fn invoke(
 		&self,
 		ctx: &EvalContext<'_>,
 		args: Vec<Value>,
 	) -> FlowResult<Value> {
+		let evaluated = self.evaluate_body(ctx, args).await;
+		self.returned(evaluated)
+	}
+
+	/// The body's own outcome for an invocation from `ctx` with `args`, as
+	/// [`Self::invoke`] runs it: a `RETURN`, `BREAK` or `CONTINUE` the body
+	/// signals is passed on as signalled, and the value is not checked against
+	/// the declared return kind.
+	pub(crate) async fn evaluate_body(
+		&self,
+		ctx: &EvalContext<'_>,
+		args: Vec<Value>,
+	) -> FlowResult<Value> {
 		let bound = self.bind_args(args)?;
-
-		let mut isolated = Context::new_isolated(ctx.exec_ctx.ctx());
-		isolated.attach_variables(self.captures.clone())?;
-		for (name, value) in bound {
-			isolated.add_value(name, Arc::new(value));
+		match crate::exec::vm::closure::run_unit(self, ctx, bound).await {
+			Invoked::Ran(ran) => ran,
+			// The unit the instruction handing the value over linked stopped
+			// standing during the call it made — a builtin invoking the value
+			// per element, whose earlier invocation changed what the unit was
+			// lowered against. The call cannot hand the step back, so the
+			// invocation links the unit as the instruction would have, and runs
+			// what it links.
+			Invoked::Unlinked(bound) => Box::pin(self.relinked(ctx, bound)).await,
 		}
-		let isolated_ctx = ctx.exec_ctx.dive()?.with_new_ctx(isolated.freeze());
+	}
 
-		let eval_ctx = EvalContext {
-			exec_ctx: &isolated_ctx,
-			current_value: ctx.document_root.or(ctx.current_value),
-			local_params: None,
-			recursion_ctx: None,
-			document_root: ctx.document_root,
-			skip_fetch_perms: ctx.skip_fetch_perms,
-			computing_record: ctx.computing_record.clone(),
-			plan_depth: ctx.plan_depth + 1,
+	/// The body's value for an invocation from `ctx` whose linked unit
+	/// stopped standing: it links one again, and runs what it linked. Boxed
+	/// by the caller, so that the invocation a body nests to the depth budget
+	/// carries none of it.
+	async fn relinked(
+		&self,
+		ctx: &EvalContext<'_>,
+		bound: Vec<(Strand, Value)>,
+	) -> FlowResult<Value> {
+		crate::exec::vm::closure::link(self, ctx).await?;
+		match crate::exec::vm::closure::run_unit(self, ctx, bound).await {
+			Invoked::Ran(ran) => ran,
+			Invoked::Unlinked(_) => {
+				Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+					"a closure unit linked for an invocation stopped standing before it ran"
+						.to_owned(),
+				))))
+			}
+		}
+	}
+
+	/// [`Self::invoke`] for a program's instruction that linked the
+	/// closure's unit into the run's table before invoking it: `None` where
+	/// the table holds no unit standing for it in the invoking frame and the
+	/// instruction has not just linked one (`relinked`), for the instruction
+	/// to link one again. Where it has, the invocation links the unit itself.
+	pub(crate) async fn invoke_linked(
+		&self,
+		ctx: &EvalContext<'_>,
+		args: Vec<Value>,
+		relinked: bool,
+	) -> Option<FlowResult<Value>> {
+		let bound = match self.bind_args(args) {
+			Ok(bound) => bound,
+			Err(e) => return Some(Err(e.into())),
 		};
+		let evaluated = match crate::exec::vm::closure::run_unit(self, ctx, bound).await {
+			Invoked::Ran(ran) => ran,
+			Invoked::Unlinked(bound) if relinked => Box::pin(self.relinked(ctx, bound)).await,
+			Invoked::Unlinked(_) => return None,
+		};
+		Some(self.returned(evaluated))
+	}
 
-		let result = match self.body.evaluate(eval_ctx).await {
+	/// The value of an invocation whose body evaluated to `evaluated`: a
+	/// `RETURN` is the value, a loop signal an error, and the value is
+	/// checked against the declared return kind.
+	fn returned(&self, evaluated: FlowResult<Value>) -> FlowResult<Value> {
+		let result = match evaluated {
 			Ok(v) => v,
 			Err(ControlFlow::Return(v)) => v,
 			Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
@@ -303,75 +448,48 @@ impl CompiledClosure {
 		Ok(validate_return("ANONYMOUS", self.returns.as_ref(), result)?)
 	}
 
-	/// Invoke the closure from the legacy evaluator.
-	///
-	/// Rebuilds the streaming context the compiled body needs from the legacy
-	/// handles: the options' auth, permission and computed-field frames and
-	/// remaining computation-depth budget, the session the context carries,
-	/// the namespace and database the options select, and `doc` as the
-	/// current value. The context is built per call and never stored on the
-	/// value, so a closure bound by one statement and called by a later one
-	/// runs against the later statement's transaction.
-	pub(crate) async fn invoke_legacy(
+	/// The frame an invocation from `ctx` runs the body's unit in: an
+	/// isolated child of the caller's context binding the captures and then
+	/// the arguments `bound`, one re-entry deeper than the call, holding
+	/// `units` where the invocation brings a table of closure units of its
+	/// own, computing the record the caller computes, where it computes one,
+	/// and waiving the reads' checks where the caller's reads waive them.
+	pub(crate) fn frame(
 		&self,
-		ctx: &FrozenContext,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		args: Vec<Value>,
-	) -> anyhow::Result<Value> {
-		let exec_ctx = self.legacy_exec_ctx(ctx, opt).await?;
-		let current = doc.map(|d| d.doc.as_ref().clone());
-		let eval_ctx = EvalContext {
-			exec_ctx: &exec_ctx,
-			current_value: current.as_ref(),
-			local_params: None,
-			recursion_ctx: None,
-			document_root: current.as_ref(),
-			skip_fetch_perms: !opt.perms,
-			computing_record: None,
-			// The legacy caller's depth is the remaining dive of `opt`, which
-			// the rebuilt context carries as its options; the body's own
-			// nesting was counted when its statement was compiled.
-			plan_depth: 0,
+		ctx: &EvalContext<'_>,
+		bound: Vec<(Strand, Value)>,
+		units: Option<Arc<crate::exec::vm::closure::ClosureUnits>>,
+	) -> FlowResult<ExecutionContext> {
+		let mut isolated = Context::new_isolated(ctx.exec_ctx.ctx());
+		isolated.attach_variables(self.captures.clone())?;
+		for (name, value) in bound {
+			isolated.add_value(name, Arc::new(value));
+		}
+		if let Some(units) = units {
+			isolated.set_vm_closures(units);
+		}
+		let frame = if self.dives {
+			ctx.exec_ctx.dive()?
+		} else {
+			ctx.exec_ctx.clone()
 		};
-		self.invoke(&eval_ctx, args).await.map_err(|ctrl| match ctrl {
-			ControlFlow::Err(e) => e,
-			other => anyhow::Error::new(crate::err::EngineError::Internal(format!(
-				"unexpected control flow from a closure body: {other}"
-			))),
+		let frame = frame.with_new_ctx(isolated.freeze());
+		let frame = match &ctx.computing_record {
+			Some(record) => frame.with_computing_record(Some(Arc::clone(record))),
+			None => frame,
+		};
+		// A caller whose reads waive the checks — a permission predicate's,
+		// a gate's — runs the body with its reads waived too.
+		Ok(if ctx.skip_fetch_perms && !frame.root().skip_fetch_perms {
+			frame.with_skip_fetch_perms(true)
+		} else {
+			frame
 		})
 	}
 
-	/// The streaming context a legacy call site's handles denote.
-	async fn legacy_exec_ctx(
-		&self,
-		ctx: &FrozenContext,
-		opt: &Options,
-	) -> anyhow::Result<ExecutionContext> {
-		let root = ExecutionContext::Root(RootContext {
-			ctx: Arc::clone(ctx),
-			function_registry: Arc::clone(&self.registry),
-			options: Some(opt.clone()),
-			datastore: None,
-			cancellation: ctx.cancel_token().map(|t| t.child_token()).unwrap_or_default(),
-			auth: Arc::clone(&opt.auth),
-			session: SessionInfo::from_context(ctx).map(Arc::new),
-			current_value: None,
-			current_row: None,
-			skip_fetch_perms: !opt.perms,
-			computing_record: None,
-			computing_field: opt.no_write == Some(NoWriteFrame::ComputedField),
-			version_stamp: opt.version,
-		});
-		let (Ok(ns), Ok(db)) = (opt.ns(), opt.db()) else {
-			return Ok(root);
-		};
-		let Some(txn) = ctx.try_tx() else {
-			return Ok(root);
-		};
-		let ns_def = txn.expect_ns_by_name(ns).await?;
-		let db_def = txn.expect_db_by_name(ns, db).await?;
-		Ok(root.with_database(ns_def, db_def))
+	/// The parameters captured where the closure was created.
+	pub(crate) fn captures(&self) -> &Variables {
+		&self.captures
 	}
 }
 
@@ -379,9 +497,9 @@ impl CompiledClosure {
 // StreamingClosureEvaluator - the value layer's seam, for streaming callers
 // =============================================================================
 
-/// The streaming engine's [`ClosureEvaluator`]: invokes a closure with the
+/// The engine's [`ClosureEvaluator`]: invokes a closure with the
 /// evaluation context of the expression that holds it, so a closure-taking
-/// builtin (`array::map`, `value::chain`, …) run by the streaming engine
+/// builtin (`array::map`, `value::chain`, …) run by the engine
 /// evaluates a compiled body without leaving the engine.
 pub(crate) struct StreamingClosureEvaluator<'a> {
 	ctx: &'a EvalContext<'a>,
@@ -474,11 +592,17 @@ impl PhysicalExpr for ClosureCallExec {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// The closure is a runtime value, so its body's access mode is unknown
-		// here; be conservative.
-		AccessMode::ReadWrite
-			.combine(self.target.access_mode())
-			.combine(args_access_mode(&self.arguments))
+		// A closure literal is the body this call runs, and `ClosureExec`
+		// reports that body's mode, so the target's own mode is exact. Any
+		// other target is a runtime value — a parameter, a field, the result
+		// of a call — whose body cannot be read here, so such a call is
+		// charged `ReadWrite` whatever it turns out to hold.
+		let unknown_body = if self.target.as_any().is::<ClosureExec>() {
+			AccessMode::ReadOnly
+		} else {
+			AccessMode::ReadWrite
+		};
+		unknown_body.combine(self.target.access_mode()).combine(args_access_mode(&self.arguments))
 	}
 }
 
@@ -523,6 +647,29 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn invoking_a_closure_literal_takes_the_mode_of_the_body_that_runs() {
+		// The target is the body the call runs, so charging the call
+		// `ReadWrite` regardless would make a pure immediately-invoked closure
+		// demand a writeable transaction.
+		let db = TestDb::new(
+			"DEFINE TABLE log SCHEMALESS;
+			 DEFINE FUNCTION fn::log($v: any) { CREATE log SET v = $v; };",
+		)
+		.await;
+		assert_eq!(access_mode_of(&db, "(|| [1, 2])()").await, AccessMode::ReadOnly);
+		assert_eq!(access_mode_of(&db, "(|| { fn::log(1) })()").await, AccessMode::ReadWrite);
+	}
+
+	#[tokio::test]
+	async fn invoking_a_closure_a_runtime_value_holds_stays_read_write() {
+		// Nothing here reads the body that will run, so the call is charged
+		// `ReadWrite` whatever the value turns out to hold — including when it
+		// holds a body that only reads.
+		let db = TestDb::new("").await;
+		assert_eq!(access_mode_of(&db, "$f()").await, AccessMode::ReadWrite);
+	}
+
+	#[tokio::test]
 	async fn a_writing_closure_passed_to_a_builtin_is_read_write() {
 		// `array::map` runs the closure per element under this statement's
 		// options, so a writing closure argument makes the whole call writable.
@@ -555,11 +702,53 @@ mod tests {
 			panic!("expected a closure, got {value:?}");
 		};
 		let Closure::Builtin(obj) = closure.as_ref() else {
-			panic!("the streaming engine creates compiled closures");
+			panic!("the engine creates compiled closures");
 		};
 		assert!(obj.as_any().downcast_ref::<CompiledClosure>().is_some());
 
 		assert_eq!(eval("(|$x: int| $x * 2)(21)", &ctx).await.unwrap(), Value::from(42));
+	}
+
+	#[tokio::test]
+	async fn a_closure_captures_the_write_binding_live_where_it_was_written() {
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let bound = val("'bound'").await;
+
+		// Created where `$value` is bound, the way a write stage evaluates a
+		// field or permission clause.
+		let expr = physical_expr("|| $value", &ctx).await;
+		let mut creating = EvalContext::from_exec_ctx(&ctx);
+		creating.write_value = Some(&bound);
+		let value = expr.evaluate(creating).await.unwrap();
+		let Value::Closure(closure) = &value else {
+			panic!("expected a closure, got {value:?}");
+		};
+		let Closure::Builtin(obj) = closure.as_ref() else {
+			panic!("the engine creates compiled closures");
+		};
+		let compiled = obj.as_any().downcast_ref::<CompiledClosure>().unwrap();
+
+		// Invoked where nothing binds `$value`. The binding is not a context
+		// value and the invocation clears the slots, so the capture is the only
+		// way the body can still read it.
+		let called = compiled.invoke(&EvalContext::from_exec_ctx(&ctx), vec![]).await.unwrap();
+		assert_eq!(called, bound, "the body must read the binding its creator held");
+
+		// A name nothing bound stays unbound rather than picking up a slot.
+		let absent = physical_expr("|| $nothing", &ctx).await;
+		let mut creating = EvalContext::from_exec_ctx(&ctx);
+		creating.write_value = Some(&bound);
+		let value = absent.evaluate(creating).await.unwrap();
+		let Value::Closure(closure) = &value else {
+			panic!("expected a closure, got {value:?}");
+		};
+		let Closure::Builtin(obj) = closure.as_ref() else {
+			panic!("the engine creates compiled closures");
+		};
+		let compiled = obj.as_any().downcast_ref::<CompiledClosure>().unwrap();
+		let called = compiled.invoke(&EvalContext::from_exec_ctx(&ctx), vec![]).await.unwrap();
+		assert_eq!(called, Value::None);
 	}
 
 	#[tokio::test]
@@ -655,6 +844,30 @@ mod tests {
 			let err = eval("$f($f)", &ctx).await.expect_err("the recursion has no end");
 			assert!(is_depth_error(&err), "{closure}: {err}");
 		}
+	}
+
+	/// A closure invoked with a current value and no document runs its unit
+	/// over the value as no document: a statement in an element body of the
+	/// body takes the element as its `$parent`, as one evaluated where there
+	/// is no row does, while one invoked with the value as its document takes
+	/// the document.
+	#[tokio::test]
+	async fn a_body_invoked_with_a_value_and_no_document_reads_no_document() {
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let closure =
+			eval("|| [1, 2, 3][WHERE (SELECT VALUE $parent FROM ONLY 0) > 1]", &ctx).await.unwrap();
+		let ctx = ctx.with_param("f", closure);
+		let call = physical_expr("$f()", &ctx).await;
+		let row = Value::from(0);
+		let undocumented =
+			call.evaluate(EvalContext::from_exec_ctx(&ctx).with_value(&row)).await.unwrap();
+		assert_eq!(undocumented, val("[2, 3]").await);
+		let documented =
+			call.evaluate(EvalContext::from_exec_ctx(&ctx).with_value_and_doc(&row)).await.unwrap();
+		assert_eq!(documented, val("[]").await);
+		let rowless = call.evaluate(EvalContext::from_exec_ctx(&ctx)).await.unwrap();
+		assert_eq!(rowless, val("[2, 3]").await);
 	}
 
 	#[tokio::test]

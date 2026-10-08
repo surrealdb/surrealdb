@@ -1,0 +1,5 @@
+### SELECT VALUE id FROM open WHERE emb <|4, 40|> [1.0, 0.0, 0.0] AND tag = 'a' ORDER BY id
+open:2
+open:4
+open:6
+open:8

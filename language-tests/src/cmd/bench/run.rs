@@ -23,7 +23,7 @@ use crate::cmd::util::ImportFailure;
 use crate::cmd::{graphql, util};
 use crate::tests::case::Dialect;
 use crate::tests::run::{CaseImports, RunConfig, TestRunId};
-use crate::tests::schema::{BoolOr, NewPlannerStrategyConfig, TestConfig};
+use crate::tests::schema::{BoolOr, TestConfig};
 use crate::tests::{CaseSet, RunSetBuilder, TestRun};
 
 struct BenchRunConfig {
@@ -68,7 +68,7 @@ fn resolve_capabilities(config: &TestConfig) -> Capabilities {
 /// target namespace + database all match — everything that determines the
 /// populated keyspace and the engine config.
 ///
-/// Deliberately excluded for ordinary benches: auth, planner strategy, dialect,
+/// Deliberately excluded for ordinary benches: auth, dialect,
 /// and the bench's own query. These only parameterize the per-bench execute
 /// session and statement (built fresh per bench against the shared store), never
 /// where imported data lands — imports always run as `Session::owner()`
@@ -128,7 +128,6 @@ struct BenchConfig {
 	/// Temp directory under which file-backed datastores (rocksdb/surrealkv) are
 	/// built; `None` for the in-memory backend. Removed when `run()` returns.
 	bench_root: Option<PathBuf>,
-	new_planner: NewPlannerStrategyConfig,
 }
 
 /// Counter for unique per-datastore subdirectories under `bench_root`.
@@ -403,7 +402,6 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	let config = BenchConfig {
 		backend: cfg.backend,
 		bench_root,
-		new_planner: NewPlannerStrategyConfig::BestEffortRo,
 	};
 
 	let mut store = get_store(&cfg.store).await?;
@@ -1214,8 +1212,7 @@ async fn populate(
 	// The import session only targets the namespace/database — data lands as owner
 	// (see `run_imports_list`), so it is independent of the bench's own auth. The
 	// timed statement gets its own session per bench.
-	let session =
-		util::session_from_test_config(&run.case.test.config.parsed, config.new_planner.into());
+	let session = util::session_from_test_config(&run.case.test.config.parsed);
 
 	surrealdb_expr::val::rnd::reseed(dataset_seed());
 
@@ -1244,10 +1241,7 @@ async fn populate(
 		if !matches!(run.case.test.dialect, Dialect::SurrealQl) {
 			bail!("`graph-fold` / `graph-numeric-ids` require a SurrealQL bench statement");
 		}
-		let session = util::session_from_test_config(
-			&run.case.test.config.parsed,
-			config.new_planner.into(),
-		);
+		let session = util::session_from_test_config(&run.case.test.config.parsed);
 		let results = dbs.execute(&run.case.test.source, &session, None).await?;
 		for (idx, result) in results.iter().enumerate() {
 			if let Err(error) = &result.result {
@@ -1312,10 +1306,7 @@ async fn prepare(
 	match build_and_populate(run, config, token).await? {
 		Err(e) => Ok(Err(e)),
 		Ok(dbs) => {
-			let session = util::session_from_test_config(
-				&run.case.test.config.parsed,
-				config.new_planner.into(),
-			);
+			let session = util::session_from_test_config(&run.case.test.config.parsed);
 			Ok(Ok((dbs, session)))
 		}
 	}
@@ -1438,10 +1429,7 @@ async fn run_bench(
 	// data MUST set `rebuild = true`.
 	let shared = match shared_dbs {
 		Some(dbs) => {
-			let session = util::session_from_test_config(
-				&run.case.test.config.parsed,
-				config.new_planner.into(),
-			);
+			let session = util::session_from_test_config(&run.case.test.config.parsed);
 			let statement = BenchStatement::prepare(run, &dbs, &session).await?;
 			Some((dbs, session, statement))
 		}

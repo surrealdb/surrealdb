@@ -1,4 +1,4 @@
-//! Graph edge scanning operator for the streaming execution engine.
+//! Graph edge scanning operator for the engine.
 //!
 //! This operator scans graph edges based on a source record, direction, and
 //! target edge tables. It is used to implement graph traversal idioms like
@@ -378,7 +378,7 @@ impl ExecOperator for GraphEdgeScan {
 		let check_perms = should_check_perms(&db_ctx, Action::View)?;
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -421,7 +421,7 @@ impl ExecOperator for GraphEdgeScan {
 			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
 
 			// Determine the directions to scan
-			// Note: For Both, we scan In first then Out to match legacy executor behavior
+			// For Both, we scan In first then Out.
 			// Arc'd for the same reason as the edge/target table lists: the
 			// fan-out shares it with each spawned source.
 			let directions: Arc<Vec<Dir>> = Arc::new(match direction {
@@ -538,10 +538,13 @@ impl ExecOperator for GraphEdgeScan {
 					if batch_table_info.contains_key(&rid.table) {
 						continue;
 					}
-					let tb = txn
-						.get_tb(ns_id, db_id, &rid.table, None)
-						.await
-						.context("Failed to resolve the source vertex's table")?;
+					// A load of the descriptor API: the table's layout, read as a
+					// running program reads it.
+					let tb = crate::exec::vm::descriptor::object(
+						txn.get_tb(ns_id, db_id, &rid.table, None),
+					)
+					.await
+					.context("Failed to resolve the source vertex's table")?;
 					let info = (
 						vertex_adjacency_of(tb.as_deref()),
 						crate::idx::inline_cache::effective_edges_cap(tb.as_deref()),
@@ -788,7 +791,7 @@ impl ExecOperator for GraphEdgeScan {
 						// its id alone, which says nothing about existence — and
 						// sources can be literal ids (`follows:[a,b]->person`),
 						// not just live upstream rows. Gate on the edge existing
-						// at this snapshot, exactly as the fallback executor does.
+						// at this snapshot, exactly as an edge read does.
 						if adjacency == VertexAdjacency::Lightweight
 							&& !txn
 								.record_exists(ns_id, db_id, &rid.table, &rid.key, version)
@@ -1682,6 +1685,36 @@ impl ExecOperator for GraphEdgeScan {
 /// the edge record is the only source of truth.
 type PayloadPending = (RecordId, Option<Value>);
 
+/// The referenced inline fields an adjacency entry's inline-property section
+/// `props` carries for an edge of the table `table_spec` snapshots, by name;
+/// `None` when the section is absent, undecodable, or written under another
+/// generation or field count than the snapshot's, which leaves the edge
+/// record the only source of truth.
+pub(crate) fn payload_fields(
+	table_spec: &PayloadTableSpec,
+	props: Option<&[u8]>,
+) -> Option<Vec<(String, Value)>> {
+	use surrealdb_datastore::values::graph::InlineProps;
+	let props = InlineProps::decode(props?).ok()?;
+	if props.generation != table_spec.generation {
+		return None;
+	}
+	let values = props.values?;
+	if values.len() != table_spec.fields.len() {
+		return None;
+	}
+	Some(
+		table_spec
+			.fields
+			.iter()
+			.zip(&table_spec.referenced)
+			.zip(values)
+			.filter(|((_, referenced), _)| **referenced)
+			.map(|((name, _), value)| (name.clone(), value))
+			.collect(),
+	)
+}
+
 /// Synthesizes the candidate object a payload-resident predicate is
 /// evaluated against, for one adjacency entry. Trust is anchored on the
 /// plan-time snapshot: the payload's stamped generation and value count
@@ -1695,7 +1728,6 @@ fn synthesize_payload_candidate(
 	dir: Dir,
 	item: crate::idx::adjacency::MergedAdjacencyEdge,
 ) -> PayloadPending {
-	use surrealdb_datastore::values::graph::InlineProps;
 	let edge = item.edge;
 	// A target-less (legacy-format) entry still answers a key-only
 	// predicate that reads nothing beyond `id`; anything needing `in`,
@@ -1715,29 +1747,10 @@ fn synthesize_payload_candidate(
 		let Some(table_spec) = spec.tables.get(&edge.table) else {
 			return (edge, None);
 		};
-		let Some(body) = item.props.as_deref() else {
-			return (edge, None);
-		};
-		let Ok(props) = InlineProps::decode(body) else {
-			return (edge, None);
-		};
-		if props.generation != table_spec.generation {
-			return (edge, None);
+		match payload_fields(table_spec, item.props.as_deref()) {
+			Some(fields) => fields,
+			None => return (edge, None),
 		}
-		let Some(values) = props.values else {
-			return (edge, None);
-		};
-		if values.len() != table_spec.fields.len() {
-			return (edge, None);
-		}
-		table_spec
-			.fields
-			.iter()
-			.zip(&table_spec.referenced)
-			.zip(values)
-			.filter(|((_, referenced), _)| **referenced)
-			.map(|((name, _), value)| (name.clone(), value))
-			.collect()
 	};
 	// The candidate carries only the fields the predicate reads — anything
 	// more is a per-edge clone or insert spent on a value the evaluation

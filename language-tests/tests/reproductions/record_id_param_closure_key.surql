@@ -2,8 +2,7 @@
 [test]
 reason = """A record-id parameter whose key holds a closure has no literal form; a \
 SELECT over it keeps the parameter as its source and evaluates it at runtime instead \
-of resolving it against the catalog at bind time, where the key fails to serialize as \
-it does on every engine."""
+of resolving it against the catalog at bind time, where the key fails to serialize."""
 
 [[test.results]]
 value = "NONE"

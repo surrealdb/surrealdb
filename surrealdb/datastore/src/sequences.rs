@@ -311,6 +311,36 @@ pub struct Sequences {
 	tf: TransactionFactory,
 	nid: Uuid,
 	sequences: SequencesMap,
+	held: Arc<std::sync::Mutex<HeldCatalogIds>>,
+}
+
+/// A sequence of catalog identifiers: the domains an id can be held from
+/// ahead of the definition that takes it ([`Sequences::hold_catalog_id`]).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum CatalogSequence {
+	/// Namespace ids.
+	Namespaces,
+	/// The database ids of a namespace.
+	Databases(NamespaceId),
+	/// The table ids of a database.
+	Tables(NamespaceId, DatabaseId),
+	/// The index ids of a table.
+	Indexes(NamespaceId, DatabaseId, TableName),
+}
+
+/// The catalog ids this node holds outside its sequences' cursors.
+///
+/// Every id here was handed out by this node from a window it claimed, so no
+/// other node hands it out: a held id is one a caller may still define with
+/// or release, a released id one no definition holds, handed out again
+/// before the cursor moves. Both live in memory only; a restart skips them,
+/// as it skips the rest of an unconsumed window.
+#[derive(Default)]
+struct HeldCatalogIds {
+	/// Ids held and neither confirmed nor released.
+	held: std::collections::HashSet<(CatalogSequence, u32)>,
+	/// Ids released, by sequence, handed out lowest first.
+	released: HashMap<CatalogSequence, std::collections::BTreeSet<u32>>,
 }
 
 /// Defines the different types of sequences supported by the system.
@@ -674,6 +704,72 @@ impl Sequences {
 			tf,
 			sequences: Arc::new(Default::default()),
 			nid,
+			held: Arc::new(Default::default()),
+		}
+	}
+
+	fn held_catalog_ids(&self) -> std::sync::MutexGuard<'_, HeldCatalogIds> {
+		self.held.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+	}
+
+	/// The lowest id of `sequence` released and not handed out since.
+	fn take_released(&self, sequence: &CatalogSequence) -> Option<u32> {
+		let mut held = self.held_catalog_ids();
+		if held.released.is_empty() {
+			return None;
+		}
+		let released = held.released.get_mut(sequence)?;
+		let id = released.pop_first();
+		if released.is_empty() {
+			held.released.remove(sequence);
+		}
+		id
+	}
+
+	/// The next id of catalog sequence `sequence`.
+	pub async fn next_catalog_id(
+		&self,
+		ctx: Option<&dyn CancellationProbe>,
+		sequence: &CatalogSequence,
+	) -> Result<u32> {
+		Ok(match sequence {
+			CatalogSequence::Namespaces => self.next_namespace_id(ctx).await?.0,
+			CatalogSequence::Databases(ns) => self.next_database_id(ctx, *ns).await?.0,
+			CatalogSequence::Tables(ns, db) => self.next_table_id(ctx, *ns, *db).await?.0,
+			CatalogSequence::Indexes(ns, db, tb) => {
+				self.next_index_id(ctx, *ns, *db, tb.clone()).await?.0
+			}
+		})
+	}
+
+	/// The next id of `sequence`, held: handed out like any other, and
+	/// handed out again by [`Self::release_catalog_id`] unless
+	/// [`Self::confirm_catalog_id`] confirms it first. A caller that leases
+	/// an id ahead of the definition that may take it holds it, so an id no
+	/// definition takes is not lost.
+	pub async fn hold_catalog_id(
+		&self,
+		ctx: Option<&dyn CancellationProbe>,
+		sequence: &CatalogSequence,
+	) -> Result<u32> {
+		let id = self.next_catalog_id(ctx, sequence).await?;
+		self.held_catalog_ids().held.insert((sequence.clone(), id));
+		Ok(id)
+	}
+
+	/// Confirm that held id `id` of `sequence` is taken by a definition, so
+	/// releasing it does nothing. Confirming an id not held does nothing.
+	pub fn confirm_catalog_id(&self, sequence: &CatalogSequence, id: u32) {
+		self.held_catalog_ids().held.remove(&(sequence.clone(), id));
+	}
+
+	/// Release held id `id` of `sequence`, unless it was confirmed: the next
+	/// id handed out of `sequence` is the lowest it released. The caller
+	/// releases an id only once nothing may still confirm it.
+	pub fn release_catalog_id(&self, sequence: &CatalogSequence, id: u32) {
+		let mut held = self.held_catalog_ids();
+		if held.held.remove(&(sequence.clone(), id)) {
+			held.released.entry(sequence.clone()).or_default().insert(id);
 		}
 	}
 
@@ -849,6 +945,9 @@ impl Sequences {
 		&self,
 		ctx: Option<&dyn CancellationProbe>,
 	) -> Result<NamespaceId> {
+		if let Some(id) = self.take_released(&CatalogSequence::Namespaces) {
+			return Ok(NamespaceId(id));
+		}
 		let domain = Arc::new(SequenceDomain::new_namespace_ids());
 		let id = self.next_val(ctx, domain, 0, 100, None).await?;
 		Ok(NamespaceId(id as u32))
@@ -867,6 +966,9 @@ impl Sequences {
 		ctx: Option<&dyn CancellationProbe>,
 		ns: NamespaceId,
 	) -> Result<DatabaseId> {
+		if let Some(id) = self.take_released(&CatalogSequence::Databases(ns)) {
+			return Ok(DatabaseId(id));
+		}
 		let domain = Arc::new(SequenceDomain::new_database_ids(ns));
 		let id = self.next_val(ctx, domain, 0, 100, None).await?;
 		Ok(DatabaseId(id as u32))
@@ -887,6 +989,9 @@ impl Sequences {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<TableId> {
+		if let Some(id) = self.take_released(&CatalogSequence::Tables(ns, db)) {
+			return Ok(TableId(id));
+		}
 		let domain = Arc::new(SequenceDomain::new_table_ids(ns, db));
 		let id = self.next_val(ctx, domain, 0, 100, None).await?;
 		Ok(TableId(id as u32))
@@ -909,6 +1014,9 @@ impl Sequences {
 		db: DatabaseId,
 		tb: TableName,
 	) -> Result<IndexId> {
+		if let Some(id) = self.take_released(&CatalogSequence::Indexes(ns, db, tb.clone())) {
+			return Ok(IndexId(id));
+		}
 		let domain = Arc::new(SequenceDomain::new_index_ids(ns, db, tb));
 		let id = self.next_val(ctx, domain, 0, 100, None).await?;
 		Ok(IndexId(id as u32))
@@ -1916,6 +2024,53 @@ mod tests {
 
 		let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
 		assert_eq!(unique.len(), ids.len(), "a zero batch reissued an id across a reload: {ids:?}");
+	}
+
+	/// A held catalog id released before any definition confirms it is the
+	/// next id its sequence hands out, lowest first; one confirmed is never
+	/// handed out again, and releasing it does nothing. Other sequences are
+	/// not touched.
+	#[tokio::test]
+	async fn a_released_catalog_id_is_handed_out_again_and_a_confirmed_one_is_not() {
+		use super::CatalogSequence;
+
+		let (_, sequences) = factory().await;
+		let tables = CatalogSequence::Tables(NamespaceId(1), DatabaseId(2));
+		let indexes = CatalogSequence::Indexes(NamespaceId(1), DatabaseId(2), "t".into());
+
+		let first = sequences.hold_catalog_id(None, &tables).await.unwrap();
+		let second = sequences.hold_catalog_id(None, &tables).await.unwrap();
+		let third = sequences.hold_catalog_id(None, &tables).await.unwrap();
+		let index = sequences.hold_catalog_id(None, &indexes).await.unwrap();
+		sequences.confirm_catalog_id(&tables, second);
+		sequences.release_catalog_id(&tables, third);
+		sequences.release_catalog_id(&tables, first);
+		sequences.release_catalog_id(&tables, second);
+		// Released twice, handed out once.
+		sequences.release_catalog_id(&tables, first);
+
+		let mut next = Vec::new();
+		for _ in 0..3 {
+			next.push(
+				sequences.next_table_id(None, NamespaceId(1), DatabaseId(2)).await.unwrap().0,
+			);
+		}
+		assert_eq!(next, vec![first, third, third + 1], "held {first}, {second}, {third}");
+		assert_eq!(
+			sequences
+				.next_index_id(None, NamespaceId(1), DatabaseId(2), "t".into())
+				.await
+				.unwrap()
+				.0,
+			index + 1,
+			"an index id still held is not handed out"
+		);
+		sequences.release_catalog_id(&indexes, index);
+		assert_eq!(
+			sequences.next_catalog_id(None, &indexes).await.unwrap(),
+			index,
+			"the index id released is"
+		);
 	}
 
 	#[tokio::test]

@@ -1,5 +1,5 @@
-//! Captures the parameter bindings a closure body references at evaluation
-//! time, so `Closure::Expr` carries only the variables it actually uses.
+//! A visitor pass that collects the parameter bindings an expression references
+//! from a context, so a closure carries only the variables it actually uses.
 
 use std::convert::Infallible;
 
@@ -8,29 +8,13 @@ use surrealdb_cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::FrozenContext;
 use crate::expr::Param;
 use crate::expr::variables::Variables;
-use crate::expr::visit::{Visit, Visitor};
+use crate::expr::visit::Visitor;
 
 /// A visitor pass which will capture the value of parameters in the visited expression from the
 /// context.
 pub(crate) struct ParameterCapturePass<'a, 'b> {
 	pub context: &'a FrozenContext,
 	pub captures: &'b mut Variables,
-}
-
-impl ParameterCapturePass<'_, '_> {
-	pub fn capture<V: for<'a, 'b> Visit<ParameterCapturePass<'a, 'b>>>(
-		context: &FrozenContext,
-		v: &V,
-	) -> Variables {
-		let mut captures = Variables::new();
-
-		let _ = v.visit(&mut ParameterCapturePass {
-			context,
-			captures: &mut captures,
-		});
-
-		captures
-	}
 }
 
 impl Visitor for ParameterCapturePass<'_, '_> {

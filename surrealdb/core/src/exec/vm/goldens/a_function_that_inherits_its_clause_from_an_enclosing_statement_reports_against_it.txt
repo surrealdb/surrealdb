@@ -1,0 +1,9 @@
+### SELECT id, (SELECT VALUE search::score(1) FROM ONLY open:3) AS inner FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, inner: 0.6632941961288452f }
+{ id: open:6, inner: 0.6632941961288452f }
+{ id: open:9, inner: 0.6632941961288452f }
+{ id: open:12, inner: 0.6632941961288452f }
+{ id: open:15, inner: 0.6632941961288452f }
+{ id: open:18, inner: 0.6632941961288452f }
+{ id: open:21, inner: 0.6632941961288452f }
+{ id: open:24, inner: 0.6632941961288452f }

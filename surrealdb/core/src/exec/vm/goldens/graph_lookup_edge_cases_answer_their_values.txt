@@ -1,0 +1,32 @@
+### owner: SELECT VALUE ->e->v FROM [{ id: v:1, open: true }, { id: v:2 }]
+[v:2]
+[v:1]
+### owner: SELECT VALUE ->e->v FROM v
+[v:2]
+[v:1]
+### owner: RETURN v:1->e->v
+[v:2]
+### owner: SELECT VALUE [->e->v, ->e[WHERE $parent.open]->v] FROM [{ id: v:1, open: true }]
+[[v:2], [v:2]]
+### owner: SELECT VALUE ->e[WHERE THROW 'no'] FROM [v:1]
+error: An error occurred: no
+### owner: SELECT VALUE ->e[WHERE <int> 'x' > 1] FROM [v:1]
+error: Could not cast into `int` using input `'x'`
+### owner: SELECT VALUE ->e[WHERE (SELECT VALUE open FROM ONLY $parent.id)] FROM [v:1, v:2]
+[e:1]
+[]
+### record user: SELECT VALUE ->e->v FROM [{ id: v:1, open: true }, { id: v:2 }]
+[v:2]
+[]
+### record user: SELECT VALUE ->e->v FROM v
+[v:2]
+### record user: RETURN v:1->e->v
+[]
+### record user: SELECT VALUE [->e->v, ->e[WHERE $parent.open]->v] FROM [{ id: v:1, open: true }]
+[[v:2], [v:2]]
+### record user: SELECT VALUE ->e[WHERE THROW 'no'] FROM [v:1]
+error: An error occurred: no
+### record user: SELECT VALUE ->e[WHERE <int> 'x' > 1] FROM [v:1]
+error: Could not cast into `int` using input `'x'`
+### record user: SELECT VALUE ->e[WHERE (SELECT VALUE open FROM ONLY $parent.id)] FROM [v:1, v:2]
+[e:1]

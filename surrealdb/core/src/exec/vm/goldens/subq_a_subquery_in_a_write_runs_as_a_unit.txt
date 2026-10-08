@@ -1,0 +1,69 @@
+### UPDATE open SET m = 1 RETURN (SELECT VALUE count() FROM item GROUP ALL)[0] AS c
+{ c: 3 }
+{ c: 3 }
+{ c: 3 }
+records:
+log: { id: log:generated, m: 1, of: open:1 }
+log: { id: log:generated, m: 1, of: open:2 }
+log: { id: log:generated, m: 1, of: open:3 }
+open: { id: open:1, m: 1, n: 10, of: item:1 }
+open: { id: open:2, m: 1, n: 20, of: item:3 }
+open: { id: open:3, m: 1, n: 2, of: item:9 }
+### UPDATE open SET m = 1 RETURN n, (SELECT VALUE n FROM item WHERE n < $parent.n) AS below
+{ below: [1, 2, 3], n: 10 }
+{ below: [1, 2, 3], n: 20 }
+{ below: [1], n: 2 }
+records:
+log: { id: log:generated, m: 1, of: open:1 }
+log: { id: log:generated, m: 1, of: open:2 }
+log: { id: log:generated, m: 1, of: open:3 }
+open: { id: open:1, m: 1, n: 10, of: item:1 }
+open: { id: open:2, m: 1, n: 20, of: item:3 }
+open: { id: open:3, m: 1, n: 2, of: item:9 }
+### UPDATE open SET m = 1 RETURN n, (SELECT VALUE twice FROM ONLY $parent.of) AS t
+{ n: 10, t: 2 }
+{ n: 20, t: 6 }
+{ n: 2, t: NONE }
+records:
+log: { id: log:generated, m: 1, of: open:1 }
+log: { id: log:generated, m: 1, of: open:2 }
+log: { id: log:generated, m: 1, of: open:3 }
+open: { id: open:1, m: 1, n: 10, of: item:1 }
+open: { id: open:2, m: 1, n: 20, of: item:3 }
+open: { id: open:3, m: 1, n: 2, of: item:9 }
+### UPDATE open SET m = (CREATE log SET of = $parent.id RETURN VALUE of)
+{ id: open:1, m: [open:1], n: 10, of: item:1 }
+{ id: open:2, m: [open:2], n: 20, of: item:3 }
+{ id: open:3, m: [open:3], n: 2, of: item:9 }
+records:
+log: { id: log:generated, m: [open:1], of: open:1 }
+log: { id: log:generated, m: [open:2], of: open:2 }
+log: { id: log:generated, m: [open:3], of: open:3 }
+log: { id: log:generated, of: open:1 }
+log: { id: log:generated, of: open:2 }
+log: { id: log:generated, of: open:3 }
+open: { id: open:1, m: [open:1], n: 10, of: item:1 }
+open: { id: open:2, m: [open:2], n: 20, of: item:3 }
+open: { id: open:3, m: [open:3], n: 2, of: item:9 }
+### UPDATE open SET m = 1
+{ id: open:1, m: 1, n: 10, of: item:1 }
+{ id: open:2, m: 1, n: 20, of: item:3 }
+{ id: open:3, m: 1, n: 2, of: item:9 }
+records:
+log: { id: log:generated, m: 1, of: open:1 }
+log: { id: log:generated, m: 1, of: open:2 }
+log: { id: log:generated, m: 1, of: open:3 }
+open: { id: open:1, m: 1, n: 10, of: item:1 }
+open: { id: open:2, m: 1, n: 20, of: item:3 }
+open: { id: open:3, m: 1, n: 2, of: item:9 }
+### UPDATE open SET m = 1 RETURN n, (SELECT VALUE m FROM ONLY $parent) AS written
+{ n: 10, written: 1 }
+{ n: 20, written: 1 }
+{ n: 2, written: 1 }
+records:
+log: { id: log:generated, m: 1, of: open:1 }
+log: { id: log:generated, m: 1, of: open:2 }
+log: { id: log:generated, m: 1, of: open:3 }
+open: { id: open:1, m: 1, n: 10, of: item:1 }
+open: { id: open:2, m: 1, n: 20, of: item:3 }
+open: { id: open:3, m: 1, n: 2, of: item:9 }

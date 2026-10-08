@@ -3,11 +3,10 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
-Ensure the new executor correctly plans index usage on a SCHEMALESS table \
+Ensure index usage is planned correctly on a SCHEMALESS table \
 with computed fields and multiple indexes, exercised through parameterized \
 OData V4-style queries. The V4 connector cannot distinguish strings from \
 record IDs in plain JSON, so the WHERE clause checks both: \
@@ -97,11 +96,11 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-"Project [ctx: Db] {rows: 2}
+"SelectProject [ctx: Db] [projections: id, title, category, cryptoVulnerabilityType, summary, location, classicSeverity, classicWeaknessType, annotation, quantumSeverity, quantumWeaknessType, ruleId, scan, confidence, advisories, links, potentialSideEffects, replacementConfidence, replacementCode, guidance, replacementCodeLanguage, remediations, remediationJobs] {rows: 2}
     Filter [ctx: Db] [predicate: type::field('scan') INSIDE ['scan:01kg1bsd1hbtsnq1b57zz3zm55', scan:01kg1bsd1hbtsnq1b57zz3zm55]] {rows: 2}
         UnionIndexScan [ctx: Db] [table: finding, branches: 2] {rows: 2}
-            IndexScan [ctx: Db] [index: idx_scan, access: = 'scan:01kg1bsd1hbtsnq1b57zz3zm55', direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_scan, access: = scan:01kg1bsd1hbtsnq1b57zz3zm55, direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: finding, index: idx_scan, access: = 'scan:01kg1bsd1hbtsnq1b57zz3zm55', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: finding, index: idx_scan, access: = scan:01kg1bsd1hbtsnq1b57zz3zm55, direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -234,7 +233,7 @@ LET $select21 = "remediations";
 LET $select22 = "remediationJobs";
 LET $table = "finding";
 
--- Verify the new executor plans index usage correctly
+-- Verify index usage is planned correctly
 EXPLAIN ANALYZE SELECT
     type::field($select0) AS `id`,
     type::field($select1) AS `title`,

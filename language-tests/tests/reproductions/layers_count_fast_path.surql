@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_count_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["compute-only", "all-ro", "best-effort-ro"]
 
 [test]
 reason = """

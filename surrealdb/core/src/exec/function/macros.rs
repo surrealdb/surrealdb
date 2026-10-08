@@ -52,6 +52,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		() -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -71,6 +72,11 @@ macro_rules! define_pure_function {
 
 			fn signature(&self) -> $crate::exec::function::Signature {
 				$crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
@@ -85,6 +91,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		($arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -106,6 +113,11 @@ macro_rules! define_pure_function {
 				$crate::exec::function::Signature::new()
 					.arg(stringify!($arg_name), $crate::expr::Kind::$arg_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
@@ -120,6 +132,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -142,6 +155,11 @@ macro_rules! define_pure_function {
 					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
 					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
@@ -156,6 +174,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -179,6 +198,11 @@ macro_rules! define_pure_function {
 					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.arg(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
@@ -193,6 +217,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		(... $arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -214,6 +239,11 @@ macro_rules! define_pure_function {
 				$crate::exec::function::Signature::new()
 					.variadic($crate::expr::Kind::$arg_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
@@ -228,6 +258,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, ... $rest_name:ident : $rest_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -250,6 +281,11 @@ macro_rules! define_pure_function {
 					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
 					.variadic($crate::expr::Kind::$rest_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
@@ -264,6 +300,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		(? $arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -285,6 +322,11 @@ macro_rules! define_pure_function {
 				$crate::exec::function::Signature::new()
 					.optional(stringify!($arg_name), $crate::expr::Kind::$arg_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
@@ -299,6 +341,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -321,6 +364,11 @@ macro_rules! define_pure_function {
 					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
 					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
@@ -335,6 +383,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -358,6 +407,11 @@ macro_rules! define_pure_function {
 					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
@@ -372,6 +426,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -395,6 +450,11 @@ macro_rules! define_pure_function {
 					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
@@ -409,6 +469,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident, ? $arg4_name:ident : $arg4_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -433,6 +494,11 @@ macro_rules! define_pure_function {
 					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
 					.optional(stringify!($arg4_name), $crate::expr::Kind::$arg4_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
@@ -447,6 +513,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		(? $arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_path:path
 	) => {
@@ -469,6 +536,11 @@ macro_rules! define_pure_function {
 					.optional(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
 					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
@@ -524,6 +596,7 @@ macro_rules! define_context_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		() -> $ret:ident,
 		$impl_fn:expr
 	) => {
@@ -543,6 +616,11 @@ macro_rules! define_context_function {
 
 			fn signature(&self) -> $crate::exec::function::Signature {
 				$crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn is_pure(&self) -> bool {
@@ -600,6 +678,7 @@ macro_rules! define_async_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		() -> $ret:ident,
 		$impl_fn:expr
 	) => {
@@ -619,6 +698,11 @@ macro_rules! define_async_function {
 
 			fn signature(&self) -> $crate::exec::function::Signature {
 				$crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn is_pure(&self) -> bool {
@@ -651,6 +735,7 @@ macro_rules! define_async_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		($arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_fn:expr
 	) => {
@@ -672,6 +757,11 @@ macro_rules! define_async_function {
 				$crate::exec::function::Signature::new()
 					.arg(stringify!($arg_name), $crate::expr::Kind::$arg_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn is_pure(&self) -> bool {
@@ -704,6 +794,7 @@ macro_rules! define_async_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_fn:expr
 	) => {
@@ -726,6 +817,11 @@ macro_rules! define_async_function {
 					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
 					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn is_pure(&self) -> bool {
@@ -758,6 +854,7 @@ macro_rules! define_async_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_fn:expr
 	) => {
@@ -780,6 +877,11 @@ macro_rules! define_async_function {
 					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
 					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn is_pure(&self) -> bool {
@@ -812,6 +914,7 @@ macro_rules! define_async_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_fn:expr
 	) => {
@@ -835,6 +938,11 @@ macro_rules! define_async_function {
 					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
 					.returns($crate::expr::Kind::$ret)
+					$(.rule({
+						#[allow(unused_imports)]
+						use $crate::exec::function::ReturnRule;
+						$rule
+					}))?
 			}
 
 			fn is_pure(&self) -> bool {

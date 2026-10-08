@@ -61,25 +61,38 @@
 //! the row carries a key under a computed name; otherwise the dereference
 //! reads storage, as it does for a record that has nothing to hide.
 
+#[cfg(test)]
 use std::collections::HashMap;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use futures::StreamExt;
+#[cfg(test)]
 use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
+#[cfg(test)]
 use tracing::instrument;
 
+#[cfg(test)]
 use crate::err::EngineError;
+#[cfg(test)]
 use crate::exec::physical_expr::ComputingRecord;
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
 	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatchStream, buffer_stream,
 	monitor_stream,
 };
+#[cfg(test)]
 use crate::expr::logical::{EvalFrame, EvalMode, Schema};
+#[cfg(test)]
 use crate::expr::{ControlFlow, Kind};
-use crate::val::{Object, Value};
+#[cfg(test)]
+use crate::val::Object;
+use crate::val::Value;
 
+#[cfg(test)]
 /// One column of a layer: the field name it lands under, the expression
 /// whose value lands there, the kind the value is coerced to, and the frame
 /// the column evaluates in.
@@ -96,7 +109,9 @@ pub(crate) struct LayerColumn {
 	pub(crate) frame: EvalFrame,
 }
 
+#[cfg(test)]
 impl LayerColumn {
+	#[cfg(test)]
 	/// A column whose `value` lands as the module documentation states for
 	/// its frame.
 	pub(crate) fn new(
@@ -114,6 +129,7 @@ impl LayerColumn {
 		}
 	}
 
+	#[cfg(test)]
 	/// A field's `SELECT` permission `WHERE guard`, admitting `value`: the
 	/// column `IF guard THEN value ELSE NONE END` in the permission `frame`,
 	/// with the guard's verdict kept apart from the value it admits, which is
@@ -135,6 +151,7 @@ impl LayerColumn {
 	}
 }
 
+#[cfg(test)]
 /// Sets each of `columns` on every row of `input`; see the module docs.
 #[derive(Debug, Clone)]
 pub struct ProjectLayer {
@@ -149,7 +166,9 @@ pub struct ProjectLayer {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl ProjectLayer {
+	#[cfg(test)]
 	pub(crate) fn new(input: Arc<dyn ExecOperator>, columns: Vec<LayerColumn>) -> Self {
 		Self {
 			input,
@@ -160,6 +179,7 @@ impl ProjectLayer {
 		}
 	}
 
+	#[cfg(test)]
 	/// Records what the input's schema declares `COMPUTED`.
 	///
 	/// A computed field has no stored value, so a stored key under its name is
@@ -179,6 +199,7 @@ impl ProjectLayer {
 		self
 	}
 
+	#[cfg(test)]
 	/// Records whether the plan is compiled for a caller whose reads are
 	/// permission-checked.
 	///
@@ -195,6 +216,7 @@ impl ProjectLayer {
 		self
 	}
 
+	#[cfg(test)]
 	/// The text of one column in the `EXPLAIN` output:
 	/// `name = <expression> [: kind] @frame`, a guarded column's expression
 	/// being the `IF guard THEN value ELSE NONE END` it was compiled from.
@@ -238,6 +260,7 @@ impl ProjectLayer {
 		rendered
 	}
 
+	#[cfg(test)]
 	/// Every expression the columns hold, guards included, each under its
 	/// column's name.
 	fn column_exprs(&self) -> impl Iterator<Item = (&str, &Arc<dyn PhysicalExpr>)> {
@@ -251,6 +274,7 @@ impl ProjectLayer {
 	}
 }
 
+#[cfg(test)]
 /// A column with its evaluation context resolved once for the whole stream:
 /// the frame differs per column, not per row.
 struct PreparedColumn {
@@ -270,6 +294,7 @@ struct PreparedColumn {
 	value_ctx: ExecutionContext,
 }
 
+#[cfg(test)]
 /// The columns of one layer, prepared for its stream.
 struct Prepared {
 	/// Stored-field columns first, then the columns on computed fields, each
@@ -280,6 +305,7 @@ struct Prepared {
 	stored_guards: bool,
 }
 
+#[cfg(test)]
 /// What one column does to the row once evaluated; see the module docs.
 #[derive(Clone)]
 enum Landing {
@@ -290,13 +316,16 @@ enum Landing {
 	Set(Value),
 }
 
+#[cfg(test)]
 impl PreparedColumn {
+	#[cfg(test)]
 	/// Whether the column is a field's `SELECT` permission: its `NONE` cuts
 	/// the field, and its value is part of the view a self-dereference reads.
 	fn is_guard(&self) -> bool {
 		matches!(self.mode, EvalMode::Permission | EvalMode::MutablePermission)
 	}
 
+	#[cfg(test)]
 	/// Whether the column is a stored field's `SELECT` permission, which the
 	/// reduced record the computed columns read applies.
 	fn is_stored_guard(&self) -> bool {
@@ -304,11 +333,13 @@ impl PreparedColumn {
 	}
 }
 
+#[cfg(test)]
 /// The context a column's expression evaluates in.
 ///
 /// - [`EvalMode::Permission`] and [`EvalMode::MutablePermission`]: reads are not
-///   permission-checked, which is also the signal the legacy bridge reads to reject a write in the
-///   frame.
+///   permission-checked. [`EvalMode::Permission`] additionally refuses a write, which
+///   [`EvalMode::MutablePermission`] does not: a write predicate is reached from a mutation and may
+///   carry side effects.
 /// - [`EvalMode::Computed`]: reads stay permission-checked as the definer; the frame rejects writes
 ///   (`computing_field`).
 /// - [`EvalMode::Caller`]: the caller's own context.
@@ -317,9 +348,14 @@ impl PreparedColumn {
 fn frame_context(ctx: &ExecutionContext, frame: &EvalFrame) -> ExecutionContext {
 	let mut frame_ctx = match frame.mode {
 		EvalMode::Caller => ctx.clone(),
-		EvalMode::Permission | EvalMode::MutablePermission => {
-			ctx.clone().with_skip_fetch_perms(true)
-		}
+		// A read predicate must be free of observable side effects; a write
+		// one is reached from a mutation and may carry them, which is the one
+		// thing the two modes differ in here.
+		EvalMode::Permission => ctx
+			.clone()
+			.with_skip_fetch_perms(true)
+			.refusing_writes(crate::dbs::NoWriteFrame::PermissionPredicate),
+		EvalMode::MutablePermission => ctx.clone().with_skip_fetch_perms(true),
 		EvalMode::Computed => ctx.clone().computing_field(),
 	};
 	if let Some(limit) = &frame.auth {
@@ -328,6 +364,7 @@ fn frame_context(ctx: &ExecutionContext, frame: &EvalFrame) -> ExecutionContext 
 	frame_ctx
 }
 
+#[cfg(test)]
 impl ExecOperator for ProjectLayer {
 	fn name(&self) -> &'static str {
 		"ProjectLayer"
@@ -392,11 +429,34 @@ impl ExecOperator for ProjectLayer {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 
+		let layer = self.prepare(ctx);
+		let layered = input_stream.then(move |batch_result| {
+			let layer = layer.clone();
+			async move {
+				let mut batch = batch_result?;
+				for row in batch.values_mut() {
+					layer.apply(row).await?;
+				}
+				Ok(batch)
+			}
+		});
+
+		Ok(monitor_stream(Box::pin(layered), "ProjectLayer", &self.metrics))
+	}
+}
+
+#[cfg(test)]
+impl ProjectLayer {
+	#[cfg(test)]
+	/// The layer's columns made ready to apply under `ctx`: each with the
+	/// frames it is evaluated in, the columns on stored fields first. Every
+	/// engine that applies a projection layer applies it through this.
+	pub(crate) fn prepare(&self, ctx: &ExecutionContext) -> PreparedLayer {
 		let prepared: Vec<PreparedColumn> = self
 			.columns
 			.iter()
@@ -433,22 +493,31 @@ impl ExecOperator for ProjectLayer {
 		});
 		let computed_fields = Arc::clone(&self.computed_fields);
 
-		let layered = input_stream.then(move |batch_result| {
-			let prepared = Arc::clone(&prepared);
-			let computed_fields = Arc::clone(&computed_fields);
-			async move {
-				let mut batch = batch_result?;
-				for row in batch.values_mut() {
-					layer_row(row, &prepared, &computed_fields).await?;
-				}
-				Ok(batch)
-			}
-		});
-
-		Ok(monitor_stream(Box::pin(layered), "ProjectLayer", &self.metrics))
+		PreparedLayer {
+			prepared,
+			computed_fields,
+		}
 	}
 }
 
+#[cfg(test)]
+/// A [`ProjectLayer`] ready to apply to rows; see [`ProjectLayer::prepare`].
+#[derive(Clone)]
+pub(crate) struct PreparedLayer {
+	prepared: Arc<Prepared>,
+	computed_fields: Arc<[Strand]>,
+}
+
+#[cfg(test)]
+impl PreparedLayer {
+	#[cfg(test)]
+	/// Set the layer's columns on `row`, as the module documentation states.
+	pub(crate) async fn apply(&self, row: &mut Value) -> FlowResult<()> {
+		layer_row(row, &self.prepared, &self.computed_fields).await
+	}
+}
+
+#[cfg(test)]
 /// Evaluate every column against `row`, in the order and against the record
 /// the module documentation states, then land each result on the row under
 /// its name.
@@ -529,6 +598,7 @@ async fn layer_row(
 	Ok(())
 }
 
+#[cfg(test)]
 /// Evaluate one expression of a column. A block body ends in `RETURN`, whose
 /// value is the body's; no other control flow has anywhere to go.
 async fn evaluate(expr: &Arc<dyn PhysicalExpr>, ctx: EvalContext<'_>) -> FlowResult<Value> {
@@ -542,8 +612,9 @@ async fn evaluate(expr: &Arc<dyn PhysicalExpr>, ctx: EvalContext<'_>) -> FlowRes
 	}
 }
 
+#[cfg(test)]
 /// `value` coerced to the column's kind, when it carries one. A value that
-/// does not coerce fails the read with the legacy engine's field error,
+/// does not coerce fails the read with the field-coercion error,
 /// naming the record `row` is.
 fn coerce(column: &PreparedColumn, value: Value, row: &Value) -> FlowResult<Value> {
 	match &column.kind {
@@ -558,6 +629,7 @@ fn coerce(column: &PreparedColumn, value: Value, row: &Value) -> FlowResult<Valu
 	}
 }
 
+#[cfg(test)]
 /// Land one column on the row; see the module docs.
 fn set_column(row: &mut Object, column: &PreparedColumn, landing: Landing) {
 	match landing {
@@ -574,7 +646,7 @@ fn set_column(row: &mut Object, column: &PreparedColumn, landing: Landing) {
 
 /// The record a coercion error names: the row's id, or the row itself when
 /// it has none.
-fn record_of(row: &Value) -> String {
+pub(crate) fn record_of(row: &Value) -> String {
 	match row {
 		Value::Object(obj) => match obj.get("id") {
 			Some(Value::RecordId(rid)) => rid.to_sql(),
@@ -584,6 +656,7 @@ fn record_of(row: &Value) -> String {
 	}
 }
 
+#[cfg(test)]
 /// The record as the layer's stored columns leave it; see the module
 /// documentation.
 struct Reduced {
@@ -595,7 +668,9 @@ struct Reduced {
 	computing: Option<Arc<ComputingRecord>>,
 }
 
+#[cfg(test)]
 impl Reduced {
+	#[cfg(test)]
 	/// The reduced record of `row`, `landings` being those of the stored
 	/// columns, which precede every computed one.
 	fn new(
@@ -632,6 +707,7 @@ impl Reduced {
 		}
 	}
 
+	#[cfg(test)]
 	/// Records the value a column on a computed field derived, for the
 	/// columns after it to read.
 	fn land(&mut self, name: &str, value: &Value) {
@@ -641,6 +717,7 @@ impl Reduced {
 	}
 }
 
+#[cfg(test)]
 /// Every field name that is computed: this layer's columns on computed fields
 /// and what the input schema declares `COMPUTED`.
 fn computed_names<'a>(
@@ -654,6 +731,7 @@ fn computed_names<'a>(
 		.chain(computed_fields.iter().map(Strand::as_str))
 }
 
+#[cfg(test)]
 /// The record a computed column is computed for when nothing reduces the
 /// row — the layer has no stored guard — with the view a self-dereference
 /// reads: storage, unless the row carries a key under a computed name, which

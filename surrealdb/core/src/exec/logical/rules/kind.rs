@@ -97,6 +97,7 @@ fn simplified(expr: &LogicalExpr, schema: &Schema) -> Option<LogicalExpr> {
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Param(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Field(_)
 		| LogicalExpr::Doc
@@ -312,10 +313,12 @@ mod tests {
 	fn a_broadcast_over_an_object_column_is_resolved_and_over_an_array_kept() {
 		// `obj.b.len()`: a mapping step followed by a method broadcasts over
 		// `obj`; checked to be an object, `obj` is one value and the body
-		// applies to it directly.
+		// applies to it directly. The resolved form renders parenthesised,
+		// because `obj.b.len()` is the spelling of the broadcast this rule
+		// just removed.
 		let predicate = predicate_over("SELECT * FROM t WHERE obj.b.len() = 1", &checked());
 		assert!(!predicate.any(|e| matches!(e, LogicalExpr::Broadcast { .. })), "{predicate}");
-		assert_eq!(predicate.to_string(), "obj.b.len() = 1");
+		assert_eq!(predicate.to_string(), "(obj.b).len() = 1");
 		let predicate = predicate_over("SELECT * FROM t WHERE objs.b.len() = 1", &checked());
 		assert!(predicate.any(|e| matches!(e, LogicalExpr::Broadcast { .. })), "{predicate}");
 		let predicate = predicate_over("SELECT * FROM t WHERE obj.b.len() = 1", &Schema::open());

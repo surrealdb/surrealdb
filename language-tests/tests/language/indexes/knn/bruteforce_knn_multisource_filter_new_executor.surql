@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Verify brute-force KNN with AND predicate on multiple FROM sources applies filter before top-K"
@@ -14,13 +13,12 @@ value = "[{ active: true, distance: 2f, id: pts:3, point: [3, 0] }, { active: tr
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *, distance] {rows: 2}
-    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2}
-        Compute [ctx: Db] [fields: distance = vector::distance::euclidean(point, [1, 0])] {rows: 2}
-            KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 2] {rows: 2}
-                Filter [ctx: Db] [predicate: active = true] {rows: 3}
-                    Union [ctx: Db] [inputs: 2] {rows: 5}
-                        TableScan [ctx: Db] [table: pts, direction: Forward] {rows: 3}
-                        TableScan [ctx: Db] [table: pts2, direction: Forward] {rows: 2}
+    Sort [ctx: Db] [sort_keys: vector::distance::euclidean(point, [1, 0]) ASC] {rows: 2}
+        KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 2] {rows: 2}
+            Filter [ctx: Db] [predicate: active = true] {rows: 2}
+                Union [ctx: Db] {rows: 2}
+                    TableScan [ctx: Db] [table: pts, direction: Forward] {rows: 2}
+                    TableScan [ctx: Db] [table: pts2, direction: Forward] {rows: 2}
 
 Total rows: 2''''
 */

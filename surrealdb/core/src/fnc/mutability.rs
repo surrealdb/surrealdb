@@ -25,7 +25,7 @@ use std::collections::HashSet;
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{DatabaseId, Error as CatalogError, NamespaceId};
-use crate::expr::function_facts::FunctionFacts;
+use crate::expr::function_facts::{ClosurePositions, FunctionFacts};
 use crate::kvs::Transaction;
 
 /// Where a provable write was found.
@@ -48,6 +48,12 @@ pub(crate) struct ResolvedMutability {
 	pub(crate) opaque_effects: bool,
 	/// A reachable call names a function this snapshot does not define.
 	pub(crate) undefined_callee: bool,
+	/// Some body reached — the starting expression's or a callee's — calls a
+	/// builtin or method the caller's `keeps_row_order` predicate answers
+	/// for, so calls made for several rows at once may answer what calls
+	/// made one row after another would not. Complete only when
+	/// [`Self::write`] is `None`: a write already keeps every row in order.
+	pub(crate) keeps_row_order: bool,
 }
 
 impl ResolvedMutability {
@@ -64,17 +70,28 @@ impl ResolvedMutability {
 /// call will run against: a definition that writes is a definition that
 /// writes at the moment it is invoked, and a function redefined since then
 /// says nothing about it. `None` reads current state.
+///
+/// `keeps_row_order` answers, from the builtins and methods one body names,
+/// whether that body must keep row order ([`ResolvedMutability::keeps_row_order`]);
+/// the declarations it reads live on the function registry, which this
+/// module does not hold. `closures`, where given, says where builtins and
+/// methods run a closure they are handed, so that a callee handing one a
+/// closure that is not a literal of the call is noted for `keeps_row_order`
+/// ([`FunctionFacts::unseen_closures`]).
 pub(crate) async fn resolve_mutability(
 	txn: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
 	version: Option<u64>,
 	root: &FunctionFacts,
+	keeps_row_order: &(dyn Fn(&FunctionFacts) -> bool + Sync),
+	closures: Option<&(dyn ClosurePositions + Sync)>,
 ) -> anyhow::Result<ResolvedMutability> {
 	let mut resolved = ResolvedMutability {
 		write: root.direct_writes.then_some(WriteSource::Body),
 		opaque_effects: root.opaque_effects,
 		undefined_callee: false,
+		keeps_row_order: keeps_row_order(root),
 	};
 
 	let mut visited: HashSet<String> = root.calls.iter().cloned().collect();
@@ -88,7 +105,10 @@ pub(crate) async fn resolve_mutability(
 			break;
 		};
 		let facts = match txn.get_db_function(ns, db, &name, version).await {
-			Ok(def) => def.block.function_facts(),
+			Ok(def) => match closures {
+				Some(closures) => def.block.function_facts_with(Some(closures)),
+				None => def.block.function_facts(),
+			},
 			Err(e) => {
 				if matches!(e.downcast_ref::<CatalogError>(), Some(CatalogError::FcNotFound { .. }))
 				{
@@ -105,6 +125,7 @@ pub(crate) async fn resolve_mutability(
 			break;
 		}
 		resolved.opaque_effects |= facts.opaque_effects;
+		resolved.keeps_row_order |= keeps_row_order(&facts);
 		for call in facts.calls {
 			if visited.insert(call.clone()) {
 				pending.push(call);
@@ -143,8 +164,17 @@ mod tests {
 		let facts = expr.function_facts();
 		let txn = ds.transaction(TransactionType::Read).await.unwrap();
 		let db = txn.get_db_by_name("test", "test", None).await.unwrap().unwrap();
-		let resolved =
-			resolve_mutability(&txn, db.namespace_id, db.database_id, None, &facts).await.unwrap();
+		let resolved = resolve_mutability(
+			&txn,
+			db.namespace_id,
+			db.database_id,
+			None,
+			&facts,
+			&|_| false,
+			None,
+		)
+		.await
+		.unwrap();
 		txn.cancel().await.unwrap();
 		resolved
 	}
@@ -159,8 +189,10 @@ mod tests {
 			expr.function_facts()
 		};
 
-		// A builtin that cannot evaluate statements contributes nothing.
-		assert_eq!(facts("math::abs(-1)"), FunctionFacts::default());
+		// A builtin that cannot evaluate statements contributes only its name.
+		let f = facts("math::abs(-1)");
+		assert!(!f.direct_writes && !f.opaque_effects && f.calls.is_empty());
+		assert_eq!(f.builtins.iter().collect::<Vec<_>>(), ["math::abs"]);
 
 		// Custom calls are edges, at any depth including argument position.
 		let f = facts("fn::a(fn::b(1))");

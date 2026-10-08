@@ -1,44 +1,15 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+pub(crate) use surrealdb_datastore::index_state::filter_online_indexes;
 // Answering from durable build state needs only the keyspace that binds it, so
 // those readers live with it; the protocol that writes the state stays here.
 pub(super) use surrealdb_datastore::index_state::{
 	CatalogIndexState, catalog_index_state, durable_index_error_reason, report_status_from_phase,
 };
-pub(crate) use surrealdb_datastore::index_state::{filter_online_indexes, index_building_info};
 
 use super::{BUILD_OWNER_LEASE_SECS, IndexBuildPhase, IndexBuildState};
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::IndexKeyBase;
 use crate::kvs::{Error as KvsError, Transaction, storage_error};
-use crate::val::TableName;
-
-/// Delete durable build state for an index that is removed or overwritten.
-///
-/// The delete is staged in the caller's schema transaction so durable state and
-/// queues disappear atomically with the catalog change that retires the index
-/// definition. Once the catalog no longer references this `(name, IndexId)`,
-/// missing `!bs` means retired state; while it still does, missing `!bs` is the
-/// legacy/pre-durable ready state.
-///
-/// Deleting `!bs` here is also the fence that stops the build. Every builder
-/// transaction that writes index data brings `!bs` into its own conflict
-/// domain first — a build batch by compare-and-swap, post-`Online` compaction
-/// by locked read — so once this commits such a transaction can neither find
-/// the state it needs nor commit against a deleted one. Aborting the
-/// process-local task afterwards only saves it a failed batch.
-pub(crate) async fn retire_durable_index(
-	tx: &Transaction,
-	ns: NamespaceId,
-	db: DatabaseId,
-	tb: &TableName,
-	ix: IndexId,
-	expunge: bool,
-) -> Result<()> {
-	let ikb = IndexKeyBase::new(ns, db, tb.clone(), ix);
-	delete_durable_build_artifacts(tx, &ikb, expunge).await?;
-	Ok(())
-}
 
 /// Delete build state and every generation-scoped queue for one index.
 ///

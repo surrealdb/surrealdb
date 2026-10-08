@@ -4,19 +4,27 @@
 //! duration. If the timeout expires before the input completes, a
 //! `QueryTimedout` error is returned.
 
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use futures::StreamExt;
 
+#[cfg(test)]
 use crate::err::EngineError;
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, PhysicalExpr, ValueBatchStream, buffer_stream, monitor_stream,
 };
+#[cfg(test)]
 use crate::expr::ControlFlow;
+#[cfg(test)]
 use crate::val::Duration;
 
+#[cfg(test)]
 /// Applies a timeout to the execution of its input operator.
 ///
 /// If the timeout expires before the input stream completes, an error is returned.
@@ -29,7 +37,9 @@ pub struct Timeout {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl Timeout {
+	#[cfg(test)]
 	pub(crate) fn new(
 		input: Arc<dyn ExecOperator>,
 		timeout: Option<Arc<dyn PhysicalExpr>>,
@@ -41,6 +51,7 @@ impl Timeout {
 		}
 	}
 }
+#[cfg(test)]
 impl ExecOperator for Timeout {
 	fn name(&self) -> &'static str {
 		"Timeout"
@@ -102,7 +113,7 @@ impl ExecOperator for Timeout {
 		let Some(timeout_expr) = &self.timeout else {
 			let input_stream = buffer_stream(
 				self.input.execute(ctx)?,
-				self.input.access_mode(),
+				self.access_mode().combine(self.input.access_mode()),
 				self.input.cardinality_hint(),
 				ctx.root().ctx.config.exec.operator_buffer_size,
 			);
@@ -112,6 +123,9 @@ impl ExecOperator for Timeout {
 		// Evaluate the timeout expression to get the duration
 		let timeout_expr = Arc::clone(timeout_expr);
 		let input = Arc::clone(&self.input);
+		// Read here, where the operator is still in hand: the input is
+		// buffered from inside the stream below.
+		let own_mode = self.access_mode();
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -132,12 +146,14 @@ impl ExecOperator for Timeout {
 			// started only once the clause has been read: a statement whose
 			// clause names no duration fails before anything beneath this
 			// operator runs.
-			let mut input_stream = buffer_stream(
+			// A boundary: what the input nests runs within this stream's
+			// poll, under the timer, rather than on a driver above it.
+			let mut input_stream = crate::exec::trampoline::boundary(buffer_stream(
 				input.execute(&ctx)?,
-				input.access_mode(),
+				own_mode.combine(input.access_mode()),
 				input.cardinality_hint(),
 				ctx.root().ctx.config.exec.operator_buffer_size,
-			);
+			));
 
 			let Some(duration) = duration else {
 				while let Some(batch) = input_stream.next().await {
@@ -149,8 +165,17 @@ impl ExecOperator for Timeout {
 			// Convert our Duration to std::time::Duration for tokio
 			let std_duration: std::time::Duration = duration.0;
 
-			// Create a timeout future
-			let timeout_instant = common::time::Instant::now() + std_duration;
+			// A duration the clock cannot reach names no deadline, and adding
+			// it to the current instant is an overflow rather than a very
+			// distant moment. Reported as the invalid clause it is, naming the
+			// same error the per-row engine names for it.
+			let Some(timeout_instant) = common::time::Instant::now().checked_add(std_duration)
+			else {
+				Err(ControlFlow::Err(anyhow::Error::new(
+					crate::kvs::DatastoreError::InvalidTimeout(std_duration.as_secs()),
+				)))?;
+				unreachable!("the deadline is unreachable, so the clause has already failed")
+			};
 
 			loop {
 				// Check if we've exceeded the timeout

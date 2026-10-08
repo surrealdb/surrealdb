@@ -20,7 +20,6 @@ use surrealdb_datastore::Transaction;
 use surrealdb_kvs::Direction;
 use surrealdb_kvs::consts::NORMAL_BATCH_SIZE;
 
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Relation, TableType};
 use crate::expr::Dir;
 use crate::idx::adjacency::{AdjacencyResolveCache, MergedAdjacencyCursor};
@@ -100,7 +99,7 @@ impl<'a> LightweightEdgeScanner<'a> {
 				};
 				let folded = self
 					.txn
-					.get_tb(self.ns, self.db, table, self.version)
+					.layout_tb(self.ns, self.db, table, self.version)
 					.await?
 					.is_some_and(|tb| tb.graph_folded);
 				self.cursor = Some(

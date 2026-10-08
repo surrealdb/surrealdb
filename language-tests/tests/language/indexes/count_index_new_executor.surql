@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -20,7 +19,9 @@ value = "{ building: { compacting: false, initial: 0, pending: 0, status: 'ready
 value = "'OK'"
 
 [[test.results]]
-value = ''''CountScan [ctx: Db] [source: t] {rows: 1}
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 1}
+    CountScan [ctx: Db] [source: t] {rows: 1}
 
 Total rows: 1''''
 

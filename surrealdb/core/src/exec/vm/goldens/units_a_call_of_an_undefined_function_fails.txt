@@ -1,0 +1,2 @@
+### fn::missing(1)
+error: Function 'fn::missing' not found: The function 'fn::missing' does not exist

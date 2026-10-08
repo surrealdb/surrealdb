@@ -12,8 +12,7 @@ reason = """
 	after the `LET` appears in the rows the closure returns, a field removed
 	after the `LET` is gone from them, an index removed after the `LET` is not
 	read, a function redefined after the `LET` is called in its new form, and
-	a field guard defined after the `LET` stands over the closure's read. Both
-	engines agree on every strategy.
+	a field guard defined after the `LET` stands over the closure's read.
 """
 
 [[test.results]]

@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Pre-decode filter for INSIDE / NOTINSIDE on literal arrays (hashset path), mixed numbers, missing field, range RHS, nested object element, and large IN list. EXPLAIN asserts pre_decode_filter: yes."
+reason = "Pre-decode filter for INSIDE / NOTINSIDE on literal arrays (hashset path), mixed numbers, missing field, range RHS, nested object element, and large IN list. EXPLAIN shows the predicate as a filter over the table scan."
 
 [[test.results]]
 value = "{ id: pin:1, s: 'hello', v: 10 }"
@@ -67,7 +66,7 @@ value = '''
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: pin, direction: Forward, predicate: v INSIDE 3 .. 7, pre_decode_filter: no (unsupported predicate)]
+    TableScan [ctx: Db] [table: pin, direction: Forward, predicate: v INSIDE 3..7, pre_decode_filter: yes]
 ''''
 */
 

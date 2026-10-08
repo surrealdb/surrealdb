@@ -1,4 +1,4 @@
-//! Sleep function for the streaming executor.
+//! Sleep function for the engine.
 //!
 //! This provides an async sleep function that respects the context cancellation.
 

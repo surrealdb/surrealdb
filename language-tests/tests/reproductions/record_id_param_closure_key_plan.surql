@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -19,19 +18,17 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-'Return [ctx: Db]
-    Expr [ctx: Db] [expr: (
+'Return [ctx: Rt]
+    ExprPlan [ctx: Rt] [expr: (
   Project[*]
     Source[$r]
 ).len()]
-      expr.subquery: SelectProject [ctx: Db] [projections: *]
-          DynamicScan [ctx: Db] [source: $r]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    DynamicScan [ctx: Db] [source: $r]
+    Values [ctx: Rt] [expr: $r]
 ''''
 */
 

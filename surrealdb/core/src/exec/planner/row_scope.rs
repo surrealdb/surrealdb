@@ -129,13 +129,25 @@ pub(crate) fn first_row_scoped_reference(
 	walker.first_kind
 }
 
+/// Whether `op`, a plan in scalar position, reads the row it is evaluated
+/// over: a statement operator that does not rescope the row parameters, or a
+/// plan that names a row parameter anywhere inside it.
+pub(crate) fn reads_enclosing_row(op: &LogicalOp) -> bool {
+	if !rescopes_row_params(op) {
+		return true;
+	}
+	let mut walker = ParamWalker::new(|_| true, AnalysisScope::Recursive);
+	let _ = walker.walk_op(op);
+	walker.found
+}
+
 /// Whether a plan in scalar position rescopes the row parameters.
 ///
 /// A SELECT — any relational operator — binds `$this` to its own rows and
 /// `$parent` to the enclosing row, so a reference inside it is about the
 /// subquery's rows. The statement operators (a bare expression, a block,
-/// `LET`, `RETURN`, `FOR`, `INFO`, `SLEEP`) run in the enclosing scope and
-/// do not.
+/// `LET`, `RETURN`, `FOR`, `INFO`, a schema statement, `SLEEP`) run in the
+/// enclosing scope and do not.
 fn rescopes_row_params(op: &LogicalOp) -> bool {
 	!matches!(
 		op,
@@ -145,6 +157,7 @@ fn rescopes_row_params(op: &LogicalOp) -> bool {
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_)
 	)
 }

@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -35,10 +34,10 @@ value = "[{ id: r:1, k: 1 }]"
 value = "[{ id: outr:1, k: 1 }]"
 
 [[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'k INSIDE (ProjectValue)', table: 'outr' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'expr', sql: 'id' }], operator: 'ProjectValue' }"
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k INSIDE (subquery)' }, children: [{ attributes: { direction: 'Forward', table: 'outr' }, context: 'Db', operator: 'TableScan' }, { attributes: { strategy: 'apply' }, children: [{ attributes: { expr: 'k' }, children: [{ attributes: { predicate: '(cfg:one).coin' }, children: [{ attributes: { direction: 'Forward', table: 'r' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }], context: 'Db', operator: 'Subquery' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
 
 [[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { alias: '_join0', on: 'k = _join0.k', type: 'Semi' }, children: [{ attributes: { direction: 'Forward', table: 'outr' }, context: 'Db', operator: 'TableScan' }, { attributes: { direction: 'Forward', pre_decode_filter: 'yes', predicate: 'k > 0', table: 'r' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'probe_key', sql: 'k' }, { role: 'build_key', sql: '_join0.k' }], operator: 'HashJoin' }], context: 'Db', expressions: [{ role: 'expr', sql: 'id' }], operator: 'ProjectValue' }"
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k INSIDE (subquery)' }, children: [{ attributes: { direction: 'Forward', table: 'outr' }, context: 'Db', operator: 'TableScan' }, { attributes: { strategy: 'once' }, children: [{ attributes: { expr: 'k' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'yes', predicate: 'k > 0', table: 'r' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'ProjectValue' }], context: 'Db', operator: 'Subquery' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
 
 
 */

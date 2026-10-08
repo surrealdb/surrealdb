@@ -69,9 +69,8 @@ use crate::expr::logical::{LogicalExpr, LogicalField, LogicalFields, OutputPath,
 /// Currently only `Sort` and `Project` are used by the planner. `Filter` and
 /// `Aggregate` are reserved for future optimisations (e.g. pre-computing
 /// complex WHERE sub-expressions, or consolidating GROUP BY key evaluation).
-/// The `Aggregate` variant is intentionally unused today because GROUP BY
-/// queries route through the legacy aggregate path which handles expression
-/// evaluation internally (see module-level docs).
+/// The `Aggregate` variant is intentionally unused today because the
+/// aggregate operator evaluates its own expressions (see module-level docs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(dead_code)] // Filter and Aggregate are reserved extension points
 pub enum ComputePoint {
@@ -79,7 +78,7 @@ pub enum ComputePoint {
 	/// Reserved for future pre-filter expression computation.
 	Filter = 0,
 	/// Compute before Aggregate (GROUP BY keys, aggregate inputs).
-	/// Reserved — GROUP BY currently uses the legacy `Aggregate` operator.
+	/// Reserved — GROUP BY currently evaluates its expressions in the `Aggregate` operator.
 	Aggregate = 1,
 	/// Compute before Sort (ORDER BY keys, SELECT expressions).
 	Sort = 2,

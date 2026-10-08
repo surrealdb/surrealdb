@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use reblessive::TreeStack;
 use surrealism_runtime::capabilities::{FunctionTargets, SurrealismCapabilities};
 use surrealism_runtime::config::SurrealismConfig;
 use surrealism_runtime::host::InvocationContext;
@@ -15,7 +14,6 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use crate::doc::CursorDoc;
-use crate::exe::FlowResultExt;
 use crate::expr::function::Function;
 use crate::expr::{Expr, FunctionCall, Model};
 #[cfg(feature = "http")]
@@ -40,7 +38,7 @@ pub(crate) struct Host {
 	/// savepoints form a stack with no handle, so a second writer entering
 	/// before the first has left would unwind the wrong one and silently
 	/// discard the other's writes and index deltas. `crate::exec::fan_out`
-	/// states the same invariant for the streaming path.
+	/// states the same invariant for the engine's own writes.
 	///
 	/// So a writing call takes this exclusively and a reading one shares it.
 	/// Which of the two a call is comes off the parsed expression, not off the
@@ -299,14 +297,14 @@ impl InvocationContext for Host {
 		self.check_caller_still_waiting()?;
 		// Everything past parsing is the datastore's verdict, including a write
 		// refused because this function was lent a read-only transaction.
-		let res = TreeStack::new()
-			.enter(|stk| {
-				crate::legacy::expr_compute(&expr, stk, &ctx, &self.opt, self.doc.as_ref())
-			})
-			.finish()
-			.await
-			.catch_return()
-			.map_err(|e| HostCallError::Datastore(e.to_string()))?;
+		// Under a driver of its own: the guest may await several calls at once,
+		// and calls nested under one shared driver would run one at a time.
+		let res = crate::exec::trampoline::concurrent(async {
+			let exec = crate::exec::entry::frame(&ctx, &self.opt, self.doc.as_ref()).await;
+			crate::exec::entry::scalar(&exec, &expr).await
+		})
+		.await
+		.map_err(|e| HostCallError::Datastore(e.to_string()))?;
 
 		convert_value_to_public_value(res).map_err(|e| HostCallError::Other(e.to_string()))
 	}
@@ -386,14 +384,14 @@ impl InvocationContext for Host {
 		// overlaps.
 		let _order = self.order(expr.read_only()).await;
 		self.check_caller_still_waiting()?;
-		let res = TreeStack::new()
-			.enter(|stk| {
-				crate::legacy::expr_compute(&expr, stk, &ctx, &self.opt, self.doc.as_ref())
-			})
-			.finish()
-			.await
-			.catch_return()
-			.map_err(|e| HostCallError::Datastore(e.to_string()))?;
+		// Under a driver of its own: the guest may await several calls at once,
+		// and calls nested under one shared driver would run one at a time.
+		let res = crate::exec::trampoline::concurrent(async {
+			let exec = crate::exec::entry::frame(&ctx, &self.opt, self.doc.as_ref()).await;
+			crate::exec::entry::scalar(&exec, &expr).await
+		})
+		.await
+		.map_err(|e| HostCallError::Datastore(e.to_string()))?;
 
 		convert_value_to_public_value(res).map_err(|e| HostCallError::Other(e.to_string()))
 	}

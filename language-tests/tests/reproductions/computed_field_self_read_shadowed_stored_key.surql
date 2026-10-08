@@ -2,11 +2,8 @@
 [env]
 imports = ["reproductions/computed_field_self_read_shadowed_stored_key_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "account:alice" }
-# The legacy path answers the self-read with the computed value rather than the
-# stored one, so it never reaches the shadowed key and returns `COMPUTED_VAL`
-# here. The streaming paths are the ones that resolve the read against storage,
-# so they are the ones this asserts.
-planner-strategy = ["all-ro", "best-effort-ro"]
+# The self-read resolves against storage rather than the computed value, so it
+# reaches the shadowed key.
 
 [test]
 reason = "A key stored under a name the table later defines as COMPUTED stays in the record's bytes, and a self-dereference reads storage directly. The stored permission pass classifies that name as computed and so reports nothing cut, which left the sanitised view unbuilt and the self-read serving the shadowed value. The view is built whenever a computed name shadows a stored key, not only when a stored field was cut."

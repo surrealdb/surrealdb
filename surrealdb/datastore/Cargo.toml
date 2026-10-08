@@ -42,7 +42,6 @@ surrealdb-catalog.workspace = true
 surrealdb-collections.workspace = true
 surrealdb-expr.workspace = true
 surrealdb-iam.workspace = true
-surrealdb-rpc.workspace = true
 semver = { workspace = true, features = ["serde"] }
 surrealdb-strand.workspace = true
 surrealdb-kvs.workspace = true

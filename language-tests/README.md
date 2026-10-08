@@ -981,34 +981,3 @@ passed to each spawned binary; every other key is rejected, and writing the
 table without that key is a load error. It must sit on the graded test case —
 on an import or a chain script it is inert.
 
-#### `[env.planner-strategy]`
-
-Controls which planner strategies the test is executed under. The test runs
-once per listed strategy, each with its own clean datastore.
-
-Valid strategy values:
-- `"best-effort-ro"`: Try the new planner for read-only statements. If
-  the planner returns `Unimplemented`, silently fall back to the legacy compute
-  executor.
-- `"all-ro"`: Require the new planner for all read-only statements. If the new
-  planner cannot handle a non-DDL/DML statement, the test fails with an error
-  instead of silently falling back. DDL/DML statements (CREATE, UPDATE, DELETE,
-  DEFINE, etc.) always fall back regardless of this setting.
-- `"compute-only"`: Skip the new planner entirely and always use the legacy
-  compute executor for all statements.
-
-Defaults to `["compute-only", "all-ro"]` when omitted, meaning the test runs
-twice: once under the legacy compute executor and once requiring the new planner.
-
-**Examples:**
-```toml
-# Run only under the new executor (narrow from the default two-strategy run)
-[env]
-planner-strategy = ["all-ro"]
-```
-
-```toml
-# Run only under legacy compute (e.g. features not yet supported by the new planner)
-[env]
-planner-strategy = ["compute-only"]
-```

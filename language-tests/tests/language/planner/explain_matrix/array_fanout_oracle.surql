@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -45,36 +44,26 @@ reason = """
 	an empty and for an absent array, one key for a repeated element, and the
 	full cartesian product of two fanning columns — not for prefix construction.
 
-	Three behaviours recorded here are wrong, and are recorded as they are so a
-	fix is recognisable rather than being bent out of the suite. All three are
-	the same gap: the write path expands any array VALUE, while the planner's
-	fan-out guards key off a column spelling `.*`. A plain column whose field
-	declares a kind admitting an array is planned as its `.*` spelling and is
-	guarded (reproductions/7539_*); a plain column with no declared kind, as
-	every table here is, is planned as written, so when its value happens to be
-	an array it fans out unguarded. Each of the three has a `.*` counterpart
-	elsewhere in the file which behaves correctly over the same shape, so the
-	gap is legible as the difference between the two.
+	The write path expands any array VALUE, in a column spelled `.*` or not. A
+	plain column whose field declares a kind admitting only arrays is planned
+	as its `.*` spelling (reproductions/7539_*). A plain column with no declared
+	kind, as every table here has, or one declared a kind admitting an array,
+	is planned as written, and a scan that leaves it unpinned is collapsed to
+	one row per record all the same: a compound index whose trailing column is
+	plain and holds an array, seeked on its leading column alone, lists each
+	record once, and counts records. Only a column declared a kind that holds
+	no array is scanned with no collapse.
 
-	1. Whole-array equality against a plain index over that array column
-	   (`tags = ['x', 'y']`) seeks the single key `['x', 'y']`, which the
-	   per-element write never made, and returns []. The oracle returns the
-	   record; [] is wrong. Its count pair is 0 against an oracle of 1. The key
-	   is missing the same way when the array column is the trailing column of
-	   an exact compound prefix, which is asserted too: the range is exact and
-	   still addresses nothing, and that count is 0 against an oracle of 1 as
-	   well.
-	2. `count()` over element equality on that same column (`tags = 'y'`)
-	   returns 2 where the oracle returns 0: IndexCountScan counts the two index
-	   entries carrying 'y' and, unlike the IndexScan that serves the row query,
-	   never applies the per-record re-check that makes the row answer 0
-	   correct.
-	3. A compound index whose trailing column is plain and holds an array,
-	   seeked on the leading column alone, emits one row per element rather than
-	   one per record, and its count inflates the same way: three rows and a
-	   count of 3 against an oracle of two records. The scan carries no Distinct
-	   and the count reaches IndexCountScan. The `.*` spelling of the same index
-	   over the same shape is the sparse case below, which gets both.
+	No key is a whole array, so a comparison to a whole array is never answered
+	by a key: against a plain index over the array column (`tags = ['x', 'y']`)
+	it is a table scan with the oracle's rows and count, and as the trailing
+	column of a compound prefix it ends the prefix, leaving the predicate to a
+	Filter over the leading column's scan.
+
+	The index-only count declines a plain column that is not declared a kind
+	which excludes arrays, so `count()` over element equality on a plain array
+	column (`tags = 'y'`) runs through the row path and returns 0, the oracle's
+	count.
 
 	One behaviour is correct but easy to mistake for a defect, so it is pinned
 	as intended: a containment predicate on a non-flattening column with no
@@ -89,10 +78,6 @@ reason = """
 	index collapses to one key and is stored. The two are inconsistent, and
 	which is right is not settled here; the expectation is the current
 	behaviour, so a change to it is visible rather than silent.
-
-	Narrowed to the streaming strategies because the file asserts EXPLAIN plans,
-	which compute-only does not render; both are pinned because they plan
-	identically by contract.
 """
 
 [[test.results]]
@@ -111,23 +96,25 @@ value = "[{ id: tagged:one, tags: ['y'] }]"
 value = "[tagged:both]"
 
 [[test.results]]
-value = "[]"
+value = "[tagged:both]"
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: tagged_tags, access: = ['x', 'y'], direction: Forward, predicate: tags = ['x', 'y']]
+    TableScan [ctx: Db] [table: tagged, direction: Forward, predicate: tags = ['x', 'y'], pre_decode_filter: yes]
 "'''
 
 [[test.results]]
 value = "[{ count: 1 }]"
 
 [[test.results]]
-value = "[{ count: 0 }]"
+value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: tagged, condition: tags = ['x', 'y']]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: tagged, direction: Forward, predicate: tags = ['x', 'y'], pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -139,7 +126,7 @@ value = "[]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 0}
-    IndexScan [ctx: Db] [index: tagged_tags, access: = 'y', direction: Forward, predicate: tags = 'y'] {rows: 0}
+    IndexScan [ctx: Db] [table: tagged, index: tagged_tags, access: = 'y', direction: Forward] {rows: 0}
 
 Total rows: 0"'''
 
@@ -147,11 +134,13 @@ Total rows: 0"'''
 value = "[{ count: 0 }]"
 
 [[test.results]]
-value = "[{ count: 2 }]"
+value = "[{ count: 0 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: tagged, condition: tags = 'y']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: tagged, index: tagged_tags, access: = 'y', direction: Forward]
 "'''
 
 [[test.results]]
@@ -174,8 +163,9 @@ value = "[{ count: 2 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: tagged, direction: Forward, predicate: tags CONTAINS 'y', pre_decode_filter: yes]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: tagged, direction: Forward, predicate: tags CONTAINS 'y', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -194,47 +184,57 @@ value = "[{ grp: 'g', id: plainfan:one, tags: ['z'] }]"
 value = "[plainfan:one, plainfan:two]"
 
 [[test.results]]
-value = "[plainfan:two, plainfan:two, plainfan:one]"
+value = "[plainfan:two, plainfan:one]"
 
 [[test.results]]
 value = '''
-"ProjectValue [ctx: Db] [expr: id] {rows: 3}
-    IndexScan [ctx: Db] [index: plainfan_grp_tags, access: ['g'], direction: Forward, predicate: grp = 'g'] {rows: 3}
+"ProjectValue [ctx: Db] [expr: id] {rows: 2}
+    DistinctRecords [ctx: Db] {rows: 2}
+        IndexScan [ctx: Db] [table: plainfan, index: plainfan_grp_tags, access: ['g'], direction: Forward] {rows: 2}
 
-Total rows: 3"'''
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ count: 2 }]"
 
 [[test.results]]
-value = "[{ count: 3 }]"
+value = "[{ count: 2 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: plainfan, condition: grp = 'g']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: plainfan, index: plainfan_grp_tags, access: ['g'], direction: Forward]
 "'''
 
 [[test.results]]
 value = "[plainfan:two]"
 
 [[test.results]]
-value = "[]"
+value = "[plainfan:two]"
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: plainfan_grp_tags, access: ['g', ['x', 'y']], direction: Forward, predicate: grp = 'g' AND tags = ['x', 'y']]
+    Filter [ctx: Db] [predicate: grp = 'g' AND tags = ['x', 'y']]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: plainfan, index: plainfan_grp_tags, access: ['g'], direction: Forward]
 "'''
 
 [[test.results]]
 value = "[{ count: 1 }]"
 
 [[test.results]]
-value = "[{ count: 0 }]"
+value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: plainfan, condition: grp = 'g' AND tags = ['x', 'y']]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: grp = 'g' AND tags = ['x', 'y']]
+            DistinctRecords [ctx: Db]
+                IndexScan [ctx: Db] [table: plainfan, index: plainfan_grp_tags, access: ['g'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -267,7 +267,7 @@ value = "[uniqf:1]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
-    IndexScan [ctx: Db] [index: uniqf_labels, access: = 'q', direction: Forward, predicate: labels.* CONTAINS 'q'] {rows: 1}
+    IndexScan [ctx: Db] [table: uniqf, index: uniqf_labels, access: = 'q', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -279,7 +279,9 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: uniqf, condition: labels.* CONTAINS 'q']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: uniqf, index: uniqf_labels, access: = 'q', direction: Forward]
 "'''
 
 [[test.results]]
@@ -316,7 +318,7 @@ value = "[prod:one]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
     DistinctRecords [ctx: Db] {rows: 1}
-        IndexScan [ctx: Db] [index: prod_ab, access: ['p'], direction: Forward, predicate: a.* CONTAINS 'p'] {rows: 2}
+        IndexScan [ctx: Db] [table: prod, index: prod_ab, access: ['p'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -328,9 +330,10 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [index: prod_ab, access: ['p'], direction: Forward, predicate: a.* CONTAINS 'p']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: prod, index: prod_ab, access: ['p'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -342,7 +345,7 @@ value = "[prod:one]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
-    IndexScan [ctx: Db] [index: prod_ab, access: ['p', '2'], direction: Forward, predicate: a.* CONTAINS 'p' AND b.* CONTAINS '2'] {rows: 1}
+    IndexScan [ctx: Db] [table: prod, index: prod_ab, access: ['p', '2'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -354,7 +357,9 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: prod, condition: a.* CONTAINS 'p' AND b.* CONTAINS '2']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: prod, index: prod_ab, access: ['p', '2'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -382,7 +387,7 @@ value = "[sparse:missing, sparse:empty, sparse:two]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
     DistinctRecords [ctx: Db] {rows: 3}
-        IndexScan [ctx: Db] [index: sparse_grp_labels, access: ['g'], direction: Forward, predicate: grp = 'g'] {rows: 4}
+        IndexScan [ctx: Db] [table: sparse, index: sparse_grp_labels, access: ['g'], direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 
@@ -394,9 +399,10 @@ value = "[{ count: 3 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [index: sparse_grp_labels, access: ['g'], direction: Forward, predicate: grp = 'g']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: sparse, index: sparse_grp_labels, access: ['g'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -408,7 +414,7 @@ value = "[sparse:two]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
-    IndexScan [ctx: Db] [index: sparse_grp_labels, access: ['g', 'l1'], direction: Forward, predicate: grp = 'g' AND labels.* CONTAINS 'l1'] {rows: 1}
+    IndexScan [ctx: Db] [table: sparse, index: sparse_grp_labels, access: ['g', 'l1'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -420,7 +426,9 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: sparse, condition: grp = 'g' AND labels.* CONTAINS 'l1']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: sparse, index: sparse_grp_labels, access: ['g', 'l1'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -442,7 +450,7 @@ value = "[dup:one]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
     DistinctRecords [ctx: Db] {rows: 1}
-        IndexScan [ctx: Db] [index: dup_grp_labels, access: ['d'], direction: Forward, predicate: grp = 'd'] {rows: 2}
+        IndexScan [ctx: Db] [table: dup, index: dup_grp_labels, access: ['d'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -454,9 +462,10 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [index: dup_grp_labels, access: ['d'], direction: Forward, predicate: grp = 'd']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: dup, index: dup_grp_labels, access: ['d'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -468,7 +477,7 @@ value = "[dup:one]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
-    IndexScan [ctx: Db] [index: dup_grp_labels, access: ['d', 'same'], direction: Forward, predicate: grp = 'd' AND labels.* CONTAINS 'same'] {rows: 1}
+    IndexScan [ctx: Db] [table: dup, index: dup_grp_labels, access: ['d', 'same'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -480,7 +489,9 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: dup, condition: grp = 'd' AND labels.* CONTAINS 'same']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: dup, index: dup_grp_labels, access: ['d', 'same'], direction: Forward]
 "'''
 
 */
@@ -488,22 +499,19 @@ value = '''
 -- ---------------------------------------------------------------------------
 -- A plain (non-flattening) index column whose value is an array. The write
 -- path expands any array value, so the keys for tagged:both are 'x' and 'y' —
--- never the array itself — while the dedupe and the count guard read the column
--- idiom, which here does not spell `.*`. No scan in this section carries a
--- Distinct. tagged:both holds two distinct elements because a single-element
--- array cannot show duplicate emission, count inflation or a missing key.
+-- never the array itself. Every seek in this section pins the index's one
+-- column, so no scan carries a Distinct. tagged:both holds two distinct
+-- elements because a single-element array cannot show duplicate emission,
+-- count inflation or a missing key.
 -- ---------------------------------------------------------------------------
 DEFINE TABLE tagged SCHEMALESS;
 DEFINE INDEX tagged_tags ON tagged COLUMNS tags;
 CREATE tagged:both SET tags = ['x', 'y'];
 CREATE tagged:one SET tags = ['y'];
 
--- (a) Whole-array equality. The scan seeks the key ['x', 'y'], which the
--- per-element write never made, so the record is unreachable through the index
--- and the answer disagrees with the oracle. The plan shows the index both
--- narrowing and re-checking, which is why the wrong answer is a missing key
--- rather than a missing filter. Correct answer: [tagged:both], and a count
--- of 1.
+-- (a) Whole-array equality. No key is the array ['x', 'y'] — the write made
+-- 'x' and 'y' — so the index answers no key for it and the statement is a
+-- table scan, with the oracle's answer [tagged:both] and a count of 1.
 SELECT VALUE id FROM tagged WITH NOINDEX WHERE tags = ['x', 'y'];
 SELECT VALUE id FROM tagged WHERE tags = ['x', 'y'];
 EXPLAIN SELECT VALUE id FROM tagged WHERE tags = ['x', 'y'];
@@ -546,12 +554,11 @@ EXPLAIN SELECT count() FROM tagged WHERE tags CONTAINS 'y' GROUP ALL;
 -- ---------------------------------------------------------------------------
 -- (d) A compound index whose TRAILING column is plain and holds an array. The
 -- write path expands the value, so the key set is the same one the `.*`
--- spelling would produce, but the guards read the idiom and find no `.*`: the
--- unpinned trailing column multiplies the rows and the count with no Distinct
--- to collapse them, and the count still reaches the key space. The sparse
--- section below is this same index and this same seek with `labels.*` in place
--- of `tags`, and is the shape both guards do cover. Correct answer here:
--- [plainfan:one, plainfan:two] once each, and a count of 2 — the oracle's.
+-- spelling would produce. The column has no declared kind and may hold an
+-- array, so the seek on the leading column leaves it unpinned under a
+-- Distinct: [plainfan:one, plainfan:two] once each, and a count of 2 — the
+-- oracle's. The sparse section below is this same index and this same seek
+-- with `labels.*` in place of `tags`.
 -- ---------------------------------------------------------------------------
 DEFINE TABLE plainfan SCHEMALESS;
 DEFINE INDEX plainfan_grp_tags ON plainfan COLUMNS grp, tags;
@@ -565,12 +572,10 @@ SELECT count() FROM plainfan WITH NOINDEX WHERE grp = 'g' GROUP ALL;
 SELECT count() FROM plainfan WHERE grp = 'g' GROUP ALL;
 EXPLAIN SELECT count() FROM plainfan WHERE grp = 'g' GROUP ALL;
 
--- Pinning the trailing column makes the range exact, so the element keys
--- answer an equality on the whole array value no more than they do in (a):
--- the seek is for the key ['g', ['x', 'y']], which the per-element write never
--- made. The count over the same predicate takes the key space, where the
--- exact range addresses nothing either, so it reports 0. Correct answer:
--- [plainfan:two] and a count of 1.
+-- An equality on the whole array value of the trailing column pins no key, as
+-- in (a), so it ends the prefix: the leading column's seek is filtered by the
+-- whole predicate. The seek is the one above, collapsed the same way:
+-- [plainfan:two] and a count of 1, the oracle's.
 SELECT VALUE id FROM plainfan WITH NOINDEX WHERE grp = 'g' AND tags = ['x', 'y'];
 SELECT VALUE id FROM plainfan WHERE grp = 'g' AND tags = ['x', 'y'];
 EXPLAIN SELECT VALUE id FROM plainfan WHERE grp = 'g' AND tags = ['x', 'y'];

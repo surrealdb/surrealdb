@@ -20,8 +20,8 @@ pub enum SortDirection {
 
 /// A single field in an ORDER BY clause that evaluates an expression.
 ///
-/// This is the legacy/original approach where Sort evaluates expressions.
-/// For the new consolidated approach, use `SortKey` instead.
+/// This is the form where `Sort` evaluates expressions per row; `SortKey`
+/// instead references fields computed ahead of the sort.
 #[derive(Debug, Clone)]
 pub struct OrderByField {
 	/// Expression to evaluate for each row

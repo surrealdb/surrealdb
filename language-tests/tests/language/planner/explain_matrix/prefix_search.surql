@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
-reason = "`string::starts_with(<indexed column>, '<literal>')` over a b-tree index, end to end. The strings carrying a prefix are exactly those at or after it and before its successor, and the key encoding orders strings the way the predicate compares them, so the predicate names one contiguous key range. This file pins where each bound lands, when the upper bound must be absent, and which spellings name no range at all. Every indexed query is paired with the same query `WITH NOINDEX`, which forces a table scan and is the oracle: an upper bound placed one string too low returns a subset while still rendering an IndexScan, and a silently dropped row is the failure this file exists to catch. The fixture is built so a bound in the wrong place moves a row rather than only a plan. Around `alpha` it carries the prefix itself, a longer string extending it, `alpha` followed by the last scalar value, a string extending THAT, and the successor `alphb`, which carries the prefix in neither direction and must not be returned. The last two are a pair and are what separates the correct upper bound from an upper bound of the prefix followed by the last scalar value: both admit the shorter string, only the correct one admits the longer, so a bound stopping at the largest single-character extension shows up as a missing row rather than passing unnoticed. `alp`, `ALPHA` and `beta` sit below and above the stretch. The successor is exact in both of its forms -- over string values `[prefix, successor)` and, where no successor can be formed, `[prefix, ..)` each hold precisely the strings carrying the prefix -- so the call is kept as a residual `Filter` rather than because the range needs narrowing, and that `Filter` is asserted on every indexed shape; where no index is reached the call is instead carried inline as the scan's own `predicate:` with no `Filter` above it, so the two outcomes are told apart by which node holds the call. E2 is where the residual carries something no range can: the equality on the trailing column lives there, so dropping the residual returns every row the range admits instead of the one row wanted. The last scalar value gets its own group: at the end of a longer prefix the increment carries into the character before it, so that prefix runs up to `alphb` -- the same upper bound the plain `alpha` has, reached from the other side -- while standing alone it has no successor at all and the range carries a lower bound only. An open end is the only correct answer there, since an invented upper bound would sit below the very strings the predicate selects; both cases carry a string extending the last scalar value so that an invented bound moves a row. A multibyte prefix steps by scalar value rather than by byte, so `hé` runs up to `hê` and `hêlp` is the first string above the stretch. Four spellings reach no index and pin their TableScan, because a shape silently acquiring an IndexScan is as much a regression as one silently losing it: an empty prefix, whose stretch is the whole key space; the call against an unindexed column; the arguments reversed, which asks which names are prefixes OF a literal rather than which carry one; and a second argument that is not a literal, whose bounds cannot be built at plan time. A compound index is seeked on its leading column and not on a trailing one, and an equality on the trailing column stays in the residual rather than pinning anything behind a range. A UNIQUE index constrains what may be written, not how the key space is ordered, and addresses the same stretch the same way over the same boundary strings. Every indexed column here holds a scalar string, so nothing fans out to more than one index entry per record and no count() companion is needed; the fixture keeps to strings deliberately, because `string::starts_with` errors on a non-string first argument, which the table-scan oracle would raise and a range that filtered the value away before the call would not. `EXPLAIN` is rejected by the compute-only engine, so the planner axis is narrowed to the two streaming strategies; they plan identically by contract, so both are pinned rather than one. Each plan is asserted on the query without `ORDER BY` and the rows on the same query with `ORDER BY id`, which makes the row comparison deterministic without putting a sort wrapper into every plan."
+reason = "`string::starts_with(<indexed column>, '<literal>')` over a b-tree index, end to end. The strings carrying a prefix are exactly those at or after it and before its successor, and the key encoding orders strings the way the predicate compares them, so the predicate names one contiguous key range. This file pins where each bound lands, when the upper bound must be absent, and which spellings name no range at all. Every indexed query is paired with the same query `WITH NOINDEX`, which forces a table scan and is the oracle: an upper bound placed one string too low returns a subset while still rendering an IndexScan, and a silently dropped row is the failure this file exists to catch. The fixture is built so a bound in the wrong place moves a row rather than only a plan. Around `alpha` it carries the prefix itself, a longer string extending it, `alpha` followed by the last scalar value, a string extending THAT, and the successor `alphb`, which carries the prefix in neither direction and must not be returned. The last two are a pair and are what separates the correct upper bound from an upper bound of the prefix followed by the last scalar value: both admit the shorter string, only the correct one admits the longer, so a bound stopping at the largest single-character extension shows up as a missing row rather than passing unnoticed. `alp`, `ALPHA` and `beta` sit below and above the stretch. The successor is exact in both of its forms -- over string values `[prefix, successor)` and, where no successor can be formed, `[prefix, ..)` each hold precisely the strings carrying the prefix -- so the call is kept as a residual `Filter` rather than because the range needs narrowing, and that `Filter` is asserted on every indexed shape; where no index is reached the call is instead carried inline as the scan's own `predicate:` with no `Filter` above it, so the two outcomes are told apart by which node holds the call. E2 is where the residual carries something no range can: the equality on the trailing column lives there, so dropping the residual returns every row the range admits instead of the one row wanted. The last scalar value gets its own group: at the end of a longer prefix the increment carries into the character before it, so that prefix runs up to `alphb` -- the same upper bound the plain `alpha` has, reached from the other side -- while standing alone it has no successor at all and the range carries a lower bound only. An open end is the only correct answer there, since an invented upper bound would sit below the very strings the predicate selects; both cases carry a string extending the last scalar value so that an invented bound moves a row. A multibyte prefix steps by scalar value rather than by byte, so `hé` runs up to `hê` and `hêlp` is the first string above the stretch. Four spellings reach no index and pin their TableScan, because a shape silently acquiring an IndexScan is as much a regression as one silently losing it: an empty prefix, whose stretch is the whole key space; the call against an unindexed column; the arguments reversed, which asks which names are prefixes OF a literal rather than which carry one; and a second argument that is not a literal, whose bounds cannot be built at plan time. A compound index is seeked on its leading column and not on a trailing one, and an equality on the trailing column stays in the residual rather than pinning anything behind a range. A UNIQUE index constrains what may be written, not how the key space is ordered, and addresses the same stretch the same way over the same boundary strings. Every indexed column here holds a scalar string, so nothing fans out to more than one index entry per record and no count() companion is needed; the fixture keeps to strings deliberately, because `string::starts_with` errors on a non-string first argument, which the table-scan oracle would raise and a range that filtered the value away before the call would not. Each plan is asserted on the query without `ORDER BY` and the rows on the same query with `ORDER BY id`, which makes the row comparison deterministic without putting a sort wrapper into every plan."
 
 [[test.results]]
 value = "NONE"
@@ -17,7 +16,8 @@ value = "['alpha', 'alphabet', 'alpha􏿿', 'alpha􏿿tail', 'alphb', 'alp', 'AL
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'alpha')]
-        IndexScan [ctx: Db] [index: ps_name, access: >='alpha' <'alphb', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='alpha' <'alphb', direction: Forward]
 "'''
 
 [[test.results]]
@@ -30,7 +30,8 @@ value = "[ps:1, ps:2, ps:3, ps:4]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'alphab')]
-        IndexScan [ctx: Db] [index: ps_name, access: >='alphab' <'alphac', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='alphab' <'alphac', direction: Forward]
 "'''
 
 [[test.results]]
@@ -43,7 +44,8 @@ value = "[ps:2]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'zzz')]
-        IndexScan [ctx: Db] [index: ps_name, access: >='zzz' <'zz{', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='zzz' <'zz{', direction: Forward]
 "'''
 
 [[test.results]]
@@ -56,7 +58,8 @@ value = "[]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'ALPHA')]
-        IndexScan [ctx: Db] [index: ps_name, access: >='ALPHA' <'ALPHB', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='ALPHA' <'ALPHB', direction: Forward]
 "'''
 
 [[test.results]]
@@ -69,7 +72,8 @@ value = "[ps:7]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'hé')]
-        IndexScan [ctx: Db] [index: ps_name, access: >='hé' <'hê', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='hé' <'hê', direction: Forward]
 "'''
 
 [[test.results]]
@@ -82,7 +86,8 @@ value = "[ps:9, ps:10]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'alpha􏿿')]
-        IndexScan [ctx: Db] [index: ps_name, access: >='alpha􏿿' <'alphb', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='alpha􏿿' <'alphb', direction: Forward]
 "'''
 
 [[test.results]]
@@ -95,7 +100,8 @@ value = "[ps:3, ps:4]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, '􏿿')]
-        IndexScan [ctx: Db] [index: ps_name, access: >='􏿿', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='􏿿', direction: Forward]
 "'''
 
 [[test.results]]
@@ -107,7 +113,8 @@ value = "[ps:12, ps:13]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: ps, direction: Forward, predicate: string::starts_with(name, ''), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: string::starts_with(name, '')]
+        TableScan [ctx: Db] [table: ps, direction: Forward]
 "'''
 
 [[test.results]]
@@ -119,7 +126,8 @@ value = "[ps:1, ps:2, ps:3, ps:4, ps:5, ps:6, ps:7, ps:8, ps:9, ps:10, ps:11, ps
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: ps, direction: Forward, predicate: string::starts_with(alias, 'alpha'), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: string::starts_with(alias, 'alpha')]
+        TableScan [ctx: Db] [table: ps, direction: Forward]
 "'''
 
 [[test.results]]
@@ -131,7 +139,8 @@ value = "[ps:1, ps:2, ps:3, ps:4]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: ps, direction: Forward, predicate: string::starts_with('alpha', name), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: string::starts_with('alpha', name)]
+        TableScan [ctx: Db] [table: ps, direction: Forward]
 "'''
 
 [[test.results]]
@@ -143,7 +152,8 @@ value = "[ps:1, ps:6]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: ps, direction: Forward, predicate: string::starts_with(name, pat), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: string::starts_with(name, pat)]
+        TableScan [ctx: Db] [table: ps, direction: Forward]
 ''''
 
 [[test.results]]
@@ -159,7 +169,8 @@ value = "NONE"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'alpha')]
-        IndexScan [ctx: Db] [index: pc_name_tier, access: >='alpha' <'alphb', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: pc, index: pc_name_tier, access: >='alpha' <'alphb', direction: Forward]
 "'''
 
 [[test.results]]
@@ -172,7 +183,8 @@ value = "[pc:1, pc:2, pc:3, pc:4]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'alpha') AND tier = 'beta']
-        IndexScan [ctx: Db] [index: pc_name_tier, access: >='alpha' <'alphb', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: pc, index: pc_name_tier, access: >='alpha' <'alphb', direction: Forward]
 "'''
 
 [[test.results]]
@@ -184,7 +196,8 @@ value = "[pc:2]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: pc, direction: Forward, predicate: string::starts_with(tier, 'alpha'), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: string::starts_with(tier, 'alpha')]
+        TableScan [ctx: Db] [table: pc, direction: Forward]
 "'''
 
 [[test.results]]
@@ -200,7 +213,8 @@ value = "NONE"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'alpha')]
-        IndexScan [ctx: Db] [index: pu_name, access: >='alpha' <'alphb', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: pu, index: pu_name, access: >='alpha' <'alphb', direction: Forward]
 "'''
 
 [[test.results]]

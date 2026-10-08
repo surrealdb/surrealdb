@@ -3,7 +3,7 @@
 //! This is the vocabulary of running a query: which statement forms are legal
 //! where, whether a clause evaluated to something usable, which permission
 //! predicate said no, how deep evaluation may recurse. Both executors - the
-//! recursive `compute` path and the streaming planner - speak it, which is why
+//! recursive `compute` path and the planner - speak it, which is why
 //! it is one type rather than one per executor.
 //!
 //! It deliberately names nothing about values, the catalog, keys, indexes,
@@ -257,10 +257,13 @@ pub(crate) enum Error {
 	#[error("Unimplemented functionality: {0}")]
 	Unimplemented(String),
 
-	/// The planner does not support this statement type (e.g. DML/DDL).
-	/// Callers should always fall back to the compute path.
-	#[error("Planner unsupported: {0}")]
-	PlannerUnsupported(String),
+	/// The engine does not run this statement or expression. The statement
+	/// fails with the reason, which names the construct; nothing else
+	/// executes it.
+	#[error("The engine cannot run this statement: {reason}")]
+	PlannerUnsupported {
+		reason: String,
+	},
 
 	/// The access method cannot be defined on the requested level
 	#[error("The access method cannot be defined on the requested level")]
@@ -537,7 +540,9 @@ impl LeafError for Error {
 			| Error::ReturnCoerce {
 				..
 			}
-			| Error::PlannerUnsupported(_)
+			| Error::PlannerUnsupported {
+				..
+			}
 			| Error::AccessLevelMismatch
 			| Error::AccessRecordTokenDurationRequired
 			| Error::AccessGrantInvalidSubject

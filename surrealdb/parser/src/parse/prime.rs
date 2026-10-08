@@ -5,6 +5,7 @@ use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use token::{BaseTokenKind, T};
 
+use crate::parse::misc::parse_closure_parameter;
 use crate::parse::range::{TryRange, parse_prefix_range_sync, try_parse_infix_range_sync};
 use crate::parse::utils::parse_delimited_list;
 use crate::parse::{ParseError, ParseResult, Parser, ParserSettings, ParserState};
@@ -70,7 +71,10 @@ impl Parse for ast::Closure {
 		let (args_span, parameters) = if let Some(peek) = parser.eat(T![||])? {
 			(peek.span, None)
 		} else {
-			parse_delimited_list(parser, T![|], T![|], T![,], Parser::parse).await?
+			parse_delimited_list(parser, T![|], T![|], T![,], async |parser| {
+				parse_closure_parameter(parser).await
+			})
+			.await?
 		};
 
 		let output_ty = if parser.eat(T![->])?.is_some() {

@@ -18,15 +18,21 @@ use super::{
 use crate::exec::object_extract::PathSegment;
 use crate::exec::operators::scan::pipeline::FieldState;
 use crate::exec::permission::PhysicalPermission;
+#[cfg(test)]
 use crate::exec::physical_expr::record_id::PhysicalRecordIdKey;
+#[cfg(test)]
 use crate::exec::physical_expr::{
 	ArrayLiteral, BinaryOp, ObjectLiteral, PhysicalExpr, RecordIdExpr, SetLiteral, SimpleBinaryOp,
 	Step, UnaryOp,
 };
 use crate::exec::planner::is_simple_binary_eligible;
+use crate::expr::logical::LogicalExpr;
 use crate::expr::operator::{BinaryOperator, PrefixOperator};
-use crate::val::{RecordId, RecordIdKey, Value};
+use crate::val::Value;
+#[cfg(test)]
+use crate::val::{RecordId, RecordIdKey};
 
+#[cfg(test)]
 /// Compile the physical WHERE predicate into a fused predicate tree for KV-byte inspection.
 ///
 /// Pure shape compile — does not consult [`FieldState`]. Returns
@@ -208,6 +214,7 @@ fn field_permission_covers(field_state: &FieldState, name: &str) -> bool {
 	})
 }
 
+#[cfg(test)]
 /// Resolve pre-decode filter status at plan time, given an optional plan-time [`FieldState`].
 ///
 /// * No predicate → [`PreDecodeFilterStatus::NotApplicable`].
@@ -383,6 +390,7 @@ fn try_compile_leaf_streaming(
 	}
 }
 
+#[cfg(test)]
 /// Decode a plan-time [`PhysicalRecordIdKey`] when it uses only static literals, collections, and
 /// nested [`RecordIdExpr`] keys (no `rand()` / ulid / uuid generators or range bounds).
 fn try_static_record_id_key(key: &PhysicalRecordIdKey) -> Option<RecordIdKey> {
@@ -411,6 +419,7 @@ fn try_static_record_id_key(key: &PhysicalRecordIdKey) -> Option<RecordIdKey> {
 	}
 }
 
+#[cfg(test)]
 /// Fold planner [`ArrayLiteral`] / [`SetLiteral`] / [`ObjectLiteral`] trees into a [`Value`] when
 /// every leaf is a static [`Literal`](crate::exec::physical_expr::Literal) (or nested literal
 /// collection). `field INSIDE [1, 2]` lowers to an [`ArrayLiteral`] RHS, so
@@ -451,6 +460,7 @@ fn try_static_literal_value(expr: &Arc<dyn PhysicalExpr>) -> Option<Value> {
 	None
 }
 
+#[cfg(test)]
 fn compile_expr(expr: &Arc<dyn PhysicalExpr>) -> Option<PredNode> {
 	let expr: &dyn PhysicalExpr = expr.as_ref();
 	if let Some(sb) = expr.downcast_ref::<SimpleBinaryOp>() {
@@ -465,6 +475,7 @@ fn compile_expr(expr: &Arc<dyn PhysicalExpr>) -> Option<PredNode> {
 	None
 }
 
+#[cfg(test)]
 fn compile_simple_binary(sb: &SimpleBinaryOp) -> Option<PredNode> {
 	if !is_simple_binary_eligible(&sb.op) || unsupported_containment_like(&sb.op) {
 		return None;
@@ -496,6 +507,7 @@ fn compile_simple_binary(sb: &SimpleBinaryOp) -> Option<PredNode> {
 	})
 }
 
+#[cfg(test)]
 fn compile_binary(b: &BinaryOp) -> Option<PredNode> {
 	match &b.op {
 		BinaryOperator::And => {
@@ -523,6 +535,7 @@ fn compile_binary(b: &BinaryOp) -> Option<PredNode> {
 	}
 }
 
+#[cfg(test)]
 /// Recognise `array::len(field) <op> N` and emit a `LeafStreaming` over
 /// [`ArrayLenCompare`] (skips every Strand / Value decode — reads the
 /// array's varint length prologue and compares).
@@ -600,6 +613,7 @@ fn try_compile_array_len_pair(
 	})
 }
 
+#[cfg(test)]
 fn compile_field_lit_pair(
 	field_side: &Arc<dyn PhysicalExpr>,
 	literal_side: &Arc<dyn PhysicalExpr>,
@@ -608,32 +622,150 @@ fn compile_field_lit_pair(
 ) -> Option<PredNode> {
 	let path = resolve_static_path(field_side)?;
 	let literal = try_static_literal_value(literal_side)?;
+	Some(leaf_node(path, op, literal, reversed))
+}
+
+/// The leaf judging `path <op> literal` (`literal <op> path` when `reversed`):
+/// a set membership, a streaming evaluator or a plain comparison, whichever
+/// the operator and literal admit.
+fn leaf_node(
+	path: Vec<PathSegment>,
+	op: &BinaryOperator,
+	literal: Value,
+	reversed: bool,
+) -> PredNode {
 	if !reversed
 		&& matches!(op, BinaryOperator::Inside | BinaryOperator::NotInside)
 		&& let Some(set) = try_build_inside_literal_hashset(&literal)
 	{
 		let literal_set = Arc::new(LiteralSet::from_set(set.as_ref()));
-		return Some(PredNode::LeafSetMembership {
+		return PredNode::LeafSetMembership {
 			path,
 			op: op.clone(),
 			set,
 			literal_set,
 			reversed: false,
-		});
+		};
 	}
 	if let Some(n) = try_compile_leaf_streaming(path.clone(), op, &literal, reversed) {
-		return Some(n);
+		return n;
 	}
 	let literal_wire = Arc::new(LiteralWire::from_value(&literal));
-	Some(PredNode::Leaf {
+	PredNode::Leaf {
 		path,
 		op: op.clone(),
 		literal,
 		literal_wire,
 		reversed,
-	})
+	}
 }
 
+/// The predicate a table scan judges of a record's stored bytes before it
+/// decodes the record, as plain data: the comparisons of a field with a
+/// literal, joined by `AND`, `OR` and `NOT`.
+///
+/// A record the shape judges false is never decoded; one it cannot judge is
+/// decoded and judged by the predicate itself, so the shape only ever spares
+/// a record the predicate would have refused.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PreDecodeShape {
+	And(Vec<PreDecodeShape>),
+	Or(Vec<PreDecodeShape>),
+	Not(Box<PreDecodeShape>),
+	/// `path <op> literal`, or `literal <op> path` when `reversed`.
+	Leaf {
+		path: Arc<[PathSegment]>,
+		op: BinaryOperator,
+		literal: Value,
+		reversed: bool,
+	},
+}
+
+impl PreDecodeShape {
+	/// The shape of `predicate`, when every part of it is one the stored bytes
+	/// judge: a comparison of a static field path with a literal, or a
+	/// conjunction, disjunction or negation of such.
+	pub(crate) fn of(predicate: &LogicalExpr) -> Option<Self> {
+		match predicate {
+			LogicalExpr::Binary {
+				left,
+				op: BinaryOperator::And,
+				right,
+			} => Some(Self::And(vec![Self::of(left)?, Self::of(right)?])),
+			LogicalExpr::Binary {
+				left,
+				op: BinaryOperator::Or,
+				right,
+			} => Some(Self::Or(vec![Self::of(left)?, Self::of(right)?])),
+			LogicalExpr::Prefix {
+				op: PrefixOperator::Not,
+				expr,
+			} => Some(Self::Not(Box::new(Self::of(expr)?))),
+			LogicalExpr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				if !is_simple_binary_eligible(op) || unsupported_containment_like(op) {
+					return None;
+				}
+				Self::leaf(left, right, false, op).or_else(|| Self::leaf(right, left, true, op))
+			}
+			_ => None,
+		}
+	}
+
+	fn leaf(
+		field: &LogicalExpr,
+		literal: &LogicalExpr,
+		reversed: bool,
+		op: &BinaryOperator,
+	) -> Option<Self> {
+		use crate::expr::logical::FieldSegment;
+		let field_path = field.field_path()?;
+		let path = field_path
+			.segments()
+			.iter()
+			.map(|segment| match segment {
+				FieldSegment::Field(name) => Some(PathSegment::new(name.as_str())),
+				FieldSegment::All => None,
+			})
+			.collect::<Option<Vec<_>>>()?;
+		// The record's id is its key, which its stored bytes do not hold.
+		if path.first()?.as_str() == "id" {
+			return None;
+		}
+		let literal = crate::exec::planner::util::try_literal_to_value(literal)?;
+		Some(Self::Leaf {
+			path: path.into(),
+			op: op.clone(),
+			literal,
+			reversed,
+		})
+	}
+
+	/// The filter that judges stored bytes by this shape, descending no deeper
+	/// than `depth_limit` path segments.
+	pub(crate) fn filter(&self, depth_limit: u32) -> Arc<PreDecodeFilter> {
+		Arc::new(PreDecodeFilter::new(fuse_tree(self.node()), depth_limit))
+	}
+
+	fn node(&self) -> PredNode {
+		match self {
+			Self::And(parts) => PredNode::And(parts.iter().map(Self::node).collect()),
+			Self::Or(parts) => PredNode::Or(parts.iter().map(Self::node).collect()),
+			Self::Not(inner) => PredNode::Not(Box::new(inner.node())),
+			Self::Leaf {
+				path,
+				op,
+				literal,
+				reversed,
+			} => leaf_node(path.to_vec(), op, literal.clone(), *reversed),
+		}
+	}
+}
+
+#[cfg(test)]
 fn resolve_static_path(e: &Arc<dyn PhysicalExpr>) -> Option<Vec<PathSegment>> {
 	let e: &dyn PhysicalExpr = e.as_ref();
 	if let Some(id) = e.downcast_ref::<Step>() {
@@ -645,6 +777,7 @@ fn resolve_static_path(e: &Arc<dyn PhysicalExpr>) -> Option<Vec<PathSegment>> {
 	}
 }
 
+#[cfg(test)]
 fn compile_unary(u: &UnaryOp) -> Option<PredNode> {
 	match u.op {
 		PrefixOperator::Not => {

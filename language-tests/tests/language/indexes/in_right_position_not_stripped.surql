@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Right-position `[v] IN field` has different runtime semantics from `field IN [v]` (it's `[v].contains(field)`, not a containment of `field` in a literal array). The strip-path normalisation that rewrites `field IN [v]` to `field = v` must NOT apply when the idiom is on the right — otherwise the IndexScan returns rows for which the original predicate evaluates to false, silently corrupting results."
@@ -25,8 +24,8 @@ value = "[]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: [5] INSIDE field]
-        IndexScan [ctx: Db] [index: idx_field, access: = 5, direction: Forward]
+    Filter [ctx: Db] [predicate: field = 5 AND [5] INSIDE field]
+        IndexScan [ctx: Db] [table: t, index: idx_field, access: = 5, direction: Forward]
 ''''
 
 [[test.results]]
@@ -41,8 +40,8 @@ value = "[]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: [5] INSIDE field]
-        IndexScan [ctx: Db] [index: idx_ab, access: [5, 'g'], direction: Forward]
+    Filter [ctx: Db] [predicate: field = 5 AND group = 'g' AND [5] INSIDE field]
+        IndexScan [ctx: Db] [table: t, index: idx_ab, access: [5, 'g'], direction: Forward]
 "'''
 */
 DEFINE TABLE t;

@@ -1,0 +1,1455 @@
+### owner: { DEFINE FIELD k ON t VALUE 5; CREATE t:1 SET n = 1; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1, k: 5, n: 1 }]
+[{ id: t:0, n: 0 }, { id: t:1, k: 5, n: 1 }]
+[t:1]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 9acbe23947a3cb54 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 975259d8fe0c48da (64 bytes)
+### owner: { DEFINE FIELD c ON t COMPUTED n * 10; RETURN SELECT VALUE c FROM t ORDER BY id }
+[0]
+[{ c: 0, id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdc\x00 => c7d256ce125a1a41 (41 bytes)
+### owner: { DEFINE FIELD d ON t DEFAULT 'x'; CREATE t:1; UPDATE t:0 SET n = 9; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 9 }, { d: 'x', id: t:1 }]
+[{ id: t:0, n: 9 }, { d: 'x', id: t:1 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdd\x00 => 910e080a94d7f7fb (38 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x00 => d2973b00b51d797f (53 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 9a000d4c5a416a9e (52 bytes)
+### owner: { DEFINE FIELD a ON t TYPE int; CREATE t:1 SET a = 'no' }
+error: Couldn't coerce value for field `a` of `t:1`: Expected `int` but found `'no'`
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { DEFINE FIELD a ON t TYPE int ASSERT $value > 0; CREATE t:1 SET a = 3; CREATE t:2 SET a = -1 }
+error: Found -1 for field `a`, with record `t:2`, but field must conform to: $value > 0
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { DEFINE TABLE s SCHEMAFULL; DEFINE FIELD a ON s TYPE int; CREATE s:1 SET a = 1, b = 2; RETURN SELECT * FROM s }
+error: Found field 'b', but no such field exists for table 's'
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { DEFINE TABLE fresh; CREATE fresh:1 SET n = 1; RETURN SELECT * FROM fresh }
+[{ id: fresh:1, n: 1 }]
+[{ id: t:0, n: 0 }]
+[]
+[{ id: fresh:1, n: 1 }]
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 49c1d58539ae8411 (57 bytes)
+### owner: { DEFINE TABLE fresh TYPE RELATION IN t OUT t; RELATE t:0->fresh:1->t:0; RETURN SELECT in, out FROM fresh }
+[{ in: t:0, out: t:0 }]
+[{ id: t:0, n: 0 }]
+[]
+[{ id: fresh:1, in: t:0, out: t:0 }]
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 360f22a5a2c24673 (122 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!fdin\x00 => 1276933c8efe05fd (43 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!fdout\x00 => 466b6e6ebc7723ad (44 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => a1818ef5a33ebe89 (82 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00~\x02\x80\x00\x00\x00\x00\x00\x00\x01\x02t\x00\x02\x80\x00\x00\x00\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00~\x02\x80\x00\x00\x00\x00\x00\x00\x01\x03t\x00\x02\x80\x00\x00\x00\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00~\x02\x80\x00\x00\x00\x00\x00\x00\x00\x02fresh\x00\x02\x80\x00\x00\x00\x00\x00\x00\x01t\x00\x02\x80\x00\x00\x00\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00~\x02\x80\x00\x00\x00\x00\x00\x00\x00\x03fresh\x00\x02\x80\x00\x00\x00\x00\x00\x00\x01t\x00\x02\x80\x00\x00\x00\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+### owner: { DEFINE TABLE fresh; DEFINE TABLE fresh; CREATE fresh:1 }
+error: The table 'fresh' already exists
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { DEFINE TABLE IF NOT EXISTS t; DEFINE TABLE IF NOT EXISTS t; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1 }]
+[{ id: t:0, n: 0 }, { id: t:1 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ccfa78f0d54463e3 (42 bytes)
+### owner: { DEFINE TABLE OVERWRITE t SCHEMAFULL; CREATE t:1 SET n = 1; RETURN SELECT * FROM t ORDER BY id }
+error: Found field 'n', but no such field exists for table 't'
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { REMOVE TABLE t; RETURN SELECT * FROM t }
+error: The table 't' does not exist
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { REMOVE TABLE IF EXISTS missing; REMOVE TABLE IF EXISTS missing; RETURN 1 }
+1
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { REMOVE TABLE missing; RETURN 1 }
+error: The table 'missing' does not exist
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { DEFINE FIELD a ON t TYPE int; ALTER FIELD a ON t TYPE string; CREATE t:1 SET a = 's'; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { a: 's', id: t:1 }]
+[{ id: t:0, n: 0 }, { a: 's', id: t:1 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fda\x00 => 1ef766410d4fbe1b (41 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => f29cffbd2cb4a6c4 (52 bytes)
+### owner: { ALTER TABLE t SCHEMAFULL; CREATE t:1 SET n = 1, extra = 2; RETURN SELECT * FROM t ORDER BY id }
+error: Found field 'extra', but no such field exists for table 't'
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { DEFINE FIELD a ON t VALUE 1; REMOVE FIELD a ON t; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1 }]
+[{ id: t:0, n: 0 }, { id: t:1 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ccfa78f0d54463e3 (42 bytes)
+### owner: { DEFINE INDEX by_n ON t FIELDS n; FOR $i IN 1..6 { CREATE type::record('t', $i) SET n = $i % 3 }; RETURN SELECT VALUE id FROM t WHERE n = 1 ORDER BY id }
+[t:1, t:4]
+[{ id: t:0, n: 0 }, { id: t:1, n: 1 }, { id: t:2, n: 2 }, { id: t:3, n: 0 }, { id: t:4, n: 1 }, { id: t:5, n: 2 }]
+[t:1, t:4]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!bs\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x00 => d0a397186727310c (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x01 => d0a3991867273472 (3 bytes)
+... 39 changes, digest 0e0da733090fdbc7 ...
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00+\x00\x00\x00\x00*\x05\x80\x01\x00\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x00 => c92225de271a9608 (14 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00+\x00\x00\x00\x00*\x05\x80\x01\x00\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x03 => 3da0250fa2bc58c7 (14 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00+\x00\x00\x00\x00*\x05\xa0\x19\x19 \x01\x00\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => eff6d199505083e1 (14 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00+\x00\x00\x00\x00*\x05\xa0\x19\x19 \x01\x00\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x04 => 2dcf7ef18242ec3c (14 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00+\x00\x00\x00\x00*\x05\xa0\x19\x190\x01\x00\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 16cb7d54798671ba (14 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00+\x00\x00\x00\x00*\x05\xa0\x19\x190\x01\x00\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x05 => 54a42aacab78da15 (14 bytes)
+### owner: { DEFINE INDEX by_n ON t FIELDS n UNIQUE; CREATE t:1 SET n = 1; CREATE t:2 SET n = 1 }
+error: Database index `by_n` already contains 1, with record `t:1`
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x00 => d0a397186727310c (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dh\x80\x00\x00\x00\x00\x00\x00\x00 => a71164df71139968 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ds\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 77030c7a8f19ff68 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+### owner: { DEFINE INDEX by_n ON t FIELDS n UNIQUE; CREATE t:1 SET n = 1; UPDATE t:1 SET n = 2; DELETE t:0; RETURN SELECT VALUE id FROM t WHERE n = 2 }
+error: There was a problem with the key-value store: Transaction conflict: Write conflict, retry the transaction. This transaction can be retried
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x00 => d0a397186727310c (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dh\x80\x00\x00\x00\x00\x00\x00\x00 => a71164df71139968 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ds\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 77030c7a8f19ff68 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+### owner: { DEFINE TABLE fresh; DEFINE INDEX by_n ON fresh FIELDS n; CREATE fresh:1 SET n = 4; RETURN SELECT VALUE id FROM fresh WHERE n = 4 }
+[fresh:1]
+[{ id: t:0, n: 0 }]
+[]
+[{ id: fresh:1, n: 4 }]
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!bs\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!dd\x00\x00\x00\x00\x00\x00\x00\x00 => d0a3991867273472 (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!dh\x80\x00\x00\x00\x00\x00\x00\x00 => a71164df71139968 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x01 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x01 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!ds\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 77030c7a8f19ff68 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!il\x00\x00\x00\x00 => 67e1d49c1df65d6d (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!ixby_n\x00 => 93bcc47ae9ff7158 (21 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 3c4f7eaf87253247 (57 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00+\x00\x00\x00\x00*\x05\xa0\x19\x19P\x01\x00\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 7581e607670e4d7a (18 bytes)
+### owner: { DEFINE INDEX by_n ON t FIELDS n; REMOVE INDEX by_n ON t; CREATE t:1 SET n = 1; RETURN SELECT VALUE id FROM t WHERE n = 1 }
+error: There was a problem with the key-value store: Transaction conflict: Write conflict, retry the transaction. This transaction can be retried
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x00 => d0a397186727310c (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dh\x80\x00\x00\x00\x00\x00\x00\x00 => a71164df71139968 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ds\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 77030c7a8f19ff68 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+### owner: { DEFINE INDEX by_n ON t FIELDS n; DEFINE INDEX OVERWRITE by_n ON t FIELDS n UNIQUE; CREATE t:1 SET n = 0 }
+error: There was a problem with the key-value store: Transaction conflict: Write conflict, retry the transaction. This transaction can be retried
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x00 => d0a397186727310c (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dh\x80\x00\x00\x00\x00\x00\x00\x00 => a71164df71139968 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ds\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 77030c7a8f19ff68 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+### owner: { DEFINE EVENT noted ON t WHEN $event = 'CREATE' THEN (UPSERT type::record('log', record::id($after.id)) SET of = $after.id); CREATE t:1; RETURN SELECT VALUE of FROM log }
+[t:1]
+[{ id: t:0, n: 0 }, { id: t:1 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 07cd256dad18179f (59 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!evnoted\x00 => e3ac5badc3e29c53 (112 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ccfa78f0d54463e3 (42 bytes)
+### owner: { DEFINE TABLE counts AS SELECT count() AS c FROM t GROUP ALL; CREATE t:1; CREATE t:2; RETURN SELECT c FROM counts }
+[{ c: 3 }]
+[{ id: t:0, n: 0 }, { id: t:1 }, { id: t:2 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcounts\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcounts\x00 => 35afb1fb28c74bcc (135 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counts\x00*\x05\x00 => 423b45496036e36f (45 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ftcounts\x00 => 35afb1fb28c74bcc (135 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ccfa78f0d54463e3 (42 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => ccfa7ef0d5446e15 (42 bytes)
+### owner: { DEFINE TABLE mirror AS SELECT n FROM t; CREATE t:1 SET n = 7; RETURN SELECT n FROM mirror ORDER BY n }
+[{ n: 0 }, { n: 7 }]
+[{ id: t:0, n: 0 }, { id: t:1, n: 7 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvmirror\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbmirror\x00 => adb4b9d49b2a9a76 (123 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*mirror\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x00 => 5809a2d2b11686ff (38 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*mirror\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 5809a8d2b1169131 (38 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ftmirror\x00 => adb4b9d49b2a9a76 (123 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 7b7291eed22950e1 (53 bytes)
+### owner: { DEFINE FIELD up ON t TYPE option<record<fresh>> REFERENCE ON DELETE UNSET; CREATE fresh:1; UPDATE t:0 SET up = fresh:1; DELETE fresh:1; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }]
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdup\x00 => a232baa737604626 (59 bytes)
+### owner: { DEFINE FUNCTION fn::twice($x: int) { $x * 2 }; RETURN fn::twice(4) }
+8
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fntwice\x00 => d9c324a70625a2b8 (41 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00twice\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### owner: { DEFINE FUNCTION fn::f() { 1 }; DEFINE FUNCTION OVERWRITE fn::f() { 2 }; RETURN fn::f() }
+2
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnf\x00 => 68493e865acbca65 (26 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00f\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### owner: { DEFINE FUNCTION fn::f() { 1 }; REMOVE FUNCTION fn::f; RETURN fn::f() }
+error: Function 'fn::f' not found: The function 'fn::f' does not exist
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { DEFINE PARAM $p VALUE 3; RETURN $p }
+3
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x01p\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!pap\x00 => 28e61d42b3ff15dc (15 bytes)
+### owner: { DEFINE FUNCTION fn::rows() { SELECT VALUE n FROM t ORDER BY n }; CREATE t:1 SET n = 1; RETURN fn::rows() }
+[0, 1]
+[{ id: t:0, n: 0 }, { id: t:1, n: 1 }]
+[t:1]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnrows\x00 => 6e6f7938b20b35a0 (60 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00rows\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => dbb804487ff70435 (53 bytes)
+### owner: { DEFINE FUNCTION OVERWRITE fn::none() { RETURN 7 }; RETURN fn::none() }
+7
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnnone\x00 => 7d92a5ece1679a7c (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00none\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### owner: { REMOVE FUNCTION fn::none; RETURN fn::none() }
+error: Function 'fn::none' not found: The function 'fn::none' does not exist
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { FOR $i IN 0..2 { DEFINE FUNCTION OVERWRITE fn::none() { RETURN 7 } }; RETURN fn::none() }
+7
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnnone\x00 => 7d92a5ece1679a7c (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00none\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### owner: { DEFINE PARAM $p VALUE 3; CREATE t:1 SET p = $p; RETURN SELECT VALUE p FROM t:1 }
+[3]
+[{ id: t:0, n: 0 }, { id: t:1, p: 3 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x01p\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!pap\x00 => 28e61d42b3ff15dc (15 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 3acaf252f532431f (53 bytes)
+### owner: { DEFINE FIELD a ON t VALUE 1; CREATE t:1 SET n = 1; DEFINE FIELD b ON t VALUE 2; CREATE t:2 SET n = 2; DEFINE FIELD c ON t VALUE 3; CREATE t:3 SET n = 3; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { a: 1, id: t:1, n: 1 }, { a: 1, b: 2, id: t:2, n: 2 }, { a: 1, b: 2, c: 3, id: t:3, n: 3 }]
+[{ id: t:0, n: 0 }, { a: 1, id: t:1, n: 1 }, { a: 1, b: 2, id: t:2, n: 2 }, { a: 1, b: 2, c: 3, id: t:3, n: 3 }]
+[t:1]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fda\x00 => 6daa546e66855336 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdb\x00 => 8450c07027e9641e (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdc\x00 => 42d7872ab504069e (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 6f68f2a9dc68d63c (64 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 035fb94b32f18df6 (75 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => 12f88a46d529f8d7 (86 bytes)
+### owner: { IF true { DEFINE FIELD k ON t VALUE 1 }; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1, k: 1 }]
+[{ id: t:0, n: 0 }, { id: t:1, k: 1 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 8eecb43b21cdb9b8 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 386b63801f9163c2 (53 bytes)
+### owner: { IF false { DEFINE FIELD k ON t VALUE 1 }; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1 }]
+[{ id: t:0, n: 0 }, { id: t:1 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ccfa78f0d54463e3 (42 bytes)
+### owner: { FOR $i IN 0..3 { DEFINE FIELD IF NOT EXISTS k ON t VALUE $i; CREATE type::record('t', $i + 1) }; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1 }, { id: t:2 }, { id: t:3 }]
+[{ id: t:0, n: 0 }, { id: t:1 }, { id: t:2 }, { id: t:3 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 97633cd630cc50bf (37 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ccfa78f0d54463e3 (42 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => ccfa7ef0d5446e15 (42 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => ccfa7cf0d5446aaf (42 bytes)
+### owner: { FOR $i IN 0..3 { DEFINE FIELD OVERWRITE k ON t VALUE $i; CREATE type::record('t', $i + 1) }; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1 }, { id: t:2 }, { id: t:3 }]
+[{ id: t:0, n: 0 }, { id: t:1 }, { id: t:2 }, { id: t:3 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 97633cd630cc50bf (37 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ccfa78f0d54463e3 (42 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => ccfa7ef0d5446e15 (42 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => ccfa7cf0d5446aaf (42 bytes)
+### owner: { DEFINE FIELD k ON t VALUE 1; FOR $i IN 0..3 { CREATE type::record('t', $i + 1) }; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1, k: 1 }, { id: t:2, k: 1 }, { id: t:3, k: 1 }]
+[{ id: t:0, n: 0 }, { id: t:1, k: 1 }, { id: t:2, k: 1 }, { id: t:3, k: 1 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 8eecb43b21cdb9b8 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 386b63801f9163c2 (53 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 386b5d801f915990 (53 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => 386b5f801f915cf6 (53 bytes)
+### owner: { CREATE fresh:1; DEFINE FIELD k ON fresh VALUE 1; CREATE fresh:2; RETURN SELECT * FROM fresh ORDER BY id }
+[{ id: fresh:1 }, { id: fresh:2, k: 1 }]
+[{ id: t:0, n: 0 }]
+[]
+[{ id: fresh:1 }, { id: fresh:2, k: 1 }]
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!fdk\x00 => b7207a3fc86d0b14 (40 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ac4087c058ee9743 (46 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => a34706aef51672c4 (57 bytes)
+### owner: { CREATE fresh:1 SET n = 1; DEFINE INDEX by_n ON fresh FIELDS n; CREATE fresh:2 SET n = 1; RETURN SELECT VALUE id FROM fresh WHERE n = 1 }
+[fresh:2]
+[{ id: t:0, n: 0 }]
+[]
+[{ id: fresh:1, n: 1 }, { id: fresh:2, n: 1 }]
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!bs\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!dd\x00\x00\x00\x00\x00\x00\x00\x00 => d0a3931867272a40 (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!dh\x80\x00\x00\x00\x00\x00\x00\x00 => a71164df71139968 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x02 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x02 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!ds\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 77030c7a8f19ff68 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!il\x00\x00\x00\x00 => 67e1d49c1df65d6d (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!ixby_n\x00 => 93bcc47ae9ff7158 (21 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 49c1d58539ae8411 (57 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 49c1d78539ae8777 (57 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00+\x00\x00\x00\x00*\x05\xa0\x19\x19 \x01\x00\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 0103e5d5eb6c8908 (18 bytes)
+### owner: { CREATE fresh:1; DEFINE EVENT e ON fresh THEN (UPSERT type::record('log', record::id($after.id)) SET of = $after.id); CREATE fresh:2; RETURN SELECT VALUE of FROM log }
+[fresh:2]
+[{ id: t:0, n: 0 }]
+[]
+[{ id: fresh:1 }, { id: fresh:2 }]
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!eve\x00 => 8eeef3523bda6486 (99 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ac4087c058ee9743 (46 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => ac408dc058eea175 (46 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*log\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => cf7fd08727bdefe3 (63 bytes)
+### owner: { IF (SELECT VALUE n FROM ONLY t:0) = 1 { CREATE fresh:1 }; DEFINE FIELD k ON fresh VALUE 1; CREATE fresh:2; RETURN SELECT * FROM fresh ORDER BY id }
+[{ id: fresh:2, k: 1 }]
+[{ id: t:0, n: 0 }]
+[]
+[{ id: fresh:2, k: 1 }]
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!fdk\x00 => b7207a3fc86d0b14 (40 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => a34706aef51672c4 (57 bytes)
+### owner: { CREATE fresh:1; CREATE fresh:2; DEFINE FIELD k ON fresh VALUE 1; CREATE fresh:3; DEFINE FIELD j ON fresh VALUE 2; CREATE fresh:4; RETURN SELECT * FROM fresh ORDER BY id }
+[{ id: fresh:1 }, { id: fresh:2 }, { id: fresh:3, k: 1 }, { id: fresh:4, j: 2, k: 1 }]
+[{ id: t:0, n: 0 }]
+[]
+[{ id: fresh:1 }, { id: fresh:2 }, { id: fresh:3, k: 1 }, { id: fresh:4, j: 2, k: 1 }]
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!fdj\x00 => 06ae9cf07bdf2a5e (40 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!fdk\x00 => b7207a3fc86d0b14 (40 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ac4087c058ee9743 (46 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => ac408dc058eea175 (46 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => a34708aef516762a (57 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x04 => 6212da7be1f67900 (68 bytes)
+### owner: { CREATE fresh:1; DEFINE TABLE fresh; RETURN 1 }
+error: The table 'fresh' already exists
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { CREATE fresh:1; DEFINE TABLE fresh; CREATE fresh:2 }
+error: The table 'fresh' already exists
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { CREATE fresh:1; REMOVE TABLE fresh; RETURN SELECT * FROM fresh }
+error: The table 'fresh' does not exist
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { LET $r = type::record('fresh', (SELECT VALUE n FROM ONLY t:0)); CREATE $r; DEFINE FIELD k ON fresh VALUE 1; CREATE fresh:2; RETURN SELECT * FROM fresh ORDER BY id }
+[{ id: fresh:0 }, { id: fresh:2, k: 1 }]
+[{ id: t:0, n: 0 }]
+[]
+[{ id: fresh:0 }, { id: fresh:2, k: 1 }]
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!fdk\x00 => b7207a3fc86d0b14 (40 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x00 => ac4089c058ee9aa9 (46 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => a34706aef51672c4 (57 bytes)
+### owner: { CREATE t:1 SET n = 1; DEFINE INDEX by_n ON t FIELDS n; CREATE t:2 SET n = 1; RETURN SELECT VALUE id FROM t WHERE n = 1 ORDER BY id }
+[t:2]
+[{ id: t:0, n: 0 }, { id: t:1, n: 1 }, { id: t:2, n: 1 }]
+[t:2]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!bs\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x00 => d0a397186727310c (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x01 => d0a3931867272a40 (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dh\x80\x00\x00\x00\x00\x00\x00\x00 => a71164df71139968 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x02 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x02 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ds\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 77030c7a8f19ff68 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!il\x00\x00\x00\x00 => 67e1d49c1df65d6d (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ixby_n\x00 => 0542802b415525a4 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => dbb804487ff70435 (53 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => dbb7fe487ff6fa03 (53 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00+\x00\x00\x00\x00*\x05\x80\x01\x00\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x00 => c92225de271a9608 (14 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00+\x00\x00\x00\x00*\x05\xa0\x19\x19 \x01\x00\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 16cb7c5479867007 (14 bytes)
+### owner: { CREATE t:1 SET n = 1; CREATE t:2 SET n = 1; DEFINE INDEX u ON t FIELDS n UNIQUE; CREATE t:3 }
+[{ id: t:3 }]
+[{ id: t:0, n: 0 }, { id: t:1, n: 1 }, { id: t:2, n: 1 }, { id: t:3 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!bs\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x00 => d0a397186727310c (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x01 => d0a3951867272da6 (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dh\x80\x00\x00\x00\x00\x00\x00\x00 => a71164df71139968 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x03 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x03 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ds\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 77030c7a8f19ff68 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!il\x00\x00\x00\x00 => af63e84c860200f0 (1 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ixu\x00 => 9b91e605333fac35 (14 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => dbb804487ff70435 (53 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => dbb7fe487ff6fa03 (53 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => ccfa7cf0d5446aaf (42 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00+\x00\x00\x00\x00*\x02\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x03 => 3da0270fa2bc5c2d (14 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00+\x00\x00\x00\x00*\x05\x80\x01\x00\x00\x00\x02 => c92225de271a9608 (14 bytes)
+### owner: { CREATE t:1 SET n = 7; DEFINE TABLE mirror AS SELECT n FROM t; CREATE t:2 SET n = 8; RETURN SELECT n FROM mirror ORDER BY n }
+[{ n: 0 }, { n: 7 }, { n: 8 }]
+[{ id: t:0, n: 0 }, { id: t:1, n: 7 }, { id: t:2, n: 8 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvmirror\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbmirror\x00 => adb4b9d49b2a9a76 (123 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*mirror\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x00 => 5809a2d2b11686ff (38 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*mirror\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 5809a8d2b1169131 (38 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*mirror\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 5809b2d2b116a22f (38 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ftmirror\x00 => adb4b9d49b2a9a76 (123 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 7b7291eed22950e1 (53 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 8581497e3980d2d1 (53 bytes)
+### owner: { DEFINE EVENT e ON t THEN (DEFINE FIELD IF NOT EXISTS late ON t VALUE 'event'); CREATE t:1; DEFINE FIELD IF NOT EXISTS late ON t VALUE 'block'; CREATE t:2; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1 }, { id: t:2, late: 'event' }]
+[{ id: t:0, n: 0 }, { id: t:1 }, { id: t:2, late: 'event' }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!eve\x00 => c57b7673f79be49d (94 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdlate\x00 => f0d504d2148ddb41 (45 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ccfa78f0d54463e3 (42 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 446edda9d4a60ae0 (59 bytes)
+### owner: { DEFINE FIELD shown ON doc VALUE 'v'; UPDATE doc SET n = 1; RETURN SELECT * FROM doc ORDER BY id }
+[{ id: doc:1, n: 1, owner: user:reader, secret: 's1', shown: 'v' }, { id: doc:2, n: 1, owner: user:other, secret: 's2', shown: 'v' }]
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, n: 1, owner: user:reader, secret: 's1', shown: 'v' }, { id: doc:2, n: 1, owner: user:other, secret: 's2', shown: 'v' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvdoc\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbdoc\x00 => 300e68eb8b5799c6 (128 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*doc\x00!fdshown\x00 => 688c9e5cc564683d (44 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*doc\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 2674baedfd913311 (112 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*doc\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 83157e0b90b064b4 (111 bytes)
+### owner: { DEFINE FIELD guarded ON doc VALUE 'g' PERMISSIONS FOR select NONE; CREATE doc:3 SET owner = $auth.id; RETURN SELECT * FROM doc ORDER BY id }
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }, { guarded: 'g', id: doc:3 }]
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }, { guarded: 'g', id: doc:3 }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvdoc\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbdoc\x00 => 300e68eb8b5799c6 (128 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*doc\x00!fdguarded\x00 => 3a6ab09e2945566a (46 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*doc\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => 59dd841eb3fd25c7 (60 bytes)
+### owner: { DEFINE FIELD loud ON doc COMPUTED string::uppercase(secret ?? ''); RETURN SELECT id, loud FROM doc ORDER BY id }
+[{ id: doc:1, loud: 'S1' }, { id: doc:2, loud: 'S2' }]
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, loud: 'S1', owner: user:reader, secret: 's1' }, { id: doc:2, loud: 'S2', owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvdoc\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbdoc\x00 => 300e68eb8b5799c6 (128 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*doc\x00!fdloud\x00 => a54a0158152fc981 (71 bytes)
+### owner: { DEFINE FIELD OVERWRITE secret ON doc PERMISSIONS FULL; RETURN SELECT id, secret FROM doc ORDER BY id }
+[{ id: doc:1, secret: 's1' }, { id: doc:2, secret: 's2' }]
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvdoc\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbdoc\x00 => 300e68eb8b5799c6 (128 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*doc\x00!fdsecret\x00 => e66cccf43aa57097 (41 bytes)
+### owner: { DEFINE TABLE OVERWRITE doc PERMISSIONS FULL; RETURN SELECT id, owner FROM doc ORDER BY id }
+[{ id: doc:1, owner: user:reader }, { id: doc:2, owner: user:other }]
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvdoc\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbdoc\x00 => c3b1abb2c0a0a81d (111 bytes)
+### owner: { DEFINE FIELD c ON t COMPUTED n + 1; DEFINE FIELD OVERWRITE c ON t COMPUTED n + 2; RETURN SELECT VALUE c FROM t }
+[2]
+[{ c: 2, id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdc\x00 => d3a80142b019bd9e (40 bytes)
+### owner: { REMOVE TABLE t; CREATE t:5 SET n = 5; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:5, n: 5 }]
+[{ id: t:5, n: 5 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 766f993e4b68548e (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x05 => 6bb0d09079b1c3f5 (53 bytes)
+### owner: { REMOVE TABLE log; RETURN [(SELECT * FROM log), (INFO FOR TABLE log)] }
+error: The table 'log' does not exist
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { LET $f = 'n'; DEFINE INDEX by_n ON t FIELDS $f; CREATE t:1 SET n = 1; RETURN SELECT VALUE id FROM t WHERE n = 1 }
+[t:1]
+[{ id: t:0, n: 0 }, { id: t:1, n: 1 }]
+[t:1]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!bs\x00\x00\x00\x00 => cbf29ce484222325 (0 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!bt\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x00 => d0a397186727310c (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x01 => d0a3991867273472 (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dh\x80\x00\x00\x00\x00\x00\x00\x00 => a71164df71139968 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x01 => a8c7f732281a3812 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ds\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 77030c7a8f19ff68 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!il\x00\x00\x00\x00 => 67e1d49c1df65d6d (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ixby_n\x00 => 0542802b415525a4 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => dbb804487ff70435 (53 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00+\x00\x00\x00\x00*\x05\x80\x01\x00\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x00 => c92225de271a9608 (14 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00+\x00\x00\x00\x00*\x05\xa0\x19\x19 \x01\x00\x00\x00\x03\x02\x80\x00\x00\x00\x00\x00\x00\x01 => eff6d199505083e1 (14 bytes)
+### owner: { LET $v = 4; DEFINE FIELD k ON t VALUE $v; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1 }]
+[{ id: t:0, n: 0 }, { id: t:1 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 628d404c9e8ca124 (37 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ccfa78f0d54463e3 (42 bytes)
+### owner: { CREATE fresh:1 SET n = 1; CREATE fresh:2 SET n = 2; RETURN SELECT * FROM fresh ORDER BY id }
+[{ id: fresh:1, n: 1 }, { id: fresh:2, n: 2 }]
+[{ id: t:0, n: 0 }]
+[]
+[{ id: fresh:1, n: 1 }, { id: fresh:2, n: 2 }]
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 49c1d58539ae8411 (57 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => d210ca35eb30d995 (57 bytes)
+### owner: { CREATE fresh:1 SET n = 1; UPDATE fresh SET n += 1; DELETE fresh:1; RETURN SELECT * FROM fresh }
+[]
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+### owner: { FOR $f IN ['n', 'm'] { DEFINE INDEX OVERWRITE by_f ON t FIELDS $f; CREATE t SET n = 1, m = 1 }; RETURN SELECT VALUE count() FROM t WHERE n = 1 GROUP ALL }
+error: There was a problem with the key-value store: Transaction conflict: Write conflict, retry the transaction. This transaction can be retried
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x00 => d0a397186727310c (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dh\x80\x00\x00\x00\x00\x00\x00\x00 => a71164df71139968 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ds\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 77030c7a8f19ff68 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+### owner: { FOR $i IN 0..3 { CREATE type::record('t', $i + 1) SET n = $i; IF $i = 1 { REMOVE TABLE t } }; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:3, n: 2 }]
+[{ id: t:3, n: 2 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 766f993e4b68548e (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x00 => removed
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => 5120468accbe7467 (53 bytes)
+### owner: { IF (SELECT VALUE n FROM ONLY t:0) = 0 { DEFINE FIELD k ON t VALUE 1 }; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1, k: 1 }]
+[{ id: t:0, n: 0 }, { id: t:1, k: 1 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 8eecb43b21cdb9b8 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 386b63801f9163c2 (53 bytes)
+### owner: { DEFINE FUNCTION fn::mk() { DEFINE FIELD IF NOT EXISTS made ON t VALUE 'm'; RETURN 1 }; LET $x = fn::mk(); CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1, made: 'm' }]
+[{ id: t:0, n: 0 }, { id: t:1, made: 'm' }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnmk\x00 => 6ea51bb27d098ad2 (100 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00mk\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdmade\x00 => a76c239678241aed (41 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 72204b91e05b14ac (55 bytes)
+### owner: { DEFINE EVENT e ON t THEN (DEFINE FIELD IF NOT EXISTS late ON t VALUE 'event'); FOR $i IN 1..4 { CREATE type::record('t', $i) }; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1 }, { id: t:2, late: 'event' }, { id: t:3, late: 'event' }]
+[{ id: t:0, n: 0 }, { id: t:1 }, { id: t:2, late: 'event' }, { id: t:3, late: 'event' }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!eve\x00 => c57b7673f79be49d (94 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdlate\x00 => f0d504d2148ddb41 (45 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ccfa78f0d54463e3 (42 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x02 => 446edda9d4a60ae0 (59 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x03 => c1362404252d44f2 (59 bytes)
+### owner: { IF (SELECT VALUE n FROM ONLY t:0) = 0 { DEFINE FUNCTION OVERWRITE fn::none() { RETURN 7 } }; RETURN fn::none() }
+7
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnnone\x00 => 7d92a5ece1679a7c (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00none\x00\x00 => eba8d4f0aba80485 (17 bytes)
+### owner: { IF (SELECT VALUE n FROM ONLY t:0) = 0 { REMOVE FUNCTION fn::none }; RETURN fn::none() }
+error: Function 'fn::none' not found: The function 'fn::none' does not exist
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: { IF (SELECT VALUE n FROM ONLY t:0) = 0 { DEFINE PARAM $q VALUE 4 }; RETURN $q }
+4
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x01q\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!paq\x00 => 4fbf10b4cd99e9a5 (15 bytes)
+### owner: { DEFINE FIELD k ON t VALUE 1; CREATE t:1 SET n = 1; THROW 'stop' }
+error: An error occurred: stop
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### owner: BEGIN; { DEFINE TABLE fresh; DEFINE INDEX by_n ON fresh FIELDS n UNIQUE; CREATE fresh:1 SET n = 1; CREATE fresh:2 SET n = 1 }; COMMIT;
+NONE
+error: Database index `by_n` already contains 1, with record `fresh:1`
+error: Cannot COMMIT: the transaction was aborted due to a prior error
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!dh\x80\x00\x00\x00\x00\x00\x00\x00 => a71164df71139968 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!ds\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 77030c7a8f19ff68 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+### owner: BEGIN; { DEFINE FIELD k ON t VALUE 1; CREATE t:1 SET n = 1 }; CANCEL;
+NONE
+error: The query was not executed due to a cancelled transaction
+NONE
+[{ id: t:0, n: 0 }]
+[]
+error: The table 'fresh' does not exist
+[{ id: doc:1, owner: user:reader, secret: 's1' }, { id: doc:2, owner: user:other, secret: 's2' }]
+entries:
+### record user: { DEFINE FIELD k ON t VALUE 5; CREATE t:1 SET n = 1; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD c ON t COMPUTED n * 10; RETURN SELECT VALUE c FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD d ON t DEFAULT 'x'; CREATE t:1; UPDATE t:0 SET n = 9; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD a ON t TYPE int; CREATE t:1 SET a = 'no' }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD a ON t TYPE int ASSERT $value > 0; CREATE t:1 SET a = 3; CREATE t:2 SET a = -1 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE TABLE s SCHEMAFULL; DEFINE FIELD a ON s TYPE int; CREATE s:1 SET a = 1, b = 2; RETURN SELECT * FROM s }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE TABLE fresh; CREATE fresh:1 SET n = 1; RETURN SELECT * FROM fresh }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE TABLE fresh TYPE RELATION IN t OUT t; RELATE t:0->fresh:1->t:0; RETURN SELECT in, out FROM fresh }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE TABLE fresh; DEFINE TABLE fresh; CREATE fresh:1 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE TABLE IF NOT EXISTS t; DEFINE TABLE IF NOT EXISTS t; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE TABLE OVERWRITE t SCHEMAFULL; CREATE t:1 SET n = 1; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { REMOVE TABLE t; RETURN SELECT * FROM t }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { REMOVE TABLE IF EXISTS missing; REMOVE TABLE IF EXISTS missing; RETURN 1 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { REMOVE TABLE missing; RETURN 1 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD a ON t TYPE int; ALTER FIELD a ON t TYPE string; CREATE t:1 SET a = 's'; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { ALTER TABLE t SCHEMAFULL; CREATE t:1 SET n = 1, extra = 2; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD a ON t VALUE 1; REMOVE FIELD a ON t; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE INDEX by_n ON t FIELDS n; FOR $i IN 1..6 { CREATE type::record('t', $i) SET n = $i % 3 }; RETURN SELECT VALUE id FROM t WHERE n = 1 ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE INDEX by_n ON t FIELDS n UNIQUE; CREATE t:1 SET n = 1; CREATE t:2 SET n = 1 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE INDEX by_n ON t FIELDS n UNIQUE; CREATE t:1 SET n = 1; UPDATE t:1 SET n = 2; DELETE t:0; RETURN SELECT VALUE id FROM t WHERE n = 2 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE TABLE fresh; DEFINE INDEX by_n ON fresh FIELDS n; CREATE fresh:1 SET n = 4; RETURN SELECT VALUE id FROM fresh WHERE n = 4 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE INDEX by_n ON t FIELDS n; REMOVE INDEX by_n ON t; CREATE t:1 SET n = 1; RETURN SELECT VALUE id FROM t WHERE n = 1 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE INDEX by_n ON t FIELDS n; DEFINE INDEX OVERWRITE by_n ON t FIELDS n UNIQUE; CREATE t:1 SET n = 0 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE EVENT noted ON t WHEN $event = 'CREATE' THEN (UPSERT type::record('log', record::id($after.id)) SET of = $after.id); CREATE t:1; RETURN SELECT VALUE of FROM log }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE TABLE counts AS SELECT count() AS c FROM t GROUP ALL; CREATE t:1; CREATE t:2; RETURN SELECT c FROM counts }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE TABLE mirror AS SELECT n FROM t; CREATE t:1 SET n = 7; RETURN SELECT n FROM mirror ORDER BY n }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD up ON t TYPE option<record<fresh>> REFERENCE ON DELETE UNSET; CREATE fresh:1; UPDATE t:0 SET up = fresh:1; DELETE fresh:1; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FUNCTION fn::twice($x: int) { $x * 2 }; RETURN fn::twice(4) }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FUNCTION fn::f() { 1 }; DEFINE FUNCTION OVERWRITE fn::f() { 2 }; RETURN fn::f() }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FUNCTION fn::f() { 1 }; REMOVE FUNCTION fn::f; RETURN fn::f() }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE PARAM $p VALUE 3; RETURN $p }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FUNCTION fn::rows() { SELECT VALUE n FROM t ORDER BY n }; CREATE t:1 SET n = 1; RETURN fn::rows() }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FUNCTION OVERWRITE fn::none() { RETURN 7 }; RETURN fn::none() }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { REMOVE FUNCTION fn::none; RETURN fn::none() }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { FOR $i IN 0..2 { DEFINE FUNCTION OVERWRITE fn::none() { RETURN 7 } }; RETURN fn::none() }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE PARAM $p VALUE 3; CREATE t:1 SET p = $p; RETURN SELECT VALUE p FROM t:1 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD a ON t VALUE 1; CREATE t:1 SET n = 1; DEFINE FIELD b ON t VALUE 2; CREATE t:2 SET n = 2; DEFINE FIELD c ON t VALUE 3; CREATE t:3 SET n = 3; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { IF true { DEFINE FIELD k ON t VALUE 1 }; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { IF false { DEFINE FIELD k ON t VALUE 1 }; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:1 }]
+[{ id: t:0, n: 0 }, { id: t:1 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ccfa78f0d54463e3 (42 bytes)
+### record user: { FOR $i IN 0..3 { DEFINE FIELD IF NOT EXISTS k ON t VALUE $i; CREATE type::record('t', $i + 1) }; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { FOR $i IN 0..3 { DEFINE FIELD OVERWRITE k ON t VALUE $i; CREATE type::record('t', $i + 1) }; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD k ON t VALUE 1; FOR $i IN 0..3 { CREATE type::record('t', $i + 1) }; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { CREATE fresh:1; DEFINE FIELD k ON fresh VALUE 1; CREATE fresh:2; RETURN SELECT * FROM fresh ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { CREATE fresh:1 SET n = 1; DEFINE INDEX by_n ON fresh FIELDS n; CREATE fresh:2 SET n = 1; RETURN SELECT VALUE id FROM fresh WHERE n = 1 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { CREATE fresh:1; DEFINE EVENT e ON fresh THEN (UPSERT type::record('log', record::id($after.id)) SET of = $after.id); CREATE fresh:2; RETURN SELECT VALUE of FROM log }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { IF (SELECT VALUE n FROM ONLY t:0) = 1 { CREATE fresh:1 }; DEFINE FIELD k ON fresh VALUE 1; CREATE fresh:2; RETURN SELECT * FROM fresh ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { CREATE fresh:1; CREATE fresh:2; DEFINE FIELD k ON fresh VALUE 1; CREATE fresh:3; DEFINE FIELD j ON fresh VALUE 2; CREATE fresh:4; RETURN SELECT * FROM fresh ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { CREATE fresh:1; DEFINE TABLE fresh; RETURN 1 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { CREATE fresh:1; DEFINE TABLE fresh; CREATE fresh:2 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { CREATE fresh:1; REMOVE TABLE fresh; RETURN SELECT * FROM fresh }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { LET $r = type::record('fresh', (SELECT VALUE n FROM ONLY t:0)); CREATE $r; DEFINE FIELD k ON fresh VALUE 1; CREATE fresh:2; RETURN SELECT * FROM fresh ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { CREATE t:1 SET n = 1; DEFINE INDEX by_n ON t FIELDS n; CREATE t:2 SET n = 1; RETURN SELECT VALUE id FROM t WHERE n = 1 ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { CREATE t:1 SET n = 1; CREATE t:2 SET n = 1; DEFINE INDEX u ON t FIELDS n UNIQUE; CREATE t:3 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { CREATE t:1 SET n = 7; DEFINE TABLE mirror AS SELECT n FROM t; CREATE t:2 SET n = 8; RETURN SELECT n FROM mirror ORDER BY n }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE EVENT e ON t THEN (DEFINE FIELD IF NOT EXISTS late ON t VALUE 'event'); CREATE t:1; DEFINE FIELD IF NOT EXISTS late ON t VALUE 'block'; CREATE t:2; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD shown ON doc VALUE 'v'; UPDATE doc SET n = 1; RETURN SELECT * FROM doc ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD guarded ON doc VALUE 'g' PERMISSIONS FOR select NONE; CREATE doc:3 SET owner = $auth.id; RETURN SELECT * FROM doc ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD loud ON doc COMPUTED string::uppercase(secret ?? ''); RETURN SELECT id, loud FROM doc ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD OVERWRITE secret ON doc PERMISSIONS FULL; RETURN SELECT id, secret FROM doc ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE TABLE OVERWRITE doc PERMISSIONS FULL; RETURN SELECT id, owner FROM doc ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD c ON t COMPUTED n + 1; DEFINE FIELD OVERWRITE c ON t COMPUTED n + 2; RETURN SELECT VALUE c FROM t }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { REMOVE TABLE t; CREATE t:5 SET n = 5; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { REMOVE TABLE log; RETURN [(SELECT * FROM log), (INFO FOR TABLE log)] }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { LET $f = 'n'; DEFINE INDEX by_n ON t FIELDS $f; CREATE t:1 SET n = 1; RETURN SELECT VALUE id FROM t WHERE n = 1 }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { LET $v = 4; DEFINE FIELD k ON t VALUE $v; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { CREATE fresh:1 SET n = 1; CREATE fresh:2 SET n = 2; RETURN SELECT * FROM fresh ORDER BY id }
+[]
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+### record user: { CREATE fresh:1 SET n = 1; UPDATE fresh SET n += 1; DELETE fresh:1; RETURN SELECT * FROM fresh }
+[]
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+### record user: { FOR $f IN ['n', 'm'] { DEFINE INDEX OVERWRITE by_f ON t FIELDS $f; CREATE t SET n = 1, m = 1 }; RETURN SELECT VALUE count() FROM t WHERE n = 1 GROUP ALL }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { FOR $i IN 0..3 { CREATE type::record('t', $i + 1) SET n = $i; IF $i = 1 { REMOVE TABLE t } }; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { IF (SELECT VALUE n FROM ONLY t:0) = 0 { DEFINE FIELD k ON t VALUE 1 }; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FUNCTION fn::mk() { DEFINE FIELD IF NOT EXISTS made ON t VALUE 'm'; RETURN 1 }; LET $x = fn::mk(); CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE EVENT e ON t THEN (DEFINE FIELD IF NOT EXISTS late ON t VALUE 'event'); FOR $i IN 1..4 { CREATE type::record('t', $i) }; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { IF (SELECT VALUE n FROM ONLY t:0) = 0 { DEFINE FUNCTION OVERWRITE fn::none() { RETURN 7 } }; RETURN fn::none() }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { IF (SELECT VALUE n FROM ONLY t:0) = 0 { REMOVE FUNCTION fn::none }; RETURN fn::none() }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { IF (SELECT VALUE n FROM ONLY t:0) = 0 { DEFINE PARAM $q VALUE 4 }; RETURN $q }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: { DEFINE FIELD k ON t VALUE 1; CREATE t:1 SET n = 1; THROW 'stop' }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: BEGIN; { DEFINE TABLE fresh; DEFINE INDEX by_n ON fresh FIELDS n UNIQUE; CREATE fresh:1 SET n = 1; CREATE fresh:2 SET n = 1 }; COMMIT;
+NONE
+error: IAM error: Not enough permissions to perform this action
+error: Cannot COMMIT: the transaction was aborted due to a prior error
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:
+### record user: BEGIN; { DEFINE FIELD k ON t VALUE 1; CREATE t:1 SET n = 1 }; CANCEL;
+NONE
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+[]
+[{ id: doc:1, owner: user:reader, secret: 's1' }]
+entries:

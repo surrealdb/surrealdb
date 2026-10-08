@@ -25,10 +25,8 @@ reason = """
 	group's key rather than by the spelling `g`.
 
 	An argument naming a field that is *not* a grouping key is deliberately
-	absent. The engines answer it differently — the per-row engine collects the
-	field over the group and reports a wrong-type error, the streaming engine
-	answers `NONE` — and which of those is right is a separate question from
-	the one these queries ask.
+	absent: what it should answer is a separate question from the one these
+	queries ask.
 """
 
 [[test.results]]

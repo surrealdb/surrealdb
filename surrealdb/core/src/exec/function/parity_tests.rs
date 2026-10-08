@@ -1,14 +1,14 @@
-//! Parity tests between the streaming [`FunctionRegistry`] declarations and
-//! the legacy `crate::fnc` dispatch layer.
+//! Parity tests between the [`FunctionRegistry`] declarations and
+//! the `crate::fnc` dispatch layer.
 //!
 //! These tests permanently prevent the two layers from drifting apart:
 //!
 //! - `registry_signatures_match_fnc_layer` locks every registered function's declared arity range
 //!   (and, where a sample invocation is possible, its declared return kind) to the behaviour of the
-//!   legacy `fnc::` layer, which is the source of truth for builtin function signatures.
-//! - `legacy_dispatch_names_are_registered` locks the name set: every function dispatchable through
-//!   `fnc::synchronous` / `fnc::asynchronous` must be resolvable in the streaming registry (as a
-//!   scalar, aggregate, projection or index function).
+//!   `fnc::` layer, which is the source of truth for builtin function signatures.
+//! - `fnc_dispatch_names_are_registered` locks the name set: every function dispatchable through
+//!   `fnc::synchronous` / `fnc::asynchronous` must be resolvable in the registry (as a scalar,
+//!   aggregate, projection or index function).
 
 use std::sync::{Arc, LazyLock};
 
@@ -97,9 +97,9 @@ fn classify(res: anyhow::Result<Value>) -> Probe {
 	}
 }
 
-/// Probe the legacy fnc layer with `n` placeholder arguments, reporting how
+/// Probe the fnc layer with `n` placeholder arguments, reporting how
 /// the argument count was treated.
-async fn probe_legacy(ctx: &FrozenContext, opt: &Options, name: &str, n: usize) -> Probe {
+async fn probe_fnc(ctx: &FrozenContext, opt: &Options, name: &str, n: usize) -> Probe {
 	let args = vec![Value::None; n];
 	let probe = classify(crate::fnc::synchronous(ctx, None, name, args.clone()));
 	if probe != Probe::Unknown {
@@ -161,7 +161,7 @@ fn format_arity(lower: usize, upper: Option<usize>) -> String {
 	}
 }
 
-/// Check one registered function's declared signature against the legacy fnc
+/// Check one registered function's declared signature against the fnc
 /// layer, collecting any mismatches into `problems`.
 async fn check_function(
 	ctx: &FrozenContext,
@@ -174,17 +174,17 @@ async fn check_function(
 	let (lower, upper) = sig.arity();
 	let probe_hi = upper.unwrap_or(lower) + PROBE_EXTRA;
 
-	// Determine which argument counts the legacy layer accepts.
-	let mut legacy: Vec<usize> = Vec::new();
+	// Determine which argument counts the fnc layer accepts.
+	let mut fnc_counts: Vec<usize> = Vec::new();
 	for n in 0..=probe_hi {
-		match probe_legacy(ctx, opt, name, n).await {
-			Probe::Accepted => legacy.push(n),
+		match probe_fnc(ctx, opt, name, n).await {
+			Probe::Accepted => fnc_counts.push(n),
 			Probe::ArityRejected => {}
 			Probe::Gated => return,
 			Probe::Unknown => {
 				problems.push(format!(
-					"`{name}` is registered in the streaming registry but is not \
-					 dispatchable in the legacy fnc layer"
+					"`{name}` is registered in the registry but is not \
+					 dispatchable in the fnc layer"
 				));
 				return;
 			}
@@ -196,28 +196,28 @@ async fn check_function(
 		Some(set) => set.to_vec(),
 		None => (lower..=upper.unwrap_or(probe_hi)).collect(),
 	};
-	if legacy != expected {
+	if fnc_counts != expected {
 		problems.push(format!(
-			"`{name}`: declared arity is {} argument(s) but the legacy fnc layer \
-			 accepts argument counts {legacy:?}",
+			"`{name}`: declared arity is {} argument(s) but the fnc layer \
+			 accepts argument counts {fnc_counts:?}",
 			format_arity(lower, upper),
 		));
 	}
 
 	if let Some(func) = pure {
-		// Pure functions can also be probed directly on the streaming side,
+		// Pure functions can also be probed directly on the registry side,
 		// catching handwritten `invoke` implementations that drift from the
 		// fnc layer.
-		let mut streaming: Vec<usize> = Vec::new();
+		let mut registry_counts: Vec<usize> = Vec::new();
 		for n in 0..=probe_hi {
 			if classify(func.invoke(vec![Value::None; n])) == Probe::Accepted {
-				streaming.push(n);
+				registry_counts.push(n);
 			}
 		}
-		if streaming != legacy {
+		if registry_counts != fnc_counts {
 			problems.push(format!(
-				"`{name}`: the streaming invoke accepts argument counts {streaming:?} \
-				 but the legacy fnc layer accepts {legacy:?}"
+				"`{name}`: the registry's invoke accepts argument counts {registry_counts:?} \
+				 but the fnc layer accepts {fnc_counts:?}"
 			));
 		}
 
@@ -245,7 +245,7 @@ async fn registry_signatures_match_fnc_layer() {
 	let (ctx, opt) = crate::dbs::test::mock().await;
 	let registry = FunctionRegistry::with_builtins();
 
-	// Collect every registered function which has a legacy fnc counterpart.
+	// Collect every registered function which has an fnc counterpart.
 	// Aggregate registrations are skipped: their accumulator model has no
 	// comparable fnc signature, and their scalar twins are checked normally.
 	let mut entries: RegistryEntries = Vec::new();
@@ -273,7 +273,7 @@ async fn registry_signatures_match_fnc_layer() {
 		}
 		panic!(
 			"{} function declaration(s) in exec/function/builtin do not match the \
-			 legacy fnc implementations; the fnc implementation is the source of \
+			 fnc implementations; the fnc implementation is the source of \
 			 truth, so update the registry declaration(s)",
 			problems.len()
 		);
@@ -281,10 +281,10 @@ async fn registry_signatures_match_fnc_layer() {
 }
 
 #[test]
-fn legacy_dispatch_names_are_registered() {
+fn fnc_dispatch_names_are_registered() {
 	let registry = FunctionRegistry::with_builtins();
 
-	// Harvest every function name from the legacy dispatch tables, using the
+	// Harvest every function name from the fnc dispatch tables, using the
 	// same source scrape as `fnc::tests::implementations_are_present`.
 	let fnc_mod = include_str!("../../fnc/mod.rs");
 	let idiom_regex = Regex::new(r"(?ms)pub async fn idiom\(.*}").unwrap();
@@ -313,17 +313,17 @@ fn legacy_dispatch_names_are_registered() {
 			|| registry.is_index_function(name);
 		if !registered {
 			problems.push(format!(
-				"`{name}` is dispatchable in the legacy fnc layer but missing from \
-				 the streaming FunctionRegistry"
+				"`{name}` is dispatchable in the fnc layer but missing from \
+				 the FunctionRegistry"
 			));
 		}
 	}
 
 	if !problems.is_empty() {
-		eprintln!("Functions missing from the streaming registry:");
+		eprintln!("Functions missing from the registry:");
 		for problem in &problems {
 			eprintln!(" - {problem}");
 		}
-		panic!("{} legacy function(s) are not registered in exec/function/builtin", problems.len());
+		panic!("{} fnc function(s) are not registered in exec/function/builtin", problems.len());
 	}
 }

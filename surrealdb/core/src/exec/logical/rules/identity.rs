@@ -72,6 +72,7 @@ fn apply(node: &mut LogicalOp, cx: &mut RuleContext<'_>) -> bool {
 					&& let LogicalOp::Values(LogicalValues {
 						expr,
 						for_update,
+						..
 					}) = input.as_ref()
 					// Dropping the source drops the evaluation of the literal it
 					// is built from, so it goes only where that literal is inert
@@ -88,6 +89,7 @@ fn apply(node: &mut LogicalOp, cx: &mut RuleContext<'_>) -> bool {
 				return Outcome::Rewritten(LogicalOp::Values(LogicalValues {
 					expr: LogicalExpr::Array(Vec::new()),
 					for_update: *for_update,
+					written: false,
 				}));
 			}
 			Outcome::Unchanged(LogicalOp::Filter(LogicalFilter {
@@ -99,6 +101,7 @@ fn apply(node: &mut LogicalOp, cx: &mut RuleContext<'_>) -> bool {
 			input,
 			predicate,
 			auth,
+			guard,
 		}) => {
 			if is_true(&predicate) {
 				Outcome::Rewritten(*input)
@@ -107,6 +110,7 @@ fn apply(node: &mut LogicalOp, cx: &mut RuleContext<'_>) -> bool {
 					input,
 					predicate,
 					auth,
+					guard,
 				}))
 			}
 		}
@@ -271,6 +275,7 @@ fn at_most_one_row(op: &LogicalOp) -> bool {
 		LogicalOp::Source(_)
 		| LogicalOp::Values(_)
 		| LogicalOp::Match(_)
+		| LogicalOp::Write(_)
 		| LogicalOp::UnionAll(_)
 		| LogicalOp::Split(_)
 		| LogicalOp::Explain(_)
@@ -280,6 +285,7 @@ fn at_most_one_row(op: &LogicalOp) -> bool {
 		| LogicalOp::Return(_)
 		| LogicalOp::Foreach(_)
 		| LogicalOp::Info(_)
+		| LogicalOp::Ddl(_)
 		| LogicalOp::Sleep(_) => false,
 	}
 }
@@ -291,7 +297,7 @@ mod tests {
 	use super::super::super::lower_test as lower;
 	use super::super::test_support::{rewritten, rewritten_checking, rewritten_sql, spine};
 	use super::*;
-	use crate::expr::logical::LogicalLiteral;
+	use crate::expr::logical::{GuardKind, LogicalLiteral};
 
 	#[test]
 	fn a_true_predicate_removes_the_filter_and_a_false_one_keeps_it() {
@@ -314,6 +320,7 @@ mod tests {
 				})),
 				predicate: LogicalExpr::Literal(LogicalLiteral::Bool(predicate)),
 				auth: None,
+				guard: GuardKind::Read,
 			})
 		};
 		assert_eq!(rewritten(over(true)).name(), "Source");

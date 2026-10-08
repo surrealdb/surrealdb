@@ -1,14 +1,13 @@
-//! Definer's-rights (`AUTH LIMIT`) parity between the two execution engines.
+//! Definer's-rights (`AUTH LIMIT`) for a read-time `COMPUTED` body.
 //!
 //! `DEFINE FIELD` stamps the definer's `(level, max_role)` onto the field
 //! (`AuthLimit::new_from_auth`), and `Options::limited_by` narrows the auth used
 //! to evaluate that field's bodies so a body cannot exercise more privilege than
 //! the identity that wrote it.
 //!
-//! The narrowing applies on the write path (`doc/field.rs`, `doc/event.rs`), to a
-//! field's `PERMISSIONS FOR select` predicate (`doc/reduce.rs`), and to a
-//! `COMPUTED` body evaluated at read time (`doc/compute.rs` on the legacy engine,
-//! `compute_fields_for_value` on the streaming one). Both engines must agree.
+//! The narrowing applies on the write path, to a field's `PERMISSIONS FOR select`
+//! predicate, and to a `COMPUTED` body evaluated at read time
+//! (`compute_fields_for_value`).
 //!
 //! Note the narrowing is a no-op for record and anonymous readers
 //! (`Actor::new_limited` returns early for those levels), so a test that wants to
@@ -20,7 +19,7 @@ use surrealdb_types::Value;
 use test_log::test;
 
 use crate::catalog::providers::CatalogProvider;
-use crate::dbs::{NewPlannerStrategy, Session};
+use crate::dbs::Session;
 use crate::iam::{Level, Role};
 use crate::kvs::{Datastore, TransactionType};
 
@@ -30,9 +29,7 @@ use crate::kvs::{Datastore, TransactionType};
 /// `INFO FOR ROOT` is the probe: it requires a root-level identity, so it is
 /// refused under the definer's `(Database, Editor)` narrowing and returns the
 /// root catalog without it.
-async fn read_root_only_computed_field(
-	strategy: NewPlannerStrategy,
-) -> Result<Result<Value, surrealdb_types::Error>> {
+async fn read_root_only_computed_field() -> Result<Result<Value, surrealdb_types::Error>> {
 	let ds = Datastore::new("memory").await?;
 	{
 		let tx = ds.transaction(TransactionType::Write).await?;
@@ -59,13 +56,13 @@ async fn read_root_only_computed_field(
 	}
 
 	// Root Owner reads the field back.
-	let reader = Session::owner().with_ns("test").with_db("test").new_planner_strategy(strategy);
+	let reader = Session::owner().with_ns("test").with_db("test");
 	let mut responses = ds.execute("SELECT leak FROM thing:1;", &reader, None).await?;
 	Ok(responses.remove(0).result)
 }
 
 /// Describe a probe outcome as either the namespace names it disclosed or the
-/// refusal it produced, so the two engines can be compared on both axes at once.
+/// refusal it produced.
 fn outcome(result: Result<Value, surrealdb_types::Error>) -> Result<Vec<String>, String> {
 	let value = match result {
 		Ok(value) => value,
@@ -89,18 +86,11 @@ fn outcome(result: Result<Value, surrealdb_types::Error>) -> Result<Vec<String>,
 }
 
 /// A `(Database, Editor)` definer's `INFO FOR ROOT` body must be refused even
-/// when the reader is root Owner, and both engines must refuse it the same way.
+/// when the reader is root Owner.
 #[test(tokio::test(flavor = "multi_thread"))]
-async fn both_engines_narrow_a_read_time_computed_body_to_the_definer() -> Result<()> {
-	let legacy = outcome(read_root_only_computed_field(NewPlannerStrategy::ComputeOnly).await?);
-	let streaming =
-		outcome(read_root_only_computed_field(NewPlannerStrategy::AllReadOnlyStatements).await?);
-
-	assert_eq!(
-		legacy, streaming,
-		"the two engines disagree on the auth used for a read-time COMPUTED body"
-	);
-	let err = legacy.expect_err("a (Database, Editor) definer must not reach INFO FOR ROOT");
+async fn a_read_time_computed_body_is_narrowed_to_the_definer() -> Result<()> {
+	let outcome = outcome(read_root_only_computed_field().await?);
+	let err = outcome.expect_err("a (Database, Editor) definer must not reach INFO FOR ROOT");
 	assert!(err.contains("Not enough permissions"), "expected a permission refusal, got: {err}");
 	Ok(())
 }

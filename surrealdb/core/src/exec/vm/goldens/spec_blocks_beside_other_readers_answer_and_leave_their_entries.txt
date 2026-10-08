@@ -1,0 +1,61 @@
+### owner: { DEFINE FUNCTION fn::mk() { DEFINE FIELD IF NOT EXISTS made ON t VALUE 'm'; RETURN 1 }; DEFINE FIELD k ON t VALUE 2; RETURN [fn::mk(), fn::mk()]; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+[1, 1]
+[{ id: t:0, n: 0 }]
+error: The table 'fresh' does not exist
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!fnmk\x00 => 6ea51bb27d098ad2 (100 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!ov\x00mk\x00\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 28f89d18482a6937 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdmade\x00 => a76c239678241aed (41 bytes)
+### owner: { DEFINE FIELD k ON t VALUE 2; RETURN SELECT n, fn::none() AS f, (SELECT VALUE k FROM ONLY $parent.id) AS again FROM t }
+[{ again: NONE, f: NONE, n: 0 }]
+[{ id: t:0, n: 0 }]
+error: The table 'fresh' does not exist
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 28f89d18482a6937 (36 bytes)
+### owner: { DEFINE FIELD k ON t VALUE 2; LET $before = (SELECT VALUE k FROM t); CREATE t:9 SET n = 9; RETURN [$before, (SELECT VALUE k FROM t:9), (SELECT VALUE count() FROM t GROUP ALL)] }
+[[NONE], [2], [2]]
+[{ id: t:0, n: 0 }, { id: t:9, k: 2, n: 9 }]
+error: The table 'fresh' does not exist
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 28f89d18482a6937 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x02\x80\x00\x00\x00\x00\x00\x00\t => 682275817b0f967c (64 bytes)
+### owner: { CREATE fresh:1; DEFINE FIELD k ON t VALUE 3; RETURN [(SELECT * FROM fresh), (SELECT VALUE k FROM t)] }
+[[{ id: fresh:1 }], [NONE]]
+[{ id: t:0, n: 0 }]
+[{ id: fresh:1 }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => ac4087c058ee9743 (46 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => e0d2f877684d0456 (36 bytes)
+### record user: { DEFINE FUNCTION fn::mk() { DEFINE FIELD IF NOT EXISTS made ON t VALUE 'm'; RETURN 1 }; DEFINE FIELD k ON t VALUE 2; RETURN [fn::mk(), fn::mk()]; CREATE t:1; RETURN SELECT * FROM t ORDER BY id }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+entries:
+### record user: { DEFINE FIELD k ON t VALUE 2; RETURN SELECT n, fn::none() AS f, (SELECT VALUE k FROM ONLY $parent.id) AS again FROM t }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+entries:
+### record user: { DEFINE FIELD k ON t VALUE 2; LET $before = (SELECT VALUE k FROM t); CREATE t:9 SET n = 9; RETURN [$before, (SELECT VALUE k FROM t:9), (SELECT VALUE count() FROM t GROUP ALL)] }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+entries:
+### record user: { CREATE fresh:1; DEFINE FIELD k ON t VALUE 3; RETURN [(SELECT * FROM fresh), (SELECT VALUE k FROM t)] }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+entries:
+### a region reading a speculated field
+[0, 150, 300, 450, 600, 750]

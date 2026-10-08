@@ -1061,7 +1061,12 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 			},
 		),
 		("Unimplemented", ExecError::Unimplemented("sample".to_string())),
-		("PlannerUnsupported", ExecError::PlannerUnsupported("sample".to_string())),
+		(
+			"PlannerUnsupported",
+			ExecError::PlannerUnsupported {
+				reason: "sample".to_string(),
+			},
+		),
 		("AccessLevelMismatch", ExecError::AccessLevelMismatch),
 		("AccessUnsupportedAlgorithm", ExecError::AccessUnsupportedAlgorithm),
 		(

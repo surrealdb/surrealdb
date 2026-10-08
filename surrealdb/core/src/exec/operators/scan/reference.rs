@@ -1,4 +1,4 @@
-//! Reference scanning operator for the streaming execution engine.
+//! Reference scanning operator for the engine.
 //!
 //! This operator scans record references (the `<~` operator) to find records
 //! that reference a given source record. Unlike graph edges which are explicit
@@ -15,7 +15,6 @@ use surrealdb_datastore::values::inline_cache::{CacheValue, RefCacheEntry};
 use super::common::{
 	evaluate_bound_key, extract_record_ids_into, resolve_record_batch, resolve_version_stamp,
 };
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::permission::{
 	PhysicalPermission, should_check_perms, validate_record_user_access,
@@ -171,7 +170,7 @@ impl ExecOperator for ReferenceScan {
 		let check_perms = should_check_perms(&db_ctx, Action::View)?;
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -272,7 +271,7 @@ impl ExecOperator for ReferenceScan {
 							Some(capped) => *capped,
 							None => {
 								let tb = txn
-									.get_tb(ns_id, db_id, &rid.table, None)
+									.layout_tb(ns_id, db_id, &rid.table, None)
 									.await
 									.context("Failed to resolve the referenced record's table")?;
 								let capped =
@@ -639,7 +638,7 @@ impl ExecOperator for ReferenceScan {
 /// bounds that was supplied: each of them narrows the scan by one more field of
 /// the reference key.
 #[allow(clippy::too_many_arguments)]
-async fn compute_ref_key_range(
+pub(crate) async fn compute_ref_key_range(
 	ns_id: NamespaceId,
 	db_id: DatabaseId,
 	rid: &RecordId,
@@ -649,8 +648,31 @@ async fn compute_ref_key_range(
 	range_end: &Bound<Arc<dyn PhysicalExpr>>,
 	ctx: &ExecutionContext,
 ) -> Result<TypedRange<()>, ControlFlow> {
-	let has_range =
-		!matches!(range_start, Bound::Unbounded) || !matches!(range_end, Bound::Unbounded);
+	let start = match range_start {
+		Bound::Included(x) => Bound::Included(evaluate_bound_key(x, ctx).await?),
+		Bound::Excluded(x) => Bound::Excluded(evaluate_bound_key(x, ctx).await?),
+		Bound::Unbounded => Bound::Unbounded,
+	};
+	let end = match range_end {
+		Bound::Included(x) => Bound::Included(evaluate_bound_key(x, ctx).await?),
+		Bound::Excluded(x) => Bound::Excluded(evaluate_bound_key(x, ctx).await?),
+		Bound::Unbounded => Bound::Unbounded,
+	};
+	ref_key_range(ns_id, db_id, rid, referencing_table, referencing_field, start, end)
+}
+
+/// [`compute_ref_key_range`] over evaluated bounds `start` and `end` on the
+/// referencing record's key.
+pub(crate) fn ref_key_range(
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	rid: &RecordId,
+	referencing_table: Option<&TableName>,
+	referencing_field: Option<&str>,
+	start: Bound<RecordIdKey>,
+	end: Bound<RecordIdKey>,
+) -> Result<TypedRange<()>, ControlFlow> {
+	let has_range = !matches!(start, Bound::Unbounded) || !matches!(end, Bound::Unbounded);
 
 	let prefix = DbRoot {
 		ns: ns_id,
@@ -670,17 +692,12 @@ async fn compute_ref_key_range(
 
 		// The bounds are on the referencing record's key, which is the field the
 		// reference key carries after the referring field.
-		let start = match range_start {
-			Bound::Included(x) => Bound::Included(Cow::Owned(evaluate_bound_key(x, ctx).await?)),
-			Bound::Excluded(x) => Bound::Excluded(Cow::Owned(evaluate_bound_key(x, ctx).await?)),
+		let owned = |bound: Bound<RecordIdKey>| match bound {
+			Bound::Included(key) => Bound::Included(Cow::Owned(key)),
+			Bound::Excluded(key) => Bound::Excluded(Cow::Owned(key)),
 			Bound::Unbounded => Bound::Unbounded,
 		};
-
-		let end = match range_end {
-			Bound::Included(x) => Bound::Included(Cow::Owned(evaluate_bound_key(x, ctx).await?)),
-			Bound::Excluded(x) => Bound::Excluded(Cow::Owned(evaluate_bound_key(x, ctx).await?)),
-			Bound::Unbounded => Bound::Unbounded,
-		};
+		let (start, end) = (owned(start), owned(end));
 
 		Ok(ReferenceForeignFieldPrefix {
 			ns: prefix.ns,

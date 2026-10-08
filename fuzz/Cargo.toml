@@ -65,6 +65,12 @@ doc = false
 
 
 [[bin]]
+name = "fuzz_vm_executor"
+path = "fuzz_targets/fuzz_vm_executor.rs"
+test = false
+doc = false
+
+[[bin]]
 name = "fuzz_format"
 path = "fuzz_targets/fuzz_format.rs"
 test = false

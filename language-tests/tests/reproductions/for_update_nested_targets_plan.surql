@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -37,12 +36,12 @@ error = "Invalid query: SELECT ... FOR UPDATE requires record ids as targets"
 
 [[test.results]]
 value = '''
-'Return [ctx: Db]
-    Sequence [ctx: Db] [statements: 2]
+'Return [ctx: Rt]
+    Sequence [ctx: Rt] [statements: 2]
         Let [ctx: Rt] [name: $r]
-            Expr [ctx: Rt] [expr: [1]]
+            ExprPlan [ctx: Rt] [expr: [1]]
         SelectProject [ctx: Db] [projections: *]
-            DynamicScan [ctx: Db] [source: $r, for_update: true]
+            Values [ctx: Rt] [expr: $r, for_update: true]
 ''''
 
 [[test.results]]
@@ -56,8 +55,8 @@ error = "Invalid query: SELECT ... FOR UPDATE requires record ids as targets"
 
 [[test.results]]
 value = '''
-'Return [ctx: Db]
-    Project [ctx: Db]
+'Return [ctx: Rt]
+    SelectProject [ctx: Db] [projections: *]
         RecordIdScan [ctx: Db] [record_id: person:1, for_update: true]
 ''''
 */

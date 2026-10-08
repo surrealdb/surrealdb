@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "A full-text OR-of-matches nested inside an AND is driven from the multi-index FT union (UnionIndexScan over two FullTextScan) instead of driving from the non-FT equality index and evaluating the OR as a per-row filter. Regression guard for the nested-OR-in-AND fix (the full-text cousin of issue #4996). Covers: (A) top-level OR unions; (B) OR nested in an AND with an indexed sibling unions; (C) a De Morgan rewrite unions; (D) WITH INDEX leaves the pinned plan alone; (E) the nested OR is the only indexable part (unindexed sibling) and still unions rather than falling back to a table scan."
@@ -43,7 +42,7 @@ value = "NONE"
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 3}
     Filter [ctx: Db] [predicate: search_title @1@ 'hello' OR search_body @2@ 'hello'] {rows: 3}
-        BitmapResolve [ctx: Db] [table: asset] {rows: 3}
+        BitmapScan [ctx: Db] [table: asset] {rows: 3}
             BitmapOr [ctx: Db] {rows: 3}
                 BitmapFullTextScan [ctx: Db] [index: asset_search_title_ft, query: hello] {rows: 2}
                 BitmapFullTextScan [ctx: Db] [index: asset_search_body_ft, query: hello] {rows: 1}
@@ -53,8 +52,8 @@ Total rows: 3"'''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
-    Filter [ctx: Db] [predicate: type = 'doc' AND search_title @1@ 'hello' OR search_body @2@ 'hello'] {rows: 2}
-        BitmapResolve [ctx: Db] [table: asset] {rows: 2}
+    Filter [ctx: Db] [predicate: type = 'doc' AND (search_title @1@ 'hello' OR search_body @2@ 'hello')] {rows: 2}
+        BitmapScan [ctx: Db] [table: asset] {rows: 2}
             BitmapAnd [ctx: Db] {rows: 2}
                 BitmapIndexScan [ctx: Db] [index: asset_type_idx, access: = 'doc'] {rows: 2}
                 BitmapOr [ctx: Db] {rows: 3}
@@ -67,7 +66,7 @@ Total rows: 2"'''
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
     Filter [ctx: Db] [predicate: type = 'doc' AND search_title @1@ 'hello' OR type = 'doc' AND search_body @2@ 'hello'] {rows: 2}
-        BitmapResolve [ctx: Db] [table: asset] {rows: 3}
+        BitmapScan [ctx: Db] [table: asset] {rows: 2}
             BitmapOr [ctx: Db] {rows: 3}
                 BitmapFullTextScan [ctx: Db] [index: asset_search_title_ft, query: hello] {rows: 2}
                 BitmapFullTextScan [ctx: Db] [index: asset_search_body_ft, query: hello] {rows: 1}
@@ -77,17 +76,18 @@ Total rows: 2"'''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
-    TableScan [ctx: Db] [table: asset, direction: Forward, predicate: type = 'doc' AND search_title @1@ 'hello' OR search_body @2@ 'hello', pre_decode_filter: no (unsupported predicate)] {rows: 2}
+    Filter [ctx: Db] [predicate: type = 'doc' AND (search_title @1@ 'hello' OR search_body @2@ 'hello')] {rows: 2}
+        TableScan [ctx: Db] [table: asset, direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
-    Filter [ctx: Db] [predicate: tag = 'x' AND search_title @1@ 'hello' OR search_body @2@ 'hello'] {rows: 2}
-        UnionIndexScan [ctx: Db] [table: asset, branches: 2] {rows: 3}
-            FullTextScan [ctx: Db] [index: asset_search_title_ft, query: hello] {rows: 2}
-            FullTextScan [ctx: Db] [index: asset_search_body_ft, query: hello] {rows: 1}
+    Filter [ctx: Db] [predicate: tag = 'x' AND (search_title @1@ 'hello' OR search_body @2@ 'hello')] {rows: 2}
+        UnionIndexScan [ctx: Db] [table: asset, branches: 2] {rows: 2}
+            FullTextScan [ctx: Db] [table: asset, index: asset_search_title_ft, query: hello] {rows: 2}
+            FullTextScan [ctx: Db] [table: asset, index: asset_search_body_ft, query: hello] {rows: 2}
 
 Total rows: 2"'''
 

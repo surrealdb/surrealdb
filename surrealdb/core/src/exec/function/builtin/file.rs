@@ -1,4 +1,4 @@
-//! File functions for the streaming executor.
+//! File functions for the engine.
 //!
 //! These provide file storage functionality for working with buckets.
 //! Note: File functions require the experimental "files" capability to be enabled.
@@ -15,7 +15,6 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::EngineError;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::physical_expr::EvalContext;
-use crate::exec::planner::Planner;
 use crate::exec::{Error as ExecError, ExecutionContext};
 use crate::expr::Error as ExprError;
 use crate::expr::logical::LogicalPermission;
@@ -35,7 +34,7 @@ fn accept_payload(value: Value) -> Result<bytes::Bytes> {
 }
 
 /// Helper struct for bucket operations without needing the full BucketController.
-/// This is used by the streaming executor which doesn't have access to Stk.
+/// This is used by the engine which doesn't have access to Stk.
 struct StreamingBucketOps<'a> {
 	bucket: Arc<BucketDefinition>,
 	store: Arc<dyn ObjectStore>,
@@ -68,8 +67,12 @@ impl<'a> StreamingBucketOps<'a> {
 
 		// Get bucket definition and store
 		let txn = ctx.txn();
-		let bucket = txn.expect_db_bucket(ns_id, db_id, bucket_name).await?;
-		let store = frozen_ctx.get_bucket_store(ns_id, db_id, bucket_name).await?;
+		let (bucket, store) = crate::exec::vm::descriptor::object(async {
+			let bucket = txn.expect_db_bucket(ns_id, db_id, bucket_name).await?;
+			let store = frozen_ctx.get_bucket_store(ns_id, db_id, bucket_name).await?;
+			anyhow::Ok((bucket, store))
+		})
+		.await?;
 
 		Ok(Self {
 			bucket,
@@ -118,9 +121,21 @@ impl<'a> StreamingBucketOps<'a> {
 				}
 				LogicalPermission::Full => (),
 				LogicalPermission::Specific(e) => {
-					let expr = Planner::new(self.exec_ctx.ctx(), self.exec_ctx.function_registry())
-						.physical_expr(e)
-						.await?;
+					// Served from the compile cache by the clause as written, the
+					// names the check binds around it read when it runs, so one
+					// compilation serves every operation and file
+					// ([`crate::exec::vm::serve`]). It is compiled without a
+					// principal: the clause is judged with permissions off, and
+					// a principal would bind guards over what it reads that the
+					// frame is meant to waive.
+					let expr = crate::exec::vm::serve::expr_binding(
+						self.exec_ctx,
+						e,
+						None,
+						0,
+						["action", "file", "target"].map(str::to_owned).to_vec(),
+					)
+					.await?;
 					let mut exec_ctx =
 						self.exec_ctx.with_param("action", Value::from(op.to_string()));
 					if let Some(key) = key {
@@ -144,8 +159,13 @@ impl<'a> StreamingBucketOps<'a> {
 
 					// SECURITY: the bucket predicate runs with the caller's auth and only
 					// disables nested permission checks to avoid recursive permission
-					// evaluation, matching the bounded legacy `new_with_perms(false)` path.
-					let exec_ctx = exec_ctx.with_skip_fetch_perms(true);
+					// evaluation, as `Options::new_with_perms(false)` does.
+					// A write reached from it is refused for the same reason a table's
+					// `select` guard refuses one: the predicate is judged with
+					// enforcement off (GHSA-66r2-5gwj-gxm2).
+					let exec_ctx = exec_ctx
+						.with_skip_fetch_perms(true)
+						.refusing_writes(crate::dbs::NoWriteFrame::PermissionPredicate);
 					let eval_ctx = EvalContext::from_exec_ctx(&exec_ctx);
 					let res = expr
 						.evaluate(eval_ctx)

@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -30,10 +29,10 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'k INSIDE (ProjectValue)', table: 'outr' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'expr', sql: 'id' }], operator: 'ProjectValue' }"
+value = "{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k INSIDE (subquery)' }, children: [{ attributes: { direction: 'Forward', table: 'outr' }, context: 'Db', operator: 'TableScan' }, { attributes: { strategy: 'apply' }, children: [{ attributes: { expr: 'k' }, children: [{ attributes: { predicate: 'time::nano((IF k = k THEN NONE END)) % 2 = 0' }, children: [{ attributes: { direction: 'Forward', table: 'r' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }], context: 'Db', operator: 'Subquery' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"
 
 [[test.results]]
-value = "{ attributes: { expr: 'id' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'k INSIDE (ProjectValue)', table: 'outr' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'expr', sql: 'id' }], operator: 'ProjectValue' }"
+value = """{ attributes: { expr: 'id' }, children: [{ attributes: { predicate: 'k INSIDE (subquery)' }, children: [{ attributes: { direction: 'Forward', table: 'outr' }, context: 'Db', operator: 'TableScan' }, { attributes: { strategy: 'apply' }, children: [{ attributes: { expr: 'k' }, children: [{ attributes: { predicate: "time::year(d'2024-01-01T00:00:00Z') = 2024" }, children: [{ attributes: { direction: 'Forward', table: 'r' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }], context: 'Db', operator: 'Subquery' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'ProjectValue' }"""
 */
 
 DEFINE TABLE outr SCHEMALESS;

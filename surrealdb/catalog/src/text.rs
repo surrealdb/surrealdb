@@ -581,12 +581,13 @@ mod tests {
 		let second: *const LogicalExpr = body.logical().unwrap();
 		assert_eq!(first, second, "the compiled form is cached on the body");
 
-		// A write statement in scalar position compiles as an `Expr` and has
-		// no logical form; the body reports that rather than panicking, and
-		// keeps reporting it.
-		let write = ExprText::from_raw("(CREATE person)");
-		assert!(write.compile().is_ok());
-		let body = LogicalBody::new(&write);
+		// Stored text a later version wrote, or text this one can no longer
+		// read, has no logical form. The body reports that rather than
+		// panicking, and keeps reporting it rather than recompiling and
+		// possibly answering differently.
+		let no_form = ExprText::from_raw("a +");
+		assert!(no_form.compile().is_err());
+		let body = LogicalBody::new(&no_form);
 		assert!(body.logical().is_err());
 		assert!(body.logical().is_err());
 	}

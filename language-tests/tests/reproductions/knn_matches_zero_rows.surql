@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Regression (#548): a MATCHES conjunct combined with a KNN operator returned zero rows on the streaming executor — the conjunct was pushed into the ANN traversal's residual, where the legacy compute path has no query executor and evaluates MATCHES to false, rejecting every candidate. MATCHES conjuncts are now never pushed in-traversal: exactly coverable ones join the allow-list bitmap (query 1); non-coverable shapes (a negated MATCHES, query 2) are enforced by the outer Filter through the physical MATCHES operator."
+reason = "Regression (#548): a MATCHES conjunct combined with a KNN operator must not return zero rows. MATCHES conjuncts are never pushed in-traversal: exactly coverable ones join the allow-list bitmap (query 1); non-coverable shapes (a negated MATCHES, query 2) are enforced by the outer Filter through the physical MATCHES operator."
 issue = 548
 
 [[test.results]]

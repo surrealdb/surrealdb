@@ -31,6 +31,8 @@ Query
                         .exprs: None
                     .comment: None
                     .permission: None
+                    .graphql_alias: None
+                    .graphql_deprecated: None
         -TopLevelExpr::Expr
             Expr::DefineFunction
                 DefineFunction
@@ -51,6 +53,8 @@ Query
                         .exprs: None
                     .comment: None
                     .permission: None
+                    .graphql_alias: None
+                    .graphql_deprecated: None
         -TopLevelExpr::Expr
             Expr::DefineFunction
                 DefineFunction
@@ -71,6 +75,8 @@ Query
                         .exprs: None
                     .comment: None
                     .permission: None
+                    .graphql_alias: None
+                    .graphql_deprecated: None
         -TopLevelExpr::Expr
             Expr::DefineFunction
                 DefineFunction
@@ -103,6 +109,8 @@ Query
                         .exprs: None
                     .comment: None
                     .permission: None
+                    .graphql_alias: None
+                    .graphql_deprecated: None
         -TopLevelExpr::Expr
             Expr::DefineFunction
                 DefineFunction
@@ -137,6 +145,8 @@ Query
                         .exprs: None
                     .comment: None
                     .permission: None
+                    .graphql_alias: None
+                    .graphql_deprecated: None
         -TopLevelExpr::Expr
             Expr::DefineFunction
                 DefineFunction
@@ -174,6 +184,8 @@ Query
                         StringLit
                             .text: "com"
                     .permission: None
+                    .graphql_alias: None
+                    .graphql_deprecated: None
         -TopLevelExpr::Expr
             Expr::DefineFunction
                 DefineFunction
@@ -211,6 +223,8 @@ Query
                         StringLit
                             .text: "com"
                     .permission: None
+                    .graphql_alias: None
+                    .graphql_deprecated: None
         -TopLevelExpr::Expr
             Expr::DefineFunction
                 DefineFunction
@@ -249,6 +263,8 @@ Query
                             .text: "com"
                     .permission: Some
                     Permission::Full
+                    .graphql_alias: None
+                    .graphql_deprecated: None
         -TopLevelExpr::Expr
             Expr::DefineFunction
                 DefineFunction
@@ -287,6 +303,8 @@ Query
                             .text: "com"
                     .permission: Some
                     Permission::None
+                    .graphql_alias: None
+                    .graphql_deprecated: None
         -TopLevelExpr::Expr
             Expr::DefineFunction
                 DefineFunction
@@ -334,4 +352,6 @@ Query
                                 .right: Expr::String
                                     StringLit
                                         .text: "bla"
+                    .graphql_alias: None
+                    .graphql_deprecated: None
 */

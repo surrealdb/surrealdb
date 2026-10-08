@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test EXPLAIN with multiple FROM sources and expression sources"
@@ -9,20 +8,23 @@ reason = "Test EXPLAIN with multiple FROM sources and expression sources"
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    Union [ctx: Db] [inputs: 2]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Union [ctx: Db]
         TableScan [ctx: Db] [table: cat, direction: Forward]
         TableScan [ctx: Db] [table: dog, direction: Forward]
 ''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    SourceExpr [ctx: Db] [expr: [1, 2, 3]]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Values [ctx: Rt] [expr: [1, 2, 3]]
 ''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    SourceExpr [ctx: Db] [expr: <array>  0 .. 5]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Values [ctx: Rt] [expr: <array> 0..5]
 ''''
 */
 

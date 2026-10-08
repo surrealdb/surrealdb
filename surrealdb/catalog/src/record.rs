@@ -166,8 +166,9 @@ impl Record {
 /// Existing edges keep whatever variant they were originally stamped with
 /// so their on-disk keys stay valid — only first-write picks this value.
 /// Bump when the on-disk adjacency-key layout for new edges advances; add
-/// a matching dispatch arm in `doc/edges.rs::store_edges_data` (write) and
-/// `doc/purge.rs::purge_pointers` (delete) at the same time.
+/// a matching dispatch arm in the edge-key writes of
+/// `core/src/exec/operators/write/stages/store.rs` and the deletes of
+/// `core/src/exec/operators/write/stages/purge.rs` at the same time.
 pub const LATEST_EDGE_VARIANT: u16 = 2;
 
 /// Types of records that can be stored in the database

@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "decorrelation builds the subquery's relation once for every outer row, so a right side that answers differently each time stays a scalar subquery"
@@ -16,21 +15,33 @@ value = "[{ id: r:1, k: 0 }]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: k]
-    TableScan [ctx: Db] [table: o, direction: Forward, predicate: k INSIDE (ProjectValue), pre_decode_filter: no (unsupported predicate)]
-''''
-
-[[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: k]
-    TableScan [ctx: Db] [table: o, direction: Forward, predicate: k INSIDE (ProjectValue), pre_decode_filter: no (unsupported predicate)]
-''''
-
-[[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: k]
-    HashJoin [ctx: Db] [type: Semi, alias: _join0, on: k = _join0.k + 1]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
         TableScan [ctx: Db] [table: o, direction: Forward]
-        TableScan [ctx: Db] [table: r, direction: Forward]
+        Subquery [ctx: Db] [strategy: apply]
+            ProjectValue [ctx: Db] [expr: k]
+                Filter [ctx: Db] [predicate: `rand`::bool()]
+                    TableScan [ctx: Db] [table: r, direction: Forward]
+''''
+
+[[test.results]]
+value = '''
+'ProjectValue [ctx: Db] [expr: k]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
+        TableScan [ctx: Db] [table: o, direction: Forward]
+        Subquery [ctx: Db] [strategy: apply]
+            ProjectValue [ctx: Db] [expr: k]
+                Filter [ctx: Db] [predicate: k > `rand`::int(0, 2)]
+                    TableScan [ctx: Db] [table: r, direction: Forward]
+''''
+
+[[test.results]]
+value = '''
+'ProjectValue [ctx: Db] [expr: k]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
+        TableScan [ctx: Db] [table: o, direction: Forward]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: k + 1]
+                TableScan [ctx: Db] [table: r, direction: Forward]
 ''''
 */
 

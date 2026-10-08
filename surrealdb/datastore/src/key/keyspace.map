@@ -81,6 +81,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}!cf                                                                                     ChangefeedFenceKey ->  u64
 /*{ns}*{db}!cv{tb}                                                                                  CatalogVersionKey ->  crate::values::catalog_version::CatalogVersion
 /*{ns}*{db}!cv                                                                                   CatalogVersionPrefix ->  (range)
+/*{ns}*{db}!ov{kind}{name}{sub}                                                                      ObjectVersionKey ->  crate::values::catalog_version::CatalogVersion
+/*{ns}*{db}!ov                                                                                    ObjectVersionPrefix ->  (range)
 /*{ns}*{db}!fn{fc}                                                                                        FunctionKey ->  surrealdb_catalog::StoredFunctionDefinition
 /*{ns}*{db}!fn                                                                                         FunctionPrefix ->  (range)
 /*{ns}*{db}!md{md}                                                                                          ModuleKey ->  surrealdb_catalog::StoredModuleDefinition

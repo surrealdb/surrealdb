@@ -170,9 +170,9 @@ pub struct Step {
 	/// The rendering of the logical path this was compiled from.
 	display: String,
 	/// What the first part applies to; `None` for the current value.
-	root: Option<Arc<dyn PhysicalExpr>>,
+	pub(crate) root: Option<Arc<dyn PhysicalExpr>>,
 	/// The parts, in application order. Never empty.
-	parts: Vec<Arc<dyn PhysicalExpr>>,
+	pub(crate) parts: Vec<Arc<dyn PhysicalExpr>>,
 	/// Whether evaluating the run executes a lookup plan; see
 	/// [`runs_lookup_plan`].
 	runs_lookup_plan: bool,
@@ -208,6 +208,7 @@ impl Step {
 		&self.parts
 	}
 
+	#[cfg(test)]
 	/// The field names of a path into the current value made only of field
 	/// reads (`a.b.c`): the shape a byte-level filter can follow into an
 	/// encoded object.
@@ -357,8 +358,8 @@ impl ToSql for Step {
 pub struct Broadcast {
 	/// The rendering of the logical path this was compiled from.
 	display: String,
-	base: Arc<dyn PhysicalExpr>,
-	body: Arc<dyn PhysicalExpr>,
+	pub(crate) base: Arc<dyn PhysicalExpr>,
+	pub(crate) body: Arc<dyn PhysicalExpr>,
 	flatten: bool,
 	/// Whether the body's first step over the current value is `.*`.
 	leading_each: bool,

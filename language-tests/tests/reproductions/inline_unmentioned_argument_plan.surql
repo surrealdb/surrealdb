@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -18,13 +17,13 @@ value = "NONE"
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: 1]
+    ExprPlan [ctx: Rt] [expr: 1]
 ''''
 
 [[test.results]]
 value = '''
-'Return [ctx: Db]
-    Expr [ctx: Db] [expr: fn::one(<int>  NONE)]
+'Return [ctx: Rt]
+    ExprPlan [ctx: Rt] [expr: fn::one(<int> NONE)]
 ''''
 */
 

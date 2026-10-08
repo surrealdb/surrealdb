@@ -4,6 +4,7 @@ use surrealdb_expr::val::RecordIdKey;
 use uuid::Uuid;
 
 use super::key::Key;
+use crate::values::catalog_version::CatalogObjectKind;
 
 #[derive(Hash, Eq, PartialEq)]
 pub enum Lookup<'a> {
@@ -54,9 +55,19 @@ pub enum Lookup<'a> {
 	/// A cache key for the database-wide reference-target summary consumed by
 	/// the DELETE purge gate (which tables any `REFERENCE` field can target).
 	DbReferenceTargets(NamespaceId, DatabaseId),
+	/// A cache key for what identifies the catalog of every table of a
+	/// database, as this transaction sees it, with the count of catalog
+	/// stamps it was read at.
+	DbCatalog(NamespaceId, DatabaseId),
+	/// A cache key for the `REFERENCE` fields of every table of a database,
+	/// with the catalog state they were read in.
+	DbReferenceFields(NamespaceId, DatabaseId),
 	/// A cache key for a table's catalog version, as this transaction sees it:
 	/// `Some` once read or stamped, `None` for a table nothing has stamped.
 	Cv(NamespaceId, DatabaseId, &'a str),
+	/// A cache key for a database-scoped object's catalog version, as this
+	/// transaction sees it: by kind and the name fields of its `!ov` key.
+	Ov(NamespaceId, DatabaseId, CatalogObjectKind, &'a str, &'a str),
 	/// A cache key for events (on a table)
 	Evs(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for fields (on a table)
@@ -153,7 +164,10 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Sqs(la, lb), Key::Sqs(ka, kb)) => la == ka && lb == kb,
 			(Self::Tbs(la, lb), Key::Tbs(ka, kb)) => la == ka && lb == kb,
 			(Self::DbReferenceTargets(la, lb), Key::DbReferenceTargets(ka, kb)) => la == ka && lb == kb,
+			(Self::DbCatalog(la, lb), Key::DbCatalog(ka, kb)) => la == ka && lb == kb,
+			(Self::DbReferenceFields(la, lb), Key::DbReferenceFields(ka, kb)) => la == ka && lb == kb,
 			(Self::Cv(la, lb, lc), Key::Cv(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::Ov(la, lb, lc, ld, le), Key::Ov(ka, kb, kc, kd, ke)) => la == ka && lb == kb && lc == kc && ld == kd && le == ke,
 			(Self::Evs(la, lb, lc), Key::Evs(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Fds(la, lb, lc), Key::Fds(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Fts(la, lb, lc), Key::Fts(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
@@ -266,6 +280,11 @@ mod tests {
 		Key::DbReferenceTargets(NamespaceId(1), DatabaseId(1)),
 		true
 	)]
+	#[case(
+		Lookup::DbCatalog(NamespaceId(1), DatabaseId(1)),
+		Key::DbCatalog(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
 	#[case(Lookup::Evs(NamespaceId(1), DatabaseId(1), "test"), Key::Evs(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Fds(NamespaceId(1), DatabaseId(1), "test"), Key::Fds(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Fts(NamespaceId(1), DatabaseId(1), "test"), Key::Fts(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
@@ -301,6 +320,9 @@ mod tests {
 	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &RecordIdKey::Number(1)), Key::Record(NamespaceId(1), DatabaseId(2), "test".to_string(), RecordIdKey::Number(1)), false)]
 	#[case(Lookup::Cv(NamespaceId(1), DatabaseId(1), "test"), Key::Cv(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Cv(NamespaceId(1), DatabaseId(1), "test"), Key::Cv(NamespaceId(1), DatabaseId(1), "other".to_string()), false)]
+	#[case(Lookup::Ov(NamespaceId(1), DatabaseId(1), CatalogObjectKind::Model, "m", "1"), Key::Ov(NamespaceId(1), DatabaseId(1), CatalogObjectKind::Model, "m".to_string(), "1".to_string()), true)]
+	#[case(Lookup::Ov(NamespaceId(1), DatabaseId(1), CatalogObjectKind::Function, "f", ""), Key::Ov(NamespaceId(1), DatabaseId(1), CatalogObjectKind::Param, "f".to_string(), String::new()), false)]
+	#[case(Lookup::Ov(NamespaceId(1), DatabaseId(1), CatalogObjectKind::Model, "m", "1"), Key::Ov(NamespaceId(1), DatabaseId(1), CatalogObjectKind::Model, "m".to_string(), "2".to_string()), false)]
 	fn test_equivalent(#[case] l: Lookup<'_>, #[case] k: Key, #[case] expected: bool) {
 		assert_eq!(l.equivalent(&k), expected);
 		// The cache hashes the lookup and compares it against the stored key,

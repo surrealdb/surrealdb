@@ -15,30 +15,39 @@
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use futures::StreamExt;
+#[cfg(test)]
 use surrealdb_types::ToSql;
 
+#[cfg(test)]
 use crate::catalog::Distance;
+#[cfg(test)]
 use crate::err::EngineError;
+#[cfg(test)]
 use crate::exec::operators::split::output_field_path;
+#[cfg(test)]
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
+#[cfg(test)]
 use crate::expr::logical::LogicalExpr;
 use crate::val::field_path::FieldPath;
 use crate::val::{Number, Value};
 
+#[cfg(test)]
 /// The query vector of a brute-force KNN, as planned.
 ///
 /// `Deferred` carries a non-literal right-hand side (bind parameter, function
-/// call, array with computed elements) that the legacy planner would compute
-/// once at plan time with no document context. The streaming equivalent
-/// evaluates it once at stream open and coerces to `array<number>` with the
-/// same coercion the legacy tree applies, so error messages match.
+/// call, array with computed elements) that has no document context to
+/// evaluate against. It is evaluated once at stream open and coerced to
+/// `array<number>`.
 #[derive(Clone, Debug)]
 pub(crate) enum KnnVectorSource {
 	/// Plan-time literal vector.
@@ -145,6 +154,7 @@ impl<T> KnnTopKHeap<T> {
 	}
 }
 
+#[cfg(test)]
 /// Brute-force KNN operator: scans all input, computes vector distances,
 /// and returns the top-K nearest records.
 ///
@@ -175,7 +185,9 @@ pub struct KnnTopK {
 	pub(crate) knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 }
 
+#[cfg(test)]
 impl KnnTopK {
+	#[cfg(test)]
 	/// Create a new KnnTopK operator.
 	pub(crate) fn new(
 		input: Arc<dyn ExecOperator>,
@@ -197,6 +209,7 @@ impl KnnTopK {
 		}
 	}
 
+	#[cfg(test)]
 	/// Set the KNN context for distance propagation.
 	pub(crate) fn with_knn_context(
 		mut self,
@@ -206,6 +219,7 @@ impl KnnTopK {
 		self
 	}
 }
+#[cfg(test)]
 impl ExecOperator for KnnTopK {
 	fn name(&self) -> &'static str {
 		"KnnTopK"
@@ -259,7 +273,7 @@ impl ExecOperator for KnnTopK {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -273,8 +287,7 @@ impl ExecOperator for KnnTopK {
 
 		let result_stream = futures::stream::once(async move {
 			// Resolve the query vector. Deferred sources evaluate once here,
-			// with no row context, and coerce exactly like the legacy tree's
-			// plan-time compute of the KNN right-hand side.
+			// with no row context, and coerce to `array<number>`.
 			let query_vector: Vec<Number> = match &query_vector {
 				KnnVectorSource::Literal(v) => v.clone(),
 				KnnVectorSource::Deferred(expr) => {

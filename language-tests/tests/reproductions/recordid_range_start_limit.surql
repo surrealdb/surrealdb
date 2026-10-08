@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Large START offsets must correctly skip rows in table and index scans"
@@ -26,7 +25,7 @@ value = "[]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_score, access: >0, direction: Forward, limit: 2, offset: 5, predicate: score > 0]
+    IndexScan [ctx: Db] [table: item, index: idx_score, access: >0, direction: Forward, limit: 2, offset: 5]
 ''''
 
 [[test.results]]
@@ -36,8 +35,10 @@ value = "[{ id: item:6, score: 60 }, { id: item:7, score: 70 }]"
 value = "[]"
 */
 
--- Setup: 10 rows with an index
+-- Setup: 10 rows with an index on a column declared a scalar kind, so the
+-- index holds one entry per record
 {
+	DEFINE FIELD score ON TABLE item TYPE int;
 	DEFINE INDEX idx_score ON TABLE item COLUMNS score;
 	CREATE item:1 SET score = 10;
 	CREATE item:2 SET score = 20;

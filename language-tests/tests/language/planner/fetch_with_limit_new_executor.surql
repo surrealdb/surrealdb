@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test that FETCH clause works with WHERE + LIMIT and that LIMIT is pushed to IndexScan before FETCH"
@@ -10,9 +9,9 @@ value = "'OK'"
 
 [[test.results]]
 value = '''
-"Fetch [ctx: Db] [fields: friend]
+"Fetch [ctx: Db] [fetches: friend]
     SelectProject [ctx: Db] [projections: *]
-        IndexScan [ctx: Db] [index: idx_city, access: = 'london', direction: Forward, limit: 2, predicate: city = 'london']
+        IndexScan [ctx: Db] [table: person, index: idx_city, access: = 'london', direction: Forward, limit: 2]
 "'''
 
 [[test.results]]
@@ -20,22 +19,22 @@ value = "[{ city: 'london', friend: { city: 'london', friend: person:charlie, id
 
 [[test.results]]
 value = '''
-"Fetch [ctx: Db] [fields: friend] {rows: 2}
+"Fetch [ctx: Db] [fetches: friend] {rows: 2}
     SelectProject [ctx: Db] [projections: *] {rows: 2}
-        IndexScan [ctx: Db] [index: idx_city, access: = 'london', direction: Forward, limit: 2, predicate: city = 'london'] {rows: 2}
+        IndexScan [ctx: Db] [table: person, index: idx_city, access: = 'london', direction: Forward, limit: 2] {rows: 2}
 
 Total rows: 2"'''
 
 [[test.results]]
 value = '''
-"Fetch [ctx: Db] [fields: friend]
+"Fetch [ctx: Db] [fetches: friend]
     SelectProject [ctx: Db] [projections: *]
         TableScan [ctx: Db] [table: person, direction: Forward, predicate: city = 'london', limit: 2, pre_decode_filter: yes]
 "'''
 
 [[test.results]]
 value = '''
-'Fetch [ctx: Db] [fields: friend]
+'Fetch [ctx: Db] [fetches: friend]
     SelectProject [ctx: Db] [projections: *]
         TableScan [ctx: Db] [table: person, direction: Forward, limit: 3]
 ''''

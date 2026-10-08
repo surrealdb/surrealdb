@@ -12,6 +12,8 @@ use crate::catalog::ModuleDefinition;
 #[cfg(feature = "surrealism")]
 use crate::catalog::providers::DatabaseProvider;
 #[cfg(feature = "surrealism")]
+use crate::exec::frame::options_for_frame;
+#[cfg(feature = "surrealism")]
 use crate::exec::permission::CompiledGuard;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut};
@@ -34,52 +36,115 @@ async fn call_module_export<'a>(
 	sub: Option<&'a str>,
 	arguments: &'a [Arc<dyn PhysicalExpr>],
 	permission: &'a CompiledGuard<ModuleDefinition>,
+	planned: &'a crate::exec::physical_expr::PlannedGuard<ModuleDefinition>,
 	ctx: EvalContext<'a>,
 ) -> FlowResult<Value> {
-	use reblessive::TreeStack;
+	let val = read_module(&mod_name, sub, &ctx).await?;
+	// Check permissions. Inside a permission predicate the call is the
+	// definer's and is not checked.
+	if !ctx.skip_fetch_perms && ctx.exec_ctx.should_check_perms(crate::iam::Action::View)? {
+		check_permission(
+			crate::exec::guard_verdicts::GuardKind::Module,
+			(permission, planned),
+			val.permissions_body.logical_ref()?,
+			None,
+			&val,
+			&mod_name,
+			&ctx,
+		)
+		.await?;
+	}
+	let export = module_export(&val, sub, &ctx).await?;
+	let args = evaluate_args(arguments, ctx.clone()).await?;
+	run_module_export(&mod_name, &export, sub, args, &ctx).await
+}
 
-	use crate::doc::CursorDoc;
-	use crate::expr::module::ModuleExecutable;
-
-	let fnc_name = match sub {
+/// The name a call of export `sub` of the module stored as `mod_name`
+/// reports itself by.
+#[cfg(feature = "surrealism")]
+fn export_name(mod_name: &str, sub: Option<&str>) -> String {
+	match sub {
 		Some(sub) => format!("{mod_name}::{sub}"),
-		None => mod_name.clone(),
-	};
+		None => mod_name.to_owned(),
+	}
+}
 
-	// Check if this function is allowed
+/// The definition of the module stored as `mod_name` that a call of its
+/// export `sub` from `ctx` reads, before its arguments are evaluated: the
+/// session may call the export, the context holds a database, and the catalog
+/// holds the module as of the context's `VERSION`. Its `PERMISSIONS` clause
+/// is the caller's to judge.
+#[cfg(feature = "surrealism")]
+pub(crate) async fn read_module(
+	mod_name: &str,
+	sub: Option<&str>,
+	ctx: &EvalContext<'_>,
+) -> FlowResult<Arc<ModuleDefinition>> {
+	let fnc_name = export_name(mod_name, sub);
 	ctx.check_allowed_function(&fnc_name)?;
-
-	// Get the database context for module lookup
 	let db_ctx = ctx
 		.exec_ctx
 		.database()
 		.map_err(|_| anyhow::anyhow!("Module function '{}' requires database context", fnc_name))?;
-
-	// Get namespace and database IDs
 	let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 	let db_id = db_ctx.db.database_id;
+	let txn = ctx.txn();
+	let stamp = ctx.exec_ctx.version_stamp();
+	Ok(crate::exec::vm::descriptor::object(txn.get_db_module(ns_id, db_id, mod_name, stamp))
+		.await?)
+}
 
-	// Get the module definition
-	let val =
-		ctx.txn().get_db_module(ns_id, db_id, &mod_name, ctx.exec_ctx.version_stamp()).await?;
+/// An export of a module, resolved against the context a call runs in: the
+/// module's executable and the export's signature.
+#[cfg(feature = "surrealism")]
+pub(crate) struct ModuleExport {
+	executable: crate::expr::module::ModuleExecutable,
+	signature: crate::expr::module::Signature,
+}
 
-	// Check permissions. Inside a permission predicate the call is the
-	// definer's and is not checked.
-	if !ctx.skip_fetch_perms && ctx.exec_ctx.should_check_perms(crate::iam::Action::View)? {
-		check_permission(permission, val.permissions_body.logical_ref()?, &val, &mod_name, &ctx)
-			.await?;
-	}
+/// Export `sub` of module `definition`, resolved for a call from `ctx`: the
+/// executable's signature for it, read before the call's arguments are
+/// evaluated.
+#[cfg(feature = "surrealism")]
+pub(crate) async fn module_export(
+	definition: &ModuleDefinition,
+	sub: Option<&str>,
+	ctx: &EvalContext<'_>,
+) -> FlowResult<ModuleExport> {
+	let db_ctx = ctx.exec_ctx.database().map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
+	let ns_id = db_ctx.ns_ctx.ns.namespace_id;
+	let db_id = db_ctx.db.database_id;
+	let executable: crate::expr::module::ModuleExecutable = definition.executable.clone().into();
+	let signature = crate::fnc::module::module_executable_signature(
+		&executable,
+		ctx.exec_ctx.ctx(),
+		&ns_id,
+		&db_id,
+		sub,
+	)
+	.await?;
+	Ok(ModuleExport {
+		executable,
+		signature,
+	})
+}
 
-	// Get the executable and signature
-	let executable: ModuleExecutable = val.executable.clone().into();
-	let frozen_ctx = ctx.exec_ctx.ctx();
-	let signature =
-		crate::legacy::module_executable_signature(&executable, frozen_ctx, &ns_id, &db_id, sub)
-			.await?;
+/// Call `export`, export `sub` of the module stored as `mod_name`, with
+/// `args` from `ctx`: counted and coerced to the signature's kinds, run in
+/// the evaluation frame the call is in with the current value as its
+/// document, and its value checked against the signature's return kind.
+#[cfg(feature = "surrealism")]
+pub(crate) async fn run_module_export(
+	mod_name: &str,
+	export: &ModuleExport,
+	sub: Option<&str>,
+	args: Vec<Value>,
+	ctx: &EvalContext<'_>,
+) -> FlowResult<Value> {
+	use crate::doc::CursorDoc;
 
-	// Evaluate all arguments
-	let args = evaluate_args(arguments, ctx.clone()).await?;
-
+	let fnc_name = export_name(mod_name, sub);
+	let signature = &export.signature;
 	// Validate argument count against signature
 	if args.len() != signature.args.len() {
 		return Err(Error::InvalidFunctionArguments {
@@ -103,34 +168,48 @@ async fn call_module_export<'a>(
 		coerced_args.push(coerced);
 	}
 
-	// Get the Options for the module execution
-	let opt = ctx
-		.exec_ctx
-		.options()
-		.ok_or_else(|| anyhow::anyhow!("Module functions require Options context"))?;
+	// The body runs in the evaluation frame the call is in: a write it reaches
+	// is refused wherever the caller refuses one, its own reads are not gated
+	// by the clause it is called from, and it reads at the caller's `VERSION`.
+	let opt = options_for_frame(
+		ctx.exec_ctx
+			.options()
+			.ok_or_else(|| anyhow::anyhow!("Module functions require Options context"))?,
+		ctx.skip_fetch_perms,
+		ctx.exec_ctx.root().no_write,
+		ctx.exec_ctx.version_stamp(),
+	);
 
 	// Build CursorDoc from current value
-	let doc = ctx.current_value.map(|v| CursorDoc::new(None, None, v.clone()));
+	let doc = ctx.current_value.map(|v| CursorDoc::new(None, v.clone()));
 
-	// Run the module using the legacy stack-based execution
-	let mut stack = TreeStack::new();
-	let result = stack
-		.enter(|stk| {
-			crate::legacy::module_executable_run(
-				&executable,
-				stk,
-				frozen_ctx,
-				opt,
-				doc.as_ref(),
-				coerced_args,
-				sub,
-			)
-		})
-		.finish()
-		.await?;
+	let result = crate::fnc::module::module_executable_run(
+		&export.executable,
+		ctx.exec_ctx.ctx(),
+		&opt,
+		doc.as_ref(),
+		coerced_args,
+		sub,
+	)
+	.await?;
 
 	// Validate return value if signature specifies a return type
 	validate_return(&fnc_name, signature.returns.as_ref(), result).map_err(Into::into)
+}
+
+/// The error a call of a module export raises in a build without the
+/// Surrealism runtime: `name` is the module's storage name followed by the
+/// export for a `mod::` call, and the package's storage name for a `silo::`
+/// call.
+#[cfg(not(feature = "surrealism"))]
+pub(crate) fn module_runtime_missing(name: &str, silo: bool) -> crate::expr::ControlFlow {
+	let kind = if silo {
+		"Silo"
+	} else {
+		"Module"
+	};
+	anyhow::anyhow!("{kind} function '{name}' requires the 'surrealism' feature to be enabled")
+		.into()
 }
 
 // =============================================================================
@@ -158,6 +237,10 @@ pub struct SurrealismModuleExec {
 	/// and what is not.
 	#[cfg(feature = "surrealism")]
 	pub(crate) permission: CompiledGuard<ModuleDefinition>,
+	/// The `PERMISSIONS` clause compiled with the plan, for the definition
+	/// the planner read; see [`crate::exec::physical_expr::PlannedGuard`].
+	#[cfg(feature = "surrealism")]
+	pub(crate) planned_permission: crate::exec::physical_expr::PlannedGuard<ModuleDefinition>,
 }
 impl PhysicalExpr for SurrealismModuleExec {
 	fn name(&self) -> &'static str {
@@ -181,6 +264,7 @@ impl PhysicalExpr for SurrealismModuleExec {
 			self.sub.as_deref(),
 			&self.arguments,
 			&self.permission,
+			&self.planned_permission,
 			ctx,
 		))
 	}
@@ -192,11 +276,7 @@ impl PhysicalExpr for SurrealismModuleExec {
 				Some(s) => format!("mod::{}::{}", self.module, s),
 				None => format!("mod::{}", self.module),
 			};
-			Err(anyhow::anyhow!(
-				"Module function '{}' requires the 'surrealism' feature to be enabled",
-				name
-			)
-			.into())
+			Err(module_runtime_missing(&name, false))
 		})
 	}
 
@@ -244,6 +324,10 @@ pub struct SiloModuleExec {
 	/// and what is not.
 	#[cfg(feature = "surrealism")]
 	pub(crate) permission: CompiledGuard<ModuleDefinition>,
+	/// The `PERMISSIONS` clause compiled with the plan, for the definition
+	/// the planner read; see [`crate::exec::physical_expr::PlannedGuard`].
+	#[cfg(feature = "surrealism")]
+	pub(crate) planned_permission: crate::exec::physical_expr::PlannedGuard<ModuleDefinition>,
 }
 impl PhysicalExpr for SiloModuleExec {
 	fn name(&self) -> &'static str {
@@ -270,6 +354,7 @@ impl PhysicalExpr for SiloModuleExec {
 			self.sub.as_deref(),
 			&self.arguments,
 			&self.permission,
+			&self.planned_permission,
 			ctx,
 		))
 	}
@@ -281,11 +366,7 @@ impl PhysicalExpr for SiloModuleExec {
 				"silo::{}::{}::<{}.{}.{}>",
 				self.org, self.pkg, self.major, self.minor, self.patch
 			);
-			Err(anyhow::anyhow!(
-				"Silo function '{}' requires the 'surrealism' feature to be enabled",
-				name
-			)
-			.into())
+			Err(module_runtime_missing(&name, true))
 		})
 	}
 

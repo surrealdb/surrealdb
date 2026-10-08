@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -10,7 +9,9 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 4}
-    IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward, limit: 4, predicate: time > d'2000-01-01T00:00:00Z'] {rows: 4}
+    Limit [ctx: Db] [limit: 4] {rows: 4}
+        DistinctRecords [ctx: Db] {rows: 4}
+            IndexScan [ctx: Db] [table: session, index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward] {rows: 4}
 
 Total rows: 4"'''
 
@@ -20,7 +21,8 @@ value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, tim
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 4}
-    IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward, predicate: time > d'2000-01-01T00:00:00Z'] {rows: 4}
+    DistinctRecords [ctx: Db] {rows: 4}
+        IndexScan [ctx: Db] [table: session, index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward] {rows: 4}
 
 Total rows: 4"'''
 
@@ -30,7 +32,9 @@ value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, tim
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 4}
-    IndexScan [ctx: Db] [index: time, access: , direction: Forward, limit: 4] {rows: 4}
+    Limit [ctx: Db] [limit: 4] {rows: 4}
+        DistinctRecords [ctx: Db] {rows: 4}
+            IndexScan [ctx: Db] [table: session, index: time, direction: Forward] {rows: 4}
 
 Total rows: 4''''
 
@@ -40,7 +44,8 @@ value = "[{ id: session:3, other: 'test' }, { id: session:4, time: NULL }, { id:
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 6}
-    IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 6}
+    DistinctRecords [ctx: Db] {rows: 6}
+        IndexScan [ctx: Db] [table: session, index: time, direction: Forward] {rows: 6}
 
 Total rows: 6''''
 
@@ -50,7 +55,9 @@ value = "[{ id: session:3, other: 'test' }, { id: session:4, time: NULL }, { id:
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 4}
-    IndexScan [ctx: Db] [index: time, access: , direction: Backward, limit: 4] {rows: 4}
+    Limit [ctx: Db] [limit: 4] {rows: 4}
+        DistinctRecords [ctx: Db] {rows: 4}
+            IndexScan [ctx: Db] [table: session, index: time, direction: Backward] {rows: 4}
 
 Total rows: 4''''
 
@@ -60,7 +67,8 @@ value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, tim
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 6}
-    IndexScan [ctx: Db] [index: time, access: , direction: Backward] {rows: 6}
+    DistinctRecords [ctx: Db] {rows: 6}
+        IndexScan [ctx: Db] [table: session, index: time, direction: Backward] {rows: 6}
 
 Total rows: 6''''
 

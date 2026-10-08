@@ -1,13 +1,10 @@
 /**
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """A grouped SELECT whose projection reads $parent as the source of a nested \
 SELECT is refused with the GROUP BY row-scope error, the same as a $parent read in any \
-other position of the projection. The legacy engine has no such rule and evaluates \
-$parent as NONE inside a grouped projection, so only the streaming strategies are \
-pinned."""
+other position of the projection."""
 
 [[test.results]]
 value = "'OK'"

@@ -26,7 +26,9 @@ use surrealdb_expr::val::{IndexFormat, RecordId, RecordIdKey, RecordIdentity, Va
 use surrealdb_keyspace_macro::keyspace;
 // The generated code refers to the key error by this name.
 use surrealdb_kvs::key::Error as KeyError;
-use surrealdb_kvs::key::{KVKey, KVKeyDecode, KVRange, KVSubspace, RawRange, TypedRange};
+use surrealdb_kvs::key::{
+	KVKey, KVKeyDecode, KVRange, KVSubspace, KeyRole, KeyRoute, KeyStep, RawRange, TypedRange,
+};
 use surrealdb_kvs::value::KVValue;
 use surrealdb_kvs::{Key, KeyRange};
 use surrealdb_strand::TableName;
@@ -34,6 +36,7 @@ use uuid::Uuid;
 
 use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
 use crate::tasklease::TaskLeaseType;
+use crate::values::catalog_version::CatalogObjectKind;
 use crate::values::ids::DocId;
 use crate::values::index_build::{
 	Appending, AppendingId, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq,
@@ -51,7 +54,7 @@ keyspace! {
 		fixed(16) Uuid;
 		fixed(32) Hash32 = [u8; 32];
 		// Hand-written codecs whose discriminants predate storekey's numbering.
-		fixed(1)  ReclaimKind, Expunge;
+		fixed(1)  ReclaimKind, Expunge, CatalogObjectKind;
 		// An `Option` is self-delimiting: its tag says whether a payload follows.
 		var       OptUuidPair = Option<(Uuid, Uuid)>;
 		var       Vector = Cow<'k, SerializedVector>;
@@ -230,11 +233,12 @@ keyspace! {
 
 				/// The identity of one table's catalog entry: rewritten with a
 				/// fresh uuid by every catalog write that changes the table's
-				/// definition, its fields or its indexes, in the same transaction
-				/// as that write. Keyed per table, beside the table definition
-				/// rather than under the table's own prefix, so that catalog writes
-				/// to different tables share no key and the stamp of a removed
-				/// table outlives the removal of its data.
+				/// definition, its fields, its indexes, its events or the views
+				/// that read it, in the same transaction as that write. Keyed per
+				/// table, beside the table definition rather than under the
+				/// table's own prefix, so that catalog writes to different tables
+				/// share no key and the stamp of a removed table outlives the
+				/// removal of its data.
 				///
 				/// Read by [`crate::Transaction::catalog_version`] and used as the
 				/// key of the node-wide [`crate::cache::ds::TableSnapshot`]: a
@@ -243,6 +247,23 @@ keyspace! {
 				/// no shareable snapshot, and its readers load through their own
 				/// transaction.
 				catalog_version = ["!cv", @, tb: Table] => crate::values::catalog_version::CatalogVersion;
+
+				/// The identity of one database-scoped catalog object other than
+				/// a table — a function, param, database access method, model,
+				/// module, analyzer, sequence or API — named by its kind and by
+				/// the name fields of its definition key (`sub` is a model's
+				/// version, and empty for every other kind).
+				///
+				/// Rewritten with a fresh uuid by every write or removal that
+				/// changes what the object's definition key holds, in the same
+				/// transaction, by the transaction's write methods themselves
+				/// ([`crate::Transaction::catalog_object_version`]). A removal
+				/// leaves its value behind as a tombstone, so a reader holding
+				/// the version of the removed object sees it change. Keyed per
+				/// object, so catalog writes to different objects share no key.
+				/// Absent for an object no write by this build has touched.
+				object_version = ["!ov", @, kind: CatalogObjectKind, name: Str, sub: Str]
+					=> crate::values::catalog_version::CatalogVersion;
 
 				/// A user-defined function. The tag is `!fn`, not `!fc`.
 				function = ["!fn", @, fc: Str] => surrealdb_catalog::StoredFunctionDefinition;

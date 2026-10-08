@@ -13,6 +13,7 @@ mod crypto_async;
 mod duration;
 mod encoding;
 mod eval;
+pub(crate) use eval::evaluate_streaming;
 mod file;
 mod geo;
 mod http;

@@ -20,6 +20,10 @@
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
+// The unit tests that reach the test-only helpers run on the in-memory
+// datastore. A test build without `kv-mem`, as each storage engine's job makes,
+// compiles those tests out and leaves the helpers unreached.
+#![cfg_attr(all(test, not(feature = "kv-mem")), allow(dead_code))]
 
 #[macro_use]
 extern crate surrealdb_collections;
@@ -44,6 +48,7 @@ mod sql_to_sql_test;
 #[doc(hidden)]
 pub mod buc;
 mod cf;
+mod ddl;
 #[doc(hidden)]
 pub mod doc;
 mod exe;
@@ -51,7 +56,6 @@ mod exe;
 mod fmt_roundtrip_test;
 mod fnc;
 pub(crate) mod key;
-mod legacy;
 mod lq;
 #[cfg(feature = "surrealism")]
 mod surrealism;

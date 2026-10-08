@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_guarded_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["compute-only", "all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -12,7 +11,7 @@ reason = """
 	after a field, with or without an underscore prefix and an ordinal, is an
 	ordinary parameter: it changes nothing about what the caller may read,
 	and reading it back gives the value the caller set or NONE. Denied
-	fields are projected under an alias, which every engine reports as NONE.
+	fields are projected under an alias, which reports NONE.
 """
 
 # 0: the caller's view before any parameter is set.

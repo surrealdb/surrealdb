@@ -1,11 +1,10 @@
 //! Control flow physical expressions - BREAK, CONTINUE, THROW.
 //!
 //! These expressions signal control flow changes when evaluated inside blocks,
-//! function bodies, or other expression contexts. They mirror the behavior of
-//! [`crate::exec::operators::control_flow::ControlFlowPlan`] but implement
+//! function bodies, or other expression contexts. They implement
 //! [`PhysicalExpr`] so they can be used within expression-level planning
-//! (e.g. inside a closure body or an `IF` branch). `RETURN` is a statement:
-//! it compiles to `ReturnPlan`, and in scalar position it is a subquery.
+//! (e.g. inside a closure body or an `IF` branch). `RETURN` is a statement,
+//! and in scalar position it is a subquery.
 
 use std::sync::Arc;
 

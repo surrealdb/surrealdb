@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 timeout = 120000
 
 [test]
@@ -25,11 +24,10 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id, distance] {rows: 3}
-    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 3}
-        Compute [ctx: Db] [fields: distance = vector::distance::knn()] {rows: 3}
-            Filter [ctx: Db] [predicate: category = 'a'] {rows: 3}
-                KnnScan [ctx: Db] [index: hn_pt1, k: 3, ef: 40, dimension: 1, prefilter_tier: graph] {rows: 3}
-                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 2500}
+    Sort [ctx: Db] [sort_keys: vector::distance::knn() ASC] {rows: 3}
+        Filter [ctx: Db] [predicate: category = 'a'] {rows: 3}
+            KnnScan [ctx: Db] [index: hn_pt1, k: 3, ef: 40, dimension: 1, prefilter_tier: graph] {rows: 3}
+                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 2500}
 
 Total rows: 3"'''
 

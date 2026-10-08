@@ -9,11 +9,9 @@ use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::exec::analyzer_function::StreamingAnalyzerFunction;
 use crate::expr::Error;
-use crate::fnc::get_execution_context;
 use crate::idx::ft::analyzer::Analyzer;
-use crate::idx::ft::highlighter::HighlightParams;
-use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 use crate::val::{Array, Number, Object, Value};
 
 pub async fn analyze(
@@ -24,47 +22,37 @@ pub async fn analyze(
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let az = ctx.tx().get_db_analyzer(ns, db, &az, opt.version).await?;
 		let az = Analyzer::new(ctx.get_index_stores(), az).await?;
-		az.analyze(stk, &LegacyAnalyzerFunction::new(ctx, opt), val).await
+		let exec = crate::exec::entry::frame(ctx, opt, None).await;
+		az.analyze(stk, &StreamingAnalyzerFunction::new(&exec), val).await
 	} else {
 		Ok(Value::None)
 	}
 }
 
+/// `search::score`, `search::highlight` and `search::offsets` answer from the
+/// full-text index an index-driven scan holds for the record it is reading.
+/// The operators of the engine evaluate them there; reached from any
+/// other caller there is no index to answer from, and the answer is `NONE`.
 pub async fn score(
-	(ctx, doc): (&FrozenContext, Option<&CursorDoc>),
-	(match_ref,): (Value,),
+	(_ctx, _doc): (&FrozenContext, Option<&CursorDoc>),
+	(_match_ref,): (Value,),
 ) -> Result<Value> {
-	if let Some((exe, doc, thg)) = get_execution_context(ctx, doc) {
-		return exe.score(ctx, &match_ref, thg, doc.ir.as_ref()).await;
-	}
 	Ok(Value::None)
 }
 
+/// See [`score`].
 pub async fn highlight(
-	(ctx, doc): (&FrozenContext, Option<&CursorDoc>),
-	(prefix, suffix, match_ref, Optional(partial)): (Value, Value, Value, Optional<bool>),
+	(_ctx, _doc): (&FrozenContext, Option<&CursorDoc>),
+	(_prefix, _suffix, _match_ref, Optional(_partial)): (Value, Value, Value, Optional<bool>),
 ) -> Result<Value> {
-	if let Some((exe, doc, thg)) = get_execution_context(ctx, doc) {
-		let hlp = HighlightParams {
-			prefix,
-			suffix,
-			match_ref,
-			partial: partial.unwrap_or(false),
-		};
-
-		return exe.highlight(ctx, thg, hlp, doc.doc.as_ref()).await;
-	}
 	Ok(Value::None)
 }
 
+/// See [`score`].
 pub async fn offsets(
-	(ctx, doc): (&FrozenContext, Option<&CursorDoc>),
-	(match_ref, Optional(partial)): (Value, Optional<bool>),
+	(_ctx, _doc): (&FrozenContext, Option<&CursorDoc>),
+	(_match_ref, Optional(_partial)): (Value, Optional<bool>),
 ) -> Result<Value> {
-	if let Some((exe, _, thg)) = get_execution_context(ctx, doc) {
-		let partial = partial.unwrap_or(false);
-		return exe.offsets(ctx, thg, match_ref, partial).await;
-	}
 	Ok(Value::None)
 }
 

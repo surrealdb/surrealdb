@@ -14,25 +14,22 @@ signin = """{
 
 [test]
 reason = """
-A field permission on a mapped path (`items[*].secret`) is judged against the
-record, not against the array element the path widens to. Guarded by a closure
-invocation the guard does not contain, that still has to hold: `t:1` refuses at
-the record and allows at the element, and the element must not win.
-
-`$pred()` is what `SECURITY_GUIDE.md` calls an invocation whose body is nowhere
-in the expression, which must be read as demanding the whole row. `t:2` is the
-control, refusing at the element and allowing at the record, so the guard is
-shown to be live rather than merely closed.
+A field permission on a mapped path (`items[*].secret`) guarded by `$pred()`, an invocation
+whose body is nowhere in the expression, is definer code, run in a privileged frame that holds
+none of the caller's bindings. The record user's `LET $pred` is such a binding, so the guard
+invokes `NONE`, which fails, and neither record is read through the caller's closure: not `t:1`,
+which the record refuses and the element allows, nor `t:2`. A closure cannot be stored, so no
+database parameter supplies one either.
 """
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[{ allowed: false, id: t:1, items: [{ allowed: true, shown: 1 }] }]"
+error = "Failed to check field permission: There was a problem running the ANONYMOUS() function. 'none' is not a function"
 
 [[test.results]]
-value = "[{ allowed: true, id: t:2, items: [{ allowed: false, secret: 'SHOWN', shown: 2 }] }]"
+error = "Failed to check field permission: There was a problem running the ANONYMOUS() function. 'none' is not a function"
 */
 
 LET $pred = || allowed;

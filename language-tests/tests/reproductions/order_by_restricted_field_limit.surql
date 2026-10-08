@@ -20,8 +20,7 @@ wrong rows.
 
 Each source route reaches the scan differently -- a literal table, a table
 resolved from a call at plan time, and a B-tree access path chosen for the
-WHERE clause -- and each must apply the LIMIT after the sort. The queries run
-under every planner strategy, so the legacy and streaming paths must agree.
+WHERE clause -- and each must apply the LIMIT after the sort.
 """
 
 # The permission grants `score` on every row, so the key is visible.

@@ -5,7 +5,7 @@ use surrealdb_strand::TableName;
 use web_time::Instant;
 
 use super::builder::{IndexKey, IndexMutation};
-use super::state::{CatalogIndexState, catalog_index_state, is_condition_not_met};
+use super::state::{CatalogIndexState, is_condition_not_met};
 use super::{
 	Appending, BUILD_CLOSING_SLEEP, BUILD_RESERVATION_TTL_SECS, ConsumeResult, DurableAdmission,
 	DurableAdmissionDecision, DurableAdmissionFence, IndexBuildPhase, IndexBuildReservation,
@@ -287,7 +287,7 @@ impl IndexBuilder {
 		db: DatabaseId,
 	) -> Result<bool> {
 		Ok(!matches!(
-			catalog_index_state(&ctx.tx(), ns, db, &ix.table_name, &ix.name, ix.index_id).await?,
+			catalog_state(&ctx.tx(), ns, db, &ix.table_name, &ix.name, ix.index_id).await?,
 			CatalogIndexState::Present
 		))
 	}
@@ -332,10 +332,8 @@ impl IndexBuilder {
 			// invisible to that transaction: its snapshot predates the removal,
 			// and its catalog cache is already holding the definition the write
 			// read on its first record.
-			let catalog = catch!(
-				tx,
-				catalog_index_state(&tx, ns, db, &ix.table_name, &ix.name, ix.index_id).await
-			);
+			let catalog =
+				catch!(tx, catalog_state(&tx, ns, db, &ix.table_name, &ix.name, ix.index_id).await);
 			tx.cancel().await?;
 			return match catalog {
 				CatalogIndexState::Retired => Ok(CachedAdmission::Retired),
@@ -422,9 +420,7 @@ impl IndexBuilder {
 				// keeps both halves of the decision on the view that observed
 				// the state missing.
 				let catalog =
-					match catalog_index_state(&tx, ns, db, &ix.table_name, &ix.name, ix.index_id)
-						.await
-					{
+					match catalog_state(&tx, ns, db, &ix.table_name, &ix.name, ix.index_id).await {
 						Ok(catalog) => catalog,
 						Err(err) => {
 							let _ = tx.cancel().await;
@@ -522,12 +518,14 @@ impl IndexBuilder {
 					match res {
 						Ok(()) => {
 							tx.commit().await?;
-							return Ok(DurableAdmissionDecision::Admit(DurableAdmission {
-								generation: state.generation,
-								ticket,
-								initial_complete: state.initial_complete,
-								release,
-							}));
+							return Ok(DurableAdmissionDecision::Admit(Box::new(
+								DurableAdmission {
+									generation: state.generation,
+									ticket,
+									initial_complete: state.initial_complete,
+									release,
+								},
+							)));
 						}
 						Err(err) if is_condition_not_met(&err) => {
 							let _ = tx.cancel().await;
@@ -620,4 +618,22 @@ impl IndexBuilder {
 			);
 		}
 	}
+}
+
+/// [`super::state::catalog_index_state`], as a seam of the run-time seal
+/// ([`crate::exec::compiles`]): admission decides whether a write maintains an
+/// index from what the catalog holds now, which a running program's write
+/// reaches and which no descriptor answers.
+async fn catalog_state(
+	tx: &crate::kvs::Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table_name: &TableName,
+	index_name: &surrealdb_strand::Strand,
+	index_id: IndexId,
+) -> Result<CatalogIndexState> {
+	crate::exec::compiles::seam(super::state::catalog_index_state(
+		tx, ns, db, table_name, index_name, index_id,
+	))
+	.await
 }

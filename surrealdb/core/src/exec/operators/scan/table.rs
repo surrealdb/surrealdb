@@ -4,35 +4,55 @@
 //! at plan time. Skips runtime index analysis and source expression evaluation,
 //! going straight to `kv_scan_stream` + `ScanPipeline`.
 
+#[cfg(test)]
 use std::borrow::Cow;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::Yielder;
+#[cfg(test)]
 use futures::StreamExt;
+#[cfg(test)]
 use surrealdb_strand::TableName;
 
-use super::pipeline::{
-	FieldState, ScanPipeline, build_field_state, eval_limit_expr, kv_scan_stream,
-};
+#[cfg(test)]
+#[cfg(test)]
+use super::pipeline::eval_limit_expr;
+#[cfg(test)]
+use super::pipeline::{FieldState, ScanPipeline, build_field_state, kv_scan_stream};
+#[cfg(test)]
 use super::resolved::{EnforcementMode, ResolvedTableContext, planned_select_permission};
+#[cfg(test)]
 use crate::err::EngineError;
+#[cfg(test)]
 use crate::exec::operators::limit::PagingClause;
+#[cfg(test)]
 use crate::exec::operators::scan::common::resolve_version_stamp;
+#[cfg(test)]
 use crate::exec::permission::{
 	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
 	validate_record_user_access,
 };
+#[cfg(test)]
 use crate::exec::pre_decode_filter::{PreDecodeFilterStatus, pre_decode_filter_for_execute};
+#[cfg(test)]
 use crate::exec::topk_pushdown::{TopKPushdownStatus, topk_probe_for_execute};
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
 	OutputOrdering, PhysicalExpr, ValueBatchStream, monitor_stream,
 };
+#[cfg(test)]
 use crate::expr::{ControlFlow, ControlFlowExt};
+#[cfg(test)]
 use crate::iam::Action;
+#[cfg(test)]
 use crate::key::schema::RecordPrefix;
+#[cfg(test)]
 use crate::kvs::Direction;
 
+#[cfg(test)]
 /// Direct KV range scan over a known table.
 ///
 /// Unlike [`DynamicScan`](super::DynamicScan), this operator knows at plan
@@ -69,9 +89,14 @@ pub struct TableScan {
 	/// TopK threshold pushdown status (plan-time); see [`TopKPushdownStatus`].
 	pub(crate) topk_pushdown_status: TopKPushdownStatus,
 	pub(crate) metrics: Arc<OperatorMetrics>,
+	/// The limit this scan is bound to, which spares it its records when it
+	/// evaluates to zero.
+	pub(crate) zero_limit: crate::exec::zero_limit::ZeroLimitBinding,
 }
 
+#[cfg(test)]
 impl TableScan {
+	#[cfg(test)]
 	pub(crate) fn new(
 		table_name: TableName,
 		direction: Direction,
@@ -93,37 +118,47 @@ impl TableScan {
 			mode: EnforcementMode::Runtime,
 			pre_decode_filter_status: PreDecodeFilterStatus::NotApplicable,
 			topk_pushdown_status: TopKPushdownStatus::NotApplicable,
+			zero_limit: Default::default(),
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
 
+	#[cfg(test)]
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
 		self
 	}
 
+	#[cfg(test)]
 	/// Set the mode the scan was planned under; see [`Self::mode`].
 	pub(crate) fn with_enforcement_mode(mut self, mode: EnforcementMode) -> Self {
 		self.mode = mode;
 		self
 	}
 
+	#[cfg(test)]
 	/// Set plan-time pre-decode filter status for EXPLAIN and execution.
 	pub(crate) fn with_pre_decode_filter(mut self, status: PreDecodeFilterStatus) -> Self {
 		self.pre_decode_filter_status = status;
 		self
 	}
 
+	#[cfg(test)]
 	/// Set plan-time TopK threshold pushdown status for EXPLAIN and execution.
 	pub(crate) fn with_topk_pushdown(mut self, status: TopKPushdownStatus) -> Self {
 		self.topk_pushdown_status = status;
 		self
 	}
 }
+#[cfg(test)]
 impl ExecOperator for TableScan {
 	fn name(&self) -> &'static str {
 		"TableScan"
+	}
+
+	fn zero_limit_binding(&self) -> Option<&crate::exec::zero_limit::ZeroLimitBinding> {
+		Some(&self.zero_limit)
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
@@ -203,6 +238,7 @@ impl ExecOperator for TableScan {
 		let pre_decode_filter_status = self.pre_decode_filter_status.clone();
 		let topk_pushdown_status = self.topk_pushdown_status.clone();
 		let metrics = Arc::clone(&self.metrics);
+		let zeroed = self.zero_limit.applies(ctx);
 		let ctx = ctx.clone();
 
 		let stream =
@@ -216,6 +252,11 @@ impl ExecOperator for TableScan {
 				let limit_val: Option<usize> = match &limit_expr {
 					Some(expr) => Some(eval_limit_expr(&**expr, &ctx, PagingClause::Limit).await?),
 					None => None,
+				};
+				let limit_val = if zeroed {
+					Some(0)
+				} else {
+					limit_val
 				};
 				let start_val: usize = match &start_expr {
 					Some(expr) => eval_limit_expr(&**expr, &ctx, PagingClause::Start).await?,
@@ -337,6 +378,7 @@ impl ExecOperator for TableScan {
 					&field_state,
 					check_perms,
 					&metrics,
+					&ctx,
 				);
 				let mut source = kv_scan_stream(
 					Arc::clone(&txn),

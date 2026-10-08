@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Test IN and INSIDE operators with standard, unique, and compound indexes (new executor)"
+reason = "Test IN and INSIDE operators with standard, unique, and compound indexes"
 
 [[test.results]]
 value = "NONE"
@@ -19,8 +18,8 @@ value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
     Filter [ctx: Db] [predicate: email INSIDE ['a@b', 'e@f']] {rows: 1}
         UnionIndexScan [ctx: Db] [table: user, branches: 2] {rows: 1}
-            IndexScan [ctx: Db] [index: user_email_idx, access: = 'a@b', direction: Forward] {rows: 1}
-            IndexScan [ctx: Db] [index: user_email_idx, access: = 'e@f', direction: Forward] {rows: 0}
+            IndexScan [ctx: Db] [table: user, index: user_email_idx, access: = 'a@b', direction: Forward] {rows: 1}
+            IndexScan [ctx: Db] [table: user, index: user_email_idx, access: = 'e@f', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -29,8 +28,8 @@ value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
     Filter [ctx: Db] [predicate: email INSIDE ['a@b', 'e@f']] {rows: 1}
         UnionIndexScan [ctx: Db] [table: user, branches: 2] {rows: 1}
-            IndexScan [ctx: Db] [index: user_email_idx, access: = 'a@b', direction: Forward] {rows: 1}
-            IndexScan [ctx: Db] [index: user_email_idx, access: = 'e@f', direction: Forward] {rows: 0}
+            IndexScan [ctx: Db] [table: user, index: user_email_idx, access: = 'a@b', direction: Forward] {rows: 1}
+            IndexScan [ctx: Db] [table: user, index: user_email_idx, access: = 'e@f', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -64,7 +63,7 @@ value = "[{ apprenantUid: '00013483-fedd-43e3-a94e-80728d896f6e' }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: apprenantUid] {rows: 1}
-    IndexScan [ctx: Db] [index: apprenantUid, access: = '00013483-fedd-43e3-a94e-80728d896f6e', direction: Forward, predicate: apprenantUid INSIDE ['00013483-fedd-43e3-a94e-80728d896f6e']] {rows: 1}
+    IndexScan [ctx: Db] [table: apprenants, index: apprenantUid, access: = '00013483-fedd-43e3-a94e-80728d896f6e', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -86,26 +85,29 @@ value = "[{ account: accounts:3, id: test:3, type: 'password', value: 'notAValid
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    Filter [ctx: Db] [predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1}
-        UnionIndexScan [ctx: Db] [table: test, branches: 2] {rows: 3}
-            IndexScan [ctx: Db] [index: idx_type_value, access: ['password'], direction: Forward] {rows: 3}
-            IndexScan [ctx: Db] [index: idx_type_value, access: ['firebasePassword'], direction: Forward] {rows: 0}
+    Filter [ctx: Db] [predicate: account = (accounts:1) AND type INSIDE ['password', 'firebasePassword']] {rows: 1}
+        UnionIndexScan [ctx: Db] [table: test, branches: 2] {rows: 1}
+            DistinctRecords [ctx: Db] {rows: 1}
+                IndexScan [ctx: Db] [table: test, index: idx_type_value, access: ['password'], direction: Forward] {rows: 1}
+            DistinctRecords [ctx: Db] {rows: 1}
+                IndexScan [ctx: Db] [table: test, index: idx_type_value, access: ['firebasePassword'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    Filter [ctx: Db] [predicate: type INSIDE ['password', 'firebasePassword']] {rows: 1}
-        IndexScan [ctx: Db] [index: idx_account_type, access: [accounts:1], direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: account = (accounts:1) AND type INSIDE ['password', 'firebasePassword']] {rows: 1}
+        DistinctRecords [ctx: Db] {rows: 1}
+            IndexScan [ctx: Db] [table: test, index: idx_account_type, access: [accounts:1], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    Filter [ctx: Db] [predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1}
-        BitmapResolve [ctx: Db] [table: test] {rows: 1}
+    Filter [ctx: Db] [predicate: account = (accounts:1) AND type INSIDE ['password', 'firebasePassword']] {rows: 1}
+        BitmapScan [ctx: Db] [table: test] {rows: 1}
             BitmapAnd [ctx: Db] {rows: 1}
                 BitmapIndexScan [ctx: Db] [index: idx_account_type, access: [accounts:1]] {rows: 1}
                 BitmapOr [ctx: Db] {rows: 3}

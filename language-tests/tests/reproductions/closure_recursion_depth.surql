@@ -14,7 +14,7 @@ allow-eval-query = ["system"]
 reason = """
 A compiled closure that reaches itself again — passed as its own argument and
 called directly, through a block of its own, through a closure-taking builtin
-such as `array::map`, or through a statement the legacy engine runs inside
+such as `array::map`, or through a statement run inside
 `eval::surql` — consumes one unit of the computation-depth budget per call and
 fails with the computation-depth error once the budget is spent, instead of
 growing the native stack without bound. A recursion that terminates within the

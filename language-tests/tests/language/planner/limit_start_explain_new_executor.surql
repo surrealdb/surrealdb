@@ -1,16 +1,16 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 timeout = 5000
 
 [test]
-reason = "Test LIMIT and START with EXPLAIN plans and ORDER BY (new executor)"
+reason = "Test LIMIT and START with EXPLAIN plans and ORDER BY"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 10}
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 10}
     TableScan [ctx: Db] [table: item, direction: Forward, limit: 10, offset: 2] {rows: 10}
 
 Total rows: 10''''
@@ -19,7 +19,8 @@ Total rows: 10''''
 value = "[]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 10}
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 10}
     TableScan [ctx: Db] [table: item2, direction: Forward, limit: 10, offset: 2] {rows: 10}
 
 Total rows: 10''''

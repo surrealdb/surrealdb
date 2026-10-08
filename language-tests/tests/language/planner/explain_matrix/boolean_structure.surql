@@ -1,12 +1,9 @@
 /**
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
 Plan and row coverage for the BOOLEAN STRUCTURE of a WHERE clause: the index set and the leaf operators are held fixed and only the shape of the AND/OR/NOT tree varies. One conjunct; two conjuncts on one index; two conjuncts on two indexes; a top-level OR of two indexed equalities; an OR with an unindexed branch; an OR with an always-empty branch; AND nested in OR and OR nested in AND, including an OR whose member is unindexed; NOT and ! around an indexed leaf; double negation in both spellings; AND NOT; a non-boolean conjunct taken for its truthiness; true/false literals ANDed and ORed in; bitmap intersection, union and subtraction and what blocks them; and each of those shapes again over a fan-out array column in both index spellings, including whole-array equality against a scalar and against the array's own value. Every indexed query is paired with the same query under WITH NOINDEX, which forces a table scan and is therefore the row oracle, and every shape whose candidate set can fan out also pins count() ... GROUP ALL on both sides, because count has its own index-only path.
-
-planner-strategy is narrowed because a prefix EXPLAIN errors under compute-only. Both streaming strategies are pinned rather than one: they plan identically by contract, so recording both states that intent and costs nothing.
 
 One behaviour is intended though it reads like a missed fast path: `plain CONTAINS 'red'` scans the table in every boolean position, while the same shapes over `tags`, indexed as `tags[*]`, fuse and seek. A bare-column index is planned as the element column it behaves as, which keeps whole-array comparisons off its entries, but is never sought for containment, because nothing shows that every value it stores is an array.
 
@@ -75,7 +72,7 @@ value = "[]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_a, access: = 'x', direction: Forward, predicate: a = 'x']
+    IndexScan [ctx: Db] [table: bs, index: idx_a, access: = 'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -87,7 +84,7 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:6 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_n, access: >2 <8, direction: Forward, predicate: n > 2 AND n < 8]
+    IndexScan [ctx: Db] [table: bs, index: idx_n, access: >2 <8, direction: Forward]
 ''''
 
 [[test.results]]
@@ -100,7 +97,7 @@ value = "[{ id: bs:2 }, { id: bs:4 }, { id: bs:5 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: a = 'x' AND b = true]
-        BitmapResolve [ctx: Db] [table: bs]
+        BitmapScan [ctx: Db] [table: bs]
             BitmapAnd [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
                 BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
@@ -114,10 +111,11 @@ value = "[{ id: bs:1 }, { id: bs:6 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: bs, condition: a = 'x' AND b = true]
-    BitmapAnd [ctx: Db]
-        BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
-        BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: bs, condition: a = 'x' AND b = true]
+        BitmapAnd [ctx: Db]
+            BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
+            BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
 "'''
 
 [[test.results]]
@@ -130,7 +128,7 @@ value = "[{ count: 2 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: a = 'x' OR b = false]
-        BitmapResolve [ctx: Db] [table: bs]
+        BitmapScan [ctx: Db] [table: bs]
             BitmapOr [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
                 BitmapIndexScan [ctx: Db] [index: idx_b, access: = false]
@@ -144,12 +142,13 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:4 }, { id: bs:6 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    Filter [ctx: Db] [predicate: a = 'x' OR b = false]
-        BitmapResolve [ctx: Db] [table: bs]
-            BitmapOr [ctx: Db]
-                BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
-                BitmapIndexScan [ctx: Db] [index: idx_b, access: = false]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: a = 'x' OR b = false]
+            BitmapScan [ctx: Db] [table: bs]
+                BitmapOr [ctx: Db]
+                    BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
+                    BitmapIndexScan [ctx: Db] [index: idx_b, access: = false]
 "'''
 
 [[test.results]]
@@ -175,8 +174,8 @@ value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: a = 'x' OR a = 'absent']
         UnionIndexScan [ctx: Db] [table: bs, branches: 2]
-            IndexScan [ctx: Db] [index: idx_a, access: = 'x', direction: Forward]
-            IndexScan [ctx: Db] [index: idx_a, access: = 'absent', direction: Forward]
+            IndexScan [ctx: Db] [table: bs, index: idx_a, access: = 'x', direction: Forward]
+            IndexScan [ctx: Db] [table: bs, index: idx_a, access: = 'absent', direction: Forward]
 "'''
 
 [[test.results]]
@@ -189,7 +188,7 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:6 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: a = 'x' AND b = true OR n = 9]
-        BitmapResolve [ctx: Db] [table: bs]
+        BitmapScan [ctx: Db] [table: bs]
             BitmapOr [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
                 BitmapIndexScan [ctx: Db] [index: idx_n, access: = 9]
@@ -206,8 +205,8 @@ value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: a = 'x' AND b = true OR a = 'y' AND b = false]
         UnionIndexScan [ctx: Db] [table: bs, branches: 2]
-            IndexScan [ctx: Db] [index: idx_a, access: = 'x', direction: Forward]
-            IndexScan [ctx: Db] [index: idx_a, access: = 'y', direction: Forward]
+            IndexScan [ctx: Db] [table: bs, index: idx_a, access: = 'x', direction: Forward]
+            IndexScan [ctx: Db] [table: bs, index: idx_a, access: = 'y', direction: Forward]
 "'''
 
 [[test.results]]
@@ -219,8 +218,8 @@ value = "[{ id: bs:1 }, { id: bs:4 }, { id: bs:6 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: b = true AND a = 'x' OR a = 'y']
-        BitmapResolve [ctx: Db] [table: bs]
+    Filter [ctx: Db] [predicate: b = true AND (a = 'x' OR a = 'y')]
+        BitmapScan [ctx: Db] [table: bs]
             BitmapAnd [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
                 BitmapOr [ctx: Db]
@@ -237,8 +236,8 @@ value = "[{ id: bs:1 }, { id: bs:3 }, { id: bs:6 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: a = 'x' OR u = 'r']
-        IndexScan [ctx: Db] [index: idx_b, access: = true, direction: Forward]
+    Filter [ctx: Db] [predicate: b = true AND (a = 'x' OR u = 'r')]
+        IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
 [[test.results]]
@@ -250,7 +249,8 @@ value = "[{ id: bs:1 }, { id: bs:6 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: bs, direction: Forward, predicate: not(a = 'x'), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: not(a = 'x')]
+        TableScan [ctx: Db] [table: bs, direction: Forward]
 "'''
 
 [[test.results]]
@@ -262,7 +262,7 @@ value = "[{ id: bs:3 }, { id: bs:4 }, { id: bs:5 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: bs, direction: Forward, predicate: ! a = 'x', pre_decode_filter: yes]
+    TableScan [ctx: Db] [table: bs, direction: Forward, predicate: !(a = 'x'), pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -275,7 +275,7 @@ value = "[{ id: bs:3 }, { id: bs:4 }, { id: bs:5 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: a = 'x' AND not(b = true)]
-        BitmapResolve [ctx: Db] [table: bs]
+        BitmapScan [ctx: Db] [table: bs]
             BitmapAndNot [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
                 BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
@@ -289,10 +289,11 @@ value = "[{ id: bs:2 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: bs, condition: a = 'x' AND not(b = true)]
-    BitmapAndNot [ctx: Db]
-        BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
-        BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: bs, condition: a = 'x' AND not(b = true)]
+        BitmapAndNot [ctx: Db]
+            BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
+            BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
 "'''
 
 [[test.results]]
@@ -304,8 +305,8 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: a = 'x' AND ! b = true]
-        BitmapResolve [ctx: Db] [table: bs]
+    Filter [ctx: Db] [predicate: a = 'x' AND !(b = true)]
+        BitmapScan [ctx: Db] [table: bs]
             BitmapAndNot [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
                 BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
@@ -320,7 +321,8 @@ value = "[{ id: bs:2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: bs, direction: Forward, predicate: not(not(a = 'x')), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: not(not(a = 'x'))]
+        TableScan [ctx: Db] [table: bs, direction: Forward]
 "'''
 
 [[test.results]]
@@ -332,7 +334,7 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:6 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: bs, direction: Forward, predicate: ! ! a = 'x', pre_decode_filter: yes]
+    TableScan [ctx: Db] [table: bs, direction: Forward, predicate: !!(a = 'x'), pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -344,8 +346,8 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:6 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: u]
-        IndexScan [ctx: Db] [index: idx_a, access: = 'x', direction: Forward]
+    Filter [ctx: Db] [predicate: a = 'x' AND u]
+        IndexScan [ctx: Db] [table: bs, index: idx_a, access: = 'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -357,7 +359,7 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:6 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_a, access: = 'x', direction: Forward, predicate: a = 'x']
+    IndexScan [ctx: Db] [table: bs, index: idx_a, access: = 'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -368,8 +370,9 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:6 }]"
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Rt] [projections: id]
-    EmptyScan [ctx: Rt]
+'SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: false]
+        Union [ctx: Db]
 ''''
 
 [[test.results]]
@@ -394,7 +397,7 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:3 }, { id: bs:4 }, { id: bs:5 }, 
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: a = 'x' AND b = true AND u = 'p']
-        BitmapResolve [ctx: Db] [table: bs]
+        BitmapScan [ctx: Db] [table: bs]
             BitmapAnd [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
                 BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
@@ -408,12 +411,13 @@ value = "[{ id: bs:1 }, { id: bs:6 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    Filter [ctx: Db] [predicate: a = 'x' AND b = true AND u = 'p']
-        BitmapResolve [ctx: Db] [table: bs]
-            BitmapAnd [ctx: Db]
-                BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
-                BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: a = 'x' AND b = true AND u = 'p']
+            BitmapScan [ctx: Db] [table: bs]
+                BitmapAnd [ctx: Db]
+                    BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
+                    BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
 "'''
 
 [[test.results]]
@@ -425,7 +429,7 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_tags, access: = 'red', direction: Forward, predicate: tags CONTAINS 'red']
+    IndexScan [ctx: Db] [table: bs, index: idx_tags, access: = 'red', direction: Forward]
 "'''
 
 [[test.results]]
@@ -436,7 +440,8 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:3 }, { id: bs:6 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: bs, condition: tags CONTAINS 'red']
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: bs, condition: tags CONTAINS 'red']
 "'''
 
 [[test.results]]
@@ -449,7 +454,7 @@ value = "[{ count: 4 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: tags CONTAINS 'red' AND b = true]
-        BitmapResolve [ctx: Db] [table: bs]
+        BitmapScan [ctx: Db] [table: bs]
             BitmapAnd [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
                 BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
@@ -463,10 +468,11 @@ value = "[{ id: bs:1 }, { id: bs:3 }, { id: bs:6 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: bs, condition: tags CONTAINS 'red' AND b = true]
-    BitmapAnd [ctx: Db]
-        BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
-        BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: bs, condition: tags CONTAINS 'red' AND b = true]
+        BitmapAnd [ctx: Db]
+            BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
+            BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
 "'''
 
 [[test.results]]
@@ -479,7 +485,7 @@ value = "[{ count: 3 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: tags CONTAINS 'red' OR b = false]
-        BitmapResolve [ctx: Db] [table: bs]
+        BitmapScan [ctx: Db] [table: bs]
             BitmapOr [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
                 BitmapIndexScan [ctx: Db] [index: idx_b, access: = false]
@@ -493,12 +499,13 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:3 }, { id: bs:4 }, { id: bs:6 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    Filter [ctx: Db] [predicate: tags CONTAINS 'red' OR b = false]
-        BitmapResolve [ctx: Db] [table: bs]
-            BitmapOr [ctx: Db]
-                BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
-                BitmapIndexScan [ctx: Db] [index: idx_b, access: = false]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: tags CONTAINS 'red' OR b = false]
+            BitmapScan [ctx: Db] [table: bs]
+                BitmapOr [ctx: Db]
+                    BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
+                    BitmapIndexScan [ctx: Db] [index: idx_b, access: = false]
 "'''
 
 [[test.results]]
@@ -512,8 +519,8 @@ value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: tags CONTAINS 'red' OR tags CONTAINS 'blue']
         UnionIndexScan [ctx: Db] [table: bs, branches: 2]
-            IndexScan [ctx: Db] [index: idx_tags, access: = 'red', direction: Forward]
-            IndexScan [ctx: Db] [index: idx_tags, access: = 'blue', direction: Forward]
+            IndexScan [ctx: Db] [table: bs, index: idx_tags, access: = 'red', direction: Forward]
+            IndexScan [ctx: Db] [table: bs, index: idx_tags, access: = 'blue', direction: Forward]
 "'''
 
 [[test.results]]
@@ -524,11 +531,12 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:3 }, { id: bs:6 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    Filter [ctx: Db] [predicate: tags CONTAINS 'red' OR tags CONTAINS 'blue']
-        UnionIndexScan [ctx: Db] [table: bs, branches: 2]
-            IndexScan [ctx: Db] [index: idx_tags, access: = 'red', direction: Forward]
-            IndexScan [ctx: Db] [index: idx_tags, access: = 'blue', direction: Forward]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: tags CONTAINS 'red' OR tags CONTAINS 'blue']
+            UnionIndexScan [ctx: Db] [table: bs, branches: 2]
+                IndexScan [ctx: Db] [table: bs, index: idx_tags, access: = 'red', direction: Forward]
+                IndexScan [ctx: Db] [table: bs, index: idx_tags, access: = 'blue', direction: Forward]
 "'''
 
 [[test.results]]
@@ -540,7 +548,8 @@ value = "[{ count: 4 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: bs, direction: Forward, predicate: not(tags CONTAINS 'red'), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: not(tags CONTAINS 'red')]
+        TableScan [ctx: Db] [table: bs, direction: Forward]
 "'''
 
 [[test.results]]
@@ -551,8 +560,10 @@ value = "[{ id: bs:4 }, { id: bs:5 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: bs, direction: Forward, predicate: not(tags CONTAINS 'red'), pre_decode_filter: no (unsupported predicate)]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: not(tags CONTAINS 'red')]
+            TableScan [ctx: Db] [table: bs, direction: Forward]
 "'''
 
 [[test.results]]
@@ -565,7 +576,7 @@ value = "[{ count: 2 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: b = true AND not(tags CONTAINS 'red')]
-        BitmapResolve [ctx: Db] [table: bs]
+        BitmapScan [ctx: Db] [table: bs]
             BitmapAndNot [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
                 BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
@@ -579,10 +590,11 @@ value = "[{ id: bs:5 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: bs, condition: b = true AND not(tags CONTAINS 'red')]
-    BitmapAndNot [ctx: Db]
-        BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
-        BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: bs, condition: b = true AND not(tags CONTAINS 'red')]
+        BitmapAndNot [ctx: Db]
+            BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+            BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
 "'''
 
 [[test.results]]
@@ -605,8 +617,9 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:3 }, { id: bs:6 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: bs, direction: Forward, predicate: plain CONTAINS 'red', pre_decode_filter: yes]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: bs, direction: Forward, predicate: plain CONTAINS 'red', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -618,8 +631,8 @@ value = "[{ count: 4 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: plain CONTAINS 'red']
-        IndexScan [ctx: Db] [index: idx_b, access: = true, direction: Forward]
+    Filter [ctx: Db] [predicate: plain CONTAINS 'red' AND b = true]
+        IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
 [[test.results]]
@@ -630,9 +643,10 @@ value = "[{ id: bs:1 }, { id: bs:3 }, { id: bs:6 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    Filter [ctx: Db] [predicate: plain CONTAINS 'red']
-        IndexScan [ctx: Db] [index: idx_b, access: = true, direction: Forward]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: plain CONTAINS 'red' AND b = true]
+            IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
 [[test.results]]
@@ -655,8 +669,9 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:3 }, { id: bs:4 }, { id: bs:6 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: bs, direction: Forward, predicate: plain CONTAINS 'red' OR b = false, pre_decode_filter: yes]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: bs, direction: Forward, predicate: plain CONTAINS 'red' OR b = false, pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -680,8 +695,8 @@ value = "[]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: plain = 'red']
-        IndexScan [ctx: Db] [index: idx_b, access: = true, direction: Forward]
+    Filter [ctx: Db] [predicate: plain = 'red' AND b = true]
+        IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
 [[test.results]]
@@ -692,9 +707,10 @@ value = "[]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    Filter [ctx: Db] [predicate: plain = 'red']
-        IndexScan [ctx: Db] [index: idx_b, access: = true, direction: Forward]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: plain = 'red' AND b = true]
+            IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
 [[test.results]]
@@ -706,8 +722,8 @@ value = "[{ count: 0 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: plain = ['red', 'blue']]
-        IndexScan [ctx: Db] [index: idx_b, access: = true, direction: Forward]
+    Filter [ctx: Db] [predicate: plain = ['red', 'blue'] AND b = true]
+        IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
 [[test.results]]

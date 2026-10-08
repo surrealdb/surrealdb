@@ -13,7 +13,7 @@ backend = ["mem"]
 allow-eval-query = ["system"]
 
 [test]
-reason = "A self-referential eval (a function whose body evaluates a query that calls the function again) is bounded by expression-nesting depth against max_computation_depth — the same number the legacy executor counts — and errors with a computation-depth error instead of overflowing the stack. The legacy path counts via Options::dive on a heap TreeStack; the streaming planner tracks the same depth and eval continues the count when it re-plans its query string, so the native stack cannot grow without limit. Either way it must not crash."
+reason = "A self-referential eval (a function whose body evaluates a query that calls the function again) is bounded by expression-nesting depth against max_computation_depth, and errors with a computation-depth error instead of overflowing the stack. The planner tracks the nesting depth and eval continues the count when it re-plans its query string, so the native stack cannot grow without limit. It must not crash."
 
 [[test.results]]
 value = "NONE"

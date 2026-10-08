@@ -42,7 +42,12 @@
 //!   pipeline the filter stands on. The right side's purity says the relation is the same each time
 //!   it is read; this says nothing on the left changes it between the reads. A write on the probe
 //!   side does — the per-row form reads the relation the writes so far have left, and the join
-//!   reads it once for all of them.
+//!   reads it once for all of them;
+//! - lifted out of a `PermissionFilter`, it reads no computed field of the table off the outer row,
+//!   at the outer position or through `$parent`. The rows reach the filter as stored, carrying no
+//!   computed field, and the filter judges its predicate against the row with the computed fields
+//!   it reads derived (the VM's `Lowering::permission`); a join above the filter would read the
+//!   field as `NONE` — an anti join then admitting the rows the predicate was written to deny.
 //!
 //! The other conjuncts of the predicate keep their order in a filter of the
 //! same kind beneath the join, so an index the pipeline chose for them still
@@ -86,6 +91,9 @@
 
 use std::collections::HashSet;
 
+use surrealdb_strand::Strand;
+
+use super::reads::reads_beneath;
 use super::{
 	Outcome, RuleContext, RuleDef, and_all, conjuncts, fire, is_pure, may_raise,
 	mentions_index_operator, mentions_row_scoped_deep, plan_may_raise, split_and,
@@ -93,9 +101,9 @@ use super::{
 use crate::exec::function::FunctionRegistry;
 use crate::expr::BinaryOperator;
 use crate::expr::logical::{
-	EvalFrame, JoinKind, LogicalExpr, LogicalFields, LogicalFilter, LogicalIf, LogicalJoin,
-	LogicalOp, LogicalPermissionFilter, LogicalProject, LogicalSource, OpKind, RelationAlias,
-	SourceRef,
+	EvalFrame, FieldPath, JoinKind, LogicalExpr, LogicalFields, LogicalFilter, LogicalIf,
+	LogicalJoin, LogicalOp, LogicalPermissionFilter, LogicalProject, LogicalSource, OpKind,
+	RelationAlias, SourceRef,
 };
 
 /// The parameter a subquery reads its caller's row through.
@@ -116,23 +124,34 @@ fn apply(node: &mut LogicalOp, cx: &mut RuleContext<'_>) -> bool {
 		LogicalOp::Filter(LogicalFilter {
 			input,
 			predicate,
-		}) => lift(*input, predicate, &EvalFrame::caller(), cx, &|input, predicate| {
-			LogicalOp::Filter(LogicalFilter {
-				input: Box::new(input),
-				predicate,
-			})
-		}),
+		}) => lift(
+			*input,
+			predicate,
+			&EvalFrame::caller(),
+			&HashSet::new(),
+			cx,
+			&|input, predicate| {
+				LogicalOp::Filter(LogicalFilter {
+					input: Box::new(input),
+					predicate,
+				})
+			},
+		),
 		LogicalOp::PermissionFilter(LogicalPermissionFilter {
 			input,
 			predicate,
 			auth,
+			guard,
 		}) => {
 			let frame = EvalFrame::permission(auth.clone());
-			lift(*input, predicate, &frame, cx, &|input, predicate| {
+			// The rows reach a permission filter as stored.
+			let absent = computed_fields(&input);
+			lift(*input, predicate, &frame, &absent, cx, &|input, predicate| {
 				LogicalOp::PermissionFilter(LogicalPermissionFilter {
 					input: Box::new(input),
 					predicate,
 					auth: auth.clone(),
+					guard,
 				})
 			})
 		}
@@ -162,11 +181,15 @@ impl<'a> Consults<'a> {
 
 /// Rebuilds a filter of `predicate` over `input` with every liftable
 /// conjunct lifted into a join above the filter of the remaining conjuncts.
-/// `rebuild` makes a filter of the original kind.
+/// `absent` names the fields `input`'s rows do not carry though its schema
+/// declares them — the computed fields beneath a permission filter — which no
+/// lifted conjunct may read off the outer row. `rebuild` makes a filter of the
+/// original kind.
 fn lift(
 	input: LogicalOp,
 	predicate: LogicalExpr,
 	frame: &EvalFrame,
+	absent: &HashSet<Strand>,
 	cx: &mut RuleContext<'_>,
 	rebuild: &dyn Fn(LogicalOp, LogicalExpr) -> LogicalOp,
 ) -> Outcome {
@@ -195,6 +218,7 @@ fn lift(
 	let liftable = |conjunct: &LogicalExpr| {
 		Lift::of(conjunct, consults)
 			.filter(|lift| probe_rows_are_objects || lift.residual.is_empty())
+			.filter(|lift| !lift.reads_outer_any_of(absent))
 	};
 	if !conjuncts.iter().any(|c| liftable(c).is_some()) {
 		return Outcome::Unchanged(rebuild(input, predicate));
@@ -269,6 +293,16 @@ fn lift(
 	})
 }
 
+/// The computed fields `op`'s schema declares, by name.
+fn computed_fields(op: &LogicalOp) -> HashSet<Strand> {
+	op.schema()
+		.fields
+		.iter()
+		.filter(|field| field.computed.is_some())
+		.filter_map(|field| field.path.as_field().cloned())
+		.collect()
+}
+
 /// Whether every row `op` yields is an object.
 ///
 /// A `VALUE` projection yields the bare value of its expression and a value
@@ -295,6 +329,7 @@ fn yields_object_rows(op: &LogicalOp) -> bool {
 		// fails to compile until its answer here is decided.
 		LogicalOp::Values(_)
 		| LogicalOp::Match(_)
+		| LogicalOp::Write(_)
 		| LogicalOp::Subquery(_)
 		| LogicalOp::UnionAll(_)
 		| LogicalOp::Join(_)
@@ -314,6 +349,7 @@ fn yields_object_rows(op: &LogicalOp) -> bool {
 		| LogicalOp::Return(_)
 		| LogicalOp::Foreach(_)
 		| LogicalOp::Info(_)
+		| LogicalOp::Ddl(_)
 		| LogicalOp::Sleep(_) => false,
 	}
 }
@@ -354,6 +390,25 @@ struct Lift {
 }
 
 impl Lift {
+	/// Whether the lift reads one of `fields` off the outer row: at the outer
+	/// position, or through `$parent` in a correlation key or the residual.
+	fn reads_outer_any_of(&self, fields: &HashSet<Strand>) -> bool {
+		if fields.is_empty() {
+			return false;
+		}
+		let paths: Vec<FieldPath> = fields.iter().cloned().map(FieldPath::field).collect();
+		let through_parent = |expr: &LogicalExpr| {
+			expr.any(|e| {
+				matches!(e, LogicalExpr::Access { base, field }
+					if fields.contains(field)
+						&& matches!(base.as_ref(), LogicalExpr::Param(param) if param.as_str() == PARENT))
+			})
+		};
+		reads_beneath(&self.outer, &paths)
+			|| self.keys.iter().any(|(outer, _)| through_parent(outer))
+			|| self.residual.iter().any(through_parent)
+	}
+
 	/// Whether evaluating this lift can raise: its keys and residual, judged
 	/// per probe row, the subquery's own filter, and the pipeline beneath it.
 	fn may_raise(&self, permission_checked: &HashSet<String>) -> bool {
@@ -547,9 +602,10 @@ impl Side {
 	fn of(expr: &LogicalExpr, row_scoped: &[&str]) -> Option<Side> {
 		let of = |e: &LogicalExpr| Side::of(e, row_scoped);
 		match expr {
-			LogicalExpr::Literal(_) | LogicalExpr::Constant(_) | LogicalExpr::Table(_) => {
-				Some(Side::Neither)
-			}
+			LogicalExpr::Literal(_)
+			| LogicalExpr::Constant(_)
+			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_) => Some(Side::Neither),
 			LogicalExpr::RecordId(_) => {
 				if expr.children().is_empty() {
 					Some(Side::Neither)
@@ -734,6 +790,7 @@ fn is_chain_over_table(op: &LogicalOp) -> bool {
 			LogicalOp::Source(_)
 			| LogicalOp::Values(_)
 			| LogicalOp::Match(_)
+			| LogicalOp::Write(_)
 			| LogicalOp::Subquery(_)
 			| LogicalOp::UnionAll(_)
 			| LogicalOp::Join(_)
@@ -754,6 +811,7 @@ fn is_chain_over_table(op: &LogicalOp) -> bool {
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => return false,
 		}
 	}
@@ -1043,6 +1101,39 @@ Filter[id != (note:1)]
       Source[note]
     Source[grant]"
 		);
+	}
+
+	/// The rows a permission filter judges carry no computed field, so a
+	/// membership that reads one off the row — at the outer position, or
+	/// through `$parent` in the subquery's condition — stays in the filter,
+	/// which judges it with the field derived. Lifted, the join would read the
+	/// field as `NONE`, and `NONE NOT IN …` admits every row.
+	#[tokio::test]
+	async fn a_permission_membership_reading_a_computed_field_is_not_lifted() {
+		let fx = Fixture::new(
+			"DEFINE TABLE grant SCHEMALESS;
+			 DEFINE TABLE squad SCHEMAFULL
+			 	PERMISSIONS FOR select WHERE lead NOT IN (SELECT VALUE who FROM grant);
+			 DEFINE FIELD owner ON squad TYPE string;
+			 DEFINE FIELD lead ON squad COMPUTED owner;
+			 DEFINE TABLE crew SCHEMAFULL
+			 	PERMISSIONS FOR select WHERE $auth IN (SELECT VALUE who FROM grant WHERE team = $parent.lead);
+			 DEFINE FIELD owner ON crew TYPE string;
+			 DEFINE FIELD lead ON crew COMPUTED owner;
+			 DEFINE TABLE band SCHEMAFULL
+			 	PERMISSIONS FOR select WHERE owner NOT IN (SELECT VALUE who FROM grant);
+			 DEFINE FIELD owner ON band TYPE string;
+			 DEFINE FIELD lead ON band COMPUTED owner;",
+		)
+		.await;
+		for table in ["squad", "crew"] {
+			let plan = fx.bind_as(&record_user(), &format!("SELECT id FROM {table}")).await;
+			assert!(!plan.contains("Join["), "no permission join over {table}:\n{plan}");
+			assert!(plan.contains("PermissionFilter["), "the filter keeps the membership:\n{plan}");
+		}
+		// The same membership over the stored field is lifted.
+		let plan = fx.bind_as(&record_user(), "SELECT id FROM band").await;
+		assert!(plan.contains("Join[ANTI"), "a stored key lifts:\n{plan}");
 	}
 }
 

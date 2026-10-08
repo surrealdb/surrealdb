@@ -89,7 +89,22 @@ impl FunctionSnapshot {
 		db: DatabaseId,
 		name: &str,
 	) -> Result<Option<Arc<Self>>> {
-		let definition = match txn.get_db_function(ns, db, name, None).await {
+		Self::for_function_at(cache, txn, ns, db, name, None).await
+	}
+
+	/// [`Self::for_function`] as of `version`, the stamp a `VERSION` names:
+	/// the definition the catalog held then. A versioned read has no shared
+	/// form, so it neither consults nor fills the cache; the definition is
+	/// compiled for the one caller.
+	pub async fn for_function_at(
+		cache: Option<&DatastoreCache>,
+		txn: &Transaction,
+		ns: NamespaceId,
+		db: DatabaseId,
+		name: &str,
+		version: Option<u64>,
+	) -> Result<Option<Arc<Self>>> {
+		let definition = match txn.get_db_function(ns, db, name, version).await {
 			Ok(definition) => definition,
 			Err(e) => {
 				if matches!(e.downcast_ref::<CatalogError>(), Some(CatalogError::FcNotFound { .. }))
@@ -100,6 +115,7 @@ impl FunctionSnapshot {
 			}
 		};
 		let hash = content_hash(&definition);
+		let cache = cache.filter(|_| version.is_none());
 		if let Some(cache) = cache {
 			let lookup = Lookup::Function(ns, db, name, hash);
 			if let Some(entry) = cache.get(&lookup).map(Entry::try_into_function).transpose()? {
@@ -239,6 +255,7 @@ fn reads_row(body: &LogicalOp) -> bool {
 					| LogicalExpr::Object(_)
 					| LogicalExpr::RecordId(_)
 					| LogicalExpr::Table(_)
+					| LogicalExpr::Mock(_)
 					| LogicalExpr::Constant(_)
 					| LogicalExpr::Access {
 						..

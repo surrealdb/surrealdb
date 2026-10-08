@@ -266,6 +266,7 @@ fn free_to_duplicate(expr: &LogicalExpr) -> bool {
 		| LogicalExpr::Object(_)
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Postfix {
 			..
 		}
@@ -366,6 +367,7 @@ fn is_path(expr: &LogicalExpr) -> bool {
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Param(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Filter {
 			..
@@ -560,6 +562,7 @@ fn pushable(plan: &LogicalOp, predicate: &LogicalExpr, row_scoped: &[&str]) -> O
 		}
 		LogicalOp::Values(_)
 		| LogicalOp::Match(_)
+		| LogicalOp::Write(_)
 		| LogicalOp::Subquery(_)
 		| LogicalOp::UnionAll(_)
 		| LogicalOp::Split(_)
@@ -578,6 +581,7 @@ fn pushable(plan: &LogicalOp, predicate: &LogicalExpr, row_scoped: &[&str]) -> O
 		| LogicalOp::Return(_)
 		| LogicalOp::Foreach(_)
 		| LogicalOp::Info(_)
+		| LogicalOp::Ddl(_)
 		| LogicalOp::Sleep(_) => return None,
 	};
 	if beneath.any(|n| matches!(n, LogicalOp::Values(_))) {

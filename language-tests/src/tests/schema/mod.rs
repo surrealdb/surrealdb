@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize, de};
 use surrealdb_core::syn::{self};
 use surrealdb_rpc::capabilities::{
 	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
-	NewPlannerStrategy, RouteTarget,
+	RouteTarget,
 };
 use surrealdb_syn::parser::ParserSettings;
 use surrealdb_types::{Object, RecordId, ToSql, Value};
@@ -17,14 +17,6 @@ use crate::cli::Backend;
 
 fn bool_or_f<T>() -> BoolOr<T> {
 	BoolOr::Bool(false)
-}
-
-fn default_planner_strategy() -> Vec<NewPlannerStrategyConfig> {
-	vec![
-		NewPlannerStrategyConfig::ComputeOnly,
-		NewPlannerStrategyConfig::AllRo,
-		NewPlannerStrategyConfig::BestEffortRo,
-	]
 }
 
 fn t() -> bool {
@@ -134,12 +126,6 @@ pub struct TestEnv {
 	/// (see [`Backend::supports_versioning`]).
 	#[serde(default)]
 	pub versioned: bool,
-	/// Planner strategies to run this test under.
-	/// Defaults to `["compute-only", "all-ro"]` when omitted; the test is
-	/// executed once per listed strategy.
-	#[serde(default = "default_planner_strategy")]
-	pub planner_strategy: Vec<NewPlannerStrategyConfig>,
-
 	/// Whether EXPLAIN ANALYZE output omits elapsed durations, making
 	/// output deterministic for test assertions. Defaults to true in the
 	/// language test framework. Set to `false` explicitly if you need
@@ -167,7 +153,6 @@ impl Default for TestEnv {
 			capabilities: Default::default(),
 			backend: Default::default(),
 			versioned: Default::default(),
-			planner_strategy: default_planner_strategy(),
 			redact_volatile_explain_attrs: Default::default(),
 			_unused_keys: Default::default(),
 		}
@@ -197,58 +182,6 @@ impl TestEnv {
 		}
 
 		res
-	}
-}
-
-/// Strategy for the new streaming planner/executor in language tests.
-///
-/// Maps to `surrealdb_rpc::capabilities::NewPlannerStrategy` but uses shorter
-/// kebab-case names for TOML configuration.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum NewPlannerStrategyConfig {
-	/// Try new planner, fall back on Unimplemented.
-	BestEffortRo,
-	/// Require new planner for all read-only statements (hard fail on Unimplemented).
-	AllRo,
-	/// Skip new planner entirely; always use legacy compute.
-	ComputeOnly,
-}
-
-impl NewPlannerStrategyConfig {
-	pub const DEFAULT_STRATEGIES: &[NewPlannerStrategyConfig] =
-		&[NewPlannerStrategyConfig::ComputeOnly, NewPlannerStrategyConfig::AllRo];
-}
-
-impl fmt::Display for NewPlannerStrategyConfig {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Self::BestEffortRo => f.write_str("best-effort-ro"),
-			Self::AllRo => f.write_str("all-ro"),
-			Self::ComputeOnly => f.write_str("compute-only"),
-		}
-	}
-}
-
-impl From<NewPlannerStrategy> for NewPlannerStrategyConfig {
-	fn from(strategy: NewPlannerStrategy) -> Self {
-		match strategy {
-			NewPlannerStrategy::BestEffortReadOnlyStatements => Self::BestEffortRo,
-			NewPlannerStrategy::ComputeOnly => Self::ComputeOnly,
-			NewPlannerStrategy::AllReadOnlyStatements => Self::AllRo,
-		}
-	}
-}
-
-impl From<NewPlannerStrategyConfig> for NewPlannerStrategy {
-	fn from(strategy: NewPlannerStrategyConfig) -> Self {
-		match strategy {
-			NewPlannerStrategyConfig::BestEffortRo => {
-				NewPlannerStrategy::BestEffortReadOnlyStatements
-			}
-			NewPlannerStrategyConfig::ComputeOnly => NewPlannerStrategy::ComputeOnly,
-			NewPlannerStrategyConfig::AllRo => NewPlannerStrategy::AllReadOnlyStatements,
-		}
 	}
 }
 

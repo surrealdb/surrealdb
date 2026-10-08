@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Regression (#548): `knn AND <unique-indexed equality>` demoted the KNN operator off its KnnScan — the unique equality outscored the KNN candidate (1000 > 800) with no KNN-must-drive guard, so the b-tree index drove the plan and the KNN conjunct landed in a per-row residual where it is never truthy, returning zero rows. A KNN candidate now drives unconditionally; the equality is enforced as the pushed-down residual (`email` has no declared field kind, so it is not bitmap-coverable)."

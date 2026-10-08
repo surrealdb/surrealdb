@@ -2,6 +2,6 @@
 //!
 //! This module provides iterators that efficiently retrieve records from
 //! various index types. Each iterator produces batches of records to
-//! support the streaming executor model.
+//! support the engine model.
 
 pub mod btree;

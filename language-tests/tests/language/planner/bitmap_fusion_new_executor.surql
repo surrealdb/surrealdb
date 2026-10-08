@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Bitmap candidate fusion (roaring bitmap index intersection) plan selection, EXPLAIN shape and results"
@@ -43,7 +42,7 @@ value = "[{ id: docs:1 }, { id: docs:4 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: category = 'ml' AND published = true]
-        BitmapResolve [ctx: Db] [table: docs]
+        BitmapScan [ctx: Db] [table: docs]
             BitmapAnd [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']
                 BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]
@@ -56,9 +55,9 @@ value = "[{ id: docs:1, rank: 3 }, { id: docs:4, rank: 4 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id, rank]
     Limit [ctx: Db] [limit: 1]
-        SortTopKByKey [ctx: Db] [sort_keys: rank ASC, limit: 1]
+        Sort [ctx: Db] [sort_keys: rank ASC, keep: 1]
             Filter [ctx: Db] [predicate: category = 'ml' AND published = true]
-                BitmapResolve [ctx: Db] [table: docs]
+                BitmapScan [ctx: Db] [table: docs]
                     BitmapAnd [ctx: Db]
                         BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']
                         BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]
@@ -71,7 +70,7 @@ value = "[{ id: docs:1 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: category = 'ml' AND published = true AND body @@ 'attention']
-        BitmapResolve [ctx: Db] [table: docs]
+        BitmapScan [ctx: Db] [table: docs]
             BitmapAnd [ctx: Db]
                 BitmapFullTextScan [ctx: Db] [index: ft_body, query: attention]
                 BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']
@@ -85,7 +84,7 @@ value = "[{ id: docs:2 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: category = 'ml' AND not(published = true)]
-        BitmapResolve [ctx: Db] [table: docs]
+        BitmapScan [ctx: Db] [table: docs]
             BitmapAndNot [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']
                 BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]
@@ -97,8 +96,8 @@ value = "[{ id: docs:4 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: category = 'ml' AND published = true AND ! body @@ 'attention']
-        BitmapResolve [ctx: Db] [table: docs]
+    Filter [ctx: Db] [predicate: category = 'ml' AND published = true AND !(body @@ 'attention')]
+        BitmapScan [ctx: Db] [table: docs]
             BitmapAndNot [ctx: Db]
                 BitmapAnd [ctx: Db]
                     BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']
@@ -112,7 +111,7 @@ value = "[{ id: docs:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: docs, direction: Forward, predicate: ! published = true, pre_decode_filter: yes]
+    TableScan [ctx: Db] [table: docs, direction: Forward, predicate: !(published = true), pre_decode_filter: yes]
 ''''
 
 [[test.results]]
@@ -121,8 +120,8 @@ value = "[{ id: docs:1 }, { id: docs:3 }, { id: docs:4 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: published = true AND category = 'ml' OR category = 'db']
-        BitmapResolve [ctx: Db] [table: docs]
+    Filter [ctx: Db] [predicate: published = true AND (category = 'ml' OR category = 'db')]
+        BitmapScan [ctx: Db] [table: docs]
             BitmapAnd [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]
                 BitmapOr [ctx: Db]
@@ -136,47 +135,46 @@ value = "[{ id: docs:3, score: 0.8472978472709656f }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id, score]
-    Compute [ctx: Db] [fields: score = search::score()]
-        Filter [ctx: Db] [predicate: published = true AND body @1@ 'roaring']
-            BitmapResolve [ctx: Db] [table: docs]
-                BitmapAnd [ctx: Db]
-                    BitmapFullTextScan [ctx: Db] [index: ft_body, query: roaring]
-                    BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]
+    Filter [ctx: Db] [predicate: published = true AND body @1@ 'roaring']
+        BitmapScan [ctx: Db] [table: docs]
+            BitmapAnd [ctx: Db]
+                BitmapFullTextScan [ctx: Db] [index: ft_body, query: roaring]
+                BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]
 "'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: published = true]
-        IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]
+    Filter [ctx: Db] [predicate: category = 'ml' AND published = true]
+        IndexScan [ctx: Db] [table: docs, index: idx_category, access: = 'ml', direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Limit [ctx: Db] [limit: 1]
-        Filter [ctx: Db] [predicate: published = true]
-            IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]
+        Filter [ctx: Db] [predicate: category = 'ml' AND published = true]
+            IndexScan [ctx: Db] [table: docs, index: idx_category, access: = 'ml', direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward, predicate: category = 'ml']
+    IndexScan [ctx: Db] [table: docs, index: idx_category, access: = 'ml', direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: published = true]
-        IndexScan [ctx: Db] [index: idx_category, access: = 'ml', direction: Forward]
+    Filter [ctx: Db] [predicate: category = 'ml' AND published = true]
+        IndexScan [ctx: Db] [table: docs, index: idx_category, access: = 'ml', direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
     Filter [ctx: Db] [predicate: category = 'ml' AND published = true] {rows: 2}
-        BitmapResolve [ctx: Db] [table: docs] {rows: 2}
+        BitmapScan [ctx: Db] [table: docs] {rows: 2}
             BitmapAnd [ctx: Db] {rows: 2}
                 BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml'] {rows: 3}
                 BitmapIndexScan [ctx: Db] [index: idx_published, access: = true] {rows: 3}
@@ -185,13 +183,14 @@ Total rows: 2"'''
 
 [[test.results]]
 value = '''
-"Limit [ctx: Db] [limit: 5]
-    Aggregate [ctx: Db] [by: category]
-        Filter [ctx: Db] [predicate: category = 'ml' AND published = true]
-            BitmapResolve [ctx: Db] [table: docs]
-                BitmapAnd [ctx: Db]
-                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']
-                    BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]
+"SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 5]
+        Aggregate [ctx: Db] [by: category]
+            Filter [ctx: Db] [predicate: category = 'ml' AND published = true]
+                BitmapScan [ctx: Db] [table: docs]
+                    BitmapAnd [ctx: Db]
+                        BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']
+                        BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]
 "'''
 */
 

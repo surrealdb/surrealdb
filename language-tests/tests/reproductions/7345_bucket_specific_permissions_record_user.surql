@@ -7,7 +7,7 @@ auth = { namespace = "test", database = "test", access = "user", rid = "user:bob
 allow-experimental = ["files"]
 
 [test]
-reason = "Issue 7345: record users must not bypass DEFINE BUCKET PERMISSIONS WHERE in the streaming file executor."
+reason = "Issue 7345: record users must not bypass DEFINE BUCKET PERMISSIONS WHERE in the file executor."
 issue = 7345
 
 [[test.results]]

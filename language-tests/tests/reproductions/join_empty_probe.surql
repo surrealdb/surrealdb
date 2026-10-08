@@ -8,9 +8,9 @@ auth = { level = "owner" }
 reason = """
 	An `IN` subquery lifted into a join is evaluated only when a left row
 	reaches it. With no left row satisfying the other conjuncts, a right
-	side whose filter raises on a stored value is never built, as the legacy
-	engine never evaluates the subquery for a row `AND` has already refused.
-	With a left row that reaches it, both engines raise the cast error.
+	side whose filter raises on a stored value is never built, as a
+	subquery is never evaluated for a row `AND` has already refused. With a left
+	row that reaches it, the cast error is raised.
 """
 
 [[test.results]]

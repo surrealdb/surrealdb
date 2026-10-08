@@ -1,13 +1,13 @@
 //! Schema resolution: what the catalog declares, written into the plan.
 //!
 //! The pass runs first in [`super::bind`]. It gives every table source its
-//! [`Schema`] and desugars the three schema-derived behaviours the streaming
+//! [`Schema`] and desugars the three schema-derived behaviours the
 //! engine enforces on a read into plan nodes, exactly where the scan pipeline
 //! applies them today and only for the callers it applies them to:
 //!
 //! | Declaration | Node | Condition |
 //! |---|---|---|
-//! | table `PERMISSIONS FOR select WHERE p` | `PermissionFilter[p]` directly above the `Source` | the caller is permission-checked |
+//! | table `PERMISSIONS FOR select WHERE p` | `PermissionFilter[p]` directly above the `Source`, `p` judged with the computed fields it reads derived | the caller is permission-checked |
 //! | table `PERMISSIONS FOR select NONE` | `PermissionFilter[false]` | the caller is permission-checked |
 //! | `COMPUTED e` on field `c` | the column `e AS c : kind @computed` of a derivation layer | the statement reads `c`, or a guard the statement brings into the plan does |
 //! | field `PERMISSIONS FOR select WHERE p` on `f` | the column `(IF p THEN f ELSE NONE END) AS f @permission` of the guard layer | the caller is permission-checked and `f` can reach the caller |
@@ -28,8 +28,12 @@
 //!
 //! The order of checks is the scan pipeline's
 //! (`operators/scan/pipeline.rs::materialise_fields_with_permissions`). The
-//! table permission is judged against the record as stored. Computed fields
-//! are derived from storage. For a checked caller the stored fields' guards
+//! table permission is judged against the record as stored, with the computed
+//! fields its predicate reads derived onto a copy in the predicate's own frame
+//! — the `PermissionFilter` does that itself (the VM's `Lowering::permission`;
+//! `exec::permission::ComputedFieldGuard` for a compiled guard), so the row
+//! passes it as stored.
+//! Computed fields are then derived from storage. For a checked caller the stored fields' guards
 //! then run, each judged against the *unreduced* record — raw stored fields
 //! and the computed fields as first derived — with `$value` the field's
 //! value, and a denied field is cut. If anything was cut, every computed
@@ -157,7 +161,7 @@
 //! for the next bind on the node. A `VERSION`ed read has no shared form and
 //! goes to the transaction. The definitions' clauses are compiled from their
 //! stored text into logical form through the catalog's lazily compiled
-//! bodies; nothing here reads the legacy engine's expression form of a
+//! bodies; nothing here reads the surface expression form of a
 //! clause.
 
 use std::collections::{HashMap, HashSet};
@@ -168,19 +172,20 @@ use surrealdb_types::ToSql;
 
 use super::{BindContext, Caller, visit_binding, visit_binding_mut, visit_deep};
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{FieldDefinition, TableDefinition};
+use crate::catalog::{FieldDefinition, PermissionKind, TableDefinition};
 use crate::err::{EngineError, Error};
 use crate::exec::function::FunctionRegistry;
 use crate::exec::planner::util::{
 	SELECT_ITERATION_PARAMS, evaluates_against_row, resolve_param_value, try_value_to_logical_expr,
 };
 use crate::expr::logical::{
-	ComputedBody, EvalFrame, FieldPath, FieldSchema, FieldSegment, LogicalAggregate,
+	ComputedBody, EvalFrame, FieldPath, FieldSchema, FieldSegment, GuardKind, LogicalAggregate,
 	LogicalDistinct, LogicalEval, LogicalExplain, LogicalExpr, LogicalFetch, LogicalField,
 	LogicalFields, LogicalFilter, LogicalForeach, LogicalIf, LogicalLet, LogicalLimit,
 	LogicalLiteral, LogicalOnly, LogicalOp, LogicalPermission, LogicalPermissionFilter,
-	LogicalProject, LogicalRecursePath, LogicalReturn, LogicalSort, LogicalSource, LogicalSplit,
-	LogicalSubquery, LogicalTimeout, LogicalUnionAll, LogicalVersionScope, Schema, SourceRef,
+	LogicalProject, LogicalRecursePath, LogicalReturn, LogicalSequence, LogicalSort, LogicalSource,
+	LogicalSplit, LogicalSubquery, LogicalTimeout, LogicalUnionAll, LogicalVersionScope,
+	LogicalWrite, LogicalWriteStatement, Schema, SourceRef,
 };
 use crate::expr::{BinaryOperator, Kind, KindLiteral};
 use crate::kvs::Transaction;
@@ -201,10 +206,18 @@ pub(super) async fn resolve(
 		return Ok(op);
 	};
 	let snapshot = gather(&op, bx, txn, ns, db).await?;
-	if snapshot.tables.is_empty() {
+	// The tenant check precedes every use the plan makes of a table's
+	// permission clauses, so a caller outside its tenant learns nothing of a
+	// table's clauses from the statement's outcome: a plan that reads or
+	// writes a table is checked here, whether it names the table or the run
+	// does.
+	if snapshot.tables.is_empty() && !reaches_tables(&op) {
 		return Ok(op);
 	}
 	caller.validate_access()?;
+	if snapshot.tables.is_empty() {
+		return Ok(op);
+	}
 	let mut resolver = Resolver {
 		snapshot: &snapshot,
 		caller,
@@ -213,10 +226,23 @@ pub(super) async fn resolve(
 	};
 	let scope = Scope {
 		checks: caller.checks_permissions(),
+		clause: PermissionKind::Select,
 		in_progress: Vec::new(),
 		version: Version::Current,
 	};
 	resolver.resolve_op(op, &scope)
+}
+
+/// Whether `op` reads or writes a table: it holds a source, at any depth, or a
+/// write, wherever the table it reaches is named.
+fn reaches_tables(op: &LogicalOp) -> bool {
+	op.visit_ops_deep(
+		&mut |node| match matches!(node, LogicalOp::Source(_) | LogicalOp::Write(_)) {
+			true => std::ops::ControlFlow::Break(()),
+			false => std::ops::ControlFlow::Continue(()),
+		},
+	)
+	.is_break()
 }
 
 // ---------------------------------------------------------------------------
@@ -239,12 +265,69 @@ struct CatalogSnapshot {
 }
 
 /// What one bind knows about one table. A table that is not defined has an
-/// open schema and a `SELECT` permission of `NONE`, as the scan resolves a
-/// missing definition.
+/// open schema and permissions of `NONE`, as the scan resolves a missing
+/// definition.
 struct TableFacts {
 	schema: Arc<Schema>,
 	select: LogicalPermission,
+	/// The clauses a mutation's subjects are gated by, in logical form: the
+	/// `create`, `update` or `delete` clause, as `select` is the clause a read
+	/// is gated by.
+	///
+	/// One entry per mutation kind this plan performs, and none for a plan
+	/// that performs no mutation: a clause no source in this plan can be
+	/// resolved under is not lowered, so a read pays nothing for the write
+	/// side. A clause is therefore read through [`TableFacts::permission`],
+	/// which answers `None` for a clause the gather did not lower rather than
+	/// standing in another one.
+	write: Vec<(PermissionKind, LogicalPermission)>,
 	fields: Vec<FieldFacts>,
+}
+
+impl TableFacts {
+	/// The clause gating a source resolved under `kind`, or `None` when the
+	/// gather did not lower it.
+	fn permission(&self, kind: PermissionKind) -> Option<&LogicalPermission> {
+		if matches!(kind, PermissionKind::Select) {
+			return Some(&self.select);
+		}
+		self.write.iter().find(|(clause, _)| *clause == kind).map(|(_, permission)| permission)
+	}
+}
+
+/// The `PERMISSIONS` clause gating the subjects of one mutation, picked by
+/// statement kind: `DELETE` is gated by `delete`, `CREATE` by `create`, and
+/// every other mutation — `UPDATE`, `UPSERT`, `RELATE`, `INSERT` — by
+/// `update`.
+fn write_clause(statement: &LogicalWriteStatement) -> PermissionKind {
+	match statement {
+		LogicalWriteStatement::Create(_) => PermissionKind::Create,
+		LogicalWriteStatement::Delete(_) => PermissionKind::Delete,
+		LogicalWriteStatement::Update(_)
+		| LogicalWriteStatement::Upsert(_)
+		| LogicalWriteStatement::Insert(_)
+		| LogicalWriteStatement::Relate(_) => PermissionKind::Update,
+	}
+}
+
+/// The mutation clauses `op` performs, deduplicated: what the gather lowers
+/// for every table the plan names. The walk is the one the gather collects
+/// tables with, so a source it reaches has the clause it resolves under.
+fn plan_write_clauses(op: &LogicalOp) -> Vec<PermissionKind> {
+	let mut clauses: Vec<PermissionKind> = Vec::new();
+	visit_deep(op, &mut |node| {
+		if let LogicalOp::Write(LogicalWrite {
+			statement,
+			..
+		}) = node
+		{
+			let clause = write_clause(statement);
+			if !clauses.contains(&clause) {
+				clauses.push(clause);
+			}
+		}
+	});
+	clauses
 }
 
 /// What one bind knows about one field, in logical form.
@@ -312,7 +395,8 @@ async fn gather(
 	// The parameters the plan reads as a source or a version, resolved once.
 	// A name the plan binds itself — a `LET` or a `FOR` variable — takes its
 	// value where the statement runs, so the value the context holds under
-	// that name at bind time is never consulted. A closure body is not
+	// that name at bind time is never consulted; so does a name a `DEFINE
+	// PARAM` or `REMOVE PARAM` of the plan changes. A closure body is not
 	// walked: its sources are resolved where the closure is invoked.
 	let mut param_names = HashSet::new();
 	let mut bound = HashSet::new();
@@ -341,10 +425,16 @@ async fn gather(
 		}) => {
 			bound.insert(param.as_str().to_owned());
 		}
+		LogicalOp::Ddl(ddl) => {
+			if let Some(name) = super::params::changed_param(&ddl.statement) {
+				bound.insert(name.to_owned());
+			}
+		}
 		LogicalOp::Source(_)
 		| LogicalOp::VersionScope(_)
 		| LogicalOp::Values(_)
 		| LogicalOp::Match(_)
+		| LogicalOp::Write(_)
 		| LogicalOp::Subquery(_)
 		| LogicalOp::UnionAll(_)
 		| LogicalOp::Join(_)
@@ -371,8 +461,9 @@ async fn gather(
 	let mut param_versions = HashMap::new();
 	let stamps = txn.timestamp_impl();
 	for name in param_names {
+		let ns_db = bx.ns_db.filter(|_| bx.inlines_definitions);
 		let Some(value) =
-			resolve_param_value(&name, bx.ctx, bx.txn.as_ref(), bx.ns_db, bx.row_scoped).await
+			resolve_param_value(&name, bx.ctx, bx.txn.as_ref(), ns_db, bx.row_scoped).await
 		else {
 			continue;
 		};
@@ -417,6 +508,9 @@ async fn gather(
 	// replaces a link with the record it names; a plan without one reads no
 	// linked table through its kinds.
 	let follows_kinds = plan_fetches(op);
+	// The mutation clauses this plan can resolve a source under; empty for a
+	// plan that performs no mutation.
+	let write_clauses = plan_write_clauses(op);
 
 	// Current-version tables come from the node-wide catalog snapshot, each
 	// validated by one read of its own catalog version through the
@@ -485,7 +579,7 @@ async fn gather(
 				})?,
 			),
 		};
-		let Some(facts) = table_facts(&table, def.as_deref(), &fields)? else {
+		let Some(facts) = table_facts(&table, def.as_deref(), &fields, &write_clauses)? else {
 			tables.insert((table, stamp), None);
 			continue;
 		};
@@ -504,9 +598,11 @@ async fn gather(
 				}
 			}
 		}
-		if let LogicalPermission::Specific(guard) = &facts.select {
-			for named in tables_in_expr(guard) {
-				worklist.push((named, stamp));
+		for permission in std::iter::once(&facts.select).chain(facts.write.iter().map(|(_, p)| p)) {
+			if let LogicalPermission::Specific(guard) = permission {
+				for named in tables_in_expr(guard) {
+					worklist.push((named, stamp));
+				}
 			}
 		}
 		tables.insert((table, stamp), Some(Arc::new(facts)));
@@ -533,6 +629,7 @@ fn plan_fetches(op: &LogicalOp) -> bool {
 			LogicalOp::Source(_)
 			| LogicalOp::Values(_)
 			| LogicalOp::Match(_)
+			| LogicalOp::Write(_)
 			| LogicalOp::Subquery(_)
 			| LogicalOp::UnionAll(_)
 			| LogicalOp::Join(_)
@@ -553,6 +650,7 @@ fn plan_fetches(op: &LogicalOp) -> bool {
 			| LogicalOp::Let(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => false,
 		};
 	});
@@ -587,6 +685,7 @@ fn collect_named(
 		}
 		LogicalOp::Values(_)
 		| LogicalOp::Match(_)
+		| LogicalOp::Write(_)
 		| LogicalOp::Subquery(_)
 		| LogicalOp::UnionAll(_)
 		| LogicalOp::Join(_)
@@ -608,6 +707,7 @@ fn collect_named(
 		| LogicalOp::Return(_)
 		| LogicalOp::Foreach(_)
 		| LogicalOp::Info(_)
+		| LogicalOp::Ddl(_)
 		| LogicalOp::Sleep(_) => version,
 	};
 	// A `FETCH` reads the tables its targets link to. A target's kind against
@@ -709,18 +809,37 @@ fn tables_in_expr(expr: &LogicalExpr) -> Vec<TableName> {
 	out
 }
 
+/// Whether a clause has a logical form but holds a write no operator compiles
+/// yet.
+///
+/// Such a clause leaves its table to runtime enforcement, exactly as a clause
+/// with no logical form does: both are clauses the engine cannot
+/// evaluate, and a caller with no statement behind it to evaluate the clause —
+/// a GQL plan — would otherwise fail on a read that never needed the write's
+/// branch.
+fn holds_an_unplannable_write(permission: &LogicalPermission) -> bool {
+	match permission {
+		LogicalPermission::Specific(guard) => super::unplannable_write_in_expr(guard).is_some(),
+		LogicalPermission::None | LogicalPermission::Full => false,
+	}
+}
+
 /// Builds what the pass knows about one table from its definitions, reading
 /// each clause in the logical form the catalog compiled from its stored text.
+///
+/// `writes` names the mutation clauses to lower beside `select`: the kinds the
+/// plan performs, and nothing for a plan that performs none.
 ///
 /// `None` when a clause has no logical form, or a field is declared on a path
 /// the schema cannot describe: the table's sources are then left unresolved,
 /// and the scan evaluates the stored clauses itself at runtime, as it does for
 /// any source the analyzer does not reach. A malformed `AUTH LIMIT` is a
-/// catalog error and is reported as one; the legacy engine fails on it too.
+/// catalog error and is reported as one.
 fn table_facts(
 	table: &TableName,
 	def: Option<&TableDefinition>,
 	defs: &[FieldDefinition],
+	writes: &[PermissionKind],
 ) -> Result<Option<TableFacts>, Error> {
 	let select = match def {
 		Some(def) => match def.select_permission_logical() {
@@ -729,6 +848,26 @@ fn table_facts(
 		},
 		None => LogicalPermission::None,
 	};
+	if holds_an_unplannable_write(&select) {
+		return Ok(None);
+	}
+	// A table with no definition denies its mutation clauses as it denies
+	// `select`: the definition a write creates on the way carries the default
+	// permissions, which grant a checked caller nothing.
+	let mut write = Vec::with_capacity(writes.len());
+	for clause in writes {
+		let permission = match def {
+			Some(def) => match def.permission_logical(*clause) {
+				Ok(permission) => permission,
+				Err(_) => return Ok(None),
+			},
+			None => LogicalPermission::None,
+		};
+		if holds_an_unplannable_write(&permission) {
+			return Ok(None);
+		}
+		write.push((*clause, permission));
+	}
 	let mut fields = Vec::with_capacity(defs.len());
 	// Every record of the table is keyed by a record id of the table, so the
 	// kind of `id` is checked; a declared field's kind is enforced on write
@@ -744,6 +883,9 @@ fn table_facts(
 		let Ok(select) = fd.select_permission_logical() else {
 			return Ok(None);
 		};
+		if holds_an_unplannable_write(&select) {
+			return Ok(None);
+		}
 		let auth = narrowing_auth_limit(&fd.auth_limit).map_err(|e| {
 			EngineError::Internal(format!(
 				"the AUTH LIMIT of field `{name}` on table `{table}`: {e:#}"
@@ -791,6 +933,7 @@ fn table_facts(
 	Ok(Some(TableFacts {
 		schema: Arc::new(schema),
 		select,
+		write,
 		fields,
 	}))
 }
@@ -825,9 +968,37 @@ struct Scope {
 	/// Whether reads in this position are permission-checked. `false` inside
 	/// a permission predicate, as `skip_fetch_perms` is at runtime.
 	checks: bool,
+	/// The `PERMISSIONS` clause a table source in this position is gated by.
+	///
+	/// `Select` everywhere a plan reads, which is everywhere but one: the
+	/// table and record targets a mutation reaches directly, whose subjects
+	/// the statement's own clause gates. A plan nested in a scalar reads, and
+	/// so does an explicitly written nested `SELECT`, whatever encloses
+	/// either, so the clause follows neither inwards.
+	clause: PermissionKind,
 	/// The tables whose bodies are being expanded on the way here.
 	in_progress: Vec<TableName>,
 	version: Version,
+}
+
+impl Scope {
+	/// The scope a mutation's row source resolves in: its subjects are gated
+	/// by `clause`, the clause the statement kind names.
+	fn writing(&self, clause: PermissionKind) -> Scope {
+		Scope {
+			clause,
+			..self.clone()
+		}
+	}
+
+	/// The scope a plan nested in a scalar resolves in: a read, whether or not
+	/// a mutation encloses the scalar.
+	fn reading(&self) -> Scope {
+		Scope {
+			clause: PermissionKind::Select,
+			..self.clone()
+		}
+	}
 }
 
 /// The parameters that denote the row. `$this` and `$self` name the current
@@ -877,6 +1048,7 @@ impl Resolver<'_> {
 			relational @ (LogicalOp::Source(_)
 			| LogicalOp::Values(_)
 			| LogicalOp::Match(_)
+			| LogicalOp::Write(_)
 			| LogicalOp::Subquery(_)
 			| LogicalOp::UnionAll(_)
 			| LogicalOp::Filter(_)
@@ -894,19 +1066,56 @@ impl Resolver<'_> {
 			| LogicalOp::Explain(_)) => self.resolve_pipeline(relational, scope),
 			// A join's inputs are pipelines of their own; its keys and filter
 			// may hold plans.
+			// A join lifted from a definer's clause was bound when it was
+			// lifted, its right side in the clause's scope: resolving it again
+			// here would read that side as the caller.
+			LogicalOp::Join(join) if join.frame != crate::expr::logical::EvalFrame::caller() => {
+				Ok(LogicalOp::Join(join))
+			}
 			join @ LogicalOp::Join(_) => {
 				let mut op = join.map_children(|child| self.resolve_op(child, scope))?;
+				self.resolve_scalars(&mut op, scope)?;
+				Ok(op)
+			}
+			// A statement after one that changes the catalog reads the catalog
+			// that change leaves, which this bind cannot see, and a pipeline
+			// resolved here keeps its layers when bound again: it is left for
+			// the bind of its own, where it is planned.
+			LogicalOp::Sequence(LogicalSequence {
+				stmts,
+			}) => {
+				let mut changed = false;
+				let stmts = stmts
+					.into_iter()
+					.map(|stmt| {
+						if changed {
+							return Ok(stmt);
+						}
+						changed = crate::exec::planner::fold::changes_the_catalog(&stmt);
+						self.resolve_op(stmt, scope)
+					})
+					.collect::<Result<_, Error>>()?;
+				Ok(LogicalOp::Sequence(LogicalSequence {
+					stmts,
+				}))
+			}
+			// So is a loop body that changes the catalog, which a later
+			// iteration reads after the change.
+			LogicalOp::Foreach(foreach)
+				if crate::exec::planner::fold::changes_the_catalog(&foreach.body) =>
+			{
+				let mut op = LogicalOp::Foreach(foreach);
 				self.resolve_scalars(&mut op, scope)?;
 				Ok(op)
 			}
 			// A statement: its inputs are statements or pipelines of their
 			// own, and its scalars may hold plans.
 			statement @ (LogicalOp::Eval(_)
-			| LogicalOp::Sequence(_)
 			| LogicalOp::Let(_)
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_)) => {
 				let mut op = statement.map_children(|child| self.resolve_op(child, scope))?;
 				self.resolve_scalars(&mut op, scope)?;
@@ -927,7 +1136,10 @@ impl Resolver<'_> {
 		visit_binding_mut(expr, &mut |e| {
 			if let LogicalExpr::Subquery(plan) = e {
 				let taken = std::mem::replace(plan.as_mut(), placeholder());
-				**plan = self.resolve_op(taken, scope)?;
+				// A plan a scalar holds reads: a statement's own clause gates
+				// the rows it writes, not the rows a subquery of its condition
+				// or its data clause reads.
+				**plan = self.resolve_op(taken, &scope.reading())?;
 			}
 			Ok(())
 		})
@@ -947,12 +1159,20 @@ impl Resolver<'_> {
 			{
 				scope.version = resolve_version(
 					version,
-					&self.snapshot.param_versions,
+					self.param_versions(&scope),
 					self.snapshot.stamps.as_ref(),
 				);
 			}
 		}
 		for stage in &mut stages {
+			// An analyzer node exists only once the pipeline is bound, and its
+			// scalars were resolved when it was built, in the scope its clause
+			// reads in: a permission predicate unchecked, a computed body as
+			// its definer. Resolving them again in this scope would read them
+			// as the caller.
+			if matches!(stage, LogicalOp::PermissionFilter(_)) || stage.is_layer() {
+				continue;
+			}
 			self.resolve_scalars(stage, &scope)?;
 		}
 		// A pipeline already carrying analyzer nodes was bound before; its
@@ -961,6 +1181,31 @@ impl Resolver<'_> {
 			.iter()
 			.any(|stage| matches!(stage, LogicalOp::PermissionFilter(_)) || stage.is_layer());
 		let leaf = match leaf {
+			// A mutation is its own scope, and nothing around it resolves what
+			// it holds: `stage_input` does not name it, so `peel` stops here,
+			// and a leaf is not one of the stages passed to `resolve_scalars`
+			// above. Both of its sources are therefore resolved here — a
+			// `Rows` input as the pipeline it is, and the scalars a `Targets`
+			// list owns, either of which may hold a plan. `EXPLAIN CREATE …`
+			// is what makes this a leaf under stages rather than always the
+			// whole plan.
+			//
+			// Resolution binds sources and substitutes params; it does not
+			// settle the write's own permission obligations, which ADR 0001
+			// makes the write operator's stage list.
+			LogicalOp::Write(write) => {
+				// `map_children` reaches the `Rows` source alone: the rows the
+				// statement writes, which its own `PERMISSIONS` clause gates
+				// as far as the targets it names directly — an explicitly
+				// written nested `SELECT` among them reads under `FOR select`.
+				// A `Targets` list reads nothing, and the scalars below are
+				// read wherever they are written.
+				let rows = scope.writing(write_clause(&write.statement));
+				let mut op =
+					LogicalOp::Write(write).map_children(|child| self.resolve_op(child, &rows))?;
+				self.resolve_scalars(&mut op, &scope)?;
+				op
+			}
 			LogicalOp::Source(LogicalSource {
 				source,
 				schema,
@@ -968,12 +1213,7 @@ impl Resolver<'_> {
 				for_update,
 			}) => {
 				let source = match source {
-					SourceRef::Param(param) => {
-						match self.snapshot.param_sources.get(param.as_str()) {
-							Some(resolved) => resolved.clone(),
-							None => SourceRef::Param(param),
-						}
-					}
+					SourceRef::Param(param) => self.param_source(param, &scope),
 					other @ (SourceRef::Table(_)
 					| SourceRef::RecordId(_)
 					| SourceRef::Mock(_)
@@ -1002,10 +1242,15 @@ impl Resolver<'_> {
 					(None, _) | (Some(_), None) => leaf,
 				}
 			}
+			// An explicitly written nested `SELECT` reads under `FOR select`,
+			// wherever it stands: as a mutation's target it names the rows the
+			// statement then writes, and naming them is a read. The
+			// statement's own clause gates those rows where the mutation
+			// reaches them directly, as a table or record target.
 			LogicalOp::Subquery(LogicalSubquery {
 				input,
 			}) => LogicalOp::Subquery(LogicalSubquery {
-				input: Box::new(self.resolve_pipeline(*input, &scope)?),
+				input: Box::new(self.resolve_pipeline(*input, &scope.reading())?),
 			}),
 			LogicalOp::UnionAll(LogicalUnionAll {
 				inputs,
@@ -1044,6 +1289,7 @@ impl Resolver<'_> {
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_)) => self.resolve_op(statement, &scope)?,
 		};
 		Ok(reassemble(stages, leaf))
@@ -1067,12 +1313,7 @@ impl Resolver<'_> {
 				for_update,
 			}) => {
 				let source = match source {
-					SourceRef::Param(param) => {
-						match self.snapshot.param_sources.get(param.as_str()) {
-							Some(resolved) => resolved.clone(),
-							None => SourceRef::Param(param),
-						}
-					}
+					SourceRef::Param(param) => self.param_source(param, scope),
 					other @ (SourceRef::Table(_)
 					| SourceRef::RecordId(_)
 					| SourceRef::Mock(_)
@@ -1101,13 +1342,17 @@ impl Resolver<'_> {
 					(None, _) | (Some(_), None) => Ok(leaf),
 				}
 			}
+			// A nested `SELECT` among several targets reads under `FOR select`,
+			// as it does anywhere else; only the targets the mutation reaches
+			// directly are gated by the statement's own clause.
 			LogicalOp::Subquery(LogicalSubquery {
 				input,
 			}) => Ok(LogicalOp::Subquery(LogicalSubquery {
-				input: Box::new(self.resolve_pipeline(*input, scope)?),
+				input: Box::new(self.resolve_pipeline(*input, &scope.reading())?),
 			})),
 			mut other @ (LogicalOp::Values(_)
 			| LogicalOp::Match(_)
+			| LogicalOp::Write(_)
 			| LogicalOp::UnionAll(_)
 			| LogicalOp::Join(_)
 			| LogicalOp::Filter(_)
@@ -1129,6 +1374,7 @@ impl Resolver<'_> {
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_)) => {
 				self.resolve_scalars(&mut other, scope)?;
 				Ok(other)
@@ -1148,6 +1394,34 @@ impl Resolver<'_> {
 	}
 
 	/// The scope a permission predicate of `table` is resolved in.
+	/// The source `FROM $param` reads in `scope`: the table or record the
+	/// statement's value of the parameter names, or the parameter where that
+	/// value is not known when the plan is bound. Inside a definition's body
+	/// — a permission predicate or a `COMPUTED` body, definer code that holds
+	/// none of the caller's bindings — the caller's value is never taken; the
+	/// parameter is read where the body runs.
+	fn param_source(&self, param: crate::expr::Param, scope: &Scope) -> SourceRef {
+		if !scope.in_progress.is_empty() {
+			return SourceRef::Param(param);
+		}
+		match self.snapshot.param_sources.get(param.as_str()) {
+			Some(resolved) => resolved.clone(),
+			None => SourceRef::Param(param),
+		}
+	}
+
+	/// The version stamps of the parameters a `VERSION` reads in `scope`: none
+	/// inside a definition's body, for the reason [`Self::param_source`] gives.
+	fn param_versions(&self, scope: &Scope) -> &HashMap<String, u64> {
+		static NONE: std::sync::LazyLock<HashMap<String, u64>> =
+			std::sync::LazyLock::new(HashMap::new);
+		if scope.in_progress.is_empty() {
+			&self.snapshot.param_versions
+		} else {
+			&NONE
+		}
+	}
+
 	fn permission_scope(&self, table: &TableName, scope: &Scope) -> Scope {
 		let mut inner = scope.clone();
 		inner.checks = false;
@@ -1171,6 +1445,21 @@ impl Resolver<'_> {
 
 	/// The source with its schema attached and its table permission above it,
 	/// for a checked caller.
+	///
+	/// The clause is the one the scope names: `select` for a read, and the
+	/// statement's own clause for the rows a mutation writes. A clause of
+	/// `NONE` becomes a predicate of `false`, so the source yields nothing and
+	/// the statement is not failed: a target the caller may not write is
+	/// refused by yielding nothing rather than by raising.
+	///
+	/// A *conditional* write clause stops there: it is judged per record by
+	/// the write's own gates, twice for each record the statement edits —
+	/// once against the record as found and once against it as edited — and a
+	/// filter here would be a third judgement of a predicate that may write.
+	/// The line is drawn between a clause that is `None` and one that is
+	/// `Specific`: only `None` refuses the target.
+	/// So for a mutation's row source this node carries a refusal and never a
+	/// guard, and [`GuardKind`] on it says which.
 	fn filtered_source(
 		&mut self,
 		leaf: LogicalOp,
@@ -1196,9 +1485,22 @@ impl Resolver<'_> {
 		if !scope.checks {
 			return Ok(source);
 		}
-		let predicate = match &facts.select {
+		let permission = facts.permission(scope.clause).ok_or_else(|| {
+			EngineError::Internal(format!(
+				"the `{}` permission of table `{table}` was not lowered for this plan",
+				scope.clause
+			))
+		})?;
+		let guard = match scope.clause {
+			PermissionKind::Select => GuardKind::Read,
+			PermissionKind::Create | PermissionKind::Update | PermissionKind::Delete => {
+				GuardKind::Write
+			}
+		};
+		let predicate = match permission {
 			LogicalPermission::Full => return Ok(source),
 			LogicalPermission::None => LogicalExpr::Literal(LogicalLiteral::Bool(false)),
+			LogicalPermission::Specific(_) if guard == GuardKind::Write => return Ok(source),
 			LogicalPermission::Specific(guard) => {
 				let mut predicate = guard.clone();
 				self.resolve_expr(&mut predicate, &self.permission_scope(table, scope))?;
@@ -1209,6 +1511,7 @@ impl Resolver<'_> {
 			input: Box::new(source),
 			predicate,
 			auth: None,
+			guard,
 		}))
 	}
 
@@ -1685,6 +1988,7 @@ impl Resolver<'_> {
 				LogicalOp::Source(_)
 				| LogicalOp::Values(_)
 				| LogicalOp::Match(_)
+				| LogicalOp::Write(_)
 				| LogicalOp::Subquery(_)
 				| LogicalOp::UnionAll(_)
 				| LogicalOp::Join(_)
@@ -1705,6 +2009,7 @@ impl Resolver<'_> {
 				| LogicalOp::Return(_)
 				| LogicalOp::Foreach(_)
 				| LogicalOp::Info(_)
+				| LogicalOp::Ddl(_)
 				| LogicalOp::Sleep(_) => {}
 			}
 		}
@@ -1788,6 +2093,7 @@ impl Resolver<'_> {
 			| LogicalExpr::Object(_)
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::SetField {
 				..
@@ -1870,6 +2176,7 @@ impl Resolver<'_> {
 			| LogicalExpr::Object(_)
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::SetField {
 				..
@@ -2030,6 +2337,7 @@ impl Resolver<'_> {
 				| LogicalExpr::RecordId(_)
 				| LogicalExpr::Param(_)
 				| LogicalExpr::Table(_)
+				| LogicalExpr::Mock(_)
 				| LogicalExpr::Constant(_)
 				| LogicalExpr::SetField {
 					..
@@ -2516,6 +2824,7 @@ fn reads_row(guard: &LogicalExpr, registry: &FunctionRegistry) -> bool {
 		| LogicalExpr::Object(_)
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Access {
 			..
@@ -2842,6 +3151,7 @@ fn stage_input(op: &mut LogicalOp) -> Option<&mut Box<LogicalOp>> {
 		LogicalOp::Source(_)
 		| LogicalOp::Values(_)
 		| LogicalOp::Match(_)
+		| LogicalOp::Write(_)
 		| LogicalOp::Subquery(_)
 		| LogicalOp::UnionAll(_)
 		| LogicalOp::Join(_)
@@ -2851,6 +3161,7 @@ fn stage_input(op: &mut LogicalOp) -> Option<&mut Box<LogicalOp>> {
 		| LogicalOp::Return(_)
 		| LogicalOp::Foreach(_)
 		| LogicalOp::Info(_)
+		| LogicalOp::Ddl(_)
 		| LogicalOp::Sleep(_) => None,
 	}
 }
@@ -3131,7 +3442,11 @@ mod tests {
 		assert_eq!(
 			layers(&plan),
 			[
-				"Project[*, (IF false THEN secret ELSE NONE END) AS secret @permission]",
+				// `PERMISSIONS FOR select WHERE false` denies the field outright, so the
+				// guard `rules::control_flow` collapses to the value it always takes. The
+				// column keeps its `@permission` classification; what goes is a conditional
+				// that would otherwise be evaluated per row for a field no caller can read.
+				"Project[*, NONE AS secret @permission]",
 				"Project[*, a + 1 AS c : int @computed]",
 			],
 			"{plan}"
@@ -3705,56 +4020,6 @@ mod tests {
 		assert_eq!(unresolved_t, 1, "{plan_op}");
 	}
 
-	/// A clause the lowering has no form for is not a decline: the table's
-	/// source is left unresolved, with no analyzer node above it, so the
-	/// physical planner compiles it with runtime enforcement and the scan
-	/// evaluates the stored clause itself. A table whose clauses all have a
-	/// logical form is resolved as usual in the same plan.
-	#[tokio::test]
-	async fn a_clause_with_no_logical_form_leaves_the_source_unresolved() {
-		let fixture = Fixture::new(
-			"DEFINE TABLE t SCHEMALESS PERMISSIONS FOR select WHERE id IN |t:1..3|;
-			 DEFINE TABLE u SCHEMALESS PERMISSIONS FOR select WHERE x = 1;
-			 DEFINE FIELD guarded ON u PERMISSIONS FOR select WHERE $value IN |u:1..2|;
-			 DEFINE TABLE v SCHEMALESS PERMISSIONS FOR select WHERE y = 1;",
-		)
-		.await;
-		let bound = fixture.bound_as(&record_user(), vec![]).await;
-		let bx = fixture.bind_context(&bound);
-		let caller = Caller::new(&bx).expect("principal");
-		let plan = resolve(
-			super::super::lower_test(
-				"SELECT * FROM t WHERE a IN (SELECT VALUE a FROM u) AND b IN (SELECT VALUE b FROM v)",
-			),
-			&bx,
-			Some(&caller),
-		)
-		.await
-		.expect("a clause with no logical form is not an error");
-		let mut unresolved = Vec::new();
-		let mut resolved = Vec::new();
-		visit_deep(&plan, &mut |n| {
-			if let LogicalOp::Source(LogicalSource {
-				source: SourceRef::Table(table),
-				schema,
-				..
-			}) = n
-			{
-				match schema {
-					None => unresolved.push(table.to_string()),
-					Some(_) => resolved.push(table.to_string()),
-				}
-			}
-		});
-		unresolved.sort();
-		assert_eq!(unresolved, ["t", "u"], "{plan}");
-		assert_eq!(resolved, ["v"], "{plan}");
-		let rendered = plan.to_string();
-		assert_eq!(rendered.matches("PermissionFilter").count(), 1, "{rendered}");
-		assert!(rendered.contains("PermissionFilter[y = 1]"), "{rendered}");
-		assert!(layer_nodes(&plan).is_empty(), "{rendered}");
-	}
-
 	#[tokio::test]
 	async fn a_param_source_known_at_bind_time_is_a_table() {
 		let fixture =
@@ -3956,5 +4221,196 @@ mod tests {
 			got.sort();
 			assert_eq!(got, want, "tables gathered for `{sql}`");
 		}
+	}
+
+	/// The plan a write's target scalar holds is resolved, not returned as it
+	/// was parsed.
+	///
+	/// Nothing around a `Write` resolves what it holds: `stage_input` does not
+	/// name it, so `peel` returns it as the leaf, and a leaf is not among the
+	/// stages `resolve_pipeline` hands to `resolve_scalars`. A target computed
+	/// by a `SELECT` would therefore keep unresolved schema and permission
+	/// state, and be handed to the write operator that way once one consumes
+	/// this form.
+	///
+	/// Checked through the structure rather than the rendered plan, which
+	/// prints a write as `Write[CREATE]` and shows neither its targets nor
+	/// what they contain. `EXPLAIN CREATE …` is covered too, because that is
+	/// the shape where the write is a leaf beneath a stage rather than the
+	/// whole plan.
+	#[tokio::test]
+	async fn a_write_target_has_its_nested_plan_resolved() {
+		let fixture = Fixture::new(
+			"DEFINE TABLE t SCHEMAFULL PERMISSIONS FOR select WHERE published = true;
+			 DEFINE FIELD published ON t TYPE bool;",
+		)
+		.await;
+		let bound = fixture.bound_as(&record_user(), vec![]).await;
+		let bx = fixture.bind_context(&bound);
+
+		for sql in ["CREATE (SELECT VALUE id FROM t)", "EXPLAIN CREATE (SELECT VALUE id FROM t)"] {
+			// `bind` rather than `resolve`: it is what `bind_as` runs, and the
+			// only difference here is that the plan is kept as a tree instead
+			// of rendered.
+			let plan = super::super::bind(super::super::lower_test(sql), &bx).await.expect("binds");
+
+			// `visit` walks operator children, and a target list is not one —
+			// the write is found by walking, its targets by asking it.
+			let mut writes = Vec::new();
+			let _ = plan.visit(&mut |n| {
+				if matches!(n, LogicalOp::Write(_)) {
+					writes.push(n.clone());
+				}
+				std::ops::ControlFlow::<()>::Continue(())
+			});
+			assert_eq!(writes.len(), 1, "expected one write in `{sql}`:\n{plan}");
+
+			let mut nested = Vec::new();
+			writes[0]
+				.visit_scalars(&mut |scalar| {
+					if let LogicalExpr::Subquery(inner) = scalar {
+						nested.push((**inner).clone());
+					}
+					Ok::<(), std::convert::Infallible>(())
+				})
+				.expect("infallible");
+			assert_eq!(nested.len(), 1, "expected one target subquery in `{sql}`:\n{plan}");
+
+			assert!(
+				!source_is_unresolved(&nested[0], "t"),
+				"the target's source should be bound in `{sql}`:\n{}",
+				nested[0]
+			);
+			assert!(
+				nested[0].any(|n| matches!(n, LogicalOp::PermissionFilter(_))),
+				"the target's plan should carry the caller's select permission in `{sql}`:\n{}",
+				nested[0]
+			);
+		}
+	}
+
+	/// The gather lowers the clause a source can be resolved under and no
+	/// other: a plan that performs no mutation names none, so a read carries
+	/// the select clause alone, as it did before the write side existed.
+	#[test]
+	fn a_plan_names_the_clauses_its_mutations_are_gated_by() {
+		let clauses = |sql| plan_write_clauses(&super::super::lower_test(sql));
+		assert!(clauses("SELECT * FROM t WHERE a = 1").is_empty());
+		assert!(clauses("RETURN (SELECT * FROM t)").is_empty());
+		assert_eq!(clauses("CREATE t"), vec![PermissionKind::Create]);
+		assert_eq!(
+			clauses("SELECT id, (CREATE log:1) AS made FROM t"),
+			vec![PermissionKind::Create],
+			"a mutation in a scalar position names its clause too"
+		);
+		assert_eq!(
+			clauses("{ CREATE a; CREATE b; }"),
+			vec![PermissionKind::Create],
+			"one entry per kind, however many mutations perform it"
+		);
+	}
+
+	/// A `Write` over a named table's rows, built by taking a statement from
+	/// its own lowering and giving it a source of known shape.
+	///
+	/// The reading mutations lower to this shape on their own; assembling it
+	/// here keeps the table under test out of the statement's text, so a test
+	/// states which table the gather should reach rather than depending on how
+	/// a target lowers.
+	fn write_over_rows(sql: &str, table: &str) -> LogicalOp {
+		let LogicalOp::Write(crate::expr::logical::LogicalWrite {
+			statement,
+			data,
+			duplicate_update,
+			cond,
+			..
+		}) = super::super::lower_test(sql)
+		else {
+			panic!("`{sql}` does not lower to a write");
+		};
+		// The clauses are carried across with the statement: the source is
+		// what this rebuilds, and a clause the statement wrote belongs to it
+		// wherever its rows come from.
+		LogicalOp::Write(crate::expr::logical::LogicalWrite {
+			statement,
+			data,
+			duplicate_update,
+			cond,
+			source: crate::expr::logical::LogicalWriteSource::Rows(Box::new(LogicalOp::Source(
+				LogicalSource {
+					source: SourceRef::Table(TableName::from(table)),
+					schema: None,
+					with: None,
+					for_update: false,
+				},
+			))),
+		})
+	}
+
+	/// The predicates of the plan's permission filters, outermost first.
+	fn permission_predicates(plan: &LogicalOp) -> Vec<String> {
+		let mut out = Vec::new();
+		let _ = plan.visit(&mut |n| {
+			if let LogicalOp::PermissionFilter(LogicalPermissionFilter {
+				predicate,
+				..
+			}) = n
+			{
+				out.push(predicate.to_sql());
+			}
+			std::ops::ControlFlow::<()>::Continue(())
+		});
+		out
+	}
+
+	/// A mutation's row source is gated by the clause its statement kind
+	/// names, and a read of the same table by `select`: the two clauses of one
+	/// table do not stand in for each other. The mutation's *conditional*
+	/// clause is not judged here at all — the write's own gates judge it, once
+	/// against each record as found and once as edited — so the source carries
+	/// no predicate where the read carries one.
+	#[tokio::test]
+	async fn a_mutations_row_source_is_gated_by_its_own_clause() {
+		let fixture = Fixture::new(
+			"DEFINE TABLE t SCHEMALESS
+			 	PERMISSIONS FOR select WHERE published = true, FOR create WHERE owner = $auth.id;",
+		)
+		.await;
+		let bound = fixture.bound_as(&record_user(), vec![]).await;
+		let bx = fixture.bind_context(&bound);
+		let caller = Caller::new(&bx).expect("a principal");
+
+		let plan =
+			resolve(write_over_rows("CREATE t", "t"), &bx, Some(&caller)).await.expect("resolves");
+		assert!(permission_predicates(&plan).is_empty(), "{plan}");
+
+		let plan = resolve(super::super::lower_test("SELECT * FROM t"), &bx, Some(&caller))
+			.await
+			.expect("resolves");
+		assert_eq!(permission_predicates(&plan), vec!["published = true".to_owned()], "{plan}");
+	}
+
+	/// A mutation clause of `NONE` drops the target rather than failing the
+	/// statement: the source keeps a predicate of `false` and yields nothing,
+	/// which is how a target the caller may not write is refused.
+	#[tokio::test]
+	async fn a_denied_mutation_target_is_dropped_and_not_an_error() {
+		let fixture =
+			Fixture::new("DEFINE TABLE t SCHEMALESS PERMISSIONS FOR select FULL, FOR create NONE;")
+				.await;
+		let bound = fixture.bound_as(&record_user(), vec![]).await;
+		let bx = fixture.bind_context(&bound);
+		let caller = Caller::new(&bx).expect("a principal");
+
+		let plan = resolve(write_over_rows("CREATE t", "t"), &bx, Some(&caller))
+			.await
+			.expect("a denied target resolves; it does not fail the statement");
+		assert_eq!(permission_predicates(&plan), vec!["false".to_owned()], "{plan}");
+
+		// The caller may read the table it may not write to.
+		let plan = resolve(super::super::lower_test("SELECT * FROM t"), &bx, Some(&caller))
+			.await
+			.expect("resolves");
+		assert!(permission_predicates(&plan).is_empty(), "{plan}");
 	}
 }

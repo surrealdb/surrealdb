@@ -7,7 +7,7 @@
 //! over WebSocket, so the SDK's engine implementation is a thin transport
 //! shim over this crate.
 
-#![recursion_limit = "256"]
+#![recursion_limit = "512"]
 
 mod app;
 mod err;

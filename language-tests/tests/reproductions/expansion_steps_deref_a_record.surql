@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -46,13 +45,13 @@ error = "Could not cast into `int` using input `'x'`"
 error = "Could not cast into `int` using input `'x'`"
 
 [[test.results]]
-value = "{ attributes: { projections: '*' }, children: [{ attributes: { predicate: 'a = 1' }, children: [{ attributes: { projections: 'a, expanded' }, children: [{ attributes: { fields: 'expanded = link.*' }, children: [{ attributes: { direction: 'Forward', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'expanded', sql: 'link.*' }], operator: 'Compute' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', expressions: [{ role: 'predicate', sql: 'a = 1' }], operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"
+value = "{ attributes: { projections: '*' }, children: [{ attributes: { predicate: 'a = 1' }, children: [{ children: [{ attributes: { projections: 'a, expanded' }, children: [{ attributes: { direction: 'Forward', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }], context: 'Rt', operator: 'Subquery' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
-value = "{ attributes: { projections: '*' }, children: [{ attributes: { predicate: 'x.coin' }, children: [{ attributes: { projections: 'x' }, children: [{ attributes: { fields: 'x = link.{ coin }' }, children: [{ attributes: { direction: 'Forward', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'x', sql: 'link.{ coin }' }], operator: 'Compute' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', expressions: [{ role: 'predicate', sql: 'x.coin' }], operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"
+value = "{ attributes: { projections: '*' }, children: [{ attributes: { predicate: 'x.coin' }, children: [{ children: [{ attributes: { projections: 'x' }, children: [{ attributes: { direction: 'Forward', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }], context: 'Rt', operator: 'Subquery' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
-value = "{ attributes: { expr: 'fn::pair(link.*)' }, children: [{ attributes: { record_id: 't:one' }, context: 'Db', expressions: [{ role: 'record_id', sql: 't:one' }], operator: 'RecordIdScan' }], context: 'Db', expressions: [{ role: 'expr', sql: 'fn::pair(link.*)' }], operator: 'ProjectValue' }"
+value = "{ attributes: { expr: 'fn::pair(link.*)' }, children: [{ attributes: { record_id: 't:one' }, context: 'Db', operator: 'RecordIdScan' }], context: 'Db', operator: 'ProjectValue' }"
 */
 
 DEFINE TABLE cfg SCHEMALESS;

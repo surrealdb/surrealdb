@@ -54,7 +54,8 @@ pub(crate) use surrealdb_datastore::error::DatastoreError;
 // `surrealdb-datastore`; these bind them to core's own `crate::kvs::…` paths.
 // Depend on that crate directly to reach them from outside core.
 pub(crate) use surrealdb_datastore::{
-	TransactionConfig, TransactionFactory, cache, sequences, tasklease, tx, util, version,
+	TransactionConfig, TransactionFactory, cache, catalog_reads, sequences, speculation, tasklease,
+	tx, util, version,
 };
 // Recognising a storage failure descends with the transaction layer: the code
 // that classifies one sits on both sides of the crate boundary. Both shapes stay

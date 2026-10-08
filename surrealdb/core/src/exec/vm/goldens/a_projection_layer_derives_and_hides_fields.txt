@@ -1,0 +1,96 @@
+### owner: SELECT * FROM bag
+{ arr: [{ secret: 's1', shown: 1 }], hidden: 'h', id: bag:1, open: 1, veiled: 'v1' }
+{ arr: [], hidden: 'h', id: bag:2, open: 2, veiled: 'v2' }
+### owner: SELECT arr, open FROM bag WHERE open > 1
+{ arr: [], open: 2 }
+### owner: SELECT hidden FROM bag WHERE hidden
+{ hidden: 'h' }
+{ hidden: 'h' }
+### owner: SELECT VALUE hidden FROM bag
+'h'
+'h'
+### owner: SELECT veiled FROM bag
+{ veiled: 'v1' }
+{ veiled: 'v2' }
+### owner: SELECT * FROM c
+{ age: 1, d: 2, e: 3, id: c:1 }
+{ age: 3, d: 6, e: 7, id: c:2 }
+{ age: 7, d: 14, e: 15, id: c:3 }
+### owner: SELECT * FROM c WHERE d > 2
+{ age: 3, d: 6, e: 7, id: c:2 }
+{ age: 7, d: 14, e: 15, id: c:3 }
+### owner: SELECT e FROM c ORDER BY e DESC
+{ e: 15 }
+{ e: 7 }
+{ e: 3 }
+### owner: SELECT VALUE d FROM c LIMIT 1 START 1
+6
+### owner: SELECT math::sum(e) AS s FROM c GROUP ALL
+{ s: 25 }
+### owner: SELECT * FROM c:1..3
+{ age: 1, d: 2, e: 3, id: c:1 }
+{ age: 3, d: 6, e: 7, id: c:2 }
+### owner: SELECT * FROM c WHERE age > 2
+{ age: 3, d: 6, e: 7, id: c:2 }
+{ age: 7, d: 14, e: 15, id: c:3 }
+### owner: SELECT d FROM c WHERE age > 2 AND d > 2
+{ d: 6 }
+{ d: 14 }
+### owner: SELECT * FROM c WHERE age = 3 LIMIT 1
+{ age: 3, d: 6, e: 7, id: c:2 }
+### owner: SELECT * FROM c WHERE age > 1 ORDER BY d DESC
+{ age: 7, d: 14, e: 15, id: c:3 }
+{ age: 3, d: 6, e: 7, id: c:2 }
+### owner: SELECT * FROM c WHERE age > 1 SPLIT d
+{ age: 3, d: 6, e: 7, id: c:2 }
+{ age: 7, d: 14, e: 15, id: c:3 }
+### owner: SELECT veiled FROM bag WHERE open = 2
+{ veiled: 'v2' }
+### owner: SELECT * FROM bag WHERE open > 0 LIMIT 1
+{ arr: [{ secret: 's1', shown: 1 }], hidden: 'h', id: bag:1, open: 1, veiled: 'v1' }
+### record user: SELECT * FROM bag
+{ arr: [{ secret: 's1', shown: 1 }], id: bag:1, open: 1 }
+{ arr: [], id: bag:2, open: 2, veiled: 'v2' }
+### record user: SELECT arr, open FROM bag WHERE open > 1
+{ arr: [], open: 2 }
+### record user: SELECT hidden FROM bag WHERE hidden
+(no rows)
+### record user: SELECT VALUE hidden FROM bag
+NONE
+NONE
+### record user: SELECT veiled FROM bag
+{ veiled: NONE }
+{ veiled: 'v2' }
+### record user: SELECT * FROM c
+{ age: 3, d: 6, id: c:2 }
+{ age: 7, d: 14, e: 15, id: c:3 }
+### record user: SELECT * FROM c WHERE d > 2
+{ age: 3, d: 6, id: c:2 }
+{ age: 7, d: 14, e: 15, id: c:3 }
+### record user: SELECT e FROM c ORDER BY e DESC
+{ e: 15 }
+{ e: NONE }
+### record user: SELECT VALUE d FROM c LIMIT 1 START 1
+14
+### record user: SELECT math::sum(e) AS s FROM c GROUP ALL
+{ s: 15 }
+### record user: SELECT * FROM c:1..3
+{ age: 3, d: 6, id: c:2 }
+### record user: SELECT * FROM c WHERE age > 2
+{ age: 3, d: 6, id: c:2 }
+{ age: 7, d: 14, e: 15, id: c:3 }
+### record user: SELECT d FROM c WHERE age > 2 AND d > 2
+{ d: 6 }
+{ d: 14 }
+### record user: SELECT * FROM c WHERE age = 3 LIMIT 1
+{ age: 3, d: 6, id: c:2 }
+### record user: SELECT * FROM c WHERE age > 1 ORDER BY d DESC
+{ age: 7, d: 14, e: 15, id: c:3 }
+{ age: 3, d: 6, id: c:2 }
+### record user: SELECT * FROM c WHERE age > 1 SPLIT d
+{ age: 3, d: 6, id: c:2 }
+{ age: 7, d: 14, e: 15, id: c:3 }
+### record user: SELECT veiled FROM bag WHERE open = 2
+{ veiled: 'v2' }
+### record user: SELECT * FROM bag WHERE open > 0 LIMIT 1
+{ arr: [{ secret: 's1', shown: 1 }], id: bag:1, open: 1 }

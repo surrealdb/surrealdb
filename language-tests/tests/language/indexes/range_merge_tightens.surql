@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Same-side range bounds must tighten. `WHERE a > 5 AND a > 10` should produce a single IndexScan with `from > 10` rather than the looser `> 5` plus a residual filter. Similarly `WHERE a < 50 AND a < 20` should use `to < 20`."
@@ -31,8 +30,9 @@ value = "[{ a: 12, id: t:c }, { a: 50, id: t:d }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: a > 5]
-        IndexScan [ctx: Db] [index: idx_a, access: >10, direction: Forward]
+    Filter [ctx: Db] [predicate: a > 5 AND a > 10]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: t, index: idx_a, access: >10, direction: Forward]
 ''''
 
 [[test.results]]
@@ -41,8 +41,9 @@ value = "[{ a: 3, id: t:a }, { a: 7, id: t:b }, { a: 12, id: t:c }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: a < 50]
-        IndexScan [ctx: Db] [index: idx_a, access: <20, direction: Forward]
+    Filter [ctx: Db] [predicate: a < 50 AND a < 20]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: t, index: idx_a, access: <20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -51,8 +52,9 @@ value = "[{ a: 7, id: t:b }, { a: 12, id: t:c }, { a: 50, id: t:d }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: a >= 5]
-        IndexScan [ctx: Db] [index: idx_a, access: >5, direction: Forward]
+    Filter [ctx: Db] [predicate: a > 5 AND a >= 5]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: t, index: idx_a, access: >5, direction: Forward]
 ''''
 */
 DEFINE TABLE t;

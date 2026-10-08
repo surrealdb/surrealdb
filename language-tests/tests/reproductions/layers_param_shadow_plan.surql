@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_guarded_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -10,16 +9,16 @@ reason = """
 	from the fields a statement reads, never from the parameters in scope, so
 	the plan for a projection of `is_owner`, `secret` and `c` is the same
 	before and after parameters named after them are bound; a predicate on
-	`is_owner` keeps the filter above the layer that derives it; a projection
-	of parameters alone brings no layer and reads them as expressions above
-	the scan.
+	`is_owner` keeps the filter above the layers that guard and derive it; a
+	projection of parameters alone brings no layer. The plan renders a layer
+	without its columns, so the depth of the stack is what is pinned.
 """
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Db] [projections: is_owner, secret AS s, c AS cc]
+'SelectProject [ctx: Db] [projections: is_owner, s, cc]
     ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-        ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
             TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
@@ -37,15 +36,15 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Db] [projections: is_owner, secret AS s, c AS cc]
+'SelectProject [ctx: Db] [projections: is_owner, s, cc]
     ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-        ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
             TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Db] [projections: secret AS s]
+'SelectProject [ctx: Db] [projections: s]
     Filter [ctx: Db] [predicate: is_owner = true]
         ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
             ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
@@ -55,15 +54,13 @@ value = '''
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: a, b, p]
-    Compute [ctx: Db] [fields: a = $_is_owner0, b = $_secret1, p = $_c0]
-        TableScan [ctx: Db] [table: t, direction: Forward]
+    TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: raw]
-    Compute [ctx: Db] [fields: raw = $_c1]
-        TableScan [ctx: Db] [table: t, direction: Forward]
+    TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
@@ -72,8 +69,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: x]
-    Compute [ctx: Db] [fields: x = $_x + n]
-        TableScan [ctx: Db] [table: t, direction: Forward]
+    TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 */
 

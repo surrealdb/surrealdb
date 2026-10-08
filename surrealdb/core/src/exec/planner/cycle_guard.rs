@@ -6,17 +6,23 @@
 //! and bails when the key is already present, falling back to txn-less
 //! compilation for that subtree.
 //!
+//! The guard also counts the lowerings of each table's events for each action
+//! open on the planners that share it ([`CycleGuard::try_enter_events`]),
+//! which bounds a chain of events that write back to their own table in
+//! frames that never repeat.
+//!
 //! Orthogonal to the runtime data-cycle guards (`skip_fetch_perms`,
 //! `computing_record`) — those break cycles during evaluation, this one
 //! breaks them during plan construction.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use surrealdb_strand::TableName;
 
 use crate::catalog::{DatabaseId, NamespaceId};
+use crate::doc::Action;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TableKey {
@@ -28,9 +34,25 @@ struct TableKey {
 #[derive(Clone, Default)]
 pub(crate) struct CycleGuard {
 	inner: Arc<Mutex<HashSet<TableKey>>>,
+	/// How many lowerings of each table's events for each action are open.
+	events: Arc<Mutex<HashMap<EventsKey, usize>>>,
+}
+
+/// A table's events for one action.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct EventsKey {
+	table: TableKey,
+	action: Action,
 }
 
 impl CycleGuard {
+	/// Whether no compilation of a table and no lowering of a table's events
+	/// is open on the guard: what a planner holding it compiles is then
+	/// what a fresh planner compiles.
+	pub(crate) fn is_idle(&self) -> bool {
+		self.inner.lock().is_empty() && self.events.lock().is_empty()
+	}
+
 	/// Try to push `(ns, db, table)` onto the guard. Returns `Some(entry)`
 	/// on success — when `entry` drops, the key is removed. Returns `None`
 	/// if the key is already present; the caller must fall back to a
@@ -59,6 +81,38 @@ impl CycleGuard {
 		}
 	}
 
+	/// Count one more lowering of `(ns, db, table)`'s events for `action`
+	/// open, unless `limit` are open already. The count drops when the entry
+	/// does.
+	#[must_use]
+	pub(crate) fn try_enter_events(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		table: TableName,
+		action: Action,
+		limit: usize,
+	) -> Option<EventsEntry> {
+		let key = EventsKey {
+			table: TableKey {
+				ns,
+				db,
+				table,
+			},
+			action,
+		};
+		let mut open = self.events.lock();
+		let count = open.entry(key.clone()).or_default();
+		if *count >= limit {
+			return None;
+		}
+		*count += 1;
+		Some(EventsEntry {
+			events: Arc::clone(&self.events),
+			key,
+		})
+	}
+
 	#[cfg(test)]
 	fn contains(&self, ns: NamespaceId, db: DatabaseId, table: &TableName) -> bool {
 		self.inner.lock().contains(&TableKey {
@@ -66,6 +120,25 @@ impl CycleGuard {
 			db,
 			table: table.clone(),
 		})
+	}
+}
+
+/// One open lowering of a table's events for an action, counted until it
+/// drops.
+pub(crate) struct EventsEntry {
+	events: Arc<Mutex<HashMap<EventsKey, usize>>>,
+	key: EventsKey,
+}
+
+impl Drop for EventsEntry {
+	fn drop(&mut self) {
+		let mut open = self.events.lock();
+		if let Some(count) = open.get_mut(&self.key) {
+			*count -= 1;
+			if *count == 0 {
+				open.remove(&self.key);
+			}
+		}
 	}
 }
 
@@ -164,5 +237,32 @@ mod tests {
 		// Same table name in a different database is not a cycle.
 		let e2 = g.try_enter(NamespaceId(1), DatabaseId(3), t);
 		assert!(e2.is_some(), "same table name in different db must not collide");
+	}
+
+	#[test]
+	fn events_are_refused_past_the_limit_for_one_action() {
+		let g = CycleGuard::default();
+		let (ns, db, t) = key("foo");
+		let open: Vec<_> = (0..3)
+			.map(|_| g.try_enter_events(ns, db, t.clone(), Action::Update, 3).expect("under"))
+			.collect();
+		assert!(g.try_enter_events(ns, db, t.clone(), Action::Update, 3).is_none());
+		drop(open);
+		assert!(
+			g.try_enter_events(ns, db, t, Action::Update, 3).is_some(),
+			"the count drops with its entries"
+		);
+	}
+
+	#[test]
+	fn events_of_each_action_are_counted_apart() {
+		let g = CycleGuard::default();
+		let (ns, db, t) = key("foo");
+		let _update = g.try_enter_events(ns, db, t.clone(), Action::Update, 1).expect("update");
+		assert!(g.try_enter_events(ns, db, t.clone(), Action::Update, 1).is_none());
+		let _create = g.try_enter_events(ns, db, t.clone(), Action::Create, 1).expect("create");
+		let _delete = g.try_enter_events(ns, db, t, Action::Delete, 1).expect("delete");
+		let (_, _, other) = key("bar");
+		assert!(g.try_enter_events(ns, db, other, Action::Update, 1).is_some());
 	}
 }

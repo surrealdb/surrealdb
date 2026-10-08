@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -18,11 +17,9 @@ was read from.
 Each group answers from its own keys, which is what the multi-group case
 checks: the base of the logarithm changes with the group.
 
-`planner-strategy` excludes the per-row engine, which rejects an aggregate
-anywhere but as a direct argument of the outer call — `math::log(math::sum(v),
-g)` is the form it accepts, and that agrees on every strategy in
-`a_grouped_key_reaches_the_post_expression`. The forms here, an
-aggregate as a method receiver or inside an array literal, are streaming-only.
+The forms here are an aggregate as a method receiver or inside an array
+literal; `a_grouped_key_reaches_the_post_expression` covers the aggregate as a
+direct argument of the outer call.
 """
 
 [[test.results]]

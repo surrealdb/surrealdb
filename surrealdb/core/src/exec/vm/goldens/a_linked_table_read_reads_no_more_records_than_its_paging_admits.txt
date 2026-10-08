@@ -1,0 +1,30 @@
+### SELECT * FROM type::table(rand::enum('fresh')) LIMIT 10
+{ id: fresh:1, label: 'n1', n: 1 }
+{ id: fresh:2, label: 'n2', n: 2 }
+{ id: fresh:3, label: 'n3', n: 3 }
+{ id: fresh:4, label: 'n4', n: 4 }
+{ id: fresh:5, label: 'n5', n: 5 }
+{ id: fresh:6, label: 'n6', n: 6 }
+{ id: fresh:7, label: 'n7', n: 7 }
+{ id: fresh:8, label: 'n8', n: 8 }
+{ id: fresh:9, label: 'n9', n: 9 }
+{ id: fresh:10, label: 'n10', n: 10 }
+### SELECT * FROM type::table(rand::enum('fresh')) LIMIT 10 START 5
+{ id: fresh:6, label: 'n6', n: 6 }
+{ id: fresh:7, label: 'n7', n: 7 }
+{ id: fresh:8, label: 'n8', n: 8 }
+{ id: fresh:9, label: 'n9', n: 9 }
+{ id: fresh:10, label: 'n10', n: 10 }
+{ id: fresh:11, label: 'n11', n: 11 }
+{ id: fresh:12, label: 'n12', n: 12 }
+{ id: fresh:13, label: 'n13', n: 13 }
+{ id: fresh:14, label: 'n14', n: 14 }
+{ id: fresh:15, label: 'n15', n: 15 }
+### SELECT n FROM type::table(rand::enum('fresh')) WHERE n > 2990 LIMIT 5
+{ n: 2991 }
+{ n: 2992 }
+{ n: 2993 }
+{ n: 2994 }
+{ n: 2995 }
+### SELECT * FROM type::table(rand::enum('fresh')) LIMIT 0
+(no rows)

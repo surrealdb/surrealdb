@@ -1,0 +1,11 @@
+### SELECT VALUE c FROM thing ORDER BY id
+2
+4
+6
+### SELECT VALUE (|$x| $x + 1)(n) FROM [{ n: 1 }, { n: 2 }] VERSION d'2100-01-01T00:00:00Z'
+2
+3
+### SELECT VALUE d FROM other ORDER BY id
+[3]
+[6]
+[9]

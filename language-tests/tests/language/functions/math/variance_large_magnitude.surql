@@ -160,7 +160,7 @@ CREATE u:1 SET g = "a", f = 100000001f;
 CREATE u:2 SET g = "a", f = 100000002f;
 CREATE u:3 SET g = "a", f = 100000004f;
 
--- Ad-hoc GROUP BY, and the scalar form for reference. Both engines agree.
+-- Ad-hoc GROUP BY, and the scalar form for reference.
 SELECT g, math::variance(f) AS v, math::stddev(f) AS s FROM u GROUP BY g;
 RETURN math::variance([100000001f, 100000002f, 100000004f]);
 

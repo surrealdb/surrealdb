@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -28,9 +27,6 @@ query is ill-typed for an aggregate, and saying so beats inventing a value.
 Note the scalar `time::min` does accept an array — asserted below — because it
 receives the whole array as its argument, where the aggregate receives one
 element per row.
-
-The legacy compute-only path errors on every non-Datetime value, including the
-absent ones, so this test is scoped to the streaming executor.
 """
 issue = 7301
 

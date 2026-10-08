@@ -29,12 +29,75 @@ pub fn generate(model: &Model) -> TokenStream {
 	let types = model.types.iter().map(|def| type_def(model, def));
 	let builders = builders(model);
 	let context_diagnostic = context_diagnostic();
+	let routes = key_routes(model);
 
 	quote! {
 		#context_diagnostic
 		#(#enums)*
 		#(#types)*
 		#builders
+		#routes
+	}
+}
+
+/// Every key type's layout, as data a program can encode and decode keys from
+/// without the generated Rust types: its route, the steps its encoder takes,
+/// and the value stored at it.
+fn key_routes(model: &Model) -> TokenStream {
+	let routes = model.types.iter().map(|def| {
+		let name = def.name.to_string();
+		let route = &def.route;
+		let value = match &def.value {
+			Some(v) => {
+				let v = quote::ToTokens::to_token_stream(v).to_string().replace(' ', "");
+				quote!(Some(#v))
+			}
+			None => quote!(None),
+		};
+		let format = def.format.describe();
+		let role = match def.role {
+			Role::Key => quote!(KeyRole::Key),
+			Role::Root => quote!(KeyRole::Root),
+			Role::Prefix => quote!(KeyRole::Prefix),
+		};
+		let steps = def.emit.iter().map(|step| match step {
+			Emit::Lit(bytes) => {
+				let bytes = proc_macro2::Literal::byte_string(bytes);
+				quote!(KeyStep::Lit(#bytes))
+			}
+			Emit::Field(i) => {
+				let field = &def.fields[*i];
+				let (name, ty) = (field.name.to_string(), &field.schema_ty);
+				quote!(KeyStep::Field { name: #name, ty: #ty })
+			}
+			Emit::ListTerminated(i) => {
+				let field = &def.fields[*i];
+				let (name, ty) = (field.name.to_string(), &field.schema_ty);
+				quote!(KeyStep::List { name: #name, ty: #ty, terminated: true })
+			}
+			Emit::ListOpen(i) => {
+				let field = &def.fields[*i];
+				let (name, ty) = (field.name.to_string(), &field.schema_ty);
+				quote!(KeyStep::List { name: #name, ty: #ty, terminated: false })
+			}
+		});
+		let cfgs: Vec<_> = def.attrs.cfgs.iter().collect();
+		quote! {
+			#(#cfgs)*
+			KeyRoute {
+				name: #name,
+				route: #route,
+				role: #role,
+				value: #value,
+				format: #format,
+				steps: &[#(#steps),*],
+			},
+		}
+	});
+	quote! {
+		/// Every key type's layout, as data: its route, the steps its encoder
+		/// takes, and the value stored at it.
+		pub const KEY_ROUTES: &[KeyRoute] = &[#(#routes)*];
 	}
 }
 

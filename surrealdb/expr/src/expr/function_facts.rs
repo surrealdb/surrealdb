@@ -4,8 +4,10 @@
 //! single yes/no. This module extracts the three facts a *call-graph* answer
 //! needs instead: whether the tree writes directly, which user-defined
 //! functions it calls (their stored bodies carry the rest of the answer), and
-//! whether it invokes something whose body cannot be inspected at all. The
-//! caller combines these facts across function bodies with two polarities:
+//! whether it invokes something whose body cannot be inspected at all. It also
+//! names the builtins and methods the tree calls, whose declared effects live
+//! on the function registry rather than here. The caller combines these facts
+//! across function bodies with two polarities:
 //!
 //! - **Precise** ("provably writes"): only `direct_writes`, unioned over the reachable call graph.
 //!   Opaque callables count as clean, because refusing them would refuse working read-only bodies
@@ -45,16 +47,49 @@ pub struct FunctionFacts {
 	/// [`Function::read_only`] rejects), or a call operator whose target is
 	/// not a closure literal.
 	pub opaque_effects: bool,
+	/// Names of the builtin functions the tree calls, at any depth, whose
+	/// declared effects a caller holding the function registry reads.
+	pub builtins: BTreeSet<String>,
+	/// Names of the methods the tree calls, at any depth, whose resolutions'
+	/// declared effects a caller holding the function registry reads.
+	pub methods: BTreeSet<String>,
+	/// The tree hands a builtin or method a closure it runs that is not a
+	/// literal of the call, whose body the tree cannot see; known only where
+	/// the scan is told where callees run closures ([`ClosurePositions`]).
+	pub unseen_closures: bool,
+}
+
+/// Where the builtins and methods a tree calls run a closure they are
+/// handed: the registry's declarations, which this crate does not hold.
+pub trait ClosurePositions {
+	/// The argument positions at which the builtin `name` runs the closure
+	/// it is handed.
+	fn function(&self, name: &str) -> Vec<usize>;
+	/// The argument positions, the receiver not counted, at which a builtin
+	/// the method `name` resolves to runs the closure it is handed.
+	fn method(&self, name: &str) -> Vec<usize>;
+}
+
+/// Whether an argument in one of `positions` is something other than a
+/// closure literal written there, whose body the tree cannot see.
+fn unseen_closure(args: &[Expr], positions: Vec<usize>) -> bool {
+	positions
+		.into_iter()
+		.filter_map(|at| args.get(at))
+		.any(|arg| !matches!(arg, Expr::Closure(_) | Expr::Literal(_)))
 }
 
 /// Collects [`FunctionFacts`] over a whole tree. Unlike the mutation scanner
 /// this never short-circuits: `calls` must be complete even when a write has
 /// already been found, because the caller builds a call graph from it.
-struct FactsScanner {
+struct FactsScanner<'a> {
 	facts: FunctionFacts,
+	/// With it, a builtin or method handed a closure that is not a literal of
+	/// the call is noted ([`FunctionFacts::unseen_closures`]).
+	closures: Option<&'a dyn ClosurePositions>,
 }
 
-impl Visitor for FactsScanner {
+impl Visitor for FactsScanner<'_> {
 	type Error = std::convert::Infallible;
 
 	/// The match is **exhaustive (no `_` arm) on purpose**, matching
@@ -94,11 +129,25 @@ impl Visitor for FactsScanner {
 			// cannot see. `Part::Method` is the idiom-path shape of the same
 			// call and is classified in `visit_part`.
 			Expr::Postfix {
-				op: PostfixOperator::MethodCall(name, _),
+				op: PostfixOperator::MethodCall(name, args),
 				..
 			} => {
 				if !crate::expr::method::is_builtin_method(name) {
 					self.facts.opaque_effects = true;
+				}
+				if self.closures.is_some_and(|c| unseen_closure(args, c.method(name))) {
+					self.facts.unseen_closures = true;
+				}
+				self.facts.methods.insert(name.clone());
+			}
+
+			// A builtin handed a closure it runs, other than a literal written
+			// in the call, runs a body this tree cannot see.
+			Expr::FunctionCall(call) => {
+				if let (Function::Normal(name), Some(closures)) = (&call.receiver, self.closures)
+					&& unseen_closure(&call.arguments, closures.function(name))
+				{
+					self.facts.unseen_closures = true;
 				}
 			}
 
@@ -121,7 +170,6 @@ impl Visitor for FactsScanner {
 			| Expr::Binary {
 				..
 			}
-			| Expr::FunctionCall(_)
 			| Expr::Closure(_)
 			| Expr::Break
 			| Expr::Continue
@@ -143,10 +191,14 @@ impl Visitor for FactsScanner {
 	/// The idiom-path shape of a method call: an unregistered name resolves
 	/// to a closure stored on the receiver, whose body this tree cannot see.
 	fn visit_part(&mut self, part: &Part) -> Result<(), Self::Error> {
-		if let Part::Method(name, _) = part
-			&& !crate::expr::method::is_builtin_method(name)
-		{
-			self.facts.opaque_effects = true;
+		if let Part::Method(name, args) = part {
+			if !crate::expr::method::is_builtin_method(name) {
+				self.facts.opaque_effects = true;
+			}
+			if self.closures.is_some_and(|c| unseen_closure(args, c.method(name))) {
+				self.facts.unseen_closures = true;
+			}
+			self.facts.methods.insert(name.as_str().to_owned());
 		}
 		part.visit(self)
 	}
@@ -164,6 +216,9 @@ impl Visitor for FactsScanner {
 				if !other.read_only() {
 					self.facts.opaque_effects = true;
 				}
+				if let Function::Normal(name) = other {
+					self.facts.builtins.insert(name.clone());
+				}
 			}
 		}
 		Ok(())
@@ -173,8 +228,16 @@ impl Visitor for FactsScanner {
 impl Expr {
 	/// Extract this tree's [`FunctionFacts`].
 	pub fn function_facts(&self) -> FunctionFacts {
+		self.function_facts_with(None)
+	}
+
+	/// [`Self::function_facts`], with a builtin or method handed a closure
+	/// that is not a literal of the call noted where `closures` says where
+	/// the callees run one.
+	pub fn function_facts_with(&self, closures: Option<&dyn ClosurePositions>) -> FunctionFacts {
 		let mut scanner = FactsScanner {
 			facts: FunctionFacts::default(),
+			closures,
 		};
 		// Enter through the visitor method, not the default traversal, so the
 		// root node is classified too. Infallible: the scanner accumulates.
@@ -187,8 +250,14 @@ impl Block {
 	/// Extract this block's [`FunctionFacts`], the form stored function
 	/// bodies take.
 	pub fn function_facts(&self) -> FunctionFacts {
+		self.function_facts_with(None)
+	}
+
+	/// [`Expr::function_facts_with`] for a block.
+	pub fn function_facts_with(&self, closures: Option<&dyn ClosurePositions>) -> FunctionFacts {
 		let mut scanner = FactsScanner {
 			facts: FunctionFacts::default(),
+			closures,
 		};
 		let Ok(()) = scanner.visit_block(self);
 		scanner.facts

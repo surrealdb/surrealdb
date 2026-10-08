@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "FETCH clause with a negative or out-of-range array index used to rely on `i64 as usize` truncation, which silently produced a huge `usize` so `array.get_mut` returned `None`. On 64-bit platforms this happened to do the right thing, but the cast also lost information on 32-bit and made the intent unreadable. The fix replaces the cast with `usize::try_from` so negative indices explicitly skip the fetch. Behaviour for positive in-range indices is unchanged. Also verifies the new streaming executor's FETCH operator, which previously (#472/#473) silently fetched nothing for any numeric index -- runs under all three planner strategies now that it correctly evaluates and fetches a positive in-range index."
+reason = "FETCH clause with a negative or out-of-range array index skips the fetch explicitly (`usize::try_from`) rather than relying on `i64 as usize` truncation, which yields a huge `usize` so `array.get_mut` returns `None`. A positive in-range index fetches the element."
 
 [[test.results]]
 value = "[{ id: other:1, name: 'A' }]"

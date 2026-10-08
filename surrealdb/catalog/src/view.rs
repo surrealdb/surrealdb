@@ -4,7 +4,8 @@ use surrealdb_strand::TableName;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::aggregation::{AggregateFields, AggregationAnalysis};
-use crate::catalog::{Error, ExprText, FieldsText, FromStored, IdiomText};
+use crate::catalog::{Error, ExprText, FieldsText, FromStored, IdiomText, LogicalBody};
+use crate::expr::logical::LogicalExpr;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Expr, Fields, Group, Groups, View};
 use crate::sql;
@@ -173,10 +174,12 @@ impl StoredViewDefinition {
 pub fn view_to_definition(this: &View) -> Result<ViewDefinition> {
 	let Some(group) = this.group.as_ref() else {
 		// No group, nothing to aggregate.
+		let condition = this.cond.clone().map(|x| x.0);
 		return Ok(ViewDefinition::Materialized {
 			fields: this.expr.clone(),
 			tables: this.what.clone(),
-			condition: this.cond.clone().map(|x| x.0),
+			condition_body: condition.as_ref().map(LogicalBody::of),
+			condition,
 		});
 	};
 
@@ -248,6 +251,11 @@ pub enum ViewDefinition {
 		fields: Fields,
 		tables: Vec<TableName>,
 		condition: Option<Expr>,
+		/// The `WHERE` clause in logical form, compiled on first use; see
+		/// [`ViewDefinition::materialized_condition_logical`]. Derived from
+		/// `condition` and carrying the same clause: `Some` exactly when
+		/// `condition` is.
+		condition_body: Option<LogicalBody>,
 	},
 	/// The view has a group by and has a running compute.
 	Aggregated {
@@ -287,12 +295,77 @@ impl ViewDefinition {
 		}
 	}
 
+	/// Visit the clauses the view evaluates when a source table is written:
+	/// its field list, its `WHERE` condition and its `GROUP` targets, whichever
+	/// maintenance strategy applies.
+	pub fn visit_clauses<V: crate::expr::visit::Visitor>(
+		&self,
+		visitor: &mut V,
+	) -> Result<(), V::Error> {
+		use crate::expr::visit::Visit as _;
+		let (fields, condition, groups) = match self {
+			ViewDefinition::Materialized {
+				fields,
+				condition,
+				..
+			} => (fields, condition, None),
+			ViewDefinition::Aggregated {
+				fields,
+				condition,
+				groups,
+				..
+			} => (fields, condition, Some(groups)),
+			ViewDefinition::Select {
+				fields,
+				condition,
+				groups,
+				..
+			} => (fields, condition, groups.as_ref()),
+		};
+		fields.visit(visitor)?;
+		if let Some(condition) = condition {
+			condition.visit(visitor)?;
+		}
+		for group in groups.into_iter().flat_map(|groups| groups.0.iter()) {
+			group.0.visit(visitor)?;
+		}
+		Ok(())
+	}
+
+	/// A materialized view's `WHERE` clause as the logical scalar the
+	/// streaming engine evaluates, compiled on first call.
+	///
+	/// `None` for a view with no condition, and for the two classifications
+	/// that carry one this does not compile: an aggregated view's condition
+	/// narrows the group its maintenance statement reads rather than judging
+	/// the written record on its own, and a `Select` view is not maintained at
+	/// all.
+	///
+	/// Errs when the clause has no logical form — a write statement, a mock
+	/// record set in scalar position — and the caller then evaluates the
+	/// [`Expr`] half instead.
+	pub fn materialized_condition_logical(&self) -> Option<anyhow::Result<&LogicalExpr>> {
+		match self {
+			ViewDefinition::Materialized {
+				condition_body,
+				..
+			} => condition_body.as_ref().map(LogicalBody::logical),
+			ViewDefinition::Aggregated {
+				..
+			}
+			| ViewDefinition::Select {
+				..
+			} => None,
+		}
+	}
+
 	pub fn to_stored(&self) -> StoredViewDefinition {
 		match self {
 			ViewDefinition::Materialized {
 				fields,
 				tables,
 				condition,
+				..
 			} => StoredViewDefinition::clauses(fields, tables.clone(), condition.as_ref(), None),
 			ViewDefinition::Aggregated {
 				fields,
@@ -326,6 +399,7 @@ impl ViewDefinition {
 				fields,
 				tables,
 				condition,
+				..
 			} => sql::View {
 				expr: fields.clone().into(),
 				what: tables.clone().into_iter().map(Into::into).collect(),
@@ -370,6 +444,50 @@ impl InfoStructure for ViewDefinition {
 	}
 }
 
+/// The select that fills a materialized view over `tables` and `condition`.
+///
+/// It always yields `id`, ahead of the view's own fields, so that the key of
+/// the source record is known whatever field list the view projects.
+pub fn materialized_backfill_select(
+	fields: &Fields,
+	tables: &[TableName],
+	condition: Option<&Expr>,
+) -> crate::expr::SelectStatement {
+	use crate::expr::field::Selector;
+	use crate::expr::{Field, Idiom, Literal};
+	let init_fields = match fields {
+		Fields::Select(user_fields) => {
+			let id_field = Field::Single(Selector {
+				expr: Expr::Idiom(Idiom::from(crate::expr::paths::ID.to_vec())),
+				alias: None,
+			});
+			let mut all = vec![id_field];
+			all.extend(user_fields.iter().cloned());
+			Fields::Select(all)
+		}
+		other => other.clone(),
+	};
+	crate::expr::SelectStatement {
+		fields: init_fields,
+		what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
+		cond: condition.cloned().map(Cond),
+		omit: vec![],
+		only: false,
+		with: None,
+		split: None,
+		group: None,
+		order: None,
+		limit: None,
+		start: None,
+		fetch: None,
+		version: Expr::Literal(Literal::None),
+		timeout: Expr::Literal(Literal::None),
+		explain: None,
+		tempfiles: false,
+		for_update: false,
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -393,6 +511,40 @@ mod tests {
 		let compiled = ViewDefinition::from_stored(&definition.to_stored()).unwrap();
 		assert_eq!(compiled.to_stored(), definition.to_stored());
 		assert_eq!(compiled.to_sql(), definition.to_sql());
+	}
+
+	/// A materialized view's condition is carried twice from one source, and
+	/// only that classification has a logical form to offer: the other two are
+	/// maintained by something other than judging the written record.
+	#[test]
+	fn only_a_materialized_views_condition_compiles_to_a_logical_form() {
+		let clauses = |fields, groups| StoredViewDefinition::Clauses {
+			fields: FieldsText::from_raw(fields),
+			tables: vec![TableName::from("orders")],
+			condition: Some(ExprText::from_raw("paid")),
+			groups,
+		};
+
+		let materialized = ViewDefinition::from_stored(&clauses("*", None)).unwrap();
+		let body = materialized
+			.materialized_condition_logical()
+			.expect("a materialized view with a condition")
+			.unwrap();
+		assert_eq!(body.to_sql(), "paid");
+
+		let aggregated =
+			ViewDefinition::from_stored(&clauses("count()", Some(Vec::new()))).unwrap();
+		assert!(matches!(aggregated, ViewDefinition::Aggregated { .. }));
+		assert!(aggregated.materialized_condition_logical().is_none());
+
+		let unconditional = ViewDefinition::from_stored(&StoredViewDefinition::Clauses {
+			fields: FieldsText::from_raw("*"),
+			tables: vec![TableName::from("orders")],
+			condition: None,
+			groups: None,
+		})
+		.unwrap();
+		assert!(unconditional.materialized_condition_logical().is_none());
 	}
 
 	/// `GROUP ALL` groups everything into one row; no `GROUP` clause at all
@@ -456,6 +608,7 @@ mod tests {
 				fields: Fields::all(),
 				tables: tables.clone(),
 				condition: None,
+				condition_body: None,
 			},
 			ViewDefinition::Aggregated {
 				analysis,

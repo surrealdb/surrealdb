@@ -20,31 +20,16 @@ pub mod distance {
 	use crate::ctx::FrozenContext;
 	use crate::doc::CursorDoc;
 	use crate::fnc::args::Optional;
-	use crate::fnc::get_execution_context;
-	use crate::idx::planner::IterationStage;
 	use crate::val::Value;
 
+	/// The distance the KNN index computed for the record being iterated is
+	/// held by the index-driven scan, and the engine's operators
+	/// answer this function there. Reached from any other caller there is no
+	/// index to read from, and the answer is `NONE`.
 	pub fn knn(
-		(ctx, doc): (&FrozenContext, Option<&CursorDoc>),
-		(Optional(knn_ref),): (Optional<Value>,),
+		(_ctx, _doc): (&FrozenContext, Option<&CursorDoc>),
+		(Optional(_knn_ref),): (Optional<Value>,),
 	) -> Result<Value> {
-		if let Some((_exe, doc, thg)) = get_execution_context(ctx, doc) {
-			if let Some(ir) = &doc.ir
-				&& let Some(d) = ir.dist()
-			{
-				return Ok(d.into());
-			}
-			if let Some(IterationStage::Iterate(Some(results))) = ctx.get_iteration_stage() {
-				let n = if let Some(Value::Number(n)) = knn_ref {
-					n.as_usize()
-				} else {
-					0
-				};
-				if let Some(d) = results.get_dist(n, thg) {
-					return Ok(d.into());
-				}
-			}
-		}
 		Ok(Value::None)
 	}
 }

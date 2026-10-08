@@ -1401,7 +1401,7 @@ pub fn check_value_depth(value: &Value) -> Result<()> {
 				// A closure captures the values it references, so a closure
 				// capturing a closure nests. The `body` / `args` are parse-bounded
 				// AST, not runtime values; only the captures grow. A `Builtin`
-				// closure (the compiled form the streaming engine produces) holds
+				// closure (the compiled form the engine produces) holds
 				// its captures behind the trait, so walk them through
 				// `captured_values` rather than treating it as a leaf.
 				match closure {
@@ -1436,7 +1436,7 @@ pub fn convert_value_to_public_value(value: crate::val::Value) -> Result<surreal
 /// its own root at depth 1.
 ///
 /// This is the anchor the storage write guard uses - `check_value_depth` runs on
-/// a record's value with the record at depth 1 - and the one the streaming read
+/// a record's value with the record at depth 1 - and the one the engine's read
 /// path already uses (it converts each row as it is emitted). Converting the
 /// whole result array at depth 1 instead would charge every row an extra level,
 /// so a record whose deepest field sits exactly at [`MAX_VALUE_DEPTH`] would
@@ -1799,7 +1799,7 @@ mod tests {
 			convert_value_to_public_value(result.clone()).is_err(),
 			"the envelope-charging path must reject a row at the cap"
 		);
-		// Per-row conversion accepts it, matching storage and the streaming path.
+		// Per-row conversion accepts it, matching storage and the engine's own row conversion.
 		convert_result_rows_to_public(result).expect("a row at the cap must convert as a row");
 	}
 
@@ -1940,10 +1940,10 @@ mod tests {
 		);
 	}
 
-	/// The streaming engine represents a runtime closure as a `Closure::Builtin`
+	/// The engine represents a runtime closure as a `Closure::Builtin`
 	/// whose captures live behind the `BuiltinClosureObj` trait, not a
 	/// `Closure::Expr`, so the walk must reach them through `captured_values` or a
-	/// closure-valued accumulator escapes the cap on that engine. The captures
+	/// closure-valued accumulator escapes the cap. The captures
 	/// nest exactly as `Closure::Expr`'s do, so the boundary is the same.
 	#[test]
 	fn builtin_closure_captures_are_walked() {

@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -25,7 +24,8 @@ value = "[{ id: t:2, v: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward, predicate: v > 1]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -34,7 +34,8 @@ value = "[{ id: t:2, v: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward, predicate: v > 1]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -43,7 +44,8 @@ value = "[{ id: t:2, v: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward, predicate: v > 1]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -52,7 +54,8 @@ value = "[{ id: t:2, v: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward, predicate: v > 1]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -61,7 +64,8 @@ value = "[{ id: t:2, v: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward, predicate: v > 1]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
 ''''
 
 */

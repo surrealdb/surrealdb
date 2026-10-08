@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -38,7 +37,7 @@ value = "NONE"
 error = "Could not cast into `int` using input `'x'`"
 
 [[test.results]]
-value = "{ attributes: { projections: '*' }, children: [{ attributes: { predicate: 'x' }, children: [{ attributes: { projections: 'x' }, children: [{ attributes: { fields: 'x = _join0.coin' }, children: [{ attributes: { direction: 'Forward', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'x', sql: '_join0.coin' }], operator: 'Compute' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', expressions: [{ role: 'predicate', sql: 'x' }], operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"
+value = "{ attributes: { projections: '*' }, children: [{ attributes: { predicate: 'x' }, children: [{ children: [{ attributes: { projections: 'x' }, children: [{ attributes: { direction: 'Forward', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }], context: 'Rt', operator: 'Subquery' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"
 */
 
 DEFINE TABLE cfg SCHEMALESS;

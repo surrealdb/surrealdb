@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "OR bitmap fusion declines when the union satisfies the ORDER BY by composite k-way merge"
@@ -35,8 +34,8 @@ value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: category = 'ml' AND published = true OR category = 'db' AND published = false]
         UnionIndexScan [ctx: Db] [table: docs, branches: 2, merge_by_index_key_dedup: rank Asc]
-            IndexScan [ctx: Db] [index: idx_cat_pub_rank, access: ['ml', true], direction: Forward]
-            IndexScan [ctx: Db] [index: idx_cat_pub_rank, access: ['db', false], direction: Forward]
+            IndexScan [ctx: Db] [table: docs, index: idx_cat_pub_rank, access: ['ml', true], direction: Forward]
+            IndexScan [ctx: Db] [table: docs, index: idx_cat_pub_rank, access: ['db', false], direction: Forward]
 "'''
 
 [[test.results]]
@@ -45,9 +44,9 @@ value = "[{ id: docs:2, rank: 1 }, { id: docs:3, rank: 2 }, { id: docs:1, rank: 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    SortByKey [ctx: Db] [sort_keys: score ASC]
+    Sort [ctx: Db] [sort_keys: score ASC]
         Filter [ctx: Db] [predicate: category = 'ml' AND published = true OR category = 'db' AND published = false]
-            BitmapResolve [ctx: Db] [table: docs]
+            BitmapScan [ctx: Db] [table: docs]
                 BitmapOr [ctx: Db]
                     BitmapIndexScan [ctx: Db] [index: idx_cat_pub_rank, access: ['ml', true]]
                     BitmapIndexScan [ctx: Db] [index: idx_cat_pub_rank, access: ['db', false]]

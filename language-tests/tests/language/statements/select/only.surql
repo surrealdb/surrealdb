@@ -6,8 +6,7 @@ reason = """
 	satisfies all answer `NONE`, and only a second row is an error.
 
 	An array source written without a limit is left to
-	`reproductions/only_over_an_array_written_without_a_limit_*`, where
-	the two engines disagree.
+	`reproductions/only_over_an_array_written_without_a_limit.surql`.
 """
 
 # 0: a single value

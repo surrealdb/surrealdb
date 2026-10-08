@@ -6,47 +6,38 @@
 
 mod broker;
 mod capture;
-mod distinct;
 pub mod executor;
-mod group;
-mod iterator;
 mod observe_ctx;
 mod options;
-mod plan;
-pub(crate) mod processor;
-mod result;
 mod session;
 mod sort_error;
 mod statement;
 mod statement_counters;
-mod store;
 mod stream;
 mod top_level;
 
 // A session outlives the process that attached it, so its stored form belongs to
 // the keyspace; the live session above converts in and out of it.
 pub(crate) use surrealdb_datastore::values::session::DurableSession;
-pub(crate) use surrealdb_rpc::capabilities::NewPlannerStrategy;
 pub(crate) use surrealdb_rpc::{
 	QueryResult, QueryResultBuilder, QueryStreamItem, QueryType, capabilities, items_for_result,
 };
 
-pub(crate) use self::broker::SendKill;
 pub use self::broker::{
 	BrokerRoutingContext, LocalMessageBroker, MessageBroker, NodeEndpointResolver,
 	RoutedNotification,
 };
+pub(crate) use self::broker::{DefaultBroker, SendKill};
 pub(crate) use self::capabilities::Capabilities;
 pub(crate) use self::capture::ParameterCapturePass;
 pub(crate) use self::executor::Executor;
-pub(crate) use self::iterator::{Iterable, Iterator, Operable, Processable};
 pub(crate) use self::options::{Force, NoWriteFrame, Options};
 pub use self::session::{AuthPrincipalSnapshot, Session, SessionData};
 pub(crate) use self::session::{durable_session, restore_session};
 pub(crate) use self::sort_error::SortError;
 pub(crate) use self::statement::{
 	FOR_UPDATE_GROUP_ERROR, FOR_UPDATE_LIMIT_ERROR, FOR_UPDATE_TARGETS_ERROR,
-	FOR_UPDATE_VERSION_ERROR, Statement, validate_for_update, validate_for_update_ast,
+	FOR_UPDATE_VERSION_ERROR, validate_for_update_ast,
 };
 pub(crate) use self::statement_counters::StatementCounters;
 pub use self::stream::{QueryItemStream, QueryStreamJob};
@@ -54,11 +45,10 @@ pub(crate) use self::top_level::{Dispatch, TopLevelStatement};
 pub use crate::catalog::node;
 pub(crate) use crate::expr::variables::Variables;
 
-#[cfg(storage)]
-mod file;
-
 #[cfg(all(test, feature = "kv-mem"))]
 mod definer_rights_test;
+#[cfg(all(test, feature = "kv-mem"))]
+mod live_notification_test;
 #[cfg(all(test, feature = "kv-mem"))]
 mod nested_matches_parity_test;
 #[cfg(test)]

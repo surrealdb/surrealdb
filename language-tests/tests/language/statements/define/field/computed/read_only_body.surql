@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A COMPUTED body is evaluated on every read of the field, inside the reading statement's own transaction, which is read-only for a plain SELECT. A write in the body can therefore never succeed -- it only turns every later read of the field into an error, and the two engines phrase that error differently. DEFINE FIELD rejects a direct write in the body instead. A write reached through a function call is still accepted here, because the callee can be redefined afterwards so definition time cannot be sound about it; that one keeps failing at read time. Read-only bodies, including calls to read-only user-defined functions, are unaffected."
+reason = "A COMPUTED body is evaluated on every read of the field, inside the reading statement's own transaction, which is read-only for a plain SELECT. A write in the body can therefore never succeed -- it only turns every later read of the field into an error. DEFINE FIELD rejects a direct write in the body instead. A write reached through a function call is still accepted here, because the callee can be redefined afterwards so definition time cannot be sound about it; that one keeps failing at read time. Read-only bodies, including calls to read-only user-defined functions, are unaffected."
 
 [[test.results]]
 value = "NONE"

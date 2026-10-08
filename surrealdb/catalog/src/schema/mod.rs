@@ -245,6 +245,55 @@ impl LogicalPermissionBody {
 	}
 }
 
+/// The four `PERMISSIONS` clauses of a definition that has all four, each
+/// compiled to its logical form on first use: the [`LogicalPermissionBody`]
+/// counterpart of [`Permissions`].
+///
+/// The set is built from one source at a time — the stored clauses, or the
+/// clauses a statement produced — so a definition cannot carry the logical
+/// form of one clause beside the legacy form of another. Which clause gates a
+/// statement is the caller's question; see [`Self::clause`].
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct LogicalPermissions {
+	pub select: LogicalPermissionBody,
+	pub create: LogicalPermissionBody,
+	pub update: LogicalPermissionBody,
+	pub delete: LogicalPermissionBody,
+}
+
+impl LogicalPermissions {
+	/// The bodies of a stored clause set, each compiled lazily.
+	pub fn from_stored(stored: &StoredPermissions) -> Self {
+		Self {
+			select: LogicalPermissionBody::from_stored(&stored.select),
+			create: LogicalPermissionBody::from_stored(&stored.create),
+			update: LogicalPermissionBody::from_stored(&stored.update),
+			delete: LogicalPermissionBody::from_stored(&stored.delete),
+		}
+	}
+
+	/// The bodies of a clause set a `DEFINE` or `ALTER` statement produced,
+	/// over the text `to_stored` writes for each clause.
+	pub fn of(permissions: &Permissions) -> Self {
+		Self {
+			select: LogicalPermissionBody::of(&permissions.select),
+			create: LogicalPermissionBody::of(&permissions.create),
+			update: LogicalPermissionBody::of(&permissions.update),
+			delete: LogicalPermissionBody::of(&permissions.delete),
+		}
+	}
+
+	/// The body of one clause.
+	pub fn clause(&self, kind: PermissionKind) -> &LogicalPermissionBody {
+		match kind {
+			PermissionKind::Select => &self.select,
+			PermissionKind::Create => &self.create,
+			PermissionKind::Update => &self.update,
+			PermissionKind::Delete => &self.delete,
+		}
+	}
+}
+
 impl StoredPermission {
 	pub fn from_runtime(p: &Permission) -> StoredPermission {
 		match p {

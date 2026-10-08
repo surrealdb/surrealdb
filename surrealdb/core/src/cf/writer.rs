@@ -116,7 +116,7 @@ mod tests {
 		let start: u64 = 0;
 
 		let tx4 = ds.transaction(Write).await.unwrap();
-		let r = crate::cf::read(
+		let r = crate::cf::reader::read(
 			&tx4,
 			tb.namespace_id,
 			tb.database_id,
@@ -182,7 +182,7 @@ mod tests {
 	}
 
 	async fn change_feed_ts(tx: Transaction, tb: &TableDefinition, ts: u64) -> Vec<ChangeSet> {
-		let r = crate::cf::read(
+		let r = crate::cf::reader::read(
 			&tx,
 			tb.namespace_id,
 			tb.database_id,

@@ -1,4 +1,4 @@
-//! Aggregate function system for the streaming executor.
+//! Aggregate function system for the engine.
 //!
 //! This module provides traits for aggregate functions that operate over
 //! groups of values (used with GROUP BY clauses).

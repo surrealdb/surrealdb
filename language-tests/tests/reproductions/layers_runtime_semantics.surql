@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_semantics_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["compute-only", "all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -15,7 +14,7 @@ reason = """
 	denied field is absent from `SELECT *`, not present as NONE. A guard on a
 	wildcard path cuts the key from every element. A `FROM` naming two tables
 	applies each table's guards to that table's rows. Denied fields are
-	projected under an alias, which every engine reports as NONE.
+	projected under an alias, which reports NONE.
 """
 
 # 0: `g` and `c_raw` absent; `c_reads` re-derived to true; `c_self` reads the caller's view; `c_pass` admitted.

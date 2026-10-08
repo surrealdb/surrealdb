@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Covers the vector::sum aggregate cases whose result does not depend on the planner strategy, so it runs unpinned and guards the compute-only path's Accumulate fallback as well as the streaming aggregate operator. Every group here holds a vector of a consistent dimension on every row: the strategies diverge only on missing vectors, mixed dimensions, per-row functions inside the aggregate argument, and GROUP ALL over an empty table, which sum_aggregate.surql covers under a streaming-only pin."
+reason = "Covers the vector::sum aggregate cases that need no special input: every group here holds a vector of a consistent dimension on every row. Missing vectors, mixed dimensions, per-row functions inside the aggregate argument, and GROUP ALL over an empty table are covered by sum_aggregate.surql."
 
 [[test.results]]
 value = "[]"

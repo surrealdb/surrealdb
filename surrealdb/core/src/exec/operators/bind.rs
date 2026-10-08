@@ -10,16 +10,21 @@
 //! `Bind` is structurally transparent: it neither reorders nor drops rows, so
 //! it delegates `cardinality_hint` and `output_ordering` to its input.
 
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use futures::TryStreamExt;
 
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, OutputOrdering, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
+#[cfg(test)]
 use crate::val::{Object, Value};
 
+#[cfg(test)]
 /// Wraps each input value into a single-binding row `{ name: value }`.
 #[derive(Debug, Clone)]
 pub struct Bind {
@@ -29,7 +34,9 @@ pub struct Bind {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl Bind {
+	#[cfg(test)]
 	/// Create a new `Bind` binding `input`'s rows under `name`.
 	pub(crate) fn new(input: Arc<dyn ExecOperator>, name: String) -> Self {
 		Self {
@@ -40,6 +47,7 @@ impl Bind {
 	}
 }
 
+#[cfg(test)]
 impl ExecOperator for Bind {
 	fn name(&self) -> &'static str {
 		"Bind"
@@ -80,7 +88,7 @@ impl ExecOperator for Bind {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);

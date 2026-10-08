@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["compute-only"]
 
 [test]
 reason = "Test IN and INSIDE operators with standard, unique, and compound indexes"
@@ -13,12 +12,6 @@ value = "[{ email: 'a@b', id: user:1 }]"
 
 [[test.results]]
 value = "[{ email: 'c@d', id: user:2 }]"
-
-[[test.results]]
-value = "[{ detail: { plan: { index: 'user_email_idx', operator: 'union', value: ['a@b', 'e@f'] }, table: 'user' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
-
-[[test.results]]
-value = "[{ detail: { plan: { index: 'user_email_idx', operator: 'union', value: ['a@b', 'e@f'] }, table: 'user' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ email: 'a@b', id: user:1 }]"
@@ -48,9 +41,6 @@ value = "[{ apprenantUid: '00013483-fedd-43e3-a94e-80728d896f6e' }]"
 value = "[{ apprenantUid: '00013483-fedd-43e3-a94e-80728d896f6e' }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'apprenantUid', operator: 'union', value: ['00013483-fedd-43e3-a94e-80728d896f6e'] }, table: 'apprenants' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
-
-[[test.results]]
 value = "NONE"
 
 [[test.results]]
@@ -66,15 +56,6 @@ value = "[{ account: accounts:2, id: test:2, type: 'password', value: '$argon2id
 value = "[{ account: accounts:3, id: test:3, type: 'password', value: 'notAValidPassword' }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'idx_type_value', operator: 'union', value: ['password', 'firebasePassword'] }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
-
-[[test.results]]
-value = "[{ detail: { plan: { index: 'idx_account_type', operator: 'union', value: [[accounts:1, 'password'], [accounts:1, 'firebasePassword']] }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
-
-[[test.results]]
-value = "[{ detail: { plan: { index: 'idx_account_type', operator: 'union', value: [[accounts:1, 'password'], [accounts:1, 'firebasePassword']] }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
-
-[[test.results]]
 value = "[{ account: accounts:1, id: test:1, type: 'password', value: '$argon2id$v=19$m=19456,t=2,p=1$qP0Y6ApAaFyeDsGySVD0DQ$Bp/Jv2uwapFUl5NKYk3uMsT5DZV0XPpMMVm3F2ZVfSM' }]"
 
 [[test.results]]
@@ -85,14 +66,12 @@ value = "[{ account: accounts:1, id: test:1, type: 'password', value: '$argon2id
 
 [[test.results]]
 value = "[{ account: accounts:1, id: test:1, type: 'password', value: '$argon2id$v=19$m=19456,t=2,p=1$qP0Y6ApAaFyeDsGySVD0DQ$Bp/Jv2uwapFUl5NKYk3uMsT5DZV0XPpMMVm3F2ZVfSM' }]"
+
 */
-
 -- Standard index with IN/INSIDE
 DEFINE INDEX user_email_idx ON user FIELDS email;
 CREATE user:1 CONTENT { email: 'a@b' };
 CREATE user:2 CONTENT { email: 'c@d' };
-SELECT * FROM user WHERE email IN ['a@b', 'e@f'] EXPLAIN;
-SELECT * FROM user WHERE email INSIDE ['a@b', 'e@f'] EXPLAIN;
 SELECT * FROM user WHERE email IN ['a@b', 'e@f'];
 SELECT * FROM user WHERE email INSIDE ['a@b', 'e@f'];
 
@@ -104,7 +83,6 @@ SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["00013483-fedd-43e3-a
 SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["99999999-aaaa-1111-8888-abcdef012345", "00013483-fedd-43e3-a94e-80728d896f6e"];
 SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["00013483-fedd-43e3-a94e-80728d896f6e", "99999999-aaaa-1111-8888-abcdef012345"];
 SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["99999999-aaaa-1111-8888-abcdef012345", "00013483-fedd-43e3-a94e-80728d896f6e", "99999999-aaaa-1111-8888-abcdef012345"];
-SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["00013483-fedd-43e3-a94e-80728d896f6e"] EXPLAIN;
 
 -- Compound index with IN and cross-index selection
 DEFINE INDEX idx_account_type ON test FIELDS account, type;
@@ -124,9 +102,6 @@ CREATE test:3 CONTENT {
 	type: 'password',
 	value: 'notAValidPassword'
 };
-SELECT * FROM test WITH INDEX idx_type_value WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'] EXPLAIN;
-SELECT * FROM test WITH INDEX idx_account_type WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'] EXPLAIN;
-SELECT * FROM test WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'] EXPLAIN;
 SELECT * FROM test WITH INDEX idx_type_value WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
 SELECT * FROM test WITH INDEX idx_account_type WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
 SELECT * FROM test WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];

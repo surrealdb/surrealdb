@@ -5,8 +5,8 @@
 //! rayon on non-WASM platforms for better performance on large datasets.
 //!
 //! Two modes are supported:
-//! - `Sort`: Legacy mode that evaluates expressions for each row
-//! - `SortByKey`: New mode that references pre-computed fields by name
+//! - `Sort`: evaluates expressions for each row
+//! - `SortByKey`: references pre-computed fields by name
 
 use std::sync::Arc;
 
@@ -162,7 +162,7 @@ impl ExecOperator for Sort {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -356,7 +356,7 @@ impl ExecOperator for SortByKey {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);

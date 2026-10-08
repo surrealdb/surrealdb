@@ -1,4 +1,4 @@
-//! Function physical expressions for the streaming executor.
+//! Function physical expressions for the engine.
 //!
 //! This module contains separate PhysicalExpr types for each function variant:
 //! - `BuiltinFunctionExec` - built-in functions like `math::abs`, `string::len`
@@ -26,11 +26,17 @@ pub(crate) use builtin::BuiltinFunctionExec;
 #[cfg(test)]
 pub(crate) use builtin::builtin_can_write;
 pub(crate) use closure::{
-	ClosureCallExec, ClosureExec, CompiledClosure, StreamingClosureEvaluator,
+	ClosureCallExec, ClosureExec, CompiledClosure, StreamingClosureEvaluator, bind_closure_args,
 };
 pub(crate) use index::IndexFunctionExec;
-pub(crate) use model::ModelFunctionExec;
+pub(crate) use model::{ModelFunctionExec, compute_model, enter_model};
+#[cfg(not(feature = "surrealism"))]
+pub(crate) use module::module_runtime_missing;
+#[cfg(feature = "surrealism")]
+pub(crate) use module::{ModuleExport, module_export, read_module, run_module_export};
 pub(crate) use module::{SiloModuleExec, SurrealismModuleExec};
 pub(crate) use projection::ProjectionFunctionExec;
-pub(crate) use script::JsFunctionExec;
-pub(crate) use user_defined::{BodyPlan, PlannedBody, RecursiveBody, UserDefinedFunctionExec};
+pub(crate) use script::{JsFunctionExec, check_script_allowed, run_script};
+pub(crate) use user_defined::{
+	BodyPlan, EnteredCall, FunctionCall, PlannedBody, RecursiveBody, UserDefinedFunctionExec,
+};

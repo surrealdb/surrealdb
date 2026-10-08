@@ -7,13 +7,14 @@
 //!
 //! # Statements
 //!
-//! A statement operator compiles directly: `Eval` to an `ExprPlan`, `Sequence`
-//! to a `SequencePlan` of its folded statements, `Let`, `Return`, `Foreach`,
-//! `Info` and `Sleep` to their operators, `Explain` to an `ExplainPlan` or
-//! `AnalyzePlan` over the folded input, and a GQL `Match` to the plan
-//! `plan_match` builds. Branches and bodies compile eagerly: lowering has
-//! already decided the engine for the whole statement, so nothing is deferred
-//! to run time.
+//! A statement (`Eval`, `Sequence`, `Let`, `Return`, `Foreach`, `Info`,
+//! `Ddl`, `Sleep`, `Explain`) has no operator form: the VM runs it, and the
+//! fold refuses it with `PlannerUnsupported`. A mutation compiles to its write
+//! operator and a GQL `Match` to the plan `plan_match` builds.
+//!
+//! The fold compiles only in test builds, where it is the oracle the VM's
+//! results are compared with; [`collect_pipeline`] and the offers the VM's
+//! mapping reads are shared with it.
 //!
 //! # The relational pipeline
 //!
@@ -82,36 +83,43 @@
 // variant compiles, which a wildcard arm would silently absorb.
 #![warn(clippy::wildcard_enum_match_arm)]
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use surrealdb_cnf::PROTECTED_PARAM_NAMES;
-
 use super::Planner;
+#[cfg(test)]
 use super::select::{FilterAction, PlannedSource, TopKPushdownRequest};
 use super::util::{expr_contains_matches, has_knn_operator};
 use crate::err::{EngineError, Error};
 use crate::exec::function::FunctionRegistry;
+#[cfg(test)]
+use crate::exec::logical::plan_may_raise;
 use crate::exec::logical::reads::{layer_column_names, reads_beneath, reads_row_opaquely};
-use crate::exec::logical::{and, conjuncts, is_false, plan_may_raise};
+use crate::exec::logical::{and, conjuncts, is_false};
+#[cfg(test)]
 use crate::exec::operators::scan::resolved::EnforcementMode;
+#[cfg(test)]
 use crate::exec::operators::{
-	AnalyzePlan, DatabaseInfoPlan, Distinct, ExplainPlan, ExprPlan, Filter, ForeachPlan, HashJoin,
-	IndexInfoPlan, JoinFrame, JoinType, LayerColumn, LetPlan, LookupJoin, NamespaceInfoPlan,
-	PermissionFilterExec, ProjectLayer, RecordBatchFetch, ReturnPlan, RootInfoPlan, SequencePlan,
-	SleepPlan, TableInfoPlan, UserInfoPlan,
+	Distinct, HashJoin, JoinFrame, LayerColumn, LookupJoin, PermissionFilterExec, ProjectLayer,
+	RecordBatchFetch,
 };
-use crate::exec::physical_expr::Literal as PhysicalLiteral;
+#[cfg(test)]
+use crate::exec::operators::{Filter, JoinType};
+#[cfg(test)]
+use crate::exec::permission::ComputedFieldGuard;
+#[cfg(test)]
 use crate::exec::{CardinalityHint, Error as ExecError, ExecOperator, PhysicalExpr};
 use crate::expr::logical::{
-	EvalFrame, EvalMode, FieldPath, JoinKind, LogicalAggregate, LogicalDistinct, LogicalEval,
-	LogicalExplain, LogicalExpr, LogicalFetch, LogicalField, LogicalFields, LogicalFilter,
-	LogicalForeach, LogicalInfo, LogicalJoin, LogicalLet, LogicalLimit, LogicalLiteral,
-	LogicalMatch, LogicalOnly, LogicalOp, LogicalOrdering, LogicalPermissionFilter, LogicalProject,
-	LogicalReturn, LogicalSequence, LogicalSleep, LogicalSort, LogicalSource, LogicalSplit,
-	LogicalTimeout, LogicalVersionScope, RelationAlias, Schema, SourceRef,
+	EvalFrame, EvalMode, FieldPath, GuardKind, JoinKind, LogicalAggregate, LogicalExpr,
+	LogicalFetch, LogicalField, LogicalFields, LogicalFilter, LogicalJoin, LogicalLimit,
+	LogicalLiteral, LogicalOnly, LogicalOp, LogicalOrdering, LogicalPermissionFilter,
+	LogicalProject, LogicalSort, LogicalSource, LogicalSplit, LogicalTimeout, LogicalVersionScope,
+	RelationAlias, Schema, SourceRef,
 };
+#[cfg(test)]
+use crate::expr::logical::{LogicalDistinct, LogicalMatch};
 use crate::iam::AuthLimit;
-use crate::val::{Strand, TableName, Value};
+use crate::val::{Strand, TableName};
 
 /// The clauses collected above a pipeline's leaf, in the form the access-path
 /// chooser and the pipeline assembler read them.
@@ -138,6 +146,8 @@ pub(crate) struct PipelineClauses {
 }
 
 /// The `Project` operator's clauses.
+// Constructed or read only by the operator-tree oracle, which test builds compile.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
 pub(crate) struct ProjectClause {
 	pub(crate) fields: LogicalFields,
@@ -301,7 +311,8 @@ pub(crate) fn collect_pipeline(op: LogicalOp) -> (PipelineClauses, PipelineStop)
 			| LogicalOp::Values(_)
 			| LogicalOp::Subquery(_)
 			| LogicalOp::UnionAll(_)
-			| LogicalOp::Match(_)) => return (clauses, PipelineStop::Leaf(leaf)),
+			| LogicalOp::Match(_)
+			| LogicalOp::Write(_)) => return (clauses, PipelineStop::Leaf(leaf)),
 			// A node the walk does not collect (a `Project` here is a layer),
 			// a clause met out of pipeline order, or a statement in relational
 			// position. Each is compiled in place and is opaque to the clauses
@@ -326,6 +337,7 @@ pub(crate) fn collect_pipeline(op: LogicalOp) -> (PipelineClauses, PipelineStop)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Join(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_)) => return (clauses, PipelineStop::Node(node)),
 		};
 	}
@@ -334,67 +346,30 @@ pub(crate) fn collect_pipeline(op: LogicalOp) -> (PipelineClauses, PipelineStop)
 impl<'ctx> Planner<'ctx> {
 	/// Compile a logical plan into an operator tree. One operator in, one
 	/// operator out; see the [module docs](self) for how each kind compiles.
+	#[cfg(test)]
 	pub(crate) async fn fold(&self, op: LogicalOp) -> Result<Arc<dyn ExecOperator>, Error> {
 		match op {
+			// A mutation is one operator holding a per-record stage list
+			// (`planner/write.rs`).
+			LogicalOp::Write(write) => Box::pin(self.plan_write(write)).await,
 			// A GQL `MATCH` plan is compiled whole (`match_plan.rs`).
 			LogicalOp::Match(LogicalMatch {
 				plan,
 			}) => Box::pin(self.plan_match(*plan)).await,
-			// `EXPLAIN` describes the tree everything below it compiles to.
-			LogicalOp::Explain(LogicalExplain {
-				input,
-				analyze,
-				format,
-			}) => {
-				let plan = Box::pin(self.fold(*input)).await?;
-				Ok(if analyze {
-					Arc::new(AnalyzePlan {
-						plan,
-						format,
-						redact_volatile_explain_attrs: self.ctx.redact_volatile_explain_attrs(),
-					})
-				} else {
-					Arc::new(ExplainPlan {
-						plan,
-						format,
-					})
-				})
+			// A statement is run by the VM; the tree compiles relational plans
+			// and the plans of front ends alone.
+			statement @ (LogicalOp::Explain(_)
+			| LogicalOp::Eval(_)
+			| LogicalOp::Sequence(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
+			| LogicalOp::Sleep(_)) => Err(ExecError::PlannerUnsupported {
+				reason: format!("a {} statement is run by the VM", statement.name()),
 			}
-			LogicalOp::Eval(LogicalEval {
-				expr,
-			}) => {
-				let expr = self.physical_expr(expr).await?;
-				Ok(Arc::new(ExprPlan::new(expr)))
-			}
-			LogicalOp::Sequence(LogicalSequence {
-				stmts,
-			}) => self.fold_sequence(stmts).await,
-			LogicalOp::Let(stmt) => self.fold_let(stmt).await,
-			LogicalOp::Return(LogicalReturn {
-				what,
-				fetch,
-			}) => {
-				let inner = Box::pin(self.fold(*what)).await?;
-				let inner = self.plan_fetch(fetch, inner).await?;
-				Ok(Arc::new(ReturnPlan::new(inner)))
-			}
-			LogicalOp::Foreach(LogicalForeach {
-				param,
-				range,
-				body,
-			}) => {
-				let range = self.physical_expr(range).await?;
-				// The loop parameter binds around the body, whatever it is
-				// named, so a read of it there is the element the loop binds
-				// and never the ambient context's value.
-				let inner = self.shadowing([param.as_str().to_owned()]);
-				let body = Box::pin(inner.fold(*body)).await?;
-				Ok(Arc::new(ForeachPlan::new(param, range, body)))
-			}
-			LogicalOp::Info(info) => self.fold_info(*info).await,
-			LogicalOp::Sleep(LogicalSleep {
-				duration,
-			}) => fold_sleep(&duration),
+			.into()),
 			relational @ (LogicalOp::Source(_)
 			| LogicalOp::Values(_)
 			| LogicalOp::Subquery(_)
@@ -415,115 +390,6 @@ impl<'ctx> Planner<'ctx> {
 				let (clauses, stop) = collect_pipeline(relational);
 				self.compile_pipeline(stop, clauses).await
 			}
-		}
-	}
-
-	/// A block: nothing yields `NONE`, one statement is that statement, and
-	/// more run in sequence yielding the last.
-	///
-	/// A block's bindings are its own, so a one-statement block collapses to
-	/// its statement only when that statement does not bind: `{ LET $x = 1 }`
-	/// keeps its `SequencePlan`, which is what stops the `LET` reaching the
-	/// enclosing block, `FOR` body or statement.
-	async fn fold_sequence(&self, stmts: Vec<LogicalOp>) -> Result<Arc<dyn ExecOperator>, Error> {
-		match stmts.len() {
-			0 => Ok(Arc::new(ExprPlan::new(Arc::new(PhysicalLiteral(Value::None))))),
-			1 => {
-				let stmt =
-					Box::pin(self.fold(stmts.into_iter().next().expect("length checked"))).await?;
-				if stmt.mutates_context() {
-					Ok(Arc::new(SequencePlan::new(vec![stmt])))
-				} else {
-					Ok(stmt)
-				}
-			}
-			_ => {
-				let mut compiled = Vec::with_capacity(stmts.len());
-				for stmt in stmts {
-					compiled.push(Box::pin(self.fold(stmt)).await?);
-				}
-				Ok(Arc::new(SequencePlan::new(compiled)))
-			}
-		}
-	}
-
-	/// `LET $name: kind = value`. A protected name is rejected here, before
-	/// anything runs, so a `LET` inside a block or a `FOR` body fails the same
-	/// way as one at the top level.
-	async fn fold_let(&self, stmt: LogicalLet) -> Result<Arc<dyn ExecOperator>, Error> {
-		let LogicalLet {
-			name,
-			kind,
-			value,
-		} = stmt;
-		if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
-			return Err(ExecError::InvalidParam {
-				name,
-			}
-			.into());
-		}
-		let value = Box::pin(self.fold(*value)).await?;
-		Ok(Arc::new(LetPlan::new(Strand::new(name), kind, value)))
-	}
-
-	/// `INFO FOR …`: one operator per subject.
-	async fn fold_info(&self, info: LogicalInfo) -> Result<Arc<dyn ExecOperator>, Error> {
-		Ok(match info {
-			LogicalInfo::Root {
-				structure,
-				version,
-			} => Arc::new(RootInfoPlan::new(structure, self.optional_physical_expr(version).await?)),
-			LogicalInfo::Ns {
-				structure,
-				version,
-			} => Arc::new(NamespaceInfoPlan::new(
-				structure,
-				self.optional_physical_expr(version).await?,
-			)),
-			LogicalInfo::Db {
-				structure,
-				version,
-			} => Arc::new(DatabaseInfoPlan::new(
-				structure,
-				self.optional_physical_expr(version).await?,
-			)),
-			LogicalInfo::Table {
-				table,
-				structure,
-				version,
-			} => {
-				let table = self.physical_expr_as_name(table).await?;
-				let version = self.optional_physical_expr(version).await?;
-				Arc::new(TableInfoPlan::new(table, structure, version))
-			}
-			LogicalInfo::User {
-				user,
-				base,
-				structure,
-			} => {
-				let user = self.physical_expr_as_name(user).await?;
-				Arc::new(UserInfoPlan::new(user, base, structure))
-			}
-			LogicalInfo::Index {
-				index,
-				table,
-				structure,
-			} => {
-				let index = self.physical_expr_as_name(index).await?;
-				let table = self.physical_expr_as_name(table).await?;
-				Arc::new(IndexInfoPlan::new(index, table, structure))
-			}
-		})
-	}
-
-	/// An optional scalar, compiled when present.
-	async fn optional_physical_expr(
-		&self,
-		expr: Option<LogicalExpr>,
-	) -> Result<Option<Arc<dyn PhysicalExpr>>, Error> {
-		match expr {
-			Some(expr) => Ok(Some(self.physical_expr(expr).await?)),
-			None => Ok(None),
 		}
 	}
 
@@ -606,6 +472,7 @@ impl<'ctx> Planner<'ctx> {
 	/// paging ([`PlannedSource::limit_pushed`]); its predicate is always the pipeline's to judge
 	/// above ([`FilterAction::UseOriginal`]).
 	#[allow(clippy::too_many_arguments)]
+	#[cfg(test)]
 	pub(crate) async fn fold_uncollected(
 		&self,
 		node: LogicalOp,
@@ -637,15 +504,19 @@ impl<'ctx> Planner<'ctx> {
 		}
 		let layer = node.is_layer();
 		let op: Result<Arc<dyn ExecOperator>, Error> = match node {
+			// Compiled as in `fold`; see there.
+			LogicalOp::Write(write) => Box::pin(self.plan_write(write)).await,
 			LogicalOp::PermissionFilter(LogicalPermissionFilter {
 				input,
 				predicate,
 				auth,
+				guard,
 			}) => {
+				let subject = permission_subject(&input);
 				let input = Box::pin(self.fold(*input)).await?;
-				let predicate = self.physical_expr(predicate).await?;
+				let predicate = self.permission_predicate(predicate, subject.as_ref()).await?;
 				Ok(Arc::new(
-					PermissionFilterExec::new(input, predicate, auth)
+					PermissionFilterExec::new(input, predicate, auth, guard)
 						.for_checked_caller(self.compiles_for_checked_caller()),
 				))
 			}
@@ -691,6 +562,7 @@ impl<'ctx> Planner<'ctx> {
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_)) => Box::pin(self.fold(other)).await,
 		};
 		Ok(PlannedSource::opaque(op?))
@@ -718,6 +590,7 @@ impl<'ctx> Planner<'ctx> {
 	/// the chain withholds the ordering: the `Sort` above it runs over every
 	/// row, and a scan offered no ordering would take the paging beneath it.
 	#[allow(clippy::too_many_arguments)]
+	#[cfg(test)]
 	async fn fold_chain_over_table(
 		&self,
 		mut chain: Vec<ChainNode>,
@@ -751,6 +624,7 @@ impl<'ctx> Planner<'ctx> {
 			} else {
 				(scan_limit, scan_start, limit_hint)
 			};
+		let subject = permission_subject(&source);
 		let planned = self
 			.plan_source(
 				source,
@@ -819,7 +693,9 @@ impl<'ctx> Planner<'ctx> {
 				|| !chain.iter().any(|node| matches!(node, ChainNode::Filter { .. })),
 			"a scan took the paging beneath a filter it did not consume"
 		);
-		let operator = self.wrap_chain(planned.operator, chain, version, permissioned).await?;
+		let operator = self
+			.wrap_chain(planned.operator, chain, subject.as_ref(), version, permissioned)
+			.await?;
 		Ok(PlannedSource {
 			operator,
 			filter_action: FilterAction::UseOriginal,
@@ -829,15 +705,20 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Wrap `chain`, top to bottom, back onto its compiled input `op`,
-	/// innermost first. `version` is the pipeline's, for a join in the chain
-	/// whose right side reads records. `permissioned` says whether a
-	/// permission predicate of the chain was offered to `op`'s access path
-	/// ([`ChainOffer::permissioned`]), which the permission nodes record so
-	/// a checked caller's `EXPLAIN` prints no bound of the definer's.
+	/// innermost first. `subject` is the table the chain stands over and its
+	/// resolved schema, whose computed fields a permission predicate of the
+	/// chain is judged with ([`Self::permission_predicate`]). `version` is the
+	/// pipeline's, for a join in the chain whose right side reads records.
+	/// `permissioned` says whether a permission predicate of the chain was
+	/// offered to `op`'s access path ([`ChainOffer::permissioned`]), which the
+	/// permission nodes record so a checked caller's `EXPLAIN` prints no bound
+	/// of the definer's.
+	#[cfg(test)]
 	async fn wrap_chain(
 		&self,
 		mut op: Arc<dyn ExecOperator>,
 		chain: Vec<ChainNode>,
+		subject: Option<&(TableName, Arc<Schema>)>,
 		version: Option<Arc<dyn PhysicalExpr>>,
 		permissioned: bool,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
@@ -846,10 +727,11 @@ impl<'ctx> Planner<'ctx> {
 				ChainNode::Permission {
 					predicate,
 					auth,
+					guard,
 				} => {
-					let predicate = self.physical_expr(predicate).await?;
+					let predicate = self.permission_predicate(predicate, subject).await?;
 					Arc::new(
-						PermissionFilterExec::new(op, predicate, auth)
+						PermissionFilterExec::new(op, predicate, auth, guard)
 							.for_checked_caller(self.compiles_for_checked_caller())
 							.with_access_path_from_predicate(permissioned),
 					)
@@ -869,11 +751,39 @@ impl<'ctx> Planner<'ctx> {
 		Ok(op)
 	}
 
+	/// The compiled `predicate` of a table's `PermissionFilter`, over the rows
+	/// of `subject` — the table beneath the node and the schema the analyzer
+	/// resolved for it.
+	///
+	/// The rows reach the node as stored, carrying no computed field, so a
+	/// predicate that reads one of the table's computed fields — by name, or
+	/// by reading the row other than by name — is judged against the row with
+	/// those fields derived, as every table `SELECT` guard is
+	/// ([`ComputedFieldGuard`]). A predicate reading none is compiled as it
+	/// stands.
+	#[cfg(test)]
+	async fn permission_predicate(
+		&self,
+		predicate: LogicalExpr,
+		subject: Option<&(TableName, Arc<Schema>)>,
+	) -> Result<Arc<dyn PhysicalExpr>, Error> {
+		let reads = subject.and_then(|(table, schema)| {
+			computed_reads(&predicate, schema, self.function_registry())
+				.map(|reads| (table.clone(), reads))
+		});
+		let guard = self.physical_expr(predicate).await?;
+		Ok(match reads {
+			Some((table, reads)) => ComputedFieldGuard::for_reads(guard, table, reads),
+			None => guard,
+		})
+	}
+
 	/// The left input of a join, planned with what the pipeline's ordering
 	/// admits to its access path; see the module docs on joins. The
 	/// pipeline's predicate is not offered: the conjuncts that read the left
 	/// row alone stand beneath the join as a filter of their own, and the rest
 	/// read the joined row.
+	#[cfg(test)]
 	async fn fold_join_left(
 		&self,
 		left: LogicalOp,
@@ -927,6 +837,7 @@ impl<'ctx> Planner<'ctx> {
 
 	/// A join over its compiled `left` input; see the module docs on joins
 	/// for the choice between a [`LookupJoin`] and a [`HashJoin`].
+	#[cfg(test)]
 	pub(crate) async fn compile_join_parts(
 		&self,
 		left: Arc<dyn ExecOperator>,
@@ -970,9 +881,10 @@ impl<'ctx> Planner<'ctx> {
 				EnforcementMode::for_source(schema.as_ref()),
 				version.clone(),
 			));
+			let subject = schema.map(|schema| (table.clone(), schema));
 			// The fetch reads at the left side's keys, not at any bound of the
 			// permission predicate's.
-			let right = self.wrap_chain(leaf, chain, version, false).await?;
+			let right = self.wrap_chain(leaf, chain, subject.as_ref(), version, false).await?;
 			return Ok(Arc::new(LookupJoin::new(
 				left,
 				right,
@@ -1019,20 +931,76 @@ impl<'ctx> Planner<'ctx> {
 	/// ([`ProjectLayer::with_input_schema`]). The layer is marked for a
 	/// checked caller when this planner compiles for one, so `EXPLAIN` never
 	/// shows such a caller a body or a predicate it is enforced on.
+	#[cfg(test)]
 	async fn compile_layer(
 		&self,
 		input: Arc<dyn ExecOperator>,
 		fields: LogicalFields,
 		input_schema: &Schema,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		let LogicalFields::Select(fields) = fields else {
-			return Err(EngineError::Internal(
-				"a projection layer reached the planner as a VALUE projection".to_string(),
-			)
-			.into());
-		};
-		let mut columns: Vec<LayerColumn> = Vec::with_capacity(fields.len());
-		for field in fields {
+		Ok(Arc::new(self.compile_layer_operator(input, fields, input_schema).await?))
+	}
+
+	/// The [`ProjectLayer`] [`Self::compile_layer`] compiles, as itself.
+	#[cfg(test)]
+	pub(crate) async fn compile_layer_operator(
+		&self,
+		input: Arc<dyn ExecOperator>,
+		fields: LogicalFields,
+		input_schema: &Schema,
+	) -> Result<ProjectLayer, Error> {
+		let logical = layer_columns(fields)?;
+		let mut columns: Vec<LayerColumn> = Vec::with_capacity(logical.len());
+		for LogicalLayerColumn {
+			name,
+			guard,
+			value,
+			kind,
+			frame,
+		} in logical
+		{
+			let column = match guard {
+				Some(guard) => LayerColumn::guarded(
+					name,
+					self.physical_expr(guard).await?,
+					self.physical_expr(value).await?,
+					kind,
+					frame,
+				),
+				None => LayerColumn::new(name, self.physical_expr(value).await?, kind, frame),
+			};
+			columns.push(column);
+		}
+		Ok(ProjectLayer::new(input, columns)
+			.with_input_schema(input_schema)
+			.for_checked_caller(self.compiles_for_checked_caller()))
+	}
+}
+
+/// One column of a projection layer, before its expressions are compiled:
+/// the field it lands on, the guard of a field `SELECT` permission written
+/// `WHERE p`, the value, the kind the value is coerced to, and the frame the
+/// column evaluates in (see [`crate::exec::operators::layer`]).
+pub(crate) struct LogicalLayerColumn {
+	pub(crate) name: Strand,
+	pub(crate) guard: Option<LogicalExpr>,
+	pub(crate) value: LogicalExpr,
+	pub(crate) kind: Option<crate::expr::Kind>,
+	pub(crate) frame: EvalFrame,
+}
+
+/// The columns of projection layer `fields`, in plan order, each permission
+/// column written `IF p THEN v ELSE NONE END` split into its guard and value.
+pub(crate) fn layer_columns(fields: LogicalFields) -> Result<Vec<LogicalLayerColumn>, Error> {
+	let LogicalFields::Select(fields) = fields else {
+		return Err(EngineError::Internal(
+			"a projection layer reached the planner as a VALUE projection".to_string(),
+		)
+		.into());
+	};
+	Ok(fields
+		.into_iter()
+		.filter_map(|field| {
 			let LogicalField::Single {
 				expr,
 				alias,
@@ -1040,32 +1008,22 @@ impl<'ctx> Planner<'ctx> {
 				frame,
 			} = field
 			else {
-				continue;
+				return None;
 			};
 			let name = match alias {
 				Some(alias) => Strand::new(alias.name()),
 				None => Strand::new(expr.output_path().name()),
 			};
-			let column = match split_judgement(expr, &frame) {
-				(Some(guard), value) => LayerColumn::guarded(
-					name,
-					self.physical_expr(guard).await?,
-					self.physical_expr(value).await?,
-					kind,
-					frame,
-				),
-				(None, value) => {
-					LayerColumn::new(name, self.physical_expr(value).await?, kind, frame)
-				}
-			};
-			columns.push(column);
-		}
-		Ok(Arc::new(
-			ProjectLayer::new(input, columns)
-				.with_input_schema(input_schema)
-				.for_checked_caller(self.compiles_for_checked_caller()),
-		))
-	}
+			let (guard, value) = split_judgement(expr, &frame);
+			Some(LogicalLayerColumn {
+				name,
+				guard,
+				value,
+				kind,
+				frame,
+			})
+		})
+		.collect())
 }
 
 /// The guard and the value of a permission column written
@@ -1085,10 +1043,13 @@ fn split_judgement(expr: LogicalExpr, frame: &EvalFrame) -> (Option<LogicalExpr>
 }
 
 /// One node of a chain over a table source, detached from its input.
+// Constructed or read only by the operator-tree oracle, which test builds compile.
+#[cfg_attr(not(test), allow(dead_code))]
 enum ChainNode {
 	Permission {
 		predicate: LogicalExpr,
 		auth: Option<AuthLimit>,
+		guard: GuardKind,
 	},
 	Layer {
 		/// The layer's projection: `*` followed by its columns.
@@ -1136,6 +1097,8 @@ impl ChainNode {
 
 /// A [`LogicalJoin`] detached from its left input: everything that compiles
 /// it once the left side is compiled.
+// Constructed or read only by the operator-tree oracle, which test builds compile.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct JoinParts {
 	right: LogicalOp,
 	kind: JoinKind,
@@ -1177,6 +1140,7 @@ fn is_permission_join(join: &LogicalJoin) -> bool {
 	join.frame.mode != EvalMode::Caller && matches!(join.kind, JoinKind::Semi | JoinKind::Anti)
 }
 
+#[cfg(test)]
 /// Whether `expr` is `alias.id`: the right key that lets a join read its
 /// right side by record id.
 fn is_alias_id(expr: &LogicalExpr, alias: &RelationAlias) -> bool {
@@ -1189,6 +1153,7 @@ fn is_alias_id(expr: &LogicalExpr, alias: &RelationAlias) -> bool {
 	)
 }
 
+#[cfg(test)]
 /// Whether `node` is a table `Source`, alone or under filters,
 /// `PermissionFilter`s, layers and semi or anti joins in any order — the
 /// right side a [`LookupJoin`] can read by record id, every node of which
@@ -1221,6 +1186,7 @@ fn is_lookup_chain_over_table(node: &LogicalOp) -> bool {
 			LogicalOp::Source(_)
 			| LogicalOp::Values(_)
 			| LogicalOp::Match(_)
+			| LogicalOp::Write(_)
 			| LogicalOp::Subquery(_)
 			| LogicalOp::UnionAll(_)
 			| LogicalOp::Join(_)
@@ -1241,11 +1207,13 @@ fn is_lookup_chain_over_table(node: &LogicalOp) -> bool {
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => return false,
 		}
 	}
 }
 
+#[cfg(test)]
 /// Split a chain [`is_lookup_chain_over_table`] accepted into its nodes, top
 /// to bottom, and the table and resolved schema of the `Source` beneath them.
 fn peel_lookup_chain(node: LogicalOp) -> (Vec<ChainNode>, TableName, Option<Arc<Schema>>) {
@@ -1266,11 +1234,13 @@ fn peel_lookup_chain(node: LogicalOp) -> (Vec<ChainNode>, TableName, Option<Arc<
 			input,
 			predicate,
 			auth,
+			guard,
 		}) = cur
 		{
 			chain.push(ChainNode::Permission {
 				predicate,
 				auth,
+				guard,
 			});
 			*input
 		} else if layer
@@ -1342,6 +1312,7 @@ pub(crate) fn is_layer_chain_over_table(node: &LogicalOp) -> bool {
 			LogicalOp::Source(_)
 			| LogicalOp::Values(_)
 			| LogicalOp::Match(_)
+			| LogicalOp::Write(_)
 			| LogicalOp::Subquery(_)
 			| LogicalOp::UnionAll(_)
 			| LogicalOp::Join(_)
@@ -1362,9 +1333,106 @@ pub(crate) fn is_layer_chain_over_table(node: &LogicalOp) -> bool {
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => return false,
 		}
 	}
+}
+
+/// The table whose rows reach a `PermissionFilter` over `input`, and the
+/// schema the analyzer resolved for it: the resolved `Source` beneath the
+/// permission, layer, filter and permission-join nodes the analyzer and the
+/// rules stack over it. `None` for any other shape, which carries no resolved
+/// schema to name the table's computed fields.
+pub(crate) fn permission_subject(input: &LogicalOp) -> Option<(TableName, Arc<Schema>)> {
+	let mut cur = input;
+	loop {
+		cur = match cur {
+			LogicalOp::PermissionFilter(LogicalPermissionFilter {
+				input,
+				..
+			})
+			| LogicalOp::Filter(LogicalFilter {
+				input,
+				..
+			}) => input,
+			LogicalOp::Project(LogicalProject {
+				input,
+				..
+			}) if cur.is_layer() => input,
+			LogicalOp::Join(join) if is_permission_join(join) => join.left(),
+			LogicalOp::Source(LogicalSource {
+				source,
+				schema: Some(schema),
+				..
+			}) => {
+				let table = match source {
+					SourceRef::Table(table) => table.clone(),
+					SourceRef::RecordId(rid) => rid.table.clone(),
+					SourceRef::Mock(_) | SourceRef::Param(_) | SourceRef::Dynamic(_) => {
+						return None;
+					}
+				};
+				return Some((table, Arc::clone(schema)));
+			}
+			LogicalOp::Source(_)
+			| LogicalOp::Values(_)
+			| LogicalOp::Match(_)
+			| LogicalOp::Subquery(_)
+			| LogicalOp::UnionAll(_)
+			| LogicalOp::Join(_)
+			| LogicalOp::Split(_)
+			| LogicalOp::Aggregate(_)
+			| LogicalOp::Distinct(_)
+			| LogicalOp::Sort(_)
+			| LogicalOp::Limit(_)
+			| LogicalOp::Project(_)
+			| LogicalOp::Fetch(_)
+			| LogicalOp::Timeout(_)
+			| LogicalOp::VersionScope(_)
+			| LogicalOp::Only(_)
+			| LogicalOp::Explain(_)
+			| LogicalOp::Eval(_)
+			| LogicalOp::Sequence(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Sleep(_)
+			| LogicalOp::Write(_)
+			| LogicalOp::Ddl(_) => return None,
+		};
+	}
+}
+
+/// The computed fields of `schema` a table permission predicate reads, as
+/// [`ComputedFieldGuard::for_reads`](crate::exec::permission::ComputedFieldGuard::for_reads) takes
+/// them: `None` when it reads none of them, `Some(None)` when it reads the row other than by name
+/// ([`reads_row_opaquely`]), so any of them may be read, and otherwise the
+/// names it reads.
+pub(crate) fn computed_reads(
+	predicate: &LogicalExpr,
+	schema: &Schema,
+	registry: &FunctionRegistry,
+) -> Option<Option<HashSet<String>>> {
+	let computed: Vec<&Strand> = schema
+		.fields
+		.iter()
+		.filter(|field| field.computed.is_some())
+		.filter_map(|field| field.path.as_field())
+		.collect();
+	if computed.is_empty() {
+		return None;
+	}
+	if reads_row_opaquely(predicate, registry) {
+		return Some(None);
+	}
+	let reads: HashSet<String> = computed
+		.into_iter()
+		.filter(|name| reads_beneath(predicate, &[FieldPath::field((*name).clone())]))
+		.map(|name| name.as_str().to_owned())
+		.collect();
+	(!reads.is_empty()).then_some(Some(reads))
 }
 
 /// Split a chain [`is_layer_chain_over_table`] accepted into its nodes, top
@@ -1378,11 +1446,13 @@ fn peel_layer_chain(node: LogicalOp) -> (Vec<ChainNode>, LogicalOp) {
 			input,
 			predicate,
 			auth,
+			guard,
 		}) = cur
 		{
 			chain.push(ChainNode::Permission {
 				predicate,
 				auth,
+				guard,
 			});
 			*input
 		} else if let LogicalOp::Filter(LogicalFilter {
@@ -1416,8 +1486,148 @@ fn peel_layer_chain(node: LogicalOp) -> (Vec<ChainNode>, LogicalOp) {
 	}
 }
 
+/// What the operator tree offers the access path of each table source of a
+/// pipeline: the predicate and ordering access-path choice reads, and whether
+/// a `LIMIT` can end the pipeline's read early. See
+/// [`Planner::access_offer`].
+pub(crate) struct AccessOffer {
+	pub(crate) cond: Option<LogicalExpr>,
+	pub(crate) order: Option<LogicalOrdering>,
+	pub(crate) has_query_limit: bool,
+	/// Whether a table permission predicate is part of `cond`
+	/// ([`ChainOffer::permissioned`]).
+	pub(crate) permissioned: bool,
+}
+
+impl Planner<'_> {
+	/// The [`AccessOffer`] for the pipeline `op` heads, as the pipeline
+	/// planner makes it: the clauses [`collect_pipeline`] takes, the
+	/// predicate folded by [`Planner::fold_pipeline_cond`], and beneath a
+	/// chain of permission and layer nodes what [`chain_offer`] admits of it.
+	/// `versioned` says the pipeline has a `VERSION` of its own.
+	///
+	/// A grouped pipeline's `LIMIT` does not end its read: the grouping
+	/// consumes every row first.
+	pub(crate) async fn access_offer(&self, op: &LogicalOp, versioned: bool) -> AccessOffer {
+		let parts = PipelineParts::of(op);
+		let cond = self.fold_in_pipeline(&parts, parts.clauses.cond.clone(), versioned).await;
+		let PipelineParts {
+			clauses,
+			node,
+			..
+		} = parts;
+		let has_query_limit = clauses.limit.is_some() && clauses.group.is_none();
+		match node {
+			Some(node) if is_layer_chain_over_table(&node) => {
+				let (chain, _) = peel_layer_chain(node);
+				let offer = chain_offer(
+					&chain,
+					cond.as_ref(),
+					clauses.order.as_ref(),
+					self.function_registry(),
+				);
+				AccessOffer {
+					cond: offer.cond,
+					order: offer.order.cloned(),
+					has_query_limit,
+					permissioned: offer.permissioned,
+				}
+			}
+			_ => AccessOffer {
+				cond,
+				order: clauses.order,
+				has_query_limit,
+				permissioned: false,
+			},
+		}
+	}
+
+	/// `conds`, each a predicate of the pipeline `op` heads, folded as
+	/// [`Self::access_offer`] folds the pipeline's own predicate: what the
+	/// access path is chosen from, so a caller that reads a predicate beside
+	/// the access path's answer reads the same value operands.
+	pub(crate) async fn fold_pipeline_conds(
+		&self,
+		op: &LogicalOp,
+		versioned: bool,
+		conds: Vec<LogicalExpr>,
+	) -> Vec<LogicalExpr> {
+		let parts = PipelineParts::of(op);
+		let mut folded = Vec::with_capacity(conds.len());
+		for cond in conds {
+			folded.extend(self.fold_in_pipeline(&parts, Some(cond), versioned).await);
+		}
+		folded
+	}
+
+	async fn fold_in_pipeline(
+		&self,
+		parts: &PipelineParts,
+		cond: Option<LogicalExpr>,
+		versioned: bool,
+	) -> Option<LogicalExpr> {
+		self.fold_pipeline_cond(
+			cond,
+			versioned,
+			parts.fields(),
+			&parts.sources,
+			parts.node.as_ref(),
+			&parts.predicate_tables,
+		)
+		.await
+	}
+}
+
+/// What the collecting walk over a pipeline leaves for folding its predicate:
+/// the clauses, the sources and node it stopped at, and the tables whose rows
+/// the predicate is evaluated against.
+struct PipelineParts {
+	clauses: PipelineClauses,
+	sources: Vec<LogicalOp>,
+	node: Option<LogicalOp>,
+	predicate_tables: Vec<TableName>,
+}
+
+impl PipelineParts {
+	fn of(op: &LogicalOp) -> Self {
+		let (clauses, stop) = collect_pipeline(op.clone());
+		let (sources, node) = match stop {
+			PipelineStop::Leaf(LogicalOp::UnionAll(union)) => (union.inputs, None),
+			PipelineStop::Leaf(leaf) => (vec![leaf], None),
+			PipelineStop::Node(node) => (Vec::new(), Some(node)),
+		};
+		let predicate_tables: Vec<TableName> = {
+			let mut tables = Vec::new();
+			for source in &sources {
+				crate::exec::planner::select::tables_beneath(source, &mut tables);
+			}
+			if let Some(node) = &node {
+				crate::exec::planner::select::tables_beneath(node, &mut tables);
+			}
+			tables.into_iter().cloned().collect()
+		};
+		Self {
+			clauses,
+			sources,
+			node,
+			predicate_tables,
+		}
+	}
+
+	/// The fields the pipeline projects or groups to.
+	fn fields(&self) -> Option<&LogicalFields> {
+		match (&self.clauses.group, &self.clauses.project) {
+			(Some(group), _) => Some(&group.fields),
+			(None, Some(project)) => Some(&project.fields),
+			(None, None) => None,
+		}
+	}
+}
+
 /// What a chain of permission, layer and filter nodes admits of the
 /// pipeline's predicate and ordering to the source beneath it.
+// Constructed or read only by the operator-tree oracle, which test builds compile.
+#[cfg_attr(not(test), allow(dead_code))]
 struct ChainOffer<'a> {
 	/// The predicate offered to the access path: the conjuncts of the chain's
 	/// filters that read no column of a layer beneath them, the pipeline's
@@ -1427,9 +1637,8 @@ struct ChainOffer<'a> {
 	/// The conjuncts of the chain's filters for the scan to apply per row:
 	/// those offered that hold no `KNN` or `MATCHES` operator, which the
 	/// access path answers. `None` when the chain holds a table permission —
-	/// the legacy engine judges the table permission before the user's
-	/// predicate, and the scan would judge them on rows the permission
-	/// removes — or when no conjunct qualifies.
+	/// the table permission is judged before the user's predicate, and the
+	/// scan would judge them on rows the permission removes — or when no conjunct qualifies.
 	scan: Option<LogicalExpr>,
 	order: Option<&'a LogicalOrdering>,
 	/// Whether a table permission predicate is part of `cond`: the access
@@ -1556,17 +1765,6 @@ fn retain_conjuncts(
 	conjuncts(cond).into_iter().filter(|c| keep(c)).cloned().reduce(and)
 }
 
-/// `SLEEP`: lowering carries the duration as a literal.
-fn fold_sleep(duration: &LogicalExpr) -> Result<Arc<dyn ExecOperator>, Error> {
-	if let LogicalExpr::Literal(LogicalLiteral::Duration(duration)) = duration {
-		return Ok(Arc::new(SleepPlan::new(*duration)));
-	}
-	Err(EngineError::Internal(format!(
-		"SLEEP reached the planner with a non-literal duration: {duration}"
-	))
-	.into())
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -1656,6 +1854,7 @@ mod tests {
 				})),
 				predicate: LogicalExpr::Literal(LogicalLiteral::Bool(true)),
 				auth: None,
+				guard: GuardKind::Read,
 			})),
 			predicate: LogicalExpr::Literal(LogicalLiteral::Bool(false)),
 		});
@@ -1749,6 +1948,7 @@ mod tests {
 		ChainNode::Permission {
 			predicate,
 			auth: None,
+			guard: GuardKind::Read,
 		}
 	}
 
@@ -1817,6 +2017,7 @@ mod tests {
 			input: Box::new(layer_over(layer_over(table("t"), &["a"]), &["b"])),
 			predicate: LogicalExpr::Literal(LogicalLiteral::Bool(true)),
 			auth: None,
+			guard: GuardKind::Read,
 		});
 		assert!(is_layer_chain_over_table(&chain));
 		let (nodes, source) = peel_layer_chain(chain);
@@ -1876,6 +2077,7 @@ mod tests {
 				})),
 				predicate: LogicalExpr::Literal(LogicalLiteral::Bool(true)),
 				auth: None,
+				guard: GuardKind::Read,
 			}
 		)));
 		// The user's own projection is not a layer, so it is not a chain node.
@@ -2460,4 +2662,25 @@ mod planned_tests {
 			"{physical}"
 		);
 	}
+}
+
+/// Whether a statement changes the catalog the statements after it would be
+/// compiled against.
+///
+/// A schema statement does, wherever it sits inside the statement: one reached
+/// through a block, a `FOR` body or a subquery has still run by the time the
+/// next statement of the enclosing block does.
+pub(crate) fn changes_the_catalog(op: &LogicalOp) -> bool {
+	if matches!(op, LogicalOp::Ddl(_)) {
+		return true;
+	}
+	let mut found = false;
+	let _ = op.visit_ops_deep(&mut |node| {
+		if matches!(node, LogicalOp::Ddl(_)) {
+			found = true;
+			return std::ops::ControlFlow::Break(());
+		}
+		std::ops::ControlFlow::Continue(())
+	});
+	found
 }

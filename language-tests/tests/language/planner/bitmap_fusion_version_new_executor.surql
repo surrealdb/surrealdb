@@ -2,11 +2,10 @@
 [env]
 backend = ["mem", "rocksdb", "surrealkv"]
 versioned = true
-planner-strategy = ["all-ro"]
 timeout = 15000
 
 [test]
-reason = "VERSION queries never use bitmap fusion plans: doc-ID mappings and index entries are not time-travel-aware, so a fused bitmap (or bitmap count) would reflect current state instead of the requested version"
+reason = "VERSION queries never use an index path, bitmap fusion plans included: doc-ID mappings and index entries are not time-travel-aware, so a fused bitmap (or bitmap count) would reflect current state instead of the requested version. The versioned read scans the table at the stamp, which is what its WITH NOINDEX twin does."
 issue = 547
 
 [[test.results]]
@@ -37,7 +36,7 @@ value = "NONE"
 value = "'OK'"
 
 [[test.results]]
-value = "[{ count: 1 }]"
+value = "[{ count: 2 }]"
 
 [[test.results]]
 value = "[{ count: 2 }]"
@@ -46,7 +45,7 @@ value = "[{ count: 2 }]"
 value = "[{ count: 3 }]"
 
 [[test.results]]
-value = "[{ id: t:2 }]"
+value = "[{ id: t:1 }, { id: t:2 }]"
 
 [[test.results]]
 value = "[{ id: t:1 }, { id: t:2 }]"
@@ -80,16 +79,10 @@ SLEEP 50ms;
     RETURN "OK";
 };
 
--- VERSION gates bitmap fusion off (both the SELECT plan and the count):
--- doc-ID mappings and index entries reflect current state only. The
--- versioned queries below fall back to the streaming index plans and
--- return exactly what they returned before bitmap fusion existed.
---
--- NOTE: the versioned *indexed* results themselves exhibit a pre-existing
--- engine limitation (unchanged by this feature): index entries are not
--- time-travel-aware, so rows deleted after the timestamp (t:1) are
--- missing from index-driven versioned plans. The NOINDEX baseline shows
--- the true historical answer.
+-- VERSION gates every index path off (both the SELECT plan and the count):
+-- index entries and doc-ID mappings reflect current state only, so each
+-- versioned query is the scan at the stamp and must agree with its
+-- WITH NOINDEX twin.
 SELECT count() FROM t WHERE a = 'x' AND b = true GROUP ALL VERSION $ts;
 SELECT count() FROM t WITH NOINDEX WHERE a = 'x' AND b = true GROUP ALL VERSION $ts;
 

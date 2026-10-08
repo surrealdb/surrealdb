@@ -1,0 +1,18 @@
+### defined by the owner, called by the owner
+[3, 3, 6]
+### defined by the owner, called by the editor
+[3, 3, 6]
+### defined by the owner, called by the record user
+[2, 2, 4]
+### defined by the editor, called by the owner
+[3, 3, 6]
+### defined by the editor, called by the editor
+[3, 3, 6]
+### defined by the editor, called by the record user
+[2, 2, 4]
+### defined by the viewer, called by the owner
+error: Function 'fn::limited' not found: The function 'fn::limited' does not exist
+### defined by the viewer, called by the editor
+error: Function 'fn::limited' not found: The function 'fn::limited' does not exist
+### defined by the viewer, called by the record user
+error: Function 'fn::limited' not found: The function 'fn::limited' does not exist

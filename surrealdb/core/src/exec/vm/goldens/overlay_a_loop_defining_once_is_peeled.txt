@@ -1,0 +1,99 @@
+### owner: FOR $i IN 0..4 { DEFINE FIELD IF NOT EXISTS k ON t VALUE 7; CREATE t:[$i] SET n = $i }
+NONE
+[{ id: t:0, n: 0 }, { id: t:[0], k: 7, n: 0 }, { id: t:[1], k: 7, n: 1 }, { id: t:[2], k: 7, n: 2 }, { id: t:[3], k: 7, n: 3 }]
+error: The table 'fresh' does not exist
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 6ed793729b6e0fe2 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\x80\x01\x00\x00\x02\x00 => 22a8e8ffdec7ff42 (79 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x19 \x01\x00\x00\x02\x00 => 7a6589a232033972 (79 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x190\x01\x00\x00\x02\x00 => 7033aca1856206da (79 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x19@\x01\x00\x00\x02\x00 => fc7632910a41a68a (79 bytes)
+### owner: { FOR $i IN 0..4 { DEFINE TABLE IF NOT EXISTS fresh; DEFINE FIELD IF NOT EXISTS k ON fresh VALUE 'k'; CREATE fresh:[$i]; IF $i = 2 { BREAK } }; RETURN SELECT * FROM fresh ORDER BY id }
+[{ id: fresh:[0], k: 'k' }, { id: fresh:[1], k: 'k' }, { id: fresh:[2], k: 'k' }]
+[{ id: t:0, n: 0 }]
+[{ id: fresh:[0], k: 'k' }, { id: fresh:[1], k: 'k' }, { id: fresh:[2], k: 'k' }]
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvfresh\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbfresh\x00 => 848fccd568de7a12 (113 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00!fdk\x00 => a21139b0dc0271fa (42 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x05\x05\x80\x01\x00\x00\x02\x00 => 3751d5be378ee8c0 (71 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x05\x05\xa0\x19\x19 \x01\x00\x00\x02\x00 => 3751d7be378eec26 (71 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*fresh\x00*\x05\x05\xa0\x19\x190\x01\x00\x00\x02\x00 => 3751d9be378eef8c (71 bytes)
+### owner: { FOR $i IN 0..4 { DEFINE FIELD IF NOT EXISTS k ON t VALUE 7; IF $i = 1 { CONTINUE }; CREATE t:[$i] SET n = $i }; CREATE t:[9]; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:[0], k: 7, n: 0 }, { id: t:[2], k: 7, n: 2 }, { id: t:[3], k: 7, n: 3 }, { id: t:[9], k: 7 }]
+[{ id: t:0, n: 0 }, { id: t:[0], k: 7, n: 0 }, { id: t:[2], k: 7, n: 2 }, { id: t:[3], k: 7, n: 3 }, { id: t:[9], k: 7 }]
+error: The table 'fresh' does not exist
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 6ed793729b6e0fe2 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\x80\x01\x00\x00\x02\x00 => 22a8e8ffdec7ff42 (79 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x190\x01\x00\x00\x02\x00 => 7033aca1856206da (79 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x19@\x01\x00\x00\x02\x00 => fc7632910a41a68a (79 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x19\xa0\x01\x00\x00\x02\x00 => 99efc613a1408de6 (68 bytes)
+### owner: { FOR $i IN [] { DEFINE FIELD IF NOT EXISTS k ON t VALUE 7; CREATE t:[$i] }; CREATE t:[9]; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:[9] }]
+[{ id: t:0, n: 0 }, { id: t:[9] }]
+error: The table 'fresh' does not exist
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x19\xa0\x01\x00\x00\x02\x00 => 775c4b74657741cd (57 bytes)
+### owner: { LET $to = (SELECT VALUE n FROM ONLY t:0); FOR $i IN 0..$to { DEFINE FIELD IF NOT EXISTS k ON t VALUE 7; CREATE t:[$i] }; CREATE t:[9]; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:[9] }]
+[{ id: t:0, n: 0 }, { id: t:[9] }]
+error: The table 'fresh' does not exist
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x19\xa0\x01\x00\x00\x02\x00 => 775c4b74657741cd (57 bytes)
+### owner: { FOR $i IN 0..3 { DEFINE FIELD IF NOT EXISTS k ON t VALUE 7; CREATE t:[$i] }; DEFINE FIELD IF NOT EXISTS m ON t VALUE 8; CREATE t:[9]; RETURN SELECT * FROM t ORDER BY id }
+[{ id: t:0, n: 0 }, { id: t:[0], k: 7 }, { id: t:[1], k: 7 }, { id: t:[2], k: 7 }, { id: t:[9], k: 7, m: 8 }]
+[{ id: t:0, n: 0 }, { id: t:[0], k: 7 }, { id: t:[1], k: 7 }, { id: t:[2], k: 7 }, { id: t:[9], k: 7, m: 8 }]
+error: The table 'fresh' does not exist
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 6ed793729b6e0fe2 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdm\x00 => e129fa512d16927b (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\x80\x01\x00\x00\x02\x00 => 99efd413a140a5b0 (68 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x19 \x01\x00\x00\x02\x00 => 99efd613a140a916 (68 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x190\x01\x00\x00\x02\x00 => 99efd813a140ac7c (68 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x19\xa0\x01\x00\x00\x02\x00 => 44fcbd55f40729ff (79 bytes)
+### owner: FOR $i IN 0..3 { DEFINE FIELD OVERWRITE k ON t VALUE $i; CREATE t:[$i] SET n = $i }
+NONE
+[{ id: t:0, n: 0 }, { id: t:[0], n: 0 }, { id: t:[1], n: 1 }, { id: t:[2], n: 2 }]
+error: The table 'fresh' does not exist
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 97633cd630cc50bf (37 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\x80\x01\x00\x00\x02\x00 => f4d124e333a0284f (68 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x19 \x01\x00\x00\x02\x00 => 70a183f147f72ecf (68 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x190\x01\x00\x00\x02\x00 => 7944d0e1df7b4647 (68 bytes)
+### owner: FOR $i IN 0..3 { DEFINE INDEX IF NOT EXISTS u ON t FIELDS n UNIQUE; CREATE t:[$i] SET n = $i % 2 }
+error: Database index `u` already contains 0, with record `t:[0]`
+[{ id: t:0, n: 0 }]
+error: The table 'fresh' does not exist
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dd\x00\x00\x00\x00\x00\x00\x00\x00 => d0a397186727310c (3 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dh\x80\x00\x00\x00\x00\x00\x00\x00 => a71164df71139968 (20 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!di\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!dj\x02\x80\x00\x00\x00\x00\x00\x00\x00 => a8c7f832281a39c5 (8 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ds\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 77030c7a8f19ff68 (4 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!ih\x80\x00\x00\x00\x00\x00\x00\x00 => 52a25e1f0fb9406c (18 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!is\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 => 082fda07b4e9c56c (2 bytes)
+### owner: { IF true { FOR $i IN 0..3 { DEFINE FIELD IF NOT EXISTS k ON t VALUE 7; CREATE t:[$i] } } }
+NONE
+[{ id: t:0, n: 0 }, { id: t:[0], k: 7 }, { id: t:[1], k: 7 }, { id: t:[2], k: 7 }]
+error: The table 'fresh' does not exist
+entries:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvt\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbt\x00 => 95fc49906082f1c3 (109 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00!fdk\x00 => 6ed793729b6e0fe2 (36 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\x80\x01\x00\x00\x02\x00 => 99efd413a140a5b0 (68 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x19 \x01\x00\x00\x02\x00 => 99efd613a140a916 (68 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*t\x00*\x05\x05\xa0\x19\x190\x01\x00\x00\x02\x00 => 99efd813a140ac7c (68 bytes)
+### record user: FOR $i IN 0..3 { DEFINE FIELD IF NOT EXISTS k ON t VALUE 7; CREATE t:[$i] SET n = $i }
+error: IAM error: Not enough permissions to perform this action
+[{ id: t:0, n: 0 }]
+[]
+entries:

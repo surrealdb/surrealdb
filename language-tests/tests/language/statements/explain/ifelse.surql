@@ -1,33 +1,44 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test EXPLAIN with IF/ELSE statements"
 
 [[test.results]]
-# EXPLAIN simple IF statement
-value = """\
-"Expr [ctx: Rt] [expr: IF true THEN (Expr) END]
-""""
+value = '''
+"Sequence [ctx: Rt] [statements: 1]
+    ExprPlan [ctx: Rt] [expr: 'yes']
+"'''
 
 [[test.results]]
-# EXPLAIN IF/ELSE statement
-value = """\
-"Expr [ctx: Rt] [expr: IF true THEN (Expr) ELSE (Expr) END]
-""""
+value = '''
+"Sequence [ctx: Rt] [statements: 1]
+    ExprPlan [ctx: Rt] [expr: 'yes']
+"'''
 
 [[test.results]]
-# EXPLAIN IF/ELSE IF/ELSE statement
-value = """\
-"Expr [ctx: Rt] [expr: IF $x > 10 THEN (Expr) ELSE IF $x > 5 THEN (Expr) ELSE (Expr) END]
-""""
+value = '''
+"If [ctx: Rt]
+    ExprPlan [ctx: Rt] [expr: $x > 10]
+    Sequence [ctx: Rt] [statements: 1]
+        ExprPlan [ctx: Rt] [expr: 'large']
+    ExprPlan [ctx: Rt] [expr: $x > 5]
+    Sequence [ctx: Rt] [statements: 1]
+        ExprPlan [ctx: Rt] [expr: 'medium']
+    Sequence [ctx: Rt] [statements: 1]
+        ExprPlan [ctx: Rt] [expr: 'small']
+"'''
 
 [[test.results]]
-# EXPLAIN IF/ELSE IF (no final else)
-value = """\
-"Expr [ctx: Rt] [expr: IF $x > 10 THEN (Expr) ELSE IF $x > 5 THEN (Expr) END]
-""""
+value = '''
+"If [ctx: Rt]
+    ExprPlan [ctx: Rt] [expr: $x > 10]
+    Sequence [ctx: Rt] [statements: 1]
+        ExprPlan [ctx: Rt] [expr: 'large']
+    ExprPlan [ctx: Rt] [expr: $x > 5]
+    Sequence [ctx: Rt] [statements: 1]
+        ExprPlan [ctx: Rt] [expr: 'medium']
+"'''
 
 */
 

@@ -23,7 +23,6 @@ use common::time::{Instant, sleep, timeout, timeout_at};
 use futures::{Future, Stream};
 use rand::Rng;
 use rand::distr::{Alphanumeric, SampleString};
-use reblessive::TreeStack;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
 use surrealdb_datastore::triggers::CommitTriggers;
@@ -41,7 +40,6 @@ use super::tx::Transaction;
 use super::version::{MajorVersion, MigrationRecord, StorageVersion, VersionHistoryEntry};
 use super::{INDEX_COMPACTION_QUEUE_BATCH_SIZE, migration};
 use crate::api::err::ApiError;
-use crate::api::invocation::process_api_request;
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
 use crate::buc::manager::BucketsManager;
@@ -65,7 +63,6 @@ use crate::dbs::{
 };
 use crate::doc::process_next_events_batch;
 use crate::err::{EngineError, Error};
-use crate::exe::FlowResultExt as _;
 use crate::exec::Error as ExecError;
 use crate::exec::config::ExecConfig;
 use crate::exec::function::FunctionRegistry;
@@ -386,6 +383,10 @@ pub struct Datastore {
 	/// statement rather than rebuilding the registry, which is otherwise the
 	/// single biggest per-query cost.
 	function_registry: Arc<FunctionRegistry>,
+	/// The live-subscription units this node has compiled for the VM.
+	live_units: Arc<crate::exec::vm::live::LiveUnits>,
+	/// The function-body units this node has compiled for the VM.
+	compiled_units: Arc<crate::exec::vm::units::CompiledUnits>,
 	// The index asynchronous builder
 	index_builder: IndexBuilder,
 	#[cfg(storage)]
@@ -686,6 +687,9 @@ impl Datastore {
 	/// shared it.
 	pub fn restart(self) -> Self {
 		self.buckets.clear();
+		// One registry per datastore, shared by the executor and by the index
+		// builder, so a build resolves the same names a query does.
+		let function_registry = Arc::new(FunctionRegistry::with_builtins());
 		Self {
 			shutdown: CancellationToken::new(),
 			maintenance: parking_lot::Mutex::new(None),
@@ -713,7 +717,11 @@ impl Datastore {
 			cache: Arc::new(DatastoreCache::new(self.config.datastore.datastore_cache_size)),
 			#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
 			graphql_schema_cache: crate::graphql::cache::GraphQLSchemaCache::default(),
-			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			function_registry,
+			live_units: Arc::default(),
+			compiled_units: Arc::new(crate::exec::vm::units::CompiledUnits::for_config(
+				&self.config.exec,
+			)),
 			buckets: self.buckets,
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
@@ -746,6 +754,7 @@ impl Datastore {
 	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
 	pub(crate) fn fork_for_test_with_node_id(&self, id: Uuid) -> Self {
 		let transaction_factory = self.transaction_factory.clone();
+		let function_registry = Arc::new(FunctionRegistry::with_builtins());
 		Self {
 			// A fork is unshared, so it carries no maintenance tasks.
 			shutdown: CancellationToken::new(),
@@ -774,7 +783,11 @@ impl Datastore {
 			cache: Arc::new(DatastoreCache::new(self.config.datastore.datastore_cache_size)),
 			#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
 			graphql_schema_cache: crate::graphql::cache::GraphQLSchemaCache::default(),
-			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			function_registry,
+			live_units: Arc::default(),
+			compiled_units: Arc::new(crate::exec::vm::units::CompiledUnits::for_config(
+				&self.config.exec,
+			)),
 			buckets: self.buckets.clone(),
 			sequences: Sequences::new(transaction_factory.clone(), id),
 			transaction_factory,
@@ -1273,13 +1286,7 @@ impl Datastore {
 			let mut ctx = self.setup_ctx()?;
 			ctx.set_transaction(Arc::clone(&txn));
 			let ctx = ctx.freeze();
-			let mut stack = TreeStack::new();
-			let res = stack
-				.enter(|stk| {
-					crate::legacy::define_user_statement_compute(&stm, stk, &ctx, &opt, None)
-				})
-				.finish()
-				.await;
+			let res = crate::ddl::define_user_statement_compute(&stm, &ctx, &opt, None).await;
 			catch!(txn, res);
 			// We added a user, so commit the transaction
 			txn.commit().await
@@ -5536,8 +5543,6 @@ impl Datastore {
 	) -> Result<PublicValue> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
-		// Create a new memory stack
-		let mut stack = TreeStack::new();
 		// Create a new query options
 		let opt = self.setup_options(sess);
 		// Create a default context
@@ -5577,12 +5582,11 @@ impl Datastore {
 
 		// Freeze the context
 		let ctx = ctx.freeze();
-		// Compute the value
-		let res = stack
-			.enter(|stk| crate::legacy::expr_compute(val, stk, &ctx, &opt, None))
-			.finish()
-			.await
-			.catch_return();
+		// Evaluate the clause. It has no statement behind it, so it enters the
+		// engine through the route every other caller outside a plan takes,
+		// under the options built for this session above.
+		let exec = crate::exec::entry::frame(&ctx, &opt, None).await;
+		let res = crate::exec::entry::scalar(&exec, val).await;
 		// Store any data
 		if res.is_ok() && txn_type == TransactionType::Write {
 			// If the compute was successful, then commit if writeable
@@ -5728,6 +5732,9 @@ impl Datastore {
 			Arc::clone(&self.cache),
 			#[cfg(feature = "http")]
 			self.http_client.load_full(),
+			Arc::clone(&self.function_registry),
+			Arc::clone(&self.live_units),
+			Arc::clone(&self.compiled_units),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
@@ -6087,7 +6094,7 @@ impl Datastore {
 				debug!(
 					request_id = %req.request_id,
 					path = %path,
-					"API definition found, dispatching to process_api_request"
+					"API definition found, dispatching to the API chain"
 				);
 				req.params = catch!(tx, params.try_into());
 
@@ -6103,7 +6110,7 @@ impl Datastore {
 				}
 				let ctx = &ctx.freeze();
 
-				process_api_request(ctx, &opt, api, req).await
+				crate::exec::api::process(ctx, &opt, api, req).await
 			}
 			None => {
 				trace!(
@@ -8462,66 +8469,6 @@ mod test {
 	}
 
 	#[tokio::test]
-	pub async fn very_deep_query() -> Result<()> {
-		use reblessive::{Stack, Stk};
-
-		use crate::expr::{BinaryOperator, Expr, Literal};
-		use crate::kvs::Datastore;
-		use crate::val::{Number, Value};
-
-		// build query manually to bypass query limits.
-		let mut stack = Stack::new();
-		async fn build_query(stk: &mut Stk, depth: usize) -> Expr {
-			if depth == 0 {
-				Expr::Binary {
-					left: Box::new(Expr::Literal(Literal::Integer(1))),
-					op: BinaryOperator::Add,
-					right: Box::new(Expr::Literal(Literal::Integer(1))),
-				}
-			} else {
-				let q = stk.run(|stk| build_query(stk, depth - 1)).await;
-				Expr::Binary {
-					left: Box::new(q),
-					op: BinaryOperator::Add,
-					right: Box::new(Expr::Literal(Literal::Integer(1))),
-				}
-			}
-		}
-		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
-
-		let dbs = Datastore::builder()
-			.with_capabilities(Capabilities::all())
-			.build_with_path("memory")
-			.await
-			.unwrap();
-
-		let opt = Options::new(&dbs.config().exec)
-			.with_ns(Some("test".into()))
-			.with_db(Some("test".into()))
-			.with_max_computation_depth(u32::MAX);
-
-		// Create a default context
-		let mut ctx = dbs.setup_ctx()?;
-		// Start a new transaction
-		let txn = dbs.transaction(TransactionType::Read).await?.enclose();
-		// Store the transaction
-		ctx.set_transaction(Arc::clone(&txn));
-		// Freeze the context
-		let ctx = ctx.freeze();
-		// Compute the value
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack
-			.enter(|stk| crate::legacy::expr_compute(&val, stk, &ctx, &opt, None))
-			.finish()
-			.await
-			.catch_return()
-			.unwrap();
-		assert_eq!(res, Value::Number(Number::Int(1002)));
-		txn.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
 	async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 		let (send, _recv) = crate::channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
 		let ds = Datastore::builder()
@@ -8626,6 +8573,146 @@ mod test {
 			assert_ne!(after_define.cache_lives_ts, after_remove.cache_lives_ts);
 		}
 		//
+		Ok(())
+	}
+
+	/// Every statement that defines, alters or removes a database-scoped
+	/// object moves that object's catalog version to one it never held, and a
+	/// removal leaves a version behind.
+	#[tokio::test]
+	async fn ddl_moves_each_objects_catalog_version() -> Result<()> {
+		use surrealdb_datastore::values::catalog_version::CatalogObject;
+
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::all())
+			.build_with_path("memory")
+			.await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let db = {
+			let txn = ds.transaction(TransactionType::Write).await?;
+			let db = txn.ensure_ns_db(None, "test", "test").await?;
+			txn.commit().await?;
+			db
+		};
+		let cases: [(CatalogObject<'_>, [&str; 3]); 6] = [
+			(
+				CatalogObject::Function("f"),
+				[
+					"DEFINE FUNCTION fn::f() { RETURN 1; }",
+					"DEFINE FUNCTION OVERWRITE fn::f() { RETURN 2; }",
+					"REMOVE FUNCTION fn::f",
+				],
+			),
+			(
+				CatalogObject::Param("p"),
+				["DEFINE PARAM $p VALUE 1", "ALTER PARAM $p VALUE 2", "REMOVE PARAM $p"],
+			),
+			(
+				CatalogObject::Analyzer("az"),
+				[
+					"DEFINE ANALYZER az TOKENIZERS blank",
+					"DEFINE ANALYZER OVERWRITE az TOKENIZERS class",
+					"REMOVE ANALYZER az",
+				],
+			),
+			(
+				CatalogObject::Sequence("s"),
+				["DEFINE SEQUENCE s", "ALTER SEQUENCE s TIMEOUT 5s", "REMOVE SEQUENCE s"],
+			),
+			(
+				CatalogObject::Access("a"),
+				[
+					"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY 'one'",
+					"DEFINE ACCESS OVERWRITE a ON DATABASE TYPE JWT ALGORITHM HS256 KEY 'two'",
+					"REMOVE ACCESS a ON DATABASE",
+				],
+			),
+			(
+				CatalogObject::Api("/x"),
+				["DEFINE API \"/x\"", "ALTER API \"/x\" COMMENT \"altered\"", "REMOVE API \"/x\""],
+			),
+		];
+		for (object, statements) in cases {
+			let mut seen = vec![None];
+			for sql in statements {
+				let res = ds.execute(sql, &ses, None).await?;
+				for response in res {
+					response.result.map_err(|e| anyhow::anyhow!("{sql}: {e}"))?;
+				}
+				let txn = ds.transaction(TransactionType::Read).await?;
+				let version =
+					txn.catalog_object_version(db.namespace_id, db.database_id, object).await?;
+				txn.cancel().await?;
+				assert!(version.is_some(), "`{sql}` stamps {object:?}");
+				assert!(!seen.contains(&version), "`{sql}` mints a version {object:?} never held");
+				seen.push(version);
+			}
+		}
+		Ok(())
+	}
+
+	/// Every statement that changes how reads or writes of a table behave —
+	/// its definition, permissions and changefeed, its fields and references,
+	/// its indexes, its events, and the views that read it — moves the
+	/// table's catalog version; registering a live query does not.
+	#[tokio::test]
+	async fn ddl_under_a_table_moves_its_catalog_version() -> Result<()> {
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::all())
+			.build_with_path("memory")
+			.await?;
+		let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+		let db = {
+			let txn = ds.transaction(TransactionType::Write).await?;
+			let db = txn.ensure_ns_db(None, "test", "test").await?;
+			txn.commit().await?;
+			db
+		};
+		let tb = TableName::from("t");
+		let version = || async {
+			let txn = ds.transaction(TransactionType::Read).await?;
+			let version = txn.catalog_version(db.namespace_id, db.database_id, &tb).await?;
+			txn.cancel().await?;
+			Result::<_>::Ok(version)
+		};
+		ds.execute("DEFINE TABLE other", &ses, None).await?;
+		let mut seen = vec![None];
+		for sql in [
+			"DEFINE TABLE t SCHEMALESS",
+			"DEFINE TABLE OVERWRITE t SCHEMALESS PERMISSIONS FOR select NONE",
+			"ALTER TABLE t COMMENT 'altered'",
+			"DEFINE TABLE OVERWRITE t SCHEMALESS CHANGEFEED 1h",
+			"DEFINE FIELD a ON t TYPE int",
+			"DEFINE FIELD OVERWRITE a ON t TYPE option<int>",
+			"DEFINE FIELD r ON t TYPE option<record<other>> REFERENCE",
+			"ALTER FIELD a ON t COMMENT 'altered'",
+			"DEFINE INDEX ia ON t FIELDS a",
+			"REBUILD INDEX ia ON t",
+			"REMOVE INDEX ia ON t",
+			"DEFINE EVENT e ON t WHEN true THEN {}",
+			"ALTER EVENT e ON t COMMENT 'altered'",
+			"REMOVE EVENT e ON t",
+			"DEFINE TABLE v AS SELECT * FROM t",
+			"REMOVE TABLE v",
+			"REMOVE FIELD a ON t",
+			"REMOVE TABLE t",
+		] {
+			let res = ds.execute(sql, &ses, None).await?;
+			for response in res {
+				response.result.map_err(|e| anyhow::anyhow!("{sql}: {e}"))?;
+			}
+			let version = version().await?;
+			assert!(version.is_some(), "`{sql}` stamps the table");
+			assert!(!seen.contains(&version), "`{sql}` mints a version the table never held");
+			seen.push(version);
+		}
+		ds.execute("DEFINE TABLE t", &ses, None).await?;
+		let before = version().await?;
+		let res = ds.execute("LIVE SELECT * FROM t", &ses, None).await?;
+		for response in res {
+			response.result?;
+		}
+		assert_eq!(version().await?, before, "a live query is not a catalog change");
 		Ok(())
 	}
 

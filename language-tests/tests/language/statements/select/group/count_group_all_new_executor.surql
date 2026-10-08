@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -9,7 +8,8 @@ value = "'OK'"
 
 [[test.results]]
 value = '''
-'CountScan [ctx: Db] [source: `table`]
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: table]
 ''''
 
 [[test.results]]
@@ -18,8 +18,7 @@ value = "[{ count: 3 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: count]
-    Compute [ctx: Db] [fields: count = count()]
-        TableScan [ctx: Db] [table: table, direction: Forward]
+    TableScan [ctx: Db] [table: table, direction: Forward]
 ''''
 
 [[test.results]]

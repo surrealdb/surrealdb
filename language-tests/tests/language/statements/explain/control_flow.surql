@@ -1,30 +1,34 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test EXPLAIN with control flow statements (RETURN, THROW, BREAK, CONTINUE)"
 
 [[test.results]]
-value = '''"Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: 'OK']
+value = '''
+"Return [ctx: Rt]
+    ExprPlan [ctx: Rt] [expr: 'OK']
 "'''
 
 [[test.results]]
-value = ''''Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: 3]
+value = '''
+'Return [ctx: Rt]
+    ExprPlan [ctx: Rt] [expr: 3]
 ''''
 
 [[test.results]]
-value = '''"Expr [ctx: Rt] [expr: THROW 'error message']
+value = '''
+"ExprPlan [ctx: Rt] [expr: THROW 'error message']
 "'''
 
 [[test.results]]
-value = ''''Expr [ctx: Rt] [expr: BREAK]
+value = '''
+'ExprPlan [ctx: Rt] [expr: BREAK]
 ''''
 
 [[test.results]]
-value = ''''Expr [ctx: Rt] [expr: CONTINUE]
+value = '''
+'ExprPlan [ctx: Rt] [expr: CONTINUE]
 ''''
 
 */

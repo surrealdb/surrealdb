@@ -53,6 +53,52 @@ pub trait KVKey: Debug + Sized {
 	fn value_context(&self) -> <Self::Value as KVValue>::KeyContext;
 }
 
+/// One key type's layout, as a `keyspace!` schema declares it.
+#[derive(Debug, Clone, Copy)]
+pub struct KeyRoute {
+	/// The generated type's name.
+	pub name: &'static str,
+	/// The route as the keyspace map renders it.
+	pub route: &'static str,
+	pub role: KeyRole,
+	/// The value type stored at the key, for a stored key.
+	pub value: Option<&'static str>,
+	/// The `storekey` format its fields are encoded under.
+	pub format: &'static str,
+	/// The encoder's steps, in order.
+	pub steps: &'static [KeyStep],
+}
+
+/// What a [`KeyRoute`] names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyRole {
+	/// A stored key.
+	Key,
+	/// A level root: a whole subtree.
+	Root,
+	/// A truncation point: a scan bound.
+	Prefix,
+}
+
+/// One step of a key's encoder.
+#[derive(Debug, Clone, Copy)]
+pub enum KeyStep {
+	/// Literal bytes.
+	Lit(&'static [u8]),
+	/// One field, of the type the schema names.
+	Field {
+		name: &'static str,
+		ty: &'static str,
+	},
+	/// A list of fields, each behind a terminator mark, closed by a terminator
+	/// unless `terminated` is false.
+	List {
+		name: &'static str,
+		ty: &'static str,
+		terminated: bool,
+	},
+}
+
 pub trait KVKeyDecode<'a>: Sized {
 	fn decode_key(bytes: &'a [u8]) -> Result<Self>;
 }
@@ -148,6 +194,17 @@ impl RawRange {
 		})
 	}
 
+	/// Every key beneath `bound`: its bytes and everything they prefix, as
+	/// [`KVSubspace::raw_range`] forms it from a typed bound.
+	///
+	/// For a caller holding a bound's encoded bytes rather than its type — a
+	/// program encoding keys from the keyspace's routes. `None` for a bound with
+	/// no successor.
+	#[doc(hidden)]
+	pub fn prefix_of(bound: Key<'static>) -> Option<Self> {
+		bound.prefix().map(RawRange)
+	}
+
 	/// Every byte string ordering after `key`, up to the same ceiling as
 	/// [`Self::every_key`].
 	///
@@ -199,6 +256,16 @@ fn resume(mut range: KeyRange<'static>, key: &[u8], dir: Direction) -> KeyRange<
 /// and returns bytes says `_raw` in its name.
 #[derive(Clone, Debug)]
 pub struct RawRange(KeyRange<'static>);
+
+impl RawRange {
+	/// The range's bounds as bytes, `[start, end)`.
+	///
+	/// For a caller dividing the range into sub-ranges it reads separately; the halves it forms
+	/// are its own to bound, so it needs what this one spans.
+	pub fn bounds(&self) -> (&[u8], &[u8]) {
+		(self.0.start.as_slice(), self.0.end.as_slice())
+	}
+}
 
 /// A range the datastore can act on, whatever the keys inside it store.
 ///

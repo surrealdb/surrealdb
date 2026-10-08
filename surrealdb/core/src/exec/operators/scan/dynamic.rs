@@ -1,48 +1,80 @@
+#[cfg(test)]
 use std::borrow::Cow;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use futures::StreamExt;
+#[cfg(test)]
 use surrealdb_types::ToSql;
+#[cfg(test)]
 use tracing::instrument;
 
+#[cfg(test)]
 use super::common::resolve_version_stamp;
+#[cfg(test)]
+use super::pipeline::eval_limit_expr;
+#[cfg(test)]
 use super::pipeline::{
-	build_field_state, determine_scan_direction, eval_limit_expr, kv_scan_stream,
-	table_read_restricted_fields,
+	build_field_state, determine_scan_direction, kv_scan_stream, table_read_restricted_fields,
 };
+#[cfg(test)]
 use super::{FullTextScan, IndexScan, KnnScan};
+#[cfg(test)]
 use crate::catalog::providers::TableProvider;
+#[cfg(test)]
 use crate::catalog::{DatabaseId, Error, NamespaceId};
+#[cfg(test)]
 use crate::err::EngineError;
+#[cfg(test)]
+use crate::exec::index::access_path::without_btree_indexes;
+#[cfg(test)]
 use crate::exec::index::access_path::{
 	AccessPath, ElementColumns, may_have_array_columns, select_access_path,
-	with_array_columns_as_elements, without_btree_indexes,
+	with_array_columns_as_elements,
 };
+#[cfg(test)]
 use crate::exec::operators::limit::PagingClause;
+#[cfg(test)]
 use crate::exec::operators::scan::pipeline::ScanPipeline;
+#[cfg(test)]
 use crate::exec::permission::{
 	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
 	validate_record_user_access,
 };
+#[cfg(test)]
+use crate::exec::planner::util::resolve_condition_params;
+#[cfg(test)]
 use crate::exec::planner::util::{
 	SELECT_ITERATION_PARAMS, fold_condition_expressions, index_covers_ordering,
-	resolve_condition_params, resolve_projection_field_idioms,
-	strip_knn_and_matches_from_condition, strip_knn_from_condition,
+	resolve_projection_field_idioms, strip_knn_and_matches_from_condition,
+	strip_knn_from_condition,
 };
+#[cfg(test)]
 use crate::exec::pre_decode_filter::{PreDecodeFilterStatus, pre_decode_filter_for_execute};
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
+#[cfg(test)]
 use crate::expr::logical::{FieldPath, FieldSegment, LogicalExpr, LogicalLiteral, LogicalOrdering};
+#[cfg(test)]
 use crate::expr::with::With;
+#[cfg(test)]
 use crate::expr::{ControlFlow, ControlFlowExt};
+#[cfg(test)]
 use crate::iam::Action;
+#[cfg(test)]
 use crate::key::schema::RecordPrefix;
+#[cfg(test)]
 use crate::kvs::Direction;
+#[cfg(test)]
 use crate::val::{TableName, Value};
 
+#[cfg(test)]
 /// Full table scan - iterates over all records in a table.
 ///
 /// Requires database-level context since it reads from a specific table
@@ -93,9 +125,14 @@ pub struct DynamicScan {
 	/// source must then resolve to a specific record id at execution time;
 	/// every other value shape is rejected.
 	pub(crate) for_update: bool,
+	/// The limit this scan is bound to, which spares it its records when it
+	/// evaluates to zero.
+	pub(crate) zero_limit: crate::exec::zero_limit::ZeroLimitBinding,
 }
 
+#[cfg(test)]
 impl DynamicScan {
+	#[cfg(test)]
 	/// Create a new Scan operator with fresh metrics.
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
@@ -119,6 +156,7 @@ impl DynamicScan {
 			predicate,
 			limit,
 			start,
+			zero_limit: Default::default(),
 			metrics: Arc::new(OperatorMetrics::new()),
 			knn_context: None,
 			pre_decode_filter_status: PreDecodeFilterStatus::NotApplicable,
@@ -126,18 +164,21 @@ impl DynamicScan {
 		}
 	}
 
+	#[cfg(test)]
 	/// Set plan-time pre-decode filter status for EXPLAIN and execution.
 	pub(crate) fn with_pre_decode_filter(mut self, status: PreDecodeFilterStatus) -> Self {
 		self.pre_decode_filter_status = status;
 		self
 	}
 
+	#[cfg(test)]
 	/// Set whether the scan performs a locked read (`FOR UPDATE`).
 	pub(crate) fn with_for_update(mut self, for_update: bool) -> Self {
 		self.for_update = for_update;
 		self
 	}
 
+	#[cfg(test)]
 	/// Set the KNN context for distance propagation.
 	pub(crate) fn with_knn_context(
 		mut self,
@@ -147,9 +188,14 @@ impl DynamicScan {
 		self
 	}
 }
+#[cfg(test)]
 impl ExecOperator for DynamicScan {
 	fn name(&self) -> &'static str {
 		"DynamicScan"
+	}
+
+	fn zero_limit_binding(&self) -> Option<&crate::exec::zero_limit::ZeroLimitBinding> {
+		Some(&self.zero_limit)
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
@@ -259,6 +305,7 @@ impl ExecOperator for DynamicScan {
 		let knn_context = self.knn_context.clone();
 		let pre_decode_filter_status = self.pre_decode_filter_status.clone();
 		let for_update = self.for_update;
+		let zeroed = self.zero_limit.applies(ctx);
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -312,15 +359,15 @@ impl ExecOperator for DynamicScan {
 						None => 0,
 					};
 
-					// A zero limit does not short-circuit the lookup. It is one
-					// key read, and what it does per row — the table
-					// `PERMISSIONS` clause, the `COMPUTED` fields, the pushed
-					// predicate, and the locked read a `FOR UPDATE` source
-					// registers for conflict detection — is owed whether or
-					// not the row is emitted. The lookup reads and judges
-					// first and discards for a zero limit afterwards, which is
-					// what the literal `RecordIdScan` plan for the same query
-					// does.
+					// A zero limit reads no record: the lookup checks the table
+					// and its permission and returns, as the literal
+					// `RecordIdScan` plan for the same query does (see
+					// `crate::exec::zero_limit`).
+					let limit_val = if zeroed {
+						Some(0)
+					} else {
+						limit_val
+					};
 					let results = super::record_id::execute_record_lookup(
 						&rid,
 						version,
@@ -426,7 +473,7 @@ impl ExecOperator for DynamicScan {
 				// literal source.
 				Value::None | Value::Null => return Ok(()),
 				// For any other value type, yield as a single row.
-				// This matches legacy FROM behavior for non-table values.
+				// A value that names no source is a single row.
 				other => {
 					// === SCALAR SOURCE ===
 					// Same pushdown logic as the array branch above.
@@ -469,6 +516,11 @@ impl ExecOperator for DynamicScan {
 			let limit_val: Option<usize> = match &limit_expr {
 				Some(expr) => Some(eval_limit_expr(&**expr, &ctx, PagingClause::Limit).await?),
 				None => None,
+			};
+			let limit_val = if zeroed {
+				Some(0)
+			} else {
+				limit_val
 			};
 			let start_val: usize = match &start_expr {
 				Some(expr) => eval_limit_expr(&**expr, &ctx, PagingClause::Start).await?,
@@ -629,6 +681,7 @@ impl ExecOperator for DynamicScan {
 // Source helpers
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 /// SECURITY (value-ordering oracle): returns `true` when any top-level
 /// `ORDER BY` idiom references a field carrying a non-`Full` SELECT permission
 /// for the current actor.
@@ -662,6 +715,7 @@ fn order_touches_restricted_select_field(
 	})
 }
 
+#[cfg(test)]
 /// The declared position the leading steps of an `ORDER BY` key read: its
 /// `Field` root followed by every field access and `.*` up to the first step
 /// of another kind (`foo.bar[0].baz` reads `foo.bar`). Empty for a key that
@@ -715,6 +769,7 @@ fn leading_field_path(expr: &LogicalExpr) -> Vec<FieldSegment> {
 	out
 }
 
+#[cfg(test)]
 /// Whether a key's leading declared position lies at or under a catalog
 /// field's path. A catalog name that declares no position (one holding a
 /// part other than a field or `*`) governs no key.
@@ -722,6 +777,7 @@ fn path_starts_with_field(leading: &[FieldSegment], field: &crate::expr::Idiom) 
 	FieldPath::from_idiom(field).is_some_and(|path| leading.starts_with(path.segments()))
 }
 
+#[cfg(test)]
 /// SECURITY: whether any column of an index is governed by a non-`Full` SELECT
 /// permission for the current actor.
 ///
@@ -753,6 +809,7 @@ fn index_touches_restricted_select_field(
 	})
 }
 
+#[cfg(test)]
 /// Configuration bundle for [`resolve_table_scan_stream`].
 struct TableScanConfig {
 	ns_id: NamespaceId,
@@ -789,6 +846,7 @@ struct TableScanConfig {
 	field_permissions: Arc<Vec<(crate::expr::Idiom, PhysicalPermission)>>,
 }
 
+#[cfg(test)]
 /// Resolve the optimal access path for a table scan and return the source
 /// stream together with the number of rows that were pre-skipped at the
 /// KV layer (zero for index / full-text sources).
@@ -956,13 +1014,13 @@ async fn resolve_table_scan_stream(
 				// A pushed LIMIT counts rows, and a scan that fans out reads
 				// several entries per row, so the pipeline would truncate on
 				// entries. Leave that combination to the KV scan.
-				&& !crate::exec::index::access_path::access_fans_out(&index_ref.cols, &access)) =>
+				&& !crate::exec::index::access_path::access_repeats_records(&index_ref, &access)) =>
 		{
 			// A key range leaving a fanning column open reaches a record
 			// through several entries; the scan yields records, so the
 			// repeats are collapsed before anything above counts them.
 			let fans_out =
-				crate::exec::index::access_path::access_fans_out(&index_ref.cols, &access);
+				crate::exec::index::access_path::access_repeats_records(&index_ref, &access);
 			let operator: Arc<dyn ExecOperator> = Arc::new(IndexScan::new(
 				index_ref,
 				access,
@@ -1091,8 +1149,8 @@ async fn resolve_table_scan_stream(
 		// check, etc.)
 		_ => {
 			// Fail closed: a record-range scan over a lightweight relation
-			// would be wrong-empty, and a runtime-resolved source cannot fall
-			// back to the legacy collectors.
+			// would be wrong-empty, and a runtime-resolved source cannot be
+			// handed to a reader that would resolve the relation.
 			{
 				if txn.get_tb(cfg.ns_id, cfg.db_id, &cfg.table_name, None).await?.is_some_and(
 					|def| crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some(),
@@ -1128,6 +1186,7 @@ async fn resolve_table_scan_stream(
 	}
 }
 
+#[cfg(test)]
 /// Compile the residual WHERE a runtime-resolved KNN search evaluates per
 /// candidate inside the ANN traversal.
 ///
@@ -1146,6 +1205,7 @@ async fn compile_residual(
 	}
 }
 
+#[cfg(test)]
 /// Create an index scan operator for a single access path.
 ///
 /// Used by the multi-index union handler to create individual operators

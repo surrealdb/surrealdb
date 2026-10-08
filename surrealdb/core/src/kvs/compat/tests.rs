@@ -204,6 +204,32 @@ macro_rules! compat_test {
 						)
 					});
 
+					// The VM's codec, where it describes the type, reads the
+					// fixture as the Rust codec does: decoding it and writing
+					// it back yields the bytes the Rust codec re-encodes.
+					let type_name = stringify!($type);
+					// `MajorVersion` is a bare `u16` key value, not a revisioned type.
+					assert!(
+						type_name == "MajorVersion" || crate::exec::vm::codec::describes(type_name),
+						"the VM codec has no descriptor for {type_name}"
+					);
+					if crate::exec::vm::codec::describes(type_name) {
+						let vm = crate::exec::vm::codec::decode(type_name, fixture_bytes)
+							.map(|value| crate::exec::vm::codec::KeyContext::read(&$ctx, value))
+							.and_then(|value| crate::exec::vm::codec::encode(type_name, &value));
+						let vm = vm.unwrap_or_else(|e| {
+							panic!(
+								concat!("the VM codec failed on ", stringify!([<$version _ $base_name>]), ": {:#}"),
+								e
+							)
+						});
+						assert_eq!(
+							vm,
+							re_encoded,
+							concat!("the VM codec re-encoded ", stringify!([<$version _ $base_name>]), " differently")
+						);
+					}
+
 					if version_writes_current_format(stringify!($version), stringify!($type), stringify!($base_name)) {
 						assert_eq!(
 							re_encoded.as_slice(),

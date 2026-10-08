@@ -11,11 +11,14 @@
 //! projection function calls (`type::field("name")`) into the path expression
 //! the argument names so the index analyzer can match them.
 
+#[cfg(test)]
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
+#[cfg(test)]
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+#[cfg(test)]
 use super::literals::try_value_to_logical_expr;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::Function;
@@ -29,11 +32,10 @@ use crate::expr::logical::{LogicalExpr, LogicalLiteral, lower_expr};
 ///
 /// Event/live/field params (`$before`, `$after`, `$value`, `$input`, `$event`)
 /// are intentionally excluded because the exec planner only handles
-/// top-level statements.  SELECTs inside event handlers, live query
-/// notifications, and field evaluators run through the legacy `compute()`
-/// path, where those params are resolved at runtime via `ctx.value()`.
-/// If the exec planner is ever extended to those contexts, this guard
-/// set would need to be expanded accordingly.
+/// top-level statements.  Those params are bound by the frame an event
+/// handler, live query notification or field evaluator runs in and are
+/// resolved at runtime via `ctx.value()`. A plan compiled in such a frame
+/// would need this guard set expanded accordingly.
 pub(crate) const SELECT_ITERATION_PARAMS: &[&str] = super::super::row_scope::ROW_SCOPED_PARAMS;
 
 /// What a parameter is at plan time; see [`bind_param`].
@@ -109,6 +111,7 @@ pub(crate) async fn resolve_param_value(
 	}
 }
 
+#[cfg(test)]
 /// Resolve bind-parameter references in a `WHERE` condition to their literal
 /// values. Returns a new expression with [`LogicalExpr::Param`] nodes replaced
 /// by their literal form wherever the value is available.

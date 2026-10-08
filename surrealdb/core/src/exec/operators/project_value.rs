@@ -4,21 +4,20 @@
 //! and returns the raw values (not wrapped in objects).
 //!
 //! OMIT is applied internally before expression evaluation so that omitted
-//! fields resolve to NONE.  This mirrors the legacy `Results::project_value`
-//! path and avoids the ordering hazards of a separate Project-for-OMIT operator.
+//! fields resolve to NONE.  This avoids the ordering hazards of a separate Project-for-OMIT
+//! operator.
 
 use std::sync::Arc;
 
 use futures::StreamExt;
 
-use super::project::omit_field_sync;
+use super::OmitPath;
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
 	monitor_stream,
 };
 use crate::expr::ControlFlow;
-use crate::expr::logical::LogicalExpr;
 use crate::val::Value;
 
 /// ProjectValue operator - evaluates a single expression for each input record.
@@ -33,7 +32,7 @@ pub struct ProjectValue {
 	/// The expression to evaluate for each record
 	pub expr: Arc<dyn PhysicalExpr>,
 	/// Paths to strip before evaluating (SELECT VALUE … OMIT).
-	omit: Arc<[LogicalExpr]>,
+	omit: Arc<[OmitPath]>,
 	/// Whether evaluating the projected expression a second time would expose
 	/// anything: it stages no write, advances no counter, reaches nothing
 	/// outside the transaction and runs no body the plan cannot see.
@@ -64,7 +63,7 @@ impl ProjectValue {
 	pub(crate) fn new(
 		input: Arc<dyn ExecOperator>,
 		expr: Arc<dyn PhysicalExpr>,
-		omit: Vec<LogicalExpr>,
+		omit: Vec<OmitPath>,
 	) -> Self {
 		Self {
 			input,
@@ -123,7 +122,7 @@ impl ExecOperator for ProjectValue {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -141,15 +140,15 @@ impl ExecOperator for ProjectValue {
 				let batch = batch_result?;
 				let mut values = batch.into_values();
 
+				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+
 				if !omit.is_empty() {
 					for value in &mut values {
 						for field in omit.iter() {
-							omit_field_sync(value, field);
+							field.apply(value, &eval_ctx).await?;
 						}
 					}
 				}
-
-				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
 				// One batch call is the faster shape — it lets an I/O-bound
 				// expression (a subquery, a lookup) overlap its rows — but a

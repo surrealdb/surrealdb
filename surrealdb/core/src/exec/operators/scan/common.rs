@@ -7,21 +7,25 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::Yielder;
 use surrealdb_strand::Strand;
 
-use super::pipeline::{
-	FieldState, ScanPipeline, build_field_state, materialise_fields_with_permissions,
-};
+#[cfg(test)]
+use super::pipeline::ScanPipeline;
+use super::pipeline::{FieldState, build_field_state, materialise_fields_with_permissions};
+#[cfg(test)]
 use super::resolved::ResolvedTableContext;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Record};
 use crate::err::EngineError;
+#[cfg(test)]
+use crate::exec::ValueBatch;
 use crate::exec::object_extract::{
 	PathSegment, project_record_bytes, project_record_bytes_excluding,
 };
 use crate::exec::permission::PhysicalPermission;
-use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr, ValueBatch};
+use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr};
 use crate::expr::{ControlFlow, FlowResult};
 use crate::key::KVValue;
 use crate::key::schema::RecordKey;
@@ -134,7 +138,7 @@ pub(crate) fn approx_value_size(value: &Value) -> usize {
 /// way when nothing else in the plan reads the stored record (see
 /// [`projected_decode_applies`]), and decodes the whole record otherwise.
 /// `id` is never listed: a fetched row's id is set from its storage key.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DecodeFields {
 	/// The listed root field names, strictly ascending.
 	keys: Arc<[PathSegment]>,
@@ -184,6 +188,7 @@ impl DecodeFields {
 	}
 }
 
+#[cfg(test)]
 /// Whether a scan may decode only its [`DecodeFields`] of each record rather
 /// than the whole record.
 ///
@@ -205,6 +210,7 @@ pub(crate) fn projected_decode_applies(
 				&& table_state.field_permissions.is_empty()))
 }
 
+#[cfg(test)]
 /// The decode set a scan uses for one execution: `fields` when
 /// [`projected_decode_applies`] to `table_name`, `None` — decode whole
 /// records — otherwise.
@@ -283,11 +289,11 @@ enum ReadAheadRecord {
 /// cache, so a partially decoded record never enters that cache; the
 /// key-value transaction holds the transaction's own writes, so they are read
 /// all the same.
-pub(crate) struct ReadAhead<'a> {
+pub(crate) struct ReadAhead {
 	records: VecDeque<(RecordId, ReadAheadRecord)>,
-	select_permission: &'a PhysicalPermission,
+	select_permission: PhysicalPermission,
 	check_perms: bool,
-	fields: Option<&'a DecodeFields>,
+	fields: Option<DecodeFields>,
 	budget: usize,
 	/// The most records a batch decodes; see [`ReadAhead::processed`].
 	row_cap: usize,
@@ -296,7 +302,7 @@ pub(crate) struct ReadAhead<'a> {
 	last_rows: usize,
 }
 
-impl<'a> ReadAhead<'a> {
+impl ReadAhead {
 	/// An empty read-ahead whose batches decode up to `budget` bytes each.
 	///
 	/// # Arguments
@@ -305,9 +311,9 @@ impl<'a> ReadAhead<'a> {
 	///   check no permission: callers establish [`projected_decode_applies`] first. Otherwise
 	///   decode whole records and, when `check_perms`, drop those `select_permission` denies.
 	pub(crate) fn new(
-		select_permission: &'a PhysicalPermission,
+		select_permission: PhysicalPermission,
 		check_perms: bool,
-		fields: Option<&'a DecodeFields>,
+		fields: Option<DecodeFields>,
 		budget: usize,
 	) -> Self {
 		Self {
@@ -322,6 +328,7 @@ impl<'a> ReadAhead<'a> {
 		}
 	}
 
+	#[cfg(test)]
 	/// Size the next batch from the last batch decoded, once `pipeline`
 	/// processed it.
 	///
@@ -424,7 +431,7 @@ impl<'a> ReadAhead<'a> {
 		&mut self,
 		ctx: &ExecutionContext,
 	) -> Result<Vec<Value>, ControlFlow> {
-		let fields = self.fields;
+		let fields = self.fields.as_ref();
 		let mut values = Vec::new();
 		let mut decoded_bytes = 0;
 		let mut decoded_rows = 0;
@@ -466,7 +473,7 @@ impl<'a> ReadAhead<'a> {
 			if fields.is_none()
 				&& self.check_perms
 				&& !crate::exec::permission::check_permission_for_value(
-					self.select_permission,
+					&self.select_permission,
 					&data,
 					None,
 					ctx,
@@ -485,6 +492,7 @@ impl<'a> ReadAhead<'a> {
 	}
 }
 
+#[cfg(test)]
 /// Decode what `read_ahead` holds, a byte budget at a time, through
 /// `pipeline`, emitting each batch the pipeline keeps.
 ///
@@ -493,7 +501,7 @@ impl<'a> ReadAhead<'a> {
 /// Whether the pipeline takes more rows; once it does not, the rest of
 /// `read_ahead` is left undecoded.
 pub(crate) async fn drain_read_ahead(
-	read_ahead: &mut ReadAhead<'_>,
+	read_ahead: &mut ReadAhead,
 	pipeline: &mut ScanPipeline,
 	yielder: &mut Yielder<'_, ValueBatch>,
 	ctx: &ExecutionContext,
@@ -672,11 +680,10 @@ pub(crate) async fn resolve_version_stamp(
 /// ([`crate::exec::operators::fetch::process_fetched_record`]): read-time
 /// `COMPUTED` fields are always evaluated, and field-level SELECT
 /// permissions are applied whenever `check_perms` is set. Resolving only the
-/// table-level permission here (the previous behaviour) let a graph or
-/// reference traversal that yields full edge/record objects expose
-/// field-restricted data to callers whose field permissions should hide it,
-/// and dropped computed fields — diverging from both the legacy compute
-/// engine and a direct `SELECT *` on the same table.
+/// table-level permission here would let a graph or reference traversal that
+/// yields full edge/record objects expose field-restricted data to callers
+/// whose field permissions should hide it, and drop computed fields —
+/// diverging from a direct `SELECT *` on the same table.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn resolve_record_batch(
 	ctx: &ExecutionContext,
@@ -705,21 +712,11 @@ pub(crate) async fn resolve_record_batch(
 	// this batch. The cache survives across batches so we only resolve a
 	// given table's permission once per scan.
 	if check_perms {
-		let db_ctx = ctx.database().context("permission resolution requires database context")?;
 		for rid in rids {
 			if perm_cache.contains_key(&rid.table) {
 				continue;
 			}
-			let table_def = db_ctx
-				.get_table_def(&rid.table, version)
-				.await
-				.context("Failed to get table definition")?;
-			let perm = crate::exec::permission::table_select_permission_physical_runtime(
-				table_def.as_deref(),
-				ctx,
-			)
-			.await
-			.context("Failed to convert permission")?;
+			let perm = crate::exec::vm::descriptor::select_permission(ctx, &rid.table).await?;
 			perm_cache.insert(rid.table.clone(), perm);
 		}
 	}
@@ -800,6 +797,7 @@ pub(crate) async fn resolve_record_batch(
 	Ok(values)
 }
 
+#[cfg(test)]
 /// Fetch full records for a batch of [`RecordId`]s in one batch, applying
 /// permission filtering to each record.
 ///
@@ -913,8 +911,8 @@ mod tests {
 		permission: &PhysicalPermission,
 		budget: usize,
 		values: Vec<Value>,
-	) -> ReadAhead<'_> {
-		let mut read_ahead = ReadAhead::new(permission, false, None, budget);
+	) -> ReadAhead {
+		let mut read_ahead = ReadAhead::new(permission.clone(), false, None, budget);
 		for (i, value) in values.into_iter().enumerate() {
 			let rid = RecordId {
 				table: "t".into(),

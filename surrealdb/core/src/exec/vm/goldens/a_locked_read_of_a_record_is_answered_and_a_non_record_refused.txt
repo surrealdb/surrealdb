@@ -1,0 +1,27 @@
+### SELECT * FROM person:1 FOR UPDATE
+ReadWrite
+{ age: 30, id: person:1, name: 'ann', nested: { x: 1 }, tags: ['a', 'b'] }
+### SELECT name FROM person:99 FOR UPDATE
+ReadWrite
+(no rows)
+### SELECT VALUE name FROM person:1 WHERE age > 100 FOR UPDATE
+ReadWrite
+(no rows)
+### SELECT * FROM type::record('person', 2) FOR UPDATE
+ReadWrite
+{ age: 17, id: person:2, name: 'Bob', tags: ['b'] }
+### { LET $r = person:3; SELECT name FROM $r FOR UPDATE }
+ReadWrite
+[{ name: 'cat' }]
+### { LET $r = person:3; SELECT name FROM $r LIMIT 0 FOR UPDATE }
+ReadWrite
+[]
+### { LET $r = [1]; SELECT * FROM $r FOR UPDATE }
+ReadWrite
+error: Invalid query: SELECT ... FOR UPDATE requires record ids as targets
+### { LET $r = person:1..3; SELECT * FROM $r FOR UPDATE }
+ReadWrite
+error: Invalid query: SELECT ... FOR UPDATE requires record ids as targets
+### { LET $r = person; SELECT * FROM $r FOR UPDATE }
+ReadWrite
+error: Invalid query: SELECT ... FOR UPDATE requires record ids as targets

@@ -1,0 +1,16 @@
+### { CREATE fresh:1 SET n = 1; LET $t = (SELECT VALUE 'fresh' FROM ONLY t:1); RETURN SELECT * FROM type::table($t) }
+[{ id: fresh:1, n: 1 }]
+### { CREATE fresh:1; FOR $i IN ['t', 'fresh'] { CREATE log SET r = (SELECT * FROM type::table($i)) }; RETURN SELECT VALUE r FROM log ORDER BY r }
+[[{ id: fresh:1 }], [{ id: t:1, n: 1 }]]
+### { LET $a = SELECT * FROM [t:1]; DEFINE FIELD c ON t COMPUTED 7; RETURN [$a, (SELECT * FROM [t:1])] }
+[[{ id: t:1, n: 1 }], [{ c: 7, id: t:1, n: 1 }]]
+### { DEFINE INDEX by_n ON t FIELDS n; LET $t = (SELECT VALUE 't' FROM ONLY t:1); RETURN SELECT * FROM type::table($t) }
+[{ id: t:1, n: 1 }]
+### { DEFINE TABLE fresh; CREATE fresh:1; LET $t = (SELECT VALUE 'fresh' FROM ONLY t:1); RETURN SELECT * FROM type::table($t) }
+[{ id: fresh:1 }]
+### { LET $t = (SELECT VALUE 't' FROM ONLY t:1); DEFINE FIELD c ON t COMPUTED 7; RETURN SELECT * FROM type::table($t) }
+[{ c: 7, id: t:1, n: 1 }]
+### { DEFINE FIELD c ON t COMPUTED 7; LET $r = (SELECT VALUE id FROM ONLY t:1); RETURN SELECT * FROM $r }
+[{ c: 7, id: t:1, n: 1 }]
+### { DEFINE FIELD c ON t COMPUTED 7; CREATE log:1 SET p = t:1; RETURN SELECT * FROM log FETCH p }
+[{ id: log:1, p: { c: 7, id: t:1, n: 1 } }]

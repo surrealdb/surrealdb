@@ -1,0 +1,36 @@
+### owner: SELECT VALUE ->(knows WHERE score > 5) FROM person:1
+[knows:2, knows:6, knows:7, knows:8, knows:9, knows:10]
+### owner: SELECT VALUE ->(knows WHERE 5 < score) FROM person:1
+[knows:2, knows:6, knows:7, knows:8, knows:9, knows:10]
+### owner: SELECT VALUE ->(knows WHERE score > 3 AND score <= 8) FROM person:1
+[knows:4, knows:5, knows:6, knows:7, knows:8]
+### owner: SELECT VALUE ->(knows WHERE score = 'x') FROM person:1
+[knows:2]
+### owner: SELECT VALUE ->(knows WHERE score > 3 AND id != knows:6) FROM person:1
+[knows:2, knows:4, knows:5, knows:7, knows:8, knows:9, knows:10]
+### owner: SELECT VALUE ->(knows WHERE score > 8 OR score < 4) FROM person:1
+[knows:1, knows:2, knows:3, knows:9, knows:10]
+### owner: SELECT VALUE ->(knows WHERE out = person:5 AND score >= 4) FROM person:1
+[knows:4]
+### owner: SELECT VALUE ->(knows WHERE score CONTAINS 1) FROM person:1
+[]
+### owner: SELECT VALUE ->(knows WHERE score > 3)->person FROM person:1
+[person:3, person:5, person:6, person:7, person:8, person:9, person:10, person:11]
+### record user: SELECT VALUE ->(knows WHERE score > 5) FROM person:1
+[knows:2, knows:6, knows:7, knows:8, knows:9, knows:10]
+### record user: SELECT VALUE ->(knows WHERE 5 < score) FROM person:1
+[knows:2, knows:6, knows:7, knows:8, knows:9, knows:10]
+### record user: SELECT VALUE ->(knows WHERE score > 3 AND score <= 8) FROM person:1
+[knows:4, knows:5, knows:6, knows:7, knows:8]
+### record user: SELECT VALUE ->(knows WHERE score = 'x') FROM person:1
+[knows:2]
+### record user: SELECT VALUE ->(knows WHERE score > 3 AND id != knows:6) FROM person:1
+[knows:2, knows:4, knows:5, knows:7, knows:8, knows:9, knows:10]
+### record user: SELECT VALUE ->(knows WHERE score > 8 OR score < 4) FROM person:1
+[knows:1, knows:2, knows:3, knows:9, knows:10]
+### record user: SELECT VALUE ->(knows WHERE out = person:5 AND score >= 4) FROM person:1
+[knows:4]
+### record user: SELECT VALUE ->(knows WHERE score CONTAINS 1) FROM person:1
+[]
+### record user: SELECT VALUE ->(knows WHERE score > 3)->person FROM person:1
+[person:3, person:5, person:6, person:7, person:8, person:9, person:10, person:11]

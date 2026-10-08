@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -17,9 +16,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}
+value = '''
+"SelectProject [ctx: Db] [projections: name] {rows: 1}
     Filter [ctx: Db] [predicate: genre = 'm'] {rows: 1}
-        FullTextScan [ctx: Db] [index: ft_name, query: Jaime] {rows: 1}
+        FullTextScan [ctx: Db] [table: person, index: ft_name, query: Jaime] {rows: 1}
 
 Total rows: 1"'''
 

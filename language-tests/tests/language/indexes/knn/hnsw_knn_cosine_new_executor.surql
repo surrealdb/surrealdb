@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "HNSW index with DIST COSINE returns neighbours in ascending cosine-distance order. Guards the cached stored-vector norm path: an incorrect norm would corrupt the cosine ranking. Points are chosen so cosine distances to [1,0,0] are strictly increasing (pts:1<pts:2<pts:3<pts:4<pts:5) with no ties."

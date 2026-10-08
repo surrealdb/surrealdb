@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/permission_access_path_import.surql"]
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """

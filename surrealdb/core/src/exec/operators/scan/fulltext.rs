@@ -3,36 +3,52 @@
 //! This operator retrieves records using full-text search indexes,
 //! supporting the MATCHES operator with BM25 or VS scoring.
 
+#[cfg(test)]
 use std::collections::HashSet;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
 use reblessive::TreeStack;
 
+#[cfg(test)]
 use super::common::{
 	DecodeFields, RECORD_PROBE_ROWS, ReadAhead, decode_fields_for_execution, drain_read_ahead,
 	next_batch_len, probe_batch_len, resolve_version_stamp,
 };
+#[cfg(test)]
 use super::pipeline::{ScanPipeline, build_field_state};
+#[cfg(test)]
 use super::resolved::ResolvedTableContext;
-use crate::catalog::{Error, Index};
+#[cfg(test)]
+use crate::catalog::Error;
+use crate::catalog::{Index, IndexDefinition};
+#[cfg(test)]
+#[cfg(test)]
 use crate::err::EngineError;
+use crate::exec::analyzer_function::StreamingAnalyzerFunction;
+#[cfg(test)]
 use crate::exec::index::access_path::IndexRef;
+#[cfg(test)]
 use crate::exec::permission::{
-	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
-	validate_record_user_access,
+	PhysicalPermission, should_check_perms, validate_record_user_access,
 };
+#[cfg(test)]
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	PhysicalExpr, ValueBatchStream, monitor_stream,
+	AccessMode, ContextLevel, ExecOperator, OperatorMetrics, PhysicalExpr, ValueBatchStream,
+	monitor_stream,
 };
+use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::operator::MatchesOperator;
 use crate::expr::{ControlFlow, ControlFlowExt};
+#[cfg(test)]
 use crate::iam::Action;
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchesHitsIterator;
-use crate::idx::ft::fulltext::FullTextIndex;
-use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
+use crate::idx::ft::fulltext::{FullTextHitsIterator, FullTextIndex};
+use crate::kvs::Transaction;
+use crate::val::{RecordId, TableName};
 
 /// Batch size for full-text result batching.
 ///
@@ -43,8 +59,9 @@ use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 /// full-text results are ordered by relevance score, so smaller batches let
 /// downstream operators begin processing sooner. Each read below it is sized
 /// from the bytes the read before it held, as the other record scans do.
-const BATCH_SIZE: usize = 100;
+pub(crate) const FULL_TEXT_BATCH_SIZE: usize = 100;
 
+#[cfg(test)]
 /// Full-text search scan operator.
 ///
 /// Executes a full-text search query against a FullText index and returns
@@ -78,7 +95,9 @@ pub struct FullTextScan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl FullTextScan {
+	#[cfg(test)]
 	pub(crate) fn new(
 		index_ref: IndexRef,
 		query: String,
@@ -100,6 +119,7 @@ impl FullTextScan {
 		}
 	}
 
+	#[cfg(test)]
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
@@ -112,6 +132,7 @@ impl FullTextScan {
 		self
 	}
 }
+#[cfg(test)]
 impl ExecOperator for FullTextScan {
 	fn name(&self) -> &'static str {
 		"FullTextScan"
@@ -167,11 +188,6 @@ impl ExecOperator for FullTextScan {
 			// clause evaluated again; see [`resolve_version_stamp`].
 			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
 
-			// Get the FrozenContext and Options from the root context
-			let root = ctx.root();
-			let frozen_ctx = &root.ctx;
-			let opt = root.options.as_ref().context("FullTextScan requires Options context")?;
-
 			// Resolve table permissions: plan-time fast path or runtime fallback
 			let select_permission = if let Some(ref res) = resolved {
 				res.select_permission(check_perms)
@@ -181,10 +197,8 @@ impl ExecOperator for FullTextScan {
 					.await
 					.context("Failed to get table")?;
 
-				if let Some(def) = &table_def {
-					table_select_permission_physical_runtime(Some(&**def), &ctx)
-						.await
-						.context("Failed to convert permission")?
+				if table_def.is_some() {
+					crate::exec::vm::descriptor::select_permission(&ctx, &table_name).await?
 				} else {
 					Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
 						name: table_name.clone(),
@@ -233,103 +247,44 @@ impl ExecOperator for FullTextScan {
 				0,
 			);
 
-			// Get the FullText index parameters from the index definition
-			let index_def = index_ref.definition();
-			// Legacy (pre-shared-doc-ID) indexes resolve postings through their
-			// historical private doc-ID layout until explicitly rebuilt; the
-			// format version selects the resolver used below.
-			let ft_params = match &index_def.index {
-				Index::FullText(params) => params,
-				_ => Err(ControlFlow::Err(anyhow::anyhow!(
-					"Index '{}' is not a full-text index",
-					index_def.name
-				)))?,
-			};
-
-			// Create the index key base
-			let ikb = IndexKeyBase::new(
-				ns.namespace_id,
-				db.database_id,
-				table_name.clone(),
-				index_def.index_id,
-			);
-
-			// Open the full-text index
-			let fti = FullTextIndex::new(
-				frozen_ctx.get_index_stores(),
-				txn.as_ref(),
-				ikb,
-				ft_params,
-				&frozen_ctx.config.idx.file_allowlist,
-				index_def.format_version,
-			)
-			.await
-			.context("Failed to open full-text index")?;
-
-			// Extract query terms using TreeStack for stack management
-			let query_terms = {
-				let az_fn = LegacyAnalyzerFunction::new(frozen_ctx, opt);
-				let mut stack = TreeStack::new();
-				stack
-					.enter(|stk| fti.extract_querying_terms(stk, frozen_ctx, &az_fn, query.clone()))
-					.finish()
-					.await
-					.context("Failed to extract query terms")?
-			};
-
-			// If query terms are empty, no results
-			if query_terms.is_empty() {
+			let Some(mut hits) =
+				open_full_text_hits(&ctx, &table_name, index_ref.definition(), &query, &operator)
+					.await?
+			else {
 				return Ok(());
-			}
-
-			// Get the boolean operator from the MATCHES operator
-			let bool_op = operator.operator;
-
-			// Create hits iterator
-			let hits_iter = match fti.new_hits_iterator(&query_terms, bool_op) {
-				Some(iter) => iter,
-				None => {
-					// No matching documents
-					return Ok(());
-				}
 			};
 
-			// Collect the hits' record IDs in chunks, read each chunk ahead as
-			// stored bytes, and decode it in batches of at most the byte budget.
-			// The first chunk is a small probe and each later one is sized from
-			// the bytes the one before it read, up to `BATCH_SIZE`.
+			// Read each chunk of hits ahead as stored bytes, and decode it in
+			// batches of at most the byte budget. The first chunk is a small
+			// probe and each later one is sized from the bytes the one before
+			// it read, up to `FULL_TEXT_BATCH_SIZE`.
 			let batch_bytes = ctx.root().ctx.config.exec.scan_batch_bytes;
-			let mut chunk_len = probe_batch_len(batch_bytes, RECORD_PROBE_ROWS.min(BATCH_SIZE));
+			let mut chunk_len =
+				probe_batch_len(batch_bytes, RECORD_PROBE_ROWS.min(FULL_TEXT_BATCH_SIZE));
 			let mut read_ahead = ReadAhead::new(
-				&select_permission,
+				select_permission.clone(),
 				check_perms,
-				decode_fields.as_ref(),
+				decode_fields.clone(),
 				batch_bytes,
 			);
-			let mut hits_iter = hits_iter;
-			let mut rid_batch = Vec::with_capacity(BATCH_SIZE);
 			loop {
 				if ctx.cancellation().is_cancelled() {
 					Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 				}
-				let hit = hits_iter.next(txn.as_ref()).await.context("Failed to get next hit")?;
-				let exhausted = hit.is_none();
-				if let Some((rid, _doc_id)) = hit {
-					rid_batch.push(rid);
+				let rids = hits.next_batch(txn.as_ref(), chunk_len).await?;
+				if rids.is_empty() {
+					break;
 				}
-				if rid_batch.len() >= chunk_len || (exhausted && !rid_batch.is_empty()) {
-					let rids = std::mem::replace(&mut rid_batch, Vec::with_capacity(BATCH_SIZE));
-					let (read_bytes, read_rows) = read_ahead
-						.read(&txn, ns.namespace_id, db.database_id, rids, version)
-						.await?;
-					chunk_len =
-						next_batch_len(read_bytes, read_rows, chunk_len, batch_bytes, BATCH_SIZE);
-					if !drain_read_ahead(&mut read_ahead, &mut pipeline, &mut yielder, &ctx).await?
-					{
-						break;
-					}
-				}
-				if exhausted {
+				let (read_bytes, read_rows) =
+					read_ahead.read(&txn, ns.namespace_id, db.database_id, rids, version).await?;
+				chunk_len = next_batch_len(
+					read_bytes,
+					read_rows,
+					chunk_len,
+					batch_bytes,
+					FULL_TEXT_BATCH_SIZE,
+				);
+				if !drain_read_ahead(&mut read_ahead, &mut pipeline, &mut yielder, &ctx).await? {
 					break;
 				}
 			}
@@ -338,6 +293,92 @@ impl ExecOperator for FullTextScan {
 
 		Ok(monitor_stream(Box::pin(stream), "FullTextScan", &self.metrics))
 	}
+}
+
+/// The hits of a full-text query, in the order the index lists them, read a
+/// batch of record IDs at a time.
+pub(crate) struct FullTextHits {
+	iter: FullTextHitsIterator,
+}
+
+impl FullTextHits {
+	/// The next `limit` record IDs the query matches, fewer only when the
+	/// hits run out; empty once they have. A hit whose record ID no longer
+	/// resolves is passed over.
+	pub(crate) async fn next_batch(
+		&mut self,
+		txn: &Transaction,
+		limit: usize,
+	) -> FlowResult<Vec<RecordId>> {
+		let mut batch = Vec::with_capacity(limit);
+		while batch.len() < limit {
+			match self.iter.next(txn).await.context("Failed to get next hit")? {
+				Some((rid, _doc_id)) => batch.push(rid),
+				None => break,
+			}
+		}
+		Ok(batch)
+	}
+}
+
+/// Open the hits of `query` against full-text index `index_def` of `table`,
+/// or `None` when no record can match: the query yields no terms, or a term
+/// has no document.
+///
+/// The hits are the index's own: no table permission or version applies to
+/// them, which the caller applies to the records the hits name.
+pub(crate) async fn open_full_text_hits(
+	ctx: &ExecutionContext,
+	table: &TableName,
+	index_def: &IndexDefinition,
+	query: &str,
+	operator: &MatchesOperator,
+) -> FlowResult<Option<FullTextHits>> {
+	let db_ctx = ctx.database().context("a full-text scan requires database context")?;
+	let txn = ctx.txn();
+	let root = ctx.root();
+	let frozen_ctx = &root.ctx;
+	// Legacy (pre-shared-doc-ID) indexes resolve postings through their
+	// historical private doc-ID layout until explicitly rebuilt; the format
+	// version selects the resolver used below.
+	let ft_params = match &index_def.index {
+		Index::FullText(params) => params,
+		_ => Err(ControlFlow::Err(anyhow::anyhow!(
+			"Index '{}' is not a full-text index",
+			index_def.name
+		)))?,
+	};
+	let ikb = IndexKeyBase::new(
+		db_ctx.ns_ctx.ns.namespace_id,
+		db_ctx.db.database_id,
+		table.clone(),
+		index_def.index_id,
+	);
+	let fti = crate::exec::vm::descriptor::object(FullTextIndex::new(
+		frozen_ctx.get_index_stores(),
+		txn.as_ref(),
+		ikb,
+		ft_params,
+		&frozen_ctx.config.idx.file_allowlist,
+		index_def.format_version,
+	))
+	.await
+	.context("Failed to open full-text index")?;
+	let query_terms = {
+		let az_fn = StreamingAnalyzerFunction::new(ctx);
+		let mut stack = TreeStack::new();
+		stack
+			.enter(|stk| fti.extract_querying_terms(stk, frozen_ctx, &az_fn, query.to_owned()))
+			.finish()
+			.await
+			.context("Failed to extract query terms")?
+	};
+	if query_terms.is_empty() {
+		return Ok(None);
+	}
+	Ok(fti.new_hits_iterator(&query_terms, operator.operator).map(|iter| FullTextHits {
+		iter,
+	}))
 }
 
 #[cfg(test)]
@@ -437,7 +478,7 @@ mod tests {
 	}
 
 	/// Reads of matching records start from the probe and grow by bytes, up
-	/// to `BATCH_SIZE`.
+	/// to `FULL_TEXT_BATCH_SIZE`.
 	#[tokio::test]
 	async fn matches_are_read_from_the_probe_up_to_the_batch_size() {
 		const ROWS: usize = 300;
@@ -469,6 +510,9 @@ mod tests {
 		assert_eq!(lens.iter().sum::<usize>(), ROWS, "every match once: {lens:?}");
 		// Narrow rows decode within the budget, so each batch is one read.
 		assert_eq!(lens[0], RECORD_PROBE_ROWS, "the first read is the probe: {lens:?}");
-		assert!(lens.iter().all(|&n| n <= BATCH_SIZE), "no read past BATCH_SIZE: {lens:?}");
+		assert!(
+			lens.iter().all(|&n| n <= FULL_TEXT_BATCH_SIZE),
+			"no read past FULL_TEXT_BATCH_SIZE: {lens:?}"
+		);
 	}
 }

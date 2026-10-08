@@ -346,9 +346,68 @@ pub async fn db_access(
 #[allow(clippy::unwrap_used)]
 mod tests {
 	use chrono::Duration;
+	use surrealdb_types::ToSql;
 
 	use super::*;
 	use crate::iam::Role;
+
+	/// A `SIGNUP` that names the rows it writes through a function call signs
+	/// the caller up, and its write lands.
+	///
+	/// Rows named by a call are resolved when the statement runs rather than
+	/// at plan time, which is one of the shapes the write pre-flight declines,
+	/// so the clause reaches the engine that runs such a form. The `SELECT`
+	/// afterwards is the half that matters: a clause whose write is skipped
+	/// rather than run still returns the record the signup needs and would
+	/// otherwise pass.
+	#[tokio::test]
+	async fn a_signup_naming_its_rows_by_call_writes_them() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNIN ( SELECT * FROM user WHERE name = $user )
+				SIGNUP {
+					LET $rec = (CREATE type::record('user', $user) SET name = $user)[0];
+					UPDATE type::record('user', $user) SET seen = true;
+					RETURN $rec;
+				}
+				DURATION FOR SESSION 2h
+			;
+			"#,
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let mut sess = Session {
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			..Default::default()
+		};
+		let mut vars = PublicVariables::new();
+		vars.insert("user", "user");
+		let res = db_access(
+			&ds,
+			&mut sess,
+			"test".to_string(),
+			"test".to_string(),
+			"user".to_string(),
+			vars,
+		)
+		.await;
+
+		assert!(res.is_ok(), "Failed to signup: {:?}", res);
+		assert_eq!(sess.au.id(), "user:user");
+
+		// The declined `UPDATE` must have written, not merely not raised.
+		let owner = Session::owner().with_ns("test").with_db("test");
+		let mut res = ds.execute("SELECT VALUE seen FROM user:user", &owner, None).await.unwrap();
+		let seen = res.remove(0).output().unwrap();
+		assert_eq!(seen.to_sql(), "[true]", "the SIGNUP's UPDATE did not write");
+	}
 
 	#[tokio::test]
 	async fn test_record_signup() {

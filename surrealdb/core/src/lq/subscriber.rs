@@ -3,11 +3,11 @@
 //! This is the half of the inverted pipeline that runs *off* the mutator's
 //! write path. The write path's only job (under the Router engine) is to
 //! capture before/after values into the dedicated `lqe` keyspace cheaply
-//! ([`crate::lq::event`], [`crate::doc::Document::process_live_events`]). The
-//! matching/permission/projection/FETCH work — the part whose cost previously
-//! scaled with subscriber count on every write — is performed here instead,
-//! reading the captured events back and replaying them through the existing,
-//! security-audited [`crate::doc::Document::process_table_lives`] pipeline.
+//! ([`crate::lq::event`]). The matching/permission/projection/FETCH work — the
+//! part whose cost previously scaled with subscriber count on every write — is
+//! performed here instead, reading the captured events back and replaying them
+//! through the same per-subscription units the inline engine notifies through
+//! ([`crate::exec::vm::notify_at`]).
 //!
 //! The per-node router ([`crate::lq::router`]) drives this as it tails the `lqe`
 //! keyspace. Equivalence with the inline engine is pinned by an end-to-end test
@@ -17,14 +17,28 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use reblessive::TreeStack;
 use surrealdb_strand::TableName;
 
-use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::dbs::{MessageBroker, Session};
-use crate::doc::{Document, DocumentContext, NsDbCtx};
+use crate::doc::Action;
+use crate::exec::operators::write::clauses::WriteClauses;
+use crate::exec::operators::write::ctx::{TableExistence, WriteCtx};
+use crate::exec::operators::write::stages::lives::{Images, Notify, deliver};
+use crate::expr::ControlFlow;
 use crate::kvs::{Datastore, Transaction};
-use crate::lq::event::LiveEvent;
+use crate::lq::event::{LiveAction, LiveEvent};
+
+/// The error a write-context failure carries. Neither resolving a table's
+/// context nor delivering a notification can signal a loop or a `RETURN`, so
+/// anything but an error is a broken invariant.
+fn into_error(flow: ControlFlow) -> anyhow::Error {
+	match flow {
+		ControlFlow::Err(e) => e,
+		ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_) => {
+			anyhow::Error::new(crate::exec::Error::InvalidControlFlow)
+		}
+	}
+}
 
 /// Compute and deliver live-query notifications for a batch of captured
 /// [`LiveEvent`]s on a single table, entirely off the write path.
@@ -32,10 +46,12 @@ use crate::lq::event::LiveEvent;
 /// The caller supplies the read `txn` — which must be at-or-after the events'
 /// commit so any permission / computed-field / FETCH reads observe the
 /// committed state — and the `broker` that receives the produced
-/// notifications. For each event this resolves the table's catalog context
-/// (including its live subscriptions) once, then replays every event through
-/// [`Document::replay_live_event`], reusing the inline matching pipeline so all
-/// of its security guarantees hold unchanged.
+/// notifications. This resolves the table's catalog context (including its live
+/// subscriptions and their units) once, then replays every event against each
+/// subscription through [`crate::exec::vm::notify_at`], so all of the inline
+/// pipeline's security guarantees hold
+/// unchanged: field-permission and computed-field filtering, DIFF leakage
+/// protection, session-expiry suppression and per-subscriber error isolation.
 ///
 /// `ns_name`/`db_name`/`table` identify the table whose events these are; the
 /// router resolves them from the `lqe` key and value before calling in.
@@ -55,30 +71,48 @@ pub(crate) async fn replay_table_live_events(
 	// that the replayed notifications are sent through.
 	let mut ctx = ds.setup_ctx()?;
 	ctx.set_transaction(Arc::clone(&txn));
-	ctx.set_broker(Some(broker));
+	ctx.set_broker(Some(Arc::clone(&broker)));
 	let ctx = ctx.freeze();
-	// Resolve the catalog definitions for this table from the read transaction.
-	let ns = ctx.tx().expect_ns_by_name(ns_name).await?;
-	let db = ctx.tx().expect_db_by_name(ns_name, db_name).await?;
-	let tb = ctx.tx().expect_tb_by_name(ns_name, db_name, table).await?;
-	let parent = NsDbCtx {
-		ns,
-		db,
-	};
-	// The mutating context carries the table's live subscriptions, which
-	// `process_table_lives` iterates over per record change.
-	let doc_ctx = DocumentContext::initialise(&ctx, &parent, tb, table, None, true).await?;
 	// Base options scoped to this namespace/database. The auth is anonymous and
 	// irrelevant: the pipeline applies each subscription's own stored auth
 	// snapshot before evaluating any permission.
 	let opt = ds.setup_options(&Session::default().with_ns(ns_name).with_db(db_name));
-	let mut stack = TreeStack::new();
+	let exec = crate::exec::entry::frame(&ctx, &opt, None).await;
+	// The table's definitions, including the live subscriptions each event is
+	// replayed against.
+	let write_ctx = WriteCtx::resolve(
+		&exec,
+		table,
+		TableExistence::Required,
+		None,
+		Arc::new(WriteClauses::default()),
+	)
+	.await
+	.map_err(into_error)?;
 	for event in events {
-		let doc_ctx = doc_ctx.clone();
-		stack
-			.enter(|stk| Document::replay_live_event(stk, &ctx, &opt, doc_ctx, event))
-			.finish()
-			.await?;
+		// The action selects the same source image and emits the same
+		// notification action the inline engine does.
+		let images = Images {
+			initial: Arc::new(event.before.clone()),
+			current: Arc::new(event.after.clone()),
+			action: match event.action {
+				LiveAction::Create => Action::Create,
+				LiveAction::Update => Action::Update,
+				LiveAction::Delete => Action::Delete,
+			},
+		};
+		for at in 0..write_ctx.lives.len() {
+			let Notify::Deliver(notification) =
+				crate::exec::vm::notify_at(&write_ctx, at, &event.id, &images)
+					.await
+					.map_err(into_error)?
+			else {
+				continue;
+			};
+			deliver(&broker, &write_ctx, &write_ctx.lives[at], notification)
+				.await
+				.map_err(into_error)?;
+		}
 	}
 	Ok(())
 }

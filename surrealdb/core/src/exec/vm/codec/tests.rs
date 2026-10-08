@@ -1,0 +1,478 @@
+use super::*;
+
+// Which types must have a descriptor is decided by the compat tests: every
+// revisioned type a fixture covers (`kvs/compat/tests.rs`).
+
+/// Every revisioned type the compat fixtures cover and the VM describes:
+/// decoding each fixture of it and re-encoding writes exactly what the Rust
+/// codec writes for the same fixture. The compat tests run the check
+/// themselves (`kvs/compat/tests.rs`); this names the types that must pass
+/// it, so a descriptor that stops matching cannot be dropped silently.
+#[test]
+fn integers_round_trip_at_every_varint_width() {
+	for v in
+		[0u128, 250, 251, 65_535, 65_536, u32::MAX as u128, u32::MAX as u128 + 1, u64::MAX as u128]
+	{
+		let mut w = wire::Writer::default();
+		w.varint(v);
+		let bytes = w.into_bytes();
+		assert_eq!(wire::Reader::new(&bytes).varint().unwrap(), v);
+	}
+	for v in [0i128, -1, 1, i64::MIN as i128, i64::MAX as i128] {
+		let mut w = wire::Writer::default();
+		w.zigzag(v);
+		let bytes = w.into_bytes();
+		assert_eq!(wire::Reader::new(&bytes).zigzag().unwrap(), v);
+	}
+}
+
+mod keys {
+	use std::borrow::Cow;
+
+	use surrealdb_kvs::key::KeyStep;
+
+	use super::key;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
+	use crate::key::schema::{
+		DatabaseKey, EventKey, FieldKey, FunctionKey, NamespaceKey, ParamKey, ReclaimKey, TableKey,
+	};
+	use crate::val::{Number, Object, TableName, Value};
+
+	fn fields(pairs: &[(&str, Value)]) -> Value {
+		let mut object = Object::default();
+		for (k, v) in pairs {
+			object.insert((*k).to_owned(), v.clone());
+		}
+		Value::Object(object)
+	}
+
+	fn int(v: i64) -> Value {
+		Value::Number(Number::Int(v))
+	}
+
+	fn string(s: &str) -> Value {
+		Value::String(s.into())
+	}
+
+	/// A name with every byte the key encoding has to escape.
+	const AWKWARD: &str = "a\u{0}b\u{1}c";
+
+	#[test]
+	fn the_vm_encodes_catalog_keys_as_the_schema_does() {
+		let (ns, db) = (NamespaceId(7), DatabaseId(300));
+		let tb = TableName::new(AWKWARD);
+		let mut cases: Vec<(&str, Vec<u8>, Value)> = vec![
+			(
+				"NamespaceKey",
+				NamespaceKey::new(Cow::Borrowed(AWKWARD)).encode_key().unwrap().to_vec(),
+				fields(&[("ns", string(AWKWARD))]),
+			),
+			(
+				"DatabaseKey",
+				DatabaseKey::new(ns, Cow::Borrowed("db")).encode_key().unwrap().to_vec(),
+				fields(&[("ns", int(7)), ("db", string("db"))]),
+			),
+			(
+				"TableKey",
+				TableKey::new(ns, db, Cow::Borrowed(&tb)).encode_key().unwrap().to_vec(),
+				fields(&[("ns", int(7)), ("db", int(300)), ("tb", string(AWKWARD))]),
+			),
+			(
+				"FieldKey",
+				FieldKey::new(ns, db, Cow::Borrowed(&tb), Cow::Borrowed("a.b"))
+					.encode_key()
+					.unwrap()
+					.to_vec(),
+				fields(&[
+					("ns", int(7)),
+					("db", int(300)),
+					("tb", string(AWKWARD)),
+					("fd", string("a.b")),
+				]),
+			),
+			(
+				"EventKey",
+				EventKey::new(ns, db, Cow::Borrowed(&tb), Cow::Borrowed("ev"))
+					.encode_key()
+					.unwrap()
+					.to_vec(),
+				fields(&[
+					("ns", int(7)),
+					("db", int(300)),
+					("tb", string(AWKWARD)),
+					("ev", string("ev")),
+				]),
+			),
+			(
+				"FunctionKey",
+				FunctionKey::new(ns, db, Cow::Borrowed("f")).encode_key().unwrap().to_vec(),
+				fields(&[("ns", int(7)), ("db", int(300)), ("fc", string("f"))]),
+			),
+			(
+				"ParamKey",
+				ParamKey::new(ns, db, Cow::Borrowed("p")).encode_key().unwrap().to_vec(),
+				fields(&[("ns", int(7)), ("db", int(300)), ("pa", string("p"))]),
+			),
+		];
+		let uid = uuid::Uuid::from_u128(0x0102_0304);
+		let reclaim = |kind: i64, db: i64, expunge: i64| {
+			fields(&[
+				("kind", int(kind)),
+				("ns", int(7)),
+				("db", int(db)),
+				("tb", string("")),
+				("ix", int(0)),
+				("expunge", int(expunge)),
+				("uid", Value::Uuid(crate::val::Uuid(uid))),
+			])
+		};
+		cases.push((
+			"ReclaimKey",
+			ReclaimKey::namespace(ns, true, uid).encode_key().unwrap().to_vec(),
+			reclaim(0, 0, 1),
+		));
+		cases.push((
+			"ReclaimKey",
+			ReclaimKey::database(ns, db, false, uid).encode_key().unwrap().to_vec(),
+			reclaim(1, 300, 0),
+		));
+		for (name, rust, fields) in cases {
+			assert_eq!(key::encode(name, &fields).unwrap(), rust, "{name}");
+			assert_eq!(key::decode(name, &rust).unwrap(), fields, "{name}");
+		}
+	}
+
+	/// Every route of simple fields round-trips through the VM's encoding.
+	#[test]
+	fn every_route_of_simple_fields_round_trips() {
+		let sample = |ty: &str| -> Option<Value> {
+			Some(match ty {
+				"ReclaimKind" | "Expunge" => int(1),
+				"u16" | "TaskLeaseType" => int(513),
+				"u32"
+				| "NamespaceId"
+				| "DatabaseId"
+				| "IndexId"
+				| "BuildTicketMutationSeq"
+				| "AppendingId"
+				| "BatchId" => int(70_000),
+				"u64" | "DocId" | "BuildGeneration" | "BuildTicket" | "ElementId" => int(1 << 40),
+				"i64" => int(-5),
+				"bool" => Value::Bool(true),
+				"Uuid" => Value::Uuid(crate::val::Uuid(uuid::Uuid::from_u128(0x0102))),
+				"Str" | "Table" => string(AWKWARD),
+				_ => return None,
+			})
+		};
+		let mut checked = 0;
+		for route in surrealdb_datastore::key::schema::KEY_ROUTES {
+			let mut pairs = Vec::new();
+			let simple = route.steps.iter().all(|step| match step {
+				KeyStep::Lit(_) => true,
+				KeyStep::Field {
+					name,
+					ty,
+				} => sample(ty).map(|v| pairs.push((*name, v))).is_some(),
+				KeyStep::List {
+					..
+				} => false,
+			});
+			if !simple {
+				continue;
+			}
+			let fields = fields(&pairs);
+			let bytes = key::encode(route.name, &fields).unwrap();
+			assert_eq!(key::decode(route.name, &bytes).unwrap(), fields, "{}", route.name);
+			checked += 1;
+		}
+		assert!(checked > 50, "only {checked} routes were simple");
+	}
+
+	/// An index entry's key, whether it names a record or is unique, and the
+	/// pending-entries marker, encoded from borrowed fields spell exactly the
+	/// bytes the typed keys spell: the indexed values under the index format,
+	/// each behind a terminator mark, and the record id under that format too.
+	#[test]
+	fn index_keys_match_the_typed_keys() {
+		use key::KeyField;
+
+		use crate::key::schema::{DocPendingKey, EntryKey, UniqueKey};
+		use crate::val::{Array, RecordIdKey, Strand};
+		let tb = TableName::from("t\u{1}b");
+		let lists: Vec<Vec<Value>> = vec![
+			vec![],
+			vec![int(0)],
+			vec![Value::from(0.0_f64)],
+			vec![Value::Number(Number::Decimal(rust_decimal::Decimal::new(15, 1)))],
+			vec![int(-7), Value::from(1.5_f64), int(i64::MAX)],
+			vec![string(AWKWARD), string("")],
+			vec![Value::None, Value::Null, Value::Bool(true)],
+			vec![Value::from(vec![int(1), string("x")]), Value::from(Array::default())],
+			vec![Value::RecordId(crate::val::RecordId::new(
+				TableName::from("other"),
+				RecordIdKey::Number(3),
+			))],
+		];
+		let ids = [
+			RecordIdKey::Number(-4),
+			RecordIdKey::String(Strand::new_static("a\u{0}b")),
+			RecordIdKey::Array(Array(vec![int(1), Value::from(2.5_f64)])),
+		];
+		for fd in &lists {
+			for id in &ids {
+				let typed = EntryKey::new(
+					NamespaceId(1),
+					DatabaseId(2),
+					Cow::Borrowed(&tb),
+					crate::catalog::IndexId(3),
+					Cow::Borrowed(fd),
+					Cow::Borrowed(id),
+				)
+				.encode_key()
+				.unwrap();
+				let vm = key::encode_fields(
+					"EntryKey",
+					&[
+						("ns", KeyField::Int(1)),
+						("db", KeyField::Int(2)),
+						("tb", KeyField::Str(tb.as_str())),
+						("ix", KeyField::Int(3)),
+						("fd", KeyField::Values(fd)),
+						("id", KeyField::Id(id)),
+					],
+				)
+				.unwrap();
+				assert_eq!(vm, typed.to_vec(), "entry {fd:?} {id:?}");
+			}
+			let typed = UniqueKey::new(
+				NamespaceId(1),
+				DatabaseId(2),
+				Cow::Borrowed(&tb),
+				crate::catalog::IndexId(3),
+				Cow::Borrowed(fd),
+			)
+			.encode_key()
+			.unwrap();
+			let vm = key::encode_fields(
+				"UniqueKey",
+				&[
+					("ns", KeyField::Int(1)),
+					("db", KeyField::Int(2)),
+					("tb", KeyField::Str(tb.as_str())),
+					("ix", KeyField::Int(3)),
+					("fd", KeyField::Values(fd)),
+				],
+			)
+			.unwrap();
+			assert_eq!(vm, typed.to_vec(), "unique {fd:?}");
+		}
+		for id in &ids {
+			let typed = DocPendingKey::new(
+				NamespaceId(1),
+				DatabaseId(2),
+				Cow::Borrowed(&tb),
+				crate::val::RecordIdentity(id.clone()),
+			)
+			.encode_key()
+			.unwrap();
+			let vm = key::encode_fields(
+				"DocPendingKey",
+				&[
+					("ns", KeyField::Int(1)),
+					("db", KeyField::Int(2)),
+					("tb", KeyField::Str(tb.as_str())),
+					("id", KeyField::Id(id)),
+				],
+			)
+			.unwrap();
+			assert_eq!(vm, typed.to_vec(), "pending {id:?}");
+		}
+	}
+}
+
+/// A reclaim queue entry's state, which no frozen fixture covers, reads and
+/// writes as the Rust type does at its current revision.
+#[test]
+fn reclaim_state_matches_its_revisioned_encoding() {
+	use surrealdb_datastore::key::reclaim::ReclaimState;
+	let cases = [
+		ReclaimState::enqueued(),
+		ReclaimState {
+			observed_ms: 1 << 40,
+			cursor: Some(vec![0, 1, 0xff]),
+		},
+	];
+	for state in cases {
+		let rust = revision::to_vec(&state).unwrap();
+		let value = super::decode("ReclaimState", &rust).unwrap();
+		assert_eq!(super::encode("ReclaimState", &value).unwrap(), rust, "{state:?}");
+	}
+}
+
+/// An aggregated view row, whose metadata carries a stat of every kind, reads
+/// and writes as the Rust `Record` does: decoding its bytes and encoding them
+/// again, or encoding its metadata and data where they are, writes exactly the
+/// bytes the Rust codec writes.
+#[test]
+fn nest_a_view_rows_stats_match_their_revisioned_encoding() {
+	use crate::catalog::aggregation::AggregationStat;
+	use crate::catalog::{Metadata, Record, RecordType};
+	use crate::val::{Datetime, Number, Object};
+	let n = |v: f64| Number::Float(v);
+	let stats = vec![
+		AggregationStat::Count {
+			count: 3,
+		},
+		AggregationStat::CountValue {
+			arg: 0,
+			count: -1,
+		},
+		AggregationStat::NumberMax {
+			arg: 1,
+			max: Number::Int(9),
+		},
+		AggregationStat::NumberMin {
+			arg: 2,
+			min: n(f64::INFINITY),
+		},
+		AggregationStat::Sum {
+			arg: 3,
+			sum: Number::Decimal(rust_decimal::Decimal::new(125, 2)),
+		},
+		AggregationStat::Mean {
+			arg: 4,
+			sum: n(7.5),
+			count: 2,
+		},
+		AggregationStat::StdDev {
+			arg: 5,
+			shift: n(2.0),
+			sum: n(1.0),
+			sum_of_squares: n(3.0),
+			count: 4,
+		},
+		AggregationStat::Variance {
+			arg: 6,
+			shift: n(0.0),
+			sum: Number::Int(0),
+			sum_of_squares: Number::Int(0),
+			count: 0,
+		},
+		AggregationStat::TimeMax {
+			arg: 7,
+			max: Datetime::MIN_UTC,
+		},
+		AggregationStat::TimeMin {
+			arg: 8,
+			min: Datetime::MAX_UTC,
+		},
+		AggregationStat::Accumulate {
+			arg: 9,
+			values: vec![Value::from(1), Value::from("a"), Value::None],
+		},
+	];
+	let mut data = Object::default();
+	data.insert("n".to_owned(), Value::from(3));
+	for stats in [Vec::new(), stats] {
+		let record = Record {
+			metadata: Some(Metadata {
+				record_type: RecordType::Table,
+				aggregation_stats: stats,
+			}),
+			data: Value::Object(data.clone()),
+		};
+		let rust = revision::to_vec(&record).unwrap();
+		let value = super::decode("Record", &rust).unwrap();
+		assert_eq!(super::encode("Record", &value).unwrap(), rust, "{record:?}");
+		let Value::Object(fields) = &value else {
+			panic!("a record decodes to an object: {value:?}");
+		};
+		let (Some(metadata), Some(data)) = (fields.get("metadata"), fields.get("data")) else {
+			panic!("a record decodes to its metadata and data: {value:?}");
+		};
+		assert_eq!(super::encode_record(metadata, data).unwrap(), rust, "{record:?}");
+	}
+}
+
+/// A route or type named by id encodes and decodes exactly as the same one
+/// named by its name, and every route's id resolves back to its own name.
+#[test]
+fn ids_name_the_routes_and_types_their_names_do() {
+	for route in surrealdb_datastore::key::schema::KEY_ROUTES {
+		assert_eq!(key::RouteId::named(route.name).name(), route.name);
+	}
+	let utf8 = encode_id(TypeId::UTF8, &Value::String("a".into())).unwrap();
+	assert_eq!(utf8, b"a");
+	assert_eq!(decode_id(TypeId::UTF8, &utf8).unwrap(), Value::String("a".into()));
+	let bytes = revision::to_vec(&crate::catalog::Record::new(Value::None)).unwrap();
+	let value = decode("Record", &bytes).unwrap();
+	let id = TypeId::named("Record");
+	assert_eq!(decode_id(id, &bytes).unwrap(), value);
+	assert_eq!(encode_id(id, &value).unwrap(), bytes);
+}
+
+/// A function definition as 3.2.4 wrote it, at revision 3 with its argument
+/// kinds stored as `Kind` (`DEFINE FUNCTION fn::test_function_1($a: number,
+/// $b: array<int>) {} COMMENT "A function comment" PERMISSIONS NONE`), reads
+/// with each kind as the text the Rust `convert_fn` renders, and writes back
+/// exactly what the Rust codec writes for it.
+#[test]
+fn a_function_with_kinds_stored_as_an_ast_reads_as_kind_text() {
+	use crate::catalog::StoredFunctionDefinition;
+	use crate::key::KVValue;
+	const WRITTEN_BY_3_2_4: &[u8] = &[
+		3, 15, 116, 101, 115, 116, 95, 102, 117, 110, 99, 116, 105, 111, 110, 95, 49, 2, 1, 97, 1,
+		10, 1, 98, 1, 20, 1, 9, 0, 3, 123, 59, 125, 1, 18, 65, 32, 102, 117, 110, 99, 116, 105,
+		111, 110, 32, 99, 111, 109, 109, 101, 110, 116, 1, 0, 0, 1, 1, 1, 1, 5, 79, 119, 110, 101,
+		114, 0, 0,
+	];
+	let rust = StoredFunctionDefinition::kv_decode_value(WRITTEN_BY_3_2_4, ())
+		.unwrap()
+		.kv_encode_value()
+		.unwrap();
+	let value = decode("StoredFunctionDefinition", WRITTEN_BY_3_2_4).unwrap();
+	let Value::Object(fields) = &value else {
+		panic!("a function decodes to an object: {value:?}");
+	};
+	let arg = |name: &str, kind: &str| {
+		Value::Array(vec![Value::String(name.into()), Value::String(kind.into())].into())
+	};
+	assert_eq!(
+		fields.get("args"),
+		Some(&Value::Array(vec![arg("a", "number"), arg("b", "array<int>")].into()))
+	);
+	assert_eq!(fields.get("returns"), Some(&Value::None));
+	assert_eq!(encode("StoredFunctionDefinition", &value).unwrap(), rust);
+}
+
+/// A table whose view is the `Aggregated` form, which predates a view's
+/// clauses being stored as text and which no frozen fixture covers, reads and
+/// writes as the Rust codec does.
+#[test]
+fn an_aggregated_view_matches_its_revisioned_encoding() {
+	use crate::catalog::aggregation::AggregationAnalysis;
+	use crate::catalog::view::StoredViewDefinition;
+	let ast = crate::syn::parse(
+		"SELECT count() AS total, math::sum(n) AS sum, b FROM x WHERE n > 1 GROUP BY b",
+	)
+	.unwrap();
+	let Some(crate::sql::TopLevelExpr::Expr(expr)) = ast.expressions.into_iter().next() else {
+		panic!("a select statement");
+	};
+	let crate::expr::Expr::Select(select) = crate::expr::Expr::from(expr) else {
+		panic!("a select statement");
+	};
+	let groups = select.group.clone().unwrap();
+	let view = StoredViewDefinition::Aggregated {
+		analysis: AggregationAnalysis::analyze_fields_groups(&select.fields, &groups, true)
+			.unwrap(),
+		condition: select.cond.clone().map(|c| c.0),
+		tables: vec![crate::val::TableName::new("x")],
+		groups,
+		fields: select.fields.clone(),
+	};
+	let rust = revision::to_vec(&view).unwrap();
+	let value = decode("StoredViewDefinition", &rust).unwrap();
+	assert_eq!(encode("StoredViewDefinition", &value).unwrap(), rust, "{view:?}");
+}

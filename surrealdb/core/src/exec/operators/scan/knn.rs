@@ -4,40 +4,72 @@
 //! index. It retrieves the top-K records closest to a query vector, ordered by
 //! distance (nearest first).
 
-use std::collections::{HashSet, VecDeque};
+#[cfg(test)]
+use std::collections::HashSet;
+use std::collections::VecDeque;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
 use reblessive::TreeStack;
+#[cfg(test)]
+use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
+#[cfg(test)]
 use surrealdb_types::ToSql;
 
+#[cfg(test)]
 use super::bitmap::BitmapNode;
+#[cfg(test)]
 use super::common::{fetch_and_filter_records_batch, resolve_version_stamp};
+#[cfg(test)]
 use super::pipeline::{ScanPipeline, build_field_state};
+#[cfg(test)]
 use super::resolved::ResolvedTableContext;
-use crate::catalog::{DatabaseId, Distance, Error, Index, NamespaceId, VectorType};
+#[cfg(test)]
+use crate::catalog::{DatabaseId, Distance, NamespaceId, Record, VectorType};
+use crate::catalog::{Error, Index};
+#[cfg(test)]
+use crate::exe::FlowResultExt as _;
+#[cfg(test)]
 use crate::exec::field_path_convert::field_path_from_idiom;
+#[cfg(test)]
 use crate::exec::index::access_path::IndexRef;
+#[cfg(test)]
 use crate::exec::operators::{KnnTopKHeap, check_cancelled, extract_vector};
+#[cfg(test)]
+use crate::exec::permission::PhysicalTableSelect;
+#[cfg(test)]
 use crate::exec::permission::{
-	PhysicalPermission, PhysicalTableSelect, should_check_perms,
-	table_select_permission_physical_runtime, validate_record_user_access,
+	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
+	validate_record_user_access,
 };
+#[cfg(test)]
 use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, OperatorMetrics,
+	PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
+use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::{ControlFlow, ControlFlowExt};
+#[cfg(test)]
 use crate::iam::Action;
+#[cfg(test)]
 use crate::idx::docids::TableDocIds;
-use crate::idx::trees::gate::{CachedTableSelect, CandidateFetchCounter};
+#[cfg(test)]
+use crate::idx::trees::gate::{
+	BoxGateFut, CachedTableSelect, CandidateCondition, CandidateFetchCounter,
+};
+#[cfg(test)]
 use crate::idx::trees::vector::{score_raw_vector, typed_query_vector};
 use crate::idx::trees::{KnnCondFilter, KnnIteratorResult};
+#[cfg(test)]
 use crate::kvs::{CachePolicy, Transaction};
-use crate::legacy::knn::PhysicalCondition;
+#[cfg(test)]
 use crate::val::field_path::FieldPath;
-use crate::val::{Number, Object, RecordId, TableName, Value};
+use crate::val::{Number, RecordId, TableName};
+#[cfg(test)]
+use crate::val::{Object, Value};
 
 /// Execution strategy chosen by the KNN prefilter triage (#548), keyed on
 /// the allow-list cardinality.
@@ -105,6 +137,7 @@ pub(crate) fn boosted_ef(ef: u32, boost: u32, ef_max: u32) -> u32 {
 	ef.saturating_mul(boost).min(ef_max).max(ef)
 }
 
+#[cfg(test)]
 /// Operator-side pre-filter for a KNN scan (#548, pre-filtered vector
 /// search).
 ///
@@ -132,6 +165,7 @@ pub(crate) struct KnnPrefilter {
 	pub(crate) uncovered_matches: bool,
 }
 
+#[cfg(test)]
 /// KNN scan operator using an ANN index.
 ///
 /// Executes an approximate nearest-neighbor search against an ANN index
@@ -213,7 +247,175 @@ pub struct KnnScan {
 	pub(crate) needed_fields: Option<Option<HashSet<String>>>,
 }
 
+/// The ANN index [`ann_search`] searches and what it is opened with.
+#[derive(Clone, Copy)]
+pub(crate) struct AnnTarget<'a> {
+	pub(crate) frozen_ctx: &'a crate::ctx::FrozenContext,
+	pub(crate) index_def: &'a crate::catalog::IndexDefinition,
+	pub(crate) ikb: &'a crate::idx::IndexKeyBase,
+	pub(crate) table_id: crate::catalog::TableId,
+}
+
+/// Search the ANN index of `target` for the `k` nearest neighbours of
+/// `vector`, exploring `ef` candidates, nearest first.
+///
+/// `cond_filter` gates each candidate inside the traversal on the table's
+/// permission and a pushed-down condition; `allow` restricts admission to a
+/// bitmap of doc-IDs. With neither, the search ranks every record of the
+/// index and applies no permission, which is the caller's to apply to what it
+/// returns.
+pub(crate) async fn ann_search(
+	target: &AnnTarget<'_>,
+	vector: &[Number],
+	k: u32,
+	ef: u32,
+	cond_filter: Option<KnnCondFilter<'_>>,
+	allow: Option<&RoaringTreemap>,
+) -> Result<VecDeque<KnnIteratorResult>, ControlFlow> {
+	let AnnTarget {
+		frozen_ctx,
+		index_def,
+		ikb,
+		table_id,
+	} = *target;
+	Ok(match &index_def.index {
+		Index::Hnsw(hnsw_params) => {
+			// Obtain the shared HNSW index
+			let hnsw_index = frozen_ctx
+				.get_index_stores()
+				.get_index_hnsw(frozen_ctx, table_id, ikb, hnsw_params, index_def.format_version)
+				.await
+				.context("Failed to get HNSW index")?;
+
+			// The search brings the graph level with this transaction's snapshot
+			// itself, under the guard it walks the graph with.
+			let mut stack = TreeStack::new();
+			stack
+				.enter(|stk| {
+					let hnsw_index = &hnsw_index;
+					async move {
+						hnsw_index
+							.knn_search(
+								frozen_ctx,
+								stk,
+								vector,
+								k as usize,
+								ef as usize,
+								cond_filter,
+								allow,
+							)
+							.await
+					}
+				})
+				.finish()
+				.await
+				.context("HNSW KNN search failed")?
+		}
+		#[cfg(diskann)]
+		Index::DiskAnn(diskann_params) => {
+			let diskann_index = frozen_ctx
+				.get_index_stores()
+				.get_index_diskann(index_def.format_version, table_id, ikb, diskann_params)
+				.await
+				.context("Failed to get DiskANN index")?;
+
+			diskann_index.check_state().await.context("Failed to check DiskANN index state")?;
+
+			let mut stack = TreeStack::new();
+			stack
+				.enter(|stk| {
+					let diskann_index = &diskann_index;
+					async move {
+						diskann_index
+							.knn_search(
+								frozen_ctx,
+								stk,
+								vector,
+								k as usize,
+								ef as usize,
+								cond_filter,
+								allow,
+							)
+							.await
+					}
+				})
+				.finish()
+				.await
+				.context("DiskANN KNN search failed")?
+		}
+		#[cfg(not(diskann))]
+		Index::DiskAnn(_) => {
+			Err(ControlFlow::Err(anyhow::anyhow!(
+				"DISKANN indexes require a 64-bit, non-WASM platform"
+			)))?;
+			unreachable!()
+		}
+		_ => {
+			Err(ControlFlow::Err(anyhow::anyhow!(
+				"Index '{}' is not an ANN index",
+				index_def.name
+			)))?;
+			unreachable!()
+		}
+	})
+}
+
+/// The records ANN index `index_def` of `table` ranks nearest to `vector`,
+/// at most `k`, nearest first, each with its distance; the table's definition
+/// is read as of `version`.
+///
+/// Without `cond_filter` and `allow` the ranking is the index's own, over
+/// every record the index holds: no table permission, condition or allow-list
+/// narrows the candidates, so the caller applies the table's permission to
+/// the records it reads for them. `cond_filter` gates each candidate inside
+/// the search on the table's permission and then a condition, and `allow`
+/// restricts admission to a bitmap of doc-IDs.
+#[expect(clippy::too_many_arguments)]
+pub(crate) async fn knn_candidates(
+	ctx: &ExecutionContext,
+	table: &TableName,
+	index_def: &crate::catalog::IndexDefinition,
+	vector: &[Number],
+	k: u32,
+	ef: u32,
+	version: Option<u64>,
+	cond_filter: Option<KnnCondFilter<'_>>,
+	allow: Option<&RoaringTreemap>,
+) -> FlowResult<Vec<(RecordId, f64)>> {
+	let db_ctx = ctx.database().context("a KNN scan requires database context")?;
+	let table_def = db_ctx.get_table_def(table, version).await.context("Failed to get table")?;
+	let Some(table_def) = table_def else {
+		return Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
+			name: table.clone(),
+		})));
+	};
+	let ikb = crate::idx::IndexKeyBase::new(
+		db_ctx.ns_ctx.ns.namespace_id,
+		db_ctx.db.database_id,
+		index_def.table_name.clone(),
+		index_def.index_id,
+	);
+	let root = ctx.root();
+	let results = ann_search(
+		&AnnTarget {
+			frozen_ctx: &root.ctx,
+			index_def,
+			ikb: &ikb,
+			table_id: table_def.table_id,
+		},
+		vector,
+		k,
+		ef,
+		cond_filter,
+		allow,
+	)
+	.await?;
+	Ok(results.into_iter().map(|(rid, distance, _)| (rid.as_ref().clone(), distance)).collect())
+}
+
+#[cfg(test)]
 impl KnnScan {
+	#[cfg(test)]
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		index_ref: IndexRef,
@@ -247,12 +449,14 @@ impl KnnScan {
 		}
 	}
 
+	#[cfg(test)]
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
 		self
 	}
 
+	#[cfg(test)]
 	/// Records that every field of the table reads as stored for every caller
 	/// (see [`Self::fields_read_as_stored`]).
 	pub(crate) fn with_fields_read_as_stored(mut self, read_as_stored: bool) -> Self {
@@ -260,17 +464,20 @@ impl KnnScan {
 		self
 	}
 
+	#[cfg(test)]
 	pub(crate) fn with_matches_condition(mut self, phys: Option<Arc<dyn PhysicalExpr>>) -> Self {
 		self.matches_condition = phys;
 		self
 	}
 }
+#[cfg(test)]
 impl KnnScan {
 	/// Operator name, shared with the planner's KNN-source detection
 	/// (`source_contains_knn` in `planner/select`).
 	pub(crate) const NAME: &'static str = "KnnScan";
 }
 
+#[cfg(test)]
 impl ExecOperator for KnnScan {
 	fn name(&self) -> &'static str {
 		Self::NAME
@@ -627,102 +834,20 @@ impl ExecOperator for KnnScan {
 				};
 				// A filter reads each candidate's record inside the search.
 				search_read_records = cond_filter.is_some();
-				match &index_def.index {
-					Index::Hnsw(hnsw_params) => {
-						// Obtain the shared HNSW index
-						let hnsw_index = frozen_ctx
-							.get_index_stores()
-							.get_index_hnsw(
-								frozen_ctx,
-								table_id,
-								&ikb,
-								hnsw_params,
-								index_def.format_version,
-							)
-							.await
-							.context("Failed to get HNSW index")?;
-
-						// The search brings the graph level with this transaction's
-						// snapshot itself, under the guard it walks the graph with.
-						let mut stack = TreeStack::new();
-						stack
-							.enter(|stk| {
-								let hnsw_index = &hnsw_index;
-								let vector = &vector;
-								async move {
-									hnsw_index
-										.knn_search(
-											frozen_ctx,
-											stk,
-											vector,
-											k as usize,
-											ef_eff as usize,
-											cond_filter,
-											search_allow,
-										)
-										.await
-								}
-							})
-							.finish()
-							.await
-							.context("HNSW KNN search failed")?
-					}
-					#[cfg(diskann)]
-					Index::DiskAnn(diskann_params) => {
-						let diskann_index = frozen_ctx
-							.get_index_stores()
-							.get_index_diskann(
-								index_def.format_version,
-								table_id,
-								&ikb,
-								diskann_params,
-							)
-							.await
-							.context("Failed to get DiskANN index")?;
-
-						diskann_index
-							.check_state()
-							.await
-							.context("Failed to check DiskANN index state")?;
-
-						let mut stack = TreeStack::new();
-						stack
-							.enter(|stk| {
-								let diskann_index = &diskann_index;
-								let vector = &vector;
-								async move {
-									diskann_index
-										.knn_search(
-											frozen_ctx,
-											stk,
-											vector,
-											k as usize,
-											ef_eff as usize,
-											cond_filter,
-											search_allow,
-										)
-										.await
-								}
-							})
-							.finish()
-							.await
-							.context("DiskANN KNN search failed")?
-					}
-					#[cfg(not(diskann))]
-					Index::DiskAnn(_) => {
-						Err(ControlFlow::Err(anyhow::anyhow!(
-							"DISKANN indexes require a 64-bit, non-WASM platform"
-						)))?;
-						unreachable!()
-					}
-					_ => {
-						Err(ControlFlow::Err(anyhow::anyhow!(
-							"Index '{}' is not an ANN index",
-							index_def.name
-						)))?;
-						unreachable!()
-					}
-				}
+				ann_search(
+					&AnnTarget {
+						frozen_ctx,
+						index_def,
+						ikb: &ikb,
+						table_id,
+					},
+					&vector,
+					k,
+					ef_eff,
+					cond_filter,
+					search_allow,
+				)
+				.await?
 			};
 
 			let mut rids = Vec::with_capacity(knn_results.len());
@@ -791,6 +916,7 @@ impl ExecOperator for KnnScan {
 	}
 }
 
+#[cfg(test)]
 /// Whether the rows of a KNN result can be emitted as `{ id }` objects built
 /// from the record ids the search returned, without reading the records.
 ///
@@ -818,6 +944,7 @@ fn emits_record_ids_only(
 		&& matches!(select_permission, PhysicalPermission::Allow)
 }
 
+#[cfg(test)]
 /// The row of a record the pipeline reads only the id of.
 fn record_id_row(rid: RecordId) -> Value {
 	let mut row = Object::default();
@@ -825,10 +952,12 @@ fn record_id_row(rid: RecordId) -> Value {
 	Value::Object(row)
 }
 
+#[cfg(test)]
 /// Number of allow-list members resolved and fetched per batch on the exact
 /// tier (mirrors `BitmapResolve`'s resolve batching).
 const EXACT_TIER_BATCH_SIZE: usize = 1000;
 
+#[cfg(test)]
 /// Tier [`PrefilterTier::Exact`] of the KNN prefilter triage (#548): exact
 /// scoring over the allow-list members, with no graph access.
 ///
@@ -945,6 +1074,46 @@ async fn exact_prefiltered_knn(
 		res.push_back((rid, dist.to_float(), None));
 	}
 	Ok(res)
+}
+
+#[cfg(test)]
+/// The residual WHERE this scan pushes into the ANN search, evaluated against
+/// each candidate record.
+///
+/// Used only for vector indexes without shared doc ids, which cannot use a
+/// shared-doc-ID prefilter and whose in-traversal evaluation computes
+/// `MATCHES` to `false` — so the condition is evaluated here, by the compiled
+/// expression layer that knows what a `MATCHES` means.
+pub(crate) struct PhysicalCondition {
+	phys: Arc<dyn PhysicalExpr>,
+	exec_ctx: ExecutionContext,
+}
+
+#[cfg(test)]
+impl PhysicalCondition {
+	#[cfg(test)]
+	pub(crate) fn new(phys: Arc<dyn PhysicalExpr>, exec_ctx: ExecutionContext) -> Self {
+		Self {
+			phys,
+			exec_ctx,
+		}
+	}
+}
+
+#[cfg(test)]
+impl CandidateCondition for PhysicalCondition {
+	fn matches<'a>(
+		&'a self,
+		_stk: &'a mut Stk,
+		_rid: &'a Arc<RecordId>,
+		record: &'a Arc<Record>,
+	) -> BoxGateFut<'a> {
+		Box::pin(async move {
+			let value = record.data.clone();
+			let eval_ctx = EvalContext::from_exec_ctx(&self.exec_ctx).with_value_and_doc(&value);
+			Ok(self.phys.evaluate(eval_ctx).await.catch_return()?.is_truthy())
+		})
+	}
 }
 
 #[cfg(test)]

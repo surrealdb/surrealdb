@@ -45,9 +45,8 @@ pub(crate) const RECORD_DEREFERENCE: AccessMode = AccessMode::ReadOnly;
 ///
 /// - Overlapped rows interleave their side effects, so the order a statement's writes land in would
 ///   depend on the scheduler rather than on the input.
-/// - Writes on the streaming path are serialised on a single transaction, whose savepoints form a
-///   stack with no handle: a second writer entering before the first has left would unwind the
-///   wrong one.
+/// - Writes in a plan are serialised on a single transaction, whose savepoints form a stack with no
+///   handle: a second writer entering before the first has left would unwind the wrong one.
 ///
 /// A caller with no child expression to read a mode from must still name one,
 /// and must say what it evaluated to reach that answer.
@@ -283,6 +282,44 @@ const SPAWN_PER_ROW_NANOS: u64 = 5_000;
 #[cfg(not(target_family = "wasm"))]
 const SPAWN_MIN_TOTAL_NANOS: u64 = 8_000_000;
 
+/// The write-path bindings of an evaluation context, owned so that a spawned
+/// chunk can put them back into the context it rebuilds. Captured once per
+/// batch and shared by every chunk, never cloned per row.
+#[cfg(not(target_family = "wasm"))]
+#[derive(Clone)]
+struct SpawnedWriteBindings {
+	before: Option<std::sync::Arc<Value>>,
+	after: Option<std::sync::Arc<Value>>,
+	value: Option<std::sync::Arc<Value>>,
+	input: Option<std::sync::Arc<Value>>,
+	event: Option<std::sync::Arc<Value>>,
+	reference: Option<std::sync::Arc<Value>>,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl SpawnedWriteBindings {
+	fn capture(ctx: &crate::exec::physical_expr::EvalContext<'_>) -> Self {
+		let own = |v: Option<&Value>| v.map(|v| std::sync::Arc::new(v.clone()));
+		Self {
+			before: own(ctx.write_before),
+			after: own(ctx.write_after),
+			value: own(ctx.write_value),
+			input: own(ctx.write_input),
+			event: own(ctx.write_event),
+			reference: own(ctx.write_reference),
+		}
+	}
+
+	fn restore<'a>(&'a self, ctx: &mut crate::exec::physical_expr::EvalContext<'a>) {
+		ctx.write_before = self.before.as_deref();
+		ctx.write_after = self.after.as_deref();
+		ctx.write_value = self.value.as_deref();
+		ctx.write_input = self.input.as_deref();
+		ctx.write_event = self.event.as_deref();
+		ctx.write_reference = self.reference.as_deref();
+	}
+}
+
 /// Runs contiguous chunks of rows on their own runtime tasks — bounded,
 /// results in input order — reconstructing each chunk's evaluation context
 /// from owned clones so the tasks are `'static`. This is what row-level
@@ -297,11 +334,11 @@ const SPAWN_MIN_TOTAL_NANOS: u64 = 8_000_000;
 /// bounded in-flight set is drained, and the smallest failing index wins —
 /// which error a caller sees never depends on the scheduler.
 ///
-/// The reconstruction restores `local_params`, `skip_fetch_perms`,
-/// `computing_record`, `plan_depth` and the `doc_root`-selected
-/// `document_root` into each spawned row's context. Callers must gate on
-/// `AccessMode::ReadOnly` and an empty `recursion_ctx` — neither survives
-/// the context reconstruction.
+/// The reconstruction restores `local_params`, the write-path bindings,
+/// `skip_fetch_perms`, `computing_record`, `plan_depth` and the
+/// `doc_root`-selected `document_root` into each spawned row's context.
+/// Callers must gate on `AccessMode::ReadOnly` and an empty `recursion_ctx`
+/// — neither survives the context reconstruction.
 #[cfg(not(target_family = "wasm"))]
 pub(crate) async fn evaluate_rows_spawned(
 	expr: std::sync::Arc<dyn crate::exec::PhysicalExpr>,
@@ -321,6 +358,11 @@ pub(crate) async fn evaluate_rows_spawned(
 	let local_params: Option<
 		std::sync::Arc<std::collections::HashMap<surrealdb_strand::Strand, Value>>,
 	> = ctx.local_params.map(|m| std::sync::Arc::new(m.clone()));
+	// The write-path bindings, owned once per batch for the same reason: a
+	// row that reached a spawned task without them would read `$value` or
+	// `$before` as an unbound parameter, which is a wrong answer rather than
+	// an error.
+	let write_bindings = SpawnedWriteBindings::capture(ctx);
 	// The probe is a constant handful of rows run inline — borrowed
 	// values, the exact sequential cost — independent of the batch size:
 	// its warm rows absorb one-off setup cost and its timed rows estimate
@@ -378,6 +420,7 @@ pub(crate) async fn evaluate_rows_spawned(
 			let chunk = chunk.to_vec();
 			let inherited_root = inherited_root.clone();
 			let local_params = local_params.clone();
+			let write_bindings = write_bindings.clone();
 			let skip_fetch_perms = ctx.skip_fetch_perms;
 			let computing_record = ctx.computing_record.clone();
 			let plan_depth = ctx.plan_depth;
@@ -386,6 +429,7 @@ pub(crate) async fn evaluate_rows_spawned(
 				for value in &chunk {
 					let mut row_ctx = EvalContext::from_exec_ctx(&exec_ctx);
 					row_ctx.local_params = local_params.as_deref();
+					write_bindings.restore(&mut row_ctx);
 					row_ctx.skip_fetch_perms = skip_fetch_perms;
 					row_ctx.computing_record = computing_record.clone();
 					row_ctx.plan_depth = plan_depth;

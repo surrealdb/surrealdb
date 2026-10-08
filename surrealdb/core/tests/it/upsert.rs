@@ -2,7 +2,7 @@ use surrealdb_core::dbs::Session;
 use surrealdb_iam::{Level, Role};
 use surrealdb_types::{Array, ToSql, Value};
 
-use crate::helpers::new_ds;
+use crate::helpers::{assert_write_refused, new_ds};
 
 //
 // Permissions
@@ -134,7 +134,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 	let statement = "UPSERT person:test CONTENT { name: 'Name' };";
 
 	for ((level, role), (ns, db), should_succeed, msg) in tests {
-		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
+		let sess = Session::for_level(level.clone(), role).with_ns(ns).with_db(db);
 
 		// Test the statement when the table has to be created
 
@@ -155,12 +155,8 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 			if should_succeed {
 				assert!(res.is_ok() && res.unwrap() != Value::Array(Array::new()), "{}", msg);
-			} else if res.is_ok() {
-				assert!(res.unwrap() == Value::Array(Array::new()), "{}", msg);
 			} else {
-				// Not allowed to create a table
-				let err = res.unwrap_err();
-				assert!(err.is_not_allowed(), "{msg}: expected NotAllowed, got {err}")
+				assert_write_refused(&level, ns, db, res, msg);
 			}
 		}
 
@@ -234,8 +230,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				let res = res.unwrap().to_sql();
 				assert!(res.contains("Name"), "{}: {:?}", msg, res);
 			} else {
-				let res = res.unwrap();
-				assert!(res == Value::Array(Array::new()), "{}: {:?}", msg, res);
+				assert_write_refused(&level, ns, db, res, msg);
 
 				// Verify the update was not persisted
 				let mut resp = ds

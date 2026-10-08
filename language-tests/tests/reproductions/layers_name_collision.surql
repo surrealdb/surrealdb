@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_collision_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["compute-only", "all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -11,7 +10,7 @@ reason = """
 	digit — `a1` beside `a`, `_a1` beside `_a10` — are projected
 	independently: the computed value is the computed field's and the denied
 	stored field reads as NONE, whatever else the table declares. Denied
-	fields are projected under an alias, which every engine reports as NONE.
+	fields are projected under an alias, which reports NONE.
 """
 
 # 0: `a1` is the computed value, `a` is denied.

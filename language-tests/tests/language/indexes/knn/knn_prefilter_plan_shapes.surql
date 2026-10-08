@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Pre-filtered vector search (#548) plan-shape gates: an OR of exactly-coverable equalities joins the allow-list as a BitmapOr; a negated conjunct always stays residual (no table-universe bitmap); a WITH INDEX hint pins the plan and disables the prefilter; a WITH INDEX hint naming a different index is overridden (with a warning) because a KNN operator can only be computed by its KnnScan; an indexed column without a declared array-free field kind is not provably exact and stays residual."
@@ -37,8 +36,8 @@ value = '''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: category = 'a' AND ! category = 'b']
-        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: ! category = 'b']
+    Filter [ctx: Db] [predicate: category = 'a' AND !(category = 'b')]
+        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: !(category = 'b')]
             BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a']
 "'''
 

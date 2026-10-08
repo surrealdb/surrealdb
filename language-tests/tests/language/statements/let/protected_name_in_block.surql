@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "LET inside a block rejects protected parameter names ($access, $auth, $token, $session) at plan time. The streaming planner now mirrors the top-level executor's check."
+reason = "LET inside a block rejects protected parameter names ($access, $auth, $token, $session) at plan time. The check is the one the top-level executor applies."
 
 [env]
 

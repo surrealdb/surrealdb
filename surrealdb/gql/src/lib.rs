@@ -2,7 +2,7 @@
 //!
 //! Lexer, parser and AST for GQL queries, and the lowering that turns a
 //! parsed query into a `PreparedGqlQuery` — the `LogicalOp::Match` operator
-//! the streaming engine runs, whose scalars are the logical plan's
+//! the engine runs, whose scalars are the logical plan's
 //! `LogicalExpr`.
 //!
 //! This crate is an internal implementation detail of SurrealDB: its API is
@@ -89,7 +89,7 @@ pub fn parse_with_settings(
 /// [`MatchPlan`](crate::expr::match_plan::MatchPlan) carried by a
 /// `LogicalOp::Match`; `doc/gql/V2_DESIGN.md` §8).
 ///
-/// The returned plan executes through the streaming execution engine; no
+/// The returned plan executes through the engine; no
 /// SurrealQL surface AST is generated.
 pub fn lower(query: ast::GqlQuery) -> Result<PreparedGqlQuery, SyntaxError> {
 	Ok(PreparedGqlQuery(lower::lower(query)?))

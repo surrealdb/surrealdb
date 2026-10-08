@@ -13,8 +13,8 @@ use crate::parse::peek::peek_starts_prime;
 use crate::parse::prime::parse_prime;
 use crate::parse::range::{TryRange, parse_prefix_range_sync, try_parse_infix_range_sync};
 use crate::parse::record_id::{
-	parse_peeked_record_id_key, parse_record_id_headless_range, peek_record_id_token,
-	try_parse_record_id_range,
+	parse_keyword_key, parse_peeked_record_id_key, parse_record_id_headless_range,
+	peek_record_id_token, try_parse_record_id_range,
 };
 use crate::parse::utils::parse_seperated_list;
 use crate::parse::{Parse, ParseResult};
@@ -887,7 +887,14 @@ async fn parse_lookup_range(parser: &mut Parser<'_, '_>) -> ParseResult<RecordId
 			})
 		}
 		_ => {
-			let key = parse_peeked_record_id_key(parser).await?;
+			// As in a record id, the range may start with a generator: `rand()`, `ulid()` or
+			// `uuid()`.
+			let key = match peek.token {
+				T![RAND] => parse_keyword_key(parser, peek, ast::RecordIdKeyGenerate::Rand)?,
+				T![UUID] => parse_keyword_key(parser, peek, ast::RecordIdKeyGenerate::Uuid)?,
+				T![ULID] => parse_keyword_key(parser, peek, ast::RecordIdKeyGenerate::Ulid)?,
+				_ => parse_peeked_record_id_key(parser).await?,
+			};
 			match try_parse_record_id_range(parser, key).await? {
 				TryRange::None(_) => Err(parser.unexpected("a record id key range")),
 				TryRange::Some {

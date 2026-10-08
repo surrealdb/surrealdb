@@ -1,23 +1,29 @@
-//! `eval::surql` / `eval::gql` for the streaming executor.
+//! `eval::surql` / `eval::gql` for the engine.
 //!
-//! `eval` re-enters the executor at a statement boundary of its own: the query
-//! text is parsed into a statement, and the engine is chosen for that statement
-//! the way the executor chooses for a top-level one — lowering, then binding
-//! and planning, then the legacy engine when either declines. A statement with
-//! a logical form runs natively: lowered, bound and planned, then evaluated
-//! against an isolated child of the current `ExecutionContext` (only the
-//! explicit bindings visible — never the call site's scope). A statement
-//! without one — a write, a schema statement — runs whole on the legacy engine
-//! through [`legacy_compute`], in the same isolated context and transaction.
-//! The plan holding the call never hands part of itself over: the nested
-//! statement is decided and run as a unit. Running on the streaming engine is
-//! required for `eval::gql`, since GQL `MATCH` only executes there.
+//! `eval` runs its query text as a nested query
+//! ([`crate::exec::compiles::nested_query`]), the one sanctioned way a running
+//! program has code compiled for it, shared with an embedded script's
+//! `surrealdb.query()`. The text is parsed into a statement, which is lowered,
+//! bound and planned the way the executor plans a top-level one, in the
+//! caller's transaction and with the caller's session, principal and options,
+//! then evaluated against an isolated child of the current `ExecutionContext`
+//! (only the explicit bindings visible — never the call site's scope). A
+//! statement the planner refuses fails the call with `PlannerUnsupported`. The
+//! program holding the call is never recompiled: the nested statement is
+//! planned and run as a program of its own, sealed again by its own stream.
+//!
+//! The nested program is served from the compile cache
+//! ([`crate::exec::vm::serve`]) under the statement the text parses to, the
+//! re-entry depth and the names of the bindings, for the frame of the
+//! principal's class, and only while the catalog it read is unchanged; it
+//! reads the bindings and the session's own values when it runs. A call
+//! evaluated once per row therefore compiles once per distinct text.
 //!
 //! Capability gating, parsing and statement validation live in
-//! `crate::fnc::eval::prepare`, shared with the legacy `compute` path.
+//! `crate::fnc::eval::prepare`.
 //!
-//! Nested-`eval` recursion is bounded by *depth*, exactly like the legacy
-//! executor: the planner counts expression-nesting depth against
+//! Nested-`eval` recursion is bounded by *depth*: the planner counts
+//! expression-nesting depth against
 //! `max_computation_depth`, and records that depth onto each `eval` node
 //! ([`EvalContext::plan_depth`]). When `eval` plans its query string here, it
 //! seeds the fresh planner with that recorded depth so the count *continues*
@@ -31,15 +37,11 @@ use anyhow::Result;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::ctx::Context;
-use crate::dbs::{Force, Variables};
-use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::dbs::Variables;
 use crate::exe::FlowResultExt as _;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::operators::collect_shaped_value;
-use crate::exec::operators::legacy_bridge::{legacy_compute, legacy_handles};
 use crate::exec::physical_expr::EvalContext;
-use crate::exec::planner::{plan_logical_inner, plan_statement_inner};
 use crate::exec::{Error as ExecError, ExecOperator, ExecutionContext};
 use crate::expr::Kind;
 use crate::expr::logical::{EffectSet, lower};
@@ -48,18 +50,26 @@ use crate::fnc::eval::{Prepared, prepare};
 use crate::kvs::Dialect;
 use crate::val::{Object, Value};
 
-/// Evaluate a prepared eval query, isolated from the call site's scope and
-/// bound to the current transaction.
+/// Evaluate `query` in `dialect` with `bindings`, isolated from the call
+/// site's scope and bound to the current transaction, as a nested query.
 ///
 /// `prepare` yields either the SurrealQL statements (at most one) or, for GQL,
-/// the plan its lowering produced. A statement is lowered and goes through
-/// [`plan_statement_inner`], which binds it for the transaction and compiles
-/// it; when lowering declines, or planning answers `PlannerUnsupported`, the
-/// statement runs on the legacy engine instead ([`evaluate_legacy`]). A plan
-/// goes through [`plan_logical_inner`] and has
-/// no other engine. The planner is seeded with `ctx.plan_depth + 1` so the
-/// nesting count continues toward `max_computation_depth`.
-async fn evaluate_streaming(
+/// the plan its lowering produced. A statement is lowered and planned through
+/// [`crate::exec::vm::serve::statement`], a plan through
+/// [`crate::exec::vm::serve::front_end`]; lowering that declines fails the
+/// call with `PlannerUnsupported`. The plan is compiled at
+/// `ctx.plan_depth + 1` so the nesting count continues toward
+/// `max_computation_depth`.
+pub(crate) async fn evaluate_streaming(
+	ctx: &EvalContext<'_>,
+	dialect: Dialect,
+	query: String,
+	bindings: Option<Object>,
+) -> Result<Value> {
+	crate::exec::compiles::nested_query(evaluate_nested(ctx, dialect, query, bindings)).await
+}
+
+async fn evaluate_nested(
 	ctx: &EvalContext<'_>,
 	dialect: Dialect,
 	query: String,
@@ -74,32 +84,34 @@ async fn evaluate_streaming(
 	// bounds nested-`eval` recursion against `max_computation_depth`.
 	let depth = ctx.plan_depth + 1;
 
-	// Gate, parse and validate (shared with the legacy compute path).
+	// Gate, parse and validate.
 	let prepared = prepare(&caps, exec_ctx.auth(), dialect, &query)?;
 
 	// Build an isolated child context: the evaluated query sees the transaction,
 	// capabilities and the explicit bindings, but not the caller's scope. The
 	// `ExecutionContext` is rebuilt around it, preserving auth / ns-db level.
+	// The bindings are read when the nested program runs, so one compilation
+	// serves every value they hold.
 	let mut isolated = Context::new_isolated(exec_ctx.ctx());
+	let mut bound: Vec<String> = Vec::new();
 	if let Some(bindings) = bindings {
+		bound.extend(bindings.keys().map(|key| key.as_str().to_owned()));
 		isolated.attach_variables(Variables::from(bindings))?;
 	}
 	let isolated = isolated.freeze();
 	let mut eval_ctx = exec_ctx.with_new_ctx(isolated);
 
-	// Carry the permission-predicate no-write signal onto the root of the
-	// re-entered context. Inside a `PERMISSIONS` predicate the flag lives on
-	// the caller's `EvalContext` (set in `exec::permission`), not on the root
-	// this builtin rebuilds from; without this, a write reached through
-	// `eval` from a predicate body would bypass the frame the legacy bridge
-	// derives from the root (GHSA-66r2-5gwj-gxm2). The COMPUTED-field signal
-	// is already a root flag, so it needs no mirror.
+	// The permission-predicate no-write signal lives on the caller's
+	// `EvalContext` (set in `exec::permission`), not on the root this builtin
+	// rebuilds, so it is copied onto the root here; the re-entered context then
+	// refuses writes as the predicate does. The COMPUTED-field signal is already
+	// a root flag and needs no copy.
 	eval_ctx = eval_ctx.with_skip_fetch_perms(ctx.skip_fetch_perms);
 
 	// Promote to Database level when a database is selected, so nested table /
 	// GQL MATCH queries have the context they require. `eval`'s `required_context`
 	// stays Root so db-less queries (e.g. `eval::surql("RETURN 1")`) still work;
-	// the streaming executor would otherwise apply this promotion itself.
+	// the engine would otherwise apply this promotion itself.
 	if let Some(session) = exec_ctx.session()
 		&& let (Some(ns), Some(db)) = (session.ns.clone(), session.db.clone())
 	{
@@ -109,78 +121,34 @@ async fn evaluate_streaming(
 		eval_ctx = eval_ctx.with_database(ns_def, db_def);
 	}
 
-	// Planning resolves table and index definitions through the transaction,
-	// so a context without one cannot plan at all.
-	let txn = eval_ctx.try_txn().ok_or_else(|| {
-		Error::unreachable("eval requires a transaction, but the context has none")
-	})?;
 	let auth = Some(Arc::clone(&eval_ctx.root().auth));
 
 	match prepared {
 		Prepared::Statements(statements) => {
 			let mut result = Value::None;
 			for stmt in statements {
-				let planned = match lower(stmt.clone()) {
-					Ok(op) => plan_statement_inner(
-						op,
-						eval_ctx.ctx(),
-						eval_ctx.function_registry(),
-						Arc::clone(&txn),
-						auth.clone(),
-						depth,
-					)
-					.await
-					.map(Some),
-					Err(_) => Ok(None),
-				};
-				result = match planned {
-					Ok(Some(plan)) => run_plan(plan, &eval_ctx).await.catch_return()?,
-					Ok(None) | Err(Error::Exec(ExecError::PlannerUnsupported(_))) => {
-						evaluate_legacy(&eval_ctx, ctx, stmt).await?
-					}
-					Err(e) => return Err(e.into()),
-				};
+				let op = lower(stmt).map_err(|reason| ExecError::PlannerUnsupported {
+					reason: reason.to_string(),
+				})?;
+				let plan = crate::exec::vm::serve::statement(
+					&eval_ctx,
+					op,
+					auth.clone(),
+					depth,
+					bound.clone(),
+				)
+				.await?;
+				result = run_plan(plan, &eval_ctx).await.catch_return()?;
 			}
 			Ok(result)
 		}
-		// A GQL query lowers to a plan, and this is the only engine that runs
-		// one.
+		// A GQL query lowers to a plan.
 		Prepared::Plan(op) => {
-			let plan = plan_logical_inner(
-				*op,
-				eval_ctx.ctx(),
-				eval_ctx.function_registry(),
-				txn,
-				auth,
-				depth,
-			)
-			.await?;
+			let plan =
+				crate::exec::vm::serve::front_end(&eval_ctx, *op, auth, depth, bound).await?;
 			Ok(run_plan(plan, &eval_ctx).await.catch_return()?)
 		}
 	}
-}
-
-/// Evaluate a statement the streaming engine declined on the legacy engine,
-/// in the same isolated context and transaction.
-///
-/// The options are the ones a legacy evaluation inside `eval_ctx` runs with
-/// ([`legacy_handles`]), so the permission-predicate and computed-field frames
-/// the call site is in still forbid a write, with the call's nesting depth
-/// consumed from the dive budget so the count continues across the engine
-/// boundary as it does when the statement is planned. Force is reset so the
-/// nested statement does not inherit a table re-run. The document is the call
-/// site's, as the legacy `eval` passes its own caller's.
-async fn evaluate_legacy(
-	eval_ctx: &ExecutionContext,
-	ctx: &EvalContext<'_>,
-	stmt: crate::sql::Expr,
-) -> Result<Value> {
-	let (opt, frozen) = legacy_handles(eval_ctx)?;
-	let opt = opt.new_with_force(Force::None).with_dive_consumed(ctx.plan_depth + 1);
-	let doc =
-		ctx.document_root.or(ctx.current_value).map(|v| CursorDoc::new(None, None, v.clone()));
-	let expr = crate::expr::Expr::from(stmt);
-	legacy_compute(&expr, &frozen, &opt, doc.as_ref()).await.catch_return()
 }
 
 /// Run a compiled plan to the single value it evaluates to.
@@ -188,9 +156,15 @@ async fn run_plan(
 	plan: Arc<dyn ExecOperator>,
 	ctx: &ExecutionContext,
 ) -> crate::expr::FlowResult<Value> {
-	let shape = plan.output_shape();
-	let stream = plan.execute(ctx)?;
-	collect_shaped_value(stream, shape).await
+	// The query runs as a frame of the statement's driver, when there is
+	// one, rather than beneath this call on the native stack.
+	let ctx = ctx.clone();
+	crate::exec::trampoline::nest(async move {
+		let shape = plan.output_shape();
+		let stream = plan.execute(&ctx)?;
+		collect_shaped_value(stream, shape).await
+	})
+	.await
 }
 
 fn eval_signature() -> Signature {
@@ -286,4 +260,137 @@ impl ScalarFunction for EvalGql {
 pub fn register(registry: &mut FunctionRegistry) {
 	registry.register(EvalSurql);
 	registry.register(EvalGql);
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::dbs::Session;
+	use crate::dbs::capabilities::{Capabilities, Targets};
+	use crate::exec::operators::test_util::TestDb;
+	use crate::val::Value;
+
+	/// Every capability allowed, `eval` included.
+	fn eval_allowed() -> Capabilities {
+		Capabilities::all().with_eval_query(Targets::All)
+	}
+
+	fn record_user(user: &str) -> Session {
+		let rid = crate::types::PublicValue::RecordId(surrealdb_types::RecordId::new("user", user));
+		Session::for_record("test", "test", "user", rid)
+	}
+
+	/// The last statement's value of `sql` run as `session`, or its error's
+	/// message.
+	async fn last(db: &TestDb, session: &Session, sql: &str) -> Value {
+		let mut results = db.datastore().execute(sql, session, None).await.expect("runs");
+		let result = results.pop().expect("a result").result;
+		result.map(Value::from).unwrap_or_else(|e| Value::from(e.to_string()))
+	}
+
+	fn parse(text: &str) -> Value {
+		Value::from(crate::syn::value(text).expect("parses"))
+	}
+
+	/// How many statements the datastore's compile cache has compiled.
+	async fn statement_compiles(db: &TestDb) -> u64 {
+		let ctx = db.exec_ctx().await;
+		let units = ctx.ctx().compiled_units().expect("the node keeps units");
+		let compiles = units.statements().stats().compiles;
+		ctx.txn().cancel().await.expect("cancel");
+		compiles
+	}
+
+	/// A call evaluated once per row compiles its text once, served to every
+	/// later row and to a later query, with the bindings read per row; each
+	/// distinct text compiles once, and what a compiled text reads of the
+	/// catalog answers as the catalog stands when it runs.
+	#[tokio::test]
+	async fn a_text_compiles_once_whatever_the_rows() {
+		let db = TestDb::new_with_capabilities(
+			"CREATE t:1 SET n = 1; CREATE t:2 SET n = 2; CREATE t:3 SET n = 3; \
+			 CREATE t:4 SET n = 4; CREATE t:5 SET n = 5;",
+			false,
+			eval_allowed(),
+		)
+		.await;
+		let owner = TestDb::owner();
+		let per_row = "SELECT VALUE eval::surql('RETURN $n + 1', { n: n }) FROM t ORDER BY n";
+
+		let before = statement_compiles(&db).await;
+		assert_eq!(last(&db, &owner, per_row).await, parse("[2, 3, 4, 5, 6]"));
+		assert_eq!(statement_compiles(&db).await - before, 1, "five rows, one text");
+
+		let before = statement_compiles(&db).await;
+		assert_eq!(last(&db, &owner, per_row).await, parse("[2, 3, 4, 5, 6]"));
+		assert_eq!(statement_compiles(&db).await - before, 0, "a later query is served");
+
+		let before = statement_compiles(&db).await;
+		let two_texts = "SELECT VALUE eval::surql(IF n > 2 { 'RETURN 10' } ELSE { 'RETURN 20' }) \
+		                 FROM t ORDER BY n";
+		assert_eq!(last(&db, &owner, two_texts).await, parse("[20, 20, 10, 10, 10]"));
+		assert_eq!(statement_compiles(&db).await - before, 2, "two distinct texts");
+
+		// What the compiled text reads of the catalog answers as the catalog
+		// stands when it runs: a field defined, and a function redefined, after
+		// it was compiled.
+		let reads = "SELECT VALUE eval::surql('SELECT VALUE twice FROM ONLY $r', { r: id }) \
+		             FROM t ORDER BY n";
+		assert_eq!(last(&db, &owner, reads).await, parse("[NONE, NONE, NONE, NONE, NONE]"));
+		db.run("DEFINE FIELD twice ON t COMPUTED n * 2").await;
+		assert_eq!(last(&db, &owner, reads).await, parse("[2, 4, 6, 8, 10]"));
+		let calls = "SELECT VALUE eval::surql('RETURN fn::f($n)', { n: n }) FROM t ORDER BY n";
+		db.run("DEFINE FUNCTION fn::f($x: int) { RETURN $x + 1 }").await;
+		assert_eq!(last(&db, &owner, calls).await, parse("[2, 3, 4, 5, 6]"));
+		db.run("DEFINE FUNCTION OVERWRITE fn::f($x: int) { RETURN $x - 1 }").await;
+		assert_eq!(last(&db, &owner, calls).await, parse("[0, 1, 2, 3, 4]"));
+	}
+
+	const OWNED: &str = "
+		DEFINE ACCESS user ON DATABASE TYPE RECORD;
+		DEFINE TABLE user SCHEMALESS PERMISSIONS FULL;
+		DEFINE TABLE doc SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+		CREATE user:alice, user:bob;
+		CREATE doc:1 SET owner = user:alice;
+		CREATE doc:2 SET owner = user:bob;
+	";
+
+	/// One compiled program serves two record users of one access method, and
+	/// each reads their own `$auth` and is judged by their own permissions,
+	/// whichever of them compiled it.
+	#[tokio::test]
+	async fn two_principals_share_a_compiled_text() {
+		let db = TestDb::new_with_capabilities(OWNED, true, eval_allowed()).await;
+		for sql in [
+			"RETURN eval::surql('SELECT VALUE id FROM doc')",
+			"RETURN eval::surql('SELECT VALUE id FROM doc WHERE owner = $auth')",
+			"RETURN eval::surql('RETURN [$auth, (SELECT VALUE id FROM doc)]')",
+		] {
+			let alice = last(&db, &record_user("alice"), sql).await;
+			let before = statement_compiles(&db).await;
+			let bob = last(&db, &record_user("bob"), sql).await;
+			assert_eq!(statement_compiles(&db).await - before, 0, "`{sql}`: bob is served");
+			let alice_again = last(&db, &record_user("alice"), sql).await;
+			let (alice_sees, bob_sees) = match sql.contains("RETURN [") {
+				true => ("[user:alice, [doc:1]]", "[user:bob, [doc:2]]"),
+				false => ("[doc:1]", "[doc:2]"),
+			};
+			assert_eq!(alice, parse(alice_sees), "`{sql}` as alice");
+			assert_eq!(bob, parse(bob_sees), "`{sql}` as bob");
+			assert_eq!(alice_again, parse(alice_sees), "`{sql}` as alice after bob");
+		}
+	}
+
+	/// With no `allow-eval-query`, every call is refused naming the function,
+	/// whoever makes it.
+	#[tokio::test]
+	async fn eval_is_denied_without_the_capability() {
+		let db = TestDb::new_with_capabilities("", false, Capabilities::all()).await;
+		for sql in ["RETURN eval::surql('RETURN 1')", "RETURN eval::gql('MATCH (n) RETURN n')"] {
+			let name = sql.split('(').next().unwrap_or_default().trim_start_matches("RETURN ");
+			assert_eq!(
+				last(&db, &TestDb::owner(), sql).await,
+				Value::from(format!("Function '{name}' is not allowed to be executed")),
+			);
+		}
+	}
 }

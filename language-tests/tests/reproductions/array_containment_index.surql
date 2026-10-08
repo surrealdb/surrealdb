@@ -4,7 +4,6 @@ namespace = true
 database = true
 auth = { level = "owner" }
 
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "WHERE field CONTAINS scalar and scalar INSIDE field should use array indexes with Part::All"
@@ -36,7 +35,7 @@ value = "[{ name: 'Education Org' }, { name: 'Green Edu' }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name]
-    IndexScan [ctx: Db] [index: org_topics, access: = 'climate', direction: Forward, predicate: mission_topic_tags CONTAINS 'climate']
+    IndexScan [ctx: Db] [table: organization, index: org_topics, access: = 'climate', direction: Forward]
 "'''
 */
 

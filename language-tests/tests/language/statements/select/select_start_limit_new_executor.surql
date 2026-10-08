@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -8,19 +7,19 @@ planner-strategy = ["all-ro"]
 value = "'OK'"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: i, direction: Forward, limit: 3, offset: 2]
-'"""
+''''
 
 [[test.results]]
 value = "[{ b: true, id: i:2 }, { b: true, id: i:3 }, { b: true, id: i:4 }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: i, direction: Forward, predicate: b = true, limit: 3, offset: 2, pre_decode_filter: yes]
-'"""
+''''
 
 [[test.results]]
 value = "[{ b: true, id: i:2 }, { b: true, id: i:3 }, { b: true, id: i:4 }]"

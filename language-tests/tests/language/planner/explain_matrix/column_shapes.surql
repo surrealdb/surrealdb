@@ -4,7 +4,6 @@ namespace = true
 database = true
 auth = { level = "owner" }
 
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -30,22 +29,18 @@ pinned side; compound_prefix.surql asserts the contrast, because the node's
 presence is the only thing in the plan text separating an exact seek from a
 seek-then-collapse.
 
-Both streaming strategies are pinned because a prefix EXPLAIN errors under
-compute-only; all-ro and best-effort-ro plan identically by contract, so
-pinning both records that and costs nothing.
+One shape records a WRONG answer. It is pinned deliberately, labelled at its
+case:
 
-Two shapes record WRONG answers. They are pinned deliberately, each
-labelled at its case:
+1. A plain (non-`*`) column whose VALUE is an array fans out on write all the
+   same. Its scan collapses a record's entries — the column is not declared a
+   kind that holds no array — so a range predicate lists each record once, but
+   it drops a record whose whole-array comparison is true while all of its
+   elements fall outside the range. Correct: the oracle's row set.
 
-1. The record dedupe keys off the `*` in a column idiom, so a plain (non-`*`)
-   column whose VALUE is an array is not covered by it: such a column fans out
-   on write all the same, so a range predicate emits the record once per
-   qualifying element, and drops a record whose whole-array comparison is true
-   while all of its elements fall outside the range. Correct: the oracle's
-   distinct row set.
-2. IndexCountScan on such a plain column counts index entries, not records, and
-   does not apply the per-record recheck that the row path applies. Correct:
-   the oracle's count.
+The index-only count declines a plain column that is not declared a kind which
+excludes arrays, so its count runs through the row path and applies the
+per-record recheck; it agrees with the oracle.
 
 Whole-array equality against a plain array column belongs to the fan-out key
 model rather than to the column-shape axis, and is pinned once, in
@@ -70,7 +65,7 @@ value = "[{ id: sh_flat:3, score: 30 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = 20, direction: Forward, predicate: score = 20]
+    IndexScan [ctx: Db] [table: sh_flat, index: idx, access: = 20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -82,7 +77,7 @@ value = "[{ id: sh_flat:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = 20, direction: Forward, predicate: 20 = score]
+    IndexScan [ctx: Db] [table: sh_flat, index: idx, access: = 20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -94,7 +89,8 @@ value = "[{ id: sh_flat:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: >15, direction: Forward, predicate: score > 15]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: sh_flat, index: idx, access: >15, direction: Forward]
 ''''
 
 [[test.results]]
@@ -133,7 +129,7 @@ value = "[{ a: { b: 30, other: 'z' }, id: sh_nested:3 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = 20, direction: Forward, predicate: a.b = 20]
+    IndexScan [ctx: Db] [table: sh_nested, index: idx, access: = 20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -145,7 +141,7 @@ value = "[{ id: sh_nested:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = 20, direction: Forward, predicate: 20 = a.b]
+    IndexScan [ctx: Db] [table: sh_nested, index: idx, access: = 20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -157,7 +153,8 @@ value = "[{ id: sh_nested:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: >=20, direction: Forward, predicate: a.b >= 20]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: sh_nested, index: idx, access: >=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -169,7 +166,8 @@ value = "[{ id: sh_nested:2 }, { id: sh_nested:3 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: >15, direction: Forward, predicate: 15 < a.b]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: sh_nested, index: idx, access: >15, direction: Forward]
 ''''
 
 [[test.results]]
@@ -181,7 +179,8 @@ value = "[{ id: sh_nested:2 }, { id: sh_nested:3 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: >10 <30, direction: Forward, predicate: a.b > 10 AND a.b < 30]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: sh_nested, index: idx, access: >10 <30, direction: Forward]
 ''''
 
 [[test.results]]
@@ -232,7 +231,7 @@ value = "[{ a: { b: { c: 30 } }, id: sh_deep:3 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = 20, direction: Forward, predicate: a.b.c = 20]
+    IndexScan [ctx: Db] [table: sh_deep, index: idx, access: = 20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -244,7 +243,8 @@ value = "[{ id: sh_deep:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: >=20, direction: Forward, predicate: a.b.c >= 20]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: sh_deep, index: idx, access: >=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -295,7 +295,7 @@ value = "[{ a: { b: 2, c: 'x' }, id: sh_compound_nested:3 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: [1, 'y'], direction: Forward, predicate: a.b = 1 AND a.c = 'y']
+    IndexScan [ctx: Db] [table: sh_compound_nested, index: idx, access: [1, 'y'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -307,7 +307,8 @@ value = "[{ id: sh_compound_nested:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: [1], direction: Forward, predicate: a.b = 1]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: sh_compound_nested, index: idx, access: [1], direction: Forward]
 ''''
 
 [[test.results]]
@@ -331,7 +332,8 @@ value = "[{ id: sh_compound_nested:1 }, { id: sh_compound_nested:3 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: [1] MoreThan 'x', direction: Forward, predicate: a.b = 1 AND a.c > 'x']
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: sh_compound_nested, index: idx, access: [1] MoreThan 'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -358,7 +360,7 @@ value = "[{ id: sh_flatten:3, tags: ['blue', 'red', 'blue'] }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = 'blue', direction: Forward, predicate: tags CONTAINS 'blue']
+    IndexScan [ctx: Db] [table: sh_flatten, index: idx, access: = 'blue', direction: Forward]
 "'''
 
 [[test.results]]
@@ -370,13 +372,15 @@ value = "[{ id: sh_flatten:1 }, { id: sh_flatten:3 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
-    IndexScan [ctx: Db] [index: idx, access: = 'blue', direction: Forward, predicate: tags CONTAINS 'blue'] {rows: 2}
+    IndexScan [ctx: Db] [table: sh_flatten, index: idx, access: = 'blue', direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: sh_flatten, condition: tags CONTAINS 'blue']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: sh_flatten, index: idx, access: = 'blue', direction: Forward]
 "'''
 
 [[test.results]]
@@ -400,7 +404,8 @@ value = "[]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: sh_flatten, direction: Forward, predicate: tags.* > 'c', pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: tags.* > 'c']
+        TableScan [ctx: Db] [table: sh_flatten, direction: Forward]
 "'''
 
 [[test.results]]
@@ -430,7 +435,8 @@ Total rows: 3''''
 
 [[test.results]]
 value = '''
-'CountScan [ctx: Db] [source: sh_flatten]
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: sh_flatten]
 ''''
 
 [[test.results]]
@@ -472,7 +478,7 @@ value = "{ events: {  }, fields: {  }, indexes: { idx: 'DEFINE INDEX idx ON sh_b
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = 'blue', direction: Forward, predicate: tags CONTAINS 'blue']
+    IndexScan [ctx: Db] [table: sh_bracket, index: idx, access: = 'blue', direction: Forward]
 "'''
 
 [[test.results]]
@@ -483,7 +489,9 @@ value = "[{ id: sh_bracket:1 }, { id: sh_bracket:3 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: sh_bracket, condition: tags CONTAINS 'blue']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: sh_bracket, index: idx, access: = 'blue', direction: Forward]
 "'''
 
 [[test.results]]
@@ -510,7 +518,7 @@ value = "[{ emails: [{ norm: 'b@x', raw: 'B@x' }, { norm: 'd@x', raw: 'D@x' }], 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = 'b@x', direction: Forward, predicate: emails.*.norm CONTAINS 'b@x']
+    IndexScan [ctx: Db] [table: sh_objarr, index: idx, access: = 'b@x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -521,7 +529,9 @@ value = "[{ id: sh_objarr:1 }, { id: sh_objarr:3 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: sh_objarr, condition: emails.*.norm CONTAINS 'b@x']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: sh_objarr, index: idx, access: = 'b@x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -533,7 +543,8 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: sh_objarr, direction: Forward, predicate: emails.*.norm = 'b@x', pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: emails.*.norm = 'b@x']
+        TableScan [ctx: Db] [table: sh_objarr, direction: Forward]
 "'''
 
 [[test.results]]
@@ -545,7 +556,8 @@ value = "[]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: sh_objarr, direction: Forward, predicate: emails.*.raw CONTAINS 'B@x', pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: emails.*.raw CONTAINS 'B@x']
+        TableScan [ctx: Db] [table: sh_objarr, direction: Forward]
 "'''
 
 [[test.results]]
@@ -569,7 +581,7 @@ value = "[{ a: [{ b: ['s'] }], id: sh_twolevel:2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = 'q', direction: Forward, predicate: a.*.b.* CONTAINS 'q']
+    IndexScan [ctx: Db] [table: sh_twolevel, index: idx, access: = 'q', direction: Forward]
 "'''
 
 [[test.results]]
@@ -580,7 +592,9 @@ value = "[]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: sh_twolevel, condition: a.*.b.* CONTAINS 'q']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: sh_twolevel, index: idx, access: = 'q', direction: Forward]
 "'''
 
 [[test.results]]
@@ -592,7 +606,7 @@ value = "[{ count: 0 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = ['p', 'q'], direction: Forward, predicate: a.*.b.* CONTAINS ['p', 'q']]
+    IndexScan [ctx: Db] [table: sh_twolevel, index: idx, access: = ['p', 'q'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -603,7 +617,9 @@ value = "[{ id: sh_twolevel:1 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: sh_twolevel, condition: a.*.b.* CONTAINS ['p', 'q']]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: sh_twolevel, index: idx, access: = ['p', 'q'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -615,7 +631,7 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = ['p', 'q'], direction: Forward, predicate: a.*.b CONTAINS ['p', 'q']]
+    IndexScan [ctx: Db] [table: sh_twolevel, index: idx, access: = ['p', 'q'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -626,7 +642,9 @@ value = "[{ id: sh_twolevel:1 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: sh_twolevel, condition: a.*.b CONTAINS ['p', 'q']]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: sh_twolevel, index: idx, access: = ['p', 'q'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -653,7 +671,7 @@ value = "[{ id: sh_idelem:[3, 'x'] }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = 'x', direction: Forward, predicate: id[1] = 'x']
+    IndexScan [ctx: Db] [table: sh_idelem, index: idx, access: = 'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -665,7 +683,8 @@ value = "[{ id: sh_idelem:[1, 'x'] }, { id: sh_idelem:[3, 'x'] }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: >'x', direction: Forward, predicate: id[1] > 'x']
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: sh_idelem, index: idx, access: >'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -677,7 +696,8 @@ value = "[{ id: sh_idelem:[2, 'y'] }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: sh_idelem, direction: Forward, predicate: id[0] = 1, pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: id[0] = 1]
+        TableScan [ctx: Db] [table: sh_idelem, direction: Forward]
 ''''
 
 [[test.results]]
@@ -704,7 +724,7 @@ value = "[{ id: sh_arrayvalue:3, tags: ['ant'] }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: = 'red', direction: Forward, predicate: tags = 'red']
+    IndexScan [ctx: Db] [table: sh_arrayvalue, index: idx, access: = 'red', direction: Forward]
 "'''
 
 [[test.results]]
@@ -715,11 +735,13 @@ value = "[{ id: sh_arrayvalue:2 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: sh_arrayvalue, condition: tags = 'red']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: sh_arrayvalue, index: idx, access: = 'red', direction: Forward]
 "'''
 
 [[test.results]]
-value = "[{ count: 2 }]"
+value = "[{ count: 1 }]"
 
 [[test.results]]
 value = "[{ count: 1 }]"
@@ -727,22 +749,26 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx, access: >'p', direction: Forward, predicate: tags > 'p']
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: sh_arrayvalue, index: idx, access: >'p', direction: Forward]
 "'''
 
 [[test.results]]
-value = "[{ id: sh_arrayvalue:1 }, { id: sh_arrayvalue:2 }, { id: sh_arrayvalue:1 }]"
+value = "[{ id: sh_arrayvalue:1 }, { id: sh_arrayvalue:2 }]"
 
 [[test.results]]
 value = "[{ id: sh_arrayvalue:1 }, { id: sh_arrayvalue:2 }, { id: sh_arrayvalue:3 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: sh_arrayvalue, condition: tags > 'p']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: sh_arrayvalue, index: idx, access: >'p', direction: Forward]
 "'''
 
 [[test.results]]
-value = "[{ count: 3 }]"
+value = "[{ count: 2 }]"
 
 [[test.results]]
 value = "[{ count: 3 }]"
@@ -1154,26 +1180,24 @@ EXPLAIN SELECT id FROM sh_arrayvalue WHERE tags = 'red';
 SELECT id FROM sh_arrayvalue WHERE tags = 'red';
 SELECT id FROM sh_arrayvalue WITH NOINDEX WHERE tags = 'red';
 
--- J2: DEFECT PINNED. The count of J1 goes through IndexCountScan, which counts
--- the entries the seek covered and applies no recheck, so it reports the row
--- the row path correctly discarded. Correct answer: the oracle's 1.
+-- J2: the count of J1. The column is not declared a kind that excludes arrays,
+-- so the index-only count declines and the count runs through the row path,
+-- whose recheck discards the row. Index and oracle agree.
 EXPLAIN SELECT count() FROM sh_arrayvalue WHERE tags = 'red' GROUP ALL;
 SELECT count() FROM sh_arrayvalue WHERE tags = 'red' GROUP ALL;
 SELECT count() FROM sh_arrayvalue WITH NOINDEX WHERE tags = 'red' GROUP ALL;
 
--- J3: DEFECT PINNED, twice over. The range pins nothing and the column carries
--- no `*`, so no `Distinct` is planned above the scan: the range covers both of
--- sh_arrayvalue:1's elements and that record is emitted once per entry. And
--- sh_arrayvalue:3 is dropped, because `['ant'] > 'p'` holds under filter
--- semantics while its only entry, 'ant', sorts below the bound. Correct
--- answer: the oracle's three distinct rows.
+-- J3: DEFECT PINNED. The range pins nothing and the column, with no declared
+-- kind, may hold an array, so the scan collapses sh_arrayvalue:1's two
+-- entries into one row. But sh_arrayvalue:3 is dropped, because
+-- `['ant'] > 'p'` holds under filter semantics while its only entry, 'ant',
+-- sorts below the bound. Correct answer: the oracle's three rows.
 EXPLAIN SELECT id FROM sh_arrayvalue WHERE tags > 'p';
 SELECT id FROM sh_arrayvalue WHERE tags > 'p';
 SELECT id FROM sh_arrayvalue WITH NOINDEX WHERE tags > 'p';
 
--- J4: the count of J3. It agrees with the oracle only because the duplicated
--- record and the dropped record cancel out - which is why the row assertion
--- above cannot be replaced by a count.
+-- J4: DEFECT PINNED, the count of J3: one short of the oracle, by the record
+-- J3 drops.
 EXPLAIN SELECT count() FROM sh_arrayvalue WHERE tags > 'p' GROUP ALL;
 SELECT count() FROM sh_arrayvalue WHERE tags > 'p' GROUP ALL;
 SELECT count() FROM sh_arrayvalue WITH NOINDEX WHERE tags > 'p' GROUP ALL;

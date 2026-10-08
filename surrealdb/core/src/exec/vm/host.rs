@@ -1,0 +1,5114 @@
+//! The host a program runs under.
+//!
+//! [`VmOperator`] is where a program meets the async engine. It evaluates the
+//! statement's paging clauses, then runs the program's pipelines in order:
+//! one that runs in place inside the storage cursor, on each record's stored
+//! bytes; any other over the rows its source holds in memory — records the scan
+//! decoded, rows a sort ordered, groups an aggregate finished — evaluating the
+//! expressions its body hands back. To the operators and executor around it,
+//! it is an operator like any other.
+
+use std::borrow::Cow;
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use common::future::stream::Yielder;
+use futures::StreamExt;
+
+use super::batch::RecordReader;
+use super::interp::{self, Groups, Paging, Pending, Region, State, Step};
+use super::program::{Enforce, Instr, Pipeline, Program, STACK_REGISTERS, Source, StoreInstr};
+use super::region::Rows;
+use super::row::{RevisionRow, RowReader, ValueRow};
+use super::scalar::Scalar;
+use super::services::{EngineServices, Services};
+use super::write;
+use crate::exec::index::access_path::access_repeats_records;
+use crate::exec::index::iterator::btree::BTreeIterator;
+use crate::exec::operators::fetch::fetch_raw_record;
+use crate::exec::operators::limit::{PagingClause, paging_count};
+use crate::exec::operators::scan::common::{
+	DecodeFields, ensure_below_memory_threshold, resolve_version_stamp,
+};
+use crate::exec::operators::scan::pipeline::kv_scan_stream;
+use crate::exec::operators::scan::{
+	FULL_TEXT_BATCH_SIZE, FusedCandidates, MergeMode, RESOLVE_BATCH_SIZE, record_key_range,
+};
+use crate::exec::operators::{GroupState, SortDirection, check_cancelled};
+use crate::exec::permission::validate_record_user_access;
+use crate::exec::physical_expr::graph_degree::DegreeCounter;
+use crate::exec::{
+	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, ValueBatch, ValueBatchStream, monitor_stream,
+};
+use crate::expr::{ControlFlow, ControlFlowExt};
+use crate::key::schema::RecordPrefix;
+use crate::val::{RecordIdKey, Value};
+
+/// Rows a pipeline over in-memory rows runs before it yields to other work.
+const ROWS_PER_SLICE: usize = 1024;
+
+/// A statement run by the bytecode VM.
+#[derive(Debug)]
+pub(crate) struct VmOperator {
+	program: Arc<Program>,
+	metrics: Arc<OperatorMetrics>,
+	/// The operator at the top of the plan `EXPLAIN` renders for the
+	/// program's statement ([`ExecOperator::display_name`]).
+	display: &'static str,
+	/// The catalog ids the statement's planning held, which the program's
+	/// draws take: kept until the operator and every run of it are dropped.
+	held: Option<Arc<super::speculate::HeldIds>>,
+	/// The program's late-bound statements, as written, which its blocks
+	/// serve when they reach them.
+	served: Option<super::ServedStatements>,
+}
+
+impl VmOperator {
+	/// The operator's name, which no other operator takes.
+	pub(super) const NAME: &'static str = "Bytecode";
+
+	pub(super) fn new(program: Program) -> Self {
+		Self {
+			program: Arc::new(program),
+			metrics: Arc::new(OperatorMetrics::new()),
+			display: Self::NAME,
+			held: None,
+			served: None,
+		}
+	}
+
+	/// This operator serving `served`, its program's late-bound statements.
+	pub(super) fn serving(mut self, served: Vec<Arc<crate::expr::logical::LogicalOp>>) -> Self {
+		self.served = (!served.is_empty()).then(|| served.into());
+		self
+	}
+
+	/// This operator shown by `display` ([`ExecOperator::display_name`]).
+	pub(super) fn displayed_as(mut self, display: &'static str) -> Self {
+		self.display = display;
+		self
+	}
+
+	/// This operator keeping `held` for as long as it or a run of it lasts.
+	pub(super) fn holding(mut self, held: Option<Arc<super::speculate::HeldIds>>) -> Self {
+		self.held = held;
+		self
+	}
+}
+
+/// A run's stream keeping the catalog ids its draws take until it is dropped.
+struct Holding {
+	stream: ValueBatchStream,
+	_held: Arc<super::speculate::HeldIds>,
+}
+
+impl futures::Stream for Holding {
+	type Item = FlowResult<ValueBatch>;
+
+	fn poll_next(
+		mut self: std::pin::Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+	) -> std::task::Poll<Option<Self::Item>> {
+		self.stream.as_mut().poll_next(cx)
+	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		self.stream.size_hint()
+	}
+}
+
+impl ExecOperator for VmOperator {
+	fn name(&self) -> &'static str {
+		Self::NAME
+	}
+
+	fn display_name(&self) -> &'static str {
+		self.display
+	}
+
+	fn attrs(&self) -> Vec<(String, String)> {
+		vec![
+			(
+				"table".to_owned(),
+				self.program.table.as_ref().map_or_else(|| "NONE".to_owned(), |t| t.to_string()),
+			),
+			("pipelines".to_owned(), self.program.pipelines.len().to_string()),
+		]
+	}
+
+	fn required_context(&self) -> ContextLevel {
+		self.program.required_context
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		self.program.access_mode
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
+	fn cardinality_hint(&self) -> crate::exec::CardinalityHint {
+		match &self.program.tail {
+			Some(tail) if tail.only => crate::exec::CardinalityHint::AtMostOne,
+			_ => cardinality_hint(&self.program),
+		}
+	}
+
+	/// A write's `ONLY` makes its value the one row it returned, which the
+	/// write body judges itself.
+	fn output_shape(&self) -> crate::exec::OutputShape {
+		output_shape(&self.program)
+	}
+
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
+		let serving;
+		let ctx = match &self.served {
+			Some(served) => {
+				serving = ctx.with_vm_served(Arc::clone(served));
+				&serving
+			}
+			None => ctx,
+		};
+		let stream = execute_program(&self.program, ctx)?;
+		let stream: ValueBatchStream = match &self.held {
+			Some(held) => Box::pin(Holding {
+				stream,
+				_held: Arc::clone(held),
+			}),
+			None => stream,
+		};
+		Ok(monitor_stream(stream, "Bytecode", &self.metrics))
+	}
+}
+
+/// How many rows `program` yields before its tail: at most one for a write
+/// that is `ONLY` and for a statement whose value is its one row.
+fn cardinality_hint(program: &Program) -> crate::exec::CardinalityHint {
+	match &program.write {
+		Some(spec) if spec.only => crate::exec::CardinalityHint::AtMostOne,
+		_ if program.scalar => crate::exec::CardinalityHint::AtMostOne,
+		_ => crate::exec::CardinalityHint::Unbounded,
+	}
+}
+
+/// What `program`'s value is made of: its one row, or its rows. `ONLY` in the
+/// tail makes it the one row. A write's `ONLY` makes its value the one row it
+/// returned, which the write body judges itself, with or without a `TIMEOUT`.
+/// Any other statement with a `TIMEOUT` hands on rows.
+pub(super) fn output_shape(program: &Program) -> crate::exec::OutputShape {
+	match (&program.tail, &program.write) {
+		(Some(tail), _) if tail.only => crate::exec::OutputShape::Scalar,
+		_ if program.rows => crate::exec::OutputShape::Rows,
+		(_, Some(spec)) if spec.only => crate::exec::OutputShape::Scalar,
+		(Some(tail), _) if tail.timeout.is_some() => crate::exec::OutputShape::Rows,
+		_ if program.scalar => crate::exec::OutputShape::Scalar,
+		_ => crate::exec::OutputShape::Rows,
+	}
+}
+
+/// Run `program` in `ctx`: the stream of its rows, under the tail it holds,
+/// on a frame stack of its own for the statements it nests.
+pub(super) fn execute_program(
+	program: &Arc<Program>,
+	ctx: &ExecutionContext,
+) -> FlowResult<ValueBatchStream> {
+	execute_program_reading(program, ctx, None)
+}
+
+/// [`execute_program`] for a reader that takes no more than `reads` rows
+/// before its paging is spent, where it says: a program with no tail hands
+/// on its rows that many at a time, and its first read of storage takes no
+/// more records than that from its cursor first ([`State::scan_hint`]).
+pub(super) fn execute_program_reading(
+	program: &Arc<Program>,
+	ctx: &ExecutionContext,
+	reads: Option<u32>,
+) -> FlowResult<ValueBatchStream> {
+	// The run's table is set up first: a dispatch shares the reads it links.
+	let unitted = super::closure::with_units(program, ctx);
+	let ctx = unitted.as_ref().unwrap_or(ctx);
+	let dispatched = super::dispatch::with_dispatch(program, ctx);
+	let ctx = dispatched.as_ref().unwrap_or(ctx);
+	match &program.tail {
+		Some(_) => Ok(execute_tailed(program, ctx)),
+		None => execute_untailed(program, ctx, reads),
+	}
+}
+
+/// `program` under its tail: the `VERSION` stamp its reads are made at, the
+/// `TIMEOUT` that bounds it, and `ONLY` over its rows.
+///
+/// The `VERSION` clause is evaluated first, then the `TIMEOUT` clause in the
+/// frame the stamp makes, and the statement starts only once both are read. A
+/// statement still running at its deadline fails with the timeout error; one
+/// that finishes in time is not failed by the clock. `ONLY` hands on the one
+/// row, `NONE` for none, and fails over more than one.
+fn execute_tailed(program: &Arc<Program>, ctx: &ExecutionContext) -> ValueBatchStream {
+	let program = Arc::clone(program);
+	let ctx = ctx.clone();
+	let stream = common::future::stream::try_async_stream(async move |mut yielder: Yielder<_>| {
+		let Some(tail) = &program.tail else {
+			return Err(ControlFlow::Err(anyhow::anyhow!("a tail run for a program with none")));
+		};
+		let ctx = match &tail.version {
+			Some(version) => {
+				let value = host_scalar(&program, version, &ctx, None).await?;
+				let stamp = value
+					.cast_to::<crate::val::Datetime>()
+					.map_err(|e| anyhow::anyhow!("{e}"))?
+					.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?;
+				ctx.with_version_stamp(Some(stamp))
+			}
+			None => ctx,
+		};
+		// The clause is cast, not coerced, so a duration written down as text
+		// names one; `NONE` names no bound at all.
+		let duration = match &tail.timeout {
+			Some(timeout) => host_scalar(&program, timeout, &ctx, None)
+				.await?
+				.cast_to::<Option<crate::val::Duration>>()
+				.map_err(anyhow::Error::new)?,
+			None => None,
+		};
+		// A duration the clock cannot reach names no deadline: it is the
+		// invalid clause it is, not a very distant moment.
+		let deadline = match duration {
+			Some(duration) => {
+				let Some(instant) = common::time::Instant::now().checked_add(duration.0) else {
+					return Err(ControlFlow::Err(anyhow::Error::new(
+						crate::kvs::DatastoreError::InvalidTimeout(duration.0.as_secs()),
+					)));
+				};
+				Some((duration, instant))
+			}
+			None => None,
+		};
+		let input = crate::exec::buffer_stream(
+			execute_untailed(&program, &ctx, None)?,
+			program.access_mode,
+			cardinality_hint(&program),
+			ctx.root().ctx.config.exec.operator_buffer_size,
+		);
+		// A boundary: what the statement nests runs within this stream's
+		// poll, under the timer, rather than on a driver above it.
+		let mut input: ValueBatchStream = if tail.timeout.is_some() {
+			Box::pin(crate::exec::trampoline::boundary(input))
+		} else {
+			input
+		};
+		let mut one: Vec<Value> = Vec::new();
+		loop {
+			let next = match &deadline {
+				Some((duration, instant)) => {
+					let remaining = instant.saturating_duration_since(common::time::Instant::now());
+					let timed_out = || {
+						ControlFlow::Err(anyhow::anyhow!(crate::err::EngineError::QueryTimedout(
+							duration.0
+						)))
+					};
+					if remaining.is_zero() {
+						return Err(timed_out());
+					}
+					match common::time::timeout(remaining, input.next()).await {
+						Ok(next) => next,
+						Err(_) => {
+							stopped_at_deadline(&program, &ctx);
+							return Err(timed_out());
+						}
+					}
+				}
+				None => input.next().await,
+			};
+			let Some(batch) = next else {
+				break;
+			};
+			let batch = batch?;
+			if tail.only {
+				one.extend(batch.into_values());
+				if one.len() > 1 {
+					return Err(ControlFlow::Err(anyhow::anyhow!(
+						crate::exec::Error::SingleOnlyOutput
+					)));
+				}
+			} else {
+				yielder.emit(batch).await;
+			}
+		}
+		if tail.only {
+			yielder.emit(ValueBatch::new(vec![one.pop().unwrap_or(Value::None)])).await;
+		}
+		Ok(())
+	});
+	crate::exec::compiles::sealed_stream(Box::pin(stream))
+}
+
+/// Run `program` in `ctx`, its tail not applied: the stream of its rows, on a
+/// frame stack of its own for the statements it nests.
+fn execute_untailed(
+	program: &Arc<Program>,
+	ctx: &ExecutionContext,
+	reads: Option<u32>,
+) -> FlowResult<ValueBatchStream> {
+	{
+		// The bound plan carries the statement's table and field permissions
+		// as nodes, and the VM runs only plans that have none to apply.
+		// Confinement to the principal's own namespace and database is not
+		// among them, so it is checked here, as every scan checks it. A write
+		// checks it per record, as the head of every order.
+		if let Some(spec) = &program.write {
+			refuse_unwritable(spec, ctx)?;
+			let stream = write::stream(Arc::clone(program), ctx.clone());
+			return Ok(crate::exec::compiles::while_running(Box::pin(
+				crate::exec::trampoline::Trampolined::root(stream),
+			)));
+		}
+		// An expression statement reads nothing a scan would, and may run
+		// outside any database.
+		if !program.scalar {
+			validate_record_user_access(ctx.database()?)?;
+		}
+		let program = Arc::clone(program);
+		let ctx = ctx.clone();
+		let stream =
+			common::future::stream::try_async_stream(async move |mut stream: Yielder<_>| {
+				let mut yielder = Out::Stream(&mut stream);
+				let mut state =
+					out_of_line(|| run_untailed(&program, &ctx, &mut yielder, reads)).await?;
+				let rest = state.take_output();
+				if !rest.is_empty() {
+					stream.emit(ValueBatch::new(rest)).await;
+				}
+				Ok(())
+			});
+		// The statements it nests — subqueries, a block's statements, the
+		// bodies they call — run on this stream's frame stack.
+		let stream = crate::exec::trampoline::Trampolined::root(Box::pin(stream));
+		Ok(crate::exec::compiles::while_running(Box::pin(stream)))
+	}
+}
+
+/// Run the pipelines of `program`, a statement that writes nothing, in `ctx`,
+/// handing their rows to `yielder`: its paging and its `VERSION` stamp
+/// evaluated first, over a state of its own, which is answered holding the
+/// rows not yet flushed.
+async fn run_untailed(
+	program: &Arc<Program>,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	reads: Option<u32>,
+) -> FlowResult<interp::PooledState> {
+	let mut paging = Vec::with_capacity(program.limits.len());
+	for spec in &program.limits {
+		paging.push(match spec.group {
+			// A block statement's paging is evaluated when the block reaches
+			// it.
+			Some(_) => Paging {
+				skip: 0,
+				remaining: None,
+			},
+			None => out_of_line(|| paging_of(program, spec, ctx)).await?,
+		});
+	}
+	let mut flush_at = ctx.root().ctx.config.exec.scan_batch_size.max(1);
+	if let Some(reads) = reads {
+		flush_at = flush_at.min(reads as usize).max(1);
+	}
+	// Under `VERSION`, every scan reads the state as of the stamp the
+	// enclosing scope evaluated.
+	let version = out_of_line(|| resolve_version_stamp(ctx, None)).await?;
+	let mut state = State::new(program, paging, ctx.function_registry())?;
+	state.build_budget = ctx.root().ctx.config.exec.gql_max_join_build_rows;
+	state.scan_hint = reads;
+	for (at, spec) in program.sorts.iter().enumerate() {
+		if spec.pushdown {
+			state.topk_cells[at] =
+				Some(Arc::new(crate::exec::topk_pushdown::TopKThresholdCell::default()));
+		}
+	}
+	if !program.groups.is_empty() {
+		state.program = Some(Arc::clone(program));
+	}
+	// Inside a permission predicate every row passes, as the permission
+	// operator passes it.
+	state.permissions_bypassed = ctx.root().skip_fetch_perms;
+	state.frames = program.permissions.iter().map(|spec| spec.context(ctx)).collect();
+	spill_to(program, &mut state, ctx);
+	run_pipelines(program, None, version, &mut state, ctx, yielder, flush_at).await?;
+	Ok(state)
+}
+
+/// A block statement's rows, and how it ended.
+pub(super) type GroupRun<'a> =
+	std::pin::Pin<Box<dyn std::future::Future<Output = (Vec<Value>, FlowResult<()>)> + Send + 'a>>;
+
+/// Run block statement `group` of `program` over `state`, in `frame`: its
+/// pipelines, with its paging, sorts, aggregates and permission frames
+/// started afresh, and its write — for a write — on the one write state the
+/// statement keeps, started afresh. Answers its rows: once a signal or an
+/// error ends it, only those it had flushed, as a stream's reader holds them.
+///
+/// The block's own row-level state is kept aside while the statement runs.
+pub(super) fn run_group<'a>(
+	program: &'a Arc<Program>,
+	group: u16,
+	state: &'a mut State,
+	frame: &'a ExecutionContext,
+) -> GroupRun<'a> {
+	crate::exec::vm::host::out_of_line(|| async move {
+		if state.program.is_none() {
+			state.program = Some(Arc::clone(program));
+		}
+		let output = state.take_output();
+		let write = state.write.take();
+		let rowless = std::mem::replace(&mut state.rowless, false);
+		let undocumented = std::mem::replace(&mut state.undocumented, false);
+		let in_place = std::mem::replace(&mut state.read_in_place_permission_errors, false);
+		let sorted_keys = std::mem::take(&mut state.sorted_keys);
+		let mut out = Out::Gather(Vec::new());
+		let mut ran = run_tailed(program, group, state, frame, &mut out).await;
+		let mut rows = match out {
+			Out::Gather(rows) => rows,
+			Out::Stream(_) => Vec::new(),
+		};
+		if ran.is_ok() {
+			rows.append(&mut state.output);
+		}
+		// `ONLY` hands on the one row, or `NONE`, and nothing when it fails.
+		if program.groups.get(group as usize).is_some_and(|spec| spec.only) {
+			if rows.len() > 1 {
+				ran = Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::SingleOnlyOutput)));
+			}
+			match ran {
+				Ok(()) if rows.is_empty() => rows.push(Value::None),
+				Ok(()) => {}
+				Err(_) => rows.clear(),
+			}
+		}
+		if let Some(slot) = state.group_writes.get_mut(group as usize) {
+			*slot = state.write.take();
+		}
+		state.output = output;
+		state.write = write;
+		state.rowless = rowless;
+		state.undocumented = undocumented;
+		state.read_in_place_permission_errors = in_place;
+		state.sorted_keys = sorted_keys;
+		(rows, ran)
+	})
+}
+
+/// A state for `program`, a block statement compiled as a program of its own,
+/// in `ctx`: [`run_group`] starts its paging, sorts, aggregates and
+/// permission frames afresh per reach.
+pub(super) fn statement_state(
+	program: &Program,
+	ctx: &ExecutionContext,
+) -> anyhow::Result<interp::PooledState> {
+	let mut state = unit_state(program, ctx)?;
+	host_frames(program, &mut state, ctx);
+	Ok(state)
+}
+
+/// [`statement_state`] without what only a host step reads — the permission
+/// frames and the sorts' spill — for a unit's body run in place
+/// ([`run_unit_inline`]); [`host_frames`] completes it for the host.
+pub(super) fn unit_state(
+	program: &Program,
+	ctx: &ExecutionContext,
+) -> anyhow::Result<interp::PooledState> {
+	let paging = program
+		.limits
+		.iter()
+		.map(|_| Paging {
+			skip: 0,
+			remaining: None,
+		})
+		.collect();
+	let mut state = State::new(program, paging, ctx.function_registry())?;
+	state.build_budget = ctx.root().ctx.config.exec.gql_max_join_build_rows;
+	state.permissions_bypassed = ctx.root().skip_fetch_perms;
+	Ok(state)
+}
+
+/// Give `state`, a [`unit_state`], the permission frames and the sorts'
+/// spill of `program` in `ctx`, which the host's steps read.
+pub(super) fn host_frames(program: &Program, state: &mut State, ctx: &ExecutionContext) {
+	state.frames = program.permissions.iter().map(|spec| spec.context(ctx)).collect();
+	spill_to(program, state, ctx);
+}
+
+/// Run block statement `group` under its tail: in the frame its `VERSION`
+/// reads at, and failed once its `TIMEOUT` has passed, as the operator tree's
+/// version scope and timeout apply them.
+async fn run_tailed(
+	program: &Arc<Program>,
+	group: u16,
+	state: &mut State,
+	frame: &ExecutionContext,
+	out: &mut Out<'_, '_>,
+) -> FlowResult<()> {
+	let spec = program.groups.get(group as usize).ok_or_else(|| {
+		ControlFlow::Err(anyhow::anyhow!("a block statement the program does not hold"))
+	})?;
+	let versioned;
+	let frame = match &spec.version {
+		Some(version) => {
+			let value = host_scalar(program, version, frame, None).await?;
+			let stamp = value
+				.cast_to::<crate::val::Datetime>()
+				.map_err(|e| anyhow::anyhow!("{e}"))?
+				.to_version_stamp(frame.txn().timestamp_impl().as_ref())?;
+			versioned = frame.clone().with_version_stamp(Some(stamp));
+			&versioned
+		}
+		None => frame,
+	};
+	let Some(timeout) = &spec.timeout else {
+		return start_group(program, group, state, frame, out).await;
+	};
+	let duration = host_scalar(program, timeout, frame, None)
+		.await?
+		.cast_to::<Option<crate::val::Duration>>()
+		.map_err(anyhow::Error::new)?;
+	let Some(duration) = duration else {
+		return start_group(program, group, state, frame, out).await;
+	};
+	let Some(deadline) = common::time::Instant::now().checked_add(duration.0) else {
+		return Err(ControlFlow::Err(anyhow::Error::new(
+			crate::kvs::DatastoreError::InvalidTimeout(duration.0.as_secs()),
+		)));
+	};
+	let timed_out =
+		|| ControlFlow::Err(anyhow::anyhow!(crate::err::EngineError::QueryTimedout(duration.0)));
+	let remaining = deadline.saturating_duration_since(common::time::Instant::now());
+	match common::time::timeout(remaining, start_group(program, group, state, frame, out)).await {
+		// A statement that finishes past its deadline has timed out too.
+		Ok(ran) => {
+			ran?;
+			if common::time::Instant::now() >= deadline {
+				return Err(timed_out());
+			}
+			Ok(())
+		}
+		Err(_) => {
+			stopped_at_deadline(program, frame);
+			Err(timed_out())
+		}
+	}
+}
+
+/// Marks the transaction of a statement that was dropped at its deadline.
+///
+/// A deadline stops a statement by dropping its future, which can land inside
+/// a record's write: the record is in the transaction and the index entries
+/// written so far with it, and a client-owned transaction survives the
+/// statement's error and can still commit. A program that may write therefore
+/// makes the commit of its transaction refuse.
+fn stopped_at_deadline(program: &Program, frame: &ExecutionContext) {
+	if program.access_mode == crate::exec::AccessMode::ReadWrite {
+		frame.txn().poison_interrupted_write();
+	}
+}
+
+async fn start_group(
+	program: &Arc<Program>,
+	group: u16,
+	state: &mut State,
+	frame: &ExecutionContext,
+	out: &mut Out<'_, '_>,
+) -> FlowResult<()> {
+	let spec = program.groups.get(group as usize).ok_or_else(|| {
+		ControlFlow::Err(anyhow::anyhow!("a block statement the program does not hold"))
+	})?;
+	// Checked per reach, as a statement's program checks it when it starts.
+	match &spec.write {
+		Some(write) => refuse_unwritable(write, frame)?,
+		None if !spec.rowless => validate_record_user_access(frame.database()?)?,
+		None => {}
+	}
+	for (at, limit) in program.limits.iter().enumerate() {
+		if limit.group == Some(group) {
+			state.paging[at] = out_of_line(|| paging_of(program, limit, frame)).await?;
+		}
+	}
+	for at in spec.sorts.clone() {
+		let at = at as usize;
+		state.sorts[at].clear();
+		state.sort_floors[at] = None;
+		if let Some(sort_spec) = program.sorts.get(at)
+			&& sort_spec.pushdown
+		{
+			let cell = Arc::new(crate::exec::topk_pushdown::TopKThresholdCell::default());
+			state.topk_cells[at] = Some(cell);
+		}
+		#[cfg(all(storage, not(target_family = "wasm")))]
+		{
+			state.sort_runs[at] = None;
+		}
+	}
+	for at in spec.aggregates.clone() {
+		state.reset_aggregate(program, at as usize);
+	}
+	for at in spec.permissions.clone() {
+		state.frames[at as usize] = program.permissions[at as usize].context(frame);
+	}
+	for (at, nested) in program.nested.iter().enumerate() {
+		if nested.owner == Some(group) {
+			state.once[at] = None;
+		}
+	}
+	for (at, owner) in program.probes.iter().enumerate() {
+		if *owner == Some(group) {
+			state.probes[at] = None;
+		}
+	}
+	for (at, join) in program.joins.iter().enumerate() {
+		if join.owner == Some(group) {
+			state.joins[at] = None;
+		}
+	}
+	for (at, owner) in program.distincts.iter().enumerate() {
+		if *owner == Some(group) {
+			state.seen[at] = crate::exec::operators::SeenSet::new();
+		}
+	}
+	let flush_at = frame.root().ctx.config.exec.scan_batch_size.max(1);
+	let version = out_of_line(|| resolve_version_stamp(frame, None)).await?;
+	match &spec.write {
+		Some(write) => {
+			// What a write reaches runs in the write's frame.
+			let writing;
+			let frame = if frame.root().writing {
+				frame
+			} else {
+				writing = frame.clone().in_write();
+				&writing
+			};
+			let kept = state.group_writes.get_mut(group as usize).and_then(Option::take);
+			state.write = Some(match kept {
+				Some(mut kept) => {
+					kept.reset(write, group, frame)?;
+					kept
+				}
+				None => {
+					let mut fresh = Box::new(write::WriteState::new(write, frame)?);
+					fresh.group = Some(group);
+					fresh
+				}
+			});
+			write::run_write(program, Some(group), version, state, frame, out, flush_at).await
+		}
+		None => run_pipelines(program, Some(group), version, state, frame, out, flush_at).await,
+	}
+}
+
+/// Evaluate the query vectors of the brute-force KNN sorts `group` owns, once,
+/// over no row and before any pipeline reads: a vector that does not coerce
+/// to `array<number>` fails the statement as it starts.
+pub(super) async fn evaluate_knn_queries(
+	program: &Program,
+	group: Option<u16>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<()> {
+	for (at, spec) in program.sorts.iter().enumerate() {
+		let Some(query) = &spec.knn_query else {
+			continue;
+		};
+		if query.group != group {
+			continue;
+		}
+		let value = host_scalar(program, &query.scalar, ctx, None).await?;
+		let vector = value
+			.coerce_to::<Vec<crate::val::Number>>()
+			.map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?;
+		state.knn_queries[at] = Some(Arc::new(vector));
+	}
+	Ok(())
+}
+
+/// Run the pipelines of `program` that `group` owns — the program's own for
+/// `None` — in order, over `state`, handing their rows to `yielder`.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn run_pipelines(
+	program: &Arc<Program>,
+	group: Option<u16>,
+	version: Option<u64>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+) -> FlowResult<()> {
+	evaluate_knn_queries(program, group, state, ctx).await?;
+	for (index, pipeline) in
+		program.pipelines.iter().enumerate().filter(|(_, pipeline)| pipeline.group == group)
+	{
+		// A join whose build side writes runs it before the pipeline that
+		// reads the rows it takes starts, so those rows read what it wrote.
+		for (split, spec) in program.splits.iter().enumerate() {
+			if spec.build_before == Some(index)
+				&& let super::program::SplitKind::Step(step) = &spec.kind
+			{
+				out_of_line(|| super::binding::prepare_join(split as u16, step, state, ctx))
+					.await?;
+			}
+		}
+		// A pipeline one of whose limits admits nothing reads no
+		// record: it opens no read of storage — a table, an index,
+		// a record id or range, a union of them — and no sort or
+		// aggregate, which has already drained its own input (see
+		// `crate::exec::zero_limit`). A source that is not a read
+		// of storage still yields its rows and every row is
+		// judged, so the errors its layers and predicates raise
+		// are raised.
+		//
+		// A statement in `FROM` bound to its reader's zero limit reads no
+		// record of storage either ([`State::zeroed`]).
+		//
+		// A locked read (`FOR UPDATE`) is read whatever its limit: the lock
+		// is a side effect of the read, and the limit only drops its row.
+		let reads_storage = (pipeline.source.reads_storage()
+			|| matches!(pipeline.source, Source::Count { .. } | Source::Probe { .. }))
+			&& !matches!(
+				pipeline.source,
+				Source::Record {
+					for_update: true,
+					..
+				}
+			);
+		let skippable = reads_storage
+			|| matches!(pipeline.source, Source::Sorted { .. } | Source::Groups { .. });
+		let spent = limits_spent(pipeline, state);
+		if (skippable && spent) || (reads_storage && state.zeroed) {
+			if let Some(table) = pipeline.source.table() {
+				let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
+					.await
+					.map_err(ControlFlow::Err)?;
+				let db_ctx = ctx.database().context("the VM requires a database context")?;
+				let hidden = matches!(pipeline.source, Source::Scan { .. })
+					&& hidden_absence(pipeline, &descriptor, db_ctx)?;
+				if !hidden {
+					descriptor.defined().map_err(ControlFlow::Err)?;
+				}
+			}
+			continue;
+		}
+		match &pipeline.source {
+			Source::Scan {
+				..
+			}
+			| Source::Record {
+				..
+			}
+			| Source::Index {
+				..
+			}
+			| Source::IndexUnion {
+				..
+			}
+			| Source::Bitmap {
+				..
+			}
+			| Source::FullText {
+				..
+			}
+			| Source::Knn {
+				..
+			}
+			| Source::LightweightEdges {
+				..
+			}
+			| Source::Union(_) => {
+				out_of_line(|| {
+					run_storage_source(
+						program,
+						pipeline,
+						&pipeline.source,
+						version,
+						state,
+						ctx,
+						yielder,
+						flush_at,
+					)
+				})
+				.await?;
+			}
+			Source::Values {
+				..
+			}
+			| Source::Nested {
+				..
+			}
+			| Source::Probe {
+				..
+			} => {
+				out_of_line(|| {
+					super::nested::run_source(
+						program,
+						pipeline,
+						&pipeline.source,
+						spent,
+						state,
+						ctx,
+						yielder,
+						flush_at,
+					)
+				})
+				.await?;
+			}
+			// The counted row, counted as the count fast path's
+			// operators count it.
+			Source::Count {
+				count,
+				output,
+			} => {
+				let rows = match out_of_line(|| {
+					super::count::count(program, count, version, state.units.clone(), ctx)
+				})
+				.await?
+				{
+					super::count::Counted::Count(n) => output.batch(n).into_values(),
+					super::count::Counted::Rows(rows) => rows,
+				};
+				for row in rows {
+					out_of_line(|| run_value_row(program, pipeline, row, state, ctx)).await?;
+				}
+				out_of_line(|| flush(state, yielder, flush_at)).await?;
+			}
+			Source::Sorted {
+				sort,
+			} => {
+				let spec = &program.sorts[*sort as usize];
+				#[cfg(all(storage, not(target_family = "wasm")))]
+				if let Some(runs) = state.sort_runs[*sort as usize].take() {
+					let held = std::mem::take(&mut state.sorts[*sort as usize]);
+					let mut merge =
+						runs.merge(held, spec.keys.clone()).map_err(ControlFlow::Err)?;
+					loop {
+						let (next, chunk) = merge
+							.next_chunk(ctx.root().ctx.config.exec.scan_batch_size.max(1))
+							.await
+							.map_err(ControlFlow::Err)?;
+						merge = next;
+						if chunk.is_empty() {
+							break;
+						}
+						let stopped = out_of_line(|| {
+							run_rows(program, pipeline, chunk, state, ctx, yielder, flush_at)
+						})
+						.await?;
+						if stopped {
+							break;
+						}
+					}
+					continue;
+				}
+				let mut rows = std::mem::take(&mut state.sorts[*sort as usize]);
+				if spec.random {
+					use rand::seq::SliceRandom;
+					let mut rng = rand::rng();
+					rows.shuffle(&mut rng);
+					if let Some(keep) = spec.keep {
+						rows.truncate(keep);
+					}
+				} else {
+					interp::sort_and_keep(&mut rows, &spec.keys, spec.keep.unwrap_or(usize::MAX));
+				}
+				let rows = rows
+					.into_iter()
+					.map(|(keys, row)| Ok((keys, row.into_value()?)))
+					.collect::<anyhow::Result<Vec<_>>>()
+					.map_err(ControlFlow::Err)?;
+				// A brute-force KNN publishes the distance it ranked each row
+				// by before any row is yielded, so a projection reading
+				// them finds them.
+				if let Some(slot) = spec.knn_slot {
+					let published = state.knn_context(slot);
+					for (keys, row) in &rows {
+						if let (Some(Value::Number(distance)), Value::Object(object)) =
+							(keys.first(), row) && let Some(Value::RecordId(rid)) = object.get("id")
+						{
+							published.insert(rid.clone(), *distance).await;
+						}
+					}
+				}
+				out_of_line(|| run_rows(program, pipeline, rows, state, ctx, yielder, flush_at))
+					.await?;
+			}
+			Source::Once => {
+				// The enclosing row is read where it is held, and copied only
+				// where the body changes it or hands it on.
+				let row = ctx.current_row();
+				state.rowless = row.is_none();
+				out_of_line(|| {
+					run_cow_row(
+						program,
+						pipeline,
+						row.map_or(Cow::Owned(Value::None), Cow::Borrowed),
+						state,
+						ctx,
+					)
+				})
+				.await?;
+			}
+			Source::WriteTargets {
+				..
+			}
+			| Source::WriteInserts {
+				..
+			}
+			| Source::WriteEdges {
+				..
+			} => {
+				return Err(ControlFlow::Err(anyhow::anyhow!("a write's subjects in a read")));
+			}
+			// A split's rows run as its input's pipeline settles each row it
+			// splits; a write stage's, which keeps its rows until that
+			// pipeline has finished, run now. A join's pairings run as its
+			// probe pipeline settles each probe row.
+			Source::Split {
+				split,
+			} => {
+				if let super::program::SplitKind::Step(step) = &program.splits[*split as usize].kind
+					&& step.buffers()
+				{
+					let rows = out_of_line(|| {
+						super::binding::finish_step(program, *split, step, state, ctx)
+					})
+					.await?;
+					for row in rows {
+						check_cancelled(ctx)?;
+						if out_of_line(|| run_value_row(program, pipeline, row, state, ctx)).await?
+							== Step::Stop
+						{
+							break;
+						}
+					}
+					out_of_line(|| flush(state, yielder, flush_at)).await?;
+				}
+			}
+			Source::Join {
+				..
+			} => {}
+			Source::Groups {
+				aggregate,
+			} => {
+				let groups = state.groups[*aggregate as usize].take();
+				let rows = out_of_line(|| finish_groups(program, *aggregate, groups, ctx)).await?;
+				let rows = rows.into_iter().map(|row| (Vec::new(), row)).collect();
+				out_of_line(|| run_rows(program, pipeline, rows, state, ctx, yielder, flush_at))
+					.await?;
+			}
+		}
+	}
+	Ok(())
+}
+
+/// Whether a limit of `pipeline` admits no row.
+pub(super) fn limits_spent(pipeline: &Pipeline, state: &State) -> bool {
+	pipeline.limits.iter().any(|id| state.paging[*id as usize].remaining == Some(0))
+}
+
+/// The paging `spec` names, its clauses evaluated in `ctx`.
+async fn paging_of(
+	program: &Program,
+	spec: &super::program::LimitSpec,
+	ctx: &ExecutionContext,
+) -> FlowResult<Paging> {
+	let remaining = match &spec.limit {
+		Some(clause) => Some(paging_clause(program, clause, ctx, PagingClause::Limit).await?),
+		None => None,
+	};
+	let skip = match &spec.start {
+		Some(clause) => paging_clause(program, clause, ctx, PagingClause::Start).await?,
+		None => 0,
+	};
+	Ok(Paging {
+		skip,
+		remaining,
+	})
+}
+
+/// Where the rows a pipeline hands on go: the statement's stream, flushed a
+/// batch at a time, or — for a statement a block runs within its program —
+/// the state's output, gathered into the statement's value once it is done.
+pub(super) enum Out<'o, 'y> {
+	Stream(&'o mut Yielder<'y, ValueBatch>),
+	/// The rows flushed so far. A statement a signal interrupts keeps these,
+	/// and not the rows its state still held, as a stream's reader would.
+	Gather(Vec<Value>),
+}
+
+/// `make`'s future, built in a frame of its own and boxed.
+///
+/// In an unoptimised build, an `.await` of a future built in place reserves
+/// the future's whole size in the awaiting function's frame, once per call
+/// site, and the host's generators and step loop, the planner and the
+/// lowering have many. Built here, the caller holds only the box, which keeps
+/// the native stack each poll of a program, and each step of planning one,
+/// takes small: the lowering recurses through itself, and a frame holding a
+/// copy of its own future per call site grows the stack by that much at
+/// every level.
+#[inline(never)]
+pub(crate) fn out_of_line<F: std::future::Future>(
+	make: impl FnOnce() -> F,
+) -> std::pin::Pin<Box<F>> {
+	Box::pin(make())
+}
+
+/// Run a pipeline over the rows of a source in storage: a table, a record id,
+/// or each source of a union in written order. Answers whether the pipeline
+/// stopped, taking no more rows, so that a union opens no later source.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn run_storage_source(
+	program: &Arc<Program>,
+	pipeline: &Pipeline,
+	source: &Source,
+	version: Option<u64>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+) -> FlowResult<bool> {
+	let db_ctx = ctx.database().context("the VM requires a database context")?;
+	match source {
+		Source::Scan {
+			table,
+			direction,
+			..
+		} => {
+			let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
+				.await
+				.map_err(ControlFlow::Err)?;
+			if hidden_absence(pipeline, &descriptor, db_ctx)? {
+				return Ok(false);
+			}
+			let def = descriptor.defined().map_err(ControlFlow::Err)?;
+			refuse_lightweight(table, def)?;
+			let range = RecordPrefix {
+				ns: db_ctx.ns_ctx.ns.namespace_id,
+				db: db_ctx.db.database_id,
+				tb: Cow::Borrowed(table),
+			}
+			.range()?;
+			scan_range(program, pipeline, range, *direction, version, state, ctx, yielder, flush_at)
+				.await
+		}
+		Source::Record {
+			table,
+			record,
+			for_update,
+		} => {
+			let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
+				.await
+				.map_err(ControlFlow::Err)?;
+			let def = descriptor.defined().map_err(ControlFlow::Err)?;
+			match host_scalar(program, record, ctx, None).await? {
+				// A locked read is of one record, and of no historical version.
+				Value::RecordId(rid) if *for_update && rid.key.is_range() => {
+					Err(ControlFlow::Err(anyhow::Error::new(crate::exec::Error::Query {
+						message: crate::dbs::FOR_UPDATE_TARGETS_ERROR.to_string(),
+					})))
+				}
+				Value::RecordId(_) if *for_update && version.is_some() => {
+					Err(ControlFlow::Err(anyhow::Error::new(crate::exec::Error::Query {
+						message: crate::dbs::FOR_UPDATE_VERSION_ERROR.to_string(),
+					})))
+				}
+				// A range reads its records in key order, as a scan.
+				Value::RecordId(rid) if rid.key.is_range() => {
+					refuse_lightweight(table, def)?;
+					let RecordIdKey::Range(bounds) = &rid.key else {
+						unreachable!("checked a range above")
+					};
+					let range = record_key_range(
+						db_ctx.ns_ctx.ns.namespace_id,
+						db_ctx.db.database_id,
+						table,
+						bounds,
+					)?;
+					scan_range(
+						program,
+						pipeline,
+						range,
+						crate::kvs::Direction::Forward,
+						version,
+						state,
+						ctx,
+						yielder,
+						flush_at,
+					)
+					.await
+				}
+				// A record that does not exist is no row.
+				Value::RecordId(rid) => {
+					let row = if *for_update {
+						crate::exec::operators::fetch::fetch_raw_record_for_update(ctx, &rid)
+							.await?
+					} else {
+						fetch_raw_record(ctx, &rid, version).await?
+					};
+					let Some(row) = row else {
+						return Ok(false);
+					};
+					let step = run_value_row(program, pipeline, row, state, ctx).await?;
+					flush(state, yielder, flush_at).await?;
+					Ok(step == Step::Stop)
+				}
+				other => Err(ControlFlow::Err(anyhow::anyhow!(
+					"a record source evaluated to {other:?}, not a record id"
+				))),
+			}
+		}
+		// An index lists record ids in its key order; each record is read and
+		// run, and an id whose record is gone is no row, as the index scan
+		// operator reads them.
+		Source::Index {
+			index,
+			access,
+			direction,
+			decode,
+		} => {
+			let distinct = access_repeats_records(index, access);
+			let mut records = IndexRecords::open(
+				ctx,
+				index,
+				access,
+				*direction,
+				version,
+				distinct,
+				decode.as_ref(),
+			)?;
+			let mut rows = Rows::of(program, pipeline, ctx);
+			loop {
+				let row = match records.next(ctx).await {
+					Ok(Some(row)) => row,
+					Ok(None) => break,
+					Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
+				};
+				if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
+					return Ok(true);
+				}
+			}
+			rows.finish(state, ctx, yielder, flush_at).await
+		}
+		// Each record once, as the union index operator combines its
+		// branches: drained in branch order, or merged by the key each branch
+		// is sorted by, the earlier branch first between equal keys. A branch
+		// that reaches a record through several entries lists it once, below
+		// the merge, unless the merge already admits each record once.
+		Source::IndexUnion {
+			branches,
+			merge,
+			decode,
+		} => {
+			let branch_distinct =
+				matches!(merge, Some(MergeMode::ById(_) | MergeMode::ByIndexKey { .. }));
+			let mut branches = branches
+				.iter()
+				.map(|b| match &b.read {
+					super::plan::BranchRead::BTree(access) => {
+						let distinct = branch_distinct && access_repeats_records(&b.index, access);
+						IndexRecords::open(
+							ctx,
+							&b.index,
+							access,
+							b.direction,
+							version,
+							distinct,
+							decode.as_ref(),
+						)
+					}
+					super::plan::BranchRead::FullText {
+						query,
+						operator,
+					} => Ok(IndexRecords::full_text(
+						ctx,
+						&b.index,
+						query,
+						operator,
+						version,
+						decode.as_ref(),
+					)),
+				})
+				.collect::<FlowResult<Vec<_>>>()?;
+			let mut rows = Rows::of(program, pipeline, ctx);
+			// A failure to read is raised after the batches before it merge.
+			macro_rules! read {
+				($read:expr) => {
+					match $read {
+						Ok(value) => value,
+						Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
+					}
+				};
+			}
+			let Some(merge) = merge else {
+				let mut seen = HashSet::new();
+				for branch in &mut branches {
+					while let Some(row) = read!(branch.next(ctx).await) {
+						if let Some(rid) = record_id(&row)
+							&& !seen.insert(rid)
+						{
+							continue;
+						}
+						if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
+							return Ok(true);
+						}
+					}
+				}
+				return rows.finish(state, ctx, yielder, flush_at).await;
+			};
+			let descending = matches!(merge.direction(), SortDirection::Desc);
+			let mut last = None;
+			let mut seen = HashSet::new();
+			loop {
+				let mut best: Option<(usize, MergeKey)> = None;
+				for (i, branch) in branches.iter_mut().enumerate() {
+					// A row with no key is passed over, as the union
+					// operator passes over it.
+					let Some(key) =
+						read!(branch.peek(ctx).await).and_then(|row| merge_key(merge, row))
+					else {
+						continue;
+					};
+					let better = best.as_ref().is_none_or(|(_, prev)| {
+						let ordering = key.cmp(prev);
+						if descending {
+							ordering.is_gt()
+						} else {
+							ordering.is_lt()
+						}
+					});
+					if better {
+						best = Some((i, key));
+					}
+				}
+				let Some((i, key)) = best else {
+					return rows.finish(state, ctx, yielder, flush_at).await;
+				};
+				let row = read!(branches[i].next(ctx).await).expect("the branch's head was peeked");
+				// Merged by id, a record listed by several branches arrives
+				// once per branch in succession.
+				if let MergeKey::Rid(rid) = &key {
+					if last.as_ref() == Some(rid) {
+						continue;
+					}
+					last = Some(rid.clone());
+				}
+				if matches!(merge, MergeMode::ByIndexKeyDedup { .. })
+					&& let Some(rid) = record_id(&row)
+					&& !seen.insert(rid)
+				{
+					continue;
+				}
+				if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
+					return Ok(true);
+				}
+			}
+		}
+		// The doc-IDs a fused plan leaves, resolved and read in batches as the
+		// bitmap resolve operator reads them; on an overflow, its fallback.
+		Source::Bitmap {
+			table,
+			root,
+			fallback,
+			decode,
+		} => {
+			let services = EngineServices::new(ctx);
+			let bitmap = match services.evaluate_bitmap(table, root, fallback.is_none()).await? {
+				FusedCandidates::Bitmap(bitmap) => bitmap,
+				FusedCandidates::Overflow => {
+					let Some(fallback) = fallback else {
+						return Err(ControlFlow::Err(anyhow::anyhow!(
+							"an anchored bitmap plan overflowed its branch budget"
+						)));
+					};
+					return out_of_line(|| {
+						run_storage_source(
+							program, pipeline, fallback, version, state, ctx, yielder, flush_at,
+						)
+					})
+					.await;
+				}
+			};
+			let mut doc_ids = bitmap.into_iter();
+			let mut rows = Rows::of(program, pipeline, ctx);
+			macro_rules! read {
+				($read:expr) => {
+					match $read {
+						Ok(value) => value,
+						Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
+					}
+				};
+			}
+			// The first read is a probe and each later one is sized from the
+			// stored bytes of the read before it; the records each read finds
+			// are decoded a byte budget at a time.
+			let mut reader = RecordReader::stored(ctx, RESOLVE_BATCH_SIZE, None, decode.clone());
+			loop {
+				read!(check_cancelled(ctx));
+				if reader.is_drained() {
+					let chunk: Vec<u64> = doc_ids.by_ref().take(reader.read_len()).collect();
+					if chunk.is_empty() {
+						return rows.finish(state, ctx, yielder, flush_at).await;
+					}
+					reader.push(read!(services.resolve_doc_ids(table, &chunk).await));
+				}
+				let records = read!(reader.next_rows(ctx).await);
+				for row in records {
+					if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
+						return Ok(true);
+					}
+				}
+				yield_now!();
+			}
+		}
+		// The hits of a full-text query, read a batch at a time: the table's
+		// permission and fields are the program's, applied to the rows.
+		Source::FullText {
+			table,
+			index,
+			query,
+			operator,
+			decode,
+		} => {
+			let services = EngineServices::new(ctx);
+			let mut rows = Rows::of(program, pipeline, ctx);
+			macro_rules! read {
+				($read:expr) => {
+					match $read {
+						Ok(value) => value,
+						Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
+					}
+				};
+			}
+			let Some(mut hits) =
+				read!(services.full_text_candidates(table, index, query, operator).await)
+			else {
+				return rows.finish(state, ctx, yielder, flush_at).await;
+			};
+			let txn = ctx.txn();
+			let mut reader = RecordReader::stored(ctx, RESOLVE_BATCH_SIZE, version, decode.clone());
+			loop {
+				read!(check_cancelled(ctx));
+				let rids = read!(hits.next_batch(&txn, FULL_TEXT_BATCH_SIZE).await);
+				if rids.is_empty() {
+					return rows.finish(state, ctx, yielder, flush_at).await;
+				}
+				reader.push(rids);
+				while !reader.is_drained() {
+					let records = read!(reader.next_rows(ctx).await);
+					for row in records {
+						if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
+							return Ok(true);
+						}
+					}
+				}
+			}
+		}
+		// The nearest records of a vector, nearest first: the table's
+		// permission and fields are the program's, applied to the rows.
+		Source::Knn {
+			table,
+			index,
+			vector,
+			k,
+			ef,
+			slot,
+			gate,
+			ids_only,
+		} => {
+			let mut rows = Rows::of(program, pipeline, ctx);
+			macro_rules! read {
+				($read:expr) => {
+					match $read {
+						Ok(value) => value,
+						Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
+					}
+				};
+			}
+			let candidates = read!(
+				super::knn::search(
+					program,
+					ctx,
+					table,
+					index,
+					vector,
+					*k,
+					*ef,
+					version,
+					gate.as_ref(),
+				)
+				.await
+			);
+			// The distances are published before any record is yielded, so
+			// a projection reading them finds them.
+			if let Some(slot) = slot {
+				let published = state.knn_context(*slot);
+				for (rid, distance) in &candidates {
+					published.insert(rid.clone(), crate::val::Number::Float(*distance)).await;
+				}
+			}
+			let rids: Vec<crate::val::RecordId> =
+				candidates.into_iter().map(|(rid, _distance)| rid).collect();
+			// A read at the current version, the one the index describes,
+			// returns ids of records that exist in the transaction's snapshot;
+			// a row nothing reads more of than its id is built from the id.
+			if *ids_only && version.is_none() {
+				for rid in rids {
+					let mut row = crate::val::Object::default();
+					row.insert("id".to_string(), Value::RecordId(rid));
+					if rows
+						.row(program, pipeline, Value::Object(row), state, ctx, yielder, flush_at)
+						.await?
+					{
+						return Ok(true);
+					}
+				}
+				return rows.finish(state, ctx, yielder, flush_at).await;
+			}
+			let mut reader = RecordReader::new(
+				ctx,
+				RESOLVE_BATCH_SIZE,
+				version,
+				crate::kvs::CachePolicy::ReadWrite,
+			);
+			reader.push(rids);
+			while !reader.is_drained() {
+				let records = read!(reader.next_rows(ctx).await);
+				for row in records {
+					if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
+						return Ok(true);
+					}
+				}
+			}
+			rows.finish(state, ctx, yielder, flush_at).await
+		}
+		// The edges of a lightweight relation, walked over adjacency: each
+		// edge's record is synthesized from its id, as a stored record is
+		// read.
+		Source::LightweightEdges {
+			table,
+			record,
+			direction,
+		} => {
+			let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
+				.await
+				.map_err(ControlFlow::Err)?;
+			let def = descriptor.defined().map_err(ControlFlow::Err)?;
+			if crate::kvs::lightweight::lightweight_relation(&def.table_type).is_none() {
+				return Err(ControlFlow::Err(anyhow::anyhow!(
+					"`{table}` was planned as a lightweight relation and is not one"
+				)));
+			}
+			let wanted = match record {
+				None => None,
+				Some(record) => match host_scalar(program, record, ctx, None).await? {
+					Value::RecordId(rid) if rid.key.is_range() => Some(rid.key),
+					// An edge named by its id is read as a record is.
+					Value::RecordId(rid) => {
+						let Some(row) = fetch_raw_record(ctx, &rid, version).await? else {
+							return Ok(false);
+						};
+						let step = run_value_row(program, pipeline, row, state, ctx).await?;
+						flush(state, yielder, flush_at).await?;
+						return Ok(step == Step::Stop);
+					}
+					other => {
+						return Err(ControlFlow::Err(anyhow::anyhow!(
+							"a record source evaluated to {other:?}, not a record id"
+						)));
+					}
+				},
+			};
+			let services = EngineServices::new(ctx);
+			let mut edges = services.scan_lightweight_edges(table, wanted, *direction, version);
+			let mut rows = Rows::of(program, pipeline, ctx);
+			while let Some(batch) = edges.next().await {
+				let rids = match check_cancelled(ctx).and(batch) {
+					Ok(rids) => rids,
+					Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
+				};
+				for rid in rids {
+					let row = match services.read_record(&rid, version).await {
+						Ok(Some(row)) => row,
+						Ok(None) => continue,
+						Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
+					};
+					if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
+						return Ok(true);
+					}
+				}
+			}
+			rows.finish(state, ctx, yielder, flush_at).await
+		}
+		Source::Union(sources) => {
+			for source in sources {
+				// A source after the limit is reached is not read: the
+				// limit is judged before each one is opened.
+				let spent = limits_spent(pipeline, state);
+				let stopped = if source.reads_storage() {
+					// Under a zero limit a read of storage reads no record,
+					// unless it is a locked read, and a source that is not one
+					// still yields its rows.
+					let locked = matches!(
+						source,
+						Source::Record {
+							for_update: true,
+							..
+						}
+					);
+					if (spent || state.zeroed) && !locked {
+						continue;
+					}
+					out_of_line(|| {
+						run_storage_source(
+							program, pipeline, source, version, state, ctx, yielder, flush_at,
+						)
+					})
+					.await?
+				} else {
+					out_of_line(|| {
+						super::nested::run_source(
+							program, pipeline, source, spent, state, ctx, yielder, flush_at,
+						)
+					})
+					.await?
+				};
+				if stopped {
+					return Ok(true);
+				}
+			}
+			Ok(false)
+		}
+		Source::Sorted {
+			..
+		}
+		| Source::Groups {
+			..
+		}
+		| Source::Split {
+			..
+		}
+		| Source::Join {
+			..
+		}
+		| Source::Values {
+			..
+		}
+		| Source::Nested {
+			..
+		}
+		| Source::Probe {
+			..
+		}
+		| Source::Count {
+			..
+		}
+		| Source::WriteTargets {
+			..
+		}
+		| Source::WriteInserts {
+			..
+		}
+		| Source::WriteEdges {
+			..
+		}
+		| Source::Once => unreachable!("a source that is not a storage read"),
+	}
+}
+
+/// The records an index lists, in its order: each batch of record ids is
+/// read as the index scan operator reads it, an id whose record is gone
+/// yielding nothing.
+///
+/// A scan that reaches a record through several entries (see
+/// [`access_fans_out`]) lists it once: the first entry to name it, in the
+/// index's order, stands for the record. The repeats are dropped from the ids
+/// before any record is read, so they cost no read.
+struct IndexRecords {
+	listing: Listing,
+	reader: RecordReader,
+	rows: std::collections::VecDeque<Value>,
+	exhausted: bool,
+	/// The ids listed so far, kept only by a scan that can name a record more
+	/// than once.
+	seen: Option<HashSet<crate::val::RecordId>>,
+}
+
+/// What an index lists.
+enum Listing {
+	/// The entries of a B-tree index under an access.
+	BTree(BTreeIterator),
+	/// The hits of a full-text query, opened when the first is asked for.
+	FullText {
+		index: crate::exec::index::access_path::IndexRef,
+		query: String,
+		operator: crate::expr::operator::MatchesOperator,
+		hits: Option<Option<Box<crate::exec::operators::scan::FullTextHits>>>,
+	},
+}
+
+impl IndexRecords {
+	/// The records of B-tree index `index` under `access`, each once when
+	/// `distinct`.
+	fn open(
+		ctx: &ExecutionContext,
+		index: &crate::exec::index::access_path::IndexRef,
+		access: &crate::exec::index::access_path::BTreeAccess,
+		direction: crate::kvs::Direction,
+		version: Option<u64>,
+		distinct: bool,
+		decode: Option<&DecodeFields>,
+	) -> FlowResult<Self> {
+		Ok(Self {
+			listing: Listing::BTree(EngineServices::new(ctx).index_rids(index, access, direction)?),
+			reader: RecordReader::stored(ctx, RESOLVE_BATCH_SIZE, version, decode.cloned()),
+			rows: Default::default(),
+			exhausted: false,
+			seen: distinct.then(HashSet::new),
+		})
+	}
+
+	fn full_text(
+		ctx: &ExecutionContext,
+		index: &crate::exec::index::access_path::IndexRef,
+		query: &str,
+		operator: &crate::expr::operator::MatchesOperator,
+		version: Option<u64>,
+		decode: Option<&DecodeFields>,
+	) -> Self {
+		Self {
+			listing: Listing::FullText {
+				index: index.clone(),
+				query: query.to_owned(),
+				operator: operator.clone(),
+				hits: None,
+			},
+			reader: RecordReader::stored(ctx, RESOLVE_BATCH_SIZE, version, decode.cloned()),
+			rows: Default::default(),
+			exhausted: false,
+			seen: None,
+		}
+	}
+
+	/// The next batch of record ids the index lists; empty once it has none.
+	async fn next_rids(&mut self, ctx: &ExecutionContext) -> FlowResult<Vec<crate::val::RecordId>> {
+		let services = EngineServices::new(ctx);
+		match &mut self.listing {
+			Listing::BTree(rids) => services.next_index_rids(rids).await,
+			Listing::FullText {
+				index,
+				query,
+				operator,
+				hits,
+			} => {
+				if hits.is_none() {
+					let table = index.definition().table_name.clone();
+					*hits = Some(
+						services
+							.full_text_candidates(&table, index, query, operator)
+							.await?
+							.map(Box::new),
+					);
+				}
+				match hits.as_mut().and_then(Option::as_mut) {
+					Some(hits) => hits.next_batch(&ctx.txn(), FULL_TEXT_BATCH_SIZE).await,
+					None => Ok(Vec::new()),
+				}
+			}
+		}
+	}
+
+	/// The next record, without taking it.
+	async fn peek(&mut self, ctx: &ExecutionContext) -> FlowResult<Option<&Value>> {
+		while self.rows.is_empty() && !self.exhausted {
+			if self.reader.is_drained() {
+				let mut batch = self.next_rids(ctx).await?;
+				if batch.is_empty() {
+					self.exhausted = true;
+					break;
+				}
+				if let Some(seen) = &mut self.seen {
+					batch.retain(|rid| seen.insert(rid.clone()));
+				}
+				self.reader.push(batch);
+			}
+			self.rows.extend(self.reader.next_rows(ctx).await?);
+			yield_now!();
+		}
+		Ok(self.rows.front())
+	}
+
+	/// The next record.
+	async fn next(&mut self, ctx: &ExecutionContext) -> FlowResult<Option<Value>> {
+		self.peek(ctx).await?;
+		Ok(self.rows.pop_front())
+	}
+}
+
+/// Whether the table `descriptor` names is absent and a scan of it by
+/// `pipeline`, which enforces the table's permissions per row, owes the
+/// caller no rows rather than the error of an undefined table: a caller whose
+/// reads are checked is denied a table that does not exist, as one whose
+/// permission it fails, so its scan reads as empty.
+fn hidden_absence(
+	pipeline: &Pipeline,
+	descriptor: &crate::exec::vm::descriptor::TableDescriptor,
+	db_ctx: &crate::exec::DatabaseContext,
+) -> FlowResult<bool> {
+	if descriptor.definition.is_some() || !matches!(pipeline.enforce, Some(Enforce::Rows(_))) {
+		return Ok(false);
+	}
+	crate::exec::permission::should_check_perms(db_ctx, crate::iam::Action::View)
+		.map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))
+}
+
+/// Raise the internal error of a scan that was planned as a read of a record
+/// range and finds `table` a lightweight relation, which has none.
+fn refuse_lightweight(
+	table: &crate::val::TableName,
+	def: &crate::catalog::TableDefinition,
+) -> FlowResult<()> {
+	if crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some() {
+		return Err(ControlFlow::Err(anyhow::anyhow!(
+			"`{table}` is a lightweight relation and was planned as a record range"
+		)));
+	}
+	Ok(())
+}
+
+/// What an index union merges its branches by: a record's id, or the value
+/// at the merge path.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum MergeKey {
+	Rid(crate::val::RecordId),
+	Field(Value),
+}
+
+/// The key `row` merges by, as the union index operator reads it: a row with
+/// no record id has no key when merging by id.
+fn merge_key(merge: &MergeMode, row: &Value) -> Option<MergeKey> {
+	match merge {
+		MergeMode::ById(_) => record_id(row).map(MergeKey::Rid),
+		MergeMode::ByIndexKey {
+			path,
+			..
+		}
+		| MergeMode::ByIndexKeyDedup {
+			path,
+			..
+		} => Some(MergeKey::Field(path.extract(row).into_owned())),
+	}
+}
+
+/// The record id a row carries at `id`.
+fn record_id(row: &Value) -> Option<crate::val::RecordId> {
+	match row {
+		Value::Object(object) => match object.get("id") {
+			Some(Value::RecordId(rid)) => Some(rid.clone()),
+			_ => None,
+		},
+		_ => None,
+	}
+}
+
+/// The probe of the top-k pushdown `pipeline`'s scan carries, armed with the
+/// threshold cell of the sort that feeds on it in the run in progress; `None`
+/// for a scan with no pushdown or whose sort holds no cell.
+fn armed_probe(
+	pipeline: &Pipeline,
+	state: &State,
+) -> Option<Arc<crate::exec::topk_pushdown::TopKThresholdProbe>> {
+	let topk = pipeline.source.topk()?;
+	let cell = state.topk_cells.get(topk.sort as usize)?.as_ref()?;
+	Some(topk.probe(cell))
+}
+
+/// Run a pipeline over every record of `range`: inside the storage cursor on
+/// the stored bytes when it runs in place, over the decoded records otherwise.
+#[allow(clippy::too_many_arguments)]
+async fn scan_range(
+	program: &Arc<Program>,
+	pipeline: &Pipeline,
+	range: crate::key::RawRange,
+	direction: crate::kvs::Direction,
+	version: Option<u64>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+) -> FlowResult<bool> {
+	// The first read of storage of a run whose reader says how many rows it
+	// takes reads no more records than that before it hands its rows on.
+	let first = state.scan_hint.take();
+	if pipeline.in_place {
+		return scan_in_place(
+			program, pipeline, range, direction, version, first, state, ctx, yielder, flush_at,
+		)
+		.await;
+	}
+	let topk_probe = armed_probe(pipeline, state);
+	// The body's first step refuses what the shape judges false, so a record
+	// the stored bytes show it would refuse is not decoded.
+	let prefilter = pipeline
+		.source
+		.prefilter()
+		.map(|shape| shape.filter(ctx.root().ctx.config.exec.idiom_recursion_limit));
+	let mut source =
+		kv_scan_stream(ctx.txn(), range, version, None, direction, 0, first, prefilter, topk_probe);
+	// The rows of a program that does heavy work for each, reading only, are
+	// read and decoded on a task of their own, ahead of the work, as the
+	// operator tree reads the rows its operators consume.
+	if program.access_mode == crate::exec::access_mode::AccessMode::ReadOnly
+		&& program
+			.splits
+			.iter()
+			.any(|split| matches!(split.kind, super::program::SplitKind::Step(_)))
+	{
+		source = crate::exec::buffer_stream(
+			source,
+			program.access_mode,
+			crate::exec::CardinalityHint::Unbounded,
+			ctx.root().ctx.config.exec.operator_buffer_size,
+		);
+	}
+	let mut rows = Rows::of(program, pipeline, ctx).reading(first);
+	while let Some(batch) = source.next().await {
+		let batch = match check_cancelled(ctx).and(batch) {
+			Ok(batch) => batch,
+			Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
+		};
+		#[cfg(test)]
+		RECORDS_SCANNED.with(|scanned| scanned.set(scanned.get() + batch.len()));
+		for row in batch.into_values() {
+			if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
+				return Ok(true);
+			}
+		}
+	}
+	rows.finish(state, ctx, yielder, flush_at).await
+}
+
+#[cfg(test)]
+thread_local! {
+	/// How many records this thread's scans of a table's range read from
+	/// storage, for tests that must know how far a scan read.
+	pub(super) static RECORDS_SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The register file of a body run inside the storage cursor that holds no
+/// more registers than this.
+const SMALL_REGISTERS: usize = 8;
+
+/// Run an in-place pipeline over every record of `range`, inside the storage
+/// cursor, on each record's stored bytes: no more than `first` records before
+/// the rows are handed on the first time, where it is given.
+#[allow(clippy::too_many_arguments)]
+async fn scan_in_place(
+	program: &Program,
+	pipeline: &Pipeline,
+	range: crate::key::RawRange,
+	direction: crate::kvs::Direction,
+	version: Option<u64>,
+	mut first: Option<u32>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+) -> FlowResult<bool> {
+	let topk_probe = armed_probe(pipeline, state);
+	let topk_threshold = topk_probe.as_ref().and_then(|p| p.snapshot());
+	let txn = ctx.txn();
+	let mut cursor = txn
+		.open_vals_cursor_raw(range, direction, 0, version)
+		.await
+		.context("Failed to open scan cursor")?;
+	loop {
+		check_cancelled(ctx)?;
+		let mut failed = None;
+		let mut stopped = false;
+		let chunk = first.take().map_or(crate::kvs::NORMAL_BATCH_SIZE, |first| {
+			first.clamp(1, crate::kvs::NORMAL_BATCH_SIZE)
+		});
+		let stats = cursor
+			.for_each(chunk, &mut |key, value| {
+				if let (Some(probe), Some(threshold)) =
+					(topk_probe.as_ref(), topk_threshold.as_deref())
+					&& probe.rejects(threshold, value)
+				{
+					return Ok(std::ops::ControlFlow::Continue(()));
+				}
+				let row = RevisionRow::new(key, value);
+				// A body that holds few registers gets a register file of its
+				// size: the file is made and dropped for every record.
+				let step = if pipeline.registers <= SMALL_REGISTERS {
+					let mut regs: [Scalar<'_>; SMALL_REGISTERS] =
+						std::array::from_fn(|_| Scalar::None);
+					interp::run_row(
+						program,
+						pipeline,
+						&row,
+						&mut regs[..pipeline.registers],
+						state,
+						0,
+					)
+				} else {
+					let mut stack;
+					let mut spilled;
+					let regs: &mut [Scalar<'_>] = if pipeline.registers <= STACK_REGISTERS {
+						stack =
+							std::array::from_fn::<Scalar<'_>, STACK_REGISTERS, _>(|_| Scalar::None);
+						&mut stack[..pipeline.registers]
+					} else {
+						spilled = (0..pipeline.registers).map(|_| Scalar::None).collect::<Vec<_>>();
+						&mut spilled[..]
+					};
+					interp::run_row(program, pipeline, &row, regs, state, 0)
+				};
+				let settled = match step {
+					Ok(Step::Next) => Ok(false),
+					Ok(Step::Stop) => Ok(true),
+					Ok(Step::WriteProjection {
+						..
+					})
+					| Ok(Step::LandRow {
+						..
+					})
+					| Ok(Step::BindRow {
+						..
+					})
+					| Ok(Step::Write {
+						..
+					})
+					| Ok(Step::Store {
+						..
+					})
+					| Ok(Step::Block {
+						..
+					})
+					| Ok(Step::Param {
+						..
+					})
+					| Ok(Step::CallAllowed {
+						..
+					})
+					| Ok(Step::Access {
+						..
+					})
+					| Ok(Step::Each {
+						..
+					})
+					| Ok(Step::Fetch {
+						..
+					})
+					| Ok(Step::FetchRow {
+						..
+					})
+					| Ok(Step::Call {
+						..
+					})
+					| Ok(Step::IndexFn {
+						..
+					})
+					| Ok(Step::Matches {
+						..
+					})
+					| Ok(Step::Method {
+						..
+					})
+					| Ok(Step::Subquery {
+						..
+					})
+					| Ok(Step::Lookup {
+						..
+					})
+					| Ok(Step::Destructure {
+						..
+					})
+					| Ok(Step::JudgeCopy {
+						..
+					})
+					| Ok(Step::Omit {
+						..
+					})
+					| Ok(Step::Signal {
+						..
+					})
+					| Ok(Step::Recurse {
+						..
+					})
+					| Ok(Step::Closure {
+						..
+					})
+					| Ok(Step::NeedUnit {
+						..
+					})
+					| Ok(Step::Function {
+						..
+					})
+					| Ok(Step::External {
+						..
+					})
+					| Ok(Step::Degree {
+						..
+					}) => Err(anyhow::anyhow!("an in-place pipeline evaluated an expression")),
+					Err(e) => Err(e),
+				}
+				.and_then(|stop| {
+					if state.pending.is_some() {
+						state.settle_stored(program, key, value)?;
+					}
+					Ok(stop)
+				});
+				match settled {
+					Ok(false) => Ok(std::ops::ControlFlow::Continue(())),
+					Ok(true) => {
+						stopped = true;
+						Ok(std::ops::ControlFlow::Break(()))
+					}
+					Err(e) => {
+						failed = Some(e);
+						Ok(std::ops::ControlFlow::Break(()))
+					}
+				}
+			})
+			.await
+			.context("Failed to scan record")?;
+		if let Some(e) = failed {
+			return Err(ControlFlow::Err(e));
+		}
+		#[cfg(test)]
+		RECORDS_SCANNED.with(|scanned| scanned.set(scanned.get() + stats.rows as usize));
+		// The rows the chunk emitted are held until `flush` hands them on, so a
+		// process past its memory threshold fails here rather than scanning on.
+		ensure_below_memory_threshold()?;
+		flush(state, yielder, flush_at).await?;
+		if stopped || stats.rows == 0 {
+			return Ok(stopped);
+		}
+		// A scan that emits nothing still yields between chunks, so a
+		// `TIMEOUT` around it, or other work, gets its turn.
+		yield_now!();
+	}
+}
+
+/// Run a pipeline over rows held in memory, yielding to other work every
+/// [`ROWS_PER_SLICE`] rows.
+pub(super) async fn run_rows(
+	program: &Program,
+	pipeline: &Pipeline,
+	rows: Vec<(Vec<Value>, Value)>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+) -> FlowResult<bool> {
+	for (i, (keys, row)) in rows.into_iter().enumerate() {
+		if i % ROWS_PER_SLICE == ROWS_PER_SLICE - 1 {
+			check_cancelled(ctx)?;
+			yield_now!();
+		}
+		// A sorted row's keys, which a projection sharing them reads.
+		state.sorted_keys = keys;
+		if run_value_row(program, pipeline, row, state, ctx).await? == Step::Stop {
+			return Ok(true);
+		}
+		flush(state, yielder, flush_at).await?;
+	}
+	Ok(false)
+}
+
+/// Run a pipeline's body for one row held in memory, evaluating what it hands
+/// back, and settle the row where the body sent it.
+///
+/// A run over a state that is already inside an [`Instr::TryNone`] region, as a
+/// statement the body runs is, leaves those regions as it found them: it
+/// catches only the errors of the regions it opens itself.
+/// Host pipeline `pipeline`'s answer over `image` when its body answers
+/// without handing the host a step: run in place, synchronously, over a row
+/// that is a document. `None` when the body hands the host a step or fails,
+/// having kept nothing it did; the caller then runs the pipeline whole.
+pub(super) fn run_image_inline(
+	program: &Program,
+	pipeline: u16,
+	image: &Value,
+	state: &mut State,
+) -> Option<Value> {
+	const INLINE_REGISTERS: usize = 8;
+	let pipeline = &program.host_code[pipeline as usize];
+	let reader = super::row::ValueRow(image);
+	let mut stack;
+	let mut spilled;
+	let regs: &mut [Scalar<'_>] = if pipeline.registers <= INLINE_REGISTERS {
+		stack = [const { Scalar::None }; INLINE_REGISTERS];
+		&mut stack[..pipeline.registers]
+	} else {
+		spilled = (0..pipeline.registers).map(|_| Scalar::None).collect::<Vec<_>>();
+		&mut spilled[..]
+	};
+	let (output, tries) = (state.output.len(), state.tries.len());
+	let rowless = std::mem::replace(&mut state.rowless, false);
+	let undocumented = std::mem::replace(&mut state.undocumented, false);
+	let step = interp::run_row(program, pipeline, &reader, regs, state, 0);
+	state.rowless = rowless;
+	state.undocumented = undocumented;
+	match step {
+		Ok(Step::Next | Step::Stop) if state.output.len() == output + 1 => state.output.pop(),
+		_ => {
+			state.output.truncate(output);
+			state.tries.truncate(tries);
+			None
+		}
+	}
+}
+
+/// Where a unit's body run in place ([`run_unit_inline`]) left its row when
+/// it could not finish it there.
+pub(super) struct Unfinished<'r> {
+	/// The row, with the layers the body landed on it before it stopped.
+	pub(super) row: Cow<'r, Value>,
+	/// Where the host continues the body over `row`: `Some` with the
+	/// instruction that begins the stretch the body stopped in, on the same
+	/// state, which holds the body's work up to that stretch and nothing of
+	/// the stretch itself; `None` where the body is run whole on a fresh
+	/// state, `row` being as it was handed in.
+	pub(super) resume: Option<usize>,
+}
+
+/// Run `pipeline`'s body over `row`, a unit's one row on a state of the
+/// unit's own ([`unit_state`]), in place and synchronously, when the body
+/// answers without handing the host a step other than landing a layer, which
+/// it lands here: how the row ended, with what the body left pending settled,
+/// `row` copied only where the body changes it or hands it on.
+///
+/// The row is handed back ([`Unfinished`]) when the body hands the host
+/// another step, fails, or splits the row. A body whose program pages, sorts,
+/// aggregates or runs block statements holds work a stretch cannot be run
+/// twice over, so it stops at its first layer and is run whole on a fresh
+/// state. Any other is continued from the start of the stretch it stopped in
+/// — the start of the body, or the instruction after the last layer landed —
+/// with the stretch's open `TRY` regions, output and pending row given back;
+/// what else a stretch sets (the record being computed, a landing) it sets
+/// afresh when it runs again. The body binds no block slot itself, which
+/// only a host step does, so the state's slots are still as the caller set
+/// them.
+pub(super) fn run_unit_inline<'r>(
+	program: &Program,
+	pipeline: &Pipeline,
+	mut row: Cow<'r, Value>,
+	state: &mut State,
+) -> Result<Step, Unfinished<'r>> {
+	/// The registers of a body small enough to run in place, in two sizes,
+	/// so that the most common bodies, the smallest, set up the fewest.
+	const FEW: usize = 4;
+	const MANY: usize = 16;
+	let resumable = program.limits.is_empty()
+		&& program.sorts.is_empty()
+		&& program.aggregates.is_empty()
+		&& program.groups.is_empty();
+	// A row the pipeline enforces the table's permissions, computed fields
+	// and field permissions on is enforced by the host before the body runs
+	// ([`run_cow_row_from`]), so the body is run whole there.
+	if pipeline.enforce.is_some() {
+		return Err(Unfinished {
+			row,
+			resume: None,
+		});
+	}
+	let (output, tries) = (state.output.len(), state.tries.len());
+	let mut start = 0;
+	loop {
+		let step = {
+			let reader = ValueRow(&row);
+			let registers = pipeline.registers;
+			if registers <= FEW {
+				let mut regs = [const { Scalar::None }; FEW];
+				interp::run_row(program, pipeline, &reader, &mut regs[..registers], state, start)
+			} else if registers <= MANY {
+				let mut regs = [const { Scalar::None }; MANY];
+				interp::run_row(program, pipeline, &reader, &mut regs[..registers], state, start)
+			} else {
+				return Err(Unfinished {
+					row,
+					resume: resumable.then_some(0),
+				});
+			}
+		};
+		match step {
+			// A layer landed with a `TRY` region open across it is left to the
+			// host, which catches into that region after the landing.
+			Ok(Step::LandRow {
+				resume,
+			}) if resumable && state.tries.len() == tries => {
+				land(state, &mut row);
+				start = resume;
+			}
+			Ok(step @ (Step::Next | Step::Stop))
+				if !matches!(state.pending, Some(Pending::Split { .. } | Pending::Join { .. })) =>
+			{
+				if state.pending.is_some() {
+					state.settle(program, row.into_owned());
+				}
+				return Ok(step);
+			}
+			_ => {
+				if resumable {
+					state.output.truncate(output);
+					state.tries.truncate(tries);
+					state.pending = None;
+					state.landing = None;
+				}
+				return Err(Unfinished {
+					row,
+					resume: resumable.then_some(start),
+				});
+			}
+		}
+	}
+}
+
+/// Land the columns [`State::landing`] holds on `row`: its cuts removed, then
+/// its sets written.
+fn land(state: &mut State, row: &mut Cow<'_, Value>) {
+	if let (Some((cuts, sets)), Value::Object(obj)) = (state.landing.take(), row.to_mut()) {
+		for name in cuts.keys() {
+			obj.remove(name.as_str());
+		}
+		for (name, value) in sets {
+			obj.insert(name, value);
+		}
+	}
+}
+
+pub(super) async fn run_value_row(
+	program: &Program,
+	pipeline: &Pipeline,
+	row: Value,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Step> {
+	run_cow_row(program, pipeline, Cow::Owned(row), state, ctx).await
+}
+
+/// [`run_value_row`] over `row`, which is copied only where the body changes
+/// it or hands it on: a host pipeline evaluated over a row it only reads runs
+/// over the row where it is.
+pub(super) async fn run_cow_row(
+	program: &Program,
+	pipeline: &Pipeline,
+	row: Cow<'_, Value>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Step> {
+	run_cow_row_from(program, pipeline, row, state, ctx, 0).await
+}
+
+/// [`run_cow_row`] from instruction `start` of the body, with fresh
+/// registers: where the body begins, or where a run in place left it
+/// ([`Unfinished::resume`]).
+pub(super) async fn run_cow_row_from(
+	program: &Program,
+	pipeline: &Pipeline,
+	row: Cow<'_, Value>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	start: usize,
+) -> FlowResult<Step> {
+	let mut row = row;
+	// A source whose rows no node of the plan enforces the table's
+	// permission, computed fields and field permissions on is put through
+	// them first, as the table's scan does: a row the permission refuses is
+	// no row.
+	if start == 0
+		&& let Some(enforce) = &pipeline.enforce
+	{
+		let mut enforced = row.into_owned();
+		if !enforce_row(enforce, &mut enforced, state, ctx).await? {
+			return Ok(Step::Next);
+		}
+		row = Cow::Owned(enforced);
+	}
+	let base = state.tries.len();
+	let stepped = run_body(program, pipeline, row, state, ctx, base, start).await;
+	state.tries.truncate(base);
+	stepped
+}
+
+/// Put `row` through the enforcement `enforce` names, in place, and answer
+/// whether the row is shown: only [`Enforce::Rows`] can refuse one. A row that
+/// is no record (an object with a record id) is left as it is.
+async fn enforce_row(
+	enforce: &Enforce,
+	row: &mut Value,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<bool> {
+	use crate::exec::operators::scan::pipeline::{
+		build_field_state, filter_fields_by_permission, materialise_fields_with_permissions,
+	};
+	let record = match &*row {
+		Value::Object(object) => match object.get("id") {
+			Some(Value::RecordId(rid)) => Some(rid.clone()),
+			_ => None,
+		},
+		_ => None,
+	};
+	let frame = frame_ctx(state, ctx, None);
+	match enforce {
+		Enforce::Rows(_) => {
+			let Some(rid) = record else {
+				return Ok(true);
+			};
+			// The table's read unit enforces the row where one serves the
+			// frame, as a read of the record by id is enforced.
+			if let Some(deref) = frame.vm_deref()
+				&& let Some(read) =
+					out_of_line(|| deref.read_record(frame, &rid.table, row, true)).await
+			{
+				return read;
+			}
+			out_of_line(|| crate::exec::operators::fetch::process_fetched_record(frame, &rid, row))
+				.await
+		}
+		Enforce::Image(table) => {
+			if record.is_none() {
+				return Ok(true);
+			}
+			let db_ctx = frame.database().context("an image enforced with no database context")?;
+			let checked =
+				crate::exec::permission::should_check_perms(db_ctx, crate::iam::Action::View)
+					.map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?;
+			let fields = build_field_state(frame, table, checked, None).await?;
+			materialise_fields_with_permissions(
+				frame,
+				&fields,
+				row,
+				frame.root().skip_fetch_perms,
+				checked,
+			)
+			.await?;
+			Ok(true)
+		}
+		Enforce::Guards(table) => {
+			if record.is_none() {
+				return Ok(true);
+			}
+			let fields = build_field_state(frame, table, true, None).await?;
+			filter_fields_by_permission(frame, &fields, row).await?;
+			Ok(true)
+		}
+	}
+}
+
+async fn run_body(
+	program: &Program,
+	pipeline: &Pipeline,
+	mut row: Cow<'_, Value>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	base: usize,
+	mut start: usize,
+) -> FlowResult<Step> {
+	let step = loop {
+		let step = {
+			let reader = ValueRow(&row);
+			let mut small;
+			let mut stack;
+			let mut spilled;
+			let regs: &mut [Scalar<'_>] = if pipeline.registers <= SMALL_REGISTERS {
+				small = std::array::from_fn::<Scalar<'_>, SMALL_REGISTERS, _>(|_| Scalar::None);
+				&mut small[..pipeline.registers]
+			} else if pipeline.registers <= STACK_REGISTERS {
+				stack = std::array::from_fn::<Scalar<'_>, STACK_REGISTERS, _>(|_| Scalar::None);
+				&mut stack[..pipeline.registers]
+			} else {
+				spilled = (0..pipeline.registers).map(|_| Scalar::None).collect::<Vec<_>>();
+				&mut spilled[..]
+			};
+			let mut pc = start;
+			// An error about the shape of the data inside an `Instr::TryNone`
+			// region is caught by the innermost, and the body resumes where it
+			// names.
+			loop {
+				let attempt: FlowResult<Step> = async {
+					// The instruction whose closures were linked last, and not
+					// yet taken since: an invocation it makes that finds no unit
+					// standing does not link again.
+					let mut relinked: Option<usize> = None;
+					loop {
+						match interp::run_row(program, pipeline, &reader, regs, state, pc)
+							.map_err(ControlFlow::Err)?
+						{
+							Step::Param {
+								param,
+								dst,
+								frame,
+								resume,
+							} => {
+								let eval_ctx = frame_eval(program, state, ctx, frame);
+								let eval_ctx = row_eval(state, eval_ctx, &row);
+								let spec = &program.params[param as usize];
+								let value = match super::function::frame_param(spec, &eval_ctx) {
+									Some(value) => value,
+									None => {
+										out_of_line(|| {
+											super::function::stored_param(program, spec, &eval_ctx)
+										})
+										.await?
+									}
+								};
+								regs[dst as usize] = Scalar::Value(Cow::Owned(value));
+								pc = resume;
+							}
+							Step::Access {
+								at,
+							} => {
+								let Instr::Access {
+									src,
+									field,
+									dst,
+									frame,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("an access step at an access instruction")
+								};
+								let base = interp::read_operand(regs, &reader, program, *src)
+									.map_err(ControlFlow::Err)?;
+								let eval_ctx = frame_eval(program, state, ctx, *frame);
+								let eval_ctx = row_eval(state, eval_ctx, &row);
+								let value = out_of_line(|| {
+									crate::exec::parts::field::evaluate_field(
+										&base,
+										program.fields[*field as usize].as_str(),
+										eval_ctx,
+									)
+								})
+								.await?;
+								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								pc = at + 1;
+							}
+							Step::Each {
+								at,
+							} => {
+								let Instr::Each {
+									src,
+									dst,
+									frame,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("an each step at an each instruction")
+								};
+								let base = interp::read_operand(regs, &reader, program, *src)
+									.map_err(ControlFlow::Err)?;
+								let eval_ctx = frame_eval(program, state, ctx, *frame);
+								let eval_ctx = row_eval(state, eval_ctx, &row);
+								let value = out_of_line(|| {
+									crate::exec::parts::array_ops::evaluate_all(&base, eval_ctx)
+								})
+								.await?;
+								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								pc = at + 1;
+							}
+							Step::FetchRow {
+								at,
+							} => {
+								let Instr::FetchRow {
+									dst,
+									none,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a row fetch step at a row fetch instruction")
+								};
+								let Value::RecordId(rid) = &*row else {
+									unreachable!("a row fetch step over a row that is a record id")
+								};
+								let frame = frame_ctx(state, ctx, None);
+								let fetched = out_of_line(|| {
+									crate::exec::operators::fetch::fetch_record(frame, rid)
+								})
+								.await?;
+								if matches!(fetched, Value::None) {
+									pc = *none as usize;
+								} else {
+									regs[*dst as usize] = Scalar::Value(Cow::Owned(fetched));
+									pc = at + 1;
+								}
+							}
+							Step::Fetch {
+								at,
+							} => {
+								let Instr::Fetch {
+									fetch,
+									src,
+									dst,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a fetch step at a fetch instruction")
+								};
+								let value = if *src == super::program::ROW {
+									Value::clone(&row)
+								} else {
+									std::mem::replace(&mut regs[*src as usize], Scalar::None)
+										.to_value()
+								};
+								let index = ProgramIndex {
+									program,
+								};
+								let fetched = out_of_line(|| {
+									crate::exec::operators::fetch::fetch_fields_with(
+										ctx,
+										value,
+										&program.fetches[*fetch as usize],
+										&index,
+									)
+								})
+								.await?;
+								regs[*dst as usize] = Scalar::Value(Cow::Owned(fetched));
+								pc = at + 1;
+							}
+							Step::CallAllowed {
+								call,
+								frame,
+								resume,
+							} => {
+								frame_eval(program, state, ctx, frame)
+									.check_allowed_function(&program.calls[call as usize].name)
+									.map_err(ControlFlow::Err)?;
+								pc = resume;
+							}
+							Step::Call {
+								at,
+							} => {
+								let Instr::Call {
+									call,
+									args,
+									dst,
+									frame,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a call step at a call instruction")
+								};
+								let args = args
+									.iter()
+									.map(|arg| interp::read_operand(regs, &reader, program, *arg))
+									.collect::<anyhow::Result<Vec<_>>>()
+									.map_err(ControlFlow::Err)?;
+								let eval_ctx = frame_eval(program, state, ctx, *frame);
+								let eval_ctx = row_eval(state, eval_ctx, &row);
+								let value = out_of_line(|| {
+									call_builtin(&program.calls[*call as usize], args, eval_ctx)
+								})
+								.await?;
+								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								pc = at + 1;
+							}
+							Step::IndexFn {
+								at,
+							} => {
+								let Instr::CallIndexFn {
+									call,
+									args,
+									dst,
+									frame,
+								} = &pipeline.code[at]
+								else {
+									unreachable!(
+										"an index-function step at an index-function instruction"
+									)
+								};
+								let mut args = args
+									.iter()
+									.map(|arg| interp::read_operand(regs, &reader, program, *arg))
+									.collect::<anyhow::Result<Vec<_>>>()
+									.map_err(ControlFlow::Err)?;
+								let spec = &program.calls[*call as usize];
+								let query = interp::runtime_query(spec, &mut args)
+									.map_err(ControlFlow::Err)?;
+								let run = state
+									.index_run_for(
+										*call,
+										spec,
+										ctx.function_registry(),
+										query.as_deref(),
+									)
+									.map_err(ControlFlow::Err)?;
+								let eval_ctx = frame_eval(program, state, ctx, *frame);
+								let eval_ctx = row_eval(state, eval_ctx, &row);
+								let value = out_of_line(|| async {
+									run.function
+										.invoke_async(&eval_ctx, &run.context, args)
+										.await
+										.map_err(ControlFlow::Err)
+								})
+								.await?;
+								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								pc = at + 1;
+							}
+							Step::Matches {
+								at,
+							} => {
+								let Instr::Matches {
+									matches,
+									query,
+									dst,
+									frame,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a matches step at a matches instruction")
+								};
+								let query = match query {
+									Some(query) => Some(
+										interp::read_operand(regs, &reader, program, *query)
+											.map_err(ControlFlow::Err)?,
+									),
+									None => None,
+								};
+								let spec = &program.matches[*matches as usize];
+								let eval = state.matches_eval(*matches, spec);
+								let eval_ctx = frame_eval(program, state, ctx, *frame);
+								let eval_ctx = row_eval(state, eval_ctx, &row);
+								let value = out_of_line(|| {
+									eval.evaluate(
+										&eval_ctx,
+										|| async {
+											match spec.left {
+												Some(code) => {
+													host_scalar(
+														program,
+														&super::program::HostScalar::Code(code),
+														ctx,
+														Some(&*row),
+													)
+													.await
+												}
+												None => Err(ControlFlow::Err(anyhow::anyhow!(
+													"a MATCHES read an operand it was lowered without"
+												))),
+											}
+										},
+										|| async {
+											query.ok_or_else(|| {
+												ControlFlow::Err(anyhow::anyhow!(
+													"a MATCHES read a query it was lowered without"
+												))
+											})
+										},
+									)
+								})
+								.await?;
+								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								pc = at + 1;
+							}
+							Step::Method {
+								at,
+							} => {
+								let (method_index, recv, args, dst, frame, closure) =
+									match &pipeline.code[at] {
+										Instr::Method {
+											method,
+											recv,
+											args,
+											dst,
+											frame,
+										} => (method, recv, args, dst, frame, false),
+										Instr::MethodClosure {
+											method,
+											recv,
+											args,
+											dst,
+											frame,
+										} => (method, recv, args, dst, frame, true),
+										_ => unreachable!("a method step at a method instruction"),
+									};
+								let recv = interp::read_operand(regs, &reader, program, *recv)
+									.map_err(ControlFlow::Err)?;
+								let args = args
+									.iter()
+									.map(|arg| interp::read_operand(regs, &reader, program, *arg))
+									.collect::<anyhow::Result<Vec<_>>>()
+									.map_err(ControlFlow::Err)?;
+								let method = &program.methods[*method_index as usize];
+								let descriptor = state.method_descriptor(
+									*method_index,
+									method,
+									ctx.function_registry(),
+								);
+								let eval_ctx = frame_eval(program, state, ctx, *frame);
+								let eval_ctx = row_eval(state, eval_ctx, &row);
+								let value = out_of_line(|| {
+									call_method(method, descriptor, recv, args, closure, eval_ctx)
+								})
+								.await?;
+								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								pc = at + 1;
+							}
+							Step::Function {
+								at,
+							} => {
+								use super::program::CALL_FRAME;
+								match &pipeline.code[at] {
+									Instr::FunctionEnter {
+										function,
+										frame,
+										outer,
+									} => {
+										if state.functions.len() <= *function as usize {
+											state.functions.resize_with(
+												*function as usize + 1,
+												Default::default,
+											);
+										}
+										let mut known = std::mem::take(
+											&mut state.functions[*function as usize],
+										);
+										let eval_ctx = frame_eval(program, state, ctx, *outer);
+										let eval_ctx = row_eval(state, eval_ctx, &row);
+										let spec = &program.functions[*function as usize];
+										let entered = out_of_line(|| {
+											super::function::enter(
+												program, spec, &mut known, &eval_ctx,
+											)
+										})
+										.await;
+										state.functions[*function as usize] = known;
+										let (entered, principal) = entered?;
+										let slot = (*frame - CALL_FRAME) as usize;
+										if state.calls.len() <= slot {
+											state.calls.resize_with(slot + 1, || None);
+											state.call_principals.resize(slot + 1, 0);
+										}
+										state.calls[slot] = Some(entered);
+										state.call_principals[slot] = principal;
+									}
+									Instr::FunctionBind {
+										function,
+										frame,
+										args,
+										params,
+									} => {
+										let args = args
+											.iter()
+											.map(|arg| {
+												interp::read_operand(regs, &reader, program, *arg)
+											})
+											.collect::<anyhow::Result<Vec<_>>>()
+											.map_err(ControlFlow::Err)?;
+										let entered = state.calls[(*frame - CALL_FRAME) as usize]
+											.as_ref()
+											.expect("a function bound after it is entered");
+										let spec = &program.functions[*function as usize];
+										let bound =
+											super::function::bind_args(spec, entered, args)?;
+										// The re-entry a call of the body would take.
+										entered.limited.check_dive().map_err(ControlFlow::Err)?;
+										for (i, value) in bound.into_iter().enumerate() {
+											regs[*params as usize + i] =
+												Scalar::Value(Cow::Owned(value));
+										}
+									}
+									Instr::FunctionReturn {
+										function,
+										frame,
+										src,
+										dst,
+									} => {
+										let value =
+											interp::read_operand(regs, &reader, program, *src)
+												.map_err(ControlFlow::Err)?;
+										let entered = state.calls[(*frame - CALL_FRAME) as usize]
+											.take()
+											.expect("a function returned from after it is entered");
+										let spec = &program.functions[*function as usize];
+										regs[*dst as usize] = Scalar::Value(Cow::Owned(
+											super::function::returned(spec, &entered, value)?,
+										));
+									}
+									Instr::FunctionCall {
+										function,
+										frame,
+										args,
+										dst,
+										outer,
+									} => {
+										let args = args
+											.iter()
+											.map(|arg| {
+												interp::read_operand(regs, &reader, program, *arg)
+											})
+											.collect::<anyhow::Result<Vec<_>>>()
+											.map_err(ControlFlow::Err)?;
+										let entered = state.calls[(*frame - CALL_FRAME) as usize]
+											.take()
+											.expect("a function called after it is entered");
+										let eval_ctx = frame_eval(program, state, ctx, *outer);
+										let eval_ctx = row_eval(state, eval_ctx, &row);
+										let spec = &program.functions[*function as usize];
+										let units = unit_table(program, state, eval_ctx.exec_ctx)?;
+										let principal =
+											state.call_principals[(*frame - CALL_FRAME) as usize];
+										let value = out_of_line(|| {
+											super::function::call(
+												units, spec, &entered, principal, &eval_ctx, args,
+											)
+										})
+										.await?;
+										regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+									}
+									Instr::Dive {
+										frame,
+									} => {
+										frame_ctx(state, ctx, *frame)
+											.dive()
+											.map_err(ControlFlow::Err)?;
+									}
+									_ => unreachable!("a function step at a function instruction"),
+								}
+								pc = at + 1;
+							}
+							Step::Subquery {
+								at,
+							} => {
+								let Instr::Subquery {
+									subquery,
+									dst,
+									frame,
+									caught,
+									doc,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a subquery step at a subquery instruction")
+								};
+								let over = doc
+									.map(|doc| {
+										interp::read_operand(
+											regs,
+											&reader,
+											program,
+											super::program::Operand::Reg(doc),
+										)
+									})
+									.transpose()
+									.map_err(ControlFlow::Err)?;
+								let eval_ctx = frame_eval(program, state, ctx, *frame);
+								let eval_ctx = match &over {
+									Some(over) => eval_ctx.with_value_and_doc(over),
+									None => row_eval(state, eval_ctx, &row),
+								};
+								let spec = &program.subqueries[*subquery as usize];
+								let units = unit_table(program, state, ctx)?;
+								let evaluated =
+									out_of_line(|| run_subprogram(&units, spec, eval_ctx)).await;
+								match (evaluated, caught) {
+									(Ok(value), _) => {
+										regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+										pc = at + 1;
+									}
+									(Err(ControlFlow::Return(value)), Some(catch)) => {
+										regs[catch.root as usize] =
+											Scalar::Value(Cow::Owned(value));
+										pc = catch.label as usize;
+									}
+									(Err(ControlFlow::Err(e)), _) => {
+										return Err(ControlFlow::Err(e));
+									}
+									(
+										Err(ControlFlow::Break | ControlFlow::Continue),
+										Some(super::program::Catch {
+											loops_fail: true,
+											..
+										}),
+									) => {
+										return Err(ControlFlow::Err(anyhow::Error::new(
+											crate::exec::Error::InvalidControlFlow,
+										)));
+									}
+									(Err(signal), _) => {
+										return Err(escaped_signal(program, *frame, signal));
+									}
+								}
+							}
+							Step::Closure {
+								at,
+							} => {
+								let (value, dst) = match &pipeline.code[at] {
+									Instr::MakeClosure {
+										closure,
+										slots,
+										dst,
+									} => {
+										let index = *closure as usize;
+										let spec = &program.closure_values[index];
+										let mut captures = crate::dbs::Variables::new();
+										for (name, slot) in spec.slots.iter().zip(slots) {
+											let value =
+												interp::read_operand(regs, &reader, program, *slot)
+													.map_err(ControlFlow::Err)?;
+											captures.insert(name.as_str(), value);
+										}
+										let eval_ctx = frame_eval(program, state, ctx, spec.frame);
+										for name in &spec.framed {
+											let bound = eval_ctx
+												.write_binding(name)
+												.or_else(|| eval_ctx.exec_ctx.value(name));
+											if let Some(value) = bound {
+												captures.insert(name.as_str(), value.clone());
+											}
+										}
+										let compiled = crate::exec::physical_expr::function::CompiledClosure::planned(
+											&spec.closure,
+											spec.digest,
+											captures,
+										);
+										(
+											Value::Closure(Box::new(crate::val::Closure::Builtin(
+												Arc::new(compiled),
+											))),
+											*dst,
+										)
+									}
+									Instr::Invoke {
+										target,
+										args,
+										dst,
+										frame,
+									} => {
+										let target =
+											interp::read_operand(regs, &reader, program, *target)
+												.map_err(ControlFlow::Err)?;
+										let Value::Closure(closure) = &target else {
+											unreachable!(
+												"an invocation's target was checked a closure"
+											)
+										};
+										let mut values = Vec::with_capacity(args.len());
+										for arg in args {
+											values.push(
+												interp::read_operand(regs, &reader, program, *arg)
+													.map_err(ControlFlow::Err)?,
+											);
+										}
+										let eval_ctx = frame_eval(program, state, ctx, *frame);
+										let eval_ctx = row_eval(state, eval_ctx, &row);
+										// A unit the instruction linked runs; one the run's
+										// table no longer holds standing is linked again.
+										let relinking = relinked == Some(at);
+										let value = match super::closure::compiled_of(&target) {
+											Some(compiled) => {
+												let ran = out_of_line(|| {
+													compiled
+														.invoke_linked(&eval_ctx, values, relinking)
+												})
+												.await;
+												let Some(ran) = ran else {
+													let digest = compiled.digest();
+													state.forget_linked(*frame, digest);
+													pc = at;
+													continue;
+												};
+												ran?
+											}
+											None => {
+												out_of_line(|| {
+													crate::exec::physical_expr::function::helpers::invoke_uncompiled_closure(
+														closure, values, &eval_ctx,
+													)
+												})
+												.await?
+											}
+										};
+										(value, *dst)
+									}
+									_ => unreachable!("a closure step at a closure instruction"),
+								};
+								regs[dst as usize] = Scalar::Value(Cow::Owned(value));
+								relinked = None;
+								pc = at + 1;
+							}
+							Step::NeedUnit {
+								at,
+							} => {
+								let (frame, closures) =
+									closures_handed(program, &pipeline.code[at], regs, &reader)
+										.map_err(ControlFlow::Err)?;
+								let mut linked = Vec::with_capacity(closures.len());
+								{
+									let eval_ctx = frame_eval(program, state, ctx, frame);
+									let eval_ctx = row_eval(state, eval_ctx, &row);
+									for closure in &closures {
+										let Some(compiled) = super::closure::compiled_of(closure)
+										else {
+											continue;
+										};
+										if !state.has_linked(frame, compiled.digest()) {
+											out_of_line(|| {
+												super::closure::link(compiled, &eval_ctx)
+											})
+											.await?;
+											linked.push(compiled.digest());
+										}
+									}
+								}
+								for digest in linked {
+									state.note_linked(frame, digest);
+								}
+								relinked = Some(at);
+								pc = at;
+							}
+							Step::Lookup {
+								at,
+							} => {
+								let Instr::Lookup {
+									lookup,
+									src,
+									dst,
+									frame,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a lookup step at a lookup instruction")
+								};
+								let origin = interp::read_operand(regs, &reader, program, *src)
+									.map_err(ControlFlow::Err)?;
+								let spec = &program.lookups[*lookup as usize];
+								let doc = if state.rowless {
+									None
+								} else {
+									Some(&*row)
+								};
+								// What a write's gate, or a computed field derived for a
+								// permission, reads is not permission-checked.
+								let gate = frame.is_some_and(|frame| {
+									super::program::is_permission_frame(Some(frame))
+										&& matches!(
+											program.permissions[frame as usize].mode,
+											super::program::FrameMode::Gate(_)
+												| super::program::FrameMode::Derived
+										)
+								});
+								let frame = frame_ctx(state, ctx, *frame).clone();
+								let frame = if gate {
+									frame.with_skip_fetch_perms(true)
+								} else {
+									frame
+								};
+								let value = out_of_line(|| {
+									super::graph::lookup(program, spec, origin, doc, state, &frame)
+								})
+								.await?;
+								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								pc = at + 1;
+							}
+							Step::Recurse {
+								at,
+							} => {
+								let (src, spec, target, dst) = match &pipeline.code[at] {
+									Instr::Recurse {
+										src,
+										spec,
+										target,
+										dst,
+									} => (src, spec, target, dst),
+									Instr::RepeatRecurse {
+										src,
+										dst,
+									} => {
+										let value =
+											interp::read_operand(regs, &reader, program, *src)
+												.map_err(ControlFlow::Err)?;
+										let eval_ctx = frame_eval(program, state, ctx, None);
+										let eval_ctx = match &state.recursion {
+											Some(recursion) => {
+												eval_ctx.with_recursion_ctx(recursion.clone())
+											}
+											None => eval_ctx,
+										};
+										let value = out_of_line(|| {
+											crate::exec::operators::recursion::evaluate_repeat_recurse(
+												&value, eval_ctx,
+											)
+										})
+										.await?;
+										regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+										pc = at + 1;
+										continue;
+									}
+									_ => {
+										unreachable!("a recursion step at a recursion instruction")
+									}
+								};
+								let value = interp::read_operand(regs, &reader, program, *src)
+									.map_err(ControlFlow::Err)?;
+								let target = target
+									.map(|target| {
+										interp::read_operand(regs, &reader, program, target)
+									})
+									.transpose()
+									.map_err(ControlFlow::Err)?;
+								let skip = frame_eval(program, state, ctx, None).skip_fetch_perms;
+								let frame = frame_ctx(state, ctx, None).clone();
+								let frame = if skip {
+									frame.with_skip_fetch_perms(true)
+								} else {
+									frame
+								};
+								let units = match spec.body {
+									Some(_) => Some(unit_table(program, state, ctx)?),
+									None => None,
+								};
+								let value = out_of_line(|| {
+									recurse(spec, units, &value, target.as_ref(), &frame)
+								})
+								.await?;
+								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								pc = at + 1;
+							}
+							Step::Signal {
+								at,
+							} => {
+								let Instr::Signal {
+									brk,
+									frame,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a signal step at a signal instruction")
+								};
+								let signal = if *brk {
+									ControlFlow::Break
+								} else {
+									ControlFlow::Continue
+								};
+								return Err(escaped_signal(program, *frame, signal));
+							}
+							Step::Omit {
+								at,
+							} => {
+								let Instr::Omit {
+									object,
+									walk,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("an omit step at an omit instruction")
+								};
+								let mut value =
+									std::mem::replace(&mut regs[*object as usize], Scalar::None)
+										.to_value();
+								let frame = frame_ctx(state, ctx, None).clone();
+								out_of_line(|| {
+									super::omit::apply(program, walk, &mut value, state, &frame)
+								})
+								.await?;
+								regs[*object as usize] = Scalar::Value(Cow::Owned(value));
+								pc = at + 1;
+							}
+							Step::Destructure {
+								at,
+							} => {
+								let Instr::Destructure {
+									src,
+									fields,
+									dst,
+									frame,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a destructure step at a destructure instruction")
+								};
+								let value = interp::read_operand(regs, &reader, program, *src)
+									.map_err(ControlFlow::Err)?;
+								let skip = frame_eval(program, state, ctx, *frame).skip_fetch_perms;
+								let frame = frame_ctx(state, ctx, *frame).clone();
+								let value = out_of_line(|| {
+									destructure(program, fields, value, skip, state, &frame)
+								})
+								.await?;
+								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+								pc = at + 1;
+							}
+							Step::JudgeCopy {
+								at,
+							} => {
+								let Instr::JudgeCopy {
+									pipeline: judge,
+									src,
+									dst,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a judge step at a judge instruction")
+								};
+								let value = interp::read_operand(
+									regs,
+									&reader,
+									program,
+									super::program::Operand::Reg(*src),
+								)
+								.map_err(ControlFlow::Err)?;
+								let frame = state.frame.clone();
+								let verdict = out_of_line(|| {
+									super::write::run_image(
+										program, *judge, value, frame, state, ctx,
+									)
+								})
+								.await?;
+								regs[*dst as usize] = Scalar::Value(Cow::Owned(verdict));
+								pc = at + 1;
+							}
+							Step::Block {
+								at,
+							} => {
+								let Instr::Block(instr) = &pipeline.code[at] else {
+									unreachable!("a block step at a block instruction")
+								};
+								if let super::program::BlockInstr::Nested {
+									dst,
+									caught,
+									frame,
+									..
+								} = instr
+								{
+									let doc = (!state.rowless).then_some(&*row);
+									let evaluated = out_of_line(|| {
+										super::nested::statement(program, instr, doc, state, ctx)
+									})
+									.await;
+									match (evaluated, caught) {
+										(Ok(value), _) => {
+											regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+											pc = at + 1;
+										}
+										(Err(ControlFlow::Return(value)), Some(catch)) => {
+											regs[catch.root as usize] =
+												Scalar::Value(Cow::Owned(value));
+											pc = catch.label as usize;
+										}
+										(
+											Err(ControlFlow::Break | ControlFlow::Continue),
+											Some(super::program::Catch {
+												loops_fail: true,
+												..
+											}),
+										) => {
+											return Err(ControlFlow::Err(anyhow::Error::new(
+												crate::exec::Error::InvalidControlFlow,
+											)));
+										}
+										(Err(signal), _) => {
+											return Err(escaped_signal(program, *frame, signal));
+										}
+									}
+									continue;
+								}
+								// Boxed: a block step runs a statement's group, whose
+								// pipelines run beneath it.
+								pc = match out_of_line(|| {
+									super::block::step(program, instr, regs, state, ctx)
+								})
+								.await?
+								{
+									Some(target) => target,
+									None => at + 1,
+								};
+							}
+							Step::Store {
+								at,
+							} => {
+								let Instr::Store(instr) = &pipeline.code[at] else {
+									unreachable!("a store step at a store instruction")
+								};
+								// Boxed: a store step's future is large, and this one
+								// is part of every row's.
+								let target = if matches!(
+									instr,
+									StoreInstr::EvaluateOver { .. }
+										| StoreInstr::BackfillRow { .. }
+										| StoreInstr::BackfillGroup { .. }
+										| StoreInstr::BackfillGroupRow { .. }
+								) {
+									out_of_line(|| {
+										super::backfill::step(program, instr, regs, state, ctx)
+									})
+									.await?
+								} else {
+									out_of_line(|| {
+										super::store::step(
+											program,
+											instr,
+											regs,
+											&mut state.reserved_taken,
+											ctx,
+										)
+									})
+									.await?
+								};
+								pc = match target {
+									Some(target) => target,
+									None => at + 1,
+								};
+							}
+							Step::WriteProjection {
+								at,
+							} => {
+								let Instr::WriteProjection {
+									call,
+									args,
+									object,
+									path,
+									aliased,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a projection step at a projection instruction")
+								};
+								let args = args
+									.iter()
+									.map(|arg| interp::read_operand(regs, &reader, program, *arg))
+									.collect::<anyhow::Result<Vec<_>>>()
+									.map_err(ControlFlow::Err)?;
+								let eval_ctx = frame_eval(program, state, ctx, None);
+								let eval_ctx = row_eval(state, eval_ctx, &row);
+								let bindings = out_of_line(|| {
+									project_call(&program.calls[*call as usize], args, eval_ctx)
+								})
+								.await?;
+								let mut writes = Vec::new();
+								crate::exec::operators::projection_writes(
+									bindings,
+									*aliased,
+									&program.paths[*path as usize],
+									&mut writes,
+								);
+								if let Scalar::Value(cow) = &mut regs[*object as usize] {
+									let object = cow.to_mut();
+									for (path, value) in writes {
+										object.set_at_field_path_owned(&path, value);
+									}
+								}
+								pc = at + 1;
+							}
+							Step::External {
+								at,
+							} => {
+								match &pipeline.code[at] {
+									Instr::ExternalEnter {
+										external,
+										frame,
+									} => {
+										let spec = &program.externals[*external as usize];
+										let eval_ctx = frame_eval(program, state, ctx, *frame);
+										let eval_ctx = row_eval(state, eval_ctx, &row);
+										let entered = out_of_line(|| {
+											super::external::enter(program, spec, &eval_ctx)
+										})
+										.await?;
+										let at = *external as usize;
+										if state.externals.len() <= at {
+											state.externals.resize_with(at + 1, || None);
+										}
+										state.externals[at] = Some(entered);
+									}
+									Instr::ExternalCall {
+										external,
+										args,
+										this,
+										dst,
+										frame,
+									} => {
+										let spec = &program.externals[*external as usize];
+										let args = args
+											.iter()
+											.map(|arg| {
+												interp::read_operand(regs, &reader, program, *arg)
+											})
+											.collect::<anyhow::Result<Vec<_>>>()
+											.map_err(ControlFlow::Err)?;
+										let this = this
+											.map(|this| {
+												interp::read_operand(regs, &reader, program, this)
+											})
+											.transpose()
+											.map_err(ControlFlow::Err)?;
+										let entered = state
+											.externals
+											.get_mut(*external as usize)
+											.and_then(Option::take)
+											.ok_or_else(|| {
+												ControlFlow::Err(anyhow::Error::new(
+													crate::err::EngineError::Internal(
+														"an external call made before it was entered"
+															.to_owned(),
+													),
+												))
+											})?;
+										let site = *external as usize;
+										let mut held =
+											state.call_units.get_mut(site).and_then(Option::take);
+										let value = {
+											let eval_ctx = frame_eval(program, state, ctx, *frame);
+											let eval_ctx = row_eval(state, eval_ctx, &row);
+											let eval_ctx = match &this {
+												Some(this) => eval_ctx.with_value(this),
+												None => eval_ctx,
+											};
+											out_of_line(|| {
+												super::external::call(
+													spec, entered, args, &eval_ctx, &mut held,
+												)
+											})
+											.await
+										};
+										if held.is_some() {
+											if state.call_units.len() <= site {
+												state.call_units.resize_with(site + 1, || None);
+											}
+											state.call_units[site] = held;
+										}
+										let value = value?;
+										regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+									}
+									_ => {
+										unreachable!("an external step at an external instruction")
+									}
+								}
+								pc = at + 1;
+							}
+							Step::Degree {
+								at,
+							} => {
+								let Instr::Degree {
+									degree,
+									src,
+									dst,
+									done,
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a degree step at a degree instruction")
+								};
+								let current = interp::read_operand(regs, &reader, program, *src)
+									.map_err(ControlFlow::Err)?;
+								let counted = match DegreeCounter::source(Some(&current)) {
+									Some(rid) => {
+										let counter = state
+											.degree_counter(
+												*degree,
+												&program.degrees[*degree as usize],
+											)
+											.map_err(ControlFlow::Err)?;
+										let eval_ctx = frame_eval(program, state, ctx, None);
+										out_of_line(|| async {
+											counter
+												.degree(&eval_ctx, &rid)
+												.await
+												.map_err(ControlFlow::Err)
+										})
+										.await?
+									}
+									None => None,
+								};
+								pc = match counted {
+									Some(count) => {
+										regs[*dst as usize] =
+											Scalar::Value(Cow::Owned(Value::Number(count.into())));
+										*done as usize
+									}
+									None => at + 1,
+								};
+							}
+							done => break Ok(done),
+						}
+					}
+				}
+				.await;
+				match attempt {
+					Ok(step) => break step,
+					Err(mut error) => loop {
+						match state.tries.last().copied() {
+							// An error leaving a method's body is the method's,
+							// in the frame that names it so.
+							Some(Region::Method {
+								method,
+							}) if state.tries.len() > base => {
+								state.tries.pop();
+								if !ctx.root().writing
+									&& !program.methods[method as usize].writing
+									&& let ControlFlow::Err(e) = &error
+									&& let Some(crate::expr::Error::InvalidFunctionArguments {
+										message,
+										..
+									}) = e.downcast_ref::<crate::expr::Error>()
+								{
+									error = ControlFlow::Err(method_arguments_error(
+										&program.methods[method as usize].name,
+										message,
+									));
+								}
+							}
+							Some(Region::Permission {
+								check,
+							}) if state.tries.len() > base => {
+								state.tries.pop();
+								if let ControlFlow::Err(e) = &mut error {
+									let raised = std::mem::replace(e, anyhow::anyhow!(""));
+									*e = if state.read_in_place_permission_errors
+										&& check == super::program::PermissionCheck::Table
+									{
+										raised.context("Permission check failed")
+									} else {
+										anyhow::anyhow!("{}: {raised}", check.prefix())
+									};
+								}
+							}
+							Some(Region::Try {
+								catch,
+								dst,
+							}) if state.tries.len() > base && error.is_ignorable() => {
+								state.tries.pop();
+								if let Some(dst) = dst {
+									regs[dst as usize] = Scalar::None;
+								}
+								pc = catch;
+								break;
+							}
+							_ => return Err(error),
+						}
+					},
+				}
+			}
+		};
+		// A layer rewrites the row, so nothing read from it survives.
+		match step {
+			Step::LandRow {
+				resume,
+			} => {
+				land(state, &mut row);
+				start = resume;
+			}
+			Step::BindRow {
+				name,
+				resume,
+			} => {
+				let mut bound = crate::val::Object::default();
+				bound.insert(program.fields[name as usize].as_str(), row.into_owned());
+				row = Cow::Owned(Value::Object(bound));
+				start = resume;
+			}
+			Step::Write {
+				at,
+			} => {
+				// Boxed: a write step's future is large, and this one is part
+				// of every row's. The record's run of write instructions is
+				// taken in the one step.
+				start = out_of_line(|| write::steps(program, pipeline, at, state, row.to_mut()))
+					.await?;
+			}
+			done => break done,
+		}
+	};
+	if let Some(Pending::Split {
+		split,
+		value,
+	}) = state.pending.take_if(|pending| matches!(pending, Pending::Split { .. }))
+	{
+		return run_split(program, split, value.unwrap_or_else(|| row.into_owned()), state, ctx)
+			.await;
+	}
+	if let Some(Pending::Join {
+		join,
+		keys,
+	}) = state.pending.take_if(|pending| matches!(pending, Pending::Join { .. }))
+	{
+		return run_join(program, join, row.into_owned(), keys, state, ctx).await;
+	}
+	if state.pending.is_some() {
+		state.settle(program, row.into_owned());
+	}
+	Ok(step)
+}
+
+/// Run the rows split `split` turns `row` into through the split's pipeline,
+/// in order: `Stop` once that pipeline takes no more rows, so the pipeline
+/// that handed over `row` takes no more of its own.
+async fn run_split(
+	program: &Program,
+	split: u16,
+	row: Value,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Step> {
+	let spec = &program.splits[split as usize];
+	let mut below = Below {
+		program,
+		pipeline: &program.pipelines[spec.pipeline],
+		ctx,
+	};
+	match &spec.kind {
+		super::program::SplitKind::Targets(targets) => {
+			let mut rows = Vec::new();
+			crate::exec::operators::split_row(row, targets, &mut rows);
+			below.run(rows, state).await
+		}
+		super::program::SplitKind::Step(step) => {
+			check_cancelled(ctx)?;
+			let row = match super::binding::keep_row(step, split, row, state) {
+				Ok(()) => return Ok(Step::Next),
+				Err(row) => row,
+			};
+			let stepped = out_of_line(|| {
+				super::binding::run_step(program, split, step, row, state, ctx, &mut below)
+			})
+			.await?;
+			match stepped {
+				super::binding::Stepped::Rows(rows) => below.run(rows, state).await,
+				super::binding::Stepped::Delivered(step) => Ok(step),
+			}
+		}
+	}
+}
+
+/// The pipeline below a split, as the place the rows the split yields go.
+struct Below<'a> {
+	program: &'a Program,
+	pipeline: &'a Pipeline,
+	ctx: &'a ExecutionContext,
+}
+
+impl Below<'_> {
+	/// `rows`, in order, through the pipeline: `Stop` once it takes no more.
+	///
+	/// The rows of a call share one future, built out of line, whose size is
+	/// moved once, and not once for each row.
+	async fn run(&self, rows: Vec<Value>, state: &mut State) -> FlowResult<Step> {
+		let mut rows = rows.into_iter();
+		let Some(split) = forwarded_split(self.pipeline) else {
+			return out_of_line(|| self.each(rows, state)).await;
+		};
+		// A split that only keeps what it is given keeps it here, with no
+		// future built for the row.
+		if let super::program::SplitKind::Step(step) = &self.program.splits[split as usize].kind {
+			while let Some(row) = rows.next() {
+				check_cancelled(self.ctx)?;
+				match super::binding::keep_row(step, split, row, state) {
+					Ok(()) => {}
+					Err(row) => {
+						return out_of_line(|| self.forward(split, row, rows, state)).await;
+					}
+				}
+			}
+			return Ok(Step::Next);
+		}
+		match rows.next() {
+			Some(row) => out_of_line(|| self.forward(split, row, rows, state)).await,
+			None => Ok(Step::Next),
+		}
+	}
+
+	/// `rows` through the pipeline, one row at a time.
+	async fn each(&self, rows: std::vec::IntoIter<Value>, state: &mut State) -> FlowResult<Step> {
+		for row in rows {
+			check_cancelled(self.ctx)?;
+			if run_value_row(self.program, self.pipeline, row, state, self.ctx).await? == Step::Stop
+			{
+				return Ok(Step::Stop);
+			}
+		}
+		Ok(Step::Next)
+	}
+
+	/// `first` and `rest` to split `split`, which the pipeline forwards its
+	/// rows to.
+	async fn forward(
+		&self,
+		split: u16,
+		first: Value,
+		rest: std::vec::IntoIter<Value>,
+		state: &mut State,
+	) -> FlowResult<Step> {
+		for row in std::iter::once(first).chain(rest) {
+			check_cancelled(self.ctx)?;
+			if run_split(self.program, split, row, state, self.ctx).await? == Step::Stop {
+				return Ok(Step::Stop);
+			}
+		}
+		Ok(Step::Next)
+	}
+}
+
+/// The split a pipeline hands every row it is given to, as it is given it,
+/// where the pipeline does nothing else: its row is the split's.
+fn forwarded_split(pipeline: &Pipeline) -> Option<u16> {
+	if pipeline.enforce.is_some() || !pipeline.limits.is_empty() {
+		return None;
+	}
+	match pipeline.code.as_slice() {
+		[
+			Instr::SplitPush {
+				split,
+				src: super::program::ROW,
+			},
+			Instr::EndRow,
+			Instr::StopPipeline,
+		] => Some(*split),
+		_ => None,
+	}
+}
+
+impl super::binding::StepSink for Below<'_> {
+	fn rows<'a>(
+		&'a mut self,
+		rows: Vec<Value>,
+		state: &'a mut State,
+	) -> futures::future::BoxFuture<'a, FlowResult<Step>> {
+		crate::exec::vm::host::out_of_line(|| self.run(rows, state))
+	}
+}
+
+/// Pair the probe row `probe`, keyed by `keys`, with the rows join `join`
+/// holds for those keys, and run each pairing through the join's pipeline in
+/// order: `Stop` once that pipeline takes no more rows, so the pipeline that
+/// handed over `probe` takes no more of its own.
+///
+/// The build side is read when the first probe row arrives, and held until the
+/// join's owner starts again. A pairing is the probe row with the build row
+/// set under the join's alias; a probe row that is no object is paired as it
+/// is. A build row pairs only if the residual holds of the row paired, and a
+/// [`JoinMatch::Left`](super::plan::JoinMatch::Left) join emits a probe row no
+/// build row pairs with once, with `NULL` under the alias. A
+/// [`JoinMatch::Semi`](super::plan::JoinMatch::Semi) join emits a probe row
+/// some build row matches once, as it is, and judges no residual.
+async fn run_join(
+	program: &Program,
+	join: u16,
+	probe: Value,
+	keys: Vec<Value>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Step> {
+	use super::plan::JoinMatch;
+	let spec = &program.joins[join as usize];
+	let table = match &state.joins[join as usize] {
+		Some(table) => Arc::clone(table),
+		None => {
+			let table = Arc::new(out_of_line(|| build_join(program, spec, state, ctx)).await?);
+			state.joins[join as usize] = Some(Arc::clone(&table));
+			table
+		}
+	};
+	let pipeline = &program.pipelines[spec.pipeline];
+	if spec.kind == JoinMatch::Semi {
+		if table.matches(&keys).next().is_none() {
+			return Ok(Step::Next);
+		}
+		return out_of_line(|| run_value_row(program, pipeline, probe, state, ctx)).await;
+	}
+	let mut matched = false;
+	let mut eval = None;
+	// The probe row is paired in place with the last build row it meets,
+	// which is the only one when its key is unique.
+	let mut probe = Some(probe);
+	let mut builds = table.matches(&keys).peekable();
+	while let Some(build) = builds.next() {
+		check_cancelled(ctx)?;
+		let held = probe.as_ref().expect("the probe row is held until it is paired");
+		let paired = match &spec.residual {
+			Some(residual) => {
+				let row = match held {
+					Value::Object(_) => {
+						crate::exec::operators::with_alias(held, &spec.alias, build.clone())
+					}
+					_ => {
+						let mut row = crate::val::Object::default();
+						row.insert(spec.alias.clone(), build.clone());
+						Value::Object(row)
+					}
+				};
+				let eval = match &mut eval {
+					Some(eval) => eval,
+					slot => slot.insert(statement_state(program, ctx).map_err(ControlFlow::Err)?),
+				};
+				let answer =
+					out_of_line(|| host_scalar_in(program, residual, ctx, &row, eval)).await?;
+				if !answer.is_truthy() {
+					continue;
+				}
+				match held {
+					// The row the residual judged is the pairing.
+					Value::Object(_) => row,
+					_ => held.clone(),
+				}
+			}
+			None if builds.peek().is_none() => {
+				let held = probe.take().expect("the probe row is held until it is paired");
+				crate::exec::operators::with_alias_owned(held, &spec.alias, build.clone())
+			}
+			None => crate::exec::operators::with_alias(held, &spec.alias, build.clone()),
+		};
+		matched = true;
+		if out_of_line(|| run_value_row(program, pipeline, paired, state, ctx)).await? == Step::Stop
+		{
+			return Ok(Step::Stop);
+		}
+	}
+	if !matched
+		&& spec.kind == JoinMatch::Left
+		&& let Some(probe) = probe
+	{
+		let paired = crate::exec::operators::with_alias_owned(probe, &spec.alias, Value::Null);
+		if out_of_line(|| run_value_row(program, pipeline, paired, state, ctx)).await? == Step::Stop
+		{
+			return Ok(Step::Stop);
+		}
+	}
+	Ok(Step::Next)
+}
+
+/// The build table of join `spec`: its build side's rows, each keyed by the
+/// build keys evaluated over the row set under the alias.
+async fn build_join(
+	program: &Program,
+	spec: &super::program::JoinSpec,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<crate::exec::operators::BuildTable> {
+	let held = state.program.clone().ok_or_else(|| {
+		ControlFlow::Err(anyhow::anyhow!("a join in a run that does not hold its program"))
+	})?;
+	let (rows, ran) = run_group(&held, spec.build, state, ctx).await;
+	ran?;
+	let mut table = crate::exec::operators::BuildTable::new();
+	let mut eval = match spec.build_keys.is_empty() {
+		true => None,
+		false => Some(statement_state(program, ctx).map_err(ControlFlow::Err)?),
+	};
+	for (i, row) in rows.into_iter().enumerate() {
+		if i % ROWS_PER_SLICE == ROWS_PER_SLICE - 1 {
+			check_cancelled(ctx)?;
+			yield_now!();
+		}
+		let mut key = Vec::with_capacity(spec.build_keys.len());
+		let row = match &mut eval {
+			Some(eval) => {
+				// The keys read the row through the alias, as the residual and
+				// everything above the join do.
+				let mut seen = crate::val::Object::default();
+				seen.insert(spec.alias.clone(), row);
+				let seen = Value::Object(seen);
+				for scalar in &spec.build_keys {
+					key.push(
+						out_of_line(|| host_scalar_in(program, scalar, ctx, &seen, eval)).await?,
+					);
+				}
+				match seen {
+					Value::Object(mut seen) => {
+						seen.remove(spec.alias.as_str()).unwrap_or(Value::None)
+					}
+					other => other,
+				}
+			}
+			None => row,
+		};
+		table.insert(key, row, usize::MAX)?;
+	}
+	Ok(table)
+}
+
+/// The rows aggregate `aggregate`'s groups finish into, as the aggregate
+/// operator finishes them: `GROUP ALL`'s one group whether or not a row
+/// reached it, `GROUP BY`'s groups in group-key order.
+async fn finish_groups(
+	program: &Program,
+	aggregate: u16,
+	groups: Option<Groups>,
+	ctx: &ExecutionContext,
+) -> FlowResult<Vec<Value>> {
+	let sink = &program.aggregates[aggregate as usize];
+	let mut finish = Finish {
+		program,
+		sink,
+		ctx,
+		state: None,
+	};
+	let mut rows = Vec::new();
+	match groups {
+		Some(Groups::All(mut group)) => {
+			finish.constant_columns(&mut group).await?;
+			finish.bind_extra_args(&mut group, &[]).await?;
+			rows.push(finish.result(&[], group).await?);
+		}
+		Some(Groups::By {
+			groups,
+			..
+		}) => {
+			for (key, mut group) in groups.into_key_order() {
+				finish.bind_extra_args(&mut group, &key).await?;
+				rows.push(finish.result(&key, group).await?);
+			}
+		}
+		None => {}
+	}
+	Ok(rows)
+}
+
+/// The host side of an aggregate's finish: the pipelines that evaluate what
+/// its groups answer once, over a state made when the first is needed and
+/// kept for the rest.
+struct Finish<'a> {
+	program: &'a Program,
+	sink: &'a super::program::AggregateSink,
+	ctx: &'a ExecutionContext,
+	state: Option<interp::PooledState>,
+}
+
+impl Finish<'_> {
+	/// The value pipeline `pipeline` of [`Program::host_code`] answers over
+	/// `row`, or over no row.
+	async fn run(&mut self, pipeline: u16, row: Option<Value>) -> FlowResult<Value> {
+		let state = match &mut self.state {
+			Some(state) => state,
+			slot => slot.insert(statement_state(self.program, self.ctx).map_err(ControlFlow::Err)?),
+		};
+		state.rowless = row.is_none();
+		let code = &self.program.host_code[pipeline as usize];
+		let (program, ctx) = (self.program, self.ctx);
+		out_of_line(|| run_value_row(program, code, row.unwrap_or(Value::None), state, ctx))
+			.await?;
+		state.take_output().pop().ok_or_else(|| {
+			ControlFlow::Err(anyhow::anyhow!("a host pipeline that answered nothing"))
+		})
+	}
+
+	/// The document of a group's keys, each under its placeholder name.
+	fn key_document(key: &[Value]) -> crate::val::Object {
+		let mut document = crate::val::Object::default();
+		for (idx, value) in key.iter().enumerate() {
+			document.insert(crate::exec::operators::group_key_field_name(idx), value.clone());
+		}
+		document
+	}
+
+	/// Evaluate, against no row, each column of a `GROUP ALL` the row cannot
+	/// influence and no row has evaluated, once for the group. An error about
+	/// the shape of the data leaves the column without a value.
+	async fn constant_columns(&mut self, group: &mut GroupState) -> FlowResult<()> {
+		for (field, spec) in self.sink.fields.iter().enumerate() {
+			let Some(pipeline) = spec.finish else {
+				continue;
+			};
+			if spec.is_group_key || spec.aggregate.is_some() || group.first_values[field].is_some()
+			{
+				continue;
+			}
+			match self.run(pipeline, None).await {
+				Ok(value) => group.first_values[field] = Some(value),
+				Err(error) if error.is_ignorable() => {
+					tracing::debug!(error = %error, "Fallback expression evaluation failed (ignorable)");
+				}
+				Err(error) => return Err(error),
+			}
+		}
+		Ok(())
+	}
+
+	/// Bind each aggregate's arguments after the first, which belong to the
+	/// group rather than to a row: evaluated once, over a document of the
+	/// group's keys, an argument reading anything else off it answering
+	/// `NONE`.
+	async fn bind_extra_args(&mut self, group: &mut GroupState, key: &[Value]) -> FlowResult<()> {
+		let document = Value::Object(Self::key_document(key));
+		for (field, spec) in self.sink.fields.iter().enumerate() {
+			let Some(aggregate) = &spec.aggregate else {
+				continue;
+			};
+			for (call_at, call) in aggregate.calls.iter().enumerate() {
+				if call.extra_args.is_empty() {
+					continue;
+				}
+				let mut args = Vec::with_capacity(call.extra_args.len());
+				for &pipeline in &call.extra_args {
+					args.push(match self.run(pipeline, Some(document.clone())).await {
+						Ok(value) => value,
+						Err(error) if error.is_ignorable() => Value::None,
+						Err(error) => return Err(error),
+					});
+				}
+				if let Some(accumulator) = group.accumulators[field].get_mut(call_at) {
+					accumulator.set_extra_args(&args);
+				}
+			}
+		}
+		Ok(())
+	}
+
+	/// The answer of one finished group: an object of each field's answer
+	/// placed by its output path, or the one answer itself for `SELECT
+	/// VALUE`.
+	async fn result(&mut self, key: &[Value], group: GroupState) -> FlowResult<Value> {
+		let fields = &self.sink.fields[..];
+		let mut answers = group.accumulators.into_iter().zip(group.first_values);
+		if fields.len() == 1
+			&& fields[0].output_path.len() == 1
+			&& fields[0].output_path[0].is_empty()
+		{
+			let (accumulators, first) = answers.next().unwrap_or_default();
+			return self.field(&fields[0], key, &accumulators, first.unwrap_or(Value::None)).await;
+		}
+		let mut result = crate::val::Object::default();
+		for (spec, (accumulators, first)) in fields.iter().zip(answers) {
+			let value = self.field(spec, key, &accumulators, first.unwrap_or(Value::None)).await?;
+			crate::exec::operators::set_nested_value(&mut result, &spec.output_path, value);
+		}
+		Ok(Value::Object(result))
+	}
+
+	/// The answer of one field of a finished group: its key, the answer of its
+	/// aggregates, or the first value its group took.
+	async fn field(
+		&mut self,
+		spec: &super::program::AggSpec,
+		key: &[Value],
+		accumulators: &[Box<dyn crate::exec::function::Accumulator>],
+		first: Value,
+	) -> FlowResult<Value> {
+		if let Some(index) = spec.group_key_index {
+			return Ok(key.get(index).cloned().unwrap_or(Value::None));
+		}
+		let Some(aggregate) = &spec.aggregate else {
+			return Ok(first);
+		};
+		if aggregate.calls.is_empty() {
+			return Ok(Value::Null);
+		}
+		// A failure to finalize is raised: an accumulator fails when handed a
+		// value of a kind it cannot fold, which is the argument-type error the
+		// scalar form of the function raises.
+		let mut document = crate::val::Object::default();
+		for (idx, accumulator) in accumulators.iter().enumerate() {
+			let value = accumulator.finalize().map_err(ControlFlow::Err)?;
+			document.insert(crate::exec::operators::aggregate_field_name(idx), value);
+		}
+		let Some(post) = aggregate.post else {
+			return Ok(document.0.into_values().next().unwrap_or(Value::Null));
+		};
+		// The group's keys sit beside its answers, so a key the expression
+		// names finds its placeholder.
+		for (idx, value) in key.iter().enumerate() {
+			document.insert(crate::exec::operators::group_key_field_name(idx), value.clone());
+		}
+		match self.run(post, Some(Value::Object(document))).await {
+			Ok(value) => Ok(value),
+			Err(error) if error.is_ignorable() => {
+				tracing::debug!(error = %error, "Post-expression evaluation failed (ignorable), using Null");
+				Ok(Value::Null)
+			}
+			Err(error) => Err(error),
+		}
+	}
+}
+
+pub(super) async fn flush(
+	state: &mut State,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+) -> FlowResult<()> {
+	#[cfg(all(storage, not(target_family = "wasm")))]
+	spill_sorts(state).await?;
+	if let Some(write) = &state.write {
+		write.judge_only()?;
+	}
+	if state.output.len() >= flush_at {
+		match yielder {
+			Out::Stream(yielder) => yielder.emit(ValueBatch::new(state.take_output())).await,
+			Out::Gather(rows) => rows.append(&mut state.output),
+		}
+	}
+	Ok(())
+}
+
+/// Let every sort of `program` that asks for `TEMPFILES` spill, when the
+/// context names a temporary directory: each holds at most the external
+/// sorting buffer limit's rows in memory, as the operator tree's external sort
+/// does.
+#[cfg(storage)]
+fn spill_to(program: &Program, state: &mut State, ctx: &ExecutionContext) {
+	let Some(dir) = ctx.ctx().temporary_directory() else {
+		return;
+	};
+	let limit = ctx.root().ctx.config.exec.external_sorting_buffer_limit.max(1);
+	let mut any = false;
+	for (at, spec) in program.sorts.iter().enumerate() {
+		if spec.spill {
+			state.sort_spill[at] = Some((limit, spec.keys.clone()));
+			any = true;
+		}
+	}
+	if any {
+		state.spill_dir = Some(std::sync::Arc::clone(dir));
+	}
+}
+
+/// Without a temporary directory to write runs to, no sort spills.
+#[cfg(not(storage))]
+fn spill_to(_program: &Program, _state: &mut State, _ctx: &ExecutionContext) {}
+
+/// Write out as a run each spilling sort that holds its limit.
+#[cfg(all(storage, not(target_family = "wasm")))]
+async fn spill_sorts(state: &mut State) -> FlowResult<()> {
+	let Some(dir) = state.spill_dir.clone() else {
+		return Ok(());
+	};
+	for at in 0..state.sorts.len() {
+		let Some((limit, keys)) = &state.sort_spill[at] else {
+			continue;
+		};
+		if state.sorts[at].len() < *limit {
+			continue;
+		}
+		let keys = keys.clone();
+		let rows = std::mem::take(&mut state.sorts[at]);
+		let runs = match &mut state.sort_runs[at] {
+			Some(runs) => runs,
+			slot => slot.insert(super::spill::Runs::new(&dir).map_err(ControlFlow::Err)?),
+		};
+		runs.spill(rows, keys).await.map_err(ControlFlow::Err)?;
+	}
+	Ok(())
+}
+
+/// A paging clause's count, evaluated once for the statement.
+async fn paging_clause(
+	program: &Program,
+	scalar: &super::program::HostScalar,
+	ctx: &ExecutionContext,
+	clause: PagingClause,
+) -> FlowResult<usize> {
+	let value = host_scalar(program, scalar, ctx, None).await?;
+	Ok(paging_count(&value, clause).map_err(ControlFlow::Err)? as usize)
+}
+
+/// The value of host scalar `scalar`, evaluated over `row` — the value the
+/// statement binds as `$this`, for a write's subjects — or no row.
+pub(super) async fn host_scalar(
+	program: &Program,
+	scalar: &super::program::HostScalar,
+	ctx: &ExecutionContext,
+	row: Option<&Value>,
+) -> FlowResult<Value> {
+	use super::program::HostScalar;
+	match scalar {
+		HostScalar::Const(value) => Ok(Value::clone(value)),
+		HostScalar::Code(pipeline) => {
+			// The pipeline's host steps read in the program's frames, a
+			// lookup's records shown through their tables' views among them.
+			let mut state = statement_state(program, ctx)?;
+			state.rowless = row.is_none();
+			let pipeline = &program.host_code[*pipeline as usize];
+			let row = row.map_or(Cow::Owned(Value::None), Cow::Borrowed);
+			out_of_line(|| run_cow_row(program, pipeline, row, &mut state, ctx)).await?;
+			state.output.pop().ok_or_else(|| {
+				ControlFlow::Err(anyhow::anyhow!("a host pipeline that answered nothing"))
+			})
+		}
+	}
+}
+
+/// The value host pipeline `pipeline` of [`Program::host_code`] answers over
+/// `row` as its document, evaluated in the state `slot` holds, made when the
+/// first row is evaluated and kept for the rest.
+pub(super) async fn eval_on_row(
+	program: &Program,
+	pipeline: u16,
+	row: Cow<'_, Value>,
+	slot: &mut Option<interp::PooledState>,
+	ctx: &ExecutionContext,
+) -> FlowResult<Value> {
+	let state = match slot {
+		Some(state) => state,
+		slot => slot.insert(statement_state(program, ctx).map_err(ControlFlow::Err)?),
+	};
+	state.rowless = false;
+	let code = &program.host_code[pipeline as usize];
+	out_of_line(|| run_cow_row(program, code, row, state, ctx)).await?;
+	state
+		.take_output()
+		.pop()
+		.ok_or_else(|| ControlFlow::Err(anyhow::anyhow!("a host pipeline that answered nothing")))
+}
+
+/// [`host_scalar`] over `row`, evaluated on `state`, which the caller made
+/// for `program` ([`statement_state`]) and keeps across evaluations.
+pub(super) async fn host_scalar_in(
+	program: &Program,
+	scalar: &super::program::HostScalar,
+	ctx: &ExecutionContext,
+	row: &Value,
+	state: &mut State,
+) -> FlowResult<Value> {
+	use super::program::HostScalar;
+	match scalar {
+		HostScalar::Const(value) => Ok(Value::clone(value)),
+		HostScalar::Code(pipeline) => {
+			state.rowless = false;
+			let pipeline = &program.host_code[*pipeline as usize];
+			out_of_line(|| run_cow_row(program, pipeline, Cow::Borrowed(row), state, ctx)).await?;
+			state.output.pop().ok_or_else(|| {
+				ControlFlow::Err(anyhow::anyhow!("a host pipeline that answered nothing"))
+			})
+		}
+	}
+}
+
+/// `eval_ctx` over `row`, the row the pipeline running over `state` runs
+/// over: its current value and document, its current value alone where the
+/// row is no document ([`State::undocumented`]), and neither where the
+/// pipeline has no row.
+fn row_eval<'c>(state: &State, eval_ctx: EvalContext<'c>, row: &'c Value) -> EvalContext<'c> {
+	if state.rowless {
+		eval_ctx
+	} else if state.undocumented {
+		eval_ctx.with_value(row)
+	} else {
+		eval_ctx.with_value_and_doc(row)
+	}
+}
+
+/// The evaluation context of a host step in `frame`, as [`frame_ctx`] states:
+/// in a computed or index-entry frame computing the record
+/// [`Instr::BeginComputing`](super::program::Instr::BeginComputing) last set,
+/// in a gate frame, or while a write permission is judged
+/// ([`State::unchecked_reads`]), reading without permission checks; and in
+/// any frame with `$input` bound to [`State::write_input`] while that is set.
+pub(super) fn frame_eval<'c>(
+	program: &Program,
+	state: &'c State,
+	ctx: &'c ExecutionContext,
+	frame: Option<u16>,
+) -> EvalContext<'c> {
+	let mut eval_ctx = EvalContext::from_exec_ctx(frame_ctx(state, ctx, frame));
+	if state.unchecked_reads {
+		eval_ctx.skip_fetch_perms = true;
+	}
+	if let Some(input) = &state.write_input {
+		eval_ctx.write_input = Some(input);
+	}
+	if let Some(parent) = &state.parent {
+		eval_ctx.local_params = Some(parent);
+	}
+	if let Some(frame) = frame
+		&& super::program::is_permission_frame(Some(frame))
+	{
+		match program.permissions[frame as usize].mode {
+			super::program::FrameMode::Computed | super::program::FrameMode::IndexEntry => {
+				eval_ctx.computing_record.clone_from(&state.computing);
+			}
+			super::program::FrameMode::Gate(_) => eval_ctx.skip_fetch_perms = true,
+			super::program::FrameMode::Derived => {
+				eval_ctx.computing_record.clone_from(&state.computing);
+				eval_ctx.skip_fetch_perms = true;
+			}
+			super::program::FrameMode::Guard(_) => {}
+		}
+	}
+	eval_ctx
+}
+
+/// The context a host step reads in: permission or call frame `frame` when
+/// set, and
+/// otherwise the block's current frame or the statement's.
+fn frame_ctx<'c>(
+	state: &'c State,
+	ctx: &'c ExecutionContext,
+	frame: Option<u16>,
+) -> &'c ExecutionContext {
+	use super::program::CALL_FRAME;
+	match frame {
+		Some(frame) if frame >= CALL_FRAME => {
+			match state.calls.get((frame - CALL_FRAME) as usize) {
+				Some(Some(entered)) => &entered.limited,
+				_ => unreachable!("a call frame read before the function is entered"),
+			}
+		}
+		Some(frame) => &state.frames[frame as usize],
+		None => state.frame.as_ref().unwrap_or(ctx),
+	}
+}
+
+/// Apply builtin `call` to `args`, as the operator tree's `BuiltinFunctionExec`
+/// applies it once its arguments are evaluated: the experimental gate, then
+/// the function, with the call's plan depth for `eval::*`.
+async fn call_builtin(
+	call: &super::program::CallSpec,
+	args: Vec<Value>,
+	ctx: EvalContext<'_>,
+) -> FlowResult<Value> {
+	let registry = ctx.exec_ctx.function_registry();
+	// A projection function called for its value answers its one binding's
+	// value, or every binding's in an array, as `ProjectionFunctionExec`
+	// answers outside a projection.
+	if let Some(projection) = registry.get_projection(&call.name) {
+		let mut bindings = projection.invoke_async(&ctx, args).await.map_err(ControlFlow::Err)?;
+		return Ok(if bindings.len() == 1 {
+			bindings.pop().expect("one binding").1
+		} else {
+			Value::Array(bindings.into_iter().map(|(_, value)| value).collect::<Vec<_>>().into())
+		});
+	}
+	let func = registry.get(&call.name).ok_or_else(|| {
+		ControlFlow::Err(anyhow::anyhow!(
+			"Unknown function '{}' - not found in function registry",
+			call.name
+		))
+	})?;
+	if let Some(target) = crate::exec::function::experimental_target(&call.name)
+		&& !ctx.capabilities().allows_experimental(&target)
+	{
+		return Err(ControlFlow::Err(anyhow::Error::new(crate::exec::Error::InvalidFunction {
+			name: call.name.clone(),
+			message: format!("Experimental feature {target} is not enabled"),
+		})));
+	}
+	refuse_mutating_builtin(func.name(), ctx.exec_ctx)?;
+	if func.is_pure() && !func.is_async() {
+		Ok(func.invoke(args).map_err(ControlFlow::Err)?)
+	} else {
+		let mut ctx = ctx;
+		ctx.plan_depth = ctx.plan_depth.max(call.plan_depth);
+		Ok(func.invoke_async(&ctx, args).await.map_err(ControlFlow::Err)?)
+	}
+}
+
+/// Refuse a call of builtin `name` that the frame `ctx` runs in does not let
+/// change state: a Surrealism function declared read-only reaches a mutating
+/// builtin by a call or by a method on a value, and either is refused with
+/// the frame's error.
+fn refuse_mutating_builtin(name: &str, ctx: &ExecutionContext) -> FlowResult<()> {
+	match ctx.root().no_write {
+		Some(frame) if frame.refuses_builtin_call(name) => {
+			Err(ControlFlow::Err(anyhow::anyhow!(frame.side_effect_error())))
+		}
+		_ => Ok(()),
+	}
+}
+
+/// Whether `frame` evaluates a column of a projection layer
+/// ([`PermissionSpec::column`](super::program::PermissionSpec::column)).
+fn column_frame(program: &Program, frame: Option<u16>) -> bool {
+	frame.is_some_and(|frame| {
+		super::program::is_permission_frame(Some(frame))
+			&& program.permissions.get(frame as usize).is_some_and(|spec| spec.column)
+	})
+}
+
+/// What `signal`, raised by a statement evaluated in `frame` and taken by no
+/// catch, raises there. A permission predicate and a projection layer's column
+/// have nowhere to send a `RETURN`, `BREAK` or `CONTINUE`, so it is an error,
+/// as the permission operator and the projection layer report it: the signal
+/// never leaves the frame, and a predicate's value never becomes the value of
+/// the statement it guards. Outside those frames, and for an error, the
+/// signal passes through unchanged.
+fn escaped_signal(program: &Program, frame: Option<u16>, signal: ControlFlow) -> ControlFlow {
+	match signal {
+		ControlFlow::Err(_) => signal,
+		signal if column_frame(program, frame) => column_signal(&signal),
+		signal if super::program::is_permission_frame(frame) => {
+			ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(format!(
+				"unexpected control flow in a permission predicate: {signal}"
+			))))
+		}
+		signal => signal,
+	}
+}
+
+/// The error `signal` raises out of a projection layer's column, which has
+/// nowhere to send one, as the projection layer reports it.
+fn column_signal(signal: &ControlFlow) -> ControlFlow {
+	ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(format!(
+		"unexpected control flow in a layer column: {signal}"
+	))))
+}
+
+/// The bindings projection function `call` names answers for `args`, as a
+/// projection function at a projection's root is invoked: by name through the
+/// function registry, with no capability check of its own.
+async fn project_call(
+	call: &super::program::CallSpec,
+	args: Vec<Value>,
+	ctx: EvalContext<'_>,
+) -> FlowResult<Vec<(crate::expr::idiom::Idiom, Value)>> {
+	let projection =
+		ctx.exec_ctx.function_registry().get_projection(&call.name).ok_or_else(|| {
+			ControlFlow::Err(anyhow::anyhow!(
+				"Unknown projection function '{}' - not found in function registry",
+				call.name
+			))
+		})?;
+	projection.invoke_async(&ctx, args).await.map_err(ControlFlow::Err)
+}
+
+/// The unit table the ids of `program` index: its own when it is the root
+/// that holds the units, and otherwise the one `state` carries for a unit
+/// the host runs over a state of its own, or the bundle executing around
+/// `ctx`.
+pub(super) fn unit_table(
+	program: &Program,
+	state: &State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Arc<[Arc<Program>]>> {
+	if !program.units.is_empty() {
+		return Ok(Arc::clone(&program.units));
+	}
+	state.units.clone().or_else(|| ctx.vm_units().cloned()).ok_or_else(|| {
+		ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+			"a program calls a unit and holds no unit table".to_owned(),
+		)))
+	})
+}
+
+/// The digest of the class of the principal `ctx` runs under in the
+/// database `ns` and `db` name
+/// ([`UnitFrame::digest`](super::program::UnitFrame::digest)).
+pub(super) fn class_digest_in(ctx: &ExecutionContext, ns: Option<&str>, db: Option<&str>) -> u64 {
+	super::program::UnitFrame::digest(ctx.ctx().auth_enabled(), Some(&ctx.root().auth), ns, db)
+}
+
+/// The digest of the class of the principal `ctx` runs under in the
+/// database `frame` names, the database its class was taken in when the unit
+/// was lowered.
+pub(super) fn class_digest(ctx: &ExecutionContext, frame: &super::program::UnitFrame) -> u64 {
+	class_digest_in(ctx, frame.ns.as_deref(), frame.db.as_deref())
+}
+
+/// The digest of the class of the principal `ctx` runs under in the database
+/// it runs in.
+pub(super) fn class_digest_here(ctx: &ExecutionContext) -> u64 {
+	let database = ctx.database().ok();
+	class_digest_in(
+		ctx,
+		database.as_ref().map(|db| db.ns_name()),
+		database.as_ref().map(|db| db.db_name()),
+	)
+}
+
+/// Whether the frame `ctx` runs in is one `frame`, the frame a unit was
+/// lowered for, admits: the principal, namespace and database it names, and
+/// a permission contract no weaker than its own: a unit lowered with
+/// permissions suppressed runs only where they are suppressed or where reads
+/// skip them, as an event's frame does.
+pub(super) fn frame_admits(frame: &super::program::UnitFrame, ctx: &ExecutionContext) -> bool {
+	frame_admits_as(frame, ctx, ctx.root().skip_fetch_perms, |frame| class_digest(ctx, frame))
+}
+
+/// [`frame_admits`], for a run that skips permission checks when `skips`,
+/// with the digest of the class of the principal `ctx` runs under answered by
+/// `principal` for the frame, which is asked only of a frame that names one.
+pub(super) fn frame_admits_as(
+	frame: &super::program::UnitFrame,
+	ctx: &ExecutionContext,
+	skips: bool,
+	principal: impl FnOnce(&super::program::UnitFrame) -> u64,
+) -> bool {
+	let database = ctx.database().ok();
+	let names = |held: &Option<String>, running: Option<&str>| match held {
+		Some(held) => running == Some(held.as_str()),
+		None => true,
+	};
+	let root = ctx.root();
+	(frame.class_digest == 0 || frame.class_digest == principal(frame))
+		&& names(&frame.ns, database.as_ref().map(|db| db.ns_name()))
+		&& names(&frame.db, database.as_ref().map(|db| db.db_name()))
+		&& (!frame.perms_suppressed || root.perms_suppressed || skips)
+		&& (frame.checked || skips)
+}
+
+/// Unit `unit` of `units`, after checking that the frame `ctx` runs in is the
+/// one it was lowered for: a unit never runs under a principal or a
+/// permission contract other than its own, and fails closed.
+pub(super) fn admitted_unit<'u>(
+	units: &'u [Arc<Program>],
+	unit: super::program::UnitId,
+	ctx: &ExecutionContext,
+) -> FlowResult<&'u Arc<Program>> {
+	admitted_unit_as(units, unit, ctx, ctx.root().skip_fetch_perms, |frame| {
+		class_digest(ctx, frame)
+	})
+}
+
+/// [`admitted_unit`], for a run that skips permission checks when `skips`,
+/// with the digest of the class of the principal `ctx` runs under answered by
+/// `principal` for the unit's frame, which is asked only of a unit that names
+/// one.
+pub(super) fn admitted_unit_as<'u>(
+	units: &'u [Arc<Program>],
+	unit: super::program::UnitId,
+	ctx: &ExecutionContext,
+	skips: bool,
+	principal: impl FnOnce(&super::program::UnitFrame) -> u64,
+) -> FlowResult<&'u Arc<Program>> {
+	let internal =
+		|why: String| ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(why)));
+	let program = units
+		.get(unit.0 as usize)
+		.ok_or_else(|| internal(format!("a unit the program does not hold: {}", unit.0)))?;
+	let head = program
+		.unit
+		.as_ref()
+		.ok_or_else(|| internal(format!("unit {} holds no frame it was lowered for", unit.0)))?;
+	if !frame_admits_as(&head.frame, ctx, skips, principal) {
+		return Err(internal(format!(
+			"unit {} was lowered for a frame other than the one it runs in",
+			unit.0
+		)));
+	}
+	Ok(program)
+}
+
+/// The value of subquery `spec` evaluated in `eval_ctx`: its unit, a program
+/// of its own, run over the context the enclosing row derives
+/// ([`crate::exec::physical_expr::subquery_context`], as the operator tree's
+/// subquery derives it), and its rows gathered — its one value, `NONE` for
+/// none, when the unit's value is one row, and an array of its rows
+/// otherwise.
+///
+/// The unit runs on the frame stack of the statement's driver, when there is
+/// one, so what it nests does not hold this evaluation's frames on the native
+/// stack beneath its own. It runs only in a frame that matches the one it was
+/// lowered for.
+async fn run_subprogram(
+	units: &super::UnitTable,
+	spec: &super::program::SubquerySpec,
+	eval_ctx: EvalContext<'_>,
+) -> FlowResult<Value> {
+	let ctx = crate::exec::physical_expr::subquery_context(&eval_ctx, spec.inherits_row);
+	let unit = Arc::clone(admitted_unit(units, spec.unit, &ctx)?);
+	// A unit that holds no arena of its own finds the units its ids name in
+	// the table it was found in.
+	let ctx =
+		if unit.units.is_empty() && !ctx.vm_units().is_some_and(|held| Arc::ptr_eq(held, units)) {
+			ctx.with_vm_units(Arc::clone(units))
+		} else {
+			ctx
+		};
+	crate::exec::trampoline::nest(gather_program(unit, ctx)).await
+}
+
+/// The rows of `program` run in `ctx`, or its one value when its value is one
+/// row.
+///
+/// A program that writes nothing and has no tail runs in place, on the frame
+/// stack of its caller, with its rows gathered as a block statement's are;
+/// any other runs as the stream [`execute_program`] answers. The future is a
+/// trait object, since the program may call, through a function body or a
+/// subquery, a program gathered here again.
+pub(super) fn gather_program(
+	program: Arc<Program>,
+	ctx: ExecutionContext,
+) -> crate::exec::BoxFut<'static, FlowResult<Value>> {
+	crate::exec::vm::host::out_of_line(|| async move {
+		let mut values = if program.write.is_none() && program.tail.is_none() {
+			let unitted = super::closure::with_units(&program, &ctx);
+			let ctx = unitted.as_ref().unwrap_or(&ctx);
+			let dispatched = super::dispatch::with_dispatch(&program, ctx);
+			let ctx = dispatched.as_ref().unwrap_or(ctx);
+			// As `execute_untailed` confines a statement that reads.
+			if !program.scalar {
+				validate_record_user_access(ctx.database()?)?;
+			}
+			let mut out = Out::Gather(Vec::new());
+			let mut state = run_untailed(&program, ctx, &mut out, None).await?;
+			let mut values = match out {
+				Out::Gather(values) => values,
+				Out::Stream(_) => Vec::new(),
+			};
+			values.append(&mut state.output);
+			values
+		} else {
+			let mut stream = execute_program(&program, &ctx)?;
+			let mut values = Vec::new();
+			while let Some(batch) = stream.next().await {
+				values.extend(batch?.into_values());
+			}
+			values
+		};
+		if output_shape(&program).is_scalar() {
+			Ok(values.pop().unwrap_or(Value::None))
+		} else {
+			Ok(Value::Array(crate::val::Array(values)))
+		}
+	})
+}
+
+/// Run `program`, a unit of `units` that [`admitted_unit`] answered for
+/// `ctx`, over `row` — the value its reads of the current value take, none for
+/// a unit that runs rowless — with `args` bound to its parameters in order,
+/// in the frame `ctx`, and answer its value. The unit runs over a state of its
+/// own, its reads checked as `ctx`'s are.
+fn run_unit<'a>(
+	program: &'a Program,
+	units: &'a Arc<[Arc<Program>]>,
+	ctx: &'a ExecutionContext,
+	row: Option<&'a Value>,
+	args: Vec<Value>,
+) -> impl std::future::Future<Output = FlowResult<Value>> + Send + 'a {
+	run_unit_in(program, units, ctx, row, args, None)
+}
+
+/// [`run_unit`], in phase `recursion` of the `.@` recursion whose body the
+/// unit is, which its `.@` markers answer in ([`Instr::RepeatRecurse`]).
+async fn run_unit_in(
+	program: &Program,
+	units: &Arc<[Arc<Program>]>,
+	ctx: &ExecutionContext,
+	row: Option<&Value>,
+	args: Vec<Value>,
+	recursion: Option<crate::exec::physical_expr::RecursionCtx>,
+) -> FlowResult<Value> {
+	let head = program.unit.as_ref().ok_or_else(|| {
+		ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+			"a unit holds no frame it was lowered for".to_owned(),
+		)))
+	})?;
+	if args.len() != head.sig.params.len() {
+		return Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+			format!(
+				"a unit takes {} arguments and was called with {}",
+				head.sig.params.len(),
+				args.len()
+			),
+		))));
+	}
+	let mut state = statement_state(program, ctx)?;
+	state.units = Some(Arc::clone(units));
+	state.rowless = !head.sig.takes_row || row.is_none();
+	state.slots = args;
+	state.recursion = recursion;
+	let row = row.cloned().unwrap_or(Value::None);
+	let pipeline = program.own_pipeline().ok_or_else(|| {
+		ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+			"a unit holds no pipeline of its own".to_owned(),
+		)))
+	})?;
+	run_value_row(program, pipeline, row, &mut state, ctx).await?;
+	Ok(state.output.pop().unwrap_or(Value::None))
+}
+
+/// The units of a root program, shared by the runs that execute them.
+type UnitTable = Arc<[Arc<Program>]>;
+
+/// A recursion's body at each depth: the unit of the root it names, run over
+/// the value that depth steps from, or the value itself for a recursion with
+/// no body.
+struct RecurseBody<'a> {
+	unit: Option<(&'a Arc<Program>, &'a UnitTable)>,
+	ctx: &'a ExecutionContext,
+}
+
+impl crate::exec::operators::recursion::DepthBody for RecurseBody<'_> {
+	fn eval<'a>(&'a self, value: &'a Value) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
+		crate::exec::vm::host::out_of_line(|| async move {
+			match self.unit {
+				Some((program, units)) => {
+					run_unit(program, units, self.ctx, Some(value), Vec::new()).await
+				}
+				None => Ok(value.clone()),
+			}
+		})
+	}
+}
+
+/// Recursion `spec` from `value`, as the operator tree's `RecursePart`
+/// answers it: its body, a unit of the root, evaluated with each depth's value
+/// as the current value. `units` is the root's unit table when `spec` has a
+/// body.
+async fn recurse(
+	spec: &super::program::RecurseSpec,
+	units: Option<Arc<[Arc<Program>]>>,
+	value: &Value,
+	target: Option<&Value>,
+	ctx: &ExecutionContext,
+) -> FlowResult<Value> {
+	use super::program::RecurseCollect;
+	use crate::exec::operators::recursion;
+	let bounds = recursion::RecursionBounds {
+		min: spec.min,
+		max: spec.max,
+		system_limit: ctx.ctx().config.exec.idiom_recursion_limit,
+	};
+	let unit = match (spec.body, units.as_ref()) {
+		(Some(id), Some(units)) => Some((admitted_unit(units, id, ctx)?, units)),
+		(Some(_), None) => {
+			return Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+				"a recursion body is called and no unit table is held".to_owned(),
+			))));
+		}
+		(None, _) => None,
+	};
+	if spec.repeat {
+		let Some((program, units)) = unit else {
+			return Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+				"a `.@` recursion with no body".to_owned(),
+			))));
+		};
+		let body = RepeatUnit {
+			program,
+			units,
+			ctx,
+		};
+		return crate::exec::vm::host::out_of_line(|| {
+			recursion::evaluate_recurse_iterative_with(value, bounds, &body)
+		})
+		.await;
+	}
+	let body = RecurseBody {
+		unit,
+		ctx,
+	};
+	match &spec.collect {
+		RecurseCollect::Last => {
+			recursion::evaluate_recurse_default_with(value, &body, bounds).await
+		}
+		RecurseCollect::All {
+			inclusive,
+		} => recursion::evaluate_recurse_collect_with(value, &body, bounds, *inclusive).await,
+		RecurseCollect::Paths {
+			inclusive,
+		} => recursion::evaluate_recurse_path_with(value, &body, bounds, *inclusive).await,
+		RecurseCollect::Shortest {
+			inclusive,
+		} => {
+			let target = target.ok_or_else(|| {
+				ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+					"a shortest path with no target".to_owned(),
+				)))
+			})?;
+			recursion::evaluate_recurse_shortest_with(value, target, &body, bounds, *inclusive)
+				.await
+		}
+	}
+}
+
+/// A `.@` recursion's body at each depth: the unit of the root it names, run
+/// over the value that depth steps from in the phase the recursion is in.
+struct RepeatUnit<'a> {
+	program: &'a Arc<Program>,
+	units: &'a UnitTable,
+	ctx: &'a ExecutionContext,
+}
+
+impl crate::exec::operators::recursion::RepeatBody for RepeatUnit<'_> {
+	fn eval<'a>(
+		&'a self,
+		value: &'a Value,
+		rec: crate::exec::physical_expr::RecursionCtx,
+	) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
+		crate::exec::vm::host::out_of_line(|| {
+			run_unit_in(self.program, self.units, self.ctx, Some(value), Vec::new(), Some(rec))
+		})
+	}
+}
+
+/// The computed indexes of a program's `FETCH` steps: each the value of its
+/// host pipeline.
+pub(super) struct ProgramIndex<'a> {
+	pub(super) program: &'a Program,
+}
+
+impl crate::exec::operators::fetch::FetchWalk for super::program::FetchStepSpec {
+	fn step(&self) -> crate::exec::operators::fetch::WalkStep<'_> {
+		use crate::exec::operators::fetch::WalkStep;
+		match self {
+			super::program::FetchStepSpec::Field(name) => WalkStep::Field(name),
+			super::program::FetchStepSpec::All => WalkStep::All,
+			super::program::FetchStepSpec::First => WalkStep::First,
+			super::program::FetchStepSpec::Last => WalkStep::Last,
+			super::program::FetchStepSpec::Index {
+				..
+			} => WalkStep::Index,
+			super::program::FetchStepSpec::Unsupported => WalkStep::Unsupported,
+		}
+	}
+}
+
+impl crate::exec::operators::fetch::FetchIndex<super::program::FetchStepSpec> for ProgramIndex<'_> {
+	fn index<'a>(
+		&'a self,
+		ctx: &'a ExecutionContext,
+		step: &'a super::program::FetchStepSpec,
+	) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
+		crate::exec::vm::host::out_of_line(|| async move {
+			match step {
+				super::program::FetchStepSpec::Index {
+					pipeline,
+				} => {
+					let scalar = super::program::HostScalar::Code(*pipeline);
+					host_scalar(self.program, &scalar, ctx, None).await
+				}
+				_ => Ok(Value::None),
+			}
+		})
+	}
+}
+
+/// `value` destructured into `fields`, as the operator tree's
+/// `DestructurePart` answers it: an object's fields gathered, a record id's
+/// record fetched — without its table's permissions when `skip` — and
+/// destructured, an array's elements each destructured, and `NONE` for
+/// anything else. An aliased field is its host pipeline's value over the
+/// value destructured.
+async fn destructure(
+	program: &Program,
+	fields: &[super::program::DestructureStep],
+	value: Value,
+	skip: bool,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Value> {
+	use super::program::DestructureStep;
+	let fetch = async |rid: &crate::val::RecordId| {
+		if skip {
+			crate::exec::operators::fetch::fetch_record_no_perms(ctx, rid).await
+		} else {
+			crate::exec::operators::fetch::fetch_record(ctx, rid).await
+		}
+	};
+	match value {
+		Value::Object(ref obj) => {
+			let mut result = std::collections::BTreeMap::new();
+			for field in fields {
+				match field {
+					DestructureStep::All(name) => {
+						let resolved = match obj.get(name.as_str()) {
+							Some(Value::RecordId(rid)) => fetch(rid).await?,
+							Some(other) => other.clone(),
+							None => Value::None,
+						};
+						if let Value::Object(nested) = resolved {
+							result.insert(name.clone(), Value::Object(nested));
+						}
+					}
+					DestructureStep::Field(name) => {
+						result.insert(
+							name.clone(),
+							obj.get(name.as_str()).cloned().unwrap_or(Value::None),
+						);
+					}
+					DestructureStep::Aliased(name, pipeline) => {
+						let answered =
+							write::run_image(program, *pipeline, value.clone(), None, state, ctx)
+								.await?;
+						result.insert(name.clone(), answered);
+					}
+					DestructureStep::Nested(name, parts) => {
+						let nested = obj.get(name.as_str()).cloned().unwrap_or(Value::None);
+						let answered = crate::exec::vm::host::out_of_line(|| {
+							destructure(program, parts, nested, skip, state, ctx)
+						})
+						.await?;
+						result.insert(name.clone(), answered);
+					}
+					DestructureStep::Rest => {
+						for (key, v) in obj.iter() {
+							if !result.contains_key(key.as_str()) {
+								result.insert(key.clone(), v.clone());
+							}
+						}
+					}
+				}
+			}
+			Ok(Value::Object(crate::val::Object::from(result)))
+		}
+		Value::RecordId(ref rid) => {
+			let fetched = fetch(rid).await?;
+			if fetched.is_none() {
+				return Ok(Value::None);
+			}
+			crate::exec::vm::host::out_of_line(|| {
+				destructure(program, fields, fetched, skip, state, ctx)
+			})
+			.await
+		}
+		Value::Array(items) => {
+			let mut results = Vec::with_capacity(items.len());
+			for item in items {
+				results.push(
+					crate::exec::vm::host::out_of_line(|| {
+						destructure(program, fields, item, skip, state, ctx)
+					})
+					.await?,
+				);
+			}
+			Ok(Value::Array(results.into()))
+		}
+		_ => Ok(Value::None),
+	}
+}
+
+/// The frame instruction `instr` invokes closures in, and the closure values
+/// it hands a callee: the target of an `Invoke`, the arguments of a call or a
+/// method at the positions its builtin invokes a closure from, and the field
+/// of a method-closure's receiver it calls.
+fn closures_handed(
+	program: &Program,
+	instr: &Instr,
+	regs: &[Scalar<'_>],
+	row: &dyn RowReader,
+) -> anyhow::Result<(Option<u16>, Vec<Value>)> {
+	let read = |operand: super::program::Operand| interp::read_operand(regs, row, program, operand);
+	let at = |args: &[super::program::Operand], positions: &[u16]| -> anyhow::Result<Vec<Value>> {
+		positions
+			.iter()
+			.filter_map(|&position| args.get(position as usize))
+			.map(|&arg| read(arg))
+			.collect()
+	};
+	Ok(match instr {
+		Instr::Invoke {
+			target,
+			frame,
+			..
+		} => (*frame, vec![read(*target)?]),
+		Instr::Call {
+			call,
+			args,
+			frame,
+			..
+		} => (*frame, at(args, &program.calls[*call as usize].closure_args)?),
+		Instr::Method {
+			method,
+			args,
+			frame,
+			..
+		} => (*frame, at(args, &program.methods[*method as usize].closure_args)?),
+		Instr::MethodClosure {
+			method,
+			recv,
+			frame,
+			..
+		} => {
+			let name = program.methods[*method as usize].name.as_str();
+			let field = match read(*recv)? {
+				Value::Object(mut object) => object.remove(name),
+				_ => None,
+			};
+			(*frame, field.into_iter().collect())
+		}
+		_ => (None, Vec::new()),
+	})
+}
+
+/// Apply method `method` to the receiver `recv` and `args`, as the operator
+/// tree's `MethodPart` applies it once the receiver has been resolved and
+/// the arguments evaluated: the closure the receiver holds under the method's
+/// name when `closure`, and otherwise the builtin that implements the method
+/// for the receiver's type, behind the capability that refuses a direct call
+/// of that builtin and the experimental gate, with an argument error named
+/// for the method.
+async fn call_method(
+	method: &super::program::MethodSpec,
+	descriptor: Option<Arc<crate::exec::function::MethodDescriptor>>,
+	recv: Value,
+	args: Vec<Value>,
+	closure: bool,
+	mut ctx: EvalContext<'_>,
+) -> FlowResult<Value> {
+	let name = method.name.as_str();
+	let unknown = |recv: &Value| {
+		ControlFlow::Err(anyhow::Error::new(crate::exec::Error::InvalidFunction {
+			name: name.to_string(),
+			message: format!("no such method found for the {} type", recv.kind_of()),
+		}))
+	};
+	ctx.plan_depth = ctx.plan_depth.max(method.plan_depth);
+	if closure {
+		let Value::Object(object) = &recv else {
+			return Err(unknown(&recv));
+		};
+		let Some(value @ Value::Closure(body)) = object.get(name) else {
+			return Err(unknown(&recv));
+		};
+		return match super::closure::compiled_of(value) {
+			Some(compiled) => compiled.invoke(&ctx, args).await,
+			None => {
+				crate::exec::physical_expr::function::helpers::invoke_uncompiled_closure(
+					body, args, &ctx,
+				)
+				.await
+			}
+		};
+	}
+	let Some(descriptor) = descriptor else {
+		return Err(ControlFlow::Err(anyhow::anyhow!(
+			"Unknown function '{name}' - not found in function registry"
+		)));
+	};
+	let Some(func) = descriptor.resolve(&recv) else {
+		return Err(unknown(&recv));
+	};
+	let func = Arc::clone(func);
+	let mut func_args = Vec::with_capacity(1 + args.len());
+	func_args.push(recv);
+	func_args.extend(args);
+	ctx.check_allowed_function(func.name()).map_err(ControlFlow::Err)?;
+	if let Some(target) = crate::exec::function::experimental_target(func.name())
+		&& !ctx.capabilities().allows_experimental(&target)
+	{
+		return Err(ControlFlow::Err(anyhow::Error::new(crate::exec::Error::InvalidFunction {
+			name: name.to_string(),
+			message: format!("Experimental feature {target} is not enabled"),
+		})));
+	}
+	refuse_mutating_builtin(func.name(), ctx.exec_ctx)?;
+	let result = if func.is_pure() && !func.is_async() {
+		func.invoke(func_args)
+	} else {
+		func.invoke_async(&ctx, func_args).await
+	};
+	let writing = method.writing || ctx.exec_ctx.root().writing;
+	let resolved = func.name();
+	result.map_err(|e| match e.downcast_ref::<crate::expr::Error>() {
+		// Code a write reaches names the method's own argument error after the
+		// method, as a function, and leaves an error raised beneath it as it was
+		// raised ([`crate::exec::context::RootContext::writing`]).
+		Some(crate::expr::Error::InvalidFunctionArguments {
+			name: raised,
+			message,
+		}) if writing => {
+			if raised == resolved {
+				ControlFlow::Err(anyhow::Error::new(crate::expr::Error::InvalidFunctionArguments {
+					name: name.to_string(),
+					message: message.clone(),
+				}))
+			} else {
+				ControlFlow::Err(e)
+			}
+		}
+		Some(crate::expr::Error::InvalidFunctionArguments {
+			message,
+			..
+		}) => ControlFlow::Err(method_arguments_error(name, message)),
+		_ => ControlFlow::Err(e),
+	})
+}
+
+/// The error a method named `name` raises for an argument error `message`
+/// raised beneath it.
+pub(super) fn method_arguments_error(name: &str, message: &str) -> anyhow::Error {
+	anyhow::Error::new(crate::expr::Error::InvalidMethodArguments {
+		name: name.to_string(),
+		message: message.to_string(),
+	})
+}
+
+/// Refuse a write the frame or the transaction cannot hold, before any of the
+/// statement's work begins, as the write operator refuses one.
+fn refuse_unwritable(spec: &super::program::WriteSpec, ctx: &ExecutionContext) -> FlowResult<()> {
+	if let Some(frame) = ctx.root().no_write {
+		return Err(ControlFlow::Err(anyhow::anyhow!(frame.side_effect_error())));
+	}
+	let Some(txn) = ctx.try_txn() else {
+		return Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(
+			format!("Cannot run {} without a transaction", spec.form.kind())
+		))));
+	};
+	if !txn.writeable() {
+		return Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(
+			format!("Cannot run {} on a read only transaction", spec.form.kind())
+		))));
+	}
+	Ok(())
+}

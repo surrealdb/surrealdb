@@ -1,4 +1,4 @@
-//! Index support for the streaming executor.
+//! Index support for the engine.
 //!
 //! This module provides index analysis, access path selection, and index iteration
 //! for the new streaming query executor. It supports:

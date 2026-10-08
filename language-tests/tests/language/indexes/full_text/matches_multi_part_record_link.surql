@@ -6,9 +6,7 @@ database = true
 [test]
 issue = 475
 reason = """
-Multi-part MATCHES (`t.name @@ 'x'`) semantics, identical across the legacy
-and streaming executors (this file deliberately runs under every planner
-strategy as a differential proof). A MATCHES traversing a record link to a
+Multi-part MATCHES (`t.name @@ 'x'`) semantics. A MATCHES traversing a record link to a
 full-text index on the target table evaluates per row by analyzing the
 idiom's value with the remote index's analyzer (the value path). A MATCHES
 registered from the WHERE condition evaluates; one that is not (projection
@@ -19,9 +17,6 @@ evaluate to false because they never get a query executor. `ts[*].name`
 resolves through the auto-defined `ts[*]` child field while `ts.name` does
 not; `record<a | b>` uses the last resolvable target before the first
 unresolvable one; search::score/highlight on a remote match ref yield NONE.
-Before #475 the legacy value path compared the query against its own terms
-(always true) and the streaming planner rejected multi-part MATCHES with
-PlannerUnimplemented.
 """
 
 [[test.results]]

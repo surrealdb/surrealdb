@@ -1,13 +1,12 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test EXPLAIN with closure expressions"
 
 [[test.results]]
 value = '''
-'Expr [ctx: Rt] [expr: |$x: any| (
+'ExprPlan [ctx: Rt] [expr: |$x: any| (
   Sequence
     Eval[$x * 2]
 )]
@@ -15,7 +14,7 @@ value = '''
 
 [[test.results]]
 value = '''
-'Expr [ctx: Rt] [expr: |$x: int| (
+'ExprPlan [ctx: Rt] [expr: |$x: int| (
   Sequence
     Eval[$x * 2]
 )]
@@ -23,7 +22,7 @@ value = '''
 
 [[test.results]]
 value = '''
-'Expr [ctx: Rt] [expr: |$x: int| -> int (
+'ExprPlan [ctx: Rt] [expr: |$x: int| -> int (
   Sequence
     Eval[$x * 2]
 )]
@@ -31,7 +30,7 @@ value = '''
 
 [[test.results]]
 value = '''
-'Expr [ctx: Rt] [expr: |$a: int, $b: int| -> int (
+'ExprPlan [ctx: Rt] [expr: |$a: int, $b: int| -> int (
   Sequence
     Eval[$a + $b]
 )]
@@ -39,7 +38,7 @@ value = '''
 
 [[test.results]]
 value = '''
-'Expr [ctx: Rt] [expr: || (
+'ExprPlan [ctx: Rt] [expr: || (
   Sequence
     Eval[42]
 )]

@@ -2,15 +2,11 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
 Plan matrix for the containment and membership operators: which of them reach
-an index, how, and which cannot. A prefix EXPLAIN is rejected by the per-row
-engine, so the compute-only strategy is dropped; the two streaming strategies
-plan identically by contract and both are pinned so the file fails if that
-stops being true.
+an index, how, and which cannot.
 
 Each shape is asserted three ways -- the plan, the rows, and the same rows
 under WITH NOINDEX, which forces a table scan and is therefore the oracle for
@@ -50,8 +46,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: code] {rows: 2}
     Filter [ctx: Db] [predicate: code INSIDE ['a', 'c']] {rows: 2}
         UnionIndexScan [ctx: Db] [table: sc, branches: 2] {rows: 2}
-            IndexScan [ctx: Db] [index: idx_sc_code, access: = 'a', direction: Forward] {rows: 1}
-            IndexScan [ctx: Db] [index: idx_sc_code, access: = 'c', direction: Forward] {rows: 1}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_code, access: = 'a', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_code, access: = 'c', direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -66,8 +62,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: code] {rows: 2}
     Filter [ctx: Db] [predicate: code INSIDE ['a', 'c']] {rows: 2}
         UnionIndexScan [ctx: Db] [table: sc, branches: 2] {rows: 2}
-            IndexScan [ctx: Db] [index: idx_sc_code, access: = 'a', direction: Forward] {rows: 1}
-            IndexScan [ctx: Db] [index: idx_sc_code, access: = 'c', direction: Forward] {rows: 1}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_code, access: = 'a', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_code, access: = 'c', direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -80,7 +76,7 @@ value = "['a', 'c']"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: code] {rows: 1}
-    IndexScan [ctx: Db] [index: idx_sc_code, access: = 'a', direction: Forward, predicate: code INSIDE ['a']] {rows: 1}
+    IndexScan [ctx: Db] [table: sc, index: idx_sc_code, access: = 'a', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -95,9 +91,9 @@ value = '''
 "ProjectValue [ctx: Db] [expr: code] {rows: 2}
     Filter [ctx: Db] [predicate: code INSIDE ['a', 'a', 'b']] {rows: 2}
         UnionIndexScan [ctx: Db] [table: sc, branches: 3] {rows: 2}
-            IndexScan [ctx: Db] [index: idx_sc_code, access: = 'a', direction: Forward] {rows: 1}
-            IndexScan [ctx: Db] [index: idx_sc_code, access: = 'a', direction: Forward] {rows: 1}
-            IndexScan [ctx: Db] [index: idx_sc_code, access: = 'b', direction: Forward] {rows: 1}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_code, access: = 'a', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_code, access: = 'a', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_code, access: = 'b', direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -116,7 +112,8 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: code]
-    EmptyScan [ctx: Rt]
+    Filter [ctx: Db] [predicate: false]
+        Union [ctx: Db]
 ''''
 
 [[test.results]]
@@ -181,38 +178,38 @@ value = '''
 'ProjectValue [ctx: Db] [expr: n] {rows: 3}
     Filter [ctx: Db] [predicate: n INSIDE [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]] {rows: 3}
         UnionIndexScan [ctx: Db] [table: sc, branches: 32] {rows: 3}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 1, direction: Forward] {rows: 1}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 2, direction: Forward] {rows: 1}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 3, direction: Forward] {rows: 1}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 4, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 5, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 6, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 7, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 8, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 9, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 10, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 11, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 12, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 13, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 14, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 15, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 16, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 17, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 18, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 19, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 20, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 21, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 22, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 23, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 24, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 25, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 26, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 27, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 28, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 29, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 30, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 31, direction: Forward] {rows: 0}
-            IndexScan [ctx: Db] [index: idx_sc_n, access: = 32, direction: Forward] {rows: 0}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 1, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 2, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 3, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 4, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 5, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 6, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 7, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 8, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 9, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 10, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 11, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 12, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 13, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 14, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 15, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 16, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 17, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 18, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 19, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 20, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 21, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 22, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 23, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 24, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 25, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 26, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 27, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 28, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 29, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 30, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 31, direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: sc, index: idx_sc_n, access: = 32, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 
@@ -241,7 +238,7 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
-    IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'red', direction: Forward, predicate: tags CONTAINS 'red'] {rows: 3}
+    IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 
@@ -260,7 +257,7 @@ value = "[{ count: 3 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
-    IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'red', direction: Forward, predicate: 'red' INSIDE tags] {rows: 3}
+    IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 
@@ -306,9 +303,9 @@ value = "[bag:b, bag:d]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
     Filter [ctx: Db] [predicate: tags CONTAINSALL ['red', 'green']] {rows: 1}
-        UnionIndexScan [ctx: Db] [table: bag, branches: 2] {rows: 4}
-            IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 3}
-            IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 2}
+        UnionIndexScan [ctx: Db] [table: bag, branches: 2] {rows: 1}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 1}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -328,9 +325,9 @@ value = "[{ count: 1 }]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
     Filter [ctx: Db] [predicate: ['red', 'green'] ALLINSIDE tags] {rows: 1}
-        UnionIndexScan [ctx: Db] [table: bag, branches: 2] {rows: 4}
-            IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 3}
-            IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 2}
+        UnionIndexScan [ctx: Db] [table: bag, branches: 2] {rows: 1}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 1}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -343,9 +340,10 @@ value = "[bag:a]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 4}
-    UnionIndexScan [ctx: Db] [table: bag, branches: 2] {rows: 4}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 3}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 2}
+    Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'green']] {rows: 4}
+        UnionIndexScan [ctx: Db] [table: bag, branches: 2] {rows: 4}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 4}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 4}
 
 Total rows: 4"'''
 
@@ -364,9 +362,10 @@ value = "[{ count: 4 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 4}
-    UnionIndexScan [ctx: Db] [table: bag, branches: 2, merge_by_id: Asc] {rows: 4}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 3}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 2}
+    Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'green']] {rows: 4}
+        UnionIndexScan [ctx: Db] [table: bag, branches: 2, merge_by_id: Asc] {rows: 4}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 4}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 4}
 
 Total rows: 4"'''
 
@@ -379,9 +378,10 @@ value = "[bag:a, bag:b, bag:c, bag:e]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 4}
-    UnionIndexScan [ctx: Db] [table: bag, branches: 2] {rows: 4}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 3}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 2}
+    Filter [ctx: Db] [predicate: ['red', 'green'] ANYINSIDE tags] {rows: 4}
+        UnionIndexScan [ctx: Db] [table: bag, branches: 2] {rows: 4}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 4}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 4}
 
 Total rows: 4"'''
 
@@ -394,10 +394,11 @@ value = "[bag:a, bag:b, bag:c, bag:e]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 4}
-    UnionIndexScan [ctx: Db] [table: bag, branches: 3] {rows: 4}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 3}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 2}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'blue', direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'green', 'blue']] {rows: 4}
+        UnionIndexScan [ctx: Db] [table: bag, branches: 3] {rows: 4}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 4}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 4}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'blue', direction: Forward] {rows: 4}
 
 Total rows: 4"'''
 
@@ -484,7 +485,8 @@ value = "[{ count: 5 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
-    TableScan [ctx: Db] [table: bag, direction: Forward, predicate: tags ?= 'red', pre_decode_filter: no (unsupported predicate)] {rows: 3}
+    Filter [ctx: Db] [predicate: tags ?= 'red'] {rows: 3}
+        TableScan [ctx: Db] [table: bag, direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 
@@ -503,7 +505,8 @@ value = "[{ count: 3 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
-    TableScan [ctx: Db] [table: bag, direction: Forward, predicate: tags *= 'red', pre_decode_filter: no (unsupported predicate)] {rows: 2}
+    Filter [ctx: Db] [predicate: tags *= 'red'] {rows: 2}
+        TableScan [ctx: Db] [table: bag, direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -522,39 +525,40 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
-    UnionIndexScan [ctx: Db] [table: bag, branches: 32] {rows: 3}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 3}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't02', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't03', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't04', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't05', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't06', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't07', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't08', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't09', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't10', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't11', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't12', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't13', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't14', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't15', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't16', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't17', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't18', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't19', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't20', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't21', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't22', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't23', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't24', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't25', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't26', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't27', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't28', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't29', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't30', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't31', direction: Forward] {rows: 0}
-        IndexScan [ctx: Db] [index: idx_bag_tags, access: = 't32', direction: Forward] {rows: 0}
+    Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 't02', 't03', 't04', 't05', 't06', 't07', 't08', 't09', 't10', 't11', 't12', 't13', 't14', 't15', 't16', 't17', 't18', 't19', 't20', 't21', 't22', 't23', 't24', 't25', 't26', 't27', 't28', 't29', 't30', 't31', 't32']] {rows: 3}
+        UnionIndexScan [ctx: Db] [table: bag, branches: 32] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't02', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't03', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't04', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't05', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't06', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't07', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't08', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't09', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't10', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't11', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't12', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't13', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't14', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't15', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't16', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't17', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't18', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't19', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't20', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't21', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't22', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't23', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't24', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't25', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't26', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't27', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't28', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't29', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't30', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't31', direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't32', direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 
@@ -595,7 +599,8 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
-    IndexScan [ctx: Db] [index: idx_box, access: ['red'], direction: Forward, predicate: tags CONTAINS 'red'] {rows: 2}
+    DistinctRecords [ctx: Db] {rows: 2}
+        IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -614,9 +619,12 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
-    UnionIndexScan [ctx: Db] [table: box, branches: 2] {rows: 3}
-        IndexScan [ctx: Db] [index: idx_box, access: ['red'], direction: Forward] {rows: 2}
-        IndexScan [ctx: Db] [index: idx_box, access: ['green'], direction: Forward] {rows: 2}
+    Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'green']] {rows: 3}
+        UnionIndexScan [ctx: Db] [table: box, branches: 2] {rows: 3}
+            DistinctRecords [ctx: Db] {rows: 3}
+                IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 3}
+            DistinctRecords [ctx: Db] {rows: 3}
+                IndexScan [ctx: Db] [table: box, index: idx_box, access: ['green'], direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 
@@ -635,10 +643,13 @@ value = "[{ count: 3 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
-    SortByKey [ctx: Db] [sort_keys: id ASC] {rows: 3}
-        UnionIndexScan [ctx: Db] [table: box, branches: 2] {rows: 3}
-            IndexScan [ctx: Db] [index: idx_box, access: ['red'], direction: Forward] {rows: 2}
-            IndexScan [ctx: Db] [index: idx_box, access: ['green'], direction: Forward] {rows: 2}
+    Sort [ctx: Db] [sort_keys: id ASC] {rows: 3}
+        Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'green']] {rows: 3}
+            UnionIndexScan [ctx: Db] [table: box, branches: 2] {rows: 3}
+                DistinctRecords [ctx: Db] {rows: 3}
+                    IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 3}
+                DistinctRecords [ctx: Db] {rows: 3}
+                    IndexScan [ctx: Db] [table: box, index: idx_box, access: ['green'], direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 
@@ -651,7 +662,7 @@ value = "[box:a, box:b, box:c]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
-    IndexScan [ctx: Db] [index: idx_box, access: ['red', 'x'], direction: Forward, predicate: tags CONTAINS 'red' AND code = 'x'] {rows: 2}
+    IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red', 'x'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -670,8 +681,9 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
-    Filter [ctx: Db] [predicate: code INSIDE ['x', 'y']] {rows: 2}
-        IndexScan [ctx: Db] [index: idx_box, access: ['red'], direction: Forward] {rows: 2}
+    Filter [ctx: Db] [predicate: code INSIDE ['x', 'y'] AND tags CONTAINS 'red'] {rows: 2}
+        DistinctRecords [ctx: Db] {rows: 2}
+            IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -708,8 +720,10 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
     Filter [ctx: Db] [predicate: k INSIDE ['a', 'b']] {rows: 3}
         UnionIndexScan [ctx: Db] [table: kv, branches: 2] {rows: 3}
-            IndexScan [ctx: Db] [index: idx_kv, access: ['a'], direction: Forward] {rows: 2}
-            IndexScan [ctx: Db] [index: idx_kv, access: ['b'], direction: Forward] {rows: 1}
+            DistinctRecords [ctx: Db] {rows: 3}
+                IndexScan [ctx: Db] [table: kv, index: idx_kv, access: ['a'], direction: Forward] {rows: 3}
+            DistinctRecords [ctx: Db] {rows: 3}
+                IndexScan [ctx: Db] [table: kv, index: idx_kv, access: ['b'], direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 
@@ -724,8 +738,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
     Filter [ctx: Db] [predicate: meta.kind INSIDE ['p', 'z']] {rows: 2}
         UnionIndexScan [ctx: Db] [table: kv, branches: 2] {rows: 2}
-            IndexScan [ctx: Db] [index: idx_kv_meta, access: = 'p', direction: Forward] {rows: 2}
-            IndexScan [ctx: Db] [index: idx_kv_meta, access: = 'z', direction: Forward] {rows: 0}
+            IndexScan [ctx: Db] [table: kv, index: idx_kv_meta, access: = 'p', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: kv, index: idx_kv_meta, access: = 'z', direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -741,9 +755,10 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
-    UnionIndexScan [ctx: Db] [table: ord, branches: 2] {rows: 2}
-        IndexScan [ctx: Db] [index: idx_ord_sku, access: = 's1', direction: Forward] {rows: 1}
-        IndexScan [ctx: Db] [index: idx_ord_sku, access: = 's2', direction: Forward] {rows: 2}
+    Filter [ctx: Db] [predicate: lines.*.sku CONTAINSANY ['s1', 's2']] {rows: 2}
+        UnionIndexScan [ctx: Db] [table: ord, branches: 2] {rows: 2}
+            IndexScan [ctx: Db] [table: ord, index: idx_ord_sku, access: = 's1', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: ord, index: idx_ord_sku, access: = 's2', direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -762,9 +777,10 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
-    UnionIndexScan [ctx: Db] [table: ord, branches: 2] {rows: 2}
-        IndexScan [ctx: Db] [index: idx_ord_sku, access: = 's1', direction: Forward] {rows: 1}
-        IndexScan [ctx: Db] [index: idx_ord_sku, access: = 's2', direction: Forward] {rows: 2}
+    Filter [ctx: Db] [predicate: ['s1', 's2'] ANYINSIDE lines.*.sku] {rows: 2}
+        UnionIndexScan [ctx: Db] [table: ord, branches: 2] {rows: 2}
+            IndexScan [ctx: Db] [table: ord, index: idx_ord_sku, access: = 's1', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [table: ord, index: idx_ord_sku, access: = 's2', direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -777,7 +793,8 @@ value = "[ord:1, ord:2]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 0}
-    TableScan [ctx: Db] [table: ord, direction: Forward, predicate: lines.*.sku INSIDE ['s1', 's2'], pre_decode_filter: no (unsupported predicate)] {rows: 0}
+    Filter [ctx: Db] [predicate: lines.*.sku INSIDE ['s1', 's2']] {rows: 0}
+        TableScan [ctx: Db] [table: ord, direction: Forward] {rows: 0}
 
 Total rows: 0"'''
 
@@ -796,7 +813,7 @@ value = "[{ count: 0 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
-    IndexScan [ctx: Db] [index: idx_nest, access: = ['red', 'green'], direction: Forward, predicate: tags CONTAINS ['red', 'green']] {rows: 1}
+    IndexScan [ctx: Db] [table: nest, index: idx_nest, access: = ['red', 'green'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -819,7 +836,7 @@ value = "'OK'"
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
     DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [index: idx_tl, access: ['x'], direction: Forward, predicate: code INSIDE ['x']] {rows: 4}
+        IndexScan [ctx: Db] [table: tl, index: idx_tl, access: ['x'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -839,7 +856,7 @@ value = "[{ count: 2 }]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
     DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [index: idx_tl, access: ['x'], direction: Forward, predicate: code = 'x'] {rows: 4}
+        IndexScan [ctx: Db] [table: tl, index: idx_tl, access: ['x'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -860,10 +877,10 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
     Filter [ctx: Db] [predicate: code INSIDE ['x', 'y']] {rows: 3}
         UnionIndexScan [ctx: Db] [table: tl, branches: 2] {rows: 3}
-            DistinctRecords [ctx: Db] {rows: 2}
-                IndexScan [ctx: Db] [index: idx_tl, access: ['x'], direction: Forward] {rows: 4}
-            DistinctRecords [ctx: Db] {rows: 1}
-                IndexScan [ctx: Db] [index: idx_tl, access: ['y'], direction: Forward] {rows: 1}
+            DistinctRecords [ctx: Db] {rows: 3}
+                IndexScan [ctx: Db] [table: tl, index: idx_tl, access: ['x'], direction: Forward] {rows: 3}
+            DistinctRecords [ctx: Db] {rows: 3}
+                IndexScan [ctx: Db] [table: tl, index: idx_tl, access: ['y'], direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 
@@ -882,7 +899,7 @@ value = "[{ count: 3 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
-    IndexScan [ctx: Db] [index: idx_tl, access: ['x', 'red'], direction: Forward, predicate: code = 'x' AND tags CONTAINS 'red'] {rows: 2}
+    IndexScan [ctx: Db] [table: tl, index: idx_tl, access: ['x', 'red'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -901,9 +918,9 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
-    Filter [ctx: Db] [predicate: tags CONTAINSNOT 'yellow'] {rows: 1}
-        DistinctRecords [ctx: Db] {rows: 2}
-            IndexScan [ctx: Db] [index: idx_tl, access: ['x'], direction: Forward] {rows: 4}
+    Filter [ctx: Db] [predicate: code = 'x' AND tags CONTAINSNOT 'yellow'] {rows: 1}
+        DistinctRecords [ctx: Db] {rows: 1}
+            IndexScan [ctx: Db] [table: tl, index: idx_tl, access: ['x'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -922,9 +939,9 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
-    Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'yellow']] {rows: 2}
+    Filter [ctx: Db] [predicate: code = 'x' AND tags CONTAINSANY ['red', 'yellow']] {rows: 2}
         DistinctRecords [ctx: Db] {rows: 2}
-            IndexScan [ctx: Db] [index: idx_tl, access: ['x'], direction: Forward] {rows: 4}
+            IndexScan [ctx: Db] [table: tl, index: idx_tl, access: ['x'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 

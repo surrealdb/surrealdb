@@ -29,6 +29,7 @@ pub fn lower_bound_select(
 		None | Some(BoundTableSource::Values) => LogicalOp::Values(LogicalValues {
 			expr: LogicalExpr::Array(vec![LogicalExpr::Object(vec![])]),
 			for_update: select.for_update,
+			written: false,
 		}),
 		Some(source) => {
 			let mut join_counter = 0;
@@ -501,6 +502,7 @@ fn lower_table_source(
 		BoundTableSource::Values => Ok(LogicalOp::Values(LogicalValues {
 			expr: LogicalExpr::Array(vec![LogicalExpr::Object(vec![])]),
 			for_update,
+			written: false,
 		})),
 		BoundTableSource::Table {
 			name,

@@ -463,6 +463,17 @@ pub trait Transactable: Send + Sync {
 	/// Get the name of the transaction type.
 	fn kind(&self) -> &'static str;
 
+	/// Whether every transaction committed to the store is committed through
+	/// the datastore this transaction belongs to — a store held in this
+	/// process's memory, or one whose files this process holds the exclusive
+	/// lock of — and this transaction reads the snapshot the store held when
+	/// it opened. A caller may then learn which commits a transaction sees by
+	/// watching the datastore's own. `false` unless the backend guarantees
+	/// both.
+	fn sole_writer(&self) -> bool {
+		false
+	}
+
 	/// Check if transaction is finished.
 	///
 	/// If the transaction has been cancelled or committed,

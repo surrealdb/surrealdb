@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/order_by_field_select_perm_leak_import.surql"]
 auth = { namespace = "test", database = "test", access = "test", rid = "users:attacker" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "The value-ordering oracle guard must also hold for an ordinary (non-VALUE) projection that orders by a restricted field absent from the projection. Hidden order is a < c < m, so a leak would emit [secret:2, secret:3, secret:1] ascending and [secret:1, secret:3, secret:2] descending; the guard keeps the source in record-id order instead."

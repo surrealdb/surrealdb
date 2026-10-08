@@ -1282,3 +1282,44 @@ async fn permissions_checks_define_index() {
 	let res = iam_check_cases(test_cases.iter(), &scenario, &check_success, &check_error).await;
 	assert!(res.is_ok(), "{}", res.unwrap_err());
 }
+
+/// A statement run in a session whose namespace and database do not exist
+/// yet. A definition that creates them answers as it would in an existing
+/// database. Any other statement fails with the namespace or database not
+/// found, and a statement that only alters, removes or rebuilds what a
+/// database holds names the database.
+#[tokio::test]
+async fn statements_in_a_database_that_does_not_exist_yet() -> Result<()> {
+	let (_, dbs) = new_ds("test", "test", false).await?;
+	let cases: [(&str, Result<(), &str>); 13] = [
+		("DEFINE FIELD category ON pts TYPE string", Ok(())),
+		("DEFINE EVENT ev ON pts WHEN true THEN {}", Ok(())),
+		("DEFINE TABLE pts", Err("The namespace 'fresh2' does not exist")),
+		("DEFINE TABLE v AS SELECT * FROM pts", Err("The namespace 'fresh3' does not exist")),
+		("DEFINE INDEX ix ON pts FIELDS category", Err("The database 'fresh4' does not exist")),
+		("REBUILD INDEX IF EXISTS ix ON pts", Err("The database 'fresh5' does not exist")),
+		("ALTER FIELD category ON pts TYPE int", Err("The database 'fresh6' does not exist")),
+		("REMOVE TABLE IF EXISTS pts", Err("The database 'fresh7' does not exist")),
+		("CREATE pts:1", Err("The namespace 'fresh8' does not exist")),
+		("DELETE pts", Err("The namespace 'fresh9' does not exist")),
+		("DELETE pts:1", Err("The namespace 'fresh10' does not exist")),
+		("SELECT count() FROM pts GROUP ALL", Err("The namespace 'fresh11' does not exist")),
+		("RETURN fn::f()", Err("The namespace 'fresh12' does not exist")),
+	];
+	for (i, (sql, expected)) in cases.into_iter().enumerate() {
+		let ses = Session::owner().with_ns(&format!("fresh{i}")).with_db(&format!("fresh{i}"));
+		let res = &mut dbs.execute(sql, &ses, None).await?;
+		assert_eq!(res.len(), 1, "{sql}");
+		match (res.remove(0).result, expected) {
+			(Ok(value), Ok(())) => assert_eq!(value, Value::None, "{sql}"),
+			(Err(e), Err(message)) => assert_eq!(e.to_string(), message, "{sql}"),
+			(got, _) => panic!("{sql}: unexpected {got:?}"),
+		}
+	}
+	// The definitions landed in the databases they created.
+	let ses = Session::owner().with_ns("fresh0").with_db("fresh0");
+	let res = &mut dbs.execute("INFO FOR TABLE pts", &ses, None).await?;
+	let info = surrealdb_types::ToSql::to_sql(&res.remove(0).result?);
+	assert!(info.contains("DEFINE FIELD category ON pts TYPE string"), "{info}");
+	Ok(())
+}

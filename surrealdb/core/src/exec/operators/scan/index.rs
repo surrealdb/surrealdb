@@ -21,8 +21,7 @@ use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::index::iterator::btree::{BTreeIterator, INDEX_BATCH_SIZE};
 use crate::exec::operators::limit::PagingClause;
 use crate::exec::permission::{
-	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
-	validate_record_user_access,
+	PhysicalPermission, should_check_perms, validate_record_user_access,
 };
 use crate::exec::{
 	AccessMode, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext, FlowResult,
@@ -84,6 +83,9 @@ pub struct IndexScan {
 	pub(crate) decode_fields: Option<DecodeFields>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
+	/// The limit this scan is bound to, which spares it its records when it
+	/// evaluates to zero.
+	pub(crate) zero_limit: crate::exec::zero_limit::ZeroLimitBinding,
 }
 
 impl IndexScan {
@@ -112,6 +114,7 @@ impl IndexScan {
 			where_predicate,
 			batch_ceiling: None,
 			decode_fields: None,
+			zero_limit: Default::default(),
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -159,6 +162,10 @@ fn next_index_batch_len(read_bytes: usize, read_rows: usize, current: u32, budge
 impl ExecOperator for IndexScan {
 	fn name(&self) -> &'static str {
 		"IndexScan"
+	}
+
+	fn zero_limit_binding(&self) -> Option<&crate::exec::zero_limit::ZeroLimitBinding> {
+		Some(&self.zero_limit)
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
@@ -267,6 +274,7 @@ impl ExecOperator for IndexScan {
 		let needed_fields = self.needed_fields.clone();
 		let decode_fields = self.decode_fields.clone();
 		let where_predicate = self.where_predicate.clone();
+		let zeroed = self.zero_limit.applies(ctx);
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -281,6 +289,11 @@ impl ExecOperator for IndexScan {
 			let limit_val: Option<usize> = match &limit_expr {
 				Some(expr) => Some(eval_limit_expr(&**expr, &ctx, PagingClause::Limit).await?),
 				None => None,
+			};
+			let limit_val = if zeroed {
+				Some(0)
+			} else {
+				limit_val
 			};
 			let start_val: usize = match &start_expr {
 				Some(expr) => eval_limit_expr(&**expr, &ctx, PagingClause::Start).await?,
@@ -322,10 +335,8 @@ impl ExecOperator for IndexScan {
 					.await
 					.context("Failed to get table")?;
 
-				if let Some(def) = &table_def {
-					table_select_permission_physical_runtime(Some(&**def), &ctx)
-						.await
-						.context("Failed to convert permission")?
+				if table_def.is_some() {
+					crate::exec::vm::descriptor::select_permission(&ctx, &table_name).await?
 				} else {
 					Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
 						name: table_name.clone(),
@@ -386,9 +397,9 @@ impl ExecOperator for IndexScan {
 			let batch_bytes = ctx.root().ctx.config.exec.scan_batch_bytes;
 			let mut chunk_len = probe_batch_len(batch_bytes, RECORD_PROBE_ROWS) as u32;
 			let mut read_ahead = ReadAhead::new(
-				&select_permission,
+				select_permission.clone(),
 				check_perms,
-				decode_fields.as_ref(),
+				decode_fields.clone(),
 				batch_bytes,
 			);
 

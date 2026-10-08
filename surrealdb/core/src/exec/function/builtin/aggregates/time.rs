@@ -76,7 +76,7 @@ impl Accumulator for TimeMinAccumulator {
 	}
 
 	fn finalize(&self) -> Result<Value> {
-		// Streaming executor only. The materialised-view path
+		// The engine's aggregate only. The materialised-view path
 		// (`catalog/aggregation.rs`) still emits `Datetime::MAX_UTC` for empty
 		// groups; aligning it requires bumping `AggregationStat`'s revision.
 		self.rejected.check()?;
@@ -167,7 +167,7 @@ impl Accumulator for TimeMaxAccumulator {
 	}
 
 	fn finalize(&self) -> Result<Value> {
-		// Streaming executor only. The materialised-view path
+		// The engine's aggregate only. The materialised-view path
 		// (`catalog/aggregation.rs`) still emits `Datetime::MIN_UTC` for empty
 		// groups; aligning it requires bumping `AggregationStat`'s revision.
 		self.rejected.check()?;

@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Correctness guard for the nested-OR-in-AND union substitution (issue #7402): a KNN (nearest-neighbour) operator must keep driving from its KnnScan and must NOT be replaced by a higher-scoring OR-of-equalities union. `field <|k|> $v AND <filter>` is filtered-KNN — the k nearest rows that satisfy the filter. If the plan drove from the email union instead, the KNN operator would become a residual filter that no longer limits to k, so ALL filter-matching rows (including far ones) would be returned. With k=2 over three unique-email branches the correct answer is the two nearest matches [pts:1, pts:2]; the buggy union plan would also return the far pts:3."

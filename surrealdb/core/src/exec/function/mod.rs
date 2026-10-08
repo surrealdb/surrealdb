@@ -1,4 +1,4 @@
-//! Function system for the streaming executor.
+//! Function system for the engine.
 //!
 //! This module provides a trait-based function system that supports:
 //! - Pure scalar functions (no context needed)
@@ -12,6 +12,7 @@
 
 mod aggregate;
 mod builtin;
+pub(crate) use builtin::evaluate_streaming;
 mod index;
 mod macros;
 mod method;
@@ -19,6 +20,8 @@ mod method;
 mod parity_tests;
 mod projection;
 mod registry;
+#[cfg(test)]
+mod rule_tests;
 mod signature;
 
 use std::fmt::Debug;
@@ -26,13 +29,14 @@ use std::fmt::Debug;
 pub use aggregate::{Accumulator, AggregateFunction};
 use anyhow::Result;
 pub use index::{
-	IndexContext, IndexContextKind, IndexFunction, KnnContext, MatchInfo, MatchesContext,
+	IndexContext, IndexContextKind, IndexFunction, KnnContext, MatchContext, MatchInfo,
+	MatchesContext,
 };
-pub use method::MethodDescriptor;
+pub use method::{MethodDescriptor, ValueKind};
 pub use projection::ProjectionFunction;
 pub use registry::FunctionRegistry;
 pub(crate) use registry::experimental_target;
-pub use signature::Signature;
+pub use signature::{ReturnRule, Signature};
 
 use crate::exec::BoxFut;
 use crate::exec::physical_expr::EvalContext;
@@ -91,13 +95,12 @@ pub trait ScalarFunction: Send + Sync + Debug {
 	#[allow(unused)]
 	fn signature(&self) -> Signature;
 
-	/// Infer the return type given the argument types.
-	///
-	/// This is used during planning for type inference. The default
-	/// implementation returns the signature's return type.
+	/// The result kind of a call whose arguments have kinds `arg_types`, for
+	/// kind inference in the plan. The default applies the signature's
+	/// [`ReturnRule`].
 	#[allow(unused)]
-	fn return_type(&self, _arg_types: &[Kind]) -> Result<Kind> {
-		Ok(self.signature().returns)
+	fn return_type(&self, arg_types: &[Kind]) -> Result<Kind> {
+		Ok(self.signature().infer(arg_types))
 	}
 
 	/// The minimum context level required to execute this function.

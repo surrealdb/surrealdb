@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_guarded_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["compute-only", "all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -15,7 +14,7 @@ reason = """
 	time. A computed field the caller may read stays readable in the same
 	scopes. The same holds over a record-id range and over an edge table.
 	Denied fields are projected under an alias throughout: the value a scope
-	reads is what these pin, and an alias is how every engine reports it.
+	reads is what these pin, and an alias is how it is reported.
 """
 
 # 0: a block reading `secret` gets the guarded value.

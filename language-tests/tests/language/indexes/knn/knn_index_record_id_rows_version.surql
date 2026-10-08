@@ -2,11 +2,10 @@
 [env]
 backend = ["mem", "rocksdb", "surrealkv"]
 versioned = true
-planner-strategy = ["all-ro", "best-effort-ro"]
 timeout = 15000
 
 [test]
-reason = "A versioned KNN whose rows need only their id still reads the records at that version: the index describes the current state, so a record created after the version can be among the neighbours it returns, and only the read at that version drops it. The streaming strategies are pinned because the compute-only engine does not apply VERSION to an index-backed KNN."
+reason = "A versioned KNN whose rows need only their id still answers for the records at that version: the index describes the current state, so the search ranks the records read at the version instead, and returns the neighbours the brute-force search over them returns."
 
 [[test.results]]
 value = "NONE"
@@ -30,7 +29,10 @@ value = "NONE"
 value = "[{ id: pts:0, point: [0f] }]"
 
 [[test.results]]
-value = "[{ id: pts:1 }]"
+value = "[{ id: pts:1 }, { id: pts:2 }]"
+
+[[test.results]]
+value = "[{ id: pts:1 }, { id: pts:2 }]"
 
 [[test.results]]
 value = "[{ id: pts:0 }, { id: pts:1 }]"
@@ -48,4 +50,6 @@ LET $ts = time::now();
 SLEEP 10ms;
 CREATE pts:0 SET point = [ 0f ];
 SELECT id FROM pts WHERE point <|2,40|> $q VERSION $ts;
+-- The brute-force search over the records at the version: the same answer.
+SELECT id FROM pts WITH NOINDEX WHERE point <|2,EUCLIDEAN|> $q VERSION $ts;
 SELECT id FROM pts WHERE point <|2,40|> $q;

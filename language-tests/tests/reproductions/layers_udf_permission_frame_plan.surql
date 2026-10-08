@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_udf_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -24,8 +23,8 @@ value = '''
 
 [[test.results]]
 value = '''
-'Return [ctx: Db]
-    Expr [ctx: Db] [expr: fn::tier_of(user:reader)]
+'Return [ctx: Rt]
+    ExprPlan [ctx: Rt] [expr: fn::tier_of(user:reader)]
 ''''
 
 [[test.results]]
@@ -37,7 +36,7 @@ value = '''
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Db] [projections: who, active AS a, tier AS t]
+'SelectProject [ctx: Db] [projections: who, a, t]
     ProjectLayer [ctx: Db] [columns: active = <permission> @permission, tier = <permission> @permission]
         TableScan [ctx: Db] [table: membership, direction: Forward]
 ''''

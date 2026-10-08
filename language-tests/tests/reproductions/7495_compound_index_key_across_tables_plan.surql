@@ -7,13 +7,13 @@ auth = { level = "owner" }
 [test]
 reason = """
 The plan its sibling's rows were produced by. The condition reaches through a
-linked record, so the two tables' indexes must stay separate index options: the
-scan drives `idx_edge_in_type` and joins `idx_node_type` for the remote column.
-Merged into one compound key the scan looks up ['mm-Mission', 'HAS'] against an
-index whose leading column holds a record id, and the DELETE silently removes
-nothing.
-
-DELETE renders the same plan under every strategy, so the file is not pinned.
+linked record, whose index belongs to a different table, so the DELETE must
+not merge the two tables' columns into one compound key: merged, the scan
+looks up ['mm-Mission', 'HAS'] against an index whose leading column holds a
+record id, and the DELETE silently removes nothing. The DELETE is planned as
+a `Write` over a `TableScan` that the write's own condition filters, so the
+plan names no index and no key can be merged; the sibling asserts the rows the
+DELETE removes.
 """
 issue = 7495
 
@@ -45,7 +45,7 @@ value = "[{ id: node:craft }]"
 value = "[{ edge_type: 'HAS', id: edge:has, in: node:mission, out: node:craft }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'idx_edge_in_type', joins: [{ index: 'idx_node_type', operator: '=', value: 'mm-Mission' }], operator: 'join' }, table: 'edge' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 0 }, operation: 'Fetch' }]"
+value = "{ attributes: { form: 'DELETE' }, children: [{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', table: 'edge' }, context: 'Db', metrics: { output_rows: 0 }, operator: 'TableScan' }], context: 'Db', metrics: { output_rows: 0 }, operator: 'SelectProject' }], context: 'Db', metrics: { output_rows: 0 }, operator: 'WriteOperator', total_rows: 0 }"
 */
 
 DEFINE TABLE node SCHEMALESS;

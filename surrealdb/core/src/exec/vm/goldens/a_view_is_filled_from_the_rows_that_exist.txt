@@ -1,0 +1,37 @@
+### DEFINE TABLE v AS SELECT * FROM sale
+{ amount: 10, at: d'2024-01-01T00:00:00Z', id: v:1, region: 'eu' }
+{ amount: 20, at: d'2024-03-01T00:00:00Z', id: v:2, region: 'eu' }
+{ amount: 5, at: d'2024-02-01T00:00:00Z', id: v:3, region: 'us' }
+{ amount: 7, id: v:4, region: 'us' }
+### DEFINE TABLE v AS SELECT region, amount FROM sale WHERE amount > 5
+{ amount: 10, id: v:1, region: 'eu' }
+{ amount: 20, id: v:2, region: 'eu' }
+{ amount: 7, id: v:4, region: 'us' }
+### DEFINE TABLE v AS SELECT region, amount * 2 AS doubled FROM sale
+{ doubled: 20, id: v:1, region: 'eu' }
+{ doubled: 40, id: v:2, region: 'eu' }
+{ doubled: 10, id: v:3, region: 'us' }
+{ doubled: 14, id: v:4, region: 'us' }
+### DEFINE TABLE v AS SELECT region, count() AS n FROM sale GROUP BY region
+{ id: v:['eu'], n: 2, region: 'eu' }
+{ id: v:['us'], n: 2, region: 'us' }
+### DEFINE TABLE v AS SELECT count() AS n, math::sum(amount) AS t FROM sale GROUP ALL
+{ id: v:[], n: 4, t: 42f }
+### DEFINE TABLE v AS SELECT region, math::mean(amount) AS m FROM sale GROUP BY region
+{ id: v:['eu'], m: 15f, region: 'eu' }
+{ id: v:['us'], m: 6f, region: 'us' }
+### DEFINE TABLE v AS SELECT region, math::variance(amount) AS a, math::stddev(amount) AS b FROM sale GROUP BY region
+{ a: 50f, b: 7.0710678118654755f, id: v:['eu'], region: 'eu' }
+{ a: 2f, b: 1.4142135623730951f, id: v:['us'], region: 'us' }
+### DEFINE TABLE v AS SELECT region, math::max(amount) AS hi, math::min(amount) AS lo, time::max(at) AS late FROM sale GROUP BY region
+{ hi: 20, id: v:['eu'], late: d'2024-03-01T00:00:00Z', lo: 10, region: 'eu' }
+{ hi: 7, id: v:['us'], late: d'2024-02-01T00:00:00Z', lo: 5, region: 'us' }
+### DEFINE TABLE v AS SELECT region, count() AS n FROM sale WHERE amount > 5 GROUP BY region
+{ id: v:['eu'], n: 2, region: 'eu' }
+{ id: v:['us'], n: 1, region: 'us' }
+### DEFINE TABLE v AS SELECT region, count() AS n FROM sale WHERE amount > 100 GROUP BY region
+(no rows)
+### DEFINE TABLE v AS SELECT count() AS n FROM sale WHERE amount > 100 GROUP ALL
+(no rows)
+### DEFINE TABLE OVERWRITE by_person AS SELECT existing FROM person
+{ existing: 'a', id: by_person:1 }

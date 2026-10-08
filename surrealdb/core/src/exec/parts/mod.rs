@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::expr::FlowResult;
 // Re-export recursion utilities from the canonical definitions in `expr::idiom::recursion`.
-// These are shared between the legacy compute path and the streaming execution engine.
+// These are shared with the idiom recursion in `expr`.
 pub(crate) use crate::expr::idiom::recursion::{clean_iteration, get_final, is_final};
 use crate::val::Value;
 

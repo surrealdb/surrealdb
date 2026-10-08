@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test that SELECT ... EXPLAIN rewrites to EXPLAIN SELECT (JSON format) and SELECT ... EXPLAIN FULL rewrites to EXPLAIN ANALYZE SELECT (JSON format) when using the new planner"
@@ -12,13 +11,13 @@ value = "'OK'"
 value = "{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', table: 'item' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
-value = "{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', predicate: 'score > 15', pre_decode_filter: 'yes', table: 'item' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }"
+value = "{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'yes', predicate: 'score > 15', table: 'item' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
 value = "{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', table: 'item' }, context: 'Db', metrics: { output_rows: 3 }, operator: 'TableScan' }], context: 'Db', metrics: { output_rows: 3 }, operator: 'SelectProject', total_rows: 3 }"
 
 [[test.results]]
-value = "{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', predicate: 'score > 15', pre_decode_filter: 'yes', table: 'item' }, context: 'Db', metrics: { output_rows: 2 }, operator: 'TableScan' }], context: 'Db', metrics: { output_rows: 2 }, operator: 'SelectProject', total_rows: 2 }"
+value = "{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'yes', predicate: 'score > 15', table: 'item' }, context: 'Db', metrics: { output_rows: 2 }, operator: 'TableScan' }], context: 'Db', metrics: { output_rows: 2 }, operator: 'SelectProject', total_rows: 2 }"
 
 */
 

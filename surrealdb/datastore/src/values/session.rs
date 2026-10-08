@@ -9,7 +9,6 @@ use revision::revisioned;
 use surrealdb_expr::val::{Object, Value};
 use surrealdb_iam::Auth;
 use surrealdb_kvs::impl_kv_value_revisioned;
-use surrealdb_rpc::capabilities::NewPlannerStrategy;
 use uuid::Uuid;
 
 /// The durable form of a client-attached RPC session, stored under `/!se{id}` so
@@ -66,9 +65,31 @@ pub struct DurableSession {
 	/// The variables set on the session
 	pub variables: Object,
 	/// Strategy for the new streaming planner/executor
+	//
+	// Retired: the engine has a single execution path, so nothing selects between
+	// planners. The field keeps its place in the stored layout so a node on an
+	// earlier release reads this entry unchanged; it is always written as the
+	// default and its decoded value is ignored. A plain comment, not a doc
+	// comment: `revision.lock` hashes doc comments, and this struct's hash must
+	// stay that of the revision earlier releases wrote.
 	pub new_planner_strategy: NewPlannerStrategy,
 	/// When true, EXPLAIN ANALYZE output omits elapsed durations
 	pub redact_volatile_explain_attrs: bool,
 }
 
 impl_kv_value_revisioned!(DurableSession);
+
+/// The wire shape of the planner-strategy setting that earlier releases stored
+/// in [`DurableSession`].
+///
+/// It occupies a fixed slot in the stored layout and nothing reads it: it is
+/// always written as [`Default::default`] and ignored on decode. Variant order
+/// is part of the stored encoding and must not change.
+#[revisioned(revision = 1)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum NewPlannerStrategy {
+	#[default]
+	BestEffortReadOnlyStatements,
+	ComputeOnly,
+	AllReadOnlyStatements,
+}

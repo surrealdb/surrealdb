@@ -22,7 +22,7 @@ reason = """
 
 	The third query raises, which is what makes an engine that evaluates a
 	column at a time evaluate it a second time. The value it raises is not one
-	an aggregate may skip, so both engines report it, and the draw count is the
+	an aggregate may skip, so the statement reports it, and the draw count is the
 	assertion.
 """
 

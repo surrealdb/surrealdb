@@ -74,17 +74,20 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use futures::StreamExt;
 use tracing::debug;
 
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
 use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, collect_adjacency};
+#[cfg(test)]
 use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
-	monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, OperatorMetrics,
+	PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
+use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::adjacency::VertexAdjacency;
 use crate::val::{Object, RecordId, TableName, Value};
@@ -122,6 +125,7 @@ impl ExpandDir {
 		}
 	}
 
+	#[cfg(test)]
 	/// EXPLAIN arrow rendering.
 	fn arrow(self) -> &'static str {
 		match self {
@@ -132,7 +136,7 @@ impl ExpandDir {
 }
 
 /// How the traversed edge is bound into each surviving row.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EdgeBinding {
 	/// Bind the full edge record (FieldState-aware fetch) under this name.
 	Full(String),
@@ -141,6 +145,7 @@ pub enum EdgeBinding {
 }
 
 impl EdgeBinding {
+	#[cfg(test)]
 	/// The binding name regardless of mode.
 	fn name(&self) -> &str {
 		match self {
@@ -148,12 +153,14 @@ impl EdgeBinding {
 		}
 	}
 
+	#[cfg(test)]
 	/// Whether the edge record must be fetched.
 	fn fetch_full(&self) -> bool {
 		matches!(self, EdgeBinding::Full(_))
 	}
 }
 
+#[cfg(test)]
 /// Single-hop graph expansion over a stream of binding rows.
 ///
 /// See the module docs for the per-row algorithm and the target-rid decision.
@@ -182,7 +189,9 @@ pub struct Expand {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl Expand {
+	#[cfg(test)]
 	/// Create a new `Expand` operator with fresh metrics.
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
@@ -210,21 +219,15 @@ impl Expand {
 		}
 	}
 
+	#[cfg(test)]
 	/// Build the `EdgeTableSpec` list (unbounded ranges) for the configured
 	/// edge tables. An empty list yields the all-edges wildcard scan.
 	fn edge_specs(&self) -> Vec<EdgeTableSpec> {
-		self.edge_tables
-			.iter()
-			.cloned()
-			.map(|table| EdgeTableSpec {
-				table,
-				range_start: std::ops::Bound::Unbounded,
-				range_end: std::ops::Bound::Unbounded,
-			})
-			.collect()
+		edge_specs_for(&self.edge_tables)
 	}
 }
 
+#[cfg(test)]
 impl ExecOperator for Expand {
 	fn name(&self) -> &'static str {
 		if self.optional {
@@ -293,7 +296,7 @@ impl ExecOperator for Expand {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let db_ctx = ctx.database()?.clone();
+		ctx.database()?;
 		// SECURITY: target/edge binding contents are produced by the FieldState
 		// helper ([`resolve_with_field_state`]), which resolves whether SELECT
 		// permissions must be enforced (once, internally) and applies table +
@@ -301,47 +304,32 @@ impl ExecOperator for Expand {
 		// therefore does not re-derive the permission-check flag itself.
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 
 		let source = self.source.clone();
-		let direction = self.direction;
-		let edge_specs = self.edge_specs();
-		let edge_binding = self.edge_binding.clone();
-		let target_binding = self.target_binding.clone();
-		let target_label = self.target_label.clone();
+		let params = ExpandParams {
+			direction: self.direction,
+			edge_specs: self.edge_specs(),
+			edge_name: self.edge_binding.name().to_string(),
+			fetch_full_edge: self.edge_binding.fetch_full(),
+			target_binding: self.target_binding.clone(),
+			target_label: self.target_label.clone(),
+			optional: self.optional,
+			scan_batch_size: ctx.root().ctx.config.exec.scan_batch_size,
+			max_output_rows: ctx.root().ctx.config.exec.gql_max_output_rows,
+		};
 		let predicate = self.predicate.clone();
-		let optional = self.optional;
-		let scan_batch_size = ctx.root().ctx.config.exec.scan_batch_size;
-		let max_output_rows = ctx.root().ctx.config.exec.gql_max_output_rows;
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
-			let txn = ctx.txn();
-			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
-			let db_id = db_ctx.db.database_id;
-			let version = ctx.version_stamp();
-			let dir = direction.as_dir();
-			let fetch_full_edge = edge_binding.fetch_full();
-			let edge_name = edge_binding.name().to_string();
-
-			// FieldState caches: one for edges, one for targets. They are
-			// keyed by table internally and survive the whole stream so each
-			// table's permission + FieldState are resolved at most once.
-			let mut edge_cache = FetchFieldStateCache::new();
-			let mut target_cache = FetchFieldStateCache::new();
-			// Per-table adjacency classifications, cached for the whole stream
-			// (source rids can span tables).
-			let mut adjacency_memo: HashMap<TableName, VertexAdjacency> = HashMap::new();
-
-			// Cumulative emitted-row count across all batches and source rows —
-			// bounds high-fan-out expand output (a single dense source vertex, or
-			// a long streaming input, can fan out far past memory). The per-source
-			// optional null-fills are 1-per-row and bounded by the input, so only
-			// the survivor pushes inside `expand_row` are counted.
-			let mut emitted: usize = 0;
+			let mut caches = ExpandCaches::new();
+			let mut judge = PredicateJudge {
+				predicate: predicate.as_deref(),
+				ctx: &ctx,
+			};
 
 			while let Some(batch_result) = input_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
@@ -349,56 +337,16 @@ impl ExecOperator for Expand {
 				let mut out: Vec<Value> = Vec::with_capacity(batch.len());
 
 				for row in batch.into_values() {
-					match extract_source_id(&row, &source) {
-						SourceId::Found(rid) => {
-							expand_row(
-								&ctx,
-								&txn,
-								ns_id,
-								db_id,
-								version,
-								&row,
-								&rid,
-								dir,
-								direction,
-								&edge_specs,
-								&edge_name,
-								fetch_full_edge,
-								&target_binding,
-								target_label.as_ref(),
-								predicate.as_deref(),
-								optional,
-								scan_batch_size,
-								&mut edge_cache,
-								&mut target_cache,
-								&mut adjacency_memo,
-								&mut out,
-								&mut emitted,
-								max_output_rows,
-							)
-							.await?;
-						}
-						SourceId::OptionalMiss => {
-							// Source is a prior optional miss (Null). Left-outer
-							// propagation: keep the row, nulling this hop's
-							// bindings when this expand is itself optional;
-							// otherwise an inner expand from a null source
-							// produces nothing.
-							if optional {
-								out.push(null_filled_row(&row, &edge_name, &target_binding));
-							}
-						}
-						SourceId::Drop => {
-							// Malformed plan: the source binding is missing or
-							// not a record. The lowering guarantees a bound node
-							// here, so this is unreachable on valid plans; drop
-							// without panicking.
-							debug!(
-								binding = %source,
-								"Expand: source binding is missing or not a record id; dropping row"
-							);
-						}
-					}
+					expand_input_row(
+						&ctx,
+						&params,
+						&source,
+						&mut caches,
+						&mut judge,
+						&row,
+						&mut out,
+					)
+					.await?;
 				}
 
 				if !out.is_empty() {
@@ -409,6 +357,143 @@ impl ExecOperator for Expand {
 		});
 
 		Ok(monitor_stream(Box::pin(stream), self.name(), &self.metrics))
+	}
+}
+
+/// The edge-table specs, with unbounded ranges, of `tables`. No tables is the
+/// all-edges wildcard scan.
+pub(crate) fn edge_specs_for(tables: &[TableName]) -> Vec<EdgeTableSpec> {
+	tables
+		.iter()
+		.cloned()
+		.map(|table| EdgeTableSpec {
+			table,
+			range_start: std::ops::Bound::Unbounded,
+			range_end: std::ops::Bound::Unbounded,
+		})
+		.collect()
+}
+
+/// What judges an assembled candidate row of an expansion.
+pub(crate) trait CandidateJudge {
+	/// Whether `candidate` — the input row with the edge and the target bound —
+	/// survives.
+	fn passes<'a>(
+		&'a mut self,
+		candidate: &'a Value,
+	) -> impl std::future::Future<Output = FlowResult<bool>> + Send + 'a;
+}
+
+#[cfg(test)]
+/// The judge of a compiled predicate, evaluated as `Filter` evaluates it.
+struct PredicateJudge<'a> {
+	predicate: Option<&'a dyn PhysicalExpr>,
+	ctx: &'a ExecutionContext,
+}
+
+#[cfg(test)]
+impl CandidateJudge for PredicateJudge<'_> {
+	async fn passes(&mut self, candidate: &Value) -> FlowResult<bool> {
+		let Some(predicate) = self.predicate else {
+			return Ok(true);
+		};
+		let base_eval = EvalContext::from_exec_ctx(self.ctx);
+		Ok(predicate.evaluate(base_eval.with_value(candidate)).await?.is_truthy())
+	}
+}
+
+/// What one expansion is parameterised by, fixed for the whole run.
+pub(crate) struct ExpandParams {
+	pub(crate) direction: ExpandDir,
+	pub(crate) edge_specs: Vec<EdgeTableSpec>,
+	pub(crate) edge_name: String,
+	pub(crate) fetch_full_edge: bool,
+	pub(crate) target_binding: String,
+	pub(crate) target_label: Option<TableName>,
+	pub(crate) optional: bool,
+	pub(crate) scan_batch_size: usize,
+	pub(crate) max_output_rows: usize,
+}
+
+/// What an expansion keeps across the input rows of one run.
+///
+/// The FieldState caches are keyed by table internally, so each table's
+/// permission and FieldState are resolved at most once. `emitted` is the
+/// cumulative count of survivors across all input rows: it bounds a
+/// high-fan-out expansion (a single dense source vertex, or a long input,
+/// can fan out far past memory). The per-source optional null-fills are
+/// one per row and bounded by the input, so only survivors are counted.
+pub(crate) struct ExpandCaches {
+	edge_cache: FetchFieldStateCache,
+	target_cache: FetchFieldStateCache,
+	/// Per-table adjacency classifications (source rids can span tables).
+	adjacency_memo: HashMap<TableName, VertexAdjacency>,
+	emitted: usize,
+}
+
+impl ExpandCaches {
+	pub(crate) fn new() -> Self {
+		Self {
+			edge_cache: FetchFieldStateCache::new(),
+			target_cache: FetchFieldStateCache::new(),
+			adjacency_memo: HashMap::new(),
+			emitted: 0,
+		}
+	}
+}
+
+/// Expand one input binding row from the node bound at `source`, appending the
+/// rows it yields to `out`.
+pub(crate) async fn expand_input_row<J: CandidateJudge>(
+	ctx: &ExecutionContext,
+	params: &ExpandParams,
+	source: &str,
+	caches: &mut ExpandCaches,
+	judge: &mut J,
+	row: &Value,
+	out: &mut Vec<Value>,
+) -> Result<(), ControlFlow> {
+	match extract_source_id(row, source) {
+		SourceId::Found(rid) => {
+			let db_ctx = ctx.database()?;
+			let txn = ctx.txn();
+			expand_row(
+				ctx,
+				&txn,
+				db_ctx.ns_ctx.ns.namespace_id,
+				db_ctx.db.database_id,
+				ctx.version_stamp(),
+				row,
+				&rid,
+				params,
+				caches,
+				judge,
+				out,
+			)
+			.await
+		}
+		SourceId::OptionalMiss => {
+			// Source is a prior optional miss (Null). Left-outer
+			// propagation: keep the row, nulling this hop's
+			// bindings when this expand is itself optional;
+			// otherwise an inner expand from a null source
+			// produces nothing.
+			if params.optional {
+				out.push(null_filled_row(row, &params.edge_name, &params.target_binding));
+			}
+			Ok(())
+		}
+		SourceId::Drop => {
+			// Malformed plan: the source binding is missing or
+			// not a record. The lowering guarantees a bound node
+			// here, so this is unreachable on valid plans; drop
+			// without panicking.
+			debug!(
+				binding = %source,
+				"Expand: source binding is missing or not a record id; dropping row"
+			);
+			Ok(())
+		}
 	}
 }
 
@@ -479,7 +564,7 @@ fn target_from_edge_obj(edge: &Value, direction: ExpandDir) -> Option<RecordId> 
 
 /// Enumerate one input row's adjacency and emit surviving candidate rows.
 #[allow(clippy::too_many_arguments)]
-async fn expand_row(
+async fn expand_row<J: CandidateJudge>(
 	ctx: &ExecutionContext,
 	txn: &Arc<crate::kvs::Transaction>,
 	ns_id: crate::catalog::NamespaceId,
@@ -487,23 +572,32 @@ async fn expand_row(
 	version: Option<u64>,
 	input_row: &Value,
 	source_rid: &RecordId,
-	dir: Dir,
-	direction: ExpandDir,
-	edge_specs: &[EdgeTableSpec],
-	edge_name: &str,
-	fetch_full_edge: bool,
-	target_binding: &str,
-	target_label: Option<&TableName>,
-	predicate: Option<&dyn PhysicalExpr>,
-	optional: bool,
-	scan_batch_size: usize,
-	edge_cache: &mut FetchFieldStateCache,
-	target_cache: &mut FetchFieldStateCache,
-	adjacency_memo: &mut HashMap<TableName, VertexAdjacency>,
+	params: &ExpandParams,
+	caches: &mut ExpandCaches,
+	judge: &mut J,
 	out: &mut Vec<Value>,
-	emitted: &mut usize,
-	max_output_rows: usize,
 ) -> Result<(), ControlFlow> {
+	let ExpandParams {
+		direction,
+		edge_specs,
+		edge_name,
+		fetch_full_edge,
+		target_binding,
+		optional,
+		scan_batch_size,
+		max_output_rows,
+		..
+	} = params;
+	let (direction, fetch_full_edge, optional, scan_batch_size, max_output_rows) =
+		(*direction, *fetch_full_edge, *optional, *scan_batch_size, *max_output_rows);
+	let target_label = params.target_label.as_ref();
+	let dir = direction.as_dir();
+	let ExpandCaches {
+		edge_cache,
+		target_cache,
+		adjacency_memo,
+		emitted,
+	} = caches;
 	// Enumerate the source vertex's adjacency — packed blocks merged with
 	// per-edge pointer keys — retaining only (edge rid, optional decoded
 	// target) pairs per item: the key and props are dropped as each edge
@@ -661,9 +755,6 @@ async fn expand_row(
 		// `targets_to_fetch`; `None` ⇒ missing or permission-denied ⇒ drop.
 		let target_values = resolve_with_field_state(ctx, target_cache, &targets_to_fetch).await?;
 
-		// Base eval context for the predicate (no current value yet).
-		let base_eval = EvalContext::from_exec_ctx(ctx);
-
 		for (slot, target_value) in target_values.into_iter().enumerate() {
 			let Some(target_value) = target_value else {
 				continue;
@@ -683,13 +774,9 @@ async fn expand_row(
 			let candidate =
 				candidate_row(input_row, edge_name, edge_value, target_binding, target_value);
 
-			// Predicate evaluation against the assembled candidate row, copying
-			// Filter's per-row idiom (`EvalContext::with_value`).
-			if let Some(predicate) = predicate {
-				let result = predicate.evaluate(base_eval.with_value(&candidate)).await?;
-				if !result.is_truthy() {
-					continue;
-				}
+			// The predicate, evaluated against the assembled candidate row.
+			if !judge.passes(&candidate).await? {
+				continue;
 			}
 
 			*emitted += 1;

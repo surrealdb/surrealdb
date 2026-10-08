@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Under method syntax the receiver is the asserted value and is returned unchanged on success. A thrown assertion failure keeps the `value::expect` name on every planner strategy, but argument-validation errors are relabelled: the compute executor reports them against the function while the streaming executors rewrite them to the bare method name, so those expectations are matched by pattern"
+reason = "Under method syntax the receiver is the asserted value and is returned unchanged on success. A thrown assertion failure keeps the `value::expect` name, but argument-validation errors are relabelled to the bare method name, so those expectations are matched by pattern"
 
 [[test.results]]
 value = "10"

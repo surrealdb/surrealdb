@@ -1,4 +1,4 @@
-//! Recursion operator for the streaming execution engine.
+//! Recursion operator for the engine.
 //!
 //! This operator implements bounded/unbounded recursive graph traversal with
 //! various collection strategies. It wraps the inner operator chain (typically
@@ -61,8 +61,13 @@ mod path;
 mod repeat;
 mod shortest;
 
+pub(crate) use collect::evaluate_recurse_collect_with;
+pub(crate) use common::{DepthBody, RecursionBounds};
+pub(crate) use default::evaluate_recurse_default_with;
+pub(crate) use path::evaluate_recurse_path_with;
 // Re-export for use by parts::recurse (RepeatRecursePart evaluation).
-pub(crate) use repeat::evaluate_repeat_recurse;
+pub(crate) use repeat::{RepeatBody, evaluate_recurse_iterative_with, evaluate_repeat_recurse};
+pub(crate) use shortest::evaluate_recurse_shortest_with;
 
 /// Recursion operator -- bounded/unbounded recursive graph traversal.
 ///

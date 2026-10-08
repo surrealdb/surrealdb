@@ -3,7 +3,6 @@
 namespace = true
 database = true
 imports = ["language/statements/select/topk_pushdown_field_permissions_record_user_import.surql"]
-planner-strategy = ["compute-only", "all-ro", "best-effort-ro"]
 
 signin = """{
 	ns: "test",
@@ -19,7 +18,7 @@ ORDER BY over a field with a conditional select permission, read as a record
 user: the sort key is the field as this caller may see it, so a row whose
 guard fails sorts as NONE and the TopK threshold cannot be judged from the
 stored value. p:1 holds the largest stored `secret` but its guard fails, so
-it is last under DESC and first under ASC, on every engine.
+it is last under DESC and first under ASC.
 """
 
 [[test.results]]

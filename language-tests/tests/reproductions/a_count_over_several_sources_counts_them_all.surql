@@ -7,7 +7,7 @@ auth = { level = "owner" }
 [test]
 reason = """
 	`SELECT count() … GROUP ALL` over several sources counts the rows of all
-	of them. The per-row engine answers such a statement from a count taken
+	of them. Such a statement is answered from a count taken
 	per source, one row standing for each; that count is added to the group's
 	rather than replacing it, which is what makes the answer the total instead
 	of whatever the last source happened to hold.

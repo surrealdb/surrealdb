@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -29,37 +28,37 @@ value = "NONE"
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINSANY [a:2], pre_decode_filter: yes]
-'"""
+''''
 
 [[test.results]]
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINS a:2, pre_decode_filter: yes]
-'"""
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINS (a:2), pre_decode_filter: yes]
+''''
 
 [[test.results]]
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: a:2 INSIDE links, pre_decode_filter: yes]
-'"""
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: (a:2) INSIDE links, pre_decode_filter: yes]
+''''
 
 [[test.results]]
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: t, direction: Forward, predicate: [a:2] ANYINSIDE links, pre_decode_filter: yes]
-'"""
+''''
 
 */
 

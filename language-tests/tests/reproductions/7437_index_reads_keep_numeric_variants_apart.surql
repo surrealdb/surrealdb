@@ -1,9 +1,6 @@
 /**
 [env]
-# The legacy compute-only engine still returns one of the two records twice
-# through a full-text index, and the ordinary runner replays this body under
-# every strategy.
-planner-strategy = ["all-ro", "best-effort-ro"]
+# A full-text index read returns each of the two records once.
 
 [test]
 reason = """

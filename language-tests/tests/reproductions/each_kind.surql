@@ -9,8 +9,7 @@ reason = """
 	`tags.*` over an `array<string>` field yields the array, so a cast of it
 	to `string` renders the array as a string rather than being elided as a
 	cast to the value's own kind, a cast to `int` fails, and a function
-	declared over `array<string>` accepts it unchanged. Both engines agree
-	on every strategy.
+	declared over `array<string>` accepts it unchanged.
 """
 
 [[test.results]]

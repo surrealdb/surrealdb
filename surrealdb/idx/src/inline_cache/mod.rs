@@ -53,7 +53,6 @@ use surrealdb_kvs::Direction;
 use surrealdb_kvs::key::Error as KeyError;
 
 use crate::adjacency::{AdjacencyResolveCache, AdjacencyScope, MergedAdjacencyCursor};
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::expr::Dir;
 use crate::key::RawRange;
@@ -108,7 +107,7 @@ pub async fn record_edge_write(
 	target: &RecordId,
 	resolve: Option<&AdjacencyResolveCache>,
 ) -> Result<()> {
-	let tb = txn.get_tb(ns, db, &vertex.table, None).await?;
+	let tb = txn.layout_tb(ns, db, &vertex.table, None).await?;
 	let Some(cap) = effective_edges_cap(tb.as_deref()) else {
 		return Ok(());
 	};
@@ -231,7 +230,7 @@ pub async fn record_edge_delete(
 	dir: Dir,
 	edge: &RecordId,
 ) -> Result<()> {
-	let tb = txn.get_tb(ns, db, &vertex.table, None).await?;
+	let tb = txn.layout_tb(ns, db, &vertex.table, None).await?;
 	if effective_edges_cap(tb.as_deref()).is_none() {
 		return Ok(());
 	}
@@ -276,7 +275,7 @@ pub async fn record_ref_write(
 	foreign_field: &str,
 	foreign_key: &crate::val::RecordIdKey,
 ) -> Result<()> {
-	let tb = txn.get_tb(ns, db, &target.table, None).await?;
+	let tb = txn.layout_tb(ns, db, &target.table, None).await?;
 	let Some(cap) = effective_refs_cap(tb.as_deref()) else {
 		return Ok(());
 	};
@@ -386,7 +385,7 @@ pub async fn record_ref_delete(
 	foreign_field: &str,
 	foreign_key: &crate::val::RecordIdKey,
 ) -> Result<()> {
-	let tb = txn.get_tb(ns, db, &target.table, None).await?;
+	let tb = txn.layout_tb(ns, db, &target.table, None).await?;
 	if effective_refs_cap(tb.as_deref()).is_none() {
 		return Ok(());
 	}
@@ -430,7 +429,7 @@ pub async fn purge_record_caches(
 	db: DatabaseId,
 	rid: &RecordId,
 ) -> Result<()> {
-	let tb = txn.get_tb(ns, db, &rid.table, None).await?;
+	let tb = txn.layout_tb(ns, db, &rid.table, None).await?;
 	if effective_edges_cap(tb.as_deref()).is_some() {
 		for dir in [Dir::In, Dir::Out] {
 			let key = EdgeCacheKey {

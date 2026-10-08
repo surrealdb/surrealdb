@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_knn_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["compute-only", "all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -10,8 +9,8 @@ reason = """
 	see it, not over the stored record the search traverses: a conjunct on a
 	guarded field, by name or through `$this`, compares the admitted value on
 	the caller's own records and `NONE` on the others. The dataset has no
-	more matching rows than the search's `k`, so the engines agree on the
-	rows returned.
+	more matching rows than the search's `k`, so the rows
+	returned are all the matching rows.
 """
 
 [[test.results]]

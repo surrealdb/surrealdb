@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 # Extra timeout because this test has a sleep.
 timeout = 5000
@@ -38,7 +37,7 @@ value = "{ building: { compacting: false, initial: 3, pending: 0, status: 'ready
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: test, access: = 'testA@surrealdb.com', direction: Forward, predicate: email = 'testA@surrealdb.com']
+    IndexScan [ctx: Db] [table: user.csv, index: test, access: = 'testA@surrealdb.com', direction: Forward]
 "'''
 
 [[test.results]]

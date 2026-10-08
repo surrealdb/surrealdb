@@ -5,13 +5,11 @@ timeout = 5000
 
 [test]
 reason = """
-	A legacy evaluation reached from inside a versioned statement reads at the
-	statement's `VERSION`. A user-defined function whose body has no logical
-	form (here, a mock record set outside FROM) runs on the legacy evaluator
-	when the streaming engine calls it, so the version the streaming context
-	reads at has to be carried into the options that evaluation runs with;
-	otherwise the body's `SELECT` reads current data while the statement
-	around it reads the past.
+	A user-defined function body evaluated from inside a versioned statement reads
+	at the statement's `VERSION`: the body's `SELECT` reads the past data the
+	statement around it reads, not current data. Here the body has no logical
+	form (a mock record set outside FROM), so the version of the calling context
+	has to be carried into the evaluation of the body.
 """
 
 [[test.results]]

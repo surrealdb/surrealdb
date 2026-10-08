@@ -59,10 +59,10 @@ use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
-use super::common::{RecursionBounds, eval_buffered, is_recursion_target};
+use super::common::{DepthBody, PathBody, RecursionBounds, eval_buffered, is_recursion_target};
 use crate::exec::FlowResult;
+use crate::exec::parts::is_final;
 use crate::exec::parts::recurse::value_hash;
-use crate::exec::parts::{evaluate_physical_path, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::val::Value;
 
@@ -72,13 +72,12 @@ use crate::val::Value;
 /// target is not reachable within max_depth.
 ///
 /// Fully iterative -- level-based BFS loop.
-pub(crate) async fn evaluate_recurse_shortest(
+pub(crate) async fn evaluate_recurse_shortest_with(
 	start: &Value,
 	target: &Value,
-	path: &[Arc<dyn PhysicalExpr>],
+	body: &impl DepthBody,
 	bounds: RecursionBounds,
 	inclusive: bool,
-	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
 	let min_depth = bounds.min;
 	let max_depth = bounds.cap();
@@ -101,10 +100,7 @@ pub(crate) async fn evaluate_recurse_shortest(
 
 		// Phase 1: Evaluate all level values concurrently (bounded).
 		// Uses `buffered` (ordered) so results align with `level` for zip.
-		let futures: Vec<_> = level
-			.iter()
-			.map(|(current, _)| evaluate_physical_path(current, path, ctx.with_value(current)))
-			.collect();
+		let futures: Vec<_> = level.iter().map(|(current, _)| body.eval(current)).collect();
 		let eval_results = eval_buffered(futures).await?;
 
 		// Phase 2: Process results sequentially (target check, dedup, enqueue).
@@ -151,7 +147,7 @@ pub(crate) async fn evaluate_recurse_shortest(
 	}
 
 	// Unbounded recursion truncated at the system limit with the queue still
-	// non-empty: hard error, matching legacy (see `RecursionBounds`).
+	// non-empty: hard error (see `RecursionBounds`).
 	if bounds.errors_on_limit() && !queue.is_empty() {
 		return Err(crate::exec::Error::IdiomRecursionLimitExceeded {
 			limit: bounds.system_limit,
@@ -171,6 +167,28 @@ pub(crate) async fn evaluate_recurse_shortest(
 	} else {
 		Ok(Value::Array(remaining_paths.into()))
 	}
+}
+
+/// [`evaluate_recurse_shortest_with`] over a body that is a path of physical expressions.
+pub(crate) async fn evaluate_recurse_shortest(
+	start: &Value,
+	target: &Value,
+	path: &[Arc<dyn PhysicalExpr>],
+	bounds: RecursionBounds,
+	inclusive: bool,
+	ctx: EvalContext<'_>,
+) -> FlowResult<Value> {
+	evaluate_recurse_shortest_with(
+		start,
+		target,
+		&PathBody {
+			path,
+			ctx,
+		},
+		bounds,
+		inclusive,
+	)
+	.await
 }
 
 #[cfg(test)]

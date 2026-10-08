@@ -61,9 +61,9 @@ use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
-use super::common::{RecursionBounds, eval_buffered, is_recursion_target};
+use super::common::{DepthBody, PathBody, RecursionBounds, eval_buffered, is_recursion_target};
 use crate::exec::FlowResult;
-use crate::exec::parts::{evaluate_physical_path, is_final};
+use crate::exec::parts::is_final;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::val::Value;
 
@@ -73,12 +73,11 @@ use crate::val::Value;
 /// path as an array. Paths terminate at dead ends or max depth.
 ///
 /// Fully iterative -- BFS loop over active paths.
-pub(crate) async fn evaluate_recurse_path(
+pub(crate) async fn evaluate_recurse_path_with(
 	start: &Value,
-	path: &[Arc<dyn PhysicalExpr>],
+	body: &impl DepthBody,
 	bounds: RecursionBounds,
 	inclusive: bool,
-	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
 	let min_depth = bounds.min;
 	let max_depth = bounds.cap();
@@ -100,7 +99,7 @@ pub(crate) async fn evaluate_recurse_path(
 			.iter()
 			.map(|current_path| {
 				let current_value = current_path.last().unwrap_or(start);
-				evaluate_physical_path(current_value, path, ctx.with_value(current_value))
+				body.eval(current_value)
 			})
 			.collect();
 		let eval_results = eval_buffered(futures).await?;
@@ -169,7 +168,7 @@ pub(crate) async fn evaluate_recurse_path(
 	}
 
 	// Unbounded recursion truncated at the system limit with paths still
-	// active: hard error, matching legacy (see `RecursionBounds`).
+	// active: hard error (see `RecursionBounds`).
 	if bounds.errors_on_limit() && !active_paths.is_empty() {
 		return Err(crate::exec::Error::IdiomRecursionLimitExceeded {
 			limit: bounds.system_limit,
@@ -185,6 +184,26 @@ pub(crate) async fn evaluate_recurse_path(
 	}
 
 	Ok(Value::Array(completed_paths.into()))
+}
+
+/// [`evaluate_recurse_path_with`] over a body that is a path of physical expressions.
+pub(crate) async fn evaluate_recurse_path(
+	start: &Value,
+	path: &[Arc<dyn PhysicalExpr>],
+	bounds: RecursionBounds,
+	inclusive: bool,
+	ctx: EvalContext<'_>,
+) -> FlowResult<Value> {
+	evaluate_recurse_path_with(
+		start,
+		&PathBody {
+			path,
+			ctx,
+		},
+		bounds,
+		inclusive,
+	)
+	.await
 }
 
 #[cfg(test)]

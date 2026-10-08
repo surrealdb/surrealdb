@@ -10,8 +10,7 @@ reason = """
 	name must not be one the statement reads: a field named like a minted
 	alias, reached through `$parent`, would be read as the right row instead
 	of as the field. The alias is minted above every such name, so the
-	comparison reads the left row's value and every engine returns the same
-	rows.
+	comparison reads the left row's value.
 """
 
 [[test.results]]

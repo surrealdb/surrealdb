@@ -22,6 +22,9 @@ Without that a caller who may update the record reads a denied value through
 a data clause, a `WHERE` condition, or a renamed `RETURN` field, and can copy
 it into a field they are allowed to select. A field the caller *is* allowed to
 read stays readable in all the same places.
+
+A denied field projected under its own name is pinned separately, by
+`reproductions/a_denied_field_projected_by_name.surql`.
 """
 
 [[test.results]]
@@ -59,9 +62,6 @@ value = "[]"
 
 [[test.results]]
 value = "[{ leak: 'matched' }]"
-
-[[test.results]]
-value = "[{  }]"
 
 [[test.results]]
 value = "[{ alias: NONE }]"
@@ -120,11 +120,9 @@ UPDATE item:1 SET leak = 'matched' WHERE derived = 2 RETURN leak;
 UPDATE item:1 SET leak = 'matched' WHERE visible = 'VISIBLE' RETURN leak;
 
 -- A `RETURN` field list is projected from that same image, and an alias does
--- not smuggle a denied field past the permission pass on the output. The two
--- mechanisms answer differently in shape: a field projected under its own name
--- is cut from the output, while an alias resolves to `NONE` because the image
--- it was projected from no longer carries the field.
-UPDATE item:1 RETURN hidden;
+-- not smuggle a denied field past the permission pass on the output: it
+-- resolves to `NONE`, because the image it was projected from no longer
+-- carries the field.
 UPDATE item:1 RETURN hidden AS alias;
 UPDATE item:1 RETURN VALUE hidden;
 UPDATE item:1 SET counter = 4 RETURN $after.derived AS alias;

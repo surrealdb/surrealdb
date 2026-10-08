@@ -1,0 +1,69 @@
+### UPDATE open SET m = (SELECT VALUE count() FROM item GROUP ALL)[0]
+{ id: open:1, m: 3, n: 10, of: item:1 }
+{ id: open:2, m: 3, n: 20, of: item:3 }
+{ id: open:3, m: 3, n: 2, of: item:9 }
+records:
+open: { id: open:1, m: 3, n: 10, of: item:1 }
+open: { id: open:2, m: 3, n: 20, of: item:3 }
+open: { id: open:3, m: 3, n: 2, of: item:9 }
+### UPDATE open SET m = (SELECT VALUE n FROM item WHERE n < $parent.n)
+{ id: open:1, m: [1, 2, 3], n: 10, of: item:1 }
+{ id: open:2, m: [1, 2, 3], n: 20, of: item:3 }
+{ id: open:3, m: [1], n: 2, of: item:9 }
+records:
+open: { id: open:1, m: [1, 2, 3], n: 10, of: item:1 }
+open: { id: open:2, m: [1, 2, 3], n: 20, of: item:3 }
+open: { id: open:3, m: [1], n: 2, of: item:9 }
+### FOR $i IN [1, 2, 3] { CREATE log SET c = (SELECT VALUE count() FROM log GROUP ALL)[0] }
+NONE
+records:
+log: { c: 0, id: log:generated }
+log: { c: 1, id: log:generated }
+log: { c: 2, id: log:generated }
+open: { id: open:1, n: 10, of: item:1 }
+open: { id: open:2, n: 20, of: item:3 }
+open: { id: open:3, n: 2, of: item:9 }
+### FOR $i IN [1, 2] { CREATE log; LET $x = SELECT (SELECT VALUE count() FROM log GROUP ALL)[0] AS c FROM ONLY open:1; CREATE seen SET c = $x.c }
+NONE
+records:
+log: { id: log:generated }
+log: { id: log:generated }
+seen: { c: 1, id: seen:generated }
+seen: { c: 2, id: seen:generated }
+open: { id: open:1, n: 10, of: item:1 }
+open: { id: open:2, n: 20, of: item:3 }
+open: { id: open:3, n: 2, of: item:9 }
+### UPDATE open SET m = (CREATE log SET of = $parent.id RETURN VALUE of)
+{ id: open:1, m: [open:1], n: 10, of: item:1 }
+{ id: open:2, m: [open:2], n: 20, of: item:3 }
+{ id: open:3, m: [open:3], n: 2, of: item:9 }
+records:
+log: { id: log:generated, of: open:1 }
+log: { id: log:generated, of: open:2 }
+log: { id: log:generated, of: open:3 }
+open: { id: open:1, m: [open:1], n: 10, of: item:1 }
+open: { id: open:2, m: [open:2], n: 20, of: item:3 }
+open: { id: open:3, m: [open:3], n: 2, of: item:9 }
+### UPDATE (SELECT * FROM open WHERE n > 5) SET m = 1
+{ id: open:1, m: 1, n: 10, of: item:1 }
+{ id: open:2, m: 1, n: 20, of: item:3 }
+records:
+open: { id: open:1, m: 1, n: 10, of: item:1 }
+open: { id: open:2, m: 1, n: 20, of: item:3 }
+open: { id: open:3, n: 2, of: item:9 }
+### UPDATE (SELECT VALUE id FROM open ORDER BY n DESC LIMIT 1) SET m = 2
+{ id: open:2, m: 2, n: 20, of: item:3 }
+records:
+open: { id: open:1, n: 10, of: item:1 }
+open: { id: open:2, m: 2, n: 20, of: item:3 }
+open: { id: open:3, n: 2, of: item:9 }
+### DELETE [open:1, open:3]
+(no rows)
+records:
+open: { id: open:2, n: 20, of: item:3 }
+### { LET $o = open:2; RETURN UPDATE $o SET m = 3 }
+[{ id: open:2, m: 3, n: 20, of: item:3 }]
+records:
+open: { id: open:1, n: 10, of: item:1 }
+open: { id: open:2, m: 3, n: 20, of: item:3 }
+open: { id: open:3, n: 2, of: item:9 }

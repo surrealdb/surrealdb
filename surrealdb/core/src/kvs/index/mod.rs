@@ -39,10 +39,7 @@ mod tests;
 use std::time::Duration;
 
 pub(crate) use builder::{AbortLocalBuild, CleanUncommittedBuild, IndexBuilder, IndexMutation};
-pub(crate) use state::{
-	build_owner_is_live, build_owner_is_live_locked, filter_online_indexes, index_building_info,
-	retire_durable_index,
-};
+pub(crate) use state::{build_owner_is_live, build_owner_is_live_locked, filter_online_indexes};
 // Only the frozen-fixture corpus names this directly; the builder reaches a
 // primary appending through its ticket.
 #[cfg(test)]
@@ -123,8 +120,11 @@ struct DurableAdmission {
 }
 
 enum DurableAdmissionDecision {
-	/// The write must be queued for the active durable generation.
-	Admit(DurableAdmission),
+	/// The write must be queued for the active durable generation. Boxed: the
+	/// admission carries its release, which holds a transaction factory, and
+	/// the decision is made once per user transaction and index, after a
+	/// commit of its own.
+	Admit(Box<DurableAdmission>),
 	/// Durable state exists and is already online, so index normally.
 	IndexNormally,
 	/// Durable state is absent and the catalog no longer names this index, so

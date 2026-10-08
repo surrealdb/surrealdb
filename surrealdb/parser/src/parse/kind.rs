@@ -402,8 +402,26 @@ impl Parse for ast::Type {
 	}
 }
 
-/// Parse a type which is not surrounded by `<>`.
+/// Parse a kind which is not surrounded by `<>`, as the kind of a function parameter.
+///
+/// A bare `any` or `option<..>` followed by `|` is rejected as a union; see
+/// [`parse_closure_bare_type`] for the closure form, where that `|` closes the parameter list.
 pub async fn parse_bare_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Type> {
+	parse_bare_type_with(parser, true).await
+}
+
+/// Parse a kind which is not surrounded by `<>`, as the kind of a closure parameter.
+///
+/// The closure's parameter list ends with `|`, so a bare kind never consumes a following `|`.
+/// Only a `<..>` kind can hold a union.
+pub async fn parse_closure_bare_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Type> {
+	parse_bare_type_with(parser, false).await
+}
+
+async fn parse_bare_type_with(
+	parser: &mut Parser<'_, '_>,
+	reject_union: bool,
+) -> ParseResult<ast::Type> {
 	let peek = parser.peek_expect("a kind")?;
 	match peek.token {
 		T![<] => {
@@ -416,7 +434,9 @@ pub async fn parse_bare_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Ty
 			let _ = parser.next()?;
 			let ty = ast::Type::Any(peek.span);
 
-			no_either_type(parser, peek.span)?;
+			if reject_union {
+				no_either_type(parser, peek.span)?;
+			}
 
 			return Ok(ty);
 		}
@@ -432,7 +452,9 @@ pub async fn parse_bare_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Ty
 				next: Some(head),
 			});
 
-			no_either_type(parser, peek.span)?;
+			if reject_union {
+				no_either_type(parser, peek.span)?;
+			}
 
 			return Ok(ast::Type::Prime(head));
 		}

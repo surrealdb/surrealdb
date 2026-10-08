@@ -2,17 +2,14 @@
 
 use std::sync::Arc;
 
-use reblessive::tree::TreeStack;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::closure::CompiledClosure;
-use crate::doc::CursorDoc;
-use crate::exec::operators::legacy_bridge::legacy_options_for_frame;
 use crate::exec::permission::CompiledGuard;
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::exec::physical_expr::{EvalContext, PhysicalExpr, PlannedGuard};
 use crate::exec::{AccessMode, CombineAccessModes, Error as ExecError};
 use crate::expr::logical::LogicalPermissionRef;
-use crate::expr::{ControlFlow, Error as ExprError, FlowResult, Kind};
+use crate::expr::{Error as ExprError, FlowResult, Kind};
 use crate::val::{Closure, Value};
 
 /// Evaluate all argument expressions to values.
@@ -32,38 +29,49 @@ pub(crate) async fn evaluate_args(
 /// A conditional permission is judged on every call and evaluated in the
 /// permission frame: reads inside it are not themselves permission-checked,
 /// which is what stops a predicate that follows a record link from recursing
-/// into itself. `guard` is the calling node's memo of the compilation, which
-/// [`CompiledGuard`] reuses only while `definition` is the definition the call
-/// found; a predicate that fails to compile or to evaluate denies.
+/// into itself. `guards` holds the calling node's memo of the compilation,
+/// which [`CompiledGuard`] reuses only while `definition` is the definition
+/// the call found; a predicate that fails to compile or to evaluate denies.
+///
+/// `guards` also holds the predicate compiled with the plan: where the
+/// definition the call found holds the clause it was compiled from, under the
+/// `AUTH LIMIT` `limit`, it is judged, once per statement where its verdict
+/// stands that long ([`crate::exec::guard_verdicts`]), and nothing is compiled
+/// while the call runs. `kind` names the definition the verdict is kept for.
 pub(crate) async fn check_permission<D>(
-	guard: &CompiledGuard<D>,
+	kind: crate::exec::guard_verdicts::GuardKind,
+	(guard, planned): (&CompiledGuard<D>, &PlannedGuard<D>),
 	permission: LogicalPermissionRef<'_>,
+	limit: Option<&crate::catalog::auth::AuthLimit>,
 	definition: &Arc<D>,
 	func_name: &str,
 	ctx: &EvalContext<'_>,
 ) -> FlowResult<()> {
-	guard
-		.check(permission, definition, ctx, ctx.exec_ctx.try_txn(), || {
-			ExecError::FunctionPermissions {
-				name: func_name.to_string(),
-			}
-		})
-		.await
+	let denied = || ExecError::FunctionPermissions {
+		name: func_name.to_string(),
+	};
+	if let Some(matched) = planned.matching(definition, permission, limit) {
+		return crate::exec::guard_verdicts::judged(
+			ctx.exec_ctx,
+			matched.scope,
+			kind,
+			func_name,
+			matched.id,
+			|| crate::exec::permission::judge_compiled_guard(matched.compiled, ctx, denied),
+		)
+		.await;
+	}
+	guard.check(permission, definition, ctx, ctx.exec_ctx.try_txn(), denied).await
 }
 
 /// Invoke a closure value with `args` from a streaming expression.
 ///
-/// A [`CompiledClosure`] — the value the streaming engine creates — evaluates
-/// its compiled body directly. Any other closure can only be run by the legacy
-/// evaluator: a `Closure::Expr` (a surface-syntax body, as stored by `DEFINE
-/// PARAM` or created by a legacy statement) and a natively implemented
-/// builtin closure (API middleware). Those are handed to
-/// `legacy::closure_invoke` through the engine's one legacy bridge, in the
-/// evaluation frame the caller is in, with the caller's document root — or
-/// its current value, when there is no root — as the cursor document. Both
-/// forms therefore see the same document: the row the statement is
-/// evaluating, whichever position of an idiom chain the call sits at (see
-/// [`CompiledClosure::invoke`]).
+/// A [`CompiledClosure`] — the value the engine creates — evaluates
+/// its compiled body directly; every other form is invoked by
+/// [`crate::exec::closure::invoke`]. The body evaluates against the caller's
+/// document root — or its current value, when there is no root — so a closure
+/// of either form sees the row the statement is evaluating, whichever
+/// position of an idiom chain the call sits at (see [`CompiledClosure::invoke`]).
 pub(crate) async fn invoke_closure(
 	closure: &Closure,
 	args: Vec<Value>,
@@ -74,32 +82,19 @@ pub(crate) async fn invoke_closure(
 	{
 		return compiled.invoke(ctx, args).await;
 	}
+	invoke_uncompiled_closure(closure, args, ctx).await
+}
 
-	let Some(options) = ctx.exec_ctx.options() else {
-		return Err(ExecError::Thrown(
-			"Options not available to invoke a closure through the legacy evaluator".into(),
-		)
-		.into());
-	};
-	let options = legacy_options_for_frame(
-		options,
-		ctx.skip_fetch_perms,
-		ctx.exec_ctx.root().computing_field,
-		ctx.exec_ctx.version_stamp(),
-	)
-	.with_dive_consumed(ctx.plan_depth + 1);
-	let frozen = ctx.exec_ctx.ctx();
-	let doc =
-		ctx.document_root.or(ctx.current_value).map(|v| CursorDoc::new(None, None, v.clone()));
-
-	let mut stack = TreeStack::new();
-	stack
-		.enter(|stk| {
-			crate::legacy::closure_invoke(closure, stk, frozen, &options, doc.as_ref(), args)
-		})
-		.finish()
-		.await
-		.map_err(ControlFlow::Err)
+/// [`invoke_closure`] for a closure value that is not a [`CompiledClosure`]:
+/// the rest of an API chain, run by its stage, or a closure stored as
+/// written, which the instruction handing it over links no unit for: its
+/// invocation links the unit itself.
+pub(crate) async fn invoke_uncompiled_closure(
+	closure: &Closure,
+	args: Vec<Value>,
+	ctx: &EvalContext<'_>,
+) -> FlowResult<Value> {
+	crate::exec::closure::invoke(closure, args, ctx).await
 }
 
 /// Validate argument count against expected signature.

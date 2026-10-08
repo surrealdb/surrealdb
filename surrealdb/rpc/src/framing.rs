@@ -72,8 +72,7 @@ pub fn live_queries_disowned(ids: &[Uuid]) -> TypesError {
 ///
 /// Frames are produced one at a time, on demand, and never accumulated: a
 /// single item routinely carries a whole statement's result — every sort and
-/// aggregate operator emits one batch, as does any statement answered by the
-/// legacy evaluator — and pre-framing all of it would hold thousands of row
+/// aggregate operator emits one batch — and pre-framing all of it would hold thousands of row
 /// vectors at once and defeat the backpressure the bounded channels provide.
 /// Because a statement's rows are taken from the front of a queue rather than
 /// drained out of a vector, framing an item costs time linear in its size.

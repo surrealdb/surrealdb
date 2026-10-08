@@ -32,8 +32,8 @@ use crate::exec::logical::{
 	may_signal_control_flow,
 };
 use crate::exec::operators::{
-	Compute, FieldSelection, Project, ProjectValue, Projection, SelectProject,
-	omit_path_is_expressible,
+	Compute, FieldSelection, OmitAction, OmitPath, OmitStep, Project, ProjectValue, Projection,
+	SelectProject,
 };
 use crate::exec::{ExecOperator, OperatorMetrics};
 use crate::expr::logical::{LogicalExpr, LogicalField, LogicalFields, OutputPath, OutputPathPart};
@@ -73,17 +73,9 @@ pub(super) enum ProjectedField {
 	Fallback(&'static str),
 }
 
-/// The name of a bare field read, or `None` for any other expression.
-fn single_field_name(expr: &LogicalExpr) -> Option<&str> {
-	match expr {
-		LogicalExpr::Field(name) => Some(name.as_str()),
-		_ => None,
-	}
-}
-
 /// Where a projected value lands, as the path the `Project` operator writes
 /// to: one key per [`OutputPath`] part, a lookup key included.
-fn output_field_path(path: &OutputPath) -> FieldPath {
+pub(crate) fn output_field_path(path: &OutputPath) -> FieldPath {
 	FieldPath(
 		path.parts()
 			.iter()
@@ -249,7 +241,7 @@ impl<'ctx> Planner<'ctx> {
 				// SELECT VALUE aliases are guaranteed single-part by the parser.
 				if let Some(name) = alias.as_ref().and_then(OutputPath::as_field)
 					&& registry.contains_name(name)
-					&& !omit_fields.iter().any(|f| single_field_name(f) == Some(name))
+					&& !omit_fields.iter().any(|f| f.single_field() == Some(name))
 				{
 					// A bare field read of what `Compute` already evaluated.
 					let expr = self.physical_expr(LogicalExpr::Field(name.into())).await?;
@@ -588,32 +580,157 @@ impl<'ctx> Planner<'ctx> {
 		omit.iter().any(|e| !matches!(e, LogicalExpr::Field(_)))
 	}
 
-	/// Plan OMIT fields — resolve each expression to the paths it names.
+	/// The non-negative literal integer an index step holds, if any. Anything
+	/// else names its index only once evaluated.
+	fn literal_index(index: &LogicalExpr) -> Option<usize> {
+		match index {
+			LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::Integer(idx)) => {
+				usize::try_from(*idx).ok()
+			}
+			_ => None,
+		}
+	}
+
+	/// Plan OMIT fields — resolve each expression to the paths it names, and
+	/// compile each path to the steps that reach a location and the one action
+	/// that removes something there.
 	///
-	/// A resolved path the projection walker cannot perform is declined rather
-	/// than planned: that walk is structural, so a path holding a step which
-	/// needs evaluation would remove nothing. The statement is owed the
-	/// removal, so it runs on the per-row engine instead. Which paths those
-	/// are is stated by [`omit_path_is_expressible`].
-	pub(crate) async fn plan_omit(
-		&self,
-		omit: Vec<LogicalExpr>,
-	) -> Result<Vec<LogicalExpr>, Error> {
+	/// A step whose meaning comes from evaluation — a filter selecting the
+	/// elements to remove, a parameter spelling an index — carries the
+	/// compiled expression, evaluated per row where the path is applied. A
+	/// step that names no location at all, such as a method call answering
+	/// with a value, compiles to an action that removes nothing, which is what
+	/// the path does.
+	pub(crate) async fn plan_omit(&self, omit: Vec<LogicalExpr>) -> Result<Vec<OmitPath>, Error> {
 		let mut fields = Vec::with_capacity(omit.len());
 		for expr in omit {
-			let mut paths = self.resolve_field_paths(expr).await?;
-			for path in &paths {
-				if !omit_path_is_expressible(path) {
-					return Err(crate::exec::Error::PlannerUnsupported(format!(
-						"an OMIT path of this shape names no location to remove without \
-						 evaluating it: {}",
-						path.to_sql()
-					))
-					.into());
-				}
+			for path in self.resolve_field_paths(expr).await? {
+				fields.push(self.compile_omit_path(path).await?);
 			}
-			fields.append(&mut paths);
 		}
 		Ok(fields)
+	}
+
+	/// One `OMIT` path, compiled. The outermost node names what is removed;
+	/// everything under it is the walk to where.
+	async fn compile_omit_path(&self, path: LogicalExpr) -> Result<OmitPath, Error> {
+		let (base, action) = match path {
+			LogicalExpr::Field(name) => (None, OmitAction::RemoveField(name)),
+			LogicalExpr::Access {
+				base,
+				field,
+			} => (Some(*base), OmitAction::RemoveField(field)),
+			LogicalExpr::Each(base) => (Some(*base), OmitAction::Clear),
+			LogicalExpr::First(base) => (Some(*base), OmitAction::RemoveFirst),
+			LogicalExpr::Last(base) => (Some(*base), OmitAction::RemoveLast),
+			LogicalExpr::Index {
+				base,
+				index,
+			} => {
+				let action = match Self::literal_index(&index) {
+					Some(idx) => OmitAction::RemoveIndex(idx),
+					None => OmitAction::RemoveIndexAt(self.physical_expr(*index).await?),
+				};
+				(Some(*base), action)
+			}
+			LogicalExpr::Filter {
+				base,
+				predicate,
+			} => {
+				let predicate = self.physical_expr(*predicate).await?;
+				(Some(*base), OmitAction::RemoveMatching(predicate))
+			}
+			LogicalExpr::Destructure {
+				base,
+				fields,
+			} => (Some(*base), OmitAction::Destructure(fields.into())),
+			// A `Broadcast` applies its body to everything its base reaches,
+			// which is the base's walk followed by the body's own path.
+			LogicalExpr::Broadcast {
+				base,
+				body,
+				..
+			} => {
+				let mut compiled = Box::pin(self.compile_omit_path(*body)).await?;
+				let mut steps = self.compile_omit_steps(*base).await?;
+				steps.append(&mut compiled.steps);
+				return Ok(OmitPath {
+					steps,
+					action: compiled.action,
+				});
+			}
+			// Answers with a value rather than naming a place, so there is
+			// nothing to remove.
+			_ => (None, OmitAction::Nothing),
+		};
+		let steps = match base {
+			Some(base) => self.compile_omit_steps(base).await?,
+			None => Vec::new(),
+		};
+		Ok(OmitPath {
+			steps,
+			action,
+		})
+	}
+
+	/// The walk `path` describes, as the steps that reach its locations.
+	///
+	/// A step that reaches nothing makes the whole walk reach nothing, which
+	/// the caller renders as a path that removes nothing.
+	fn compile_omit_steps(
+		&self,
+		path: LogicalExpr,
+	) -> std::pin::Pin<Box<dyn Future<Output = Result<Vec<OmitStep>, Error>> + Send + '_>> {
+		Box::pin(async move {
+			let (base, step) = match path {
+				LogicalExpr::Current => return Ok(Vec::new()),
+				LogicalExpr::Field(name) => (None, OmitStep::Field(name)),
+				LogicalExpr::Access {
+					base,
+					field,
+				} => (Some(*base), OmitStep::Field(field)),
+				LogicalExpr::Each(base) => (Some(*base), OmitStep::Each),
+				LogicalExpr::First(base) => (Some(*base), OmitStep::First),
+				LogicalExpr::Last(base) => (Some(*base), OmitStep::Last),
+				LogicalExpr::Index {
+					base,
+					index,
+				} => {
+					let step = match Self::literal_index(&index) {
+						Some(idx) => OmitStep::Index(idx),
+						None => OmitStep::IndexAt(self.physical_expr(*index).await?),
+					};
+					(Some(*base), step)
+				}
+				LogicalExpr::Filter {
+					base,
+					predicate,
+				} => {
+					let predicate = self.physical_expr(*predicate).await?;
+					(Some(*base), OmitStep::Matching(predicate))
+				}
+				LogicalExpr::Destructure {
+					base,
+					fields,
+				} => (Some(*base), OmitStep::Destructure(fields.into())),
+				LogicalExpr::Broadcast {
+					base,
+					body,
+					..
+				} => {
+					let mut steps = self.compile_omit_steps(*base).await?;
+					steps.append(&mut self.compile_omit_steps(*body).await?);
+					return Ok(steps);
+				}
+				// Reaches nothing, so neither does anything built on it.
+				_ => return Ok(vec![OmitStep::Nowhere]),
+			};
+			let mut steps = match base {
+				Some(base) => self.compile_omit_steps(base).await?,
+				None => Vec::new(),
+			};
+			steps.push(step);
+			Ok(steps)
+		})
 	}
 }

@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -8,14 +7,17 @@ planner-strategy = ["all-ro"]
 value = "'OK'"
 
 [[test.results]]
-value = ''''CountScan [ctx: Db] [source: `table`:1..4]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: `table`:1..4]
 ''''
 
 [[test.results]]
 value = "[{ count: 3 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = '''
+'SelectProject [ctx: Db] [projections: count]
     RecordIdScan [ctx: Db] [record_id: `table`:1..4]
 ''''
 

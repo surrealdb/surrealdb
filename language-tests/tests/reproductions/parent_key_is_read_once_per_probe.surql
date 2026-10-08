@@ -6,16 +6,13 @@ database = true
 [test]
 reason = """
 A correlation `k = $parent.coin` over a probe of bare record ids becomes a
-join key, evaluated once per probe row. That is what the legacy engine does
-too: it reads the parent's record once for the subquery, so with `r` holding
-both `k = false` and `k = true` every outer row matches, and the count is the
-whole table.
-
-The streaming scalar form does not — it dereferences `$parent` again for each
-right row, drawing `coin` afresh each time, so an outer row matches only if
-one of the draws lands on its own `k`. Keeping the join is therefore what
-holds the two engines together here; withdrawing it for a non-object probe
-would return a random count near three quarters instead.
+join key, evaluated once per probe row: the parent's record is read once for the
+subquery, so with `r` holding both `k = false` and `k = true` every outer row
+matches, and the count is the whole table. A scalar form would dereference
+`$parent` again for each right row, drawing `coin` afresh each time, so an
+outer row would match only if one of the draws lands on its own `k`; keeping
+the join is what holds the count at the whole table, and withdrawing it for a
+non-object probe would return a random count near three quarters instead.
 
 Deterministic while the join stands: one draw per probe always equals one of
 the two `k` values.

@@ -2,9 +2,6 @@
 [test]
 reason = "RETURN can wrap SLEEP (yields NONE) and EXPLAIN ANALYZE (yields the formatted plan) as scalar subqueries."
 
-[env]
-planner-strategy = ["all-ro", "best-effort-ro"]
-
 [[test.results]]
 value = "NONE"
 
@@ -13,10 +10,12 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-'Project [ctx: Db] {rows: 1}
+'SelectProject [ctx: Db] [projections: *] {rows: 1}
     RecordIdScan [ctx: Db] [record_id: subq:a] {rows: 1}
 
 Total rows: 1''''
+
+[env]
 
 */
 

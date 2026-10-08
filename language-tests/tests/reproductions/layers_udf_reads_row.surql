@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -10,11 +9,6 @@ reason = """
 	reads it through `$this`, or the call sits in a WHERE. What the body
 	reads cannot be seen from the call, so every column is on the row it
 	runs against.
-	Streaming engine only: the legacy engine computes a computed field into
-	the document only on a demand its own analysis sees — a name in the
-	statement, `$this`, a block — and a function body's reads are not seen
-	by it, so there a body reading a computed field nothing else in the
-	statement names gets the stored record's `NONE`.
 """
 
 # 0-4: setup

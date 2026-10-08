@@ -10,6 +10,7 @@
 //! clause by clause.
 
 use super::fields::{field_path_from_expr, idiom_is_id};
+#[cfg(test)]
 use crate::err::Error;
 use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalOrdering};
 
@@ -151,6 +152,7 @@ fn limit_expr_as_usize(expr: &LogicalExpr) -> Option<usize> {
 	}
 }
 
+#[cfg(test)]
 /// Returns `true` when the SELECT pipeline's ORDER BY + LIMIT will be served
 /// by a bounded top-k sort (heap of size ≤ `max_order_limit_priority_queue_size`).
 ///
@@ -186,6 +188,7 @@ pub(crate) fn is_bounded_topk_downstream(
 // VERSION
 // ============================================================================
 
+#[cfg(test)]
 /// Extract version expression from VERSION clause.
 ///
 /// Returns a physical expression that, when evaluated at execution time,

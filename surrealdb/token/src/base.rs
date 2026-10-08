@@ -462,6 +462,10 @@ pub enum BaseTokenKind {
 	KwGrant,
 	#[regex(r"(?i)GRAPHQL")]
 	KwGraphql,
+	#[regex(r"(?i)GRAPHQL_ALIAS")]
+	KwGraphqlAlias,
+	#[regex(r"(?i)GRAPHQL_DEPRECATED")]
+	KwGraphqlDeprecated,
 	#[regex(r"(?i)GROUP")]
 	KwGroup,
 	#[regex(r"(?i)HASHED_VECTOR")]
@@ -1073,6 +1077,8 @@ impl BaseTokenKind {
 			BaseTokenKind::KwFunctions => "keyword `FUNCTIONS`",
 			BaseTokenKind::KwGrant => "keyword `GRANT`",
 			BaseTokenKind::KwGraphql => "keyword `GRAPHQL`",
+			BaseTokenKind::KwGraphqlAlias => "keyword `GRAPHQL_ALIAS`",
+			BaseTokenKind::KwGraphqlDeprecated => "keyword `GRAPHQL_DEPRECATED`",
 			BaseTokenKind::KwGroup => "keyword `GROUP`",
 			BaseTokenKind::KwHashedVector => "keyword `HASHED_VECTOR`",
 			BaseTokenKind::KwHeaders => "keyword `HEADERS`",
@@ -1407,6 +1413,8 @@ impl BaseTokenKind {
 				| Self::KwFunctions
 				| Self::KwGrant
 				| Self::KwGraphql
+				| Self::KwGraphqlAlias
+				| Self::KwGraphqlDeprecated
 				| Self::KwGroup
 				| Self::KwHashedVector
 				| Self::KwHeaders

@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Test compound index selection with partial and full key matching (new executor)"
+reason = "Test compound index selection with partial and full key matching"
 
 [[test.results]]
 value = "NONE"
@@ -20,22 +19,22 @@ value = "[{ event: 'event', id: event:1, name: 'someName', path: 'A/B/C' }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    Filter [ctx: Db] [predicate: path = 'A/B/C'] {rows: 1}
-        IndexScan [ctx: Db] [index: idxNameEvent, access: ['someName', 'event'], direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: name = 'someName' AND event = 'event' AND path = 'A/B/C'] {rows: 1}
+        IndexScan [ctx: Db] [table: event, index: idxNameEvent, access: ['someName', 'event'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: idxNameEventPath, access: ['someName', 'event', 'A/B/C'], direction: Forward, predicate: name = 'someName' AND event = 'event' AND path = 'A/B/C'] {rows: 1}
+    IndexScan [ctx: Db] [table: event, index: idxNameEventPath, access: ['someName', 'event', 'A/B/C'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: idxNameEventPath, access: ['someName', 'event', 'A/B/C'], direction: Forward, predicate: name = 'someName' AND event = 'event' AND path = 'A/B/C'] {rows: 1}
+    IndexScan [ctx: Db] [table: event, index: idxNameEventPath, access: ['someName', 'event', 'A/B/C'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 

@@ -148,18 +148,16 @@ impl PhysicalExpr for BinaryOp {
 				// A MATCHES that was not lowered into MatchesOp. The planner routes
 				// every parsed `@@` there — including the shapes that can name no
 				// index — so this arm is only reachable for a hand-built node. It
-				// answers `false`, the legacy outcome for a row with no query
-				// executor, because there is no row table here to decide whether
-				// the stricter `NoIndexFoundForMatch` applies.
+				// answers `false`, because there is no row table here to decide
+				// whether the stricter `NoIndexFoundForMatch` applies.
 				BinaryOperator::Matches(_) => Value::Bool(false),
 
 				// A KNN expression that was not lowered into KnnScan (HNSW)
 				// or KnnTopK (brute-force): projection position, a bare
 				// expression, a non-plan-time-computable query vector, or an
-				// Approximate form with no index. The legacy executor has no
-				// executor entry for these and evaluates them to `false` per
-				// row. Extracted conjuncts never reach this arm — they are
-				// stripped via strip_knn_from_condition before physical
+				// Approximate form with no index. No KNN source ran for these,
+				// so they evaluate to `false` per row. Extracted conjuncts never reach this arm —
+				// they are stripped via strip_knn_from_condition before physical
 				// expression compilation.
 				BinaryOperator::NearestNeighbor(_) => Value::Bool(false),
 			})
@@ -566,7 +564,9 @@ mod tests {
 	use surrealdb_types::ToSql;
 
 	use super::*;
-	use crate::exec::operators::test_util::{TestDb, eval, eval_on, physical_expr, root_ctx, val};
+	use crate::exec::operators::test_util::{
+		TestDb, eval, eval_in_txn, eval_on, physical_expr, physical_expr_in_txn, root_ctx, val,
+	};
 	use crate::exec::physical_expr::ScalarSubquery;
 	use crate::exec::{ContextLevel, EvalContext};
 	use crate::expr::ControlFlow;
@@ -900,8 +900,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn an_unindexable_matches_answers_false_off_an_executor_table() {
-		// A row that no legacy `QueryExecutor` would have seen — here a value
-		// with no record id — answers `false` rather than matching. Under the
+		// A row with no registered index — here a value with no record id —
+		// answers `false` rather than matching. Under the
 		// generic binary evaluator's assumption that any row reaching it came
 		// pre-filtered from a FullTextScan, these matched every row.
 		let ctx = root_ctx();
@@ -915,8 +915,7 @@ mod tests {
 	#[tokio::test]
 	async fn a_knn_operator_no_scan_lowered_answers_false_for_every_row() {
 		// The planner routes every parsed `<|k|>` to KnnMembershipOp, so this
-		// arm is only reachable for a hand-built node; it answers `false`,
-		// matching the legacy executor's missing-entry semantics.
+		// arm is only reachable for a hand-built node; it answers `false`.
 		let ctx = root_ctx();
 		let knn = BinaryOp {
 			left: physical_expr("1", &ctx).await,
@@ -943,14 +942,15 @@ mod tests {
 
 	#[tokio::test]
 	async fn control_flow_out_of_an_operand_passes_through_as_a_signal_not_an_error() {
-		let ctx = root_ctx();
-		let flow = eval("true AND BREAK", &ctx).await.unwrap_err();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let flow = eval_in_txn("true AND BREAK", &ctx).await.unwrap_err();
 		assert!(matches!(flow, ControlFlow::Break), "got {flow}");
 
-		let flow = eval("true AND CONTINUE", &ctx).await.unwrap_err();
+		let flow = eval_in_txn("true AND CONTINUE", &ctx).await.unwrap_err();
 		assert!(matches!(flow, ControlFlow::Continue), "got {flow}");
 
-		let flow = eval("true AND RETURN 7", &ctx).await.unwrap_err();
+		let flow = eval_in_txn("true AND RETURN 7", &ctx).await.unwrap_err();
 		match flow {
 			ControlFlow::Return(value) => assert_eq!(value, Value::from(7)),
 			other => panic!("got {other}"),
@@ -989,9 +989,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn explain_traversal_sees_both_operands_left_before_right() {
-		let ctx = root_ctx();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
 		let expr =
-			physical_expr("(SELECT VALUE 1 FROM [1]) = (SELECT VALUE 2 FROM [2])", &ctx).await;
+			physical_expr_in_txn("(SELECT VALUE 1 FROM [1]) = (SELECT VALUE 2 FROM [2])", &ctx)
+				.await;
 
 		let children = expr.expr_children();
 		let roles: Vec<&str> = children.iter().map(|(role, _)| *role).collect();
@@ -1244,6 +1246,96 @@ mod tests {
 			expr.evaluate_batch(base.clone(), &rows)
 				.await
 				.unwrap_or_else(|e| panic!("evaluate_batch failed for {op:?}: {e}"));
+		}
+	}
+
+	#[test]
+	fn simple_binary_op_arms_are_pinned_against_node_may_raise() {
+		use surrealdb_strand::Strand;
+
+		use crate::expr::logical::{
+			EffectOracle, EffectSet, LogicalExpr, LogicalLiteral, effects_of,
+		};
+
+		struct TestOracle;
+		impl EffectOracle for TestOracle {
+			fn builtin(&self, _name: &str) -> Option<EffectSet> {
+				None
+			}
+			fn closure_args(&self, _name: &str) -> Option<&'static [usize]> {
+				None
+			}
+			fn method_always_dispatches(&self, _name: &str) -> bool {
+				false
+			}
+			fn evaluates_against_row(&self, _name: &str) -> bool {
+				false
+			}
+			fn permission_checked_param(&self, _name: &str) -> bool {
+				false
+			}
+		}
+
+		let all = [
+			BinaryOperator::Add,
+			BinaryOperator::Subtract,
+			BinaryOperator::Multiply,
+			BinaryOperator::Divide,
+			BinaryOperator::Remainder,
+			BinaryOperator::Power,
+			BinaryOperator::Equal,
+			BinaryOperator::ExactEqual,
+			BinaryOperator::NotEqual,
+			BinaryOperator::AllEqual,
+			BinaryOperator::AnyEqual,
+			BinaryOperator::And,
+			BinaryOperator::Or,
+			BinaryOperator::NullCoalescing,
+			BinaryOperator::TenaryCondition,
+			BinaryOperator::LessThan,
+			BinaryOperator::LessThanEqual,
+			BinaryOperator::MoreThan,
+			BinaryOperator::MoreThanEqual,
+			BinaryOperator::Contain,
+			BinaryOperator::NotContain,
+			BinaryOperator::ContainAll,
+			BinaryOperator::ContainAny,
+			BinaryOperator::ContainNone,
+			BinaryOperator::Inside,
+			BinaryOperator::NotInside,
+			BinaryOperator::AllInside,
+			BinaryOperator::AnyInside,
+			BinaryOperator::NoneInside,
+			BinaryOperator::Outside,
+			BinaryOperator::Intersects,
+			BinaryOperator::Range,
+			BinaryOperator::RangeInclusive,
+			BinaryOperator::RangeSkip,
+			BinaryOperator::RangeSkipInclusive,
+			BinaryOperator::Matches(MatchesOperator {
+				rf: None,
+				operator: BooleanOperator::And,
+			}),
+			BinaryOperator::NearestNeighbor(Box::new(NearestNeighbor::KTree(1))),
+		];
+
+		for op in all {
+			let is_simple = simple_binary_op_has_an_arm(&op);
+			let expr = LogicalExpr::Binary {
+				op: op.clone(),
+				left: Box::new(LogicalExpr::Field(Strand::from("a"))),
+				right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(10))),
+			};
+			let eff = effects_of(&expr, &TestOracle);
+			if is_simple {
+				// Operators in SimpleBinaryOp evaluate in unmasked batch loops and
+				// therefore must never raise when evaluated over total inputs.
+				assert!(
+					!eff.may_raise,
+					"operator {:?} is in SimpleBinaryOp but node_may_raise returned true",
+					op
+				);
+			}
 		}
 	}
 

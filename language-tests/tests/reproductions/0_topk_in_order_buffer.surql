@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "ORDER BY a non-indexed column with IN-filter on an indexed column and a small LIMIT must return the correct top-k results without buffering all matching rows. Regression guard for the streaming UnionIndexScan + SortTopKByKey path."
+reason = "ORDER BY a non-indexed column with IN-filter on an indexed column and a small LIMIT must return the correct top-k results without buffering all matching rows. Regression guard for the streaming UnionIndexScan + bounded Sort path."
 
 [[test.results]]
 value = "NONE"

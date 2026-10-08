@@ -1,40 +1,41 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test EXPLAIN with FOR loop statements"
 
 [[test.results]]
-# EXPLAIN FOR loop over array
-value = """\
-"Foreach [ctx: Rt] [param: $item, range: [1, 2, 3]]
-    Expr [ctx: Rt] [expr: $item]
-""""
+value = '''
+'Foreach [ctx: Db] [param: $item]
+    ExprPlan [ctx: Rt] [expr: [1, 2, 3]]
+    Sequence [ctx: Rt] [statements: 1]
+        ExprPlan [ctx: Rt] [expr: $item]
+''''
 
 [[test.results]]
-# EXPLAIN FOR loop over range
-value = """\
-"Foreach [ctx: Rt] [param: $i, range: 0 .. 5]
-    Expr [ctx: Rt] [expr: $i]
-""""
+value = '''
+'Foreach [ctx: Db] [param: $i]
+    ExprPlan [ctx: Rt] [expr: 0..5]
+    Sequence [ctx: Rt] [statements: 1]
+        ExprPlan [ctx: Rt] [expr: $i]
+''''
 
 [[test.results]]
-# EXPLAIN FOR loop with multiple statements
-value = """\
-"Foreach [ctx: Rt] [param: $x, range: [1, 2]]
+value = '''
+'Foreach [ctx: Db] [param: $x]
+    ExprPlan [ctx: Rt] [expr: [1, 2]]
     Sequence [ctx: Rt] [statements: 2]
         Let [ctx: Rt] [name: $y]
-            Expr [ctx: Rt] [expr: $x]
-        Expr [ctx: Rt] [expr: $y]
-""""
+            ExprPlan [ctx: Rt] [expr: $x]
+        ExprPlan [ctx: Rt] [expr: $y]
+''''
 
 [[test.results]]
-# EXPLAIN FOR loop with empty body
-value = """\
-"Foreach [ctx: Rt] [param: $n, range: [1]]
-    Expr [ctx: Rt] [expr: NONE]
-""""
+value = '''
+'Foreach [ctx: Db] [param: $n]
+    ExprPlan [ctx: Rt] [expr: [1]]
+    Sequence [ctx: Rt] [statements: 0]
+''''
 
 */
 

@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Pre-decode filter for ALLINSIDE, ANYINSIDE, NONEINSIDE, NOTINSIDE combinations on arrays. EXPLAIN asserts pre_decode_filter: yes."
+reason = "Pre-decode filter for ALLINSIDE, ANYINSIDE, NONEINSIDE, NOTINSIDE combinations on arrays. EXPLAIN shows the predicate as a filter over the table scan."
 
 [[test.results]]
 value = "{ bag: [1, 2, 3], id: pdiv:1 }"

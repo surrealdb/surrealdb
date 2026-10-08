@@ -2,7 +2,7 @@ use surrealdb_core::dbs::Session;
 use surrealdb_iam::{Level, Role};
 use surrealdb_types::{Array, ToSql, Value};
 
-use crate::helpers::new_ds;
+use crate::helpers::{assert_write_refused, new_ds};
 
 //
 // Permissions
@@ -135,7 +135,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 	let statement = "UPDATE person:test CONTENT { name: 'Name' };";
 
 	for ((level, role), (ns, db), should_succeed, msg) in tests {
-		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
+		let sess = Session::for_level(level.clone(), role).with_ns(ns).with_db(db);
 
 		// Test the statement when the table already exists
 		{
@@ -191,8 +191,6 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
 
-			// Select always succeeds, but the result may be empty
-
 			if should_succeed {
 				assert!(res.unwrap() != Value::Array(Array::new()), "{}", msg);
 
@@ -209,7 +207,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				let res = res.unwrap().to_sql();
 				assert!(res.contains("Name"), "{}: {:?}", msg, res);
 			} else {
-				assert!(res.unwrap() == Value::Array(Array::new()), "{}", msg);
+				assert_write_refused(&level, ns, db, res, msg);
 
 				// Verify the update was not persisted
 				let mut resp = ds

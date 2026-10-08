@@ -183,7 +183,7 @@ pub(crate) enum Extracted {
 /// falls back to the walker chain — the fast path can never produce a
 /// different extraction, only decline to produce one.
 #[inline]
-fn rev2_record_data_bytes(record_bytes: &[u8]) -> Option<&[u8]> {
+pub(crate) fn rev2_record_data_bytes(record_bytes: &[u8]) -> Option<&[u8]> {
 	let (&rev, rest) = record_bytes.split_first()?;
 	if rev != 2 {
 		return None;
@@ -329,7 +329,7 @@ pub(crate) fn extract_field_from_record_bytes_parts(
 /// envelope.
 ///
 /// [`Error::OptimisedOffsetOutOfRange`]: revision::Error::OptimisedOffsetOutOfRange
-fn indexed_map_walker_from_object_bytes(
+pub(crate) fn indexed_map_walker_from_object_bytes(
 	object_wire: &[u8],
 ) -> Result<IndexedMapWalker<'_, Strand, Value>, RevisionError> {
 	// Caller is descending from a rev-2 `Value::Object(_)`; the parent
@@ -517,7 +517,7 @@ pub(crate) fn strand_wire_bytes_from_utf8(utf8: &[u8]) -> Vec<u8> {
 /// length prefix and compare against the segment's UTF-8 bytes directly. The
 /// legacy scan does not short-circuit on a "greater" key because wire order
 /// is not UTF-8 order.
-fn lookup_value_bytes_in_map<'p>(
+pub(crate) fn lookup_value_bytes_in_map<'p>(
 	map_walker: &IndexedMapWalker<'p, Strand, Value>,
 	needle: &PathSegment,
 ) -> Result<Option<&'p [u8]>, RevisionError> {

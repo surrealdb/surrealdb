@@ -71,7 +71,7 @@ impl TestCase {
 		source: String,
 		dialect: Dialect,
 	) -> Result<Self> {
-		let config = CaseConfig::parse(&source, dialect).with_context(|| {
+		let config = CaseConfig::parse(&source).with_context(|| {
 			if let Some(line) = origin.line_offset {
 				format!("Could not parse config for test file `{}` at line {line}", origin.path)
 			} else {

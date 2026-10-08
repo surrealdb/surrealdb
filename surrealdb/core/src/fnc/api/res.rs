@@ -47,7 +47,7 @@ use crate::val::{Closure, Value};
 ///         };
 /// ```
 pub async fn body(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(FromPublic(req), next, Optional(strategy)): (
 		FromPublic<ApiRequest>,
 		Box<Closure>,
@@ -55,16 +55,23 @@ pub async fn body(
 	),
 ) -> Result<Value> {
 	let res =
-		crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req.clone().into()]).await?;
-	let mut res: ApiResponse = res.try_into()?;
+		crate::exec::closure::invoke_in(&next, ctx, opt, doc, vec![req.clone().into()]).await?;
+	encode_body(&req, res, strategy.map(|x| x.0))
+}
 
-	let strategy = strategy.map(|x| x.0).unwrap_or_default();
+/// `api::res::body`'s work on the response `res` to `req`: its body encoded
+/// by `strategy`, or by what the request accepts when none is named.
+pub(crate) fn encode_body(
+	req: &ApiRequest,
+	res: Value,
+	strategy: Option<BodyStrategy>,
+) -> Result<Value> {
+	let mut res: ApiResponse = res.try_into()?;
+	let strategy = strategy.unwrap_or_default();
 	let Some(strategy) = output_body_strategy(&req.headers, strategy) else {
 		return Err(ApiError::NoOutputStrategy.into());
 	};
-
 	convert_response_value(&mut res, strategy)?;
-
 	Ok(res.into())
 }
 
@@ -90,10 +97,16 @@ pub async fn body(
 ///         };
 /// ```
 pub async fn status(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(req, next, status): (Value, Box<Closure>, i64),
 ) -> Result<Value> {
-	let res = crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req]).await?;
+	let res = crate::exec::closure::invoke_in(&next, ctx, opt, doc, vec![req]).await?;
+	set_status(res, status)
+}
+
+/// `api::res::status`'s work on the response `res`: its status set to
+/// `status`, which must be an HTTP status code.
+pub(crate) fn set_status(res: Value, status: i64) -> Result<Value> {
 	let mut res: ApiResponse = res.try_into()?;
 
 	// Validate status code: must be a valid u16 and a valid HTTP status code (100-599)
@@ -129,10 +142,16 @@ pub async fn status(
 ///         };
 /// ```
 pub async fn header(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(req, next, name, Optional(value)): (Value, Box<Closure>, String, Optional<String>),
 ) -> Result<Value> {
-	let res = crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req]).await?;
+	let res = crate::exec::closure::invoke_in(&next, ctx, opt, doc, vec![req]).await?;
+	set_header(res, &name, value)
+}
+
+/// `api::res::header`'s work on the response `res`: header `name` set to
+/// `value`, or removed when there is none.
+pub(crate) fn set_header(res: Value, name: &str, value: Option<String>) -> Result<Value> {
 	let mut res: ApiResponse = res.try_into()?;
 
 	let name: HeaderName =
@@ -181,10 +200,16 @@ pub async fn header(
 ///         };
 /// ```
 pub async fn headers(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(req, next, headers): (Value, Box<Closure>, BTreeMap<String, Option<String>>),
 ) -> Result<Value> {
-	let res = crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req]).await?;
+	let res = crate::exec::closure::invoke_in(&next, ctx, opt, doc, vec![req]).await?;
+	set_headers(res, headers)
+}
+
+/// `api::res::headers`'s work on the response `res`: each header named set to
+/// its value, or removed where it has none.
+pub(crate) fn set_headers(res: Value, headers: BTreeMap<String, Option<String>>) -> Result<Value> {
 	let mut res: ApiResponse = res.try_into()?;
 
 	for (k, value) in headers {

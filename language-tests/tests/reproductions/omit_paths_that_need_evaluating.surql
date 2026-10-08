@@ -12,8 +12,7 @@ reason = """
 	path names, and nothing else — a filter, a parameter index and a method
 	call all name their location only once evaluated.
 
-	A path the walk cannot reach is declined at plan time rather than applied,
-	so the statement runs on the per-row engine and the removal happens.
+	A path the walk cannot reach is evaluated instead, and the removal happens.
 	Removal by index is a removal: the element leaves the array, rather than
 	being left in place as `NONE`. A destructure entry naming the contents of a
 	field (`{ c.* }`) empties that field instead of removing it, and one naming

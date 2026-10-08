@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "SDB-207: an AND condition with an OR residual uses the compound index prefix on the streaming executor, for both literal operands and $scan.field record traversals (folded to literals at plan time); the OR clause is applied as a residual Filter"
+reason = "SDB-207: an AND condition with an OR residual uses the compound index prefix, for both literal operands and $scan.field record traversals (folded to literals at plan time); the whole predicate, OR clause included, is applied as the residual Filter"
 
 [[test.results]]
 value = "NONE"
@@ -32,8 +31,9 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z']
-        IndexScan [ctx: Db] [index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
+    Filter [ctx: Db] [predicate: scanDefinition = (scan:one).scanDefinition AND createdAt <= (scan:one).task.finishedAt AND (closedAt = NONE OR closedAt >= (scan:one).createdAt)]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: canonical_finding, index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]
@@ -42,8 +42,9 @@ value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z']
-        IndexScan [ctx: Db] [index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
+    Filter [ctx: Db] [predicate: scanDefinition = (scan_definition:a) AND createdAt <= d'2026-01-11T00:00:00Z' AND (closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z')]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: canonical_finding, index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]
@@ -52,7 +53,8 @@ value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward, predicate: scanDefinition = scan_definition:a AND createdAt <= d'2026-01-11T00:00:00Z']
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: canonical_finding, index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]

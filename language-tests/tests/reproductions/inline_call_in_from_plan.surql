@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -18,13 +17,13 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-'Project [ctx: Db]
+'SelectProject [ctx: Db] [projections: *]
     RecordIdScan [ctx: Db] [record_id: item:one, for_update: true]
 ''''
 
 [[test.results]]
 value = '''
-'Project [ctx: Db]
+'SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 0]
         RecordIdScan [ctx: Db] [record_id: item:one, for_update: true]
 ''''
@@ -35,7 +34,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    DynamicScan [ctx: Db] [source: fn::dynamic_rid(), limit: 0, for_update: true]
+    Limit [ctx: Db] [limit: 0]
+        Values [ctx: Rt] [expr: fn::dynamic_rid(), for_update: true]
 ''''
 */
 

@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "TopK threshold pushdown with a field-level SELECT permission on the ORDER BY field, read as the owner: the owner is not permission-checked, so the bound plan carries no guard, the scan keeps `topk_pushdown: yes`, and the order reflects the stored values. The record-user side is pinned in topk_pushdown_field_permissions_record_user.surql."
@@ -26,7 +25,7 @@ value = "[{ id: p:3, pub: 3, secret: 2 }]"
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 2]
-        SortTopKByKey [ctx: Db] [sort_keys: secret DESC, limit: 2]
+        Sort [ctx: Db] [sort_keys: secret DESC, keep: 2]
             TableScan [ctx: Db] [table: p, direction: Forward, topk_pushdown: yes]
 ''''
 
@@ -40,7 +39,7 @@ value = "[p:2, p:3]"
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 2]
-        SortTopKByKey [ctx: Db] [sort_keys: pub DESC, limit: 2]
+        Sort [ctx: Db] [sort_keys: pub DESC, keep: 2]
             TableScan [ctx: Db] [table: p, direction: Forward, topk_pushdown: yes]
 ''''
 */

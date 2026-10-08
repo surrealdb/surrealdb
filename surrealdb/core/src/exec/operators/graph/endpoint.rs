@@ -50,17 +50,22 @@
 //! a `SELECT` on that table would return for the caller. A permission denial is
 //! indistinguishable from a missing record — both drop the row.
 
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use futures::StreamExt;
 use tracing::debug;
 
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
+#[cfg(test)]
 use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, OutputOrdering, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, OperatorMetrics, OutputOrdering,
+	ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
+use crate::exec::{ExecutionContext, FlowResult};
 use crate::val::{Object, RecordId, TableName, Value};
 
 /// Which endpoint of the bound edge to bind as the target node.
@@ -78,7 +83,7 @@ pub enum EndpointField {
 
 impl EndpointField {
 	/// The edge-record field holding this endpoint's vertex.
-	fn field(self) -> &'static str {
+	pub(crate) fn field(self) -> &'static str {
 		match self {
 			EndpointField::In => "in",
 			EndpointField::Out => "out",
@@ -86,6 +91,7 @@ impl EndpointField {
 	}
 }
 
+#[cfg(test)]
 /// Bind a node from a bound edge's `in`/`out` endpoint.
 ///
 /// See the module docs for the per-row algorithm and the edge-extraction rules.
@@ -107,7 +113,9 @@ pub struct EndpointBind {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl EndpointBind {
+	#[cfg(test)]
 	/// Create a new `EndpointBind` operator with fresh metrics.
 	pub(crate) fn new(
 		input: Arc<dyn ExecOperator>,
@@ -127,6 +135,7 @@ impl EndpointBind {
 	}
 }
 
+#[cfg(test)]
 impl ExecOperator for EndpointBind {
 	fn name(&self) -> &'static str {
 		"EndpointBind"
@@ -179,7 +188,7 @@ impl ExecOperator for EndpointBind {
 		// field SELECT permissions and computed fields per record.
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -198,55 +207,16 @@ impl ExecOperator for EndpointBind {
 			while let Some(batch_result) = input_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
-
-				// Collect the endpoint rids to fetch for this batch, keeping a
-				// parallel record of which input row each resolved endpoint maps
-				// back to. Rows whose edge binding is missing / not a record /
-				// label-mismatched never enter `targets_to_fetch` and so are
-				// dropped here.
-				let mut targets_to_fetch: Vec<RecordId> = Vec::with_capacity(batch.len());
-				let mut row_positions: Vec<usize> = Vec::with_capacity(batch.len());
-
-				for (i, row) in batch.values().iter().enumerate() {
-					match extract_endpoint_id(row, &edge, field) {
-						Some(rid) => {
-							// Apply the target_label filter before fetching.
-							if let Some(label) = target_label.as_ref()
-								&& &rid.table != label
-							{
-								continue;
-							}
-							targets_to_fetch.push(rid);
-							row_positions.push(i);
-						}
-						None => {
-							// Malformed plan, optional miss, or an edge with no
-							// readable endpoint: drop the row without panicking.
-							// The lowering guarantees a full edge object here, so
-							// this is unreachable on valid plans.
-							debug!(
-								binding = %edge,
-								"EndpointBind: edge binding missing, not a full edge record, or has no endpoint; dropping row"
-							);
-						}
-					}
-				}
-
-				// Batch-fetch the endpoint nodes (FieldState-aware). Positional
-				// with `targets_to_fetch`; `None` ⇒ missing or permission-denied
-				// ⇒ drop.
-				let target_values =
-					resolve_with_field_state(&ctx, &mut target_cache, &targets_to_fetch).await?;
-
-				let mut out: Vec<Value> = Vec::with_capacity(target_values.len());
-				for (slot, target_value) in target_values.into_iter().enumerate() {
-					let Some(target_value) = target_value else {
-						continue;
-					};
-					let input_row = &batch.values()[row_positions[slot]];
-					out.push(bound_row(input_row, &target_binding, target_value));
-				}
-
+				let out = bind_endpoints(
+					&ctx,
+					&mut target_cache,
+					&edge,
+					field,
+					&target_binding,
+					target_label.as_ref(),
+					batch.values(),
+				)
+				.await?;
 				if !out.is_empty() {
 					yielder.emit(ValueBatch::new(out)).await;
 				}
@@ -258,11 +228,77 @@ impl ExecOperator for EndpointBind {
 	}
 }
 
+/// The rows of `batch` extended with the endpoint node of the edge each binds
+/// at `edge`, bound at `target_binding`, in order; the nodes are fetched as one
+/// batch.
+///
+/// A row whose edge binding is missing, not a record, an optional miss, of a
+/// label other than `target_label`, or whose endpoint is missing or denied to
+/// the caller, is dropped.
+pub(crate) async fn bind_endpoints(
+	ctx: &ExecutionContext,
+	cache: &mut FetchFieldStateCache,
+	edge: &str,
+	field: EndpointField,
+	target_binding: &str,
+	target_label: Option<&TableName>,
+	batch: &[Value],
+) -> FlowResult<Vec<Value>> {
+	// Collect the endpoint rids to fetch for this batch, keeping a parallel
+	// record of which input row each resolved endpoint maps back to. Rows
+	// whose edge binding is missing / not a record / label-mismatched never
+	// enter `targets_to_fetch` and so are dropped here.
+	let mut targets_to_fetch: Vec<RecordId> = Vec::with_capacity(batch.len());
+	let mut row_positions: Vec<usize> = Vec::with_capacity(batch.len());
+
+	for (i, row) in batch.iter().enumerate() {
+		match extract_endpoint_id(row, edge, field) {
+			Some(rid) => {
+				// Apply the target_label filter before fetching.
+				if let Some(label) = target_label
+					&& &rid.table != label
+				{
+					continue;
+				}
+				targets_to_fetch.push(rid);
+				row_positions.push(i);
+			}
+			None => {
+				// Malformed plan, optional miss, or an edge with no readable
+				// endpoint: drop the row without panicking. The lowering
+				// guarantees a full edge object here, so this is unreachable
+				// on valid plans.
+				debug!(
+					binding = %edge,
+					"EndpointBind: edge binding missing, not a full edge record, or has no endpoint; dropping row"
+				);
+			}
+		}
+	}
+
+	// Batch-fetch the endpoint nodes (FieldState-aware). Positional with
+	// `targets_to_fetch`; `None` => missing or permission-denied => drop.
+	let target_values = resolve_with_field_state(ctx, cache, &targets_to_fetch).await?;
+
+	let mut out: Vec<Value> = Vec::with_capacity(target_values.len());
+	for (slot, target_value) in target_values.into_iter().enumerate() {
+		let Some(target_value) = target_value else {
+			continue;
+		};
+		out.push(bound_row(&batch[row_positions[slot]], target_binding, target_value));
+	}
+	Ok(out)
+}
+
 /// Read the endpoint vertex [`RecordId`] from `row[edge]`'s `in`/`out` field per
 /// the edge-extraction rules (module docs). Returns `None` (the row drops) for a
 /// missing / non-object / non-record-id edge, an id-only edge, an optional-miss
 /// `Null`, or an edge whose endpoint field is missing or not a record id.
-fn extract_endpoint_id(row: &Value, edge: &str, field: EndpointField) -> Option<RecordId> {
+pub(crate) fn extract_endpoint_id(
+	row: &Value,
+	edge: &str,
+	field: EndpointField,
+) -> Option<RecordId> {
 	let Value::Object(obj) = row else {
 		return None;
 	};
@@ -279,7 +315,7 @@ fn extract_endpoint_id(row: &Value, edge: &str, field: EndpointField) -> Option<
 
 /// Assemble the output row: clone the input object and insert the target node
 /// binding.
-fn bound_row(input: &Value, target_binding: &str, target: Value) -> Value {
+pub(crate) fn bound_row(input: &Value, target_binding: &str, target: Value) -> Value {
 	let mut obj = match input {
 		Value::Object(o) => o.clone(),
 		// `extract_endpoint_id` only yields `Some` for object rows, so this is

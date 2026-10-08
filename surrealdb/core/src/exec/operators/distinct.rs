@@ -19,11 +19,15 @@
 //! is a future change, matching the `Aggregate` stance.
 
 use std::collections::BTreeSet;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use futures::StreamExt;
 
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
 	OutputOrdering, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
@@ -31,6 +35,7 @@ use crate::exec::{
 use crate::expr::ControlFlow;
 use crate::val::Value;
 
+#[cfg(test)]
 /// Emits the first occurrence of each distinct input row, dropping duplicates
 /// while preserving stream order.
 #[derive(Debug, Clone)]
@@ -39,7 +44,9 @@ pub struct Distinct {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl Distinct {
+	#[cfg(test)]
 	/// Create a new `Distinct` over `input`.
 	pub(crate) fn new(input: Arc<dyn ExecOperator>) -> Self {
 		Self {
@@ -49,6 +56,7 @@ impl Distinct {
 	}
 }
 
+#[cfg(test)]
 impl ExecOperator for Distinct {
 	fn name(&self) -> &'static str {
 		"Distinct"
@@ -79,7 +87,7 @@ impl ExecOperator for Distinct {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -112,12 +120,12 @@ impl ExecOperator for Distinct {
 /// the language uses — see the module docs for why a hash-bucketed set is not
 /// equivalent. Only distinct rows are retained, so the stored count is bounded by
 /// the configured build-row budget.
-struct SeenSet {
+pub(crate) struct SeenSet {
 	seen: BTreeSet<Value>,
 }
 
 impl SeenSet {
-	fn new() -> Self {
+	pub(crate) fn new() -> Self {
 		Self {
 			seen: BTreeSet::new(),
 		}
@@ -130,7 +138,7 @@ impl SeenSet {
 	///
 	/// The duplicate case — the common one for a dedup — probes without cloning;
 	/// only a newly seen row is cloned into the set.
-	fn insert(&mut self, value: &Value, max_rows: usize) -> Result<bool, ControlFlow> {
+	pub(crate) fn insert(&mut self, value: &Value, max_rows: usize) -> Result<bool, ControlFlow> {
 		if self.seen.contains(value) {
 			return Ok(false);
 		}

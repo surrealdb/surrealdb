@@ -51,7 +51,7 @@ impl ToSql for DocPart {
 }
 
 /// The record identity `value` carries, or `NONE` when it carries none.
-fn record_identity(value: &Value) -> Value {
+pub(crate) fn record_identity(value: &Value) -> Value {
 	match value {
 		Value::RecordId(_) => value.clone(),
 		Value::Object(obj) => match obj.get("id") {

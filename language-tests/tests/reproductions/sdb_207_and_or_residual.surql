@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "SDB-207 differential companion: rows-only assertions with no planner-strategy, so every engine (compute-only, all-ro, best-effort-ro) must agree on results regardless of whether the record-idiom fold or the compound index is used"
+reason = "SDB-207 companion: rows-only assertions that must hold regardless of whether the record-idiom fold or the compound index is used"
 
 [[test.results]]
 value = "NONE"

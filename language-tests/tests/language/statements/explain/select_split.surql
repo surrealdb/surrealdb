@@ -1,24 +1,27 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Test EXPLAIN with SPLIT clause"
+reason = "Test EXPLAIN with SPLIT clause. A `SPLIT` divides the row the statement returns, so the split sits above the projection and the sort above the split — the order the statement runs them in. The projection is therefore below the sort here, where every other shape projects last."
 
 [[test.results]]
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    Split [ctx: Db] [on: tags]
-        TableScan [ctx: Db] [table: post, direction: Forward]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Split [ctx: Db] [targets: tags]
+        SelectProject [ctx: Db] [projections: *]
+            TableScan [ctx: Db] [table: post, direction: Forward]
 ''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: views DESC]
-        Split [ctx: Db] [on: tags]
-            TableScan [ctx: Db] [table: post, direction: Forward]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Sort [ctx: Db] [sort_keys: views DESC]
+        Split [ctx: Db] [targets: tags]
+            SelectProject [ctx: Db] [projections: *]
+                TableScan [ctx: Db] [table: post, direction: Forward]
 ''''
 */
 

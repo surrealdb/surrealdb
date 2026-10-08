@@ -1,0 +1,31 @@
+### { LET $f = |$v| (CREATE log SET v = $v RETURN VALUE v); RETURN array::map([1, 2], $f) }
+[[1], [2]]
+records:
+log: { id: log:generated, v: 1 }
+log: { id: log:generated, v: 2 }
+t: { a: 1, id: t:1 }
+### { LET $f = || (SELECT VALUE count() FROM log GROUP ALL); CREATE log; LET $a = $f(); CREATE log; RETURN [$a, $f()] }
+[[1], [2]]
+records:
+log: { id: log:generated }
+log: { id: log:generated }
+t: { a: 1, id: t:1 }
+### { LET $f = || (SELECT * FROM t); DEFINE FIELD b ON t COMPUTED a + 1; RETURN $f() }
+[{ a: 1, b: 2, id: t:1 }]
+records:
+t: { a: 1, b: 2, id: t:1 }
+### { LET $f = || fn::v(); LET $a = $f(); DEFINE FUNCTION OVERWRITE fn::v() { RETURN 2; }; RETURN [$a, $f()] }
+[1, 2]
+records:
+t: { a: 1, id: t:1 }
+### { LET $f = || fn::v() + $p; LET $a = $f(); DEFINE PARAM OVERWRITE $p VALUE 5; RETURN [$a, $f()] }
+[2, 6]
+records:
+t: { a: 1, id: t:1 }
+### array::map([1, 2, 3], |$v| (CREATE log SET v = $v, c = (SELECT VALUE count() FROM log GROUP ALL) RETURN VALUE c))
+[[[0]], [[1]], [[2]]]
+records:
+log: { c: [0], id: log:generated, v: 1 }
+log: { c: [1], id: log:generated, v: 2 }
+log: { c: [2], id: log:generated, v: 3 }
+t: { a: 1, id: t:1 }

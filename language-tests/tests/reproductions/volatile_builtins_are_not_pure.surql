@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -23,34 +22,57 @@ value = "[{ id: r:1, k: 1 }]"
 
 [[test.results]]
 value = '''
-'ProjectValue [ctx: Db] [expr: k]
-    TableScan [ctx: Db] [table: o, direction: Forward, predicate: k INSIDE (ProjectValue), pre_decode_filter: no (unsupported predicate)]
-''''
+"ProjectValue [ctx: Db] [expr: k]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
+        TableScan [ctx: Db] [table: o, direction: Forward]
+        Subquery [ctx: Db] [strategy: apply]
+            ProjectValue [ctx: Db] [expr: k]
+                Filter [ctx: Db] [predicate: crypto::bcrypt::generate('p') != '']
+                    TableScan [ctx: Db] [table: r, direction: Forward]
+"'''
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: k]
-    HashJoin [ctx: Db] [type: Semi, alias: _join0, on: k = _join0.k]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
         TableScan [ctx: Db] [table: o, direction: Forward]
-        TableScan [ctx: Db] [table: r, direction: Forward, predicate: crypto::bcrypt::compare('h', 'p') != true, pre_decode_filter: no (unsupported predicate)]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: k]
+                Filter [ctx: Db] [predicate: crypto::bcrypt::compare('h', 'p') != true]
+                    TableScan [ctx: Db] [table: r, direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: k]
-    TableScan [ctx: Db] [table: o, direction: Forward, predicate: k INSIDE (ProjectValue), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
+        TableScan [ctx: Db] [table: o, direction: Forward]
+        Subquery [ctx: Db] [strategy: apply]
+            ProjectValue [ctx: Db] [expr: k]
+                Filter [ctx: Db] [predicate: `sleep`(1ms) = NONE]
+                    TableScan [ctx: Db] [table: r, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
-'ProjectValue [ctx: Db] [expr: k]
-    TableScan [ctx: Db] [table: o, direction: Forward, predicate: k INSIDE (ProjectValue), pre_decode_filter: no (unsupported predicate)]
-''''
+"ProjectValue [ctx: Db] [expr: k]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
+        TableScan [ctx: Db] [table: o, direction: Forward]
+        Subquery [ctx: Db] [strategy: apply]
+            ProjectValue [ctx: Db] [expr: k]
+                Filter [ctx: Db] [predicate: http::get('http://localhost/') != NONE]
+                    TableScan [ctx: Db] [table: r, direction: Forward]
+"'''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: k]
-    TableScan [ctx: Db] [table: o, direction: Forward, predicate: k INSIDE (ProjectValue), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
+        TableScan [ctx: Db] [table: o, direction: Forward]
+        Subquery [ctx: Db] [strategy: apply]
+            ProjectValue [ctx: Db] [expr: k]
+                Filter [ctx: Db] [predicate: file::exists(f"b:/k") = true]
+                    TableScan [ctx: Db] [table: r, direction: Forward]
 ''''
 */
 

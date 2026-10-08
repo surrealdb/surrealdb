@@ -1,7 +1,7 @@
 //! PostgreSQL SQL front-end for SurrealDB.
 //!
 //! Provides direct AST-to-LogicalOp lowering for PostgreSQL queries,
-//! executing read operations on the streaming engine without textual
+//! executing read operations on the engine without textual
 //! serialization or re-parsing.
 
 pub mod lower;
@@ -35,7 +35,7 @@ pub fn parse_to_plan(
 ///
 /// Statements with direct logical forms (like SELECT) are lowered directly
 /// to TopLevelStatement::Plan(Box<LogicalOp>), bypassing SurrealQL text translation.
-/// Mutations and DDL statements fall back to the transactional engine.
+/// Mutations and DDL statements are lowered to SurrealQL statements, which run on the engine.
 pub(crate) fn parse_to_statements(
 	input: &str,
 	capabilities: &Capabilities,

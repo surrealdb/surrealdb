@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
-reason = "Compound-index prefix construction, end to end: how far a prefix reaches for equality-only, equality-plus-range, gapped, reversed-order, contradictory and `!= NONE` conditions on two- and three-column indexes, and the containment extension by which a single-value CONTAINS / INSIDE pins a fanning column exactly as an equality pins a scalar one. Every indexed query is paired with its WITH NOINDEX oracle, and every fanning shape additionally with count() GROUP ALL, because a plan that looks right can still return the wrong rows. This file owns the containment extension and the inexact-prefix-over-a-fanning-column shape for the whole EXPLAIN matrix: array_fanout_oracle.surql pins what the fan-out KEY SET contains and defers prefix construction here. An index column whose idiom holds `*` stores one entry per element of that column's value, so a key range leaving such a column unpinned reaches a record through several entries and the scan is collapsed by a `Distinct` directly above it; where every fanning column IS pinned no `Distinct` appears, whether or not the prefix goes on to reach the index's trailing scalar columns. How far the prefix reaches and whether a `Distinct` follows are decided separately, and the file pins all three combinations: C1 and C2 are the pair on an index with ONE fanning column -- the most load-bearing contrast in the file -- and C10 and C11 restate it on an index with TWO, where pinning one of them extends the prefix across it and still leaves the `Distinct` standing for the other. Those four carry an EXPLAIN ANALYZE, where the scan's own `{rows: N}` counts index entries and the node above it counts records. E1 and E2 pin what an explicit ORDER BY costs a scan over an unpinned fanning column: the scan claims no ordering past that column, so a sort is planned above the collapse and the rows match the oracle's order ascending and descending. Narrowed to the streaming strategies because a prefix EXPLAIN is rejected under compute-only; both are pinned because they plan identically by contract, so recording the pair costs nothing and states the intent."
+reason = "Compound-index prefix construction, end to end: how far a prefix reaches for equality-only, equality-plus-range, gapped, reversed-order, contradictory and `!= NONE` conditions on two- and three-column indexes, and the containment extension by which a single-value CONTAINS / INSIDE pins a fanning column exactly as an equality pins a scalar one. Every indexed query is paired with its WITH NOINDEX oracle, and every fanning shape additionally with count() GROUP ALL, because a plan that looks right can still return the wrong rows. This file owns the containment extension and the inexact-prefix-over-a-fanning-column shape for the whole EXPLAIN matrix: array_fanout_oracle.surql pins what the fan-out KEY SET contains and defers prefix construction here. An index column whose idiom holds `*` stores one entry per element of that column's value, so a key range leaving such a column unpinned reaches a record through several entries and the scan is collapsed by a `Distinct` directly above it; where every fanning column IS pinned no `Distinct` appears, whether or not the prefix goes on to reach the index's trailing scalar columns. How far the prefix reaches and whether a `Distinct` follows are decided separately, and the file pins all three combinations: C1 and C2 are the pair on an index with ONE fanning column -- the most load-bearing contrast in the file -- and C10 and C11 restate it on an index with TWO, where pinning one of them extends the prefix across it and still leaves the `Distinct` standing for the other. Those four carry an EXPLAIN ANALYZE, where the scan's own `{rows: N}` counts index entries and the node above it counts records. E1 and E2 pin what an explicit ORDER BY costs a scan over an unpinned fanning column: the scan claims no ordering past that column, so a sort is planned above the collapse and the rows match the oracle's order ascending and descending."
 
 [[test.results]]
 value = "NONE"
@@ -11,7 +10,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: cp2_ab, access: [1], direction: Forward, predicate: a = 1]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1], direction: Forward]
 ''''
 
 [[test.results]]
@@ -23,7 +23,7 @@ value = "[cp2:1, cp2:2, cp2:3]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: cp2_ab, access: [1, 20], direction: Forward, predicate: a = 1 AND b = 20]
+    IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1, 20], direction: Forward]
 ''''
 
 [[test.results]]
@@ -35,7 +35,8 @@ value = "[cp2:2]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: cp2_ab, access: [1] MoreThan 10, direction: Forward, predicate: a = 1 AND b > 10]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1] MoreThan 10, direction: Forward]
 ''''
 
 [[test.results]]
@@ -47,7 +48,8 @@ value = "[cp2:2, cp2:3]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: cp2_ab, access: >1, direction: Forward, predicate: a > 1]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -59,7 +61,7 @@ value = "[cp2:4, cp2:5]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: cp2_ab, access: [1, 20], direction: Forward, predicate: b = 20 AND a = 1]
+    IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1, 20], direction: Forward]
 ''''
 
 [[test.results]]
@@ -71,7 +73,8 @@ value = "[cp2:2]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: cp2_ab, access: [1] MoreThan NONE, direction: Forward, predicate: a = 1 AND b != NONE]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1] MoreThan NONE, direction: Forward]
 ''''
 
 [[test.results]]
@@ -83,8 +86,9 @@ value = "[cp2:1, cp2:2, cp2:3]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: b != 20]
-        IndexScan [ctx: Db] [index: cp2_ab, access: [1], direction: Forward]
+    Filter [ctx: Db] [predicate: a = 1 AND b != 20]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1], direction: Forward]
 ''''
 
 [[test.results]]
@@ -96,8 +100,9 @@ value = "[cp2:1, cp2:3]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: a = 2]
-        IndexScan [ctx: Db] [index: cp2_ab, access: [1], direction: Forward]
+    Filter [ctx: Db] [predicate: a = 1 AND a = 2]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1], direction: Forward]
 ''''
 
 [[test.results]]
@@ -112,7 +117,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: cp3_abc, access: [1, 10, 'y'], direction: Forward, predicate: a = 1 AND b = 10 AND c = 'y']
+    IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1, 10, 'y'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -124,7 +129,8 @@ value = "[cp3:2]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: cp3_abc, access: [1, 10] MoreThan 'x', direction: Forward, predicate: a = 1 AND b = 10 AND c > 'x']
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1, 10] MoreThan 'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -136,8 +142,9 @@ value = "[cp3:2]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: c = 'x']
-        IndexScan [ctx: Db] [index: cp3_abc, access: [1], direction: Forward]
+    Filter [ctx: Db] [predicate: a = 1 AND c = 'x']
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1], direction: Forward]
 "'''
 
 [[test.results]]
@@ -149,8 +156,9 @@ value = "[cp3:1, cp3:3]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: c = 'x']
-        IndexScan [ctx: Db] [index: cp3_abc, access: [1] MoreThan 10, direction: Forward]
+    Filter [ctx: Db] [predicate: a = 1 AND b > 10 AND c = 'x']
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1] MoreThan 10, direction: Forward]
 "'''
 
 [[test.results]]
@@ -162,7 +170,7 @@ value = "[cp3:3]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: cp3_abc, access: [1, 20, 'x'], direction: Forward, predicate: c = 'x' AND b = 20 AND a = 1]
+    IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1, 20, 'x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -174,7 +182,8 @@ value = "[cp3:3]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: cp3_abc, access: [1, 10], direction: Forward, predicate: a = 1 AND b = 10]
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1, 10], direction: Forward]
 ''''
 
 [[test.results]]
@@ -195,13 +204,13 @@ value = "NONE"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: fan_std_ae, access: ['acme', 'b@x'], direction: Forward, predicate: account = 'acme' AND emails.*.norm CONTAINS 'b@x']
+    IndexScan [ctx: Db] [table: fan_std, index: fan_std_ae, access: ['acme', 'b@x'], direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
-    IndexScan [ctx: Db] [index: fan_std_ae, access: ['acme', 'b@x'], direction: Forward, predicate: account = 'acme' AND emails.*.norm CONTAINS 'b@x'] {rows: 2}
+    IndexScan [ctx: Db] [table: fan_std, index: fan_std_ae, access: ['acme', 'b@x'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -221,14 +230,14 @@ value = "[{ count: 2 }]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [index: fan_std_ae, access: ['acme'], direction: Forward, predicate: account = 'acme']
+        IndexScan [ctx: Db] [table: fan_std, index: fan_std_ae, access: ['acme'], direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
     DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [index: fan_std_ae, access: ['acme'], direction: Forward, predicate: account = 'acme'] {rows: 4}
+        IndexScan [ctx: Db] [table: fan_std, index: fan_std_ae, access: ['acme'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -247,7 +256,7 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: fan_std_ae, access: ['acme', 'b@x'], direction: Forward, predicate: account = 'acme' AND 'b@x' INSIDE emails.*.norm]
+    IndexScan [ctx: Db] [table: fan_std, index: fan_std_ae, access: ['acme', 'b@x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -265,9 +274,9 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: emails.*.norm = 'b@x']
+    Filter [ctx: Db] [predicate: account = 'acme' AND emails.*.norm = 'b@x']
         DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [index: fan_std_ae, access: ['acme'], direction: Forward]
+            IndexScan [ctx: Db] [table: fan_std, index: fan_std_ae, access: ['acme'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -285,7 +294,7 @@ value = "[{ count: 0 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: fan_std_ae, access: ['acme', 'zz@x'], direction: Forward, predicate: account = 'acme' AND emails.*.norm CONTAINS 'zz@x']
+    IndexScan [ctx: Db] [table: fan_std, index: fan_std_ae, access: ['acme', 'zz@x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -306,7 +315,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: fan_uniq_ae, access: ['acme', 'b@x'], direction: Forward, predicate: account = 'acme' AND emails.*.norm CONTAINS 'b@x']
+    IndexScan [ctx: Db] [table: fan_uniq, index: fan_uniq_ae, access: ['acme', 'b@x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -327,7 +336,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: fan3_aet, access: ['acme', 'b@x', 2], direction: Forward, predicate: account = 'acme' AND emails.*.norm CONTAINS 'b@x' AND tier = 2]
+    IndexScan [ctx: Db] [table: fan3, index: fan3_aet, access: ['acme', 'b@x', 2], direction: Forward]
 "'''
 
 [[test.results]]
@@ -345,7 +354,8 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: fan3_aet, access: ['acme', 'b@x'], direction: Forward, predicate: account = 'acme' AND emails.*.norm CONTAINS 'b@x']
+    DistinctRecords [ctx: Db]
+        IndexScan [ctx: Db] [table: fan3, index: fan3_aet, access: ['acme', 'b@x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -363,9 +373,9 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: tier = 2]
+    Filter [ctx: Db] [predicate: account = 'acme' AND tier = 2]
         DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [index: fan3_aet, access: ['acme'], direction: Forward]
+            IndexScan [ctx: Db] [table: fan3, index: fan3_aet, access: ['acme'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -387,14 +397,14 @@ value = "NONE"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [index: fan2f_aet, access: ['acme', 'b@x'], direction: Forward, predicate: account = 'acme' AND emails.*.norm CONTAINS 'b@x']
+        IndexScan [ctx: Db] [table: fan2f, index: fan2f_aet, access: ['acme', 'b@x'], direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
     DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [index: fan2f_aet, access: ['acme', 'b@x'], direction: Forward, predicate: account = 'acme' AND emails.*.norm CONTAINS 'b@x'] {rows: 3}
+        IndexScan [ctx: Db] [table: fan2f, index: fan2f_aet, access: ['acme', 'b@x'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -413,13 +423,13 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: fan2f_aet, access: ['acme', 'b@x', 'q'], direction: Forward, predicate: account = 'acme' AND emails.*.norm CONTAINS 'b@x' AND tags.* CONTAINS 'q']
+    IndexScan [ctx: Db] [table: fan2f, index: fan2f_aet, access: ['acme', 'b@x', 'q'], direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
-    IndexScan [ctx: Db] [index: fan2f_aet, access: ['acme', 'b@x', 'q'], direction: Forward, predicate: account = 'acme' AND emails.*.norm CONTAINS 'b@x' AND tags.* CONTAINS 'q'] {rows: 1}
+    IndexScan [ctx: Db] [table: fan2f, index: fan2f_aet, access: ['acme', 'b@x', 'q'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -441,8 +451,9 @@ value = "NONE"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    SortByKey [ctx: Db] [sort_keys: id ASC]
-        IndexScan [ctx: Db] [index: cp2x_ab, access: [1], direction: Forward, predicate: a = 1]
+    Sort [ctx: Db] [sort_keys: id ASC]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: cp2x, index: cp2x_ab, access: [1], direction: Forward]
 ''''
 
 [[test.results]]
@@ -454,7 +465,7 @@ value = "[cp2x:1, cp2x:2, cp2x:3]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: cp2x_ab, access: [1, 20], direction: Forward, predicate: a = 1 AND b = 20]
+    IndexScan [ctx: Db] [table: cp2x, index: cp2x_ab, access: [1, 20], direction: Forward]
 ''''
 
 [[test.results]]
@@ -466,7 +477,7 @@ value = "[cp2x:2]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: fan_std_ae, access: ['acme', 'b@x'], direction: Forward, predicate: account = 'acme' AND emails.*.norm CONTAINS 'b@x']
+    IndexScan [ctx: Db] [table: fan_std, index: fan_std_ae, access: ['acme', 'b@x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -487,9 +498,9 @@ value = "NONE"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    SortByKey [ctx: Db] [sort_keys: id ASC]
+    Sort [ctx: Db] [sort_keys: id ASC]
         DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [index: fan_ord_ae, access: ['acme'], direction: Forward, predicate: account = 'acme']
+            IndexScan [ctx: Db] [table: fan_ord, index: fan_ord_ae, access: ['acme'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -507,9 +518,9 @@ value = "[{ count: 4 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    SortByKey [ctx: Db] [sort_keys: id DESC]
+    Sort [ctx: Db] [sort_keys: id DESC]
         DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [index: fan_ord_ae, access: ['acme'], direction: Backward, predicate: account = 'acme']
+            IndexScan [ctx: Db] [table: fan_ord, index: fan_ord_ae, access: ['acme'], direction: Backward]
 "'''
 
 [[test.results]]
@@ -527,7 +538,7 @@ value = "[{ count: 4 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: fan_ord_ae, access: ['acme', 'b@x'], direction: Forward, predicate: account = 'acme' AND emails.*.norm CONTAINS 'b@x']
+    IndexScan [ctx: Db] [table: fan_ord, index: fan_ord_ae, access: ['acme', 'b@x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -545,8 +556,8 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: emails.*.norm CONTAINS 'c@x']
-        IndexScan [ctx: Db] [index: fan_std_ae, access: ['acme', 'b@x'], direction: Forward]
+    Filter [ctx: Db] [predicate: account = 'acme' AND emails.*.norm CONTAINS 'b@x' AND emails.*.norm CONTAINS 'c@x']
+        IndexScan [ctx: Db] [table: fan_std, index: fan_std_ae, access: ['acme', 'b@x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -564,7 +575,8 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: fan_std, direction: Forward, predicate: emails.*.norm CONTAINS 'b@x', pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: emails.*.norm CONTAINS 'b@x']
+        TableScan [ctx: Db] [table: fan_std, direction: Forward]
 "'''
 
 [[test.results]]
@@ -938,7 +950,7 @@ SELECT count() FROM fan2f WITH NOINDEX WHERE account = $acct AND emails.*.norm C
 };
 
 -- D1: prefix on the leading column only, so several keys share it and their
--- order is `b`'s, not `id`'s. A `SortByKey` is inserted and the rows come
+-- order is `b`'s, not `id`'s. A `Sort` is inserted and the rows come
 -- back in id order.
 EXPLAIN SELECT VALUE id FROM cp2x WHERE a = 1 ORDER BY id;
 SELECT VALUE id FROM cp2x WHERE a = 1 ORDER BY id;
@@ -985,7 +997,7 @@ SELECT count() FROM fan_std WITH NOINDEX WHERE account = $acct AND emails.*.norm
 --
 -- The `DistinctRecords` above the scan holds record uniqueness — each of the
 -- four records appears once and `count()` is 4, matching the oracle — and a
--- `SortByKey` above that restores id order. The scan walks index-key order,
+-- `Sort` above that restores id order. The scan walks index-key order,
 -- [fan_ord:3, fan_ord:4, fan_ord:2, fan_ord:1] for this data, because a
 -- record's key position is one per element of the unpinned `emails.*.norm`;
 -- the scan claims no ordering past a column it cannot state, and so no
@@ -1006,7 +1018,7 @@ SELECT count() FROM fan_ord WITH NOINDEX WHERE account = $acct GROUP ALL;
 --
 -- The scan direction flips to `Backward`, which alone would deliver reverse
 -- index-key order, [fan_ord:1, fan_ord:4, fan_ord:2, fan_ord:3]; the
--- `SortByKey` above it is what answers the ORDER BY. A flipped scan direction
+-- `Sort` above it is what answers the ORDER BY. A flipped scan direction
 -- serves an ORDER BY only when the varying tail of the key IS the sort key,
 -- which an unpinned fanning column is what denies.
 EXPLAIN SELECT VALUE id FROM fan_ord WHERE account = $acct ORDER BY id DESC;

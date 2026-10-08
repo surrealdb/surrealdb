@@ -1,9 +1,7 @@
 /**
 [env]
-# The scope carried here is the streaming planner's; the legacy compute
-# executor has no query planner for the subquery and evaluates both index
-# functions to NONE, so pinning one set of results means pinning this mode.
-planner-strategy = ["all-ro"]
+# The scope carried here is the planner's: the subquery's index functions
+# resolve against the enclosing statement's MATCHES and KNN operators.
 
 [test]
 reason = "A nested SELECT that declares no MATCHES / KNN of its own inherits the enclosing planner's scope, so an index function inside it resolves against the operator that introduced it instead of failing to plan with 'no MATCHES clause found in WHERE condition' / 'no KNN operator found in WHERE condition'. Pins the inherit-then-override rule in Planner::set_planning_scopes: the inner SELECT reads the outer statement's MATCHES entries and KNN distance slot, so blog:2 scores through the outer MATCHES and pt:1 has a distance while pt:2 (never visited by the ANN scan) has none."

@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Pre-filtered vector search (#548), partial coverage: the exactly index-coverable conjunct feeds the allow-list bitmap while the non-indexable one stays as the true residual — the KnnScan predicate shows only the residual, and both predicates are enforced in the results."
@@ -24,11 +23,10 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id, distance] {rows: 2}
-    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2}
-        Compute [ctx: Db] [fields: distance = vector::distance::knn()] {rows: 2}
-            Filter [ctx: Db] [predicate: category = 'a' AND flag = true] {rows: 2}
-                KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: flag = true, prefilter_tier: exact] {rows: 2}
-                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 4}
+    Sort [ctx: Db] [sort_keys: vector::distance::knn() ASC] {rows: 2}
+        Filter [ctx: Db] [predicate: category = 'a' AND flag = true] {rows: 2}
+            KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: flag = true, prefilter_tier: exact] {rows: 2}
+                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 4}
 
 Total rows: 2"'''
 

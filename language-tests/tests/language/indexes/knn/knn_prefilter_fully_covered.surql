@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Pre-filtered vector search (#548): a fully index-coverable WHERE conjunct becomes an allow-list bitmap prefilter under the KnnScan — the plan shows the bitmap child and no pushed-down predicate, EXPLAIN ANALYZE reports the exact tier taken, and results match the filtered ground truth with zero record fetches inside the search."
@@ -24,21 +23,19 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id, category, distance]
-    SortByKey [ctx: Db] [sort_keys: distance ASC]
-        Compute [ctx: Db] [fields: distance = vector::distance::knn()]
-            Filter [ctx: Db] [predicate: category = 'a']
-                KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1]
-                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a']
+    Sort [ctx: Db] [sort_keys: vector::distance::knn() ASC]
+        Filter [ctx: Db] [predicate: category = 'a']
+            KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1]
+                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a']
 "'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id, category, distance] {rows: 2}
-    SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2}
-        Compute [ctx: Db] [fields: distance = vector::distance::knn()] {rows: 2}
-            Filter [ctx: Db] [predicate: category = 'a'] {rows: 2}
-                KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, prefilter_tier: exact] {rows: 2}
-                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 4}
+    Sort [ctx: Db] [sort_keys: vector::distance::knn() ASC] {rows: 2}
+        Filter [ctx: Db] [predicate: category = 'a'] {rows: 2}
+            KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, prefilter_tier: exact] {rows: 2}
+                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 4}
 
 Total rows: 2"'''
 

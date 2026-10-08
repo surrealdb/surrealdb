@@ -8,7 +8,7 @@ database = true
 backend = ["mem"]
 
 [test]
-reason = "A user-defined function that calls itself directly, with no `eval::surql` between the levels, must reach the computation-depth limit and error rather than overflow the native stack. The streaming engine compiles a recursive edge to the plan of the body it sits in, so the recursion re-enters one shared plan and nothing is re-planned per level; the only thing standing between it and an unbounded native recursion is the depth budget each call consumes (`ExecutionContext::dive`). The eval-based recursion tests cover the re-planning boundary instead, where the planner's own re-entry count applies, so neither of them exercises this guard."
+reason = "A user-defined function that calls itself directly, with no `eval::surql` between the levels, must reach the computation-depth limit and error rather than overflow the native stack. A recursive edge compiles to the plan of the body it sits in, so the recursion re-enters one shared plan and nothing is re-planned per level; the only thing standing between it and an unbounded native recursion is the depth budget each call consumes (`ExecutionContext::dive`). The eval-based recursion tests cover the re-planning boundary instead, where the planner's own re-entry count applies, so neither of them exercises this guard."
 
 [[test.results]]
 value = "NONE"

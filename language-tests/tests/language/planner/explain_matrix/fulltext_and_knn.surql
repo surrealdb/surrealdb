@@ -1,10 +1,9 @@
 /**
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
-EXPLAIN / row-parity matrix for the two index kinds with their own operators:
+EXPLAIN / row matrix for the two index kinds with their own operators:
 FULLTEXT (`FullTextScan`, reached by `@@`) and the vector kinds HNSW and
 DISKANN (`KnnScan`, reached by `<|k,EF|>`). Held apart from index_kinds.surql
 because both need fixtures the B-tree kinds do not — an analyzer and a declared
@@ -15,10 +14,6 @@ with `ALTER INDEX ... PREPARE REMOVE`, or absent; and two operators of the same
 kind conjoined in one WHERE clause, which is where a conjunct can be lost. The
 second axis is pinned with each operator asserted alone first, so a collapse is
 distinguishable from a column that simply has no index.
-
-Narrowed to the two streaming strategies because a prefix `EXPLAIN` errors
-under `compute-only`; the two streaming strategies plan identically by
-contract, so pinning both records that and costs nothing.
 
 Neither kind takes `WITH NOINDEX` as an oracle, and the file establishes why
 before relying on anything else:
@@ -68,7 +63,7 @@ value = "'OK'"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    FullTextScan [ctx: Db] [index: doc_body, query: quick]
+    FullTextScan [ctx: Db] [table: doc, index: doc_body, query: quick]
 ''''
 
 [[test.results]]
@@ -77,7 +72,8 @@ value = "[{ id: doc:1 }, { id: doc:2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: doc, direction: Forward, predicate: body @@ 'quick', pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: body @@ 'quick']
+        TableScan [ctx: Db] [table: doc, direction: Forward]
 "'''
 
 [[test.results]]
@@ -88,8 +84,9 @@ value = "[doc:1, doc:2]"
 
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [mode: GROUP ALL]
-    FullTextScan [ctx: Db] [index: doc_body, query: quick]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        FullTextScan [ctx: Db] [table: doc, index: doc_body, query: quick]
 ''''
 
 [[test.results]]
@@ -101,9 +98,8 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id, sc]
-    SortByKey [ctx: Db] [sort_keys: sc DESC]
-        Compute [ctx: Db] [fields: sc = search::score()]
-            FullTextScan [ctx: Db] [index: doc_body, query: quick]
+    Sort [ctx: Db] [sort_keys: search::score(1) DESC]
+        FullTextScan [ctx: Db] [table: doc, index: doc_body, query: quick]
 ''''
 
 [[test.results]]
@@ -115,7 +111,8 @@ value = "[{ id: doc:1, sc: 0.4925091564655304f }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: doc, direction: Forward, predicate: kw.* @@ 'alpha', pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: kw.* @@ 'alpha']
+        TableScan [ctx: Db] [table: doc, direction: Forward]
 "'''
 
 [[test.results]]
@@ -139,7 +136,8 @@ value = "[{ body: 'another quick one', id: doc:4, kw: ['delta'] }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: doc, direction: Forward, predicate: body @@ 'quick', pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: body @@ 'quick']
+        TableScan [ctx: Db] [table: doc, direction: Forward]
 "'''
 
 [[test.results]]
@@ -175,9 +173,10 @@ value = "[pt:2, pt:3]"
 
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [mode: GROUP ALL]
-    KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 2]
-        TableScan [ctx: Db] [table: pt, direction: Forward]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 2]
+            TableScan [ctx: Db] [table: pt, direction: Forward]
 ''''
 
 [[test.results]]
@@ -213,8 +212,9 @@ value = "[pt:2, pt:3]"
 
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [mode: GROUP ALL]
-    KnnScan [ctx: Db] [index: pt_hnsw, k: 2, ef: 40, dimension: 2]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        KnnScan [ctx: Db] [index: pt_hnsw, k: 2, ef: 40, dimension: 2]
 ''''
 
 [[test.results]]
@@ -258,10 +258,9 @@ value = "[pt:2, pt:3]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id, d]
-    SortByKey [ctx: Db] [sort_keys: d ASC]
-        Compute [ctx: Db] [fields: d = vector::distance::knn()]
-            Filter [ctx: Db] [predicate: grp = 'a']
-                KnnScan [ctx: Db] [index: pt_hnsw, k: 2, ef: 40, dimension: 2, predicate: grp = 'a']
+    Sort [ctx: Db] [sort_keys: vector::distance::knn() ASC]
+        Filter [ctx: Db] [predicate: grp = 'a']
+            KnnScan [ctx: Db] [index: pt_hnsw, k: 2, ef: 40, dimension: 2, predicate: grp = 'a']
 "'''
 
 [[test.results]]
@@ -309,8 +308,9 @@ value = "[pt:2, pt:5]"
 
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [mode: GROUP ALL]
-    KnnScan [ctx: Db] [index: pt_da, k: 2, ef: 40, dimension: 2]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        KnnScan [ctx: Db] [index: pt_da, k: 2, ef: 40, dimension: 2]
 ''''
 
 [[test.results]]
@@ -326,7 +326,7 @@ value = "'OK'"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: title @2@ 'beta']
-        FullTextScan [ctx: Db] [index: ft2_title, query: alpha]
+        FullTextScan [ctx: Db] [table: ft2, index: ft2_title, query: alpha]
 "'''
 
 [[test.results]]
@@ -337,10 +337,11 @@ value = "[ft2:1]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: ft2, condition: title @1@ 'alpha' AND title @2@ 'beta']
-    BitmapAnd [ctx: Db]
-        BitmapFullTextScan [ctx: Db] [index: ft2_title, query: alpha]
-        BitmapFullTextScan [ctx: Db] [index: ft2_title, query: beta]
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: ft2, condition: title @1@ 'alpha' AND title @2@ 'beta']
+        BitmapAnd [ctx: Db]
+            BitmapFullTextScan [ctx: Db] [index: ft2_title, query: alpha]
+            BitmapFullTextScan [ctx: Db] [index: ft2_title, query: beta]
 "'''
 
 [[test.results]]
@@ -353,7 +354,7 @@ value = "[{ count: 1 }]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: title @2@ 'alpha']
-        FullTextScan [ctx: Db] [index: ft2_title, query: beta]
+        FullTextScan [ctx: Db] [table: ft2, index: ft2_title, query: beta]
 "'''
 
 [[test.results]]
@@ -363,7 +364,7 @@ value = "[ft2:1]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: title @1@ 'alpha' OR title @2@ 'beta']
-        BitmapResolve [ctx: Db] [table: ft2]
+        BitmapScan [ctx: Db] [table: ft2]
             BitmapOr [ctx: Db]
                 BitmapFullTextScan [ctx: Db] [index: ft2_title, query: alpha]
                 BitmapFullTextScan [ctx: Db] [index: ft2_title, query: beta]
@@ -379,7 +380,7 @@ value = "[ft2:1, ft2:2, ft2:3]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: title @1@ 'alpha' AND body @2@ 'lima']
-        BitmapResolve [ctx: Db] [table: ft2]
+        BitmapScan [ctx: Db] [table: ft2]
             BitmapAnd [ctx: Db]
                 BitmapFullTextScan [ctx: Db] [index: ft2_body, query: lima]
                 BitmapFullTextScan [ctx: Db] [index: ft2_title, query: alpha]
@@ -420,6 +421,7 @@ value = "[vec2:4, vec2:5]"
 
 [[test.results]]
 value = "[vec2:4, vec2:5]"
+
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
@@ -434,8 +436,9 @@ value = "[]"
 
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [mode: GROUP ALL]
-    KnnScan [ctx: Db] [index: vec2_a, k: 2, ef: 40, dimension: 2]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        KnnScan [ctx: Db] [index: vec2_a, k: 2, ef: 40, dimension: 2]
 ''''
 
 [[test.results]]

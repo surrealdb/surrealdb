@@ -18,9 +18,8 @@ reason = """
 	evaluated per row like any other field, and the last two queries are the
 	control for that and for an aggregate standing alone.
 
-	The totals are not checked for numeric type: a sum is a float on the
-	per-row engine and an integer on the streaming one, which
-	`group_aggregate_numeric_type_*` is where to pin.
+	The totals are not checked for numeric type, which
+	`group_aggregate_numeric_type.surql` pins.
 """
 
 [[test.results]]

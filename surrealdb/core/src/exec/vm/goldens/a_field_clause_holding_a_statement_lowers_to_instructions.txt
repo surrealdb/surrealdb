@@ -1,0 +1,58 @@
+### owner: UPDATE p:1 SET x = 2
+{ c: 6, d: 7, id: p:1, x: 2, y: 1 }
+records:
+p: { c: 6, d: 7, id: p:1, x: 2, y: 1 }
+### owner: UPDATE p:1 SET y = 3 RETURN AFTER
+{ c: 6, d: 7, id: p:1, x: 1, y: 3 }
+records:
+p: { c: 6, d: 7, id: p:1, x: 1, y: 3 }
+### owner: CREATE p:2 SET x = 2, y = 2, z = 4 RETURN AFTER
+{ c: 6, d: 7, id: p:2, x: 2, y: 2, z: 4 }
+records:
+p: { c: 6, d: 7, id: p:1, x: 1, y: 1 }
+p: { c: 6, d: 7, id: p:2, x: 2, y: 2, z: 4 }
+### owner: CREATE p:3 RETURN AFTER
+{ c: 6, d: 7, id: p:3, z: 7 }
+records:
+p: { c: 6, d: 7, id: p:1, x: 1, y: 1 }
+p: { c: 6, d: 7, id: p:3, z: 7 }
+### owner: UPSERT p:1 SET z = 9 RETURN AFTER
+{ c: 6, d: 7, id: p:1, x: 1, y: 1, z: 9 }
+records:
+p: { c: 6, d: 7, id: p:1, x: 1, y: 1, z: 9 }
+### owner: UPDATE p SET x = 5 RETURN d
+{ d: 7 }
+records:
+p: { c: 6, d: 7, id: p:1, x: 5, y: 1 }
+### owner: DELETE p:1 RETURN BEFORE
+{ c: 6, d: 7, id: p:1, x: 1, y: 1 }
+records:
+### record user: UPDATE p:1 SET x = 2
+{ c: 6, d: 7, id: p:1, x: 2, y: 1 }
+records:
+p: { c: 6, d: 7, id: p:1, x: 2, y: 1 }
+### record user: UPDATE p:1 SET y = 3 RETURN AFTER
+{ c: 6, d: 7, id: p:1, x: 1, y: 3 }
+records:
+p: { c: 6, d: 7, id: p:1, x: 1, y: 3 }
+### record user: CREATE p:2 SET x = 2, y = 2, z = 4 RETURN AFTER
+{ c: 6, d: 7, id: p:2, x: 2, y: 2, z: 4 }
+records:
+p: { c: 6, d: 7, id: p:1, x: 1, y: 1 }
+p: { c: 6, d: 7, id: p:2, x: 2, y: 2, z: 4 }
+### record user: CREATE p:3 RETURN AFTER
+{ c: 6, d: 7, id: p:3, z: 7 }
+records:
+p: { c: 6, d: 7, id: p:1, x: 1, y: 1 }
+p: { c: 6, d: 7, id: p:3, z: 7 }
+### record user: UPSERT p:1 SET z = 9 RETURN AFTER
+{ c: 6, d: 7, id: p:1, x: 1, y: 1, z: 9 }
+records:
+p: { c: 6, d: 7, id: p:1, x: 1, y: 1, z: 9 }
+### record user: UPDATE p SET x = 5 RETURN d
+{ d: 7 }
+records:
+p: { c: 6, d: 7, id: p:1, x: 5, y: 1 }
+### record user: DELETE p:1 RETURN BEFORE
+{ c: 6, d: 7, id: p:1, x: 1, y: 1 }
+records:

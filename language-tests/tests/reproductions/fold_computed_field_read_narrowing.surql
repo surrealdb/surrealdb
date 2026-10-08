@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Materialisation resolves the fields a query needs rather than all of them, so only a read of a field that carries work of its own is kept; an unrelated computed field elsewhere on the table must not cost the elimination"
@@ -16,8 +15,9 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Rt] [projections: id]
-    EmptyScan [ctx: Rt]
+'SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: false]
+        Union [ctx: Db]
 ''''
 
 [[test.results]]
@@ -33,8 +33,9 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Rt] [projections: id]
-    EmptyScan [ctx: Rt]
+'SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: false]
+        Union [ctx: Db]
 ''''
 
 [[test.results]]
@@ -45,8 +46,9 @@ value = "[{ a: 5, id: guarded_tb:1 }]"
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Rt] [projections: id]
-    EmptyScan [ctx: Rt]
+'SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: false]
+        Union [ctx: Db]
 ''''
 
 */

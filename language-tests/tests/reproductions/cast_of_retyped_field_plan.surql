@@ -1,7 +1,6 @@
 /**
 [env]
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -24,9 +23,8 @@ value = "[{ a: 1, c: 2, id: t:1 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: a, c, flag]
-    Compute [ctx: Db] [fields: a = <int>  a, flag = a = 1]
-        ProjectLayer [ctx: Db] [columns: c = a * 2 : int @computed]
-            TableScan [ctx: Db] [table: t, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: c = a * 2 : int @computed]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]

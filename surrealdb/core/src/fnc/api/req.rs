@@ -49,19 +49,28 @@ use crate::val::{Closure, Number, Value};
 ///         };
 /// ```
 pub async fn body(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(FromPublic(mut req), next, Optional(strategy)): (
 		FromPublic<ApiRequest>,
 		Box<Closure>,
 		Optional<FromPublic<BodyStrategy>>,
 	),
 ) -> Result<Value> {
-	let strategy = strategy.map(|x| x.0).unwrap_or_default();
-	let mut parser =
-		BodyParser::new(&mut req, strategy, ctx.config.parser.max_object_parsing_depth as usize);
-	parser.process().await?;
+	parse_body(&mut req, strategy.map(|x| x.0), ctx).await?;
+	crate::exec::closure::invoke_in(&next, ctx, opt, doc, vec![req.into()]).await
+}
 
-	crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req.into()]).await
+/// `api::req::body`'s work on the request: its body parsed by `strategy`, or
+/// by its `Content-Type` when none is named.
+pub(crate) async fn parse_body(
+	req: &mut ApiRequest,
+	strategy: Option<BodyStrategy>,
+	ctx: &crate::ctx::Context,
+) -> Result<()> {
+	let strategy = strategy.unwrap_or_default();
+	let mut parser =
+		BodyParser::new(req, strategy, ctx.config.parser.max_object_parsing_depth as usize);
+	parser.process().await
 }
 
 /// Middleware function that rejects requests whose raw body exceeds a size limit.
@@ -95,12 +104,19 @@ pub async fn body(
 ///         };
 /// ```
 pub async fn max_body(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(FromPublic(req), next, limit): (FromPublic<ApiRequest>, Box<Closure>, Value),
 ) -> Result<Value> {
+	check_body_size(&req, &limit)?;
+	crate::exec::closure::invoke_in(&next, ctx, opt, doc, vec![req.into()]).await
+}
+
+/// `api::req::max_body`'s check: the request's raw body is within `limit`, a
+/// non-negative byte count or a byte-size string.
+pub(crate) fn check_body_size(req: &ApiRequest, limit: &Value) -> Result<()> {
 	let limit = match limit {
-		Value::Number(Number::Int(i)) if i >= 0 => Bytesize::new(i as u64),
-		Value::String(ref s) => {
+		Value::Number(Number::Int(i)) if *i >= 0 => Bytesize::new(*i as u64),
+		Value::String(s) => {
 			Bytesize::parse(s.as_str()).map_err(|_| Error::InvalidFunctionArguments {
 				name: "api::req::max_body".to_string(),
 				message: format!("'{s}' is not a valid byte size (expected e.g. '1mb', '512kb')"),
@@ -124,6 +140,5 @@ pub async fn max_body(
 	if size.is_some_and(|size| size > limit.0) {
 		return Err(ApiError::RequestBodyTooLarge(limit).into());
 	}
-
-	crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req.into()]).await
+	Ok(())
 }

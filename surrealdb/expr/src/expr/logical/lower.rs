@@ -5,10 +5,9 @@
 //! *who is asking* or *what the schema says* is added later by a pass over the
 //! result.
 //!
-//! Lowering takes the surface AST only. It is the first point at which the
-//! engine decision is made: a statement kind with no logical form — a write or
-//! a DDL statement — is reported as [`NoLogicalForm`] before any transaction is
-//! touched, and the caller runs it on the legacy engine.
+//! Lowering takes the surface AST only. A construct with no logical form is
+//! reported as [`NoLogicalForm`] before any transaction is touched, and the
+//! statement fails.
 
 use std::collections::VecDeque;
 use std::fmt::{self, Display, Formatter};
@@ -24,35 +23,34 @@ use super::expr::{
 	LogicalRecurse, LogicalRecurseInstruction, LogicalRecursePath, OutputPath, SourceRef,
 };
 use super::{
-	LogicalAggregate, LogicalEval, LogicalExplain, LogicalFetch, LogicalFilter, LogicalForeach,
-	LogicalInfo, LogicalLet, LogicalLimit, LogicalOnly, LogicalOp, LogicalProject, LogicalReturn,
-	LogicalSequence, LogicalSleep, LogicalSort, LogicalSource, LogicalSplit, LogicalSubquery,
-	LogicalTimeout, LogicalUnionAll, LogicalValues, LogicalVersionScope,
+	LogicalAggregate, LogicalAssignment, LogicalData, LogicalDdl, LogicalDdlStatement, LogicalEval,
+	LogicalExplain, LogicalFetch, LogicalFilter, LogicalForeach, LogicalInfo, LogicalInsertRows,
+	LogicalInserts, LogicalLet, LogicalLimit, LogicalOnly, LogicalOp, LogicalProject,
+	LogicalReturn, LogicalSequence, LogicalSleep, LogicalSort, LogicalSource, LogicalSplit,
+	LogicalSubquery, LogicalTimeout, LogicalUnionAll, LogicalValues, LogicalVersionScope,
+	LogicalWrite, LogicalWriteSource, LogicalWriteStatement,
 };
 use crate::expr::part::Recurse;
 use crate::sql;
 use crate::sql::statements::{IfelseStatement, InfoStatement, SelectStatement};
 
-/// Why a statement has no logical plan.
+/// Why a tree has no logical plan.
 ///
-/// The first two name the statement kind (`CREATE`, `DEFINE`, …): those kinds
-/// run on the legacy engine by design. `Unsupported` is a shape lowering has
-/// no form for; the engine decision routes it the same way.
+/// Every statement and expression the parser produces has a logical form,
+/// schema statements and mutations included. What is reported here is a tree
+/// no parser builds: a shape that only a caller constructing the surface
+/// syntax by hand can write, such as an `INSERT` whose data clause names no
+/// rows. It is a malformed input rather than a capability the engine lacks, so
+/// a caller raises it as an error and has no other engine to hand the tree to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NoLogicalForm {
-	/// A write statement.
-	Write(&'static str),
-	/// A schema statement.
-	Ddl(&'static str),
-	/// A construct with no logical form.
+	/// A construct no parser produces.
 	Unsupported(String),
 }
 
 impl Display for NoLogicalForm {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
-			NoLogicalForm::Write(kind) => write!(f, "{kind} is a write statement"),
-			NoLogicalForm::Ddl(kind) => write!(f, "{kind} is a schema statement"),
 			NoLogicalForm::Unsupported(what) => write!(f, "{what} has no logical form"),
 		}
 	}
@@ -64,11 +62,12 @@ type Lowered<T> = Result<T, NoLogicalForm>;
 
 /// Lower a top-level expression to the operator that runs it.
 ///
-/// A `SELECT` lowers to its pipeline; a block to a [`LogicalOp::Sequence`];
-/// `LET`, `RETURN`, `FOR`, `INFO`, `SLEEP` and `EXPLAIN` to their operators.
-/// Any other expression — an `IF`, a `THROW`, an arithmetic expression, a
-/// function call — is a [`LogicalOp::Eval`] of its scalar form. Write and DDL
-/// statements have no logical form.
+/// A `SELECT` lowers to its pipeline; a mutation to a [`LogicalOp::Write`]; a
+/// block to a [`LogicalOp::Sequence`]; `LET`, `RETURN`, `FOR`, `INFO`, `SLEEP`
+/// and `EXPLAIN` to their operators. Any other expression — an `IF`, a
+/// `THROW`, an arithmetic expression, a function call — is a
+/// [`LogicalOp::Eval`] of its scalar form. A schema statement is a
+/// [`LogicalOp::Ddl`] carrying it whole.
 pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 	match expr {
 		sql::Expr::Select(select) => lower_select(*select),
@@ -100,16 +99,137 @@ pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 			analyze,
 			format: format.into(),
 		})),
-		sql::Expr::Create(_) => Err(NoLogicalForm::Write("CREATE")),
-		sql::Expr::Update(_) => Err(NoLogicalForm::Write("UPDATE")),
-		sql::Expr::Upsert(_) => Err(NoLogicalForm::Write("UPSERT")),
-		sql::Expr::Delete(_) => Err(NoLogicalForm::Write("DELETE")),
-		sql::Expr::Insert(_) => Err(NoLogicalForm::Write("INSERT")),
-		sql::Expr::Relate(_) => Err(NoLogicalForm::Write("RELATE")),
-		sql::Expr::Define(_) => Err(NoLogicalForm::Ddl("DEFINE")),
-		sql::Expr::Remove(_) => Err(NoLogicalForm::Ddl("REMOVE")),
-		sql::Expr::Rebuild(_) => Err(NoLogicalForm::Ddl("REBUILD")),
-		sql::Expr::Alter(_) => Err(NoLogicalForm::Ddl("ALTER")),
+		sql::Expr::Create(stmt) => {
+			// Targets, not rows read from storage. A creating statement's
+			// subject does not exist yet, so the target is carried as the
+			// value it evaluates to — a table to generate an id in, or a
+			// record id to write at — the distinction `Value::Table` versus
+			// `Value::RecordId` draws.
+			let targets = lower_exprs(stmt.what.clone())?;
+			let timeout = stmt.timeout.clone();
+			with_timeout(
+				LogicalOp::Write(LogicalWrite {
+					data: stmt.data.clone().map(lower_data).transpose()?.flatten(),
+					duplicate_update: None,
+					cond: None,
+					statement: LogicalWriteStatement::Create(Box::new((*stmt).into())),
+					source: LogicalWriteSource::Targets(targets),
+				}),
+				timeout,
+			)
+		}
+		sql::Expr::Update(stmt) => {
+			// Rows: `UPDATE` writes records that already exist, so its targets
+			// are read exactly as the same targets in a `FROM` clause are.
+			let rows = lower_write_rows(stmt.what.clone(), stmt.with.clone())?;
+			let timeout = stmt.timeout.clone();
+			let explain = stmt.explain.as_ref().map(|sql::Explain(analyze)| *analyze);
+			let op = with_timeout(
+				LogicalOp::Write(LogicalWrite {
+					data: stmt.data.clone().map(lower_data).transpose()?.flatten(),
+					duplicate_update: None,
+					cond: stmt.cond.clone().map(|c| lower_expr(c.0)).transpose()?,
+					statement: LogicalWriteStatement::Update(Box::new((*stmt).into())),
+					source: LogicalWriteSource::Rows(Box::new(rows)),
+				}),
+				timeout,
+			)?;
+			Ok(with_explain(op, explain))
+		}
+		sql::Expr::Upsert(stmt) => {
+			// Targets, as for `CREATE`: an `UPSERT` subject need not exist, and
+			// a reading source yields nothing for one that does not, which
+			// would silently drop the write the statement exists to perform.
+			// The write operator reconciles the two cases itself, retrying a
+			// creating attempt that conflicts with an existing record as an
+			// update.
+			let targets = lower_exprs(stmt.what.clone())?;
+			let timeout = stmt.timeout.clone();
+			let explain = stmt.explain.as_ref().map(|sql::Explain(analyze)| *analyze);
+			let op = with_timeout(
+				LogicalOp::Write(LogicalWrite {
+					data: stmt.data.clone().map(lower_data).transpose()?.flatten(),
+					duplicate_update: None,
+					cond: stmt.cond.clone().map(|c| lower_expr(c.0)).transpose()?,
+					statement: LogicalWriteStatement::Upsert(Box::new((*stmt).into())),
+					source: LogicalWriteSource::Targets(targets),
+				}),
+				timeout,
+			)?;
+			Ok(with_explain(op, explain))
+		}
+		sql::Expr::Delete(stmt) => {
+			// Rows, as for `UPDATE`: a record must be read before it can be
+			// removed.
+			let rows = lower_write_rows(stmt.what.clone(), stmt.with.clone())?;
+			let timeout = stmt.timeout.clone();
+			let explain = stmt.explain.as_ref().map(|sql::Explain(analyze)| *analyze);
+			let op = with_timeout(
+				LogicalOp::Write(LogicalWrite {
+					data: None,
+					duplicate_update: None,
+					cond: stmt.cond.clone().map(|c| lower_expr(c.0)).transpose()?,
+					statement: LogicalWriteStatement::Delete(Box::new((*stmt).into())),
+					source: LogicalWriteSource::Rows(Box::new(rows)),
+				}),
+				timeout,
+			)?;
+			Ok(with_explain(op, explain))
+		}
+		sql::Expr::Insert(stmt) => {
+			// `INSERT` names no subjects to read: its rows *are* its subjects,
+			// so they are the source. Nothing applies them to a record the
+			// statement named elsewhere, which is what separates them from
+			// every other form's data clause.
+			let inserts = lower_inserts(stmt.into.clone(), stmt.data.clone())?;
+			let timeout = stmt.timeout.clone();
+			with_timeout(
+				LogicalOp::Write(LogicalWrite {
+					data: None,
+					duplicate_update: stmt.update.clone().map(lower_data).transpose()?.flatten(),
+					cond: None,
+					statement: LogicalWriteStatement::Insert(Box::new((*stmt).into())),
+					source: LogicalWriteSource::Inserts(inserts),
+				}),
+				timeout,
+			)
+		}
+		sql::Expr::Relate(stmt) => {
+			// Targets: the edge record `RELATE` writes does not exist yet, and
+			// its endpoints are used as the ids they evaluate to rather than
+			// read as documents. The list is `[from, through, to]`,
+			// the order `LogicalWriteSource::Targets` documents for this form.
+			let targets =
+				lower_exprs(vec![stmt.from.clone(), stmt.through.clone(), stmt.to.clone()])?;
+			let timeout = stmt.timeout.clone();
+			with_timeout(
+				LogicalOp::Write(LogicalWrite {
+					data: stmt.data.clone().map(lower_data).transpose()?.flatten(),
+					duplicate_update: None,
+					cond: None,
+					statement: LogicalWriteStatement::Relate(Box::new((*stmt).into())),
+					source: LogicalWriteSource::Targets(targets),
+				}),
+				timeout,
+			)
+		}
+		// A schema statement is carried whole. Its clauses stay surface
+		// expressions, resolved where the catalog write is formed rather than
+		// lowered here: a bare name in a DDL name position denotes itself, and
+		// lowering it would make it a read of the row the statement runs
+		// under.
+		sql::Expr::Define(stmt) => Ok(LogicalOp::Ddl(LogicalDdl {
+			statement: LogicalDdlStatement::Define(Box::new((*stmt).into())),
+		})),
+		sql::Expr::Remove(stmt) => Ok(LogicalOp::Ddl(LogicalDdl {
+			statement: LogicalDdlStatement::Remove(Box::new((*stmt).into())),
+		})),
+		sql::Expr::Rebuild(stmt) => Ok(LogicalOp::Ddl(LogicalDdl {
+			statement: LogicalDdlStatement::Rebuild(Box::new((*stmt).into())),
+		})),
+		sql::Expr::Alter(stmt) => Ok(LogicalOp::Ddl(LogicalDdl {
+			statement: LogicalDdlStatement::Alter(Box::new((*stmt).into())),
+		})),
 		scalar @ (sql::Expr::Literal(_)
 		| sql::Expr::Param(_)
 		| sql::Expr::Idiom(_)
@@ -139,19 +259,16 @@ pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 /// Lower an expression in scalar position.
 ///
 /// Scalars map to their [`LogicalExpr`] form. A statement in scalar position —
-/// a `SELECT`, a block, a `RETURN`, a `LET` — becomes
-/// [`LogicalExpr::Subquery`] of the operator [`lower`] produces for it. Write
-/// and DDL statements have no logical form, and neither does a mock record set
-/// outside `FROM`.
+/// a `SELECT`, a mutation, a block, a `RETURN`, a `LET` — becomes
+/// [`LogicalExpr::Subquery`] of the operator [`lower`] produces for it. DDL
+/// statements have no logical form.
 pub fn lower_expr(expr: sql::Expr) -> Lowered<LogicalExpr> {
 	Ok(match expr {
 		sql::Expr::Literal(literal) => lower_literal(literal)?,
 		sql::Expr::Param(param) => LogicalExpr::Param(param.into()),
 		sql::Expr::Idiom(idiom) => lower_idiom(idiom)?,
 		sql::Expr::Table(table) => LogicalExpr::Table(table.into()),
-		sql::Expr::Mock(_) => {
-			return Err(NoLogicalForm::Unsupported("a mock record set outside FROM".to_string()));
-		}
+		sql::Expr::Mock(mock) => LogicalExpr::Mock(mock.into()),
 		sql::Expr::Constant(constant) => LogicalExpr::Constant(constant.into()),
 		sql::Expr::Prefix {
 			op,
@@ -177,11 +294,15 @@ pub fn lower_expr(expr: sql::Expr) -> Lowered<LogicalExpr> {
 			receiver: call.receiver.into(),
 			args: lower_exprs(call.arguments)?,
 		})),
-		sql::Expr::Closure(closure) => LogicalExpr::Closure(Box::new(LogicalClosure {
-			args: closure.args.into_iter().map(|(p, k)| (p.into(), k.into())).collect(),
-			returns: closure.returns.map(Into::into),
-			body: lower_expr(closure.body)?,
-		})),
+		sql::Expr::Closure(closure) => {
+			let body_sql = std::sync::Arc::from(closure.body.to_sql());
+			LogicalExpr::Closure(Box::new(LogicalClosure {
+				args: closure.args.into_iter().map(|(p, k)| (p.into(), k.into())).collect(),
+				returns: closure.returns.map(Into::into),
+				body: lower_expr(closure.body)?,
+				body_sql,
+			}))
+		}
 		sql::Expr::Break => LogicalExpr::Break,
 		sql::Expr::Continue => LogicalExpr::Continue,
 		sql::Expr::Throw(expr) => LogicalExpr::Throw(Box::new(lower_expr(*expr)?)),
@@ -242,20 +363,8 @@ pub fn lower_select(select: SelectStatement) -> Lowered<LogicalOp> {
 		for_update,
 	} = select;
 
-	// FROM. Several sources concatenate; the `WITH` hint and `FOR UPDATE`
-	// apply to each stored source, matching how the physical planner resolves
-	// one access path per source.
-	let with = with.map(crate::expr::With::from);
-	let leaves = what
-		.into_iter()
-		.map(|source| lower_source(source, with.as_ref(), for_update))
-		.collect::<Lowered<Vec<_>>>()?;
-	let mut op = match leaves.len() {
-		1 => leaves.into_iter().next().expect("length checked"),
-		_ => LogicalOp::UnionAll(LogicalUnionAll {
-			inputs: leaves,
-		}),
-	};
+	// FROM.
+	let mut op = lower_sources(what, with, for_update)?;
 
 	// WHERE.
 	if let Some(cond) = cond {
@@ -360,6 +469,136 @@ pub fn lower_select(select: SelectStatement) -> Lowered<LogicalOp> {
 	Ok(op)
 }
 
+/// Lower a statement's list of targets to the subtree that reads them.
+///
+/// Several targets concatenate; the `WITH` hint and `FOR UPDATE` apply to each
+/// stored source, matching how the physical planner resolves one access path
+/// per source. The same list means the same subtree wherever it is written, so
+/// a `SELECT`'s `FROM` and an updating mutation's targets share this lowering.
+fn lower_sources(
+	what: Vec<sql::Expr>,
+	with: Option<sql::With>,
+	for_update: bool,
+) -> Lowered<LogicalOp> {
+	let with = with.map(crate::expr::With::from);
+	let leaves = what
+		.into_iter()
+		.map(|source| lower_source(source, with.as_ref(), for_update))
+		.collect::<Lowered<Vec<_>>>()?;
+	Ok(match leaves.len() {
+		1 => leaves.into_iter().next().expect("length checked"),
+		_ => LogicalOp::UnionAll(LogicalUnionAll {
+			inputs: leaves,
+		}),
+	})
+}
+
+/// Lower an updating mutation's targets to the rows it writes: the same
+/// subtree the same targets produce in a `FROM` clause. `FOR UPDATE` has no
+/// spelling on these statements — the mutation's own write takes the lock.
+///
+/// The statement's `WHERE` is deliberately left out of that subtree, and must
+/// stay out of it. On the updating shapes the per-record table permission gate
+/// runs before the statement's condition, so that a condition with side
+/// effects runs only for records the caller may write
+/// (`doc/adr/0001-streaming-write-path.md`). Everything in this subtree runs
+/// beneath the write operator and therefore ahead of every one of its stages,
+/// so a condition lowered into a [`LogicalOp::Filter`] here — or pushed into
+/// the scan — would be evaluated before that gate. The condition stays a
+/// clause of the statement, which the write operator's `CheckWhereCondition`
+/// stage evaluates in its place in the order.
+fn lower_write_rows(what: Vec<sql::Expr>, with: Option<sql::With>) -> Lowered<LogicalOp> {
+	lower_sources(what, with, false)
+}
+
+/// A mutation's data clause in logical form, so the rules can rewrite what it
+/// evaluates.
+///
+/// The places stay as written: a place is a location rather than a value, and
+/// what a path names is settled where the write is compiled. An empty clause
+/// has no form — there is nothing to evaluate — and the `INSERT` spellings
+/// that name rows rather than a clause are carried by
+/// [`LogicalWriteSource::Inserts`] instead.
+fn lower_data(data: sql::Data) -> Lowered<Option<LogicalData>> {
+	Ok(Some(match data {
+		sql::Data::EmptyExpression => return Ok(None),
+		sql::Data::SetExpression(assignments) | sql::Data::UpdateExpression(assignments) => {
+			LogicalData::Set(
+				assignments
+					.into_iter()
+					.map(|a| {
+						Ok(LogicalAssignment {
+							place: a.place.into(),
+							operator: a.operator.into(),
+							value: lower_expr(a.value)?,
+						})
+					})
+					.collect::<Lowered<Vec<_>>>()?,
+			)
+		}
+		sql::Data::UnsetExpression(paths) => {
+			LogicalData::Unset(paths.into_iter().map(Into::into).collect())
+		}
+		sql::Data::PatchExpression(expr) => LogicalData::Patch(lower_expr(expr)?),
+		sql::Data::MergeExpression(expr) => LogicalData::Merge(lower_expr(expr)?),
+		sql::Data::ReplaceExpression(expr) => LogicalData::Replace(lower_expr(expr)?),
+		sql::Data::ContentExpression(expr) => LogicalData::Content(lower_expr(expr)?),
+		sql::Data::SingleExpression(expr) => LogicalData::Single(lower_expr(expr)?),
+		sql::Data::ValuesExpression(rows) => LogicalData::Values(
+			rows.into_iter()
+				.map(|row| {
+					row.into_iter()
+						.map(|(path, value)| Ok((path.into(), lower_expr(value)?)))
+						.collect::<Lowered<Vec<_>>>()
+				})
+				.collect::<Lowered<Vec<_>>>()?,
+		),
+	}))
+}
+
+/// Lower `INSERT`'s subjects: its `INTO` table, and the rows it writes.
+///
+/// The rows are the source rather than a clause. Every other form applies its
+/// data to a subject named elsewhere; `INSERT` has no such subject, so each row
+/// *is* one — the record to write, with the table taken from `INTO` where the
+/// statement has one and from the row's own record id where it does not.
+///
+/// Only the two spellings that name rows have a form here. Any other data
+/// clause on an `INSERT` names none, and lowering declines rather than
+/// silently writing records the statement did not describe.
+fn lower_inserts(into: Option<sql::Expr>, data: sql::Data) -> Lowered<LogicalInserts> {
+	let rows = match data {
+		sql::Data::ValuesExpression(tuples) => LogicalInsertRows::Tuples(
+			tuples
+				.into_iter()
+				.map(|tuple| {
+					tuple
+						.into_iter()
+						.map(|(path, value)| Ok((path.into(), lower_expr(value)?)))
+						.collect::<Lowered<Vec<_>>>()
+				})
+				.collect::<Lowered<Vec<_>>>()?,
+		),
+		sql::Data::SingleExpression(expr) => LogicalInsertRows::Value(lower_expr(expr)?),
+		sql::Data::EmptyExpression
+		| sql::Data::SetExpression(_)
+		| sql::Data::UnsetExpression(_)
+		| sql::Data::PatchExpression(_)
+		| sql::Data::MergeExpression(_)
+		| sql::Data::ReplaceExpression(_)
+		| sql::Data::ContentExpression(_)
+		| sql::Data::UpdateExpression(_) => {
+			return Err(NoLogicalForm::Unsupported(
+				"an INSERT whose data clause names no rows".to_string(),
+			));
+		}
+	};
+	Ok(LogicalInserts {
+		into: into.map(lower_expr).transpose()?,
+		rows,
+	})
+}
+
 /// Lower one `FROM` expression to its leaf.
 ///
 /// A nested `SELECT` is lowered eagerly. A literal that produces rows without
@@ -394,17 +633,10 @@ fn lower_source(
 			})
 		});
 	}
-	if let sql::Expr::Mock(mock) = source {
-		return Ok(LogicalOp::Source(LogicalSource {
-			source: SourceRef::Mock(mock.into()),
-			schema: None,
-			with: with.cloned(),
-			for_update,
-		}));
-	}
 	let source = lower_expr(source)?;
 	Ok(if is_value_literal(&source) {
 		LogicalOp::Values(LogicalValues {
+			written: matches!(source, LogicalExpr::Array(_)),
 			expr: source,
 			for_update,
 		})
@@ -454,6 +686,7 @@ pub fn is_value_literal(expr: &LogicalExpr) -> bool {
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Param(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Field(_)
 		| LogicalExpr::Doc
@@ -517,6 +750,39 @@ pub fn is_value_literal(expr: &LogicalExpr) -> bool {
 
 /// Whether an optional clause expression is the absent marker. `VERSION` and
 /// `TIMEOUT` hold a bare expression and spell "not written" as `NONE`.
+/// Wrap a mutation in its `EXPLAIN` clause, `analyze` being whether the clause
+/// said `FULL`.
+///
+/// Outermost, as in a `SELECT`: what the plan describes is everything beneath
+/// it, the timeout included. The clause form has no `FORMAT` and answers with
+/// the structured plan. Only the three updating forms have the clause; the
+/// creating ones have no grammar for it.
+fn with_explain(op: LogicalOp, analyze: Option<bool>) -> LogicalOp {
+	match analyze {
+		Some(analyze) => LogicalOp::Explain(LogicalExplain {
+			input: Box::new(op),
+			analyze,
+			format: crate::expr::ExplainFormat::Json,
+		}),
+		None => op,
+	}
+}
+
+/// Wrap a mutation in its `TIMEOUT` clause.
+///
+/// A mutation carries the clause on the statement rather than on a source, so
+/// it becomes the node above the write operator — the same node a `SELECT`'s
+/// `TIMEOUT` lowers to, holding the same budget over everything beneath it.
+fn with_timeout(op: LogicalOp, timeout: sql::Expr) -> Lowered<LogicalOp> {
+	if is_absent(&timeout) {
+		return Ok(op);
+	}
+	Ok(LogicalOp::Timeout(LogicalTimeout {
+		input: Box::new(op),
+		timeout: lower_expr(timeout)?,
+	}))
+}
+
 fn is_absent(expr: &sql::Expr) -> bool {
 	matches!(expr, sql::Expr::Literal(sql::Literal::None))
 }
@@ -612,8 +878,8 @@ fn lower_literal(literal: sql::Literal) -> Lowered<LogicalExpr> {
 		sql::Literal::Array(items) => Ok(LogicalExpr::Array(lower_exprs(items)?)),
 		sql::Literal::Set(items) => Ok(LogicalExpr::Set(lower_exprs(items)?)),
 		sql::Literal::Object(entries) => {
-			// An object literal in GeoJSON shape denotes a geometry, as it
-			// does for the legacy engine; the shared conversion decides.
+			// An object literal in GeoJSON shape denotes a geometry; the
+			// shared conversion decides.
 			if looks_like_geometry(&entries)
 				&& let crate::expr::Literal::Geometry(geometry) =
 					crate::expr::Literal::from(sql::Literal::Object(entries.clone()))
@@ -723,8 +989,10 @@ enum Prev {
 /// [`LogicalExpr::Doc`], a starting expression is itself, and a leading lookup
 /// applies to [`LogicalExpr::Current`], the row. Every later part is a step
 /// folded onto the root by [`fold_steps`] in [`PathMode::Continuation`].
+///
+/// A root written after the first part restarts the path ([`restart_at_root`]).
 fn lower_idiom(idiom: sql::Idiom) -> Lowered<LogicalExpr> {
-	let mut parts = idiom.0.into_iter().peekable();
+	let mut parts = restart_at_root(idiom.0).into_iter().peekable();
 	let base = match parts.peek() {
 		Some(sql::Part::Field(_)) => match parts.next() {
 			Some(sql::Part::Field(name)) => LogicalExpr::Field(name),
@@ -746,19 +1014,37 @@ fn lower_idiom(idiom: sql::Idiom) -> Lowered<LogicalExpr> {
 
 /// Lower an idiom that is a body over [`LogicalExpr::Current`]: the `(…)`
 /// path of a recursion, or the path of a destructure alias. Every part is a
-/// step, a leading field included; a leading starting expression replaces
-/// `Current` as the base. Bodies fold in [`PathMode::Plain`].
+/// step, a leading field included; a leading starting expression or `@`
+/// replaces `Current` as the base. Bodies fold in [`PathMode::Plain`].
 fn lower_body(idiom: sql::Idiom) -> Lowered<LogicalExpr> {
-	let mut parts = idiom.0.into_iter().peekable();
+	let mut parts = restart_at_root(idiom.0).into_iter().peekable();
 	let base = match parts.peek() {
 		Some(sql::Part::Start(_)) => match parts.next() {
 			Some(sql::Part::Start(start)) => lower_expr(start)?,
 			_ => unreachable!("peeked a start"),
 		},
+		Some(sql::Part::Doc) => {
+			parts.next();
+			LogicalExpr::Doc
+		}
 		Some(_) | None => LogicalExpr::Current,
 	};
 	let steps = lower_steps(parts)?;
 	Ok(fold_steps(base, steps, PathMode::Plain))
+}
+
+/// The parts of a path from its last root on.
+///
+/// A starting expression or `@` is a root: it is the value the parts after it
+/// apply to, wherever it is written. The parser writes one only first, so a
+/// path holding one later is a tree built without it, and the parts before the
+/// root are the value it replaces: they are not read, which is what a root
+/// means rather than a step applied to what precedes it.
+fn restart_at_root(mut parts: Vec<sql::Part>) -> Vec<sql::Part> {
+	match parts.iter().rposition(|part| matches!(part, sql::Part::Start(_) | sql::Part::Doc)) {
+		Some(at) if at > 0 => parts.split_off(at),
+		_ => parts,
+	}
 }
 
 fn lower_steps(parts: impl Iterator<Item = sql::Part>) -> Lowered<VecDeque<Step>> {
@@ -782,15 +1068,13 @@ fn lower_steps(parts: impl Iterator<Item = sql::Part>) -> Lowered<VecDeque<Step>
 					instruction.map(lower_instruction).transpose()?,
 				),
 				sql::Part::RepeatRecurse => Step::RepeatRecurse,
-				// Both are roots: the parser produces them only as the first
-				// part, where `lower_idiom` consumes them.
-				sql::Part::Start(_) => {
+				// A root is consumed before the steps are lowered
+				// ([`restart_at_root`]): only the first part of a path can be
+				// one by the time it gets here.
+				sql::Part::Start(_) | sql::Part::Doc => {
 					return Err(NoLogicalForm::Unsupported(
-						"a starting expression inside a path".to_string(),
+						"a root part that is not the first of its path".to_string(),
 					));
-				}
-				sql::Part::Doc => {
-					return Err(NoLogicalForm::Unsupported("`@` inside a path".to_string()));
 				}
 			})
 		})
@@ -1121,7 +1405,8 @@ fn lower_lookup_subject(subject: sql::lookup::LookupSubject) -> Lowered<LogicalL
 	})
 }
 
-fn lower_fields(fields: sql::Fields) -> Lowered<LogicalFields> {
+/// A projection's fields, as a `SELECT` or a `RETURN` clause writes them.
+pub fn lower_fields(fields: sql::Fields) -> Lowered<LogicalFields> {
 	Ok(match fields {
 		sql::Fields::Value(selector) => LogicalFields::Value {
 			expr: lower_expr(selector.expr)?,
@@ -1143,8 +1428,8 @@ fn lower_fields(fields: sql::Fields) -> Lowered<LogicalFields> {
 
 /// A projected field. An unaliased field whose derived name would be spelled
 /// from a nested plan — a statement in scalar position — is aliased to the
-/// SurrealQL text of the expression as written, which is the key the legacy
-/// engine gives such a projection; every other field keeps the alias the user
+/// SurrealQL text of the expression as written, which is the key such a
+/// projection takes; every other field keeps the alias the user
 /// wrote, or none, and is named by [`LogicalExpr::output_path`].
 fn lower_field(selector: sql::field::Selector) -> Lowered<LogicalField> {
 	let written = match &selector.alias {
@@ -1788,25 +2073,62 @@ mod tests {
 		"a.b[WHERE c IN [1, 2]].d.e",
 		"a.b[WHERE c][0].d[WHERE e][$]",
 		"a[WHERE b].c[WHERE d]->e->f[WHERE g].h",
+		// A grouped path start. Every step but a field access and `.*` reads as
+		// the body of a broadcast over the access to its left, so these are all
+		// different expressions from the same text without the parentheses.
+		"(a.b)[0]",
+		"(a.b)[$]",
+		"(a.b)[WHERE c]",
+		"(a.b).len()",
+		"(a.b).*",
+		"(a.b).?.c",
+		"(a.b).{ x }",
+		"(a.b)->likes->person",
+		"(a.b.c)[0]",
+		"(a.b)[0].c",
+		"((a.b)[0].c)[1]",
+		"($p.a)[0]",
+		"((1 + 2).b)[0]",
+		"(person:1.name)[0]",
 	];
 
-	/// Every idiom renders as the surface expression renders, byte for byte,
+	/// Every idiom renders as an idiom that reads back as the same expression,
 	/// in both the single-line and the pretty layout.
+	///
+	/// This is a round trip rather than a comparison against the surface text,
+	/// because the two do not always agree and should not. The surface
+	/// parenthesises a path start that is itself a path whenever it *might*
+	/// matter, without proving that it does; lowering keeps only the grouping
+	/// that changes the expression. `(a.b).c` and `a.b.c` lower to one tree, so
+	/// no rendering of that tree can reproduce both spellings, and the
+	/// canonical one is right.
+	///
+	/// What has to hold is that the rendering parses back to the expression it
+	/// came from. That is the property the stored text depends on — a
+	/// definition is re-read from its rendering — and it is the stronger claim:
+	/// a grouping this layer drops but must not would reparse as a broadcast
+	/// over the access to its left, which byte-for-byte-against-the-surface
+	/// never checked, since the corpus is written in whatever spelling the
+	/// surface happens to produce.
 	#[test]
 	fn a_path_renders_as_the_idiom_it_was_lowered_from() {
-		for sql in IDIOM_CORPUS {
+		let lower_of = |sql: &str| {
 			let sql::Expr::Return(out) = parse(&format!("RETURN {sql}")) else {
-				panic!("expected a RETURN");
+				panic!("expected a RETURN for `{sql}`");
 			};
-			let surface = out.what.to_sql();
-			let pretty = out.what.to_sql_pretty();
-			let lowered = lower_expr(out.what).expect("expression should lower");
-			assert_eq!(lowered.to_sql(), surface, "rendering of `{sql}` differs from the surface");
-			assert_eq!(
-				lowered.to_sql_pretty(),
-				pretty,
-				"pretty rendering of `{sql}` differs from the surface"
-			);
+			lower_expr(out.what).expect("expression should lower")
+		};
+		for sql in IDIOM_CORPUS {
+			let lowered = lower_of(sql);
+			for (layout, rendered) in [("", lowered.to_sql()), (" pretty", lowered.to_sql_pretty())]
+			{
+				assert_eq!(
+					lower_of(&rendered),
+					lowered,
+					"the{layout} rendering of `{sql}` is `{rendered}`, which is a different \
+					 expression"
+				);
+			}
 		}
 	}
 
@@ -1848,6 +2170,39 @@ mod tests {
 			);
 			assert_eq!(reread.to_sql(), rendered, "rendering `{sql}` is not idempotent");
 		}
+	}
+
+	/// A root written after the first part of a path, which the parser never
+	/// produces, is the value the rest of the path applies to: the parts
+	/// before it are replaced, not read.
+	#[test]
+	fn a_root_inside_a_path_restarts_it() {
+		let field = |name: &str| sql::Part::Field(name.into());
+		let doc_then_b =
+			super::lower_idiom(sql::Idiom(vec![field("a"), sql::Part::Doc, field("b")]))
+				.expect("lowers");
+		assert_eq!(shape_of(&doc_then_b), shape_of(&lower_idiom("@.b")));
+
+		let start = sql::Expr::Param(sql::Param::new("p".to_owned()));
+		let start_then_b =
+			super::lower_idiom(sql::Idiom(vec![field("a"), sql::Part::Start(start), field("b")]))
+				.expect("lowers");
+		assert_eq!(shape_of(&start_then_b), shape_of(&lower_idiom("$p.b")));
+
+		// The last root wins when several are written.
+		let twice = super::lower_idiom(sql::Idiom(vec![
+			sql::Part::Doc,
+			field("a"),
+			sql::Part::Doc,
+			field("b"),
+		]))
+		.expect("lowers");
+		assert_eq!(shape_of(&twice), shape_of(&lower_idiom("@.b")));
+
+		// A recursion body takes a root the same way.
+		let body = super::lower_body(sql::Idiom(vec![field("a"), sql::Part::Doc, field("b")]))
+			.expect("lowers");
+		assert_eq!(shape_of(&body), shape_of(&lower_idiom("@.b")));
 	}
 
 	/// Lowers an idiom written as surface SurrealQL.
@@ -1944,6 +2299,7 @@ mod tests {
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::Prefix {
 				..
@@ -2134,7 +2490,11 @@ mod tests {
 	/// on purpose: a variant added to the surface AST fails to compile here
 	/// until it is classified, and the corpus below has one statement per
 	/// variant so the classification is exercised rather than declared.
-	fn expected(expr: &sql::Expr) -> Result<&'static str, NoLogicalForm> {
+	///
+	/// Total, because lowering is: every variant the parser produces has a
+	/// logical form. A variant that does not would return a `Result` here
+	/// again.
+	fn expected(expr: &sql::Expr) -> &'static str {
 		match expr {
 			sql::Expr::Literal(_)
 			| sql::Expr::Param(_)
@@ -2155,30 +2515,28 @@ mod tests {
 			| sql::Expr::Break
 			| sql::Expr::Continue
 			| sql::Expr::Throw(_)
-			| sql::Expr::IfElse(_) => Ok("Eval"),
-			sql::Expr::Mock(_) => {
-				Err(NoLogicalForm::Unsupported("a mock record set outside FROM".to_string()))
-			}
-			sql::Expr::Block(_) => Ok("Sequence"),
-			sql::Expr::Return(_) => Ok("Return"),
-			sql::Expr::Select(_) => Ok("Project"),
-			sql::Expr::Info(_) => Ok("Info"),
-			sql::Expr::Foreach(_) => Ok("Foreach"),
-			sql::Expr::Let(_) => Ok("Let"),
-			sql::Expr::Sleep(_) => Ok("Sleep"),
+			| sql::Expr::IfElse(_)
+			| sql::Expr::Mock(_) => "Eval",
+			sql::Expr::Block(_) => "Sequence",
+			sql::Expr::Return(_) => "Return",
+			sql::Expr::Select(_) => "Project",
+			sql::Expr::Info(_) => "Info",
+			sql::Expr::Foreach(_) => "Foreach",
+			sql::Expr::Let(_) => "Let",
+			sql::Expr::Sleep(_) => "Sleep",
 			sql::Expr::Explain {
 				..
-			} => Ok("Explain"),
-			sql::Expr::Create(_) => Err(NoLogicalForm::Write("CREATE")),
-			sql::Expr::Update(_) => Err(NoLogicalForm::Write("UPDATE")),
-			sql::Expr::Delete(_) => Err(NoLogicalForm::Write("DELETE")),
-			sql::Expr::Relate(_) => Err(NoLogicalForm::Write("RELATE")),
-			sql::Expr::Insert(_) => Err(NoLogicalForm::Write("INSERT")),
-			sql::Expr::Upsert(_) => Err(NoLogicalForm::Write("UPSERT")),
-			sql::Expr::Define(_) => Err(NoLogicalForm::Ddl("DEFINE")),
-			sql::Expr::Remove(_) => Err(NoLogicalForm::Ddl("REMOVE")),
-			sql::Expr::Rebuild(_) => Err(NoLogicalForm::Ddl("REBUILD")),
-			sql::Expr::Alter(_) => Err(NoLogicalForm::Ddl("ALTER")),
+			} => "Explain",
+			sql::Expr::Create(_)
+			| sql::Expr::Update(_)
+			| sql::Expr::Delete(_)
+			| sql::Expr::Relate(_)
+			| sql::Expr::Insert(_)
+			| sql::Expr::Upsert(_) => "Write",
+			sql::Expr::Define(_)
+			| sql::Expr::Remove(_)
+			| sql::Expr::Rebuild(_)
+			| sql::Expr::Alter(_) => "Ddl",
 		}
 	}
 
@@ -2278,8 +2636,8 @@ mod tests {
 			let sql = statement.to_sql();
 			seen.insert(variant_name(&statement));
 			let want = expected(&statement);
-			let got = lower(statement).map(|op| op.name());
-			assert_eq!(got, want, "`{sql}`");
+			let got = lower(statement).expect("every surface variant lowers");
+			assert_eq!(got.name(), want, "`{sql}`");
 		}
 		// The corpus must exercise every variant `expected` classifies.
 		let all: BTreeSet<_> = [
@@ -2322,15 +2680,325 @@ mod tests {
 		assert_eq!(seen, all, "the corpus must cover every surface variant");
 	}
 
+	/// A schema statement in scalar position lowers with the statement that
+	/// holds it, as a mutation does, so the block around it keeps its logical
+	/// form.
 	#[test]
-	fn a_write_or_ddl_nested_in_a_scalar_declines_the_whole_expression() {
-		// The engine decision is made once for the statement: a write
-		// anywhere in it has no logical form.
-		let statement = parse("SELECT * FROM t WHERE a IN (CREATE u).id");
-		assert_eq!(lower(statement), Err(NoLogicalForm::Write("CREATE")));
+	fn a_ddl_nested_in_a_scalar_keeps_the_statements_logical_form() {
 		let statement = parse("RETURN { DEFINE TABLE x; 1 }");
-		assert_eq!(lower(statement), Err(NoLogicalForm::Ddl("DEFINE")));
-		assert!(NoLogicalForm::Write("CREATE").to_string().contains("CREATE"));
+		let lowered = lower(statement).expect("a block holding a schema statement lowers");
+		assert!(
+			lowered.any(|node| matches!(node, LogicalOp::Ddl(_))),
+			"the block should carry the schema statement"
+		);
+	}
+
+	/// A mock record set lowers wherever it sits, not only in `FROM`. A
+	/// decline refuses the whole statement, so a mock that declined outside
+	/// `FROM` would fail a query with one `|t:n|` in a predicate.
+	#[test]
+	fn a_mock_lowers_outside_from() {
+		for sql in [
+			"SELECT * FROM t WHERE a IN |u:3|",
+			"CREATE |u:3|",
+			"UPSERT |u:1..4|",
+			"LET $x = |u:3|",
+			"RETURN [|u:3|]",
+		] {
+			lower(parse(sql)).unwrap_or_else(|err| panic!("`{sql}` lowers: {err}"));
+		}
+	}
+
+	/// A schema statement is not read-only, wherever it sits. The node owns no
+	/// scalars, so a classification that reached for them would answer `true`
+	/// over an empty set and put a catalog write on a read-only transaction.
+	#[test]
+	fn a_ddl_plan_is_not_read_only() {
+		for sql in ["DEFINE TABLE x", "REMOVE TABLE x", "ALTER TABLE x", "REBUILD INDEX i ON x"] {
+			let lowered = lower(parse(sql)).expect("a schema statement lowers");
+			assert!(!lowered.read_only(), "`{sql}` writes the catalog");
+		}
+		// And through the statement that holds it, which reads the answer off
+		// the nested plan.
+		let lowered = lower(parse("RETURN { DEFINE TABLE x; 1 }")).expect("the block lowers");
+		assert!(!lowered.read_only(), "a block holding a schema statement writes");
+	}
+
+	/// The node carries the statement and hands out no expressions: its
+	/// clauses are resolved where the catalog write is formed, not by a pass
+	/// over the plan.
+	#[test]
+	fn a_ddl_node_owns_no_scalars_and_no_inputs() {
+		let lowered = lower(parse("DEFINE INDEX i ON t FIELDS a, b")).expect("lowers");
+		assert!(matches!(lowered, LogicalOp::Ddl(_)));
+		assert!(lowered.scalars().is_empty());
+		assert!(lowered.children().is_empty());
+		assert_eq!(lowered.name(), "Ddl");
+	}
+
+	/// A mutation in scalar position lowers with the statement that holds it,
+	/// rather than declining it. The plan it produces still writes, so the
+	/// whole statement is a writing plan and the planner is what decides
+	/// whether it can compile one.
+	#[test]
+	fn a_lowered_write_nested_in_a_scalar_keeps_the_statement_writing() {
+		let op = lower(parse("SELECT * FROM t WHERE a IN (CREATE u).id"))
+			.expect("a nested CREATE should lower with its statement");
+		assert!(!op.read_only(), "a statement containing a mutation must not claim read-only");
+
+		// The control: the same statement without the mutation. Without it
+		// the assertion above would also hold for a plan that had simply lost
+		// the nested statement, which is the failure worth excluding.
+		let control = lower(parse("SELECT * FROM t WHERE a IN u.id")).expect("should lower");
+		assert!(control.read_only(), "the control must be read-only for the pair to mean anything");
+	}
+
+	/// The [`LogicalWrite`] a mutation lowers to.
+	fn write_of(sql: &str) -> LogicalWrite {
+		let op = lower_sql(sql);
+		let name = op.name();
+		let LogicalOp::Write(write) = op else {
+			panic!("`{sql}` should lower to a write, got {name}");
+		};
+		write
+	}
+
+	fn targets_of(sql: &str) -> Vec<LogicalExpr> {
+		match write_of(sql).source {
+			LogicalWriteSource::Targets(targets) => targets,
+			other @ (LogicalWriteSource::Inserts(_) | LogicalWriteSource::Rows(_)) => panic!(
+				"`{sql}` writes subjects that need not exist, so it must not read them: {other:?}"
+			),
+		}
+	}
+
+	fn inserts_of(sql: &str) -> LogicalInserts {
+		match write_of(sql).source {
+			LogicalWriteSource::Inserts(inserts) => inserts,
+			other @ (LogicalWriteSource::Targets(_) | LogicalWriteSource::Rows(_)) => {
+				panic!("`{sql}` writes rows of its own: {other:?}")
+			}
+		}
+	}
+
+	fn rows_of(sql: &str) -> LogicalOp {
+		match write_of(sql).source {
+			LogicalWriteSource::Rows(rows) => *rows,
+			other @ (LogicalWriteSource::Targets(_) | LogicalWriteSource::Inserts(_)) => {
+				panic!("`{sql}` writes subjects that already exist, so it reads them: {other:?}")
+			}
+		}
+	}
+
+	/// Every mutation form has a logical form, and the node names the kind it
+	/// performs.
+	#[test]
+	fn every_mutation_form_lowers_to_a_write() {
+		for (sql, kind) in [
+			("CREATE person SET a = 1", "CREATE"),
+			("UPDATE person SET a = 1", "UPDATE"),
+			("UPSERT person SET a = 1", "UPSERT"),
+			("DELETE person", "DELETE"),
+			("INSERT INTO person { a: 1 }", "INSERT"),
+			("RELATE person:a->likes->person:b", "RELATE"),
+		] {
+			assert_eq!(write_of(sql).statement.kind(), kind, "`{sql}`");
+		}
+	}
+
+	/// Which source arm a form takes is a correctness property, not a
+	/// preference. A reading source resolves a record id to its stored
+	/// document and yields nothing when there is none, which for a subject
+	/// being created is always, so a creating form given one would have its
+	/// write silently dropped. An updating form's subjects exist and are read.
+	#[test]
+	fn a_creating_form_names_targets_and_an_updating_form_reads_rows() {
+		for sql in ["CREATE person", "UPSERT person", "RELATE person:a->likes->person:b"] {
+			let _ = targets_of(sql);
+			let op = lower_sql(sql);
+			assert!(op.children().is_empty(), "`{sql}` has no plan subtree to read");
+		}
+		// `INSERT` names its subjects a third way — as the rows themselves —
+		// and reads no more than the other two do.
+		let _ = inserts_of("INSERT INTO person { a: 1 }");
+		assert!(
+			lower_sql("INSERT INTO person { a: 1 }").children().is_empty(),
+			"an INSERT has no plan subtree to read"
+		);
+		for sql in ["UPDATE person SET a = 1", "DELETE person"] {
+			assert_eq!(shape(&rows_of(sql)), ["Source"], "`{sql}`");
+		}
+	}
+
+	/// `ONLY` is read from the statement. `INSERT` has no such keyword in the
+	/// grammar, so it never asks for a single record.
+	#[test]
+	fn only_is_read_from_the_statement_and_insert_has_none() {
+		for sql in [
+			"CREATE ONLY person",
+			"UPDATE ONLY person:1 SET a = 1",
+			"UPSERT ONLY person:1",
+			"DELETE ONLY person:1",
+			"RELATE ONLY person:a->likes->person:b",
+		] {
+			assert!(write_of(sql).statement.only(), "`{sql}`");
+		}
+		assert!(!write_of("DELETE person:1").statement.only());
+		assert!(!write_of("INSERT INTO person { a: 1 }").statement.only());
+	}
+
+	/// An updating form's targets lower to the subtree the same targets take
+	/// in a `FROM` clause, index hint included, rather than to a second
+	/// lowering of their own.
+	#[test]
+	fn an_updating_forms_targets_lower_as_a_from_clause_does() {
+		let rows = rows_of("UPDATE a, b:1 WITH NOINDEX SET x = 1");
+		assert_eq!(rows.name(), "UnionAll");
+		let leaves: Vec<_> = rows.children().iter().map(LogicalOp::name).collect();
+		assert_eq!(leaves, ["Source", "Source"]);
+		for leaf in rows.children() {
+			let LogicalOp::Source(LogicalSource {
+				with,
+				for_update,
+				..
+			}) = leaf
+			else {
+				panic!("expected a source");
+			};
+			assert!(with.is_some(), "the hint reaches each stored source");
+			assert!(!for_update, "the mutation's own write takes the lock");
+		}
+	}
+
+	/// The per-record table permission gate runs ahead of the statement's
+	/// condition on the updating shapes, so that a condition with side effects
+	/// runs only for records the caller may write
+	/// (`doc/adr/0001-streaming-write-path.md`). The row subtree runs beneath
+	/// the write operator and so ahead of every one of its stages, which is
+	/// why the condition must not be lowered into it; it stays a clause of the
+	/// statement, for the write operator's condition stage to evaluate.
+	#[test]
+	fn an_updating_forms_condition_stays_out_of_its_row_subtree() {
+		for sql in ["UPDATE person SET a = 1 WHERE b > 1", "DELETE person WHERE b > 1"] {
+			let rows = rows_of(sql);
+			assert!(
+				!rows.any(|node| matches!(node, LogicalOp::Filter(_))),
+				"`{sql}` must not evaluate its condition below the write: {rows}"
+			);
+			assert!(
+				!rows.to_string().contains("b > 1"),
+				"`{sql}` must not push its condition into the scan: {rows}"
+			);
+		}
+		// The condition is kept, not dropped: the write operator's stage reads
+		// it from the statement.
+		let LogicalWriteStatement::Update(stmt) =
+			write_of("UPDATE person SET a = 1 WHERE b > 1").statement
+		else {
+			panic!("expected an UPDATE");
+		};
+		assert!(stmt.cond.is_some());
+		let LogicalWriteStatement::Delete(stmt) = write_of("DELETE person WHERE b > 1").statement
+		else {
+			panic!("expected a DELETE");
+		};
+		assert!(stmt.cond.is_some());
+		// The control: the same target and condition in a `FROM` clause do
+		// build the filter, so the assertions above are about where a
+		// mutation's condition goes rather than about lowering being unable to
+		// place one.
+		assert_eq!(
+			shape(&lower_sql("SELECT * FROM person WHERE b > 1")),
+			["Project", "Filter", "Source"]
+		);
+	}
+
+	/// An `UPSERT` subject may or may not exist, and the write operator
+	/// reconciles the two cases by retrying a conflicting create as an update.
+	/// A condition does not change that: a reading source would still drop the
+	/// creating case.
+	#[test]
+	fn upsert_names_targets_whether_or_not_it_has_a_condition() {
+		assert_eq!(targets_of("UPSERT person:1 SET a = 1").len(), 1);
+		assert_eq!(targets_of("UPSERT person:1 SET a = 1 WHERE b > 1").len(), 1);
+		assert_eq!(targets_of("UPSERT a, b:1").len(), 2, "one target per thing written");
+	}
+
+	/// `INSERT`'s rows are its subjects: they reach the write operator as its
+	/// source, so the operator has a record to write for each of them. The
+	/// `INTO` table rides beside them and is absent where the statement names
+	/// none, in which case each row names its table through the id it carries.
+	#[test]
+	fn insert_carries_its_rows_and_its_into_table_as_its_source() {
+		let single = inserts_of("INSERT INTO person { a: 1 }");
+		assert!(single.into.is_some());
+		assert!(matches!(single.rows, LogicalInsertRows::Value(_)));
+
+		let bare = inserts_of("INSERT { id: person:1, a: 1 }");
+		assert!(
+			bare.into.is_none(),
+			"without INTO each record names its table through the id it carries"
+		);
+
+		// A `VALUES` tuple keeps one `(place, expression)` pair per column, in
+		// the order written: the pairs build the row, so losing their order or
+		// their paths loses what the row holds.
+		let LogicalInsertRows::Tuples(tuples) =
+			inserts_of("INSERT INTO person (a, b) VALUES (1, 2), (3, 4)").rows
+		else {
+			panic!("a VALUES list must lower to tuples");
+		};
+		assert_eq!(tuples.len(), 2);
+		let rendered: Vec<_> =
+			tuples[0].iter().map(|(path, value)| (path.to_sql(), value.to_sql())).collect();
+		assert_eq!(rendered, [("a".to_string(), "1".to_string()), ("b".into(), "2".into())]);
+	}
+
+	/// The `INTO` table and every row expression are the node's own scalars,
+	/// so a pass that rewrites expressions reaches them — the same property
+	/// the target list has, and what makes a parameter in a row resolvable.
+	#[test]
+	fn an_inserts_rows_are_the_nodes_own_scalars() {
+		let single = lower_sql("INSERT INTO person { a: $x }");
+		assert_eq!(single.scalars().len(), 2, "the INTO table and the one row expression");
+		assert!(single.children().is_empty(), "rows are not a plan subtree");
+
+		let tuples = lower_sql("INSERT INTO person (a, b) VALUES (1, 2), (3, 4)");
+		assert_eq!(tuples.scalars().len(), 5, "the INTO table and four values");
+
+		let bare = lower_sql("INSERT { id: person:1 }");
+		assert_eq!(bare.scalars().len(), 1, "no INTO table, one row expression");
+	}
+
+	/// A data clause that names no rows is not `INSERT`'s source, and lowering
+	/// declines rather than writing records the statement never described.
+	#[test]
+	fn an_insert_whose_data_names_no_rows_has_no_logical_form() {
+		let stmt = sql::Expr::Insert(Box::new(sql::statements::InsertStatement {
+			into: Some(sql::Expr::Table("person".into())),
+			data: sql::Data::ContentExpression(sql::Expr::Literal(sql::Literal::Integer(1))),
+			ignore: false,
+			update: None,
+			output: None,
+			timeout: sql::Expr::Literal(sql::Literal::None),
+			relation: false,
+		}));
+		assert!(matches!(lower(stmt), Err(NoLogicalForm::Unsupported(_))));
+	}
+
+	/// `RELATE`'s targets are `[from, through, to]`, the order
+	/// [`LogicalWriteSource::Targets`] documents for this form. None of the
+	/// three is read: the endpoints are used as the ids they evaluate to, and
+	/// the edge record does not exist yet.
+	#[test]
+	fn relate_names_its_endpoints_and_the_table_between_them() {
+		let rendered: Vec<_> =
+			targets_of("RELATE person:a->likes->person:b").iter().map(ToSql::to_sql).collect();
+		assert_eq!(rendered, ["person:a", "likes", "person:b"]);
+		// They are the node's own scalars, so a pass that rewrites expressions
+		// reaches all three.
+		let op = lower_sql("RELATE person:a->likes->person:b");
+		assert_eq!(op.scalars().len(), 3);
 	}
 
 	#[test]

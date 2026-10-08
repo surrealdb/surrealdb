@@ -162,12 +162,8 @@ makes most of the invariants below structural rather than guarded.
   `sql::Ast`, the catalog, or `Revisioned` serialization** (which serializes as
   SurrealQL text). The invariant is structural: no `sql::Expr` or `expr::Expr`
   variant can carry a plan, and no SurrealQL parses to one.
-- Compute-only refusal: hard error "GQL MATCH requires the streaming execution
-  engine; it cannot run under the compute-only planner strategy", raised at the
-  two entries that could otherwise route around the streaming engine — the
-  executor's `TopLevelStatement::Plan` arm under
-  `NewPlannerStrategy::ComputeOnly`, and `fnc::eval::run_eval` (the legacy
-  `compute`-path `eval` adapter).
+- A plan runs only on the execution engine: the entry that could otherwise route
+  around it, `fnc::eval::run_eval`, rejects a `MatchPlan` with a hard error.
 
 ## 3. Binding rows
 
@@ -339,12 +335,9 @@ Project [columns: p, b]
             Bind [binding: a]  ← TableScan [table: person]
 ```
 
-## 7. Strategy matrix & plumbing
+## 7. Plumbing
 
-- `.gql` language-tests default to `[all-ro, best-effort]` (dialect-aware default
-  in `language-tests/src/tests/schema/mod.rs` + `cmd/run/mod.rs`); one pinned test
-  `errors/compute_only_strategy.gql` (`planner-strategy = ["compute-only"]`)
-  asserts the compute-arm error.
+- `.gql` language-tests run once, on the one engine.
 - `gql/mod.rs`: `pub struct PreparedGqlQuery(pub LogicalOp)` — the single
   `LogicalOp::Match` the query runs as (+Debug+ToSql via MatchPlan renderer);
   `lower` / `parse_to_plan_with_settings` / `parse_with_capabilities` return

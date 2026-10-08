@@ -18,7 +18,7 @@ A table permission written as `WHERE <expr>` is a conditional permission
 whatever the expression folds to, so for a checked caller no field read off
 its rows is free: the WHERE clause is evaluated for every row the permission
 admits, and `(secret - 1 = 2) AND false` raises the subtraction error rather
-than short-circuiting to no rows. Every engine agrees, and the row itself
+than short-circuiting to no rows. The row itself
 stays readable.
 """
 

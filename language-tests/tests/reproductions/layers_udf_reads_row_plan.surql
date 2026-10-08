@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -32,17 +31,15 @@ value = "[{ a: 1, c: 2, id: t:1 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: x]
-    Compute [ctx: Db] [fields: x = fn::f()]
-        ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
-            TableScan [ctx: Db] [table: t, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: x]
-    Compute [ctx: Db] [fields: x = fn::row()]
-        ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
-            TableScan [ctx: Db] [table: t, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
@@ -56,9 +53,8 @@ value = '''
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: x, c]
-    Compute [ctx: Db] [fields: x = fn::f()]
-        ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
-            TableScan [ctx: Db] [table: t, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: c = a + 1 : int @computed]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 */
 

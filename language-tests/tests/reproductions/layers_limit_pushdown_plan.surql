@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_limit_pushdown_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -46,7 +45,7 @@ value = '''
 value = '''
 'SelectProject [ctx: Db] [projections: dbl]
     Limit [ctx: Db] [limit: 2]
-        SortTopKByKey [ctx: Db] [sort_keys: dbl DESC, limit: 2]
+        Sort [ctx: Db] [sort_keys: dbl DESC, keep: 2]
             ProjectLayer [ctx: Db] [columns: dbl = <computed> : int @computed]
                 TableScan [ctx: Db] [table: t, direction: Forward]
 ''''

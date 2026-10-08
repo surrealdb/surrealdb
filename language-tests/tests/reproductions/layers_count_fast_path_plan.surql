@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_count_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -13,26 +12,26 @@ reason = """
 	and the layer appears above the scan.
 """
 
-# 0: no computed field is read: the key-range count, no layer.
 [[test.results]]
 value = '''
-'CountScan [ctx: Db] [source: t]
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: t]
 ''''
 
-# 1: a predicate on a stored field: still no layer between the aggregate and the scan.
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: a > 1, pre_decode_filter: yes]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: t, direction: Forward, predicate: a > 1, pre_decode_filter: yes]
 ''''
 
-# 2: a predicate on the computed field derives it: the layer stands above the scan.
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [mode: GROUP ALL]
-    Filter [ctx: Db] [predicate: n > 0]
-        ProjectLayer [ctx: Db] [columns: n = <computed> : int @computed]
-            TableScan [ctx: Db] [table: t, direction: Forward]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: n > 0]
+            ProjectLayer [ctx: Db] [columns: n = <computed> : int @computed]
+                TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 */
 

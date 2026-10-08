@@ -94,7 +94,7 @@ pub use self::kind::{Kind, KindLiteral};
 pub use self::limit::Limit;
 pub use self::literal::{Literal, ObjectEntry};
 pub use self::lookup::Lookup;
-// Re-exported for the GQL lowering and the streaming planner (PR-A landing
+// Re-exported for the GQL lowering and the planner (PR-A landing
 // piecemeal); not yet referenced through this alias in this crate.
 #[allow(unused_imports)]
 pub use self::match_plan::MatchPlan;

@@ -13,7 +13,7 @@ reason = """
 	right side, and `NONE` and `NULL` keys match their own kind as `IN`
 	compares elements. Shapes the pass does not lift — a `LIMIT`, a
 	correlation through a function argument, a `$this`, a `MATCHES` in the
-	subquery's filter — still answer the same under every planner strategy.
+	subquery's filter — still answer the same.
 """
 
 [[test.results]]

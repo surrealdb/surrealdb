@@ -27,27 +27,42 @@
 //! another table — matches nothing: a `Left` join null-fills the alias, a
 //! `Semi` join drops the row, an `Anti` join keeps it.
 
+#[cfg(test)]
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use futures::StreamExt;
+#[cfg(test)]
 use tracing::instrument;
 
+#[cfg(test)]
 use super::JoinFrame;
+#[cfg(test)]
 use super::hash_join::JoinType;
+#[cfg(test)]
 use crate::catalog::providers::TableProvider;
+#[cfg(test)]
 use crate::exec::operators::scan::common::{resolve_record_batch, resolve_version_stamp};
+#[cfg(test)]
 use crate::exec::operators::scan::resolved::EnforcementMode;
+#[cfg(test)]
 use crate::exec::permission::{should_check_perms, validate_record_user_access};
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ControlFlowExt, EvalContext, ExecOperator,
 	ExecutionContext, FlowResult, OperatorMetrics, OutputOrdering, PhysicalExpr, ValueBatch,
 	ValueBatchStream, buffer_stream, monitor_stream,
 };
+#[cfg(test)]
 use crate::kvs::CachePolicy;
+#[cfg(test)]
 use crate::val::{RecordId, TableName, Value};
 
+#[cfg(test)]
 /// A join that reads its right side by record id; see the module docs.
 #[derive(Debug, Clone)]
 pub struct LookupJoin {
@@ -72,7 +87,9 @@ pub struct LookupJoin {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl LookupJoin {
+	#[cfg(test)]
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		left: Arc<dyn ExecOperator>,
@@ -97,12 +114,14 @@ impl LookupJoin {
 		}
 	}
 
+	#[cfg(test)]
 	/// Whether the join's expressions and right plan are the table
 	/// definer's and the plan is compiled for a caller they are enforced on.
 	fn redacted(&self) -> bool {
 		self.frame.as_ref().is_some_and(|frame| frame.checked_caller)
 	}
 
+	#[cfg(test)]
 	fn own_expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
 		let mut out = vec![("key", &self.key)];
 		if let Some(residual) = self.residual.as_ref() {
@@ -112,6 +131,7 @@ impl LookupJoin {
 	}
 }
 
+#[cfg(test)]
 impl ExecOperator for LookupJoin {
 	fn name(&self) -> &'static str {
 		"LookupJoin"
@@ -214,7 +234,7 @@ impl ExecOperator for LookupJoin {
 		let buffer_size = ctx.root().ctx.config.exec.operator_buffer_size;
 		let left_stream = buffer_stream(
 			self.left.execute(ctx)?,
-			self.left.access_mode(),
+			self.access_mode().combine(self.left.access_mode()),
 			self.left.cardinality_hint(),
 			buffer_size,
 		);
@@ -329,6 +349,7 @@ impl ExecOperator for LookupJoin {
 	}
 }
 
+#[cfg(test)]
 /// The left row with `value` set under `alias`. A left row that is not an
 /// object has no field to hold the alias and is emitted as it is.
 fn with_alias(left_row: &Value, alias: &str, value: Value) -> Value {
@@ -342,6 +363,7 @@ fn with_alias(left_row: &Value, alias: &str, value: Value) -> Value {
 	}
 }
 
+#[cfg(test)]
 async fn passes(
 	residual: Option<&dyn PhysicalExpr>,
 	eval: &EvalContext<'_>,
@@ -355,6 +377,7 @@ async fn passes(
 	}
 }
 
+#[cfg(test)]
 /// The leaf of a [`LookupJoin`]'s right plan: yields the records of `table`
 /// whose ids the context's current value holds, in one batched read.
 ///
@@ -375,7 +398,9 @@ pub struct RecordBatchFetch {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl RecordBatchFetch {
+	#[cfg(test)]
 	pub(crate) fn new(
 		table: TableName,
 		enforcement: EnforcementMode,
@@ -390,6 +415,7 @@ impl RecordBatchFetch {
 	}
 }
 
+#[cfg(test)]
 impl ExecOperator for RecordBatchFetch {
 	fn name(&self) -> &'static str {
 		"RecordBatchFetch"

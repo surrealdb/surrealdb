@@ -1,0 +1,689 @@
+//! Descriptors, and the decoder and encoder that interpret them.
+
+use anyhow::{Context, Result, bail};
+use rust_decimal::Decimal;
+
+use super::wire::{Reader, Writer};
+use super::{types, value};
+use crate::val::{Number, Object, Value};
+
+/// The shape of an encoded value.
+#[derive(Debug, Clone)]
+pub(super) enum Ty {
+	Bool,
+	/// Unsigned integers are varints; `u8` is one byte.
+	U8,
+	Uint,
+	/// Signed integers are zigzag varints.
+	Int,
+	F32,
+	F64,
+	/// A `String`, `Strand`, `TableName` or `str`: length and UTF-8.
+	String,
+	/// A `Vec<u8>`: length and bytes.
+	Bytes,
+	Uuid,
+	Decimal,
+	/// A `std::time::Duration`: seconds, then nanoseconds.
+	Duration,
+	/// A `chrono::DateTime<Utc>`: signed seconds, then nanoseconds.
+	DateTime,
+	Option(Box<Ty>),
+	/// Length, then each element.
+	Vec(Box<Ty>),
+	/// Length, then each key and value.
+	Map(Box<Ty>, Box<Ty>),
+	Tuple(Vec<Ty>),
+	/// A type with a descriptor of its own.
+	Named(&'static str),
+	/// A type of the `Value` family, read and written natively
+	/// ([`super::value`]).
+	Native(Native),
+}
+
+/// The `Value` family's types, each of which decodes to the value it is.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Native {
+	Value,
+	Number,
+	/// `val::Datetime`: a revisioned newtype over a `chrono` datetime.
+	Datetime,
+	/// `val::Duration`: a revisioned newtype over a `std` duration.
+	Duration,
+	RecordId,
+	/// A `RecordIdKey` on its own, read as a record id of the empty table.
+	RecordIdKey,
+}
+
+/// How one revision of a type is framed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Framing {
+	/// Fields in order; an enum's variant as a discriminant varint first.
+	Plain,
+	/// `optimised, indexed_struct`: a struct's fields behind a `u32`
+	/// little-endian length and a prologue of each field's `u32` offset into
+	/// the payload.
+	Indexed,
+}
+
+/// A field that a revision may lack, and what it reads as then.
+#[derive(Debug, Clone)]
+pub(super) enum Missing {
+	/// The type's default: `NONE`, zero, empty, `false`.
+	Default,
+	/// A fixed value.
+	Value(fn() -> Value),
+	/// Rebuilt from the value of a field the revision had.
+	Convert {
+		from: &'static str,
+		convert: fn(Value) -> Result<Value>,
+	},
+}
+
+/// One field of a struct, or of a struct-like variant.
+#[derive(Debug, Clone)]
+pub(super) struct Field {
+	pub(super) name: &'static str,
+	pub(super) ty: Ty,
+	/// The first revision that writes it.
+	pub(super) start: u16,
+	/// The first revision that no longer writes it.
+	pub(super) end: Option<u16>,
+	/// What it reads as in a revision that does not write it.
+	pub(super) missing: Missing,
+}
+
+impl Field {
+	pub(super) fn new(name: &'static str, ty: Ty) -> Self {
+		Self {
+			name,
+			ty,
+			start: 1,
+			end: None,
+			missing: Missing::Default,
+		}
+	}
+
+	pub(super) fn start(mut self, start: u16) -> Self {
+		self.start = start;
+		self
+	}
+
+	pub(super) fn end(mut self, end: u16) -> Self {
+		self.end = Some(end);
+		self
+	}
+
+	pub(super) fn missing(mut self, missing: Missing) -> Self {
+		self.missing = missing;
+		self
+	}
+
+	fn alive(&self, revision: u16) -> bool {
+		self.start <= revision && self.end.is_none_or(|end| revision < end)
+	}
+}
+
+/// One variant of an enum.
+#[derive(Debug, Clone)]
+pub(super) struct Variant {
+	pub(super) name: &'static str,
+	pub(super) shape: Shape,
+	pub(super) start: u16,
+	pub(super) end: Option<u16>,
+	/// For a variant no current revision writes, the current value it
+	/// reads as.
+	pub(super) convert: Option<fn(Value) -> Result<Value>>,
+}
+
+/// What a variant carries.
+#[derive(Debug, Clone)]
+pub(super) enum Shape {
+	Unit,
+	/// Positional fields; one field reads as its value, several as an array.
+	Tuple(Vec<Ty>),
+	/// Named fields, read as an object.
+	Struct(Vec<Field>),
+}
+
+impl Variant {
+	pub(super) fn new(name: &'static str, shape: Shape) -> Self {
+		Self {
+			name,
+			shape,
+			start: 1,
+			end: None,
+			convert: None,
+		}
+	}
+
+	pub(super) fn start(mut self, start: u16) -> Self {
+		self.start = start;
+		self
+	}
+
+	/// Retire the variant at revision `end`: what an older revision wrote
+	/// as it reads as `convert` of its body.
+	pub(super) fn end(mut self, end: u16, convert: fn(Value) -> Result<Value>) -> Self {
+		self.end = Some(end);
+		self.convert = Some(convert);
+		self
+	}
+
+	fn alive(&self, revision: u16) -> bool {
+		self.start <= revision && self.end.is_none_or(|end| revision < end)
+	}
+}
+
+/// What a type is.
+#[derive(Debug, Clone)]
+pub(super) enum Body {
+	Struct(Vec<Field>),
+	Enum(Vec<Variant>),
+	/// Written as another shape, with no revision header of its own: an id
+	/// newtype over a `u32`, a string wrapper.
+	Transparent(Ty),
+}
+
+/// A revisioned type.
+#[derive(Debug, Clone)]
+pub(crate) struct TypeDesc {
+	pub(super) name: &'static str,
+	/// The revision encoding writes.
+	pub(super) current: u16,
+	/// The first revision framed `optimised, indexed_struct`, if any.
+	pub(super) indexed_from: Option<u16>,
+	pub(super) body: Body,
+}
+
+impl TypeDesc {
+	pub(super) fn structure(name: &'static str, current: u16, fields: Vec<Field>) -> Self {
+		Self {
+			name,
+			current,
+			indexed_from: None,
+			body: Body::Struct(fields),
+		}
+	}
+
+	pub(super) fn enumeration(name: &'static str, current: u16, variants: Vec<Variant>) -> Self {
+		Self {
+			name,
+			current,
+			indexed_from: None,
+			body: Body::Enum(variants),
+		}
+	}
+
+	pub(super) fn transparent(name: &'static str, ty: Ty) -> Self {
+		Self {
+			name,
+			current: 1,
+			indexed_from: None,
+			body: Body::Transparent(ty),
+		}
+	}
+
+	pub(super) fn indexed_from(mut self, revision: u16) -> Self {
+		self.indexed_from = Some(revision);
+		self
+	}
+
+	fn framing(&self, revision: u16) -> Framing {
+		match self.indexed_from {
+			Some(from) if revision >= from => Framing::Indexed,
+			_ => Framing::Plain,
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Decoding
+// ---------------------------------------------------------------------------
+
+pub(super) fn decode_named(desc: &TypeDesc, r: &mut Reader<'_>) -> Result<Value> {
+	if let Body::Transparent(ty) = &desc.body {
+		return decode_ty(ty, r);
+	}
+	let revision = u16::try_from(r.varint()?)
+		.map_err(|_| anyhow::anyhow!("a revision past u16 for {}", desc.name))?;
+	if revision == 0 || revision > desc.current {
+		bail!("{} has no revision {revision}", desc.name);
+	}
+	let framing = desc.framing(revision);
+	match &desc.body {
+		Body::Struct(fields) => match framing {
+			Framing::Plain => decode_fields(fields, revision, r),
+			Framing::Indexed => {
+				let mut payload = r.varlen()?;
+				let alive = fields.iter().filter(|f| f.alive(revision)).count();
+				payload.take(alive * 4)?;
+				decode_fields(fields, revision, &mut payload)
+			}
+		},
+		Body::Enum(variants) => decode_variant(desc, variants, revision, r),
+		Body::Transparent(_) => unreachable!("handled above"),
+	}
+	.with_context(|| format!("decoding a {} at revision {revision}", desc.name))
+}
+
+fn decode_fields(fields: &[Field], revision: u16, r: &mut Reader<'_>) -> Result<Value> {
+	let mut read = Vec::with_capacity(fields.len());
+	for field in fields.iter().filter(|f| f.alive(revision)) {
+		read.push((field.name, decode_ty(&field.ty, r)?));
+	}
+	let mut object = Object::default();
+	for field in fields.iter().filter(|f| f.end.is_none()) {
+		let value = match read.iter().position(|(name, _)| *name == field.name) {
+			Some(at) => read.swap_remove(at).1,
+			None => missing(field, &mut read)?,
+		};
+		object.insert(field.name.to_owned(), value);
+	}
+	Ok(Value::Object(object))
+}
+
+fn missing(field: &Field, read: &mut Vec<(&'static str, Value)>) -> Result<Value> {
+	Ok(match &field.missing {
+		Missing::Default => default_of(&field.ty)?,
+		Missing::Value(value) => value(),
+		Missing::Convert {
+			from,
+			convert,
+		} => match read.iter().position(|(name, _)| name == from) {
+			Some(at) => convert(read.swap_remove(at).1)?,
+			None => bail!("field `{}` converts from `{from}`, which was not read", field.name),
+		},
+	})
+}
+
+fn default_of(ty: &Ty) -> Result<Value> {
+	Ok(match ty {
+		Ty::Bool => Value::Bool(false),
+		Ty::U8 | Ty::Uint | Ty::Int => Value::Number(Number::Int(0)),
+		Ty::F32 | Ty::F64 => Value::Number(Number::Float(0.0)),
+		Ty::String => Value::String(Default::default()),
+		Ty::Bytes => Value::Bytes(Default::default()),
+		Ty::Option(_) => Value::None,
+		Ty::Vec(_) => Value::Array(Default::default()),
+		Ty::Map(..) => Value::Object(Default::default()),
+		Ty::Uuid => Value::Uuid(Default::default()),
+		other => bail!("no default for a missing {other:?}"),
+	})
+}
+
+fn decode_variant(
+	desc: &TypeDesc,
+	variants: &[Variant],
+	revision: u16,
+	r: &mut Reader<'_>,
+) -> Result<Value> {
+	let alive: Vec<&Variant> = variants.iter().filter(|v| v.alive(revision)).collect();
+	let index = r.varint()? as usize;
+	let variant =
+		alive.get(index).with_context(|| format!("no variant {index} of {}", desc.name))?;
+	let body = decode_shape(&variant.shape, revision, r)?;
+	if let Some(convert) = variant.convert {
+		return convert(body);
+	}
+	let mut object = Object::default();
+	object.insert(variant.name.to_owned(), body);
+	Ok(Value::Object(object))
+}
+
+fn decode_shape(shape: &Shape, revision: u16, r: &mut Reader<'_>) -> Result<Value> {
+	Ok(match shape {
+		Shape::Unit => Value::None,
+		Shape::Tuple(tys) if tys.len() == 1 => decode_ty(&tys[0], r)?,
+		Shape::Tuple(tys) => {
+			let mut out = Vec::with_capacity(tys.len());
+			for ty in tys {
+				out.push(decode_ty(ty, r)?);
+			}
+			Value::Array(out.into())
+		}
+		Shape::Struct(fields) => decode_fields(fields, revision, r)?,
+	})
+}
+
+fn int(v: i128) -> Result<Value> {
+	Ok(Value::Number(match i64::try_from(v) {
+		Ok(v) => Number::Int(v),
+		Err(_) => Number::Decimal(
+			Decimal::try_from_i128_with_scale(v, 0)
+				.map_err(|_| anyhow::anyhow!("an integer past a decimal"))?,
+		),
+	}))
+}
+
+fn decode_ty(ty: &Ty, r: &mut Reader<'_>) -> Result<Value> {
+	Ok(match ty {
+		Ty::Bool => match r.u8()? {
+			0 => Value::Bool(false),
+			1 => Value::Bool(true),
+			b => bail!("an invalid bool {b}"),
+		},
+		Ty::U8 => int(r.u8()? as i128)?,
+		Ty::Uint => int(i128::try_from(r.varint()?)?)?,
+		Ty::Int => int(r.zigzag()?)?,
+		Ty::F32 => Value::Number(Number::Float(f32::from_le_bytes(r.array()?) as f64)),
+		Ty::F64 => Value::Number(Number::Float(f64::from_le_bytes(r.array()?))),
+		Ty::String => Value::String(
+			std::str::from_utf8(r.bytes()?).context("a string that is not UTF-8")?.into(),
+		),
+		Ty::Bytes => Value::Bytes(r.bytes()?.to_vec().into()),
+		Ty::Uuid => Value::Uuid(crate::val::Uuid(uuid::Uuid::from_bytes(r.array()?))),
+		Ty::Decimal => Value::Number(Number::Decimal(Decimal::deserialize(r.array()?))),
+		Ty::Duration => {
+			let secs = u64::try_from(r.varint()?)?;
+			let nanos = u32::try_from(r.varint()?)?;
+			Value::Duration(crate::val::Duration(std::time::Duration::new(secs, nanos)))
+		}
+		Ty::DateTime => {
+			let secs = i64::try_from(r.zigzag()?)?;
+			let nanos = u32::try_from(r.varint()?)?;
+			let at = chrono::DateTime::from_timestamp(secs, nanos)
+				.with_context(|| format!("a datetime out of range: {secs}s {nanos}ns"))?;
+			Value::Datetime(crate::val::Datetime(at))
+		}
+		Ty::Option(inner) => match r.u8()? {
+			0 => Value::None,
+			1 if holds_none(inner) => Value::Array(vec![decode_ty(inner, r)?].into()),
+			1 => decode_ty(inner, r)?,
+			b => bail!("an invalid option tag {b}"),
+		},
+		Ty::Vec(inner) => {
+			let len = r.len()?;
+			let mut out = Vec::with_capacity(len.min(4096));
+			for _ in 0..len {
+				out.push(decode_ty(inner, r)?);
+			}
+			Value::Array(out.into())
+		}
+		Ty::Map(k, v) => {
+			let len = r.len()?;
+			let mut out = Vec::with_capacity(len.min(4096));
+			for _ in 0..len {
+				out.push(Value::Array(vec![decode_ty(k, r)?, decode_ty(v, r)?].into()));
+			}
+			Value::Array(out.into())
+		}
+		Ty::Tuple(tys) => {
+			let mut out = Vec::with_capacity(tys.len());
+			for ty in tys {
+				out.push(decode_ty(ty, r)?);
+			}
+			Value::Array(out.into())
+		}
+		Ty::Named(name) => decode_named(types::lookup(name)?, r)?,
+		Ty::Native(native) => match native {
+			Native::Value => value::decode(r)?,
+			Native::Number => Value::Number(value::decode_number(r)?),
+			Native::Datetime => Value::Datetime(value::decode_val_datetime(r)?),
+			Native::Duration => Value::Duration(value::decode_val_duration(r)?),
+			Native::RecordId => Value::RecordId(value::decode_record_id(r)?),
+			Native::RecordIdKey => Value::RecordId(crate::val::RecordId {
+				table: crate::val::TableName::new(""),
+				key: value::decode_record_id_key(r)?,
+			}),
+		},
+	})
+}
+
+/// Whether a value of `ty` can itself be `NONE`, so an option of it reads
+/// `Some(x)` as the one-element array `[x]` and only `None` as `NONE`.
+fn holds_none(ty: &Ty) -> bool {
+	matches!(ty, Ty::Native(Native::Value) | Ty::Option(_))
+}
+
+// ---------------------------------------------------------------------------
+// Encoding
+// ---------------------------------------------------------------------------
+
+pub(super) fn encode_named(desc: &TypeDesc, value: &Value, w: &mut Writer) -> Result<()> {
+	if let Body::Transparent(ty) = &desc.body {
+		return encode_ty(ty, value, w);
+	}
+	match &desc.body {
+		Body::Struct(_) => {
+			let object = object(value)?;
+			encode_struct(desc, |field| object.get(field.name).unwrap_or(&Value::None), w)
+		}
+		Body::Enum(variants) => {
+			w.varint(desc.current as u128);
+			encode_variant(desc, variants, desc.current, value, w)
+				.map_err(|e| located(e, || format!("encoding a {}", desc.name)))
+		}
+		Body::Transparent(_) => unreachable!("handled above"),
+	}
+}
+
+/// Encode struct `desc` at its current revision, each field alive in it the
+/// value `field` answers for it, in the framing the revision was written in.
+pub(super) fn encode_struct<'v>(
+	desc: &TypeDesc,
+	mut field: impl FnMut(&Field) -> &'v Value,
+	w: &mut Writer,
+) -> Result<()> {
+	let Body::Struct(fields) = &desc.body else {
+		bail!("{} is not a struct", desc.name);
+	};
+	let revision = desc.current;
+	w.varint(revision as u128);
+	let alive = || fields.iter().filter(|f| f.alive(revision));
+	let encode = |f: &Field, value: &Value, w: &mut Writer| {
+		encode_ty(&f.ty, value, w).map_err(|e| located(e, || format!("field `{}`", f.name)))
+	};
+	match desc.framing(revision) {
+		Framing::Plain => {
+			for f in alive() {
+				encode(f, field(f), w)?;
+			}
+			Ok(())
+		}
+		// A table of where each field's body starts, counted from the start of
+		// the table, then the bodies.
+		Framing::Indexed => w.varlen(|w| {
+			let count = alive().count();
+			let table = w.reserve(count * 4);
+			for (at, f) in alive().enumerate() {
+				let off = w.since(table)?;
+				w.patch_u32(table + at * 4, off);
+				encode(f, field(f), w)?;
+			}
+			Ok(())
+		}),
+	}
+	.map_err(|e| located(e, || format!("encoding a {}", desc.name)))
+}
+
+/// `e`, an error encoding a value, located by `at`; the error a closure's
+/// encoding raises is the user's own, and is left as it is.
+fn located(e: anyhow::Error, at: impl FnOnce() -> String) -> anyhow::Error {
+	if e.downcast_ref::<revision::Error>().is_some() {
+		e
+	} else {
+		e.context(at())
+	}
+}
+
+fn object(value: &Value) -> Result<&Object> {
+	match value {
+		Value::Object(object) => Ok(object),
+		other => bail!("expected an object, found {other:?}"),
+	}
+}
+
+fn encode_fields(fields: &[Field], revision: u16, value: &Value, w: &mut Writer) -> Result<()> {
+	let object = object(value)?;
+	for field in fields.iter().filter(|f| f.alive(revision)) {
+		let value = object.get(field.name).unwrap_or(&Value::None);
+		encode_ty(&field.ty, value, w)
+			.map_err(|e| located(e, || format!("field `{}`", field.name)))?;
+	}
+	Ok(())
+}
+
+fn encode_variant(
+	desc: &TypeDesc,
+	variants: &[Variant],
+	revision: u16,
+	value: &Value,
+	w: &mut Writer,
+) -> Result<()> {
+	let object = object(value)?;
+	let (name, body) = object
+		.iter()
+		.next()
+		.filter(|_| object.len() == 1)
+		.context("a variant is an object with one key")?;
+	let alive: Vec<&Variant> = variants.iter().filter(|v| v.alive(revision)).collect();
+	let index = alive
+		.iter()
+		.position(|v| v.name == name.as_str())
+		.with_context(|| format!("{} has no variant `{name}`", desc.name))?;
+	w.varint(index as u128);
+	encode_shape(&alive[index].shape, revision, body, w)
+}
+
+fn encode_shape(shape: &Shape, revision: u16, value: &Value, w: &mut Writer) -> Result<()> {
+	match shape {
+		Shape::Unit => Ok(()),
+		Shape::Tuple(tys) if tys.len() == 1 => encode_ty(&tys[0], value, w),
+		Shape::Tuple(tys) => {
+			let items = array(value)?;
+			if items.len() != tys.len() {
+				bail!("a tuple variant of {} fields holding {}", tys.len(), items.len());
+			}
+			for (ty, item) in tys.iter().zip(items) {
+				encode_ty(ty, item, w)?;
+			}
+			Ok(())
+		}
+		Shape::Struct(fields) => encode_fields(fields, revision, value, w),
+	}
+}
+
+fn array(value: &Value) -> Result<&[Value]> {
+	match value {
+		Value::Array(array) => Ok(array.0.as_slice()),
+		other => bail!("expected an array, found {other:?}"),
+	}
+}
+
+fn integer(value: &Value) -> Result<i128> {
+	match value {
+		Value::Number(Number::Int(v)) => Ok(*v as i128),
+		Value::Number(Number::Decimal(d)) if d.fract().is_zero() => {
+			d.mantissa().checked_div(10i128.pow(d.scale())).context("an integer decimal")
+		}
+		other => bail!("expected an integer, found {other:?}"),
+	}
+}
+
+fn float(value: &Value) -> Result<f64> {
+	match value {
+		Value::Number(Number::Float(v)) => Ok(*v),
+		other => bail!("expected a float, found {other:?}"),
+	}
+}
+
+fn encode_ty(ty: &Ty, value: &Value, w: &mut Writer) -> Result<()> {
+	match ty {
+		Ty::Bool => match value {
+			Value::Bool(b) => w.u8(*b as u8),
+			other => bail!("expected a bool, found {other:?}"),
+		},
+		Ty::U8 => w.u8(u8::try_from(integer(value)?)?),
+		Ty::Uint => w.varint(u128::try_from(integer(value)?)?),
+		Ty::Int => w.zigzag(integer(value)?),
+		Ty::F32 => w.raw(&(float(value)? as f32).to_le_bytes()),
+		Ty::F64 => w.raw(&float(value)?.to_le_bytes()),
+		Ty::String => match value {
+			Value::String(s) => w.bytes(s.as_bytes()),
+			Value::Table(t) => w.bytes(t.as_str().as_bytes()),
+			other => bail!("expected a string, found {other:?}"),
+		},
+		Ty::Bytes => match value {
+			Value::Bytes(b) => w.bytes(&b.0),
+			other => bail!("expected bytes, found {other:?}"),
+		},
+		Ty::Uuid => match value {
+			Value::Uuid(u) => w.raw(u.0.as_bytes()),
+			other => bail!("expected a uuid, found {other:?}"),
+		},
+		Ty::Decimal => match value {
+			Value::Number(Number::Decimal(d)) => w.raw(&d.serialize()),
+			other => bail!("expected a decimal, found {other:?}"),
+		},
+		Ty::Duration => match value {
+			Value::Duration(d) => {
+				w.varint(d.0.as_secs() as u128);
+				w.varint(d.0.subsec_nanos() as u128);
+			}
+			other => bail!("expected a duration, found {other:?}"),
+		},
+		Ty::DateTime => match value {
+			Value::Datetime(d) => {
+				w.zigzag(d.0.timestamp() as i128);
+				w.varint(d.0.timestamp_subsec_nanos() as u128);
+			}
+			other => bail!("expected a datetime, found {other:?}"),
+		},
+		Ty::Option(inner) => match value {
+			Value::None => w.u8(0),
+			some if holds_none(inner) => {
+				let [some] = array(some)? else {
+					bail!("an option of a value is NONE or a one-element array");
+				};
+				w.u8(1);
+				encode_ty(inner, some, w)?;
+			}
+			some => {
+				w.u8(1);
+				encode_ty(inner, some, w)?;
+			}
+		},
+		Ty::Vec(inner) => {
+			let items = array(value)?;
+			w.varint(items.len() as u128);
+			for item in items {
+				encode_ty(inner, item, w)?;
+			}
+		}
+		Ty::Map(k, v) => {
+			let entries = array(value)?;
+			w.varint(entries.len() as u128);
+			for entry in entries {
+				let pair = array(entry)?;
+				if pair.len() != 2 {
+					bail!("a map entry is a [key, value] pair");
+				}
+				encode_ty(k, &pair[0], w)?;
+				encode_ty(v, &pair[1], w)?;
+			}
+		}
+		Ty::Tuple(tys) => {
+			let items = array(value)?;
+			if items.len() != tys.len() {
+				bail!("a tuple of {} holding {}", tys.len(), items.len());
+			}
+			for (ty, item) in tys.iter().zip(items) {
+				encode_ty(ty, item, w)?;
+			}
+		}
+		Ty::Named(name) => encode_named(types::lookup(name)?, value, w)?,
+		Ty::Native(native) => match (native, value) {
+			(Native::Value, value) => value::encode(value, w)?,
+			(Native::Number, Value::Number(n)) => value::encode_number(n, w),
+			(Native::Datetime, Value::Datetime(d)) => value::encode_val_datetime(d, w),
+			(Native::Duration, Value::Duration(d)) => value::encode_val_duration(d, w),
+			(Native::RecordId, Value::RecordId(rid)) => value::encode_record_id(rid, w)?,
+			(Native::RecordIdKey, Value::RecordId(rid)) => {
+				value::encode_record_id_key(&rid.key, w)?
+			}
+			(native, other) => bail!("expected a {native:?}, found {other:?}"),
+		},
+	}
+	Ok(())
+}

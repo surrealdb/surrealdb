@@ -3,7 +3,6 @@
 namespace = true
 database = true
 imports = ["reproductions/permission_where_true_is_conditional_import.surql"]
-planner-strategy = ["all-ro"]
 
 signin = """{
 	ns: "test",
@@ -27,13 +26,14 @@ reason = """
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: $auth]
+    ExprPlan [ctx: Rt] [expr: $auth]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: secret - 1 = 2 AND false, pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: secret - 1 = 2 AND false]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]

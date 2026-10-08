@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test EXPLAIN with complex queries that combine multiple planner operators into deep plans"
@@ -10,47 +9,50 @@ value = "'OK'"
 
 [[test.results]]
 value = '''
-'Limit [ctx: Db] [limit: 2]
-    SortTopK [ctx: Db] [order_by: revenue DESC, limit: 2]
-        Aggregate [ctx: Db] [by: category]
-            TableScan [ctx: Db] [table: product, direction: Forward]
+'SelectProject [ctx: Db] [projections: *]
+    Limit [ctx: Db] [limit: 2]
+        Sort [ctx: Db] [sort_keys: revenue DESC, keep: 2]
+            Aggregate [ctx: Db] [by: category]
+                TableScan [ctx: Db] [table: product, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 5]
-        SortTopKByKey [ctx: Db] [sort_keys: rating DESC, limit: 5]
-            Split [ctx: Db] [on: tags]
-                TableScan [ctx: Db] [table: product, direction: Forward, predicate: price < 50, pre_decode_filter: yes]
+        Sort [ctx: Db] [sort_keys: rating DESC, keep: 5]
+            Split [ctx: Db] [targets: tags]
+                SelectProject [ctx: Db] [projections: *]
+                    TableScan [ctx: Db] [table: product, direction: Forward, predicate: price < 50, pre_decode_filter: yes]
 ''''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name, price, rating]
     Limit [ctx: Db] [limit: 1, offset: 0]
-        SortTopKByKey [ctx: Db] [sort_keys: price ASC, limit: 1]
-            IndexScan [ctx: Db] [index: idx_cat_brand, access: ['electronics', 'Acme'], direction: Forward, predicate: category = 'electronics' AND brand = 'Acme']
+        Sort [ctx: Db] [sort_keys: price ASC, keep: 1]
+            IndexScan [ctx: Db] [table: product, index: idx_cat_brand, access: ['electronics', 'Acme'], direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id, name]
-    FullTextScan [ctx: Db] [index: idx_ft_name, query: Widget]
+    FullTextScan [ctx: Db] [table: product, index: idx_ft_name, query: Widget]
 ''''
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward, predicate: category = 'electronics']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: product, index: idx_category, access: = 'electronics', direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 5]
-        SortTopKByKey [ctx: Db] [sort_keys: id ASC, limit: 5]
-            Union [ctx: Db] [inputs: 2]
+        Sort [ctx: Db] [sort_keys: id ASC, keep: 5]
+            Union [ctx: Db]
                 TableScan [ctx: Db] [table: product, direction: Forward]
                 TableScan [ctx: Db] [table: review, direction: Forward]
 ''''
@@ -64,15 +66,17 @@ value = '''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    SelectProject [ctx: Db] [projections: *]
-        Filter [ctx: Db] [predicate: category = 'electronics' AND tags = ['sale']]
-            Union [ctx: Db] [inputs: 2]
-                SelectProject [ctx: Db] [projections: *]
-                    Filter [ctx: Db] [predicate: rating >= 4f]
-                        Union [ctx: Db] [inputs: 2]
-                            TableScan [ctx: Db] [table: product, direction: Forward]
-                            TableScan [ctx: Db] [table: review, direction: Forward]
-                IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
+    Subquery [ctx: Rt]
+        SelectProject [ctx: Db] [projections: *]
+            Filter [ctx: Db] [predicate: category = 'electronics' AND tags = ['sale']]
+                Union [ctx: Db]
+                    Subquery [ctx: Rt]
+                        SelectProject [ctx: Db] [projections: *]
+                            Filter [ctx: Db] [predicate: rating >= 4f]
+                                Union [ctx: Db]
+                                    TableScan [ctx: Db] [table: product, direction: Forward]
+                                    TableScan [ctx: Db] [table: review, direction: Forward]
+                    IndexScan [ctx: Db] [table: product, index: idx_category, access: = 'electronics', direction: Forward]
 "'''
 */
 

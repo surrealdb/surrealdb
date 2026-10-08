@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Fixture for 7555_knn_returns_k_rows_the_caller_can_see_streaming.surql and _legacy.surql: an HNSW-indexed and a DiskANN-indexed table whose SELECT permission hides every row nearer the query than alice's, plus the record user those tests sign in as. Runs as owner."
+reason = "Fixture for 7555_knn_returns_k_rows_the_caller_can_see.surql: an HNSW-indexed and a DiskANN-indexed table whose SELECT permission hides every row nearer the query than alice's, plus the record user those tests sign in as. Runs as owner."
 
 [[test.results]]
 value = "'OK'"

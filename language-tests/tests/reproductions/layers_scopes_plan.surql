@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_guarded_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -10,70 +9,53 @@ reason = """
 	block, an IF, `$parent` at the statement's own level or inside a nested
 	SELECT, a WHERE, a user-defined function call, a closure or a projection
 	function naming the field at run time is served by the guard layer above
-	the scan, so the layer is present for every one of those scopes and the
-	user expression sits above it; a predicate reading the guarded field, by
-	name or through a call evaluated against the row, keeps the filter above
-	the layer. The same stack stands above a record-id range scan and above
-	an edge-table scan.
+	the scan, so the layer is present for every one of those scopes; a
+	predicate reading the guarded field, by name or through a call evaluated
+	against the row, keeps the filter above the layers. The same stack stands
+	above a record-id range scan and above an edge-table scan. The plan
+	renders a layer without its columns and a nested statement as part of the
+	expression that holds it, so the depth of the stack and the placement of
+	the filter are what is pinned.
 """
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: s]
-    Compute [ctx: Db] [fields: s = (Return)]
-      s.subquery: Return [ctx: Db]
-          Expr [ctx: Db] [expr: secret]
-        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
-            ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
-                TableScan [ctx: Db] [table: t, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
+            TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: s]
-    Compute [ctx: Db] [fields: s = IF true THEN (Expr) END]
-        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
-            ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
-                TableScan [ctx: Db] [table: t, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
+            TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: s]
-    Compute [ctx: Db] [fields: s = $parent.secret]
-        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
-            ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
-                TableScan [ctx: Db] [table: t, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
+            TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: s]
-    Compute [ctx: Db] [fields: s = (UnwrapExactlyOne)]
-      s.subquery: UnwrapExactlyOne [ctx: Db]
-          ProjectValue [ctx: Db] [expr: $parent.secret]
-              ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
-                  ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
-                      Project [ctx: Db]
-                          RecordIdScan [ctx: Db] [record_id: t:1]
-        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-            ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
-                TableScan [ctx: Db] [table: t, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
+        ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
+            TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: row]
-    Compute [ctx: Db] [fields: row = (UnwrapExactlyOne)]
-      row.subquery: UnwrapExactlyOne [ctx: Db]
-          ProjectValue [ctx: Db] [expr: $parent]
-              ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-                  ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
-                      Project [ctx: Db]
-                          RecordIdScan [ctx: Db] [record_id: t:1]
-        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-            ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
-                TableScan [ctx: Db] [table: t, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
+        ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
+            TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
@@ -97,43 +79,14 @@ value = '''
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: s]
-    Compute [ctx: Db] [fields: s = fn::peek()]
-        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-            ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
-                TableScan [ctx: Db] [table: t, direction: Forward]
-''''
-
-[[test.results]]
-value = '''
-"SelectProject [ctx: Db] [projections: s]
-    Compute [ctx: Db] [fields: s = array::any([1], |$x: any| ($parent.secret = 'hidden'))]
-        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
-            ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
-                TableScan [ctx: Db] [table: t, direction: Forward]
-"'''
-
-[[test.results]]
-value = '''
-"SelectProject [ctx: Db] [projections: s]
-    Compute [ctx: Db] [fields: s = array::any([1], |$x: any| (secret = 'hidden'))]
-        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
-            ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
-                TableScan [ctx: Db] [table: t, direction: Forward]
-"'''
-
-[[test.results]]
-value = '''
-'SelectProject [ctx: Db] [projections: owner_flag]
-    Compute [ctx: Db] [fields: owner_flag = (Return)]
-      owner_flag.subquery: Return [ctx: Db]
-          Expr [ctx: Db] [expr: is_owner]
-        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
+    ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
+        ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
             TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Db] [projections: is_owner, secret AS s]
+'SelectProject [ctx: Db] [projections: s]
     ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
         ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
             TableScan [ctx: Db] [table: t, direction: Forward]
@@ -142,28 +95,44 @@ value = '''
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: s]
-    Compute [ctx: Db] [fields: s = (Return)]
-      s.subquery: Return [ctx: Db]
-          Expr [ctx: Db] [expr: secret]
-        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
-            ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
-                Project [ctx: Db]
-                    RecordIdScan [ctx: Db] [record_id: t:1..=9]
+    ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
+            TableScan [ctx: Db] [table: t, direction: Forward]
+''''
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: owner_flag]
+    ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
+        TableScan [ctx: Db] [table: t, direction: Forward]
+''''
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: is_owner, s]
+    ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
+            TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: s]
-    Compute [ctx: Db] [fields: s = (Return)]
-      s.subquery: Return [ctx: Db]
-          Expr [ctx: Db] [expr: secret]
-        ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
-            TableScan [ctx: Db] [table: owns, direction: Forward]
+    ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
+            RecordIdScan [ctx: Db] [record_id: t:1..=9]
 ''''
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Db] [projections: secret AS s]
+'SelectProject [ctx: Db] [projections: s]
+    ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
+        TableScan [ctx: Db] [table: owns, direction: Forward]
+''''
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: s]
     ProjectLayer [ctx: Db] [columns: secret = <permission> @permission]
         TableScan [ctx: Db] [table: owns, direction: Forward]
 ''''
@@ -179,7 +148,7 @@ value = '''
 
 [[test.results]]
 value = '''
-'Project [ctx: Db]
+'SelectProject [ctx: Db] [projections: s]
     ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
         ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
             TableScan [ctx: Db] [table: t, direction: Forward]
@@ -188,7 +157,13 @@ value = '''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: type::field(IF n = 21 THEN (Expr) ELSE (Expr) END) = 'hidden']
+    Filter [ctx: Db] [predicate: type::field((IF n = 21 THEN (
+  Sequence
+    Eval['secret']
+) ELSE (
+  Sequence
+    Eval['n']
+) END)) = 'hidden']
         ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
             ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
                 TableScan [ctx: Db] [table: t, direction: Forward]

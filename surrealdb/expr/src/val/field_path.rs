@@ -58,7 +58,26 @@ impl FieldPath {
 	pub fn field(name: impl Into<String>) -> Self {
 		FieldPath(vec![FieldPathPart::Field(name.into())])
 	}
+}
 
+impl From<&str> for FieldPath {
+	fn from(s: &str) -> Self {
+		if s.contains('.') {
+			let parts = s.split('.').map(|p| FieldPathPart::Field(p.to_string())).collect();
+			FieldPath(parts)
+		} else {
+			FieldPath::field(s)
+		}
+	}
+}
+
+impl From<String> for FieldPath {
+	fn from(s: String) -> Self {
+		FieldPath::from(s.as_str())
+	}
+}
+
+impl FieldPath {
 	/// Check if this is an empty path.
 	pub fn is_empty(&self) -> bool {
 		self.0.is_empty()

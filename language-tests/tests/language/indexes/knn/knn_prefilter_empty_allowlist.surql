@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Pre-filtered vector search (#548), empty allow-list: coverage is per-conjunct exact, so an empty bitmap proves no record can satisfy the WHERE — the query returns no rows through the graph-free exact tier, regardless of the residual, without touching the ANN index."

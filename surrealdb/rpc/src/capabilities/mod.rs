@@ -4,8 +4,6 @@ use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 
 use ipnet::IpNet;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use surrealdb_iam::{Auth, Level};
 use url::Url;
 
@@ -620,56 +618,6 @@ impl<T: Hash + Eq + PartialEq + Ord> Hash for Targets<T> {
 	}
 }
 
-/// Which engine a session's read-only statements go through.
-///
-/// The engine is chosen per statement by the core planner's `engine_for`: a
-/// write or a schema statement always runs on the compute executor, and a
-/// read-only statement runs on the streaming engine unless the session is
-/// `ComputeOnly`. A read-only statement the streaming engine declines — no
-/// logical form, or a shape its planner does not compile — runs on the
-/// compute executor under either of the other two settings, since every
-/// decline the planner makes is for a statement it has no plan for.
-#[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub enum NewPlannerStrategy {
-	/// The streaming engine for every read-only statement it can plan, the
-	/// compute executor for the rest.
-	#[default]
-	BestEffortReadOnlyStatements,
-	/// The compute executor for every statement. A GQL `MATCH`, which has no
-	/// compute form, is refused under this setting.
-	ComputeOnly,
-	/// The streaming engine for every read-only statement it can plan. Planned
-	/// identically to `BestEffortReadOnlyStatements`; the distinct name lets a
-	/// test or a deployment state which engine it means to exercise.
-	AllReadOnlyStatements,
-}
-
-impl fmt::Display for NewPlannerStrategy {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Self::BestEffortReadOnlyStatements => f.write_str("best-effort"),
-			Self::ComputeOnly => f.write_str("compute-only"),
-			Self::AllReadOnlyStatements => f.write_str("all-read-only"),
-		}
-	}
-}
-
-impl std::str::FromStr for NewPlannerStrategy {
-	type Err = String;
-
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match s {
-			"best-effort" => Ok(Self::BestEffortReadOnlyStatements),
-			"compute-only" => Ok(Self::ComputeOnly),
-			"all-read-only" => Ok(Self::AllReadOnlyStatements),
-			_ => Err(format!(
-				"unknown planner strategy: '{s}' (expected 'best-effort', 'compute-only', or 'all-read-only')"
-			)),
-		}
-	}
-}
-
 #[derive(Debug, Clone, Hash)]
 pub struct Capabilities {
 	scripting: bool,
@@ -690,14 +638,13 @@ pub struct Capabilities {
 	deny_arbitrary_query: Targets<ArbitraryQueryTarget>,
 	allow_eval_query: Targets<EvalQueryTarget>,
 	deny_eval_query: Targets<EvalQueryTarget>,
-	planner_strategy: NewPlannerStrategy,
 }
 
 impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
 			f,
-			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}, allow_eval_query={}, deny_eval_query={}, planner_strategy={}",
+			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}, allow_eval_query={}, deny_eval_query={},",
 			self.scripting,
 			self.guest_access,
 			self.live_query_notifications,
@@ -715,7 +662,6 @@ impl fmt::Display for Capabilities {
 			self.deny_arbitrary_query,
 			self.allow_eval_query,
 			self.deny_eval_query,
-			self.planner_strategy,
 		)
 	}
 }
@@ -743,7 +689,6 @@ impl Default for Capabilities {
 			// `--allow-all`): eval must be explicitly enabled per subject class.
 			allow_eval_query: Targets::None,
 			deny_eval_query: Targets::None,
-			planner_strategy: NewPlannerStrategy::default(),
 		}
 	}
 }
@@ -771,7 +716,6 @@ impl Capabilities {
 			// `--allow-all`): eval must be explicitly enabled per subject class.
 			allow_eval_query: Targets::None,
 			deny_eval_query: Targets::None,
-			planner_strategy: NewPlannerStrategy::default(),
 		}
 	}
 
@@ -795,7 +739,6 @@ impl Capabilities {
 			deny_arbitrary_query: Targets::None,
 			allow_eval_query: Targets::None,
 			deny_eval_query: Targets::None,
-			planner_strategy: NewPlannerStrategy::default(),
 		}
 	}
 
@@ -920,15 +863,6 @@ impl Capabilities {
 	pub fn without_http_routes(mut self, deny_http: Targets<RouteTarget>) -> Self {
 		self.deny_http = deny_http;
 		self
-	}
-
-	pub fn with_planner_strategy(mut self, strategy: NewPlannerStrategy) -> Self {
-		self.planner_strategy = strategy;
-		self
-	}
-
-	pub fn planner_strategy(&self) -> &NewPlannerStrategy {
-		&self.planner_strategy
 	}
 
 	pub fn allows_scripting(&self) -> bool {

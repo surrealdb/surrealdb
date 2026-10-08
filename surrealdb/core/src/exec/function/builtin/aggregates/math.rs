@@ -442,10 +442,9 @@ impl Spread {
 /// Shared accumulator for `math::variance` and `math::stddev`.
 ///
 /// Delegates to [`aggregation::shifted_accumulate`] and
-/// [`aggregation::shifted_sample_variance`], the same functions the legacy
-/// `GROUP BY` collector and materialized-view maintenance use, so all three
-/// paths produce bit-identical results over the same input order. Arithmetic
-/// stays in `Number`, so a group of `Decimal` inputs finalises as `Decimal`.
+/// [`aggregation::shifted_sample_variance`], the same functions materialized-view
+/// maintenance uses, so both paths produce bit-identical results over the same input order.
+/// Arithmetic stays in `Number`, so a group of `Decimal` inputs finalises as `Decimal`.
 #[derive(Debug, Clone)]
 struct SpreadAccumulator {
 	spread: Spread,

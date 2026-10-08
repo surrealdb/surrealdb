@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Index-only COUNT via exact bitmap fusion: multi-index AND (and AND NOT) counted from index entries with zero record fetches"
@@ -35,10 +34,11 @@ value = "[{ count: 2 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: t, condition: a = 'x' AND b = true]
-    BitmapAnd [ctx: Db]
-        BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
-        BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: t, condition: a = 'x' AND b = true]
+        BitmapAnd [ctx: Db]
+            BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
+            BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
 "'''
 
 [[test.results]]
@@ -46,10 +46,11 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: t, condition: a = 'x' AND not(b = true)]
-    BitmapAndNot [ctx: Db]
-        BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
-        BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: t, condition: a = 'x' AND not(b = true)]
+        BitmapAndNot [ctx: Db]
+            BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
+            BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
 "'''
 
 [[test.results]]
@@ -57,12 +58,13 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    Filter [ctx: Db] [predicate: a = 'x' AND b = true AND id != t:1]
-        BitmapResolve [ctx: Db] [table: t]
-            BitmapAnd [ctx: Db]
-                BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
-                BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: a = 'x' AND b = true AND id != (t:1)]
+            BitmapScan [ctx: Db] [table: t]
+                BitmapAnd [ctx: Db]
+                    BitmapIndexScan [ctx: Db] [index: idx_a, access: = 'x']
+                    BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
 "'''
 
 [[test.results]]

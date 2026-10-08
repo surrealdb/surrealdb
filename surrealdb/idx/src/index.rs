@@ -619,10 +619,10 @@ impl<'a> IndexOperation<'a> {
 /// then in an array. Eg. IF the index is composed of the columns `name` and
 /// `instrument` Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie"
 /// } It will return: ["Tobie", "piano"]
-struct Indexable(Vec<(Value, bool)>);
+pub struct Indexable(Vec<(Value, bool)>);
 
 impl Indexable {
-	fn new(vals: Vec<Value>, ix: &IndexDefinition) -> Self {
+	pub fn new(vals: Vec<Value>, ix: &IndexDefinition) -> Self {
 		let mut source = Vec::with_capacity(vals.len());
 		for (v, i) in vals.into_iter().zip(ix.cols.iter()) {
 			let f = matches!(i.0.last(), Some(&Part::Flatten));
@@ -641,7 +641,9 @@ impl IntoIterator for Indexable {
 	}
 }
 
-struct Combinator {
+/// The combinations of an [`Indexable`]'s values an index holds entries for,
+/// one array of values per entry.
+pub struct Combinator {
 	iterators: Vec<Box<dyn ValuesIterator>>,
 	has_next: bool,
 }

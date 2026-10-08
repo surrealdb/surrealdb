@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_udf_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["compute-only", "all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -11,7 +10,7 @@ reason = """
 	computed field denied to the caller, derived from a stored field denied
 	to the caller, and still admits the member. The same function called by
 	the caller runs in the caller's frame, where both guards apply. Denied
-	fields are projected under an alias, which every engine reports as NONE.
+	fields are projected under an alias, which reports NONE.
 """
 
 # 0: the table guard's function reads `tier` in the permission frame and admits the row.

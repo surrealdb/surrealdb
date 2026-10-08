@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -52,31 +51,35 @@ value = "NONE"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: fn::is_target(n), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: fn::is_target(n)]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [index: idx_n, access: = 5, direction: Forward, predicate: n = 5]
+    IndexScan [ctx: Db] [table: t, index: idx_n, access: = 5, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: fn::is_target_stepwise(n), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: fn::is_target_stepwise(n)]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: fn::is_target_guarded(n), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: fn::is_target_guarded(n)]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: fn::is_target(s), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: fn::is_target(s)]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 */
 

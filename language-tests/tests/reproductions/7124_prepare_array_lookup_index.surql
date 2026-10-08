@@ -1,7 +1,6 @@
 /**
 
 [env]
-planner-strategy = ["compute-only"]
 
 [test]
 reason = "Ensure edge traversal in array FROM uses the lookup optimization and processes all elements"

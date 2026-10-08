@@ -1,0 +1,10 @@
+### SELECT * FROM bag
+[{ arr: [{ shown: 1 }], id: bag:1, open: 1 }]
+### SELECT arr FROM bag
+[{ arr: [{ shown: 1 }] }]
+### SELECT VALUE hidden FROM bag
+[NONE]
+### SELECT * FROM bag WHERE open = 1
+[{ arr: [{ shown: 1 }], id: bag:1, open: 1 }]
+### SELECT * FROM plain
+[{ a: 1, id: plain:1 }]

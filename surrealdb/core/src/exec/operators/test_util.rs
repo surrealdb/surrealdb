@@ -27,7 +27,6 @@ use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProv
 use crate::ctx::Context;
 use crate::dbs::Session;
 use crate::exec::context::{DatabaseContext, NamespaceContext, RootContext, SessionInfo};
-use crate::exec::function::FunctionRegistry;
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, OutputOrdering, PhysicalExpr, ValueBatch, ValueBatchStream,
@@ -98,18 +97,23 @@ impl ExecOperator for ValuesOperator {
 pub(crate) fn root_ctx() -> ExecutionContext {
 	ExecutionContext::Root(RootContext {
 		ctx: Context::new_test().freeze(),
-		function_registry: Arc::new(FunctionRegistry::with_builtins()),
 		options: None,
 		datastore: None,
-		cancellation: CancellationToken::new(),
+		cancellation: Arc::new(CancellationToken::new()),
 		auth: Arc::new(Auth::default()),
 		session: None,
 		current_value: None,
 		current_row: None,
 		skip_fetch_perms: false,
+		perms_suppressed: false,
+		caller_perms_suppressed: false,
 		computing_record: None,
-		computing_field: false,
+		no_write: None,
 		version_stamp: None,
+		zero_limits: Vec::new(),
+		topk_thresholds: None,
+		guard_verdicts: Default::default(),
+		writing: false,
 	})
 }
 
@@ -125,6 +129,19 @@ pub(crate) fn root_ctx_with_auth(auth: Auth) -> ExecutionContext {
 		unreachable!("root_ctx builds a Root context")
 	};
 	root.auth = Arc::new(auth);
+	ExecutionContext::Root(root)
+}
+
+/// As [`root_ctx`], but carrying the `Options` a real context carries.
+///
+/// The permission frames mirror themselves into those options, so that code
+/// reading the options lands in the frame it was entered in; `root_ctx`'s bare
+/// context has none, and the mirror is invisible there.
+pub(crate) fn root_ctx_with_options() -> ExecutionContext {
+	let ExecutionContext::Root(mut root) = root_ctx() else {
+		unreachable!("root_ctx builds a Root context")
+	};
+	root.options = Some(crate::dbs::Options::new(&crate::exec::config::ExecConfig::default()));
 	ExecutionContext::Root(root)
 }
 
@@ -192,23 +209,80 @@ pub(crate) fn field_idiom(src: &str) -> crate::expr::Idiom {
 	}
 }
 
+/// Compile a SurrealQL idiom into the place a data clause writes to, the way
+/// the planner compiles the left-hand side of a `SET` or a path of an `UNSET`.
+///
+/// Uses a txn-less planner, as [`physical_expr`] does. Panics when the idiom
+/// names a part no place can address.
+///
+/// Carries the feature its callers do: a write clause is exercised against a
+/// datastore, so every test that compiles a place needs the in-memory engine,
+/// and under any other the helper would stand unreached.
+#[cfg(feature = "kv-mem")]
+pub(crate) async fn write_place(
+	src: &str,
+	ctx: &ExecutionContext,
+) -> crate::exec::operators::write::place::WritePlace {
+	let planner = crate::exec::planner::Planner::new(ctx.ctx(), ctx.function_registry());
+	crate::exec::operators::write::place::WritePlace::compile(&planner, field_idiom(src))
+		.await
+		.expect("idiom should compile to a place")
+}
+
 /// Compile a SurrealQL expression fragment into a [`PhysicalExpr`] against
 /// `ctx`.
 ///
-/// Uses a txn-less planner, which is the same path runtime permission
-/// resolution takes — no plan-time index resolution, so it works under
-/// [`root_ctx`] as well as under [`TestDb`].
+/// Compiled over the transaction `ctx` holds where it holds one, so a
+/// statement the expression holds is planned with it, and with none under
+/// [`root_ctx`].
 pub(crate) async fn physical_expr(src: &str, ctx: &ExecutionContext) -> Arc<dyn PhysicalExpr> {
-	crate::exec::planner::compile_expr(
+	crate::exec::planner::compile_expr_tree(
 		parse_expr(src),
 		ctx.ctx(),
 		ctx.function_registry(),
-		None,
+		ctx.try_txn(),
 		None,
 		0,
 	)
 	.await
 	.expect("fragment should compile to a physical expression")
+}
+
+/// As [`physical_expr`], but compiled with the transaction and principal of
+/// `ctx`, the way a scalar is compiled inside a running query: a statement the
+/// expression holds is bound and planned as a program when it is compiled.
+///
+/// Needs a context with a transaction ([`TestDb`]).
+pub(crate) async fn physical_expr_in_txn(
+	src: &str,
+	ctx: &ExecutionContext,
+) -> Arc<dyn PhysicalExpr> {
+	crate::exec::planner::compile_expr_tree(
+		parse_expr(src),
+		ctx.ctx(),
+		ctx.function_registry(),
+		Some(ctx.try_txn().expect("physical_expr_in_txn needs a context with a transaction")),
+		Some(Arc::clone(&ctx.root().auth)),
+		0,
+	)
+	.await
+	.expect("fragment should compile to a physical expression")
+}
+
+/// As [`eval_on`], compiled as [`physical_expr_in_txn`] does.
+pub(crate) async fn eval_on_in_txn(
+	src: &str,
+	value: &Value,
+	ctx: &ExecutionContext,
+) -> FlowResult<Value> {
+	let expr = physical_expr_in_txn(src, ctx).await;
+	expr.evaluate(EvalContext::from_exec_ctx(ctx).with_value_and_doc(value)).await
+}
+
+/// As [`eval`], compiled as [`physical_expr_in_txn`] does.
+pub(crate) async fn eval_in_txn(src: &str, ctx: &ExecutionContext) -> FlowResult<Value> {
+	let expr = physical_expr_in_txn(src, ctx).await;
+	expr.evaluate(EvalContext::from_exec_ctx(ctx)).await
 }
 
 /// Lower, bind and plan one SurrealQL statement against `ctx`, the way the
@@ -217,13 +291,7 @@ pub(crate) async fn physical_expr(src: &str, ctx: &ExecutionContext) -> Arc<dyn 
 /// Needs a context with a transaction ([`TestDb`]): binding and planning read
 /// the catalog through it. Panics when the statement has no logical form.
 pub(crate) async fn plan_statement(src: &str, ctx: &ExecutionContext) -> Arc<dyn ExecOperator> {
-	let ast = crate::syn::parse(src).expect("statement should parse");
-	let mut exprs = ast.expressions;
-	assert_eq!(exprs.len(), 1, "expected exactly one statement in {src:?}");
-	let crate::sql::TopLevelExpr::Expr(expr) = exprs.remove(0) else {
-		panic!("unexpected statement shape for {src:?}");
-	};
-	let op = crate::expr::logical::lower(expr).expect("statement should lower");
+	let op = lower_statement(src);
 	crate::exec::planner::plan_statement_inner(
 		op,
 		ctx.ctx(),
@@ -231,9 +299,20 @@ pub(crate) async fn plan_statement(src: &str, ctx: &ExecutionContext) -> Arc<dyn
 		ctx.try_txn().expect("plan_statement needs a context with a transaction"),
 		Some(Arc::clone(&ctx.root().auth)),
 		0,
+		None,
 	)
 	.await
 	.expect("statement should plan")
+}
+
+fn lower_statement(src: &str) -> crate::expr::logical::LogicalOp {
+	let ast = crate::syn::parse(src).expect("statement should parse");
+	let mut exprs = ast.expressions;
+	assert_eq!(exprs.len(), 1, "expected exactly one statement in {src:?}");
+	let crate::sql::TopLevelExpr::Expr(expr) = exprs.remove(0) else {
+		panic!("unexpected statement shape for {src:?}");
+	};
+	crate::expr::logical::lower(expr).expect("statement should lower")
 }
 
 /// Compile and evaluate `src` with `value` bound as both the current value and
@@ -302,9 +381,99 @@ impl TestDb {
 		Self::build(setup, false, config).await
 	}
 
+	/// As [`Self::new_with_config`], with sorts that ask for `TEMPFILES` spilling
+	/// beneath `dir`.
+	#[cfg(feature = "kv-mem")]
+	pub(crate) async fn new_with_temporary_directory(
+		setup: &str,
+		dir: &std::path::Path,
+		config: surrealdb_cnf::ConfigMap,
+	) -> Self {
+		let builder = Datastore::builder().with_temporary_directory(Some(dir));
+		Self::build_from(builder, setup, false, config).await
+	}
+
+	/// As [`Self::new`], with a notification broker: live queries run, and
+	/// every notification the datastore sends arrives on the receiver.
+	pub(crate) async fn new_with_notifications(
+		setup: &str,
+	) -> (Self, crate::channel::Receiver<crate::types::PublicNotification>) {
+		let (send, recv) = crate::channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
+		let builder = Datastore::builder().with_notify(send);
+		(Self::build_from(builder, setup, false, surrealdb_cnf::ConfigMap::empty()).await, recv)
+	}
+
+	/// As [`Self::new`], or [`Self::new_with_auth`] when `auth_enabled`, on a
+	/// datastore that runs no maintenance tasks: nothing writes to it but the
+	/// statements a test runs. A test comparing the keyspace two runs leave
+	/// needs it, since index compaction, task leases and the node heartbeat
+	/// otherwise write on their own schedule, inside one run's window and not
+	/// the other's.
+	pub(crate) async fn quiescent(setup: &str, auth_enabled: bool) -> Self {
+		let builder = Datastore::builder().without_maintenance_tasks();
+		Self::build_from(builder, setup, auth_enabled, surrealdb_cnf::ConfigMap::empty()).await
+	}
+
+	/// As [`Self::new_with_notifications`], on a datastore that runs no
+	/// maintenance tasks ([`Self::quiescent`]).
+	pub(crate) async fn quiescent_with_notifications(
+		setup: &str,
+	) -> (Self, crate::channel::Receiver<crate::types::PublicNotification>) {
+		let (send, recv) = crate::channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
+		let builder = Datastore::builder().with_notify(send).without_maintenance_tasks();
+		(Self::build_from(builder, setup, false, surrealdb_cnf::ConfigMap::empty()).await, recv)
+	}
+
+	/// A test database over `ds`, whose `test`/`test` namespace and database
+	/// already exist: for a test that needs a datastore [`Self::new`] does not
+	/// build, such as a versioned one.
+	#[cfg(feature = "kv-surrealkv")]
+	pub(crate) fn over(ds: Arc<Datastore>) -> Self {
+		Self {
+			ds,
+		}
+	}
+
 	async fn build(setup: &str, auth_enabled: bool, config: surrealdb_cnf::ConfigMap) -> Self {
-		let ds = Datastore::builder()
-			.with_capabilities(crate::dbs::Capabilities::all())
+		Self::build_from(Datastore::builder(), setup, auth_enabled, config).await
+	}
+
+	async fn build_from(
+		builder: crate::kvs::ds::Builder,
+		setup: &str,
+		auth_enabled: bool,
+		config: surrealdb_cnf::ConfigMap,
+	) -> Self {
+		Self::build_with(builder, setup, auth_enabled, config, crate::dbs::Capabilities::all())
+			.await
+	}
+
+	/// As [`Self::new`], or [`Self::new_with_auth`] when `auth_enabled`, with
+	/// `capabilities` in place of every capability allowed.
+	pub(crate) async fn new_with_capabilities(
+		setup: &str,
+		auth_enabled: bool,
+		capabilities: crate::dbs::Capabilities,
+	) -> Self {
+		Self::build_with(
+			Datastore::builder(),
+			setup,
+			auth_enabled,
+			surrealdb_cnf::ConfigMap::empty(),
+			capabilities,
+		)
+		.await
+	}
+
+	async fn build_with(
+		builder: crate::kvs::ds::Builder,
+		setup: &str,
+		auth_enabled: bool,
+		config: surrealdb_cnf::ConfigMap,
+		capabilities: crate::dbs::Capabilities,
+	) -> Self {
+		let ds = builder
+			.with_capabilities(capabilities)
 			.with_auth(auth_enabled)
 			.with_config(config)
 			.build_with_path("memory")
@@ -334,6 +503,12 @@ impl TestDb {
 		self.run_as(&Self::owner(), sql).await
 	}
 
+	/// The datastore itself, for a test that needs a statement's result — or
+	/// its failure — rather than only the side effect of running it.
+	pub(crate) fn datastore(&self) -> &Arc<Datastore> {
+		&self.ds
+	}
+
 	/// Run SurrealQL as `session`, panicking if any statement fails.
 	pub(crate) async fn run_as(&self, session: &Session, sql: &str) {
 		for response in self.ds.execute(sql, session, None).await.expect("query should execute") {
@@ -360,8 +535,31 @@ impl TestDb {
 		session: &Session,
 		mode: TransactionType,
 	) -> ExecutionContext {
+		self.exec_ctx_with(session, mode, false).await
+	}
+
+	/// As [`Self::exec_ctx_as`], with the datastore's live-query broker
+	/// attached as the executor attaches it for a batch, so a statement's
+	/// notifications are sent once its transaction commits.
+	pub(crate) async fn exec_ctx_with_broker(
+		&self,
+		session: &Session,
+		mode: TransactionType,
+	) -> ExecutionContext {
+		self.exec_ctx_with(session, mode, true).await
+	}
+
+	async fn exec_ctx_with(
+		&self,
+		session: &Session,
+		mode: TransactionType,
+		broker: bool,
+	) -> ExecutionContext {
 		let txn = Arc::new(self.ds.transaction(mode).await.expect("transaction"));
 		let mut ctx = self.ds.setup_ctx().expect("context from datastore");
+		if broker {
+			ctx.set_broker(self.ds.live_query_broker());
+		}
 		ctx.attach_session(session).expect("attach session");
 		ctx.set_transaction(Arc::clone(&txn));
 
@@ -370,18 +568,23 @@ impl TestDb {
 
 		let root = RootContext {
 			ctx: ctx.freeze(),
-			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			options: Some(self.ds.setup_options(session)),
 			datastore: Some(Arc::clone(&self.ds)),
-			cancellation: CancellationToken::new(),
+			cancellation: Arc::new(CancellationToken::new()),
 			auth: Arc::clone(&session.au),
 			session: Some(Arc::new(session_info(session))),
 			current_value: None,
 			current_row: None,
 			skip_fetch_perms: false,
+			perms_suppressed: false,
+			caller_perms_suppressed: false,
 			computing_record: None,
-			computing_field: false,
+			no_write: None,
 			version_stamp: None,
+			zero_limits: Vec::new(),
+			topk_thresholds: None,
+			guard_verdicts: Default::default(),
+			writing: false,
 		};
 
 		ExecutionContext::Database(DatabaseContext {
@@ -398,8 +601,8 @@ impl TestDb {
 	}
 }
 
-/// Project a [`Session`] onto the pre-extracted [`SessionInfo`] the streaming
-/// executor carries, so `$session`-reading expressions see the same fields they
+/// Project a [`Session`] onto the pre-extracted [`SessionInfo`] the
+/// engine carries, so `$session`-reading expressions see the same fields they
 /// would under a real query.
 fn session_info(session: &Session) -> SessionInfo {
 	use crate::val::convert_public::convert_public_value_to_internal;

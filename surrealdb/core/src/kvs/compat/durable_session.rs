@@ -9,7 +9,14 @@
 //!
 //! The round-trip test beside the type encodes and decodes revision-2 bytes
 //! with revision-2 code, which by construction cannot see that break. This
-//! module holds frozen revision-1 bytes instead.
+//! module holds frozen revision-1 and revision-2 bytes instead.
+//!
+//! Revision 2 is also the revision a node writes today, and it is the layout
+//! every earlier release that reads `DurableSession` decodes. The type keeps
+//! its planner-strategy slot, written as the default and ignored on read, so a
+//! session written after an upgrade is still readable on rollback: the frozen
+//! revision-2 bytes below were produced by the previous release's code, and the
+//! current encoder must reproduce them byte for byte.
 //!
 //! This lives outside the `fixtures.rs`/`vX_Y_Z.rs` machinery next door because
 //! that machinery snapshots a whole catalog at a released version, and no
@@ -18,10 +25,9 @@
 //! is ever restated; the bytes themselves must never be edited by hand.
 
 use revision::revisioned;
-use surrealdb_datastore::values::session::DurableSession;
+use surrealdb_datastore::values::session::{DurableSession, NewPlannerStrategy};
 use surrealdb_expr::val::{Object, Value};
 use surrealdb_iam::Auth;
-use surrealdb_rpc::capabilities::NewPlannerStrategy;
 use uuid::Uuid;
 
 use crate::key::KVValue;
@@ -103,6 +109,53 @@ const DURABLE_SESSION_V1: &[u8] = &[
 	108, 111, 1, 0, 1,
 ];
 
+/// The revision-2 session the frozen bytes below were captured from: the
+/// revision-1 session with a `CONTEXT` payload, built as a [`DurableSession`].
+fn durable_session_v2() -> DurableSession {
+	let v1 = durable_session_v1();
+	DurableSession {
+		expires_at: v1.expires_at,
+		au: v1.au,
+		rt: v1.rt,
+		ip: v1.ip,
+		or: v1.or,
+		id: v1.id,
+		ns: v1.ns,
+		db: v1.db,
+		ac: v1.ac,
+		tk: v1.tk,
+		rd: v1.rd,
+		data: Some(Value::from("context")),
+		exp: v1.exp,
+		variables: v1.variables,
+		new_planner_strategy: v1.new_planner_strategy,
+		redact_volatile_explain_attrs: v1.redact_volatile_explain_attrs,
+	}
+}
+
+/// FROZEN. Revision-2 `DurableSession` bytes, written by the release that
+/// declared `DurableSession` at revision 2 with its own planner-strategy type.
+/// Never edit these by hand and never regenerate them to make a failing test
+/// pass: a failure here means the current code can no longer read, or no longer
+/// write, the layout that release reads.
+#[rustfmt::skip]
+const DURABLE_SESSION_V2: &[u8] = &[
+	2, 252, 21, 205, 91, 7, 1, 1, 1, 12, 112, 101, 114, 115, 111, 110,
+	58, 116, 111, 98, 105, 101, 5, 20, 1, 4, 3, 97, 112, 112, 3, 97,
+	112, 112, 7, 97, 99, 99, 111, 117, 110, 116, 0, 1, 1, 8, 49, 48,
+	46, 48, 46, 48, 46, 49, 1, 11, 101, 120, 97, 109, 112, 108, 101, 46,
+	99, 111, 109, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 7, 1, 3, 97, 112, 112, 1, 3, 97, 112, 112, 1, 7,
+	97, 99, 99, 111, 117, 110, 116, 1, 2, 74, 27, 0, 0, 0, 2, 22,
+	0, 0, 0, 0, 1, 3, 105, 115, 115, 2, 68, 10, 0, 0, 0, 9,
+	115, 117, 114, 114, 101, 97, 108, 100, 98, 1, 2, 78, 16, 0, 0, 0,
+	1, 6, 112, 101, 114, 115, 111, 110, 1, 1, 5, 116, 111, 98, 105, 101,
+	1, 2, 68, 8, 0, 0, 0, 7, 99, 111, 110, 116, 101, 120, 116, 1,
+	252, 0, 226, 167, 202, 2, 23, 0, 0, 0, 0, 1, 8, 103, 114, 101,
+	101, 116, 105, 110, 103, 2, 68, 6, 0, 0, 0, 5, 104, 101, 108, 108,
+	111, 1, 0, 1,
+];
+
 /// Revision-1 bytes must still decode, and the field `#[revision(start = 2)]`
 /// added must default to `None` — a session that predates `CONTEXT` clauses.
 #[test]
@@ -160,6 +213,52 @@ fn re_encoding_an_upgraded_session_writes_revision_2_losslessly() {
 	assert_eq!(round_tripped, decoded);
 }
 
+/// Revision-2 bytes written by the previous release decode, payload included,
+/// and the planner-strategy slot they carry is consumed without shifting the
+/// fields after it.
+#[test]
+fn v2_durable_session_decodes() {
+	let decoded = DurableSession::kv_decode_value(DURABLE_SESSION_V2, ()).unwrap_or_else(|e| {
+		panic!(
+			"BACKWARDS COMPATIBILITY BROKEN: revision-2 DurableSession bytes no longer decode.\n\
+			 Error: {e}\n\n\
+			 Every `/!se{{id}}` entry written by the previous release is revision 2. A node that \
+			 cannot decode them drops or errors every attached session on upgrade."
+		)
+	});
+
+	assert_eq!(DURABLE_SESSION_V2.first(), Some(&2), "the frozen fixture must be revision 2");
+	assert_eq!(decoded, durable_session_v2());
+}
+
+/// A session written now is revision-2 bytes identical to what the previous
+/// release wrote for the same session, so a node rolled back to that release
+/// reads it. A revision bump, a dropped or reordered field, or a changed
+/// planner-strategy encoding fails here.
+#[test]
+fn a_session_written_now_is_the_layout_the_previous_release_reads() {
+	let encoded = durable_session_v2().kv_encode_value().expect("encode");
+	assert_eq!(
+		encoded, DURABLE_SESSION_V2,
+		"the current encoding of a session must equal the previous release's bytes"
+	);
+}
+
+/// The planner-strategy slot is written as the default whatever the entry it
+/// was restored from carried, and the live session captured into a durable one
+/// stays at revision 2.
+#[test]
+fn a_captured_session_is_written_at_revision_2_with_the_default_strategy() {
+	let session = crate::dbs::Session::for_level(crate::iam::Level::Root, crate::iam::Role::Owner);
+	let durable = crate::dbs::durable_session(&session, 123_456_789);
+	assert_eq!(durable.new_planner_strategy, NewPlannerStrategy::default());
+
+	let encoded = durable.kv_encode_value().expect("encode");
+	assert_eq!(encoded.first(), Some(&2), "a node must keep writing revision 2");
+	let decoded = DurableSession::kv_decode_value(&encoded, ()).expect("decode");
+	assert_eq!(decoded, durable);
+}
+
 /// Regenerate [`DURABLE_SESSION_V1`]. Ignored so it never runs in CI:
 ///
 /// ```text
@@ -178,4 +277,26 @@ fn generate() {
 		.collect::<Vec<_>>()
 		.join("\n");
 	println!("const DURABLE_SESSION_V1: &[u8] = &[\n{body}\n];");
+}
+
+/// Regenerate [`DURABLE_SESSION_V2`] from the type as the previous release
+/// declared it. Ignored so it never runs in CI; run it only on a checkout of
+/// that release, never on one that has changed the layout:
+///
+/// ```text
+/// cargo test -p surrealdb-core --lib kvs::compat::durable_session::generate_v2 -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "prints the frozen fixture; run by hand on the release that wrote revision 2"]
+fn generate_v2() {
+	let bytes = revision::to_vec(&durable_session_v2()).expect("encode");
+	let body = bytes
+		.chunks(16)
+		.map(|row| {
+			let cells: Vec<String> = row.iter().map(|b| b.to_string()).collect();
+			format!("\t{},", cells.join(", "))
+		})
+		.collect::<Vec<_>>()
+		.join("\n");
+	println!("const DURABLE_SESSION_V2: &[u8] = &[\n{body}\n];");
 }

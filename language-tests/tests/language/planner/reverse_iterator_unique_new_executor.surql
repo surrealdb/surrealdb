@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Tests reverse iteration with a unique index using ORDER BY DESC (new executor)"
+reason = "Tests reverse iteration with a unique index using ORDER BY DESC"
 
 [[test.results]]
 value = "'OK'"
@@ -11,7 +10,9 @@ value = "'OK'"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: v] {rows: 3}
-    IndexScan [ctx: Db] [index: idx, access: >5, direction: Backward, limit: 3, predicate: v > 5] {rows: 3}
+    Limit [ctx: Db] [limit: 3] {rows: 3}
+        DistinctRecords [ctx: Db] {rows: 3}
+            IndexScan [ctx: Db] [table: i, index: idx, access: >5, direction: Backward] {rows: 3}
 
 Total rows: 3''''
 
@@ -21,7 +22,9 @@ value = "[{ v: 15 }, { v: 14 }, { v: 13 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: v] {rows: 3}
-    IndexScan [ctx: Db] [index: idx, access: , direction: Backward, limit: 3] {rows: 3}
+    Limit [ctx: Db] [limit: 3] {rows: 3}
+        DistinctRecords [ctx: Db] {rows: 3}
+            IndexScan [ctx: Db] [table: i, index: idx, direction: Backward] {rows: 3}
 
 Total rows: 3''''
 
@@ -31,7 +34,8 @@ value = "[{ v: 15 }, { v: 14 }, { v: 13 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: v] {rows: 15}
-    IndexScan [ctx: Db] [index: idx, access: , direction: Backward] {rows: 15}
+    DistinctRecords [ctx: Db] {rows: 15}
+        IndexScan [ctx: Db] [table: i, index: idx, direction: Backward] {rows: 15}
 
 Total rows: 15''''
 

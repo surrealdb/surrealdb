@@ -5,12 +5,11 @@ database = true
 
 [test]
 reason = """
-A closure created by the streaming engine is a value like any other: it is
+A compiled closure is a value like any other: it is
 equal to itself and to a closure written the same way with the same captures,
 so `==`, `array::distinct` and `CONTAINS` treat it as one value; and a closure
-invoked from a statement the legacy engine runs (here a `CREATE`) sees the
-session of the statement that calls it, so `session::db()` inside the body
-names the current database.
+invoked from a write (here a `CREATE`) sees the session of the statement that
+calls it, so `session::db()` inside the body names the current database.
 """
 
 [[test.results]]

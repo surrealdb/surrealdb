@@ -21,6 +21,9 @@
 //!   plan-time value, if any, is the wrong one.
 //! - **Names the plan binds itself:** a `LET` in a block or a `FOR` loop variable. Each is a
 //!   runtime lookup wherever it appears, and a context value under the same name never wins.
+//! - **Names the plan defines or removes:** a `DEFINE PARAM` or `REMOVE PARAM` in a block changes
+//!   what the name reads for the statements after it, so the name is a runtime lookup wherever it
+//!   appears in the plan.
 //! - **Closure bodies:** not entered. A closure is invoked by later statements, so every parameter
 //!   its body reads — its own arguments included — is resolved where it is invoked, from the values
 //!   captured when the closure was created and the arguments of the call.
@@ -44,15 +47,13 @@ use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::ops::ControlFlow;
 
-use super::{
-	BindContext, classify_source, rewrite_deep, visit_binding, visit_binding_mut, visit_deep,
-};
+use super::{BindContext, classify_source, visit_binding, visit_binding_mut, visit_deep};
 use crate::exec::planner::util::{
 	ParamBinding, bind_param, substitution_is_lossy, value_to_logical_expr,
 };
 use crate::expr::logical::{
-	LogicalExpr, LogicalFilter, LogicalForeach, LogicalJoin, LogicalLet, LogicalOp,
-	LogicalPermissionFilter, LogicalSource, SourceRef,
+	LogicalDdl, LogicalDdlStatement, LogicalEval, LogicalExpr, LogicalFilter, LogicalForeach,
+	LogicalJoin, LogicalLet, LogicalOp, LogicalPermissionFilter, LogicalSource, SourceRef,
 };
 use crate::val::Value;
 
@@ -62,6 +63,10 @@ pub(super) async fn resolve_params(op: LogicalOp, bx: &BindContext<'_>) -> Logic
 	// Phase 1: the names the plan references in a resolvable position, and
 	// the names it binds itself.
 	let (names, bound) = referenced_and_bound(&op);
+	// The names a table permission predicate reads: a privileged frame holds
+	// none of the caller's bindings, so those are looked up in the isolated
+	// view rather than the caller's.
+	let guarded = permission_names(&op, &bound);
 
 	// Phase 2: look each name up once.
 	let mut literals: HashMap<String, LogicalExpr> = HashMap::new();
@@ -69,24 +74,74 @@ pub(super) async fn resolve_params(op: LogicalOp, bx: &BindContext<'_>) -> Logic
 		if bound.contains(&name) {
 			continue;
 		}
-		let value = match bind_param(&name, bx.ctx, bx.txn.as_ref(), bx.ns_db, bx.row_scoped).await
-		{
-			ParamBinding::Value(value) => value,
-			ParamBinding::Unbound => Value::None,
-			ParamBinding::Runtime => continue,
-		};
-		if substitution_is_lossy(&value) {
-			continue;
+		if let Some(literal) = resolved_literal(&name, bx, bx.ctx).await {
+			literals.insert(name, literal);
 		}
-		literals.insert(name, value_to_logical_expr(value));
 	}
-	if literals.is_empty() {
+	let mut privileged: HashMap<String, LogicalExpr> = HashMap::new();
+	if !guarded.is_empty() {
+		let isolated = crate::ctx::Context::new_isolated(bx.ctx).freeze();
+		for name in guarded {
+			if let Some(literal) = resolved_literal(&name, bx, &isolated).await {
+				privileged.insert(name, literal);
+			}
+		}
+	}
+	if literals.is_empty() && privileged.is_empty() {
 		return op;
 	}
 
 	// Phase 3: substitute, then re-derive each leaf's kind from its new
 	// expression.
-	substitute_all(op, &literals)
+	substitute_all(op, &literals, &privileged)
+}
+
+/// The literal `name` takes in the context `ctx`, or `None` where the name is
+/// read when the statement runs.
+async fn resolved_literal(
+	name: &str,
+	bx: &BindContext<'_>,
+	ctx: &crate::ctx::FrozenContext,
+) -> Option<LogicalExpr> {
+	// A statement that inlines no catalog definition reads a `DEFINE PARAM`
+	// when it runs: only the context's values are taken.
+	let (txn, ns_db) = match bx.inlines_definitions {
+		true => (bx.txn.as_ref(), bx.ns_db),
+		false => (None, None),
+	};
+	let value = match bind_param(name, ctx, txn, ns_db, bx.row_scoped).await {
+		ParamBinding::Value(value) => value,
+		ParamBinding::Unbound => Value::None,
+		ParamBinding::Runtime => return None,
+	};
+	if substitution_is_lossy(&value) {
+		return None;
+	}
+	Some(value_to_logical_expr(value))
+}
+
+/// The names read by the predicate of a table permission in `op`, or of a
+/// permission filter nested in it, and in the resolvable positions of every
+/// plan such a predicate holds, that `bound` does not bind.
+fn permission_names(op: &LogicalOp, bound: &HashSet<String>) -> HashSet<String> {
+	let mut names = HashSet::new();
+	visit_deep(op, &mut |node| {
+		if let LogicalOp::PermissionFilter(LogicalPermissionFilter {
+			predicate,
+			..
+		}) = node
+		{
+			collect_names(predicate, &mut names);
+			let _ = visit_binding(predicate, &mut |expr| {
+				if let LogicalExpr::Subquery(plan) = expr {
+					names.extend(referenced_and_bound(plan).0);
+				}
+				ControlFlow::<()>::Continue(())
+			});
+		}
+	});
+	names.retain(|name| !bound.contains(name));
+	names
 }
 
 /// Whether some name of `names` is read where [`resolve_params`] would
@@ -177,21 +232,94 @@ fn referenced_and_bound(op: &LogicalOp) -> (HashSet<String>, HashSet<String>) {
 			| LogicalOp::VersionScope(_)
 			| LogicalOp::Only(_)
 			| LogicalOp::Match(_)
+			| LogicalOp::Write(_)
 			| LogicalOp::Explain(_)
 			| LogicalOp::Eval(_)
 			| LogicalOp::Sequence(_)
 			| LogicalOp::Return(_)
 			| LogicalOp::Info(_)
 			| LogicalOp::Sleep(_) => {}
+			// A `DEFINE PARAM` or `REMOVE PARAM` changes the value its name
+			// reads for every statement after it in the plan, so that name is
+			// read where it runs rather than at its bind-time value.
+			LogicalOp::Ddl(LogicalDdl {
+				statement,
+			}) => {
+				if let Some(name) = changed_param(statement) {
+					bound.insert(name.to_owned());
+				}
+			}
 		}
 	});
 	(names, bound)
 }
 
+/// The parameter a schema statement defines, redefines or removes.
+pub(super) fn changed_param(statement: &LogicalDdlStatement) -> Option<&str> {
+	use crate::expr::statements::{DefineStatement, RemoveStatement};
+	match statement {
+		LogicalDdlStatement::Define(define) => {
+			if let DefineStatement::Param(param) = define.as_ref() {
+				Some(param.name.as_str())
+			} else {
+				None
+			}
+		}
+		LogicalDdlStatement::Remove(remove) => {
+			if let RemoveStatement::Param(param) = remove.as_ref() {
+				Some(param.name.as_str())
+			} else {
+				None
+			}
+		}
+		LogicalDdlStatement::Alter(_) | LogicalDdlStatement::Rebuild(_) => None,
+	}
+}
+
 /// `op` with `literals` substituted for the parameters in every resolvable
-/// position, each leaf's kind re-derived from its new expression.
-fn substitute_all(op: LogicalOp, literals: &HashMap<String, LogicalExpr>) -> LogicalOp {
-	rewrite_deep(op, &mut |node| match node {
+/// position, and `privileged` for those in a table permission predicate and
+/// throughout every plan such a predicate holds, each leaf's kind re-derived
+/// from its new expression. A plan inside a closure body is not reached.
+fn substitute_all(
+	op: LogicalOp,
+	literals: &HashMap<String, LogicalExpr>,
+	privileged: &HashMap<String, LogicalExpr>,
+) -> LogicalOp {
+	let Ok(op) = op.transform_up(&mut |mut node| {
+		// A permission predicate is definer code: the plans it holds read the
+		// values a privileged frame holds, as the predicate itself does.
+		let nested = match matches!(node, LogicalOp::PermissionFilter(_)) {
+			true => privileged,
+			false => literals,
+		};
+		let Ok(()) = node.visit_scalars_mut(&mut |scalar| {
+			visit_binding_mut(scalar, &mut |expr| {
+				if let LogicalExpr::Subquery(plan) = expr {
+					let taken = std::mem::replace(
+						plan.as_mut(),
+						LogicalOp::Eval(LogicalEval {
+							expr: LogicalExpr::Break,
+						}),
+					);
+					**plan = substitute_all(taken, nested, privileged);
+				}
+				Ok::<_, Infallible>(())
+			})
+		});
+		Ok::<_, Infallible>(substitute_node(node, literals, privileged))
+	});
+	op
+}
+
+/// `node` with `literals` substituted for the parameters in its own
+/// resolvable positions, and `privileged` for those of a table permission
+/// predicate; the plans its scalars hold are [`substitute_all`]'s.
+fn substitute_node(
+	node: LogicalOp,
+	literals: &HashMap<String, LogicalExpr>,
+	privileged: &HashMap<String, LogicalExpr>,
+) -> LogicalOp {
+	match node {
 		LogicalOp::Filter(LogicalFilter {
 			input,
 			mut predicate,
@@ -206,12 +334,14 @@ fn substitute_all(op: LogicalOp, literals: &HashMap<String, LogicalExpr>) -> Log
 			input,
 			mut predicate,
 			auth,
+			guard,
 		}) => {
-			substitute(&mut predicate, literals);
+			substitute(&mut predicate, privileged);
 			LogicalOp::PermissionFilter(LogicalPermissionFilter {
 				input,
 				predicate,
 				auth,
+				guard,
 			})
 		}
 		LogicalOp::Join(mut join) => {
@@ -282,6 +412,7 @@ fn substitute_all(op: LogicalOp, literals: &HashMap<String, LogicalExpr>) -> Log
 		| LogicalOp::VersionScope(_)
 		| LogicalOp::Only(_)
 		| LogicalOp::Match(_)
+		| LogicalOp::Write(_)
 		| LogicalOp::Explain(_)
 		| LogicalOp::Eval(_)
 		| LogicalOp::Sequence(_)
@@ -289,8 +420,9 @@ fn substitute_all(op: LogicalOp, literals: &HashMap<String, LogicalExpr>) -> Log
 		| LogicalOp::Return(_)
 		| LogicalOp::Foreach(_)
 		| LogicalOp::Info(_)
+		| LogicalOp::Ddl(_)
 		| LogicalOp::Sleep(_)) => other,
-	})
+	}
 }
 
 /// The parameter names whose value the statement fetches from the catalog
@@ -396,8 +528,13 @@ mod tests {
 			txn: None,
 			ns_db: None,
 			auth: None,
+			perms_suppressed: false,
 			row_scoped: SELECT_ITERATION_PARAMS,
 			registry: &registry,
+			versioned: false,
+			folds_clock: true,
+			inlines_definitions: true,
+			binds_nested: true,
 		};
 		resolve_params(op, &bx).await
 	}

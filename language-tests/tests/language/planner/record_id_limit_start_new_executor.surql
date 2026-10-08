@@ -3,7 +3,6 @@
 reason = "SELECT FROM <literal record id> with LIMIT / START / both still returns the single matching row."
 
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [[test.results]]
 value = "NONE"

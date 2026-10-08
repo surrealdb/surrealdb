@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -22,18 +21,22 @@ value = "NONE"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    LookupJoin [ctx: Db] [type: Semi, alias: _join0, table: team, on: k = _join0.id]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
         TableScan [ctx: Db] [table: t, direction: Forward]
-        Filter [ctx: Db] [predicate: ok = true]
-            RecordBatchFetch [ctx: Db] [table: team]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: id]
+                TableScan [ctx: Db] [table: team, direction: Forward, predicate: ok = true, pre_decode_filter: yes]
 ''''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    HashJoin [ctx: Db] [type: Semi, alias: _join0, on: k = _join0.id]
+    Filter [ctx: Db] [predicate: k INSIDE (subquery)]
         TableScan [ctx: Db] [table: t, direction: Forward]
-        TableScan [ctx: Db] [table: team, direction: Forward, predicate: IF id = team:b THEN <int>  bad ELSE true END, pre_decode_filter: no (unsupported predicate)]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: id]
+                Filter [ctx: Db] [predicate: IF id = (team:b) THEN <int> bad ELSE true END]
+                    TableScan [ctx: Db] [table: team, direction: Forward]
 ''''
 
 */

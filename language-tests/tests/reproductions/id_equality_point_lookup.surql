@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "WHERE id = record_id should use RecordIdScan instead of a full table scan"
@@ -9,19 +8,21 @@ reason = "WHERE id = record_id should use RecordIdScan instead of a full table s
 value = "'OK'"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
-    RecordIdScan [ctx: Db] [record_id: item:1, predicate: id = item:1, pre_decode_filter: yes]
-'"""
+    Filter [ctx: Db] [predicate: id = (item:1)]
+        RecordIdScan [ctx: Db] [record_id: item:1]
+''''
 
 [[test.results]]
 value = "[{ id: item:1, name: 'Alpha', score: 10 }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
-    RecordIdScan [ctx: Db] [record_id: item:2, predicate: id = item:2 AND score > 15, pre_decode_filter: yes]
-'"""
+    Filter [ctx: Db] [predicate: id = (item:2) AND score > 15]
+        RecordIdScan [ctx: Db] [record_id: item:2]
+''''
 
 [[test.results]]
 value = "[{ id: item:2, name: 'Beta', score: 20 }]"
@@ -30,28 +31,31 @@ value = "[{ id: item:2, name: 'Beta', score: 20 }]"
 value = "[]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: item, direction: Forward, predicate: id = item:1 OR score > 15, pre_decode_filter: yes]
-'"""
+    Filter [ctx: Db] [predicate: id = (item:1) OR score > 15]
+        TableScan [ctx: Db] [table: item, direction: Forward]
+''''
 
 [[test.results]]
 value = "[{ id: item:1, name: 'Alpha', score: 10 }, { id: item:2, name: 'Beta', score: 20 }, { id: item:3, name: 'Gamma', score: 30 }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
-    RecordIdScan [ctx: Db] [record_id: item:3, predicate: item:3 = id, pre_decode_filter: yes]
-'"""
+    Filter [ctx: Db] [predicate: (item:3) = id]
+        RecordIdScan [ctx: Db] [record_id: item:3]
+''''
 
 [[test.results]]
 value = "[{ id: item:3, name: 'Gamma', score: 30 }]"
 
 [[test.results]]
-value = """
+value = '''
 'SelectProject [ctx: Db] [projections: *]
-    RecordIdScan [ctx: Db] [record_id: item:1, predicate: id == item:1, pre_decode_filter: yes]
-'"""
+    Filter [ctx: Db] [predicate: id == (item:1)]
+        RecordIdScan [ctx: Db] [record_id: item:1]
+''''
 
 [[test.results]]
 value = "'OK'"

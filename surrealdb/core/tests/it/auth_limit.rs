@@ -230,3 +230,179 @@ async fn auth_limit_id_field_assert() -> Result<()> {
 
 	Ok(())
 }
+
+/// The principal a function body runs under is derived from the caller and the
+/// definition read, once per pairing, and answered again for every later call
+/// of the pairing: a recursion, a call per row, a later statement. Every one of
+/// those calls is narrowed by the definer's limit, and no call is raised above
+/// its caller.
+#[tokio::test]
+async fn auth_limit_holds_for_every_call_of_a_function() -> Result<()> {
+	let (_, dbs) = new_ds("test", "test", true).await?;
+
+	let ses_owner = Session::owner().with_ns("test").with_db("test");
+	let ses_editor = Session::editor().with_ns("test").with_db("test");
+
+	// The base case of the recursion attempts what only an owner may do.
+	let escalating = "
+		DEFINE FUNCTION fn::deep($n: int) {
+			IF $n <= 0 {
+				DEFINE USER OVERWRITE escalated ON DATABASE ROLES OWNER PASSWORD 'pass';
+				RETURN 0;
+			};
+			RETURN fn::deep($n - 1) + 1;
+		};
+	";
+	let res = &mut dbs.execute(escalating, &ses_editor, None).await?;
+	skip_ok(res, 1)?;
+
+	// Called by the owner, every call runs as the editor that defined it, however
+	// many calls of the pairing came first.
+	for sql in [
+		"fn::deep(0);",
+		"fn::deep(4);",
+		"SELECT VALUE fn::deep(n) FROM [{ n: 2 }, { n: 0 }, { n: 7 }];",
+		"fn::deep(1);",
+	] {
+		let res = &mut dbs.execute(sql, &ses_owner, None).await?;
+		assert_eq!(res.len(), 1);
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_err(), "the editor's limit was not applied to: {sql}");
+		assert_eq!(
+			tmp.unwrap_err().to_string(),
+			"IAM error: Not enough permissions to perform this action",
+			"{sql}"
+		);
+	}
+	let info = &mut dbs.execute("INFO FOR DB", &ses_owner, None).await?;
+	let info = info.remove(0).result?.to_sql();
+	// The definition of the function names the user; only a created user is defined as one.
+	assert!(
+		!info.contains("DEFINE USER escalated ON"),
+		"an owner-level user was created by a limited call"
+	);
+
+	// A function the owner defines runs as the owner when the owner calls it,
+	// and as the caller, never above it, when the editor does.
+	let owned = "
+		DEFINE FUNCTION fn::owned($n: int) {
+			IF $n <= 0 {
+				DEFINE USER OVERWRITE made ON DATABASE ROLES OWNER PASSWORD 'pass';
+				RETURN 0;
+			};
+			RETURN fn::owned($n - 1) + 1;
+		};
+	";
+	let res = &mut dbs.execute(owned, &ses_owner, None).await?;
+	skip_ok(res, 1)?;
+	for sql in ["fn::owned(3);", "SELECT VALUE fn::owned(n) FROM [{ n: 1 }, { n: 2 }];"] {
+		let res = &mut dbs.execute(sql, &ses_editor, None).await?;
+		assert_eq!(res.len(), 1);
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_err(), "the editor was raised to the owner's limit by: {sql}");
+		assert_eq!(
+			tmp.unwrap_err().to_string(),
+			"IAM error: Not enough permissions to perform this action",
+			"{sql}"
+		);
+	}
+	let res = &mut dbs.execute("fn::owned(3);", &ses_owner, None).await?;
+	assert_eq!(res.len(), 1);
+	assert_eq!(res.remove(0).result?.to_sql(), "3");
+	let info = &mut dbs.execute("INFO FOR DB", &ses_owner, None).await?;
+	let info = info.remove(0).result?.to_sql();
+	assert!(info.contains("DEFINE USER made ON"), "the owner's own call did not run as the owner");
+
+	Ok(())
+}
+
+/// A function redefined by a principal with a narrower limit between two calls
+/// by the same caller is narrowed by the definition the second call reads.
+#[tokio::test]
+async fn auth_limit_follows_the_definition_read() -> Result<()> {
+	let (_, dbs) = new_ds("test", "test", true).await?;
+
+	let ses_owner = Session::owner().with_ns("test").with_db("test");
+	let ses_editor = Session::editor().with_ns("test").with_db("test");
+
+	let body = "
+		DEFINE USER OVERWRITE probe ON DATABASE ROLES OWNER PASSWORD 'pass';
+		RETURN 1;
+	";
+	let res = &mut dbs
+		.execute(&format!("DEFINE FUNCTION fn::probe() {{ {body} }};"), &ses_owner, None)
+		.await?;
+	skip_ok(res, 1)?;
+
+	let res = &mut dbs.execute("fn::probe();", &ses_owner, None).await?;
+	assert_eq!(res.remove(0).result?.to_sql(), "1");
+
+	let res = &mut dbs
+		.execute(&format!("DEFINE FUNCTION OVERWRITE fn::probe() {{ {body} }};"), &ses_editor, None)
+		.await?;
+	skip_ok(res, 1)?;
+
+	let res = &mut dbs.execute("fn::probe();", &ses_owner, None).await?;
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err(), "the redefinition's limit was not applied");
+	assert_eq!(
+		tmp.unwrap_err().to_string(),
+		"IAM error: Not enough permissions to perform this action"
+	);
+
+	Ok(())
+}
+
+/// A field's clauses run under the `AUTH LIMIT` of the user who defined the
+/// field, so a call of a function in them is made for that user narrowed: a
+/// database editor's `VALUE`, `ASSERT`, `DEFAULT`, `PERMISSIONS` and
+/// `COMPUTED` clauses calling a function answer every writer alike.
+#[tokio::test]
+async fn auth_limit_field_clauses_call_functions_for_every_writer() -> Result<()> {
+	let (_, dbs) = new_ds("test", "test", true).await?;
+	let ses_owner = Session::owner().with_ns("test").with_db("test");
+	let ses_editor = Session::editor().with_ns("test").with_db("test");
+	let sql = "
+		DEFINE FUNCTION fn::double($n: int) { RETURN $n * 2; };
+		DEFINE FIELD a ON p TYPE int;
+		DEFINE FIELD f ON p COMPUTED fn::double(a);
+		DEFINE FIELD g ON p VALUE f + 1;
+		DEFINE FIELD v ON p VALUE fn::double($value) ASSERT fn::double($value) > 0;
+		DEFINE FIELD d ON p DEFAULT fn::double(21);
+		DEFINE FIELD w ON p PERMISSIONS FOR create, update WHERE fn::double(1) = 2;
+	";
+	let res = &mut dbs.execute(sql, &ses_editor, None).await?;
+	skip_ok(res, 7)?;
+	for (ses, id) in [(&ses_owner, 1), (&ses_editor, 2)] {
+		let sql = format!("CREATE ONLY p:{id} SET a = 2, v = 3, w = true");
+		let res = &mut dbs.execute(&sql, ses, None).await?;
+		let created = res.remove(0).result?.to_sql();
+		assert_eq!(created, format!("{{ a: 2, d: 42, f: 4, g: 5, id: p:{id}, v: 6, w: true }}"));
+	}
+	let res = &mut dbs.execute("CREATE p:3 SET a = 2, v = -1", &ses_owner, None).await?;
+	let refused = res.remove(0).result.expect_err("the ASSERT admitted -2").to_string();
+	assert!(refused.contains("fn::double($value) > 0"), "{refused}");
+	Ok(())
+}
+
+/// A statement in a field's `VALUE` runs for the field's definer narrowed by
+/// its `AUTH LIMIT`, not for the writer: an editor's field cannot define an
+/// owner when an owner writes the record.
+#[tokio::test]
+async fn auth_limit_field_value_statement() -> Result<()> {
+	let (_, dbs) = new_ds("test", "test", true).await?;
+	let ses_owner = Session::owner().with_ns("test").with_db("test");
+	let ses_editor = Session::editor().with_ns("test").with_db("test");
+	let sql = "DEFINE FIELD x ON t VALUE (DEFINE USER escalate_value ON DATABASE ROLES OWNER PASSWORD 'pass');";
+	let res = &mut dbs.execute(sql, &ses_editor, None).await?;
+	skip_ok(res, 1)?;
+	let res = &mut dbs.execute("CREATE t:1;", &ses_owner, None).await?;
+	let tmp = res.remove(0).result;
+	assert_eq!(
+		tmp.expect_err("the escalation was not blocked").to_string(),
+		"IAM error: Not enough permissions to perform this action"
+	);
+	let info = dbs.execute("INFO FOR DB", &ses_owner, None).await?.remove(0).result?.to_sql();
+	assert!(!info.contains("escalate_value"), "an owner-level user was created: {info}");
+	Ok(())
+}

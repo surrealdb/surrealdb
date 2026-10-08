@@ -12,8 +12,7 @@ async fn alter_statement_index_prepare_remove(def_index: &str, skip_def: usize) 
 	let session = Session::owner().with_ns("test").with_db("test");
 	let (_, ds) = new_ds("test", "test", false).await?;
 
-	// Populate initial records
-	// We need enough records so that the indexation should last more than 5 seconds
+	// Populate initial records: enough that the build runs several batches
 	let mut r = ds
 		.execute(
 			"CREATE |user:40000| SET
@@ -25,17 +24,12 @@ async fn alter_statement_index_prepare_remove(def_index: &str, skip_def: usize) 
 		.await?;
 	skip_ok(&mut r, 1)?;
 
-	// Create the index concurrently
-	let mut r = ds.execute(def_index, &session, None).await?;
-	assert_eq!(r.len(), skip_def);
-	skip_ok(&mut r, skip_def)?;
-
-	// Let's wait a bit
-	sleep(Duration::from_millis(500)).await;
-
-	// Decommissions then index
-	let mut r = ds.execute("ALTER INDEX test ON user PREPARE REMOVE", &session, None).await?;
-	skip_ok(&mut r, 1)?;
+	// Create the index concurrently and decommission it in the same
+	// transaction, so the build never sees the index undecommissioned.
+	let query = format!("BEGIN;\n{def_index}\nALTER INDEX test ON user PREPARE REMOVE;\nCOMMIT;");
+	let mut r = ds.execute(&query, &session, None).await?;
+	assert_eq!(r.len(), skip_def + 3);
+	skip_ok(&mut r, skip_def + 3)?;
 
 	// Loop until the index built is in error
 	let now = SystemTime::now();

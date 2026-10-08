@@ -65,19 +65,11 @@ objects with newlines in a nested string. Text a literal cannot hold — text
 carrying a literal delimiter of its own, or a carriage return — stays on one
 line.
 
-### Which engines a test runs on
+### Which engine a test runs on
 
-A `.surql` file runs under **three planner strategies** by default —
-`compute-only` (the per-row engine), `all-ro` and `best-effort-ro` (the
-streaming planner) — so one file is three runs and any divergence between the
-engines fails it. A `.gql` file runs under the two streaming strategies; GQL has
-no per-row path.
-
-`[env] planner-strategy = [...]` narrows that axis. **Narrowing costs coverage,
-so it needs a reason in the file**, and there are only two good ones:
-
-- The answer is the same but the *plan* is not — an `EXPLAIN` assertion, which only one engine renders.
-- The engines genuinely disagree and the divergence is being pinned rather than fixed. Say which answer is correct and why it is not fixed here.
+Every `.surql` and `.gql` file runs once per backend, on the default engine:
+the bytecode VM. There is no per-test engine selector, so a plan assertion
+(`EXPLAIN`) pins the VM's plan and nothing else.
 
 ### Naming and companions
 
@@ -88,26 +80,12 @@ place (`ISSUE_NUMBER_description.surql`), because it is an address a reader can
 look up. Put the provenance in `issue = 1234` or in `reason`, not in the
 filename.
 
-Four suffixes are load-bearing. A new test should carry no other:
+Two suffixes are load-bearing. A new test should carry no other:
 
 | Suffix | Is |
 |---|---|
 | `_import` | Setup only, run as owner by the files that import it. Names the tests it serves in its `reason`. |
-| `_plan` | The `EXPLAIN` companion of the test of the same name — the plan its rows were produced by. Pins the streaming strategies. |
-| `_legacy` | The `compute-only` half of a pinned divergence. |
-| `_streaming` | The `all-ro` / `best-effort-ro` half of the same divergence. |
-
-`_new_executor` is an older spelling of `_streaming` still carried by tests
-written while the streaming planner was new. It means the same thing; most of
-those pin `all-ro` alone, which leaves `best-effort-ro` uncovered. Do not add
-another — and when you touch one, pin both streaming strategies or say in the
-`reason` why only one applies.
-
-Both halves of a pair carry the same queries and the same `reason`, and the
-`reason` says which answer is correct. **When a fix makes the halves agree,
-delete both and write one unpinned file** — a pair whose halves no longer
-diverge is two files, three redundant runs and a claim of a divergence that is
-gone.
+| `_plan` | The `EXPLAIN` companion of the test of the same name — the plan its rows were produced by. |
 
 `imports = [...]` entries are paths from the `tests/` root
 (`"reproductions/x_import.surql"`); `./` and `../` resolve against the importing
@@ -117,17 +95,12 @@ must itself be a `.surql` file.
 ### Prove the test catches its own bug
 
 A reproduction that passes against the unfixed code tests nothing. Revert the
-fix, watch the test fail, restore it, watch it pass — in both directions, and
-for each strategy the file runs under. For a divergence, measure both engines
-before deciding which one is right: the shipping engine is not automatically
-correct, and several defects found this way were in it.
+fix, watch the test fail, restore it, watch it pass — in both directions.
 
-Generating expectations has two traps. `--results accept` fills only blocks that
-are **empty**, and where a file runs under several strategies it silently writes
-the **first** strategy's values — so probe each strategy in its own file and
-diff the results before writing one file that claims they agree. And numeric
-expectations are type-blind: `3` is satisfied by `3f` and `3dec`, so pin a type
-with `type::is_int(...)` rather than by writing the number.
+Generating expectations has a trap: `--results accept` fills only blocks that
+are **empty**, and numeric expectations are type-blind: `3` is satisfied by
+`3f` and `3dec`, so pin a type with `type::is_int(...)` rather than by writing
+the number.
 
 ## Upgrade Tests (`language-tests/tests/upgrade/*.surql`)
 
@@ -295,11 +268,10 @@ test covering an index needs an `EXPLAIN` assertion naming the operator, or it
 cannot tell a working index from a missing one.
 
 `EXPLAIN` output is not stable across the 3.x line — older releases return an
-array of plan objects with entirely different operator names, and the legacy
-compute-only engine rejects the statement outright. A plan assertion therefore
+array of plan objects with entirely different operator names, and older
+releases reject or render the statement differently. A plan assertion therefore
 lives in its own `*_current.surql` file, gated with `version = ">=3.4.0-a"` to bound
-the upgrade target to the current checkout, and carrying
-`planner-strategy = ["all-ro", "best-effort-ro"]` for the ordinary runner. The
+the upgrade target to the current checkout. The
 seed axis sends every released version straight to the current checkout, so the
 gate costs no coverage of the hops that matter. Keep the data assertions in the
 ungated sibling, where they run on every hop.

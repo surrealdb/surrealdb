@@ -2,30 +2,23 @@ mod aggregate;
 mod bind;
 mod compute;
 mod current_value_source;
-mod distinct;
+pub(crate) mod distinct;
 mod distinct_records;
 mod explain;
-mod expr;
 pub(crate) mod fetch;
 mod filter;
-mod foreach;
-mod graph;
-mod info;
-mod join;
+pub(crate) mod graph;
+pub(crate) mod join;
 mod knn_topk;
 mod layer;
-pub(crate) mod legacy_bridge;
-mod let_plan;
 pub(crate) mod limit;
-mod mutate;
+pub(crate) mod mutate;
+mod omit;
 mod permission_filter;
 mod project;
 mod project_value;
 pub(crate) mod recursion;
-mod r#return;
 pub(crate) mod scan;
-mod sequence;
-mod sleep;
 mod sort;
 mod source_expr;
 mod split;
@@ -33,74 +26,107 @@ mod timeout;
 mod union;
 mod unwrap_exactly_one;
 mod version_scope;
+pub(crate) mod write;
 
 #[cfg(test)]
 pub(crate) mod test_util;
 
 pub use aggregate::{
-	Aggregate, AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
-	group_key_field_name,
+	Aggregate, AggregateExprInfo, AggregateField, AggregateId, ExtractedAggregate,
+	aggregate_field_name, group_key_field_name,
 };
+pub(crate) use aggregate::{GroupMap, GroupState, first_value_needed, set_nested_value};
+#[cfg(test)]
 pub use bind::Bind;
 pub use compute::Compute;
 pub use current_value_source::CurrentValueSource;
+#[cfg(test)]
 pub use distinct::Distinct;
+pub(crate) use distinct::SeenSet;
+#[cfg(test)]
 pub use distinct_records::DistinctRecords;
 pub use explain::{AnalyzePlan, ExplainPlan};
-pub use expr::ExprPlan;
+pub(crate) use explain::{
+	analyze_json_template, analyze_text_pieces, render_analyze_json, render_analyze_text,
+};
+#[cfg(test)]
 pub use fetch::Fetch;
+#[cfg(test)]
 pub(crate) use fetch::FetchStep;
 pub use filter::Filter;
-pub use foreach::ForeachPlan;
 use futures::StreamExt;
-pub use graph::{
-	DistinctEdges, EdgeBinding, EndpointBind, EndpointField, Expand, ExpandDir, PathExpand,
-	PathMode, ShortestPathExpand, ShortestSelector,
-};
-pub use info::{
-	DatabaseInfoPlan, IndexInfoPlan, NamespaceInfoPlan, RootInfoPlan, TableInfoPlan, UserInfoPlan,
-};
-pub use join::{HashJoin, JoinFrame, JoinType, LookupJoin, RecordBatchFetch};
+#[cfg(test)]
+pub use graph::{DistinctEdges, EndpointBind, Expand, PathExpand, ShortestPathExpand};
+pub use graph::{EdgeBinding, EndpointField, ExpandDir, PathMode, ShortestSelector};
+#[cfg(test)]
+pub use join::JoinFrame;
+pub use join::JoinType;
+pub(crate) use join::hash_join::{BuildTable, with_alias, with_alias_owned};
+#[cfg(test)]
+pub use join::{HashJoin, LookupJoin, RecordBatchFetch};
+#[cfg(test)]
 pub use knn_topk::KnnTopK;
-pub(crate) use knn_topk::{KnnTopKHeap, KnnVectorSource, extract_vector};
+#[cfg(test)]
+pub(crate) use knn_topk::KnnVectorSource;
+pub(crate) use knn_topk::{KnnTopKHeap, extract_vector};
+#[cfg(test)]
 pub(crate) use layer::LayerColumn;
+#[cfg(test)]
 pub use layer::ProjectLayer;
-pub use let_plan::LetPlan;
+pub(crate) use layer::record_of;
 pub use limit::Limit;
+#[cfg(test)]
 pub use mutate::{DeleteBinding, DrainSink, InsertGraph, SingleRowScan, UpdateBinding};
+#[cfg(test)]
 pub(crate) use mutate::{InsertEdgeOp, InsertNodeOp};
+pub(crate) use omit::{OmitAction, OmitPath, OmitStep};
+#[cfg(test)]
 pub use permission_filter::PermissionFilterExec;
-pub(crate) use project::omit_path_is_expressible;
+pub(crate) use permission_filter::permission_frame;
 pub use project::{FieldSelection, Project, Projection, SelectProject};
+pub(crate) use project::{evaluate_and_set_field, projection_writes};
 pub use project_value::ProjectValue;
 pub use recursion::RecursionOp;
-pub use r#return::ReturnPlan;
-pub(crate) use scan::{BitmapNode, KnnPrefilter};
-pub use scan::{
-	BitmapResolve, DynamicScan, EdgeTableSpec, EmptyScan, FullTextScan, GraphEdgeScan,
-	GraphScanOutput, IndexScan, KnnScan, RecordIdScan, ReferenceScan, ReferenceScanOutput,
-	TableScan, UnionIndexScan,
-};
+pub(crate) use scan::BitmapNode;
 // Scan operators (storage I/O)
-pub use scan::{CountOutput, CountScan};
-pub use sequence::SequencePlan;
-pub use sleep::SleepPlan;
+pub use scan::CountOutput;
+#[cfg(test)]
+pub use scan::CountScan;
+#[cfg(test)]
+pub(crate) use scan::KnnPrefilter;
+#[cfg(test)]
+pub use scan::{
+	BitmapResolve, DynamicScan, EmptyScan, FullTextScan, IndexScan, KnnScan, LightweightEdgeScan,
+	RecordIdScan, TableScan, UnionIndexScan,
+};
+pub use scan::{EdgeTableSpec, GraphEdgeScan, GraphScanOutput, ReferenceScan, ReferenceScanOutput};
 #[cfg(all(storage, not(target_family = "wasm")))]
 pub use sort::{ExternalSort, ExternalSortByKey};
 pub(crate) use sort::{OrderByField, SortDirection, SortKey, compare_values};
 pub use sort::{RandomShuffle, Sort, SortByKey, SortTopK, SortTopKByKey};
+#[cfg(test)]
 pub use source_expr::SourceExpr;
 pub use split::Split;
+pub(crate) use split::{SplitTarget, split_row, split_target};
+#[cfg(test)]
 pub use timeout::Timeout;
 pub use union::Union;
+#[cfg(test)]
 pub use unwrap_exactly_one::UnwrapExactlyOne;
+#[cfg(test)]
 pub use version_scope::VersionScope;
+// Named here like every other operator. The re-export is part of the seam the
+// write module declares, and carries the module's own dead-code rationale: the
+// operator's stages are the unit of work that follows it.
+#[allow(unused_imports)]
+pub use write::{WriteOperator, WriteSource};
 
 use crate::err::EngineError;
+#[cfg(test)]
 use crate::exe::FlowResultExt as _;
-use crate::exec::{
-	EvalContext, ExecutionContext, FlowResult, OutputShape, PhysicalExpr, ValueBatchStream,
-};
+#[cfg(test)]
+use crate::exec::{EvalContext, PhysicalExpr};
+use crate::exec::{ExecutionContext, FlowResult, OutputShape, ValueBatchStream};
 use crate::val::Value;
 
 /// Collect values from a stream into the single value an expression evaluates
@@ -139,6 +165,7 @@ pub(crate) async fn collect_stream(mut stream: ValueBatchStream) -> FlowResult<V
 	Ok(results)
 }
 
+#[cfg(test)]
 /// Evaluate a statement's `FROM` source expression into the value to iterate.
 ///
 /// The source is a value position, not a statement body, so a `RETURN` raised
@@ -162,7 +189,7 @@ pub(crate) async fn evaluate_from_source(
 	Ok(expr.evaluate(ctx).await.catch_return()?)
 }
 
-/// Cancellation poll shared by the streaming operators' hot loops.
+/// Cancellation poll shared by the operators' hot loops.
 ///
 /// Returns `Err(ControlFlow::Err(QueryCancelled))` when the query has been
 /// cancelled, matching the canonical scan idiom (`scan/table.rs`). Cheap (one

@@ -7,6 +7,7 @@
 
 use std::borrow::Cow;
 
+use surrealdb_catalog::providers::TableProvider;
 use surrealdb_datastore::values::graph::AdjacencyValue;
 use surrealdb_kvs::TransactionType::{Read, Write};
 use surrealdb_kvs::key::KVKey;

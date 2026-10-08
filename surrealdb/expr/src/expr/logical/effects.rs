@@ -233,6 +233,15 @@ pub trait EffectOracle {
 	/// guaranteed to reach a builtin.
 	fn method_always_dispatches(&self, name: &str) -> bool;
 
+	/// The effects a call of the user-defined function `fn::name` adds at the
+	/// call site, or `None` for a body the call site cannot see. A summary
+	/// that names the functions it calls rather than folding their bodies in
+	/// answers for the call alone ([`EffectSet::READS_ROW`]); every other
+	/// oracle leaves the body unseen.
+	fn custom_function(&self, _name: &str) -> Option<EffectSet> {
+		None
+	}
+
 	/// Whether the named builtin is evaluated against the row it is called on
 	/// rather than against its arguments — a projection function.
 	fn evaluates_against_row(&self, name: &str) -> bool;
@@ -425,6 +434,7 @@ pub fn invokes_unseen_body(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> boo
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Param(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Field(_)
 		| LogicalExpr::Doc
@@ -499,6 +509,7 @@ fn may_carry_unseen_closure(arg: &LogicalExpr) -> bool {
 		| LogicalExpr::Literal(_)
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_) => false,
 		LogicalExpr::Array(items) | LogicalExpr::Set(items) => {
 			items.iter().any(may_carry_unseen_closure)
@@ -650,8 +661,10 @@ fn node_set(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> EffectSet {
 				set
 			}
 			Function::Model(_) => EffectSet::READS_EXTERNAL,
-			Function::Custom(_)
-			| Function::Script(_)
+			Function::Custom(name) => oracle
+				.custom_function(name)
+				.unwrap_or(EffectSet::OPAQUE_BODY.union(EffectSet::READS_ROW)),
+			Function::Script(_)
 			| Function::Module(..)
 			| Function::Silo {
 				..
@@ -676,6 +689,7 @@ fn node_set(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> EffectSet {
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Param(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Field(_)
 		| LogicalExpr::Doc
@@ -810,6 +824,7 @@ fn node_is_impure(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> bool {
 		| LogicalExpr::Object(_)
 		| LogicalExpr::Param(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Field(_)
 		| LogicalExpr::Doc
@@ -877,6 +892,7 @@ fn node_may_raise(expr: &LogicalExpr, children: bool, oracle: &dyn EffectOracle)
 		| LogicalExpr::Doc
 		| LogicalExpr::Current
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_) => false,
 		LogicalExpr::RecordId(rid) => match &rid.key {
 			LogicalRecordIdKey::Number(_)
@@ -1012,6 +1028,7 @@ fn node_reads_row(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> bool {
 		| LogicalExpr::Object(_)
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Access {
 			..
@@ -1086,6 +1103,7 @@ fn node_reads_row_opaquely(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> boo
 		| LogicalExpr::Object(_)
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Field(_)
 		| LogicalExpr::Current
@@ -1204,6 +1222,7 @@ pub fn may_dereference(expr: &LogicalExpr) -> bool {
 		LogicalExpr::RecordId(_)
 		| LogicalExpr::Param(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Field(_)
 		| LogicalExpr::Doc
@@ -1327,6 +1346,7 @@ mod tests {
 		LogicalExpr::Closure(Box::new(LogicalClosure {
 			args: Vec::new(),
 			returns: None,
+			body_sql: std::sync::Arc::from(surrealdb_types::ToSql::to_sql(&body)),
 			body,
 		}))
 	}

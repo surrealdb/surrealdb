@@ -63,10 +63,7 @@ async fn test_hnsw_filtered_knn_batches_record_fetches() -> Result<()> {
 		tx.ensure_ns_db(None, "test", "test").await?;
 		tx.commit().await?;
 	}
-	let session = Session::owner()
-		.with_ns("test")
-		.with_db("test")
-		.new_planner_strategy(crate::dbs::NewPlannerStrategy::AllReadOnlyStatements);
+	let session = Session::owner().with_ns("test").with_db("test");
 
 	// 500 deterministic 8-d points with a selective `category` (1-in-20),
 	// plus an HNSW index. A selective filter makes the search visit many
@@ -168,10 +165,7 @@ async fn hnsw_filtered_knn_spans_pending_materialisation_batches() -> Result<()>
 		tx.ensure_ns_db(None, "test", "test").await?;
 		tx.commit().await?;
 	}
-	let session = Session::owner()
-		.with_ns("test")
-		.with_db("test")
-		.new_planner_strategy(crate::dbs::NewPlannerStrategy::AllReadOnlyStatements);
+	let session = Session::owner().with_ns("test").with_db("test");
 
 	// Record `i` sits at (i, i) and carries `category = i % 100`, so a
 	// category selects an evenly spread 1-in-100 subset of the queue. The
@@ -296,15 +290,12 @@ async fn hnsw_query_reads_record_keyed_pending_vectors() -> Result<()> {
 	Ok(())
 }
 
-/// A filtered KNN at a `VERSION` reads each visited candidate's record once.
-/// Versioned reads bypass the transaction record cache, so the records the
-/// per-neighbourhood prefetch reads must be the ones the filter evaluates; a
-/// second, per-candidate read would double the record keys the query reads.
-/// The same query unversioned reads each record once through the cache. The
-/// versioned run additionally re-reads its K results when it materialises
-/// them and reads its catalog at the version, so it may exceed the
-/// unversioned count by at most 2K keys — far below the hundreds a second
-/// read of every visited candidate adds.
+/// A filtered KNN at a `VERSION` is the brute-force search over the records
+/// read at the stamp, since an ANN index describes the present: it reads each
+/// record of the table once and returns K rows. The same query unversioned
+/// walks the index and reads the candidates it visits. The versioned run
+/// additionally reads its catalog at the version, so it may exceed the
+/// table's record count by at most 2K keys.
 #[cfg(feature = "kv-surrealkv")]
 #[test(tokio::test(flavor = "multi_thread"))]
 async fn hnsw_versioned_filtered_knn_reads_each_candidate_once() -> Result<()> {
@@ -317,15 +308,12 @@ async fn hnsw_versioned_filtered_knn_reads_each_candidate_once() -> Result<()> {
 		tx.ensure_ns_db(None, "test", "test").await?;
 		tx.commit().await?;
 	}
-	let session = Session::owner()
-		.with_ns("test")
-		.with_db("test")
-		.new_planner_strategy(crate::dbs::NewPlannerStrategy::AllReadOnlyStatements);
+	let session = Session::owner().with_ns("test").with_db("test");
 
 	let mut setup = String::from(
 		"DEFINE INDEX emb ON pts FIELDS vec HNSW DIMENSION 8 DIST EUCLIDEAN TYPE F32 EFC 200 M 12;\n",
 	);
-	for i in 0..500u32 {
+	for i in 0..ROWS as u32 {
 		let mut v = String::new();
 		for j in 0..8u32 {
 			if j > 0 {
@@ -362,6 +350,7 @@ async fn hnsw_versioned_filtered_knn_reads_each_candidate_once() -> Result<()> {
 	}
 
 	const K: u64 = 10;
+	const ROWS: u64 = 500;
 	let query = format!(
 		"SELECT id FROM pts \
 		 WHERE vec <|{K},400|> [0.5f,0.5f,0.5f,0.5f,0.5f,0.5f,0.5f,0.5f] AND category = 7"
@@ -379,10 +368,22 @@ async fn hnsw_versioned_filtered_knn_reads_each_candidate_once() -> Result<()> {
 	assert_eq!(current_len as u64, K, "filtered KNN should return K matches");
 	assert_eq!(versioned_len as u64, K, "versioned filtered KNN should return K matches");
 	assert!(
-		versioned_keys <= current_keys + 2 * K,
-		"a versioned filtered KNN should read each candidate record once: \
-		 versioned keys_read={versioned_keys}, current keys_read={current_keys}"
+		versioned_keys <= ROWS + 2 * K,
+		"a versioned filtered KNN should read each record of the table once: \
+		 versioned keys_read={versioned_keys}, table rows={ROWS}"
 	);
 	ds.shutdown().await?;
 	Ok(())
+}
+
+/// The HNSW search a statement's access path ends in reads each candidate's
+/// record once at a `VERSION` (see
+/// [`super::assert_versioned_search_reads_each_candidate_once`]).
+#[cfg(feature = "kv-surrealkv")]
+#[test(tokio::test(flavor = "multi_thread"))]
+async fn hnsw_versioned_filtered_search_reads_each_candidate_once() -> Result<()> {
+	super::assert_versioned_search_reads_each_candidate_once(
+		"DEFINE INDEX emb ON pts FIELDS vec HNSW DIMENSION 8 DIST EUCLIDEAN TYPE F32 EFC 200 M 12;",
+	)
+	.await
 }

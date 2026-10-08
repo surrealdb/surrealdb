@@ -4,36 +4,24 @@ use std::collections::HashSet;
 use std::mem;
 
 use surrealdb_rpc::capabilities::{
-	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, NewPlannerStrategy,
-	ParseFuncTargetError, ParseNetTargetError, Targets,
+	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseFuncTargetError,
+	ParseNetTargetError, Targets,
 };
 
-/// Strategy for the streaming query planner.
+/// The retired planner-strategy setting.
 ///
-/// Controls how the new streaming planner/executor is used for query processing.
+/// The engine has a single execution path, so no value selects anything. The
+/// type remains so that code written against [`Capabilities::with_planner_strategy`]
+/// keeps compiling.
+#[deprecated(note = "the engine has a single execution path; the planner strategy has no effect")]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum PlannerStrategy {
-	/// Try the new planner for read-only statements, fall back to compute on unimplemented.
-	/// This is the default.
+	/// Has no effect.
 	BestEffort,
-	/// Skip the new planner entirely; always use the compute executor.
+	/// Has no effect.
 	ComputeOnly,
-	/// The streaming engine for every read-only statement it can plan. Planned
-	/// identically to [`PlannerStrategy::BestEffort`]; the distinct name lets a
-	/// deployment state which engine it means to exercise.
+	/// Has no effect.
 	AllReadOnly,
-}
-
-/// Not public API
-#[doc(hidden)]
-impl From<PlannerStrategy> for NewPlannerStrategy {
-	fn from(strategy: PlannerStrategy) -> Self {
-		match strategy {
-			PlannerStrategy::BestEffort => NewPlannerStrategy::BestEffortReadOnlyStatements,
-			PlannerStrategy::ComputeOnly => NewPlannerStrategy::ComputeOnly,
-			PlannerStrategy::AllReadOnly => NewPlannerStrategy::AllReadOnlyStatements,
-		}
-	}
 }
 
 /// A list of features that are still experimental
@@ -217,21 +205,13 @@ impl Capabilities {
 		}
 	}
 
-	/// Set the planner strategy for query processing.
-	///
-	/// Controls how the streaming query planner/executor is used:
-	/// - [`PlannerStrategy::BestEffort`] (default): Try the new planner for read-only statements,
-	///   fall back to compute on unimplemented features.
-	/// - [`PlannerStrategy::ComputeOnly`]: Skip the new planner entirely; always use the compute
-	///   executor.
-	/// - [`PlannerStrategy::AllReadOnly`]: The streaming engine for every read-only statement it
-	///   can plan; planned identically to `BestEffort`, and a statement the planner declines runs
-	///   on the compute executor, the decline logged as a warning (a debug line under `BestEffort`)
-	///   naming the statement kind and the planner's reason.
-	pub fn with_planner_strategy(self, strategy: PlannerStrategy) -> Self {
-		Self {
-			cap: self.cap.with_planner_strategy(strategy.into()),
-		}
+	/// Has no effect: the engine has a single execution path.
+	#[deprecated(
+		note = "the engine has a single execution path; the planner strategy has no effect"
+	)]
+	#[allow(deprecated)]
+	pub fn with_planner_strategy(self, _strategy: PlannerStrategy) -> Self {
+		self
 	}
 
 	/// Set the allow list to allow all functions

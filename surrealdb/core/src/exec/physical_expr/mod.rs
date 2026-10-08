@@ -24,6 +24,7 @@ mod literal;
 mod matches;
 mod ops;
 mod path;
+pub(crate) mod planned_guard;
 pub(crate) mod record_id;
 mod subquery;
 
@@ -32,22 +33,24 @@ pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetFieldExpr, SetLiter
 pub(crate) use conditional::IfElseExpr;
 pub(crate) use control_flow::{ControlFlowExpr, ControlFlowKind};
 pub(crate) use function::{
-	BodyPlan, BuiltinFunctionExec, ClosureCallExec, ClosureExec, JsFunctionExec, ModelFunctionExec,
-	PlannedBody, ProjectionFunctionExec, RecursiveBody, SiloModuleExec, SurrealismModuleExec,
-	UserDefinedFunctionExec,
+	BodyPlan, BuiltinFunctionExec, ClosureCallExec, ClosureExec, EnteredCall, FunctionCall,
+	JsFunctionExec, ModelFunctionExec, PlannedBody, ProjectionFunctionExec, RecursiveBody,
+	SiloModuleExec, SurrealismModuleExec, UserDefinedFunctionExec,
 };
 pub(crate) use knn_membership::KnnMembershipOp;
 pub(crate) use literal::{Literal, MockExpr, Param};
 pub(crate) use matches::{
-	ExecutorTables, MatchProbe, MatchesOp, MatchesScope, collect_cond_matches,
+	ExecutorTables, MatchProbe, MatchesEval, MatchesOp, MatchesScope, collect_cond_matches,
 	first_unregistered_cond_matches,
 };
 pub(crate) use ops::{BinaryOp, PostfixOp, SimpleBinaryOp, UnaryOp};
 #[cfg(test)]
 pub(crate) use path::find_part;
 pub(crate) use path::{Broadcast, Current, FoldedPath, Step};
+pub(crate) use planned_guard::PlannedGuard;
 pub(crate) use record_id::RecordIdExpr;
-pub(crate) use subquery::ScalarSubquery;
+pub(crate) mod tree_guard;
+pub(crate) use subquery::{ScalarSubquery, UnplannedSubquery, subquery_context};
 
 /// Context for recursive tree-building via RepeatRecurse (@).
 ///
@@ -85,6 +88,24 @@ pub struct RecursionCtx {
 /// This is a borrowed view into the execution context for expression evaluation.
 /// It provides access to parameters, namespace/database names, and the current row
 /// (for per-row expressions like filters and projections).
+///
+/// The `write_*` slots are the write path's bindings: `$before`, `$after`,
+/// `$value`, `$input`, `$event` and `$reference`. A mutation evaluates field
+/// clauses, permission predicates, event conditions and output expressions
+/// that name this fixed, known set, and the set changes per field and per
+/// record. They are typed slots rather than entries in `local_params` for two
+/// reasons: a map allocated per field per record would sit in the write path's
+/// innermost loop, and parameter resolution has to place them below
+/// block-local `LET` and above the context's own parameter chain, which a
+/// single map cannot express. [`EvalContext::write_binding`] is the name table
+/// that resolution reads them through.
+///
+/// What each slot denotes depends on the stage that bound it: a field clause
+/// binds that field's own values, while an event, output or permission stage
+/// binds whole records. Every slot is `None` outside a write, and a body
+/// evaluated in a context of its own (a user-defined function, a closure)
+/// starts with every slot empty: a slot belongs to the stage that bound it
+/// and does not cross a call boundary.
 #[derive(Clone)]
 pub struct EvalContext<'a> {
 	pub exec_ctx: &'a ExecutionContext,
@@ -105,6 +126,32 @@ pub struct EvalContext<'a> {
 	/// evaluate dynamic key expressions (`[field]`, `[$param]`) against the
 	/// document rather than the chain's current position.
 	pub document_root: Option<&'a Value>,
+
+	/// `$before`: the field, or the record, as it stood before the statement.
+	pub write_before: Option<&'a Value>,
+
+	/// `$after`: the field, or the record, as it stands once the statement's
+	/// changes are applied.
+	pub write_after: Option<&'a Value>,
+
+	/// `$value`: the value the expression is about. A field clause binds that
+	/// field's current value, which narrows as field evaluation descends; an
+	/// event, output or reduction stage binds the record being evaluated.
+	pub write_value: Option<&'a Value>,
+
+	/// `$input`: the value the statement supplied, before a `DEFAULT` or
+	/// `VALUE` clause rewrote it. `NONE` where it supplied nothing.
+	pub write_input: Option<&'a Value>,
+
+	/// `$event`: which action is running, as `CREATE`, `UPDATE` or `DELETE`.
+	/// Present while an event's condition or body is evaluated, and for a
+	/// live subscriber's expressions.
+	pub write_event: Option<&'a Value>,
+
+	/// `$reference`: the record whose deletion is running a reference's
+	/// custom delete strategy. Present only while that strategy's expression
+	/// is evaluated.
+	pub write_reference: Option<&'a Value>,
 
 	/// When true, RecordId dereferences use raw fetch (no permission checks).
 	/// Set during permission predicate evaluation to prevent reentrant
@@ -175,6 +222,16 @@ impl<'a> EvalContext<'a> {
 			local_params: None,
 			recursion_ctx: None,
 			document_root: None,
+			// Nothing to carry: this builds a context out of the execution
+			// context alone, with no row and no write in scope. A caller that
+			// rebuilds a row's context on top of it restores the bindings
+			// itself, the way it restores `local_params`.
+			write_before: None,
+			write_after: None,
+			write_value: None,
+			write_input: None,
+			write_event: None,
+			write_reference: None,
 			skip_fetch_perms: exec_ctx.root().skip_fetch_perms,
 			computing_record: exec_ctx.root().computing_record.clone(),
 			plan_depth: 0,
@@ -189,6 +246,15 @@ impl<'a> EvalContext<'a> {
 			local_params: self.local_params,
 			recursion_ctx: self.recursion_ctx.clone(),
 			document_root: self.document_root,
+			// The bindings belong to the record being written, not to the
+			// position within it that evaluation has reached, so narrowing
+			// the current value leaves them alone.
+			write_before: self.write_before,
+			write_after: self.write_after,
+			write_value: self.write_value,
+			write_input: self.write_input,
+			write_event: self.write_event,
+			write_reference: self.write_reference,
 			skip_fetch_perms: self.skip_fetch_perms,
 			computing_record: self.computing_record.clone(),
 			plan_depth: self.plan_depth,
@@ -205,6 +271,15 @@ impl<'a> EvalContext<'a> {
 			local_params: self.local_params,
 			recursion_ctx: self.recursion_ctx.clone(),
 			document_root: Some(value),
+			// Still the same record being written: a new document root
+			// changes what an idiom resolves against, not what the statement
+			// bound.
+			write_before: self.write_before,
+			write_after: self.write_after,
+			write_value: self.write_value,
+			write_input: self.write_input,
+			write_event: self.write_event,
+			write_reference: self.write_reference,
 			skip_fetch_perms: self.skip_fetch_perms,
 			computing_record: self.computing_record.clone(),
 			plan_depth: self.plan_depth,
@@ -219,9 +294,35 @@ impl<'a> EvalContext<'a> {
 			local_params: self.local_params,
 			recursion_ctx: Some(ctx),
 			document_root: self.document_root,
+			// A recursion context changes how `@` is evaluated, nothing
+			// about which record is being written, so the bindings stay.
+			write_before: self.write_before,
+			write_after: self.write_after,
+			write_value: self.write_value,
+			write_input: self.write_input,
+			write_event: self.write_event,
+			write_reference: self.write_reference,
 			skip_fetch_perms: self.skip_fetch_perms,
 			computing_record: self.computing_record.clone(),
 			plan_depth: self.plan_depth,
+		}
+	}
+
+	/// Resolve a write-path binding by the name it is spelled with, or `None`
+	/// where the name is not one of them or the slot is empty.
+	///
+	/// This is the whole name table for the bindings; parameter resolution
+	/// consults it after block-local `LET` bindings and before the execution
+	/// context's parameter chain.
+	pub fn write_binding(&self, name: &str) -> Option<&'a Value> {
+		match name {
+			"before" => self.write_before,
+			"after" => self.write_after,
+			"value" => self.write_value,
+			"input" => self.write_input,
+			"event" => self.write_event,
+			"reference" => self.write_reference,
+			_ => None,
 		}
 	}
 

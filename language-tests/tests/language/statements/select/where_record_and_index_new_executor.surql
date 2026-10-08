@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Test WHERE with record ID field, AND conditions, and index usage (new executor)"
+reason = "Test WHERE with record ID field, AND conditions, and index usage"
 
 [[test.results]]
 value = "[{ id: person:tobie, name: 'Tobie' }]"
@@ -20,7 +19,7 @@ value = "[{ author: person:tobie, id: post:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 2}
-    IndexScan [ctx: Db] [index: author, access: = person:tobie, direction: Forward, predicate: author = person:tobie] {rows: 2}
+    IndexScan [ctx: Db] [table: post, index: author, access: = person:tobie, direction: Forward] {rows: 2}
 
 Total rows: 2''''
 
@@ -39,8 +38,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name] {rows: 1}
-    Filter [ctx: Db] [predicate: genre = 'm'] {rows: 1}
-        IndexScan [ctx: Db] [index: person2_name, access: = 'Tobie', direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: name = 'Tobie' AND genre = 'm'] {rows: 1}
+        IndexScan [ctx: Db] [table: person2, index: person2_name, access: = 'Tobie', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -59,8 +58,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name] {rows: 1}
-    Filter [ctx: Db] [predicate: genre = 'm'] {rows: 1}
-        IndexScan [ctx: Db] [index: person3_name, access: = 'Jaime', direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm'] {rows: 1}
+        IndexScan [ctx: Db] [table: person3, index: person3_name, access: = 'Jaime', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 

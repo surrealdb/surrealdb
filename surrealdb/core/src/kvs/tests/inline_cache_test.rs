@@ -33,21 +33,22 @@ async fn run(ds: &Datastore, ses: &Session, sql: &str) -> Vec<Value> {
 		.collect()
 }
 
-/// Sums every occurrence of the named metric across an `EXPLAIN ANALYZE`
-/// rendering (a text plan tree with `name: value` metric pairs).
+/// The named metric of an `EXPLAIN ANALYZE` rendering (a text plan tree with
+/// `name: value` metric pairs). Every node of an analysed plan reports the one
+/// set of counters the run recorded, so the value is the largest any node shows.
 fn sum_metric(value: &Value, name: &str) -> i64 {
 	let Value::String(text) = value else {
 		panic!("expected a rendered plan, found {value:?}");
 	};
 	let marker = format!("{name}: ");
-	let mut sum = 0;
+	let mut largest = 0;
 	let mut rest = text.as_str();
 	while let Some(at) = rest.find(&marker) {
 		rest = &rest[at + marker.len()..];
 		let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-		sum += digits.parse::<i64>().unwrap_or(0);
+		largest = largest.max(digits.parse::<i64>().unwrap_or(0));
 	}
-	sum
+	largest
 }
 
 /// Runs one query under `EXPLAIN ANALYZE` and returns the summed
@@ -416,18 +417,17 @@ async fn reference_caches_serve_reverse_lookups() {
 	assert_eq!(cache_counters(&ds, &ses, query).await, (1, 0));
 }
 
-/// The cache fast path spends only the LIMIT budget: entries past the
-/// limit are neither decoded nor counted, so the scanned-edges metric
-/// equals the rows the limit consumed — exactly how the cursor path
-/// meters itself.
+/// A hop's `LIMIT` caps the adjacency read: the cache serves the vertex's
+/// adjacency once, and only the entries the limit keeps, so the scanned-edges
+/// metric counts them and not the entries past the limit.
 #[tokio::test]
-async fn cache_fast_path_stops_at_the_limit() {
+async fn cache_limited_hop_serves_the_adjacency_once() {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let cached = ds().await;
 	let uncached = ds().await;
 	seed(&cached, &ses, "INLINE EDGES 16").await;
 	seed(&uncached, &ses, "").await;
-	// p0 has three outgoing edges; the limit consumes two of them.
+	// p0 has three outgoing edges; the limit keeps two of them.
 	let query = "SELECT VALUE ->(likes LIMIT 2) FROM person:p0;";
 	assert_eq!(run(&cached, &ses, query).await, run(&uncached, &ses, query).await);
 	let explained = run(&cached, &ses, &format!("EXPLAIN ANALYZE {query}")).await.remove(0);
@@ -437,6 +437,24 @@ async fn cache_fast_path_stops_at_the_limit() {
 		2,
 		"the fast path must not materialise entries past the limit"
 	);
+}
+
+/// Without a cache the adjacency is read from the merged cursor, and a hop's
+/// `LIMIT` and `START` stop the read at the entries the page reaches.
+#[tokio::test]
+async fn an_uncached_limited_hop_reads_only_the_entries_its_page_reaches() {
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let uncached = ds().await;
+	seed(&uncached, &ses, "").await;
+	// p0 has three outgoing edges.
+	for (query, scanned) in [
+		("SELECT VALUE ->(likes LIMIT 2) FROM person:p0;", 2),
+		("SELECT VALUE ->(likes LIMIT 1 START 1) FROM person:p0;", 2),
+		("SELECT VALUE ->(likes LIMIT 9) FROM person:p0;", 3),
+	] {
+		let explained = run(&uncached, &ses, &format!("EXPLAIN ANALYZE {query}")).await.remove(0);
+		assert_eq!(sum_metric(&explained, "scanned"), scanned, "`{query}`");
+	}
 }
 
 /// Narrowed reverse-reference lookups (table- and field-restricted) over a

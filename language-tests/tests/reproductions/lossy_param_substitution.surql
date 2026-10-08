@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Plan-time parameter substitution must not inline values whose literal form evaluates differently: a set becomes an array literal (sets and arrays compare unequal), and a closure literal drops its captures. No planner-strategy, so all engines must agree"
+reason = "Plan-time parameter substitution must not inline values whose literal form evaluates differently: a set becomes an array literal (sets and arrays compare unequal), and a closure literal drops its captures."
 
 [[test.results]]
 value = "NONE"

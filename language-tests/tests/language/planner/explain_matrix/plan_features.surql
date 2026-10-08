@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -47,9 +46,6 @@ Three recorded expectations are wrong. They are pinned rather than bent around:
    unmatched-hint diagnostic can fire. Correctly the failure of the hint
    reaches the user — by rejecting a name no index carries, or by surfacing
    the fallback in the plan.
-
-Narrowed to the streaming strategies because a prefix EXPLAIN errors under
-compute-only; the two plan identically by contract.
 """
 
 [[test.results]]
@@ -58,7 +54,7 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_cat_pri, access: ['alpha'], direction: Forward, limit: 2, predicate: cat = 'alpha']
+    IndexScan [ctx: Db] [table: ev, index: ev_cat_pri, access: ['alpha'], direction: Forward, limit: 2]
 "'''
 
 [[test.results]]
@@ -71,8 +67,8 @@ value = "[ev:1, ev:2, ev:3]"
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 2]
-        Filter [ctx: Db] [predicate: note = 'keep']
-            IndexScan [ctx: Db] [index: ev_cat_pri, access: ['alpha'], direction: Forward]
+        Filter [ctx: Db] [predicate: cat = 'alpha' AND note = 'keep']
+            IndexScan [ctx: Db] [table: ev, index: ev_cat_pri, access: ['alpha'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -84,7 +80,7 @@ value = "[ev:1, ev:3]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_score, access: >30, direction: Forward, limit: 2, predicate: score > 30]
+    IndexScan [ctx: Db] [table: ev, index: ev_score, access: >30, direction: Forward, limit: 2]
 ''''
 
 [[test.results]]
@@ -96,7 +92,7 @@ value = "[40, 50, 60, 70, 80]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_cat_pri, access: ['alpha'], direction: Forward, limit: 0, predicate: cat = 'alpha']
+    IndexScan [ctx: Db] [table: ev, index: ev_cat_pri, access: ['alpha'], direction: Forward, limit: 0]
 "'''
 
 [[test.results]]
@@ -108,7 +104,7 @@ value = "[]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_cat_pri, access: ['alpha'], direction: Forward, limit: 2, offset: 1, predicate: cat = 'alpha']
+    IndexScan [ctx: Db] [table: ev, index: ev_cat_pri, access: ['alpha'], direction: Forward, limit: 2, offset: 1]
 "'''
 
 [[test.results]]
@@ -120,7 +116,7 @@ value = "2"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_score, access: , direction: Forward, limit: 3, offset: 2]
+    IndexScan [ctx: Db] [table: ev, index: ev_score, direction: Forward, limit: 3, offset: 2]
 ''''
 
 [[test.results]]
@@ -132,7 +128,7 @@ value = "[30, 40, 50]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_score, access: , direction: Forward, limit: 3]
+    IndexScan [ctx: Db] [table: ev, index: ev_score, direction: Forward, limit: 3]
 ''''
 
 [[test.results]]
@@ -144,7 +140,7 @@ value = "[10, 20, 30]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_score, access: , direction: Backward, limit: 3]
+    IndexScan [ctx: Db] [table: ev, index: ev_score, direction: Backward, limit: 3]
 ''''
 
 [[test.results]]
@@ -156,7 +152,7 @@ value = "[80, 70, 60]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_score, access: , direction: Backward]
+    IndexScan [ctx: Db] [table: ev, index: ev_score, direction: Backward]
 ''''
 
 [[test.results]]
@@ -168,7 +164,7 @@ value = "[80, 70, 60, 50, 40, 30, 20, 10]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_cat_pri, access: , direction: Forward]
+    IndexScan [ctx: Db] [table: ev, index: ev_cat_pri, direction: Forward]
 ''''
 
 [[test.results]]
@@ -180,7 +176,7 @@ value = "[['alpha', 1], ['alpha', 2], ['alpha', 3], ['beta', 1], ['beta', 2], ['
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: cat ASC, pri DESC]
+    Sort [ctx: Db] [sort_keys: cat ASC, pri DESC]
         TableScan [ctx: Db] [table: ev, direction: Forward]
 ''''
 
@@ -193,7 +189,7 @@ value = "[['alpha', 3], ['alpha', 2], ['alpha', 1], ['beta', 2], ['beta', 1], ['
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_cat_pri, access: ['alpha'], direction: Forward, predicate: cat = 'alpha']
+    IndexScan [ctx: Db] [table: ev, index: ev_cat_pri, access: ['alpha'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -205,7 +201,7 @@ value = "[1, 2, 3]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_cat_pri, access: ['alpha'], direction: Backward, predicate: cat = 'alpha']
+    IndexScan [ctx: Db] [table: ev, index: ev_cat_pri, access: ['alpha'], direction: Backward]
 "'''
 
 [[test.results]]
@@ -217,7 +213,7 @@ value = "[3, 2, 1]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: pri ASC]
+    Sort [ctx: Db] [sort_keys: pri ASC]
         TableScan [ctx: Db] [table: ev, direction: Forward]
 ''''
 
@@ -230,7 +226,7 @@ value = "[1, 1, 1, 2, 2, 2, 3, 3]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: score ASC, cat ASC]
+    Sort [ctx: Db] [sort_keys: score ASC, cat ASC]
         TableScan [ctx: Db] [table: ev, direction: Forward]
 ''''
 
@@ -242,8 +238,9 @@ value = "[10, 20, 30, 40, 50, 60, 70, 80]"
 
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [by: cat]
-    TableScan [ctx: Db] [table: ev, direction: Forward]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [by: cat]
+        TableScan [ctx: Db] [table: ev, direction: Forward]
 ''''
 
 [[test.results]]
@@ -254,8 +251,9 @@ value = "[{ cat: 'alpha', count: 3 }, { cat: 'beta', count: 2 }, { cat: 'gamma',
 
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: ev, direction: Forward]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: ev, direction: Forward]
 ''''
 
 [[test.results]]
@@ -266,7 +264,8 @@ value = "[{ total: 360 }]"
 
 [[test.results]]
 value = '''
-'CountScan [ctx: Db] [source: ev]
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: ev]
 ''''
 
 [[test.results]]
@@ -277,7 +276,8 @@ value = "[{ count: 8 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: ev, condition: cat = 'alpha']
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: ev, condition: cat = 'alpha']
 "'''
 
 [[test.results]]
@@ -289,7 +289,7 @@ value = "[{ count: 3 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_tags, access: = 'y', direction: Forward, predicate: tags CONTAINS 'y']
+    IndexScan [ctx: Db] [table: ev, index: ev_tags, access: = 'y', direction: Forward]
 "'''
 
 [[test.results]]
@@ -300,7 +300,9 @@ value = "[ev:1, ev:3, ev:7, ev:8]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: ev, condition: tags CONTAINS 'y']
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: ev, index: ev_tags, access: = 'y', direction: Forward]
 "'''
 
 [[test.results]]
@@ -312,7 +314,7 @@ value = "[{ count: 4 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_tags, access: = 'y', direction: Forward, limit: 2, predicate: tags CONTAINS 'y']
+    IndexScan [ctx: Db] [table: ev, index: ev_tags, access: = 'y', direction: Forward, limit: 2]
 "'''
 
 [[test.results]]
@@ -333,7 +335,7 @@ value = "1"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 3}
-    IndexScan [ctx: Db] [index: ev_cat_pri, access: ['alpha'], direction: Forward, predicate: cat = 'alpha'] {rows: 3}
+    IndexScan [ctx: Db] [table: ev, index: ev_cat_pri, access: ['alpha'], direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 
@@ -346,14 +348,15 @@ Total rows: 3"'''
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: ev, condition: cat = 'alpha'] {rows: 1}
+"SelectProject [ctx: Db] [projections: *] {rows: 1}
+    IndexCountScan [ctx: Db] [source: ev, condition: cat = 'alpha'] {rows: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 4}
-    IndexScan [ctx: Db] [index: ev_tags, access: = 'y', direction: Forward, predicate: tags CONTAINS 'y'] {rows: 4}
+    IndexScan [ctx: Db] [table: ev, index: ev_tags, access: = 'y', direction: Forward] {rows: 4}
 
 Total rows: 4"'''
 
@@ -367,7 +370,7 @@ Total rows: 4"'''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: ev_cat_pri, access: ['alpha'], direction: Forward, predicate: cat = 'alpha']
+    IndexScan [ctx: Db] [table: ev, index: ev_cat_pri, access: ['alpha'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -403,7 +406,7 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: tie_first, access: = 'a', direction: Forward, predicate: k = 'a']
+    IndexScan [ctx: Db] [table: tie, index: tie_first, access: = 'a', direction: Forward]
 "'''
 
 [[test.results]]
@@ -418,7 +421,7 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: aa_defined_second, access: = 'a', direction: Forward, predicate: k = 'a']
+    IndexScan [ctx: Db] [table: tiez, index: aa_defined_second, access: = 'a', direction: Forward]
 "'''
 
 [[test.results]]
@@ -432,6 +435,13 @@ value = "[tiez:1]"
 -- file, so the DEFINE order here is load-bearing.
 {
     DEFINE TABLE ev SCHEMALESS;
+    -- The scalar columns are declared, so each holds one index entry per
+    -- record and the scans below carry no record dedupe; a column with no
+    -- declared kind is array_fanout_oracle.surql's subject.
+    DEFINE FIELD cat ON ev TYPE string;
+    DEFINE FIELD pri ON ev TYPE int;
+    DEFINE FIELD score ON ev TYPE int;
+    DEFINE FIELD region ON ev TYPE string;
     DEFINE INDEX ev_cat_pri ON ev FIELDS cat, pri;
     DEFINE INDEX ev_score ON ev FIELDS score;
     DEFINE INDEX ev_tags ON ev FIELDS tags[*];

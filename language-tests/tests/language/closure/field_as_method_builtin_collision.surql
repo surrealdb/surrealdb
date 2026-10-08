@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["compute-only", "all-ro", "best-effort-ro"]
 
 [test]
-reason = "Method-call syntax on an object resolves builtin methods first, by receiver type: a builtin with an implementation for objects (`len`) wins over a same-named closure field, while a builtin method name with no object implementation (`get` exists for files only) falls back to invoking the object's closure field of that name. A colliding name with no closure field is the unknown-method error. Every planner strategy must apply the same precedence and wording."
+reason = "Method-call syntax on an object resolves builtin methods first, by receiver type: a builtin with an implementation for objects (`len`) wins over a same-named closure field, while a builtin method name with no object implementation (`get` exists for files only) falls back to invoking the object's closure field of that name. A colliding name with no closure field is the unknown-method error."
 
 [[test.results]]
 value = "NONE"

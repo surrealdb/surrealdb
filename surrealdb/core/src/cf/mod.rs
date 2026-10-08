@@ -5,4 +5,3 @@ pub(crate) mod writer;
 
 pub use self::gc::*;
 pub(crate) use self::mutations::*;
-pub use self::reader::read;

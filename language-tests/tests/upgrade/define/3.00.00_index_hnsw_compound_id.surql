@@ -1,8 +1,5 @@
 /**
 [env]
-# `EXPLAIN` is rejected by the legacy compute-only engine, and the ordinary
-# language-test runner replays this body under every strategy.
-planner-strategy = ["all-ro", "best-effort-ro"]
 imports = ["upgrade/define/3.00.00_index_hnsw_compound_id_import.surql"]
 
 [test]

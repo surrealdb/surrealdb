@@ -152,7 +152,7 @@ pub(crate) enum Error {
 impl Error {
 	/// Check if this error is related to schema checks.
 	///
-	/// UPSERT's create-then-update fallback (`doc/upsert.rs`) treats a schema
+	/// UPSERT's create-then-update fallback treats a schema
 	/// failure on the create attempt as recoverable when the statement is
 	/// repeatable: it carries the error, retries the document as an update, and
 	/// surfaces the carried error only if the update fails too. Any other

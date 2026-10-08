@@ -88,6 +88,9 @@ pub struct FieldDef {
 	pub borrowed: bool,
 	/// True when the field came from an enclosing level rather than this item.
 	pub inherited: bool,
+	/// The type as the schema names it — `NamespaceId`, `Str`, `Value` — or,
+	/// for a list field, its element type as the schema names it.
+	pub schema_ty: String,
 }
 
 /// The `storekey` format parameter a type is encoded under.
@@ -667,6 +670,9 @@ fn build(
 							elem: None,
 							borrowed,
 							inherited: false,
+							schema_ty: quote::ToTokens::to_token_stream(t)
+								.to_string()
+								.replace(' ', ""),
 						});
 						emit.push(Emit::Field(idx));
 						syms.push(Sym::Field {
@@ -687,6 +693,9 @@ fn build(
 							elem: Some(elem_toks),
 							borrowed: true,
 							inherited: false,
+							schema_ty: quote::ToTokens::to_token_stream(elem)
+								.to_string()
+								.replace(' ', ""),
 						});
 						emit.push(Emit::ListTerminated(idx));
 						syms.push(Sym::Field {

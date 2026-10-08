@@ -14,7 +14,7 @@ signin = """{
 
 [test]
 issue = 474
-reason = "HNSW KNN as a record user must apply the table's SELECT permission to every candidate inside the ANN search, before the residual WHERE runs (idx/trees/hnsw/filter.rs::is_record_truthy). Query 2 (residual WHERE): hidden rows (bob's) must neither be probed by the WHERE nor consume top-K slots, and alice's non-matching rows must not consume slots either -> vec:1, vec:5, vec:9. Query 3: the permission references `id`, so the per-candidate check must see the record id spliced into the candidate document -> vecb:1 (nearest) is excluded by the permission, vecb:3 by the WHERE. A KNN with no other condition is gated the same way; reproductions/7555_knn_returns_k_rows_the_caller_can_see_*.surql pins it, per engine."
+reason = "HNSW KNN as a record user must apply the table's SELECT permission to every candidate inside the ANN search, before the residual WHERE runs (idx/trees/hnsw/filter.rs::is_record_truthy). Query 2 (residual WHERE): hidden rows (bob's) must neither be probed by the WHERE nor consume top-K slots, and alice's non-matching rows must not consume slots either -> vec:1, vec:5, vec:9. Query 3: the permission references `id`, so the per-candidate check must see the record id spliced into the candidate document -> vecb:1 (nearest) is excluded by the permission, vecb:3 by the WHERE. A KNN with no other condition is gated the same way; reproductions/7555_knn_returns_k_rows_the_caller_can_see.surql pins it."
 
 [[test.results]]
 value = "user:alice"

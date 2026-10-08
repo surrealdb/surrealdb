@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Graph reachability semi-joins as bitmap branches: plan selection, EXPLAIN shape and results"
@@ -57,10 +56,8 @@ value = "[person:2, person:4]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: flag = true AND ->wrote->doc CONTAINS doc:x]
-      predicate.lookup: GraphEdgeScan [ctx: Db] [direction: ->, tables: wrote, output: TargetVertex]
-          CurrentValueSource [ctx: Rt]
-        BitmapResolve [ctx: Db] [table: person]
+    Filter [ctx: Db] [predicate: flag = true AND ->wrote->doc CONTAINS (doc:x)]
+        BitmapScan [ctx: Db] [table: person]
             BitmapAnd [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true]
                 BitmapGraphScan [ctx: Db] [source: doc:x, direction: <-, edges: wrote]
@@ -72,26 +69,22 @@ value = "[person:2, person:4]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    TableScan [ctx: Db] [table: person, direction: Forward, predicate: ->wrote->doc CONTAINS doc:x, pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: ->wrote->doc CONTAINS (doc:x)]
+        TableScan [ctx: Db] [table: person, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: ->wrote->doc->wrote->doc CONTAINS doc:x]
-      predicate.lookup: GraphEdgeScan [ctx: Db] [direction: ->, tables: wrote, output: TargetVertex]
-          GraphEdgeScan [ctx: Db] [direction: ->, tables: wrote, output: TargetVertex]
-              CurrentValueSource [ctx: Rt]
-        IndexScan [ctx: Db] [index: idx_flag, access: = true, direction: Forward]
+    Filter [ctx: Db] [predicate: flag = true AND ->wrote->doc->wrote->doc CONTAINS (doc:x)]
+        IndexScan [ctx: Db] [table: person, index: idx_flag, access: = true, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id] {rows: 2}
-    Filter [ctx: Db] [predicate: flag = true AND ->wrote->doc CONTAINS doc:x] {rows: 2}
-      predicate.lookup: GraphEdgeScan [ctx: Db] [direction: ->, tables: wrote, output: TargetVertex] {rows: 2}
-          CurrentValueSource [ctx: Rt] {rows: 2}
-        BitmapResolve [ctx: Db] [table: person] {rows: 2}
+    Filter [ctx: Db] [predicate: flag = true AND ->wrote->doc CONTAINS (doc:x)] {rows: 2}
+        BitmapScan [ctx: Db] [table: person] {rows: 2}
             BitmapAnd [ctx: Db] {rows: 2}
                 BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true] {rows: 3}
                 BitmapGraphScan [ctx: Db] [source: doc:x, direction: <-, edges: wrote] {rows: 4}

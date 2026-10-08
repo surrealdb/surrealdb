@@ -1,11 +1,10 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
 Test planner recognition of parameter, datetime, and UUID values in WHERE with
-index (new executor).
+index.
 
 `$obj.field` reaches the planner as a field of a constant object literal,
 because `resolve_condition_params` has already substituted the parameter. The
@@ -31,7 +30,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name] {rows: 1}
-    IndexScan [ctx: Db] [index: name, access: = 'Tobie', direction: Forward, predicate: name = 'Tobie'] {rows: 1}
+    IndexScan [ctx: Db] [table: person, index: name, access: = 'Tobie', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -50,14 +49,14 @@ value = "[{ created_at: d'2023-12-25T17:13:01.940183014Z', id: test_user:1 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: createdAt, access: = d'2023-12-25T17:13:01.940183014Z', direction: Forward, predicate: created_at = d'2023-12-25T17:13:01.940183014Z'] {rows: 1}
+    IndexScan [ctx: Db] [table: test_user, index: createdAt, access: = d'2023-12-25T17:13:01.940183014Z', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: createdAt, access: = d'2023-12-25T17:13:01.940183014Z', direction: Forward, predicate: created_at = d'2023-12-25T17:13:01.940183014Z'] {rows: 1}
+    IndexScan [ctx: Db] [table: test_user, index: createdAt, access: = d'2023-12-25T17:13:01.940183014Z', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -79,14 +78,14 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: sessionUid, access: = u'00ad70db-f435-442e-9012-1cd853102084', direction: Forward, predicate: sessionUid = u'00ad70db-f435-442e-9012-1cd853102084'] {rows: 1}
+    IndexScan [ctx: Db] [table: sessions, index: sessionUid, access: = u'00ad70db-f435-442e-9012-1cd853102084', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: sessionUid, access: = u'00ad70db-f435-442e-9012-1cd853102084', direction: Forward, predicate: sessionUid = u'00ad70db-f435-442e-9012-1cd853102084'] {rows: 1}
+    IndexScan [ctx: Db] [table: sessions, index: sessionUid, access: = u'00ad70db-f435-442e-9012-1cd853102084', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 

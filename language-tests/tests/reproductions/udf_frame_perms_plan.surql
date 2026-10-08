@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/udf_frame_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -25,7 +24,7 @@ value = '''
 'SelectProject [ctx: Db] [projections: *]
     ProjectLayer [ctx: Db] [columns: active = <permission> @permission]
         PermissionFilter [ctx: Db] [predicate: <permission>]
-            EmptyScan [ctx: Rt]
+            Union [ctx: Db]
 ''''
 */
 

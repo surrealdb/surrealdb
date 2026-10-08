@@ -236,7 +236,7 @@ SurrealismReadOnlySideEffect	{ cause: NONE, code: -32600, details: { kind: 'Inva
 SetCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Tried to set `$sample`, but couldn't coerce value: Expected `sample` but found `NONE`" }
 ReturnCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Couldn't coerce return value from function `sample`: Expected `sample` but found `NONE`" }
 Unimplemented	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Unimplemented functionality: sample' }
-PlannerUnsupported	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Planner unsupported: sample' }
+PlannerUnsupported	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The engine cannot run this statement: sample' }
 AccessLevelMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The access method cannot be defined on the requested level' }
 AccessUnsupportedAlgorithm	{ cause: NONE, code: -32000, kind: 'Validation', message: 'The ES512 algorithm is not currently supported. Please use ES384 or another supported algorithm' }
 AccessRedactedKey	{ cause: NONE, code: -32000, kind: 'Validation', message: "The access method 'sample' names the redaction placeholder as its key, which is published wherever an access is rendered; restore it from a definition carrying the real key, or define it again" }

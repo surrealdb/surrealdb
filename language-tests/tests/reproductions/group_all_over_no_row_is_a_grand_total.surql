@@ -15,10 +15,8 @@ reason = """
 	`math::mean` `NaN` rather than a row-shaped absence, and why `time::min`
 	and `time::max` report `NONE`, having no such bound to fall back on. Each
 	scalar form is checked alongside its aggregate so the two cannot drift
-	apart in value. They are not checked for numeric *type*: a total is a
-	float on the per-row engine and an integer on the streaming one, here as
-	for a group with rows, and `group_aggregate_numeric_type_*` is where
-	that is pinned.
+	apart in value. They are not checked for numeric *type*, which
+	`group_aggregate_numeric_type.surql` pins.
 
 	A column that is not an aggregate follows the same rule: one the row
 	cannot influence has the statement's value — evaluated once for the group,
@@ -35,10 +33,8 @@ reason = """
 	can only be learned from a row, so an input that yields none leaves no
 	group and the statement reports nothing.
 
-	`SELECT *, count() ... GROUP BY` is deliberately absent: both engines
-	reject it, differing only in that the streaming message carries an
-	`Invalid query: ` prefix, which is a message difference rather than a
-	behavioural one.
+	`SELECT *, count() ... GROUP BY` is deliberately absent: it is rejected, and
+	the message is not what this file pins.
 """
 
 [[test.results]]

@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use surrealdb_datastore::values::inline_cache::CacheValue;
 
-use crate::catalog::providers::TableProvider;
 use crate::exec::operators::scan::EdgeTableSpec;
 use crate::exec::operators::scan::graph_keys::compute_graph_ranges;
 use crate::exec::parts::LookupDirection;
@@ -32,13 +31,21 @@ use crate::val::{RecordId, TableName, Value};
 
 /// See the module docs.
 pub(crate) struct GraphDegreeExpr {
+	/// The fast path.
+	counter: DegreeCounter,
+	/// The expression the planner would otherwise have produced — the
+	/// authority for every shape the fast path declines at runtime.
+	pub(crate) fallback: Arc<dyn PhysicalExpr>,
+}
+
+/// The degree fast path of a `count(->edge)`-shaped call over the record the
+/// call is evaluated on: what it counts, and the per-table data it derives
+/// from that once.
+pub(crate) struct DegreeCounter {
 	/// The traversal direction; `Both` sums the two directions.
 	direction: LookupDirection,
 	/// The edge tables to count; empty counts every table.
 	edge_tables: Vec<TableName>,
-	/// The expression the planner would otherwise have produced — the
-	/// authority for every shape the fast path declines at runtime.
-	fallback: Arc<dyn PhysicalExpr>,
 	/// The edge tables as storekey prefixes, for filtering inline-cache
 	/// entries — an entry's identity bytes start with its encoded table.
 	/// Empty accepts every table. Plan-constant: projections evaluate once
@@ -57,8 +64,8 @@ pub(crate) struct GraphDegreeExpr {
 impl std::fmt::Debug for GraphDegreeExpr {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("GraphDegreeExpr")
-			.field("direction", &self.direction)
-			.field("edge_tables", &self.edge_tables)
+			.field("direction", &self.counter.direction)
+			.field("edge_tables", &self.counter.edge_tables)
 			.finish_non_exhaustive()
 	}
 }
@@ -88,18 +95,10 @@ impl PhysicalExpr for GraphDegreeExpr {
 
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
-			// The fast path covers exactly one row shape: a single source
-			// record. Arrays, NONE and exotic values keep the evaluator's
-			// flatten-and-count semantics.
-			let rid = match ctx.current_value {
-				Some(Value::RecordId(rid)) => rid.clone(),
-				Some(Value::Object(obj)) => match obj.get("id") {
-					Some(Value::RecordId(rid)) => rid.clone(),
-					_ => return self.fallback.evaluate(ctx).await,
-				},
-				_ => return self.fallback.evaluate(ctx).await,
+			let Some(rid) = DegreeCounter::source(ctx.current_value) else {
+				return self.fallback.evaluate(ctx).await;
 			};
-			match self.degree(&ctx, &rid).await? {
+			match self.counter.degree(&ctx, &rid).await? {
 				Some(degree) => Ok(Value::Number(degree.into())),
 				None => self.fallback.evaluate(ctx).await,
 			}
@@ -107,7 +106,7 @@ impl PhysicalExpr for GraphDegreeExpr {
 	}
 }
 
-/// The degree count's cancellation probe: the streaming executor's
+/// The degree count's cancellation probe: the engine's
 /// cancellation token plus the context's deadline, so both a cancelled
 /// query and a `TIMEOUT` clause interrupt a long count.
 struct DegreeCancel<'a> {
@@ -135,6 +134,20 @@ impl GraphDegreeExpr {
 		edge_tables: Vec<TableName>,
 		fallback: Arc<dyn PhysicalExpr>,
 	) -> anyhow::Result<Self> {
+		Ok(Self {
+			counter: DegreeCounter::new(direction, edge_tables)?,
+			fallback,
+		})
+	}
+}
+
+impl DegreeCounter {
+	/// The fast path counting `edge_tables` (every table when empty) along
+	/// `direction`, deriving the per-table prefixes and scan specs once.
+	pub(crate) fn new(
+		direction: LookupDirection,
+		edge_tables: Vec<TableName>,
+	) -> anyhow::Result<Self> {
 		let prefixes = edge_tables
 			.iter()
 			.map(|t| storekey::encode_vec(t).map_err(anyhow::Error::from_boxed))
@@ -150,16 +163,33 @@ impl GraphDegreeExpr {
 		Ok(Self {
 			direction,
 			edge_tables,
-			fallback,
 			prefixes,
 			specs,
 			table_info: Default::default(),
 		})
 	}
 
+	/// The source record a value the call is evaluated on names: a record
+	/// id, or an object's `id` that is one. Arrays, `NONE` and every other
+	/// value are left to the evaluator's flatten-and-count semantics.
+	pub(crate) fn source(current: Option<&Value>) -> Option<RecordId> {
+		match current {
+			Some(Value::RecordId(rid)) => Some(rid.clone()),
+			Some(Value::Object(obj)) => match obj.get("id") {
+				Some(Value::RecordId(rid)) => Some(rid.clone()),
+				_ => None,
+			},
+			_ => None,
+		}
+	}
+
 	/// The degree of one source record, or `None` when the source's state
 	/// is a shape the fast path leaves to the evaluator.
-	async fn degree(&self, ctx: &EvalContext<'_>, rid: &RecordId) -> anyhow::Result<Option<u64>> {
+	pub(crate) async fn degree(
+		&self,
+		ctx: &EvalContext<'_>,
+		rid: &RecordId,
+	) -> anyhow::Result<Option<u64>> {
 		let exec = ctx.exec_ctx;
 		let db_ctx = exec.database()?;
 		let ns_id = db_ctx.ns_ctx.ns.namespace_id;
@@ -170,7 +200,7 @@ impl GraphDegreeExpr {
 		let (adjacency, edges_cap) = match info {
 			Some(info) => info,
 			None => {
-				let tb = txn.get_tb(ns_id, db_id, &rid.table, None).await?;
+				let tb = txn.layout_tb(ns_id, db_id, &rid.table, None).await?;
 				let info = (
 					vertex_adjacency_of(tb.as_deref()),
 					crate::idx::inline_cache::effective_edges_cap(tb.as_deref()),

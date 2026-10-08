@@ -5,15 +5,19 @@
 //! `IN []`, or a WHERE clause folded to `false`. Returning an empty stream
 //! is strictly cheaper than reaching storage and filtering.
 
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use futures::stream;
 
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatchStream, monitor_stream,
 };
 
+#[cfg(test)]
 /// Operator that produces no rows.
 ///
 /// Used when the planner can statically prove a SELECT cannot match any
@@ -23,7 +27,9 @@ pub struct EmptyScan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl EmptyScan {
+	#[cfg(test)]
 	pub(crate) fn new() -> Self {
 		Self {
 			metrics: Arc::new(OperatorMetrics::new()),
@@ -31,12 +37,14 @@ impl EmptyScan {
 	}
 }
 
+#[cfg(test)]
 impl Default for EmptyScan {
 	fn default() -> Self {
 		Self::new()
 	}
 }
 
+#[cfg(test)]
 impl ExecOperator for EmptyScan {
 	fn name(&self) -> &'static str {
 		"EmptyScan"

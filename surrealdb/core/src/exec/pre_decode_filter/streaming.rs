@@ -462,6 +462,8 @@ impl ArrayOverlapsLiteralSet {
 /// right after the `flags` byte (see `IndexedSeqWalker`); we read just that
 /// prefix and compare against `expected_len`. No element decode, no array
 /// iteration, no Strand / Value materialisation.
+// Constructed or read only by the operator-tree oracle, which test builds compile.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug)]
 pub(crate) struct ArrayLenCompare {
 	/// Right-hand side of the predicate: the numeric literal `array::len`

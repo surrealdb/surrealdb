@@ -5,19 +5,26 @@
 //! - 1 result → returns that value (unwrapped from array)
 //! - >1 results → returns `ExecError::SingleOnlyOutput`
 
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use futures::StreamExt;
 
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, Error as ExecError, ExecOperator, ExecutionContext,
 	FlowResult, OperatorMetrics, OutputShape, ValueBatch, ValueBatchStream, buffer_stream,
 	monitor_stream,
 };
+#[cfg(test)]
 use crate::expr::ControlFlow;
+#[cfg(test)]
 use crate::val::Value;
 
+#[cfg(test)]
 /// Unwraps the one result of a `SELECT ... FROM ONLY ...`.
 ///
 /// It collects all values from the input stream and:
@@ -36,7 +43,9 @@ pub struct UnwrapExactlyOne {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl UnwrapExactlyOne {
+	#[cfg(test)]
 	pub(crate) fn new(input: Arc<dyn ExecOperator>) -> Self {
 		Self {
 			input,
@@ -44,6 +53,7 @@ impl UnwrapExactlyOne {
 		}
 	}
 }
+#[cfg(test)]
 impl ExecOperator for UnwrapExactlyOne {
 	fn name(&self) -> &'static str {
 		"UnwrapExactlyOne"
@@ -81,7 +91,7 @@ impl ExecOperator for UnwrapExactlyOne {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);

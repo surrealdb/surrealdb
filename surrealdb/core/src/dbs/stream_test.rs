@@ -1,4 +1,4 @@
-//! Differential tests for the streaming execution path.
+//! Differential tests for the result stream.
 //!
 //! The contract is that streaming changes *when* a result reaches the caller,
 //! never *what* it is. Each test therefore runs the same query both ways and
@@ -59,7 +59,7 @@ fn session() -> Session {
 	Session::owner().with_ns("test").with_db("test")
 }
 
-/// Run a query through the streaming path and reassemble what a consumer would
+/// Run a query through the result stream and reassemble what a consumer would
 /// see, the way a client demultiplexing by statement index does.
 async fn streamed(ds: &Arc<Datastore>, sql: &str) -> Result<Vec<QueryResult>, String> {
 	let (tx, rx) = async_channel::bounded(QUERY_STREAM_BUFFER);
@@ -154,8 +154,7 @@ const SEED: &str = "CREATE thing:1 SET n = 1; CREATE thing:2 SET n = 2; CREATE t
 
 #[tokio::test]
 async fn streaming_matches_buffered() {
-	// Row-shaped, scalar-shaped, empty, multi-statement, and the statement
-	// kinds that fall back to the legacy evaluator rather than streaming.
+	// Row-shaped, scalar-shaped, empty and multi-statement queries.
 	for sql in [
 		"SELECT * FROM thing",
 		"SELECT * FROM thing ORDER BY n DESC",

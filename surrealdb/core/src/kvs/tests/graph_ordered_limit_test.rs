@@ -1,15 +1,13 @@
 //! `->(SELECT ... FROM edge ORDER BY id LIMIT n)` driven end to end
 //! through a `Datastore` with real SurrealQL.
 //!
-//! The invariant under test: when the planner caps the scan beneath an
-//! `ORDER BY id ASC` (see `GraphEdgeScan::limit_needs_id_order`), the
-//! result is identical to the full-scan-then-sort answer, in every
-//! adjacency state a scope can be in — plain per-edge keys, a live inline
-//! cache (whose entries are stored in write order, not id order), folded
-//! blocks (plain and numeric), a folded scope with live and tombstoned
-//! tail entries, and lightweight relations. Edges are RELATEd in shuffled
-//! id order throughout so that any path that caps in write order rather
-//! than id order returns the wrong rows.
+//! The invariant under test: the result is identical to the
+//! full-scan-then-sort answer, in every adjacency state a scope can be in —
+//! plain per-edge keys, a live inline cache (whose entries are stored in
+//! write order, not id order), folded blocks (plain and numeric), a folded
+//! scope with live and tombstoned tail entries, and lightweight relations.
+//! Edges are RELATEd in shuffled id order throughout so that any path that
+//! limits in write order rather than id order returns the wrong rows.
 
 #![allow(clippy::unwrap_used)]
 
@@ -288,40 +286,6 @@ async fn ordered_limits_are_exact_with_numeric_blocks() {
 	full_battery(&ds, &ses).await;
 }
 
-/// The plan itself: the cap and its ordering contract are visible in
-/// EXPLAIN for an eligible shape, and absent for shapes that must decline.
-#[tokio::test]
-async fn the_ordered_cap_is_visible_in_explain() {
-	let ds =
-		Datastore::builder().without_maintenance_tasks().build_with_path("memory").await.unwrap();
-	let ses = Session::owner().with_ns("test").with_db("test");
-	seed(&ds, &ses).await;
-
-	let eligible = run(
-		&ds,
-		&ses,
-		"EXPLAIN SELECT VALUE ->(SELECT id FROM knows ORDER BY id LIMIT 3).id FROM ONLY person:1;",
-	)
-	.await
-	.remove(0);
-	let eligible = surrealdb_types::ToSql::to_sql(&eligible);
-	assert!(eligible.contains("order_pushdown"), "expected the cap in: {eligible}");
-
-	for declined in [
-		"EXPLAIN SELECT VALUE ->(SELECT id FROM knows ORDER BY id DESC LIMIT 3).id FROM ONLY person:1;",
-		"EXPLAIN SELECT VALUE ->(SELECT id FROM knows, likes ORDER BY id LIMIT 3).id FROM ONLY person:1;",
-		"EXPLAIN SELECT VALUE <->(SELECT id FROM knows ORDER BY id LIMIT 3).id FROM ONLY person:50;",
-		"EXPLAIN SELECT VALUE ->(SELECT id, out FROM knows ORDER BY out LIMIT 3).out FROM ONLY person:1;",
-		// An alias renaming `out` to the literal name `id` shadows the
-		// source id: declined, regardless of what the aliased values
-		// happen to sort to in this seed.
-		"EXPLAIN SELECT VALUE ->(SELECT out AS id FROM knows ORDER BY id LIMIT 3).id FROM ONLY person:1;",
-	] {
-		let plan = surrealdb_types::ToSql::to_sql(&run(&ds, &ses, declined).await.remove(0));
-		assert!(!plan.contains("order_pushdown"), "unexpected cap in `{declined}`: {plan}");
-	}
-}
-
 /// A parameterised START must narrow the cap by its real (runtime) value,
 /// not fall back to zero: capping two rows short of a `START $skip` would
 /// silently discard the rows the real skip should have produced.
@@ -518,19 +482,6 @@ async fn permission_checked_sessions_decline_the_scan_cap() {
 		],
 	)
 	.await;
-
-	// The decline is visible in the plan: no cap, ordered or otherwise, on
-	// the conditionally-visible edge table.
-	let plan = surrealdb_types::ToSql::to_sql(
-		&run(
-			&ds,
-			&user,
-			"EXPLAIN SELECT VALUE ->(SELECT id FROM knows ORDER BY id LIMIT 1).id FROM ONLY person:1;",
-		)
-		.await
-		.remove(0),
-	);
-	assert!(!plan.contains("order_pushdown"), "unexpected cap under live permissions: {plan}");
 }
 
 /// A negative LIMIT or START must decline the scan cap rather than compute

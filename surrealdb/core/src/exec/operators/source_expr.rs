@@ -9,42 +9,72 @@
 //! RecordId resolution ensures downstream pipeline operators (Filter, Sort, etc.)
 //! can access document fields, matching the behaviour of RecordIdScan and TableScan.
 
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use surrealdb_types::{SqlFormat, ToSql};
 
+#[cfg(test)]
 use crate::exec::context::{ContextLevel, ExecutionContext};
+#[cfg(test)]
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, ExecOperator, FlowResult, OperatorMetrics, OutputShape, ValueBatch,
 	ValueBatchStream, monitor_stream,
 };
+#[cfg(test)]
 use crate::val::Value;
 
+#[cfg(test)]
 /// SourceExpr operator - evaluates an expression and yields values for iteration.
 ///
-/// Unlike ExprPlan (which returns a single value), SourceExpr handles
-/// FROM clause semantics:
+/// An expression in a FROM clause names rows to iterate, not one value, so
+/// SourceExpr gives it FROM clause semantics:
 /// - None/Null → empty stream (no rows)
 /// - Array → yield each element
 /// - Other → yield single value
+///
+/// An array written in `FROM` is a list of sources, as the per-row engine
+/// reads it: an element that evaluates to an array contributes its elements,
+/// one level deep, so `FROM [a->b, c]` reads the records the traversal reaches
+/// as `FROM a->b, c` does, while an array held in a parameter or returned by a
+/// call is one source whose elements are its rows as they are.
 #[derive(Debug, Clone)]
 pub struct SourceExpr {
 	/// The expression to evaluate
 	pub expr: Arc<dyn PhysicalExpr>,
+	/// Whether `expr` is an array written in `FROM`, whose elements that are
+	/// arrays contribute their elements.
+	written: bool,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl SourceExpr {
+	#[cfg(test)]
 	pub(crate) fn new(expr: Arc<dyn PhysicalExpr>) -> Self {
 		Self {
 			expr,
+			written: false,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
+
+	#[cfg(test)]
+	/// The source of an array written in `FROM`.
+	pub(crate) fn written_array(expr: Arc<dyn PhysicalExpr>) -> Self {
+		Self {
+			written: true,
+			..Self::new(expr)
+		}
+	}
 }
+#[cfg(test)]
 impl ExecOperator for SourceExpr {
 	fn name(&self) -> &'static str {
 		"SourceExpr"
@@ -75,6 +105,7 @@ impl ExecOperator for SourceExpr {
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let expr = Arc::clone(&self.expr);
+		let written = self.written;
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -96,10 +127,14 @@ impl ExecOperator for SourceExpr {
 
 			match value {
 				Value::Array(arr) => {
-					let mut values: Vec<Value> = arr
-						.into_iter()
-						.filter(|v| !matches!(v, Value::None | Value::Null))
-						.collect();
+					let mut values: Vec<Value> = Vec::with_capacity(arr.len());
+					for value in arr {
+						match value {
+							Value::Array(inner) if written => values.extend(inner),
+							other => values.push(other),
+						}
+					}
+					values.retain(|v| !matches!(v, Value::None | Value::Null));
 					if !values.is_empty() {
 						// Resolve RecordId values to full documents so that
 						// downstream operators (Filter, Sort, etc.) can access
@@ -134,6 +169,7 @@ impl ExecOperator for SourceExpr {
 	}
 }
 
+#[cfg(test)]
 impl ToSql for SourceExpr {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		self.expr.fmt_sql(f, fmt);

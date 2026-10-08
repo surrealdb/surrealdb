@@ -14,8 +14,8 @@ Building the write path from the target's *output name* drops every positional
 step, since a name is what a projection would call the column: `a[0]`, `a[1]`
 and `a[$]` all project under `a`, and writing there replaced the whole field.
 
-`a[*]` names no single position — it reads every element — so it is declined
-and the statement runs on the per-row engine.
+`a[*]` names every position of the collection — it reads every element — so
+each element the row is split on is written to all of them.
 """
 
 [[test.results]]
@@ -61,6 +61,5 @@ SELECT * FROM t:1 SPLIT a;
 -- Nested under a field.
 SELECT * FROM t:2 SPLIT o.b[0];
 
--- `a[*]` reads every element, so writing one back names no single position;
--- the statement runs on the per-row engine, which sets them all.
+-- `a[*]` reads every element, so writing one back sets them all.
 SELECT * FROM t:1 SPLIT a[*];

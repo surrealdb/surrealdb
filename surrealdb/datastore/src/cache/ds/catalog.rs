@@ -58,7 +58,9 @@ use crate::tx::Transaction;
 /// and if it rolls back, the version is gone with it and the entry can never be
 /// served to anyone. It ages out of the cache unread.
 ///
-/// A table that no catalog write has stamped has no version. Its snapshot is
+/// A table that no catalog write has stamped has no version, nor has one
+/// whose definition a build that predates versions has rewritten since its
+/// last stamp ([`Transaction::catalog_version`]). Its snapshot is
 /// keyed by the content hash of its definition as read through the
 /// requesting transaction instead: every catalog write to a table's fields or
 /// indexes rewrites the table's definition — the `cache_fields_ts` and

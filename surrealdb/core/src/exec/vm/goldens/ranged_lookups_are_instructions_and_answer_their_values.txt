@@ -1,0 +1,18 @@
+### a:1->edge:1..=2
+[edge:1, edge:2]
+### a:1->edge:2..
+[edge:2, edge:3]
+### b:1->ce:[6]..=[$num - 2]
+[ce:[6], ce:[7]]
+### b:1->ce:[6]..
+[ce:[6], ce:[7]]
+### a:1->edge:1..=2->a
+[a:2, a:2]
+### a:1->(SELECT id FROM edge:1..=2).*
+[{ id: edge:1 }, { id: edge:2 }]
+### a:1->(SELECT id FROM edge:..=3 START 1 LIMIT 1).*
+[{ id: edge:2 }]
+### chat:bla<~(message:1..=2 FIELD chat)
+[message:1, message:2]
+### chat:bla<~(message:1>.. FIELD chat).id
+[message:2, message:3]

@@ -82,6 +82,7 @@ use crate::expr::logical::{
 };
 pub(super) use crate::expr::logical::{ROW_PARAMS, may_dereference};
 
+pub(super) mod control_flow;
 pub(super) mod decorrelate;
 pub(super) mod filter;
 pub(super) mod identity;
@@ -113,6 +114,9 @@ pub(super) struct RuleContext<'a> {
 	pub(super) next_alias: usize,
 	/// What the caller may execute, which bounds what a call folds to.
 	pub(super) capabilities: &'a Capabilities,
+	/// Whether a `time::now()` in a condition folds to the time of binding
+	/// ([`super::BindContext::folds_clock`]).
+	pub(super) folds_clock: bool,
 }
 
 /// One node rewrite rule; see the module documentation for what a rule may
@@ -197,6 +201,9 @@ pub(super) struct ExprContext<'a> {
 	/// Whether the aggregate extractor reads these scalars after binding and
 	/// matches their calls by name, so a call it knows must survive whole.
 	pub(super) aggregates_survive: bool,
+	/// Whether these scalars are a condition, where `time::now()` is one value
+	/// for the statement; see [`super::fold::is_condition`].
+	pub(super) condition: bool,
 }
 
 /// One expression rewrite rule.
@@ -209,7 +216,8 @@ pub(super) type ExprRule = fn(&mut LogicalExpr, &ExprContext<'_>) -> bool;
 
 /// The expression rules, applied at every scalar of every node before the
 /// node rules see it. Order affects only how many passes the fixpoint takes.
-pub(super) const EXPR_RULES: &[(&str, ExprRule)] = &[("fold", super::fold::apply)];
+pub(super) const EXPR_RULES: &[(&str, ExprRule)] =
+	&[("fold", super::fold::apply), ("control_flow", control_flow::apply)];
 
 /// Rewrite every position of every scalar of `node`, against the schema of
 /// the row that position is evaluated on: the node's row schema at the row,
@@ -405,6 +413,7 @@ pub(super) fn is_permission_node(node: &LogicalOp) -> bool {
 		LogicalOp::Source(_)
 		| LogicalOp::Values(_)
 		| LogicalOp::Match(_)
+		| LogicalOp::Write(_)
 		| LogicalOp::Subquery(_)
 		| LogicalOp::UnionAll(_)
 		| LogicalOp::Filter(_)
@@ -425,6 +434,7 @@ pub(super) fn is_permission_node(node: &LogicalOp) -> bool {
 		| LogicalOp::Return(_)
 		| LogicalOp::Foreach(_)
 		| LogicalOp::Info(_)
+		| LogicalOp::Ddl(_)
 		| LogicalOp::Sleep(_) => false,
 	}
 }
@@ -450,6 +460,7 @@ pub(super) fn row_schema(node: &LogicalOp) -> Schema {
 		LogicalOp::Source(_)
 		| LogicalOp::Values(_)
 		| LogicalOp::Match(_)
+		| LogicalOp::Write(_)
 		| LogicalOp::Subquery(_)
 		| LogicalOp::UnionAll(_)
 		| LogicalOp::Join(_)
@@ -460,6 +471,7 @@ pub(super) fn row_schema(node: &LogicalOp) -> Schema {
 		| LogicalOp::Return(_)
 		| LogicalOp::Foreach(_)
 		| LogicalOp::Info(_)
+		| LogicalOp::Ddl(_)
 		| LogicalOp::Sleep(_) => Schema::open(),
 	}
 }
@@ -498,6 +510,7 @@ fn body_inputs_from(expr: &LogicalExpr) -> Option<usize> {
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Param(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Field(_)
 		| LogicalExpr::Doc
@@ -703,6 +716,7 @@ pub(crate) fn may_signal_control_flow(expr: &LogicalExpr) -> bool {
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Param(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Field(_)
 		| LogicalExpr::Doc
@@ -1049,6 +1063,7 @@ pub(super) mod test_support {
 			permission_checked_params: permission_checked,
 			next_alias: 0,
 			capabilities: &capabilities,
+			folds_clock: true,
 		};
 		optimise(op, &mut cx)
 	}

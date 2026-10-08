@@ -2,13 +2,12 @@
 [env]
 namespace = false
 database = false
-planner-strategy = ["compute-only", "all-ro", "best-effort-ro"]
 
 [test]
 reason = """
 A pure closure invoked in a session with no namespace or database selected
 must evaluate at root level, both directly ($f()) and through an object field
-($o.inc()), on every planner strategy. The executor upgrades the context from
+($o.inc()). The executor upgrades the context from
 the session's ns/db selection opportunistically, so a session without one must
 not start failing.
 """

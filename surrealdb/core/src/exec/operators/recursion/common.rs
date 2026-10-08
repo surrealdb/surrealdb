@@ -5,7 +5,8 @@ use std::sync::Arc;
 use futures::{StreamExt, TryStreamExt, stream};
 use surrealdb_types::ToSql;
 
-use crate::exec::parts::is_final;
+use crate::exec::parts::{evaluate_physical_path, is_final};
+use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{BoxFut, ExecOperator, ExecutionContext, FlowResult};
 use crate::val::Value;
 
@@ -14,6 +15,27 @@ use crate::val::Value;
 /// allowing progress when individual evaluations block on I/O.
 pub(crate) const RECURSION_CONCURRENCY: usize = 16;
 
+/// What a strategy evaluates at each depth: the recursion's body over the
+/// value that depth steps from, answering the value it reaches. An
+/// evaluation holds no state a concurrent evaluation of another value
+/// reads, so a strategy may run a level's evaluations side by side.
+pub(crate) trait DepthBody: Sync {
+	fn eval<'a>(&'a self, value: &'a Value) -> BoxFut<'a, FlowResult<Value>>;
+}
+
+/// A body that is a path of physical expressions, each evaluated over the
+/// previous part's value with the depth's value as the current value.
+pub(crate) struct PathBody<'p, 'c> {
+	pub(crate) path: &'p [Arc<dyn PhysicalExpr>],
+	pub(crate) ctx: EvalContext<'c>,
+}
+
+impl DepthBody for PathBody<'_, '_> {
+	fn eval<'a>(&'a self, value: &'a Value) -> BoxFut<'a, FlowResult<Value>> {
+		evaluate_physical_path(value, self.path, self.ctx.with_value(value))
+	}
+}
+
 /// The `{min..max}` range of a recursive idiom (`.{min..max}`) plus the resolved
 /// system `idiom_recursion_limit`, shared by every recursion strategy and
 /// constructed once by the dispatching `RecursionOp`.
@@ -21,9 +43,8 @@ pub(crate) const RECURSION_CONCURRENCY: usize = 16;
 /// `max` carries the user-specified upper bound, or `None` when the user gave no
 /// bound. That distinction drives limit handling: an explicit bound stops the
 /// recursion silently at that depth, whereas an unbounded recursion is capped at
-/// the system limit and *exhausting* that cap is a hard error (matching the
-/// legacy `compute()` engine). The two cases are otherwise indistinguishable
-/// once the cap is resolved (a user bound equal to the system limit is legal),
+/// the system limit and *exhausting* that cap is a hard error. The two cases are otherwise
+/// indistinguishable once the cap is resolved (a user bound equal to the system limit is legal),
 /// so the `Option` must be preserved rather than collapsed to a single depth
 /// value.
 #[derive(Clone, Copy, Debug)]

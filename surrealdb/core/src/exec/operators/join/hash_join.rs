@@ -133,21 +133,29 @@
 //! constructed and the buffered rows replayed. See `execute`.
 
 use std::collections::BTreeMap;
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use futures::StreamExt;
 
+#[cfg(test)]
 use super::JoinFrame;
+use crate::exec::FlowResult;
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, OutputOrdering, PhysicalExpr, ValueBatch, ValueBatchStream,
-	buffer_stream, monitor_stream,
+	OperatorMetrics, OutputOrdering, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::{Object, Value};
 
 /// The kind of join `HashJoin` performs.
+// Constructed or read only by the operator-tree oracle, which test builds compile.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JoinType {
 	/// Emit only probe rows that match at least one build row.
@@ -177,6 +185,7 @@ impl JoinType {
 	}
 }
 
+#[cfg(test)]
 /// How the two sides' rows are keyed and merged; see the module docs.
 #[derive(Debug, Clone)]
 pub(crate) enum JoinShape {
@@ -200,6 +209,7 @@ pub(crate) enum JoinShape {
 	},
 }
 
+#[cfg(test)]
 /// Equi-join / cartesian product of two row streams.
 ///
 /// See the module docs for the key extraction, the null-key rules per join
@@ -226,7 +236,9 @@ pub struct HashJoin {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl HashJoin {
+	#[cfg(test)]
 	/// A join of binding rows, keyed on the shared bindings `keys`.
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
@@ -251,6 +263,7 @@ impl HashJoin {
 		}
 	}
 
+	#[cfg(test)]
 	/// A join of document rows: each probe row keyed by `probe_keys`, each
 	/// build row by `build_keys` read through `alias`, the matched build row
 	/// added to the probe row under `alias`.
@@ -280,12 +293,14 @@ impl HashJoin {
 		}
 	}
 
+	#[cfg(test)]
 	/// Whether the join's expressions and build plan are the table
 	/// definer's and the plan is compiled for a caller they are enforced on.
 	fn redacted(&self) -> bool {
 		self.frame.as_ref().is_some_and(|frame| frame.checked_caller)
 	}
 
+	#[cfg(test)]
 	/// Every expression the join evaluates, with its role.
 	fn own_expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
 		let mut out = Vec::new();
@@ -305,38 +320,51 @@ impl HashJoin {
 	}
 }
 
+#[cfg(test)]
 /// One side of a `HashJoin` (build or probe): the child operator plus its
 /// pre-read buffering inputs. `execute` constructs each side's stream through
 /// this so it can choose to build a side eagerly (up front, for read-only
 /// pipeline parallelism) or lazily inside the stream (after the *other*,
 /// mutating side has drained — see the read-after-write ordering notes in
-/// `execute`) without juggling parallel `op`/`access`/`card` locals.
+/// `execute`) without juggling a parallel local per side.
 struct JoinSide {
 	op: Arc<dyn ExecOperator>,
+	/// This side's own mode, which decides the build/probe ordering below.
 	access: AccessMode,
+	/// The mode this side's stream is buffered with: the join's mode combined
+	/// with this side's, so a join that writes — on either side or in its own
+	/// expressions — never moves a side onto another task.
+	buffered_as: AccessMode,
 	card: CardinalityHint,
 }
 
+#[cfg(test)]
 impl JoinSide {
-	fn new(op: &Arc<dyn ExecOperator>) -> Self {
+	#[cfg(test)]
+	fn new(op: &Arc<dyn ExecOperator>, join_mode: AccessMode) -> Self {
+		let access = op.access_mode();
 		Self {
 			op: Arc::clone(op),
-			access: op.access_mode(),
+			access,
+			buffered_as: access.combine(join_mode),
 			card: op.cardinality_hint(),
 		}
 	}
 
+	#[cfg(test)]
 	/// Whether this side carries a GQL write stage upstream.
 	fn mutates(&self) -> bool {
 		self.access.is_read_write()
 	}
 
+	#[cfg(test)]
 	/// Construct and buffer this side's stream (lazy until first polled).
 	fn stream(&self, ctx: &ExecutionContext, buffer_size: usize) -> FlowResult<ValueBatchStream> {
-		Ok(buffer_stream(self.op.execute(ctx)?, self.access, self.card, buffer_size))
+		Ok(buffer_stream(self.op.execute(ctx)?, self.buffered_as, self.card, buffer_size))
 	}
 }
 
+#[cfg(test)]
 impl ExecOperator for HashJoin {
 	fn name(&self) -> &'static str {
 		"HashJoin"
@@ -495,8 +523,9 @@ impl ExecOperator for HashJoin {
 		//    yielded a row (the module docs, "Build and probe order"): an empty probe leaves the
 		//    build side unbuilt.
 		let buffer_size = ctx.root().ctx.config.exec.operator_buffer_size;
-		let build = JoinSide::new(&self.build);
-		let probe = JoinSide::new(&self.probe);
+		let join_mode = self.access_mode();
+		let build = JoinSide::new(&self.build, join_mode);
+		let probe = JoinSide::new(&self.probe, join_mode);
 		let probe_first = probe.mutates() && !build.mutates();
 
 		// A framed semi or anti join inside an enclosing permission frame
@@ -759,7 +788,9 @@ impl ExecOperator for HashJoin {
 	}
 }
 
+#[cfg(test)]
 impl JoinShape {
+	#[cfg(test)]
 	/// The key of a build row, or `None` for a row that can match nothing.
 	async fn build_key(&self, row: &Value, eval: &EvalContext<'_>) -> FlowResult<Option<JoinKey>> {
 		match self {
@@ -782,6 +813,7 @@ impl JoinShape {
 		}
 	}
 
+	#[cfg(test)]
 	/// The key of a probe row, or `None` for a row that can match nothing.
 	async fn probe_key(&self, row: &Value, eval: &EvalContext<'_>) -> FlowResult<Option<JoinKey>> {
 		match self {
@@ -796,6 +828,7 @@ impl JoinShape {
 		}
 	}
 
+	#[cfg(test)]
 	/// The output row for a build row matching a probe row.
 	fn merge(&self, build_row: &Value, probe_row: &Value) -> Value {
 		match self {
@@ -809,6 +842,7 @@ impl JoinShape {
 		}
 	}
 
+	#[cfg(test)]
 	/// The row the residual predicate reads for a build row and a probe row.
 	///
 	/// This is [`JoinShape::merge`]'s row wherever the merge can carry the
@@ -834,6 +868,7 @@ impl JoinShape {
 		}
 	}
 
+	#[cfg(test)]
 	/// The output row for a probe row a `Left` join found no match for.
 	fn null_filled(&self, probe_row: &Value) -> Value {
 		match self {
@@ -850,8 +885,9 @@ impl JoinShape {
 }
 
 /// A join key: one value per key column.
-type JoinKey = Vec<Value>;
+pub(crate) type JoinKey = Vec<Value>;
 
+#[cfg(test)]
 /// Evaluate each key expression against `row`, as the row and its document.
 async fn evaluate_keys(
 	keys: &[Arc<dyn PhysicalExpr>],
@@ -868,7 +904,7 @@ async fn evaluate_keys(
 /// The probe row with `value` set under `alias`. A probe row that is not an
 /// object — a bare value from a `VALUE` projection — has no field to hold
 /// the alias, and is emitted as it is.
-fn with_alias(probe_row: &Value, alias: &str, value: Value) -> Value {
+pub(crate) fn with_alias(probe_row: &Value, alias: &str, value: Value) -> Value {
 	match probe_row {
 		Value::Object(row) => {
 			let mut row = row.clone();
@@ -876,6 +912,18 @@ fn with_alias(probe_row: &Value, alias: &str, value: Value) -> Value {
 			Value::Object(row)
 		}
 		other => other.clone(),
+	}
+}
+
+/// [`with_alias`] over a probe row that is given up: the row itself carries
+/// the alias, with no copy of it.
+pub(crate) fn with_alias_owned(probe_row: Value, alias: &str, value: Value) -> Value {
+	match probe_row {
+		Value::Object(mut row) => {
+			row.insert(alias.to_string(), value);
+			Value::Object(row)
+		}
+		other => other,
 	}
 }
 
@@ -887,7 +935,7 @@ fn with_alias(probe_row: &Value, alias: &str, value: Value) -> Value {
 /// directly and never calls this with an empty `keys`, but an empty `keys`
 /// here would yield `Some(vec![])` (every row shares the one empty key), which
 /// is also correct.
-fn join_key(row: &Value, keys: &[String]) -> Option<JoinKey> {
+pub(crate) fn join_key(row: &Value, keys: &[String]) -> Option<JoinKey> {
 	let Value::Object(obj) = row else {
 		return None;
 	};
@@ -923,7 +971,7 @@ fn binding_id(slot: Option<&Value>) -> Option<Value> {
 /// by construction, so the choice is immaterial); build-only bindings are
 /// carried over. Both rows are objects in practice; a non-object row defaults
 /// to empty so the merge never panics.
-fn merge_rows(build_row: &Value, probe_row: &Value) -> Value {
+pub(crate) fn merge_rows(build_row: &Value, probe_row: &Value) -> Value {
 	let mut merged = match build_row {
 		Value::Object(o) => o.clone(),
 		_ => Object::default(),
@@ -938,7 +986,7 @@ fn merge_rows(build_row: &Value, probe_row: &Value) -> Value {
 
 /// Build a null-filled output for a `Left` miss: the probe row plus every
 /// `null_template` binding set to `Value::Null`.
-fn null_filled(probe_row: &Value, null_template: &[String]) -> Value {
+pub(crate) fn null_filled(probe_row: &Value, null_template: &[String]) -> Value {
 	let mut row = match probe_row {
 		Value::Object(o) => o.clone(),
 		_ => Object::default(),
@@ -949,6 +997,7 @@ fn null_filled(probe_row: &Value, null_template: &[String]) -> Value {
 	Value::Object(row)
 }
 
+#[cfg(test)]
 /// Whether a build row and a probe row pass the residual (`ON`) predicate.
 /// `None` ⇒ always passes (a pure equi-join), and the row the predicate would
 /// read is not built. Mirrors `Expand`'s per-candidate predicate eval
@@ -972,7 +1021,12 @@ async fn residual_passes(
 /// the push (not per batch) is required: a single probe row crossed against a
 /// large build side already fans out unboundedly, so the guard must trip inside
 /// the inner loop.
-fn emit(out: &mut Vec<Value>, emitted: &mut usize, max_rows: usize, row: Value) -> FlowResult<()> {
+pub(crate) fn emit(
+	out: &mut Vec<Value>,
+	emitted: &mut usize,
+	max_rows: usize,
+	row: Value,
+) -> FlowResult<()> {
 	*emitted += 1;
 	if *emitted > max_rows {
 		return Err(crate::exec::operators::gql_output_rows_exceeded(max_rows));
@@ -1008,7 +1062,7 @@ fn key_has_regex(key: &[Value]) -> bool {
 /// it satisfies, which no ordering expresses, so such keys are compared one
 /// by one with [`Value::equal`] — on the build side against every probe key,
 /// and a regex probe key against every build row.
-struct BuildTable {
+pub(crate) struct BuildTable {
 	keyed: BTreeMap<JoinKey, Vec<Value>>,
 	/// Build rows whose key holds a regex, with their keys.
 	regex_keyed: Vec<(JoinKey, Value)>,
@@ -1016,7 +1070,7 @@ struct BuildTable {
 }
 
 impl BuildTable {
-	fn new() -> Self {
+	pub(crate) fn new() -> Self {
 		Self {
 			keyed: BTreeMap::new(),
 			regex_keyed: Vec::new(),
@@ -1026,7 +1080,12 @@ impl BuildTable {
 
 	/// Insert a build `row` under `key`, failing when the total stored row count
 	/// would exceed `max_rows`.
-	fn insert(&mut self, key: JoinKey, row: Value, max_rows: usize) -> Result<(), ControlFlow> {
+	pub(crate) fn insert(
+		&mut self,
+		key: JoinKey,
+		row: Value,
+		max_rows: usize,
+	) -> Result<(), ControlFlow> {
 		if self.rows >= max_rows {
 			return Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(
 				format!(
@@ -1051,7 +1110,7 @@ impl BuildTable {
 
 	/// The build rows whose key equals `key` by `=`: those stored under it,
 	/// then those a regex on either side matches.
-	fn matches<'a>(&'a self, key: &'a JoinKey) -> impl Iterator<Item = &'a Value> + 'a {
+	pub(crate) fn matches<'a>(&'a self, key: &'a JoinKey) -> impl Iterator<Item = &'a Value> + 'a {
 		let exact = self.get(key).unwrap_or(&[]).iter();
 		let build_regex =
 			self.regex_keyed.iter().filter(move |(k, _)| keys_equal(k, key)).map(|(_, row)| row);
@@ -1071,7 +1130,7 @@ impl BuildTable {
 	/// across processes: by key, then insertion order within a key. `Cross` has no
 	/// join keys at all, so every row shares the one empty key and this is plain
 	/// insertion order.
-	fn all_rows(&self) -> impl Iterator<Item = &Value> {
+	pub(crate) fn all_rows(&self) -> impl Iterator<Item = &Value> {
 		self.keyed.values().flatten().chain(self.regex_keyed.iter().map(|(_, row)| row))
 	}
 }

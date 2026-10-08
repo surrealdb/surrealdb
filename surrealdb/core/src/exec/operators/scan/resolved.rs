@@ -20,18 +20,30 @@
 //! remain the scan's, evaluated at execution time against the authority the
 //! executor set up.
 
+#[cfg(test)]
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+#[cfg(test)]
 use surrealdb_strand::TableName;
 
-use super::pipeline::{FieldState, build_field_state_raw, filter_field_state_for_projection};
-use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId, Permission, TableDefinition};
+#[cfg(test)]
+use super::pipeline::build_field_state_raw;
+use super::pipeline::{FieldState, filter_field_state_for_projection};
+#[cfg(test)]
+use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId};
+use crate::catalog::{Permission, TableDefinition};
+#[cfg(test)]
 use crate::err::{EngineError, Error};
-use crate::exec::permission::{PhysicalPermission, table_select_permission_physical};
+use crate::exec::permission::PhysicalPermission;
+#[cfg(test)]
+use crate::exec::permission::table_select_permission_physical;
+#[cfg(test)]
 use crate::exec::planner::Planner;
-use crate::expr::logical::{LogicalOp, LogicalSource, Schema};
+use crate::expr::logical::Schema;
+#[cfg(test)]
+use crate::expr::logical::{LogicalOp, LogicalSource};
 
 /// How a `Source` node asks its scan to be planned.
 ///
@@ -56,6 +68,7 @@ impl EnforcementMode {
 		}
 	}
 
+	#[cfg(test)]
 	/// The mode for a pipeline's sources: [`Self::Planned`] when there is one
 	/// source and the analyzer resolved it, [`Self::Runtime`] otherwise.
 	pub(crate) fn of_sources(sources: &[LogicalOp]) -> Self {
@@ -72,17 +85,18 @@ impl EnforcementMode {
 }
 
 /// Who applies the schema-derived behaviours to the rows a scan reads.
+// Constructed or read only by the operator-tree oracle, which test builds compile.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone)]
 pub(crate) enum RowEnforcement {
 	/// The plan enforces: a `PermissionFilter` and the projection layers above
 	/// this scan apply the table permission, computed fields and field
-	/// permissions, so rows leave the scan as stored. `select_permission` is
-	/// `Deny` for a permission of `NONE`, which keeps its short-circuit — no
-	/// row could pass the filter above, so the scan may stop before reading
-	/// any — and otherwise `Allow`: the plan's filter judges a conditional
-	/// guard, and the scan does not compile it. The one exception is a top-k
-	/// scan (KNN), which applies the guard to its candidates so that k counts
-	/// rows the caller may see; its context carries the compiled guard, set by
+	/// permissions, so rows leave the scan as stored, and
+	/// [`ResolvedTableContext::select_permission`] answers `Allow` whatever
+	/// the table's `SELECT` clause says. `select_permission` is carried for
+	/// the one reader that is not the plan: a top-k scan (KNN) applies the
+	/// guard to its candidates so that k counts rows the caller may see, and
+	/// its context carries the compiled guard, set by
 	/// [`ResolvedTableContext::with_candidate_guard`].
 	Planned {
 		select_permission: PhysicalPermission,
@@ -104,6 +118,8 @@ pub(crate) enum RowEnforcement {
 /// the fields a statement names: a computed field, which may read any stored
 /// field, or a field-level `SELECT` permission, which reads the field it
 /// guards.
+// Constructed or read only by the operator-tree oracle, which test builds compile.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct DefinedFieldReads {
 	/// The table defines a computed field.
@@ -113,6 +129,7 @@ pub(crate) struct DefinedFieldReads {
 }
 
 impl DefinedFieldReads {
+	#[cfg(test)]
 	/// What `fields`, a table's field definitions, read.
 	pub(crate) fn of(fields: &[FieldDefinition]) -> Self {
 		Self {
@@ -127,6 +144,8 @@ impl DefinedFieldReads {
 /// Carries the table definition and the [`RowEnforcement`] the scan was
 /// planned under. With one of these, a scan's `execute()` performs no async
 /// metadata resolution; only the synchronous session gates remain.
+// Constructed or read only by the operator-tree oracle, which test builds compile.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedTableContext {
 	/// The resolved table definition (used for ns_id/db_id/table_id).
@@ -138,10 +157,13 @@ pub(crate) struct ResolvedTableContext {
 impl ResolvedTableContext {
 	/// The table permission this scan applies to every row it reads.
 	///
-	/// `Allow` when the session is not permission-checked, and when the plan
-	/// enforces — except for a `NONE` permission, which stays `Deny`: the
-	/// filter above admits no row, so stopping before the read changes nothing
-	/// the plan observes.
+	/// `Allow` when the session is not permission-checked, and whenever the
+	/// plan enforces — including for a `SELECT` clause of `NONE`. Denying
+	/// there would read as a short circuit of the filter above, but what that
+	/// filter carries is not always the `SELECT` clause: the row source of a
+	/// mutation is resolved under the statement's own clause, so a table a
+	/// caller may delete from but not read has no filter above this scan and
+	/// every row it needs has to reach it.
 	pub(crate) fn select_permission(&self, check_perms: bool) -> PhysicalPermission {
 		if !check_perms {
 			return PhysicalPermission::Allow;
@@ -152,15 +174,12 @@ impl ResolvedTableContext {
 				..
 			} => select_permission.clone(),
 			RowEnforcement::Planned {
-				select_permission: PhysicalPermission::Deny,
-				..
-			} => PhysicalPermission::Deny,
-			RowEnforcement::Planned {
 				..
 			} => PhysicalPermission::Allow,
 		}
 	}
 
+	#[cfg(test)]
 	/// The table permission a top-k scan applies to its candidates, in either
 	/// mode: the k neighbours it returns have to be k the caller may see, and a
 	/// filter above the scan cannot widen a result already cut to k. `Allow`
@@ -182,6 +201,7 @@ impl ResolvedTableContext {
 		}
 	}
 
+	#[cfg(test)]
 	/// This context with the table's conditional `SELECT` guard compiled for a
 	/// top-k scan's candidates. A planned context otherwise carries no
 	/// compiled guard — the plan's filter judges it — so a top-k scan planned
@@ -226,6 +246,7 @@ impl ResolvedTableContext {
 		}
 	}
 
+	#[cfg(test)]
 	/// Whether a scan of this table may decode only part of each record; see
 	/// [`super::common::projected_decode_applies`], which a runtime context
 	/// answers from its field state and a planned one from the
@@ -254,6 +275,7 @@ impl ResolvedTableContext {
 		}
 	}
 
+	#[cfg(test)]
 	/// The table's whole field state, unnarrowed by any projection — what a
 	/// plan-time eligibility check reads. Empty when the plan enforces.
 	pub(crate) fn field_state(&self) -> Cow<'_, FieldState> {
@@ -269,6 +291,7 @@ impl ResolvedTableContext {
 	}
 }
 
+#[cfg(test)]
 /// Resolve table context at plan time.
 ///
 /// Reads the table definition as of `version` — the stamp the scan will read
@@ -358,11 +381,15 @@ pub(crate) async fn resolve_table_context(
 	}))
 }
 
-/// The table permission a scan keeps under [`EnforcementMode::Planned`]:
-/// `Deny` for a permission of `NONE` — the plan's filter above admits no row,
-/// so the scan may stop before reading any — and `Allow` otherwise, the plan
-/// judging a conditional guard. Read off the definition the scan runs with,
-/// whether resolved when the plan was made or when it runs.
+/// The table `SELECT` permission a scan carries under
+/// [`EnforcementMode::Planned`], for the readers that are not the plan: `Deny`
+/// for a permission of `NONE` and `Allow` otherwise, the plan judging a
+/// conditional guard. Read off the definition the scan runs with, whether
+/// resolved when the plan was made or when it runs.
+///
+/// This is not what the scan applies to the rows it reads — see
+/// [`ResolvedTableContext::select_permission`], which admits every row under
+/// this mode.
 pub(crate) fn planned_select_permission(table_def: &TableDefinition) -> PhysicalPermission {
 	match table_def.permissions.select {
 		Permission::None => PhysicalPermission::Deny,
@@ -456,7 +483,7 @@ pub(crate) mod test_support {
 			.expect("catalog read");
 		let idx =
 			indexes.iter().position(|ix| ix.name.as_str() == name).expect("the index is defined");
-		IndexRef::new(indexes, idx)
+		IndexRef::new(&indexes, idx)
 	}
 
 	/// A field of an object row, `NONE` when absent.
@@ -636,15 +663,17 @@ mod tests {
 		assert!(matches!(ctx_cond.candidate_permission(false), PhysicalPermission::Allow));
 		assert!(matches!(ctx_cond.select_permission(false), PhysicalPermission::Allow));
 
-		// `NONE` keeps its short-circuit for a checked session.
+		// `NONE` is the plan's to apply too: the filter above a planned scan
+		// is not always the `SELECT` clause, so the scan admits every row and
+		// carries the permission only for a top-k scan's candidates.
 		let ctx_none = planned(PhysicalPermission::Deny);
-		assert!(matches!(ctx_none.select_permission(true), PhysicalPermission::Deny));
-		assert!(matches!(ctx_none.select_permission(false), PhysicalPermission::Allow));
+		assert!(matches!(ctx_none.select_permission(true), PhysicalPermission::Allow));
+		assert!(matches!(ctx_none.candidate_permission(true), PhysicalPermission::Deny));
 	}
 
 	/// A planned context does not compile a conditional table guard — the
 	/// plan's filter judges it — until a top-k scan asks for its candidates'
-	/// guard; a `NONE` permission keeps its short-circuit without compiling.
+	/// guard; a `NONE` permission needs no compilation to answer either way.
 	#[tokio::test]
 	async fn a_planned_context_compiles_the_guard_only_for_candidates() {
 		let db = TestDb::new(
@@ -690,7 +719,7 @@ mod tests {
 		assert!(matches!(guarded.candidate_permission(true), PhysicalPermission::Conditional(_)));
 
 		let hidden = resolve("hidden", EnforcementMode::Planned).await;
-		assert!(matches!(hidden.select_permission(true), PhysicalPermission::Deny));
+		assert!(matches!(hidden.select_permission(true), PhysicalPermission::Allow));
 		let hidden = hidden.with_candidate_guard(&planner).await.expect("nothing to compile");
 		assert!(matches!(hidden.candidate_permission(true), PhysicalPermission::Deny));
 

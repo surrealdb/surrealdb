@@ -155,7 +155,6 @@ object_store.workspace = true
 parking_lot.workspace = true
 path-clean.workspace = true
 pbkdf2 = { workspace = true, features = ["simple"] }
-pin-project-lite.workspace = true
 quick_cache.workspace = true
 rand.workspace = true
 rand_core.workspace = true

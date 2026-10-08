@@ -7,7 +7,7 @@
 //! [`MatchPlan`](crate::expr::match_plan::MatchPlan) — a language-neutral
 //! binding-table IR carried by
 //! [`LogicalOp::Match`](crate::expr::logical::LogicalOp::Match) —
-//! and executed by the streaming engine. No SurrealQL surface AST is produced
+//! and executed by the engine. No SurrealQL surface AST is produced
 //! along the way; the GQL front-end shares the parser conventions, error
 //! types and execution operators of SurrealQL but not its statement AST.
 //!

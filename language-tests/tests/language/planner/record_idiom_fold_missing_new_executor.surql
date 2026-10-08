@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "A record-idiom traversal through a missing record folds to NONE (as the runtime walk yields), and the plan pins whether the folded `= NONE` predicate is index-eligible — a rows-only assertion cannot distinguish a NONE fold from a table-scan bail"
@@ -23,7 +22,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_owner, access: = NONE, direction: Forward, predicate: owner = NONE]
+    Filter [ctx: Db] [predicate: owner = (ticket:nope).owner]
+        IndexScan [ctx: Db] [table: ticket, index: idx_owner, access: = NONE, direction: Forward]
 ''''
 
 [[test.results]]

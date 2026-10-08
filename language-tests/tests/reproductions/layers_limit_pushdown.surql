@@ -6,7 +6,7 @@ auth = { namespace = "test", database = "test", access = "user", rid = "user:rea
 [test]
 reason = """
 	LIMIT and START over a table read through a stack of projection layers
-	page the same rows on both engines: a layer sets columns on a row and
+	page the rows the pipeline's LIMIT would count: a layer sets columns on a row and
 	drops none, so the rows the scan counts are the rows the pipeline's
 	LIMIT would have counted, whether the user's predicate reads a stored
 	field beneath the layers or a computed column above them, and an ORDER

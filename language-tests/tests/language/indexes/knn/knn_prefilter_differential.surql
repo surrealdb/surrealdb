@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Pre-filtered vector search (#548) differential battery: each filtered ANN query (`<|k,ef|>`, planned with an allow-list prefilter where conjuncts are exactly coverable) is paired with its brute-force ground-truth twin (`<|k,EUCLIDEAN|>`, a KnnTopK full scan + filter that never touches the prefilter machinery) and must return identical rows — across equality, range, OR, negation, multi-conjunct, partial-coverage, unsatisfiable shapes, and rows missing the residual column. The legacy compute-only planner is not used as the oracle: it independently mis-plans KNN with an indexed sibling conjunct (the demotion bug fixed for the streaming planner by #548)."
+reason = "Pre-filtered vector search battery: each filtered ANN query (`<|k,ef|>`, planned with an allow-list prefilter where conjuncts are exactly coverable) is paired with its brute-force ground-truth twin (`<|k,EUCLIDEAN|>`, a KnnTopK full scan + filter that never touches the prefilter machinery) and must return identical rows — across equality, range, OR, negation, multi-conjunct, partial-coverage, unsatisfiable shapes, and rows missing the residual column."
 issue = 548
 
 [[test.results]]

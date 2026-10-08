@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -13,8 +12,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: id ASC]
-        IndexScan [ctx: Db] [index: index, access: >0 <2, direction: Forward, predicate: number > 0 AND number < 2]
+    Sort [ctx: Db] [sort_keys: id ASC]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: test, index: index, access: >0 <2, direction: Forward]
 ''''
 
 [[test.results]]
@@ -23,8 +23,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: id ASC]
-        IndexScan [ctx: Db] [index: index, access: >0.1f <2, direction: Forward, predicate: number > 0.1f AND number < 2]
+    Sort [ctx: Db] [sort_keys: id ASC]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: test, index: index, access: >0.1f <2, direction: Forward]
 ''''
 
 [[test.results]]
@@ -33,8 +34,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: id ASC]
-        IndexScan [ctx: Db] [index: index, access: >0.1f <1.5f, direction: Forward, predicate: number > 0.1f AND number < 1.5f]
+    Sort [ctx: Db] [sort_keys: id ASC]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: test, index: index, access: >0.1f <1.5f, direction: Forward]
 ''''
 
 [[test.results]]
@@ -43,8 +45,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: id ASC]
-        IndexScan [ctx: Db] [index: index, access: >0 <1.5f, direction: Forward, predicate: number > 0 AND number < 1.5f]
+    Sort [ctx: Db] [sort_keys: id ASC]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: test, index: index, access: >0 <1.5f, direction: Forward]
 ''''
 
 [[test.results]]
@@ -53,8 +56,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: id ASC]
-        IndexScan [ctx: Db] [index: index, access: >0.1f, direction: Forward, predicate: number > 0.1f]
+    Sort [ctx: Db] [sort_keys: id ASC]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: test, index: index, access: >0.1f, direction: Forward]
 ''''
 
 [[test.results]]
@@ -63,8 +67,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: id ASC]
-        IndexScan [ctx: Db] [index: index, access: >0, direction: Forward, predicate: number > 0]
+    Sort [ctx: Db] [sort_keys: id ASC]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: test, index: index, access: >0, direction: Forward]
 ''''
 
 [[test.results]]
@@ -73,8 +78,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: id ASC]
-        IndexScan [ctx: Db] [index: index, access: <2, direction: Forward, predicate: number < 2]
+    Sort [ctx: Db] [sort_keys: id ASC]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: test, index: index, access: <2, direction: Forward]
 ''''
 
 [[test.results]]
@@ -83,8 +89,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: id ASC]
-        IndexScan [ctx: Db] [index: index, access: <1.9f, direction: Forward, predicate: number < 1.9f]
+    Sort [ctx: Db] [sort_keys: id ASC]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: test, index: index, access: <1.9f, direction: Forward]
 ''''
 
 */

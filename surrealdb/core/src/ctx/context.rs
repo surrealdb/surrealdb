@@ -27,9 +27,10 @@ use crate::buc::manager::BucketsManager;
 use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
-use crate::catalog::{DatabaseDefinition, DatabaseId, Error as CatalogError, NamespaceId};
+use crate::catalog::{DatabaseId, Error as CatalogError, NamespaceId};
 use crate::config::RuntimeConfig;
 use crate::ctx::cancel::CancelHandle;
+#[cfg(test)]
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 use crate::dbs::capabilities::Error as CapabilitiesError;
@@ -39,17 +40,14 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::NetTarget;
 #[cfg(all(feature = "http", feature = "surrealism"))]
 use crate::dbs::capabilities::Targets;
-use crate::dbs::{
-	Capabilities, MessageBroker, NewPlannerStrategy, Options, Session, StatementCounters, Variables,
-};
+use crate::dbs::{Capabilities, MessageBroker, Options, Session, StatementCounters, Variables};
 use crate::err::{EngineError, Error};
 use crate::exec::Error as ExecError;
+use crate::exec::function::FunctionRegistry;
 use crate::expr::Base;
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
 use crate::iam::{Action, ResourceKind};
-use crate::idx::planner::executor::QueryExecutor;
-use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::index::IndexBuilder;
@@ -69,7 +67,7 @@ pub type FrozenContext = Arc<Context>;
 /// and **request-wide** configuration (node id, auth enabled, dynamic config, live/broker).
 ///
 /// Stored behind [`FrozenContext`] (`Arc<Context>`) with optional parent links for scoped
-/// deadlines, planner state, and parameters. Per-statement toggles live on [`Options`], not here.
+/// deadlines and parameters. Per-statement toggles live on [`Options`], not here.
 pub struct Context {
 	// An optional parent context.
 	parent: Option<FrozenContext>,
@@ -90,20 +88,15 @@ pub struct Context {
 	cancel_token: Option<tokio_util::sync::CancellationToken>,
 	// A collection of read only values stored in this context.
 	values: HashMap<Strand, Arc<Value>>,
-	// An optional query planner
-	query_planner: Option<Arc<QueryPlanner>>,
-	// An optional query executor
-	query_executor: Option<QueryExecutor>,
-	// An optional iteration stage
-	iteration_stage: Option<IterationStage>,
 	// An optional datastore cache
 	cache: Option<Arc<DatastoreCache>>,
 	// The index store
 	index_stores: IndexStores,
-	// The index concurrent builders
-	index_builder: Option<IndexBuilder>,
-	// The sequences
-	sequences: Option<Sequences>,
+	// The index concurrent builders. Held behind an `Arc` so that deriving a child context
+	// is one reference-count bump rather than one per handle the builder carries.
+	index_builder: Option<Arc<IndexBuilder>>,
+	// The sequences, behind an `Arc` for the same reason.
+	sequences: Option<Arc<Sequences>>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
 	#[cfg(storage)]
@@ -118,8 +111,6 @@ pub struct Context {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Option<Arc<SurrealismCache>>,
-	// Strategy for the new streaming planner/executor
-	new_planner_strategy: NewPlannerStrategy,
 	// When true, EXPLAIN ANALYZE omits elapsed durations for deterministic test output
 	redact_volatile_explain_attrs: bool,
 	// Per-statement counters, shared with the executor so it can read the
@@ -136,6 +127,47 @@ pub struct Context {
 	/// Client for making http requests.
 	#[cfg(feature = "http")]
 	http_client: Arc<HttpClient>,
+	/// The datastore's function registry.
+	///
+	/// A function is resolved by name against one registry per datastore, so
+	/// this is the datastore's and is carried rather than rebuilt. It reaches
+	/// the context because compiling an expression needs it and not every
+	/// compiler holds an [`crate::exec::ExecutionContext`]: a schema
+	/// statement's clauses are compiled wherever the statement is reached,
+	/// which includes the evaluator that owns the catalog writes.
+	function_registry: Arc<FunctionRegistry>,
+	/// The live-subscription units this node has compiled for the VM
+	/// (`crate::exec::vm::live`), carried as the function registry is.
+	live_units: Option<Arc<crate::exec::vm::live::LiveUnits>>,
+	/// The function-body units this node has compiled (`crate::exec::vm::units`),
+	/// carried as the live-subscription units are.
+	compiled_units: Option<Arc<crate::exec::vm::units::CompiledUnits>>,
+	/// The unit table of the function bundle whose body is executing around
+	/// this context: the arena a nested program with none of its own finds the
+	/// units its ids name in ([`crate::exec::vm::UnitTable`]). A child context
+	/// carries its parent's.
+	vm_units: Option<crate::exec::vm::UnitTable>,
+	/// The per-table units the program executing around this context reads
+	/// records by id through ([`crate::exec::vm::Deref`]). A child context
+	/// carries its parent's.
+	vm_deref: Option<Arc<crate::exec::vm::Deref>>,
+	/// The late-bound statements the program executing around this context
+	/// serves when a block reaches them, if any.
+	vm_served: Option<crate::exec::vm::ServedStatements>,
+	/// The metrics an `EXPLAIN ANALYZE` plan reports for the program running
+	/// around this context, which the program's host steps record their
+	/// counters into. A child context carries its parent's.
+	vm_metrics: Option<Arc<crate::exec::metrics::OperatorMetrics>>,
+	/// The edge cascade a delete is running the stages of a record of an
+	/// edge beneath: the bundle an edge cascade of those stages runs again
+	/// (`crate::exec::vm::write_cascade`). A child context carries its
+	/// parent's.
+	vm_edge_cascade: Option<Arc<crate::exec::vm::program::Program>>,
+	/// The closure-body units the programs executing around this context
+	/// lowered ([`crate::exec::vm::closure::ClosureUnits`]), which an
+	/// invocation of a closure value looks its unit up in. A child context
+	/// carries its parent's.
+	vm_closures: Option<Arc<crate::exec::vm::closure::ClosureUnits>>,
 	/// Stable node id for this datastore instance (live routing, queue keys, etc.).
 	node_id: Uuid,
 	/// Whether authentication is required for non-anonymous access (datastore boot flag).
@@ -172,9 +204,6 @@ impl Context {
 			slow_log: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
-			query_planner: None,
-			query_executor: None,
-			iteration_stage: None,
 			capabilities: Arc::clone(&parent.capabilities),
 			// Derived rather than new: this context is built per unit of work
 			// (one LIVE query delivery), and a segmentation dictionary is far
@@ -195,12 +224,20 @@ impl Context {
 			buckets: None,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
-			new_planner_strategy: NewPlannerStrategy::default(),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&parent.http_client),
+			function_registry: Arc::clone(&parent.function_registry),
+			live_units: parent.live_units.clone(),
+			compiled_units: parent.compiled_units.clone(),
+			vm_units: parent.vm_units.clone(),
+			vm_deref: parent.vm_deref.clone(),
+			vm_served: parent.vm_served.clone(),
+			vm_metrics: parent.vm_metrics.clone(),
+			vm_edge_cascade: parent.vm_edge_cascade.clone(),
+			vm_closures: parent.vm_closures.clone(),
 			tenant_identity: None,
 			node_id: parent.node_id,
 			auth_enabled: parent.auth_enabled,
@@ -234,9 +271,6 @@ impl Context {
 			slow_log: parent.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
-			query_planner: parent.query_planner.clone(),
-			query_executor: parent.query_executor.clone(),
-			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: cap,
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
@@ -250,12 +284,20 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
-			new_planner_strategy: parent.new_planner_strategy,
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client,
+			function_registry: Arc::clone(&parent.function_registry),
+			live_units: parent.live_units.clone(),
+			compiled_units: parent.compiled_units.clone(),
+			vm_units: parent.vm_units.clone(),
+			vm_deref: parent.vm_deref.clone(),
+			vm_served: parent.vm_served.clone(),
+			vm_metrics: parent.vm_metrics.clone(),
+			vm_edge_cascade: parent.vm_edge_cascade.clone(),
+			vm_closures: parent.vm_closures.clone(),
 			tenant_identity: parent.tenant_identity.clone(),
 			node_id: parent.node_id,
 			auth_enabled: parent.auth_enabled,
@@ -275,9 +317,6 @@ impl Context {
 			slow_log: parent.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
-			query_planner: parent.query_planner.clone(),
-			query_executor: parent.query_executor.clone(),
-			iteration_stage: parent.iteration_stage.clone(),
 			capabilities: Arc::clone(&parent.capabilities),
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
@@ -291,12 +330,20 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
-			new_planner_strategy: parent.new_planner_strategy,
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&parent.http_client),
+			function_registry: Arc::clone(&parent.function_registry),
+			live_units: parent.live_units.clone(),
+			compiled_units: parent.compiled_units.clone(),
+			vm_units: parent.vm_units.clone(),
+			vm_deref: parent.vm_deref.clone(),
+			vm_served: parent.vm_served.clone(),
+			vm_metrics: parent.vm_metrics.clone(),
+			vm_edge_cascade: parent.vm_edge_cascade.clone(),
+			vm_closures: parent.vm_closures.clone(),
 			tenant_identity: parent.tenant_identity.clone(),
 			node_id: parent.node_id,
 			auth_enabled: parent.auth_enabled,
@@ -312,14 +359,14 @@ impl Context {
 	/// `values` map and sets `parent: None`, so the returned context does
 	/// **not** hold an `Arc` reference to the original parent.
 	///
-	/// This is used by the streaming executor to give the operator pipeline
+	/// This is used by the engine to give the operator pipeline
 	/// its own `Arc<Context>` that won't interfere with the executor's
 	/// `Arc::get_mut` requirements between statements.
 	///
 	/// The cancellation flag and awaitable token are **cloned** from the
 	/// source rather than allocated fresh. Without this, any operator that
-	/// bridges back into legacy `Context::done` / `is_done` checks — e.g.
-	/// the streaming-exec KNN operator calling into
+	/// polls `Context::done` / `is_done` — e.g.
+	/// the KNN operator calling into
 	/// `idx::trees::hnsw::knn_search` / `idx::trees::diskann::knn_search`,
 	/// whose inner loops poll `frozen_ctx.is_done(Some(count))` — would
 	/// observe the snapshot's local (never-tripped) flag instead of the
@@ -333,9 +380,6 @@ impl Context {
 			slow_log: from.slow_log.clone(),
 			cancelled: Arc::clone(&from.cancelled),
 			cancel_token: from.cancel_token.clone(),
-			query_planner: from.query_planner.clone(),
-			query_executor: from.query_executor.clone(),
-			iteration_stage: from.iteration_stage.clone(),
 			capabilities: Arc::clone(&from.capabilities),
 			index_stores: from.index_stores.clone(),
 			cache: from.cache.clone(),
@@ -349,12 +393,20 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
-			new_planner_strategy: from.new_planner_strategy,
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
 			config: Arc::clone(&from.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&from.http_client),
+			function_registry: Arc::clone(&from.function_registry),
+			live_units: from.live_units.clone(),
+			compiled_units: from.compiled_units.clone(),
+			vm_units: from.vm_units.clone(),
+			vm_deref: from.vm_deref.clone(),
+			vm_served: from.vm_served.clone(),
+			vm_metrics: from.vm_metrics.clone(),
+			vm_edge_cascade: from.vm_edge_cascade.clone(),
+			vm_closures: from.vm_closures.clone(),
 			tenant_identity: from.tenant_identity.clone(),
 			node_id: from.node_id,
 			auth_enabled: from.auth_enabled,
@@ -382,9 +434,6 @@ impl Context {
 			slow_log: from.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
-			query_planner: from.query_planner.clone(),
-			query_executor: from.query_executor.clone(),
-			iteration_stage: from.iteration_stage.clone(),
 			capabilities: Arc::clone(&from.capabilities),
 			index_stores: from.index_stores.clone(),
 			cache: from.cache.clone(),
@@ -398,12 +447,20 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
-			new_planner_strategy: from.new_planner_strategy,
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
 			config: Arc::clone(&from.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&from.http_client),
+			function_registry: Arc::clone(&from.function_registry),
+			live_units: from.live_units.clone(),
+			compiled_units: from.compiled_units.clone(),
+			vm_units: from.vm_units.clone(),
+			vm_deref: from.vm_deref.clone(),
+			vm_served: from.vm_served.clone(),
+			vm_metrics: from.vm_metrics.clone(),
+			vm_edge_cascade: from.vm_edge_cascade.clone(),
+			vm_closures: from.vm_closures.clone(),
 			tenant_identity: from.tenant_identity.clone(),
 			node_id: from.node_id,
 			auth_enabled: from.auth_enabled,
@@ -427,12 +484,14 @@ impl Context {
 		sequences: Sequences,
 		cache: Arc<DatastoreCache>,
 		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
+		function_registry: Arc<FunctionRegistry>,
+		live_units: Arc<crate::exec::vm::live::LiveUnits>,
+		compiled_units: Arc<crate::exec::vm::units::CompiledUnits>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: BucketsManager,
 		config: Arc<RuntimeConfig>,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<Context> {
-		let planner_strategy = *capabilities.planner_strategy();
 		let mut ctx = Self {
 			values: HashMap::default(),
 			parent: None,
@@ -440,14 +499,11 @@ impl Context {
 			slow_log,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
-			query_planner: None,
-			query_executor: None,
-			iteration_stage: None,
 			capabilities,
 			index_stores,
 			cache: Some(cache),
-			index_builder: Some(index_builder),
-			sequences: Some(sequences),
+			index_builder: Some(Arc::new(index_builder)),
+			sequences: Some(Arc::new(sequences)),
 			#[cfg(storage)]
 			temporary_directory,
 			transaction: None,
@@ -455,12 +511,20 @@ impl Context {
 			buckets: Some(buckets),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Some(surrealism_cache),
-			new_planner_strategy: planner_strategy,
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
 			config,
 			#[cfg(feature = "http")]
 			http_client,
+			function_registry,
+			live_units: Some(live_units),
+			compiled_units: Some(compiled_units),
+			vm_units: None,
+			vm_deref: None,
+			vm_served: None,
+			vm_metrics: None,
+			vm_edge_cascade: None,
+			vm_closures: None,
 			tenant_identity: None,
 			node_id,
 			auth_enabled,
@@ -484,9 +548,6 @@ impl Context {
 			slow_log: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			cancel_token: None,
-			query_planner: None,
-			query_executor: None,
-			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::new(
 				256 * 1024 * 1024,
@@ -504,7 +565,6 @@ impl Context {
 			buckets: None,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
-			new_planner_strategy: NewPlannerStrategy::default(),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
 			config: Default::default(),
@@ -517,6 +577,15 @@ impl Context {
 				)
 				.expect("http client to be created"),
 			),
+			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			live_units: None,
+			compiled_units: None,
+			vm_units: None,
+			vm_deref: None,
+			vm_served: None,
+			vm_metrics: None,
+			vm_edge_cascade: None,
+			vm_closures: None,
 			tenant_identity: None,
 			node_id: Uuid::nil(),
 			auth_enabled: true,
@@ -531,15 +600,97 @@ impl Context {
 		Arc::new(self)
 	}
 
-	/// Unfreezes this context, allowing it to be edited and configured.
-	pub(crate) fn unfreeze(ctx: FrozenContext) -> Result<Context> {
-		let Some(x) = Arc::into_inner(ctx) else {
-			fail!("Tried to unfreeze a Context with multiple references")
-		};
-		Ok(x)
+	#[inline]
+	/// The datastore's function registry, for a caller compiling an
+	/// expression that may name a function.
+	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
+		&self.function_registry
 	}
 
-	#[inline]
+	/// The live-subscription units this node has compiled for the VM, or
+	/// `None` for a context made without a datastore.
+	pub(crate) fn live_units(&self) -> Option<Arc<crate::exec::vm::live::LiveUnits>> {
+		self.live_units.clone()
+	}
+
+	/// The unit table of the function bundle executing around this context,
+	/// if any.
+	pub(crate) fn vm_units(&self) -> Option<&crate::exec::vm::UnitTable> {
+		self.vm_units.as_ref()
+	}
+
+	/// Make the units of `units` the ones the nested programs of this context
+	/// find their ids in.
+	pub(crate) fn set_vm_units(&mut self, units: crate::exec::vm::UnitTable) {
+		self.vm_units = Some(units);
+	}
+
+	/// The late-bound statements the program executing around this context
+	/// serves, if any.
+	pub(crate) fn vm_served(&self) -> Option<&crate::exec::vm::ServedStatements> {
+		self.vm_served.as_ref()
+	}
+
+	/// Make `served` the late-bound statements the program executing around
+	/// this context serves.
+	pub(crate) fn set_vm_served(&mut self, served: crate::exec::vm::ServedStatements) {
+		self.vm_served = Some(served);
+	}
+
+	/// The per-table units the program executing around this context reads
+	/// records by id through, if any.
+	pub(crate) fn vm_deref(&self) -> Option<&Arc<crate::exec::vm::Deref>> {
+		self.vm_deref.as_ref()
+	}
+
+	/// Make `deref` the per-table units the record reads of this context go
+	/// through.
+	pub(crate) fn set_vm_deref(&mut self, deref: Arc<crate::exec::vm::Deref>) {
+		self.vm_deref = Some(deref);
+	}
+
+	/// The metrics the program running around this context records into, when
+	/// its plan is analysed.
+	pub(crate) fn vm_metrics(&self) -> Option<&Arc<crate::exec::metrics::OperatorMetrics>> {
+		self.vm_metrics.as_ref()
+	}
+
+	/// Make `metrics` the ones the program running around this context
+	/// records into.
+	pub(crate) fn set_vm_metrics(&mut self, metrics: Arc<crate::exec::metrics::OperatorMetrics>) {
+		self.vm_metrics = Some(metrics);
+	}
+
+	/// The edge cascade running around this context, if any.
+	pub(crate) fn vm_edge_cascade(&self) -> Option<&Arc<crate::exec::vm::program::Program>> {
+		self.vm_edge_cascade.as_ref()
+	}
+
+	/// Make `cascade` the edge cascade running around this context.
+	pub(crate) fn set_vm_edge_cascade(&mut self, cascade: Arc<crate::exec::vm::program::Program>) {
+		self.vm_edge_cascade = Some(cascade);
+	}
+
+	/// The closure-body units registered around this context, if any.
+	pub(crate) fn vm_closures(&self) -> Option<&Arc<crate::exec::vm::closure::ClosureUnits>> {
+		self.vm_closures.as_ref()
+	}
+
+	/// Make `closures` the registry the closure invocations of this context
+	/// find their units in.
+	pub(crate) fn set_vm_closures(
+		&mut self,
+		closures: Arc<crate::exec::vm::closure::ClosureUnits>,
+	) {
+		self.vm_closures = Some(closures);
+	}
+
+	/// The function-body units this node has compiled, or `None` for a
+	/// context made without a datastore.
+	pub(crate) fn compiled_units(&self) -> Option<&Arc<crate::exec::vm::units::CompiledUnits>> {
+		self.compiled_units.as_ref()
+	}
+
 	pub fn node_id(&self) -> Uuid {
 		self.node_id
 	}
@@ -648,22 +799,10 @@ impl Context {
 	/// created based on the `strict` option.
 	pub(crate) async fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
-		let db_def = self.tx().ensure_ns_db(Some(self), ns, db).await?;
+		let txn = self.tx();
+		let db_def =
+			crate::exec::vm::descriptor::object(txn.ensure_ns_db(Some(self), ns, db)).await?;
 		Ok((db_def.namespace_id, db_def.database_id))
-	}
-
-	/// Get the namespace and database ids for the current context.
-	/// If the namespace or database does not exist, it will be try to be
-	/// created based on the `strict` option.
-	pub(crate) async fn try_ns_db_ids(
-		&self,
-		opt: &Options,
-	) -> Result<Option<(NamespaceId, DatabaseId)>> {
-		let (ns, db) = opt.ns_db()?;
-		let Some(db_def) = self.tx().get_db_by_name(ns, db, None).await? else {
-			return Ok(None);
-		};
-		Ok(Some((db_def.namespace_id, db_def.database_id)))
 	}
 
 	/// Get the namespace and database ids for the current context.
@@ -673,19 +812,16 @@ impl Context {
 		opt: &Options,
 	) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
-		let Some(db_def) = self.tx().get_db_by_name(ns, db, None).await? else {
+		let txn = self.tx();
+		let Some(db_def) =
+			crate::exec::vm::descriptor::object(txn.get_db_by_name(ns, db, None)).await?
+		else {
 			return Err(CatalogError::DbNotFound {
 				name: db.to_string(),
 			}
 			.into());
 		};
 		Ok((db_def.namespace_id, db_def.database_id))
-	}
-
-	pub(crate) async fn get_db(&self, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
-		let (ns, db) = opt.ns_db()?;
-		let db_def = self.tx().ensure_ns_db(Some(self), ns, db).await?;
-		Ok(db_def)
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
@@ -708,6 +844,7 @@ impl Context {
 		self.values.extend(iter.into_iter().map(|(k, v)| (k.into(), v.into())))
 	}
 
+	#[cfg(test)]
 	/// Add cancellation to the context. The value that is returned will cancel
 	/// the context and it's children once called.
 	pub(crate) fn add_cancel(&mut self) -> Canceller {
@@ -773,23 +910,6 @@ impl Context {
 		}
 	}
 
-	pub(crate) fn set_query_planner(&mut self, qp: QueryPlanner) {
-		self.query_planner = Some(Arc::new(qp));
-	}
-
-	/// Cache a table-specific QueryExecutor in the Context.
-	///
-	/// This is set by the collector/processor when iterating over a specific
-	/// table or index so that downstream per-record operations can access the
-	/// executor without repeatedly looking it up from the QueryPlanner.
-	pub(crate) fn set_query_executor(&mut self, qe: QueryExecutor) {
-		self.query_executor = Some(qe);
-	}
-
-	pub(crate) fn set_iteration_stage(&mut self, is: IterationStage) {
-		self.iteration_stage = Some(is);
-	}
-
 	pub(crate) fn set_transaction(&mut self, txn: Arc<Transaction>) {
 		self.transaction = Some(txn);
 	}
@@ -832,20 +952,6 @@ impl Context {
 		self.slow_log.as_ref()
 	}
 
-	pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {
-		self.query_planner.as_ref().map(|qp| qp.as_ref())
-	}
-
-	/// Get the cached QueryExecutor (if any) attached by the current iteration
-	/// context.
-	pub(crate) fn get_query_executor(&self) -> Option<&QueryExecutor> {
-		self.query_executor.as_ref()
-	}
-
-	pub(crate) fn get_iteration_stage(&self) -> Option<&IterationStage> {
-		self.iteration_stage.as_ref()
-	}
-
 	/// Get the index_store for this context/ds
 	pub(crate) fn get_index_stores(&self) -> &IndexStores {
 		&self.index_stores
@@ -853,12 +959,12 @@ impl Context {
 
 	/// Get the index_builder for this context/ds
 	pub(crate) fn get_index_builder(&self) -> Option<&IndexBuilder> {
-		self.index_builder.as_ref()
+		self.index_builder.as_deref()
 	}
 
 	/// Return the sequences manager
 	pub(crate) fn get_sequences(&self) -> Option<&Sequences> {
-		self.sequences.as_ref()
+		self.sequences.as_deref()
 	}
 
 	pub(crate) fn try_get_sequences(&self) -> Result<&Sequences> {
@@ -984,28 +1090,41 @@ impl Context {
 	/// Get a value from the context. If no value is stored under the
 	/// provided key, then this will return None.
 	pub(crate) fn value(&self, key: &str) -> Option<&Value> {
+		self.shared_value(key).map(Arc::as_ref)
+	}
+
+	/// The allocation [`Self::value`] answers for `key`.
+	fn shared_value(&self, key: &str) -> Option<&Arc<Value>> {
 		match self.values.get(key) {
-			Some(v) => Some(v.as_ref()),
+			Some(v) => Some(v),
 			None if PROTECTED_PARAM_NAMES.contains(&key) || !self.isolated => match &self.parent {
-				Some(p) => p.value(key),
+				Some(p) => p.shared_value(key),
 				_ => None,
 			},
 			None => None,
 		}
 	}
 
-	/// Collect context values into the provided map, walking up parent contexts
-	/// unless this context is isolated.
+	/// Collect context values into the provided map: every value
+	/// [`Self::value`] answers, so the parent chain's values, or of an isolated
+	/// context's chain only the protected ones (`$auth`, `$access`, `$token`,
+	/// `$session`), under this context's own.
 	pub(crate) fn collect_values(
 		&self,
 		map: HashMap<Strand, Arc<Value>>,
 	) -> HashMap<Strand, Arc<Value>> {
-		let mut map = if !self.isolated
-			&& let Some(p) = &self.parent
-		{
-			p.collect_values(map)
-		} else {
-			map
+		let mut map = match &self.parent {
+			Some(p) if !self.isolated => p.collect_values(map),
+			Some(p) => {
+				let mut map = map;
+				for name in PROTECTED_PARAM_NAMES {
+					if let Some(value) = p.shared_value(name) {
+						map.insert(Strand::from(*name), Arc::clone(value));
+					}
+				}
+				map
+			}
+			None => map,
 		};
 		self.values.iter().for_each(|(k, v)| {
 			map.insert(k.clone(), Arc::clone(v));
@@ -1029,12 +1148,6 @@ impl Context {
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.live = session.live();
 		self.add_values(session.values());
-		// Only override the planner strategy if the session explicitly sets a
-		// non-default value (e.g. language tests). Otherwise the capability-level
-		// strategy (set via from_ds) is preserved.
-		if session.new_planner_strategy != NewPlannerStrategy::default() {
-			self.new_planner_strategy = session.new_planner_strategy;
-		}
 		// Propagate duration redaction flag from session.
 		if session.redact_volatile_explain_attrs {
 			self.redact_volatile_explain_attrs = true;
@@ -1089,11 +1202,6 @@ impl Context {
 		Arc::clone(&self.capabilities)
 	}
 
-	/// Get the new planner strategy for this context
-	pub(crate) fn new_planner_strategy(&self) -> &NewPlannerStrategy {
-		&self.new_planner_strategy
-	}
-
 	/// Whether EXPLAIN ANALYZE should redact elapsed durations.
 	pub(crate) fn redact_volatile_explain_attrs(&self) -> bool {
 		self.redact_volatile_explain_attrs
@@ -1107,16 +1215,6 @@ impl Context {
 			bail!(CapabilitiesError::ScriptingNotAllowed);
 		}
 		trace!("Capabilities allowed scripting");
-		Ok(())
-	}
-
-	/// Check if a function is allowed
-	pub(crate) fn check_allowed_function(&self, target: &str) -> Result<()> {
-		if !self.capabilities.allows_function_name(target) {
-			warn!("Capabilities denied function execution attempt, target: '{target}'");
-			bail!(CapabilitiesError::FunctionNotAllowed(target.to_string()));
-		}
-		trace!("Capabilities allowed function execution, target: '{target}'");
 		Ok(())
 	}
 
@@ -1657,14 +1755,13 @@ mod tests {
 		assert_eq!(result.unwrap(), true);
 	}
 
-	/// `Context::snapshot` is called by the streaming executor at
+	/// `Context::snapshot` is called by the engine at
 	/// `dbs::Executor::execute_operator_plan` and produces a ctx with
-	/// `parent: None`. Operators that bridge back into legacy
-	/// `Context::done` / `is_done` checks (HNSW/DiskANN KNN search inner
-	/// loops, etc.) read the snapshot's own `cancelled` flag — without
-	/// parent walk to fall back to. If `snapshot` allocated a fresh
-	/// `Arc<AtomicBool>` instead of sharing the source's, those legacy
-	/// checks would never observe a connection-level cancel installed
+	/// `parent: None`. Operators that poll `Context::done` / `is_done`
+	/// (HNSW/DiskANN KNN search inner loops, etc.) read the snapshot's own
+	/// `cancelled` flag — without parent walk to fall back to. If `snapshot`
+	/// allocated a fresh `Arc<AtomicBool>` instead of sharing the source's,
+	/// those checks would never observe a connection-level cancel installed
 	/// via `set_cancellation`, and a WS disconnect during e.g. a KNN
 	/// search would not abort the operation — the read loop's drain
 	/// would block until the search finished.
@@ -1687,13 +1784,13 @@ mod tests {
 		assert_eq!(
 			snap.is_done(Some(1)).await.unwrap(),
 			true,
-			"snapshot did not observe external cancel after trip — legacy `is_done` on \
-			 streaming-exec snapshot would silently miss WebSocket disconnect"
+			"snapshot did not observe external cancel after trip — `is_done` on an \
+			 execution snapshot would silently miss WebSocket disconnect"
 		);
 		assert!(
 			snap.cancel_token().is_some(),
 			"snapshot lost the awaitable cancel token — bare-await sites reached via \
-			 the snapshot (legacy SLEEP fallback, etc.) could not `select!` against cancel"
+			 the snapshot (`SLEEP`, etc.) could not `select!` against cancel"
 		);
 	}
 

@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_fold_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -40,7 +39,7 @@ value = '''
 "SelectProject [ctx: Db] [projections: id, dbl]
     Filter [ctx: Db] [predicate: dbl > 2]
         ProjectLayer [ctx: Db] [columns: dbl = <computed> : int @computed]
-            IndexScan [ctx: Db] [index: idx_cat, access: = 'a', direction: Forward, predicate: cat = 'a']
+            IndexScan [ctx: Db] [table: t, index: idx_cat, access: = 'a', direction: Forward]
 "'''
 
 [[test.results]]

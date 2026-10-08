@@ -7,10 +7,13 @@
 
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
 use futures::StreamExt;
+#[cfg(test)]
 use tracing::instrument;
 
+#[cfg(test)]
 use super::common::resolve_version_stamp;
 use super::pipeline::{
 	FieldState, ScanPipeline, build_field_state, filter_and_process_batch, kv_scan_stream,
@@ -18,19 +21,22 @@ use super::pipeline::{
 use super::resolved::{EnforcementMode, ResolvedTableContext, planned_select_permission};
 use crate::err::EngineError;
 use crate::exec::operators::scan::count::record_key_range;
-use crate::exec::permission::{
-	PhysicalPermission, should_check_perms, table_select_permission_physical_runtime,
-	validate_record_user_access,
-};
+use crate::exec::permission::PhysicalPermission;
+#[cfg(test)]
+use crate::exec::permission::{should_check_perms, validate_record_user_access};
 use crate::exec::pre_decode_filter::{PreDecodeFilterStatus, pre_decode_filter_for_execute};
+#[cfg(test)]
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, OutputOrdering, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, ContextLevel, EvalContext, ExecOperator, FlowResult, OperatorMetrics,
+	OutputOrdering, ValueBatch, ValueBatchStream, monitor_stream,
 };
+use crate::exec::{ExecutionContext, PhysicalExpr};
 use crate::expr::{ControlFlow, ControlFlowExt};
+#[cfg(test)]
 use crate::iam::Action;
 use crate::val::{RecordId, RecordIdKey, Value};
 
+#[cfg(test)]
 /// Record lookup and range scan by RecordId.
 ///
 /// Handles both single-record point lookups (`person:1`) and RecordId
@@ -76,9 +82,14 @@ pub struct RecordIdScan {
 	pub(crate) pre_decode_filter_status: PreDecodeFilterStatus,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
+	/// The limit this scan is bound to, which spares it its records when it
+	/// evaluates to zero.
+	pub(crate) zero_limit: crate::exec::zero_limit::ZeroLimitBinding,
 }
 
+#[cfg(test)]
 impl RecordIdScan {
+	#[cfg(test)]
 	pub(crate) fn new(
 		record_id: Arc<dyn PhysicalExpr>,
 		version: Option<Arc<dyn PhysicalExpr>>,
@@ -94,37 +105,47 @@ impl RecordIdScan {
 			mode: EnforcementMode::Runtime,
 			for_update: false,
 			pre_decode_filter_status: PreDecodeFilterStatus::NotApplicable,
+			zero_limit: Default::default(),
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
 
+	#[cfg(test)]
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
 		self
 	}
 
+	#[cfg(test)]
 	/// Set the mode the lookup was planned under; see [`Self::mode`].
 	pub(crate) fn with_enforcement_mode(mut self, mode: EnforcementMode) -> Self {
 		self.mode = mode;
 		self
 	}
 
+	#[cfg(test)]
 	/// Set whether the lookup performs a locked read (`FOR UPDATE`).
 	pub(crate) fn with_for_update(mut self, for_update: bool) -> Self {
 		self.for_update = for_update;
 		self
 	}
 
+	#[cfg(test)]
 	/// Set plan-time pre-decode filter status for EXPLAIN and execution.
 	pub(crate) fn with_pre_decode_filter(mut self, status: PreDecodeFilterStatus) -> Self {
 		self.pre_decode_filter_status = status;
 		self
 	}
 }
+#[cfg(test)]
 impl ExecOperator for RecordIdScan {
 	fn name(&self) -> &'static str {
 		"RecordIdScan"
+	}
+
+	fn zero_limit_binding(&self) -> Option<&crate::exec::zero_limit::ZeroLimitBinding> {
+		Some(&self.zero_limit)
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
@@ -221,6 +242,7 @@ impl ExecOperator for RecordIdScan {
 		let mode = self.mode;
 		let for_update = self.for_update;
 		let pre_decode_filter_status = self.pre_decode_filter_status.clone();
+		let zeroed = self.zero_limit.applies(ctx);
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -261,7 +283,7 @@ impl ExecOperator for RecordIdScan {
 				needed_fields.as_ref(),
 				&ctx,
 				predicate.as_ref(),
-				None,
+				zeroed.then_some(0),
 				0,
 				resolved.as_ref(),
 				mode,
@@ -371,9 +393,7 @@ pub(crate) async fn execute_record_lookup(
 			),
 			EnforcementMode::Runtime => {
 				let perm = if check_perms {
-					table_select_permission_physical_runtime(Some(&*table_def), ctx)
-						.await
-						.context("Failed to convert permission")?
+					crate::exec::vm::descriptor::select_permission(ctx, &table_def.name).await?
 				} else {
 					PhysicalPermission::Allow
 				};
@@ -385,6 +405,13 @@ pub(crate) async fn execute_record_lookup(
 
 	// Early exit if denied
 	if matches!(select_permission, PhysicalPermission::Deny) {
+		return Ok(vec![]);
+	}
+
+	// A zero limit reads no record (see `crate::exec::zero_limit`), except a
+	// locked read: the lock is a side effect of the read whatever rows it
+	// returns, so the point lookup below still registers it.
+	if limit == Some(0) && !for_update {
 		return Ok(vec![]);
 	}
 
@@ -465,7 +492,12 @@ pub(crate) async fn execute_record_lookup(
 		_ => {
 			// --- Point lookup ---
 			let fetched = if for_update {
-				crate::exec::operators::fetch::fetch_raw_record_for_update(ctx, rid).await?
+				let fetched =
+					crate::exec::operators::fetch::fetch_raw_record_for_update(ctx, rid).await?;
+				if limit == Some(0) {
+					return Ok(vec![]);
+				}
+				fetched
 			} else {
 				crate::exec::operators::fetch::fetch_raw_record(ctx, rid, version).await?
 			};

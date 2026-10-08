@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "DEFINE FUNCTION: LET inside IF inside FOR must not drop planned LET bindings when a later statement uses legacy compute (CREATE) (#7131)"
+reason = "DEFINE FUNCTION: LET inside IF inside FOR must not drop planned LET bindings when a later statement is a write (CREATE) (#7131)"
 issue = 7131
 
 [[test.results]]

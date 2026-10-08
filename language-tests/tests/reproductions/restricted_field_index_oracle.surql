@@ -4,7 +4,7 @@ imports = ["reproductions/restricted_field_index_oracle_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "account:alice" }
 
 [test]
-reason = "An index whose columns carry a non-`Full` SELECT permission must not be selected for a query. Every scan built from such a candidate answers its predicate from index entries and drops the covered condition, so the document-level field reduction never runs on the data the decision was made from — result membership then reports which records contain a guessed value or search term, and for HNSW which restricted vectors lie nearest a supplied one. The legacy planner already refused these indexes; this pins the same rule for the streaming planner across full-text, single-column and compound B-tree, and HNSW, while a readable-column index stays usable."
+reason = "An index whose columns carry a non-`Full` SELECT permission must not be selected for a query. Every scan built from such a candidate answers its predicate from index entries and drops the covered condition, so the document-level field reduction never runs on the data the decision was made from — result membership then reports which records contain a guessed value or search term, and for HNSW which restricted vectors lie nearest a supplied one. This pins the rule across full-text, single-column and compound B-tree, and HNSW, while a readable-column index stays usable."
 
 # Control: the restricted field is absent from a direct read, which is the
 # boundary the index paths must not go around.

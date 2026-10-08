@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """EXPLAIN of a statement that is not a relational pipeline (RETURN, a block, \
@@ -12,15 +11,16 @@ value = "[{ a: 1, id: t:1 }]"
 
 [[test.results]]
 value = '''
-'Return [ctx: Db]
+'Return [ctx: Rt]
     SelectProject [ctx: Db] [projections: *]
         TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward]
+'Sequence [ctx: Rt] [statements: 1]
+    SelectProject [ctx: Db] [projections: *]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
@@ -32,7 +32,9 @@ value = '''
 
 [[test.results]]
 value = '''
-'Expr [ctx: Db] [expr: IF true THEN (SelectProject) END]
+'Sequence [ctx: Rt] [statements: 1]
+    SelectProject [ctx: Db] [projections: *]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 */

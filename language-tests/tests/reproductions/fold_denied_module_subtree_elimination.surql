@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [env.capabilities]
 deny-functions = ["mod::secret"]
@@ -23,9 +22,7 @@ CREATE t:1 SET a = 5;
 -- allowed and let the fold collapse the predicate to `false`, returning `[]`
 -- with no error at all. Preserving the subtree means evaluation is reached.
 --
--- Scoped to the new planner because the error text differs by build: with the
--- `surrealism` feature compiled out the module executor reports the missing
--- feature before consulting capabilities, whereas the legacy executor reaches
--- its capability check first and reports FunctionNotAllowed. What both agree
--- on, and what this pins, is that the call is not silently eliminated.
+-- The error text differs by build: with the `surrealism` feature compiled out
+-- the module executor reports the missing feature before consulting
+-- capabilities. What this pins is that the call is not silently eliminated.
 SELECT * FROM t WHERE mod::secret() IN [];

@@ -33,6 +33,23 @@ pub struct ExplainPlan {
 	/// The output format (currently only Text is supported)
 	pub format: ExplainFormat,
 }
+impl ExplainPlan {
+	/// The value `EXPLAIN` answers for `plan` in `format`: a function of the
+	/// plan alone, which nothing it runs changes.
+	pub(crate) fn render(plan: &dyn ExecOperator, format: ExplainFormat) -> Value {
+		match format {
+			ExplainFormat::Text => {
+				let mut plan_text = String::new();
+				format_execution_plan(plan, &mut plan_text, "", Redaction::default());
+				Value::String(plan_text.into())
+			}
+			ExplainFormat::Json => {
+				Value::Object(format_execution_plan_json(plan, Redaction::default()))
+			}
+		}
+	}
+}
+
 impl ExecOperator for ExplainPlan {
 	fn name(&self) -> &'static str {
 		"Explain"
@@ -60,19 +77,7 @@ impl ExecOperator for ExplainPlan {
 	}
 
 	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let output = match self.format {
-			ExplainFormat::Text => {
-				let mut plan_text = String::new();
-				format_execution_plan(self.plan.as_ref(), &mut plan_text, "", Redaction::default());
-				Value::String(plan_text.into())
-			}
-			ExplainFormat::Json => {
-				let plan_json =
-					format_execution_plan_json(self.plan.as_ref(), Redaction::default());
-				Value::Object(plan_json)
-			}
-		};
-
+		let output = Self::render(self.plan.as_ref(), self.format);
 		Ok(Box::pin(futures::stream::once(std::future::ready(Ok(ValueBatch::new(vec![output]))))))
 	}
 
@@ -141,7 +146,7 @@ impl ExecOperator for AnalyzePlan {
 		// Execute the inner plan to get its stream
 		let mut inner_stream = buffer_stream(
 			self.plan.execute(ctx)?,
-			self.plan.access_mode(),
+			self.access_mode().combine(self.plan.access_mode()),
 			self.plan.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -409,6 +414,144 @@ fn format_execution_plan_json(plan: &dyn ExecOperator, redaction: Redaction) -> 
 // ANALYZE Formatters (include metrics)
 // =========================================================================
 
+/// The text `EXPLAIN ANALYZE` renders of `plan` cut where it writes metrics,
+/// for a plan whose operators all report one set of metrics: the rendering
+/// is the pieces joined by those metrics ([`render_analyze_text`]). `None`
+/// where two operators report different metrics.
+pub(crate) fn analyze_text_pieces(plan: &dyn ExecOperator) -> Option<Vec<String>> {
+	let mut pieces = Vec::new();
+	let mut reported: Option<*const OperatorMetrics> = None;
+	let mut shared = true;
+	let mut output = String::new();
+	format_analyze_plan_by(plan, &mut output, "", Redaction::default(), &mut |metrics, output| {
+		let at = std::ptr::from_ref(metrics);
+		shared &= *reported.get_or_insert(at) == at;
+		pieces.push(std::mem::take(output));
+	});
+	pieces.push(output);
+	shared.then_some(pieces)
+}
+
+/// The value `EXPLAIN ANALYZE` answers in text for the plan
+/// [`analyze_text_pieces`] cut into `pieces`, whose operators reported
+/// `metrics`, after it yielded `total_rows` rows.
+pub(crate) fn render_analyze_text(
+	pieces: &[String],
+	metrics: &OperatorMetrics,
+	redact_volatile_explain_attrs: bool,
+	total_rows: u64,
+) -> Value {
+	let reported = format!(" {{{}}}", format_metrics_text(metrics, redact_volatile_explain_attrs));
+	let mut plan_text = pieces.join(&reported);
+	let _ = writeln!(plan_text);
+	let _ = write!(plan_text, "Total rows: {}", total_rows);
+	Value::String(plan_text.into())
+}
+
+/// The `metrics` object `EXPLAIN ANALYZE` renders in JSON for `metrics`.
+fn metrics_json(metrics: &OperatorMetrics, redact_volatile_explain_attrs: bool) -> Object {
+	let mut metrics_obj = Object::default();
+	metrics_obj.insert("output_rows", Value::from(metrics.output_rows() as i64));
+	// Emitted only when a bitmap branch declined, so its `output_rows: 0`
+	// is distinguishable from a genuinely empty candidate set.
+	// Deterministic for a given dataset and configuration, so never
+	// redacted.
+	if metrics.branch_dropped() {
+		metrics_obj.insert("dropped", Value::Bool(true));
+	}
+	if !redact_volatile_explain_attrs {
+		metrics_obj.insert("output_batches", Value::from(metrics.output_batches() as i64));
+		metrics_obj.insert("elapsed_ns", Value::from(metrics.elapsed_ns() as i64));
+		// Volatile (progress/publish-timing dependent); rendered only when
+		// non-zero. `edges_scanned` is the graph-traversal selectivity
+		// denominator (matched = output_rows).
+		let scanned = metrics.edges_scanned();
+		if scanned > 0 {
+			metrics_obj.insert("edges_scanned", Value::from(scanned as i64));
+		}
+		let block_hits = metrics.block_hits();
+		if block_hits > 0 {
+			metrics_obj.insert("block_hits", Value::from(block_hits as i64));
+		}
+		let delta_hits = metrics.delta_hits();
+		if delta_hits > 0 {
+			metrics_obj.insert("delta_hits", Value::from(delta_hits as i64));
+		}
+		let cache_hits = metrics.cache_hits();
+		if cache_hits > 0 {
+			metrics_obj.insert("cache_hits", Value::from(cache_hits as i64));
+		}
+		let cache_misses = metrics.cache_misses();
+		if cache_misses > 0 {
+			metrics_obj.insert("cache_misses", Value::from(cache_misses as i64));
+		}
+		let props_evals = metrics.props_evals();
+		if props_evals > 0 {
+			metrics_obj.insert("props_evals", Value::from(props_evals as i64));
+		}
+		let props_fallbacks = metrics.props_fallbacks();
+		if props_fallbacks > 0 {
+			metrics_obj.insert("props_fallbacks", Value::from(props_fallbacks as i64));
+		}
+		let skipped = metrics.skipped_rows();
+		if skipped > 0 {
+			metrics_obj.insert("skipped_rows", Value::from(skipped as i64));
+		}
+		// Deliberately rendered even at zero — unlike the counters above,
+		// `records_fetched: 0` is itself the claim worth asserting: an ANN
+		// search whose predicate was fully served by the allow-list bitmap
+		// performed no in-traversal record fetches (#548).
+		metrics_obj.insert("records_fetched", Value::from(metrics.records_fetched() as i64));
+	}
+	metrics_obj
+}
+
+/// The JSON `EXPLAIN ANALYZE` renders for `plan`, every operator of which
+/// reports the one set of metrics a run records, with that set's `metrics`
+/// objects to be filled when the run ends ([`render_analyze_json`]); `None`
+/// where operators report metrics of their own.
+pub(crate) fn analyze_json_template(plan: &dyn ExecOperator) -> Option<Object> {
+	analyze_text_pieces(plan)?;
+	Some(format_analyze_plan_json(plan, false, Redaction::default()))
+}
+
+/// The value `EXPLAIN ANALYZE` answers in JSON for the plan rendered as
+/// `template` ([`analyze_json_template`]), whose operators reported
+/// `metrics`, after it yielded `total_rows` rows.
+pub(crate) fn render_analyze_json(
+	template: &Object,
+	metrics: &OperatorMetrics,
+	redact_volatile_explain_attrs: bool,
+	total_rows: u64,
+) -> Value {
+	fn fill(value: &mut Value, metrics: &Object) {
+		match value {
+			Value::Object(object) => {
+				for (key, inner) in object.iter_mut() {
+					if key == "metrics" && matches!(inner, Value::Object(_)) {
+						*inner = Value::Object(metrics.clone());
+					} else {
+						fill(inner, metrics);
+					}
+				}
+			}
+			Value::Array(items) => {
+				for item in items.iter_mut() {
+					fill(item, metrics);
+				}
+			}
+			_ => {}
+		}
+	}
+	let metrics = metrics_json(metrics, redact_volatile_explain_attrs);
+	let mut plan = Value::Object(template.clone());
+	fill(&mut plan, &metrics);
+	if let Value::Object(object) = &mut plan {
+		object.insert("total_rows", Value::from(total_rows as i64));
+	}
+	plan
+}
+
 /// Format metrics as a human-readable string fragment.
 ///
 /// When `redact_volatile_explain_attrs` is true, elapsed time and batch counts are
@@ -499,6 +642,21 @@ fn format_analyze_plan(
 	redact_volatile_explain_attrs: bool,
 	redaction: Redaction,
 ) {
+	format_analyze_plan_by(plan, output, prefix, redaction, &mut |metrics, output| {
+		let _ =
+			write!(output, " {{{}}}", format_metrics_text(metrics, redact_volatile_explain_attrs));
+	});
+}
+
+/// [`format_analyze_plan`], with each operator's metrics written by
+/// `write_metrics` where the rendering shows them.
+fn format_analyze_plan_by(
+	plan: &dyn ExecOperator,
+	output: &mut String,
+	prefix: &str,
+	redaction: Redaction,
+	write_metrics: &mut dyn FnMut(&OperatorMetrics, &mut String),
+) {
 	let name = plan.name();
 	let properties = redaction.attrs(plan);
 	let beneath = redaction.beneath(plan);
@@ -531,8 +689,7 @@ fn format_analyze_plan(
 	if !redaction.metrics
 		&& let Some(metrics) = plan.metrics()
 	{
-		let _ =
-			write!(output, " {{{}}}", format_metrics_text(metrics, redact_volatile_explain_attrs));
+		write_metrics(metrics, output);
 	}
 
 	let _ = writeln!(output);
@@ -544,12 +701,12 @@ fn format_analyze_plan(
 		if !embedded.is_empty() {
 			for (embed_role, embed_plan) in &embedded {
 				let _ = write!(output, "{}  {}.{}: ", prefix, role, embed_role);
-				format_analyze_plan(
+				format_analyze_plan_by(
 					embed_plan.as_ref(),
 					output,
 					&format!("{}  ", prefix),
-					redact_volatile_explain_attrs,
 					beneath,
+					write_metrics,
 				);
 			}
 		}
@@ -561,13 +718,7 @@ fn format_analyze_plan(
 		let child_prefix = format!("{}{:width$}", prefix, "", width = INDENT_WIDTH);
 		for child in children.iter() {
 			let _ = write!(output, "{}", child_prefix);
-			format_analyze_plan(
-				child.as_ref(),
-				output,
-				&child_prefix,
-				redact_volatile_explain_attrs,
-				beneath,
-			);
+			format_analyze_plan_by(child.as_ref(), output, &child_prefix, beneath, write_metrics);
 		}
 	}
 }
@@ -605,60 +756,7 @@ fn format_analyze_plan_json(
 	if !redaction.metrics
 		&& let Some(metrics) = plan.metrics()
 	{
-		let mut metrics_obj = Object::default();
-		metrics_obj.insert("output_rows", Value::from(metrics.output_rows() as i64));
-		// Emitted only when a bitmap branch declined, so its `output_rows: 0`
-		// is distinguishable from a genuinely empty candidate set.
-		// Deterministic for a given dataset and configuration, so never
-		// redacted.
-		if metrics.branch_dropped() {
-			metrics_obj.insert("dropped", Value::Bool(true));
-		}
-		if !redact_volatile_explain_attrs {
-			metrics_obj.insert("output_batches", Value::from(metrics.output_batches() as i64));
-			metrics_obj.insert("elapsed_ns", Value::from(metrics.elapsed_ns() as i64));
-			// Volatile (progress/publish-timing dependent); rendered only when
-			// non-zero. `edges_scanned` is the graph-traversal selectivity
-			// denominator (matched = output_rows).
-			let scanned = metrics.edges_scanned();
-			if scanned > 0 {
-				metrics_obj.insert("edges_scanned", Value::from(scanned as i64));
-			}
-			let block_hits = metrics.block_hits();
-			if block_hits > 0 {
-				metrics_obj.insert("block_hits", Value::from(block_hits as i64));
-			}
-			let delta_hits = metrics.delta_hits();
-			if delta_hits > 0 {
-				metrics_obj.insert("delta_hits", Value::from(delta_hits as i64));
-			}
-			let cache_hits = metrics.cache_hits();
-			if cache_hits > 0 {
-				metrics_obj.insert("cache_hits", Value::from(cache_hits as i64));
-			}
-			let cache_misses = metrics.cache_misses();
-			if cache_misses > 0 {
-				metrics_obj.insert("cache_misses", Value::from(cache_misses as i64));
-			}
-			let props_evals = metrics.props_evals();
-			if props_evals > 0 {
-				metrics_obj.insert("props_evals", Value::from(props_evals as i64));
-			}
-			let props_fallbacks = metrics.props_fallbacks();
-			if props_fallbacks > 0 {
-				metrics_obj.insert("props_fallbacks", Value::from(props_fallbacks as i64));
-			}
-			let skipped = metrics.skipped_rows();
-			if skipped > 0 {
-				metrics_obj.insert("skipped_rows", Value::from(skipped as i64));
-			}
-			// Deliberately rendered even at zero — unlike the counters above,
-			// `records_fetched: 0` is itself the claim worth asserting: an ANN
-			// search whose predicate was fully served by the allow-list bitmap
-			// performed no in-traversal record fetches (#548).
-			metrics_obj.insert("records_fetched", Value::from(metrics.records_fetched() as i64));
-		}
-		obj.insert("metrics", Value::Object(metrics_obj));
+		obj.insert("metrics", Value::Object(metrics_json(metrics, redact_volatile_explain_attrs)));
 	}
 
 	let expressions = plan.expressions();

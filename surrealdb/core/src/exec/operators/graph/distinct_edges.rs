@@ -30,17 +30,22 @@
 //! `exec/planner/match_plan.rs`. The transform is order-preserving and 1:≤1 (each
 //! input row yields at most one output row), so it propagates the input ordering.
 
+#[cfg(test)]
 use std::sync::Arc;
 
+#[cfg(test)]
 use common::future::stream::{self, Yielder};
+#[cfg(test)]
 use futures::StreamExt;
 
+#[cfg(test)]
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
 	OutputOrdering, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::val::{RecordId, Value};
 
+#[cfg(test)]
 /// Drops rows in which any two of the clause's edge bindings reference the same
 /// edge record, enforcing the per-MATCH DIFFERENT EDGES default (R2).
 #[derive(Debug, Clone)]
@@ -51,7 +56,9 @@ pub struct DistinctEdges {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+#[cfg(test)]
 impl DistinctEdges {
+	#[cfg(test)]
 	/// Create a new `DistinctEdges` over `input`, enforcing pairwise-distinct
 	/// edge ids across `edge_bindings`.
 	pub(crate) fn new(input: Arc<dyn ExecOperator>, edge_bindings: Vec<String>) -> Self {
@@ -63,6 +70,7 @@ impl DistinctEdges {
 	}
 }
 
+#[cfg(test)]
 impl ExecOperator for DistinctEdges {
 	fn name(&self) -> &'static str {
 		"DistinctEdges"
@@ -97,7 +105,7 @@ impl ExecOperator for DistinctEdges {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
-			self.input.access_mode(),
+			self.access_mode().combine(self.input.access_mode()),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
@@ -130,7 +138,7 @@ impl ExecOperator for DistinctEdges {
 /// Collects the record id of every edge the `edge_bindings` reference (flattening
 /// group bindings) and returns `true` iff they are pairwise distinct. A row that
 /// is not an object, or that binds nothing edge-ish, trivially passes.
-fn row_has_distinct_edges(row: &Value, edge_bindings: &[String]) -> bool {
+pub(crate) fn row_has_distinct_edges(row: &Value, edge_bindings: &[String]) -> bool {
 	let Value::Object(obj) = row else {
 		// Binding rows are always objects; a non-object row carries no edge
 		// bindings to compare, so it passes unchanged.

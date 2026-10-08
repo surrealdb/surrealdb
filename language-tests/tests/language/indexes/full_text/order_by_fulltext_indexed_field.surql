@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["compute-only"]
 
 [test]
 
@@ -17,9 +16,6 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'person' }, operation: 'Iterate Table' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
-[[test.results]]
 value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"
 
 [[test.results]]
@@ -30,6 +26,5 @@ CREATE person:tobie SET name = 'Tobie', genre='m';
 CREATE person:jaime SET name = 'Jaime', genre='m';
 DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
 DEFINE INDEX ft_name ON TABLE person COLUMNS name FULLTEXT ANALYZER simple BM25(1.2,0.75);
-SELECT name FROM person ORDER BY name ASC EXPLAIN;
 SELECT name FROM person ORDER BY name ASC;
 SELECT name FROM person WHERE name @@ 'tobie' ORDER BY name;

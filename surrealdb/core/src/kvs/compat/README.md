@@ -18,7 +18,7 @@ compat/
 ├── generator.rs        # Tool to serialize fixtures into byte arrays
 ├── v3_0_0.rs           # FROZEN: Serialized bytes from version 3.0.0
 ├── tests.rs            # Tests that decode bytes and assert equality
-├── durable_session.rs  # FROZEN rev-1 bytes for a type no released snapshot holds
+├── durable_session.rs  # FROZEN rev-1 and rev-2 bytes for a type no released snapshot holds
 └── ann_pending.rs      # FROZEN rev-1 bytes for the two ANN pending values
 ```
 

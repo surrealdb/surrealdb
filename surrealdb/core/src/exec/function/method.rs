@@ -46,6 +46,12 @@ pub enum ValueKind {
 }
 
 impl ValueKind {
+	/// The kind's bit in a mask of kinds: [`MethodDescriptor::kind_mask`] holds
+	/// one per kind the method implements.
+	pub const fn bit(self) -> u16 {
+		1 << (self as u8)
+	}
+
 	/// Extract the coarse kind from a Value, if it has type-specific methods.
 	///
 	/// Returns `None` for types that only support generic methods
@@ -106,6 +112,12 @@ impl MethodDescriptor {
 	pub fn dispatches_for_an_object(&self) -> bool {
 		self.fallback.is_some()
 			|| self.type_impls.iter().any(|(kind, _)| *kind == ValueKind::Object)
+	}
+
+	/// The kinds with a type-specific implementation, as a mask of
+	/// [`ValueKind::bit`]s.
+	pub fn kind_mask(&self) -> u16 {
+		self.type_impls.iter().fold(0, |mask, (kind, _)| mask | kind.bit())
 	}
 
 	pub fn resolve(&self, value: &Value) -> Option<&Arc<dyn ScalarFunction>> {

@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_collision_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -17,7 +16,7 @@ reason = """
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Db] [projections: a1 AS first, a AS second]
+'SelectProject [ctx: Db] [projections: first, second]
     ProjectLayer [ctx: Db] [columns: a = <permission> @permission]
         ProjectLayer [ctx: Db] [columns: a1 = <computed> : int @computed]
             TableScan [ctx: Db] [table: u, direction: Forward]
@@ -25,7 +24,7 @@ value = '''
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Db] [projections: _a1 AS first, _a10 AS second]
+'SelectProject [ctx: Db] [projections: first, second]
     ProjectLayer [ctx: Db] [columns: _a10 = <permission> @permission]
         ProjectLayer [ctx: Db] [columns: _a1 = <computed> : int @computed]
             TableScan [ctx: Db] [table: u, direction: Forward]
@@ -33,14 +32,15 @@ value = '''
 
 [[test.results]]
 value = '''
-'ProjectLayer [ctx: Db] [columns: _a10 = <permission> @permission, a = <permission> @permission]
-    ProjectLayer [ctx: Db] [columns: _a1 = <computed> : int @computed, a1 = <computed> : int @computed, b = <computed> : int @computed, c = <computed> : int @computed, d = <computed> : int @computed, e = <computed> : int @computed, f = <computed> : int @computed, g = <computed> : int @computed, h = <computed> : int @computed, i = <computed> : int @computed, j = <computed> : int @computed]
-        TableScan [ctx: Db] [table: u, direction: Forward]
+'SelectProject [ctx: Db] [projections: *]
+    ProjectLayer [ctx: Db] [columns: _a10 = <permission> @permission, a = <permission> @permission]
+        ProjectLayer [ctx: Db] [columns: _a1 = <computed> : int @computed, a1 = <computed> : int @computed, b = <computed> : int @computed, c = <computed> : int @computed, d = <computed> : int @computed, e = <computed> : int @computed, f = <computed> : int @computed, g = <computed> : int @computed, h = <computed> : int @computed, i = <computed> : int @computed, j = <computed> : int @computed]
+            TableScan [ctx: Db] [table: u, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Db] [projections: a AS x, _a10 AS y]
+'SelectProject [ctx: Db] [projections: x, y]
     Filter [ctx: Db] [predicate: a1 = 1 AND _a1 = 11]
         ProjectLayer [ctx: Db] [columns: _a10 = <permission> @permission, a = <permission> @permission]
             ProjectLayer [ctx: Db] [columns: _a1 = <computed> : int @computed, a1 = <computed> : int @computed]

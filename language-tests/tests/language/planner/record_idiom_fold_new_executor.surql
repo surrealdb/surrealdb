@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Plan-time folding of row-independent record-idiom traversals ($rec.field) lets index analysis match them; the fold bails (table scan, same results) for tables with computed fields"
@@ -44,7 +43,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_owner, access: = person:alice, direction: Forward, predicate: owner = person:alice]
+    Filter [ctx: Db] [predicate: owner = (ticket:t1).owner]
+        IndexScan [ctx: Db] [table: ticket, index: idx_owner, access: = person:alice, direction: Forward]
 ''''
 
 [[test.results]]
@@ -56,7 +56,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_tier, access: = 'gold', direction: Forward, predicate: tier = 'gold']
+    Filter [ctx: Db] [predicate: tier = (person:alice).profile.tier]
+        IndexScan [ctx: Db] [table: ticket, index: idx_tier, access: = 'gold', direction: Forward]
 "'''
 
 [[test.results]]
@@ -65,7 +66,8 @@ value = "[{ id: ticket:t1 }, { id: ticket:t3 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_org_label, access: = 'ACME', direction: Forward, predicate: orgLabel = 'ACME']
+    Filter [ctx: Db] [predicate: orgLabel = (ticket:t1).owner.org.label]
+        IndexScan [ctx: Db] [table: ticket, index: idx_org_label, access: = 'ACME', direction: Forward]
 "'''
 
 [[test.results]]
@@ -77,7 +79,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: idx_region, access: = 'eu', direction: Forward, predicate: region = 'eu']
+    Filter [ctx: Db] [predicate: region = (ticket:t4).shard.region]
+        IndexScan [ctx: Db] [table: ticket, index: idx_region, access: = 'eu', direction: Forward]
 "'''
 
 [[test.results]]
@@ -101,7 +104,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: ticket, direction: Forward, predicate: tier = (account:a).plan, pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: tier = (account:a).plan]
+        TableScan [ctx: Db] [table: ticket, direction: Forward]
 ''''
 
 [[test.results]]

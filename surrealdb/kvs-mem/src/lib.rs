@@ -179,6 +179,11 @@ impl Transactable for Transaction {
 		"memory"
 	}
 
+	/// The store lives in the memory of the datastore that opened it.
+	fn sole_writer(&self) -> bool {
+		true
+	}
+
 	/// Check if closed
 	fn closed(&self) -> bool {
 		self.done.load(Ordering::Relaxed)

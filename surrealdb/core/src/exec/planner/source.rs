@@ -12,7 +12,7 @@ use super::util::{extract_table_from_matches, get_effective_limit_literal, key_l
 use crate::err::Error;
 use crate::exec::operators::{
 	EdgeTableSpec, Filter, GraphEdgeScan, GraphScanOutput, Limit, OrderByField, ReferenceScan,
-	ReferenceScanOutput, SortDirection,
+	ReferenceScanOutput, SortDirection, Union,
 };
 use crate::exec::parts::LookupDirection;
 use crate::exec::planner::select::{SelectPipelineConfig, WhereClauseState};
@@ -392,47 +392,57 @@ impl<'ctx> Planner<'ctx> {
 				Arc::new(scan)
 			}
 			LookupKind::Reference => {
-				let (referencing_table, referencing_field, range_start, range_end) =
-					if let Some(subject) = what.first() {
-						match subject {
-							LogicalLookupSubject::Table {
-								table,
-								referencing_field,
-							} => (
-								Some(table.clone()),
-								referencing_field.clone(),
-								Bound::Unbounded,
-								Bound::Unbounded,
-							),
-							LogicalLookupSubject::Range {
-								table,
-								referencing_field,
-								range,
-							} => {
-								let rs = self.convert_range_bound(&range.start).await?;
-								let re = self.convert_range_bound(&range.end).await?;
-								(Some(table.clone()), referencing_field.clone(), rs, re)
-							}
-						}
-					} else {
-						(None, None, Bound::Unbounded, Bound::Unbounded)
-					};
-
 				let ref_output_mode = if needs_full_records {
 					ReferenceScanOutput::FullRecord
 				} else {
 					ReferenceScanOutput::RecordId
 				};
-
-				Arc::new(ReferenceScan::new(
-					input,
-					referencing_table,
-					referencing_field,
-					ref_output_mode,
-					range_start,
-					range_end,
-					self.version.clone(),
-				))
+				// A reference scan carries one subject: the table the
+				// referencing records live in, narrowed by the field that
+				// holds the reference and by a key range where the subject
+				// named one. `<~(a, b)` names several, so it is several scans
+				// read in the order they were written — the order the lookup
+				// answers them in. Naming none is the wildcard `<~?`, one scan
+				// over every table that references the target.
+				let mut subjects = Vec::with_capacity(what.len().max(1));
+				for subject in what {
+					subjects.push(match subject {
+						LogicalLookupSubject::Table {
+							table,
+							referencing_field,
+						} => (Some(table), referencing_field, Bound::Unbounded, Bound::Unbounded),
+						LogicalLookupSubject::Range {
+							table,
+							referencing_field,
+							range,
+						} => {
+							let rs = self.convert_range_bound(&range.start).await?;
+							let re = self.convert_range_bound(&range.end).await?;
+							(Some(table), referencing_field, rs, re)
+						}
+					});
+				}
+				if subjects.is_empty() {
+					subjects.push((None, None, Bound::Unbounded, Bound::Unbounded));
+				}
+				let scans: Vec<Arc<dyn ExecOperator>> = subjects
+					.into_iter()
+					.map(|(table, field, range_start, range_end)| {
+						Arc::new(ReferenceScan::new(
+							Arc::clone(&input),
+							table,
+							field,
+							ref_output_mode,
+							range_start,
+							range_end,
+							self.version.clone(),
+						)) as Arc<dyn ExecOperator>
+					})
+					.collect();
+				match <[Arc<dyn ExecOperator>; 1]>::try_from(scans) {
+					Ok([one]) => one,
+					Err(scans) => Arc::new(Union::new(scans)),
+				}
 			}
 		};
 
@@ -529,7 +539,7 @@ impl<'ctx> Planner<'ctx> {
 	///
 	/// Returns the per-table `(generation, field order)` snapshot the
 	/// evaluation trusts at read time.
-	async fn graph_predicate_payload_spec(
+	pub(crate) async fn graph_predicate_payload_spec(
 		&self,
 		cond: &LogicalExpr,
 		pred: &Arc<dyn crate::exec::PhysicalExpr>,
@@ -537,9 +547,39 @@ impl<'ctx> Planner<'ctx> {
 		direction: LookupDirection,
 	) -> Option<crate::exec::operators::scan::PayloadPredicateSpec> {
 		use crate::catalog::providers::TableProvider;
+		let mut defs = std::collections::HashMap::new();
+		if let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
+			&& self.version.is_none()
+		{
+			for subject in what {
+				let table = subject_table(subject);
+				if let Ok(Some(def)) = txn.get_tb_by_name(ns, db, table, None).await
+					&& let Ok(fields) =
+						txn.all_tb_fields(def.namespace_id, def.database_id, &def.name, None).await
+				{
+					defs.insert(table.clone(), (def, fields));
+				}
+			}
+		}
+		self.graph_predicate_payload_spec_from(cond, pred, what, direction, &|table| {
+			defs.get(table).cloned()
+		})
+	}
+
+	/// [`Self::graph_predicate_payload_spec`], with the definition and the
+	/// fields of each table `what` names as `defs` answers them: `None` for a
+	/// table it holds no definition of.
+	pub(crate) fn graph_predicate_payload_spec_from(
+		&self,
+		cond: &LogicalExpr,
+		pred: &Arc<dyn crate::exec::PhysicalExpr>,
+		what: &[LogicalLookupSubject],
+		direction: LookupDirection,
+		defs: &dyn Fn(&TableName) -> Option<TableDefs>,
+	) -> Option<crate::exec::operators::scan::PayloadPredicateSpec> {
 		use crate::exec::operators::scan::{PayloadPredicateSpec, PayloadTableSpec};
 
-		let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) else {
+		let (Some(_), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) else {
 			return None;
 		};
 		if self.version.is_some() || what.is_empty() {
@@ -594,9 +634,7 @@ impl<'ctx> Planner<'ctx> {
 					..
 				} => table,
 			};
-			let Ok(Some(def)) = txn.get_tb_by_name(ns, db, table, None).await else {
-				return None;
-			};
+			let (def, fields) = defs(table)?;
 			if !perms_skipped && !matches!(def.permissions.select, crate::catalog::Permission::Full)
 			{
 				return None;
@@ -605,11 +643,6 @@ impl<'ctx> Planner<'ctx> {
 				crate::catalog::TableType::Relation(rel) if !rel.lightweight => {}
 				_ => return None,
 			}
-			let Ok(fields) =
-				txn.all_tb_fields(def.namespace_id, def.database_id, &def.name, None).await
-			else {
-				return None;
-			};
 			let inline = crate::doc::inline_fields(&fields);
 			let names: Vec<String> =
 				inline.iter().map(|f| crate::doc::inline_field_name(f)).collect();
@@ -710,101 +743,9 @@ impl<'ctx> Planner<'ctx> {
 		edge: &LogicalLookup,
 		vertex: &LogicalLookup,
 	) -> Result<Option<TargetVertexPlan>, Error> {
-		// Both hops must be graph traversal in the same direction. The
-		// `d1 == d2` guard means the vertex-hop direction is exactly
-		// `edge_dir`, so we only bind the one we use.
-		let edge_dir = match (&edge.kind, &vertex.kind) {
-			(LookupKind::Graph(d1), LookupKind::Graph(d2)) if d1 == d2 => d1,
-			_ => return Ok(None),
+		let Some(plan) = self.fast_path_pair_shape(edge, vertex) else {
+			return Ok(None);
 		};
-		// SECURITY: time-travel queries (`VERSION <ts>`) must enforce the
-		// edge table's SELECT permissions as they stood at the requested
-		// version, not the current catalog. The eligibility check below
-		// inspects the *current* `Permission::Full` state, so a query that
-		// targets a historical version where the edge had a row-level WHERE
-		// could be admitted to the fast path -- which then skips the edge
-		// record entirely and bypasses that WHERE. Always take the slow
-		// path when a VERSION expression is present so the historical
-		// permission gate is honoured.
-		if self.version.is_some() {
-			return Ok(None);
-		}
-		// Bidirectional (`<->`) traversal has the slow path scan the edge's
-		// own adjacency in *both* directions on the second hop, so each
-		// edge contributes both endpoint vertices to the result -- the
-		// embedded target plus the originating source vertex. The fast
-		// path emits only the embedded target, dropping the source-side
-		// duplicate. Force the slow path on `<->` to preserve semantics;
-		// `->` and `<-` keep the optimisation.
-		if matches!(edge_dir, Dir::Both) {
-			return Ok(None);
-		}
-
-		// Neither hop may carry edge-side filtering, projection, or other
-		// clauses that depend on reading the edge / vertex record.
-		let lookup_is_plain = |l: &LogicalLookup| {
-			l.expr.is_none()
-				&& l.cond.is_none()
-				&& l.split.is_none()
-				&& l.group.is_none()
-				&& l.order.is_none()
-				&& l.limit.is_none()
-				&& l.start.is_none()
-				&& l.alias.is_none()
-				&& !l.only
-		};
-		if !lookup_is_plain(edge) || !lookup_is_plain(vertex) {
-			return Ok(None);
-		}
-
-		// Only unbounded `Table` subjects are supported on both hops. Range
-		// subjects on the edge would change the bound semantics (and would
-		// need the trailing-target-aware bound construction); they stay on
-		// the slow path.
-		let mut edge_tables: Vec<EdgeTableSpec> = Vec::with_capacity(edge.what.len());
-		for s in &edge.what {
-			let LogicalLookupSubject::Table {
-				table,
-				..
-			} = s
-			else {
-				return Ok(None);
-			};
-			edge_tables.push(EdgeTableSpec {
-				table: table.clone(),
-				range_start: Bound::Unbounded,
-				range_end: Bound::Unbounded,
-			});
-		}
-		// The edge `what` list must be non-empty so we can resolve each
-		// edge table's permissions. The unbounded "any edge table" case
-		// stays on the slow path because we don't know which tables to
-		// permission-check at plan time.
-		if edge_tables.is_empty() {
-			return Ok(None);
-		}
-
-		let mut target_tables: Vec<TableName> = Vec::with_capacity(vertex.what.len());
-		for s in &vertex.what {
-			let LogicalLookupSubject::Table {
-				table,
-				..
-			} = s
-			else {
-				return Ok(None);
-			};
-			target_tables.push(table.clone());
-		}
-		// Mirror the edge `what` check above: the unbounded "any vertex
-		// table" case (empty `what`) stays on the slow path. The scan
-		// operator would otherwise accept every embedded target without a
-		// table filter, leaving the per-target permission check as the
-		// only gate; keep the eligibility contract symmetric so plan-time
-		// reasoning matches the edge side.
-		if target_tables.is_empty() {
-			return Ok(None);
-		}
-
 		// Verify every edge table has `PERMISSIONS FULL` for SELECT.
 		// Without a plan-time transaction we cannot check, so fall back.
 		let Some(txn) = self.txn() else {
@@ -827,7 +768,7 @@ impl<'ctx> Planner<'ctx> {
 		// correctness gate.
 		if self.should_check_perms_for_view(ns, db) {
 			let edge_table_names: Vec<TableName> =
-				edge_tables.iter().map(|spec| spec.table.clone()).collect();
+				plan.edge_tables.iter().map(|spec| spec.table.clone()).collect();
 			if !crate::exec::permission::tables_have_full_select_permission(
 				txn,
 				ns,
@@ -839,12 +780,121 @@ impl<'ctx> Planner<'ctx> {
 				return Ok(None);
 			}
 		}
+		Ok(Some(plan))
+	}
 
-		Ok(Some(TargetVertexPlan {
+	/// The collapse [`Self::try_fast_path_pair`] serves the pair with, where
+	/// its shape admits one, before the edge tables' permissions are
+	/// checked: the caller admits it only where each edge table's `SELECT`
+	/// permission is `Full` or the session's reads go unchecked.
+	pub(crate) fn fast_path_pair_shape(
+		&self,
+		edge: &LogicalLookup,
+		vertex: &LogicalLookup,
+	) -> Option<TargetVertexPlan> {
+		// Both hops must be graph traversal in the same direction. The
+		// `d1 == d2` guard means the vertex-hop direction is exactly
+		// `edge_dir`, so we only bind the one we use.
+		let edge_dir = match (&edge.kind, &vertex.kind) {
+			(LookupKind::Graph(d1), LookupKind::Graph(d2)) if d1 == d2 => d1,
+			_ => return None,
+		};
+		// SECURITY: time-travel queries (`VERSION <ts>`) must enforce the
+		// edge table's SELECT permissions as they stood at the requested
+		// version, not the current catalog. The eligibility check below
+		// inspects the *current* `Permission::Full` state, so a query that
+		// targets a historical version where the edge had a row-level WHERE
+		// could be admitted to the fast path -- which then skips the edge
+		// record entirely and bypasses that WHERE. Always take the slow
+		// path when a VERSION expression is present so the historical
+		// permission gate is honoured, whether the planner holds the
+		// expression or only the stamp it denotes.
+		if self.version.is_some()
+			|| !matches!(self.plan_time_version, super::PlanTimeVersion::Current)
+		{
+			return None;
+		}
+		// Bidirectional (`<->`) traversal has the slow path scan the edge's
+		// own adjacency in *both* directions on the second hop, so each
+		// edge contributes both endpoint vertices to the result -- the
+		// embedded target plus the originating source vertex. The fast
+		// path emits only the embedded target, dropping the source-side
+		// duplicate. Force the slow path on `<->` to preserve semantics;
+		// `->` and `<-` keep the optimisation.
+		if matches!(edge_dir, Dir::Both) {
+			return None;
+		}
+
+		// Neither hop may carry edge-side filtering, projection, or other
+		// clauses that depend on reading the edge / vertex record.
+		let lookup_is_plain = |l: &LogicalLookup| {
+			l.expr.is_none()
+				&& l.cond.is_none()
+				&& l.split.is_none()
+				&& l.group.is_none()
+				&& l.order.is_none()
+				&& l.limit.is_none()
+				&& l.start.is_none()
+				&& l.alias.is_none()
+				&& !l.only
+		};
+		if !lookup_is_plain(edge) || !lookup_is_plain(vertex) {
+			return None;
+		}
+
+		// Only unbounded `Table` subjects are supported on both hops. Range
+		// subjects on the edge would change the bound semantics (and would
+		// need the trailing-target-aware bound construction); they stay on
+		// the slow path.
+		let mut edge_tables: Vec<EdgeTableSpec> = Vec::with_capacity(edge.what.len());
+		for s in &edge.what {
+			let LogicalLookupSubject::Table {
+				table,
+				..
+			} = s
+			else {
+				return None;
+			};
+			edge_tables.push(EdgeTableSpec {
+				table: table.clone(),
+				range_start: Bound::Unbounded,
+				range_end: Bound::Unbounded,
+			});
+		}
+		// The edge `what` list must be non-empty so we can resolve each
+		// edge table's permissions. The unbounded "any edge table" case
+		// stays on the slow path because we don't know which tables to
+		// permission-check at plan time.
+		if edge_tables.is_empty() {
+			return None;
+		}
+
+		let mut target_tables: Vec<TableName> = Vec::with_capacity(vertex.what.len());
+		for s in &vertex.what {
+			let LogicalLookupSubject::Table {
+				table,
+				..
+			} = s
+			else {
+				return None;
+			};
+			target_tables.push(table.clone());
+		}
+		// Mirror the edge `what` check above: the unbounded "any vertex
+		// table" case (empty `what`) stays on the slow path. The scan
+		// operator would otherwise accept every embedded target without a
+		// table filter, leaving the per-target permission check as the
+		// only gate; keep the eligibility contract symmetric so plan-time
+		// reasoning matches the edge side.
+		if target_tables.is_empty() {
+			return None;
+		}
+
+		Some(TargetVertexPlan {
 			direction: LookupDirection::from(edge_dir),
 			edge_tables,
 			target_tables,
-		}))
+		})
 	}
 
 	/// Build the operator that implements a fast-path `->edge->vertex`
@@ -863,6 +913,24 @@ impl<'ctx> Planner<'ctx> {
 		)
 		.with_target_tables(plan.target_tables);
 		Ok(Arc::new(scan))
+	}
+}
+
+/// A table's definition and its fields.
+pub(crate) type TableDefs =
+	(Arc<crate::catalog::TableDefinition>, Arc<[crate::catalog::FieldDefinition]>);
+
+/// The table a lookup subject names.
+fn subject_table(subject: &LogicalLookupSubject) -> &TableName {
+	match subject {
+		LogicalLookupSubject::Table {
+			table,
+			..
+		}
+		| LogicalLookupSubject::Range {
+			table,
+			..
+		} => table,
 	}
 }
 
@@ -895,6 +963,7 @@ fn static_field_roots(
 				| LogicalExpr::Object(_)
 				| LogicalExpr::RecordId(_)
 				| LogicalExpr::Table(_)
+				| LogicalExpr::Mock(_)
 				| LogicalExpr::Constant(_)
 				| LogicalExpr::Access {
 					..

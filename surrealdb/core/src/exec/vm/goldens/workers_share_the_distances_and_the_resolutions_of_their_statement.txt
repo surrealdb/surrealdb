@@ -1,0 +1,42 @@
+### SELECT id, search::score(1) AS s, search::highlight('<', '>', 1) AS h FROM w WHERE title @1@ 'alpha' ORDER BY id
+{ h: '<alpha> beta', id: w:0, s: 0f }
+{ h: '<alpha> beta', id: w:2, s: 0f }
+{ h: '<alpha> beta', id: w:4, s: 0f }
+{ h: '<alpha> beta', id: w:6, s: 0f }
+{ h: '<alpha> beta', id: w:8, s: 0f }
+{ h: '<alpha> beta', id: w:10, s: 0f }
+... 300 rows, digest 53580e4df75d00d3 ...
+{ h: '<alpha> beta', id: w:588, s: 0f }
+{ h: '<alpha> beta', id: w:590, s: 0f }
+{ h: '<alpha> beta', id: w:592, s: 0f }
+{ h: '<alpha> beta', id: w:594, s: 0f }
+{ h: '<alpha> beta', id: w:596, s: 0f }
+{ h: '<alpha> beta', id: w:598, s: 0f }
+### SELECT id, vector::distance::knn() AS d FROM w WHERE emb <|400, 600|> [0.0, 1.0, 0.0] ORDER BY id
+{ d: 0f, id: w:0 }
+{ d: 1f, id: w:1 }
+{ d: 2f, id: w:2 }
+{ d: 3f, id: w:3 }
+{ d: 4f, id: w:4 }
+{ d: 5f, id: w:5 }
+... 400 rows, digest e5e6bd07364bc8fb ...
+{ d: 394f, id: w:394 }
+{ d: 395f, id: w:395 }
+{ d: 396f, id: w:396 }
+{ d: 397f, id: w:397 }
+{ d: 398f, id: w:398 }
+{ d: 399f, id: w:399 }
+### SELECT id FROM w WHERE n >= 0 AND (title @1@ 'alpha' OR n = 3) ORDER BY id
+{ id: w:0 }
+{ id: w:2 }
+{ id: w:3 }
+{ id: w:4 }
+{ id: w:6 }
+{ id: w:8 }
+... 301 rows, digest 82b787adff941eda ...
+{ id: w:588 }
+{ id: w:590 }
+{ id: w:592 }
+{ id: w:594 }
+{ id: w:596 }
+{ id: w:598 }

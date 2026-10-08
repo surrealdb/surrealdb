@@ -8,16 +8,15 @@
 //!
 //! # Scalars are `LogicalExpr`, statements are operators
 //!
-//! The plan is built for the streaming engine and shares nothing with the
-//! legacy engine's input. Its scalars are [`LogicalExpr`]: a type that holds
+//! The plan is built for the engine. Its scalars are [`LogicalExpr`]: a type that holds
 //! scalars only, sharing the expression-free leaf types (parameters, table
 //! names, constants, kinds, operators) with the expression layer and
 //! mirroring everything that holds an expression. Every statement kind the
 //! engine runs is an operator — a `SELECT` pipeline, an [`LogicalOp::Eval`] of
 //! a bare expression, a [`LogicalOp::Sequence`] for a block, a
 //! [`LogicalOp::Let`], [`LogicalOp::Return`], [`LogicalOp::Foreach`],
-//! [`LogicalOp::Info`], [`LogicalOp::Sleep`] or [`LogicalOp::Explain`] — and
-//! the one way a statement appears inside a scalar is
+//! [`LogicalOp::Info`], [`LogicalOp::Ddl`], [`LogicalOp::Sleep`] or
+//! [`LogicalOp::Explain`] — and the one way a statement appears inside a scalar is
 //! [`LogicalExpr::Subquery`]. A block in scalar position is
 //! `Subquery(Sequence)`; a block as a statement is `Sequence`. One encoding.
 //!
@@ -146,8 +145,9 @@
 //! covers every expression the plan evaluates — and a plan one of those
 //! scalars holds is reached like any other.
 //!
-//! Write and schema statements have no operator here: [`lower`] reports them
-//! as [`NoLogicalForm`], and the executor runs them on the legacy engine.
+//! A schema statement is a [`LogicalOp::Ddl`], which carries the statement
+//! whole. Its clauses stay surface expressions and are not this layer's
+//! scalars, so no pass here reads or rewrites them.
 
 // Adding a `LogicalOp` variant must break every pass that has not stated its
 // position on it, which a wildcard arm would silently absorb.
@@ -177,14 +177,16 @@ pub use self::expr::{
 	LogicalRecurse, LogicalRecurseInstruction, LogicalRecursePath, OutputPath, OutputPathPart,
 	SourceRef,
 };
-pub use self::lower::{NoLogicalForm, is_value_literal, lower, lower_expr, lower_select};
+pub use self::lower::{
+	NoLogicalForm, is_value_literal, lower, lower_expr, lower_fields, lower_select,
+};
 pub use self::schema::{
 	ComputedBody, FieldPath, FieldSchema, FieldSegment, LogicalPermission, LogicalPermissionRef,
 	Openness, Schema,
 };
 use crate::expr::match_plan::MatchPlan;
 use crate::expr::with::With;
-use crate::expr::{Base, ExplainFormat, Kind, Param};
+use crate::expr::{Base, ExplainFormat, Idiom, Kind, Param};
 
 /// How an expression's own reads and writes are treated while it evaluates.
 ///
@@ -491,6 +493,10 @@ pub enum LogicalOp {
 	Match(LogicalMatch),
 	/// A statement in relational position; see [`LogicalSubquery`].
 	Subquery(LogicalSubquery),
+	/// A mutation; see [`LogicalWrite`].
+	Write(LogicalWrite),
+	/// A schema statement; see [`LogicalDdl`].
+	Ddl(LogicalDdl),
 	/// The concatenation of several inputs; see [`LogicalUnionAll`].
 	UnionAll(LogicalUnionAll),
 	/// Each left row paired with the right rows whose keys match; see
@@ -566,6 +572,11 @@ pub struct LogicalValues {
 	/// there is nothing for the clause to lock; the planner rejects the
 	/// statement wherever it appears.
 	pub for_update: bool,
+	/// Whether `expr` is an array written in `FROM`, which is a list of
+	/// sources: an element that evaluates to an array contributes its
+	/// elements. A value a pass substituted — a parameter's, a folded call's —
+	/// is one source, and is not written.
+	pub written: bool,
 }
 
 /// A GQL `MATCH` query, as the binding-table plan its lowering produced.
@@ -588,6 +599,339 @@ pub struct LogicalMatch {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalSubquery {
 	pub input: Box<LogicalOp>,
+}
+
+/// A mutation: `source` supplies what to write, and `statement`'s per-record
+/// pipeline writes it.
+///
+/// The per-record write order is deliberately *not* expressed here. It is not
+/// relational algebra: it is a fixed sequence whose positions carry security
+/// properties, so it belongs to the operator, which holds it as an ordered
+/// stage list. See `doc/adr/0001-streaming-write-path.md`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LogicalWrite {
+	/// Which mutation this is. Carried whole because the write operator
+	/// reads what the statement asked for — its form, its `ONLY`, its
+	/// `TIMEOUT`.
+	pub statement: LogicalWriteStatement,
+	/// What the mutation writes to.
+	pub source: LogicalWriteSource,
+	/// The data clause in logical form: `SET`, `CONTENT`, `MERGE` and the
+	/// rest, with every value an expression the rules can rewrite.
+	///
+	/// The statement carries the same clause as the surface form it was
+	/// written in. This is the one the engine compiles, so a rule that rewrites
+	/// it changes what the engine does.
+	pub data: Option<LogicalData>,
+	/// `INSERT … ON DUPLICATE KEY UPDATE`, in logical form.
+	pub duplicate_update: Option<LogicalData>,
+	/// The statement's `WHERE`, in logical form.
+	pub cond: Option<LogicalExpr>,
+}
+
+/// A mutation's data clause, with its expressions in logical form.
+///
+/// Mirrors [`crate::expr::Data`] arm for arm. The places an assignment writes
+/// to stay as written: a place is a location rather than a value, and what a
+/// path names is settled where the write is compiled.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LogicalData {
+	/// `SET a = 1, b += 2`, and `ON DUPLICATE KEY UPDATE`'s assignments.
+	Set(Vec<LogicalAssignment>),
+	/// `UNSET a, b`.
+	Unset(Vec<crate::expr::Idiom>),
+	/// `PATCH [ … ]`.
+	Patch(LogicalExpr),
+	/// `MERGE { … }`.
+	Merge(LogicalExpr),
+	/// `REPLACE { … }`.
+	Replace(LogicalExpr),
+	/// `CONTENT { … }`.
+	Content(LogicalExpr),
+	/// `INSERT INTO t { … }` — one row rather than a clause applied to one.
+	Single(LogicalExpr),
+	/// `INSERT INTO t (a, b) VALUES (…)` — one tuple per row.
+	Values(Vec<Vec<(crate::expr::Idiom, LogicalExpr)>>),
+}
+
+/// One `place = value` of a [`LogicalData::Set`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LogicalAssignment {
+	pub place: crate::expr::Idiom,
+	pub operator: crate::expr::AssignOperator,
+	pub value: LogicalExpr,
+}
+
+impl LogicalData {
+	/// Every value the clause evaluates, in the order it was written.
+	pub fn values(&self) -> Vec<&LogicalExpr> {
+		match self {
+			LogicalData::Set(assignments) => assignments.iter().map(|a| &a.value).collect(),
+			LogicalData::Unset(_) => vec![],
+			LogicalData::Patch(expr)
+			| LogicalData::Merge(expr)
+			| LogicalData::Replace(expr)
+			| LogicalData::Content(expr)
+			| LogicalData::Single(expr) => vec![expr],
+			LogicalData::Values(rows) => {
+				rows.iter().flat_map(|row| row.iter().map(|(_, value)| value)).collect()
+			}
+		}
+	}
+
+	/// [`Self::values`], to rewrite in place.
+	pub fn values_mut(&mut self) -> Vec<&mut LogicalExpr> {
+		match self {
+			LogicalData::Set(assignments) => assignments.iter_mut().map(|a| &mut a.value).collect(),
+			LogicalData::Unset(_) => vec![],
+			LogicalData::Patch(expr)
+			| LogicalData::Merge(expr)
+			| LogicalData::Replace(expr)
+			| LogicalData::Content(expr)
+			| LogicalData::Single(expr) => vec![expr],
+			LogicalData::Values(rows) => {
+				rows.iter_mut().flat_map(|row| row.iter_mut().map(|(_, value)| value)).collect()
+			}
+		}
+	}
+}
+
+/// Where a mutation's subjects come from.
+///
+/// The arms are not interchangeable, and the distinction is why this is an
+/// enum rather than a plan subtree in every case: a creating form's subject
+/// does not exist yet, so it must not be read. A reading source resolves a
+/// record id to its stored document and yields nothing when there is none,
+/// which for a target being created is always — the target would be silently
+/// dropped rather than written.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LogicalWriteSource {
+	/// The subjects the statement names, each evaluated to a value: a table to
+	/// generate an id in, a record id to write at, or — for `RELATE` — the
+	/// endpoints the edge joins. Nothing is read.
+	///
+	/// The list is per form: `CREATE` and `UPSERT` hold the targets they were
+	/// written with, in that order; `RELATE` holds exactly `[from, through,
+	/// to]`.
+	Targets(Vec<LogicalExpr>),
+	/// `INSERT`'s rows, which name one record each. Nothing is read: a row is
+	/// the record to write, not a claim about one that exists.
+	Inserts(LogicalInserts),
+	/// Records read from an ordinary plan subtree, for a form whose subjects
+	/// already exist. This is what lowering a mutation buys: `UPDATE t WHERE …`
+	/// inherits index selection, filter pushdown and the projection-layer
+	/// encoding from the read side rather than going through a separate
+	/// iterator.
+	Rows(Box<LogicalOp>),
+}
+
+/// `INSERT`'s subjects: the rows, and the table they land on.
+///
+/// `INSERT` is the one form whose subjects are spelled as its data. The rows
+/// are not a clause — nothing applies them to a subject the statement named
+/// elsewhere — so they are the source, and every row produces one record.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LogicalInserts {
+	/// The `INTO` table, evaluated once for the statement to a table name.
+	/// `None` where the statement names none, in which case each row names its
+	/// table through the record id it carries.
+	pub into: Option<LogicalExpr>,
+	/// The rows themselves.
+	pub rows: LogicalInsertRows,
+}
+
+/// How an `INSERT` spells its rows.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LogicalInsertRows {
+	/// `INSERT INTO t (a, b) VALUES (1, 2), (3, 4)` — one tuple per row. Each
+	/// tuple builds a fresh empty object by setting every expression into the
+	/// path paired with it, so the paths are places rather than field names:
+	/// `(a.b)` writes at `a.b`.
+	Tuples(Vec<Vec<(Idiom, LogicalExpr)>>),
+	/// `INSERT INTO t { … }`, `INSERT INTO t [ … ]`, `INSERT INTO t (SELECT …)`
+	/// — one expression, evaluated once for the statement. An object is one
+	/// row and an array is one row per element.
+	Value(LogicalExpr),
+}
+
+/// The statement a [`LogicalWrite`] performs.
+///
+/// One variant per statement form. The enum exists rather than a single boxed
+/// statement so that a pass matching on the form states which forms it handles,
+/// and so that adding a form is a compile error everywhere it matters.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LogicalWriteStatement {
+	Create(Box<crate::expr::statements::CreateStatement>),
+	Update(Box<crate::expr::statements::UpdateStatement>),
+	Upsert(Box<crate::expr::statements::UpsertStatement>),
+	Delete(Box<crate::expr::statements::DeleteStatement>),
+	Insert(Box<crate::expr::statements::InsertStatement>),
+	Relate(Box<crate::expr::statements::RelateStatement>),
+}
+
+impl LogicalWriteStatement {
+	/// The statement kind, for `EXPLAIN` and diagnostics.
+	pub fn kind(&self) -> &'static str {
+		match self {
+			LogicalWriteStatement::Create(_) => "CREATE",
+			LogicalWriteStatement::Update(_) => "UPDATE",
+			LogicalWriteStatement::Upsert(_) => "UPSERT",
+			LogicalWriteStatement::Delete(_) => "DELETE",
+			LogicalWriteStatement::Insert(_) => "INSERT",
+			LogicalWriteStatement::Relate(_) => "RELATE",
+		}
+	}
+
+	/// The statement's `RETURN` clause, which the write operator dispatches on.
+	pub fn output(&self) -> Option<&crate::expr::output::Output> {
+		match self {
+			LogicalWriteStatement::Create(stmt) => stmt.output.as_ref(),
+			LogicalWriteStatement::Update(stmt) => stmt.output.as_ref(),
+			LogicalWriteStatement::Upsert(stmt) => stmt.output.as_ref(),
+			LogicalWriteStatement::Delete(stmt) => stmt.output.as_ref(),
+			LogicalWriteStatement::Insert(stmt) => stmt.output.as_ref(),
+			LogicalWriteStatement::Relate(stmt) => stmt.output.as_ref(),
+		}
+	}
+
+	/// The statement's `WHERE`, which the per-record order evaluates in its own
+	/// place rather than as a filter beneath the operator — the table's write
+	/// permission is judged first, so a condition with side effects runs only
+	/// for records the caller may write.
+	///
+	/// The creating forms have none: `CREATE`, `INSERT` and `RELATE` name their
+	/// subjects rather than selecting them.
+	pub fn cond(&self) -> Option<&crate::expr::Expr> {
+		match self {
+			LogicalWriteStatement::Update(stmt) => stmt.cond.as_ref().map(|cond| &cond.0),
+			LogicalWriteStatement::Upsert(stmt) => stmt.cond.as_ref().map(|cond| &cond.0),
+			LogicalWriteStatement::Delete(stmt) => stmt.cond.as_ref().map(|cond| &cond.0),
+			LogicalWriteStatement::Create(_)
+			| LogicalWriteStatement::Insert(_)
+			| LogicalWriteStatement::Relate(_) => None,
+		}
+	}
+
+	/// The statement's data clause.
+	///
+	/// `INSERT`'s is deliberately absent: its `data` produces the statement's
+	/// *subjects* — the rows it writes — rather than a clause applied to one,
+	/// so it is carried by [`LogicalWriteSource::Inserts`] and not here.
+	/// `DELETE` has none at all.
+	pub fn data(&self) -> Option<&crate::expr::Data> {
+		match self {
+			LogicalWriteStatement::Create(stmt) => stmt.data.as_ref(),
+			LogicalWriteStatement::Update(stmt) => stmt.data.as_ref(),
+			LogicalWriteStatement::Upsert(stmt) => stmt.data.as_ref(),
+			LogicalWriteStatement::Relate(stmt) => stmt.data.as_ref(),
+			LogicalWriteStatement::Delete(_) | LogicalWriteStatement::Insert(_) => None,
+		}
+	}
+
+	/// `INSERT … ON DUPLICATE KEY UPDATE`, the clause a conflicting row is
+	/// re-run as an update with. No other form has one.
+	pub fn duplicate_update(&self) -> Option<&crate::expr::Data> {
+		match self {
+			LogicalWriteStatement::Insert(stmt) => stmt.update.as_ref(),
+			LogicalWriteStatement::Create(_)
+			| LogicalWriteStatement::Update(_)
+			| LogicalWriteStatement::Upsert(_)
+			| LogicalWriteStatement::Delete(_)
+			| LogicalWriteStatement::Relate(_) => None,
+		}
+	}
+
+	/// Whether the statement asked for a single record with `ONLY`.
+	///
+	/// `INSERT` never does: the grammar gives it no `ONLY` keyword, so the
+	/// statement carries no flag to read and the answer is fixed.
+	pub fn only(&self) -> bool {
+		match self {
+			LogicalWriteStatement::Create(stmt) => stmt.only,
+			LogicalWriteStatement::Update(stmt) => stmt.only,
+			LogicalWriteStatement::Upsert(stmt) => stmt.only,
+			LogicalWriteStatement::Delete(stmt) => stmt.only,
+			LogicalWriteStatement::Relate(stmt) => stmt.only,
+			LogicalWriteStatement::Insert(_) => false,
+		}
+	}
+}
+
+/// A schema statement: the node that writes the catalog.
+///
+/// The statement is carried whole and unmirrored, as
+/// [`LogicalWrite`]'s is. What a schema statement names — the thing being
+/// defined, the table it hangs off, the field paths an index covers — is
+/// written as an expression, but those expressions are the statement's
+/// clauses rather than this node's scalars: they are resolved where the
+/// catalog write is formed, against the row the statement runs under.
+///
+/// The node is therefore a leaf with no inputs and no scalars, and two
+/// consequences follow from that. An optimiser rule that reaches expressions
+/// through [`LogicalOp::scalars`] sees none here and leaves the statement
+/// alone. And a mutation written into one of those clauses — `DEFINE PARAM $p
+/// VALUE (CREATE t)`, a `DEFINE EVENT … THEN { … }` body — is invisible to a
+/// walk over scalars and children, so a pre-flight that reports the writes a
+/// plan holds does not name it. Nothing is lost by that: those writes are
+/// never planned, they are performed by the same evaluator that performs the
+/// catalog write. The plan still counts as writing, because
+/// [`LogicalOp::read_only`] answers `false` for this node whatever it holds.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LogicalDdl {
+	/// Which schema statement this is, carried whole because the catalog
+	/// write is formed from its clauses directly.
+	pub statement: LogicalDdlStatement,
+}
+
+/// The statement a [`LogicalDdl`] performs.
+///
+/// One variant per statement form, for the same reason
+/// [`LogicalWriteStatement`] has one: a pass matching on the form states which
+/// forms it handles, and adding a form is a compile error everywhere it
+/// matters.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LogicalDdlStatement {
+	Define(Box<crate::expr::statements::DefineStatement>),
+	Remove(Box<crate::expr::statements::RemoveStatement>),
+	Alter(Box<crate::expr::statements::AlterStatement>),
+	Rebuild(Box<crate::expr::statements::RebuildStatement>),
+}
+
+impl LogicalDdlStatement {
+	/// The statement kind, for `EXPLAIN` and diagnostics.
+	pub fn kind(&self) -> &'static str {
+		match self {
+			LogicalDdlStatement::Define(_) => "DEFINE",
+			LogicalDdlStatement::Remove(_) => "REMOVE",
+			LogicalDdlStatement::Alter(_) => "ALTER",
+			LogicalDdlStatement::Rebuild(_) => "REBUILD",
+		}
+	}
+}
+
+/// The statement as an expression, which is the form the evaluator that owns
+/// the catalog writes takes.
+impl From<LogicalDdlStatement> for crate::expr::Expr {
+	fn from(statement: LogicalDdlStatement) -> Self {
+		match statement {
+			LogicalDdlStatement::Define(stmt) => crate::expr::Expr::Define(stmt),
+			LogicalDdlStatement::Remove(stmt) => crate::expr::Expr::Remove(stmt),
+			LogicalDdlStatement::Alter(stmt) => crate::expr::Expr::Alter(stmt),
+			LogicalDdlStatement::Rebuild(stmt) => crate::expr::Expr::Rebuild(stmt),
+		}
+	}
+}
+
+/// Renders as the statement itself.
+///
+/// The statement is held in its executed form, whose rendering is what every
+/// surface that prints a schema statement produces — `DEFINE USER` prints the
+/// derived `PASSHASH` rather than the `PASSWORD` it was written with, because
+/// the plaintext is gone by the time the statement is carried here.
+impl ToSql for LogicalDdlStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		crate::expr::Expr::from(self.clone()).fmt_sql(f, fmt);
+	}
 }
 
 /// The concatenation of several inputs, as in `SELECT … FROM a, b`. Rows
@@ -790,6 +1134,26 @@ pub struct LogicalPermissionFilter {
 	pub input: Box<LogicalOp>,
 	pub predicate: LogicalExpr,
 	pub auth: Option<AuthLimit>,
+	/// Which stored clause the predicate is, which decides the frame it is
+	/// evaluated in. See [`GuardKind`].
+	pub guard: GuardKind,
+}
+
+/// Which stored `PERMISSIONS` clause a guard is, which decides the frame its
+/// predicate is evaluated in.
+///
+/// A read guard is evaluated write-refusing and a write guard is not: the
+/// line is drawn by giving a `SELECT` clause
+/// `Options::new_for_permission_predicate` and a create/update/delete clause
+/// `Options::new_for_mutable_permission_predicate`. A write inside a write
+/// guard is therefore performed rather than refused, which is not a nicety —
+/// a guard that records an access attempt is written that way.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum GuardKind {
+	/// `PERMISSIONS FOR select`, on a table or a field.
+	Read,
+	/// `PERMISSIONS FOR create`, `update` or `delete`, on a table or a field.
+	Write,
 }
 
 /// `SPLIT ON`: expands each row into one row per element of each
@@ -1006,6 +1370,8 @@ op_kinds!(
 	Values,
 	Match,
 	Subquery,
+	Write,
+	Ddl,
 	UnionAll,
 	Join,
 	Filter,
@@ -1038,6 +1404,8 @@ impl LogicalOp {
 			LogicalOp::Values(_) => "Values",
 			LogicalOp::Match(_) => "Match",
 			LogicalOp::Subquery(_) => "Subquery",
+			LogicalOp::Write(_) => "Write",
+			LogicalOp::Ddl(_) => "Ddl",
 			LogicalOp::UnionAll(_) => "UnionAll",
 			LogicalOp::Join(_) => "Join",
 			LogicalOp::Filter(_) => "Filter",
@@ -1071,7 +1439,16 @@ impl LogicalOp {
 			| LogicalOp::Match(_)
 			| LogicalOp::Eval(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => &[],
+			LogicalOp::Write(LogicalWrite {
+				source: LogicalWriteSource::Rows(input),
+				..
+			}) => std::slice::from_ref(input),
+			LogicalOp::Write(LogicalWrite {
+				source: LogicalWriteSource::Targets(_) | LogicalWriteSource::Inserts(_),
+				..
+			}) => &[],
 			LogicalOp::UnionAll(LogicalUnionAll {
 				inputs,
 			}) => inputs,
@@ -1159,7 +1536,16 @@ impl LogicalOp {
 			| LogicalOp::Match(_)
 			| LogicalOp::Eval(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => &mut [],
+			LogicalOp::Write(LogicalWrite {
+				source: LogicalWriteSource::Rows(input),
+				..
+			}) => std::slice::from_mut(input),
+			LogicalOp::Write(LogicalWrite {
+				source: LogicalWriteSource::Targets(_) | LogicalWriteSource::Inserts(_),
+				..
+			}) => &mut [],
 			LogicalOp::UnionAll(LogicalUnionAll {
 				inputs,
 			}) => inputs,
@@ -1255,7 +1641,28 @@ impl LogicalOp {
 			| LogicalOp::Match(_)
 			| LogicalOp::Eval(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_)) => leaf,
+			LogicalOp::Write(LogicalWrite {
+				statement,
+				source,
+				data,
+				duplicate_update,
+				cond,
+			}) => LogicalOp::Write(LogicalWrite {
+				statement,
+				data,
+				duplicate_update,
+				cond,
+				source: match source {
+					LogicalWriteSource::Rows(input) => {
+						LogicalWriteSource::Rows(Box::new(f(*input)?))
+					}
+					leaf @ (LogicalWriteSource::Targets(_) | LogicalWriteSource::Inserts(_)) => {
+						leaf
+					}
+				},
+			}),
 			LogicalOp::UnionAll(LogicalUnionAll {
 				inputs,
 			}) => LogicalOp::UnionAll(LogicalUnionAll {
@@ -1389,6 +1796,53 @@ impl LogicalOp {
 	/// grouping keys, columns, ordering and paging — in execution order.
 	pub fn for_each_scalar<'a>(&'a self, out: &mut dyn FnMut(&'a LogicalExpr)) {
 		match self {
+			// Everything the write evaluates: what its source names — a
+			// target, an `INSERT`'s `INTO` and rows — and what its clauses
+			// hold. The clauses are here so a rule reaches them: the
+			// statement beside them keeps the surface form the per-record
+			// engine is given, and is not a scalar of this node.
+			LogicalOp::Write(LogicalWrite {
+				source,
+				data,
+				duplicate_update,
+				cond,
+				..
+			}) => {
+				match source {
+					LogicalWriteSource::Targets(targets) => {
+						for target in targets {
+							out(target);
+						}
+					}
+					LogicalWriteSource::Inserts(inserts) => {
+						if let Some(into) = &inserts.into {
+							out(into);
+						}
+						match &inserts.rows {
+							LogicalInsertRows::Tuples(tuples) => {
+								for tuple in tuples {
+									for (_, value) in tuple {
+										out(value);
+									}
+								}
+							}
+							LogicalInsertRows::Value(expr) => out(expr),
+						}
+					}
+					LogicalWriteSource::Rows(_) => {}
+				}
+				for clause in [data, duplicate_update] {
+					for value in clause.iter().flat_map(LogicalData::values) {
+						out(value);
+					}
+				}
+				if let Some(cond) = cond {
+					out(cond);
+				}
+			}
+			// A schema statement's expressions are its clauses, resolved
+			// where the catalog write is formed, so the node itself owns none.
+			LogicalOp::Ddl(_) => {}
 			LogicalOp::Source(LogicalSource {
 				source,
 				..
@@ -1522,6 +1976,37 @@ impl LogicalOp {
 	pub fn scalars_mut(&mut self) -> Vec<&mut LogicalExpr> {
 		let mut out = Vec::new();
 		match self {
+			// The mirror of the read walk: the source's own expressions and
+			// the clauses' values, so a rule rewrites a data clause as it
+			// rewrites anything else.
+			LogicalOp::Write(LogicalWrite {
+				source,
+				data,
+				duplicate_update,
+				cond,
+				..
+			}) => {
+				match source {
+					LogicalWriteSource::Targets(targets) => out.extend(targets.iter_mut()),
+					LogicalWriteSource::Inserts(inserts) => {
+						out.extend(inserts.into.iter_mut());
+						match &mut inserts.rows {
+							LogicalInsertRows::Tuples(tuples) => out.extend(
+								tuples
+									.iter_mut()
+									.flat_map(|tuple| tuple.iter_mut().map(|(_, v)| v)),
+							),
+							LogicalInsertRows::Value(expr) => out.push(expr),
+						}
+					}
+					LogicalWriteSource::Rows(_) => {}
+				}
+				for clause in [data, duplicate_update] {
+					out.extend(clause.iter_mut().flat_map(LogicalData::values_mut));
+				}
+				out.extend(cond.iter_mut());
+			}
+			LogicalOp::Ddl(_) => {}
 			LogicalOp::Source(LogicalSource {
 				source,
 				..
@@ -1763,6 +2248,12 @@ impl LogicalOp {
 	/// [`Self::read_only`] for this node alone, inputs excluded.
 	fn node_read_only(&self) -> bool {
 		match self {
+			// A mutation writes by construction, and so does a schema
+			// statement. Nothing about an input or a statement can make
+			// either read-only, so this is the one arm that consults neither
+			// — and the one a node owning no scalars must be in, since the
+			// scalar arm below answers `true` for a node that has none.
+			LogicalOp::Write(_) | LogicalOp::Ddl(_) => false,
 			LogicalOp::Source(LogicalSource {
 				source,
 				for_update,
@@ -1771,6 +2262,7 @@ impl LogicalOp {
 			LogicalOp::Values(LogicalValues {
 				expr,
 				for_update,
+				..
 			}) => !*for_update && expr.read_only(),
 			// A write stage targets bindings rather than expressions, so the
 			// plan's scalars do not reveal it.
@@ -1852,6 +2344,11 @@ impl LogicalOp {
 	/// and a statement's result is not a row set.
 	pub fn schema(&self) -> Schema {
 		match self {
+			// The records a mutation emits are the target table's, not its
+			// input's, and this node resolves no table. An open schema is the
+			// honest answer rather than a placeholder: nothing above may treat
+			// a mutation's output as having declared columns.
+			LogicalOp::Write(_) => Schema::open(),
 			LogicalOp::Source(LogicalSource {
 				schema,
 				..
@@ -1882,6 +2379,7 @@ impl LogicalOp {
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => Schema::open(),
 			LogicalOp::Subquery(LogicalSubquery {
 				input,
@@ -2005,9 +2503,9 @@ impl LogicalOp {
 
 	/// Whether a statement in scalar position evaluates its expressions against
 	/// the row of the statement that holds it. A block, `RETURN`, `LET`, `FOR`,
-	/// `INFO`, `SLEEP` or `EXPLAIN` does — the legacy engine computes each with
-	/// the enclosing document — while a relational plan or a GQL `MATCH` supplies
-	/// its own rows.
+	/// `INFO`, a schema statement, `SLEEP` or `EXPLAIN` does — each is
+	/// computed with the enclosing document — while a relational plan or a
+	/// GQL `MATCH` supplies its own rows.
 	pub fn inherits_row(&self) -> bool {
 		match self {
 			LogicalOp::Eval(_)
@@ -2016,12 +2514,14 @@ impl LogicalOp {
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_)
 			| LogicalOp::Explain(_) => true,
 			LogicalOp::Source(_)
 			| LogicalOp::Values(_)
 			| LogicalOp::Match(_)
 			| LogicalOp::Subquery(_)
+			| LogicalOp::Write(_)
 			| LogicalOp::UnionAll(_)
 			| LogicalOp::Join(_)
 			| LogicalOp::Filter(_)
@@ -2057,6 +2557,7 @@ impl LogicalOp {
 			| LogicalOp::Values(_)
 			| LogicalOp::Match(_)
 			| LogicalOp::Subquery(_)
+			| LogicalOp::Write(_)
 			| LogicalOp::UnionAll(_)
 			| LogicalOp::Join(_)
 			| LogicalOp::Filter(_)
@@ -2077,6 +2578,7 @@ impl LogicalOp {
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
 			| LogicalOp::Info(_)
+			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => false,
 		}
 	}
@@ -2085,6 +2587,16 @@ impl LogicalOp {
 	/// entry per attribute of a rendered node.
 	fn attrs(&self) -> Vec<String> {
 		match self {
+			LogicalOp::Write(LogicalWrite {
+				statement,
+				..
+			}) => {
+				let mut out = vec![statement.kind().to_string()];
+				if statement.only() {
+					out.push("ONLY".to_string());
+				}
+				out
+			}
 			LogicalOp::Source(LogicalSource {
 				source,
 				with,
@@ -2103,6 +2615,7 @@ impl LogicalOp {
 			LogicalOp::Values(LogicalValues {
 				expr,
 				for_update,
+				..
 			}) => {
 				let mut out = vec![expr.to_sql()];
 				if *for_update {
@@ -2272,6 +2785,11 @@ impl LogicalOp {
 				..
 			}) => vec![format!("{} IN {}", param.to_sql(), range.to_sql())],
 			LogicalOp::Info(info) => vec![info.to_sql()],
+			// The kind alone. A schema statement's text can name a secret the
+			// catalog holds — an access method's signing key, a user's
+			// password hash — and a plan renders wherever one is printed,
+			// `EXPLAIN` and diagnostics alike.
+			LogicalOp::Ddl(ddl) => vec![ddl.statement.kind().to_string()],
 			LogicalOp::Sleep(LogicalSleep {
 				duration,
 			}) => vec![duration.to_sql()],
@@ -2332,6 +2850,7 @@ fn leaf_table(mut op: &LogicalOp) -> Option<&TableName> {
 					| LogicalOp::Values(_)
 					| LogicalOp::Match(_)
 					| LogicalOp::Subquery(_)
+					| LogicalOp::Write(_)
 					| LogicalOp::UnionAll(_)
 					| LogicalOp::Join(_)
 					| LogicalOp::Filter(_)
@@ -2353,6 +2872,7 @@ fn leaf_table(mut op: &LogicalOp) -> Option<&TableName> {
 					| LogicalOp::Return(_)
 					| LogicalOp::Foreach(_)
 					| LogicalOp::Info(_)
+					| LogicalOp::Ddl(_)
 					| LogicalOp::Sleep(_) => None,
 				};
 			}
@@ -2683,6 +3203,7 @@ mod tests {
 			input: Box::new(source("t")),
 			predicate: expr("published = true"),
 			auth: None,
+			guard: GuardKind::Read,
 		});
 		// The computed field: a typed column in the computed frame, under
 		// the field's own name.
@@ -2724,6 +3245,25 @@ mod tests {
 		})
 	}
 
+	/// A schema statement node. Which statement it carries is immaterial to
+	/// the traversal and rendering fixtures: the node is a leaf with no
+	/// inputs and no scalars whichever form it holds, and it renders as its
+	/// kind alone.
+	fn ddl_op() -> LogicalOp {
+		LogicalOp::Ddl(LogicalDdl {
+			statement: LogicalDdlStatement::Rebuild(Box::new(
+				crate::expr::statements::RebuildStatement::Index(
+					crate::expr::statements::rebuild::RebuildIndexStatement {
+						name: "i".into(),
+						table: TableName::from("t"),
+						if_exists: false,
+						concurrently: false,
+					},
+				),
+			)),
+		})
+	}
+
 	/// One node of every variant, each over a single `Source` leaf where it
 	/// has an input, so traversal tests can cover the whole enum.
 	fn one_of_each() -> Vec<LogicalOp> {
@@ -2733,9 +3273,17 @@ mod tests {
 			LogicalOp::Values(LogicalValues {
 				expr: expr("[1, 2]"),
 				for_update: false,
+				written: false,
 			}),
 			LogicalOp::Subquery(LogicalSubquery {
 				input: leaf(),
+			}),
+			LogicalOp::Write(LogicalWrite {
+				statement: LogicalWriteStatement::Create(Box::default()),
+				source: LogicalWriteSource::Targets(vec![expr("person")]),
+				data: None,
+				duplicate_update: None,
+				cond: None,
 			}),
 			LogicalOp::UnionAll(LogicalUnionAll {
 				inputs: vec![source("a"), source("b")],
@@ -2757,6 +3305,7 @@ mod tests {
 				input: leaf(),
 				predicate: expr("published = true"),
 				auth: Some(root_limit()),
+				guard: GuardKind::Read,
 			}),
 			LogicalOp::Split(LogicalSplit {
 				input: leaf(),
@@ -2832,6 +3381,7 @@ mod tests {
 			LogicalOp::Sleep(LogicalSleep {
 				duration: expr("1ms"),
 			}),
+			ddl_op(),
 		]
 	}
 
@@ -2879,6 +3429,7 @@ mod tests {
 			LogicalOp::Values(LogicalValues {
 				expr: expr("[1, 2]"),
 				for_update: false,
+				written: false,
 			})
 			.read_only()
 		);
@@ -2886,6 +3437,7 @@ mod tests {
 			!LogicalOp::Values(LogicalValues {
 				expr: expr("fn::write()"),
 				for_update: false,
+				written: false,
 			})
 			.read_only()
 		);
@@ -3070,6 +3622,64 @@ Project[a, c, secret]
 		}
 	}
 
+	/// A mutation lowers like any other statement, so `engine_for` can offer
+	/// it to the engine and the planner can report why it declines.
+	#[test]
+	fn a_create_lowers_to_a_write() {
+		let op = super::lower(parse_expr("CREATE person SET name = 'x'")).expect("should lower");
+		let LogicalOp::Write(write) = &op else {
+			panic!("expected a Write, got {}", op.name());
+		};
+		assert_eq!(write.statement.kind(), "CREATE");
+		assert!(!write.statement.only());
+		// Targets, not rows: a creating form's subject does not exist yet, so
+		// nothing may read it.
+		let LogicalWriteSource::Targets(targets) = &write.source else {
+			panic!("a creating statement must not take a reading source")
+		};
+		assert_eq!(targets.len(), 1);
+	}
+
+	/// Each target is kept separately, and they are the node's own scalars, so
+	/// a pass that rewrites expressions reaches them. They are not a plan
+	/// subtree: a creating form's target must not be read.
+	#[test]
+	fn create_keeps_one_target_per_thing_written() {
+		let many = super::lower(parse_expr("CREATE person:a, person:b")).expect("should lower");
+		let LogicalOp::Write(write) = &many else {
+			panic!("expected a Write")
+		};
+		let LogicalWriteSource::Targets(targets) = &write.source else {
+			panic!("expected targets")
+		};
+		assert_eq!(targets.len(), 2);
+		assert_eq!(many.scalars().len(), 2, "the targets are the node's own scalars");
+		assert!(many.children().is_empty(), "targets are not a plan subtree");
+	}
+
+	/// The one arm of `node_read_only` that consults neither its source nor
+	/// its statement. A mutation writes by construction, and `read_only()`
+	/// selects the transaction, so a `Write` that answered otherwise would put
+	/// a write on a read-only transaction.
+	#[test]
+	fn a_write_is_never_read_only() {
+		let op = super::lower(parse_expr("CREATE person")).expect("should lower");
+		assert!(!op.read_only());
+
+		// Not inherited: there is no subtree, and the target expression itself
+		// reads nothing.
+		assert!(op.children().is_empty());
+		assert!(op.scalars().iter().all(|target| target.read_only()));
+	}
+
+	/// A mutation emits the target table's records, which this node does not
+	/// resolve, so nothing above it may assume declared columns.
+	#[test]
+	fn a_write_declares_no_columns() {
+		let op = super::lower(parse_expr("CREATE person")).expect("should lower");
+		assert!(op.schema().is_open());
+	}
+
 	#[test]
 	fn a_scalar_subquery_renders_as_a_nested_plan() {
 		let plan = LogicalOp::Filter(LogicalFilter {
@@ -3193,6 +3803,7 @@ Join[SEMI AS _join0    ON a = _join0.b    WHERE _join0.n > m    @permission]
 			Ok::<_, Infallible>(LogicalOp::Values(LogicalValues {
 				expr: expr("[]"),
 				for_update: false,
+				written: false,
 			}))
 		});
 		assert_eq!(seen, ["Source[a]", "Source[b]"]);
@@ -3362,6 +3973,7 @@ Join[SEMI AS _join0    ON a = _join0.b    WHERE _join0.n > m    @permission]
 				LogicalOp::Values(LogicalValues {
 					expr: expr("[$p, $p]"),
 					for_update: false,
+					written: false,
 				}),
 				2,
 			),
@@ -3377,6 +3989,7 @@ Join[SEMI AS _join0    ON a = _join0.b    WHERE _join0.n > m    @permission]
 					input: leaf(),
 					predicate: expr("owner = $p"),
 					auth: None,
+					guard: GuardKind::Read,
 				}),
 				1,
 			),
@@ -3665,6 +4278,7 @@ Join[SEMI AS _join0    ON a = _join0.b    WHERE _join0.n > m    @permission]
 					table: expr("t"),
 					structure: false,
 				})),
+				ddl_op(),
 				LogicalOp::Return(LogicalReturn {
 					what: Box::new(LogicalOp::Eval(LogicalEval {
 						expr: expr("$x"),
@@ -3683,6 +4297,7 @@ Sequence
       Eval[IF $i > 1 THEN BREAK END]
   Info[INFO FOR TABLE t VERSION d'2024-01-01T00:00:00Z' STRUCTURE]
   Info[INFO FOR INDEX i ON t]
+  Ddl[REBUILD]
   Return[FETCH f]
     Eval[$x]";
 		assert_eq!(plan.to_string(), expected, "\nrendered:\n{plan}\n");

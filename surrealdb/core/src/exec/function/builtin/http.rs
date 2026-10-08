@@ -1,4 +1,4 @@
-//! HTTP functions for the streaming executor.
+//! HTTP functions for the engine.
 //!
 //! These provide HTTP client functionality (GET, POST, PUT, PATCH, DELETE, HEAD).
 //! Note: HTTP functions require the "http" feature to be enabled.

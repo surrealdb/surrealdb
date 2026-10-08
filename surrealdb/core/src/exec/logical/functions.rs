@@ -10,6 +10,8 @@
 //!
 //! - the caller's capabilities allow the call — a denied call stays in place, so it fails where it
 //!   would have;
+//! - no schema statement of the statement defines, removes or alters the function: a call reached
+//!   after one reads the definition it leaves, which is not the one read here;
 //! - the function's `PERMISSIONS` clause is `FULL`, so no caller is refused;
 //! - the function's `AUTH LIMIT` does not narrow the caller: limiting the caller's authority to it
 //!   yields the caller's authority unchanged. Without a principal at bind time only a function
@@ -95,15 +97,18 @@ impl Functions {
 		bx: &BindContext<'_>,
 		caller: Option<&Caller>,
 	) -> Self {
-		if reads_versioned_state(op) {
+		if !bx.inlines_definitions || bx.versioned || reads_versioned_state(op) {
 			return Self::none();
 		}
 		let (Some(txn), Some((ns, db))) = (&bx.txn, bx.ns_db) else {
 			return Self::none();
 		};
-		let names = called_functions(op);
+		let mut names = called_functions(op);
 		if names.is_empty() {
 			return Self::none();
+		}
+		for written in written_functions(op) {
+			names.remove(&written);
 		}
 		let cache = bx.ctx.get_cache();
 		let capabilities = bx.ctx.get_capabilities();
@@ -163,6 +168,45 @@ fn called_functions(op: &LogicalOp) -> HashSet<String> {
 			});
 			Ok::<_, std::convert::Infallible>(())
 		});
+	});
+	names
+}
+
+/// Every user-defined function a schema statement in `op` defines, removes or
+/// alters, at any depth, without the `fn::` prefix. A call the statement
+/// makes after one of them runs reaches the definition it leaves, which is
+/// not the one read here, so its body is withheld: the call stays in place
+/// and is bound where it runs.
+fn written_functions(op: &LogicalOp) -> HashSet<String> {
+	use crate::expr::logical::LogicalDdlStatement;
+	use crate::expr::statements::{AlterStatement, DefineStatement, RemoveStatement};
+	let mut names = HashSet::new();
+	visit_deep(op, &mut |node| {
+		let LogicalOp::Ddl(ddl) = node else {
+			return;
+		};
+		let name = match &ddl.statement {
+			LogicalDdlStatement::Define(define) => {
+				let DefineStatement::Function(stmt) = define.as_ref() else {
+					return;
+				};
+				stmt.name.as_str()
+			}
+			LogicalDdlStatement::Remove(remove) => {
+				let RemoveStatement::Function(stmt) = remove.as_ref() else {
+					return;
+				};
+				stmt.name.as_str()
+			}
+			LogicalDdlStatement::Alter(alter) => {
+				let AlterStatement::Function(stmt) = alter.as_ref() else {
+					return;
+				};
+				stmt.name.as_str()
+			}
+			LogicalDdlStatement::Rebuild(_) => return,
+		};
+		names.insert(name.to_owned());
 	});
 	names
 }
@@ -259,6 +303,7 @@ fn body_is_inlinable(
 		| LogicalExpr::Object(_)
 		| LogicalExpr::RecordId(_)
 		| LogicalExpr::Table(_)
+		| LogicalExpr::Mock(_)
 		| LogicalExpr::Constant(_)
 		| LogicalExpr::Access {
 			..
@@ -426,6 +471,32 @@ mod tests {
 		assert_eq!(
 			gathered(&fixture, &record_user(), "SELECT fn::double(a) FROM t").await,
 			["double"]
+		);
+	}
+
+	#[tokio::test]
+	async fn a_function_the_statement_redefines_is_withheld() {
+		let fixture = Fixture::new(
+			"DEFINE TABLE t SCHEMALESS;
+			 DEFINE FUNCTION fn::double($x: int) { RETURN $x * 2; };
+			 DEFINE FUNCTION fn::bare($x: int) { $x + 1 };",
+		)
+		.await;
+		for sql in [
+			"{ DEFINE FUNCTION OVERWRITE fn::double($x: int) { RETURN $x * 3; }; RETURN [fn::double(1), fn::bare(1)] }",
+			"{ IF true { REMOVE FUNCTION fn::double }; RETURN [fn::double(1), fn::bare(1)] }",
+			"{ FOR $i IN 0..2 { ALTER FUNCTION fn::double DROP COMMENT }; RETURN [fn::double(1), fn::bare(1)] }",
+		] {
+			assert_eq!(gathered(&fixture, &owner(), sql).await, ["bare"], "`{sql}`");
+		}
+		assert_eq!(
+			gathered(
+				&fixture,
+				&owner(),
+				"{ DEFINE FUNCTION fn::other() { 1 }; RETURN [fn::double(1), fn::bare(1)] }"
+			)
+			.await,
+			["bare", "double"]
 		);
 	}
 }

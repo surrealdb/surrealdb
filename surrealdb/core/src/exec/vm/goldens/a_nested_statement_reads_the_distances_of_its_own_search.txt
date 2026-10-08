@@ -1,0 +1,13 @@
+### SELECT id, vector::distance::knn() AS d, (SELECT VALUE vector::distance::knn() FROM open WHERE emb <|2, 40|> [20.25, 0.0, 0.0] ORDER BY id) AS inner FROM open WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id
+{ d: 0f, id: open:1, inner: [0.25f, 0.75f] }
+{ d: 1f, id: open:2, inner: [0.25f, 0.75f] }
+{ d: 2f, id: open:3, inner: [0.25f, 0.75f] }
+### SELECT id, search::score(1) AS s, (SELECT VALUE search::score(1) FROM open WHERE body @1@ 'dog' ORDER BY id LIMIT 2) AS inner FROM open WHERE title @1@ 'alpha' ORDER BY id
+{ id: open:3, inner: [0f, 0f], s: 0.6632941961288452f }
+{ id: open:6, inner: [0f, 0f], s: 0.6632941961288452f }
+{ id: open:9, inner: [0f, 0f], s: 0.6632941961288452f }
+{ id: open:12, inner: [0f, 0f], s: 0.6632941961288452f }
+{ id: open:15, inner: [0f, 0f], s: 0.6632941961288452f }
+{ id: open:18, inner: [0f, 0f], s: 0.6632941961288452f }
+{ id: open:21, inner: [0f, 0f], s: 0.6632941961288452f }
+{ id: open:24, inner: [0f, 0f], s: 0.6632941961288452f }

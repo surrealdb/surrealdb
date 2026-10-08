@@ -2,11 +2,11 @@
 //! `COMPUTED` field (GHSA-f6h4-5xf2-86q9).
 //!
 //! A computed field is stripped before storage, so the record a write gate is
-//! evaluated against carries `NONE` for it. A deny-intended clause such as
-//! `WHERE blocked != true` was therefore satisfied by `NONE != true` and let
-//! every caller through. The gate now materialises the computed fields its
-//! predicate reads — on a scratch copy, so the derived values never reach
-//! storage — and does so for every write pipeline, not only create/update/delete.
+//! evaluated against carries no value for it; read as `NONE`, a deny-intended
+//! clause such as `WHERE blocked != true` lets every caller through. The gate
+//! materialises the computed fields its predicate reads, each after the
+//! computed fields it reads in turn, on a scratch copy — the derived values
+//! never reach storage — on every write pipeline, not only create/update/delete.
 
 use std::sync::Arc;
 
@@ -143,6 +143,66 @@ async fn write_gate_computed_field_enforced_across_pipelines() -> Result<()> {
 	let edges =
 		ds.execute("SELECT VALUE id FROM edge", &owner, None).await?.remove(0).output()?.to_sql();
 	assert_eq!(edges, "[]", "a rejected RELATE must not persist an edge: {edges}");
+
+	Ok(())
+}
+
+/// A computed field the gate reads through another computed field is derived
+/// after it, whichever sorts first by name. Here `can_edit` sorts before the
+/// `is_locked` it reads, so a derivation in name order computes it from
+/// `is_locked = NONE` — `!NONE` is `true` — and admits every write to a locked
+/// record.
+#[tokio::test]
+async fn write_gate_computed_fields_derived_in_dependency_order() -> Result<()> {
+	let (_, ds) = new_ds("test", "test", true).await?;
+	let owner = Session::owner().with_ns("test").with_db("test");
+
+	ds.execute(
+		"DEFINE ACCESS user ON DATABASE TYPE RECORD
+			SIGNUP ( CREATE type::record('account', $id) )
+			SIGNIN ( SELECT * FROM type::record('account', $id) )
+			DURATION FOR TOKEN 1h, FOR SESSION 1h;
+		 DEFINE TABLE t SCHEMALESS
+			PERMISSIONS FOR select FULL, FOR create, update, delete WHERE can_edit = true;
+		 DEFINE FIELD is_locked ON t COMPUTED status = 'locked';
+		 DEFINE FIELD can_edit ON t COMPUTED !is_locked;
+		 CREATE account:alice;
+		 CREATE t:locked SET status = 'locked';
+		 CREATE t:open SET status = 'open';",
+		&owner,
+		None,
+	)
+	.await?;
+
+	let alice = record_session("alice");
+	for sql in [
+		"UPDATE t:locked SET n = 1",
+		"DELETE t:locked RETURN BEFORE",
+		"CREATE t:new SET status = 'locked'",
+	] {
+		let out = ds.execute(sql, &alice, None).await?.remove(0).output()?.to_sql();
+		assert_eq!(out, "[]", "the gate must refuse `{sql}` on a locked record: {out}");
+	}
+	let out = ds
+		.execute("UPDATE t:open SET n = 1 RETURN n", &alice, None)
+		.await?
+		.remove(0)
+		.output()?
+		.to_sql();
+	assert_eq!(out, "[{ n: 1 }]", "the gate must admit a write to an open record: {out}");
+
+	// Nothing refused reached storage: the locked record is neither updated
+	// nor deleted, and the locked create persisted nothing.
+	let rows = ds
+		.execute("SELECT id, n FROM t ORDER BY id", &owner, None)
+		.await?
+		.remove(0)
+		.output()?
+		.to_sql();
+	assert_eq!(
+		rows, "[{ id: t:locked, n: NONE }, { id: t:open, n: 1 }]",
+		"only the open record was written: {rows}"
+	);
 
 	Ok(())
 }

@@ -45,6 +45,7 @@
 //! already stamped past it would skip it forever if the stamp gated selection.
 
 mod doc_lookup_identity;
+mod kinds_as_text;
 mod module_keys;
 mod sequence_defs;
 
@@ -54,7 +55,8 @@ use std::pin::Pin;
 use anyhow::{Result, bail};
 use tracing::{info, warn};
 
-use crate::key::schema::{MigrationKey, StorageVersionKey, VersionHistoryKey};
+use crate::catalog::TaskLease;
+use crate::key::schema::{MigrationKey, StorageVersionKey, TaskLeaseKey, VersionHistoryKey};
 use crate::kvs::ds::Datastore;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::version::{MigrationRecord, StorageVersion, VersionHistoryEntry};
@@ -65,6 +67,10 @@ const TARGET: &str = "surrealdb::core::kvs::migration";
 /// How long a migration lease is held before another node may take it over.
 /// Renewed between migrations, and between the batches of one that walks user
 /// data, so this bounds the time between renewals, not the whole run.
+///
+/// Every release that takes the lease uses this duration, and
+/// [`clear_lease_of_finished_holder`] relies on that to recover when a holder
+/// last wrote it.
 const LEASE_DURATION: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// How long a node that lost the lease waits for the holder to finish before
@@ -107,6 +113,12 @@ pub(crate) static MIGRATIONS: &[Migration] = &[
 		name: "rebuild forward doc-ID mappings under an injective key",
 		version: (3, 3, 0),
 		run: |ds| Box::pin(doc_lookup_identity::rebuild_forward_doc_ids_under_an_injective_key(ds)),
+	},
+	Migration {
+		id: 4,
+		name: "re-save field and function kinds stored as an AST as text",
+		version: (3, 4, 0),
+		run: |ds| Box::pin(kinds_as_text::resave_kinds_as_text(ds)),
 	},
 ];
 
@@ -262,6 +274,11 @@ async fn unapplied(ds: &Datastore, ids: &[u32]) -> Result<Vec<u32>> {
 /// blocking until the deadline. Holding the lease is the normal path, not a
 /// guarantee: it can expire under a migration that outruns it, which is why
 /// migrations must tolerate a second node repeating them.
+///
+/// A waiter only waits on a holder that may still be migrating. A holder that
+/// has finished its pass releases the lease, and a lease left behind by a
+/// holder that did not release it is cleared once that holder's version
+/// history entry proves its pass is over.
 async fn apply(ds: &Datastore, registry: &[Migration], pending: &[u32]) -> Result<()> {
 	let lease = lease(ds)?;
 	let deadline = web_time::Instant::now() + WAIT_FOR_HOLDER;
@@ -272,6 +289,7 @@ async fn apply(ds: &Datastore, registry: &[Migration], pending: &[u32]) -> Resul
 			return Ok(());
 		}
 
+		clear_lease_of_finished_holder(ds).await?;
 		if lease.has_lease().await? {
 			for id in outstanding {
 				let migration = registry
@@ -289,6 +307,12 @@ async fn apply(ds: &Datastore, registry: &[Migration], pending: &[u32]) -> Resul
 				// Renew between migrations so a long run keeps the lease. A lost
 				// renewal is not fatal, so the result is deliberately ignored.
 				let _ = lease.try_maintain_lease().await;
+			}
+			// A lease left in place would hold off a node with migrations this
+			// build does not know about until it expired. A failed release only
+			// delays that node until expiry, so it does not fail startup.
+			if let Err(e) = release_lease(ds).await {
+				warn!(target: TARGET, error = %e, "Failed to release the data migration lease");
 			}
 			return Ok(());
 		}
@@ -319,6 +343,93 @@ pub(super) fn lease(ds: &Datastore) -> Result<LeaseHandler> {
 		TaskLeaseType::DataMigration,
 		LEASE_DURATION,
 	)
+}
+
+/// The stored migration lease, if any.
+async fn read_lease(ds: &Datastore) -> Result<Option<TaskLease>> {
+	let txn = ds.transaction(TransactionType::Read).await?;
+	let key = TaskLeaseKey {
+		task_id: TaskLeaseType::DataMigration,
+	};
+	let lease = catch!(txn, txn.get_key(&key, None).await);
+	txn.cancel().await?;
+	Ok(lease)
+}
+
+/// Deletes the migration lease if it is exactly `expected`.
+///
+/// The compare makes this a no-op when another node renewed or replaced the
+/// lease since it was read; that lost race is reported as success, because
+/// the lease then belongs to a node that is actively holding it.
+async fn delete_lease_if_unchanged(ds: &Datastore, expected: &TaskLease) -> Result<()> {
+	let txn = ds.transaction(TransactionType::Write).await?;
+	let key = TaskLeaseKey {
+		task_id: TaskLeaseType::DataMigration,
+	};
+	let result = async {
+		txn.del_compare_key(&key, Some(expected)).await?;
+		txn.commit().await
+	}
+	.await;
+	match result {
+		Ok(()) => Ok(()),
+		Err(e) if lost_the_race(&e) => {
+			let _ = txn.cancel().await;
+			Ok(())
+		}
+		Err(e) => {
+			let _ = txn.cancel().await;
+			Err(e)
+		}
+	}
+}
+
+/// Gives up this node's migration lease once its pass is complete.
+///
+/// Only a lease this node still owns is removed; one that expired and was
+/// taken over belongs to its new holder.
+async fn release_lease(ds: &Datastore) -> Result<()> {
+	match read_lease(ds).await? {
+		Some(held) if held.owner == ds.id() => delete_lease_if_unchanged(ds, &held).await,
+		_ => Ok(()),
+	}
+}
+
+/// Clears a migration lease whose holder has finished its migration pass but
+/// did not release the lease.
+///
+/// [`advance_stamp`] runs only after [`apply`] returns, so a version history
+/// entry naming the holder, recorded no earlier than the holder last wrote the
+/// lease, proves the holder is past its migrations and will never renew the
+/// lease again. Both readings come from the holder's own clock, so the
+/// comparison is unaffected by skew between nodes. The tenure start is the
+/// lease's expiry less [`LEASE_DURATION`]. Without such an entry the holder may
+/// still be migrating, and the lease is left for it to finish or let expire.
+async fn clear_lease_of_finished_holder(ds: &Datastore) -> Result<()> {
+	let Some(held) = read_lease(ds).await? else {
+		return Ok(());
+	};
+	if held.owner == ds.id() {
+		return Ok(());
+	}
+	let Ok(duration) = chrono::Duration::from_std(LEASE_DURATION) else {
+		return Ok(());
+	};
+	let tenure_start = (held.expiration - duration).timestamp_millis();
+	let finished = ds
+		.version_history()
+		.await?
+		.iter()
+		.any(|entry| entry.node == held.owner && entry.timestamp as i64 >= tenure_start);
+	if !finished {
+		return Ok(());
+	}
+	info!(
+		target: TARGET,
+		holder = %held.owner,
+		"The data migration lease is held by a node that has finished its migrations; clearing it"
+	);
+	delete_lease_if_unchanged(ds, &held).await
 }
 
 /// Writes a migration's ledger entry.

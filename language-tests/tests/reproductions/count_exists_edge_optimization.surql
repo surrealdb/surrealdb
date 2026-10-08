@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "count(->edge) OP N in WHERE should inject a minimal LIMIT into graph traversal"
@@ -26,7 +25,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) > 0, pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    Filter [ctx: Db] [predicate: count(->connects) > 0] {rows: 1}
+        TableScan [ctx: Db] [table: node, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 
@@ -36,57 +36,8 @@ value = "[{ name: 'A' }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) >= 1, pre_decode_filter: no (unsupported predicate)] {rows: 1}
-
-Total rows: 1''''
-
-[[test.results]]
-value = "[{ name: 'A' }]"
-
-[[test.results]]
-value = '''
-'SelectProject [ctx: Db] [projections: name] {rows: 2}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) = 0, pre_decode_filter: no (unsupported predicate)] {rows: 2}
-
-Total rows: 2''''
-
-[[test.results]]
-value = "[{ name: 'B' }, { name: 'C' }]"
-
-[[test.results]]
-value = '''
-'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) > 1, pre_decode_filter: no (unsupported predicate)] {rows: 1}
-
-Total rows: 1''''
-
-[[test.results]]
-value = "[{ name: 'A' }]"
-
-[[test.results]]
-value = '''
-'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) >= 2, pre_decode_filter: no (unsupported predicate)] {rows: 1}
-
-Total rows: 1''''
-
-[[test.results]]
-value = "[{ name: 'A' }]"
-
-[[test.results]]
-value = '''
-'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) = 2, pre_decode_filter: no (unsupported predicate)] {rows: 1}
-
-Total rows: 1''''
-
-[[test.results]]
-value = "[{ name: 'A' }]"
-
-[[test.results]]
-value = '''
-'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) != 0, pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    Filter [ctx: Db] [predicate: count(->connects) >= 1] {rows: 1}
+        TableScan [ctx: Db] [table: node, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 
@@ -96,17 +47,8 @@ value = "[{ name: 'A' }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 2}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) < 2, pre_decode_filter: no (unsupported predicate)] {rows: 2}
-
-Total rows: 2''''
-
-[[test.results]]
-value = "[{ name: 'B' }, { name: 'C' }]"
-
-[[test.results]]
-value = '''
-'SelectProject [ctx: Db] [projections: name] {rows: 2}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: count(->connects) <= 1, pre_decode_filter: no (unsupported predicate)] {rows: 2}
+    Filter [ctx: Db] [predicate: count(->connects) = 0] {rows: 2}
+        TableScan [ctx: Db] [table: node, direction: Forward] {rows: 2}
 
 Total rows: 2''''
 
@@ -116,7 +58,74 @@ value = "[{ name: 'B' }, { name: 'C' }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: node, direction: Forward, predicate: 1 < count(->connects), pre_decode_filter: no (unsupported predicate)] {rows: 1}
+    Filter [ctx: Db] [predicate: count(->connects) > 1] {rows: 1}
+        TableScan [ctx: Db] [table: node, direction: Forward] {rows: 1}
+
+Total rows: 1''''
+
+[[test.results]]
+value = "[{ name: 'A' }]"
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: name] {rows: 1}
+    Filter [ctx: Db] [predicate: count(->connects) >= 2] {rows: 1}
+        TableScan [ctx: Db] [table: node, direction: Forward] {rows: 1}
+
+Total rows: 1''''
+
+[[test.results]]
+value = "[{ name: 'A' }]"
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: name] {rows: 1}
+    Filter [ctx: Db] [predicate: count(->connects) = 2] {rows: 1}
+        TableScan [ctx: Db] [table: node, direction: Forward] {rows: 1}
+
+Total rows: 1''''
+
+[[test.results]]
+value = "[{ name: 'A' }]"
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: name] {rows: 1}
+    Filter [ctx: Db] [predicate: count(->connects) != 0] {rows: 1}
+        TableScan [ctx: Db] [table: node, direction: Forward] {rows: 1}
+
+Total rows: 1''''
+
+[[test.results]]
+value = "[{ name: 'A' }]"
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: name] {rows: 2}
+    Filter [ctx: Db] [predicate: count(->connects) < 2] {rows: 2}
+        TableScan [ctx: Db] [table: node, direction: Forward] {rows: 2}
+
+Total rows: 2''''
+
+[[test.results]]
+value = "[{ name: 'B' }, { name: 'C' }]"
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: name] {rows: 2}
+    Filter [ctx: Db] [predicate: count(->connects) <= 1] {rows: 2}
+        TableScan [ctx: Db] [table: node, direction: Forward] {rows: 2}
+
+Total rows: 2''''
+
+[[test.results]]
+value = "[{ name: 'B' }, { name: 'C' }]"
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: name] {rows: 1}
+    Filter [ctx: Db] [predicate: 1 < count(->connects)] {rows: 1}
+        TableScan [ctx: Db] [table: node, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 

@@ -19,9 +19,11 @@ use common::future::stream::{self, Yielder};
 
 use crate::catalog::Permission;
 use crate::catalog::providers::TableProvider;
+#[cfg(test)]
 use crate::exec::operators::limit::{PagingClause, paging_count};
 use crate::exec::permission::{
-	LegacyClause, PhysicalPermission, check_permission_for_value, permission_to_physical,
+	GuardKind, PhysicalPermission, UncompilableClause, check_permission_for_value,
+	read_permission_to_physical,
 };
 use crate::exec::pre_decode_filter::{PreDecodeFilter, PreDecodeFilterOutcome};
 use crate::exec::topk_pushdown::TopKThresholdProbe;
@@ -131,6 +133,7 @@ impl ScanPipeline {
 		}
 	}
 
+	#[cfg(test)]
 	/// The approximate size of the last batch [`Self::process_batch`]
 	/// processed once its computed fields were materialised, before any row
 	/// was filtered out; 0 when the pipeline materialises no computed field.
@@ -142,6 +145,7 @@ impl ScanPipeline {
 		self.materialised_bytes
 	}
 
+	#[cfg(test)]
 	/// How many more rows this pipeline can use: those it has yet to skip for
 	/// the start offset plus those it has yet to emit under the limit; `None`
 	/// without a limit, when it takes every row.
@@ -412,10 +416,18 @@ macro_rules! check_perm {
 				if $ctx.root().skip_fetch_perms {
 					Ok(true)
 				} else {
-					// Bind the record as both current value and document root,
-					// matching `check_permission_for_value` — see the note there
-					// on why `$parent` needs the root.
-					let mut eval_ctx = EvalContext::from_exec_ctx($ctx).with_value_and_doc($value);
+					// A `select` guard refuses a write for the whole of its
+					// evaluation, as `check_permission_for_value` does — see
+					// the note there, and on why `$parent` needs the record
+					// bound as the document root as well as the value. The
+					// guard is definer code, so it runs in a privileged frame
+					// that holds none of the caller's own bindings.
+					let guarded = $ctx
+						.clone()
+						.privileged_frame()
+						.refusing_writes(crate::dbs::NoWriteFrame::PermissionPredicate);
+					let mut eval_ctx =
+						EvalContext::from_exec_ctx(&guarded).with_value_and_doc($value);
 					eval_ctx.skip_fetch_perms = true;
 					expr.evaluate(eval_ctx).await.map(|v| v.is_truthy()).map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}"))
@@ -428,8 +440,11 @@ macro_rules! check_perm {
 
 /// Combined single-pass filter and process for a batch of decoded values.
 ///
-/// Per-record pipeline (sequential, in-place):
+/// Per-record steps (sequential, in-place):
 ///   table permission -> [`materialise_fields_with_permissions`] -> WHERE predicate.
+/// A table permission reading a computed field derives it on a copy of its own
+/// ([`ComputedFieldGuard`](crate::exec::permission::ComputedFieldGuard)), so
+/// the record reaches materialisation as stored.
 /// Computed fields and field-level permissions both precede the predicate so a
 /// field the reader may not see is already cut from the document the condition
 /// is evaluated against, and a computed field derived from such a field already
@@ -518,6 +533,7 @@ pub(crate) async fn filter_and_process_batch(
 // Key helpers
 // =============================================================================
 
+#[cfg(test)]
 /// Evaluate a paging clause a scan takes for itself, to the count it names.
 ///
 /// The clause means the same thing pushed into a scan as it does in the
@@ -575,6 +591,12 @@ pub(crate) struct FieldState {
 }
 
 impl FieldState {
+	/// The names of the operators the computed fields evaluate, in order.
+	#[cfg(test)]
+	pub(crate) fn computed_names(&self) -> impl Iterator<Item = &'static str> + '_ {
+		self.computed_fields.iter().map(|field| field.expr.name())
+	}
+
 	/// Create an empty field state with no computed fields or field permissions.
 	pub(crate) fn empty() -> Self {
 		Self {
@@ -623,14 +645,14 @@ impl ComputedFieldDef {
 	}
 }
 
-/// Convert a field's stored `AUTH LIMIT` into the narrowing to apply to its
-/// bodies, or `None` when the stamp cannot narrow any caller.
+/// Convert a definition's stored `AUTH LIMIT` into the narrowing to apply to
+/// its bodies, or `None` when the stamp cannot narrow any caller.
 ///
 /// A root-`Owner` stamp is inert: `Level::Root` is a sublevel of nothing but
 /// `Level::Root`, so the caller keeps its own level, and retaining roles `<=
-/// Owner` keeps every role. Field records written before `auth_limit` existed
+/// Owner` keeps every role. Records written before `auth_limit` existed
 /// default to exactly that stamp, so this is also the overwhelmingly common case.
-fn narrowing_auth_limit(
+pub(crate) fn narrowing_auth_limit(
 	auth_limit: &crate::catalog::auth::AuthLimit,
 ) -> Result<Option<crate::iam::AuthLimit>, anyhow::Error> {
 	if auth_limit == &crate::catalog::auth::AuthLimit::new_no_limit() {
@@ -720,6 +742,7 @@ pub(crate) async fn table_read_restricted_fields(
 	Some(restricted)
 }
 
+#[cfg(test)]
 pub(crate) async fn build_field_state_raw(
 	planner: &crate::exec::planner::Planner<'_>,
 	ns_id: crate::catalog::NamespaceId,
@@ -734,7 +757,17 @@ pub(crate) async fn build_field_state_raw(
 		.all_tb_fields(ns_id, db_id, table_name, version)
 		.await
 		.context("Failed to get field definitions")?;
+	compile_field_state(planner, table_name, &field_defs, check_perms).await
+}
 
+/// The field state of reads of `table_name` whose fields are `field_defs`,
+/// compiled by `planner`, with field permissions where `check_perms`.
+pub(crate) async fn compile_field_state(
+	planner: &crate::exec::planner::Planner<'_>,
+	table_name: &TableName,
+	field_defs: &[crate::catalog::FieldDefinition],
+	check_perms: bool,
+) -> Result<FieldState, ControlFlow> {
 	// Fast path: if there are no computed fields and no field-level permissions
 	// that need checking, skip the expensive resolution. Both Permission::None
 	// (deny) and Permission::Specific (conditional) require enforcement.
@@ -751,8 +784,8 @@ pub(crate) async fn build_field_state_raw(
 	// planner's `CycleGuard` prevents recursive table-resolution for
 	// self-referential permissions like
 	// `WHERE (SELECT FROM same_table) != NONE`. When the planner is txn-less
-	// (runtime fallback), inner subqueries compile to runtime-resolving
-	// scans — bit-for-bit identical to the legacy behaviour. See
+	// (runtime resolution), inner subqueries compile to runtime-resolving
+	// scans. See
 	// `language-tests/tests/reproductions/skip_fetch_perms_subquery_dereference.surql`.
 
 	// Collect ALL computed fields and their dependency metadata.
@@ -761,8 +794,8 @@ pub(crate) async fn build_field_state_raw(
 
 	for fd in field_defs.iter() {
 		// The dependency analysis reads the stored clause; the body the engine
-		// evaluates is its logical form, or the stored clause itself through
-		// the legacy bridge when it has no logical form.
+		// evaluates is its logical form, which fails when evaluated if the
+		// clause has none.
 		if let (Some(expr), Some(body)) = (fd.computed.as_ref(), fd.computed_logical()) {
 			let field_name = fd.name.to_raw_string();
 
@@ -770,11 +803,23 @@ pub(crate) async fn build_field_state_raw(
 
 			dep_map.insert(field_name.clone(), deps.clone());
 
+			// The field is computed for the principal its `AUTH LIMIT` narrows
+			// to, so the statements it holds are planned for that principal.
+			let limit = narrowing_auth_limit(&fd.auth_limit)?;
+			let limited = match (&limit, &planner.auth) {
+				(Some(limit), Some(_)) => Some(planner.limited(limit)),
+				_ => None,
+			};
+			let body_planner = limited.as_ref().unwrap_or(planner);
 			let physical_expr = match body {
-				Ok(body) => planner.physical_expr(body.clone()).await.with_context(|| {
-					format!("Computed field '{field_name}' has unsupported expression")
-				})?,
-				Err(_) => LegacyClause::computed(expr.clone()),
+				Ok(body) => {
+					let compiled =
+						body_planner.physical_expr(body.clone()).await.with_context(|| {
+							format!("Computed field '{field_name}' has unsupported expression")
+						})?;
+					crate::exec::scalar_unit::UnitClause::of(body.clone(), compiled)
+				}
+				Err(reason) => UncompilableClause::of(reason.to_string()),
 			};
 
 			raw_computed.push((
@@ -782,7 +827,7 @@ pub(crate) async fn build_field_state_raw(
 				physical_expr,
 				fd.field_kind.clone(),
 				deps.fields,
-				narrowing_auth_limit(&fd.auth_limit)?,
+				limit,
 			));
 		}
 	}
@@ -840,11 +885,11 @@ pub(crate) async fn build_field_state_raw(
 					}
 					permission_field_deps.extend(deps.fields);
 					// The guard in the logical form the catalog compiled from
-					// its text, or the stored clause through the legacy bridge
-					// when it has none.
-					permission_to_physical(
+					// its text.
+					read_permission_to_physical(
 						&fd.select_permission,
 						fd.select_permission_logical(),
+						GuardKind::Read,
 						planner,
 					)
 					.await
@@ -864,55 +909,20 @@ pub(crate) async fn build_field_state_raw(
 	})
 }
 
-/// Fetch field definitions and build the cached field state.
+/// The field state of reads of `table_name` in `ctx`, with field permissions
+/// where `check_perms`, narrowed to `needed_fields` where it is `Some`.
 ///
-/// Always builds and caches the *full* field state (all computed fields and
-/// permissions) keyed by `(table, check_perms)`. When `needed_fields` is
-/// `Some`, the cached full state is cheaply filtered to the required subset.
-/// This avoids repeated expensive work (KV lookups, PhysicalExpr compilation,
-/// dependency analysis, topological sort) for projected queries.
+/// The full state is the table descriptor's
+/// ([`crate::exec::vm::descriptor::field_state`]), compiled once per table
+/// version, so narrowing it per projection is the only work a call does.
 pub(crate) async fn build_field_state(
 	ctx: &ExecutionContext,
 	table_name: &TableName,
 	check_perms: bool,
 	needed_fields: Option<&std::collections::HashSet<String>>,
 ) -> Result<FieldState, ControlFlow> {
-	let db_ctx = ctx.database().context("build_field_state requires database context")?;
-	let version = ctx.version_stamp();
-	let cache_key = (table_name.clone(), check_perms);
-
-	// Check the cache first (keyed by table name + check_perms flag).
-	// Versioned reads bypass the cache to get field defs at the correct point in time.
-	if version.is_none() {
-		let cache = db_ctx.field_state_cache.read().await;
-		if let Some(cached) = cache.get(&cache_key) {
-			return Ok(filter_field_state_for_projection(cached, needed_fields));
-		}
-	}
-
-	// Fresh `Planner::with_txn` so subqueries inside computed-field /
-	// field-permission bodies get plan-time index resolution. The cycle
-	// guard starts empty; same-table recursion is broken by the inner
-	// `try_resolve_table_ctx` push.
-	let planner = crate::exec::planner::Planner::for_database(ctx.ctx(), ctx.txn(), db_ctx);
-	let full_state = build_field_state_raw(
-		&planner,
-		db_ctx.ns_ctx.ns.namespace_id,
-		db_ctx.db.database_id,
-		table_name,
-		check_perms,
-		version,
-	)
-	.await?;
-
-	// Cache the full (unfiltered) state (skip for versioned reads)
-	let cached = Arc::new(full_state);
-	if version.is_none() {
-		db_ctx.field_state_cache.write().await.insert(cache_key, Arc::clone(&cached));
-	}
-
-	// Return filtered if needed_fields is specified
-	Ok(filter_field_state_for_projection(&cached, needed_fields))
+	let full = crate::exec::vm::descriptor::field_state(ctx, table_name, check_perms).await?;
+	Ok(filter_field_state_for_projection(&full, needed_fields))
 }
 
 /// Filter a full FieldState down to only the computed fields required by
@@ -1066,12 +1076,14 @@ pub(crate) async fn compute_fields_for_value_against(
 		_ => None,
 	};
 
-	// SECURITY: the body runs in a frame that refuses writes, whichever auth it
-	// holds. `Expr::contains_mutation` rejects a mutation written into the body
-	// at definition time but cannot see through a call to a user-defined
-	// function, so without this a read of the field would mutate the database as
+	// SECURITY: the body is definer code, so it runs in a privileged frame that
+	// holds none of the caller's bindings ([`ExecutionContext::privileged_frame`]),
+	// and the frame refuses writes, whichever auth it holds.
+	// `Expr::contains_mutation` rejects a mutation written into the body at
+	// definition time but cannot see through a call to a user-defined function,
+	// so without the refusal a read of the field would mutate the database as
 	// the definer. Loop-invariant, so derived once per row rather than per field.
-	let field_ctx = ctx.clone().computing_field();
+	let field_ctx = ctx.clone().privileged_frame().computing_field();
 
 	for cf in &state.computed_fields {
 		// SECURITY: apply the field's AUTH LIMIT so the body runs under the
@@ -1099,11 +1111,14 @@ pub(crate) async fn compute_fields_for_value_against(
 			Err(e) => return Err(e),
 		};
 
-		// Apply type coercion if specified
+		// A value that does not coerce fails naming the computed field.
 		let final_value = if let Some(kind) = &cf.kind {
-			computed_value
-				.coerce_to_kind(kind)
-				.with_context(|| format!("Failed to coerce computed field '{}'", cf.field_name))?
+			computed_value.coerce_to_kind(kind).map_err(|error| {
+				ControlFlow::Err(
+					anyhow::Error::new(error)
+						.context(format!("Failed to coerce computed field '{}'", cf.field_name)),
+				)
+			})?
 		} else {
 			computed_value
 		};
@@ -1141,8 +1156,8 @@ fn stored_fields_view(state: &FieldState, value: &Value) -> Value {
 
 /// Which of `state.field_permissions` a pass applies.
 ///
-/// The two-pass materialisation splits the entries the way the legacy read path
-/// splits them, and for the same reason: a field's clause must be answered
+/// The two-pass materialisation splits the entries by field kind, for this
+/// reason: a field's clause must be answered
 /// exactly once, against the view that field actually exists on. Evaluating one
 /// twice and keeping the union is not merely wasted work — a volatile predicate
 /// such as `WHERE rand::bool()` would be allowed by either roll, turning a 50%
@@ -1187,7 +1202,7 @@ impl PermissionPass {
 /// leaves every computed field derived from the document *before* any field was
 /// cut, so one whose body reads a denied field still holds its value once the
 /// permission pass has removed the source. Re-deriving them against the reduced
-/// document is what the legacy read path does.
+/// document is what keeps the record consistent.
 ///
 /// The passes are split by field kind, as [`PermissionPass`] describes: stored
 /// fields are cut first, because those cuts are what re-derivation reacts to,
@@ -1276,9 +1291,8 @@ pub(crate) async fn materialise_fields_with_permissions(
 ///
 /// Each `(idiom, perm)` entry is expanded via [`Value::each`] to handle
 /// wildcards (`outer.*`, `items[*]`), then each concrete path is checked
-/// with `$value` bound to the picked field value — matching the legacy
-/// [`crate::doc::pluck::Document::pluck_select`] semantics that the
-/// streaming runtime previously skipped for nested paths (issue #83).
+/// with `$value` bound to the picked field value, so a permission on a nested
+/// or wildcard path judges the field it names.
 pub(crate) async fn filter_fields_by_permission(
 	ctx: &ExecutionContext,
 	state: &FieldState,
@@ -1385,7 +1399,7 @@ mod tests {
 
 	use super::*;
 	use crate::exec::operators::test_util::{
-		TestDb, field_idiom, parse_path, physical_expr, root_ctx, val,
+		TestDb, field_idiom, parse_path, physical_expr, physical_expr_in_txn, root_ctx, val,
 	};
 	use crate::expr::computed_deps::ComputedDeps;
 	use crate::expr::logical::{LogicalOrder, LogicalOrdering};
@@ -1663,7 +1677,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn a_row_denied_by_the_table_permission_never_reaches_the_predicate() {
-		let ctx = root_ctx();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
 		let empty = FieldState::empty();
 		// A predicate that cannot be evaluated without failing the whole batch.
 		let poison = physical_expr("THROW 'the predicate must not see this row'", &ctx).await;
@@ -1685,7 +1700,7 @@ mod tests {
 		// Conditional deny: only the permitted row is fed to the predicate, and
 		// the predicate throws for anything else.
 		let permission = PhysicalPermission::Conditional(physical_expr("public", &ctx).await);
-		let guarded = physical_expr(
+		let guarded = physical_expr_in_txn(
 			"IF public { true } ELSE { THROW 'the predicate saw a denied row' }",
 			&ctx,
 		)
@@ -1930,11 +1945,12 @@ mod tests {
 
 	#[tokio::test]
 	async fn a_return_out_of_a_computed_body_becomes_the_field_value() {
-		let ctx = root_ctx();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
 		// A body whose block returns rather than falling off its end signals
 		// `ControlFlow::Return`, which the field takes as its value.
 		let field_state = state(
-			vec![computed("answer", physical_expr("{ RETURN 5 }", &ctx).await, None)],
+			vec![computed("answer", physical_expr_in_txn("{ RETURN 5 }", &ctx).await, None)],
 			Vec::new(),
 		);
 
@@ -2234,7 +2250,8 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn field_state_is_cached_per_table_and_check_perms_flag() {
+	async fn field_state_is_compiled_once_per_table_version_and_check_perms_flag() {
+		use crate::exec::vm::descriptor::field_state;
 		let db = TestDb::new(
 			"DEFINE TABLE t SCHEMALESS;
 			 DEFINE FIELD score ON t TYPE int;
@@ -2242,23 +2259,17 @@ mod tests {
 		)
 		.await;
 		let ctx = db.exec_ctx().await;
-		let db_ctx = ctx.database().unwrap();
 		let table = TableName::from("t");
 
-		build_field_state(&ctx, &table, true, None).await.unwrap();
-		build_field_state(&ctx, &table, true, None).await.unwrap();
-		{
-			let cache = db_ctx.field_state_cache.read().await;
-			assert_eq!(cache.len(), 1);
-			assert!(cache.contains_key(&(table.clone(), true)));
-		}
+		let first = field_state(&ctx, &table, true).await.unwrap();
+		let again = field_state(&ctx, &table, true).await.unwrap();
+		assert!(Arc::ptr_eq(&first, &again), "the state is compiled once per table version");
 
 		// The flag is part of the key: the two states differ, so they cannot
 		// share an entry.
-		build_field_state(&ctx, &table, false, None).await.unwrap();
-		let cache = db_ctx.field_state_cache.read().await;
-		assert_eq!(cache.len(), 2);
-		assert!(cache.contains_key(&(table, false)));
+		let unchecked = field_state(&ctx, &table, false).await.unwrap();
+		assert!(!Arc::ptr_eq(&first, &unchecked));
+		assert!(Arc::ptr_eq(&unchecked, &field_state(&ctx, &table, false).await.unwrap()));
 	}
 
 	#[tokio::test]

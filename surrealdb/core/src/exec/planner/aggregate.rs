@@ -13,7 +13,7 @@ use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::logical::{BatchRetry, ColumnEffects, columns_may_run_column_major};
 use crate::exec::operators::{
-	AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
+	AggregateExprInfo, AggregateField, AggregateId, ExtractedAggregate, aggregate_field_name,
 	group_key_field_name,
 };
 use crate::exec::planner::util::SELECT_ITERATION_PARAMS;
@@ -224,108 +224,46 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
-	/// Extract aggregate function information from an expression.
-	///
-	/// Uses [`AggregateExtractor`] to walk the expression tree. An expression
-	/// carrying no aggregate of its own still has to reduce to one value per
-	/// group, and which way it reduces depends on whether the row can influence
-	/// it: an expression that cannot is returned as the non-aggregate
-	/// `fallback_expr` and evaluated once per group, while one that reads the
-	/// row is wrapped in the implicit collect aggregate, keeping each row's
-	/// value.
+	/// Extract aggregate function information from an expression and compile
+	/// it, as [`analyse_aggregate_info`] reads it.
 	///
 	/// Takes `expr` by value. When no aggregate functions are found, the
 	/// extractor leaves the expression unchanged, so either path can use it
 	/// directly without an extra clone.
 	#[allow(clippy::type_complexity)]
-	#[allow(clippy::clone_on_ref_ptr)] // Several paths clone `Arc<dyn AggregateFunction>` from concrete registry entries
 	pub(crate) async fn extract_aggregate_info(
 		&self,
-		mut expr: LogicalExpr,
+		expr: LogicalExpr,
 		group_by: &[LogicalExpr],
 	) -> Result<(Option<AggregateExprInfo>, Option<Arc<dyn PhysicalExpr>>), Error> {
 		let registry = self.function_registry();
+		let (info, fallback) = analyse_aggregate_info(registry, expr, group_by)?;
 
-		let mut extractor = AggregateExtractor::new(registry);
-		extractor.extract(&mut expr)?;
-
-		if extractor.aggregates.is_empty() {
-			// No aggregates found — the extractor left expr unchanged.
-			//
-			// An expression the row cannot influence has one value for the
-			// whole group, so it is evaluated once as a non-aggregate field
-			// rather than collected. Collecting it would return an array whose
-			// length is the group's row count, which no reading of GROUP BY
-			// produces.
-			if !expr_reads_row(&expr, registry) {
-				return Ok((None, Some(self.physical_expr(expr).await?)));
-			}
-
-			// The expression reads the row, so the group is reduced by
-			// collecting each row's value, duplicates included. That is the
-			// established answer for this shape, which is why it folds with
-			// `array::collect` and not `array::group` — the latter owes its
-			// caller a deduplicated result.
-			let argument_expr = self.physical_expr(expr).await?;
-			let collect = registry.get_implicit_collect_aggregate();
-			return Ok((
-				Some(AggregateExprInfo {
-					aggregates: vec![ExtractedAggregate {
-						function: collect,
-						argument_expr,
-						extra_args: vec![],
-					}],
-					post_expr: None,
-				}),
-				None,
-			));
+		if let Some(fallback) = fallback {
+			return Ok((None, Some(self.physical_expr(fallback).await?)));
 		}
+		let Some(info) = info else {
+			return Ok((None, None));
+		};
 
-		let mut extracted_aggregates = Vec::new();
-		for (name, call) in extractor.aggregates {
-			let func = if name.as_str() == "count" {
-				registry.get_count_aggregate(!call.args.is_empty())
-			} else {
-				Arc::clone(registry.get_aggregate(&name).expect("aggregate function should exist"))
-			};
-
-			let mut args = call.args.into_iter();
-			let argument_expr = if let Some(first_arg) = args.next() {
-				self.physical_expr(first_arg).await
-			} else {
-				self.physical_expr(LogicalExpr::Literal(LogicalLiteral::None)).await
-			}?;
-
-			let mut extra_args = Vec::new();
-			for mut arg in args {
-				// An argument after the first is evaluated once for the group,
-				// against the group's keys rather than against a row, so a key
-				// named in one is reached through its placeholder exactly as a
-				// post-expression reaches it.
-				rewrite_group_key_reads(&mut arg, group_by);
+		let mut extracted_aggregates = Vec::with_capacity(info.calls.len());
+		for call in info.calls {
+			let function = call.id.resolve(registry).expect("aggregate function should exist");
+			let argument_expr = self.physical_expr(call.argument).await?;
+			let mut extra_args = Vec::with_capacity(call.extra_args.len());
+			for arg in call.extra_args {
 				extra_args.push(self.physical_expr(arg).await?);
 			}
-
 			extracted_aggregates.push(ExtractedAggregate {
-				function: func,
+				function,
 				argument_expr,
 				extra_args,
 			});
 		}
-
-		// The extractor replaced each aggregate call with a read of its
-		// placeholder field (`_a0`, `_a1`, …). A projection that is exactly
-		// one such read needs no post-expression.
-		let is_direct_single_aggregate = extracted_aggregates.len() == 1
-			&& expr == LogicalExpr::Field(aggregate_field_name(0).into());
-
-		let post_expr = if is_direct_single_aggregate {
-			None
-		} else {
-			rewrite_group_key_reads(&mut expr, group_by);
-			Some(self.physical_expr(expr).await?)
+		let post_expr = match info.post {
+			Some(post) => Some(self.physical_expr(post).await?),
+			None => None,
 		};
-
 		Ok((
 			Some(AggregateExprInfo {
 				aggregates: extracted_aggregates,
@@ -334,6 +272,258 @@ impl<'ctx> Planner<'ctx> {
 			None,
 		))
 	}
+}
+
+// ============================================================================
+// Logical analysis
+// ============================================================================
+
+/// One aggregate call of a projected expression, before any of its
+/// expressions is compiled.
+#[derive(Debug, Clone)]
+pub(crate) struct AggregateCallAnalysis {
+	/// The function the call names.
+	pub(crate) id: AggregateId,
+	/// The expression evaluated per row to get the value to accumulate.
+	pub(crate) argument: LogicalExpr,
+	/// The arguments after the first, evaluated once for the group against a
+	/// document of its keys, with a key read already rewritten to its
+	/// placeholder.
+	pub(crate) extra_args: Vec<LogicalExpr>,
+}
+
+/// The aggregates a projected expression holds, as the planner extracts them.
+#[derive(Debug, Clone)]
+pub(crate) struct AggregateInfoAnalysis {
+	/// The calls, in the order of their `_aN` placeholders.
+	pub(crate) calls: Vec<AggregateCallAnalysis>,
+	/// The expression over the placeholders, evaluated once for the group
+	/// against a document of the group's answers; `None` for a projection that
+	/// is exactly one aggregate.
+	pub(crate) post: Option<LogicalExpr>,
+}
+
+/// A projected field of an aggregation, before any of its expressions is
+/// compiled.
+#[derive(Debug, Clone)]
+pub(crate) struct AggregateFieldAnalysis {
+	/// Where the field's value lands in the group's answer.
+	pub(crate) output_path: Vec<String>,
+	/// Whether the field is a grouping key.
+	pub(crate) is_group_key: bool,
+	/// For a grouping key, its position among the keys.
+	pub(crate) group_key_index: Option<usize>,
+	/// The aggregates of the field, when it holds any or reads the row.
+	pub(crate) info: Option<AggregateInfoAnalysis>,
+	/// The expression of a field that is neither a key nor an aggregate.
+	pub(crate) fallback: Option<LogicalExpr>,
+	/// Whether [`Self::fallback`] has one value for the whole group: it is
+	/// the row-independent branch of the analysis.
+	pub(crate) fallback_is_constant: bool,
+}
+
+/// An aggregation's grouping keys and projected fields, before any of their
+/// expressions is compiled.
+#[derive(Debug, Clone)]
+pub(crate) struct AggregationAnalysis {
+	/// The grouping keys with a key written as a field's alias replaced by
+	/// that field's expression.
+	pub(crate) keys: Vec<LogicalExpr>,
+	pub(crate) fields: Vec<AggregateFieldAnalysis>,
+}
+
+/// What an expression analyses to: its aggregates, or else the expression
+/// itself as a field evaluated once for the group.
+type AggregateInfoOrFallback = (Option<AggregateInfoAnalysis>, Option<LogicalExpr>);
+
+/// Read the keys and fields of an aggregation over `fields` grouped by
+/// `group_by` as [`Planner::plan_aggregation`] reads them, without compiling
+/// any expression.
+pub(crate) fn analyse_aggregation(
+	registry: &FunctionRegistry,
+	fields: &LogicalFields,
+	group_by: &[LogicalExpr],
+) -> Result<AggregationAnalysis, Error> {
+	let mut alias_to_expr: HashMap<String, &LogicalExpr> = HashMap::new();
+	match fields {
+		LogicalFields::Value {
+			expr,
+			alias,
+		} => {
+			if let Some(alias) = alias {
+				alias_to_expr.insert(alias.to_sql(), expr);
+			}
+		}
+		LogicalFields::Select(field_list) => {
+			for field in field_list {
+				if let LogicalField::Single {
+					expr,
+					alias: Some(alias),
+					..
+				} = field
+				{
+					alias_to_expr.insert(alias.to_sql(), expr);
+				}
+			}
+		}
+	}
+
+	let keys = group_by
+		.iter()
+		.map(|key| match alias_to_expr.get(&key.to_sql()) {
+			Some(select_expr) => (*select_expr).clone(),
+			None => key.clone(),
+		})
+		.collect();
+
+	let analyse = |output_path: Vec<String>,
+	               expr: &LogicalExpr,
+	               alias: Option<&OutputPath>|
+	 -> Result<AggregateFieldAnalysis, Error> {
+		let group_key_index = find_group_key_index(expr, alias, group_by);
+		let is_group_key = group_key_index.is_some();
+		let (info, fallback) = if is_group_key {
+			(None, None)
+		} else {
+			analyse_aggregate_info(registry, expr.clone(), group_by)?
+		};
+		Ok(AggregateFieldAnalysis {
+			output_path,
+			is_group_key,
+			group_key_index,
+			// A fallback comes from the row-independent branch of the
+			// analysis, which is the only place one is produced.
+			fallback_is_constant: fallback.is_some(),
+			info,
+			fallback,
+		})
+	};
+
+	let fields = match fields {
+		LogicalFields::Value {
+			expr,
+			alias,
+		} => vec![analyse(vec![String::new()], expr, alias.as_ref())?],
+		LogicalFields::Select(field_list) => {
+			let mut analysed = Vec::with_capacity(field_list.len());
+			for field in field_list {
+				match field {
+					LogicalField::All => {
+						return Err(ExecError::Query {
+							message: "Incorrect selector for aggregate selection, expression `*` within in selector cannot be aggregated in a group."
+								.to_string(),
+						}
+						.into());
+					}
+					LogicalField::Single {
+						expr,
+						alias,
+						..
+					} => {
+						let output_path = match alias {
+							Some(alias) => output_path_keys(alias),
+							None => output_path_keys(&expr.output_path()),
+						};
+						analysed.push(analyse(output_path, expr, alias.as_ref())?);
+					}
+				}
+			}
+			analysed
+		}
+	};
+	Ok(AggregationAnalysis {
+		keys,
+		fields,
+	})
+}
+
+/// Extract the aggregate calls of `expr` with [`AggregateExtractor`].
+///
+/// An expression carrying no aggregate of its own still has to reduce to one
+/// value per group, and which way it reduces depends on whether the row can
+/// influence it: an expression that cannot is returned as the non-aggregate
+/// fallback and evaluated once per group, while one that reads the row is
+/// wrapped in the implicit collect aggregate, keeping each row's value.
+pub(crate) fn analyse_aggregate_info(
+	registry: &FunctionRegistry,
+	mut expr: LogicalExpr,
+	group_by: &[LogicalExpr],
+) -> Result<AggregateInfoOrFallback, Error> {
+	let mut extractor = AggregateExtractor::new(registry);
+	extractor.extract(&mut expr)?;
+
+	if extractor.aggregates.is_empty() {
+		// No aggregates found — the extractor left expr unchanged.
+		//
+		// An expression the row cannot influence has one value for the
+		// whole group, so it is evaluated once as a non-aggregate field
+		// rather than collected. Collecting it would return an array whose
+		// length is the group's row count, which no reading of GROUP BY
+		// produces.
+		if !expr_reads_row(&expr, registry) {
+			return Ok((None, Some(expr)));
+		}
+
+		// The expression reads the row, so the group is reduced by
+		// collecting each row's value, duplicates included. That is the
+		// established answer for this shape, which is why it folds with
+		// `array::collect` and not `array::group` — the latter owes its
+		// caller a deduplicated result.
+		return Ok((
+			Some(AggregateInfoAnalysis {
+				calls: vec![AggregateCallAnalysis {
+					id: AggregateId::ImplicitCollect,
+					argument: expr,
+					extra_args: vec![],
+				}],
+				post: None,
+			}),
+			None,
+		));
+	}
+
+	let mut calls = Vec::with_capacity(extractor.aggregates.len());
+	for (name, call) in extractor.aggregates {
+		let id = AggregateId::of_call(name.as_str(), !call.args.is_empty());
+		let mut args = call.args.into_iter();
+		let argument = args.next().unwrap_or(LogicalExpr::Literal(LogicalLiteral::None));
+		let extra_args = args
+			.map(|mut arg| {
+				// An argument after the first is evaluated once for the group,
+				// against the group's keys rather than against a row, so a key
+				// named in one is reached through its placeholder exactly as a
+				// post-expression reaches it.
+				rewrite_group_key_reads(&mut arg, group_by);
+				arg
+			})
+			.collect();
+		calls.push(AggregateCallAnalysis {
+			id,
+			argument,
+			extra_args,
+		});
+	}
+
+	// The extractor replaced each aggregate call with a read of its
+	// placeholder field (`_a0`, `_a1`, …). A projection that is exactly
+	// one such read needs no post-expression.
+	let is_direct_single_aggregate =
+		calls.len() == 1 && expr == LogicalExpr::Field(aggregate_field_name(0).into());
+
+	let post = if is_direct_single_aggregate {
+		None
+	} else {
+		rewrite_group_key_reads(&mut expr, group_by);
+		Some(expr)
+	};
+
+	Ok((
+		Some(AggregateInfoAnalysis {
+			calls,
+			post,
+		}),
+		None,
+	))
 }
 
 // ============================================================================
@@ -399,6 +589,10 @@ fn is_row_independent(
 		}
 		// `math::PI` and friends resolve to a fixed value.
 		LogicalExpr::Constant(_) => true,
+		// A mock generates its ids afresh on each evaluation, so the value it
+		// denotes is not shared across the rows of a group even though it
+		// reads none of them.
+		LogicalExpr::Mock(_) => false,
 		// A parameter resolves from the session, the statement or a block,
 		// none of which vary across a group — except the three that are bound
 		// to the row being projected and would otherwise read one row on the

@@ -1,5 +1,5 @@
 //! Verifies the lazy variant-1 → variant-2 adjacency-key migration performed
-//! by `Document::store_edges_data` when a stale-variant edge is re-related.
+//! by the write path's edge-store stage when a stale-variant edge is re-related.
 //!
 //! A variant-1 edge stores its vertex-side adjacency keys as bare
 //! [`GraphKey`]s: `(in-vertex, Out, edge)` and `(out-vertex, In, edge)`.
@@ -11,7 +11,7 @@
 //! the purge path deletes only the pointer form, orphaning the bare key
 //! permanently. The variant-1 layout cannot be produced through SurrealQL, so
 //! these tests seed it with raw key writes, mirroring the layout the
-//! variant-1 arm of `Document::purge_pointers` deletes.
+//! variant-1 arm of the write path's edge purge deletes.
 
 use std::borrow::Cow;
 use std::sync::Arc;

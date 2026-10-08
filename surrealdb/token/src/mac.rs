@@ -412,6 +412,12 @@ macro_rules! T {
 	(GRAPHQL) => {
 		$crate::BaseTokenKind::KwGraphql
 	};
+	(GRAPHQL_ALIAS) => {
+		$crate::BaseTokenKind::KwGraphqlAlias
+	};
+	(GRAPHQL_DEPRECATED) => {
+		$crate::BaseTokenKind::KwGraphqlDeprecated
+	};
 	(GROUP) => {
 		$crate::BaseTokenKind::KwGroup
 	};

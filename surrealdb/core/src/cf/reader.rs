@@ -11,6 +11,27 @@ use crate::key::schema::{ChangeFeedKey, ChangeFeedPrefix};
 use crate::key::{KVKeyDecode, KVValue};
 use crate::kvs::Transaction;
 
+/// The changes `SHOW CHANGES` reports: the change sets of the selected
+/// database, or of one table in it, from `this.since`, at most `this.limit`
+/// of them, for a principal allowed to view the database's tables.
+pub(crate) async fn show_changes(
+	this: &crate::expr::statements::show::ShowStatement,
+	ctx: &crate::ctx::FrozenContext,
+	opt: &crate::dbs::Options,
+) -> Result<crate::val::Value> {
+	use crate::iam::{Action, ResourceKind};
+	ctx.is_allowed(opt, Action::View, ResourceKind::Table, crate::expr::Base::Db)?;
+	let txn = ctx.tx();
+	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+	let changes = read(&txn, ns, db, this.table.as_ref(), this.since.clone(), this.limit).await?;
+	let changes = changes
+		.iter()
+		.cloned()
+		.map(|change| change.into_value())
+		.collect::<Result<Vec<crate::val::Value>>>()?;
+	Ok(changes.into())
+}
+
 // Reads the change feed for a specific database or a table,
 // starting from a specific timestamp or version number.
 //

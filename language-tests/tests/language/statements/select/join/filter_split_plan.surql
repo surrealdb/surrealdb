@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -43,38 +42,41 @@ value = "NONE"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    LookupJoin [ctx: Db] [type: Semi, alias: _join0, table: team, on: team = _join0.id]
-        IndexScan [ctx: Db] [index: person_name, access: = 'p1', direction: Forward, predicate: name = 'p1']
-        Filter [ctx: Db] [predicate: active = true]
-            RecordBatchFetch [ctx: Db] [table: team]
+    Filter [ctx: Db] [predicate: name = 'p1' AND team INSIDE (subquery)]
+        IndexScan [ctx: Db] [table: person, index: person_name, access: = 'p1', direction: Forward]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: id]
+                TableScan [ctx: Db] [table: team, direction: Forward, predicate: active = true, pre_decode_filter: yes]
 "'''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    LookupJoin [ctx: Db] [type: Semi, alias: _join0, table: team, on: team = _join0.id]
-        TableScan [ctx: Db] [table: person, direction: Forward, predicate: age > 3, pre_decode_filter: yes]
-        Filter [ctx: Db] [predicate: active = true]
-            RecordBatchFetch [ctx: Db] [table: team]
+    Filter [ctx: Db] [predicate: age > 3 AND team INSIDE (subquery)]
+        TableScan [ctx: Db] [table: person, direction: Forward]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: id]
+                TableScan [ctx: Db] [table: team, direction: Forward, predicate: active = true, pre_decode_filter: yes]
 ''''
 
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    LookupJoin [ctx: Db] [type: Semi, alias: _join0, table: team, on: team = _join0.id]
-        TableScan [ctx: Db] [table: person, direction: Forward, predicate: age > 3 AND string::len($this.name) > 1, pre_decode_filter: no (unsupported predicate)]
-        Filter [ctx: Db] [predicate: active = true]
-            RecordBatchFetch [ctx: Db] [table: team]
+    Filter [ctx: Db] [predicate: age > 3 AND string::len($this.name) > 1 AND team INSIDE (subquery)]
+        TableScan [ctx: Db] [table: person, direction: Forward]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: id]
+                TableScan [ctx: Db] [table: team, direction: Forward, predicate: active = true, pre_decode_filter: yes]
 ''''
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    LookupJoin [ctx: Db] [type: Semi, alias: _join0, table: team, on: team = _join0.id]
-        Filter [ctx: Db] [predicate: age > 3]
-            IndexScan [ctx: Db] [index: person_name, access: = 'p1', direction: Forward]
-        Filter [ctx: Db] [predicate: active = true]
-            RecordBatchFetch [ctx: Db] [table: team]
+    Filter [ctx: Db] [predicate: age > 3 AND name = 'p1' AND team INSIDE (subquery)]
+        IndexScan [ctx: Db] [table: person, index: person_name, access: = 'p1', direction: Forward]
+        Subquery [ctx: Db] [strategy: once]
+            ProjectValue [ctx: Db] [expr: id]
+                TableScan [ctx: Db] [table: team, direction: Forward, predicate: active = true, pre_decode_filter: yes]
 "'''
 */
 

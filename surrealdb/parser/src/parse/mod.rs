@@ -413,7 +413,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		match res {
 			Ok(x) => Ok(Some(x)),
 			Err(e) => {
-				if e.is_speculative() && !self.state.contains(ParserState::SPECULATING) {
+				// A speculative error always rolls this branch back, even when an enclosing
+				// branch is speculating too, so the caller gets `Ok(None)` and can try another
+				// alternative.
+				if e.is_speculative() {
 					// If we hit a speculating error but we also peeked until the lexer was empty
 					// we might have made a decision based on the absence of more data.
 					// So we must see if more data is available before rejecting the speculating
@@ -446,7 +449,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		match res {
 			Ok(x) => Ok(Some(x)),
 			Err(e) => {
-				if e.is_speculative() && !self.state.contains(ParserState::SPECULATING) {
+				// A speculative error always rolls this branch back, even when an enclosing
+				// branch is speculating too, so the caller gets `Ok(None)` and can try another
+				// alternative.
+				if e.is_speculative() {
 					// If we hit a speculating error but we also peeked until the lexer was empty
 					// we might have made a decision based on the absence of more data.
 					// So we must see if more data is available before rejecting the speculating

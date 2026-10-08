@@ -27,20 +27,19 @@ use crate::runner::Schedular;
 use crate::tests::case::Dialect;
 use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
 use crate::tests::run::{CaseImports, RunConfig};
-use crate::tests::schema::{ENV_DEFAULT_TIMEOUT, NewPlannerStrategyConfig};
+use crate::tests::schema::ENV_DEFAULT_TIMEOUT;
 use crate::tests::{CaseSet, RunSetBuilder, TestRun};
 
 mod provisioner;
 
 #[derive(Debug)]
 pub struct TestRunConfig {
-	pub planner_config: NewPlannerStrategyConfig,
 	pub backend: Backend,
 }
 
 impl RunConfig for TestRunConfig {
 	fn name(&self, case: &CaseImports) -> String {
-		format!("{} on {} [{}]", case.test.origin.path, self.backend, self.planner_config)
+		format!("{} on {}", case.test.origin.path, self.backend)
 	}
 }
 
@@ -90,19 +89,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.with_filter(|x| {
 			!x.test.config.parsed.env.versioned || backend.supports_versioning()
 		})
-		// Run for all config the test has configured.
-		.with_expander(|x| {
-			x.test
-				.config
-				.parsed
-				.env
-				.planner_strategy
-				.iter()
-				.map(|x| TestRunConfig {
-					planner_config: *x,
-					backend,
-				})
-				.collect()
+		// One run per test.
+		.with_expander(|_| {
+			vec![TestRunConfig {
+				backend,
+			}]
 		});
 
 	let set_builder = if let Some(name_filter) = matches.get_one::<String>("filter") {
@@ -182,7 +173,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let mut reports = Vec::new();
 	let mut progress = Progress::from_stderr(runs.len(), color);
 
-	// spawn all tests -- one task per (test, strategy) combination.
+	// spawn all tests -- one task per test.
 	for run in runs {
 		progress.start_item(run.id, &run.name()).unwrap();
 		schedule_run(run, &mut schedular, &mut provisioner, report_send.clone()).await;
@@ -267,8 +258,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	.unwrap();
 
 	// Print summary line.
-	// passed/failed/warned are per-run counts (one report per test-strategy pair),
-	// while skipped is a per-test count (tests excluded before strategy expansion).
+	// passed/failed/warned are per-run counts (one report per test),
+	// while skipped is a per-test count (tests excluded before the run is built).
 	let passed = reports.iter().filter(|r| r.grade() == TestGrade::Success).count();
 	let failed = reports.iter().filter(|r| r.grade() == TestGrade::Failed).count();
 	let warned = reports.iter().filter(|r| r.grade() == TestGrade::Warning).count();
@@ -405,7 +396,7 @@ async fn run_test_with_dbs(
 ) -> Result<TestTaskResult> {
 	let config = &run.case.test.config.parsed;
 
-	let mut session = util::session_from_test_config(config, run.config.planner_config.into());
+	let mut session = util::session_from_test_config(config);
 
 	// Run the test body, capturing any early-exit result. The cleanup below must
 	// run on *every* exit path — otherwise seed data from an importing test that
@@ -526,10 +517,7 @@ async fn run_test_body(
 			// limit matches `parser::ParserSettings::default()` above.
 			// Lowering produces a `PreparedGqlQuery` (the `LogicalOp::Match`
 			// carrying a `MatchPlan`), which is submitted as an already-lowered
-			// `QuerySource::Plan`. It executes through the streaming engine,
-			// so `.gql` cases default away from the compute-only strategy
-			// (see `Dialect::Gql` default in the schema's planner-strategy
-			// seam).
+			// `QuerySource::Plan`.
 			let settings = gql::GqlParserSettings::default();
 			let source = &run.case.test.source.as_bytes();
 			let query = match gql::parse_to_plan_with_settings(&run.case.test.source, settings) {
@@ -708,7 +696,6 @@ mod tests {
 	use super::*;
 	use crate::tests::case::{CaseId, Dialect, Origin, TestCase};
 	use crate::tests::run::{CaseImports, TestRunId};
-	use crate::tests::schema::NewPlannerStrategyConfig;
 
 	/// Builds a datastore equivalent to the reused base-environment datastore the
 	/// provisioner hands out (all capabilities + experimental targets, auth on).
@@ -753,7 +740,6 @@ mod tests {
 				repairs: Vec::new(),
 			}),
 			config: TestRunConfig {
-				planner_config: NewPlannerStrategyConfig::ComputeOnly,
 				backend: Backend::Memory,
 			},
 		}

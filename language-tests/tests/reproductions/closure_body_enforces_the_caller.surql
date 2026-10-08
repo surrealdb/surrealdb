@@ -9,7 +9,7 @@ reason = """
 	reads where it is invoked, so a record user reading a table through a
 	closure sees exactly the rows and fields a direct `SELECT` shows it: the
 	table permission removes `t:3` and the field guard cuts `hidden` from the
-	record the caller does not own, on both engines.
+	record the caller does not own.
 """
 
 [[test.results]]

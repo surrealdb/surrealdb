@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_semantics_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -19,14 +18,7 @@ reason = """
 
 [[test.results]]
 value = '''
-'ProjectLayer [ctx: Db] [columns: g = <permission> @permission, c_pass = <permission> : string @permission, c_raw = <permission> : string @permission, c_reads = <computed> : bool @computed, c_self = <computed> : none | string @computed]
-    ProjectLayer [ctx: Db] [columns: c_pass = <computed> : string @computed, c_raw = <computed> : string @computed]
-        TableScan [ctx: Db] [table: item, direction: Forward]
-''''
-
-[[test.results]]
-value = '''
-'SelectProject [ctx: Db] [projections: g AS stored, c_raw AS raw_judged, c_reads AS rederived, c_self AS self_view, c_pass AS admitted]
+'SelectProject [ctx: Db] [projections: *]
     ProjectLayer [ctx: Db] [columns: g = <permission> @permission, c_pass = <permission> : string @permission, c_raw = <permission> : string @permission, c_reads = <computed> : bool @computed, c_self = <computed> : none | string @computed]
         ProjectLayer [ctx: Db] [columns: c_pass = <computed> : string @computed, c_raw = <computed> : string @computed]
             TableScan [ctx: Db] [table: item, direction: Forward]
@@ -34,10 +26,19 @@ value = '''
 
 [[test.results]]
 value = '''
-'Filter [ctx: Db] [predicate: c_reads = true]
+'SelectProject [ctx: Db] [projections: stored, raw_judged, rederived, self_view, admitted]
     ProjectLayer [ctx: Db] [columns: g = <permission> @permission, c_pass = <permission> : string @permission, c_raw = <permission> : string @permission, c_reads = <computed> : bool @computed, c_self = <computed> : none | string @computed]
         ProjectLayer [ctx: Db] [columns: c_pass = <computed> : string @computed, c_raw = <computed> : string @computed]
             TableScan [ctx: Db] [table: item, direction: Forward]
+''''
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Filter [ctx: Db] [predicate: c_reads = true]
+        ProjectLayer [ctx: Db] [columns: g = <permission> @permission, c_pass = <permission> : string @permission, c_raw = <permission> : string @permission, c_reads = <computed> : bool @computed, c_self = <computed> : none | string @computed]
+            ProjectLayer [ctx: Db] [columns: c_pass = <computed> : string @computed, c_raw = <computed> : string @computed]
+                TableScan [ctx: Db] [table: item, direction: Forward]
 ''''
 
 [[test.results]]
@@ -60,21 +61,30 @@ value = '''
 
 [[test.results]]
 value = '''
-'Union [ctx: Db] [inputs: 2]
-    ProjectLayer [ctx: Db] [columns: hid_a = <permission> @permission]
-        TableScan [ctx: Db] [table: a, direction: Forward]
-    ProjectLayer [ctx: Db] [columns: hid_b = <permission> @permission]
-        TableScan [ctx: Db] [table: b, direction: Forward]
+'SelectProject [ctx: Db] [projections: *]
+    Union [ctx: Db]
+        Subquery [ctx: Rt]
+            SelectProject [ctx: Db] [projections: *]
+                ProjectLayer [ctx: Db] [columns: hid_a = <permission> @permission]
+                    TableScan [ctx: Db] [table: a, direction: Forward]
+        Subquery [ctx: Rt]
+            SelectProject [ctx: Db] [projections: *]
+                ProjectLayer [ctx: Db] [columns: hid_b = <permission> @permission]
+                    TableScan [ctx: Db] [table: b, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Db] [projections: pub, hid_a AS ha, hid_b AS hb]
-    Union [ctx: Db] [inputs: 2]
-        ProjectLayer [ctx: Db] [columns: hid_a = <permission> @permission]
-            TableScan [ctx: Db] [table: a, direction: Forward]
-        ProjectLayer [ctx: Db] [columns: hid_b = <permission> @permission]
-            TableScan [ctx: Db] [table: b, direction: Forward]
+'SelectProject [ctx: Db] [projections: pub, ha, hb]
+    Union [ctx: Db]
+        Subquery [ctx: Rt]
+            SelectProject [ctx: Db] [projections: *]
+                ProjectLayer [ctx: Db] [columns: hid_a = <permission> @permission]
+                    TableScan [ctx: Db] [table: a, direction: Forward]
+        Subquery [ctx: Rt]
+            SelectProject [ctx: Db] [projections: *]
+                ProjectLayer [ctx: Db] [columns: hid_b = <permission> @permission]
+                    TableScan [ctx: Db] [table: b, direction: Forward]
 ''''
 */
 

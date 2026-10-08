@@ -2,10 +2,9 @@
 //!
 //! `MatchPlan` is the language-neutral binding-table plan node produced by the
 //! GQL lowering and carried by the logical plan's [`LogicalOp::Match`]. Its
-//! scalars are the logical plan's own [`LogicalExpr`], so the streaming
-//! execution planner (`exec/planner/match_plan.rs`) compiles them as it
-//! compiles every other scalar and the plan holds nothing the legacy engine
-//! evaluates. It never runs under the compute-only planner.
+//! scalars are the logical plan's own [`LogicalExpr`], so the execution planner
+//! (`exec/planner/match_plan.rs`) compiles them as it compiles every other
+//! scalar. It runs only on the engine.
 //!
 //! See `doc/gql/V2_DESIGN.md` §2 for the normative contract.
 
@@ -415,7 +414,7 @@ impl MatchPlan {
 	///
 	/// # Panics
 	/// Panics if `id` is not a valid index into [`MatchPlan::bindings`]. Callers
-	/// (the streaming planner) only ever pass ids that the lowering placed into
+	/// (the planner) only ever pass ids that the lowering placed into
 	/// this same plan's `bindings`/patterns, so the index is always in range; an
 	/// out-of-range id is an internal-consistency bug, not a user-reachable path.
 	/// For the never-panicking rendering path use [`MatchPlan::binding_name`].

@@ -16,41 +16,41 @@ use crate::val::{ClosureEvaluator, Value};
 use crate::{define_pure_function, register_functions};
 
 // Single array argument functions
-define_pure_function!(ArrayDistinct, "array::distinct", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::distinct);
-define_pure_function!(ArrayFirst, "array::first", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::first);
+define_pure_function!(ArrayDistinct, "array::distinct", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (array: Any) -> Any, crate::fnc::array::distinct);
+define_pure_function!(ArrayFirst, "array::first", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (array: Any) -> Any, crate::fnc::array::first);
 define_pure_function!(ArrayFlatten, "array::flatten", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::flatten);
 define_pure_function!(ArrayGroup, "array::group", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::group);
 define_pure_function!(ArrayIsEmpty, "array::is_empty", effects: EffectSet::PURE, (array: Any) -> Bool, crate::fnc::array::is_empty);
-define_pure_function!(ArrayLast, "array::last", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::last);
+define_pure_function!(ArrayLast, "array::last", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (array: Any) -> Any, crate::fnc::array::last);
 define_pure_function!(ArrayLen, "array::len", effects: EffectSet::PURE, (array: Any) -> Int, crate::fnc::array::len);
-define_pure_function!(ArrayMax, "array::max", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::max);
-define_pure_function!(ArrayMin, "array::min", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::min);
-define_pure_function!(ArrayPop, "array::pop", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::pop);
-define_pure_function!(ArrayReverse, "array::reverse", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::reverse);
+define_pure_function!(ArrayMax, "array::max", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (array: Any) -> Any, crate::fnc::array::max);
+define_pure_function!(ArrayMin, "array::min", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (array: Any) -> Any, crate::fnc::array::min);
+define_pure_function!(ArrayPop, "array::pop", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (array: Any) -> Any, crate::fnc::array::pop);
+define_pure_function!(ArrayReverse, "array::reverse", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (array: Any) -> Any, crate::fnc::array::reverse);
 // Shuffles with the thread rng, so it answers differently for one input and
 // declares `EffectSet::ENTROPY`: a rule that folds a call at plan time or
 // duplicates one across mentions must not touch it.
-define_pure_function!(ArrayShuffle, "array::shuffle", effects: EffectSet::ENTROPY, (array: Any) -> Any, crate::fnc::array::shuffle);
-define_pure_function!(ArraySort, "array::sort", effects: EffectSet::PURE, (array: Any, ?order: Any) -> Any, crate::fnc::array::sort);
-define_pure_function!(ArraySortNatural, "array::sort_natural", effects: EffectSet::PURE, (array: Any, ?order: Any) -> Any, crate::fnc::array::sort_natural);
-define_pure_function!(ArraySortLexical, "array::sort_lexical", effects: EffectSet::PURE, (array: Any, ?order: Any) -> Any, crate::fnc::array::sort_lexical);
-define_pure_function!(ArraySortNaturalLexical, "array::sort_natural_lexical", effects: EffectSet::PURE, (array: Any, ?order: Any) -> Any, crate::fnc::array::sort_natural_lexical);
+define_pure_function!(ArrayShuffle, "array::shuffle", effects: EffectSet::ENTROPY, rule: ReturnRule::SameAsArg(0), (array: Any) -> Any, crate::fnc::array::shuffle);
+define_pure_function!(ArraySort, "array::sort", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (array: Any, ?order: Any) -> Any, crate::fnc::array::sort);
+define_pure_function!(ArraySortNatural, "array::sort_natural", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (array: Any, ?order: Any) -> Any, crate::fnc::array::sort_natural);
+define_pure_function!(ArraySortLexical, "array::sort_lexical", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (array: Any, ?order: Any) -> Any, crate::fnc::array::sort_lexical);
+define_pure_function!(ArraySortNaturalLexical, "array::sort_natural_lexical", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (array: Any, ?order: Any) -> Any, crate::fnc::array::sort_natural_lexical);
 define_pure_function!(ArrayTranspose, "array::transpose", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::transpose);
 define_pure_function!(ArrayBooleanNot, "array::boolean_not", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::boolean_not);
 
 // Two argument array functions
 define_pure_function!(ArrayAdd, "array::add", effects: EffectSet::PURE, (array: Any, value: Any) -> Any, crate::fnc::array::add);
 define_pure_function!(ArrayAppend, "array::append", effects: EffectSet::PURE, (array: Any, value: Any) -> Any, crate::fnc::array::append);
-define_pure_function!(ArrayAt, "array::at", effects: EffectSet::PURE, (array: Any, index: Int) -> Any, crate::fnc::array::at);
+define_pure_function!(ArrayAt, "array::at", effects: EffectSet::PURE, rule: ReturnRule::ArrayElement(0), (array: Any, index: Int) -> Any, crate::fnc::array::at);
 define_pure_function!(ArrayBooleanAnd, "array::boolean_and", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::array::boolean_and);
 define_pure_function!(ArrayBooleanOr, "array::boolean_or", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::array::boolean_or);
 define_pure_function!(ArrayBooleanXor, "array::boolean_xor", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::array::boolean_xor);
 define_pure_function!(ArrayClump, "array::clump", effects: EffectSet::PURE, (array: Any, size: Int) -> Any, crate::fnc::array::clump);
 define_pure_function!(ArrayCombine, "array::combine", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::array::combine);
-define_pure_function!(ArrayComplement, "array::complement", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::array::complement);
+define_pure_function!(ArrayComplement, "array::complement", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (a: Any, b: Any) -> Any, crate::fnc::array::complement);
 define_pure_function!(ArrayConcat, "array::concat", effects: EffectSet::PURE, (...arrays: Any) -> Any, crate::fnc::array::concat);
 define_pure_function!(ArrayDifference, "array::difference", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::array::difference);
-define_pure_function!(ArrayIntersect, "array::intersect", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::array::intersect);
+define_pure_function!(ArrayIntersect, "array::intersect", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (a: Any, b: Any) -> Any, crate::fnc::array::intersect);
 define_pure_function!(ArrayJoin, "array::join", effects: EffectSet::PURE, (array: Any, separator: String) -> String, crate::fnc::array::join);
 define_pure_function!(ArrayLogicalAnd, "array::logical_and", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::array::logical_and);
 define_pure_function!(ArrayLogicalOr, "array::logical_or", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::array::logical_or);
@@ -58,7 +58,7 @@ define_pure_function!(ArrayLogicalXor, "array::logical_xor", effects: EffectSet:
 define_pure_function!(ArrayMatches, "array::matches", effects: EffectSet::PURE, (array: Any, value: Any) -> Any, crate::fnc::array::matches);
 define_pure_function!(ArrayPrepend, "array::prepend", effects: EffectSet::PURE, (array: Any, value: Any) -> Any, crate::fnc::array::prepend);
 define_pure_function!(ArrayPush, "array::push", effects: EffectSet::PURE, (array: Any, value: Any) -> Any, crate::fnc::array::push);
-define_pure_function!(ArrayRemove, "array::remove", effects: EffectSet::PURE, (array: Any, index: Int) -> Any, crate::fnc::array::remove);
+define_pure_function!(ArrayRemove, "array::remove", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (array: Any, index: Int) -> Any, crate::fnc::array::remove);
 define_pure_function!(ArrayRepeat, "array::repeat", effects: EffectSet::PURE, (value: Any, count: Int) -> Any, crate::fnc::array::repeat);
 define_pure_function!(ArrayUnion, "array::union", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::array::union);
 define_pure_function!(ArrayWindows, "array::windows", effects: EffectSet::PURE, (array: Any, size: Int) -> Any, crate::fnc::array::windows);
@@ -68,12 +68,12 @@ define_pure_function!(ArraySequence, "array::sequence", effects: EffectSet::PURE
 define_pure_function!(ArrayFill, "array::fill", effects: EffectSet::PURE, (array: Any, value: Any, ?start: Any, ?end: Int) -> Any, crate::fnc::array::fill);
 define_pure_function!(ArrayInsert, "array::insert", effects: EffectSet::PURE, (array: Any, value: Any, ?index: Int) -> Any, crate::fnc::array::insert);
 define_pure_function!(ArrayRange, "array::range", effects: EffectSet::PURE, (start: Any, ?end: Int) -> Any, crate::fnc::array::range);
-define_pure_function!(ArraySlice, "array::slice", effects: EffectSet::PURE, (array: Any, ?start: Any, ?end: Int) -> Any, crate::fnc::array::slice);
-define_pure_function!(ArraySwap, "array::swap", effects: EffectSet::PURE, (array: Any, i: Int, j: Int) -> Any, crate::fnc::array::swap);
+define_pure_function!(ArraySlice, "array::slice", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (array: Any, ?start: Any, ?end: Int) -> Any, crate::fnc::array::slice);
+define_pure_function!(ArraySwap, "array::swap", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (array: Any, i: Int, j: Int) -> Any, crate::fnc::array::swap);
 
 // Sort submodule
-define_pure_function!(ArraySortAsc, "array::sort::asc", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::sort::asc);
-define_pure_function!(ArraySortDesc, "array::sort::desc", effects: EffectSet::PURE, (array: Any) -> Any, crate::fnc::array::sort::desc);
+define_pure_function!(ArraySortAsc, "array::sort::asc", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (array: Any) -> Any, crate::fnc::array::sort::asc);
+define_pure_function!(ArraySortDesc, "array::sort::desc", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (array: Any) -> Any, crate::fnc::array::sort::desc);
 
 // =========================================================================
 // Closure-based array functions (require async execution with TreeStack)

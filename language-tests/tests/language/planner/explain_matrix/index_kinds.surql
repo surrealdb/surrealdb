@@ -1,19 +1,14 @@
 /**
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
-EXPLAIN / row-parity matrix over DEFINE INDEX *kind*: standard, UNIQUE,
+EXPLAIN / row matrix over DEFINE INDEX *kind*: standard, UNIQUE,
 unconditional COUNT, guarded COUNT (`COUNT WHERE <cond>`), and any of those
 decommissioned with `ALTER INDEX ... PREPARE REMOVE`. Every plan assertion is
 paired with the same query under `WITH NOINDEX` (or, where `WITH NOINDEX` is
 not an oracle, with a formulation that cannot reach the index), because a plan
 naming an operator says nothing about whether that operator answers correctly.
-
-The file is narrowed to the two streaming strategies because a prefix `EXPLAIN`
-errors under `compute-only`; the two streaming strategies plan identically by
-contract, so pinning both records that and costs nothing.
 
 Column SPELLING is not an index kind: whole-array equality against a plain
 (non-`*`) column whose value is an array returns the wrong answer, but that is
@@ -50,7 +45,7 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: std_zone, access: = 'n', direction: Forward, predicate: zone = 'n']
+    IndexScan [ctx: Db] [table: std, index: std_zone, access: = 'n', direction: Forward]
 "'''
 
 [[test.results]]
@@ -74,7 +69,7 @@ value = "[{ id: std:3 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: std_zone, access: >'n', direction: Forward, predicate: zone > 'n']
+    IndexScan [ctx: Db] [table: std, index: std_zone, access: >'n', direction: Forward]
 "'''
 
 [[test.results]]
@@ -89,7 +84,7 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: uq_email, access: = 'a@x', direction: Forward, predicate: email = 'a@x']
+    IndexScan [ctx: Db] [table: uq, index: uq_email, access: = 'a@x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -104,7 +99,7 @@ error = "Database index `uq_email` already contains 'a@x', with record `uq:2`"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: uq_email, access: , direction: Forward]
+    IndexScan [ctx: Db] [table: uq, index: uq_email, direction: Forward]
 ''''
 
 [[test.results]]
@@ -119,7 +114,7 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: fan_tags, access: = 'x', direction: Forward, predicate: tags CONTAINS 'x']
+    IndexScan [ctx: Db] [table: fan, index: fan_tags, access: = 'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -130,7 +125,8 @@ value = "[{ id: fan:1 }, { id: fan:2 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: fan, condition: tags CONTAINS 'x']
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: fan, condition: tags CONTAINS 'x']
 "'''
 
 [[test.results]]
@@ -153,8 +149,9 @@ value = "[{ id: fan:1 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: fan, direction: Forward, predicate: tags = ['x', 'y'], pre_decode_filter: yes]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: fan, direction: Forward, predicate: tags = ['x', 'y'], pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -180,8 +177,9 @@ value = "[{ id: fanp:1 }, { id: fanp:2 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: fanp, direction: Forward, predicate: tags CONTAINS 'x', pre_decode_filter: yes]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: fanp, direction: Forward, predicate: tags CONTAINS 'x', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -208,7 +206,7 @@ value = "[{ count: 0 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: fanu_tags, access: = 'p', direction: Forward, predicate: tags CONTAINS 'p']
+    IndexScan [ctx: Db] [table: fanu, index: fanu_tags, access: = 'p', direction: Forward]
 "'''
 
 [[test.results]]
@@ -219,7 +217,8 @@ value = "[{ id: fanu:1 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: fanu, condition: tags CONTAINS 'p']
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: fanu, condition: tags CONTAINS 'p']
 "'''
 
 [[test.results]]
@@ -233,7 +232,8 @@ value = "'OK'"
 
 [[test.results]]
 value = '''
-'CountScan [ctx: Db] [source: ctr]
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: ctr]
 ''''
 
 [[test.results]]
@@ -244,7 +244,8 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-'CountScan [ctx: Db] [source: ctr]
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: ctr]
 ''''
 
 [[test.results]]
@@ -255,7 +256,8 @@ value = "3"
 
 [[test.results]]
 value = '''
-'CountScan [ctx: Db] [source: ctr]
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: ctr]
 ''''
 
 [[test.results]]
@@ -278,7 +280,8 @@ value = """{ events: {  }, fields: { state: 'DEFINE FIELD state ON gc TYPE strin
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: gc, condition: state = 'on']
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: gc, condition: state = 'on']
 "'''
 
 [[test.results]]
@@ -286,8 +289,9 @@ value = "[{ count: 2 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: gc, direction: Forward, predicate: state = 'on', pre_decode_filter: yes]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: gc, direction: Forward, predicate: state = 'on', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -295,8 +299,9 @@ value = "[{ count: 2 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: gc, direction: Forward, predicate: 'on' = state, pre_decode_filter: yes]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: gc, direction: Forward, predicate: 'on' = state, pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -304,8 +309,9 @@ value = "[{ count: 2 }]"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: gc, direction: Forward, predicate: state = 'off', pre_decode_filter: yes]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: gc, direction: Forward, predicate: state = 'off', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -313,7 +319,8 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-'CountScan [ctx: Db] [source: gc]
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: gc]
 ''''
 
 [[test.results]]
@@ -327,7 +334,8 @@ value = "'OK'"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: var, condition: zone = 'guarded']
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: var, condition: zone = 'guarded']
 "'''
 
 [[test.results]]
@@ -338,7 +346,8 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: var, condition: zone = 'n']
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: var, condition: zone = 'n']
 "'''
 
 [[test.results]]
@@ -349,10 +358,11 @@ value = "[{ count: 2 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: var, condition: zone = 'n' AND email = 'a@x']
-    BitmapAnd [ctx: Db]
-        BitmapIndexScan [ctx: Db] [index: var_zone, access: = 'n']
-        BitmapIndexScan [ctx: Db] [index: var_email, access: = 'a@x']
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: var, condition: zone = 'n' AND email = 'a@x']
+        BitmapAnd [ctx: Db]
+            BitmapIndexScan [ctx: Db] [index: var_zone, access: = 'n']
+            BitmapIndexScan [ctx: Db] [index: var_email, access: = 'a@x']
 "'''
 
 [[test.results]]
@@ -363,8 +373,10 @@ value = "[{ count: 1 }]"
 
 [[test.results]]
 value = '''
-'Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: var, direction: Forward, predicate: string::len(zone) = 1, pre_decode_filter: no (unsupported predicate)]
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: string::len(zone) = 1]
+            TableScan [ctx: Db] [table: var, direction: Forward]
 ''''
 
 [[test.results]]
@@ -379,7 +391,7 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: pr_zone, access: = 'n', direction: Forward, predicate: zone = 'n']
+    IndexScan [ctx: Db] [table: pr, index: pr_zone, access: = 'n', direction: Forward]
 "'''
 
 [[test.results]]
@@ -432,7 +444,8 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-'CountScan [ctx: Db] [source: prc]
+'SelectProject [ctx: Db] [projections: *]
+    CountScan [ctx: Db] [source: prc]
 ''''
 
 [[test.results]]
@@ -455,7 +468,8 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: prg, condition: state = 'on']
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: prg, condition: state = 'on']
 "'''
 
 [[test.results]]
@@ -475,8 +489,9 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-    TableScan [ctx: Db] [table: prg, direction: Forward, predicate: state = 'on', pre_decode_filter: yes]
+"SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        TableScan [ctx: Db] [table: prg, direction: Forward, predicate: state = 'on', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -491,7 +506,7 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    IndexScan [ctx: Db] [index: dupe_tags, access: = 'x', direction: Forward, predicate: tags CONTAINS 'x']
+    IndexScan [ctx: Db] [table: dupe, index: dupe_tags, access: = 'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -502,7 +517,8 @@ value = "[{ id: dupe:1 }, { id: dupe:2 }]"
 
 [[test.results]]
 value = '''
-"IndexCountScan [ctx: Db] [source: dupe, condition: tags CONTAINS 'x']
+"SelectProject [ctx: Db] [projections: *]
+    IndexCountScan [ctx: Db] [source: dupe, condition: tags CONTAINS 'x']
 "'''
 
 [[test.results]]

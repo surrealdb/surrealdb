@@ -3448,14 +3448,14 @@ mod http_integration {
 	}
 
 	async fn start_bucket_permission_test_server(
-		planner_strategy: Option<&str>,
+		retired_planner_strategy: Option<&str>,
 	) -> Result<(String, common::Child, Client), Box<dyn std::error::Error>> {
 		const NS: &str = "bucket_permission_ns";
 		const DB: &str = "bucket_permission_db";
 
 		let mut args = "--allow-experimental files".to_string();
-		if let Some(planner_strategy) = planner_strategy {
-			args.push_str(&format!(" --planner-strategy {planner_strategy}"));
+		if let Some(retired_planner_strategy) = retired_planner_strategy {
+			args.push_str(&format!(" --planner-strategy {retired_planner_strategy}"));
 		}
 		let (addr, server) = common::start_server(StartServerArguments {
 			args,
@@ -3951,8 +3951,10 @@ mod http_integration {
 		Ok(())
 	}
 
+	/// `--planner-strategy` selects nothing; a server started with a retired
+	/// value runs the same single engine.
 	#[test(tokio::test)]
-	async fn bucket_list_is_denied_for_record_users_in_compute_only_planner()
+	async fn a_retired_planner_strategy_flag_is_accepted_and_ignored()
 	-> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server, client) =
 			start_bucket_permission_test_server(Some("compute-only")).await?;

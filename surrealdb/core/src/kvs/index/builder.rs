@@ -13,7 +13,8 @@ use futures::channel::oneshot::{Receiver, Sender, channel};
 use surrealdb_datastore::close::{CommitAction, RollbackAction};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Notify, OnceCell, RwLock};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
@@ -29,11 +30,15 @@ use super::{
 	AcquiredBuild, BUILD_CLOSING_SLEEP, BuildGeneration, IndexBuildPhase, IndexBuildReportStatus,
 	IndexBuildState, IndexBuilding, build_abort_deadline,
 };
-use crate::catalog::providers::TableProvider;
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, TableId};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::exec::context::{NamespaceContext, RootContext};
+use crate::exec::permission::{PhysicalIndexEntry, index_entry_physical};
+use crate::exec::planner::Planner;
+use crate::exec::{DatabaseContext, ExecutionContext};
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::hnsw::index::HnswCompactionOutcome;
@@ -369,6 +374,24 @@ impl IndexBuilder {
 		}
 	}
 
+	/// Build index `ix` of table `tb` as [`Self::build`] starts it, and when
+	/// `blocking`, wait for this node's build to finish, failing as it fails.
+	pub(crate) async fn run(
+		&self,
+		ctx: &FrozenContext,
+		opt: Options,
+		tb: TableId,
+		ix: Arc<IndexDefinition>,
+		blocking: bool,
+	) -> Result<()> {
+		match self.build(ctx, opt, tb, ix, blocking).await? {
+			Some(rcv) => rcv.await.map_err(|_| DatastoreError::IndexingBuildingCancelled {
+				reason: "Channel shutdown".to_string(),
+			})?,
+			None => Ok(()),
+		}
+	}
+
 	/// Resume an index build left unfinished by a crashed or expired owner.
 	///
 	/// A `CONCURRENTLY` build is fire-and-forget: the initiating statement
@@ -467,6 +490,15 @@ pub(super) struct Building {
 	/// the two must move together: a notification without the flag is a lost
 	/// wake-up for every waiter that has not registered yet.
 	finished_notify: Notify,
+	/// The index's columns and `COUNT` guard, compiled on first use and once
+	/// for the whole build.
+	///
+	/// The expressions are a function of the definition, which is fixed for
+	/// the build's life, so they outlive the per-batch transactions the build
+	/// opens. That is sound because the planner they are compiled through
+	/// holds no transaction: its sources resolve when the expression runs, so
+	/// nothing from the compiling batch is baked in.
+	compiled: OnceCell<Arc<PhysicalIndexEntry>>,
 }
 
 impl Building {
@@ -493,7 +525,90 @@ impl Building {
 			finished: AtomicBool::new(false),
 			release_gate: AtomicU8::new(RELEASE_GATE_STATEMENT),
 			finished_notify: Notify::new(),
+			compiled: OnceCell::new(),
 		})
+	}
+
+	/// The engine's context for one batch of this build.
+	///
+	/// A build runs with no session and no executor behind it, so this is
+	/// assembled from what the build owns: the batch's own context — which
+	/// carries that batch's transaction and the datastore's function registry
+	/// — and the `Options` the build was started with, whose authority is the
+	/// definer's for a build a statement started and root Owner's for one a
+	/// maintenance scan resumed.
+	///
+	/// No session is bound, because a build's context carries no parameters:
+	/// a `$param` inside an index expression reads `NONE` during a build and
+	/// the writer's binding during a write.
+	///
+	/// The cancellation token is fresh and nothing signals it. A build's abort
+	/// signal is [`Building::aborted`], checked between records; the token is
+	/// what the context is shaped to hold rather than a second path.
+	pub(super) async fn exec_ctx(&self, ctx: &FrozenContext) -> Result<ExecutionContext> {
+		let tx = ctx.tx();
+		let ns = tx.expect_ns_by_name(self.opt.ns()?).await?;
+		let db = tx.expect_db_by_name(self.opt.ns()?, self.opt.db()?).await?;
+		let root = RootContext {
+			ctx: Arc::clone(ctx),
+			options: Some(self.opt.clone()),
+			datastore: None,
+			cancellation: Arc::new(CancellationToken::new()),
+			auth: Arc::clone(&self.opt.auth),
+			session: None,
+			current_value: None,
+			current_row: None,
+			// Suppression is derived from the options the build carries, not
+			// fixed: a build started from a frame that suppressed enforcement
+			// must key a record the way a write in that frame keys it, or the
+			// two disagree about the same record. It is expressed as
+			// suppression rather than as `skip_fetch_perms`, which also
+			// refuses a write — the frame a permission predicate runs in, and
+			// not the frame a build does.
+			skip_fetch_perms: false,
+			perms_suppressed: !self.opt.perms,
+			caller_perms_suppressed: !self.opt.caller_perms,
+			computing_record: None,
+			no_write: None,
+			version_stamp: None,
+			zero_limits: Vec::new(),
+			topk_thresholds: None,
+			guard_verdicts: Default::default(),
+			writing: false,
+		};
+		Ok(ExecutionContext::Database(DatabaseContext {
+			ns_ctx: NamespaceContext {
+				root,
+				ns,
+			},
+			db,
+			field_state_cache: Arc::new(RwLock::new(HashMap::new())),
+			table_def_cache: Arc::new(RwLock::new(HashMap::new())),
+			index_def_cache: Arc::new(RwLock::new(HashMap::new())),
+			select_permission_cache: Arc::new(RwLock::new(HashMap::new())),
+		}))
+	}
+
+	/// This index's columns and `COUNT` guard, compiled on first use and once
+	/// for the whole build, so the scan evaluates the same expressions the
+	/// write path evaluates for the same definition.
+	///
+	/// The planner is built without a transaction, as the write path's is: a
+	/// planner that resolves no table context cannot recurse into an index
+	/// expression that names the table it indexes, and it is what makes the
+	/// compiled form outlive the batch it was compiled in.
+	pub(super) async fn compiled_index(
+		&self,
+		exec: &ExecutionContext,
+	) -> Result<Arc<PhysicalIndexEntry>> {
+		self.compiled
+			.get_or_try_init(|| async {
+				let planner = Planner::new(exec.ctx(), exec.function_registry());
+				let entry = index_entry_physical(&self.ix, &planner).await?;
+				Ok::<_, anyhow::Error>(Arc::new(entry))
+			})
+			.await
+			.cloned()
 	}
 
 	/// Acquire durable ownership for this build.
@@ -1459,8 +1574,11 @@ impl Building {
 		// this check runs on a separate read transaction. During a blocking DEFINE
 		// INDEX, the index definition is only committed after indexing completes,
 		// so this read transaction may not yet see it.
-		// If the index is not found, we continue — the prepare_remove flag can only
-		// be set by REMOVE INDEX, which runs in a separate transaction.
+		// A miss is throttled like a hit: the prepare_remove flag is set only by
+		// a REMOVE INDEX, in a transaction of its own, on a definition it can
+		// read, so no flag exists before the definition is visible, and one set
+		// after is seen by the first check after it, at most one throttle
+		// interval later.
 		if let Some(ix) = tx
 			.get_tb_index(
 				self.ix_key.ns,
@@ -1561,7 +1679,11 @@ impl Building {
 	/// from `Building` after `initial_complete`, skips the initial scan and
 	/// only drains durable appendings and reservations.
 	pub(super) async fn run_acquired(&self, acquired: AcquiredBuild) -> Result<()> {
-		let mut last_prepare_remove_check = Instant::now();
+		// The first batch checks whether the index was marked for removal, so a
+		// build of an index decommissioned before it started never completes;
+		// later batches check at most every few seconds.
+		let mut last_prepare_remove_check =
+			Instant::now().checked_sub(Duration::from_secs(5)).unwrap_or_else(Instant::now);
 		let generation = acquired.generation;
 		let scanning_initial =
 			acquired.phase == IndexBuildPhase::Building && !acquired.initial_complete;

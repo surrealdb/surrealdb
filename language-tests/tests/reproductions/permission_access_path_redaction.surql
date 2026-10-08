@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/permission_access_path_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -17,11 +16,11 @@ reason = """
 value = '''
 'SelectProject [ctx: Db] [projections: id]
     PermissionFilter [ctx: Db] [predicate: <permission>]
-        IndexScan [ctx: Db] [index: <permission>, access: <permission>, direction: Forward]
+        IndexScan [ctx: Db] [table: t, index: <permission>, access: <permission>, direction: Forward]
 ''''
 
 [[test.results]]
-value = "{ attributes: { projections: 'id' }, children: [{ attributes: { predicate: '<permission>' }, children: [{ attributes: { access: '<permission>', direction: 'Forward', index: '<permission>' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'PermissionFilter' }], context: 'Db', operator: 'SelectProject' }"
+value = "{ attributes: { projections: 'id' }, children: [{ attributes: { predicate: '<permission>' }, children: [{ attributes: { access: '<permission>', direction: 'Forward', index: '<permission>', table: 't' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'PermissionFilter' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
 value = "[{ id: t:1 }]"

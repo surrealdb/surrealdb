@@ -60,6 +60,11 @@ pub struct Options {
 	pub(crate) for_update: bool,
 	/// Tracks async event nesting depth for enforcing event MAXDEPTH.
 	async_event_depth: Option<u16>,
+	/// Whether the evaluation spends [`Self::dive`] per expression it enters
+	/// rather than per re-entry: inside a table's event clauses, the body of a
+	/// user-defined function whose text writes, and what either reaches
+	/// ([`crate::exec::vm::depth`]).
+	pub(crate) per_expression_depth: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -107,15 +112,13 @@ pub(crate) enum NoWriteFrame {
 impl NoWriteFrame {
 	/// Whether this frame refuses a *call* to the named builtin.
 	///
-	/// Asked at two points, because a builtin can be reached two ways that do
-	/// not meet: as an `Expr::FunctionCall`, which `expr_compute` sees, and as a
-	/// method on a value (`f'bucket:k'.put(..)`), which dispatches straight
-	/// through `fnc::idiom` with only its arguments going back through the
-	/// expression walk. Both ask this so the answer cannot differ between them.
+	/// Asked wherever a builtin is applied, by a function call and by a method
+	/// on a value (`f'bucket:k'.put(..)`) alike, so the answer cannot differ
+	/// between them.
 	///
-	/// Scoped to [`Self::SurrealismReadOnly`]: see `refuses_under_no_write` in
-	/// `legacy/expr/expression.rs` for why the other two frames permit these
-	/// calls, and `SECURITY_GUIDE.md` for the decision that keeps
+	/// Scoped to [`Self::SurrealismReadOnly`]: the other two frames permit
+	/// these calls and refuse the writes they make where they are made, and
+	/// `SECURITY_GUIDE.md` records the decision that keeps
 	/// [`Self::PermissionPredicate`] out of it.
 	pub(crate) fn refuses_builtin_call(self, name: &str) -> bool {
 		matches!(self, Self::SurrealismReadOnly) && crate::expr::method::mutates_state_builtin(name)
@@ -162,6 +165,7 @@ impl Options {
 			version: None,
 			for_update: false,
 			async_event_depth: None,
+			per_expression_depth: false,
 		}
 	}
 
@@ -188,15 +192,16 @@ impl Options {
 	/// Resume the computation-depth count `depth` levels deeper, reducing the
 	/// remaining budget by that much (saturating at 0).
 	///
-	/// The streaming executor tracks nesting depth as a count *up* toward
-	/// `max_computation_depth`; the legacy `compute` path tracks the same limit
-	/// as the count *down* remaining budget held here in [`Self::dive`]. When the
-	/// streaming engine hands a sub-computation to the legacy path (or to
-	/// embedded scripting, which re-enters via `compute`), this carries the depth
-	/// across so one continuous count applies end-to-end. The configured maximum
-	/// is deliberately *not* altered — only the remaining budget shrinks — so the
-	/// limit a query actually hits is always `max_computation_depth`, never an
-	/// arbitrary smaller number derived from how deep the caller already was.
+	/// The planner tracks nesting depth as a count *up* toward
+	/// `max_computation_depth`; the budget held here in [`Self::dive`] counts
+	/// *down*. Embedded scripting, which re-enters the engine from inside a
+	/// computation, carries the depth across with this, so one continuous count
+	/// applies end to end. The configured maximum is deliberately *not*
+	/// altered — only the remaining budget shrinks — so the limit a query
+	/// actually hits is always `max_computation_depth`, never an arbitrary
+	/// smaller number derived from how deep the caller already was. A body
+	/// entered to be evaluated one expression at a time from code that is not
+	/// resumes the count the same way ([`crate::exec::vm::depth`]).
 	pub(crate) fn with_dive_consumed(&self, depth: u32) -> Self {
 		Self {
 			dive: self.dive.saturating_sub(depth),
@@ -249,7 +254,7 @@ impl Options {
 	/// whatever the actor may do to it, or referential integrity could not be
 	/// maintained. That bypass is scoped to the referencing record itself:
 	/// nested work with its own permission contract — the graph-edge cascade in
-	/// [`crate::doc::Document::purge_edges`] — restores `caller_perms`.
+	/// the graph-edge purge — restores `caller_perms`.
 	pub(crate) fn new_for_reference_cascade(&self) -> Self {
 		Self {
 			perms: false,
@@ -426,13 +431,28 @@ impl Options {
 	/// The parameter is the approximate cost of the operation (more concretely, the size of the
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
 	pub(crate) fn dive(&self, cost: u8) -> Result<Self, Error> {
-		if self.dive < cost as u32 {
-			return Err(ExecError::ComputationDepthExceeded.into());
-		}
+		self.check_dive(cost)?;
 		Ok(Self {
 			dive: self.dive - cost as u32,
 			..self.clone()
 		})
+	}
+
+	/// Spend `cost` of this object's computation-depth budget in place, with the
+	/// failure [`Self::dive`] raises once the budget is spent, leaving the budget
+	/// as it was.
+	pub(crate) fn spend_dive(&mut self, cost: u8) -> Result<(), Error> {
+		self.check_dive(cost)?;
+		self.dive -= cost as u32;
+		Ok(())
+	}
+
+	/// Whether a dive of `cost` would succeed, spending nothing.
+	pub(crate) fn check_dive(&self, cost: u8) -> Result<(), Error> {
+		if self.dive < cost as u32 {
+			return Err(ExecError::ComputationDepthExceeded.into());
+		}
+		Ok(())
 	}
 
 	// --------------------------------------------------

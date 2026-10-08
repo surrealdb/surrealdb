@@ -1,18 +1,17 @@
-//! # Streaming Execution Module
+//! # Execution Module
 //!
-//! This module implements a streaming query execution engine for SurrealDB. It provides
-//! a complete replacement for the recursive `compute()` method path used by the `expr`
-//! module, enabling push-based, batched execution of query plans.
+//! This module is SurrealDB's query execution engine. The bytecode VM ([`vm`]) runs every
+//! statement; a statement the VM cannot run is an error, and nothing falls back to another
+//! engine (`doc/adr/0007-one-engine-the-bytecode-vm.md`).
 //!
 //! ## Design Principles
 //!
-//! - **No compute methods**: This module must not call any `compute()` methods from the `expr`
-//!   module. All evaluation logic is implemented through [`PhysicalExpr`] and [`OperatorPlan`]
-//!   traits to maintain a clean separation between the legacy compute path and the streaming
-//!   execution path.
+//! - **One engine**: Evaluation is implemented through [`PhysicalExpr`] and the VM's programs. The
+//!   operators of [`operators`] are host services the VM calls — storage scans, index iterators,
+//!   record fetches — and not a second executor.
 //!
-//! - **Push-based streaming**: Rather than pulling results through recursive calls, operators push
-//!   batches of values downstream through async streams. This enables better memory efficiency and
+//! - **Push-based streaming**: Operators push batches of values downstream through async streams
+//!   rather than pulling results through recursive calls. This enables better memory efficiency and
 //!   supports incremental result delivery.
 //!
 //! - **Batched execution**: Values are processed in [`ValueBatch`] containers, allowing operators
@@ -20,18 +19,19 @@
 //!
 //! ## Module Structure
 //!
-//! - [`planner`]: Transforms parsed statements into executable operator plans
-//! - [`operators`]: Physical operators (scan, filter, project, aggregate, etc.)
-//! - [`physical_expr`]: Expression evaluation within the streaming context
+//! - [`planner`]: Binds a logical plan and plans it into a VM program, compiling the host services
+//!   the program needs
+//! - [`vm`]: The physical plan, the bytecode lowering and the interpreter
+//! - [`operators`]: Physical operators the VM uses as host services (scan, graph, join, etc.)
+//! - [`physical_expr`]: Expression evaluation within the execution context
 //! - [`context`]: Execution context hierarchy (root → namespace → database)
-//! - [`statement`]: Statement-level execution coordination
 //!
 //! ## Execution Flow
 //!
-//! 1. The [`planner`] converts a parsed statement into an [`OperatorPlan`] tree
+//! 1. The [`planner`] binds a statement's logical plan for one transaction and principal
 //! 2. Context requirements are validated against the current session
-//! 3. Each operator's `execute()` method returns a [`ValueBatchStream`]
-//! 4. Streams are composed and consumed to produce query results
+//! 3. The VM maps, optimises and lowers the plan to a program and runs it
+//! 4. The host serves the program's storage reads; results are produced as a [`ValueBatchStream`]
 
 use std::fmt::Debug;
 use std::pin::Pin;
@@ -48,17 +48,30 @@ pub(crate) use crate::expr::{ControlFlowExt, FlowResult};
 pub(crate) type BoxFut<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
 pub(crate) mod access_mode;
+pub(crate) mod analyzer_function;
+pub(crate) mod api;
 pub(crate) mod batch;
 pub(crate) mod buffer;
 pub(crate) mod cardinality;
+pub(crate) mod catalog_deps;
+pub(crate) mod closure;
+pub(crate) mod compiles;
 pub(crate) mod config;
 pub(crate) mod context;
+pub(crate) mod entry;
 pub(crate) mod error;
 pub(crate) mod expression_registry;
 pub(crate) mod fan_out;
+pub(crate) mod frame;
+pub(crate) mod kill;
+pub(crate) mod live;
+pub(crate) mod scalar_unit;
+pub(crate) mod zero_limit;
 pub(crate) use crate::val::field_path;
 pub(crate) mod field_path_convert;
+pub(crate) mod field_rules;
 pub(crate) mod function;
+pub(crate) mod guard_verdicts;
 pub(crate) mod index;
 pub(crate) mod logical;
 pub(crate) mod metrics;
@@ -71,8 +84,11 @@ pub(crate) mod permission;
 pub(crate) mod physical_expr;
 pub(crate) mod planner;
 pub(crate) mod pre_decode_filter;
+pub(crate) mod reference_purge;
+pub(crate) mod table_view;
 pub(crate) mod topk_pushdown;
-
+pub(crate) mod trampoline;
+pub(crate) mod vm;
 // Re-export access mode types
 pub(crate) use access_mode::{AccessMode, CombineAccessModes};
 // Re-export the operator data unit
@@ -127,8 +143,14 @@ pub(crate) type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBat
 /// Execution plans form a tree structure where each node declares its minimum required
 /// context level via `required_context()`. The executor validates that the current session
 /// meets these requirements before execution begins.
-pub(crate) trait ExecOperator: Debug + Send + Sync {
+pub(crate) trait ExecOperator: Debug + Send + Sync + std::any::Any {
 	fn name(&self) -> &'static str;
+
+	/// The name an expression holding this operator's statement shows it
+	/// by: the operator at the top of the plan `EXPLAIN` renders for it.
+	fn display_name(&self) -> &'static str {
+		self.name()
+	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
 		vec![]
@@ -166,6 +188,12 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 		vec![]
 	}
 
+	/// For a scan of storage, the limit it is bound to, which spares it its
+	/// records when that limit evaluates to zero (see [`zero_limit`]).
+	fn zero_limit_binding(&self) -> Option<&zero_limit::ZeroLimitBinding> {
+		None
+	}
+
 	/// The children `EXPLAIN` renders beneath this operator: every child,
 	/// unless the operator hides one from the caller. A join lifted out of a
 	/// permission predicate hides its right side from a caller the permission
@@ -194,39 +222,6 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 	/// index scan or a record-id lookup would print is the definer's.
 	fn redacts_access_paths_beneath(&self) -> bool {
 		false
-	}
-
-	/// Does this operator modify the execution context?
-	///
-	/// True for USE, LET, BEGIN, COMMIT, CANCEL operators.
-	/// When true, the executor will call `output_context()` after execution
-	/// to get the modified context for downstream statements.
-	fn mutates_context(&self) -> bool {
-		false
-	}
-
-	/// Compute the output context after execution.
-	///
-	/// Only called if `mutates_context()` returns true.
-	/// This method may perform async operations (like looking up namespace/database
-	/// definitions or creating transactions).
-	///
-	/// Returns `FlowResult` for the same reason `execute` does: computing the
-	/// context runs the bound expression, and a `BREAK` or `CONTINUE` raised in
-	/// there belongs to an enclosing loop, which sits above this call. Flattening
-	/// the signal into an error here would strand it at the binding site, so the
-	/// loop never sees it.
-	///
-	/// `ControlFlow::Err` carries an `anyhow::Error` rather than a concrete enum
-	/// so that a failure raised while evaluating the bound expression reaches the
-	/// boundary with its type intact. Flattening it cost the transactor's retry
-	/// loop its ability to see a write conflict, and cancellation and timeout
-	/// their classification.
-	fn output_context<'a>(
-		&'a self,
-		input: &'a ExecutionContext,
-	) -> BoxFut<'a, crate::expr::FlowResult<ExecutionContext>> {
-		Box::pin(async move { Ok(input.clone()) })
 	}
 
 	/// Returns the access mode for this plan (and all its children).

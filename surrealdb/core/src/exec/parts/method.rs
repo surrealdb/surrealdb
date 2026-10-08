@@ -62,10 +62,9 @@ impl PhysicalExpr for MethodPart {
 			// the receiver type takes precedence; when the descriptor has no
 			// implementation for it, the call degrades to closure-field-call
 			// semantics: an object field of this name holding a closure is
-			// invoked, anything else is the unknown-method error. The compute
-			// path applies the same precedence, so a name collision between a
-			// builtin method and a closure field resolves identically under
-			// every planner strategy.
+			// invoked, anything else is the unknown-method error. A name
+			// collision between a builtin method and a closure field resolves
+			// to the builtin.
 			let Some(func) = self.descriptor.resolve(&value) else {
 				return closure_field_call(self.descriptor.name, &value, &self.args, ctx).await;
 			};
@@ -86,8 +85,11 @@ impl PhysicalExpr for MethodPart {
 			}
 
 			// Method dispatch reaches the same registry entry a direct call
-			// does, so a pure built-in behind an experimental target is gated
-			// here too — after the arguments, matching the direct-call path.
+			// does, so it is refused by the same capability, under the name
+			// of the builtin the receiver resolved to, and a pure built-in
+			// behind an experimental target is gated here too. Both follow
+			// the arguments.
+			ctx.check_allowed_function(func.name())?;
 			if let Some(target) = crate::exec::function::experimental_target(func.name())
 				&& !ctx.capabilities().allows_experimental(&target)
 			{
@@ -249,9 +251,8 @@ async fn closure_field_call(
 		evaluated_args.push(arg_expr.evaluate(ctx.clone()).await?);
 	}
 
-	// Invoke the closure. A body the streaming engine compiled runs natively;
-	// any other closure value goes through the legacy evaluator in the
-	// caller's frame.
+	// Invoke the closure. A body the engine compiled runs natively;
+	// any other closure value is invoked in the caller's frame.
 	invoke_closure(&closure, evaluated_args, &ctx).await
 }
 
@@ -274,7 +275,9 @@ impl ToSql for ClosureFieldCallPart {
 mod tests {
 	use super::*;
 	use crate::exec::ExecutionContext;
-	use crate::exec::operators::test_util::{eval_on, physical_expr, root_ctx, val};
+	use crate::exec::operators::test_util::{
+		TestDb, eval_on, eval_on_in_txn, physical_expr, root_ctx, val,
+	};
 	use crate::expr::FlowResult;
 
 	/// Evaluate `tail` (a method-call suffix) with `receiver` bound as the
@@ -282,6 +285,13 @@ mod tests {
 	async fn call(receiver: &str, tail: &str, ctx: &ExecutionContext) -> FlowResult<Value> {
 		let row = val(&format!("{{ v: {receiver} }}")).await;
 		eval_on(&format!("v{tail}"), &row, ctx).await
+	}
+
+	/// As [`call`], compiled in the transaction `ctx` holds, which a closure
+	/// body that is a block needs to be planned.
+	async fn call_in_txn(receiver: &str, tail: &str, ctx: &ExecutionContext) -> FlowResult<Value> {
+		let row = val(&format!("{{ v: {receiver} }}")).await;
+		eval_on_in_txn(&format!("v{tail}"), &row, ctx).await
 	}
 
 	fn part(name: &str, args: Vec<Arc<dyn PhysicalExpr>>, ctx: &ExecutionContext) -> MethodPart {
@@ -355,8 +365,9 @@ mod tests {
 		// MethodPart rather than a ClosureFieldCallPart — but with no object
 		// implementation the closure field must still be reached, exactly as
 		// if the name had not been registered at all.
-		let ctx = root_ctx();
-		let out = call("{ get: |$x: number| $x * 2 }", ".get(4)", &ctx).await.unwrap();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let out = call_in_txn("{ get: |$x: number| $x * 2 }", ".get(4)", &ctx).await.unwrap();
 		assert_eq!(out, Value::from(8));
 	}
 
@@ -406,8 +417,7 @@ mod tests {
 	#[tokio::test]
 	async fn an_argument_idiom_resolves_against_the_document_row_not_the_receiver() {
 		// `sep` is a field of the row, not of the string the chain stands on:
-		// the arguments evaluate in the row's frame, as the legacy engine
-		// computes them with the cursor document.
+		// the arguments evaluate in the row's frame, with the cursor document.
 		let ctx = root_ctx();
 		let row = val("{ text: 'a-b', sep: '-' }").await;
 		assert_eq!(eval_on("text.split(sep)", &row, &ctx).await.unwrap(), val("['a', 'b']").await);
@@ -441,7 +451,8 @@ mod tests {
 	async fn a_closure_argument_reads_the_document_row_in_its_body() {
 		// The closure is invoked by the builtin in the call's frame, so a bare
 		// field in its body is the row's.
-		let ctx = root_ctx();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
 		let row = val("{ tags: ['a', 'b'], suffix: '!' }").await;
 		let out = eval_on("tags.map(|$t| $t + suffix)", &row, &ctx).await.unwrap();
 		assert_eq!(out, val("['a!', 'b!']").await);
@@ -452,7 +463,8 @@ mod tests {
 		// Both routes to a closure field -- an unregistered name, and a
 		// registered method with no implementation for an object receiver --
 		// read `n` from the row, not from the object holding the closure.
-		let ctx = root_ctx();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
 		let row = val("{ obj: { double: |$x: number| $x * 2, n: 100 }, n: 4 }").await;
 		assert_eq!(eval_on("obj.double(n)", &row, &ctx).await.unwrap(), Value::from(8));
 		let row = val("{ obj: { get: |$x: number| $x * 2, n: 100 }, n: 4 }").await;
@@ -547,20 +559,22 @@ mod tests {
 
 	#[tokio::test]
 	async fn an_object_field_holding_a_closure_is_invoked_with_the_given_arguments() {
-		let ctx = root_ctx();
-		let out = call("{ double: |$x: number| $x * 2 }", ".double(4)", &ctx).await.unwrap();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let out = call_in_txn("{ double: |$x: number| $x * 2 }", ".double(4)", &ctx).await.unwrap();
 		assert_eq!(out, Value::from(8));
 	}
 
 	#[tokio::test]
 	async fn a_closure_argument_is_coerced_to_its_declared_type() {
-		let ctx = root_ctx();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
 		// An int argument reaches a float parameter as a float.
-		let out = call("{ f: |$x: float| $x }", ".f(1)", &ctx).await.unwrap();
+		let out = call_in_txn("{ f: |$x: float| $x }", ".f(1)", &ctx).await.unwrap();
 		assert_eq!(out, val("1.0f").await);
 
 		// A value that cannot be coerced is an argument error, not a silent pass.
-		let err = call("{ f: |$x: number| $x }", ".f('nope')", &ctx).await.unwrap_err();
+		let err = call_in_txn("{ f: |$x: number| $x }", ".f('nope')", &ctx).await.unwrap_err();
 		assert!(
 			err.to_string().contains("Expected a value of type 'number'"),
 			"expected a coercion failure, got {err}"
@@ -569,8 +583,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn a_missing_required_closure_argument_is_rejected() {
-		let ctx = root_ctx();
-		let err = call("{ f: |$x: number| $x }", ".f()", &ctx).await.unwrap_err();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let err = call_in_txn("{ f: |$x: number| $x }", ".f()", &ctx).await.unwrap_err();
 		let message = err.to_string();
 		assert!(
 			message.contains("Expected a value of type 'number'"),
@@ -581,29 +596,28 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn an_omitted_optional_closure_argument_is_left_unbound() {
+	async fn an_omitted_optional_closure_argument_is_none() {
 		// A parameter whose kind admits NONE passes the missing-argument check,
-		// but only supplied arguments are zipped into the parameter bindings, so
-		// the body finds no such parameter at all rather than reading NONE.
-		let ctx = root_ctx();
-		let err = call("{ f: |$x: option<number>| $x }", ".f()", &ctx).await.unwrap_err();
-		assert!(
-			err.to_string().contains("Parameter not found: $x"),
-			"expected the unbound-parameter error, got {err}"
-		);
+		// and the body reads it as NONE.
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let out = call_in_txn("{ f: |$x: option<number>| $x }", ".f()", &ctx).await.unwrap();
+		assert_eq!(out, Value::None);
 
 		// Supplying the argument binds it as normal.
-		let out = call("{ f: |$x: option<number>| $x }", ".f(3)", &ctx).await.unwrap();
+		let out = call_in_txn("{ f: |$x: option<number>| $x }", ".f(3)", &ctx).await.unwrap();
 		assert_eq!(out, Value::from(3));
 	}
 
 	#[tokio::test]
 	async fn a_declared_closure_return_type_is_enforced() {
-		let ctx = root_ctx();
-		let ok = call("{ f: |$x: number| -> float { $x } }", ".f(1)", &ctx).await.unwrap();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let ok = call_in_txn("{ f: |$x: number| -> float { $x } }", ".f(1)", &ctx).await.unwrap();
 		assert_eq!(ok, val("1.0f").await);
 
-		let err = call("{ f: |$x: number| -> string { $x } }", ".f(1)", &ctx).await.unwrap_err();
+		let err =
+			call_in_txn("{ f: |$x: number| -> string { $x } }", ".f(1)", &ctx).await.unwrap_err();
 		assert!(
 			err.to_string().contains("string"),
 			"expected a return-type failure naming the declared type, got {err}"
@@ -614,8 +628,10 @@ mod tests {
 	async fn a_return_inside_the_closure_body_becomes_its_value() {
 		// The body is a block: a RETURN unwinds to the closure boundary and is
 		// the call's result rather than propagating out of the enclosing query.
-		let ctx = root_ctx();
-		let out = call("{ f: |$x: number| { RETURN $x * 3 } }", ".f(2)", &ctx).await.unwrap();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
+		let out =
+			call_in_txn("{ f: |$x: number| { RETURN $x * 3 } }", ".f(2)", &ctx).await.unwrap();
 		assert_eq!(out, Value::from(6));
 	}
 
@@ -623,9 +639,10 @@ mod tests {
 	async fn break_or_continue_out_of_a_closure_body_is_an_error() {
 		// Neither signal has a loop to bind to at the closure boundary, so both
 		// must surface as errors instead of escaping the call.
-		let ctx = root_ctx();
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx().await;
 		for body in ["{ BREAK }", "{ CONTINUE }"] {
-			let err = call(&format!("{{ f: || {body} }}"), ".f()", &ctx).await.unwrap_err();
+			let err = call_in_txn(&format!("{{ f: || {body} }}"), ".f()", &ctx).await.unwrap_err();
 			assert!(
 				err.to_string().contains("Invalid control flow"),
 				"expected InvalidControlFlow for {body}, got {err}"

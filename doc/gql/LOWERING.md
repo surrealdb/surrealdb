@@ -5,11 +5,11 @@ lowering turns a parsed GQL AST (`gql::ast`) into a
 [`MatchPlan`](../../surrealdb/core/src/expr/match_plan.rs) — the
 language-neutral, binding-table IR — carried as a single `LogicalOp::Match`,
 which the executor holds as a `TopLevelStatement::Plan`. **No SurrealQL
-surface AST is generated**: the streaming
-execution planner (`exec/planner/match_plan.rs`) compiles the `MatchPlan`
+surface AST is generated**: the execution
+planner (`exec/planner/match_plan.rs`) compiles the `MatchPlan`
 directly into physical operators (`exec/operators/` — `graph/`, `join/`, and the
-generic `bind.rs`/`distinct.rs`). The `MatchPlan` never runs under the
-compute-only planner — its `compute()` arm is a hard error.
+generic `bind.rs`/`distinct.rs`). The `MatchPlan` runs only through that
+planner; no per-record evaluation exists for it.
 
 `V2_DESIGN.md` is the **authoritative spec** for the IR, the operators, the
 planner, and the plumbing. This document is narrower: it specifies what the
@@ -25,8 +25,7 @@ Two corpora pin the behaviour this design relies on:
   (the E1–E8 pins the §4 guard rules cite, kept for continuity) and
   `exec_substrate.surql` (the v2 operator-level pins: the 3VL guard trio, the
   NULL/NONE sort position R7 relies on, RecordId auto-fetch) pin the
-  SurrealQL/engine facts the guard rules and binding-row model depend on, under
-  every planner strategy.
+  SurrealQL/engine facts the guard rules and binding-row model depend on.
 - **Operator substrate** — the unit tests in `surrealdb/core/src/exec/operators/`
   (`graph/{expand.rs, endpoint.rs, path_expand.rs, distinct_edges.rs}`,
   `join/hash_join.rs`, `bind.rs`, `distinct.rs`, `scan/fetch.rs`, with shared
@@ -142,7 +141,7 @@ Lowers each GQL expression with uniform binding addressing (§2) and the
 three-valued-logic guards (§4). Value position (projections, sort keys,
 comparison operands) lowers two-valued; predicate position (`WHERE`) lowers
 three-valued with the guards. Expressions are built directly as the logical
-plan's `LogicalExpr`, the scalar type of `MatchPlan`; the streaming planner
+plan's `LogicalExpr`, the scalar type of `MatchPlan`; the planner
 compiles them as it compiles every other scalar.
 
 ### 3.4 Output spec — `lower/mod.rs`

@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -37,17 +36,20 @@ value = "[{ id: u:1, len: 3, name: 'abc' }]"
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Db] [projections: len]
-    ProjectLayer [ctx: Db] [columns: len = string::len(name) : int @computed]
-        TableScan [ctx: Db] [table: t, direction: Forward]
+'SelectProject [ctx: Db] [projections: *]
+    Subquery [ctx: Rt]
+        SelectProject [ctx: Db] [projections: len]
+            ProjectLayer [ctx: Db] [columns: len = string::len(name) : int @computed]
+                TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    SelectProject [ctx: Db] [projections: len]
-        ProjectLayer [ctx: Db] [columns: len = string::len(name) @computed]
-            TableScan [ctx: Db] [table: u, direction: Forward]
+    Subquery [ctx: Rt]
+        SelectProject [ctx: Db] [projections: len]
+            ProjectLayer [ctx: Db] [columns: len = string::len(name) @computed]
+                TableScan [ctx: Db] [table: u, direction: Forward]
 ''''
 
 [[test.results]]

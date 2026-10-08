@@ -2,22 +2,18 @@
 [test]
 reason = "EXPLAIN renders stable plans for four shapes: recursive idiom (`.{..3}`), destructuring projection (`{field, nested:{...}}`), ORDER+LIMIT+START, and FETCH on a record link."
 
-[env]
-planner-strategy = ["all-ro", "best-effort-ro"]
-
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 value = '''
 'Project [ctx: Db]
-  field.recurse: Recurse [ctx: Db] [depth: 1..3, instruction: default]
     RecordIdScan [ctx: Db] [record_id: node:a]
 ''''
 
 [[test.results]]
 value = '''
-'Project [ctx: Db]
+'SelectProject [ctx: Db] [projections: outer]
     RecordIdScan [ctx: Db] [record_id: shape:1]
 ''''
 
@@ -25,16 +21,18 @@ value = '''
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 2, offset: 1]
-        SortTopKByKey [ctx: Db] [sort_keys: label DESC, limit: 3]
+        Sort [ctx: Db] [sort_keys: label DESC, keep: 3]
             TableScan [ctx: Db] [table: node, direction: Forward, topk_pushdown: yes]
 ''''
 
 [[test.results]]
 value = '''
-'Fetch [ctx: Db] [fields: child]
+'Fetch [ctx: Db] [fetches: child]
     SelectProject [ctx: Db] [projections: label, child]
         RecordIdScan [ctx: Db] [record_id: node:a]
 ''''
+
+[env]
 
 */
 

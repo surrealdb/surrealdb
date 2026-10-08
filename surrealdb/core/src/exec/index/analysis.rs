@@ -30,6 +30,10 @@ pub struct IndexAnalyzer<'a> {
 	/// column; a column past the end of its index's flags may be sought.
 	/// `None` withholds nothing.
 	no_containment: Option<Arc<[super::access_path::ColumnFlags]>>,
+	/// Per index of `indexes`, whether each column is declared a kind that
+	/// holds no array; a column past the end of its index's flags is not
+	/// known to. `None` knows of none. Carried on each [`IndexRef`] made.
+	scalar: Option<Arc<[super::access_path::ColumnFlags]>>,
 }
 
 impl<'a> IndexAnalyzer<'a> {
@@ -39,6 +43,27 @@ impl<'a> IndexAnalyzer<'a> {
 			indexes,
 			with_hints,
 			no_containment: None,
+			scalar: None,
+		}
+	}
+
+	/// Know the columns `flags` marks, per index of `indexes`, to be declared
+	/// kinds that hold no array.
+	pub(crate) fn with_scalar_columns(
+		mut self,
+		flags: Arc<[super::access_path::ColumnFlags]>,
+	) -> Self {
+		self.scalar = Some(flags);
+		self
+	}
+
+	/// A reference to index `idx` of `indexes`, carrying which of its columns
+	/// are known to hold no array.
+	fn index_ref(&self, idx: usize) -> IndexRef {
+		let index_ref = IndexRef::new(&self.indexes, idx);
+		match self.scalar.as_ref().and_then(|flags| flags.get(idx)) {
+			Some(flags) if flags.contains(&true) => index_ref.with_scalar_columns(flags.clone()),
+			_ => index_ref,
 		}
 	}
 
@@ -321,7 +346,7 @@ impl<'a> IndexAnalyzer<'a> {
 	/// residual filter, so the bitmap only needs to over-approximate the
 	/// result per omitted conjunct.
 	///
-	/// Returns `None` (caller falls back to the streaming plans) unless the
+	/// Returns `None` (caller uses the union plans) unless the
 	/// plan has at least two positive members, or one positive member plus a
 	/// subtraction. Order/limit/version gating is the caller's
 	/// responsibility; `exact_col` reports whether a column's declared
@@ -1151,7 +1176,7 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 
 			if let Some((idx, ncols)) = best {
-				let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
+				let index_ref = self.index_ref(idx);
 				let paths: Vec<AccessPath> = if ncols == 1 {
 					// Single-column index: equality scans
 					values
@@ -1233,7 +1258,7 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 
 				if self.seeks_containment(idx, 0, path) {
-					let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
+					let index_ref = self.index_ref(idx);
 					let is_composite = ix_def.cols.len() > 1;
 					let paths: Vec<AccessPath> = values
 						.iter()
@@ -1570,6 +1595,9 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 
 				match matching_cond {
+					// No key is a whole array (see `match_operator_to_access`),
+					// so a comparison to one ends the prefix.
+					Some(cond) if matches!(cond.value, Value::Array(_)) => break,
 					Some(cond) => {
 						let is_equality =
 							matches!(cond.op, BinaryOperator::Equal | BinaryOperator::ExactEqual);
@@ -1619,7 +1647,7 @@ impl<'a> IndexAnalyzer<'a> {
 					range: range_condition,
 				};
 
-				let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
+				let index_ref = self.index_ref(idx);
 				candidates.push(IndexCandidate::new(index_ref, access));
 			}
 		}
@@ -1788,7 +1816,7 @@ impl<'a> IndexAnalyzer<'a> {
 					access
 				};
 
-				let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
+				let index_ref = self.index_ref(idx);
 				candidates.push(IndexCandidate::new(index_ref, access));
 			}
 		}
@@ -1804,6 +1832,12 @@ impl<'a> IndexAnalyzer<'a> {
 	) -> Option<BTreeAccess> {
 		// Only Idx and Uniq support these access patterns
 		if !matches!(index_type, Index::Idx | Index::Uniq) {
+			return None;
+		}
+		// An index stores an array one entry per element, so no key is a
+		// whole array: a comparison to one is not answered by a key or a
+		// range of keys. `IN` reads the array's elements as its keys.
+		if matches!(value, Value::Array(_)) && !matches!(op, BinaryOperator::Inside) {
 			return None;
 		}
 
@@ -1956,7 +1990,7 @@ impl<'a> IndexAnalyzer<'a> {
 			if let Some(col) = ix_def.cols.first()
 				&& path_matches_column(path, col)
 			{
-				let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
+				let index_ref = self.index_ref(idx);
 				candidates.push(IndexCandidate::new(index_ref, access.clone()));
 			}
 		}
@@ -2013,7 +2047,7 @@ impl<'a> IndexAnalyzer<'a> {
 				} else {
 					BTreeAccess::Equality(value.clone())
 				};
-				let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
+				let index_ref = self.index_ref(idx);
 				candidates.push(IndexCandidate::new(index_ref, access));
 			}
 		}
@@ -2048,7 +2082,7 @@ impl<'a> IndexAnalyzer<'a> {
 			if let Some(first_col) = ix_def.cols.first()
 				&& path_matches_column(path, first_col)
 			{
-				let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
+				let index_ref = self.index_ref(idx);
 				candidates.push(IndexCandidate::new(
 					index_ref,
 					BTreeAccess::FullText {
@@ -2130,7 +2164,7 @@ impl<'a> IndexAnalyzer<'a> {
 			if let Some(first_col) = ix_def.cols.first()
 				&& path_matches_column(path, first_col)
 			{
-				let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
+				let index_ref = self.index_ref(idx);
 				candidates.push(IndexCandidate::new(
 					index_ref,
 					BTreeAccess::Knn {
@@ -2185,7 +2219,7 @@ impl<'a> IndexAnalyzer<'a> {
 			if candidates.iter().any(|c| c.index_ref.idx == idx) {
 				continue;
 			}
-			let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
+			let index_ref = self.index_ref(idx);
 			let full_range = BTreeAccess::Range {
 				range: Range::unbounded(),
 			};
@@ -4062,10 +4096,7 @@ mod tests {
 		#[test]
 		fn unique_equality_beats_non_unique() {
 			let uniq_cand = IndexCandidate {
-				index_ref: IndexRef::new(
-					Arc::<[_]>::from(vec![idx_uniq(1, "u", &["a"])].into_boxed_slice()),
-					0,
-				),
+				index_ref: IndexRef::new(&[idx_uniq(1, "u", &["a"])], 0),
 				access: BTreeAccess::Equality(crate::val::Value::Number(crate::val::Number::Int(
 					1,
 				))),
@@ -4073,10 +4104,7 @@ mod tests {
 				empty: false,
 			};
 			let nonunique_cand = IndexCandidate {
-				index_ref: IndexRef::new(
-					Arc::<[_]>::from(vec![idx_basic(1, "i", &["a"])].into_boxed_slice()),
-					0,
-				),
+				index_ref: IndexRef::new(&[idx_basic(1, "i", &["a"])], 0),
 				access: BTreeAccess::Equality(crate::val::Value::Number(crate::val::Number::Int(
 					1,
 				))),
@@ -4092,10 +4120,7 @@ mod tests {
 		#[test]
 		fn bounded_range_beats_half_bounded() {
 			let make = |from_some, to_some| IndexCandidate {
-				index_ref: IndexRef::new(
-					Arc::<[_]>::from(vec![idx_basic(1, "i", &["a"])].into_boxed_slice()),
-					0,
-				),
+				index_ref: IndexRef::new(&[idx_basic(1, "i", &["a"])], 0),
 				access: BTreeAccess::Range {
 					range: Range {
 						start: if from_some {
@@ -4126,14 +4151,11 @@ mod tests {
 				.collect::<Vec<_>>();
 			let wide = IndexCandidate {
 				index_ref: IndexRef::new(
-					Arc::<[_]>::from(
-						vec![idx_basic(
-							1,
-							"i_wide",
-							&["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"],
-						)]
-						.into_boxed_slice(),
-					),
+					&[idx_basic(
+						1,
+						"i_wide",
+						&["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"],
+					)],
 					0,
 				),
 				access: BTreeAccess::Compound {
@@ -4144,10 +4166,7 @@ mod tests {
 				empty: false,
 			};
 			let unique_eq = IndexCandidate {
-				index_ref: IndexRef::new(
-					Arc::<[_]>::from(vec![idx_uniq(2, "u_a", &["a"])].into_boxed_slice()),
-					0,
-				),
+				index_ref: IndexRef::new(&[idx_uniq(2, "u_a", &["a"])], 0),
 				access: BTreeAccess::Equality(crate::val::Value::Number(crate::val::Number::Int(
 					1,
 				))),
@@ -4163,10 +4182,7 @@ mod tests {
 		#[test]
 		fn covers_order_provides_positive_bonus() {
 			let make = |covers| IndexCandidate {
-				index_ref: IndexRef::new(
-					Arc::<[_]>::from(vec![idx_basic(1, "i", &["a"])].into_boxed_slice()),
-					0,
-				),
+				index_ref: IndexRef::new(&[idx_basic(1, "i", &["a"])], 0),
 				access: BTreeAccess::Range {
 					range: Range {
 						start: Bound::Included(crate::val::Value::Number(crate::val::Number::Int(

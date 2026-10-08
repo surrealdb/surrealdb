@@ -73,9 +73,8 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> FlowRes
 			if has_record_ids {
 				let mut results = Vec::with_capacity(arr.len());
 				for item in arr.iter() {
-					// Match legacy `val/value/get.rs`: under `.*`, only RecordId
-					// elements trigger a fetch; everything else passes through
-					// unchanged.
+					// Under `.*`, only RecordId elements trigger a fetch; everything else passes
+					// through unchanged.
 					let processed = match item {
 						Value::RecordId(_) => Box::pin(evaluate_all(item, ctx.clone())).await?,
 						_ => item.clone(),
@@ -95,9 +94,8 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> FlowRes
 				crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await
 			}
 		}
-		// Anything else (NONE, NULL, scalars, geometries) returns NONE, matching the
-		// legacy compute path. Issue #7143: previously this wrapped the value in a
-		// single-element array, so `none.*` produced `[NONE]` instead of `NONE`.
+		// Anything else (NONE, NULL, scalars, geometries) returns NONE rather than a
+		// single-element array: `none.*` is `NONE`, not `[NONE]`.
 		_ => Ok(Value::None),
 	}
 }
@@ -296,7 +294,7 @@ mod tests {
 		let ctx = root_ctx();
 		// NONE, NULL and scalars collapse to NONE rather than being wrapped in a
 		// one-element array. A set is not treated as a collection here either,
-		// unlike the legacy `compute` path which maps over set members.
+		// and is not mapped over member by member.
 		for src in ["NONE", "NULL", "42", "'text'", "true", "(1.0, 2.0)"] {
 			let value = val(src).await;
 			assert_eq!(eval_part(&AllPart, &value, &ctx).await, Value::None, "NONE for {src}");

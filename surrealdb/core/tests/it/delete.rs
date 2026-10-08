@@ -9,7 +9,7 @@ use surrealdb_observe::{ExecutionObserver, Outcome, TransactionEvent, Transactio
 use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_types::{Action, Array, Notification, RecordId, Value};
 
-use crate::helpers::{new_ds, new_ns_db};
+use crate::helpers::{assert_write_refused, new_ds, new_ns_db};
 
 // Capture transaction delete counts so tests can distinguish point deletes
 // from staged range deletes without reaching into document internals.
@@ -239,7 +239,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 	let statement = "DELETE person:test";
 
 	for ((level, role), (ns, db), should_succeed, msg) in tests {
-		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
+		let sess = Session::for_level(level.clone(), role).with_ns(ns).with_db(db);
 
 		{
 			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
@@ -300,9 +300,10 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			// Run the test
 			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
-			assert!(res.is_ok(), "delete should not fail");
 
 			if should_succeed {
+				assert!(res.is_ok(), "{}: {:?}", msg, res);
+
 				// Verify the record has been deleted
 				let mut resp = ds
 					.execute(
@@ -315,6 +316,8 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				let res = resp.remove(0).output();
 				assert!(res.is_ok() && res.unwrap() == Value::Array(Array::new()), "{}", msg);
 			} else {
+				assert_write_refused(&level, ns, db, res, msg);
+
 				// Verify the record has not been deleted in any DB
 				let mut resp = ds
 					.execute(

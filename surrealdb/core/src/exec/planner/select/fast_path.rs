@@ -19,12 +19,15 @@
 use surrealdb_strand::TableName;
 
 use super::super::fold::{GroupClause, PipelineClauses};
+#[cfg(test)]
 use super::clause_is_absent;
 use crate::exec::operators::CountOutput;
 use crate::expr::Function;
+#[cfg(test)]
+use crate::expr::logical::LogicalRecordIdLit;
 use crate::expr::logical::{
 	LogicalExpr, LogicalField, LogicalFields, LogicalOp, LogicalPermissionFilter,
-	LogicalRecordIdKey, LogicalRecordIdLit, LogicalSource, OutputPath, SourceRef,
+	LogicalRecordIdKey, LogicalSource, OutputPath, SourceRef,
 };
 use crate::expr::with::With;
 
@@ -259,6 +262,7 @@ pub(crate) fn permission_filtered_source(node: &LogicalOp) -> Option<&LogicalOp>
 	}
 }
 
+#[cfg(test)]
 /// `SELECT <fields> FROM <record id>` — a plan of
 ///
 /// ```text
@@ -275,6 +279,7 @@ pub(crate) struct SingleRecord<'a> {
 	pub(crate) for_update: bool,
 }
 
+#[cfg(test)]
 /// Match [`SingleRecord`], or `None` when the plan carries an operator a
 /// single key read would skip.
 ///
@@ -539,6 +544,7 @@ mod tests {
 				input: Box::new(input),
 				predicate: LogicalExpr::Literal(LogicalLiteral::Bool(false)),
 				auth: None,
+				guard: crate::expr::logical::GuardKind::Read,
 			})
 		};
 

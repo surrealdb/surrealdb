@@ -5,7 +5,7 @@ database = true
 imports = ["gql/_schema.surql"]
 
 [test]
-reason = "Fixed-depth {1} under V2_DESIGN R6 (one row per path at every depth in [min,max]). At depth 1 every qualifying edge is its own path, so the four person->person knows edges give four rows; the person->city edge is excluded by the far label. R6 makes no difference at {1} because no depth-1 path can repeat an edge, so this is identical to the v1 result (kept as a parity anchor)."
+reason = "Fixed-depth {1} under V2_DESIGN R6 (one row per path at every depth in [min,max]). At depth 1 every qualifying edge is its own path, so the four person->person knows edges give four rows; the person->city edge is excluded by the far label. R6 makes no difference at {1} because no depth-1 path can repeat an edge, so it is the baseline the deeper bounds are read against."
 
 [[test.results]]
 value = "[{ an: 'A', bn: 'B' }, { an: 'B', bn: 'A' }, { an: 'B', bn: 'C' }, { an: 'C', bn: 'A' }]"

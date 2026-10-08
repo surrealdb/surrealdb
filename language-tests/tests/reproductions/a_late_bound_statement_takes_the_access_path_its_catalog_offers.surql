@@ -1,0 +1,95 @@
+/**
+[env]
+namespace = true
+database = true
+
+[test]
+reason = """
+A block statement after a schema statement whose effect the block cannot
+know ahead (here, one under IF) is planned for the catalog its transaction
+reads when the block reaches it, as main plans it there: it takes the KNN,
+full-text and B-tree access path an index defined earlier in the
+transaction offers — which, defined in that transaction, lists none of the
+rows the transaction wrote before it — fails over a removed full-text
+index, and honours WITH INDEX and WITH NOINDEX against the indexes it finds.
+EXPLAIN renders the access path chosen there.
+"""
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+error = "There was no suitable index supporting the expression: text @@ 'hello'"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    Limit [ctx: Db] [limit: 2]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: n, index: iv, access: >0, direction: Forward]
+''''
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ id: n:3 }]"
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [table: n, index: uv, access: = 2, direction: Forward]
+''''
+
+*/
+
+LET $go = true;
+{
+	CREATE pts:1 SET point = [1,2,3,4];
+	CREATE pts:2 SET point = [4,5,6,7];
+	IF $go { DEFINE INDEX hnsw_pts ON pts FIELDS point HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32 EFC 500 M 12 };
+	SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,100|> [2,3,4,5];
+};
+{
+	CREATE doc:1 SET text = 'hello world';
+	CREATE doc:2 SET text = 'goodbye';
+	IF $go {
+		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
+		DEFINE INDEX ft ON doc FIELDS text FULLTEXT ANALYZER simple BM25;
+	};
+	SELECT id FROM doc WHERE text @@ 'hello';
+};
+{
+	IF $go { REMOVE INDEX ft ON doc };
+	SELECT id FROM doc WHERE text @@ 'hello';
+};
+{
+	CREATE n:1 SET v = 3; CREATE n:2 SET v = 1; CREATE n:3 SET v = 2;
+	IF $go { DEFINE INDEX iv ON n FIELDS v };
+	SELECT id FROM n WHERE v > 0 LIMIT 2;
+};
+{
+	IF $go { DEFINE INDEX iv2 ON n FIELDS w };
+	EXPLAIN SELECT id FROM n WHERE v > 0 ORDER BY v LIMIT 2;
+};
+{
+	IF $go { DEFINE INDEX iv3 ON n FIELDS w };
+	SELECT id FROM n WITH INDEX iv WHERE v > 1;
+};
+{
+	IF $go { DEFINE INDEX uv ON n FIELDS v UNIQUE };
+	SELECT id FROM n WITH NOINDEX WHERE v = 2;
+};
+{
+	IF $go { DEFINE INDEX uv2 ON n FIELDS w };
+	EXPLAIN SELECT id FROM n WHERE v = 2;
+};

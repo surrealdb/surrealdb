@@ -1,0 +1,12 @@
+### { FOR $i IN 1..=3 { CREATE type::record('item', $i) SET v = true, p = $i + 1 }; FOR $i IN 4..=6 { CREATE type::record('item', $i) SET v = false, p = 10 }; RETURN 'OK' }
+'OK'
+[{ id: item:1, p: 2, v: true }, { id: item:2, p: 3, v: true }, { id: item:3, p: 4, v: true }, { id: item:4, p: 10, v: false }, { id: item:5, p: 10, v: false }, { id: item:6, p: 10, v: false }]
+### { DEFINE TABLE item; FOR $i IN 1..=3 { CREATE type::record('item', $i) SET v = true, p = $i + 1 }; FOR $i IN 4..=6 { CREATE type::record('item', $i) SET v = false, p = 10 }; RETURN 'OK' }
+'OK'
+[{ id: item:1, p: 2, v: true }, { id: item:2, p: 3, v: true }, { id: item:3, p: 4, v: true }, { id: item:4, p: 10, v: false }, { id: item:5, p: 10, v: false }, { id: item:6, p: 10, v: false }]
+### { DEFINE TABLE item SCHEMAFULL; DEFINE FIELD v ON item TYPE bool; DEFINE FIELD p ON item TYPE int; DEFINE INDEX iv ON item FIELDS v; FOR $i IN 1..=3 { CREATE type::record('item', $i) SET v = true, p = $i + 1 }; FOR $i IN 4..=6 { CREATE type::record('item', $i) SET v = false, p = 10 }; RETURN 'OK' }
+'OK'
+[{ id: item:1, p: 2, v: true }, { id: item:2, p: 3, v: true }, { id: item:3, p: 4, v: true }, { id: item:4, p: 10, v: false }, { id: item:5, p: 10, v: false }, { id: item:6, p: 10, v: false }]
+### { DEFINE FIELD a ON item TYPE option<int>; CREATE item:1 SET a = 1; CREATE item:2 SET b = 2; UPDATE item:1 SET c = 3; SELECT * FROM item ORDER BY id }
+[{ a: 1, c: 3, id: item:1 }, { b: 2, id: item:2 }]
+[{ a: 1, c: 3, id: item:1 }, { b: 2, id: item:2 }]

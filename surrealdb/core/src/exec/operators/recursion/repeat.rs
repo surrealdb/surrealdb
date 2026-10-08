@@ -81,7 +81,7 @@ use super::common::{
 use crate::exec::parts::recurse::value_hash;
 use crate::exec::parts::{clean_iteration, evaluate_physical_path, get_final, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr, RecursionCtx};
-use crate::exec::{ExecutionContext, FlowResult};
+use crate::exec::{BoxFut, ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::val::Value;
 
@@ -245,6 +245,76 @@ pub(crate) async fn evaluate_recurse_iterative(
 	exec_ctx: &ExecutionContext,
 	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
+	let path = PhysicalRepeat {
+		path,
+		body,
+		exec_ctx,
+		ctx,
+	};
+	evaluate_recurse_iterative_with(start, bounds, &path).await
+}
+
+/// What a `.@` recursion evaluates at each depth: its path over the depth's
+/// value, under the recursion context of the phase (`RecursionCtx`), which
+/// the path's `@` markers read ([`evaluate_repeat_recurse`]). An evaluation
+/// holds no state a concurrent evaluation of another value reads.
+pub(crate) trait RepeatBody: Sync {
+	/// The path over `value` under recursion context `rec`.
+	fn eval<'a>(&'a self, value: &'a Value, rec: RecursionCtx) -> BoxFut<'a, FlowResult<Value>>;
+
+	/// Whether the depth's targets are read directly ([`Self::discover`])
+	/// rather than written by the path's `@` in discovery mode.
+	fn discovers(&self) -> bool {
+		false
+	}
+
+	/// The targets `value` reaches, read directly.
+	fn discover<'a>(&'a self, value: &'a Value) -> BoxFut<'a, FlowResult<Vec<Value>>> {
+		let _ = value;
+		Box::pin(async { Ok(Vec::new()) })
+	}
+}
+
+/// The operator tree's `.@` body: a path of physical expressions, and the
+/// body operator it discovers each depth's targets with where it has one.
+struct PhysicalRepeat<'p, 'c> {
+	path: &'p [Arc<dyn PhysicalExpr>],
+	body: &'p Option<Arc<dyn crate::exec::ExecOperator>>,
+	exec_ctx: &'p ExecutionContext,
+	ctx: EvalContext<'c>,
+}
+
+impl RepeatBody for PhysicalRepeat<'_, '_> {
+	fn eval<'a>(&'a self, value: &'a Value, rec: RecursionCtx) -> BoxFut<'a, FlowResult<Value>> {
+		evaluate_physical_path(value, self.path, self.ctx.with_value(value).with_recursion_ctx(rec))
+	}
+
+	fn discovers(&self) -> bool {
+		self.body.is_some()
+	}
+
+	fn discover<'a>(&'a self, value: &'a Value) -> BoxFut<'a, FlowResult<Vec<Value>>> {
+		Box::pin(async move {
+			match self.body {
+				// Execute the fused lookup chain directly: only the graph scan
+				// or record-link resolution, without evaluating destructure
+				// fields that are irrelevant for discovery.
+				Some(body_op) => {
+					discover_body_targets(body_op, self.exec_ctx.with_current_value(value.clone()))
+						.await
+				}
+				None => Ok(Vec::new()),
+			}
+		})
+	}
+}
+
+/// [`evaluate_recurse_iterative`] over any [`RepeatBody`].
+pub(crate) async fn evaluate_recurse_iterative_with(
+	start: &Value,
+	bounds: RecursionBounds,
+	path: &impl RepeatBody,
+) -> FlowResult<Value> {
 	let min_depth = bounds.min;
 	let max_depth = bounds.cap();
 	// Early exit: if start is a dead end, return immediately.
@@ -277,18 +347,12 @@ pub(crate) async fn evaluate_recurse_iterative(
 			break;
 		}
 
-		let raw_discovered: Vec<Value> = if let Some(body_op) = body {
-			// ── Fast path: use the body operator to discover targets ──
-			// Execute the fused lookup chain directly. This only performs
-			// the graph scan / record-link resolution without evaluating
-			// destructure fields that are irrelevant for discovery.
+		let raw_discovered: Vec<Value> = if path.discovers() {
+			// ── Fast path: the body reads each value's targets directly ──
 			let futs: Vec<_> = current_level
 				.iter()
 				.filter(|val| !is_final(val) && is_recursion_target(val))
-				.map(|val| {
-					let body_ctx = exec_ctx.with_current_value(val.clone());
-					discover_body_targets(body_op, body_ctx)
-				})
+				.map(|val| path.discover(val))
 				.collect();
 			let all_discovered = common::eval_buffered(futs).await?;
 			all_discovered.into_iter().flatten().collect()
@@ -311,10 +375,7 @@ pub(crate) async fn evaluate_recurse_iterative(
 			let futures: Vec<_> = current_level
 				.iter()
 				.filter(|val| !is_final(val))
-				.map(|val| {
-					let eval = ctx.with_value(val).with_recursion_ctx(discovery_ctx.clone());
-					evaluate_physical_path(val, path, eval)
-				})
+				.map(|val| path.eval(val, discovery_ctx.clone()))
 				.collect();
 			let eval_results = eval_buffered_all(futures).await;
 
@@ -353,7 +414,7 @@ pub(crate) async fn evaluate_recurse_iterative(
 	let num_levels = levels.len();
 
 	// Unbounded recursion with a non-empty level still discovered at the system
-	// limit (one level pushed per iteration): hard error, matching legacy (see
+	// limit (one level pushed per iteration): hard error (see
 	// `RecursionBounds`).
 	if bounds.errors_on_limit() && num_levels > max_depth as usize {
 		return Err(crate::exec::Error::IdiomRecursionLimitExceeded {
@@ -408,13 +469,8 @@ pub(crate) async fn evaluate_recurse_iterative(
 
 			// Evaluate non-final values concurrently (bounded).
 			// Uses `buffered` (ordered) so results align with `eval_values` for zip.
-			let futures: Vec<_> = eval_values
-				.iter()
-				.map(|val| {
-					let eval = ctx.with_value(val).with_recursion_ctx(assembly_ctx.clone());
-					evaluate_physical_path(val, path, eval)
-				})
-				.collect();
+			let futures: Vec<_> =
+				eval_values.iter().map(|val| path.eval(val, assembly_ctx.clone())).collect();
 			let eval_results = eval_buffered_all(futures).await;
 
 			// Process results: PathEliminationSignal -> Value::None, others propagate.

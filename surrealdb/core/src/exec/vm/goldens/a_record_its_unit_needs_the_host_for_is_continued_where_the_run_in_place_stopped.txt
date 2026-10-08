@@ -1,0 +1,21 @@
+### SELECT n, toy FROM post ORDER BY n FETCH toy
+{ n: 0, toy: { id: toy:0, label: 'tag 0', name: '0' } }
+{ n: 1, toy: { id: toy:1, label: 'tag 1', name: '1' } }
+{ n: 2, toy: { id: toy:2, label: 'tag 2', name: '2' } }
+{ n: 3, toy: { id: toy:3, label: 'tag 3', name: '3' } }
+{ n: 4, toy: { id: toy:0, label: 'tag 0', name: '0' } }
+{ n: 5, toy: { id: toy:1, label: 'tag 1', name: '1' } }
+{ n: 6, toy: { id: toy:2, label: 'tag 2', name: '2' } }
+{ n: 7, toy: { id: toy:3, label: 'tag 3', name: '3' } }
+{ n: 8, toy: { id: toy:0, label: 'tag 0', name: '0' } }
+{ n: 9, toy: { id: toy:1, label: 'tag 1', name: '1' } }
+{ n: 10, toy: { id: toy:2, label: 'tag 2', name: '2' } }
+{ n: 11, toy: { id: toy:3, label: 'tag 3', name: '3' } }
+{ n: 12, toy: { id: toy:0, label: 'tag 0', name: '0' } }
+{ n: 13, toy: { id: toy:1, label: 'tag 1', name: '1' } }
+{ n: 14, toy: { id: toy:2, label: 'tag 2', name: '2' } }
+{ n: 15, toy: { id: toy:3, label: 'tag 3', name: '3' } }
+{ n: 16, toy: { id: toy:0, label: 'tag 0', name: '0' } }
+{ n: 17, toy: { id: toy:1, label: 'tag 1', name: '1' } }
+{ n: 18, toy: { id: toy:2, label: 'tag 2', name: '2' } }
+{ n: 19, toy: { id: toy:3, label: 'tag 3', name: '3' } }

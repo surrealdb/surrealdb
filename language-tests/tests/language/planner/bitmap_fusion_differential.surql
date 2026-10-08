@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Differential check: bitmap fusion plans (all-ro) return identical results to the legacy engine (compute-only) for AND-composed selective predicates, including AND NOT, nested OR and ranges. ORDER BY uses an unindexed field so the bitmap plan actually drives the all-ro runs (a covered ORDER BY keeps the streaming plan)."
+reason = "Bitmap fusion plans return the rows of the predicates they fuse, for AND-composed selective predicates, including AND NOT, nested OR and ranges. ORDER BY uses an unindexed field so the bitmap plan actually drives the run (a covered ORDER BY keeps the streaming plan)."
 issue = 547
 
 [[test.results]]
@@ -84,6 +84,4 @@ SELECT id, pos FROM items WHERE flag = false AND category IN ['red', 'green'] AN
 SELECT id FROM items WHERE category = 'red' AND category = 'green';
 
 -- NOTE: index-backed `count()` differential checks live in
--- bitmap_fusion_count_new_executor.surql (with NOINDEX baselines): the
--- legacy compute engine has a pre-existing bug where a multi-index AND
--- count reports a single branch's cardinality.
+-- bitmap_fusion_count_new_executor.surql, with NOINDEX baselines.

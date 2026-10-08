@@ -30,7 +30,7 @@
 //! a release build past a bound keeps the plan as it stands, which is a
 //! correct plan.
 
-use super::fold::{aggregates_survive, is_from_leaf};
+use super::fold::{aggregates_survive, is_condition, is_from_leaf};
 use super::rules::{EXPR_RULES, ExprContext, RULES, RuleContext};
 use super::{classify_source, next_alias_index, rewrite_deep};
 use crate::expr::logical::{LogicalOp, LogicalSource, SourceRef};
@@ -152,6 +152,7 @@ impl Driver<'_, '_> {
 			// [`super::fold::fold_constants`].
 			restricted: None,
 			aggregates_survive: aggregates_survive(node),
+			condition: self.cx.folds_clock && is_condition(node),
 		};
 		let mut changed = false;
 		let Ok(()) = node.visit_scalars_mut(&mut |scalar| {

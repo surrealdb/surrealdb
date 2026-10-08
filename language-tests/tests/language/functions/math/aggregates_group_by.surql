@@ -1,9 +1,8 @@
 /**
 [test]
-reason = "Every math aggregate (sum/mean/min/max/stddev/variance/median) over a GROUP BY across two groups. Streaming planner only — its stddev/variance use Welford's online algorithm and differ slightly from the legacy path."
+reason = "Every math aggregate (sum/mean/min/max/stddev/variance/median) over a GROUP BY across two groups. Its stddev and variance use Welford's online algorithm."
 
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [[test.results]]
 value = "NONE"

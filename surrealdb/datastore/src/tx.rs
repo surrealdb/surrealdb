@@ -61,18 +61,18 @@ use crate::key::reclaim::{ALL_DOC_ID_KINDS, Expunge, ReclaimState};
 use crate::key::schema::{
 	AdjacencyEdgeTablePrefix, AdjacencyKey, AnalyzerKey, AnalyzerPrefix, ApiKey, ApiPrefix,
 	BucketKey, BucketPrefix, BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey,
-	CatalogVersionKey, ChangeFeedKey, ChangefeedFenceKey, DatabaseKey, DatabasePrefix,
-	DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot, DbConfigKey, DbConfigPrefix, DbGrantKey,
-	DbGrantPrefix, DbUserKey, DbUserPrefix, DocKeyKey, DocLookupIdentityKey, DocLookupKey,
-	DocStatsBatchKey, EventKey, EventPrefix, FieldKey, FieldPrefix, ForeignTablePrefix,
-	FunctionKey, FunctionPrefix, GraphFoldKey, GraphPointerKey, IdxRoot, IndexCompactionKey,
-	IndexCountKey, IndexDefKey, IndexDefPrefix, IndexNameKey, LiveEventsKey, MlModelKey,
-	MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix,
-	NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix, NsUserKey,
-	NsUserPrefix, ParamKey, ParamPrefix, ReclaimKey, ReclaimTbPrefix, RecordKey,
-	RootAccessMethodKey, RootAccessMethodPrefix, RootAccessRoot, RootConfigKey, RootGrantKey,
-	RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionPrefix,
-	TableKey, TablePrefix, TermChangeBatchKey,
+	CatalogVersionKey, CatalogVersionPrefix, ChangeFeedKey, ChangefeedFenceKey, DatabaseKey,
+	DatabasePrefix, DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot, DbConfigKey,
+	DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix, DocKeyKey,
+	DocLookupIdentityKey, DocLookupKey, DocStatsBatchKey, EventKey, EventPrefix, FieldKey,
+	FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, GraphFoldKey, GraphPointerKey,
+	IdxRoot, IndexCompactionKey, IndexCountKey, IndexDefKey, IndexDefPrefix, IndexNameKey,
+	LiveEventsKey, MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey,
+	NamespacePrefix, NodeKey, NodePrefix, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot,
+	NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix, ObjectVersionKey, ParamKey, ParamPrefix,
+	ReclaimKey, ReclaimTbPrefix, RecordKey, RootAccessMethodKey, RootAccessMethodPrefix,
+	RootAccessRoot, RootConfigKey, RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix,
+	SequenceKey, SequencePrefix, SubscriptionPrefix, TableKey, TablePrefix, TermChangeBatchKey,
 };
 use crate::sequences::{Sequence, Sequences};
 #[cfg(any(test, feature = "test-hooks"))]
@@ -81,7 +81,7 @@ use crate::testing::{
 	maybe_inject_retryable_conflict,
 };
 use crate::triggers::CommitTriggers;
-use crate::values::catalog_version::CatalogVersion;
+use crate::values::catalog_version::{CatalogObject, CatalogObjectKind, CatalogVersion};
 use crate::values::changefeed::Changefeed;
 use crate::values::fulltext::DocLengthAndCount;
 use crate::values::graph::{AdjacencyBlock, BlockEntries, GraphFoldScope};
@@ -96,6 +96,22 @@ use crate::{
 	TransactionFactory, TransactionType, Transactor, Val, cache, catalog,
 	is_retryable_transaction_conflict, storage_error, util,
 };
+
+/// Counts a write or a save-point rollback in
+/// [`Transaction::state_changes`] when dropped: held across the change, so
+/// the count grows once the change has taken effect.
+#[must_use = "the change is counted when the guard is dropped"]
+struct StateChange<'a>(&'a AtomicU64);
+
+impl Drop for StateChange<'_> {
+	fn drop(&mut self) {
+		self.0.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+	}
+}
+
+/// The catalog epoch of a transaction that names none; see
+/// [`Transaction::catalog_epoch`].
+pub const NO_CATALOG_EPOCH: u64 = u64::MAX;
 
 /// The slot a transaction holds for a sequence it defined: the allocator it
 /// owns for that sequence, empty until something draws from it.
@@ -136,11 +152,40 @@ pub struct Transaction {
 	/// [`Self::set_tenant_identity`].
 	tenant_identity: OnceLock<Arc<TenantIdentity>>,
 	/// The underlying transactor.
-	tr: Transactor,
+	pub(crate) tr: Transactor,
 	/// The query cache for this store
 	cache: TransactionCache,
+	/// The caches speculations read through, each with the speculative state
+	/// its entries describe: a speculation starting from the same state
+	/// reads through its cache again.
+	speculative_caches: Mutex<Vec<(crate::speculation::Overlay, Arc<cache::tx::Cache>)>>,
 	/// The sequences for this store
 	sequences: Sequences,
+	/// How many times this transaction has stamped a table's catalog version
+	/// ([`Self::bump_catalog_version`]). It only grows, so a reader that saw
+	/// the same count earlier in the transaction knows no table's version has
+	/// changed since.
+	catalog_stamps: AtomicU64,
+	/// How many times this transaction has stamped the version of a catalog
+	/// object other than a table ([`Self::catalog_object_version`]), with the
+	/// same contract as [`Self::catalog_stamps`] for those objects.
+	object_stamps: AtomicU64,
+	/// The version each table this transaction stamped was last stamped
+	/// with, so a later write of the table's definition in the transaction
+	/// prints the version again from what it wrote
+	/// ([`Self::reprint_stamped_table`]).
+	stamped_tables: parking_lot::Mutex<HashMap<(NamespaceId, DatabaseId, TableName), Uuid>>,
+	/// The count of the datastore's catalog commits finished when this
+	/// transaction opened, with none under way, where the datastore is the
+	/// store's sole writer; [`NO_CATALOG_EPOCH`] otherwise
+	/// ([`Self::catalog_epoch`]).
+	catalog_epoch: u64,
+	/// How many writes and save-point rollbacks this transaction has taken
+	/// ([`Self::state_changes`]).
+	state_changes: AtomicU64,
+	/// The recordings of catalog reads open on this transaction
+	/// ([`Self::record_catalog_reads`]).
+	catalog_reads: crate::catalog_reads::CatalogReadLog,
 	/// The changefeed buffer.
 	changefeed: OnceLock<Changefeed>,
 	/// The live-query event buffer (dedicated keyspace, Router engine).
@@ -443,7 +488,7 @@ impl IndexBuildReservationRelease {
 			return Err(err);
 		}
 
-		if let Err(err) = tx.tr.commit().await {
+		if let Err(err) = tx.commit_store().await {
 			let _ = tx.tr.cancel().await;
 			return Err(err.into());
 		}
@@ -542,7 +587,7 @@ impl IndexBuildReservationRelease {
 				}
 			}
 
-			match tx.tr.commit().await {
+			match tx.commit_store().await {
 				Ok(()) => return Ok(()),
 				Err(err) if err.is_retryable() => {
 					let _ = tx.tr.cancel().await;
@@ -629,7 +674,7 @@ impl IndexBuildReservationRelease {
 				}
 			}
 		}
-		match tx.tr.commit().await {
+		match tx.commit_store().await {
 			Ok(()) => Ok(()),
 			Err(_) => {
 				let _ = tx.tr.cancel().await;
@@ -922,6 +967,11 @@ impl Transaction {
 	/// `Arc::new(NoopObserver)` when no observer is configured. `write`
 	/// should match the `TransactionType` used to open the underlying
 	/// transactor so the emitted event carries the correct attribute.
+	///
+	/// `catalog_epoch` is the count of the datastore's catalog commits
+	/// finished, with none under way, read before the underlying transaction
+	/// opened, where the datastore is the store's sole writer, and
+	/// [`NO_CATALOG_EPOCH`] otherwise ([`Self::catalog_epoch`]).
 	pub fn new(
 		local: bool,
 		sequences: Sequences,
@@ -929,6 +979,7 @@ impl Transaction {
 		observer: Arc<dyn ExecutionObserver>,
 		tr: Transactor,
 		config: &TransactionConfig,
+		catalog_epoch: u64,
 	) -> Transaction {
 		Transaction {
 			local,
@@ -938,7 +989,14 @@ impl Transaction {
 			tenant_identity: OnceLock::new(),
 			tr,
 			cache: TransactionCache::new(config.transaction_cache_size),
+			speculative_caches: Mutex::new(Vec::new()),
 			sequences,
+			catalog_stamps: AtomicU64::new(0),
+			object_stamps: AtomicU64::new(0),
+			stamped_tables: Default::default(),
+			catalog_epoch,
+			state_changes: AtomicU64::new(0),
+			catalog_reads: Default::default(),
 			changefeed: OnceLock::new(),
 			live_events: OnceLock::new(),
 			index_deltas: OnceLock::new(),
@@ -1002,7 +1060,17 @@ impl Transaction {
 	/// (compare-and-increment), so writes issued concurrently on the same
 	/// transaction each take a distinct slot and the limit holds under any
 	/// interleaving.
-	fn reserve_write_slot(&self) -> Result<()> {
+	///
+	/// The write is counted in [`Self::state_changes`] when the answered
+	/// guard is dropped, which the caller holds until the write has taken
+	/// effect.
+	fn reserve_write_slot(&self) -> Result<StateChange<'_>> {
+		let changed = self.state_change();
+		// A speculation's writes never reach the storage, so they spend none
+		// of the statement's write allowance.
+		if self.tr.speculating() {
+			return Ok(changed);
+		}
 		if let Some(limit) = self.write_keys_limit.get()
 			&& self
 				.guarded_writes
@@ -1020,7 +1088,7 @@ impl Transaction {
 			}
 			.into());
 		}
-		Ok(())
+		Ok(changed)
 	}
 
 	/// Attach pre-resolved tenant identity so the emitted
@@ -1403,7 +1471,7 @@ impl Transaction {
 			}
 			.into());
 		}
-		Ok(self.tr.commit().await?)
+		Ok(self.commit_store().await?)
 	}
 
 	/// The reason this transaction may not commit, if there is one.
@@ -1520,7 +1588,7 @@ impl Transaction {
 			return Err(e);
 		}
 		// Commit the transaction
-		if let Err(e) = self.tr.commit().await {
+		if let Err(e) = self.commit_store().await {
 			// Record the write-set size, which is what separates an over-large
 			// transaction from an unhealthy cluster and which storage-layer
 			// errors do not carry.
@@ -1670,6 +1738,23 @@ impl Transaction {
 	pub async fn get(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Vec<u8>>> {
 		let key_bytes = key.len() as u64;
 		let val = self.tr.get(key, version).await?;
+		let (keys_found, value_bytes) = match &val {
+			Some(v) => (1, v.len() as u64),
+			None => (0, 0),
+		};
+		self.metrics.record_get(keys_found, key_bytes, value_bytes);
+		Ok(val)
+	}
+
+	/// [`Self::getu_key`] over an encoded key, without decoding the value: for
+	/// a program that encodes keys and values itself.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn getu_raw(&self, key: Key<'_>) -> Result<Option<Val>> {
+		if !self.tr.writeable() {
+			anyhow::bail!(KvsError::TransactionReadonly);
+		}
+		let key_bytes = key.len() as u64;
+		let val = self.tr.getu(key).await?;
 		let (keys_found, value_bytes) = match &val {
 			Some(v) => (1, v.len() as u64),
 			None => (0, 0),
@@ -1896,22 +1981,24 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let key_bytes = key.len() as u64;
+		let defined = self.changed_definition(&key, None).await?;
 		self.tr.del(key).await?;
 		self.metrics.record_del(1, key_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Delete a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn del(&self, key: Key<'_>) -> Result<()> {
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
+		let defined = self.changed_definition(&key, None).await?;
 		self.tr.del(key).await?;
 		self.metrics.record_del(1, key_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// The stored bytes to retry a failed comparison against, or `None` if the
@@ -1962,9 +2049,10 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let encoded = key.encode_key()?;
 		let key_bytes = encoded.len() as u64;
+		let defined = self.changed_definition(&encoded, None).await?;
 		match chk {
 			// Nothing to fence on, so nothing to re-examine.
 			None => self.tr.delc(encoded, None).await?,
@@ -1984,18 +2072,19 @@ impl Transaction {
 			}
 		}
 		self.metrics.record_del(1, key_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Delete a key from the datastore if the current value matches a
 	/// condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn del_compare(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
+		let defined = self.changed_definition(&key, None).await?;
 		self.tr.delc(key, chk).await?;
 		self.metrics.record_del(1, key_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -2004,7 +2093,7 @@ impl Transaction {
 	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn delr(&self, rng: impl AnyRange) -> Result<()> {
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		self.tr.delr(rng.into_key_range()).await?;
 		// Range/prefix deletes don't report the number of affected keys or
 		// their byte size.
@@ -2028,11 +2117,12 @@ impl Transaction {
 	/// Delete all versions of a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn clr(&self, key: Key<'_>) -> Result<()> {
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
+		let defined = self.changed_definition(&key, None).await?;
 		self.tr.clr(key).await?;
 		self.metrics.record_del(1, key_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Delete all versions of a key from the datastore.
@@ -2041,12 +2131,13 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let key_bytes = key.len() as u64;
+		let defined = self.changed_definition(&key, None).await?;
 		self.tr.clr(key).await?;
 		self.metrics.record_del(1, key_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Delete all versions of a key from the datastore if the current value
@@ -2056,9 +2147,10 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let encoded = key.encode_key()?;
 		let key_bytes = encoded.len() as u64;
+		let defined = self.changed_definition(&encoded, None).await?;
 		match chk {
 			// Nothing to fence on, so nothing to re-examine.
 			None => self.tr.clrc(encoded, None).await?,
@@ -2078,7 +2170,7 @@ impl Transaction {
 			}
 		}
 		self.metrics.record_del(1, key_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Delete all versions of a range of keys from the datastore.
@@ -2087,7 +2179,7 @@ impl Transaction {
 	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn clrr(&self, rng: impl AnyRange) -> Result<()> {
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		self.tr.clrr(rng.into_key_range()).await?;
 		self.metrics.record_del(0, 0);
 		Ok(())
@@ -2102,7 +2194,7 @@ impl Transaction {
 	where
 		K: KVSubspace,
 	{
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let range = key.raw_range()?;
 		self.tr.clrr(range.into_key_range()).await?;
 		self.metrics.record_del(0, 0);
@@ -2312,6 +2404,11 @@ impl Transaction {
 	/// The identity of `tb`'s catalog entry as this transaction sees it, or
 	/// `None` for a table no catalog write has stamped yet.
 	///
+	/// A stored version is answered only where it is proven against the
+	/// table's definition key ([`CatalogVersion::proven`]): a definition
+	/// rewritten or removed since the stamp by a build that predates versions
+	/// reads as unstamped, so a reader falls back to the definition itself.
+	///
 	/// The answer is the transaction's snapshot plus its own uncommitted catalog
 	/// writes: a transaction that has run DDL on the table sees the version it
 	/// minted, and no other transaction can see that version until this one
@@ -2325,6 +2422,22 @@ impl Transaction {
 	/// Under snapshot isolation nothing else can change the stored value this
 	/// transaction sees, so the cached answer is the stored one for the life of
 	/// the transaction, or until [`Self::clear_cache`] drops it.
+	/// The definition of `tb` as of `version`, read by the storage layer to
+	/// lay out a record it reads or writes: whether the table is a
+	/// lightweight relation, whether its adjacency is folded, the caps of its
+	/// inline caches, its id. The read is the storage layer's own, which the
+	/// work it serves does not make, so it is made unsealed
+	/// ([`crate::catalog_reads::sealed`]); open recordings still note it.
+	pub fn layout_tb<'a>(
+		&'a self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		version: Option<u64>,
+	) -> BoxProviderFut<'a, Result<Option<Arc<TableDefinition>>>> {
+		Box::pin(crate::catalog_reads::sealed(false, self.get_tb(ns, db, tb, version)))
+	}
+
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub async fn catalog_version(
 		&self,
@@ -2332,6 +2445,7 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Option<Uuid>> {
+		self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
 		let qey = cache::tx::Lookup::Cv(ns, db, tb.as_str());
 		if let Some(entry) = self.cache.get(&qey) {
 			return Ok(*entry.try_into_type::<Option<Uuid>>()?);
@@ -2341,9 +2455,30 @@ impl Transaction {
 			db,
 			tb: Cow::Borrowed(tb),
 		};
-		let version = self.get_key(&key, None).await?.map(|v| v.0);
+		let version = match self.get_key(&key, None).await? {
+			Some(stamped) => stamped.proven(self.table_stored(ns, db, tb).await?.as_deref()),
+			None => None,
+		};
 		self.cache.insert(qey, cache::tx::Entry::Any(Arc::new(version)));
 		Ok(version)
+	}
+
+	/// The bytes `tb`'s definition key holds as this transaction sees it,
+	/// read past the transaction cache: what a table's catalog version is
+	/// printed from and proven against ([`CatalogVersion::proven`]).
+	async fn table_stored(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<Option<Val>> {
+		let key = TableKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.encode_key()?;
+		Ok(self.tr.get(key, None).await?)
 	}
 
 	/// Stamp `tb`'s catalog entry with a fresh version.
@@ -2363,24 +2498,636 @@ impl Transaction {
 	/// state of the table rests on every DDL path writing the table through
 	/// [`Self::replace_tb`], whose locked read of the definition is what two
 	/// DDL transactions on the same table conflict over.
-	async fn bump_catalog_version(
+	pub async fn bump_catalog_version(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<()> {
-		let version = CatalogVersion::fresh();
+		self.stamp_catalog_version(ns, db, tb, None).await.map(|_| ())
+	}
+
+	/// Stamp `tb`'s catalog entry with `version`, or a fresh one when
+	/// `None`, answering the version stamped. A schema statement run again
+	/// after a speculation of it stamps the version the speculation minted,
+	/// which what was planned over the speculation read.
+	pub async fn stamp_catalog_version(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		version: Option<Uuid>,
+	) -> Result<Uuid> {
+		let stored = self.table_stored(ns, db, tb).await?;
+		let version = match version {
+			Some(version) => CatalogVersion::stamped(version, stored.as_deref()),
+			None => CatalogVersion::fresh(stored.as_deref()),
+		};
 		let key = CatalogVersionKey {
 			ns,
 			db,
 			tb: Cow::Borrowed(tb),
 		};
 		self.set_key(&key, &version).await?;
+		self.stamped_tables.lock().insert((ns, db, tb.clone()), version.0);
 		self.cache.insert(
 			cache::tx::Lookup::Cv(ns, db, tb.as_str()),
 			cache::tx::Entry::Any(Arc::new(Some(version.0))),
 		);
+		if !self.tr.speculating() {
+			self.catalog_stamps.fetch_add(1, std::sync::atomic::Ordering::Release);
+		}
+		Ok(version.0)
+	}
+
+	/// The version of `object` as this transaction sees it, or `None` for an
+	/// object no catalog write by this build has stamped.
+	///
+	/// A table answers [`Self::catalog_version`]. Every other kind answers the
+	/// value under its `!ov` key, which the transaction's write methods mint
+	/// afresh whenever a write or deletion of the object's definition key
+	/// changes what it holds ([`Self::restamp_defined`]), so no DDL path can
+	/// change a definition without moving its version. A removal mints too, leaving a tombstone
+	/// value behind, rather than deleting the version: an object that was
+	/// never stamped and one that has been removed would otherwise both read
+	/// `None`, and a reader that held `None` for the first would not see the
+	/// second as a change.
+	///
+	/// `None` names no state. An object written only by a build that predates
+	/// these versions reads `None` whatever its definition, as does one such
+	/// a build has rewritten or removed since its last stamp: a stored version
+	/// is answered only where it is proven against the definition key
+	/// ([`CatalogVersion::proven`]). A reader must not take two `None` reads
+	/// to mean the same definition; only equal `Some` values do.
+	///
+	/// # What makes a version name one committed state
+	///
+	/// Each of these objects is one definition key, and every write of that
+	/// key writes the version beside it in the same transaction. A commit is
+	/// atomic, so the pair a reader's snapshot holds always comes from one
+	/// transaction, whatever the backend's conflict rules: two concurrent
+	/// writers of the same object either conflict, or both commit and the
+	/// later commit replaces both keys. No locked read of the definition is
+	/// needed for that, unlike a table, whose state spans its definition,
+	/// fields and indexes, and whose writers serialise through
+	/// [`Self::replace_tb`]'s locked read so that two DDL transactions
+	/// writing different keys of one table cannot both commit.
+	///
+	/// Storage is read once per object per transaction, as for a table: the
+	/// answer, `None` included, is held in the transaction cache, and a stamp
+	/// replaces it with the version it mints.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub async fn catalog_object_version(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		object: CatalogObject<'_>,
+	) -> Result<Option<Uuid>> {
+		let (kind, name, sub) = match object.versioned_as() {
+			Ok(versioned) => versioned,
+			Err(tb) => return self.catalog_version(ns, db, tb).await,
+		};
+		match kind {
+			CatalogObjectKind::Function => {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Function(ns, db, name))
+			}
+			CatalogObjectKind::Param => {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Param(ns, db, name))
+			}
+			_ => {}
+		}
+		let qey = cache::tx::Lookup::Ov(ns, db, kind, name, sub);
+		if let Some(entry) = self.cache.get(&qey) {
+			return Ok(*entry.try_into_type::<Option<Uuid>>()?);
+		}
+		let key = ObjectVersionKey {
+			ns,
+			db,
+			kind,
+			name: Cow::Borrowed(name),
+			sub: Cow::Borrowed(sub),
+		};
+		let version = match self.get_key(&key, None).await? {
+			Some(stamped) => {
+				let defined = DefinedObject::key_of(ns, db, kind, name, sub)?;
+				stamped.proven(self.tr.get(defined, None).await?.as_deref())
+			}
+			None => None,
+		};
+		self.cache.insert(qey, cache::tx::Entry::Any(Arc::new(version)));
+		Ok(version)
+	}
+
+	/// Stamp `object` with a fresh version, answering the version stamped.
+	///
+	/// A table is stamped through [`Self::stamp_catalog_version`]. Any other
+	/// object is stamped by every write of its definition already, so a caller
+	/// needs this only to move a version without writing the definition,
+	/// which is always safe: a fresh version naming an unchanged definition
+	/// costs a reader a fallback, never a wrong answer.
+	pub async fn bump_catalog_object_version(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		object: CatalogObject<'_>,
+	) -> Result<Uuid> {
+		match object.versioned_as() {
+			Ok((kind, name, sub)) => self.stamp_object_version(ns, db, kind, name, sub).await,
+			Err(tb) => self.stamp_catalog_version(ns, db, tb, None).await,
+		}
+	}
+
+	/// Write a fresh version under `object`'s `!ov` key and hold it in the
+	/// transaction cache. Written through the transactor directly rather than
+	/// [`Self::set_key`], whose own restamp would otherwise recurse here.
+	async fn stamp_object_version(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		kind: CatalogObjectKind,
+		name: &str,
+		sub: &str,
+	) -> Result<Uuid> {
+		let defined = DefinedObject::key_of(ns, db, kind, name, sub)?;
+		let version = CatalogVersion::fresh(self.tr.get(defined, None).await?.as_deref());
+		let key = ObjectVersionKey {
+			ns,
+			db,
+			kind,
+			name: Cow::Borrowed(name),
+			sub: Cow::Borrowed(sub),
+		}
+		.encode_key()?;
+		let val = version.kv_encode_value()?;
+		let _changed = self.reserve_write_slot()?;
+		let key_bytes = key.len() as u64;
+		let value_bytes = val.len() as u64;
+		self.tr.set(key, val).await?;
+		self.metrics.record_set(key_bytes, value_bytes);
+		self.cache.insert(
+			cache::tx::Lookup::Ov(ns, db, kind, name, sub),
+			cache::tx::Entry::Any(Arc::new(Some(version.0))),
+		);
+		if !self.tr.speculating() {
+			self.object_stamps.fetch_add(1, std::sync::atomic::Ordering::Release);
+		}
+		Ok(version.0)
+	}
+
+	/// The object whose definition a write of `val` at `key` changes, or a
+	/// deletion of `key` when `val` is `None`, for [`Self::restamp_defined`] to
+	/// mint a version for once the write succeeds.
+	///
+	/// `None` when `key` is no versioned object's definition, and also when
+	/// the write leaves the definition as it is — the same bytes written
+	/// again, or a definition that is not there deleted — so a statement that
+	/// rewrites a definition unchanged leaves its version standing, and two
+	/// runs of it leave the catalog as one does. Only a key that is an
+	/// object's definition costs the read of what it holds.
+	async fn changed_definition(
+		&self,
+		key: &Key<'_>,
+		val: Option<&[u8]>,
+	) -> Result<Option<Defined>> {
+		if let Some(table) = self.stamped_table_at(key)? {
+			return Ok(Some(Defined::Table(table)));
+		}
+		let Some(defined) = DefinedObject::at(key)? else {
+			return Ok(None);
+		};
+		let prior = self.tr.get(key.as_borrowed(), None).await?;
+		Ok((prior.as_deref() != val).then_some(Defined::Object(defined)))
+	}
+
+	/// The table whose definition `key` is, where this transaction has
+	/// stamped that table's version; `None` for any other key.
+	fn stamped_table_at(&self, key: &[u8]) -> Result<Option<(NamespaceId, DatabaseId, TableName)>> {
+		if key.len() < 14 || &key[11..14] != b"!tb" || self.stamped_tables.lock().is_empty() {
+			return Ok(None);
+		}
+		let Ok(table) = TableKey::decode_key(key) else {
+			return Ok(None);
+		};
+		let table = (table.ns, table.db, table.tb.into_owned());
+		Ok(self.stamped_tables.lock().contains_key(&table).then_some(table))
+	}
+
+	/// Print the version this transaction last stamped `table` with again,
+	/// from the definition as it now stands: a version names the state the
+	/// transaction commits, so a definition written after its stamp is what
+	/// the version is proven against. Uncounted, as the version is unmoved.
+	async fn reprint_stamped_table(
+		&self,
+		(ns, db, tb): (NamespaceId, DatabaseId, TableName),
+	) -> Result<()> {
+		let Some(version) = self.stamped_tables.lock().get(&(ns, db, tb.clone())).copied() else {
+			return Ok(());
+		};
+		let stored = self.table_stored(ns, db, &tb).await?;
+		let key = CatalogVersionKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(&tb),
+		}
+		.encode_key()?;
+		let val = CatalogVersion::stamped(version, stored.as_deref()).kv_encode_value()?;
+		let _changed = self.reserve_write_slot()?;
+		self.tr.set(key, val).await?;
 		Ok(())
+	}
+
+	/// Mint a fresh version for the object a write method just wrote or
+	/// deleted the definition of, as [`Self::changed_definition`] found it.
+	///
+	/// Every single-key write and delete method of the transaction calls this
+	/// after its write succeeds, which is what lets the versions of these
+	/// objects stand without any DDL path stamping them. Range deletes do
+	/// not: the only range that spans these definitions is a whole
+	/// database's, which takes their versions with it, and a database's id is
+	/// never reused.
+	async fn restamp_defined(&self, defined: Option<Defined>) -> Result<()> {
+		match defined {
+			Some(Defined::Object(defined)) => {
+				self.stamp_object_version(
+					defined.ns,
+					defined.db,
+					defined.kind,
+					&defined.name,
+					&defined.sub,
+				)
+				.await?;
+			}
+			Some(Defined::Table(table)) => self.reprint_stamped_table(table).await?,
+			None => {}
+		}
+		Ok(())
+	}
+
+	/// The table definitions of a database, read for a compilation that
+	/// specialises per table: each table is noted in the recordings of
+	/// catalog reads as a read of its own definition, and the listing as a
+	/// read of which tables the database defines, so what is compiled from it
+	/// is reused while every table it read is as it was and no table has been
+	/// defined or removed.
+	pub async fn all_tb_each(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[TableDefinition]>> {
+		self.catalog_reads.note(crate::catalog_reads::CatalogRead::Listing(ns, db));
+		let tables = self.all_tb_listed(ns, db, None).await?;
+		for table in tables.iter() {
+			self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, &table.name));
+		}
+		Ok(tables)
+	}
+
+	/// What identifies the catalog of every table of a database, as this
+	/// transaction sees it, read in two scans of keys and small values: the
+	/// tables the database defines, from the keys of their definitions alone,
+	/// and every catalog version stamped in it that is proven against its
+	/// table's definition ([`CatalogVersion::proven`]). Two reads that answer
+	/// the same see the same tables, each in the state its version names; a
+	/// table the database defines and no proven version stamps has no version
+	/// here, and its state is its definition. Noted in the recordings of catalog
+	/// reads as a read of the database's listing.
+	///
+	/// Storage is read once per database for as long as the transaction
+	/// stamps no catalog version ([`Self::catalog_stamps`]): every catalog
+	/// write stamps one, so the answer held in the transaction cache with the
+	/// count it was read at is the stored one while the count stands. A
+	/// speculating transaction, whose stamps are not counted, reads storage
+	/// each time.
+	pub async fn database_catalog_state(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<DatabaseCatalogState>> {
+		self.catalog_reads.note(crate::catalog_reads::CatalogRead::Listing(ns, db));
+		self.catalog_state_unnoted(ns, db).await
+	}
+
+	/// [`Self::database_catalog_state`], with no read noted.
+	async fn catalog_state_unnoted(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<DatabaseCatalogState>> {
+		let held = !self.tr.speculating();
+		let stamps = self.catalog_stamps();
+		let qey = cache::tx::Lookup::DbCatalog(ns, db);
+		if held && let Some(entry) = self.cache.get(&qey) {
+			let read = entry.try_into_type::<(u64, Arc<DatabaseCatalogState>)>()?;
+			if read.0 == stamps {
+				return Ok(Arc::clone(&read.1));
+			}
+		}
+		let defined = self
+			.scan_raw(
+				TablePrefix {
+					ns,
+					db,
+				}
+				.range()?,
+				u32::MAX,
+				0,
+				None,
+			)
+			.await?
+			.into_iter()
+			.map(|(key, stored)| {
+				TableKey::decode_key(&key).map(|key| (key.tb.into_owned(), stored))
+			})
+			.collect::<Result<Vec<_>>>()?;
+		// A version stands for its table only where it is proven against the
+		// definition it was stamped beside; any other leaves the table
+		// unstamped here, as if no write had stamped it.
+		let stored_of: HashMap<&TableName, &[u8]> =
+			defined.iter().map(|(tb, stored)| (tb, stored.as_slice())).collect();
+		let mut versions = Vec::new();
+		for (key, stamped) in self
+			.getr(
+				CatalogVersionPrefix {
+					ns,
+					db,
+				}
+				.range()?,
+				None,
+			)
+			.await?
+		{
+			let tb = CatalogVersionKey::decode_key(&key)?.tb.into_owned();
+			if let Some(version) = stamped.proven(stored_of.get(&tb).copied()) {
+				versions.push((tb, version));
+			}
+		}
+		drop(stored_of);
+		let tables = defined.into_iter().map(|(tb, _)| tb).collect();
+		let state = Arc::new(DatabaseCatalogState {
+			tables,
+			versions,
+		});
+		if held {
+			self.cache.insert(qey, cache::tx::Entry::Any(Arc::new((stamps, Arc::clone(&state)))));
+		}
+		Ok(state)
+	}
+
+	/// The `REFERENCE` fields of every table of `ns`/`db`, as this
+	/// transaction reads the catalog, with no read noted: a caller that
+	/// compiles from them notes what it depends on itself
+	/// ([`Self::note_references_read`]).
+	///
+	/// The fields of a table are read only where its catalog version differs
+	/// from the one `previous` was read under, or where no catalog write has
+	/// stamped it; every other table's are taken from `previous`. Finding the
+	/// fields after a change to one table so reads that table's fields and the
+	/// two scans that identify the catalog of every table, which are held for
+	/// the transaction while it stamps no catalog version. The answer is held
+	/// for the transaction under the catalog state it was read in.
+	pub async fn reference_fields(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		previous: Option<&Arc<ReferenceFields>>,
+	) -> Result<Arc<ReferenceFields>> {
+		let state = self.catalog_state_unnoted(ns, db).await?;
+		let held = !self.tr.speculating();
+		let qey = cache::tx::Lookup::DbReferenceFields(ns, db);
+		if held && let Some(entry) = self.cache.get(&qey) {
+			let read = entry.try_into_type::<ReferenceFields>()?;
+			if Arc::ptr_eq(&read.state, &state) || *read.state == *state {
+				return Ok(read);
+			}
+		}
+		if let Some(previous) = previous
+			&& *previous.state == *state
+		{
+			let fields = Arc::new(ReferenceFields {
+				state,
+				tables: previous.tables.clone(),
+			});
+			if held {
+				self.cache.insert(qey, cache::tx::Entry::Any(Arc::clone(&fields) as _));
+			}
+			return Ok(fields);
+		}
+		let version_of = |state: &DatabaseCatalogState| -> HashMap<TableName, Uuid> {
+			state.versions.iter().cloned().collect()
+		};
+		let now = version_of(&state);
+		let before = previous.map(|previous| (version_of(&previous.state), &previous.tables));
+		let mut tables = Vec::new();
+		for table in &state.tables {
+			let version = now.get(table);
+			if let Some((versions, kept)) = &before
+				&& version.is_some()
+				&& versions.get(table) == version
+			{
+				if let Some((_, fields)) = kept.iter().find(|(name, _)| name == table) {
+					tables.push((table.clone(), Arc::clone(fields)));
+				}
+				continue;
+			}
+			let fields = self.tb_fields_unnoted(ns, db, table).await?;
+			let declared: Arc<[catalog::FieldDefinition]> =
+				fields.iter().filter(|field| field.reference.is_some()).cloned().collect();
+			if !declared.is_empty() {
+				tables.push((table.clone(), declared));
+			}
+		}
+		let fields = Arc::new(ReferenceFields {
+			state,
+			tables,
+		});
+		if held {
+			self.cache.insert(qey, cache::tx::Entry::Any(Arc::clone(&fields) as _));
+		}
+		Ok(fields)
+	}
+
+	/// Note in the open recordings a read of the `REFERENCE` fields of
+	/// `ns`/`db` that can name a record of `target`, or of any table where it
+	/// is `None`.
+	pub fn note_references_read(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		target: Option<&TableName>,
+	) {
+		self.catalog_reads.answered(crate::catalog_reads::CatalogRead::References(ns, db, target));
+	}
+
+	/// Note in the open recordings a read of `tb`'s catalog that the caller
+	/// answered without reading it.
+	pub fn note_table_read(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName) {
+		self.catalog_reads.answered(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
+	}
+
+	/// Note in the open recordings a read of the `DEFINE PARAM $pa` of
+	/// `ns`/`db` that the caller answered without reading it.
+	pub fn note_param_read(&self, ns: NamespaceId, db: DatabaseId, pa: &str) {
+		self.catalog_reads.answered(crate::catalog_reads::CatalogRead::Param(ns, db, pa));
+	}
+
+	/// Note in the open recordings a read of the definition of function `fc`
+	/// of `ns`/`db` that the caller answered without reading it.
+	pub fn note_function_read(&self, ns: NamespaceId, db: DatabaseId, fc: &str) {
+		self.catalog_reads.answered(crate::catalog_reads::CatalogRead::Function(ns, db, fc));
+	}
+
+	/// Note in the open recordings a read of database `db` of namespace `ns`,
+	/// by name, that the caller answered without reading it.
+	pub fn note_database_read(&self, ns: &str, db: &str) {
+		self.catalog_reads.answered(crate::catalog_reads::CatalogRead::Database(ns, db));
+	}
+
+	/// Note in the open recordings a read of something in the catalog the
+	/// recordings cannot name, which the caller answered without reading it.
+	pub fn note_opaque_read(&self) {
+		self.catalog_reads.answered(crate::catalog_reads::CatalogRead::Opaque);
+	}
+
+	/// The fields of `tb` as [`TableProvider::all_tb_fields`] reads them at
+	/// the current version, with no read noted.
+	async fn tb_fields_unnoted(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<Arc<[catalog::FieldDefinition]>> {
+		let qey = cache::tx::Lookup::Fds(ns, db, tb.as_str());
+		if let Some(val) = self.cache.get(&qey) {
+			return val.try_into_fds();
+		}
+		let range = FieldPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.range()?;
+		let val = self.tr.getr(range.into_key_range(), None).await?;
+		let stored: Arc<[catalog::StoredFieldDefinition]> =
+			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+		let val = catalog::from_stored_all(&stored)?;
+		self.cache.insert(qey, cache::tx::Entry::Fds(Arc::clone(&val)));
+		Ok(val)
+	}
+
+	/// The listing of [`TableProvider::all_tb`], with no read noted.
+	async fn all_tb_listed(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		version: Option<u64>,
+	) -> Result<Arc<[TableDefinition]>> {
+		if version.is_some() {
+			let range = TablePrefix {
+				ns,
+				db,
+			}
+			.range()?;
+			let val = self.tr.getr(range.into_key_range(), version).await?;
+			let stored: Arc<[StoredTableDefinition]> =
+				util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+			return catalog::from_stored_all(&stored);
+		}
+		let qey = cache::tx::Lookup::Tbs(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_tbs(),
+			None => {
+				let range = TablePrefix {
+					ns,
+					db,
+				}
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), None).await?;
+				let stored: Arc<[StoredTableDefinition]> =
+					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+				let val = catalog::from_stored_all(&stored)?;
+				let entry = cache::tx::Entry::Tbs(Arc::clone(&val));
+				self.cache.insert(qey, entry);
+				Ok(val)
+			}
+		}
+	}
+
+	/// How many writes and save-point rollbacks this transaction has taken.
+	///
+	/// It only grows, and grows once each has taken effect or failed, so two
+	/// equal readings bracket a stretch of the transaction in which nothing
+	/// it reads changed: what was read after the first still holds at the
+	/// second.
+	pub fn state_changes(&self) -> u64 {
+		self.state_changes.load(std::sync::atomic::Ordering::Acquire)
+	}
+
+	/// A guard that counts a write or a save-point rollback in
+	/// [`Self::state_changes`] when dropped.
+	fn state_change(&self) -> StateChange<'_> {
+		StateChange(&self.state_changes)
+	}
+
+	/// Open a recording of the catalog reads this transaction answers until
+	/// it is finished ([`crate::catalog_reads`]).
+	pub fn record_catalog_reads(&self) -> crate::catalog_reads::CatalogReadRecording<'_> {
+		self.catalog_reads.begin()
+	}
+
+	/// Note in the open recordings a read of the listing of the tables of
+	/// `ns`/`db` that the caller answered without reading it: code compiled
+	/// from an answer kept under a listing it read earlier depends on that
+	/// listing as a fresh read would.
+	pub fn note_listing_read(&self, ns: NamespaceId, db: DatabaseId) {
+		self.catalog_reads.answered(crate::catalog_reads::CatalogRead::Listing(ns, db));
+	}
+
+	/// How many table catalog versions this transaction has stamped so far.
+	///
+	/// Two reads of the same count bracket a stretch of the transaction in
+	/// which no table's catalog version changed, so what was read of the
+	/// versions at the first still holds at the second.
+	pub fn catalog_stamps(&self) -> u64 {
+		self.catalog_stamps.load(std::sync::atomic::Ordering::Acquire)
+	}
+
+	/// How many versions of catalog objects other than tables this
+	/// transaction has stamped so far: the same bracket as
+	/// [`Self::catalog_stamps`], over [`Self::catalog_object_version`].
+	pub fn catalog_object_stamps(&self) -> u64 {
+		self.object_stamps.load(std::sync::atomic::Ordering::Acquire)
+	}
+
+	/// The count of the datastore's catalog commits whose catalog this
+	/// transaction sees, where that count names it: the datastore is the
+	/// store's sole writer, no catalog commit was under way when the
+	/// transaction opened and none has started since, and the transaction
+	/// has stamped no catalog version of its own and is not a speculation.
+	/// Two transactions answering the same count see the same catalog: every
+	/// table the store defines, each in the same state.
+	///
+	/// The snapshot a transaction reads is taken at or after it opens, and no
+	/// commit that writes the catalog overlapped the stretch from the opening
+	/// to this call, so the snapshot holds exactly the catalog commits
+	/// finished before the opening.
+	pub fn catalog_epoch(&self) -> Option<u64> {
+		if self.catalog_epoch == NO_CATALOG_EPOCH
+			|| self.catalog_stamps() > 0
+			|| self.tr.speculating()
+		{
+			return None;
+		}
+		(self.triggers.catalog_epoch.settled() == Some(self.catalog_epoch))
+			.then_some(self.catalog_epoch)
+	}
+
+	/// Commit the underlying transaction, counted among the datastore's
+	/// catalog commits ([`crate::triggers::CatalogEpoch`]) from before it
+	/// starts until it has returned, where it stamped a catalog version.
+	async fn commit_store(&self) -> std::result::Result<(), KvsError> {
+		let _counted =
+			(self.catalog_stamps() > 0).then(|| self.triggers.catalog_epoch.committing());
+		self.tr.commit().await
 	}
 
 	/// Enqueue background reclaim of an index-data prefix by its stable id.
@@ -2582,20 +3329,45 @@ impl Transaction {
 		Ok(DocIdsReclaimClaim::Available)
 	}
 
+	/// Hold `record` in this transaction's cache as the record at `id` of
+	/// table `tb`, as [`TableProvider::put_record`] leaves it once the record
+	/// is written: for a writer that encodes the record's key and bytes itself.
+	pub fn cache_record(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordIdKey,
+		record: Arc<Record>,
+	) {
+		let qey = crate::cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
+		self.cache.insert(qey, crate::cache::tx::Entry::Val(record));
+	}
+
+	/// Drop the record at `id` of table `tb` from this transaction's cache, as
+	/// [`TableProvider::set_record`] and [`TableProvider::del_record`] do once
+	/// the record is overwritten or removed: for a writer that encodes the
+	/// record's key and bytes itself.
+	pub fn forget_record(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName, id: &RecordIdKey) {
+		let qey = crate::cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
+		self.cache.remove(&qey);
+	}
+
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn set_key<K>(&self, key: &K, val: &K::Value) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let val = val.kv_encode_value()?;
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
+		let defined = self.changed_definition(&key, Some(&val)).await?;
 		self.tr.set(key, val).await?;
 		self.metrics.record_set(key_bytes, value_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Insert or update a key whose write slot was already reserved.
@@ -2619,13 +3391,15 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
+		let _changed = self.state_change();
 		let key = key.encode_key()?;
 		let val = val.kv_encode_value()?;
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
+		let defined = self.changed_definition(&key, Some(&val)).await?;
 		self.tr.set(key, val).await?;
 		self.metrics.record_set(key_bytes, value_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Insert or update a key in the datastore.
@@ -2634,13 +3408,14 @@ impl Transaction {
 	where
 		V: IntoBytes + Debug,
 	{
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
 		let val = val.into_bytes();
 		let value_bytes = val.len() as u64;
+		let defined = self.changed_definition(&key, Some(&val)).await?;
 		self.tr.set(key, val).await?;
 		self.metrics.record_set(key_bytes, value_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -2649,14 +3424,15 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let val = val.kv_encode_value()?;
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
+		let defined = self.changed_definition(&key, Some(&val)).await?;
 		self.tr.put(key, val).await?;
 		self.metrics.record_put(key_bytes, value_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -2665,13 +3441,14 @@ impl Transaction {
 	where
 		V: IntoBytes + Debug,
 	{
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
 		let val = val.into_bytes();
 		let value_bytes = val.len() as u64;
+		let defined = self.changed_definition(&key, Some(&val)).await?;
 		self.tr.put(key, val).await?;
 		self.metrics.record_put(key_bytes, value_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -2685,11 +3462,12 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let encoded = key.encode_key()?;
 		let encoded_val = val.kv_encode_value()?;
 		let key_bytes = encoded.len() as u64;
 		let value_bytes = encoded_val.len() as u64;
+		let defined = self.changed_definition(&encoded, Some(&encoded_val)).await?;
 		match chk {
 			// Nothing to fence on, so nothing to re-examine.
 			None => self.tr.putc(encoded, encoded_val, None).await?,
@@ -2714,7 +3492,7 @@ impl Transaction {
 			}
 		}
 		self.metrics.record_put(key_bytes, value_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -2723,13 +3501,14 @@ impl Transaction {
 	where
 		V: IntoBytes + Debug,
 	{
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let val = val.into_bytes();
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
+		let defined = self.changed_definition(&key, Some(&val)).await?;
 		self.tr.putc(key, val, chk.map(|x| x.into_bytes())).await?;
 		self.metrics.record_put(key_bytes, value_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
 	}
 
 	/// Insert or replace a key in the datastore.
@@ -2738,14 +3517,28 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.reserve_write_slot()?;
+		let _changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let val = val.kv_encode_value()?;
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
+		let defined = self.changed_definition(&key, Some(&val)).await?;
 		self.tr.replace(key, val).await?;
 		self.metrics.record_put(key_bytes, value_bytes);
-		Ok(())
+		self.restamp_defined(defined).await
+	}
+
+	/// [`Self::replace_key`] over an encoded key and value: for a program that
+	/// encodes keys and values itself.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn replace_raw(&self, key: Key<'_>, val: Val) -> Result<()> {
+		let _changed = self.reserve_write_slot()?;
+		let key_bytes = key.len() as u64;
+		let value_bytes = val.len() as u64;
+		let defined = self.changed_definition(&key, Some(&val)).await?;
+		self.tr.replace(key, val).await?;
+		self.metrics.record_put(key_bytes, value_bytes);
+		self.restamp_defined(defined).await
 	}
 
 	// --------------------------------------------------
@@ -3068,6 +3861,128 @@ impl Transaction {
 	}
 
 	// --------------------------------------------------
+	// Speculation functions
+	// --------------------------------------------------
+
+	/// Speculate from `overlay` ([`crate::speculation`]): a view of this
+	/// transaction, answered with the guard that ends it, whose writes land in
+	/// the overlay and whose reads of the current state see them. Only code
+	/// handed the view ([`Speculation::txn`]) reads through the overlay; this
+	/// transaction, its cache and its count of catalog stamps are left as they
+	/// were, for every other holder of it too.
+	///
+	/// The speculation reads through the cache a speculation from the same
+	/// state that wrote nothing left, adding to it until its first write,
+	/// after which it caches apart ([`TransactionCache::begin_speculation`]).
+	///
+	/// `None` on a view: speculations do not nest.
+	pub fn speculate(
+		self: &Arc<Self>,
+		overlay: crate::speculation::Overlay,
+	) -> Option<Speculation> {
+		if self.tr.speculating() {
+			return None;
+		}
+		let kept = self.speculative_caches.try_lock().ok().and_then(|kept| {
+			kept.iter().find(|(from, _)| from.writes_as(&overlay)).map(|(_, c)| Arc::clone(c))
+		});
+		// The view's overlay lists only the catalog ids held in this
+		// speculation: those `overlay` lists stay with whoever handed it in.
+		let mut own = overlay.clone();
+		own.take_held();
+		let held = Arc::new(std::sync::Mutex::new(Some(own)));
+		let tr = Transactor::speculative(
+			Box::new(crate::speculation::Base::new(Arc::clone(self), Arc::clone(&held))),
+			held,
+		);
+		let cache = TransactionCache::new(1);
+		cache.begin_speculation(kept, Arc::clone(&tr.writes));
+		let view = Transaction {
+			local: self.local,
+			started_at: Instant::now(),
+			observer: Arc::new(surrealdb_observe::NoopObserver),
+			metrics: TransactionMetrics::new(),
+			tenant_identity: OnceLock::new(),
+			tr,
+			cache,
+			speculative_caches: Mutex::new(Vec::new()),
+			catalog_reads: Default::default(),
+			sequences: self.sequences.clone(),
+			catalog_stamps: AtomicU64::new(self.catalog_stamps()),
+			object_stamps: AtomicU64::new(self.catalog_object_stamps()),
+			stamped_tables: Default::default(),
+			catalog_epoch: NO_CATALOG_EPOCH,
+			state_changes: AtomicU64::new(0),
+			changefeed: OnceLock::new(),
+			live_events: OnceLock::new(),
+			index_deltas: OnceLock::new(),
+			triggers: Arc::new(CommitTriggers::new()),
+			trigger_async_event: AtomicBool::new(false),
+			trigger_index_compaction: AtomicBool::new(false),
+			trigger_graph_fold: AtomicBool::new(false),
+			write_keys_limit: OnceLock::new(),
+			write_guard_poisoned: AtomicBool::new(false),
+			save_point_poisoned: AtomicBool::new(false),
+			interrupted_write_poisoned: AtomicBool::new(false),
+			guarded_writes: AtomicU64::new(0),
+			pending_index_build_reservations: Mutex::new(Vec::new()),
+			cached_index_build_reservations: Mutex::new(HashMap::new()),
+			provisional_sequences: Mutex::new(HashMap::new()),
+			defines_any_sequence: AtomicBool::new(false),
+			provisional_save_points: Mutex::new(Vec::new()),
+			commit_actions: Mutex::new(Vec::new()),
+			rollback_actions: Mutex::new(Vec::new()),
+			graph_doc_ids_settled: Mutex::new(HashMap::new()),
+		};
+		Some(Speculation {
+			base: Arc::clone(self),
+			view: Arc::new(view),
+			from: overlay,
+			ended: false,
+		})
+	}
+
+	/// Mark that the speculation in progress raised a refusal its statement
+	/// declares.
+	pub fn note_speculative_refusal(&self) {
+		if let Some(overlay) =
+			self.tr.overlay.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_mut()
+		{
+			overlay.refuse();
+		}
+	}
+
+	/// Mark that the speculation in progress left an effect for the real run.
+	pub fn note_speculative_skip(&self) {
+		if let Some(overlay) =
+			self.tr.overlay.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_mut()
+		{
+			overlay.skip();
+		}
+	}
+
+	/// Keep `note` with the speculation in progress's writes, when one is.
+	pub fn note_speculative(&self, note: (u16, u128)) {
+		if let Some(overlay) =
+			self.tr.overlay.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_mut()
+		{
+			overlay.note(note);
+		}
+	}
+
+	/// Keep catalog id `held`, held by the speculation in progress, with its
+	/// writes, when one is: `false` when none is, and nothing keeps it.
+	pub fn note_speculative_hold(&self, held: (crate::sequences::CatalogSequence, u32)) -> bool {
+		match self.tr.overlay.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_mut() {
+			Some(overlay) => {
+				overlay.hold(held);
+				true
+			}
+			None => false,
+		}
+	}
+
+	// --------------------------------------------------
 	// Savepoint functions
 	// --------------------------------------------------
 
@@ -3108,6 +4023,7 @@ impl Transaction {
 
 	/// Rollback to the last save point.
 	pub async fn rollback_to_save_point(&self) -> Result<()> {
+		let _changed = self.state_change();
 		if let Err(e) = self.inner.rollback_to_save_point().await {
 			Self::poison_unless_inert(&e, &self.save_point_poisoned);
 			return Err(e.into());
@@ -3376,7 +4292,7 @@ impl Transaction {
 				nid,
 			);
 		if fresh {
-			self.reserve_write_slot()?;
+			let _changed = self.reserve_write_slot()?;
 		}
 		Ok(())
 	}
@@ -3638,7 +4554,7 @@ impl Transaction {
 				tb: Cow::Borrowed(&tb),
 			}
 			.encode_key()?;
-			self.reserve_write_slot()?;
+			let _changed = self.reserve_write_slot()?;
 			let key_bytes = key.len() as u64;
 			let value_bytes = value.len() as u64;
 			// Write the changefeed entry using the raw transactor API
@@ -3655,7 +4571,7 @@ impl Transaction {
 				ts: Cow::Borrowed(ts),
 			}
 			.encode_key()?;
-			self.reserve_write_slot()?;
+			let _changed = self.reserve_write_slot()?;
 			let key_bytes = key.len() as u64;
 			let value_bytes = value.len() as u64;
 			self.tr.set(key, value).await?;
@@ -3824,8 +4740,27 @@ impl Transaction {
 			// The table is gone (e.g. removed in the same batch); nothing to do.
 			return Ok(());
 		};
+		let version_key = CatalogVersionKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		let prior = self.table_stored(ns, db, tb).await?;
+		let proven = match self.get_key(&version_key, None).await? {
+			Some(stamped) => stamped.proven(prior.as_deref()),
+			None => None,
+		};
 		stored.cache_lives_ts = uuid::Uuid::now_v7();
 		self.set_key(&key, &stored).await?;
+		// The registration changes no catalog state, so a version that named
+		// the table's state before it names it after: it is printed again
+		// from the rewritten definition, uncounted as a stamp.
+		if let Some(version) = proven {
+			let stored = self.table_stored(ns, db, tb).await?;
+			let reprinted = CatalogVersion::stamped(version, stored.as_deref());
+			let _changed = self.reserve_write_slot()?;
+			self.tr.set(version_key.encode_key()?, reprinted.kv_encode_value()?).await?;
+		}
 		// Every cached view of this table now carries a stale `cache_lives_ts`:
 		// the by-id and by-name definitions, the database's table list, and the
 		// table's compiled live-query list. A re-read within this transaction
@@ -3850,6 +4785,13 @@ impl Transaction {
 		K: KVSubspace + Debug,
 	{
 		let range = key.raw_range()?;
+		self.tr.inner.compact(Some(range.into_key_range())).await?;
+		Ok(())
+	}
+
+	/// [`Self::compact`] over a range a program encoded itself.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn compact_raw(&self, range: impl AnyRange) -> Result<()> {
 		self.tr.inner.compact(Some(range.into_key_range())).await?;
 		Ok(())
 	}
@@ -3931,6 +4873,7 @@ impl NodeProvider for Transaction {
 impl RootProvider for Transaction {
 	fn get_default_config(&self) -> BoxProviderFut<'_, Result<Option<Arc<DefaultConfig>>>> {
 		Box::pin(async move {
+			self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 			let qey = cache::tx::Lookup::Rcg("default");
 			match self.cache.get(&qey) {
 				Some(val) => val,
@@ -3961,6 +4904,7 @@ impl RootProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::ConfigDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				let qey = cache::tx::Lookup::Rcg(cg);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Option::Some),
@@ -3996,6 +4940,7 @@ impl NamespaceProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[NamespaceDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = NamespacePrefix {}.range()?;
 					let val = self.tr.getr(range.into_key_range(), version).await?;
@@ -4114,6 +5059,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[DatabaseDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = DatabasePrefix {
 						ns,
@@ -4152,6 +5098,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<DatabaseDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Database(ns, db));
 				if version.is_some() {
 					let Some(ns) = self.get_ns_by_name(ns, version).await? else {
 						return Ok(None);
@@ -4292,6 +5239,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::AnalyzerDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = AnalyzerPrefix {
 						ns,
@@ -4332,6 +5280,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::SequenceDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = SequencePrefix {
 						ns,
@@ -4372,6 +5321,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::FunctionDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = FunctionPrefix {
 						ns,
@@ -4415,6 +5365,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::ModuleDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = ModulePrefix {
 						ns,
@@ -4458,6 +5409,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::ParamDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = ParamPrefix {
 						ns,
@@ -4501,6 +5453,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::MlModelDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = MlModelPrefix {
 						ns,
@@ -4544,6 +5497,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::ConfigDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = DbConfigPrefix {
 						ns,
@@ -4589,6 +5543,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::MlModelDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = MlModelKey {
 						ns,
@@ -4635,6 +5590,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<catalog::AnalyzerDefinition>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = AnalyzerKey {
 						ns,
@@ -4683,6 +5639,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<catalog::SequenceDefinition>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = SequenceKey {
 						ns,
@@ -4731,6 +5688,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<catalog::FunctionDefinition>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Function(ns, db, fc));
 				if version.is_some() {
 					let key = FunctionKey {
 						ns,
@@ -4779,6 +5737,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<catalog::ModuleDefinition>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = ModuleKey {
 						ns,
@@ -4827,6 +5786,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<catalog::ParamDefinition>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Param(ns, db, pa));
 				if version.is_some() {
 					let key = ParamKey {
 						ns,
@@ -4875,6 +5835,7 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::ConfigDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = DbConfigKey {
 						ns,
@@ -5055,6 +6016,28 @@ fn compile_subscriptions(
 		.collect()
 }
 
+/// What identifies the catalog of every table of a database; see
+/// [`Transaction::database_catalog_state`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DatabaseCatalogState {
+	/// The tables the database defines, in key order.
+	pub tables: Vec<TableName>,
+	/// Every proven catalog version stamped in the database, by table, in key
+	/// order: those of the tables it defines and of tables since removed.
+	pub versions: Vec<(TableName, Uuid)>,
+}
+
+/// The `REFERENCE` fields of every table of a database, and the catalog
+/// state they were read in ([`Transaction::reference_fields`]).
+#[derive(Debug)]
+pub struct ReferenceFields {
+	/// The catalog of every table of the database the fields were read in.
+	pub state: Arc<DatabaseCatalogState>,
+	/// Each table that defines a `REFERENCE` field, in the order of
+	/// `state.tables`, with those fields.
+	pub tables: Vec<(TableName, Arc<[catalog::FieldDefinition]>)>,
+}
+
 impl TableProvider for Transaction {
 	/// Retrieve all table definitions for a specific database.
 	fn all_tb(
@@ -5065,35 +6048,8 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[TableDefinition]>>> {
 		Box::pin(
 			async move {
-				if version.is_some() {
-					let range = TablePrefix {
-						ns,
-						db,
-					}
-					.range()?;
-					let val = self.tr.getr(range.into_key_range(), version).await?;
-					let stored: Arc<[StoredTableDefinition]> =
-						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
-				}
-				let qey = cache::tx::Lookup::Tbs(ns, db);
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_tbs(),
-					None => {
-						let range = TablePrefix {
-							ns,
-							db,
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[StoredTableDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Tbs(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
-				}
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
+				self.all_tb_listed(ns, db, version).await
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_tb")),
 		)
@@ -5109,6 +6065,7 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<[TableDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
 				if version.is_some() {
 					let range = ForeignTablePrefix {
 						ns,
@@ -5233,6 +6190,7 @@ impl TableProvider for Transaction {
 		version: Option<u64>,
 	) -> BoxProviderFut<'a, Result<Option<Arc<TableDefinition>>>> {
 		Box::pin(async move {
+			self.catalog_reads.note(crate::catalog_reads::CatalogRead::TableByName(ns, db, tb));
 			if version.is_some() {
 				let Some(db) = self.get_db_by_name(ns, db, version).await? else {
 					return Ok(None);
@@ -5406,6 +6364,7 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<[catalog::EventDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
 				if version.is_some() {
 					let range = EventPrefix {
 						ns,
@@ -5452,6 +6411,7 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<[catalog::FieldDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
 				if version.is_some() {
 					let range = FieldPrefix {
 						ns,
@@ -5464,25 +6424,12 @@ impl TableProvider for Transaction {
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
 				}
+				// The transaction's cache answers without another await.
 				let qey = cache::tx::Lookup::Fds(ns, db, tb.as_str());
-				match self.cache.get(&qey) {
-					Some(val) => val.try_into_fds(),
-					None => {
-						let range = FieldPrefix {
-							ns,
-							db,
-							tb: Cow::Borrowed(tb),
-						}
-						.range()?;
-						let val = self.tr.getr(range.into_key_range(), None).await?;
-						let stored: Arc<[catalog::StoredFieldDefinition]> =
-							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = catalog::from_stored_all(&stored)?;
-						let entry = cache::tx::Entry::Fds(Arc::clone(&val));
-						self.cache.insert(qey, entry);
-						Ok(val)
-					}
+				if let Some(val) = self.cache.get(&qey) {
+					return val.try_into_fds();
 				}
+				self.tb_fields_unnoted(ns, db, tb).await
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_tb_fields")),
 		)
@@ -5498,6 +6445,7 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<[catalog::IndexDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
 				if version.is_some() {
 					let range = IndexDefPrefix {
 						ns,
@@ -5544,6 +6492,7 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<[catalog::SubscriptionDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
 				if version.is_some() {
 					let range = SubscriptionPrefix {
 						ns,
@@ -5590,6 +6539,7 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<TableDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
 				if version.is_some() {
 					let key = TableKey {
 						ns,
@@ -5635,6 +6585,7 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<catalog::EventDefinition>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
 				if version.is_some() {
 					let key = EventKey {
 						ns,
@@ -5686,6 +6637,7 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::FieldDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
 				if version.is_some() {
 					let key = FieldKey {
 						ns,
@@ -5799,6 +6751,7 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::IndexDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
 				if version.is_some() {
 					let key = IndexDefKey {
 						ns,
@@ -5844,6 +6797,7 @@ impl TableProvider for Transaction {
 		version: Option<u64>,
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::IndexDefinition>>>> {
 		Box::pin(async move {
+			self.catalog_reads.note(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
 			let key = IndexNameKey {
 				ns,
 				db,
@@ -6293,6 +7247,7 @@ impl UserProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::UserDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = RootUserPrefix {}.range()?;
 					let val = self.tr.getr(range.into_key_range(), version).await?;
@@ -6324,6 +7279,7 @@ impl UserProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::UserDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = NsUserPrefix {
 						ns,
@@ -6362,6 +7318,7 @@ impl UserProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::UserDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = DbUserPrefix {
 						ns,
@@ -6401,6 +7358,7 @@ impl UserProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::UserDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = RootUserKey {
 						user: Cow::Borrowed(us),
@@ -6440,6 +7398,7 @@ impl UserProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::UserDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = NsUserKey {
 						ns,
@@ -6483,6 +7442,7 @@ impl UserProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::UserDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = DbUserKey {
 						ns,
@@ -6606,6 +7566,7 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::AccessDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = RootAccessMethodPrefix {}.range()?;
 					let val = self.tr.getr(range.into_key_range(), version).await?;
@@ -6677,6 +7638,7 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::AccessDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = NsAccessMethodPrefix {
 						ns,
@@ -6758,6 +7720,7 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::AccessDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = DbAccessMethodPrefix {
 						ns,
@@ -6843,6 +7806,7 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::AccessDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = RootAccessMethodKey {
 						ac: Cow::Borrowed(ra),
@@ -6923,6 +7887,7 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::AccessDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = NsAccessMethodKey {
 						ns,
@@ -7009,6 +7974,7 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::AccessDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = DbAccessMethodKey {
 						ns,
@@ -7197,6 +8163,7 @@ impl ApiProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::ApiDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = ApiPrefix {
 						ns,
@@ -7241,6 +8208,7 @@ impl ApiProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::ApiDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = ApiKey {
 						ns,
@@ -7319,6 +8287,7 @@ impl BucketProvider for Transaction {
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::BucketDefinition]>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let range = BucketPrefix {
 						ns,
@@ -7363,6 +8332,7 @@ impl BucketProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::BucketDefinition>>>> {
 		Box::pin(
 			async move {
+				self.catalog_reads.note(crate::catalog_reads::CatalogRead::Opaque);
 				if version.is_some() {
 					let key = BucketKey {
 						ns,
@@ -7469,7 +8439,7 @@ impl Transaction {
 		let Some((l, r)) = lightweight_edge_parts(id) else {
 			return Ok(None);
 		};
-		let Some(tbdef) = self.get_tb(ns, db, tb, version).await? else {
+		let Some(tbdef) = self.layout_tb(ns, db, tb, version).await? else {
 			return Ok(None);
 		};
 		let TableType::Relation(rel) = &tbdef.table_type else {
@@ -7508,7 +8478,7 @@ impl Transaction {
 			let Some((l, r)) = lightweight_edge_parts(&rid.key) else {
 				continue;
 			};
-			let Some(tbdef) = self.get_tb(ns, db, &rid.table, version).await? else {
+			let Some(tbdef) = self.layout_tb(ns, db, &rid.table, version).await? else {
 				continue;
 			};
 			let TableType::Relation(rel) = &tbdef.table_type else {
@@ -7559,7 +8529,7 @@ impl Transaction {
 				continue;
 			}
 			let folded =
-				self.get_tb(ns, db, &l.table, version).await?.is_some_and(|tb| tb.graph_folded);
+				self.layout_tb(ns, db, &l.table, version).await?.is_some_and(|tb| tb.graph_folded);
 			if !folded {
 				continue;
 			}
@@ -7641,7 +8611,7 @@ impl Transaction {
 		// No delta key: the edge can only live in a packed chunk, which only
 		// exists once the vertex table has folded.
 		let folded =
-			self.get_tb(ns, db, &l.table, version).await?.is_some_and(|tb| tb.graph_folded);
+			self.layout_tb(ns, db, &l.table, version).await?.is_some_and(|tb| tb.graph_folded);
 		if !folded {
 			return Ok(false);
 		}
@@ -7778,6 +8748,147 @@ impl Transaction {
 				Ok(target == Some(entry.target))
 			}
 		}
+	}
+}
+
+/// A database-scoped catalog object identified from the key of its
+/// definition: the subject of the version a change to that key mints
+/// ([`Transaction::restamp_defined`]).
+/// What a single-key write changed that a catalog version stands for.
+enum Defined {
+	/// The definition of a versioned object other than a table.
+	Object(DefinedObject),
+	/// The definition of a table this transaction has stamped.
+	Table((NamespaceId, DatabaseId, TableName)),
+}
+
+struct DefinedObject {
+	ns: NamespaceId,
+	db: DatabaseId,
+	kind: CatalogObjectKind,
+	name: String,
+	sub: String,
+}
+
+impl DefinedObject {
+	/// The definition key of the object of `kind` named `name` and `sub`.
+	fn key_of(
+		ns: NamespaceId,
+		db: DatabaseId,
+		kind: CatalogObjectKind,
+		name: &str,
+		sub: &str,
+	) -> Result<Key<'static>> {
+		let name = Cow::Borrowed(name);
+		Ok(match kind {
+			CatalogObjectKind::Function => FunctionKey {
+				ns,
+				db,
+				fc: name,
+			}
+			.encode_key()?,
+			CatalogObjectKind::Param => ParamKey {
+				ns,
+				db,
+				pa: name,
+			}
+			.encode_key()?,
+			CatalogObjectKind::Access => DbAccessMethodKey {
+				ns,
+				db,
+				ac: name,
+			}
+			.encode_key()?,
+			CatalogObjectKind::Model => MlModelKey {
+				ns,
+				db,
+				ml: name,
+				vn: Cow::Borrowed(sub),
+			}
+			.encode_key()?,
+			CatalogObjectKind::Module => ModuleKey {
+				ns,
+				db,
+				md: name,
+			}
+			.encode_key()?,
+			CatalogObjectKind::Analyzer => AnalyzerKey {
+				ns,
+				db,
+				az: name,
+			}
+			.encode_key()?,
+			CatalogObjectKind::Sequence => SequenceKey {
+				ns,
+				db,
+				sq: name,
+			}
+			.encode_key()?,
+			CatalogObjectKind::Api => ApiKey {
+				ns,
+				db,
+				ap: name,
+			}
+			.encode_key()?,
+		})
+	}
+
+	/// The object whose definition `key` is, or `None` for any other key.
+	///
+	/// Called on every single-key write, so it rejects on four fixed bytes
+	/// before decoding anything: a database-scoped catalog key is
+	/// `/*{ns}*{db}!` and a two-byte tag, the namespace and database ids are
+	/// four bytes each, and a record or any other key under a table has `*`
+	/// where the catalog has `!`. The tags are those of the definition keys in
+	/// [`crate::key::schema`]; a key that carries one of them is that key,
+	/// since the schema allows no two keys to share bytes, so a decode failure
+	/// is a malformed key and is reported.
+	fn at(key: &[u8]) -> Result<Option<Self>> {
+		if key.len() < 14 || key[0] != b'/' || key[1] != b'*' || key[6] != b'*' || key[11] != b'!' {
+			return Ok(None);
+		}
+		let (ns, db, kind, name, sub) = match &key[12..14] {
+			b"fn" => {
+				let k = FunctionKey::decode_key(key)?;
+				(k.ns, k.db, CatalogObjectKind::Function, k.fc, Cow::Borrowed(""))
+			}
+			b"pa" => {
+				let k = ParamKey::decode_key(key)?;
+				(k.ns, k.db, CatalogObjectKind::Param, k.pa, Cow::Borrowed(""))
+			}
+			b"ac" => {
+				let k = DbAccessMethodKey::decode_key(key)?;
+				(k.ns, k.db, CatalogObjectKind::Access, k.ac, Cow::Borrowed(""))
+			}
+			b"ml" => {
+				let k = MlModelKey::decode_key(key)?;
+				(k.ns, k.db, CatalogObjectKind::Model, k.ml, k.vn)
+			}
+			b"md" => {
+				let k = ModuleKey::decode_key(key)?;
+				(k.ns, k.db, CatalogObjectKind::Module, k.md, Cow::Borrowed(""))
+			}
+			b"az" => {
+				let k = AnalyzerKey::decode_key(key)?;
+				(k.ns, k.db, CatalogObjectKind::Analyzer, k.az, Cow::Borrowed(""))
+			}
+			b"sd" => {
+				let k = SequenceKey::decode_key(key)?;
+				(k.ns, k.db, CatalogObjectKind::Sequence, k.sq, Cow::Borrowed(""))
+			}
+			b"ap" => {
+				let k = ApiKey::decode_key(key)?;
+				(k.ns, k.db, CatalogObjectKind::Api, k.ap, Cow::Borrowed(""))
+			}
+			_ => return Ok(None),
+		};
+		Ok(Some(Self {
+			ns,
+			db,
+			kind,
+			name: name.into_owned(),
+			sub: sub.into_owned(),
+		}))
 	}
 }
 
@@ -8072,5 +9183,899 @@ mod compare_swap_tests {
 			assert_eq!(tx.get_key(&StateKey, None).await.unwrap(), None, "{which}: not deleted");
 			tx.cancel().await.unwrap();
 		}
+	}
+}
+
+/// A speculation in progress on a transaction ([`Transaction::speculate`]),
+/// ended when [`Speculation::end`] is called or the guard is dropped.
+///
+/// The catalog ids held in the speculation
+/// ([`crate::sequences::Sequences::hold_catalog_id`]) are answered by
+/// [`Speculation::end`] to the caller, which confirms or releases each. A
+/// guard dropped without `end` — its caller cancelled mid-run — releases
+/// them itself, since nothing else can reach them.
+pub struct Speculation {
+	/// The transaction speculated on.
+	base: Arc<Transaction>,
+	/// The speculation's view of it.
+	view: Arc<Transaction>,
+	/// The state the speculation started from.
+	from: crate::speculation::Overlay,
+	ended: bool,
+}
+
+impl Speculation {
+	/// The speculation's view: the transaction whose reads see the
+	/// speculation's writes and whose writes are the speculation's.
+	pub fn txn(&self) -> &Arc<Transaction> {
+		&self.view
+	}
+
+	/// End the speculation, answering the writes it took.
+	pub fn end(mut self) -> crate::speculation::Overlay {
+		self.ended = true;
+		self.finish()
+	}
+
+	/// End the view. A speculation that wrote nothing leaves its cache's
+	/// entries describing the state it started from, so they are kept for
+	/// the next speculation from that state; one that wrote drops them.
+	fn finish(&mut self) -> crate::speculation::Overlay {
+		let overlay = self.view.tr.end_speculation();
+		let cache = self.view.cache.end_speculation();
+		if let Some(cache) = cache
+			&& overlay.writes_as(&self.from)
+			&& let Ok(mut kept) = self.base.speculative_caches.try_lock()
+		{
+			kept.retain(|(from, _)| !from.writes_as(&self.from));
+			// A handful of states is all a block's planning revisits.
+			if kept.len() >= 8 {
+				kept.remove(0);
+			}
+			kept.push((self.from.clone(), cache));
+		}
+		overlay
+	}
+}
+
+impl Drop for Speculation {
+	fn drop(&mut self) {
+		if !self.ended {
+			let mut overlay = self.finish();
+			for (sequence, id) in overlay.take_held() {
+				self.base.sequences.release_catalog_id(&sequence, id);
+			}
+		}
+	}
+}
+
+#[cfg(test)]
+mod speculation_tests {
+	use std::sync::Arc;
+
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_kvs::{Direction, Key, KeyRange, TransactionType};
+
+	use crate::factory::TransactionFactory;
+	use crate::sequences::Sequences;
+	use crate::speculation::Overlay;
+
+	async fn factory() -> (TransactionFactory, Sequences) {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let tf = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
+		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		(tf, sequences)
+	}
+
+	fn key(bytes: &[u8]) -> Key<'static> {
+		Key::from(bytes.to_vec())
+	}
+
+	/// A speculation that writes caches apart once it has, so what it caches
+	/// after a write never reaches the cache kept for the state it started
+	/// from, which a later speculation from that state reads through.
+	#[tokio::test]
+	async fn a_speculation_that_writes_leaves_the_kept_cache_alone() {
+		use crate::catalog::{DatabaseId, NamespaceId};
+		use crate::val::TableName;
+
+		let (tf, sq) = factory().await;
+		let tx = Arc::new(tf.transaction(TransactionType::Write, sq.clone()).await.unwrap());
+		let (ns, db, tb) = (NamespaceId(1), DatabaseId(1), TableName::new("t"));
+
+		let reading = tx.speculate(Overlay::default()).expect("not a view");
+		assert_eq!(reading.txn().catalog_version(ns, db, &tb).await.unwrap(), None);
+		drop(reading);
+
+		let writing = tx.speculate(Overlay::default()).expect("not a view");
+		writing.txn().bump_catalog_version(ns, db, &tb).await.unwrap();
+		assert!(writing.txn().catalog_version(ns, db, &tb).await.unwrap().is_some());
+		drop(writing);
+
+		let reading = tx.speculate(Overlay::default()).expect("not a view");
+		assert_eq!(reading.txn().catalog_version(ns, db, &tb).await.unwrap(), None);
+		drop(reading);
+		assert_eq!(tx.catalog_version(ns, db, &tb).await.unwrap(), None);
+		tx.cancel().await.unwrap();
+	}
+
+	/// The catalog ids held in a speculation are answered by `end` to its
+	/// caller, which releases or confirms them; a speculation dropped
+	/// without `end` releases them, so its sequence hands them out again.
+	/// A speculation resumed from an overlay that lists held ids answers and
+	/// releases only its own.
+	#[tokio::test]
+	async fn a_speculation_dropped_unended_releases_the_ids_held_in_it() {
+		use crate::catalog::{DatabaseId, NamespaceId};
+		use crate::sequences::CatalogSequence;
+
+		let (tf, sq) = factory().await;
+		let tx = Arc::new(tf.transaction(TransactionType::Write, sq.clone()).await.unwrap());
+		let tables = CatalogSequence::Tables(NamespaceId(1), DatabaseId(1));
+		let hold = |speculation: &super::Speculation, id: u32| {
+			assert!(speculation.txn().note_speculative_hold((tables.clone(), id)));
+		};
+
+		let ended = tx.speculate(Overlay::default()).expect("not a view");
+		let kept = sq.hold_catalog_id(None, &tables).await.unwrap();
+		hold(&ended, kept);
+		let mut overlay = ended.end();
+		let mut resumed = overlay.clone();
+		assert_eq!(overlay.take_held(), vec![(tables.clone(), kept)]);
+
+		let dropped = tx.speculate(resumed.clone()).expect("not a view");
+		let released = sq.hold_catalog_id(None, &tables).await.unwrap();
+		hold(&dropped, released);
+		drop(dropped);
+		assert_eq!(sq.next_catalog_id(None, &tables).await.unwrap(), released);
+		assert_eq!(resumed.take_held(), vec![(tables.clone(), kept)]);
+
+		let next = sq.next_catalog_id(None, &tables).await.unwrap();
+		assert!(next > released, "{kept} is still held, {released} handed out: {next}");
+		sq.release_catalog_id(&tables, kept);
+		assert_eq!(sq.next_catalog_id(None, &tables).await.unwrap(), kept);
+		tx.cancel().await.unwrap();
+	}
+
+	/// A speculation's writes are read back through its view, resumed from
+	/// its overlay, and never by the transaction itself, during the
+	/// speculation or after it.
+	#[tokio::test]
+	async fn a_speculation_reads_its_writes_and_leaves_the_storage_alone() {
+		let (tf, sq) = factory().await;
+		let tx = Arc::new(tf.transaction(TransactionType::Write, sq.clone()).await.unwrap());
+		tx.set(key(b"/a1"), b"stored".to_vec()).await.unwrap();
+		tx.set(key(b"/a2"), b"stored".to_vec()).await.unwrap();
+		let range = || KeyRange {
+			start: key(b"/a"),
+			end: key(b"/b"),
+		};
+		let keys_of = |values: Vec<(Vec<u8>, Vec<u8>)>| -> Vec<Vec<u8>> {
+			values.into_iter().map(|(k, _)| k).collect()
+		};
+
+		let speculation = tx.speculate(Overlay::default()).expect("not a view");
+		let view = Arc::clone(speculation.txn());
+		assert!(view.speculate(Overlay::default()).is_none(), "speculations do not nest");
+		view.set(key(b"/a3"), b"speculated".to_vec()).await.unwrap();
+		view.del(key(b"/a1")).await.unwrap();
+		assert!(view.put(key(b"/a2"), b"again".to_vec()).await.is_err());
+		assert_eq!(view.get(key(b"/a3"), None).await.unwrap().as_deref(), Some(&b"speculated"[..]));
+		assert_eq!(view.get(key(b"/a1"), None).await.unwrap(), None);
+		assert_eq!(
+			keys_of(view.tr.getr(range(), None).await.unwrap().values),
+			vec![b"/a2".to_vec(), b"/a3".to_vec()]
+		);
+		// While the speculation lasts, the transaction itself reads and writes
+		// its storage, and the view reads what the transaction writes.
+		assert_eq!(tx.get(key(b"/a3"), None).await.unwrap(), None);
+		assert_eq!(tx.get(key(b"/a1"), None).await.unwrap().as_deref(), Some(&b"stored"[..]));
+		tx.set(key(b"/a4"), b"stored".to_vec()).await.unwrap();
+		assert_eq!(view.get(key(b"/a4"), None).await.unwrap().as_deref(), Some(&b"stored"[..]));
+		// A save point the view opens frames its overlay.
+		view.new_save_point().await.unwrap();
+		view.set(key(b"/a5"), b"rolled back".to_vec()).await.unwrap();
+		view.rollback_to_save_point().await.unwrap();
+		assert_eq!(view.get(key(b"/a5"), None).await.unwrap(), None);
+		let overlay = speculation.end();
+		assert!(!overlay.is_empty());
+
+		// A view held past its speculation's end takes no write.
+		assert!(view.set(key(b"/a6"), b"late".to_vec()).await.is_err());
+		assert!(view.del(key(b"/a2")).await.is_err());
+		assert_eq!(tx.get(key(b"/a6"), None).await.unwrap(), None);
+		assert_eq!(tx.get(key(b"/a2"), None).await.unwrap().as_deref(), Some(&b"stored"[..]));
+		drop(view);
+
+		// Resumed from its overlay, a speculation sees its earlier writes.
+		let speculation = tx.speculate(overlay).expect("not a view");
+		let view = Arc::clone(speculation.txn());
+		view.tr.delr(range()).await.unwrap();
+		view.set(key(b"/a9"), b"after".to_vec()).await.unwrap();
+		assert_eq!(
+			keys_of(view.tr.getr(range(), None).await.unwrap().values),
+			vec![b"/a9".to_vec()]
+		);
+		// A cursor over the range reads it as the speculation leaves it.
+		let mut cursor =
+			view.tr.open_keys_cursor(range(), Direction::Backward, 0, None).await.unwrap();
+		let batch = cursor.next_batch(10).await.unwrap();
+		let keys: Vec<Vec<u8>> = batch.iter().map(<[u8]>::to_vec).collect();
+		assert_eq!(keys, vec![b"/a9".to_vec()]);
+		drop(cursor);
+		drop(speculation);
+		drop(view);
+		assert_eq!(
+			keys_of(tx.tr.getr(range(), None).await.unwrap().values),
+			vec![b"/a1".to_vec(), b"/a2".to_vec(), b"/a4".to_vec()]
+		);
+		tx.cancel().await.unwrap();
+	}
+}
+
+#[cfg(test)]
+mod state_changes_tests {
+	use std::sync::Arc;
+
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_kvs::{Key, TransactionType};
+
+	use crate::factory::TransactionFactory;
+	use crate::sequences::Sequences;
+
+	async fn factory() -> (TransactionFactory, Sequences) {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let tf = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
+		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		(tf, sequences)
+	}
+
+	/// A read leaves the count as it was; a write, a deletion and a rollback to
+	/// a save point, which changes what the transaction reads without writing,
+	/// each grow it.
+	#[tokio::test]
+	async fn every_change_to_what_the_transaction_reads_is_counted() {
+		let (tf, sq) = factory().await;
+		let tx = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		let key = || Key::from(b"/state-changes".to_vec());
+		let start = tx.state_changes();
+		tx.get(key(), None).await.unwrap();
+		assert_eq!(tx.state_changes(), start, "a read changes nothing");
+		tx.set(key(), b"1".to_vec()).await.unwrap();
+		let written = tx.state_changes();
+		assert!(written > start, "a write is counted");
+		tx.new_save_point().await.unwrap();
+		tx.set(key(), b"2".to_vec()).await.unwrap();
+		let before_rollback = tx.state_changes();
+		assert!(before_rollback > written, "a write under a save point is counted");
+		tx.rollback_to_save_point().await.unwrap();
+		assert!(tx.state_changes() > before_rollback, "a rollback is counted");
+		assert_eq!(tx.get(key(), None).await.unwrap(), Some(b"1".to_vec()));
+		let rolled_back = tx.state_changes();
+		tx.del(key()).await.unwrap();
+		assert!(tx.state_changes() > rolled_back, "a deletion is counted");
+		tx.cancel().await.unwrap();
+	}
+}
+
+#[cfg(test)]
+mod catalog_epoch_tests {
+	use std::sync::Arc;
+
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_kvs::{Key, TransactionType};
+
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::factory::TransactionFactory;
+	use crate::sequences::Sequences;
+	use crate::val::TableName;
+
+	async fn factory() -> (TransactionFactory, Sequences) {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let tf = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
+		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		(tf, sequences)
+	}
+
+	/// A transaction names the catalog it sees by the count of catalog
+	/// commits finished before it opened, for as long as no other starts:
+	/// one open across a catalog commit, one that stamped a version of its
+	/// own and a speculation name none, and one opened after the commit names
+	/// the next count. A commit that stamped nothing moves no count.
+	#[tokio::test]
+	async fn a_transaction_names_the_catalog_commits_it_sees() {
+		let (tf, sq) = factory().await;
+		let (ns, db, tb) = (NamespaceId(1), DatabaseId(1), TableName::new("t"));
+		let before = tf.transaction(TransactionType::Read, sq.clone()).await.unwrap();
+		let epoch = before.catalog_epoch().expect("a memory store is written by its datastore");
+		let data = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		data.set(Key::from(b"data".to_vec()), b"1".to_vec()).await.unwrap();
+		data.commit().await.unwrap();
+		assert_eq!(before.catalog_epoch(), Some(epoch), "a data commit moved the count");
+		let writer = tf.transaction(TransactionType::Write, sq.clone()).await.unwrap();
+		assert_eq!(writer.catalog_epoch(), Some(epoch));
+		writer.bump_catalog_version(ns, db, &tb).await.unwrap();
+		assert_eq!(writer.catalog_epoch(), None, "a transaction that stamped a version");
+		writer.commit().await.unwrap();
+		assert_eq!(before.catalog_epoch(), None, "a transaction open across a catalog commit");
+		let after = Arc::new(tf.transaction(TransactionType::Read, sq.clone()).await.unwrap());
+		assert_eq!(after.catalog_epoch(), Some(epoch + 1));
+		let view = after.speculate(crate::speculation::Overlay::default()).expect("not a view");
+		assert_eq!(view.txn().catalog_epoch(), None, "a speculation");
+		drop(view);
+		before.cancel().await.unwrap();
+		after.cancel().await.unwrap();
+	}
+}
+
+#[cfg(test)]
+mod object_version_tests {
+	use std::borrow::Cow;
+	use std::sync::Arc;
+
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_kvs::key::KVKey;
+	use surrealdb_kvs::{Key, TransactionType};
+
+	use super::Transaction;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::factory::TransactionFactory;
+	use crate::key::schema::{
+		AnalyzerKey, ApiKey, DbAccessMethodKey, FunctionKey, MlModelKey, ModuleKey,
+		NsAccessMethodKey, ParamKey, RecordKey, SequenceKey, TableKey,
+	};
+	use crate::sequences::Sequences;
+	use crate::val::TableName;
+	use crate::values::catalog_version::CatalogObject;
+
+	const NS: NamespaceId = NamespaceId(3);
+	const DB: DatabaseId = DatabaseId(7);
+
+	async fn factory() -> (TransactionFactory, Sequences) {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let tf = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
+		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		(tf, sequences)
+	}
+
+	async fn write(tf: &TransactionFactory, sq: &Sequences) -> Transaction {
+		tf.transaction(TransactionType::Write, sq.clone()).await.unwrap()
+	}
+
+	/// Every kind of object with a version of its own, with the key of its
+	/// definition: each one's name fields in `ns`/`db`.
+	fn objects() -> Vec<(CatalogObject<'static>, Key<'static>)> {
+		let (ns, db) = (NS, DB);
+		let b = Cow::Borrowed;
+		vec![
+			(
+				CatalogObject::Function("f"),
+				FunctionKey {
+					ns,
+					db,
+					fc: b("f"),
+				}
+				.encode_key()
+				.unwrap(),
+			),
+			(
+				CatalogObject::Param("p"),
+				ParamKey {
+					ns,
+					db,
+					pa: b("p"),
+				}
+				.encode_key()
+				.unwrap(),
+			),
+			(
+				CatalogObject::Access("a"),
+				DbAccessMethodKey {
+					ns,
+					db,
+					ac: b("a"),
+				}
+				.encode_key()
+				.unwrap(),
+			),
+			(
+				CatalogObject::Model {
+					name: "m",
+					version: "1.0.0",
+				},
+				MlModelKey {
+					ns,
+					db,
+					ml: b("m"),
+					vn: b("1.0.0"),
+				}
+				.encode_key()
+				.unwrap(),
+			),
+			(
+				CatalogObject::Module("mod::x"),
+				ModuleKey {
+					ns,
+					db,
+					md: b("mod::x"),
+				}
+				.encode_key()
+				.unwrap(),
+			),
+			(
+				CatalogObject::Analyzer("az"),
+				AnalyzerKey {
+					ns,
+					db,
+					az: b("az"),
+				}
+				.encode_key()
+				.unwrap(),
+			),
+			(
+				CatalogObject::Sequence("s"),
+				SequenceKey {
+					ns,
+					db,
+					sq: b("s"),
+				}
+				.encode_key()
+				.unwrap(),
+			),
+			(
+				CatalogObject::Api("/x"),
+				ApiKey {
+					ns,
+					db,
+					ap: b("/x"),
+				}
+				.encode_key()
+				.unwrap(),
+			),
+		]
+	}
+
+	/// Defining, altering and removing each kind of object mints a version
+	/// every time, through each of the write methods a definition is written
+	/// or deleted with, and a removal leaves a version behind rather than
+	/// none.
+	#[tokio::test]
+	async fn define_alter_and_remove_each_mint_a_new_version() {
+		let (tf, sq) = factory().await;
+		for (object, key) in objects() {
+			let tx = write(&tf, &sq).await;
+			assert_eq!(
+				tx.catalog_object_version(NS, DB, object).await.unwrap(),
+				None,
+				"{object:?}"
+			);
+			tx.set(key.clone(), b"defined".to_vec()).await.unwrap();
+			let defined = tx.catalog_object_version(NS, DB, object).await.unwrap();
+			assert!(defined.is_some(), "a definition stamps {object:?}");
+			tx.replace_raw(key.clone(), b"altered".to_vec()).await.unwrap();
+			let altered = tx.catalog_object_version(NS, DB, object).await.unwrap();
+			assert!(altered.is_some() && altered != defined, "an alteration restamps {object:?}");
+			tx.del(key.clone()).await.unwrap();
+			let removed = tx.catalog_object_version(NS, DB, object).await.unwrap();
+			assert!(removed.is_some() && removed != altered, "a removal restamps {object:?}");
+			tx.commit().await.unwrap();
+
+			let tx = write(&tf, &sq).await;
+			assert_eq!(tx.catalog_object_version(NS, DB, object).await.unwrap(), removed);
+			tx.put(key.clone(), b"redefined".to_vec()).await.unwrap();
+			let redefined = tx.catalog_object_version(NS, DB, object).await.unwrap();
+			assert!(redefined.is_some() && redefined != removed, "{object:?}");
+			tx.put_compare(key.clone(), b"again".to_vec(), Some(b"redefined".to_vec()))
+				.await
+				.unwrap();
+			let compared = tx.catalog_object_version(NS, DB, object).await.unwrap();
+			assert!(compared != redefined, "a guarded write restamps {object:?}");
+			tx.clr(key.clone()).await.unwrap();
+			assert!(tx.catalog_object_version(NS, DB, object).await.unwrap() != compared);
+			tx.cancel().await.unwrap();
+		}
+	}
+
+	/// A write that leaves a definition as it is — the same bytes again, or
+	/// a deletion of a definition that is not there — leaves its version
+	/// standing.
+	#[tokio::test]
+	async fn an_unchanged_definition_keeps_its_version() {
+		let (tf, sq) = factory().await;
+		let (object, key) = objects().remove(0);
+		let tx = write(&tf, &sq).await;
+		tx.del(key.clone()).await.unwrap();
+		assert_eq!(tx.catalog_object_version(NS, DB, object).await.unwrap(), None);
+		tx.set(key.clone(), b"defined".to_vec()).await.unwrap();
+		let defined = tx.catalog_object_version(NS, DB, object).await.unwrap();
+		tx.set(key.clone(), b"defined".to_vec()).await.unwrap();
+		tx.replace_raw(key.clone(), b"defined".to_vec()).await.unwrap();
+		assert_eq!(tx.catalog_object_version(NS, DB, object).await.unwrap(), defined);
+		tx.del(key.clone()).await.unwrap();
+		let removed = tx.catalog_object_version(NS, DB, object).await.unwrap();
+		assert_ne!(removed, defined);
+		tx.del(key.clone()).await.unwrap();
+		assert_eq!(tx.catalog_object_version(NS, DB, object).await.unwrap(), removed);
+		tx.cancel().await.unwrap();
+	}
+
+	/// Each kind's version is its own: stamping one object moves no other
+	/// object's version, and objects of different kinds that share a name are
+	/// different objects.
+	#[tokio::test]
+	async fn objects_are_versioned_apart() {
+		let (tf, sq) = factory().await;
+		let tx = write(&tf, &sq).await;
+		let all = objects();
+		for (_, key) in &all {
+			tx.set(key.clone(), b"defined".to_vec()).await.unwrap();
+		}
+		let mut versions = Vec::new();
+		for (object, _) in &all {
+			versions.push(tx.catalog_object_version(NS, DB, *object).await.unwrap().unwrap());
+		}
+		let mut distinct = versions.clone();
+		distinct.sort();
+		distinct.dedup();
+		assert_eq!(distinct.len(), versions.len(), "each object holds a version of its own");
+		tx.set(all[0].1.clone(), b"altered".to_vec()).await.unwrap();
+		for ((object, _), before) in all.iter().zip(&versions).skip(1) {
+			assert_eq!(
+				tx.catalog_object_version(NS, DB, *object).await.unwrap(),
+				Some(*before),
+				"{object:?}"
+			);
+		}
+		assert_eq!(
+			tx.catalog_object_version(NS, DB, CatalogObject::Param("f")).await.unwrap(),
+			None,
+			"a param named as a function is another object"
+		);
+		tx.cancel().await.unwrap();
+	}
+
+	/// A version minted by a transaction that rolls back is never seen by
+	/// anyone: the object reads as it did before.
+	#[tokio::test]
+	async fn a_rolled_back_version_is_never_visible() {
+		let (tf, sq) = factory().await;
+		let (object, key) = objects().remove(0);
+		let tx = write(&tf, &sq).await;
+		tx.set(key.clone(), b"defined".to_vec()).await.unwrap();
+		let committed = tx.catalog_object_version(NS, DB, object).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let tx = write(&tf, &sq).await;
+		tx.set(key.clone(), b"altered".to_vec()).await.unwrap();
+		let minted = tx.catalog_object_version(NS, DB, object).await.unwrap();
+		assert_ne!(minted, committed);
+		let concurrent = write(&tf, &sq).await;
+		assert_eq!(
+			concurrent.catalog_object_version(NS, DB, object).await.unwrap(),
+			committed,
+			"an uncommitted version is the writer's alone"
+		);
+		concurrent.cancel().await.unwrap();
+		tx.cancel().await.unwrap();
+
+		let tx = write(&tf, &sq).await;
+		assert_eq!(tx.catalog_object_version(NS, DB, object).await.unwrap(), committed);
+		tx.cancel().await.unwrap();
+	}
+
+	/// A transaction reads an object's version from storage once, `None`
+	/// included; a version it mints is what it reads afterwards, without a
+	/// read; and a version committed by another transaction meanwhile is not.
+	#[tokio::test]
+	async fn the_version_is_cached_per_transaction() {
+		let (tf, sq) = factory().await;
+		let (object, key) = objects().remove(1);
+		let (ghost, _) = objects().remove(2);
+		let tx = write(&tf, &sq).await;
+		tx.set(key.clone(), b"defined".to_vec()).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let tx = write(&tf, &sq).await;
+		let seen = tx.catalog_object_version(NS, DB, object).await.unwrap();
+		assert!(seen.is_some());
+		assert_eq!(tx.catalog_object_version(NS, DB, ghost).await.unwrap(), None);
+		let reads = tx.metrics_snapshot_for_test().ops_get;
+
+		let other = write(&tf, &sq).await;
+		other.set(key.clone(), b"altered".to_vec()).await.unwrap();
+		other.commit().await.unwrap();
+
+		assert_eq!(tx.catalog_object_version(NS, DB, object).await.unwrap(), seen);
+		assert_eq!(tx.catalog_object_version(NS, DB, ghost).await.unwrap(), None);
+		assert_eq!(tx.metrics_snapshot_for_test().ops_get, reads, "answered from the cache");
+
+		let stamps = tx.catalog_object_stamps();
+		let minted = tx.bump_catalog_object_version(NS, DB, object).await.unwrap();
+		assert_eq!(tx.catalog_object_version(NS, DB, object).await.unwrap(), Some(minted));
+		assert_eq!(tx.metrics_snapshot_for_test().ops_get, reads);
+		assert_eq!(tx.catalog_object_stamps(), stamps + 1, "a stamp is counted");
+		tx.cancel().await.unwrap();
+	}
+
+	/// A table answers its `!cv` version through the same call, and writes
+	/// that are not of a versioned object's definition — a record, a table
+	/// definition, a namespace-level access method — stamp nothing here.
+	#[tokio::test]
+	async fn tables_and_other_keys_are_not_object_versions() {
+		let (tf, sq) = factory().await;
+		let tb = TableName::new("person");
+		let tx = write(&tf, &sq).await;
+		let stamps = tx.catalog_object_stamps();
+		tx.set(
+			RecordKey {
+				ns: NS,
+				db: DB,
+				tb: Cow::Borrowed(&tb),
+				id: Cow::Owned(crate::val::RecordIdKey::Number(1)),
+			}
+			.encode_key()
+			.unwrap(),
+			b"record".to_vec(),
+		)
+		.await
+		.unwrap();
+		tx.set(
+			TableKey {
+				ns: NS,
+				db: DB,
+				tb: Cow::Borrowed(&tb),
+			}
+			.encode_key()
+			.unwrap(),
+			b"table".to_vec(),
+		)
+		.await
+		.unwrap();
+		tx.set(
+			NsAccessMethodKey {
+				ns: NS,
+				ac: Cow::Borrowed("a"),
+			}
+			.encode_key()
+			.unwrap(),
+			b"access".to_vec(),
+		)
+		.await
+		.unwrap();
+		assert_eq!(tx.catalog_object_stamps(), stamps, "nothing here is a versioned object");
+		assert_eq!(
+			tx.catalog_object_version(NS, DB, CatalogObject::Table(&tb)).await.unwrap(),
+			None
+		);
+		tx.bump_catalog_version(NS, DB, &tb).await.unwrap();
+		assert_eq!(
+			tx.catalog_object_version(NS, DB, CatalogObject::Table(&tb)).await.unwrap(),
+			tx.catalog_version(NS, DB, &tb).await.unwrap()
+		);
+		assert_eq!(tx.catalog_object_stamps(), stamps);
+		tx.cancel().await.unwrap();
+	}
+}
+
+#[cfg(test)]
+mod older_build_write_tests {
+	//! A build that predates catalog versions shares the store during a
+	//! rolling upgrade and writes definitions without moving their versions.
+	//! These write through the transactor directly, as such a build does.
+
+	use std::borrow::Cow;
+	use std::sync::Arc;
+
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_kvs::key::KVKey;
+	use surrealdb_kvs::value::KVValue;
+	use surrealdb_kvs::{Key, TransactionType};
+
+	use super::Transaction;
+	use crate::catalog::{DatabaseId, NamespaceId, StoredTableDefinition, TableId};
+	use crate::factory::TransactionFactory;
+	use crate::key::schema::{CatalogVersionKey, FunctionKey, TableKey};
+	use crate::sequences::Sequences;
+	use crate::val::TableName;
+	use crate::values::catalog_version::{CatalogObject, CatalogVersion};
+
+	const NS: NamespaceId = NamespaceId(3);
+	const DB: DatabaseId = DatabaseId(7);
+
+	async fn factory() -> (TransactionFactory, Sequences) {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let tf = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
+		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		(tf, sequences)
+	}
+
+	async fn txn(tf: &TransactionFactory, sq: &Sequences) -> Transaction {
+		tf.transaction(TransactionType::Write, sq.clone()).await.unwrap()
+	}
+
+	fn table_key(tb: &TableName) -> Key<'static> {
+		TableKey {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(tb),
+		}
+		.encode_key()
+		.unwrap()
+	}
+
+	fn stored(tb: &TableName) -> Vec<u8> {
+		StoredTableDefinition::new(NS, DB, TableId(1), tb.clone()).kv_encode_value().unwrap()
+	}
+
+	/// A table stamped by this build and then redefined, or removed, by an
+	/// older build reads as unstamped — through its own version and through
+	/// its database's listing — until this build stamps it again.
+	#[tokio::test]
+	async fn a_table_rewritten_by_an_older_build_is_unstamped() {
+		let (tf, sq) = factory().await;
+		let tb = TableName::new("person");
+		let tx = txn(&tf, &sq).await;
+		tx.tr.set(table_key(&tb), stored(&tb)).await.unwrap();
+		tx.bump_catalog_version(NS, DB, &tb).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let tx = txn(&tf, &sq).await;
+		let stamped = tx.catalog_version(NS, DB, &tb).await.unwrap();
+		assert!(stamped.is_some(), "this build's stamp is proven");
+		let listed = tx.database_catalog_state(NS, DB).await.unwrap();
+		assert_eq!(listed.versions, vec![(tb.clone(), stamped.unwrap())]);
+		tx.cancel().await.unwrap();
+
+		// An older build redefines the table: `!tb` changes, `!cv` stays.
+		let tx = txn(&tf, &sq).await;
+		tx.tr.set(table_key(&tb), stored(&tb)).await.unwrap();
+		tx.commit().await.unwrap();
+		let tx = txn(&tf, &sq).await;
+		assert_eq!(tx.catalog_version(NS, DB, &tb).await.unwrap(), None);
+		let listed = tx.database_catalog_state(NS, DB).await.unwrap();
+		assert_eq!(listed.tables, vec![tb.clone()]);
+		assert!(listed.versions.is_empty(), "an unproven version is not listed");
+		tx.cancel().await.unwrap();
+
+		// This build stamps it again, then an older build removes it.
+		let tx = txn(&tf, &sq).await;
+		tx.bump_catalog_version(NS, DB, &tb).await.unwrap();
+		tx.commit().await.unwrap();
+		let tx = txn(&tf, &sq).await;
+		assert!(tx.catalog_version(NS, DB, &tb).await.unwrap().is_some());
+		tx.tr.del(table_key(&tb)).await.unwrap();
+		tx.commit().await.unwrap();
+		let tx = txn(&tf, &sq).await;
+		assert_eq!(tx.catalog_version(NS, DB, &tb).await.unwrap(), None);
+		let listed = tx.database_catalog_state(NS, DB).await.unwrap();
+		assert!(listed.tables.is_empty() && listed.versions.is_empty());
+		tx.cancel().await.unwrap();
+	}
+
+	/// A function stamped by this build and then redefined by an older build
+	/// has no version until this build writes it again.
+	#[tokio::test]
+	async fn an_object_rewritten_by_an_older_build_is_unstamped() {
+		let (tf, sq) = factory().await;
+		let key = FunctionKey {
+			ns: NS,
+			db: DB,
+			fc: Cow::Borrowed("f"),
+		}
+		.encode_key()
+		.unwrap();
+		let object = CatalogObject::Function("f");
+		let tx = txn(&tf, &sq).await;
+		tx.set(key.clone(), b"defined".to_vec()).await.unwrap();
+		tx.commit().await.unwrap();
+		let tx = txn(&tf, &sq).await;
+		assert!(tx.catalog_object_version(NS, DB, object).await.unwrap().is_some());
+		tx.tr.set(key.clone(), b"redefined".to_vec()).await.unwrap();
+		tx.commit().await.unwrap();
+		let tx = txn(&tf, &sq).await;
+		assert_eq!(tx.catalog_object_version(NS, DB, object).await.unwrap(), None);
+		tx.set(key.clone(), b"defined again".to_vec()).await.unwrap();
+		assert!(tx.catalog_object_version(NS, DB, object).await.unwrap().is_some());
+		tx.cancel().await.unwrap();
+	}
+
+	/// A definition written after its table was stamped, in the same
+	/// transaction, is what the stamped version is proven against.
+	#[tokio::test]
+	async fn a_definition_written_after_its_stamp_keeps_the_version_proven() {
+		let (tf, sq) = factory().await;
+		let tb = TableName::new("person");
+		let key = TableKey {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&tb),
+		};
+		let tx = txn(&tf, &sq).await;
+		let version = tx.stamp_catalog_version(NS, DB, &tb, None).await.unwrap();
+		let stored = StoredTableDefinition::new(NS, DB, TableId(1), tb.clone());
+		tx.set_key(&key, &stored).await.unwrap();
+		tx.commit().await.unwrap();
+		let tx = txn(&tf, &sq).await;
+		assert_eq!(tx.catalog_version(NS, DB, &tb).await.unwrap(), Some(version));
+		tx.cancel().await.unwrap();
+	}
+
+	/// A version stored with no print proves nothing.
+	#[tokio::test]
+	async fn a_version_without_a_print_is_unstamped() {
+		let (tf, sq) = factory().await;
+		let tb = TableName::new("person");
+		let tx = txn(&tf, &sq).await;
+		tx.tr.set(table_key(&tb), stored(&tb)).await.unwrap();
+		let key = CatalogVersionKey {
+			ns: NS,
+			db: DB,
+			tb: Cow::Borrowed(&tb),
+		};
+		tx.tr
+			.set(
+				key.encode_key().unwrap(),
+				CatalogVersion(uuid::Uuid::now_v7(), None).kv_encode_value().unwrap(),
+			)
+			.await
+			.unwrap();
+		tx.commit().await.unwrap();
+		let tx = txn(&tf, &sq).await;
+		assert_eq!(tx.catalog_version(NS, DB, &tb).await.unwrap(), None);
+		tx.cancel().await.unwrap();
+	}
+
+	/// A live-query registration rewrites the definition with no catalog
+	/// change, and keeps a proven version proven and unmoved.
+	#[tokio::test]
+	async fn a_live_registration_keeps_the_version_proven() {
+		let (tf, sq) = factory().await;
+		let tb = TableName::new("person");
+		let tx = txn(&tf, &sq).await;
+		tx.tr.set(table_key(&tb), stored(&tb)).await.unwrap();
+		let version = tx.stamp_catalog_version(NS, DB, &tb, None).await.unwrap();
+		tx.commit().await.unwrap();
+		let tx = txn(&tf, &sq).await;
+		tx.bump_table_lives_cache(NS, DB, &tb).await.unwrap();
+		assert_eq!(tx.catalog_version(NS, DB, &tb).await.unwrap(), Some(version));
+		tx.commit().await.unwrap();
+		let tx = txn(&tf, &sq).await;
+		assert_eq!(tx.catalog_version(NS, DB, &tb).await.unwrap(), Some(version));
+		tx.cancel().await.unwrap();
 	}
 }

@@ -168,6 +168,7 @@ impl Chain {
 				}) => return Some(chain),
 				LogicalOp::Values(_)
 				| LogicalOp::Match(_)
+				| LogicalOp::Write(_)
 				| LogicalOp::Subquery(_)
 				| LogicalOp::UnionAll(_)
 				| LogicalOp::Join(_)
@@ -189,6 +190,7 @@ impl Chain {
 				| LogicalOp::Return(_)
 				| LogicalOp::Foreach(_)
 				| LogicalOp::Info(_)
+				| LogicalOp::Ddl(_)
 				| LogicalOp::Sleep(_) => return None,
 			}
 		}
@@ -258,8 +260,8 @@ mod tests {
 	use super::*;
 	use crate::expr::Kind;
 	use crate::expr::logical::{
-		EvalFrame, FieldSchema, LogicalField, LogicalFields, LogicalPermissionFilter, Schema,
-		SourceRef,
+		EvalFrame, FieldSchema, GuardKind, LogicalField, LogicalFields, LogicalPermissionFilter,
+		Schema, SourceRef,
 	};
 
 	fn source() -> LogicalOp {
@@ -297,6 +299,7 @@ mod tests {
 				)),
 			},
 			auth: None,
+			guard: GuardKind::Read,
 		})
 	}
 

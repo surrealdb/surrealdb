@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/closure_call_guard_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
@@ -57,13 +56,15 @@ value = '''
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: public]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: string::len(public) > 0, pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: string::len(public) > 0]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: public]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: array::includes(tags, 'x'), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: array::includes(tags, 'x')]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 "'''
 
 [[test.results]]

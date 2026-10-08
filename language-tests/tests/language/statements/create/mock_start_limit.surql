@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "START/LIMIT over a mock target still skip and cap correctly now that the mock is one lazy iterable instead of one entry per id — the per-record skip (Collector::collect, which checks Iterator::skippable() before even preparing the document) applies identically regardless of how many entries stage the scan"
+reason = "START/LIMIT over a mock target skip and cap correctly: the mock is one lazy iterable, so the skip applies identically regardless of how many ids the mock names"
 
 [[test.results]]
 value = "[]"

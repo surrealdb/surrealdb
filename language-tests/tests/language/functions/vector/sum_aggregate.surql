@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
-reason = "Tests vector::sum as an aggregate over GROUP BY, including the weighted-centroid composition, GROUP ALL batching, skipped missing vectors, and groups whose vector dimensions disagree. Pinned to the streaming strategies: the compute-only path implements a grouped aggregate by collecting the group's values and applying the scalar form, so it neither skips missing vectors nor evaluates a per-row function inside the aggregate argument. math::sum and math::mean diverge between the two paths the same way."
+reason = "Tests vector::sum as an aggregate over GROUP BY, including the weighted-centroid composition, GROUP ALL batching, skipped missing vectors, and groups whose vector dimensions disagree. The aggregate skips missing vectors and evaluates a per-row function inside the aggregate argument once per row."
 
 [[test.results]]
 value = "[]"

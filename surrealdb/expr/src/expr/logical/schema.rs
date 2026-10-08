@@ -10,8 +10,9 @@
 //!
 //! Typing is partial. [`LogicalExpr::kind`] answers with the vocabulary of
 //! `DEFINE FIELD … TYPE`, and [`Kind::Any`] is the honest answer whenever the
-//! kind is not a property of the expression and the schema alone: a field on
-//! an open schema, a parameter, a call, a subquery. A consumer fires on a known
+//! kind is not a property of the expression and the schema alone: an undeclared
+//! field on an open schema, a parameter, a call, a subquery. A declared field
+//! on an open schema carries its declared kind. A consumer fires on a known
 //! kind and never on `Any`.
 //!
 //! A projection layer ([`LogicalOp::is_layer`](super::LogicalOp::is_layer))
@@ -41,7 +42,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use super::expr::{LogicalExpr, LogicalLiteral, OutputPath};
 use crate::expr::constant::ConstantValue;
-use crate::expr::{BinaryOperator, Idiom, Kind, Part, PrefixOperator};
+use crate::expr::{BinaryOperator, Idiom, Kind, Mock, Part, PrefixOperator};
 
 /// One segment of a [`FieldPath`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -229,6 +230,7 @@ impl LogicalExpr {
 			| LogicalExpr::RecordId(_)
 			| LogicalExpr::Param(_)
 			| LogicalExpr::Table(_)
+			| LogicalExpr::Mock(_)
 			| LogicalExpr::Constant(_)
 			| LogicalExpr::Prefix {
 				..
@@ -451,6 +453,14 @@ fn each_keeps_element_kind(kind: &Kind) -> bool {
 	}
 }
 
+/// The kind of a mock record set: the ids it generates, all in the table it
+/// names. The length is not carried — a count is an `i64` that may be negative
+/// or wider than a `usize`, and the bounds of a range may cross, so the set is
+/// typed by its elements alone.
+fn mock_kind(mock: &Mock) -> Kind {
+	Kind::Array(Box::new(Kind::Record(vec![mock.table().clone()])), None)
+}
+
 /// The kind every element of `kinds` shares, or `Any` when they differ or
 /// there are none.
 pub fn common_kind(kinds: impl IntoIterator<Item = Kind>) -> Kind {
@@ -482,6 +492,7 @@ impl LogicalExpr {
 			LogicalExpr::Literal(literal) => Some(literal.kind()),
 			LogicalExpr::RecordId(rid) => Some(Kind::Record(vec![rid.table.clone()])),
 			LogicalExpr::Table(table) => Some(Kind::Table(vec![table.clone()])),
+			LogicalExpr::Mock(mock) => Some(mock_kind(mock)),
 			LogicalExpr::Constant(constant) => Some(match constant.value() {
 				ConstantValue::Float(_) => Kind::Float,
 				ConstantValue::Datetime(_) => Kind::Datetime,
@@ -634,6 +645,7 @@ impl LogicalExpr {
 			LogicalExpr::Object(_) => Kind::Object,
 			LogicalExpr::RecordId(rid) => Kind::Record(vec![rid.table.clone()]),
 			LogicalExpr::Table(table) => Kind::Table(vec![table.clone()]),
+			LogicalExpr::Mock(mock) => mock_kind(mock),
 			LogicalExpr::Constant(constant) => match constant.value() {
 				ConstantValue::Float(_) => Kind::Float,
 				ConstantValue::Datetime(_) => Kind::Datetime,
@@ -819,12 +831,12 @@ mod tests {
 
 	use super::*;
 	use crate::expr::logical::{
-		EvalFrame, JoinKind, LogicalDistinct, LogicalEval, LogicalExplain, LogicalFetch,
-		LogicalField, LogicalFields, LogicalFilter, LogicalForeach, LogicalInfo, LogicalJoin,
-		LogicalLet, LogicalLimit, LogicalOnly, LogicalOp, LogicalOrdering, LogicalPermissionFilter,
-		LogicalProject, LogicalReturn, LogicalSequence, LogicalSleep, LogicalSort, LogicalSource,
-		LogicalSplit, LogicalSubquery, LogicalTimeout, LogicalUnionAll, LogicalValues,
-		LogicalVersionScope, RelationAlias, SourceRef, lower_expr,
+		EvalFrame, GuardKind, JoinKind, LogicalDdl, LogicalDdlStatement, LogicalDistinct,
+		LogicalEval, LogicalExplain, LogicalFetch, LogicalField, LogicalFields, LogicalFilter,
+		LogicalForeach, LogicalInfo, LogicalJoin, LogicalLet, LogicalLimit, LogicalOnly, LogicalOp,
+		LogicalOrdering, LogicalPermissionFilter, LogicalProject, LogicalReturn, LogicalSequence,
+		LogicalSleep, LogicalSort, LogicalSource, LogicalSplit, LogicalSubquery, LogicalTimeout,
+		LogicalUnionAll, LogicalValues, LogicalVersionScope, RelationAlias, SourceRef, lower_expr,
 	};
 	use crate::expr::{ExplainFormat, Param};
 
@@ -966,7 +978,7 @@ mod tests {
 	}
 
 	#[test]
-	fn every_field_on_an_open_schema_is_any() {
+	fn every_undeclared_field_on_an_open_schema_is_any() {
 		let open = Schema::open();
 		for sql in ["id", "a", "b", "c", "c.x", "missing", "a.b[0]", "$p.a"] {
 			assert_eq!(expr(sql).kind(&open), Kind::Any, "kind of `{sql}` on an open schema");
@@ -978,6 +990,18 @@ mod tests {
 		assert_eq!(expr("a + 1").kind(&open), Kind::Any);
 		// An unbound source is open.
 		assert_eq!(unbound().schema(), Schema::open());
+	}
+
+	#[test]
+	fn declared_field_on_open_schema_retains_kind() {
+		// A SCHEMALESS table with declared fields carries its kinds to the planner
+		let mut open = Schema::open();
+		open.fields.push(FieldSchema::new(FieldPath::field("age"), Kind::Int));
+		open.fields.push(FieldSchema::new(FieldPath::field("score"), Kind::Float));
+
+		assert_eq!(expr("age").kind(&open), Kind::Int);
+		assert_eq!(expr("score").kind(&open), Kind::Float);
+		assert_eq!(expr("missing").kind(&open), Kind::Any);
 	}
 
 	#[test]
@@ -1321,6 +1345,7 @@ mod tests {
 				input: leaf(),
 				predicate: expr("true"),
 				auth: None,
+				guard: GuardKind::Read,
 			}),
 			LogicalOp::Distinct(LogicalDistinct {
 				input: leaf(),
@@ -1392,6 +1417,7 @@ mod tests {
 			LogicalOp::Values(LogicalValues {
 				expr: expr("[1]"),
 				for_update: false,
+				written: false,
 			}),
 		)
 		.schema();
@@ -1451,6 +1477,7 @@ mod tests {
 			LogicalOp::Values(LogicalValues {
 				expr: expr("[1, 2]"),
 				for_update: false,
+				written: false,
 			}),
 			LogicalOp::Explain(LogicalExplain {
 				input: leaf(),
@@ -1483,6 +1510,18 @@ mod tests {
 			})),
 			LogicalOp::Sleep(LogicalSleep {
 				duration: expr("1ms"),
+			}),
+			LogicalOp::Ddl(LogicalDdl {
+				statement: LogicalDdlStatement::Rebuild(Box::new(
+					crate::expr::statements::RebuildStatement::Index(
+						crate::expr::statements::rebuild::RebuildIndexStatement {
+							name: "i".into(),
+							table: TableName::from("t"),
+							if_exists: false,
+							concurrently: false,
+						},
+					),
+				)),
 			}),
 		];
 		for op in ops {

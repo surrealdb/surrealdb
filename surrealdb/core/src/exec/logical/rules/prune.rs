@@ -306,6 +306,7 @@ fn prune(op: LogicalOp, demand: Demand, cx: &RuleContext<'_>) -> Outcome {
 			input,
 			predicate,
 			auth,
+			guard,
 		}) => {
 			let below = demand.add_all([&predicate], cx);
 			rebuild(*input, below, cx, |input| {
@@ -313,6 +314,7 @@ fn prune(op: LogicalOp, demand: Demand, cx: &RuleContext<'_>) -> Outcome {
 					input: Box::new(input),
 					predicate,
 					auth,
+					guard,
 				})
 			})
 		}

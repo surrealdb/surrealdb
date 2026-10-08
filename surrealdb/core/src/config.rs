@@ -4,8 +4,7 @@
 //! loaded independently from the shared [`ConfigMap`], so adding a knob touches
 //! one layer instead of a struct every layer shares. A layer owns a knob when it
 //! is the lowest layer that reads it; layers above read downward, which is why
-//! core's legacy evaluator reads [`ExecConfig`] and the index engines' file
-//! allowlist without either moving up.
+//! core's executor reads the index engines' file allowlist without it moving up.
 //!
 //! This struct is only the transport for the knobs a *running query* reaches
 //! through [`Context`](crate::ctx::Context). Settings read once while building
@@ -27,7 +26,6 @@ use crate::http::config::HttpConfig;
 use crate::iam::config::IamConfig;
 use crate::idx::config::IdxConfig;
 use crate::kvs::ds::config::DatastoreConfig;
-use crate::legacy::config::LegacyConfig;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::config::SurrealismConfig;
 
@@ -38,13 +36,11 @@ pub(crate) struct RuntimeConfig {
 	/// `DEFINE API` request decoding, a Surrealism module's own queries, and the
 	/// `eval()` builtin.
 	pub parser: ParserConfig,
-	/// Limits and batch sizes governing the streaming executor.
+	/// Limits and batch sizes governing the engine.
 	pub exec: ExecConfig,
 	/// Knobs of the index engines, including the file allowlist their analyzers
 	/// enforce.
 	pub idx: IdxConfig,
-	/// Knobs of the legacy evaluator.
-	pub legacy: LegacyConfig,
 	/// Authentication behaviour read while evaluating record access.
 	pub iam: IamConfig,
 	/// The datastore's own knobs.
@@ -77,7 +73,6 @@ impl RuntimeConfig {
 			parser: map.load(),
 			exec: map.load(),
 			idx: map.load(),
-			legacy: map.load(),
 			iam: map.load(),
 			datastore: map.load(),
 			#[cfg(feature = "surrealism")]
@@ -148,9 +143,7 @@ mod tests {
 	}
 
 	#[test]
-	fn legacy_and_iam_keys_reach_their_fields() {
-		let c: LegacyConfig = map_with("max_concurrent_tasks", "7").load();
-		assert_eq!(c.max_concurrent_tasks, 7);
+	fn iam_keys_reach_their_fields() {
 		let c: IamConfig = map_with("insecure_forward_access_errors", "true").load();
 		assert!(c.insecure_forward_access_errors);
 	}
@@ -275,14 +268,12 @@ mod tests {
 			.with_key_value("max_object_parsing_depth", "7")
 			.with_key_value("operator_buffer_size", "7")
 			.with_key_value("table_doc_ids_batch_size", "7")
-			.with_key_value("max_concurrent_tasks", "7")
 			.with_key_value("insecure_forward_access_errors", "true")
 			.with_key_value("datastore_cache_size", "7");
 		let c = RuntimeConfig::load(&map);
 		assert_eq!(c.parser.max_object_parsing_depth, 7, "parser not loaded");
 		assert_eq!(c.exec.operator_buffer_size, 7, "exec not loaded");
 		assert_eq!(c.idx.table_doc_ids_batch_size, 7, "idx not loaded");
-		assert_eq!(c.legacy.max_concurrent_tasks, 7, "legacy not loaded");
 		assert!(c.iam.insecure_forward_access_errors, "iam not loaded");
 		assert_eq!(c.datastore.datastore_cache_size, 7, "datastore not loaded");
 

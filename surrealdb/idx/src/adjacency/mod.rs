@@ -29,7 +29,6 @@ pub use self::merge::{
 	AdjacencyScope, MergeStats, MergedAdjacencyCursor, MergedAdjacencyEdge, VisitFlow, scope_degree,
 };
 pub use self::resolve::{AdjacencyResolveCache, resolve_doc_ids};
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::val::TableName;
 
@@ -44,7 +43,7 @@ pub async fn vertex_table_folded(
 	db: DatabaseId,
 	tb: &TableName,
 ) -> Result<bool> {
-	Ok(txn.get_tb(ns, db, tb, None).await?.is_some_and(|tb| tb.graph_folded))
+	Ok(txn.layout_tb(ns, db, tb, None).await?.is_some_and(|tb| tb.graph_folded))
 }
 
 /// How a record's own adjacency subspace is read.
@@ -91,5 +90,5 @@ pub async fn vertex_adjacency(
 	db: DatabaseId,
 	tb: &TableName,
 ) -> Result<VertexAdjacency> {
-	Ok(vertex_adjacency_of(txn.get_tb(ns, db, tb, None).await?.as_deref()))
+	Ok(vertex_adjacency_of(txn.layout_tb(ns, db, tb, None).await?.as_deref()))
 }

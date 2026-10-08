@@ -5,8 +5,8 @@
 //! ([`crate::lq::event`]), the router tails that keyspace **off** the write path,
 //! reconstructs each change, and runs the matching/permission/projection/FETCH
 //! pipeline on the subscriber side ([`crate::lq::subscriber`]). Under the Router
-//! engine this is the *only* delivery path — the inline
-//! [`Document::process_table_lives`](crate::doc::Document) becomes a no-op — so a
+//! engine this is the *only* delivery path — the write path's inline
+//! notification stage becomes a no-op — so a
 //! write's cost no longer scales with the number of live subscribers.
 //!
 //! The router runs on every node with **no lease**: each node tails the `lqe`

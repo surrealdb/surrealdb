@@ -76,7 +76,7 @@ const MAX_PARAMS: usize = i16::MAX as usize;
 enum CachedPlan {
 	SurrealQl(Ast),
 	PgSelect {
-		plan: LogicalOp,
+		plan: Box<LogicalOp>,
 	},
 	PgAst(Ast),
 }
@@ -1110,7 +1110,7 @@ impl Connection {
 							}
 							if let Ok(op) = lower_stmt(&stmts[0]) {
 								cached_plan = Some(CachedPlan::PgSelect {
-									plan: op,
+									plan: Box::new(op),
 								});
 							}
 						}
@@ -1565,7 +1565,7 @@ impl Connection {
 			) => self
 				.ds
 				.run(
-					QueryRequest::new(QuerySource::Plan(vec![plan]), &self.session)
+					QueryRequest::new(QuerySource::Plan(vec![*plan]), &self.session)
 						.with_variables(Some(params))
 						.with_optional_transaction(transaction)
 						.with_cancel(cancel),

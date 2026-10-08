@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["compute-only"]
 
 [test]
 
@@ -11,50 +10,25 @@ value = "'OK'"
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: 0 }, index: 'index', to: { inclusive: false, value: 2 } }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
-[[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: 0.1f }, index: 'index', to: { inclusive: false, value: 2 } }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
+value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: 0.1f }, index: 'index', to: { inclusive: false, value: 1.5f } }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
-[[test.results]]
-value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
-
-[[test.results]]
-value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: 0 }, index: 'index', to: { inclusive: false, value: 1.5f } }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
+value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }, { id: test:int2, number: 2 }]"
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }, { id: test:int2, number: 2 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: 0.1f }, index: 'index', to: { inclusive: false, value: NONE } }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
-[[test.results]]
-value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }, { id: test:int2, number: 2 }]"
-
-[[test.results]]
-value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: 0 }, index: 'index', to: { inclusive: false, value: NONE } }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
-[[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int0, number: 0 }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: NONE }, index: 'index', to: { inclusive: false, value: 2 } }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
-[[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int0, number: 0 }, { id: test:int1, number: 1 }]"
-
-[[test.results]]
-value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: NONE }, index: 'index', to: { inclusive: false, value: 1.9f } }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
-
 
 */
 {
@@ -68,25 +42,17 @@ value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, va
 };
 
 SELECT * FROM test WHERE number > 0 AND number < 2 ORDER BY id;
-SELECT * FROM test WHERE number > 0 AND number < 2 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WHERE number > 0.1 AND number < 2 ORDER BY id;
-SELECT * FROM test WHERE number > 0.1 AND number < 2 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WHERE number > 0.1 AND number < 1.5 ORDER BY id;
-SELECT * FROM test WHERE number > 0.1 AND number < 1.5 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WHERE number > 0 AND number < 1.5 ORDER BY id;
-SELECT * FROM test WHERE number > 0 AND number < 1.5 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WHERE number > 0.1 ORDER BY id;
-SELECT * FROM test WHERE number > 0.1 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WHERE number > 0 ORDER BY id;
-SELECT * FROM test WHERE number > 0 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WHERE number < 2 ORDER BY id;
-SELECT * FROM test WHERE number < 2 ORDER BY id EXPLAIN;
 
 SELECT * FROM test WHERE number < 1.9 ORDER BY id;
-SELECT * FROM test WHERE number < 1.9 ORDER BY id EXPLAIN;

@@ -1,13 +1,10 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """An unaliased projection whose derived name would be spelled from a nested \
 plan — a statement in scalar position — is keyed by the SurrealQL text of the \
-expression as written, which is the key the legacy engine gives it. A path that starts \
-with such a statement is keyed by the path's text; the legacy engine drops that field \
-from the row, so the streaming engine is pinned alone."""
+expression as written. A path that starts with such a statement is keyed by the path's text."""
 
 [[test.results]]
 value = "[{ id: a:1 }]"

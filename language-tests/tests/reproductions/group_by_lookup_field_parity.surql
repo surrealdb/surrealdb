@@ -1,13 +1,10 @@
 /**
 [env]
-# Compute-only routes through a separate (legacy) code path with its
-# own, unrelated divergences for `->knows.out`; this test pins parity
-# between the two streaming planner strategies (`all-ro` and
-# `best-effort-ro`), which is the scope of the bug being verified.
-planner-strategy = ["all-ro", "best-effort-ro"]
+# The unaliased `->knows.out` field produces the same nested shape with and
+# without GROUP BY.
 
 [test]
-reason = "Unaliased graph-traversal field expressions (e.g. `->knows.out`) must produce the same nested output shape in both the projection and aggregation streaming planner paths. `plan_projections` / `plan_projections_fast` route through `idiom_to_field_path`, which pushes a `FieldPathPart::Lookup` entry for the Lookup part; `plan_aggregation` routes through `alias_output_path`, which must do the same. Without this the non-GROUP-BY path nests into `{ \"->knows\": { out: _ } }` while GROUP BY produces the flat key `\"->knows.out\"`."
+reason = "Unaliased graph-traversal field expressions (e.g. `->knows.out`) must produce the same nested output shape with and without GROUP BY. `plan_projections` / `plan_projections_fast` route through `idiom_to_field_path`, which pushes a `FieldPathPart::Lookup` entry for the Lookup part; `plan_aggregation` routes through `alias_output_path`, which must do the same."
 
 [[test.results]]
 value = "[{ age: 30, id: person:a }]"
@@ -41,13 +38,13 @@ CREATE person:c SET age = 40;
 LET $_ = (RELATE person:a->knows->person:c);
 LET $_ = (RELATE person:b->knows->person:c);
 
--- Non-GROUP-BY streaming projection path (`idiom_to_field_path`):
+-- Non-GROUP-BY projection path (`idiom_to_field_path`):
 -- `->knows.out` nests into `{ "->knows": { out: [...] } }`.
 -- Each person has at most one outgoing `knows` edge so array order is
--- deterministic across executor strategies.
+-- deterministic.
 SELECT id, ->knows.out FROM person ORDER BY id;
 
--- GROUP BY streaming aggregation path (`alias_output_path`) must
+-- GROUP BY aggregation path (`alias_output_path`) must
 -- produce the same nested shape for `->knows.out` as the non-GROUP-BY
 -- path, not a flat `"->knows.out"` key.
 SELECT age, ->knows.out FROM person GROUP BY age ORDER BY age;

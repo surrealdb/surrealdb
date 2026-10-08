@@ -30,8 +30,17 @@ pub(crate) mod expand;
 pub(crate) mod path_expand;
 pub(crate) mod shortest_path_expand;
 
+#[cfg(test)]
 pub use distinct_edges::DistinctEdges;
-pub use endpoint::{EndpointBind, EndpointField};
-pub use expand::{EdgeBinding, Expand, ExpandDir};
-pub use path_expand::{PathExpand, PathMode};
-pub use shortest_path_expand::{ShortestPathExpand, ShortestSelector};
+#[cfg(test)]
+pub use endpoint::EndpointBind;
+pub use endpoint::EndpointField;
+#[cfg(test)]
+pub use expand::Expand;
+pub use expand::{EdgeBinding, ExpandDir};
+#[cfg(test)]
+pub use path_expand::PathExpand;
+pub use path_expand::PathMode;
+#[cfg(test)]
+pub use shortest_path_expand::ShortestPathExpand;
+pub use shortest_path_expand::ShortestSelector;

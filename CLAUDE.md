@@ -102,6 +102,7 @@ consult `SECURITY_GUIDE.md` and confirm the relevant invariants still hold.
 
 - Security model and review invariants: `SECURITY_GUIDE.md`
 - General code review checklist: `REVIEW.md`
+- Architecture decision records: `doc/adr/`
 - SurrealQL docs: https://surrealdb.com/docs
 - SurrealDB University: https://surrealdb.com/learn
 - Detailed cursor rules: `.cursor/rules/`

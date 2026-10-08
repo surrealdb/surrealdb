@@ -675,6 +675,22 @@ impl Value {
 		T::coerce(self)
 	}
 
+	/// Coerce the value as [`Self::coerce_to`] does, naming `into` rather
+	/// than the kind of `T` when the value is of the wrong kind: a clause that
+	/// wanted the value is more use to the reader than the kind it wanted.
+	pub fn coerce_naming<T: Coerce>(self, into: &str) -> Result<T, CoerceError> {
+		match T::coerce(self) {
+			Err(CoerceError::InvalidKind {
+				from,
+				..
+			}) => Err(CoerceError::InvalidKind {
+				from,
+				into: into.to_string(),
+			}),
+			x => x,
+		}
+	}
+
 	/// Try to coerce this value to the specified `Kind`
 	pub fn coerce_to_kind(self, kind: &Kind) -> Result<Value, CoerceError> {
 		// Attempt to convert to the desired type

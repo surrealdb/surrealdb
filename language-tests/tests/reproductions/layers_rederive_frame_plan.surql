@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/layers_rederive_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """

@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 
@@ -16,7 +15,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 1}
-    FullTextScan [ctx: Db] [index: blog_title, query: Hello] {rows: 1}
+    FullTextScan [ctx: Db] [table: blog, index: blog_title, query: Hello] {rows: 1}
 
 Total rows: 1''''
 
@@ -25,11 +24,10 @@ value = "[{ id: blog:1, title: '<em>Hello</em> World!' }]"
 
 [[test.results]]
 value = '''
-"SelectProject [ctx: Db] [projections: id, title] {rows: 1}
-    Compute [ctx: Db] [fields: title = search::highlight('<em>', '</em>')] {rows: 1}
-        FullTextScan [ctx: Db] [index: blog_title, query: Hello] {rows: 1}
+'SelectProject [ctx: Db] [projections: id, title] {rows: 1}
+    FullTextScan [ctx: Db] [table: blog, index: blog_title, query: Hello] {rows: 1}
 
-Total rows: 1"'''
+Total rows: 1''''
 */
 CREATE blog:1 SET title = 'Hello World!';
 DEFINE ANALYZER simple TOKENIZERS blank,class;

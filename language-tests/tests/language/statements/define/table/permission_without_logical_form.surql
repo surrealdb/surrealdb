@@ -9,7 +9,7 @@ auth = { namespace = "test", database = "test", access = "user", rid = "user:rea
 reason = """
 	A stored `PERMISSIONS FOR select` guard whose shape the logical lowering
 	does not express — a mock record set in scalar position — is still
-	enforced on every engine and under every planner strategy: the analyzer
+	enforced: the analyzer
 	leaves the table's source unresolved and the scan evaluates the stored
 	clause itself, so the read is neither declined nor answered differently.
 	The same holds for a field guard, and the guards compose: the table guard

@@ -2,14 +2,11 @@
 [env]
 imports = ["reproductions/layers_knn_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro", "best-effort-ro"]
 
 [test]
 reason = """
 	A KNN query's residual predicate reads a computed field as the row
-	presents it, by name or through `$this`. The legacy engine judges a KNN
-	residual over the stored record, where a computed field is absent, so
-	this test runs on the streaming engine alone. The plan pins the residual
+	presents it, by name or through `$this`. The plan pins the residual
 	above the layer that derives the field, above the search.
 """
 

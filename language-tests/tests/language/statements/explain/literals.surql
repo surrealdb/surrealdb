@@ -1,23 +1,29 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test EXPLAIN with literals"
 
 [[test.results]]
-value = ''''Expr [ctx: Rt] [expr: 9] {rows: 0}
+value = '''
+'ExprPlan [ctx: Rt] [expr: 9] {rows: 1}
 
 Total rows: 1''''
 
 [[test.results]]
-value = ''''Return [ctx: Rt]
-    Expr [ctx: Rt] [expr: IF true THEN (Return) ELSE (Expr) END]
+value = '''
+'Return [ctx: Rt]
+    Sequence [ctx: Rt] [statements: 1]
+        Return [ctx: Rt]
+            ExprPlan [ctx: Rt] [expr: 9]
 ''''
 
 [[test.results]]
-value = ''''Return [ctx: Rt] {rows: 0}
-    Expr [ctx: Rt] [expr: IF true THEN (Return) ELSE (Expr) END] {rows: 0}
+value = '''
+'Return [ctx: Rt] {rows: 0}
+    Sequence [ctx: Rt] [statements: 1] {rows: 0}
+        Return [ctx: Rt] {rows: 0}
+            ExprPlan [ctx: Rt] [expr: 9] {rows: 0}
 
 Total rows: 0''''
 

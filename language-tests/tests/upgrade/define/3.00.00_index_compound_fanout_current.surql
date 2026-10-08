@@ -1,8 +1,7 @@
 /**
 [env]
-# `EXPLAIN` is rejected by the legacy compute-only engine, and the ordinary
-# language-test runner replays this body under every strategy.
-planner-strategy = ["all-ro", "best-effort-ro"]
+# The body asserts an `EXPLAIN` plan, and the ordinary language-test runner
+# replays it as well as the upgrade axis.
 imports = ["upgrade/define/3.00.00_index_compound_fanout_import.surql"]
 
 [test]

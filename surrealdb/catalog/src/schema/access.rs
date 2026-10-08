@@ -45,6 +45,23 @@ impl AccessType {
 			_ => true,
 		}
 	}
+	/// Whether any JWT component of the access method uses ES512: a
+	/// verification key or an issuer, of the method itself or of a record
+	/// method's bearer.
+	pub fn uses_es512(&self) -> bool {
+		fn jwt_uses_es512(jwt: &JwtAccess) -> bool {
+			matches!(&jwt.verify, JwtAccessVerify::Key(ver) if matches!(ver.alg, Algorithm::Es512))
+				|| jwt.issue.as_ref().is_some_and(|iss| matches!(iss.alg, Algorithm::Es512))
+		}
+		match self {
+			AccessType::Jwt(jwt) => jwt_uses_es512(jwt),
+			AccessType::Record(rec) => {
+				jwt_uses_es512(&rec.jwt)
+					|| rec.bearer.as_ref().is_some_and(|b| jwt_uses_es512(&b.jwt))
+			}
+			AccessType::Bearer(bearer) => jwt_uses_es512(&bearer.jwt),
+		}
+	}
 }
 
 impl InfoStructure for AccessType {

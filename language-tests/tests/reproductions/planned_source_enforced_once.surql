@@ -6,8 +6,8 @@ auth = { namespace = "test", database = "test", access = "user", rid = "user:rea
 [test]
 reason = """
 	A record user reading a table with a conditional table permission and a
-	field guard sees the same rows, with the same fields cut, on both engines.
-	The streaming engine enforces both declarations once, in the plan above
+	field guard sees the rows the permission admits, with the guarded fields cut. Both
+	declarations are enforced once, in the plan above
 	the scan: the table permission removes `t:3`, and `hidden` is cut from
 	the record the caller does not own. A predicate on the guarded field is
 	judged over the row as the caller sees it, so it never matches a cut

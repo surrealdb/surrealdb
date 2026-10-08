@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [env.capabilities]
 deny-functions = ["math::max"]
@@ -14,19 +13,22 @@ value = "[{ a: 5, id: t:1 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: a > math::max([1, 2]), pre_decode_filter: no (unsupported predicate)]
+    Filter [ctx: Db] [predicate: a > math::max([1, 2])]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    EmptyScan [ctx: Rt]
+    Filter [ctx: Db] [predicate: false]
+        Union [ctx: Db]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    EmptyScan [ctx: Rt]
+    Filter [ctx: Db] [predicate: false]
+        Union [ctx: Db]
 ''''
 */
 

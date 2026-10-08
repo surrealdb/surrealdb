@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "Applying .* to NONE/NULL/scalar values must return NONE, not [VALUE]. Previously the streaming planner's `evaluate_all` wrapped non-collection values in a single-element array, which broke client SDKs that expected to decode into a struct."
+reason = "Applying .* to NONE/NULL/scalar values must return NONE, not [VALUE], so client SDKs can decode into a struct."
 issue = 7143
 
 [[test.results]]

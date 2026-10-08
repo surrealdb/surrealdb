@@ -3,8 +3,7 @@
 reason = """
 A grouped projection reduces to one output value per group, and which
 reduction applies depends on the expression. Three contracts share this
-pipeline, and no override is set here because all planner strategies owe the
-same answers for every one of them:
+pipeline:
 
 - An expression the row cannot influence — a literal, a composite literal, a
   constant arithmetic expression, a param, a builtin call over any of those —

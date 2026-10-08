@@ -2,7 +2,6 @@
 [env]
 imports = ["reproductions/7537_matches_auth_operand_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:alice" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """For a record user `$auth` is the user's record id, so `$auth.principals` reads a \

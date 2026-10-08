@@ -6,7 +6,6 @@ auth = { level = "owner" }
 backend = ["rocksdb", "surrealkv"]
 versioned = true
 timeout = 5000
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -45,7 +44,7 @@ value = "[{ id: t:1, k: 1 }]"
 value = '''
 'VersionScope [ctx: Db] [version: $hist]
     SelectProject [ctx: Db] [projections: *]
-        DynamicScan [ctx: Db] [source: type::table(fn::name())]
+        Values [ctx: Rt] [expr: type::table(fn::name())]
 ''''
 
 [[test.results]]

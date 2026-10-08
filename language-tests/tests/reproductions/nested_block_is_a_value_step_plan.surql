@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -20,18 +19,19 @@ value = '''
     Sequence [ctx: Rt] [statements: 2]
         Sequence [ctx: Rt] [statements: 1]
             Let [ctx: Rt] [name: $x]
-                Expr [ctx: Rt] [expr: 1]
+                ExprPlan [ctx: Rt] [expr: 1]
         Return [ctx: Rt]
-            Expr [ctx: Rt] [expr: $x]
+            ExprPlan [ctx: Rt] [expr: $x]
 ''''
 
 [[test.results]]
 value = '''
 'Return [ctx: Rt]
-    Sequence [ctx: Rt] [statements: 2]
-        Let [ctx: Rt] [name: $x]
-            Expr [ctx: Rt] [expr: 1]
-        Expr [ctx: Rt] [expr: $x + 1]
+    Sequence [ctx: Rt] [statements: 1]
+        Sequence [ctx: Rt] [statements: 2]
+            Let [ctx: Rt] [name: $x]
+                ExprPlan [ctx: Rt] [expr: 1]
+            ExprPlan [ctx: Rt] [expr: 1 + 1]
 ''''
 
 [[test.results]]
@@ -40,9 +40,9 @@ value = '''
     Sequence [ctx: Rt] [statements: 2]
         Sequence [ctx: Rt] [statements: 2]
             Let [ctx: Rt] [name: $x]
-                Expr [ctx: Rt] [expr: 1]
-            Expr [ctx: Rt] [expr: $x + 1]
-        Expr [ctx: Rt] [expr: $x]
+                ExprPlan [ctx: Rt] [expr: 1]
+            ExprPlan [ctx: Rt] [expr: 1 + 1]
+        ExprPlan [ctx: Rt] [expr: $x]
 ''''
 
 [[test.results]]
@@ -50,8 +50,8 @@ value = "NONE"
 
 [[test.results]]
 value = '''
-'Return [ctx: Db]
-    Expr [ctx: Db] [expr: fn::leak()]
+'Return [ctx: Rt]
+    ExprPlan [ctx: Rt] [expr: fn::leak()]
 ''''
 
 [[test.results]]
@@ -59,11 +59,11 @@ value = '''
 'Return [ctx: Rt]
     Sequence [ctx: Rt] [statements: 3]
         Let [ctx: Rt] [name: $y]
-            Expr [ctx: Rt] [expr: 5]
+            ExprPlan [ctx: Rt] [expr: 5]
         Sequence [ctx: Rt] [statements: 1]
             Let [ctx: Rt] [name: $y]
-                Expr [ctx: Rt] [expr: 6]
-        Expr [ctx: Rt] [expr: $y]
+                ExprPlan [ctx: Rt] [expr: 6]
+        ExprPlan [ctx: Rt] [expr: 5]
 ''''
 */
 

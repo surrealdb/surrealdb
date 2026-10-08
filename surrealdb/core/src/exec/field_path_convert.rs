@@ -1,5 +1,5 @@
-//! Builds a [`FieldPath`] from an idiom, rejecting the shapes the streaming
-//! operators cannot express (conditions, method calls).
+//! Builds a [`FieldPath`] from an idiom, rejecting the shapes the operators
+//! cannot express (conditions, method calls).
 
 use surrealdb_types::ToSql;
 
@@ -9,8 +9,8 @@ use crate::expr::part::Part;
 use crate::expr::{Expr, Idiom, Literal};
 use crate::val::field_path::{FieldPath, FieldPathPart};
 
-/// Builds a [`FieldPath`] from an idiom, rejecting shapes the streaming
-/// operators cannot express.
+/// Builds a [`FieldPath`] from an idiom, rejecting shapes the operators
+/// cannot express.
 pub(crate) fn field_path_from_idiom(idiom: &Idiom) -> Result<FieldPath, Error> {
 	let mut parts = Vec::with_capacity(idiom.len());
 	for part in idiom.iter() {

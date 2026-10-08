@@ -1,4 +1,4 @@
-//! Search functions for the streaming executor.
+//! Search functions for the engine.
 //!
 //! These functions provide full-text search capabilities including
 //! analyzer operations, result highlighting, scoring, offsets, and fusion.
@@ -15,6 +15,7 @@ use reblessive::tree::TreeStack;
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::exec::ContextLevel;
+use crate::exec::analyzer_function::StreamingAnalyzerFunction;
 use crate::exec::function::index::{IndexContext, IndexContextKind, IndexFunction};
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
@@ -23,7 +24,6 @@ use crate::expr::{Error, Kind};
 use crate::fnc::args::{FromArgs, Optional};
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::highlighter::HighlightParams;
-use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 use crate::val::{Array, Number, Object, Value};
 
 // =========================================================================
@@ -76,17 +76,11 @@ impl ScalarFunction for SearchAnalyze {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
-			// Same argument handling as the legacy dispatch: exactly two
+			// Same argument handling as the `fnc` dispatch: exactly two
 			// arguments, returning NONE when either is not a string.
 			let (az, val): (Value, Value) = FromArgs::from_args("search::analyze", args)?;
 			let (Value::String(az), Value::String(val)) = (az, val) else {
 				return Ok(Value::None);
-			};
-
-			// Get the options - if not available, return NONE (matching original behavior)
-			let opt = match ctx.exec_ctx.options() {
-				Some(opt) => opt,
-				None => return Ok(Value::None),
 			};
 
 			// Get database context - if not available, return NONE
@@ -99,18 +93,21 @@ impl ScalarFunction for SearchAnalyze {
 			let db_id = db_ctx.db.database_id;
 
 			// Get the analyzer definition from the database
-			let az_def = ctx
-				.txn()
-				.get_db_analyzer(ns_id, db_id, &az, ctx.exec_ctx.version_stamp())
-				.await
-				.map_err(|e| anyhow::anyhow!("Analyzer '{}' not found: {}", az, e))?;
+			let txn = ctx.txn();
+			let az_def = crate::exec::vm::descriptor::object(txn.get_db_analyzer(
+				ns_id,
+				db_id,
+				&az,
+				ctx.exec_ctx.version_stamp(),
+			))
+			.await
+			.map_err(|e| anyhow::anyhow!("Analyzer '{}' not found: {}", az, e))?;
 
 			// Create the analyzer
 			let analyzer = Analyzer::new(ctx.exec_ctx.ctx().get_index_stores(), az_def).await?;
 
 			// Analyze the value using a TreeStack
-			let frozen = ctx.exec_ctx.ctx();
-			let az_fn = LegacyAnalyzerFunction::new(frozen, opt);
+			let az_fn = StreamingAnalyzerFunction::new(ctx.exec_ctx);
 			let mut stack = TreeStack::new();
 			stack
 				.enter(|stk| async move { analyzer.analyze(stk, &az_fn, val).await })
@@ -188,7 +185,7 @@ impl IndexFunction for SearchHighlight {
 			let doc = ctx.current_value.unwrap_or(&Value::None);
 
 			// Get the full-text index resources (lazy init); no index on
-			// the scan table covering the idiom → NONE (legacy parity).
+			// the scan table covering the idiom → NONE.
 			let Some(ft) = match_ctx.ft_resources(ctx).await? else {
 				return Ok(Value::None);
 			};
@@ -258,7 +255,7 @@ impl IndexFunction for SearchScore {
 			let rid = extract_record_id(ctx)?;
 
 			// Get the full-text index resources (lazy init); no index on
-			// the scan table covering the idiom → NONE (legacy parity).
+			// the scan table covering the idiom → NONE.
 			let Some(ft) = match_ctx.ft_resources(ctx).await? else {
 				return Ok(Value::None);
 			};
@@ -342,7 +339,7 @@ impl IndexFunction for SearchOffsets {
 			let rid = extract_record_id(ctx)?;
 
 			// Get the full-text index resources (lazy init); no index on
-			// the scan table covering the idiom → NONE (legacy parity).
+			// the scan table covering the idiom → NONE.
 			let Some(ft) = match_ctx.ft_resources(ctx).await? else {
 				return Ok(Value::None);
 			};
@@ -427,7 +424,7 @@ impl ScalarFunction for SearchRrf {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
 
-			// Same argument handling as the legacy dispatch.
+			// Same argument handling as the `fnc` dispatch.
 			let (results, limit, Optional(rrf_constant)): (Array, i64, Optional<i64>) =
 				FromArgs::from_args("search::rrf", args)?;
 			let limit = if limit < 1 {
@@ -571,7 +568,7 @@ impl ScalarFunction for SearchLinear {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
 
-			// Same argument handling as the legacy dispatch.
+			// Same argument handling as the `fnc` dispatch.
 			let (results, weights, limit, norm): (Array, Array, i64, String) =
 				FromArgs::from_args("search::linear", args)?;
 			let limit = if limit < 1 {

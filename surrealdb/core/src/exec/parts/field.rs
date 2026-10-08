@@ -221,8 +221,7 @@ mod tests {
 	async fn field_access_on_none_null_and_scalars_is_none() {
 		let ctx = root_ctx();
 		// A set is included deliberately: only arrays are mapped over here, so a
-		// set of objects yields NONE rather than the per-member mapping the
-		// legacy `compute` path applies.
+		// set of objects yields NONE rather than a per-member mapping.
 		let set = val("{ { a: 1 }, { a: 2 } }").await;
 		assert!(matches!(set, Value::Set(_)), "expected a set literal, got {set:?}");
 		assert_eq!(field(&set, "a", &ctx).await, Value::None);

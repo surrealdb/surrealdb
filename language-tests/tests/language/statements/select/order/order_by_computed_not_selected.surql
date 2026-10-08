@@ -2,10 +2,9 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["best-effort-ro", "all-ro"]
 
 [test]
-reason = "ORDER BY sorts the full record before the projection runs, so an ordering field need not appear in the SELECT list. Covers ASC, DESC, the bounded top-k path via LIMIT, an index-backed ordering, and multiple ordering keys. The legacy executor projects during iteration and rejects this shape instead; see order_by_not_selected_compute_only.surql."
+reason = "ORDER BY sorts the full record before the projection runs, so an ordering field need not appear in the SELECT list. Covers ASC, DESC, the bounded top-k path via LIMIT, an index-backed ordering, and multiple ordering keys."
 
 [[test.results]]
 value = "[{ age: 30, id: t:1, name: 'alice' }]"

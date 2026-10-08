@@ -1,0 +1,31 @@
+### SELECT count() AS c, math::sum(n) AS s FROM t GROUP ALL
+{ c: 300, s: 44850 }
+### SELECT g, count() AS c, math::max(n) AS m FROM t GROUP BY g ORDER BY g
+{ c: 43, g: 0, m: 294 }
+{ c: 43, g: 1, m: 295 }
+{ c: 43, g: 2, m: 296 }
+{ c: 43, g: 3, m: 297 }
+{ c: 43, g: 4, m: 298 }
+{ c: 43, g: 5, m: 299 }
+{ c: 42, g: 6, m: 293 }
+### SELECT VALUE fn::c() FROM t LIMIT 20
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]
+[300]

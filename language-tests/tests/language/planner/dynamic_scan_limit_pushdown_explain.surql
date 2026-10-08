@@ -1,9 +1,11 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "EXPLAIN plans show plan-time source resolution: type::table($name) resolves to concrete operators"
+reason = "EXPLAIN plans show plan-time source resolution: a constant type::table($name) resolves to a table scan or an index scan, so an index, an ORDER BY and a LIMIT are planned over it as over a named table"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "NONE"
@@ -20,13 +22,13 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_ts, access: = d'2025-01-05T00:00:00Z', direction: Forward, predicate: ts = d'2025-01-05T00:00:00Z']
+    IndexScan [ctx: Db] [table: item, index: idx_ts, access: = d'2025-01-05T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_ts, access: , direction: Forward, limit: 3]
+    IndexScan [ctx: Db] [table: item, index: idx_ts, direction: Forward, limit: 3]
 ''''
 
 [[test.results]]
@@ -38,7 +40,7 @@ value = '''
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_ts, access: , direction: Backward, limit: 3]
+    IndexScan [ctx: Db] [table: item, index: idx_ts, direction: Backward, limit: 3]
 ''''
 
 [[test.results]]
@@ -50,7 +52,7 @@ value = '''
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    IndexScan [ctx: Db] [index: idx_ts, access: , direction: Forward, limit: 3]
+    IndexScan [ctx: Db] [table: item, index: idx_ts, direction: Forward, limit: 3]
 ''''
 
 [[test.results]]
@@ -60,6 +62,9 @@ value = '''
 ''''
 */
 
+-- `ts` is declared a scalar kind, so the index holds one entry per record and
+-- an ordered scan can take the limit itself.
+DEFINE FIELD ts ON item TYPE datetime;
 DEFINE INDEX idx_ts ON item FIELDS ts;
 FOR $i IN 1..=10 {
     CREATE type::record('item', $i) SET ts = d'2025-01-01T00:00:00Z' + duration::from_days($i - 1);

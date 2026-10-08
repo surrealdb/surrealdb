@@ -2,16 +2,14 @@
 [env]
 imports = ["reproductions/layers_guarded_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:reader" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
 	A permission predicate and a computed body are the definer's, and a
 	caller they are enforced on must not learn them from the plan: for a
-	record user, EXPLAIN renders every layer column as `<permission>` or
-	`<computed>` and a table's permission predicate as `<permission>`, and
-	carries no expression text for them, in the text form and in the
-	structured form alike. The caller's own predicate is shown.
+	record user, EXPLAIN renders a layer and a permission filter as bare
+	nodes with no column, guard or predicate text, in the text form and in
+	the structured form alike. The caller's own predicate is shown.
 """
 
 [[test.results]]
@@ -27,12 +25,12 @@ value = '''
 value = '''
 'SelectProject [ctx: Db] [projections: is_owner, secret, c]
     ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-        ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
             TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ attributes: { predicate: "secret = 'x'" }, children: [{ attributes: { columns: 'secret = <permission> @permission' }, children: [{ attributes: { columns: 'is_owner = <computed> : bool @computed' }, children: [{ attributes: { direction: 'Forward', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'ProjectLayer' }], context: 'Db', operator: 'ProjectLayer' }], context: 'Db', expressions: [{ role: 'predicate', sql: "secret = 'x'" }], operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"""
+value = """{ attributes: { projections: 'id' }, children: [{ attributes: { predicate: "secret = 'x'" }, children: [{ attributes: { columns: 'secret = <permission> @permission' }, children: [{ attributes: { columns: 'is_owner = <computed> : bool @computed' }, children: [{ attributes: { direction: 'Forward', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'ProjectLayer' }], context: 'Db', operator: 'ProjectLayer' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"""
 
 [[test.results]]
 value = '''

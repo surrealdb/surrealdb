@@ -3,7 +3,6 @@
 backend = ["rocksdb", "surrealkv"]
 versioned = true
 timeout = 5000
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "A call under a VERSION runs the body stored at that stamp, so the plan-time mutability walk reads the body at the same stamp"

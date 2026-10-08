@@ -26,8 +26,9 @@ pub struct ComputedDeps {
 	/// Whether static analysis could fully determine all dependencies.
 	///
 	/// When `false`, the expression contains opaque constructs (subqueries, params,
-	/// graph traversals, etc.) that could access arbitrary fields at runtime.
-	/// If such a field is needed by a query, ALL computed fields must be evaluated.
+	/// graph traversals, calls to a function whose body runs against the record,
+	/// etc.) that could access arbitrary fields at runtime. If such a field is
+	/// needed by a query, ALL computed fields must be evaluated.
 	pub is_complete: bool,
 }
 
@@ -63,6 +64,15 @@ fn field_name_from_part(part: &Part) -> Option<String> {
 		Part::Value(Expr::Literal(Literal::String(name))) => Some(name.as_str().to_owned()),
 		_ => None,
 	}
+}
+
+/// Whether `param` is one the session binds — what the statement runs as
+/// (`$auth`, `$access`, `$token`, `$session`). User code cannot rebind these
+/// (`surrealdb_cnf::PROTECTED_PARAM_NAMES`), so a read of one never reaches a
+/// field of the document being evaluated: `$auth.id` names the authenticated
+/// record, and a dereference through it reads that record, not this one.
+fn is_session_param(param: &crate::expr::Param) -> bool {
+	surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&param.as_str())
 }
 
 /// Visitor that walks an expression tree extracting field dependencies.
@@ -171,15 +181,20 @@ impl Visitor for FieldDependencyExtractor {
 			// GQL MATCH reads arbitrary fields/tables at runtime via the planner;
 			// treat it as opaque (cannot appear in a permission clause, but stay
 			// safe if it ever does).
+			// === Session parameters: transparent ===
+			// Bound by the session, never to the row (see `is_session_param`).
+			Expr::Param(param) if is_session_param(param) => {}
+
 			// === Opaque (flip, do not walk) ===
-			// Parameters are resolved at runtime and may bind to anything.
+			// Any other parameter is resolved at runtime and may bind to
+			// anything, the row included.
 			Expr::Param(_) => {
 				self.is_complete = false;
 			}
 
-			// === Projection-aware function calls ===
+			// === Function calls: projection-aware, opaque bodies flip ===
 			Expr::FunctionCall(call) => {
-				self.visit_function_call_with_projection(call)?;
+				self.visit_function_call(call)?;
 			}
 		}
 		Ok(())
@@ -203,6 +218,11 @@ impl Visitor for FieldDependencyExtractor {
 				part.visit(self)?;
 			}
 
+			// A path from a session parameter (`$auth.id`) reads what the
+			// session is bound to, not the row; the parts after it are walked
+			// by `visit_idiom`.
+			Part::Start(Expr::Param(param)) if is_session_param(param) => {}
+
 			// Opaque (flip + walk).
 			// Lookup: graph traversals can access other tables.
 			// Start: `(subexpr).field` — the start expr is itself opaque to
@@ -219,8 +239,8 @@ impl Visitor for FieldDependencyExtractor {
 }
 
 impl FieldDependencyExtractor {
-	/// Handle a function call, applying projection-function-aware analysis
-	/// before falling through to default argument traversal.
+	/// Handle a function call: the fields its receiver reads of the current
+	/// document, then the fields its arguments read.
 	///
 	/// Projection functions (`type::field("x")`, `type::fields(["x", "y"])`)
 	/// read fields of the current document by name, bypassing the idiom-walk
@@ -231,18 +251,32 @@ impl FieldDependencyExtractor {
 	/// registry asserts these are the only projection functions; adding a new
 	/// one requires updating both sites.
 	///
-	/// Arguments are always walked after the projection analysis, so that
-	/// nested subqueries / params / etc. inside arg expressions still
-	/// contribute their own deps and may flip the flag.
-	fn visit_function_call_with_projection(
-		&mut self,
-		call: &FunctionCall,
-	) -> Result<(), std::convert::Infallible> {
-		if let Function::Normal(name) = &call.receiver {
-			match name.as_str() {
+	/// A user-defined, scripted, module or silo function runs a body the call
+	/// site does not hold, against the current document: `fn::hidden()` whose
+	/// body is `RETURN hidden` reads `hidden` while naming no field. Such a
+	/// call is opaque, as the logical effects fold also judges it
+	/// (`call_evaluates_against_row`). A model is handed only its arguments,
+	/// and a builtin reads the document only through its arguments or as a
+	/// projection function above.
+	///
+	/// Arguments are always walked after the receiver, so that nested
+	/// subqueries / params / etc. inside arg expressions still contribute
+	/// their own deps and may flip the flag.
+	fn visit_function_call(&mut self, call: &FunctionCall) -> Result<(), std::convert::Infallible> {
+		match &call.receiver {
+			Function::Normal(name) => match name.as_str() {
 				"type::field" => self.analyse_type_field(&call.arguments),
 				"type::fields" => self.analyse_type_fields(&call.arguments),
 				_ => {}
+			},
+			Function::Model(_) => {}
+			Function::Custom(_)
+			| Function::Script(_)
+			| Function::Module(..)
+			| Function::Silo {
+				..
+			} => {
+				self.is_complete = false;
 			}
 		}
 		call.visit(self)?;
@@ -742,6 +776,25 @@ mod tests {
 		assert!(deps.is_complete);
 	}
 
+	/// `$auth`, `$access`, `$token` and `$session` are bound by the session, so
+	/// neither the parameter nor a path from it reads the row: a permission
+	/// written `owner = $auth.id` reads `owner` and nothing else.
+	#[test]
+	fn session_params_read_no_field_of_the_row() {
+		for src in ["$auth", "$auth.id", "$access", "$token.sub", "$session.ns", "$auth.roles[0]"] {
+			let deps = extract(&parse(src));
+			assert!(deps.fields.is_empty(), "`{src}` reads no field: {deps:?}");
+			assert!(deps.is_complete, "`{src}` is not opaque");
+		}
+		let deps = extract(&parse("owner = $auth.id AND $session.ns = 'test'"));
+		assert_eq!(deps.fields, vec!["owner"]);
+		assert!(deps.is_complete);
+		// A graph traversal from the session's record still reaches other
+		// records, and a parameter the session does not bind may be the row.
+		assert!(!extract(&parse("$auth->likes->post")).is_complete);
+		assert!(!extract(&parse("$auth.id = $this")).is_complete);
+	}
+
 	#[test]
 	fn other_param_dot_field_marks_incomplete() {
 		// $foo.a -- unknown param, not $this/$self
@@ -972,6 +1025,29 @@ mod tests {
 		let deps = extract(&expr);
 		assert!(deps.is_complete);
 		assert_eq!(deps.fields, vec!["a", "b"]);
+	}
+
+	// ===== Calls whose body runs against the document =====
+
+	/// A user-defined, scripted, module or silo function runs a body the call
+	/// site does not hold against the document, so it may read any field
+	/// whatever its arguments name. The arguments still contribute their own.
+	#[test]
+	fn a_call_running_its_own_body_marks_incomplete() {
+		for src in [
+			"fn::hidden() != true",
+			"fn::check(a) = true",
+			"function() { return this.hidden; }",
+			"mod::perms::hidden()",
+			"silo::acme::perms::<1.0.0>::hidden()",
+		] {
+			assert!(!extract(&parse(src)).is_complete, "`{src}` is opaque");
+		}
+		assert_eq!(extract(&parse("fn::check(a) = true")).fields, vec!["a"]);
+		// A builtin reads the document through its arguments alone.
+		let deps = extract(&parse("string::lowercase(owner) = 'bob'"));
+		assert!(deps.is_complete);
+		assert_eq!(deps.fields, vec!["owner"]);
 	}
 
 	// ===== Topological sort tests =====

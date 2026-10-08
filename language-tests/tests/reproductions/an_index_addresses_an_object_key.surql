@@ -3,10 +3,7 @@
 reason = """
 	An index addresses the key it renders as when the value beneath it is an
 	object, so `a[0]` reaches `{ '0': .. }` — the rule a read already follows.
-	The structural walker the streaming operators navigate output paths with
-	handled an index over arrays and sets alone, so a SPLIT on such a path
-	found nothing to split and left the row whole. It splits, and the written
-	key is the one the index names.
+	A SPLIT on such a path splits, and the written key is the one the index names.
 """
 
 [[test.results]]

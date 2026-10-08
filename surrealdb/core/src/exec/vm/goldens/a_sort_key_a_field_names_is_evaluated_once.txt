@@ -1,0 +1,29 @@
+### SELECT sequence::nextval('seq') AS n FROM t ORDER BY n
+{ n: 1 }
+{ n: 2 }
+{ n: 3 }
+### SELECT sequence::nextval('seq') AS n, v FROM t ORDER BY n DESC
+{ n: 3, v: 2 }
+{ n: 2, v: 1 }
+{ n: 1, v: 3 }
+### SELECT *, sequence::nextval('seq') AS n FROM t ORDER BY n DESC
+{ id: t:3, n: 3, v: 2 }
+{ id: t:2, n: 2, v: 1 }
+{ id: t:1, n: 1, v: 3 }
+### SELECT sequence::nextval('seq') AS a, sequence::nextval('seq') AS b FROM t ORDER BY b
+{ a: 4, b: 1 }
+{ a: 5, b: 2 }
+{ a: 6, b: 3 }
+### SELECT VALUE sequence::nextval('seq') AS n FROM t ORDER BY n
+1
+2
+3
+### SELECT to.c AS x, v FROM link ORDER BY x
+{ v: 2, x: 1 }
+{ v: 1, x: 2 }
+### SELECT to.c AS x, v FROM link ORDER BY x DESC LIMIT 1
+{ v: 1, x: 2 }
+### SELECT v + sequence::nextval('seq') AS s FROM t ORDER BY s, v
+{ s: 3 }
+{ s: 4 }
+{ s: 5 }

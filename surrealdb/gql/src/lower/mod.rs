@@ -4,7 +4,7 @@
 //! [`GqlQuery`] becomes a [`LogicalOp::Match`] holding a [`MatchPlan`] (the
 //! language-neutral binding-table plan node) whose scalars are the logical
 //! plan's [`LogicalExpr`]. No SurrealQL surface AST and no expression-layer
-//! value is produced; the streaming execution planner compiles the
+//! value is produced; the planner compiles the
 //! [`MatchPlan`] into operators.
 //!
 //! Layout: [`binding`] runs the variable-resolution semantic pass over the

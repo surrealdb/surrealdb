@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test EXPLAIN with index-backed queries: standard index, unique index, compound index"
@@ -11,14 +10,14 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    IndexScan [ctx: Db] [index: idx_email_uniq, access: = 'a@test.com', direction: Forward, predicate: email = 'a@test.com'] {rows: 1}
+    IndexScan [ctx: Db] [table: user, index: idx_email_uniq, access: = 'a@test.com', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 2}
-    IndexScan [ctx: Db] [index: idx_region_status, access: ['EU', 'active'], direction: Forward, predicate: region = 'EU' AND status = 'active'] {rows: 2}
+    IndexScan [ctx: Db] [table: user, index: idx_region_status, access: ['EU', 'active'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -32,7 +31,8 @@ Total rows: 1"'''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 2}
-    IndexScan [ctx: Db] [index: idx_region_status, access: ['NA'], direction: Forward, predicate: region = 'NA'] {rows: 2}
+    DistinctRecords [ctx: Db] {rows: 2}
+        IndexScan [ctx: Db] [table: user, index: idx_region_status, access: ['NA'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 */

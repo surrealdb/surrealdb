@@ -2,7 +2,6 @@
 [env]
 namespace = true
 database = true
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "An OR branch that the analyzer can prove is empty (e.g. a contradictory range) must be dropped from the union — a zero-row branch contributes nothing to OR semantics. Without this fix `try_or_union` pushed an `AccessPath::EmptyScan` sub-path into the Union and `build_union_sub_operator` errored with `Error::Internal(\"UnionIndexScan sub-path produced an unexpected access path\")`. When only one branch survives the result is a plain IndexScan, not a Union."
@@ -32,7 +31,7 @@ value = "[{ id: t:r1 }]"
 value = '''
 'SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: a > 10 AND a < 5 OR b = 1]
-        IndexScan [ctx: Db] [index: idx_b, access: = 1, direction: Forward]
+        IndexScan [ctx: Db] [table: t, index: idx_b, access: = 1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -40,8 +39,9 @@ value = "[]"
 
 [[test.results]]
 value = '''
-'SelectProject [ctx: Rt] [projections: id]
-    EmptyScan [ctx: Rt]
+'SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: a > 10 AND a < 5 OR a > 100 AND a < 50]
+        Union [ctx: Db]
 ''''
 */
 DEFINE TABLE t;

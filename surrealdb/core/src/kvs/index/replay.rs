@@ -18,8 +18,7 @@ use super::{
 use crate::catalog::providers::{NodeProvider, TableProvider};
 use crate::catalog::{Index, Record};
 use crate::ctx::FrozenContext;
-use crate::doc::{CursorDoc, Document};
-use crate::exe::FlowResultExt as _;
+use crate::exec::analyzer_function::StreamingAnalyzerFunction;
 use crate::idx::docids::{DocId, TableDocIds};
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
@@ -33,7 +32,6 @@ use crate::kvs::{
 	DatastoreError, Direction, INDEXING_BATCH_SIZE, Transaction, Val,
 	is_retryable_transaction_conflict,
 };
-use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 use crate::val::{Array, Number, Object, RecordId, RecordIdKey, RecordIdentity, Value};
 
 /// Maximum consecutive commit-conflict retries for one deferred doc-ID reclaim
@@ -610,9 +608,16 @@ impl Building {
 			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
 				.await?;
 		let lookup_tx = self.new_read_tx().await?;
-		// COUNT WHERE predicate, already parsed once when the build started.
-		let count_cond_expr: Option<crate::expr::Expr> =
-			self.ix.count_cond.as_ref().map(|c| c.0.clone());
+		// The index's columns and `COUNT` guard, as the engine
+		// evaluates them: compiled once for the build, and the same
+		// expressions the write path evaluates for the same definition, so a
+		// record indexed by this scan and one indexed by a concurrent write
+		// are judged alike.
+		let exec = self.exec_ctx(ctx).await?;
+		let entry = self.compiled_index(&exec).await?;
+		// The analyzer's `FUNCTION` clause, compiled once for the batch rather
+		// than once per record, in the same frame the columns are evaluated in.
+		let az_fn = StreamingAnalyzerFunction::new(&exec);
 		let result = async {
 			// A record is baselined from its first queued mutation, which an
 			// older node may have marked under its own spelling.
@@ -670,33 +675,21 @@ impl Building {
 					(a.old_values, baselined_match(a.count_cond_match))
 				} else {
 					// Otherwise, proceed with normal indexing.
-					let doc = CursorDoc::new(Some(Arc::clone(&rid)), None, val);
-					let opt_values = stack
-						.enter(|stk| {
-							Document::build_opt_values(stk, ctx, &self.opt, &self.ix, &doc)
-						})
-						.finish()
-						.await?;
+					let opt_values = entry.values(&val.data, &exec).await?;
 					// COUNT WHERE indexes have no indexed values, so the
 					// initial scan carries the predicate result separately.
-					let count_cond_match = if let Some(expr) = &count_cond_expr {
-						let new_matches = stack
-							.enter(|stk| {
-								crate::legacy::expr_compute(expr, stk, ctx, &self.opt, Some(&doc))
-							})
-							.finish()
-							.await
-							.catch_return()?
-							.is_truthy();
-						Some((false, new_matches))
-					} else {
-						None
-					};
+					// The scan is the record's entry into the index, so the
+					// before-image it is compared against is its absence.
+					let count_cond_match = entry
+						.guard_matches(&val.data, &exec)
+						.await?
+						.map(|matches| (false, matches));
 					(opt_values, count_cond_match)
 				};
 				self.index_initial_values(
 					ctx,
 					&mut stack,
+					&az_fn,
 					&fulltext_index,
 					InitialIndexValue {
 						rid: rid.as_ref(),
@@ -725,6 +718,7 @@ impl Building {
 							initial_count: initial_count + count,
 						},
 						&mut stack,
+						&az_fn,
 						&mut rc,
 					)
 					.await?;
@@ -763,6 +757,8 @@ impl Building {
 		let mut stack = TreeStack::new();
 		let mut rc = false;
 		let live_ids = BTreeSet::new();
+		let exec = self.exec_ctx(ctx).await?;
+		let az_fn = StreamingAnalyzerFunction::new(&exec);
 		let result = self
 			.index_missing_count_primary_appendings(
 				ctx,
@@ -775,6 +771,7 @@ impl Building {
 					initial_count,
 				},
 				&mut stack,
+				&az_fn,
 				&mut rc,
 			)
 			.await;
@@ -797,6 +794,7 @@ impl Building {
 		&self,
 		ctx: &FrozenContext,
 		stack: &mut TreeStack,
+		az_fn: &StreamingAnalyzerFunction<'_>,
 		fulltext_index: &Option<FullTextIndex>,
 		value: InitialIndexValue<'_>,
 		rc: &mut bool,
@@ -806,7 +804,6 @@ impl Building {
 			opt_values,
 			count_cond_match,
 		} = value;
-		let az_fn = LegacyAnalyzerFunction::new(ctx, &self.opt);
 		let mut io = IndexOperation::new(
 			ctx,
 			self.ix_key.ns,
@@ -822,11 +819,11 @@ impl Building {
 		}
 		if let Some(fulltext_index) = fulltext_index {
 			stack
-				.enter(|stk| io.compute_fulltext_with_index(stk, &az_fn, fulltext_index, rc))
+				.enter(|stk| io.compute_fulltext_with_index(stk, az_fn, fulltext_index, rc))
 				.finish()
 				.await
 		} else {
-			stack.enter(|stk| io.compute(stk, &az_fn, rc)).finish().await
+			stack.enter(|stk| io.compute(stk, az_fn, rc)).finish().await
 		}
 	}
 
@@ -869,6 +866,7 @@ impl Building {
 		ctx: &FrozenContext,
 		scan: CountPrimaryAppendingScan<'_>,
 		stack: &mut TreeStack,
+		az_fn: &StreamingAnalyzerFunction<'_>,
 		rc: &mut bool,
 	) -> Result<usize> {
 		let Index::Count(_) = &self.ix.index else {
@@ -901,7 +899,7 @@ impl Building {
 				continue;
 			}
 			let appending = self.queued_appending(scan.lookup_tx, generation, ptr).await?;
-			self.index_queued_baseline(ctx, stack, rc, appending).await?;
+			self.index_queued_baseline(ctx, stack, az_fn, rc, appending).await?;
 			count += 1;
 		}
 		let range =
@@ -988,7 +986,7 @@ impl Building {
 					}
 					appending
 				};
-				self.index_queued_baseline(ctx, stack, rc, appending).await?;
+				self.index_queued_baseline(ctx, stack, az_fn, rc, appending).await?;
 				count += 1;
 			}
 		}
@@ -1134,6 +1132,7 @@ impl Building {
 		&self,
 		ctx: &FrozenContext,
 		stack: &mut TreeStack,
+		az_fn: &StreamingAnalyzerFunction<'_>,
 		rc: &mut bool,
 		appending: Appending,
 	) -> Result<()> {
@@ -1145,6 +1144,7 @@ impl Building {
 		self.index_initial_values(
 			ctx,
 			stack,
+			az_fn,
 			&None,
 			InitialIndexValue {
 				rid: &rid,
@@ -1466,6 +1466,7 @@ impl Building {
 		&self,
 		ctx: &FrozenContext,
 		stack: &mut TreeStack,
+		az_fn: &StreamingAnalyzerFunction<'_>,
 		fulltext_index: &Option<FullTextIndex>,
 		appending: Appending,
 		rc: &mut bool,
@@ -1486,7 +1487,6 @@ impl Building {
 			table: self.ikb.table().clone(),
 			key: rid_key.clone(),
 		};
-		let az_fn = LegacyAnalyzerFunction::new(ctx, &self.opt);
 		let mut io = IndexOperation::new(
 			ctx,
 			self.ix_key.ns,
@@ -1502,11 +1502,11 @@ impl Building {
 		}
 		if let Some(fulltext_index) = fulltext_index {
 			stack
-				.enter(|stk| io.compute_fulltext_with_index(stk, &az_fn, fulltext_index, rc))
+				.enter(|stk| io.compute_fulltext_with_index(stk, az_fn, fulltext_index, rc))
 				.finish()
 				.await?;
 		} else {
-			stack.enter(|stk| io.compute(stk, &az_fn, rc)).finish().await?;
+			stack.enter(|stk| io.compute(stk, az_fn, rc)).finish().await?;
 		}
 		if reclaim_doc_id {
 			let tx = ctx.tx();
@@ -1915,6 +1915,8 @@ impl Building {
 		let fulltext_index =
 			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
 				.await?;
+		let exec = self.exec_ctx(ctx).await?;
+		let az_fn = StreamingAnalyzerFunction::new(&exec);
 		for k in keys {
 			// Replay analysis is synchronous CPU work; yield so a long batch
 			// cannot starve the runtime worker.
@@ -1926,7 +1928,7 @@ impl Building {
 			let ig = IndexAppendKey::decode_key(&k)?;
 			if let Some(appending) = tx.get_key(&ig, None).await? {
 				let rid_key = self
-					.apply_appending(ctx, &mut stack, &fulltext_index, appending, &mut rc)
+					.apply_appending(ctx, &mut stack, &az_fn, &fulltext_index, appending, &mut rc)
 					.await?;
 				tx.del_key(&ig).await?;
 
@@ -1956,6 +1958,8 @@ impl Building {
 		let fulltext_index =
 			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
 				.await?;
+		let exec = self.exec_ctx(ctx).await?;
+		let az_fn = StreamingAnalyzerFunction::new(&exec);
 		for k in keys {
 			// Replay analysis is synchronous CPU work; yield so a long batch
 			// cannot starve the runtime worker.
@@ -1967,7 +1971,7 @@ impl Building {
 			let bg = BuildAppendKey::decode_key(&k)?;
 			if let Some(appending) = tx.get_key(&bg, None).await? {
 				let rid_key = self
-					.apply_appending(ctx, &mut stack, &fulltext_index, appending, &mut rc)
+					.apply_appending(ctx, &mut stack, &az_fn, &fulltext_index, appending, &mut rc)
 					.await?;
 				tx.del_key(&bg).await?;
 				let bp = self.ikb.new_bp_key(bg.generation, &rid_key);

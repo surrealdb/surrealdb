@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test that EXPLAIN can be used inside expression context (e.g. object literals)"
@@ -12,10 +11,7 @@ value = "[{ id: person:1, name: 'Alice' }]"
 value = "[{ id: person:2, name: 'Bob' }]"
 
 [[test.results]]
-value = '''{ agg: 'CountScan [ctx: Db] [source: person]
-', select: 'SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: person, direction: Forward]
-' }'''
+value = '''{ agg: 'SelectProject [ctx: Db] [projections: *]\n    CountScan [ctx: Db] [source: person]\n', select: 'SelectProject [ctx: Db] [projections: *]\n    TableScan [ctx: Db] [table: person, direction: Forward]\n' }'''
 
 */
 

@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["compute-only", "all-ro", "best-effort-ro"]
 
 [test]
 reason = """

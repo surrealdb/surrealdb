@@ -9,7 +9,7 @@ reason = """
 	A call evaluates and coerces every argument before the body runs, so an
 	argument the body never mentions still raises when evaluating it does.
 	Replacing the call by its body drops such an argument, and is done only
-	when evaluating it cannot raise. Both engines agree on every strategy.
+	when evaluating it cannot raise.
 """
 
 [[test.results]]

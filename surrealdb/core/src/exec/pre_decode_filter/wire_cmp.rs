@@ -258,6 +258,12 @@ fn wire_cmp_int_number(value_bytes: &[u8], lit: &LiteralWire) -> Option<std::cmp
 		return None;
 	}
 	let lit_i64 = (*int_value)?;
+	Some(int_on_wire(value_bytes)?.cmp(&lit_i64))
+}
+
+/// The integer a rev-2 `Value::Number(Number::Int(_))` wire holds, or [`None`]
+/// for a value of any other kind or sub-variant, or a truncated wire.
+pub(crate) fn int_on_wire(value_bytes: &[u8]) -> Option<i64> {
 	let peek = peek_value(value_bytes)?;
 	if peek.tag.variant_id() != variant_id::NUMBER {
 		return None;
@@ -276,9 +282,7 @@ fn wire_cmp_int_number(value_bytes: &[u8], lit: &LiteralWire) -> Option<std::cmp
 		return None;
 	}
 	let mut body: &[u8] = &peek.payload[6..];
-	let field_i64 =
-		<i64 as revision::DeserializeRevisioned>::deserialize_revisioned(&mut body).ok()?;
-	Some(field_i64.cmp(&lit_i64))
+	<i64 as revision::DeserializeRevisioned>::deserialize_revisioned(&mut body).ok()
 }
 
 /// Probe `value_bytes` against a [`LiteralSet`]. Returns `Some(true)` /

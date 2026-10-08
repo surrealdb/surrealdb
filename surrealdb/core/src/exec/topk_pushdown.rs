@@ -30,30 +30,51 @@
 //!   compares with [`compare_values`], the same function the sort operator uses, including
 //!   `Value::None` sorting below everything for missing fields.
 //!
+//! ## One threshold per execution
+//!
+//! A compiled plan can run more than once: a subquery once per outer row, with
+//! runs overlapping where those rows are evaluated concurrently, and a `FOR`
+//! body once per iteration. Each run's threshold is that run's alone. The
+//! single-key `Equal` rejection above is sound only against the heap of the run
+//! doing the scanning, which already holds the tied row, and a correlated run
+//! has rows of its own that another run's threshold would reject.
+//!
+//! So the planner gives the scan's probe and the sort the same pushdown id
+//! ([`next_id`]) rather than a cell. Each execution of the sort creates a fresh
+//! [`TopKThresholdCell`] and runs its input in a context holding it under that
+//! id ([`ExecutionContext::with_topk_threshold`]). The scan arms its probe with
+//! the cell it finds there ([`topk_probe_for_execute`]), and a scan that finds
+//! none reads no threshold.
+//!
 //! ## Degradation
 //!
-//! The cell gets a writer only when the planner installs it into a
+//! The pushdown gets a publisher only when the planner installs its id into a
 //! [`SortTopKByKey`](crate::exec::operators::SortTopKByKey) whose computed sort
 //! keys match the probe (see the install guard in
 //! `plan_sort_consolidated`). Any divergence — sort eliminated, GROUP BY,
-//! TEMPFILES, oversized limit, registry-computed first key — leaves the cell
-//! unpublished and the probe dormant: one `RwLock` read per cursor batch,
-//! nothing else.
+//! TEMPFILES, oversized limit, registry-computed first key — leaves no cell in
+//! the scan's context, and the scan runs without a probe.
 
 use std::cmp::Ordering;
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, RwLock};
 
+#[cfg(test)]
+use crate::exec::ExecutionContext;
 use crate::exec::OperatorMetrics;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::object_extract::{Extracted, PathSegment, extract_field_from_record_bytes};
+#[cfg(test)]
 use crate::exec::operators::scan::pipeline::FieldState;
 use crate::exec::operators::{SortDirection, SortKey, compare_values};
+#[cfg(test)]
 use crate::exec::pre_decode_filter::{PreDecodeFilterReason, field_state_blocks_raw_read};
 use crate::val::Value;
 
-/// Shared, monotonically-tightening threshold between the sort operator (top
-/// of the buffered pipeline, possibly a separate task) and the KV scan visitor
-/// (bottom).
+/// Monotonically-tightening threshold shared, for one execution, between the
+/// sort operator (top of the buffered pipeline, possibly a separate task) and
+/// the KV scan visitor (bottom).
 ///
 /// `std::sync::RwLock` rather than a lock-free cell: the scan reads once per
 /// cursor batch (≤ 1 per [`crate::kvs::NORMAL_BATCH_SIZE`] rows) and the sort
@@ -85,11 +106,61 @@ impl TopKThresholdCell {
 	}
 }
 
+#[cfg(test)]
+/// A fresh pushdown id, naming the scan and the sort of one top-k pushdown in
+/// one plan.
+pub(crate) fn next_id() -> u64 {
+	static NEXT: AtomicU64 = AtomicU64::new(1);
+	NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+}
+
+/// The thresholds of the top-k sorts executing around a context, innermost
+/// first.
+///
+/// Each execution of a sort that publishes a threshold pushes its own cell
+/// under its pushdown's id ([`ExecutionContext::with_topk_threshold`]). A plan
+/// run inside another run of itself therefore finds its own execution's cell
+/// ahead of the outer one's.
+#[derive(Debug)]
+pub(crate) struct TopKThresholds {
+	pushdown: u64,
+	cell: Arc<TopKThresholdCell>,
+	outer: Option<Arc<TopKThresholds>>,
+}
+
+impl TopKThresholds {
+	/// `outer` with `cell` held in front of it under `pushdown`.
+	pub(crate) fn push(
+		outer: Option<Arc<TopKThresholds>>,
+		pushdown: u64,
+		cell: Arc<TopKThresholdCell>,
+	) -> Arc<Self> {
+		Arc::new(Self {
+			pushdown,
+			cell,
+			outer,
+		})
+	}
+
+	/// The innermost cell held under `pushdown`, if any.
+	pub(crate) fn find(&self, pushdown: u64) -> Option<&Arc<TopKThresholdCell>> {
+		let mut frame = Some(self);
+		while let Some(f) = frame {
+			if f.pushdown == pushdown {
+				return Some(&f.cell);
+			}
+			frame = f.outer.as_deref();
+		}
+		None
+	}
+}
+
 /// Scan-side probe: rejects rows from raw revision-encoded record bytes when
 /// their first ORDER BY key cannot beat the current threshold.
 ///
-/// Built at plan time by the select planner; armed (and optionally given a
-/// metrics handle) at execute time via [`topk_probe_for_execute`].
+/// Built at plan time by the select planner, naming its pushdown but holding no
+/// threshold. [`topk_probe_for_execute`] arms a copy for each execution with
+/// the cell that execution's sort created and, optionally, a metrics handle.
 #[derive(Debug, Clone)]
 pub(crate) struct TopKThresholdProbe {
 	/// First ORDER BY key as pre-encoded wire segments (all
@@ -101,7 +172,12 @@ pub(crate) struct TopKThresholdProbe {
 	/// against the threshold also rejects (the heap admits only on strict
 	/// `Less`). With multiple keys, `Equal` must fall through to full decode.
 	single_key: bool,
-	cell: Arc<TopKThresholdCell>,
+	/// The pushdown whose sort publishes the threshold this probe reads.
+	pushdown: u64,
+	/// The threshold of the execution this probe is armed for. `None` in the
+	/// plan-time probe, which [`topk_probe_for_execute`] never hands to a
+	/// scan.
+	cell: Option<Arc<TopKThresholdCell>>,
 	/// Bounds walker descent; sourced from `ctx.config.exec.idiom_recursion_limit`.
 	depth_limit: u32,
 	/// Present only when EXPLAIN ANALYZE enabled the scan's metrics; the
@@ -110,23 +186,26 @@ pub(crate) struct TopKThresholdProbe {
 }
 
 impl TopKThresholdProbe {
+	#[cfg(test)]
 	pub(crate) fn new(
 		path: Vec<PathSegment>,
 		direction: SortDirection,
 		single_key: bool,
-		cell: Arc<TopKThresholdCell>,
+		pushdown: u64,
 		depth_limit: u32,
 	) -> Self {
 		Self {
 			path: path.into(),
 			direction,
 			single_key,
-			cell,
+			pushdown,
+			cell: None,
 			depth_limit,
 			metrics: None,
 		}
 	}
 
+	#[cfg(test)]
 	/// Root field name the probe reads from raw bytes — the subject of the
 	/// computed-field / field-permission eligibility checks.
 	pub(crate) fn root_field(&self) -> &str {
@@ -134,9 +213,31 @@ impl TopKThresholdProbe {
 		self.path[0].as_str()
 	}
 
-	/// Current threshold snapshot; [`None`] until the sort heap fills.
+	/// Current threshold snapshot; [`None`] until this execution's sort heap
+	/// fills.
 	pub(crate) fn snapshot(&self) -> Option<Arc<Value>> {
-		self.cell.snapshot()
+		self.cell.as_ref()?.snapshot()
+	}
+
+	/// A probe armed with `cell` directly, for a scan that holds the cell of
+	/// the sort it feeds itself rather than finding it by pushdown id. Its
+	/// pushdown id is `0`, which [`next_id`] never hands out.
+	pub(crate) fn armed(
+		path: Arc<[PathSegment]>,
+		direction: SortDirection,
+		single_key: bool,
+		depth_limit: u32,
+		cell: Arc<TopKThresholdCell>,
+	) -> Arc<Self> {
+		Arc::new(Self {
+			path,
+			direction,
+			single_key,
+			pushdown: 0,
+			cell: Some(cell),
+			depth_limit,
+			metrics: None,
+		})
 	}
 
 	/// Metrics handle for flushing skip counts (EXPLAIN ANALYZE only).
@@ -176,6 +277,16 @@ impl TopKThresholdProbe {
 	}
 }
 
+impl PartialEq for TopKThresholdProbe {
+	fn eq(&self, other: &Self) -> bool {
+		self.pushdown == other.pushdown
+			&& self.direction == other.direction
+			&& self.single_key == other.single_key
+			&& self.path == other.path
+	}
+}
+
+#[cfg(test)]
 /// Why TopK threshold pushdown cannot be applied to a scan.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum TopKPushdownReason {
@@ -198,6 +309,7 @@ pub(crate) enum TopKPushdownReason {
 	FieldPermissions,
 }
 
+#[cfg(test)]
 /// Plan / execute-time status of TopK threshold pushdown for a KV table scan.
 /// Mirrors [`PreDecodeFilterStatus`](crate::exec::pre_decode_filter::PreDecodeFilterStatus).
 #[derive(Debug, Clone)]
@@ -213,7 +325,9 @@ pub(crate) enum TopKPushdownStatus {
 	Ineligible(TopKPushdownReason),
 }
 
+#[cfg(test)]
 impl TopKPushdownStatus {
+	#[cfg(test)]
 	/// Human-readable value for the `topk_pushdown` attribute in EXPLAIN
 	/// output; [`None`] means the attribute is omitted.
 	pub(crate) fn explain_text(&self) -> Option<&'static str> {
@@ -236,16 +350,17 @@ impl TopKPushdownStatus {
 
 /// Planner-side handle from scan construction to sort construction.
 ///
-/// `plan_table_scan_source` creates the cell and probe; `plan_sort_consolidated`
-/// installs the publish side into [`SortTopKByKey`](crate::exec::operators::SortTopKByKey)
-/// **only** when the sort plan it actually built matches what the probe was
-/// compiled against — `sort_keys.first() == Some(&expected_first_key)` and
+/// `plan_table_scan_source` creates the probe and names the pushdown;
+/// `plan_sort_consolidated` installs the pushdown's id into
+/// [`SortTopKByKey`](crate::exec::operators::SortTopKByKey) **only** when the
+/// sort plan it actually built matches what the probe was compiled against —
+/// `sort_keys.first() == Some(&expected_first_key)` and
 /// `sort_keys.len() == expected_key_count`. A mismatch (alias resolution or
-/// registry compute diverging from the request-time analysis) simply leaves
-/// the cell unpublished.
+/// registry compute diverging from the request-time analysis) leaves the
+/// pushdown without a publisher, and the scan without a threshold.
 #[derive(Debug, Clone)]
 pub(crate) struct TopKPushdownHandle {
-	pub(crate) cell: Arc<TopKThresholdCell>,
+	pub(crate) pushdown: u64,
 	pub(crate) expected_first_key: SortKey,
 	pub(crate) expected_key_count: usize,
 }
@@ -275,6 +390,7 @@ pub(crate) fn field_path_wire_segments(path: &FieldPath) -> Option<Vec<PathSegme
 	Some(segments)
 }
 
+#[cfg(test)]
 /// Map the shared raw-read eligibility reason onto the pushdown's reason enum.
 fn map_reason(reason: PreDecodeFilterReason) -> TopKPushdownReason {
 	match reason {
@@ -285,6 +401,7 @@ fn map_reason(reason: PreDecodeFilterReason) -> TopKPushdownReason {
 	}
 }
 
+#[cfg(test)]
 /// Resolve pushdown status at plan time given an optional plan-time
 /// [`FieldState`]. Mirrors
 /// [`pre_decode_filter_status_at_plan_time`](crate::exec::pre_decode_filter::pre_decode_filter_status_at_plan_time):
@@ -310,12 +427,17 @@ pub(crate) fn topk_pushdown_status_at_plan_time(
 	}
 }
 
+#[cfg(test)]
 /// Resolve the optional probe for a KV scan at execution time. Mirrors
 /// [`pre_decode_filter_for_execute`](crate::exec::pre_decode_filter::pre_decode_filter_for_execute):
 /// `Active` arms directly, `Deferred` re-checks against the runtime
 /// [`FieldState`] with the session's `check_perms`, everything else is
-/// [`None`]. The armed probe carries the scan's metrics handle only when
-/// EXPLAIN ANALYZE enabled it, so the common path keeps the plan-time `Arc`.
+/// [`None`].
+///
+/// The armed probe reads the cell that the pushdown's sort created for the
+/// execution `ctx` belongs to. A context holding no cell for the pushdown arms
+/// nothing, so the scan reads every row. The armed probe carries the scan's
+/// metrics handle only when EXPLAIN ANALYZE enabled it.
 ///
 /// The metrics handle is additionally withheld when permission checks apply
 /// (`check_perms`): the `skipped` counter tallies rows rejected *before*
@@ -328,6 +450,7 @@ pub(crate) fn topk_probe_for_execute(
 	field_state: &FieldState,
 	check_perms: bool,
 	metrics: &Arc<OperatorMetrics>,
+	ctx: &ExecutionContext,
 ) -> Option<Arc<TopKThresholdProbe>> {
 	let probe = match status {
 		TopKPushdownStatus::NotApplicable | TopKPushdownStatus::Ineligible(_) => return None,
@@ -339,14 +462,12 @@ pub(crate) fn topk_probe_for_execute(
 			p
 		}
 	};
-	if metrics.is_enabled() && !check_perms {
-		Some(Arc::new(TopKThresholdProbe {
-			metrics: Some(Arc::clone(metrics)),
-			..probe.as_ref().clone()
-		}))
-	} else {
-		Some(Arc::clone(probe))
-	}
+	let cell = ctx.topk_threshold(probe.pushdown)?;
+	Some(Arc::new(TopKThresholdProbe {
+		cell: Some(cell),
+		metrics: (metrics.is_enabled() && !check_perms).then(|| Arc::clone(metrics)),
+		..probe.as_ref().clone()
+	}))
 }
 
 #[cfg(test)]
@@ -388,7 +509,7 @@ mod tests {
 			path.iter().map(|s| PathSegment::new(*s)).collect(),
 			direction,
 			single_key,
-			Arc::new(TopKThresholdCell::default()),
+			next_id(),
 			TEST_DEPTH_LIMIT,
 		)
 	}
@@ -401,6 +522,44 @@ mod tests {
 		assert_eq!(cell.snapshot().as_deref(), Some(&Value::Number(Number::Int(5))));
 		cell.publish(Value::Number(Number::Int(7)));
 		assert_eq!(cell.snapshot().as_deref(), Some(&Value::Number(Number::Int(7))));
+	}
+
+	/// A plan-time probe holds no threshold: only arming it with an
+	/// execution's cell gives it one.
+	#[test]
+	fn plan_time_probe_reads_no_threshold() {
+		let p = probe(SortDirection::Desc, true, &["a"]);
+		assert!(p.snapshot().is_none());
+		let cell = Arc::new(TopKThresholdCell::default());
+		cell.publish(Value::Number(Number::Int(5)));
+		let armed = TopKThresholdProbe {
+			cell: Some(Arc::clone(&cell)),
+			..p.clone()
+		};
+		assert_eq!(armed.snapshot().as_deref(), Some(&Value::Number(Number::Int(5))));
+		assert!(p.snapshot().is_none());
+	}
+
+	/// Each pushdown finds its own cell, and a pushdown held twice finds the
+	/// innermost one.
+	#[test]
+	fn thresholds_find_the_innermost_cell_of_their_pushdown() {
+		let (a, b) = (next_id(), next_id());
+		assert_ne!(a, b);
+		let outer_a = Arc::new(TopKThresholdCell::default());
+		let cell_b = Arc::new(TopKThresholdCell::default());
+		let inner_a = Arc::new(TopKThresholdCell::default());
+		let outer = TopKThresholds::push(None, a, Arc::clone(&outer_a));
+		assert!(Arc::ptr_eq(outer.find(a).unwrap(), &outer_a));
+		assert!(outer.find(b).is_none());
+		let both = TopKThresholds::push(Some(Arc::clone(&outer)), b, Arc::clone(&cell_b));
+		assert!(Arc::ptr_eq(both.find(a).unwrap(), &outer_a));
+		assert!(Arc::ptr_eq(both.find(b).unwrap(), &cell_b));
+		let nested = TopKThresholds::push(Some(both), a, Arc::clone(&inner_a));
+		assert!(Arc::ptr_eq(nested.find(a).unwrap(), &inner_a));
+		assert!(Arc::ptr_eq(nested.find(b).unwrap(), &cell_b));
+		// The outer context is unchanged by what was pushed after it.
+		assert!(Arc::ptr_eq(outer.find(a).unwrap(), &outer_a));
 	}
 
 	/// Full reject matrix: {Asc, Desc} × {candidate better, tie, worse} ×

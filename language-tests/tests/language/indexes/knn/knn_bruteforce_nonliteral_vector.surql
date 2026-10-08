@@ -6,25 +6,18 @@ database = true
 [test]
 issue = 476
 reason = """
-Brute-force KNN (`<|k, DIST|>`) with a non-literal query vector, identical
-across the legacy and streaming executors (this file deliberately runs under
-every planner strategy as a differential proof). Right-hand sides the legacy
-tree computes at plan time — bind parameters, function calls (including
-closure arguments), arrays with computed elements — now evaluate once at
-stream open in the streaming KnnTopK operator, with the same
-`array<number>` coercion (and error messages) as the legacy planner.
-Right-hand sides the legacy tree treats as unsupported (subqueries, idioms)
-register no executor entry and evaluate to false per row, so such queries
-return no rows instead of erroring; the same per-row false applies to KNN in
-projection position, bare expressions, and an Approximate form without an
-HNSW index. Dimension mismatches skip records (no error). Operands of a
-KNN evaluated as a predicate are deliberately not computed — the legacy
-path hands operate::knn the whole expression without computing either
-side, so an erroring operand yields false rather than an error. A
-multi-source FROM restores the stripped conjunct so rows from sources
-without a KNN entry are filtered out, as legacy does per table. Before
-#476 the streaming planner rejected every non-literal vector with
-PlannerUnimplemented and the physical fallback evaluated KNN to true.
+Brute-force KNN (`<|k, DIST|>`) with a non-literal query vector. Right-hand
+sides computed at plan time — bind parameters, function calls (including
+closure arguments), arrays with computed elements — evaluate once at stream
+open in the KnnTopK operator, with the `array<number>` coercion and its error
+messages. Right-hand sides that are unsupported (subqueries, idioms) register
+no executor entry and evaluate to false per row, so such queries return no
+rows instead of erroring; the same per-row false applies to KNN in projection
+position, bare expressions, and an Approximate form without an HNSW index.
+Dimension mismatches skip records (no error). Operands of a KNN evaluated as a
+predicate are deliberately not computed, so an erroring operand yields false
+rather than an error. A multi-source FROM restores the stripped conjunct so
+rows from sources without a KNN entry are filtered out, per table.
 """
 
 [[test.results]]

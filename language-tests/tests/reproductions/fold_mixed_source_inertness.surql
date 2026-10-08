@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = """
@@ -18,57 +17,57 @@ value = "[{ a: 5, id: t:1 }]"
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Filter [ctx: Db] [predicate: false]
-        Union [ctx: Db] [inputs: 2]
-            EmptyScan [ctx: Rt]
-            SourceExpr [ctx: Db] [expr: 1]
+        Union [ctx: Db]
+            Union [ctx: Db]
+            Values [ctx: Rt] [expr: 1]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Filter [ctx: Db] [predicate: false]
-        Union [ctx: Db] [inputs: 2]
-            EmptyScan [ctx: Rt]
-            SourceExpr [ctx: Db] [expr: { b: 1 }]
+        Union [ctx: Db]
+            Union [ctx: Db]
+            Values [ctx: Rt] [expr: { b: 1 }]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Filter [ctx: Db] [predicate: false]
-        Union [ctx: Db] [inputs: 2]
-            EmptyScan [ctx: Rt]
-            SourceExpr [ctx: Db] [expr: 3.141592653589793f]
+        Union [ctx: Db]
+            Union [ctx: Db]
+            Values [ctx: Rt] [expr: math::PI]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Filter [ctx: Db] [predicate: a INSIDE []]
-        Union [ctx: Db] [inputs: 2]
+        Union [ctx: Db]
             TableScan [ctx: Db] [table: t, direction: Forward]
-            SourceExpr [ctx: Db] [expr: [1, 2]]
+            Values [ctx: Rt] [expr: [1, 2]]
 ''''
 
 [[test.results]]
 value = '''
-'Sequence [ctx: Db] [statements: 2]
+'Sequence [ctx: Rt] [statements: 2]
     Let [ctx: Rt] [name: $p]
-        Expr [ctx: Rt] [expr: [1, 2]]
+        ExprPlan [ctx: Rt] [expr: [1, 2]]
     SelectProject [ctx: Db] [projections: *]
         Filter [ctx: Db] [predicate: a INSIDE []]
-            Union [ctx: Db] [inputs: 2]
+            Union [ctx: Db]
                 TableScan [ctx: Db] [table: t, direction: Forward]
-                DynamicScan [ctx: Db] [source: $p]
+                Values [ctx: Rt] [expr: $p]
 ''''
 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Filter [ctx: Db] [predicate: false]
-        Union [ctx: Db] [inputs: 2]
-            EmptyScan [ctx: Rt]
-            SourceExpr [ctx: Db] [expr: NONE]
+        Union [ctx: Db]
+            Union [ctx: Db]
+            Values [ctx: Rt] [expr: NONE]
 ''''
 
 */

@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "value::expect() called as a path function returns its first argument unchanged when the assertion closure returns true, and throws otherwise; the error names the full `value::expect` path on every planner strategy"
+reason = "value::expect() called as a path function returns its first argument unchanged when the assertion closure returns true, and throws otherwise; the error names the full `value::expect` path"
 
 [[test.results]]
 value = "10"

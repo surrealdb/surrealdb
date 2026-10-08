@@ -9,6 +9,10 @@
 
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
+// Proving the served router's futures `Send` walks the engine's lowering of a
+// function body, which nests deeper than the default limit, as the server
+// crate's own root does.
+#![recursion_limit = "256"]
 
 use std::net::SocketAddr;
 use std::sync::Arc;

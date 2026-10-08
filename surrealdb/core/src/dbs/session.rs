@@ -3,10 +3,11 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use surrealdb_datastore::values::session::NewPlannerStrategy;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
-use crate::dbs::{DurableSession, NewPlannerStrategy};
+use crate::dbs::DurableSession;
 use crate::iam::{Auth, Level, Role};
 use crate::types::{PublicValue, PublicVariables};
 use crate::val::Value;
@@ -236,8 +237,6 @@ pub struct Session {
 	pub exp: Option<i64>,
 	/// The variables set
 	pub variables: PublicVariables,
-	/// Strategy for the new streaming planner/executor.
-	pub new_planner_strategy: NewPlannerStrategy,
 	/// When true, EXPLAIN ANALYZE output omits elapsed durations, making
 	/// output deterministic for testing.
 	pub redact_volatile_explain_attrs: bool,
@@ -265,12 +264,6 @@ impl Session {
 	// Set the realtime functionality of the session
 	pub fn with_rt(mut self, rt: bool) -> Session {
 		self.rt = rt;
-		self
-	}
-
-	/// Set the new planner strategy for the session
-	pub fn new_planner_strategy(mut self, strategy: NewPlannerStrategy) -> Session {
-		self.new_planner_strategy = strategy;
 		self
 	}
 
@@ -382,7 +375,6 @@ impl Session {
 			data: None,
 			exp: None,
 			variables: Default::default(),
-			new_planner_strategy: NewPlannerStrategy::default(),
 			redact_volatile_explain_attrs: false,
 		}
 	}
@@ -485,7 +477,9 @@ pub(crate) fn durable_session(session: &Session, expires_at: u64) -> DurableSess
 			.into_iter()
 			.map(|(k, v)| (k, convert_public_value_to_internal(v)))
 			.collect(),
-		new_planner_strategy: session.new_planner_strategy,
+		// The stored layout keeps a planner-strategy slot for nodes on earlier
+		// releases; nothing selects a planner, so it is always the default.
+		new_planner_strategy: NewPlannerStrategy::default(),
 		redact_volatile_explain_attrs: session.redact_volatile_explain_attrs,
 	}
 }
@@ -513,7 +507,6 @@ pub(crate) fn restore_session(durable: DurableSession) -> Result<Session> {
 			.into_iter()
 			.map(|(k, v)| Ok((k.into_string(), convert_value_to_public_value(v)?)))
 			.collect::<Result<PublicVariables>>()?,
-		new_planner_strategy: durable.new_planner_strategy,
 		redact_volatile_explain_attrs: durable.redact_volatile_explain_attrs,
 	})
 }

@@ -1,22 +1,19 @@
 //! Physical expression for KNN (`<|k, …|>`) operators evaluated as per-row
 //! predicates rather than lowered into a KNN source operator.
 //!
-//! The legacy executor evaluates a KNN expression per row as membership in
-//! the result set collected by its KNN checker (`QueryExecutor::knn`), and as
-//! `false` when no executor entry exists — projection position, bare
-//! expressions, an `Approximate` form with no usable HNSW index, or a `K`
-//! form whose query vector the planner cannot compute. The streaming
-//! equivalent: the KNN source operators (`KnnScan`, `KnnTopK`) record every
+//! A KNN expression evaluates per row as membership in the result set the
+//! KNN source operators (`KnnScan`, `KnnTopK`) collect: they record every
 //! yielded row in the per-statement [`KnnContext`], and this expression tests
-//! the current row's record id against it. Without a [`KnnContext`] (no KNN
-//! in the WHERE condition, or a non-SELECT context) it is always `false`.
+//! the current row's record id against it. It is `false` when no KNN source
+//! ran — projection position, bare expressions, an `Approximate` form with no
+//! usable HNSW index, or a `K` form whose query vector the planner cannot
+//! compute — and without a [`KnnContext`] (no KNN in the WHERE condition, or
+//! a non-SELECT context) it is always `false`.
 //!
-//! Operands are deliberately **not** evaluated: the legacy compute path for
-//! KNN hands `fnc::operate::knn` the whole expression without computing
-//! either side (unlike MATCHES, which receives computed operands), so an
-//! erroring or side-effecting operand is never observed there either —
-//! `point <|2,EUCLIDEAN|> (1 / 0)` in projection position yields `false`,
-//! not a division error. Pinned in
+//! Operands are deliberately **not** evaluated (unlike MATCHES, which receives
+//! computed operands), so an erroring or side-effecting operand is never
+//! observed — `point <|2,EUCLIDEAN|> (1 / 0)` in projection position yields
+//! `false`, not a division error. Pinned in
 //! `language-tests/tests/language/indexes/knn/knn_bruteforce_nonliteral_vector.surql`.
 //!
 //! Membership is stable under re-evaluation, so the same conjunct can safely
@@ -35,7 +32,7 @@ use crate::expr::operator::BinaryOperator;
 use crate::val::Value;
 
 /// Evaluates a KNN (`<|k, …|>`) predicate as membership in the statement's
-/// KNN result set. See the module docs for the legacy-executor mapping.
+/// KNN result set. See the module docs.
 pub struct KnnMembershipOp {
 	/// Left side expression (kept for `ToSql` display; never evaluated —
 	/// see the module docs).

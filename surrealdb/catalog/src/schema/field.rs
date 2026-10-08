@@ -25,6 +25,18 @@ pub enum StoredDefineDefault {
 	Set(ExprText),
 }
 
+impl StoredDefineDefault {
+	/// The clause's stored expression text, or `None` for a field with no
+	/// `DEFAULT`. `DEFAULT` and `DEFAULT ALWAYS` differ in when the clause is
+	/// applied, not in what it holds.
+	pub fn expression(&self) -> Option<&ExprText> {
+		match self {
+			StoredDefineDefault::None => None,
+			StoredDefineDefault::Always(text) | StoredDefineDefault::Set(text) => Some(text),
+		}
+	}
+}
+
 /// Dependency metadata for a computed field.
 ///
 /// Tracks which same-table fields a computed expression references, and whether
@@ -255,6 +267,15 @@ impl FromStored for DefineDefault {
 }
 
 impl DefineDefault {
+	/// The clause's expression, or `None` for a field with no `DEFAULT`;
+	/// [`StoredDefineDefault::expression`] for the stored half.
+	pub fn expression(&self) -> Option<&Expr> {
+		match self {
+			DefineDefault::None => None,
+			DefineDefault::Always(expr) | DefineDefault::Set(expr) => Some(expr),
+		}
+	}
+
 	pub fn to_stored(&self) -> StoredDefineDefault {
 		match self {
 			DefineDefault::None => StoredDefineDefault::None,
@@ -266,14 +287,22 @@ impl DefineDefault {
 
 /// Runtime form of [`StoredFieldDefinition`].
 ///
-/// The two clauses the streaming engine's analyzer reads — `COMPUTED` and
-/// `PERMISSIONS FOR select` — are carried twice: as the [`Expr`] the legacy
-/// engine evaluates and as a lazily compiled logical body. Both come from the
-/// stored text, so `computed_body` is `Some` exactly when `computed` is and
-/// `select_body` names the same clause as `select_permission`. A constructor
-/// that sets one half must set the other from the same source:
+/// The five clauses the streaming engine evaluates — `COMPUTED`, `DEFAULT`,
+/// `VALUE`, `ASSERT` and `PERMISSIONS FOR select` — are carried twice: as the
+/// [`Expr`] the legacy engine evaluates and as a lazily compiled logical body.
+/// Both come from the stored text, so `computed_body` is `Some` exactly when
+/// `computed` is, `value_body` when `value` is, `assert_body` when `assert`
+/// is, `default_body` exactly when `default` is not [`DefineDefault::None`],
+/// and `select_body` names the same clause as `select_permission`. A
+/// constructor that sets one half must set the other from the same source:
 /// [`LogicalBody::of`] and [`LogicalPermissionBody::of`] do so from the
 /// expression a `DEFINE` statement produced.
+///
+/// The body is what keeps the cost of a clause per *definition* rather than
+/// per record: it is compiled once, on first use, and the definition is shared
+/// for as long as the catalog holds it. Reading the [`Expr`] half and building
+/// a body from it instead renders the expression back to text and re-parses it
+/// for every record the clause is applied to.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FieldDefinition {
 	pub name: Idiom,
@@ -283,11 +312,17 @@ pub struct FieldDefinition {
 	pub readonly: bool,
 	pub inline: bool,
 	pub value: Option<Expr>,
+	/// The `VALUE` clause in logical form; see [`Self::value_logical`].
+	pub value_body: Option<LogicalBody>,
 	pub assert: Option<Expr>,
+	/// The `ASSERT` clause in logical form; see [`Self::assert_logical`].
+	pub assert_body: Option<LogicalBody>,
 	pub computed: Option<Expr>,
 	/// The `COMPUTED` clause in logical form; see [`Self::computed_logical`].
 	pub computed_body: Option<LogicalBody>,
 	pub default: DefineDefault,
+	/// The `DEFAULT` clause in logical form; see [`Self::default_logical`].
+	pub default_body: Option<LogicalBody>,
 	pub select_permission: Permission,
 	/// The `PERMISSIONS FOR select` clause in logical form; see
 	/// [`Self::select_permission_logical`].
@@ -314,10 +349,13 @@ impl FromStored for FieldDefinition {
 				readonly: stored.readonly,
 				inline: stored.inline,
 				value: stored.value.as_ref().map(|t| t.compile()).transpose()?,
+				value_body: stored.value.as_ref().map(LogicalBody::new),
 				assert: stored.assert.as_ref().map(|t| t.compile()).transpose()?,
+				assert_body: stored.assert.as_ref().map(LogicalBody::new),
 				computed: stored.computed.as_ref().map(|t| t.compile()).transpose()?,
 				computed_body: stored.computed.as_ref().map(LogicalBody::new),
 				default: DefineDefault::from_stored(&stored.default)?,
+				default_body: stored.default.expression().map(LogicalBody::new),
 				select_permission: Permission::from_stored(&stored.select_permission)?,
 				select_body: LogicalPermissionBody::from_stored(&stored.select_permission),
 				create_permission: Permission::from_stored(&stored.create_permission)?,
@@ -348,6 +386,39 @@ impl FieldDefinition {
 	/// then declines the table rather than evaluating the legacy form.
 	pub fn computed_logical(&self) -> Option<anyhow::Result<&LogicalExpr>> {
 		self.computed_body.as_ref().map(LogicalBody::logical)
+	}
+
+	/// The `DEFAULT` clause as the logical scalar the streaming engine
+	/// evaluates, compiled on first call; `None` for a field with no
+	/// `DEFAULT`.
+	///
+	/// One accessor for both spellings: `DEFAULT` and `DEFAULT ALWAYS` differ
+	/// in when the clause is applied, not in what it evaluates to, and
+	/// [`Self::default`] is what says which was written.
+	///
+	/// Errs when the clause has no logical form — a write statement, a mock
+	/// record set in scalar position — and the caller then evaluates the
+	/// [`Expr`] half instead.
+	pub fn default_logical(&self) -> Option<anyhow::Result<&LogicalExpr>> {
+		self.default_body.as_ref().map(LogicalBody::logical)
+	}
+
+	/// The `VALUE` clause as the logical scalar the streaming engine
+	/// evaluates, compiled on first call; `None` for a field with no `VALUE`.
+	///
+	/// Errs when the clause has no logical form — a write statement, a mock
+	/// record set in scalar position — and the caller then evaluates the
+	/// [`Expr`] half instead.
+	pub fn value_logical(&self) -> Option<anyhow::Result<&LogicalExpr>> {
+		self.value_body.as_ref().map(LogicalBody::logical)
+	}
+
+	/// The `ASSERT` clause as the logical scalar the streaming engine
+	/// evaluates, compiled on first call; `None` for a field with no `ASSERT`.
+	///
+	/// Errs on the same terms as [`Self::value_logical`].
+	pub fn assert_logical(&self) -> Option<anyhow::Result<&LogicalExpr>> {
+		self.assert_body.as_ref().map(LogicalBody::logical)
 	}
 
 	/// The `PERMISSIONS FOR select` clause in logical form, compiling its
@@ -549,6 +620,38 @@ mod tests {
 		.unwrap();
 		assert!(plain.computed_logical().is_none());
 		assert_eq!(plain.select_permission_logical().unwrap(), LogicalPermission::Full);
+	}
+
+	/// A `DEFAULT` is carried twice for the reason `COMPUTED` is, and both
+	/// spellings carry it: a definition read back from storage compiles the
+	/// same scalar as the one a statement built.
+	#[test]
+	fn a_default_clause_compiles_to_its_logical_form() {
+		for spelling in [DefineDefault::Set, DefineDefault::Always] {
+			let clause: Expr = ExprText::from_raw("time::now()").compile().unwrap();
+			let def = FieldDefinition {
+				name: Idiom::field("created"),
+				table: TableName::from("t"),
+				default_body: Some(LogicalBody::of(&clause)),
+				default: spelling(clause),
+				..Default::default()
+			};
+			let loaded = FieldDefinition::from_stored(&def.to_stored()).unwrap();
+			assert_eq!(loaded, def);
+			let body = loaded.default_logical().expect("a field with a DEFAULT").unwrap();
+			assert_eq!(surrealdb_types::ToSql::to_sql(body), "time::now()");
+		}
+
+		let plain = FieldDefinition::from_stored(
+			&FieldDefinition {
+				name: Idiom::field("plain"),
+				table: TableName::from("t"),
+				..Default::default()
+			}
+			.to_stored(),
+		)
+		.unwrap();
+		assert!(plain.default_logical().is_none());
 	}
 
 	/// A field named after any reserved keyword must survive the stored-text

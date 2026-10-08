@@ -59,17 +59,17 @@ use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
-use super::common::{RecursionBounds, eval_buffered, is_recursion_target};
+use super::common::{DepthBody, PathBody, RecursionBounds, eval_buffered, is_recursion_target};
 use crate::exec::FlowResult;
+use crate::exec::parts::is_final;
 use crate::exec::parts::recurse::value_hash;
-use crate::exec::parts::{evaluate_physical_path, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::val::Value;
 
 /// Collect recursion: gather all unique nodes encountered during BFS traversal.
 ///
 /// Collects every distinct node reachable by a walk whose length falls in
-/// `[min_depth, max_depth]`, matching the legacy compute engine. Walks may
+/// `[min_depth, max_depth]`. Walks may
 /// revisit nodes, so cycle pruning must not lose nodes whose only in-range
 /// walk passes through an already-visited node:
 ///
@@ -81,12 +81,11 @@ use crate::val::Value;
 ///   first occurrence. This also bounds unbounded recursion on cyclic graphs.
 ///
 /// Fully iterative -- frontier-based BFS loop.
-pub(crate) async fn evaluate_recurse_collect(
+pub(crate) async fn evaluate_recurse_collect_with(
 	start: &Value,
-	path: &[Arc<dyn PhysicalExpr>],
+	body: &impl DepthBody,
 	bounds: RecursionBounds,
 	inclusive: bool,
-	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
 	let min_depth = bounds.min;
 	let max_depth = bounds.cap();
@@ -115,10 +114,7 @@ pub(crate) async fn evaluate_recurse_collect(
 		let mut level_seen: HashSet<u64> = HashSet::new();
 
 		// Phase 1: Evaluate all frontier values concurrently (bounded).
-		let futures: Vec<_> = frontier
-			.iter()
-			.map(|value| evaluate_physical_path(value, path, ctx.with_value(value)))
-			.collect();
+		let futures: Vec<_> = frontier.iter().map(|value| body.eval(value)).collect();
 		let eval_results = eval_buffered(futures).await?;
 
 		// Phase 2: Aggregate results sequentially (fast, no I/O).
@@ -169,7 +165,7 @@ pub(crate) async fn evaluate_recurse_collect(
 	}
 
 	// Unbounded recursion truncated at the system limit with the frontier still
-	// non-empty: hard error, matching legacy (see `RecursionBounds`).
+	// non-empty: hard error (see `RecursionBounds`).
 	if bounds.errors_on_limit() && !frontier.is_empty() {
 		return Err(crate::exec::Error::IdiomRecursionLimitExceeded {
 			limit: bounds.system_limit,
@@ -178,6 +174,26 @@ pub(crate) async fn evaluate_recurse_collect(
 	}
 
 	Ok(Value::Array(collected.into()))
+}
+
+/// [`evaluate_recurse_collect_with`] over a body that is a path of physical expressions.
+pub(crate) async fn evaluate_recurse_collect(
+	start: &Value,
+	path: &[Arc<dyn PhysicalExpr>],
+	bounds: RecursionBounds,
+	inclusive: bool,
+	ctx: EvalContext<'_>,
+) -> FlowResult<Value> {
+	evaluate_recurse_collect_with(
+		start,
+		&PathBody {
+			path,
+			ctx,
+		},
+		bounds,
+		inclusive,
+	)
+	.await
 }
 
 #[cfg(test)]

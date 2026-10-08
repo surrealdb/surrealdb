@@ -1,0 +1,8 @@
+### 8 terms
+error: Cannot perform addition with 'none' and 'int'
+### 40 terms
+error: Cannot perform addition with 'none' and 'int'
+### 100 terms
+error: Cannot perform addition with 'none' and 'int'
+### 200 terms
+error: Cannot perform addition with 'none' and 'int'

@@ -1,9 +1,8 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
-reason = "Test all range operator combinations (inclusive/exclusive) with standard and unique indexes (new executor)"
+reason = "Test all range operator combinations (inclusive/exclusive) with standard and unique indexes"
 
 [[test.results]]
 value = "NONE"
@@ -26,7 +25,8 @@ value = "[{ id: test:20, year: 2020 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 3}
-    IndexScan [ctx: Db] [index: year, access: >2000 <2020, direction: Forward, predicate: year > 2000 AND year < 2020] {rows: 3}
+    DistinctRecords [ctx: Db] {rows: 3}
+        IndexScan [ctx: Db] [table: test, index: year, access: >2000 <2020, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 
@@ -36,7 +36,8 @@ value = "[{ id: test:10 }, { id: test:15 }, { id: test:16 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 4}
-    IndexScan [ctx: Db] [index: year, access: >=2000 <2020, direction: Forward, predicate: year >= 2000 AND year < 2020] {rows: 4}
+    DistinctRecords [ctx: Db] {rows: 4}
+        IndexScan [ctx: Db] [table: test, index: year, access: >=2000 <2020, direction: Forward] {rows: 4}
 
 Total rows: 4''''
 
@@ -46,7 +47,8 @@ value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }, { id: test:16 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 4}
-    IndexScan [ctx: Db] [index: year, access: >2000 <=2020, direction: Forward, predicate: year > 2000 AND year <= 2020] {rows: 4}
+    DistinctRecords [ctx: Db] {rows: 4}
+        IndexScan [ctx: Db] [table: test, index: year, access: >2000 <=2020, direction: Forward] {rows: 4}
 
 Total rows: 4''''
 
@@ -56,7 +58,8 @@ value = "[{ id: test:10 }, { id: test:15 }, { id: test:16 }, { id: test:20 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 5}
-    IndexScan [ctx: Db] [index: year, access: >=2000 <=2020, direction: Forward, predicate: year >= 2000 AND year <= 2020] {rows: 5}
+    DistinctRecords [ctx: Db] {rows: 5}
+        IndexScan [ctx: Db] [table: test, index: year, access: >=2000 <=2020, direction: Forward] {rows: 5}
 
 Total rows: 5''''
 
@@ -66,7 +69,8 @@ value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }, { id: test:16 }, { i
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 2}
-    IndexScan [ctx: Db] [index: year, access: <2015, direction: Forward, predicate: year < 2015] {rows: 2}
+    DistinctRecords [ctx: Db] {rows: 2}
+        IndexScan [ctx: Db] [table: test, index: year, access: <2015, direction: Forward] {rows: 2}
 
 Total rows: 2''''
 
@@ -76,7 +80,8 @@ value = "[{ id: test:0 }, { id: test:10 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 4}
-    IndexScan [ctx: Db] [index: year, access: <=2015, direction: Forward, predicate: year <= 2015] {rows: 4}
+    DistinctRecords [ctx: Db] {rows: 4}
+        IndexScan [ctx: Db] [table: test, index: year, access: <=2015, direction: Forward] {rows: 4}
 
 Total rows: 4''''
 
@@ -86,7 +91,8 @@ value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }, { id: test:16 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 1}
-    IndexScan [ctx: Db] [index: year, access: >2015, direction: Forward, predicate: year > 2015] {rows: 1}
+    DistinctRecords [ctx: Db] {rows: 1}
+        IndexScan [ctx: Db] [table: test, index: year, access: >2015, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 
@@ -96,7 +102,8 @@ value = "[{ id: test:20 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 3}
-    IndexScan [ctx: Db] [index: year, access: >=2015, direction: Forward, predicate: year >= 2015] {rows: 3}
+    DistinctRecords [ctx: Db] {rows: 3}
+        IndexScan [ctx: Db] [table: test, index: year, access: >=2015, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 
@@ -127,7 +134,8 @@ value = "[{ id: test:20, year: 2020 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 3}
-    IndexScan [ctx: Db] [index: year, access: >2000 <2020, direction: Forward, predicate: year > 2000 AND year < 2020] {rows: 3}
+    DistinctRecords [ctx: Db] {rows: 3}
+        IndexScan [ctx: Db] [table: test, index: year, access: >2000 <2020, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 
@@ -137,7 +145,8 @@ value = "[{ id: test:10 }, { id: test:15 }, { id: test:16 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 4}
-    IndexScan [ctx: Db] [index: year, access: >=2000 <2020, direction: Forward, predicate: year >= 2000 AND year < 2020] {rows: 4}
+    DistinctRecords [ctx: Db] {rows: 4}
+        IndexScan [ctx: Db] [table: test, index: year, access: >=2000 <2020, direction: Forward] {rows: 4}
 
 Total rows: 4''''
 
@@ -147,7 +156,8 @@ value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }, { id: test:16 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 4}
-    IndexScan [ctx: Db] [index: year, access: >2000 <=2020, direction: Forward, predicate: year > 2000 AND year <= 2020] {rows: 4}
+    DistinctRecords [ctx: Db] {rows: 4}
+        IndexScan [ctx: Db] [table: test, index: year, access: >2000 <=2020, direction: Forward] {rows: 4}
 
 Total rows: 4''''
 
@@ -157,7 +167,8 @@ value = "[{ id: test:10 }, { id: test:15 }, { id: test:16 }, { id: test:20 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 5}
-    IndexScan [ctx: Db] [index: year, access: >=2000 <=2020, direction: Forward, predicate: year >= 2000 AND year <= 2020] {rows: 5}
+    DistinctRecords [ctx: Db] {rows: 5}
+        IndexScan [ctx: Db] [table: test, index: year, access: >=2000 <=2020, direction: Forward] {rows: 5}
 
 Total rows: 5''''
 
@@ -167,7 +178,8 @@ value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }, { id: test:16 }, { i
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 2}
-    IndexScan [ctx: Db] [index: year, access: <2015, direction: Forward, predicate: year < 2015] {rows: 2}
+    DistinctRecords [ctx: Db] {rows: 2}
+        IndexScan [ctx: Db] [table: test, index: year, access: <2015, direction: Forward] {rows: 2}
 
 Total rows: 2''''
 
@@ -177,7 +189,8 @@ value = "[{ id: test:0 }, { id: test:10 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 3}
-    IndexScan [ctx: Db] [index: year, access: <=2015, direction: Forward, predicate: year <= 2015] {rows: 3}
+    DistinctRecords [ctx: Db] {rows: 3}
+        IndexScan [ctx: Db] [table: test, index: year, access: <=2015, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 
@@ -187,7 +200,8 @@ value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 2}
-    IndexScan [ctx: Db] [index: year, access: >2015, direction: Forward, predicate: year > 2015] {rows: 2}
+    DistinctRecords [ctx: Db] {rows: 2}
+        IndexScan [ctx: Db] [table: test, index: year, access: >2015, direction: Forward] {rows: 2}
 
 Total rows: 2''''
 
@@ -197,7 +211,8 @@ value = "[{ id: test:16 }, { id: test:20 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 3}
-    IndexScan [ctx: Db] [index: year, access: >=2015, direction: Forward, predicate: year >= 2015] {rows: 3}
+    DistinctRecords [ctx: Db] {rows: 3}
+        IndexScan [ctx: Db] [table: test, index: year, access: >=2015, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 

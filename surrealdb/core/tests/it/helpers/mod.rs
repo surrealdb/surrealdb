@@ -38,6 +38,34 @@ pub async fn new_ds(
 	Ok((recv, ds))
 }
 
+/// Asserts how a write the session may not make is refused.
+///
+/// A principal addressing a namespace or database outside the one it is
+/// authenticated for is refused with `NotAllowed` before the table is
+/// consulted. A principal inside its own tenant whose role or table
+/// permissions reject the record sees a statement that matched nothing.
+pub fn assert_write_refused(
+	level: &Level,
+	ns: &str,
+	db: &str,
+	res: Result<Value, TypesError>,
+	msg: &str,
+) {
+	let outside = match level {
+		Level::Namespace(own) => own != ns,
+		Level::Database(own_ns, own_db) => own_ns != ns || own_db != db,
+		_ => false,
+	};
+	match res {
+		Err(err) if outside => {
+			assert!(err.is_not_allowed(), "{msg}: expected NotAllowed, got {err}")
+		}
+		Err(err) => panic!("{msg}: expected an empty result inside the tenant, got {err}"),
+		Ok(res) if outside => panic!("{msg}: expected NotAllowed outside the tenant, got {res:?}"),
+		Ok(res) => assert!(res == Value::Array(Default::default()), "{msg}: {res:?}"),
+	}
+}
+
 pub async fn new_ns_db(ds: &Datastore, ns: &str, db: &str) -> Result<()> {
 	let sess = Session::owner().with_ns(ns);
 	ds.execute(&format!("DEFINE NS `{ns}`"), &Session::owner(), None).await?;

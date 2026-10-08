@@ -1,0 +1,50 @@
+### CREATE fixed SET a = 1
+{ a: 1, id: fixed:42 }
+records:
+{ a: 1, id: fixed:42 }
+### CREATE fixed SET a = 1; CREATE fixed SET a = 2
+error: Database record `fixed:42` already exists
+records:
+### CREATE fixed CONTENT { id: 7, a: 1 }
+{ a: 1, id: fixed:7 }
+records:
+{ a: 1, id: fixed:7 }
+### CREATE fixed CONTENT { id: 'x' }
+error: Couldn't coerce value for field `id` of `fixed:x`: Expected `int` but found `'x'`
+records:
+### CREATE derived SET n = 3
+{ id: derived:30, n: 3 }
+records:
+{ id: derived:1, n: 1 }
+{ id: derived:30, n: 3 }
+### INSERT INTO derived { n: 4 }
+{ id: derived:40, n: 4 }
+records:
+{ id: derived:1, n: 1 }
+{ id: derived:40, n: 4 }
+### CREATE derived SET n = 'a'
+error: Cannot perform multiplication with 'string' and 'int'
+records:
+{ id: derived:1, n: 1 }
+### CREATE derived:9 SET n = 1
+{ id: derived:9, n: 1 }
+records:
+{ id: derived:1, n: 1 }
+{ id: derived:9, n: 1 }
+### CREATE typed SET a = 1
+error: Cannot generate a record id of type `int` for the `typed` table; specify an explicit record id, or declare the `id` field as `uuid` or `string` to auto-generate one.
+records:
+### CREATE typed:5 SET a = 1
+{ a: 1, id: typed:5 }
+records:
+{ a: 1, id: typed:5 }
+### CREATE typed:five SET a = 1
+error: Couldn't coerce value for field `id` of `typed:five`: Expected `int` but found `'five'`
+records:
+### CREATE keyed:1 SET a = 1
+error: Couldn't coerce value for field `id` of `keyed:1`: Expected `string` but found `1`
+records:
+### CREATE keyed SET a = 1
+{ a: 1, id: keyed:generated }
+records:
+{ a: 1, id: keyed:generated }

@@ -562,6 +562,15 @@ script = '''
         --target wasm32-unknown-unknown \
         -- -D warnings
 
+    # The core engine on its own, as a downstream wasm build takes it: no
+    # default features and none of the SDK's. The SDK and engine checks pull
+    # other feature sets of `surrealdb-core` into one build, so this
+    # combination is not otherwise compiled.
+    cargo clippy --locked --package surrealdb-core \
+        --no-default-features --features gql,http \
+        --target wasm32-unknown-unknown \
+        -- -D warnings
+
     # The browser engine, which pulls in `surrealdb-embedded` behind it. Neither
     # is reachable from `surrealdb`, so the check above covers neither. Both
     # feature sets are built and published, so both are checked.

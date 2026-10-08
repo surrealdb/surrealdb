@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Sort elimination must not skip COLLATE/NUMERIC modifiers on ORDER BY terms"
@@ -21,8 +20,9 @@ value = "[{ id: test:4, val: '1' }]"
 value = "[{ id: test:5, val: '3' }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: val ASC]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Sort [ctx: Db] [sort_keys: val ASC NUMERIC]
         TableScan [ctx: Db] [table: test, direction: Forward]
 ''''
 
@@ -30,8 +30,9 @@ value = ''''SelectProject [ctx: Db] [projections: *]
 value = "[{ val: '1' }, { val: '2' }, { val: '3' }, { val: '10' }, { val: '20' }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    SortByKey [ctx: Db] [sort_keys: val ASC]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Sort [ctx: Db] [sort_keys: val ASC COLLATE]
         TableScan [ctx: Db] [table: test, direction: Forward]
 ''''
 

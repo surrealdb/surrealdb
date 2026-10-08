@@ -1,0 +1,8 @@
+### CREATE t:9 SET f = |$x| $x + 1
+error: A user generated conversion error occured: Closures cannot be stored on disk
+records:
+t: { a: 1, id: t:1 }
+### UPDATE t:1 SET f = |$x| $x RETURN NONE
+error: A user generated conversion error occured: Closures cannot be stored on disk
+records:
+t: { a: 1, id: t:1 }

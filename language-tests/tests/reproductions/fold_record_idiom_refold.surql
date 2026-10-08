@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "Substituting a row-independent record idiom leaves an operand constant that was not constant during the first fold, so the condition is simplified again and an eliminating comparison still reaches EmptyScan"
@@ -14,7 +13,8 @@ value = "[{ a: 5, id: t:1 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    EmptyScan [ctx: Rt]
+    Filter [ctx: Db] [predicate: (config:1).flag INSIDE []]
+        Union [ctx: Db]
 ''''
 
 */

@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Parity (#471, gap H5): the collect / path / shortest / repeat recursion strategies must raise the idiom recursion limit error when an unbounded recursion exhausts the system `idiom_recursion_limit`, matching the default strategy and the legacy compute() engine. The new streaming executor previously returned a silently-truncated result for these four strategies (only `default` raised the error). The other side of the contract is pinned too: an explicit user bound equal to the system limit (`{1..256}`) must stop silently, not error."
+reason = "The collect / path / shortest / repeat recursion strategies raise the idiom recursion limit error when an unbounded recursion exhausts the system `idiom_recursion_limit`, as the default strategy does. The other side of the contract is pinned too: an explicit user bound equal to the system limit (`{1..256}`) stops silently, not with an error."
 issue = 471
 
 [[test.results]]
@@ -52,7 +52,7 @@ a:1.{1..+shortest=a:999}(.link);
 a:1.{1..}.{ id, link: link.@ };
 
 -- The silent-stop side: an explicit user bound equal to the system limit (256)
--- must NOT error, for every strategy.
+-- must NOT error.
 
 -- collect: 256 nodes collected (a:2 .. a:257), no error.
 count(a:1.{1..256+collect}(.link));

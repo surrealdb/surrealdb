@@ -62,7 +62,7 @@ pub enum QuerySource<'src> {
 	/// Plans from a front end that emits operators rather than statements: a
 	/// `PreparedGqlQuery` holds one, so pass its inner plan. There is no
 	/// surface syntax behind a plan, so nothing converts it, and each runs on
-	/// the streaming engine or fails.
+	/// the engine or fails.
 	Plan(Vec<LogicalOp>),
 }
 
