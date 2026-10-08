@@ -325,6 +325,84 @@ async fn lower_in_sealed<'c>(
 	Ok(program)
 }
 
+/// The units the statements of one request are lowered into, shared by all
+/// of them: a statement lowered into it holds none of its own, and the ids it
+/// calls index the units of the program holding the request
+/// ([`request_program`]).
+#[derive(Default)]
+pub(super) struct RequestUnits(function::Arena<'static>);
+
+impl RequestUnits {
+	/// How many units the statements lowered so far hold.
+	pub(super) fn len(&self) -> usize {
+		self.0.len()
+	}
+
+	/// Drop the units of the statements lowered from `len` on.
+	pub(super) fn rewind(&mut self, len: usize) {
+		self.0.rewind(len);
+	}
+}
+
+/// [`lower`] for a statement of a request, its units lowered into `units`.
+/// The statement is lowered as a statement at the root of a program is: only
+/// where its units go differs.
+pub(super) async fn lower_request_statement(
+	planner: &Planner<'_>,
+	plan: &PhysicalPlan,
+	units: &mut RequestUnits,
+) -> Lowered<(Program, Vec<Arc<LogicalOp>>)> {
+	let scoped = match &plan.tail.version {
+		Some(version) => {
+			Some(crate::kvs::catalog_reads::sealed(false, planner.under_version(version)).await)
+		}
+		None => None,
+	};
+	let planner = scoped.as_ref().unwrap_or(planner);
+	let (mut program, served) =
+		crate::kvs::catalog_reads::sealed(true, lower_request_sealed(planner, plan, units)).await?;
+	seal(planner, &mut program, Default::default()).await?;
+	Ok((program, served))
+}
+
+async fn lower_request_sealed(
+	planner: &Planner<'_>,
+	plan: &PhysicalPlan,
+	units: &mut RequestUnits,
+) -> Lowered<(Program, Vec<Arc<LogicalOp>>)> {
+	crate::exec::compiles::note();
+	let mut l = Lowering::new(planner);
+	l.ahead = true;
+	l.stage_sets = true;
+	l.serves_late = true;
+	l.put_arena(std::mem::take(&mut units.0).moved());
+	let rooted = Box::pin(l.root(plan)).await;
+	let tail = match rooted {
+		Ok(()) => l.program_tail(&plan.tail).await,
+		Err(e) => Err(e),
+	};
+	units.0 = l.take_arena().moved();
+	let tail = tail?;
+	let served = std::mem::take(&mut l.served_ops);
+	let mut program = l.finish()?;
+	program.tail = tail;
+	Ok((program, served))
+}
+
+/// The program of a whole request: `units`, the units its statements were
+/// lowered into, and `request`, its steps and the programs of its statements.
+pub(super) fn request_program(
+	planner: &Planner<'_>,
+	units: RequestUnits,
+	request: super::program::RequestCode,
+) -> Lowered<Program> {
+	let mut l = Lowering::new(planner);
+	l.put_arena(units.0.moved());
+	let mut program = l.finish()?;
+	program.request = Some(Box::new(request));
+	Ok(program)
+}
+
 impl Lowering<'_, '_> {
 	/// Lower `plan` as the statement this lowering compiles.
 	fn root<'s>(&'s mut self, plan: &'s PhysicalPlan) -> crate::exec::BoxFut<'s, Lowered<()>> {
@@ -1829,6 +1907,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			events: None,
 			required_context,
 			keeps_row_order,
+			request: None,
 		})
 	}
 
@@ -4570,6 +4649,14 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	/// whether it may write, and such a predicate does neither. Any other is
 	/// evaluated by the host in the permission frame. None runs where the
 	/// statement's permissions are not checked.
+	///
+	/// TODO: fold the session values a predicate reads (`$auth`, `$session`,
+	/// `$token`, `$access`) into it at plan time, for example
+	/// `$auth.admin = true OR owner = $auth` becoming `true` or
+	/// `owner = <id>`. Until then nothing folds: the predicate reads those
+	/// values at run time through the shared table-read unit, and `EXPLAIN`
+	/// renders it as `<permission>`, as main does. Folding changes that
+	/// rendering, so the change needs a decision before it lands.
 	async fn permission(
 		&mut self,
 		predicate: &LogicalExpr,

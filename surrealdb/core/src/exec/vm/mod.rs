@@ -71,6 +71,7 @@ mod param_unit;
 mod plan;
 pub(crate) mod plan_catalog;
 pub(crate) mod program;
+pub(crate) mod request;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_body_scope;
 #[cfg(all(test, feature = "kv-mem"))]
@@ -313,6 +314,138 @@ pub(crate) fn plan_checked<'a>(
 		}
 		Err(declined(not_covered))
 	})
+}
+
+/// The statements of a request lowered so far, and the units they share.
+#[derive(Default)]
+pub(crate) struct RequestBuilder {
+	units: lower::RequestUnits,
+	statements: Vec<Arc<program::Program>>,
+	/// Each statement's late-bound block statements, as written, which its
+	/// blocks serve when they reach them.
+	served: Vec<Option<ServedStatements>>,
+	/// The catalog ids each statement's planning held, which its run takes.
+	held: Vec<Arc<speculate::HeldIds>>,
+}
+
+/// Where a statement of a request was compiled to.
+pub(crate) enum RequestEntry {
+	/// Statement `index` of the request's program.
+	Statement(u32),
+	/// An operator of its own, planned on a path that lowers no statement
+	/// into the request.
+	Operator(Arc<dyn ExecOperator>),
+}
+
+impl RequestBuilder {
+	/// Plan `op`, bound by `planner`, as the next statement of the request,
+	/// as [`super::plan_checked`] plans a statement on its own.
+	pub(crate) async fn plan(
+		&mut self,
+		planner: &Planner<'_>,
+		op: &LogicalOp,
+		unbound: Option<&LogicalOp>,
+	) -> Result<RequestEntry, crate::err::Error> {
+		// A plain `EXPLAIN` answers with the rendering of another statement's
+		// plan, which its own operator makes.
+		if matches!(op, LogicalOp::Explain(_)) {
+			return plan_checked(planner, op, unbound).await.map(RequestEntry::Operator);
+		}
+		let not_covered = match self.plan_statement(planner, op).await? {
+			Ok(index) => return Ok(RequestEntry::Statement(index)),
+			Err(not_covered) => not_covered,
+		};
+		// As `plan_checked`: a statement holding a schema statement whose
+		// effect the plan cannot know is planned again late-bound.
+		if !not_covered.internal
+			&& !planner.binds_late_after_schema()
+			&& (not_covered.reason == speculate::DATA_DEPENDENT_DDL
+				|| crate::exec::planner::fold::changes_the_catalog(op))
+		{
+			if let Some(speculating) = &planner.speculation {
+				speculating.held.release_all();
+			}
+			let late = planner.binding_late_after_schema();
+			return match self.plan_statement(&late, unbound.unwrap_or(op)).await? {
+				Ok(index) => Ok(RequestEntry::Statement(index)),
+				Err(not_covered) => Err(declined(not_covered)),
+			};
+		}
+		Err(declined(not_covered))
+	}
+
+	/// Map, optimize and lower `op` into the request, answering its index, or
+	/// the reason the VM does not cover it. What the statement lowered into
+	/// the request's units is taken back out where it is not covered.
+	async fn plan_statement(
+		&mut self,
+		planner: &Planner<'_>,
+		op: &LogicalOp,
+	) -> Result<Result<u32, NotCovered>, crate::err::Error> {
+		let physical = match map::map(planner, op).await {
+			Ok(physical) => physical,
+			Err(not_covered) => return Ok(Err(not_covered)),
+		};
+		if let Some(refusal) = physical.refusal() {
+			return Err(refusal.error());
+		}
+		let physical = optimize::optimize(physical);
+		let mark = self.units.len();
+		let (program, served) =
+			match lower::lower_request_statement(planner, &physical, &mut self.units).await {
+				Ok(lowered) => lowered,
+				Err(not_covered) => {
+					self.units.rewind(mark);
+					return Ok(Err(not_covered));
+				}
+			};
+		if leaf::reporting() {
+			leaf::report(op, &program, planner.function_registry());
+		}
+		let Ok(index) = u32::try_from(self.statements.len()) else {
+			return Ok(Err(NotCovered::internal("more statements than a request holds")));
+		};
+		self.statements.push(Arc::new(program));
+		self.served.push((!served.is_empty()).then(|| served.into()));
+		if let Some(speculating) = &planner.speculation
+			&& !speculating.held.is_empty()
+		{
+			self.held.push(Arc::clone(&speculating.held));
+		}
+		Ok(Ok(index))
+	}
+
+	/// The program of the request: `steps`, and the statements lowered into
+	/// it, with the units they share.
+	pub(crate) fn finish(
+		self,
+		planner: &Planner<'_>,
+		steps: Vec<program::RequestStep>,
+	) -> Result<request::CompiledRequest, crate::err::Error> {
+		let request = program::RequestCode {
+			steps,
+			statements: self.statements,
+		};
+		let program = lower::request_program(planner, self.units, request).map_err(declined)?;
+		#[cfg(test)]
+		request::LAST.with(|last| {
+			*last.borrow_mut() = program.request.as_ref().map(|request| {
+				(request.steps.len(), request.statements.len(), program.units.len())
+			});
+		});
+		Ok(request::CompiledRequest {
+			program: Arc::new(program),
+			served: self.served,
+			held: self.held,
+		})
+	}
+}
+
+/// Whether binding `op` with `planner` folds a call that reads the clock, in
+/// `op` or in the body of a user-defined function it reaches: a plan of it
+/// holds the time it was bound at.
+pub(crate) async fn binds_the_clock(op: &LogicalOp, planner: &Planner<'_>) -> bool {
+	map::binds_the_clock(op, planner).await
 }
 
 /// Map, optimize and lower the bound statement `op` to an operator, or the

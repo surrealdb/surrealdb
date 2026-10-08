@@ -5730,7 +5730,7 @@ pub(super) fn binds_alike_closure(op: &LogicalOp, planner: &Planner<'_>) -> bool
 /// tree binds a block statement after the block's first schema statement when
 /// the block reaches it, so such a statement folds the clock as it stands
 /// then. A body whose definition cannot be read is taken to fold it.
-async fn binds_the_clock(op: &LogicalOp, planner: &Planner<'_>) -> bool {
+pub(super) async fn binds_the_clock(op: &LogicalOp, planner: &Planner<'_>) -> bool {
 	if !binds_alike_recorded(op, planner) {
 		return true;
 	}

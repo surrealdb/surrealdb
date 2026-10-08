@@ -446,7 +446,7 @@ impl TestDb {
 		config: surrealdb_cnf::ConfigMap,
 	) -> Self {
 		let path = format!("rocksdb:{}", dir.display());
-		Self::build_with(
+		Self::build_at(
 			Datastore::builder(),
 			&path,
 			setup,
@@ -463,7 +463,7 @@ impl TestDb {
 		auth_enabled: bool,
 		config: surrealdb_cnf::ConfigMap,
 	) -> Self {
-		Self::build_with(
+		Self::build_at(
 			builder,
 			"memory",
 			setup,
@@ -481,7 +481,7 @@ impl TestDb {
 		auth_enabled: bool,
 		capabilities: crate::dbs::Capabilities,
 	) -> Self {
-		Self::build_with(
+		Self::build_at(
 			Datastore::builder(),
 			"memory",
 			setup,
@@ -492,7 +492,7 @@ impl TestDb {
 		.await
 	}
 
-	async fn build_with(
+	async fn build_at(
 		builder: crate::kvs::ds::Builder,
 		path: &str,
 		setup: &str,

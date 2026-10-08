@@ -3244,6 +3244,77 @@ pub(crate) async fn plan_statement_scoped(
 	plan_statement_with(op, ctx, registry, txn, auth, depth, None, perms_suppressed, shadowed).await
 }
 
+/// A top-level statement of a request, planned when the request arrives
+/// ([`plan_request_statement`]).
+pub(crate) struct RequestStatementPlan {
+	/// Where the statement was compiled to, or the error planning raised.
+	pub(crate) entry: Result<crate::exec::vm::RequestEntry, Error>,
+	/// Whether binding folded a call that reads the clock, so the plan holds
+	/// the time it was planned at.
+	pub(crate) binds_the_clock: bool,
+}
+
+/// Plan a top-level statement of a request when the request arrives, in the
+/// transaction of the request's first planned statement, lowering it into the
+/// request's program as `request` builds it.
+///
+/// `ctx` holds the session and the parameters the statements before it leave.
+/// The executor plans here only a statement that runs in this transaction with
+/// no statement before it that may have changed the catalog, so the plan
+/// meets the catalog it was planned against.
+pub(crate) async fn plan_request_statement(
+	op: LogicalOp,
+	ctx: &FrozenContext,
+	registry: &FunctionRegistry,
+	txn: Arc<crate::kvs::Transaction>,
+	auth: Option<Arc<crate::iam::Auth>>,
+	speculation: Option<Arc<crate::dbs::Options>>,
+	request: &mut crate::exec::vm::RequestBuilder,
+) -> RequestStatementPlan {
+	if let Some(why) = crate::exec::logical::unplannable_write(&op) {
+		return RequestStatementPlan {
+			entry: Err(Error::Exec(ExecError::PlannerUnsupported {
+				reason: why,
+			})),
+			binds_the_clock: false,
+		};
+	}
+	let (ns, db) = session_ns_db(ctx);
+	let mut planner = Planner::with_txn(ctx, registry, Arc::clone(&txn), ns, db);
+	if let Some(auth) = auth {
+		planner = planner.with_auth(auth);
+	}
+	planner.speculate_with(speculation);
+	let binds_the_clock = Box::pin(crate::exec::vm::binds_the_clock(&op, &planner)).await;
+	let unbound = matches!(
+		op,
+		LogicalOp::Sequence(_) | LogicalOp::Foreach(_) | LogicalOp::Let(_) | LogicalOp::Eval(_)
+	)
+	.then(|| op.clone());
+	let entry = match Box::pin(planner.bind(op)).await {
+		Ok(bound) => Box::pin(request.plan(&planner, &bound, unbound.as_ref())).await,
+		Err(e) => Err(e),
+	};
+	RequestStatementPlan {
+		entry,
+		binds_the_clock,
+	}
+}
+
+/// The program of a request whose statements `request` lowered, taking
+/// `steps`, planned in `txn` as its statements were.
+pub(crate) fn finish_request(
+	ctx: &FrozenContext,
+	registry: &FunctionRegistry,
+	txn: Arc<crate::kvs::Transaction>,
+	request: crate::exec::vm::RequestBuilder,
+	steps: Vec<crate::exec::vm::program::RequestStep>,
+) -> Result<crate::exec::vm::request::CompiledRequest, Error> {
+	let (ns, db) = session_ns_db(ctx);
+	let planner = Planner::with_txn(ctx, registry, txn, ns, db);
+	request.finish(&planner, steps)
+}
+
 #[expect(
 	clippy::too_many_arguments,
 	reason = "the arguments of plan_statement_on and the names the plan leaves to the run"

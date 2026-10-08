@@ -127,6 +127,13 @@ pub(crate) enum UnitObject {
 		depth: u32,
 		shadowed: Vec<String>,
 	},
+	/// A top-level statement of a request served when it is reached, planned
+	/// with the values the session's own parameters it reads hold folded in,
+	/// for those values ([`super::serve::request_statement`]).
+	SessionStatement {
+		op: Arc<crate::expr::logical::LogicalOp>,
+		session: ArgValues,
+	},
 	/// A front end's plan — a GQL query `eval::gql` evaluates — compiled at
 	/// re-entry depth `depth`, with the names `shadowed` read when it runs
 	/// ([`super::serve::front_end`]).

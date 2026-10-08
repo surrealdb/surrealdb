@@ -182,7 +182,7 @@ impl ExecOperator for VmOperator {
 
 /// How many rows `program` yields before its tail: at most one for a write
 /// that is `ONLY` and for a statement whose value is its one row.
-fn cardinality_hint(program: &Program) -> crate::exec::CardinalityHint {
+pub(super) fn cardinality_hint(program: &Program) -> crate::exec::CardinalityHint {
 	match &program.write {
 		Some(spec) if spec.only => crate::exec::CardinalityHint::AtMostOne,
 		_ if program.scalar => crate::exec::CardinalityHint::AtMostOne,

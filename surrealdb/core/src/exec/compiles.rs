@@ -20,6 +20,12 @@
 //! and are not noted as ones the program made, so a running program that
 //! compiles only in faults leaves [`count`] unchanged.
 //!
+//! A request is compiled once, when it arrives: the executor compiles every
+//! statement of it inside [`compiling_request`], counted by
+//! [`request_compiles`], and runs the request inside [`request`]. A note made
+//! while a request runs, outside its compilation and outside a fault, is a
+//! compilation made after the request arrived, counted by [`after_arrival`].
+//!
 //! Every closure invocation runs a unit; no closure body is evaluated in the
 //! operator tree's form. A body the host lowers no unit of is compiled to that
 //! form once, in the fault that finds it, only for the error compiling it
@@ -53,6 +59,35 @@ thread_local! {
 	static TREE_BODIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 	/// The program streams this thread has started ([`while_running`]).
 	static PROGRAMS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	/// How many requests this thread is executing, nested ([`request`]).
+	static REQUEST: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	/// How many request compilations this thread is inside, nested
+	/// ([`compiling_request`]).
+	static COMPILING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	/// The compilations noted while a request ran outside its compilation.
+	static AFTER_ARRIVAL: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	/// The request compilations this thread has started.
+	static REQUEST_COMPILES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+	/// Whether requests on this thread plan each statement as it is reached,
+	/// as a streamed request's are, for tests comparing the two.
+	static PER_STATEMENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether requests on this thread plan each statement as it is reached
+/// rather than compiling the request when it arrives. Only a test sets it.
+#[inline]
+pub(crate) fn per_statement() -> bool {
+	#[cfg(test)]
+	return PER_STATEMENT.with(std::cell::Cell::get);
+	#[cfg(not(test))]
+	false
+}
+
+/// Plan each statement of later requests on this thread as it is reached
+/// (`true`), or compile each request when it arrives (`false`).
+#[cfg(test)]
+pub(crate) fn set_per_statement(on: bool) {
+	PER_STATEMENT.with(|flag| flag.set(on));
 }
 
 /// Note one compilation of a closure body to the operator tree's form for the
@@ -73,6 +108,22 @@ pub(crate) fn tree_bodies() -> usize {
 /// Note one compilation on this thread.
 #[inline]
 pub(crate) fn note() {
+	#[cfg(test)]
+	if REQUEST.with(std::cell::Cell::get) > 0
+		&& COMPILING.with(std::cell::Cell::get) == 0
+		&& SERVING.with(std::cell::Cell::get) == 0
+	{
+		AFTER_ARRIVAL.with(|count| count.set(count.get() + 1));
+		if std::env::var_os("SURREAL_TRACE_COMPILES").is_some() {
+			let trace = std::backtrace::Backtrace::force_capture().to_string();
+			let frames: Vec<&str> = trace
+				.lines()
+				.filter(|l| l.contains("surrealdb_core::") && !l.contains("compiles::"))
+				.take(8)
+				.collect();
+			eprintln!("compiled after the request arrived:\n{}", frames.join("\n"));
+		}
+	}
 	#[cfg(test)]
 	if RUNNING.with(std::cell::Cell::get) > 0 && SERVING.with(std::cell::Cell::get) == 0 {
 		COMPILES.with(|count| count.set(count.get() + 1));
@@ -101,6 +152,79 @@ pub(crate) fn count() -> usize {
 #[cfg(test)]
 pub(crate) fn programs() -> usize {
 	PROGRAMS.with(std::cell::Cell::get)
+}
+
+/// How many compilations this thread has noted while a request ran, outside
+/// the request's compilation and outside the faults it served.
+#[cfg(test)]
+pub(crate) fn after_arrival() -> usize {
+	AFTER_ARRIVAL.with(std::cell::Cell::get)
+}
+
+/// How many request compilations this thread has started: one per request
+/// whose statements are compiled together when it arrives.
+#[cfg(test)]
+pub(crate) fn request_compiles() -> usize {
+	REQUEST_COMPILES.with(std::cell::Cell::get)
+}
+
+/// A future marked, on this thread, while polled: `flag` is raised for the
+/// length of each poll.
+#[cfg(test)]
+struct Marked<F> {
+	inner: std::pin::Pin<Box<F>>,
+	flag: &'static std::thread::LocalKey<std::cell::Cell<usize>>,
+}
+
+#[cfg(test)]
+impl<F: std::future::Future> std::future::Future for Marked<F> {
+	type Output = F::Output;
+	fn poll(
+		mut self: std::pin::Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+	) -> std::task::Poll<F::Output> {
+		let flag = self.flag;
+		flag.with(|depth| depth.set(depth.get() + 1));
+		let polled = self.inner.as_mut().poll(cx);
+		flag.with(|depth| depth.set(depth.get() - 1));
+		polled
+	}
+}
+
+/// `future`, the execution of one request, marking this thread as running
+/// it while it is polled: a compilation noted then, outside
+/// [`compiling_request`] and outside a fault, is counted by
+/// [`after_arrival`].
+pub(crate) fn request<'a, F: std::future::Future + Send + 'a>(
+	future: F,
+) -> impl std::future::Future<Output = F::Output> + Send + 'a {
+	#[cfg(test)]
+	{
+		Marked {
+			inner: Box::pin(future),
+			flag: &REQUEST,
+		}
+	}
+	#[cfg(not(test))]
+	future
+}
+
+/// `future`, the compilation of a request's statements, counted once by
+/// [`request_compiles`]; what it compiles is not counted by
+/// [`after_arrival`].
+pub(crate) fn compiling_request<'a, F: std::future::Future + Send + 'a>(
+	future: F,
+) -> impl std::future::Future<Output = F::Output> + Send + 'a {
+	#[cfg(test)]
+	{
+		REQUEST_COMPILES.with(|count| count.set(count.get() + 1));
+		Marked {
+			inner: Box::pin(future),
+			flag: &COMPILING,
+		}
+	}
+	#[cfg(not(test))]
+	future
 }
 
 /// How many faults this thread has served.

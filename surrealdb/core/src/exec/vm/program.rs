@@ -5024,6 +5024,55 @@ pub(crate) struct Program {
 	/// made after another, or leaves something behind, so its rows run one
 	/// after another in the order read and no pipeline runs as a region.
 	pub(super) keeps_row_order: bool,
+	/// For the program of a whole request, the request: its steps in order
+	/// and the programs of its statements, whose units are this program's.
+	pub(super) request: Option<Box<RequestCode>>,
+}
+
+/// A request as one program: the steps the driver takes, in the order the
+/// statements were written, and the program of each statement compiled when
+/// the request arrived. A statement's program holds no units of its own: the
+/// ids it calls index the units of the program holding the request.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RequestCode {
+	pub(super) steps: Vec<RequestStep>,
+	pub(super) statements: Vec<Arc<Program>>,
+}
+
+/// One step of a request, one per statement written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RequestStep {
+	/// `BEGIN`: open the block's transaction.
+	Begin,
+	/// `COMMIT`: commit the block's transaction.
+	Commit,
+	/// `CANCEL`: cancel the block's transaction.
+	Cancel,
+	/// `OPTION name = what`.
+	Option {
+		name: String,
+		what: bool,
+	},
+	/// `USE`: the namespace and database it names where they are written as
+	/// names, `computed` where its run computes either.
+	Use {
+		ns: Option<String>,
+		db: Option<String>,
+		computed: bool,
+	},
+	/// A top-level `LET` of `name`, its value the program of statement
+	/// `value` of [`RequestCode::statements`].
+	Let {
+		name: String,
+		value: Option<u32>,
+	},
+	/// A statement the engine runs: the program of statement `statement`.
+	Run {
+		statement: Option<u32>,
+	},
+	/// A statement the driver runs from its surface form: `KILL`, `LIVE`,
+	/// `SHOW` or `ACCESS`.
+	Surface,
 }
 
 impl Program {

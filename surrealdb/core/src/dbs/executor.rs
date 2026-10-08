@@ -210,6 +210,12 @@ pub struct Executor {
 	/// statement in `execute_plan_in_transaction` and set in
 	/// `execute_operator_plan`; statements that never reach a plan stay `Scalar`.
 	result_shape: OutputShape,
+	/// The statements of a request that arrived whole, compiled together the
+	/// first time one of them is planned; `None` for a streamed request,
+	/// whose statements are planned as each is reached.
+	request: Option<RequestPlan>,
+	/// Whether the statement running is inside `BEGIN … COMMIT`.
+	in_block: bool,
 	/// The bare `LIVE` statement converted as it arrived, with the unit
 	/// compiled for it in a read transaction before its write transaction
 	/// opened. [`Executor::run_live`] takes it, so the statement registers
@@ -219,6 +225,133 @@ pub struct Executor {
 		crate::expr::statements::LiveStatement,
 		Option<crate::exec::vm::lower_live::Arrived>,
 	)>,
+}
+
+/// What a request's statement needs to be compiled with the rest of the
+/// request, by its kind as the driver acts on it.
+enum RequestEntry {
+	Begin,
+	Commit,
+	Cancel,
+	Option(OptionStatement),
+	/// `USE`: the namespace and database it names where both are written as
+	/// names, and `None` where either is computed when it runs.
+	Use(Option<(Option<String>, Option<String>)>),
+	/// A top-level `LET`: its name, the kind it declares, and its value,
+	/// lowered.
+	Let {
+		name: String,
+		kind: Option<crate::expr::Kind>,
+		value: Option<Result<LogicalOp, Error>>,
+		read_only: bool,
+	},
+	/// A statement an engine runs, lowered.
+	Run {
+		op: Option<Result<LogicalOp, Error>>,
+		read_only: bool,
+	},
+	/// A plan a front end emitted.
+	Plan {
+		op: Option<LogicalOp>,
+		read_only: bool,
+	},
+	/// `LIVE` or `ACCESS`: the statements after it may meet what it stores.
+	Stores,
+	/// `KILL` or `SHOW`: nothing a later statement is compiled against.
+	Inert,
+}
+
+/// How a statement of the request was planned when the request arrived.
+enum Planned {
+	/// Compiled into the request's program, or to an operator of its own, or
+	/// the error compiling it raised.
+	Compiled(Result<crate::exec::vm::RequestEntry, Error>),
+	/// Served when it is reached, planned for the catalog its transaction
+	/// reads then ([`StatementPlan::Served`]).
+	Served {
+		op: LogicalOp,
+		front_end: bool,
+	},
+	/// Planned when it is reached, for that run alone
+	/// ([`StatementPlan::Reached`]).
+	Reached {
+		op: LogicalOp,
+		front_end: bool,
+	},
+}
+
+/// A request's statement as planned when the request arrived.
+struct PlannedStatement {
+	entry: Planned,
+	/// The plan's logical form, kept for the slow log when one is configured.
+	logged: Option<LogicalOp>,
+}
+
+impl PlannedStatement {
+	/// The statement of the request's program it was lowered to.
+	fn index(&self) -> Option<u32> {
+		match &self.entry {
+			Planned::Compiled(Ok(crate::exec::vm::RequestEntry::Statement(index))) => Some(*index),
+			Planned::Compiled(Ok(crate::exec::vm::RequestEntry::Operator(_)) | Err(_))
+			| Planned::Served {
+				..
+			}
+			| Planned::Reached {
+				..
+			} => None,
+		}
+	}
+}
+
+/// How a statement the driver runs is planned.
+enum StatementPlan {
+	/// Planned already: the operator that runs it.
+	Ready(Arc<dyn crate::exec::ExecOperator>),
+	/// Planned for the catalog its transaction reads when it runs, served
+	/// from the compile cache by its text (`vm::serve`): `op` as written, a
+	/// front end's plan where `front_end`.
+	Served {
+		op: LogicalOp,
+		front_end: bool,
+	},
+	/// Planned when it is reached, for the catalog its transaction reads then
+	/// and for this run alone: an `EXPLAIN`, whose operator renders what this
+	/// run of it measured, and a statement holding a schema statement, which
+	/// planning models in the transaction it runs in.
+	Reached {
+		op: LogicalOp,
+		front_end: bool,
+	},
+}
+
+/// A statement of the request as the driver runs it: how it is planned, or
+/// the error planning raised.
+struct CompiledStatement {
+	plan: Result<StatementPlan, Error>,
+	/// The plan's logical form, kept for the slow log when one is configured.
+	logged: Option<LogicalOp>,
+}
+
+/// A request whose statements arrived together, and their compilation.
+///
+/// The request is compiled once, inside the transaction of the first
+/// statement that plans, before that statement runs, into one program
+/// (`vm::request`). A statement is compiled there where it runs in that
+/// transaction and no statement before it may have changed the catalog; every
+/// other statement is served when it is reached, planned for the catalog its
+/// own transaction reads then and kept in the compile cache by its text, so
+/// a schema change the request made, a table a write defined, and another
+/// client's schema change committed in between are each met as planning the
+/// statement then meets them, and a repeated request finds the plan kept.
+struct RequestPlan {
+	entries: Vec<RequestEntry>,
+	/// Each statement's planning, by position, once the request has been
+	/// compiled; `None` where the statement is planned when reached.
+	compiled: Option<Vec<Option<PlannedStatement>>>,
+	/// The request's program, once compiled.
+	program: Option<crate::exec::vm::request::CompiledRequest>,
+	/// How many statements the driver has taken from the request.
+	taken: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 #[cfg(test)]
@@ -334,6 +467,8 @@ impl Executor {
 			broker_owned_by_executor: false,
 			stream: None,
 			result_shape: OutputShape::Scalar,
+			request: None,
+			in_block: false,
 			arrived_live: None,
 		}
 	}
@@ -787,16 +922,13 @@ impl Executor {
 	/// the consumer as such.
 	async fn execute_operator_plan(
 		&mut self,
-		plan: Arc<dyn crate::exec::ExecOperator>,
+		plan: StatementPlan,
 		txn: Arc<Transaction>,
 		stream_rows: bool,
 	) -> FlowResult<Value> {
 		use tokio_util::sync::CancellationToken;
 
-		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
-		use crate::exec::context::{
-			DatabaseContext, ExecutionContext, NamespaceContext, RootContext,
-		};
+		use crate::exec::context::ContextLevel;
 
 		/// Guard that stops the timeout task when dropped, so it does not
 		/// outlive the execution it was bounding.
@@ -870,99 +1002,71 @@ impl Executor {
 		let _timeout_guard =
 			self.ctx.timeout().map(|timeout| spawn_timeout(timeout, cancellation.clone()));
 
-		// Build the root context using cached session info. The context
-		// snapshot must be fresh per-query because it contains the
-		// transaction reference which changes between statements.
-		let root_ctx = RootContext {
-			ctx: Context::snapshot(&self.ctx).freeze(),
-			options: Some(self.opt.clone()),
-			datastore: None,
-			cancellation: Arc::new(cancellation),
-			auth: Arc::clone(&self.opt.auth),
-			session: self.get_session_info(),
-			current_value: None,
-			current_row: None,
-			skip_fetch_perms: false,
-			perms_suppressed: false,
-			caller_perms_suppressed: false,
-			computing_record: None,
-			no_write: None,
-			version_stamp: None,
-			zero_limits: Vec::new(),
-			topk_thresholds: None,
-			guard_verdicts: Arc::new(crate::exec::guard_verdicts::GuardVerdicts::for_statement(
-				plan.access_mode() != crate::exec::AccessMode::ReadOnly,
-			)),
-			writing: false,
-		};
-
-		// The plan's declared context level is the minimum it needs (see
-		// `ContextLevel`), not a construction target: materialize the highest
-		// level the session's ns/db selection supports. A closure that
-		// arrives as a runtime value (`LET $f = || (SELECT ...); $f()`)
-		// hides its body from the planner, so a database-touching body must
-		// find the database context already in place even though the plan
-		// only declared root. Above the declared minimum the upgrade is
-		// opportunistic — a session pointing at a missing ns/db falls back
-		// to the declared level rather than failing a statement that never
-		// needed more. At or below the minimum, resolution failures surface
-		// exactly as before.
-		//
-		// SECURITY: `USE` no longer implicitly creates namespaces for
-		// sessions without `DEFINE NAMESPACE`-equivalent authorization, so
-		// this must not paper over a missing target by writing a fresh
-		// namespace into the catalog on the read path (which would also
-		// fail on a read-only transaction). `expect_ns_by_name` /
-		// `expect_db_by_name` surface a clean `NsNotFound` / `DbNotFound`
-		// instead.
-		use crate::exec::context::ContextLevel;
-		let required_level = plan.required_context();
-
-		let ns_def = if required_level >= ContextLevel::Namespace {
-			Some(txn.expect_ns_by_name(self.opt.ns()?).await?)
-		} else if let Ok(ns_name) = self.opt.ns() {
-			txn.expect_ns_by_name(ns_name).await.ok()
-		} else {
-			None
-		};
-
-		let db_def = match &ns_def {
-			Some(_) if required_level >= ContextLevel::Database => {
-				Some(txn.expect_db_by_name(self.opt.ns()?, self.opt.db()?).await?)
+		let plan = match plan {
+			StatementPlan::Ready(plan) => plan,
+			// A statement served for the catalog it meets is planned here, in a
+			// context of the session's namespace and database as far as they
+			// exist, and run in one of the level the plan requires.
+			StatementPlan::Served {
+				op,
+				front_end,
+			} => {
+				let probe =
+					self.statement_context(&txn, &cancellation, true, ContextLevel::Root).await?;
+				let principal = Some(Arc::clone(&self.opt.auth));
+				let served = match front_end {
+					true => {
+						crate::exec::vm::serve::front_end(&probe, op, principal, 0, Vec::new())
+							.await
+					}
+					false => crate::exec::vm::serve::request_statement(&probe, op, principal).await,
+				};
+				match served {
+					Ok(plan) => plan,
+					Err(e) => {
+						let e = match e.downcast::<Error>() {
+							Ok(error) => self.planning_failed(&txn, error).await,
+							Err(e) => e,
+						};
+						return Err(ControlFlow::Err(e));
+					}
+				}
 			}
-			Some(_) => match (self.opt.ns(), self.opt.db()) {
-				(Ok(ns_name), Ok(db_name)) => txn.expect_db_by_name(ns_name, db_name).await.ok(),
-				_ => None,
-			},
-			None => None,
+			StatementPlan::Reached {
+				op,
+				front_end,
+			} => {
+				let planned = async {
+					match front_end {
+						true => {
+							crate::exec::planner::plan_logical_inner(
+								op,
+								&self.ctx,
+								&self.function_registry,
+								Arc::clone(&txn),
+								Some(Arc::clone(&self.opt.auth)),
+								0,
+							)
+							.await
+						}
+						false => self.plan_bare_expression(op, Arc::clone(&txn)).await,
+					}
+				}
+				.await;
+				match planned {
+					Ok(plan) => plan,
+					Err(e) => return Err(ControlFlow::Err(self.planning_failed(&txn, e).await)),
+				}
+			}
 		};
-
-		let exec_ctx = match (ns_def, db_def) {
-			(Some(ns_def), Some(db_def)) => ExecutionContext::Database(DatabaseContext {
-				ns_ctx: NamespaceContext {
-					root: root_ctx,
-					ns: ns_def,
-				},
-				db: db_def,
-				field_state_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
-					std::collections::HashMap::new(),
-				)),
-				table_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
-					std::collections::HashMap::new(),
-				)),
-				index_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
-					std::collections::HashMap::new(),
-				)),
-				select_permission_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
-					std::collections::HashMap::new(),
-				)),
-			}),
-			(Some(ns_def), None) => ExecutionContext::Namespace(NamespaceContext {
-				root: root_ctx,
-				ns: ns_def,
-			}),
-			(None, _) => ExecutionContext::Root(root_ctx),
-		};
+		let exec_ctx = self
+			.statement_context(
+				&txn,
+				&cancellation,
+				plan.access_mode() != crate::exec::AccessMode::ReadOnly,
+				plan.required_context(),
+			)
+			.await?;
 
 		// Execute the plan
 		// Handle control flow signals from execute()
@@ -1053,6 +1157,116 @@ impl Executor {
 		shape_statement_value(plan.output_shape(), results).map_err(ControlFlow::Err)
 	}
 
+	/// The context a statement runs in: a fresh snapshot of the session's
+	/// context with `txn`, cancelled through `cancellation`, at the highest
+	/// level the session's namespace and database support — failing where
+	/// either is missing at or below `required_level`, the level the plan
+	/// requires.
+	async fn statement_context(
+		&mut self,
+		txn: &Arc<Transaction>,
+		cancellation: &tokio_util::sync::CancellationToken,
+		writes: bool,
+		required_level: crate::exec::context::ContextLevel,
+	) -> FlowResult<crate::exec::context::ExecutionContext> {
+		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+		use crate::exec::context::{
+			ContextLevel, DatabaseContext, ExecutionContext, NamespaceContext, RootContext,
+		};
+		// Build the root context using cached session info. The context
+		// snapshot must be fresh per-query because it contains the
+		// transaction reference which changes between statements.
+		let root_ctx = RootContext {
+			ctx: Context::snapshot(&self.ctx).freeze(),
+			options: Some(self.opt.clone()),
+			datastore: None,
+			cancellation: Arc::new(cancellation.clone()),
+			auth: Arc::clone(&self.opt.auth),
+			session: self.get_session_info(),
+			current_value: None,
+			current_row: None,
+			skip_fetch_perms: false,
+			perms_suppressed: false,
+			caller_perms_suppressed: false,
+			computing_record: None,
+			no_write: None,
+			version_stamp: None,
+			zero_limits: Vec::new(),
+			topk_thresholds: None,
+			guard_verdicts: Arc::new(crate::exec::guard_verdicts::GuardVerdicts::for_statement(
+				writes,
+			)),
+			writing: false,
+		};
+
+		// The plan's declared context level is the minimum it needs (see
+		// `ContextLevel`), not a construction target: materialize the highest
+		// level the session's ns/db selection supports. A closure that
+		// arrives as a runtime value (`LET $f = || (SELECT ...); $f()`)
+		// hides its body from the planner, so a database-touching body must
+		// find the database context already in place even though the plan
+		// only declared root. Above the declared minimum the upgrade is
+		// opportunistic — a session pointing at a missing ns/db falls back
+		// to the declared level rather than failing a statement that never
+		// needed more. At or below the minimum, resolution failures surface
+		// exactly as before.
+		//
+		// SECURITY: `USE` no longer implicitly creates namespaces for
+		// sessions without `DEFINE NAMESPACE`-equivalent authorization, so
+		// this must not paper over a missing target by writing a fresh
+		// namespace into the catalog on the read path (which would also
+		// fail on a read-only transaction). `expect_ns_by_name` /
+		// `expect_db_by_name` surface a clean `NsNotFound` / `DbNotFound`
+		// instead.
+
+		let ns_def = if required_level >= ContextLevel::Namespace {
+			Some(txn.expect_ns_by_name(self.opt.ns()?).await?)
+		} else if let Ok(ns_name) = self.opt.ns() {
+			txn.expect_ns_by_name(ns_name).await.ok()
+		} else {
+			None
+		};
+
+		let db_def = match &ns_def {
+			Some(_) if required_level >= ContextLevel::Database => {
+				Some(txn.expect_db_by_name(self.opt.ns()?, self.opt.db()?).await?)
+			}
+			Some(_) => match (self.opt.ns(), self.opt.db()) {
+				(Ok(ns_name), Ok(db_name)) => txn.expect_db_by_name(ns_name, db_name).await.ok(),
+				_ => None,
+			},
+			None => None,
+		};
+
+		let exec_ctx = match (ns_def, db_def) {
+			(Some(ns_def), Some(db_def)) => ExecutionContext::Database(DatabaseContext {
+				ns_ctx: NamespaceContext {
+					root: root_ctx,
+					ns: ns_def,
+				},
+				db: db_def,
+				field_state_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+					std::collections::HashMap::new(),
+				)),
+				table_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+					std::collections::HashMap::new(),
+				)),
+				index_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+					std::collections::HashMap::new(),
+				)),
+				select_permission_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+					std::collections::HashMap::new(),
+				)),
+			}),
+			(Some(ns_def), None) => ExecutionContext::Namespace(NamespaceContext {
+				root: root_ctx,
+				ns: ns_def,
+			}),
+			(None, _) => ExecutionContext::Root(root_ctx),
+		};
+		Ok(exec_ctx)
+	}
+
 	/// Run a bare expression on the engine.
 	///
 	/// Lowering or planning can refuse a statement — a nested DML subquery or a
@@ -1064,17 +1278,23 @@ impl Executor {
 		txn: Arc<Transaction>,
 		start: &Instant,
 	) -> FlowResult<Value> {
-		let lowered = self.lower_bare_expression(&expr);
-		// Planning consumes the plan, and the slow log reads the statement's
-		// parameters from it after the query has run; keep a copy only when a
-		// slow log is configured.
-		let logged = match &lowered {
-			Ok(op) if self.ctx.slow_log().is_some() => Some(op.clone()),
-			_ => None,
-		};
-		let planned = match lowered {
-			Ok(op) => self.plan_bare_expression(op, Arc::clone(&txn)).await,
-			Err(e) => Err(e),
+		let (planned, logged) = match self.compiled_statement(&txn).await {
+			Some(compiled) => (compiled.plan, compiled.logged),
+			None => {
+				let lowered = self.lower_bare_expression(&expr);
+				// Planning consumes the plan, and the slow log reads the
+				// statement's parameters from it after the query has run; keep a
+				// copy only when a slow log is configured.
+				let logged = match &lowered {
+					Ok(op) if self.ctx.slow_log().is_some() => Some(op.clone()),
+					_ => None,
+				};
+				let planned = match lowered {
+					Ok(op) => self.plan_bare_expression(op, Arc::clone(&txn)).await,
+					Err(e) => Err(e),
+				};
+				(planned.map(StatementPlan::Ready), logged)
+			}
 		};
 		match planned {
 			Ok(plan) => {
@@ -1271,18 +1491,24 @@ impl Executor {
 		txn: Arc<Transaction>,
 		start: &Instant,
 	) -> FlowResult<Value> {
-		// Planning consumes the plan, and the slow log needs it after
-		// the query has run; keep a copy only when one is configured.
-		let logged = self.ctx.slow_log().is_some().then(|| op.clone());
-		let planned = crate::exec::planner::plan_logical_inner(
-			*op,
-			&self.ctx,
-			&self.function_registry,
-			Arc::clone(&txn),
-			Some(Arc::clone(&self.opt.auth)),
-			0,
-		)
-		.await;
+		let (planned, logged) = match self.compiled_statement(&txn).await {
+			Some(compiled) => (compiled.plan, compiled.logged.map(Box::new)),
+			None => {
+				// Planning consumes the plan, and the slow log needs it after
+				// the query has run; keep a copy only when one is configured.
+				let logged = self.ctx.slow_log().is_some().then(|| op.clone());
+				let planned = crate::exec::planner::plan_logical_inner(
+					*op,
+					&self.ctx,
+					&self.function_registry,
+					Arc::clone(&txn),
+					Some(Arc::clone(&self.opt.auth)),
+					0,
+				)
+				.await;
+				(planned.map(StatementPlan::Ready), logged)
+			}
+		};
 		match planned {
 			Ok(plan) => {
 				context_mut(&mut self.ctx)?.set_transaction(Arc::clone(&txn));
@@ -1502,16 +1728,25 @@ impl Executor {
 		}
 		context_mut(&mut self.ctx)?.set_transaction(Arc::clone(&txn));
 
-		// The slow log reads the statement's parameters from the plan, which
-		// planning consumes; a copy is kept only when a slow log is
-		// configured.
-		let op = lower(stm.what.clone()).map_err(|reason| {
-			ControlFlow::Err(anyhow::Error::new(ExecError::PlannerUnsupported {
-				reason: reason.to_string(),
-			}))
-		})?;
-		let logged = self.ctx.slow_log().is_some().then(|| op.clone());
-		let plan = match self.plan_bare_expression(op, Arc::clone(&txn)).await {
+		let (planned, logged) = match self.compiled_statement(&txn).await {
+			Some(compiled) => (compiled.plan, compiled.logged),
+			None => {
+				// The slow log reads the statement's parameters from the plan,
+				// which planning consumes; a copy is kept only when a slow log
+				// is configured.
+				let op = lower(stm.what.clone()).map_err(|reason| {
+					ControlFlow::Err(anyhow::Error::new(ExecError::PlannerUnsupported {
+						reason: reason.to_string(),
+					}))
+				})?;
+				let logged = self.ctx.slow_log().is_some().then(|| op.clone());
+				(
+					self.plan_bare_expression(op, Arc::clone(&txn)).await.map(StatementPlan::Ready),
+					logged,
+				)
+			}
+		};
+		let plan = match planned {
 			Ok(plan) => plan,
 			Err(e) => return Err(ControlFlow::Err(self.planning_failed(&txn, e).await)),
 		};
@@ -2008,7 +2243,23 @@ impl Executor {
 			return Ok(());
 		};
 		let txn = Arc::new(txn);
+		self.in_block = true;
+		let ran = self.execute_begin_statement_timed(kvs, txn, stream).await;
+		self.in_block = false;
+		ran
+	}
 
+	/// [`Self::execute_begin_statement_impl`] once the block's transaction is
+	/// open, bounded by the datastore's transaction timeout.
+	async fn execute_begin_statement_timed<S>(
+		&mut self,
+		kvs: &Datastore,
+		txn: Arc<Transaction>,
+		stream: Pin<&mut S>,
+	) -> Result<()>
+	where
+		S: Stream<Item = Result<TopLevelStatement>>,
+	{
 		match kvs.transaction_timeout() {
 			Some(timeout) => {
 				let start_results = self.results.len();
@@ -2459,10 +2710,18 @@ impl Executor {
 							skip_remaining = true;
 							Ok(value)
 						}
-						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
-							Err(anyhow!(ExecError::InvalidControlFlow))
-						}
-						Err(ControlFlow::Err(e)) => {
+						// A `BREAK` or `CONTINUE` no loop of the statement caught is
+						// the statement's error, which fails the block as any other
+						// does.
+						Err(
+							flow @ (ControlFlow::Err(_)
+							| ControlFlow::Break
+							| ControlFlow::Continue),
+						) => {
+							let e = match flow {
+								ControlFlow::Err(e) => e,
+								_ => anyhow!(ExecError::InvalidControlFlow),
+							};
 							for res in &mut self.results[start_results..] {
 								res.query_type = QueryType::Other;
 								res.result = Err(TypesError::query(
@@ -2618,8 +2877,11 @@ impl Executor {
 		opt: Options,
 		statements: Vec<TopLevelStatement>,
 	) -> Result<Vec<QueryResult>> {
-		let stream = futures::stream::iter(statements.into_iter().map(Ok));
-		Self::execute_statement_stream(kvs, ctx, opt, false, stream).await
+		let mut this = Executor::new(kvs, ctx, opt);
+		this.prepare_request(&statements);
+		let stream = this.counted(futures::stream::iter(statements.into_iter().map(Ok)));
+		crate::exec::compiles::request(this.run_statement_stream(kvs, false, stream)).await?;
+		Ok(this.results)
 	}
 
 	/// Execute a batch of statements with an existing transaction
@@ -2631,7 +2893,8 @@ impl Executor {
 		statements: Vec<TopLevelStatement>,
 	) -> Result<Vec<QueryResult>> {
 		let mut executor = Self::new(kvs, ctx, opt);
-		executor.run_with_transaction(kvs, statements).await?;
+		executor.prepare_request(&statements);
+		crate::exec::compiles::request(executor.run_with_transaction(kvs, statements)).await?;
 		Ok(executor.results)
 	}
 
@@ -2650,7 +2913,9 @@ impl Executor {
 		items: Sender<QueryStreamItem>,
 	) -> Result<Vec<QueryResult>> {
 		let mut executor = Self::new_streaming(kvs, ctx, opt, items);
-		let outcome = executor.run_with_transaction(kvs, statements).await;
+		executor.prepare_request(&statements);
+		let outcome =
+			crate::exec::compiles::request(executor.run_with_transaction(kvs, statements)).await;
 		executor.finalise_results().await;
 		outcome.map(|()| executor.results)
 	}
@@ -2676,12 +2941,17 @@ impl Executor {
 		let batch_start = Instant::now();
 		let results_start = self.results.len();
 
+		// Every statement runs in the caller's transaction, as a block's do.
+		self.in_block = true;
 		for stmt in statements {
 			// See `consumer_gone`: the rest of the batch is abandoned rather
 			// than run. The transaction spans requests and its owner still
 			// decides whether to commit.
 			if self.consumer_gone() {
 				break;
+			}
+			if let Some(request) = &self.request {
+				request.taken.fetch_add(1, Ordering::Relaxed);
 			}
 			let start = Instant::now();
 			// Capture classification before the statement is moved
@@ -2823,9 +3093,11 @@ impl Executor {
 		statements: Vec<TopLevelStatement>,
 		items: Sender<QueryStreamItem>,
 	) -> Result<Vec<QueryResult>> {
-		let stream = futures::stream::iter(statements.into_iter().map(Ok));
 		let mut this = Executor::new_streaming(kvs, ctx, opt, items);
-		let outcome = this.run_statement_stream(kvs, false, stream).await;
+		this.prepare_request(&statements);
+		let stream = this.counted(futures::stream::iter(statements.into_iter().map(Ok)));
+		let outcome =
+			crate::exec::compiles::request(this.run_statement_stream(kvs, false, stream)).await;
 		// However the execution ended, every result it produced is now final.
 		// A consumer is owed a terminal item for each one, including on the
 		// paths that returned an error before the loop finalised them.
@@ -3072,6 +3344,506 @@ impl Executor {
 		self.emit_query_event_for_results(kvs, batch_start, &self.results[batch_results_start..]);
 		Ok(())
 	}
+}
+
+impl Executor {
+	/// Record the statements of a request that arrived whole, to be compiled
+	/// together when the first of them is planned ([`RequestPlan`]).
+	fn prepare_request(&mut self, statements: &[TopLevelStatement]) {
+		if crate::exec::compiles::per_statement() {
+			return;
+		}
+		let entries = statements.iter().map(|stmt| self.request_entry(stmt)).collect();
+		self.request = Some(RequestPlan {
+			entries,
+			compiled: None,
+			program: None,
+			taken: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+		});
+	}
+
+	/// What compiling `stmt` with the rest of its request needs.
+	fn request_entry(&self, stmt: &TopLevelStatement) -> RequestEntry {
+		let read_only = stmt.read_only();
+		match stmt {
+			TopLevelStatement::Plan(op) => RequestEntry::Plan {
+				op: Some(op.as_ref().clone()),
+				read_only,
+			},
+			TopLevelStatement::Ast(stmt) => match stmt {
+				sql::TopLevelExpr::Begin => RequestEntry::Begin,
+				sql::TopLevelExpr::Commit => RequestEntry::Commit,
+				sql::TopLevelExpr::Cancel => RequestEntry::Cancel,
+				sql::TopLevelExpr::Option(option) => RequestEntry::Option(option.clone().into()),
+				sql::TopLevelExpr::Use(stmt) => {
+					let name = |expr: &sql::Expr| {
+						crate::ddl::scalar::written_name(&crate::expr::Expr::from(expr.clone()))
+					};
+					RequestEntry::Use(match stmt {
+						sql::statements::UseStatement::Ns(ns) => {
+							name(ns).map(|ns| (Some(ns), None))
+						}
+						sql::statements::UseStatement::Db(db) => {
+							name(db).map(|db| (None, Some(db)))
+						}
+						sql::statements::UseStatement::NsDb(ns, db) => {
+							name(ns).zip(name(db)).map(|(ns, db)| (Some(ns), Some(db)))
+						}
+						sql::statements::UseStatement::Default => None,
+					})
+				}
+				sql::TopLevelExpr::Live(_) | sql::TopLevelExpr::Access(_) => RequestEntry::Stores,
+				sql::TopLevelExpr::Kill(_) | sql::TopLevelExpr::Show(_) => RequestEntry::Inert,
+				sql::TopLevelExpr::Expr(sql::Expr::Let(stmt)) => RequestEntry::Let {
+					name: stmt.name.to_string(),
+					kind: stmt.kind.clone().map(Into::into),
+					read_only,
+					value: Some(lower(stmt.what.clone()).map_err(|reason| {
+						ExecError::PlannerUnsupported {
+							reason: reason.to_string(),
+						}
+						.into()
+					})),
+				},
+				sql::TopLevelExpr::Expr(expr) => RequestEntry::Run {
+					op: Some(self.lower_bare_expression(expr)),
+					read_only,
+				},
+			},
+		}
+	}
+
+	/// `stream`, counting each statement the driver takes from it, so the
+	/// statement running is known by its position in the request.
+	fn counted<S>(&self, stream: S) -> impl Stream<Item = Result<TopLevelStatement>> + use<S>
+	where
+		S: Stream<Item = Result<TopLevelStatement>>,
+	{
+		let taken = self.request.as_ref().map(|request| Arc::clone(&request.taken));
+		stream.inspect(move |_| {
+			if let Some(taken) = &taken {
+				taken.fetch_add(1, Ordering::Relaxed);
+			}
+		})
+	}
+
+	/// The position in its request of the statement running.
+	fn position(&self) -> Option<usize> {
+		let request = self.request.as_ref()?;
+		request.taken.load(Ordering::Relaxed).checked_sub(1)
+	}
+
+	/// The compiled form of the statement running, compiling the request in
+	/// `txn` first when it has not been; `None` where the statement is
+	/// planned as it is reached.
+	async fn compiled_statement(&mut self, txn: &Arc<Transaction>) -> Option<CompiledStatement> {
+		let position = self.position()?;
+		if self.request.as_ref().is_some_and(|request| request.compiled.is_none()) {
+			let (compiled, program) =
+				crate::exec::compiles::compiling_request(self.compile_request(txn, position)).await;
+			if let Some(request) = self.request.as_mut() {
+				request.compiled = Some(compiled);
+				request.program = program;
+			}
+		}
+		let request = self.request.as_mut()?;
+		let compiled = request.compiled.as_mut()?.get_mut(position)?.take()?;
+		let plan = match compiled.entry {
+			Planned::Compiled(Ok(crate::exec::vm::RequestEntry::Statement(index))) => {
+				Ok(StatementPlan::Ready(request.program.as_ref()?.statement(index)?))
+			}
+			Planned::Compiled(Ok(crate::exec::vm::RequestEntry::Operator(operator))) => {
+				Ok(StatementPlan::Ready(operator))
+			}
+			Planned::Compiled(Err(e)) => Err(e),
+			Planned::Served {
+				op,
+				front_end,
+			} => Ok(StatementPlan::Served {
+				op,
+				front_end,
+			}),
+			Planned::Reached {
+				op,
+				front_end,
+			} => Ok(StatementPlan::Reached {
+				op,
+				front_end,
+			}),
+		};
+		Some(CompiledStatement {
+			plan,
+			logged: compiled.logged,
+		})
+	}
+
+	/// Compile every statement of the request from `first`, the statement
+	/// about to be planned, in `txn`, the transaction it runs in, into one
+	/// program: the request's steps, and the program of each statement
+	/// compiled.
+	///
+	/// A statement is compiled here only where it runs in `txn`, no
+	/// statement before it there may have changed the catalog — a schema
+	/// statement, a write, which may define a table or run code that changes
+	/// it, a `USE`, a `LIVE` or `ACCESS`, or anything whose effects are not
+	/// known — and it reads no parameter an earlier `LET` binds to what only
+	/// the run computes; past the first statement, only where binding folds no
+	/// read of the clock. It is compiled under the session the statements
+	/// before it leave: the names a `USE` writes, the options an `OPTION`
+	/// sets, the constants a `LET` binds. Every other statement is served
+	/// when it is reached, planned for the catalog its transaction reads then
+	/// ([`StatementPlan::Served`]).
+	async fn compile_request(
+		&mut self,
+		txn: &Arc<Transaction>,
+		first: usize,
+	) -> (Vec<Option<PlannedStatement>>, Option<crate::exec::vm::request::CompiledRequest>) {
+		use crate::exec::vm::program::RequestStep;
+		let Some(request) = self.request.as_mut() else {
+			return (Vec::new(), None);
+		};
+		let mut entries = std::mem::take(&mut request.entries);
+		let mut compiled: Vec<Option<PlannedStatement>> =
+			std::iter::repeat_with(|| None).take(entries.len()).collect();
+		let mut builder = crate::exec::vm::RequestBuilder::default();
+		let mut steps: Vec<RequestStep> = Vec::with_capacity(entries.len());
+		let mut opt = self.opt.clone();
+		let mut session = self.ctx.value("session").cloned().unwrap_or(Value::None);
+		let mut bound: Vec<(String, Value)> = Vec::new();
+		let mut computed: std::collections::HashSet<String> = std::collections::HashSet::new();
+		let keep_logged = self.ctx.slow_log().is_some();
+		let mut same_txn = true;
+		let mut changed = false;
+		let mut in_block = self.in_block;
+		for (at, entry) in entries.iter_mut().enumerate() {
+			let planning = at >= first;
+			let is_first = at == first;
+			if planning && at > first && !in_block {
+				same_txn &= matches!(
+					entry,
+					RequestEntry::Begin
+						| RequestEntry::Commit
+						| RequestEntry::Cancel
+						| RequestEntry::Option(_)
+				);
+			}
+			let inline = same_txn && !changed;
+			let step = match entry {
+				RequestEntry::Begin => {
+					if planning && at > first && !in_block {
+						same_txn = false;
+					}
+					in_block = true;
+					RequestStep::Begin
+				}
+				RequestEntry::Commit => {
+					in_block = false;
+					same_txn &= !planning;
+					RequestStep::Commit
+				}
+				RequestEntry::Cancel => {
+					in_block = false;
+					same_txn &= !planning;
+					RequestStep::Cancel
+				}
+				RequestEntry::Option(option) => {
+					if planning {
+						if option.name.eq_ignore_ascii_case("IMPORT") {
+							opt.set_import(option.what);
+						} else if option.name.eq_ignore_ascii_case("FORCE") {
+							opt.force = if option.what {
+								Force::All
+							} else {
+								Force::None
+							};
+						}
+					}
+					RequestStep::Option {
+						name: option.name.to_string(),
+						what: option.what,
+					}
+				}
+				RequestEntry::Use(names) => {
+					if planning {
+						changed = true;
+						if let Some((ns, db)) = names {
+							if let Some(ns) = ns {
+								opt.set_ns(Some(ns.as_str().into()));
+								session.put(NS.as_ref(), ns.clone().into());
+							}
+							if let Some(db) = db {
+								opt.set_db(Some(db.as_str().into()));
+								session.put(DB.as_ref(), db.clone().into());
+							}
+						}
+					}
+					match names {
+						Some((ns, db)) => RequestStep::Use {
+							ns: ns.clone(),
+							db: db.clone(),
+							computed: false,
+						},
+						None => RequestStep::Use {
+							ns: None,
+							db: None,
+							computed: true,
+						},
+					}
+				}
+				RequestEntry::Stores => {
+					changed |= planning;
+					RequestStep::Surface
+				}
+				RequestEntry::Inert => RequestStep::Surface,
+				RequestEntry::Let {
+					name,
+					kind,
+					value,
+					read_only,
+				} => {
+					// A value with no logical form fails the `LET` when it is
+					// reached.
+					let constant = match value.as_ref() {
+						Some(Ok(op)) if planning => {
+							compiled[at] = Some(
+								self.compile_one(
+									txn,
+									op,
+									&opt,
+									&session,
+									&bound,
+									&computed,
+									inline,
+									is_first,
+									keep_logged,
+									&mut builder,
+								)
+								.await,
+							);
+							constant_value(op, kind.as_ref())
+						}
+						_ => None,
+					};
+					bound.retain(|(bound_name, _)| bound_name != name);
+					match constant {
+						Some(constant) => {
+							computed.remove(name.as_str());
+							bound.push((name.clone(), constant));
+						}
+						None => {
+							computed.insert(name.clone());
+						}
+					}
+					changed |= planning && !*read_only;
+					RequestStep::Let {
+						name: name.clone(),
+						value: compiled[at].as_ref().and_then(PlannedStatement::index),
+					}
+				}
+				RequestEntry::Run {
+					op,
+					read_only,
+				} => {
+					match op.as_ref() {
+						Some(Ok(lowered)) if planning => {
+							compiled[at] = Some(
+								self.compile_one(
+									txn,
+									lowered,
+									&opt,
+									&session,
+									&bound,
+									&computed,
+									inline,
+									is_first,
+									keep_logged,
+									&mut builder,
+								)
+								.await,
+							);
+						}
+						// A statement with no logical form fails with that,
+						// whatever the catalog holds.
+						Some(Err(_)) if planning => {
+							let Some(Err(e)) = op.take() else {
+								unreachable!("matched an error")
+							};
+							compiled[at] = Some(PlannedStatement {
+								entry: Planned::Compiled(Err(e)),
+								logged: None,
+							});
+						}
+						_ => {}
+					}
+					changed |= planning && !*read_only;
+					RequestStep::Run {
+						statement: compiled[at].as_ref().and_then(PlannedStatement::index),
+					}
+				}
+				RequestEntry::Plan {
+					op,
+					read_only,
+				} => {
+					if planning && let Some(plan) = op.take() {
+						let logged = keep_logged.then(|| plan.clone());
+						let entry = if inline {
+							Planned::Compiled(
+								crate::exec::planner::plan_logical_inner(
+									plan,
+									&self.ctx,
+									&self.function_registry,
+									Arc::clone(txn),
+									Some(Arc::clone(&self.opt.auth)),
+									0,
+								)
+								.await
+								.map(crate::exec::vm::RequestEntry::Operator),
+							)
+						} else {
+							served_for(plan, true)
+						};
+						compiled[at] = Some(PlannedStatement {
+							entry,
+							logged,
+						});
+					}
+					changed |= planning && !*read_only;
+					RequestStep::Run {
+						statement: None,
+					}
+				}
+			};
+			steps.push(step);
+		}
+		let program = crate::exec::planner::finish_request(
+			&self.ctx,
+			&self.function_registry,
+			Arc::clone(txn),
+			builder,
+			steps,
+		);
+		match program {
+			Ok(program) => (compiled, Some(program)),
+			// A request whose program cannot be put together plans each
+			// statement when it is reached.
+			Err(_) => (Vec::new(), None),
+		}
+	}
+
+	/// Compile `op`, a statement of the request, in `txn` under the session
+	/// the statements before it leave, into the request `builder` builds;
+	/// or, where it is not `inline`, where it reads a parameter only the run
+	/// computes, or where binding it past the first statement would fold a
+	/// read of the clock, leave it to be served when it is reached.
+	#[expect(
+		clippy::too_many_arguments,
+		reason = "the statement, the session the statements before it leave, and the request"
+	)]
+	async fn compile_one(
+		&self,
+		txn: &Arc<Transaction>,
+		op: &LogicalOp,
+		opt: &Options,
+		session: &Value,
+		bound: &[(String, Value)],
+		computed: &std::collections::HashSet<String>,
+		inline: bool,
+		first: bool,
+		keep_logged: bool,
+		builder: &mut crate::exec::vm::RequestBuilder,
+	) -> PlannedStatement {
+		let logged = keep_logged.then(|| op.clone());
+		let served = || PlannedStatement {
+			entry: served_for(op.clone(), false),
+			logged: keep_logged.then(|| op.clone()),
+		};
+		if !inline || (!computed.is_empty() && reads_any(op, computed)) {
+			return served();
+		}
+		let mut ctx = Context::snapshot(&self.ctx);
+		ctx.set_transaction(Arc::clone(txn));
+		ctx.add_value("session", session.clone().into());
+		for (name, value) in bound {
+			ctx.add_value(name.clone(), value.clone().into());
+		}
+		let ctx = ctx.freeze();
+		let planned = crate::exec::planner::plan_request_statement(
+			op.clone(),
+			&ctx,
+			&self.function_registry,
+			Arc::clone(txn),
+			Some(Arc::clone(&opt.auth)),
+			Some(Arc::new(opt.clone())),
+			builder,
+		)
+		.await;
+		if !first && planned.binds_the_clock {
+			return served();
+		}
+		PlannedStatement {
+			entry: Planned::Compiled(planned.entry),
+			logged,
+		}
+	}
+}
+
+/// How `op`, a statement planned when it is reached, is planned then: served
+/// from the compile cache, or planned for that run alone
+/// ([`StatementPlan::Reached`]) — an `EXPLAIN`, whose operator renders what
+/// that run measured, and a statement holding a schema statement, whose
+/// planning models it with a speculative run in the transaction it runs in.
+fn served_for(op: LogicalOp, front_end: bool) -> Planned {
+	if op.any(|node| matches!(node, LogicalOp::Explain(_)))
+		|| crate::exec::planner::fold::changes_the_catalog(&op)
+	{
+		Planned::Reached {
+			op,
+			front_end,
+		}
+	} else {
+		Planned::Served {
+			op,
+			front_end,
+		}
+	}
+}
+
+/// The value `LET` binds for `value`, where lowering wrote it as a constant:
+/// a value statement whose expression denotes a value without evaluation,
+/// coerced to `kind` when it declares one. `None` where the run computes it,
+/// or where the coercion fails, which the run raises.
+fn constant_value(value: &LogicalOp, kind: Option<&crate::expr::Kind>) -> Option<Value> {
+	let LogicalOp::Eval(eval) = value else {
+		return None;
+	};
+	let constant = crate::exec::planner::static_value(&eval.expr)?;
+	match kind {
+		Some(kind) => constant.coerce_to_kind(kind).ok(),
+		None => Some(constant),
+	}
+}
+
+/// Whether `op` reads any of `names` as a parameter.
+fn reads_any(op: &LogicalOp, names: &std::collections::HashSet<String>) -> bool {
+	struct Reads<'a> {
+		names: &'a std::collections::HashSet<String>,
+	}
+	impl Visitor for Reads<'_> {
+		type Error = ();
+		fn visit_param(&mut self, param: &crate::expr::Param) -> Result<(), ()> {
+			match self.names.contains(param.as_str()) {
+				true => Err(()),
+				false => Ok(()),
+			}
+		}
+	}
+	visit_plan_params(
+		op,
+		&mut Reads {
+			names,
+		},
+	)
+	.is_err()
 }
 
 /// The parameters a plan references, as the slow log reads them.

@@ -1401,10 +1401,12 @@ fn run() { /* Planner */ }"
 }
 
 /// The files that name the operator tree's `ExecOperator`: the adapter a
-/// program runs behind, the planner entry that hands it over, `EXPLAIN`,
-/// which renders a plan around it, and the compile cache's keeping of the
-/// statements reached through the operator tree's expressions.
-const OPERATOR_FILES: &[&str] = &["explain.rs", "host.rs", "mod.rs", "serve.rs", "units.rs"];
+/// program runs behind and the one a request's statement runs behind, the
+/// planner entry that hands it over, `EXPLAIN`, which renders a plan around
+/// it, and the compile cache's keeping of the statements reached through the
+/// operator tree's expressions.
+const OPERATOR_FILES: &[&str] =
+	&["explain.rs", "host.rs", "mod.rs", "request.rs", "serve.rs", "units.rs"];
 
 /// The files of `files` naming `ExecOperator` outside [`OPERATOR_FILES`].
 fn operator_scan(files: &BTreeMap<String, String>) -> Vec<String> {

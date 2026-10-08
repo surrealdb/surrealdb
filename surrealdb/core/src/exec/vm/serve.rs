@@ -28,7 +28,9 @@
 //! A compilation is served to every principal of the frame's class, so it
 //! reads the session's own values — `$auth`, `$access`, `$token`,
 //! `$session` — when it runs and never folds them
-//! ([`crate::exec::planner::Planner::reading_session_values`]).
+//! ([`crate::exec::planner::Planner::reading_session_values`]). The one
+//! exception is a request's own top-level statement, which folds them and is
+//! kept under the values it folded ([`request_statement`]).
 //!
 //! An expression reached where no database is selected names no database to
 //! key by: it is compiled on each miss, never kept.
@@ -271,6 +273,71 @@ pub(crate) async fn statement(
 		principal.as_deref(),
 	);
 	served(exec, units.statements(), keyed, params, compile).await
+}
+
+/// `op`, a top-level statement of a request, planned for its run in `exec`
+/// for `principal` and served from the compile cache.
+///
+/// The request's program is compiled for one session, so a statement of it
+/// folds the values that session's own parameters — `$auth`, `$access`,
+/// `$token`, `$session` — hold, as one planned in the program does. A
+/// statement that reads none of them is served as [`statement`] serves it. One
+/// that reads any is kept under the values it folds as well as its text, so a
+/// session holding other values is never served it: a specialisation per
+/// session, at most `ExecConfig::specialised_body_cache_size` of them. Where
+/// those values are larger than `ExecConfig::specialised_body_max_arg_bytes`,
+/// or hold a value that has no encoding, the statement reads them when it
+/// runs instead.
+pub(crate) async fn request_statement(
+	exec: &ExecutionContext,
+	op: LogicalOp,
+	principal: Option<Arc<crate::iam::Auth>>,
+) -> anyhow::Result<Arc<dyn ExecOperator>> {
+	let params = statement_params(&op);
+	let folded: Vec<&str> = crate::exec::planner::UNIT_RUNTIME_PARAMS
+		.iter()
+		.copied()
+		.filter(|name| params.contains(*name))
+		.collect();
+	let Some(units) = exec.ctx().compiled_units().filter(|_| !folded.is_empty()) else {
+		return statement(exec, op, principal, 0, Vec::new()).await;
+	};
+	let values: Vec<crate::val::Value> = folded
+		.iter()
+		.map(|name| exec.ctx().value(name).cloned().unwrap_or(crate::val::Value::None))
+		.collect();
+	let Some(session) = super::compile_cache::ArgValues::of(&values, units.specialised_arg_bytes())
+	else {
+		return statement(exec, op, principal, 0, Vec::new()).await;
+	};
+	let Some(txn) = exec.try_txn() else {
+		anyhow::bail!(crate::exec::Error::InvalidStatement(
+			"a statement of a request is planned in a transaction".to_owned()
+		));
+	};
+	let op = Arc::new(op);
+	let compile = || async {
+		Ok(crate::exec::planner::plan_statement_scoped(
+			(*op).clone(),
+			exec.ctx(),
+			exec.function_registry(),
+			Arc::clone(&txn),
+			principal.clone(),
+			0,
+			exec.root().perms_suppressed,
+			&[],
+		)
+		.await?)
+	};
+	let keyed = key_of(
+		exec,
+		UnitObject::SessionStatement {
+			op: Arc::clone(&op),
+			session,
+		},
+		principal.as_deref(),
+	);
+	served(exec, units.session_statements(), keyed, params, compile).await
 }
 
 /// `op`, a front end's plan compiled for a run in `exec` at re-entry depth

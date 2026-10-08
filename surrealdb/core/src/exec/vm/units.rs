@@ -578,6 +578,10 @@ pub(crate) struct CompiledUnits {
 	/// Statements reached through the operator tree's expressions, by text
 	/// ([`super::serve::statement`]).
 	statements: super::compile_cache::UnitCache<Arc<dyn crate::exec::ExecOperator>>,
+	/// Top-level statements of requests served for the session values they
+	/// fold ([`super::serve::request_statement`]), at most
+	/// `ExecConfig::specialised_body_cache_size` of them.
+	session_statements: super::compile_cache::UnitCache<Arc<dyn crate::exec::ExecOperator>>,
 	/// The units of closure bodies, by closure ([`super::closure::link`]),
 	/// or the failure a body no unit of which is lowered reports.
 	closure_units: super::compile_cache::UnitCache<Result<ClosureUnit, surrealdb_types::Error>>,
@@ -659,6 +663,9 @@ impl CompiledUnits {
 			stage_bundles: super::compile_cache::UnitCache::tables(capacity),
 			exprs: super::compile_cache::UnitCache::functions(capacity),
 			statements: super::compile_cache::UnitCache::functions(capacity),
+			session_statements: super::compile_cache::UnitCache::functions(
+				crate::exec::config::ExecConfig::default().specialised_body_cache_size,
+			),
 			closure_units: super::compile_cache::UnitCache::functions(capacity),
 			function_calls: super::compile_cache::UnitCache::functions(capacity),
 			param_guards: super::compile_cache::UnitCache::functions(capacity),
@@ -679,6 +686,8 @@ impl CompiledUnits {
 	pub(crate) fn for_config(config: &crate::exec::config::ExecConfig) -> Self {
 		let mut units = Self::new(config.compiled_unit_cache_size);
 		units.specialised_bodies =
+			super::compile_cache::UnitCache::functions(config.specialised_body_cache_size);
+		units.session_statements =
 			super::compile_cache::UnitCache::functions(config.specialised_body_cache_size);
 		units.specialised_values = config.specialised_body_values;
 		units.specialised_arg_bytes = config.specialised_body_max_arg_bytes;
@@ -791,6 +800,14 @@ impl CompiledUnits {
 		&self,
 	) -> &super::compile_cache::UnitCache<Arc<dyn crate::exec::ExecOperator>> {
 		&self.statements
+	}
+
+	/// Top-level statements of requests served for the session values they
+	/// fold.
+	pub(crate) fn session_statements(
+		&self,
+	) -> &super::compile_cache::UnitCache<Arc<dyn crate::exec::ExecOperator>> {
+		&self.session_statements
 	}
 
 	/// The units of closure bodies, by closure, or the failure a body no

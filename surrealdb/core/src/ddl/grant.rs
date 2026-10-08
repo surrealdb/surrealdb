@@ -41,9 +41,12 @@ use crate::{catalog, val};
 /// The `WHERE` clause of an access statement, resolved once for the statement.
 ///
 /// The clause is asked of every grant the statement reached, so it is compiled
-/// here rather than per grant. A clause the engine has no compiled form for is
-/// kept as it was written and evaluated the way [`crate::ddl::scalar`]
-/// evaluates such an expression.
+/// here rather than per grant, and served from the compile cache like every
+/// other expression an executed statement is written with
+/// ([`crate::exec::vm::serve::expr`]): the statement compiles it only on the
+/// cache's miss. A clause the engine has no compiled form for is kept as it
+/// was written and evaluated the way [`crate::ddl::scalar`] evaluates such an
+/// expression.
 enum GrantFilter {
 	/// No clause: every grant the statement reached.
 	Every,
@@ -59,15 +62,9 @@ impl GrantFilter {
 		let Ok(logical) = crate::expr::logical::lower_expr(cond.0.clone().into()) else {
 			return Ok(Self::Uncompiled(cond.0.clone()));
 		};
-		let compiled = crate::exec::planner::compile_expr(
-			logical,
-			exec.ctx(),
-			exec.function_registry(),
-			exec.try_txn(),
-			Some(Arc::clone(&exec.root().auth)),
-			0,
-		)
-		.await?;
+		let compiled =
+			crate::exec::vm::serve::expr(exec, logical, Some(Arc::clone(&exec.root().auth)), 0)
+				.await?;
 		Ok(Self::Compiled(compiled))
 	}
 

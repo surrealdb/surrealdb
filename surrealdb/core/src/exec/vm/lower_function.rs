@@ -52,6 +52,36 @@ pub(super) struct Arena<'ctx> {
 	pub(super) closures: Vec<super::closure::ClosureLink>,
 }
 
+impl<'ctx> Arena<'ctx> {
+	/// The same units and links, for a lowering under another planner: what
+	/// the arena keeps between two statements' lowerings, whose queue of event
+	/// lowerings each drains before it ends.
+	pub(super) fn moved<'other>(self) -> Arena<'other> {
+		Arena {
+			units: self.units,
+			links: self.links,
+			cascades: self.cascades,
+			observers: self.observers,
+			events: Default::default(),
+			closures: self.closures,
+		}
+	}
+
+	/// How many units the arena holds.
+	pub(super) fn len(&self) -> usize {
+		self.units.len()
+	}
+
+	/// Drop the units from `len` on, and the links that name them.
+	pub(super) fn rewind(&mut self, len: usize) {
+		self.units.truncate(len);
+		self.links.retain(|link| (link.unit.0 as usize) < len);
+		self.cascades.retain(|link| link.names_before(len));
+		self.observers.retain(|link| link.names_before(len));
+		self.closures.retain(|link| link.names_before(len));
+	}
+}
+
 /// What a call needs of the function it calls, as lowered.
 struct Callee {
 	/// Whether the function was defined when the call was lowered; a call of
