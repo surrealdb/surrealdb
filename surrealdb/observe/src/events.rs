@@ -632,6 +632,14 @@ impl TransactionMetrics {
 		}
 	}
 
+	/// The key and value bytes written so far: what the transaction's write
+	/// buffer holds, for a caller that bounds it.
+	pub fn bytes_written(&self) -> u64 {
+		self.key_bytes_written
+			.load(Ordering::Relaxed)
+			.saturating_add(self.value_bytes_written.load(Ordering::Relaxed))
+	}
+
 	/// Freeze the current counter values into a `Copy` snapshot suitable for
 	/// attaching to a [`TransactionEvent`]. Derived totals (`total_bytes_*`,
 	/// `ops_total`) are computed here so consumers do not pay extra atomic

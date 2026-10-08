@@ -6,6 +6,7 @@
 use anyhow::Result;
 
 use super::Rejected;
+use super::saved::{Loading, Saving};
 use crate::catalog::aggregation;
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
 use crate::expr::Kind;
@@ -52,6 +53,17 @@ impl SumAccumulator {
 }
 
 impl Accumulator for SumAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().number(self.sum).rejected(&self.rejected).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.sum = state.number()?;
+		self.rejected = state.rejected()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		if let Some(n) = self.rejected.number("math::sum", &value) {
 			self.sum = self.sum + n;
@@ -139,6 +151,18 @@ impl MeanAccumulator {
 }
 
 impl Accumulator for MeanAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().number(self.sum).int(self.count).rejected(&self.rejected).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.sum = state.number()?;
+		self.count = state.int()?;
+		self.rejected = state.rejected()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		if let Some(n) = self.rejected.number("math::mean", &value) {
 			self.sum = self.sum + n;
@@ -244,6 +268,17 @@ impl MinAccumulator {
 }
 
 impl Accumulator for MinAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().option_number(self.min).rejected(&self.rejected).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.min = state.option_number()?;
+		self.rejected = state.rejected()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		if let Some(n) = self.rejected.number("math::min", &value) {
 			self.min = Some(match &self.min {
@@ -361,6 +396,17 @@ impl MaxAccumulator {
 }
 
 impl Accumulator for MaxAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().option_number(self.max).rejected(&self.rejected).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.max = state.option_number()?;
+		self.rejected = state.rejected()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		if let Some(n) = self.rejected.number("math::max", &value) {
 			self.max = Some(match &self.max {
@@ -521,6 +567,28 @@ impl SpreadAccumulator {
 }
 
 impl Accumulator for SpreadAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(
+			Saving::default()
+				.number(self.shift)
+				.number(self.sum)
+				.number(self.sum_of_squares)
+				.int(self.count)
+				.rejected(&self.rejected)
+				.done(),
+		)
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.shift = state.number()?;
+		self.sum = state.number()?;
+		self.sum_of_squares = state.number()?;
+		self.count = state.int()?;
+		self.rejected = state.rejected()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		if let Some(n) = self.rejected.number(self.spread.function_name(), &value) {
 			aggregation::shifted_accumulate(
@@ -632,6 +700,21 @@ struct MedianAccumulator {
 }
 
 impl Accumulator for MedianAccumulator {
+	fn holds_inputs(&self) -> bool {
+		true
+	}
+
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().numbers(&self.values).rejected(&self.rejected).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.values = state.numbers()?;
+		self.rejected = state.rejected()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		if let Some(n) = self.rejected.number("math::median", &value) {
 			self.values.push(n);

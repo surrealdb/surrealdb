@@ -4131,6 +4131,12 @@ impl Transaction {
 		self.tr.timestamp_impl()
 	}
 
+	/// The key and value bytes this transaction has written, which its write
+	/// buffer holds until it commits: deletes count their keys.
+	pub fn bytes_written(&self) -> u64 {
+		self.metrics.bytes_written()
+	}
+
 	// --------------------------------------------------
 	// Changefeed functions
 	// --------------------------------------------------

@@ -485,7 +485,7 @@ async fn run_untailed(
 	// operator passes it.
 	state.permissions_bypassed = ctx.root().skip_fetch_perms;
 	state.frames = program.permissions.iter().map(|spec| spec.context(ctx)).collect();
-	spill_to(program, &mut state, ctx);
+	bound_breakers(program, &mut state, ctx);
 	run_pipelines(program, None, version, &mut state, ctx, yielder, flush_at).await?;
 	Ok(state)
 }
@@ -508,24 +508,16 @@ pub(super) fn run_group<'a>(
 	frame: &'a ExecutionContext,
 ) -> GroupRun<'a> {
 	crate::exec::vm::host::out_of_line(|| async move {
-		if state.program.is_none() {
-			state.program = Some(Arc::clone(program));
-		}
-		let output = state.take_output();
-		let write = state.write.take();
-		let rowless = std::mem::replace(&mut state.rowless, false);
-		let undocumented = std::mem::replace(&mut state.undocumented, false);
-		let in_place = std::mem::replace(&mut state.read_in_place_permission_errors, false);
-		let sorted_keys = std::mem::take(&mut state.sorted_keys);
-		let mut out = Out::Gather(Vec::new());
-		let mut ran = run_tailed(program, group, state, frame, &mut out).await;
+		let (out, mut ran, output) =
+			run_group_out(program, group, state, frame, Out::Gather(Vec::new())).await;
 		let mut rows = match out {
 			Out::Gather(rows) => rows,
-			Out::Stream(_) => Vec::new(),
+			Out::Stream(_) | Out::Sink(_) => Vec::new(),
 		};
 		if ran.is_ok() {
 			rows.append(&mut state.output);
 		}
+		state.output = output;
 		// `ONLY` hands on the one row, or `NONE`, and nothing when it fails.
 		if program.groups.get(group as usize).is_some_and(|spec| spec.only) {
 			if rows.len() > 1 {
@@ -537,17 +529,81 @@ pub(super) fn run_group<'a>(
 				Err(_) => rows.clear(),
 			}
 		}
+		(rows, ran)
+	})
+}
+
+/// Run block statement `group` of `program` as [`run_group`] does, handing
+/// its rows to `sink` a batch at a time rather than gathering them: for a
+/// reader of the rows that bounds what it holds, such as a join's build.
+/// `ONLY` is not applied.
+pub(super) fn run_group_into<'a>(
+	program: &'a Arc<Program>,
+	group: u16,
+	state: &'a mut State,
+	frame: &'a ExecutionContext,
+	sink: &'a mut (dyn RowSink + Send),
+) -> crate::exec::BoxFut<'a, FlowResult<()>> {
+	crate::exec::vm::host::out_of_line(|| async move {
+		let (out, ran, output) = run_group_out(program, group, state, frame, Out::Sink(sink)).await;
+		let rest = std::mem::replace(&mut state.output, output);
+		ran?;
+		if let Out::Sink(sink) = out {
+			sink.take(rest, frame).await?;
+		}
+		Ok(())
+	})
+}
+
+/// [`run_group`]'s run into `out`, the block's row-level state kept aside
+/// and put back, but for its output: the rows the run left are in
+/// `state.output`, and the output kept aside is answered for the caller to
+/// put back once it has taken them.
+fn run_group_out<'a, 'o>(
+	program: &'a Arc<Program>,
+	group: u16,
+	state: &'a mut State,
+	frame: &'a ExecutionContext,
+	mut out: Out<'o, 'o>,
+) -> crate::exec::BoxFut<'a, (Out<'o, 'o>, FlowResult<()>, Vec<Value>)>
+where
+	'o: 'a,
+{
+	crate::exec::vm::host::out_of_line(|| async move {
+		if state.program.is_none() {
+			state.program = Some(Arc::clone(program));
+		}
+		let output = state.take_output();
+		let write = state.write.take();
+		let rowless = std::mem::replace(&mut state.rowless, false);
+		let undocumented = std::mem::replace(&mut state.undocumented, false);
+		let in_place = std::mem::replace(&mut state.read_in_place_permission_errors, false);
+		let sorted_keys = std::mem::take(&mut state.sorted_keys);
+		let gather_account = state.gather_account.take();
+		let ran = run_tailed(program, group, state, frame, &mut out).await;
+		// The rows gathered leave the statement as its value.
+		state.gather_account = gather_account;
 		if let Some(slot) = state.group_writes.get_mut(group as usize) {
 			*slot = state.write.take();
 		}
-		state.output = output;
 		state.write = write;
 		state.rowless = rowless;
 		state.undocumented = undocumented;
 		state.read_in_place_permission_errors = in_place;
 		state.sorted_keys = sorted_keys;
-		(rows, ran)
+		(out, ran, output)
 	})
+}
+
+/// Where a statement's rows go when they are neither streamed nor gathered:
+/// a reader that takes them a batch at a time as they are flushed.
+pub(super) trait RowSink {
+	/// Take `rows`, the next batch in order.
+	fn take<'a>(
+		&'a mut self,
+		rows: Vec<Value>,
+		ctx: &'a ExecutionContext,
+	) -> crate::exec::BoxFut<'a, FlowResult<()>>;
 }
 
 /// A state for `program`, a block statement compiled as a program of its own,
@@ -587,7 +643,7 @@ pub(super) fn unit_state(
 /// spill of `program` in `ctx`, which the host's steps read.
 pub(super) fn host_frames(program: &Program, state: &mut State, ctx: &ExecutionContext) {
 	state.frames = program.permissions.iter().map(|spec| spec.context(ctx)).collect();
-	spill_to(program, state, ctx);
+	bound_breakers(program, state, ctx);
 }
 
 /// Run block statement `group` under its tail: in the frame its `VERSION`
@@ -695,10 +751,8 @@ async fn start_group(
 			let cell = Arc::new(crate::exec::topk_pushdown::TopKThresholdCell::default());
 			state.topk_cells[at] = Some(cell);
 		}
-		#[cfg(all(storage, not(target_family = "wasm")))]
-		{
-			state.sort_runs[at] = None;
-		}
+		state.sort_runs[at] = None;
+		state.sort_accounts[at].clear();
 	}
 	for at in spec.aggregates.clone() {
 		state.reset_aggregate(program, at as usize);
@@ -927,26 +981,32 @@ pub(super) async fn run_pipelines(
 				for row in rows {
 					out_of_line(|| run_value_row(program, pipeline, row, state, ctx)).await?;
 				}
-				out_of_line(|| flush(state, yielder, flush_at)).await?;
+				out_of_line(|| flush(state, yielder, flush_at, ctx)).await?;
 			}
 			Source::Sorted {
 				sort,
 			} => {
 				let spec = &program.sorts[*sort as usize];
-				#[cfg(all(storage, not(target_family = "wasm")))]
-				if let Some(runs) = state.sort_runs[*sort as usize].take() {
-					let held = std::mem::take(&mut state.sorts[*sort as usize]);
+				if let Some(runs) = state.sort_runs[*sort as usize].take()
+					&& let Some(memory) = state.memory.clone()
+				{
+					let mut held = std::mem::take(&mut state.sorts[*sort as usize]);
 					let slab = std::mem::take(&mut state.sort_slabs[*sort as usize]);
-					let held = super::sort::sorted(held, &spec.keys, usize::MAX, ctx).await?;
-					let mut merge =
-						runs.merge(held, slab, spec.keys.clone()).map_err(ControlFlow::Err)?;
+					let keys = match spec.random {
+						true => {
+							super::sort::with_random_keys(&mut held);
+							vec![super::sort::RANDOM_ORDER]
+						}
+						false => spec.keys.clone(),
+					};
+					let held = super::sort::sorted(held, &keys, usize::MAX, ctx).await?;
+					let held = super::spill::records_of(held, &slab)?;
+					state.sort_accounts[*sort as usize].clear();
+					let order = super::spill::sort_order(keys);
+					let mut merge = runs.merge(&memory, held, order, ctx).await?;
 					loop {
 						let most = ctx.root().ctx.config.exec.scan_batch_size.max(1);
-						let (next, chunk) = merge
-							.next_chunk(super::fuel::batch(super::fuel::units(most)) as usize)
-							.await
-							.map_err(ControlFlow::Err)?;
-						merge = next;
+						let chunk = merge.next_chunk(most, ctx).await?;
 						if chunk.is_empty() {
 							break;
 						}
@@ -960,6 +1020,7 @@ pub(super) async fn run_pipelines(
 					}
 					continue;
 				}
+				state.sort_accounts[*sort as usize].clear();
 				let rows = std::mem::take(&mut state.sorts[*sort as usize]);
 				let slab = std::mem::take(&mut state.sort_slabs[*sort as usize]);
 				let keep = spec.keep.unwrap_or(usize::MAX);
@@ -996,7 +1057,7 @@ pub(super) async fn run_pipelines(
 							stretch = super::fuel::left().clamp(1, 256);
 							taken = 0;
 						}
-						flush(state, yielder, flush_at).await?;
+						flush(state, yielder, flush_at, ctx).await?;
 					}
 					super::fuel::tick(ctx, taken).await?;
 					continue;
@@ -1068,6 +1129,35 @@ pub(super) async fn run_pipelines(
 				split,
 			} => {
 				if let super::program::SplitKind::Step(step) = &program.splits[*split as usize].kind
+					&& matches!(
+						step,
+						super::binding::BindingStep::Distinct
+							| super::binding::BindingStep::Join(_)
+					) {
+					let merge = out_of_line(|| {
+						super::binding::finish_deferred(program, *split, step, state, ctx)
+					})
+					.await?;
+					if let Some(mut merge) = merge {
+						let most = ctx.root().ctx.config.exec.scan_batch_size.max(1);
+						'rows: loop {
+							let chunk = merge.next_chunk(most, ctx).await?;
+							if chunk.is_empty() {
+								break;
+							}
+							for (_, row) in chunk {
+								if out_of_line(|| run_value_row(program, pipeline, row, state, ctx))
+									.await? == Ended::Stop
+								{
+									break 'rows;
+								}
+							}
+							out_of_line(|| flush(state, yielder, flush_at, ctx)).await?;
+						}
+						out_of_line(|| flush(state, yielder, flush_at, ctx)).await?;
+					}
+				} else if let super::program::SplitKind::Step(step) =
+					&program.splits[*split as usize].kind
 					&& step.buffers()
 				{
 					let rows = out_of_line(|| {
@@ -1081,15 +1171,33 @@ pub(super) async fn run_pipelines(
 							break;
 						}
 					}
-					out_of_line(|| flush(state, yielder, flush_at)).await?;
+					out_of_line(|| flush(state, yielder, flush_at, ctx)).await?;
 				}
 			}
 			Source::Join {
-				..
-			} => {}
+				join,
+			} => {
+				out_of_line(|| {
+					finish_spilled_join(program, pipeline, *join, state, ctx, yielder, flush_at)
+				})
+				.await?;
+			}
 			Source::Groups {
 				aggregate,
 			} => {
+				if let Some(runs) = state.group_runs[*aggregate as usize].take()
+					&& let Some(memory) = state.memory.clone()
+				{
+					out_of_line(|| {
+						finish_spilled_groups(
+							program, pipeline, *aggregate, runs, memory, state, ctx, yielder,
+							flush_at,
+						)
+					})
+					.await?;
+					continue;
+				}
+				state.group_accounts[*aggregate as usize].clear();
 				let groups = state.groups[*aggregate as usize].take();
 				let rows = out_of_line(|| finish_groups(program, *aggregate, groups, ctx)).await?;
 				let rows = rows.into_iter().map(|row| (Vec::new(), row)).collect();
@@ -1134,6 +1242,8 @@ pub(super) enum Out<'o, 'y> {
 	/// The rows flushed so far. A statement a signal interrupts keeps these,
 	/// and not the rows its state still held, as a stream's reader would.
 	Gather(Vec<Value>),
+	/// A reader taking each batch as it is flushed ([`RowSink`]).
+	Sink(&'o mut (dyn RowSink + Send)),
 }
 
 /// `make`'s future, built in a frame of its own and boxed.
@@ -1249,7 +1359,7 @@ pub(super) async fn run_storage_source(
 						return Ok(false);
 					};
 					let step = run_value_row(program, pipeline, row, state, ctx).await?;
-					flush(state, yielder, flush_at).await?;
+					flush(state, yielder, flush_at, ctx).await?;
 					Ok(step == Ended::Stop)
 				}
 				other => Err(ControlFlow::Err(anyhow::anyhow!(
@@ -1609,7 +1719,7 @@ pub(super) async fn run_storage_source(
 							return Ok(false);
 						};
 						let step = run_value_row(program, pipeline, row, state, ctx).await?;
-						flush(state, yielder, flush_at).await?;
+						flush(state, yielder, flush_at, ctx).await?;
 						return Ok(step == Ended::Stop);
 					}
 					other => {
@@ -1724,7 +1834,7 @@ pub(super) async fn run_storage_source(
 /// yielding nothing.
 ///
 /// A scan that reaches a record through several entries (see
-/// [`access_fans_out`]) lists it once: the first entry to name it, in the
+/// [`access_repeats_records`]) lists it once: the first entry to name it, in the
 /// index's order, stands for the record. The repeats are dropped from the ids
 /// before any record is read, so they cost no read.
 struct IndexRecords {
@@ -2083,7 +2193,7 @@ async fn scan_in_place(
 		// The rows the chunk emitted are held until `flush` hands them on, so a
 		// process past its memory threshold fails here rather than scanning on.
 		ensure_below_memory_threshold()?;
-		flush(state, yielder, flush_at).await?;
+		flush(state, yielder, flush_at, ctx).await?;
 		if stopped || stats.rows == 0 {
 			return Ok(stopped);
 		}
@@ -2240,7 +2350,7 @@ pub(super) async fn run_rows(
 		if run_value_row(program, pipeline, row, state, ctx).await? == Ended::Stop {
 			return Ok(true);
 		}
-		flush(state, yielder, flush_at).await?;
+		flush(state, yielder, flush_at, ctx).await?;
 	}
 	Ok(false)
 }
@@ -3973,13 +4083,25 @@ async fn run_join(
 ) -> FlowResult<Ended> {
 	use super::plan::JoinMatch;
 	let spec = &program.joins[join as usize];
-	let table = match &state.joins[join as usize] {
-		Some(table) => Arc::clone(table),
-		None => {
-			let table = Arc::new(out_of_line(|| build_join(program, spec, state, ctx)).await?);
-			state.joins[join as usize] = Some(Arc::clone(&table));
-			table
+	if state.joins[join as usize].is_none() {
+		let built = out_of_line(|| build_join(program, spec, state, ctx)).await?;
+		state.joins[join as usize] = Some(built);
+	}
+	let table = match &mut state.joins[join as usize] {
+		Some(super::join_spill::JoinBuilt::Memory(table)) => Arc::clone(table),
+		Some(super::join_spill::JoinBuilt::Spilled(spilled)) => {
+			// A join whose build side spilled defers its probe rows to its
+			// own pipeline's turn ([`finish_spilled_join`]).
+			let mut pairer = PlanPairer {
+				program,
+				spec,
+				ctx,
+				eval: None,
+			};
+			spilled.defer(Some(keys), probe, &mut pairer).await?;
+			return Ok(Ended::Next);
 		}
+		None => return Ok(Ended::Next),
 	};
 	let pipeline = &program.pipelines[spec.pipeline];
 	if spec.kind == JoinMatch::Semi {
@@ -4052,52 +4174,219 @@ async fn run_join(
 	Ok(Ended::Next)
 }
 
-/// The build table of join `spec`: its build side's rows, each keyed by the
-/// build keys evaluated over the row set under the alias.
+/// The build side of join `spec`: its build side's rows, each keyed by the
+/// build keys evaluated over the row set under the alias. Where the query
+/// can spill, the rows are read a batch at a time and spilled once the lease
+/// no longer covers them ([`super::join_spill`]); otherwise they are
+/// gathered into a table.
 async fn build_join(
 	program: &Program,
 	spec: &super::program::JoinSpec,
 	state: &mut State,
 	ctx: &ExecutionContext,
-) -> FlowResult<crate::exec::operators::BuildTable> {
+) -> FlowResult<super::join_spill::JoinBuilt> {
 	let held = state.program.clone().ok_or_else(|| {
 		ControlFlow::Err(anyhow::anyhow!("a join in a run that does not hold its program"))
 	})?;
-	let (rows, ran) = run_group(&held, spec.build, state, ctx).await;
-	ran?;
-	let mut table = crate::exec::operators::BuildTable::new();
 	let mut eval = match spec.build_keys.is_empty() {
 		true => None,
 		false => Some(statement_state(program, ctx).map_err(ControlFlow::Err)?),
 	};
+	let spills = ctx.ctx().memory().is_some_and(|memory| memory.can_spill())
+		&& !held.groups.get(spec.build as usize).is_some_and(|group| group.only);
+	if spills {
+		let mut sink = PlanBuildSink {
+			inner: super::join_spill::BuildSink::with_width(spec.build_keys.len(), usize::MAX, ctx),
+			program,
+			spec,
+			eval,
+		};
+		run_group_into(&held, spec.build, state, ctx, &mut sink).await?;
+		return Ok(match sink.inner.finish(ctx).await? {
+			super::join_spill::Built::Memory(table) => {
+				super::join_spill::JoinBuilt::Memory(Arc::new(table))
+			}
+			super::join_spill::Built::Spilled(spilled) => {
+				super::join_spill::JoinBuilt::Spilled(spilled)
+			}
+		});
+	}
+	let (rows, ran) = run_group(&held, spec.build, state, ctx).await;
+	ran?;
+	let mut table = crate::exec::operators::BuildTable::new();
 	for row in rows {
 		// A row keyed and held is a unit of the build's work.
 		super::fuel::tick(ctx, 1).await?;
-		let mut key = Vec::with_capacity(spec.build_keys.len());
-		let row = match &mut eval {
-			Some(eval) => {
-				// The keys read the row through the alias, as the residual and
-				// everything above the join do.
-				let mut seen = crate::val::Object::default();
-				seen.insert(spec.alias.clone(), row);
-				let seen = Value::Object(seen);
-				for scalar in &spec.build_keys {
-					key.push(
-						out_of_line(|| host_scalar_in(program, scalar, ctx, &seen, eval)).await?,
-					);
-				}
-				match seen {
-					Value::Object(mut seen) => {
-						seen.remove(spec.alias.as_str()).unwrap_or(Value::None)
-					}
-					other => other,
-				}
-			}
-			None => row,
-		};
+		let (key, row) = build_key(program, spec, row, &mut eval, ctx).await?;
 		table.insert(key, row, usize::MAX)?;
 	}
-	Ok(table)
+	Ok(super::join_spill::JoinBuilt::Memory(Arc::new(table)))
+}
+
+/// Build row `row` of join `spec` with its key: the build keys evaluated
+/// over the row set under the alias, as the residual and everything above
+/// the join read it. `eval` is the state the keys are evaluated on, `None`
+/// for a join with no keys.
+async fn build_key(
+	program: &Program,
+	spec: &super::program::JoinSpec,
+	row: Value,
+	eval: &mut Option<interp::PooledState>,
+	ctx: &ExecutionContext,
+) -> FlowResult<(Vec<Value>, Value)> {
+	let mut key = Vec::with_capacity(spec.build_keys.len());
+	let Some(eval) = eval else {
+		return Ok((key, row));
+	};
+	let mut seen = crate::val::Object::default();
+	seen.insert(spec.alias.clone(), row);
+	let seen = Value::Object(seen);
+	for scalar in &spec.build_keys {
+		key.push(out_of_line(|| host_scalar_in(program, scalar, ctx, &seen, eval)).await?);
+	}
+	let row = match seen {
+		Value::Object(mut seen) => seen.remove(spec.alias.as_str()).unwrap_or(Value::None),
+		other => other,
+	};
+	Ok((key, row))
+}
+
+/// The build side of a join, keyed as it is read a batch at a time.
+struct PlanBuildSink<'a> {
+	inner: super::join_spill::BuildSink,
+	program: &'a Program,
+	spec: &'a super::program::JoinSpec,
+	eval: Option<interp::PooledState>,
+}
+
+impl RowSink for PlanBuildSink<'_> {
+	fn take<'a>(
+		&'a mut self,
+		rows: Vec<Value>,
+		ctx: &'a ExecutionContext,
+	) -> crate::exec::BoxFut<'a, FlowResult<()>> {
+		Box::pin(async move {
+			for row in rows {
+				super::fuel::tick(ctx, 1).await?;
+				let (key, row) =
+					build_key(self.program, self.spec, row, &mut self.eval, ctx).await?;
+				self.inner.push(key, row, ctx).await?;
+			}
+			Ok(())
+		})
+	}
+}
+
+/// What a join's probe row yields given its matches, as [`run_join`] pairs
+/// it: each match the residual admits, under the alias, and under a left
+/// join a probe row no match admits with `NULL` under it.
+struct PlanPairer<'a> {
+	program: &'a Program,
+	spec: &'a super::program::JoinSpec,
+	ctx: &'a ExecutionContext,
+	eval: Option<interp::PooledState>,
+}
+
+impl super::join_spill::Pairer for PlanPairer<'_> {
+	fn ctx(&self) -> &ExecutionContext {
+		self.ctx
+	}
+
+	fn pair<'a>(
+		&'a mut self,
+		matches: &'a [&'a Value],
+		probe: Value,
+	) -> crate::exec::BoxFut<'a, FlowResult<Vec<Value>>> {
+		Box::pin(async move {
+			let (program, spec, ctx) = (self.program, self.spec, self.ctx);
+			let mut out = Vec::new();
+			for build in matches {
+				super::fuel::tick(ctx, 1).await?;
+				let paired = match &spec.residual {
+					Some(residual) => {
+						let row = match &probe {
+							Value::Object(_) => crate::exec::operators::with_alias(
+								&probe,
+								&spec.alias,
+								(*build).clone(),
+							),
+							_ => {
+								let mut row = crate::val::Object::default();
+								row.insert(spec.alias.clone(), (*build).clone());
+								Value::Object(row)
+							}
+						};
+						let eval = match &mut self.eval {
+							Some(eval) => eval,
+							slot => slot
+								.insert(statement_state(program, ctx).map_err(ControlFlow::Err)?),
+						};
+						let answer =
+							out_of_line(|| host_scalar_in(program, residual, ctx, &row, eval))
+								.await?;
+						if !answer.is_truthy() {
+							continue;
+						}
+						match &probe {
+							Value::Object(_) => row,
+							_ => probe.clone(),
+						}
+					}
+					None => {
+						crate::exec::operators::with_alias(&probe, &spec.alias, (*build).clone())
+					}
+				};
+				out.push(paired);
+			}
+			if out.is_empty() && spec.kind == super::plan::JoinMatch::Left {
+				out.push(crate::exec::operators::with_alias_owned(probe, &spec.alias, Value::Null));
+			}
+			Ok(out)
+		})
+	}
+}
+
+/// Hand on, through join `join`'s pipeline, the pairings of the probe rows
+/// it deferred once its build side spilled, in the order the in-memory join
+/// pairs them. Nothing where the join kept its build side in memory.
+#[allow(clippy::too_many_arguments)]
+async fn finish_spilled_join(
+	program: &Program,
+	pipeline: &Pipeline,
+	join: u16,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+) -> FlowResult<()> {
+	let Some(super::join_spill::JoinBuilt::Spilled(spilled)) = state.joins[join as usize]
+		.take_if(|built| matches!(built, super::join_spill::JoinBuilt::Spilled(_)))
+	else {
+		return Ok(());
+	};
+	let mut pairer = PlanPairer {
+		program,
+		spec: &program.joins[join as usize],
+		ctx,
+		eval: None,
+	};
+	let mut merge = spilled.finish(&mut pairer).await?;
+	let most = ctx.root().ctx.config.exec.scan_batch_size.max(1);
+	loop {
+		let chunk = merge.next_chunk(most, ctx).await?;
+		if chunk.is_empty() {
+			break;
+		}
+		for (_, row) in chunk {
+			if out_of_line(|| run_value_row(program, pipeline, row, state, ctx)).await?
+				== Ended::Stop
+			{
+				return flush(state, yielder, flush_at, ctx).await;
+			}
+		}
+		out_of_line(|| flush(state, yielder, flush_at, ctx)).await?;
+	}
+	Ok(())
 }
 
 /// The rows aggregate `aggregate`'s groups finish into, as the aggregate
@@ -4306,11 +4595,12 @@ pub(super) async fn flush(
 	state: &mut State,
 	yielder: &mut Out<'_, '_>,
 	flush_at: usize,
+	ctx: &ExecutionContext,
 ) -> FlowResult<()> {
-	#[cfg(all(storage, not(target_family = "wasm")))]
-	spill_sorts(state).await?;
+	spill_breakers(state, ctx).await?;
 	if let Some(write) = &state.write {
 		write.judge_only()?;
+		held_writes(ctx)?;
 	}
 	if state.output_len() >= flush_at {
 		match yielder {
@@ -4318,61 +4608,219 @@ pub(super) async fn flush(
 				Some(rows) => yielder.emit(ValueBatch::encoded(rows)).await,
 				None => yielder.emit(ValueBatch::new(state.take_output())).await,
 			},
-			Out::Gather(rows) => rows.append(&mut state.output),
+			Out::Gather(rows) => {
+				gathered(state, ctx)?;
+				rows.append(&mut state.output)
+			}
+			Out::Sink(sink) => sink.take(state.take_output(), ctx).await?,
 		}
 	}
 	Ok(())
 }
 
-/// Let every sort of `program` that asks for `TEMPFILES` spill, when the
-/// context names a temporary directory: each holds at most the external
-/// sorting buffer limit's rows in memory, as the operator tree's external sort
-/// does.
-#[cfg(storage)]
-fn spill_to(program: &Program, state: &mut State, ctx: &ExecutionContext) {
-	let Some(dir) = ctx.ctx().temporary_directory() else {
-		return;
-	};
-	let limit = ctx.root().ctx.config.exec.external_sorting_buffer_limit.max(1);
-	let mut any = false;
-	for (at, spec) in program.sorts.iter().enumerate() {
-		if spec.spill {
-			state.sort_spill[at] = Some((limit, spec.keys.clone()));
-			any = true;
-		}
-	}
-	if any {
-		state.spill_dir = Some(std::sync::Arc::clone(dir));
-	}
-}
-
-/// Without a temporary directory to write runs to, no sort spills.
-#[cfg(not(storage))]
-fn spill_to(_program: &Program, _state: &mut State, _ctx: &ExecutionContext) {}
-
-/// Write out as a run each spilling sort that holds its limit.
-#[cfg(all(storage, not(target_family = "wasm")))]
-async fn spill_sorts(state: &mut State) -> FlowResult<()> {
-	let Some(dir) = state.spill_dir.clone() else {
+/// Charge what the statement's transaction has written to the query's
+/// lease: its write buffer holds it until the transaction commits, and it
+/// cannot be spilled.
+fn held_writes(ctx: &ExecutionContext) -> FlowResult<()> {
+	let (Some(memory), Some(txn)) = (ctx.ctx().memory(), ctx.try_txn()) else {
 		return Ok(());
 	};
-	for at in 0..state.sorts.len() {
-		let Some((limit, keys)) = &state.sort_spill[at] else {
-			continue;
-		};
-		if state.sorts[at].len() < *limit {
-			continue;
-		}
-		let keys = keys.clone();
-		let rows = std::mem::take(&mut state.sorts[at]);
-		let slab = std::mem::take(&mut state.sort_slabs[at]);
-		let runs = match &mut state.sort_runs[at] {
-			Some(runs) => runs,
-			slot => slot.insert(super::spill::Runs::new(&dir).map_err(ControlFlow::Err)?),
-		};
-		runs.spill(rows, slab, keys).await.map_err(ControlFlow::Err)?;
+	let address = Arc::as_ptr(&txn) as usize;
+	memory.hold_writes(address, txn.bytes_written()).map_err(ControlFlow::Err)
+}
+
+/// Charge the rows a gather is about to take to the query's lease. A
+/// gathered result becomes one value and cannot be spilled, so a gather the
+/// lease no longer covers fails the statement once the lease stands at its
+/// minimum; above it, the query's breakers give memory back by spilling.
+fn gathered(state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
+	let Some(memory) = ctx.ctx().memory() else {
+		return Ok(());
+	};
+	let bytes = crate::exec::memory::size::values_bytes(&state.output);
+	let account = state.gather_account.get_or_insert_with(|| memory.reservation());
+	if account.charge(bytes) == crate::exec::memory::Verdict::Spill && memory.lease().at_minimum() {
+		return Err(ControlFlow::Err(account.exhausted()));
 	}
 	Ok(())
+}
+
+/// Bound the breakers of `program` by the query's memory: every sort that
+/// keeps all its rows charges them to the query's lease, which opens it with
+/// its spill headroom, and spills once the lease no longer covers them. A
+/// sort under `TEMPFILES` also spills each time it holds the external
+/// sorting buffer limit's rows, as the operator tree's external sort does,
+/// when the context names a temporary directory.
+fn bound_breakers(program: &Program, state: &mut State, ctx: &ExecutionContext) {
+	let Some(memory) = ctx.ctx().memory() else {
+		return;
+	};
+	state.memory = Some(Arc::clone(memory));
+	let rows = tempfiles_limit(ctx);
+	for (at, spec) in program.sorts.iter().enumerate() {
+		if spec.keep.is_some() {
+			continue;
+		}
+		state.sort_accounts[at] = memory.reservation();
+		state.sort_spill[at] = Some(super::sort::SortSpill {
+			rows: rows.filter(|_| spec.spill && !spec.random),
+			keys: match spec.random {
+				true => vec![super::sort::RANDOM_ORDER],
+				false => spec.keys.clone(),
+			},
+			random: spec.random,
+		});
+	}
+	for (at, sink) in program.aggregates.iter().enumerate() {
+		if sink.keys > 0 {
+			state.group_accounts[at] = memory.reservation();
+		}
+	}
+}
+
+/// The rows a `TEMPFILES` sort holds before it spills, when the context
+/// names a temporary directory.
+#[cfg(storage)]
+fn tempfiles_limit(ctx: &ExecutionContext) -> Option<usize> {
+	ctx.ctx()
+		.temporary_directory()
+		.map(|_| ctx.root().ctx.config.exec.external_sorting_buffer_limit.max(1))
+}
+
+#[cfg(not(storage))]
+fn tempfiles_limit(_ctx: &ExecutionContext) -> Option<usize> {
+	None
+}
+
+/// Write out as a run each sort its lease no longer covers, or that holds
+/// its `TEMPFILES` limit. A sort over its lease with no store to spill to
+/// fails the statement.
+async fn spill_breakers(state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
+	let Some(memory) = state.memory.clone() else {
+		return Ok(());
+	};
+	state.spill_due = false;
+	for at in 0..state.sorts.len() {
+		let Some(spill) = &state.sort_spill[at] else {
+			continue;
+		};
+		let by_rows = spill.rows.is_some_and(|limit| state.sorts[at].len() >= limit);
+		let account = &mut state.sort_accounts[at];
+		if !by_rows && !account.wants_spill() {
+			continue;
+		}
+		if state.sorts[at].is_empty() {
+			account.clear();
+			continue;
+		}
+		if !memory.can_spill() {
+			return Err(ControlFlow::Err(account.exhausted()));
+		}
+		let (keys, random) = (spill.keys.clone(), spill.random);
+		let mut rows = std::mem::take(&mut state.sorts[at]);
+		let slab = std::mem::take(&mut state.sort_slabs[at]);
+		if random {
+			super::sort::with_random_keys(&mut rows);
+		}
+		let runs = state.sort_runs[at].get_or_insert_with(Default::default);
+		runs.spill_sorted(&memory, rows, &slab, &keys, ctx).await?;
+		state.sort_accounts[at].clear();
+	}
+	for at in 0..state.groups.len() {
+		let account = &mut state.group_accounts[at];
+		let Some(groups) = state.groups[at].as_mut() else {
+			continue;
+		};
+		if account.memory().is_none() || !groups.spillable() {
+			continue;
+		}
+		account.hold(groups.bytes());
+		if !account.wants_spill() {
+			continue;
+		}
+		if !memory.can_spill() {
+			return Err(ControlFlow::Err(account.exhausted()));
+		}
+		// Groups whose states cannot be saved stay in memory.
+		let Some(records) = groups.save_all() else {
+			continue;
+		};
+		let run = super::spill::write_run(&memory, records, ctx).await?;
+		state.group_runs[at].get_or_insert_with(Default::default).push(run);
+		state.group_accounts[at].clear();
+	}
+	Ok(())
+}
+
+/// The rows aggregate `aggregate` answers once some of its groups have been
+/// spilled: the runs and the groups still held, merged in key order, the
+/// saved states of each key combined in the order they were spilled and
+/// finished a batch of keys at a time.
+#[allow(clippy::too_many_arguments)]
+async fn finish_spilled_groups(
+	program: &Program,
+	pipeline: &Pipeline,
+	aggregate: u16,
+	runs: super::spill::Runs,
+	memory: Arc<crate::exec::memory::QueryMemory>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+) -> FlowResult<()> {
+	let at = aggregate as usize;
+	let held = match state.groups[at].take() {
+		Some(mut groups) => groups.save_all().ok_or_else(|| {
+			ControlFlow::Err(anyhow::anyhow!("an aggregate spilled groups it cannot save"))
+		})?,
+		None => Vec::new(),
+	};
+	state.group_accounts[at].clear();
+	let order: super::spill::RecordOrder = Arc::new(|(a, _), (b, _)| a.cmp(b));
+	let mut merge = runs.merge(&memory, held, order, ctx).await?;
+	let functions = state.aggregates.functions[at].clone();
+	let keys = program.aggregates[at].keys;
+	let batch = ctx.root().ctx.config.exec.scan_batch_size.max(1);
+	// A batch of keys is finished once it holds half of what the query may
+	// hold, so the groups finished at once stay within its lease.
+	let room = memory.working() / 2;
+	let mut next: Option<crate::exec::memory::runs::Record> = None;
+	loop {
+		let mut chunk = Groups::new(keys, &functions);
+		let mut taken = 0;
+		let mut last: Option<Vec<Value>> = None;
+		let mut drained = true;
+		loop {
+			let record = match next.take() {
+				Some(record) => record,
+				None => match merge.next(ctx).await? {
+					Some(record) => record,
+					None => break,
+				},
+			};
+			if last.as_ref() != Some(&record.0) {
+				if taken == batch || (taken > 0 && chunk.bytes() > room) {
+					next = Some(record);
+					drained = false;
+					break;
+				}
+				taken += 1;
+				last = Some(record.0.clone());
+			}
+			chunk.load_saved(record.0, record.1, &functions).map_err(ControlFlow::Err)?;
+		}
+		if taken == 0 {
+			return Ok(());
+		}
+		let rows = out_of_line(|| finish_groups(program, aggregate, Some(chunk), ctx)).await?;
+		let rows = rows.into_iter().map(|row| (Vec::new(), row)).collect();
+		let stopped =
+			out_of_line(|| run_rows(program, pipeline, rows, state, ctx, yielder, flush_at))
+				.await?;
+		if stopped || drained {
+			return Ok(());
+		}
+	}
 }
 
 /// A paging clause's count, evaluated once for the statement.
@@ -4849,7 +5297,7 @@ pub(super) fn gather_program(
 			let mut state = run_untailed(&program, ctx, &mut out, None, None).await?;
 			let mut values = match out {
 				Out::Gather(values) => values,
-				Out::Stream(_) => Vec::new(),
+				Out::Stream(_) | Out::Sink(_) => Vec::new(),
 			};
 			values.append(&mut state.output);
 			values

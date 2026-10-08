@@ -5,6 +5,7 @@
 use anyhow::Result;
 
 use super::Rejected;
+use super::saved::{Loading, Saving};
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
 use crate::expr::Kind;
 use crate::val::{Datetime, Value};
@@ -38,6 +39,17 @@ struct TimeMinAccumulator {
 }
 
 impl Accumulator for TimeMinAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().option_datetime(self.min).rejected(&self.rejected).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.min = state.option_datetime()?;
+		self.rejected = state.rejected()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		if let Some(d) = self.rejected.datetime("time::min", &value) {
 			self.min = Some(match &self.min {
@@ -129,6 +141,17 @@ struct TimeMaxAccumulator {
 }
 
 impl Accumulator for TimeMaxAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().option_datetime(self.max).rejected(&self.rejected).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.max = state.option_datetime()?;
+		self.rejected = state.rejected()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		if let Some(d) = self.rejected.datetime("time::max", &value) {
 			self.max = Some(match &self.max {

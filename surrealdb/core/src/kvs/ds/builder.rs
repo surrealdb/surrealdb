@@ -59,6 +59,11 @@ pub struct Builder {
 	transaction_timeout: Option<Duration>,
 	query_timeout: Option<Duration>,
 	temporary_directory: Option<Arc<PathBuf>>,
+	/// The governor granting each query its memory; see
+	/// [`Builder::with_memory_governor`].
+	memory_governor: Option<Arc<dyn crate::exec::memory::MemoryGovernor>>,
+	/// The store a query's breakers spill to; see [`Builder::with_temp_store`].
+	temp_store: Option<Arc<dyn crate::exec::memory::TempStore>>,
 	authenticate: bool,
 	config: ConfigMap,
 	/// Overrides the built-in graph fold threshold; see
@@ -95,6 +100,8 @@ impl Builder {
 			transaction_timeout: None,
 			query_timeout: None,
 			temporary_directory: None,
+			memory_governor: None,
+			temp_store: None,
 			authenticate: false,
 			config: ConfigMap::empty(),
 			graph_fold_threshold: None,
@@ -239,6 +246,25 @@ impl Builder {
 		disallowed_params: Vec<String>,
 	) -> Self {
 		self.slow_log = Some(SlowLog::new(timeout, allowed_params, disallowed_params));
+		self
+	}
+
+	/// Set the governor that grants each query its memory, for a host that
+	/// sizes and shares memory itself (an edge isolate). Without one, the
+	/// datastore holds its queries to the `memory_limit` setting.
+	pub fn with_memory_governor(
+		mut self,
+		governor: Arc<dyn crate::exec::memory::MemoryGovernor>,
+	) -> Self {
+		self.memory_governor = Some(governor);
+		self
+	}
+
+	/// Set the store a query's breakers spill to once they outgrow their
+	/// query's memory. Without one, a native datastore spills to files in its
+	/// temporary directory, or the system's.
+	pub fn with_temp_store(mut self, store: Arc<dyn crate::exec::memory::TempStore>) -> Self {
+		self.temp_store = Some(store);
 		self
 	}
 
@@ -401,6 +427,9 @@ impl Builder {
 			live_query_broker: self.live_query_broker,
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			scheduler: None,
+			memory_governor: self.memory_governor,
+			temp_store: self.temp_store,
+			memory_host: Default::default(),
 			http_endpoint: self.http_endpoint,
 			capabilities: ArcSwap::from_pointee(capabilities),
 			index_stores: IndexStores::new(

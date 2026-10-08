@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 
+use super::saved::{Loading, Saving};
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
 use crate::expr::Kind;
 use crate::val::{Number, Value};
@@ -49,6 +50,16 @@ impl CountAccumulator {
 }
 
 impl Accumulator for CountAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().int(self.count).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.count = state.int()?;
+		Ok(())
+	}
+
 	fn update(&mut self, _value: Value) -> Result<()> {
 		self.count += 1;
 		Ok(())
@@ -124,6 +135,16 @@ impl CountFieldAccumulator {
 }
 
 impl Accumulator for CountFieldAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().int(self.count).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.count = state.int()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		// Count truthy values (matches old behavior)
 		if value.is_truthy() {

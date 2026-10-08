@@ -440,7 +440,18 @@ pub(crate) async fn record_change(row: &mut WriteRow, ctx: &WriteCtx) -> Result<
 		return Ok(());
 	};
 	let txn = ctx.txn();
+	// What the transaction buffers until it commits counts against the
+	// query's memory.
+	let memory = ctx.exec.ctx().memory().cloned();
+	let held = |values: &[&crate::val::Value]| -> Result<(), ControlFlow> {
+		if let Some(memory) = &memory {
+			let bytes = values.iter().map(|v| crate::exec::memory::size::value_bytes(v)).sum();
+			memory.hold_unspillable(bytes).map_err(ControlFlow::Err)?;
+		}
+		Ok(())
+	};
 	if let Some(changefeed) = changefeed_definition(ctx) {
+		held(&[&row.initial, &row.current])?;
 		txn.changefeed_buffer_record_change(
 			ctx.db.namespace_id,
 			ctx.db.database_id,
@@ -460,6 +471,7 @@ pub(crate) async fn record_change(row: &mut WriteRow, ctx: &WriteCtx) -> Result<
 	// The live-query capture is independent of the feed above and
 	// runs whether or not one is defined.
 	if captures_live_events(ctx, &txn).await? {
+		held(&[&row.initial, &row.current])?;
 		txn.live_event_buffer_record_change(
 			ctx.db.namespace_id,
 			ctx.db.database_id,

@@ -98,6 +98,20 @@ impl Rejected {
 		);
 	}
 
+	/// The rejection's reason and whether a value was folded, for a saved
+	/// state.
+	pub(super) fn parts(&self) -> (&Option<String>, bool) {
+		(&self.reason, self.folded)
+	}
+
+	/// A rejection rebuilt from the parts [`Self::parts`] answered.
+	pub(super) fn from_parts(reason: Option<String>, folded: bool) -> Self {
+		Self {
+			reason,
+			folded,
+		}
+	}
+
 	/// Combine with another partial accumulator over the same group: a value
 	/// folded by either half gives the group an answer, and the first rejection
 	/// is carried in case neither half folded anything.

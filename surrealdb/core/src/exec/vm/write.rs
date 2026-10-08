@@ -1343,7 +1343,7 @@ async fn run_targets(
 			while let Some(row) = rows.next().await? {
 				write_state(state)?.row = Some(row);
 				run_value_row(program, pipeline, Value::None, state, ctx).await?;
-				flush(state, yielder, flush_at).await?;
+				flush(state, yielder, flush_at, ctx).await?;
 			}
 		}
 	}
@@ -1356,7 +1356,7 @@ async fn run_targets(
 	{
 		write_state(state)?.row = Some(WriteRow::for_target(Value::Table(table))?);
 		run_value_row(program, pipeline, Value::None, state, ctx).await?;
-		flush(state, yielder, flush_at).await?;
+		flush(state, yielder, flush_at, ctx).await?;
 	}
 	Ok(())
 }
@@ -1388,7 +1388,7 @@ async fn run_inserts(
 	for value in insert_values(program, rows, state, ctx).await? {
 		write_state(state)?.row = Some(insert_row(value, &into, relation)?);
 		run_value_row(program, pipeline, Value::None, state, ctx).await?;
-		flush(state, yielder, flush_at).await?;
+		flush(state, yielder, flush_at, ctx).await?;
 	}
 	Ok(())
 }
@@ -1495,7 +1495,7 @@ async fn run_edges(
 			let at = endpoint(through).await?;
 			write_state(state)?.row = Some(relate_row(at, f.clone(), t.clone())?);
 			run_value_row(program, pipeline, Value::None, state, ctx).await?;
-			flush(state, yielder, flush_at).await?;
+			flush(state, yielder, flush_at, ctx).await?;
 		}
 	}
 	Ok(())

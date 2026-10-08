@@ -103,9 +103,12 @@ pub(crate) type UnitTable = Arc<[Arc<program::Program>]>;
 /// [`program::Program::served`] index: kept beside the program by the
 /// operator that runs it, since a program holds no logical plan.
 pub(crate) type ServedStatements = Arc<[Arc<LogicalOp>]>;
+
 mod arena;
 mod backfill;
 mod batch;
+mod distinct_spill;
+mod join_spill;
 mod region;
 mod row;
 mod scalar;
@@ -113,7 +116,6 @@ mod schema_host;
 mod services;
 mod sort;
 pub(crate) mod speculate;
-#[cfg(all(storage, not(target_family = "wasm")))]
 mod spill;
 mod store;
 mod subroutine;
@@ -149,6 +151,8 @@ mod tests_kept;
 mod tests_leaf;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_lookups;
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests_memory;
 #[cfg(test)]
 mod tests_methods;
 #[cfg(all(test, feature = "kv-mem"))]

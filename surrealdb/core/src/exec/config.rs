@@ -40,6 +40,22 @@ const DEFAULT_REGION_ROW_THRESHOLD: usize = 256;
 /// host's scheduler. Overridable per deployment via the `vm_quantum` key.
 const DEFAULT_VM_QUANTUM: u32 = 4096;
 
+/// Default node memory limit, in bytes, for the queries' breakers when
+/// neither `memory_limit` nor `SURREAL_MEMORY_THRESHOLD` sets one: 2 GiB.
+const DEFAULT_MEMORY_LIMIT: usize = 2 << 30;
+
+/// Default bytes every query lease is guaranteed beyond its spill headroom.
+const DEFAULT_QUERY_MEMORY_MINIMUM: usize = 4 << 20;
+
+/// Default size of a spilled run's parts, in bytes.
+const DEFAULT_SPILL_PART_SIZE: usize = 1 << 20;
+
+/// Default number of runs a merge reads at once.
+const DEFAULT_SPILL_MERGE_FAN_IN: usize = 8;
+
+/// Default bytes a breaker reserves from its query's lease at a time.
+const DEFAULT_MEMORY_RESERVE_CHUNK: usize = 256 << 10;
+
 /// Default number of compiled units of each kind a node keeps. Overridable
 /// per deployment via the `compiled_unit_cache_size` key.
 const DEFAULT_COMPILED_UNIT_CACHE_SIZE: usize = 1024;
@@ -178,6 +194,38 @@ pub(crate) struct ExecConfig {
 	/// before its calls run a body that reads them when it runs, where one
 	/// compiles (default: 32).
 	pub specialised_body_values: usize,
+	/// The bytes the node's queries may hold in their breakers — sorts,
+	/// groups, distincts, join builds — before they spill
+	/// (`crate::exec::memory`). `0`, the default, takes half of
+	/// `SURREAL_MEMORY_THRESHOLD` where that is set, and 2 GiB otherwise. A
+	/// host that supplies its own governor sizes it itself.
+	pub memory_limit: usize,
+	/// The bytes every query that holds a breaker is guaranteed, beyond what
+	/// spilling takes (default: 4 MiB). No lowered grant takes them back.
+	pub query_memory_minimum: usize,
+	/// The size, in bytes, of the parts a spilled run is written and read in
+	/// (default: 1 MiB). A query holds one to write a run and one per run a
+	/// merge reads, as part of its guaranteed minimum.
+	pub spill_part_size: usize,
+	/// The runs a merge reads at once (default: 8, at least 2); a merge of
+	/// more takes several passes.
+	pub spill_merge_fan_in: usize,
+	/// The bytes a breaker reserves from its query's lease at a time
+	/// (default: 256 KiB).
+	pub memory_reserve_chunk: usize,
+}
+
+impl ExecConfig {
+	/// The node memory limit `memory_limit` names, with its default resolved.
+	pub(crate) fn memory_limit(&self) -> usize {
+		match self.memory_limit {
+			0 => match *cnf::MEMORY_THRESHOLD {
+				0 => DEFAULT_MEMORY_LIMIT,
+				threshold => threshold / 2,
+			},
+			limit => limit,
+		}
+	}
 }
 
 impl Default for ExecConfig {
@@ -202,6 +250,11 @@ impl Default for ExecConfig {
 			specialised_body_cache_size: DEFAULT_SPECIALISED_BODY_CACHE_SIZE,
 			specialised_body_max_arg_bytes: DEFAULT_SPECIALISED_BODY_MAX_ARG_BYTES,
 			specialised_body_values: DEFAULT_SPECIALISED_BODY_VALUES,
+			memory_limit: 0,
+			query_memory_minimum: DEFAULT_QUERY_MEMORY_MINIMUM,
+			spill_part_size: DEFAULT_SPILL_PART_SIZE,
+			spill_merge_fan_in: DEFAULT_SPILL_MERGE_FAN_IN,
+			memory_reserve_chunk: DEFAULT_MEMORY_RESERVE_CHUNK,
 		}
 	}
 }
@@ -230,6 +283,19 @@ impl cnf::Config for ExecConfig {
 			.parse_key("specialised_body_cache_size", &mut self.specialised_body_cache_size)
 			.parse_key("specialised_body_max_arg_bytes", &mut self.specialised_body_max_arg_bytes)
 			.parse_key("specialised_body_values", &mut self.specialised_body_values)
+			.parse_key_with("memory_limit", &mut self.memory_limit, |x| {
+				x.parse_bytes::<usize>().ok()
+			})
+			.parse_key_with("query_memory_minimum", &mut self.query_memory_minimum, |x| {
+				x.parse_bytes::<usize>().ok()
+			})
+			.parse_key_with("spill_part_size", &mut self.spill_part_size, |x| {
+				x.parse_bytes::<usize>().ok().filter(|&n| n > 0)
+			})
+			.parse_key("spill_merge_fan_in", &mut self.spill_merge_fan_in)
+			.parse_key_with("memory_reserve_chunk", &mut self.memory_reserve_chunk, |x| {
+				x.parse_bytes::<usize>().ok().filter(|&n| n > 0)
+			})
 			.parse_key_with(
 				"generation_allocation_limit",
 				&mut self.generation_allocation_limit,

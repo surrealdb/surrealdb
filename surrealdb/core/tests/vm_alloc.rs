@@ -32,13 +32,14 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::backtrace::Backtrace;
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use surrealdb_core::dbs::Session;
-use surrealdb_core::exec::row_frame_probe;
+use surrealdb_core::exec::row_frame_probe::transcode_table;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_types::{Array, Number, Object, Value, Variables};
+use tokio::sync::Mutex as AsyncMutex;
 
 // --------------------------------------------------
 // The counting allocator
@@ -55,6 +56,32 @@ static BYTES: AtomicU64 = AtomicU64::new(0);
 /// Capture a backtrace every this many counted allocations; zero captures none.
 static SAMPLE_EVERY: AtomicU64 = AtomicU64::new(0);
 static SAMPLES: Mutex<Vec<Backtrace>> = Mutex::new(Vec::new());
+/// The bytes allocated and not yet freed, on every thread, counted always.
+static LIVE: AtomicI64 = AtomicI64::new(0);
+/// Held by every check for its whole run: the counts and the peak are
+/// process-wide, so a check measures only its own work while no other runs.
+static MEASURING: AsyncMutex<()> = AsyncMutex::const_new(());
+/// The most [`LIVE`] has reached since [`reset_peak`].
+static PEAK: AtomicI64 = AtomicI64::new(0);
+
+#[inline]
+fn live(delta: i64) {
+	let now = LIVE.fetch_add(delta, Ordering::Relaxed) + delta;
+	PEAK.fetch_max(now, Ordering::Relaxed);
+}
+
+/// Start a peak measurement from the bytes live now.
+fn reset_peak() -> i64 {
+	let now = LIVE.load(Ordering::SeqCst);
+	PEAK.store(now, Ordering::SeqCst);
+	now
+}
+
+/// The most bytes live at once since [`reset_peak`] answered `base`, above
+/// `base`.
+fn peak_since(base: i64) -> i64 {
+	PEAK.load(Ordering::SeqCst) - base
+}
 
 thread_local! {
 	/// Set while this thread captures a backtrace, so the allocations the
@@ -83,23 +110,27 @@ fn record(size: usize) {
 unsafe impl GlobalAlloc for Counting {
 	unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
 		record(layout.size());
+		live(layout.size() as i64);
 		// SAFETY: forwarded unchanged from the caller's contract.
 		unsafe { System.alloc(layout) }
 	}
 
 	unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
 		record(layout.size());
+		live(layout.size() as i64);
 		// SAFETY: forwarded unchanged from the caller's contract.
 		unsafe { System.alloc_zeroed(layout) }
 	}
 
 	unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+		live(-(layout.size() as i64));
 		// SAFETY: forwarded unchanged from the caller's contract.
 		unsafe { System.dealloc(ptr, layout) }
 	}
 
 	unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
 		record(new_size);
+		live(new_size as i64 - layout.size() as i64);
 		// SAFETY: forwarded unchanged from the caller's contract.
 		unsafe { System.realloc(ptr, layout, new_size) }
 	}
@@ -516,7 +547,7 @@ async fn per_row_frame_allocations() {
 	let (small, _) = datastore(SMALL).await;
 	let (large, _) = datastore(LARGE).await;
 	let probe = |ds: Arc<Datastore>| async move {
-		let run = || row_frame_probe::transcode_table(&ds, "test", "test", "t");
+		let run = || transcode_table(&ds, "test", "test", "t");
 		run().await.expect("transcodes");
 		let ((rows, bytes), counts, samples) =
 			count(sample_every, async { run().await.expect("transcodes") }).await;
@@ -826,6 +857,7 @@ const RESPONSE_BUDGETS: &[(&str, f64, &str)] = &[
 #[tokio::test]
 async fn response_allocations_stay_within_budget() {
 	use surrealdb_rpc::RowFormat;
+	let _measuring = MEASURING.lock().await;
 	const CHECK_SMALL: usize = 2_000;
 	const CHECK_LARGE: usize = 4_000;
 	let (small, session) = datastore(CHECK_SMALL).await;
@@ -857,4 +889,95 @@ async fn response_allocations_stay_within_budget() {
 		}
 	}
 	assert!(over.is_empty(), "over budget:\n{}", over.join("\n"));
+}
+
+// --------------------------------------------------
+// Memory ceilings
+// --------------------------------------------------
+
+/// Runs go to files, so the heap holds only what the breakers keep in memory
+/// and the parts they read and write.
+/// Rows whose payload makes the table several MiB, sorted and grouped by it.
+const CEILING_ROWS: usize = 12_000;
+
+async fn ceiling_datastore(bounded: bool) -> (Arc<Datastore>, Session) {
+	use std::sync::Arc;
+
+	use surrealdb_core::exec::memory::{FairGovernor, FileTempStore};
+	let mut builder = Datastore::builder().without_maintenance_tasks();
+	if bounded {
+		builder = builder
+			.with_memory_governor(Arc::new(FairGovernor::new(1 << 20)))
+			.with_temp_store(Arc::new(
+				FileTempStore::open(
+					&std::env::temp_dir().join("surrealdb-vm-alloc"),
+					64 << 10,
+					None,
+				)
+				.expect("a temporary store"),
+			))
+			.with_config(
+				surrealdb_cnf::ConfigMap::empty()
+					.with_key_value("spill_part_size", "65536")
+					.with_key_value("spill_merge_fan_in", "4")
+					.with_key_value("query_memory_minimum", "262144"),
+			);
+	}
+	let ds = builder.build_with_path("memory").await.expect("datastore");
+	let session = Session::owner().with_ns("test").with_db("test");
+	ds.execute("DEFINE NS test; USE NS test; DEFINE DB test;", &Session::owner(), None)
+		.await
+		.expect("namespace and database defined");
+	// Written a transaction of a hundred rows at a time: a transaction's
+	// writes count against its query's memory too.
+	let define = ds.execute("DEFINE TABLE t", &session, None).await.expect("table defined");
+	define.into_iter().for_each(|response| drop(response.result.expect("table defined")));
+	for start in (0..CEILING_ROWS).step_by(100) {
+		let setup = format!(
+			"FOR $i IN {start}..{} {{ CREATE type::record('t', $i) SET n = $i, \
+			 pad = string::concat(<string> ($i % 1999), string::repeat('x', 2048)) }};",
+			start + 100
+		);
+		for response in ds.execute(&setup, &session, None).await.expect("setup runs") {
+			response.result.expect("setup succeeds");
+		}
+	}
+	(ds, session)
+}
+
+/// The answer to `sql` and the most bytes live at once while it ran.
+async fn peak_of(ds: &Datastore, session: &Session, sql: &str) -> (Vec<Value>, i64) {
+	let base = reset_peak();
+	let mut answers = Vec::new();
+	for response in ds.execute(sql, session, None).await.expect("query runs") {
+		answers.push(response.result.expect("statement succeeds"));
+	}
+	(answers, peak_since(base))
+}
+
+/// A sort and an aggregate over a table several times the size of a 1 MiB
+/// budget answer what they answer unbounded, while the heap they hold at
+/// once stays a fraction of what they hold unbounded. The statements answer
+/// little, so what they hold is what their breakers hold.
+#[tokio::test(flavor = "current_thread")]
+async fn breakers_over_a_small_budget_hold_a_bounded_heap() {
+	let _measuring = MEASURING.lock().await;
+	let statements = [
+		"SELECT VALUE n FROM t ORDER BY pad, n",
+		"SELECT n % 100 AS b, array::len(array::group(pad)) AS c FROM t GROUP BY b",
+	];
+	let (free, session) = ceiling_datastore(false).await;
+	let (bounded, _) = ceiling_datastore(true).await;
+	for sql in statements {
+		let (expected, unbounded_peak) = peak_of(&free, &session, sql).await;
+		let (got, bounded_peak) = peak_of(&bounded, &session, sql).await;
+		assert_eq!(got, expected, "`{sql}` under a small budget");
+		eprintln!(
+			"{sql}: unbounded peak {unbounded_peak} bytes, bounded peak {bounded_peak} bytes"
+		);
+		assert!(
+			bounded_peak * 2 < unbounded_peak,
+			"`{sql}` held {bounded_peak} bytes under a 1 MiB budget, {unbounded_peak} unbounded"
+		);
+	}
 }

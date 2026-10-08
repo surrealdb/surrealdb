@@ -14,6 +14,7 @@ mod array;
 mod count;
 mod math;
 mod reject;
+mod saved;
 mod time;
 mod vector;
 
@@ -82,6 +83,31 @@ impl AccumulatorState {
 	#[inline]
 	pub(crate) fn update(&mut self, value: Value) -> anyhow::Result<()> {
 		self.as_accumulator_mut().update(value)
+	}
+
+	/// The state as a value, for an aggregate that spills its groups:
+	/// [`Accumulator::save`].
+	pub(crate) fn save(&self) -> Option<Value> {
+		match self {
+			Self::Count(a) => a.save(),
+			Self::CountField(a) => a.save(),
+			Self::Sum(a) => a.save(),
+			Self::Mean(a) => a.save(),
+			Self::Min(a) => a.save(),
+			Self::Max(a) => a.save(),
+			Self::Boxed(a) => a.save(),
+		}
+	}
+
+	/// [`Accumulator::holds_inputs`].
+	pub(crate) fn holds_inputs(&self) -> bool {
+		matches!(self, Self::Boxed(a) if a.holds_inputs())
+	}
+
+	/// Load a state [`Self::save`] answered into this fresh state:
+	/// [`Accumulator::load`].
+	pub(crate) fn load(&mut self, state: Value) -> anyhow::Result<()> {
+		self.as_accumulator_mut().load(state)
 	}
 
 	/// [`Accumulator::finalize`].

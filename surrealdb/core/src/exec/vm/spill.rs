@@ -1,139 +1,213 @@
-//! A sort's rows held on disk once they outgrow the rows it may keep in
-//! memory, for a statement that asks for `TEMPFILES`.
+//! External sort and merge: a breaker's rows held in the query's temporary
+//! store once they outgrow its memory.
 //!
-//! The sort takes its rows in arrival order. Each time it holds its limit, the
-//! rows are sorted — stably — and written out as one run. When the sort hands
-//! its rows on, the runs and the rows still held are merged: at each step the
-//! row that orders first is taken, and of rows whose keys are equal, the one
-//! from the earlier run, so the merged order is the order sorting every row at
-//! once gives.
+//! A breaker takes its rows in arrival order. Each time its query's lease no
+//! longer covers them (`crate::exec::memory`), or — for a sort under
+//! `TEMPFILES` — each time it holds the external sorting buffer limit's rows,
+//! the rows are sorted, stably, and written out as one run. When the breaker
+//! hands its rows on, the runs and the rows still held are merged: at each
+//! step the row that orders first is taken, and of rows that tie, the one
+//! from the earlier run, the rows still held last. The merged order is the
+//! order sorting every row at once gives.
 //!
-//! A run is a file of records, each its keys and its row, every value framed
-//! by its length and encoded as a stored value is. Records are read back one
-//! at a time, so a merge holds one record per run.
+//! A merge reads each run through one part buffer, and reads no more runs at
+//! once than its query's fan-in ([`QueryMemory::fan_in`]). With more runs than
+//! that, consecutive runs are merged into one, a fan-in at a time, until few
+//! enough remain; merging consecutive runs keeps every tie in arrival order.
+//! The merge is a loser tree, `log k` comparisons a row taken over `k`
+//! sources, and charges the thread's fuel a unit a row.
 
-use std::fs::File;
-use std::io::{BufReader, BufWriter, Read, Write};
-use std::path::{Path, PathBuf};
+use std::cmp::Ordering;
+use std::sync::Arc;
 
-use anyhow::Context as _;
-use revision::{DeserializeRevisioned, SerializeRevisioned};
+use surrealdb_runtime::fuel::LoserTree;
 
-use super::interp::{SortRow, compare_keys, sort_and_keep};
 use super::program::KeyOrder;
-use crate::val::Value;
+use super::sort::{Sorted, compare_rows};
+use crate::exec::memory::QueryMemory;
+use crate::exec::memory::runs::{Record, Run, RunSink, RunSource};
+use crate::exec::{ExecutionContext, FlowResult};
+use crate::expr::ControlFlow;
 
-/// How many runs this process has written, for tests that must know a sort
-/// spilled.
+/// How many runs this process has written, for tests that must know a
+/// breaker spilled.
 #[cfg(test)]
 pub(super) static RUNS_WRITTEN: std::sync::atomic::AtomicUsize =
 	std::sync::atomic::AtomicUsize::new(0);
 
-/// The runs a sort has written, in the order it wrote them.
-pub(crate) struct Runs {
-	dir: tempfile::TempDir,
-	runs: Vec<PathBuf>,
+/// How many merge passes this process has made before a final merge, for
+/// tests that must know a merge took several.
+#[cfg(test)]
+pub(super) static MERGE_PASSES: std::sync::atomic::AtomicUsize =
+	std::sync::atomic::AtomicUsize::new(0);
+
+/// The order two records take in a merge.
+pub(crate) type RecordOrder = Arc<dyn Fn(&Record, &Record) -> Ordering + Send + Sync>;
+
+/// The order of a sort's records: by their keys under `keys`, then their
+/// arrival where a sort stamps one.
+pub(crate) fn sort_order(keys: Vec<KeyOrder>) -> RecordOrder {
+	Arc::new(move |(a, _), (b, _)| compare_rows(a, b, &keys))
 }
 
-impl std::fmt::Debug for Runs {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("Runs").field("runs", &self.runs.len()).finish()
+fn err(e: anyhow::Error) -> ControlFlow {
+	ControlFlow::Err(e)
+}
+
+/// Write `records`, already in order, as one run.
+pub(crate) async fn write_run(
+	memory: &Arc<QueryMemory>,
+	records: impl IntoIterator<Item = Record>,
+	ctx: &ExecutionContext,
+) -> FlowResult<Run> {
+	let mut sink = RunSink::open(memory).await.map_err(err)?;
+	let mut taken = 0;
+	for (keys, row) in records {
+		sink.push(&keys, &row).await.map_err(err)?;
+		taken += 1;
+		if taken >= super::fuel::left().max(1) {
+			super::fuel::tick(ctx, taken).await?;
+			taken = 0;
+		}
 	}
+	super::fuel::tick(ctx, taken).await?;
+	let run = sink.finish().await.map_err(err)?;
+	#[cfg(test)]
+	RUNS_WRITTEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+	Ok(run)
+}
+
+/// The runs one breaker has written, in the order it wrote them.
+#[derive(Debug, Default)]
+pub(crate) struct Runs {
+	runs: Vec<Run>,
 }
 
 impl Runs {
-	/// No runs yet, written beneath `parent`.
-	pub(super) fn new(parent: &Path) -> anyhow::Result<Self> {
-		let dir = tempfile::Builder::new()
-			.prefix("SURREAL_VM_SORT")
-			.tempdir_in(parent)
-			.context("Failed to create a sort's temporary directory")?;
-		Ok(Self {
-			dir,
-			runs: Vec::new(),
-		})
+	/// Whether no run has been written.
+	pub(crate) fn is_empty(&self) -> bool {
+		self.runs.is_empty()
 	}
 
-	/// Sort `rows` and write them as the next run.
-	pub(super) async fn spill(
+	/// Add `run`, written after every run held.
+	pub(crate) fn push(&mut self, run: Run) {
+		self.runs.push(run);
+	}
+
+	/// Sort a sort's `rows` stably by `keys` and write them as the next run;
+	/// `slab` is the sort's slab its slab rows lie in.
+	pub(super) async fn spill_sorted(
 		&mut self,
-		mut rows: Vec<(Vec<Value>, SortRow)>,
-		slab: Vec<u8>,
-		keys: Vec<KeyOrder>,
-	) -> anyhow::Result<()> {
-		let path = self.dir.path().join(format!("run-{}", self.runs.len()));
-		let written = path.clone();
-		tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-			sort_and_keep(&mut rows, &keys, usize::MAX);
-			let mut out = BufWriter::new(File::create(&written)?);
-			for (keys, row) in rows {
-				write_record(&mut out, &keys, &row.into_value_in(&slab)?)?;
-			}
-			out.flush()?;
-			Ok(())
-		})
-		.await
-		.context("A sort's spill task failed")??;
-		self.runs.push(path);
-		#[cfg(test)]
-		RUNS_WRITTEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+		memory: &Arc<QueryMemory>,
+		rows: Vec<Sorted>,
+		slab: &[u8],
+		keys: &[KeyOrder],
+		ctx: &ExecutionContext,
+	) -> FlowResult<()> {
+		let rows = super::sort::sorted(rows, keys, usize::MAX, ctx).await?;
+		let records = records_of(rows, slab)?;
+		self.runs.push(write_run(memory, records, ctx).await?);
 		Ok(())
 	}
 
-	/// The merge of every run with `held`, the rows still in memory, which
-	/// arrived after every run, already in order.
-	pub(super) fn merge(
+	/// The merge of every run with `held`, the records still in memory, which
+	/// arrived after every run, already in `order`.
+	pub(crate) async fn merge(
 		self,
-		held: Vec<(Vec<Value>, SortRow)>,
-		slab: Vec<u8>,
-		keys: Vec<KeyOrder>,
-	) -> anyhow::Result<Merge> {
-		let mut sources = Vec::with_capacity(self.runs.len() + 1);
-		for path in &self.runs {
-			sources.push(Source::Run(BufReader::new(File::open(path)?)));
+		memory: &Arc<QueryMemory>,
+		held: Vec<Record>,
+		order: RecordOrder,
+		ctx: &ExecutionContext,
+	) -> FlowResult<Merge> {
+		let fan_in = memory.fan_in();
+		self.reduce(memory, &order, fan_in, ctx).await?.open(held, order).await
+	}
+
+	/// These runs merged, in passes of the query's fan-in, until no more
+	/// than `readers` (at least one) remain. Merging consecutive runs keeps
+	/// every tie in order. A caller that will read several merges at once
+	/// reduces each before it opens any, so that no pass runs beside them.
+	pub(crate) async fn reduce(
+		self,
+		memory: &Arc<QueryMemory>,
+		order: &RecordOrder,
+		readers: usize,
+		ctx: &ExecutionContext,
+	) -> FlowResult<Self> {
+		let fan_in = memory.fan_in();
+		let readers = readers.clamp(1, fan_in);
+		let mut runs = self.runs;
+		while runs.len() > fan_in {
+			let mut merged = Vec::with_capacity(runs.len().div_ceil(fan_in));
+			let mut rest = runs.into_iter().peekable();
+			while rest.peek().is_some() {
+				let group: Vec<Run> = rest.by_ref().take(fan_in).collect();
+				merged.push(merge_pass(memory, group, order, ctx).await?);
+			}
+			runs = merged;
 		}
-		sources.push(Source::Held(held.into_iter(), slab));
-		let mut merge = Merge {
-			_dir: self.dir,
-			heads: Vec::with_capacity(sources.len()),
-			sources,
-			keys,
-		};
-		for at in 0..merge.sources.len() {
-			let head = merge.sources[at].next()?;
-			merge.heads.push(head);
+		if runs.len() > readers {
+			let rest = runs.split_off(runs.len() - readers + 1);
+			let first = merge_pass(memory, runs, order, ctx).await?;
+			runs = std::iter::once(first).chain(rest).collect();
 		}
-		Ok(merge)
+		Ok(Self {
+			runs,
+		})
+	}
+
+	/// The merge of these runs with `held`, the records still in memory,
+	/// every run read at once.
+	pub(crate) async fn open(self, held: Vec<Record>, order: RecordOrder) -> FlowResult<Merge> {
+		Merge::open(self.runs, held, order).await
 	}
 }
 
-/// Where a merge reads rows from: a run on disk, or the rows held in memory.
+/// Merge `group`, consecutive runs, into one run; a single run is answered
+/// as it is.
+async fn merge_pass(
+	memory: &Arc<QueryMemory>,
+	mut group: Vec<Run>,
+	order: &RecordOrder,
+	ctx: &ExecutionContext,
+) -> FlowResult<Run> {
+	if group.len() == 1 {
+		return Ok(group.remove(0));
+	}
+	#[cfg(test)]
+	MERGE_PASSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+	let mut pass = Merge::open(group, Vec::new(), Arc::clone(order)).await?;
+	let mut sink = RunSink::open(memory).await.map_err(err)?;
+	while let Some((keys, row)) = pass.next(ctx).await? {
+		sink.push(&keys, &row).await.map_err(err)?;
+	}
+	sink.finish().await.map_err(err)
+}
+
+/// Where a merge reads records from: a run, or the records held in memory.
 enum Source {
-	Run(BufReader<File>),
-	/// The rows held in memory, with the slab their slab rows lie in.
-	Held(std::vec::IntoIter<(Vec<Value>, SortRow)>, Vec<u8>),
+	Run(RunSource),
+	Held(std::vec::IntoIter<Record>),
 }
 
 impl Source {
-	fn next(&mut self) -> anyhow::Result<Option<(Vec<Value>, Value)>> {
+	async fn next(&mut self) -> FlowResult<Option<Record>> {
 		match self {
-			Source::Run(reader) => read_record(reader),
-			Source::Held(rows, slab) => match rows.next() {
-				Some((keys, row)) => Ok(Some((keys, row.into_value_in(slab)?))),
-				None => Ok(None),
-			},
+			Source::Run(run) => run.next().await.map_err(err),
+			Source::Held(rows) => Ok(rows.next()),
 		}
 	}
 }
 
-/// The merged rows of a sort's runs and the rows it still held.
+/// The merged records of a breaker's runs and the records it still held.
 pub(crate) struct Merge {
-	/// Held so the runs are removed only once the merge is done with them.
-	_dir: tempfile::TempDir,
+	/// Held so the runs are deleted only once the merge is done with them.
+	_runs: Vec<Run>,
 	sources: Vec<Source>,
-	/// Each source's next row, `None` once the source is spent.
-	heads: Vec<Option<(Vec<Value>, Value)>>,
-	keys: Vec<KeyOrder>,
+	/// Each source's next record, `None` once the source is spent.
+	heads: Vec<Option<Record>>,
+	tree: LoserTree,
+	order: RecordOrder,
 }
 
 impl std::fmt::Debug for Merge {
@@ -142,90 +216,79 @@ impl std::fmt::Debug for Merge {
 	}
 }
 
+/// Whether source `a`'s head orders before source `b`'s: a spent source
+/// orders after every other, and the earlier source wins a tie.
+fn beats(heads: &[Option<Record>], order: &RecordOrder, a: usize, b: usize) -> bool {
+	match (&heads[a], &heads[b]) {
+		(Some(x), Some(y)) => match order(x, y) {
+			Ordering::Less => true,
+			Ordering::Greater => false,
+			Ordering::Equal => a < b,
+		},
+		(Some(_), None) => true,
+		(None, _) => false,
+	}
+}
+
 impl Merge {
-	/// Up to `count` further rows in order, reading the runs on a blocking
-	/// thread; empty once every row is taken.
-	pub(super) async fn next_chunk(
-		mut self,
-		count: usize,
-	) -> anyhow::Result<(Self, Vec<(Vec<Value>, Value)>)> {
-		tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-			let mut chunk = Vec::with_capacity(count);
-			while chunk.len() < count {
-				// The earliest source wins a tie, which keeps the sort stable.
-				let mut first: Option<usize> = None;
-				for (at, head) in self.heads.iter().enumerate() {
-					let Some((keys, _)) = head else {
-						continue;
-					};
-					first = match first {
-						Some(best) => {
-							let best_keys =
-								&self.heads[best].as_ref().expect("a chosen head is present").0;
-							if compare_keys(keys, best_keys, &self.keys) == std::cmp::Ordering::Less
-							{
-								Some(at)
-							} else {
-								Some(best)
-							}
-						}
-						None => Some(at),
-					};
-				}
-				let Some(at) = first else {
-					break;
-				};
-				let row = self.heads[at].take().expect("a chosen head is present");
-				self.heads[at] = self.sources[at].next()?;
-				chunk.push(row);
-			}
-			Ok((self, chunk))
+	async fn open(runs: Vec<Run>, held: Vec<Record>, order: RecordOrder) -> FlowResult<Self> {
+		let mut sources = Vec::with_capacity(runs.len() + 1);
+		for run in &runs {
+			sources.push(Source::Run(run.read().await.map_err(err)?));
+		}
+		if !held.is_empty() {
+			sources.push(Source::Held(held.into_iter()));
+		}
+		let mut heads = Vec::with_capacity(sources.len());
+		for source in &mut sources {
+			heads.push(source.next().await?);
+		}
+		let tree = LoserTree::new(heads.len(), |a, b| beats(&heads, &order, a, b));
+		Ok(Self {
+			_runs: runs,
+			sources,
+			heads,
+			tree,
+			order,
 		})
-		.await
-		.context("A sort's merge task failed")?
+	}
+
+	/// The next record in order, or `None` once every record is taken.
+	pub(crate) async fn next(&mut self, ctx: &ExecutionContext) -> FlowResult<Option<Record>> {
+		if self.heads.is_empty() {
+			return Ok(None);
+		}
+		let winner = self.tree.winner();
+		let Some(record) = self.heads[winner].take() else {
+			return Ok(None);
+		};
+		self.heads[winner] = self.sources[winner].next().await?;
+		let (heads, order) = (&self.heads, &self.order);
+		self.tree.replay(winner, heads.len(), |a, b| beats(heads, order, a, b));
+		super::fuel::tick(ctx, 1).await?;
+		Ok(Some(record))
+	}
+
+	/// Up to `count` further records in order; empty once every record is
+	/// taken.
+	pub(crate) async fn next_chunk(
+		&mut self,
+		count: usize,
+		ctx: &ExecutionContext,
+	) -> FlowResult<Vec<Record>> {
+		let mut chunk = Vec::with_capacity(count.min(1024));
+		while chunk.len() < count {
+			match self.next(ctx).await? {
+				Some(record) => chunk.push(record),
+				None => break,
+			}
+		}
+		Ok(chunk)
 	}
 }
 
-fn write_value<W: Write>(out: &mut W, value: &Value) -> anyhow::Result<()> {
-	let mut bytes = Vec::new();
-	SerializeRevisioned::serialize_revisioned(value, &mut bytes)?;
-	out.write_all(&(bytes.len() as u64).to_be_bytes())?;
-	out.write_all(&bytes)?;
-	Ok(())
-}
-
-fn write_record<W: Write>(out: &mut W, keys: &[Value], row: &Value) -> anyhow::Result<()> {
-	out.write_all(&(keys.len() as u64).to_be_bytes())?;
-	for key in keys {
-		write_value(out, key)?;
-	}
-	write_value(out, row)
-}
-
-/// A `u64` framing length, or `None` at the end of the file.
-fn read_len<R: Read>(reader: &mut R) -> anyhow::Result<Option<u64>> {
-	let mut len = [0u8; 8];
-	match reader.read_exact(&mut len) {
-		Ok(()) => Ok(Some(u64::from_be_bytes(len))),
-		Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
-		Err(e) => Err(e.into()),
-	}
-}
-
-fn read_value<R: Read>(reader: &mut R) -> anyhow::Result<Value> {
-	let len = read_len(reader)?.context("A sort run ended inside a record")?;
-	let mut bytes = vec![0u8; len as usize];
-	reader.read_exact(&mut bytes)?;
-	Ok(DeserializeRevisioned::deserialize_revisioned(&mut bytes.as_slice())?)
-}
-
-fn read_record<R: Read>(reader: &mut R) -> anyhow::Result<Option<(Vec<Value>, Value)>> {
-	let Some(count) = read_len(reader)? else {
-		return Ok(None);
-	};
-	let mut keys = Vec::with_capacity(count as usize);
-	for _ in 0..count {
-		keys.push(read_value(reader)?);
-	}
-	Ok(Some((keys, read_value(reader)?)))
+/// A sort's rows as records, each decoded; a slab row is read from `slab`,
+/// its sort's slab.
+pub(super) fn records_of(rows: Vec<Sorted>, slab: &[u8]) -> FlowResult<Vec<Record>> {
+	rows.into_iter().map(|(keys, row)| Ok((keys, row.into_value_in(slab).map_err(err)?))).collect()
 }

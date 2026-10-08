@@ -504,7 +504,7 @@ impl<'p> Rows<'p> {
 		match self {
 			Rows::Serial => {
 				let stop = run_value_row(program, pipeline, row, state, ctx).await? == Ended::Stop;
-				flush(state, yielder, flush_at).await?;
+				flush(state, yielder, flush_at, ctx).await?;
 				Ok(stop)
 			}
 			Rows::Region(region) => region.push(row, state, ctx, yielder, flush_at).await,
@@ -557,7 +557,7 @@ impl<'p> Rows<'p> {
 			}
 			region.merging.push_back(Batch::Done(Err(failure)));
 			while !region.merging.is_empty() {
-				region.merge(true, state, yielder, flush_at).await?;
+				region.merge(true, state, yielder, flush_at, ctx).await?;
 			}
 			if region.stopped {
 				return Ok(true);
@@ -714,7 +714,7 @@ impl<'p> Region<'p> {
 				&& !self.merging.is_empty()
 				&& self.window(state).is_some_and(|window| self.in_flight >= window)
 			{
-				self.merge(true, state, yielder, flush_at).await?;
+				self.merge(true, state, yielder, flush_at, ctx).await?;
 			}
 			return Ok(self.stopped);
 		}
@@ -782,7 +782,7 @@ impl<'p> Region<'p> {
 		};
 		self.merging.push_back(batch);
 		let waiting = self.merging.len() > read_ahead();
-		self.merge(waiting, state, yielder, flush_at).await
+		self.merge(waiting, state, yielder, flush_at, ctx).await
 	}
 
 	async fn finish(
@@ -797,7 +797,7 @@ impl<'p> Region<'p> {
 		}
 		self.place = None;
 		while !self.merging.is_empty() {
-			self.merge(true, state, yielder, flush_at).await?;
+			self.merge(true, state, yielder, flush_at, ctx).await?;
 		}
 		Ok(self.stopped)
 	}
@@ -811,6 +811,7 @@ impl<'p> Region<'p> {
 		state: &mut State,
 		yielder: &mut Out<'_, '_>,
 		flush_at: usize,
+		ctx: &ExecutionContext,
 	) -> FlowResult<()> {
 		while self.merging.front().is_some_and(|batch| waiting || batch.is_done()) {
 			waiting = false;
@@ -837,7 +838,7 @@ impl<'p> Region<'p> {
 			if state.output.len() >= flush_at {
 				self.reads = None;
 			}
-			flush(state, yielder, flush_at).await?;
+			flush(state, yielder, flush_at, ctx).await?;
 			if self.stopped {
 				self.merging.clear();
 				self.filling.clear();

@@ -474,6 +474,16 @@ impl TestDb {
 		.await
 	}
 
+	/// As [`Self::new_with_config`], over a datastore `builder` prepares: one
+	/// a test gives its own memory governor or temporary store.
+	pub(crate) async fn new_on(
+		builder: crate::kvs::ds::Builder,
+		setup: &str,
+		config: surrealdb_cnf::ConfigMap,
+	) -> Self {
+		Self::build_from(builder, setup, false, config).await
+	}
+
 	/// As [`Self::new`], or [`Self::new_with_auth`] when `auth_enabled`, with
 	/// `capabilities` in place of every capability allowed.
 	pub(crate) async fn new_with_capabilities(

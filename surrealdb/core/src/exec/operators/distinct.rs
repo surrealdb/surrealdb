@@ -116,6 +116,14 @@ impl ExecOperator for Distinct {
 	}
 }
 
+/// The error a distinct raises past `max_rows` distinct rows.
+pub(crate) fn too_many_distinct(max_rows: usize) -> ControlFlow {
+	ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(format!(
+		"GQL MATCH RETURN DISTINCT exceeded the maximum of {max_rows} distinct rows \
+		 (configurable via SURREAL_GQL_MAX_JOIN_BUILD_ROWS)"
+	))))
+}
+
 /// Set of seen rows, keyed by `Value: Ord` so membership is exactly the equality
 /// the language uses — see the module docs for why a hash-bucketed set is not
 /// equivalent. Only distinct rows are retained, so the stored count is bounded by
@@ -143,15 +151,20 @@ impl SeenSet {
 			return Ok(false);
 		}
 		if self.seen.len() >= max_rows {
-			return Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(
-				format!(
-					"GQL MATCH RETURN DISTINCT exceeded the maximum of {max_rows} distinct rows \
-					 (configurable via SURREAL_GQL_MAX_JOIN_BUILD_ROWS)"
-				),
-			))));
+			return Err(too_many_distinct(max_rows));
 		}
 		self.seen.insert(value.clone());
 		Ok(true)
+	}
+
+	/// Every row seen, in order, leaving the set empty.
+	pub(crate) fn take_sorted(&mut self) -> Vec<Value> {
+		std::mem::take(&mut self.seen).into_iter().collect()
+	}
+
+	/// How many rows the set holds.
+	pub(crate) fn len(&self) -> usize {
+		self.seen.len()
 	}
 }
 

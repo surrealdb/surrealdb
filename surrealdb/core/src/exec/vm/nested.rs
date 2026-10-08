@@ -165,7 +165,7 @@ async fn stream_rows(
 				return Ok(true);
 			}
 		}
-		flush(state, yielder, flush_at).await?;
+		flush(state, yielder, flush_at, ctx).await?;
 	}
 	Ok(false)
 }

@@ -74,6 +74,7 @@ pub(crate) mod function;
 pub(crate) mod guard_verdicts;
 pub(crate) mod index;
 pub(crate) mod logical;
+pub mod memory;
 pub(crate) mod metrics;
 pub(crate) mod object_extract;
 pub(crate) mod operators;

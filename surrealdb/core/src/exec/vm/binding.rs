@@ -33,7 +33,6 @@ use super::host::{Ended, eval_on_row};
 use super::interp::{PooledState, State};
 use super::plan::Plan;
 use super::program::HostScalar;
-use crate::exec::operators::distinct::SeenSet;
 use crate::exec::operators::graph::distinct_edges::row_has_distinct_edges;
 use crate::exec::operators::graph::endpoint::bind_endpoints;
 use crate::exec::operators::graph::expand::{
@@ -209,10 +208,11 @@ impl<P, B> BindingStep<P, B> {
 		}
 	}
 
-	/// Whether the step keeps rows it has not yet answered, which
-	/// [`finish_step`] answers once the pipeline above has finished.
+	/// Whether the step may keep rows it has not yet answered, which it
+	/// answers once the pipeline above has finished: [`finish_step`], or
+	/// [`finish_distinct`] for a distinct that spilled and deferred them.
 	pub(crate) fn buffers(&self) -> bool {
-		matches!(self, Self::Mutate(_) | Self::Endpoint(_))
+		matches!(self, Self::Mutate(_) | Self::Endpoint(_) | Self::Distinct | Self::Join(_))
 	}
 }
 
@@ -230,13 +230,10 @@ pub(super) enum StepRun {
 		/// How many rows make a batch.
 		batch: usize,
 	},
-	Distinct {
-		seen: SeenSet,
-		max_rows: usize,
-	},
+	Distinct(super::distinct_spill::Distinct),
 	Join {
 		/// The build side's rows, once the first probe row has built them.
-		table: Option<BuildTable>,
+		table: Option<super::join_spill::Built>,
 		emitted: usize,
 		judge: Option<PooledState>,
 	},
@@ -279,10 +276,10 @@ impl StepRun {
 				pending: Vec::new(),
 				batch: exec.scan_batch_size.max(1),
 			}),
-			BindingStep::Distinct => Some(Self::Distinct {
-				seen: SeenSet::new(),
-				max_rows: exec.gql_max_join_build_rows,
-			}),
+			BindingStep::Distinct => Some(Self::Distinct(super::distinct_spill::Distinct::start(
+				exec.gql_max_join_build_rows,
+				ctx,
+			))),
 			BindingStep::Join(_) => Some(Self::Join {
 				table: None,
 				emitted: 0,
@@ -323,11 +320,11 @@ impl StepRun {
 
 /// Judges a candidate row with a host scalar, over a state kept for the
 /// run of the step.
-struct HostJudge<'a> {
-	program: &'a super::program::Program,
-	scalar: Option<&'a HostScalar>,
-	ctx: &'a ExecutionContext,
-	state: &'a mut Option<PooledState>,
+pub(super) struct HostJudge<'a> {
+	pub(super) program: &'a super::program::Program,
+	pub(super) scalar: Option<&'a HostScalar>,
+	pub(super) ctx: &'a ExecutionContext,
+	pub(super) state: &'a mut Option<PooledState>,
 }
 
 impl HostJudge<'_> {
@@ -542,6 +539,48 @@ impl RowEval<HostScalar> for HostEval<'_> {
 ///
 /// Every write is the statement a hand-written mutation would be, planned
 /// and run in `ctx` ([`crate::exec::operators::mutate`]).
+/// The rows a step deferred once it spilled — a distinct's rows first seen,
+/// a join's pairings — to hand on in order now that the pipeline above has
+/// finished; `None` where step `split` deferred none.
+pub(super) async fn finish_deferred(
+	program: &super::program::Program,
+	split: u16,
+	step: &ProgramStep,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Option<super::spill::Merge>> {
+	match (step, state.steps[split as usize].as_deref_mut()) {
+		(BindingStep::Distinct, Some(StepRun::Distinct(distinct))) if distinct.has_spilled() => {
+			distinct.finish(ctx).await
+		}
+		(
+			BindingStep::Join(step),
+			Some(StepRun::Join {
+				table,
+				emitted,
+				judge,
+			}),
+		) if matches!(table, Some(super::join_spill::Built::Spilled(_))) => {
+			let Some(super::join_spill::Built::Spilled(spilled)) = table.take() else {
+				return Ok(None);
+			};
+			let mut with = super::join_spill::Pairing {
+				step,
+				residual: HostJudge {
+					program,
+					scalar: step.residual.as_ref(),
+					ctx,
+					state: judge,
+				},
+				emitted,
+				max_output_rows: ctx.root().ctx.config.exec.gql_max_output_rows,
+			};
+			spilled.finish(&mut with).await.map(Some)
+		}
+		_ => Ok(None),
+	}
+}
+
 pub(super) async fn finish_step(
 	program: &super::program::Program,
 	split: u16,
@@ -707,17 +746,9 @@ async fn step_rows(
 		} else {
 			Vec::new()
 		}),
-		(
-			BindingStep::Distinct,
-			Some(StepRun::Distinct {
-				seen,
-				max_rows,
-			}),
-		) => Ok(if seen.insert(&row, *max_rows)? {
-			vec![row]
-		} else {
-			Vec::new()
-		}),
+		(BindingStep::Distinct, Some(StepRun::Distinct(distinct))) => {
+			Ok(distinct.take(row, ctx).await?.into_iter().collect())
+		}
 		(
 			BindingStep::Join(step),
 			Some(StepRun::Join {
@@ -730,17 +761,81 @@ async fn step_rows(
 	}
 }
 
+/// What probe `row` of an inner, left, semi or anti join `step` yields given
+/// the build rows its key `matches`, in order: a build row matches only if
+/// the merged row passes the residual, and a left join's probe row with no
+/// passing build row is carried with the build's bindings `NULL`.
+pub(super) async fn pairings(
+	step: &JoinStep<u16, HostScalar>,
+	matches: &[&Value],
+	row: Value,
+	residual: &mut HostJudge<'_>,
+	emitted: &mut usize,
+	max_output_rows: usize,
+) -> FlowResult<Vec<Value>> {
+	let mut out = Vec::new();
+	match step.join_type {
+		JoinType::Cross | JoinType::Inner => {
+			for build_row in matches {
+				super::fuel::tick(residual.ctx, 1).await?;
+				let merged = merge_rows(build_row, &row);
+				if residual.truthy(&merged).await? {
+					emit(&mut out, emitted, max_output_rows, merged)?;
+				}
+			}
+		}
+		JoinType::Left => {
+			let mut matched = false;
+			for build_row in matches {
+				super::fuel::tick(residual.ctx, 1).await?;
+				let merged = merge_rows(build_row, &row);
+				if residual.truthy(&merged).await? {
+					emit(&mut out, emitted, max_output_rows, merged)?;
+					matched = true;
+				}
+			}
+			if !matched {
+				emit(&mut out, emitted, max_output_rows, null_filled(&row, &step.null_template))?;
+			}
+		}
+		JoinType::Semi | JoinType::Anti => {
+			let mut matched = false;
+			for build_row in matches {
+				super::fuel::tick(residual.ctx, 1).await?;
+				if residual.truthy(&merge_rows(build_row, &row)).await? {
+					matched = true;
+					break;
+				}
+			}
+			if matched == (step.join_type == JoinType::Semi) {
+				emit(&mut out, emitted, max_output_rows, row)?;
+			}
+		}
+	}
+	Ok(out)
+}
+
 /// The table of `step`'s build side: its group run, its rows keyed on the
-/// bindings the join is keyed on.
+/// bindings the join is keyed on. A join with keys reads the run a batch at
+/// a time and spills it once its lease no longer covers it
+/// ([`super::join_spill`]); a cross join gathers it.
 async fn build_table(
 	step: &JoinStep<u16, HostScalar>,
 	state: &mut State,
 	ctx: &ExecutionContext,
-) -> FlowResult<BuildTable> {
+) -> FlowResult<super::join_spill::Built> {
 	let max_rows = ctx.root().ctx.config.exec.gql_max_join_build_rows;
 	let Some(running) = state.program.clone() else {
 		return Err(ControlFlow::Err(anyhow::anyhow!("a join run with no program")));
 	};
+	let spills = step.join_type != JoinType::Cross
+		&& ctx.ctx().memory().is_some_and(|memory| memory.can_spill())
+		&& !running.groups.get(step.build as usize).is_some_and(|spec| spec.only);
+	if spills {
+		let mut sink = super::join_spill::BuildSink::new(&step.keys, max_rows, ctx);
+		super::host::run_group_into(&running, step.build, state, ctx, &mut sink).await?;
+		return sink.finish(ctx).await;
+	}
 	let (rows, ran) = super::host::run_group(&running, step.build, state, ctx).await;
 	ran?;
 	let mut built = BuildTable::new();
@@ -750,7 +845,7 @@ async fn build_table(
 			built.insert(key, build_row, max_rows)?;
 		}
 	}
-	Ok(built)
+	Ok(super::join_spill::Built::Memory(built))
 }
 
 /// Run the build side of join `step` of split `split` now, so the rows the
@@ -784,7 +879,7 @@ pub(super) async fn prepare_join(
 async fn join_row(
 	program: &super::program::Program,
 	step: &JoinStep<u16, HostScalar>,
-	table: &mut Option<BuildTable>,
+	table: &mut Option<super::join_spill::Built>,
 	emitted: &mut usize,
 	judge: &mut Option<PooledState>,
 	row: Value,
@@ -796,14 +891,25 @@ async fn join_row(
 	if table.is_none() {
 		*table = Some(build_table(step, state, ctx).await?);
 	}
-	let Some(table) = table.as_ref() else {
-		return Ok(Vec::new());
-	};
 	let mut residual = HostJudge {
 		program,
 		scalar: step.residual.as_ref(),
 		ctx,
 		state: judge,
+	};
+	let table = match table.as_mut() {
+		None => return Ok(Vec::new()),
+		Some(super::join_spill::Built::Memory(table)) => &*table,
+		Some(super::join_spill::Built::Spilled(spilled)) => {
+			let mut with = super::join_spill::Pairing {
+				step,
+				residual,
+				emitted,
+				max_output_rows,
+			};
+			spilled.defer(join_key(&row, &step.keys), row, &mut with).await?;
+			return Ok(Vec::new());
+		}
 	};
 	let mut out = Vec::new();
 	match step.join_type {
@@ -816,47 +922,13 @@ async fn join_row(
 				}
 			}
 		}
-		JoinType::Inner => {
-			if let Some(key) = join_key(&row, &step.keys) {
-				for build_row in table.matches(&key) {
-					super::fuel::tick(ctx, 1).await?;
-					let merged = merge_rows(build_row, &row);
-					if residual.truthy(&merged).await? {
-						emit(&mut out, emitted, max_output_rows, merged)?;
-					}
-				}
-			}
-		}
-		JoinType::Left => {
-			let mut matched = false;
-			if let Some(key) = join_key(&row, &step.keys) {
-				for build_row in table.matches(&key) {
-					super::fuel::tick(ctx, 1).await?;
-					let merged = merge_rows(build_row, &row);
-					if residual.truthy(&merged).await? {
-						emit(&mut out, emitted, max_output_rows, merged)?;
-						matched = true;
-					}
-				}
-			}
-			if !matched {
-				emit(&mut out, emitted, max_output_rows, null_filled(&row, &step.null_template))?;
-			}
-		}
-		JoinType::Semi | JoinType::Anti => {
-			let mut matched = false;
-			if let Some(key) = join_key(&row, &step.keys) {
-				for build_row in table.matches(&key) {
-					super::fuel::tick(ctx, 1).await?;
-					if residual.truthy(&merge_rows(build_row, &row)).await? {
-						matched = true;
-						break;
-					}
-				}
-			}
-			if matched == (step.join_type == JoinType::Semi) {
-				emit(&mut out, emitted, max_output_rows, row)?;
-			}
+		JoinType::Inner | JoinType::Left | JoinType::Semi | JoinType::Anti => {
+			let key = join_key(&row, &step.keys);
+			let matches: Vec<&Value> = match &key {
+				Some(key) => table.matches(key).collect(),
+				None => Vec::new(),
+			};
+			out = pairings(step, &matches, row, &mut residual, emitted, max_output_rows).await?;
 		}
 	}
 	Ok(out)

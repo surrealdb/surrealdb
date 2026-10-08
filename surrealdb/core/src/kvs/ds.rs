@@ -364,6 +364,13 @@ pub struct Datastore {
 	/// How a running program gives up its thread once it has spent its
 	/// quantum; the default scheduler when `None`.
 	scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
+	/// The memory governor and temporary store a host supplied; see
+	/// [`Self::memory_host`] for what applies without them.
+	memory_governor: Option<Arc<dyn crate::exec::memory::MemoryGovernor>>,
+	temp_store: Option<Arc<dyn crate::exec::memory::TempStore>>,
+	/// The governor and store every query of this datastore shares, settled
+	/// at its first query.
+	memory_host: Arc<std::sync::OnceLock<crate::exec::memory::MemoryHost>>,
 	/// Public HTTP endpoint this datastore publishes on its `Node` catalog row so other
 	/// cluster members can route cross-node messages (e.g. live-query relay) to it.
 	/// `None` in deployments that don't expose such an endpoint.
@@ -708,6 +715,9 @@ impl Datastore {
 			// Fresh router cursor: a restarted node re-establishes its baseline.
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			scheduler: self.scheduler,
+			memory_governor: self.memory_governor,
+			temp_store: self.temp_store,
+			memory_host: Default::default(),
 			http_endpoint: self.http_endpoint,
 			index_stores: IndexStores::new(
 				self.config.idx.hnsw_cache_size,
@@ -775,6 +785,9 @@ impl Datastore {
 			// A fork models a separate node, so it gets its own router cursor.
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			scheduler: self.scheduler.clone(),
+			memory_governor: self.memory_governor.clone(),
+			temp_store: self.temp_store.clone(),
+			memory_host: Default::default(),
 			http_endpoint: self.http_endpoint.clone(),
 			index_stores: IndexStores::new(
 				self.config.idx.hnsw_cache_size,
@@ -877,6 +890,82 @@ impl Datastore {
 	pub fn with_scheduler(mut self, scheduler: Arc<dyn crate::exec::scheduler::Scheduler>) -> Self {
 		self.scheduler = Some(scheduler);
 		self
+	}
+
+	/// Set the governor that grants each query its memory, for a host that
+	/// sizes and shares memory itself (an edge isolate). Without one, the
+	/// datastore holds its queries to the `memory_limit` setting.
+	pub fn with_memory_governor(
+		mut self,
+		governor: Arc<dyn crate::exec::memory::MemoryGovernor>,
+	) -> Self {
+		self.memory_governor = Some(governor);
+		self
+	}
+
+	/// Set the store a query's breakers spill to once they outgrow their
+	/// query's memory. Without one, a native datastore spills to files in its
+	/// temporary directory, or the system's.
+	pub fn with_temp_store(mut self, store: Arc<dyn crate::exec::memory::TempStore>) -> Self {
+		self.temp_store = Some(store);
+		self
+	}
+
+	/// The governor and store every query of this datastore shares.
+	///
+	/// A host's own are used where it supplied them. Otherwise a native
+	/// datastore spills to a [`FileTempStore`](crate::exec::memory::FileTempStore)
+	/// in its temporary directory (the system's when none is set) and holds
+	/// its queries to `memory_limit` bytes; a datastore with no store to spill
+	/// to bounds nothing, since a breaker that cannot spill could only fail.
+	pub(crate) fn memory_host(&self) -> crate::exec::memory::MemoryHost {
+		use crate::exec::memory::{FairGovernor, MemoryHost, MemorySettings, Unlimited};
+		self.memory_host
+			.get_or_init(|| {
+				let exec = &self.config.exec;
+				let settings = MemorySettings {
+					floor: exec.query_memory_minimum,
+					fan_in: exec.spill_merge_fan_in,
+					chunk: exec.memory_reserve_chunk,
+				};
+				let store = self.temp_store.clone().or_else(|| self.default_temp_store());
+				let governor: Arc<dyn crate::exec::memory::MemoryGovernor> =
+					match (&self.memory_governor, &store) {
+						(Some(governor), _) => Arc::clone(governor),
+						(None, Some(_)) => Arc::new(FairGovernor::new(exec.memory_limit())),
+						(None, None) => Arc::new(Unlimited),
+					};
+				MemoryHost {
+					governor,
+					store,
+					settings,
+				}
+			})
+			.clone()
+	}
+
+	#[cfg(all(storage, not(target_family = "wasm")))]
+	fn default_temp_store(&self) -> Option<Arc<dyn crate::exec::memory::TempStore>> {
+		let parent = match &self.temporary_directory {
+			Some(dir) => dir.as_ref().clone(),
+			None => std::env::temp_dir().join("surrealdb"),
+		};
+		match crate::exec::memory::FileTempStore::open(
+			&parent,
+			self.config.exec.spill_part_size,
+			None,
+		) {
+			Ok(store) => Some(Arc::new(store)),
+			Err(error) => {
+				warn!("Queries will not spill to disk: {error:#}");
+				None
+			}
+		}
+	}
+
+	#[cfg(not(all(storage, not(target_family = "wasm"))))]
+	fn default_temp_store(&self) -> Option<Arc<dyn crate::exec::memory::TempStore>> {
+		None
 	}
 
 	#[cfg(storage)]
@@ -5762,6 +5851,7 @@ impl Datastore {
 			Arc::clone(&self.surrealism_cache),
 		)?;
 		ctx.set_scheduler(self.scheduler.clone());
+		ctx.set_memory(Some(self.memory_host().query()));
 		Ok(ctx)
 	}
 

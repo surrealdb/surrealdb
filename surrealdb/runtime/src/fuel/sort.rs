@@ -94,7 +94,7 @@ where
 	}
 	runs.reverse();
 	let mut out = Vec::with_capacity(want);
-	let mut tree = LoserTree::new(&runs, &mut cmp);
+	let mut tree = LoserTree::new(runs.len(), |a, b| beats(&runs, a, b, &mut cmp));
 	while out.len() < want {
 		let taken = next_stretch().await.min(want - out.len());
 		for _ in 0..taken {
@@ -103,7 +103,7 @@ where
 				unreachable!("the merge takes no more than its runs hold")
 			};
 			out.push(item);
-			tree.replay(winner, &runs, &mut cmp);
+			tree.replay(winner, runs.len(), |a, b| beats(&runs, a, b, &mut cmp));
 		}
 		tick(units(taken)).await;
 	}
@@ -181,21 +181,24 @@ where
 	order.windows(2).all(|pair| follows(cmp, pair[0], pair[1])).then_some(order)
 }
 
-/// A tournament over the runs' heads: each inner node holds the run that lost
-/// the match there, and the root the run whose head orders first, the earlier
-/// run winning a tie. A spent run loses every match.
-struct LoserTree {
+/// A tournament over `k` ordered sources' heads: each inner node holds the
+/// source that lost the match there, and the root the source whose head
+/// orders first.
+///
+/// The tree holds no heads itself. A caller answers `beats(a, b)` — whether
+/// source `a`'s head orders before source `b`'s — from the heads it keeps, and
+/// must make a spent source lose every match and the earlier source win a tie
+/// for the merge to be stable. Taking the winner's head and replaying its path
+/// costs `log k` comparisons.
+pub struct LoserTree {
 	/// `nodes[0]` is the winner; `nodes[1..k]` hold the losers, as a binary
-	/// heap over the `k` runs, whose leaves sit at `k..2k`.
+	/// heap over the `k` sources, whose leaves sit at `k..2k`.
 	nodes: Vec<usize>,
 }
 
 impl LoserTree {
-	fn new<T, F>(runs: &[std::vec::IntoIter<T>], cmp: &mut F) -> Self
-	where
-		F: FnMut(&T, &T) -> Ordering,
-	{
-		let k = runs.len();
+	/// The tournament over `k` sources as their heads stand.
+	pub fn new(k: usize, mut beats: impl FnMut(usize, usize) -> bool) -> Self {
 		let mut nodes = vec![0; k.max(1)];
 		let mut winners = vec![0; 2 * k];
 		for (at, winner) in winners[k..].iter_mut().enumerate() {
@@ -203,7 +206,7 @@ impl LoserTree {
 		}
 		for node in (1..k).rev() {
 			let (a, b) = (winners[2 * node], winners[2 * node + 1]);
-			if beats(runs, a, b, cmp) {
+			if beats(a, b) {
 				winners[node] = a;
 				nodes[node] = b;
 			} else {
@@ -219,25 +222,21 @@ impl LoserTree {
 		}
 	}
 
-	/// The run whose head orders first.
+	/// The source whose head orders first.
 	#[inline]
-	fn winner(&self) -> usize {
+	pub fn winner(&self) -> usize {
 		self.nodes[0]
 	}
 
-	/// Replay the matches on the path of run `run`, whose head has just been
-	/// taken.
+	/// Replay the matches on the path of source `run` of `k`, whose head has
+	/// just changed (taken, or the source spent).
 	#[inline]
-	fn replay<T, F>(&mut self, run: usize, runs: &[std::vec::IntoIter<T>], cmp: &mut F)
-	where
-		F: FnMut(&T, &T) -> Ordering,
-	{
-		let k = runs.len();
+	pub fn replay(&mut self, run: usize, k: usize, mut beats: impl FnMut(usize, usize) -> bool) {
 		let mut winner = run;
 		let mut node = (k + run) / 2;
 		while node > 0 {
 			let held = self.nodes[node];
-			if beats(runs, held, winner, cmp) {
+			if beats(held, winner) {
 				self.nodes[node] = winner;
 				winner = held;
 			}

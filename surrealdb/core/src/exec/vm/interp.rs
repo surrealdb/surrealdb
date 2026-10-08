@@ -263,14 +263,28 @@ pub(super) struct State {
 	/// For each sort of a brute-force KNN whose query vector is computed when
 	/// the statement runs, the vector, once evaluated.
 	pub(super) knn_queries: Vec<Option<std::sync::Arc<Vec<crate::val::Number>>>>,
-	/// For each sort that may spill, the rows it holds in memory before it
-	/// writes them out as a run, and its order.
-	pub(super) sort_spill: Vec<Option<(usize, Vec<KeyOrder>)>>,
-	/// The runs each spilling sort has written.
-	#[cfg(all(storage, not(target_family = "wasm")))]
+	/// For each sort that may spill, the rows it holds before it writes them
+	/// out as a run whatever its query's memory (a sort under `TEMPFILES`),
+	/// and its order.
+	pub(super) sort_spill: Vec<Option<super::sort::SortSpill>>,
+	/// The runs each sort has spilled ([`super::spill`]).
 	pub(super) sort_runs: Vec<Option<super::spill::Runs>>,
-	/// Where a spilling sort writes its runs.
-	pub(super) spill_dir: Option<std::sync::Arc<std::path::PathBuf>>,
+	/// What each sort that keeps every row holds, against its query's lease;
+	/// unbounded for a sort a limit bounds.
+	pub(super) sort_accounts: Vec<crate::exec::memory::Reservation>,
+	/// The runs each aggregate's groups have spilled, as saved groups in key
+	/// order ([`Groups::save_all`]).
+	pub(super) group_runs: Vec<Option<super::spill::Runs>>,
+	/// What each aggregate grouped by a key holds, against its query's lease.
+	pub(super) group_accounts: Vec<crate::exec::memory::Reservation>,
+	/// What the rows a statement gathers into its value hold, against its
+	/// query's lease, while it gathers them.
+	pub(super) gather_account: Option<crate::exec::memory::Reservation>,
+	/// The query's memory, where its breakers are bounded.
+	pub(super) memory: Option<std::sync::Arc<crate::exec::memory::QueryMemory>>,
+	/// Whether a breaker's account has passed its lease since the last
+	/// flush, so the flush spills it.
+	pub(super) spill_due: bool,
 	pub(super) groups: Vec<Option<Groups>>,
 	/// The [`FunctionRegistry::id`] of the registry the aggregate functions
 	/// and method descriptors this state holds were resolved from, `0` for a
@@ -364,7 +378,7 @@ pub(super) struct State {
 	/// The rows each join's build side holds, keyed, by
 	/// [`Program::joins`](super::program::Program::joins) index, once the
 	/// first probe row has reached the join and until its owner starts again.
-	pub(super) joins: Vec<Option<std::sync::Arc<crate::exec::operators::BuildTable>>>,
+	pub(super) joins: Vec<Option<super::join_spill::JoinBuilt>>,
 	/// The rows each distinct set has passed, by
 	/// [`Program::distincts`](super::program::Program::distincts) index.
 	pub(super) seen: Vec<crate::exec::operators::SeenSet>,
@@ -742,8 +756,11 @@ impl State {
 		self.topk_cells.resize(sorts, None);
 		self.knn_queries.resize(sorts, None);
 		self.sort_spill.resize(sorts, None);
-		#[cfg(all(storage, not(target_family = "wasm")))]
 		self.sort_runs.resize_with(sorts, || None);
+		self.sort_accounts.resize_with(sorts, crate::exec::memory::Reservation::unbounded);
+		self.group_runs.resize_with(program.aggregates.len(), || None);
+		self.group_accounts
+			.resize_with(program.aggregates.len(), crate::exec::memory::Reservation::unbounded);
 		let functions = &self.aggregates.functions;
 		self.groups.extend(
 			program
@@ -756,7 +773,7 @@ impl State {
 		self.once.resize(program.nested.len(), None);
 		self.probes.resize(program.probes.len(), None);
 		self.steps.resize_with(program.splits.len(), || None);
-		self.joins.resize(program.joins.len(), None);
+		self.joins.resize_with(program.joins.len(), || None);
 		self.seen.resize_with(program.distincts.len(), crate::exec::operators::SeenSet::new);
 		self.reserved_taken.resize(program.reservations.len(), false);
 	}
@@ -779,9 +796,13 @@ impl State {
 			topk_cells,
 			knn_queries,
 			sort_spill,
-			#[cfg(all(storage, not(target_family = "wasm")))]
 			sort_runs,
-			spill_dir,
+			sort_accounts,
+			group_runs,
+			group_accounts,
+			gather_account,
+			memory,
+			spill_due,
 			groups,
 			registry: _,
 			aggregates: _,
@@ -843,9 +864,13 @@ impl State {
 		emptied(topk_cells);
 		emptied(knn_queries);
 		emptied(sort_spill);
-		#[cfg(all(storage, not(target_family = "wasm")))]
 		emptied(sort_runs);
-		*spill_dir = None;
+		emptied(sort_accounts);
+		emptied(group_runs);
+		emptied(group_accounts);
+		*gather_account = None;
+		*memory = None;
+		*spill_due = false;
 		emptied(groups);
 		emptied(tries);
 		emptied(output);
@@ -1086,9 +1111,13 @@ impl State {
 			topk_cells: Vec::new(),
 			knn_queries: Vec::new(),
 			sort_spill: Vec::new(),
-			#[cfg(all(storage, not(target_family = "wasm")))]
 			sort_runs: Vec::new(),
-			spill_dir: None,
+			sort_accounts: Vec::new(),
+			group_runs: Vec::new(),
+			group_accounts: Vec::new(),
+			gather_account: None,
+			memory: None,
+			spill_due: false,
 			groups: Vec::new(),
 			registry: 0,
 			aggregates: std::sync::Arc::clone(&NO_AGGREGATES),
@@ -1147,6 +1176,12 @@ impl State {
 	pub(super) fn reset_aggregate(&mut self, program: &Program, aggregate: usize) {
 		let sink = &program.aggregates[aggregate];
 		self.groups[aggregate] = Some(fresh_groups(sink, &self.aggregates.functions[aggregate]));
+		if let Some(runs) = self.group_runs.get_mut(aggregate) {
+			*runs = None;
+		}
+		if let Some(account) = self.group_accounts.get_mut(aggregate) {
+			account.clear();
+		}
 	}
 
 	/// Whether the state has linked a unit for the closure `digest` names,
@@ -1251,6 +1286,9 @@ impl State {
 		let keep = match spec.keep {
 			Some(keep) if !spec.random => keep,
 			_ => {
+				for row in &rows {
+					self.charge_sort(sort, row);
+				}
 				self.sorts[at].extend(rows);
 				return;
 			}
@@ -1479,14 +1517,16 @@ impl State {
 				let start = slab.len();
 				slab.extend_from_slice(key);
 				slab.extend_from_slice(value);
-				self.sorts[sort as usize].push((
+				let row = (
 					keys,
 					SortRow::Slab {
 						start,
 						split: start + key.len(),
 						end: slab.len(),
 					},
-				));
+				);
+				self.charge_sort(sort, &row);
+				self.sorts[sort as usize].push(row);
 			}
 			Some(Pending::Sort {
 				sort,
@@ -1497,13 +1537,15 @@ impl State {
 				bytes.reserve_exact(key.len() + value.len());
 				bytes.extend_from_slice(key);
 				bytes.extend_from_slice(value);
-				self.sorts[sort as usize].push((
+				let row = (
 					keys,
 					SortRow::Stored {
 						bytes,
 						split: key.len(),
 					},
-				));
+				);
+				self.charge_sort(sort, &row);
+				self.sorts[sort as usize].push(row);
 				self.keep_sorted(program, sort);
 			}
 			// An emitted record of a statement whose rows leave encoded is
@@ -1550,6 +1592,20 @@ impl State {
 		Ok(self.row_frame.as_mut().map(super::row_frame::RowFrame::take_encoded))
 	}
 
+	/// Charge a row sort `sort` takes to its account, marking a spill due once
+	/// its lease does not cover it. A sort a limit bounds has an unbounded
+	/// account.
+	#[inline]
+	fn charge_sort(&mut self, sort: u16, row: &super::sort::Sorted) {
+		let account = &mut self.sort_accounts[sort as usize];
+		if account.memory().is_none() {
+			return;
+		}
+		if account.charge(super::sort::sorted_bytes(row)) == crate::exec::memory::Verdict::Spill {
+			self.spill_due = true;
+		}
+	}
+
 	/// Hand a row the body left pending to where it goes: the output, or a
 	/// sort, which keeps only the rows its order can still reach.
 	pub(super) fn settle(&mut self, program: &Program, row: Value) {
@@ -1559,7 +1615,9 @@ impl State {
 				sort,
 				keys,
 			}) => {
-				self.sorts[sort as usize].push((keys, SortRow::Value(row)));
+				let row = (keys, SortRow::Value(row));
+				self.charge_sort(sort, &row);
+				self.sorts[sort as usize].push(row);
 				self.keep_sorted(program, sort);
 			}
 			// A split's rows are run by the host, which takes the pending
@@ -3079,6 +3137,7 @@ pub(super) fn run_row<'r>(
 			} => {
 				let value = read_value(regs, *src)?;
 				if let Some(groups) = &mut state.groups[*aggregate as usize] {
+					groups.grew(crate::exec::memory::size::value_bytes(&value));
 					*groups.first_mut(*field as usize) = Some(value);
 				}
 				pc += 1;
@@ -3120,12 +3179,17 @@ pub(super) fn run_row<'r>(
 				value,
 			} => {
 				let value = read_value(regs, *value)?;
-				if let Some(accumulator) = state.groups[*aggregate as usize]
-					.as_mut()
-					.and_then(|groups| groups.accumulator(*field as usize, *agg as usize))
-					&& let Err(e) = accumulator.update(value)
-				{
-					tracing::debug!(error = %e, "Accumulator update failed, skipping value");
+				if let Some(groups) = state.groups[*aggregate as usize].as_mut() {
+					let mut grew = 0;
+					if let Some(accumulator) = groups.accumulator(*field as usize, *agg as usize) {
+						if accumulator.holds_inputs() {
+							grew = crate::exec::memory::size::value_bytes(&value);
+						}
+						if let Err(e) = accumulator.update(value) {
+							tracing::debug!(error = %e, "Accumulator update failed, skipping value");
+						}
+					}
+					groups.grew(grew);
 				}
 				pc += 1;
 			}
@@ -3329,7 +3393,6 @@ impl SortRow {
 	}
 }
 
-/// Stable sort by `keys`, then drop every row past the first `keep`.
 /// Charge the walk a comparison of two collections makes, whole: an
 /// operator such as `CONTAINS` or `=` reads each operand in one go, and the
 /// row yields at its next yield point.
@@ -3653,14 +3716,6 @@ fn recycle_sort_row(
 	{
 		spare_bytes.push(bytes);
 	}
-}
-
-/// Sorts `rows` by `keys` and keeps the first `keep`. The spill to disk is
-/// its only caller, so it is compiled where the spill is.
-#[cfg(all(storage, not(target_family = "wasm")))]
-pub(super) fn sort_and_keep(rows: &mut Vec<(Vec<Value>, SortRow)>, keys: &[KeyOrder], keep: usize) {
-	rows.sort_by(|(a, _), (b, _)| compare_keys(a, b, keys));
-	rows.truncate(keep);
 }
 
 pub(super) fn compare_keys(a: &[Value], b: &[Value], keys: &[KeyOrder]) -> Ordering {

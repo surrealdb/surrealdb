@@ -1035,14 +1035,22 @@ pub(crate) fn emit(
 	Ok(())
 }
 
+/// The error a join raises past `max_rows` build-side rows.
+pub(crate) fn too_many_build_rows(max_rows: usize) -> ControlFlow {
+	ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(format!(
+		"GQL MATCH join exceeded the maximum of {max_rows} build-side rows \
+		 (configurable via SURREAL_GQL_MAX_JOIN_BUILD_ROWS)"
+	))))
+}
+
 /// Whether two keys are equal by SurrealQL's `=`, column by column.
-fn keys_equal(left: &[Value], right: &[Value]) -> bool {
+pub(crate) fn keys_equal(left: &[Value], right: &[Value]) -> bool {
 	left.len() == right.len() && left.iter().zip(right).all(|(l, r)| l.equal(r))
 }
 
 /// Whether a key holds a regex in any column, which `=` matches against
 /// strings rather than by identity.
-fn key_has_regex(key: &[Value]) -> bool {
+pub(crate) fn key_has_regex(key: &[Value]) -> bool {
 	key.iter().any(|v| matches!(v, Value::Regex(_)))
 }
 
@@ -1087,12 +1095,7 @@ impl BuildTable {
 		max_rows: usize,
 	) -> Result<(), ControlFlow> {
 		if self.rows >= max_rows {
-			return Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(
-				format!(
-					"GQL MATCH join exceeded the maximum of {max_rows} build-side rows \
-					 (configurable via SURREAL_GQL_MAX_JOIN_BUILD_ROWS)"
-				),
-			))));
+			return Err(too_many_build_rows(max_rows));
 		}
 		if key_has_regex(&key) {
 			self.regex_keyed.push((key, row));

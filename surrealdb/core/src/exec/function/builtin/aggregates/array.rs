@@ -7,6 +7,7 @@ use std::hash::{Hash, Hasher};
 
 use anyhow::Result;
 
+use super::saved::{Loading, Saving};
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
 use crate::expr::Kind;
 use crate::val::Value;
@@ -96,6 +97,20 @@ impl ArrayGroupAccumulator {
 }
 
 impl Accumulator for ArrayGroupAccumulator {
+	fn holds_inputs(&self) -> bool {
+		true
+	}
+
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().values(&self.values).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.values = state.values()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		self.values.push(value);
 		Ok(())
@@ -173,6 +188,20 @@ struct ArrayJoinAccumulator {
 }
 
 impl Accumulator for ArrayJoinAccumulator {
+	fn holds_inputs(&self) -> bool {
+		true
+	}
+
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().values(&self.values).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.values = state.values()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		self.values.push(value);
 		Ok(())
@@ -255,6 +284,21 @@ impl ArrayDistinctAccumulator {
 }
 
 impl Accumulator for ArrayDistinctAccumulator {
+	fn holds_inputs(&self) -> bool {
+		true
+	}
+
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().values(&self.values).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.values = state.values()?;
+		self.seen_hashes = self.values.iter().map(Self::hash_value).collect();
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		let hash = Self::hash_value(&value);
 		// Only add if we haven't seen this hash before
@@ -395,6 +439,16 @@ impl ExtremumAccumulator {
 }
 
 impl Accumulator for ExtremumAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().option_value(&self.current).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.current = state.option_value()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		self.fold(&value);
 		Ok(())

@@ -34,7 +34,7 @@ use std::ops::ControlFlow;
 use std::pin::{Pin, pin};
 use std::task::{Context, Poll, Waker};
 
-pub use sort::sort_by;
+pub use sort::{LoserTree, sort_by};
 
 /// The units a thread holds before any program on it has yielded.
 const INITIAL: u32 = 4096;

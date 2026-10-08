@@ -182,6 +182,10 @@ pub struct Context {
 	/// quantum; the default scheduler when `None`. A child context carries
 	/// its parent's.
 	scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
+	/// The query's memory: its lease from the node's governor and the store
+	/// its breakers spill to. `None` outside a datastore query, where nothing
+	/// is bounded. A child context carries its parent's.
+	memory: Option<Arc<crate::exec::memory::QueryMemory>>,
 	/// The per-layer configuration a running query reads. Crate-internal: these
 	/// are operator knobs, not API.
 	pub(crate) config: Arc<RuntimeConfig>,
@@ -249,6 +253,7 @@ impl Context {
 			live: parent.live,
 			broker: parent.broker.clone(),
 			scheduler: parent.scheduler.clone(),
+			memory: parent.memory.clone(),
 		}
 	}
 
@@ -310,6 +315,7 @@ impl Context {
 			live: parent.live,
 			broker: parent.broker.clone(),
 			scheduler: parent.scheduler.clone(),
+			memory: parent.memory.clone(),
 		}
 	}
 
@@ -357,6 +363,7 @@ impl Context {
 			live: parent.live,
 			broker: parent.broker.clone(),
 			scheduler: parent.scheduler.clone(),
+			memory: parent.memory.clone(),
 		}
 	}
 
@@ -421,6 +428,7 @@ impl Context {
 			live: from.live,
 			broker: from.broker.clone(),
 			scheduler: from.scheduler.clone(),
+			memory: from.memory.clone(),
 		}
 	}
 
@@ -476,6 +484,7 @@ impl Context {
 			live: from.live,
 			broker: from.broker.clone(),
 			scheduler: from.scheduler.clone(),
+			memory: from.memory.clone(),
 		}
 	}
 
@@ -541,6 +550,7 @@ impl Context {
 			live: false,
 			broker: None,
 			scheduler: None,
+			memory: None,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -603,6 +613,7 @@ impl Context {
 			live: false,
 			broker: None,
 			scheduler: None,
+			memory: None,
 		}
 	}
 
@@ -743,6 +754,15 @@ impl Context {
 		scheduler: Option<Arc<dyn crate::exec::scheduler::Scheduler>>,
 	) {
 		self.scheduler = scheduler;
+	}
+
+	/// The query's memory, `None` where nothing is bounded.
+	pub(crate) fn memory(&self) -> Option<&Arc<crate::exec::memory::QueryMemory>> {
+		self.memory.as_ref()
+	}
+
+	pub(crate) fn set_memory(&mut self, memory: Option<Arc<crate::exec::memory::QueryMemory>>) {
+		self.memory = memory;
 	}
 
 	/// IAM check using auth from [`Options`] and the datastore auth toggle on this context.

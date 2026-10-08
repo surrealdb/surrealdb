@@ -6,6 +6,7 @@
 use anyhow::Result;
 use surrealdb_runtime::util::math::vector::add_assign;
 
+use super::saved::{Loading, Saving};
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
 use crate::expr::{Error as ExprError, Kind};
 use crate::val::{Number, Value};
@@ -122,6 +123,17 @@ impl VectorSumAccumulator {
 }
 
 impl Accumulator for VectorSumAccumulator {
+	fn save(&self) -> Option<Value> {
+		Some(Saving::default().option_numbers(&self.total).option_string(&self.undefined).done())
+	}
+
+	fn load(&mut self, state: Value) -> Result<()> {
+		let mut state = Loading::new(state)?;
+		self.total = state.option_numbers()?;
+		self.undefined = state.option_string()?;
+		Ok(())
+	}
+
 	fn update(&mut self, value: Value) -> Result<()> {
 		if self.undefined.is_some() {
 			return Ok(());

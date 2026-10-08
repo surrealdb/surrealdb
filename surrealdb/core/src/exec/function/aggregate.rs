@@ -48,6 +48,28 @@ pub trait Accumulator: Send + Sync + Debug {
 	#[allow(unused)]
 	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()>;
 
+	/// The accumulator's partial state as a value, for an aggregate that
+	/// spills its groups, or `None` where the state cannot be saved. A state
+	/// saved here and loaded into a fresh accumulator of the same function
+	/// ([`Self::load`]) folds and finalizes as this one does.
+	fn save(&self) -> Option<Value> {
+		None
+	}
+
+	/// Whether the accumulator keeps its inputs, so what it holds grows with
+	/// each value it folds: a breaker counts those values against its
+	/// query's memory.
+	fn holds_inputs(&self) -> bool {
+		false
+	}
+
+	/// Replace this fresh accumulator's state with `state`, which
+	/// [`Self::save`] answered for an accumulator of the same function.
+	fn load(&mut self, state: Value) -> Result<()> {
+		let _ = state;
+		anyhow::bail!("This aggregate's state cannot be restored")
+	}
+
 	/// Compute the final aggregate value.
 	///
 	/// Called after all values have been accumulated to produce

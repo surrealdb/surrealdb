@@ -19,7 +19,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::exec::function::{AccumulatorState, AggregateFunction};
+use crate::exec::memory::runs::Record;
 use crate::val::Value;
+
+/// What a group holds beyond its key and slots: its place in the key index.
+const GROUP_OVERHEAD: usize = 48;
 
 /// The groups of one aggregate. See the module documentation.
 pub(super) struct Groups {
@@ -36,6 +40,10 @@ pub(super) struct Groups {
 	firsts: Vec<Option<Value>>,
 	/// How many groups are open.
 	len: usize,
+	/// What the open groups hold, estimated: each group's key and slots
+	/// when it opens, each first value when it is set, and each value an
+	/// accumulator that keeps its inputs takes ([`Self::grew`]).
+	bytes: usize,
 }
 
 /// A group's place by its key.
@@ -136,6 +144,7 @@ impl Groups {
 			accumulators: Vec::new(),
 			firsts: Vec::new(),
 			len: 0,
+			bytes: 0,
 		};
 		if keys == 0 {
 			groups.open(functions);
@@ -158,7 +167,141 @@ impl Groups {
 		}
 		self.firsts.extend((0..functions.len()).map(|_| None));
 		self.len += 1;
+		self.bytes += crate::exec::memory::size::values_bytes(&self.key)
+			+ self.width() * std::mem::size_of::<AccumulatorState>()
+			+ functions.len() * std::mem::size_of::<Option<Value>>()
+			+ GROUP_OVERHEAD;
 		self.len - 1
+	}
+
+	/// What the open groups hold, estimated.
+	pub(super) fn bytes(&self) -> usize {
+		self.bytes
+	}
+
+	/// Count `bytes` more held by the selected group: a first value set, or
+	/// a value an accumulator that keeps its inputs took.
+	pub(super) fn grew(&mut self, bytes: usize) {
+		self.bytes += bytes;
+	}
+
+	/// Whether these groups may be spilled: grouped by a key, so more than
+	/// one group can open.
+	pub(super) fn spillable(&self) -> bool {
+		!matches!(self.index, KeyIndex::All)
+	}
+
+	/// Every open group as a saved record in key order — its key, then its
+	/// accumulators' saved states and its first values — leaving no group
+	/// open. `None`, with the groups left as they are, when an accumulator's
+	/// state cannot be saved.
+	pub(super) fn save_all(&mut self) -> Option<Vec<Record>> {
+		if !self.spillable() {
+			return None;
+		}
+		let (width, fields) = (self.width(), self.fields());
+		let index = match &mut self.index {
+			KeyIndex::All => return None,
+			KeyIndex::One(index) => {
+				std::mem::take(index).into_iter().map(|(k, i)| (vec![k], i)).collect::<Vec<_>>()
+			}
+			KeyIndex::Many(index) => std::mem::take(index).into_iter().collect(),
+		};
+		let mut records = Vec::with_capacity(index.len());
+		let mut saved_all = true;
+		for (key, at) in &index {
+			let mut states = Vec::with_capacity(width);
+			for state in &self.accumulators[at * width..(at + 1) * width] {
+				match state.save() {
+					Some(saved) => states.push(saved),
+					None => {
+						saved_all = false;
+						break;
+					}
+				}
+			}
+			if !saved_all {
+				break;
+			}
+			let mut firsts = Vec::with_capacity(fields * 2);
+			for first in &self.firsts[at * fields..(at + 1) * fields] {
+				firsts.push(first.clone().unwrap_or(Value::None));
+				firsts.push(Value::Bool(first.is_some()));
+			}
+			let row =
+				Value::Array(vec![Value::Array(states.into()), Value::Array(firsts.into())].into());
+			records.push((key.clone(), row));
+		}
+		if !saved_all {
+			// Put the index back as it was.
+			match &mut self.index {
+				KeyIndex::One(map) => {
+					map.extend(index.into_iter().map(|(mut k, i)| (k.remove(0), i)))
+				}
+				KeyIndex::Many(map) => map.extend(index),
+				KeyIndex::All => {}
+			}
+			return None;
+		}
+		self.accumulators.clear();
+		self.firsts.clear();
+		self.len = 0;
+		self.bytes = 0;
+		Some(records)
+	}
+
+	/// Fold a record [`Self::save_all`] answered into these groups: a key no
+	/// group holds opens one with the record's states, and a key one holds
+	/// has each state merged after its own and each first value kept unless
+	/// it has none.
+	pub(super) fn load_saved(
+		&mut self,
+		key: Vec<Value>,
+		row: Value,
+		functions: &[Vec<Arc<dyn AggregateFunction>>],
+	) -> anyhow::Result<()> {
+		let Value::Array(parts) = row else {
+			anyhow::bail!("A spilled group is not an array");
+		};
+		let mut parts = parts.0.into_iter();
+		let (Some(Value::Array(states)), Some(Value::Array(firsts))) = (parts.next(), parts.next())
+		else {
+			anyhow::bail!("A spilled group is malformed");
+		};
+		for (index, value) in key.into_iter().enumerate() {
+			self.set_key(index, value);
+		}
+		let before = self.len;
+		self.select(functions);
+		let opened = self.len > before;
+		let (width, fields) = (self.width(), self.fields());
+		let base = self.current * width;
+		let mut at = 0;
+		for calls in functions {
+			for function in calls {
+				let state = states.0.get(at).cloned().unwrap_or(Value::None);
+				self.bytes += crate::exec::memory::size::value_bytes(&state);
+				if opened {
+					self.accumulators[base + at].load(state)?;
+				} else {
+					let mut later = function.accumulator_state();
+					later.load(state)?;
+					self.accumulators[base + at].merge(later)?;
+				}
+				at += 1;
+			}
+		}
+		let mut firsts = firsts.0.into_iter();
+		for field in 0..fields {
+			let (value, present) = (firsts.next(), firsts.next());
+			let slot = &mut self.firsts[self.current * fields + field];
+			if slot.is_none() && matches!(present, Some(Value::Bool(true))) {
+				let value = value.unwrap_or(Value::None);
+				self.bytes += crate::exec::memory::size::value_bytes(&value);
+				*slot = Some(value);
+			}
+		}
+		Ok(())
 	}
 
 	/// Set key `index` of the row being folded.
@@ -243,6 +386,7 @@ impl Groups {
 			anyhow::bail!("a region merged groups of another kind");
 		}
 		let (width, fields) = (self.width(), self.fields());
+		self.bytes += part.bytes;
 		let mut part = part.finish();
 		for (key, from) in std::mem::take(&mut part.keys) {
 			let found = match (&self.index, &key) {

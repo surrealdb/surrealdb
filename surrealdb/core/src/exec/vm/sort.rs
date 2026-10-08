@@ -16,6 +16,58 @@ use crate::val::Value;
 /// A row a sort holds, with its keys.
 pub(super) type Sorted = (Vec<Value>, SortRow);
 
+/// How a sort that may spill writes its runs.
+#[derive(Debug, Clone)]
+pub(super) struct SortSpill {
+	/// The rows it holds before it spills whatever its query's memory: a
+	/// sort under `TEMPFILES`.
+	pub(super) rows: Option<usize>,
+	/// The order its runs are written and merged in.
+	pub(super) keys: Vec<KeyOrder>,
+	/// Whether the order is random: each row takes a random key as it is
+	/// spilled or merged ([`with_random_keys`]), so the merge of the runs is
+	/// a uniform shuffle of every row.
+	pub(super) random: bool,
+}
+
+/// The order of the random key [`with_random_keys`] gives each row.
+pub(super) const RANDOM_ORDER: KeyOrder = KeyOrder {
+	ascending: true,
+	collate: false,
+	numeric: false,
+};
+
+/// Give each of `rows` a key drawn uniformly at random, in place of the keys
+/// it holds: sorted by those keys, the rows lie in a uniformly random order,
+/// and runs so sorted merge into one.
+pub(super) fn with_random_keys(rows: &mut [Sorted]) {
+	use rand::Rng as _;
+	let mut rng = rand::rng();
+	for (keys, _) in rows {
+		keys.clear();
+		keys.push(Value::from(rng.random::<f64>()));
+	}
+}
+
+/// The bytes a row a sort holds weighs, for its account.
+#[inline]
+pub(super) fn sorted_bytes((keys, row): &Sorted) -> usize {
+	let row = match row {
+		SortRow::Value(value) => crate::exec::memory::size::value_bytes(value),
+		SortRow::Stored {
+			bytes,
+			..
+		} => std::mem::size_of::<SortRow>() + bytes.len(),
+		// The row's bytes lie in its sort's slab, which grows by them.
+		SortRow::Slab {
+			start,
+			end,
+			..
+		} => std::mem::size_of::<SortRow>() + (end - start),
+	};
+	row + crate::exec::memory::size::values_bytes(keys) + std::mem::size_of::<Sorted>()
+}
+
 /// The order of two rows' keys under `keys`, then — for a sort that keeps a
 /// bounded number of rows, whose rows carry their arrival after their keys
 /// ([`super::interp::State::keep_sorted`]) — the earlier arrival first.
