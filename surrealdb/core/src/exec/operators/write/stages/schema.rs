@@ -1043,7 +1043,15 @@ impl WriteStage for MaterialiseObservedFields {
 /// Whether anything other than the statement's own projection reads this record
 /// after it is written: a table event, a live-query subscription, or a
 /// changefeed on the table or on its database.
+///
+/// Under `OPTION IMPORT` nothing does. An import runs no observer, so deriving
+/// the computed values one would read evaluates bodies whose result is
+/// discarded — and a body reading a table the dump defines later raises, which
+/// would fail a restore of a database's own export.
 pub(crate) fn has_record_observers(ctx: &WriteCtx) -> bool {
+	if ctx.exec().options().is_some_and(|options| options.import) {
+		return false;
+	}
 	!ctx.events.is_empty()
 		|| !ctx.lives.is_empty()
 		|| ctx.table.changefeed.is_some()
@@ -1069,6 +1077,37 @@ mod tests {
 	/// transaction held by a root-Owner session.
 	async fn ctx_for(db: &TestDb, table: &str) -> Arc<WriteCtx> {
 		ctx_as(db, &TestDb::owner(), table, WriteClauses::default()).await
+	}
+
+	/// As [`ctx_for`], for a statement running under `OPTION IMPORT`.
+	async fn importing_ctx(db: &TestDb, table: &str) -> Arc<WriteCtx> {
+		let exec = db.exec_ctx_as(&TestDb::owner(), TransactionType::Write).await;
+		let options = exec.options().expect("a database context carries options").clone();
+		let mut root = exec.root().clone();
+		root.options = Some(options.new_with_import(true));
+		let importing = match exec {
+			ExecutionContext::Database(db_ctx) => ExecutionContext::Database(DatabaseContext {
+				ns_ctx: NamespaceContext {
+					root,
+					ns: db_ctx.ns_ctx.ns,
+				},
+				..db_ctx
+			}),
+			ExecutionContext::Root(_) | ExecutionContext::Namespace(_) => {
+				panic!("a write context is a database context")
+			}
+		};
+		Arc::new(
+			WriteCtx::resolve(
+				&importing,
+				&TableName::from(table),
+				TableExistence::DefinedOnDemand,
+				None,
+				Arc::new(WriteClauses::default()),
+			)
+			.await
+			.expect("the write context resolves"),
+		)
 	}
 
 	/// As [`ctx_for`], for `session` and for a statement carrying `clauses`.
@@ -2057,37 +2096,36 @@ mod tests {
 			",
 		)
 		.await;
-		let exec = db.exec_ctx_as(&TestDb::owner(), TransactionType::Write).await;
-		let options = exec.options().expect("a database context carries options").clone();
-		let mut root = exec.root().clone();
-		root.options = Some(options.new_with_import(true));
-		let importing = match exec {
-			ExecutionContext::Database(db_ctx) => ExecutionContext::Database(DatabaseContext {
-				ns_ctx: NamespaceContext {
-					root,
-					ns: db_ctx.ns_ctx.ns,
-				},
-				..db_ctx
-			}),
-			ExecutionContext::Root(_) | ExecutionContext::Namespace(_) => {
-				panic!("a write context is a database context")
-			}
-		};
-		let ctx = Arc::new(
-			WriteCtx::resolve(
-				&importing,
-				&TableName::from("t"),
-				TableExistence::DefinedOnDemand,
-				None,
-				Arc::new(WriteClauses::default()),
-			)
-			.await
-			.expect("the write context resolves"),
-		);
+		let ctx = importing_ctx(&db, "t").await;
 		let mut row = creating_row(object(vec![("id", Value::RecordId(subject()))]));
 
 		kernel(&mut row, &ctx).await.unwrap();
 
 		assert!(!carries(&row.current, "n"), "an import derives no default");
+	}
+
+	/// An import runs no observer, so the computed values an event would read
+	/// are not derived either — not even from a body that would raise.
+	#[tokio::test]
+	async fn an_import_derives_no_observed_field() {
+		let db = TestDb::new(
+			"
+			DEFINE TABLE t SCHEMALESS;
+			DEFINE FIELD broken ON t COMPUTED (SELECT * FROM missing);
+			DEFINE EVENT seen ON t WHEN true THEN { RETURN true; };
+			",
+		)
+		.await;
+		let ctx = importing_ctx(&db, "t").await;
+		let mut row = creating_row(object(vec![("id", Value::RecordId(subject()))]));
+
+		stage(StageId::MaterialiseObservedFields)
+			.expect("the stage is registered")
+			.apply(&mut row, &ctx)
+			.await
+			.expect("an import evaluates no computed body");
+
+		assert!(!carries(&row.current, "broken"));
+		assert!(!row.fields_computed);
 	}
 }

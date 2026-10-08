@@ -284,6 +284,51 @@ async fn a_reference_survives_its_target_table_being_restored_later() -> Result<
 	.await
 }
 
+/// A computed field reading a table restored later does not fail the restore of
+/// a table with an event.
+///
+/// The export emits stored tables in name order, so `anchor`'s records are
+/// replayed before `revision` — the table its computed field reads — is defined.
+/// An event on the table would read the computed values, but a restore runs no
+/// event, so the values are not derived and the body never meets the missing
+/// table. Once restored, the field reads the restored rows and the event fires
+/// again.
+#[tokio::test]
+async fn a_computed_field_reading_a_later_table_survives_an_event() -> Result<()> {
+	let round_trip = RoundTrip::run(
+		"DEFINE FUNCTION fn::naming($e: record<anchor>) {
+			RETURN (SELECT label FROM revision WHERE anchor = $e)[0];
+		 };
+		 DEFINE TABLE anchor SCHEMAFULL;
+		 DEFINE FIELD label ON anchor COMPUTED fn::naming(id).label;
+		 DEFINE EVENT guard ON anchor WHEN $event = 'DELETE' THEN THROW 'guarded';
+		 DEFINE TABLE revision SCHEMAFULL;
+		 DEFINE FIELD anchor ON revision TYPE record<anchor>;
+		 DEFINE FIELD label ON revision TYPE string;
+		 CREATE anchor:1;
+		 CREATE revision:1 SET anchor = anchor:1, label = 'Lea';",
+	)
+	.await?;
+
+	// As with the late reference target, the ordering is the fixture.
+	let export = round_trip.export_a();
+	let anchor_data =
+		export.find("INSERT [ { id: anchor:1").expect("the export must carry anchor's records");
+	let revision_definition =
+		export.find("DEFINE TABLE revision").expect("the export must carry the revision table");
+	assert!(
+		anchor_data < revision_definition,
+		"this fixture only covers the late-table case while anchor's records are replayed \
+		 before the table its computed field reads is defined:\n{export}"
+	);
+
+	round_trip.assert_all().await?;
+	round_trip.assert_query_equal("SELECT VALUE label FROM anchor ORDER BY id").await?;
+	assert_target_renders(&round_trip, "SELECT VALUE label FROM anchor ORDER BY id", "['Lea']")
+		.await?;
+	assert_target_rejects(&round_trip, "DELETE anchor:1", "guarded").await
+}
+
 /// A restored reference still cascades when the record it names is deleted.
 ///
 /// Reading a reference key tells you it exists; it does not tell you the key is
