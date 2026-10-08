@@ -257,6 +257,19 @@ impl fmt::Display for NetTarget {
 	}
 }
 
+/// Folds an IPv4-mapped IPv6 host prefix (`::ffff:a.b.c.d/128`) onto the IPv4
+/// address it denotes, leaving every other network unchanged.
+///
+/// Both notations name the same host and the connector dials whichever one it
+/// is handed, so a rule written in one of them has to cover the other.
+fn canonical_host_net(net: &IpNet) -> IpNet {
+	if net.prefix_len() == net.max_prefix_len() {
+		IpNet::from(net.network().to_canonical())
+	} else {
+		*net
+	}
+}
+
 impl Target for NetTarget {
 	fn matches(&self, tgt: &Self) -> bool {
 		match self {
@@ -271,15 +284,25 @@ impl Target for NetTarget {
 				_ => false,
 			},
 			// If self is an IPNet, it can match both an IPNet or a Host elem that contains an
-			// IPAddr
-			Self::IPNet(ipnet) => match tgt {
-				Self::IPNet(tgt_ipnet) => ipnet.contains(tgt_ipnet),
-				Self::Host(host, _) => match host {
-					url::Host::Ipv4(ip) => ipnet.contains(&IpAddr::from(ip.to_owned())),
-					url::Host::Ipv6(ip) => ipnet.contains(&IpAddr::from(ip.to_owned())),
-					_ => false,
-				},
-			},
+			// IPAddr. An address given in IPv4-mapped IPv6 notation is compared in its
+			// canonical form as well, so that `::ffff:a.b.c.d` cannot slip past a rule
+			// written for `a.b.c.d`.
+			Self::IPNet(ipnet) => {
+				let ipnet = canonical_host_net(ipnet);
+				match tgt {
+					Self::IPNet(tgt_ipnet) => {
+						ipnet.contains(tgt_ipnet) || ipnet.contains(&canonical_host_net(tgt_ipnet))
+					}
+					Self::Host(host, _) => match host {
+						url::Host::Ipv4(ip) => ipnet.contains(&IpAddr::from(ip.to_owned())),
+						url::Host::Ipv6(ip) => {
+							let ip = IpAddr::from(ip.to_owned());
+							ipnet.contains(&ip) || ipnet.contains(&ip.to_canonical())
+						}
+						_ => false,
+					},
+				}
+			}
 		}
 	}
 }
@@ -1280,6 +1303,44 @@ mod tests {
 				.unwrap()
 				.matches(&NetTarget::from_str("[2001:db8::1]:443").unwrap()),
 			"Host IPv6 with port does not match Host IPv6 with different port"
+		);
+
+		// IPv4-mapped IPv6 notation denotes the same host as its IPv4 form
+		assert!(
+			NetTarget::from_str("127.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("[::ffff:127.0.0.1]:80").unwrap()),
+			"IPv4 network matches IPv4-mapped IPv6 host with port"
+		);
+		assert!(
+			NetTarget::from_str("169.254.169.254")
+				.unwrap()
+				.matches(&NetTarget::from_str("[::ffff:169.254.169.254]:80").unwrap()),
+			"IPv4 addr matches IPv4-mapped IPv6 host with port"
+		);
+		assert!(
+			NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("::ffff:10.0.0.1").unwrap()),
+			"IPv4 network matches IPv4-mapped IPv6 addr"
+		);
+		assert!(
+			NetTarget::from_str("::ffff:127.0.0.1")
+				.unwrap()
+				.matches(&NetTarget::from_str("127.0.0.1:80").unwrap()),
+			"IPv4-mapped IPv6 addr matches IPv4 host with port"
+		);
+		assert!(
+			!NetTarget::from_str("10.0.0.0/8")
+				.unwrap()
+				.matches(&NetTarget::from_str("[::ffff:20.0.0.1]:80").unwrap()),
+			"IPv4 network does not match an unrelated IPv4-mapped IPv6 host"
+		);
+		assert!(
+			NetTarget::from_str("::ffff:0:0/96")
+				.unwrap()
+				.matches(&NetTarget::from_str("[::ffff:127.0.0.1]:80").unwrap()),
+			"IPv4-mapped IPv6 network still matches a mapped host inside it"
 		);
 
 		// Test invalid targets
