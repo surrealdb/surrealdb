@@ -914,3 +914,130 @@ async fn concurrent_lives_on_one_task_do_not_conflict() -> Result<()> {
 	);
 	Ok(())
 }
+
+// A bare `LIVE` and a bare `KILL` each read and then write their table's
+// live-query stamp, so statements that overlap on one table can lose a commit
+// conflict. The server re-runs the loser, so whatever order a connection's
+// concurrent registrations and aborts fall in, every `LIVE` it answered is
+// gone once its `KILL` answered, and neither statement reports a conflict.
+#[cfg(feature = "kv-rocksdb")]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_live_and_kill_on_one_task_leave_no_live_query() -> Result<()> {
+	use futures::StreamExt;
+	use surrealdb_core::kvs::Datastore;
+	use surrealdb_rpc::capabilities::Capabilities;
+
+	const ROUNDS: usize = 20;
+	const PER_ROUND: usize = 30;
+
+	let (send, _recv) = surrealdb_core::channel::bounded(1000);
+	let dir = temp_dir::TempDir::new()?;
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.with_capabilities(Capabilities::all())
+		.with_notify(send)
+		.build_with_path(&format!("rocksdb://{}", dir.path().display()))
+		.await?;
+	crate::helpers::new_ns_db(&ds, "test", "test").await?;
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+
+	for round in 0..ROUNDS {
+		let res = &mut ds.execute(&format!("DEFINE TABLE person_{round}"), &ses, None).await?;
+		skip_ok(res, 1)?;
+		let live = format!("LIVE SELECT * FROM person_{round}");
+		// Polled as a connection polls its requests: each is resumed in the
+		// order it is woken, not the order it was sent.
+		let results: Vec<Result<()>> = (0..PER_ROUND)
+			.map(|_| async {
+				let mut res = ds.execute(&live, &ses, None).await?;
+				let id = res.remove(0).result?;
+				let Value::Uuid(id) = id else {
+					return Err(anyhow::anyhow!("LIVE answered {id:?}, not a uuid"));
+				};
+				let mut res = ds.execute(&format!("KILL u'{id}'"), &ses, None).await?;
+				res.remove(0).result?;
+				Ok(())
+			})
+			.collect::<futures::stream::FuturesUnordered<_>>()
+			.collect()
+			.await;
+		for result in results {
+			if let Err(e) = result {
+				return Err(anyhow::anyhow!("round {round}: {e}"));
+			}
+		}
+		let res = &mut ds.execute(&format!("INFO FOR TABLE person_{round}"), &ses, None).await?;
+		let Value::Object(info) = res.remove(0).result? else {
+			return Err(anyhow::anyhow!("INFO FOR TABLE should answer an object"));
+		};
+		let Some(Value::Object(lives)) = info.get("lives") else {
+			return Err(anyhow::anyhow!("INFO FOR TABLE should list `lives`"));
+		};
+		assert!(lives.is_empty(), "round {round} left live queries: {:?}", lives.keys());
+	}
+	Ok(())
+}
+
+// A `LIVE` that overlaps a `KILL` inside a transaction block the caller owns
+// is not re-run on its behalf: the block's conflict surfaces to the caller,
+// and its `KILL` does not apply.
+#[cfg(feature = "kv-rocksdb")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_conflict_inside_a_transaction_block_surfaces() -> Result<()> {
+	use surrealdb_core::kvs::Datastore;
+	use surrealdb_rpc::capabilities::Capabilities;
+
+	let (send, _recv) = surrealdb_core::channel::bounded(1000);
+	let dir = temp_dir::TempDir::new()?;
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.with_capabilities(Capabilities::all())
+		.with_notify(send)
+		.build_with_path(&format!("rocksdb://{}", dir.path().display()))
+		.await?;
+	crate::helpers::new_ns_db(&ds, "test", "test").await?;
+	let ses_a = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let ses_b = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	skip_ok(&mut ds.execute("DEFINE TABLE person", &ses_a, None).await?, 1)?;
+
+	let res = &mut ds.execute("LIVE SELECT * FROM person", &ses_a, None).await?;
+	let id_a = res.remove(0).result?;
+	assert_eq!(id_a.kind(), Kind::Uuid);
+
+	let block = tokio::spawn({
+		let ds = ds.clone();
+		let vars = vars! { id: id_a.clone() };
+		async move { ds.execute("BEGIN; KILL $id; SLEEP 500ms; COMMIT;", &ses_a, Some(vars)).await }
+	});
+	tokio::time::sleep(Duration::from_millis(100)).await;
+	let res = &mut ds.execute("LIVE SELECT * FROM person", &ses_b, None).await?;
+	let id_b = res.remove(0).result?;
+	assert_eq!(id_b.kind(), Kind::Uuid);
+
+	let responses = block.await??;
+	let conflicted = responses.iter().any(|r| {
+		r.result.as_ref().is_err_and(|e| {
+			let message = e.to_string().to_lowercase();
+			message.contains("conflict")
+				|| message.contains("resource busy")
+				|| e.query_details() == Some(&surrealdb_types::QueryError::TransactionConflict)
+		})
+	});
+	assert!(conflicted, "the block should report a transaction conflict: {responses:?}");
+
+	let res = &mut ds.execute("INFO FOR TABLE person", &ses_b, None).await?;
+	let Value::Object(info) = res.remove(0).result? else {
+		return Err(anyhow::anyhow!("INFO FOR TABLE should answer an object"));
+	};
+	let Some(Value::Object(lives)) = info.get("lives") else {
+		return Err(anyhow::anyhow!("INFO FOR TABLE should list `lives`"));
+	};
+	let listed: Vec<&String> = lives.keys().collect();
+	for id in [&id_a, &id_b] {
+		let Value::Uuid(id) = id else {
+			return Err(anyhow::anyhow!("LIVE answered {id:?}, not a uuid"));
+		};
+		assert!(listed.contains(&&id.to_string()), "{id} should still be listed: {listed:?}");
+	}
+	Ok(())
+}
