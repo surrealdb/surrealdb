@@ -505,10 +505,11 @@ mod mem {
 	/// Embedded only, deliberately: over the RPC transports `authenticate`
 	/// carries a bare token string and there is nowhere to put a refresh token,
 	/// so a caller there asks for the refresh explicitly. This is the implicit
-	/// path, and it is the one that takes the session lock twice — once to try
-	/// the access token and again to redeem the refresh token — so an
-	/// implementation that holds the first lock into the second deadlocks here
-	/// rather than failing.
+	/// path, and both trying the access token and redeeming the refresh token
+	/// need exclusive access to the session. An implementation that asks for
+	/// the session lock again while still holding it never completes the
+	/// command, and every later command on the session waits behind it; the
+	/// timeouts turn either into a failure rather than a hung test.
 	#[test_log::test(tokio::test)]
 	async fn authenticate_refreshes_an_expired_access_token() {
 		use surrealdb::opt::auth::Record as RecordAccess;
@@ -556,12 +557,23 @@ mod mem {
 		// Let the access token expire, leaving the refresh token as the only way in.
 		tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-		let token = db.authenticate(token).await.unwrap();
+		let bound = std::time::Duration::from_secs(10);
+		let token = tokio::time::timeout(bound, async { db.authenticate(token).await })
+			.await
+			.expect("authenticate with an expired access token must complete")
+			.unwrap();
 		assert_ne!(
 			expired,
 			token.access.as_insecure_token(),
 			"the session must be authenticated with a freshly issued access token"
 		);
+
+		let mut response = tokio::time::timeout(bound, async { db.query("RETURN 1").await })
+			.await
+			.expect("the session must stay usable after an automatic refresh")
+			.unwrap();
+		let value: Option<i64> = response.take(0).unwrap();
+		assert_eq!(value, Some(1));
 	}
 
 	#[test_log::test(tokio::test)]

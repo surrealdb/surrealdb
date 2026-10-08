@@ -577,31 +577,25 @@ impl SurrealEngine for LocalEngine {
 					..
 				} => (access, true),
 			};
-			// Bound the guard to this block rather than letting it live as a
-			// temporary in the `match` scrutinee below. A scrutinee's temporaries
-			// are dropped only at the end of the whole `match`, and the refresh
-			// arm takes the same lock -- which `RwLock` does not grant twice to
-			// one task.
-			let verified = {
+			// One write guard covers both the verification and the automatic
+			// refresh, and the refresh borrows it rather than locking again:
+			// `RwLock` does not grant a second write lock to a task that holds
+			// one, and taking it twice in sequence would let another command
+			// change the session between the two steps. The guard is released
+			// before live queries are cleaned up, which reads the session.
+			let result = {
 				let mut session = state.session.write().await;
-				iam::verify::token(&self.kvs, &mut session, access).await
-			};
-			let result = match verified {
-				// Authentication successful - return the original token
-				Ok(_) => Ok(token),
-				Err(error) => {
-					// Automatic refresh token handling:
-					// If the access token is expired and we have a refresh token,
-					// automatically attempt to refresh and return new tokens.
-					if with_refresh && iam::is_expired_token_error(&error) {
-						iam::token::refresh(token, &self.kvs, &mut *state.session.write().await)
+				match iam::verify::token(&self.kvs, &mut session, access).await {
+					// Authentication successful - return the original token
+					Ok(_) => Ok(token),
+					// An expired access token paired with a refresh token is
+					// refreshed, and the new token pair is returned.
+					Err(error) if with_refresh && iam::is_expired_token_error(&error) => {
+						iam::token::refresh(token, &self.kvs, &mut session)
 							.await
 							.map_err(|error| Error::internal(error.to_string()))
-					} else {
-						// If authentication failed and automatic refresh isn't applicable,
-						// return the authentication error
-						Err(Error::internal(error.to_string()))
 					}
+					Err(error) => Err(Error::internal(error.to_string())),
 				}
 			};
 			cleanup_lqs_on_principal_change(&self.kvs, &state, &before).await;
