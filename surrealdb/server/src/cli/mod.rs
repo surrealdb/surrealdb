@@ -65,8 +65,10 @@ use crate::ntw::RouterFactory;
 fn banner() -> String {
 	let (pink, bold, dim, ul, r) =
 		("\x1b[38;2;255;0;160m", "\x1b[1m", "\x1b[2m", "\x1b[4m", "\x1b[0m");
+	let logo = LOGO.trim_end();
 	format!(
-		"{pink}{LOGO}{r}
+		"{pink}{logo}{r}
+
   {bold}Your free SurrealDB Cloud instance is waiting.{r}
   Spin one up in under a minute, no credit card needed:
   {pink}{ul}https://studio.surrealdb.com{r}
