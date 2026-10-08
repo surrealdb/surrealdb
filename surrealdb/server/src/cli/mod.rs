@@ -63,8 +63,7 @@ use crate::ntw::RouterFactory;
 /// Builds the help banner. clap strips the ANSI codes itself when the output stream
 /// is not a terminal, or when `NO_COLOR` / `CLICOLOR` say so.
 fn banner() -> String {
-	let (pink, bold, dim, ul, r) =
-		("\x1b[38;5;199m", "\x1b[1m", "\x1b[2m", "\x1b[4m", "\x1b[0m");
+	let (pink, bold, dim, ul, r) = ("\x1b[38;5;199m", "\x1b[1m", "\x1b[2m", "\x1b[4m", "\x1b[0m");
 	let logo = LOGO.trim_end();
 	format!(
 		"{pink}{logo}{r}
