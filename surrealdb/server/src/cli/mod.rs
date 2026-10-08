@@ -24,7 +24,6 @@ pub(crate) mod validator;
 mod version;
 mod version_client;
 
-use std::io::IsTerminal;
 use std::ops::Deref;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -61,14 +60,11 @@ use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
 use crate::ntw::RouterFactory;
 
-/// Builds the help banner, coloured only when stdout is a terminal and `NO_COLOR` is unset
+/// Builds the help banner. clap strips the ANSI codes itself when the output stream
+/// is not a terminal, or when `NO_COLOR` / `CLICOLOR` say so.
 fn banner() -> String {
-	let colour = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
-	let (pink, bold, dim, ul, r) = if colour {
-		("\x1b[38;2;255;0;160m", "\x1b[1m", "\x1b[2m", "\x1b[4m", "\x1b[0m")
-	} else {
-		("", "", "", "", "")
-	};
+	let (pink, bold, dim, ul, r) =
+		("\x1b[38;2;255;0;160m", "\x1b[1m", "\x1b[2m", "\x1b[4m", "\x1b[0m");
 	format!(
 		"{pink}{LOGO}{r}
   {bold}Your free SurrealDB Cloud instance is waiting.{r}
