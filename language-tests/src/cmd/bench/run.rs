@@ -1187,7 +1187,7 @@ async fn build_and_populate(
 	let dbs = builder_from_config(&run.case.test.config.parsed)
 		.build_with_path(&datastore_conn(config))
 		.await?;
-	match populate(run, config, token, &dbs).await {
+	match populate(run, token, &dbs).await {
 		Ok(None) => Ok(Ok(dbs)),
 		Ok(Some(e)) => {
 			retire_datastore(dbs, config).await;
@@ -1205,7 +1205,6 @@ async fn build_and_populate(
 /// an import fails.
 async fn populate(
 	run: &TestRun<BenchRunConfig>,
-	config: &BenchConfig,
 	token: &tokio_util::sync::CancellationToken,
 	dbs: &Arc<Datastore>,
 ) -> Result<Option<ImportFailure>> {
