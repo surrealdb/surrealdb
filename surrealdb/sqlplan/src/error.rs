@@ -69,11 +69,11 @@ impl PlanError {
 			Self::UndefinedColumn(_) => "42703",                                  /* undefined_column */
 			Self::AmbiguousColumn(_) => "42702",                                  /* ambiguous_column */
 			Self::InvalidGroupByPosition(_) | Self::InvalidOrderByPosition(_) => "42P10", /* invalid_column_reference */
-			Self::ColumnNotInGroupBy(_) => "42803", // grouping_error
-			Self::AggregateNotAllowed(_) | Self::WindowNotAllowed(_) => "42803", // grouping_error
-			Self::SubqueryMustHaveAlias => "42601", // syntax_error
+			Self::ColumnNotInGroupBy(_) => "42803",                                       // grouping_error
+			Self::AggregateNotAllowed(_) | Self::WindowNotAllowed(_) => "42803",          // grouping_error
+			Self::SubqueryMustHaveAlias => "42601",                                       // syntax_error
 			Self::ParameterOutOfRange(_) => "22023", // invalid_parameter_value
-			Self::DivisionByZero => "22012",        // division_by_zero
+			Self::DivisionByZero => "22012",         // division_by_zero
 			Self::InvalidTextRepresentation(_) => "22P02", // invalid_text_representation
 			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => "0A000", /* feature_not_supported */
 			Self::Custom(_) => "42000",

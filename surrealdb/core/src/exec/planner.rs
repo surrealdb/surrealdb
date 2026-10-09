@@ -1808,12 +1808,6 @@ impl<'ctx> Planner<'ctx> {
 		reached
 	}
 
-	/// Whether this planner plans a statement a block compiles when it
-	/// reaches it ([`Self::compiled_when_reached`]).
-	pub(crate) fn is_compiled_when_reached(&self) -> bool {
-		self.when_reached
-	}
-
 	/// This planner planning a stored clause, or a statement nested in one
 	/// ([`Self::is_stored_clause`]).
 	pub(crate) fn in_stored_clause(mut self) -> Self {

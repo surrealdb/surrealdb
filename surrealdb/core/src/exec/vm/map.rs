@@ -4989,11 +4989,7 @@ impl Blocks {
 				Op::Sequence(_) | Op::Foreach(_) | Op::Return(_) | Op::Sleep(_) | Op::Eval(_) => {
 					crate::exec::vm::host::out_of_line(|| self.control(planner, op)).await
 				}
-				Op::Let(_)
-					if self.eager
-						&& !planner.is_late_bound()
-						&& !planner.is_compiled_when_reached() =>
-				{
+				Op::Let(_) => {
 					let op = Op::Eval(LogicalEval {
 						expr: value.clone(),
 					});

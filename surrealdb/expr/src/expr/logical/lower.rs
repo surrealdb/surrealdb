@@ -285,7 +285,17 @@ pub fn lower_value_statement(expr: sql::Expr) -> Lowered<LogicalOp> {
 /// An `IF` in statement position: each arm lowered as a statement, so a block
 /// arm is its [`LogicalOp::Sequence`] and a nested `IF` another
 /// [`LogicalOp::If`].
+///
+/// An `IF` with an arm written as a `LET` — a `LET` as an expression, which
+/// planning refuses whether or not the arm is taken — is a
+/// [`LogicalOp::Eval`] of its scalar form, where that refusal is raised as
+/// the statement is planned.
 fn lower_if_statement(stmt: IfelseStatement) -> Lowered<LogicalOp> {
+	if if_arm_is_a_let(&stmt) {
+		return Ok(LogicalOp::Eval(LogicalEval {
+			expr: lower_expr(sql::Expr::IfElse(Box::new(stmt)))?,
+		}));
+	}
 	let branches = stmt
 		.exprs
 		.into_iter()
@@ -293,6 +303,21 @@ fn lower_if_statement(stmt: IfelseStatement) -> Lowered<LogicalOp> {
 		.collect::<Lowered<Vec<_>>>()?;
 	let otherwise = stmt.close.map(lower).transpose()?;
 	Ok(LogicalOp::If(LogicalIfOp::new(branches, otherwise)))
+}
+
+/// Whether an arm of `stmt` is a `LET` written in place of a value, here or in
+/// an `IF` written as an arm. An arm that is a block holding a `LET` is not:
+/// the `LET` is a statement of the block.
+fn if_arm_is_a_let(stmt: &IfelseStatement) -> bool {
+	#[expect(clippy::wildcard_enum_match_arm, reason = "any other arm is a value or a statement")]
+	fn is_a_let(arm: &sql::Expr) -> bool {
+		match arm {
+			sql::Expr::Let(_) => true,
+			sql::Expr::IfElse(nested) => if_arm_is_a_let(nested),
+			_ => false,
+		}
+	}
+	stmt.exprs.iter().any(|(_, then)| is_a_let(then)) || stmt.close.as_ref().is_some_and(is_a_let)
 }
 
 /// Lower an expression in scalar position.
@@ -1593,6 +1618,20 @@ mod tests {
 			lower_sql("IF $a THEN IF $b THEN 1 ELSE 2 END END").to_string(),
 			"If[$a]\n  If[$b    ELSE]\n    Eval[1]\n    Eval[2]"
 		);
+	}
+
+	/// A statement `IF` with an arm written as a `LET`, at any depth of the
+	/// `IF`s written as arms, keeps its scalar form; a block arm holding a
+	/// `LET` does not.
+	#[test]
+	fn a_statement_if_with_a_let_arm_stays_an_expression() {
+		assert!(matches!(lower_sql("IF $c THEN (LET $x = 1) ELSE 3 END"), LogicalOp::Eval(_)));
+		assert!(matches!(lower_sql("IF $c THEN 1 ELSE (LET $x = 1) END"), LogicalOp::Eval(_)));
+		assert!(matches!(
+			lower_sql("IF $t THEN 1 ELSE IF $c THEN (LET $x = 1) ELSE 3 END"),
+			LogicalOp::Eval(_)
+		));
+		assert!(matches!(lower_sql("IF $t { LET $x = 1; } ELSE { 3 }"), LogicalOp::If(_)));
 	}
 
 	/// The value of a `RETURN`, and an `IF` inside an expression, stay in
