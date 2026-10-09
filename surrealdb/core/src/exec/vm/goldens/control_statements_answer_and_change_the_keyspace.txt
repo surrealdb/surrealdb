@@ -453,3 +453,28 @@ keyspace:
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0e6fb3ae11f2f17e (114 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdc\x00 => 3121f8d4b3f994be (41 bytes)
+### { LET $x = { IF true { CREATE counter:1; RETURN 1 }; 2 }; RETURN $x }
+1
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcounter\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcounter\x00 => d320847722538f39 (115 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 13f0179e1f3d8d59 (48 bytes)
+### { LET $x = { FOR $i IN 0..5 { IF $i = 3 { RETURN $i } }; 'none' }; RETURN $x }
+3
+keyspace:
+### { LET $x = { LET $y = 7; { RETURN $y } }; RETURN [$x, $y] }
+[7, NONE]
+keyspace:
+### { RETURN { IF true { RETURN 'inner' }; 'outer' } }
+'inner'
+keyspace:
+### { FOR $i IN 0..4 { LET $x = { IF $i = 2 { BREAK }; $i }; CREATE type::record('counter', $x) }; RETURN SELECT VALUE id FROM counter ORDER BY id }
+[counter:0, counter:1]
+keyspace:
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!cvcounter\x00 => eba8d4f0aba80485 (17 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00!tbcounter\x00 => d320847722538f39 (115 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x00 => 13f0159e1f3d89f3 (48 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*counter\x00*\x02\x80\x00\x00\x00\x00\x00\x00\x01 => 13f0179e1f3d8d59 (48 bytes)
+### { LET $x: int = { RETURN 'five' }; RETURN $x }
+error: Tried to set `$x`, but couldn't coerce value: Expected `int` but found `'five'`
+keyspace:

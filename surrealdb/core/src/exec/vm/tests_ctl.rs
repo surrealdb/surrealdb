@@ -112,6 +112,13 @@ const CTL_STATEMENTS: &[&str] = &[
 	"{ CREATE fresh:1 SET n = 1; LET $t = (SELECT VALUE 'fresh' FROM ONLY person:1); RETURN SELECT * FROM type::table($t) }",
 	"{ CREATE fresh:1; FOR $i IN ['person', 'fresh'] { CREATE log SET r = (SELECT * FROM type::table($i)) }; RETURN SELECT r FROM log ORDER BY r }",
 	"{ LET $a = SELECT * FROM [person:1]; DEFINE FIELD c ON person COMPUTED 7; RETURN [$a, (SELECT * FROM [person:1])] }",
+	// A `RETURN` caught by the `LET` or `RETURN` whose value holds it.
+	"{ LET $x = { IF true { CREATE counter:1; RETURN 1 }; 2 }; RETURN $x }",
+	"{ LET $x = { FOR $i IN 0..5 { IF $i = 3 { RETURN $i } }; 'none' }; RETURN $x }",
+	"{ LET $x = { LET $y = 7; { RETURN $y } }; RETURN [$x, $y] }",
+	"{ RETURN { IF true { RETURN 'inner' }; 'outer' } }",
+	"{ FOR $i IN 0..4 { LET $x = { IF $i = 2 { BREAK }; $i }; CREATE type::record('counter', $x) }; RETURN SELECT VALUE id FROM counter ORDER BY id }",
+	"{ LET $x: int = { RETURN 'five' }; RETURN $x }",
 ];
 
 #[tokio::test]
