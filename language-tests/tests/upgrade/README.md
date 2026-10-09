@@ -45,6 +45,10 @@ SDK crate, not the root binary package, which is named `surreal`. It is then
 built with `cargo build --bin surreal`. Any other checkout works the same way:
 `--to /path/to/another/clone`.
 
+Setting `LANG_UPGRADE_PREBUILT_CURRENT` skips that build and uses the binary already
+at `<checkout>/target/debug/surreal`, which must exist; the same binary packs the
+Surrealism module fixture. CI sets it after downloading the `build` job's binary.
+
 Everything else is a tag, downloaded from
 `https://download.surrealdb.com/v{ver}/surreal-v{ver}.{platform}` and cached in
 `language-tests/.binary_cache/`. The CDN is used rather than GitHub Releases

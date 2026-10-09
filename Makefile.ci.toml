@@ -1365,6 +1365,52 @@ args = [
     "--skip", "database_upgrade",
 ]
 
+[tasks.ci-workspace-test-archive]
+category = "CI - WORKSPACE TESTS"
+description = "Build the workspace test binaries once and pack them for ci-workspace-test-run"
+command = "cargo"
+args = [
+    "nextest",
+    "archive",
+    "--locked",
+    "--no-default-features",
+    "--features",
+    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks,surrealism,gql,surrealdb-embedded/kv-mem",
+    "--workspace",
+    "--exclude", "demo",
+    "--exclude", "surrealdb-profiling",
+    "--archive-file", "target/workspace-tests.tar.zst",
+]
+
+# Runs one shard (CI_SHARD of CI_SHARDS) of the archive built by
+# `ci-workspace-test-archive`, with the same skips as `ci-workspace-test`.
+[tasks.ci-workspace-test-run]
+category = "CI - WORKSPACE TESTS"
+description = "Run one shard of the packed workspace tests"
+command = "cargo"
+args = [
+    "nextest",
+    "run",
+    "--archive-file", "target/workspace-tests.tar.zst",
+    "--workspace-remap", ".",
+    "--partition", "count:${CI_SHARD}/${CI_SHARDS}",
+    "--",
+    "--skip", "api_integration",
+    "--skip", "cli_integration",
+    "--skip", "http_integration",
+    "--skip", "ws_integration",
+    "--skip", "ml_integration",
+    "--skip", "graphql_integration",
+    "--skip", "gql_integration",
+    "--skip", "database_upgrade",
+]
+
+# Defaults apply only when the caller has not set the shard variables, so a
+# matrix leg's exported CI_SHARD / CI_SHARDS reach the `--partition` expansion.
+[tasks.ci-workspace-test-run.env]
+CI_SHARD = { value = "1", condition = { env_not_set = ["CI_SHARD"] } }
+CI_SHARDS = { value = "1", condition = { env_not_set = ["CI_SHARDS"] } }
+
 [tasks.ci-cjk-test]
 category = "CI - WORKSPACE TESTS"
 description = "Run the surrealdb-idx tests with the embedded dictionaries enabled"
@@ -1541,6 +1587,8 @@ script = """
 [tasks.build-surrealdb]
 category = "CI - BUILD"
 private = true
+# `_PREBUILT_SURREAL` set means `target/debug/surreal` was supplied by the caller.
+condition = { env_not_set = ["_PREBUILT_SURREAL"] }
 command = "cargo"
 args = [
     "build",

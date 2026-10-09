@@ -781,10 +781,20 @@ async fn ensure_module_fixture() -> Result<PathBuf> {
 		&& tokio::fs::read_to_string(&stamp).await.ok().as_deref() == Some(want.as_str());
 	if !fresh {
 		tokio::fs::create_dir_all(cache).await.context("Failed to create the module cache")?;
-		let status = tokio::process::Command::new("cargo")
+		// With a prebuilt checkout binary the module is packed by that binary
+		// directly, so no second compile of the engine happens here.
+		let mut command = if std::env::var_os(binaries::PREBUILT_CURRENT_ENV).is_some() {
+			let binary = std::fs::canonicalize("../target/debug/surreal")
+				.context("Failed to locate the prebuilt checkout binary")?;
+			tokio::process::Command::new(binary)
+		} else {
+			let mut cargo = tokio::process::Command::new("cargo");
+			cargo.args(["run", "--locked", "--quiet", "--bin", "surreal", "--"]);
+			cargo
+		};
+		command.args(["module", "build", "surrealism/demo", "--out"]);
+		let status = command
 			.env("RUST_LOG", "warn")
-			.args(["run", "--locked", "--quiet", "--bin", "surreal", "--"])
-			.args(["module", "build", "surrealism/demo", "--out"])
 			// Built to a temp name and renamed on success: a build that writes
 			// its output and then fails would otherwise leave a truncated file
 			// that every later run accepts. The name still ends in `.surli`,

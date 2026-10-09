@@ -263,7 +263,19 @@ pub async fn retrieve_version_from_path(path: &str) -> anyhow::Result<Version> {
 	Version::parse(version).context("Failed to parse 'surreealdb' package config")
 }
 
+/// Environment variable naming a `surreal` binary already built for the current
+/// checkout. When set, the checkout is used as it stands and `cargo build` is
+/// skipped; the binary must sit at `<checkout>/target/debug/surreal`.
+pub const PREBUILT_CURRENT_ENV: &str = "LANG_UPGRADE_PREBUILT_CURRENT";
+
 pub async fn prepare_path(path: &str) -> anyhow::Result<()> {
+	if std::env::var_os(PREBUILT_CURRENT_ENV).is_some() {
+		let binary = Path::new(path).join("target").join("debug").join("surreal");
+		if !binary.is_file() {
+			bail!("{PREBUILT_CURRENT_ENV} is set but '{}' does not exist", binary.display());
+		}
+		return Ok(());
+	}
 	let mut child = Command::new("cargo")
 		.current_dir(path)
 		.args(["build", "--locked", "--bin", "surreal"])

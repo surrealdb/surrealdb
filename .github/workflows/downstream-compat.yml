@@ -26,6 +26,10 @@ on:
       - "docs/**"
       - "img/**"
       - "LICENSE"
+      - "language-tests/**"
+      - "tests/**"
+      - ".claude/**"
+      - ".cursor/**"
   pull_request:
     types:
       - opened
@@ -38,6 +42,10 @@ on:
       - "docs/**"
       - "img/**"
       - "LICENSE"
+      - "language-tests/**"
+      - "tests/**"
+      - ".claude/**"
+      - ".cursor/**"
 
 concurrency:
   # Use github.run_id on main branch

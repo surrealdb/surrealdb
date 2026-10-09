@@ -26,6 +26,10 @@ inputs:
     description: 'Secret half of kache-access-key-id'
     required: false
     default: ''
+  task:
+    description: 'cargo-make task to run'
+    required: false
+    default: 'ci-workspace-test'
 
 runs:
   using: 'composite'
@@ -52,4 +56,4 @@ runs:
 
     - name: Test workspace
       shell: bash
-      run: cargo make ci-workspace-test
+      run: cargo make ${{ inputs.task }}
