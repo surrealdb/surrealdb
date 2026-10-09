@@ -601,6 +601,9 @@ async fn a_block_is_control_flow_over_statements_planned_with_it() {
 				}
 				| super::program::BlockInstr::Nested {
 					..
+				}
+				| super::program::BlockInstr::Member {
+					..
 				}),
 			) => Some(std::mem::discriminant(step)),
 			_ => None,

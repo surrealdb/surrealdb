@@ -136,6 +136,10 @@ pub(crate) struct Nested {
 	/// evaluated for by, where that is the only way it reads the row.
 	pub(crate) join: Option<JoinKey>,
 	pub(crate) strategy: Strategy,
+	/// Whether the statement's only use is as the right operand of an
+	/// `INSIDE` or `NOT INSIDE`, so a kept value is held as a membership
+	/// index. It takes effect with [`Strategy::Once`] alone.
+	pub(crate) membership: bool,
 }
 
 /// A correlated read whose only reading of the row it is evaluated for is

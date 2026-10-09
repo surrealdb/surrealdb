@@ -43,6 +43,14 @@ cargo run --features backend-rocksdb run --backend rocksdb
 cargo run --features backend-tikv run --backend tikv
 ```
 
+The repeatable `--config KEY=VALUE` flag sets a datastore configuration key for
+every datastore the run opens, for example `--config memory_limit=8MiB` to run
+the suite under a small node memory limit. The runner prints the memory limits
+the first datastore holds, and stops if a `memory_limit`, `query_memory_max` or
+`memory_wait` given this way is not the one the datastore holds. The
+environment's `SURREAL_*` variables are not read: only the keys a run names
+reach its datastores.
+
 ## GraphQL tests
 
 Besides `.surql` files the test directory can also contain `.graphql` files.

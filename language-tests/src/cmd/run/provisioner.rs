@@ -19,15 +19,19 @@ struct CreateInfo {
 	id_gen: AtomicUsize,
 	backend: Backend,
 	dir: Option<String>,
+	/// The datastore configuration keys every datastore of the run is opened
+	/// with, beside the ones the runner sets itself.
+	config: Vec<(String, String)>,
 }
 
 impl CreateInfo {
-	pub async fn new(backend: Backend) -> Result<Self> {
+	pub async fn new(backend: Backend, config: Vec<(String, String)>) -> Result<Self> {
 		if let Backend::Memory = backend {
 			return Ok(CreateInfo {
 				id_gen: AtomicUsize::new(0),
 				backend,
 				dir: None,
+				config,
 			});
 		}
 		let temp_dir = std::env::temp_dir();
@@ -49,6 +53,7 @@ impl CreateInfo {
 			id_gen: AtomicUsize::new(0),
 			backend,
 			dir: Some(dir.to_str().unwrap().to_string()),
+			config,
 		})
 	}
 
@@ -80,12 +85,16 @@ impl CreateInfo {
 		// now-empty allowlist denies *all* `mapper()` access — every mapper test
 		// would then fail with `File access denied`. This also sets a single
 		// global allowlist shared by every language test.
+		let config = self.config.iter().fold(
+			ConfigMap::empty().with_key_value("file_allowlist", "../tests"),
+			|config, (key, value)| config.with_key_value(key.as_str(), value.as_str()),
+		);
 		let builder = Datastore::builder()
 			.without_maintenance_tasks()
 			.with_capabilities(cap)
 			.with_auth(true)
 			.with_temporary_directory(Some(sort_temp_dir))
-			.with_config(ConfigMap::empty().with_key_value("file_allowlist", "../tests"));
+			.with_config(config);
 
 		let builder = if allows_live {
 			let (send, _) = channel::bounded(15_000);
@@ -336,13 +345,20 @@ async fn create_grade_ds() -> Arc<Datastore> {
 }
 
 impl Provisioner {
-	pub async fn new(num_jobs: usize, backend: Backend) -> Result<Self> {
-		let info = CreateInfo::new(backend).await?;
+	pub async fn new(
+		num_jobs: usize,
+		backend: Backend,
+		config: Vec<(String, String)>,
+	) -> Result<Self> {
+		let info = CreateInfo::new(backend, config).await?;
 
 		let (send, recv) = mpsc::channel(num_jobs);
-		for _ in 0..num_jobs {
+		for at in 0..num_jobs {
 			let ds =
 				info.produce_ds(false, Capabilities::all().with_experimental(Targets::All)).await?;
+			if at == 0 {
+				report_memory(&ds.store, &info.config)?;
+			}
 			send.try_send(ds).unwrap();
 		}
 		let (grade_send, grade_recv) = mpsc::channel(num_jobs);
@@ -424,4 +440,103 @@ impl Provisioner {
 
 fn is_base_environment(env: &TestEnv) -> bool {
 	!env.clean && !env.versioned && matches!(env.capabilities, BoolOr::Bool(true))
+}
+
+/// Print the memory limits `ds` holds, and fail where a limit the run set with
+/// `--config` is not the one it holds: a key that does not reach the
+/// datastore would leave every test running under the defaults while the run
+/// reports otherwise.
+fn report_memory(ds: &Datastore, config: &[(String, String)]) -> Result<()> {
+	match ds.memory_limit() {
+		Some(limit) => {
+			println!(
+				" memory_limit: {limit} bytes, query_memory_max: {} bytes",
+				ds.query_memory_max()
+			)
+		}
+		None => println!(" memory_limit: none (unlimited governor)"),
+	}
+	for (key, value) in config {
+		match key.as_str() {
+			// A `0` asks for the default, which the datastore holds resolved.
+			"memory_limit" => match parse_bytes(value)? {
+				0 => anyhow::ensure!(
+					ds.memory_limit().is_some(),
+					"memory_limit={value} did not reach the datastore (it holds none)"
+				),
+				wanted => anyhow::ensure!(
+					ds.memory_limit() == Some(wanted),
+					"memory_limit={value} did not reach the datastore (it holds {:?})",
+					ds.memory_limit()
+				),
+			},
+			"query_memory_max" => {
+				let wanted = match parse_bytes(value)? {
+					0 => ds.memory_limit().unwrap_or_else(|| ds.query_memory_max()),
+					wanted => wanted,
+				};
+				anyhow::ensure!(
+					ds.query_memory_max() == wanted,
+					"query_memory_max={value} did not reach the datastore (it holds {})",
+					ds.query_memory_max()
+				);
+			}
+			"memory_wait" => {
+				let wanted = std::time::Duration::from_millis(value.parse()?);
+				anyhow::ensure!(
+					ds.memory_wait() == wanted,
+					"memory_wait={value} did not reach the datastore (it holds {:?})",
+					ds.memory_wait()
+				);
+			}
+			_ => {}
+		}
+	}
+	Ok(())
+}
+
+/// A byte count as the datastore's configuration reads it: digits with an
+/// optional `B`, `K`, `KB`, `KiB`, `M`, `MB`, `MiB`, `G`, `GB` or `GiB`
+/// suffix, which is not case-sensitive.
+fn parse_bytes(value: &str) -> Result<usize> {
+	let value = value.trim();
+	let split = value.find(|c: char| !c.is_ascii_digit()).unwrap_or(value.len());
+	let (number, suffix) = value.split_at(split);
+	let multiplier: usize = match suffix.trim().to_lowercase().as_str() {
+		"" | "b" => 1,
+		"k" | "kb" | "kib" => 1 << 10,
+		"m" | "mb" | "mib" => 1 << 20,
+		"g" | "gb" | "gib" => 1 << 30,
+		other => anyhow::bail!("unknown size suffix `{other}` in `{value}`"),
+	};
+	Ok(number.parse::<usize>()?.saturating_mul(multiplier))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A byte count reads digits and the suffixes the datastore reads.
+	#[test]
+	fn byte_counts_parse_as_the_datastore_reads_them() {
+		assert_eq!(parse_bytes("8388608").unwrap(), 8_388_608);
+		assert_eq!(parse_bytes("8MiB").unwrap(), 8_388_608);
+		assert_eq!(parse_bytes("1 gb").unwrap(), 1 << 30);
+		assert!(parse_bytes("8 parsecs").is_err());
+	}
+
+	/// A key given with `--config` reaches the datastore the runner opens, and
+	/// the check that the limit was applied accepts it.
+	#[tokio::test]
+	async fn a_config_key_reaches_the_datastore() {
+		let config = vec![("memory_limit".to_owned(), "8388608".to_owned())];
+		let info = CreateInfo::new(Backend::Memory, config.clone()).await.unwrap();
+		let ds = info.produce_ds(false, Capabilities::all()).await.unwrap();
+		assert_eq!(ds.store.memory_limit(), Some(8_388_608));
+		report_memory(&ds.store, &config).unwrap();
+		let wrong = vec![("memory_limit".to_owned(), "1MiB".to_owned())];
+		assert!(report_memory(&ds.store, &wrong).is_err());
+		let default = vec![("query_memory_max".to_owned(), "0".to_owned())];
+		report_memory(&ds.store, &default).unwrap();
+	}
 }

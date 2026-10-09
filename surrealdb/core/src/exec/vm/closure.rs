@@ -999,6 +999,7 @@ async fn run_body(
 			state.rowless = !has_row;
 			state.undocumented = undocumented;
 			state.slots = slots;
+			state.keep_slots_now(exec)?;
 			Ok(state)
 		};
 		let pipeline = &program.pipelines[0];
@@ -1044,6 +1045,7 @@ async fn run_body(
 	state.rowless = !has_row;
 	state.undocumented = undocumented;
 	state.slots = slots;
+	state.keep_slots(&running).await?;
 	let program = Arc::clone(program);
 	// Run on the statement's frame stack, so a body that invokes its own
 	// closure nests no deeper natively than the depth budget allows.

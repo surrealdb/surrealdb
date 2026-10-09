@@ -336,6 +336,16 @@ impl RecordIdKey {
 		}
 	}
 
+	/// [`Value::ord_agrees_with_equal`] for a record id's key.
+	pub fn ord_agrees_with_equal(&self) -> bool {
+		match self {
+			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => true,
+			RecordIdKey::Array(a) => a.iter().all(Value::ord_agrees_with_equal),
+			RecordIdKey::Object(o) => o.values().all(Value::ord_agrees_with_equal),
+			RecordIdKey::Range(_) => false,
+		}
+	}
+
 	/// Generate a new random ID
 	pub fn rand() -> Self {
 		let id: String = crate::rnd::with_rng(|rng| {

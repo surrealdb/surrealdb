@@ -579,10 +579,16 @@ where
 		let undocumented = std::mem::replace(&mut state.undocumented, false);
 		let in_place = std::mem::replace(&mut state.read_in_place_permission_errors, false);
 		let sorted_keys = std::mem::take(&mut state.sorted_keys);
+		let hand_on = std::mem::take(&mut state.hand_on);
 		let gather_account = state.gather_account.take();
 		let ran = run_tailed(program, group, state, frame, &mut out).await;
-		// The rows gathered leave the statement as its value.
-		state.gather_account = gather_account;
+		// The rows gathered leave the statement as its value. A `LET`'s value is
+		// bound next, and takes over the account that charged its rows; any
+		// other leaves with the value, and its account is released.
+		let account = std::mem::replace(&mut state.gather_account, gather_account);
+		if hand_on {
+			state.handed = account;
+		}
 		if let Some(slot) = state.group_writes.get_mut(group as usize) {
 			*slot = state.write.take();
 		}
@@ -762,7 +768,7 @@ async fn start_group(
 	}
 	for (at, nested) in program.nested.iter().enumerate() {
 		if nested.owner == Some(group) {
-			state.once[at] = None;
+			state.reset_once(at);
 		}
 	}
 	for (at, owner) in program.probes.iter().enumerate() {
@@ -3561,16 +3567,40 @@ async fn run_body(
 									caught,
 									frame,
 									..
+								}
+								| super::program::BlockInstr::Member {
+									dst,
+									caught,
+									frame,
+									..
 								} = instr
 								{
 									let doc = (!state.rowless).then_some(&*row);
-									let evaluated = out_of_line(|| {
-										super::nested::statement(program, instr, doc, state, ctx)
-									})
-									.await;
+									let evaluated = match instr {
+										super::program::BlockInstr::Member {
+											probe,
+											..
+										} => {
+											let probe = regs[*probe as usize].to_value();
+											out_of_line(|| {
+												super::nested::member(
+													program, instr, doc, &probe, state, ctx,
+												)
+											})
+											.await
+											.map(Scalar::Bool)
+										}
+										_ => out_of_line(|| {
+											super::nested::statement(
+												program, instr, doc, state, ctx,
+											)
+										})
+										.await
+										.map(|value| Scalar::Value(Cow::Owned(value))),
+									};
 									match (evaluated, caught) {
 										(Ok(value), _) => {
-											regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+											regs[*dst as usize] = value;
 											pc = at + 1;
 										}
 										(Err(ControlFlow::Return(value)), Some(catch)) => {
@@ -4600,7 +4630,7 @@ pub(super) async fn flush(
 	spill_breakers(state, ctx).await?;
 	if let Some(write) = &state.write {
 		write.judge_only()?;
-		held_writes(ctx)?;
+		held_writes(ctx).await?;
 	}
 	if state.output_len() >= flush_at {
 		match yielder {
@@ -4609,7 +4639,7 @@ pub(super) async fn flush(
 				None => yielder.emit(ValueBatch::new(state.take_output())).await,
 			},
 			Out::Gather(rows) => {
-				gathered(state, ctx)?;
+				gathered(state, ctx).await?;
 				rows.append(&mut state.output)
 			}
 			Out::Sink(sink) => sink.take(state.take_output(), ctx).await?,
@@ -4619,28 +4649,41 @@ pub(super) async fn flush(
 }
 
 /// Charge what the statement's transaction has written to the query's
-/// lease: its write buffer holds it until the transaction commits, and it
-/// cannot be spilled.
-fn held_writes(ctx: &ExecutionContext) -> FlowResult<()> {
+/// lease, unless the backend bounds its own write buffer
+/// ([`Transaction::bounds_write_buffer`](crate::kvs::Transaction)). Where it
+/// does not, the write buffer holds the bytes until the transaction commits
+/// and cannot be spilled, so they are pinned: the governor sees the memory,
+/// the statement waits when other queries can give memory back, and the bytes
+/// are otherwise granted past the node's limit. The statement fails only
+/// where its pinned bytes would pass the query's ceiling.
+async fn held_writes(ctx: &ExecutionContext) -> FlowResult<()> {
 	let (Some(memory), Some(txn)) = (ctx.ctx().memory(), ctx.try_txn()) else {
 		return Ok(());
 	};
+	if txn.bounds_write_buffer() {
+		return Ok(());
+	}
 	let address = Arc::as_ptr(&txn) as usize;
-	memory.hold_writes(address, txn.bytes_written()).map_err(ControlFlow::Err)
+	memory.hold_writes(address, txn.bytes_written(), ctx).await
 }
 
 /// Charge the rows a gather is about to take to the query's lease. A
-/// gathered result becomes one value and cannot be spilled, so a gather the
-/// lease no longer covers fails the statement once the lease stands at its
-/// minimum; above it, the query's breakers give memory back by spilling.
-fn gathered(state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
+/// gathered result becomes one value and cannot be spilled, so the charge
+/// goes through [`Reservation::insist`](crate::exec::memory::Reservation):
+/// the statement waits, for at most the configured wait, for other queries
+/// to give memory back, and is then granted the bytes past the node's limit.
+/// It fails only where the query's pinned bytes would pass its ceiling. The
+/// account is released when the statement hands its value on, except that a
+/// `LET`'s binding takes it over ([`State::handed`]); a value kept elsewhere
+/// is charged where it is kept ([`super::ledger`]).
+async fn gathered(state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
 	let Some(memory) = ctx.ctx().memory() else {
 		return Ok(());
 	};
 	let bytes = crate::exec::memory::size::values_bytes(&state.output);
-	let account = state.gather_account.get_or_insert_with(|| memory.reservation());
-	if account.charge(bytes) == crate::exec::memory::Verdict::Spill && memory.lease().at_minimum() {
-		return Err(ControlFlow::Err(account.exhausted()));
+	let account = state.gather_account.get_or_insert_with(|| memory.pinned_reservation());
+	if account.charge(bytes) == crate::exec::memory::Verdict::Spill {
+		account.insist(ctx).await?;
 	}
 	Ok(())
 }
@@ -4673,7 +4716,15 @@ fn bound_breakers(program: &Program, state: &mut State, ctx: &ExecutionContext) 
 	}
 	for (at, sink) in program.aggregates.iter().enumerate() {
 		if sink.keys > 0 {
-			state.group_accounts[at] = memory.reservation();
+			let savable = state
+				.aggregates
+				.functions
+				.get(at)
+				.is_none_or(|calls| super::groups::savable(calls));
+			state.group_accounts[at] = match savable {
+				true => memory.reservation(),
+				false => memory.pinned_reservation(),
+			};
 		}
 	}
 }
@@ -4693,8 +4744,11 @@ fn tempfiles_limit(_ctx: &ExecutionContext) -> Option<usize> {
 }
 
 /// Write out as a run each sort its lease no longer covers, or that holds
-/// its `TEMPFILES` limit. A sort over its lease with no store to spill to
-/// fails the statement.
+/// its `TEMPFILES` limit. A breaker over its lease with no store to spill to
+/// holds what it holds through [`Reservation::insist`](crate::exec::memory::Reservation):
+/// the statement waits for other queries to give memory back, and is then
+/// granted the bytes past the node's limit. It fails only where the query's
+/// pinned bytes would pass its ceiling.
 async fn spill_breakers(state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
 	let Some(memory) = state.memory.clone() else {
 		return Ok(());
@@ -4714,7 +4768,8 @@ async fn spill_breakers(state: &mut State, ctx: &ExecutionContext) -> FlowResult
 			continue;
 		}
 		if !memory.can_spill() {
-			return Err(ControlFlow::Err(account.exhausted()));
+			account.insist(ctx).await?;
+			continue;
 		}
 		let (keys, random) = (spill.keys.clone(), spill.random);
 		let mut rows = std::mem::take(&mut state.sorts[at]);
@@ -4739,10 +4794,13 @@ async fn spill_breakers(state: &mut State, ctx: &ExecutionContext) -> FlowResult
 			continue;
 		}
 		if !memory.can_spill() {
-			return Err(ControlFlow::Err(account.exhausted()));
+			account.insist(ctx).await?;
+			continue;
 		}
-		// Groups whose states cannot be saved stay in memory.
+		// Groups whose states cannot be saved stay in memory, held as bytes
+		// the query cannot spill.
 		let Some(records) = groups.save_all() else {
+			account.insist(ctx).await?;
 			continue;
 		};
 		let run = super::spill::write_run(&memory, records, ctx).await?;
@@ -5360,6 +5418,7 @@ async fn run_unit_in(
 	state.units = Some(Arc::clone(units));
 	state.rowless = !head.sig.takes_row || row.is_none();
 	state.slots = args;
+	state.keep_slots(ctx).await?;
 	state.recursion = recursion;
 	let row = row.cloned().unwrap_or(Value::None);
 	let pipeline = program.own_pipeline().ok_or_else(|| {

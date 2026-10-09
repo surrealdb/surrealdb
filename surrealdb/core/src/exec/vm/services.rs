@@ -131,10 +131,8 @@ pub(super) trait Services {
 
 	/// The records `rids` name that exist as of `version`, in order, each as
 	/// its row with the record id in place; a record that does not exist is
-	/// passed over. Fails with
-	/// [`DatastoreError::QueryBeyondMemoryThreshold`](crate::kvs::DatastoreError)
-	/// when the process is past `SURREAL_MEMORY_THRESHOLD` once they are
-	/// decoded.
+	/// passed over. Fails with the process memory threshold's error when the
+	/// process is past `SURREAL_MEMORY_THRESHOLD` once they are decoded.
 	async fn read_records(
 		&self,
 		rids: &[RecordId],

@@ -42,7 +42,9 @@ use super::host::{
 	Ended, Out, execute_program_reading, flush, host_scalar, limits_spent, run_group, run_rows,
 	run_value_row,
 };
-use super::interp::State;
+use super::interp::{Kept, State};
+use super::ledger::Site;
+use super::membership::Members;
 use super::plan::ValuesRead;
 use super::program::{BlockInstr, HostScalar, Pipeline, Program, Source};
 use crate::exe::FlowResultExt as _;
@@ -755,10 +757,67 @@ pub(super) async fn statement(
 	};
 	let spec = &program.nested[*nested as usize];
 	if spec.once
-		&& let Some(value) = &state.once[*nested as usize]
+		&& let Some(Kept::Value(value)) = &state.once[*nested as usize]
 	{
 		return Ok(value.clone());
 	}
+	let mut rows = run_statement(program, *nested, *frame, row, state, ctx).await?;
+	let value = if program.groups[spec.group as usize].scalar {
+		rows.pop().unwrap_or(Value::None)
+	} else {
+		Value::Array(crate::val::Array(rows))
+	};
+	if spec.once {
+		state.once[*nested as usize] = Some(Kept::Value(value.clone()));
+		let kept = crate::exec::memory::size::kept_bytes(&value);
+		state.keep(Site::Once(*nested as usize), kept, ctx).await?;
+	}
+	Ok(value)
+}
+
+/// Whether `probe` is a member of the rows of the statement
+/// [`BlockInstr::Member`] names, not a member when it negates, evaluated for
+/// `row` as [`statement`] evaluates it. The rows are kept as a membership
+/// index ([`Members`]) from the first evaluation, which answers every later
+/// one.
+pub(super) async fn member(
+	program: &Program,
+	instr: &BlockInstr,
+	row: Option<&Value>,
+	probe: &Value,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<bool> {
+	let BlockInstr::Member {
+		nested,
+		negate,
+		frame,
+		..
+	} = instr
+	else {
+		return Err(ControlFlow::Err(anyhow::anyhow!("a membership step at another instruction")));
+	};
+	if let Some(Kept::Members(members)) = &state.once[*nested as usize] {
+		return Ok(members.contains(probe) != *negate);
+	}
+	let rows = run_statement(program, *nested, *frame, row, state, ctx).await?;
+	let members = Members::keep(rows, ctx).await?;
+	let found = members.contains(probe);
+	state.once[*nested as usize] = Some(Kept::Members(Box::new(members)));
+	Ok(found != *negate)
+}
+
+/// The rows of nested statement `nested`'s group, evaluated for `row` in
+/// permission frame `frame` when set; see the module.
+async fn run_statement(
+	program: &Program,
+	nested: u32,
+	frame: Option<u16>,
+	row: Option<&Value>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Vec<Value>> {
+	let spec = &program.nested[nested as usize];
 	let running = state
 		.program
 		.clone()
@@ -768,7 +827,7 @@ pub(super) async fn statement(
 	// inherits it; unchecked reads, and the record a computed frame
 	// computes, carried in.
 	let frame = {
-		let eval_ctx = super::host::frame_eval(program, state, ctx, *frame);
+		let eval_ctx = super::host::frame_eval(program, state, ctx, frame);
 		let mut nested_ctx = eval_ctx.exec_ctx.clone();
 		if let Some(row) = row {
 			let row = Arc::new(row.clone());
@@ -807,16 +866,7 @@ pub(super) async fn statement(
 	*state = running_state;
 	aside.restore(state);
 	ran?;
-	let mut rows = rows;
-	let value = if program.groups[group as usize].scalar {
-		rows.pop().unwrap_or(Value::None)
-	} else {
-		Value::Array(crate::val::Array(rows))
-	};
-	if spec.once {
-		state.once[*nested as usize] = Some(value.clone());
-	}
-	Ok(value)
+	Ok(rows)
 }
 
 /// The row-level state of the pipeline evaluating a nested statement, set

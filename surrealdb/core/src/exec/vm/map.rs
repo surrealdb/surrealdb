@@ -560,9 +560,9 @@ async fn map_nested(
 	if matches!(plan.root, Plan::Control { .. }) {
 		return Vec::new();
 	}
-	let mut written = Vec::new();
-	statements_in(op, &mut written);
-	if written.is_empty() {
+	let mut uses = Vec::new();
+	uses_in(op, &mut uses);
+	if uses.is_empty() {
 		return Vec::new();
 	}
 	let registry = planner.function_registry();
@@ -572,8 +572,8 @@ async fn map_nested(
 		|| enclosing.set.intersects(EffectSet::OPAQUE_BODY | EffectSet::WRITES_EXTERNAL);
 	let mut closure_params = Vec::new();
 	closure_params_in(op, &mut closure_params);
-	let mut nested: Vec<std::sync::Arc<Nested>> = Vec::with_capacity(written.len());
-	for statement in written {
+	let mut nested: Vec<std::sync::Arc<Nested>> = Vec::with_capacity(uses.len());
+	for &(statement, _) in &uses {
 		if nested.iter().any(|n| n.op == *statement) {
 			continue;
 		}
@@ -616,6 +616,9 @@ async fn map_nested(
 			facts,
 			join,
 			strategy: Strategy::Apply,
+			// Every place the statement is written, not the first alone.
+			membership: facts.reads_rows
+				&& uses.iter().filter(|(other, _)| *other == statement).all(|(_, member)| *member),
 		}));
 	}
 	nested
@@ -746,14 +749,25 @@ fn mask_join(op: &mut LogicalOp, predicate: &LogicalExpr) -> bool {
 }
 
 /// The statements written in the expressions of `op` and its inputs, down to
-/// but not into a statement in `FROM`, a block or a nested statement.
-fn statements_in<'a>(op: &'a LogicalOp, out: &mut Vec<&'a LogicalOp>) {
-	fn in_expr<'a>(expr: &'a LogicalExpr, out: &mut Vec<&'a LogicalOp>) {
-		if let LogicalExpr::Subquery(statement) = expr {
-			out.push(statement);
-			return;
+/// but not into a statement in `FROM`, a block or a nested statement, each
+/// with whether that occurrence is the right operand of an `INSIDE` or
+/// `NOT INSIDE`.
+fn uses_in<'a>(op: &'a LogicalOp, out: &mut Vec<(&'a LogicalOp, bool)>) {
+	fn in_expr<'a>(expr: &'a LogicalExpr, out: &mut Vec<(&'a LogicalOp, bool)>) {
+		match expr {
+			LogicalExpr::Subquery(statement) => out.push((statement, false)),
+			LogicalExpr::Binary {
+				left,
+				op: BinaryOperator::Inside | BinaryOperator::NotInside,
+				right,
+			} if matches!(right.as_ref(), LogicalExpr::Subquery(_)) => {
+				in_expr(left, out);
+				if let LogicalExpr::Subquery(statement) = right.as_ref() {
+					out.push((statement, true));
+				}
+			}
+			_ => expr.for_each_child(&mut |child| in_expr(child, out)),
 		}
-		expr.for_each_child(&mut |child| in_expr(child, out));
 	}
 	if matches!(
 		op,
@@ -769,7 +783,7 @@ fn statements_in<'a>(op: &'a LogicalOp, out: &mut Vec<&'a LogicalOp>) {
 		in_expr(scalar, out);
 	}
 	for child in op.children() {
-		statements_in(child, out);
+		uses_in(child, out);
 	}
 }
 

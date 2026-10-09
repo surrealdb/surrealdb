@@ -55,6 +55,7 @@ const DEFAULT_SPILL_MERGE_FAN_IN: usize = 8;
 
 /// Default bytes a breaker reserves from its query's lease at a time.
 const DEFAULT_MEMORY_RESERVE_CHUNK: usize = 256 << 10;
+const DEFAULT_MEMORY_WAIT_MS: u64 = 1000;
 
 /// Default number of compiled units of each kind a node keeps. Overridable
 /// per deployment via the `compiled_unit_cache_size` key.
@@ -213,6 +214,16 @@ pub(crate) struct ExecConfig {
 	/// The bytes a breaker reserves from its query's lease at a time
 	/// (default: 256 KiB).
 	pub memory_reserve_chunk: usize,
+	/// The longest, in milliseconds, a query waits in all for other queries to
+	/// give memory back before it proceeds past the node limit (default: 1000).
+	/// `0` never waits.
+	pub memory_wait: u64,
+	/// The bytes a single query may hold that it cannot spill — values it has
+	/// gathered or built, and its transaction's buffers — before it fails with
+	/// the memory threshold error (default: `0`, the node's `memory_limit`). It
+	/// bounds the query's own state alone: no other query's use counts toward
+	/// it.
+	pub query_memory_max: usize,
 }
 
 impl ExecConfig {
@@ -224,6 +235,15 @@ impl ExecConfig {
 				threshold => threshold / 2,
 			},
 			limit => limit,
+		}
+	}
+
+	/// The per-query ceiling on bytes a query cannot spill that
+	/// `query_memory_max` names, with its default resolved.
+	pub(crate) fn query_memory_max(&self) -> usize {
+		match self.query_memory_max {
+			0 => self.memory_limit(),
+			max => max,
 		}
 	}
 }
@@ -255,6 +275,8 @@ impl Default for ExecConfig {
 			spill_part_size: DEFAULT_SPILL_PART_SIZE,
 			spill_merge_fan_in: DEFAULT_SPILL_MERGE_FAN_IN,
 			memory_reserve_chunk: DEFAULT_MEMORY_RESERVE_CHUNK,
+			memory_wait: DEFAULT_MEMORY_WAIT_MS,
+			query_memory_max: 0,
 		}
 	}
 }
@@ -296,6 +318,10 @@ impl cnf::Config for ExecConfig {
 			.parse_key_with("memory_reserve_chunk", &mut self.memory_reserve_chunk, |x| {
 				x.parse_bytes::<usize>().ok().filter(|&n| n > 0)
 			})
+			.parse_key("memory_wait", &mut self.memory_wait)
+			.parse_key_with("query_memory_max", &mut self.query_memory_max, |x| {
+				x.parse_bytes::<usize>().ok()
+			})
 			.parse_key_with(
 				"generation_allocation_limit",
 				&mut self.generation_allocation_limit,
@@ -334,6 +360,18 @@ mod tests {
 		assert_eq!(config.scan_batch_bytes, 512 << 10);
 		config.parse(&ConfigMap::empty().with_key_value("scan_batch_bytes", "0"));
 		assert_eq!(config.scan_batch_bytes, 512 << 10, "zero is ignored");
+	}
+
+	/// The per-query ceiling defaults to the node's memory limit, and parses a
+	/// byte count or a size with a suffix.
+	#[test]
+	fn query_memory_max_defaults_to_the_memory_limit() {
+		let mut config = ExecConfig::default();
+		assert_eq!(config.query_memory_max(), config.memory_limit());
+		config.parse(&ConfigMap::empty().with_key_value("memory_limit", "8MiB"));
+		assert_eq!(config.query_memory_max(), 8 << 20);
+		config.parse(&ConfigMap::empty().with_key_value("query_memory_max", "1MiB"));
+		assert_eq!(config.query_memory_max(), 1 << 20);
 	}
 
 	/// The fan-out threshold defaults to 4 and parses from the config map, which

@@ -202,6 +202,37 @@ impl Value {
 		}
 	}
 
+	/// Whether [`Value::cmp`] agrees with [`Value::equal`] for this value
+	/// against any other value that also agrees: `a.equal(b) == (a.cmp(b) ==
+	/// Equal)`. A value for which it does not — a regex (which `equal` matches
+	/// against strings), or one holding a geometry, range or closure (whose
+	/// `partial_cmp` may be undefined) — must be compared with `equal`.
+	///
+	/// A [`Number`] agrees at any depth: `Number`'s equality and order both
+	/// treat `1`, `1.0` and `1dec` as one value, `-0.0` as `0.0`, and a NaN by
+	/// its bits. `NONE` and `NULL` agree, since they are distinct variants
+	/// that order apart.
+	pub fn ord_agrees_with_equal(&self) -> bool {
+		match self {
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::Number(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::File(_) => true,
+			Value::Geometry(_) | Value::Regex(_) | Value::Range(_) | Value::Closure(_) => false,
+			Value::Array(a) => a.iter().all(Value::ord_agrees_with_equal),
+			Value::Set(s) => s.iter().all(Value::ord_agrees_with_equal),
+			Value::Object(o) => o.values().all(Value::ord_agrees_with_equal),
+			Value::RecordId(r) => r.key.ord_agrees_with_equal(),
+		}
+	}
+
 	pub const NONE: Self = Self::None;
 
 	// -----------------------------------
@@ -2061,6 +2092,109 @@ mod tests {
 			}),
 		] {
 			assert!(!v.hash_agrees_with_eq(), "{v:?}");
+		}
+	}
+
+	/// The values `Value::ord_agrees_with_equal` is judged over: every kind of
+	/// number, the two nothings, strings and a regex that matches one, a
+	/// geometry with a NaN coordinate, and the collections and record ids that
+	/// hold them.
+	fn ord_corpus() -> Vec<crate::val::Value> {
+		use std::collections::BTreeMap;
+
+		use rust_decimal::Decimal;
+		use surrealdb_strand::Strand;
+
+		use crate::val::{Geometry, Number, Object, RecordId, RecordIdKey, Regex, Value};
+
+		let float = |f: f64| Value::Number(Number::Float(f));
+		let decimal = |i: i64| Value::Number(Number::Decimal(Decimal::from(i)));
+		let regex =
+			|text: &str| Value::Regex(Regex(crate::val::regex::regex_new(text).expect("a regex")));
+		let object = |entries: Vec<(&str, Value)>| {
+			Value::Object(Object::from(
+				entries
+					.into_iter()
+					.map(|(key, value)| (Strand::from(key), value))
+					.collect::<BTreeMap<_, _>>(),
+			))
+		};
+		let record = |key: RecordIdKey| {
+			Value::RecordId(RecordId {
+				table: "t".into(),
+				key,
+			})
+		};
+		vec![
+			Value::None,
+			Value::Null,
+			Value::Bool(true),
+			Value::Bool(false),
+			Value::from(0i64),
+			Value::from(1i64),
+			Value::from(2i64),
+			float(0.0),
+			float(-0.0),
+			float(1.0),
+			float(1.5),
+			float(f64::NAN),
+			float(f64::INFINITY),
+			decimal(0),
+			decimal(1),
+			decimal(2),
+			Value::String("a".into()),
+			Value::String("abc".into()),
+			Value::String("b".into()),
+			regex("^a"),
+			regex("^b"),
+			Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+			Value::Geometry(Geometry::Point(geo::Point::new(f64::NAN, 2.0))),
+			Value::from(vec![Value::from(1i64), float(2.0)]),
+			Value::from(vec![float(1.0), Value::from(2i64)]),
+			Value::from(vec![Value::from(1i64), decimal(2)]),
+			Value::from(vec![regex("^a")]),
+			Value::from(vec![Value::Geometry(Geometry::Point(geo::Point::new(f64::NAN, 2.0)))]),
+			object(vec![("a", decimal(1))]),
+			object(vec![("a", Value::from(1i64))]),
+			object(vec![("a", Value::None)]),
+			object(vec![("a", Value::Null)]),
+			object(vec![("a", regex("^a"))]),
+			record(RecordIdKey::Number(1)),
+			record(RecordIdKey::String("x".into())),
+			record(RecordIdKey::Array(vec![Value::from(1i64)].into())),
+			record(RecordIdKey::Array(vec![float(1.0)].into())),
+			record(RecordIdKey::Object(Object::from(BTreeMap::from([(
+				Strand::from("k"),
+				decimal(1),
+			)])))),
+		]
+	}
+
+	/// For every pair of values whose order agrees with their equality, the
+	/// two give one answer, whichever way round the pair is taken.
+	#[test]
+	fn ord_agrees_with_equal_is_faithful() {
+		use std::cmp::Ordering;
+
+		let corpus = ord_corpus();
+		let agreeing: Vec<_> = corpus.iter().filter(|v| v.ord_agrees_with_equal()).collect();
+		assert!(agreeing.len() > 20, "the corpus holds too few agreeing values");
+		for a in &agreeing {
+			for b in &agreeing {
+				assert_eq!(
+					a.equal(b),
+					a.cmp(b) == Ordering::Equal,
+					"{a:?} against {b:?}: equal and cmp disagree"
+				);
+			}
+		}
+		// A value that holds a regex, a geometry, a range or a closure, at any
+		// depth, does not claim to agree.
+		for v in &corpus {
+			let holds = format!("{v:?}");
+			if holds.contains("Regex") || holds.contains("Geometry") {
+				assert!(!v.ord_agrees_with_equal(), "{v:?}");
+			}
 		}
 	}
 

@@ -523,3 +523,164 @@ async fn subq_a_nested_explain_is_a_constant_of_the_program() {
 	}
 	golden.check();
 }
+
+/// Whether `program` tests membership of a statement's rows with an index.
+fn tests_membership(program: &Program) -> bool {
+	program.pipelines.iter().flat_map(|pipeline| &pipeline.code).any(|instr| {
+		matches!(instr, super::program::Instr::Block(super::program::BlockInstr::Member { .. }))
+	})
+}
+
+/// `x IN` and `x NOT IN` a statement run once are answered from a membership
+/// index of its rows: a statement over rows the size of the table it is
+/// tested against does not take a pass over the rows for each probe.
+#[tokio::test]
+async fn in_subquery_50k_by_50k() {
+	let setup = "
+		DEFINE TABLE t SCHEMALESS;
+		DEFINE TABLE u SCHEMALESS;
+		FOR $i IN 0..50000 { CREATE type::record('t', $i) SET k = $i };
+		FOR $i IN 0..50000 { CREATE type::record('u', $i) SET k = $i };
+	";
+	let db = TestDb::new(setup).await;
+	let ctx = db.exec_ctx().await;
+	for (sql, count) in [
+		(
+			"SELECT count() FROM t WHERE k IN (SELECT VALUE k FROM u WHERE k % 2 = 0) GROUP ALL",
+			25000,
+		),
+		(
+			"SELECT count() FROM t WHERE k NOT IN (SELECT VALUE k FROM u WHERE k % 2 = 0) GROUP ALL",
+			25000,
+		),
+		("SELECT count() FROM t WHERE k IN (SELECT VALUE k FROM u WHERE k < 10) GROUP ALL", 10),
+	] {
+		let program = lowered(&ctx, sql).await;
+		assert!(tests_membership(&program), "`{sql}` keeps no membership index");
+		let bound = bind(&ctx, sql).await;
+		let vm = super::plan(&planner(&ctx), &bound).await.expect("plans");
+		let started = web_time::Instant::now();
+		let rows = outcome(&vm, &ctx).await.expect("answers");
+		let took = started.elapsed();
+		assert_eq!(rows.len(), 1, "`{sql}` answers {rows:?}");
+		assert_eq!(rows[0].to_sql(), format!("{{ count: {count} }}"), "`{sql}`");
+		// The structural assertion is the real check; this bound only catches a
+		// pass over the rows for each probe, which takes minutes.
+		assert!(took < std::time::Duration::from_secs(30), "`{sql}` took {took:?}");
+	}
+}
+
+/// The values the membership tests probe with and keep, written as the
+/// statements write them: every kind of number, the two nothings, strings, a
+/// regex that matches some of them, a geometry, and collections and record
+/// ids holding numbers.
+const MEMBERS: &[&str] = &[
+	"1",
+	"1.0",
+	"1dec",
+	"-0.0",
+	"0",
+	"<float> 'NaN'",
+	"NONE",
+	"NULL",
+	"'abc'",
+	"'zzz'",
+	"<regex> '^a'",
+	"(1.0, 2.0)",
+	"[1, 2.0]",
+	"[1.0, 2]",
+	"{ a: 1dec }",
+	"{ a: 1 }",
+	"t:1",
+	"t:2",
+];
+
+/// The values among [`MEMBERS`] the kept side holds, a subset of them with
+/// others that equal some by a different type and a regex.
+const KEPT: &[&str] = &[
+	"1dec",
+	"-0.0",
+	"<float> 'NaN'",
+	"NONE",
+	"NULL",
+	"'abc'",
+	"<regex> '^a'",
+	"(1.0, 2.0)",
+	"[1, 2.0]",
+	"{ a: 1dec }",
+	"t:1",
+];
+
+/// A membership test answers what `IN` and `NOT IN` over the array of the
+/// rows answers, probe by probe, for numbers that equal across types, `NONE`
+/// and `NULL`, a string a regex row matches, a regex probe, a geometry, and
+/// nested values and record ids.
+#[tokio::test]
+async fn in_subquery_membership_matches_equal() {
+	let mut setup = String::from("DEFINE TABLE s SCHEMALESS; DEFINE TABLE p SCHEMALESS;\n");
+	for (at, kept) in KEPT.iter().enumerate() {
+		setup.push_str(&format!("CREATE s:{at} SET v = {kept};\n"));
+	}
+	for (at, probe) in MEMBERS.iter().enumerate() {
+		setup.push_str(&format!("CREATE p:{at} SET v = {probe};\n"));
+	}
+	let db = TestDb::new(&setup).await;
+	let ctx = db.exec_ctx().await;
+	for (member, test) in [
+		(
+			"SELECT VALUE id FROM p WHERE v IN (SELECT VALUE v FROM s) ORDER BY id",
+			"SELECT VALUE id FROM p WHERE v IN $kept ORDER BY id",
+		),
+		(
+			"SELECT VALUE id FROM p WHERE v NOT IN (SELECT VALUE v FROM s) ORDER BY id",
+			"SELECT VALUE id FROM p WHERE v NOT IN $kept ORDER BY id",
+		),
+	] {
+		let program = lowered(&ctx, member).await;
+		assert!(tests_membership(&program), "`{member}` keeps no membership index");
+		let by_index = db.datastore().execute(member, &TestDb::owner(), None).await.expect("runs");
+		let by_array = db
+			.datastore()
+			.execute(
+				&format!("LET $kept = (SELECT VALUE v FROM s); {test}"),
+				&TestDb::owner(),
+				None,
+			)
+			.await
+			.expect("runs");
+		let indexed = by_index[0].result.as_ref().map(|v| v.to_sql()).map_err(|e| e.to_string());
+		let linear = by_array[1].result.as_ref().map(|v| v.to_sql()).map_err(|e| e.to_string());
+		assert!(indexed.is_ok(), "`{member}` answers {indexed:?}");
+		assert_eq!(indexed, linear, "`{member}` against the array of the rows");
+		let ids = indexed.expect("answers");
+		// Both sides of the test are exercised: some probe is a member, and some
+		// is not.
+		let members = ids.matches("p:").count();
+		assert!(members > 0 && members < MEMBERS.len(), "`{member}` answers {ids}");
+	}
+}
+
+/// What a membership index answers for each probe is what `contains` answers
+/// of the array of its rows, for every pair of values of a corpus.
+#[tokio::test]
+async fn members_answer_what_contains_answers() {
+	let db = TestDb::new("").await;
+	let ctx = db.exec_ctx().await;
+	let corpus: Vec<Value> = {
+		let sql = format!("RETURN [{}]", MEMBERS.join(", "));
+		let bound = bind(&ctx, &sql).await;
+		let vm = super::plan(&planner(&ctx), &bound).await.expect("plans");
+		match outcome(&vm, &ctx).await.expect("answers").into_iter().next() {
+			Some(Value::Array(values)) => values.0,
+			other => panic!("the corpus answers {other:?}"),
+		}
+	};
+	let kept = [&corpus[..], &corpus[2..9], &corpus[..1]].concat();
+	for rows in [corpus.clone(), kept, Vec::new()] {
+		let members = super::membership::Members::keep(rows.clone(), &ctx).await.expect("kept");
+		let array = Value::Array(crate::val::Array(rows));
+		for probe in &corpus {
+			assert_eq!(members.contains(probe), array.contains(probe), "{probe:?}");
+		}
+	}
+}

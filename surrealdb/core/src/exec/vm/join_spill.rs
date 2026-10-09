@@ -69,8 +69,10 @@ pub(super) struct BuildSink {
 	/// Build rows with a key, keyed by the key then their arrival.
 	held: Vec<Record>,
 	runs: Runs,
-	/// Build rows whose key holds a regex, in arrival order.
+	/// Build rows whose key holds a regex, in arrival order. They are never
+	/// spilled, so they are charged as bytes the query cannot spill.
 	regex: Vec<(JoinKey, Value)>,
+	regex_account: Reservation,
 }
 
 impl BuildSink {
@@ -95,6 +97,10 @@ impl BuildSink {
 			rows: 0,
 			account: match &memory {
 				Some(memory) => memory.reservation(),
+				None => Reservation::unbounded(),
+			},
+			regex_account: match &memory {
+				Some(memory) => memory.pinned_reservation(),
 				None => Reservation::unbounded(),
 			},
 			memory,
@@ -123,9 +129,11 @@ impl BuildSink {
 		Ok(Built::Spilled(Box::new(SpilledJoin {
 			width: self.width,
 			account: memory.reservation(),
+			regex_probe_account: memory.pinned_reservation(),
 			memory,
 			build: self.runs,
 			regex: self.regex,
+			_regex_account: self.regex_account,
 			probes: Vec::new(),
 			probe_runs: Runs::default(),
 			regex_probes: Vec::new(),
@@ -153,6 +161,9 @@ impl BuildSink {
 			+ crate::exec::memory::size::values_bytes(&key);
 		if key_has_regex(&key) {
 			self.regex.push((key, row));
+			if self.regex_account.charge(bytes) == Verdict::Spill {
+				self.regex_account.insist(ctx).await?;
+			}
 			return Ok(());
 		}
 		let mut keys = key;
@@ -208,11 +219,16 @@ pub(super) struct SpilledJoin {
 	account: Reservation,
 	build: Runs,
 	regex: Vec<(JoinKey, Value)>,
+	/// What the build rows in `regex` hold, charged for as long as the join
+	/// holds them.
+	_regex_account: Reservation,
 	/// Probe rows with a key, keyed by the key then their arrival.
 	probes: Vec<Record>,
 	probe_runs: Runs,
-	/// Probe rows whose key holds a regex, with their arrival.
+	/// Probe rows whose key holds a regex, with their arrival. They are never
+	/// spilled, so they are charged as bytes the query cannot spill.
 	regex_probes: Vec<(i64, JoinKey, Value)>,
+	regex_probe_account: Reservation,
 	/// Rows yielded, keyed by their probe row's arrival and their place.
 	out: Vec<Record>,
 	out_runs: Runs,
@@ -303,7 +319,12 @@ impl SpilledJoin {
 			return self.yielded(arrival, rows, ctx).await;
 		};
 		if key_has_regex(&key) {
+			let bytes = crate::exec::memory::size::value_bytes(&row)
+				+ crate::exec::memory::size::values_bytes(&key);
 			self.regex_probes.push((arrival, key, row));
+			if self.regex_probe_account.charge(bytes) == Verdict::Spill {
+				self.regex_probe_account.insist(ctx).await?;
+			}
 			return Ok(());
 		}
 		let bytes = crate::exec::memory::size::value_bytes(&row);
@@ -394,6 +415,7 @@ impl SpilledJoin {
 				self.yielded(arrival, rows, ctx).await?;
 			}
 		}
+		self.regex_probe_account.clear();
 		drop(probes);
 		drop(build);
 		let mut out = std::mem::take(&mut self.out);

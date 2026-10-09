@@ -979,6 +979,21 @@ pub(super) enum BlockInstr {
 		frame: Option<u16>,
 		caught: Option<Catch>,
 	},
+	/// `dst` = whether `probe` is a member (not a member when `negate`) of the
+	/// rows of nested statement [`Program::nested`]`[nested]`, as the
+	/// `INSIDE` (`NOT INSIDE`) of the probe over them answers, kept as a
+	/// membership index from the first evaluation that reaches it, as
+	/// [`Self::Nested`] keeps a `once` value. The statement runs as
+	/// [`Self::Nested`] runs it, and its `caught` signals are taken as
+	/// there.
+	Member {
+		nested: u32,
+		probe: Reg,
+		dst: Reg,
+		negate: bool,
+		frame: Option<u16>,
+		caught: Option<Catch>,
+	},
 	/// Run late-bound statement [`Program::served`]`[served]`, written as the
 	/// running operator's [`super::ServedStatements`] hold it: planned for
 	/// the catalog the transaction reads when the block reaches it, served
@@ -2343,10 +2358,16 @@ impl Instr {
 				caught,
 				..
 			}
-			| Instr::Block(BlockInstr::Nested {
-				caught,
-				..
-			}) => caught.iter_mut().map(|catch| &mut catch.label).collect(),
+			| Instr::Block(
+				BlockInstr::Nested {
+					caught,
+					..
+				}
+				| BlockInstr::Member {
+					caught,
+					..
+				},
+			) => caught.iter_mut().map(|catch| &mut catch.label).collect(),
 			Instr::MethodResolve {
 				closure,
 				..
@@ -3813,6 +3834,10 @@ pub(super) struct NestedSpec {
 	/// Whether it reads through a probe ([`Source::Probe`]), whose kept rows
 	/// are the running state's.
 	pub(super) probed: bool,
+	/// Whether its rows are kept as a membership index rather than as the
+	/// array they gather ([`BlockInstr::Member`]), which only a statement kept
+	/// across evaluations ([`Self::once`]) is.
+	pub(super) members: bool,
 }
 
 /// A graph lookup: a run of hops, each read from the records the one before

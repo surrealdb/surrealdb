@@ -2,7 +2,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use clap::builder::{EnumValueParser, PossibleValue};
-use clap::{ArgMatches, Command, ValueEnum, arg, command, value_parser};
+use clap::{Arg, ArgAction, ArgMatches, Command, ValueEnum, arg, command, value_parser};
 use rust_decimal::serde::str;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -213,6 +213,16 @@ impl ValueEnum for ColorMode {
 	}
 }
 
+/// A `KEY=VALUE` datastore configuration pair.
+fn config_pair(pair: &str) -> Result<(String, String), String> {
+	match pair.split_once('=') {
+		Some((key, value)) if !key.trim().is_empty() => {
+			Ok((key.trim().to_lowercase(), value.trim().to_owned()))
+		}
+		_ => Err(format!("expected KEY=VALUE, found `{pair}`")),
+	}
+}
+
 pub fn parse() -> ArgMatches {
 	let cmd = command!()
 		.arg(arg!(--color <COLOR> "Set if the output should be colored").value_parser(EnumValueParser::<ColorMode>::new()).default_value("auto"))
@@ -236,6 +246,14 @@ pub fn parse() -> ArgMatches {
 			)
 			.arg(
 				arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
+			)
+			.arg(
+				Arg::new("config")
+					.long("config")
+					.value_name("KEY=VALUE")
+					.action(ArgAction::Append)
+					.value_parser(config_pair)
+					.help("Set a datastore configuration key for every datastore the run opens, e.g. `--config memory_limit=8MiB`")
 			),
 	)
 		.subcommand(

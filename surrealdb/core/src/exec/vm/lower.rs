@@ -5806,13 +5806,22 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				}),
 				..
 			}
-			| Instr::Block(BlockInstr::Nested {
-				caught: Some(super::program::Catch {
-					label: t,
+			| Instr::Block(
+				BlockInstr::Nested {
+					caught: Some(super::program::Catch {
+						label: t,
+						..
+					}),
 					..
-				}),
-				..
-			})
+				}
+				| BlockInstr::Member {
+					caught: Some(super::program::Catch {
+						label: t,
+						..
+					}),
+					..
+				},
+			)
 			| Instr::ElemNext {
 				done: t,
 				..
@@ -8108,6 +8117,28 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	/// state of its own — a host pipeline, a region's — or where its group
 	/// does not lower; the statement then runs as a program of its own.
 	async fn nested_group(&mut self, op: &LogicalOp) -> Lowered<Option<Operand>> {
+		Ok(self.nested_group_as(op, None).await?.map(|(value, _)| value))
+	}
+
+	/// Whether statement `op` in scalar position is kept as a membership
+	/// index: the plan says its only use is the right operand of an `INSIDE`
+	/// or `NOT INSIDE`, and runs it once.
+	fn kept_as_members(&self, op: &LogicalOp) -> bool {
+		self.nested_plans.iter().find(|nested| nested.op == *op).is_some_and(|nested| {
+			nested.membership && nested.strategy == super::plan::Strategy::Once
+		})
+	}
+
+	/// [`Self::nested_group`], and with a `probe` and whether it is tested
+	/// for non-membership, the statement as [`BlockInstr::Member`] answers it
+	/// where the plan keeps its rows as a membership index and the statement
+	/// yields rows. The answer says which was emitted: `true` for the
+	/// membership, otherwise the statement's value.
+	async fn nested_group_as(
+		&mut self,
+		op: &LogicalOp,
+		probe: Option<(Reg, bool)>,
+	) -> Lowered<Option<(Operand, bool)>> {
 		if self.slot_hidden > 0 {
 			return Ok(None);
 		}
@@ -8139,6 +8170,11 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		let read_only = access_mode == AccessMode::ReadOnly
 			&& self.groups.get(group as usize).is_some_and(|spec| spec.write.is_none());
 		self.delegate_context = self.delegate_context.max(required_context);
+		let member = probe.filter(|_| {
+			nested.membership
+				&& nested.strategy == super::plan::Strategy::Once
+				&& self.groups.get(group as usize).is_some_and(|spec| !spec.scalar)
+		});
 		self.nested.push(super::program::NestedSpec {
 			group,
 			inherits_row: op.inherits_row(),
@@ -8147,6 +8183,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			hoist: None,
 			read_only,
 			probed: self.probes.len() > probes,
+			members: member.is_some(),
 		});
 		let index = (self.nested.len() - 1) as u32;
 		let dst = self.register()?;
@@ -8163,11 +8200,21 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			}
 			_ => None,
 		};
-		let at = self.emit(Instr::Block(BlockInstr::Nested {
-			nested: index,
-			dst,
-			frame: self.eval_frame,
-			caught,
+		let at = self.emit(Instr::Block(match member {
+			Some((probe, negate)) => BlockInstr::Member {
+				nested: index,
+				probe,
+				dst,
+				negate,
+				frame: self.eval_frame,
+				caught,
+			},
+			None => BlockInstr::Nested {
+				nested: index,
+				dst,
+				frame: self.eval_frame,
+				caught,
+			},
 		}));
 		if caught.is_some()
 			&& let Some(catch) = &mut self.return_catch
@@ -8176,7 +8223,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		}
 		self.uses_eval = true;
 		self.may_fail = true;
-		Ok(Some(Operand::Reg(dst)))
+		Ok(Some((Operand::Reg(dst), member.is_some())))
 	}
 
 	/// Subquery `op`, bound by `self`'s planner, as a unit of the program: see
@@ -9178,6 +9225,45 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				} if CompareOp::of(op).is_some() => {
 					let op = CompareOp::of(op).expect("checked above");
 					let left = crate::exec::vm::host::out_of_line(|| self.value(left)).await?;
+					// The probe is evaluated before the statement, as the
+					// operator tree evaluates it.
+					if matches!(op, CompareOp::Inside | CompareOp::NotInside)
+						&& let LogicalExpr::Subquery(statement) = right.as_ref()
+						&& !self.column_statements
+						&& self.statement_doc.is_none()
+						&& self.kept_as_members(statement)
+					{
+						let probe = match left {
+							Operand::Reg(probe) => probe,
+							other => {
+								let probe = self.register()?;
+								self.emit(Instr::Load {
+									dst: probe,
+									src: other,
+								});
+								probe
+							}
+						};
+						let negate = op == CompareOp::NotInside;
+						match crate::exec::vm::host::out_of_line(|| {
+							self.nested_group_as(statement, Some((probe, negate)))
+						})
+						.await?
+						{
+							Some((answer, true)) => return Ok(answer),
+							Some((rows, false)) => {
+								let dst = self.register()?;
+								self.emit(Instr::Compare {
+									op,
+									left,
+									right: rows,
+									dst,
+								});
+								return Ok(Operand::Reg(dst));
+							}
+							None => {}
+						}
+					}
 					let right = crate::exec::vm::host::out_of_line(|| self.value(right)).await?;
 					let dst = self.register()?;
 					self.emit(Instr::Compare {

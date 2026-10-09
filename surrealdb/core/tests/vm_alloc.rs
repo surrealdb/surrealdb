@@ -294,8 +294,8 @@ const SMALL: usize = 10_000;
 const LARGE: usize = 20_000;
 
 /// The schema and data a datastore of `n` rows holds: a table `t` of `n`
-/// records, two `knows` edges out of each, an empty indexed table `ix`, and
-/// an empty table `c`.
+/// records, two `knows` edges out of each, an empty indexed table `ix`, an
+/// empty table `c`, and a function `fn::tag`.
 fn setup(n: usize) -> String {
 	format!(
 		"
@@ -311,6 +311,7 @@ fn setup(n: usize) -> String {
 		DEFINE TABLE ix SCHEMALESS;
 		DEFINE INDEX ix_k ON ix FIELDS k;
 		DEFINE TABLE c SCHEMALESS;
+		DEFINE FUNCTION fn::tag($s: string) {{ RETURN $s + '!'; }};
 		"
 	)
 }
@@ -403,6 +404,13 @@ const SHAPES: &[Shape] = &[
 	Shape {
 		name: "fetch",
 		query: |_| "SELECT * FROM t FETCH friend".into(),
+		rows: all,
+		takes_rows: false,
+	},
+	// Each call binds a string argument, which a call's frame accounts for.
+	Shape {
+		name: "fn_call",
+		query: |_| "SELECT fn::tag(s) AS r FROM t".into(),
 		rows: all,
 		takes_rows: false,
 	},
@@ -618,7 +626,7 @@ async fn per_row_wire_allocations() {
 	println!("{:<14} {:>6} {:>12} {:>12}", "shape", "format", "allocs/row", "bytes/row");
 	for shape in selected()
 		.into_iter()
-		.filter(|s| !s.takes_rows && s.name != "update" && s.name != "create_loop")
+		.filter(|s| !s.takes_rows && !matches!(s.name, "update" | "create_loop" | "fn_call"))
 	{
 		for format in [RowFormat::Cbor, RowFormat::Json] {
 			let measure = |ds: Arc<Datastore>, n: usize| {
@@ -761,7 +769,7 @@ async fn respond(
 fn read_shapes() -> impl Iterator<Item = &'static Shape> {
 	selected()
 		.into_iter()
-		.filter(|s| !s.takes_rows && s.name != "update" && s.name != "create_loop")
+		.filter(|s| !s.takes_rows && !matches!(s.name, "update" | "create_loop" | "fn_call"))
 }
 
 /// Allocations per row of `shape` produced along `path`, between datastores

@@ -768,6 +768,7 @@ impl<'p> Region<'p> {
 		let under = Under {
 			frames: state.frames.clone(),
 			slots: state.slots.clone(),
+			kept: state.slot_charges(),
 			bypassed: state.permissions_bypassed,
 			shared: state
 				.shared(self.program, ctx.function_registry())
@@ -929,6 +930,9 @@ fn merge_groups(main: &mut Option<Groups>, part: Option<Groups>) -> FlowResult<(
 struct Under {
 	frames: Vec<ExecutionContext>,
 	slots: Vec<Value>,
+	/// The bytes the statement's ledger charges each slot, which the batch's
+	/// copy of the slots is charged again.
+	kept: Vec<usize>,
 	bypassed: bool,
 	shared: super::interp::RunShare,
 }
@@ -985,6 +989,7 @@ async fn run_batch(
 	state.program = Some(Arc::clone(program));
 	state.frames = under.frames;
 	state.slots = under.slots;
+	state.keep_copied(under.kept, ctx).await?;
 	state.permissions_bypassed = under.bypassed;
 	let pipeline = &program.pipelines[at];
 	let count = rows.len();

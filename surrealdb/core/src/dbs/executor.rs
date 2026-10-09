@@ -2022,6 +2022,10 @@ impl Executor {
 		if self.broker_owned_by_executor {
 			self.clear_broker();
 		}
+		// The statement's transaction has ended, committed or cancelled.
+		if let Some(memory) = self.ctx.memory() {
+			memory.transaction_ended();
+		}
 		result
 	}
 
@@ -2289,6 +2293,10 @@ impl Executor {
 			self.clear_broker();
 		}
 		self.holding = false;
+		// The transaction block has ended, committed or cancelled.
+		if let Some(memory) = self.ctx.memory() {
+			memory.transaction_ended();
+		}
 		result
 	}
 

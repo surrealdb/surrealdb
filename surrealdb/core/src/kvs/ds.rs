@@ -368,6 +368,10 @@ pub struct Datastore {
 	/// [`Self::memory_host`] for what applies without them.
 	memory_governor: Option<Arc<dyn crate::exec::memory::MemoryGovernor>>,
 	temp_store: Option<Arc<dyn crate::exec::memory::TempStore>>,
+	/// Whether queries spill nowhere even where the platform has a default
+	/// store.
+	#[cfg(test)]
+	no_temp_store: bool,
 	/// The governor and store every query of this datastore shares, settled
 	/// at its first query.
 	memory_host: Arc<std::sync::OnceLock<crate::exec::memory::MemoryHost>>,
@@ -717,6 +721,8 @@ impl Datastore {
 			scheduler: self.scheduler,
 			memory_governor: self.memory_governor,
 			temp_store: self.temp_store,
+			#[cfg(test)]
+			no_temp_store: self.no_temp_store,
 			memory_host: Default::default(),
 			http_endpoint: self.http_endpoint,
 			index_stores: IndexStores::new(
@@ -787,6 +793,8 @@ impl Datastore {
 			scheduler: self.scheduler.clone(),
 			memory_governor: self.memory_governor.clone(),
 			temp_store: self.temp_store.clone(),
+			#[cfg(test)]
+			no_temp_store: self.no_temp_store,
 			memory_host: Default::default(),
 			http_endpoint: self.http_endpoint.clone(),
 			index_stores: IndexStores::new(
@@ -917,7 +925,8 @@ impl Datastore {
 	/// datastore spills to a [`FileTempStore`](crate::exec::memory::FileTempStore)
 	/// in its temporary directory (the system's when none is set) and holds
 	/// its queries to `memory_limit` bytes; a datastore with no store to spill
-	/// to bounds nothing, since a breaker that cannot spill could only fail.
+	/// to bounds nothing, since a breaker that cannot spill gains nothing from a
+	/// limit but waits and overcommits.
 	pub(crate) fn memory_host(&self) -> crate::exec::memory::MemoryHost {
 		use crate::exec::memory::{FairGovernor, MemoryHost, MemorySettings, Unlimited};
 		self.memory_host
@@ -927,8 +936,12 @@ impl Datastore {
 					floor: exec.query_memory_minimum,
 					fan_in: exec.spill_merge_fan_in,
 					chunk: exec.memory_reserve_chunk,
+					wait: std::time::Duration::from_millis(exec.memory_wait),
+					max: exec.query_memory_max(),
 				};
 				let store = self.temp_store.clone().or_else(|| self.default_temp_store());
+				#[cfg(test)]
+				let store = store.filter(|_| !self.no_temp_store);
 				let governor: Arc<dyn crate::exec::memory::MemoryGovernor> =
 					match (&self.memory_governor, &store) {
 						(Some(governor), _) => Arc::clone(governor),
@@ -942,6 +955,24 @@ impl Datastore {
 				}
 			})
 			.clone()
+	}
+
+	/// The node memory limit the datastore holds its queries to, or `None`
+	/// where its governor has none.
+	pub fn memory_limit(&self) -> Option<usize> {
+		self.memory_host().governor.limit()
+	}
+
+	/// The bytes a single query may hold that it cannot spill before it fails
+	/// with the memory threshold error.
+	pub fn query_memory_max(&self) -> usize {
+		self.memory_host().settings.max
+	}
+
+	/// The longest a query waits in all for other queries to give memory back
+	/// before it proceeds past the node limit.
+	pub fn memory_wait(&self) -> std::time::Duration {
+		self.memory_host().settings.wait
 	}
 
 	#[cfg(all(storage, not(target_family = "wasm")))]

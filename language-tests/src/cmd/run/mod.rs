@@ -166,7 +166,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	// So unbounded is required.
 	let (report_send, mut report_recv) = mpsc::unbounded_channel();
 
-	let mut provisioner = Provisioner::new(num_jobs as usize, backend).await?;
+	let config = matches
+		.get_many::<(String, String)>("config")
+		.map(|pairs| pairs.cloned().collect())
+		.unwrap_or_default();
+	let mut provisioner = Provisioner::new(num_jobs as usize, backend, config).await?;
 
 	println!("Found {} tests ", runs.len());
 

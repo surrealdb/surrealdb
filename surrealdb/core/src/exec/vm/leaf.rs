@@ -221,6 +221,9 @@ fn block(instr: &BlockInstr) -> Class {
 		| BlockInstr::Restore
 		| BlockInstr::Nested {
 			..
+		}
+		| BlockInstr::Member {
+			..
 		} => Class::Kernel(&[Params]),
 		BlockInstr::Resolve => Class::Kernel(&[Catalog]),
 		BlockInstr::RunAnalyzed {

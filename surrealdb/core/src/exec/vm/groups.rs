@@ -120,6 +120,13 @@ impl Finished {
 	}
 }
 
+/// Whether every accumulator of `functions` can save its state, as groups
+/// that spill must: a group set that cannot is held as bytes the query cannot
+/// spill.
+pub(super) fn savable(functions: &[Vec<Arc<dyn AggregateFunction>>]) -> bool {
+	functions.iter().flatten().all(|function| function.accumulator_state().save().is_some())
+}
+
 impl Groups {
 	/// An aggregate's groups before any row has been folded into them: with
 	/// `keys` grouping keys, and an accumulator for each of `functions`, by

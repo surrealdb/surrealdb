@@ -499,6 +499,14 @@ pub trait Transactable: Send + Sync {
 		false
 	}
 
+	/// Whether the backend bounds the memory its write buffer takes — staging
+	/// writes outside memory, or flushing them before commit — so a caller need
+	/// not count what the transaction has written against its own memory.
+	/// `false` unless the backend guarantees it.
+	fn bounds_write_buffer(&self) -> bool {
+		false
+	}
+
 	/// How the work of [`Self::count`] and [`Self::count_bounded`] grows with
 	/// the keys a range holds. [`CountCost::Linear`] unless the backend
 	/// answers a count from summaries it keeps.

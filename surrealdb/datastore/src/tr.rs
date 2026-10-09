@@ -178,6 +178,16 @@ impl Transactor {
 	pub fn parallel_count(&self) -> bool {
 		!self.speculating() && self.inner.parallel_count()
 	}
+
+	/// Whether the backend bounds the memory its write buffer takes. A
+	/// speculating transaction holds its writes in memory itself, so it
+	/// answers `false`.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::bounds_write_buffer`].
+	pub fn bounds_write_buffer(&self) -> bool {
+		!self.speculating() && self.inner.bounds_write_buffer()
+	}
+
 	/// Check if transaction is finished.
 	///
 	/// If the transaction has been cancelled or committed,

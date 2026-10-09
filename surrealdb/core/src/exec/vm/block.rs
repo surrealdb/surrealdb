@@ -12,6 +12,7 @@ use std::borrow::Cow;
 
 use anyhow::{Context as _, anyhow};
 
+use super::ledger::Site;
 use super::program::{BlockInstr, Collect, Program};
 use super::scalar::Scalar;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
@@ -68,6 +69,7 @@ pub(super) async fn step(
 				.clone()
 				.ok_or_else(|| ControlFlow::Err(anyhow!("a block statement with no program")))?;
 			let scalar = running.groups[*statement as usize].scalar;
+			state.hand_on = *collect == Collect::Let;
 			let (rows, ended) = super::host::run_group(&running, *statement, state, &frame).await;
 			match collected(rows, ended, scalar, *collect) {
 				Ok(value) => write(regs, *dst, value),
@@ -189,6 +191,9 @@ pub(super) async fn step(
 		// The host runs a nested statement over the row it is evaluated for.
 		BlockInstr::Nested {
 			..
+		}
+		| BlockInstr::Member {
+			..
 		} => {
 			return Err(ControlFlow::Err(anyhow!("a nested statement reached as a block step")));
 		}
@@ -203,6 +208,7 @@ pub(super) async fn step(
 			if state.slots.len() <= slot {
 				state.slots.resize(slot + 1, Value::None);
 			}
+			let kept = crate::exec::memory::size::kept_bytes(&value);
 			if *in_frame {
 				let frame = state.frame.take().unwrap_or_else(|| ctx.clone());
 				let name = program.fields[*name as usize].as_str().to_owned();
@@ -210,6 +216,15 @@ pub(super) async fn step(
 				state.frame = Some(frame.with_param(name, value));
 			} else {
 				state.slots[slot] = value;
+			}
+			if kept != 0 || state.values.is_some() || state.handed.is_some() {
+				state.keep(Site::Slot(slot), kept, ctx).await?;
+				// The frame's copy of a parameter weighs what the value does, and
+				// stays held with the copies of the earlier bindings of the name
+				// until the block ends.
+				if *in_frame {
+					state.keep_more(Site::Frame(slot), kept, ctx).await?;
+				}
 			}
 		}
 		BlockInstr::CoerceKind {
@@ -229,7 +244,10 @@ pub(super) async fn step(
 		BlockInstr::CheckDepth {
 			value,
 		} => crate::val::check_value_depth(&read(regs, *value))?,
-		BlockInstr::Save => state.saved.push(state.frame.clone()),
+		BlockInstr::Save => {
+			state.saved.push(state.frame.clone());
+			state.save_frames(state.saved.len());
+		}
 		BlockInstr::Resolve => {
 			let current = state.frame.clone().unwrap_or_else(|| ctx.clone());
 			state.frame = Some(resolve_names(&current, ContextLevel::Root).await?);
@@ -239,10 +257,12 @@ pub(super) async fn step(
 			}
 		}
 		BlockInstr::Restore => {
+			let depth = state.saved.len();
 			state.frame = state
 				.saved
 				.pop()
 				.ok_or_else(|| ControlFlow::Err(anyhow!("a frame restored that was not saved")))?;
+			state.restore_frames(depth, ctx).await?;
 		}
 		BlockInstr::Return {
 			value,
@@ -251,7 +271,13 @@ pub(super) async fn step(
 			src,
 			slot,
 		} => {
-			let iter = match read(regs, *src) {
+			let source = read(regs, *src);
+			// The iterator holds the array it walks until the loop ends.
+			let kept = match &source {
+				Value::Array(_) => crate::exec::memory::size::kept_bytes(&source),
+				_ => 0,
+			};
+			let iter = match source {
 				Value::Array(array) => ForIter::Array(array.0.into_iter()),
 				Value::Range(range) => {
 					let range = range
@@ -273,7 +299,7 @@ pub(super) async fn step(
 			// time it starts.
 			for (at, nested) in program.nested.iter().enumerate() {
 				if nested.hoist == Some(*slot) {
-					state.once[at] = None;
+					state.reset_once(at);
 				}
 			}
 			let slot = *slot as usize;
@@ -281,6 +307,9 @@ pub(super) async fn step(
 				state.iters.resize_with(slot + 1, || None);
 			}
 			state.iters[slot] = Some(iter);
+			if kept != 0 || state.values.is_some() {
+				state.keep(Site::Iter(slot), kept, ctx).await?;
+			}
 		}
 		BlockInstr::IterNext {
 			slot,
@@ -296,6 +325,7 @@ pub(super) async fn step(
 				Some(value) => write(regs, *dst, value),
 				None => {
 					state.iters[*slot as usize] = None;
+					state.release(Site::Iter(*slot as usize));
 					return Ok(Some(*done as usize));
 				}
 			}

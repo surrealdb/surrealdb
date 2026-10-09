@@ -64,6 +64,10 @@ pub struct Builder {
 	memory_governor: Option<Arc<dyn crate::exec::memory::MemoryGovernor>>,
 	/// The store a query's breakers spill to; see [`Builder::with_temp_store`].
 	temp_store: Option<Arc<dyn crate::exec::memory::TempStore>>,
+	/// Whether queries spill nowhere even where the platform has a default
+	/// store; see [`Builder::without_temp_store`].
+	#[cfg(test)]
+	no_temp_store: bool,
 	authenticate: bool,
 	config: ConfigMap,
 	/// Overrides the built-in graph fold threshold; see
@@ -102,6 +106,8 @@ impl Builder {
 			temporary_directory: None,
 			memory_governor: None,
 			temp_store: None,
+			#[cfg(test)]
+			no_temp_store: false,
 			authenticate: false,
 			config: ConfigMap::empty(),
 			graph_fold_threshold: None,
@@ -268,6 +274,14 @@ impl Builder {
 		self
 	}
 
+	/// Have queries spill nowhere, where the platform would otherwise give the
+	/// datastore a default store.
+	#[cfg(test)]
+	pub(crate) fn without_temp_store(mut self) -> Self {
+		self.no_temp_store = true;
+		self
+	}
+
 	pub fn with_temporary_directory<P: AsRef<Path>>(mut self, directory: Option<P>) -> Self {
 		self.temporary_directory = directory.map(|x| Arc::new(x.as_ref().to_path_buf()));
 		self
@@ -429,6 +443,8 @@ impl Builder {
 			scheduler: None,
 			memory_governor: self.memory_governor,
 			temp_store: self.temp_store,
+			#[cfg(test)]
+			no_temp_store: self.no_temp_store,
 			memory_host: Default::default(),
 			http_endpoint: self.http_endpoint,
 			capabilities: ArcSwap::from_pointee(capabilities),

@@ -4209,6 +4209,13 @@ impl Transaction {
 		self.metrics.bytes_written()
 	}
 
+	/// Whether the backend bounds the memory its write buffer takes, so what
+	/// the transaction has written need not be counted against a query's
+	/// memory.
+	pub fn bounds_write_buffer(&self) -> bool {
+		self.tr.bounds_write_buffer()
+	}
+
 	// --------------------------------------------------
 	// Changefeed functions
 	// --------------------------------------------------

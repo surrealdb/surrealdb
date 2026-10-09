@@ -239,6 +239,14 @@ pub(super) enum Region {
 	},
 }
 
+/// What a nested statement run once keeps across its evaluations.
+pub(super) enum Kept {
+	/// The value the statement took.
+	Value(Value),
+	/// The rows the statement took, held for membership tests.
+	Members(Box<super::membership::Members>),
+}
+
 pub(super) struct State {
 	pub(super) paging: Vec<Paging>,
 	pub(super) sorts: Vec<Vec<(Vec<Value>, SortRow)>>,
@@ -280,6 +288,17 @@ pub(super) struct State {
 	/// What the rows a statement gathers into its value hold, against its
 	/// query's lease, while it gathers them.
 	pub(super) gather_account: Option<crate::exec::memory::Reservation>,
+	/// What the values the program keeps hold, against its query's lease
+	/// ([`super::ledger`]); made when the program first keeps a value with a
+	/// heap.
+	pub(super) values: Option<super::ledger::Ledger>,
+	/// Whether the statement that runs next hands its gathered rows on as the
+	/// value of a `LET`, which keeps their account in [`Self::handed`].
+	pub(super) hand_on: bool,
+	/// The account of the rows a `LET`'s statement gathered, until the binding
+	/// that takes their value absorbs it: the bytes stay reserved as the value
+	/// changes hands.
+	pub(super) handed: Option<crate::exec::memory::Reservation>,
 	/// The query's memory, where its breakers are bounded.
 	pub(super) memory: Option<std::sync::Arc<crate::exec::memory::QueryMemory>>,
 	/// Whether a breaker's account has passed its lease since the last
@@ -367,10 +386,10 @@ pub(super) struct State {
 	pub(super) group_writes: Vec<Option<Box<super::write::WriteState>>>,
 	/// The values a block has bound its `LET` and `FOR` names to, by slot.
 	pub(super) slots: Vec<Value>,
-	/// The value each nested statement run once has taken, by
+	/// What each nested statement run once has taken, by
 	/// [`Program::nested`](super::program::Program::nested) index, until the
 	/// group it is evaluated in starts again.
-	pub(super) once: Vec<Option<Value>>,
+	pub(super) once: Vec<Option<Kept>>,
 	/// The rows each probe has kept, by
 	/// [`Program::probes`](super::program::Program::probes) index, until its
 	/// owner starts again.
@@ -773,7 +792,7 @@ impl State {
 				.map(|(sink, functions)| Some(fresh_groups(sink, functions))),
 		);
 		self.group_writes.resize_with(program.groups.len(), || None);
-		self.once.resize(program.nested.len(), None);
+		self.once.resize_with(program.nested.len(), || None);
 		self.probes.resize(program.probes.len(), None);
 		self.steps.resize_with(program.splits.len(), || None);
 		self.joins.resize_with(program.joins.len(), || None);
@@ -804,6 +823,9 @@ impl State {
 			group_runs,
 			group_accounts,
 			gather_account,
+			values,
+			hand_on,
+			handed,
 			memory,
 			spill_due,
 			groups,
@@ -873,6 +895,9 @@ impl State {
 		emptied(group_runs);
 		emptied(group_accounts);
 		*gather_account = None;
+		*values = None;
+		*hand_on = false;
+		*handed = None;
 		*memory = None;
 		*spill_due = false;
 		emptied(groups);
@@ -1121,6 +1146,9 @@ impl State {
 			group_runs: Vec::new(),
 			group_accounts: Vec::new(),
 			gather_account: None,
+			values: None,
+			hand_on: false,
+			handed: None,
 			memory: None,
 			spill_due: false,
 			groups: Vec::new(),

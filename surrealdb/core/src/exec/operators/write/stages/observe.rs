@@ -425,6 +425,24 @@ impl WriteStage for ProcessChangefeeds {
 	}
 }
 
+/// Count `values` against the query's memory, which the transaction's
+/// buffers hold until it commits. The query waits or overcommits, and fails
+/// only where its pinned bytes would pass its ceiling
+/// ([`QueryMemory::hold_unspillable`]).
+///
+/// [`QueryMemory::hold_unspillable`]: crate::exec::memory::QueryMemory::hold_unspillable
+async fn held(
+	memory: Option<&Arc<crate::exec::memory::QueryMemory>>,
+	values: &[&crate::val::Value],
+	ctx: &WriteCtx,
+) -> Result<(), ControlFlow> {
+	if let Some(memory) = memory {
+		let bytes = values.iter().map(|v| crate::exec::memory::size::value_bytes(v)).sum();
+		memory.hold_unspillable(bytes, &ctx.exec).await?;
+	}
+	Ok(())
+}
+
 /// Buffer this record's change for the table's change feed, and capture the
 /// live-query event the router engine replays from: the effect
 /// [`ProcessChangefeeds`] takes, and the one the VM's write body asks its host
@@ -443,15 +461,8 @@ pub(crate) async fn record_change(row: &mut WriteRow, ctx: &WriteCtx) -> Result<
 	// What the transaction buffers until it commits counts against the
 	// query's memory.
 	let memory = ctx.exec.ctx().memory().cloned();
-	let held = |values: &[&crate::val::Value]| -> Result<(), ControlFlow> {
-		if let Some(memory) = &memory {
-			let bytes = values.iter().map(|v| crate::exec::memory::size::value_bytes(v)).sum();
-			memory.hold_unspillable(bytes).map_err(ControlFlow::Err)?;
-		}
-		Ok(())
-	};
 	if let Some(changefeed) = changefeed_definition(ctx) {
-		held(&[&row.initial, &row.current])?;
+		held(memory.as_ref(), &[&row.initial, &row.current], ctx).await?;
 		txn.changefeed_buffer_record_change(
 			ctx.db.namespace_id,
 			ctx.db.database_id,
@@ -471,7 +482,7 @@ pub(crate) async fn record_change(row: &mut WriteRow, ctx: &WriteCtx) -> Result<
 	// The live-query capture is independent of the feed above and
 	// runs whether or not one is defined.
 	if captures_live_events(ctx, &txn).await? {
-		held(&[&row.initial, &row.current])?;
+		held(memory.as_ref(), &[&row.initial, &row.current], ctx).await?;
 		txn.live_event_buffer_record_change(
 			ctx.db.namespace_id,
 			ctx.db.database_id,

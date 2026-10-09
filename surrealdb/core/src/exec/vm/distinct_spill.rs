@@ -102,22 +102,27 @@ impl Distinct {
 			return Ok(None);
 		}
 		let bytes = crate::exec::memory::size::value_bytes(&row);
-		if self.account.charge(bytes) == Verdict::Spill
-			&& let Some(memory) = self.account.memory().filter(|m| m.can_spill()).cloned()
-		{
-			let seen_count = self.seen.len();
-			let rows = self.seen.take_sorted().into_iter().map(|v| (vec![v], Value::None));
-			let mut seen = Runs::default();
-			seen.push(write_run(&memory, rows, ctx).await?);
-			self.account.clear();
-			self.spilled = Some(Box::new(Spilled {
-				memory,
-				seen,
-				seen_count,
-				deferred: Vec::new(),
-				deferred_runs: Runs::default(),
-				arrivals: 0,
-			}));
+		if self.account.charge(bytes) == Verdict::Spill {
+			match self.account.memory().filter(|m| m.can_spill()).cloned() {
+				Some(memory) => {
+					let seen_count = self.seen.len();
+					let rows = self.seen.take_sorted().into_iter().map(|v| (vec![v], Value::None));
+					let mut seen = Runs::default();
+					seen.push(write_run(&memory, rows, ctx).await?);
+					self.account.clear();
+					self.spilled = Some(Box::new(Spilled {
+						memory,
+						seen,
+						seen_count,
+						deferred: Vec::new(),
+						deferred_runs: Runs::default(),
+						arrivals: 0,
+					}));
+				}
+				// With no store to spill to the seen rows stay in memory, held
+				// as bytes the query cannot spill.
+				None => self.account.insist(ctx).await?,
+			}
 		}
 		Ok(Some(row))
 	}

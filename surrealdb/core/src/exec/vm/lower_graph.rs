@@ -199,6 +199,7 @@ impl Lowering<'_, '_> {
 				},
 				join: None,
 				strategy: super::super::plan::Strategy::Apply,
+				membership: false,
 			}));
 		}
 		Some(LogicalExpr::Subquery(input))
