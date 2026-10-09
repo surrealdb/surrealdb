@@ -238,6 +238,8 @@ pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicV
 /// strings.
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", skip(input), fields(length = input.len())))]
 pub fn json_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicValue> {
+	// The settings below are fixed; `config` does not shape this parse.
+	let _ = config;
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
 	let settings = ParserSettings {

@@ -7,9 +7,6 @@ run = false
 -- The table itself is fully selectable by record users, but the `code` field is
 -- only visible to its owner. An index covers `code` so the planner could be
 -- tempted to satisfy `ORDER BY code` via an index walk (true value order).
--- The record users' table exists: the field permission reads `$auth.id`, and a
--- record id naming an undefined table is an error rather than `NONE`.
-DEFINE TABLE users SCHEMALESS;
 DEFINE TABLE secret SCHEMALESS PERMISSIONS FOR select FULL;
 DEFINE FIELD code ON secret TYPE string PERMISSIONS FOR select WHERE owner = $auth.id;
 DEFINE FIELD owner ON secret TYPE record;

@@ -806,9 +806,7 @@ impl Reach {
 		};
 		for statement in ast.expressions {
 			match statement {
-				surrealdb_expr::parser::TopLevelExpr::Expr(expr) => {
-					self.expr(&crate::expr::Expr::from(expr))
-				}
+				surrealdb_expr::parser::TopLevelExpr::Expr(expr) => self.expr(&expr),
 				_ => self.schema = true,
 			}
 		}

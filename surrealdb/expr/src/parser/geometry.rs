@@ -1,4 +1,4 @@
-use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 
 use crate::expr::{Expr, Literal, ObjectEntry};
 use crate::val::Geometry;

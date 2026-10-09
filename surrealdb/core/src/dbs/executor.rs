@@ -3181,6 +3181,7 @@ impl Executor {
 			if self.consumer_gone() {
 				break;
 			}
+			trace!(target: TARGET, statement = %stmt.to_sql(), "Executing statement");
 			let place = place_statement(&mut grouper, &stmt);
 			if let StatementRole::Misplaced(misplaced) = place.role {
 				self.misplaced_control = Some(misplaced);
@@ -3435,6 +3436,8 @@ impl Executor {
 					return Ok(());
 				}
 			};
+
+			trace!(target: TARGET, statement = %stmt.to_sql(), "Executing statement");
 
 			// Capture classification up-front so we can emit a
 			// `StatementEvent` from whichever branch of the match consumes

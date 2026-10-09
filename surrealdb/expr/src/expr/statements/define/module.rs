@@ -1,3 +1,4 @@
+use common::fmt::EscapeKwFreeIdent;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
@@ -24,7 +25,7 @@ impl ToSql for DefineModuleStatement {
 			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
 		if let Some(name) = &self.name {
-			write_sql!(f, sql_fmt, " mod::{} FROM", name);
+			write_sql!(f, sql_fmt, " mod::{} FROM", EscapeKwFreeIdent(name));
 		}
 		write_sql!(f, sql_fmt, " {}", self.executable);
 		if self.unsigned {

@@ -663,20 +663,25 @@ test("closures cannot cross the wire, but type::of still reports function", asyn
 test("regex is never representable as a wire value; it exists only as an operand", async () => {
 	const { db } = await rootClient(server);
 
-	// A regex literal is only parsed as an operand of an expression. Any attempt
-	// to surface one as a standalone value — returned, wrapped, or stored — is a
-	// PARSE error, so a regex never reaches the CBOR encoder at all.
-	for (const stmt of [
-		"RETURN /abc/",
-		"RETURN (/abc/)",
-		"RETURN [/abc/]",
-		"RETURN { r: /abc/ }",
-		"CREATE re_probe:one SET r = /abc/",
-	]) {
+	// A regex parses wherever a value can stand, but CBOR has no encoding for
+	// one, so a result holding a regex cannot be sent. Where the encoding fails
+	// decides the error. A statement whose result is a single value is encoded
+	// with the whole response, and that failure is reported as the response's
+	// `Parse error`. A statement whose result is rows — an array, the records a
+	// write returns — encodes each row as it runs, so the statement itself fails
+	// with an internal error, before its write commits.
+	for (const stmt of ["RETURN /abc/", "RETURN (/abc/)", "RETURN { r: /abc/ }"]) {
 		const err = await rejects(db.query(stmt).collect());
 		expect(err.constructor.name).toBe("ValidationError");
 		expect(String(err)).toMatch(/Parse error/);
 	}
+	for (const stmt of ["RETURN [/abc/]", "CREATE re_probe:one SET r = /abc/"]) {
+		const err = await rejects(db.query(stmt).collect());
+		expect(err.constructor.name).toBe("InternalError");
+		expect(String(err)).toMatch(/Unsupported value type: Regex/);
+	}
+	const unstored = await rejects(db.query("SELECT * FROM re_probe").collect());
+	expect(unstored.constructor.name).toBe("NotFoundError");
 
 	// As an operand it is fully live: type::of names it, and it matches.
 	const [t] = await db.query<[string]>("RETURN type::of(/abc/)").json();

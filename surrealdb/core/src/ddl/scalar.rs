@@ -281,11 +281,11 @@ mod tests {
 		}
 	}
 
-	/// Parse a `DEFINE` and convert it to the form a schema statement is
-	/// carried and executed as.
+	/// Parse a `DEFINE`, the form a schema statement is carried and executed
+	/// as.
 	fn define(src: &str) -> DefineStatement {
 		match parse_one(src) {
-			crate::expr::Expr::Define(stmt) => (*stmt).into(),
+			crate::expr::Expr::Define(stmt) => *stmt,
 			other => panic!("expected a DEFINE for {src:?}, got {other:?}"),
 		}
 	}
@@ -293,7 +293,7 @@ mod tests {
 	/// Parse a `REMOVE`, as [`define`] does.
 	fn remove(src: &str) -> RemoveStatement {
 		match parse_one(src) {
-			crate::expr::Expr::Remove(stmt) => (*stmt).into(),
+			crate::expr::Expr::Remove(stmt) => *stmt,
 			other => panic!("expected a REMOVE for {src:?}, got {other:?}"),
 		}
 	}
