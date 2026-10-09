@@ -459,8 +459,13 @@ async fn fetch_value_if_record(
 /// Fetch a single raw record value from the datastore.
 ///
 /// Returns `Ok(Some(val))` with the record's ID injected, or `Ok(None)` if
-/// the record does not exist.  This is the single point of record retrieval
-/// that all higher-level helpers compose on top of.
+/// the record does not exist in a table that does.  A record id naming a
+/// table that is not defined at `version` fails with `TbNotFound`, as a scan
+/// of that table does, whichever position the id is read from — a `FROM`
+/// source, a dereference, a `FETCH` target.  The table is only looked up once
+/// the record is found missing, so a read that finds its record pays nothing
+/// for the check.  This is the single point of record retrieval that all
+/// higher-level helpers compose on top of.
 pub(crate) async fn fetch_raw_record(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
@@ -479,6 +484,18 @@ pub(crate) async fn fetch_raw_record(
 		.await
 		.context("Failed to fetch record")?;
 	if record.data.is_none() {
+		if db_ctx
+			.get_table_def(&rid.table, version)
+			.await
+			.context("Failed to get table definition")?
+			.is_none()
+		{
+			return Err(crate::expr::ControlFlow::Err(anyhow::Error::new(
+				crate::catalog::Error::TbNotFound {
+					name: rid.table.clone(),
+				},
+			)));
+		}
 		return Ok(None);
 	}
 
