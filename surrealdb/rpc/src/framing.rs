@@ -1069,4 +1069,105 @@ mod tests {
 			"{out:?}"
 		);
 	}
+
+	/// A held transaction's items arrive whole, after it resolves: a committed
+	/// block carries its payload and a rolled-back one only the errors, and in
+	/// neither does a statement's failure follow rows the client already saw.
+	#[test]
+	fn a_held_transaction_is_framed_without_retraction() {
+		let result = |index: usize, result: Result<Value, TypesError>| {
+			crate::items_for_result(
+				index,
+				crate::QueryResult {
+					time: Duration::from_millis(1),
+					result,
+					query_type: QueryType::Other,
+				},
+			)
+		};
+
+		let mut committed = StreamFrames::new();
+		let ints = Value::Array((0..40).map(int).collect::<Vec<_>>().into());
+		for item in result(1, Ok(ints)).into_iter().chain(result(2, Ok(Value::Bool(true)))) {
+			committed.absorb(item);
+		}
+		let committed_frames = drain(&mut committed);
+		let produced = &committed_frames;
+		let rows: usize = produced
+			.iter()
+			.filter_map(|f| match f {
+				QueryStreamFrame::Rows {
+					index: 1,
+					values,
+				} => Some(values.len()),
+				_ => None,
+			})
+			.sum();
+		assert_eq!(rows, 40, "every row of the committed statement goes out");
+		assert!(produced.iter().any(|f| matches!(
+			f,
+			QueryStreamFrame::Finished {
+				index: 1,
+				error: None,
+				..
+			}
+		)));
+		assert!(produced.iter().any(|f| matches!(
+			f,
+			QueryStreamFrame::Value {
+				index: 2,
+				..
+			}
+		)));
+
+		let mut rolled_back = StreamFrames::new();
+		for index in [1, 2] {
+			for item in result(index, Err(TypesError::internal("rolled back".to_string()))) {
+				rolled_back.absorb(item);
+			}
+		}
+		let rolled_back_frames = drain(&mut rolled_back);
+		let produced = &rolled_back_frames;
+		assert!(
+			!produced.iter().any(|f| matches!(
+				f,
+				QueryStreamFrame::Rows { .. } | QueryStreamFrame::Value { .. }
+			)),
+			"a rolled-back held block frames no payload: {produced:?}"
+		);
+		assert_eq!(
+			produced
+				.iter()
+				.filter(|f| matches!(
+					f,
+					QueryStreamFrame::Finished {
+						error: Some(_),
+						..
+					}
+				))
+				.count(),
+			2,
+			"each statement is finished with its error"
+		);
+
+		// No statement is retracted: a failed statement never had a payload frame.
+		for produced in [&committed_frames, &rolled_back_frames] {
+			for frame in produced {
+				let QueryStreamFrame::Finished {
+					index,
+					error: Some(_),
+					..
+				} = frame
+				else {
+					continue;
+				};
+				assert!(
+					!produced.iter().any(|f| matches!(f,
+						QueryStreamFrame::Rows { index: i, .. }
+						| QueryStreamFrame::Value { index: i, .. } if i == index)),
+					"statement {index} failed after sending payload"
+				);
+			}
+		}
+	}
 }

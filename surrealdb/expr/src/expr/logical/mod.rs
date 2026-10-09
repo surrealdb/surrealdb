@@ -187,7 +187,7 @@ pub use self::lower::{
 };
 pub use self::request::{
 	Emission, LogicalTransaction, MisplacedControl, RequestGrouper, RequestStatementKind,
-	StatementPlace, StatementRole, TxnEnd, TxnMode, lower_request,
+	StatementPlace, StatementRole, TxnEnd, TxnMode, lower_request, lower_request_with,
 };
 pub use self::schema::{
 	ComputedBody, FieldPath, FieldSchema, FieldSegment, LogicalPermission, LogicalPermissionRef,

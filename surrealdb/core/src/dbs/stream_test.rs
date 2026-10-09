@@ -59,61 +59,85 @@ fn session() -> Session {
 	Session::owner().with_ns("test").with_db("test")
 }
 
-/// Run a query through the result stream and reassemble what a consumer would
-/// see, the way a client demultiplexing by statement index does.
-async fn streamed(ds: &Arc<Datastore>, sql: &str) -> Result<Vec<QueryResult>, String> {
+/// Run a query through the result stream and collect every item the consumer
+/// receives, in arrival order. `held` asks for explicit transactions to be held
+/// until they resolve.
+async fn streamed_items(
+	ds: &Arc<Datastore>,
+	sql: &str,
+	held: bool,
+) -> Result<Vec<QueryStreamItem>, String> {
 	let (tx, rx) = async_channel::bounded(QUERY_STREAM_BUFFER);
-	let job =
-		ds.run_streaming(QueryRequest::new(sql, &session()), tx).map_err(|e| e.to_string())?;
+	let session = session();
+	let mut request = QueryRequest::new(sql, &session);
+	if held {
+		request = request.with_held_transactions();
+	}
+	let job = ds.run_streaming(request, tx).map_err(|e| e.to_string())?;
 
 	// The execution and the drain have to run together: the channel is bounded,
 	// so an execution left to run alone would block forever on a full channel.
 	let drain = async {
-		let mut statements: Vec<Option<Statement>> = Vec::new();
+		let mut items = Vec::new();
 		while let Ok(item) = rx.recv().await {
-			let index = item.index();
-			if index >= statements.len() {
-				statements.resize_with(index + 1, || None);
-			}
-			let statement = statements[index].get_or_insert_with(Statement::default);
-			match item {
-				QueryStreamItem::Rows {
-					values,
-					..
-				} => statement.values.extend(values),
-				QueryStreamItem::Frame {
-					rows,
-					..
-				} => statement.values.extend(rows.to_values().expect("rows decode")),
-				QueryStreamItem::Value {
-					value,
-					..
-				} => statement.single = Some(value),
-				QueryStreamItem::Finished {
-					time,
-					query_type,
-					error,
-					..
-				} => {
-					statement.finished = Some(QueryResult {
-						time,
-						result: match error {
-							Some(error) => Err(error),
-							None => Ok(PublicValue::None),
-						},
-						query_type,
-					});
-				}
-			}
+			items.push(item);
 		}
-		statements
+		items
 	};
 
-	let (outcome, statements) = futures::future::join(job.run, drain).await;
+	let (outcome, items) = futures::future::join(job.run, drain).await;
 	outcome.map_err(|e| e.to_string())?;
+	Ok(items)
+}
+
+/// What a consumer demultiplexing by statement index reassembles from `items`.
+fn reassemble(items: Vec<QueryStreamItem>) -> Vec<QueryResult> {
+	let mut statements: Vec<Option<Statement>> = Vec::new();
+	for item in items {
+		let index = item.index();
+		if index >= statements.len() {
+			statements.resize_with(index + 1, || None);
+		}
+		let statement = statements[index].get_or_insert_with(Statement::default);
+		match item {
+			QueryStreamItem::Rows {
+				values,
+				..
+			} => statement.values.extend(values),
+			QueryStreamItem::Frame {
+				rows,
+				..
+			} => statement.values.extend(rows.to_values().expect("rows decode")),
+			QueryStreamItem::Value {
+				value,
+				..
+			} => statement.single = Some(value),
+			QueryStreamItem::Finished {
+				time,
+				query_type,
+				error,
+				..
+			} => {
+				statement.finished = Some(QueryResult {
+					time,
+					result: match error {
+						Some(error) => Err(error),
+						None => Ok(PublicValue::None),
+					},
+					query_type,
+				});
+			}
+		}
+	}
 	// An index that produced no item at all is a statement control flow
 	// skipped, and contributes no result -- the same as on the buffered path.
-	Ok(statements.into_iter().flatten().map(Statement::finish).collect())
+	statements.into_iter().flatten().map(Statement::finish).collect()
+}
+
+/// Run a query through the result stream and reassemble what a consumer would
+/// see, the way a client demultiplexing by statement index does.
+async fn streamed(ds: &Arc<Datastore>, sql: &str, held: bool) -> Result<Vec<QueryResult>, String> {
+	streamed_items(ds, sql, held).await.map(reassemble)
 }
 
 /// Compare everything about two results except how long they took.
@@ -139,8 +163,17 @@ fn same(streamed: &[QueryResult], buffered: &[QueryResult], sql: &str) {
 
 /// Run a query both ways and assert the results are the same.
 async fn assert_parity(sql: &str) {
+	assert_parity_with(sql, false).await;
+}
+
+/// [`assert_parity`], with the streamed run holding its explicit transactions.
+async fn assert_parity_held(sql: &str) {
+	assert_parity_with(sql, true).await;
+}
+
+async fn assert_parity_with(sql: &str, held: bool) {
 	let ds = datastore().await;
-	let streamed = streamed(&ds, sql).await;
+	let streamed = streamed(&ds, sql, held).await;
 
 	let ds = datastore().await;
 	let buffered = ds.execute(sql, &session(), None).await;
@@ -156,34 +189,44 @@ async fn assert_parity(sql: &str) {
 
 const SEED: &str = "CREATE thing:1 SET n = 1; CREATE thing:2 SET n = 2; CREATE thing:3 SET n = 3;";
 
+/// Row-shaped, scalar-shaped, empty, multi-statement and transaction-block
+/// queries.
+const PARITY_QUERIES: &[&str] = &[
+	"SELECT * FROM thing",
+	"SELECT * FROM thing ORDER BY n DESC",
+	"SELECT * FROM thing WHERE n > 99",
+	"SELECT * FROM ONLY thing:1",
+	"RETURN 1 + 2",
+	"SELECT n FROM thing; RETURN 'done'; SELECT * FROM thing WHERE n = 2",
+	"CREATE thing:4 SET n = 4",
+	"UPDATE thing:1 SET n = 10",
+	"DELETE thing:1",
+	"INFO FOR DB",
+	"LET $x = SELECT * FROM thing; RETURN $x",
+	"SELECT * FROM thing; THROW 'nope'; SELECT * FROM thing WHERE n = 1",
+	"SELECT count() FROM thing GROUP ALL",
+	"BEGIN; CREATE thing:5 SET n = 5; SELECT * FROM thing; COMMIT;",
+	"BEGIN; CREATE thing:6 SET n = 6; CANCEL;",
+	"BEGIN; SELECT * FROM thing; THROW 'nope'; SELECT * FROM thing; COMMIT;",
+	"BEGIN; SELECT * FROM thing; RETURN 'early'; SELECT * FROM thing; COMMIT;",
+	"BEGIN; CREATE thing:1; BEGIN; CREATE thing:2; COMMIT; SELECT * FROM thing;",
+	"CREATE thing:0; BEGIN; CREATE thing:1; RETURN 2;",
+	"BEGIN; COMMIT; COMMIT; CANCEL; RETURN 1;",
+	"BEGIN; RETURN 1; CREATE thing:1; COMMIT; SELECT * FROM thing;",
+	"BEGIN; THROW 'x'; CREATE thing:1; CANCEL; RETURN 2;",
+];
+
 #[tokio::test]
 async fn streaming_matches_buffered() {
-	// Row-shaped, scalar-shaped, empty and multi-statement queries.
-	for sql in [
-		"SELECT * FROM thing",
-		"SELECT * FROM thing ORDER BY n DESC",
-		"SELECT * FROM thing WHERE n > 99",
-		"SELECT * FROM ONLY thing:1",
-		"RETURN 1 + 2",
-		"SELECT n FROM thing; RETURN 'done'; SELECT * FROM thing WHERE n = 2",
-		"CREATE thing:4 SET n = 4",
-		"UPDATE thing:1 SET n = 10",
-		"DELETE thing:1",
-		"INFO FOR DB",
-		"LET $x = SELECT * FROM thing; RETURN $x",
-		"SELECT * FROM thing; THROW 'nope'; SELECT * FROM thing WHERE n = 1",
-		"SELECT count() FROM thing GROUP ALL",
-		"BEGIN; CREATE thing:5 SET n = 5; SELECT * FROM thing; COMMIT;",
-		"BEGIN; CREATE thing:6 SET n = 6; CANCEL;",
-		"BEGIN; SELECT * FROM thing; THROW 'nope'; SELECT * FROM thing; COMMIT;",
-		"BEGIN; SELECT * FROM thing; RETURN 'early'; SELECT * FROM thing; COMMIT;",
-		"BEGIN; CREATE thing:1; BEGIN; CREATE thing:2; COMMIT; SELECT * FROM thing;",
-		"CREATE thing:0; BEGIN; CREATE thing:1; RETURN 2;",
-		"BEGIN; COMMIT; COMMIT; CANCEL; RETURN 1;",
-		"BEGIN; RETURN 1; CREATE thing:1; COMMIT; SELECT * FROM thing;",
-		"BEGIN; THROW 'x'; CREATE thing:1; CANCEL; RETURN 2;",
-	] {
+	for sql in PARITY_QUERIES {
 		assert_parity(sql).await;
+	}
+}
+
+#[tokio::test]
+async fn held_streaming_matches_buffered() {
+	for sql in PARITY_QUERIES {
+		assert_parity_held(sql).await;
 	}
 }
 
@@ -390,4 +433,233 @@ async fn a_dropped_consumer_stops_later_statements() {
 		PublicValue::Array(Vec::<PublicValue>::new().into()),
 		"a write after the abandoned statement must not have run"
 	);
+}
+
+fn is_rows(item: &QueryStreamItem, index: usize) -> bool {
+	matches!(item, QueryStreamItem::Rows { index: i, .. } if *i == index)
+}
+
+fn is_finished(item: &QueryStreamItem, index: usize) -> bool {
+	matches!(item, QueryStreamItem::Finished { index: i, .. } if *i == index)
+}
+
+/// A held block sends no row while it runs: each of its statements arrives
+/// whole once the block has committed, one after another.
+#[tokio::test]
+async fn a_held_block_sends_each_statement_whole_after_it_commits() {
+	let ds = datastore().await;
+	let sql = "BEGIN; SELECT * FROM thing; SELECT * FROM thing WHERE n > 1; COMMIT;";
+
+	let items = streamed_items(&ds, sql, true).await.expect("the held query runs");
+	let first_finished = items.iter().position(|i| is_finished(i, 1)).expect("statement 1 ends");
+	let first_rows = items.iter().position(|i| is_rows(i, 2)).expect("statement 2 has rows");
+	assert!(first_finished < first_rows, "statement 1 is complete before statement 2 starts");
+	assert!(
+		items.windows(2).all(|pair| pair[0].index() <= pair[1].index()),
+		"every statement's items are contiguous and ascending"
+	);
+	let rows: Vec<_> = items
+		.iter()
+		.filter_map(|i| match i {
+			QueryStreamItem::Rows {
+				index: 1,
+				values,
+			} => Some(values.len()),
+			_ => None,
+		})
+		.collect();
+	assert_eq!(rows, vec![3], "statement 1 is sent as one batch of every row");
+
+	// The same query streamed provisionally interleaves the statements, which
+	// is what makes the ordering above a property of holding.
+	let ds = datastore().await;
+	let items = streamed_items(&ds, sql, false).await.expect("the streamed query runs");
+	let first_finished = items.iter().position(|i| is_finished(i, 1)).expect("statement 1 ends");
+	let first_rows = items.iter().position(|i| is_rows(i, 2)).expect("statement 2 has rows");
+	assert!(first_rows < first_finished, "a streamed block sends rows before it resolves");
+}
+
+/// A held block that does not commit sends no payload at all: every statement
+/// in it is reported failed, and nothing was sent that needs retracting.
+#[tokio::test]
+async fn a_held_rolled_back_block_emits_no_rows() {
+	// The second element is the slot of the `CANCEL` that ends the block, which
+	// reports its own success after the block's statements have failed.
+	for (sql, cancel_slot) in [
+		("BEGIN; SELECT * FROM thing; THROW 'nope'; COMMIT;", None),
+		("BEGIN; CREATE thing:6 SET n = 6; SELECT * FROM thing; CANCEL;", Some(3)),
+		("BEGIN; SELECT * FROM thing;", None),
+		("BEGIN; SELECT * FROM thing; BEGIN; COMMIT;", None),
+	] {
+		let ds = datastore().await;
+		let items = streamed_items(&ds, sql, true).await.expect("the held query runs");
+		assert!(
+			!items.iter().any(|i| matches!(i, QueryStreamItem::Rows { .. })),
+			"{sql}: a rolled-back held block sends no rows"
+		);
+		for item in &items {
+			// Slot 0 is the `BEGIN`, which is not part of the block's payload.
+			if item.index() == 0 || Some(item.index()) == cancel_slot {
+				continue;
+			}
+			match item {
+				QueryStreamItem::Value {
+					..
+				} => panic!("{sql}: a rolled-back held block sends no value, got {item:?}"),
+				QueryStreamItem::Finished {
+					error,
+					..
+				} => assert!(error.is_some(), "{sql}: {item:?} must carry the failure"),
+				QueryStreamItem::Rows {
+					..
+				}
+				| QueryStreamItem::Frame {
+					..
+				} => unreachable!("checked above"),
+			}
+		}
+
+		let held = reassemble(items);
+		let ds = datastore().await;
+		let buffered = ds.execute(sql, &session(), None).await.expect("the buffered query runs");
+		same(&held, &buffered, sql);
+	}
+}
+
+/// Holding changes when a statement is sent, not that it is terminated exactly
+/// once with that terminal item last.
+#[tokio::test]
+async fn held_each_statement_is_terminated_exactly_once() {
+	for sql in [
+		"BEGIN; SELECT * FROM thing; RETURN 1; COMMIT;",
+		"BEGIN; SELECT * FROM thing; CREATE thing:9; SELECT * FROM thing; COMMIT;",
+	] {
+		let ds = datastore().await;
+		let items = streamed_items(&ds, sql, true).await.expect("the held query runs");
+		let mut indices: Vec<usize> = items.iter().map(QueryStreamItem::index).collect();
+		indices.dedup();
+		assert!(!indices.is_empty(), "{sql}: the query produced items");
+		for index in indices {
+			let terminals = items.iter().filter(|i| is_finished(i, index)).count();
+			assert_eq!(terminals, 1, "{sql}: statement {index} must be terminated exactly once");
+			let last = items.iter().rposition(|i| i.index() == index).expect("it has items");
+			assert!(
+				is_finished(&items[last], index),
+				"{sql}: statement {index}'s last item must be its terminal one"
+			);
+		}
+	}
+}
+
+/// Holding applies to explicit transactions only: a statement outside a block
+/// still streams its rows in batches.
+#[tokio::test]
+async fn a_held_request_streams_its_auto_commit_statements() {
+	let ds = datastore().await;
+	for result in ds
+		.execute(
+			"FOR $i IN array::range(0, 5000) { CREATE type::record('big', $i) SET n = $i }",
+			&session(),
+			None,
+		)
+		.await
+		.expect("the seed runs")
+	{
+		result.result.expect("seeding succeeds");
+	}
+
+	let items = streamed_items(&ds, "SELECT * FROM big", true).await.expect("the query runs");
+	let batches = items.iter().filter(|i| is_rows(i, 0)).count();
+	assert!(batches > 1, "an auto-commit statement streams in batches, got {batches}");
+}
+
+/// Dropping the consumer still rolls a held block back.
+#[tokio::test]
+async fn a_dropped_consumer_rolls_back_a_held_block() {
+	let ds = datastore().await;
+	for result in ds.execute("DEFINE TABLE marker", &session(), None).await.expect("the seed runs")
+	{
+		result.result.expect("seeding succeeds");
+	}
+
+	let (tx, rx) = async_channel::bounded(QUERY_STREAM_BUFFER);
+	let session = session();
+	let job = ds
+		.run_streaming(
+			QueryRequest::new("BEGIN; SLEEP 1s; CREATE marker:1; COMMIT;", &session)
+				.with_held_transactions(),
+			tx,
+		)
+		.expect("the query parses");
+	let running = tokio::spawn(job.run);
+
+	// The drop lands while the block is inside `SLEEP`, after the top-level
+	// boundary check, so it is the block's own check that abandons it.
+	tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+	drop(rx);
+
+	running
+		.await
+		.expect("the execution task completes")
+		.expect("abandoning the results is not itself an error");
+
+	let mut created = ds
+		.execute("SELECT VALUE id FROM marker", &session, None)
+		.await
+		.expect("the follow-up query runs");
+	assert_eq!(
+		created.remove(0).result.expect("a result"),
+		PublicValue::Array(Vec::<PublicValue>::new().into()),
+		"the held block's write must not have committed"
+	);
+}
+
+/// What kind of item this is, and which statement it is for.
+fn shape(item: &QueryStreamItem) -> (usize, &'static str) {
+	let kind = match item {
+		QueryStreamItem::Rows {
+			..
+		}
+		| QueryStreamItem::Frame {
+			..
+		} => "rows",
+		QueryStreamItem::Value {
+			..
+		} => "value",
+		QueryStreamItem::Finished {
+			..
+		} => "finished",
+	};
+	(item.index(), kind)
+}
+
+/// A request that runs inside a transaction its caller holds has no explicit
+/// block of its own to hold, so asking for it changes nothing.
+#[tokio::test]
+async fn a_session_request_ignores_hold() {
+	let mut shapes = Vec::new();
+	for held in [true, false] {
+		let ds = datastore().await;
+		let txn = Arc::new(ds.transaction(TransactionType::Write).await.expect("a transaction"));
+		let (tx, rx) = async_channel::bounded(QUERY_STREAM_BUFFER);
+		let session = session();
+		let mut request = QueryRequest::new("CREATE thing:7; SELECT * FROM thing", &session)
+			.with_transaction(Arc::clone(&txn));
+		if held {
+			request = request.with_held_transactions();
+		}
+		let job = ds.run_streaming(request, tx).expect("the query parses");
+		let drain = async {
+			let mut items = Vec::new();
+			while let Ok(item) = rx.recv().await {
+				items.push(item);
+			}
+			items
+		};
+		let (outcome, items) = futures::future::join(job.run, drain).await;
+		outcome.expect("the query succeeds");
+		txn.cancel().await.expect("the transaction is cancelled");
+		shapes.push(items.iter().map(shape).collect::<Vec<_>>());
+	}
+	assert_eq!(shapes[0], shapes[1], "holding changes nothing inside a caller's transaction");
 }

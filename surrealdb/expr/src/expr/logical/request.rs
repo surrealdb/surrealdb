@@ -28,6 +28,10 @@
 //! [`RequestGrouper`] places one statement at a time, for a driver that pulls
 //! statements from a stream it cannot read ahead of time. [`lower_request`] is
 //! a fold over it, so the two agree on every request.
+//!
+//! The emission of an explicit transaction is fixed when its `BEGIN` is placed,
+//! because a streaming driver cannot read ahead to learn how the block ends.
+//! Auto-commit and session transactions always stream.
 
 /// How a transaction of a request is opened and ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -134,6 +138,9 @@ pub struct StatementPlace {
 	pub transaction: usize,
 	/// What the grouping makes of the statement.
 	pub role: StatementRole,
+	/// When the results of the transaction that holds the statement reach a
+	/// streaming consumer.
+	pub emission: Emission,
 }
 
 /// One transaction of a request.
@@ -192,6 +199,7 @@ fn plain_role(kind: RequestStatementKind) -> StatementRole {
 #[derive(Debug)]
 pub struct RequestGrouper {
 	session: bool,
+	explicit_emission: Emission,
 	next: usize,
 	out: Vec<LogicalTransaction>,
 	/// The explicit block that is open, which is pushed to `out` when it ends.
@@ -206,11 +214,19 @@ impl RequestGrouper {
 	pub fn new(session: bool) -> Self {
 		RequestGrouper {
 			session,
+			explicit_emission: Emission::Stream,
 			next: 0,
 			out: Vec::new(),
 			block: None,
 			held: None,
 		}
+	}
+
+	/// The emission given to every explicit transaction this grouper opens.
+	/// Auto-commit and session transactions always stream.
+	pub fn with_explicit_emission(mut self, emission: Emission) -> Self {
+		self.explicit_emission = emission;
+		self
 	}
 
 	/// Place the next statement of the request.
@@ -245,6 +261,7 @@ impl RequestGrouper {
 				index,
 				transaction: 0,
 				role,
+				emission: Emission::Stream,
 			};
 		}
 		match (&mut self.block, kind) {
@@ -259,11 +276,13 @@ impl RequestGrouper {
 					end,
 				};
 				let transaction = self.out.len();
+				let emission = open.emission;
 				self.out.extend(self.block.take());
 				StatementPlace {
 					index,
 					transaction,
 					role,
+					emission,
 				}
 			}
 			(Some(open), RequestStatementKind::Begin) => {
@@ -274,6 +293,7 @@ impl RequestGrouper {
 					index,
 					transaction: self.out.len(),
 					role: StatementRole::Misplaced(MisplacedControl::NestedBegin),
+					emission: open.emission,
 				}
 			}
 			(Some(open), RequestStatementKind::Option | RequestStatementKind::Run) => {
@@ -282,19 +302,23 @@ impl RequestGrouper {
 					index,
 					transaction: self.out.len(),
 					role: plain_role(kind),
+					emission: open.emission,
 				}
 			}
 			(None, RequestStatementKind::Begin) => {
-				self.block = Some(LogicalTransaction::new(
+				let mut block = LogicalTransaction::new(
 					TxnMode::Explicit {
 						end: TxnEnd::Unterminated,
 					},
 					index,
-				));
+				);
+				block.emission = self.explicit_emission;
+				self.block = Some(block);
 				StatementPlace {
 					index,
 					transaction: self.out.len(),
 					role: StatementRole::Begin,
+					emission: self.explicit_emission,
 				}
 			}
 			(
@@ -326,6 +350,7 @@ impl RequestGrouper {
 					index,
 					transaction,
 					role,
+					emission: Emission::Stream,
 				}
 			}
 		}
@@ -345,7 +370,17 @@ impl RequestGrouper {
 /// transaction the client holds across requests, which every statement of it
 /// shares.
 pub fn lower_request(kinds: &[RequestStatementKind], session: bool) -> Vec<LogicalTransaction> {
-	let mut grouper = RequestGrouper::new(session);
+	lower_request_with(kinds, session, Emission::Stream)
+}
+
+/// [`lower_request`], giving every explicit transaction `explicit` as its
+/// emission. Auto-commit and session transactions always stream.
+pub fn lower_request_with(
+	kinds: &[RequestStatementKind],
+	session: bool,
+	explicit: Emission,
+) -> Vec<LogicalTransaction> {
+	let mut grouper = RequestGrouper::new(session).with_explicit_emission(explicit);
 	for kind in kinds {
 		grouper.place(*kind);
 	}
@@ -425,6 +460,49 @@ mod tests {
 		for txn in lower_request(&[Run, Begin, Run, Cancel, Begin], false) {
 			assert_eq!(txn.emission, Emission::Stream);
 		}
+	}
+
+	#[test]
+	fn an_explicit_transaction_holds_when_asked() {
+		let kinds = [Run, Begin, Run, Commit, Begin, Run, Cancel, Begin, Run];
+		let txns = lower_request_with(&kinds, false, Emission::Hold);
+		assert_eq!(
+			txns.iter().map(|txn| txn.emission).collect::<Vec<_>>(),
+			vec![Emission::Stream, Emission::Hold, Emission::Hold, Emission::Hold]
+		);
+		assert_eq!(txns[0].mode, TxnMode::AutoCommit);
+		assert_eq!(txns[3].mode, explicit(TxnEnd::Unterminated));
+	}
+
+	#[test]
+	fn auto_commit_and_session_transactions_always_stream() {
+		for txn in lower_request_with(&[Run, Commit, Run], false, Emission::Hold) {
+			assert_eq!(txn.emission, Emission::Stream);
+		}
+		let txns = lower_request_with(&[Run, Begin, Run, Commit], true, Emission::Hold);
+		assert_eq!(txns.len(), 1);
+		assert_eq!(txns[0].mode, TxnMode::Session);
+		assert_eq!(txns[0].emission, Emission::Stream);
+	}
+
+	#[test]
+	fn a_place_carries_its_transactions_emission() {
+		let mut grouper = RequestGrouper::new(false).with_explicit_emission(Emission::Hold);
+		let emissions: Vec<_> = [Run, Begin, Run, Begin, Commit, Commit]
+			.iter()
+			.map(|kind| grouper.place(*kind).emission)
+			.collect();
+		assert_eq!(
+			emissions,
+			vec![
+				Emission::Stream,
+				Emission::Hold,
+				Emission::Hold,
+				Emission::Hold,
+				Emission::Hold,
+				Emission::Stream
+			]
+		);
 	}
 
 	fn roles(kinds: &[RequestStatementKind], session: bool) -> Vec<StatementRole> {

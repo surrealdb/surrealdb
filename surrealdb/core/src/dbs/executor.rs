@@ -31,7 +31,7 @@ use crate::exec::function::FunctionRegistry;
 use crate::exec::planner::plan_statement_inner;
 use crate::exec::{Error as ExecError, OutputShape};
 use crate::expr::logical::{
-	LogicalExpr, LogicalOp, LogicalSource, MisplacedControl, RequestGrouper, SourceRef,
+	Emission, LogicalExpr, LogicalOp, LogicalSource, MisplacedControl, RequestGrouper, SourceRef,
 	StatementPlace, StatementRole, lower,
 };
 use crate::expr::paths::{DB, NS};
@@ -147,6 +147,9 @@ fn encode_rows(
 ///
 /// The ordering it maintains is the one the wire requires: a statement's rows
 /// go out while it runs, and its `Finished` only once its outcome is final.
+///
+/// The rows of a held transaction never stream: its statements reach the sink
+/// only through [`Executor::finalise_results`], once the transaction resolves.
 struct StreamSink {
 	items: Sender<QueryStreamItem>,
 	/// Statements whose rows have already been sent, and how many went out.
@@ -248,6 +251,13 @@ pub struct Executor {
 	/// before it hands the statement to [`Executor::run_surface_statement`]
 	/// and taken there; a driver clears it once the statement has run.
 	misplaced_control: Option<MisplacedControl>,
+	/// The emission request lowering gives the explicit transactions of the
+	/// request this executor drives.
+	explicit_emission: Emission,
+	/// True while a held explicit transaction runs, which is exactly the span of
+	/// [`Executor::execute_begin_statement`]. [`Executor::streams_rows`] is
+	/// false for as long as it is set.
+	holding: bool,
 }
 
 /// What a request's statement needs to be compiled with the rest of the
@@ -494,6 +504,8 @@ impl Executor {
 			in_block: false,
 			arrived_live: None,
 			misplaced_control: None,
+			explicit_emission: Emission::Stream,
+			holding: false,
 		}
 	}
 
@@ -530,9 +542,11 @@ impl Executor {
 	/// Whether the statement about to run should stream its rows.
 	///
 	/// False once the consumer has gone away, so a dropped stream stops the
-	/// work rather than producing rows nothing will read.
+	/// work rather than producing rows nothing will read. False inside a held
+	/// transaction too: its statements keep their values, and
+	/// [`Self::finalise_results`] sends them once the transaction resolves.
 	fn streams_rows(&self) -> bool {
-		self.stream.as_ref().is_some_and(|sink| !sink.is_closed())
+		!self.holding && self.stream.as_ref().is_some_and(|sink| !sink.is_closed())
 	}
 
 	/// The index of the statement currently running.
@@ -572,7 +586,9 @@ impl Executor {
 	/// Called once a statement's outcome can no longer change: immediately for
 	/// a statement outside a transaction block, and at the block's resolution
 	/// for every statement inside one, since until then a failure can still
-	/// rewrite them into errors.
+	/// rewrite them into errors. A held statement's value was kept, so it goes
+	/// out as its payload followed by its `Finished`, or as a `Finished` that
+	/// carries the error when the block was rolled back.
 	async fn finalise_results(&mut self) {
 		let Some(sink) = self.stream.as_mut() else {
 			return;
@@ -2260,15 +2276,19 @@ impl Executor {
 		kvs: &Datastore,
 		stream: Pin<&mut S>,
 		grouper: &mut RequestGrouper,
+		emission: Emission,
 	) -> Result<()>
 	where
 		S: Stream<Item = Result<TopLevelStatement>>,
 	{
+		debug_assert!(!self.holding);
 		self.broker_owned_by_executor = false;
+		self.holding = matches!(emission, Emission::Hold) && self.stream.is_some();
 		let result = self.execute_begin_statement_impl(kvs, stream, grouper).await;
 		if self.broker_owned_by_executor {
 			self.clear_broker();
 		}
+		self.holding = false;
 		result
 	}
 
@@ -3214,8 +3234,12 @@ impl Executor {
 		statements: Vec<TopLevelStatement>,
 		items: Sender<QueryStreamItem>,
 		row_format: Option<surrealdb_rpc::RowFormat>,
+		held_transactions: bool,
 	) -> Result<Vec<QueryResult>> {
 		let mut this = Executor::new_streaming(kvs, ctx, opt, items, row_format);
+		if held_transactions {
+			this.explicit_emission = Emission::Hold;
+		}
 		this.prepare_request(&statements);
 		let stream = this.counted(futures::stream::iter(statements.into_iter().map(Ok)));
 		let outcome =
@@ -3253,7 +3277,7 @@ impl Executor {
 		let mut stream = pin!(stream);
 		// Groups the statements as they are pulled: the stream cannot be read
 		// ahead of time, and import cannot be lowered ahead of time.
-		let mut grouper = RequestGrouper::new(false);
+		let mut grouper = RequestGrouper::new(false).with_explicit_emission(self.explicit_emission);
 
 		if skip_success_results {
 			// The import path requires OPTION IMPORT as the first statement.
@@ -3372,8 +3396,9 @@ impl Executor {
 						});
 					}
 
-					let begin_result =
-						self.execute_begin_statement(kvs, stream.as_mut(), &mut grouper).await;
+					let begin_result = self
+						.execute_begin_statement(kvs, stream.as_mut(), &mut grouper, place.emission)
+						.await;
 					let outcome = Outcome::from(&begin_result);
 					// `execute_begin_statement` returns `anyhow::Result`; on
 					// failure the result is wrapped via

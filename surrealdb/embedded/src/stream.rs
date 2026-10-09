@@ -33,7 +33,7 @@ use std::time::Duration;
 use futures::Stream;
 use surrealdb_core::channel::{Receiver, Sender, bounded};
 use surrealdb_core::ctx::CancelHandle;
-use surrealdb_core::dbs::{AuthPrincipalSnapshot, Session};
+use surrealdb_core::dbs::{AuthPrincipalSnapshot, QueryStreamJob, Session};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::{RpcProtocol, live_query_owner};
 use surrealdb_rpc::capabilities::MethodTarget;
@@ -162,7 +162,6 @@ impl EmbeddedEngine {
 		let session_id = request.session_id.map(Into::into).unwrap_or(self.id);
 		let cancel = CancelHandle::new();
 		let (items_tx, items) = bounded(QUERY_STREAM_BUFFER);
-		let (frames_tx, frames_rx) = bounded(FRAME_BUFFER);
 		let (job, principal) = RpcProtocol::query_stream(
 			self,
 			request.txn.map(Into::into),
@@ -172,6 +171,21 @@ impl EmbeddedEngine {
 			items_tx,
 		)
 		.await?;
+		Ok(self.spawn_driver(job, principal, session_id, cancel, items, format))
+	}
+
+	/// Spawn the driver that runs `job`, sending what it reads from `items` as
+	/// frames on the returned channel.
+	fn spawn_driver<T: FrameSink>(
+		&self,
+		job: QueryStreamJob,
+		principal: AuthPrincipalSnapshot,
+		session_id: Uuid,
+		cancel: CancelHandle,
+		items: Receiver<QueryStreamItem>,
+		format: Option<Format>,
+	) -> Receiver<T> {
+		let (frames_tx, frames_rx) = bounded(FRAME_BUFFER);
 		let driver = Driver {
 			frames: StreamFrames::new(),
 			items,
@@ -191,7 +205,7 @@ impl EmbeddedEngine {
 		// polled, and the driver polls it for as long as it runs -- including
 		// after a consumer has gone, which is what bounds an abandoned stream.
 		spawn(driver.drive(statements, job.run));
-		Ok(frames_rx)
+		frames_rx
 	}
 }
 
@@ -506,6 +520,7 @@ mod tests {
 	use std::time::Duration;
 
 	use futures::StreamExt;
+	use surrealdb_core::kvs::QueryRequest;
 	use surrealdb_types::{Array, Object, Value};
 
 	use super::*;
@@ -546,6 +561,161 @@ mod tests {
 
 	async fn frames(engine: &EmbeddedEngine, sql: &str) -> Vec<QueryStreamFrame> {
 		engine.query_stream(request(sql)).await.expect("the stream should open").collect().await
+	}
+
+	/// Frames of a stream whose explicit transactions are held, driven by the
+	/// same driver a `query_stream` request gets. The knob has no request
+	/// surface, so the job is built from the datastore directly.
+	async fn held_frames(
+		engine: &EmbeddedEngine,
+		session: &Session,
+		sql: &str,
+	) -> Vec<QueryStreamFrame> {
+		let (items_tx, items) = bounded(QUERY_STREAM_BUFFER);
+		let cancel = CancelHandle::new();
+		let job = engine
+			.kvs
+			.run_streaming(
+				QueryRequest::new(sql, session)
+					.with_cancel(cancel.clone())
+					.with_held_transactions(),
+				items_tx,
+			)
+			.expect("the query parses");
+		let principal = AuthPrincipalSnapshot::capture(session);
+		engine
+			.spawn_driver::<QueryStreamFrame>(job, principal, engine.id, cancel, items, None)
+			.collect()
+			.await
+	}
+
+	/// A database with two `thing` records, and the session that reads it.
+	async fn seeded() -> (EmbeddedEngine, Session) {
+		let engine = engine().await;
+		for sql in [
+			"DEFINE NAMESPACE n",
+			"USE NS n; DEFINE DATABASE d;",
+			"USE NS n DB d; CREATE thing:1; CREATE thing:2;",
+		] {
+			engine.execute(query(sql)).await.unwrap_or_else(|e| panic!("{sql}: {e}"));
+		}
+		(engine, Session::owner().with_ns("n").with_db("d"))
+	}
+
+	fn finished_error(frames: &[QueryStreamFrame], index: usize) -> Option<bool> {
+		frames.iter().find_map(|frame| match frame {
+			QueryStreamFrame::Finished {
+				index: i,
+				error,
+				..
+			} if *i == index => Some(error.is_some()),
+			_ => None,
+		})
+	}
+
+	/// A held block that fails sends the failure alone, and one that commits
+	/// sends its rows whole: the consumer is never given rows to take back.
+	#[tokio::test]
+	async fn a_held_block_emits_no_retraction() {
+		let (engine, session) = seeded().await;
+
+		let frames =
+			held_frames(&engine, &session, "BEGIN; SELECT * FROM thing; THROW 'nope'; COMMIT;")
+				.await;
+		assert!(
+			!frames.iter().any(|f| matches!(
+				f,
+				QueryStreamFrame::Rows {
+					index: 1,
+					..
+				}
+			)),
+			"a failed held block sends no rows: {frames:?}"
+		);
+		assert_eq!(finished_error(&frames, 1), Some(true), "the SELECT is reported failed");
+		assert!(
+			matches!(
+				frames.last(),
+				Some(QueryStreamFrame::End {
+					error: None,
+					..
+				})
+			),
+			"the stream itself ends cleanly: {frames:?}"
+		);
+
+		let frames = held_frames(&engine, &session, "BEGIN; SELECT * FROM thing; COMMIT;").await;
+		let rows: usize = frames
+			.iter()
+			.filter_map(|f| match f {
+				QueryStreamFrame::Rows {
+					index: 1,
+					values,
+				} => Some(values.len()),
+				_ => None,
+			})
+			.sum();
+		assert_eq!(rows, 2, "a committed held block sends its rows: {frames:?}");
+		assert_eq!(finished_error(&frames, 1), Some(false), "and finishes them cleanly");
+	}
+
+	/// The same failing block, streamed provisionally, is what a held one
+	/// spares the consumer: rows first, then the failure that voids them.
+	#[tokio::test]
+	async fn a_streamed_block_retracts_where_a_held_one_does_not() {
+		let engine = engine().await;
+		for sql in [
+			"DEFINE NAMESPACE n",
+			"USE NS n; DEFINE DATABASE d;",
+			// More rows than the first frame carries, so some of them have
+			// reached the consumer by the time the block fails.
+			"USE NS n DB d; FOR $i IN array::range(0, 100) { CREATE type::record('thing', $i) };",
+		] {
+			engine.execute(query(sql)).await.unwrap_or_else(|e| panic!("{sql}: {e}"));
+		}
+		// The `use` method, not a `USE` statement: the stream needs the session
+		// itself pointed at the database.
+		let mut select = Object::default();
+		select.insert("method".to_owned(), Value::String("use".to_owned()));
+		select.insert(
+			"params".to_owned(),
+			Value::Array(Array::from(vec![
+				Value::String("n".to_owned()),
+				Value::String("d".to_owned()),
+			])),
+		);
+		engine
+			.execute(Request::from_object(select).expect("a use request should parse"))
+			.await
+			.expect("use");
+
+		let frames = frames(&engine, "BEGIN; SELECT * FROM thing; THROW 'nope'; COMMIT;").await;
+		let rows = frames
+			.iter()
+			.position(|f| {
+				matches!(
+					f,
+					QueryStreamFrame::Rows {
+						index: 1,
+						..
+					}
+				)
+			})
+			.expect("a streamed block sends rows before it resolves");
+		let finished = frames
+			.iter()
+			.position(|f| {
+				matches!(
+					f,
+					QueryStreamFrame::Finished {
+						index: 1,
+						error: Some(_),
+						..
+					}
+				)
+			})
+			.expect("the SELECT is finished with an error");
+		assert!(rows < finished, "the rows precede the failure that retracts them");
 	}
 
 	/// The frames answer the whole query: one `Begin`, each statement's rows

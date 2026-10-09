@@ -171,6 +171,10 @@ pub struct QueryRequest<'a> {
 	/// the server builds no public value for them. `None` streams rows as
 	/// values. A buffered execution ignores it.
 	pub row_format: Option<surrealdb_rpc::RowFormat>,
+	/// Whether each explicit `BEGIN … COMMIT` transaction's rows are held until
+	/// it resolves. Visible to the datastore only, so the public field set is
+	/// unchanged.
+	pub(super) held_transactions: bool,
 }
 
 impl<'a> QueryRequest<'a> {
@@ -184,6 +188,7 @@ impl<'a> QueryRequest<'a> {
 			transaction: None,
 			cancel: None,
 			row_format: None,
+			held_transactions: false,
 		}
 	}
 
@@ -222,6 +227,16 @@ impl<'a> QueryRequest<'a> {
 	/// [`Self::row_format`].
 	pub fn with_row_format(mut self, format: Option<surrealdb_rpc::RowFormat>) -> Self {
 		self.row_format = format;
+		self
+	}
+
+	/// Hold each explicit `BEGIN … COMMIT` transaction's rows until it has
+	/// resolved, rather than streaming them provisionally. Read only by
+	/// `Datastore::run_streaming` outside a caller-owned transaction. An
+	/// internal knob, not an API.
+	#[doc(hidden)]
+	pub fn with_held_transactions(mut self) -> Self {
+		self.held_transactions = true;
 		self
 	}
 }

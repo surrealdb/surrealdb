@@ -5223,6 +5223,7 @@ impl Datastore {
 			transaction,
 			cancel,
 			row_format: _,
+			held_transactions: _,
 		} = req;
 		let statements = self.statements_for(source)?;
 		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
@@ -5270,6 +5271,7 @@ impl Datastore {
 			transaction,
 			cancel,
 			row_format,
+			held_transactions,
 		} = req;
 		let statements = self.statements_for(source)?;
 		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
@@ -5288,7 +5290,13 @@ impl Datastore {
 					.await
 				} else {
 					Executor::execute_statements_streaming(
-						&kvs, ctx, opt, statements, items, row_format,
+						&kvs,
+						ctx,
+						opt,
+						statements,
+						items,
+						row_format,
+						held_transactions,
 					)
 					.await
 				};
