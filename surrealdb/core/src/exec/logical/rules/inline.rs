@@ -46,7 +46,9 @@
 use super::{
 	RuleContext, RuleDef, is_pure, is_row_free, may_raise, rewrite_positions, visit_positions,
 };
-use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalOp, OpKind, Schema};
+use crate::expr::logical::{
+	LogicalExpr, LogicalLiteral, LogicalOp, OpKind, Schema, coercion_is_identity,
+};
 use crate::expr::{Function, Kind};
 
 pub(super) const RULE: RuleDef = RuleDef {
@@ -153,89 +155,8 @@ fn inlined(expr: &LogicalExpr, schema: &Schema, cx: &RuleContext<'_>) -> Option<
 	Some(out)
 }
 
-/// Whether coercing a value of kind `actual` to `declared` yields the value
-/// unchanged, for every value of that kind. `any` accepts everything; a kind
-/// accepts a value of exactly that kind; `number` accepts any numeric kind;
-/// `option<k>` accepts `NONE` and what `k` accepts; a collection of `k`
-/// accepts a collection whose elements `k` accepts, with no length bound; a
-/// record, table or file kind naming no or every one of the value's tables or
-/// buckets accepts it. Anything else may convert or fail, and is not identity
-/// — an `actual` of `any` in particular, whose values are unknown.
-pub(super) fn coercion_is_identity(declared: &Kind, actual: &Kind) -> bool {
-	match declared {
-		Kind::Any => true,
-		Kind::Number => matches!(actual, Kind::Int | Kind::Float | Kind::Decimal | Kind::Number),
-		Kind::Either(kinds) => match kinds.as_slice() {
-			[Kind::None, inner] => {
-				matches!(actual, Kind::None) || coercion_is_identity(inner, actual)
-			}
-			_ => declared == actual && !matches!(actual, Kind::Any),
-		},
-		Kind::Array(inner, None) => {
-			matches!(actual, Kind::Array(elements, None) if coercion_is_identity(inner, elements))
-		}
-		Kind::Set(inner, None) => {
-			matches!(actual, Kind::Set(elements, None) if coercion_is_identity(inner, elements))
-		}
-		Kind::Record(tables) => match actual {
-			Kind::Record(of) => {
-				tables.is_empty() || (!of.is_empty() && of.iter().all(|t| tables.contains(t)))
-			}
-			Kind::Any
-			| Kind::None
-			| Kind::Null
-			| Kind::Bool
-			| Kind::Bytes
-			| Kind::Datetime
-			| Kind::Decimal
-			| Kind::Duration
-			| Kind::Float
-			| Kind::Int
-			| Kind::Number
-			| Kind::Object
-			| Kind::String
-			| Kind::Uuid
-			| Kind::Regex
-			| Kind::Table(_)
-			| Kind::Geometry(_)
-			| Kind::Function(..)
-			| Kind::Range
-			| Kind::File(_)
-			| Kind::Array(..)
-			| Kind::Set(..)
-			| Kind::Either(_)
-			| Kind::Literal(_) => false,
-		},
-		Kind::Geometry(shapes) => {
-			matches!(actual, Kind::Geometry(of) if shapes.is_empty() || (!of.is_empty() && of.iter().all(|s| shapes.contains(s))))
-		}
-		Kind::None
-		| Kind::Null
-		| Kind::Bool
-		| Kind::Bytes
-		| Kind::Datetime
-		| Kind::Decimal
-		| Kind::Duration
-		| Kind::Float
-		| Kind::Int
-		| Kind::Object
-		| Kind::String
-		| Kind::Uuid
-		| Kind::Regex
-		| Kind::Table(_)
-		| Kind::Function(..)
-		| Kind::Range
-		| Kind::File(_)
-		| Kind::Array(_, Some(_))
-		| Kind::Set(_, Some(_))
-		| Kind::Literal(_) => declared == actual,
-	}
-}
-
 #[cfg(test)]
 mod tests {
-	use std::sync::Arc;
-
 	use surrealdb_strand::TableName;
 
 	use super::super::super::functions::{Functions, InlineBody};
@@ -447,34 +368,5 @@ mod tests {
 		let any = functions(&[("double", &[("x", Kind::Any)], None, "$x * 2")]);
 		let plan = inlined("SELECT arr[WHERE fn::double(a) > 1] FROM t", &any);
 		assert!(!plan.contains("fn::double("), "{plan}");
-	}
-
-	#[test]
-	fn coercion_identity_follows_the_declared_kind() {
-		assert!(coercion_is_identity(&Kind::Any, &Kind::Any));
-		assert!(coercion_is_identity(&Kind::Int, &Kind::Int));
-		assert!(!coercion_is_identity(&Kind::Int, &Kind::Any));
-		assert!(!coercion_is_identity(&Kind::Int, &Kind::Float));
-		assert!(coercion_is_identity(&Kind::Number, &Kind::Decimal));
-		assert!(coercion_is_identity(&Kind::option(Kind::Int), &Kind::Int));
-		assert!(coercion_is_identity(&Kind::option(Kind::Int), &Kind::None));
-		assert!(!coercion_is_identity(&Kind::option(Kind::Int), &Kind::option(Kind::String)));
-		assert!(coercion_is_identity(
-			&Kind::Array(Box::new(Kind::Int), None),
-			&Kind::Array(Box::new(Kind::Int), None)
-		));
-		assert!(!coercion_is_identity(
-			&Kind::Array(Box::new(Kind::Int), Some(2)),
-			&Kind::Array(Box::new(Kind::Int), None)
-		));
-		assert!(coercion_is_identity(
-			&Kind::Record(vec![]),
-			&Kind::Record(vec![TableName::from("t")])
-		));
-		assert!(!coercion_is_identity(
-			&Kind::Record(vec![TableName::from("u")]),
-			&Kind::Record(vec![])
-		));
-		let _ = Arc::new(());
 	}
 }

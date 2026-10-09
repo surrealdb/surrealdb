@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use super::batch::BATCHES;
-use super::program::Source;
+use super::program::{Instr, Source};
 use super::tests::{bind, outcome, planner};
 use crate::exec::ExecutionContext;
 use crate::exec::operators::test_util::TestDb;
@@ -522,4 +522,47 @@ async fn a_stored_reader_decodes_only_the_listed_fields() {
 		keys.sort();
 		assert_eq!(keys, ["id", "label"], "{row:?}");
 	}
+}
+
+/// A declared kind is a hint: rows written before `DEFINE FIELD OVERWRITE`
+/// retyped their field still hold what they held, and the typed comparison
+/// the declaration selects answers them through its fallback as the operator
+/// tree compares them.
+#[tokio::test]
+async fn a_declared_int_is_a_guarded_hint_over_retyped_rows() {
+	let db = TestDb::new(
+		"
+		DEFINE TABLE n SCHEMAFULL;
+		DEFINE FIELD v ON n TYPE string;
+		CREATE n:1 SET v = '5';
+		CREATE n:2 SET v = 'x';
+		DEFINE FIELD OVERWRITE v ON n TYPE int;
+		CREATE n:3 SET v = 7;
+		",
+	)
+	.await;
+	let ctx = db.exec_ctx().await;
+	let sql = "SELECT VALUE id FROM n WHERE v > 3";
+	let bound = bind(&ctx, sql).await;
+	let physical = super::optimize::optimize(
+		super::map::map(&planner(&ctx), &bound).await.unwrap_or_else(|e| panic!("`{sql}`: {e:?}")),
+	);
+	let program = super::lower::lower(&planner(&ctx), &physical).await.expect("lowers");
+	// The filter is fused into the scan, so the typed comparison is the
+	// filter form of `CompareFieldInt`; each carries the `fallback` that
+	// compares a value that is not an integer.
+	let typed = program.pipelines.iter().flat_map(|pipeline| pipeline.code.iter()).any(|instr| {
+		matches!(
+			instr,
+			Instr::CompareFieldInt { .. }
+				| Instr::JumpIfFieldInt { .. }
+				| Instr::FilterFieldInt { .. }
+		)
+	});
+	assert!(typed, "`{sql}` compares the declared int typed");
+	let vm = super::plan(&planner(&ctx), &bound).await.expect("the VM plans it");
+	let tree = planner(&ctx).plan_logical(bound).await.expect("the operator tree plans");
+	let got = outcome(&vm, &ctx).await.expect("the VM runs");
+	let want = outcome(&tree, &ctx).await.expect("the tree runs");
+	assert_eq!(got, want, "`{sql}`");
 }

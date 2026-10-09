@@ -237,7 +237,8 @@ The statement tree stays a tree. The pure expressions inside one statement — a
 projection, a data clause, an `IF` condition, a `FOR` range — are held as a hash-consed DAG:
 
 - **Global value numbering.** Two occurrences of the same pure expression in one statement are
-  one node, evaluated once. Hash-consing gives this without a pass.
+  one node, evaluated once where its first occurrence dominates the rest (see *Errors keep their
+  order*). Hash-consing gives this without a pass.
 - **Dead-code elimination.** A node no root of the statement reaches is not lowered.
 - **Local rewrite rules to a fixed point.** The expression rules of `exec/logical/rules` (constant
   folding, `IF` collapse, cast elision) apply node by node until a pass changes nothing, the same
@@ -246,16 +247,25 @@ projection, a data clause, an `IF` condition, a `FOR` range — are held as a ha
   infers only proofs: kinds that follow from a literal, or from a value the query itself computes
   (a constructor, a cast, a comparison, a function whose return kind is fixed). A proof may fold a
   dynamic check (`$v.f` over a value known to be an object needs no array branch; a cast to the
-  kind a value already has goes) and may let a rewrite move or merge an expression it shows
+  kind a value already has goes) and may let a rewrite move or drop an expression it shows
   cannot fail. The logical plan never reads a schema kind: kinds that come from the catalog or
   from storage are the physical plan's (§5.2). `LogicalExpr::kind` and `checked_kind` are the
   start of this; the DAG makes it one pass per statement rather than a query per call site.
-- **Errors keep their order.** A logical rewrite may move, merge or drop an expression that can
-  fail only where a proof shows it cannot fail. Otherwise the expression stays where its
-  evaluation order puts it, so the first error a statement raises is the one `main` raises.
+- **Errors keep their order.** A logical rewrite may move or drop an expression that can fail
+  only where a proof shows it cannot fail. Otherwise the expression stays where its evaluation
+  order puts it, so the first error a statement raises is the one `main` raises. Merging two
+  occurrences of one expression is not a move when the first dominates the second: the first is
+  evaluated unconditionally, in the same evaluation region and against the same row, before every
+  run of the second; no region between them catches or converts its error; and the expression is
+  pure. Then any error the second would raise, the first has already raised at the point `main`
+  raises it, and any value the second would compute, the first has computed. Such a merge needs no
+  proof that the expression cannot fail, and a fallible pure expression (`a * 2`, `<int> v`) is
+  shared on that ground alone.
 
 The DAG lives inside a statement and never crosses a statement boundary, a `LET` the program
-reads by name, or a call into a body the plan cannot see.
+reads by name, or a call into a body the plan cannot see. Within a statement, a value is shared
+only inside one evaluation region of the lowered program: one pipeline's row code, one data
+clause, one `IF` condition chain, one `FOR` range.
 
 **Unified primitives.** A `WHERE` clause, an array filter idiom `$arr[WHERE …]` and a call of
 `array::filter` with a closure written in the call compute the same thing; they lower to one

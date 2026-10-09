@@ -871,6 +871,29 @@ Project[*]
 	}
 
 	#[test]
+	fn a_proof_lets_a_predicate_move_beneath_a_projected_cast_or_read() {
+		// A projection withdraws when one of its fields can raise, since a
+		// filter beneath it would spare that field the rows it rejects. A cast
+		// or a field read is such a field unless a kind proof shows it cannot
+		// fail or fetch.
+		for sql in [
+			"SELECT * FROM (SELECT a, <option<bool>> (a > 1) AS p FROM t) WHERE a",
+			"SELECT * FROM (SELECT a, { x: a }.x AS p FROM t) WHERE a",
+		] {
+			let plan = rewritten_sql(sql);
+			assert!(!outer(&plan).iter().any(|l| l.contains("Filter[")), "`{sql}`:\n{plan}");
+		}
+		for sql in [
+			"SELECT * FROM (SELECT a, <int> a AS p FROM t) WHERE a",
+			"SELECT * FROM (SELECT a, a.x AS p FROM t) WHERE a",
+			"SELECT * FROM (SELECT a, (<int> a) + 1 AS p FROM t) WHERE a",
+		] {
+			let plan = rewritten_sql(sql);
+			assert!(outer(&plan).iter().any(|l| l.contains("Filter[")), "`{sql}`:\n{plan}");
+		}
+	}
+
+	#[test]
 	fn an_impure_or_nested_or_omitted_projection_keeps_its_predicate_above() {
 		for sql in [
 			// A call is never substituted; this one would also draw a second

@@ -20,8 +20,9 @@
 use std::fmt::{self, Debug, Formatter};
 use std::ops::{BitOr, BitOrAssign, Bound};
 
-use super::expr::{LogicalCall, LogicalExpr, LogicalRecordIdKey};
-use crate::expr::{BinaryOperator, Function, PrefixOperator};
+use super::expr::{LogicalCall, LogicalDestructureField, LogicalExpr, LogicalRecordIdKey};
+use super::schema::{Schema, coercion_is_identity, kind_may_be_record};
+use crate::expr::{BinaryOperator, Function, Kind, PrefixOperator};
 
 /// The effects of one builtin, as a set of flags.
 ///
@@ -283,7 +284,10 @@ pub struct Effects {
 	pub index_operator: bool,
 	/// Whether evaluating the expression may raise or signal control flow,
 	/// so that a rule dropping it unevaluated may change what a statement
-	/// reports. Which operators are total is decided in [`node_may_raise`].
+	/// reports. Which operators are total is decided in [`node_may_raise`]. A
+	/// cast of an operand proven to hold a kind the target coerces by identity,
+	/// and a field read or destructure of a base proven not to be a record id,
+	/// raise only where their children do.
 	pub may_raise: bool,
 	/// Whether the expression reads anything of the value it is evaluated
 	/// against — a field, the document, the current value, a row parameter,
@@ -351,15 +355,53 @@ impl Effects {
 	}
 }
 
+/// What a node's parent reads of one child: the child's effects, the kind it
+/// is proven to evaluate to against the open schema
+/// ([`LogicalExpr::checked_kind`]) and whether it may be or hold a record id
+/// ([`may_dereference`]).
+///
+/// Each fact of a node is a function of the node's own shape and of the same
+/// facts of its children, so a caller walking a tree bottom-up folds each once
+/// per node ([`node_effects`], [`LogicalExpr::node_checked_kind`],
+/// [`node_may_dereference`]) rather than recomputing it over every subtree.
+#[derive(Clone, Debug)]
+pub struct ChildFacts {
+	pub effects: Effects,
+	pub checked_kind: Option<Kind>,
+	pub may_dereference: bool,
+}
+
+/// The facts of `expr`, folded from the facts of its children.
+pub fn facts_of(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> ChildFacts {
+	let mut children = Vec::new();
+	expr.for_each_child(&mut |child| children.push(facts_of(child, oracle)));
+	let kinds = children.iter().map(|child| child.checked_kind.clone()).collect::<Vec<_>>();
+	ChildFacts {
+		effects: node_effects(expr, &children, oracle),
+		checked_kind: expr.node_checked_kind(&kinds, &Schema::open()),
+		may_dereference: node_may_dereference(expr, &children),
+	}
+}
+
 /// The effects of `expr`, from the declarations `oracle` answers and the
 /// shape of every node, a nested statement not entered.
 pub fn effects_of(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> Effects {
-	let mut children = Effects::INERT;
-	expr.for_each_child(&mut |child| children = children.join(effects_of(child, oracle)));
+	facts_of(expr, oracle).effects
+}
+
+/// The effects of `expr` given the facts of its children, one per child in the
+/// order of [`LogicalExpr::for_each_child`]. This is the one definition of the
+/// rules [`effects_of`] applies at each node.
+pub fn node_effects(
+	expr: &LogicalExpr,
+	children: &[ChildFacts],
+	oracle: &dyn EffectOracle,
+) -> Effects {
+	let joined = children.iter().fold(Effects::INERT, |all, child| all.join(child.effects));
 	Effects {
-		set: children.set.union(node_set(expr, oracle)),
-		impure: children.impure || node_is_impure(expr, oracle),
-		index_operator: children.index_operator
+		set: joined.set.union(node_set(expr, oracle)),
+		impure: joined.impure || node_is_impure(expr, children, oracle),
+		index_operator: joined.index_operator
 			|| matches!(
 				expr,
 				LogicalExpr::Binary {
@@ -367,9 +409,9 @@ pub fn effects_of(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> Effects {
 					..
 				}
 			),
-		may_raise: node_may_raise(expr, children.may_raise, oracle),
-		reads_row: children.reads_row || node_reads_row(expr, oracle),
-		reads_row_opaquely: children.reads_row_opaquely || node_reads_row_opaquely(expr, oracle),
+		may_raise: node_may_raise(expr, children, joined.may_raise, oracle),
+		reads_row: joined.reads_row || node_reads_row(expr, oracle),
+		reads_row_opaquely: joined.reads_row_opaquely || node_reads_row_opaquely(expr, oracle),
 	}
 }
 
@@ -746,7 +788,7 @@ fn node_set(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> EffectSet {
 
 /// Whether this node forbids evaluating the expression twice in place of
 /// once, or not at all; see [`Effects::impure`].
-fn node_is_impure(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> bool {
+fn node_is_impure(expr: &LogicalExpr, children: &[ChildFacts], oracle: &dyn EffectOracle) -> bool {
 	match expr {
 		LogicalExpr::Call(call) => match &call.receiver {
 			Function::Normal(name) => {
@@ -801,23 +843,32 @@ fn node_is_impure(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> bool {
 		// of one base answer from two separate materialisations. The base
 		// still decides whether anything is read at all: a base that cannot
 		// be or hold a record id has no edges to reach.
+		//
+		// A field read whose base is proven not to be a record id
+		// ([`proven_not_record`]) reads a value in hand and fetches nothing. So
+		// does a destructure of such a base whose pattern names plain fields
+		// and aliased bodies only: a `f.*` entry or a nested `f.{ … }` fetches
+		// the record id its field holds, whatever the base.
 		LogicalExpr::Access {
-			base,
 			..
+		} => {
+			let base = base_facts(children);
+			base.may_dereference && !proven_not_record(base.checked_kind.as_ref())
 		}
-		| LogicalExpr::Each(base)
-		| LogicalExpr::Destructure {
-			base,
+		LogicalExpr::Destructure {
+			fields,
 			..
+		} => {
+			let base = base_facts(children);
+			base.may_dereference && destructure_fetches(base.checked_kind.as_ref(), fields)
 		}
+		LogicalExpr::Each(_)
 		| LogicalExpr::Filter {
-			base,
 			..
 		}
 		| LogicalExpr::Lookup {
-			base,
 			..
-		} => may_dereference(base),
+		} => base_facts(children).may_dereference,
 		LogicalExpr::Literal(_)
 		| LogicalExpr::Array(_)
 		| LogicalExpr::Set(_)
@@ -872,7 +923,13 @@ fn node_is_impure(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> bool {
 /// `AND`, `OR`, `??`, `?:`), whose `fnc::operate` implementations return a
 /// value for any operands; unary `+` and a prefix range, which wrap their
 /// operand; and a container, an `IF`, a field access, `.*`, `[0]`, `[$]`, a
-/// flatten, a destructure or `?.` over such. `true` for a cast, arithmetic
+/// flatten, a destructure or `?.` over such. A cast whose operand is proven
+/// ([`LogicalExpr::checked_kind`], against the open schema) to hold a kind the
+/// target coerces by identity ([`coercion_is_identity`]) yields its operand
+/// unchanged and raises only where the operand does. A field read or a
+/// destructure whose base is proven not to be a record id
+/// ([`kind_may_be_record`]) fetches nothing and raises only where its children
+/// do. `true` for any other cast, arithmetic
 /// (`+ - * / % **`, unary `-`), a binary range, an index step, every call,
 /// method, closure and applied value, `THROW`, `BREAK`, `CONTINUE`, a nested
 /// plan, a lookup, a recursion, a broadcast, a `[WHERE]` filter, a set-field,
@@ -884,7 +941,12 @@ fn node_is_impure(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> bool {
 /// A parameter is inert where its value is in hand before the plan runs, and
 /// raises where reading it fetches a `DEFINE PARAM` whose `PERMISSIONS`
 /// clause denies the caller ([`EffectOracle::permission_checked_param`]).
-fn node_may_raise(expr: &LogicalExpr, children: bool, oracle: &dyn EffectOracle) -> bool {
+fn node_may_raise(
+	expr: &LogicalExpr,
+	child_facts: &[ChildFacts],
+	children: bool,
+	oracle: &dyn EffectOracle,
+) -> bool {
 	match expr {
 		LogicalExpr::Param(param) => oracle.permission_checked_param(param.as_str()),
 		LogicalExpr::Literal(_)
@@ -913,15 +975,27 @@ fn node_may_raise(expr: &LogicalExpr, children: bool, oracle: &dyn EffectOracle)
 			..
 		}
 		| LogicalExpr::If(_) => children,
-		LogicalExpr::Each(base)
-		| LogicalExpr::Destructure {
-			base,
-			..
+		LogicalExpr::Each(base) => {
+			base_dereference_may_raise(base, base_facts(child_facts).may_dereference) || children
 		}
-		| LogicalExpr::Access {
+		LogicalExpr::Access {
 			base,
 			..
-		} => base_dereference_may_raise(base) || children,
+		} => {
+			let facts = base_facts(child_facts);
+			(base_dereference_may_raise(base, facts.may_dereference)
+				&& !proven_not_record(facts.checked_kind.as_ref()))
+				|| children
+		}
+		LogicalExpr::Destructure {
+			base,
+			fields,
+		} => {
+			let facts = base_facts(child_facts);
+			(base_dereference_may_raise(base, facts.may_dereference)
+				&& destructure_fetches(facts.checked_kind.as_ref(), fields))
+				|| children
+		}
 		LogicalExpr::Prefix {
 			op,
 			..
@@ -930,7 +1004,10 @@ fn node_may_raise(expr: &LogicalExpr, children: bool, oracle: &dyn EffectOracle)
 			| PrefixOperator::Positive
 			| PrefixOperator::Range
 			| PrefixOperator::RangeInclusive => children,
-			PrefixOperator::Negate | PrefixOperator::Cast(_) => true,
+			PrefixOperator::Cast(kind) => {
+				!cast_is_identity(kind, base_facts(child_facts).checked_kind.as_ref()) || children
+			}
+			PrefixOperator::Negate => true,
 		},
 		LogicalExpr::Binary {
 			op,
@@ -1011,7 +1088,7 @@ fn node_may_raise(expr: &LogicalExpr, children: bool, oracle: &dyn EffectOracle)
 
 /// Whether this node reads something of the value the expression is
 /// evaluated against; see [`Effects::reads_row`].
-fn node_reads_row(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> bool {
+pub(super) fn node_reads_row(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> bool {
 	match expr {
 		LogicalExpr::Field(_)
 		| LogicalExpr::Doc
@@ -1204,21 +1281,80 @@ pub fn key_is_generated(key: &LogicalRecordIdKey) -> bool {
 /// makes a join mint a different index, precisely so a user's field may keep
 /// the name — and a user's field may hold a link. Separating the two needs
 /// the indices a rewrite minted, which a rule does not carry either.
-fn base_dereference_may_raise(base: &LogicalExpr) -> bool {
+///
+/// A caller reading a field of `base`, or destructuring it with a pattern for
+/// which [`fields_fetch`] is false, further declines this when `base` is proven
+/// not to be a record id ([`proven_not_record`]), since the read then fetches
+/// nothing.
+fn base_dereference_may_raise(base: &LogicalExpr, base_may_dereference: bool) -> bool {
 	if let LogicalExpr::Param(name) = base {
 		return !ITERATION_PARAMS.contains(&name.as_str());
 	}
-	may_dereference(base)
+	base_may_dereference
+}
+
+/// The facts of the first child, which is the base of every step form and the
+/// operand of a prefix operator.
+fn base_facts(children: &[ChildFacts]) -> &ChildFacts {
+	&children[0]
+}
+
+/// Whether a base whose checked kind is `kind` is proven, against the open
+/// schema, to hold a value that is not a record id, so a field read or
+/// destructure of it fetches nothing. The proof is
+/// [`LogicalExpr::checked_kind`], never a declared kind: a stored field's
+/// declaration is enforced on write alone.
+fn proven_not_record(kind: Option<&Kind>) -> bool {
+	kind.is_some_and(|kind| !kind_may_be_record(kind))
+}
+
+/// Whether destructuring a base whose checked kind is `kind` with `fields` may
+/// fetch: the base is not proven to be a non-record ([`proven_not_record`]), or
+/// the pattern fetches a held record id whatever the base ([`fields_fetch`]).
+fn destructure_fetches(kind: Option<&Kind>, fields: &[LogicalDestructureField]) -> bool {
+	!proven_not_record(kind) || fields_fetch(fields)
+}
+
+/// Whether a destructure pattern fetches a record id held by a field of its
+/// base, whatever the base: an `f.*` entry, or a nested `f.{ … }` whose
+/// destructure fetches in turn. An aliased body is a child expression and is
+/// judged as one.
+fn fields_fetch(fields: &[LogicalDestructureField]) -> bool {
+	fields.iter().any(|field| {
+		matches!(field, LogicalDestructureField::All(_) | LogicalDestructureField::Destructure(..))
+	})
+}
+
+/// Whether a cast to `kind` of an operand whose checked kind, against the open
+/// schema, is `operand` yields the operand unchanged: `operand` is one `kind`
+/// coerces by identity.
+fn cast_is_identity(kind: &Kind, operand: Option<&Kind>) -> bool {
+	operand.is_some_and(|checked| coercion_is_identity(kind, checked))
 }
 
 /// Whether a value `expr` produces may be, or hold, a record id: a literal,
 /// or a collection of literals, cannot; a record id, and everything whose
 /// value only the run decides, may.
 pub fn may_dereference(expr: &LogicalExpr) -> bool {
+	dereference_by(expr, || {
+		let mut any = false;
+		expr.for_each_child(&mut |child| any = any || may_dereference(child));
+		any
+	})
+}
+
+/// [`may_dereference`] of a node given the same fact of each child, one per
+/// child in the order of [`LogicalExpr::for_each_child`].
+pub fn node_may_dereference(expr: &LogicalExpr, children: &[ChildFacts]) -> bool {
+	dereference_by(expr, || children.iter().any(|child| child.may_dereference))
+}
+
+/// The one definition of [`may_dereference`]: `any_child` answers whether any
+/// child of a collection may, and is asked of a collection alone.
+fn dereference_by(expr: &LogicalExpr, any_child: impl FnOnce() -> bool) -> bool {
 	match expr {
 		LogicalExpr::Literal(_) => false,
-		LogicalExpr::Array(items) | LogicalExpr::Set(items) => items.iter().any(may_dereference),
-		LogicalExpr::Object(entries) => entries.iter().any(|(_, entry)| may_dereference(entry)),
+		LogicalExpr::Array(_) | LogicalExpr::Set(_) | LogicalExpr::Object(_) => any_child(),
 		LogicalExpr::RecordId(_)
 		| LogicalExpr::Param(_)
 		| LogicalExpr::Table(_)
@@ -1286,8 +1422,10 @@ pub fn may_dereference(expr: &LogicalExpr) -> bool {
 
 #[cfg(test)]
 mod tests {
-	use super::{EffectOracle, EffectSet, invokes_unseen_body};
-	use crate::expr::logical::{LogicalCall, LogicalClosure, LogicalExpr, LogicalLiteral};
+	use super::{EffectOracle, EffectSet, Effects, effects_of, invokes_unseen_body};
+	use crate::expr::logical::{
+		LogicalCall, LogicalClosure, LogicalExpr, LogicalLiteral, lower_expr,
+	};
 	use crate::expr::{BinaryOperator, Function, Param};
 
 	/// An oracle declaring `array::any` and `array::fold` as pure builtins
@@ -1501,5 +1639,66 @@ mod tests {
 			"WRITES_EXTERNAL | READS_EXTERNAL"
 		);
 		assert_eq!(EffectSet::ALL.len(), 12, "every flag is named");
+	}
+
+	fn effects(text: &str) -> Effects {
+		let expr = lower_expr(crate::syn::expr(text).expect("expression parses"))
+			.expect("expression lowers");
+		effects_of(&expr, &Declared)
+	}
+
+	#[test]
+	fn a_cast_proven_identity_raises_only_where_its_operand_does() {
+		assert!(!effects("<option<bool>> (a > 1)").may_raise);
+		// The inner cast raises.
+		assert!(effects("<number> (<int> a)").may_raise);
+		// A `bool` is not a `number`.
+		assert!(effects("<number> (a > 1)").may_raise);
+		// The operand raises.
+		assert!(effects("<any> (a + 1)").may_raise);
+	}
+
+	#[test]
+	fn a_read_of_a_base_proven_not_a_record_fetches_nothing() {
+		let object = effects("{ x: 1 }.x");
+		assert!(!object.may_raise);
+		assert!(object.pure());
+		assert!(!effects("{ x: a }.x").may_raise);
+		let cast = effects("(<object> $v).f");
+		assert!(!cast.impure);
+		// The cast raises: `$v` is not proven an object.
+		assert!(cast.may_raise);
+		assert!(effects("(<record> $v).f").impure);
+		let field = effects("a.f");
+		assert!(field.may_raise);
+		assert!(field.impure);
+		assert!(!effects("(<array<object>> $v).f").impure);
+		assert!(effects("(<array<record>> $v).f").impure);
+	}
+
+	#[test]
+	fn a_destructure_fetching_a_field_is_no_read_of_a_value_in_hand() {
+		let plain = effects("(<object> $v).{ f }");
+		assert!(!plain.impure);
+		assert!(plain.may_raise);
+		assert!(!effects("{ f: 1 }.{ f }").may_raise);
+		// `f.*` and a nested destructure fetch a record id held by `f`.
+		for text in [
+			"(<object> $v).{ f.* }",
+			"(<object> $v).{ f.{ g } }",
+			"(<object> $v).{ f, h.* }",
+			"{ f: a }.{ f.* }",
+		] {
+			let fetch = effects(text);
+			assert!(fetch.impure, "{text} is impure");
+			assert!(fetch.may_raise, "{text} may raise");
+		}
+	}
+
+	#[test]
+	fn arithmetic_raises_whatever_the_operand_kinds() {
+		assert!(effects("(<int> a) + 1").may_raise);
+		assert!(effects("-(<float> a)").may_raise);
+		assert!(effects("(<int> a) / 0").may_raise);
 	}
 }

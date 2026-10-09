@@ -1597,6 +1597,558 @@ impl LogicalOrdering {
 }
 
 // ---------------------------------------------------------------------------
+// Shallow identity
+// ---------------------------------------------------------------------------
+
+impl LogicalExpr {
+	/// Whether `self` and `other` agree on everything that
+	/// [`Self::for_each_child`] does not yield: the variant, the operator, the
+	/// name, the kind, the literal, the flags and the shape of the clauses a
+	/// node holds around its children. The children themselves are not
+	/// compared. A caller that interns bottom-up compares the child nodes it
+	/// already holds in their place, so a whole tree is compared in time linear
+	/// in its size.
+	///
+	/// For two expressions whose children are pairwise equal, `shallow_eq` is
+	/// `self == other`, with one exception: a [`Self::Subquery`] is equal only
+	/// to itself, by address, since the plan it holds is not a child and is
+	/// never compared. Every payload of a node is either yielded by
+	/// [`Self::for_each_child`] or compared here, so no expression is compared
+	/// deeply.
+	pub fn shallow_eq(&self, other: &LogicalExpr) -> bool {
+		match self {
+			LogicalExpr::Literal(x) => matches!(other, LogicalExpr::Literal(y) if x == y),
+			LogicalExpr::Array(_) => matches!(other, LogicalExpr::Array(_)),
+			LogicalExpr::Set(_) => matches!(other, LogicalExpr::Set(_)),
+			LogicalExpr::Object(entries) => matches!(
+				other,
+				LogicalExpr::Object(others) if entries.len() == others.len()
+					&& entries.iter().zip(others).all(|((a, _), (b, _))| a == b)
+			),
+			LogicalExpr::RecordId(rid) => matches!(
+				other,
+				LogicalExpr::RecordId(o) if rid.table == o.table && key_shape_eq(&rid.key, &o.key)
+			),
+			LogicalExpr::Param(x) => matches!(other, LogicalExpr::Param(y) if x == y),
+			LogicalExpr::Table(x) => matches!(other, LogicalExpr::Table(y) if x == y),
+			LogicalExpr::Mock(x) => matches!(other, LogicalExpr::Mock(y) if x == y),
+			LogicalExpr::Constant(x) => matches!(other, LogicalExpr::Constant(y) if x == y),
+			LogicalExpr::Field(x) => matches!(other, LogicalExpr::Field(y) if x == y),
+			LogicalExpr::Doc => matches!(other, LogicalExpr::Doc),
+			LogicalExpr::Current => matches!(other, LogicalExpr::Current),
+			LogicalExpr::Access {
+				field,
+				..
+			} => matches!(
+				other,
+				LogicalExpr::Access { field: o, .. } if field == o
+			),
+			LogicalExpr::Index {
+				..
+			} => matches!(other, LogicalExpr::Index { .. }),
+			LogicalExpr::First(_) => matches!(other, LogicalExpr::First(_)),
+			LogicalExpr::Last(_) => matches!(other, LogicalExpr::Last(_)),
+			LogicalExpr::Each(_) => matches!(other, LogicalExpr::Each(_)),
+			LogicalExpr::Flatten {
+				explicit,
+				..
+			} => matches!(
+				other,
+				LogicalExpr::Flatten { explicit: o, .. } if explicit == o
+			),
+			LogicalExpr::Filter {
+				..
+			} => matches!(other, LogicalExpr::Filter { .. }),
+			LogicalExpr::Method {
+				name,
+				..
+			} => matches!(
+				other,
+				LogicalExpr::Method { name: o, .. } if name == o
+			),
+			LogicalExpr::Destructure {
+				fields,
+				..
+			} => matches!(
+				other,
+				LogicalExpr::Destructure { fields: o, .. } if destructure_shape_eq(fields, o)
+			),
+			LogicalExpr::Optional {
+				..
+			} => matches!(other, LogicalExpr::Optional { .. }),
+			LogicalExpr::Lookup {
+				lookup,
+				..
+			} => matches!(
+				other,
+				LogicalExpr::Lookup { lookup: o, .. } if lookup_shape_eq(lookup, o)
+			),
+			LogicalExpr::Recurse(recurse) => matches!(
+				other,
+				LogicalExpr::Recurse(o) if recurse.recurse == o.recurse
+					&& recurse_path_tag(&recurse.path) == recurse_path_tag(&o.path)
+					&& recurse_instruction_tag(&recurse.instruction)
+						== recurse_instruction_tag(&o.instruction)
+			),
+			LogicalExpr::RepeatRecurse(_) => matches!(other, LogicalExpr::RepeatRecurse(_)),
+			LogicalExpr::Broadcast {
+				flatten,
+				..
+			} => matches!(
+				other,
+				LogicalExpr::Broadcast { flatten: o, .. } if flatten == o
+			),
+			LogicalExpr::SetField {
+				field,
+				..
+			} => matches!(
+				other,
+				LogicalExpr::SetField { field: o, .. } if field == o
+			),
+			LogicalExpr::Prefix {
+				op,
+				..
+			} => matches!(other, LogicalExpr::Prefix { op: o, .. } if op == o),
+			LogicalExpr::Postfix {
+				op,
+				..
+			} => matches!(other, LogicalExpr::Postfix { op: o, .. } if op == o),
+			LogicalExpr::Invoke {
+				..
+			} => matches!(other, LogicalExpr::Invoke { .. }),
+			LogicalExpr::Binary {
+				op,
+				..
+			} => matches!(other, LogicalExpr::Binary { op: o, .. } if op == o),
+			LogicalExpr::Call(call) => {
+				matches!(other, LogicalExpr::Call(o) if call.receiver == o.receiver)
+			}
+			LogicalExpr::Closure(closure) => matches!(
+				other,
+				LogicalExpr::Closure(o) if closure.args == o.args
+					&& closure.returns == o.returns
+					&& closure.body_sql == o.body_sql
+			),
+			LogicalExpr::If(branches) => matches!(
+				other,
+				LogicalExpr::If(o) if branches.branches.len() == o.branches.len()
+					&& branches.otherwise.is_some() == o.otherwise.is_some()
+			),
+			LogicalExpr::Throw(_) => matches!(other, LogicalExpr::Throw(_)),
+			LogicalExpr::Break => matches!(other, LogicalExpr::Break),
+			LogicalExpr::Continue => matches!(other, LogicalExpr::Continue),
+			LogicalExpr::Subquery(_) => std::ptr::eq(self, other),
+		}
+	}
+
+	/// Hashes what [`Self::shallow_eq`] compares: two expressions that are
+	/// `shallow_eq` hash alike.
+	pub fn shallow_hash<H: Hasher>(&self, state: &mut H) {
+		std::mem::discriminant(self).hash(state);
+		match self {
+			LogicalExpr::Literal(x) => x.hash(state),
+			LogicalExpr::Array(_)
+			| LogicalExpr::Set(_)
+			| LogicalExpr::Doc
+			| LogicalExpr::Current
+			| LogicalExpr::Index {
+				..
+			}
+			| LogicalExpr::First(_)
+			| LogicalExpr::Last(_)
+			| LogicalExpr::Each(_)
+			| LogicalExpr::Filter {
+				..
+			}
+			| LogicalExpr::Optional {
+				..
+			}
+			| LogicalExpr::RepeatRecurse(_)
+			| LogicalExpr::Invoke {
+				..
+			}
+			| LogicalExpr::Throw(_)
+			| LogicalExpr::Break
+			| LogicalExpr::Continue => {}
+			LogicalExpr::Object(entries) => {
+				entries.len().hash(state);
+				entries.iter().for_each(|(key, _)| key.hash(state));
+			}
+			LogicalExpr::RecordId(rid) => {
+				rid.table.hash(state);
+				key_shape_hash(&rid.key, state);
+			}
+			LogicalExpr::Param(x) => x.hash(state),
+			LogicalExpr::Table(x) => x.hash(state),
+			LogicalExpr::Mock(x) => x.hash(state),
+			LogicalExpr::Constant(x) => x.hash(state),
+			LogicalExpr::Field(x) => x.hash(state),
+			LogicalExpr::Access {
+				field,
+				..
+			}
+			| LogicalExpr::SetField {
+				field,
+				..
+			} => field.hash(state),
+			LogicalExpr::Flatten {
+				explicit: flag,
+				..
+			}
+			| LogicalExpr::Broadcast {
+				flatten: flag,
+				..
+			} => flag.hash(state),
+			LogicalExpr::Method {
+				name,
+				..
+			} => name.hash(state),
+			LogicalExpr::Destructure {
+				fields,
+				..
+			} => destructure_shape_hash(fields, state),
+			LogicalExpr::Lookup {
+				lookup,
+				..
+			} => lookup_shape_hash(lookup, state),
+			LogicalExpr::Recurse(recurse) => {
+				recurse.recurse.hash(state);
+				recurse_path_tag(&recurse.path).hash(state);
+				recurse_instruction_tag(&recurse.instruction).hash(state);
+			}
+			LogicalExpr::Prefix {
+				op,
+				..
+			} => op.hash(state),
+			LogicalExpr::Postfix {
+				op,
+				..
+			} => op.hash(state),
+			LogicalExpr::Binary {
+				op,
+				..
+			} => op.hash(state),
+			LogicalExpr::Call(call) => call.receiver.hash(state),
+			LogicalExpr::Closure(closure) => {
+				closure.args.hash(state);
+				closure.returns.hash(state);
+				closure.body_sql.hash(state);
+			}
+			LogicalExpr::If(branches) => {
+				branches.branches.len().hash(state);
+				branches.otherwise.is_some().hash(state);
+			}
+			LogicalExpr::Subquery(_) => std::ptr::from_ref(self).hash(state),
+		}
+	}
+}
+
+/// `Some(inclusive)` of an instruction that carries one, and the variant
+/// otherwise: the part of a recursion's instruction that its children do not
+/// hold.
+fn recurse_instruction_tag(instruction: &Option<LogicalRecurseInstruction>) -> Option<(u8, bool)> {
+	match instruction {
+		None => None,
+		Some(LogicalRecurseInstruction::Path {
+			inclusive,
+		}) => Some((0, *inclusive)),
+		Some(LogicalRecurseInstruction::Collect {
+			inclusive,
+		}) => Some((1, *inclusive)),
+		Some(LogicalRecurseInstruction::Shortest {
+			inclusive,
+			..
+		}) => Some((2, *inclusive)),
+	}
+}
+
+/// How a recursion's body was written; the body is a child.
+fn recurse_path_tag(path: &Option<LogicalRecursePath>) -> Option<u8> {
+	match path {
+		None => None,
+		Some(LogicalRecursePath::Nested(_)) => Some(0),
+		Some(LogicalRecursePath::Trailing(_)) => Some(1),
+	}
+}
+
+/// [`LogicalRecordIdKey`] equality with every expression it holds skipped.
+fn key_shape_eq(a: &LogicalRecordIdKey, b: &LogicalRecordIdKey) -> bool {
+	match a {
+		LogicalRecordIdKey::Number(x) => matches!(b, LogicalRecordIdKey::Number(y) if x == y),
+		LogicalRecordIdKey::String(x) => matches!(b, LogicalRecordIdKey::String(y) if x == y),
+		LogicalRecordIdKey::Uuid(x) => matches!(b, LogicalRecordIdKey::Uuid(y) if x == y),
+		LogicalRecordIdKey::Generate(x) => matches!(b, LogicalRecordIdKey::Generate(y) if x == y),
+		LogicalRecordIdKey::Array(items) => {
+			matches!(b, LogicalRecordIdKey::Array(others) if items.len() == others.len())
+		}
+		LogicalRecordIdKey::Object(entries) => matches!(
+			b,
+			LogicalRecordIdKey::Object(others) if entries.len() == others.len()
+				&& entries.iter().zip(others).all(|((a, _), (b, _))| a == b)
+		),
+		LogicalRecordIdKey::Range(range) => {
+			matches!(b, LogicalRecordIdKey::Range(other) if range_shape_eq(range, other))
+		}
+	}
+}
+
+fn key_shape_hash<H: Hasher>(key: &LogicalRecordIdKey, state: &mut H) {
+	std::mem::discriminant(key).hash(state);
+	match key {
+		LogicalRecordIdKey::Number(x) => x.hash(state),
+		LogicalRecordIdKey::String(x) => x.hash(state),
+		LogicalRecordIdKey::Uuid(x) => x.hash(state),
+		LogicalRecordIdKey::Generate(x) => x.hash(state),
+		LogicalRecordIdKey::Array(items) => items.len().hash(state),
+		LogicalRecordIdKey::Object(entries) => {
+			entries.len().hash(state);
+			entries.iter().for_each(|(key, _)| key.hash(state));
+		}
+		LogicalRecordIdKey::Range(range) => range_shape_hash(range, state),
+	}
+}
+
+fn range_shape_eq(a: &LogicalRecordIdKeyRange, b: &LogicalRecordIdKeyRange) -> bool {
+	bound_shape_eq(&a.start, &b.start) && bound_shape_eq(&a.end, &b.end)
+}
+
+fn range_shape_hash<H: Hasher>(range: &LogicalRecordIdKeyRange, state: &mut H) {
+	bound_shape_hash(&range.start, state);
+	bound_shape_hash(&range.end, state);
+}
+
+fn bound_shape_eq(a: &Bound<LogicalRecordIdKey>, b: &Bound<LogicalRecordIdKey>) -> bool {
+	match (a, b) {
+		(Bound::Included(a), Bound::Included(b)) | (Bound::Excluded(a), Bound::Excluded(b)) => {
+			key_shape_eq(a, b)
+		}
+		(Bound::Unbounded, Bound::Unbounded) => true,
+		(Bound::Included(_) | Bound::Excluded(_) | Bound::Unbounded, _) => false,
+	}
+}
+
+fn bound_shape_hash<H: Hasher>(bound: &Bound<LogicalRecordIdKey>, state: &mut H) {
+	match bound {
+		Bound::Included(key) => {
+			0u8.hash(state);
+			key_shape_hash(key, state);
+		}
+		Bound::Excluded(key) => {
+			1u8.hash(state);
+			key_shape_hash(key, state);
+		}
+		Bound::Unbounded => 2u8.hash(state),
+	}
+}
+
+/// Equality of destructure patterns with every aliased body skipped.
+fn destructure_shape_eq(a: &[LogicalDestructureField], b: &[LogicalDestructureField]) -> bool {
+	a.len() == b.len()
+		&& a.iter().zip(b).all(|(a, b)| match a {
+			LogicalDestructureField::All(x) => {
+				matches!(b, LogicalDestructureField::All(y) if x == y)
+			}
+			LogicalDestructureField::Field(x) => {
+				matches!(b, LogicalDestructureField::Field(y) if x == y)
+			}
+			LogicalDestructureField::Aliased(x, _) => {
+				matches!(b, LogicalDestructureField::Aliased(y, _) if x == y)
+			}
+			LogicalDestructureField::Destructure(x, fields) => matches!(
+				b,
+				LogicalDestructureField::Destructure(y, others)
+					if x == y && destructure_shape_eq(fields, others)
+			),
+			LogicalDestructureField::Rest => matches!(b, LogicalDestructureField::Rest),
+		})
+}
+
+fn destructure_shape_hash<H: Hasher>(fields: &[LogicalDestructureField], state: &mut H) {
+	fields.len().hash(state);
+	for field in fields {
+		std::mem::discriminant(field).hash(state);
+		match field {
+			LogicalDestructureField::All(name)
+			| LogicalDestructureField::Field(name)
+			| LogicalDestructureField::Aliased(name, _) => name.hash(state),
+			LogicalDestructureField::Destructure(name, fields) => {
+				name.hash(state);
+				destructure_shape_hash(fields, state);
+			}
+			LogicalDestructureField::Rest => {}
+		}
+	}
+}
+
+/// [`LogicalLookup`] equality with every expression it holds skipped: which
+/// clauses are present, how many entries each holds, and the clauses that are
+/// not expressions.
+fn lookup_shape_eq(a: &LogicalLookup, b: &LogicalLookup) -> bool {
+	a.kind == b.kind
+		&& a.only == b.only
+		&& a.alias == b.alias
+		&& match (&a.expr, &b.expr) {
+			(None, None) => true,
+			(Some(a), Some(b)) => fields_shape_eq(a, b),
+			(None, Some(_)) | (Some(_), None) => false,
+		} && a.what.len() == b.what.len()
+		&& a.what.iter().zip(&b.what).all(|(a, b)| subject_shape_eq(a, b))
+		&& a.cond.is_some() == b.cond.is_some()
+		&& a.split.as_ref().map(Vec::len) == b.split.as_ref().map(Vec::len)
+		&& a.group.as_ref().map(Vec::len) == b.group.as_ref().map(Vec::len)
+		&& match (&a.order, &b.order) {
+			(None, None) => true,
+			(Some(a), Some(b)) => ordering_shape_eq(a, b),
+			(None, Some(_)) | (Some(_), None) => false,
+		} && a.limit.is_some() == b.limit.is_some()
+		&& a.start.is_some() == b.start.is_some()
+}
+
+fn lookup_shape_hash<H: Hasher>(lookup: &LogicalLookup, state: &mut H) {
+	lookup.kind.hash(state);
+	lookup.only.hash(state);
+	lookup.alias.hash(state);
+	match &lookup.expr {
+		None => 0u8.hash(state),
+		Some(fields) => {
+			1u8.hash(state);
+			fields_shape_hash(fields, state);
+		}
+	}
+	lookup.what.len().hash(state);
+	lookup.what.iter().for_each(|subject| subject_shape_hash(subject, state));
+	lookup.cond.is_some().hash(state);
+	lookup.split.as_ref().map(Vec::len).hash(state);
+	lookup.group.as_ref().map(Vec::len).hash(state);
+	match &lookup.order {
+		None => 0u8.hash(state),
+		Some(order) => {
+			1u8.hash(state);
+			ordering_shape_hash(order, state);
+		}
+	}
+	lookup.limit.is_some().hash(state);
+	lookup.start.is_some().hash(state);
+}
+
+fn subject_shape_eq(a: &LogicalLookupSubject, b: &LogicalLookupSubject) -> bool {
+	match a {
+		LogicalLookupSubject::Table {
+			table,
+			referencing_field,
+		} => matches!(
+			b,
+			LogicalLookupSubject::Table { table: t, referencing_field: r }
+				if table == t && referencing_field == r
+		),
+		LogicalLookupSubject::Range {
+			table,
+			range,
+			referencing_field,
+		} => matches!(
+			b,
+			LogicalLookupSubject::Range { table: t, range: g, referencing_field: r }
+				if table == t && referencing_field == r && range_shape_eq(range, g)
+		),
+	}
+}
+
+fn subject_shape_hash<H: Hasher>(subject: &LogicalLookupSubject, state: &mut H) {
+	std::mem::discriminant(subject).hash(state);
+	match subject {
+		LogicalLookupSubject::Table {
+			table,
+			referencing_field,
+		} => {
+			table.hash(state);
+			referencing_field.hash(state);
+		}
+		LogicalLookupSubject::Range {
+			table,
+			range,
+			referencing_field,
+		} => {
+			table.hash(state);
+			referencing_field.hash(state);
+			range_shape_hash(range, state);
+		}
+	}
+}
+
+fn fields_shape_eq(a: &LogicalFields, b: &LogicalFields) -> bool {
+	match a {
+		LogicalFields::Value {
+			alias,
+			..
+		} => matches!(b, LogicalFields::Value { alias: o, .. } if alias == o),
+		LogicalFields::Select(fields) => matches!(
+			b,
+			LogicalFields::Select(others) if fields.len() == others.len()
+				&& fields.iter().zip(others).all(|(a, b)| match a {
+					LogicalField::All => matches!(b, LogicalField::All),
+					LogicalField::Single { alias, kind, frame, .. } => matches!(
+						b,
+						LogicalField::Single { alias: a2, kind: k2, frame: f2, .. }
+							if alias == a2 && kind == k2 && frame == f2
+					),
+				})
+		),
+	}
+}
+
+fn fields_shape_hash<H: Hasher>(fields: &LogicalFields, state: &mut H) {
+	std::mem::discriminant(fields).hash(state);
+	match fields {
+		LogicalFields::Value {
+			alias,
+			..
+		} => alias.hash(state),
+		LogicalFields::Select(fields) => {
+			fields.len().hash(state);
+			for field in fields {
+				std::mem::discriminant(field).hash(state);
+				if let LogicalField::Single {
+					alias,
+					kind,
+					frame,
+					..
+				} = field
+				{
+					alias.hash(state);
+					kind.hash(state);
+					frame.hash(state);
+				}
+			}
+		}
+	}
+}
+
+fn ordering_shape_eq(a: &LogicalOrdering, b: &LogicalOrdering) -> bool {
+	match a {
+		LogicalOrdering::Random => matches!(b, LogicalOrdering::Random),
+		LogicalOrdering::Order(orders) => matches!(
+			b,
+			LogicalOrdering::Order(others) if orders.len() == others.len()
+				&& orders.iter().zip(others).all(|(a, b)| {
+					a.collate == b.collate && a.numeric == b.numeric && a.direction == b.direction
+				})
+		),
+	}
+}
+
+fn ordering_shape_hash<H: Hasher>(ordering: &LogicalOrdering, state: &mut H) {
+	std::mem::discriminant(ordering).hash(state);
+	if let LogicalOrdering::Order(orders) = ordering {
+		orders.len().hash(state);
+		for order in orders {
+			order.collate.hash(state);
+			order.numeric.hash(state);
+			order.direction.hash(state);
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Read-only classification
 // ---------------------------------------------------------------------------
 
@@ -3985,5 +4537,183 @@ mod tests {
 			assert_eq!(sample, sample.clone(), "{sample:?} must equal itself");
 		}
 		assert_ne!(LogicalLiteral::Float(-0.0), LogicalLiteral::Float(0.0));
+	}
+
+	/// Every subexpression of a corpus covering each variant, and each lookup,
+	/// recursion, destructure and record-id key shape the identity compares.
+	fn shallow_corpus() -> Vec<LogicalExpr> {
+		let mut corpus = Vec::new();
+		let texts = [
+			"1",
+			"2",
+			"'s'",
+			"[a, 1]",
+			"[a]",
+			"{ a: 1, b: c }",
+			"{ a: 1, d: c }",
+			"{ a: 1 }",
+			"t:1",
+			"t:2",
+			"u:1",
+			"t:[a, 1]",
+			"t:[a]",
+			"t:{ k: a }",
+			"t:{ j: a }",
+			"t:[1]..=[a]",
+			"t:[1]..[a]",
+			"t:rand()",
+			"t:ulid()",
+			"$p",
+			"$q",
+			"|t:3|",
+			"|t:4|",
+			"math::pi",
+			"math::e",
+			"a.b",
+			"a.c",
+			"a.b.c",
+			"a[0]",
+			"a[$]",
+			"a[a + 1]",
+			"a[WHERE x > 1]",
+			"a.*",
+			"a…",
+			"a.b.*",
+			"a.slice(1, 2)",
+			"a.slice(1)",
+			"a.other(1, 2)",
+			"a.{ x, y }",
+			"a.{ x, y: z }",
+			"a.{ x, w: z }",
+			"a.{ x.*, y }",
+			"a.{ x.{ y }, ... }",
+			"a.?.b",
+			"->likes->person",
+			"->likes",
+			"<-likes",
+			"->(likes WHERE x = 1)",
+			"->(SELECT * FROM likes WHERE x = 1 LIMIT 3)",
+			"->(SELECT * FROM likes LIMIT 3 START 1)",
+			"->(SELECT * FROM likes SPLIT a)",
+			"->(SELECT * FROM likes GROUP BY a)",
+			"->(SELECT * FROM likes ORDER BY a)",
+			"->(SELECT * FROM likes ORDER BY a DESC)",
+			"->(SELECT * FROM likes ORDER BY a NUMERIC)",
+			"->(SELECT * FROM likes ORDER BY RAND())",
+			"->(likes AS x)",
+			"->(likes:1..3)",
+			"->(likes:1..=3)",
+			"->(likes, knows)",
+			"->(SELECT a, b AS c FROM likes)",
+			"->(SELECT VALUE a FROM likes)",
+			"<~person",
+			"a.{2}",
+			"a.{2}(.b)",
+			"a.{2}.b.@",
+			"a.{3}.b.@",
+			"a.{1..3+collect}(.b)",
+			"a.{1..3+path}(.b)",
+			"a.{1..3+path+inclusive}(.b)",
+			"a.{1..3+shortest=t:1}(.b)",
+			"a.b[0].c",
+			"<int> a",
+			"<string> a",
+			"-a",
+			"!a",
+			"+a",
+			"a..",
+			"a>..",
+			"..a",
+			"a + 1",
+			"a - 1",
+			"a AND b",
+			"a ?? b",
+			"a ?: b",
+			"a = b",
+			"math::abs(1)",
+			"math::abs(a)",
+			"math::sqrt(a)",
+			"fn::f(1)",
+			"$f(1)",
+			"|$x: int| $x + 1",
+			"|$x: int| $x + 2",
+			"|$x: int| -> int { $x + 1 }",
+			"|$x: string| $x + 1",
+			"IF a THEN 1 ELSE 2 END",
+			"IF a THEN 1 END",
+			"IF a THEN 1 ELSE IF b THEN 2 ELSE 3 END",
+			"(SELECT * FROM t)",
+			"(SELECT a FROM t)",
+		];
+		for text in texts {
+			corpus.push(expr(text));
+		}
+		corpus.extend([
+			LogicalExpr::Set(vec![expr("1"), expr("2")]),
+			LogicalExpr::Set(vec![expr("1")]),
+			LogicalExpr::Table(TableName::from("t")),
+			LogicalExpr::Table(TableName::from("u")),
+			LogicalExpr::Doc,
+			LogicalExpr::Current,
+			LogicalExpr::First(Box::new(expr("a"))),
+			LogicalExpr::Break,
+			LogicalExpr::Continue,
+			LogicalExpr::Throw(Box::new(expr("1"))),
+			LogicalExpr::RepeatRecurse(Box::new(LogicalExpr::Current)),
+			LogicalExpr::SetField {
+				base: Box::new(expr("o")),
+				field: Strand::new("k"),
+				value: Box::new(expr("1")),
+			},
+			LogicalExpr::SetField {
+				base: Box::new(expr("o")),
+				field: Strand::new("j"),
+				value: Box::new(expr("1")),
+			},
+			LogicalExpr::Flatten {
+				base: Box::new(expr("a")),
+				explicit: false,
+			},
+		]);
+		let mut all = Vec::new();
+		for root in &corpus {
+			let _ = root.visit(&mut |node| {
+				all.push(node.clone());
+				ControlFlow::<()>::Continue(())
+			});
+		}
+		all
+	}
+
+	#[test]
+	fn shallow_identity_is_equality_modulo_children() {
+		use std::collections::hash_map::DefaultHasher;
+		let corpus = shallow_corpus();
+		let variants =
+			corpus.iter().map(std::mem::discriminant).collect::<std::collections::HashSet<_>>();
+		// One per variant of `LogicalExpr`.
+		assert_eq!(variants.len(), 38, "the corpus must cover every variant");
+		let hash = |expr: &LogicalExpr| {
+			let mut state = DefaultHasher::new();
+			expr.shallow_hash(&mut state);
+			state.finish()
+		};
+		for a in &corpus {
+			for b in &corpus {
+				let children_equal = a.children() == b.children();
+				if matches!(a, LogicalExpr::Subquery(_)) {
+					assert_eq!(a.shallow_eq(b), std::ptr::eq(a, b));
+				} else {
+					assert_eq!(
+						a.shallow_eq(b) && children_equal,
+						a == b,
+						"shallow identity of {a:?} and {b:?}"
+					);
+				}
+				if a.shallow_eq(b) {
+					assert_eq!(hash(a), hash(b), "{a:?} and {b:?} are shallow-equal");
+				}
+			}
+		}
 	}
 }

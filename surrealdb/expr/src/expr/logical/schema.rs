@@ -295,6 +295,11 @@ impl Schema {
 		self.openness == Openness::Open
 	}
 
+	/// Whether the schema declares any field.
+	fn has_fields(&self) -> bool {
+		!self.fields.is_empty()
+	}
+
 	/// The declaration for exactly `path`.
 	///
 	/// A path beneath a declared field is not itself declared: for `a`
@@ -422,6 +427,124 @@ pub fn is_numeric(kind: &Kind) -> bool {
 	matches!(kind, Kind::Int | Kind::Float | Kind::Decimal | Kind::Number)
 }
 
+/// Whether a value of `kind` may be a record id, the one value a field read
+/// dereferences. `any`, a record, an `either` with any member that may be one
+/// and a literal kind may. A collection may when its elements may, since a
+/// read of one reads each element. Every other kind may not; `object` in
+/// particular is not a record: an object holds its fields and a read of one
+/// fetches nothing.
+pub fn kind_may_be_record(kind: &Kind) -> bool {
+	match kind {
+		Kind::Any | Kind::Record(_) | Kind::Literal(_) => true,
+		Kind::Either(kinds) => kinds.iter().any(kind_may_be_record),
+		Kind::Array(element, _) | Kind::Set(element, _) => kind_may_be_record(element),
+		Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Geometry(_)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::File(_) => false,
+	}
+}
+
+/// Whether coercing a value of kind `actual` to `declared` yields the value
+/// unchanged, for every value of that kind. `any` accepts everything.
+/// `number` accepts `int`, `float`, `decimal` and `number`. `option<k>` — an
+/// either of exactly `NONE` then `k` — accepts `NONE` and what `k` accepts of
+/// a single kind; an `actual` that is itself an either is not accepted. Any
+/// other either accepts only an equal either. An array or set of `k` with no
+/// length bound accepts an unbounded array or set whose element kind `k`
+/// accepts. A record kind accepts a record kind when it names no table, or
+/// when the actual names at least one table and every table it names is
+/// named by the declaration; a geometry kind accepts a geometry kind by the
+/// same rule over shapes. Every other declared kind — the scalar kinds, a
+/// `table` or `file` kind, a bounded array or set, a literal — accepts only
+/// an equal kind. Anything else may convert or fail, and is not identity: an
+/// `actual` of `any` in particular, whose values are unknown.
+pub fn coercion_is_identity(declared: &Kind, actual: &Kind) -> bool {
+	match declared {
+		Kind::Any => true,
+		Kind::Number => matches!(actual, Kind::Int | Kind::Float | Kind::Decimal | Kind::Number),
+		Kind::Either(kinds) => match kinds.as_slice() {
+			[Kind::None, inner] => {
+				matches!(actual, Kind::None) || coercion_is_identity(inner, actual)
+			}
+			_ => declared == actual && !matches!(actual, Kind::Any),
+		},
+		Kind::Array(inner, None) => {
+			matches!(actual, Kind::Array(elements, None) if coercion_is_identity(inner, elements))
+		}
+		Kind::Set(inner, None) => {
+			matches!(actual, Kind::Set(elements, None) if coercion_is_identity(inner, elements))
+		}
+		Kind::Record(tables) => match actual {
+			Kind::Record(of) => {
+				tables.is_empty() || (!of.is_empty() && of.iter().all(|t| tables.contains(t)))
+			}
+			Kind::Any
+			| Kind::None
+			| Kind::Null
+			| Kind::Bool
+			| Kind::Bytes
+			| Kind::Datetime
+			| Kind::Decimal
+			| Kind::Duration
+			| Kind::Float
+			| Kind::Int
+			| Kind::Number
+			| Kind::Object
+			| Kind::String
+			| Kind::Uuid
+			| Kind::Regex
+			| Kind::Table(_)
+			| Kind::Geometry(_)
+			| Kind::Function(..)
+			| Kind::Range
+			| Kind::File(_)
+			| Kind::Array(..)
+			| Kind::Set(..)
+			| Kind::Either(_)
+			| Kind::Literal(_) => false,
+		},
+		Kind::Geometry(shapes) => {
+			matches!(actual, Kind::Geometry(of) if shapes.is_empty() || (!of.is_empty() && of.iter().all(|s| shapes.contains(s))))
+		}
+		Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Function(..)
+		| Kind::Range
+		| Kind::File(_)
+		| Kind::Array(_, Some(_))
+		| Kind::Set(_, Some(_))
+		| Kind::Literal(_) => declared == actual,
+	}
+}
+
 /// Whether an element of `kind` reaches the caller unchanged through `.*`:
 /// the step dereferences a record id it finds among the elements, so an
 /// element kind that admits a record — `any`, a record, an `either` or a
@@ -488,6 +611,24 @@ impl LogicalExpr {
 	/// conversion of a value requires this; a rewrite that only trusts the
 	/// declaration may read [`Self::kind`].
 	pub fn checked_kind(&self, schema: &Schema) -> Option<Kind> {
+		let mut kinds = Vec::new();
+		if matches!(
+			self,
+			LogicalExpr::Binary {
+				op: BinaryOperator::And | BinaryOperator::Or,
+				..
+			}
+		) {
+			self.for_each_child(&mut |child| kinds.push(child.checked_kind(schema)));
+		}
+		self.node_checked_kind(&kinds, schema)
+	}
+
+	/// [`Self::checked_kind`] of a node given the checked kind of each child,
+	/// one per child in the order of [`Self::for_each_child`]. Only an `AND` or
+	/// `OR` reads them; every other node answers from its own shape, so a caller
+	/// that does not need them may pass none.
+	pub fn node_checked_kind(&self, child_kinds: &[Option<Kind>], schema: &Schema) -> Option<Kind> {
 		match self {
 			LogicalExpr::Literal(literal) => Some(literal.kind()),
 			LogicalExpr::RecordId(rid) => Some(Kind::Record(vec![rid.table.clone()])),
@@ -501,8 +642,10 @@ impl LogicalExpr {
 			LogicalExpr::Field(_)
 			| LogicalExpr::Access {
 				..
-			} => self
-				.field_path()
+			} => schema
+				.has_fields()
+				.then(|| self.field_path())
+				.flatten()
 				.and_then(|path| schema.field(&path))
 				.filter(|field| field.checked)
 				.map(|field| field.kind.clone()),
@@ -518,9 +661,8 @@ impl LogicalExpr {
 				| PrefixOperator::RangeInclusive => None,
 			},
 			LogicalExpr::Binary {
-				left,
 				op,
-				right,
+				..
 			} => match op {
 				BinaryOperator::Equal
 				| BinaryOperator::ExactEqual
@@ -546,10 +688,9 @@ impl LogicalExpr {
 				| BinaryOperator::Matches(_)
 				| BinaryOperator::NearestNeighbor(_) => Some(Kind::Bool),
 				// Short-circuit: the result is whichever operand decided it.
-				BinaryOperator::And | BinaryOperator::Or => (left.checked_kind(schema)
-					== Some(Kind::Bool)
-					&& right.checked_kind(schema) == Some(Kind::Bool))
-				.then_some(Kind::Bool),
+				BinaryOperator::And | BinaryOperator::Or => {
+					(child_kinds == [Some(Kind::Bool), Some(Kind::Bool)]).then_some(Kind::Bool)
+				}
 				BinaryOperator::NullCoalescing
 				| BinaryOperator::TenaryCondition
 				| BinaryOperator::Add
@@ -1534,5 +1675,48 @@ mod tests {
 		for op in ops {
 			assert_eq!(op.schema(), Schema::open(), "{} should be open", op.name());
 		}
+	}
+
+	#[test]
+	fn coercion_identity_follows_the_declared_kind() {
+		assert!(coercion_is_identity(&Kind::Any, &Kind::Any));
+		assert!(coercion_is_identity(&Kind::Int, &Kind::Int));
+		assert!(!coercion_is_identity(&Kind::Int, &Kind::Any));
+		assert!(!coercion_is_identity(&Kind::Int, &Kind::Float));
+		assert!(coercion_is_identity(&Kind::Number, &Kind::Decimal));
+		assert!(coercion_is_identity(&Kind::option(Kind::Int), &Kind::Int));
+		assert!(coercion_is_identity(&Kind::option(Kind::Int), &Kind::None));
+		assert!(!coercion_is_identity(&Kind::option(Kind::Int), &Kind::option(Kind::String)));
+		assert!(coercion_is_identity(
+			&Kind::Array(Box::new(Kind::Int), None),
+			&Kind::Array(Box::new(Kind::Int), None)
+		));
+		assert!(!coercion_is_identity(
+			&Kind::Array(Box::new(Kind::Int), Some(2)),
+			&Kind::Array(Box::new(Kind::Int), None)
+		));
+		assert!(coercion_is_identity(
+			&Kind::Record(vec![]),
+			&Kind::Record(vec![TableName::from("t")])
+		));
+		assert!(!coercion_is_identity(
+			&Kind::Record(vec![TableName::from("u")]),
+			&Kind::Record(vec![])
+		));
+		// A table or file kind, a bounded collection and an either that is not
+		// an option are matched by equality, never by subset.
+		assert!(!coercion_is_identity(
+			&Kind::Table(vec![]),
+			&Kind::Table(vec![TableName::from("a")])
+		));
+		assert!(coercion_is_identity(
+			&Kind::Geometry(vec![]),
+			&Kind::Geometry(vec![crate::expr::kind::GeometryKind::Point])
+		));
+		assert!(!coercion_is_identity(&Kind::option(Kind::Int), &Kind::option(Kind::Int)));
+		assert!(coercion_is_identity(
+			&Kind::Array(Box::new(Kind::Int), Some(3)),
+			&Kind::Array(Box::new(Kind::Int), Some(3))
+		));
 	}
 }

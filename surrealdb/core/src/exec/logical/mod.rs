@@ -88,7 +88,7 @@
 
 pub(crate) mod constants;
 pub(crate) mod edges;
-mod effects;
+pub(crate) mod effects;
 mod fold;
 pub(crate) mod footprint;
 mod functions;

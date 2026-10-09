@@ -62,12 +62,12 @@ pub(crate) fn effects_of_plan_late_bound(
 /// The registry's declarations. Every parameter read is taken to be in hand,
 /// so `Effects::may_raise` is not the question to ask through this one; see
 /// [`ParamsOnly`].
-pub(super) struct Oracle<'a> {
+pub(crate) struct Oracle<'a> {
 	registry: &'a FunctionRegistry,
 }
 
 impl<'a> Oracle<'a> {
-	pub(super) fn new(registry: &'a FunctionRegistry) -> Self {
+	pub(crate) fn new(registry: &'a FunctionRegistry) -> Self {
 		Self {
 			registry,
 		}

@@ -172,6 +172,8 @@ mod tests_recurse;
 #[cfg(all(test, feature = "kv-mem", not(target_family = "wasm")))]
 mod tests_scan_parity;
 #[cfg(all(test, feature = "kv-mem"))]
+mod tests_shared;
+#[cfg(all(test, feature = "kv-mem"))]
 mod tests_sources;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_subq;

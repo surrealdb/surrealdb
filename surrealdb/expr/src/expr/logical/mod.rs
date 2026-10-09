@@ -154,6 +154,7 @@
 // position on it, which a wildcard arm would silently absorb.
 #![warn(clippy::wildcard_enum_match_arm)]
 
+pub mod dag;
 mod effects;
 mod exits;
 mod expr;
@@ -170,8 +171,9 @@ use surrealdb_strand::{Strand, TableName};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 pub use self::effects::{
-	EffectOracle, EffectSet, Effects, ITERATION_PARAMS, ROW_PARAMS, effects_of,
-	invokes_unseen_body, key_is_generated, may_dereference,
+	ChildFacts, EffectOracle, EffectSet, Effects, ITERATION_PARAMS, ROW_PARAMS, effects_of,
+	facts_of, invokes_unseen_body, key_is_generated, may_dereference, node_effects,
+	node_may_dereference,
 };
 pub use self::exits::Exits;
 pub use self::expr::{
@@ -191,7 +193,7 @@ pub use self::request::{
 };
 pub use self::schema::{
 	ComputedBody, FieldPath, FieldSchema, FieldSegment, LogicalPermission, LogicalPermissionRef,
-	Openness, Schema,
+	Openness, Schema, coercion_is_identity, kind_may_be_record,
 };
 use crate::expr::match_plan::MatchPlan;
 use crate::expr::with::With;

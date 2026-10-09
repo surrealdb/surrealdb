@@ -958,6 +958,36 @@ pub(super) enum DocumentRoot {
 	RowElseReceiver,
 }
 
+/// The values of one evaluation region that are evaluated once and read again
+/// ([`crate::expr::logical::dag`]), each with the register that holds it once
+/// its first occurrence is lowered, and the kinds the region proves.
+///
+/// A region is a straight-line stretch of one pipeline's code over one register
+/// file, whose roots the DAG takes in the order they run; sharing never crosses
+/// one. The register is pinned: nothing lowered while the scope is on
+/// [`Lowering::shared`] is handed it back by [`Lowering::release`], so every
+/// read of it sees the value its first occurrence left there. A first
+/// occurrence always ends in a load into the pinned register, which no
+/// peephole drops while a later root may read it.
+#[derive(Default)]
+struct SharedScope {
+	values: Vec<(crate::expr::logical::dag::SharedValue, Option<Reg>)>,
+	/// The kind proven for the base of each field read of the region, by the
+	/// address of the base. Addresses are compared, never dereferenced.
+	kinds: HashMap<usize, crate::expr::Kind>,
+}
+
+/// What the innermost [`SharedScope`] makes of an expression.
+enum SharedSlot {
+	/// The first occurrence of the value at this index of the scope: lowered
+	/// as written, then kept in the value's register.
+	First(usize),
+	/// A later occurrence of a value already kept: read from its register.
+	Reuse(Reg),
+	/// Not a shared value, or one with nothing yet to read.
+	Unshared,
+}
+
 struct Lowering<'p, 'ctx> {
 	planner: &'p Planner<'ctx>,
 	/// What the plan being lowered read of the catalog: every definition the
@@ -1298,6 +1328,11 @@ struct Lowering<'p, 'ctx> {
 	/// value is lowered: the catch, whose subquery instructions are pointed
 	/// at the expression's end.
 	return_catch: Option<ReturnCatch>,
+	/// The sharing scopes of the projections being lowered, innermost last.
+	/// Only the innermost is consulted, and a lowering that builds code in
+	/// registers of its own sets an empty one in its place
+	/// ([`Self::hide_shared`]).
+	shared: Vec<SharedScope>,
 	/// Whether a record-id key element is being lowered: a `BREAK` or
 	/// `CONTINUE` it raises outside any statement it holds has no loop to
 	/// take it, and is an error.
@@ -1809,6 +1844,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			call_frames: 0,
 			inline_params: Vec::new(),
 			return_catch: None,
+			shared: Vec::new(),
 			key_element: false,
 			column_statements: false,
 			statement_doc: None,
@@ -3092,6 +3128,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	/// returns to this one.
 	fn set_aside(&mut self) -> Aside {
 		self.slot_hidden += 1;
+		self.hide_shared();
 		Aside {
 			code: std::mem::take(&mut self.code),
 			next_reg: std::mem::replace(&mut self.next_reg, ROW + 1),
@@ -3109,6 +3146,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	/// since when `built` succeeded, and answer its index.
 	fn restore(&mut self, aside: Aside, built: Lowered<()>) -> Lowered<u16> {
 		self.slot_hidden -= 1;
+		self.unhide_shared();
 		let registers = self.next_reg;
 		let code = std::mem::replace(&mut self.code, aside.code);
 		self.next_reg = aside.next_reg;
@@ -3154,7 +3192,14 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 
 	/// The body of a `RETURN <fields>` host pipeline: the projection, emitted.
 	async fn projection_body(&mut self, projection: &super::plan::Projection) -> Lowered<()> {
-		let out = crate::exec::vm::host::out_of_line(|| self.projection(projection)).await?;
+		// The projection is a region of its own: its fields run against one row.
+		let mut roots = Vec::new();
+		projection_roots(projection, crate::expr::logical::dag::Frame::new(0), &mut roots);
+		let scope = self.shared_scope(&roots);
+		self.shared.push(scope);
+		let out = crate::exec::vm::host::out_of_line(|| self.projection(projection)).await;
+		self.shared.pop();
+		let out = out?;
 		self.emit(Instr::Emit {
 			src: out,
 		});
@@ -3692,218 +3737,234 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		// A binding replaced the row: the source's own rows are no more what
 		// the nodes above judge, and the row no longer lies in the stored bytes.
 		let mut rebound = false;
-		for node in chain.iter().rev() {
-			match node {
-				Plan::Filter {
-					predicate,
-					..
-				} => {
-					if current != ROW {
-						return Err(NotCovered::internal("a filter over a projection"));
+		// The streaming nodes' row code is one evaluation region: a filter's
+		// predicate and the projection's fields run in written order against
+		// one row, and a node that replaces or rebinds the row starts a new
+		// frame. The scope is popped on every path out of the loop.
+		let mut roots = Vec::new();
+		chain_roots(&chain, &mut roots);
+		let scope = self.shared_scope(&roots);
+		self.shared.push(scope);
+		let looped: Lowered<()> = async {
+			for node in chain.iter().rev() {
+				match node {
+					Plan::Filter {
+						predicate,
+						..
+					} => {
+						if current != ROW {
+							return Err(NotCovered::internal("a filter over a projection"));
+						}
+						end_row.extend(
+							crate::exec::vm::host::out_of_line(|| self.branch(predicate, false))
+								.await?,
+						);
 					}
-					end_row.extend(
-						crate::exec::vm::host::out_of_line(|| self.branch(predicate, false))
+					Plan::PermissionFilter {
+						predicate,
+						auth,
+						guard,
+						computed,
+						..
+					} => {
+						if current != ROW {
+							return Err(NotCovered::internal("a permission over a projection"));
+						}
+						end_row.extend(
+							crate::exec::vm::host::out_of_line(|| {
+								self.permission(predicate, auth, *guard, computed.as_ref())
+							})
 							.await?,
-					);
-				}
-				Plan::PermissionFilter {
-					predicate,
-					auth,
-					guard,
-					computed,
-					..
-				} => {
-					if current != ROW {
-						return Err(NotCovered::internal("a permission over a projection"));
+						);
 					}
-					end_row.extend(
-						crate::exec::vm::host::out_of_line(|| {
-							self.permission(predicate, auth, *guard, computed.as_ref())
-						})
-						.await?,
-					);
-				}
-				Plan::Layer {
-					fields,
-					input_schema,
-					..
-				} => {
-					if current != ROW {
-						return Err(NotCovered::internal("a layer over a projection"));
+					Plan::Layer {
+						fields,
+						input_schema,
+						..
+					} => {
+						if current != ROW {
+							return Err(NotCovered::internal("a layer over a projection"));
+						}
+						crate::exec::vm::host::out_of_line(|| self.layer(fields, input_schema))
+							.await?;
+						// The layer derives fields the table's schema does not
+						// type, so no typed read is chosen above it.
+						self.schema = None;
 					}
-					crate::exec::vm::host::out_of_line(|| self.layer(fields, input_schema)).await?;
-					// The layer derives fields the table's schema does not
-					// type, so no typed read is chosen above it.
-					self.schema = None;
-				}
-				Plan::Limit {
-					limit,
-					start,
-					..
-				} => {
-					let id = self.limits.len() as u16;
-					let limit_scalar = match limit {
-						Some(e) => {
-							Some(crate::exec::vm::host::out_of_line(|| self.host_scalar(e)).await?)
+					Plan::Limit {
+						limit,
+						start,
+						..
+					} => {
+						let id = self.limits.len() as u16;
+						let limit_scalar = match limit {
+							Some(e) => Some(
+								crate::exec::vm::host::out_of_line(|| self.host_scalar(e)).await?,
+							),
+							None => None,
+						};
+						let start_scalar = match start {
+							Some(e) => Some(
+								crate::exec::vm::host::out_of_line(|| self.host_scalar(e)).await?,
+							),
+							None => None,
+						};
+						self.limits.push(LimitSpec {
+							limit: limit_scalar,
+							start: start_scalar,
+							group: self.current_group,
+						});
+						self.pipeline_limits.push(id);
+						if start.is_some() {
+							end_row.push(self.emit(Instr::Skip {
+								limit: id,
+								target: 0,
+							}));
 						}
-						None => None,
-					};
-					let start_scalar = match start {
-						Some(e) => {
-							Some(crate::exec::vm::host::out_of_line(|| self.host_scalar(e)).await?)
+						if limit.is_some() {
+							if (!self.rows_are_objects && !matches!(source, Source::Join { .. }))
+								|| (one_record && !rebound)
+							{
+								// Past the limit a row is judged and not taken:
+								// the pipeline reads every row.
+								end_row.push(self.emit(Instr::JumpIfLimitReached {
+									limit: id,
+									done: 0,
+								}));
+							} else if !rebound
+								&& matches!(
+									source,
+									Source::Scan { .. }
+										| Source::LightweightEdges {
+											record: None,
+											..
+										} | Source::Index { .. } | Source::IndexUnion { .. }
+										| Source::Bitmap { .. } | Source::Count { .. }
+										| Source::Sorted { .. } | Source::Groups { .. }
+										| Source::Probe { .. } | Source::Join { .. }
+								) {
+								// A scan, sort, aggregate or join is not opened
+								// under a spent limit, so only the rows it takes
+								// are checked, and the probe it reads stops with
+								// the pipeline.
+								limit_checks.push(id);
+							} else {
+								// A range or a union stops at its limit, as a
+								// scan does: no row past it is read or judged.
+								stop.push(self.emit(Instr::JumpIfLimitReached {
+									limit: id,
+									done: 0,
+								}));
+								limit_checks.push(id);
+							}
+							self.emit(Instr::Take {
+								limit: id,
+							});
 						}
-						None => None,
-					};
-					self.limits.push(LimitSpec {
-						limit: limit_scalar,
-						start: start_scalar,
-						group: self.current_group,
-					});
-					self.pipeline_limits.push(id);
-					if start.is_some() {
-						end_row.push(self.emit(Instr::Skip {
-							limit: id,
+					}
+					Plan::Project {
+						projection,
+						..
+					} => {
+						if current != ROW {
+							return Err(NotCovered::internal("a projection over a projection"));
+						}
+						current = match projection {
+							// `SELECT *` over a row that is a record id is the
+							// record, and no row where none answers.
+							Projection::All if self.rows_may_be_ids => {
+								self.reaches(super::dispatch::Reach::Any);
+								let dst = self.register()?;
+								end_row.push(self.emit(Instr::FetchRow {
+									dst,
+									none: 0,
+								}));
+								self.uses_eval = true;
+								dst
+							}
+							// `*` beside fields over a row that may be a record id
+							// reads the record, as `SELECT *` does, and its fields
+							// read it too.
+							Projection::Star {
+								..
+							} if !self.rows_are_objects && self.rows_may_be_ids => {
+								self.reaches(super::dispatch::Reach::Any);
+								let dst = self.register()?;
+								end_row.push(self.emit(Instr::FetchRow {
+									dst,
+									none: 0,
+								}));
+								self.uses_eval = true;
+								self.fetched_row = Some(dst);
+								let projected = crate::exec::vm::host::out_of_line(|| {
+									self.projection(projection)
+								})
+								.await;
+								self.fetched_row = None;
+								projected?
+							}
+							_ => {
+								crate::exec::vm::host::out_of_line(|| self.projection(projection))
+									.await?
+							}
+						};
+					}
+					Plan::Distinct {
+						..
+					} => {
+						if current != ROW {
+							return Err(NotCovered::internal("a distinct over a projection"));
+						}
+						let distinct = u16::try_from(self.distincts.len()).map_err(|_| {
+							NotCovered::internal("more distinct sets than a program holds")
+						})?;
+						self.distincts.push(self.current_group);
+						// A set that outgrows its budget fails the statement.
+						self.may_fail = true;
+						end_row.push(self.emit(Instr::Distinct {
+							distinct,
 							target: 0,
 						}));
 					}
-					if limit.is_some() {
-						if (!self.rows_are_objects && !matches!(source, Source::Join { .. }))
-							|| (one_record && !rebound)
-						{
-							// Past the limit a row is judged and not taken:
-							// the pipeline reads every row.
-							end_row.push(self.emit(Instr::JumpIfLimitReached {
-								limit: id,
-								done: 0,
-							}));
-						} else if !rebound
-							&& matches!(
-								source,
-								Source::Scan { .. }
-									| Source::LightweightEdges {
-										record: None,
-										..
-									} | Source::Index { .. } | Source::IndexUnion { .. }
-									| Source::Bitmap { .. } | Source::Count { .. }
-									| Source::Sorted { .. } | Source::Groups { .. }
-									| Source::Probe { .. } | Source::Join { .. }
-							) {
-							// A scan, sort, aggregate or join is not opened
-							// under a spent limit, so only the rows it takes
-							// are checked, and the probe it reads stops with
-							// the pipeline.
-							limit_checks.push(id);
-						} else {
-							// A range or a union stops at its limit, as a
-							// scan does: no row past it is read or judged.
-							stop.push(self.emit(Instr::JumpIfLimitReached {
-								limit: id,
-								done: 0,
-							}));
-							limit_checks.push(id);
+					Plan::Fetch {
+						fetches,
+						..
+					} => {
+						current = crate::exec::vm::host::out_of_line(|| {
+							self.fetched(fetches, current, fetch_rows.as_ref())
+						})
+						.await?;
+					}
+					Plan::Step {
+						step,
+						..
+					} => {
+						let super::binding::BindingStep::Bind {
+							name,
+						} = &**step
+						else {
+							unreachable!("the chain holds binding steps that are bindings")
+						};
+						if current != ROW {
+							return Err(NotCovered::internal("a binding over a projection"));
 						}
-						self.emit(Instr::Take {
-							limit: id,
+						let name = self.field(name);
+						self.emit(Instr::BindRow {
+							name,
 						});
+						rebound = true;
+						self.rows_are_objects = true;
+						self.rows_may_be_ids = false;
+						self.schema = None;
 					}
+					_ => unreachable!("the chain holds streaming nodes"),
 				}
-				Plan::Project {
-					projection,
-					..
-				} => {
-					if current != ROW {
-						return Err(NotCovered::internal("a projection over a projection"));
-					}
-					current = match projection {
-						// `SELECT *` over a row that is a record id is the
-						// record, and no row where none answers.
-						Projection::All if self.rows_may_be_ids => {
-							self.reaches(super::dispatch::Reach::Any);
-							let dst = self.register()?;
-							end_row.push(self.emit(Instr::FetchRow {
-								dst,
-								none: 0,
-							}));
-							self.uses_eval = true;
-							dst
-						}
-						// `*` beside fields over a row that may be a record id
-						// reads the record, as `SELECT *` does, and its fields
-						// read it too.
-						Projection::Star {
-							..
-						} if !self.rows_are_objects && self.rows_may_be_ids => {
-							self.reaches(super::dispatch::Reach::Any);
-							let dst = self.register()?;
-							end_row.push(self.emit(Instr::FetchRow {
-								dst,
-								none: 0,
-							}));
-							self.uses_eval = true;
-							self.fetched_row = Some(dst);
-							let projected =
-								crate::exec::vm::host::out_of_line(|| self.projection(projection))
-									.await;
-							self.fetched_row = None;
-							projected?
-						}
-						_ => {
-							crate::exec::vm::host::out_of_line(|| self.projection(projection))
-								.await?
-						}
-					};
-				}
-				Plan::Distinct {
-					..
-				} => {
-					if current != ROW {
-						return Err(NotCovered::internal("a distinct over a projection"));
-					}
-					let distinct = u16::try_from(self.distincts.len()).map_err(|_| {
-						NotCovered::internal("more distinct sets than a program holds")
-					})?;
-					self.distincts.push(self.current_group);
-					// A set that outgrows its budget fails the statement.
-					self.may_fail = true;
-					end_row.push(self.emit(Instr::Distinct {
-						distinct,
-						target: 0,
-					}));
-				}
-				Plan::Fetch {
-					fetches,
-					..
-				} => {
-					current = crate::exec::vm::host::out_of_line(|| {
-						self.fetched(fetches, current, fetch_rows.as_ref())
-					})
-					.await?;
-				}
-				Plan::Step {
-					step,
-					..
-				} => {
-					let super::binding::BindingStep::Bind {
-						name,
-					} = &**step
-					else {
-						unreachable!("the chain holds binding steps that are bindings")
-					};
-					if current != ROW {
-						return Err(NotCovered::internal("a binding over a projection"));
-					}
-					let name = self.field(name);
-					self.emit(Instr::BindRow {
-						name,
-					});
-					rebound = true;
-					self.rows_are_objects = true;
-					self.rows_may_be_ids = false;
-					self.schema = None;
-				}
-				_ => unreachable!("the chain holds streaming nodes"),
 			}
+			Ok(())
 		}
+		.await;
+		self.shared.pop();
+		looped?;
 
 		// A body that hands its row to a split runs where the host can run
 		// the split's rows, outside the storage cursor.
@@ -4744,7 +4805,10 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		self.emit(Instr::PermissionRegion {
 			check,
 		});
-		let verdict = crate::exec::vm::host::out_of_line(|| self.caught(predicate, true)).await?;
+		self.hide_shared();
+		let verdict = crate::exec::vm::host::out_of_line(|| self.caught(predicate, true)).await;
+		self.unhide_shared();
+		let verdict = verdict?;
 		self.emit(Instr::TryEnd);
 		self.may_fail = true;
 		Ok(vec![self.emit(Instr::JumpIf {
@@ -5328,7 +5392,10 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		if !self.is_native(expr) {
 			return Err(self.uncovered(expr, "an expression"));
 		}
-		crate::exec::vm::host::out_of_line(|| self.value(expr)).await
+		self.hide_shared();
+		let value = crate::exec::vm::host::out_of_line(|| self.value(expr)).await;
+		self.unhide_shared();
+		value
 	}
 
 	/// An aggregate's argument or key: `expr`'s value, read as `NONE` when
@@ -5374,7 +5441,10 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			catch: 0,
 			dst: None,
 		});
-		let operand = crate::exec::vm::host::out_of_line(|| self.fallible_value(expr)).await?;
+		self.hide_shared();
+		let operand = crate::exec::vm::host::out_of_line(|| self.fallible_value(expr)).await;
+		self.unhide_shared();
+		let operand = operand?;
 		let guarded = self.code.len() != begin as usize + 1;
 		if guarded {
 			self.emit(Instr::TryEnd);
@@ -5858,7 +5928,78 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	/// Return `reg`, whose value nothing reads again, for a later
 	/// [`Self::register`] to reuse.
 	fn release(&mut self, reg: Reg) {
+		if self.shared.iter().any(|scope| scope.values.iter().any(|(_, held)| *held == Some(reg))) {
+			return;
+		}
 		self.released.push(reg);
+	}
+
+	/// The sharing scope of an evaluation region whose roots, in the order the
+	/// code runs them, are `roots`.
+	fn shared_scope(&self, roots: &[crate::expr::logical::dag::Root<'_>]) -> SharedScope {
+		let oracle = crate::exec::logical::effects::Oracle::new(self.planner.function_registry());
+		let dag = crate::expr::logical::dag::build(roots, &oracle);
+		let mut kinds = HashMap::new();
+		for root in roots {
+			let _ = root.expr.visit(&mut |node| {
+				if let LogicalExpr::Access {
+					base,
+					..
+				} = node && let Some(kind) = dag.kind_at(base)
+				{
+					kinds.insert(&**base as *const LogicalExpr as usize, kind.clone());
+				}
+				std::ops::ControlFlow::<()>::Continue(())
+			});
+		}
+		SharedScope {
+			values: dag.shared().into_iter().map(|value| (value, None)).collect(),
+			kinds,
+		}
+	}
+
+	/// The kind the base of a field read is proven to evaluate to against the
+	/// open schema: the region's, or, where the read is lowered under a hidden
+	/// scope, the same proof taken directly.
+	fn base_kind(&self, base: &LogicalExpr) -> Option<crate::expr::Kind> {
+		let at = base as *const LogicalExpr as usize;
+		match self.shared.last().and_then(|scope| scope.kinds.get(&at)) {
+			Some(kind) => Some(kind.clone()),
+			None => base.checked_kind(&crate::expr::logical::Schema::open()),
+		}
+	}
+
+	/// What the innermost sharing scope makes of `expr`, by its address. An
+	/// occurrence the DAG names as neither first nor reuse, such as a
+	/// conditional one before the first, is lowered as written.
+	fn shared_slot(&self, expr: &LogicalExpr) -> SharedSlot {
+		let at = expr as *const LogicalExpr;
+		let Some(scope) = self.shared.last() else {
+			return SharedSlot::Unshared;
+		};
+		for (index, (value, held)) in scope.values.iter().enumerate() {
+			if value.first == at {
+				return SharedSlot::First(index);
+			}
+			// A later occurrence with nothing yet to read is lowered as
+			// written.
+			if let Some(held) = held
+				&& value.reuses.contains(&at)
+			{
+				return SharedSlot::Reuse(*held);
+			}
+		}
+		SharedSlot::Unshared
+	}
+
+	/// Stop reading shared values, until [`Self::unhide_shared`], for code
+	/// that is lowered into registers other than the projection's.
+	fn hide_shared(&mut self) {
+		self.shared.push(SharedScope::default());
+	}
+
+	fn unhide_shared(&mut self) {
+		self.shared.pop();
 	}
 
 	fn registers(&mut self, count: usize) -> Lowered<Reg> {
@@ -5923,7 +6064,8 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			Projection::All => ROW,
 			Projection::SortedValue(key) => self.sort_key(*key)?,
 			Projection::Value(expr) => {
-				match crate::exec::vm::host::out_of_line(|| self.projected(expr)).await? {
+				let value = crate::exec::vm::host::out_of_line(|| self.projected(expr)).await;
+				match value? {
 					Operand::Reg(reg) => reg,
 					other => {
 						let dst = self.register()?;
@@ -7453,11 +7595,13 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		let uses_eval = std::mem::replace(&mut self.uses_eval, false);
 		let may_fail = std::mem::replace(&mut self.may_fail, false);
 		self.slot_hidden += 1;
+		self.hide_shared();
 		let built = if self.is_native(expr) {
 			crate::exec::vm::host::out_of_line(|| self.host_pipeline(expr)).await
 		} else {
 			Err(self.uncovered(expr, "a host scalar"))
 		};
+		self.unhide_shared();
 		self.slot_hidden -= 1;
 		self.code = code;
 		self.next_reg = next_reg;
@@ -7547,8 +7691,10 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		let uses_eval = std::mem::replace(&mut self.uses_eval, false);
 		let may_fail = std::mem::replace(&mut self.may_fail, false);
 		self.slot_hidden += 1;
+		self.hide_shared();
 		let built =
 			crate::exec::vm::host::out_of_line(|| self.knn_gate_pipeline(permissions, cond)).await;
+		self.unhide_shared();
 		self.slot_hidden -= 1;
 		self.code = code;
 		self.next_reg = next_reg;
@@ -7879,7 +8025,9 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			any_frame,
 			loops_fail: self.key_element,
 		});
+		self.hide_shared();
 		let value = crate::exec::vm::host::out_of_line(|| self.value(expr)).await;
+		self.unhide_shared();
 		let ReturnCatch {
 			exits,
 			..
@@ -8242,9 +8390,12 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		}
 	}
 
-	/// Whether the schema admits an integer in top-level field `name`. A
-	/// field it declares of a kind that holds no integer is not read typed:
-	/// the guard would fail on every row.
+	/// Whether the schema admits an integer in top-level field `name`. The
+	/// declared kind is read as a hint, never as a guarantee: a field whose
+	/// kind admits no integer is compared by the general instruction, since
+	/// the guard would fail on every row, and a field whose kind admits one
+	/// may still hold other values in rows written before the kind changed,
+	/// which [`Instr::CompareFieldInt`] answers through its `fallback`.
 	fn may_hold_int(&self, name: &str) -> bool {
 		let Some(schema) = &self.schema else {
 			return true;
@@ -8267,6 +8418,47 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				self.consts.push(value);
 				return Ok(Operand::Const(index));
 			}
+			match self.shared_slot(expr) {
+				SharedSlot::Reuse(held) => return Ok(Operand::Reg(held)),
+				SharedSlot::First(index) => {
+					let result =
+						crate::exec::vm::host::out_of_line(|| self.value_node(expr)).await?;
+					let scope =
+						self.shared.last_mut().expect("the scope outlasts its first occurrence");
+					let pinned = match scope.values[index].1 {
+						Some(held) => held,
+						None => {
+							let pinned = self.register()?;
+							let scope = self
+								.shared
+								.last_mut()
+								.expect("the scope outlasts its first occurrence");
+							scope.values[index].1 = Some(pinned);
+							pinned
+						}
+					};
+					if result != Operand::Reg(pinned) {
+						self.emit(Instr::Load {
+							dst: pinned,
+							src: result,
+						});
+					}
+					return Ok(Operand::Reg(pinned));
+				}
+				SharedSlot::Unshared => {}
+			}
+			crate::exec::vm::host::out_of_line(|| self.value_node(expr)).await
+		})
+	}
+
+	/// [`Self::value`] for an expression that is not read from a shared
+	/// register: where its value is read from once the instructions emitted
+	/// for it have run.
+	fn value_node<'s>(
+		&'s mut self,
+		expr: &'s LogicalExpr,
+	) -> crate::exec::BoxFut<'s, Lowered<Operand>> {
+		Box::pin(async move {
 			match expr {
 				LogicalExpr::Constant(constant) => {
 					self.consts.push(constant.compute());
@@ -8360,7 +8552,10 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 					..
 				} if let Some(value) = self.answers_unscoped_operator(expr) => Ok(self.constant(value)),
 				// `AND`, `OR`, `?:` and `??` answer an operand, evaluating the
-				// right only when the left does not decide.
+				// right only when the left does not decide. The right operand
+				// follows a jump, so `dag::reach` classes it conditional: a
+				// value it computes is never the first occurrence a later
+				// read relies on.
 				LogicalExpr::Binary {
 					left,
 					op:
@@ -8493,6 +8688,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 					field,
 				} => {
 					let src = crate::exec::vm::host::out_of_line(|| self.value(base)).await?;
+					let stays = self.base_kind(base).is_some_and(|kind| access_stays_in_vm(&kind));
 					let field = self.field(field.as_str());
 					let dst = self.register()?;
 					self.emit(Instr::Access {
@@ -8501,10 +8697,15 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 						dst,
 						frame: self.eval_frame,
 					});
-					// A record id is fetched by the host.
-					self.uses_eval = true;
+					// A record id is fetched by the host, unless the base is
+					// proven to be a value the interpreter answers itself.
+					if !stays {
+						self.uses_eval = true;
+					}
 					Ok(Operand::Reg(dst))
 				}
+				// The index is lowered by `step_arg`, which rebinds the element
+				// to the document root, so `dag::reach` classes it a body.
 				LogicalExpr::Index {
 					base,
 					index,
@@ -8590,6 +8791,9 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				}
 				// A branch evaluated by the host could signal `RETURN` through
 				// the value; the operator tree's `IfElseExpr` passes it on.
+				// Each condition but the first and each value is lowered behind
+				// a `JumpIf`, so `dag::reach` classes every child but the first
+				// condition conditional.
 				LogicalExpr::If(branches) if self.is_native(expr) => {
 					let dst = self.register()?;
 					let mut done = Vec::with_capacity(branches.branches.len());
@@ -9029,6 +9233,8 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				}
 				// The object `base` with `field` set to `value`, `NONE` removing
 				// it; anything but an object is itself, `value` unevaluated.
+				// `value` follows `JumpIfNotObject`, so `dag::reach` classes it
+				// conditional.
 				LogicalExpr::SetField {
 					base,
 					field,
@@ -9121,6 +9327,117 @@ fn int_comparison<'e>(
 			Some((name.as_str(), *n, true))
 		}
 		_ => None,
+	}
+}
+
+/// The roots of the evaluation region a projection's fields are: the value of
+/// a value projection, or each field that is not a sort key, in written order
+/// and against `frame`.
+fn projection_roots<'p>(
+	projection: &'p super::plan::Projection,
+	frame: crate::expr::logical::dag::Frame,
+	roots: &mut Vec<crate::expr::logical::dag::Root<'p>>,
+) {
+	use crate::expr::logical::dag::Root;
+	match projection {
+		Projection::Value(expr) => roots.push(Root {
+			expr,
+			frame,
+		}),
+		Projection::Fields {
+			fields,
+			..
+		} => {
+			roots.extend(fields.iter().filter(|field| field.sort_key.is_none()).map(|field| Root {
+				expr: &field.expr,
+				frame,
+			}))
+		}
+		Projection::All
+		| Projection::OmittedValue {
+			..
+		}
+		| Projection::SortedValue(_)
+		| Projection::Star {
+			..
+		} => {}
+	}
+}
+
+/// The roots of the evaluation region the row code of a pipeline's streaming
+/// `chain` is, in the order the code runs them. A node that replaces or
+/// rebinds the row starts a new frame, so that a read of the row above it is
+/// not the same value as a read beneath it: a layer sets columns, a binding
+/// replaces the row, a fetch rebinds fetched fields and a projection builds a
+/// new row. A layer's columns are evaluated in frames of their own and are not
+/// roots; a permission, a limit and a distinct hold nothing the row code
+/// shares.
+fn chain_roots<'p>(chain: &[&'p Plan], roots: &mut Vec<crate::expr::logical::dag::Root<'p>>) {
+	use crate::expr::logical::dag::{Frame, Root};
+	let mut frame = Frame::new(0);
+	for node in chain.iter().rev().copied() {
+		match node {
+			Plan::Filter {
+				predicate,
+				..
+			} => roots.push(Root {
+				expr: predicate,
+				frame,
+			}),
+			Plan::Project {
+				projection,
+				..
+			} => {
+				projection_roots(projection, frame, roots);
+				frame = frame.next();
+			}
+			Plan::Layer {
+				..
+			}
+			| Plan::Step {
+				..
+			}
+			| Plan::Fetch {
+				..
+			} => frame = frame.next(),
+			_ => {}
+		}
+	}
+}
+
+/// Whether a base proven to be of `kind` never makes [`Instr::Access`] take
+/// the host step: the interpreter hands a record id, an array or a geometry to
+/// the host to read a field of, and answers every other value itself. A kind
+/// that may be any of those, as `any`, an either and a literal may be, does not
+/// stay.
+fn access_stays_in_vm(kind: &crate::expr::Kind) -> bool {
+	use crate::expr::Kind;
+	match kind {
+		Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Range
+		| Kind::Table(_)
+		| Kind::File(_)
+		| Kind::Function(..)
+		| Kind::Set(..) => true,
+		Kind::Any
+		| Kind::Record(_)
+		| Kind::Array(..)
+		| Kind::Geometry(_)
+		| Kind::Either(_)
+		| Kind::Literal(_) => false,
 	}
 }
 

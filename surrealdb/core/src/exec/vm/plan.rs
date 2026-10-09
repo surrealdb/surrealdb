@@ -512,9 +512,16 @@ pub(crate) enum Plan {
 	/// Rows are the records' objects.
 	///
 	/// `schema` is what the catalog declares for the rows, read by the
-	/// lowering to choose typed instructions. A declared kind is speculated,
-	/// not proven, where the schema says it is unchecked
-	/// ([`FieldSchema::checked`](crate::expr::logical::FieldSchema)).
+	/// lowering to choose typed instructions. A declared kind is a hint, not
+	/// a guarantee: a field's kind is enforced on write alone, so rows
+	/// written before a `DEFINE FIELD` or `DEFINE FIELD OVERWRITE` hold what
+	/// they held. The lowering may use it only to choose an instruction whose
+	/// fallback answers every value the field may hold. A declared kind never
+	/// removes a check, never licenses moving or merging a fallible
+	/// expression, and never selects an unguarded path
+	/// ([`FieldSchema::checked`](crate::expr::logical::FieldSchema)). Merging
+	/// two evaluations of one pure expression where the first dominates the
+	/// second ([`crate::expr::logical::dag`]) needs no kind at all.
 	TableScan {
 		table: TableName,
 		direction: Direction,

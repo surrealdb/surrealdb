@@ -545,20 +545,37 @@ impl Lowering<'_, '_> {
 				dst: out,
 			});
 		}
-		for expr in exprs {
-			let value = crate::exec::vm::host::out_of_line(|| self.projected(expr)).await?;
-			if many {
-				self.emit(Instr::ArrayPush {
-					array: out,
-					value,
-				});
-			} else {
-				self.emit(Instr::Load {
-					dst: out,
-					src: value,
-				});
+		// The values are evaluated in written order against one snapshot: one
+		// evaluation region, of which the pipeline's `WHERE` is not a part.
+		let roots = exprs
+			.iter()
+			.map(|expr| crate::expr::logical::dag::Root {
+				expr,
+				frame: crate::expr::logical::dag::Frame::new(0),
+			})
+			.collect::<Vec<_>>();
+		let scope = self.shared_scope(&roots);
+		self.shared.push(scope);
+		let evaluated: Lowered<()> = async {
+			for expr in exprs {
+				let value = crate::exec::vm::host::out_of_line(|| self.projected(expr)).await?;
+				if many {
+					self.emit(Instr::ArrayPush {
+						array: out,
+						value,
+					});
+				} else {
+					self.emit(Instr::Load {
+						dst: out,
+						src: value,
+					});
+				}
 			}
+			Ok(())
 		}
+		.await;
+		self.shared.pop();
+		evaluated?;
 		self.emit(Instr::Emit {
 			src: out,
 		});

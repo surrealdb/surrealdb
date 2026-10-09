@@ -32,9 +32,12 @@
 //! and terminates. A choice with a cost is not a rule: which access path
 //! answers a predicate, in which order two inputs join, whether a lookup join
 //! beats a hash join, are the physical planner's, and the driver records no
-//! alternatives. A rule sees one node: a subexpression shared by two nodes is
+//! alternatives. A rule sees one node: a subexpression two nodes hold is
 //! rewritten where each occurrence stands, since the plan is a tree and no
-//! occurrence knows of another.
+//! occurrence knows of another. A pure subexpression one evaluation region
+//! repeats is evaluated once per row within that region, which is decided when
+//! the plan is lowered to a program, through [`crate::expr::logical::dag`], and
+//! leaves the plan as it is.
 //!
 //! The rules, each in its own module:
 //!

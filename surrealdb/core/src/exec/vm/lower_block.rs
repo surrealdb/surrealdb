@@ -354,36 +354,62 @@ impl Lowering<'_, '_> {
 				branches,
 				otherwise,
 			} => {
-				let mut done = Vec::with_capacity(branches.len());
-				for (condition, branch) in branches {
-					let cond = self.register()?;
-					crate::exec::vm::host::out_of_line(|| {
-						self.node(condition, cond, Collect::Block)
+				// The leading run of conditions that are expressions is one
+				// evaluation region: each is evaluated only when the ones before
+				// it did not hold, so a value an earlier condition computed is
+				// read by a later one. A condition that is a statement ends the
+				// run. The pins outlive the branch bodies, which are lowered
+				// beneath scopes of their own.
+				let roots = branches
+					.iter()
+					.map_while(|(condition, _)| match condition {
+						Control::Value(expr) => Some(crate::expr::logical::dag::Root {
+							expr,
+							frame: crate::expr::logical::dag::Frame::new(0),
+						}),
+						_ => None,
 					})
-					.await?;
-					let skip = self.emit(Instr::JumpIf {
-						cond: Operand::Reg(cond),
-						truthy: false,
-						target: 0,
-					});
-					self.release(cond);
-					crate::exec::vm::host::out_of_line(|| self.if_branch(branch, dst, collect))
+					.collect::<Vec<_>>();
+				let scope = self.shared_scope(&roots);
+				self.shared.push(scope);
+				let lowered: Lowered<()> = async {
+					let mut done = Vec::with_capacity(branches.len());
+					for (condition, branch) in branches {
+						let cond = self.register()?;
+						crate::exec::vm::host::out_of_line(|| {
+							self.node(condition, cond, Collect::Block)
+						})
 						.await?;
-					done.push(self.emit(Instr::Jump {
-						target: 0,
-					}));
-					let next = self.here();
-					self.patch(skip, next);
-				}
-				match otherwise {
-					Some(branch) => {
+						let skip = self.emit(Instr::JumpIf {
+							cond: Operand::Reg(cond),
+							truthy: false,
+							target: 0,
+						});
+						self.release(cond);
 						crate::exec::vm::host::out_of_line(|| self.if_branch(branch, dst, collect))
-							.await?
+							.await?;
+						done.push(self.emit(Instr::Jump {
+							target: 0,
+						}));
+						let next = self.here();
+						self.patch(skip, next);
 					}
-					None => self.load_none(dst),
+					match otherwise {
+						Some(branch) => {
+							crate::exec::vm::host::out_of_line(|| {
+								self.if_branch(branch, dst, collect)
+							})
+							.await?
+						}
+						None => self.load_none(dst),
+					}
+					let end = self.here();
+					self.patch_all(done, end);
+					Ok(())
 				}
-				let end = self.here();
-				self.patch_all(done, end);
+				.await;
+				self.shared.pop();
+				lowered?;
 			}
 			Control::Throw {
 				value,
@@ -500,7 +526,21 @@ impl Lowering<'_, '_> {
 		dst: Reg,
 	) -> Lowered<()> {
 		let evaluated = self.register()?;
-		crate::exec::vm::host::out_of_line(|| self.node(range, evaluated, Collect::Block)).await?;
+		// The range is evaluated once, before the body: one evaluation region.
+		let roots = match range {
+			Control::Value(expr) => vec![crate::expr::logical::dag::Root {
+				expr,
+				frame: crate::expr::logical::dag::Frame::new(0),
+			}],
+			_ => Vec::new(),
+		};
+		let scope = self.shared_scope(&roots);
+		self.shared.push(scope);
+		let ranged =
+			crate::exec::vm::host::out_of_line(|| self.node(range, evaluated, Collect::Block))
+				.await;
+		self.shared.pop();
+		ranged?;
 		let range = evaluated;
 		let peeled = match first {
 			Some(_) => {
