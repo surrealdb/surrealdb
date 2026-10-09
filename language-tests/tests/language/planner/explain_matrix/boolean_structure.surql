@@ -236,7 +236,7 @@ value = "[{ id: bs:1 }, { id: bs:3 }, { id: bs:6 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: b = true AND (a = 'x' OR u = 'r')]
+    Filter [ctx: Db] [predicate: a = 'x' OR u = 'r']
         IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
@@ -346,7 +346,7 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:6 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: a = 'x' AND u]
+    Filter [ctx: Db] [predicate: u]
         IndexScan [ctx: Db] [table: bs, index: idx_a, access: = 'x', direction: Forward]
 "'''
 
@@ -631,7 +631,7 @@ value = "[{ count: 4 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: plain CONTAINS 'red' AND b = true]
+    Filter [ctx: Db] [predicate: plain CONTAINS 'red']
         IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
@@ -645,7 +645,7 @@ value = "[{ id: bs:1 }, { id: bs:3 }, { id: bs:6 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [mode: GROUP ALL]
-        Filter [ctx: Db] [predicate: plain CONTAINS 'red' AND b = true]
+        Filter [ctx: Db] [predicate: plain CONTAINS 'red']
             IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
@@ -695,7 +695,7 @@ value = "[]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: plain = 'red' AND b = true]
+    Filter [ctx: Db] [predicate: plain = 'red']
         IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
@@ -709,7 +709,7 @@ value = "[]"
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [mode: GROUP ALL]
-        Filter [ctx: Db] [predicate: plain = 'red' AND b = true]
+        Filter [ctx: Db] [predicate: plain = 'red']
             IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
@@ -722,7 +722,7 @@ value = "[{ count: 0 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: plain = ['red', 'blue'] AND b = true]
+    Filter [ctx: Db] [predicate: plain = ['red', 'blue']]
         IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 

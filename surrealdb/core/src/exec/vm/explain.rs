@@ -350,6 +350,8 @@ impl<'a> Explainer<'a> {
 				Strategy::Apply => "apply",
 				Strategy::Once => "once",
 				Strategy::Hash => "hash",
+				Strategy::Lookup if nested.hashed.is_some() => "lookup, then hash",
+				Strategy::Lookup => "lookup",
 			};
 			let plan = self.plan(&nested.plan);
 			children.push(
@@ -507,6 +509,21 @@ impl<'a> Explainer<'a> {
 				direction,
 				..
 			} => self.btree_scan(table, index, access, *direction),
+			Plan::IndexLookup {
+				table,
+				index,
+				field,
+				key,
+				..
+			} => {
+				let mut attrs = vec![
+					("table".to_string(), table.to_string()),
+					("index".to_string(), index.name.to_string()),
+					("access".to_string(), format!("{field} = {}", key.expr().to_sql())),
+				];
+				attrs.extend(self.paging.take().unwrap_or_default());
+				self.node("IndexLookup", ContextLevel::Database, attrs, vec![])
+			}
 			Plan::IndexUnion {
 				table,
 				branches,
@@ -814,17 +831,26 @@ impl<'a> Explainer<'a> {
 				predicate,
 				auth,
 				hides_access_paths,
+				once,
 				..
 			} => {
 				let child = self.root(input).shared();
 				// The predicate is the definer's: a caller it is enforced on is
 				// shown a placeholder in its place.
-				let text = if self.checked {
-					"<permission>".to_string()
-				} else {
-					predicate.to_sql()
+				let shown = |predicate: &LogicalExpr| {
+					if self.checked {
+						"<permission>".to_string()
+					} else {
+						predicate.to_sql()
+					}
 				};
-				let mut attrs = vec![("predicate".to_string(), text)];
+				let mut attrs = Vec::new();
+				if let Some(once) = once {
+					attrs.push(("once".to_string(), shown(once)));
+				}
+				if once.is_none() || !is_true(predicate) {
+					attrs.push(("predicate".to_string(), shown(predicate)));
+				}
 				if auth.is_some() {
 					attrs.push(("auth".to_string(), "limited".to_string()));
 				}
@@ -849,6 +875,7 @@ impl<'a> Explainer<'a> {
 			Plan::Filter {
 				input,
 				predicate,
+				once: None,
 			} if prefiltered_scan(input, predicate) => {
 				// The scan judges the predicate of each record's stored bytes
 				// before it decodes the record, and the body judges it again
@@ -861,6 +888,7 @@ impl<'a> Explainer<'a> {
 			Plan::Filter {
 				input,
 				predicate,
+				once: None,
 			} if rechecking_scan(input, predicate) => {
 				// The scan lists the records whose index entries lie in its key
 				// range, which answers every conjunct of the predicate; the
@@ -870,15 +898,20 @@ impl<'a> Explainer<'a> {
 			Plan::Filter {
 				input,
 				predicate,
+				once,
 			} => {
 				let mut children = vec![self.root(input).shared()];
 				children.extend(self.memberships(predicate));
-				self.node(
-					"Filter",
-					ContextLevel::Database,
-					vec![("predicate".to_string(), predicate_text(predicate))],
-					children,
-				)
+				let mut attrs = Vec::new();
+				// The conjuncts judged once per run of the statement, before
+				// those judged per row.
+				if let Some(once) = once {
+					attrs.push(("once".to_string(), predicate_text(once)));
+				}
+				if once.is_none() || !is_true(predicate) {
+					attrs.push(("predicate".to_string(), predicate_text(predicate)));
+				}
+				self.node("Filter", ContextLevel::Database, attrs, children)
 			}
 			Plan::Fetch {
 				input,
@@ -1139,6 +1172,7 @@ impl<'a> Explainer<'a> {
 			}
 			Plan::Distinct {
 				input,
+				..
 			} => {
 				let child = self.root(input).shared();
 				self.node("Distinct", ContextLevel::Database, vec![], vec![child])
@@ -1150,7 +1184,11 @@ impl<'a> Explainer<'a> {
 				keys,
 				residual,
 				alias,
+				lookup,
+				build: held,
+				..
 			} => {
+				let looked_up = lookup.as_ref().map(|lookup| self.root(&lookup.right).shared());
 				let build = self.root(right).shared();
 				let probe = self.root(left).shared();
 				let mut attrs = vec![
@@ -1177,7 +1215,35 @@ impl<'a> Explainer<'a> {
 				if let Some(residual) = residual {
 					attrs.push(("residual".to_string(), residual.to_sql()));
 				}
-				self.node("HashJoin", ContextLevel::Database, attrs, vec![build, probe])
+				if *held == super::plan::JoinBuild::Left {
+					// The left input whose one row the join holds, then the
+					// right input it streams past that row.
+					return self.node(
+						"SingleRowJoin",
+						ContextLevel::Database,
+						attrs,
+						vec![probe, build],
+					);
+				}
+				match looked_up {
+					// The lookup's right input, the hash join's it hands the
+					// rest of the left rows to, and the left input.
+					Some(looked_up) => {
+						attrs.push((
+							"lookups".to_string(),
+							format!("{}, then hash", super::plan::LOOKUP_EVALUATIONS),
+						));
+						self.node(
+							"IndexLoopJoin",
+							ContextLevel::Database,
+							attrs,
+							vec![looked_up, build, probe],
+						)
+					}
+					None => {
+						self.node("HashJoin", ContextLevel::Database, attrs, vec![build, probe])
+					}
+				}
 			}
 			Plan::Limit {
 				input,
@@ -1416,6 +1482,12 @@ fn conjunct_text(predicate: &LogicalExpr) -> String {
 /// such. The rows of a scan under no enforcement are the stored records, so
 /// the predicate reads what the bytes hold; the lowering attaches the shape to
 /// the scan under the same test.
+/// Whether `predicate` is the literal `true`: what a filter whose every
+/// conjunct is judged once judges per row.
+fn is_true(predicate: &LogicalExpr) -> bool {
+	matches!(predicate, LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::Bool(true)))
+}
+
 fn prefiltered_scan(input: &Plan, predicate: &LogicalExpr) -> bool {
 	matches!(input, Plan::TableScan { .. })
 		&& crate::exec::pre_decode_filter::PreDecodeShape::of(predicate).is_some()
@@ -1448,6 +1520,7 @@ fn takes_paging(plan: &Plan) -> bool {
 		Plan::Filter {
 			input,
 			predicate,
+			once: None,
 		} => {
 			prefiltered_scan(input, predicate)
 				|| (rechecking_scan(input, predicate) && takes_paging(input))

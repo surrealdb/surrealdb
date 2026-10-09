@@ -76,7 +76,7 @@ value = '''
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: flag = true AND ->wrote->doc->wrote->doc CONTAINS (doc:x)]
+    Filter [ctx: Db] [predicate: ->wrote->doc->wrote->doc CONTAINS (doc:x)]
         IndexScan [ctx: Db] [table: person, index: idx_flag, access: = true, direction: Forward]
 ''''
 

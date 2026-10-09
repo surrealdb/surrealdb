@@ -482,3 +482,271 @@ async fn a_mutation_plans_its_write_once_for_every_row() {
 		.collect();
 	assert_eq!(state, expected);
 }
+
+/// The join of a SQL plan pairing on a field an index covers alone reads its
+/// right input through the index, one left row's key at a time, and hands
+/// the left rows past the first few to the hash join; it pairs the rows the
+/// hash join pairs, in its order, whatever the key's kind.
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn a_join_on_an_indexed_field_reads_its_right_input_through_the_index() {
+	use super::plan::Plan;
+	let setup = |index: &str| {
+		format!(
+			"
+			DEFINE TABLE l SCHEMALESS;
+			DEFINE TABLE r SCHEMALESS;
+			{index}
+			FOR $i IN 0..150 {{ CREATE type::record('l', $i) SET k = $i % 40 RETURN NONE }};
+			CREATE l:1000 SET k = 1.0 RETURN NONE;
+			CREATE l:1001 SET k = 2dec RETURN NONE;
+			CREATE l:1002 SET k = NULL RETURN NONE;
+			CREATE l:1003 RETURN NONE;
+			CREATE l:1004 SET k = '3' RETURN NONE;
+			FOR $i IN 0..90 {{ CREATE type::record('r', $i) SET k = $i % 30, x = $i RETURN NONE }};
+			CREATE r:1000 SET k = NULL, x = -1 RETURN NONE;
+			CREATE r:1001 SET x = -2 RETURN NONE;
+			CREATE r:1002 SET k = 1dec, x = -3 RETURN NONE;
+			CREATE r:1003 SET k = [3], x = -4 RETURN NONE;
+		"
+		)
+	};
+	let queries = [
+		"SELECT a.k, b.x FROM l a JOIN r b ON a.k = b.k",
+		"SELECT a.k, b.x FROM l a LEFT JOIN r b ON a.k = b.k",
+		"SELECT a.k, b.x FROM l a JOIN r b ON b.k = a.k AND b.x > 20",
+		"SELECT a.k, b.x FROM l a LEFT JOIN r b ON a.k = b.k AND b.x < 0",
+		"SELECT a.k, b.x FROM l a JOIN r b ON a.k = b.k WHERE a.k < 3 LIMIT 5",
+	];
+	let mut answers = Vec::new();
+	for index in ["", "DEFINE INDEX r_k ON r FIELDS k;"] {
+		let db = TestDb::new(&setup(index)).await;
+		let ctx = db.exec_ctx().await;
+		let planner = super::tests::planner(&ctx);
+		let mut answered = Vec::new();
+		for query in queries {
+			let statements = crate::pgsql::parse_to_statements(
+				query,
+				&crate::dbs::Capabilities::all(),
+				&db.datastore().parser_config(),
+			)
+			.unwrap_or_else(|e| panic!("`{query}` does not parse: {e:?}"));
+			let [crate::dbs::TopLevelStatement::Plan(op)] = statements.as_slice() else {
+				panic!("`{query}` is not one plan");
+			};
+			let physical = super::optimize::optimize(
+				super::map::map(&planner, op).await.unwrap_or_else(|e| panic!("`{query}`: {e:?}")),
+			);
+			fn looks_up(plan: &Plan) -> bool {
+				match plan {
+					Plan::Join {
+						lookup,
+						left,
+						..
+					} => lookup.is_some() || looks_up(left),
+					_ => plan.input().is_some_and(looks_up),
+				}
+			}
+			assert_eq!(
+				looks_up(&physical.root),
+				!index.is_empty(),
+				"`{query}`: {:#?}",
+				physical.root
+			);
+			let vm = super::plan_front_end(&planner, (**op).clone()).await.expect("the VM plans");
+			answered.push(
+				crate::exec::operators::test_util::try_collect(&vm, &ctx)
+					.await
+					.unwrap_or_else(|e| panic!("`{query}`: {e:?}")),
+			);
+		}
+		answers.push(answered);
+	}
+	assert_eq!(answers[0], answers[1]);
+}
+
+/// The join of a SQL plan whose left input yields at most one row — a
+/// derived table with a `LIMIT 1` or an aggregate over every row — holds
+/// that row and streams its right input past it, where reading the right
+/// input raises nothing and no index serves its key; it pairs the rows the
+/// hash join pairs, in its order, whatever the key's kind, a regex key on
+/// either side included. A field whose select permission is a predicate
+/// leaves the right table's enforcement something to evaluate, so the same
+/// query over it builds the hash table and answers alike.
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn a_join_over_one_left_row_holds_the_row_and_streams_its_right_input() {
+	use super::plan::{JoinBuild, Plan};
+	let setup = |field: &str| {
+		format!(
+			"
+			DEFINE TABLE l SCHEMALESS;
+			DEFINE TABLE r SCHEMALESS;
+			{field}
+			FOR $i IN 0..20 {{ CREATE type::record('l', $i) SET u = $i, k = $i % 7 RETURN NONE }};
+			CREATE l:100 SET u = 100, k = 1.0 RETURN NONE;
+			CREATE l:101 SET u = 101, k = NULL RETURN NONE;
+			CREATE l:102 SET u = 102 RETURN NONE;
+			CREATE l:103 SET u = 103, k = <regex> '^3$' RETURN NONE;
+			CREATE l:104 SET u = 104, k = 'nothing' RETURN NONE;
+			FOR $i IN 0..40 {{ CREATE type::record('r', $i) SET k = $i % 5, x = $i RETURN NONE }};
+			CREATE r:1000 SET k = NULL, x = -1 RETURN NONE;
+			CREATE r:1001 SET x = -2 RETURN NONE;
+			CREATE r:1002 SET k = 1dec, x = -3 RETURN NONE;
+			CREATE r:1003 SET k = <regex> '^1$', x = -4 RETURN NONE;
+			CREATE r:1004 SET k = '3', x = -5 RETURN NONE;
+		"
+		)
+	};
+	let mut queries = vec![
+		"SELECT s.m, b.x FROM (SELECT max(a.u) AS m FROM l a WHERE a.u < 4) s JOIN r b ON s.m = b.k"
+			.to_owned(),
+		"SELECT s.m, b.x FROM (SELECT max(a.u) AS m FROM l a) s LEFT JOIN r b ON s.m = b.k"
+			.to_owned(),
+	];
+	for u in [3, 100, 101, 102, 103, 104, 999] {
+		let one = format!("(SELECT a.k AS k FROM l a WHERE a.u = {u} LIMIT 1) s");
+		queries.push(format!("SELECT s.k, b.x FROM {one} JOIN r b ON s.k = b.k"));
+		queries.push(format!("SELECT s.k, b.x FROM {one} LEFT JOIN r b ON s.k = b.k"));
+		queries.push(format!("SELECT s.k, b.x FROM {one} JOIN r b ON b.k = s.k AND b.x > 20"));
+		queries
+			.push(format!("SELECT s.k, b.x FROM {one} LEFT JOIN r b ON s.k = b.k AND b.x > 100"));
+		queries.push(format!("SELECT s.k, b.x FROM {one} JOIN r b ON s.k = b.k LIMIT 3"));
+	}
+	let mut answers = Vec::new();
+	for field in ["", "DEFINE FIELD hidden ON r PERMISSIONS FOR select WHERE true;"] {
+		let db = TestDb::new(&setup(field)).await;
+		let ctx = db.exec_ctx().await;
+		let planner = super::tests::planner(&ctx);
+		let mut answered = Vec::new();
+		for query in &queries {
+			let statements = crate::pgsql::parse_to_statements(
+				query,
+				&crate::dbs::Capabilities::all(),
+				&db.datastore().parser_config(),
+			)
+			.unwrap_or_else(|e| panic!("`{query}` does not parse: {e:?}"));
+			let [crate::dbs::TopLevelStatement::Plan(op)] = statements.as_slice() else {
+				panic!("`{query}` is not one plan");
+			};
+			let physical = super::optimize::optimize(
+				super::map::map(&planner, op).await.unwrap_or_else(|e| panic!("`{query}`: {e:?}")),
+			);
+			fn holds(plan: &Plan) -> bool {
+				match plan {
+					Plan::Join {
+						build,
+						left,
+						..
+					} => *build == JoinBuild::Left || holds(left),
+					_ => plan.input().is_some_and(holds),
+				}
+			}
+			assert_eq!(holds(&physical.root), field.is_empty(), "`{query}`: {:#?}", physical.root);
+			let explained = crate::exec::operators::ExplainPlan::render(
+				&*super::explain::to_explain_operator(op, &physical, None, false),
+				crate::expr::ExplainFormat::Text,
+			)
+			.to_sql();
+			assert_eq!(
+				explained.contains("SingleRowJoin"),
+				field.is_empty(),
+				"`{query}` renders\n{explained}"
+			);
+			let vm = super::plan_front_end(&planner, (**op).clone()).await.expect("the VM plans");
+			answered.push(
+				crate::exec::operators::test_util::try_collect(&vm, &ctx)
+					.await
+					.unwrap_or_else(|e| panic!("`{query}`: {e:?}")),
+			);
+		}
+		answers.push(answered);
+	}
+	for (at, query) in queries.iter().enumerate() {
+		assert_eq!(answers[0][at], answers[1][at], "`{query}`");
+	}
+}
+
+/// A predicate above a SQL join that reads only the left row moves beneath
+/// the join onto its left input, where reading the right input raises
+/// nothing; a predicate reading the right row stays above, and so does one
+/// that may raise. The same query over a right table whose
+/// enforcement has a predicate to evaluate keeps the predicate whole above
+/// the join and answers alike.
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn a_predicate_over_the_left_row_moves_beneath_a_join() {
+	use super::plan::Plan;
+	let setup = |field: &str| {
+		format!(
+			"
+			DEFINE TABLE l SCHEMALESS;
+			DEFINE TABLE r SCHEMALESS;
+			{field}
+			FOR $i IN 0..60 {{ CREATE type::record('l', $i) SET k = $i % 9, v = $i RETURN NONE }};
+			CREATE l:100 SET k = NULL, v = 100 RETURN NONE;
+			CREATE l:101 SET v = 101 RETURN NONE;
+			FOR $i IN 0..30 {{ CREATE type::record('r', $i) SET k = $i % 7, x = $i RETURN NONE }};
+			CREATE r:1000 SET k = NULL, x = -1 RETURN NONE;
+		"
+		)
+	};
+	// Each query with whether its predicate moves, wholly or in part.
+	let queries = [
+		("SELECT a.v, b.x FROM l a JOIN r b ON a.k = b.k WHERE a.v > 40", true),
+		("SELECT a.v, b.x FROM l a LEFT JOIN r b ON a.k = b.k WHERE a.v > 40", true),
+		("SELECT a.v, b.x FROM l a LEFT JOIN r b ON a.k = b.k WHERE a.v >= 100", true),
+		// SQL's `AND` is one three-valued expression reading both rows.
+		("SELECT a.v, b.x FROM l a JOIN r b ON a.k = b.k WHERE a.v > 40 AND b.x < 10", false),
+		("SELECT a.v, b.x FROM l a JOIN r b ON a.k = b.k WHERE b.x < 10", false),
+		("SELECT a.v, b.x FROM l a JOIN r b ON a.k = b.k WHERE a.v > 40 LIMIT 4", true),
+		("SELECT a.v, b.x FROM l a JOIN r b ON a.k = b.k WHERE a.v / 0 > 1 AND a.v > 40", false),
+		("SELECT a.v, b.x FROM l a JOIN r b ON a.k = b.k WHERE a.v > 1000", true),
+	];
+	let mut answers = Vec::new();
+	for field in ["", "DEFINE FIELD hidden ON r PERMISSIONS FOR select WHERE true;"] {
+		let db = TestDb::new(&setup(field)).await;
+		let ctx = db.exec_ctx().await;
+		let planner = super::tests::planner(&ctx);
+		let mut answered = Vec::new();
+		for (query, moves) in &queries {
+			let statements = crate::pgsql::parse_to_statements(
+				query,
+				&crate::dbs::Capabilities::all(),
+				&db.datastore().parser_config(),
+			)
+			.unwrap_or_else(|e| panic!("`{query}` does not parse: {e:?}"));
+			let [crate::dbs::TopLevelStatement::Plan(op)] = statements.as_slice() else {
+				panic!("`{query}` is not one plan");
+			};
+			let physical = super::optimize::optimize(
+				super::map::map(&planner, op).await.unwrap_or_else(|e| panic!("`{query}`: {e:?}")),
+			);
+			fn filters_left(plan: &Plan) -> bool {
+				match plan {
+					Plan::Join {
+						left,
+						..
+					} => matches!(**left, Plan::Filter { .. }),
+					_ => plan.input().is_some_and(filters_left),
+				}
+			}
+			assert_eq!(
+				filters_left(&physical.root),
+				*moves && field.is_empty(),
+				"`{query}`: {:#?}",
+				physical.root
+			);
+			let vm = super::plan_front_end(&planner, (**op).clone()).await.expect("the VM plans");
+			answered.push(
+				crate::exec::operators::test_util::try_collect(&vm, &ctx)
+					.await
+					.map_err(|e| format!("{e:?}")),
+			);
+		}
+		answers.push(answered);
+	}
+	for (at, (query, _)) in queries.iter().enumerate() {
+		assert_eq!(answers[0][at], answers[1][at], "`{query}`");
+	}
+}

@@ -145,7 +145,7 @@ value = '''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: category = 'ml' AND published = true]
+    Filter [ctx: Db] [predicate: published = true]
         IndexScan [ctx: Db] [table: docs, index: idx_category, access: = 'ml', direction: Forward]
 "'''
 
@@ -153,7 +153,7 @@ value = '''
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Limit [ctx: Db] [limit: 1]
-        Filter [ctx: Db] [predicate: category = 'ml' AND published = true]
+        Filter [ctx: Db] [predicate: published = true]
             IndexScan [ctx: Db] [table: docs, index: idx_category, access: = 'ml', direction: Forward]
 "'''
 
@@ -166,7 +166,7 @@ value = '''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: category = 'ml' AND published = true]
+    Filter [ctx: Db] [predicate: published = true]
         IndexScan [ctx: Db] [table: docs, index: idx_category, access: = 'ml', direction: Forward]
 "'''
 

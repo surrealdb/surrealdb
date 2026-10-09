@@ -784,6 +784,15 @@ pub(super) fn instr(
 		| Instr::JoinProbe {
 			..
 		}
+		| Instr::JoinPair {
+			..
+		}
+		| Instr::VerdictJump {
+			..
+		}
+		| Instr::VerdictSet {
+			..
+		}
 		| Instr::GroupKey {
 			..
 		}
@@ -1050,6 +1059,9 @@ pub(super) fn source(source: &Source) -> (Class, String) {
 			..
 		}
 		| Source::Index {
+			..
+		}
+		| Source::Lookup {
 			..
 		}
 		| Source::IndexUnion {

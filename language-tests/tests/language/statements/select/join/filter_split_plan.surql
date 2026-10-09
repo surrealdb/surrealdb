@@ -42,7 +42,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: name = 'p1' AND team INSIDE (subquery)]
+    Filter [ctx: Db] [predicate: team INSIDE (subquery)]
         IndexScan [ctx: Db] [table: person, index: person_name, access: = 'p1', direction: Forward]
         Subquery [ctx: Db] [strategy: once]
             ProjectValue [ctx: Db] [expr: id]
@@ -72,7 +72,7 @@ value = '''
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: age > 3 AND name = 'p1' AND team INSIDE (subquery)]
+    Filter [ctx: Db] [predicate: age > 3 AND team INSIDE (subquery)]
         IndexScan [ctx: Db] [table: person, index: person_name, access: = 'p1', direction: Forward]
         Subquery [ctx: Db] [strategy: once]
             ProjectValue [ctx: Db] [expr: id]

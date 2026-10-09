@@ -10,8 +10,7 @@ value = "'OK'"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: id = (item:1)]
-        RecordIdScan [ctx: Db] [record_id: item:1]
+    RecordIdScan [ctx: Db] [record_id: item:1]
 ''''
 
 [[test.results]]
@@ -20,7 +19,7 @@ value = "[{ id: item:1, name: 'Alpha', score: 10 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: id = (item:2) AND score > 15]
+    Filter [ctx: Db] [predicate: score > 15]
         RecordIdScan [ctx: Db] [record_id: item:2]
 ''''
 
@@ -43,8 +42,7 @@ value = "[{ id: item:1, name: 'Alpha', score: 10 }, { id: item:2, name: 'Beta', 
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: (item:3) = id]
-        RecordIdScan [ctx: Db] [record_id: item:3]
+    RecordIdScan [ctx: Db] [record_id: item:3]
 ''''
 
 [[test.results]]
@@ -53,8 +51,7 @@ value = "[{ id: item:3, name: 'Gamma', score: 30 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: id == (item:1)]
-        RecordIdScan [ctx: Db] [record_id: item:1]
+    RecordIdScan [ctx: Db] [record_id: item:1]
 ''''
 
 [[test.results]]

@@ -684,6 +684,28 @@ pub(super) enum Instr {
 		keys: Reg,
 		count: u16,
 	},
+	/// Jump on the verdict `cell` holds for the run of the statement: to
+	/// `admitted` once a verdict that admits rows is held, to `refused` once
+	/// one that refuses them is, and on to the next instruction, which
+	/// judges the conjuncts the verdict is of, while none is.
+	VerdictJump {
+		cell: u16,
+		admitted: Label,
+		refused: Label,
+	},
+	/// Hold verdict `admits` in `cell` for the rest of the run of the
+	/// statement.
+	VerdictSet {
+		cell: u16,
+		admits: bool,
+	},
+	/// Hand the row, a row of the right input of join `join`, which holds its
+	/// left row ([`JoinSpec::streams`]), to the join, which pairs it with the
+	/// held row where their keys match and runs the pairing through the join's
+	/// pipeline once this body ends.
+	JoinPair {
+		join: u16,
+	},
 	/// Set key `index` of the row's group in aggregate `aggregate`.
 	GroupKey {
 		aggregate: u16,
@@ -2963,13 +2985,26 @@ pub(super) struct JoinSpec {
 	/// What decides, beside the keys, whether a build row matches a probe row:
 	/// evaluated over the row the pairing would emit.
 	pub(super) residual: Option<HostScalar>,
-	/// The group that reads the build side.
+	/// The group that reads the build side; unread where the join holds its
+	/// left row ([`Self::streams`]).
 	pub(super) build: u16,
 	/// The group whose start empties the build table.
 	pub(super) owner: Option<u16>,
 	/// The index in [`Program::pipelines`] of the pipeline whose source is
 	/// this join.
 	pub(super) pipeline: usize,
+	/// For a join reading its right input through an index
+	/// ([`super::plan::JoinLookup`]): the group that reads it for one left
+	/// row's key, and the position of that key among the probe keys. The
+	/// first [`super::plan::LOOKUP_EVALUATIONS`] left rows since the group
+	/// that owns the join started run it in place of the build table.
+	pub(super) lookup: Option<(u16, usize)>,
+	/// For a join that holds its left input's one row
+	/// ([`super::plan::JoinBuild::Left`]): the index in [`Program::pipelines`]
+	/// of the pipeline that reads the right input and hands each row to the
+	/// join ([`Instr::JoinPair`]). It runs after the left input's pipeline,
+	/// and only where that pipeline handed the join a row.
+	pub(super) streams: Option<usize>,
 }
 
 /// A sort: the order its rows drain in.
@@ -2978,6 +3013,11 @@ pub(super) struct SortSpec {
 	pub(super) keys: Vec<KeyOrder>,
 	/// Only this many rows of the order are ever read.
 	pub(super) keep: Option<usize>,
+	/// How the plan has the sort hold its rows: [`Spill::Spillable`] for a
+	/// sort that keeps all of them, which the run charges to the query's
+	/// lease and spills once the lease no longer covers them
+	/// ([`Spill::Bounded`] for one bounded by `keep`).
+	pub(super) held: super::plan::Spill,
 	/// Whether the sort holds on disk what outgrows the rows it may keep in
 	/// memory (`TEMPFILES`); never with `keep`, which bounds it already.
 	pub(super) spill: bool,
@@ -3002,6 +3042,11 @@ pub(super) struct SortSpec {
 pub(crate) struct AggregateSink {
 	pub(super) fields: Vec<AggSpec>,
 	pub(super) keys: usize,
+	/// How the plan has the aggregate hold its groups: [`Spill::Spillable`]
+	/// for `GROUP BY`'s, which the run charges to the query's lease and
+	/// spills once the lease no longer covers them, [`Spill::Bounded`] for
+	/// `GROUP ALL`'s one.
+	pub(super) held: super::plan::Spill,
 }
 
 /// A projected field of an aggregate: what its group answers for it, in the
@@ -3695,6 +3740,14 @@ pub(super) struct FunctionSpec {
 	/// What the call spends of the computation-depth budget beyond its own
 	/// re-entry ([`super::depth`]).
 	pub(super) depth: CallDepth,
+	/// Whether every body the call may run is light: a small leaf
+	/// ([`Program::small_leaf`]) that reads its arguments from its slots and
+	/// nothing else of its frame. The lighter calling convention runs it in
+	/// the frame the call entered, one re-entry deeper, with the arguments in
+	/// its slots, in place where it hands the host no step, rather than as a
+	/// program of its own in a frame built for the call on the statement's
+	/// frame stack.
+	pub(super) light: bool,
 }
 
 /// What a call of a user-defined function spends of the computation-depth
@@ -3838,6 +3891,14 @@ pub(super) struct NestedSpec {
 	/// array they gather ([`BlockInstr::Member`]), which only a statement kept
 	/// across evaluations ([`Self::once`]) is.
 	pub(super) members: bool,
+	/// For a statement read through an index nested loop: the group that reads
+	/// it through its probe, and the path into `$parent` of the key the
+	/// lookup reads. The evaluations past the first
+	/// [`super::plan::LOOKUP_EVALUATIONS`] since the group that owns it
+	/// started run that group instead of `group`, as does an evaluation whose
+	/// key the index may not list every equal record under, which a lookup
+	/// would read the table whole for.
+	pub(super) hashed: Option<(u16, Vec<surrealdb_strand::Strand>)>,
 }
 
 /// A graph lookup: a run of hops, each read from the records the one before
@@ -4458,6 +4519,18 @@ pub(super) enum Source {
 		/// records.
 		decode: Option<crate::exec::operators::scan::common::DecodeFields>,
 	},
+	/// The records of `table` B-tree index `index` lists under an equality to
+	/// a key read when the pipeline opens: the value at `outer`, a path of
+	/// fields into `$parent` read through objects alone, or with no `outer`
+	/// the key the join running the pipeline hands it
+	/// ([`State::lookup_key`](super::interp::State)). Every record of
+	/// `table`, in key order, where the key is one the index may not list
+	/// every equal record under ([`super::plan::Plan::IndexLookup`]).
+	Lookup {
+		table: TableName,
+		index: crate::exec::index::access_path::IndexRef,
+		outer: Option<Vec<surrealdb_strand::Strand>>,
+	},
 	/// The records the B-tree scans `branches` list, each once: branch by
 	/// branch, or merged by `merge`'s key.
 	IndexUnion {
@@ -4709,6 +4782,10 @@ impl Source {
 				table,
 				..
 			}
+			| Source::Lookup {
+				table,
+				..
+			}
 			| Source::Bitmap {
 				table,
 				..
@@ -4763,6 +4840,9 @@ impl Source {
 				..
 			}
 			| Source::Index {
+				..
+			}
+			| Source::Lookup {
 				..
 			}
 			| Source::IndexUnion {
@@ -4895,6 +4975,49 @@ impl Pipeline {
 	}
 }
 
+impl Program {
+	/// Whether the program is a small leaf: one pipeline of its own, run once,
+	/// that pages, sorts, groups, joins, splits, fetches and writes nothing,
+	/// reads no storage of its own, and runs no statement, user-defined
+	/// function, closure, external call or index operator — a function body
+	/// such as `{ LET $d = $x * 2; RETURN $d > 150 }`. It reaches no unit that
+	/// could call back into the unit calling it.
+	pub(super) fn small_leaf(&self) -> bool {
+		matches!(
+			self.pipelines.as_slice(),
+			[Pipeline {
+				source: Source::Once,
+				group: None,
+				..
+			}]
+		) && self.groups.is_empty()
+			&& self.host_code.is_empty()
+			&& self.limits.is_empty()
+			&& self.sorts.is_empty()
+			&& self.splits.is_empty()
+			&& self.joins.is_empty()
+			&& self.distincts.is_empty()
+			&& self.fetches.is_empty()
+			&& self.aggregates.is_empty()
+			&& self.permissions.is_empty()
+			&& self.write.is_none()
+			&& self.tail.is_none()
+			&& self.events.is_none()
+			&& self.dispatch.is_none()
+			&& self.matches.is_empty()
+			&& self.externals.is_empty()
+			&& self.degrees.is_empty()
+			&& self.subqueries.is_empty()
+			&& self.nested.is_empty()
+			&& self.probes.is_empty()
+			&& self.lookups.is_empty()
+			&& self.functions.is_empty()
+			&& self.closures.is_empty()
+			&& self.closure_values.is_empty()
+			&& self.units.is_empty()
+	}
+}
+
 /// A statement of a block, compiled into the block's program: the pipelines,
 /// paging clauses, sorts, aggregates and permission frames whose `group` is
 /// its index, and the tables they share with the rest of the program.
@@ -4958,6 +5081,9 @@ pub(crate) struct Program {
 	pub(super) joins: Vec<JoinSpec>,
 	/// For each distinct set, the group whose start empties it.
 	pub(super) distincts: Vec<Option<u16>>,
+	/// For each verdict a filter keeps on the conjuncts it judges once
+	/// ([`Instr::VerdictJump`]), the group whose start forgets it.
+	pub(super) verdicts: Vec<Option<u16>>,
 	/// The paths each `FETCH` walks, as the planner resolves them.
 	pub(super) fetches: Vec<Vec<Vec<FetchStepSpec>>>,
 	pub(super) aggregates: Vec<AggregateSink>,

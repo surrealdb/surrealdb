@@ -67,7 +67,7 @@ value = "[ev:1, ev:2, ev:3]"
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 2]
-        Filter [ctx: Db] [predicate: cat = 'alpha' AND note = 'keep']
+        Filter [ctx: Db] [predicate: note = 'keep']
             IndexScan [ctx: Db] [table: ev, index: ev_cat_pri, access: ['alpha'], direction: Forward]
 "'''
 

@@ -369,6 +369,10 @@ pub(super) async fn call(
 		skips || limited_ctx.root().skip_fetch_perms,
 		principal,
 	)?;
+	if spec.light {
+		let value = call_light(&body, limited_ctx, ctx, bound).await?;
+		return returned(spec, entered, value);
+	}
 	// The body runs one re-entry deeper, the budget being the context's,
 	// consumed per call, in the frame the call was reached in, as a scalar
 	// subquery of the call: `$this` and `$parent` denote the caller's row,
@@ -402,6 +406,61 @@ pub(super) async fn call(
 		Err(e) => return Err(e),
 	};
 	returned(spec, entered, result)
+}
+
+/// The value `body`, a light body ([`FunctionSpec::light`]), computes for
+/// arguments `bound`: run in `limited`, the frame the call entered, one
+/// re-entry deeper, over the caller's row where `ctx` holds one, with the
+/// arguments in its slots, on a state of its own. The body reads nothing of
+/// the frame but what those slots and the row hold, so no frame is built for
+/// it, and it runs in the caller's task — in place where it hands the host no
+/// step. The call spends the re-entry a called body spends, so what the body
+/// re-enters — the query an `eval` in it plans and runs — spends the
+/// computation-depth budget from there, and a `RETURN` in the body is its
+/// value.
+async fn call_light(
+	body: &Arc<Program>,
+	limited: &ExecutionContext,
+	ctx: &EvalContext<'_>,
+	bound: Vec<Value>,
+) -> FlowResult<Value> {
+	use std::borrow::Cow;
+	let deeper = limited.dive_by(1).map_err(ControlFlow::Err)?;
+	let limited = &deeper;
+	let state = |slots: Vec<Value>| -> FlowResult<_> {
+		let mut state = super::host::unit_state(body, limited)?;
+		state.permissions_bypassed = ctx.skip_fetch_perms;
+		state.rowless = ctx.current_value.is_none();
+		state.slots = slots;
+		Ok(state)
+	};
+	let row = ctx.current_value.map_or(Cow::Owned(Value::None), Cow::Borrowed);
+	let pipeline = &body.pipelines[0];
+	let mut inline = state(bound)?;
+	let (row, start, mut state) =
+		match super::host::run_unit_inline(body, pipeline, row, &mut inline) {
+			Ok(_) => return Ok(inline.output.pop().unwrap_or(Value::None)),
+			Err(unfinished) => match unfinished.resume {
+				Some(start) => (unfinished.row, start, inline),
+				None => {
+					let slots = std::mem::take(&mut inline.slots);
+					(unfinished.row, 0, state(slots)?)
+				}
+			},
+		};
+	super::host::host_frames(body, &mut state, limited);
+	match super::host::out_of_line(|| {
+		super::host::run_cow_row_from(body, pipeline, row, &mut state, limited, start)
+	})
+	.await
+	{
+		Ok(_) => Ok(state.output.pop().unwrap_or(Value::None)),
+		Err(ControlFlow::Return(value)) => Ok(value),
+		Err(ControlFlow::Break | ControlFlow::Continue) => {
+			Err(ExecError::InvalidControlFlow.into())
+		}
+		Err(error) => Err(error),
+	}
 }
 
 /// `row`, the caller's row, as the allocation a body binds as `$parent` and

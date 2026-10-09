@@ -776,6 +776,7 @@ async fn start_group(
 	for (at, nested) in program.nested.iter().enumerate() {
 		if nested.owner == Some(group) {
 			state.reset_once(at);
+			state.lookups[at] = 0;
 		}
 	}
 	for (at, owner) in program.probes.iter().enumerate() {
@@ -786,6 +787,13 @@ async fn start_group(
 	for (at, join) in program.joins.iter().enumerate() {
 		if join.owner == Some(group) {
 			state.joins[at] = None;
+			state.join_lookups[at] = 0;
+			state.held[at] = None;
+		}
+	}
+	for (at, owner) in program.verdicts.iter().enumerate() {
+		if *owner == Some(group) {
+			state.verdicts[at] = None;
 		}
 	}
 	for (at, owner) in program.distincts.iter().enumerate() {
@@ -864,6 +872,15 @@ pub(super) async fn run_pipelines(
 	for (index, pipeline) in
 		program.pipelines.iter().enumerate().filter(|(_, pipeline)| pipeline.group == group)
 	{
+		// The right input of a join that holds its left row is read only once
+		// the left input handed it one, as a build side is read only once a
+		// probe row arrives.
+		let streamed = program.joins.iter().position(|join| join.streams == Some(index));
+		if let Some(join) = streamed
+			&& state.held[join].is_none()
+		{
+			continue;
+		}
 		// A join whose build side writes runs it before the pipeline that
 		// reads the rows it takes starts, so those rows read what it wrote.
 		for (split, spec) in program.splits.iter().enumerate() {
@@ -901,6 +918,9 @@ pub(super) async fn run_pipelines(
 			|| matches!(pipeline.source, Source::Sorted { .. } | Source::Groups { .. });
 		let spent = limits_spent(pipeline, state);
 		if (skippable && spent) || (reads_storage && state.zeroed) {
+			if let Some(join) = streamed {
+				state.held[join] = None;
+			}
 			if let Some(table) = pipeline.source.table() {
 				let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
 					.await
@@ -922,6 +942,9 @@ pub(super) async fn run_pipelines(
 				..
 			}
 			| Source::Index {
+				..
+			}
+			| Source::Lookup {
 				..
 			}
 			| Source::IndexUnion {
@@ -1220,6 +1243,10 @@ pub(super) async fn run_pipelines(
 					.await?;
 			}
 		}
+		if let Some(join) = streamed {
+			out_of_line(|| finish_held_join(program, join as u16, state, ctx)).await?;
+			out_of_line(|| flush(state, yielder, flush_at, ctx)).await?;
+		}
 	}
 	Ok(())
 }
@@ -1400,6 +1427,68 @@ pub(super) async fn run_storage_source(
 				version,
 				distinct,
 				decode.as_ref(),
+			)?;
+			let mut rows = Rows::of(program, pipeline, ctx);
+			loop {
+				let row = match records.next(ctx).await {
+					Ok(Some(row)) => row,
+					Ok(None) => break,
+					Err(e) => return rows.fail(e, state, ctx, yielder, flush_at).await,
+				};
+				if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
+					return Ok(true);
+				}
+			}
+			rows.finish(state, ctx, yielder, flush_at).await
+		}
+		// The records the index lists under the key, where it lists every
+		// record whose field equals the key; otherwise the table whole. The
+		// index is the one the plan read from the catalog under the
+		// snapshot this run reads.
+		Source::Lookup {
+			table,
+			index,
+			outer,
+		} => {
+			let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
+				.await
+				.map_err(ControlFlow::Err)?;
+			let def = descriptor.defined().map_err(ControlFlow::Err)?;
+			refuse_lightweight(table, def)?;
+			let key = match outer {
+				Some(outer) => super::nested::key_at(ctx.value("parent"), outer).cloned(),
+				None => state.lookup_key.clone(),
+			};
+			let key = key.filter(|key| version.is_none() && lookup_key(key));
+			let Some(key) = key else {
+				let range = RecordPrefix {
+					ns: db_ctx.ns_ctx.ns.namespace_id,
+					db: db_ctx.db.database_id,
+					tb: Cow::Borrowed(table),
+				}
+				.range()?;
+				return scan_range(
+					program,
+					pipeline,
+					range,
+					crate::kvs::Direction::Forward,
+					version,
+					state,
+					ctx,
+					yielder,
+					flush_at,
+				)
+				.await;
+			};
+			let access = crate::exec::index::access_path::BTreeAccess::Equality(key);
+			let mut records = IndexRecords::open(
+				ctx,
+				index,
+				&access,
+				crate::kvs::Direction::Forward,
+				version,
+				false,
+				None,
 			)?;
 			let mut rows = Rows::of(program, pipeline, ctx);
 			loop {
@@ -1852,6 +1941,33 @@ pub(super) async fn run_storage_source(
 /// [`access_repeats_records`]) lists it once: the first entry to name it, in the
 /// index's order, stands for the record. The repeats are dropped from the ids
 /// before any record is read, so they cost no read.
+/// Whether a B-tree equality on `key` lists every record whose field `=` the
+/// key ([`Source::Lookup`]): a value keyed alike by every value equal to it.
+/// An array is listed by its elements, a float or decimal equals a number of
+/// another representation inexactly, and a record id with a composite key
+/// may hold either. A string equals a regex it matches, but no entry is keyed
+/// by a regex.
+pub(super) fn lookup_key(key: &Value) -> bool {
+	match key {
+		Value::None
+		| Value::Null
+		| Value::Bool(_)
+		| Value::Number(crate::val::Number::Int(_))
+		| Value::Duration(_)
+		| Value::Datetime(_)
+		| Value::Uuid(_)
+		| Value::Bytes(_)
+		| Value::String(_) => true,
+		Value::RecordId(rid) => {
+			matches!(
+				rid.key,
+				RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_)
+			)
+		}
+		_ => false,
+	}
+}
+
 struct IndexRecords {
 	listing: Listing,
 	reader: RecordReader,
@@ -2520,7 +2636,10 @@ pub(super) fn run_unit_inline<'r>(
 				start = resume;
 			}
 			Ok(step @ (Step::Next | Step::Stop))
-				if !matches!(state.pending, Some(Pending::Split { .. } | Pending::Join { .. })) =>
+				if !matches!(
+					state.pending,
+					Some(Pending::Split { .. } | Pending::Join { .. } | Pending::JoinPair { .. })
+				) =>
 			{
 				if state.pending.is_some() {
 					state.settle(program, row.into_owned());
@@ -3957,6 +4076,12 @@ async fn run_body(
 	{
 		return run_join(program, join, row.into_owned(), keys, state, ctx).await;
 	}
+	if let Some(Pending::JoinPair {
+		join,
+	}) = state.pending.take_if(|pending| matches!(pending, Pending::JoinPair { .. }))
+	{
+		return run_join_pair(program, join, row.into_owned(), state, ctx).await;
+	}
 	if state.pending.is_some() {
 		state.settle(program, row.into_owned());
 	}
@@ -4120,15 +4245,36 @@ async fn run_join(
 	state: &mut State,
 	ctx: &ExecutionContext,
 ) -> FlowResult<Ended> {
-	use super::plan::JoinMatch;
 	let spec = &program.joins[join as usize];
-	if state.joins[join as usize].is_none() {
+	if spec.streams.is_some() {
+		return hold_join_row(join, probe, keys, state);
+	}
+	// The right input read through the index for this row's key alone,
+	// judged below as the build table is. A key the index may not list every
+	// equal record under reads the build table, which a lookup would read
+	// whole for this row alone.
+	let looked = match spec.lookup {
+		Some((group, key))
+			if state.joins[join as usize].is_none()
+				&& state.join_lookups[join as usize] < super::plan::LOOKUP_EVALUATIONS
+				&& keys.get(key).is_some_and(lookup_key) =>
+		{
+			state.join_lookups[join as usize] += 1;
+			let held = state.lookup_key.replace(keys.get(key).cloned().unwrap_or(Value::None));
+			let built = out_of_line(|| build_table(program, spec, group, state, ctx)).await;
+			state.lookup_key = held;
+			Some(Arc::new(built?))
+		}
+		_ => None,
+	};
+	if looked.is_none() && state.joins[join as usize].is_none() {
 		let built = out_of_line(|| build_join(program, spec, state, ctx)).await?;
 		state.joins[join as usize] = Some(built);
 	}
-	let table = match &mut state.joins[join as usize] {
-		Some(super::join_spill::JoinBuilt::Memory(table)) => Arc::clone(table),
-		Some(super::join_spill::JoinBuilt::Spilled(spilled)) => {
+	let table = match (looked, &mut state.joins[join as usize]) {
+		(Some(table), _) => table,
+		(None, Some(super::join_spill::JoinBuilt::Memory(table))) => Arc::clone(table),
+		(None, Some(super::join_spill::JoinBuilt::Spilled(spilled))) => {
 			// A join whose build side spilled defers its probe rows to its
 			// own pipeline's turn ([`finish_spilled_join`]).
 			let mut pairer = PlanPairer {
@@ -4140,8 +4286,23 @@ async fn run_join(
 			spilled.defer(Some(keys), probe, &mut pairer).await?;
 			return Ok(Ended::Next);
 		}
-		None => return Ok(Ended::Next),
+		(None, None) => return Ok(Ended::Next),
 	};
+	pair_built(program, spec, &table, probe, keys, state, ctx).await
+}
+
+/// Pair the probe row `probe`, keyed by `keys`, with the rows `table` holds
+/// for those keys, as [`run_join`] pairs them.
+async fn pair_built(
+	program: &Program,
+	spec: &super::program::JoinSpec,
+	table: &crate::exec::operators::BuildTable,
+	probe: Value,
+	keys: Vec<Value>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Ended> {
+	use super::plan::JoinMatch;
 	let pipeline = &program.pipelines[spec.pipeline];
 	if spec.kind == JoinMatch::Semi {
 		if table.matches(&keys).next().is_none() {
@@ -4227,35 +4388,50 @@ async fn build_join(
 	let held = state.program.clone().ok_or_else(|| {
 		ControlFlow::Err(anyhow::anyhow!("a join in a run that does not hold its program"))
 	})?;
-	let mut eval = match spec.build_keys.is_empty() {
-		true => None,
-		false => Some(statement_state(program, ctx).map_err(ControlFlow::Err)?),
-	};
 	let spills = ctx.ctx().memory().is_some_and(|memory| memory.can_spill())
 		&& !held.groups.get(spec.build as usize).is_some_and(|group| group.only);
-	if spills {
-		let mut sink = PlanBuildSink {
-			inner: super::join_spill::BuildSink::with_width(
-				spec.build_keys.len(),
-				usize::MAX,
-				spec.build,
-				ctx,
-			),
-			program,
-			spec,
-			eval,
-		};
-		run_group_into(&held, spec.build, state, ctx, &mut sink).await?;
-		return Ok(match sink.inner.finish(ctx).await? {
-			super::join_spill::Built::Memory(table) => {
-				super::join_spill::JoinBuilt::Memory(Arc::new(table))
-			}
-			super::join_spill::Built::Spilled(spilled) => {
-				super::join_spill::JoinBuilt::Spilled(spilled)
-			}
-		});
+	if !spills {
+		let table = build_table(program, spec, spec.build, state, ctx).await?;
+		return Ok(super::join_spill::JoinBuilt::Memory(Arc::new(table)));
 	}
-	let (rows, ran) = run_group(&held, spec.build, state, ctx).await;
+	let mut sink = PlanBuildSink {
+		inner: super::join_spill::BuildSink::with_width(
+			spec.build_keys.len(),
+			usize::MAX,
+			spec.build,
+			ctx,
+		),
+		program,
+		spec,
+		eval: None,
+	};
+	run_group_into(&held, spec.build, state, ctx, &mut sink).await?;
+	Ok(match sink.inner.finish(ctx).await? {
+		super::join_spill::Built::Memory(table) => {
+			super::join_spill::JoinBuilt::Memory(Arc::new(table))
+		}
+		super::join_spill::Built::Spilled(spilled) => {
+			super::join_spill::JoinBuilt::Spilled(spilled)
+		}
+	})
+}
+
+/// The in-memory build table of join `spec` over the rows group `group`
+/// reads — its build side, or its right input read through an index for one
+/// left row's key — each keyed by the build keys evaluated over the row set
+/// under the alias.
+async fn build_table(
+	program: &Program,
+	spec: &super::program::JoinSpec,
+	group: u16,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<crate::exec::operators::BuildTable> {
+	let held = state.program.clone().ok_or_else(|| {
+		ControlFlow::Err(anyhow::anyhow!("a join in a run that does not hold its program"))
+	})?;
+	let mut eval = None;
+	let (rows, ran) = run_group(&held, group, state, ctx).await;
 	ran?;
 	let mut table = crate::exec::operators::BuildTable::new();
 	for row in rows {
@@ -4264,13 +4440,182 @@ async fn build_join(
 		let (key, row) = build_key(program, spec, row, &mut eval, ctx).await?;
 		table.insert(key, row, usize::MAX)?;
 	}
-	Ok(super::join_spill::JoinBuilt::Memory(Arc::new(table)))
+	Ok(table)
 }
 
-/// Build row `row` of join `spec` with its key: the build keys evaluated
-/// over the row set under the alias, as the residual and everything above
-/// the join read it. `eval` is the state the keys are evaluated on, `None`
-/// for a join with no keys.
+/// Hold `probe`, keyed by `keys`, the one row the left input of join `join`
+/// hands it, for the right input to stream past ([`run_join_pair`]). A left
+/// key that holds a regex keeps the right rows keyed instead, to pair them as
+/// the build table does once the right input ends.
+fn hold_join_row(
+	join: u16,
+	probe: Value,
+	keys: Vec<Value>,
+	state: &mut State,
+) -> FlowResult<Ended> {
+	let slot = &mut state.held[join as usize];
+	if slot.is_some() {
+		return Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+			"a join that holds its left input's one row was handed another".to_owned(),
+		))));
+	}
+	let table =
+		crate::exec::operators::key_has_regex(&keys).then(crate::exec::operators::BuildTable::new);
+	*slot = Some(Box::new(interp::HeldJoin {
+		probe,
+		keys,
+		matched: false,
+		stopped: false,
+		regex: Vec::new(),
+		table,
+		eval: None,
+	}));
+	Ok(Ended::Next)
+}
+
+/// Pair `row`, a row of the right input of join `join`, with the left row
+/// the join holds, where the row's key equals the held key as the build
+/// table's ordering equates them, and run the pairing through the join's
+/// pipeline: `Stop` once that pipeline takes no more rows, so the right
+/// input's pipeline takes no more of its own. A row whose key holds a regex
+/// that matches the held key is kept, to pair once the right input ends
+/// ([`finish_held_join`]).
+async fn run_join_pair(
+	program: &Program,
+	join: u16,
+	row: Value,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Ended> {
+	let spec = &program.joins[join as usize];
+	let Some(held) = state.held[join as usize].as_mut() else {
+		return Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+			"a right row reached a join that holds no left row".to_owned(),
+		))));
+	};
+	let mut eval = held.eval.take();
+	let keyed = out_of_line(|| build_key(program, spec, row, &mut eval, ctx)).await;
+	let held =
+		state.held[join as usize].as_mut().expect("the held row is kept while its key is read");
+	held.eval = eval;
+	let (key, row) = keyed?;
+	if let Some(table) = &mut held.table {
+		table.insert(key, row, usize::MAX)?;
+		return Ok(Ended::Next);
+	}
+	if crate::exec::operators::key_has_regex(&key) {
+		if crate::exec::operators::keys_equal(&key, &held.keys) {
+			held.regex.push(row);
+		}
+		return Ok(Ended::Next);
+	}
+	if key.cmp(&held.keys) != std::cmp::Ordering::Equal {
+		return Ok(Ended::Next);
+	}
+	let probe = held.probe.clone();
+	pair_held(program, join, &probe, row, state, ctx).await
+}
+
+/// Pair the held left row `probe` of join `join` with right row `build`,
+/// where the residual holds of the pairing, and run it through the join's
+/// pipeline.
+async fn pair_held(
+	program: &Program,
+	join: u16,
+	probe: &Value,
+	build: Value,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Ended> {
+	let spec = &program.joins[join as usize];
+	let held = state.held[join as usize].as_mut().expect("a join pairs only the row it holds");
+	let paired = match &spec.residual {
+		Some(residual) => {
+			let row = match probe {
+				Value::Object(_) => crate::exec::operators::with_alias(probe, &spec.alias, build),
+				_ => {
+					let mut row = crate::val::Object::default();
+					row.insert(spec.alias.clone(), build);
+					Value::Object(row)
+				}
+			};
+			let mut eval = match held.eval.take() {
+				Some(eval) => eval,
+				None => statement_state(program, ctx).map_err(ControlFlow::Err)?,
+			};
+			let answer =
+				out_of_line(|| host_scalar_in(program, residual, ctx, &row, &mut eval)).await;
+			let held =
+				state.held[join as usize].as_mut().expect("a join pairs only the row it holds");
+			held.eval = Some(eval);
+			if !answer?.is_truthy() {
+				return Ok(Ended::Next);
+			}
+			match probe {
+				Value::Object(_) => row,
+				_ => probe.clone(),
+			}
+		}
+		None => crate::exec::operators::with_alias(probe, &spec.alias, build),
+	};
+	if let Some(held) = state.held[join as usize].as_mut() {
+		held.matched = true;
+	}
+	let pipeline = &program.pipelines[spec.pipeline];
+	let step = out_of_line(|| run_value_row(program, pipeline, paired, state, ctx)).await?;
+	if step == Ended::Stop
+		&& let Some(held) = state.held[join as usize].as_mut()
+	{
+		held.stopped = true;
+	}
+	Ok(step)
+}
+
+/// End join `join`'s held row once its right input has streamed past it:
+/// pair the right rows a regex key matched, then — for a
+/// [`JoinMatch::Left`](super::plan::JoinMatch::Left) join whose row nothing
+/// paired with — emit the row once with `NULL` under the alias. A held row
+/// whose key holds a regex is paired with the right rows kept, as
+/// [`run_join`] pairs a probe row with its build table.
+async fn finish_held_join(
+	program: &Program,
+	join: u16,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<()> {
+	let spec = &program.joins[join as usize];
+	let Some(mut held) = state.held[join as usize].take() else {
+		return Ok(());
+	};
+	if held.stopped {
+		return Ok(());
+	}
+	if let Some(table) = held.table.take() {
+		pair_built(program, spec, &table, held.probe, held.keys, state, ctx).await?;
+		return Ok(());
+	}
+	let regex = std::mem::take(&mut held.regex);
+	let probe = held.probe.clone();
+	state.held[join as usize] = Some(held);
+	for build in regex {
+		if pair_held(program, join, &probe, build, state, ctx).await? == Ended::Stop {
+			break;
+		}
+	}
+	let Some(held) = state.held[join as usize].take() else {
+		return Ok(());
+	};
+	if !held.matched && !held.stopped && spec.kind == super::plan::JoinMatch::Left {
+		let paired = crate::exec::operators::with_alias_owned(held.probe, &spec.alias, Value::Null);
+		let pipeline = &program.pipelines[spec.pipeline];
+		out_of_line(|| run_value_row(program, pipeline, paired, state, ctx)).await?;
+	}
+	Ok(())
+}
+
+/// The key of build row `row` of join `spec` — its build keys evaluated over
+/// the row set under the alias, on `eval`, made when first needed — and the
+/// row.
 async fn build_key(
 	program: &Program,
 	spec: &super::program::JoinSpec,
@@ -4278,13 +4623,17 @@ async fn build_key(
 	eval: &mut Option<interp::PooledState>,
 	ctx: &ExecutionContext,
 ) -> FlowResult<(Vec<Value>, Value)> {
-	let mut key = Vec::with_capacity(spec.build_keys.len());
-	let Some(eval) = eval else {
-		return Ok((key, row));
+	if spec.build_keys.is_empty() {
+		return Ok((Vec::new(), row));
+	}
+	let eval = match eval {
+		Some(eval) => eval,
+		slot => slot.insert(statement_state(program, ctx).map_err(ControlFlow::Err)?),
 	};
 	let mut seen = crate::val::Object::default();
 	seen.insert(spec.alias.clone(), row);
 	let seen = Value::Object(seen);
+	let mut key = Vec::with_capacity(spec.build_keys.len());
 	for scalar in &spec.build_keys {
 		key.push(out_of_line(|| host_scalar_in(program, scalar, ctx, &seen, eval)).await?);
 	}
@@ -4705,13 +5054,14 @@ async fn gathered(state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
 /// Bound the breakers of `program` by the query's memory: every sort but a
 /// brute-force KNN's charges what it holds to the query's lease, which opens
 /// it with its spill headroom, and spills once the lease no longer covers it.
-/// A sort that keeps a bounded number of rows takes nothing from its lease
-/// until it holds more than a chunk, and takes no account at all when the
-/// query has no temporary store: it prunes in memory and never fails for
-/// memory. A sort that keeps every row under
+/// A sort its plan labels [`Spill::Bounded`](super::plan::Spill) keeps a
+/// bounded number of rows: it takes nothing from its lease until it holds
+/// more than a chunk, and takes no account at all when the query has no
+/// temporary store: it prunes in memory and never fails for memory. A sort
+/// labelled [`Spill::Spillable`](super::plan::Spill) under
 /// `TEMPFILES` also spills each time it holds the external sorting buffer
 /// limit's rows, as the operator tree's external sort does, when the context
-/// names a temporary directory.
+/// names a temporary directory. An aggregate so labelled charges its groups.
 fn bound_breakers(program: &Program, state: &mut State, ctx: &ExecutionContext) {
 	let Some(memory) = ctx.ctx().memory() else {
 		return;
@@ -4745,7 +5095,7 @@ fn bind_breakers(
 		}
 		// A keep sort holds a bounded buffer, so it has no need to be
 		// accounted where it could not spill.
-		if spec.keep.is_some() && !memory.can_spill() {
+		if spec.held == super::plan::Spill::Bounded && !memory.can_spill() {
 			continue;
 		}
 		state.sort_accounts[at] = memory.reservation();
@@ -4763,7 +5113,7 @@ fn bind_breakers(
 		});
 	}
 	for (at, sink) in program.aggregates.iter().enumerate() {
-		if sink.keys > 0 {
+		if sink.held == super::plan::Spill::Spillable {
 			let savable = state
 				.aggregates
 				.functions

@@ -86,7 +86,8 @@ pub(crate) use aggregate::{AggregationAnalysis, analyse_aggregation};
 pub(crate) use cycle_guard::{CycleGuard, EventsEntry};
 pub(crate) use fold::AccessOffer;
 pub(crate) use select::{
-	CountDecision, bitmap_plan_to_node, check_locked_read, decide_union_merge, output_field_path,
+	CountDecision, bitmap_plan_to_node, check_locked_read, decide_union_merge,
+	field_def_excludes_arrays, output_field_path,
 };
 use surrealdb_strand::Strand;
 

@@ -1042,3 +1042,98 @@ async fn index_functions_never_read_the_callers_param_for_a_bound_query() {
 	}
 	assert_eq!(answer("RETURN fn::hl('one')".to_owned()).await, "['<one> two']");
 }
+
+/// A call whose body is a small leaf — one run of LET, IF, THROW and RETURN
+/// over its arguments — is called by the lighter convention; a body that
+/// reads storage, calls another function or is inlined is not. Each answers
+/// what the body computes.
+#[tokio::test]
+async fn units_a_small_leaf_body_is_called_light() {
+	let db = TestDb::new_with_auth(
+		"
+		DEFINE FUNCTION fn::ob($x: number) { LET $d = $x * 2; RETURN $d > 150; } PERMISSIONS FULL;
+		DEFINE FUNCTION fn::refuse($x: int) { IF $x > 100 { THROW 'too big' }; RETURN $x; } PERMISSIONS FULL;
+		DEFINE FUNCTION fn::reads($x: number) { LET $c = count(SELECT * FROM item); RETURN $c + $x; } PERMISSIONS FULL;
+		DEFINE FUNCTION fn::calls($x: number) { LET $d = fn::ob($x); RETURN !$d; } PERMISSIONS FULL;
+		DEFINE FUNCTION fn::one($x: number) { RETURN $x * 2 > 150; } PERMISSIONS FULL;
+		CREATE item:1 SET n = 80;
+		",
+	)
+	.await;
+	let ctx = db.exec_ctx_as(&TestDb::owner(), crate::kvs::TransactionType::Read).await;
+	for (sql, light, answer) in [
+		("SELECT VALUE fn::ob(n) FROM item", true, Value::Bool(true)),
+		("SELECT VALUE fn::refuse(n) FROM item", true, Value::from(80)),
+		("SELECT VALUE fn::reads(n) FROM item", false, Value::from(81)),
+		("SELECT VALUE fn::calls(n) FROM item", false, Value::Bool(false)),
+	] {
+		let program = lowered(&ctx, sql).await;
+		assert_eq!(program.functions[0].light, light, "`{sql}`");
+		assert_eq!(answers(&ctx, sql).await, vec![answer], "`{sql}`");
+	}
+	let program = lowered(&ctx, "SELECT VALUE fn::one(n) FROM item").await;
+	assert!(program.functions[0].body.is_none() && !program.functions[0].light, "an inlined body");
+}
+
+/// A table permission that reads only the session is judged once per run of
+/// a statement over the table, at its first row: a scan of a thousand
+/// records judges it once, whether its verdict admits every row or none, and
+/// a scan of no records judges it never. A predicate mixing a session
+/// conjunct with a conjunct over the row judges the first once and the second
+/// per row. A conjunct that raises raises at the first row and holds no
+/// verdict, and raises nothing over no rows; one written after a conjunct
+/// that may raise is judged per row.
+/// Each statement runs serially, on this thread.
+#[tokio::test]
+async fn invariants_a_session_permission_is_judged_once_per_statement() {
+	use super::interp::VERDICTS_JUDGED;
+	let config =
+		surrealdb_cnf::ConfigMap::empty().with_key_value("region_row_threshold", "1000000");
+	let db = TestDb::new_with_auth_and_config(
+		"
+		DEFINE ACCESS user ON DATABASE TYPE RECORD;
+		DEFINE TABLE p SCHEMALESS PERMISSIONS FOR select WHERE $auth = user:reader;
+		DEFINE TABLE m SCHEMALESS PERMISSIONS FOR select WHERE $auth = user:reader AND n >= 990;
+		DEFINE TABLE vacant SCHEMALESS PERMISSIONS FOR select WHERE $auth = user:reader;
+		FOR $i IN 0..1000 { CREATE type::record('p', $i) SET n = $i; CREATE type::record('m', $i) SET n = $i; };
+		",
+		config,
+	)
+	.await;
+	let other = {
+		let rid =
+			crate::types::PublicValue::RecordId(surrealdb_types::RecordId::new("user", "other"));
+		crate::dbs::Session::for_record("test", "test", "user", rid)
+	};
+	let judged = || VERDICTS_JUDGED.with(|judged| judged.get());
+	for (session, sql, answer, verdicts) in [
+		(reader(), "SELECT VALUE n FROM p WHERE n >= 997", "[997, 998, 999]", 1),
+		(other.clone(), "SELECT VALUE n FROM p WHERE n >= 997", "[]", 1),
+		(reader(), "SELECT VALUE n FROM vacant", "[]", 0),
+		(reader(), "SELECT VALUE n FROM m WHERE n < 992", "[990, 991]", 1),
+		(other, "SELECT VALUE n FROM m WHERE n < 992", "[]", 1),
+		(reader(), "SELECT VALUE n FROM p WHERE <int> $session.ns > 0 AND n > 5", "error", 1),
+		(TestDb::owner(), "SELECT VALUE n FROM vacant WHERE <int> $session.ns > 0", "[]", 0),
+		(
+			reader(),
+			"SELECT VALUE n FROM p WHERE <int> n > 997 AND $session.ns = 'test'",
+			"[998, 999]",
+			1,
+		),
+		(
+			TestDb::owner(),
+			"SELECT VALUE n FROM p WHERE $session.ns = 'test' AND n > 997",
+			"[998, 999]",
+			1,
+		),
+	] {
+		let before = judged();
+		let responses = db.datastore().execute(sql, &session, None).await.expect("runs");
+		let answered = match responses.into_iter().next().expect("one response").result {
+			Ok(value) => value.to_sql(),
+			Err(_) => "error".to_owned(),
+		};
+		assert_eq!(answered, answer, "`{sql}`");
+		assert_eq!(judged() - before, verdicts, "`{sql}` judged its session conjuncts");
+	}
+}

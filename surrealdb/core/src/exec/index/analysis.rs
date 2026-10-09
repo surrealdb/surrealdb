@@ -2371,6 +2371,33 @@ impl IndexCandidate {
 		score
 	}
 
+	/// [`Self::score`] for a statement that does or does not page its rows
+	/// with a `LIMIT`.
+	///
+	/// Under a `LIMIT`, a candidate that delivers the `ORDER BY` lets the
+	/// pipeline stop once the limit is met, where any other driver reads every
+	/// row it lists and sorts them before the first is returned. Such a
+	/// candidate then outranks a range over another index and a table scan,
+	/// but not an equality on a key or a key prefix, whose bucket the rules
+	/// take to be small enough to sort. A scan that reaches a record through
+	/// several entries delivers no order whatever its columns, and earns
+	/// nothing.
+	pub fn rank(&self, limited: bool) -> u32 {
+		/// Lifts an order-covering full-range scan (50 + 100) above a bounded
+		/// range (300) and keeps it below a one-column compound prefix (450).
+		const ORDER_UNDER_LIMIT_BONUS: u32 = 200;
+		let score = self.score();
+		if limited
+			&& self.covers_order
+			&& !self.empty
+			&& !super::access_path::access_fans_out(&self.index_ref.cols, &self.access)
+		{
+			score.saturating_add(ORDER_UNDER_LIMIT_BONUS)
+		} else {
+			score
+		}
+	}
+
 	/// Convert this candidate to an AccessPath.
 	pub fn to_access_path(&self, direction: Direction) -> AccessPath {
 		if self.empty {
@@ -4195,6 +4222,63 @@ mod tests {
 				empty: false,
 			};
 			assert!(make(true).score() > make(false).score());
+		}
+
+		#[test]
+		fn under_a_limit_an_order_covering_scan_outranks_a_range_but_not_an_equality() {
+			let int = |n| crate::val::Value::Number(crate::val::Number::Int(n));
+			let ordered = IndexCandidate {
+				index_ref: IndexRef::new(&[idx_basic(1, "by_b", &["b"])], 0),
+				access: BTreeAccess::Range {
+					range: Range::unbounded(),
+				},
+				covers_order: true,
+				empty: false,
+			};
+			let range = IndexCandidate {
+				index_ref: IndexRef::new(&[idx_basic(2, "by_a", &["a"])], 0),
+				access: BTreeAccess::Range {
+					range: Range {
+						start: Bound::Included(int(0)),
+						end: Bound::Included(int(10)),
+					},
+				},
+				covers_order: false,
+				empty: false,
+			};
+			let equality = IndexCandidate {
+				index_ref: IndexRef::new(&[idx_basic(3, "by_c", &["c"])], 0),
+				access: BTreeAccess::Equality(int(1)),
+				covers_order: false,
+				empty: false,
+			};
+			let prefix = IndexCandidate {
+				index_ref: IndexRef::new(&[idx_basic(4, "by_cd", &["c", "d"])], 0),
+				access: BTreeAccess::Compound {
+					prefix: vec![int(1)],
+					range: None,
+				},
+				covers_order: false,
+				empty: false,
+			};
+			assert!(range.rank(false) > ordered.rank(false));
+			assert!(ordered.rank(true) > range.rank(true));
+			assert!(equality.rank(true) > ordered.rank(true));
+			assert!(prefix.rank(true) > ordered.rank(true));
+			assert_eq!(range.rank(true), range.score());
+		}
+
+		#[test]
+		fn under_a_limit_a_fanning_order_scan_earns_nothing() {
+			let fanning = IndexCandidate {
+				index_ref: IndexRef::new(&[idx_basic(1, "by_tags", &["tags[*]"])], 0),
+				access: BTreeAccess::Range {
+					range: Range::unbounded(),
+				},
+				covers_order: true,
+				empty: false,
+			};
+			assert_eq!(fanning.rank(true), fanning.score());
 		}
 	}
 }

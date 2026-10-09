@@ -30,6 +30,7 @@ mod block;
 mod call_unit;
 pub(crate) mod closure;
 pub(crate) mod compile_cache;
+mod conjunct;
 mod count;
 pub(crate) mod descriptor;
 pub(crate) mod dispatch;
@@ -173,6 +174,8 @@ mod tests_paths;
 mod tests_plain;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_plain_data;
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests_planner;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_preempt;
 #[cfg(all(test, feature = "kv-mem"))]

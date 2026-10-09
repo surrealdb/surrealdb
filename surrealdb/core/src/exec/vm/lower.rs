@@ -752,6 +752,10 @@ fn scanned_table(node: &Plan) -> Option<&surrealdb_strand::TableName> {
 			table,
 			..
 		}
+		| Plan::IndexLookup {
+			table,
+			..
+		}
 		| Plan::IndexUnion {
 			table,
 			..
@@ -942,6 +946,11 @@ enum Sink<'a> {
 		id: u16,
 		keys: Vec<&'a LogicalExpr>,
 	},
+	/// Join `id`, which holds its left row and pairs each row of its right
+	/// input with it, running the pairings through the pipeline above it.
+	JoinPair {
+		id: u16,
+	},
 }
 
 /// The document root an index or a method argument of a path step is
@@ -1014,6 +1023,7 @@ struct Lowering<'p, 'ctx> {
 	joins: Vec<super::program::JoinSpec>,
 	/// The group that owns each distinct set.
 	distincts: Vec<Option<u16>>,
+	verdicts: Vec<Option<u16>>,
 	fetches: Vec<Vec<Vec<super::program::FetchStepSpec>>>,
 	/// For each pipeline, the pipeline that fills the sort, aggregate or split
 	/// it reads, if any.
@@ -1488,6 +1498,7 @@ fn lend<'c>(from: &mut Lowering<'_, 'c>, to: &mut Lowering<'_, 'c>) {
 		splits,
 		joins,
 		distincts,
+		verdicts,
 		fetches,
 		feeders,
 		aggregates,
@@ -1547,6 +1558,7 @@ struct Marks {
 	splits: usize,
 	joins: usize,
 	distincts: usize,
+	verdicts: usize,
 	fetches: usize,
 	feeders: usize,
 	aggregates: usize,
@@ -1599,6 +1611,7 @@ impl Marks {
 			splits: l.splits.len(),
 			joins: l.joins.len(),
 			distincts: l.distincts.len(),
+			verdicts: l.verdicts.len(),
 			fetches: l.fetches.len(),
 			feeders: l.feeders.len(),
 			aggregates: l.aggregates.len(),
@@ -1653,6 +1666,7 @@ impl Marks {
 		l.splits.truncate(self.splits);
 		l.joins.truncate(self.joins);
 		l.distincts.truncate(self.distincts);
+		l.verdicts.truncate(self.verdicts);
 		l.fetches.truncate(self.fetches);
 		l.feeders.truncate(self.feeders);
 		l.aggregates.truncate(self.aggregates);
@@ -1736,6 +1750,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			splits: Vec::new(),
 			joins: Vec::new(),
 			distincts: Vec::new(),
+			verdicts: Vec::new(),
 			fetches: Vec::new(),
 			feeders: Vec::new(),
 			aggregates: Vec::new(),
@@ -1910,6 +1925,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			splits: self.splits,
 			joins: self.joins,
 			distincts: self.distincts,
+			verdicts: self.verdicts,
 			fetches: self.fetches,
 			aggregates: self.aggregates,
 			permissions: self.permissions,
@@ -3250,6 +3266,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				}
 				| Plan::Distinct {
 					input,
+					..
 				}
 				| Plan::Fetch {
 					input,
@@ -3308,6 +3325,9 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			| Plan::IndexScan {
 				..
 			}
+			| Plan::IndexLookup {
+				..
+			}
 			| Plan::IndexUnion {
 				..
 			}
@@ -3334,6 +3354,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 						},
 						Some(Plan::Filter {
 							predicate,
+							once: None,
 							..
 						}),
 						None,
@@ -3408,11 +3429,14 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				keep,
 				pushdown,
 				random,
+				spill,
+				..
 			} => {
 				let id = self.sorts.len() as u16;
 				self.sorts.push(SortSpec {
 					keys: keys.iter().map(key_order).collect(),
 					keep: *keep,
+					held: *spill,
 					spill: self.tempfiles && keep.is_none() && !*random,
 					pushdown: *pushdown,
 					random: *random,
@@ -3468,6 +3492,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 						numeric: false,
 					}],
 					keep: Some(*k as usize),
+					held: super::plan::Spill::Bounded,
 					spill: false,
 					pushdown: false,
 					random: false,
@@ -3594,6 +3619,73 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				keys,
 				residual,
 				alias,
+				build: super::plan::JoinBuild::Left,
+				..
+			} => {
+				let id = u16::try_from(self.joins.len())
+					.map_err(|_| NotCovered::internal("more joins than a program holds"))?;
+				let mut build_keys = Vec::with_capacity(keys.len());
+				for (_, build_key) in keys {
+					build_keys.push(self.host_scalar(build_key).await?);
+				}
+				let residual = match residual {
+					Some(residual) => Some(self.host_scalar(residual).await?),
+					None => None,
+				};
+				self.joins.push(super::program::JoinSpec {
+					kind: *kind,
+					alias: alias.clone(),
+					build_keys,
+					residual,
+					build: 0,
+					owner: self.current_group,
+					pipeline: 0,
+					lookup: None,
+					streams: None,
+				});
+				// The left input's pipeline hands the join its one row, then
+				// the right input's pipeline streams past it. A limit above
+				// the join spares the right input, then the left.
+				crate::exec::vm::host::out_of_line(|| {
+					self.pipeline(
+						left,
+						Sink::JoinProbe {
+							id,
+							keys: keys.iter().map(|(probe_key, _)| probe_key).collect(),
+						},
+					)
+				})
+				.await?;
+				let held_at = self.pipelines.len() - 1;
+				crate::exec::vm::host::out_of_line(|| {
+					self.pipeline(
+						right,
+						Sink::JoinPair {
+							id,
+						},
+					)
+				})
+				.await?;
+				let streamed_at = self.pipelines.len() - 1;
+				self.feeders[streamed_at] = Some(held_at);
+				feeder = Some(streamed_at);
+				self.joins[id as usize].streams = Some(streamed_at);
+				// A pairing is the held row with the right row under the
+				// alias, which no schema of the program describes.
+				self.schema = None;
+				Source::Join {
+					join: id,
+				}
+			}
+			Plan::Join {
+				left,
+				right,
+				kind,
+				keys,
+				residual,
+				alias,
+				lookup,
+				..
 			} => {
 				let id = u16::try_from(self.joins.len())
 					.map_err(|_| NotCovered::internal("more joins than a program holds"))?;
@@ -3605,6 +3697,8 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 					build: 0,
 					owner: self.current_group,
 					pipeline: 0,
+					lookup: None,
+					streams: None,
 				});
 				// The build side is a statement of its own, read when the
 				// first probe row reaches the join.
@@ -3620,6 +3714,29 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				let (build, _, required_context) =
 					crate::exec::vm::host::out_of_line(|| self.group(self.planner, &build)).await?;
 				self.delegate_context = self.delegate_context.max(required_context);
+				// The right input read through the index for one left row's
+				// key, a statement of its own as the build side is.
+				let looked_up = match lookup {
+					Some(super::plan::JoinLookup {
+						key,
+						right,
+					}) => {
+						let plan = PhysicalPlan {
+							catalog: None,
+							root: (**right).clone(),
+							dependencies: Vec::new(),
+							tail: Default::default(),
+							sources: Vec::new(),
+							nested: self.nested_plans.clone(),
+							scope: IndexScope::default(),
+						};
+						let (group, _, required_context) =
+							Box::pin(self.group(self.planner, &plan)).await?;
+						self.delegate_context = self.delegate_context.max(required_context);
+						Some((group, *key))
+					}
+					None => None,
+				};
 				let mut build_keys = Vec::with_capacity(keys.len());
 				for (_, build_key) in keys {
 					build_keys.push(
@@ -3647,6 +3764,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				spec.build_keys = build_keys;
 				spec.residual = residual;
 				spec.build = build;
+				spec.lookup = looked_up;
 				// A pairing is its probe row with the build row under the
 				// alias, which no schema of the program describes.
 				self.schema = None;
@@ -3659,9 +3777,11 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				group,
 				fields,
 				first_value,
+				spill,
+				..
 			} => {
 				let (id, analysis) = crate::exec::vm::host::out_of_line(|| {
-					self.aggregate(group, fields, first_value)
+					self.aggregate(group, fields, first_value, *spill)
 				})
 				.await?;
 				crate::exec::vm::host::out_of_line(|| {
@@ -3755,10 +3875,20 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				match node {
 					Plan::Filter {
 						predicate,
+						once,
 						..
 					} => {
 						if current != ROW {
 							return Err(NotCovered::internal("a filter over a projection"));
+						}
+						if let Some(once) = once {
+							if !self.is_native_predicate(once) {
+								return Err(self.uncovered(once, "a predicate judged once"));
+							}
+							end_row.extend(
+								crate::exec::vm::host::out_of_line(|| self.once_branch(once))
+									.await?,
+							);
 						}
 						end_row.extend(
 							crate::exec::vm::host::out_of_line(|| self.branch(predicate, false))
@@ -3770,6 +3900,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 						auth,
 						guard,
 						computed,
+						once,
 						..
 					} => {
 						if current != ROW {
@@ -3777,7 +3908,13 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 						}
 						end_row.extend(
 							crate::exec::vm::host::out_of_line(|| {
-								self.permission(predicate, auth, *guard, computed.as_ref())
+								self.permission(
+									predicate,
+									auth,
+									*guard,
+									computed.as_ref(),
+									once.as_ref(),
+								)
 							})
 							.await?,
 						);
@@ -3973,7 +4110,8 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 
 		// A body that hands its row to a split runs where the host can run
 		// the split's rows, outside the storage cursor.
-		let splits = matches!(sink, Sink::Split { .. } | Sink::JoinProbe { .. });
+		let splits =
+			matches!(sink, Sink::Split { .. } | Sink::JoinProbe { .. } | Sink::JoinPair { .. });
 		let output = matches!(sink, Sink::Output);
 		match sink {
 			Sink::Output => {
@@ -4115,6 +4253,16 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 					join: id,
 					keys: first,
 					count: keys.len() as u16,
+				});
+			}
+			Sink::JoinPair {
+				id,
+			} => {
+				if current != ROW {
+					return Err(NotCovered::internal("a join over a projection"));
+				}
+				self.emit(Instr::JoinPair {
+					join: id,
 				});
 			}
 		}
@@ -4531,6 +4679,44 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 					decode: decode.clone(),
 				})
 			}
+			Plan::IndexLookup {
+				table,
+				index,
+				key,
+				schema,
+				..
+			} => {
+				self.schema = schema.as_deref().cloned();
+				self.table.get_or_insert_with(|| table.clone());
+				let outer = match key {
+					super::plan::LookupKey::Parent(outer) => {
+						let mut path = Vec::new();
+						let mut step = outer;
+						while let LogicalExpr::Access {
+							base,
+							field,
+						} = step
+						{
+							path.push(field.clone());
+							step = base;
+						}
+						if !matches!(step, LogicalExpr::Param(param) if param.as_str() == "parent")
+						{
+							return Err(NotCovered::internal(
+								"a lookup key that is not a path into $parent",
+							));
+						}
+						path.reverse();
+						Some(path)
+					}
+					super::plan::LookupKey::Probe(_) => None,
+				};
+				Ok(Source::Lookup {
+					table: table.clone(),
+					index: index.clone(),
+					outer,
+				})
+			}
 			Plan::IndexUnion {
 				table,
 				branches,
@@ -4734,6 +4920,9 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 
 	/// A table's permission: jumps taken for a row it does not admit.
 	///
+	/// `once`, the conjuncts the permission splits off that read nothing of the
+	/// row, are judged first, once per run of the statement ([`Self::once_branch`]).
+	///
 	/// A predicate that reads `computed`, `COMPUTED` fields of the table the
 	/// row is a record of, is judged by a host pipeline over a copy of the row
 	/// with those fields, and those they read in turn, derived onto it in the
@@ -4758,6 +4947,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		auth: &Option<surrealdb_iam::AuthLimit>,
 		guard: crate::expr::logical::GuardKind,
 		computed: Option<&super::plan::ComputedReads>,
+		once: Option<&LogicalExpr>,
 	) -> Lowered<Vec<Label>> {
 		let derivations = match computed {
 			Some(reads) => {
@@ -4769,10 +4959,22 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			None => Vec::new(),
 		};
 		if !derivations.is_empty() {
-			return crate::exec::vm::host::out_of_line(|| {
-				self.derived_permission(predicate, auth, guard, &derivations)
-			})
-			.await;
+			// The conjuncts judged once read no field, computed or stored; the
+			// rest are judged over the copy with its computed fields derived.
+			let mut rejected = match once {
+				Some(once) => {
+					crate::exec::vm::host::out_of_line(|| self.once_permission(once, auth, guard))
+						.await?
+				}
+				None => Vec::new(),
+			};
+			rejected.extend(
+				crate::exec::vm::host::out_of_line(|| {
+					self.derived_permission(predicate, auth, guard, &derivations)
+				})
+				.await?,
+			);
+			return Ok(rejected);
 		}
 		let frame = self.guard_frame(auth, guard);
 		let bypass = self.emit(Instr::JumpIfPermissionsBypassed {
@@ -4782,15 +4984,33 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		// in the permission frame, which also decides what it may call.
 		let outer = self.eval_frame.replace(frame);
 		let outer_privileged = std::mem::replace(&mut self.privileged, true);
-		let rejected = if !self.is_native_predicate(predicate) {
-			Err(self.uncovered(predicate, "a permission predicate"))
-		} else if crate::exec::logical::holds_write_statement(predicate) {
-			crate::exec::vm::host::out_of_line(|| {
-				self.checked_verdict(predicate, super::program::PermissionCheck::Table)
-			})
-			.await
-		} else {
-			crate::exec::vm::host::out_of_line(|| self.branch(predicate, false)).await
+		// The conjuncts that read nothing of the row are judged first, as the
+		// rule that split them off wrote them before the rest.
+		let once_rejected = match once {
+			Some(once) if !self.is_native_predicate(once) => {
+				Err(self.uncovered(once, "a permission predicate"))
+			}
+			Some(once) => crate::exec::vm::host::out_of_line(|| self.once_branch(once)).await,
+			None => Ok(Vec::new()),
+		};
+		let rejected = match once_rejected {
+			Err(refused) => Err(refused),
+			Ok(mut rejected) => {
+				let rest = if !self.is_native_predicate(predicate) {
+					Err(self.uncovered(predicate, "a permission predicate"))
+				} else if crate::exec::logical::holds_write_statement(predicate) {
+					crate::exec::vm::host::out_of_line(|| {
+						self.checked_verdict(predicate, super::program::PermissionCheck::Table)
+					})
+					.await
+				} else {
+					crate::exec::vm::host::out_of_line(|| self.branch(predicate, false)).await
+				};
+				rest.map(|rest| {
+					rejected.extend(rest);
+					rejected
+				})
+			}
 		};
 		self.eval_frame = outer;
 		self.privileged = outer_privileged;
@@ -4896,6 +5116,75 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		self.release(verdict);
 		self.patch(bypass, self.here());
 		Ok(vec![rejected])
+	}
+
+	/// Judge `once`, the conjuncts of a table permission that read nothing of
+	/// the row, in the permission's frame ([`Self::once_branch`]), unless the
+	/// statement's permissions are not checked.
+	async fn once_permission(
+		&mut self,
+		once: &LogicalExpr,
+		auth: &Option<surrealdb_iam::AuthLimit>,
+		guard: crate::expr::logical::GuardKind,
+	) -> Lowered<Vec<Label>> {
+		let frame = self.guard_frame(auth, guard);
+		let bypass = self.emit(Instr::JumpIfPermissionsBypassed {
+			target: 0,
+		});
+		let outer = self.eval_frame.replace(frame);
+		let outer_privileged = std::mem::replace(&mut self.privileged, true);
+		let rejected = if self.is_native_predicate(once) {
+			crate::exec::vm::host::out_of_line(|| self.once_branch(once)).await
+		} else {
+			Err(self.uncovered(once, "a permission predicate"))
+		};
+		self.eval_frame = outer;
+		self.privileged = outer_privileged;
+		let rejected = rejected?;
+		self.patch(bypass, self.here());
+		Ok(rejected)
+	}
+
+	/// Judge `once`, the conjuncts of a filter that read nothing of the row,
+	/// at the first row that reaches them in a run of the statement, and keep
+	/// the verdict for the rest of the run ([`Instr::VerdictJump`]): a row
+	/// after it jumps past them where the verdict admits and to the rejection
+	/// where it refuses. Answers the jumps that reject the row, for the caller
+	/// to patch.
+	async fn once_branch(&mut self, once: &LogicalExpr) -> Lowered<Vec<Label>> {
+		let cell = u16::try_from(self.verdicts.len())
+			.map_err(|_| NotCovered::internal("more verdicts than a program holds"))?;
+		self.verdicts.push(self.current_group);
+		let held = self.emit(Instr::VerdictJump {
+			cell,
+			admitted: 0,
+			refused: 0,
+		});
+		let refuses = crate::exec::vm::host::out_of_line(|| self.branch(once, false)).await?;
+		self.emit(Instr::VerdictSet {
+			cell,
+			admits: true,
+		});
+		let admits = self.emit(Instr::Jump {
+			target: 0,
+		});
+		let refused = self.here();
+		self.patch_all(refuses, refused);
+		self.emit(Instr::VerdictSet {
+			cell,
+			admits: false,
+		});
+		let reject = self.emit(Instr::Jump {
+			target: 0,
+		});
+		let admitted = self.here();
+		self.patch(admits, admitted);
+		self.code[held as usize] = Instr::VerdictJump {
+			cell,
+			admitted,
+			refused: reject,
+		};
+		Ok(vec![reject])
 	}
 
 	/// Apply projection layer `fields` to the row, as
@@ -5273,6 +5562,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		group: &[LogicalExpr],
 		fields: &LogicalFields,
 		first_value: &[usize],
+		spill: super::plan::Spill,
 	) -> Lowered<(u16, AggregationAnalysis)> {
 		let registry = self.planner.function_registry();
 		let mut analysis = analyse_aggregation(registry, fields, group)
@@ -5363,6 +5653,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		self.aggregates.push(AggregateSink {
 			fields: specs,
 			keys: analysis.keys.len(),
+			held: spill,
 		});
 		Ok((id, analysis))
 	}
@@ -7739,7 +8030,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		for (predicate, auth, guard, computed) in permissions {
 			rejected.extend(
 				crate::exec::vm::host::out_of_line(|| {
-					self.permission(predicate, auth, *guard, computed.as_ref())
+					self.permission(predicate, auth, *guard, computed.as_ref(), None)
 				})
 				.await?,
 			);
@@ -8175,6 +8466,34 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				&& nested.strategy == super::plan::Strategy::Once
 				&& self.groups.get(group as usize).is_some_and(|spec| !spec.scalar)
 		});
+		let hashed = match &nested.hashed {
+			Some(plan) => {
+				let owner = self.probe_owner.replace(self.current_group);
+				let grouped =
+					crate::exec::vm::host::out_of_line(|| self.group(&planner, plan)).await;
+				self.probe_owner = owner;
+				let Ok((hashed, _, required_context)) = grouped else {
+					return Ok(None);
+				};
+				self.delegate_context = self.delegate_context.max(required_context);
+				let Some(join) = &nested.join else {
+					return Ok(None);
+				};
+				let mut path = Vec::new();
+				let mut step = &join.outer;
+				while let LogicalExpr::Access {
+					base,
+					field,
+				} = step
+				{
+					path.push(field.clone());
+					step = base;
+				}
+				path.reverse();
+				Some((hashed, path))
+			}
+			None => None,
+		};
 		self.nested.push(super::program::NestedSpec {
 			group,
 			inherits_row: op.inherits_row(),
@@ -8184,6 +8503,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			read_only,
 			probed: self.probes.len() > probes,
 			members: member.is_some(),
+			hashed,
 		});
 		let index = (self.nested.len() - 1) as u32;
 		let dst = self.register()?;

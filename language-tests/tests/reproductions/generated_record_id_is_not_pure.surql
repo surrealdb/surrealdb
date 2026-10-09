@@ -51,8 +51,7 @@ value = '''
         TableScan [ctx: Db] [table: o, direction: Forward]
         Subquery [ctx: Db] [strategy: once]
             ProjectValue [ctx: Db] [expr: k]
-                Filter [ctx: Db] [predicate: (r:1) = id]
-                    RecordIdScan [ctx: Db] [record_id: r:1]
+                RecordIdScan [ctx: Db] [record_id: r:1]
 ''''
 
 [[test.results]]

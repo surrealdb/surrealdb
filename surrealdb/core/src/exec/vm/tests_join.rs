@@ -176,6 +176,117 @@ async fn join_hashed_reads_answer_their_rows() {
 	golden.check();
 }
 
+/// The strategy of each statement `sql` nests, as the optimizer chose it.
+async fn strategies(ctx: &ExecutionContext, sql: &str) -> Vec<super::plan::Strategy> {
+	let bound = bind(ctx, sql).await;
+	let physical = super::optimize::optimize(
+		super::map::map(&planner(ctx), &bound).await.unwrap_or_else(|e| panic!("`{sql}`: {e:?}")),
+	);
+	physical.nested.iter().map(|nested| nested.strategy).collect()
+}
+
+/// With an index on the join field, every statement a probe reads through
+/// reads through the index instead, per row, and answers what the probe
+/// answers: the index is read only for a key it lists every equal record
+/// under, and the table whole for a float, a decimal or an array. No index
+/// entry is keyed by a regex, so neither database holds `b`'s.
+#[tokio::test]
+async fn join_an_indexed_key_is_looked_up_per_row_and_answers_as_the_probe() {
+	let base = SETUP.replace("\tCREATE b:11 SET k = /b/, x = 110, s = '11';\n", "");
+	let indexed = base.replacen(
+		"DEFINE TABLE log",
+		"DEFINE INDEX b_k ON b FIELDS k;\n\tDEFINE INDEX empty_k ON empty FIELDS k;\n\tDEFINE TABLE log",
+		1,
+	);
+	let plain = TestDb::new_with_auth(&base).await;
+	let looked_up = TestDb::new_with_auth(&indexed).await;
+	let mut differ = Vec::new();
+	let mut shapes = Vec::new();
+	for (who, session) in [("owner", TestDb::owner()), ("record user", reader())] {
+		let plain_ctx = plain.exec_ctx_as(&session, crate::kvs::TransactionType::Read).await;
+		let ctx = looked_up.exec_ctx_as(&session, crate::kvs::TransactionType::Read).await;
+		for (sql, owner, record_user) in STATEMENTS {
+			let probed = if who == "owner" {
+				owner
+			} else {
+				record_user
+			};
+			let bound = bind(&plain_ctx, sql).await;
+			let vm = super::plan(&planner(&plain_ctx), &bound).await.expect("runs");
+			let expected = outcome(&vm, &plain_ctx).await;
+			let bound = bind(&ctx, sql).await;
+			let vm = super::plan(&planner(&ctx), &bound).await.expect("runs");
+			let answered = outcome(&vm, &ctx).await;
+			if answered != expected {
+				differ.push(format!("`{sql}` for the {who}: {answered:?} != {expected:?}"));
+			}
+			let chosen = strategies(&ctx, sql).await;
+			let looks_up = chosen.contains(&super::plan::Strategy::Lookup);
+			let expected_lookup = probed[0] && !sql.contains("WHERE twice");
+			if looks_up != expected_lookup {
+				shapes.push(format!("`{sql}` for the {who}: {chosen:?}"));
+			}
+		}
+	}
+	assert!(differ.is_empty(), "answers that differ: {differ:#?}");
+	assert!(shapes.is_empty(), "strategies of another shape: {shapes:#?}");
+}
+
+/// An index nested loop that could be hashed reads through the index for the
+/// first evaluations of a run and through its probe, built once, for the
+/// rest, and answers as the probe does throughout; one in a statement that
+/// writes has no probe and reads through the index for every row.
+#[tokio::test]
+async fn join_a_lookup_hands_the_rest_of_a_long_run_to_its_probe() {
+	let rows = super::plan::LOOKUP_EVALUATIONS as usize * 3;
+	let setup = |index: &str| {
+		format!(
+			"
+			DEFINE TABLE a;
+			DEFINE TABLE b;
+			{index}
+			FOR $i IN 0..{rows} {{ CREATE type::record('a', $i) SET k = $i % 50 }};
+			FOR $i IN 0..200 {{ CREATE type::record('b', $i) SET k = $i % 60, x = $i }};
+		"
+		)
+	};
+	let plain = TestDb::new(&setup("")).await;
+	let indexed = TestDb::new(&setup("DEFINE INDEX b_k ON b FIELDS k;")).await;
+	let plain_ctx = plain.exec_ctx().await;
+	let ctx = indexed.exec_ctx().await;
+	for (sql, builds) in [
+		("SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k) AS xs FROM a", 1),
+		("SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k) AS xs FROM a LIMIT 10", 0),
+		(
+			"SELECT VALUE id FROM a WHERE (SELECT VALUE x FROM b WHERE k = $parent.k AND x > 150) != []",
+			1,
+		),
+	] {
+		let bound = bind(&plain_ctx, sql).await;
+		let vm = super::plan(&planner(&plain_ctx), &bound).await.expect("runs");
+		let expected = outcome(&vm, &plain_ctx).await;
+		let bound = bind(&ctx, sql).await;
+		let vm = super::plan(&planner(&ctx), &bound).await.expect("runs");
+		let before = super::nested::PROBES_BUILT.with(std::cell::Cell::get);
+		let answered = outcome(&vm, &ctx).await;
+		let after = super::nested::PROBES_BUILT.with(std::cell::Cell::get);
+		assert_eq!(answered, expected, "`{sql}`");
+		assert_eq!(after - before, builds, "`{sql}`");
+		assert_eq!(strategies(&ctx, sql).await, vec![super::plan::Strategy::Lookup], "`{sql}`");
+	}
+	let sql = "UPDATE a SET xs = (SELECT VALUE x FROM b WHERE k = $parent.k) RETURN xs";
+	let ctx = indexed.exec_ctx_as(&TestDb::owner(), crate::kvs::TransactionType::Write).await;
+	let bound = bind(&ctx, sql).await;
+	let physical = super::optimize::optimize(
+		super::map::map(&planner(&ctx), &bound).await.unwrap_or_else(|e| panic!("`{sql}`: {e:?}")),
+	);
+	let [nested] = physical.nested.as_slice() else {
+		panic!("`{sql}` nests one statement");
+	};
+	assert_eq!(nested.strategy, super::plan::Strategy::Lookup);
+	assert!(nested.hashed.is_none(), "`{sql}` keeps a probe it may not read");
+}
+
 /// An error the statement's body raises for a row is raised for a row its key
 /// reaches, and not for one no key reaches.
 #[tokio::test]
@@ -277,18 +388,24 @@ async fn join_a_probe_reads_its_rows_once_per_reach() {
 /// row: `outer` rows of `a`, each reading the
 /// ten rows of `b`'s 10,000 its key names. The per-row form is the same
 /// statement with its join written so that it is no conjunct of the form a
-/// probe takes. Run with `cargo test --release -p surrealdb-core --lib
-/// join_throughput -- --ignored --nocapture`; `JOIN_OUTER` sets the outer
-/// rows (10,000 by default).
+/// probe takes. With `JOIN_INDEXED` set, `b.k` is indexed and the joined
+/// forms read through the index instead. Run with `cargo test --release -p
+/// surrealdb-core --lib join_throughput -- --ignored --nocapture`;
+/// `JOIN_OUTER` sets the outer rows (10,000 by default).
 #[tokio::test]
 #[ignore = "a measurement, not a check"]
 async fn join_throughput() {
 	let outer: usize =
 		std::env::var("JOIN_OUTER").ok().and_then(|v| v.parse().ok()).unwrap_or(10_000);
+	let index = match std::env::var("JOIN_INDEXED") {
+		Ok(_) => "DEFINE INDEX b_k ON b FIELDS k;",
+		Err(_) => "",
+	};
 	let setup = format!(
 		"
 		DEFINE TABLE a;
 		DEFINE TABLE b;
+		{index}
 		FOR $i IN 0..{outer} {{ CREATE type::record('a', $i) SET k = $i % 1000 }};
 		FOR $i IN 0..10000 {{ CREATE type::record('b', $i) SET k = $i % 1000, x = $i }};
 	"
@@ -299,9 +416,14 @@ async fn join_throughput() {
 	let applied = "SELECT id, (SELECT VALUE x FROM b WHERE (k = $parent.k) = true) AS xs FROM a";
 	let semi = "SELECT VALUE id FROM a WHERE (SELECT VALUE x FROM b WHERE k = $parent.k AND x > 9990) != []";
 	let semi_applied = "SELECT VALUE id FROM a WHERE (SELECT VALUE x FROM b WHERE (k = $parent.k) = true AND x > 9990) != []";
-	for (label, sql) in
-		[("hash", hashed), ("apply", applied), ("semi hash", semi), ("semi apply", semi_applied)]
-	{
+	let few = "SELECT id, (SELECT VALUE x FROM b WHERE k = $parent.k) AS xs FROM a LIMIT 50";
+	for (label, sql) in [
+		("hash", hashed),
+		("apply", applied),
+		("semi hash", semi),
+		("semi apply", semi_applied),
+		("few hash", few),
+	] {
 		let bound = bind(&ctx, sql).await;
 		let op = super::plan(&planner(&ctx), &bound).await.expect("the VM runs it");
 		let mut best = std::time::Duration::MAX;

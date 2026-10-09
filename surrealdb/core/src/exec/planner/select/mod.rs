@@ -78,7 +78,7 @@ use crate::err::Error;
 use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::index::access_path::{
-	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
+	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path_paged,
 };
 use crate::exec::index::analysis::IndexAnalyzer;
 use crate::exec::logical::named_reads;
@@ -4115,12 +4115,13 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(Some((AccessPath::TableScan, direction)));
 		}
 
-		// Score of the best single-index driver, captured before
-		// `select_access_path` consumes `candidates`. Used below to decide
-		// whether a nested-OR multi-index union would be a better driver.
-		let best_single_score = candidates.iter().map(|c| c.score()).max().unwrap_or(0);
+		// Rank of the best single-index driver, captured before
+		// `select_access_path_paged` consumes `candidates`. Used below to
+		// decide whether a nested-OR multi-index union would be a better
+		// driver.
+		let best_single_score = candidates.iter().map(|c| c.rank(has_limit)).max().unwrap_or(0);
 
-		let path = select_access_path(candidates, with, direction);
+		let path = select_access_path_paged(candidates, with, direction, has_limit);
 
 		// When the chosen index covers ORDER BY, derive the correct scan
 		// direction from the ORDER BY clause rather than the default
@@ -4649,7 +4650,7 @@ pub(crate) fn bitmap_plan_to_node(plan: BitmapPlan) -> Arc<BitmapNode> {
 /// Like [`crate::exec::index::access_path::field_kind_excludes_arrays`], but starting from a field
 /// definition's declared kind. A definition with no declared `TYPE` is
 /// conservatively not exact.
-fn field_def_excludes_arrays(fd: &crate::catalog::FieldDefinition) -> bool {
+pub(crate) fn field_def_excludes_arrays(fd: &crate::catalog::FieldDefinition) -> bool {
 	let Some(kind) = fd.field_kind.as_ref() else {
 		return false;
 	};

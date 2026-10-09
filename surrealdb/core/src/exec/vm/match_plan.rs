@@ -145,6 +145,7 @@ impl BindingBackend for VmBackend<'_, '_> {
 		Ok(Plan::Filter {
 			input: Box::new(input),
 			predicate,
+			once: None,
 		})
 	}
 
@@ -293,6 +294,7 @@ impl BindingBackend for VmBackend<'_, '_> {
 			group: group_keys.to_vec(),
 			fields: column_fields(output, true),
 			first_value,
+			spill: super::plan::Spill::of_aggregate(group_keys),
 		})
 	}
 
@@ -347,6 +349,7 @@ impl BindingBackend for VmBackend<'_, '_> {
 			keep: None,
 			pushdown: false,
 			random: false,
+			spill: super::plan::Spill::of_sort(None),
 		})
 	}
 

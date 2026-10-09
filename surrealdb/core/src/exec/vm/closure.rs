@@ -1028,9 +1028,9 @@ async fn run_body(
 			}
 		};
 		super::host::host_frames(program, &mut state, exec);
-		return Box::pin(super::host::run_cow_row_from(
-			program, pipeline, row, &mut state, exec, start,
-		))
+		return super::host::out_of_line(|| {
+			super::host::run_cow_row_from(program, pipeline, row, &mut state, exec, start)
+		})
 		.await
 		.map(|_| state.output.pop().unwrap_or(Value::None));
 	}

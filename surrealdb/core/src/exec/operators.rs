@@ -63,7 +63,9 @@ pub use graph::{EdgeBinding, EndpointField, ExpandDir, PathMode, ShortestSelecto
 #[cfg(test)]
 pub use join::JoinFrame;
 pub use join::JoinType;
-pub(crate) use join::hash_join::{BuildTable, with_alias, with_alias_owned};
+pub(crate) use join::hash_join::{
+	BuildTable, key_has_regex, keys_equal, with_alias, with_alias_owned,
+};
 #[cfg(test)]
 pub use join::{HashJoin, LookupJoin, RecordBatchFetch};
 #[cfg(test)]

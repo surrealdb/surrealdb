@@ -381,6 +381,15 @@ impl TestDb {
 		Self::build(setup, false, config).await
 	}
 
+	/// As [`Self::new_with_auth`], with `config` applied.
+	#[cfg(feature = "kv-mem")]
+	pub(crate) async fn new_with_auth_and_config(
+		setup: &str,
+		config: surrealdb_cnf::ConfigMap,
+	) -> Self {
+		Self::build(setup, true, config).await
+	}
+
 	/// As [`Self::new_with_config`], with sorts that ask for `TEMPFILES` spilling
 	/// beneath `dir`.
 	#[cfg(feature = "kv-mem")]

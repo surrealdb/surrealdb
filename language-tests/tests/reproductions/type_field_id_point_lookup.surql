@@ -43,8 +43,7 @@ value = "[]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: id = (item:1)]
-        RecordIdScan [ctx: Db] [record_id: item:1]
+    RecordIdScan [ctx: Db] [record_id: item:1]
 ''''
 
 [[test.results]]

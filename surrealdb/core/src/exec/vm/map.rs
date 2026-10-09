@@ -125,6 +125,28 @@ async fn map_as_bound_unsealed(planner: &Planner<'_>, op: &LogicalOp) -> Mapped<
 	if !planner.catalog_within().nested_late {
 		plan.nested = crate::exec::vm::host::out_of_line(|| map_nested(planner, op, &plan)).await;
 	}
+	// The join rules read which tables' enforcement evaluates nothing. A join
+	// may stream its right input past the one row its left input yields only
+	// where nothing the statement does writes a row it reads.
+	if version_of(op).is_none() {
+		let mut enforced = Vec::new();
+		super::optimize::enforced_candidates(&plan.root, &mut enforced);
+		let mut inert = Vec::with_capacity(enforced.len());
+		for table in enforced {
+			if enforcement_is_total(planner, &table).await {
+				inert.push(table);
+			}
+		}
+		super::optimize::push_into_left(&mut plan.root, &inert);
+		let is_write = matches!(plan.root, Plan::Write { .. });
+		let mut writes = None;
+		super::optimize::hold_single_left(&mut plan.root, &inert, &mut || {
+			*writes.get_or_insert_with(|| statement_writes(planner, op, is_write))
+		});
+	}
+	// The conjuncts of a predicate that read nothing of the row are judged
+	// once per run of the statement.
+	super::optimize::judge_invariants_once(&mut plan.root, planner.function_registry());
 	let scanned: Vec<TableName> = plan
 		.dependencies
 		.iter()
@@ -547,6 +569,42 @@ fn holds_a_let_statement(expr: &LogicalExpr) -> bool {
 	}
 }
 
+/// Whether putting a row of `table` through the table's enforcement
+/// ([`Plan::Enforced`]) raises no error and has no effect, whoever reads it:
+/// none of the table's fields is computed, and neither its select permission
+/// nor any field's is a predicate, so a row is kept or refused, and a field
+/// kept or cut, without evaluating anything.
+async fn enforcement_is_total(planner: &Planner<'_>, table: &TableName) -> bool {
+	use crate::catalog::Permission;
+	let (Some(txn), Some((ns, db))) = (planner.txn(), planner.ns_db_ids().await) else {
+		return false;
+	};
+	let Ok(Some(def)) = txn.get_tb(ns, db, table, None).await else {
+		return false;
+	};
+	if matches!(def.permissions.select, Permission::Specific(_)) {
+		return false;
+	}
+	let Ok(fields) = txn.all_tb_fields(ns, db, table, None).await else {
+		return false;
+	};
+	fields.iter().all(|field| {
+		field.computed.is_none() && !matches!(field.select_permission, Permission::Specific(_))
+	})
+}
+
+/// Whether statement `op` may write: it is a write (`is_write`), or its
+/// expressions, the statements nested in them and the units they call may
+/// write data or run a body whose effects are not known.
+fn statement_writes(planner: &Planner<'_>, op: &LogicalOp, is_write: bool) -> bool {
+	if is_write {
+		return true;
+	}
+	let effects = crate::exec::logical::effects_of_plan(op, planner.function_registry());
+	effects.set.writes_data()
+		|| effects.set.intersects(EffectSet::OPAQUE_BODY | EffectSet::WRITES_EXTERNAL)
+}
+
 /// The statements written in `op`'s own expressions, each mapped as a
 /// statement of its own, with the facts its strategy is chosen from. A
 /// statement in `FROM`, a block's statements and a statement nested in
@@ -566,10 +624,7 @@ async fn map_nested(
 		return Vec::new();
 	}
 	let registry = planner.function_registry();
-	let enclosing = crate::exec::logical::effects_of_plan(op, registry);
-	let enclosing_writes = matches!(plan.root, Plan::Write { .. })
-		|| enclosing.set.writes_data()
-		|| enclosing.set.intersects(EffectSet::OPAQUE_BODY | EffectSet::WRITES_EXTERNAL);
+	let enclosing_writes = statement_writes(planner, op, matches!(plan.root, Plan::Write { .. }));
 	let mut closure_params = Vec::new();
 	closure_params_in(op, &mut closure_params);
 	let mut nested: Vec<std::sync::Arc<Nested>> = Vec::with_capacity(uses.len());
@@ -610,11 +665,17 @@ async fn map_nested(
 		} else {
 			None
 		};
+		let lookup = match &join {
+			Some(join) => lookup_index(planner, statement, &mapped, join).await,
+			None => None,
+		};
 		nested.push(std::sync::Arc::new(Nested {
 			op: statement.clone(),
 			plan: mapped,
 			facts,
 			join,
+			lookup,
+			hashed: None,
 			strategy: Strategy::Apply,
 			// Every place the statement is written, not the first alone.
 			membership: facts.reads_rows
@@ -666,6 +727,266 @@ fn join_key(
 	})
 }
 
+/// The index correlated statement `statement`, mapped to `plan`, may read the
+/// table beneath its join predicate through, keyed by `join`'s field
+/// ([`indexed_field`]). A read under `WITH`, `FOR UPDATE` or a `VERSION`
+/// takes none: the statement chose its access path, locks what it reads, or
+/// reads a state no index entry describes.
+async fn lookup_index(
+	planner: &Planner<'_>,
+	statement: &LogicalOp,
+	plan: &PhysicalPlan,
+	join: &JoinKey,
+) -> Option<crate::exec::index::access_path::IndexRef> {
+	if plan.tail.version.is_some() {
+		return None;
+	}
+	let table = joined_table(&plan.root)?;
+	let source = table_source(statement, table)?;
+	if source.with.is_some() || source.for_update || version_of(statement).is_some() {
+		return None;
+	}
+	indexed_field(planner, table, &join.field).await
+}
+
+/// The index of `table` an equality on `field` alone is read through: the
+/// one the access path decision chooses for that conjunct, where it is a
+/// B-tree index over that one plain field. The decision withholds an index
+/// the caller may not read the column of.
+async fn indexed_field(
+	planner: &Planner<'_>,
+	table: &TableName,
+	field: &surrealdb_strand::Strand,
+) -> Option<crate::exec::index::access_path::IndexRef> {
+	use crate::exec::index::access_path::BTreeAccess;
+	// The value is a stand-in: the decision reads only the conjunct's shape.
+	let probe = LogicalExpr::Binary {
+		left: Box::new(LogicalExpr::Field(field.clone())),
+		op: BinaryOperator::Equal,
+		right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+	};
+	let decision =
+		planner.decide_access_path(table, Some(&probe), None, None, false, false).await?;
+	let AccessPath::BTreeScan {
+		index_ref,
+		access: BTreeAccess::Equality(_),
+		..
+	} = decision.path
+	else {
+		return None;
+	};
+	let [column] = index_ref.cols.as_slice() else {
+		return None;
+	};
+	matches!(column.0.as_slice(), [crate::expr::Part::Field(name)] if name == field)
+		.then_some(index_ref)
+}
+
+/// How join `right`, read under `alias` and paired by `keys`, may be read
+/// through an index for one left row's key ([`super::plan::JoinLookup`]):
+/// by the first key pair whose right side is a field of the row under the
+/// alias that an index covers alone, where `right` is a forward scan of one
+/// table beneath its predicates, permission, layers and enforcement, read
+/// with no `WITH` or `FOR UPDATE`, and not at a `VERSION`.
+async fn join_lookup(
+	planner: &Planner<'_>,
+	op: &LogicalOp,
+	right: &Plan,
+	keys: &[(LogicalExpr, LogicalExpr)],
+	alias: &str,
+	versioned: bool,
+) -> Option<super::plan::JoinLookup> {
+	if versioned {
+		return None;
+	}
+	let table = scanned_beneath(right)?;
+	let source = table_source(op, table)?;
+	if source.with.is_some() || source.for_update {
+		return None;
+	}
+	for (at, (probe, build)) in keys.iter().enumerate() {
+		let LogicalExpr::Access {
+			base,
+			field,
+		} = build
+		else {
+			continue;
+		};
+		if !matches!(base.as_ref(), LogicalExpr::Field(name) if name.as_str() == alias) {
+			continue;
+		}
+		let Some(index) = indexed_field(planner, table, field).await else {
+			continue;
+		};
+		let mut looked_up = right.clone();
+		if read_through(&mut looked_up, &index, field, probe) {
+			return Some(super::plan::JoinLookup {
+				key: at,
+				right: Box::new(looked_up),
+			});
+		}
+	}
+	None
+}
+
+/// The table a forward scan beneath `plan`'s predicates, permission, layers
+/// and enforcement reads.
+fn scanned_beneath(plan: &Plan) -> Option<&TableName> {
+	match plan {
+		Plan::Filter {
+			input,
+			..
+		}
+		| Plan::PermissionFilter {
+			input,
+			..
+		}
+		| Plan::Layer {
+			input,
+			..
+		}
+		| Plan::Enforced {
+			input,
+			..
+		} => scanned_beneath(input),
+		Plan::TableScan {
+			table,
+			direction: crate::kvs::Direction::Forward,
+			..
+		} => Some(table),
+		_ => None,
+	}
+}
+
+/// Replace the forward scan beneath `plan`'s predicates, permission, layers
+/// and enforcement with a lookup through `index` keyed by the join's `probe`
+/// key.
+fn read_through(
+	plan: &mut Plan,
+	index: &crate::exec::index::access_path::IndexRef,
+	field: &surrealdb_strand::Strand,
+	probe: &LogicalExpr,
+) -> bool {
+	match plan {
+		Plan::Filter {
+			input,
+			..
+		}
+		| Plan::PermissionFilter {
+			input,
+			..
+		}
+		| Plan::Layer {
+			input,
+			..
+		}
+		| Plan::Enforced {
+			input,
+			..
+		} => read_through(input, index, field, probe),
+		Plan::TableScan {
+			table,
+			direction: crate::kvs::Direction::Forward,
+			schema,
+			..
+		} if *table == index.table_name => {
+			*plan = Plan::IndexLookup {
+				table: table.clone(),
+				index: index.clone(),
+				field: field.clone(),
+				key: super::plan::LookupKey::Probe(probe.clone()),
+				schema: schema.clone(),
+			};
+			true
+		}
+		_ => false,
+	}
+}
+
+/// The table a forward table scan reads beneath the innermost predicate on
+/// `plan`'s chain of single inputs, under its table's permission and layers
+/// alone.
+fn joined_table(plan: &Plan) -> Option<&TableName> {
+	let mut source = innermost_filter_input(plan)?;
+	loop {
+		source = match source {
+			Plan::PermissionFilter {
+				input,
+				..
+			}
+			| Plan::Layer {
+				input,
+				..
+			}
+			| Plan::Enforced {
+				input,
+				..
+			} => input,
+			Plan::TableScan {
+				table,
+				direction: crate::kvs::Direction::Forward,
+				topk: None,
+				..
+			} => return Some(table),
+			_ => return None,
+		};
+	}
+}
+
+/// The input of the innermost [`Plan::Filter`] on `plan`'s chain of single
+/// inputs.
+fn innermost_filter_input(plan: &Plan) -> Option<&Plan> {
+	match plan {
+		Plan::Filter {
+			input,
+			..
+		} => innermost_filter_input(input).or(Some(input)),
+		Plan::PermissionFilter {
+			input,
+			..
+		}
+		| Plan::Layer {
+			input,
+			..
+		}
+		| Plan::Split {
+			input,
+			..
+		}
+		| Plan::Fetch {
+			input,
+			..
+		}
+		| Plan::Sort {
+			input,
+			..
+		}
+		| Plan::Limit {
+			input,
+			..
+		}
+		| Plan::Aggregate {
+			input,
+			..
+		}
+		| Plan::Project {
+			input,
+			..
+		} => innermost_filter_input(input),
+		_ => None,
+	}
+}
+
+/// The source of `op` that reads `table` whole.
+fn table_source<'a>(op: &'a LogicalOp, table: &TableName) -> Option<&'a LogicalSource> {
+	if let LogicalOp::Source(source) = op
+		&& matches!(&source.source, SourceRef::Table(named) if named == table)
+	{
+		return Some(source);
+	}
+	op.children().iter().find_map(|child| table_source(child, table))
+}
+
 /// The predicate of the innermost [`Plan::Filter`] on `plan`'s chain of
 /// single inputs; `found` is the innermost one above `plan`.
 fn innermost_predicate<'a>(
@@ -676,6 +997,7 @@ fn innermost_predicate<'a>(
 		Plan::Filter {
 			input,
 			predicate,
+			..
 		} => innermost_predicate(input, Some(predicate)),
 		Plan::PermissionFilter {
 			input,
@@ -2625,6 +2947,7 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 			guard,
 			hides_access_paths,
 			computed,
+			once: None,
 		};
 	}
 	let mut brute = brute;
@@ -2647,6 +2970,7 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 			RowStage::Filter(predicate) => Plan::Filter {
 				input: Box::new(root),
 				predicate,
+				once: None,
 			},
 			RowStage::Layer(fields, input_schema) => Plan::Layer {
 				input: Box::new(root),
@@ -2660,6 +2984,7 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 				guard,
 				hides_access_paths,
 				computed,
+				once: None,
 			},
 		};
 	}
@@ -2955,6 +3280,7 @@ fn clauses_over(
 	if let Some((group, fields)) = aggregate {
 		root = Plan::Aggregate {
 			input: Box::new(root),
+			spill: super::plan::Spill::of_aggregate(&group),
 			group,
 			fields,
 			first_value: Vec::new(),
@@ -2967,6 +3293,7 @@ fn clauses_over(
 			keep: None,
 			pushdown: false,
 			random: clause.random,
+			spill: super::plan::Spill::of_sort(None),
 		};
 	}
 	if let Some((limit, start)) = limit {
@@ -3037,6 +3364,7 @@ fn holds_on_chain(plan: &Plan, hit: &dyn Fn(&Plan) -> bool) -> bool {
 		}
 		| Plan::Distinct {
 			input,
+			..
 		}
 		| Plan::Project {
 			input,
@@ -3089,13 +3417,19 @@ async fn map_barrier(
 			let (left, mut dependencies) = rows_of(planner, join.left(), versioned).await?;
 			let (right, inner) = rows_of(planner, join.right(), versioned).await?;
 			dependencies.extend(inner);
+			let alias = join.alias.name().to_string();
+			let lookup =
+				join_lookup(planner, join.right(), &right, &join.on, &alias, versioned).await;
 			let plan = Plan::Join {
 				left: Box::new(left),
 				right: Box::new(right),
 				kind,
 				keys: join.on.clone(),
 				residual: join.filter.clone(),
-				alias: join.alias.name().to_string(),
+				alias,
+				spill: super::plan::Spill::Spillable,
+				lookup,
+				build: super::plan::JoinBuild::Right,
 			};
 			Ok((plan, dependencies))
 		}
@@ -3104,6 +3438,7 @@ async fn map_barrier(
 			Ok((
 				Plan::Distinct {
 					input: Box::new(rows),
+					spill: super::plan::Spill::Spillable,
 				},
 				dependencies,
 			))
@@ -3476,12 +3811,14 @@ async fn table_access(
 				}
 				_ => None,
 			};
+			let exact = !fans_out && answers_exactly(planner, &table, &index_ref, &access).await;
 			Ok(Plan::IndexScan {
 				table,
 				index: index_ref,
 				access,
 				direction,
 				ordered_by,
+				exact,
 				schema,
 				decode: None,
 			})
@@ -3580,6 +3917,53 @@ async fn table_access(
 			})
 		}
 	}
+}
+
+/// Whether B-tree `access` over `index` lists exactly the records whose
+/// columns satisfy the conjuncts it was chosen from ([`Plan::IndexScan`]'s
+/// `exact`): every column it pins is a plain field path, and `table`'s
+/// catalog declares that field with a kind that holds no array. An array
+/// value is listed once per element, and an empty one under `NULL`, so a
+/// column that may hold one lists records its conjunct rejects. Where the
+/// catalog cannot be read the access is not exact.
+async fn answers_exactly(
+	planner: &Planner<'_>,
+	table: &TableName,
+	index: &crate::exec::index::access_path::IndexRef,
+	access: &crate::exec::index::access_path::BTreeAccess,
+) -> bool {
+	use crate::exec::index::access_path::BTreeAccess;
+	let pinned = match access {
+		BTreeAccess::Equality(_) => index.cols.len(),
+		BTreeAccess::Compound {
+			prefix,
+			range,
+		} => prefix.len() + usize::from(range.is_some()),
+		BTreeAccess::Range {
+			..
+		} => 1,
+		_ => return false,
+	};
+	let columns = &index.cols[..pinned.min(index.cols.len())];
+	if columns.is_empty()
+		|| !columns
+			.iter()
+			.all(|column| column.0.iter().all(|part| matches!(part, crate::expr::Part::Field(_))))
+	{
+		return false;
+	}
+	let (Some(txn), Some((ns, db))) = (planner.txn(), planner.ns_db_ids().await) else {
+		return false;
+	};
+	let Ok(fields) = txn.all_tb_fields(ns, db, table, None).await else {
+		return false;
+	};
+	columns.iter().all(|column| {
+		fields
+			.iter()
+			.find(|field| &field.name == column)
+			.is_some_and(crate::exec::planner::field_def_excludes_arrays)
+	})
 }
 
 /// An index union over B-tree scans `paths`, merged as the operator tree
@@ -4207,6 +4591,9 @@ async fn knn_union_sources(
 				)],
 				residual: None,
 				alias: ALIAS.to_owned(),
+				spill: super::plan::Spill::Spillable,
+				lookup: None,
+				build: super::plan::JoinBuild::Right,
 			});
 			continue;
 		}
@@ -4222,6 +4609,7 @@ async fn knn_union_sources(
 			*leaf = statement(Plan::Filter {
 				input: Box::new(read),
 				predicate: LogicalExpr::Literal(LogicalLiteral::Bool(false)),
+				once: None,
 			});
 		}
 	}

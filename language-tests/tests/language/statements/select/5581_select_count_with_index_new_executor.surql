@@ -31,7 +31,7 @@ value = "[{ count: 10 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
     Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1}
-        Filter [ctx: Db] [predicate: indexedField = 'cake' AND unindexedField = false] {rows: 1}
+        Filter [ctx: Db] [predicate: unindexedField = false] {rows: 1}
             IndexScan [ctx: Db] [table: test, index: idx_indexedField, access: = 'cake', direction: Forward] {rows: 1}
 
 Total rows: 1"'''

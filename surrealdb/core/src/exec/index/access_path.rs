@@ -715,7 +715,8 @@ pub(crate) fn scan_ordering(
 /// 3. Best effort heuristics:
 ///    - Prefer unique index for equality (returns 1 row)
 ///    - Prefer compound index that matches more columns
-///    - Prefer index that covers ORDER BY
+///    - Prefer index that covers ORDER BY, over any range under a LIMIT
+///      ([`select_access_path_paged`])
 ///    - Otherwise, pick the first of the tied indexes in catalog order
 ///
 /// The final rule is load-bearing rather than arbitrary: two indexes that a
@@ -726,9 +727,22 @@ pub(crate) fn scan_ordering(
 /// keyed by index name, so it coincides with definition order only where the
 /// two agree.
 pub fn select_access_path(
+	candidates: Vec<IndexCandidate>,
+	with_hints: Option<&With>,
+	direction: Direction,
+) -> AccessPath {
+	select_access_path_paged(candidates, with_hints, direction, false)
+}
+
+/// [`select_access_path`] for a statement that does or does not page its rows
+/// with a `LIMIT`: under one, candidates are ranked by
+/// [`IndexCandidate::rank`], which prefers an index that delivers the
+/// `ORDER BY` to a range over another index.
+pub fn select_access_path_paged(
 	mut candidates: Vec<IndexCandidate>,
 	with_hints: Option<&With>,
 	direction: Direction,
+	limited: bool,
 ) -> AccessPath {
 	// WITH NOINDEX forces table scan
 	if matches!(with_hints, Some(With::NoIndex)) {
@@ -782,7 +796,7 @@ pub fn select_access_path(
 	// Best effort: highest score wins, and catalog position breaks a tie.
 	// Sorting rather than `max_by_key` makes the choice independent of the
 	// order the analysis passes pushed the candidates in.
-	candidates.sort_by_key(|c| (std::cmp::Reverse(c.score()), c.index_ref.idx));
+	candidates.sort_by_key(|c| (std::cmp::Reverse(c.rank(limited)), c.index_ref.idx));
 	candidates
 		.into_iter()
 		.next()

@@ -44,7 +44,7 @@ value = """{ attributes: { projections: '*' }, children: [{ attributes: { mode: 
 value = "{ attributes: { projections: '*' }, children: [{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { predicate: 'array::len(array::distinct(array::map([1, 2], |$i: any| `rand`::float()))) > 1' }, children: [{ attributes: { direction: 'Forward', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'Aggregate' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
-value = "{ attributes: { projections: '*' }, children: [{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { predicate: '20f = 20' }, children: [{ attributes: { direction: 'Forward', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'Aggregate' }], context: 'Db', operator: 'SelectProject' }"
+value = "{ attributes: { projections: '*' }, children: [{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { once: '20f = 20' }, children: [{ attributes: { direction: 'Forward', table: 't' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'Filter' }], context: 'Db', operator: 'Aggregate' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
 value = "[{ count: 10 }]"

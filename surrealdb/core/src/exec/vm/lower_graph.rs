@@ -198,6 +198,8 @@ impl Lowering<'_, '_> {
 					enclosing_writes: self.writes,
 				},
 				join: None,
+				lookup: None,
+				hashed: None,
 				strategy: super::super::plan::Strategy::Apply,
 				membership: false,
 			}));
@@ -1076,7 +1078,7 @@ impl Lowering<'_, '_> {
 			let dst = self.register()?;
 			let rejected = if derivations.is_empty() {
 				crate::exec::vm::host::out_of_line(|| {
-					self.permission(predicate, &None, GuardKind::Read, None)
+					self.permission(predicate, &None, GuardKind::Read, None, None)
 				})
 				.await?
 			} else {

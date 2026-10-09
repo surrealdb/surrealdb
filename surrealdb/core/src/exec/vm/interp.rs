@@ -197,6 +197,41 @@ pub(super) enum Pending {
 		join: u16,
 		keys: Vec<Value>,
 	},
+	/// Hand the row itself to join `join`, which holds its left row, as a row
+	/// of its right input; the host pairs it with the held row and runs the
+	/// pairing (`host::run_join_pair`), since it is a row of another pipeline.
+	JoinPair {
+		join: u16,
+	},
+}
+
+#[cfg(test)]
+thread_local! {
+	/// How many verdicts this thread's runs have judged on the conjuncts
+	/// filters judge once ([`Instr::VerdictSet`]).
+	pub(super) static VERDICTS_JUDGED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// What a join that holds its left input's one row keeps while its right
+/// input streams past it ([`super::program::JoinSpec::streams`]).
+pub(super) struct HeldJoin {
+	/// The left row.
+	pub(super) probe: Value,
+	/// Its key.
+	pub(super) keys: Vec<Value>,
+	/// Whether a right row has been paired with it.
+	pub(super) matched: bool,
+	/// Whether the join's pipeline took no more rows.
+	pub(super) stopped: bool,
+	/// The right rows whose key holds a regex that `=` matches the left key
+	/// with, paired once the right input ends, as the build table pairs them
+	/// after the rows the left key equals by ordering.
+	pub(super) regex: Vec<Value>,
+	/// Where the left key holds a regex, the right rows keyed, paired once the
+	/// right input ends as the build table pairs them.
+	pub(super) table: Option<crate::exec::operators::BuildTable>,
+	/// The state the right rows' keys and the residual are evaluated on.
+	pub(super) eval: Option<PooledState>,
 }
 
 /// A paging clause's counts across the rows of its pipeline.
@@ -391,6 +426,17 @@ pub(super) struct State {
 	/// [`Program::nested`](super::program::Program::nested) index, until the
 	/// group it is evaluated in starts again.
 	pub(super) once: Vec<Option<Kept>>,
+	/// For each nested statement read through an index nested loop with a
+	/// probe to fall back on, the evaluations made since the group that owns
+	/// it started ([`super::program::NestedSpec::hashed`]).
+	pub(super) lookups: Vec<u32>,
+	/// For each join reading its right input through an index, the left rows
+	/// it has looked up since the group that owns it started
+	/// ([`super::program::JoinSpec::lookup`]).
+	pub(super) join_lookups: Vec<u32>,
+	/// The key a join hands the index lookup its right input reads through,
+	/// while that input runs for one left row ([`super::program::Source::Lookup`]).
+	pub(super) lookup_key: Option<Value>,
 	/// The rows each probe has kept, by
 	/// [`Program::probes`](super::program::Program::probes) index, until its
 	/// owner starts again.
@@ -402,6 +448,15 @@ pub(super) struct State {
 	/// [`Program::joins`](super::program::Program::joins) index, once the
 	/// first probe row has reached the join and until its owner starts again.
 	pub(super) joins: Vec<Option<super::join_spill::JoinBuilt>>,
+	/// The left row each join that holds its left input holds, by
+	/// [`Program::joins`](super::program::Program::joins) index, from when
+	/// the left input hands it over until the right input has streamed past
+	/// it ([`super::program::JoinSpec::streams`]).
+	pub(super) held: Vec<Option<Box<HeldJoin>>>,
+	/// The verdict each filter holds on the conjuncts it judges once, by
+	/// [`Program::verdicts`](super::program::Program::verdicts) index, from the
+	/// first row that reaches it until the group that owns it starts again.
+	pub(super) verdicts: Vec<Option<bool>>,
 	/// The rows each distinct set has passed, by
 	/// [`Program::distincts`](super::program::Program::distincts) index.
 	pub(super) seen: Vec<crate::exec::operators::SeenSet>,
@@ -794,9 +849,13 @@ impl State {
 		);
 		self.group_writes.resize_with(program.groups.len(), || None);
 		self.once.resize_with(program.nested.len(), || None);
+		self.lookups.resize(program.nested.len(), 0);
 		self.probes.resize(program.probes.len(), None);
 		self.steps.resize_with(program.splits.len(), || None);
 		self.joins.resize_with(program.joins.len(), || None);
+		self.join_lookups.resize(program.joins.len(), 0);
+		self.held.resize_with(program.joins.len(), || None);
+		self.verdicts.resize(program.verdicts.len(), None);
 		self.seen.resize_with(program.distincts.len(), crate::exec::operators::SeenSet::new);
 		self.reserved_taken.resize(program.reservations.len(), false);
 	}
@@ -857,9 +916,14 @@ impl State {
 			group_writes,
 			slots,
 			once,
+			lookups,
+			join_lookups,
+			lookup_key,
 			probes,
 			steps,
 			joins,
+			held,
+			verdicts,
 			seen,
 			build_budget,
 			zeroed,
@@ -927,9 +991,14 @@ impl State {
 		emptied(group_writes);
 		emptied(slots);
 		emptied(once);
+		emptied(lookups);
+		emptied(join_lookups);
+		*lookup_key = None;
 		emptied(probes);
 		emptied(steps);
 		emptied(joins);
+		emptied(held);
+		emptied(verdicts);
 		emptied(seen);
 		*build_budget = usize::MAX;
 		*zeroed = false;
@@ -1180,9 +1249,14 @@ impl State {
 			group_writes: Vec::new(),
 			slots: Vec::new(),
 			once: Vec::new(),
+			lookups: Vec::new(),
+			join_lookups: Vec::new(),
+			lookup_key: None,
 			probes: Vec::new(),
 			steps: Vec::new(),
 			joins: Vec::new(),
+			held: Vec::new(),
+			verdicts: Vec::new(),
 			seen: Vec::new(),
 			build_budget: usize::MAX,
 			zeroed: false,
@@ -1704,9 +1778,14 @@ impl State {
 			}) => debug_assert!(false, "a split's row was settled"),
 			// A join's pairings are run by the host, which takes the pending
 			// probe row before a row is settled.
-			Some(Pending::Join {
-				..
-			}) => debug_assert!(false, "a join's row was settled"),
+			Some(
+				Pending::Join {
+					..
+				}
+				| Pending::JoinPair {
+					..
+				},
+			) => debug_assert!(false, "a join's row was settled"),
 			None => {}
 		}
 	}
@@ -3131,6 +3210,34 @@ pub(super) fn run_row<'r>(
 				state.pending = Some(Pending::Join {
 					join: *join,
 					keys,
+				});
+				pc += 1;
+			}
+			Instr::VerdictJump {
+				cell,
+				admitted,
+				refused,
+			} => {
+				pc = match state.verdicts[*cell as usize] {
+					Some(true) => *admitted as usize,
+					Some(false) => *refused as usize,
+					None => pc + 1,
+				};
+			}
+			Instr::VerdictSet {
+				cell,
+				admits,
+			} => {
+				#[cfg(test)]
+				VERDICTS_JUDGED.with(|judged| judged.set(judged.get() + 1));
+				state.verdicts[*cell as usize] = Some(*admits);
+				pc += 1;
+			}
+			Instr::JoinPair {
+				join,
+			} => {
+				state.pending = Some(Pending::JoinPair {
+					join: *join,
 				});
 				pc += 1;
 			}

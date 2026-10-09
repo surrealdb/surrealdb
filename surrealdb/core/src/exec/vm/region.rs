@@ -102,6 +102,9 @@ pub(super) fn source_admits(source: &Source) -> bool {
 		| Source::Index {
 			..
 		}
+		| Source::Lookup {
+			..
+		}
 		| Source::IndexUnion {
 			..
 		}
@@ -192,6 +195,9 @@ pub(super) fn body_admits(
 			..
 		}
 		| Instr::JoinProbe {
+			..
+		}
+		| Instr::JoinPair {
 			..
 		}
 		| Instr::Distinct {
@@ -816,6 +822,7 @@ impl<'p> Region<'p> {
 			frames: state.frames.clone(),
 			slots: state.slots.clone(),
 			kept: state.slot_charges(),
+			verdicts: state.verdicts.clone(),
 			bypassed: state.permissions_bypassed,
 			shared: state
 				.shared(self.program, ctx.function_registry())
@@ -1079,14 +1086,17 @@ fn merge_groups(main: &mut Option<Groups>, part: Option<Groups>) -> FlowResult<(
 }
 
 /// What a batch runs under besides its rows: the statement's frames, the
-/// block names it reads, whether its permissions are bypassed, and what the
-/// run shares with its batches.
+/// block names it reads, the verdicts its filters already hold on the
+/// conjuncts they judge once — a batch that finds none judges them for
+/// itself, deterministic as they are — whether its permissions are bypassed,
+/// and what the run shares with its batches.
 struct Under {
 	frames: Vec<ExecutionContext>,
 	slots: Vec<Value>,
 	/// The bytes the statement's ledger charges each slot, which the batch's
 	/// copy of the slots is charged again.
 	kept: Vec<usize>,
+	verdicts: Vec<Option<bool>>,
 	bypassed: bool,
 	shared: super::interp::RunShare,
 }
@@ -1099,6 +1109,7 @@ impl Under {
 			frames: state.frames.clone(),
 			slots: state.slots.clone(),
 			kept: state.slot_charges(),
+			verdicts: state.verdicts.clone(),
 			bypassed: state.permissions_bypassed,
 			shared: state.shared(program, ctx.function_registry()).map_err(ControlFlow::Err)?,
 		})
@@ -1265,6 +1276,7 @@ async fn batch_state(
 	state.frames = under.frames;
 	state.slots = under.slots;
 	state.keep_copied(under.kept, ctx).await?;
+	state.verdicts = under.verdicts;
 	state.permissions_bypassed = under.bypassed;
 	Ok(state)
 }

@@ -152,6 +152,13 @@ fn body_sig(definition: &crate::catalog::FunctionDefinition) -> UnitSig {
 /// Lower `prepared`, the body of function `name`, as a unit of `arena`, and
 /// answer its id; the unit already there when the body was lowered for the
 /// same frame before, which is how a recursion closes.
+///
+/// The body is lowered into `arena`, and everything it reaches is linked
+/// there, once. A body whose lowering linked no unit beyond its own and whose
+/// program is a small leaf is lowered again as a light body ([`light_body`]),
+/// which then is its unit; a light body reaches no unit, so that lowering
+/// lowers nothing beyond the body, and no body is lowered outside the arena
+/// its call is linked into.
 async fn link_function<'c>(
 	arena: &mut Arena<'c>,
 	name: &str,
@@ -184,7 +191,18 @@ async fn link_function<'c>(
 			let physical = super::super::optimize::optimize(
 				super::super::map::map(planner, &prepared.bound).await?,
 			);
-			Box::pin(super::lower_in(planner, &physical, Some(&mut *arena), None)).await?
+			let program = crate::exec::vm::host::out_of_line(|| {
+				super::lower_in(planner, &physical, Some(&mut *arena), None)
+			})
+			.await?;
+			let reached = arena.units.len() > id as usize + 1;
+			if reached || !program.small_leaf() {
+				program
+			} else {
+				crate::exec::vm::host::out_of_line(|| light_body(planner, prepared, &physical))
+					.await?
+					.unwrap_or(program)
+			}
 		}
 	};
 	program.unit = Some(UnitHead {
@@ -195,6 +213,89 @@ async fn link_function<'c>(
 	});
 	arena.units[id as usize] = Arc::new(program);
 	Ok(UnitId(id))
+}
+
+/// `physical`, the plan of the body prepared as `prepared`, lowered as a
+/// light body where it is one: a small leaf ([`Program::small_leaf`]) that
+/// reads its arguments from slots `0..` in declaration order, and reads
+/// nothing else of the frame it runs in — no parameter, no name from a
+/// pipeline of its own — and runs no external or invoked code. A call runs
+/// such a body with no frame of its own ([`FunctionSpec::light`]). `None`
+/// for any other body, whose unit is its lowering reading its arguments as
+/// parameters.
+///
+/// The lowering is one of its own, with an arena of its own, so it is made
+/// only for a body that [`link_function`] lowered as a small leaf reaching no
+/// unit: one that reached a unit would lower it again here, and every unit
+/// that unit reaches, outside the arena that links and bounds them.
+async fn light_body(
+	planner: &Planner<'_>,
+	prepared: &PreparedBody<'_>,
+	physical: &super::super::plan::PhysicalPlan,
+) -> Lowered<Option<Program>> {
+	let Some(mut l) = light_lowering(planner, prepared, physical) else {
+		return Ok(None);
+	};
+	if crate::kvs::catalog_reads::sealed(
+		true,
+		crate::exec::vm::host::out_of_line(|| l.root(physical)),
+	)
+	.await
+	.is_err()
+	{
+		return Ok(None);
+	}
+	light_program(l)
+}
+
+/// The lowering a light body is lowered into, with its arguments as the
+/// slots `0..`. Built out of line, and boxed, so that the poll of
+/// [`light_body`] holds a pointer where the lowering's whole size would
+/// otherwise sit in its frame.
+#[inline(never)]
+fn light_lowering<'p, 'ctx>(
+	planner: &'p Planner<'ctx>,
+	prepared: &PreparedBody<'_>,
+	physical: &super::super::plan::PhysicalPlan,
+) -> Option<Box<Lowering<'p, 'ctx>>> {
+	if physical.tail != super::super::plan::Tail::default() {
+		return None;
+	}
+	let args = &prepared.frame.compiled_from.args;
+	let slots = u16::try_from(args.len()).ok()?;
+	let mut l = Box::new(Lowering::new(planner));
+	l.ahead = true;
+	l.stage_sets = true;
+	l.slot_names = args
+		.iter()
+		.zip(0..slots)
+		.map(|((name, _), slot)| (name.as_str().to_owned(), slot))
+		.collect();
+	l.slots = slots;
+	Some(l)
+}
+
+/// The program of a light body whose lowering has run, or `None` where the
+/// body is not one: it reads a frame, a parameter, an external or invoked
+/// code, or its program is not a small leaf. Out of line, for the same reason
+/// as [`light_lowering`].
+#[inline(never)]
+fn light_program(l: Box<Lowering<'_, '_>>) -> Lowered<Option<Program>> {
+	let frameless = l.frame_reads == 0
+		&& l.params.is_empty()
+		&& l.externals.is_empty()
+		&& l.invokes == 0
+		&& l.closures.is_empty()
+		&& l.closure_values.is_empty();
+	if !frameless {
+		return Ok(None);
+	}
+	let program = match (*l).finish() {
+		Ok(program) => program,
+		Err(refused) if refused.internal => return Err(refused),
+		Err(_) => return Ok(None),
+	};
+	Ok(program.small_leaf().then_some(program))
 }
 
 impl<'ctx> Lowering<'_, 'ctx> {
@@ -317,6 +418,9 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		if self.catalog.function_keeps_row_order(name)? {
 			self.row_ordered_calls += 1;
 		}
+		let light = callee.inline.is_none()
+			&& callee.body.is_some_and(|unit| self.light(unit))
+			&& callee.unchecked_body.is_none_or(|unit| self.light(unit));
 		self.functions.push(FunctionSpec {
 			name: name.to_owned(),
 			qualified: format!("fn::{name}"),
@@ -330,6 +434,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			unchecked_body: callee.unchecked_body,
 			guard,
 			depth: self.call_depth(name)?,
+			light,
 		});
 		let function = (self.functions.len() - 1) as u32;
 		let frame = super::super::program::CALL_FRAME
@@ -403,6 +508,21 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		self.uses_eval = true;
 		self.may_fail = true;
 		Ok(Operand::Reg(dst))
+	}
+
+	/// Whether the body unit `unit` of this lowering's arena runs — the
+	/// body a bundle holds, for a unit that holds one — is a light body
+	/// ([`light_body`]): a small leaf that reads no parameter, its arguments
+	/// being in its slots.
+	fn light(&self, unit: UnitId) -> bool {
+		let Some(held) = self.units.get(unit.0 as usize) else {
+			return false;
+		};
+		let light = |body: &Program| body.small_leaf() && body.params.is_empty();
+		match held.unit.as_ref().and_then(|head| head.entry) {
+			Some(entry) => held.units.get(entry.0 as usize).is_some_and(|body| light(body)),
+			None => light(held),
+		}
 	}
 
 	/// What a call of `name` needs of the function, lowered.
@@ -722,7 +842,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Lowered<Program> {
 		let mut l = Lowering::new(planner);
 		l.catalog = catalog;
-		let pipeline = Box::pin(l.guard_pipeline_in(planner, guard)).await?;
+		let pipeline =
+			crate::exec::vm::host::out_of_line(|| l.guard_pipeline_in(planner, guard)).await?;
 		if pipeline != 0 {
 			return Err(NotCovered::internal("a parameter's predicate is not its unit's pipeline"));
 		}

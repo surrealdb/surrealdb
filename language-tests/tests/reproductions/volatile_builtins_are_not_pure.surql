@@ -38,7 +38,7 @@ value = '''
         TableScan [ctx: Db] [table: o, direction: Forward]
         Subquery [ctx: Db] [strategy: once]
             ProjectValue [ctx: Db] [expr: k]
-                Filter [ctx: Db] [predicate: crypto::bcrypt::compare('h', 'p') != true]
+                Filter [ctx: Db] [once: crypto::bcrypt::compare('h', 'p') != true]
                     TableScan [ctx: Db] [table: r, direction: Forward]
 "'''
 

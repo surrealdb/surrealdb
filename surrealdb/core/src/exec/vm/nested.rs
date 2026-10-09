@@ -175,7 +175,10 @@ async fn stream_rows(
 /// The value at `path` of `parent`, read through objects alone: `None` where
 /// the path meets any other value, whose reading — a record fetched, an
 /// array mapped — is the predicate's own.
-fn key_at<'a>(parent: Option<&'a Value>, path: &[surrealdb_strand::Strand]) -> Option<&'a Value> {
+pub(super) fn key_at<'a>(
+	parent: Option<&'a Value>,
+	path: &[surrealdb_strand::Strand],
+) -> Option<&'a Value> {
 	let mut value = parent?;
 	for field in path {
 		match value {
@@ -844,7 +847,21 @@ async fn run_statement(
 		}
 		nested_ctx
 	};
-	let group = spec.group;
+	let group = match &spec.hashed {
+		Some((hashed, path))
+			if state.lookups[nested as usize] >= super::plan::LOOKUP_EVALUATIONS
+				|| !row
+					.and_then(|row| key_at(Some(row), path))
+					.is_some_and(super::host::lookup_key) =>
+		{
+			*hashed
+		}
+		Some(_) => {
+			state.lookups[nested as usize] += 1;
+			spec.group
+		}
+		None => spec.group,
+	};
 	let aside = Aside {
 		frame: state.frame.replace(frame.clone()),
 		write_input: state.write_input.take(),

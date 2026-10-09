@@ -135,12 +135,33 @@ pub(crate) struct Nested {
 	/// The equality the statement's rows are joined to the row it is
 	/// evaluated for by, where that is the only way it reads the row.
 	pub(crate) join: Option<JoinKey>,
+	/// A B-tree index over the join's field alone, of the table the
+	/// statement reads beneath its join predicate, which the caller may read
+	/// through: the catalog fact an index nested loop is chosen from
+	/// ([`Strategy::Lookup`]).
+	pub(crate) lookup: Option<crate::exec::index::access_path::IndexRef>,
+	/// For a statement read through an index nested loop that a probe could
+	/// read as well: its plan over the probe, which the evaluations past the
+	/// first [`LOOKUP_EVALUATIONS`] of one run of the statement it is written
+	/// in read through instead ([`Strategy::Lookup`]).
+	pub(crate) hashed: Option<PhysicalPlan>,
 	pub(crate) strategy: Strategy,
 	/// Whether the statement's only use is as the right operand of an
 	/// `INSIDE` or `NOT INSIDE`, so a kept value is held as a membership
 	/// index. It takes effect with [`Strategy::Once`] alone.
 	pub(crate) membership: bool,
 }
+
+/// How many evaluations of a statement read through an index nested loop
+/// before the rest of the run reads it through its probe, where it has one.
+///
+/// A run evaluating the statement for a few rows reads only the records
+/// their keys reach. A run evaluating it for many reads the table once, as
+/// the probe does, after at most this many lookups: the probe's cost, which
+/// grows with the table, plus a bound. No count of the rows to come is known
+/// when the statement is planned, so the run decides by the evaluations it
+/// has made.
+pub(crate) const LOOKUP_EVALUATIONS: u32 = 64;
 
 /// A correlated read whose only reading of the row it is evaluated for is
 /// the first conjunct of its innermost predicate, `field = outer` or
@@ -174,13 +195,16 @@ pub(crate) struct NestedFacts {
 }
 
 /// How a nested statement runs, chosen by the optimizer from its facts.
-///
-/// An index nested loop — a per-row run over an index on the correlated key —
-/// needs an index access whose key is evaluated per row, which no plan holds:
-/// an index access is fixed when the statement is planned, so a correlated
-/// read applied per row reads its table whole for every row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Strategy {
+	/// Applied per evaluation, as [`Self::Apply`], with the table beneath its
+	/// join predicate read through a [`Plan::IndexLookup`] keyed by the join's
+	/// path into the row it is evaluated for: an index nested loop. Each
+	/// evaluation reads only the records the index lists under its key. Where
+	/// the statement could be hashed ([`Nested::hashed`]), the evaluations past
+	/// the first [`LOOKUP_EVALUATIONS`] of one run read through the probe, as
+	/// [`Self::Hash`] does.
+	Lookup,
 	/// Run per evaluation, with the row it is evaluated for bound as its
 	/// `$parent` and `$this`: the only strategy for a statement that writes
 	/// or reads the row.
@@ -534,16 +558,30 @@ pub(crate) enum Plan {
 	},
 	/// The records of `table` that B-tree index `index` lists under `access`,
 	/// in the index's key order along `direction`: a superset of the rows
-	/// the predicate above admits, so every row is still judged there.
+	/// the predicate above admits, so every row is still judged there,
+	/// except for the conjuncts `exact` lets a rule drop.
 	/// `ordered_by` names the record fields that order satisfies, in the
 	/// statement's `ORDER BY` directions, when it satisfies the statement's
 	/// ordering; a sort over exactly those fields is removed by a rule.
+	///
+	/// The index, and the field kinds behind `exact`, are catalog facts read
+	/// when the statement is planned: in the transaction it runs in, against
+	/// the catalog the query's own earlier schema statements leave. A program
+	/// runs only under the snapshot it was planned against, so they hold for
+	/// every run of it.
 	IndexScan {
 		table: TableName,
 		index: crate::exec::index::access_path::IndexRef,
 		access: crate::exec::index::access_path::BTreeAccess,
 		direction: Direction,
 		ordered_by: Option<Vec<FieldPath>>,
+		/// Whether `access` lists exactly the records whose columns satisfy
+		/// the conjuncts it was chosen from: every column it pins is a plain
+		/// field the catalog declares with a kind that holds no array, so no
+		/// record is listed through one element of an array. A conjunct the
+		/// access answers is then dropped from the predicate directly above
+		/// the scan (`optimize::AnsweredByIndex`).
+		exact: bool,
 		schema: Option<std::sync::Arc<crate::expr::logical::Schema>>,
 		/// The top-level fields read from each record, when nothing above the
 		/// scan reads more of a row than the fields its clauses name; `None`
@@ -574,6 +612,31 @@ pub(crate) enum Plan {
 		schema: Option<std::sync::Arc<crate::expr::logical::Schema>>,
 		/// As for [`Plan::IndexScan`].
 		decode: Option<crate::exec::operators::scan::common::DecodeFields>,
+	},
+	/// The records of `table` whose `field` may equal `key`, read when the
+	/// scan opens through B-tree index `index`, whose one column is `field`:
+	/// in record-key order, as a table scan delivers them, and a superset of
+	/// the rows whose `field` equals the key, which the plan above still
+	/// judges.
+	///
+	/// The index is read only where it lists every record whose field
+	/// equals the key. Where the key is not a value read through objects
+	/// alone, where it is a value other than `NONE`, `NULL`, a boolean, an
+	/// integer, a string, a duration, a datetime, a UUID, bytes or a record
+	/// id with a scalar key — an array is listed by its elements, and a float
+	/// or decimal equals a number of another representation inexactly — the
+	/// scan reads the table whole instead, in key order, as
+	/// [`Plan::TableScan`] does. The index is the one the plan read from the
+	/// catalog, which holds it for every run of the plan's snapshot. A
+	/// string key is read through the index although a string equals a regex
+	/// it matches: no index entry is keyed by a regex, so no record holds one
+	/// under an index that is ready to read.
+	IndexLookup {
+		table: TableName,
+		index: crate::exec::index::access_path::IndexRef,
+		field: surrealdb_strand::Strand,
+		key: LookupKey,
+		schema: Option<std::sync::Arc<crate::expr::logical::Schema>>,
 	},
 	/// The records of `table` that full-text index `index` lists for `query`
 	/// using `operator`.
@@ -705,11 +768,21 @@ pub(crate) enum Plan {
 		keys: Vec<(LogicalExpr, LogicalExpr)>,
 		residual: Option<LogicalExpr>,
 		alias: String,
+		/// How the build table holds `right`'s rows ([`Spill::Spillable`]: a
+		/// partitioned build).
+		spill: Spill,
+		/// An index the join reads `right` through for its first left rows.
+		lookup: Option<JoinLookup>,
+		/// The input the join holds while it streams the other.
+		build: JoinBuild,
 	},
 	/// The first of each set of equal rows of `input`, in `input`'s order:
 	/// two rows are the same row when they compare equal as values.
 	Distinct {
 		input: Box<Plan>,
+		/// How the rows seen are held ([`Spill::Spillable`]: a spilling
+		/// distinct).
+		spill: Spill,
 	},
 	/// The rows of `input` its table's `PERMISSIONS FOR select` admits:
 	/// `predicate` evaluated per row in the permission frame, under `auth`.
@@ -728,6 +801,10 @@ pub(crate) enum Plan {
 		/// which it judges each row with derived onto a copy; `None` when it
 		/// reads none, and the row is judged as it comes.
 		computed: Option<ComputedReads>,
+		/// As for [`Plan::Filter`]'s `once`, judged in the permission frame
+		/// before `predicate`, and not at all where permissions are not
+		/// checked.
+		once: Option<LogicalExpr>,
 	},
 	/// A projection layer over `input`: each row with the table's computed
 	/// fields derived and its restricted fields cut to what the caller may
@@ -740,9 +817,18 @@ pub(crate) enum Plan {
 	},
 	/// The rows of `input` for which `predicate` is truthy, evaluated once
 	/// per row in the caller's frame.
+	///
+	/// With `once`, the leading conjuncts of the predicate that read nothing
+	/// of the row: judged before `predicate`, at the first row that reaches
+	/// the node in a run of the statement, and their verdict kept for every
+	/// later row of that run. A falsy verdict admits no row, and no part of
+	/// the predicate is evaluated again; a conjunct that raises raises at
+	/// that first row, as the predicate judged per row raises at it. A run
+	/// no row reaches judges nothing.
 	Filter {
 		input: Box<Plan>,
 		predicate: LogicalExpr,
+		once: Option<LogicalExpr>,
 	},
 	/// Each row of `input` with the records its `fetches` paths reach
 	/// fetched in place, as `FETCH` fetches them: the statement's last step
@@ -777,6 +863,9 @@ pub(crate) enum Plan {
 		/// scan beneath it ([`TopKKey`]).
 		pushdown: bool,
 		random: bool,
+		/// How the rows are held: [`Spill::Bounded`] under `keep`, an external
+		/// sort ([`Spill::Spillable`]) otherwise.
+		spill: Spill,
 	},
 	/// `GROUP BY group` over `input`, one row per group in group-key order,
 	/// of what `fields` names. With no `group`, `GROUP ALL`: one row, whether
@@ -789,6 +878,9 @@ pub(crate) enum Plan {
 		/// an aggregate and are answered by the first value the group's rows
 		/// give, where an unlisted such column collects every row's value.
 		first_value: Vec<usize>,
+		/// How the groups are held: [`Spill::Bounded`] for `GROUP ALL`'s one
+		/// group, a spilling aggregate ([`Spill::Spillable`]) for `GROUP BY`.
+		spill: Spill,
 	},
 	/// `START` then `LIMIT` over `input`. Both are evaluated once per
 	/// statement, `limit` first, before any row is read.
@@ -839,6 +931,102 @@ pub(crate) enum Plan {
 		write: Box<crate::expr::logical::LogicalWrite>,
 		subjects: WriteSubjects,
 	},
+}
+
+/// How a breaker — a node that holds state across its input before it
+/// yields — holds that state once it outgrows the query's memory budget.
+///
+/// A plan names the variant and the run decides by the actual size. A sort
+/// or aggregate labelled [`Self::Spillable`] is charged to the query's lease
+/// and spills once the lease no longer covers it; one labelled
+/// [`Self::Bounded`] holds no more than its bound and is charged nothing. A
+/// sort under `TEMPFILES` also spills by row count ([`Tail::tempfiles`]). A
+/// join's or distinct's build spills where the run finds the memory short.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Spill {
+	/// The state is bounded by the plan: the rows a limit can reach, or one
+	/// group. It never outgrows that bound, so there is nothing to spill.
+	Bounded,
+	/// Held in memory until the budget is reached, then spilled: an external
+	/// sort's runs, a spilling aggregate's or distinct's partitions, a
+	/// partitioned join's build.
+	Spillable,
+}
+
+impl Spill {
+	/// The variant for a sort that keeps `keep` rows of its order.
+	pub(crate) fn of_sort(keep: Option<usize>) -> Self {
+		match keep {
+			Some(_) => Self::Bounded,
+			None => Self::Spillable,
+		}
+	}
+
+	/// The variant for an aggregate over `group`'s keys.
+	pub(crate) fn of_aggregate(group: &[LogicalExpr]) -> Self {
+		match group {
+			[] => Self::Bounded,
+			_ => Self::Spillable,
+		}
+	}
+}
+
+/// Where a [`Plan::IndexLookup`] takes its key from.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum LookupKey {
+	/// A path into `$parent`, read through objects alone: the row a nested
+	/// statement is evaluated for ([`Strategy::Lookup`]).
+	Parent(LogicalExpr),
+	/// The key the join above evaluated of its left row, written as that
+	/// expression ([`JoinLookup`]).
+	Probe(LogicalExpr),
+}
+
+impl LookupKey {
+	/// The expression the key is written as.
+	pub(crate) fn expr(&self) -> &LogicalExpr {
+		match self {
+			Self::Parent(expr) | Self::Probe(expr) => expr,
+		}
+	}
+}
+
+/// How a [`Plan::Join`] reads its right input through an index on the field
+/// one of its key pairs reads: an index nested loop.
+///
+/// For the first [`LOOKUP_EVALUATIONS`] left rows since the join opened, the
+/// right input is `right`, its table read through a [`Plan::IndexLookup`]
+/// keyed by that left row's key; each pairing is then judged as the hash
+/// join judges it, so the rows paired are the same. Past them the hash join
+/// reads its right input whole, as it would have from the first row.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct JoinLookup {
+	/// The position in the join's `keys` of the pair whose right side reads
+	/// the indexed field.
+	pub(crate) key: usize,
+	pub(crate) right: Box<Plan>,
+}
+
+/// Which input of a [`Plan::Join`] the join holds while it streams the other.
+///
+/// Either way the join pairs the same rows in the same order: each `left` row
+/// in order, with the `right` rows its keys match in the order `right` yields
+/// them. A `right` row whose key holds a regex pairs after those whose key the
+/// left row's key equals by ordering, as the build table pairs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JoinBuild {
+	/// `right`, read whole into a build table keyed by its keys when the first
+	/// `left` row reaches the join; `left` streams past it.
+	Right,
+	/// `left`'s one row: the plan proves `left` yields at most one, and
+	/// `right` is read only once `left` has yielded it, streamed past it row by
+	/// row. Chosen only where reading `right` raises no error and has no
+	/// effect, its keys and residual raise none, and the statement writes
+	/// nothing `right` could read, so pairing a row as `right` yields it, rather
+	/// than once `right` is read whole, changes nothing a caller observes. A
+	/// left row whose key holds a regex is paired once `right` is read whole,
+	/// as [`Self::Right`] pairs it.
+	Left,
 }
 
 /// The rows of a [`Plan::Join`] that are emitted for a row of its left input.
@@ -1153,6 +1341,9 @@ impl Plan {
 			| Plan::Bitmap {
 				..
 			}
+			| Plan::IndexLookup {
+				..
+			}
 			| Plan::FullTextScan {
 				..
 			}
@@ -1210,6 +1401,7 @@ impl Plan {
 			}
 			| Plan::Distinct {
 				input,
+				..
 			}
 			| Plan::Split {
 				input,
