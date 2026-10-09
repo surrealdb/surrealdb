@@ -832,13 +832,6 @@ user-id = 4556
 user-login = "djc"
 user-name = "Dirkjan Ochtman"
 
-[[publisher.reblessive]]
-version = "0.4.3"
-when = "2025-04-07"
-user-id = 79445
-user-login = "DelSkayn"
-user-name = "Mees Delzenne"
-
 [[publisher.regalloc2]]
 version = "0.15.2"
 when = "2026-07-20"

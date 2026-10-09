@@ -19,8 +19,6 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use reblessive::tree::TreeStack;
-
 use crate::catalog::IndexDefinition;
 use crate::dbs::{Force, Options};
 use crate::err::EngineError;
@@ -150,7 +148,6 @@ async fn maintain_indexes(row: &mut WriteRow, ctx: &WriteCtx) -> Result<bool, Co
 	}
 	let compiled = compiled_indexes(ctx).await?;
 	let exec = ctx.exec();
-	let mut stack = TreeStack::new();
 	let mut deferred = false;
 	for (ix, entry) in ctx.indexes.iter().zip(compiled.iter()) {
 		// Decommissioned indexes are ignored, and carry no compiled entry.
@@ -165,7 +162,7 @@ async fn maintain_indexes(row: &mut WriteRow, ctx: &WriteCtx) -> Result<bool, Co
 		// when the predicate-match flag flips.
 		let cond_changed = matches!(count_cond_match, Some((o, n)) if o != n);
 		if o != n || cond_changed {
-			deferred |= one_index(ctx, &mut stack, ix, o, n, &rid, count_cond_match).await?;
+			deferred |= one_index(ctx, ix, o, n, &rid, count_cond_match).await?;
 		}
 	}
 	Ok(deferred)
@@ -239,7 +236,6 @@ pub(crate) async fn guard_match(
 /// resolves the record through it.
 pub(crate) async fn one_index(
 	ctx: &WriteCtx,
-	stack: &mut TreeStack,
 	ix: &IndexDefinition,
 	o: Option<Vec<Value>>,
 	n: Option<Vec<Value>>,
@@ -288,11 +284,9 @@ pub(crate) async fn one_index(
 	let mut require_compaction = false;
 	// The maintainer of a full-text index loads its analyzer as it computes
 	// the entries.
-	crate::exec::vm::descriptor::object(
-		stack.enter(|stk| ic.compute(stk, &az_fn, &mut require_compaction)).finish(),
-	)
-	.await
-	.map_err(ControlFlow::Err)?;
+	crate::exec::vm::descriptor::object(ic.compute(&az_fn, &mut require_compaction))
+		.await
+		.map_err(ControlFlow::Err)?;
 	if require_compaction {
 		ic.trigger_compaction().await.map_err(ControlFlow::Err)?;
 	}

@@ -4,7 +4,6 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use common::fmt::EscapeKwFreeIdent;
-use reblessive::Stack;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -229,11 +228,9 @@ impl Idiom {
 		settings: crate::syn::parser::ParserSettings,
 	) -> Result<Self, revision::Error> {
 		let buf = s.as_bytes();
-		let mut stack = Stack::new();
 		let mut parser = crate::syn::parser::Parser::new_with_settings(buf, settings);
-		let idiom = stack
-			.enter(|stk| parser.parse_plain_idiom(stk))
-			.finish()
+		let idiom = parser
+			.parse_plain_idiom()
 			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
 		parser.assert_finished().map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
 

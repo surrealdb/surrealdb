@@ -1,4 +1,3 @@
-use reblessive::Stk;
 use surrealdb_sql::{Expr, Function, FunctionCall, Model};
 
 use super::{ParseResult, Parser};
@@ -7,7 +6,7 @@ use crate::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::token::{TokenKind, t};
 
 impl Parser<'_> {
-	pub async fn parse_function_name(&mut self) -> ParseResult<Function> {
+	pub fn parse_function_name(&mut self) -> ParseResult<Function> {
 		let peek = self.peek();
 		let fnc = match peek.kind {
 			t!("fn") => {
@@ -132,10 +131,7 @@ impl Parser<'_> {
 	/// Parse a custom function function call
 	///
 	/// Expects `fn` to already be called.
-	pub(super) async fn parse_custom_function(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<FunctionCall> {
+	pub(super) fn parse_custom_function(&mut self) -> ParseResult<FunctionCall> {
 		expected!(self, t!("::"));
 		let mut name = self.parse_ident()?.into_string();
 		while self.eat(t!("::")) {
@@ -144,7 +140,7 @@ impl Parser<'_> {
 		}
 
 		expected!(self, t!("(")).span;
-		let args = self.parse_function_args(stk).await?;
+		let args = self.parse_function_args()?;
 		let name = Function::Custom(name);
 		Ok(FunctionCall {
 			receiver: name,
@@ -155,10 +151,7 @@ impl Parser<'_> {
 	/// Parse a module function function call
 	///
 	/// Expects `mod` to already be called.
-	pub(super) async fn parse_module_function(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<FunctionCall> {
+	pub(super) fn parse_module_function(&mut self) -> ParseResult<FunctionCall> {
 		if !self.settings.surrealism_enabled {
 			bail!(
 				"Surrealism modules are not enabled",
@@ -180,7 +173,7 @@ impl Parser<'_> {
 		};
 
 		expected!(self, t!("(")).span;
-		let args = self.parse_function_args(stk).await?;
+		let args = self.parse_function_args()?;
 		let name = Function::Module(name, sub);
 		Ok(FunctionCall {
 			receiver: name,
@@ -191,7 +184,7 @@ impl Parser<'_> {
 	/// Parse a silo function function call
 	///
 	/// Expects `silo` to already be called.
-	pub(super) async fn parse_silo_function(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
+	pub(super) fn parse_silo_function(&mut self) -> ParseResult<FunctionCall> {
 		if !self.settings.surrealism_enabled {
 			bail!(
 				"Surrealism modules are not enabled",
@@ -223,7 +216,7 @@ impl Parser<'_> {
 		};
 
 		expected!(self, t!("(")).span;
-		let args = self.parse_function_args(stk).await?;
+		let args = self.parse_function_args()?;
 		let name = Function::Silo {
 			org,
 			pkg,
@@ -239,7 +232,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub(super) async fn parse_function_args(&mut self, stk: &mut Stk) -> ParseResult<Vec<Expr>> {
+	pub(super) fn parse_function_args(&mut self) -> ParseResult<Vec<Expr>> {
 		let start = self.last_span();
 		let mut args = Vec::new();
 		loop {
@@ -247,7 +240,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			let arg = self.parse_expr_inherit()?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {
@@ -290,7 +283,7 @@ impl Parser<'_> {
 	/// Parse a model invocation
 	///
 	/// Expects `ml` to already be called.
-	pub(super) async fn parse_model(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
+	pub(super) fn parse_model(&mut self) -> ParseResult<FunctionCall> {
 		expected!(self, t!("::"));
 
 		let mut name = self.parse_ident()?.into_string();
@@ -308,7 +301,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			let arg = self.parse_expr_inherit()?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {

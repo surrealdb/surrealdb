@@ -25,7 +25,6 @@ bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 geo = { workspace = true, features = ["use-serde"] }
 phf = { workspace = true, features = ["macros", "unicase"] }
-reblessive = { workspace = true }
 regex.workspace = true
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 thiserror = { workspace = true }

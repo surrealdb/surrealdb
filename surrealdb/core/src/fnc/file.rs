@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use reblessive::tree::Stk;
 
 use super::CursorDoc;
 use super::args::Optional;
@@ -11,7 +10,7 @@ use crate::val::{File, Object, Value};
 
 /// Put a file into a bucket.
 pub async fn put(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(file, value): (File, Value),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(ctx, opt, doc, &file.bucket).await?;
@@ -22,7 +21,7 @@ pub async fn put(
 
 /// Put a file into a bucket if it does not exist.
 pub async fn put_if_not_exists(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(file, value): (File, Value),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(ctx, opt, doc, &file.bucket).await?;
@@ -33,7 +32,7 @@ pub async fn put_if_not_exists(
 
 /// Get a file from a bucket.
 pub async fn get(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(file,): (File,),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(ctx, opt, doc, &file.bucket).await?;
@@ -45,7 +44,7 @@ pub async fn get(
 ///
 /// Returns None if the file doesn't exist.
 pub async fn head(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(file,): (File,),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(ctx, opt, doc, &file.bucket).await?;
@@ -55,7 +54,7 @@ pub async fn head(
 
 /// Delete a file.
 pub async fn delete(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(file,): (File,),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(ctx, opt, doc, &file.bucket).await?;
@@ -69,7 +68,7 @@ pub async fn delete(
 /// Destination can be a string (relative path within the source bucket) or a file pointer which
 /// allows you to copy to another bucket.
 pub async fn copy(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(src, dst): (File, Value),
 ) -> Result<Value> {
 	let dst = value_to_file(dst)?;
@@ -107,7 +106,7 @@ pub async fn copy(
 /// Destination can be a string (relative path within the source bucket) or a file pointer which
 /// allows you to copy to another bucket.
 pub async fn copy_if_not_exists(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(src, dst): (File, Value),
 ) -> Result<Value> {
 	let dst = value_to_file(dst)?;
@@ -143,7 +142,7 @@ pub async fn copy_if_not_exists(
 
 /// Rename a file within the same bucket.
 pub async fn rename(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value> {
 	let target = ObjectKey::new(target);
@@ -155,7 +154,7 @@ pub async fn rename(
 
 /// Rename a file within the same bucket if the destination path does not already exist.
 pub async fn rename_if_not_exists(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value> {
 	let target = ObjectKey::new(target);
@@ -167,7 +166,7 @@ pub async fn rename_if_not_exists(
 
 /// Check if a file exists.
 pub async fn exists(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(file,): (File,),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(ctx, opt, doc, &file.bucket).await?;
@@ -178,7 +177,7 @@ pub async fn exists(
 
 /// List files in a bucket.
 pub async fn list(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(bucket, Optional(opts)): (String, Optional<Object>),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(ctx, opt, doc, &bucket).await?;

@@ -2,7 +2,6 @@
 //! in this module.
 
 use anyhow::Result;
-use reblessive::tree::Stk;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -483,7 +482,6 @@ pub fn synchronous(
 /// calls this.
 #[cfg_attr(not(any(feature = "scripting", test)), allow(dead_code))]
 pub async fn asynchronous(
-	stk: &mut Stk,
 	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
@@ -517,31 +515,31 @@ pub async fn asynchronous(
 		args,
 		"no such builtin function found",
 		//
-		"api::invoke" => api::invoke((stk, ctx, opt)).await,
-		"api::req::body" => api::req::body((stk, ctx, opt, doc)).await,
-		"api::req::max_body" => api::req::max_body((stk, ctx, opt, doc)).await,
-		"api::res::body" => api::res::body((stk, ctx, opt, doc)).await,
-		"api::timeout" => api::timeout((stk, ctx, opt, doc)).await,
-		"api::res::status" => api::res::status((stk, ctx, opt, doc)).await,
-		"api::res::header" => api::res::header((stk, ctx, opt, doc)).await,
-		"api::res::headers" => api::res::headers((stk, ctx, opt, doc)).await,
+		"api::invoke" => api::invoke((ctx, opt)).await,
+		"api::req::body" => api::req::body((ctx, opt, doc)).await,
+		"api::req::max_body" => api::req::max_body((ctx, opt, doc)).await,
+		"api::res::body" => api::res::body((ctx, opt, doc)).await,
+		"api::timeout" => api::timeout((ctx, opt, doc)).await,
+		"api::res::status" => api::res::status((ctx, opt, doc)).await,
+		"api::res::header" => api::res::header((ctx, opt, doc)).await,
+		"api::res::headers" => api::res::headers((ctx, opt, doc)).await,
 		//
-		"eval::surql" => eval::surql((stk, ctx, opt, doc)).await,
-		"eval::gql" => eval::gql((stk, ctx, opt, doc)).await,
+		"eval::surql" => eval::surql((ctx, opt, doc)).await,
+		"eval::gql" => eval::gql((ctx, opt, doc)).await,
 		//
-		"array::all" => array::all((stk, Some(&ev))).await,
-		"array::any" => array::any((stk, Some(&ev))).await,
-		"array::every" => array::all((stk, Some(&ev))).await,
-		"array::filter" => array::filter((stk, Some(&ev))).await,
-		"array::filter_index" => array::filter_index((stk, Some(&ev))).await,
-		"array::find" => array::find((stk, Some(&ev))).await,
-		"array::find_index" => array::find_index((stk, Some(&ev))).await,
-		"array::fold" => array::fold((stk, Some(&ev))).await,
-		"array::includes" => array::any((stk, Some(&ev))).await,
-		"array::index_of" => array::find_index((stk, Some(&ev))).await,
-		"array::map" => array::map((stk, Some(&ev))).await,
-		"array::reduce" => array::reduce((stk, Some(&ev))).await,
-		"array::some" => array::any((stk, Some(&ev))).await,
+		"array::all" => array::all(Some(&ev)).await,
+		"array::any" => array::any(Some(&ev)).await,
+		"array::every" => array::all(Some(&ev)).await,
+		"array::filter" => array::filter(Some(&ev)).await,
+		"array::filter_index" => array::filter_index(Some(&ev)).await,
+		"array::find" => array::find(Some(&ev)).await,
+		"array::find_index" => array::find_index(Some(&ev)).await,
+		"array::fold" => array::fold(Some(&ev)).await,
+		"array::includes" => array::any(Some(&ev)).await,
+		"array::index_of" => array::find_index(Some(&ev)).await,
+		"array::map" => array::map(Some(&ev)).await,
+		"array::reduce" => array::reduce(Some(&ev)).await,
+		"array::some" => array::any(Some(&ev)).await,
 		//
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
 		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::r#gen.await,
@@ -552,17 +550,17 @@ pub async fn asynchronous(
 		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
 		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::r#gen.await,
 		//
-		exp(Files) "file::put" => file::put((stk, ctx, opt, doc)).await,
-		exp(Files) "file::put_if_not_exists" => file::put_if_not_exists((stk, ctx, opt, doc)).await,
-		exp(Files) "file::get" => file::get((stk, ctx, opt, doc)).await,
-		exp(Files) "file::head" => file::head((stk, ctx, opt, doc)).await,
-		exp(Files) "file::delete" => file::delete((stk, ctx, opt, doc)).await,
-		exp(Files) "file::copy" => file::copy((stk, ctx, opt, doc)).await,
-		exp(Files) "file::copy_if_not_exists" => file::copy_if_not_exists((stk, ctx, opt, doc)).await,
-		exp(Files) "file::rename" => file::rename((stk, ctx, opt, doc)).await,
-		exp(Files) "file::rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
-		exp(Files) "file::exists" => file::exists((stk, ctx, opt, doc)).await,
-		exp(Files) "file::list" => file::list((stk, ctx, opt, doc)).await,
+		exp(Files) "file::put" => file::put((ctx, opt, doc)).await,
+		exp(Files) "file::put_if_not_exists" => file::put_if_not_exists((ctx, opt, doc)).await,
+		exp(Files) "file::get" => file::get((ctx, opt, doc)).await,
+		exp(Files) "file::head" => file::head((ctx, opt, doc)).await,
+		exp(Files) "file::delete" => file::delete((ctx, opt, doc)).await,
+		exp(Files) "file::copy" => file::copy((ctx, opt, doc)).await,
+		exp(Files) "file::copy_if_not_exists" => file::copy_if_not_exists((ctx, opt, doc)).await,
+		exp(Files) "file::rename" => file::rename((ctx, opt, doc)).await,
+		exp(Files) "file::rename_if_not_exists" => file::rename_if_not_exists((ctx, opt, doc)).await,
+		exp(Files) "file::exists" => file::exists((ctx, opt, doc)).await,
+		exp(Files) "file::list" => file::list((ctx, opt, doc)).await,
 		//
 		"http::head" => http::head(ctx).await,
 		"http::get" => http::get(ctx).await,
@@ -571,34 +569,34 @@ pub async fn asynchronous(
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
-		"record::is_edge" => record::is::edge((stk, ctx, Some(opt), doc)).await,
+		"record::exists" => record::exists((ctx, Some(opt), doc)).await,
+		"record::is_edge" => record::is::edge((ctx, Some(opt), doc)).await,
 		//
-		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
+		"search::analyze" => search::analyze((ctx, Some(opt))).await,
 		"search::linear" => search::linear(ctx).await,
 		"search::rrf" => search::rrf(ctx).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
-		"set::all" => set::all((stk, Some(&ev))).await,
-		"set::any" => set::any((stk, Some(&ev))).await,
-		"set::filter" => set::filter((stk, Some(&ev))).await,
-		"set::find" => set::find((stk, Some(&ev))).await,
-		"set::fold" => set::fold((stk, Some(&ev))).await,
-		"set::map" => set::map((stk, Some(&ev))).await,
-		"set::reduce" => set::reduce((stk, Some(&ev))).await,
+		"set::all" => set::all(Some(&ev)).await,
+		"set::any" => set::any(Some(&ev)).await,
+		"set::filter" => set::filter(Some(&ev)).await,
+		"set::find" => set::find(Some(&ev)).await,
+		"set::fold" => set::fold(Some(&ev)).await,
+		"set::map" => set::map(Some(&ev)).await,
+		"set::reduce" => set::reduce(Some(&ev)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
 		"sequence::nextval" => sequence::nextval((ctx, opt)).await,
 		//
-		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
-		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
+		"type::field" => r#type::field((ctx, Some(opt), doc)).await,
+		"type::fields" => r#type::fields((ctx, Some(opt), doc)).await,
 		//
-		"value::chain" => value::chain((stk, Some(&ev))).await,
+		"value::chain" => value::chain(Some(&ev)).await,
 		"value::diff" => value::diff.await,
-		"value::expect" => value::expect((stk, Some(&ev))).await,
+		"value::expect" => value::expect(Some(&ev)).await,
 		"value::patch" => value::patch.await,
 		"schema::table::exists" => schema::table::exists((ctx, Some(opt))).await,
 	)

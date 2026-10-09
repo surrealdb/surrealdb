@@ -6,6 +6,7 @@ use super::{ParseResult, Parser};
 use crate::Parse;
 use crate::parse::ParserSettings;
 
+#[derive(Clone, Copy)]
 enum GraphStart {
 	Reference,
 	In,
@@ -13,12 +14,12 @@ enum GraphStart {
 	Both,
 }
 
-async fn parse_graph_name(
+fn parse_graph_name(
 	parser: &mut Parser<'_, '_>,
 	start: Span,
 	dir: GraphStart,
 ) -> ParseResult<NodeId<Ident>> {
-	let lookup: ast::Lookup = parser.parse_enter().await?;
+	let lookup: ast::Lookup = parser.parse_enter()?;
 
 	// `<-`, `<->` just behaves as if `<-` is part of the field name.
 	if let ast::Lookup::Subject(s) = lookup
@@ -58,7 +59,7 @@ async fn parse_graph_name(
 }
 
 impl Parse for ast::Place {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.peek_span();
 
 		let legacy = parser.settings.contains(ParserSettings::QUIRK_LEGACY_PLACE_PRODUCTIONS);
@@ -72,7 +73,7 @@ impl Parse for ast::Place {
 						let _ = parser.next();
 
 						let _ = parser.next();
-						let text = parse_graph_name(parser, peek.span, GraphStart::Out).await?;
+						let text = parse_graph_name(parser, peek.span, GraphStart::Out)?;
 						lhs = ast::Place::Field(text)
 					}
 					Some(T![->]) => {
@@ -80,7 +81,7 @@ impl Parse for ast::Place {
 						let _ = parser.next();
 
 						let _ = parser.next();
-						let text = parse_graph_name(parser, peek.span, GraphStart::In).await?;
+						let text = parse_graph_name(parser, peek.span, GraphStart::In)?;
 						lhs = ast::Place::Field(text)
 					}
 					_ => {
@@ -90,7 +91,7 @@ impl Parse for ast::Place {
 				},
 				T![->] => {
 					let _ = parser.next();
-					let text = parse_graph_name(parser, peek.span, GraphStart::In).await?;
+					let text = parse_graph_name(parser, peek.span, GraphStart::In)?;
 					lhs = ast::Place::Field(text)
 				}
 				_ => {
@@ -110,7 +111,7 @@ impl Parse for ast::Place {
 			match peek.token {
 				T![<~] if legacy => {
 					let _ = parser.next();
-					let name = parse_graph_name(parser, peek.span, GraphStart::Reference).await?;
+					let name = parse_graph_name(parser, peek.span, GraphStart::Reference)?;
 					let new_lhs = parser.push(lhs);
 					lhs = ast::Place::Member(MemberPlace {
 						lhs: new_lhs,
@@ -123,7 +124,7 @@ impl Parse for ast::Place {
 						let _ = parser.next();
 						let _ = parser.next();
 
-						let name = parse_graph_name(parser, peek.span, GraphStart::Out).await?;
+						let name = parse_graph_name(parser, peek.span, GraphStart::Out)?;
 						let new_lhs = parser.push(lhs);
 						lhs = ast::Place::Member(MemberPlace {
 							lhs: new_lhs,
@@ -135,7 +136,7 @@ impl Parse for ast::Place {
 						let _ = parser.next();
 						let _ = parser.next();
 
-						let name = parse_graph_name(parser, peek.span, GraphStart::Both).await?;
+						let name = parse_graph_name(parser, peek.span, GraphStart::Both)?;
 						let new_lhs = parser.push(lhs);
 						lhs = ast::Place::Member(MemberPlace {
 							lhs: new_lhs,
@@ -147,7 +148,7 @@ impl Parse for ast::Place {
 				},
 				T![->] if legacy => {
 					let _ = parser.next();
-					let name = parse_graph_name(parser, peek.span, GraphStart::In).await?;
+					let name = parse_graph_name(parser, peek.span, GraphStart::In)?;
 					let new_lhs = parser.push(lhs);
 					lhs = ast::Place::Member(MemberPlace {
 						lhs: new_lhs,
@@ -172,7 +173,7 @@ impl Parse for ast::Place {
 								break;
 							}
 
-							let _ = parser.parse_enter::<ast::Destructure>().await?;
+							let _ = parser.parse_enter::<ast::Destructure>()?;
 
 							if parser.eat(T![,])?.is_none() {
 								let _ = parser.expect_closing_delimiter(
@@ -218,7 +219,7 @@ impl Parse for ast::Place {
 
 					if legacy && (parser.eat(T![WHERE])?.is_some() || parser.eat(T![?])?.is_some())
 					{
-						let _: ast::Expr = parser.parse_enter().await?;
+						let _: ast::Expr = parser.parse_enter()?;
 
 						let _ = parser
 							.expect_closing_delimiter(BaseTokenKind::CloseBracket, peek.span)?;
@@ -252,7 +253,7 @@ impl Parse for ast::Place {
 						continue;
 					}
 
-					let index = parser.parse_enter().await?;
+					let index = parser.parse_enter()?;
 					let _ =
 						parser.expect_closing_delimiter(BaseTokenKind::CloseBracket, peek.span)?;
 					let new_lhs = parser.push(lhs);
@@ -271,7 +272,7 @@ impl Parse for ast::Place {
 }
 
 impl Parse for ast::PresentPlace {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.peek_span();
 
 		let field = parser.parse_sync()?;
@@ -334,7 +335,7 @@ impl Parse for ast::PresentPlace {
 							});
 						}
 						_ => {
-							let index = parser.parse_enter().await?;
+							let index = parser.parse_enter()?;
 							let _ = parser
 								.expect_closing_delimiter(BaseTokenKind::CloseBracket, peek.span)?;
 							let span = parser.span_since(start);

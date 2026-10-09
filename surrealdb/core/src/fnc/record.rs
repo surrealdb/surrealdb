@@ -1,5 +1,4 @@
 use anyhow::Result;
-use reblessive::tree::Stk;
 
 use crate::catalog::Error as CatalogError;
 use crate::ctx::FrozenContext;
@@ -9,7 +8,7 @@ use crate::exe::FlowResultExt as _;
 use crate::val::{RecordId, Value};
 
 pub async fn exists(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(arg,): (RecordId,),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
@@ -44,7 +43,6 @@ pub fn tb((arg,): (RecordId,)) -> Result<Value> {
 
 pub mod is {
 	use anyhow::Result;
-	use reblessive::tree::Stk;
 
 	use crate::catalog::providers::TableProvider;
 	use crate::ctx::FrozenContext;
@@ -68,7 +66,7 @@ pub mod is {
 	///
 	/// Returns `true` if the record is an edge, `false` otherwise
 	pub async fn edge(
-		(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+		(ctx, opt, doc): (&FrozenContext, Option<&Options>, Option<&CursorDoc>),
 		(arg,): (Value,),
 	) -> Result<Value> {
 		match opt {

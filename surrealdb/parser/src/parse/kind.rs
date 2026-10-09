@@ -4,12 +4,12 @@ use common::span::Span;
 use token::{BaseTokenKind, T};
 
 use crate::parse::ParseResult;
-use crate::parse::utils::{parse_delimited_list, parse_seperated_list, parse_seperated_list_sync};
+use crate::parse::utils::{parse_delimited_list, parse_seperated_list};
 use crate::{Parse, Parser};
 
 fn parse_ident_list_type(span: Span, parser: &mut Parser) -> ParseResult<IdentListType> {
 	let tables = if let Some(x) = parser.eat(T![<])? {
-		let (_, head) = parse_seperated_list_sync(parser, T![|], |parser| parser.parse_sync())?;
+		let (_, head) = parse_seperated_list(parser, T![|], |parser| parser.parse_sync())?;
 		let _ = parser.expect_closing_delimiter(T![>], x.span)?;
 
 		Some(head)
@@ -41,7 +41,7 @@ fn parse_geometry_sub_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Geom
 	Ok(res)
 }
 
-async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::PrimeType> {
+fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::PrimeType> {
 	let peek = parser.peek_expect("a kind")?;
 	match peek.token {
 		T![ANY] => Err(parser.with_error(|parser| {
@@ -118,7 +118,7 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Prime
 				BaseTokenKind::OpenBrace,
 				BaseTokenKind::CloseBrace,
 				T![,],
-				async |parser| {
+				|parser| {
 					let key_peek = parser.peek_expect("an object key")?;
 					let key = match key_peek.token {
 						BaseTokenKind::String => {
@@ -133,7 +133,7 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Prime
 						_ => return Err(parser.unexpected("an object key")),
 					};
 					let _ = parser.expect(T![:])?;
-					let ty = parser.parse_enter().await?;
+					let ty = parser.parse_enter()?;
 
 					let span = parser.span_since(key_peek.span);
 
@@ -143,8 +143,7 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Prime
 						span,
 					})
 				},
-			)
-			.await?;
+			)?;
 
 			let ty = parser.push(ast::LitObjectType {
 				entries,
@@ -159,9 +158,8 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Prime
 				BaseTokenKind::OpenBracket,
 				BaseTokenKind::CloseBracket,
 				T![,],
-				async |parser| parser.parse_enter().await,
-			)
-			.await?;
+				|parser| parser.parse_enter(),
+			)?;
 
 			let ty = parser.push(ast::LitArrayType {
 				entries,
@@ -256,7 +254,7 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Prime
 			let _ = parser.next();
 
 			let (ty, size) = if let Some(x) = parser.eat(T![<])? {
-				let ty = parser.parse_enter().await?;
+				let ty = parser.parse_enter()?;
 				let size = if parser.eat(T![,])?.is_some() {
 					Some(parser.parse_sync()?)
 				} else {
@@ -281,7 +279,7 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Prime
 			let _ = parser.next();
 
 			let (ty, size) = if let Some(x) = parser.eat(T![<])? {
-				let ty = parser.parse_enter().await?;
+				let ty = parser.parse_enter()?;
 				let size = if parser.eat(T![,])?.is_some() {
 					Some(parser.parse_sync()?)
 				} else {
@@ -320,7 +318,7 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Prime
 			let _ = parser.next();
 
 			let types = if let Some(x) = parser.eat(T![<])? {
-				let (_, head) = parse_seperated_list_sync(parser, T![|], parse_geometry_sub_type)?;
+				let (_, head) = parse_seperated_list(parser, T![|], parse_geometry_sub_type)?;
 				let _ = parser.expect_closing_delimiter(T![>], x.span)?;
 
 				Some(head)
@@ -367,7 +365,7 @@ fn no_either_type(parser: &mut Parser<'_, '_>, cause: Span) -> ParseResult<()> {
 }
 
 impl Parse for ast::Type {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let peek = parser.peek_expect("a kind")?;
 		match peek.token {
 			T![ANY] => {
@@ -381,7 +379,7 @@ impl Parse for ast::Type {
 			T![OPTION] => {
 				let _ = parser.next()?;
 				let start = parser.expect(T![<])?;
-				let (_, head) = parse_seperated_list(parser, T![|], parse_prime_type).await?;
+				let (_, head) = parse_seperated_list(parser, T![|], parse_prime_type)?;
 				let _ = parser.expect_closing_delimiter(T![>], start.span)?;
 
 				let none = parser.push(ast::PrimeType::None(peek.span));
@@ -397,7 +395,7 @@ impl Parse for ast::Type {
 			_ => {}
 		}
 
-		let (_, head) = parse_seperated_list(parser, T![|], parse_prime_type).await?;
+		let (_, head) = parse_seperated_list(parser, T![|], parse_prime_type)?;
 		Ok(ast::Type::Prime(head))
 	}
 }
@@ -406,27 +404,24 @@ impl Parse for ast::Type {
 ///
 /// A bare `any` or `option<..>` followed by `|` is rejected as a union; see
 /// [`parse_closure_bare_type`] for the closure form, where that `|` closes the parameter list.
-pub async fn parse_bare_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Type> {
-	parse_bare_type_with(parser, true).await
+pub fn parse_bare_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Type> {
+	parse_bare_type_with(parser, true)
 }
 
 /// Parse a kind which is not surrounded by `<>`, as the kind of a closure parameter.
 ///
 /// The closure's parameter list ends with `|`, so a bare kind never consumes a following `|`.
 /// Only a `<..>` kind can hold a union.
-pub async fn parse_closure_bare_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Type> {
-	parse_bare_type_with(parser, false).await
+pub fn parse_closure_bare_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Type> {
+	parse_bare_type_with(parser, false)
 }
 
-async fn parse_bare_type_with(
-	parser: &mut Parser<'_, '_>,
-	reject_union: bool,
-) -> ParseResult<ast::Type> {
+fn parse_bare_type_with(parser: &mut Parser<'_, '_>, reject_union: bool) -> ParseResult<ast::Type> {
 	let peek = parser.peek_expect("a kind")?;
 	match peek.token {
 		T![<] => {
 			let _ = parser.next()?;
-			let res = parser.parse().await?;
+			let res = parser.parse()?;
 			let _ = parser.expect_closing_delimiter(T![>], peek.span)?;
 			return Ok(res);
 		}
@@ -443,7 +438,7 @@ async fn parse_bare_type_with(
 		T![OPTION] => {
 			let _ = parser.next()?;
 			let start = parser.expect(T![<])?;
-			let (_, head) = parse_seperated_list(parser, T![|], parse_prime_type).await?;
+			let (_, head) = parse_seperated_list(parser, T![|], parse_prime_type)?;
 			let _ = parser.expect_closing_delimiter(T![>], start.span)?;
 
 			let none = parser.push(ast::PrimeType::None(peek.span));
@@ -461,7 +456,7 @@ async fn parse_bare_type_with(
 		_ => {}
 	}
 
-	let cur = parse_prime_type(parser).await?;
+	let cur = parse_prime_type(parser)?;
 	let cur = parser.push(cur);
 	let item = parser.push_list_item(NodeList {
 		cur,

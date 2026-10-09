@@ -56,7 +56,6 @@
 //! share [`prepare`] for gating, parsing and validation.
 
 use anyhow::{Result, bail};
-use reblessive::tree::Stk;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::capabilities::{ArbitraryQueryTarget, Error as CapabilitiesError, EvalQueryTarget};
@@ -215,14 +214,14 @@ pub(crate) fn prepare(
 }
 
 pub async fn surql(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(query, Optional(bindings)): (String, Optional<Object>),
 ) -> Result<Value> {
 	run_eval(ctx, opt, doc, Dialect::SurrealQl, query, bindings).await
 }
 
 pub async fn gql(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(query, Optional(bindings)): (String, Optional<Object>),
 ) -> Result<Value> {
 	run_eval(ctx, opt, doc, Dialect::Gql, query, bindings).await

@@ -371,16 +371,10 @@ mod test {
 		use surrealdb_sql as sql;
 
 		fn assert_ident_parses_correctly(ident: &str) {
-			use reblessive::Stack;
-
 			use crate::Parser;
 
 			let mut parser = Parser::new(ident.as_bytes());
-			let mut stack = Stack::new();
-			let r = stack
-				.enter(|ctx| async move { parser.parse_query(ctx).await })
-				.finish()
-				.unwrap_or_else(|_| panic!("failed on {}", ident));
+			let r = parser.parse_query().unwrap_or_else(|_| panic!("failed on {}", ident));
 
 			assert_eq!(
 				r.expressions,

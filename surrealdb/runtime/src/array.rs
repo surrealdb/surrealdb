@@ -6,7 +6,6 @@ use std::ops::{Bound, ControlFlow};
 use anyhow::{Result, ensure};
 use common::fail;
 use common::range::TypedRange;
-use reblessive::tree::Stk;
 use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
 use surrealdb_expr::expr::Error;
 use surrealdb_expr::val::{Array, Closure, ClosureEvaluator, Value, check_value_depth};
@@ -126,14 +125,14 @@ pub async fn add_walk((mut array, value): (Array, Value)) -> Result<Value> {
 }
 
 pub async fn all(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(array, Optional(check)): (Array, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
 			if let Some(ev) = ev {
 				for arg in array {
-					if ev.invoke(stk, &closure, vec![arg]).await?.is_truthy() {
+					if ev.invoke(&closure, vec![arg]).await?.is_truthy() {
 						continue;
 					} else {
 						return Ok(Value::Bool(false));
@@ -150,14 +149,14 @@ pub async fn all(
 }
 
 pub async fn any(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(array, Optional(check)): (Array, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
 			if let Some(ev) = ev {
 				for arg in array {
-					if ev.invoke(stk, &closure, vec![arg]).await?.is_truthy() {
+					if ev.invoke(&closure, vec![arg]).await?.is_truthy() {
 						return Ok(Value::Bool(true));
 					} else {
 						continue;
@@ -444,7 +443,7 @@ pub async fn fill_walk(
 }
 
 pub async fn filter(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(array, check): (Array, Value),
 ) -> Result<Value> {
 	Ok(match check {
@@ -452,7 +451,7 @@ pub async fn filter(
 			if let Some(ev) = ev {
 				let mut res = Vec::with_capacity(array.len());
 				for arg in array {
-					if ev.invoke(stk, &closure, vec![arg.clone()]).await?.is_truthy() {
+					if ev.invoke(&closure, vec![arg.clone()]).await?.is_truthy() {
 						res.push(arg)
 					}
 				}
@@ -476,7 +475,7 @@ pub async fn filter(
 }
 
 pub async fn filter_index(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(array, value): (Array, Value),
 ) -> Result<Value> {
 	Ok(match value {
@@ -484,7 +483,7 @@ pub async fn filter_index(
 			if let Some(ev) = ev {
 				let mut res = Vec::with_capacity(array.len());
 				for (i, arg) in array.into_iter().enumerate() {
-					if ev.invoke(stk, &closure, vec![arg]).await?.is_truthy() {
+					if ev.invoke(&closure, vec![arg]).await?.is_truthy() {
 						res.push(Value::from(i as i64));
 					}
 				}
@@ -508,14 +507,14 @@ pub async fn filter_index(
 }
 
 pub async fn find(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(array, value): (Array, Value),
 ) -> Result<Value> {
 	Ok(match value {
 		Value::Closure(closure) => {
 			if let Some(ev) = ev {
 				for arg in array {
-					if ev.invoke(stk, &closure, vec![arg.clone()]).await?.is_truthy() {
+					if ev.invoke(&closure, vec![arg.clone()]).await?.is_truthy() {
 						return Ok(arg);
 					}
 				}
@@ -529,14 +528,14 @@ pub async fn find(
 }
 
 pub async fn find_index(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(array, value): (Array, Value),
 ) -> Result<Value> {
 	Ok(match value {
 		Value::Closure(closure) => {
 			if let Some(ev) = ev {
 				for (i, arg) in array.into_iter().enumerate() {
-					if ev.invoke(stk, &closure, vec![arg]).await?.is_truthy() {
+					if ev.invoke(&closure, vec![arg]).await?.is_truthy() {
 						return Ok(i.into());
 					}
 				}
@@ -562,13 +561,13 @@ pub async fn flatten_walk((array,): (Array,)) -> Result<Value> {
 }
 
 pub async fn fold(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(array, init, mapper): (Array, Value, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(ev) = ev {
 		let mut accum = init;
 		for (i, val) in array.into_iter().enumerate() {
-			accum = ev.invoke(stk, &mapper, vec![accum, val, i.into()]).await?;
+			accum = ev.invoke(&mapper, vec![accum, val, i.into()]).await?;
 			// SECURITY: fold threads a caller-controlled accumulator through a
 			// flat loop, so a closure that wraps it each turn (`|$a, $_| [$a]`)
 			// grows the value's nesting depth without bound. The per-compute
@@ -767,13 +766,13 @@ pub async fn logical_xor_walk((mut lh, mut rh): (Array, Array)) -> Result<Value>
 }
 
 pub async fn map(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(array, mapper): (Array, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(ev) = ev {
 		let mut res = Vec::with_capacity(array.len());
 		for (i, arg) in array.into_iter().enumerate() {
-			res.push(ev.invoke(stk, &mapper, vec![arg, i.into()]).await?);
+			res.push(ev.invoke(&mapper, vec![arg, i.into()]).await?);
 		}
 		Ok(res.into())
 	} else {
@@ -880,7 +879,7 @@ pub async fn sequence_walk((offset_len, Optional(len)): (i64, Optional<i64>)) ->
 }
 
 pub async fn reduce(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(array, mapper): (Array, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(ev) = ev {
@@ -899,7 +898,7 @@ pub async fn reduce(
 					return Ok(Value::None);
 				};
 				for (idx, val) in iter.enumerate() {
-					accum = ev.invoke(stk, &mapper, vec![accum, val, idx.into()]).await?;
+					accum = ev.invoke(&mapper, vec![accum, val, idx.into()]).await?;
 					// SECURITY: bound the accumulator's nesting depth, as in
 					// `fold` above; reduce threads it through the same flat loop.
 					check_value_depth(&accum)?;

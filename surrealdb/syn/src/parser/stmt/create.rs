@@ -1,21 +1,20 @@
-use reblessive::Stk;
 use surrealdb_sql::CreateStatement;
 
 use crate::parser::{ParseResult, Parser};
 use crate::token::t;
 
 impl Parser<'_> {
-	pub async fn parse_create_stmt(&mut self, stk: &mut Stk) -> ParseResult<CreateStatement> {
+	pub fn parse_create_stmt(&mut self) -> ParseResult<CreateStatement> {
 		let only = self.eat(t!("ONLY"));
-		let what = self.parse_what_list(stk).await?;
-		let data = self.try_parse_data(stk).await?;
-		let output = self.try_parse_output(stk).await?;
+		let what = self.parse_what_list()?;
+		let data = self.try_parse_data()?;
+		let output = self.try_parse_output()?;
 		// VERSION is no longer supported in CREATE statements, it is left here for backwards
 		// compatibility.
 		if self.eat(t!("VERSION")) {
-			stk.run(|stk| self.parse_expr_field(stk)).await?;
+			self.parse_expr_field()?;
 		};
-		let timeout = self.try_parse_timeout(stk).await?;
+		let timeout = self.try_parse_timeout()?;
 
 		Ok(CreateStatement {
 			only,

@@ -832,11 +832,8 @@ async fn index_step(
 		return Ok(());
 	}
 	let deferred = if native {
-		let mut stack = reblessive::tree::TreeStack::new();
-		crate::exec::operators::write::stages::index::one_index(
-			&ctx, &mut stack, ix, o, n, &rid, matches,
-		)
-		.await?
+		crate::exec::operators::write::stages::index::one_index(&ctx, ix, o, n, &rid, matches)
+			.await?
 	} else {
 		move_entries(&ctx, ix, o, n, &rid).await?
 	};

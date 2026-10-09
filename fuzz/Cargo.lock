@@ -3070,12 +3070,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reblessive"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbc4a4ea2a66a41a1152c4b3d86e8954dc087bdf33af35446e6e176db4e73c8c"
-
-[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3991,7 +3985,6 @@ dependencies = [
  "rand 0.9.4",
  "rand_core 0.6.4",
  "rayon",
- "reblessive",
  "regex",
  "revision",
  "ring",
@@ -4090,7 +4083,6 @@ dependencies = [
  "lexicmp",
  "quick_cache",
  "rand 0.9.4",
- "reblessive",
  "regex",
  "revision",
  "rust_decimal",
@@ -4130,7 +4122,6 @@ name = "surrealdb-gql"
 version = "3.4.0-nightly"
 dependencies = [
  "phf",
- "reblessive",
  "surrealdb-expr",
  "surrealdb-strand",
  "surrealdb-syn",
@@ -4178,7 +4169,6 @@ dependencies = [
  "parking_lot",
  "quick_cache",
  "rand 0.9.4",
- "reblessive",
  "roaring",
  "rust-stemmers",
  "storekey",
@@ -4326,7 +4316,6 @@ dependencies = [
  "pbkdf2",
  "rand 0.9.4",
  "rand_core 0.6.4",
- "reblessive",
  "regex",
  "rust_decimal",
  "scrypt",
@@ -4387,7 +4376,6 @@ dependencies = [
  "chrono",
  "geo",
  "phf",
- "reblessive",
  "regex",
  "rust_decimal",
  "surrealdb-cnf",

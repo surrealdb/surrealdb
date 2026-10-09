@@ -18,8 +18,6 @@
 //! edge group (R4) and may carry an inline predicate that references that edge
 //! alone — a cross-variable reference is rejected because the per-path
 //! traversal has no place to evaluate it.
-
-use reblessive::Stk;
 use surrealdb_strand::TableName;
 
 use crate::expr::BinaryOperator;
@@ -53,8 +51,7 @@ use crate::syn::token::Span;
 /// an optional binding is owned by THAT later clause (post-null). The lowering
 /// only records the deps; the planner places each predicate at the earliest
 /// stage that binds its deps within its owning clause's subplan.
-pub(super) async fn lower_clause(
-	stk: &mut Stk,
+pub(super) fn lower_clause(
 	clause_bindings: &ClauseBindings<'_>,
 	registry: &Registry,
 ) -> Result<MatchClausePlan, SyntaxError> {
@@ -64,7 +61,7 @@ pub(super) async fn lower_clause(
 	for (pattern, bindings) in clause.patterns.iter().zip(pattern_bindings.iter()) {
 		patterns.push(build_pattern_plan(pattern, bindings)?);
 	}
-	let mut predicates = lower_predicates(stk, clause, registry, pattern_bindings).await?;
+	let mut predicates = lower_predicates(clause, registry, pattern_bindings)?;
 	// A node variable repeated within a single pattern (e.g. the self-loop
 	// `(a)-[…]->(a)`) was rewritten to a fresh hidden binding by `binding`; emit
 	// the implied `id`-equality so the planner enforces it (the chain has no join
@@ -298,8 +295,7 @@ enum Conjunct<'a> {
 /// and lowers each into a [`MatchPredicate`] with its dependency set. A
 /// conjunct may reference bindings from several patterns (a cross-pattern
 /// predicate); the planner places it post-join.
-async fn lower_predicates(
-	stk: &mut Stk,
+fn lower_predicates(
 	clause: &MatchClause,
 	registry: &Registry,
 	pattern_bindings: &[PatternBindings],
@@ -325,13 +321,13 @@ async fn lower_predicates(
 			Conjunct::Expr {
 				expr: predicate,
 				negated,
-			} => expr::lower_predicate(stk, predicate, *negated, &scope).await?,
+			} => expr::lower_predicate(predicate, *negated, &scope)?,
 			Conjunct::Prop {
 				binding,
 				binding_name,
 				key,
 				value,
-			} => expr::lower_prop_equality(stk, *binding, binding_name, key, value, &scope).await?,
+			} => expr::lower_prop_equality(*binding, binding_name, key, value, &scope)?,
 		};
 		out.push(MatchPredicate {
 			expr: lowered,

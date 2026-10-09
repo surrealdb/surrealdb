@@ -4,7 +4,6 @@
 //! The actual type checking is handled by the FromArgs trait.
 
 use anyhow::Result;
-use reblessive::tree::TreeStack;
 
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
@@ -76,7 +75,7 @@ define_pure_function!(ArraySortAsc, "array::sort::asc", effects: EffectSet::PURE
 define_pure_function!(ArraySortDesc, "array::sort::desc", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), metered: crate::fnc::array::sort::desc_walk, (array: Any) -> Any, crate::fnc::array::sort::desc);
 
 // =========================================================================
-// Closure-based array functions (require async execution with TreeStack)
+// Closure-based array functions (require async execution)
 // =========================================================================
 
 /// A builtin that runs the closure it is handed over the elements of
@@ -134,12 +133,7 @@ macro_rules! define_array_closure_function {
 					let args = FromArgs::from_args($func_name, args)?;
 					let evaluator = StreamingClosureEvaluator::new(ctx);
 					let ev = Some(&evaluator as &dyn ClosureEvaluator);
-					let mut stack = TreeStack::new();
-					stack
-						.enter(|stk| async move {
-							$impl_path((stk, ev), args).await
-						})
-						.finish()
+					$impl_path(ev, args)
 						.await
 				})
 			}
@@ -191,12 +185,7 @@ macro_rules! define_array_closure_function {
 					let args = FromArgs::from_args($func_name, args)?;
 					let evaluator = StreamingClosureEvaluator::new(ctx);
 					let ev = Some(&evaluator as &dyn ClosureEvaluator);
-					let mut stack = TreeStack::new();
-					stack
-						.enter(|stk| async move {
-							$impl_path((stk, ev), args).await
-						})
-						.finish()
+					$impl_path(ev, args)
 						.await
 				})
 			}

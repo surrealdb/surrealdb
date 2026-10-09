@@ -36,7 +36,6 @@ pub mod parser;
 pub mod token;
 
 use common::{LeafError, internal_todo};
-use reblessive::{Stack, Stk};
 use surrealdb_sql::{Ast, Block, Expr, Fields, Idiom, Kind};
 use surrealdb_types::{
 	Datetime as PublicDatetime, Duration as PublicDuration, Error as TypesError,
@@ -83,7 +82,7 @@ pub fn could_be_reserved_keyword(s: &str) -> bool {
 /// Runs `f` against a parser over `input` using the default settings.
 pub fn parse_with<F, R>(input: &[u8], f: F) -> Result<R, ParseError>
 where
-	F: AsyncFnOnce(&mut Parser<'_>, &mut Stk) -> ParseResult<R>,
+	F: FnOnce(&mut Parser<'_>) -> ParseResult<R>,
 {
 	parse_with_settings(input, ParserSettings::default(), f)
 }
@@ -98,18 +97,13 @@ pub fn parse_with_settings<F, R>(
 	f: F,
 ) -> Result<R, ParseError>
 where
-	F: for<'a> AsyncFnOnce(&'a mut Parser<'a>, &'a mut Stk) -> ParseResult<R>,
+	F: for<'a> FnOnce(&'a mut Parser<'a>) -> ParseResult<R>,
 {
 	if input.len() > u32::MAX as usize {
 		return Err(ParseError::QueryTooLarge);
 	}
 	let mut parser = Parser::new_with_settings(input, settings);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| f(&mut parser, stk))
-		.finish()
-		.map_err(|e| e.render_on_bytes(input))
-		.map_err(ParseError::InvalidQuery)
+	f(&mut parser).map_err(|e| e.render_on_bytes(input)).map_err(ParseError::InvalidQuery)
 }
 
 impl ParserSettings {
@@ -143,7 +137,7 @@ pub fn parse(input: &str) -> Result<Ast, ParseError> {
 	parse_with_settings(
 		input.as_bytes(),
 		ParserSettings::all_features(&ParserConfig::default()),
-		async |parser, stk| parser.parse_query(stk).await,
+		|parser| parser.parse_query(),
 	)
 }
 
@@ -153,24 +147,24 @@ pub fn expr(input: &str) -> Result<Expr, ParseError> {
 	parse_with_settings(
 		input.as_bytes(),
 		ParserSettings::all_features(&ParserConfig::default()),
-		async |parser, stk| parser.parse_expr_field(stk).await,
+		|parser| parser.parse_expr_field(),
 	)
 }
 
 /// Parses a SurrealQL expression, also parsing values found inside strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn expr_legacy_strand(input: &str) -> Result<Expr, ParseError> {
+	// Parsing recurses on the call stack, so the depth limits stay bounded:
+	// the stored-text ceilings are the most the parser admits anywhere.
 	let settings = ParserSettings {
-		object_recursion_limit: usize::MAX,
-		query_recursion_limit: usize::MAX,
-		expr_recursion_limit: usize::MAX,
+		object_recursion_limit: ParserSettings::STORED_TEXT.object_recursion_limit,
+		query_recursion_limit: ParserSettings::STORED_TEXT.query_recursion_limit,
+		expr_recursion_limit: ParserSettings::STORED_TEXT.expr_recursion_limit,
 		legacy_strands: true,
 		..Default::default()
 	};
 
-	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
+	parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_expr_field())
 }
 
 /// Re-parses the canonical block text a catalog definition stores, for
@@ -186,12 +180,12 @@ pub fn block(input: &str) -> Result<Block, ParseError> {
 
 /// Parses a `{ ... }` block under caller-chosen limits.
 ///
-/// The unbounded [`ParserSettings::STORED_TEXT`] profile is only safe for text
-/// this engine wrote. Parsing is heap-stacked, so a deeply nested block parses
-/// fine, but the `sql::Block -> expr::Block` lowering every caller runs, and the
-/// value's own recursive `Drop`, descend the call stack per node — and a Rust
-/// stack overflow aborts the process rather than raising an error. Fresh input
-/// therefore has to keep the configured depth limits.
+/// The [`ParserSettings::STORED_TEXT`] profile, whose ceilings sit far above
+/// the configured defaults, is only meant for text this engine wrote. Parsing,
+/// the `sql::Block -> expr::Block` lowering every caller runs, and the value's
+/// own recursive `Drop` all descend the call stack per nesting level — and a
+/// Rust stack overflow aborts the process rather than raising an error. Fresh
+/// input therefore has to keep the configured depth limits.
 ///
 /// `require_all_input` is separate because it is a real behaviour difference,
 /// not a safety one: stored text must be consumed whole or a definition with
@@ -203,12 +197,12 @@ pub fn block_with_settings(
 	settings: ParserSettings,
 	require_all_input: bool,
 ) -> Result<Block, ParseError> {
-	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
+	parse_with_settings(input.as_bytes(), settings, |parser| {
 		let found = parser.peek();
 		match found.kind {
 			token::t!("{") => {
 				let start = parser.pop_peek().span;
-				let block = parser.parse_block(stk, start).await?;
+				let block = parser.parse_block(start)?;
 				if require_all_input {
 					parser.assert_finished()?;
 				}
@@ -225,7 +219,7 @@ pub fn block_with_settings(
 /// Parses a SurrealQL [`Idiom`]
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn idiom(input: &str) -> Result<Idiom, ParseError> {
-	parse_with(input.as_bytes(), async |parser, stk| parser.parse_plain_idiom(stk).await)
+	parse_with(input.as_bytes(), |parser| parser.parse_plain_idiom())
 }
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
@@ -235,15 +229,13 @@ pub fn idiom(input: &str) -> Result<Idiom, ParseError> {
 pub fn value(input: &str) -> Result<PublicValue, ParseError> {
 	let settings = ParserSettings::default();
 
-	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
-		parser.parse_value(stk).await
-	})
+	parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_value())
 }
 
 /// Parse a record id.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn record_id(input: &str) -> Result<PublicRecordId, ParseError> {
-	parse_with(input.as_bytes(), async |parser, stk| parser.parse_value_record_id(stk).await)
+	parse_with(input.as_bytes(), |parser| parser.parse_value_record_id())
 }
 
 /// Re-parses the canonical kind-grammar text a catalog definition stores for
@@ -255,8 +247,8 @@ pub fn record_id(input: &str) -> Result<PublicRecordId, ParseError> {
 /// must be consumed, for the reason [`expr_for_definition`] documents.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn kind_for_definition(input: &str) -> Result<Kind, ParseError> {
-	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, async |parser, stk| {
-		let kind = parser.parse_inner_kind(stk).await?;
+	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, |parser| {
+		let kind = parser.parse_inner_kind()?;
 		parser.assert_finished()?;
 		Ok(kind)
 	})
@@ -272,9 +264,7 @@ pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicV
 		..Default::default()
 	};
 
-	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
-		parser.parse_value(stk).await
-	})
+	parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_value())
 }
 
 /// Re-parses the canonical SurrealQL text a catalog definition stores for one
@@ -316,8 +306,8 @@ pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicV
 /// used as if that were what the user defined.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn expr_for_definition(input: &str) -> Result<Expr, ParseError> {
-	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, async |parser, stk| {
-		let expr = parser.parse_expr_field(stk).await?;
+	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, |parser| {
+		let expr = parser.parse_expr_field()?;
 		parser.assert_finished()?;
 		Ok(expr)
 	})
@@ -371,8 +361,8 @@ pub fn block_for_definition(input: &str) -> Result<Block, ParseError> {
 /// must be consumed, for the reason [`expr_for_definition`] documents.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn idiom_for_definition(input: &str) -> Result<Idiom, ParseError> {
-	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, async |parser, stk| {
-		let idiom = parser.parse_plain_idiom(stk).await?;
+	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, |parser| {
+		let idiom = parser.parse_plain_idiom()?;
 		parser.assert_finished()?;
 		Ok(idiom)
 	})
@@ -385,8 +375,8 @@ pub fn idiom_for_definition(input: &str) -> Result<Idiom, ParseError> {
 /// consumed, for the reason [`expr_for_definition`] documents.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn fields_for_definition(input: &str) -> Result<Fields, ParseError> {
-	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, async |parser, stk| {
-		let fields = parser.parse_fields(stk).await?;
+	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, |parser| {
+		let fields = parser.parse_fields()?;
 		parser.assert_finished()?;
 		Ok(fields)
 	})
@@ -395,5 +385,5 @@ pub fn fields_for_definition(input: &str) -> Result<Fields, ParseError> {
 /// Parse a kind from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn kind(input: &str) -> Result<Kind, ParseError> {
-	parse_with(input.as_bytes(), async |parser, stk| parser.parse_inner_kind(stk).await)
+	parse_with(input.as_bytes(), |parser| parser.parse_inner_kind())
 }

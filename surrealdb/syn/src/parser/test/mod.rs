@@ -3,16 +3,15 @@ use surrealdb_strand::Strand;
 
 use super::Parser;
 
+mod stack;
 mod stmt;
 mod streaming;
 mod value;
 
 #[test]
 fn parse_large_test_file() {
-	crate::parse_with(include_bytes!("../../../test.surql"), async |parser, stk| {
-		parser.parse_query(stk).await
-	})
-	.unwrap();
+	crate::parse_with(include_bytes!("../../../test.surql"), |parser| parser.parse_query())
+		.unwrap();
 }
 
 #[test]
@@ -22,14 +21,12 @@ fn less_then_idiom() {
 			return 1
 		}
 	"#;
-	crate::parse_with(src.as_bytes(), async |parser, stk| parser.parse_query(stk).await).unwrap();
+	crate::parse_with(src.as_bytes(), |parser| parser.parse_query()).unwrap();
 }
 
 #[test]
 fn ident_is_field() {
-	let mut field =
-		crate::parse_with(r#"foo"#.as_bytes(), async |parser, stk| parser.parse_query(stk).await)
-			.unwrap();
+	let mut field = crate::parse_with(r#"foo"#.as_bytes(), |parser| parser.parse_query()).unwrap();
 
 	let exprs = field.expressions.pop().unwrap();
 
@@ -45,7 +42,7 @@ fn ident_is_field() {
 fn parse_immediate_insert_subquery() {
 	crate::parse_with(
 		r#"LET $insert = INSERT INTO t (SELECT true FROM 1);"#.as_bytes(),
-		async |parser, stk| parser.parse_query(stk).await,
+		|parser| parser.parse_query(),
 	)
 	.unwrap();
 }
@@ -56,6 +53,5 @@ fn test_non_valid_utf8() {
 	src.push(0xff);
 
 	let mut parser = Parser::new(&src);
-	let mut stack = reblessive::Stack::new();
-	stack.enter(|ctx| parser.parse_query(ctx)).finish().unwrap_err();
+	parser.parse_query().unwrap_err();
 }

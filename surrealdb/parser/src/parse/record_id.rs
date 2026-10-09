@@ -31,7 +31,7 @@ fn parse_int_id(
 		});
 		Ok(ast::RecordIdKey::String(lit))
 	} else {
-		let speculate = parser.speculate_sync(|parser| parser.parse_sync::<ast::Integer>())?;
+		let speculate = parser.speculate(|parser| parser.parse_sync::<ast::Integer>())?;
 		if let Some(int) = speculate {
 			if let Some(i) = int.into_i64() {
 				Ok(ast::RecordIdKey::Number(Spanned {
@@ -64,13 +64,11 @@ fn parse_int_id(
 	}
 }
 
-pub async fn parse_peeked_record_id_key(
-	parser: &mut Parser<'_, '_>,
-) -> ParseResult<ast::RecordIdKey> {
+pub fn parse_peeked_record_id_key(parser: &mut Parser<'_, '_>) -> ParseResult<ast::RecordIdKey> {
 	let peek = parser.peek_expect("a record id key")?;
 	let key = match peek.token {
-		BaseTokenKind::OpenBrace => ast::RecordIdKey::Object(parser.parse().await?),
-		BaseTokenKind::OpenBracket => ast::RecordIdKey::Array(parser.parse().await?),
+		BaseTokenKind::OpenBrace => ast::RecordIdKey::Object(parser.parse()?),
+		BaseTokenKind::OpenBracket => ast::RecordIdKey::Array(parser.parse()?),
 		BaseTokenKind::String => ast::RecordIdKey::String(parser.parse_sync()?),
 		T![+] => {
 			if let Some(peek1) = parser.peek_joined1()?
@@ -203,17 +201,17 @@ pub fn peek_record_id_token(parser: &mut Parser<'_, '_>) -> ParseResult<Option<T
 	Ok(Some(token))
 }
 
-pub async fn parse_record_id_headless_range(
+pub fn parse_record_id_headless_range(
 	parser: &mut Parser<'_, '_>,
 ) -> ParseResult<Bound<ast::RecordIdKey>> {
 	let end = if peek_joined_starts_record_id_key(parser)? {
-		let item = parse_peeked_record_id_key(parser).await?;
+		let item = parse_peeked_record_id_key(parser)?;
 		Bound::Excluded(item)
 	} else if let Some(T![=]) = parser.peek_joined()?.map(|x| x.token) {
 		let _ = parser.next()?;
 
 		peek_record_id_token(parser)?;
-		let item = parse_peeked_record_id_key(parser).await?;
+		let item = parse_peeked_record_id_key(parser)?;
 		Bound::Included(item)
 	} else {
 		Bound::Unbounded
@@ -221,7 +219,7 @@ pub async fn parse_record_id_headless_range(
 	Ok(end)
 }
 
-pub async fn try_parse_record_id_range(
+pub fn try_parse_record_id_range(
 	parser: &mut Parser<'_, '_>,
 	start: ast::RecordIdKey,
 ) -> ParseResult<TryRange<ast::RecordIdKey>> {
@@ -230,7 +228,7 @@ pub async fn try_parse_record_id_range(
 		Some(T![..]) => {
 			let _ = parser.next();
 			if peek_joined_starts_record_id_key(parser)? {
-				let end = parse_peeked_record_id_key(parser).await?;
+				let end = parse_peeked_record_id_key(parser)?;
 
 				TryRange::Some {
 					start: Bound::Included(start),
@@ -240,7 +238,7 @@ pub async fn try_parse_record_id_range(
 				let _ = parser.next();
 
 				peek_record_id_token(parser)?;
-				let end = parse_peeked_record_id_key(parser).await?;
+				let end = parse_peeked_record_id_key(parser)?;
 
 				TryRange::Some {
 					start: Bound::Included(start),
@@ -263,7 +261,7 @@ pub async fn try_parse_record_id_range(
 			}
 			let _ = parser.next();
 			if peek_joined_starts_record_id_key(parser)? {
-				let end = parse_peeked_record_id_key(parser).await?;
+				let end = parse_peeked_record_id_key(parser)?;
 
 				TryRange::Some {
 					start: Bound::Excluded(start),
@@ -272,7 +270,7 @@ pub async fn try_parse_record_id_range(
 			} else if let Some(T![=]) = parser.peek_joined()?.map(|x| x.token) {
 				let _ = parser.next();
 				peek_record_id_token(parser)?;
-				let end = parse_peeked_record_id_key(parser).await?;
+				let end = parse_peeked_record_id_key(parser)?;
 
 				TryRange::Some {
 					start: Bound::Excluded(start),
@@ -322,7 +320,7 @@ pub fn parse_keyword_key(
 }
 
 impl Parse for ast::RecordId {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start_span = parser.peek_span();
 		let name = parser.parse_sync()?;
 		let name = parser.push(name);
@@ -344,7 +342,7 @@ impl Parse for ast::RecordId {
 		let key = match token.token {
 			T![..] => {
 				let _ = parser.next();
-				let end = parse_record_id_headless_range(parser).await?;
+				let end = parse_record_id_headless_range(parser)?;
 				let end = end.map(|x| parser.push(x));
 				let span = parser.span_since(token.span);
 				let range = ast::RecordIdKeyRange {
@@ -358,9 +356,9 @@ impl Parse for ast::RecordId {
 			T![UUID] => parse_keyword_key(parser, token, ast::RecordIdKeyGenerate::Uuid)?,
 			T![ULID] => parse_keyword_key(parser, token, ast::RecordIdKeyGenerate::Ulid)?,
 			_ => {
-				let start = parse_peeked_record_id_key(parser).await?;
+				let start = parse_peeked_record_id_key(parser)?;
 
-				let range = try_parse_record_id_range(parser, start).await?;
+				let range = try_parse_record_id_range(parser, start)?;
 
 				match range {
 					TryRange::None(key) => {

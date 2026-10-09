@@ -11,7 +11,6 @@
 2. **Parsing Stack**:
    - Zero-allocation, linear-time lexer respecting PostgreSQL's exact tokenizing rules.
    - Top-down operator precedence (Pratt parsing) for expressions, sharing precedence tables with the printer.
-   - `reblessive` stack management for parser recursion preventing stack overflows.
    - Explicit depth budgeting charged on all recursive productions.
 
 3. **Projection & Verification**:

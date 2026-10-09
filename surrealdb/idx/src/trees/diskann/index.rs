@@ -34,7 +34,6 @@ use diskann::neighbor::{Neighbor, NeighborPriorityQueue};
 use diskann::provider::{Delete, Guard, SetElement};
 use diskann_vector::Half;
 use diskann_vector::distance::Metric;
-use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
 use surrealdb_datastore::Transaction;
 use surrealdb_kvs::api::ValsBatch;
@@ -650,8 +649,7 @@ impl DiskAnnGraph {
 	/// list walks further. The caller widens `l` and walks again for that case
 	/// (see [`DiskAnnIndex::search_graph`]); [`FilteredWalk::exhausted`] says when
 	/// widening cannot help. The classifier runs in this future, not in the
-	/// upstream search's `Send` futures, so it may hold the non-`Send` reblessive
-	/// stack a SurrealQL condition is evaluated on.
+	/// upstream search's `Send` futures.
 	async fn search_filtered<C: ElementClassifier>(
 		&self,
 		ctx: &DiskAnnContext<'_>,
@@ -846,8 +844,6 @@ struct GraphCandidateClassifier<'s, 'a, 'b> {
 	index: &'s DiskAnnIndex,
 	/// Context of the search's transaction.
 	ctx: &'s DiskAnnContext<'a>,
-	/// Stack the filter's condition is evaluated on.
-	stk: &'s mut Stk,
 	/// The truthy filter, whose verdict cache the result admission reuses.
 	filter: &'s mut DiskAnnTruthyDocumentFilter<'b>,
 	/// Document IDs whose pending update supersedes their graph entry.
@@ -941,11 +937,7 @@ impl ElementClassifier for GraphCandidateClassifier<'_, '_, '_> {
 				if !self.doc_eligible(doc_id) {
 					continue;
 				}
-				if self
-					.filter
-					.check_vector_id_truthy(self.ctx, self.stk, VectorId::DocId(doc_id))
-					.await?
-				{
+				if self.filter.check_vector_id_truthy(self.ctx, VectorId::DocId(doc_id)).await? {
 					verdicts[pos] = true;
 					self.record(distance);
 					self.docs.insert(id, docs.clone());
@@ -1858,11 +1850,9 @@ impl DiskAnnIndex {
 	/// `allow_list` restricts candidate admission to the given doc-IDs (over
 	/// the table's shared doc-ID space) without fetching records. `None`
 	/// leaves admission unrestricted.
-	#[expect(clippy::too_many_arguments)]
 	pub async fn knn_search(
 		&self,
 		env: &dyn IndexEnv,
-		stk: &mut Stk,
 		pt: &[Number],
 		k: usize,
 		ef: usize,
@@ -1897,19 +1887,10 @@ impl DiskAnnIndex {
 		// range unconditionally and the per-shard `!dw` ranges of the non-empty `!dy` shards;
 		// when nothing is pending the cost is a single empty legacy range probe.
 		let pending_docs = self
-			.search_pendings(
-				&ctx,
-				stk,
-				&search,
-				&mut filter,
-				allow_list,
-				&mut builder,
-				&pending_state,
-			)
+			.search_pendings(&ctx, &search, &mut filter, allow_list, &mut builder, &pending_state)
 			.await?;
 		self.search_graph(
 			&ctx,
-			stk,
 			DiskAnnGraphSearch {
 				graph: &graph,
 				search: &search,
@@ -1970,7 +1951,6 @@ impl DiskAnnIndex {
 	async fn search_graph(
 		&self,
 		ctx: &DiskAnnContext<'_>,
-		stk: &mut Stk,
 		state: DiskAnnGraphSearch<'_, '_>,
 	) -> Result<()> {
 		// With a truthy filter (a SELECT permission or a residual condition) the
@@ -2006,7 +1986,6 @@ impl DiskAnnIndex {
 					let mut classifier = GraphCandidateClassifier {
 						index: self,
 						ctx,
-						stk: &mut *stk,
 						filter,
 						pending_docs: state.pending_docs.as_ref(),
 						allow_list: state.allow_list,
@@ -2155,7 +2134,7 @@ impl DiskAnnIndex {
 							}
 							let id = VectorId::DocId(doc_id);
 							if let Some(filter) = state.filter.as_mut()
-								&& !filter.check_vector_id_truthy(ctx, stk, id.clone()).await?
+								&& !filter.check_vector_id_truthy(ctx, id.clone()).await?
 							{
 								continue;
 							}
@@ -2235,11 +2214,9 @@ impl DiskAnnIndex {
 	/// outside the migration window: once on the legacy range holding anything at
 	/// all, and once on the shard being one that a legacy record actually hashes
 	/// to.
-	#[expect(clippy::too_many_arguments)]
 	async fn search_pendings(
 		&self,
 		ctx: &DiskAnnContext<'_>,
-		stk: &mut Stk,
 		search: &DiskAnnSearch,
 		filter: &mut Option<DiskAnnTruthyDocumentFilter<'_>>,
 		allow_list: Option<&RoaringTreemap>,
@@ -2268,7 +2245,7 @@ impl DiskAnnIndex {
 		// writes it, so on an index that has drained it this is a single empty
 		// range probe and `legacy_shards` stays clear.
 		let rng = self.ikb.new_dr_range()?;
-		self.scan_pending_range(ctx, stk, &mut scan, rng, PendingLayout::Legacy, false).await?;
+		self.scan_pending_range(ctx, &mut scan, rng, PendingLayout::Legacy, false).await?;
 		// Phase 2: the sharded ranges of every shard that may hold data. A write
 		// commits its `!dw` key only in a transaction that read or set its `!dy`
 		// shard `NonEmpty`, and `mark_pending_non_empty` keeps that transaction from
@@ -2284,10 +2261,10 @@ impl DiskAnnIndex {
 			}
 			let probe_legacy = scan.legacy_shards & (1u32 << u32::from(shard)) != 0;
 			let rng = self.ikb.new_dw_shard_range(shard)?;
-			self.scan_pending_range(ctx, stk, &mut scan, rng, PendingLayout::Sharded, probe_legacy)
+			self.scan_pending_range(ctx, &mut scan, rng, PendingLayout::Sharded, probe_legacy)
 				.await?;
 		}
-		self.score_pending_batch(ctx, stk, &mut scan).await?;
+		self.score_pending_batch(ctx, &mut scan).await?;
 		scan.pending.finish();
 		if scan.suppressed.is_empty() {
 			return Ok(None);
@@ -2306,7 +2283,6 @@ impl DiskAnnIndex {
 	async fn scan_pending_range(
 		&self,
 		ctx: &DiskAnnContext<'_>,
-		stk: &mut Stk,
 		scan: &mut DiskAnnPendingScan<'_, '_>,
 		rng: TypedRange<DiskAnnRecordPendingUpdate>,
 		layout: PendingLayout,
@@ -2331,7 +2307,7 @@ impl DiskAnnIndex {
 				// together; scoring first leaves only page, request and reply. The cost is
 				// a scoring batch per page instead of per budget, and only while
 				// the legacy range still holds records of this shard.
-				self.score_pending_batch(ctx, stk, scan).await?;
+				self.score_pending_batch(ctx, scan).await?;
 				self.legacy_owned_rows(ctx, &read, &scan.pending).await?
 			} else {
 				Vec::new()
@@ -2385,7 +2361,7 @@ impl DiskAnnIndex {
 				// resolvable, and the captured id still masks the graph's stale
 				// entries through the bitmap above.
 				if scan.pending.rollover_required(entry_bytes) {
-					self.score_pending_batch(ctx, stk, scan).await?;
+					self.score_pending_batch(ctx, scan).await?;
 				}
 				scan.pending.push(
 					VectorId::RecordKey(Arc::new(id)),
@@ -2495,7 +2471,6 @@ impl DiskAnnIndex {
 	async fn score_pending_batch(
 		&self,
 		ctx: &DiskAnnContext<'_>,
-		stk: &mut Stk,
 		scan: &mut DiskAnnPendingScan<'_, '_>,
 	) -> Result<()> {
 		if scan.pending.batch.is_empty() {
@@ -2508,7 +2483,7 @@ impl DiskAnnIndex {
 		let batch = &mut scan.pending.batch;
 		for (id, vectors) in batch.ids.drain(..).zip(batch.vectors.drain(..)) {
 			let truthy = match scan.filter.as_mut() {
-				Some(filter) => filter.check_vector_id_truthy(ctx, stk, id.clone()).await?,
+				Some(filter) => filter.check_vector_id_truthy(ctx, id.clone()).await?,
 				None => true,
 			};
 			if truthy {
@@ -2679,11 +2654,7 @@ mod tests {
 	) -> Result<usize> {
 		let ctx = new_ctx(ds, TransactionType::Read).await;
 		let query = f32_query(values);
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack
-			.enter(|stk| async { index.knn_search(&ctx, stk, &query, k, 8, None, None).await })
-			.finish()
-			.await?;
+		let res = index.knn_search(&ctx, &query, k, 8, None, None).await?;
 		ctx.tx().cancel().await?;
 		Ok(res.len())
 	}
@@ -2700,11 +2671,7 @@ mod tests {
 	) -> Result<Option<f64>> {
 		let ctx = new_ctx(ds, TransactionType::Read).await;
 		let query = f32_query(values);
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack
-			.enter(|stk| async { index.knn_search(&ctx, stk, &query, 1, 8, None, None).await })
-			.finish()
-			.await?;
+		let res = index.knn_search(&ctx, &query, 1, 8, None, None).await?;
 		ctx.tx().cancel().await?;
 		Ok(res.front().map(|(_, dist, _)| *dist))
 	}
@@ -2720,13 +2687,7 @@ mod tests {
 	) -> Result<Vec<i64>> {
 		let ctx = new_ctx(ds, TransactionType::Read).await;
 		let query = f32_query(values);
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack
-			.enter(|stk| async {
-				index.knn_search(&ctx, stk, &query, k, 8, None, allow_list).await
-			})
-			.finish()
-			.await?;
+		let res = index.knn_search(&ctx, &query, k, 8, None, allow_list).await?;
 		ctx.tx().cancel().await?;
 		let mut keys: Vec<i64> = res
 			.iter()
@@ -2879,11 +2840,7 @@ mod tests {
 		index.check_state().await?;
 		while compact_once(&index, &ds, &ikb).await? {}
 		let pt = f32_query(&[0.0, 0.0, 0.0, 0.0]);
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack
-			.enter(|stk| async { index.knn_search(&query, stk, &pt, 5, 8, None, None).await })
-			.finish()
-			.await?;
+		let res = index.knn_search(&query, &pt, 5, 8, None, None).await?;
 		query.tx().cancel().await?;
 		let keys: Vec<i64> = res
 			.iter()
@@ -3812,10 +3769,8 @@ mod tests {
 		// `CROSSING`-th checkpoint is the crossing entry's own.
 		let ctx = CancelAtCheckpoint::new(ds.env(TransactionType::Read).await, CROSSING);
 		let query = f32_query(&[0.0, 0.0, 0.0, 0.0]);
-		let mut stack = reblessive::tree::TreeStack::new();
-		let err = stack
-			.enter(|stk| async { index.knn_search(&ctx, stk, &query, 4, 8, None, None).await })
-			.finish()
+		let err = index
+			.knn_search(&ctx, &query, 4, 8, None, None)
 			.await
 			.expect_err("the scan is cancelled before it finishes reading the queue");
 		assert!(
@@ -3863,10 +3818,8 @@ mod tests {
 		let ctx = CancelAtCheckpoint::new(ds.env(TransactionType::Read).await, CANCEL_AT);
 		let query_values = vec![0.0f32; usize::from(DIMENSION)];
 		let query = f32_query(&query_values);
-		let mut stack = reblessive::tree::TreeStack::new();
-		let err = stack
-			.enter(|stk| async { index.knn_search(&ctx, stk, &query, 1, 8, None, None).await })
-			.finish()
+		let err = index
+			.knn_search(&ctx, &query, 1, 8, None, None)
 			.await
 			.expect_err("the second entry cancels before the batch can be scored");
 		assert!(
@@ -5846,11 +5799,7 @@ mod tests {
 	) -> Result<Vec<i64>> {
 		let ctx = new_ctx(ds, TransactionType::Read).await;
 		let pt = f32_query(query);
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack
-			.enter(|stk| async { index.knn_search(&ctx, stk, &pt, k, ef, None, None).await })
-			.finish()
-			.await?;
+		let res = index.knn_search(&ctx, &pt, k, ef, None, None).await?;
 		ctx.tx().cancel().await?;
 		Ok(res
 			.iter()
@@ -6310,11 +6259,7 @@ mod tests {
 		k: usize,
 	) -> Result<Vec<i64>> {
 		let query = f32_query(values);
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack
-			.enter(|stk| async { index.knn_search(ctx, stk, &query, k, 8, None, None).await })
-			.finish()
-			.await?;
+		let res = index.knn_search(ctx, &query, k, 8, None, None).await?;
 		let mut keys: Vec<i64> = res
 			.iter()
 			.map(|(rid, _, _)| match &rid.key {

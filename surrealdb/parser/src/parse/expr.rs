@@ -49,19 +49,19 @@ const PREFIX_BP: u8 = 15;
 const IDIOM_BP: u8 = 16;
 
 impl Parse for ast::Expr {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
-		parse_pratt(parser, BASE_BP).await
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		parse_pratt(parser, BASE_BP)
 	}
 }
 
 /// Recurse into the pratt entering into a new stack frame.
-async fn parse_pratt_enter(parser: &mut Parser<'_, '_>, bp: u8) -> ParseResult<NodeId<Expr>> {
-	let expr = parser.enter(async |parser| parse_pratt(parser, bp).await).await?;
+fn parse_pratt_enter(parser: &mut Parser<'_, '_>, bp: u8) -> ParseResult<NodeId<Expr>> {
+	let expr = parser.enter(|parser| parse_pratt(parser, bp))?;
 	let expr = parser.push(expr);
 	Ok(expr)
 }
 
-async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
+fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 	let token = parser.peek_expect("an expression")?;
 	let op = match token.token {
 		T![!] => {
@@ -77,10 +77,10 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			PrefixOperator::Positive(token.span)
 		}
 		T![<] => match parser.peek_joined1()?.map(|x| x.token) {
-			Some(T![-] | T![->]) => return parse_prime(parser).await,
+			Some(T![-] | T![->]) => return parse_prime(parser),
 			_ => {
 				let _ = parser.next();
-				let ty = parser.parse().await?;
+				let ty = parser.parse()?;
 				let _ = parser.expect_closing_delimiter(T![>], token.span)?;
 
 				PrefixOperator::Cast(ty)
@@ -94,7 +94,7 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			{
 				let _ = parser.next();
 				let _ = parser.next();
-				let recurse = parse_recurse(parser, x.span, x.span).await?;
+				let recurse = parse_recurse(parser, x.span, x.span)?;
 				let op_span = parser.span_since(x.span);
 				let op = ast::IdiomOperator::Recurse(parser.push(recurse));
 				let doc_span = parser.push(token.span);
@@ -111,7 +111,7 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 				});
 				return Ok(Expr::Idiom(expr));
 			} else {
-				return parse_prime(parser).await;
+				return parse_prime(parser);
 			}
 		}
 		T![..] => {
@@ -126,11 +126,11 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			}
 		}
 		_ => {
-			return parse_prime(parser).await;
+			return parse_prime(parser);
 		}
 	};
 
-	let expr = parse_pratt_enter(parser, PREFIX_BP).await?;
+	let expr = parse_pratt_enter(parser, PREFIX_BP)?;
 	let span = parser.span_since(token.span);
 	let expr = parser.push(PrefixExpr {
 		op,
@@ -140,7 +140,7 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 	Ok(Expr::Prefix(expr))
 }
 
-async fn parse_basic_infix_op(
+fn parse_basic_infix_op(
 	parser: &mut Parser<'_, '_>,
 	min_bp: u8,
 	bp: (u8, u8),
@@ -154,7 +154,7 @@ async fn parse_basic_infix_op(
 
 	let _ = parser.next()?;
 
-	let right = parse_pratt_enter(parser, bp.1).await?;
+	let right = parse_pratt_enter(parser, bp.1)?;
 	let left = parser.push(lhs);
 	let expr = parser.push(BinaryExpr {
 		left,
@@ -201,7 +201,7 @@ fn is_relation_op(op: &BinaryOperator) -> bool {
 	)
 }
 
-async fn parse_range_infix_op(
+fn parse_range_infix_op(
 	parser: &mut Parser<'_, '_>,
 	operator: BinaryOperator,
 	lhs: Expr,
@@ -209,7 +209,7 @@ async fn parse_range_infix_op(
 	op_span: Span,
 ) -> ParseResult<Option<Expr>> {
 	let left = parser.push(lhs);
-	let rhs = parse_pratt_enter(parser, RANGE_BP).await?;
+	let rhs = parse_pratt_enter(parser, RANGE_BP)?;
 
 	if let Expr::Binary(rhs) = parser[rhs]
 		&& let BinaryOperator::Range
@@ -284,7 +284,7 @@ async fn parse_range_infix_op(
 /// does it will eat up to `EAT` tokens, expecting the code to have already checked if the operator
 /// to be parsed is correct.
 #[allow(clippy::too_many_arguments)]
-async fn parse_non_associative_infix_op(
+fn parse_non_associative_infix_op(
 	parser: &mut Parser<'_, '_>,
 	min_bp: u8,
 	bp: u8,
@@ -305,7 +305,7 @@ async fn parse_non_associative_infix_op(
 	}
 
 	let left = parser.push(lhs);
-	let right = parse_pratt_enter(parser, bp).await?;
+	let right = parse_pratt_enter(parser, bp)?;
 
 	if let Expr::Binary(x) = parser[right]
 		&& is_same(&parser[x].op.value)
@@ -341,7 +341,7 @@ async fn parse_non_associative_infix_op(
 	Ok(Some(Expr::Binary(expr)))
 }
 
-async fn parse_equality_op(
+fn parse_equality_op(
 	parser: &mut Parser<'_, '_>,
 	min_bp: u8,
 	op: BinaryOperator,
@@ -349,10 +349,9 @@ async fn parse_equality_op(
 	lhs: Expr,
 ) -> ParseResult<Option<Expr>> {
 	parse_non_associative_infix_op(parser, min_bp, EQUALITY_BP, op, is_equality_op, span, lhs, 1)
-		.await
 }
 
-async fn parse_relation_op(
+fn parse_relation_op(
 	parser: &mut Parser<'_, '_>,
 	min_bp: u8,
 	op: BinaryOperator,
@@ -360,10 +359,9 @@ async fn parse_relation_op(
 	lhs: Expr,
 ) -> ParseResult<Option<Expr>> {
 	parse_non_associative_infix_op(parser, min_bp, RELATION_BP, op, is_relation_op, span, lhs, 1)
-		.await
 }
 
-async fn parse_bracket_postfix(
+fn parse_bracket_postfix(
 	parser: &mut Parser<'_, '_>,
 	min_bp: u8,
 	lhs: Expr,
@@ -384,7 +382,7 @@ async fn parse_bracket_postfix(
 			let _ = parser.next();
 
 			let left = parser.push(lhs);
-			let cond = parser.parse_enter().await?;
+			let cond = parser.parse_enter()?;
 			let close =
 				parser.expect_closing_delimiter(BaseTokenKind::CloseBracket, open_token.span)?;
 			let op = IdiomOperator::Where(cond);
@@ -432,7 +430,7 @@ async fn parse_bracket_postfix(
 		}
 		_ => {
 			let left = parser.push(lhs);
-			let index = parser.parse_enter().await?;
+			let index = parser.parse_enter()?;
 			let _ = parser.peek();
 			let close =
 				parser.expect_closing_delimiter(BaseTokenKind::CloseBracket, open_token.span)?;
@@ -451,7 +449,7 @@ async fn parse_bracket_postfix(
 }
 
 impl Parse for ast::Destructure {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.peek_span();
 		let field = parser.parse_sync()?;
 
@@ -459,7 +457,7 @@ impl Parse for ast::Destructure {
 		match peek.token {
 			T![:] => {
 				let _ = parser.next();
-				let expr = parser.parse_enter().await?;
+				let expr = parser.parse_enter()?;
 
 				Ok(ast::Destructure {
 					field,
@@ -513,7 +511,7 @@ impl Parse for ast::Destructure {
 								break;
 							}
 
-							let item = parser.parse_enter::<ast::Destructure>().await?;
+							let item = parser.parse_enter::<ast::Destructure>()?;
 							let item = ast::DestructureItem::Field(item);
 							parser.push_list(item, &mut head, &mut tail);
 
@@ -547,7 +545,7 @@ impl Parse for ast::Destructure {
 	}
 }
 
-async fn parse_recurse(
+fn parse_recurse(
 	parser: &mut Parser<'_, '_>,
 	dot_span: Span,
 	brace_span: Span,
@@ -600,7 +598,7 @@ async fn parse_recurse(
 				let expects = parser.peek_expect(expected)?;
 				let expects = match expects.token {
 					BaseTokenKind::Param => Expr::Param(parser.parse_sync()?),
-					x if x.is_identifier() => Expr::RecordId(parser.parse().await?),
+					x if x.is_identifier() => Expr::RecordId(parser.parse()?),
 					_ => return Err(parser.unexpected(expected)),
 				};
 				let expects = parser.push(expects);
@@ -642,9 +640,8 @@ async fn parse_recurse(
 	let paren = parser.eat(BaseTokenKind::OpenParen)?;
 
 	let mut expr = Expr::Document(push_span);
-	while let Some(new_expr) = parser
-		.enter(async |parser| try_parse_infix_postfix_op(parser, IDIOM_BP, expr, span).await)
-		.await?
+	while let Some(new_expr) =
+		parser.enter(|parser| try_parse_infix_postfix_op(parser, IDIOM_BP, expr, span))?
 	{
 		expr = new_expr
 	}
@@ -666,7 +663,7 @@ async fn parse_recurse(
 }
 
 /// Parses all operators which start with `.{` .
-async fn parse_dot_brace_postfix(
+fn parse_dot_brace_postfix(
 	parser: &mut Parser<'_, '_>,
 	lhs: Expr,
 	lhs_span: Span,
@@ -678,7 +675,7 @@ async fn parse_dot_brace_postfix(
 	match peek.token {
 		T![*] | T![..] | BaseTokenKind::Int => {
 			let left = parser.push(lhs);
-			let recurse = parse_recurse(parser, dot_span, brace_token.span).await?;
+			let recurse = parse_recurse(parser, dot_span, brace_token.span)?;
 			let recurse = parser.push(recurse);
 			let op = IdiomOperator::Recurse(recurse);
 			let expr = IdiomExpr {
@@ -728,7 +725,7 @@ async fn parse_dot_brace_postfix(
 					break;
 				}
 
-				let item = parser.parse::<ast::Destructure>().await?;
+				let item = parser.parse::<ast::Destructure>()?;
 				let item = ast::DestructureItem::Field(item);
 				parser.push_list(item, &mut head, &mut cur);
 
@@ -758,11 +755,7 @@ async fn parse_dot_brace_postfix(
 /// Parses all operators which start with `.`
 /// This function must be called after checking if this is correct for precedence order (which it
 /// practically always is).
-async fn parse_dot_postfix(
-	parser: &mut Parser<'_, '_>,
-	lhs: Expr,
-	lhs_span: Span,
-) -> ParseResult<Expr> {
+fn parse_dot_postfix(parser: &mut Parser<'_, '_>, lhs: Expr, lhs_span: Span) -> ParseResult<Expr> {
 	let dot_token = parser.expect(T![.])?;
 	let peek = parser.peek_expect("*, ?, .@, {, or an identifier")?;
 
@@ -833,7 +826,7 @@ async fn parse_dot_postfix(
 		BaseTokenKind::OpenBrace => {
 			reject_seperated(parser, dot_token.span, peek.joined)?;
 
-			parse_dot_brace_postfix(parser, lhs, lhs_span, dot_token.span).await
+			parse_dot_brace_postfix(parser, lhs, lhs_span, dot_token.span)
 		}
 		x if x.is_identifier() => {
 			let left = parser.push(lhs);
@@ -864,7 +857,7 @@ async fn parse_dot_postfix(
 ///
 /// This function might panic if there is a peeked token. Called must ensure that no token is
 /// peeked when calling this function.
-async fn parse_lookup_range(parser: &mut Parser<'_, '_>) -> ParseResult<RecordIdKeyRange> {
+fn parse_lookup_range(parser: &mut Parser<'_, '_>) -> ParseResult<RecordIdKeyRange> {
 	assert!(
 		!parser.lex.has_peek(),
 		"lexing record-id-keys requires that parser has no peeked tokens"
@@ -876,7 +869,7 @@ async fn parse_lookup_range(parser: &mut Parser<'_, '_>) -> ParseResult<RecordId
 	match peek.token {
 		T![..] => {
 			let _ = parser.next();
-			let bound = parse_record_id_headless_range(parser).await?;
+			let bound = parse_record_id_headless_range(parser)?;
 			let range_span = parser.span_since(peek.span);
 
 			Ok(ast::RecordIdKeyRange {
@@ -893,9 +886,9 @@ async fn parse_lookup_range(parser: &mut Parser<'_, '_>) -> ParseResult<RecordId
 				T![RAND] => parse_keyword_key(parser, peek, ast::RecordIdKeyGenerate::Rand)?,
 				T![UUID] => parse_keyword_key(parser, peek, ast::RecordIdKeyGenerate::Uuid)?,
 				T![ULID] => parse_keyword_key(parser, peek, ast::RecordIdKeyGenerate::Ulid)?,
-				_ => parse_peeked_record_id_key(parser).await?,
+				_ => parse_peeked_record_id_key(parser)?,
 			};
-			match try_parse_record_id_range(parser, key).await? {
+			match try_parse_record_id_range(parser, key)? {
 				TryRange::None(_) => Err(parser.unexpected("a record id key range")),
 				TryRange::Some {
 					start,
@@ -914,7 +907,7 @@ async fn parse_lookup_range(parser: &mut Parser<'_, '_>) -> ParseResult<RecordId
 }
 
 impl Parse for ast::LookupSubject {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start_span = parser.peek_span();
 		let table = parser.parse_sync()?;
 		if let Some(peek) = parser.peek()?
@@ -922,7 +915,7 @@ impl Parse for ast::LookupSubject {
 		{
 			let _ = parser.next();
 
-			let range = parse_lookup_range(parser).await?;
+			let range = parse_lookup_range(parser)?;
 			let range = parser.push(range);
 
 			let field = if let Some(peek) = parser.peek()?
@@ -962,7 +955,7 @@ impl Parse for ast::LookupSubject {
 	}
 }
 
-async fn parse_lookup_from(
+fn parse_lookup_from(
 	parser: &mut Parser<'_, '_>,
 ) -> ParseResult<Option<NodeListId<LookupSubject>>> {
 	let expect = "`?` or an identifier";
@@ -972,32 +965,31 @@ async fn parse_lookup_from(
 			let _ = parser.next();
 			Ok(None)
 		}
-		x if x.is_identifier() => {
-			Ok(Some(parse_seperated_list(parser, T![,], Parser::parse).await?.1))
-		}
+		x if x.is_identifier() => Ok(Some(parse_seperated_list(parser, T![,], Parser::parse)?.1)),
 		_ => Err(parser.unexpected(expect)),
 	}
 }
 
-async fn parse_lookup_limit_start(
-	parser: &mut Parser<'_, '_>,
-) -> ParseResult<(Option<NodeId<Expr>>, Option<NodeId<Expr>>)> {
+/// The optional `START` and `LIMIT` expressions of a lookup.
+type LookupStartLimit = (Option<NodeId<Expr>>, Option<NodeId<Expr>>);
+
+fn parse_lookup_limit_start(parser: &mut Parser<'_, '_>) -> ParseResult<LookupStartLimit> {
 	if parser.eat(T![START])?.is_some() {
-		let start = parser.parse_enter().await?;
+		let start = parser.parse_enter()?;
 		let limit = if parser.eat(T![LIMIT])?.is_some() {
-			Some(parser.parse_enter().await?)
+			Some(parser.parse_enter()?)
 		} else {
 			None
 		};
 		Ok((limit, Some(start)))
 	} else {
 		let limit = if parser.eat(T![LIMIT])?.is_some() {
-			Some(parser.parse_enter().await?)
+			Some(parser.parse_enter()?)
 		} else {
 			None
 		};
 		let start = if parser.eat(T![START])?.is_some() {
-			Some(parser.parse_enter().await?)
+			Some(parser.parse_enter()?)
 		} else {
 			None
 		};
@@ -1006,7 +998,7 @@ async fn parse_lookup_limit_start(
 }
 
 impl Parse for ast::Lookup {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let expect = "`?`, `(` or an identifier";
 		let peek = parser.peek_expect(expect)?;
 		match peek.token {
@@ -1017,15 +1009,15 @@ impl Parse for ast::Lookup {
 			BaseTokenKind::OpenParen => {
 				let _ = parser.next();
 				if parser.eat(T![SELECT])?.is_some() {
-					let fields = parser.parse().await?;
+					let fields = parser.parse()?;
 
 					let _ = parser.expect(T![FROM])?;
 
 					let only = parser.eat(T![ONLY])?.is_some();
 
-					let from = parse_lookup_from(parser).await?;
+					let from = parse_lookup_from(parser)?;
 					let condition = if parser.eat(T![WHERE])?.is_some() {
-						Some(parser.parse_enter().await?)
+						Some(parser.parse_enter()?)
 					} else {
 						None
 					};
@@ -1033,10 +1025,8 @@ impl Parse for ast::Lookup {
 					let split_span = parser.peek_span();
 					let split = if parser.eat(T![SPLIT])?.is_some() {
 						let _ = parser.eat(T![ON])?;
-						let (_, splits) = parse_seperated_list(parser, T![,], async |parser| {
-							parser.parse_enter().await
-						})
-						.await?;
+						let (_, splits) =
+							parse_seperated_list(parser, T![,], |parser| parser.parse_enter())?;
 						Some(splits)
 					} else {
 						None
@@ -1060,10 +1050,8 @@ impl Parse for ast::Lookup {
 							}
 
 							let _ = parser.expect(T![BY])?;
-							let (_, groups) = parse_seperated_list(parser, T![,], async |parser| {
-								parser.parse_enter().await
-							})
-							.await?;
+							let (_, groups) =
+								parse_seperated_list(parser, T![,], |parser| parser.parse_enter())?;
 							Some(ast::Group::Fields(groups))
 						}
 					} else {
@@ -1073,15 +1061,15 @@ impl Parse for ast::Lookup {
 					let order = if let Some(x) = parser.peek()?
 						&& let T![ORDER] = x.token
 					{
-						Some(parser.parse().await?)
+						Some(parser.parse()?)
 					} else {
 						None
 					};
 
-					let (limit, start) = parse_lookup_limit_start(parser).await?;
+					let (limit, start) = parse_lookup_limit_start(parser)?;
 
 					let alias = if parser.eat(T![AS])?.is_some() {
-						Some(parser.parse().await?)
+						Some(parser.parse()?)
 					} else {
 						None
 					};
@@ -1104,17 +1092,17 @@ impl Parse for ast::Lookup {
 						alias,
 					}))
 				} else {
-					let from = parse_lookup_from(parser).await?;
+					let from = parse_lookup_from(parser)?;
 					let condition = if parser.eat(T![WHERE])?.is_some() {
-						Some(parser.parse_enter().await?)
+						Some(parser.parse_enter()?)
 					} else {
 						None
 					};
 
-					let (limit, start) = parse_lookup_limit_start(parser).await?;
+					let (limit, start) = parse_lookup_limit_start(parser)?;
 
 					let alias = if parser.eat(T![AS])?.is_some() {
-						Some(parser.parse().await?)
+						Some(parser.parse()?)
 					} else {
 						None
 					};
@@ -1148,7 +1136,7 @@ impl Parse for ast::Lookup {
 						"cannot peek past a `:` signifying a record id"
 					);
 
-					let range = parse_lookup_range(parser).await?;
+					let range = parse_lookup_range(parser)?;
 					let range = parser.push(range);
 					let span = parser.span_since(peek.span);
 					let subject = parser.push(ast::LookupSubject::Range(ast::LookupSubjectRange {
@@ -1178,7 +1166,7 @@ impl Parse for ast::Lookup {
 ///
 /// Returns None if parsing the next operator would violate precedence, or if the next token does
 /// not start an operator.
-async fn try_parse_infix_postfix_op(
+fn try_parse_infix_postfix_op(
 	parser: &mut Parser<'_, '_>,
 	min_bp: u8,
 	lhs: Expr,
@@ -1190,77 +1178,58 @@ async fn try_parse_infix_postfix_op(
 
 	match peek.token {
 		T![&&] | T![AND] => {
-			parse_basic_infix_op(parser, min_bp, AND_BP, BinaryOperator::And, peek.span, lhs).await
+			parse_basic_infix_op(parser, min_bp, AND_BP, BinaryOperator::And, peek.span, lhs)
 		}
 		T![||] | T![OR] => {
-			parse_basic_infix_op(parser, min_bp, OR_BP, BinaryOperator::Or, peek.span, lhs).await
+			parse_basic_infix_op(parser, min_bp, OR_BP, BinaryOperator::Or, peek.span, lhs)
 		}
-		T![+] => {
-			parse_basic_infix_op(parser, min_bp, SUM_BP, BinaryOperator::Add, peek.span, lhs).await
-		}
+		T![+] => parse_basic_infix_op(parser, min_bp, SUM_BP, BinaryOperator::Add, peek.span, lhs),
 		T![-] => {
 			parse_basic_infix_op(parser, min_bp, SUM_BP, BinaryOperator::Subtract, peek.span, lhs)
-				.await
 		}
-		BaseTokenKind::Times | T![*] => {
-			parse_basic_infix_op(
-				parser,
-				min_bp,
-				PRODUCT_BP,
-				BinaryOperator::Multiply,
-				peek.span,
-				lhs,
-			)
-			.await
-		}
+		BaseTokenKind::Times | T![*] => parse_basic_infix_op(
+			parser,
+			min_bp,
+			PRODUCT_BP,
+			BinaryOperator::Multiply,
+			peek.span,
+			lhs,
+		),
 		BaseTokenKind::Divide | T![/] => {
 			parse_basic_infix_op(parser, min_bp, PRODUCT_BP, BinaryOperator::Divide, peek.span, lhs)
-				.await
 		}
-		T![%] => {
-			parse_basic_infix_op(
-				parser,
-				min_bp,
-				PRODUCT_BP,
-				BinaryOperator::Remainder,
-				peek.span,
-				lhs,
-			)
-			.await
-		}
+		T![%] => parse_basic_infix_op(
+			parser,
+			min_bp,
+			PRODUCT_BP,
+			BinaryOperator::Remainder,
+			peek.span,
+			lhs,
+		),
 		T![**] => {
 			parse_basic_infix_op(parser, min_bp, POWER_BP, BinaryOperator::Power, peek.span, lhs)
-				.await
 		}
-		T![=] => parse_equality_op(parser, min_bp, BinaryOperator::Equal, peek.span, lhs).await,
-		T![==] => {
-			parse_equality_op(parser, min_bp, BinaryOperator::ExactEqual, peek.span, lhs).await
-		}
-		T![!=] => parse_equality_op(parser, min_bp, BinaryOperator::NotEqual, peek.span, lhs).await,
-		T![*=] => parse_equality_op(parser, min_bp, BinaryOperator::AllEqual, peek.span, lhs).await,
-		T![?=] => parse_equality_op(parser, min_bp, BinaryOperator::AnyEqual, peek.span, lhs).await,
-		T![?:] => {
-			parse_basic_infix_op(
-				parser,
-				min_bp,
-				NULLISH_BP,
-				BinaryOperator::TenaryCondition,
-				peek.span,
-				lhs,
-			)
-			.await
-		}
-		T![??] => {
-			parse_basic_infix_op(
-				parser,
-				min_bp,
-				NULLISH_BP,
-				BinaryOperator::NullCoalescing,
-				peek.span,
-				lhs,
-			)
-			.await
-		}
+		T![=] => parse_equality_op(parser, min_bp, BinaryOperator::Equal, peek.span, lhs),
+		T![==] => parse_equality_op(parser, min_bp, BinaryOperator::ExactEqual, peek.span, lhs),
+		T![!=] => parse_equality_op(parser, min_bp, BinaryOperator::NotEqual, peek.span, lhs),
+		T![*=] => parse_equality_op(parser, min_bp, BinaryOperator::AllEqual, peek.span, lhs),
+		T![?=] => parse_equality_op(parser, min_bp, BinaryOperator::AnyEqual, peek.span, lhs),
+		T![?:] => parse_basic_infix_op(
+			parser,
+			min_bp,
+			NULLISH_BP,
+			BinaryOperator::TenaryCondition,
+			peek.span,
+			lhs,
+		),
+		T![??] => parse_basic_infix_op(
+			parser,
+			min_bp,
+			NULLISH_BP,
+			BinaryOperator::NullCoalescing,
+			peek.span,
+			lhs,
+		),
 		T![<] => {
 			if let Some(peek1) = parser.peek_joined1()?
 				&& let T![-] | T![->] = peek1.token
@@ -1280,7 +1249,7 @@ async fn try_parse_infix_postfix_op(
 
 				let lhs = parser.push(lhs);
 
-				let lookup = parser.parse().await?;
+				let lookup = parser.parse()?;
 				let op_span = parser.span_since(peek.span);
 
 				let op = IdiomOperator::Graph {
@@ -1299,7 +1268,7 @@ async fn try_parse_infix_postfix_op(
 				return Ok(Some(expr));
 			}
 
-			parse_relation_op(parser, min_bp, BinaryOperator::LessThan, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::LessThan, peek.span, lhs)
 		}
 		T![->] => {
 			if IDIOM_BP < min_bp {
@@ -1308,7 +1277,7 @@ async fn try_parse_infix_postfix_op(
 			let _ = parser.next();
 			let lhs = parser.push(lhs);
 
-			let lookup = parser.parse().await?;
+			let lookup = parser.parse()?;
 			let op_span = parser.span_since(peek.span);
 
 			let op = IdiomOperator::Graph {
@@ -1326,9 +1295,7 @@ async fn try_parse_infix_postfix_op(
 			let expr = Expr::Idiom(parser.push(expr));
 			Ok(Some(expr))
 		}
-		T![<=] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::LessThanEqual, peek.span, lhs).await
-		}
+		T![<=] => parse_relation_op(parser, min_bp, BinaryOperator::LessThanEqual, peek.span, lhs),
 		T![>] => {
 			// Handle `>` `>..` and `>..=`
 			if let Some(peek1) = parser.peek_joined1()?
@@ -1353,8 +1320,7 @@ async fn try_parse_infix_postfix_op(
 						lhs,
 						lhs_span,
 						span,
-					)
-					.await;
+					);
 				}
 
 				if RANGE_BP < min_bp {
@@ -1373,8 +1339,7 @@ async fn try_parse_infix_postfix_op(
 						lhs,
 						lhs_span,
 						span,
-					)
-					.await;
+					);
 				} else {
 					let lhs = parser.push(lhs);
 					let expr = parser.push(PostfixExpr {
@@ -1389,7 +1354,7 @@ async fn try_parse_infix_postfix_op(
 				}
 			}
 
-			parse_relation_op(parser, min_bp, BinaryOperator::GreaterThan, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::GreaterThan, peek.span, lhs)
 		}
 		T![<~] => {
 			if IDIOM_BP < min_bp {
@@ -1398,7 +1363,7 @@ async fn try_parse_infix_postfix_op(
 			let _ = parser.next();
 			let lhs = parser.push(lhs);
 
-			let lookup = parser.parse().await?;
+			let lookup = parser.parse()?;
 			let op_span = parser.span_since(peek.span);
 
 			let op = IdiomOperator::Reference(lookup);
@@ -1523,11 +1488,9 @@ async fn try_parse_infix_postfix_op(
 				lhs,
 				0,
 			)
-			.await
 		}
 		T![>=] => {
 			parse_relation_op(parser, min_bp, BinaryOperator::GreaterThanEqual, peek.span, lhs)
-				.await
 		}
 		T![@] => {
 			if EQUALITY_BP < min_bp {
@@ -1614,43 +1577,40 @@ async fn try_parse_infix_postfix_op(
 				lhs,
 				0,
 			)
-			.await
 		}
 		BaseTokenKind::Contains | T![CONTAINS] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::Contain, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::Contain, peek.span, lhs)
 		}
 		BaseTokenKind::NotContains | T![CONTAINSNOT] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::NotContain, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::NotContain, peek.span, lhs)
 		}
 		BaseTokenKind::Inside | T![INSIDE] | T![IN] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::Inside, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::Inside, peek.span, lhs)
 		}
 		BaseTokenKind::NotInside | T![NOTINSIDE] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::NotInside, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::NotInside, peek.span, lhs)
 		}
 		BaseTokenKind::ContainsAll | T![CONTAINSALL] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::ContainAll, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::ContainAll, peek.span, lhs)
 		}
 		BaseTokenKind::ContainsAny | T![CONTAINSANY] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::ContainAny, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::ContainAny, peek.span, lhs)
 		}
 		BaseTokenKind::ContainsNone | T![CONTAINSNONE] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::ContainNone, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::ContainNone, peek.span, lhs)
 		}
 		BaseTokenKind::AllInside | T![ALLINSIDE] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::AllInside, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::AllInside, peek.span, lhs)
 		}
 		BaseTokenKind::AnyInside | T![ANYINSIDE] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::AnyInside, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::AnyInside, peek.span, lhs)
 		}
 		BaseTokenKind::NoneInside | T![NONEINSIDE] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::NoneInside, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::NoneInside, peek.span, lhs)
 		}
-		T![OUTSIDE] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::Outside, peek.span, lhs).await
-		}
+		T![OUTSIDE] => parse_relation_op(parser, min_bp, BinaryOperator::Outside, peek.span, lhs),
 		T![INTERSECTS] => {
-			parse_relation_op(parser, min_bp, BinaryOperator::Intersects, peek.span, lhs).await
+			parse_relation_op(parser, min_bp, BinaryOperator::Intersects, peek.span, lhs)
 		}
 		T![NOT] => {
 			if let Some(peek1) = parser.peek1()?
@@ -1667,7 +1627,6 @@ async fn try_parse_infix_postfix_op(
 					lhs,
 					2,
 				)
-				.await
 			} else {
 				Err(parser.with_error(|parser| {
 					Level::Error
@@ -1695,9 +1654,8 @@ async fn try_parse_infix_postfix_op(
 					lhs,
 					2,
 				)
-				.await
 			} else {
-				parse_equality_op(parser, min_bp, BinaryOperator::Equal, peek.span, lhs).await
+				parse_equality_op(parser, min_bp, BinaryOperator::Equal, peek.span, lhs)
 			}
 		}
 		T![...] => {
@@ -1737,8 +1695,7 @@ async fn try_parse_infix_postfix_op(
 					lhs,
 					lhs_span,
 					op_span,
-				)
-				.await;
+				);
 			}
 
 			let _ = parser.next();
@@ -1750,8 +1707,7 @@ async fn try_parse_infix_postfix_op(
 					lhs,
 					lhs_span,
 					peek.span,
-				)
-				.await;
+				);
 			}
 
 			let lhs = parser.push(lhs);
@@ -1771,9 +1727,9 @@ async fn try_parse_infix_postfix_op(
 				return Ok(None);
 			}
 
-			parse_dot_postfix(parser, lhs, lhs_span).await.map(Some)
+			parse_dot_postfix(parser, lhs, lhs_span).map(Some)
 		}
-		BaseTokenKind::OpenBracket => parse_bracket_postfix(parser, min_bp, lhs, lhs_span).await,
+		BaseTokenKind::OpenBracket => parse_bracket_postfix(parser, min_bp, lhs, lhs_span),
 		BaseTokenKind::OpenParen => {
 			if IDIOM_BP < min_bp {
 				return Ok(None);
@@ -1790,7 +1746,7 @@ async fn try_parse_infix_postfix_op(
 					break;
 				}
 
-				let arg = parser.parse_enter().await?;
+				let arg = parser.parse_enter()?;
 				parser.push_list(arg, &mut head, &mut tail);
 
 				if parser.eat(T![,])?.is_none() {
@@ -1819,11 +1775,11 @@ async fn try_parse_infix_postfix_op(
 
 /// Main fuction dispatching the parsing of operators, uses pratt parsing based on binding power to
 /// ensure operators are parsed immediatly with correct precedence.
-async fn parse_pratt(parser: &mut Parser<'_, '_>, bp: u8) -> ParseResult<Expr> {
+fn parse_pratt(parser: &mut Parser<'_, '_>, bp: u8) -> ParseResult<Expr> {
 	let span = parser.peek_span();
-	let mut lhs = parse_prefix_or_prime(parser).await?;
+	let mut lhs = parse_prefix_or_prime(parser)?;
 
-	while let Some(new_lhs) = try_parse_infix_postfix_op(parser, bp, lhs, span).await? {
+	while let Some(new_lhs) = try_parse_infix_postfix_op(parser, bp, lhs, span)? {
 		lhs = new_lhs;
 	}
 

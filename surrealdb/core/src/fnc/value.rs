@@ -1,5 +1,4 @@
 use anyhow::{Result, bail};
-use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::exec::Error as ExecError;
@@ -8,22 +7,22 @@ use crate::fnc::args::Optional;
 use crate::val::{Closure, ClosureEvaluator, Value};
 
 pub async fn chain(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(value, worker): (Value, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(ev) = ev {
-		ev.invoke(stk, &worker, vec![value]).await
+		ev.invoke(&worker, vec![value]).await
 	} else {
 		Ok(Value::None)
 	}
 }
 
 pub async fn expect(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(value, worker, Optional(message)): (Value, Box<Closure>, Optional<Value>),
 ) -> Result<Value> {
 	if let Some(ev) = ev {
-		let got = ev.invoke(stk, &worker, vec![value.clone()]).await?;
+		let got = ev.invoke(&worker, vec![value.clone()]).await?;
 		match got {
 			Value::Bool(true) => Ok(value),
 			Value::Bool(false) => {

@@ -2,7 +2,6 @@ use std::ops::{Bound, ControlFlow};
 
 use anyhow::Result;
 use common::range::TypedRange;
-use reblessive::tree::Stk;
 use surrealdb_expr::expr::Error;
 use surrealdb_expr::val::{Closure, ClosureEvaluator, Set, Value, check_value_depth};
 
@@ -139,14 +138,14 @@ pub fn contains((set, value): (Set, Value)) -> Result<Value> {
 
 /// Check if all elements in the set match a condition
 pub async fn all(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(set, Optional(check)): (Set, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
 			if let Some(ev) = ev {
 				for arg in set {
-					if ev.invoke(stk, &closure, vec![arg]).await?.is_truthy() {
+					if ev.invoke(&closure, vec![arg]).await?.is_truthy() {
 						continue;
 					} else {
 						return Ok(Value::Bool(false));
@@ -164,14 +163,14 @@ pub async fn all(
 
 /// Check if any element in the set matches a condition
 pub async fn any(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(set, Optional(check)): (Set, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
 			if let Some(ev) = ev {
 				for arg in set {
-					if ev.invoke(stk, &closure, vec![arg]).await?.is_truthy() {
+					if ev.invoke(&closure, vec![arg]).await?.is_truthy() {
 						return Ok(Value::Bool(true));
 					} else {
 						continue;
@@ -203,7 +202,7 @@ pub async fn at_walk((set, i): (Set, i64)) -> Result<Value> {
 
 /// Filter elements in the set that match a condition
 pub async fn filter(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(set, check): (Set, Value),
 ) -> Result<Value> {
 	Ok(match check {
@@ -211,7 +210,7 @@ pub async fn filter(
 			if let Some(ev) = ev {
 				let mut res = Set::new();
 				for arg in set {
-					if ev.invoke(stk, &closure, vec![arg.clone()]).await?.is_truthy() {
+					if ev.invoke(&closure, vec![arg.clone()]).await?.is_truthy() {
 						res.insert(arg);
 					}
 				}
@@ -235,15 +234,12 @@ pub async fn filter(
 }
 
 /// Find the first element in the set matching a condition (in BTree order)
-pub async fn find(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
-	(set, value): (Set, Value),
-) -> Result<Value> {
+pub async fn find(ev: Option<&dyn ClosureEvaluator>, (set, value): (Set, Value)) -> Result<Value> {
 	Ok(match value {
 		Value::Closure(closure) => {
 			if let Some(ev) = ev {
 				for arg in set {
-					if ev.invoke(stk, &closure, vec![arg.clone()]).await?.is_truthy() {
+					if ev.invoke(&closure, vec![arg.clone()]).await?.is_truthy() {
 						return Ok(arg);
 					}
 				}
@@ -285,13 +281,13 @@ pub async fn flatten_walk((set,): (Set,)) -> Result<Value> {
 
 /// Fold over the set with an accumulator
 pub async fn fold(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(set, init, mapper): (Set, Value, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(ev) = ev {
 		let mut accum = init;
 		for val in set {
-			accum = ev.invoke(stk, &mapper, vec![accum, val]).await?;
+			accum = ev.invoke(&mapper, vec![accum, val]).await?;
 			// SECURITY: bound the accumulator's nesting depth. Like `array::fold`,
 			// this threads a caller-controlled accumulator through a flat loop, so
 			// a wrapping closure grows its depth without bound and overflows the
@@ -326,13 +322,13 @@ pub fn last((set,): (Set,)) -> Result<Value> {
 
 /// Map over the set elements, returning a new set
 pub async fn map(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(set, mapper): (Set, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(ev) = ev {
 		let mut res = Set::new();
 		for arg in set {
-			res.insert(ev.invoke(stk, &mapper, vec![arg]).await?);
+			res.insert(ev.invoke(&mapper, vec![arg]).await?);
 		}
 		Ok(res.into())
 	} else {
@@ -362,7 +358,7 @@ pub async fn min_walk((set,): (Set,)) -> Result<Value> {
 
 /// Reduce the set using a closure (uses first element as initial value)
 pub async fn reduce(
-	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
+	ev: Option<&dyn ClosureEvaluator>,
 	(set, mapper): (Set, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(ev) = ev {
@@ -385,7 +381,7 @@ pub async fn reduce(
 					return Ok(Value::None);
 				};
 				for val in iter {
-					accum = ev.invoke(stk, &mapper, vec![accum, val]).await?;
+					accum = ev.invoke(&mapper, vec![accum, val]).await?;
 					// SECURITY: bound the accumulator's nesting depth, as in
 					// `crate::array::fold`.
 					check_value_depth(&accum)?;

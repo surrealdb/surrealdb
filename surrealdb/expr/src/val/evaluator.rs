@@ -13,42 +13,28 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use reblessive::tree::Stk;
-
 use crate::val::{Closure, Value};
 
 /// A boxed future returned by [`ClosureEvaluator::invoke`].
 ///
 /// Boxed at the trait boundary because the call is recursive: invoking a
-/// closure evaluates its body, which may invoke another closure. It is
-/// deliberately not `Send` — a closure body runs inside the heap-allocated
-/// `TreeStack` that erases auto-traits, and the engine's builtin closures
-/// return a non-`Send` future of their own.
-pub type BoxInvokeFut<'a> = Pin<Box<dyn Future<Output = anyhow::Result<Value>> + 'a>>;
+/// closure evaluates its body, which may invoke another closure. `Send`
+/// because the engine's executor awaits it inside its own `Send` futures.
+pub type BoxInvokeFut<'a> = Pin<Box<dyn Future<Output = anyhow::Result<Value>> + Send + 'a>>;
 
 /// Invokes closures on behalf of a caller that cannot reach the execution
 /// environment.
 ///
 /// Implemented by the execution layer, which captures the context, options
-/// and cursor document the closure body needs. `stk` stays an explicit
-/// parameter rather than being captured: the caller is already inside a
-/// `TreeStack` frame and must hand down the same one, or a closure that
-/// recurses would build a second stack instead of growing the first.
+/// and cursor document the closure body needs.
 ///
 /// `Sync` is required so that `&dyn ClosureEvaluator` is itself `Send`: the
 /// engine's executor holds one across an await inside a `Send` boxed future.
-/// The bound constrains the evaluator, not the future it hands back —
-/// [`BoxInvokeFut`] stays non-`Send` for the reasons given above.
 pub trait ClosureEvaluator: Sync {
 	/// Calls `closure` with `args`, returning what its body evaluates to.
 	///
 	/// A `return` inside the body is caught and becomes the value, matching
 	/// what a caller of an anonymous function expects; `break` and `continue`
 	/// escaping the body are errors, as is any failure evaluating it.
-	fn invoke<'a>(
-		&'a self,
-		stk: &'a mut Stk,
-		closure: &'a Closure,
-		args: Vec<Value>,
-	) -> BoxInvokeFut<'a>;
+	fn invoke<'a>(&'a self, closure: &'a Closure, args: Vec<Value>) -> BoxInvokeFut<'a>;
 }

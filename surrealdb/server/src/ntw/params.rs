@@ -27,7 +27,7 @@ impl From<Params> for BTreeMap<String, Value> {
 						legacy_strands: true,
 						..Default::default()
 					},
-					async |p, stk| p.parse_json(stk).await,
+					|p| p.parse_json(),
 				)
 				.unwrap_or_else(|_| Value::String(v));
 				(k, value)

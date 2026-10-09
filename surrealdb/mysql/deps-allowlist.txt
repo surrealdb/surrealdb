@@ -1,6 +1,5 @@
 proc-macro2
 quote
-reblessive
 surrealdb-mysql
 surrealdb-sqlfront-derive
 syn

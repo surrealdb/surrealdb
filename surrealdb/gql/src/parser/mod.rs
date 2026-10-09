@@ -3,9 +3,10 @@
 //! A recursive descent parser over [`crate::gql::lexer::Lexer`] tokens,
 //! mirroring the structure of the SurrealQL parser in [`crate::syn::parser`]:
 //! most functions peek a token and decide which production to parse based on
-//! it, recursive productions run on a [`reblessive`] stack so that deeply
-//! nested input cannot overflow the machine stack, and nesting depth is
-//! additionally bounded by [`GqlParserSettings::object_recursion_limit`].
+//! it. Recursive productions recurse on the call stack, so every nesting
+//! construct is charged against [`GqlParserSettings::object_recursion_limit`]
+//! or [`GqlParserSettings::expr_recursion_limit`], and the one uncharged
+//! chain, label negation, is parsed with a loop.
 //!
 //! The parser implements the grammar subset distilled in
 //! `doc/gql/REFERENCE.md` exactly, and recognises the surrounding grammar
@@ -16,8 +17,6 @@
 //! latter two used to disambiguate `p = (…)` path variable declarations,
 //! match modes, `IS [NOT] NULL` postfixes and function calls. The grammar
 //! subset is `LL(3)`; no backtracking is used.
-
-use reblessive::Stk;
 
 use self::token_buffer::TokenBuffer;
 use crate::gql::GqlParserSettings;
@@ -176,8 +175,8 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Parse a full query: the primary entry point of the parser.
-	pub async fn parse_query(&mut self, stk: &mut Stk) -> ParseResult<GqlQuery> {
-		let program = self.parse_statement(stk).await?;
+	pub fn parse_query(&mut self) -> ParseResult<GqlQuery> {
+		let program = self.parse_statement()?;
 		let token = self.peek();
 		if !token.is_eof() {
 			unexpected!(self, token, "the query to end");

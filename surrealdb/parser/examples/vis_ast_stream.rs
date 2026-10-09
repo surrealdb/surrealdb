@@ -6,7 +6,6 @@ use std::io::stdout;
 use std::{fmt, iter};
 
 use ast::{Ast, Query};
-use reblessive::Stack;
 use surrealdb_parser::Config;
 
 fn read_input() -> String {
@@ -20,7 +19,6 @@ fn read_input() -> String {
 fn main() {
 	let input = read_input();
 
-	let mut stack = Stack::new();
 	let mut ast = Ast::empty();
 
 	let mut offset = 0;
@@ -39,17 +37,11 @@ fn main() {
 
 	for idx in input.char_indices().map(|x| x.0).skip(1).chain(iter::once(input.len())) {
 		let found = if idx == input.len() {
-			surrealdb_parser::Parser::enter_parse_reuse::<Query>(
-				&input[offset..],
-				&mut stack,
-				&mut ast,
-				config,
-			)
-			.map(|x| Some((x, (idx - offset) as u32)))
+			surrealdb_parser::Parser::enter_parse_reuse::<Query>(&input[offset..], &mut ast, config)
+				.map(|x| Some((x, (idx - offset) as u32)))
 		} else {
 			surrealdb_parser::Parser::enter_partial_parse::<Query>(
 				&input[offset..idx],
-				&mut stack,
 				&mut ast,
 				config,
 			)

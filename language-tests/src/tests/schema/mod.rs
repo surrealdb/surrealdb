@@ -295,8 +295,8 @@ impl<'de> Deserialize<'de> for TestDuration {
 					json_string_escapes: false,
 				};
 
-				let v = syn::parse_with_settings(x.as_bytes(), settings, async |parser, stk| {
-					parser.parse_value(stk).await
+				let v = syn::parse_with_settings(x.as_bytes(), settings, |parser| {
+					parser.parse_value()
 				})
 				.map_err(<D::Error as serde::de::Error>::custom)?;
 				let Value::Duration(x) = v else {
@@ -682,8 +682,8 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			json_string_escapes: false,
 		};
 
-		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
-			parser.parse_value(stk).await
+		let v = syn::parse_with_settings(source.as_bytes(), settings, |parser| {
+			parser.parse_value()
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
 
@@ -746,8 +746,8 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			json_string_escapes: false,
 		};
 
-		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
-			parser.parse_value(stk).await
+		let v = syn::parse_with_settings(source.as_bytes(), settings, |parser| {
+			parser.parse_value()
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
 		if let Value::RecordId(x) = v {
@@ -790,8 +790,8 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			json_string_escapes: false,
 		};
 
-		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
-			parser.parse_value(stk).await
+		let v = syn::parse_with_settings(source.as_bytes(), settings, |parser| {
+			parser.parse_value()
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
 

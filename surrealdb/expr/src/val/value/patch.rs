@@ -164,7 +164,7 @@ impl Value {
 			.map_err(anyhow::Error::new)?;
 
 		// SECURITY: applying an operation walks `Value::put` / `cut` / `pick` once
-		// per path segment, and those are natively recursive with no `Stk`. A
+		// per path segment, and those recurse on the native stack. A
 		// JSON-Pointer path is split from an arbitrary string with no length
 		// bound, so a path of a few thousand segments overflows the host stack and
 		// aborts the process (`panic = "abort"`) while the value is being built -

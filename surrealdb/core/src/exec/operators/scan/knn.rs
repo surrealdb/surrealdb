@@ -12,9 +12,6 @@ use std::sync::Arc;
 
 #[cfg(test)]
 use common::future::stream::{self, Yielder};
-use reblessive::TreeStack;
-#[cfg(test)]
-use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
 #[cfg(test)]
 use surrealdb_types::ToSql;
@@ -289,27 +286,16 @@ pub(crate) async fn ann_search(
 
 			// The search brings the graph level with this transaction's snapshot
 			// itself, under the guard it walks the graph with.
-			let mut stack = TreeStack::new();
-			stack
-				.enter(|stk| {
-					let hnsw_index = &hnsw_index;
-					async move {
-						hnsw_index
-							.knn_search(
-								frozen_ctx,
-								stk,
-								vector,
-								k as usize,
-								ef as usize,
-								cond_filter,
-								allow,
-							)
-							.await
-					}
-				})
-				.finish()
-				.await
-				.context("HNSW KNN search failed")?
+			{
+				let hnsw_index = &hnsw_index;
+				async move {
+					hnsw_index
+						.knn_search(frozen_ctx, vector, k as usize, ef as usize, cond_filter, allow)
+						.await
+				}
+			}
+			.await
+			.context("HNSW KNN search failed")?
 		}
 		#[cfg(diskann)]
 		Index::DiskAnn(diskann_params) => {
@@ -321,27 +307,16 @@ pub(crate) async fn ann_search(
 
 			diskann_index.check_state().await.context("Failed to check DiskANN index state")?;
 
-			let mut stack = TreeStack::new();
-			stack
-				.enter(|stk| {
-					let diskann_index = &diskann_index;
-					async move {
-						diskann_index
-							.knn_search(
-								frozen_ctx,
-								stk,
-								vector,
-								k as usize,
-								ef as usize,
-								cond_filter,
-								allow,
-							)
-							.await
-					}
-				})
-				.finish()
-				.await
-				.context("DiskANN KNN search failed")?
+			{
+				let diskann_index = &diskann_index;
+				async move {
+					diskann_index
+						.knn_search(frozen_ctx, vector, k as usize, ef as usize, cond_filter, allow)
+						.await
+				}
+			}
+			.await
+			.context("DiskANN KNN search failed")?
 		}
 		#[cfg(not(diskann))]
 		Index::DiskAnn(_) => {
@@ -1102,12 +1077,7 @@ impl PhysicalCondition {
 
 #[cfg(test)]
 impl CandidateCondition for PhysicalCondition {
-	fn matches<'a>(
-		&'a self,
-		_stk: &'a mut Stk,
-		_rid: &'a Arc<RecordId>,
-		record: &'a Arc<Record>,
-	) -> BoxGateFut<'a> {
+	fn matches<'a>(&'a self, _rid: &'a Arc<RecordId>, record: &'a Arc<Record>) -> BoxGateFut<'a> {
 		Box::pin(async move {
 			let value = record.data.clone();
 			let eval_ctx = EvalContext::from_exec_ctx(&self.exec_ctx).with_value_and_doc(&value);

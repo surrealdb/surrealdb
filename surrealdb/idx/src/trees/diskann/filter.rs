@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use ahash::{HashMap, HashSet};
 use anyhow::Result;
-use reblessive::tree::Stk;
 use surrealdb_catalog::providers::CachePolicy;
 
 use crate::IndexKeyBase;
@@ -99,7 +98,6 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 	pub(super) async fn check_vector_id_truthy(
 		&mut self,
 		ctx: &DiskAnnContext<'_>,
-		stk: &mut Stk,
 		id: VectorId,
 	) -> Result<bool> {
 		if let Some(cached) = self.cache.get(&id) {
@@ -137,7 +135,6 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 		}
 		let record = Self::is_record_truthy(
 			ctx,
-			stk,
 			self.cond.as_deref(),
 			Arc::clone(&rid),
 			&self.permission,
@@ -264,7 +261,6 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 	/// read here.
 	async fn is_record_truthy(
 		ctx: &DiskAnnContext<'_>,
-		stk: &mut Stk,
 		cond: Option<&dyn CandidateCondition>,
 		rid: Arc<RecordId>,
 		permission: &CachedTableSelect<'_>,
@@ -286,11 +282,11 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 		// topK; without this guard a caller can probe restricted fields by
 		// crafting a WHERE on them and observing the resulting count / order /
 		// timing.
-		if !check_cached_table_select_for_doc(stk, permission, &rid, &val).await? {
+		if !check_cached_table_select_for_doc(permission, &rid, &val).await? {
 			return Ok(None);
 		}
 		let truthy = match cond {
-			Some(cond) => cond.matches(stk, &rid, &val).await?,
+			Some(cond) => cond.matches(&rid, &val).await?,
 			None => true,
 		};
 		if truthy {

@@ -16,7 +16,6 @@ fuzzing = []
 conformance-tests = []
 
 [dependencies]
-reblessive = { workspace = true, features = ["tree"] }
 surrealdb-sqlfront-derive = { workspace = true }
 thiserror = { workspace = true }
 
@@ -25,7 +24,6 @@ surrealdb-sqlfront-spec = { workspace = true }
 
 [package.metadata.cargo-machete]
 ignored = [
-    "reblessive",
     "surrealdb-sqlfront-derive",
     "thiserror",
 ]

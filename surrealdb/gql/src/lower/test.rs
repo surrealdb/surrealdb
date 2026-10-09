@@ -1612,37 +1612,53 @@ fn prepared_query_debug_renders_via_match_plan() {
 
 #[test]
 fn deep_linear_chains_lower_without_overflowing() {
-	// The lowering must process linear chains (binary spines, `NOT` prefixes,
-	// property postfixes) without machine-stack recursion (the reblessive
-	// guarantee). Every such chain is charged against the parse-time
-	// expression budget, so the deep cases raise the limit explicitly. The
-	// NOT chain collapses under NNF to a bounded predicate and the property
-	// chain lowers to an `Access` nest that renders iteratively, so both
-	// render fine; a deep binary spine lowers to an equally deep tree whose
-	// recursive rendering is a depth shared with syn-parsed SurrealQL, so it
-	// is kept modest and only the lowering (not the rendering) is asserted.
-	let deep = GqlParserSettings {
-		expr_recursion_limit: 100_000,
-		..Default::default()
-	};
+	// Parsing and lowering recurse on the call stack once per level of a
+	// linear chain (binary spines, `NOT` prefixes, property postfixes). Every
+	// such chain is charged against the parse-time expression budget, so the
+	// deepest chain the default budget admits is the worst case either walk
+	// sees, and it must fit a 2 MiB thread — the conservative worker-thread
+	// size — in an unoptimised build. The NOT chain collapses under NNF to a
+	// bounded predicate; the property chain lowers to an `Access` nest; the
+	// binary spine lowers to an equally deep tree that is rendered to confirm
+	// its shape.
+	std::thread::Builder::new()
+		.stack_size(2 * 1024 * 1024)
+		.spawn(|| {
+			let settings = GqlParserSettings::default();
+			// The `RETURN`/`WHERE` framing and the chain's own leaf each take a
+			// level, so stay a few levels under the budget.
+			let depth = settings.expr_recursion_limit - 4;
 
-	let nots = format!("MATCH (n:person) WHERE {} n.flag RETURN n", "NOT ".repeat(50_001));
-	let prepared =
-		parse_to_plan_with_settings(&nots, deep.clone()).expect("NOT chain should lower");
-	assert!(prepared.to_sql().contains("n.flag = false"), "unexpected: {}", prepared.to_sql());
+			let nots = format!("MATCH (n:person) WHERE {} n.flag RETURN n", "NOT ".repeat(depth));
+			let prepared = parse_to_plan_with_settings(&nots, settings.clone())
+				.expect("NOT chain should lower");
+			assert!(prepared.to_sql().contains("n.flag"), "unexpected: {}", prepared.to_sql());
 
-	let props = format!("MATCH (n:person) RETURN n{} AS x", ".p".repeat(50_000));
-	let prepared =
-		parse_to_plan_with_settings(&props, deep.clone()).expect("property chain should lower");
-	assert!(prepared.to_sql().contains("RETURN n.p.p.p"), "unexpected: {}", prepared.to_sql());
+			let props = format!("MATCH (n:person) RETURN n{} AS x", ".p".repeat(depth));
+			let prepared = parse_to_plan_with_settings(&props, settings.clone())
+				.expect("property chain should lower");
+			assert!(
+				prepared.to_sql().contains("RETURN n.p.p.p"),
+				"unexpected: {}",
+				prepared.to_sql()
+			);
 
-	// The binary spine lowers without machine-stack recursion; rendering a
-	// pathologically deep tree (the recursive `ToSql` walk) is a depth shared
-	// with syn-parsed SurrealQL and out of scope here, so the spine depth is
-	// kept modest and rendered only to confirm the shape.
-	let spine = format!("MATCH (n:person) RETURN 1{} AS x", " + 1".repeat(100));
-	let prepared = parse_to_plan_with_settings(&spine, deep).expect("binary spine should lower");
-	assert!(prepared.to_sql().contains("RETURN 1 + 1 + "));
+			let spine = format!("MATCH (n:person) RETURN 1{} AS x", " + 1".repeat(depth));
+			let prepared =
+				parse_to_plan_with_settings(&spine, settings).expect("binary spine should lower");
+			assert!(prepared.to_sql().contains("RETURN 1 + 1 + "));
+
+			// Nested collections are charged to the object budget instead.
+			let depth = GqlParserSettings::default().object_recursion_limit - 4;
+			let lists =
+				format!("MATCH (n:person) RETURN {}1{} AS x", "[".repeat(depth), "]".repeat(depth));
+			let prepared = parse_to_plan_with_settings(&lists, GqlParserSettings::default())
+				.expect("nested lists should lower");
+			assert!(prepared.to_sql().contains("[[[1]]]"), "unexpected: {}", prepared.to_sql());
+		})
+		.expect("spawning the deep-chain thread")
+		.join()
+		.expect("deep-chain thread panicked");
 }
 
 // ------------------------------------------------------------------------

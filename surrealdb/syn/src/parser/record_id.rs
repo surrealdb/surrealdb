@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::ops::Bound;
 
-use reblessive::Stk;
 use surrealdb_sql::lookup::LookupSubject;
 use surrealdb_sql::{Param, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
 use surrealdb_strand::Strand;
@@ -14,11 +13,7 @@ use crate::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::token::{TokenKind, t};
 
 impl Parser<'_> {
-	pub async fn parse_record_id_or_range(
-		&mut self,
-		stk: &mut Stk,
-		ident: Strand,
-	) -> ParseResult<RecordIdLit> {
+	pub fn parse_record_id_or_range(&mut self, ident: Strand) -> ParseResult<RecordIdLit> {
 		let ident: surrealdb_sql::TableName = ident.into();
 		expected_whitespace!(self, t!(":"));
 
@@ -26,12 +21,12 @@ impl Parser<'_> {
 		if self.eat_whitespace(t!("..")) {
 			// Check for inclusive
 			let end = if self.eat_whitespace(t!("=")) {
-				let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
+				let id = self.parse_record_id_key()?;
 				Bound::Included(id)
 			} else if let Some(peek) = self.peek_whitespace()
 				&& Self::kind_starts_record_id_key(peek.kind)
 			{
-				let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
+				let id = self.parse_record_id_key()?;
 				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
@@ -49,7 +44,7 @@ impl Parser<'_> {
 		let beg = if let Some(peek) = self.peek_whitespace()
 			&& Self::kind_starts_record_id_key(peek.kind)
 		{
-			let v = stk.run(|stk| self.parse_record_id_key(stk)).await?;
+			let v = self.parse_record_id_key()?;
 
 			// check for exclusive
 			if self.eat_whitespace(t!(">")) {
@@ -65,12 +60,12 @@ impl Parser<'_> {
 		// If we already ate the exclusive it must be a range.
 		if self.eat_whitespace(t!("..")) {
 			let end = if self.eat_whitespace(t!("=")) {
-				let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
+				let id = self.parse_record_id_key()?;
 				Bound::Included(id)
 			} else if let Some(peek) = self.peek_whitespace()
 				&& Self::kind_starts_record_id_key(peek.kind)
 			{
-				let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
+				let id = self.parse_record_id_key()?;
 				Bound::Excluded(id)
 			} else {
 				Bound::Unbounded
@@ -84,24 +79,10 @@ impl Parser<'_> {
 			})
 		} else {
 			let id = match beg {
-				Bound::Unbounded => {
-					if let Some(token) = self.peek_whitespace()
-						&& token.kind == t!("$param")
-					{
-						let param = self.next_token_value::<Param>()?;
-						bail!("Unexpected token `$param` expected a record-id key",
-								@token.span => "Record-id's can be create from a param with `type::record(\"{}\",{})`", ident, param.to_sql());
-					}
-
-					// we haven't matched anything so far so we still want any type of id.
-					unexpected!(self, self.peek(), "a record-id key")
-				}
-				Bound::Excluded(_) => {
-					// we have matched a bounded id but we don't see an range operator.
-					unexpected!(self, self.peek(), "the range operator `..`")
-				}
-				// We previously converted the `Id` value to `Value` so it's safe to unwrap here.
 				Bound::Included(v) => v,
+				other => {
+					return self.record_id_key_error(&ident, matches!(other, Bound::Excluded(_)));
+				}
 			};
 			Ok(RecordIdLit {
 				table: ident,
@@ -110,11 +91,35 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_id_range(&mut self, stk: &mut Stk) -> ParseResult<RecordIdKeyRangeLit> {
+	/// Fails a record id whose key is missing, or, when `exclusive`, is an
+	/// exclusive start with no range operator after it.
+	#[cold]
+	#[inline(never)]
+	fn record_id_key_error<T>(
+		&mut self,
+		ident: &surrealdb_sql::TableName,
+		exclusive: bool,
+	) -> ParseResult<T> {
+		if exclusive {
+			// we have matched a bounded id but we don't see an range operator.
+			unexpected!(self, self.peek(), "the range operator `..`")
+		}
+		if let Some(token) = self.peek_whitespace()
+			&& token.kind == t!("$param")
+		{
+			let param = self.next_token_value::<Param>()?;
+			bail!("Unexpected token `$param` expected a record-id key",
+					@token.span => "Record-id's can be create from a param with `type::record(\"{}\",{})`", ident, param.to_sql());
+		}
+		// we haven't matched anything so far so we still want any type of id.
+		unexpected!(self, self.peek(), "a record-id key")
+	}
+
+	pub fn parse_id_range(&mut self) -> ParseResult<RecordIdKeyRangeLit> {
 		let beg = if let Some(peek) = self.peek_whitespace()
 			&& Self::kind_starts_record_id_key(peek.kind)
 		{
-			let v = stk.run(|stk| self.parse_record_id_key(stk)).await?;
+			let v = self.parse_record_id_key()?;
 
 			// check for exclusive
 			if self.eat_whitespace(t!(">")) {
@@ -129,12 +134,12 @@ impl Parser<'_> {
 		expected!(self, t!(".."));
 
 		let end = if self.eat_whitespace(t!("=")) {
-			let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
+			let id = self.parse_record_id_key()?;
 			Bound::Included(id)
 		} else if let Some(peek) = self.peek_whitespace()
 			&& Self::kind_starts_record_id_key(peek.kind)
 		{
-			let id = stk.run(|stk| self.parse_record_id_key(stk)).await?;
+			let id = self.parse_record_id_key()?;
 			Bound::Excluded(id)
 		} else {
 			Bound::Unbounded
@@ -146,16 +151,14 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_lookup_subject(
+	pub fn parse_lookup_subject(
 		&mut self,
-		stk: &mut Stk,
 		supports_referencing_field: bool,
 	) -> ParseResult<LookupSubject> {
 		let table: surrealdb_sql::TableName = self.parse_ident_str()?.into();
 		if self.eat_whitespace(t!(":")) {
-			let range = self.parse_id_range(stk).await?;
-			let referencing_field =
-				self.parse_referencing_field(supports_referencing_field).await?;
+			let range = self.parse_id_range()?;
+			let referencing_field = self.parse_referencing_field(supports_referencing_field)?;
 
 			Ok(LookupSubject::Range {
 				table,
@@ -165,12 +168,12 @@ impl Parser<'_> {
 		} else {
 			Ok(LookupSubject::Table {
 				table,
-				referencing_field: self.parse_referencing_field(supports_referencing_field).await?,
+				referencing_field: self.parse_referencing_field(supports_referencing_field)?,
 			})
 		}
 	}
 
-	pub async fn parse_referencing_field(
+	pub fn parse_referencing_field(
 		&mut self,
 		supports_referencing_field: bool,
 	) -> ParseResult<Option<String>> {
@@ -181,19 +184,15 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_record_id(&mut self, stk: &mut Stk) -> ParseResult<RecordIdLit> {
+	pub fn parse_record_id(&mut self) -> ParseResult<RecordIdLit> {
 		let ident = self.parse_ident()?;
-		self.parse_record_id_from_ident(stk, ident).await
+		self.parse_record_id_from_ident(ident)
 	}
 
-	pub async fn parse_record_id_from_ident(
-		&mut self,
-		stk: &mut Stk,
-		ident: Strand,
-	) -> ParseResult<RecordIdLit> {
+	pub fn parse_record_id_from_ident(&mut self, ident: Strand) -> ParseResult<RecordIdLit> {
 		expected!(self, t!(":"));
 
-		let id = stk.run(|ctx| self.parse_record_id_key(ctx)).await?;
+		let id = self.parse_record_id_key()?;
 
 		Ok(RecordIdLit {
 			table: ident.into(),
@@ -201,24 +200,39 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_record_id_key(&mut self, stk: &mut Stk) -> ParseResult<RecordIdKeyLit> {
+	pub fn parse_record_id_key(&mut self) -> ParseResult<RecordIdKeyLit> {
 		let Some(token) = self.peek_whitespace() else {
 			bail!("Unexpected whitespace after record-id table", @self.peek().span)
 		};
 		match token.kind {
-			t!("u'") | t!("u\"") => Ok(RecordIdKeyLit::Uuid(self.next_token_value()?)),
 			t!("{") => {
 				self.pop_peek();
 				// object record id
-				let object = self.parse_object(stk, token.span).await?;
+				let object = self.parse_object(token.span)?;
 				Ok(RecordIdKeyLit::Object(object))
 			}
 			t!("[") => {
 				self.pop_peek();
 				// array record id
-				let array = self.parse_array(stk, token.span).await?;
+				let array = self.parse_array(token.span)?;
 				Ok(RecordIdKeyLit::Array(array))
 			}
+			_ => self.parse_scalar_record_id_key(token),
+		}
+	}
+
+	/// Parses a record-id key that is not an object or an array, starting at
+	/// the still-unconsumed `token`.
+	///
+	/// Kept out of [`Self::parse_record_id_key`], which nested object and array
+	/// keys recurse through, so that its frame stays small.
+	#[inline(never)]
+	fn parse_scalar_record_id_key(
+		&mut self,
+		token: crate::token::Token,
+	) -> ParseResult<RecordIdKeyLit> {
+		match token.kind {
+			t!("u'") | t!("u\"") => Ok(RecordIdKeyLit::Uuid(self.next_token_value()?)),
 			t!("+") => {
 				self.pop_peek();
 				// starting with a + so it must be a number
@@ -340,7 +354,6 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-	use reblessive::Stack;
 	use surrealdb_sql as sql;
 	use surrealdb_sql::{Expr, Literal};
 
@@ -349,8 +362,7 @@ mod tests {
 
 	fn record(i: &str) -> ParseResult<RecordIdLit> {
 		let mut parser = Parser::new(i.as_bytes());
-		let mut stack = Stack::new();
-		stack.enter(|ctx| async move { parser.parse_record_id(ctx).await }).finish()
+		parser.parse_record_id()
 	}
 
 	#[test]
@@ -557,19 +569,11 @@ mod tests {
 					..Default::default()
 				},
 			);
-			let mut stack = Stack::new();
-			let r = stack
-				.enter(|ctx| async move { parser.parse_record_id(ctx).await })
-				.finish()
-				.unwrap_or_else(|_| panic!("failed on {}", ident))
-				.key;
+			let r = parser.parse_record_id().unwrap_or_else(|_| panic!("failed on {}", ident)).key;
 			assert_eq!(r, RecordIdKeyLit::String(ident.to_string().into()),);
 
 			let mut parser = Parser::new(thing.as_bytes());
-			let r = stack
-				.enter(|ctx| async move { parser.parse_expr_inherit(ctx).await })
-				.finish()
-				.unwrap_or_else(|_| panic!("failed on {}", ident));
+			let r = parser.parse_expr_inherit().unwrap_or_else(|_| panic!("failed on {}", ident));
 
 			assert_eq!(
 				r,

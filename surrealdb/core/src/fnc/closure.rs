@@ -1,7 +1,5 @@
 //! The [`ClosureEvaluator`] the closure-taking builtins call back through.
 
-use reblessive::tree::Stk;
-
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -34,12 +32,7 @@ impl<'a> FrameClosureEvaluator<'a> {
 }
 
 impl ClosureEvaluator for FrameClosureEvaluator<'_> {
-	fn invoke<'a>(
-		&'a self,
-		_stk: &'a mut Stk,
-		closure: &'a Closure,
-		args: Vec<Value>,
-	) -> BoxInvokeFut<'a> {
+	fn invoke<'a>(&'a self, closure: &'a Closure, args: Vec<Value>) -> BoxInvokeFut<'a> {
 		Box::pin(crate::exec::closure::invoke_in(closure, self.ctx, self.opt, self.doc, args))
 	}
 }

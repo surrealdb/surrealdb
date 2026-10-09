@@ -31,8 +31,6 @@ mod hnsw_query_test;
 async fn assert_versioned_search_reads_each_candidate_once(index_ddl: &str) -> anyhow::Result<()> {
 	use std::sync::Arc;
 
-	use reblessive::tree::Stk;
-
 	use crate::catalog::Record;
 	use crate::catalog::providers::{CatalogProvider, TableProvider};
 	use crate::exec::operators::scan::knn_candidates;
@@ -49,7 +47,6 @@ async fn assert_versioned_search_reads_each_candidate_once(index_ddl: &str) -> a
 	impl CandidateCondition for CategorySeven {
 		fn matches<'a>(
 			&'a self,
-			_stk: &'a mut Stk,
 			_rid: &'a Arc<RecordId>,
 			record: &'a Arc<Record>,
 		) -> BoxGateFut<'a> {

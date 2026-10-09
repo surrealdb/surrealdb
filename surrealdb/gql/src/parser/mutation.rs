@@ -10,8 +10,6 @@
 //! parser here rather than reusing the MATCH pattern parser; only leaf helpers
 //! are shared.
 
-use reblessive::Stk;
-
 use crate::gql::ast::{
 	DeleteStatement, DetachMode, GqlExpr, Ident, InsertEdge, InsertEdgeDir, InsertNode, InsertPath,
 	InsertStatement, RemoveItem, RemoveStatement, SetItem, SetStatement,
@@ -21,14 +19,13 @@ use crate::gql::parser::{ParseResult, Parser};
 use crate::gql::token::{Keyword, Span, TokenKind, t};
 use crate::syn::error::bail;
 
+/// An insert element filler: its variable, its label, and its properties.
+type InsertFiller = (Option<Ident>, Option<Ident>, Vec<(Ident, GqlExpr)>);
+
 impl Parser<'_> {
 	/// Parse a `SET` statement: `SET setItem (, setItem)*` (GQL.g4:427). The
 	/// `SET` keyword must already be consumed; `start` is its span.
-	pub(super) async fn parse_set_statement(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<SetStatement> {
+	pub(super) fn parse_set_statement(&mut self, start: Span) -> ParseResult<SetStatement> {
 		let mut items = Vec::new();
 		loop {
 			let item_start = self.peek().span;
@@ -40,7 +37,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					let prop = self.parse_ident()?;
 					expected!(self, t!("="));
-					let value = stk.run(|stk| self.parse_expr(stk)).await?;
+					let value = self.parse_expr()?;
 					SetItem::Property {
 						var,
 						prop,
@@ -51,7 +48,7 @@ impl Parser<'_> {
 				// setAllPropertiesItem: `a = { k: v, … }`
 				t!("=") => {
 					self.pop_peek();
-					let props = self.parse_property_map(stk).await?;
+					let props = self.parse_property_map()?;
 					SetItem::AllProperties {
 						var,
 						props,
@@ -126,9 +123,8 @@ impl Parser<'_> {
 	/// Parse a `DELETE` statement: `deleteItem (, deleteItem)*` (GQL.g4:482).
 	/// The `DELETE` keyword (and any `DETACH`/`NODETACH` prefix) must already be
 	/// consumed; `detach` is the resolved mode and `start` the prefix span.
-	pub(super) async fn parse_delete_statement(
+	pub(super) fn parse_delete_statement(
 		&mut self,
-		stk: &mut Stk,
 		detach: DetachMode,
 		start: Span,
 	) -> ParseResult<DeleteStatement> {
@@ -136,7 +132,7 @@ impl Parser<'_> {
 		loop {
 			// deleteItem = valueExpression; the lowering checks each is a bound
 			// variable reference.
-			items.push(stk.run(|stk| self.parse_expr(stk)).await?);
+			items.push(self.parse_expr()?);
 			if !self.eat(t!(",")) {
 				break;
 			}
@@ -150,14 +146,10 @@ impl Parser<'_> {
 
 	/// Parse an `INSERT` statement: `INSERT insertGraphPattern` (GQL.g4:421).
 	/// The `INSERT` keyword must already be consumed; `start` is its span.
-	pub(super) async fn parse_insert_statement(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<InsertStatement> {
+	pub(super) fn parse_insert_statement(&mut self, start: Span) -> ParseResult<InsertStatement> {
 		let mut paths = Vec::new();
 		loop {
-			paths.push(self.parse_insert_path(stk).await?);
+			paths.push(self.parse_insert_path()?);
 			if !self.eat(t!(",")) {
 				break;
 			}
@@ -170,12 +162,12 @@ impl Parser<'_> {
 
 	/// Parse a single insert path: `insertNodePattern (insertEdgePattern
 	/// insertNodePattern)*` (GQL.g4:860).
-	async fn parse_insert_path(&mut self, stk: &mut Stk) -> ParseResult<InsertPath> {
+	fn parse_insert_path(&mut self) -> ParseResult<InsertPath> {
 		let start = self.peek().span;
-		let first = self.parse_insert_node(stk).await?;
+		let first = self.parse_insert_node()?;
 		let mut steps = Vec::new();
-		while let Some(edge) = self.parse_insert_edge(stk).await? {
-			let node = self.parse_insert_node(stk).await?;
+		while let Some(edge) = self.parse_insert_edge()? {
+			let node = self.parse_insert_node()?;
 			steps.push((edge, node));
 		}
 		Ok(InsertPath {
@@ -187,9 +179,9 @@ impl Parser<'_> {
 
 	/// Parse an insert node pattern: `( insertElementPatternFiller? )`
 	/// (GQL.g4:864).
-	async fn parse_insert_node(&mut self, stk: &mut Stk) -> ParseResult<InsertNode> {
+	fn parse_insert_node(&mut self) -> ParseResult<InsertNode> {
 		let open = expected!(self, t!("(")).span;
-		let (var, label, props) = self.parse_insert_filler(stk).await?;
+		let (var, label, props) = self.parse_insert_filler()?;
 		self.expect_closing_delimiter(t!(")"), open)?;
 		Ok(InsertNode {
 			var,
@@ -203,7 +195,7 @@ impl Parser<'_> {
 	/// token does not open an edge. Only the two directed bracketed forms
 	/// (`-[…]->` and `<-[…]-`) are supported; undirected and multidirectional
 	/// forms are rejected.
-	async fn parse_insert_edge(&mut self, stk: &mut Stk) -> ParseResult<Option<InsertEdge>> {
+	fn parse_insert_edge(&mut self) -> ParseResult<Option<InsertEdge>> {
 		let token = self.peek();
 		let direction = match token.kind {
 			t!("-[") => InsertEdgeDir::Right,
@@ -215,7 +207,7 @@ impl Parser<'_> {
 		};
 		let open = token.span;
 		self.pop_peek();
-		let (var, label, props) = self.parse_insert_filler(stk).await?;
+		let (var, label, props) = self.parse_insert_filler()?;
 		let close = self.next();
 		match (direction, close.kind) {
 			(InsertEdgeDir::Right, t!("]->")) | (InsertEdgeDir::Left, t!("]-")) => {}
@@ -239,10 +231,7 @@ impl Parser<'_> {
 	/// Parse an insert element filler: `elementVariableDeclaration?
 	/// labelAndPropertySetSpecification?` (GQL.g4:886). All parts are optional;
 	/// the label is a single plain table name (not a label expression).
-	async fn parse_insert_filler(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<(Option<Ident>, Option<Ident>, Vec<(Ident, GqlExpr)>)> {
+	fn parse_insert_filler(&mut self) -> ParseResult<InsertFiller> {
 		// Optional variable declaration.
 		let token = self.peek();
 		let var = match token.kind {
@@ -266,7 +255,7 @@ impl Parser<'_> {
 		};
 		// Optional property map.
 		let props = if self.peek_kind() == t!("{") {
-			self.parse_property_map(stk).await?
+			self.parse_property_map()?
 		} else {
 			Vec::new()
 		};
@@ -276,14 +265,14 @@ impl Parser<'_> {
 	/// Parse a property map `{ k: v, … }` (`propertyKeyValuePairList`,
 	/// GQL.g4:1018) shared by `SET … = {…}` and insert fillers. The opening
 	/// brace must be next.
-	async fn parse_property_map(&mut self, stk: &mut Stk) -> ParseResult<Vec<(Ident, GqlExpr)>> {
+	fn parse_property_map(&mut self) -> ParseResult<Vec<(Ident, GqlExpr)>> {
 		let open = expected!(self, t!("{")).span;
 		let mut props = Vec::new();
 		if self.peek_kind() != t!("}") {
 			loop {
 				let key = self.parse_ident()?;
 				expected!(self, t!(":"));
-				let value = stk.run(|stk| self.parse_expr(stk)).await?;
+				let value = self.parse_expr()?;
 				props.push((key, value));
 				if !self.eat(t!(",")) {
 					break;

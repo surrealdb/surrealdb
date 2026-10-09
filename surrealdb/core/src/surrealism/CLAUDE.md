@@ -21,8 +21,7 @@ Both take `&self` and return `HostCallResult`, classifying failures as
 `PermissionDenied` (capability denial), `InvalidRequest` (parse/resolve),
 `Datastore` (execution failures) or
 `Other`. `&self` rather than `&mut self` because a guest may hold several calls
-in flight; each builds its own `reblessive::TreeStack`, since two concurrent
-`expr_compute` calls cannot share one.
+in flight.
 - `stdout` / `stderr` — routes to `tracing` with the configured log level.
 
 **Capability scoping:** Both `sql()` and `run()` create a derived `Context` whose `Capabilities` are narrowed to the module's declared permissions via `module_scoped_capabilities()`. This ensures a module cannot exceed its declared `allow_scripting`, `allow_functions`, or `allow_net` even if the server is more permissive. The server's deny-lists are always preserved.

@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use ahash::{HashMap, HashSet};
 use anyhow::Result;
-use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
 use surrealdb_catalog::providers::CachePolicy;
 
@@ -107,7 +106,6 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 	pub(super) async fn check_any_doc_truthy(
 		&mut self,
 		ctx: &HnswContext<'_>,
-		stk: &mut Stk,
 		doc_ids: Ids64,
 		pending_docs: Option<&RoaringTreemap>,
 		allow_list: Option<&RoaringTreemap>,
@@ -121,7 +119,7 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 			{
 				continue;
 			}
-			if self.check_vector_id_truthy(ctx, stk, VectorId::DocId(doc_id)).await? {
+			if self.check_vector_id_truthy(ctx, VectorId::DocId(doc_id)).await? {
 				return Ok(true);
 			}
 		}
@@ -239,7 +237,6 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 	pub(super) async fn check_vector_id_truthy(
 		&mut self,
 		ctx: &HnswContext<'_>,
-		stk: &mut Stk,
 		id: VectorId,
 	) -> Result<bool> {
 		if let Some(cached) = self.cache.get(&id) {
@@ -279,7 +276,6 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		}
 		let record = Self::is_record_truthy(
 			ctx,
-			stk,
 			self.cond.as_deref(),
 			Arc::clone(&rid),
 			&self.permission,
@@ -301,7 +297,6 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 	/// read here.
 	async fn is_record_truthy(
 		ctx: &HnswContext<'_>,
-		stk: &mut Stk,
 		cond: Option<&dyn CandidateCondition>,
 		rid: Arc<RecordId>,
 		permission: &CachedTableSelect<'_>,
@@ -322,11 +317,11 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		// evaluated against records the caller cannot see, so result counts /
 		// ordering / pre-decode hits can leak field values from restricted
 		// rows.
-		if !check_cached_table_select_for_doc(stk, permission, &rid, &val).await? {
+		if !check_cached_table_select_for_doc(permission, &rid, &val).await? {
 			return Ok(None);
 		}
 		let truthy = match cond {
-			Some(cond) => cond.matches(stk, &rid, &val).await?,
+			Some(cond) => cond.matches(&rid, &val).await?,
 			None => true,
 		};
 		if truthy {

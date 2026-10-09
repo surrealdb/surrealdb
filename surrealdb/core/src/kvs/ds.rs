@@ -5735,7 +5735,7 @@ impl Datastore {
 		let ast = syn::parse_with_settings(
 			sql.as_bytes(),
 			Self::import_parser_settings(&self.capabilities.load()),
-			async |parser, stk| parser.parse_query(stk).await,
+			|parser| parser.parse_query(),
 		)
 		.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Execute the SQL import
@@ -9158,10 +9158,9 @@ mod test {
 	/// and dropped within the call stack a worker thread running statements is
 	/// guaranteed.
 	///
-	/// Parsing recurses on a heap-allocated `reblessive` stack, so depth alone
-	/// costs nothing there; the `sql -> expr` lowering that follows, `ToSql`
-	/// and the tree's own `Drop` recurse on the call stack, where exhaustion
-	/// aborts the process rather than returning an error. A ceiling raised
+	/// Parsing, the `sql -> expr` lowering that follows, `ToSql` and the tree's
+	/// own `Drop` all recurse on the call stack, where exhaustion aborts the
+	/// process rather than returning an error. A ceiling raised
 	/// past what those survive fails here instead.
 	///
 	/// The budget is a fraction of `SURREAL_RUNTIME_STACK_SIZE`, which the
@@ -9185,11 +9184,9 @@ mod test {
 				let settings = Datastore::import_parser_settings(&Capabilities::default());
 				let parse = |depth: usize| {
 					let source = format!("{}'leaf'{}", "{ l: ".repeat(depth), " }".repeat(depth));
-					crate::syn::parse_with_settings(
-						source.as_bytes(),
-						settings.clone(),
-						async |parser, stk| parser.parse_expr_field(stk).await,
-					)
+					crate::syn::parse_with_settings(source.as_bytes(), settings.clone(), |parser| {
+						parser.parse_expr_field()
+					})
 				};
 
 				// The deepest literal the profile accepts, so the tree the

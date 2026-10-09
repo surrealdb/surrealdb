@@ -2,7 +2,6 @@ use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, HashMap};
 
 use anyhow::Result;
-use reblessive::tree::Stk;
 
 use super::args::Optional;
 use crate::catalog::providers::DatabaseProvider;
@@ -15,7 +14,7 @@ use crate::idx::ft::analyzer::Analyzer;
 use crate::val::{Array, Number, Object, Value};
 
 pub async fn analyze(
-	(stk, ctx, opt): (&mut Stk, &FrozenContext, Option<&Options>),
+	(ctx, opt): (&FrozenContext, Option<&Options>),
 	(az, val): (Value, Value),
 ) -> Result<Value> {
 	if let (Some(opt), Value::String(az), Value::String(val)) = (opt, az, val) {
@@ -23,7 +22,7 @@ pub async fn analyze(
 		let az = ctx.tx().get_db_analyzer(ns, db, &az, opt.version).await?;
 		let az = Analyzer::new(ctx.get_index_stores(), az).await?;
 		let exec = crate::exec::entry::frame(ctx, opt, None).await;
-		az.analyze(stk, &StreamingAnalyzerFunction::new(&exec), val).await
+		az.analyze(&StreamingAnalyzerFunction::new(&exec), val).await
 	} else {
 		Ok(Value::None)
 	}

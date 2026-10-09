@@ -1,4 +1,3 @@
-use reblessive::Stack;
 use rust_decimal::Decimal;
 use surrealdb_sql::literal::ObjectEntry;
 use surrealdb_sql::{
@@ -11,10 +10,8 @@ use crate::parser::{Parser, ParserSettings};
 
 #[test]
 fn parse_index_expression() {
-	let value = crate::parse_with("a[1 + 1]".as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let value =
+		crate::parse_with("a[1 + 1]".as_bytes(), |parser| parser.parse_expr_field()).unwrap();
 	let Expr::Idiom(x) = value else {
 		panic!("not the right value type");
 	};
@@ -31,10 +28,8 @@ fn parse_index_expression() {
 
 #[test]
 fn parse_coordinate() {
-	let coord = crate::parse_with("(1.88, -18.0)".as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let coord =
+		crate::parse_with("(1.88, -18.0)".as_bytes(), |parser| parser.parse_expr_field()).unwrap();
 	let Expr::Literal(Literal::Geometry(geo::Geometry::Point(x))) = coord else {
 		panic!("not the right value");
 	};
@@ -44,10 +39,7 @@ fn parse_coordinate() {
 
 #[test]
 fn parse_numeric_object_key() {
-	let v = crate::parse_with("{ 00: 0 }".as_bytes(), async |parser, stk| {
-		parser.parse_expr_table(stk).await
-	})
-	.unwrap();
+	let v = crate::parse_with("{ 00: 0 }".as_bytes(), |parser| parser.parse_expr_table()).unwrap();
 	let Expr::Literal(Literal::Object(object)) = v else {
 		panic!("not an object");
 	};
@@ -57,95 +49,95 @@ fn parse_numeric_object_key() {
 
 #[test]
 fn parse_range_operator() {
-	crate::parse_with("1..2".as_bytes(), async |parser, stk| parser.parse_expr_field(stk).await)
-		.unwrap();
+	crate::parse_with("1..2".as_bytes(), |parser| parser.parse_expr_field()).unwrap();
+}
+
+/// Nesting depth for the deep-literal tests: past the default object budget,
+/// within the stored-text ceiling every level is charged against.
+const DEPTH: usize = 300;
+
+/// Runs `f` on a thread whose stack fits [`DEPTH`] levels of an unoptimised
+/// build, independent of `RUST_MIN_STACK`. Parsing recurses on the call stack
+/// once per nesting level, as do the parsed tree's `Drop` and the walk below.
+fn on_large_stack(f: impl FnOnce() + Send + 'static) {
+	std::thread::Builder::new()
+		.stack_size(16 * 1024 * 1024)
+		.spawn(f)
+		.expect("spawning the deep-parse thread")
+		.join()
+		.expect("deep-parse thread panicked");
 }
 
 #[test]
 fn parse_large_depth_object() {
-	let mut text = String::new();
-	let start = r#" { foo: "#;
-	let middle = r#" {bar: 1} "#;
-	let end = r#" } "#;
+	on_large_stack(|| {
+		let mut text = String::new();
+		let start = r#" { foo: "#;
+		let middle = r#" {bar: 1} "#;
+		let end = r#" } "#;
 
-	for _ in 0..1000 {
-		text.push_str(start);
-	}
-	text.push_str(middle);
-	for _ in 0..1000 {
-		text.push_str(end);
-	}
-	let mut parser = Parser::new_with_settings(
-		text.as_bytes(),
-		ParserSettings {
-			query_recursion_limit: 100000,
-			object_recursion_limit: 100000,
-			expr_recursion_limit: 100000,
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	let query = stack.enter(|stk| parser.parse_expr_inherit(stk)).finish().unwrap();
-	let Expr::Literal(Literal::Object(ref object)) = query else {
-		panic!()
-	};
-	let mut object = object;
-	for _ in 0..999 {
-		let Some(Expr::Literal(Literal::Object(new_object))) =
-			object.iter().find(|x| x.key == "foo").map(|x| &x.value)
-		else {
+		for _ in 0..DEPTH {
+			text.push_str(start);
+		}
+		text.push_str(middle);
+		for _ in 0..DEPTH {
+			text.push_str(end);
+		}
+		let mut parser = Parser::new_with_settings(text.as_bytes(), ParserSettings::STORED_TEXT);
+		let query = parser.parse_expr_inherit().unwrap();
+		let Expr::Literal(Literal::Object(ref object)) = query else {
 			panic!()
 		};
-		object = new_object
-	}
+		let mut object = object;
+		for _ in 0..DEPTH - 1 {
+			let Some(Expr::Literal(Literal::Object(new_object))) =
+				object.iter().find(|x| x.key == "foo").map(|x| &x.value)
+			else {
+				panic!()
+			};
+			object = new_object
+		}
+	});
 }
 
 #[test]
 fn parse_large_depth_record_id() {
-	let mut text = String::new();
-	let start = r#" a:[ "#;
-	let middle = r#" b:{c: 1} "#;
-	let end = r#" ] "#;
+	on_large_stack(|| {
+		let mut text = String::new();
+		let start = r#" a:[ "#;
+		let middle = r#" b:{c: 1} "#;
+		let end = r#" ] "#;
 
-	for _ in 0..1000 {
-		text.push_str(start);
-	}
-	text.push_str(middle);
-	for _ in 0..1000 {
-		text.push_str(end);
-	}
-	let mut parser = Parser::new_with_settings(
-		text.as_bytes(),
-		ParserSettings {
-			query_recursion_limit: 100000,
-			object_recursion_limit: 100000,
-			expr_recursion_limit: 100000,
-			..Default::default()
-		},
-	);
-	let mut stack = Stack::new();
-	let query = stack.enter(|stk| parser.parse_expr_inherit(stk)).finish().unwrap();
-	let Expr::Literal(Literal::RecordId(ref rid)) = query else {
-		panic!()
-	};
-	let mut rid = rid;
-	for _ in 0..999 {
-		let RecordIdKeyLit::Array(ref x) = rid.key else {
+		for _ in 0..DEPTH {
+			text.push_str(start);
+		}
+		text.push_str(middle);
+		for _ in 0..DEPTH {
+			text.push_str(end);
+		}
+		let mut parser = Parser::new_with_settings(text.as_bytes(), ParserSettings::STORED_TEXT);
+		let query = parser.parse_expr_inherit().unwrap();
+		let Expr::Literal(Literal::RecordId(ref rid)) = query else {
 			panic!()
 		};
-		let Expr::Literal(Literal::RecordId(ref new_rid)) = x[0] else {
-			panic!()
-		};
-		rid = new_rid
-	}
+		let mut rid = rid;
+		for _ in 0..DEPTH - 1 {
+			let RecordIdKeyLit::Array(ref x) = rid.key else {
+				panic!()
+			};
+			let Expr::Literal(Literal::RecordId(ref new_rid)) = x[0] else {
+				panic!()
+			};
+			rid = new_rid
+		}
+	});
 }
 
 #[test]
 fn parse_recursive_record_string() {
-	let res = crate::parse_with(
-		r#" r"a:[r\"b:{c: r\\\"d:1\\\"}\"]" "#.as_bytes(),
-		async |parser, stk| parser.parse_expr_field(stk).await,
-	)
+	let res = crate::parse_with(r#" r"a:[r\"b:{c: r\\\"d:1\\\"}\"]" "#.as_bytes(), |parser| {
+		parser.parse_expr_field()
+	})
 	.unwrap();
 	assert_eq!(
 		res,
@@ -167,10 +159,8 @@ fn parse_recursive_record_string() {
 
 #[test]
 fn parse_record_string_2() {
-	let res = crate::parse_with(r#" r'a:["foo"]' "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let res = crate::parse_with(r#" r'a:["foo"]' "#.as_bytes(), |parser| parser.parse_expr_field())
+		.unwrap();
 	assert_eq!(
 		res,
 		Expr::Literal(Literal::RecordId(RecordIdLit {
@@ -184,14 +174,14 @@ fn parse_record_string_2() {
 
 #[test]
 fn parse_i64() {
-	let res = crate::parse_with(r#" -9223372036854775808 "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
+	let res = crate::parse_with(r#" -9223372036854775808 "#.as_bytes(), |parser| {
+		parser.parse_expr_field()
 	})
 	.unwrap();
 	assert_eq!(res, Expr::Literal(Literal::Integer(i64::MIN)));
 
-	let res = crate::parse_with(r#" 9223372036854775807 "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
+	let res = crate::parse_with(r#" 9223372036854775807 "#.as_bytes(), |parser| {
+		parser.parse_expr_field()
 	})
 	.unwrap();
 	assert_eq!(res, Expr::Literal(Literal::Integer(i64::MAX)));
@@ -199,130 +189,101 @@ fn parse_i64() {
 
 #[test]
 fn parse_decimal() {
-	let res = crate::parse_with(r#" 0dec "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r#" 0dec "#.as_bytes(), |parser| parser.parse_expr_field()).unwrap();
 	assert_eq!(res, Expr::Literal(Literal::Decimal(Decimal::ZERO)));
 }
 
 #[test]
 fn constant_lowercase() {
-	let out = crate::parse_with(r#" math::pi "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let out =
+		crate::parse_with(r#" math::pi "#.as_bytes(), |parser| parser.parse_expr_field()).unwrap();
 	assert_eq!(out, Expr::Constant(Constant::MathPi));
 
-	let out = crate::parse_with(r#" math::inf "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let out =
+		crate::parse_with(r#" math::inf "#.as_bytes(), |parser| parser.parse_expr_field()).unwrap();
 	assert_eq!(out, Expr::Constant(Constant::MathInfinity));
 
-	let out = crate::parse_with(r#" math::neg_inf "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let out =
+		crate::parse_with(r#" math::neg_inf "#.as_bytes(), |parser| parser.parse_expr_field())
+			.unwrap();
 	assert_eq!(out, Expr::Constant(Constant::MathNegInfinity));
 
-	let out = crate::parse_with(r#" time::epoch "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let out = crate::parse_with(r#" time::epoch "#.as_bytes(), |parser| parser.parse_expr_field())
+		.unwrap();
 	assert_eq!(out, Expr::Constant(Constant::TimeEpoch));
 }
 
 #[test]
 fn constant_uppercase() {
-	let out = crate::parse_with(r#" MATH::PI "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let out =
+		crate::parse_with(r#" MATH::PI "#.as_bytes(), |parser| parser.parse_expr_field()).unwrap();
 	assert_eq!(out, Expr::Constant(Constant::MathPi));
 
-	let out = crate::parse_with(r#" MATH::INFINITY "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let out =
+		crate::parse_with(r#" MATH::INFINITY "#.as_bytes(), |parser| parser.parse_expr_field())
+			.unwrap();
 	assert_eq!(out, Expr::Constant(Constant::MathInfinity));
 
-	let out = crate::parse_with(r#" MATH::NEG_INFINITY "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let out =
+		crate::parse_with(r#" MATH::NEG_INFINITY "#.as_bytes(), |parser| parser.parse_expr_field())
+			.unwrap();
 	assert_eq!(out, Expr::Constant(Constant::MathNegInfinity));
 
-	let out = crate::parse_with(r#" TIME::EPOCH "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let out = crate::parse_with(r#" TIME::EPOCH "#.as_bytes(), |parser| parser.parse_expr_field())
+		.unwrap();
 	assert_eq!(out, Expr::Constant(Constant::TimeEpoch));
 }
 
 #[test]
 fn constant_mixedcase() {
-	let out = crate::parse_with(r#" MaTh::Pi "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let out =
+		crate::parse_with(r#" MaTh::Pi "#.as_bytes(), |parser| parser.parse_expr_field()).unwrap();
 	assert_eq!(out, Expr::Constant(Constant::MathPi));
 
-	let out = crate::parse_with(r#" MaTh::InfiniTy "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let out =
+		crate::parse_with(r#" MaTh::InfiniTy "#.as_bytes(), |parser| parser.parse_expr_field())
+			.unwrap();
 	assert_eq!(out, Expr::Constant(Constant::MathInfinity));
 
-	let out = crate::parse_with(r#" MaTh::Neg_InfiniTy "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let out =
+		crate::parse_with(r#" MaTh::Neg_InfiniTy "#.as_bytes(), |parser| parser.parse_expr_field())
+			.unwrap();
 	assert_eq!(out, Expr::Constant(Constant::MathNegInfinity));
 
-	let out = crate::parse_with(r#" TiME::ePoCH "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let out = crate::parse_with(r#" TiME::ePoCH "#.as_bytes(), |parser| parser.parse_expr_field())
+		.unwrap();
 	assert_eq!(out, Expr::Constant(Constant::TimeEpoch));
 }
 
 #[test]
 fn scientific_decimal() {
-	let res = crate::parse_with(r#" 9.7e-7dec "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r#" 9.7e-7dec "#.as_bytes(), |parser| parser.parse_expr_field()).unwrap();
 	assert!(matches!(res, Expr::Literal(Literal::Decimal(_))));
 	assert_eq!(res.to_sql(), "0.00000097dec")
 }
 
 #[test]
 fn scientific_number() {
-	let res = crate::parse_with(r#" 9.7e-5"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r#" 9.7e-5"#.as_bytes(), |parser| parser.parse_expr_field()).unwrap();
 	assert!(matches!(res, Expr::Literal(Literal::Float(_))));
 	assert_eq!(res.to_sql(), "0.000097f")
 }
 
 #[test]
 fn number_method() {
-	let res = crate::parse_with(r#" 9.7e-5.sin()"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let res = crate::parse_with(r#" 9.7e-5.sin()"#.as_bytes(), |parser| parser.parse_expr_field())
+		.unwrap();
 	let expected = Expr::Idiom(Idiom(vec![
 		Part::Start(Expr::Literal(Literal::Float(9.7e-5))),
 		Part::Method("sin".into(), vec![]),
 	]));
 	assert_eq!(res, expected);
 
-	let res = crate::parse_with(r#" 1.sin()"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r#" 1.sin()"#.as_bytes(), |parser| parser.parse_expr_field()).unwrap();
 	let expected = Expr::Idiom(Idiom(vec![
 		Part::Start(Expr::Literal(Literal::Integer(1))),
 		Part::Method("sin".into(), vec![]),
@@ -332,14 +293,13 @@ fn number_method() {
 
 #[test]
 fn datetime_error() {
-	crate::parse_with(r#" d"2001-01-01T01:01:01.9999999999" "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
+	crate::parse_with(r#" d"2001-01-01T01:01:01.9999999999" "#.as_bytes(), |parser| {
+		parser.parse_expr_field()
 	})
 	.unwrap_err();
 }
 
 #[test]
 fn empty_string() {
-	crate::parse_with("".as_bytes(), async |parser, stk| parser.parse_expr_field(stk).await)
-		.unwrap_err();
+	crate::parse_with("".as_bytes(), |parser| parser.parse_expr_field()).unwrap_err();
 }

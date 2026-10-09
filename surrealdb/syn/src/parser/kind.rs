@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use reblessive::Stk;
 use surrealdb_sql::Kind;
 use surrealdb_sql::kind::{GeometryKind, KindLiteral};
 
@@ -16,21 +15,21 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// expects the first `<` to already be eaten
-	pub async fn parse_kind(&mut self, stk: &mut Stk, delim: Span) -> ParseResult<Kind> {
-		let kind = self.parse_inner_kind(stk).await?;
+	pub fn parse_kind(&mut self, delim: Span) -> ParseResult<Kind> {
+		let kind = self.parse_inner_kind()?;
 		self.expect_closing_delimiter(t!(">"), delim)?;
 		Ok(kind)
 	}
 
 	/// Parse an inner kind, a kind without enclosing `<` `>`.
-	pub async fn parse_inner_kind(&mut self, stk: &mut Stk) -> ParseResult<Kind> {
-		match self.parse_inner_single_kind(stk).await? {
+	pub fn parse_inner_kind(&mut self) -> ParseResult<Kind> {
+		match self.parse_inner_single_kind()? {
 			Kind::Any => Ok(Kind::Any),
 			first => {
 				if self.peek_kind() == t!("|") {
 					let mut kind = vec![first];
 					while self.eat(t!("|")) {
-						kind.push(stk.run(|ctx| self.parse_concrete_kind(ctx)).await?);
+						kind.push(self.parse_concrete_kind()?);
 					}
 					let kind = Kind::either(kind);
 					Ok(kind)
@@ -42,7 +41,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse a single inner kind, a kind without enclosing `<` `>`.
-	pub(super) async fn parse_inner_single_kind(&mut self, stk: &mut Stk) -> ParseResult<Kind> {
+	pub(super) fn parse_inner_single_kind(&mut self) -> ParseResult<Kind> {
 		match self.peek_kind() {
 			t!("ANY") => {
 				self.pop_peek();
@@ -53,79 +52,31 @@ impl Parser<'_> {
 				enter_object_recursion!(this = self => {
 					let delim = expected!(this, t!("<")).span;
 					let mut kinds =
-						vec![Kind::None, stk.run(|ctx| this.parse_concrete_kind(ctx)).await?];
+						vec![Kind::None, this.parse_concrete_kind()?];
 					if this.peek_kind() == t!("|") {
 						while this.eat(t!("|")) {
-							kinds.push(stk.run(|ctx| this.parse_concrete_kind(ctx)).await?);
+							kinds.push(this.parse_concrete_kind()?);
 						}
 					}
 					this.expect_closing_delimiter(t!(">"), delim)?;
 					Ok(Kind::either(kinds))
 				})
 			}
-			_ => stk.run(|ctx| self.parse_concrete_kind(ctx)).await,
+			_ => self.parse_concrete_kind(),
 		}
 	}
 
 	/// Parse a single kind which is not any, option, or either.
-	async fn parse_concrete_kind(&mut self, stk: &mut Stk) -> ParseResult<Kind> {
+	fn parse_concrete_kind(&mut self) -> ParseResult<Kind> {
 		enter_object_recursion!(this = self => {
 		let next = this.next();
 		match next.kind {
 			t!("true") => Ok(Kind::Literal(KindLiteral::Bool(true))),
 			t!("false") => Ok(Kind::Literal(KindLiteral::Bool(false))),
-			t!("'") | t!("\"") => {
-				let str = this.unescape_string_span(next.span)?;
-				Ok(Kind::Literal(KindLiteral::String(str.into())))
+			t!("'") | t!("\"") | t!("+") | t!("-") | TokenKind::Digits | t!("{") | t!("[") => {
+				this.parse_literal_kind_body(next)
 			}
-			TokenKind::NaN => Ok(Kind::Literal(KindLiteral::Float(f64::NAN))),
-			TokenKind::Infinity => Ok(Kind::Literal(KindLiteral::Float(f64::INFINITY))),
-			t!("+") | t!("-") => {
-				let compound = this.lex_compound(next, compound::number)?;
-				let kind = match compound.value {
-					compound::Numeric::Float(f) => KindLiteral::Float(f),
-					compound::Numeric::Integer(int) => {
-						KindLiteral::Integer(int.into_int(compound.span)?)
-					}
-					compound::Numeric::Decimal(decimal) => KindLiteral::Decimal(decimal),
-					compound::Numeric::Duration(_) => unreachable!(),
-				};
-				Ok(Kind::Literal(kind))
-			}
-			TokenKind::Digits => {
-				let compound = this.lex_compound(next, compound::numeric)?;
-				let v = match compound.value {
-					compound::Numeric::Integer(x) => {
-						KindLiteral::Integer(x.into_int(compound.span)?)
-					}
-					compound::Numeric::Float(x) => KindLiteral::Float(x),
-					compound::Numeric::Decimal(x) => KindLiteral::Decimal(x),
-					compound::Numeric::Duration(x) => {
-						KindLiteral::Duration(x)
-					}
-				};
-				Ok(Kind::Literal(v))
-			}
-			t!("{") => {
-				let mut obj = BTreeMap::new();
-				while !this.eat(t!("}")) {
-					let key = this.parse_object_key()?;
-					expected!(this, t!(":"));
-					let kind = stk.run(|ctx| this.parse_inner_kind(ctx)).await?;
-					obj.insert(key.into(), kind);
-					this.eat(t!(","));
-				}
-				Ok(Kind::Literal(KindLiteral::Object(obj)))
-			}
-			t!("[") => {
-				let mut arr = Vec::new();
-				while !this.eat(t!("]")) {
-					let kind = stk.run(|ctx| this.parse_inner_kind(ctx)).await?;
-					arr.push(kind);
-					this.eat(t!(","));
-				}
-				Ok(Kind::Literal(KindLiteral::Array(arr)))
-			}
+			t!("RECORD") | t!("TABLE") | t!("TB") | t!("GEOMETRY") | t!("FILE") => this.parse_list_kind_body(next),
 			t!("BOOL") => Ok(Kind::Bool),
 			t!("NONE") => Ok(Kind::None),
 			t!("NULL") => Ok(Kind::Null),
@@ -143,49 +94,10 @@ impl Parser<'_> {
 			t!("RANGE") => Ok(Kind::Range),
 			t!("REGEX") => Ok(Kind::Regex),
 			t!("FUNCTION") => Ok(Kind::Function(Default::default(), Default::default())),
-			t!("RECORD") => {
-				let span = this.peek().span;
-				if this.eat(t!("<")) {
-					let mut tables = vec![this.parse_ident_str()?.into()];
-					while this.eat(t!("|")) {
-						tables.push(this.parse_ident_str()?.into());
-					}
-					this.expect_closing_delimiter(t!(">"), span)?;
-					Ok(Kind::Record(tables))
-				} else {
-					Ok(Kind::Record(Vec::new()))
-				}
-			}
-			t!("TABLE") | t!("TB") => {
-				let span = this.peek().span;
-				if this.eat(t!("<")) {
-					let mut tables = vec![this.parse_ident_str()?.into()];
-					while this.eat(t!("|")) {
-						tables.push(this.parse_ident_str()?.into());
-					}
-					this.expect_closing_delimiter(t!(">"), span)?;
-					Ok(Kind::Table(tables))
-				} else {
-					Ok(Kind::Table(Vec::new()))
-				}
-			}
-			t!("GEOMETRY") => {
-				let span = this.peek().span;
-				if this.eat(t!("<")) {
-					let mut kind = vec![this.parse_geometry_kind()?];
-					while this.eat(t!("|")) {
-						kind.push(this.parse_geometry_kind()?);
-					}
-					this.expect_closing_delimiter(t!(">"), span)?;
-					Ok(Kind::Geometry(kind))
-				} else {
-					Ok(Kind::Geometry(Vec::new()))
-				}
-			}
 			t!("ARRAY") => {
 				let span = this.peek().span;
 				if this.eat(t!("<")) {
-					let kind = stk.run(|ctx| this.parse_inner_kind(ctx)).await?;
+					let kind = this.parse_inner_kind()?;
 					let size = this.eat(t!(",")).then(|| this.next_token_value()).transpose()?;
 					this.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Array(Box::new(kind), size))
@@ -196,7 +108,7 @@ impl Parser<'_> {
 			t!("SET") => {
 				let span = this.peek().span;
 				if this.eat(t!("<")) {
-					let kind = stk.run(|ctx| this.parse_inner_kind(ctx)).await?;
+					let kind = this.parse_inner_kind()?;
 					let size = this.eat(t!(",")).then(|| this.next_token_value()).transpose()?;
 					this.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Set(Box::new(kind), size))
@@ -204,22 +116,134 @@ impl Parser<'_> {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
 				}
 			}
-			t!("FILE") => {
-				let span = this.peek().span;
-				if this.eat(t!("<")) {
-					let mut buckets = vec![this.parse_ident()?.into_string()];
-					while this.eat(t!("|")) {
-						buckets.push(this.parse_ident()?.into_string());
+			_ => unexpected!(this, next, "a kind name"),
+		}
+		})
+	}
+
+	/// Parses a literal kind whose first token, `next`, is already consumed.
+	///
+	/// Kept out of [`Self::parse_concrete_kind`], whose frame every nested
+	/// kind pays for.
+	#[inline(never)]
+	fn parse_literal_kind_body(&mut self, next: crate::token::Token) -> ParseResult<Kind> {
+		match next.kind {
+			t!("'") | t!("\"") => {
+				let str = self.unescape_string_span(next.span)?;
+				Ok(Kind::Literal(KindLiteral::String(str.into())))
+			}
+			TokenKind::NaN => Ok(Kind::Literal(KindLiteral::Float(f64::NAN))),
+			TokenKind::Infinity => Ok(Kind::Literal(KindLiteral::Float(f64::INFINITY))),
+			t!("+") | t!("-") => {
+				let compound = self.lex_compound(next, compound::number)?;
+				let kind = match compound.value {
+					compound::Numeric::Float(f) => KindLiteral::Float(f),
+					compound::Numeric::Integer(int) => {
+						KindLiteral::Integer(int.into_int(compound.span)?)
 					}
-					this.expect_closing_delimiter(t!(">"), span)?;
+					compound::Numeric::Decimal(decimal) => KindLiteral::Decimal(decimal),
+					compound::Numeric::Duration(_) => unreachable!(),
+				};
+				Ok(Kind::Literal(kind))
+			}
+			TokenKind::Digits => {
+				let compound = self.lex_compound(next, compound::numeric)?;
+				let v = match compound.value {
+					compound::Numeric::Integer(x) => {
+						KindLiteral::Integer(x.into_int(compound.span)?)
+					}
+					compound::Numeric::Float(x) => KindLiteral::Float(x),
+					compound::Numeric::Decimal(x) => KindLiteral::Decimal(x),
+					compound::Numeric::Duration(x) => KindLiteral::Duration(x),
+				};
+				Ok(Kind::Literal(v))
+			}
+			t!("{") => {
+				let mut obj = BTreeMap::new();
+				while !self.eat(t!("}")) {
+					let key = self.parse_object_key()?;
+					expected!(self, t!(":"));
+					let kind = self.parse_inner_kind()?;
+					obj.insert(key.into(), kind);
+					self.eat(t!(","));
+				}
+				Ok(Kind::Literal(KindLiteral::Object(obj)))
+			}
+			t!("[") => {
+				let mut arr = Vec::new();
+				while !self.eat(t!("]")) {
+					let kind = self.parse_inner_kind()?;
+					arr.push(kind);
+					self.eat(t!(","));
+				}
+				Ok(Kind::Literal(KindLiteral::Array(arr)))
+			}
+			_ => unexpected!(self, next, "a kind name"),
+		}
+	}
+
+	/// Parses a kind taking an optional `<a | b>` list of names, whose keyword, `next`, is already
+	/// consumed.
+	///
+	/// Kept out of [`Self::parse_concrete_kind`], whose frame every nested
+	/// kind pays for.
+	#[inline(never)]
+	fn parse_list_kind_body(&mut self, next: crate::token::Token) -> ParseResult<Kind> {
+		match next.kind {
+			t!("RECORD") => {
+				let span = self.peek().span;
+				if self.eat(t!("<")) {
+					let mut tables = vec![self.parse_ident_str()?.into()];
+					while self.eat(t!("|")) {
+						tables.push(self.parse_ident_str()?.into());
+					}
+					self.expect_closing_delimiter(t!(">"), span)?;
+					Ok(Kind::Record(tables))
+				} else {
+					Ok(Kind::Record(Vec::new()))
+				}
+			}
+			t!("TABLE") | t!("TB") => {
+				let span = self.peek().span;
+				if self.eat(t!("<")) {
+					let mut tables = vec![self.parse_ident_str()?.into()];
+					while self.eat(t!("|")) {
+						tables.push(self.parse_ident_str()?.into());
+					}
+					self.expect_closing_delimiter(t!(">"), span)?;
+					Ok(Kind::Table(tables))
+				} else {
+					Ok(Kind::Table(Vec::new()))
+				}
+			}
+			t!("GEOMETRY") => {
+				let span = self.peek().span;
+				if self.eat(t!("<")) {
+					let mut kind = vec![self.parse_geometry_kind()?];
+					while self.eat(t!("|")) {
+						kind.push(self.parse_geometry_kind()?);
+					}
+					self.expect_closing_delimiter(t!(">"), span)?;
+					Ok(Kind::Geometry(kind))
+				} else {
+					Ok(Kind::Geometry(Vec::new()))
+				}
+			}
+			t!("FILE") => {
+				let span = self.peek().span;
+				if self.eat(t!("<")) {
+					let mut buckets = vec![self.parse_ident()?.into_string()];
+					while self.eat(t!("|")) {
+						buckets.push(self.parse_ident()?.into_string());
+					}
+					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::File(buckets))
 				} else {
 					Ok(Kind::File(Vec::new()))
 				}
 			}
-			_ => unexpected!(this, next, "a kind name"),
+			_ => unexpected!(self, next, "a kind name"),
 		}
-		})
 	}
 
 	/// Parse the kind of gemoetry
@@ -243,7 +267,6 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-	use reblessive::Stack;
 	use rstest::rstest;
 	use surrealdb_types::ToSql;
 
@@ -251,8 +274,7 @@ mod tests {
 
 	fn kind(i: &str) -> ParseResult<Kind> {
 		let mut parser = Parser::new(i.as_bytes());
-		let mut stack = Stack::new();
-		stack.enter(|ctx| parser.parse_inner_kind(ctx)).finish()
+		parser.parse_inner_kind()
 	}
 
 	#[rstest]

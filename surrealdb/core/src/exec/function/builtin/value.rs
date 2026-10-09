@@ -1,7 +1,6 @@
 //! Value functions
 
 use anyhow::Result;
-use reblessive::tree::TreeStack;
 
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
@@ -150,11 +149,7 @@ impl ScalarFunction for ValueChain {
 			let args = FromArgs::from_args("value::chain", args)?;
 			let evaluator = StreamingClosureEvaluator::new(ctx);
 			let ev = Some(&evaluator as &dyn ClosureEvaluator);
-			let mut stack = TreeStack::new();
-			stack
-				.enter(|stk| async move { crate::fnc::value::chain((stk, ev), args).await })
-				.finish()
-				.await
+			crate::fnc::value::chain(ev, args).await
 		})
 	}
 }
@@ -206,11 +201,7 @@ impl ScalarFunction for ValueExpect {
 			let args = FromArgs::from_args("value::expect", args)?;
 			let evaluator = StreamingClosureEvaluator::new(ctx);
 			let ev = Some(&evaluator as &dyn ClosureEvaluator);
-			let mut stack = TreeStack::new();
-			stack
-				.enter(|stk| async move { crate::fnc::value::expect((stk, ev), args).await })
-				.finish()
-				.await
+			crate::fnc::value::expect(ev, args).await
 		})
 	}
 }

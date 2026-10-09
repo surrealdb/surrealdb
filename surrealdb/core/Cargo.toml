@@ -122,7 +122,6 @@ js = { workspace = true, features = [
     "properties",
     "rust-alloc",
 ], optional = true }
-reblessive = { workspace = true, features = ["tree"] }
 revision = { workspace = true }
 storekey.workspace = true
 surrealdb-types = { workspace = true }

@@ -1,4 +1,3 @@
-use reblessive::Stk;
 use surrealdb_sql::field::Selector;
 use surrealdb_sql::lookup::LookupKind;
 use surrealdb_sql::part::{DestructurePart, Recurse, RecurseInstruction};
@@ -25,9 +24,9 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the next tokens to be of a field set.
-	pub async fn parse_fields(&mut self, stk: &mut Stk) -> ParseResult<Fields> {
+	pub fn parse_fields(&mut self) -> ParseResult<Fields> {
 		if self.eat(t!("VALUE")) {
-			let expr = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+			let expr = self.parse_expr_field()?;
 			let alias = if self.eat(t!("AS")) {
 				// When using `SELECT VALUE ... AS ...`, only parse an alias if it is a valid
 				// identifier. It does not make sense to alias as a multi-part idiom because the
@@ -47,9 +46,9 @@ impl Parser<'_> {
 				let field = if self.eat(t!("*")) {
 					Field::All
 				} else {
-					let expr = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+					let expr = self.parse_expr_field()?;
 					let alias = if self.eat(t!("AS")) {
-						Some(self.parse_plain_idiom(stk).await?)
+						Some(self.parse_plain_idiom()?)
 					} else {
 						None
 					};
@@ -68,10 +67,10 @@ impl Parser<'_> {
 	}
 
 	/// Parses a list of idioms separated by a `,`
-	pub(super) async fn parse_idiom_list(&mut self, stk: &mut Stk) -> ParseResult<Vec<Idiom>> {
-		let mut res = vec![self.parse_plain_idiom(stk).await?];
+	pub(super) fn parse_idiom_list(&mut self) -> ParseResult<Vec<Idiom>> {
+		let mut res = vec![self.parse_plain_idiom()?];
 		while self.eat(t!(",")) {
-			res.push(self.parse_plain_idiom(stk).await?);
+			res.push(self.parse_plain_idiom()?);
 		}
 		Ok(res)
 	}
@@ -82,13 +81,9 @@ impl Parser<'_> {
 	/// This function differes from [`Parser::parse_remaining_value_idiom`] in
 	/// how it handles graph parsing. Graphs inside a plain idioms will remain
 	/// a normal graph production.
-	pub(super) async fn parse_remaining_idiom(
-		&mut self,
-		stk: &mut Stk,
-		start: Vec<Part>,
-	) -> ParseResult<Idiom> {
+	pub(super) fn parse_remaining_idiom(&mut self, start: Vec<Part>) -> ParseResult<Idiom> {
 		let restore_to = self.settings.expr_recursion_limit;
-		let res = self.parse_remaining_idiom_parts(stk, start).await;
+		let res = self.parse_remaining_idiom_parts(start);
 		self.settings.expr_recursion_limit = restore_to;
 		res.map(Idiom)
 	}
@@ -100,11 +95,7 @@ impl Parser<'_> {
 	/// The caller restores the budget so that sibling expressions are not
 	/// charged for one another; a nested expression inside a part sees the
 	/// budget the parts before it have consumed.
-	async fn parse_remaining_idiom_parts(
-		&mut self,
-		stk: &mut Stk,
-		start: Vec<Part>,
-	) -> ParseResult<Vec<Part>> {
+	fn parse_remaining_idiom_parts(&mut self, start: Vec<Part>) -> ParseResult<Vec<Part>> {
 		let mut res = start;
 		loop {
 			if self.is_part_start() {
@@ -117,43 +108,31 @@ impl Parser<'_> {
 				}
 				t!(".") => {
 					self.pop_peek();
-					res.push(self.parse_dot_part(stk).await?)
+					res.push(self.parse_dot_part()?)
 				}
 				t!("[") => {
 					let span = self.pop_peek().span;
-					let part = self.parse_bracket_part(stk, span).await?;
+					let part = self.parse_bracket_part(span)?;
 					res.push(part)
 				}
 				t!("->") => {
 					self.pop_peek();
-					let lookup =
-						stk.run(|stk| self.parse_lookup(stk, LookupKind::Graph(Dir::Out))).await?;
-					res.push(Part::Graph(Box::new(lookup)))
+					res.push(self.parse_graph_part(LookupKind::Graph(Dir::Out))?)
 				}
 				t!("<") => {
 					if let Some(peek) = self.peek_whitespace1() {
 						if peek.kind == t!("~") {
 							self.pop_peek();
 							self.pop_peek();
-							let lookup = stk
-								.run(|stk| self.parse_lookup(stk, LookupKind::Reference))
-								.await?;
-
-							res.push(Part::Graph(Box::new(lookup)))
+							res.push(self.parse_graph_part(LookupKind::Reference)?)
 						} else if peek.kind == t!("-") {
 							self.pop_peek();
 							self.pop_peek();
-							let lookup = stk
-								.run(|stk| self.parse_lookup(stk, LookupKind::Graph(Dir::In)))
-								.await?;
-							res.push(Part::Graph(Box::new(lookup)))
+							res.push(self.parse_graph_part(LookupKind::Graph(Dir::In))?)
 						} else if peek.kind == t!("->") {
 							self.pop_peek();
 							self.pop_peek();
-							let lookup = stk
-								.run(|stk| self.parse_lookup(stk, LookupKind::Graph(Dir::Both)))
-								.await?;
-							res.push(Part::Graph(Box::new(lookup)))
+							res.push(self.parse_graph_part(LookupKind::Graph(Dir::Both))?)
 						} else {
 							break;
 						}
@@ -183,24 +162,16 @@ impl Parser<'_> {
 	/// how it handles graph parsing. When parsing a idiom like production
 	/// which can be a value, the initial start value might need to be changed
 	/// to a Edge depending on what is parsed next.
-	pub(super) async fn parse_remaining_value_idiom(
-		&mut self,
-		stk: &mut Stk,
-		start: Vec<Part>,
-	) -> ParseResult<Expr> {
+	pub(super) fn parse_remaining_value_idiom(&mut self, start: Vec<Part>) -> ParseResult<Expr> {
 		let restore_to = self.settings.expr_recursion_limit;
-		let res = self.parse_remaining_value_idiom_parts(stk, start).await;
+		let res = self.parse_remaining_value_idiom_parts(start);
 		self.settings.expr_recursion_limit = restore_to;
 		res
 	}
 
 	/// The part loop of [`Self::parse_remaining_value_idiom`]; parts are
 	/// charged as in [`Self::parse_remaining_idiom_parts`].
-	async fn parse_remaining_value_idiom_parts(
-		&mut self,
-		stk: &mut Stk,
-		start: Vec<Part>,
-	) -> ParseResult<Expr> {
+	fn parse_remaining_value_idiom_parts(&mut self, start: Vec<Part>) -> ParseResult<Expr> {
 		let mut res = start;
 		loop {
 			if self.is_part_start() {
@@ -213,36 +184,31 @@ impl Parser<'_> {
 				}
 				t!(".") => {
 					self.pop_peek();
-					res.push(self.parse_dot_part(stk).await?)
+					res.push(self.parse_dot_part()?)
 				}
 				t!("[") => {
 					let span = self.pop_peek().span;
-					let part = self.parse_bracket_part(stk, span).await?;
+					let part = self.parse_bracket_part(span)?;
 					res.push(part)
 				}
 				t!("->") => {
 					self.pop_peek();
-					let x = self.parse_lookup(stk, LookupKind::Graph(Dir::Out)).await?;
-					res.push(Part::Graph(Box::new(x)))
+					res.push(self.parse_graph_part(LookupKind::Graph(Dir::Out))?)
 				}
 				t!("<") => {
 					if let Some(peek) = self.peek_whitespace1() {
 						if peek.kind == t!("~") {
 							self.pop_peek();
 							self.pop_peek();
-							let lookup = self.parse_lookup(stk, LookupKind::Reference).await?;
-							res.push(Part::Graph(Box::new(lookup)))
+							res.push(self.parse_graph_part(LookupKind::Reference)?)
 						} else if peek.kind == t!("-") {
 							self.pop_peek();
 							self.pop_peek();
-							let lookup = self.parse_lookup(stk, LookupKind::Graph(Dir::In)).await?;
-							res.push(Part::Graph(Box::new(lookup)))
+							res.push(self.parse_graph_part(LookupKind::Graph(Dir::In))?)
 						} else if peek.kind == t!("->") {
 							self.pop_peek();
 							self.pop_peek();
-							let lookup =
-								self.parse_lookup(stk, LookupKind::Graph(Dir::Both)).await?;
-							res.push(Part::Graph(Box::new(lookup)))
+							res.push(self.parse_graph_part(LookupKind::Graph(Dir::Both))?)
 						} else {
 							break;
 						}
@@ -258,22 +224,20 @@ impl Parser<'_> {
 
 	/// Parse a idiom which can only start with a graph or an identifier.
 	/// Other expressions are not allowed as start of this idiom
-	pub async fn parse_plain_idiom(&mut self, stk: &mut Stk) -> ParseResult<Idiom> {
+	pub fn parse_plain_idiom(&mut self) -> ParseResult<Idiom> {
 		let start = match self.peek_kind() {
 			t!("->") => {
 				self.pop_peek();
-				let lookup =
-					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Out))).await?;
-				Part::Graph(Box::new(lookup))
+				self.parse_graph_part(LookupKind::Graph(Dir::Out))?
 			}
 			t!("<") => {
 				let t = self.pop_peek();
 				let lookup = if self.eat_whitespace(t!("~")) {
-					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Reference)).await?
+					self.parse_lookup(LookupKind::Reference)?
 				} else if self.eat_whitespace(t!("-")) {
-					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::In))).await?
+					self.parse_lookup(LookupKind::Graph(Dir::In))?
 				} else if self.eat_whitespace(t!("->")) {
-					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Both))).await?
+					self.parse_lookup(LookupKind::Graph(Dir::Both))?
 				} else {
 					unexpected!(self, t, "either `<-` `<->` or `->`")
 				};
@@ -282,11 +246,22 @@ impl Parser<'_> {
 			_ => Part::Field(self.parse_ident_str()?.into()),
 		};
 		let start = vec![start];
-		self.parse_remaining_idiom(stk, start).await
+		self.parse_remaining_idiom(start)
+	}
+
+	/// Parses a graph or reference lookup into an idiom part.
+	///
+	/// A `Lookup` is large, and the idiom loops that call this sit on the
+	/// parser's recursion path, so it is built and boxed in a frame of its own
+	/// rather than in theirs.
+	#[inline(never)]
+	pub(super) fn parse_graph_part(&mut self, kind: LookupKind) -> ParseResult<Part> {
+		Ok(Part::Graph(Box::new(self.parse_lookup(kind)?)))
 	}
 
 	/// Parse the part after the `.` in a idiom
-	pub(super) async fn parse_dot_part(&mut self, stk: &mut Stk) -> ParseResult<Part> {
+	#[inline(never)]
+	pub(super) fn parse_dot_part(&mut self) -> ParseResult<Part> {
 		let res = match self.peek_kind() {
 			t!("?") => {
 				self.pop_peek();
@@ -302,12 +277,12 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				self.pop_peek();
-				stk.run(|ctx| self.parse_curly_part(ctx)).await?
+				self.parse_curly_part()?
 			}
 			_ => {
 				let ident = self.parse_ident_str()?.into();
 				if self.eat(t!("(")) {
-					self.parse_function_part(stk, ident).await?
+					self.parse_function_part(ident)?
 				} else {
 					Part::Field(ident)
 				}
@@ -331,41 +306,36 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub(super) async fn parse_function_part(
-		&mut self,
-		stk: &mut Stk,
-		name: Strand,
-	) -> ParseResult<Part> {
-		let args = self.parse_function_args(stk).await?;
+	pub(super) fn parse_function_part(&mut self, name: Strand) -> ParseResult<Part> {
+		let args = self.parse_function_args()?;
 		Ok(Part::Method(name, args))
 	}
 	/// Parse the part after the `.{` in an idiom
-	pub(super) async fn parse_curly_part(&mut self, stk: &mut Stk) -> ParseResult<Part> {
+	pub(super) fn parse_curly_part(&mut self) -> ParseResult<Part> {
 		match self.peek_kind() {
-			t!("*") | t!("..") | TokenKind::Digits => self.parse_recurse_part(stk).await,
-			_ => self.parse_destructure_part(stk).await,
+			t!("*") | t!("..") | TokenKind::Digits => self.parse_recurse_part(),
+			_ => self.parse_destructure_part(),
 		}
 	}
 	/// Parse a destructure part, expects `.{` to already be parsed.
 	///
-	/// Every nesting level is charged against the expression-depth budget. The
-	/// parse itself recurses on the heap (`stk`), but a destructure nests one
-	/// [`DestructurePart::Destructure`] per level and the consumers of the tree
-	/// it builds do not: lowering, `ToSql` and `Drop` each recurse once per
-	/// level on the native stack, which is the denial-of-service vector
-	/// [`Self::enter_expr_depth`] bounds. The budget is restored on return so
-	/// that the sibling fields of one destructure are not charged for one
+	/// Every nesting level is charged against the expression-depth budget. A
+	/// destructure nests one [`DestructurePart::Destructure`] per level, and
+	/// the parse and the consumers of the tree it builds — lowering, `ToSql`
+	/// and `Drop` — each recurse once per level on the native stack, which is
+	/// the denial-of-service vector [`Self::enter_expr_depth`] bounds. The budget is restored on
+	/// return so that the sibling fields of one destructure are not charged for one
 	/// another's depth.
-	pub(super) async fn parse_destructure_part(&mut self, stk: &mut Stk) -> ParseResult<Part> {
+	pub(super) fn parse_destructure_part(&mut self) -> ParseResult<Part> {
 		let restore_to = self.settings.expr_recursion_limit;
 		self.enter_expr_depth()?;
-		let res = self.parse_destructure_part_fields(stk).await;
+		let res = self.parse_destructure_part_fields();
 		self.settings.expr_recursion_limit = restore_to;
 		res
 	}
 
 	/// The field loop of [`Self::parse_destructure_part`].
-	async fn parse_destructure_part_fields(&mut self, stk: &mut Stk) -> ParseResult<Part> {
+	fn parse_destructure_part_fields(&mut self) -> ParseResult<Part> {
 		let start = self.last_span();
 		let mut destructured: Vec<DestructurePart> = Vec::new();
 		loop {
@@ -387,7 +357,7 @@ impl Parser<'_> {
 			let part = match self.peek_kind() {
 				t!(":") => {
 					self.pop_peek();
-					let idiom = match self.parse_expr_field(stk).await? {
+					let idiom = match self.parse_expr_field()? {
 						Expr::Idiom(x) => x,
 						v => Idiom(vec![Part::Start(v)]),
 					};
@@ -396,7 +366,7 @@ impl Parser<'_> {
 				t!(".") => {
 					self.pop_peek();
 					let found = self.peek_kind();
-					match self.parse_dot_part(stk).await? {
+					match self.parse_dot_part()? {
 						Part::All => DestructurePart::All(field),
 						Part::Destructure(v) => DestructurePart::Destructure(field, v),
 						_ => {
@@ -448,10 +418,7 @@ impl Parser<'_> {
 		Ok(Recurse::Range(min, max))
 	}
 	/// Parse a recursion instruction following the inner recurse part, if any
-	pub(super) async fn parse_recurse_instruction(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<Option<RecurseInstruction>> {
+	pub(super) fn parse_recurse_instruction(&mut self) -> ParseResult<Option<RecurseInstruction>> {
 		let instruction = if self.eat(t!("+")) {
 			let kind = self.parse_ident()?.into_string();
 			if kind.eq_ignore_ascii_case("path") {
@@ -494,7 +461,7 @@ impl Parser<'_> {
 				let expects = match token.kind {
 					TokenKind::Parameter => Expr::Param(self.next_token_value::<Param>()?),
 					x if Parser::kind_is_identifier(x) => {
-						Expr::Literal(Literal::RecordId(self.parse_record_id(stk).await?))
+						Expr::Literal(Literal::RecordId(self.parse_record_id()?))
 					}
 					_ => {
 						unexpected!(self, token, "a param or record-id");
@@ -527,15 +494,15 @@ impl Parser<'_> {
 		Ok(instruction)
 	}
 	/// Parse a recurse part, expects `.{` to already be parsed
-	pub(super) async fn parse_recurse_part(&mut self, stk: &mut Stk) -> ParseResult<Part> {
+	pub(super) fn parse_recurse_part(&mut self) -> ParseResult<Part> {
 		let start = self.last_span();
 		let recurse = self.parse_recurse_inner()?;
-		let instruction = self.parse_recurse_instruction(stk).await?;
+		let instruction = self.parse_recurse_instruction()?;
 		self.expect_closing_delimiter(t!("}"), start)?;
 
 		let nest = if self.eat(t!("(")) {
 			let start = self.last_span();
-			let idiom = self.parse_remaining_idiom(stk, vec![]).await?;
+			let idiom = self.parse_remaining_idiom(vec![])?;
 			self.expect_closing_delimiter(t!(")"), start)?;
 			Some(idiom)
 		} else {
@@ -546,11 +513,8 @@ impl Parser<'_> {
 	}
 
 	/// Parse the part after the `[` in a idiom
-	pub(super) async fn parse_bracket_part(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<Part> {
+	#[inline(never)]
+	pub(super) fn parse_bracket_part(&mut self, start: Span) -> ParseResult<Part> {
 		let peek = self.peek();
 		let res = match peek.kind {
 			t!("*") => {
@@ -563,11 +527,11 @@ impl Parser<'_> {
 			}
 			t!("?") | t!("WHERE") => {
 				self.pop_peek();
-				let value = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+				let value = self.parse_expr_field()?;
 				Part::Where(value)
 			}
 			_ => {
-				let value = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+				let value = self.parse_expr_inherit()?;
 				Part::Value(value)
 			}
 		};
@@ -657,10 +621,10 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects to be at the start of a what list.
-	pub(super) async fn parse_what_list(&mut self, stk: &mut Stk) -> ParseResult<Vec<Expr>> {
-		let mut res = vec![stk.run(|ctx| self.parse_expr_table(ctx)).await?];
+	pub(super) fn parse_what_list(&mut self) -> ParseResult<Vec<Expr>> {
+		let mut res = vec![self.parse_expr_table()?];
 		while self.eat(t!(",")) {
-			res.push(stk.run(|ctx| self.parse_expr_table(ctx)).await?)
+			res.push(self.parse_expr_table()?)
 		}
 		Ok(res)
 	}
@@ -670,11 +634,7 @@ impl Parser<'_> {
 	/// # Parser state
 	/// Expects to just have eaten a direction (e.g. <-, <->, or ->) and be at
 	/// the field like part of the graph
-	pub(super) async fn parse_lookup(
-		&mut self,
-		stk: &mut Stk,
-		lookup_kind: LookupKind,
-	) -> ParseResult<Lookup> {
+	pub(super) fn parse_lookup(&mut self, lookup_kind: LookupKind) -> ParseResult<Lookup> {
 		let token = self.peek();
 		match token.kind {
 			t!("?") => {
@@ -688,7 +648,7 @@ impl Parser<'_> {
 				let span = self.pop_peek().span;
 				let (expr, only) = if self.eat(t!("SELECT")) {
 					let before = self.peek().span;
-					let expr = self.parse_fields(stk).await?;
+					let expr = self.parse_fields()?;
 					let fields_span = before.covers(self.last_span());
 					expected!(self, t!("FROM"));
 					let only = self.eat(t!("ONLY"));
@@ -704,17 +664,17 @@ impl Parser<'_> {
 						Vec::new()
 					}
 					x if Self::kind_is_identifier(x) => {
-						let subject = self.parse_lookup_subject(stk, true).await?;
+						let subject = self.parse_lookup_subject(true)?;
 						let mut subjects = vec![subject];
 						while self.eat(t!(",")) {
-							subjects.push(self.parse_lookup_subject(stk, true).await?);
+							subjects.push(self.parse_lookup_subject(true)?);
 						}
 						subjects
 					}
 					_ => unexpected!(self, token, "`?`, an identifier or a range"),
 				};
 
-				let cond = self.try_parse_condition(stk).await?;
+				let cond = self.try_parse_condition()?;
 				let (split, group, order) = if let Some((ref expr, fields_span)) = expr {
 					let split_before = self.peek().span;
 					let split = self.try_parse_split(expr, fields_span)?;
@@ -727,17 +687,17 @@ impl Parser<'_> {
 				};
 
 				let (limit, start) = if let t!("START") = self.peek_kind() {
-					let start = self.try_parse_start(stk).await?;
-					let limit = self.try_parse_limit(stk).await?;
+					let start = self.try_parse_start()?;
+					let limit = self.try_parse_limit()?;
 					(limit, start)
 				} else {
-					let limit = self.try_parse_limit(stk).await?;
-					let start = self.try_parse_start(stk).await?;
+					let limit = self.try_parse_limit()?;
+					let start = self.try_parse_start()?;
 					(limit, start)
 				};
 
 				let alias = if self.eat(t!("AS")) {
-					Some(self.parse_plain_idiom(stk).await?)
+					Some(self.parse_plain_idiom()?)
 				} else {
 					None
 				};
@@ -761,7 +721,7 @@ impl Parser<'_> {
 			x if Self::kind_is_identifier(x) => {
 				// The following function should always succeed here,
 				// returning an error here would be a bug, so unwrap.
-				let subject = self.parse_lookup_subject(stk, false).await?;
+				let subject = self.parse_lookup_subject(false)?;
 				Ok(Lookup {
 					kind: lookup_kind,
 					what: vec![subject],

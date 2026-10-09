@@ -4,7 +4,6 @@ use std::path::Path;
 use std::time::Instant;
 
 use ast::Query;
-use reblessive::Stack;
 
 use crate::Config;
 use crate::test::{SEPERATOR, walk_dir};
@@ -37,18 +36,17 @@ where
 
 		let mut offset = 0;
 
-		let mut stack = Stack::new();
 		let mut ast = ast::Ast::empty();
 
 		for i in source.char_indices().map(|x| x.0).skip(1).chain(iter::once(source.len())) {
 			let slice = &source[offset..i];
 			let res = if i == source.len() {
 				count += 1;
-				crate::Parser::enter_parse_reuse::<Query>(slice, &mut stack, &mut ast, config)
+				crate::Parser::enter_parse_reuse::<Query>(slice, &mut ast, config)
 					.map(|x| Some((x, (i - offset) as u32)))
 			} else {
 				count += 1;
-				crate::Parser::enter_partial_parse::<Query>(slice, &mut stack, &mut ast, config)
+				crate::Parser::enter_partial_parse::<Query>(slice, &mut ast, config)
 			};
 
 			match res {

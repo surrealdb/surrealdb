@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 #[cfg(test)]
 use common::future::stream::{self, Yielder};
-use reblessive::TreeStack;
 
 #[cfg(test)]
 use super::common::{
@@ -366,10 +365,7 @@ pub(crate) async fn open_full_text_hits(
 	.context("Failed to open full-text index")?;
 	let query_terms = {
 		let az_fn = StreamingAnalyzerFunction::new(ctx);
-		let mut stack = TreeStack::new();
-		stack
-			.enter(|stk| fti.extract_querying_terms(stk, frozen_ctx, &az_fn, query.to_owned()))
-			.finish()
+		fti.extract_querying_terms(frozen_ctx, &az_fn, query.to_owned())
 			.await
 			.context("Failed to extract query terms")?
 	};

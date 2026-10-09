@@ -671,11 +671,7 @@ impl MatchesEval {
 
 		let query_terms = {
 			let az_fn = StreamingAnalyzerFunction::new(ctx.exec_ctx);
-			let mut stack = reblessive::TreeStack::new();
-			stack
-				.enter(|stk| fti.extract_querying_terms(stk, frozen, &az_fn, query.to_owned()))
-				.finish()
-				.await?
+			fti.extract_querying_terms(frozen, &az_fn, query.to_owned()).await?
 		};
 
 		Ok((fti, query_terms))
@@ -757,13 +753,7 @@ impl MatchesEval {
 				let value = left().await?;
 				let matches = {
 					let az_fn = StreamingAnalyzerFunction::new(ctx.exec_ctx);
-					let mut stack = reblessive::TreeStack::new();
-					stack
-						.enter(|stk| {
-							fti.matches_value(stk, &az_fn, qt, self.operator.operator, value)
-						})
-						.finish()
-						.await?
+					fti.matches_value(&az_fn, qt, self.operator.operator, value).await?
 				};
 				Ok(Value::Bool(matches))
 			}

@@ -5,8 +5,6 @@
 //! sequence of element patterns (`pathTerm : pathFactor+`); node-edge-node
 //! alternation is enforced here semantically, with targeted errors.
 
-use reblessive::Stk;
-
 use crate::gql::ast::{
 	EdgeDirection, EdgePattern, ElementPredicate, Ident, LabelExpr, NodePattern, PathMode,
 	PathPattern, PathPatternPrefix, PathSearchKind, PathStep, Quantifier, QuantifierKind,
@@ -21,7 +19,7 @@ impl Parser<'_> {
 	/// pathPatternPrefix? pathPatternExpression` (GQL.g4:834), where the
 	/// expression must be a node pattern followed by zero or more edge-node
 	/// steps.
-	pub(super) async fn parse_path_pattern(&mut self, stk: &mut Stk) -> ParseResult<PathPattern> {
+	pub(super) fn parse_path_pattern(&mut self) -> ParseResult<PathPattern> {
 		// A path variable declaration is an identifier directly followed by
 		// `=`; an identifier in pattern position can be nothing else.
 		let path_var = if Self::token_can_be_ident(self.peek_kind()) && self.peek1().kind == t!("=")
@@ -58,7 +56,7 @@ impl Parser<'_> {
 			_ => {}
 		}
 
-		let start = self.parse_node_pattern(stk).await?;
+		let start = self.parse_node_pattern()?;
 		let mut steps = Vec::new();
 		loop {
 			let token = self.peek();
@@ -87,14 +85,14 @@ impl Parser<'_> {
 				}
 				_ => {}
 			}
-			let Some(edge) = self.parse_edge_pattern(stk).await? else {
+			let Some(edge) = self.parse_edge_pattern()? else {
 				break;
 			};
 			let token = self.peek();
 			if token.kind != t!("(") {
 				unexpected!(self, token, "a node pattern after this edge pattern");
 			}
-			let node = self.parse_node_pattern(stk).await?;
+			let node = self.parse_node_pattern()?;
 			steps.push(PathStep {
 				edge,
 				node,
@@ -235,7 +233,7 @@ impl Parser<'_> {
 
 	/// Parse a node pattern: `LEFT_PAREN elementPatternFiller RIGHT_PAREN`
 	/// (GQL.g4:993).
-	async fn parse_node_pattern(&mut self, stk: &mut Stk) -> ParseResult<NodePattern> {
+	fn parse_node_pattern(&mut self) -> ParseResult<NodePattern> {
 		let token = self.peek();
 		if token.kind != t!("(") {
 			unexpected!(self, token, "a node pattern");
@@ -257,7 +255,7 @@ impl Parser<'_> {
 			);
 		}
 
-		let (var, label, predicate) = self.parse_element_filler(stk).await?;
+		let (var, label, predicate) = self.parse_element_filler()?;
 
 		// A `=` after the variable is a subpath variable declaration, which
 		// also only occurs in parenthesized path pattern expressions.
@@ -281,7 +279,7 @@ impl Parser<'_> {
 	/// start one. From `edgePattern` (GQL.g4:1035-1086): seven full forms
 	/// wrapping an element pattern filler and seven abbreviated forms, with
 	/// an optional postfix quantifier.
-	async fn parse_edge_pattern(&mut self, stk: &mut Stk) -> ParseResult<Option<EdgePattern>> {
+	fn parse_edge_pattern(&mut self) -> ParseResult<Option<EdgePattern>> {
 		let token = self.peek();
 		// Abbreviated forms first: `<-` `~` `->` `<~` `~>` `<->` `-`.
 		let abbreviated = match token.kind {
@@ -312,7 +310,7 @@ impl Parser<'_> {
 		let direction = match token.kind {
 			t!("-[") => {
 				self.pop_peek();
-				let filler = self.parse_element_filler(stk).await?;
+				let filler = self.parse_element_filler()?;
 				let close = self.next();
 				let direction = match close.kind {
 					t!("]->") => EdgeDirection::Right,
@@ -323,7 +321,7 @@ impl Parser<'_> {
 			}
 			t!("<-[") => {
 				self.pop_peek();
-				let filler = self.parse_element_filler(stk).await?;
+				let filler = self.parse_element_filler()?;
 				let close = self.next();
 				let direction = match close.kind {
 					t!("]-") => EdgeDirection::Left,
@@ -334,7 +332,7 @@ impl Parser<'_> {
 			}
 			t!("~[") => {
 				self.pop_peek();
-				let filler = self.parse_element_filler(stk).await?;
+				let filler = self.parse_element_filler()?;
 				let close = self.next();
 				let direction = match close.kind {
 					t!("]~") => EdgeDirection::Undirected,
@@ -345,7 +343,7 @@ impl Parser<'_> {
 			}
 			t!("<~[") => {
 				self.pop_peek();
-				let filler = self.parse_element_filler(stk).await?;
+				let filler = self.parse_element_filler()?;
 				let close = self.next();
 				let direction = match close.kind {
 					t!("]~") => EdgeDirection::LeftOrUndirected,
@@ -371,9 +369,8 @@ impl Parser<'_> {
 	/// isLabelExpression? elementPatternPredicate?` (GQL.g4:997), shared
 	/// between node and edge patterns. All three parts are optional; the
 	/// predicate is either an inline `WHERE` or a property map, never both.
-	async fn parse_element_filler(
+	fn parse_element_filler(
 		&mut self,
-		stk: &mut Stk,
 	) -> ParseResult<(Option<Ident>, Option<LabelExpr>, Option<ElementPredicate>)> {
 		let token = self.peek();
 		let var = match token.kind {
@@ -393,7 +390,7 @@ impl Parser<'_> {
 		// Labels are introduced by `:` or the keyword `IS` (`isOrColon`,
 		// GQL.g4:1024).
 		let label = if self.eat(t!(":")) || self.eat(t!("IS")) {
-			Some(self.parse_label_expr(stk).await?)
+			Some(self.parse_label_expr()?)
 		} else {
 			None
 		};
@@ -401,7 +398,7 @@ impl Parser<'_> {
 		let predicate = match self.peek_kind() {
 			t!("WHERE") => {
 				self.pop_peek();
-				let expr = stk.run(|stk| self.parse_expr(stk)).await?;
+				let expr = self.parse_expr()?;
 				Some(ElementPredicate::Where(expr))
 			}
 			t!("{") => {
@@ -410,7 +407,7 @@ impl Parser<'_> {
 				loop {
 					let key = self.parse_ident()?;
 					expected!(self, t!(":"));
-					let value = stk.run(|stk| self.parse_expr(stk)).await?;
+					let value = self.parse_expr()?;
 					props.push((key, value));
 					if !self.eat(t!(",")) {
 						break;
@@ -513,38 +510,45 @@ impl Parser<'_> {
 
 	/// Parse a label expression (GQL.g4:1102-1109), with precedence
 	/// `!` > `&` > `|`.
-	async fn parse_label_expr(&mut self, stk: &mut Stk) -> ParseResult<LabelExpr> {
-		let mut left = self.parse_label_conjunction(stk).await?;
+	fn parse_label_expr(&mut self) -> ParseResult<LabelExpr> {
+		let mut left = self.parse_label_conjunction()?;
 		while self.eat(t!("|")) {
-			let right = self.parse_label_conjunction(stk).await?;
+			let right = self.parse_label_conjunction()?;
 			let span = left.span().covers(right.span());
 			left = LabelExpr::Disjunction(Box::new(left), Box::new(right), span);
 		}
 		Ok(left)
 	}
 
-	async fn parse_label_conjunction(&mut self, stk: &mut Stk) -> ParseResult<LabelExpr> {
-		let mut left = stk.run(|stk| self.parse_label_negation(stk)).await?;
+	fn parse_label_conjunction(&mut self) -> ParseResult<LabelExpr> {
+		let mut left = self.parse_label_negation()?;
 		while self.eat(t!("&")) {
-			let right = stk.run(|stk| self.parse_label_negation(stk)).await?;
+			let right = self.parse_label_negation()?;
 			let span = left.span().covers(right.span());
 			left = LabelExpr::Conjunction(Box::new(left), Box::new(right), span);
 		}
 		Ok(left)
 	}
 
-	async fn parse_label_negation(&mut self, stk: &mut Stk) -> ParseResult<LabelExpr> {
-		let token = self.peek();
-		if token.kind == t!("!") {
-			self.pop_peek();
-			let inner = stk.run(|stk| self.parse_label_negation(stk)).await?;
-			let span = token.span.covers(inner.span());
-			return Ok(LabelExpr::Negation(Box::new(inner), span));
+	/// Parses a label primary under any number of `!` prefixes.
+	///
+	/// A negation chain is not charged against a depth budget — labels never
+	/// reach `LogicalExpr` — so it is parsed with a loop rather than by
+	/// recursion, and nested from the inside out once the primary is known.
+	fn parse_label_negation(&mut self) -> ParseResult<LabelExpr> {
+		let mut bangs = Vec::new();
+		while self.peek().kind == t!("!") {
+			bangs.push(self.pop_peek().span);
 		}
-		self.parse_label_primary(stk).await
+		let mut expr = self.parse_label_primary()?;
+		while let Some(bang) = bangs.pop() {
+			let span = bang.covers(expr.span());
+			expr = LabelExpr::Negation(Box::new(expr), span);
+		}
+		Ok(expr)
 	}
 
-	async fn parse_label_primary(&mut self, stk: &mut Stk) -> ParseResult<LabelExpr> {
+	fn parse_label_primary(&mut self) -> ParseResult<LabelExpr> {
 		let token = self.peek();
 		match token.kind {
 			t!("%") => {
@@ -554,7 +558,7 @@ impl Parser<'_> {
 			t!("(") => {
 				enter_object_recursion!(this = self => {
 					let open = this.pop_peek().span;
-					let inner = stk.run(|stk| this.parse_label_expr(stk)).await?;
+					let inner = this.parse_label_expr()?;
 					this.expect_closing_delimiter(t!(")"), open)?;
 					Ok(inner)
 				})

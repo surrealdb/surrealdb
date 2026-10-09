@@ -15,17 +15,15 @@
 //! alternating array) with no field structure, so property access on them is
 //! rejected.
 //!
-//! All recursion over expressions runs on a [`reblessive`] stack: the parser
-//! deliberately builds arbitrarily deep *linear* chains (binary operator
-//! spines, property and `NOT` chains) without consuming its nesting budget,
-//! so the lowering must not recurse on the machine stack either.
+//! Recursion over expressions runs on the call stack. Its depth is bounded by
+//! the parser: nested constructs charge the object budget and linear chains
+//! (binary operator spines, property and `NOT` chains) charge the expression
+//! budget, so no tree handed to the lowering is deeper than those allow.
 //!
 //! Expressions are built directly as the logical plan's scalar,
 //! [`LogicalExpr`]: a `MatchPlan` is a logical plan node, and the streaming
 //! planner compiles its scalars as it compiles every other scalar. No surface
 //! or expression-layer AST is built on the way.
-
-use reblessive::Stk;
 
 use crate::expr::logical::{LogicalCall, LogicalExpr, LogicalLiteral};
 use crate::expr::match_plan::{BindingId, BindingKind};
@@ -110,11 +108,7 @@ impl Scope<'_> {
 /// comparison operands): variable references resolve to binding-row paths;
 /// comparisons and logical operators lower two-valued — the §4 guards apply to
 /// predicate position only.
-pub(super) async fn lower_value(
-	stk: &mut Stk,
-	expr: &GqlExpr,
-	scope: &Scope<'_>,
-) -> Result<LogicalExpr, SyntaxError> {
+pub(super) fn lower_value(expr: &GqlExpr, scope: &Scope<'_>) -> Result<LogicalExpr, SyntaxError> {
 	match expr {
 		GqlExpr::Literal(lit, _) => Ok(lower_literal(lit)),
 		GqlExpr::Param {
@@ -122,13 +116,13 @@ pub(super) async fn lower_value(
 			span,
 		} => lower_param(name, *span),
 		GqlExpr::Variable(ident) => scope.binding_expr(ident, &[]),
-		GqlExpr::Property(..) => lower_property(stk, expr, scope).await,
+		GqlExpr::Property(..) => lower_property(expr, scope),
 		GqlExpr::Unary {
 			op,
 			expr: operand,
 			..
 		} => {
-			let operand = stk.run(|stk| lower_value(stk, operand, scope)).await?;
+			let operand = lower_value(operand, scope)?;
 			let op = match op {
 				UnaryOp::Not => PrefixOperator::Not,
 				UnaryOp::Neg => PrefixOperator::Negate,
@@ -146,8 +140,8 @@ pub(super) async fn lower_value(
 			span,
 		} => {
 			let op = binary_op(*op, *span)?;
-			let left = stk.run(|stk| lower_value(stk, left, scope)).await?;
-			let right = stk.run(|stk| lower_value(stk, right, scope)).await?;
+			let left = lower_value(left, scope)?;
+			let right = lower_value(right, scope)?;
 			Ok(LogicalExpr::Binary {
 				left: Box::new(left),
 				op,
@@ -159,25 +153,25 @@ pub(super) async fn lower_value(
 		}
 		| GqlExpr::IsNull {
 			..
-		} => lower_truth_test(stk, expr, false, scope).await,
+		} => lower_truth_test(expr, false, scope),
 		GqlExpr::FunctionCall {
 			name,
 			quantifier,
 			star,
 			args,
 			span,
-		} => lower_function(stk, name, *quantifier, *star, args, *span, scope).await,
+		} => lower_function(name, *quantifier, *star, args, *span, scope),
 		GqlExpr::List(items, _) => {
 			let mut exprs = Vec::with_capacity(items.len());
 			for item in items {
-				exprs.push(stk.run(|stk| lower_value(stk, item, scope)).await?);
+				exprs.push(lower_value(item, scope)?);
 			}
 			Ok(LogicalExpr::Array(exprs))
 		}
 		GqlExpr::Map(fields, _) => {
 			let mut entries = Vec::with_capacity(fields.len());
 			for (key, value) in fields {
-				let value = stk.run(|stk| lower_value(stk, value, scope)).await?;
+				let value = lower_value(value, scope)?;
 				entries.push((key.name.clone(), value));
 			}
 			Ok(LogicalExpr::Object(entries))
@@ -188,8 +182,7 @@ pub(super) async fn lower_value(
 /// Lowers a GQL expression in predicate (`WHERE`) position with GQL's
 /// three-valued semantics: rows are kept only when the predicate is TRUE.
 /// `negated` is the pending NNF negation pushed down from enclosing `NOT`s.
-pub(super) async fn lower_predicate(
-	stk: &mut Stk,
+pub(super) fn lower_predicate(
 	expr: &GqlExpr,
 	negated: bool,
 	scope: &Scope<'_>,
@@ -199,15 +192,15 @@ pub(super) async fn lower_predicate(
 			op: UnaryOp::Not,
 			expr: inner,
 			..
-		} => stk.run(|stk| lower_predicate(stk, inner, !negated, scope)).await,
+		} => lower_predicate(inner, !negated, scope),
 		GqlExpr::Binary {
 			op: op @ (BinaryOp::And | BinaryOp::Or),
 			left,
 			right,
 			..
 		} => {
-			let lowered_left = stk.run(|stk| lower_predicate(stk, left, negated, scope)).await?;
-			let lowered_right = stk.run(|stk| lower_predicate(stk, right, negated, scope)).await?;
+			let lowered_left = lower_predicate(left, negated, scope)?;
+			let lowered_right = lower_predicate(right, negated, scope)?;
 			// De Morgan: a negated AND becomes an OR of the negated branches.
 			let and = (*op == BinaryOp::And) != negated;
 			Ok(LogicalExpr::Binary {
@@ -236,13 +229,13 @@ pub(super) async fn lower_predicate(
 			left,
 			right,
 			span,
-		} => lower_comparison(stk, *op, negated, left, right, *span, scope).await,
+		} => lower_comparison(*op, negated, left, right, *span, scope),
 		GqlExpr::IsBool {
 			..
 		}
 		| GqlExpr::IsNull {
 			..
-		} => lower_truth_test(stk, expr, negated, scope).await,
+		} => lower_truth_test(expr, negated, scope),
 		GqlExpr::Literal(GqlLiteral::Bool(b), _) => {
 			Ok(LogicalExpr::Literal(LogicalLiteral::Bool(*b != negated)))
 		}
@@ -250,7 +243,7 @@ pub(super) async fn lower_predicate(
 		// explicit boolean, so that a NULL/NONE value excludes the row:
 		// `b.flag` → `b.flag = true`, `NOT b.flag` → `b.flag = false` (§4).
 		other => {
-			let value = stk.run(|stk| lower_value(stk, other, scope)).await?;
+			let value = lower_value(other, scope)?;
 			Ok(equality(value, LogicalLiteral::Bool(!negated), false))
 		}
 	}
@@ -260,8 +253,7 @@ pub(super) async fn lower_predicate(
 /// `<element>.key = value` equality conjunct (§3), with the §4 equality
 /// guards. The element is addressed by its binding (an anonymous element has a
 /// hidden binding, so it still lowers).
-pub(super) async fn lower_prop_equality(
-	stk: &mut Stk,
+pub(super) fn lower_prop_equality(
 	binding: BindingId,
 	binding_name: &str,
 	key: &Ident,
@@ -275,7 +267,7 @@ pub(super) async fn lower_prop_equality(
 	let guards = if nullable(value, scope) {
 		let mut atoms = vec![left.clone()];
 		for atom in nullable_atoms(value, scope) {
-			let atom = stk.run(|stk| lower_value(stk, atom, scope)).await?;
+			let atom = lower_value(atom, scope)?;
 			if !atoms.contains(&atom) {
 				atoms.push(atom);
 			}
@@ -284,7 +276,7 @@ pub(super) async fn lower_prop_equality(
 	} else {
 		Vec::new()
 	};
-	let right = stk.run(|stk| lower_value(stk, value, scope)).await?;
+	let right = lower_value(value, scope)?;
 	let comparison = LogicalExpr::Binary {
 		left: Box::new(left),
 		op: BinaryOperator::Equal,
@@ -312,8 +304,7 @@ pub(super) fn and_chain(exprs: impl IntoIterator<Item = LogicalExpr>) -> Option<
 /// Lowers a comparison leaf with the §4 null guards. `negated` complements
 /// the operator first (NNF), so the guards apply to the effective
 /// comparison.
-async fn lower_comparison(
-	stk: &mut Stk,
+fn lower_comparison(
 	op: BinaryOp,
 	negated: bool,
 	left: &GqlExpr,
@@ -355,13 +346,13 @@ async fn lower_comparison(
 	// order.
 	let mut atoms: Vec<LogicalExpr> = Vec::new();
 	for atom in guard_atoms {
-		let atom = stk.run(|stk| lower_value(stk, atom, scope)).await?;
+		let atom = lower_value(atom, scope)?;
 		if !atoms.contains(&atom) {
 			atoms.push(atom);
 		}
 	}
-	let lowered_left = stk.run(|stk| lower_value(stk, left, scope)).await?;
-	let lowered_right = stk.run(|stk| lower_value(stk, right, scope)).await?;
+	let lowered_left = lower_value(left, scope)?;
+	let lowered_right = lower_value(right, scope)?;
 	let comparison = LogicalExpr::Binary {
 		left: Box::new(lowered_left),
 		op: binary_op(op, span)?,
@@ -399,8 +390,7 @@ fn guard_conjuncts(atoms: &[LogicalExpr]) -> Vec<LogicalExpr> {
 /// (§4). Truth tests are two-valued in GQL, so they need no guards;
 /// `outer_negated` is the NNF negation pushed down from enclosing `NOT`s,
 /// which negates the whole test.
-async fn lower_truth_test(
-	stk: &mut Stk,
+fn lower_truth_test(
 	expr: &GqlExpr,
 	outer_negated: bool,
 	scope: &Scope<'_>,
@@ -411,7 +401,7 @@ async fn lower_truth_test(
 			negated,
 			..
 		} => {
-			let value = stk.run(|stk| lower_value(stk, operand, scope)).await?;
+			let value = lower_value(operand, scope)?;
 			Ok(null_test(value, outer_negated != *negated))
 		}
 		GqlExpr::IsBool {
@@ -420,7 +410,7 @@ async fn lower_truth_test(
 			negated,
 			..
 		} => {
-			let operand = stk.run(|stk| lower_value(stk, operand, scope)).await?;
+			let operand = lower_value(operand, scope)?;
 			let negated = outer_negated != *negated;
 			match value {
 				TruthValue::True => Ok(equality(operand, LogicalLiteral::Bool(true), negated)),
@@ -609,11 +599,7 @@ fn access_chain<'a>(base: LogicalExpr, fields: impl Iterator<Item = &'a str>) ->
 /// Lowers a property access chain: a chain rooted at a pattern variable
 /// resolves to a binding-row path; any other root lowers as a value and the
 /// chain is appended as field accesses on it.
-async fn lower_property(
-	stk: &mut Stk,
-	expr: &GqlExpr,
-	scope: &Scope<'_>,
-) -> Result<LogicalExpr, SyntaxError> {
+fn lower_property(expr: &GqlExpr, scope: &Scope<'_>) -> Result<LogicalExpr, SyntaxError> {
 	let mut names: Vec<&Ident> = Vec::new();
 	let mut base = expr;
 	while let GqlExpr::Property(inner, name, _) = base {
@@ -624,7 +610,7 @@ async fn lower_property(
 	match base {
 		GqlExpr::Variable(ident) => scope.binding_expr(ident, &names),
 		other => {
-			let start = stk.run(|stk| lower_value(stk, other, scope)).await?;
+			let start = lower_value(other, scope)?;
 			Ok(access_chain(start, names.iter().map(|name| name.name.as_str())))
 		}
 	}
@@ -676,8 +662,7 @@ const UNSUPPORTED_AGGREGATES: &[&str] =
 
 /// §5: lowers a function call. The only functions supported are the aggregates
 /// (in `RETURN`/aggregating-`ORDER BY` position); every other call is rejected.
-async fn lower_function(
-	stk: &mut Stk,
+fn lower_function(
 	name: &Ident,
 	quantifier: Option<SetQuantifier>,
 	star: Option<Span>,
@@ -720,7 +705,7 @@ async fn lower_function(
 			}
 			let arg = single_arg(name, args, span)?;
 			let arg_scope = scope.no_aggregates();
-			let lowered = stk.run(|stk| lower_value(stk, arg, &arg_scope)).await?;
+			let lowered = lower_value(arg, &arg_scope)?;
 			// GQL `count(x)` counts rows where `x` is not null. SurrealDB's
 			// `count(<arg>)` counts truthy arguments, so feed it the non-null
 			// guard: `x != NONE AND x != NULL` is `true` exactly when `x` is
@@ -737,7 +722,7 @@ async fn lower_function(
 			}
 			let arg = single_arg(name, args, span)?;
 			let arg_scope = scope.no_aggregates();
-			let lowered = stk.run(|stk| lower_value(stk, arg, &arg_scope)).await?;
+			let lowered = lower_value(arg, &arg_scope)?;
 			Ok(function_call(surreal_name, vec![lowered]))
 		}
 	}

@@ -90,8 +90,6 @@ pub(crate) async fn run_script(
 ) -> FlowResult<Value> {
 	#[cfg(feature = "scripting")]
 	{
-		use reblessive::TreeStack;
-
 		use crate::doc::CursorDoc;
 		use crate::fnc::script;
 
@@ -106,16 +104,7 @@ pub(crate) async fn run_script(
 		// already reached, rather than getting a fresh budget.
 		let opt = opt.with_dive_consumed(plan_depth);
 		let doc = ctx.current_value.map(|v| CursorDoc::new(None, v.clone()));
-		// JavaScript can call back into SurrealDB functions through
-		// `surrealdb.functions.*`, which needs a TreeStack for recursive
-		// computation.
-		let mut stack = TreeStack::new();
-		Ok(stack
-			.enter(|_stk| async {
-				script::run(&frozen_ctx, &opt, doc.as_ref(), source, args).await
-			})
-			.finish()
-			.await?)
+		Ok(script::run(&frozen_ctx, &opt, doc.as_ref(), source, args).await?)
 	}
 	#[cfg(not(feature = "scripting"))]
 	{

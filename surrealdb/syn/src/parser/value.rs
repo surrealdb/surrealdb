@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
-use reblessive::Stk;
 use surrealdb_types::{
 	Array as PublicArray, Duration as PublicDuration, File as PublicFile,
 	Geometry as PublicGeometry, Number as PublicNumber, Object as PublicObject,
@@ -19,27 +18,27 @@ use crate::parser::{enter_object_recursion, unexpected};
 use crate::token::{Span, TokenKind, t};
 
 trait ValueParseFunc {
-	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<PublicValue>;
+	fn parse(parser: &mut Parser<'_>) -> ParseResult<PublicValue>;
 }
 
 struct SurrealQL;
 struct Json;
 
 impl ValueParseFunc for SurrealQL {
-	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<PublicValue> {
-		parser.parse_value(stk).await
+	fn parse(parser: &mut Parser<'_>) -> ParseResult<PublicValue> {
+		parser.parse_value()
 	}
 }
 
 impl ValueParseFunc for Json {
-	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<PublicValue> {
-		parser.parse_json(stk).await
+	fn parse(parser: &mut Parser<'_>) -> ParseResult<PublicValue> {
+		parser.parse_json()
 	}
 }
 
 impl Parser<'_> {
 	/// Parse a complete value which cannot contain non-literal expressions.
-	pub async fn parse_value(&mut self, stk: &mut Stk) -> ParseResult<PublicValue> {
+	pub fn parse_value(&mut self) -> ParseResult<PublicValue> {
 		let token = self.peek();
 		let res = match token.kind {
 			t!("NONE") => {
@@ -90,23 +89,22 @@ impl Parser<'_> {
 					| TokenKind::Distance(_)
 					| TokenKind::VectorType(_) = this.peek().kind
 						&& let Some(x) = this
-							.speculate(stk, async |stk, this| {
+							.speculate(|this| {
 								let key = this.parse_object_key()?;
 								if !this.eat(t!(":")) {
 									return Ok(None);
 								}
-								let value = stk.run(|stk| this.parse_value(stk)).await?;
+								let value = this.parse_value()?;
 								let mut res = BTreeMap::new();
 								res.insert(key, value);
 
 								if this.eat(t!(",")) {
-									this.parse_value_object::<SurrealQL>(stk, open, res).await.map(Some)
+									this.parse_value_object::<SurrealQL>(open, res).map(Some)
 								} else {
 									this.expect_closing_delimiter(t!("}"), open)?;
 									Ok(Some(PublicObject::from(res)))
 								}
-							})
-							.await?
+							})?
 					{
 						if let Some(x) = PublicGeometry::try_from_object(&x) {
 							return Ok(PublicValue::Geometry(x));
@@ -116,22 +114,21 @@ impl Parser<'_> {
 					}
 
 					// It must be a set: `{1, 2, 3}` or `{value}`
-					let set = this.parse_value_set::<SurrealQL>(stk, token.span).await?;
+					let set = this.parse_value_set::<SurrealQL>(token.span)?;
 					PublicValue::Set(set)
 				})
 			}
 			t!("[") => {
 				self.pop_peek();
 				enter_object_recursion!(this = self => {
-					this.parse_value_array::<SurrealQL>(stk, token.span)
-						.await
+					this.parse_value_array::<SurrealQL>(token.span)
 						.map(PublicValue::Array)?
 				})
 			}
 			t!("\"") | t!("'") => {
 				let strand = self.parse_string_lit()?;
 				if self.settings.legacy_strands {
-					self.reparse_json_legacy_strand(stk, strand).await
+					self.reparse_json_legacy_strand(strand)
 				} else {
 					PublicValue::String(strand)
 				}
@@ -197,7 +194,7 @@ impl Parser<'_> {
 					}
 					_ => {
 						enter_object_recursion!(this = self => {
-							let res = stk.run(|stk| this.parse_value(stk)).await?;
+							let res = this.parse_value()?;
 							this.expect_closing_delimiter(t!(")"), open)?;
 							res
 						})
@@ -210,7 +207,7 @@ impl Parser<'_> {
 					Some(t!("=")) => {
 						self.pop_peek();
 						enter_object_recursion!(this = self => {
-							let v = stk.run(|stk| this.parse_value(stk)).await?;
+							let v = this.parse_value()?;
 							PublicValue::Range(Box::new(PublicRange {
 								start: Bound::Unbounded,
 								end: Bound::Included(v),
@@ -219,7 +216,7 @@ impl Parser<'_> {
 					}
 					Some(x) if Self::kind_starts_expression(x) => {
 						enter_object_recursion!(this = self => {
-							let v = stk.run(|stk| this.parse_value(stk)).await?;
+							let v = this.parse_value()?;
 							PublicValue::Range(Box::new(PublicRange {
 								start: Bound::Unbounded,
 								end: Bound::Excluded(v),
@@ -244,10 +241,7 @@ impl Parser<'_> {
 					Numeric::Decimal(x) => PublicValue::Number(PublicNumber::Decimal(x)),
 				}
 			}
-			_ => self
-				.parse_value_record_id_inner::<SurrealQL>(stk)
-				.await
-				.map(PublicValue::RecordId)?,
+			_ => self.parse_value_record_id_inner::<SurrealQL>().map(PublicValue::RecordId)?,
 		};
 
 		match self.peek_whitespace().map(|x| x.kind) {
@@ -258,7 +252,7 @@ impl Parser<'_> {
 					Some(t!("=")) => {
 						self.pop_peek();
 						enter_object_recursion!(this = self => {
-							let v = stk.run(|stk| this.parse_value(stk)).await?;
+							let v = this.parse_value()?;
 							Ok(PublicValue::Range(Box::new(PublicRange {
 								start: Bound::Excluded(res),
 								end: Bound::Included(v),
@@ -267,7 +261,7 @@ impl Parser<'_> {
 					}
 					Some(x) if Self::kind_starts_expression(x) => {
 						enter_object_recursion!(this = self => {
-							let v = stk.run(|stk| this.parse_value(stk)).await?;
+							let v = this.parse_value()?;
 							Ok(PublicValue::Range(Box::new(PublicRange {
 								start: Bound::Excluded(res),
 								end: Bound::Excluded(v),
@@ -287,7 +281,7 @@ impl Parser<'_> {
 					Some(t!("=")) => {
 						self.pop_peek();
 						enter_object_recursion!(this = self => {
-							let v = stk.run(|stk| this.parse_value(stk)).await?;
+							let v = this.parse_value()?;
 							Ok(PublicValue::Range(Box::new(PublicRange {
 								start: Bound::Included(res),
 								end: Bound::Included(v),
@@ -296,7 +290,7 @@ impl Parser<'_> {
 					}
 					Some(x) if Self::kind_starts_expression(x) => {
 						enter_object_recursion!(this = self => {
-							let v = stk.run(|stk| this.parse_value(stk)).await?;
+							let v = this.parse_value()?;
 							Ok(PublicValue::Range(Box::new(PublicRange {
 								start: Bound::Included(res),
 								end: Bound::Excluded(v),
@@ -313,7 +307,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_json(&mut self, stk: &mut Stk) -> ParseResult<PublicValue> {
+	pub fn parse_json(&mut self) -> ParseResult<PublicValue> {
 		let token = self.peek();
 		match token.kind {
 			t!("NULL") => {
@@ -336,21 +330,20 @@ impl Parser<'_> {
 				}
 
 				enter_object_recursion!(this = self => {
-					this.parse_value_object::<Json>(stk, open, BTreeMap::new())
-						.await
+					this.parse_value_object::<Json>(open, BTreeMap::new())
 						.map(PublicValue::Object)
 				})
 			}
 			t!("[") => {
 				self.pop_peek();
 				enter_object_recursion!(this = self => {
-					this.parse_value_array::<Json>(stk, token.span).await.map(PublicValue::Array)
+					this.parse_value_array::<Json>(token.span).map(PublicValue::Array)
 				})
 			}
 			t!("\"") | t!("'") => {
 				let strand = self.parse_string_lit()?;
 				if self.settings.legacy_strands {
-					Ok(self.reparse_json_legacy_strand(stk, strand).await)
+					Ok(self.reparse_json_legacy_strand(strand))
 				} else {
 					Ok(PublicValue::String(strand))
 				}
@@ -367,21 +360,18 @@ impl Parser<'_> {
 					Numeric::Decimal(x) => Ok(PublicValue::Number(PublicNumber::Decimal(x))),
 				}
 			}
-			_ => {
-				match self.parse_value_record_id_inner::<Json>(stk).await.map(PublicValue::RecordId)
-				{
-					Ok(x) => Ok(x),
-					Err(err) => {
-						tracing::debug!("Error parsing record id: {err:?}");
-						self.parse_value_table().await.map(PublicValue::Table)
-					}
+			_ => match self.parse_value_record_id_inner::<Json>().map(PublicValue::RecordId) {
+				Ok(x) => Ok(x),
+				Err(err) => {
+					tracing::debug!("Error parsing record id: {err:?}");
+					self.parse_value_table().map(PublicValue::Table)
 				}
-			}
+			},
 		}
 	}
 
-	async fn reparse_json_legacy_strand(&mut self, stk: &mut Stk, strand: String) -> PublicValue {
-		if let Ok(x) = Parser::new(strand.as_bytes()).parse_value_record_id(stk).await {
+	fn reparse_json_legacy_strand(&mut self, strand: String) -> PublicValue {
+		if let Ok(x) = Parser::new(strand.as_bytes()).parse_value_record_id() {
 			return PublicValue::RecordId(x);
 		}
 
@@ -396,9 +386,8 @@ impl Parser<'_> {
 		PublicValue::String(strand)
 	}
 
-	async fn parse_value_object<VP>(
+	fn parse_value_object<VP>(
 		&mut self,
-		stk: &mut Stk,
 		start: Span,
 		mut obj: BTreeMap<String, PublicValue>,
 	) -> ParseResult<PublicObject>
@@ -411,7 +400,7 @@ impl Parser<'_> {
 			}
 			let key = self.parse_object_key()?;
 			expected!(self, t!(":"));
-			let value = stk.run(|ctx| VP::parse(self, ctx)).await?;
+			let value = VP::parse(self)?;
 			obj.insert(key, value);
 
 			if !self.eat(t!(",")) {
@@ -421,7 +410,7 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_value_set<VP>(&mut self, stk: &mut Stk, start: Span) -> ParseResult<PublicSet>
+	fn parse_value_set<VP>(&mut self, start: Span) -> ParseResult<PublicSet>
 	where
 		VP: ValueParseFunc,
 	{
@@ -431,7 +420,7 @@ impl Parser<'_> {
 				return Ok(set);
 			}
 
-			let value = stk.run(|stk| VP::parse(self, stk)).await?;
+			let value = VP::parse(self)?;
 			set.insert(value);
 
 			if !self.eat(t!(",")) {
@@ -455,11 +444,7 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_value_array<VP>(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<PublicArray>
+	fn parse_value_array<VP>(&mut self, start: Span) -> ParseResult<PublicArray>
 	where
 		VP: ValueParseFunc,
 	{
@@ -468,7 +453,7 @@ impl Parser<'_> {
 			if self.eat(t!("]")) {
 				return Ok(PublicArray::from(array));
 			}
-			let value = stk.run(|stk| VP::parse(self, stk)).await?;
+			let value = VP::parse(self)?;
 			array.push(value);
 
 			if !self.eat(t!(",")) {
@@ -478,19 +463,16 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_value_table(&mut self) -> ParseResult<PublicTable> {
+	fn parse_value_table(&mut self) -> ParseResult<PublicTable> {
 		let table = self.parse_ident()?.into_string();
 		Ok(PublicTable::new(table))
 	}
 
-	pub async fn parse_value_record_id(&mut self, stk: &mut Stk) -> ParseResult<PublicRecordId> {
-		self.parse_value_record_id_inner::<SurrealQL>(stk).await
+	pub fn parse_value_record_id(&mut self) -> ParseResult<PublicRecordId> {
+		self.parse_value_record_id_inner::<SurrealQL>()
 	}
 
-	async fn parse_value_record_id_inner<VP>(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<PublicRecordId>
+	fn parse_value_record_id_inner<VP>(&mut self) -> ParseResult<PublicRecordId>
 	where
 		VP: ValueParseFunc,
 	{
@@ -503,14 +485,14 @@ impl Parser<'_> {
 				let peek = self.pop_peek();
 				enter_object_recursion!(this = self => {
 					PublicRecordIdKey::Object(
-						this.parse_value_object::<VP>(stk, peek.span, BTreeMap::new()).await?,
+						this.parse_value_object::<VP>(peek.span, BTreeMap::new())?,
 					)
 				})
 			}
 			t!("[") => {
 				let peek = self.pop_peek();
 				enter_object_recursion!(this = self => {
-					PublicRecordIdKey::Array(this.parse_value_array::<VP>(stk, peek.span).await?)
+					PublicRecordIdKey::Array(this.parse_value_array::<VP>(peek.span)?)
 				})
 			}
 			t!("+") => {

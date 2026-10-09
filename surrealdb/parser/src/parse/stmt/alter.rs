@@ -3,8 +3,7 @@ use common::span::Span;
 use token::{BaseTokenKind, T};
 
 use crate::parse::utils::{
-	parse_delimited_list, parse_seperated_list, parse_seperated_list_sync, parse_unordered_clause,
-	parse_unordered_clause_sync, redefined_error,
+	parse_delimited_list, parse_seperated_list, parse_unordered_clause, redefined_error,
 };
 use crate::parse::{ParseResult, ParserSettings, ParserState};
 use crate::{Parse, Parser};
@@ -19,7 +18,7 @@ fn parse_if_exists(parser: &mut Parser<'_, '_>) -> ParseResult<bool> {
 }
 
 impl Parse for ast::AlterSystem {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![SYSTEM])?;
 
@@ -33,7 +32,7 @@ impl Parse for ast::AlterSystem {
 				T![DROP] => {
 					let _ = parser.next();
 					let expect = parser.expect(T![QUERY_TIMEOUT])?;
-					parse_unordered_clause_sync(
+					parse_unordered_clause(
 						parser,
 						&mut query_timeout,
 						peek.span.extend(expect.span),
@@ -42,14 +41,13 @@ impl Parse for ast::AlterSystem {
 				}
 				T![QUERY_TIMEOUT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut query_timeout, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut query_timeout, peek.span, |parser| {
+						parser.parse_enter().map(AlterKind::Set)
+					})?;
 				}
 				T![COMPACT] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut compact, peek.span, |_| Ok(()))?;
+					parse_unordered_clause(parser, &mut compact, peek.span, |_| Ok(()))?;
 				}
 				_ => break,
 			}
@@ -65,13 +63,13 @@ impl Parse for ast::AlterSystem {
 }
 
 impl Parse for ast::AlterNamespace {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![NAMESPACE])?;
 
 		let if_exists = parse_if_exists(parser)?;
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let compact = parser.eat(T![COMPACT])?.is_some();
 
@@ -86,13 +84,13 @@ impl Parse for ast::AlterNamespace {
 }
 
 impl Parse for ast::AlterDatabase {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![DATABASE])?;
 
 		let if_exists = parse_if_exists(parser)?;
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let compact = parser.eat(T![COMPACT])?.is_some();
 
@@ -107,7 +105,7 @@ impl Parse for ast::AlterDatabase {
 }
 
 impl Parse for ast::AlterTable {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		if parser.eat(T![TB])?.is_none() {
 			let _ = parser.expect(T![TABLE])?;
@@ -115,7 +113,7 @@ impl Parse for ast::AlterTable {
 
 		let if_exists = parse_if_exists(parser)?;
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let mut changefeed = None;
 		let mut comment = None;
@@ -139,14 +137,14 @@ impl Parse for ast::AlterTable {
 						T![COMMENT] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut comment, span, |_| {
+							parse_unordered_clause(parser, &mut comment, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![CHANGEFEED] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut changefeed, span, |_| {
+							parse_unordered_clause(parser, &mut changefeed, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
@@ -154,19 +152,16 @@ impl Parse for ast::AlterTable {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
 							if parser.eat(T![EDGES])?.is_some() {
-								parse_unordered_clause_sync(
+								parse_unordered_clause(
 									parser,
 									&mut inline_edges_cap,
 									span,
 									|_| Ok(AlterKind::Drop(span)),
 								)?;
 							} else if parser.eat(T![REFERENCES])?.is_some() {
-								parse_unordered_clause_sync(
-									parser,
-									&mut inline_refs_cap,
-									span,
-									|_| Ok(AlterKind::Drop(span)),
-								)?;
+								parse_unordered_clause(parser, &mut inline_refs_cap, span, |_| {
+									Ok(AlterKind::Drop(span))
+								})?;
 							} else {
 								return Err(parser.unexpected_label(
 									"`EDGES` or `REFERENCES`",
@@ -179,57 +174,46 @@ impl Parse for ast::AlterTable {
 				}
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, peek.span, |parser| {
+						parser.parse_enter().map(AlterKind::Set)
+					})?;
 				}
 				T![CHANGEFEED] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut changefeed, peek.span, |parser| {
+					parse_unordered_clause(parser, &mut changefeed, peek.span, |parser| {
 						parser.parse_sync().map(AlterKind::Set)
 					})?;
 				}
 				T![COMPACT] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut compact, peek.span, |_| Ok(()))?;
+					parse_unordered_clause(parser, &mut compact, peek.span, |_| Ok(()))?;
 				}
 				T![PERMISSIONS] => {
-					parse_unordered_clause(parser, &mut permissions, peek.span, Parser::parse)
-						.await?;
+					parse_unordered_clause(parser, &mut permissions, peek.span, Parser::parse)?;
 				}
 				T![SCHEMAFULL] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut schema, peek.span, |_| {
-						Ok(Schema::Full)
-					})?;
+					parse_unordered_clause(parser, &mut schema, peek.span, |_| Ok(Schema::Full))?;
 				}
 				T![SCHEMALESS] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut schema, peek.span, |_| {
-						Ok(Schema::Less)
-					})?;
+					parse_unordered_clause(parser, &mut schema, peek.span, |_| Ok(Schema::Less))?;
 				}
 				T![TYPE] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(
-						parser,
-						&mut table_kind,
-						peek.span,
-						Parser::parse_sync,
-					)?;
+					parse_unordered_clause(parser, &mut table_kind, peek.span, Parser::parse_sync)?;
 				}
 				T![INLINE] => {
 					let _ = parser.next();
 					if parser.eat(T![EDGES])?.is_some() {
-						parse_unordered_clause_sync(
+						parse_unordered_clause(
 							parser,
 							&mut inline_edges_cap,
 							peek.span,
 							|parser| parser.parse_sync().map(AlterKind::Set),
 						)?;
 					} else if parser.eat(T![REFERENCES])?.is_some() {
-						parse_unordered_clause_sync(
+						parse_unordered_clause(
 							parser,
 							&mut inline_refs_cap,
 							peek.span,
@@ -264,16 +248,16 @@ impl Parse for ast::AlterTable {
 }
 
 impl Parse for ast::AlterEvent {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![EVENT])?;
 
 		let if_exists = parse_if_exists(parser)?;
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 		let _ = parser.expect(T![ON])?;
 		let _ = parser.eat(T![TABLE])?;
-		let table = parser.parse_enter().await?;
+		let table = parser.parse_enter()?;
 
 		let mut condition = None;
 		let mut then = None;
@@ -293,28 +277,28 @@ impl Parse for ast::AlterEvent {
 						T![WHEN] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut condition, span, |_| {
+							parse_unordered_clause(parser, &mut condition, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![THEN] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut then, span, |_| {
+							parse_unordered_clause(parser, &mut then, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![ASYNC] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut async_, span, |_| {
+							parse_unordered_clause(parser, &mut async_, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![COMMENT] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut comment, span, |_| {
+							parse_unordered_clause(parser, &mut comment, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
@@ -323,43 +307,36 @@ impl Parse for ast::AlterEvent {
 				}
 				T![WHEN] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut condition, peek.span, async |parser| {
+					parse_unordered_clause(parser, &mut condition, peek.span, |parser| {
 						parser
 							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
-							.await
 							.map(AlterKind::Set)
-					})
-					.await?;
+					})?;
 				}
 				T![THEN] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut then, peek.span, async |x| {
+					parse_unordered_clause(parser, &mut then, peek.span, |x| {
 						Ok(AlterKind::Set(
-							parse_seperated_list(x, T![,], async |parser| {
-								parser
-									.with_state(
-										|s| s.difference(ParserState::LOOP),
-										Parser::parse_enter,
-									)
-									.await
-							})
-							.await?
+							parse_seperated_list(x, T![,], |parser| {
+								parser.with_state(
+									|s| s.difference(ParserState::LOOP),
+									Parser::parse_enter,
+								)
+							})?
 							.1,
 						))
-					})
-					.await?;
+					})?;
 				}
 				T![ASYNC] => {
-					parse_unordered_clause_sync(parser, &mut async_, peek.span, |x| {
+					parse_unordered_clause(parser, &mut async_, peek.span, |x| {
 						Ok(AlterKind::Set(x.parse_sync()?))
 					})?;
 				}
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, peek.span, async |x| {
-						Ok(AlterKind::Set(x.parse_enter().await?))
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, peek.span, |x| {
+						Ok(AlterKind::Set(x.parse_enter()?))
+					})?;
 				}
 				_ => break,
 			}
@@ -380,7 +357,7 @@ impl Parse for ast::AlterEvent {
 }
 
 impl Parse for ast::AlterParam {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![PARAM])?;
 		let if_exists = parse_if_exists(parser)?;
@@ -400,21 +377,19 @@ impl Parse for ast::AlterParam {
 					let _ = parser.next();
 					let _ = parser.expect(T![COMMENT])?;
 					let span = parser.span_since(peek.span);
-					parse_unordered_clause_sync(parser, &mut comment, span, |_| {
+					parse_unordered_clause(parser, &mut comment, span, |_| {
 						Ok(AlterKind::Drop(span))
 					})?;
 				}
 				T![VALUE] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut value, peek.span, Parser::parse_enter)
-						.await?;
+					parse_unordered_clause(parser, &mut value, peek.span, Parser::parse_enter)?;
 				}
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, peek.span, async |x| {
-						Ok(AlterKind::Set(x.parse_enter().await?))
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, peek.span, |x| {
+						Ok(AlterKind::Set(x.parse_enter()?))
+					})?;
 				}
 				T![PERMISSIONS] => {
 					let _ = parser.next();
@@ -423,8 +398,7 @@ impl Parse for ast::AlterParam {
 						&mut permissions,
 						peek.span,
 						Parser::parse_enter,
-					)
-					.await?;
+					)?;
 				}
 				_ => break,
 			}
@@ -443,13 +417,13 @@ impl Parse for ast::AlterParam {
 }
 
 impl Parse for ast::AlterBucket {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![BUCKET])?;
 
 		let if_exists = parse_if_exists(parser)?;
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let mut backend = None;
 		let mut readonly = None;
@@ -470,21 +444,21 @@ impl Parse for ast::AlterBucket {
 						T![READONLY] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut readonly, span, |_| {
+							parse_unordered_clause(parser, &mut readonly, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![BACKEND] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut backend, span, |_| {
+							parse_unordered_clause(parser, &mut backend, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![COMMENT] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut comment, span, |_| {
+							parse_unordered_clause(parser, &mut comment, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
@@ -493,27 +467,25 @@ impl Parse for ast::AlterBucket {
 				}
 				T![BACKEND] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut backend, peek.span, |p| {
+					parse_unordered_clause(parser, &mut backend, peek.span, |p| {
 						Ok(AlterKind::Set(p.parse_sync()?))
 					})?;
 				}
 				T![READONLY] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut readonly, peek.span, |_| {
+					parse_unordered_clause(parser, &mut readonly, peek.span, |_| {
 						Ok(AlterKind::Set(()))
 					})?;
 				}
 				T![PERMISSIONS] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut permissions, peek.span, Parser::parse)
-						.await?;
+					parse_unordered_clause(parser, &mut permissions, peek.span, Parser::parse)?;
 				}
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, peek.span, async |p| {
-						Ok(AlterKind::Set(p.parse_enter().await?))
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, peek.span, |p| {
+						Ok(AlterKind::Set(p.parse_enter()?))
+					})?;
 				}
 				_ => break,
 			}
@@ -533,13 +505,13 @@ impl Parse for ast::AlterBucket {
 }
 
 impl Parse for ast::AlterAnalyzer {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![ANALYZER])?;
 
 		let if_exists = parse_if_exists(parser)?;
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let mut function = None;
 		let mut tokenizer = None;
@@ -559,28 +531,28 @@ impl Parse for ast::AlterAnalyzer {
 						T![FUNCTION] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut function, span, |_| {
+							parse_unordered_clause(parser, &mut function, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![TOKENIZERS] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut tokenizer, span, |_| {
+							parse_unordered_clause(parser, &mut tokenizer, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![FILTERS] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut filter, span, |_| {
+							parse_unordered_clause(parser, &mut filter, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![COMMENT] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut comment, span, |_| {
+							parse_unordered_clause(parser, &mut comment, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
@@ -590,35 +562,30 @@ impl Parse for ast::AlterAnalyzer {
 				T![FUNCTION] => {
 					let _ = parser.next();
 					let span = parser.span_since(peek.span);
-					parse_unordered_clause_sync(parser, &mut function, span, |p| {
+					parse_unordered_clause(parser, &mut function, span, |p| {
 						Ok(AlterKind::Set(p.parse_sync()?))
 					})?;
 				}
 				T![TOKENIZERS] => {
 					let _ = parser.next();
 					let span = parser.span_since(peek.span);
-					parse_unordered_clause_sync(parser, &mut tokenizer, span, |p| {
-						Ok(AlterKind::Set(
-							parse_seperated_list_sync(p, T![,], Parser::parse_sync)?.1,
-						))
+					parse_unordered_clause(parser, &mut tokenizer, span, |p| {
+						Ok(AlterKind::Set(parse_seperated_list(p, T![,], Parser::parse_sync)?.1))
 					})?;
 				}
 				T![FILTERS] => {
 					let _ = parser.next();
 					let span = parser.span_since(peek.span);
-					parse_unordered_clause_sync(parser, &mut filter, span, |p| {
-						Ok(AlterKind::Set(
-							parse_seperated_list_sync(p, T![,], Parser::parse_sync)?.1,
-						))
+					parse_unordered_clause(parser, &mut filter, span, |p| {
+						Ok(AlterKind::Set(parse_seperated_list(p, T![,], Parser::parse_sync)?.1))
 					})?;
 				}
 				T![COMMENT] => {
 					let _ = parser.next();
 					let span = parser.span_since(peek.span);
-					parse_unordered_clause(parser, &mut comment, span, async |p| {
-						Ok(AlterKind::Set(p.parse_enter().await?))
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, span, |p| {
+						Ok(AlterKind::Set(p.parse_enter()?))
+					})?;
 				}
 
 				_ => break,
@@ -639,16 +606,16 @@ impl Parse for ast::AlterAnalyzer {
 }
 
 impl Parse for ast::AlterField {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![FIELD])?;
 
 		let if_exists = parse_if_exists(parser)?;
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 		let _ = parser.expect(T![ON])?;
 		let _ = parser.eat(T![TABLE])?;
-		let table = parser.parse_enter().await?;
+		let table = parser.parse_enter()?;
 
 		let mut ty = None;
 		let mut flexible = None;
@@ -674,63 +641,63 @@ impl Parse for ast::AlterField {
 						T![TYPE] => {
 							let _ = parser.next();
 							let span = parser.span_since(drop.span);
-							parse_unordered_clause_sync(parser, &mut ty, span, |_| {
+							parse_unordered_clause(parser, &mut ty, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![FLEXIBLE] => {
 							let _ = parser.next();
 							let span = parser.span_since(drop.span);
-							parse_unordered_clause_sync(parser, &mut flexible, span, |_| {
+							parse_unordered_clause(parser, &mut flexible, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![READONLY] => {
 							let _ = parser.next();
 							let span = parser.span_since(drop.span);
-							parse_unordered_clause_sync(parser, &mut readonly, span, |_| {
+							parse_unordered_clause(parser, &mut readonly, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![INLINE] => {
 							let _ = parser.next();
 							let span = parser.span_since(drop.span);
-							parse_unordered_clause_sync(parser, &mut inline, span, |_| {
+							parse_unordered_clause(parser, &mut inline, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![VALUE] => {
 							let _ = parser.next();
 							let span = parser.span_since(drop.span);
-							parse_unordered_clause_sync(parser, &mut value, span, |_| {
+							parse_unordered_clause(parser, &mut value, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![ASSERT] => {
 							let _ = parser.next();
 							let span = parser.span_since(drop.span);
-							parse_unordered_clause_sync(parser, &mut assert, span, |_| {
+							parse_unordered_clause(parser, &mut assert, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![DEFAULT] => {
 							let _ = parser.next();
 							let span = parser.span_since(drop.span);
-							parse_unordered_clause_sync(parser, &mut default, span, |_| {
+							parse_unordered_clause(parser, &mut default, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![COMMENT] => {
 							let _ = parser.next();
 							let span = parser.span_since(drop.span);
-							parse_unordered_clause_sync(parser, &mut comment, span, |_| {
+							parse_unordered_clause(parser, &mut comment, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![REFERENCE] => {
 							let _ = parser.next();
 							let span = parser.span_since(drop.span);
-							parse_unordered_clause_sync(parser, &mut on_delete, span, |_| {
+							parse_unordered_clause(parser, &mut on_delete, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
@@ -739,89 +706,77 @@ impl Parse for ast::AlterField {
 				}
 				T![TYPE] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut ty, peek.span, async |parser| {
-						parser.parse().await.map(AlterKind::Set)
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut ty, peek.span, |parser| {
+						parser.parse().map(AlterKind::Set)
+					})?;
 				}
 
 				T![FLEXIBLE] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut flexible, peek.span, |_| {
+					parse_unordered_clause(parser, &mut flexible, peek.span, |_| {
 						Ok(AlterKind::Set(()))
 					})?;
 				}
 				T![READONLY] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut readonly, peek.span, |_| {
+					parse_unordered_clause(parser, &mut readonly, peek.span, |_| {
 						Ok(AlterKind::Set(()))
 					})?;
 				}
 				T![INLINE] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut inline, peek.span, |_| {
+					parse_unordered_clause(parser, &mut inline, peek.span, |_| {
 						Ok(AlterKind::Set(()))
 					})?;
 				}
 				T![VALUE] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut value, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut value, peek.span, |parser| {
+						parser.parse_enter().map(AlterKind::Set)
+					})?;
 				}
 				T![ASSERT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut assert, peek.span, async |parser| {
+					parse_unordered_clause(parser, &mut assert, peek.span, |parser| {
 						parser
 							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
-							.await
 							.map(AlterKind::Set)
-					})
-					.await?;
+					})?;
 				}
 				T![DEFAULT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut default, peek.span, async |parser| {
-						parser
-							.with_state(
-								|s| s.difference(ParserState::LOOP),
-								async |parser| {
-									if parser.eat(T![ALWAYS])?.is_some() {
-										parser
-											.parse_enter()
-											.await
-											.map(ast::FieldDefault::Always)
-											.map(AlterKind::Set)
-									} else {
-										parser
-											.parse_enter()
-											.await
-											.map(ast::FieldDefault::Some)
-											.map(AlterKind::Set)
-									}
-								},
-							)
-							.await
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut default, peek.span, |parser| {
+						parser.with_state(
+							|s| s.difference(ParserState::LOOP),
+							|parser| {
+								if parser.eat(T![ALWAYS])?.is_some() {
+									parser
+										.parse_enter()
+										.map(ast::FieldDefault::Always)
+										.map(AlterKind::Set)
+								} else {
+									parser
+										.parse_enter()
+										.map(ast::FieldDefault::Some)
+										.map(AlterKind::Set)
+								}
+							},
+						)
+					})?;
 				}
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, peek.span, |parser| {
+						parser.parse_enter().map(AlterKind::Set)
+					})?;
 				}
 				T![REFERENCE] => {
-					parse_unordered_clause(parser, &mut on_delete, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut on_delete, peek.span, |parser| {
+						parser.parse_enter().map(AlterKind::Set)
+					})?;
 				}
 				T![PERMISSIONS] => {
-					parse_unordered_clause(parser, &mut permissions, peek.span, Parser::parse)
-						.await?;
+					parse_unordered_clause(parser, &mut permissions, peek.span, Parser::parse)?;
 				}
 				_ => break,
 			}
@@ -848,16 +803,16 @@ impl Parse for ast::AlterField {
 }
 
 impl Parse for ast::AlterIndex {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![INDEX])?;
 
 		let if_exists = parse_if_exists(parser)?;
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 		let _ = parser.expect(T![ON])?;
 		let _ = parser.eat(T![TABLE])?;
-		let table = parser.parse_enter().await?;
+		let table = parser.parse_enter()?;
 
 		let mut comment = None;
 		let mut prepare_remove = None;
@@ -875,7 +830,7 @@ impl Parse for ast::AlterIndex {
 						T![COMMENT] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut comment, span, |_| {
+							parse_unordered_clause(parser, &mut comment, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
@@ -885,7 +840,7 @@ impl Parse for ast::AlterIndex {
 				T![PREPARE] => {
 					let _ = parser.next();
 					let expect = parser.expect(T![REMOVE])?;
-					parse_unordered_clause_sync(
+					parse_unordered_clause(
 						parser,
 						&mut prepare_remove,
 						peek.span.extend(expect.span),
@@ -894,10 +849,9 @@ impl Parse for ast::AlterIndex {
 				}
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, peek.span, |parser| {
+						parser.parse_enter().map(AlterKind::Set)
+					})?;
 				}
 				_ => break,
 			}
@@ -916,13 +870,13 @@ impl Parse for ast::AlterIndex {
 }
 
 impl Parse for ast::AlterSequence {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![SEQUENCE])?;
 
 		let if_exists = parse_if_exists(parser)?;
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let mut timeout = None;
 		loop {
@@ -939,7 +893,7 @@ impl Parse for ast::AlterSequence {
 						T![TIMEOUT] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(
+							parse_unordered_clause(
 								parser,
 								&mut timeout,
 								peek.span.extend(span),
@@ -951,10 +905,9 @@ impl Parse for ast::AlterSequence {
 				}
 				T![TIMEOUT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut timeout, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut timeout, peek.span, |parser| {
+						parser.parse_enter().map(AlterKind::Set)
+					})?;
 				}
 				_ => break,
 			}
@@ -971,7 +924,7 @@ impl Parse for ast::AlterSequence {
 }
 
 impl Parse for ast::AlterFunction {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![FUNCTION])?;
 
@@ -994,22 +947,18 @@ impl Parse for ast::AlterFunction {
 					let _ = parser.next();
 					let _ = parser.expect(T![COMMENT])?;
 					let span = parser.span_since(peek.span);
-					parse_unordered_clause_sync(
-						parser,
-						&mut comment,
-						peek.span.extend(span),
-						|_| Ok(AlterKind::Drop(span)),
-					)?;
+					parse_unordered_clause(parser, &mut comment, peek.span.extend(span), |_| {
+						Ok(AlterKind::Drop(span))
+					})?;
 				}
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, peek.span, |parser| {
+						parser.parse_enter().map(AlterKind::Set)
+					})?;
 				}
 				BaseTokenKind::OpenParen => {
-					parse_unordered_clause(parser, &mut body, peek.span, async |parser| {
+					parse_unordered_clause(parser, &mut body, peek.span, |parser| {
 						parameters = Some(
 							parse_delimited_list(
 								parser,
@@ -1017,25 +966,22 @@ impl Parse for ast::AlterFunction {
 								BaseTokenKind::CloseParen,
 								T![,],
 								Parser::parse,
-							)
-							.await?
+							)?
 							.1,
 						);
 
 						if parser.eat(T![->])?.is_some() {
-							return_ty = Some(parser.parse().await?)
+							return_ty = Some(parser.parse()?)
 						} else {
 							return_ty = None
 						}
 
-						parser.parse().await
-					})
-					.await?;
+						parser.parse()
+					})?;
 				}
 				T![PERMISSIONS] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut permission, peek.span, Parser::parse)
-						.await?;
+					parse_unordered_clause(parser, &mut permission, peek.span, Parser::parse)?;
 				}
 				_ => break,
 			}
@@ -1056,13 +1002,13 @@ impl Parse for ast::AlterFunction {
 }
 
 impl Parse for ast::AlterUser {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![USER])?;
 
 		let if_exists = parse_if_exists(parser)?;
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 		let _ = parser.expect(T![ON])?;
 		let base = parser.parse_sync()?;
 
@@ -1086,7 +1032,7 @@ impl Parse for ast::AlterUser {
 						T![COMMENT] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut comment, span, |_| {
+							parse_unordered_clause(parser, &mut comment, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
@@ -1095,13 +1041,13 @@ impl Parse for ast::AlterUser {
 				}
 				T![PASSHASH] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut secret, peek.span, |parser| {
+					parse_unordered_clause(parser, &mut secret, peek.span, |parser| {
 						parser.parse_sync().map(ast::UserSecret::PassHash)
 					})?;
 				}
 				T![PASSWORD] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut secret, peek.span, |parser| {
+					parse_unordered_clause(parser, &mut secret, peek.span, |parser| {
 						parser.parse_sync().map(ast::UserSecret::PassWord)
 					})?;
 				}
@@ -1111,14 +1057,14 @@ impl Parse for ast::AlterUser {
 					// (this parser resolves no literals and cannot reach core's
 					// `ScramCredential`). Lowering this AST to an executable statement
 					// MUST validate via `from_verifier_string`, as the `syn` parser does.
-					parse_unordered_clause_sync(parser, &mut scram, peek.span, |parser| {
+					parse_unordered_clause(parser, &mut scram, peek.span, |parser| {
 						parser.parse_sync::<ast::NodeId<ast::StringLit>>()
 					})?;
 				}
 				T![ROLES] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut roles, peek.span, |parser| {
-						Ok(parse_seperated_list_sync(parser, T![,], Parser::parse_sync)?.1)
+					parse_unordered_clause(parser, &mut roles, peek.span, |parser| {
+						Ok(parse_seperated_list(parser, T![,], Parser::parse_sync)?.1)
 					})?;
 				}
 				T![DURATION] => {
@@ -1131,14 +1077,14 @@ impl Parse for ast::AlterUser {
 							T![TOKEN] => {
 								let _ = parser.next();
 								if parser.eat(T![NONE])?.is_some() {
-									parse_unordered_clause_sync(
+									parse_unordered_clause(
 										parser,
 										&mut token_duration,
 										peek.span,
 										|_| Ok(AlterKind::Drop(peek.span)),
 									)?;
 								} else {
-									parse_unordered_clause_sync(
+									parse_unordered_clause(
 										parser,
 										&mut token_duration,
 										peek.span,
@@ -1149,14 +1095,14 @@ impl Parse for ast::AlterUser {
 							T![SESSION] => {
 								let _ = parser.next();
 								if parser.eat(T![NONE])?.is_some() {
-									parse_unordered_clause_sync(
+									parse_unordered_clause(
 										parser,
 										&mut session_duration,
 										peek.span,
 										|_| Ok(AlterKind::Drop(peek.span)),
 									)?;
 								} else {
-									parse_unordered_clause_sync(
+									parse_unordered_clause(
 										parser,
 										&mut session_duration,
 										peek.span,
@@ -1175,10 +1121,9 @@ impl Parse for ast::AlterUser {
 				}
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, peek.span, |parser| {
+						parser.parse_enter().map(AlterKind::Set)
+					})?;
 				}
 
 				_ => break,
@@ -1202,13 +1147,13 @@ impl Parse for ast::AlterUser {
 }
 
 impl Parse for ast::AlterAccess {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![ACCESS])?;
 
 		let if_exists = parse_if_exists(parser)?;
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 		let _ = parser.expect(T![ON])?;
 		let base = parser.parse_sync()?;
 
@@ -1231,21 +1176,21 @@ impl Parse for ast::AlterAccess {
 						T![AUTHENTICATE] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut authenticate, span, |_| {
+							parse_unordered_clause(parser, &mut authenticate, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![CONTEXT] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut context, span, |_| {
+							parse_unordered_clause(parser, &mut context, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
 						T![COMMENT] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
-							parse_unordered_clause_sync(parser, &mut comment, span, |_| {
+							parse_unordered_clause(parser, &mut comment, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
@@ -1262,14 +1207,14 @@ impl Parse for ast::AlterAccess {
 							T![TOKEN] => {
 								let _ = parser.next();
 								if parser.eat(T![NONE])?.is_some() {
-									parse_unordered_clause_sync(
+									parse_unordered_clause(
 										parser,
 										&mut token_duration,
 										peek.span,
 										|_| Ok(AlterKind::Drop(peek.span)),
 									)?;
 								} else {
-									parse_unordered_clause_sync(
+									parse_unordered_clause(
 										parser,
 										&mut token_duration,
 										peek.span,
@@ -1280,14 +1225,14 @@ impl Parse for ast::AlterAccess {
 							T![SESSION] => {
 								let _ = parser.next();
 								if parser.eat(T![NONE])?.is_some() {
-									parse_unordered_clause_sync(
+									parse_unordered_clause(
 										parser,
 										&mut session_duration,
 										peek.span,
 										|_| Ok(AlterKind::Drop(peek.span)),
 									)?;
 								} else {
-									parse_unordered_clause_sync(
+									parse_unordered_clause(
 										parser,
 										&mut session_duration,
 										peek.span,
@@ -1298,14 +1243,14 @@ impl Parse for ast::AlterAccess {
 							T![GRANT] => {
 								let _ = parser.next();
 								if parser.eat(T![NONE])?.is_some() {
-									parse_unordered_clause_sync(
+									parse_unordered_clause(
 										parser,
 										&mut grant_duration,
 										peek.span,
 										|_| Ok(AlterKind::Drop(peek.span)),
 									)?;
 								} else {
-									parse_unordered_clause_sync(
+									parse_unordered_clause(
 										parser,
 										&mut grant_duration,
 										peek.span,
@@ -1324,30 +1269,25 @@ impl Parse for ast::AlterAccess {
 				}
 				T![AUTHENTICATE] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut authenticate, peek.span, async |parser| {
+					parse_unordered_clause(parser, &mut authenticate, peek.span, |parser| {
 						parser
 							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
-							.await
 							.map(AlterKind::Set)
-					})
-					.await?;
+					})?;
 				}
 				T![CONTEXT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut context, peek.span, async |parser| {
+					parse_unordered_clause(parser, &mut context, peek.span, |parser| {
 						parser
 							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
-							.await
 							.map(AlterKind::Set)
-					})
-					.await?;
+					})?;
 				}
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, peek.span, |parser| {
+						parser.parse_enter().map(AlterKind::Set)
+					})?;
 				}
 				_ => break,
 			}
@@ -1400,7 +1340,7 @@ macro_rules! impl_method_matching {
 			let span = $parser.span_since(x.span);
 			AlterKind::Drop(span)
 		} else {
-			AlterKind::Set($parser.parse::<ast::NodeId<ast::ApiAction>>().await?)
+			AlterKind::Set($parser.parse::<ast::NodeId<ast::ApiAction>>()?)
 		};
 
 		$(
@@ -1412,13 +1352,13 @@ macro_rules! impl_method_matching {
 }
 
 impl Parse for ast::AlterApi {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![API])?;
 
 		let if_exists = parse_if_exists(parser)?;
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let mut comment = None;
 		let mut fallback = None;
@@ -1438,16 +1378,15 @@ impl Parse for ast::AlterApi {
 					let _ = parser.next();
 					let _ = parser.expect(T![COMMENT])?;
 					let span = parser.span_since(peek.span);
-					parse_unordered_clause_sync(parser, &mut comment, span, |_| {
+					parse_unordered_clause(parser, &mut comment, span, |_| {
 						Ok(AlterKind::Drop(span))
 					})?;
 				}
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, peek.span, |parser| {
+						parser.parse_enter().map(AlterKind::Set)
+					})?;
 				}
 				T![FOR] => {
 					let _ = parser.next();
@@ -1459,7 +1398,7 @@ impl Parse for ast::AlterApi {
 							if let Some(d) = parser.eat(T![DROP])? {
 								let _ = parser.expect(T![THEN])?;
 								let span = parser.span_since(d.span);
-								parse_unordered_clause_sync(parser, &mut fallback, span, |_| {
+								parse_unordered_clause(parser, &mut fallback, span, |_| {
 									Ok(AlterKind::Drop(span))
 								})?;
 							} else {
@@ -1468,17 +1407,15 @@ impl Parse for ast::AlterApi {
 									parser,
 									&mut fallback,
 									next.span,
-									async |parser| {
+									|parser| {
 										parser
 											.with_state(
 												|s| s.difference(ParserState::LOOP),
 												Parser::parse_enter,
 											)
-											.await
 											.map(AlterKind::Set)
 									},
-								)
-								.await?;
+								)?;
 							}
 						}
 						T![DELETE] | T![GET] | T![POST] | T![PUT] | T![PATCH] | T![TRACE] => {
@@ -1527,7 +1464,7 @@ impl Parse for ast::AlterApi {
 }
 
 impl Parse for ast::AlterConfig {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![CONFIG])?;
 
@@ -1536,9 +1473,9 @@ impl Parse for ast::AlterConfig {
 		let expect = "`API`, `GRAPHQL`, or `DEFAULT`";
 		let peek = parser.peek_expect(expect)?;
 		let kind = match peek.token {
-			T![API] => ast::DefineConfigKind::Api(parser.parse().await?),
-			T![GRAPHQL] => ast::DefineConfigKind::Graphql(parser.parse().await?),
-			T![DEFAULT] => ast::DefineConfigKind::Default(parser.parse().await?),
+			T![API] => ast::DefineConfigKind::Api(parser.parse()?),
+			T![GRAPHQL] => ast::DefineConfigKind::Graphql(parser.parse()?),
+			T![DEFAULT] => ast::DefineConfigKind::Default(parser.parse()?),
 			_ => return Err(parser.unexpected(expect)),
 		};
 

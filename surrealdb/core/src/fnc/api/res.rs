@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 use http::{HeaderName, HeaderValue, StatusCode};
-use reblessive::tree::Stk;
 
 use crate::api::err::ApiError;
 use crate::api::middleware::common::BodyStrategy;
@@ -47,7 +46,7 @@ use crate::val::{Closure, Value};
 ///         };
 /// ```
 pub async fn body(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(FromPublic(req), next, Optional(strategy)): (
 		FromPublic<ApiRequest>,
 		Box<Closure>,
@@ -97,7 +96,7 @@ pub(crate) fn encode_body(
 ///         };
 /// ```
 pub async fn status(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(req, next, status): (Value, Box<Closure>, i64),
 ) -> Result<Value> {
 	let res = crate::exec::closure::invoke_in(&next, ctx, opt, doc, vec![req]).await?;
@@ -142,7 +141,7 @@ pub(crate) fn set_status(res: Value, status: i64) -> Result<Value> {
 ///         };
 /// ```
 pub async fn header(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(req, next, name, Optional(value)): (Value, Box<Closure>, String, Optional<String>),
 ) -> Result<Value> {
 	let res = crate::exec::closure::invoke_in(&next, ctx, opt, doc, vec![req]).await?;
@@ -200,7 +199,7 @@ pub(crate) fn set_header(res: Value, name: &str, value: Option<String>) -> Resul
 ///         };
 /// ```
 pub async fn headers(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(req, next, headers): (Value, Box<Closure>, BTreeMap<String, Option<String>>),
 ) -> Result<Value> {
 	let res = crate::exec::closure::invoke_in(&next, ctx, opt, doc, vec![req]).await?;

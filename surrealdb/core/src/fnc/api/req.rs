@@ -1,5 +1,4 @@
 use anyhow::Result;
-use reblessive::tree::Stk;
 
 use crate::api::err::ApiError;
 use crate::api::middleware::common::BodyStrategy;
@@ -49,7 +48,7 @@ use crate::val::{Closure, Number, Value};
 ///         };
 /// ```
 pub async fn body(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(FromPublic(mut req), next, Optional(strategy)): (
 		FromPublic<ApiRequest>,
 		Box<Closure>,
@@ -104,7 +103,7 @@ pub(crate) async fn parse_body(
 ///         };
 /// ```
 pub async fn max_body(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(FromPublic(req), next, limit): (FromPublic<ApiRequest>, Box<Closure>, Value),
 ) -> Result<Value> {
 	check_body_size(&req, &limit)?;

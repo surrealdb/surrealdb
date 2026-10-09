@@ -492,8 +492,8 @@ impl DeserializeRevisioned for Expr {
 			// the first token it cannot continue with, so trailing content
 			// would decode to a prefix and be evaluated as if that were the
 			// stored expression.
-			async |p, stk| {
-				let expr = p.parse_expr(stk).await?;
+			|p| {
+				let expr = p.parse_expr()?;
 				p.assert_finished()?;
 				Ok(expr)
 			},

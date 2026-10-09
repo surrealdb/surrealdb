@@ -292,13 +292,7 @@ impl MatchContext {
 				// Extract query terms
 				let query_terms = {
 					let az_fn = StreamingAnalyzerFunction::new(ctx.exec_ctx);
-					let mut stack = reblessive::TreeStack::new();
-					stack
-						.enter(|stk| {
-							fti.extract_querying_terms(stk, frozen, &az_fn, self.query.clone())
-						})
-						.finish()
-						.await?
+					fti.extract_querying_terms(frozen, &az_fn, self.query.clone()).await?
 				};
 
 				// Create scorer if BM25 is configured

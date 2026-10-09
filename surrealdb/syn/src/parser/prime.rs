@@ -1,7 +1,6 @@
 use std::ops::Bound;
 
 use common::range::TypedRange;
-use reblessive::Stk;
 use surrealdb_sql::lookup::LookupKind;
 use surrealdb_sql::{
 	Closure, Dir, Expr, Function, FunctionCall, Idiom, Kind, Literal, Mock, Param, Part, Script,
@@ -38,86 +37,203 @@ impl Parser<'_> {
 		}
 	}
 
+	/// Parses a statement that appears in expression position.
+	///
+	/// Statements are large values, so each one is parsed in a frame of its
+	/// own rather than in [`Self::parse_prime_expr`], whose frame every
+	/// nested expression pays for.
+	#[inline(never)]
+	fn parse_boxed_stmt_prime<T>(
+		&mut self,
+		parse: fn(&mut Self) -> ParseResult<T>,
+		wrap: fn(Box<T>) -> Expr,
+	) -> ParseResult<Expr> {
+		self.pop_peek();
+		Ok(wrap(Box::new(parse(self)?)))
+	}
+
+	/// Parses a `<-`, `<->` or `<~` lookup at the start of an expression.
+	#[inline(never)]
+	fn parse_backward_lookup_prime(&mut self, token: crate::token::Token) -> ParseResult<Expr> {
+		self.pop_peek();
+		if let Some(peek) = self.peek_whitespace() {
+			if peek.kind == t!("~") {
+				self.pop_peek();
+				Ok(Expr::Idiom(Idiom(vec![self.parse_graph_part(LookupKind::Reference)?])))
+			} else if peek.kind == t!("-") {
+				self.pop_peek();
+				Ok(Expr::Idiom(Idiom(vec![self.parse_graph_part(LookupKind::Graph(Dir::In))?])))
+			} else if peek.kind == t!("->") {
+				self.pop_peek();
+				Ok(Expr::Idiom(Idiom(vec![self.parse_graph_part(LookupKind::Graph(Dir::Both))?])))
+			} else {
+				unexpected!(self, token, "`<-`, `<->` or `<~`")
+			}
+		} else {
+			unexpected!(self, token, "`<-`, `<->` or `<~`")
+		}
+	}
+
+	/// Parses an `r"..."` record-id string.
+	#[inline(never)]
+	fn parse_record_id_string_prime(&mut self, token: crate::token::Token) -> ParseResult<Expr> {
+		self.pop_peek();
+		let str = self.unescape_string_span(token.span)?;
+		let mut inner_parser = Parser::new(str.as_bytes());
+		let record_id = match inner_parser.parse_record_id() {
+			Ok(x) => x,
+			Err(e) => {
+				let e = e.update_spans(|span| {
+					let range = span.to_range();
+					let start =
+						Lexer::escaped_string_offset(self.span_str(token.span), range.start);
+					let end = Lexer::escaped_string_offset(self.span_str(token.span), range.end);
+					*span = Span::from_range((token.span.offset + start)..(token.span.offset + end))
+				});
+				return Err(e);
+			}
+		};
+		Ok(Expr::Literal(Literal::RecordId(record_id)))
+	}
+
 	/// Parse an expressions
-	pub(super) async fn parse_prime_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	///
+	/// Every nested expression passes through this function, so its frame is
+	/// paid once per nesting level and is kept small: each arm that builds
+	/// anything larger than a literal delegates to an `#[inline(never)]`
+	/// helper and yields its `ParseResult` without unwrapping it here.
+	pub(super) fn parse_prime_expr(&mut self) -> ParseResult<Expr> {
 		let token = self.peek();
 		let value = match token.kind {
-			t!("@") => {
-				self.pop_peek();
-				let mut res = vec![Part::Doc];
-				if !self.peek_continues_idiom() {
-					res.push(self.parse_dot_part(stk).await?);
-				}
-
-				Expr::Idiom(Idiom(res))
-			}
 			t!("NONE") => {
 				self.pop_peek();
-				Expr::Literal(Literal::None)
+				Ok(Expr::Literal(Literal::None))
 			}
 			t!("NULL") => {
 				self.pop_peek();
-				Expr::Literal(Literal::Null)
+				Ok(Expr::Literal(Literal::Null))
 			}
 			t!("true") => {
 				self.pop_peek();
-				Expr::Literal(Literal::Bool(true))
+				Ok(Expr::Literal(Literal::Bool(true)))
 			}
 			t!("false") => {
 				self.pop_peek();
-				Expr::Literal(Literal::Bool(false))
+				Ok(Expr::Literal(Literal::Bool(false)))
 			}
-			t!("<") => {
+			TokenKind::Infinity => {
 				self.pop_peek();
-				if let Some(peek) = self.peek_whitespace() {
-					if peek.kind == t!("~") {
-						self.pop_peek();
-						let lookup =
-							stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Reference)).await?;
-						Expr::Idiom(Idiom(vec![Part::Graph(Box::new(lookup))]))
-					} else if peek.kind == t!("-") {
-						self.pop_peek();
-						let lookup = stk
-							.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::In)))
-							.await?;
-						Expr::Idiom(Idiom(vec![Part::Graph(Box::new(lookup))]))
-					} else if peek.kind == t!("->") {
-						self.pop_peek();
-						let lookup = stk
-							.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Both)))
-							.await?;
-						Expr::Idiom(Idiom(vec![Part::Graph(Box::new(lookup))]))
-					} else {
-						unexpected!(self, token, "`<-`, `<->` or `<~`")
-					}
-				} else {
-					unexpected!(self, token, "`<-`, `<->` or `<~`")
-				}
+				Ok(Expr::Literal(Literal::Float(f64::INFINITY)))
 			}
-			t!("r\"") | t!("r'") => {
+			TokenKind::NaN => {
 				self.pop_peek();
-				let str = self.unescape_string_span(token.span)?;
-				let mut inner_parser = Parser::new(str.as_bytes());
-				let record_id = match stk.run(|stk| inner_parser.parse_record_id(stk)).await {
-					Ok(x) => x,
-					Err(e) => {
-						let e = e.update_spans(|span| {
-							let range = span.to_range();
-							let start = Lexer::escaped_string_offset(
-								self.span_str(token.span),
-								range.start,
-							);
-							let end =
-								Lexer::escaped_string_offset(self.span_str(token.span), range.end);
-							*span = Span::from_range(
-								(token.span.offset + start)..(token.span.offset + end),
-							)
-						});
-						return Err(e);
-					}
-				};
-				Expr::Literal(Literal::RecordId(record_id))
+				Ok(Expr::Literal(Literal::Float(f64::NAN)))
 			}
+			t!("CONTINUE") => {
+				self.pop_peek();
+				Ok(Expr::Continue)
+			}
+			t!("BREAK") => {
+				self.pop_peek();
+				Ok(Expr::Break)
+			}
+			t!("@") => self.parse_doc_prime(),
+			t!("<") => self.parse_backward_lookup_prime(token),
+			t!("r\"") | t!("r'") => self.parse_record_id_string_prime(token),
+			t!("d\"")
+			| t!("d'")
+			| t!("u\"")
+			| t!("u'")
+			| t!("b\"")
+			| t!("b'")
+			| t!("f\"")
+			| t!("f'")
+			| t!("'")
+			| t!("\"")
+			| t!("/")
+			| t!("$param") => self.parse_token_literal_prime(token),
+			t!("+") | t!("-") | TokenKind::Digits => self.parse_number_like_prime(),
+			t!("FUNCTION") => {
+				self.pop_peek();
+				self.parse_script().map(|x| Expr::FunctionCall(Box::new(x)))
+			}
+			t!("->") => self.parse_forward_lookup_prime(),
+			t!("[") => {
+				self.pop_peek();
+				self.parse_array(token.span).map(|a| Expr::Literal(Literal::Array(a)))
+			}
+			t!("{") => {
+				self.pop_peek();
+				self.parse_object_like(token.span)
+			}
+			t!("|") => {
+				self.pop_peek();
+				self.parse_closure_or_mock(token.span)
+			}
+			t!("||") => {
+				self.pop_peek();
+				self.parse_closure_after_args(Vec::new())
+			}
+			t!("(") => {
+				self.pop_peek();
+				self.parse_covered_expr_or_coordinate(token.span)
+			}
+			t!("fn") | t!("mod") | t!("silo") | t!("ml") if self.peek1().kind == t!("::") => {
+				self.parse_function_call_prime(token.kind)
+			}
+			t!("IF") => self.parse_boxed_stmt_prime(Self::parse_if_stmt, Expr::IfElse),
+			t!("SELECT") => self.parse_boxed_stmt_prime(Self::parse_select_stmt, Expr::Select),
+			t!("CREATE") => self.parse_boxed_stmt_prime(Self::parse_create_stmt, Expr::Create),
+			t!("EXPLAIN") => {
+				self.pop_peek();
+				self.parse_explain_expr()
+			}
+			t!("UPDATE") => self.parse_boxed_stmt_prime(Self::parse_update_stmt, Expr::Update),
+			t!("UPSERT") => self.parse_boxed_stmt_prime(Self::parse_upsert_stmt, Expr::Upsert),
+			t!("DELETE") => self.parse_boxed_stmt_prime(Self::parse_delete_stmt, Expr::Delete),
+			t!("RELATE") => self.parse_boxed_stmt_prime(Self::parse_relate_stmt, Expr::Relate),
+			t!("INSERT") => self.parse_boxed_stmt_prime(Self::parse_insert_stmt, Expr::Insert),
+			t!("DEFINE") => self.parse_boxed_stmt_prime(Self::parse_define_stmt, Expr::Define),
+			t!("REMOVE") => self.parse_boxed_stmt_prime(Self::parse_remove_stmt, Expr::Remove),
+			t!("REBUILD") => self.parse_boxed_stmt_prime(Self::parse_rebuild_stmt, Expr::Rebuild),
+			t!("ALTER") => self.parse_boxed_stmt_prime(Self::parse_alter_stmt, Expr::Alter),
+			t!("INFO") => self.parse_boxed_stmt_prime(Self::parse_info_stmt, Expr::Info),
+			t!("FOR") => self.parse_boxed_stmt_prime(Self::parse_for_stmt, Expr::Foreach),
+			t!("LET") => self.parse_boxed_stmt_prime(Self::parse_let_stmt, Expr::Let),
+			t!("SLEEP") if self.peek1().kind != t!("(") => {
+				self.parse_boxed_stmt_prime(Self::parse_sleep_stmt, Expr::Sleep)
+			}
+			t!("RETURN") => self.parse_boxed_stmt_prime(Self::parse_return_stmt, Expr::Return),
+			t!("THROW") => self.parse_boxed_stmt_prime(Self::parse_expr_inherit, Expr::Throw),
+			x if Self::kind_is_identifier(x) => self.parse_ident_prime(token),
+			_ => {
+				unexpected!(self, token, "an expression")
+			}
+		}?;
+
+		if self.peek_continues_idiom() {
+			self.parse_prime_idiom_continuation(value)
+		} else {
+			Ok(value)
+		}
+	}
+
+	/// Parses an expression starting with `@`, the current document.
+	#[inline(never)]
+	fn parse_doc_prime(&mut self) -> ParseResult<Expr> {
+		self.pop_peek();
+		let mut res = vec![Part::Doc];
+		if !self.peek_continues_idiom() {
+			res.push(self.parse_dot_part()?);
+		}
+		Ok(Expr::Idiom(Idiom(res)))
+	}
+
+	/// Parses a literal whose value a single token carries: strings, typed
+	/// strings, regexes and parameters.
+	#[inline(never)]
+	fn parse_token_literal_prime(&mut self, token: crate::token::Token) -> ParseResult<Expr> {
+		let expr = match token.kind {
 			t!("d\"") | t!("d'") => Expr::Literal(Literal::Datetime(self.next_token_value()?)),
 			t!("u\"") | t!("u'") => Expr::Literal(Literal::Uuid(self.next_token_value()?)),
 			t!("b\"") | t!("b'") => Expr::Literal(Literal::Bytes(self.next_token_value()?)),
@@ -125,219 +241,74 @@ impl Parser<'_> {
 				if !self.settings.files_enabled {
 					unexpected!(self, token, "the experimental files feature to be enabled");
 				}
-
 				let file: surrealdb_types::File = self.next_token_value()?;
 				Expr::Literal(Literal::File(file.into()))
 			}
-			t!("'") | t!("\"") => {
+			t!("/") => Expr::Literal(Literal::Regex(self.next_token_value()?)),
+			t!("$param") => Expr::Param(self.next_token_value()?),
+			_ => {
 				if self.settings.legacy_strands {
-					Expr::Literal(self.reparse_legacy_strand(stk).await?)
+					Expr::Literal(self.reparse_legacy_strand()?)
 				} else {
 					let s = self.parse_string_lit()?;
 					Expr::Literal(Literal::String(s.into()))
 				}
 			}
-			t!("+") | t!("-") | TokenKind::Digits => self.parse_number_like_prime()?,
-			TokenKind::Infinity => {
+		};
+		Ok(expr)
+	}
+
+	/// Parses a `->` lookup at the start of an expression.
+	#[inline(never)]
+	fn parse_forward_lookup_prime(&mut self) -> ParseResult<Expr> {
+		self.pop_peek();
+		Ok(Expr::Idiom(Idiom(vec![self.parse_graph_part(LookupKind::Graph(Dir::Out))?])))
+	}
+
+	/// Parses a `fn::`, `mod::`, `silo::` or `ml::` call; `kind` is the
+	/// still-unconsumed leading keyword.
+	#[inline(never)]
+	fn parse_function_call_prime(&mut self, kind: TokenKind) -> ParseResult<Expr> {
+		self.pop_peek();
+		let call = match kind {
+			t!("fn") => self.parse_custom_function()?,
+			t!("mod") => self.parse_module_function()?,
+			t!("silo") => self.parse_silo_function()?,
+			_ => self.parse_model()?,
+		};
+		Ok(Expr::FunctionCall(Box::new(call)))
+	}
+
+	/// Parses an expression starting with an identifier: a builtin function
+	/// call, a record id or range, or a table (or field) name.
+	#[inline(never)]
+	fn parse_ident_prime(&mut self, token: crate::token::Token) -> ParseResult<Expr> {
+		match self.peek1().kind {
+			t!("::") | t!("(") => {
 				self.pop_peek();
-				Expr::Literal(Literal::Float(f64::INFINITY))
+				self.parse_builtin(token.span)
 			}
-			TokenKind::NaN => {
-				self.pop_peek();
-				Expr::Literal(Literal::Float(f64::NAN))
-			}
-			t!("$param") => Expr::Param(self.next_token_value()?),
-			t!("FUNCTION") => {
-				self.pop_peek();
-				let script = self.parse_script(stk).await?;
-				Expr::FunctionCall(Box::new(script))
-			}
-			t!("->") => {
-				self.pop_peek();
-				let lookup =
-					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Out))).await?;
-				Expr::Idiom(Idiom(vec![Part::Graph(Box::new(lookup))]))
-			}
-			t!("[") => {
-				self.pop_peek();
-				self.parse_array(stk, token.span).await.map(|a| Expr::Literal(Literal::Array(a)))?
-			}
-			t!("{") => {
-				self.pop_peek();
-				self.parse_object_like(stk, token.span).await?
-			}
-			t!("|") => {
-				self.pop_peek();
-				self.parse_closure_or_mock(stk, token.span).await?
-			}
-			t!("||") => {
-				self.pop_peek();
-				stk.run(|ctx| self.parse_closure_after_args(ctx, Vec::new())).await?
-			}
-			t!("(") => {
-				self.pop_peek();
-				self.parse_covered_expr_or_coordinate(stk, token.span).await?
-			}
-			t!("/") => {
-				let regex = self.next_token_value()?;
-				Expr::Literal(Literal::Regex(regex))
-			}
-			t!("fn") if self.peek1().kind == t!("::") => {
-				self.pop_peek();
-				self.parse_custom_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
-			}
-			t!("mod") if self.peek1().kind == t!("::") => {
-				self.pop_peek();
-				self.parse_module_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
-			}
-			t!("silo") if self.peek1().kind == t!("::") => {
-				self.pop_peek();
-				self.parse_silo_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
-			}
-			t!("ml") if self.peek1().kind == t!("::") => {
-				self.pop_peek();
-				self.parse_model(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
-			}
-			t!("IF") => {
-				self.pop_peek();
-				let stmt = stk.run(|ctx| self.parse_if_stmt(ctx)).await?;
-				Expr::IfElse(Box::new(stmt))
-			}
-			t!("SELECT") => {
-				self.pop_peek();
-				let stmt = self.parse_select_stmt(stk).await?;
-				Expr::Select(Box::new(stmt))
-			}
-			t!("CREATE") => {
-				self.pop_peek();
-				let stmt = self.parse_create_stmt(stk).await?;
-				Expr::Create(Box::new(stmt))
-			}
-			t!("EXPLAIN") => {
-				self.pop_peek();
-				self.parse_explain_expr(stk).await?
-			}
-			t!("UPDATE") => {
-				self.pop_peek();
-				let stmt = self.parse_update_stmt(stk).await?;
-				Expr::Update(Box::new(stmt))
-			}
-			t!("UPSERT") => {
-				self.pop_peek();
-				let stmt = self.parse_upsert_stmt(stk).await?;
-				Expr::Upsert(Box::new(stmt))
-			}
-			t!("DELETE") => {
-				self.pop_peek();
-				let stmt = self.parse_delete_stmt(stk).await?;
-				Expr::Delete(Box::new(stmt))
-			}
-			t!("RELATE") => {
-				self.pop_peek();
-				let stmt = self.parse_relate_stmt(stk).await?;
-				Expr::Relate(Box::new(stmt))
-			}
-			t!("INSERT") => {
-				self.pop_peek();
-				let stmt = self.parse_insert_stmt(stk).await?;
-				Expr::Insert(Box::new(stmt))
-			}
-			t!("DEFINE") => {
-				self.pop_peek();
-				let stmt = self.parse_define_stmt(stk).await?;
-				Expr::Define(Box::new(stmt))
-			}
-			t!("REMOVE") => {
-				self.pop_peek();
-				let stmt = self.parse_remove_stmt(stk).await?;
-				Expr::Remove(Box::new(stmt))
-			}
-			t!("REBUILD") => {
-				self.pop_peek();
-				let stmt = self.parse_rebuild_stmt()?;
-				Expr::Rebuild(Box::new(stmt))
-			}
-			t!("ALTER") => {
-				self.pop_peek();
-				let stmt = self.parse_alter_stmt(stk).await?;
-				Expr::Alter(Box::new(stmt))
-			}
-			t!("INFO") => {
-				self.pop_peek();
-				let stmt = self.parse_info_stmt(stk).await?;
-				Expr::Info(Box::new(stmt))
-			}
-			t!("FOR") => {
-				self.pop_peek();
-				let stmt = self.parse_for_stmt(stk).await?;
-				Expr::Foreach(Box::new(stmt))
-			}
-			t!("LET") => {
-				self.pop_peek();
-				let stmt = self.parse_let_stmt(stk).await?;
-				Expr::Let(Box::new(stmt))
-			}
-			t!("SLEEP") if self.peek1().kind != t!("(") => {
-				self.pop_peek();
-				let stmt = self.parse_sleep_stmt()?;
-				Expr::Sleep(Box::new(stmt))
-			}
-			t!("RETURN") => {
-				self.pop_peek();
-				let stmt = self.parse_return_stmt(stk).await?;
-				Expr::Return(Box::new(stmt))
-			}
-			t!("THROW") => {
-				self.pop_peek();
-				let expr = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
-				Expr::Throw(Box::new(expr))
-			}
-			t!("CONTINUE") => {
-				self.pop_peek();
-				Expr::Continue
-			}
-			t!("BREAK") => {
-				self.pop_peek();
-				Expr::Break
-			}
-			x if Self::kind_is_identifier(x) => {
-				let peek = self.peek1();
-				match peek.kind {
-					t!("::") | t!("(") => {
-						self.pop_peek();
-						self.parse_builtin(stk, token.span).await?
-					}
-					t!(":") => {
-						let str = self.parse_ident()?;
-						self.parse_record_id_or_range(stk, str)
-							.await
-							.map(|x| Expr::Literal(Literal::RecordId(x)))?
-					}
-					_ => {
-						if self.table_as_field {
-							Expr::Idiom(Idiom(vec![Part::Field(self.parse_ident_str()?.into())]))
-						} else {
-							Expr::Table(self.parse_ident_str()?.into())
-						}
-					}
-				}
+			t!(":") => {
+				let str = self.parse_ident()?;
+				self.parse_record_id_or_range(str).map(|x| Expr::Literal(Literal::RecordId(x)))
 			}
 			_ => {
-				unexpected!(self, token, "an expression")
-			}
-		};
-
-		// Parse the rest of the idiom if it is being continued.
-		if self.peek_continues_idiom() {
-			match value {
-				Expr::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(stk, x).await,
-				Expr::Table(x) => {
-					self.parse_remaining_value_idiom(stk, vec![Part::Field(x.into())]).await
+				if self.table_as_field {
+					Ok(Expr::Idiom(Idiom(vec![Part::Field(self.parse_ident_str()?.into())])))
+				} else {
+					Ok(Expr::Table(self.parse_ident_str()?.into()))
 				}
-				x => self.parse_remaining_value_idiom(stk, vec![Part::Start(x)]).await,
 			}
-		} else {
-			Ok(value)
+		}
+	}
+
+	/// Parses the rest of an idiom that continues the prime `value`.
+	#[inline(never)]
+	fn parse_prime_idiom_continuation(&mut self, value: Expr) -> ParseResult<Expr> {
+		match value {
+			Expr::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(x),
+			Expr::Table(x) => self.parse_remaining_value_idiom(vec![Part::Field(x.into())]),
+			x => self.parse_remaining_value_idiom(vec![Part::Start(x)]),
 		}
 	}
 
@@ -346,7 +317,7 @@ impl Parser<'_> {
 	/// # Parser state
 	/// Expects the starting `[` to already be eaten and its span passed as an
 	/// argument.
-	pub async fn parse_array(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Vec<Expr>> {
+	pub fn parse_array(&mut self, start: Span) -> ParseResult<Vec<Expr>> {
 		let mut exprs = Vec::new();
 		enter_object_recursion!(this = self => {
 			loop {
@@ -354,7 +325,7 @@ impl Parser<'_> {
 					break;
 				}
 
-				let value = stk.run(|ctx| this.parse_expr_collection_element(ctx)).await?;
+				let value = this.parse_expr_collection_element()?;
 				exprs.push(value);
 
 
@@ -428,18 +399,14 @@ impl Parser<'_> {
 		))
 	}
 
-	pub(super) async fn parse_closure_or_mock(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<Expr> {
+	pub(super) fn parse_closure_or_mock(&mut self, start: Span) -> ParseResult<Expr> {
 		match self.peek_kind() {
-			t!("$param") => stk.run(|ctx| self.parse_closure(ctx, start)).await,
+			t!("$param") => self.parse_closure(start),
 			_ => self.parse_mock(start).map(Expr::Mock),
 		}
 	}
 
-	pub(super) async fn parse_closure(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Expr> {
+	pub(super) fn parse_closure(&mut self, start: Span) -> ParseResult<Expr> {
 		let mut args = Vec::new();
 		loop {
 			if self.eat(t!("|")) {
@@ -450,9 +417,9 @@ impl Parser<'_> {
 			let kind = if self.eat(t!(":")) {
 				if self.eat(t!("<")) {
 					let delim = self.last_span();
-					stk.run(|stk| self.parse_kind(stk, delim)).await?
+					self.parse_kind(delim)?
 				} else {
-					stk.run(|stk| self.parse_inner_single_kind(stk)).await?
+					self.parse_inner_single_kind()?
 				}
 			} else {
 				Kind::Any
@@ -466,21 +433,20 @@ impl Parser<'_> {
 			}
 		}
 
-		self.parse_closure_after_args(stk, args).await
+		self.parse_closure_after_args(args)
 	}
 
-	pub(super) async fn parse_closure_after_args(
+	pub(super) fn parse_closure_after_args(
 		&mut self,
-		stk: &mut Stk,
 		args: Vec<(Param, Kind)>,
 	) -> ParseResult<Expr> {
 		let (returns, body) = if self.eat(t!("->")) {
-			let returns = Some(stk.run(|ctx| self.parse_inner_kind(ctx)).await?);
+			let returns = Some(self.parse_inner_kind()?);
 			let start = expected!(self, t!("{")).span;
-			let body = Expr::Block(Box::new(stk.run(|ctx| self.parse_block(ctx, start)).await?));
+			let body = Expr::Block(Box::new(self.parse_block(start)?));
 			(returns, body)
 		} else {
-			let body = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
+			let body = self.parse_expr_inherit()?;
 			(None, body)
 		};
 
@@ -491,39 +457,32 @@ impl Parser<'_> {
 		})))
 	}
 
-	async fn parse_covered_expr_or_coordinate(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<Expr> {
+	fn parse_covered_expr_or_coordinate(&mut self, start: Span) -> ParseResult<Expr> {
 		let peek = self.peek();
 		match peek.kind {
 			t!("+") | t!("-") | TokenKind::NaN | TokenKind::Infinity | TokenKind::Digits => {
-				if let Some(x) = self
-					.speculate(stk, async |_, this| {
-						let Ok(x) = this.next_token_value::<f64>() else {
-							return Ok(None);
-						};
+				if let Some(x) = self.speculate(|this| {
+					let Ok(x) = this.next_token_value::<f64>() else {
+						return Ok(None);
+					};
 
-						if !this.eat(t!(",")) {
-							return Ok(None);
-						}
+					if !this.eat(t!(",")) {
+						return Ok(None);
+					}
 
-						let y = this.next_token_value::<f64>()?;
-						this.expect_closing_delimiter(t!(")"), start)?;
-						Ok(Some(Expr::Literal(Literal::Geometry(geo::Geometry::Point(
-							geo::Point::new(x, y),
-						)))))
-					})
-					.await?
-				{
+					let y = this.next_token_value::<f64>()?;
+					this.expect_closing_delimiter(t!(")"), start)?;
+					Ok(Some(Expr::Literal(Literal::Geometry(geo::Geometry::Point(
+						geo::Point::new(x, y),
+					)))))
+				})? {
 					return Ok(x);
 				};
 			}
 			_ => {}
 		};
 
-		let res = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+		let res = self.parse_expr_inherit()?;
 		let token = self.peek();
 		if token.kind != t!(")")
 			&& Self::starts_disallowed_subquery_statement(peek.kind)
@@ -538,7 +497,7 @@ impl Parser<'_> {
 
 		// Ensure that `((..).a).b` is broken up into separate idioms.
 		if self.peek_continues_idiom() {
-			self.parse_remaining_value_idiom(stk, vec![Part::Start(res)]).await
+			self.parse_remaining_value_idiom(vec![Part::Start(res)])
 		} else {
 			Ok(res)
 		}
@@ -546,10 +505,7 @@ impl Parser<'_> {
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or
 	/// uuid if the string matches.
-	pub(super) async fn reparse_legacy_strand(
-		&mut self,
-		stk: &mut Stk,
-	) -> Result<Literal, SyntaxError> {
+	pub(super) fn reparse_legacy_strand(&mut self) -> Result<Literal, SyntaxError> {
 		let token = self.next();
 		assert!(matches!(token.kind, t!("'") | t!("\"")));
 
@@ -563,7 +519,7 @@ impl Parser<'_> {
 		}
 
 		let mut record_id_parser = Parser::new(str.as_bytes());
-		if let Ok(x) = record_id_parser.parse_record_id(stk).await
+		if let Ok(x) = record_id_parser.parse_record_id()
 			&& record_id_parser.peek().is_eof()
 		{
 			return Ok(Literal::RecordId(x));
@@ -572,7 +528,7 @@ impl Parser<'_> {
 		Ok(Literal::String(str.into()))
 	}
 
-	async fn parse_script(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
+	fn parse_script(&mut self) -> ParseResult<FunctionCall> {
 		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {
@@ -580,7 +536,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			let arg = self.parse_expr_inherit()?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {

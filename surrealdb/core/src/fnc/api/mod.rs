@@ -1,6 +1,5 @@
 use anyhow::Result;
 use http::header::{ACCEPT, CONTENT_TYPE};
-use reblessive::tree::Stk;
 use surrealdb_rpc::format as api_format;
 use tracing::trace;
 use uuid::Uuid;
@@ -57,7 +56,7 @@ pub mod res;
 /// });
 /// ```
 pub async fn invoke(
-	(_stk, ctx, opt): (&mut Stk, &FrozenContext, &Options),
+	(ctx, opt): (&FrozenContext, &Options),
 	(path, Optional(req)): (String, Optional<FromPublic<ApiRequest>>),
 ) -> Result<Value> {
 	let response = match route(ctx, opt, &path, req.map(|x| x.0)).await? {
@@ -161,7 +160,7 @@ pub(crate) fn invoked(response: ApiResponse) -> Result<Value> {
 ///         };
 /// ```
 pub async fn timeout(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, &Options, Option<&CursorDoc>),
 	(req, next, timeout): (Value, Box<Closure>, Duration),
 ) -> Result<Value> {
 	let mut ctx = Context::new_isolated(ctx);

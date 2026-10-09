@@ -61,7 +61,6 @@
 //! token.
 
 use bytes::BytesMut;
-use reblessive::{Stack, Stk};
 use surrealdb_sql as sql;
 
 use self::token_buffer::TokenBuffer;
@@ -203,13 +202,13 @@ impl ParserSettings {
 	/// - The recursion limits are far above the configured defaults, because the text fit within
 	///   whatever (env-tunable) limits applied where it was written and re-parsing under today's
 	///   limits would reject data that was legal to store. They are not unbounded, though, and the
-	///   difference matters: parsing recurses on a heap-allocated `reblessive` stack, but the `sql
-	///   -> expr` lowering that follows recurses on the call stack, as does the value's own `Drop`.
-	///   "It already survived that lowering when it was written" holds within one process at one
-	///   configuration; it does not hold across a cluster or across a config change. A node with a
-	///   raised `SURREAL_MAX_EXPRESSION_PARSING_DEPTH` can write a definition that a
-	///   default-configured reader then re-parses on every catalog-cache miss for that table — and
-	///   a Rust stack overflow is a SIGSEGV, not an error anything can catch or degrade from.
+	///   difference matters: parsing recurses on the call stack once per nesting level, as do the
+	///   `sql -> expr` lowering that follows and the value's own `Drop`. "It already survived that
+	///   lowering when it was written" holds within one process at one configuration; it does not
+	///   hold across a cluster or across a config change. A node with a raised
+	///   `SURREAL_MAX_EXPRESSION_PARSING_DEPTH` can write a definition that a default-configured
+	///   reader then re-parses on every catalog-cache miss for that table — and a Rust stack
+	///   overflow is a SIGSEGV, not an error anything can catch or degrade from.
 	///
 	///   So decode gets an absolute ceiling, independent of live config. The numbers are several
 	///   times the defaults (100 / 20 / 128) — past anything a real schema reaches, and past the
@@ -256,10 +255,9 @@ impl ParserSettings {
 	/// trip again.
 	///
 	/// Like [`Self::STORED_TEXT`], the ceiling is bounded and independent of
-	/// live configuration, and for the same reason: parsing recurses on a
-	/// heap-allocated `reblessive` stack, but the `sql -> expr` lowering that
-	/// follows, `ToSql`, and the value's own `Drop` recurse on the call stack,
-	/// where exhaustion is a SIGSEGV rather than an error. Callers pass a
+	/// live configuration, and for the same reason: parsing, the `sql -> expr`
+	/// lowering that follows, `ToSql`, and the value's own `Drop` all recurse
+	/// on the call stack, where exhaustion is a SIGSEGV rather than an error. Callers pass a
 	/// compile-time constant, so no configuration can put a value in storage
 	/// that this ceiling cannot read back.
 	///
@@ -533,21 +531,21 @@ impl<'a> Parser<'a> {
 	/// Parse a full query.
 	///
 	/// This is the primary entry point of the parser.
-	pub async fn parse_query(&mut self, stk: &mut Stk) -> ParseResult<sql::Ast> {
-		let statements = self.parse_stmt_list(stk).await?;
+	pub fn parse_query(&mut self) -> ParseResult<sql::Ast> {
+		let statements = self.parse_stmt_list()?;
 		Ok(sql::Ast {
 			expressions: statements,
 		})
 	}
 
 	/// Parse a single statement.
-	async fn parse_statement(&mut self, stk: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
-		self.parse_top_level_expr(stk).await
+	fn parse_statement(&mut self) -> ParseResult<sql::TopLevelExpr> {
+		self.parse_top_level_expr()
 	}
 
 	/// Parse a single expression.
-	pub async fn parse_expr(&mut self, stk: &mut Stk) -> ParseResult<sql::Expr> {
-		self.parse_expr_start(stk).await
+	pub fn parse_expr(&mut self) -> ParseResult<sql::Expr> {
+		self.parse_expr_start()
 	}
 
 	pub fn lex_compound<F, R>(
@@ -611,12 +609,12 @@ impl<'a> Parser<'a> {
 	/// Please limit the usage to only syntax that can't be efficiently parsed without backtracking
 	/// and do not use it for implementing new syntax. If new syntax requires this function to
 	/// implement it consider altering the syntax to remove the need for backtracking.
-	pub async fn speculate<T, F>(&mut self, stk: &mut Stk, cb: F) -> ParseResult<Option<T>>
+	pub fn speculate<T, F>(&mut self, cb: F) -> ParseResult<Option<T>>
 	where
-		F: AsyncFnOnce(&mut Stk, &mut Parser) -> ParseResult<Option<T>>,
+		F: FnOnce(&mut Parser) -> ParseResult<Option<T>>,
 	{
 		let backup = self.last_span();
-		match cb(stk, self).await {
+		match cb(self) {
 			Ok(Some(x)) => Ok(Some(x)),
 			Ok(None) => {
 				self.backup_after(backup);
@@ -629,7 +627,6 @@ impl<'a> Parser<'a> {
 
 /// A struct which can parse queries statements by statement
 pub struct StatementStream {
-	stack: Stack,
 	settings: ParserSettings,
 	col_offset: usize,
 	line_offset: usize,
@@ -643,7 +640,6 @@ impl StatementStream {
 
 	pub fn new_with_settings(settings: ParserSettings) -> Self {
 		StatementStream {
-			stack: Stack::new(),
 			settings,
 			col_offset: 0,
 			line_offset: 0,
@@ -714,7 +710,7 @@ impl StatementStream {
 			return Ok(None);
 		}
 
-		let res = self.stack.enter(|stk| parser.parse_statement(stk)).finish();
+		let res = parser.parse_statement();
 		if parser.peek().is_eof() {
 			if buffer.len() > u32::MAX as usize {
 				let error = syntax_error!("Cannot parse query, statement exceeded maximum size of 4GB", @parser.last_span());
@@ -782,7 +778,7 @@ impl StatementStream {
 			return Ok(None);
 		}
 
-		match self.stack.enter(|stk| parser.parse_statement(stk)).finish() {
+		match parser.parse_statement() {
 			Ok(x) => {
 				if !parser.peek().is_eof() && !parser.eat(t!(";")) {
 					let peek = parser.peek();
@@ -816,10 +812,7 @@ mod settings_tests {
 	}
 
 	fn parses(source: &str, settings: ParserSettings) -> bool {
-		parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
-			parser.parse_query(stk).await
-		})
-		.is_ok()
+		parse_with_settings(source.as_bytes(), settings, |parser| parser.parse_query()).is_ok()
 	}
 
 	/// A bracketed level is charged to the object budget and to the expression

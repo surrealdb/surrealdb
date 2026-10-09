@@ -1,4 +1,3 @@
-use reblessive::Stk;
 use surrealdb_sql::builtin_paths::{PATHS, PathKind};
 use surrealdb_sql::{Expr, Function, FunctionCall};
 use unicase::UniCase;
@@ -102,7 +101,7 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 
 impl Parser<'_> {
 	/// Parse a builtin path.
-	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Expr> {
+	pub(super) fn parse_builtin(&mut self, start: Span) -> ParseResult<Expr> {
 		let s = self.unescape_ident_span(start)?;
 		let mut buffer = s.to_lowercase();
 
@@ -127,10 +126,9 @@ impl Parser<'_> {
 
 		match PATHS.get_entry(&UniCase::ascii(&buffer)) {
 			Some((_, (PathKind::Constant(x), _))) => Ok(Expr::Constant(x.clone())),
-			Some((_, (PathKind::Function, _))) => stk
-				.run(|ctx| self.parse_builtin_function(ctx, buffer))
-				.await
-				.map(|x| Expr::FunctionCall(Box::new(x))),
+			Some((_, (PathKind::Function, _))) => {
+				self.parse_builtin_function(buffer).map(|x| Expr::FunctionCall(Box::new(x)))
+			}
 			None => {
 				if let Some(suggest) = find_suggestion(&buffer) {
 					Err(SyntaxError::new(format_args!(
@@ -146,11 +144,7 @@ impl Parser<'_> {
 	}
 
 	/// Parse a call to a builtin function.
-	pub(super) async fn parse_builtin_function(
-		&mut self,
-		stk: &mut Stk,
-		name: String,
-	) -> ParseResult<FunctionCall> {
+	pub(super) fn parse_builtin_function(&mut self, name: String) -> ParseResult<FunctionCall> {
 		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {
@@ -158,7 +152,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			let arg = self.parse_expr_inherit()?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {

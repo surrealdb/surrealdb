@@ -6,7 +6,6 @@
 //! they are re-exported here so a caller sees one module.
 
 use anyhow::Result;
-use reblessive::tree::Stk;
 pub use surrealdb_runtime::r#type::*;
 
 use crate::ctx::FrozenContext;
@@ -17,7 +16,7 @@ use crate::syn;
 use crate::val::Value;
 
 pub async fn field(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(val,): (String,),
 ) -> Result<Value> {
 	match opt {
@@ -33,7 +32,7 @@ pub async fn field(
 }
 
 pub async fn fields(
-	(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(ctx, opt, doc): (&FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(val,): (Vec<String>,),
 ) -> Result<Value> {
 	match opt {

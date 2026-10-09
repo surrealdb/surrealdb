@@ -732,15 +732,15 @@ mod tests {
 		// The parser depth limits are env-tunable (SURREAL_MAX_*_PARSING_DEPTH),
 		// so a definition legally written under raised limits can exceed the
 		// defaults. Stored text parses under `ParserSettings::STORED_TEXT`
-		// (unbounded), matching `Expr`'s wire decode; only fresh input is
-		// bounded by the configured limits.
+		// (ceilings far above the defaults), matching `Expr`'s wire decode;
+		// only fresh input is bounded by the configured limits.
 		//
 		// The fresh-input rejections run on the test thread (the parser fails
 		// fast at the depth limit). The deep compiles run on a thread with an
-		// explicit large stack: parsing is heap-stacked (reblessive), but the
-		// `sql -> expr` lowering after it recurses per node on the call stack,
-		// and a definition this deep would only ever have been written by a
-		// server whose statement execution performed that same lowering.
+		// explicit large stack: parsing and the `sql -> expr` lowering after
+		// it recurse per node on the call stack, and a definition this deep
+		// would only ever have been written by a server whose statement
+		// execution performed that same parse and lowering.
 
 		// 200-deep array nesting: past the default object_recursion_limit (100).
 		let deep_array = format!("{}1{}", "[".repeat(200), "]".repeat(200));

@@ -29,14 +29,14 @@ impl<T: ParseSync> ParseSync for Spanned<T> {
 }
 
 impl<T: Parse> Parse for Spanned<T> {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = if let Some(x) = parser.peek()? {
 			x.span
 		} else {
 			parser.eof_span()
 		};
 
-		let value = T::parse(parser).await?;
+		let value = T::parse(parser)?;
 
 		let end = if let Some(x) = parser.peek()? {
 			x.span
@@ -55,7 +55,7 @@ impl<T: Parse> Parse for Spanned<T> {
 ///
 /// Returns a list of items parsed as well as the span for the whole delimited list including
 /// delimiters.
-pub async fn parse_delimited_list<'src, 'ast, R, F>(
+pub fn parse_delimited_list<'src, 'ast, R, F>(
 	parser: &mut Parser<'src, 'ast>,
 	open: BaseTokenKind,
 	close: BaseTokenKind,
@@ -63,7 +63,7 @@ pub async fn parse_delimited_list<'src, 'ast, R, F>(
 	mut value: F,
 ) -> ParseResult<(Span, Option<NodeListId<R>>)>
 where
-	F: AsyncFnMut(&mut Parser<'src, 'ast>) -> ParseResult<R>,
+	F: FnMut(&mut Parser<'src, 'ast>) -> ParseResult<R>,
 	R: Node,
 {
 	let start = parser.expect(open)?;
@@ -76,7 +76,7 @@ where
 			break;
 		}
 
-		let v = value(parser).await?;
+		let v = value(parser)?;
 		parser.push_list(v, &mut head, &mut tail);
 
 		if parser.eat(seperator)?.is_none() {
@@ -91,50 +91,7 @@ where
 
 /// Parses a list of items without delimiters seperated by a seperator like `a, b` in
 /// `SELECT a,b FROM table`.
-pub async fn parse_seperated_list<'src, 'ast, R, F>(
-	parser: &mut Parser<'src, 'ast>,
-	seperator: BaseTokenKind,
-	value: F,
-) -> ParseResult<(Span, NodeListId<R>)>
-where
-	F: AsyncFn(&mut Parser<'src, 'ast>) -> ParseResult<R>,
-	R: Node,
-{
-	let span = parser.peek_span();
-
-	let start = value(parser).await?;
-	let start = parser.push(start);
-	let start = parser.push_list_item(NodeList {
-		cur: start,
-		next: None,
-	});
-	let mut tail = start;
-	loop {
-		if parser.eat(seperator)?.is_none() {
-			break;
-		}
-
-		let next = value(parser).await?;
-		let next = parser.push(next);
-		let next = parser.push_list_item(NodeList {
-			cur: next,
-			next: None,
-		});
-
-		parser[tail].next = Some(next);
-		tail = next;
-	}
-
-	let span = parser.span_since(span);
-	Ok((span, start))
-}
-
-/// Parses a list of items without delimiters seperated by a seperator like `a, b` in
-/// `SELECT a,b FROM table`.
-///
-/// This function is the same as [`parse_seperated_list`] except that it does not allow
-/// parsing which requires a future to complete.
-pub fn parse_seperated_list_sync<'src, 'ast, R, F>(
+pub fn parse_seperated_list<'src, 'ast, R, F>(
 	parser: &mut Parser<'src, 'ast>,
 	seperator: BaseTokenKind,
 	value: F,
@@ -192,33 +149,7 @@ pub fn redefined_error(parser: &mut Parser<'_, '_>, start: Span, last_span: Span
 ///
 /// Will parse with the given callback and store the result in the given mutable reference to an
 /// option. If the option was already set it will instead throw an error.
-pub async fn parse_unordered_clause<'src, 'ast, T, F>(
-	parser: &mut Parser<'src, 'ast>,
-	store: &mut Option<(T, Span)>,
-	start: Span,
-	f: F,
-) -> ParseResult<()>
-where
-	F: AsyncFnOnce(&mut Parser<'src, 'ast>) -> ParseResult<T>,
-{
-	if let Some((_, last_span)) = store
-		&& !parser.settings.contains(ParserSettings::QUIRK_REDEFINE)
-	{
-		return Err(redefined_error(parser, start, *last_span));
-	}
-
-	let res = f(parser).await?;
-	let span = parser.span_since(start);
-	*store = Some((res, span));
-
-	Ok(())
-}
-
-/// Utility function implementing some re-used code,
-///
-/// Will parse with the given callback and store the result in the given mutable reference to an
-/// option. If the option was already set it will instead throw an error.
-pub fn parse_unordered_clause_sync<'src, 'ast, T, F>(
+pub fn parse_unordered_clause<'src, 'ast, T, F>(
 	parser: &mut Parser<'src, 'ast>,
 	store: &mut Option<(T, Span)>,
 	start: Span,

@@ -11,7 +11,6 @@ use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, HashMap};
 
 use anyhow::Result;
-use reblessive::tree::TreeStack;
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::exec::ContextLevel;
@@ -106,13 +105,8 @@ impl ScalarFunction for SearchAnalyze {
 			// Create the analyzer
 			let analyzer = Analyzer::new(ctx.exec_ctx.ctx().get_index_stores(), az_def).await?;
 
-			// Analyze the value using a TreeStack
 			let az_fn = StreamingAnalyzerFunction::new(ctx.exec_ctx);
-			let mut stack = TreeStack::new();
-			stack
-				.enter(|stk| async move { analyzer.analyze(stk, &az_fn, val).await })
-				.finish()
-				.await
+			analyzer.analyze(&az_fn, val).await
 		})
 	}
 }

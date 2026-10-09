@@ -1,7 +1,6 @@
 //! Record functions
 
 use anyhow::Result;
-use reblessive::tree::TreeStack;
 
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
@@ -126,13 +125,7 @@ impl ScalarFunction for RecordIsEdge {
 			let opt = ctx.exec_ctx.options();
 			let doc =
 				ctx.document_root.or(ctx.current_value).map(|v| CursorDoc::new(None, v.clone()));
-			let mut stack = TreeStack::new();
-			stack
-				.enter(|stk| async move {
-					crate::fnc::record::is::edge((stk, frozen, opt, doc.as_ref()), args).await
-				})
-				.finish()
-				.await
+			crate::fnc::record::is::edge((frozen, opt, doc.as_ref()), args).await
 		})
 	}
 }

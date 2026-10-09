@@ -56,42 +56,34 @@ fn ident_field(name: &str) -> Expr {
 
 #[test]
 pub fn parse_begin() {
-	let res = crate::parse_with(r#"BEGIN;"#.as_bytes(), async |parser, stk| {
-		parser.parse_query(stk).await
-	})
-	.unwrap()
-	.expressions
-	.pop()
-	.unwrap();
+	let res = crate::parse_with(r#"BEGIN;"#.as_bytes(), |parser| parser.parse_query())
+		.unwrap()
+		.expressions
+		.pop()
+		.unwrap();
 	assert_eq!(res, TopLevelExpr::Begin);
-	let res = crate::parse_with(r#"BEGIN TRANSACTION;"#.as_bytes(), async |parser, stk| {
-		parser.parse_query(stk).await
-	})
-	.unwrap()
-	.expressions
-	.pop()
-	.unwrap();
+	let res = crate::parse_with(r#"BEGIN TRANSACTION;"#.as_bytes(), |parser| parser.parse_query())
+		.unwrap()
+		.expressions
+		.pop()
+		.unwrap();
 	assert_eq!(res, TopLevelExpr::Begin);
 }
 
 #[test]
 pub fn parse_break() {
-	let res = crate::parse_with(r#"BREAK"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r#"BREAK"#.as_bytes(), |parser| parser.parse_expr_inherit()).unwrap();
 	assert_eq!(res, Expr::Break)
 }
 
 #[test]
 pub fn parse_cancel() {
-	let res = crate::parse_with(r#"CANCEL"#.as_bytes(), async |parser, stk| {
-		parser.parse_top_level_expr(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r#"CANCEL"#.as_bytes(), |parser| parser.parse_top_level_expr()).unwrap();
 	assert_eq!(res, TopLevelExpr::Cancel);
-	let res = crate::parse_with(r#"CANCEL TRANSACTION"#.as_bytes(), async |parser, stk| {
-		parser.parse_top_level_expr(stk).await
+	let res = crate::parse_with(r#"CANCEL TRANSACTION"#.as_bytes(), |parser| {
+		parser.parse_top_level_expr()
 	})
 	.unwrap();
 	assert_eq!(res, TopLevelExpr::Cancel);
@@ -99,13 +91,11 @@ pub fn parse_cancel() {
 
 #[test]
 pub fn parse_commit() {
-	let res = crate::parse_with(r#"COMMIT"#.as_bytes(), async |parser, stk| {
-		parser.parse_top_level_expr(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r#"COMMIT"#.as_bytes(), |parser| parser.parse_top_level_expr()).unwrap();
 	assert_eq!(res, TopLevelExpr::Commit);
-	let res = crate::parse_with(r#"COMMIT TRANSACTION"#.as_bytes(), async |parser, stk| {
-		parser.parse_top_level_expr(stk).await
+	let res = crate::parse_with(r#"COMMIT TRANSACTION"#.as_bytes(), |parser| {
+		parser.parse_top_level_expr()
 	})
 	.unwrap();
 	assert_eq!(res, TopLevelExpr::Commit);
@@ -113,10 +103,8 @@ pub fn parse_commit() {
 
 #[test]
 pub fn parse_continue() {
-	let res = crate::parse_with(r#"CONTINUE"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r#"CONTINUE"#.as_bytes(), |parser| parser.parse_expr_inherit()).unwrap();
 	assert_eq!(res, Expr::Continue);
 }
 
@@ -124,7 +112,7 @@ pub fn parse_continue() {
 fn parse_create() {
 	let res = crate::parse_with(
 		"CREATE ONLY foo SET bar = 3, foo +?= baz RETURN VALUE foo AS bar TIMEOUT 1s".as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 
@@ -156,11 +144,10 @@ fn parse_create() {
 
 #[test]
 fn parse_define_namespace() {
-	let res =
-		crate::parse_with("DEFINE NAMESPACE a COMMENT 'test'".as_bytes(), async |parser, stk| {
-			parser.parse_expr_inherit(stk).await
-		})
-		.unwrap();
+	let res = crate::parse_with("DEFINE NAMESPACE a COMMENT 'test'".as_bytes(), |parser| {
+		parser.parse_expr_inherit()
+	})
+	.unwrap();
 	assert_eq!(
 		res,
 		Expr::Define(Box::new(DefineStatement::Namespace(DefineNamespaceStatement {
@@ -171,10 +158,8 @@ fn parse_define_namespace() {
 		})))
 	);
 
-	let res = crate::parse_with("DEFINE NS a".as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with("DEFINE NS a".as_bytes(), |parser| parser.parse_expr_inherit()).unwrap();
 	assert_eq!(
 		res,
 		Expr::Define(Box::new(DefineStatement::Namespace(DefineNamespaceStatement {
@@ -190,7 +175,7 @@ fn parse_define_namespace() {
 fn parse_define_database() {
 	let res = crate::parse_with(
 		"DEFINE DATABASE a COMMENT 'test' CHANGEFEED 10m INCLUDE ORIGINAL".as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 	assert_eq!(
@@ -208,10 +193,8 @@ fn parse_define_database() {
 		})))
 	);
 
-	let res = crate::parse_with("DEFINE DB a".as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with("DEFINE DB a".as_bytes(), |parser| parser.parse_expr_inherit()).unwrap();
 	assert_eq!(
 		res,
 		Expr::Define(Box::new(DefineStatement::Database(DefineDatabaseStatement {
@@ -233,7 +216,7 @@ fn parse_define_function() {
 		} COMMENT 'test' PERMISSIONS FULL
 		"#
 		.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 
@@ -266,7 +249,7 @@ fn parse_define_user() {
 		let res = crate::parse_with(
 			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSWORD 'hunter2' COMMENT "*******""#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 
@@ -293,7 +276,7 @@ fn parse_define_user() {
 		let res = crate::parse_with(
 			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' COMMENT "*******""#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 
@@ -320,7 +303,7 @@ fn parse_define_user() {
 		let res = crate::parse_with(
 			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES editor, OWNER"#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 
@@ -346,7 +329,7 @@ fn parse_define_user() {
 		let res = crate::parse_with(
 			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' DURATION FOR SESSION 6h"#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 
@@ -374,7 +357,7 @@ fn parse_define_user() {
 	{
 		let res = crate::parse_with(
 			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' DURATION FOR TOKEN 15m, FOR SESSION 6h"#.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 
@@ -404,7 +387,7 @@ fn parse_define_user() {
 		crate::parse_with(
 			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' DURATION FOR TOKEN NONE"#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap_err();
 	}
@@ -413,7 +396,7 @@ fn parse_define_user() {
 	{
 		crate::parse_with(
 			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES foo"#.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap_err();
 	}
@@ -422,7 +405,7 @@ fn parse_define_user() {
 		crate::parse_with(
 			r#"DEFINE USER user ON ROOT COMMENT 'test' PASSHASH 'hunter2' ROLES Viewer, foo"#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap_err();
 	}
@@ -435,7 +418,7 @@ fn parse_define_access_jwt_key() {
 		let res = crate::parse_with(
 			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -468,7 +451,7 @@ fn parse_define_access_jwt_key() {
 	}
 	// Asymmetric verify and issue.
 	{
-		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" WITH ISSUER KEY "bar""#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" WITH ISSUER KEY "bar""#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
@@ -502,7 +485,7 @@ fn parse_define_access_jwt_key() {
 	}
 	// Asymmetric verify and issue with authenticate clause.
 	{
-		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" WITH ISSUER KEY "bar" AUTHENTICATE true"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" WITH ISSUER KEY "bar" AUTHENTICATE true"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
@@ -538,7 +521,7 @@ fn parse_define_access_jwt_key() {
 	{
 		let res = crate::parse_with(
 			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo""#.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -574,7 +557,7 @@ fn parse_define_access_jwt_key() {
 	}
 	// Symmetric verify and explicit duration.
 	{
-		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" DURATION FOR TOKEN 10s"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" DURATION FOR TOKEN 10s"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
@@ -607,7 +590,7 @@ fn parse_define_access_jwt_key() {
 	}
 	// Symmetric verify and explicit issue matching data.
 	{
-		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS256 KEY "foo""#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS256 KEY "foo""#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
@@ -641,18 +624,18 @@ fn parse_define_access_jwt_key() {
 	}
 	// Symmetric verify and explicit issue non-matching data.
 	{
-		crate::parse_with(r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 KEY "bar" DURATION FOR TOKEN 10s"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap_err();
+		crate::parse_with(r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 KEY "bar" DURATION FOR TOKEN 10s"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap_err();
 	}
 	// Symmetric verify and explicit issue non-matching algorithm.
 	{
-		crate::parse_with(r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 DURATION FOR TOKEN 10s"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap_err();
+		crate::parse_with(r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 DURATION FOR TOKEN 10s"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap_err();
 	}
 	// Symmetric verify and token duration is none.
 	/*
 	{
 		crate::parse_with(
 			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" DURATION FOR TOKEN NONE"#.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap_err();
 	}
@@ -662,7 +645,7 @@ fn parse_define_access_jwt_key() {
 		let res = crate::parse_with(
 			r#"DEFINE ACCESS a ON NAMESPACE TYPE JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -698,7 +681,7 @@ fn parse_define_access_jwt_key() {
 		let res = crate::parse_with(
 			r#"DEFINE ACCESS a ON ROOT TYPE JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar""#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -738,7 +721,7 @@ fn parse_define_access_jwt_audience() {
 		let res = crate::parse_with(
 			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" AUDIENCE "aud1""#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -776,7 +759,7 @@ fn parse_define_access_jwt_audience() {
 		let res = crate::parse_with(
 			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" AUDIENCE "aud1", "aud2" WITH ISSUER ALGORITHM EDDSA KEY "bar""#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -819,7 +802,7 @@ fn parse_define_access_jwt_audience() {
 		let res = crate::parse_with(
 			r#"DEFINE ACCESS a ON DATABASE TYPE RECORD WITH REFRESH WITH JWT ALGORITHM HS512 KEY "foo" AUDIENCE "aud1""#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 		let Expr::Define(stmt) = res else {
@@ -842,7 +825,7 @@ fn parse_define_access_jwt_audience() {
 fn parse_define_access_jwt_jwks() {
 	// With comment. Verify only.
 	{
-		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" COMMENT "bar""#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" COMMENT "bar""#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
@@ -874,7 +857,7 @@ fn parse_define_access_jwt_jwks() {
 	}
 	// Verify and symmetric issuer.
 	{
-		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM HS384 KEY "foo""#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM HS384 KEY "foo""#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
@@ -909,7 +892,7 @@ fn parse_define_access_jwt_jwks() {
 	}
 	// Verify and symmetric issuer with custom duration.
 	{
-		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM HS384 KEY "foo" DURATION FOR TOKEN 10s"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM HS384 KEY "foo" DURATION FOR TOKEN 10s"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
@@ -943,7 +926,7 @@ fn parse_define_access_jwt_jwks() {
 	}
 	// Verify and asymmetric issuer.
 	{
-		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM PS256 KEY "foo""#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with( r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM PS256 KEY "foo""#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
@@ -978,7 +961,7 @@ fn parse_define_access_jwt_jwks() {
 	}
 	// Verify and asymmetric issuer with custom duration.
 	{
-		let res = crate::parse_with(r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM PS256 KEY "foo" DURATION FOR TOKEN 10s, FOR SESSION 2d"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with(r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" WITH ISSUER ALGORITHM PS256 KEY "foo" DURATION FOR TOKEN 10s, FOR SESSION 2d"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
@@ -1020,7 +1003,7 @@ fn parse_define_access_record() {
 	{
 		let res = crate::parse_with(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD COMMENT "bar""#.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap();
 
@@ -1074,7 +1057,7 @@ fn parse_define_access_record() {
 		let res = crate::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH DURATION FOR GRANT 10d"#.as_bytes(),
 			ParserSettings::default(),
-			async |p, s| p.parse_expr_inherit(s).await,
+			|p| p.parse_expr_inherit(),
 		)
 		.unwrap();
 
@@ -1148,7 +1131,7 @@ fn parse_define_access_record() {
 	}
 	// Session duration, signing and authenticate clauses are explicitly defined.
 	{
-		let res = crate::parse_with(r#"DEFINE ACCESS a ON DB TYPE RECORD SIGNUP true SIGNIN false AUTHENTICATE true DURATION FOR SESSION 7d"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with(r#"DEFINE ACCESS a ON DB TYPE RECORD SIGNUP true SIGNIN false AUTHENTICATE true DURATION FOR SESSION 7d"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 
 		// Manually compare since DefineAccessStatement for record access
 		// without explicit JWT will create a random signing key during parsing.
@@ -1198,7 +1181,7 @@ fn parse_define_access_record() {
 	}
 	// Verification with JWT is explicitly defined only with symmetric key.
 	{
-		let res = crate::parse_with(r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with(r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
@@ -1241,7 +1224,7 @@ fn parse_define_access_record() {
 	// Verification and issuing with JWT are explicitly defined with two different
 	// keys.
 	{
-		let res = crate::parse_with(r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with(r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
@@ -1285,7 +1268,7 @@ fn parse_define_access_record() {
 		let res = crate::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
 			ParserSettings::default(),
-			async |p,s| p.parse_expr_inherit(s).await,
+			|p| p.parse_expr_inherit(),
 		)
 			.unwrap();
 		assert_eq!(
@@ -1345,7 +1328,7 @@ fn parse_define_access_record() {
 		let res = crate::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" WITH REFRESH DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
 			ParserSettings::default(),
-			async |p,s| p.parse_expr_inherit(s).await,
+			|p| p.parse_expr_inherit(),
 		).unwrap();
 		assert_eq!(
 			res,
@@ -1401,7 +1384,7 @@ fn parse_define_access_record() {
 	// Verification and issuing with JWT are explicitly defined with two different
 	// keys. Token duration is explicitly defined.
 	{
-		let res = crate::parse_with(r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM RS256 KEY 'foo' WITH ISSUER KEY 'bar' DURATION FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with(r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM RS256 KEY 'foo' WITH ISSUER KEY 'bar' DURATION FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
@@ -1445,15 +1428,13 @@ fn parse_define_access_record() {
 	// matching ALTER path) — see `language-tests/tests/access/*/record_token_duration_*.surql`.
 	// TYPE RECORD is only valid at the database level.
 	{
-		crate::parse_with(
-			r#"DEFINE ACCESS a ON ROOT TYPE RECORD"#.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
-		)
+		crate::parse_with(r#"DEFINE ACCESS a ON ROOT TYPE RECORD"#.as_bytes(), |parser| {
+			parser.parse_expr_inherit()
+		})
 		.unwrap_err();
-		crate::parse_with(
-			r#"DEFINE ACCESS a ON NS TYPE RECORD"#.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
-		)
+		crate::parse_with(r#"DEFINE ACCESS a ON NS TYPE RECORD"#.as_bytes(), |parser| {
+			parser.parse_expr_inherit()
+		})
 		.unwrap_err();
 	}
 }
@@ -1465,7 +1446,7 @@ fn parse_define_access_bearer() {
 		let res = crate::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER COMMENT "foo""#.as_bytes(),
 			ParserSettings::default(),
-			async |p, s| p.parse_expr_inherit(s).await,
+			|p| p.parse_expr_inherit(),
 		)
 		.unwrap();
 
@@ -1506,7 +1487,7 @@ fn parse_define_access_bearer() {
 		let res = crate::parse_with_settings(
 			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR USER COMMENT "foo""#.as_bytes(),
 			ParserSettings::default(),
-			async |p, s| p.parse_expr_inherit(s).await,
+			|p| p.parse_expr_inherit(),
 		)
 		.unwrap();
 
@@ -1547,7 +1528,7 @@ fn parse_define_access_bearer() {
 		let res = crate::parse_with_settings(
 			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR USER COMMENT "foo""#.as_bytes(),
 			ParserSettings::default(),
-			async |p, s| p.parse_expr_inherit(s).await,
+			|p| p.parse_expr_inherit(),
 		)
 		.unwrap();
 
@@ -1588,7 +1569,7 @@ fn parse_define_access_bearer() {
 		let res = crate::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD COMMENT "foo""#.as_bytes(),
 			ParserSettings::default(),
-			async |p, s| p.parse_expr_inherit(s).await,
+			|p| p.parse_expr_inherit(),
 		)
 		.unwrap();
 
@@ -1628,7 +1609,7 @@ fn parse_define_access_bearer() {
 		crate::parse_with_settings(
 			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR RECORD COMMENT "foo""#.as_bytes(),
 			ParserSettings::default(),
-			async |p, s| p.parse_expr_inherit(s).await,
+			|p| p.parse_expr_inherit(),
 		)
 		.unwrap_err();
 	}
@@ -1637,7 +1618,7 @@ fn parse_define_access_bearer() {
 		crate::parse_with_settings(
 			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR RECORD COMMENT "foo""#.as_bytes(),
 			ParserSettings::default(),
-			async |p, s| p.parse_expr_inherit(s).await,
+			|p| p.parse_expr_inherit(),
 		)
 		.unwrap_err();
 	}
@@ -1646,7 +1627,7 @@ fn parse_define_access_bearer() {
 		let res = crate::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
 			ParserSettings::default(),
-			async |p,s| p.parse_expr_inherit(s).await,
+			|p| p.parse_expr_inherit(),
 		).unwrap();
 		assert_eq!(
 			res,
@@ -1689,7 +1670,7 @@ fn parse_define_access_bearer() {
 		let res = crate::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
 			ParserSettings::default(),
-			async |p,s| p.parse_expr_inherit(s).await,
+			|p| p.parse_expr_inherit(),
 		).unwrap();
 		assert_eq!(
 			res,
@@ -1733,7 +1714,7 @@ fn parse_define_access_bearer() {
 fn parse_define_param() {
 	let res = crate::parse_with(
 		r#"DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 
@@ -1761,7 +1742,7 @@ fn parse_define_param() {
 #[test]
 fn parse_define_table() {
 	let res =
-		crate::parse_with(r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s INCLUDE ORIGINAL PERMISSIONS FOR DELETE FULL, FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
+		crate::parse_with(r#"DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s INCLUDE ORIGINAL PERMISSIONS FOR DELETE FULL, FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo"#.as_bytes(),|parser| parser.parse_expr_inherit()).unwrap();
 
 	assert_eq!(
 		res,
@@ -1812,7 +1793,7 @@ fn parse_define_event() {
 	let res = crate::parse_with(
 		r#"DEFINE EVENT event ON TABLE table WHEN null THEN null,none ASYNC RETRY 5 MAXDEPTH 64"#
 			.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 
@@ -1837,7 +1818,7 @@ fn parse_define_event() {
 fn parse_define_field() {
 	// General
 	{
-		let res = crate::parse_with(r#"DEFINE FIELD foo.*[*]... ON TABLE bar TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = crate::parse_with(r#"DEFINE FIELD foo.*[*]... ON TABLE bar TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 
 		assert_eq!(
 			res,
@@ -1880,7 +1861,7 @@ fn parse_define_field() {
 	{
 		crate::parse_with(
 			r#"DEFINE FIELD foo ON TABLE bar PERMISSIONS FOR DELETE NONE"#.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.unwrap_err();
 	}
@@ -1891,7 +1872,7 @@ fn parse_define_index() {
 	let res = crate::parse_with(
 		"DEFINE INDEX index ON TABLE table FIELDS a FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS"
 		.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 	assert_eq!(
@@ -1916,7 +1897,7 @@ fn parse_define_index() {
 
 	let res = crate::parse_with(
 		r#"DEFINE INDEX index ON TABLE table FIELDS a UNIQUE"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 
@@ -1934,7 +1915,7 @@ fn parse_define_index() {
 	);
 
 	let res =
-		crate::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a HNSW DIMENSION 128 EFC 250 TYPE F32 DISTANCE MANHATTAN M 6 M0 12 LM 0.5 EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS HASHED_VECTOR"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
+		crate::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a HNSW DIMENSION 128 EFC 250 TYPE F32 DISTANCE MANHATTAN M 6 M0 12 LM 0.5 EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS HASHED_VECTOR"#.as_bytes(),|parser| parser.parse_expr_inherit()).unwrap();
 	assert_eq!(
 		res,
 		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
@@ -1961,7 +1942,7 @@ fn parse_define_index() {
 
 	let res = crate::parse_with(
 		r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 	assert_eq!(
@@ -1987,7 +1968,7 @@ fn parse_define_index() {
 
 	let res = crate::parse_with(
 		r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128 DEGREE 32 L_BUILD 88 ALPHA 1.4 TYPE F32 DISTANCE COSINE HASHED_VECTOR"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 	assert_eq!(
@@ -2013,7 +1994,7 @@ fn parse_define_index() {
 
 	let res = crate::parse_with(
 		r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128 TYPE F16 DISTANCE COSINE_NORMALIZED"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 	assert_eq!(
@@ -2039,7 +2020,7 @@ fn parse_define_index() {
 
 	let res = crate::parse_with(
 		r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128 TYPE U8 DISTANCE INNER_PRODUCT"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 	assert_eq!(
@@ -2067,7 +2048,7 @@ fn parse_define_index() {
 		crate::parse_with(
 			r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128 TYPE I64"#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.is_err()
 	);
@@ -2075,7 +2056,7 @@ fn parse_define_index() {
 		crate::parse_with(
 			r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128 DISTANCE MANHATTAN"#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.is_err()
 	);
@@ -2083,14 +2064,14 @@ fn parse_define_index() {
 		crate::parse_with(
 			r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128 TYPE U8 DISTANCE COSINE_NORMALIZED"#
 				.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.is_err()
 	);
 	assert!(
 		crate::parse_with(
 			r#"DEFINE INDEX index ON TABLE table FIELDS a,b DISKANN DIMENSION 128"#.as_bytes(),
-			async |parser, stk| parser.parse_expr_inherit(stk).await,
+			|parser| parser.parse_expr_inherit(),
 		)
 		.is_err()
 	);
@@ -2098,7 +2079,7 @@ fn parse_define_index() {
 
 #[test]
 fn parse_define_analyzer() {
-	let res = crate::parse_with(r#"DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+	let res = crate::parse_with(r#"DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 	assert_eq!(
 		res,
 		Expr::Define(Box::new(DefineStatement::Analyzer(DefineAnalyzerStatement {
@@ -2134,10 +2115,7 @@ fn parse_define_analyzer_segment_tokenizer() {
 		("segment(korean)", SegmentLanguage::Korean),
 	] {
 		let src = format!("DEFINE ANALYZER ana TOKENIZERS CLASS, {clause}");
-		let res = crate::parse_with(src.as_bytes(), async |parser, stk| {
-			parser.parse_expr_inherit(stk).await
-		})
-		.unwrap();
+		let res = crate::parse_with(src.as_bytes(), |parser| parser.parse_expr_inherit()).unwrap();
 		assert_eq!(
 			res,
 			Expr::Define(Box::new(DefineStatement::Analyzer(DefineAnalyzerStatement {
@@ -2159,7 +2137,7 @@ fn parse_define_analyzer_segment_rejects_non_cjk_language() {
 	// there is no English morphological dictionary to segment with.
 	let err = crate::parse_with(
 		r#"DEFINE ANALYZER ana TOKENIZERS SEGMENT(ENGLISH)"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap_err();
 	assert!(
@@ -2172,11 +2150,11 @@ fn parse_define_analyzer_segment_rejects_non_cjk_language() {
 fn parse_define_analyzer_snowball_rejects_cjk_language() {
 	// The converse: Snowball has no CJK stemming algorithm, and
 	// `Filter::Snowball` cannot represent one.
-	let err = crate::parse_with(
-		r#"DEFINE ANALYZER ana FILTERS SNOWBALL(KOREAN)"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
-	)
-	.unwrap_err();
+	let err =
+		crate::parse_with(r#"DEFINE ANALYZER ana FILTERS SNOWBALL(KOREAN)"#.as_bytes(), |parser| {
+			parser.parse_expr_inherit()
+		})
+		.unwrap_err();
 	assert!(err.to_string().contains("a language"), "expected a language-kind error, got: {err}");
 }
 
@@ -2189,7 +2167,7 @@ fn parse_define_analyzer_module_function() {
 			surrealism_enabled: true,
 			..Default::default()
 		},
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 	assert_eq!(
@@ -2208,7 +2186,7 @@ fn parse_define_analyzer_module_function() {
 	let err = crate::parse_with_settings(
 		r#"DEFINE ANALYZER ana FUNCTION mod::demo::alter_string TOKENIZERS class"#.as_bytes(),
 		ParserSettings::default(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap_err();
 	assert!(err.to_string().contains("Surrealism modules are not enabled"));
@@ -2218,7 +2196,7 @@ fn parse_define_analyzer_module_function() {
 fn parse_define_analyzer_rejects_function_calls() {
 	let err = crate::parse_with(
 		r#"DEFINE ANALYZER ana FUNCTION fn::foo::bar() TOKENIZERS class"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap_err();
 	assert!(
@@ -2232,7 +2210,7 @@ fn parse_define_analyzer_rejects_function_calls() {
 			surrealism_enabled: true,
 			..Default::default()
 		},
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap_err();
 	assert!(
@@ -2243,7 +2221,7 @@ fn parse_define_analyzer_rejects_function_calls() {
 
 #[test]
 fn parse_delete() {
-	let res = crate::parse_with("DELETE FROM ONLY |foo:32..64| WITH INDEX index,index_2 Where 2 RETURN AFTER TIMEOUT 1s EXPLAIN FULL".as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+	let res = crate::parse_with("DELETE FROM ONLY |foo:32..64| WITH INDEX index,index_2 Where 2 RETURN AFTER TIMEOUT 1s EXPLAIN FULL".as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 	assert_eq!(
 		res,
 		Expr::Delete(Box::new(DeleteStatement {
@@ -2260,7 +2238,7 @@ fn parse_delete() {
 
 #[test]
 fn parse_delete_2() {
-	let res = crate::parse_with(r#"DELETE FROM ONLY a:b->?[$][?true] WITH INDEX index,index_2 WHERE null RETURN NULL TIMEOUT 1h EXPLAIN"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+	let res = crate::parse_with(r#"DELETE FROM ONLY a:b->?[$][?true] WITH INDEX index,index_2 WHERE null RETURN NULL TIMEOUT 1h EXPLAIN"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 	assert_eq!(
 		res,
 		Expr::Delete(Box::new(DeleteStatement {
@@ -2290,7 +2268,7 @@ fn parse_delete_2() {
 pub fn parse_for() {
 	let res = crate::parse_with(
 		r#"FOR $foo IN (SELECT foo FROM bar) * 2 { BREAK }"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 
@@ -2333,7 +2311,7 @@ pub fn parse_for() {
 fn parse_if() {
 	let res = crate::parse_with(
 		r#"IF foo THEN bar ELSE IF faz THEN baz ELSE baq END"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 	assert_eq!(
@@ -2352,7 +2330,7 @@ fn parse_if() {
 fn parse_if_block() {
 	let res = crate::parse_with(
 		r#"IF foo { bar } ELSE IF faz { baz } ELSE { baq }"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 	assert_eq!(
@@ -2369,61 +2347,52 @@ fn parse_if_block() {
 
 #[test]
 fn parse_info() {
-	let res = crate::parse_with("INFO FOR ROOT".as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res = crate::parse_with("INFO FOR ROOT".as_bytes(), |parser| parser.parse_expr_inherit())
+		.unwrap();
 	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Root(false, None))));
 
-	let res = crate::parse_with("INFO FOR KV".as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with("INFO FOR KV".as_bytes(), |parser| parser.parse_expr_inherit()).unwrap();
 	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Root(false, None))));
 
-	let res = crate::parse_with(
-		"INFO FOR ROOT VERSION d'2025-01-01T00:00:00Z'".as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
-	)
-	.unwrap();
+	let res =
+		crate::parse_with("INFO FOR ROOT VERSION d'2025-01-01T00:00:00Z'".as_bytes(), |parser| {
+			parser.parse_expr_inherit()
+		})
+		.unwrap();
 	assert!(
 		matches!(res, Expr::Info(ref i) if matches!(i.as_ref(), InfoStatement::Root(false, Some(_))))
 	);
 
-	let res = crate::parse_with("INFO FOR NAMESPACE".as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with("INFO FOR NAMESPACE".as_bytes(), |parser| parser.parse_expr_inherit())
+			.unwrap();
 	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Ns(false, None))));
 
-	let res = crate::parse_with("INFO FOR NS".as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with("INFO FOR NS".as_bytes(), |parser| parser.parse_expr_inherit()).unwrap();
 	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Ns(false, None))));
 
-	let res = crate::parse_with(
-		"INFO FOR NS VERSION d'2025-01-01T00:00:00Z'".as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
-	)
-	.unwrap();
+	let res =
+		crate::parse_with("INFO FOR NS VERSION d'2025-01-01T00:00:00Z'".as_bytes(), |parser| {
+			parser.parse_expr_inherit()
+		})
+		.unwrap();
 	assert!(
 		matches!(res, Expr::Info(ref i) if matches!(i.as_ref(), InfoStatement::Ns(false, Some(_))))
 	);
 
-	let res = crate::parse_with("INFO FOR TABLE table".as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with("INFO FOR TABLE table".as_bytes(), |parser| parser.parse_expr_inherit())
+			.unwrap();
 	assert_eq!(
 		res,
 		Expr::Info(Box::new(InfoStatement::Tb(Expr::Table("table".into()), false, None)))
 	);
 
-	let res = crate::parse_with("INFO FOR USER user".as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with("INFO FOR USER user".as_bytes(), |parser| parser.parse_expr_inherit())
+			.unwrap();
 	assert_eq!(
 		res,
 		Expr::Info(Box::new(InfoStatement::User(
@@ -2433,11 +2402,10 @@ fn parse_info() {
 		)))
 	);
 
-	let res =
-		crate::parse_with("INFO FOR USER user ON namespace".as_bytes(), async |parser, stk| {
-			parser.parse_expr_inherit(stk).await
-		})
-		.unwrap();
+	let res = crate::parse_with("INFO FOR USER user ON namespace".as_bytes(), |parser| {
+		parser.parse_expr_inherit()
+	})
+	.unwrap();
 	assert_eq!(
 		res,
 		Expr::Info(Box::new(InfoStatement::User(
@@ -2450,11 +2418,11 @@ fn parse_info() {
 
 #[test]
 fn parse_show() {
-	let res = crate::parse_with(
-		r#"SHOW CHANGES FOR TABLE foo SINCE 1 LIMIT 10"#.as_bytes(),
-		async |parser, stk| parser.parse_top_level_expr(stk).await,
-	)
-	.unwrap();
+	let res =
+		crate::parse_with(r#"SHOW CHANGES FOR TABLE foo SINCE 1 LIMIT 10"#.as_bytes(), |parser| {
+			parser.parse_top_level_expr()
+		})
+		.unwrap();
 
 	assert_eq!(
 		res,
@@ -2479,7 +2447,7 @@ fn parse_show() {
 
 	let res = crate::parse_with(
 		r#"SHOW CHANGES FOR DATABASE SINCE d"2012-04-23T18:25:43.0000511Z""#.as_bytes(),
-		async |parser, stk| parser.parse_query(stk).await,
+		|parser| parser.parse_query(),
 	)
 	.unwrap()
 	.expressions
@@ -2497,10 +2465,8 @@ fn parse_show() {
 
 #[test]
 fn parse_sleep() {
-	let res = crate::parse_with(r"SLEEP 1s".as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r"SLEEP 1s".as_bytes(), |parser| parser.parse_expr_inherit()).unwrap();
 
 	let expect = Expr::Sleep(Box::new(SleepStatement {
 		duration: std::time::Duration::from_secs(1),
@@ -2510,33 +2476,27 @@ fn parse_sleep() {
 
 #[test]
 fn parse_use() {
-	let res = crate::parse_with(r"USE NS foo".as_bytes(), async |parser, stk| {
-		parser.parse_query(stk).await
-	})
-	.unwrap()
-	.expressions
-	.pop()
-	.unwrap();
+	let res = crate::parse_with(r"USE NS foo".as_bytes(), |parser| parser.parse_query())
+		.unwrap()
+		.expressions
+		.pop()
+		.unwrap();
 	let expect = TopLevelExpr::Use(UseStatement::Ns(Expr::Idiom(Idiom::field("foo".to_owned()))));
 	assert_eq!(res, expect);
 
-	let res = crate::parse_with(r"USE NS foo".as_bytes(), async |parser, stk| {
-		parser.parse_query(stk).await
-	})
-	.unwrap()
-	.expressions
-	.pop()
-	.unwrap();
+	let res = crate::parse_with(r"USE NS foo".as_bytes(), |parser| parser.parse_query())
+		.unwrap()
+		.expressions
+		.pop()
+		.unwrap();
 	let expect = TopLevelExpr::Use(UseStatement::Ns(Expr::Idiom(Idiom::field("foo".to_owned()))));
 	assert_eq!(res, expect);
 
-	let res = crate::parse_with(r"USE NS bar DB foo".as_bytes(), async |parser, stk| {
-		parser.parse_query(stk).await
-	})
-	.unwrap()
-	.expressions
-	.pop()
-	.unwrap();
+	let res = crate::parse_with(r"USE NS bar DB foo".as_bytes(), |parser| parser.parse_query())
+		.unwrap()
+		.expressions
+		.pop()
+		.unwrap();
 
 	let expect = TopLevelExpr::Use(UseStatement::NsDb(
 		Expr::Idiom(Idiom::field("bar".to_owned())),
@@ -2547,34 +2507,28 @@ fn parse_use() {
 
 #[test]
 fn parse_use_lowercase() {
-	let res = crate::parse_with(r"use ns foo".as_bytes(), async |parser, stk| {
-		parser.parse_query(stk).await
-	})
-	.unwrap()
-	.expressions
-	.pop()
-	.unwrap();
+	let res = crate::parse_with(r"use ns foo".as_bytes(), |parser| parser.parse_query())
+		.unwrap()
+		.expressions
+		.pop()
+		.unwrap();
 	let expect = TopLevelExpr::Use(UseStatement::Ns(Expr::Idiom(Idiom::field("foo".to_owned()))));
 	assert_eq!(res, expect);
 
-	let res = crate::parse_with(r"use db foo".as_bytes(), async |parser, stk| {
-		parser.parse_query(stk).await
-	})
-	.unwrap()
-	.expressions
-	.pop()
-	.unwrap();
+	let res = crate::parse_with(r"use db foo".as_bytes(), |parser| parser.parse_query())
+		.unwrap()
+		.expressions
+		.pop()
+		.unwrap();
 
 	let expect = TopLevelExpr::Use(UseStatement::Db(Expr::Idiom(Idiom::field("foo".to_owned()))));
 	assert_eq!(res, expect);
 
-	let res = crate::parse_with(r"use ns bar db foo".as_bytes(), async |parser, stk| {
-		parser.parse_query(stk).await
-	})
-	.unwrap()
-	.expressions
-	.pop()
-	.unwrap();
+	let res = crate::parse_with(r"use ns bar db foo".as_bytes(), |parser| parser.parse_query())
+		.unwrap()
+		.expressions
+		.pop()
+		.unwrap();
 
 	let expect = TopLevelExpr::Use(UseStatement::NsDb(
 		Expr::Idiom(Idiom::field("bar".to_owned())),
@@ -2585,20 +2539,15 @@ fn parse_use_lowercase() {
 
 #[test]
 fn parse_value_stmt() {
-	let res = crate::parse_with(r"1s".as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res = crate::parse_with(r"1s".as_bytes(), |parser| parser.parse_expr_inherit()).unwrap();
 	let expect = Expr::Literal(Literal::Duration(std::time::Duration::from_secs(1)));
 	assert_eq!(res, expect);
 }
 
 #[test]
 fn parse_throw() {
-	let res = crate::parse_with(r"THROW 1s".as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r"THROW 1s".as_bytes(), |parser| parser.parse_expr_inherit()).unwrap();
 
 	let expect =
 		Expr::Throw(Box::new(Expr::Literal(Literal::Duration(std::time::Duration::from_secs(1)))));
@@ -2609,7 +2558,7 @@ fn parse_throw() {
 fn parse_insert() {
 	let res = crate::parse_with(
 		r#"INSERT IGNORE INTO $foo (a,b,c) VALUES (1,2,3),(4,5,6) ON DUPLICATE KEY UPDATE a.b +?= null, c.d += none RETURN AFTER"#.as_bytes(),
-		async |parser,stk| parser.parse_expr_inherit(stk).await
+		|parser| parser.parse_expr_inherit()
 	).unwrap();
 	assert_eq!(
 		res,
@@ -2655,11 +2604,11 @@ fn parse_insert() {
 
 #[test]
 fn parse_insert_select() {
-	let res = crate::parse_with(
-		r#"INSERT IGNORE INTO bar (select foo from baz)"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
-	)
-	.unwrap();
+	let res =
+		crate::parse_with(r#"INSERT IGNORE INTO bar (select foo from baz)"#.as_bytes(), |parser| {
+			parser.parse_expr_inherit()
+		})
+		.unwrap();
 	assert_eq!(
 		res,
 		Expr::Insert(Box::new(InsertStatement {
@@ -2697,10 +2646,9 @@ fn parse_insert_select() {
 
 #[test]
 fn parse_select_for_update() {
-	let res = crate::parse_with(
-		r#"SELECT * FROM ONLY a:b FOR UPDATE"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
-	)
+	let res = crate::parse_with(r#"SELECT * FROM ONLY a:b FOR UPDATE"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
+	})
 	.unwrap();
 	assert_eq!(
 		res,
@@ -2733,21 +2681,17 @@ fn parse_select_for_update() {
 fn parse_select_for_update_roundtrip() {
 	use surrealdb_types::ToSql;
 	let src = r#"SELECT * FROM ONLY a:b FOR UPDATE"#;
-	let res =
-		crate::parse_with(src.as_bytes(), async |parser, stk| parser.parse_expr_inherit(stk).await)
-			.unwrap();
+	let res = crate::parse_with(src.as_bytes(), |parser| parser.parse_expr_inherit()).unwrap();
 	assert_eq!(res.to_sql(), src);
 }
 
 #[test]
 fn parse_kill() {
-	let res = crate::parse_with(r#"KILL $param"#.as_bytes(), async |parser, stk| {
-		parser.parse_query(stk).await
-	})
-	.unwrap()
-	.expressions
-	.pop()
-	.unwrap();
+	let res = crate::parse_with(r#"KILL $param"#.as_bytes(), |parser| parser.parse_query())
+		.unwrap()
+		.expressions
+		.pop()
+		.unwrap();
 	assert_eq!(
 		res,
 		TopLevelExpr::Kill(KillStatement {
@@ -2757,7 +2701,7 @@ fn parse_kill() {
 
 	let res = crate::parse_with(
 		r#"KILL u"e72bee20-f49b-11ec-b939-0242ac120002" "#.as_bytes(),
-		async |parser, stk| parser.parse_query(stk).await,
+		|parser| parser.parse_query(),
 	)
 	.unwrap()
 	.expressions
@@ -2773,8 +2717,8 @@ fn parse_kill() {
 
 #[test]
 fn parse_live() {
-	let res = crate::parse_with(r#"LIVE SELECT DIFF FROM $foo"#.as_bytes(), async |parser, stk| {
-		parser.parse_top_level_expr(stk).await
+	let res = crate::parse_with(r#"LIVE SELECT DIFF FROM $foo"#.as_bytes(), |parser| {
+		parser.parse_top_level_expr()
 	})
 	.unwrap();
 	let TopLevelExpr::Live(stmt) = res else {
@@ -2785,7 +2729,7 @@ fn parse_live() {
 
 	let res = crate::parse_with(
 		r#"LIVE SELECT foo FROM table WHERE true FETCH a[where foo],b"#.as_bytes(),
-		async |parser, stk| parser.parse_top_level_expr(stk).await,
+		|parser| parser.parse_top_level_expr(),
 	)
 	.unwrap();
 	let TopLevelExpr::Live(stmt) = res else {
@@ -2814,8 +2758,8 @@ fn parse_live() {
 
 #[test]
 fn parse_option() {
-	let res = crate::parse_with(r#"OPTION value = true"#.as_bytes(), async |parser, stk| {
-		parser.parse_top_level_expr(stk).await
+	let res = crate::parse_with(r#"OPTION value = true"#.as_bytes(), |parser| {
+		parser.parse_top_level_expr()
 	})
 	.unwrap();
 	assert_eq!(
@@ -2829,8 +2773,8 @@ fn parse_option() {
 
 #[test]
 fn parse_return() {
-	let res = crate::parse_with(r#"RETURN RETRUN FETCH RETURN"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
+	let res = crate::parse_with(r#"RETURN RETRUN FETCH RETURN"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
 	})
 	.unwrap();
 	assert_eq!(
@@ -2846,7 +2790,7 @@ fn parse_return() {
 fn parse_relate() {
 	let res = crate::parse_with(
 		r#"RELATE ONLY [1,2]->a:b->(CREATE foo) UNIQUE SET a += 1 RETURN NONE"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 	assert_eq!(
@@ -2885,7 +2829,7 @@ fn parse_relate_or_update() {
 	let res = crate::parse_with(
 		r#"RELATE OR UPDATE person:one->likes:[person:one, post:one]->post:one SET note = 'x'"#
 			.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 	let Expr::Relate(stmt) = res else {
@@ -2900,7 +2844,7 @@ fn parse_relate_or_update() {
 fn parse_relate_only_or_update() {
 	let res = crate::parse_with(
 		r#"RELATE ONLY OR UPDATE a:1->edge:1->a:2 SET name = 'A'"#.as_bytes(),
-		async |parser, stk| parser.parse_expr_inherit(stk).await,
+		|parser| parser.parse_expr_inherit(),
 	)
 	.unwrap();
 	let Expr::Relate(stmt) = res else {
@@ -2912,8 +2856,8 @@ fn parse_relate_only_or_update() {
 
 #[test]
 fn parse_remove() {
-	let res = crate::parse_with(r#"REMOVE NAMESPACE ns"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
+	let res = crate::parse_with(r#"REMOVE NAMESPACE ns"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
 	})
 	.unwrap();
 	assert_eq!(
@@ -2925,10 +2869,9 @@ fn parse_remove() {
 		})))
 	);
 
-	let res = crate::parse_with(r#"REMOVE DB database"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r#"REMOVE DB database"#.as_bytes(), |parser| parser.parse_expr_inherit())
+			.unwrap();
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Database(RemoveDatabaseStatement {
@@ -2938,11 +2881,10 @@ fn parse_remove() {
 		})))
 	);
 
-	let res =
-		crate::parse_with(r#"REMOVE FUNCTION fn::foo::bar"#.as_bytes(), async |parser, stk| {
-			parser.parse_expr_inherit(stk).await
-		})
-		.unwrap();
+	let res = crate::parse_with(r#"REMOVE FUNCTION fn::foo::bar"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
+	})
+	.unwrap();
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Function(RemoveFunctionStatement {
@@ -2950,11 +2892,10 @@ fn parse_remove() {
 			if_exists: false,
 		})))
 	);
-	let res =
-		crate::parse_with(r#"REMOVE FUNCTION fn::foo::bar();"#.as_bytes(), async |parser, stk| {
-			parser.parse_expr_inherit(stk).await
-		})
-		.unwrap();
+	let res = crate::parse_with(r#"REMOVE FUNCTION fn::foo::bar();"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
+	})
+	.unwrap();
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Function(RemoveFunctionStatement {
@@ -2963,11 +2904,10 @@ fn parse_remove() {
 		})))
 	);
 
-	let res =
-		crate::parse_with(r#"REMOVE ACCESS foo ON DATABASE"#.as_bytes(), async |parser, stk| {
-			parser.parse_expr_inherit(stk).await
-		})
-		.unwrap();
+	let res = crate::parse_with(r#"REMOVE ACCESS foo ON DATABASE"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
+	})
+	.unwrap();
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Access(RemoveAccessStatement {
@@ -2977,10 +2917,9 @@ fn parse_remove() {
 		})))
 	);
 
-	let res = crate::parse_with(r#"REMOVE PARAM $foo"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r#"REMOVE PARAM $foo"#.as_bytes(), |parser| parser.parse_expr_inherit())
+			.unwrap();
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Param(RemoveParamStatement {
@@ -2989,10 +2928,9 @@ fn parse_remove() {
 		})))
 	);
 
-	let res = crate::parse_with(r#"REMOVE TABLE foo"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r#"REMOVE TABLE foo"#.as_bytes(), |parser| parser.parse_expr_inherit())
+			.unwrap();
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Table(RemoveTableStatement {
@@ -3002,11 +2940,10 @@ fn parse_remove() {
 		})))
 	);
 
-	let res =
-		crate::parse_with(r#"REMOVE EVENT foo ON TABLE bar"#.as_bytes(), async |parser, stk| {
-			parser.parse_expr_inherit(stk).await
-		})
-		.unwrap();
+	let res = crate::parse_with(r#"REMOVE EVENT foo ON TABLE bar"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
+	})
+	.unwrap();
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Event(RemoveEventStatement {
@@ -3016,11 +2953,10 @@ fn parse_remove() {
 		})))
 	);
 
-	let res =
-		crate::parse_with(r#"REMOVE FIELD foo.bar[10] ON bar"#.as_bytes(), async |parser, stk| {
-			parser.parse_expr_inherit(stk).await
-		})
-		.unwrap();
+	let res = crate::parse_with(r#"REMOVE FIELD foo.bar[10] ON bar"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
+	})
+	.unwrap();
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Field(RemoveFieldStatement {
@@ -3034,8 +2970,8 @@ fn parse_remove() {
 		})))
 	);
 
-	let res = crate::parse_with(r#"REMOVE INDEX foo ON bar"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
+	let res = crate::parse_with(r#"REMOVE INDEX foo ON bar"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
 	})
 	.unwrap();
 	assert_eq!(
@@ -3047,8 +2983,8 @@ fn parse_remove() {
 		})))
 	);
 
-	let res = crate::parse_with(r#"REMOVE ANALYZER foo"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
+	let res = crate::parse_with(r#"REMOVE ANALYZER foo"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
 	})
 	.unwrap();
 	assert_eq!(
@@ -3059,11 +2995,10 @@ fn parse_remove() {
 		})))
 	);
 
-	let res =
-		crate::parse_with(r#"REMOVE user foo on database"#.as_bytes(), async |parser, stk| {
-			parser.parse_expr_inherit(stk).await
-		})
-		.unwrap();
+	let res = crate::parse_with(r#"REMOVE user foo on database"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
+	})
+	.unwrap();
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::User(RemoveUserStatement {
@@ -3073,8 +3008,8 @@ fn parse_remove() {
 		})))
 	);
 
-	let res = crate::parse_with(r#"REMOVE CONFIG GRAPHQL"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
+	let res = crate::parse_with(r#"REMOVE CONFIG GRAPHQL"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
 	})
 	.unwrap();
 	assert_eq!(
@@ -3085,10 +3020,9 @@ fn parse_remove() {
 		})))
 	);
 
-	let res = crate::parse_with(r#"REMOVE CONFIG API"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
-	})
-	.unwrap();
+	let res =
+		crate::parse_with(r#"REMOVE CONFIG API"#.as_bytes(), |parser| parser.parse_expr_inherit())
+			.unwrap();
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Config(RemoveConfigStatement {
@@ -3097,8 +3031,8 @@ fn parse_remove() {
 		})))
 	);
 
-	let res = crate::parse_with(r#"REMOVE CONFIG DEFAULT"#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_inherit(stk).await
+	let res = crate::parse_with(r#"REMOVE CONFIG DEFAULT"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
 	})
 	.unwrap();
 	assert_eq!(
@@ -3109,11 +3043,10 @@ fn parse_remove() {
 		})))
 	);
 
-	let res =
-		crate::parse_with(r#"REMOVE CONFIG IF EXISTS DEFAULT"#.as_bytes(), async |parser, stk| {
-			parser.parse_expr_inherit(stk).await
-		})
-		.unwrap();
+	let res = crate::parse_with(r#"REMOVE CONFIG IF EXISTS DEFAULT"#.as_bytes(), |parser| {
+		parser.parse_expr_inherit()
+	})
+	.unwrap();
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Config(RemoveConfigStatement {
@@ -3125,7 +3058,7 @@ fn parse_remove() {
 
 #[test]
 fn parse_update() {
-	let res = crate::parse_with(r#"UPDATE ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s EXPLAIN FULL"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+	let res = crate::parse_with(r#"UPDATE ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s EXPLAIN FULL"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 	assert_eq!(
 		res,
 		Expr::Update(Box::new(UpdateStatement {
@@ -3167,7 +3100,7 @@ fn parse_update() {
 
 #[test]
 fn parse_upsert() {
-	let res = crate::parse_with(r#"UPSERT ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s EXPLAIN"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+	let res = crate::parse_with(r#"UPSERT ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s EXPLAIN"#.as_bytes(),|parser| parser. parse_expr_inherit()).unwrap();
 	assert_eq!(
 		res,
 		Expr::Upsert(Box::new(UpsertStatement {
@@ -3214,7 +3147,7 @@ fn parse_access_grant() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3231,7 +3164,7 @@ fn parse_access_grant() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON NAMESPACE GRANT FOR RECORD b:c"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3255,7 +3188,7 @@ fn parse_access_show() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON DATABASE SHOW ALL"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3273,7 +3206,7 @@ fn parse_access_show() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON DATABASE SHOW GRANT b"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3291,7 +3224,7 @@ fn parse_access_show() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON DATABASE SHOW WHERE true"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3313,7 +3246,7 @@ fn parse_access_revoke() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON DATABASE REVOKE ALL"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3331,7 +3264,7 @@ fn parse_access_revoke() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON DATABASE REVOKE GRANT b"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3349,7 +3282,7 @@ fn parse_access_revoke() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON DATABASE REVOKE WHERE true"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3371,7 +3304,7 @@ fn parse_access_purge() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE EXPIRED, REVOKED"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3389,7 +3322,7 @@ fn parse_access_purge() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE EXPIRED"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3407,7 +3340,7 @@ fn parse_access_purge() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE REVOKED"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3425,7 +3358,7 @@ fn parse_access_purge() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE EXPIRED FOR 90d"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3443,7 +3376,7 @@ fn parse_access_purge() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE REVOKED FOR 90d"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3461,7 +3394,7 @@ fn parse_access_purge() {
 		let res = crate::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE REVOKED, EXPIRED FOR 90d"#.as_bytes(),
 			ParserSettings::default(),
-			async |parser, stk| parser.parse_top_level_expr(stk).await,
+			|parser| parser.parse_top_level_expr(),
 		)
 		.unwrap();
 		assert_eq!(
@@ -3481,11 +3414,10 @@ fn parse_table_named_tb() {
 	// `TB` is a spelling of the `TABLE` keyword only where that keyword is
 	// mandatory. `ON [TABLE] <table>` leaves it optional, so a bare `tb` in
 	// that position is the table name rather than the keyword.
-	let res =
-		crate::parse_with("DEFINE INDEX ix ON tb FIELDS a, b".as_bytes(), async |parser, stk| {
-			parser.parse_expr_inherit(stk).await
-		})
-		.unwrap();
+	let res = crate::parse_with("DEFINE INDEX ix ON tb FIELDS a, b".as_bytes(), |parser| {
+		parser.parse_expr_inherit()
+	})
+	.unwrap();
 	assert_eq!(
 		res,
 		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
@@ -3504,10 +3436,7 @@ fn parse_table_named_tb() {
 
 	// The keyword-qualified and escaped spellings name that same table.
 	for src in ["DEFINE INDEX ix ON TABLE tb FIELDS a, b", "DEFINE INDEX ix ON `tb` FIELDS a, b"] {
-		let res = crate::parse_with(src.as_bytes(), async |parser, stk| {
-			parser.parse_expr_inherit(stk).await
-		})
-		.unwrap();
+		let res = crate::parse_with(src.as_bytes(), |parser| parser.parse_expr_inherit()).unwrap();
 		let Expr::Define(define) = res else {
 			panic!("{src} did not parse as a define statement");
 		};

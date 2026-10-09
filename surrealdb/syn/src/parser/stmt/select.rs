@@ -1,4 +1,3 @@
-use reblessive::Stk;
 use surrealdb_sql::order::{OrderList, Ordering};
 use surrealdb_sql::statements::SelectStatement;
 use surrealdb_sql::{Expr, Fields, Limit, Literal, Order, Split, Splits, Start};
@@ -10,15 +9,15 @@ use crate::token::{Span, t};
 
 impl Parser<'_> {
 	/// expects `select` to be eaten.
-	pub async fn parse_select_stmt(&mut self, stk: &mut Stk) -> ParseResult<SelectStatement> {
+	pub fn parse_select_stmt(&mut self) -> ParseResult<SelectStatement> {
 		let before = self.peek().span;
-		let fields = self.parse_fields(stk).await?;
+		let fields = self.parse_fields()?;
 		let fields_span = before.covers(self.last_span());
 
 		let omit = if self.eat(t!("OMIT")) {
 			let mut fields = Vec::new();
 			loop {
-				let expr = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+				let expr = self.parse_expr_field()?;
 				fields.push(expr);
 				if !self.eat(t!(",")) {
 					break;
@@ -33,13 +32,13 @@ impl Parser<'_> {
 
 		let only = self.eat(t!("ONLY"));
 
-		let mut what = vec![stk.run(|ctx| self.parse_expr_table(ctx)).await?];
+		let mut what = vec![self.parse_expr_table()?];
 		while self.eat(t!(",")) {
-			what.push(stk.run(|ctx| self.parse_expr_table(ctx)).await?);
+			what.push(self.parse_expr_table()?);
 		}
 
 		let with = self.try_parse_with()?;
-		let cond = self.try_parse_condition(stk).await?;
+		let cond = self.try_parse_condition()?;
 
 		let split_before = self.peek().span;
 		let split = self.try_parse_split(&fields, fields_span)?;
@@ -47,21 +46,21 @@ impl Parser<'_> {
 		let group = self.try_parse_group(&fields, fields_span, split_span)?;
 		let order = self.try_parse_orders()?;
 		let (limit, start) = if let t!("START") = self.peek_kind() {
-			let start = self.try_parse_start(stk).await?;
-			let limit = self.try_parse_limit(stk).await?;
+			let start = self.try_parse_start()?;
+			let limit = self.try_parse_limit()?;
 			(limit, start)
 		} else {
-			let limit = self.try_parse_limit(stk).await?;
-			let start = self.try_parse_start(stk).await?;
+			let limit = self.try_parse_limit()?;
+			let start = self.try_parse_start()?;
 			(limit, start)
 		};
-		let fetch = self.try_parse_fetch(stk).await?;
+		let fetch = self.try_parse_fetch()?;
 		let version = if self.eat(t!("VERSION")) {
-			stk.run(|stk| self.parse_expr_field(stk)).await?
+			self.parse_expr_field()?
 		} else {
 			Expr::Literal(Literal::None)
 		};
-		let timeout = self.try_parse_timeout(stk).await?;
+		let timeout = self.try_parse_timeout()?;
 		let for_update = if self.eat(t!("FOR")) {
 			expected!(self, t!("UPDATE"));
 			true
@@ -172,21 +171,21 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn try_parse_limit(&mut self, stk: &mut Stk) -> ParseResult<Option<Limit>> {
+	pub fn try_parse_limit(&mut self) -> ParseResult<Option<Limit>> {
 		if !self.eat(t!("LIMIT")) {
 			return Ok(None);
 		}
 		self.eat(t!("BY"));
-		let value = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let value = self.parse_expr_field()?;
 		Ok(Some(Limit(value)))
 	}
 
-	pub async fn try_parse_start(&mut self, stk: &mut Stk) -> ParseResult<Option<Start>> {
+	pub fn try_parse_start(&mut self) -> ParseResult<Option<Start>> {
 		if !self.eat(t!("START")) {
 			return Ok(None);
 		}
 		self.eat(t!("AT"));
-		let value = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let value = self.parse_expr_field()?;
 		Ok(Some(Start(value)))
 	}
 }

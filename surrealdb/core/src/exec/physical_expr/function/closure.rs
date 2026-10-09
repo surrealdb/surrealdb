@@ -514,12 +514,7 @@ impl<'a> StreamingClosureEvaluator<'a> {
 }
 
 impl ClosureEvaluator for StreamingClosureEvaluator<'_> {
-	fn invoke<'a>(
-		&'a self,
-		_stk: &'a mut reblessive::tree::Stk,
-		closure: &'a Closure,
-		args: Vec<Value>,
-	) -> BoxInvokeFut<'a> {
+	fn invoke<'a>(&'a self, closure: &'a Closure, args: Vec<Value>) -> BoxInvokeFut<'a> {
 		Box::pin(async move {
 			super::helpers::invoke_closure(closure, args, self.ctx).await.map_err(|ctrl| match ctrl
 			{

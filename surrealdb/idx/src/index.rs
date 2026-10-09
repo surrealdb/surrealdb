@@ -17,7 +17,6 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 
 use anyhow::{Result, bail};
-use reblessive::tree::Stk;
 use surrealdb_datastore::{Transaction, storage_error};
 use surrealdb_types::ToSql;
 use uuid::Uuid;
@@ -124,7 +123,6 @@ impl<'a> IndexOperation<'a> {
 
 	pub async fn compute(
 		&mut self,
-		stk: &mut Stk,
 		az_fn: &dyn AnalyzerFunction,
 		require_compaction: &mut bool,
 	) -> Result<()> {
@@ -132,10 +130,10 @@ impl<'a> IndexOperation<'a> {
 		match &self.ix.index {
 			Index::Uniq => self.index_unique().await,
 			Index::Idx => self.index_non_unique().await,
-			Index::FullText(p) => self.index_fulltext(stk, az_fn, p, require_compaction).await,
+			Index::FullText(p) => self.index_fulltext(az_fn, p, require_compaction).await,
 			Index::Hnsw(p) => self.index_hnsw(p, require_compaction).await,
 			Index::DiskAnn(p) => self.index_diskann(p, require_compaction).await,
-			Index::Count(c) => self.index_count(stk, c.as_ref(), require_compaction).await,
+			Index::Count(c) => self.index_count(c.as_ref(), require_compaction).await,
 		}
 	}
 
@@ -325,7 +323,6 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_count(
 		&mut self,
-		_stk: &mut Stk,
 		cond: Option<&CondText>,
 		require_compaction: &mut bool,
 	) -> Result<()> {
@@ -495,7 +492,6 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_fulltext(
 		&mut self,
-		stk: &mut Stk,
 		az_fn: &dyn AnalyzerFunction,
 		p: &FullTextParams,
 		require_compaction: &mut bool,
@@ -510,12 +506,11 @@ impl<'a> IndexOperation<'a> {
 			self.ix.format_version,
 		)
 		.await?;
-		self.compute_fulltext_with_index(stk, az_fn, &fti, require_compaction).await
+		self.compute_fulltext_with_index(az_fn, &fti, require_compaction).await
 	}
 
 	pub async fn compute_fulltext_with_index(
 		&mut self,
-		stk: &mut Stk,
 		az_fn: &dyn AnalyzerFunction,
 		fti: &FullTextIndex,
 		require_compaction: &mut bool,
@@ -523,11 +518,11 @@ impl<'a> IndexOperation<'a> {
 		let mut rc = false;
 		// Delete the old index data (posting lists, offsets, doc length/count).
 		if let Some(o) = self.o.take() {
-			fti.remove_content(stk, self.env, az_fn, self.rid, o, &mut rc).await?;
+			fti.remove_content(self.env, az_fn, self.rid, o, &mut rc).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			fti.index_content(stk, self.env, az_fn, self.rid, n, &mut rc).await?;
+			fti.index_content(self.env, az_fn, self.rid, n, &mut rc).await?;
 		}
 		// The record ↔ doc-ID mapping is shared across all of the table's indexes,
 		// so it is removed centrally at record purge, not per index here.
@@ -929,7 +924,6 @@ mod interrupted_fan_out {
 
 	use anyhow::Result;
 	use common::EngineError;
-	use reblessive::tree::{Stk, TreeStack};
 	use surrealdb_datastore::{DatastoreError, Transaction};
 	use surrealdb_kvs::TransactionType;
 	use surrealdb_strand::Strand;
@@ -957,12 +951,7 @@ mod interrupted_fan_out {
 	struct NoAnalyzerFunction;
 
 	impl AnalyzerFunction for NoAnalyzerFunction {
-		fn call<'a>(
-			&'a self,
-			_stk: &'a mut Stk,
-			name: &'a str,
-			_input: Strand,
-		) -> BoxAnalyzerFut<'a> {
+		fn call<'a>(&'a self, name: &'a str, _input: Strand) -> BoxAnalyzerFut<'a> {
 			unreachable!("a b-tree index calls no analyzer FUNCTION {name}")
 		}
 	}
@@ -1002,10 +991,7 @@ mod interrupted_fan_out {
 		let rid = record();
 		let mut op = IndexOperation::new(env, NS, DB, TB, ix, o, n, &rid);
 		let mut require_compaction = false;
-		TreeStack::new()
-			.enter(|stk| op.compute(stk, &NoAnalyzerFunction, &mut require_compaction))
-			.finish()
-			.await
+		op.compute(&NoAnalyzerFunction, &mut require_compaction).await
 	}
 
 	/// The index's entries as `tx` sees them, unique and non-unique alike.

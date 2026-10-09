@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use filter::Filter;
-use reblessive::tree::Stk;
 use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
@@ -27,9 +26,7 @@ pub(in crate::ft) mod tokenizer;
 /// A boxed future returned by [`AnalyzerFunction::call`].
 ///
 /// Boxed at the trait boundary because the seam is held as a trait object.
-/// Deliberately not `Send`: the call borrows the caller's `Stk`, and a future
-/// holding one cannot be.
-pub type BoxAnalyzerFut<'a> = Pin<Box<dyn Future<Output = Result<Strand>> + 'a>>;
+pub type BoxAnalyzerFut<'a> = Pin<Box<dyn Future<Output = Result<Strand>> + Send + 'a>>;
 
 /// Runs the user-defined function named by an analyzer's `FUNCTION` clause.
 ///
@@ -40,24 +37,16 @@ pub type BoxAnalyzerFut<'a> = Pin<Box<dyn Future<Output = Result<Strand>> + 'a>>
 /// trait. The implementation *holds* the environment; only the function name
 /// and the text cross the boundary.
 ///
-/// No auto-trait bound: tokenizing always happens inside a heap-allocated
-/// `TreeStack`, which erases auto-traits, so neither the trait object nor
-/// [`BoxAnalyzerFut`] ever has to be `Send` — not even where the streaming
-/// executor drives the analyzer from a `Send` boxed future. Add `Sync` only if
-/// a caller ever needs to hold a `&dyn AnalyzerFunction` across an await
-/// outside such a stack.
-pub trait AnalyzerFunction {
+/// `Sync`, and [`BoxAnalyzerFut`] `Send`, because the streaming executor
+/// drives the analyzer from a `Send` boxed future and holds a
+/// `&dyn AnalyzerFunction` across its awaits.
+pub trait AnalyzerFunction: Sync {
 	/// Calls the function stored under `name` with `input`, returning the text
 	/// it produced.
 	///
-	/// `stk` stays an explicit parameter rather than being captured: the caller
-	/// is already inside a `TreeStack` frame and must hand down the same one,
-	/// or the function body would build a second stack instead of growing the
-	/// first.
-	///
 	/// Errors when the function is not allowed, fails, or returns anything
 	/// other than a string.
-	fn call<'a>(&'a self, stk: &'a mut Stk, name: &'a str, input: Strand) -> BoxAnalyzerFut<'a>;
+	fn call<'a>(&'a self, name: &'a str, input: Strand) -> BoxAnalyzerFut<'a>;
 }
 
 #[derive(Clone)]
@@ -85,55 +74,56 @@ impl Analyzer {
 
 	pub(in crate::ft) async fn analyze_content(
 		&self,
-		stk: &mut Stk,
 		az_fn: &dyn AnalyzerFunction,
 		content: Vec<Value>,
 		stage: FilteringStage,
 	) -> Result<Vec<Tokens>> {
 		let mut tks = Vec::with_capacity(content.len());
 		for v in content {
-			self.analyze_value(stk, az_fn, v, stage, &mut tks).await?;
+			self.analyze_value(az_fn, v, stage, &mut tks).await?;
 		}
 		Ok(tks)
 	}
 
 	/// Tokenise a single `Value` into `tks`. Strings, numbers, and booleans
-	/// contribute their tokens directly; arrays and objects recurse into their
-	/// elements; other variants are ignored.
+	/// contribute their tokens directly; arrays and objects contribute their
+	/// elements' tokens, in order; other variants are ignored.
+	///
+	/// A value's nesting depth is data, not grammar, so nested collections are
+	/// walked with an explicit work stack rather than by recursion.
 	pub(super) async fn analyze_value(
 		&self,
-		stk: &mut Stk,
 		az_fn: &dyn AnalyzerFunction,
 		val: Value,
 		stage: FilteringStage,
 		tks: &mut Vec<Tokens>,
 	) -> Result<()> {
-		match val {
-			Value::String(s) => tks.push(self.generate_tokens(stk, az_fn, stage, s).await?),
-			Value::Number(n) => {
-				tks.push(self.generate_tokens(stk, az_fn, stage, n.to_sql().into()).await?)
-			}
-			Value::Bool(b) => {
-				tks.push(self.generate_tokens(stk, az_fn, stage, b.to_sql().into()).await?)
-			}
-			Value::Array(a) => {
-				for v in a.0 {
-					stk.run(|stk| self.analyze_value(stk, az_fn, v, stage, tks)).await?;
+		// Pending values, last-in first-out: a collection pushes its elements
+		// in reverse so that they are tokenised in their original order.
+		let mut pending = vec![val];
+		while let Some(val) = pending.pop() {
+			match val {
+				Value::String(s) => tks.push(self.generate_tokens(az_fn, stage, s).await?),
+				Value::Number(n) => {
+					tks.push(self.generate_tokens(az_fn, stage, n.to_sql().into()).await?)
 				}
-			}
-			Value::Object(o) => {
-				for (_, v) in o.0 {
-					stk.run(|stk| self.analyze_value(stk, az_fn, v, stage, tks)).await?;
+				Value::Bool(b) => {
+					tks.push(self.generate_tokens(az_fn, stage, b.to_sql().into()).await?)
 				}
+				Value::Array(a) => pending.extend(a.0.into_iter().rev()),
+				Value::Object(o) => {
+					let start = pending.len();
+					pending.extend(o.0.into_values());
+					pending[start..].reverse();
+				}
+				_ => {}
 			}
-			_ => {}
-		};
+		}
 		Ok(())
 	}
 
 	pub(super) async fn generate_tokens(
 		&self,
-		stk: &mut Stk,
 		az_fn: &dyn AnalyzerFunction,
 		stage: FilteringStage,
 		input: Strand,
@@ -142,7 +132,7 @@ impl Analyzer {
 		// one the input is tokenized exactly as the caller supplied it, so no
 		// evaluator is ever consulted.
 		let input = match self.az.function.as_deref() {
-			Some(function_name) => az_fn.call(stk, function_name, input).await?,
+			Some(function_name) => az_fn.call(function_name, input).await?,
 			None => input,
 		};
 		if input.is_empty() {
@@ -158,13 +148,8 @@ impl Analyzer {
 	}
 
 	/// Used for exposing the analyzer as the native function `search::analyze`
-	pub async fn analyze(
-		&self,
-		stk: &mut Stk,
-		az_fn: &dyn AnalyzerFunction,
-		input: Strand,
-	) -> Result<Value> {
-		self.generate_tokens(stk, az_fn, FilteringStage::Indexing, input).await?.try_into()
+	pub async fn analyze(&self, az_fn: &dyn AnalyzerFunction, input: Strand) -> Result<Value> {
+		self.generate_tokens(az_fn, FilteringStage::Indexing, input).await?.try_into()
 	}
 
 	pub(in crate::ft) fn extract_frequencies(
@@ -210,7 +195,6 @@ impl Analyzer {
 mod tests {
 	use std::sync::Arc;
 
-	use reblessive::tree::Stk;
 	use surrealdb_kvs::TransactionType;
 	use surrealdb_sql::Expr;
 	use surrealdb_sql::statements::DefineStatement;
@@ -229,12 +213,7 @@ mod tests {
 	struct NoAnalyzerFunction;
 
 	impl AnalyzerFunction for NoAnalyzerFunction {
-		fn call<'a>(
-			&'a self,
-			_stk: &'a mut Stk,
-			name: &'a str,
-			_input: Strand,
-		) -> BoxAnalyzerFut<'a> {
+		fn call<'a>(&'a self, name: &'a str, _input: Strand) -> BoxAnalyzerFut<'a> {
 			unreachable!("no analyzer under test declares FUNCTION {name}")
 		}
 	}
@@ -269,14 +248,8 @@ mod tests {
 
 		let a = Analyzer::new(ds.index_stores(), Arc::new(analyzer_definition(def))).await.unwrap();
 		let az_fn = NoAnalyzerFunction;
-		let mut stack = reblessive::TreeStack::new();
-		let tokens = stack
-			.enter(|stk| async move {
-				a.generate_tokens(stk, &az_fn, FilteringStage::Indexing, input.into()).await
-			})
-			.finish()
-			.await
-			.unwrap();
+		let tokens =
+			a.generate_tokens(&az_fn, FilteringStage::Indexing, input.into()).await.unwrap();
 		tx.cancel().await.unwrap();
 		tokens
 	}
@@ -298,5 +271,51 @@ mod tests {
 	#[tokio::test]
 	async fn test_no_tokenizer() {
 		test_analyzer("ANALYZER test FILTERS lowercase", "ab", &["ab"]).await;
+	}
+
+	/// Collections contribute their elements' tokens in document order, and a
+	/// value's nesting depth — which is data, not grammar — is walked without
+	/// recursion, so a deeply nested value cannot exhaust the stack.
+	#[tokio::test]
+	async fn analyze_value_walks_nested_collections_in_order() {
+		use std::collections::BTreeMap;
+
+		use crate::val::{Array, Object, Value};
+
+		let ds = TestIndexStore::new().await;
+		let a = Analyzer::new(ds.index_stores(), Arc::new(analyzer_definition("ANALYZER test")))
+			.await
+			.unwrap();
+		let words = |tks: &[Tokens]| -> Vec<String> {
+			tks.iter()
+				.flat_map(|t| t.list().iter().map(|x| t.get_token_string(x).unwrap().to_owned()))
+				.collect()
+		};
+
+		let object = Object::from(BTreeMap::from([
+			("a", Value::from("b")),
+			("c", Value::Array(Array(vec![Value::from("d"), Value::from("e")]))),
+		]));
+		let value = Value::Array(Array(vec![
+			Value::from("a"),
+			Value::Object(object),
+			Value::Array(Array(vec![Value::from("f")])),
+			Value::from("g"),
+		]));
+		let mut tks = Vec::new();
+		a.analyze_value(&NoAnalyzerFunction, value, FilteringStage::Indexing, &mut tks)
+			.await
+			.unwrap();
+		assert_eq!(words(&tks), ["a", "b", "d", "e", "f", "g"]);
+
+		let mut deep = Value::from("leaf");
+		for _ in 0..100_000 {
+			deep = Value::Array(Array(vec![deep]));
+		}
+		let mut tks = Vec::new();
+		a.analyze_value(&NoAnalyzerFunction, deep, FilteringStage::Indexing, &mut tks)
+			.await
+			.unwrap();
+		assert_eq!(words(&tks), ["leaf"]);
 	}
 }

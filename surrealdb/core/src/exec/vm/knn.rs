@@ -20,7 +20,6 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
 
 use super::batch::{BatchSizer, read_sized};
@@ -258,12 +257,7 @@ struct Judge<'a> {
 }
 
 impl CandidateCondition for Judge<'_> {
-	fn matches<'a>(
-		&'a self,
-		_stk: &'a mut Stk,
-		_rid: &'a Arc<RecordId>,
-		record: &'a Arc<Record>,
-	) -> BoxGateFut<'a> {
+	fn matches<'a>(&'a self, _rid: &'a Arc<RecordId>, record: &'a Arc<Record>) -> BoxGateFut<'a> {
 		Box::pin(async move {
 			let verdict = admits(self.program, self.pipeline, self.ctx, &record.data).await;
 			Ok(verdict.catch_return()?.is_truthy())

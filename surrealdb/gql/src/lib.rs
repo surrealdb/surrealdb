@@ -36,8 +36,6 @@ impl Default for GqlParserSettings {
 		}
 	}
 }
-
-use reblessive::Stack;
 use surrealdb_syn::error::SyntaxError;
 use surrealdb_syn::syntax_error;
 use surrealdb_syn::token::Span;
@@ -81,8 +79,7 @@ pub fn parse_with_settings(
 		));
 	}
 	let mut parser = parser::Parser::new_with_settings(input, settings);
-	let mut stack = Stack::new();
-	stack.enter(|stk| parser.parse_query(stk)).finish()
+	parser.parse_query()
 }
 
 /// Lowers a parsed GQL query into a [`PreparedGqlQuery`] (the declarative

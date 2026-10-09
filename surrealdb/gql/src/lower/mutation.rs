@@ -13,8 +13,6 @@
 //! variable, mutating an unbound variable, deleting a non-variable expression,
 //! `SET a = {…}` that sets the reserved `id`/`in`/`out` keys, and an `INSERT`
 //! node that is neither a labelled new node nor a bound-variable reference.
-
-use reblessive::Stk;
 use surrealdb_strand::TableName;
 
 use crate::expr::logical::LogicalExpr;
@@ -40,18 +38,17 @@ type PendingEdge<'ast> = (BindingId, TableName, BindingId, BindingId, &'ast [(Id
 /// registry in place: `INSERT` declares new node/edge bindings (so a trailing
 /// `RETURN` and a later `MATCH` / property map can reference them). A `SET` or
 /// `REMOVE` with several items may yield several stages.
-pub(super) async fn lower_statement(
-	stk: &mut Stk,
+pub(super) fn lower_statement(
 	registry: &mut Registry,
 	stmt: &MutationStatement,
 ) -> Result<Vec<MutationStage>, SyntaxError> {
 	let mut stages = Vec::new();
 	match stmt {
-		MutationStatement::Set(set) => lower_set(stk, registry, set, &mut stages).await?,
+		MutationStatement::Set(set) => lower_set(registry, set, &mut stages)?,
 		MutationStatement::Remove(remove) => lower_remove(registry, remove, &mut stages)?,
 		MutationStatement::Delete(delete) => lower_delete(registry, delete, &mut stages)?,
 		MutationStatement::Insert(insert) => {
-			let stage = lower_insert(stk, registry, insert).await?;
+			let stage = lower_insert(registry, insert)?;
 			stages.push(MutationStage::Insert(stage));
 		}
 	}
@@ -77,8 +74,7 @@ fn resolve_target(registry: &Registry, ident: &Ident) -> Result<BindingId, Synta
 /// target merge into one [`UpdateData::Set`] (applied as a single UPDATE); a
 /// `SET a = {…}` is its own [`UpdateData::Content`] stage; a label item is
 /// rejected.
-async fn lower_set(
-	stk: &mut Stk,
+fn lower_set(
 	registry: &mut Registry,
 	set: &SetStatement,
 	stages: &mut Vec<MutationStage>,
@@ -113,7 +109,7 @@ async fn lower_set(
 					// silently no-op (the native write path re-stamps an edge's
 					// `in`/`out` and the record `id` after the SET applies).
 					reject_reserved_key(prop)?;
-					let value = lower_value(stk, value, &scope).await?;
+					let value = lower_value(value, &scope)?;
 					assignments.push((prop.name.clone(), value));
 					i += 1;
 				}
@@ -130,7 +126,7 @@ async fn lower_set(
 				let target = resolve_target(registry, var)?;
 				reject_reserved_keys(props)?;
 				let map = GqlExpr::Map(props.clone(), *span);
-				let content = lower_value(stk, &map, &scope).await?;
+				let content = lower_value(&map, &scope)?;
 				stages.push(MutationStage::Update {
 					target,
 					data: UpdateData::Content(content),
@@ -221,8 +217,7 @@ fn lower_delete(
 /// resolve); pass 2 lowers each element's property map against the full
 /// registry. New nodes are emitted in path order (creation order); edges relate
 /// once their endpoints exist.
-async fn lower_insert(
-	stk: &mut Stk,
+fn lower_insert(
 	registry: &mut Registry,
 	insert: &InsertStatement,
 ) -> Result<InsertStage, SyntaxError> {
@@ -261,7 +256,7 @@ async fn lower_insert(
 	};
 	let mut nodes = Vec::with_capacity(new_nodes.len());
 	for (binding, label, props) in &new_nodes {
-		let props = lower_props(stk, props, &scope).await?;
+		let props = lower_props(props, &scope)?;
 		nodes.push(InsertNodePlan {
 			binding: *binding,
 			label: label.clone(),
@@ -270,7 +265,7 @@ async fn lower_insert(
 	}
 	let mut edges = Vec::with_capacity(new_edges.len());
 	for (binding, label, from, to, props) in &new_edges {
-		let props = lower_props(stk, props, &scope).await?;
+		let props = lower_props(props, &scope)?;
 		edges.push(InsertEdgePlan {
 			binding: *binding,
 			label: label.clone(),
@@ -324,14 +319,10 @@ fn classify_node<'ast>(
 
 /// Lowers a property map into a binding-row-scoped object expression (each value
 /// is evaluated against the binding row at write time).
-async fn lower_props(
-	stk: &mut Stk,
-	props: &[(Ident, GqlExpr)],
-	scope: &Scope<'_>,
-) -> Result<LogicalExpr, SyntaxError> {
+fn lower_props(props: &[(Ident, GqlExpr)], scope: &Scope<'_>) -> Result<LogicalExpr, SyntaxError> {
 	// Reuse the value lowering's object handling by lowering a synthetic map.
 	let map = GqlExpr::Map(props.to_vec(), crate::syn::token::Span::empty());
-	lower_value(stk, &map, scope).await
+	lower_value(&map, scope)
 }
 
 /// Rejects `SET a = {…}` that sets the reserved record keys (`id`, and an edge's

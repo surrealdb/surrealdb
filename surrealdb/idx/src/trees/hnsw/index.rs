@@ -8,7 +8,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use ahash::HashMap;
 use anyhow::{Result, bail};
 use common::EngineError;
-use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
 use surrealdb_datastore::Transaction;
 use surrealdb_kvs::{Direction, Val};
@@ -960,11 +959,9 @@ impl HnswIndex {
 	/// the table's shared doc-ID space) without fetching records; graph
 	/// traversal still expands through non-members so the search does not
 	/// disconnect. `None` leaves admission unrestricted.
-	#[expect(clippy::too_many_arguments)]
 	pub async fn knn_search(
 		&self,
 		env: &dyn IndexEnv,
-		stk: &mut Stk,
 		pt: &[Number],
 		k: usize,
 		ef: usize,
@@ -998,9 +995,9 @@ impl HnswIndex {
 
 		// Search in the pendings if any
 		let pending_docs =
-			self.search_pendings(&ctx, stk, &search, &mut filter, allow_list, &mut builder).await?;
+			self.search_pendings(&ctx, &search, &mut filter, allow_list, &mut builder).await?;
 		// Search in the graph
-		self.search_graph(&ctx, stk, &search, pending_docs, &mut filter, allow_list, &mut builder)
+		self.search_graph(&ctx, &search, pending_docs, &mut filter, allow_list, &mut builder)
 			.await?;
 
 		// We build the final result: replacing DocId with RecordIds
@@ -1063,11 +1060,9 @@ impl HnswIndex {
 	/// Acquires a read lock on the graph and performs KNN search, optionally
 	/// excluding documents that are present in `pending_docs` and restricting
 	/// admission to `allow_list` members (#548).
-	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn search_graph(
 		&self,
 		ctx: &HnswContext<'_>,
-		stk: &mut Stk,
 		search: &HnswSearch,
 		pending_docs: Option<RoaringTreemap>,
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
@@ -1081,11 +1076,10 @@ impl HnswIndex {
 		// pending docs but would disconnect the walk under a selective bitmap.
 		if filter.is_some() || allow_list.is_some() {
 			let neighbours = hnsw
-				.knn_search_with_filter(ctx, search, stk, filter, pending_docs.as_ref(), allow_list)
+				.knn_search_with_filter(ctx, search, filter, pending_docs.as_ref(), allow_list)
 				.await?;
 			self.add_graph_results(
 				ctx,
-				stk,
 				&hnsw,
 				neighbours,
 				pending_docs.as_ref(),
@@ -1098,7 +1092,6 @@ impl HnswIndex {
 			let neighbours = hnsw.knn_search(ctx, search, pending_docs.as_ref()).await?;
 			self.add_graph_results(
 				ctx,
-				stk,
 				&hnsw,
 				neighbours,
 				pending_docs.as_ref(),
@@ -1121,7 +1114,6 @@ impl HnswIndex {
 	async fn score_legacy_pending_chunk(
 		&self,
 		ctx: &HnswContext<'_>,
-		stk: &mut Stk,
 		search: &HnswSearch,
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		allow_list: Option<&RoaringTreemap>,
@@ -1215,7 +1207,7 @@ impl HnswIndex {
 			}
 		}
 
-		self.score_pending_batch(ctx, stk, search, filter, builder, scan).await
+		self.score_pending_batch(ctx, search, filter, builder, scan).await
 	}
 
 	/// Searches through pending (not-yet-applied) updates for nearest neighbors.
@@ -1267,7 +1259,6 @@ impl HnswIndex {
 	async fn search_pendings(
 		&self,
 		ctx: &HnswContext<'_>,
-		stk: &mut Stk,
 		search: &HnswSearch,
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		allow_list: Option<&RoaringTreemap>,
@@ -1336,7 +1327,6 @@ impl HnswIndex {
 					scan.release_page();
 					self.score_legacy_pending_chunk(
 						ctx,
-						stk,
 						search,
 						filter,
 						allow_list,
@@ -1357,7 +1347,6 @@ impl HnswIndex {
 		if !scan.batch.is_empty() {
 			self.score_legacy_pending_chunk(
 				ctx,
-				stk,
 				search,
 				filter,
 				allow_list,
@@ -1417,14 +1406,13 @@ impl HnswIndex {
 						continue;
 					}
 					if scan.rollover_required(entry_bytes) {
-						self.score_pending_batch(ctx, stk, search, filter, builder, &mut scan)
-							.await?;
+						self.score_pending_batch(ctx, search, filter, builder, &mut scan).await?;
 					}
 					scan.push(id, pending.new_vectors, entry_bytes);
 				}
 			}
 		}
-		self.score_pending_batch(ctx, stk, search, filter, builder, &mut scan).await?;
+		self.score_pending_batch(ctx, search, filter, builder, &mut scan).await?;
 		scan.finish();
 		if all_existing_docs.is_empty() {
 			return Ok(None);
@@ -1476,7 +1464,6 @@ impl HnswIndex {
 	async fn score_pending_batch(
 		&self,
 		ctx: &HnswContext<'_>,
-		stk: &mut Stk,
 		search: &HnswSearch,
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		builder: &mut KnnResultBuilder,
@@ -1496,7 +1483,7 @@ impl HnswIndex {
 		let batch = &mut scan.batch;
 		for (id, vectors) in batch.ids.drain(..).zip(batch.vectors.drain(..)) {
 			let truthy = match filter.as_mut() {
-				Some(filter) => filter.check_vector_id_truthy(ctx, stk, id.clone()).await?,
+				Some(filter) => filter.check_vector_id_truthy(ctx, id.clone()).await?,
 				None => true,
 			};
 			if truthy {
@@ -1538,7 +1525,6 @@ impl HnswIndex {
 	async fn add_graph_results(
 		&self,
 		ctx: &HnswContext<'_>,
-		stk: &mut Stk,
 		hnsw: &HnswFlavor,
 		neighbors: Vec<(f64, ElementId)>,
 		pending_docs: Option<&RoaringTreemap>,
@@ -1572,7 +1558,7 @@ impl HnswIndex {
 						}
 						let id = VectorId::DocId(doc_id);
 						if let Some(filter) = filter.as_mut()
-							&& !filter.check_vector_id_truthy(ctx, stk, id.clone()).await?
+							&& !filter.check_vector_id_truthy(ctx, id.clone()).await?
 						{
 							continue;
 						}

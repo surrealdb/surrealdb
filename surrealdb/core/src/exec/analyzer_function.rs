@@ -22,7 +22,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use anyhow::bail;
-use reblessive::tree::Stk;
 use surrealdb_strand::Strand;
 
 use crate::catalog::providers::DatabaseProvider as _;
@@ -127,7 +126,7 @@ impl AnalyzerFunction for StreamingAnalyzerFunction<'_> {
 	/// and has no record to read fields from. Compiling the call applies the
 	/// session's capability check for the function, as the per-row engine's
 	/// does.
-	fn call<'a>(&'a self, _stk: &'a mut Stk, name: &'a str, input: Strand) -> BoxAnalyzerFut<'a> {
+	fn call<'a>(&'a self, name: &'a str, input: Strand) -> BoxAnalyzerFut<'a> {
 		Box::pin(async move {
 			let compiled = self.call_expr(name).await?;
 			let mut params = HashMap::with_capacity(1);

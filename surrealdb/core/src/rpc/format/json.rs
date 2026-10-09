@@ -25,7 +25,7 @@ pub fn decode(value: &[u8], limit: usize) -> anyhow::Result<PublicValue> {
 		..Default::default()
 	};
 
-	syn::parse_with_settings(value, settings, async |parser, stk| parser.parse_value(stk).await)
+	syn::parse_with_settings(value, settings, |parser| parser.parse_value())
 		.map_err(|err| anyhow::anyhow!(err.to_string()))
 }
 

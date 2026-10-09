@@ -1,4 +1,3 @@
-use reblessive::Stack;
 use rstest::rstest;
 
 use crate::syn::parser::{Parser, ParserSettings};
@@ -110,10 +109,8 @@ fn test_parse_depth(
 	#[case] source: &str,
 	#[case] expected: bool,
 ) {
-	let mut stack = Stack::new();
-
 	let mut parser = Parser::new_with_settings(source.as_bytes(), parser_settings);
-	let result = stack.enter(|stk| parser.parse_query(stk)).finish();
+	let result = parser.parse_query();
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -142,9 +139,8 @@ fn test_parse_value_depth(#[case] limit: usize, #[case] source: &str, #[case] ex
 		object_recursion_limit: limit,
 		..Default::default()
 	};
-	let result = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
-		parser.parse_value(stk).await
-	});
+	let result =
+		syn::parse_with_settings(source.as_bytes(), settings, |parser| parser.parse_value());
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -159,9 +155,8 @@ fn test_parse_json_depth(#[case] limit: usize, #[case] source: &str, #[case] exp
 		object_recursion_limit: limit,
 		..Default::default()
 	};
-	let result = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
-		parser.parse_json(stk).await
-	});
+	let result =
+		syn::parse_with_settings(source.as_bytes(), settings, |parser| parser.parse_json());
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -214,8 +209,7 @@ fn test_parse_kind_depth(#[case] limit: usize, #[case] source: String, #[case] e
 		..Default::default()
 	};
 	let mut parser = Parser::new_with_settings(source.as_bytes(), settings);
-	let mut stack = Stack::new();
-	let result = stack.enter(|stk| parser.parse_query(stk)).finish();
+	let result = parser.parse_query();
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -254,8 +248,7 @@ fn test_parse_expr_depth(#[case] limit: usize, #[case] source: String, #[case] e
 		..Default::default()
 	};
 	let mut parser = Parser::new_with_settings(source.as_bytes(), settings);
-	let mut stack = Stack::new();
-	let result = stack.enter(|stk| parser.parse_query(stk)).finish();
+	let result = parser.parse_query();
 	assert_eq!(result.is_ok(), expected);
 }
 

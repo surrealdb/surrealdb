@@ -12,7 +12,6 @@
 
 use std::sync::{Arc, LazyLock};
 
-use reblessive::tree::TreeStack;
 use regex::Regex;
 
 use super::{FunctionRegistry, ScalarFunction, Signature};
@@ -105,9 +104,7 @@ async fn probe_fnc(ctx: &FrozenContext, opt: &Options, name: &str, n: usize) -> 
 	if probe != Probe::Unknown {
 		return probe;
 	}
-	let mut stack = TreeStack::new();
-	let res =
-		stack.enter(|stk| crate::fnc::asynchronous(stk, ctx, opt, None, name, args)).finish().await;
+	let res = crate::fnc::asynchronous(ctx, opt, None, name, args).await;
 	classify(res)
 }
 

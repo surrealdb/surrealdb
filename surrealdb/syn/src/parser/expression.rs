@@ -1,6 +1,4 @@
 //! This module defines the pratt parser for operators.
-
-use reblessive::Stk;
 use surrealdb_sql::operator::{BindingPower, BooleanOperator, MatchesOperator, NearestNeighbor};
 use surrealdb_sql::{BinaryOperator, Expr, Literal, Part, PostfixOperator, PrefixOperator};
 use surrealdb_types::ToSql;
@@ -19,9 +17,9 @@ impl Parser<'_> {
 	///
 	/// Meant to be used when parsing an expression the first time to avoid
 	/// having the depth limit be lowered unnecessarily.
-	pub async fn parse_expr_start(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub fn parse_expr_start(&mut self) -> ParseResult<Expr> {
 		self.table_as_field = true;
-		self.pratt_parse_expr(stk, BindingPower::Base).await
+		self.pratt_parse_expr(BindingPower::Base)
 	}
 
 	/// Parsers a generic value.
@@ -30,11 +28,11 @@ impl Parser<'_> {
 	/// different values depending on context: a table or a field the current
 	/// document. This function parses loose idents as a table, see
 	/// [`Parser::parse_expr_field`] for parsing loose idents as fields
-	pub async fn parse_expr_table(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub fn parse_expr_table(&mut self) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
 		let res = enter_query_recursion!(this = self => {
-			this.pratt_parse_expr(stk, BindingPower::Base).await
+			this.pratt_parse_expr(BindingPower::Base)
 		});
 		self.table_as_field = old;
 		res
@@ -46,11 +44,11 @@ impl Parser<'_> {
 	/// different values depending on context: a table or a field the current
 	/// document. This function parses loose idents as a field, see
 	/// [`Parser::parse_expr_table`] for parsing loose idents as table
-	pub async fn parse_expr_field(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub fn parse_expr_field(&mut self) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
 		let res = enter_query_recursion!(this = self => {
-			this.pratt_parse_expr(stk, BindingPower::Base).await
+			this.pratt_parse_expr(BindingPower::Base)
 		});
 		self.table_as_field = old;
 		res
@@ -59,9 +57,9 @@ impl Parser<'_> {
 	/// Parsers a generic value.
 	///
 	/// Inherits how loose identifiers are parsed from it's caller.
-	pub(super) async fn parse_expr_inherit(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub(super) fn parse_expr_inherit(&mut self) -> ParseResult<Expr> {
 		enter_query_recursion!(this = self => {
-			this.pratt_parse_expr(stk, BindingPower::Base).await
+			this.pratt_parse_expr(BindingPower::Base)
 		})
 	}
 
@@ -78,11 +76,8 @@ impl Parser<'_> {
 	/// The level is still charged to the expression budget by the pratt parser
 	/// below, so collection nesting is bounded by the smaller of the object and
 	/// expression budgets and no level goes uncharged.
-	pub(super) async fn parse_expr_collection_element(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<Expr> {
-		self.pratt_parse_expr(stk, BindingPower::Base).await
+	pub(super) fn parse_expr_collection_element(&mut self) -> ParseResult<Expr> {
+		self.pratt_parse_expr(BindingPower::Base)
 	}
 
 	/// Returns the binding power of an infix operator.
@@ -210,7 +205,8 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_prefix_op(&mut self, stk: &mut Stk, min_bp: BindingPower) -> ParseResult<Expr> {
+	#[inline(never)]
+	fn parse_prefix_op(&mut self, min_bp: BindingPower) -> ParseResult<Expr> {
 		let token = self.peek();
 		let operator = match token.kind {
 			t!("+") => {
@@ -237,9 +233,7 @@ impl Parser<'_> {
 						},
 					};
 					if self.peek_continues_idiom() {
-						return self
-							.parse_remaining_value_idiom(stk, vec![Part::Start(expr)])
-							.await;
+						return self.parse_remaining_value_idiom(vec![Part::Start(expr)]);
 					} else {
 						return Ok(expr);
 					}
@@ -272,9 +266,7 @@ impl Parser<'_> {
 						},
 					};
 					if self.peek_continues_idiom() {
-						return self
-							.parse_remaining_value_idiom(stk, vec![Part::Start(expr)])
-							.await;
+						return self.parse_remaining_value_idiom(vec![Part::Start(expr)]);
 					} else {
 						return Ok(expr);
 					}
@@ -290,7 +282,7 @@ impl Parser<'_> {
 			}
 			t!("<") => {
 				self.pop_peek();
-				let kind = self.parse_kind(stk, token.span).await?;
+				let kind = self.parse_kind(token.span)?;
 				PrefixOperator::Cast(kind)
 			}
 			t!("..") => {
@@ -313,7 +305,7 @@ impl Parser<'_> {
 			_ => unreachable!(),
 		};
 
-		let v = stk.run(|stk| self.pratt_parse_expr(stk, min_bp)).await?;
+		let v = self.pratt_parse_expr(min_bp)?;
 
 		Ok(Expr::Prefix {
 			op: operator,
@@ -408,9 +400,9 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_infix_op(
+	#[inline(never)]
+	fn parse_infix_op(
 		&mut self,
-		stk: &mut Stk,
 		min_bp: BindingPower,
 		lhs: Expr,
 		lhs_prime: bool, /* if lhs was a prime expression, required for ensuring (a..b)..c does
@@ -499,7 +491,7 @@ impl Parser<'_> {
 			x => unreachable!("found non-operator token {x:?}"),
 		};
 		let rhs_covered = self.peek().kind == t!("(");
-		let rhs = stk.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
+		let rhs = self.pratt_parse_expr(min_bp)?;
 
 		let has_associatitivity = Self::operator_has_associativity(&operator);
 		if !lhs_prime
@@ -598,12 +590,8 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_postfix(
-		&mut self,
-		stk: &mut Stk,
-		lhs: Expr,
-		lhs_prime: bool,
-	) -> ParseResult<Expr> {
+	#[inline(never)]
+	fn parse_postfix(&mut self, lhs: Expr, lhs_prime: bool) -> ParseResult<Expr> {
 		let token = self.next();
 		let op = match token.kind {
 			t!(">") => {
@@ -628,7 +616,7 @@ impl Parser<'_> {
 						break;
 					}
 
-					let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+					let arg = self.parse_expr_inherit()?;
 					args.push(arg);
 
 					if !self.eat(t!(",")) {
@@ -648,7 +636,7 @@ impl Parser<'_> {
 						break;
 					}
 
-					let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+					let arg = self.parse_expr_inherit()?;
 					args.push(arg);
 
 					if !self.eat(t!(",")) {
@@ -694,10 +682,10 @@ impl Parser<'_> {
 	/// restores it on return so that sibling expressions are not charged for
 	/// one another. The inner loop charges the budget again for every operator
 	/// it appends to the left-associative spine.
-	async fn pratt_parse_expr(&mut self, stk: &mut Stk, min_bp: BindingPower) -> ParseResult<Expr> {
+	fn pratt_parse_expr(&mut self, min_bp: BindingPower) -> ParseResult<Expr> {
 		let restore_to = self.settings.expr_recursion_limit;
 		self.enter_expr_depth()?;
-		let res = self.pratt_parse_expr_inner(stk, min_bp).await;
+		let res = self.pratt_parse_expr_inner(min_bp);
 		// Restore everything this call consumed, including the levels charged by
 		// the spine loop. Nested `pratt_parse_expr` calls restore themselves, so
 		// `restore_to` is exactly this call's entry value.
@@ -705,16 +693,12 @@ impl Parser<'_> {
 		res
 	}
 
-	async fn pratt_parse_expr_inner(
-		&mut self,
-		stk: &mut Stk,
-		min_bp: BindingPower,
-	) -> ParseResult<Expr> {
+	fn pratt_parse_expr_inner(&mut self, min_bp: BindingPower) -> ParseResult<Expr> {
 		let peek = self.peek();
 		let (mut lhs, mut lhs_prime) = if let Some(bp) = self.prefix_binding_power(peek.kind) {
-			(self.parse_prefix_op(stk, bp).await?, false)
+			(self.parse_prefix_op(bp)?, false)
 		} else {
-			(self.parse_prime_expr(stk).await?, true)
+			(self.parse_prime_expr()?, true)
 		};
 
 		loop {
@@ -727,7 +711,7 @@ impl Parser<'_> {
 
 				// Appending a postfix operator deepens the spine by one level.
 				self.enter_expr_depth()?;
-				lhs = self.parse_postfix(stk, lhs, lhs_prime).await?;
+				lhs = self.parse_postfix(lhs, lhs_prime)?;
 				lhs_prime = false;
 				continue;
 			}
@@ -748,7 +732,7 @@ impl Parser<'_> {
 
 			// Appending an infix operator deepens the spine by one level.
 			self.enter_expr_depth()?;
-			lhs = self.parse_infix_op(stk, bp, lhs, lhs_prime).await?;
+			lhs = self.parse_infix_op(bp, lhs, lhs_prime)?;
 			lhs_prime = false;
 		}
 

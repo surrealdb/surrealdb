@@ -147,11 +147,11 @@ impl ParseSync for ast::Path {
 		// Special path for ml::*<version> paths which don't have the ::< and are therefore
 		// generally ambiguous,
 		if start.index(parser).text.index(parser) == "ml" {
-			let ml = parser.speculate_sync(|parser| {
+			let ml = parser.speculate(|parser| {
 				let _ = parser.expect(T![::])?;
 				let name = parser.parse_sync()?;
 				let open = parser.expect(T![<])?;
-				parser.commit_sync(|parser| {
+				parser.commit(|parser| {
 					let version = parser.parse_sync()?;
 					let _ = parser.expect_closing_delimiter(T![>], open.span)?;
 					Ok((name, version))

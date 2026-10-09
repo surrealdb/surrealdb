@@ -6,7 +6,6 @@ use std::sync::atomic::Ordering;
 use anyhow::Result;
 use chrono::Utc;
 use common::time::sleep;
-use reblessive::TreeStack;
 use uuid::Uuid;
 use web_time::Instant;
 
@@ -603,7 +602,6 @@ impl Building {
 		// Each record's key, decoded once for the scan and the older markers.
 		let keys =
 			values.iter().map(|(k, _)| RecordKey::decode_key(k)).collect::<Result<Vec<_>>>()?;
-		let mut stack = TreeStack::new();
 		let fulltext_index =
 			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
 				.await?;
@@ -688,7 +686,6 @@ impl Building {
 				};
 				self.index_initial_values(
 					ctx,
-					&mut stack,
 					&az_fn,
 					&fulltext_index,
 					InitialIndexValue {
@@ -717,7 +714,6 @@ impl Building {
 							older_markers: &older_markers,
 							initial_count: initial_count + count,
 						},
-						&mut stack,
 						&az_fn,
 						&mut rc,
 					)
@@ -754,7 +750,6 @@ impl Building {
 			return Ok(0);
 		};
 		let lookup_tx = self.new_read_tx().await?;
-		let mut stack = TreeStack::new();
 		let mut rc = false;
 		let live_ids = BTreeSet::new();
 		let exec = self.exec_ctx(ctx).await?;
@@ -770,7 +765,6 @@ impl Building {
 					older_markers: &[],
 					initial_count,
 				},
-				&mut stack,
 				&az_fn,
 				&mut rc,
 			)
@@ -793,7 +787,6 @@ impl Building {
 	async fn index_initial_values(
 		&self,
 		ctx: &FrozenContext,
-		stack: &mut TreeStack,
 		az_fn: &StreamingAnalyzerFunction<'_>,
 		fulltext_index: &Option<FullTextIndex>,
 		value: InitialIndexValue<'_>,
@@ -818,12 +811,9 @@ impl Building {
 			io = io.with_count_cond_match(old_matches, new_matches);
 		}
 		if let Some(fulltext_index) = fulltext_index {
-			stack
-				.enter(|stk| io.compute_fulltext_with_index(stk, az_fn, fulltext_index, rc))
-				.finish()
-				.await
+			io.compute_fulltext_with_index(az_fn, fulltext_index, rc).await
 		} else {
-			stack.enter(|stk| io.compute(stk, az_fn, rc)).finish().await
+			io.compute(az_fn, rc).await
 		}
 	}
 
@@ -865,7 +855,6 @@ impl Building {
 		&self,
 		ctx: &FrozenContext,
 		scan: CountPrimaryAppendingScan<'_>,
-		stack: &mut TreeStack,
 		az_fn: &StreamingAnalyzerFunction<'_>,
 		rc: &mut bool,
 	) -> Result<usize> {
@@ -899,7 +888,7 @@ impl Building {
 				continue;
 			}
 			let appending = self.queued_appending(scan.lookup_tx, generation, ptr).await?;
-			self.index_queued_baseline(ctx, stack, az_fn, rc, appending).await?;
+			self.index_queued_baseline(ctx, az_fn, rc, appending).await?;
 			count += 1;
 		}
 		let range =
@@ -986,7 +975,7 @@ impl Building {
 					}
 					appending
 				};
-				self.index_queued_baseline(ctx, stack, az_fn, rc, appending).await?;
+				self.index_queued_baseline(ctx, az_fn, rc, appending).await?;
 				count += 1;
 			}
 		}
@@ -1131,7 +1120,6 @@ impl Building {
 	async fn index_queued_baseline(
 		&self,
 		ctx: &FrozenContext,
-		stack: &mut TreeStack,
 		az_fn: &StreamingAnalyzerFunction<'_>,
 		rc: &mut bool,
 		appending: Appending,
@@ -1143,7 +1131,6 @@ impl Building {
 		let count_cond_match = baselined_match(appending.count_cond_match);
 		self.index_initial_values(
 			ctx,
-			stack,
 			az_fn,
 			&None,
 			InitialIndexValue {
@@ -1465,7 +1452,6 @@ impl Building {
 	async fn apply_appending(
 		&self,
 		ctx: &FrozenContext,
-		stack: &mut TreeStack,
 		az_fn: &StreamingAnalyzerFunction<'_>,
 		fulltext_index: &Option<FullTextIndex>,
 		appending: Appending,
@@ -1501,12 +1487,9 @@ impl Building {
 			io = io.with_count_cond_match(old_matches, new_matches);
 		}
 		if let Some(fulltext_index) = fulltext_index {
-			stack
-				.enter(|stk| io.compute_fulltext_with_index(stk, az_fn, fulltext_index, rc))
-				.finish()
-				.await?;
+			io.compute_fulltext_with_index(az_fn, fulltext_index, rc).await?;
 		} else {
-			stack.enter(|stk| io.compute(stk, az_fn, rc)).finish().await?;
+			io.compute(az_fn, rc).await?;
 		}
 		if reclaim_doc_id {
 			let tx = ctx.tx();
@@ -1911,7 +1894,6 @@ impl Building {
 		count: &mut usize,
 	) -> Result<()> {
 		let mut rc = false;
-		let mut stack = TreeStack::new();
 		let fulltext_index =
 			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
 				.await?;
@@ -1927,9 +1909,8 @@ impl Building {
 			self.is_beyond_threshold(Some(*count))?;
 			let ig = IndexAppendKey::decode_key(&k)?;
 			if let Some(appending) = tx.get_key(&ig, None).await? {
-				let rid_key = self
-					.apply_appending(ctx, &mut stack, &az_fn, &fulltext_index, appending, &mut rc)
-					.await?;
+				let rid_key =
+					self.apply_appending(ctx, &az_fn, &fulltext_index, appending, &mut rc).await?;
 				tx.del_key(&ig).await?;
 
 				// We can delete the ip record if any
@@ -1954,7 +1935,6 @@ impl Building {
 		count: &mut usize,
 	) -> Result<()> {
 		let mut rc = false;
-		let mut stack = TreeStack::new();
 		let fulltext_index =
 			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
 				.await?;
@@ -1970,9 +1950,8 @@ impl Building {
 			self.is_beyond_threshold(Some(*count))?;
 			let bg = BuildAppendKey::decode_key(&k)?;
 			if let Some(appending) = tx.get_key(&bg, None).await? {
-				let rid_key = self
-					.apply_appending(ctx, &mut stack, &az_fn, &fulltext_index, appending, &mut rc)
-					.await?;
+				let rid_key =
+					self.apply_appending(ctx, &az_fn, &fulltext_index, appending, &mut rc).await?;
 				tx.del_key(&bg).await?;
 				let bp = self.ikb.new_bp_key(bg.generation, &rid_key);
 				tx.del_key(&bp).await?;

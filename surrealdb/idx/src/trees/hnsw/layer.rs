@@ -1,7 +1,6 @@
 use ahash::HashSet;
 use anyhow::{Result, bail};
 use common::EngineError;
-use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
 use surrealdb_datastore::Transaction;
 pub(super) use surrealdb_datastore::values::hnsw::LayerState;
@@ -205,7 +204,6 @@ where
 	pub(super) async fn search_single_with_filter(
 		&self,
 		ctx: &HnswContext<'_>,
-		stk: &mut Stk,
 		elements: &HnswElements,
 		search: &HnswSearch,
 		ep_dist: f64,
@@ -225,7 +223,6 @@ where
 		// under its element id.
 		Self::add_if_truthy(
 			ctx,
-			stk,
 			search.ef,
 			&mut w,
 			ep_pt,
@@ -238,7 +235,6 @@ where
 		.await?;
 		self.search_with_filter(
 			ctx,
-			stk,
 			elements,
 			search,
 			candidates,
@@ -330,7 +326,6 @@ where
 	pub(super) async fn search_with_filter(
 		&self,
 		ctx: &HnswContext<'_>,
-		stk: &mut Stk,
 		elements: &HnswElements,
 		search: &HnswSearch,
 		mut candidates: DoublePriorityQueue,
@@ -376,7 +371,6 @@ where
 							candidates.push(e_dist, e_id);
 							if Self::add_if_truthy(
 								ctx,
-								stk,
 								search.ef,
 								&mut w,
 								&e_pt,
@@ -492,7 +486,6 @@ where
 	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn add_if_truthy(
 		ctx: &HnswContext<'_>,
-		stk: &mut Stk,
 		efc: usize,
 		w: &mut DoublePriorityQueue,
 		e_pt: &SharedVector,
@@ -522,7 +515,7 @@ where
 			}
 			let truthy = match filter {
 				Some(filter) => {
-					filter.check_any_doc_truthy(ctx, stk, docs, pending_docs, allow_list).await?
+					filter.check_any_doc_truthy(ctx, docs, pending_docs, allow_list).await?
 				}
 				None => true,
 			};
@@ -1017,11 +1010,7 @@ mod tests {
 	async fn nearest_to_origin(ds: &TestIndexStore, h: &HnswIndex, k: usize) -> Result<Vec<i64>> {
 		let env = ds.env(TransactionType::Read).await;
 		let pt = vec![Number::Int(0), Number::Int(0)];
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack
-			.enter(|stk| async { h.knn_search(&env, stk, &pt, k, 40, None, None).await })
-			.finish()
-			.await?;
+		let res = h.knn_search(&env, &pt, k, 40, None, None).await?;
 		env.tx().cancel().await?;
 		let mut keys: Vec<i64> = res
 			.iter()
@@ -1038,11 +1027,7 @@ mod tests {
 	async fn nearest_to(ds: &TestIndexStore, h: &HnswIndex, i: i16, k: usize) -> Result<Vec<i64>> {
 		let env = ds.env(TransactionType::Read).await;
 		let pt = vec![Number::Int(i.into()), Number::Int(i.into())];
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack
-			.enter(|stk| async { h.knn_search(&env, stk, &pt, k, 40, None, None).await })
-			.finish()
-			.await?;
+		let res = h.knn_search(&env, &pt, k, 40, None, None).await?;
 		env.tx().cancel().await?;
 		let mut keys: Vec<i64> = res
 			.iter()

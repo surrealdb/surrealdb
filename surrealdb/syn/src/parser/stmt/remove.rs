@@ -1,4 +1,3 @@
-use reblessive::Stk;
 use surrealdb_sql::statements::remove::{
 	RemoveAnalyzerStatement, RemoveApiStatement, RemoveBucketStatement, RemoveConfigKind,
 	RemoveConfigStatement, RemoveModuleStatement, RemoveSequenceStatement,
@@ -16,7 +15,7 @@ use crate::parser::{ParseResult, Parser};
 use crate::token::t;
 
 impl Parser<'_> {
-	pub async fn parse_remove_stmt(&mut self, stk: &mut Stk) -> ParseResult<RemoveStatement> {
+	pub fn parse_remove_stmt(&mut self) -> ParseResult<RemoveStatement> {
 		let next = self.next();
 		let res = match next.kind {
 			t!("NAMESPACE") => {
@@ -34,7 +33,7 @@ impl Parser<'_> {
 					false
 				};
 
-				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let name = self.parse_expr_field()?;
 
 				RemoveStatement::Namespace(RemoveNamespaceStatement {
 					name,
@@ -57,7 +56,7 @@ impl Parser<'_> {
 					false
 				};
 
-				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let name = self.parse_expr_field()?;
 
 				RemoveStatement::Database(RemoveDatabaseStatement {
 					name,
@@ -142,7 +141,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let name = self.parse_expr_field()?;
 				expected!(self, t!("ON"));
 				let base = self.parse_base()?;
 
@@ -181,7 +180,7 @@ impl Parser<'_> {
 					false
 				};
 
-				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let name = self.parse_expr_field()?;
 
 				RemoveStatement::Table(surrealdb_sql::statements::RemoveTableStatement {
 					name,
@@ -196,10 +195,10 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let name = self.parse_expr_field()?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let table = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let table = self.parse_expr_field()?;
 
 				RemoveStatement::Event(RemoveEventStatement {
 					name,
@@ -214,10 +213,10 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let name = self.parse_expr_field()?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let what = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let what = self.parse_expr_field()?;
 
 				RemoveStatement::Field(RemoveFieldStatement {
 					name,
@@ -232,10 +231,10 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let name = self.parse_expr_field()?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let what = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let what = self.parse_expr_field()?;
 
 				RemoveStatement::Index(RemoveIndexStatement {
 					name,
@@ -250,7 +249,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let name = self.parse_expr_field()?;
 
 				RemoveStatement::Analyzer(RemoveAnalyzerStatement {
 					name,
@@ -264,7 +263,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let name = self.parse_expr_field()?;
 				RemoveStatement::Sequence(RemoveSequenceStatement {
 					name,
 					if_exists,
@@ -277,7 +276,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let name = self.parse_expr_field()?;
 				expected!(self, t!("ON"));
 				let base = self.parse_base()?;
 
@@ -294,7 +293,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let name = self.parse_expr_field()?;
 
 				RemoveStatement::Api(RemoveApiStatement {
 					name,
@@ -308,7 +307,7 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let name = self.parse_expr_field()?;
 
 				RemoveStatement::Bucket(RemoveBucketStatement {
 					name,

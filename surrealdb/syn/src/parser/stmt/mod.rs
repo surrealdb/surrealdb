@@ -1,4 +1,3 @@
-use reblessive::Stk;
 use surrealdb_sql::data::Assignment;
 use surrealdb_sql::statements::access::{
 	AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
@@ -33,10 +32,7 @@ mod update;
 mod upsert;
 
 impl Parser<'_> {
-	pub(super) async fn parse_stmt_list(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<Vec<TopLevelExpr>> {
+	pub(super) fn parse_stmt_list(&mut self) -> ParseResult<Vec<TopLevelExpr>> {
 		let mut res = Vec::new();
 		loop {
 			match self.peek_kind() {
@@ -47,7 +43,7 @@ impl Parser<'_> {
 				}
 				t!("eof") => break,
 				_ => {
-					let stmt = stk.run(|ctx| self.parse_top_level_expr(ctx)).await?;
+					let stmt = self.parse_top_level_expr()?;
 					res.push(stmt);
 					if !self.eat(t!(";")) {
 						if self.eat(t!("eof")) {
@@ -70,10 +66,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub(super) async fn parse_top_level_expr(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<TopLevelExpr> {
+	pub(super) fn parse_top_level_expr(&mut self) -> ParseResult<TopLevelExpr> {
 		let token = self.peek();
 		match token.kind {
 			t!("BEGIN") => {
@@ -94,7 +87,7 @@ impl Parser<'_> {
 			}
 			t!("LIVE") => {
 				self.pop_peek();
-				self.parse_live_stmt(stk).await.map(|x| TopLevelExpr::Live(Box::new(x)))
+				self.parse_live_stmt().map(|x| TopLevelExpr::Live(Box::new(x)))
 			}
 			t!("OPTION") => {
 				self.pop_peek();
@@ -102,11 +95,11 @@ impl Parser<'_> {
 			}
 			t!("USE") => {
 				self.pop_peek();
-				self.parse_use_stmt(stk).await.map(TopLevelExpr::Use)
+				self.parse_use_stmt().map(TopLevelExpr::Use)
 			}
 			t!("ACCESS") => {
 				self.pop_peek();
-				self.parse_access(stk).await.map(|x| TopLevelExpr::Access(Box::new(x)))
+				self.parse_access().map(|x| TopLevelExpr::Access(Box::new(x)))
 			}
 			t!("SHOW") => {
 				self.pop_peek();
@@ -114,7 +107,7 @@ impl Parser<'_> {
 			}
 			_ => {
 				let covered = self.peek_kind() == t!("(");
-				let expr = self.parse_expr_start(stk).await?;
+				let expr = self.parse_expr_start()?;
 				let span = token.span.covers(self.last_span);
 				if !covered {
 					Self::reject_letless_let(&expr, span)?;
@@ -125,7 +118,7 @@ impl Parser<'_> {
 	}
 
 	/// Parsers an access statement.
-	async fn parse_access(&mut self, stk: &mut Stk) -> ParseResult<AccessStatement> {
+	fn parse_access(&mut self) -> ParseResult<AccessStatement> {
 		let ac = self.parse_ident()?;
 		let base = self.eat(t!("ON")).then(|| self.parse_base()).transpose()?;
 		let peek = self.peek();
@@ -145,7 +138,7 @@ impl Parser<'_> {
 					}
 					t!("RECORD") => {
 						self.pop_peek();
-						let rid = stk.run(|ctx| self.parse_record_id(ctx)).await?;
+						let rid = self.parse_record_id()?;
 						Ok(AccessStatement::Grant(AccessStatementGrant {
 							ac,
 							base,
@@ -177,7 +170,7 @@ impl Parser<'_> {
 						}))
 					}
 					t!("WHERE") => {
-						let cond = self.try_parse_condition(stk).await?;
+						let cond = self.try_parse_condition()?;
 						Ok(AccessStatement::Show(AccessStatementShow {
 							ac,
 							base,
@@ -210,7 +203,7 @@ impl Parser<'_> {
 						}))
 					}
 					t!("WHERE") => {
-						let cond = self.try_parse_condition(stk).await?;
+						let cond = self.try_parse_condition()?;
 						Ok(AccessStatement::Revoke(AccessStatementRevoke {
 							ac,
 							base,
@@ -300,7 +293,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `EXPLAIN` to already be consumed.
-	pub(super) async fn parse_explain_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub(super) fn parse_explain_expr(&mut self) -> ParseResult<Expr> {
 		// Check for optional ANALYZE keyword
 		// ANALYZE is not a reserved keyword, so we need to check if it's an identifier
 		let analyze = {
@@ -350,7 +343,7 @@ impl Parser<'_> {
 		};
 
 		// Parse the inner statement as an expression
-		let statement = stk.run(|ctx| self.parse_expr_start(ctx)).await?;
+		let statement = self.parse_expr_start()?;
 
 		Ok(Expr::Explain {
 			format,
@@ -363,14 +356,14 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `USE` to already be consumed.
-	async fn parse_use_stmt(&mut self, stk: &mut Stk) -> ParseResult<UseStatement> {
+	fn parse_use_stmt(&mut self) -> ParseResult<UseStatement> {
 		let peek = self.peek();
 		let stmt = match peek.kind {
 			t!("NAMESPACE") => {
 				self.pop_peek();
-				let ns = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let ns = self.parse_expr_field()?;
 				if self.eat(t!("DATABASE")) {
-					let db = stk.run(|stk| self.parse_expr_field(stk)).await?;
+					let db = self.parse_expr_field()?;
 					UseStatement::NsDb(ns, db)
 				} else {
 					UseStatement::Ns(ns)
@@ -378,7 +371,7 @@ impl Parser<'_> {
 			}
 			t!("DATABASE") => {
 				self.pop_peek();
-				let db = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let db = self.parse_expr_field()?;
 				UseStatement::Db(db)
 			}
 			t!("DEFAULT") => {
@@ -395,13 +388,13 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `FOR` to already be consumed.
-	pub(super) async fn parse_for_stmt(&mut self, stk: &mut Stk) -> ParseResult<ForeachStatement> {
+	pub(super) fn parse_for_stmt(&mut self) -> ParseResult<ForeachStatement> {
 		let param = self.next_token_value()?;
 		expected!(self, t!("IN"));
-		let range = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
+		let range = self.parse_expr_inherit()?;
 
 		let span = expected!(self, t!("{")).span;
-		let block = self.parse_block(stk, span).await?;
+		let block = self.parse_block(span)?;
 		Ok(ForeachStatement {
 			param,
 			range,
@@ -413,13 +406,13 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `INFO` to already be consumed.
-	pub(super) async fn parse_info_stmt(&mut self, stk: &mut Stk) -> ParseResult<InfoStatement> {
+	pub(super) fn parse_info_stmt(&mut self) -> ParseResult<InfoStatement> {
 		expected!(self, t!("FOR"));
 		let next = self.next();
 		let stmt = match next.kind {
 			t!("ROOT") => {
 				let version = if self.eat(t!("VERSION")) {
-					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
+					Some(self.parse_expr_inherit()?)
 				} else {
 					None
 				};
@@ -428,7 +421,7 @@ impl Parser<'_> {
 			}
 			t!("NAMESPACE") => {
 				let version = if self.eat(t!("VERSION")) {
-					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
+					Some(self.parse_expr_inherit()?)
 				} else {
 					None
 				};
@@ -437,7 +430,7 @@ impl Parser<'_> {
 			}
 			t!("DATABASE") => {
 				let version = if self.eat(t!("VERSION")) {
-					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
+					Some(self.parse_expr_inherit()?)
 				} else {
 					None
 				};
@@ -445,9 +438,9 @@ impl Parser<'_> {
 				InfoStatement::Db(structure, version)
 			}
 			t!("TABLE") | t!("TB") => {
-				let ident = stk.run(|stk| self.parse_expr_table(stk)).await?;
+				let ident = self.parse_expr_table()?;
 				let version = if self.eat(t!("VERSION")) {
-					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
+					Some(self.parse_expr_inherit()?)
 				} else {
 					None
 				};
@@ -455,16 +448,16 @@ impl Parser<'_> {
 				InfoStatement::Tb(ident, structure, version)
 			}
 			t!("USER") => {
-				let ident = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
+				let ident = self.parse_expr_inherit()?;
 				let base = self.eat(t!("ON")).then(|| self.parse_base()).transpose()?;
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::User(ident, base, structure)
 			}
 			t!("INDEX") => {
-				let index = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let index = self.parse_expr_field()?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let table = stk.run(|stk| self.parse_expr_table(stk)).await?;
+				let table = self.parse_expr_table()?;
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::Index(index, table, structure)
 			}
@@ -496,7 +489,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `LIVE` to already be consumed.
-	pub(super) async fn parse_live_stmt(&mut self, stk: &mut Stk) -> ParseResult<LiveStatement> {
+	pub(super) fn parse_live_stmt(&mut self) -> ParseResult<LiveStatement> {
 		expected!(self, t!("SELECT"));
 
 		let fields = match self.peek_kind() {
@@ -504,12 +497,12 @@ impl Parser<'_> {
 				self.pop_peek();
 				LiveFields::Diff
 			}
-			_ => LiveFields::Select(self.parse_fields(stk).await?),
+			_ => LiveFields::Select(self.parse_fields()?),
 		};
 		expected!(self, t!("FROM"));
-		let what = self.parse_expr_table(stk).await?;
-		let cond = self.try_parse_condition(stk).await?;
-		let fetch = self.try_parse_fetch(stk).await?;
+		let what = self.parse_expr_table()?;
+		let cond = self.try_parse_condition()?;
+		let fetch = self.try_parse_fetch()?;
 
 		Ok(LiveStatement {
 			fields,
@@ -572,12 +565,9 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `RETURN` to already be consumed.
-	pub(super) async fn parse_return_stmt(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<OutputStatement> {
-		let what = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
-		let fetch = self.try_parse_fetch(stk).await?;
+	pub(super) fn parse_return_stmt(&mut self) -> ParseResult<OutputStatement> {
+		let what = self.parse_expr_inherit()?;
+		let fetch = self.try_parse_fetch()?;
 		Ok(OutputStatement {
 			what,
 			fetch,
@@ -593,15 +583,15 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `LET` to already be consumed.
-	pub(super) async fn parse_let_stmt(&mut self, stk: &mut Stk) -> ParseResult<SetStatement> {
+	pub(super) fn parse_let_stmt(&mut self) -> ParseResult<SetStatement> {
 		let name = self.next_token_value::<Param>()?.into_strand();
 		let kind = if self.eat(t!(":")) {
-			Some(self.parse_inner_kind(stk).await?)
+			Some(self.parse_inner_kind()?)
 		} else {
 			None
 		};
 		expected!(self, t!("="));
-		let what = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
+		let what = self.parse_expr_inherit()?;
 		Ok(SetStatement {
 			name,
 			what,
@@ -660,8 +650,8 @@ impl Parser<'_> {
 		})
 	}
 
-	pub(super) async fn parse_assignment(&mut self, stk: &mut Stk) -> ParseResult<Assignment> {
-		let place = self.parse_plain_idiom(stk).await?;
+	pub(super) fn parse_assignment(&mut self) -> ParseResult<Assignment> {
+		let place = self.parse_plain_idiom()?;
 		let token = self.next();
 		let operator = match token.kind {
 			t!("=") => AssignOperator::Assign,
@@ -670,7 +660,7 @@ impl Parser<'_> {
 			t!("+?=") => AssignOperator::Extend,
 			_ => unexpected!(self, token, "an assign operator"),
 		};
-		let value = stk.run(|stk| self.parse_expr_field(stk)).await?;
+		let value = self.parse_expr_field()?;
 		Ok(Assignment {
 			place,
 			operator,

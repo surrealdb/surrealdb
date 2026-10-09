@@ -1,6 +1,4 @@
 //! Contains parsing code for smaller common parts of statements.
-
-use reblessive::Stk;
 use surrealdb_sql::changefeed::ChangeFeed;
 use surrealdb_sql::index::{Distance, VectorType};
 use surrealdb_sql::reference::{Reference, ReferenceDeleteStrategy};
@@ -26,13 +24,13 @@ pub enum MissingKind {
 impl Parser<'_> {
 	/// Parses a data production if the next token is a data keyword.
 	/// Otherwise returns None
-	pub async fn try_parse_data(&mut self, stk: &mut Stk) -> ParseResult<Option<Data>> {
+	pub fn try_parse_data(&mut self) -> ParseResult<Option<Data>> {
 		let res = match self.peek().kind {
 			t!("SET") => {
 				self.pop_peek();
 				let mut set_list = Vec::new();
 				loop {
-					let assignment = self.parse_assignment(stk).await?;
+					let assignment = self.parse_assignment()?;
 					set_list.push(assignment);
 					if !self.eat(t!(",")) {
 						break;
@@ -42,24 +40,24 @@ impl Parser<'_> {
 			}
 			t!("UNSET") => {
 				self.pop_peek();
-				let idiom_list = self.parse_idiom_list(stk).await?;
+				let idiom_list = self.parse_idiom_list()?;
 				Data::UnsetExpression(idiom_list)
 			}
 			t!("PATCH") => {
 				self.pop_peek();
-				Data::PatchExpression(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+				Data::PatchExpression(self.parse_expr_field()?)
 			}
 			t!("MERGE") => {
 				self.pop_peek();
-				Data::MergeExpression(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+				Data::MergeExpression(self.parse_expr_field()?)
 			}
 			t!("REPLACE") => {
 				self.pop_peek();
-				Data::ReplaceExpression(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+				Data::ReplaceExpression(self.parse_expr_field()?)
 			}
 			t!("CONTENT") => {
 				self.pop_peek();
-				Data::ContentExpression(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+				Data::ContentExpression(self.parse_expr_field()?)
 			}
 			_ => return Ok(None),
 		};
@@ -67,16 +65,16 @@ impl Parser<'_> {
 	}
 
 	/// Parses a statement output if the next token is `return`.
-	pub async fn try_parse_output(&mut self, stk: &mut Stk) -> ParseResult<Option<Output>> {
+	pub fn try_parse_output(&mut self) -> ParseResult<Option<Output>> {
 		if !self.eat(t!("RETURN")) {
 			return Ok(None);
 		}
-		self.parse_output(stk).await.map(Some)
+		self.parse_output().map(Some)
 	}
 
 	/// Needed because some part of the RPC needs to call into the parser for
 	/// this specific part.
-	pub async fn parse_output(&mut self, stk: &mut Stk) -> ParseResult<Output> {
+	pub fn parse_output(&mut self) -> ParseResult<Output> {
 		let res = match self.peek_kind() {
 			t!("NONE") => {
 				self.pop_peek();
@@ -98,45 +96,42 @@ impl Parser<'_> {
 				self.pop_peek();
 				Output::Before
 			}
-			_ => Output::Fields(self.parse_fields(stk).await?),
+			_ => Output::Fields(self.parse_fields()?),
 		};
 		Ok(res)
 	}
 
 	/// Parses a statement timeout if the next token is `TIMEOUT`.
-	pub async fn try_parse_timeout(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub fn try_parse_timeout(&mut self) -> ParseResult<Expr> {
 		if !self.eat(t!("TIMEOUT")) {
 			return Ok(Expr::Literal(Literal::None));
 		}
-		let duration = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let duration = self.parse_expr_field()?;
 		Ok(duration)
 	}
 
-	pub async fn try_parse_fetch(&mut self, stk: &mut Stk) -> ParseResult<Option<Fetchs>> {
+	pub fn try_parse_fetch(&mut self) -> ParseResult<Option<Fetchs>> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
-		Ok(Some(self.parse_fetchs(stk).await?))
+		Ok(Some(self.parse_fetchs()?))
 	}
 
-	pub async fn parse_fetchs(&mut self, stk: &mut Stk) -> ParseResult<Fetchs> {
-		let mut fetchs = self.try_parse_param_or_idiom_or_fields(stk).await?;
+	pub fn parse_fetchs(&mut self) -> ParseResult<Fetchs> {
+		let mut fetchs = self.try_parse_param_or_idiom_or_fields()?;
 		while self.eat(t!(",")) {
-			fetchs.append(&mut self.try_parse_param_or_idiom_or_fields(stk).await?);
+			fetchs.append(&mut self.try_parse_param_or_idiom_or_fields()?);
 		}
 		Ok(Fetchs(fetchs))
 	}
 
-	pub async fn try_parse_param_or_idiom_or_fields(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<Vec<Fetch>> {
+	pub fn try_parse_param_or_idiom_or_fields(&mut self) -> ParseResult<Vec<Fetch>> {
 		match self.peek().kind {
 			t!("$param") => Ok(vec![Fetch(Expr::Param(self.next_token_value()?))]),
 			t!("TYPE") => {
 				// This is incorrect, the intention here was probably to only support
 				// `type::field(s)` but now it wil also parse any other `type::*` functions.
-				let fields = self.parse_fields(stk).await?;
+				let fields = self.parse_fields()?;
 
 				let fetches = match fields {
 					Fields::Value(field) => vec![Fetch(field.expr)],
@@ -151,15 +146,15 @@ impl Parser<'_> {
 
 				Ok(fetches)
 			}
-			_ => Ok(vec![Fetch(Expr::Idiom(self.parse_plain_idiom(stk).await?))]),
+			_ => Ok(vec![Fetch(Expr::Idiom(self.parse_plain_idiom()?))]),
 		}
 	}
 
-	pub async fn try_parse_condition(&mut self, stk: &mut Stk) -> ParseResult<Option<Cond>> {
+	pub fn try_parse_condition(&mut self) -> ParseResult<Option<Cond>> {
 		if !self.eat(t!("WHERE")) {
 			return Ok(None);
 		}
-		let v = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let v = self.parse_expr_field()?;
 		Ok(Some(Cond(v)))
 	}
 
@@ -307,11 +302,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to have just eaten the `PERMISSIONS` keyword.
-	pub async fn parse_permission(
-		&mut self,
-		stk: &mut Stk,
-		field: bool,
-	) -> ParseResult<Permissions> {
+	pub fn parse_permission(&mut self, field: bool) -> ParseResult<Permissions> {
 		let next = self.next();
 		match next.kind {
 			t!("NONE") => Ok(Permissions::none()),
@@ -323,8 +314,7 @@ impl Parser<'_> {
 					Permissions::none()
 				};
 				loop {
-					stk.run(|stk| self.parse_specific_permission(stk, &mut permission, field))
-						.await?;
+					self.parse_specific_permission(&mut permission, field)?;
 
 					self.eat(t!(","));
 
@@ -345,9 +335,8 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to just have eaten the `FOR` keyword.
-	pub async fn parse_specific_permission(
+	pub fn parse_specific_permission(
 		&mut self,
-		stk: &mut Stk,
 		permissions: &mut Permissions,
 		field: bool,
 	) -> ParseResult<()> {
@@ -383,7 +372,7 @@ impl Parser<'_> {
 			}
 		}
 
-		let permission_value = self.parse_permission_value(stk).await?;
+		let permission_value = self.parse_permission_value()?;
 		if select {
 			permissions.select = permission_value.clone();
 		}
@@ -406,14 +395,12 @@ impl Parser<'_> {
 	///
 	/// Expects the parser to just have eaten either `SELECT`, `CREATE`,
 	/// `UPDATE` or `DELETE`.
-	pub async fn parse_permission_value(&mut self, stk: &mut Stk) -> ParseResult<Permission> {
+	pub fn parse_permission_value(&mut self) -> ParseResult<Permission> {
 		let next = self.next();
 		match next.kind {
 			t!("NONE") => Ok(Permission::None),
 			t!("FULL") => Ok(Permission::Full),
-			t!("WHERE") => {
-				Ok(Permission::Specific(stk.run(|stk| self.parse_expr_field(stk)).await?))
-			}
+			t!("WHERE") => Ok(Permission::Specific(self.parse_expr_field()?)),
 			_ => unexpected!(self, next, "'NONE', 'FULL', or 'WHERE'"),
 		}
 	}
@@ -459,7 +446,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to have already eating the `REFERENCE` keyword
-	pub async fn parse_reference(&mut self, stk: &mut Stk) -> ParseResult<Reference> {
+	pub fn parse_reference(&mut self) -> ParseResult<Reference> {
 		let on_delete = if self.eat(t!("ON")) {
 			expected!(self, t!("DELETE"));
 			let next = self.next();
@@ -468,9 +455,7 @@ impl Parser<'_> {
 				t!("CASCADE") => ReferenceDeleteStrategy::Cascade,
 				t!("IGNORE") => ReferenceDeleteStrategy::Ignore,
 				t!("UNSET") => ReferenceDeleteStrategy::Unset,
-				t!("THEN") => ReferenceDeleteStrategy::Custom(
-					stk.run(|stk| self.parse_expr_field(stk)).await?,
-				),
+				t!("THEN") => ReferenceDeleteStrategy::Custom(self.parse_expr_field()?),
 				_ => {
 					unexpected!(self, next, "`REJECT`, `CASCASE`, `IGNORE`, `UNSET` or `THEN`")
 				}
@@ -489,10 +474,10 @@ impl Parser<'_> {
 	/// # Parse State
 	/// Expects the parser to have already eaten the possible `(` if the view
 	/// was wrapped in parens. Expects the next keyword to be `SELECT`.
-	pub async fn parse_view(&mut self, stk: &mut Stk) -> ParseResult<View> {
+	pub fn parse_view(&mut self) -> ParseResult<View> {
 		expected!(self, t!("SELECT"));
 		let before_fields = self.peek().span;
-		let fields = self.parse_fields(stk).await?;
+		let fields = self.parse_fields()?;
 		let fields_span = before_fields.covers(self.recent_span());
 		expected!(self, t!("FROM"));
 		let mut from: Vec<surrealdb_sql::TableName> = vec![self.parse_ident_str()?.into()];
@@ -500,7 +485,7 @@ impl Parser<'_> {
 			from.push(self.parse_ident_str()?.into());
 		}
 
-		let cond = self.try_parse_condition(stk).await?;
+		let cond = self.try_parse_condition()?;
 		let group = self.try_parse_group(&fields, fields_span, None)?;
 
 		Ok(View {

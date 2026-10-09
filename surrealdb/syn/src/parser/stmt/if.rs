@@ -1,4 +1,3 @@
-use reblessive::Stk;
 use surrealdb_sql::Expr;
 use surrealdb_sql::statements::IfelseStatement;
 
@@ -7,8 +6,8 @@ use crate::parser::{ParseResult, Parser};
 use crate::token::t;
 
 impl Parser<'_> {
-	pub async fn parse_if_stmt(&mut self, stk: &mut Stk) -> ParseResult<IfelseStatement> {
-		let condition = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+	pub fn parse_if_stmt(&mut self) -> ParseResult<IfelseStatement> {
+		let condition = self.parse_expr_inherit()?;
 
 		let mut res = IfelseStatement {
 			exprs: Vec::new(),
@@ -18,15 +17,15 @@ impl Parser<'_> {
 		let next = self.next();
 		match next.kind {
 			t!("THEN") => {
-				let body = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
+				let body = self.parse_expr_inherit()?;
 				self.eat(t!(";"));
 				res.exprs.push((condition, body));
-				self.parse_worded_tail(stk, &mut res).await?;
+				self.parse_worded_tail(&mut res)?;
 			}
 			t!("{") => {
-				let body = self.parse_block(stk, next.span).await?;
+				let body = self.parse_block(next.span)?;
 				res.exprs.push((condition, Expr::Block(Box::new(body))));
-				self.parse_bracketed_tail(stk, &mut res).await?;
+				self.parse_bracketed_tail(&mut res)?;
 			}
 			_ => unexpected!(self, next, "THEN or '{'"),
 		}
@@ -34,24 +33,20 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	async fn parse_worded_tail(
-		&mut self,
-		stk: &mut Stk,
-		res: &mut IfelseStatement,
-	) -> ParseResult<()> {
+	fn parse_worded_tail(&mut self, res: &mut IfelseStatement) -> ParseResult<()> {
 		loop {
 			let next = self.next();
 			match next.kind {
 				t!("END") => return Ok(()),
 				t!("ELSE") => {
 					if self.eat(t!("IF")) {
-						let condition = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
+						let condition = self.parse_expr_inherit()?;
 						expected!(self, t!("THEN"));
-						let body = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+						let body = self.parse_expr_inherit()?;
 						self.eat(t!(";"));
 						res.exprs.push((condition, body));
 					} else {
-						let value = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
+						let value = self.parse_expr_inherit()?;
 						self.eat(t!(";"));
 						expected!(self, t!("END"));
 						res.close = Some(value);
@@ -63,23 +58,19 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn parse_bracketed_tail(
-		&mut self,
-		stk: &mut Stk,
-		res: &mut IfelseStatement,
-	) -> ParseResult<()> {
+	fn parse_bracketed_tail(&mut self, res: &mut IfelseStatement) -> ParseResult<()> {
 		loop {
 			match self.peek_kind() {
 				t!("ELSE") => {
 					self.pop_peek();
 					if self.eat(t!("IF")) {
-						let condition = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+						let condition = self.parse_expr_inherit()?;
 						let span = expected!(self, t!("{")).span;
-						let body = self.parse_block(stk, span).await?;
+						let body = self.parse_block(span)?;
 						res.exprs.push((condition, Expr::Block(Box::new(body))));
 					} else {
 						let span = expected!(self, t!("{")).span;
-						let value = self.parse_block(stk, span).await?;
+						let value = self.parse_block(span)?;
 						res.close = Some(Expr::Block(Box::new(value)));
 						return Ok(());
 					}

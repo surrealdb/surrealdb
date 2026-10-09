@@ -19,7 +19,6 @@ token.workspace = true
 parse-common.workspace = true
 
 bitflags.workspace = true
-reblessive.workspace = true
 logos.workspace = true
 rust_decimal.workspace = true
 uuid.workspace = true

@@ -11,7 +11,6 @@ mod layer;
 use anyhow::Result;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
-use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
 use surrealdb_datastore::Transaction;
 // The graph's state record, the queued updates in both their layouts, the vector
@@ -498,7 +497,6 @@ where
 		&self,
 		ctx: &HnswContext<'_>,
 		search: &HnswSearch,
-		stk: &mut Stk,
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		pending_docs: Option<&RoaringTreemap>,
 		allow_list: Option<&RoaringTreemap>,
@@ -524,7 +522,6 @@ where
 				.layer0
 				.search_single_with_filter(
 					ctx,
-					stk,
 					&self.elements,
 					search,
 					ep_dist,
@@ -635,7 +632,6 @@ mod tests {
 	use common::EngineError;
 	use ndarray::Array1;
 	use rand::rngs::SmallRng;
-	use reblessive::tree::Stk;
 	use roaring::RoaringTreemap;
 	use surrealdb_kvs::TransactionType;
 	use test_log::test;
@@ -903,7 +899,6 @@ mod tests {
 
 	async fn find_collection_hnsw_index(
 		ctx: &TestIndexEnv,
-		stk: &mut Stk,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 	) {
@@ -914,9 +909,7 @@ mod tests {
 			for knn in 1..max_knn {
 				let search = HnswSearch::new(obj.clone(), knn, 500);
 				let mut builder = KnnResultBuilder::new(search.k);
-				h.search_graph(&ctx, stk, &search, None, &mut None, None, &mut builder)
-					.await
-					.unwrap();
+				h.search_graph(&ctx, &search, None, &mut None, None, &mut builder).await.unwrap();
 				let res = builder.collect();
 				let first_dist: f64 = res.first().unwrap().0.into();
 				if knn == 1 && res.len() == 1 && first_dist > 0.0 {
@@ -1030,16 +1023,10 @@ mod tests {
 
 		// Search index
 		{
-			let mut stack = reblessive::tree::TreeStack::new();
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
 
-			stack
-				.enter(|stk| async {
-					find_collection_hnsw_index(&ctx, stk, &mut h, &collection).await;
-				})
-				.finish()
-				.await;
+			find_collection_hnsw_index(&ctx, &mut h, &collection).await;
 			tx.cancel().await.unwrap();
 		}
 
@@ -1102,14 +1089,8 @@ mod tests {
 		h.check_hnsw_properties(map.len()).await;
 
 		{
-			let mut stack = reblessive::tree::TreeStack::new();
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			stack
-				.enter(|stk| async {
-					find_collection_hnsw_index(&ctx, stk, &mut h, &collection).await;
-				})
-				.finish()
-				.await;
+			find_collection_hnsw_index(&ctx, &mut h, &collection).await;
 			ctx.tx().cancel().await.unwrap();
 		}
 
@@ -1362,11 +1343,7 @@ mod tests {
 			// the search walks it.
 			compact_committed(&ds, &h).await;
 			let pt = vec![Number::Float(0.0), Number::Float(0.0)];
-			let mut stack = reblessive::tree::TreeStack::new();
-			let res = stack
-				.enter(|stk| async { h.knn_search(&query, stk, &pt, 5, 40, None, None).await })
-				.finish()
-				.await?;
+			let res = h.knn_search(&query, &pt, 5, 40, None, None).await?;
 			query.tx().cancel().await?;
 			let ids: Vec<RecordIdKey> = res.iter().map(|(rid, _, _)| rid.key.clone()).collect();
 			assert_eq!(
@@ -1492,12 +1469,8 @@ mod tests {
 		// KNN for the re-created vector resolves back to the record.
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let mut stack = reblessive::tree::TreeStack::new();
 			let pt = vec![Number::Int(2), Number::Int(2)];
-			let res = stack
-				.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None, None).await })
-				.finish()
-				.await?;
+			let res = h.knn_search(&ctx, &pt, 1, 500, None, None).await?;
 			ctx.tx().cancel().await?;
 			assert!(
 				res.iter().any(|(rid, _, _)| rid.key == id),
@@ -1638,12 +1611,8 @@ mod tests {
 		// And the KNN hit must name that same id.
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let mut stack = reblessive::tree::TreeStack::new();
 			let pt = vec![Number::Int(1), Number::Int(1)];
-			let res = stack
-				.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None, None).await })
-				.finish()
-				.await?;
+			let res = h.knn_search(&ctx, &pt, 1, 500, None, None).await?;
 			ctx.tx().cancel().await?;
 			assert!(
 				res.iter().any(|(rid, _, _)| record_key(&rid.key) == record_key(&id)),
@@ -1717,11 +1686,7 @@ mod tests {
 		allow_list: Option<&RoaringTreemap>,
 	) -> Result<Vec<i64>> {
 		let ctx = new_ctx(ds, TransactionType::Read).await;
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack
-			.enter(|stk| async { h.knn_search(&ctx, stk, pt, k, 500, None, allow_list).await })
-			.finish()
-			.await?;
+		let res = h.knn_search(&ctx, pt, k, 500, None, allow_list).await?;
 		ctx.tx().cancel().await?;
 		let mut keys: Vec<i64> = res
 			.iter()
@@ -1820,12 +1785,8 @@ mod tests {
 		// nearest allowed record.
 		let allow = RoaringTreemap::from_iter([docs[0], docs[2]]);
 		let ctx = new_ctx(&ds, TransactionType::Read).await;
-		let mut stack = reblessive::tree::TreeStack::new();
 		let pt = vec![Number::Int(0), Number::Int(0)];
-		let res = stack
-			.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 1, None, Some(&allow)).await })
-			.finish()
-			.await?;
+		let res = h.knn_search(&ctx, &pt, 1, 1, None, Some(&allow)).await?;
 		ctx.tx().cancel().await?;
 		let keys: Vec<i64> = res
 			.iter()
@@ -1987,10 +1948,8 @@ mod tests {
 		}
 		let pt = vec![Number::Int(0), Number::Int(0)];
 		let ctx = new_ctx(&ds, TransactionType::Read).await;
-		let mut stack = reblessive::tree::TreeStack::new();
-		let err = stack
-			.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None, None).await })
-			.finish()
+		let err = h
+			.knn_search(&ctx, &pt, 1, 500, None, None)
 			.await
 			.expect_err("an unreadable entry point must not be reported as an empty result");
 		ctx.tx().cancel().await?;
@@ -2021,21 +1980,16 @@ mod tests {
 		let search = HnswSearch::new(new_i16_vec(0, 0), 6, 500);
 		let ctx = new_ctx(&ds, TransactionType::Read).await;
 		let hctx = h.new_hnsw_context(&ctx);
-		let mut stack = reblessive::tree::TreeStack::new();
-		let (admitted, kept) = stack
-			.enter(|stk| async {
-				// As the allow-list: exactly the subset is admitted.
-				let mut b1 = KnnResultBuilder::new(6);
-				h.search_graph(&hctx, stk, &search, None, &mut None, Some(&subset), &mut b1)
-					.await?;
-				// As pending docs: exactly the subset is suppressed.
-				let mut b2 = KnnResultBuilder::new(6);
-				h.search_graph(&hctx, stk, &search, Some(subset.clone()), &mut None, None, &mut b2)
-					.await?;
-				anyhow::Ok((b1.collect(), b2.collect()))
-			})
-			.finish()
-			.await?;
+		let (admitted, kept) = async {
+			// As the allow-list: exactly the subset is admitted.
+			let mut b1 = KnnResultBuilder::new(6);
+			h.search_graph(&hctx, &search, None, &mut None, Some(&subset), &mut b1).await?;
+			// As pending docs: exactly the subset is suppressed.
+			let mut b2 = KnnResultBuilder::new(6);
+			h.search_graph(&hctx, &search, Some(subset.clone()), &mut None, None, &mut b2).await?;
+			anyhow::Ok((b1.collect(), b2.collect()))
+		}
+		.await?;
 		ctx.tx().cancel().await?;
 		let to_doc_ids = |res: KnnResult| -> Vec<DocId> {
 			let mut ids: Vec<DocId> = res
@@ -2609,10 +2563,8 @@ mod tests {
 		// `CROSSING`-th checkpoint is the crossing entry's own.
 		let ctx = CancelAtCheckpoint::new(ds.env(TransactionType::Read).await, CROSSING);
 		let pt = vec![Number::Int(0), Number::Int(0)];
-		let mut stack = reblessive::tree::TreeStack::new();
-		let err = stack
-			.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 4, 500, None, None).await })
-			.finish()
+		let err = h
+			.knn_search(&ctx, &pt, 4, 500, None, None)
 			.await
 			.expect_err("the scan is cancelled before it finishes reading the queue");
 		assert!(
@@ -2659,10 +2611,8 @@ mod tests {
 
 		let ctx = CancelAtCheckpoint::new(ds.env(TransactionType::Read).await, CANCEL_AT);
 		let pt = vec![Number::Int(0); DIMENSION];
-		let mut stack = reblessive::tree::TreeStack::new();
-		let err = stack
-			.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None, None).await })
-			.finish()
+		let err = h
+			.knn_search(&ctx, &pt, 1, 500, None, None)
 			.await
 			.expect_err("the second entry cancels before the batch can be scored");
 		assert!(
@@ -3255,39 +3205,36 @@ mod tests {
 			let h = Arc::clone(&h);
 			let ds = Arc::clone(&ds);
 			let f = tokio::spawn(async move {
-				let mut stack = reblessive::tree::TreeStack::new();
-				stack
-					.enter(|stk| async {
-						let mut total_recall = 0.0;
-						for (_, pt) in queries.to_vec_ref() {
-							let knn = 10;
-							let search = HnswSearch::new(pt.clone(), knn, efs);
+				async {
+					let mut total_recall = 0.0;
+					for (_, pt) in queries.to_vec_ref() {
+						let knn = 10;
+						let search = HnswSearch::new(pt.clone(), knn, efs);
 
-							let ctx = new_ctx(&ds, TransactionType::Read).await;
-							let ctx = h.new_hnsw_context(&ctx);
-							let mut builder = KnnResultBuilder::new(knn);
-							h.search_graph(&ctx, stk, &search, None, &mut None, None, &mut builder)
-								.await
-								.unwrap();
-							ctx.tx.cancel().await.unwrap();
-							let res = builder.collect();
-							assert_eq!(res.len(), knn, "Different size - knn: {knn}",);
-							let brute_force_res = collection.knn(pt, &Distance::Euclidean, knn);
-							let rec = compute_recall(&brute_force_res, &res);
-							if rec == 1.0 {
-								assert_eq!(brute_force_res, res);
-							}
-							total_recall += rec;
+						let ctx = new_ctx(&ds, TransactionType::Read).await;
+						let ctx = h.new_hnsw_context(&ctx);
+						let mut builder = KnnResultBuilder::new(knn);
+						h.search_graph(&ctx, &search, None, &mut None, None, &mut builder)
+							.await
+							.unwrap();
+						ctx.tx.cancel().await.unwrap();
+						let res = builder.collect();
+						assert_eq!(res.len(), knn, "Different size - knn: {knn}",);
+						let brute_force_res = collection.knn(pt, &Distance::Euclidean, knn);
+						let rec = compute_recall(&brute_force_res, &res);
+						if rec == 1.0 {
+							assert_eq!(brute_force_res, res);
 						}
-						let recall = total_recall / queries.to_vec_ref().len() as f64;
-						info!("EFS: {efs} - Recall: {recall}");
-						assert!(
-							recall >= expected_recall,
-							"EFS: {efs} - Recall: {recall} - Expected: {expected_recall}"
-						);
-					})
-					.finish()
-					.await;
+						total_recall += rec;
+					}
+					let recall = total_recall / queries.to_vec_ref().len() as f64;
+					info!("EFS: {efs} - Recall: {recall}");
+					assert!(
+						recall >= expected_recall,
+						"EFS: {efs} - Recall: {recall} - Expected: {expected_recall}"
+					);
+				}
+				.await;
 			});
 			futures.push(f);
 		}
@@ -3418,9 +3365,7 @@ mod tests {
 			Some(query_limit),
 		)?);
 
-		let mut stack = reblessive::tree::TreeStack::new();
-		stack
-			.enter(|stk| async {
+		async {
 				for &(modulus, invert, min_recall) in cases {
 					// Membership by doc-ID modulus, inverted for the
 					// near-universe selectivity.
@@ -3443,7 +3388,6 @@ mod tests {
 						let mut builder = KnnResultBuilder::new(knn);
 						h.search_graph(
 							&hctx,
-							stk,
 							&search,
 							None,
 							&mut None,
@@ -3480,8 +3424,7 @@ mod tests {
 						"modulus: {modulus} invert: {invert} members: {members} - Recall: {recall} - Expected: {min_recall}"
 					);
 				}
-			})
-			.finish()
+			}
 			.await;
 		Ok(())
 	}
@@ -3594,35 +3537,32 @@ mod tests {
 		let knn = 10;
 
 		for &(efs, expected_recall) in tests_ef_recall {
-			let mut stack = reblessive::tree::TreeStack::new();
-			stack
-				.enter(|stk| async {
-					let mut total_recall = 0.0;
-					for (_, pt) in queries.to_vec_ref() {
-						let search = HnswSearch::new(pt.clone(), knn, efs);
-						let qctx = new_ctx(&ds, TransactionType::Read).await;
-						let qctx = h.new_hnsw_context(&qctx);
-						let mut builder = KnnResultBuilder::new(knn);
-						h.search_graph(&qctx, stk, &search, None, &mut None, None, &mut builder)
-							.await
-							.unwrap();
-						qctx.tx.cancel().await.unwrap();
-						let res = builder.collect();
-						let brute_force_res = collection.knn(pt, &dist, knn);
-						total_recall += compute_recall(&brute_force_res, &res);
-					}
-					let recall = total_recall / queries.to_vec_ref().len() as f64;
-					info!(
-						"dim={dimension} keep_pruned={} EF={efs} -> Recall@{knn} = {recall:.4}",
-						p.keep_pruned_connections
-					);
-					assert!(
-						recall >= expected_recall,
-						"dim={dimension} EF={efs} Recall={recall:.4} < expected {expected_recall}"
-					);
-				})
-				.finish()
-				.await;
+			async {
+				let mut total_recall = 0.0;
+				for (_, pt) in queries.to_vec_ref() {
+					let search = HnswSearch::new(pt.clone(), knn, efs);
+					let qctx = new_ctx(&ds, TransactionType::Read).await;
+					let qctx = h.new_hnsw_context(&qctx);
+					let mut builder = KnnResultBuilder::new(knn);
+					h.search_graph(&qctx, &search, None, &mut None, None, &mut builder)
+						.await
+						.unwrap();
+					qctx.tx.cancel().await.unwrap();
+					let res = builder.collect();
+					let brute_force_res = collection.knn(pt, &dist, knn);
+					total_recall += compute_recall(&brute_force_res, &res);
+				}
+				let recall = total_recall / queries.to_vec_ref().len() as f64;
+				info!(
+					"dim={dimension} keep_pruned={} EF={efs} -> Recall@{knn} = {recall:.4}",
+					p.keep_pruned_connections
+				);
+				assert!(
+					recall >= expected_recall,
+					"dim={dimension} EF={efs} Recall={recall:.4} < expected {expected_recall}"
+				);
+			}
+			.await;
 		}
 		Ok(())
 	}
@@ -3668,25 +3608,22 @@ mod tests {
 		let knn = 10;
 		let mut ladder = Vec::with_capacity(efs.len());
 		for &ef in efs {
-			let mut stack = reblessive::tree::TreeStack::new();
-			let recall = stack
-				.enter(|stk| async {
-					let mut total = 0.0;
-					for (_, pt) in queries.to_vec_ref() {
-						let search = HnswSearch::new(pt.clone(), knn, ef);
-						let qctx = new_ctx(ds, TransactionType::Read).await;
-						let qctx = h.new_hnsw_context(&qctx);
-						let mut builder = KnnResultBuilder::new(knn);
-						h.search_graph(&qctx, stk, &search, None, &mut None, None, &mut builder)
-							.await
-							.unwrap();
-						qctx.tx.cancel().await.unwrap();
-						total += compute_recall(&collection.knn(pt, dist, knn), &builder.collect());
-					}
-					total / queries.to_vec_ref().len() as f64
-				})
-				.finish()
-				.await;
+			let recall = async {
+				let mut total = 0.0;
+				for (_, pt) in queries.to_vec_ref() {
+					let search = HnswSearch::new(pt.clone(), knn, ef);
+					let qctx = new_ctx(ds, TransactionType::Read).await;
+					let qctx = h.new_hnsw_context(&qctx);
+					let mut builder = KnnResultBuilder::new(knn);
+					h.search_graph(&qctx, &search, None, &mut None, None, &mut builder)
+						.await
+						.unwrap();
+					qctx.tx.cancel().await.unwrap();
+					total += compute_recall(&collection.knn(pt, dist, knn), &builder.collect());
+				}
+				total / queries.to_vec_ref().len() as f64
+			}
+			.await;
 			ladder.push(recall);
 		}
 		ladder
@@ -3929,11 +3866,7 @@ mod tests {
 		k: usize,
 	) -> Result<Vec<i64>> {
 		let ctx = new_ctx(ds, TransactionType::Read).await;
-		let mut stack = reblessive::tree::TreeStack::new();
-		let res = stack
-			.enter(|stk| async { h.knn_search(&ctx, stk, pt, k, 100, None, None).await })
-			.finish()
-			.await?;
+		let res = h.knn_search(&ctx, pt, k, 100, None, None).await?;
 		ctx.tx().cancel().await?;
 		let mut keys: Vec<i64> = res
 			.iter()

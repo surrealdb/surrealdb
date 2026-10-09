@@ -8,8 +8,6 @@
 //! constructs which share grammar real estate with this subset but are not
 //! supported are recognised and rejected with precise spans.
 
-use reblessive::Stk;
-
 use crate::gql::ast::{
 	DetachMode, GqlExpr, GqlGroupItem, GqlLiteral, GqlStep, LinearQuery, MatchClause, MatchItem,
 	MutationStatement, OptionalBlock, OrderItem, ReturnClause, ReturnItem, ReturnItems,
@@ -24,7 +22,7 @@ impl Parser<'_> {
 	/// Parse a top level linear query: a sequence of `MATCH`/`OPTIONAL` reads and
 	/// `INSERT`/`SET`/`REMOVE`/`DELETE` mutations — in any textual order — and an
 	/// optional trailing `RETURN` clause.
-	pub(super) async fn parse_statement(&mut self, stk: &mut Stk) -> ParseResult<LinearQuery> {
+	pub(super) fn parse_statement(&mut self) -> ParseResult<LinearQuery> {
 		let start = self.peek().span;
 
 		// Steps in textual order: reads and mutations may interleave freely.
@@ -34,22 +32,22 @@ impl Parser<'_> {
 			match token.kind {
 				t!("MATCH") => {
 					self.pop_peek();
-					let clause = self.parse_match_clause(stk, token.span).await?;
+					let clause = self.parse_match_clause(token.span)?;
 					steps.push(GqlStep::Read(MatchItem::Match(clause)));
 				}
 				t!("OPTIONAL") => {
 					self.pop_peek();
-					let block = stk.run(|stk| self.parse_optional_operand(stk, token.span)).await?;
+					let block = self.parse_optional_operand(token.span)?;
 					steps.push(GqlStep::Read(MatchItem::Optional(block)));
 				}
 				t!("INSERT") => {
 					self.pop_peek();
-					let stmt = self.parse_insert_statement(stk, token.span).await?;
+					let stmt = self.parse_insert_statement(token.span)?;
 					steps.push(GqlStep::Mutate(MutationStatement::Insert(stmt)));
 				}
 				t!("SET") => {
 					self.pop_peek();
-					let stmt = self.parse_set_statement(stk, token.span).await?;
+					let stmt = self.parse_set_statement(token.span)?;
 					steps.push(GqlStep::Mutate(MutationStatement::Set(stmt)));
 				}
 				t!("REMOVE") => {
@@ -59,8 +57,7 @@ impl Parser<'_> {
 				}
 				t!("DELETE") => {
 					self.pop_peek();
-					let stmt =
-						self.parse_delete_statement(stk, DetachMode::NoDetach, token.span).await?;
+					let stmt = self.parse_delete_statement(DetachMode::NoDetach, token.span)?;
 					steps.push(GqlStep::Mutate(MutationStatement::Delete(stmt)));
 				}
 				t!("DETACH") | t!("NODETACH") => {
@@ -71,7 +68,7 @@ impl Parser<'_> {
 					};
 					self.pop_peek();
 					expected!(self, t!("DELETE"));
-					let stmt = self.parse_delete_statement(stk, detach, token.span).await?;
+					let stmt = self.parse_delete_statement(detach, token.span)?;
 					steps.push(GqlStep::Mutate(MutationStatement::Delete(stmt)));
 				}
 				_ => break,
@@ -81,7 +78,7 @@ impl Parser<'_> {
 		// --- Optional trailing RETURN, or a precise rejection. ---
 		let token = self.peek();
 		let ret = match token.kind {
-			t!("RETURN") => Some(self.parse_return_clause(stk).await?),
+			t!("RETURN") => Some(self.parse_return_clause()?),
 			_ if token.is_eof() => None,
 			t!("FINISH") => {
 				bail!(
@@ -134,16 +131,12 @@ impl Parser<'_> {
 	/// themselves be further `OPTIONAL`s; each block delimiter charges the
 	/// object-recursion budget (mirroring nested label/expr parens) so that
 	/// `OPTIONAL { OPTIONAL { … } }` cannot overflow the machine stack.
-	async fn parse_optional_operand(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<OptionalBlock> {
+	fn parse_optional_operand(&mut self, start: Span) -> ParseResult<OptionalBlock> {
 		let token = self.peek();
 		match token.kind {
 			t!("MATCH") => {
 				self.pop_peek();
-				let clause = self.parse_match_clause(stk, token.span).await?;
+				let clause = self.parse_match_clause(token.span)?;
 				Ok(OptionalBlock {
 					span: start.covers(self.last_span()),
 					items: vec![MatchItem::Match(clause)],
@@ -154,7 +147,7 @@ impl Parser<'_> {
 			t!("{") => {
 				enter_object_recursion!(this = self => {
 					let open = this.pop_peek().span;
-					let items = stk.run(|stk| this.parse_match_statement_block(stk)).await?;
+					let items = this.parse_match_statement_block()?;
 					this.expect_closing_delimiter(t!("}"), open)?;
 					Ok(OptionalBlock {
 						span: start.covers(this.last_span()),
@@ -165,7 +158,7 @@ impl Parser<'_> {
 			t!("(") => {
 				enter_object_recursion!(this = self => {
 					let open = this.pop_peek().span;
-					let items = stk.run(|stk| this.parse_match_statement_block(stk)).await?;
+					let items = this.parse_match_statement_block()?;
 					this.expect_closing_delimiter(t!(")"), open)?;
 					Ok(OptionalBlock {
 						span: start.covers(this.last_span()),
@@ -180,19 +173,19 @@ impl Parser<'_> {
 	/// Parse a `matchStatementBlock`: one or more `matchStatement`s
 	/// (GQL.g4:597), each a plain `MATCH` clause or a nested `OPTIONAL`
 	/// operand. At least one statement is required.
-	async fn parse_match_statement_block(&mut self, stk: &mut Stk) -> ParseResult<Vec<MatchItem>> {
+	fn parse_match_statement_block(&mut self) -> ParseResult<Vec<MatchItem>> {
 		let mut items = Vec::new();
 		loop {
 			let token = self.peek();
 			match token.kind {
 				t!("MATCH") => {
 					self.pop_peek();
-					let clause = self.parse_match_clause(stk, token.span).await?;
+					let clause = self.parse_match_clause(token.span)?;
 					items.push(MatchItem::Match(clause));
 				}
 				t!("OPTIONAL") => {
 					self.pop_peek();
-					let block = stk.run(|stk| self.parse_optional_operand(stk, token.span)).await?;
+					let block = self.parse_optional_operand(token.span)?;
 					items.push(MatchItem::Optional(block));
 				}
 				_ if items.is_empty() => unexpected!(self, token, "`MATCH` or `OPTIONAL`"),
@@ -205,7 +198,7 @@ impl Parser<'_> {
 	/// Parse a `MATCH` clause graph pattern: `matchMode? pathPatternList
 	/// keepClause? graphPatternWhereClause?` (GQL.g4:803). The `MATCH` keyword
 	/// must already be consumed; `start` is its span.
-	async fn parse_match_clause(&mut self, stk: &mut Stk, start: Span) -> ParseResult<MatchClause> {
+	fn parse_match_clause(&mut self, start: Span) -> ParseResult<MatchClause> {
 		// `REPEATABLE`/`DIFFERENT` are non-reserved words, so they are only a
 		// match mode when followed by their element/edge synonym; otherwise
 		// they can begin a path pattern as a path variable.
@@ -231,7 +224,7 @@ impl Parser<'_> {
 
 		let mut patterns = Vec::new();
 		loop {
-			let pattern = self.parse_path_pattern(stk).await?;
+			let pattern = self.parse_path_pattern()?;
 			patterns.push(pattern);
 			let token = self.peek();
 			match token.kind {
@@ -262,7 +255,7 @@ impl Parser<'_> {
 		}
 
 		let where_clause = if self.eat(t!("WHERE")) {
-			Some(stk.run(|stk| self.parse_expr(stk)).await?)
+			Some(self.parse_expr()?)
 		} else {
 			None
 		};
@@ -283,7 +276,7 @@ impl Parser<'_> {
 	/// Parse the `RETURN` clause and its optional trailing `ORDER BY`,
 	/// `OFFSET`/`SKIP` and `LIMIT` clauses, which must appear in that fixed
 	/// order.
-	async fn parse_return_clause(&mut self, stk: &mut Stk) -> ParseResult<ReturnClause> {
+	fn parse_return_clause(&mut self) -> ParseResult<ReturnClause> {
 		let start = expected!(self, t!("RETURN")).span;
 
 		let quantifier = if self.eat(t!("DISTINCT")) {
@@ -299,7 +292,7 @@ impl Parser<'_> {
 		} else {
 			let mut items = Vec::new();
 			loop {
-				items.push(self.parse_return_item(stk).await?);
+				items.push(self.parse_return_item()?);
 				if !self.eat(t!(",")) {
 					break;
 				}
@@ -309,13 +302,13 @@ impl Parser<'_> {
 
 		// An attached `GROUP BY` (`groupByClause`, GQL.g4:1313) sits between the
 		// return items and the trailing `ORDER BY`/`OFFSET`/`LIMIT`.
-		let group_by = self.parse_group_by_clause(stk).await?;
+		let group_by = self.parse_group_by_clause()?;
 
 		let mut order_by = Vec::new();
 		if self.eat(t!("ORDER")) {
 			expected!(self, t!("BY"));
 			loop {
-				order_by.push(self.parse_order_item(stk).await?);
+				order_by.push(self.parse_order_item()?);
 				if !self.eat(t!(",")) {
 					break;
 				}
@@ -350,7 +343,7 @@ impl Parser<'_> {
 	/// `GROUP BY` keywords followed by a comma-separated list of grouping
 	/// elements. Each element is a full value expression (matching the return
 	/// items and `ORDER BY` keys); the lowering enforces the GQL shape.
-	async fn parse_group_by_clause(&mut self, stk: &mut Stk) -> ParseResult<Vec<GqlGroupItem>> {
+	fn parse_group_by_clause(&mut self) -> ParseResult<Vec<GqlGroupItem>> {
 		if !self.eat(t!("GROUP")) {
 			return Ok(Vec::new());
 		}
@@ -358,7 +351,7 @@ impl Parser<'_> {
 		let mut items = Vec::new();
 		loop {
 			let start = self.peek().span;
-			let expr = stk.run(|stk| self.parse_expr(stk)).await?;
+			let expr = self.parse_expr()?;
 			items.push(GqlGroupItem {
 				expr,
 				span: start.covers(self.last_span()),
@@ -373,9 +366,9 @@ impl Parser<'_> {
 	/// Parse a single `RETURN` item: an expression with an optional `AS`
 	/// alias, capturing the verbatim source text of the expression for use as
 	/// the default column name.
-	async fn parse_return_item(&mut self, stk: &mut Stk) -> ParseResult<ReturnItem> {
+	fn parse_return_item(&mut self) -> ParseResult<ReturnItem> {
 		let start = self.peek().span;
-		let expr = stk.run(|stk| self.parse_expr(stk)).await?;
+		let expr = self.parse_expr()?;
 		let text_span = start.covers(self.last_span());
 		let text = self.span_str(text_span).to_owned();
 		let alias = if self.eat(t!("AS")) {
@@ -393,9 +386,9 @@ impl Parser<'_> {
 	/// Parse a single `ORDER BY` sort specification: `sortKey
 	/// orderingSpecification? nullOrdering?` (GQL.g4:1341), where the sort
 	/// key is a full value expression.
-	async fn parse_order_item(&mut self, stk: &mut Stk) -> ParseResult<OrderItem> {
+	fn parse_order_item(&mut self) -> ParseResult<OrderItem> {
 		let start = self.peek().span;
-		let expr = stk.run(|stk| self.parse_expr(stk)).await?;
+		let expr = self.parse_expr()?;
 		let ascending = if self.eat(t!("ASC")) || self.eat(t!("ASCENDING")) {
 			Some(true)
 		} else if self.eat(t!("DESC")) || self.eat(t!("DESCENDING")) {

@@ -50,7 +50,6 @@ lexicmp.workspace = true
 http.workspace = true
 quick_cache.workspace = true
 rand.workspace = true
-reblessive = { workspace = true, features = ["tree"] }
 regex.workspace = true
 revision = { workspace = true }
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }

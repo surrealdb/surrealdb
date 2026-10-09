@@ -4,7 +4,7 @@ use crate::parse::ParseResult;
 use crate::{Parse, Parser};
 
 impl Parse for ast::RemoveNamespace {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![NAMESPACE])?;
 
@@ -22,7 +22,7 @@ impl Parse for ast::RemoveNamespace {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let span = parser.span_since(remove.span);
 		Ok(ast::RemoveNamespace {
@@ -35,7 +35,7 @@ impl Parse for ast::RemoveNamespace {
 }
 
 impl Parse for ast::RemoveDatabase {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![DATABASE])?;
 
@@ -53,7 +53,7 @@ impl Parse for ast::RemoveDatabase {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let span = parser.span_since(remove.span);
 		Ok(ast::RemoveDatabase {
@@ -66,7 +66,7 @@ impl Parse for ast::RemoveDatabase {
 }
 
 impl Parse for ast::RemoveFunction {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![FUNCTION])?;
 
@@ -92,7 +92,7 @@ impl Parse for ast::RemoveFunction {
 }
 
 impl Parse for ast::RemoveModule {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![MODULE])?;
 
@@ -118,7 +118,7 @@ impl Parse for ast::RemoveModule {
 }
 
 impl Parse for ast::RemoveAccess {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![ACCESS])?;
 
@@ -129,7 +129,7 @@ impl Parse for ast::RemoveAccess {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 		let _ = parser.expect(T![ON])?;
 		let base = parser.parse_sync()?;
 
@@ -144,7 +144,7 @@ impl Parse for ast::RemoveAccess {
 }
 
 impl Parse for ast::RemoveParam {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![PARAM])?;
 
@@ -167,7 +167,7 @@ impl Parse for ast::RemoveParam {
 }
 
 impl Parse for ast::RemoveTable {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		if parser.eat(T![TB])?.is_none() {
 			let _ = parser.expect(T![TABLE])?;
@@ -187,7 +187,7 @@ impl Parse for ast::RemoveTable {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let span = parser.span_since(remove.span);
 		Ok(ast::RemoveTable {
@@ -200,7 +200,7 @@ impl Parse for ast::RemoveTable {
 }
 
 impl Parse for ast::RemoveEvent {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![EVENT])?;
 
@@ -211,10 +211,10 @@ impl Parse for ast::RemoveEvent {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 		let _ = parser.expect(T![ON])?;
 		let _ = parser.eat(T![TABLE])?;
-		let table = parser.parse_enter().await?;
+		let table = parser.parse_enter()?;
 
 		let span = parser.span_since(remove.span);
 		Ok(ast::RemoveEvent {
@@ -227,7 +227,7 @@ impl Parse for ast::RemoveEvent {
 }
 
 impl Parse for ast::RemoveField {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![FIELD])?;
 
@@ -238,10 +238,10 @@ impl Parse for ast::RemoveField {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 		let _ = parser.expect(T![ON])?;
 		let _ = parser.eat(T![TABLE])?;
-		let table = parser.parse_enter().await?;
+		let table = parser.parse_enter()?;
 
 		let span = parser.span_since(remove.span);
 		Ok(ast::RemoveField {
@@ -254,7 +254,7 @@ impl Parse for ast::RemoveField {
 }
 
 impl Parse for ast::RemoveIndex {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![INDEX])?;
 
@@ -265,10 +265,10 @@ impl Parse for ast::RemoveIndex {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 		let _ = parser.expect(T![ON])?;
 		let _ = parser.eat(T![TABLE])?;
-		let table = parser.parse_enter().await?;
+		let table = parser.parse_enter()?;
 
 		let span = parser.span_since(remove.span);
 		Ok(ast::RemoveIndex {
@@ -281,7 +281,7 @@ impl Parse for ast::RemoveIndex {
 }
 
 impl Parse for ast::RemoveAnalyzer {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![ANALYZER])?;
 
@@ -292,7 +292,7 @@ impl Parse for ast::RemoveAnalyzer {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let span = parser.span_since(remove.span);
 		Ok(ast::RemoveAnalyzer {
@@ -304,7 +304,7 @@ impl Parse for ast::RemoveAnalyzer {
 }
 
 impl Parse for ast::RemoveSequence {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![SEQUENCE])?;
 
@@ -315,7 +315,7 @@ impl Parse for ast::RemoveSequence {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let span = parser.span_since(remove.span);
 		Ok(ast::RemoveSequence {
@@ -327,7 +327,7 @@ impl Parse for ast::RemoveSequence {
 }
 
 impl Parse for ast::RemoveUser {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![USER])?;
 
@@ -338,7 +338,7 @@ impl Parse for ast::RemoveUser {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 		let _ = parser.expect(T![ON])?;
 		let base = parser.parse_sync()?;
 
@@ -353,7 +353,7 @@ impl Parse for ast::RemoveUser {
 }
 
 impl Parse for ast::RemoveApi {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![API])?;
 
@@ -364,7 +364,7 @@ impl Parse for ast::RemoveApi {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let span = parser.span_since(remove.span);
 		Ok(ast::RemoveApi {
@@ -376,7 +376,7 @@ impl Parse for ast::RemoveApi {
 }
 
 impl Parse for ast::RemoveBucket {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![BUCKET])?;
 
@@ -387,7 +387,7 @@ impl Parse for ast::RemoveBucket {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 
 		let span = parser.span_since(remove.span);
 		Ok(ast::RemoveBucket {
@@ -399,7 +399,7 @@ impl Parse for ast::RemoveBucket {
 }
 
 impl Parse for ast::RemoveConfig {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let remove = parser.expect(T![REMOVE])?;
 		let _ = parser.expect(T![CONFIG])?;
 

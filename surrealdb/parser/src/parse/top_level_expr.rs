@@ -61,7 +61,7 @@ fn name_previous_statement(prev: NodeId<TopLevelExpr>, parser: &Parser<'_, '_>) 
 }
 
 impl Parse for ast::Query {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let span = parser.peek_span();
 
 		let mut exprs = None;
@@ -78,7 +78,7 @@ impl Parse for ast::Query {
 				break;
 			}
 
-			let expr = parser.parse().await?;
+			let expr = parser.parse()?;
 			parser.push_list(expr, &mut exprs, &mut cur);
 
 			if parser.eat(T![;])?.is_none()
@@ -136,7 +136,7 @@ impl Parse for ast::Query {
 }
 
 impl Parse for ast::TopLevelExpr {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let next = parser.peek_expect("an expression")?;
 		match next.token {
 			T![BEGIN] => {
@@ -160,11 +160,11 @@ impl Parse for ast::TopLevelExpr {
 				let span = parser.push(span);
 				Ok(ast::TopLevelExpr::Commit(span))
 			}
-			T![USE] => Ok(TopLevelExpr::Use(parser.parse().await?)),
+			T![USE] => Ok(TopLevelExpr::Use(parser.parse()?)),
 			T![OPTION] => Ok(TopLevelExpr::Option(parser.parse_sync()?)),
 			T![KILL] => Ok(TopLevelExpr::Kill(parser.parse_sync()?)),
-			T![SHOW] => Ok(TopLevelExpr::Show(parser.parse().await?)),
-			_ => Ok(TopLevelExpr::Expr(parser.parse().await?)),
+			T![SHOW] => Ok(TopLevelExpr::Show(parser.parse()?)),
+			_ => Ok(TopLevelExpr::Expr(parser.parse()?)),
 		}
 	}
 }
@@ -187,7 +187,7 @@ impl ParseSync for ast::Kill {
 }
 
 impl Parse for ast::Use {
-	async fn parse(parser: &mut Parser<'_, '_>) -> super::ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> super::ParseResult<Self> {
 		let start = parser.expect(T![USE])?.span;
 
 		// An argument is an expression, which carries no span of its own, so
@@ -199,11 +199,11 @@ impl Parse for ast::Use {
 		let kind = match peek.token {
 			T![NAMESPACE] => {
 				let _ = parser.next();
-				let ns = parser.parse_enter().await?;
+				let ns = parser.parse_enter()?;
 				if parser.eat(T![DATABASE])?.is_some() {
 					UseKind::NamespaceDatabase {
 						namespace: ns,
-						database: parser.parse_enter().await?,
+						database: parser.parse_enter()?,
 					}
 				} else {
 					UseKind::Namespace(ns)
@@ -211,7 +211,7 @@ impl Parse for ast::Use {
 			}
 			T![DATABASE] => {
 				let _ = parser.next();
-				UseKind::Database(parser.parse_enter().await?)
+				UseKind::Database(parser.parse_enter()?)
 			}
 			T![DEFAULT] => {
 				let _ = parser.next();
@@ -256,7 +256,7 @@ impl ParseSync for ast::OptionStmt {
 }
 
 impl Parse for ast::Show {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![SHOW])?;
 
 		let _ = parser.expect(T![CHANGES])?;
@@ -285,7 +285,7 @@ impl Parse for ast::Show {
 		};
 
 		let limit = if parser.eat(T![LIMIT])?.is_some() {
-			Some(parser.parse_enter().await?)
+			Some(parser.parse_enter()?)
 		} else {
 			None
 		};

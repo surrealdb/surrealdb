@@ -1,7 +1,7 @@
 //! Recursion limit and pathological input tests: deeply nested expressions
 //! must hit the configurable depth limit (never the machine stack), linear
-//! constructs must be stack-safe via the reblessive stack, and adversarial
-//! inputs must fail fast.
+//! constructs the limits do not charge must be parsed without recursion, and
+//! adversarial inputs must fail fast.
 //!
 //! Operator chains (binary spines, `NOT`/sign prefixes, `IS` postfixes) and
 //! property-access chains are bounded by `expr_recursion_limit` (default
@@ -205,4 +205,40 @@ fn long_comment_runs_are_iterative() {
 	parse(&source);
 	let source = format!("{}RETURN 1", "--x\n".repeat(100_000));
 	parse(&source);
+}
+
+/// Parsing and lowering recurse on the call stack, so the default budgets are
+/// the only thing between nested query text and a stack overflow. Each nesting
+/// construct, nested far past its budget, must be rejected with the budget's
+/// error on a 2 MiB thread — the conservative worker-thread size — in an
+/// unoptimised build, which is where frames are largest.
+#[test]
+fn every_nesting_construct_is_rejected_within_a_small_stack() {
+	std::thread::Builder::new()
+		.stack_size(2 * 1024 * 1024)
+		.spawn(|| {
+			const DEPTH: usize = 10_000;
+			let cases = [
+				("RETURN ", "(", "1", ")"),
+				("RETURN ", "[", "1", "]"),
+				("RETURN ", "{a: ", "1", "}"),
+				("RETURN ", "f(", "1", ")"),
+				("RETURN ", "NOT ", "true", ""),
+				("RETURN ", "- ", "1", ""),
+				("RETURN ", "1 + ", "1", ""),
+				("RETURN a", ".p", "", ""),
+				("MATCH (a:", "(", "L", ")) RETURN 1"),
+				("MATCH (a) ", "OPTIONAL { ", "MATCH (b)", " }"),
+				("MATCH (a) WHERE ", "(", "a.x", ") RETURN a"),
+			];
+			for (prefix, open, inner, close) in cases {
+				let source =
+					format!("{prefix}{}{inner}{}", open.repeat(DEPTH), close.repeat(DEPTH));
+				let error = parse_err(&source);
+				assert!(error.contains("depth limit"), "{prefix}{open}…: {error}");
+			}
+		})
+		.expect("spawning the small-stack thread")
+		.join()
+		.expect("small-stack thread panicked");
 }

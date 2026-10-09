@@ -36,7 +36,6 @@ use std::sync::Arc;
 use common::future::stream::{self, Yielder};
 #[cfg(test)]
 use futures::StreamExt;
-use reblessive::TreeStack;
 use roaring::RoaringTreemap;
 
 #[cfg(test)]
@@ -886,10 +885,7 @@ async fn build_fulltext_bitmap(
 	.context("Failed to open full-text index")?;
 	let query_terms = {
 		let az_fn = StreamingAnalyzerFunction::new(bctx.ctx);
-		let mut stack = TreeStack::new();
-		stack
-			.enter(|stk| fti.extract_querying_terms(stk, frozen_ctx, &az_fn, query.to_owned()))
-			.finish()
+		fti.extract_querying_terms(frozen_ctx, &az_fn, query.to_owned())
 			.await
 			.context("Failed to extract query terms")?
 	};

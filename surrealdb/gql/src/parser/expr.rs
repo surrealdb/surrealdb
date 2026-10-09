@@ -12,8 +12,6 @@
 //! primary postfix; `a.x + 1 IS NULL` is a syntax error which must be written
 //! `(a.x + 1) IS NULL`.
 
-use reblessive::Stk;
-
 use crate::gql::ast::{BinaryOp, GqlExpr, GqlLiteral, Ident, SetQuantifier, TruthValue, UnaryOp};
 use crate::gql::lexer::Lexer;
 use crate::gql::parser::mac::{enter_object_recursion, unexpected};
@@ -53,10 +51,10 @@ impl Parser<'_> {
 	/// one another. The operator loops below charge the budget again for
 	/// every operator they append to a left-associative spine or prefix
 	/// chain.
-	pub(super) async fn parse_expr(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
+	pub(super) fn parse_expr(&mut self) -> ParseResult<GqlExpr> {
 		let restore_to = self.settings.expr_recursion_limit;
 		self.enter_expr_depth()?;
-		let res = self.parse_expr_inner(stk).await;
+		let res = self.parse_expr_inner();
 		// Restore everything this call consumed, including the levels charged
 		// by the operator loops; `restore_to` is exactly this call's entry
 		// value.
@@ -64,9 +62,9 @@ impl Parser<'_> {
 		res
 	}
 
-	async fn parse_expr_inner(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
+	fn parse_expr_inner(&mut self) -> ParseResult<GqlExpr> {
 		// Level 1: `OR` and `XOR`, same level, left associative.
-		let mut left = self.parse_and_expr(stk).await?;
+		let mut left = self.parse_and_expr()?;
 		loop {
 			let op = match self.peek_kind() {
 				t!("OR") => BinaryOp::Or,
@@ -75,7 +73,7 @@ impl Parser<'_> {
 			};
 			self.pop_peek();
 			self.enter_expr_depth()?;
-			let right = self.parse_and_expr(stk).await?;
+			let right = self.parse_and_expr()?;
 			let span = left.span().covers(right.span());
 			left = GqlExpr::Binary {
 				left: Box::new(left),
@@ -88,11 +86,11 @@ impl Parser<'_> {
 	}
 
 	/// Level 2: `AND`, left associative.
-	async fn parse_and_expr(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
-		let mut left = self.parse_is_expr(stk).await?;
+	fn parse_and_expr(&mut self) -> ParseResult<GqlExpr> {
+		let mut left = self.parse_is_expr()?;
 		while self.eat(t!("AND")) {
 			self.enter_expr_depth()?;
-			let right = self.parse_is_expr(stk).await?;
+			let right = self.parse_is_expr()?;
 			let span = left.span().covers(right.span());
 			left = GqlExpr::Binary {
 				left: Box::new(left),
@@ -107,8 +105,8 @@ impl Parser<'_> {
 	/// Level 3: the postfix `IS [NOT] TRUE|FALSE|UNKNOWN` boolean test
 	/// (`#isNotExprAlt`). All other `IS …` predicates which can syntactically
 	/// occur here are rejected with targeted errors.
-	async fn parse_is_expr(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
-		let mut expr = self.parse_not_expr(stk).await?;
+	fn parse_is_expr(&mut self) -> ParseResult<GqlExpr> {
+		let mut expr = self.parse_not_expr()?;
 		while self.peek_kind() == t!("IS") {
 			self.enter_expr_depth()?;
 			let is_token = self.pop_peek();
@@ -172,12 +170,12 @@ impl Parser<'_> {
 	}
 
 	/// Level 4: the prefix `NOT` operator.
-	async fn parse_not_expr(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
+	fn parse_not_expr(&mut self) -> ParseResult<GqlExpr> {
 		let token = self.peek();
 		if token.kind == t!("NOT") {
 			self.pop_peek();
 			self.enter_expr_depth()?;
-			let expr = stk.run(|stk| self.parse_not_expr(stk)).await?;
+			let expr = self.parse_not_expr()?;
 			let span = token.span.covers(expr.span());
 			return Ok(GqlExpr::Unary {
 				op: UnaryOp::Not,
@@ -185,7 +183,7 @@ impl Parser<'_> {
 				span,
 			});
 		}
-		self.parse_comparison_expr(stk).await
+		self.parse_comparison_expr()
 	}
 
 	/// Level 6: the comparison operators `=` `<>` `<` `>` `<=` `>=`.
@@ -193,15 +191,15 @@ impl Parser<'_> {
 	/// The grammar parses chained comparisons left associatively
 	/// (`a = b = c` as `(a = b) = c`) but chaining has no useful semantics,
 	/// so a chained comparison is rejected with a targeted error.
-	async fn parse_comparison_expr(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
-		let left = self.parse_concat_expr(stk).await?;
+	fn parse_comparison_expr(&mut self) -> ParseResult<GqlExpr> {
+		let left = self.parse_concat_expr()?;
 		self.check_rejected_operator()?;
 		let Some(op) = self.peek_comparison_op() else {
 			return Ok(left);
 		};
 		self.pop_peek();
 		let start = self.peek().span;
-		let right = self.parse_concat_expr(stk).await?;
+		let right = self.parse_concat_expr()?;
 		Self::check_operand_null_test(&right, start)?;
 		if self.peek_comparison_op().is_some() {
 			bail!(
@@ -304,12 +302,12 @@ impl Parser<'_> {
 	}
 
 	/// Level 7: the `||` concatenation operator, left associative.
-	async fn parse_concat_expr(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
-		let mut left = self.parse_additive_expr(stk).await?;
+	fn parse_concat_expr(&mut self) -> ParseResult<GqlExpr> {
+		let mut left = self.parse_additive_expr()?;
 		while self.eat(t!("||")) {
 			self.enter_expr_depth()?;
 			let start = self.peek().span;
-			let right = self.parse_additive_expr(stk).await?;
+			let right = self.parse_additive_expr()?;
 			Self::check_operand_null_test(&right, start)?;
 			let span = left.span().covers(right.span());
 			left = GqlExpr::Binary {
@@ -323,8 +321,8 @@ impl Parser<'_> {
 	}
 
 	/// Level 8: binary `+` and `-`, left associative.
-	async fn parse_additive_expr(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
-		let mut left = self.parse_multiplicative_expr(stk).await?;
+	fn parse_additive_expr(&mut self) -> ParseResult<GqlExpr> {
+		let mut left = self.parse_multiplicative_expr()?;
 		loop {
 			let op = match self.peek_kind() {
 				t!("+") => BinaryOp::Add,
@@ -334,7 +332,7 @@ impl Parser<'_> {
 			self.pop_peek();
 			self.enter_expr_depth()?;
 			let start = self.peek().span;
-			let right = self.parse_multiplicative_expr(stk).await?;
+			let right = self.parse_multiplicative_expr()?;
 			Self::check_operand_null_test(&right, start)?;
 			let span = left.span().covers(right.span());
 			left = GqlExpr::Binary {
@@ -348,8 +346,8 @@ impl Parser<'_> {
 	}
 
 	/// Level 9: binary `*` and `/`, left associative.
-	async fn parse_multiplicative_expr(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
-		let mut left = self.parse_unary_expr(stk).await?;
+	fn parse_multiplicative_expr(&mut self) -> ParseResult<GqlExpr> {
+		let mut left = self.parse_unary_expr()?;
 		loop {
 			let op = match self.peek_kind() {
 				t!("*") => BinaryOp::Mul,
@@ -359,7 +357,7 @@ impl Parser<'_> {
 			self.pop_peek();
 			self.enter_expr_depth()?;
 			let start = self.peek().span;
-			let right = self.parse_unary_expr(stk).await?;
+			let right = self.parse_unary_expr()?;
 			Self::check_operand_null_test(&right, start)?;
 			let span = left.span().covers(right.span());
 			left = GqlExpr::Binary {
@@ -373,17 +371,17 @@ impl Parser<'_> {
 	}
 
 	/// Level 10: the unary `+` and `-` sign operators.
-	async fn parse_unary_expr(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
+	fn parse_unary_expr(&mut self) -> ParseResult<GqlExpr> {
 		let token = self.peek();
 		let op = match token.kind {
 			t!("+") => UnaryOp::Plus,
 			t!("-") => UnaryOp::Neg,
-			_ => return self.parse_primary_expr(stk).await,
+			_ => return self.parse_primary_expr(),
 		};
 		self.pop_peek();
 		self.enter_expr_depth()?;
 		let start = self.peek().span;
-		let expr = stk.run(|stk| self.parse_unary_expr(stk)).await?;
+		let expr = self.parse_unary_expr()?;
 		Self::check_operand_null_test(&expr, start)?;
 		let span = token.span.covers(expr.span());
 		Ok(GqlExpr::Unary {
@@ -395,9 +393,9 @@ impl Parser<'_> {
 
 	/// Level 11: a value expression primary with its postfixes: property
 	/// access chains and the `IS [NOT] NULL` null test.
-	async fn parse_primary_expr(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
+	fn parse_primary_expr(&mut self) -> ParseResult<GqlExpr> {
 		enter_object_recursion!(this = self => {
-			let expr = this.parse_primary_atom(stk).await?;
+			let expr = this.parse_primary_atom()?;
 			this.parse_primary_postfix(expr)
 		})
 	}
@@ -446,12 +444,12 @@ impl Parser<'_> {
 
 	/// Parse a single primary atom: a literal, parameter, variable, function
 	/// call, list or record literal, or a parenthesized expression.
-	async fn parse_primary_atom(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
+	fn parse_primary_atom(&mut self) -> ParseResult<GqlExpr> {
 		let token = self.peek();
 		match token.kind {
 			t!("(") => {
 				let open = self.pop_peek().span;
-				let expr = stk.run(|stk| self.parse_expr(stk)).await?;
+				let expr = self.parse_expr()?;
 				self.expect_closing_delimiter(t!(")"), open)?;
 				Ok(expr)
 			}
@@ -460,7 +458,7 @@ impl Parser<'_> {
 				let mut items = Vec::new();
 				if self.peek_kind() != t!("]") {
 					loop {
-						items.push(stk.run(|stk| self.parse_expr(stk)).await?);
+						items.push(self.parse_expr()?);
 						if !self.eat(t!(",")) {
 							break;
 						}
@@ -482,7 +480,7 @@ impl Parser<'_> {
 							unexpected!(self, colon, "`:`");
 						}
 						self.pop_peek();
-						let value = stk.run(|stk| self.parse_expr(stk)).await?;
+						let value = self.parse_expr()?;
 						fields.push((key, value));
 						if !self.eat(t!(",")) {
 							break;
@@ -567,7 +565,7 @@ impl Parser<'_> {
 			}
 			TokenKind::Identifier => {
 				if self.peek1().kind == t!("(") {
-					return self.parse_function_call(stk).await;
+					return self.parse_function_call();
 				}
 				self.pop_peek();
 				Ok(GqlExpr::Variable(Ident {
@@ -580,7 +578,7 @@ impl Parser<'_> {
 				// function name (`ABS`, `COUNT`, `UPPER`, …, which are all
 				// reserved words); lowering validates the name.
 				if self.peek1().kind == t!("(") {
-					return self.parse_function_call(stk).await;
+					return self.parse_function_call();
 				}
 				if keyword.is_non_reserved() {
 					self.pop_peek();
@@ -634,7 +632,7 @@ impl Parser<'_> {
 	/// and a leading `DISTINCT`/`ALL` set quantifier (`generalSetFunction`,
 	/// GQL.g4:2387) — are parsed into the AST for any function name; lowering
 	/// validates the name and rejects aggregates with a targeted error.
-	async fn parse_function_call(&mut self, stk: &mut Stk) -> ParseResult<GqlExpr> {
+	fn parse_function_call(&mut self) -> ParseResult<GqlExpr> {
 		let name_token = self.pop_peek();
 		let name = Ident {
 			name: self.span_str(name_token.span).to_owned(),
@@ -658,7 +656,7 @@ impl Parser<'_> {
 		let mut args = Vec::new();
 		if star.is_none() && (quantifier.is_some() || self.peek_kind() != t!(")")) {
 			loop {
-				args.push(stk.run(|stk| self.parse_expr(stk)).await?);
+				args.push(self.parse_expr()?);
 				if !self.eat(t!(",")) {
 					break;
 				}

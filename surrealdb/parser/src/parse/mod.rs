@@ -39,7 +39,6 @@ use common::TypedError;
 use common::source_error::{AnnotationKind, Diagnostic, Level, Snippet};
 use common::span::Span;
 use logos::{Lexer, Logos};
-use reblessive::{Stack, Stk};
 use token::{BaseTokenKind, Joined, LexError, Token};
 
 use crate::peekable::PeekableLexer;
@@ -64,19 +63,17 @@ pub use error::{ParseError, ParseResult};
 
 /// A trait for types which can be individually parsed.
 pub trait Parse: Sized {
-	#[allow(async_fn_in_trait)]
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self>;
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self>;
 }
 
 impl<P: Parse + Node> Parse for NodeId<P> {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
-		let p = P::parse(parser).await?;
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let p = P::parse(parser)?;
 		Ok(parser.push(p))
 	}
 }
 
 /// A trait for types which can be individually parsed and require no recursion.
-/// Faster to call as it doesn't require a future.
 pub trait ParseSync: Sized {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self>;
 }
@@ -94,6 +91,10 @@ pub struct Config {
 	/// Recursion depth limit of the parser.
 	///
 	/// If the parser ever recursers more times then the limit the parser will throw an error.
+	///
+	/// Parsing recurses on the call stack, so this limit is what keeps nested input from
+	/// exhausting it. Each level costs a few frames of native stack, several times larger in an
+	/// unoptimised build, so the limit must stay sized to the smallest stack the parser runs on.
 	pub depth_limit: usize,
 
 	/// If the parser should generate warning diagnostics,
@@ -132,7 +133,7 @@ impl Config {
 impl Default for Config {
 	fn default() -> Self {
 		Self {
-			depth_limit: 1024,
+			depth_limit: 512,
 			generate_warnings: false,
 			feature_bearer_access: false,
 			feature_surrealism: false,
@@ -228,6 +229,10 @@ pub struct Parser<'source, 'ast> {
 	settings: ParserSettings,
 	state: ParserState,
 	unescape_buffer: String,
+	/// How many [`Parser::enter`] frames are live, bounded by `depth_limit`.
+	depth: usize,
+	/// [`Config::depth_limit`]: recursion past this many frames is an error.
+	depth_limit: usize,
 }
 
 impl<'source, 'ast> Parser<'source, 'ast> {
@@ -240,15 +245,13 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		P: Parse,
 	{
 		let mut ast = Ast::empty();
-		let mut stack = Stack::new();
-		let node = Self::enter_parse_reuse(source, &mut stack, &mut ast, config)?;
+		let node = Self::enter_parse_reuse(source, &mut ast, config)?;
 		Ok((node, ast))
 	}
 
-	/// Parse a parsable type allowing reusing of resources like an existing stack and ast.
+	/// Parse a parsable type allowing reusing of resources like an existing ast.
 	pub fn enter_parse_reuse<P>(
 		source: &str,
-		stack: &mut Stack,
 		ast: &mut Ast,
 		config: Config,
 	) -> Result<P, TypedError<Diagnostic<'static>>>
@@ -268,6 +271,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			settings,
 			state: ParserState::empty(),
 			unescape_buffer: String::new(),
+			depth: 0,
+			depth_limit: config.depth_limit,
 		};
 
 		if source.len() > u32::MAX as usize {
@@ -278,27 +283,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				.expect("returned non diagnostic outside of the approriate context"));
 		}
 
-		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
-		// loops because we can maintain it's safety guarantees within the parser.
-		let mut runner = stack.enter(|_| parser.parse());
-
-		loop {
-			if let Some(x) = runner.step() {
-				return x.map_err(|e| {
-					e.to_diagnostic()
-						.expect("A parser internal error was returned outside of the context where such errors should be generated.")
-				});
-			}
-
-			if runner.depth() > config.depth_limit {
-				std::mem::drop(runner);
-				let span = parser.peek_span();
-				return Err(parser
-					.error("Parser hit maximum configured recursion depth", span)
-					.to_diagnostic()
-					.expect("returned non diagnostic outside of the approriate context"));
-			}
-		}
+		parser.parse().map_err(|e| {
+			e.to_diagnostic().expect(
+				"A parser internal error was returned outside of the context where such errors should be generated.",
+			)
+		})
 	}
 
 	/// Parse a parsable type in partial mode.
@@ -308,7 +297,6 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// adding more data to the source.
 	pub fn enter_partial_parse<P: Parse + Node>(
 		source: &str,
-		stack: &mut Stack,
 		ast: &mut Ast,
 		config: Config,
 	) -> Result<Option<(P, u32)>, TypedError<Diagnostic<'static>>> {
@@ -324,6 +312,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			settings,
 			state: ParserState::empty(),
 			unescape_buffer: String::new(),
+			depth: 0,
+			depth_limit: config.depth_limit,
 		};
 
 		if source.len() > u32::MAX as usize {
@@ -334,37 +324,18 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				.expect("returned non-diagnostic error outside of allowed context"));
 		}
 
-		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
-		// loops because we can maintain it's safety guarantees within the parser.
-		let mut runner = stack.enter(|_| parser.parse());
-
-		loop {
-			if let Some(x) = runner.step() {
-				match x {
-					Ok(x) => {
-						std::mem::drop(runner);
-
-						let eaten = parser.last_span.end;
-						return Ok(Some((x, eaten)));
-					}
-					Err(e) => {
-						if e.is_missing_data() {
-							return Ok(None);
-						}
-
-						return Err(e.to_diagnostic()
-						.expect("A parser internal error was returned outside of the context where such errors should be generated."));
-					}
-				}
+		match parser.parse() {
+			Ok(x) => {
+				let eaten = parser.last_span.end;
+				Ok(Some((x, eaten)))
 			}
-
-			if runner.depth() > config.depth_limit {
-				std::mem::drop(runner);
-				let span = parser.peek_span();
-				return Err(parser
-					.error("Parser hit maximum configured recursion depth", span)
-					.to_diagnostic()
-					.expect("returned non-diagnostic error outside of allowed context"));
+			Err(e) => {
+				if e.is_missing_data() {
+					return Ok(None);
+				}
+				Err(e.to_diagnostic().expect(
+					"A parser internal error was returned outside of the context where such errors should be generated.",
+				))
 			}
 		}
 	}
@@ -401,43 +372,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	///   didn't have to do.
 	///
 	/// Please limit the use of this function to small branches that can't recurse.
-	pub async fn speculate<T, F>(&mut self, cb: F) -> ParseResult<Option<T>>
-	where
-		F: AsyncFnOnce(&mut Parser) -> ParseResult<T>,
-	{
-		let backup = self.lex.clone();
-		let old_state = self.state;
-		self.state |= ParserState::SPECULATING;
-		let res = cb(self).await;
-		self.state = old_state;
-		match res {
-			Ok(x) => Ok(Some(x)),
-			Err(e) => {
-				// A speculative error always rolls this branch back, even when an enclosing
-				// branch is speculating too, so the caller gets `Ok(None)` and can try another
-				// alternative.
-				if e.is_speculative() {
-					// If we hit a speculating error but we also peeked until the lexer was empty
-					// we might have made a decision based on the absence of more data.
-					// So we must see if more data is available before rejecting the speculating
-					// branch.
-					if self.settings.contains(ParserSettings::PARTIAL)
-						&& self.lex.lexer().remainder().is_empty()
-					{
-						return Err(ParseError::missing_data());
-					}
-
-					self.lex = backup;
-					Ok(None)
-				} else {
-					Err(e)
-				}
-			}
-		}
-	}
-
-	/// Same as [`speculate`](Parser::speculate) but not asynchronous.
-	pub fn speculate_sync<T, F>(&mut self, cb: F) -> ParseResult<Option<T>>
+	pub fn speculate<T, F>(&mut self, cb: F) -> ParseResult<Option<T>>
 	where
 		F: FnOnce(&mut Parser) -> ParseResult<T>,
 	{
@@ -462,6 +397,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 					{
 						return Err(ParseError::missing_data());
 					}
+
 					self.lex = backup;
 					Ok(None)
 				} else {
@@ -476,7 +412,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// Some parts of surrealql require parsing the same query on a different string, for example
 	/// an escaped one in the case of a record-id string. This function allows parsing such
 	/// productions.
-	pub async fn sub_parse<P: Parse>(&mut self, sub_str: &str) -> ParseResult<P> {
+	pub fn sub_parse<P: Parse>(&mut self, sub_str: &str) -> ParseResult<P> {
 		let lex = BaseTokenKind::lexer(sub_str);
 		let lex = PeekableLexer::new(lex);
 
@@ -487,31 +423,18 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			settings: self.settings,
 			state: self.state,
 			unescape_buffer: String::new(),
+			depth: self.depth,
+			depth_limit: self.depth_limit,
 		};
 
-		parser.parse().await
+		parser.parse()
 	}
 
 	/// Undoes the speculative state within it's closure.
 	///
 	/// Use to commit to some branching paths in a speculative context while still able to
 	/// speculate in other branches.
-	pub async fn commit<T, F>(&mut self, cb: F) -> ParseResult<T>
-	where
-		F: AsyncFnOnce(&mut Parser) -> ParseResult<T>,
-	{
-		let old_state = self.state;
-		self.state &= !ParserState::SPECULATING;
-		let res = cb(self).await;
-		self.state = old_state;
-		res
-	}
-
-	/// Undoes the speculative state within it's closure.
-	///
-	/// Use to commit to some branching paths in a speculative context while still able to
-	/// speculate in other branches.
-	pub fn commit_sync<T, F>(&mut self, cb: F) -> ParseResult<T>
+	pub fn commit<T, F>(&mut self, cb: F) -> ParseResult<T>
 	where
 		F: FnOnce(&mut Parser) -> ParseResult<T>,
 	{
@@ -529,14 +452,14 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 	/// Modifies the parser state within the given closure, reseting the parser state to the old
 	/// result after the closure returns.
-	pub(crate) async fn with_state<F1, F2, R>(&mut self, state_cb: F1, cb: F2) -> ParseResult<R>
+	pub(crate) fn with_state<F1, F2, R>(&mut self, state_cb: F1, cb: F2) -> ParseResult<R>
 	where
 		F1: FnOnce(ParserState) -> ParserState,
-		F2: for<'a> AsyncFnOnce(&'a mut Parser<'source, 'ast>) -> ParseResult<R>,
+		F2: for<'a> FnOnce(&'a mut Parser<'source, 'ast>) -> ParseResult<R>,
 	{
 		let old = self.state;
 		self.state = state_cb(old);
-		let r = cb(self).await;
+		let r = cb(self);
 		self.state = old;
 		r
 	}
@@ -788,13 +711,13 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	}
 
 	/// Parse an ast node that might require recursion.
-	pub async fn parse<P: Parse>(&mut self) -> ParseResult<P> {
-		P::parse(self).await
+	pub fn parse<P: Parse>(&mut self) -> ParseResult<P> {
+		P::parse(self)
 	}
 
-	/// Parses an ast node entering into a new stack frame.
-	pub async fn parse_enter<P: Parse>(&mut self) -> ParseResult<P> {
-		Stk::enter_run(|_| P::parse(self)).await
+	/// Parses an ast node in a new recursion frame, charged against the depth limit.
+	pub fn parse_enter<P: Parse>(&mut self) -> ParseResult<P> {
+		self.enter(|this| P::parse(this))
 	}
 
 	/// Parse an ast node that can be parsed without recursion
@@ -802,12 +725,27 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		P::parse_sync(self)
 	}
 
-	/// Enter into a new stack context, use when running a recursive function.
-	pub async fn enter<R, F>(&mut self, cb: F) -> R
+	/// Runs `cb` in a new recursion frame; use when running a recursive function.
+	///
+	/// Parsing recurses on the call stack, so every recursive production goes
+	/// through here and is charged against [`Config::depth_limit`]. Exceeding
+	/// the limit is a diagnostic error rather than a speculative one: no
+	/// speculating branch recovers from it, so the whole parse stops instead of
+	/// retrying alternatives at the limit.
+	pub fn enter<R, F>(&mut self, cb: F) -> ParseResult<R>
 	where
-		F: AsyncFnOnce(&mut Self) -> R,
+		F: FnOnce(&mut Self) -> ParseResult<R>,
 	{
-		Stk::enter_run(|_| cb(self)).await
+		if self.depth >= self.depth_limit {
+			let span = self.peek_span();
+			let diagnostic =
+				basic_diagnostic(self, span, "Parser hit maximum configured recursion depth");
+			return Err(ParseError::diagnostic(diagnostic.to_owned()));
+		}
+		self.depth += 1;
+		let res = cb(self);
+		self.depth -= 1;
+		res
 	}
 
 	/// Access the lexer in a closure.

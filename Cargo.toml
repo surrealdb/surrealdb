@@ -163,7 +163,6 @@ surrealmx = "0.27.0"
 web-time = "1.1.0"
 ## Maintained by @Delskayn
 js = { version = "0.11.0", package = "rquickjs", features = ["rust-alloc"] }
-reblessive = "0.4.3"
 
 # External KV stores
 rocksdb = { version = "0.24.0-surreal.4", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }

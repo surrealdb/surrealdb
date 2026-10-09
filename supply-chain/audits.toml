@@ -865,12 +865,6 @@ user-id = 4556 # Dirkjan Ochtman (djc)
 start = "2024-03-28"
 end = "2027-05-01"
 
-[[trusted.reblessive]]
-criteria = "safe-to-deploy"
-user-id = 79445 # Mees Delzenne (DelSkayn)
-start = "2024-02-23"
-end = "2027-05-01"
-
 [[trusted.ref-cast]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)

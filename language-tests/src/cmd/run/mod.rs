@@ -486,9 +486,8 @@ async fn run_test_body(
 
 			let source = &run.case.test.source.as_bytes();
 			let mut parser = parser::Parser::new_with_settings(source, settings);
-			let mut stack = reblessive::Stack::new();
 
-			let query = match stack.enter(|stk| parser.parse_query(stk)).finish() {
+			let query = match parser.parse_query() {
 				Ok(x) => {
 					if let Err(e) = parser.assert_finished() {
 						return Ok(BodyOutcome::Early(TestTaskResult::ParserError(

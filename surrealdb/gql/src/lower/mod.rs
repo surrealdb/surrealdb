@@ -24,8 +24,6 @@ mod pattern;
 
 #[cfg(test)]
 mod test;
-
-use reblessive::{Stack, Stk};
 use surrealdb_types::ToSql;
 
 use self::binding::Registry;
@@ -43,16 +41,16 @@ use crate::syn::token::Span;
 /// Lowers a parsed GQL query into the single already-planned operator it
 /// runs as: [`LogicalOp::Match`].
 ///
-/// Runs on a [`reblessive`] stack: the GQL AST contains arbitrarily deep
-/// expression chains which the machine stack must not recurse over.
+/// Recurses on the call stack once per expression level. The parser charges
+/// every such level against its depth budgets, so the depth is bounded by
+/// [`GqlParserSettings`](crate::GqlParserSettings).
 pub(super) fn lower(query: GqlQuery) -> Result<LogicalOp, SyntaxError> {
 	let LinearQuery {
 		steps,
 		ret,
 		span,
 	} = query.program;
-	let mut stack = Stack::new();
-	let plan = stack.enter(|stk| lower_program(stk, &steps, ret.as_ref(), span)).finish()?;
+	let plan = lower_program(&steps, ret.as_ref(), span)?;
 	Ok(LogicalOp::Match(LogicalMatch {
 		plan: Box::new(plan),
 	}))
@@ -68,8 +66,7 @@ pub(super) fn lower(query: GqlQuery) -> Result<LogicalOp, SyntaxError> {
 /// created), and each mutation lowers and extends the registry. The output spec
 /// lowers last, against the complete registry. For a read-only query (no
 /// mutation) the per-step walk produces exactly the previous read-body lowering.
-async fn lower_program(
-	stk: &mut Stk,
+fn lower_program(
 	steps: &[GqlStep],
 	ret: Option<&ReturnClause>,
 	span: Span,
@@ -86,15 +83,12 @@ async fn lower_program(
 				// INSERT-created variables) and returns one [`ClauseBindings`] per
 				// flattened clause; each lowers against the registry so far.
 				for clause_bindings in analyzer.read(item)? {
-					let clause =
-						pattern::lower_clause(stk, &clause_bindings, analyzer.registry()).await?;
+					let clause = pattern::lower_clause(&clause_bindings, analyzer.registry())?;
 					stages.push(MatchStage::Read(clause));
 				}
 			}
 			GqlStep::Mutate(stmt) => {
-				for mutation in
-					mutation::lower_statement(stk, analyzer.registry_mut(), stmt).await?
-				{
+				for mutation in mutation::lower_statement(analyzer.registry_mut(), stmt)? {
 					stages.push(MatchStage::Mutate(mutation));
 				}
 			}
@@ -113,7 +107,7 @@ async fn lower_program(
 	}
 
 	let output = match ret {
-		Some(ret) => Some(lower_output(stk, ret, &registry).await?),
+		Some(ret) => Some(lower_output(ret, &registry)?),
 		None => {
 			// A read-only query must project a RETURN; a mutation-only query
 			// need not (it runs for its side effects and returns nothing).
@@ -163,26 +157,26 @@ struct Column {
 /// Lowers the RETURN clause into the [`MatchOutput`] spec: the projected
 /// columns (R8), the DISTINCT flag, the resolved ORDER BY keys (R7) and the
 /// SKIP/LIMIT counts.
-async fn lower_output(
-	stk: &mut Stk,
-	ret: &ReturnClause,
-	registry: &Registry,
-) -> Result<MatchOutput, SyntaxError> {
+fn lower_output(ret: &ReturnClause, registry: &Registry) -> Result<MatchOutput, SyntaxError> {
 	// GROUP BY keys lower first (no aggregates permitted in a key) so the
 	// RETURN-item lowering can validate every non-aggregate column against them.
-	let group_keys = lower_group_keys(stk, &ret.group_by, registry).await?;
+	let group_keys = lower_group_keys(&ret.group_by, registry)?;
 
-	let (mut columns, aggregating) = lower_return_items(stk, ret, registry, &group_keys).await?;
+	let (mut columns, aggregating) = lower_return_items(ret, registry, &group_keys)?;
 	let distinct = matches!(ret.quantifier, Some(SetQuantifier::Distinct));
 
 	// ORDER BY resolution may append hidden sort-only columns (an aggregating
 	// query ordering by a value it does not project), so `columns` is mutable.
 	let mut order = Vec::with_capacity(ret.order_by.len());
 	for item in &ret.order_by {
-		order.push(
-			lower_order_item(stk, item, &mut columns, &group_keys, distinct, aggregating, registry)
-				.await?,
-		);
+		order.push(lower_order_item(
+			item,
+			&mut columns,
+			&group_keys,
+			distinct,
+			aggregating,
+			registry,
+		)?);
 	}
 
 	let skip = match &ret.skip {
@@ -217,8 +211,7 @@ async fn lower_output(
 /// Lowers the GROUP BY grouping elements to binding-row key expressions. A key
 /// may not itself contain an aggregate (rejected by [`expr::lower_value`] under
 /// a non-aggregate scope).
-async fn lower_group_keys(
-	stk: &mut Stk,
+fn lower_group_keys(
 	items: &[GqlGroupItem],
 	registry: &Registry,
 ) -> Result<Vec<LogicalExpr>, SyntaxError> {
@@ -228,7 +221,7 @@ async fn lower_group_keys(
 	};
 	let mut keys = Vec::with_capacity(items.len());
 	for item in items {
-		keys.push(expr::lower_value(stk, &item.expr, &scope).await?);
+		keys.push(expr::lower_value(&item.expr, &scope)?);
 	}
 	Ok(keys)
 }
@@ -237,8 +230,7 @@ async fn lower_group_keys(
 /// unaliased items are named by their verbatim source text, `RETURN *` expands
 /// to the user-named bindings (incl. group and path variables) in alphabetical
 /// order, and duplicate column names are rejected.
-async fn lower_return_items(
-	stk: &mut Stk,
+fn lower_return_items(
 	ret: &ReturnClause,
 	registry: &Registry,
 	group_keys: &[LogicalExpr],
@@ -299,7 +291,7 @@ async fn lower_return_items(
 					);
 				}
 				let is_aggregate = expr::gql_contains_aggregate(&item.expr);
-				let lowered = expr::lower_value(stk, &item.expr, &scope).await?;
+				let lowered = expr::lower_value(&item.expr, &scope)?;
 
 				// Strict GQL/SQL: when aggregating, a non-aggregate column must be
 				// determined by the GROUP BY keys — either a key itself or a value
@@ -335,8 +327,7 @@ async fn lower_return_items(
 ///   is materialised as a hidden sort-only column (dropped before output).
 /// - plain: Sort runs pre-projection over the binding rows, so any binding-row expression is valid;
 ///   a key naming a RETURN column sorts on that column's underlying expression.
-async fn lower_order_item(
-	stk: &mut Stk,
+fn lower_order_item(
 	item: &OrderItem,
 	columns: &mut Vec<Column>,
 	group_keys: &[LogicalExpr],
@@ -355,7 +346,7 @@ async fn lower_order_item(
 	};
 
 	if distinct {
-		let column = order_output_column(stk, item, columns, &scope).await?;
+		let column = order_output_column(item, columns, &scope)?;
 		return Ok(MatchOrder {
 			expr: LogicalExpr::Field(column.into()),
 			ascending,
@@ -363,7 +354,7 @@ async fn lower_order_item(
 	}
 
 	if aggregating {
-		let column = lower_aggregating_order(stk, item, columns, group_keys, &scope).await?;
+		let column = lower_aggregating_order(item, columns, group_keys, &scope)?;
 		return Ok(MatchOrder {
 			expr: LogicalExpr::Field(column.into()),
 			ascending,
@@ -381,7 +372,7 @@ async fn lower_order_item(
 			ascending,
 		});
 	}
-	let lowered = expr::lower_value(stk, &item.expr, &scope).await?;
+	let lowered = expr::lower_value(&item.expr, &scope)?;
 	Ok(MatchOrder {
 		expr: lowered,
 		ascending,
@@ -393,8 +384,7 @@ async fn lower_order_item(
 /// otherwise materialises a hidden sort-only column for a grouping key, a
 /// value determined by the grouping keys, or an aggregate — rejecting any other
 /// key (a genuinely ungrouped, non-aggregate sort key). Returns the column name.
-async fn lower_aggregating_order(
-	stk: &mut Stk,
+fn lower_aggregating_order(
 	item: &OrderItem,
 	columns: &mut Vec<Column>,
 	group_keys: &[LogicalExpr],
@@ -407,7 +397,7 @@ async fn lower_aggregating_order(
 		return Ok(column.name.clone());
 	}
 	let is_aggregate = expr::gql_contains_aggregate(&item.expr);
-	let lowered = expr::lower_value(stk, &item.expr, scope).await?;
+	let lowered = expr::lower_value(&item.expr, scope)?;
 	// Reuse a column (projected or already-materialised) with the same expression.
 	if let Some(column) = columns.iter().find(|c| c.expr == lowered) {
 		return Ok(column.name.clone());
@@ -432,8 +422,7 @@ async fn lower_aggregating_order(
 /// Resolves a DISTINCT ORDER BY key to the name of the RETURN column it
 /// references — by dotted name, or by lowering to the same expression as a
 /// column — rejecting any key that is not a returned column.
-async fn order_output_column(
-	stk: &mut Stk,
+fn order_output_column(
 	item: &OrderItem,
 	columns: &[Column],
 	scope: &Scope<'_>,
@@ -445,7 +434,7 @@ async fn order_output_column(
 	{
 		return Ok(column.name.clone());
 	}
-	let lowered = expr::lower_value(stk, &item.expr, scope).await?;
+	let lowered = expr::lower_value(&item.expr, scope)?;
 	if let Some(column) = columns.iter().find(|c| c.expr == lowered) {
 		return Ok(column.name.clone());
 	}

@@ -1,4 +1,3 @@
-use reblessive::Stk;
 use surrealdb_sql::literal::ObjectEntry;
 use surrealdb_sql::{Block, Expr, Literal};
 
@@ -12,11 +11,7 @@ impl Parser<'_> {
 	/// Parse an production which starts with an `{`
 	///
 	/// Either a block statemnt, a object or geometry.
-	pub(super) async fn parse_object_like(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<Expr> {
+	pub(super) fn parse_object_like(&mut self, start: Span) -> ParseResult<Expr> {
 		if self.eat(t!("}")) {
 			// empty object, just return
 			return Ok(Expr::Literal(Literal::Object(Vec::new())));
@@ -30,7 +25,7 @@ impl Parser<'_> {
 
 		if self.eat(t!(";")) {
 			// Empty statement followed by other statements or an empty block.
-			let block = self.parse_block_remaining(stk, start, Vec::new()).await?;
+			let block = self.parse_block_remaining(start, Vec::new())?;
 			return Ok(Expr::Block(Box::new(block)));
 		}
 
@@ -44,33 +39,30 @@ impl Parser<'_> {
 		| TokenKind::Algorithm(_)
 		| TokenKind::Distance(_)
 		| TokenKind::VectorType(_) = self.peek().kind
-			&& let Some(x) = self
-				.speculate(stk, async |stk, this| {
-					enter_object_recursion!(this = this => {
-						let Ok(key) = this.parse_object_key() else {
-							return Ok(None)
-						};
+			&& let Some(x) = self.speculate(|this| {
+				enter_object_recursion!(this = this => {
+					let Ok(key) = this.parse_object_key() else {
+						return Ok(None)
+					};
 
-						if !this.eat(t!(":")){
-							return Ok(None)
-						}
+					if !this.eat(t!(":")){
+						return Ok(None)
+					}
 
-						let value = stk.run(|stk| this.parse_expr_collection_element(stk)).await?;
-						let res = vec![ObjectEntry {
-							key: key.into(),
-							value,
-						}];
+					let value = this.parse_expr_collection_element()?;
+					let res = vec![ObjectEntry {
+						key: key.into(),
+						value,
+					}];
 
-						if this.eat(t!(",")){
-							this.parse_object_inner(stk, start, res).await.map(Some)
-						}else{
-							this.expect_closing_delimiter(t!("}"), start)?;
-							Ok(Some(res))
-						}
-					})
+					if this.eat(t!(",")){
+						this.parse_object_inner(start, res).map(Some)
+					}else{
+						this.expect_closing_delimiter(t!("}"), start)?;
+						Ok(Some(res))
+					}
 				})
-				.await?
-		{
+			})? {
 			return Ok(Expr::Literal(Literal::Object(x)));
 		}
 
@@ -87,7 +79,7 @@ impl Parser<'_> {
 		// ceiling. Reading it as a set instead would lift block nesting to the
 		// object budget, and blocks are the shape whose depth the call stack pays
 		// for when the parsed tree is lowered and dropped.
-		let first_expr = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
+		let first_expr = self.parse_expr_inherit()?;
 
 		let first_expr_span = statement_peek.span.covers(self.last_span());
 
@@ -95,7 +87,7 @@ impl Parser<'_> {
 		match next.kind {
 			t!(",") => {
 				self.pop_peek();
-				let mut exprs = self.parse_set(stk, start).await?;
+				let mut exprs = self.parse_set(start)?;
 				exprs.insert(0, first_expr);
 				Ok(Expr::Literal(Literal::Set(exprs)))
 			}
@@ -110,7 +102,7 @@ impl Parser<'_> {
 				if statement_peek.kind != t!("(") {
 					Self::reject_letless_let(&first_expr, first_expr_span)?;
 				}
-				let block = self.parse_block_remaining(stk, start, vec![first_expr]).await?;
+				let block = self.parse_block_remaining(start, vec![first_expr])?;
 				Ok(Expr::Block(Box::new(block)))
 			}
 		}
@@ -122,19 +114,14 @@ impl Parser<'_> {
 	///
 	/// # Parser state
 	/// Expects the first `{` to already have been eaten.
-	pub(super) async fn parse_object(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<Vec<ObjectEntry>> {
+	pub(super) fn parse_object(&mut self, start: Span) -> ParseResult<Vec<ObjectEntry>> {
 		enter_object_recursion!(this = self => {
-			return this.parse_object_inner(stk, start, Vec::new()).await;
+			this.parse_object_inner(start, Vec::new())
 		})
 	}
 
-	pub(super) async fn parse_object_inner(
+	pub(super) fn parse_object_inner(
 		&mut self,
-		stk: &mut Stk,
 		start: Span,
 		mut res: Vec<ObjectEntry>,
 	) -> ParseResult<Vec<ObjectEntry>> {
@@ -143,7 +130,7 @@ impl Parser<'_> {
 				return Ok(res);
 			}
 
-			let (key, value) = self.parse_object_entry(stk).await?;
+			let (key, value) = self.parse_object_entry()?;
 			// Duplicate keys are accepted at parse time and resolved last-wins
 			// when the literal is computed (`Literal::Object` inserts into a
 			// `BTreeMap`, see `expr/literal.rs`). This matches JSON / JavaScript
@@ -161,20 +148,20 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_set(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Vec<Expr>> {
+	pub fn parse_set(&mut self, start: Span) -> ParseResult<Vec<Expr>> {
 		enter_object_recursion!(this = self => {
-			return this.parse_set_inner(stk, start).await;
+			this.parse_set_inner(start)
 		})
 	}
 
-	async fn parse_set_inner(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Vec<Expr>> {
+	fn parse_set_inner(&mut self, start: Span) -> ParseResult<Vec<Expr>> {
 		let mut res = Vec::new();
 		loop {
 			if self.eat(t!("}")) {
 				return Ok(res);
 			}
 
-			let value = stk.run(|ctx| self.parse_expr_collection_element(ctx)).await?;
+			let value = self.parse_expr_collection_element()?;
 			res.push(value);
 
 			if !self.eat(t!(",")) {
@@ -189,8 +176,8 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the starting `{` to have already been eaten and its span to be
 	/// handed to this functions as the `start` parameter.
-	pub async fn parse_block(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Block> {
-		self.parse_block_remaining(stk, start, Vec::new()).await
+	pub fn parse_block(&mut self, start: Span) -> ParseResult<Block> {
+		self.parse_block_remaining(start, Vec::new())
 	}
 
 	/// Parses the remaining statements in a block.
@@ -201,9 +188,8 @@ impl Parser<'_> {
 	///
 	/// Any statements which have already been parsed can be passed in as the `existing_stmts`
 	/// parameter.
-	async fn parse_block_remaining(
+	fn parse_block_remaining(
 		&mut self,
-		stk: &mut Stk,
 		start: Span,
 		mut existing_stmts: Vec<Expr>,
 	) -> ParseResult<Block> {
@@ -215,7 +201,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let stmt = self.parse_block_expr(stk).await?;
+			let stmt = self.parse_block_expr()?;
 			existing_stmts.push(stmt);
 
 			if !self.eat(t!(";")) {
@@ -226,10 +212,10 @@ impl Parser<'_> {
 		Ok(Block(existing_stmts))
 	}
 
-	async fn parse_block_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	fn parse_block_expr(&mut self) -> ParseResult<Expr> {
 		let peek = self.peek().kind;
 		let before = self.recent_span();
-		let stmt = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+		let stmt = self.parse_expr_inherit()?;
 		let span = before.covers(self.last_span());
 		// covered expressions are fine.
 		if peek != t!("(") {
@@ -240,10 +226,10 @@ impl Parser<'_> {
 
 	/// Parse a single entry in the object, i.e. `field: value + 1` in the
 	/// object `{ field: value + 1 }`
-	async fn parse_object_entry(&mut self, stk: &mut Stk) -> ParseResult<(String, Expr)> {
+	fn parse_object_entry(&mut self) -> ParseResult<(String, Expr)> {
 		let text = self.parse_object_key()?;
 		expected!(self, t!(":"));
-		let value = stk.run(|ctx| self.parse_expr_collection_element(ctx)).await?;
+		let value = self.parse_expr_collection_element()?;
 		Ok((text, value))
 	}
 

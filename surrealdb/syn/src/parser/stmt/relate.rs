@@ -1,4 +1,3 @@
-use reblessive::Stk;
 use surrealdb_sql::statements::RelateStatement;
 use surrealdb_sql::{Expr, Literal};
 
@@ -7,7 +6,7 @@ use crate::parser::{ParseResult, Parser};
 use crate::token::t;
 
 impl Parser<'_> {
-	pub async fn parse_relate_stmt(&mut self, stk: &mut Stk) -> ParseResult<RelateStatement> {
+	pub fn parse_relate_stmt(&mut self) -> ParseResult<RelateStatement> {
 		let only = self.eat(t!("ONLY"));
 
 		let or_update = if self.eat(t!("OR")) {
@@ -17,14 +16,14 @@ impl Parser<'_> {
 			false
 		};
 
-		let (from, through, to) = stk.run(|stk| self.parse_relation(stk)).await?;
+		let (from, through, to) = self.parse_relation()?;
 
 		// UNIQUE is unused, parse it for backwards compatibility
 		self.eat(t!("UNIQUE"));
 
-		let data = self.try_parse_data(stk).await?;
-		let output = self.try_parse_output(stk).await?;
-		let timeout = self.try_parse_timeout(stk).await?;
+		let data = self.try_parse_data()?;
+		let output = self.try_parse_output()?;
+		let timeout = self.try_parse_timeout()?;
 		Ok(RelateStatement {
 			only,
 			or_update,
@@ -37,8 +36,8 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_relation(&mut self, stk: &mut Stk) -> ParseResult<(Expr, Expr, Expr)> {
-		let first = self.parse_relate_expr(stk).await?;
+	pub fn parse_relation(&mut self) -> ParseResult<(Expr, Expr, Expr)> {
+		let first = self.parse_relate_expr()?;
 		let next = self.next();
 		let is_o = match next.kind {
 			t!("->") => true,
@@ -48,14 +47,14 @@ impl Parser<'_> {
 			}
 			_ => unexpected!(self, next, "a relation arrow"),
 		};
-		let through = self.parse_relate_kind(stk).await?;
+		let through = self.parse_relate_kind()?;
 		if is_o {
 			expected!(self, t!("->"));
 		} else {
 			expected!(self, t!("<"));
 			expected_whitespace!(self, t!("-"));
 		};
-		let second = self.parse_relate_expr(stk).await?;
+		let second = self.parse_relate_expr()?;
 		if is_o {
 			Ok((first, through, second))
 		} else {
@@ -63,24 +62,24 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_relate_kind(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub fn parse_relate_kind(&mut self) -> ParseResult<Expr> {
 		match self.peek_kind() {
 			t!("$param") => self.next_token_value().map(Expr::Param),
 			t!("(") => {
 				let span = self.pop_peek().span;
-				let res = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+				let res = self.parse_expr_inherit()?;
 				self.expect_closing_delimiter(t!(")"), span)?;
 				Ok(res)
 			}
-			_ => self.parse_thing_or_table(stk).await,
+			_ => self.parse_thing_or_table(),
 		}
 	}
 
-	pub async fn parse_relate_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub fn parse_relate_expr(&mut self) -> ParseResult<Expr> {
 		match self.peek_kind() {
 			t!("[") => {
 				let start = self.pop_peek().span;
-				self.parse_array(stk, start).await.map(|x| Expr::Literal(Literal::Array(x)))
+				self.parse_array(start).map(|x| Expr::Literal(Literal::Array(x)))
 			}
 			t!("$param") => self.next_token_value().map(Expr::Param),
 			t!("RETURN")
@@ -95,20 +94,20 @@ impl Parser<'_> {
 			| t!("REMOVE")
 			| t!("REBUILD")
 			| t!("INFO")
-			| t!("IF") => self.parse_expr_field(stk).await,
+			| t!("IF") => self.parse_expr_field(),
 			t!("(") => {
 				let open = self.pop_peek().span;
-				let res = self.parse_expr_field(stk).await?;
+				let res = self.parse_expr_field()?;
 				self.expect_closing_delimiter(t!(")"), open)?;
 				Ok(res)
 			}
-			_ => self.parse_record_id(stk).await.map(|x| Expr::Literal(Literal::RecordId(x))),
+			_ => self.parse_record_id().map(|x| Expr::Literal(Literal::RecordId(x))),
 		}
 	}
 
-	pub async fn parse_thing_or_table(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub fn parse_thing_or_table(&mut self) -> ParseResult<Expr> {
 		if let Some(t!(":")) = self.peek_whitespace1().map(|x| x.kind) {
-			self.parse_record_id(stk).await.map(|x| Expr::Literal(Literal::RecordId(x)))
+			self.parse_record_id().map(|x| Expr::Literal(Literal::RecordId(x)))
 		} else {
 			self.parse_ident_str().map(|x| Expr::Table(x.into()))
 		}

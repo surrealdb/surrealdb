@@ -69,9 +69,9 @@ predicate reads (its `deps`), and the final output spec.
 ## 3. The lowering's responsibilities
 
 The lowering is the **semantic analysis** front of the IR contract
-(`V2_DESIGN.md` §1: "Lowering owns semantics"). It runs over a `reblessive`
-stack because the parser builds arbitrarily deep linear expression chains. Its
-responsibilities, by module:
+(`V2_DESIGN.md` §1: "Lowering owns semantics"). It recurses on the call
+stack; the parser's object and expression budgets bound how deep any tree it
+is handed can be. Its responsibilities, by module:
 
 ### 3.1 Binding registry — `lower/binding.rs`
 

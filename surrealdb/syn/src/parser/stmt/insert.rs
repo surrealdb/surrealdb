@@ -1,4 +1,3 @@
-use reblessive::Stk;
 use surrealdb_sql::statements::InsertStatement;
 use surrealdb_sql::{Data, Expr};
 
@@ -8,7 +7,7 @@ use crate::parser::{ParseResult, Parser};
 use crate::token::t;
 
 impl Parser<'_> {
-	pub async fn parse_insert_stmt(&mut self, stk: &mut Stk) -> ParseResult<InsertStatement> {
+	pub fn parse_insert_stmt(&mut self) -> ParseResult<InsertStatement> {
 		let relation = self.eat(t!("RELATION"));
 		let ignore = self.eat(t!("IGNORE"));
 		let into = if self.eat(t!("INTO")) {
@@ -27,22 +26,22 @@ impl Parser<'_> {
 			None
 		};
 
-		let data = self.parse_insert_values(stk).await?;
+		let data = self.parse_insert_values()?;
 
 		let update = if self.eat(t!("ON")) {
-			Some(self.parse_insert_update(stk).await?)
+			Some(self.parse_insert_update()?)
 		} else {
 			None
 		};
-		let output = self.try_parse_output(stk).await?;
+		let output = self.try_parse_output()?;
 
 		// VERSION is no longer supported in INSERT statements, it is left here for backwards
 		// compatibility.
 		if self.eat(t!("VERSION")) {
-			stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+			self.parse_expr_field()?;
 		};
 
-		let timeout = self.try_parse_timeout(stk).await?;
+		let timeout = self.try_parse_timeout()?;
 		Ok(InsertStatement {
 			into,
 			data,
@@ -54,18 +53,18 @@ impl Parser<'_> {
 		})
 	}
 
-	async fn parse_insert_values(&mut self, stk: &mut Stk) -> ParseResult<Data> {
+	fn parse_insert_values(&mut self) -> ParseResult<Data> {
 		let token = self.peek();
 		// not a `(` so it cant be `(a,b) VALUES (c,d)`
 		if token.kind != t!("(") {
-			let value = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+			let value = self.parse_expr_field()?;
 			return Ok(Data::SingleExpression(value));
 		}
 
 		// No way to correctly parse this without backtracking.
 		// Try to first parse the VALUES case, if that doesn't work retry.
 		let speculate_result = self
-			.speculate(stk, async |stk, this| {
+			.speculate(|this| {
 				this.pop_peek();
 
 				// Some keywords can actually also align with plain idioms, for example `DELETE[1]`
@@ -77,7 +76,7 @@ impl Parser<'_> {
 
 				// If the first value fails to match a idiom, it could still be a valid normal
 				// expression so retry in this case.
-				let Ok(first) = this.parse_plain_idiom(stk).await else {
+				let Ok(first) = this.parse_plain_idiom() else {
 					return Ok(None);
 				};
 
@@ -101,7 +100,7 @@ impl Parser<'_> {
 
 					// at this point we are sure it has to be a values expression because we ate a
 					// `,` so we can throw an error if this fails to parse.
-					idioms.push(this.parse_plain_idiom(stk).await?);
+					idioms.push(this.parse_plain_idiom()?);
 				}
 
 				let select_span = token.span.covers(this.last_span());
@@ -123,7 +122,7 @@ impl Parser<'_> {
 					let mut values = Vec::new();
 					let start = expected!(this, t!("(")).span;
 					loop {
-						values.push(stk.run(|ctx| this.parse_expr_field(ctx)).await?);
+						values.push(this.parse_expr_field()?);
 
 						if !this.eat(t!(",")) {
 							this.expect_closing_delimiter(t!(")"), start)?;
@@ -157,25 +156,24 @@ impl Parser<'_> {
 						insertions.into_iter().map(|row| idioms.iter().cloned().zip(row).collect()).collect(),
 				))
 
-			})
-		.await?;
+			})?;
 
 		if let Some(x) = speculate_result {
 			Ok(Data::ValuesExpression(x))
 		} else {
-			let expr = stk.run(|stk| self.parse_expr_field(stk)).await?;
+			let expr = self.parse_expr_field()?;
 			Ok(Data::SingleExpression(expr))
 		}
 	}
 
-	async fn parse_insert_update(&mut self, stk: &mut Stk) -> ParseResult<Data> {
+	fn parse_insert_update(&mut self) -> ParseResult<Data> {
 		expected!(self, t!("DUPLICATE"));
 		expected!(self, t!("KEY"));
 		expected!(self, t!("UPDATE"));
 
 		let mut res = Vec::new();
 		loop {
-			res.push(self.parse_assignment(stk).await?);
+			res.push(self.parse_assignment()?);
 
 			if !self.eat(t!(",")) {
 				break;

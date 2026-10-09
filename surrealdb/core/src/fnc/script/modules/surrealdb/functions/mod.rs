@@ -1,6 +1,5 @@
 use js::Result;
 use js::prelude::Async;
-use reblessive::tree::Stk;
 
 use super::query::QueryContext;
 use crate::fnc;
@@ -88,10 +87,7 @@ async fn fut(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value>
 	let res = {
 		let this = js_ctx.userdata::<QueryContext<'_>>().expect("query context should be set");
 		// Process the called function
-		Stk::enter_scope(|stk| {
-			stk.run(|stk| fnc::asynchronous(stk, this.context, this.opt, this.doc, name, args))
-		})
-		.await
+		fnc::asynchronous(this.context, this.opt, this.doc, name, args).await
 	};
 	// Convert any response error
 	res.map_err(|err| {

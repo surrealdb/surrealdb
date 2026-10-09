@@ -25,19 +25,15 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use reblessive::tree::Stk;
-
 use crate::catalog::Record;
 use crate::val::RecordId;
 
 /// A boxed future returned by the per-candidate seams in this module.
 ///
 /// Boxes at the trait boundary because both seams are held as trait objects.
-/// Deliberately not `Send`: each takes the caller's `Stk`, and a future
-/// holding one cannot be. Nothing needs it to be — the ANN search runs inside
-/// a heap-allocated `TreeStack`, which erases auto-traits, so the `Send`
-/// stream that drives the streaming executor is unaffected.
-pub type BoxGateFut<'a> = Pin<Box<dyn Future<Output = anyhow::Result<bool>> + 'a>>;
+/// `Send` because the ANN search is awaited inside the `Send` stream that
+/// drives the streaming executor.
+pub type BoxGateFut<'a> = Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send + 'a>>;
 
 /// A SELECT permission that has already been resolved against an execution
 /// context, ready to be checked per candidate document.
@@ -60,12 +56,7 @@ pub trait TableSelectGate: Send + Sync {
 
 	/// Returns `true` when the candidate `record`, stored under `rid`, is
 	/// visible to the current session.
-	fn allows_doc<'a>(
-		&'a self,
-		stk: &'a mut Stk,
-		rid: &'a Arc<RecordId>,
-		record: &'a Arc<Record>,
-	) -> BoxGateFut<'a>;
+	fn allows_doc<'a>(&'a self, rid: &'a Arc<RecordId>, record: &'a Arc<Record>) -> BoxGateFut<'a>;
 }
 
 /// The WHERE condition pushed into an ANN search, evaluated per candidate.
@@ -78,12 +69,7 @@ pub trait TableSelectGate: Send + Sync {
 pub trait CandidateCondition: Send + Sync {
 	/// Returns `true` when the candidate `record`, stored under `rid`,
 	/// satisfies the condition.
-	fn matches<'a>(
-		&'a self,
-		stk: &'a mut Stk,
-		rid: &'a Arc<RecordId>,
-		record: &'a Arc<Record>,
-	) -> BoxGateFut<'a>;
+	fn matches<'a>(&'a self, rid: &'a Arc<RecordId>, record: &'a Arc<Record>) -> BoxGateFut<'a>;
 }
 
 /// Counts the candidates an ANN truthy-document filter fetches and evaluates
@@ -115,7 +101,6 @@ pub enum CachedTableSelect<'a> {
 
 /// Check a resolved [`CachedTableSelect`] against one candidate record.
 pub(crate) async fn check_cached_table_select_for_doc(
-	stk: &mut Stk,
 	cached: &CachedTableSelect<'_>,
 	rid: &Arc<RecordId>,
 	record: &Arc<Record>,
@@ -127,7 +112,7 @@ pub(crate) async fn check_cached_table_select_for_doc(
 		// document here as in the post-search batch check.
 		CachedTableSelect::Gate(gate) => match gate.allows_every_doc() {
 			Some(allowed) => Ok(allowed),
-			None => gate.allows_doc(stk, rid, record).await,
+			None => gate.allows_doc(rid, record).await,
 		},
 	}
 }

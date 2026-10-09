@@ -10,25 +10,25 @@ use token::{BaseTokenKind, T};
 
 use super::Parser;
 use crate::Parse;
-use crate::parse::utils::{parse_delimited_list, parse_seperated_list, parse_seperated_list_sync};
+use crate::parse::utils::{parse_delimited_list, parse_seperated_list};
 use crate::parse::{ParseError, ParseResult, ParserState};
 
 impl Parse for ast::If {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![IF])?;
-		let condition = parser.parse_enter().await?;
+		let condition = parser.parse_enter()?;
 
 		if parser.eat(T![THEN])?.is_some() {
-			let then = parser.parse_enter().await?;
+			let then = parser.parse_enter()?;
 			parser.eat(T![;])?;
 
 			let otherwise = if parser.eat(T![ELSE])?.is_some() {
 				let peek = parser.peek_expect("a `else` body")?;
 				if let T![IF] = peek.token {
-					let otherwise = parser.parse_enter().await?;
+					let otherwise = parser.parse_enter()?;
 					Some(parser.push(Expr::If(otherwise)))
 				} else {
-					let res = parser.parse_enter().await?;
+					let res = parser.parse_enter()?;
 					parser.eat(T![;])?;
 					let _ = parser.expect(T![END])?;
 					Some(res)
@@ -46,16 +46,16 @@ impl Parse for ast::If {
 				span,
 			})
 		} else {
-			let then = parser.parse().await?;
+			let then = parser.parse()?;
 			let then = parser.push(Expr::Block(then));
 
 			let otherwise = if parser.eat(T![ELSE])?.is_some() {
 				let peek = parser.peek_expect("a `else` body")?;
 				if let T![IF] = peek.token {
-					let otherwise = parser.parse_enter().await?;
+					let otherwise = parser.parse_enter()?;
 					Some(parser.push(Expr::If(otherwise)))
 				} else {
-					let block = parser.parse().await?;
+					let block = parser.parse()?;
 					Some(parser.push(Expr::Block(block)))
 				}
 			} else {
@@ -74,14 +74,14 @@ impl Parse for ast::If {
 }
 
 impl Parse for ast::For {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![FOR])?;
 
 		let param = parser.parse_sync()?;
 		let _ = parser.expect(T![IN])?;
-		let expr = parser.parse_enter().await?;
+		let expr = parser.parse_enter()?;
 
-		let body = parser.with_state(|s| s | ParserState::LOOP, Parser::parse).await?;
+		let body = parser.with_state(|s| s | ParserState::LOOP, Parser::parse)?;
 
 		let span = parser.span_since(start.span);
 		Ok(ast::For {
@@ -94,20 +94,20 @@ impl Parse for ast::For {
 }
 
 impl Parse for ast::Let {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![LET])?;
 
 		let param = parser.parse_sync()?;
 
 		let ty = if parser.eat(T![:])?.is_some() {
-			Some(parser.parse().await?)
+			Some(parser.parse()?)
 		} else {
 			None
 		};
 
 		let _ = parser.expect(T![=])?;
 
-		let expr = parser.parse_enter().await?;
+		let expr = parser.parse_enter()?;
 		let span = parser.span_since(start.span);
 
 		Ok(ast::Let {
@@ -120,14 +120,14 @@ impl Parse for ast::Let {
 }
 
 impl Parse for ast::Return {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![RETURN])?;
 
-		let expr = parser.parse_enter().await?;
+		let expr = parser.parse_enter()?;
 
 		let fetch = if parser.eat(T![FETCH])?.is_some() {
 			Some(
-				parse_seperated_list(parser, T![,], async |parser| {
+				parse_seperated_list(parser, T![,], |parser| {
 					// Check for param or identifier,
 					// This check could be removed but keeping it in place can allow us to
 					// constrain the allowed syntax in the future without cause backwards
@@ -135,12 +135,11 @@ impl Parse for ast::Return {
 					if let Some(t) = parser.peek()?
 						&& (t.token.is_identifier() || t.token == BaseTokenKind::Param)
 					{
-						parser.parse_enter().await
+						parser.parse_enter()
 					} else {
 						Err(parser.unexpected("a fetch expression"))
 					}
-				})
-				.await?
+				})?
 				.1,
 			)
 		} else {
@@ -157,7 +156,7 @@ impl Parse for ast::Return {
 }
 
 impl Parse for ast::Info {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![INFO])?;
 		let _ = parser.expect(T![FOR])?;
 
@@ -170,7 +169,7 @@ impl Parse for ast::Info {
 			T![NAMESPACE] => {
 				let _ = parser.next();
 				let version = if parser.eat(T![VERSION])?.is_some() {
-					Some(parser.parse_enter().await?)
+					Some(parser.parse_enter()?)
 				} else {
 					None
 				};
@@ -181,7 +180,7 @@ impl Parse for ast::Info {
 			T![DATABASE] => {
 				let _ = parser.next();
 				let version = if parser.eat(T![VERSION])?.is_some() {
-					Some(parser.parse_enter().await?)
+					Some(parser.parse_enter()?)
 				} else {
 					None
 				};
@@ -191,9 +190,9 @@ impl Parse for ast::Info {
 			}
 			T![TABLE] | T![TB] => {
 				let _ = parser.next();
-				let name = parser.parse_enter().await?;
+				let name = parser.parse_enter()?;
 				let version = if parser.eat(T![VERSION])?.is_some() {
-					Some(parser.parse_enter().await?)
+					Some(parser.parse_enter()?)
 				} else {
 					None
 				};
@@ -204,7 +203,7 @@ impl Parse for ast::Info {
 			}
 			T![USER] => {
 				let _ = parser.next();
-				let name = parser.parse_enter().await?;
+				let name = parser.parse_enter()?;
 
 				let base = if parser.eat(T![ON])?.is_some() {
 					Some(parser.parse_sync()?)
@@ -218,10 +217,10 @@ impl Parse for ast::Info {
 			}
 			T![INDEX] => {
 				let _ = parser.next();
-				let name = parser.parse_enter().await?;
+				let name = parser.parse_enter()?;
 				let _ = parser.expect(T![ON])?;
 				parser.eat(T![TABLE])?;
-				let table = parser.parse_enter().await?;
+				let table = parser.parse_enter()?;
 				ast::InfoKind::Index {
 					name,
 					table,
@@ -241,30 +240,28 @@ impl Parse for ast::Info {
 	}
 }
 
-async fn try_parse_clause_expr(
+fn try_parse_clause_expr(
 	parser: &mut Parser<'_, '_>,
 	token: BaseTokenKind,
 ) -> ParseResult<Option<NodeId<ast::Expr>>> {
 	if parser.eat(token)?.is_some() {
-		Ok(Some(parser.parse_enter().await?))
+		Ok(Some(parser.parse_enter()?))
 	} else {
 		Ok(None)
 	}
 }
 
-async fn try_parse_clause_expr_no_loop(
+fn try_parse_clause_expr_no_loop(
 	parser: &mut Parser<'_, '_>,
 	token: BaseTokenKind,
 ) -> ParseResult<Option<NodeId<ast::Expr>>> {
-	parser
-		.with_state(
-			|s| s.difference(ParserState::LOOP),
-			async |parser| try_parse_clause_expr(parser, token).await,
-		)
-		.await
+	parser.with_state(
+		|s| s.difference(ParserState::LOOP),
+		|parser| try_parse_clause_expr(parser, token),
+	)
 }
 
-async fn try_parse_with(parser: &mut Parser<'_, '_>) -> ParseResult<Option<WithIndex>> {
+fn try_parse_with(parser: &mut Parser<'_, '_>) -> ParseResult<Option<WithIndex>> {
 	if parser.eat(T![WITH])?.is_some() {
 		let peek = parser.peek_expect("`INDEX` `NO`, or `NOINDEX`")?;
 		let idx = match peek.token {
@@ -280,7 +277,7 @@ async fn try_parse_with(parser: &mut Parser<'_, '_>) -> ParseResult<Option<WithI
 			T![INDEX] => {
 				let _ = parser.next();
 				let (_, indecies) =
-					parse_seperated_list_sync(parser, T![,], |parser| parser.parse_sync())?;
+					parse_seperated_list(parser, T![,], |parser| parser.parse_sync())?;
 				ast::WithIndex::Some(indecies)
 			}
 			_ => return Err(parser.unexpected("`INDEX` or `NOINDEX`")),
@@ -291,7 +288,7 @@ async fn try_parse_with(parser: &mut Parser<'_, '_>) -> ParseResult<Option<WithI
 	}
 }
 
-async fn try_parse_explain(parser: &mut Parser<'_, '_>) -> ParseResult<Option<ast::ExplainClause>> {
+fn try_parse_explain(parser: &mut Parser<'_, '_>) -> ParseResult<Option<ast::ExplainClause>> {
 	let res = if let Some(explain) = parser.eat(T![EXPLAIN])? {
 		if let Some(full) = parser.eat(T![FULL])? {
 			Some(ast::ExplainClause::Full(explain.span.extend(full.span)))
@@ -304,43 +301,41 @@ async fn try_parse_explain(parser: &mut Parser<'_, '_>) -> ParseResult<Option<as
 	Ok(res)
 }
 
-async fn try_parse_record_data(parser: &mut Parser<'_, '_>) -> ParseResult<Option<RecordData>> {
+fn try_parse_record_data(parser: &mut Parser<'_, '_>) -> ParseResult<Option<RecordData>> {
 	let peek = parser.peek()?;
 	let data = match peek.map(|x| x.token) {
 		Some(T![SET]) => {
 			let _ = parser.next();
-			let (_, list) =
-				parse_seperated_list(parser, T![,], async |parser| parser.parse().await).await?;
+			let (_, list) = parse_seperated_list(parser, T![,], |parser| parser.parse())?;
 			Some(ast::RecordData::Set(list))
 		}
 		Some(T![UNSET]) => {
 			let _ = parser.next();
-			let (_, list) =
-				parse_seperated_list(parser, T![,], async |parser| parser.parse().await).await?;
+			let (_, list) = parse_seperated_list(parser, T![,], |parser| parser.parse())?;
 			Some(ast::RecordData::Unset(list))
 		}
 		Some(T![CONTENT]) => {
 			let _ = parser.next();
 			Some(ast::RecordData::Content(
-				parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?,
+				parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)?,
 			))
 		}
 		Some(T![PATCH]) => {
 			let _ = parser.next();
 			Some(ast::RecordData::Patch(
-				parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?,
+				parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)?,
 			))
 		}
 		Some(T![MERGE]) => {
 			let _ = parser.next();
 			Some(ast::RecordData::Merge(
-				parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?,
+				parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)?,
 			))
 		}
 		Some(T![REPLACE]) => {
 			let _ = parser.next();
 			Some(ast::RecordData::Replace(
-				parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?,
+				parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)?,
 			))
 		}
 		_ => None,
@@ -349,13 +344,12 @@ async fn try_parse_record_data(parser: &mut Parser<'_, '_>) -> ParseResult<Optio
 }
 
 impl Parse for ast::Selector {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let span = parser.peek_span();
 
-		let expr =
-			parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?;
+		let expr = parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)?;
 		let alias = if parser.eat(T![AS])?.is_some() {
-			Some(parser.parse().await?)
+			Some(parser.parse()?)
 		} else {
 			None
 		};
@@ -369,30 +363,29 @@ impl Parse for ast::Selector {
 }
 
 impl Parse for ast::ListSelector {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		if let Some(x) = parser.eat(T![*])? {
 			Ok(ast::ListSelector::All(x.span))
 		} else {
-			Ok(ast::ListSelector::Selector(parser.parse().await?))
+			Ok(ast::ListSelector::Selector(parser.parse()?))
 		}
 	}
 }
 
 impl Parse for ast::Fields {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		if parser.eat(T![VALUE])?.is_some() {
-			let selector = parser.parse().await?;
+			let selector = parser.parse()?;
 			Ok(ast::Fields::Value(selector))
 		} else {
-			let (_, list) =
-				parse_seperated_list(parser, T![,], async |parser| parser.parse().await).await?;
+			let (_, list) = parse_seperated_list(parser, T![,], |parser| parser.parse())?;
 			Ok(ast::Fields::List(list))
 		}
 	}
 }
 
 impl Parse for ast::Output {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let _ = parser.expect(T![RETURN])?;
 		let peek =
 			parser.peek_expect("`NONE`, `NULL`, `DIFF`, `AFTER`, `BEFORE`, or an expression")?;
@@ -418,7 +411,7 @@ impl Parse for ast::Output {
 				ast::Output::Before(peek.span)
 			}
 			_ => {
-				let fields = parser.parse().await?;
+				let fields = parser.parse()?;
 				ast::Output::Fields(fields)
 			}
 		};
@@ -427,27 +420,26 @@ impl Parse for ast::Output {
 }
 
 impl Parse for ast::Delete {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![DELETE])?;
 		let _ = parser.eat(T![FROM])?;
 		let only = parser.eat(T![ONLY])?.is_some();
-		let (_, targets) =
-			parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await).await?;
+		let (_, targets) = parse_seperated_list(parser, T![,], |parser| parser.parse_enter())?;
 
-		let with_index = try_parse_with(parser).await?;
+		let with_index = try_parse_with(parser)?;
 
-		let condition = try_parse_clause_expr_no_loop(parser, T![WHERE]).await?;
+		let condition = try_parse_clause_expr_no_loop(parser, T![WHERE])?;
 		let output = if let Some(x) = parser.peek()?
 			&& let T![RETURN] = x.token
 		{
-			Some(parser.parse().await?)
+			Some(parser.parse()?)
 		} else {
 			None
 		};
 
-		let timeout = try_parse_clause_expr(parser, T![TIMEOUT]).await?;
+		let timeout = try_parse_clause_expr(parser, T![TIMEOUT])?;
 
-		let explain = try_parse_explain(parser).await?;
+		let explain = try_parse_explain(parser)?;
 
 		let span = parser.span_since(start.span);
 		Ok(ast::Delete {
@@ -464,9 +456,9 @@ impl Parse for ast::Delete {
 }
 
 impl Parse for ast::Assignment {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.peek_span();
-		let place = parser.parse().await?;
+		let place = parser.parse()?;
 
 		let peek = parser.peek_expect("`=`, `+=`, `-=`, or `+?=`")?;
 		let op = match peek.token {
@@ -478,8 +470,7 @@ impl Parse for ast::Assignment {
 		};
 		let _ = parser.next();
 
-		let value =
-			parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?;
+		let value = parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)?;
 		let span = parser.span_since(start);
 
 		Ok(ast::Assignment {
@@ -492,23 +483,22 @@ impl Parse for ast::Assignment {
 }
 
 impl Parse for ast::Create {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![CREATE])?;
 		let only = parser.eat(T![ONLY])?.is_some();
-		let (_, targets) =
-			parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await).await?;
+		let (_, targets) = parse_seperated_list(parser, T![,], |parser| parser.parse_enter())?;
 
-		let data = try_parse_record_data(parser).await?;
+		let data = try_parse_record_data(parser)?;
 
 		let output = if let Some(x) = parser.peek()?
 			&& let T![RETURN] = x.token
 		{
-			Some(parser.parse().await?)
+			Some(parser.parse()?)
 		} else {
 			None
 		};
-		let version = try_parse_clause_expr(parser, T![VERSION]).await?;
-		let timeout = try_parse_clause_expr(parser, T![TIMEOUT]).await?;
+		let version = try_parse_clause_expr(parser, T![VERSION])?;
+		let timeout = try_parse_clause_expr(parser, T![TIMEOUT])?;
 
 		let span = parser.span_since(start.span);
 		Ok(ast::Create {
@@ -524,29 +514,28 @@ impl Parse for ast::Create {
 }
 
 impl Parse for ast::Update {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![UPDATE])?;
 		let only = parser.eat(T![ONLY])?.is_some();
-		let (_, targets) =
-			parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await).await?;
+		let (_, targets) = parse_seperated_list(parser, T![,], |parser| parser.parse_enter())?;
 
-		let with_index = try_parse_with(parser).await?;
+		let with_index = try_parse_with(parser)?;
 
-		let data = try_parse_record_data(parser).await?;
+		let data = try_parse_record_data(parser)?;
 
-		let condition = try_parse_clause_expr_no_loop(parser, T![WHERE]).await?;
+		let condition = try_parse_clause_expr_no_loop(parser, T![WHERE])?;
 
 		let output = if let Some(x) = parser.peek()?
 			&& let T![RETURN] = x.token
 		{
-			Some(parser.parse().await?)
+			Some(parser.parse()?)
 		} else {
 			None
 		};
 
-		let timeout = try_parse_clause_expr(parser, T![TIMEOUT]).await?;
+		let timeout = try_parse_clause_expr(parser, T![TIMEOUT])?;
 
-		let explain = try_parse_explain(parser).await?;
+		let explain = try_parse_explain(parser)?;
 
 		let span = parser.span_since(start.span);
 		Ok(ast::Update {
@@ -564,29 +553,28 @@ impl Parse for ast::Update {
 }
 
 impl Parse for ast::Upsert {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![UPSERT])?;
 		let only = parser.eat(T![ONLY])?.is_some();
-		let (_, targets) =
-			parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await).await?;
+		let (_, targets) = parse_seperated_list(parser, T![,], |parser| parser.parse_enter())?;
 
-		let with_index = try_parse_with(parser).await?;
+		let with_index = try_parse_with(parser)?;
 
-		let data = try_parse_record_data(parser).await?;
+		let data = try_parse_record_data(parser)?;
 
-		let condition = try_parse_clause_expr_no_loop(parser, T![WHERE]).await?;
+		let condition = try_parse_clause_expr_no_loop(parser, T![WHERE])?;
 
 		let output = if let Some(x) = parser.peek()?
 			&& let T![RETURN] = x.token
 		{
-			Some(parser.parse().await?)
+			Some(parser.parse()?)
 		} else {
 			None
 		};
 
-		let timeout = try_parse_clause_expr(parser, T![TIMEOUT]).await?;
+		let timeout = try_parse_clause_expr(parser, T![TIMEOUT])?;
 
-		let explain = try_parse_explain(parser).await?;
+		let explain = try_parse_explain(parser)?;
 
 		let span = parser.span_since(start.span);
 		Ok(ast::Upsert {
@@ -603,7 +591,7 @@ impl Parse for ast::Upsert {
 	}
 }
 
-async fn parse_relate_expr(parser: &mut Parser<'_, '_>) -> ParseResult<NodeId<Expr>> {
+fn parse_relate_expr(parser: &mut Parser<'_, '_>) -> ParseResult<NodeId<Expr>> {
 	let peek = parser.peek_expect("an expression")?;
 	match peek.token {
 		BaseTokenKind::Param => {
@@ -611,7 +599,7 @@ async fn parse_relate_expr(parser: &mut Parser<'_, '_>) -> ParseResult<NodeId<Ex
 			Ok(parser.push(expr))
 		}
 		BaseTokenKind::OpenBracket => {
-			let expr = parser.parse().await.map(Expr::Array)?;
+			let expr = parser.parse().map(Expr::Array)?;
 			Ok(parser.push(expr))
 		}
 		BaseTokenKind::OpenParen => {
@@ -619,7 +607,7 @@ async fn parse_relate_expr(parser: &mut Parser<'_, '_>) -> ParseResult<NodeId<Ex
 			// expression inside cannot extend past the closing delimiter, e.g.
 			// picking up `->` after `)` as a graph traversal.
 			let _ = parser.next();
-			let expr = parser.parse_enter().await?;
+			let expr = parser.parse_enter()?;
 			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, peek.span)?;
 			Ok(parser.push(Expr::Covered(expr)))
 		}
@@ -635,16 +623,16 @@ async fn parse_relate_expr(parser: &mut Parser<'_, '_>) -> ParseResult<NodeId<Ex
 		| T![REMOVE]
 		| T![REBUILD]
 		| T![INFO]
-		| T![IF] => parser.parse_enter().await,
+		| T![IF] => parser.parse_enter(),
 		_ => {
-			let expr = parser.parse().await.map(Expr::RecordId)?;
+			let expr = parser.parse().map(Expr::RecordId)?;
 			Ok(parser.push(expr))
 		}
 	}
 }
 
 impl Parse for ast::Relate {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![RELATE])?;
 		let only = parser.eat(T![ONLY])?.is_some();
 
@@ -655,7 +643,7 @@ impl Parse for ast::Relate {
 			false
 		};
 
-		let first = parse_relate_expr(parser).await?;
+		let first = parse_relate_expr(parser)?;
 
 		let peek = parser.peek_expect("`->` or `<-`")?;
 		let rightward = match peek.token {
@@ -686,7 +674,7 @@ impl Parse for ast::Relate {
 			}
 			BaseTokenKind::OpenParen => {
 				let _ = parser.next();
-				let expr = parser.parse_enter().await?;
+				let expr = parser.parse_enter()?;
 				let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, peek.span)?;
 				expr
 			}
@@ -694,7 +682,7 @@ impl Parse for ast::Relate {
 				if let Some(peek1) = parser.peek1()?
 					&& let T![:] = peek1.token
 				{
-					let id = parser.parse().await?;
+					let id = parser.parse()?;
 					parser.push(Expr::RecordId(id))
 				} else {
 					let ident = parser.parse_sync::<NodeId<_>>()?;
@@ -726,7 +714,7 @@ impl Parse for ast::Relate {
 			return Err(parser.unexpected("`<-`"));
 		}
 
-		let last = parse_relate_expr(parser).await?;
+		let last = parse_relate_expr(parser)?;
 
 		let (from, to) = if rightward {
 			(first, last)
@@ -734,7 +722,7 @@ impl Parse for ast::Relate {
 			(last, first)
 		};
 
-		let data = try_parse_record_data(parser).await?;
+		let data = try_parse_record_data(parser)?;
 
 		// Was in the previous parser for backwards compatiblity
 		// TODO (4.0): Remove
@@ -742,11 +730,11 @@ impl Parse for ast::Relate {
 		let output = if let Some(x) = parser.peek()?
 			&& let T![RETURN] = x.token
 		{
-			Some(parser.parse().await?)
+			Some(parser.parse()?)
 		} else {
 			None
 		};
-		let timeout = try_parse_clause_expr(parser, T![TIMEOUT]).await?;
+		let timeout = try_parse_clause_expr(parser, T![TIMEOUT])?;
 
 		let span = parser.span_since(start.span);
 		Ok(ast::Relate {
@@ -764,9 +752,9 @@ impl Parse for ast::Relate {
 }
 
 impl Parse for ast::Order {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let span = parser.peek_span();
-		let expr = parser.parse_enter().await?;
+		let expr = parser.parse_enter()?;
 
 		let collate = parser.eat(T![COLLATE])?.is_some();
 		let numeric = parser.eat(T![NUMERIC])?.is_some();
@@ -796,7 +784,7 @@ impl Parse for ast::Order {
 }
 
 impl Parse for ast::OrderBy {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let _ = parser.expect(T![ORDER])?;
 		let _ = parser.expect(T![BY])?;
 
@@ -812,18 +800,18 @@ impl Parse for ast::OrderBy {
 			return Ok(OrderBy::Rand(span));
 		}
 
-		let (_, v) = parse_seperated_list(parser, T![,], Parser::parse).await?;
+		let (_, v) = parse_seperated_list(parser, T![,], Parser::parse)?;
 		Ok(OrderBy::List(v))
 	}
 }
 
 impl Parse for ast::Select {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let select = parser.expect(T![SELECT])?;
-		let fields = parser.parse().await?;
+		let fields = parser.parse()?;
 
 		let omit = if parser.eat(T![OMIT])?.is_some() {
-			Some(parse_seperated_list(parser, T![,], Parser::parse_enter).await?.1)
+			Some(parse_seperated_list(parser, T![,], Parser::parse_enter)?.1)
 		} else {
 			None
 		};
@@ -832,18 +820,15 @@ impl Parse for ast::Select {
 
 		let only = parser.eat(T![ONLY])?.is_some();
 
-		let (_, from) =
-			parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await).await?;
+		let (_, from) = parse_seperated_list(parser, T![,], |parser| parser.parse_enter())?;
 
-		let with_index = try_parse_with(parser).await?;
-		let condition = try_parse_clause_expr_no_loop(parser, T![WHERE]).await?;
+		let with_index = try_parse_with(parser)?;
+		let condition = try_parse_clause_expr_no_loop(parser, T![WHERE])?;
 
 		let split_span = parser.peek_span();
 		let split = if parser.eat(T![SPLIT])?.is_some() {
 			let _ = parser.eat(T![ON])?;
-			let (_, splits) =
-				parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await)
-					.await?;
+			let (_, splits) = parse_seperated_list(parser, T![,], |parser| parser.parse_enter())?;
 			Some(splits)
 		} else {
 			None
@@ -862,8 +847,7 @@ impl Parse for ast::Select {
 
 				let _ = parser.eat(T![BY])?;
 				let (_, groups) =
-					parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await)
-						.await?;
+					parse_seperated_list(parser, T![,], |parser| parser.parse_enter())?;
 				Some(ast::Group::Fields(groups))
 			}
 		} else {
@@ -873,7 +857,7 @@ impl Parse for ast::Select {
 		let order = if let Some(x) = parser.peek()?
 			&& let T![ORDER] = x.token
 		{
-			Some(parser.parse().await?)
+			Some(parser.parse()?)
 		} else {
 			None
 		};
@@ -883,11 +867,11 @@ impl Parse for ast::Select {
 		{
 			let _ = parser.next()?;
 			let _ = parser.eat(T![AT])?;
-			let start = Some(parser.parse_enter().await?);
+			let start = Some(parser.parse_enter()?);
 
 			let limit = if parser.eat(T![LIMIT])?.is_some() {
 				let _ = parser.eat(T![BY])?;
-				Some(parser.parse_enter().await?)
+				Some(parser.parse_enter()?)
 			} else {
 				None
 			};
@@ -895,14 +879,14 @@ impl Parse for ast::Select {
 		} else {
 			let limit = if parser.eat(T![LIMIT])?.is_some() {
 				let _ = parser.eat(T![BY])?;
-				Some(parser.parse_enter().await?)
+				Some(parser.parse_enter()?)
 			} else {
 				None
 			};
 
 			let start = if parser.eat(T![START])?.is_some() {
 				let _ = parser.eat(T![AT])?;
-				Some(parser.parse_enter().await?)
+				Some(parser.parse_enter()?)
 			} else {
 				None
 			};
@@ -911,7 +895,7 @@ impl Parse for ast::Select {
 
 		let fetch = if parser.eat(T![FETCH])?.is_some() {
 			Some(
-				parse_seperated_list(parser, T![,], async |parser| {
+				parse_seperated_list(parser, T![,], |parser| {
 					// Check for param or identifier,
 					// This check could be removed but keeping it in place can allow us to
 					// constrain the allowed syntax in the future without cause backwards
@@ -919,22 +903,19 @@ impl Parse for ast::Select {
 					if let Some(t) = parser.peek()?
 						&& (t.token.is_identifier() || t.token == BaseTokenKind::Param)
 					{
-						parser
-							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
-							.await
+						parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
 					} else {
 						Err(parser.unexpected("a fetch expression"))
 					}
-				})
-				.await?
+				})?
 				.1,
 			)
 		} else {
 			None
 		};
 
-		let version = try_parse_clause_expr(parser, T![VERSION]).await?;
-		let timeout = try_parse_clause_expr(parser, T![TIMEOUT]).await?;
+		let version = try_parse_clause_expr(parser, T![VERSION])?;
+		let timeout = try_parse_clause_expr(parser, T![TIMEOUT])?;
 
 		let for_update = if parser.eat(T![FOR])?.is_some() {
 			let _ = parser.expect(T![UPDATE])?;
@@ -945,7 +926,7 @@ impl Parse for ast::Select {
 
 		let tempfiles = parser.eat(T![TEMPFILES])?.is_some();
 
-		let explain = try_parse_explain(parser).await?;
+		let explain = try_parse_explain(parser)?;
 
 		let span = parser.span_since(select.span);
 		Ok(ast::Select {
@@ -980,12 +961,12 @@ impl Parse for ast::Select {
 	}
 }
 
-async fn parse_insert_data(parser: &mut Parser<'_, '_>) -> ParseResult<InsertData> {
+fn parse_insert_data(parser: &mut Parser<'_, '_>) -> ParseResult<InsertData> {
 	// Did not start with a `(` so it cannot be the tuples
 	if let Some(peek) = parser.peek()?
 		&& !matches!(peek.token, BaseTokenKind::OpenParen)
 	{
-		return Ok(InsertData::Expr(parser.parse_enter().await?));
+		return Ok(InsertData::Expr(parser.parse_enter()?));
 	}
 
 	// We need to do something a bit hacky here.
@@ -998,20 +979,19 @@ async fn parse_insert_data(parser: &mut Parser<'_, '_>) -> ParseResult<InsertDat
 	let ident_len = parser.ast.library().ident.len();
 
 	let speculate = parser
-		.speculate(async |parser| {
+		.speculate(|parser| {
 			let mut places_len = 0;
 			let (places_span, places) = parse_delimited_list(
 				parser,
 				BaseTokenKind::OpenParen,
 				BaseTokenKind::CloseParen,
 				T![,],
-				async |parser| {
-					let res = parser.parse().await;
+				|parser| {
+					let res = parser.parse();
 					places_len += 1;
 					res
 				},
-			)
-			.await?;
+			)?;
 
 			let Some(places) = places else {
 				return Err(ParseError::speculate());
@@ -1021,21 +1001,20 @@ async fn parse_insert_data(parser: &mut Parser<'_, '_>) -> ParseResult<InsertDat
 
 			// After parsing the VALUES token we can be sure this has to be tuples
 			parser
-				.commit(async |parser| {
-					let (_, values) = parse_seperated_list(parser, T![,], async |parser| {
+				.commit(|parser| {
+					let (_, values) = parse_seperated_list(parser, T![,], |parser| {
 						let mut expr_len = 0;
 						let (exprs_span, exprs) = parse_delimited_list(
 							parser,
 							BaseTokenKind::OpenParen,
 							BaseTokenKind::CloseParen,
 							T![,],
-							async |parser| {
-								let res = parser.parse_enter::<Expr>().await?;
+							|parser| {
+								let res = parser.parse_enter::<Expr>()?;
 								expr_len += 1;
 								Ok(res)
 							},
-						)
-						.await?;
+						)?;
 
 
 						if let Some(values) = exprs && places_len == expr_len {
@@ -1051,8 +1030,7 @@ async fn parse_insert_data(parser: &mut Parser<'_, '_>) -> ParseResult<InsertDat
 									.to_diagnostic()
 							}))
 						}
-					})
-					.await?;
+					})?;
 
 					let span = parser.span_since(places_span);
 					Ok(InsertTuples{
@@ -1061,9 +1039,7 @@ async fn parse_insert_data(parser: &mut Parser<'_, '_>) -> ParseResult<InsertDat
 						span,
 					})
 				})
-				.await
-		})
-		.await?;
+		})?;
 
 	if let Some(res) = speculate {
 		return Ok(InsertData::Tuples(res));
@@ -1073,11 +1049,11 @@ async fn parse_insert_data(parser: &mut Parser<'_, '_>) -> ParseResult<InsertDat
 	parser.ast.library_mut().places.truncate(places_len);
 	parser.ast.library_mut().ident.truncate(ident_len);
 
-	Ok(InsertData::Expr(parser.parse_enter().await?))
+	Ok(InsertData::Expr(parser.parse_enter()?))
 }
 
 impl Parse for ast::Insert {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![INSERT])?;
 
 		let relation = parser.eat(T![RELATION])?.is_some();
@@ -1096,13 +1072,13 @@ impl Parse for ast::Insert {
 			None
 		};
 
-		let data = parse_insert_data(parser).await?;
+		let data = parse_insert_data(parser)?;
 
 		let on_duplicate = if parser.eat(T![ON])?.is_some() {
 			let _ = parser.expect(T![DUPLICATE])?;
 			let _ = parser.expect(T![KEY])?;
 			let _ = parser.expect(T![UPDATE])?;
-			let (_, assignments) = parse_seperated_list(parser, T![,], Parser::parse).await?;
+			let (_, assignments) = parse_seperated_list(parser, T![,], Parser::parse)?;
 			Some(assignments)
 		} else {
 			None
@@ -1111,13 +1087,13 @@ impl Parse for ast::Insert {
 		let output = if let Some(x) = parser.peek()?
 			&& let T![RETURN] = x.token
 		{
-			Some(parser.parse().await?)
+			Some(parser.parse()?)
 		} else {
 			None
 		};
 
-		let version = try_parse_clause_expr(parser, T![VERSION]).await?;
-		let timeout = try_parse_clause_expr(parser, T![TIMEOUT]).await?;
+		let version = try_parse_clause_expr(parser, T![VERSION])?;
+		let timeout = try_parse_clause_expr(parser, T![TIMEOUT])?;
 
 		let span = parser.span_since(start.span);
 		Ok(ast::Insert {
@@ -1135,7 +1111,7 @@ impl Parse for ast::Insert {
 }
 
 impl Parse for ast::Rebuild {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![REBUILD])?;
 		let _ = parser.expect(T![INDEX])?;
 
@@ -1146,10 +1122,10 @@ impl Parse for ast::Rebuild {
 			false
 		};
 
-		let name = parser.parse_enter().await?;
+		let name = parser.parse_enter()?;
 		let _ = parser.expect(T![ON])?;
 		let _ = parser.eat(T![TABLE])?;
-		let table = parser.parse_enter().await?;
+		let table = parser.parse_enter()?;
 
 		let concurrently = parser.eat(T![CONCURRENTLY])?.is_some();
 
@@ -1165,7 +1141,7 @@ impl Parse for ast::Rebuild {
 }
 
 impl Parse for ast::Access {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![ACCESS])?;
 
 		let access = parser.parse_sync()?;
@@ -1177,142 +1153,135 @@ impl Parse for ast::Access {
 
 		let expect = "`GRANT`, `SHOW`, `REVOKE`, and `PURGE`";
 		let peek = parser.peek_expect(expect)?;
-		let kind = match peek.token {
-			T![GRANT] => {
-				let _ = parser.next();
-				let _ = parser.expect(T![FOR])?;
-				let expect = "`USER` or `RECORD`";
-				let subject = parser.peek_expect(expect)?;
-				match subject.token {
-					T![USER] => {
-						let _ = parser.next();
-						let subject = ast::AccessSubject::User(parser.parse_sync()?);
-						let span = parser.span_since(peek.span);
-						ast::AccessKind::Grant(ast::AccessGrant {
-							subject,
-							span,
-						})
-					}
-					T![RECORD] => {
-						let _ = parser.next();
-						let subject = ast::AccessSubject::Subject(parser.parse().await?);
-						let span = parser.span_since(peek.span);
-						ast::AccessKind::Grant(ast::AccessGrant {
-							subject,
-							span,
-						})
-					}
-					_ => return Err(parser.unexpected(expect)),
-				}
-			}
-			T![SHOW] => {
-				let _ = parser.next();
-				let expect = "`ALL`, `GRANT`, or `WHERE`";
-				let which = parser.peek_expect(expect)?;
-				let kind = match which.token {
-					T![ALL] => {
-						let _ = parser.next();
-						ast::AccessShowKind::All
-					}
-					T![GRANT] => {
-						let _ = parser.next();
-						ast::AccessShowKind::Grant(parser.parse_sync()?)
-					}
-					T![WHERE] => {
-						let _ = parser.next();
-						ast::AccessShowKind::Condition(
-							parser
-								.with_state(
-									|s| s.difference(ParserState::LOOP),
-									Parser::parse_enter,
-								)
-								.await?,
-						)
-					}
-					_ => return Err(parser.unexpected(expect)),
-				};
-
-				let span = parser.span_since(peek.span);
-				ast::AccessKind::Show(ast::AccessShow {
-					kind,
-					span,
-				})
-			}
-			T![REVOKE] => {
-				let _ = parser.next();
-				let expect = "`ALL`, `GRANT`, or `WHERE`";
-				let which = parser.peek_expect(expect)?;
-				let kind = match which.token {
-					T![ALL] => {
-						let _ = parser.next();
-						ast::AccessRevokeKind::All
-					}
-					T![GRANT] => {
-						let _ = parser.next();
-						ast::AccessRevokeKind::Grant(parser.parse_sync()?)
-					}
-					T![WHERE] => {
-						let _ = parser.next();
-						ast::AccessRevokeKind::Condition(
-							parser
-								.with_state(
-									|s| s.difference(ParserState::LOOP),
-									Parser::parse_enter,
-								)
-								.await?,
-						)
-					}
-					_ => return Err(parser.unexpected(expect)),
-				};
-
-				let span = parser.span_since(peek.span);
-				ast::AccessKind::Revoke(ast::AccessRevoke {
-					kind,
-					span,
-				})
-			}
-			T![PURGE] => {
-				let _ = parser.next();
-				let expect = "`EXPIRED` or `REVOKED`";
-
-				let mut kind = None;
-				loop {
-					let Some(token) = parser.peek()? else {
-						break;
-					};
-					let next = match (token.token, &kind) {
-						(T![EXPIRED], None) => ast::PurgeKind::Expired,
-						(T![REVOKED], None) => ast::PurgeKind::Revoked,
-						(T![EXPIRED], Some(ast::PurgeKind::Revoked))
-						| (T![REVOKED], Some(ast::PurgeKind::Expired)) => ast::PurgeKind::Both,
-						(T![EXPIRED] | T![REVOKED], Some(_)) => {
-							return Err(parser.unexpected_token("`FOR` or `;`", token));
-						}
-						_ => break,
-					};
+		let kind =
+			match peek.token {
+				T![GRANT] => {
 					let _ = parser.next();
-					kind = Some(next);
-					let _ = parser.eat(T![,])?;
+					let _ = parser.expect(T![FOR])?;
+					let expect = "`USER` or `RECORD`";
+					let subject = parser.peek_expect(expect)?;
+					match subject.token {
+						T![USER] => {
+							let _ = parser.next();
+							let subject = ast::AccessSubject::User(parser.parse_sync()?);
+							let span = parser.span_since(peek.span);
+							ast::AccessKind::Grant(ast::AccessGrant {
+								subject,
+								span,
+							})
+						}
+						T![RECORD] => {
+							let _ = parser.next();
+							let subject = ast::AccessSubject::Subject(parser.parse()?);
+							let span = parser.span_since(peek.span);
+							ast::AccessKind::Grant(ast::AccessGrant {
+								subject,
+								span,
+							})
+						}
+						_ => return Err(parser.unexpected(expect)),
+					}
 				}
-				let Some(kind) = kind else {
-					return Err(parser.unexpected(expect));
-				};
+				T![SHOW] => {
+					let _ = parser.next();
+					let expect = "`ALL`, `GRANT`, or `WHERE`";
+					let which = parser.peek_expect(expect)?;
+					let kind = match which.token {
+						T![ALL] => {
+							let _ = parser.next();
+							ast::AccessShowKind::All
+						}
+						T![GRANT] => {
+							let _ = parser.next();
+							ast::AccessShowKind::Grant(parser.parse_sync()?)
+						}
+						T![WHERE] => {
+							let _ = parser.next();
+							ast::AccessShowKind::Condition(parser.with_state(
+								|s| s.difference(ParserState::LOOP),
+								Parser::parse_enter,
+							)?)
+						}
+						_ => return Err(parser.unexpected(expect)),
+					};
 
-				let grace = if parser.eat(T![FOR])?.is_some() {
-					Some(parser.parse_sync()?)
-				} else {
-					None
-				};
+					let span = parser.span_since(peek.span);
+					ast::AccessKind::Show(ast::AccessShow {
+						kind,
+						span,
+					})
+				}
+				T![REVOKE] => {
+					let _ = parser.next();
+					let expect = "`ALL`, `GRANT`, or `WHERE`";
+					let which = parser.peek_expect(expect)?;
+					let kind = match which.token {
+						T![ALL] => {
+							let _ = parser.next();
+							ast::AccessRevokeKind::All
+						}
+						T![GRANT] => {
+							let _ = parser.next();
+							ast::AccessRevokeKind::Grant(parser.parse_sync()?)
+						}
+						T![WHERE] => {
+							let _ = parser.next();
+							ast::AccessRevokeKind::Condition(parser.with_state(
+								|s| s.difference(ParserState::LOOP),
+								Parser::parse_enter,
+							)?)
+						}
+						_ => return Err(parser.unexpected(expect)),
+					};
 
-				let span = parser.span_since(peek.span);
-				ast::AccessKind::Purge(ast::AccessPurge {
-					kind,
-					grace,
-					span,
-				})
-			}
-			_ => return Err(parser.unexpected(expect)),
-		};
+					let span = parser.span_since(peek.span);
+					ast::AccessKind::Revoke(ast::AccessRevoke {
+						kind,
+						span,
+					})
+				}
+				T![PURGE] => {
+					let _ = parser.next();
+					let expect = "`EXPIRED` or `REVOKED`";
+
+					let mut kind = None;
+					loop {
+						let Some(token) = parser.peek()? else {
+							break;
+						};
+						let next = match (token.token, &kind) {
+							(T![EXPIRED], None) => ast::PurgeKind::Expired,
+							(T![REVOKED], None) => ast::PurgeKind::Revoked,
+							(T![EXPIRED], Some(ast::PurgeKind::Revoked))
+							| (T![REVOKED], Some(ast::PurgeKind::Expired)) => ast::PurgeKind::Both,
+							(T![EXPIRED] | T![REVOKED], Some(_)) => {
+								return Err(parser.unexpected_token("`FOR` or `;`", token));
+							}
+							_ => break,
+						};
+						let _ = parser.next();
+						kind = Some(next);
+						let _ = parser.eat(T![,])?;
+					}
+					let Some(kind) = kind else {
+						return Err(parser.unexpected(expect));
+					};
+
+					let grace = if parser.eat(T![FOR])?.is_some() {
+						Some(parser.parse_sync()?)
+					} else {
+						None
+					};
+
+					let span = parser.span_since(peek.span);
+					ast::AccessKind::Purge(ast::AccessPurge {
+						kind,
+						grace,
+						span,
+					})
+				}
+				_ => return Err(parser.unexpected(expect)),
+			};
 
 		let span = parser.span_since(start.span);
 		Ok(ast::Access {
@@ -1325,7 +1294,7 @@ impl Parse for ast::Access {
 }
 
 impl Parse for ast::Explain {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+	fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![EXPLAIN])?;
 
 		let analyze = parser.eat(T![ANALYZE])?.is_some();
@@ -1349,7 +1318,7 @@ impl Parse for ast::Explain {
 			None
 		};
 
-		let expr = parser.parse_enter().await?;
+		let expr = parser.parse_enter()?;
 
 		let span = parser.span_since(start.span);
 		Ok(ast::Explain {

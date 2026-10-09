@@ -991,12 +991,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reblessive"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbc4a4ea2a66a41a1152c4b3d86e8954dc087bdf33af35446e6e176db4e73c8c"
-
-[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1356,7 +1350,6 @@ version = "3.4.0-nightly"
 dependencies = [
  "bitflags",
  "logos",
- "reblessive",
  "rust_decimal",
  "surrealdb-ast",
  "surrealdb-common",

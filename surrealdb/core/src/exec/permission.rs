@@ -40,8 +40,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use arc_swap::ArcSwapOption;
-#[cfg(test)]
-use reblessive::tree::Stk;
 use surrealdb_strand::TableName;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -1565,7 +1563,6 @@ impl TableSelectGate for PhysicalTableSelect {
 
 	fn allows_doc<'a>(
 		&'a self,
-		_stk: &'a mut Stk,
 		_rid: &'a Arc<RecordId>,
 		record: &'a Arc<Record>,
 	) -> BoxGateFut<'a> {
@@ -2423,15 +2420,12 @@ mod tests {
 		let allowed = Arc::new(Record::new(val("{ public: true }").await));
 		let denied = Arc::new(Record::new(val("{ public: false }").await));
 
-		let mut stack = reblessive::tree::TreeStack::new();
-		let (yes, no) = stack
-			.enter(|stk| async {
-				let yes = gate.allows_doc(stk, &rid, &allowed).await.unwrap();
-				let no = gate.allows_doc(stk, &rid, &denied).await.unwrap();
-				(yes, no)
-			})
-			.finish()
-			.await;
+		let (yes, no) = async {
+			let yes = gate.allows_doc(&rid, &allowed).await.unwrap();
+			let no = gate.allows_doc(&rid, &denied).await.unwrap();
+			(yes, no)
+		}
+		.await;
 		assert!(yes);
 		assert!(!no);
 	}

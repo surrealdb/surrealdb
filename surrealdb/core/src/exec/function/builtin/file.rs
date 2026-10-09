@@ -34,7 +34,6 @@ fn accept_payload(value: Value) -> Result<bytes::Bytes> {
 }
 
 /// Helper struct for bucket operations without needing the full BucketController.
-/// This is used by the engine which doesn't have access to Stk.
 struct StreamingBucketOps<'a> {
 	bucket: Arc<BucketDefinition>,
 	store: Arc<dyn ObjectStore>,

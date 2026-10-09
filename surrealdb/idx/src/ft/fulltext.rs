@@ -4,7 +4,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use anyhow::Result;
-use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
 use roaring::treemap::IntoIter;
 use surrealdb_datastore::Transaction;
@@ -389,7 +388,6 @@ impl FullTextIndex {
 	/// It returns the document ID if the document was found and removed.
 	pub(crate) async fn remove_content(
 		&self,
-		stk: &mut Stk,
 		env: &dyn IndexEnv,
 		az_fn: &dyn AnalyzerFunction,
 		rid: &RecordId,
@@ -398,7 +396,7 @@ impl FullTextIndex {
 	) -> Result<Option<DocId>> {
 		// Collect the tokens.
 		let tokens =
-			self.analyzer.analyze_content(stk, az_fn, content, FilteringStage::Indexing).await?;
+			self.analyzer.analyze_content(az_fn, content, FilteringStage::Indexing).await?;
 		let mut set = HashSet::new();
 		let tx = env.tx();
 		let nid = env.node_id();
@@ -461,7 +459,6 @@ impl FullTextIndex {
 	/// frequencies and offsets.
 	pub(crate) async fn index_content(
 		&self,
-		stk: &mut Stk,
 		env: &dyn IndexEnv,
 		az_fn: &dyn AnalyzerFunction,
 		rid: &RecordId,
@@ -474,7 +471,7 @@ impl FullTextIndex {
 		let doc_id = self.doc_ids.resolve_or_assign(&self.ikb, env, &rid.key).await?;
 		// Collect the tokens.
 		let tokens =
-			self.analyzer.analyze_content(stk, az_fn, content, FilteringStage::Indexing).await?;
+			self.analyzer.analyze_content(az_fn, content, FilteringStage::Indexing).await?;
 		let dl = if self.highlighting {
 			self.index_with_offsets(&nid, &tx, doc_id, tokens).await?
 		} else {
@@ -602,14 +599,13 @@ impl FullTextIndex {
 	/// reduce KV round trips (one batch instead of N sequential gets).
 	pub async fn extract_querying_terms(
 		&self,
-		stk: &mut Stk,
 		env: &dyn IndexEnv,
 		az_fn: &dyn AnalyzerFunction,
 		query_string: String,
 	) -> Result<QueryTerms> {
 		let tokens = self
 			.analyzer
-			.generate_tokens(stk, az_fn, FilteringStage::Querying, query_string.into())
+			.generate_tokens(az_fn, FilteringStage::Querying, query_string.into())
 			.await?;
 
 		let mut unique_terms: Vec<&str> = Vec::new();
@@ -691,14 +687,13 @@ impl FullTextIndex {
 
 	pub async fn matches_value(
 		&self,
-		stk: &mut Stk,
 		az_fn: &dyn AnalyzerFunction,
 		qt: &QueryTerms,
 		bo: BooleanOperator,
 		val: Value,
 	) -> Result<bool> {
 		let mut tks = vec![];
-		self.analyzer.analyze_value(stk, az_fn, val, FilteringStage::Indexing, &mut tks).await?;
+		self.analyzer.analyze_value(az_fn, val, FilteringStage::Indexing, &mut tks).await?;
 		match bo {
 			BooleanOperator::And => qt.matches_and(&tks),
 			BooleanOperator::Or => qt.matches_or(&tks),
@@ -1671,7 +1666,6 @@ mod tests {
 	use std::sync::Arc;
 	use std::time::{Duration, Instant};
 
-	use reblessive::tree::Stk;
 	use roaring::RoaringTreemap;
 	use surrealdb_datastore::Transaction;
 	use surrealdb_kvs::TransactionType;
@@ -1701,12 +1695,7 @@ mod tests {
 	struct NoAnalyzerFunction;
 
 	impl AnalyzerFunction for NoAnalyzerFunction {
-		fn call<'a>(
-			&'a self,
-			_stk: &'a mut Stk,
-			name: &'a str,
-			_input: Strand,
-		) -> BoxAnalyzerFut<'a> {
+		fn call<'a>(&'a self, name: &'a str, _input: Strand) -> BoxAnalyzerFut<'a> {
 			unreachable!("the test analyzer declares no FUNCTION {name}")
 		}
 	}
@@ -1824,7 +1813,7 @@ mod tests {
 			(env, tx)
 		}
 
-		async fn remove_insert_task(&self, stk: &mut Stk, rid: &RecordId) {
+		async fn remove_insert_task(&self, rid: &RecordId) {
 			let ctx = self.ds.env(TransactionType::Write).await;
 			let tx = ctx.tx();
 
@@ -1832,7 +1821,6 @@ mod tests {
 			let az_fn = NoAnalyzerFunction;
 			self.fti
 				.remove_content(
-					stk,
 					&ctx,
 					&az_fn,
 					rid,
@@ -1843,7 +1831,6 @@ mod tests {
 				.unwrap();
 			self.fti
 				.index_content(
-					stk,
 					&ctx,
 					&az_fn,
 					rid,
@@ -1872,21 +1859,18 @@ mod tests {
 		/// that asks whether a query *retrieves* a document rather than what
 		/// terms it produced, and without that feature this would be dead code.
 		#[cfg(feature = "cjk-embed-korean")]
-		async fn query_finds(&self, stk: &mut Stk, query: &str, rid: &RecordId) -> bool {
+		async fn query_finds(&self, query: &str, rid: &RecordId) -> bool {
 			let (ctx, tx) = self.new_read_env().await;
 			let az_fn = NoAnalyzerFunction;
-			let qt = self
-				.fti
-				.extract_querying_terms(stk, &ctx, &az_fn, query.to_string())
-				.await
-				.unwrap();
+			let qt =
+				self.fti.extract_querying_terms(&ctx, &az_fn, query.to_string()).await.unwrap();
 			let doc_id = self.fti.get_doc_id(&tx, rid).await.unwrap().unwrap();
 			let found = qt.contains_doc(doc_id);
 			tx.cancel().await.unwrap();
 			found
 		}
 
-		async fn index_batch_in_one_tx(&self, stk: &mut Stk, rids: &[RecordId], content: &Value) {
+		async fn index_batch_in_one_tx(&self, rids: &[RecordId], content: &Value) {
 			let ctx = self.ds.env(TransactionType::Write).await;
 			let tx = ctx.tx();
 			let az_fn = NoAnalyzerFunction;
@@ -1894,7 +1878,6 @@ mod tests {
 			for rid in rids {
 				self.fti
 					.index_content(
-						stk,
 						&ctx,
 						&az_fn,
 						rid,
@@ -2024,13 +2007,8 @@ mod tests {
 		/// `MATCHES` clause takes.
 		async fn query_docs(&self, term: &str) -> RoaringTreemap {
 			let (ctx, tx) = self.new_read_env().await;
-			let mut stack = reblessive::TreeStack::new();
 			let az_fn = NoAnalyzerFunction;
-			let qt = stack
-				.enter(|stk| self.fti.extract_querying_terms(stk, &ctx, &az_fn, term.to_owned()))
-				.finish()
-				.await
-				.unwrap();
+			let qt = self.fti.extract_querying_terms(&ctx, &az_fn, term.to_owned()).await.unwrap();
 			tx.cancel().await.unwrap();
 			qt.docs.into_iter().flatten().fold(RoaringTreemap::new(), |mut all, docs| {
 				all |= docs;
@@ -2040,9 +2018,8 @@ mod tests {
 	}
 
 	async fn concurrent_doc_update(test: TestContext, rid: Arc<RecordId>, mut count: usize) {
-		let mut stack = reblessive::TreeStack::new();
 		while count > 0 && test.start.elapsed().as_millis() < 3000 {
-			stack.enter(|stk| test.remove_insert_task(stk, &rid)).finish().await;
+			test.remove_insert_task(&rid).await;
 			count -= 1;
 		}
 	}
@@ -2156,9 +2133,8 @@ mod tests {
 		// Index two documents so that IDF is non-zero for a term that only
 		// appears in one of them (BM25 IDF clamps to 0 when term_doc_count
 		// >= doc_count / 2, so we need at least 2 docs).
-		let mut stack = reblessive::TreeStack::new();
-		stack.enter(|stk| test.remove_insert_task(stk, &doc1)).finish().await;
-		stack.enter(|stk| test.remove_insert_task(stk, &doc2)).finish().await;
+		test.remove_insert_task(&doc1).await;
+		test.remove_insert_task(&doc2).await;
 
 		// "lorem" appears in only 1 of 25 entries in the test content, so
 		// with 2 identical docs the term_doc_count=2 and doc_count=2, giving
@@ -2239,10 +2215,9 @@ mod tests {
 		let doc2 = Arc::new(RecordId::new("t".into(), "doc2".to_owned()));
 		let doc3 = Arc::new(RecordId::new("t".into(), "doc3".to_owned()));
 
-		let mut stack = reblessive::TreeStack::new();
-		stack.enter(|stk| test.remove_insert_task(stk, &doc1)).finish().await;
-		stack.enter(|stk| test.remove_insert_task(stk, &doc2)).finish().await;
-		stack.enter(|stk| test.remove_insert_task(stk, &doc3)).finish().await;
+		test.remove_insert_task(&doc1).await;
+		test.remove_insert_task(&doc2).await;
+		test.remove_insert_task(&doc3).await;
 
 		let tx = test.new_tx(TransactionType::Read).await;
 		let before = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();
@@ -2307,23 +2282,13 @@ mod tests {
 		.await;
 		let doc = RecordId::new("t".into(), "doc1".to_owned());
 		let content = Value::from(Array::from(vec!["한국어를 배우고 있습니다"]));
-		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| test.index_batch_in_one_tx(stk, std::slice::from_ref(&doc), &content))
-			.finish()
-			.await;
+		test.index_batch_in_one_tx(std::slice::from_ref(&doc), &content).await;
 
-		let mut stack = reblessive::TreeStack::new();
-		let (stem, particle, absent) = stack
-			.enter(|stk| async {
-				(
-					test.query_finds(stk, "한국어", &doc).await,
-					test.query_finds(stk, "를", &doc).await,
-					test.query_finds(stk, "일본어", &doc).await,
-				)
-			})
-			.finish()
-			.await;
+		let (stem, particle, absent) = (
+			test.query_finds("한국어", &doc).await,
+			test.query_finds("를", &doc).await,
+			test.query_finds("일본어", &doc).await,
+		);
 
 		assert!(stem, "the stem `한국어` must find the document holding `한국어를`");
 		assert!(particle, "the particle is indexed as its own term, so it matches too");
@@ -2341,11 +2306,10 @@ mod tests {
 		for highlight in [false, true] {
 			let test = TestContext::with_highlighting(highlight).await;
 			let doc = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
-			let mut stack = reblessive::TreeStack::new();
 
 			// A record with no doc-ID yet: the removal half writes nothing, so
 			// this counts exactly what one indexing call emits.
-			stack.enter(|stk| test.remove_insert_task(stk, &doc)).finish().await;
+			test.remove_insert_task(&doc).await;
 			let tx = test.new_tx(TransactionType::Read).await;
 			let terms = test.tt_delta_count(&tx).await;
 			assert!(terms > 2, "the fixture content must yield several distinct terms");
@@ -2356,7 +2320,7 @@ mod tests {
 			// one addition per term on top of the first transaction's, and no
 			// statistics entry, because removing and re-adding one document of
 			// unchanged length nets to zero.
-			stack.enter(|stk| test.remove_insert_task(stk, &doc)).finish().await;
+			test.remove_insert_task(&doc).await;
 			let tx = test.new_tx(TransactionType::Read).await;
 			assert_eq!(test.tt_delta_count(&tx).await, terms * 2, "highlight={highlight}");
 			assert_eq!(test.dc_delta_count(&tx).await, 1, "highlight={highlight}");
@@ -2369,8 +2333,7 @@ mod tests {
 		let test = TestContext::new().await;
 		let doc = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
 
-		let mut stack = reblessive::TreeStack::new();
-		stack.enter(|stk| test.remove_insert_task(stk, &doc)).finish().await;
+		test.remove_insert_task(&doc).await;
 
 		let tx = test.new_tx(TransactionType::Read).await;
 		let before_terms = test.tt_delta_count(&tx).await;
@@ -2396,13 +2359,8 @@ mod tests {
 		tx.cancel().await.unwrap();
 
 		let (ctx, tx) = test.new_read_env().await;
-		let mut stack = reblessive::TreeStack::new();
 		let az_fn = NoAnalyzerFunction;
-		let qt = stack
-			.enter(|stk| test.fti.extract_querying_terms(stk, &ctx, &az_fn, "Welcome".into()))
-			.finish()
-			.await
-			.unwrap();
+		let qt = test.fti.extract_querying_terms(&ctx, &az_fn, "Welcome".into()).await.unwrap();
 		let doc_id = test.fti.get_doc_id(&tx, &doc).await.unwrap().unwrap();
 		assert!(
 			qt.docs.iter().flatten().any(|docs| docs.contains(doc_id)),
@@ -2423,13 +2381,8 @@ mod tests {
 
 		let (ctx, tx) = test.new_read_env().await;
 		assert_eq!(test.tt_delta_count(&tx).await, 0);
-		let mut stack = reblessive::TreeStack::new();
 		let az_fn = NoAnalyzerFunction;
-		let qt = stack
-			.enter(|stk| test.fti.extract_querying_terms(stk, &ctx, &az_fn, "Welcome".into()))
-			.finish()
-			.await
-			.unwrap();
+		let qt = test.fti.extract_querying_terms(&ctx, &az_fn, "Welcome".into()).await.unwrap();
 		assert!(
 			qt.docs.iter().flatten().any(|docs| docs.contains(doc_id)),
 			"query should still see documents after all term deltas are compacted"
@@ -2451,9 +2404,8 @@ mod tests {
 		let docs: Vec<RecordId> =
 			(0..6).map(|i| RecordId::new("t".into(), format!("doc{i}"))).collect();
 
-		let mut stack = reblessive::TreeStack::new();
 		let content = test.content.as_ref().clone();
-		stack.enter(|stk| test.index_batch_in_one_tx(stk, &docs, &content)).finish().await;
+		test.index_batch_in_one_tx(&docs, &content).await;
 
 		let tx = test.new_tx(TransactionType::Read).await;
 		assert!(
@@ -2523,8 +2475,7 @@ mod tests {
 		// all where a pass given what the legacy pass left takes one.
 		let docs = vec![RecordId::new("t".into(), "w0".to_owned())];
 		let content = Value::from(Array::from(vec!["zza", "zzb", "zzc"]));
-		let mut stack = reblessive::TreeStack::new();
-		stack.enter(|stk| test.index_batch_in_one_tx(stk, &docs, &content)).finish().await;
+		test.index_batch_in_one_tx(&docs, &content).await;
 
 		let tx = test.new_tx(TransactionType::Read).await;
 		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 3).await.unwrap();
@@ -2561,9 +2512,8 @@ mod tests {
 		let two_terms = Value::from(Array::from(vec!["aaa", "aab"]));
 		let one_term = Value::from(Array::from(vec!["zzz"]));
 
-		let mut stack = reblessive::TreeStack::new();
-		stack.enter(|stk| test.index_batch_in_one_tx(stk, &ahead, &two_terms)).finish().await;
-		stack.enter(|stk| test.index_batch_in_one_tx(stk, &behind, &one_term)).finish().await;
+		test.index_batch_in_one_tx(&ahead, &two_terms).await;
+		test.index_batch_in_one_tx(&behind, &one_term).await;
 
 		let tx = test.new_tx(TransactionType::Read).await;
 		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 3).await.unwrap();
@@ -2591,9 +2541,8 @@ mod tests {
 		let first = Value::from(Array::from(vec!["aaa"]));
 		let second = Value::from(Array::from(vec!["zzz"]));
 
-		let mut stack = reblessive::TreeStack::new();
-		stack.enter(|stk| test.index_batch_in_one_tx(stk, &narrow, &first)).finish().await;
-		stack.enter(|stk| test.index_batch_in_one_tx(stk, &wide, &second)).finish().await;
+		test.index_batch_in_one_tx(&narrow, &first).await;
+		test.index_batch_in_one_tx(&wide, &second).await;
 
 		let tx = test.new_tx(TransactionType::Read).await;
 		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 3).await.unwrap();
@@ -2975,19 +2924,14 @@ mod tests {
 		let tx = ctx.tx();
 		let az_fn = NoAnalyzerFunction;
 		let mut require_compaction = false;
-		let mut stack = reblessive::TreeStack::new();
-		stack
-			.enter(|stk| {
-				test.fti.index_content(
-					stk,
-					&ctx,
-					&az_fn,
-					&doc,
-					vec![test.content.as_ref().clone()],
-					&mut require_compaction,
-				)
-			})
-			.finish()
+		test.fti
+			.index_content(
+				&ctx,
+				&az_fn,
+				&doc,
+				vec![test.content.as_ref().clone()],
+				&mut require_compaction,
+			)
 			.await
 			.unwrap();
 
@@ -2995,11 +2939,7 @@ mod tests {
 		assert_eq!(test.tt_delta_count(&tx).await, 0, "deltas must still be buffered");
 		assert_eq!(test.dc_delta_count(&tx).await, 0, "statistics must still be buffered");
 
-		let qt = stack
-			.enter(|stk| test.fti.extract_querying_terms(stk, &ctx, &az_fn, "Welcome".into()))
-			.finish()
-			.await
-			.unwrap();
+		let qt = test.fti.extract_querying_terms(&ctx, &az_fn, "Welcome".into()).await.unwrap();
 		let doc_id = test.fti.get_doc_id(&tx, &doc).await.unwrap().unwrap();
 		assert!(
 			qt.docs.iter().flatten().any(|docs| docs.contains(doc_id)),
@@ -3021,14 +2961,13 @@ mod tests {
 		let doc1 = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
 		let doc2 = Arc::new(RecordId::new("t".into(), "doc2".to_owned()));
 
-		let mut stack = reblessive::TreeStack::new();
-		stack.enter(|stk| test.remove_insert_task(stk, &doc1)).finish().await;
+		test.remove_insert_task(&doc1).await;
 
 		let read_tx = test.new_tx(TransactionType::Read).await;
 		let plan = test.fti.prepare_compaction(&read_tx).await.unwrap();
 		read_tx.cancel().await.unwrap();
 
-		stack.enter(|stk| test.remove_insert_task(stk, &doc2)).finish().await;
+		test.remove_insert_task(&doc2).await;
 
 		let write_tx = test.new_tx(TransactionType::Write).await;
 		assert!(test.fti.apply_compaction(&write_tx, plan).await.unwrap());

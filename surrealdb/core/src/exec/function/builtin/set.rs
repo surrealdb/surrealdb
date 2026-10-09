@@ -1,7 +1,6 @@
 //! Set functions
 
 use anyhow::Result;
-use reblessive::tree::TreeStack;
 
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
@@ -36,7 +35,7 @@ define_pure_function!(SetUnion, "set::union", effects: EffectSet::PURE, metered:
 define_pure_function!(SetSlice, "set::slice", effects: EffectSet::PURE, metered: crate::fnc::set::slice_walk, (set: Any, ?start: Any, ?end: Int) -> Any, crate::fnc::set::slice);
 
 // =========================================================================
-// Closure-based set functions (require async execution with TreeStack)
+// Closure-based set functions (require async execution)
 // =========================================================================
 
 /// A builtin that runs the closure it is handed over the elements of
@@ -94,12 +93,7 @@ macro_rules! define_set_closure_function {
 					let args = FromArgs::from_args($func_name, args)?;
 					let evaluator = StreamingClosureEvaluator::new(ctx);
 					let ev = Some(&evaluator as &dyn ClosureEvaluator);
-					let mut stack = TreeStack::new();
-					stack
-						.enter(|stk| async move {
-							$impl_path((stk, ev), args).await
-						})
-						.finish()
+					$impl_path(ev, args)
 						.await
 				})
 			}
@@ -151,12 +145,7 @@ macro_rules! define_set_closure_function {
 					let args = FromArgs::from_args($func_name, args)?;
 					let evaluator = StreamingClosureEvaluator::new(ctx);
 					let ev = Some(&evaluator as &dyn ClosureEvaluator);
-					let mut stack = TreeStack::new();
-					stack
-						.enter(|stk| async move {
-							$impl_path((stk, ev), args).await
-						})
-						.finish()
+					$impl_path(ev, args)
 						.await
 				})
 			}
