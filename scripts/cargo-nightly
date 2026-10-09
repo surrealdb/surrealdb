@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/nightly-env.sh"
+if [[ ${1:-} == --help ]]; then
+    cat <<'HELP'
+Usage: scripts/cargo-nightly [--cranelift] <cargo command> [arguments...]
+Uses rust-toolchain.nightly and the parallel frontend (8 threads by default).
+Override with SURREAL_RUSTC_THREADS or SURREAL_NIGHTLY_RUST_TOOLCHAIN.
+Install first: rustup toolchain install "$(cat rust-toolchain.nightly)"
+Cranelift is experimental, native dev builds only. Install its component first:
+  rustup component add rustc-codegen-cranelift-preview --toolchain "$(cat rust-toolchain.nightly)"
+HELP
+    exit 0
+fi
+nightly_args=(--config "$nightly_cargo_config")
+if [[ ${1:-} == --cranelift ]]; then
+    shift
+    # Use Cranelift for workspace dev code, retaining LLVM for dependencies
+    # and build scripts (native library bundling/FFI must keep working).
+    export CARGO_UNSTABLE_CODEGEN_BACKEND=true
+    export CARGO_PROFILE_DEV_CODEGEN_BACKEND=cranelift
+    nightly_args+=(--config 'profile.dev.package."*".codegen-backend="llvm"'
+                   --config 'profile.dev.build-override.codegen-backend="llvm"')
+    # Avoid mixing LLVM and Cranelift outputs between local experiments.
+    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$nightly_root/target/nightly-cranelift}"
+    for arg in "$@"; do
+        case "$arg" in
+            --target|--target=*|--release|--profile|--profile=*)
+                echo 'Cranelift mode is for native dev builds; omit target/release/profile options' >&2
+                exit 1 ;;
+        esac
+    done
+    case ${1:-} in
+        build|run) ;;
+        *) echo 'Cranelift mode supports build/run only; use LLVM for tests and coverage' >&2; exit 1 ;;
+    esac
+fi
+exec cargo "${nightly_args[@]}" "$@"

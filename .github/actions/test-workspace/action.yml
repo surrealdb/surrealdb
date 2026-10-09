@@ -2,6 +2,10 @@ name: 'Test workspace'
 description: 'Run workspace tests'
 
 inputs:
+  toolchain:
+    description: 'Rust toolchain (build-nightly enables the pinned parallel frontend)'
+    required: false
+    default: stable
   save-cache:
     description: 'Whether to save the cargo cache'
     required: false
@@ -29,6 +33,7 @@ runs:
     - name: Setup environment
       uses: ./.github/actions/setup-environment
       with:
+        toolchain: ${{ inputs.toolchain }}
         save-cache: ${{ inputs.save-cache }}
         kache-bucket: ${{ inputs.kache-bucket }}
         kache-access-key-id: ${{ inputs.kache-access-key-id }}

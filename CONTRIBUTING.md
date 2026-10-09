@@ -50,6 +50,68 @@ make fmt (or cargo make fmt)
 cargo clippy
 ```
 
+## Faster development builds
+
+CI build and test jobs use the compiler in `rust-toolchain.nightly`, with
+LLVM code generation and an eight-thread parallel frontend. Documentation
+uses Cargo's nightly parallel rustdoc/index merge support. MSRV and Clippy
+checks still use stable, and release workflows keep the stable toolchain.
+
+Use the same compiler and flags locally without changing your rustup default:
+
+```bash
+rustup toolchain install "$(cat rust-toolchain.nightly)" --component rustfmt --target wasm32-unknown-unknown,wasm32-wasip2
+scripts/cargo-nightly check --locked
+scripts/cargo-nightly make build
+scripts/cargo-nightly test --locked -p surrealdb-common
+scripts/cargo-nightly doc --no-deps --workspace
+SURREAL_RUSTC_THREADS=4 scripts/cargo-nightly check --locked
+```
+
+Choose fewer threads on smaller machines; eight is the default ceiling recommended
+by [Rust's build performance guide](https://doc.rust-lang.org/cargo/guide/build-performance.html).
+The helper preserves explicit `RUSTFLAGS`/`CARGO_ENCODED_RUSTFLAGS` and adds to
+Cargo's target flags when neither is set, so wasm backend and native linker
+settings survive. Cargo-make's feature and wasm checks retain the nightly
+frontend flag when they set their own flags. Use normal `cargo` for stable
+builds; switching compilers or flags costs a rebuild. Keep incremental builds
+on locally; CI disables them so kache can share artifacts between runners.
+
+For native **build/run experiments**, Cranelift is available explicitly:
+
+```bash
+rustup component add rustc-codegen-cranelift-preview --toolchain "$(cat rust-toolchain.nightly)"
+scripts/cargo-nightly --cranelift build --locked --no-default-features --features storage-mem,http,cli
+```
+
+Cranelift compiles workspace dev code; dependencies and build scripts keep LLVM
+to preserve native library bundling. It uses a separate `target/nightly-cranelift` directory by default.
+Its generated code runs slower, SIMD support is incomplete, and panic unwinding
+is experimental (unsupported on macOS/Windows); see the
+[backend's support list](https://github.com/rust-lang/rustc_codegen_cranelift#not-yet-supported).
+Use LLVM for tests, wasm, coverage and performance measurements. The helper
+rejects test/coverage commands in Cranelift mode. A successful dependency build
+does not establish support for every engine feature.
+
+Automatic CI runs coalesce per branch/PR: newer main pushes cancel superseded
+CI runs, and the latest run executes the full required checks. Explicit
+workflow_dispatch validations keep independent concurrency groups.
+
+Feature combinations are checked in isolated CI package jobs with kache and a
+maximum of three concurrent jobs. `cargo make ci-feature-check` runs the same
+package tasks sequentially locally: concurrent Cargo commands sharing one
+`target` directory wait for its build lock instead of compiling in parallel.
+The multi-suite KVS tasks also run Cargo builds in order; nextest still runs
+tests concurrently within each suite. Each CI package has a separate prefetch manifest; cache objects remain shared.
+The `required-checks` gate still requires the entire feature-check matrix.
+
+To validate the helper's flag precedence and child Cargo behavior, install
+cargo-make and the wasm target above, then run:
+
+```bash
+python3 scripts/tests/test-nightly-build.py
+```
+
 ## Project structure
 
 The SurrealDB repository follows a specific structure for organizing crates:

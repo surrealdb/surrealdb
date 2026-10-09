@@ -17,10 +17,9 @@ on:
   merge_group:
 
 concurrency:
-  # Use github.run_id on main branch
-  # Use github.event.pull_request.number on pull requests, so it's unique per pull request
-  # Use github.ref on other branches, so it's unique per branch
-  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
+  # Superseded automatic main/branch/PR runs should release runner capacity.
+  # Explicit workflow_dispatch validations remain independent.
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -31,6 +30,8 @@ permissions:
   contents: read
 
 jobs:
+  # Build/test lanes use the pinned nightly parallel frontend. MSRV and Clippy
+  # keep the stable compatibility/lint signal; shipping workflows use stable.
   # ----------------------------------------
   # Server build
   # ----------------------------------------
@@ -65,6 +66,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -248,6 +250,8 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
+          targets: wasm32-unknown-unknown
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -255,6 +259,9 @@ jobs:
 
       - name: Install tools
         uses: ./.github/actions/install-tools
+
+      - name: Validate nightly build helpers
+        run: python3 scripts/tests/test-nightly-build.py
 
       - name: Check workspace
         run: cargo make ci-check
@@ -275,6 +282,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -363,6 +371,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -419,6 +428,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -434,9 +444,17 @@ jobs:
         run: cargo make ci-doctests
 
   feature-check:
-    name: Check feature combinations
+    name: Check feature combinations (${{ matrix.package }})
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    # Each package gets its own target directory/runner. The old aggregate
+    # spawned nine Cargo processes against one target directory, serializing
+    # on the build lock and repeatedly replacing each other's feature variants.
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        package: [sdk, engine-local, core, server, kvs, kvs-any, datastore, runtime, idx]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -449,20 +467,22 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-kache: "false"
+          kache-manifest-key: feature-check-${{ matrix.package }}
 
       - name: Install tools
         uses: ./.github/actions/install-tools
-
-      - name: Install cargo-hack
-        run: cargo install --locked cargo-hack
+        with:
+          tools: cargo-make,cargo-hack
 
       - name: Check feature combinations
-        run: cargo make ci-feature-check
+        run: cargo make "ci-feature-check-$FEATURE_PACKAGE"
+        env:
+          FEATURE_PACKAGE: ${{ matrix.package }}
 
   unused-deps:
     name: Check unused dependencies
@@ -573,6 +593,8 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          # This task includes Clippy; keep lint behavior on stable.
+          components: clippy
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -613,6 +635,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -656,6 +679,7 @@ jobs:
       - name: Test workspace
         uses: ./.github/actions/test-workspace
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -677,6 +701,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -715,6 +740,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -758,6 +784,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -791,6 +818,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -841,6 +869,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -912,6 +941,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -991,6 +1021,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -1024,6 +1055,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -1115,6 +1147,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -1181,6 +1214,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
@@ -1222,6 +1256,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          toolchain: build-nightly
           kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
           kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}

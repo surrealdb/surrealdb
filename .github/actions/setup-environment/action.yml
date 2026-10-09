@@ -3,7 +3,7 @@ description: 'Install Rust toolchain, checkout sources, and setup cache'
 
 inputs:
   toolchain:
-    description: 'Rust toolchain version'
+    description: 'Rust toolchain version, or build-nightly for the pinned parallel frontend'
     required: false
     default: stable
   components:
@@ -177,12 +177,31 @@ runs:
         echo "Disk space after cleanup:"
         df -h /
 
+    - name: Resolve build toolchain
+      id: build-toolchain
+      shell: bash
+      env:
+        REQUESTED_TOOLCHAIN: ${{ inputs.toolchain }}
+      run: |
+        if [[ "$REQUESTED_TOOLCHAIN" == build-nightly ]]; then
+          echo "toolchain=$(cat rust-toolchain.nightly)" >> "$GITHUB_OUTPUT"
+        else
+          echo "toolchain=$REQUESTED_TOOLCHAIN" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
       with:
-        toolchain: ${{ inputs.toolchain }}
+        toolchain: ${{ steps.build-toolchain.outputs.toolchain }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
+
+    - name: Enable nightly parallel frontend
+      id: nightly-config
+      if: inputs.toolchain == 'build-nightly'
+      shell: bash
+      # Includes cargo-make, the language runner, wasm-pack and module builds.
+      run: scripts/configure-nightly-ci
 
     # Installs the kache binary, points RUSTC_WRAPPER at it, and - when a bucket
     # is configured - starts the daemon that prefetches from S3 while cargo is
@@ -201,7 +220,7 @@ runs:
         s3-prefix: ${{ github.repository }}/kache
         s3-access-key-id: ${{ inputs.kache-access-key-id }}
         s3-secret-access-key: ${{ inputs.kache-secret-access-key }}
-        manifest-key: ${{ format('{0}/{1}', inputs.kache-branch || github.base_ref || github.ref_name, inputs.kache-manifest-key || format('{0}-{1}-{2}', inputs.cache-key || github.job, runner.os, runner.arch)) }}
+        manifest-key: ${{ format('{0}/{1}', inputs.kache-branch || github.base_ref || github.ref_name, inputs.toolchain == 'build-nightly' && format('{0}-{1}-threads{2}', inputs.kache-manifest-key || format('{0}-{1}-{2}', inputs.cache-key || github.job, runner.os, runner.arch), steps.build-toolchain.outputs.toolchain, steps.nightly-config.outputs.threads) || inputs.kache-manifest-key || format('{0}-{1}-{2}', inputs.cache-key || github.job, runner.os, runner.arch)) }}
         cache-dir: ${{ inputs.kache-cache-dir || format('{0}/kache', runner.temp) }}
         max-size: ${{ inputs.kache-max-size }}
         # Link outputs - binaries, dylibs and proc-macros - are cacheable and

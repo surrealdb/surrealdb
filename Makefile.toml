@@ -10,6 +10,7 @@ reduce_output = true
 default_to_workspace = false
 
 [env]
+SURREAL_NIGHTLY_RUSTFLAGS = { value = "", condition = { env_not_set = ["SURREAL_NIGHTLY_RUSTFLAGS"] } }
 ALL_FEATURES = { value = "allocator,allocation-tracking,storage-mem,storage-surrealkv,storage-rocksdb,storage-tikv,scripting,http,jwks,ml,surrealism,cli,tokio-console", condition = { env_not_set = ["ALL_FEATURES"] } }
 DEV_FEATURES = { value = "allocator,allocation-tracking,storage-mem,storage-surrealkv,storage-rocksdb,scripting,http,jwks,ml,surrealism,cli,tokio-console", condition = { env_not_set = ["DEV_FEATURES"] } }
 FAST_FEATURES = { value = "storage-mem,storage-rocksdb,http,jwks,cli", condition = { env_not_set = ["FAST_FEATURES"] } }

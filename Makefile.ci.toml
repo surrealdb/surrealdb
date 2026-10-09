@@ -275,6 +275,8 @@ args = [
 ]
 
 [tasks.ci-feature-check]
+# One target directory means one Cargo build lock. Keep package checks ordered
+# locally; CI runs the same leaf tasks in isolated matrix jobs with kache.
 category = "CI - CHECK"
 description = "Verify each feature compiles individually"
 run_task = { name = [
@@ -287,13 +289,13 @@ run_task = { name = [
     "ci-feature-check-datastore",
     "ci-feature-check-runtime",
     "ci-feature-check-idx",
-], fork = true, parallel = true }
+], fork = true, parallel = false }
 
 [tasks.ci-feature-check-sdk]
 category = "CI - CHECK"
 description = "Verify each SDK feature compiles individually"
 install_crate = "cargo-hack"
-env = { RUSTFLAGS = "-D warnings" }
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
 command = "cargo"
 args = [
     "hack",
@@ -311,7 +313,7 @@ args = [
 category = "CI - CHECK"
 description = "Verify each embedded engine feature compiles individually"
 install_crate = "cargo-hack"
-env = { RUSTFLAGS = "-D warnings" }
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
 command = "cargo"
 args = [
     "hack",
@@ -328,7 +330,7 @@ args = [
 category = "CI - CHECK"
 description = "Verify each core feature compiles individually"
 install_crate = "cargo-hack"
-env = { RUSTFLAGS = "-D warnings" }
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
 command = "cargo"
 args = [
     "hack",
@@ -345,7 +347,7 @@ args = [
 category = "CI - CHECK"
 description = "Verify each surrealdb-kvs feature compiles individually"
 install_crate = "cargo-hack"
-env = { RUSTFLAGS = "-D warnings" }
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
 command = "cargo"
 args = [
     "hack",
@@ -360,7 +362,7 @@ args = [
 category = "CI - CHECK"
 description = "Verify each surrealdb-kvs-any feature compiles individually"
 install_crate = "cargo-hack"
-env = { RUSTFLAGS = "-D warnings" }
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
 command = "cargo"
 args = [
     "hack",
@@ -377,7 +379,7 @@ args = [
 category = "CI - CHECK"
 description = "Verify each surrealdb-datastore feature compiles individually"
 install_crate = "cargo-hack"
-env = { RUSTFLAGS = "-D warnings" }
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
 command = "cargo"
 args = [
     "hack",
@@ -392,7 +394,7 @@ args = [
 category = "CI - CHECK"
 description = "Verify each surrealdb-runtime feature compiles individually"
 install_crate = "cargo-hack"
-env = { RUSTFLAGS = "-D warnings" }
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
 command = "cargo"
 args = [
     "hack",
@@ -407,7 +409,7 @@ args = [
 category = "CI - CHECK"
 description = "Verify each surrealdb-idx feature compiles individually"
 install_crate = "cargo-hack"
-env = { RUSTFLAGS = "-D warnings" }
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
 command = "cargo"
 args = [
     "hack",
@@ -425,7 +427,7 @@ args = [
 category = "CI - CHECK"
 description = "Verify each server feature compiles individually (with storage-mem base)"
 install_crate = "cargo-hack"
-env = { RUSTFLAGS = "-D warnings" }
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
 command = "cargo"
 args = [
     "hack",
@@ -547,7 +549,7 @@ script = '''
 # 2. Add the LLVM bin directory to your PATH: `echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> ~/.zshrc`
 category = "CI - CHECK"
 description = "Run clippy linting (WASM)"
-env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js"' }
+env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js" ${SURREAL_NIGHTLY_RUSTFLAGS}' }
 script = '''
     #!/bin/bash
     set -euo pipefail
@@ -1040,6 +1042,8 @@ args = [
 ]
 
 [tasks.ci-kvs-mem]
+# Each leaf runs Cargo/nextest against the same target directory. Order the
+# builds; nextest parallelizes the tests within each suite.
 category = "CI - INTEGRATION TESTS"
 description = "Run KVS integration tests with the in-memory engine"
 env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem", _TEST_CRATE = "surrealdb-kvs-mem" }
@@ -1047,9 +1051,11 @@ run_task = { name = [
     "test-kvs",
     "test-kvs-any",
     "test-kvs-crate",
-], fork = true, parallel = true }
+], fork = true, parallel = false }
 
 [tasks.ci-kvs-rocksdb]
+# Each leaf runs Cargo/nextest against the same target directory. Order the
+# builds; nextest parallelizes the tests within each suite.
 category = "CI - INTEGRATION TESTS"
 description = "Run KVS integration tests with the RocksDB engine"
 env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", _TEST_CRATE = "surrealdb-kvs-rocksdb" }
@@ -1059,7 +1065,7 @@ run_task = { name = [
     "test-kvs-crate",
     "test-datastore",
     "test-idx",
-], fork = true, parallel = true }
+], fork = true, parallel = false }
 
 [tasks.ci-kvs-surrealkv]
 category = "CI - INTEGRATION TESTS"
