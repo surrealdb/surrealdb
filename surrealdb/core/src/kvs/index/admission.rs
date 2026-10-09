@@ -19,7 +19,8 @@ use crate::key::{KVKey, KVValue};
 #[cfg(test)]
 use crate::kvs::testing::{NonRetryableErrorSite, maybe_inject_non_retryable_error};
 use crate::kvs::tx::{
-	CachedIndexBuildReservationKey, CachedIndexBuildReservationLookup, IndexBuildReservationRelease,
+	CachedIndexAdmission, CachedIndexBuildReservationKey, CachedIndexBuildReservationLookup,
+	IndexBuildReservationRelease,
 };
 use crate::kvs::{DatastoreError, TransactionType};
 
@@ -83,6 +84,13 @@ impl IndexBuilder {
 	/// admitted mutation runs the short reservation transaction; subsequent
 	/// mutations on the same index reuse the cached ticket and consume fresh
 	/// `mutation_seq` slots without paying another reservation commit.
+	///
+	/// A decision that needs no reservation, to index normally or to skip a
+	/// retired index, is cached for the user transaction as well
+	/// ([`CachedIndexAdmission`]), so the writes after the first open no
+	/// transaction of their own. It is reused while the transaction stamps no
+	/// catalog version and starts or removes no build. A decision to queue is
+	/// never cached as such: it revalidates on every reuse.
 	pub(crate) async fn consume(
 		&self,
 		db: &DatabaseDefinition,
@@ -126,8 +134,20 @@ impl IndexBuilder {
 				// The index is gone from the catalog, so there is nothing for
 				// this mutation to maintain and nothing that will ever replay a
 				// queued one. The write proceeds without it.
-				CachedAdmission::Retired => Ok(ConsumeResult::Retired),
+				CachedAdmission::Retired => {
+					ctx.tx()
+						.insert_cached_index_admission(cache_key, CachedIndexAdmission::Retired);
+					Ok(ConsumeResult::Retired)
+				}
 			};
+		}
+
+		match ctx.tx().lookup_cached_index_admission(&cache_key) {
+			Some(CachedIndexAdmission::IndexNormally) => {
+				return Ok(ConsumeResult::Ignored(mutation.old_values, mutation.new_values));
+			}
+			Some(CachedIndexAdmission::Retired) => return Ok(ConsumeResult::Retired),
+			None => {}
 		}
 
 		match self.reserve_durable_admission(ctx, &ikb, ix, db.namespace_id, db.database_id).await?
@@ -164,15 +184,24 @@ impl IndexBuilder {
 					// online state via `DurableAdmissionDecision::IndexNormally`
 					// instead of writing orphan `!bg` under the released ticket.
 					ctx.tx().remove_cached_index_build_reservation(&cache_key).await;
+					ctx.tx().insert_cached_index_admission(
+						cache_key,
+						CachedIndexAdmission::IndexNormally,
+					);
 					return Ok(ConsumeResult::Ignored(mutation.old_values, mutation.new_values));
 				}
 				let admitted = AdmittedMutation::from_lookup(first_use);
 				self.write_admitted_mutation(ctx, &ikb, mutation, admitted).await
 			}
 			DurableAdmissionDecision::IndexNormally => {
+				ctx.tx()
+					.insert_cached_index_admission(cache_key, CachedIndexAdmission::IndexNormally);
 				Ok(ConsumeResult::Ignored(mutation.old_values, mutation.new_values))
 			}
-			DurableAdmissionDecision::Retired => Ok(ConsumeResult::Retired),
+			DurableAdmissionDecision::Retired => {
+				ctx.tx().insert_cached_index_admission(cache_key, CachedIndexAdmission::Retired);
+				Ok(ConsumeResult::Retired)
+			}
 		}
 	}
 

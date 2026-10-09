@@ -94,6 +94,64 @@ pub(crate) fn table_at<'a>(
 	crate::exec::compiles::seam(async move { load_table(ctx.database()?, table, stamp).await })
 }
 
+/// The descriptors a statement's run loads of the same tables again and
+/// again, kept per distinct table.
+///
+/// Descriptors are read through the seam ([`table_at`]), and one is served
+/// again only while the transaction is the same and has stamped no table
+/// catalog version since the read, so a catalog write the transaction makes
+/// between two loads is seen by the second. A speculating transaction is
+/// never served from the memo and nothing is stored from it. It covers
+/// current-state reads only (no `VERSION` stamp). It holds at most one
+/// descriptor per distinct table.
+#[derive(Default)]
+pub(crate) struct TableMemo {
+	/// The address of the transaction `entries` were read in; `0` for none.
+	txn: usize,
+	/// The transaction's `catalog_stamps` when `entries` were read.
+	stamps: u64,
+	entries: std::collections::HashMap<TableName, Arc<TableDescriptor>>,
+}
+
+impl TableMemo {
+	/// The current descriptor of `table` in the database `ctx` runs in.
+	pub(crate) async fn current(
+		&mut self,
+		ctx: &ExecutionContext,
+		table: &TableName,
+	) -> anyhow::Result<Arc<TableDescriptor>> {
+		let txn = ctx.txn();
+		if txn.speculating() {
+			return table_at(ctx, table, None).await;
+		}
+		let (at, stamps) = (Arc::as_ptr(&txn) as usize, txn.catalog_stamps());
+		if self.txn != at || self.stamps != stamps {
+			self.entries.clear();
+			self.txn = at;
+			self.stamps = stamps;
+		}
+		if let Some(known) = self.entries.get(table) {
+			return Ok(Arc::clone(known));
+		}
+		let loaded = table_at(ctx, table, None).await?;
+		self.entries.insert(table.clone(), Arc::clone(&loaded));
+		Ok(loaded)
+	}
+
+	/// How many descriptors are held.
+	#[cfg(test)]
+	pub(crate) fn len(&self) -> usize {
+		self.entries.len()
+	}
+
+	/// Let go of every descriptor held.
+	pub(crate) fn clear(&mut self) {
+		self.txn = 0;
+		self.stamps = 0;
+		self.entries.clear();
+	}
+}
+
 async fn load_table(
 	db_ctx: &DatabaseContext,
 	table: &TableName,

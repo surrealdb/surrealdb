@@ -269,6 +269,20 @@ pub struct Transaction {
 	/// [`Self::pending_index_build_reservations`].
 	cached_index_build_reservations:
 		Mutex<HashMap<CachedIndexBuildReservationKey, CachedIndexBuildReservation>>,
+	/// The admission decision of each index this transaction has written
+	/// through that needed no build reservation, with the table catalog stamps
+	/// ([`Self::catalog_stamps`]) it was made at.
+	///
+	/// A decision is reused for the rest of the user transaction while this
+	/// transaction stamps no catalog version and starts or removes no build
+	/// ([`Self::clear_cached_index_admissions`]). A build that starts
+	/// elsewhere after the decision is covered as it is for the first write
+	/// of the transaction, whose decision is just as old by the time the
+	/// transaction commits: the commit conflicts with the builder's writes,
+	/// and the builder cleans the index before it scans. Never held by a
+	/// speculation.
+	cached_index_admissions:
+		parking_lot::Mutex<HashMap<CachedIndexBuildReservationKey, (u64, CachedIndexAdmission)>>,
 	/// Allocators for sequences this transaction has defined and not committed.
 	///
 	/// The node's allocator reads definitions through transactions of its own,
@@ -373,6 +387,17 @@ pub struct CachedIndexBuildReservationKey {
 	pub db: DatabaseId,
 	pub tb: TableName,
 	pub ix: IndexId,
+}
+
+/// An admission decision that took no build reservation, kept for the rest of
+/// a user transaction ([`Transaction::lookup_cached_index_admission`]).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CachedIndexAdmission {
+	/// The index is maintained by the writing transaction itself: it has no
+	/// build state, or its build is online.
+	IndexNormally,
+	/// The index is gone from the catalog, so a write skips it.
+	Retired,
 }
 
 /// Cached admission reservation reused across an entire user transaction.
@@ -1011,6 +1036,7 @@ impl Transaction {
 			guarded_writes: AtomicU64::new(0),
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
+			cached_index_admissions: Default::default(),
 			provisional_sequences: Mutex::new(HashMap::new()),
 			defines_any_sequence: AtomicBool::new(false),
 			provisional_save_points: Mutex::new(Vec::new()),
@@ -1235,6 +1261,44 @@ impl Transaction {
 				next_mutation_seq,
 			},
 		);
+	}
+
+	/// The admission decision cached for `key` ([`CachedIndexAdmission`]), if
+	/// this transaction has stamped no catalog version since it was stored.
+	///
+	/// `None` on a speculation.
+	pub fn lookup_cached_index_admission(
+		&self,
+		key: &CachedIndexBuildReservationKey,
+	) -> Option<CachedIndexAdmission> {
+		if self.tr.speculating() {
+			return None;
+		}
+		let stamps = self.catalog_stamps();
+		self.cached_index_admissions
+			.lock()
+			.get(key)
+			.and_then(|(at, decision)| (*at == stamps).then_some(*decision))
+	}
+
+	/// Keep `decision` for `key` at the current catalog stamps. Does nothing
+	/// on a speculation.
+	pub fn insert_cached_index_admission(
+		&self,
+		key: CachedIndexBuildReservationKey,
+		decision: CachedIndexAdmission,
+	) {
+		if self.tr.speculating() {
+			return;
+		}
+		self.cached_index_admissions.lock().insert(key, (self.catalog_stamps(), decision));
+	}
+
+	/// Forget every cached admission decision. Called where this transaction
+	/// starts or removes an index build, which changes what a write must
+	/// decide without stamping a catalog version.
+	pub fn clear_cached_index_admissions(&self) {
+		self.cached_index_admissions.lock().clear();
 	}
 
 	/// Remove a per-user-transaction admission reservation from the cache.
@@ -3091,6 +3155,13 @@ impl Transaction {
 		self.catalog_stamps.load(std::sync::atomic::Ordering::Acquire)
 	}
 
+	/// Whether this transaction is a speculation's view, whose catalog
+	/// stamps are not counted ([`Self::catalog_stamps`]): nothing read
+	/// through it can be kept on the strength of an equal count.
+	pub fn speculating(&self) -> bool {
+		self.tr.speculating()
+	}
+
 	/// How many versions of catalog objects other than tables this
 	/// transaction has stamped so far: the same bracket as
 	/// [`Self::catalog_stamps`], over [`Self::catalog_object_version`].
@@ -3942,6 +4013,7 @@ impl Transaction {
 			guarded_writes: AtomicU64::new(0),
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
+			cached_index_admissions: Default::default(),
 			provisional_sequences: Mutex::new(HashMap::new()),
 			defines_any_sequence: AtomicBool::new(false),
 			provisional_save_points: Mutex::new(Vec::new()),

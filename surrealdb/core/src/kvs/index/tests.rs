@@ -10736,3 +10736,349 @@ async fn a_marker_naming_another_record_is_not_the_scanned_records_baseline() ->
 	assert_eq!(matches("SELECT VALUE id FROM t WHERE a @@ 'live'").await?, 1);
 	Ok(())
 }
+
+/// Counts the transactions that complete.
+#[derive(Default)]
+struct CompletedTransactions(AtomicU64);
+
+impl crate::observe::ExecutionObserver for CompletedTransactions {
+	fn on_transaction_complete(&self, _event: &crate::observe::TransactionEvent) {
+		self.0.fetch_add(1, Ordering::SeqCst);
+	}
+}
+
+impl CompletedTransactions {
+	fn count(&self) -> u64 {
+		self.0.load(Ordering::SeqCst)
+	}
+}
+
+/// A user transaction that updated a row while the index was online keeps
+/// maintaining the index directly for its later writes, and a build that
+/// started elsewhere in between still ends up with every value the
+/// transaction wrote and none it replaced: the transaction's commit and the
+/// builder's clean-then-scan decide it, not the moment of each write's
+/// admission.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn online_decision_holds_for_a_transaction_that_straddles_a_remote_rebuild() -> Result<()> {
+	let (ds_a, ds_b, session) = new_distributed_index_test_ds().await?;
+	execute_all(
+		&ds_a,
+		&session,
+		"
+			DEFINE TABLE u SCHEMALESS;
+			CREATE u:one SET e = 'old1' RETURN NONE;
+			CREATE u:two SET e = 'old2' RETURN NONE;
+			DEFINE INDEX ix ON u FIELDS e;
+			",
+	)
+	.await?;
+	let ds_a = Arc::new(ds_a);
+
+	let writer = {
+		let (ds, session) = (Arc::clone(&ds_a), session.clone());
+		tokio::spawn(async move {
+			execute_all(
+				&ds,
+				&session,
+				"
+					BEGIN;
+					UPDATE u:one SET e = 'new1' RETURN NONE;
+					SLEEP 3s;
+					UPDATE u:two SET e = 'new2' RETURN NONE;
+					COMMIT;
+					",
+			)
+			.await
+		})
+	};
+	sleep(Duration::from_millis(500)).await;
+
+	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
+	let node_id = ds_b.id();
+	let guard = inject_retryable_conflicts(site, node_id, REPEATED_RETRY_CONFLICTS);
+	let ds_b = Arc::new(ds_b);
+	let rebuild = {
+		let (ds, session) = (Arc::clone(&ds_b), session.clone());
+		tokio::spawn(async move { execute_all(&ds, &session, "REBUILD INDEX ix ON u").await })
+	};
+	wait_for_retry_conflict(site, node_id, REPEATED_RETRY_CONFLICTS).await?;
+	assert!(!writer.is_finished(), "the build must start while the transaction is still open");
+
+	timeout(Duration::from_secs(20), writer)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the straddling transaction"))???;
+	drop(guard);
+	timeout(Duration::from_secs(20), rebuild)
+		.await
+		.map_err(|_| anyhow::anyhow!("timed out waiting for the rebuild"))???;
+	wait_for_index_ready(&ds_a, &session, "u", "ix").await?;
+
+	for (value, expected) in [("new1", 1), ("new2", 1), ("old1", 0), ("old2", 0)] {
+		expect_indexed_query_len(
+			&ds_a,
+			&session,
+			&format!("SELECT id FROM u WITH INDEX ix WHERE e = '{value}'"),
+			expected,
+		)
+		.await?;
+	}
+	Ok(())
+}
+
+/// A transaction that writes to an indexed table, rebuilds the index and
+/// writes again leaves the index agreeing with the rows, whether it commits
+/// or the rebuild's own writes conflict with its own and it does not.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn same_transaction_rebuild_between_writes_leaves_index_matching_rows() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE u SCHEMALESS;
+			CREATE u:one SET e = 'old1' RETURN NONE;
+			CREATE u:two SET e = 'old2' RETURN NONE;
+			DEFINE INDEX ix ON u FIELDS e;
+			",
+	)
+	.await?;
+	let results = ds
+		.execute(
+			"
+			BEGIN;
+			UPDATE u:one SET e = 'new1' RETURN NONE;
+			REBUILD INDEX ix ON u;
+			UPDATE u:two SET e = 'new2' RETURN NONE;
+			COMMIT;
+			",
+			&session,
+			None,
+		)
+		.await?;
+	let committed = match transaction_failure(results) {
+		None => true,
+		Some(error) if error.contains("Transaction conflict:") => false,
+		Some(error) => anyhow::bail!("the transaction failed: {error}"),
+	};
+	wait_for_index_ready(&ds, &session, "u", "ix").await?;
+	let (new, old) = if committed {
+		(1, 0)
+	} else {
+		(0, 1)
+	};
+	for (value, expected) in [("new1", new), ("new2", new), ("old1", old), ("old2", old)] {
+		expect_indexed_query_len(
+			&ds,
+			&session,
+			&format!("SELECT id FROM u WITH INDEX ix WHERE e = '{value}'"),
+			expected,
+		)
+		.await?;
+		expect_indexed_query_len(
+			&ds,
+			&session,
+			&format!("SELECT id FROM u WHERE e = '{value}'"),
+			expected,
+		)
+		.await?;
+	}
+	Ok(())
+}
+
+/// The writes after the first to an online index in one transaction decide
+/// nothing again: they open no transaction of their own.
+#[tokio::test(flavor = "multi_thread")]
+async fn online_index_admission_opens_one_transaction_per_user_transaction() -> Result<()> {
+	let observer = Arc::new(CompletedTransactions::default());
+	let ds = Datastore::builder()
+		.with_observer(Arc::clone(&observer) as Arc<dyn crate::observe::ExecutionObserver>)
+		.without_maintenance_tasks()
+		.build_with_path("memory")
+		.await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+	let (_, _, table, ix) = get_table_index(&ds, "user", "test").await?;
+
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let db_def = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(Arc::clone(&tx));
+	let ctx = ctx.freeze();
+	let builder = ctx.get_index_builder().expect("index builder should be present");
+	let rid = RecordId {
+		table,
+		key: RecordIdKey::from("one".to_owned()),
+	};
+	let consume = async || {
+		builder
+			.consume(
+				db_def.as_ref(),
+				&ctx,
+				&ix,
+				IndexMutation {
+					old_values: None,
+					new_values: None,
+					rid: &rid,
+					count_cond_match: None,
+				},
+			)
+			.await
+	};
+
+	let before = observer.count();
+	assert!(matches!(consume().await?, ConsumeResult::Ignored(..)));
+	let first = observer.count() - before;
+	assert!(first >= 1, "the first write decides in a transaction of its own");
+
+	let before = observer.count();
+	for _ in 0..3 {
+		assert!(matches!(consume().await?, ConsumeResult::Ignored(..)));
+	}
+	assert_eq!(observer.count(), before, "a later write to the same index opens no transaction");
+	tx.cancel().await?;
+	Ok(())
+}
+
+/// The error that failed a transaction, skipping the statements that report
+/// only that it failed.
+fn transaction_failure(results: Vec<crate::dbs::QueryResult>) -> Option<String> {
+	results
+		.into_iter()
+		.filter_map(|result| result.result.err())
+		.map(|error| error.to_string())
+		.find(|error| !error.contains("not executed due to a failed transaction"))
+}
+
+/// Two writes in one transaction that collide on a unique index fail with the
+/// collision, and leave neither a row nor an index entry behind.
+async fn unique_collision_in_one_transaction(ds: &Datastore, session: &Session) -> Result<()> {
+	execute_all(
+		ds,
+		session,
+		"
+			DEFINE TABLE u SCHEMALESS;
+			DEFINE INDEX ux ON u FIELDS e UNIQUE;
+			",
+	)
+	.await?;
+	let results = ds
+		.execute("BEGIN; CREATE u:a SET e = 'x'; CREATE u:b SET e = 'x'; COMMIT;", session, None)
+		.await?;
+	let error = transaction_failure(results).expect("the collision must fail the transaction");
+	assert!(error.contains("already contains"), "unexpected error: {error}");
+	expect_indexed_query_len(ds, session, "SELECT id FROM u", 0).await?;
+	expect_indexed_query_len(ds, session, "SELECT id FROM u WITH INDEX ux WHERE e = 'x'", 0)
+		.await?;
+
+	let rows = (0..1000)
+		.map(|n| {
+			let e = if n == 500 {
+				100
+			} else {
+				n
+			};
+			format!("{{ id: u:{n}, e: 'v{e}' }}")
+		})
+		.collect::<Vec<_>>()
+		.join(", ");
+	let results = ds.execute(&format!("INSERT INTO u [{rows}]"), session, None).await?;
+	let error = transaction_failure(results).expect("the duplicate row must fail the insert");
+	assert!(error.contains("already contains"), "unexpected error: {error}");
+	expect_indexed_query_len(ds, session, "SELECT id FROM u", 0).await?;
+	expect_indexed_query_len(ds, session, "SELECT id FROM u WITH INDEX ux WHERE e = 'v100'", 0)
+		.await?;
+	Ok(())
+}
+
+/// Two transactions that each create the same unique value, overlapping, leave
+/// the first commit's row alone and fail the other.
+async fn unique_collision_across_transactions(ds: Arc<Datastore>, session: Session) -> Result<()> {
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE u SCHEMALESS;
+			DEFINE INDEX ux ON u FIELDS e UNIQUE;
+			",
+	)
+	.await?;
+	let run = |id: &'static str| {
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		tokio::spawn(async move {
+			let sql = format!("BEGIN; CREATE u:{id} SET e = 'x'; SLEEP 500ms; COMMIT;");
+			let results = ds.execute(&sql, &session, None).await?;
+			Ok::<_, anyhow::Error>(transaction_failure(results))
+		})
+	};
+	let (first, second) = (run("a"), run("b"));
+	let outcomes = [first.await??, second.await??];
+	let errors: Vec<_> = outcomes.iter().flatten().collect();
+	assert_eq!(errors.len(), 1, "exactly one of the overlapping commits fails: {outcomes:?}");
+	assert!(
+		errors[0].contains("already contains") || errors[0].contains("Transaction conflict:"),
+		"unexpected error: {}",
+		errors[0]
+	);
+	println!("unique collision across transactions: {}", errors[0]);
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM u", 1).await?;
+	expect_indexed_query_len(&ds, &session, "SELECT id FROM u WITH INDEX ux WHERE e = 'x'", 1)
+		.await?;
+	Ok(())
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn unique_collision_in_one_transaction_mem() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	unique_collision_in_one_transaction(&ds, &session).await
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn unique_collision_across_transactions_mem() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	unique_collision_across_transactions(ds, session).await
+}
+
+#[cfg(feature = "kv-rocksdb")]
+async fn new_rocksdb_index_test_ds(dir: &TempDir) -> Result<(Arc<Datastore>, Session)> {
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.build_with_path(&format!("rocksdb://{}", dir.path().to_string_lossy()))
+		.await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	Ok((ds, session))
+}
+
+#[cfg(feature = "kv-rocksdb")]
+#[tokio::test(flavor = "multi_thread")]
+async fn unique_collision_in_one_transaction_rocksdb() -> Result<()> {
+	let dir = TempDir::new()?;
+	let (ds, session) = new_rocksdb_index_test_ds(&dir).await?;
+	unique_collision_in_one_transaction(&ds, &session).await
+}
+
+#[cfg(feature = "kv-rocksdb")]
+#[tokio::test(flavor = "multi_thread")]
+async fn unique_collision_across_transactions_rocksdb() -> Result<()> {
+	let dir = TempDir::new()?;
+	let (ds, session) = new_rocksdb_index_test_ds(&dir).await?;
+	unique_collision_across_transactions(ds, session).await
+}

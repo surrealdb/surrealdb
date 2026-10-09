@@ -348,6 +348,11 @@ impl IndexBuilder {
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
 		expect_not_prepare_remove(&ix)?;
+		// A build started by the calling transaction changes what its later
+		// writes must decide about every index.
+		if let Some(txn) = ctx.try_tx() {
+			txn.clear_cached_index_admissions();
+		}
 		let (ns, db) = ctx.expect_ns_db_ids(&opt).await?;
 		let key = Arc::new(IndexKey::new(ns, db, &ix.table_name.clone(), ix.index_id));
 		let (rcv, sdr) = if blocking {

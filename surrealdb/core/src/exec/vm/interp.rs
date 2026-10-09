@@ -319,6 +319,9 @@ pub(super) struct State {
 	/// For each of the program's [`FunctionSpec`](super::program::FunctionSpec)s,
 	/// what an entry of the run learned of it.
 	pub(super) functions: Vec<FunctionMemo>,
+	/// The descriptors of the tables the run's graph lookups source from,
+	/// served while the catalog is unchanged ([`super::descriptor::TableMemo`]).
+	pub(super) tables: super::descriptor::TableMemo,
 	/// For each open call frame, the digest of the principal its body runs
 	/// under ([`super::program::UnitFrame::digest`]).
 	pub(super) call_principals: Vec<u64>,
@@ -814,6 +817,7 @@ impl State {
 			frames,
 			calls,
 			functions,
+			tables,
 			call_principals,
 			computing,
 			write_input,
@@ -880,6 +884,7 @@ impl State {
 		emptied(frames);
 		emptied(calls);
 		emptied(functions);
+		tables.clear();
 		emptied(call_principals);
 		*computing = None;
 		*write_input = None;
@@ -1129,6 +1134,7 @@ impl State {
 			frames: Vec::new(),
 			calls: Vec::new(),
 			functions: Vec::new(),
+			tables: Default::default(),
 			call_principals: Vec::new(),
 			computing: None,
 			unchecked_reads: false,

@@ -910,3 +910,52 @@ async fn a_field_state_is_planned_with_its_statements_and_served_from_the_cache(
 	let reader = state(record_user("alice")).await;
 	assert!(!std::sync::Arc::ptr_eq(&owner, &reader), "a record user took the owner's state");
 }
+
+/// A table memo serves the descriptor it loaded again while the transaction
+/// is the same and stamps no catalog version, loads it afresh once a schema
+/// statement of the transaction stamps one, and never holds one read through
+/// a speculation.
+#[tokio::test]
+async fn a_table_memo_serves_a_descriptor_until_a_version_is_stamped() {
+	use crate::exec::vm::descriptor::TableMemo;
+	let db = TestDb::new("DEFINE TABLE m SCHEMALESS;").await;
+	let table = crate::val::TableName::from("m".to_owned());
+	let ctx = db.exec_ctx_as(&TestDb::owner(), crate::kvs::TransactionType::Write).await;
+	let mut memo = TableMemo::default();
+
+	let first = memo.current(&ctx, &table).await.expect("the table loads");
+	let second = memo.current(&ctx, &table).await.expect("the table loads");
+	assert!(std::sync::Arc::ptr_eq(&first, &second), "the second load read the catalog again");
+	assert!(!first.defined().expect("m is defined").schemafull);
+	assert_eq!(memo.len(), 1);
+
+	run(&ctx, "DEFINE TABLE OVERWRITE m SCHEMAFULL")
+		.await
+		.expect("the VM runs it")
+		.expect("the table is redefined");
+	let third = memo.current(&ctx, &table).await.expect("the table loads");
+	assert!(!std::sync::Arc::ptr_eq(&first, &third), "a stamped version left the memo serving");
+	assert!(third.defined().expect("m is defined").schemafull, "the new definition was not read");
+	let fourth = memo.current(&ctx, &table).await.expect("the table loads");
+	assert!(std::sync::Arc::ptr_eq(&third, &fourth));
+
+	let other = db.exec_ctx_as(&TestDb::owner(), crate::kvs::TransactionType::Read).await;
+	let elsewhere = memo.current(&other, &table).await.expect("the table loads");
+	assert!(!std::sync::Arc::ptr_eq(&fourth, &elsewhere), "another transaction was served");
+	other.txn().cancel().await.expect("cancel");
+
+	let mut speculative = TableMemo::default();
+	let speculation = ctx
+		.txn()
+		.speculate(crate::kvs::speculation::Overlay::default())
+		.expect("the transaction speculates");
+	let mut view = crate::ctx::Context::new_child(ctx.ctx());
+	view.set_transaction(std::sync::Arc::clone(speculation.txn()));
+	let view = ctx.clone().with_new_ctx(view.freeze());
+	let a = speculative.current(&view, &table).await.expect("the table loads");
+	let b = speculative.current(&view, &table).await.expect("the table loads");
+	assert!(!std::sync::Arc::ptr_eq(&a, &b), "a speculation was served from the memo");
+	assert_eq!(speculative.len(), 0, "a speculation left an entry");
+	drop(speculation);
+	ctx.txn().cancel().await.expect("cancel");
+}

@@ -46,6 +46,7 @@ use std::ops::Bound;
 
 use surrealdb_datastore::values::inline_cache::{CacheValue, EdgeCacheEntry};
 
+use super::descriptor::TableMemo;
 use super::interp::State;
 use super::program::{
 	EdgeSpec, HopPermission, HopRead, HostScalar, KeyCond, KeyRange, KeyRanges, LookupHop,
@@ -92,7 +93,6 @@ pub(super) async fn lookup(
 	};
 	let mut run = Run {
 		program,
-		tables: Default::default(),
 		spec,
 		state,
 		conds: conds.as_ref().unwrap_or(&ctx),
@@ -120,9 +120,6 @@ pub(super) async fn lookup(
 
 struct Run<'r> {
 	program: &'r Program,
-	/// Each source table's adjacency layout and inline-cache cap, read once
-	/// per lookup.
-	tables: std::collections::HashMap<TableName, Facts>,
 	spec: &'r LookupSpec,
 	state: &'r mut State,
 	/// The context each hop's `WHERE` is evaluated in.
@@ -280,7 +277,7 @@ impl Run<'_> {
 							sources,
 							at,
 							self.ctx,
-							&mut self.tables,
+							&mut self.state.tables,
 							cap,
 						)
 						.await?
@@ -288,7 +285,8 @@ impl Run<'_> {
 					Some(cond) => {
 						let mut entries = Vec::new();
 						for source in sources {
-							let facts = facts(&source.table, self.ctx, &mut self.tables).await?;
+							let facts =
+								facts(&source.table, self.ctx, &mut self.state.tables).await?;
 							let mut read = Vec::new();
 							adjacency(
 								(&hop.read, &ranges),
@@ -325,6 +323,7 @@ impl Run<'_> {
 							source,
 							at,
 							self.ctx,
+							&mut self.state.tables,
 							cap,
 							&mut reached,
 						)
@@ -663,22 +662,18 @@ fn checked(checks: &[super::program::KeyCheck], fields: &[(String, Value)]) -> O
 /// A source table's adjacency layout and inline-cache cap.
 type Facts = (VertexAdjacency, Option<u32>);
 
-/// The [`Facts`] of `table`, read once per lookup into `tables`.
+/// The [`Facts`] of `table`, from its descriptor as the statement's table
+/// memo serves it: loaded once per table while the transaction stamps no
+/// catalog version.
 async fn facts(
 	table: &TableName,
 	ctx: &ExecutionContext,
-	tables: &mut std::collections::HashMap<TableName, Facts>,
+	memo: &mut TableMemo,
 ) -> FlowResult<Facts> {
-	if let Some(known) = tables.get(table) {
-		return Ok(*known);
-	}
-	let tb = crate::exec::vm::descriptor::table_at(ctx, table, None)
-		.await
-		.context("Failed to resolve the source vertex's table")?;
+	let tb =
+		memo.current(ctx, table).await.context("Failed to resolve the source vertex's table")?;
 	let tb = tb.definition.as_deref();
-	let known = (vertex_adjacency_of(tb), crate::idx::inline_cache::effective_edges_cap(tb));
-	tables.insert(table.clone(), known);
-	Ok(known)
+	Ok((vertex_adjacency_of(tb), crate::idx::inline_cache::effective_edges_cap(tb)))
 }
 
 /// How many sources' adjacencies are read side by side, and the width of the
@@ -709,7 +704,7 @@ async fn adjacencies(
 	sources: &[RecordId],
 	at: &At,
 	ctx: &ExecutionContext,
-	tables: &mut std::collections::HashMap<TableName, Facts>,
+	tables: &mut TableMemo,
 	cap: usize,
 ) -> FlowResult<Vec<Entry>> {
 	let mut entries = Vec::new();
@@ -1070,12 +1065,14 @@ fn reach(
 /// reference-key order: from the inline reference cache when `target`'s table
 /// keeps one and it is live, otherwise from the reference keys. The read ends
 /// once `out` holds `cap` records.
+#[allow(clippy::too_many_arguments)]
 async fn references(
 	subject: &ReferenceSubject,
 	(start, end): (&Bound<RecordIdKey>, &Bound<RecordIdKey>),
 	target: &RecordId,
 	at: &At,
 	ctx: &ExecutionContext,
+	memo: &mut TableMemo,
 	cap: usize,
 	out: &mut Vec<RecordId>,
 ) -> FlowResult<()> {
@@ -1088,7 +1085,8 @@ async fn references(
 	// references, which a range of their keys narrows.
 	let whole = matches!(start, Bound::Unbounded) && matches!(end, Bound::Unbounded);
 	if at.version.is_none() && whole {
-		let tb = crate::exec::vm::descriptor::table_at(ctx, &target.table, None)
+		let tb = memo
+			.current(ctx, &target.table)
 			.await
 			.context("Failed to resolve the referenced record's table")?;
 		if crate::idx::inline_cache::effective_refs_cap(tb.definition.as_deref()).is_some() {
