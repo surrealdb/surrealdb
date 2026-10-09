@@ -4078,6 +4078,54 @@ mod tests {
 		}
 	}
 
+	/// A transaction supplied by the caller already is the block, so the
+	/// transaction statements of the request itself have no block to open or
+	/// close: each reports the place it ran instead of acting, and the
+	/// statements around them are unaffected.
+	#[tokio::test]
+	async fn misplaced_transaction_statements_in_a_session_transaction_report_where_they_run() {
+		use std::sync::Arc;
+
+		use crate::catalog::providers::CatalogProvider;
+		use crate::kvs::{QueryRequest, TransactionType};
+
+		let ds = Datastore::new("memory").await.expect("a memory datastore");
+		let setup = ds.transaction(TransactionType::Write).await.expect("a write transaction");
+		setup.ensure_ns_db(None, "test", "test").await.expect("the test namespace and database");
+		setup.commit().await.expect("committing the namespace");
+
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let tx = Arc::new(ds.transaction(TransactionType::Write).await.expect("a transaction"));
+		let results = ds
+			.run(
+				QueryRequest::new("BEGIN; COMMIT; CANCEL; RETURN 1", &ses)
+					.with_transaction(Arc::clone(&tx)),
+			)
+			.await
+			.expect("the request runs");
+		tx.cancel().await.expect("cancelling the session transaction");
+
+		assert_eq!(results.len(), 4, "one result per statement: {results:?}");
+		for (index, expected) in [
+			"Cannot BEGIN a transaction within a transaction",
+			"Cannot COMMIT without starting a transaction",
+			"Cannot CANCEL without starting a transaction",
+		]
+		.into_iter()
+		.enumerate()
+		{
+			let error = results[index].result.as_ref().expect_err("a misplaced statement errors");
+			assert!(
+				error.to_string().contains(expected),
+				"statement {index} should report `{expected}`, got: {error}"
+			);
+		}
+		assert_eq!(
+			results[3].result.as_ref().expect("the RETURN runs"),
+			&surrealdb_types::Value::Number(surrealdb_types::Number::Int(1))
+		);
+	}
+
 	#[tokio::test]
 	async fn check_execute_option_permissions() {
 		let tests = vec![

@@ -177,6 +177,11 @@ async fn streaming_matches_buffered() {
 		"BEGIN; CREATE thing:6 SET n = 6; CANCEL;",
 		"BEGIN; SELECT * FROM thing; THROW 'nope'; SELECT * FROM thing; COMMIT;",
 		"BEGIN; SELECT * FROM thing; RETURN 'early'; SELECT * FROM thing; COMMIT;",
+		"BEGIN; CREATE thing:1; BEGIN; CREATE thing:2; COMMIT; SELECT * FROM thing;",
+		"CREATE thing:0; BEGIN; CREATE thing:1; RETURN 2;",
+		"BEGIN; COMMIT; COMMIT; CANCEL; RETURN 1;",
+		"BEGIN; RETURN 1; CREATE thing:1; COMMIT; SELECT * FROM thing;",
+		"BEGIN; THROW 'x'; CREATE thing:1; CANCEL; RETURN 2;",
 	] {
 		assert_parity(sql).await;
 	}
