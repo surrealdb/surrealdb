@@ -12,8 +12,8 @@
 //! What a breaker spills is a run ([`runs`]): written through one part
 //! buffer and read back through one, so the memory a spill takes is bounded
 //! whatever it spills. That memory is the lease's headroom, part of the
-//! minimum the lease is guaranteed: one part buffer to write a run and one
-//! per run a merge reads at once ([`QueryMemory::fan_in`]). A merge of more
+//! minimum the lease is guaranteed: one buffer to write a run and one per run
+//! a merge reads at once ([`QueryMemory::fan_in`]). A merge of more
 //! runs than that takes several passes.
 //!
 //! A statement never fails for want of the governor's memory. What a breaker
@@ -64,7 +64,9 @@ use std::time::Duration;
 #[cfg(all(storage, not(target_family = "wasm")))]
 pub use file_store::FileTempStore;
 pub use governor::{Admit, BoxFut, FairGovernor, Lease, MemoryGovernor, Unlimited};
-pub use store::{MemTempStore, RunId, RunRead, RunWrite, TempStore};
+pub use store::{
+	MemTempStore, RunId, RunRead, RunRef, RunWrite, SessionName, Sharing, TempStore, Tier,
+};
 pub use tiered::TieredTempStore;
 
 use crate::exec::{ExecutionContext, FlowResult};
@@ -173,11 +175,12 @@ impl QueryMemory {
 		})
 	}
 
-	/// The memory spilling takes: one part buffer to write a run, and one per
-	/// run a merge reads at once.
+	/// The memory spilling takes: one buffer to write a run, and one per run a
+	/// merge reads at once, each as large as a run's writer or reader can
+	/// hold ([`runs::buffer_bound`]).
 	fn headroom(&self) -> usize {
 		match &self.host.store {
-			Some(store) => store.part_size().saturating_mul(1 + self.fan_in()),
+			Some(store) => runs::buffer_bound(store.part_size()).saturating_mul(1 + self.fan_in()),
 			None => 0,
 		}
 	}
@@ -196,6 +199,11 @@ impl QueryMemory {
 	/// Whether the query can spill.
 	pub(crate) fn can_spill(&self) -> bool {
 		self.host.store.is_some()
+	}
+
+	/// The bytes a breaker reserves from its lease at a time.
+	pub(crate) fn chunk(&self) -> usize {
+		self.host.settings.chunk.max(1)
 	}
 
 	/// The runs a merge reads at once.
@@ -496,6 +504,11 @@ impl Reservation {
 	/// The query's memory this account draws on, if any.
 	pub(crate) fn memory(&self) -> Option<&Arc<QueryMemory>> {
 		self.memory.as_ref()
+	}
+
+	/// The bytes the account holds now.
+	pub(crate) fn used(&self) -> usize {
+		self.used
 	}
 
 	/// Charge `bytes` more, answering whether the lease still covers what the

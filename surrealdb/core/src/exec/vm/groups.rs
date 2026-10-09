@@ -192,6 +192,11 @@ impl Groups {
 		self.bytes += bytes;
 	}
 
+	/// How many keys a group has; none under `GROUP ALL`.
+	pub(super) fn keys(&self) -> usize {
+		self.key.len()
+	}
+
 	/// Whether these groups may be spilled: grouped by a key, so more than
 	/// one group can open.
 	pub(super) fn spillable(&self) -> bool {

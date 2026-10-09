@@ -277,8 +277,9 @@ pub(super) struct State {
 	pub(super) sort_spill: Vec<Option<super::sort::SortSpill>>,
 	/// The runs each sort has spilled ([`super::spill`]).
 	pub(super) sort_runs: Vec<Option<super::spill::Runs>>,
-	/// What each sort that keeps every row holds, against its query's lease;
-	/// unbounded for a sort a limit bounds.
+	/// What each sort holds, against its query's lease; unbounded for a
+	/// brute-force KNN's sort, which never spills, and for a keep sort of a
+	/// query with no temporary store, which prunes in memory.
 	pub(super) sort_accounts: Vec<crate::exec::memory::Reservation>,
 	/// The runs each aggregate's groups have spilled, as saved groups in key
 	/// order ([`Groups::save_all`]).
@@ -1320,15 +1321,18 @@ impl State {
 		let keep = match spec.keep {
 			Some(keep) if !spec.random => keep,
 			_ => {
-				for row in &rows {
-					self.charge_sort(sort, row);
+				// A keep sort charges its buffer's length, so each row is
+				// pushed before the next is charged.
+				for row in rows {
+					self.charge_sort(sort, &row);
+					self.sorts[at].push(row);
 				}
-				self.sorts[at].extend(rows);
 				return;
 			}
 		};
 		if self.sort_arrivals[at].run(keep) == 0 {
 			for row in rows {
+				self.charge_sort(sort, &row);
 				self.sorts[at].push(row);
 				self.prune(program, sort, keep);
 			}
@@ -1347,7 +1351,9 @@ impl State {
 					keys.push(Value::from((base + place as u64) as i64));
 				}
 			}
-			self.sorts[at].push((keys, row));
+			let row = (keys, row);
+			self.charge_sort(sort, &row);
+			self.sorts[at].push(row);
 			self.merge_arrived(program, sort, keep);
 		}
 	}
@@ -1519,8 +1525,14 @@ impl State {
 	/// The keys a row must order strictly before to reach a kept place of
 	/// sort `sort`, once it keeps a bounded number of rows and holds that
 	/// many ([`Self::keep_sorted`]): the last row a prune kept, or the row a
-	/// merge's run placed last. A later row whose keys equal them orders after
+	/// merge's run placed last, or the floor of the runs the sort has spilled
+	/// if that orders before. A later row whose keys equal them orders after
 	/// that row, by arrival.
+	///
+	/// A row that does not order strictly before a spilled floor cannot reach
+	/// a kept place: a run that holds `keep` records has `keep` rows, each
+	/// ordering at or before its last record, and all of them arrived
+	/// earlier, so they win every tie by source order in the merge.
 	#[inline]
 	pub(super) fn sort_floor<'s>(&'s self, program: &Program, sort: u16) -> Option<&'s [Value]> {
 		let at = sort as usize;
@@ -1529,7 +1541,17 @@ impl State {
 			Some(keep) if keep > 0 && !spec.random => keep,
 			_ => return None,
 		};
-		self.sort_arrivals[at].floored.then(|| self.sorts[at][keep - 1].0.as_slice())
+		let memory_floor =
+			self.sort_arrivals[at].floored.then(|| self.sorts[at][keep - 1].0.as_slice());
+		let spilled_floor = self.sort_spill[at].as_ref().and_then(|spill| spill.floor.as_deref());
+		match (memory_floor, spilled_floor) {
+			(Some(a), Some(b)) => Some(if compare_keys(a, b, &spec.keys) == Ordering::Greater {
+				b
+			} else {
+				a
+			}),
+			(a, b) => a.or(b),
+		}
 	}
 
 	/// [`Self::settle`] for a record read in place, from its stored bytes: a
@@ -1626,16 +1648,37 @@ impl State {
 		Ok(self.row_frame.as_mut().map(super::row_frame::RowFrame::take_encoded))
 	}
 
-	/// Charge a row sort `sort` takes to its account, marking a spill due once
-	/// its lease does not cover it. A sort a limit bounds has an unbounded
-	/// account.
+	/// Charge a row sort `sort` is about to take to its account, marking a
+	/// spill due once its lease does not cover it.
+	///
+	/// A sort that keeps every row charges each row. A keep sort charges what
+	/// its buffer holds, the row included, at the mean row it has taken, which
+	/// bounds what a pruning or merging sort holds; within one chunk it takes
+	/// nothing from its lease.
 	#[inline]
 	fn charge_sort(&mut self, sort: u16, row: &super::sort::Sorted) {
-		let account = &mut self.sort_accounts[sort as usize];
-		if account.memory().is_none() {
+		let at = sort as usize;
+		let Some(chunk) = self.sort_accounts[at].memory().map(|memory| memory.chunk()) else {
 			return;
-		}
-		if account.charge(super::sort::sorted_bytes(row)) == crate::exec::memory::Verdict::Spill {
+		};
+		let bytes = super::sort::sorted_bytes(row);
+		let account = &mut self.sort_accounts[at];
+		let verdict = match self.sort_spill[at].as_mut() {
+			Some(spill) if spill.keep.is_some() => {
+				spill.taken_bytes += bytes as u64;
+				spill.taken_rows += 1;
+				let mean = spill.taken_bytes / spill.taken_rows;
+				let held = usize::try_from((self.sorts[at].len() as u64 + 1).saturating_mul(mean))
+					.unwrap_or(usize::MAX);
+				if account.used() == 0 && held <= chunk {
+					crate::exec::memory::Verdict::Hold
+				} else {
+					account.hold(held)
+				}
+			}
+			_ => account.charge(bytes),
+		};
+		if verdict == crate::exec::memory::Verdict::Spill {
 			self.spill_due = true;
 		}
 	}

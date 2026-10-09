@@ -14,7 +14,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Context as _;
 
-use super::store::{RunId, RunRead, RunWrite, TempStore};
+use super::store::{
+	RunId, RunRead, RunRef, RunWrite, SessionName, Sharing, TempStore, Tier, cannot_share,
+	not_readable,
+};
 use crate::exec::BoxFut;
 
 const SESSION_PREFIX: &str = "surreal-spill-";
@@ -23,6 +26,7 @@ const LOCK_FILE: &str = ".lock";
 /// Runs kept as files in a session directory. See the module documentation.
 pub struct FileTempStore {
 	session: PathBuf,
+	name: SessionName,
 	/// Held locked while the store lives, marking the session as in use.
 	_lock: File,
 	part_size: usize,
@@ -49,7 +53,8 @@ impl FileTempStore {
 			.duration_since(web_time::UNIX_EPOCH)
 			.map(|d| d.as_nanos())
 			.unwrap_or_default();
-		let session = parent.join(format!("{SESSION_PREFIX}{}-{nonce}", std::process::id()));
+		let dir_name = format!("{SESSION_PREFIX}{}-{nonce}", std::process::id());
+		let session = parent.join(&dir_name);
 		std::fs::create_dir(&session).context("Failed to create a spill session directory")?;
 		let lock = OpenOptions::new()
 			.create(true)
@@ -60,6 +65,7 @@ impl FileTempStore {
 		lock.try_lock().map_err(|e| anyhow::anyhow!("Failed to lock a spill session: {e}"))?;
 		Ok(Self {
 			session,
+			name: SessionName::new(dir_name),
 			_lock: lock,
 			part_size: part_size.max(1),
 			quota,
@@ -68,8 +74,13 @@ impl FileTempStore {
 	}
 
 	/// The directory this store's runs are written in.
-	pub fn session(&self) -> &Path {
+	pub fn directory(&self) -> &Path {
 		&self.session
+	}
+
+	/// Whether `run` was written through this store.
+	fn owns(&self, run: &RunRef) -> bool {
+		run.session == self.name
 	}
 
 	fn path(&self, run: RunId) -> PathBuf {
@@ -125,24 +136,47 @@ impl TempStore for FileTempStore {
 		self.quota
 	}
 
-	fn write_run(&self) -> BoxFut<'_, anyhow::Result<Box<dyn RunWrite>>> {
+	fn session(&self) -> &SessionName {
+		&self.name
+	}
+
+	fn shares(&self) -> bool {
+		false
+	}
+
+	fn write_run(&self, sharing: Sharing) -> BoxFut<'_, anyhow::Result<Box<dyn RunWrite>>> {
 		let id = self.next.fetch_add(1, Ordering::Relaxed);
 		let path = self.path(id);
 		Box::pin(async move {
+			if sharing == Sharing::Shared {
+				return Err(cannot_share());
+			}
+			let created = path.clone();
 			let file =
-				blocking(move || File::create(&path).context("Failed to create a spilled run"))
+				blocking(move || File::create(&created).context("Failed to create a spilled run"))
 					.await?;
 			Ok(Box::new(FileRunWrite {
-				id,
+				run: RunRef {
+					session: self.name.clone(),
+					id,
+					tier: Tier::Local,
+					bytes: 0,
+				},
 				file: Some(file),
+				path,
+				finished: false,
 			}) as Box<dyn RunWrite>)
 		})
 	}
 
-	fn read_run(&self, run: RunId) -> BoxFut<'_, anyhow::Result<Box<dyn RunRead>>> {
-		let path = self.path(run);
+	fn read_run(&self, run: &RunRef) -> BoxFut<'_, anyhow::Result<Box<dyn RunRead>>> {
+		let path = self.path(run.id);
+		let owned = self.owns(run);
 		let part_size = self.part_size;
 		Box::pin(async move {
+			if !owned {
+				return Err(not_readable());
+			}
 			let file =
 				blocking(move || File::open(&path).context("Failed to open a spilled run")).await?;
 			Ok(Box::new(FileRunRead {
@@ -152,20 +186,35 @@ impl TempStore for FileTempStore {
 		})
 	}
 
-	fn delete_run(&self, run: RunId) {
-		let _ = std::fs::remove_file(self.path(run));
+	fn delete_run(&self, run: &RunRef) {
+		if self.owns(run) {
+			let _ = std::fs::remove_file(self.path(run.id));
+		}
 	}
 }
 
+/// A run's file, removed if the writer is dropped before it finishes.
 struct FileRunWrite {
-	id: RunId,
+	run: RunRef,
 	file: Option<File>,
+	path: PathBuf,
+	finished: bool,
+}
+
+impl Drop for FileRunWrite {
+	fn drop(&mut self) {
+		if !self.finished {
+			self.file.take();
+			let _ = std::fs::remove_file(&self.path);
+		}
+	}
 }
 
 impl RunWrite for FileRunWrite {
 	fn write_part(&mut self, part: Vec<u8>) -> BoxFut<'_, anyhow::Result<()>> {
 		Box::pin(async move {
 			let mut file = self.file.take().context("A spilled run written after a failure")?;
+			self.run.bytes += part.len() as u64;
 			let file = blocking(move || {
 				file.write_all(&part).context("Failed to write a spilled run")?;
 				Ok(file)
@@ -176,13 +225,14 @@ impl RunWrite for FileRunWrite {
 		})
 	}
 
-	fn finish(self: Box<Self>) -> BoxFut<'static, anyhow::Result<RunId>> {
+	fn finish(self: Box<Self>) -> BoxFut<'static, anyhow::Result<RunRef>> {
 		Box::pin(async move {
 			let mut this = *self;
 			if let Some(mut file) = this.file.take() {
 				blocking(move || file.flush().context("Failed to write a spilled run")).await?;
 			}
-			Ok(this.id)
+			this.finished = true;
+			Ok(this.run.clone())
 		})
 	}
 }
@@ -227,19 +277,43 @@ mod tests {
 	async fn a_run_reads_back_what_was_written() {
 		let dir = tempfile::tempdir().expect("a directory");
 		let store = FileTempStore::open(dir.path(), 4, None).expect("a store");
-		let mut run = store.write_run().await.expect("a run");
+		let mut run = store.write_run(Sharing::Private).await.expect("a run");
 		run.write_part(b"abcdef".to_vec()).await.expect("a part");
 		run.write_part(b"gh".to_vec()).await.expect("a part");
 		let id = run.finish().await.expect("finished");
-		let mut read = store.read_run(id).await.expect("a reader");
+		let mut read = store.read_run(&id).await.expect("a reader");
 		let mut got = Vec::new();
 		while let Some(part) = read.next_part().await.expect("a part") {
 			assert!(part.len() <= 4);
 			got.extend(part);
 		}
 		assert_eq!(got, b"abcdefgh");
-		store.delete_run(id);
-		assert!(store.read_run(id).await.is_err());
+		store.delete_run(&id);
+		assert!(store.read_run(&id).await.is_err());
+	}
+
+	/// A store names its runs by its session directory, writes them
+	/// `Local`, refuses to share, and ignores a run of another session.
+	#[tokio::test]
+	async fn a_file_store_names_its_runs_by_its_session() {
+		let dir = tempfile::tempdir().expect("a directory");
+		let store = FileTempStore::open(dir.path(), 4, None).expect("a store");
+		let run = store.write_run(Sharing::Private).await.expect("a run");
+		let name = run.finish().await.expect("finished");
+		let directory = store.directory().file_name().expect("a name").to_string_lossy();
+		assert_eq!(name.session.as_str(), directory);
+		assert_eq!(name.tier, Tier::Local);
+		assert!(!store.shares());
+		assert!(store.write_run(Sharing::Shared).await.is_err());
+		let foreign = RunRef {
+			session: SessionName::new("elsewhere"),
+			id: name.id,
+			tier: Tier::Shared,
+			bytes: 0,
+		};
+		assert!(store.read_run(&foreign).await.is_err());
+		store.delete_run(&foreign);
+		assert!(store.read_run(&name).await.is_ok());
 	}
 
 	/// Opening a store sweeps a session no live store holds, and leaves one
@@ -253,7 +327,7 @@ mod tests {
 		let live = FileTempStore::open(dir.path(), 4, None).expect("a store");
 		assert!(!abandoned.exists());
 		let other = FileTempStore::open(dir.path(), 4, None).expect("another store");
-		assert!(live.session().exists());
+		assert!(live.directory().exists());
 		drop(other);
 		drop(live);
 		assert_eq!(std::fs::read_dir(dir.path()).expect("listing").count(), 0);

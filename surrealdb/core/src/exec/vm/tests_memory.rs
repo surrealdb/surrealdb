@@ -1289,3 +1289,136 @@ async fn a_gathered_let_transfers_its_charge() {
 		"the gathered bytes were given back before the bind: {events:?}"
 	);
 }
+
+/// A sort that keeps a bounded number of rows spills once what it holds
+/// passes a chunk of its lease, whether it prunes or, under a small quantum,
+/// merges; every pass and run is cut to the rows it keeps; and it answers as
+/// unbounded.
+#[tokio::test]
+async fn a_limited_sort_spills_and_answers_as_unbounded() {
+	let statements = [
+		"SELECT n FROM t ORDER BY k LIMIT 5 START 2000",
+		"SELECT n, pad FROM t ORDER BY pad DESC, n LIMIT 1500",
+		"SELECT VALUE n FROM t ORDER BY k DESC, n LIMIT 2500",
+		"SELECT n FROM t WHERE n % 2 = 0 ORDER BY s COLLATE, k LIMIT 1200",
+	];
+	let keeps = [2005, 1500, 2500, 1200];
+	let expected = unbounded(&statements).await;
+	for fan_in in [2usize, 8] {
+		for quantum in [None, Some("64")] {
+			let mut config = small(fan_in);
+			if let Some(quantum) = quantum {
+				config = config.with_key_value("vm_quantum", quantum);
+			}
+			let governor = Watching::new(32 << 10);
+			let store = Arc::new(MemTempStore::new(1024, None));
+			let db = db_on(governor, Arc::clone(&store), config).await;
+			let before = store.runs_written();
+			let passes = super::spill::MERGE_PASSES.load(Ordering::Relaxed);
+			for ((sql, expected), keep) in statements.iter().zip(&expected).zip(keeps) {
+				super::spill::LARGEST_PASS.with(|largest| largest.set(0));
+				assert_eq!(
+					&answer(&db, sql, None).await,
+					expected,
+					"`{sql}` (fan-in {fan_in}, quantum {quantum:?})"
+				);
+				if fan_in == 2 {
+					let largest = super::spill::LARGEST_PASS.with(|largest| largest.get());
+					assert!(largest <= keep as u64, "`{sql}` wrote a pass of {largest} records");
+				}
+			}
+			assert!(store.runs_written() > before, "no sort spilled");
+			assert_eq!(store.runs(), 0, "a spilled run outlived its query");
+			assert!(
+				store.most_read_at_once() <= fan_in,
+				"read {} runs at once",
+				store.most_read_at_once()
+			);
+			if fan_in == 2 {
+				assert!(
+					super::spill::MERGE_PASSES.load(Ordering::Relaxed) > passes,
+					"no merge took a pass"
+				);
+			}
+		}
+	}
+}
+
+/// A random order that keeps a bounded number of rows spills, and hands on
+/// distinct rows.
+#[tokio::test]
+async fn a_limited_random_order_spills_and_hands_on_distinct_rows() {
+	let governor = Arc::new(FairGovernor::new(32 << 10));
+	let store = Arc::new(MemTempStore::new(1024, None));
+	let db = db_on(governor, Arc::clone(&store), small(4)).await;
+	let before = store.runs_written();
+	let rows = answer(&db, "SELECT VALUE n FROM t ORDER BY RAND() LIMIT 2000", None)
+		.await
+		.expect("answers");
+	assert!(store.runs_written() > before, "the sort did not spill");
+	assert_eq!(rows.len(), 2000);
+	let distinct: std::collections::BTreeSet<_> = rows.iter().cloned().collect();
+	assert_eq!(distinct.len(), 2000, "a row was handed on twice");
+	let every: std::collections::BTreeSet<Value> = (0..3000i64).map(Value::from).collect();
+	assert!(distinct.is_subset(&every), "a row was not in the table");
+	assert_eq!(store.runs(), 0, "a spilled run outlived its query");
+}
+
+/// A sort that keeps few rows holds them within one chunk and spills nothing.
+#[tokio::test]
+async fn a_small_limited_sort_takes_no_account() {
+	let sql = "SELECT n FROM t ORDER BY k LIMIT 10";
+	let expected = unbounded(&[sql]).await;
+	let governor = Watching::new(32 << 10);
+	let store = Arc::new(MemTempStore::new(1024, None));
+	let db = db_on(governor, Arc::clone(&store), small(8)).await;
+	let before = store.runs_written();
+	assert_eq!(answer(&db, sql, None).await, expected[0]);
+	assert_eq!(store.runs_written(), before, "a sort within a chunk spilled");
+}
+
+/// A sort that keeps a bounded number of rows, in a query with no temporary
+/// store, takes no account: it prunes in memory and answers as unbounded
+/// rather than failing for memory.
+#[tokio::test]
+async fn a_limited_sort_without_a_temporary_store_prunes_in_memory() {
+	let sql = "SELECT n, pad FROM t ORDER BY k, n LIMIT 2000";
+	let expected = unbounded(&[sql]).await;
+	let governor = Watching::new(24 << 10);
+	let freely = Arc::new(SetUpFreely {
+		setting_up: std::sync::atomic::AtomicBool::new(true),
+		inner: governor,
+	});
+	// A directory that cannot be made leaves the datastore with no store.
+	let builder = crate::kvs::Datastore::builder()
+		.with_memory_governor(Arc::clone(&freely) as Arc<dyn MemoryGovernor>)
+		.with_temporary_directory(Some(std::path::PathBuf::from("/dev/null/spill")));
+	let config = small(8).with_key_value("memory_reserve_chunk", "1024");
+	let db = TestDb::new_on(builder, SETUP, config).await;
+	freely.setting_up.store(false, Ordering::Relaxed);
+	assert_eq!(answer(&db, sql, None).await, expected[0]);
+}
+
+/// A sort that keeps more rows than a chunk holds, in order, drops the rows
+/// its spilled runs show cannot be kept, and answers as unbounded.
+#[tokio::test]
+async fn a_spilled_floor_drops_rows_that_cannot_be_kept() {
+	let statements =
+		["SELECT n FROM t ORDER BY n LIMIT 100", "SELECT n FROM t ORDER BY n DESC LIMIT 100"];
+	let expected = unbounded(&statements).await;
+	let governor = Watching::new(24 << 10);
+	let store = Arc::new(MemTempStore::new(1024, None));
+	let config = small(8).with_key_value("memory_reserve_chunk", "1024");
+	let db = db_on(governor, Arc::clone(&store), config).await;
+	for (sql, expected) in statements.iter().zip(&expected) {
+		let before = store.runs_written();
+		let floors = super::spill::FLOORS_SET.with(|floors| floors.get());
+		assert_eq!(&answer(&db, sql, None).await, expected, "`{sql}`");
+		assert!(store.runs_written() > before, "`{sql}` did not spill");
+		assert!(
+			super::spill::FLOORS_SET.with(|floors| floors.get()) > floors,
+			"`{sql}` set no spilled floor"
+		);
+	}
+	assert_eq!(store.runs(), 0, "a spilled run outlived its query");
+}

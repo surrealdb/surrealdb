@@ -28,6 +28,20 @@ pub(super) struct SortSpill {
 	/// spilled or merged ([`with_random_keys`]), so the merge of the runs is
 	/// a uniform shuffle of every row.
 	pub(super) random: bool,
+	/// The rows the sort keeps (`SortSpec::keep`): it spills only once what it
+	/// holds passes one chunk of its lease, writes no more than this many rows
+	/// a run, and merges with this limit.
+	pub(super) keep: Option<usize>,
+	/// The bytes and rows the sort has taken, for the mean row a keep sort
+	/// charges its held rows at.
+	pub(super) taken_bytes: u64,
+	pub(super) taken_rows: u64,
+	/// The keys (without an arrival stamp) of the last record of a spilled run
+	/// that holds exactly `keep` records, the least such: a later row whose
+	/// keys do not order strictly before them cannot be among the first
+	/// `keep`, because those `keep` rows all arrived earlier and win every tie
+	/// by source order.
+	pub(super) floor: Option<Vec<Value>>,
 }
 
 /// The order of the random key [`with_random_keys`] gives each row.

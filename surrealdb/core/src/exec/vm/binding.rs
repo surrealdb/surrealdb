@@ -832,7 +832,7 @@ async fn build_table(
 		&& ctx.ctx().memory().is_some_and(|memory| memory.can_spill())
 		&& !running.groups.get(step.build as usize).is_some_and(|spec| spec.only);
 	if spills {
-		let mut sink = super::join_spill::BuildSink::new(&step.keys, max_rows, ctx);
+		let mut sink = super::join_spill::BuildSink::new(&step.keys, max_rows, step.build, ctx);
 		super::host::run_group_into(&running, step.build, state, ctx, &mut sink).await?;
 		return sink.finish(ctx).await;
 	}

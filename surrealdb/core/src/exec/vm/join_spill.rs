@@ -28,7 +28,7 @@ use super::binding::{HostJudge, JoinStep, pairings};
 use super::host::RowSink;
 use super::program::HostScalar;
 use super::spill::{Merge, RecordOrder, Runs, write_run};
-use crate::exec::memory::runs::Record;
+use crate::exec::memory::runs::{BreakerKind, Record, RunOrder, RunSpec};
 use crate::exec::memory::{QueryMemory, Reservation, Verdict};
 use crate::exec::operators::join::hash_join::{
 	BuildTable, JoinKey, join_key, key_has_regex, keys_equal, too_many_build_rows,
@@ -40,9 +40,10 @@ fn by_keys() -> RecordOrder {
 	Arc::new(|(a, _), (b, _)| a.cmp(b))
 }
 
-/// Sort `held` by key and write it as the next of `runs`.
+/// Sort `held` by key and write it as the next of `runs`, written for `spec`.
 async fn spill_sorted(
 	memory: &Arc<QueryMemory>,
+	spec: RunSpec,
 	runs: &mut Runs,
 	held: &mut Vec<Record>,
 	account: &mut Reservation,
@@ -50,7 +51,7 @@ async fn spill_sorted(
 ) -> FlowResult<()> {
 	let mut rows = std::mem::take(held);
 	rows.sort_by(|(a, _), (b, _)| a.cmp(b));
-	runs.push(write_run(memory, rows, ctx).await?);
+	runs.push(write_run(memory, spec, rows, ctx).await?)?;
 	account.clear();
 	Ok(())
 }
@@ -62,6 +63,8 @@ pub(super) struct BuildSink {
 	keys: Vec<String>,
 	/// How many key columns a build row's key has.
 	width: usize,
+	/// The join's build group within its program.
+	index: u16,
 	max_rows: usize,
 	rows: usize,
 	account: Reservation,
@@ -79,20 +82,37 @@ impl BuildSink {
 	/// A build side keyed on the bindings `keys`, failing past `max_rows`
 	/// rows as the in-memory table does, charging `ctx`'s query where it can
 	/// spill.
-	pub(super) fn new(keys: &[String], max_rows: usize, ctx: &ExecutionContext) -> Self {
-		Self::keyed(keys.to_vec(), keys.len(), max_rows, ctx)
+	pub(super) fn new(
+		keys: &[String],
+		max_rows: usize,
+		index: u16,
+		ctx: &ExecutionContext,
+	) -> Self {
+		Self::keyed(keys.to_vec(), keys.len(), max_rows, index, ctx)
 	}
 
 	/// A build side whose rows the caller keys, `width` columns each.
-	pub(super) fn with_width(width: usize, max_rows: usize, ctx: &ExecutionContext) -> Self {
-		Self::keyed(Vec::new(), width, max_rows, ctx)
+	pub(super) fn with_width(
+		width: usize,
+		max_rows: usize,
+		index: u16,
+		ctx: &ExecutionContext,
+	) -> Self {
+		Self::keyed(Vec::new(), width, max_rows, index, ctx)
 	}
 
-	fn keyed(keys: Vec<String>, width: usize, max_rows: usize, ctx: &ExecutionContext) -> Self {
+	fn keyed(
+		keys: Vec<String>,
+		width: usize,
+		max_rows: usize,
+		index: u16,
+		ctx: &ExecutionContext,
+	) -> Self {
 		let memory = ctx.ctx().memory().filter(|memory| memory.can_spill()).cloned();
 		Self {
 			keys,
 			width,
+			index,
 			max_rows,
 			rows: 0,
 			account: match &memory {
@@ -125,9 +145,11 @@ impl BuildSink {
 			}
 			return Ok(Built::Memory(table));
 		};
-		spill_sorted(&memory, &mut self.runs, &mut self.held, &mut self.account, ctx).await?;
+		let spec = self.spec(BreakerKind::JoinBuild);
+		spill_sorted(&memory, spec, &mut self.runs, &mut self.held, &mut self.account, ctx).await?;
 		Ok(Built::Spilled(Box::new(SpilledJoin {
 			width: self.width,
+			index: self.index,
 			account: memory.reservation(),
 			regex_probe_account: memory.pinned_reservation(),
 			memory,
@@ -145,6 +167,11 @@ impl BuildSink {
 }
 
 impl BuildSink {
+	/// The spec of a run of build rows: their key, then their arrival.
+	fn spec(&self, kind: BreakerKind) -> RunSpec {
+		RunSpec::new(kind, self.index, self.width + 1, RunOrder::Plain)
+	}
+
 	/// Take build row `row`, keyed `key`.
 	pub(super) async fn push(
 		&mut self,
@@ -173,7 +200,9 @@ impl BuildSink {
 			&& let Some(memory) = &self.memory
 		{
 			let memory = Arc::clone(memory);
-			spill_sorted(&memory, &mut self.runs, &mut self.held, &mut self.account, ctx).await?;
+			let spec = self.spec(BreakerKind::JoinBuild);
+			spill_sorted(&memory, spec, &mut self.runs, &mut self.held, &mut self.account, ctx)
+				.await?;
 		}
 		Ok(())
 	}
@@ -215,6 +244,8 @@ pub(super) enum Built {
 pub(super) struct SpilledJoin {
 	/// How many key columns a record's keys begin with.
 	width: usize,
+	/// The join's build group within its program.
+	index: u16,
 	memory: Arc<QueryMemory>,
 	account: Reservation,
 	build: Runs,
@@ -283,6 +314,16 @@ impl Pairer for Pairing<'_> {
 }
 
 impl SpilledJoin {
+	/// The spec of a run of probe rows (a key, then an arrival) or of rows
+	/// yielded (a probe arrival, then a place).
+	fn spec(&self, kind: BreakerKind) -> RunSpec {
+		let arity = match kind {
+			BreakerKind::JoinOut => 2,
+			_ => self.width + 1,
+		};
+		RunSpec::new(kind, self.index, arity, RunOrder::Plain)
+	}
+
 	/// Keep `rows`, the rows probe `arrival` yields, in order.
 	async fn yielded(
 		&mut self,
@@ -295,8 +336,16 @@ impl SpilledJoin {
 			self.out.push((vec![Value::from(arrival), Value::from(place as i64)], row));
 			if self.account.charge(bytes) == Verdict::Spill {
 				let memory = Arc::clone(&self.memory);
-				spill_sorted(&memory, &mut self.out_runs, &mut self.out, &mut self.account, ctx)
-					.await?;
+				let spec = self.spec(BreakerKind::JoinOut);
+				spill_sorted(
+					&memory,
+					spec,
+					&mut self.out_runs,
+					&mut self.out,
+					&mut self.account,
+					ctx,
+				)
+				.await?;
 			}
 		}
 		Ok(())
@@ -333,8 +382,16 @@ impl SpilledJoin {
 		self.probes.push((keys, row));
 		if self.account.charge(bytes) == Verdict::Spill {
 			let memory = Arc::clone(&self.memory);
-			spill_sorted(&memory, &mut self.probe_runs, &mut self.probes, &mut self.account, ctx)
-				.await?;
+			let spec = self.spec(BreakerKind::JoinProbe);
+			spill_sorted(
+				&memory,
+				spec,
+				&mut self.probe_runs,
+				&mut self.probes,
+				&mut self.account,
+				ctx,
+			)
+			.await?;
 		}
 		Ok(())
 	}
@@ -355,11 +412,11 @@ impl SpilledJoin {
 		// before either is opened.
 		let fan_in = memory.fan_in();
 		let order = by_keys();
-		let probe_runs = probe_runs.reduce(&memory, &order, fan_in / 2, ctx).await?;
+		let probe_runs = probe_runs.reduce(&memory, &order, fan_in / 2, None, ctx).await?;
 		let build_runs = std::mem::take(&mut self.build);
-		let build_runs = build_runs.reduce(&memory, &order, fan_in - fan_in / 2, ctx).await?;
-		let mut probes = probe_runs.open(probes_held, Arc::clone(&order)).await?;
-		let mut build = build_runs.open(Vec::new(), order).await?;
+		let build_runs = build_runs.reduce(&memory, &order, fan_in - fan_in / 2, None, ctx).await?;
+		let mut probes = probe_runs.open(probes_held, Arc::clone(&order), None).await?;
+		let mut build = build_runs.open(Vec::new(), order, None).await?;
 		// Each regex probe's matches among the build rows with a key, in key
 		// then arrival order, gathered as the build rows are walked.
 		let mut regex_matches: Vec<Vec<Value>> = vec![Vec::new(); self.regex_probes.len()];
@@ -422,7 +479,7 @@ impl SpilledJoin {
 		out.sort_by(|(a, _), (b, _)| a.cmp(b));
 		self.account.clear();
 		let out_runs = std::mem::take(&mut self.out_runs);
-		out_runs.merge(&memory, out, by_keys(), ctx).await
+		out_runs.merge(&memory, out, by_keys(), None, ctx).await
 	}
 
 	/// Offer build row `row`, keyed `key`, to every regex probe it matches.

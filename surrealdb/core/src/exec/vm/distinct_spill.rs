@@ -24,7 +24,7 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use super::spill::{RecordOrder, Runs, write_run};
-use crate::exec::memory::runs::Record;
+use crate::exec::memory::runs::{BreakerKind, Record, RunOrder, RunSpec};
 use crate::exec::memory::{QueryMemory, Reservation, Verdict};
 use crate::exec::operators::distinct::{SeenSet, too_many_distinct};
 use crate::exec::{ExecutionContext, FlowResult};
@@ -34,6 +34,12 @@ use crate::val::Value;
 /// arrival, or a kept row's arrival.
 fn by_keys() -> RecordOrder {
 	Arc::new(|(a, _), (b, _)| a.cmp(b))
+}
+
+/// The spec of a distinct's run of `kind` with `arity` keys. A distinct is
+/// one step of its program, so its runs have no index of their own.
+fn spec(kind: BreakerKind, arity: usize) -> RunSpec {
+	RunSpec::new(kind, 0, arity, RunOrder::Plain)
 }
 
 /// What a distinct holds once it has spilled.
@@ -92,8 +98,9 @@ impl Distinct {
 			if self.account.charge(bytes) == Verdict::Spill {
 				let mut held = std::mem::take(&mut spilled.deferred);
 				held.sort_by(|(a, _), (b, _)| a.cmp(b));
-				let run = write_run(&spilled.memory, held, ctx).await?;
-				spilled.deferred_runs.push(run);
+				let spec = spec(BreakerKind::DistinctDeferred, 2);
+				let run = write_run(&spilled.memory, spec, held, ctx).await?;
+				spilled.deferred_runs.push(run)?;
 				self.account.clear();
 			}
 			return Ok(None);
@@ -108,7 +115,7 @@ impl Distinct {
 					let seen_count = self.seen.len();
 					let rows = self.seen.take_sorted().into_iter().map(|v| (vec![v], Value::None));
 					let mut seen = Runs::default();
-					seen.push(write_run(&memory, rows, ctx).await?);
+					seen.push(write_run(&memory, spec(BreakerKind::DistinctSeen, 1), rows, ctx).await?)?;
 					self.account.clear();
 					self.spilled = Some(Box::new(Spilled {
 						memory,
@@ -152,10 +159,11 @@ impl Distinct {
 		// for the merge keeps the three within the query's spill headroom.
 		// Every pass is made before either is opened.
 		let order = by_keys();
-		let deferred_runs = deferred_runs.reduce(&memory, &order, memory.fan_in() - 1, ctx).await?;
-		let seen = seen.reduce(&memory, &order, 1, ctx).await?;
-		let mut before = seen.open(Vec::new(), Arc::clone(&order)).await?;
-		let mut rows = deferred_runs.open(deferred, order).await?;
+		let deferred_runs =
+			deferred_runs.reduce(&memory, &order, memory.fan_in() - 1, None, ctx).await?;
+		let seen = seen.reduce(&memory, &order, 1, None, ctx).await?;
+		let mut before = seen.open(Vec::new(), Arc::clone(&order), None).await?;
+		let mut rows = deferred_runs.open(deferred, order, None).await?;
 		let mut kept_runs = Runs::default();
 		let mut kept: Vec<Record> = Vec::new();
 		let mut kept_count = 0usize;
@@ -186,7 +194,8 @@ impl Distinct {
 			if self.account.charge(bytes) == Verdict::Spill {
 				let mut held = std::mem::take(&mut kept);
 				held.sort_by(|(a, _), (b, _)| a.cmp(b));
-				kept_runs.push(write_run(&memory, held, ctx).await?);
+				let spec = spec(BreakerKind::DistinctKept, 1);
+				kept_runs.push(write_run(&memory, spec, held, ctx).await?)?;
 				self.account.clear();
 			}
 		}
@@ -194,7 +203,7 @@ impl Distinct {
 		drop(before);
 		kept.sort_by(|(a, _), (b, _)| a.cmp(b));
 		self.account.clear();
-		let merge = kept_runs.merge(&memory, kept, by_keys(), ctx).await?;
+		let merge = kept_runs.merge(&memory, kept, by_keys(), None, ctx).await?;
 		Ok(Some(merge))
 	}
 }

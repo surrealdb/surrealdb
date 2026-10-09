@@ -9,6 +9,7 @@
 //! it is an operator like any other.
 
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -17,7 +18,7 @@ use futures::StreamExt;
 
 use super::batch::RecordReader;
 use super::groups::GroupMut;
-use super::interp::{self, Groups, Paging, Pending, Region, State, Step};
+use super::interp::{self, Arrivals, Groups, Paging, Pending, Region, State, Step};
 use super::program::{Enforce, Instr, Pipeline, Program, STACK_REGISTERS, Source, StoreInstr};
 use super::region::Rows;
 use super::row::{RevisionRow, RowReader, ValueRow};
@@ -27,6 +28,7 @@ use super::write;
 use crate::exec::function::AccumulatorState;
 use crate::exec::index::access_path::access_repeats_records;
 use crate::exec::index::iterator::btree::BTreeIterator;
+use crate::exec::memory::runs::{BreakerKind, RunOrder, RunSpec};
 use crate::exec::operators::SortDirection;
 use crate::exec::operators::fetch::fetch_raw_record;
 use crate::exec::operators::limit::{PagingClause, paging_count};
@@ -759,6 +761,11 @@ async fn start_group(
 		}
 		state.sort_runs[at] = None;
 		state.sort_accounts[at].clear();
+		if let Some(spill) = state.sort_spill[at].as_mut() {
+			spill.floor = None;
+			spill.taken_bytes = 0;
+			spill.taken_rows = 0;
+		}
 	}
 	for at in spec.aggregates.clone() {
 		state.reset_aggregate(program, at as usize);
@@ -1005,11 +1012,13 @@ pub(super) async fn run_pipelines(
 						}
 						false => spec.keys.clone(),
 					};
-					let held = super::sort::sorted(held, &keys, usize::MAX, ctx).await?;
+					let keep = spec.keep;
+					let held =
+						super::sort::sorted(held, &keys, keep.unwrap_or(usize::MAX), ctx).await?;
 					let held = super::spill::records_of(held, &slab)?;
 					state.sort_accounts[*sort as usize].clear();
 					let order = super::spill::sort_order(keys);
-					let mut merge = runs.merge(&memory, held, order, ctx).await?;
+					let mut merge = runs.merge(&memory, held, order, keep, ctx).await?;
 					loop {
 						let most = ctx.root().ctx.config.exec.scan_batch_size.max(1);
 						let chunk = merge.next_chunk(most, ctx).await?;
@@ -4226,7 +4235,12 @@ async fn build_join(
 		&& !held.groups.get(spec.build as usize).is_some_and(|group| group.only);
 	if spills {
 		let mut sink = PlanBuildSink {
-			inner: super::join_spill::BuildSink::with_width(spec.build_keys.len(), usize::MAX, ctx),
+			inner: super::join_spill::BuildSink::with_width(
+				spec.build_keys.len(),
+				usize::MAX,
+				spec.build,
+				ctx,
+			),
 			program,
 			spec,
 			eval,
@@ -4688,12 +4702,16 @@ async fn gathered(state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
 	Ok(())
 }
 
-/// Bound the breakers of `program` by the query's memory: every sort that
-/// keeps all its rows charges them to the query's lease, which opens it with
-/// its spill headroom, and spills once the lease no longer covers them. A
-/// sort under `TEMPFILES` also spills each time it holds the external
-/// sorting buffer limit's rows, as the operator tree's external sort does,
-/// when the context names a temporary directory.
+/// Bound the breakers of `program` by the query's memory: every sort but a
+/// brute-force KNN's charges what it holds to the query's lease, which opens
+/// it with its spill headroom, and spills once the lease no longer covers it.
+/// A sort that keeps a bounded number of rows takes nothing from its lease
+/// until it holds more than a chunk, and takes no account at all when the
+/// query has no temporary store: it prunes in memory and never fails for
+/// memory. A sort that keeps every row under
+/// `TEMPFILES` also spills each time it holds the external sorting buffer
+/// limit's rows, as the operator tree's external sort does, when the context
+/// names a temporary directory.
 fn bound_breakers(program: &Program, state: &mut State, ctx: &ExecutionContext) {
 	let Some(memory) = ctx.ctx().memory() else {
 		return;
@@ -4701,17 +4719,28 @@ fn bound_breakers(program: &Program, state: &mut State, ctx: &ExecutionContext) 
 	state.memory = Some(Arc::clone(memory));
 	let rows = tempfiles_limit(ctx);
 	for (at, spec) in program.sorts.iter().enumerate() {
-		if spec.keep.is_some() {
+		// A brute-force KNN's sort publishes the distance of each row it
+		// keeps, which the spilled merge does not: it never spills.
+		if spec.knn_slot.is_some() {
+			continue;
+		}
+		// A keep sort holds a bounded buffer, so it has no need to be
+		// accounted where it could not spill.
+		if spec.keep.is_some() && !memory.can_spill() {
 			continue;
 		}
 		state.sort_accounts[at] = memory.reservation();
 		state.sort_spill[at] = Some(super::sort::SortSpill {
-			rows: rows.filter(|_| spec.spill && !spec.random),
+			rows: rows.filter(|_| spec.spill && !spec.random && spec.keep.is_none()),
 			keys: match spec.random {
 				true => vec![super::sort::RANDOM_ORDER],
 				false => spec.keys.clone(),
 			},
 			random: spec.random,
+			keep: spec.keep,
+			taken_bytes: 0,
+			taken_rows: 0,
+			floor: None,
 		});
 	}
 	for (at, sink) in program.aggregates.iter().enumerate() {
@@ -4771,15 +4800,53 @@ async fn spill_breakers(state: &mut State, ctx: &ExecutionContext) -> FlowResult
 			account.insist(ctx).await?;
 			continue;
 		}
-		let (keys, random) = (spill.keys.clone(), spill.random);
+		let (keys, random, limit) = (spill.keys.clone(), spill.random, spill.keep);
 		let mut rows = std::mem::take(&mut state.sorts[at]);
 		let slab = std::mem::take(&mut state.sort_slabs[at]);
 		if random {
 			super::sort::with_random_keys(&mut rows);
 		}
+		let spec = RunSpec::new(
+			BreakerKind::Sort,
+			at as u16,
+			rows[0].0.len(),
+			RunOrder::Keys(super::spill::key_order_bytes(&keys)),
+		);
 		let runs = state.sort_runs[at].get_or_insert_with(Default::default);
-		runs.spill_sorted(&memory, rows, &slab, &keys, ctx).await?;
+		let last = runs.spill_sorted(&memory, spec, rows, &slab, &keys, limit, ctx).await?;
 		state.sort_accounts[at].clear();
+		if limit.is_some() && !random {
+			// The buffer is empty: the sort keeps nothing in memory, and the
+			// next row starts a fresh prune or merge. Arrivals keep counting,
+			// so stamps stay increasing across runs. Sorting the buffer
+			// stably at any point between rows gives the order a full sort of
+			// the rows that reached it would give: a merging sort stamps
+			// every row with its arrival, so its order is total and holds
+			// mid-merge, where rows only swap within the buffer; a pruning
+			// sort holds its kept rows sorted, stably, ahead of later
+			// arrivals, so among equal keys buffer position is arrival order.
+			let arrivals = &mut state.sort_arrivals[at];
+			*arrivals = Arrivals {
+				run: arrivals.run,
+				arrived: arrivals.arrived,
+				..Default::default()
+			};
+			if let Some(mut last) = last {
+				last.truncate(keys.len());
+				let spill = state.sort_spill[at].as_mut().expect("checked above");
+				let lower = match &spill.floor {
+					Some(floor) => {
+						super::interp::compare_keys(&last, floor, &keys) == Ordering::Less
+					}
+					None => true,
+				};
+				if lower {
+					spill.floor = Some(last);
+					#[cfg(test)]
+					super::spill::FLOORS_SET.with(|floors| floors.set(floors.get() + 1));
+				}
+			}
+		}
 	}
 	for at in 0..state.groups.len() {
 		let account = &mut state.group_accounts[at];
@@ -4803,8 +4870,9 @@ async fn spill_breakers(state: &mut State, ctx: &ExecutionContext) -> FlowResult
 			account.insist(ctx).await?;
 			continue;
 		};
-		let run = super::spill::write_run(&memory, records, ctx).await?;
-		state.group_runs[at].get_or_insert_with(Default::default).push(run);
+		let spec = RunSpec::new(BreakerKind::Groups, at as u16, groups.keys(), RunOrder::Plain);
+		let run = super::spill::write_run(&memory, spec, records, ctx).await?;
+		state.group_runs[at].get_or_insert_with(Default::default).push(run)?;
 		state.group_accounts[at].clear();
 	}
 	Ok(())
@@ -4835,7 +4903,7 @@ async fn finish_spilled_groups(
 	};
 	state.group_accounts[at].clear();
 	let order: super::spill::RecordOrder = Arc::new(|(a, _), (b, _)| a.cmp(b));
-	let mut merge = runs.merge(&memory, held, order, ctx).await?;
+	let mut merge = runs.merge(&memory, held, order, None, ctx).await?;
 	let functions = state.aggregates.functions[at].clone();
 	let keys = program.aggregates[at].keys;
 	let batch = ctx.root().ctx.config.exec.scan_batch_size.max(1);
