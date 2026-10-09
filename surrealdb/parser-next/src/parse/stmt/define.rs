@@ -62,7 +62,7 @@ impl<'a, 's> Parser<'a, 's> {
 		let t = self.tok;
 		let kind = match t.kw {
 			_ if t.kind != T::Ident => {
-				return Err(self.unexpected("expected a define statement keyword"));
+				return Err(self.unexpected("a define statement keyword"));
 			}
 			Kw::Namespace => DefineKind::Namespace,
 			Kw::Database => DefineKind::Database,
@@ -80,13 +80,21 @@ impl<'a, 's> Parser<'a, 's> {
 			Kw::Bucket => DefineKind::Bucket,
 			Kw::Sequence => DefineKind::Sequence,
 			Kw::Module => DefineKind::Module,
-			_ => return Err(self.unexpected("expected a define statement keyword")),
+			_ => return Err(self.unexpected("a define statement keyword")),
 		};
+		if self.limits.no_files && kind == DefineKind::Bucket {
+			return Err(self.files_off(t));
+		}
 		self.bump();
+		if self.limits.no_surrealism && kind == DefineKind::Module {
+			return Err(
+				self.surrealism_off(t, "Use of `DEFINE MODULE` requires Surrealism modules")
+			);
+		}
 		let mut rec = [NONE; define::LEN];
 		rec[define::EXIST] = if self.eat_kw(Kw::If) {
-			self.expect_kw(Kw::Not, "expected `NOT`")?;
-			self.expect_kw(Kw::Exists, "expected `EXISTS`")?;
+			self.expect_kw(Kw::Not, "NOT")?;
+			self.expect_kw(Kw::Exists, "EXISTS")?;
 			1
 		} else if self.eat_kw(Kw::Overwrite) {
 			2
@@ -115,18 +123,18 @@ impl<'a, 's> Parser<'a, 's> {
 			DefineKind::Function => self.define_function(&mut rec)?,
 			DefineKind::User => {
 				rec[define::NAME] = self.expr(true)?;
-				self.expect_kw(Kw::On, "expected `ON`")?;
+				self.expect_kw(Kw::On, "ON")?;
 				rec[define::ON] = self.base()?;
 				self.user_clauses()?;
 			}
 			DefineKind::Access => {
 				rec[define::NAME] = self.expr(true)?;
-				self.expect_kw(Kw::On, "expected `ON`")?;
+				self.expect_kw(Kw::On, "ON")?;
 				rec[define::ON] = self.base()?;
 				self.access_clauses()?;
 			}
 			DefineKind::Param => {
-				let p = self.expect(T::Param, "expected a parameter")?;
+				let p = self.expect(T::Param, "a parameter")?;
 				rec[define::NAME] = self.leaf(Tag::Param, 0, p);
 				loop {
 					match self.tok.kw {
@@ -147,21 +155,21 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			DefineKind::Event => {
 				rec[define::NAME] = self.expr(true)?;
-				self.expect_kw(Kw::On, "expected `ON`")?;
+				self.expect_kw(Kw::On, "ON")?;
 				self.eat_kw(Kw::Table);
 				rec[define::ON] = self.expr(false)?;
 				self.event_clauses()?;
 			}
 			DefineKind::Field => {
 				rec[define::NAME] = self.expr(true)?;
-				self.expect_kw(Kw::On, "expected `ON`")?;
+				self.expect_kw(Kw::On, "ON")?;
 				self.eat_kw(Kw::Table);
 				rec[define::ON] = self.expr(false)?;
 				self.field_clauses()?;
 			}
 			DefineKind::Index => {
 				rec[define::NAME] = self.expr(true)?;
-				self.expect_kw(Kw::On, "expected `ON`")?;
+				self.expect_kw(Kw::On, "ON")?;
 				self.eat_kw(Kw::Table);
 				rec[define::ON] = self.expr(false)?;
 				self.index_clauses()?;
@@ -188,7 +196,7 @@ impl<'a, 's> Parser<'a, 's> {
 						self.bump();
 						rec[define::ON] = 2;
 						if !(self.at_kw(Kw::Namespace) || self.at_kw(Kw::Database)) {
-							return Err(self.unexpected("expected a namespace or database name"));
+							return Err(self.unexpected("a namespace or database name"));
 						}
 						loop {
 							match self.tok.kw {
@@ -198,7 +206,7 @@ impl<'a, 's> Parser<'a, 's> {
 							}
 						}
 					}
-					_ => return Err(self.unexpected("expected a type of config")),
+					_ => return Err(self.unexpected("a type of config")),
 				}
 			}
 			DefineKind::Bucket => {
@@ -238,7 +246,7 @@ impl<'a, 's> Parser<'a, 's> {
 		let first = self.ast.nodes.len();
 		let d = self.duration_lit()?;
 		let original = if self.eat_kw(Kw::Include) {
-			self.expect_kw(Kw::Original, "expected `ORIGINAL`")?;
+			self.expect_kw(Kw::Original, "ORIGINAL")?;
 			1
 		} else {
 			0
@@ -252,7 +260,7 @@ impl<'a, 's> Parser<'a, 's> {
 		let first = self.ast.nodes.len();
 		let (a, b) = match t.kw {
 			_ if t.kind != T::Ident => {
-				return Err(self.unexpected("expected `NONE`, `FULL` or `WHERE`"));
+				return Err(self.unexpected("'NONE', 'FULL', or 'WHERE'"));
 			}
 			Kw::None_ => {
 				self.bump();
@@ -266,7 +274,7 @@ impl<'a, 's> Parser<'a, 's> {
 				self.bump();
 				(2, self.expr(true)?)
 			}
-			_ => return Err(self.unexpected("expected `NONE`, `FULL` or `WHERE`")),
+			_ => return Err(self.unexpected("'NONE', 'FULL', or 'WHERE'")),
 		};
 		self.clause(Cl::Perm, a, b, t.start, first)
 	}
@@ -312,12 +320,15 @@ impl<'a, 's> Parser<'a, 's> {
 							return Err(self.error(
 								a.start,
 								a.end,
-								"can't define permission DELETE for fields",
+								"Can't define permission DELETE for fields",
 							));
 						}
 						if bit == 0 {
-							return Err(self
-								.unexpected("expected `SELECT`, `CREATE`, `UPDATE` or `DELETE`"));
+							return Err(self.unexpected(if field {
+								"'SELECT', 'CREATE' or 'UPDATE'"
+							} else {
+								"'SELECT', 'CREATE', 'UPDATE' or 'DELETE'"
+							}));
 						}
 						actions |= bit;
 						self.bump();
@@ -334,7 +345,7 @@ impl<'a, 's> Parser<'a, 's> {
 					}
 				}
 			}
-			_ => return Err(self.unexpected("expected `NONE`, `FULL` or `FOR`")),
+			_ => return Err(self.unexpected("'NONE', 'FULL' or 'FOR'")),
 		}
 		let list = self.list_from(mark).0;
 		self.push_clause(Cl::Permissions, list, field as u32, t.start, first)
@@ -342,8 +353,8 @@ impl<'a, 's> Parser<'a, 's> {
 
 	/// `fn::a::b` as a `Name` spanning the path after `fn::`.
 	pub(crate) fn custom_function_name(&mut self) -> R<NodeId> {
-		self.expect_kw(Kw::Fn, "expected `fn`")?;
-		self.expect(T::PathSep, "expected `::`")?;
+		self.expect_kw(Kw::Fn, "fn")?;
+		self.expect(T::PathSep, "::")?;
 		let first = self.ident()?;
 		let mut end = first.end;
 		while self.eat(T::PathSep) {
@@ -354,20 +365,20 @@ impl<'a, 's> Parser<'a, 's> {
 
 	pub(crate) fn define_function(&mut self, rec: &mut [u32]) -> R<()> {
 		rec[define::NAME] = self.custom_function_name()?;
-		self.expect(T::LParen, "expected `(`")?;
+		self.expect(T::LParen, "(")?;
 		let mark = self.vals.len() as u32;
 		loop {
 			if self.eat(T::RParen) {
 				break;
 			}
-			let p = self.expect(T::Param, "expected a parameter")?;
+			let p = self.expect(T::Param, "a parameter")?;
 			let p = self.leaf(Tag::Param, 0, p);
 			self.vals.push(p);
-			self.expect(T::Colon, "expected `:`")?;
+			self.expect(T::Colon, ":")?;
 			let k = self.kind()?;
 			self.vals.push(k);
 			if !self.eat(T::Comma) {
-				self.expect(T::RParen, "expected `)`")?;
+				self.expect(T::RParen, ")")?;
 				break;
 			}
 		}
@@ -411,7 +422,7 @@ impl<'a, 's> Parser<'a, 's> {
 				}
 				Kw::Duration => {
 					self.bump();
-					self.expect_kw(Kw::For, "expected `FOR`")?;
+					self.expect_kw(Kw::For, "FOR")?;
 					loop {
 						match self.tok.kw {
 							Kw::Token if self.tok.kind == T::Ident => {
@@ -420,7 +431,7 @@ impl<'a, 's> Parser<'a, 's> {
 							Kw::Session if self.tok.kind == T::Ident => {
 								self.expr_clause(Cl::DurSession)?
 							}
-							_ => return Err(self.unexpected("expected `TOKEN` or `SESSION`")),
+							_ => return Err(self.unexpected("`TOKEN` or `SESSION`")),
 						}
 						self.eat(T::Comma);
 						if !self.eat_kw(Kw::For) {
@@ -468,7 +479,7 @@ impl<'a, 's> Parser<'a, 's> {
 									Kw::Refresh if w.kind == T::Ident => {
 										self.flag_clause(Cl::WithRefresh)?;
 									}
-									_ => return Err(self.unexpected("expected `JWT` or `REFRESH`")),
+									_ => return Err(self.unexpected("`JWT` or `REFRESH`")),
 								}
 								self.eat(T::Comma);
 							}
@@ -477,15 +488,15 @@ impl<'a, 's> Parser<'a, 's> {
 						}
 						Kw::Bearer if self.tok.kind == T::Ident => {
 							self.bump();
-							self.expect_kw(Kw::For, "expected `FOR`")?;
+							self.expect_kw(Kw::For, "FOR")?;
 							let subject = match self.tok.kw {
 								Kw::User if self.tok.kind == T::Ident => 0,
 								Kw::Record if self.tok.kind == T::Ident => 1,
-								_ => return Err(self.unexpected("expected `USER` or `RECORD`")),
+								_ => return Err(self.unexpected("`USER` or `RECORD`")),
 							};
 							self.bump();
 							let j = if self.eat_kw(Kw::With) {
-								self.expect_kw(Kw::Jwt, "expected `JWT`")?;
+								self.expect_kw(Kw::Jwt, "JWT")?;
 								self.jwt()?
 							} else {
 								NONE
@@ -512,9 +523,7 @@ impl<'a, 's> Parser<'a, 's> {
 								self.expr_clause(Cl::DurSession)?
 							}
 							_ => {
-								return Err(
-									self.unexpected("expected `GRANT`, `TOKEN` or `SESSION`")
-								);
+								return Err(self.unexpected("`GRANT`, `TOKEN` or `SESSION`"));
 							}
 						}
 						self.eat(T::Comma);
@@ -532,7 +541,7 @@ impl<'a, 's> Parser<'a, 's> {
 			self.bump();
 			return Ok(self.leaf(Tag::Name, 0, t));
 		}
-		Err(self.unexpected("expected a valid algorithm"))
+		Err(self.unexpected("a valid algorithm"))
 	}
 
 	/// A JWT definition, as a [`Cl::Jwt`] clause.
@@ -544,14 +553,14 @@ impl<'a, 's> Parser<'a, 's> {
 			Kw::Algorithm if self.tok.kind == T::Ident => {
 				self.bump();
 				rec[jwt::ALG] = self.algorithm()?;
-				self.expect_kw(Kw::Key, "expected a key")?;
+				self.expect_kw(Kw::Key, "a key")?;
 				rec[jwt::KEY] = self.expr(true)?;
 			}
 			Kw::Url if self.tok.kind == T::Ident => {
 				self.bump();
 				rec[jwt::KEY] = self.expr(true)?;
 			}
-			_ => return Err(self.unexpected("expected `ALGORITHM` or `URL`")),
+			_ => return Err(self.unexpected("`ALGORITHM` or `URL`")),
 		}
 		if self.eat_kw(Kw::Audience) {
 			let mark = self.vals.len() as u32;
@@ -565,7 +574,7 @@ impl<'a, 's> Parser<'a, 's> {
 			rec[jwt::AUDIENCE] = self.list_from(mark).0;
 		}
 		if self.eat_kw(Kw::With) {
-			self.expect_kw(Kw::Issuer, "expected `ISSUER`")?;
+			self.expect_kw(Kw::Issuer, "ISSUER")?;
 			rec[jwt::ISSUER] = 1;
 			loop {
 				match self.tok.kw {
@@ -600,12 +609,12 @@ impl<'a, 's> Parser<'a, 's> {
 					let first = self.ast.nodes.len();
 					let v = if self.eat(T::LParen) {
 						let v = self.view()?;
-						self.expect(T::RParen, "expected `)`")?;
+						self.expect(T::RParen, ")")?;
 						v
 					} else if self.at_kw(Kw::Select) {
 						self.view()?
 					} else {
-						return Err(self.unexpected("expected `SELECT`"));
+						return Err(self.unexpected("SELECT"));
 					};
 					self.push_clause(Cl::View, v, 0, t.start, first)?;
 				}
@@ -618,7 +627,7 @@ impl<'a, 's> Parser<'a, 's> {
 						Kw::References if self.tok.kind == T::Ident => {
 							self.uint_clause(Cl::InlineRefs)?
 						}
-						_ => return Err(self.unexpected("expected `EDGES` or `REFERENCES`")),
+						_ => return Err(self.unexpected("`EDGES` or `REFERENCES`")),
 					}
 				}
 				Kw::GraphqlAlias => self.string_clause(Cl::GraphqlAlias)?,
@@ -634,7 +643,7 @@ impl<'a, 's> Parser<'a, 's> {
 		if !self.eat_kw(Kw::On) {
 			return Ok((5, NONE));
 		}
-		self.expect_kw(Kw::Delete, "expected `DELETE`")?;
+		self.expect_kw(Kw::Delete, "DELETE")?;
 		let n = self.tok;
 		let a = match n.kw {
 			_ if n.kind != T::Ident => 9,
@@ -649,9 +658,7 @@ impl<'a, 's> Parser<'a, 's> {
 			_ => 9,
 		};
 		if a == 9 {
-			return Err(
-				self.unexpected("expected `REJECT`, `CASCADE`, `IGNORE`, `UNSET` or `THEN`")
-			);
+			return Err(self.unexpected("`REJECT`, `CASCADE`, `IGNORE`, `UNSET` or `THEN`"));
 		}
 		self.bump();
 		Ok((a, NONE))
@@ -697,7 +704,7 @@ impl<'a, 's> Parser<'a, 's> {
 				let idx = self.record(&rel);
 				self.push_clause(Cl::TypeRelation, idx, 0, t.start, first)
 			}
-			_ => Err(self.unexpected("expected `NORMAL`, `RELATION`, or `ANY`")),
+			_ => Err(self.unexpected("`NORMAL`, `RELATION`, or `ANY`")),
 		}
 	}
 
@@ -717,7 +724,7 @@ impl<'a, 's> Parser<'a, 's> {
 	/// A table view: `SELECT fields FROM tables [WHERE …] [GROUP …]`, as a
 	/// `Select` node whose `what` is a list of table `Name`s.
 	pub(crate) fn view(&mut self) -> R<NodeId> {
-		let t = self.expect_kw(Kw::Select, "expected `SELECT`")?;
+		let t = self.expect_kw(Kw::Select, "SELECT")?;
 		let first = self.ast.nodes.len();
 		let mut rec = [NONE; crate::ast::select::LEN];
 		if self.eat_kw(Kw::Value) {
@@ -725,7 +732,7 @@ impl<'a, 's> Parser<'a, 's> {
 		} else {
 			rec[crate::ast::select::FIELDS] = self.fields()?;
 		}
-		self.expect_kw(Kw::From, "expected `FROM`")?;
+		self.expect_kw(Kw::From, "FROM")?;
 		let mark = self.vals.len() as u32;
 		loop {
 			let n = self.name()?;
@@ -785,7 +792,7 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			let methods = self.list_from(mark).0;
 			let cfg = self.api_config()?;
-			self.expect_kw(Kw::Then, "expected `THEN`")?;
+			self.expect_kw(Kw::Then, "THEN")?;
 			let action = self.expr(true)?;
 			let idx = self.record(&[methods, cfg, action]);
 			self.push_clause(Cl::ApiMethods, idx, 0, t.start, first)?;
@@ -831,9 +838,13 @@ impl<'a, 's> Parser<'a, 's> {
 	pub(crate) fn middleware_call(&mut self) -> R<NodeId> {
 		let t = self.tok;
 		if !(t.kind == T::Ident || t.kind == T::EscIdent) || self.peek1().kind == T::Colon {
-			return Err(self.unexpected("expected a function name"));
+			return Err(self.unexpected("a function name"));
 		}
-		let call = self.atom(true)?;
+		// `syn` takes any name here, builtin or not.
+		self.any_path = true;
+		let call = self.atom(true);
+		self.any_path = false;
+		let call = call?;
 		let n = self.ast.nodes[call as usize];
 		if n.tag != Tag::Call || n.depth & COVERED != 0 {
 			return Err(self.error(n.start, n.end, "expected a function call"));
@@ -890,9 +901,7 @@ impl<'a, 's> Parser<'a, 's> {
 						_ => (9, NONE),
 					};
 					if mode == 9 {
-						return Err(
-							self.unexpected("expected `NONE`, `AUTO`, `INCLUDE` or `EXCLUDE`")
-						);
+						return Err(self.unexpected("`NONE`, `AUTO`, `INCLUDE` or `EXCLUDE`"));
 					}
 					self.push_clause(cl, mode, list, t.start, first)?;
 				}
@@ -907,7 +916,7 @@ impl<'a, 's> Parser<'a, 's> {
 						let mode = match self.tok.kw {
 							Kw::Auto if self.tok.kind == T::Ident => 1,
 							Kw::None_ if self.tok.kind == T::Ident => 0,
-							_ => return Err(self.unexpected("expected `AUTO` or `NONE`")),
+							_ => return Err(self.unexpected("`AUTO` or `NONE`")),
 						};
 						self.bump();
 						self.push_clause(Cl::GqlIntrospection, mode, 0, t.start, first)?;
@@ -940,7 +949,13 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 		}
 		if !then {
-			return Err(self.unexpected("expected at least one `THEN` statement"));
+			let d = Diag::message(
+				self.prev_start,
+				self.prev_end,
+				"Expected at least one `THEN` statement",
+			)
+			.with_label("`THEN` statement required");
+			return Err(self.diag(d));
 		}
 		Ok(())
 	}
@@ -1027,9 +1042,9 @@ impl<'a, 's> Parser<'a, 's> {
 								self.bump();
 								scoring = if self.eat(T::LParen) {
 									let k1 = self.float_lit()?;
-									self.expect(T::Comma, "expected `,`")?;
+									self.expect(T::Comma, ",")?;
 									let b = self.float_lit()?;
-									self.expect(T::RParen, "expected `)`")?;
+									self.expect(T::RParen, ")")?;
 									self.record(&[k1, b])
 								} else {
 									NONE - 1
@@ -1064,7 +1079,7 @@ impl<'a, 's> Parser<'a, 's> {
 	pub(crate) fn vector_index(&mut self, cl: Cl) -> R<()> {
 		let t = self.bump();
 		let first = self.ast.nodes.len();
-		self.expect_kw(Kw::Dimension, "expected `DIMENSION`")?;
+		self.expect_kw(Kw::Dimension, "DIMENSION")?;
 		let mut rec = [NONE; vector::LEN];
 		rec[vector::DIMENSION] = self.uint_lit()?;
 		let mut flags = 0;
@@ -1078,7 +1093,7 @@ impl<'a, 's> Parser<'a, 's> {
 					self.bump();
 					let d = self.tok;
 					if d.kind != T::Ident || !is_distance(self.text_of(d)) {
-						return Err(self.unexpected("expected a distance measure"));
+						return Err(self.unexpected("a distance measure"));
 					}
 					self.bump();
 					rec[vector::DISTANCE] = self.leaf(Tag::Name, 0, d);
@@ -1091,7 +1106,7 @@ impl<'a, 's> Parser<'a, 's> {
 					self.bump();
 					let v = self.tok;
 					if v.kind != T::Ident || !is_vector_type(self.text_of(v)) {
-						return Err(self.unexpected("expected a vector type"));
+						return Err(self.unexpected("a vector type"));
 					}
 					self.bump();
 					rec[vector::TYPE] = self.leaf(Tag::Name, 0, v);
@@ -1180,33 +1195,33 @@ impl<'a, 's> Parser<'a, 's> {
 				_ => 9,
 			};
 			if code == 9 {
-				return Err(self.unexpected("expected a filter"));
+				return Err(self.unexpected("a filter"));
 			}
 			self.bump();
 			let b = match code {
 				3 | 4 => {
-					self.expect(T::LParen, "expected `(`")?;
+					self.expect(T::LParen, "(")?;
 					let x = self.uint_lit()?;
-					self.expect(T::Comma, "expected `,`")?;
+					self.expect(T::Comma, ",")?;
 					let y = self.uint_lit()?;
-					self.expect(T::RParen, "expected `)`")?;
+					self.expect(T::RParen, ")")?;
 					self.record(&[x, y])
 				}
 				5 => {
-					self.expect(T::LParen, "expected `(`")?;
+					self.expect(T::LParen, "(")?;
 					let l = self.tok;
 					if l.kind != T::Ident || !(is_language(self.text_of(l)) || l.kw == Kw::No) {
-						return Err(self.unexpected("expected a language"));
+						return Err(self.unexpected("a language"));
 					}
 					self.bump();
 					let n = self.leaf(Tag::Name, 0, l);
-					self.expect(T::RParen, "expected `)`")?;
+					self.expect(T::RParen, ")")?;
 					n
 				}
 				6 => {
-					self.expect(T::LParen, "expected `(`")?;
+					self.expect(T::LParen, "(")?;
 					let p = self.string_lit()?;
-					self.expect(T::RParen, "expected `)`")?;
+					self.expect(T::RParen, ")")?;
 					p
 				}
 				_ => NONE,
@@ -1233,18 +1248,18 @@ impl<'a, 's> Parser<'a, 's> {
 			let ok = k.kind == T::Ident
 				&& matches!(k.kw, Kw::Blank | Kw::Camel | Kw::Class | Kw::Punct | Kw::Segment);
 			if !ok {
-				return Err(self.unexpected("expected a tokenizer"));
+				return Err(self.unexpected("a tokenizer"));
 			}
 			self.bump();
 			let n = if k.kw == Kw::Segment {
-				self.expect(T::LParen, "expected `(`")?;
+				self.expect(T::LParen, "(")?;
 				let l = self.tok;
 				if !(l.is_kw(Kw::Chinese) || l.is_kw(Kw::Japanese) || l.is_kw(Kw::Korean)) {
-					return Err(self.unexpected("expected `CHINESE`, `JAPANESE` or `KOREAN`"));
+					return Err(self.unexpected("`CHINESE`, `JAPANESE` or `KOREAN`"));
 				}
 				self.bump();
 				let lang = self.leaf(Tag::Name, 0, l);
-				self.expect(T::RParen, "expected `)`")?;
+				self.expect(T::RParen, ")")?;
 				self.leaf_span(Tag::Name, 1, lang, 0, k.start, self.prev_end)
 			} else {
 				self.leaf(Tag::Name, 0, k)
@@ -1269,7 +1284,12 @@ impl<'a, 's> Parser<'a, 's> {
 			Kw::Fn if f.kind == T::Ident => self.custom_function_name()?,
 			Kw::Mod if f.kind == T::Ident => {
 				self.bump();
-				self.expect(T::PathSep, "expected `::`")?;
+				if self.limits.no_surrealism {
+					return Err(
+						self.surrealism_off(f, "Use of `mod::` requires Surrealism modules")
+					);
+				}
+				self.expect(T::PathSep, "::")?;
 				let s = self.ident()?;
 				let mut end = s.end;
 				while self.eat(T::PathSep) {
@@ -1277,19 +1297,29 @@ impl<'a, 's> Parser<'a, 's> {
 				}
 				self.leaf_span(Tag::Name, 2, 0, 0, f.start, end)
 			}
-			Kw::Ml | Kw::Silo if f.kind == T::Ident => {
-				return Err(self.error(
-					f.start,
-					f.end,
-					"analyzers cannot use model or silo functions",
-				));
+			Kw::Ml if f.kind == T::Ident => {
+				let d = Diag::message(f.start, f.end, "Analyzers cannot use model functions")
+					.with_label("Model functions cannot be used in an analyzer `FUNCTION` clause");
+				return Err(self.diag(d));
 			}
-			_ => return Err(self.unexpected("expected `fn::` or `mod::`")),
+			Kw::Silo if f.kind == T::Ident => {
+				let d = Diag::message(f.start, f.end, "Analyzers cannot use silo functions")
+					.with_label("Silo functions cannot be used in an analyzer `FUNCTION` clause");
+				return Err(self.diag(d));
+			}
+			_ => return Err(self.unexpected("`fn::` or `mod::`")),
 		};
 		if self.at(T::LParen) {
-			return Err(
-				self.unexpected("analyzer FUNCTION expects a function name, not a function call")
+			let t = self.tok;
+			let d = Diag::message(
+				t.start,
+				t.end,
+				"Analyzer FUNCTION expects a function name, not a function call",
+			)
+			.with_label(
+				"Remove `()` from the analyzer FUNCTION clause (for example: `fn::some` or `mod::demo::some`)",
 			);
+			return Err(self.diag(d));
 		}
 		self.push_clause(Cl::Function, name, 0, t.start, first)?;
 		Ok(())
@@ -1298,22 +1328,22 @@ impl<'a, 's> Parser<'a, 's> {
 	pub(crate) fn define_module(&mut self, rec: &mut [u32]) -> R<()> {
 		if self.at_kw(Kw::Mod) {
 			self.bump();
-			self.expect(T::PathSep, "expected `::`")?;
+			self.expect(T::PathSep, "::")?;
 			rec[define::NAME] = self.name()?;
-			self.expect_kw(Kw::From, "expected `FROM`")?;
+			self.expect_kw(Kw::From, "FROM")?;
 		}
 		let t = self.tok;
 		rec[define::X1] = match t.kind {
 			T::Ident if t.kw == Kw::Silo => {
 				self.bump();
-				self.expect(T::PathSep, "expected `::`")?;
+				self.expect(T::PathSep, "::")?;
 				let mark = self.vals.len() as u32;
 				let org = self.name()?;
 				self.vals.push(org);
-				self.expect(T::PathSep, "expected `::`")?;
+				self.expect(T::PathSep, "::")?;
 				let pkg = self.name()?;
 				self.vals.push(pkg);
-				self.expect(T::PathSep, "expected `::`")?;
+				self.expect(T::PathSep, "::")?;
 				self.model_version()?;
 				self.list_from(mark).0
 			}
@@ -1321,7 +1351,7 @@ impl<'a, 's> Parser<'a, 's> {
 				self.bump();
 				self.leaf(Tag::Str, b'f', t)
 			}
-			_ => return Err(self.unexpected("expected a module executable")),
+			_ => return Err(self.unexpected("a module executable")),
 		};
 		let mut unsigned = false;
 		loop {
@@ -1336,31 +1366,37 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 		}
 		if !unsigned {
-			return Err(
-				self.unexpected("expected the `UNSIGNED` keyword on this module definition")
+			let d = Diag::message(
+				self.prev_start,
+				self.prev_end,
+				"Expected the `UNSIGNED` keyword on this module definition",
+			)
+			.with_label(
+				"Surrealism modules are not signature-verified yet, so a module must be defined as `UNSIGNED`",
 			);
+			return Err(self.diag(d));
 		}
 		Ok(())
 	}
 
 	/// `<major.minor.patch>`, pushing the three numbers onto the value stack.
 	pub(crate) fn model_version(&mut self) -> R<()> {
-		self.expect(T::Lt, "expected `<`")?;
+		self.expect(T::Lt, "<")?;
 		for i in 0..3 {
 			if i > 0 && (!self.at(T::Dot) || self.tok.ws()) {
-				return Err(self.unexpected("expected `.`"));
+				return Err(self.unexpected("."));
 			}
 			if i > 0 {
 				self.bump();
 			}
-			let d = self.expect(T::Digits, "expected a version number")?;
+			let d = self.expect(T::Digits, "a version number")?;
 			let v = crate::lex::decode_uint(&self.src[d.start as usize..d.end as usize])
 				.filter(|v| *v <= u32::MAX as u64)
 				.ok_or_else(|| self.error(d.start, d.end, "invalid version number"))?;
 			let n = self.leaf_span(Tag::Int, 0, v as u32, 0, d.start, d.end);
 			self.vals.push(n);
 		}
-		self.expect(T::Gt, "expected `>`")?;
+		self.expect(T::Gt, ">")?;
 		Ok(())
 	}
 }

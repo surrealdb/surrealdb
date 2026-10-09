@@ -511,3 +511,9 @@ pub static PATHS: phf::Map<UniCase<&'static str>, (PathKind, Option<UniCase<&'st
 		//
 		UniCase::ascii("schema::table::exists") => (PathKind::Function, None),
 };
+
+/// The entry for `path`, compared ASCII case insensitively, as the parser
+/// resolves a path.
+pub fn lookup(path: &str) -> Option<&'static PathKind> {
+	PATHS.get(&UniCase::ascii(path)).map(|(kind, _)| kind)
+}

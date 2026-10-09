@@ -1,10 +1,11 @@
 //! Differential test of `syn`'s entry points other than whole queries, and of
 //! the parser settings, against parser-next and its lowering.
 //!
-//! Inputs are every corpus statement and every suffix of it that starts at a
-//! token, so each entry point sees realistic text at many positions. For
-//! each input and entry point both sides must produce equal trees or both
-//! reject.
+//! Inputs are every statement of the language-test corpus, the parser test
+//! corpora and `syn`'s sample script, and every suffix of each that starts at
+//! a token, so each entry point sees realistic text at many positions. For
+//! each input and entry point both sides must produce equal trees, or both
+//! reject; `--errors` also requires equal rendered error text.
 //!
 //! ```text
 //! cargo run --locked --release -p surrealdb-parser-next --example entries [-v] [--only NAME] [--fuzz N]
@@ -17,6 +18,7 @@ use surrealdb_parser_next::lex::{Lexer, T};
 use surrealdb_parser_next::{Limits, Scratch, parse_script};
 use surrealdb_parser_next_lower::entry::{self, Settings};
 use surrealdb_parser_next_lower::{Options, value};
+use surrealdb_syn::next::render;
 use surrealdb_syn::{ParserConfig, ParserSettings};
 use surrealdb_types::ToSql;
 
@@ -62,6 +64,8 @@ fn mask_keys(sql: &str) -> String {
 enum Outcome {
 	Equal,
 	BothReject,
+	/// Both reject, with different error text: syn's, then parser-next's.
+	ErrorDiffers(String, String),
 	Mismatch(String, String),
 	NewAcceptsInvalid(String),
 	NewRejectsValid(String),
@@ -83,7 +87,18 @@ fn judge<T: PartialEq + ToSql>(
 				Outcome::Mismatch(os, ns)
 			}
 		}
-		(Err(_), Err(_)) => Outcome::BothReject,
+		(Err(n), Err(o)) => {
+			let syn_text = match o {
+				surrealdb_syn::ParseError::InvalidQuery(r) => r.to_string(),
+				other => other.to_string(),
+			};
+			let next_text = INPUT.with(|i| render(&i.borrow(), &n).to_string());
+			if syn_text == next_text {
+				Outcome::BothReject
+			} else {
+				Outcome::ErrorDiffers(syn_text, next_text)
+			}
+		}
 		(Ok(n), Err(_)) => Outcome::NewAcceptsInvalid(n.to_sql()),
 		(Err(e), Ok(o)) => Outcome::NewRejectsValid(format!("{e:?} / syn: {}", o.to_sql())),
 	}
@@ -96,6 +111,10 @@ fn limits(s: &ParserSettings) -> Limits {
 		query_depth: c(s.query_recursion_limit),
 		object_depth: c(s.object_recursion_limit),
 		strict_record_ids: !s.flexible_record_id,
+		builtin: Some(surrealdb_parser_next_lower::is_builtin),
+		regex: Some(surrealdb_parser_next_lower::is_regex),
+		no_files: !s.files_enabled,
+		no_surrealism: !s.surrealism_enabled,
 	}
 }
 
@@ -111,6 +130,31 @@ fn settings(s: &ParserSettings) -> Settings {
 }
 
 type Check = fn(&str) -> Outcome;
+
+thread_local! {
+	/// The input being checked, for rendering parser-next's error on it.
+	static INPUT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// The first line of an error with the contents of backticks elided, so
+/// errors group by the message that produced them.
+fn template(text: &str) -> String {
+	let line = text.lines().next().unwrap_or("");
+	let mut out = String::new();
+	let mut inside = false;
+	for c in line.chars() {
+		if c == '`' {
+			inside = !inside;
+			out.push(c);
+			if inside {
+				out.push('…');
+			}
+		} else if !inside {
+			out.push(c);
+		}
+	}
+	out
+}
 
 /// Each entry point `syn` exposes, as the engine calls it.
 fn checks() -> Vec<(&'static str, Check)> {
@@ -291,7 +335,10 @@ fn main() {
 	let verbose = args.iter().any(|a| a == "-v");
 	let only = args.iter().position(|a| a == "--only").map(|i| args[i + 1].clone());
 	if let Some(i) = args.iter().position(|a| a == "--check") {
-		for text in &args[i + 1..] {
+		for text in
+			args[i + 1..].iter().filter(|a| !a.starts_with("--") && Some(*a) != only.as_ref())
+		{
+			INPUT.with(|i| text.clone_into(&mut i.borrow_mut()));
 			for (name, check) in checks() {
 				if only.as_deref().is_none_or(|o| o == name) {
 					println!("{name}: {text:?}: {:?}", check(text));
@@ -300,9 +347,18 @@ fn main() {
 		}
 		return;
 	}
-	let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../language-tests/tests");
+	// The language-test corpus, and the parser test corpora, whose
+	// expectation blocks are comments.
+	let base = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
 	let mut files = Vec::new();
-	collect(Path::new(root), &mut files);
+	for root in [
+		"language-tests/tests",
+		"surrealdb/parser/src/test/files",
+		"surrealdb/parser/src/test/files_quirk",
+	] {
+		collect(&base.join(root), &mut files);
+	}
+	files.push(base.join("surrealdb/syn/test.surql"));
 	files.sort();
 
 	// Statements, then every token-start suffix of each.
@@ -402,12 +458,15 @@ fn main() {
 			continue;
 		}
 		let mut tally: BTreeMap<&'static str, u32> = BTreeMap::new();
+		let mut templates: BTreeMap<String, (u32, String, String, String)> = BTreeMap::new();
+		let errors = args.iter().any(|a| a == "--errors");
 		let mut shown = 0;
 		let trace = args.iter().any(|a| a == "--trace");
 		for s in &inputs {
 			if trace {
 				eprintln!("{s:?}");
 			}
+			INPUT.with(|i| s.clone_into(&mut i.borrow_mut()));
 			let Ok(o) = std::panic::catch_unwind(|| check(s)) else {
 				println!("  {name}: {s:?}\n    panicked");
 				*tally.entry("panic").or_default() += 1;
@@ -417,12 +476,22 @@ fn main() {
 			let key = match &o {
 				Outcome::Equal => "equal",
 				Outcome::BothReject => "both reject",
+				Outcome::ErrorDiffers(..) => "error differs",
 				Outcome::Mismatch(..) => "mismatch",
 				Outcome::NewAcceptsInvalid(_) => "new accepts invalid",
 				Outcome::NewRejectsValid(_) => "new rejects valid",
 			};
 			*tally.entry(key).or_default() += 1;
-			if !matches!(o, Outcome::Equal | Outcome::BothReject) {
+			if let Outcome::ErrorDiffers(old, new) = &o {
+				let t = templates
+					.entry(template(old))
+					.or_insert_with(|| (0, s.clone(), old.clone(), new.clone()));
+				t.0 += 1;
+				if !errors {
+					continue;
+				}
+			}
+			if !matches!(o, Outcome::Equal | Outcome::BothReject | Outcome::ErrorDiffers(..)) {
 				failed = true;
 				if verbose || shown < 5 {
 					shown += 1;
@@ -431,6 +500,19 @@ fn main() {
 			}
 		}
 		println!("{name}: {tally:?}");
+		if errors {
+			let mut by: Vec<_> = templates.into_iter().collect();
+			by.sort_by_key(|t| std::cmp::Reverse(t.1.0));
+			for (t, (n, input, old, new)) in by.iter().take(if verbose {
+				400
+			} else {
+				25
+			}) {
+				println!(
+					"  {n:>7}  {t}\n           input {input:?}\n           syn   {old:?}\n           next  {new:?}"
+				);
+			}
+		}
 	}
 	if failed {
 		std::process::exit(1);

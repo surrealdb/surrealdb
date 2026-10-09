@@ -9,11 +9,9 @@
 //!
 //! Modes, from `SURREAL_PARSER_NEXT` on first use or [`set_mode`]:
 //! - [`Mode::Off`]: this crate's parser only.
-//! - [`Mode::On`]: parser-next's tree. A rejected input is parsed again by this crate's parser,
-//!   whose error is returned, so error messages are unchanged; if that parser accepts the input
-//!   instead, the divergence is returned as an error rather than hidden.
-//! - [`Mode::Check`]: both parsers on every input; any difference in outcome or tree is returned as
-//!   an error. For test lanes, at twice the parse cost.
+//! - [`Mode::On`]: parser-next alone: its tree, or its error rendered as this crate renders errors.
+//! - [`Mode::Check`]: both parsers on every input; any difference in outcome, tree or rendered
+//!   error text is returned as an error. For test lanes, at twice the parse cost.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -95,6 +93,10 @@ pub(crate) fn settings(s: &ParserSettings) -> Settings {
 			query_depth: c(s.query_recursion_limit),
 			object_depth: c(s.object_recursion_limit),
 			strict_record_ids: !s.flexible_record_id,
+			builtin: Some(surrealdb_parser_next_lower::is_builtin),
+			regex: Some(surrealdb_parser_next_lower::is_regex),
+			no_files: !s.files_enabled,
+			no_surrealism: !s.surrealism_enabled,
 		},
 		opts: Options {
 			legacy_strands: s.legacy_strands,
@@ -129,15 +131,7 @@ pub(crate) fn route<T: PartialEq + ToSql>(
 	}
 	match mode() {
 		Mode::Off => old(),
-		Mode::On => match new() {
-			Ok(v) => Ok(v),
-			Err(e) => match old() {
-				Err(err) => Err(err),
-				Ok(_) => {
-					Err(divergence(input, &format!("parser-next rejects ({e:?}), syn accepts")))
-				}
-			},
-		},
+		Mode::On => new().map_err(|e| ParseError::InvalidQuery(render(input, &e))),
 		Mode::Check => match (new(), old()) {
 			(Ok(n), Ok(o)) => {
 				if n == o || mask_keys(&n.to_sql()) == mask_keys(&o.to_sql()) {
@@ -153,7 +147,21 @@ pub(crate) fn route<T: PartialEq + ToSql>(
 					))
 				}
 			}
-			(Err(_), Err(err)) => Err(err),
+			(Err(e), Err(err)) => {
+				let ours = render(input, &e).to_string();
+				let theirs = match &err {
+					ParseError::InvalidQuery(r) => r.to_string(),
+					other => other.to_string(),
+				};
+				if ours == theirs {
+					Err(err)
+				} else {
+					Err(divergence(
+						input,
+						&format!("error text differs:\nsyn:\n{theirs}\nparser-next:\n{ours}"),
+					))
+				}
+			}
 			(Ok(n), Err(_)) => Err(divergence(
 				input,
 				&format!("parser-next accepts `{}`, syn rejects", n.to_sql()),
@@ -163,6 +171,54 @@ pub(crate) fn route<T: PartialEq + ToSql>(
 			}
 		},
 	}
+}
+
+/// Renders a parser-next error against `input` as this crate renders its
+/// own, so the two can be compared and, once they agree, interchanged.
+pub fn render(input: &str, e: &entry::Error) -> crate::RenderedError {
+	use surrealdb_parser_next_lower::render;
+	let span = |start: u32, end: u32| Span {
+		offset: start,
+		len: end.saturating_sub(start),
+	};
+	let err = match e {
+		entry::Error::Syntax(d) => {
+			let d = *d;
+			let mut err = SyntaxError::new(render::message(input, &d));
+			err = if d.label.is_empty() {
+				err.with_span(span(d.start, d.end), MessageKind::Error)
+			} else {
+				err.with_labeled_span(
+					span(d.start, d.end),
+					MessageKind::Error,
+					render::fill(d.label, input, d.start, d.end),
+				)
+			};
+			if let Some(x) = d.extra {
+				err = err.with_labeled_span(
+					span(x.start, x.end),
+					MessageKind::Error,
+					render::fill(x.label, input, x.start, x.end),
+				);
+			}
+			err
+		}
+		entry::Error::Lower(r) => {
+			let mut err = SyntaxError::new(&r.msg);
+			err = match (r.span, &r.label) {
+				(None, _) => err,
+				(Some((start, end)), None) => err.with_span(span(start, end), MessageKind::Error),
+				(Some((start, end)), Some(label)) => {
+					err.with_labeled_span(span(start, end), MessageKind::Error, label)
+				}
+			};
+			if let Some((start, end, label)) = &r.extra {
+				err = err.with_labeled_span(span(*start, *end), MessageKind::Error, label);
+			}
+			err
+		}
+	};
+	err.render_on(input)
 }
 
 /// Replaces the random 128-character keys both parsers mint for access

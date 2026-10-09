@@ -132,6 +132,11 @@ pub(crate) enum Frame {
 	Infix {
 		op: Binary,
 		start: u32,
+		/// The operator token, and whether its left operand already chains
+		/// a non-associative operator of the same power: an error `syn`
+		/// reports once the right operand is parsed.
+		op_start: u32,
+		chain: bool,
 		/// For `@…@` and `<|…|>`, the index into `extra` of the operator's
 		/// payload; otherwise `NONE`.
 		payload: u32,
@@ -163,6 +168,8 @@ pub(crate) enum Frame {
 	/// `Name`, an expression, or a method `Name`.
 	Args {
 		start: u32,
+		/// The `(`.
+		open: u32,
 		mark: u32,
 		callee: NodeId,
 		tag: Tag,
@@ -202,6 +209,8 @@ pub(crate) enum Frame {
 	/// `mark`. `option` when inside `option<…>`.
 	KindAlts {
 		start: u32,
+		/// For `option<…>`, its `<`.
+		open: u32,
 		mark: u32,
 		option: bool,
 		/// A single kind: `|` ends it rather than adding an alternative.
@@ -216,6 +225,8 @@ pub(crate) enum Frame {
 	/// `array<…>` or `set<…>` awaiting an optional size and `>`.
 	KindSized {
 		start: u32,
+		/// The `<`.
+		open: u32,
 		code: u8,
 	},
 	/// A literal object kind; keys and kinds alternate on the value stack.
@@ -435,6 +446,7 @@ impl<'a, 's> Parser<'a, 's> {
 					}
 					self.push_frame(Frame::Args {
 						start,
+						open: self.prev_end - 1,
 						mark: self.vals.len() as u32,
 						callee: v,
 						tag: Tag::CallExpr,
@@ -442,11 +454,14 @@ impl<'a, 's> Parser<'a, 's> {
 					continue 'operand;
 				}
 				if matches!(self.tok.kind, T::PlusEq | T::MinusEq | T::PlusQEq) {
-					return Err(self.error(
-						self.tok.start,
-						self.tok.end,
-						"assignment operators are only allowed in SET clauses",
-					));
+					return Err(self.diag(Diag {
+						start: self.tok.start,
+						end: self.tok.end,
+						kind: DiagKind::Unexpected,
+						msg: "an operator",
+						label: "assignment operators are only allowed in SET and DUPLICATE KEY UPDATE clauses",
+						extra: None,
+					}));
 				}
 				if let Some((op, extra)) = self.infix_op()? {
 					let bp = BINARY_BP[op as usize];
@@ -454,9 +469,8 @@ impl<'a, 's> Parser<'a, 's> {
 						let start = self.ast.nodes[v as usize].start;
 						// An infix operator deepens the expression's spine.
 						self.enter_e()?;
-						if !associative(op) && self.node_bp(v) == check_bp(op) {
-							return Err(self.chain_error(op));
-						}
+						let chain = !associative(op) && self.node_bp(v) == check_bp(op);
+						let op_start = self.tok.start;
 						let payload = if extra == OPERATOR_PAYLOAD {
 							self.operator_payload(op)?
 						} else {
@@ -470,6 +484,8 @@ impl<'a, 's> Parser<'a, 's> {
 						self.push_frame(Frame::Infix {
 							op,
 							start,
+							op_start,
+							chain,
 							payload,
 						})?;
 						continue 'operand;
@@ -502,14 +518,19 @@ impl<'a, 's> Parser<'a, 's> {
 					Frame::Infix {
 						op,
 						start,
+						op_start,
+						chain,
 						payload,
 					} => {
 						let lhs = self.vals.pop().expect("infix lhs");
+						if chain {
+							return Err(self.chain_error(op, op_start, true));
+						}
 						if !associative(op)
 							&& self.node_bp(v) == check_bp(op)
 							&& self.ast.nodes[v as usize].depth & COVERED == 0
 						{
-							return Err(self.chain_error(op));
+							return Err(self.chain_error(op, op_start, false));
 						}
 						let d = self.depth_of(lhs).max(self.depth_of(v));
 						v = if payload == NONE {
@@ -537,11 +558,7 @@ impl<'a, 's> Parser<'a, 's> {
 					Frame::Paren {
 						start,
 					} => {
-						if !self.at(T::RParen) {
-							return Err(self.unexpected("expected `)`"));
-						}
-						self.bump();
-						let _ = start;
+						self.close(T::RParen, start)?;
 						self.ast.nodes[v as usize].depth |= COVERED;
 					}
 					Frame::Array {
@@ -554,7 +571,7 @@ impl<'a, 's> Parser<'a, 's> {
 							self.push_frame(f)?;
 							continue 'operand;
 						}
-						self.expect(T::RBracket, "expected `,` or `]`")?;
+						self.close(T::RBracket, start)?;
 						let (list, d) = self.list_from(mark);
 						v = self.node(Tag::Array, 0, list, 0, start, d)?;
 						match self.wrap(v, wrap)? {
@@ -573,7 +590,7 @@ impl<'a, 's> Parser<'a, 's> {
 							self.object_key()?;
 							continue 'operand;
 						}
-						self.expect(T::RBrace, "expected `,` or `}`")?;
+						self.close(T::RBrace, start)?;
 						let (list, d) = self.list_from(mark);
 						v = self.node(Tag::Object, 0, list, 0, start, d)?;
 						match self.wrap(v, wrap)? {
@@ -647,7 +664,7 @@ impl<'a, 's> Parser<'a, 's> {
 								continue 'operand;
 							}
 						}
-						self.expect(T::RBrace, "expected `;` or `}`")?;
+						self.close(T::RBrace, start)?;
 						let (list, d) = self.list_from(mark);
 						v = self.node(Tag::Block, 0, list, 0, start, d)?;
 					}
@@ -660,12 +677,13 @@ impl<'a, 's> Parser<'a, 's> {
 							self.push_frame(f)?;
 							continue 'operand;
 						}
-						self.expect(T::RBrace, "expected `,` or `}`")?;
+						self.close(T::RBrace, start)?;
 						let (list, d) = self.list_from(mark);
 						v = self.node(Tag::Set, 0, list, 0, start, d)?;
 					}
 					Frame::Args {
 						start,
+						open,
 						mark,
 						callee,
 						tag,
@@ -675,7 +693,7 @@ impl<'a, 's> Parser<'a, 's> {
 							self.push_frame(f)?;
 							continue 'operand;
 						}
-						self.expect(T::RParen, "expected `,` or `)`")?;
+						self.close(T::RParen, open)?;
 						let (list, d) = self.list_from(mark);
 						if tag == Tag::Script {
 							v = self.script_body(start, list, d)?;
@@ -698,7 +716,7 @@ impl<'a, 's> Parser<'a, 's> {
 						tag,
 						table_as_field,
 					} => {
-						self.expect(T::RBracket, "expected `]`")?;
+						self.close(T::RBracket, start)?;
 						self.table_as_field = table_as_field;
 						let d = self.depth_of(v);
 						let n = self.node(tag, 0, v, 0, start, d)?;
@@ -770,21 +788,41 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 	}
 
-	pub(crate) fn chain_error(&mut self, op: Binary) -> Stop {
-		let msg = if BINARY_BP[op as usize] == BP_RANGE {
-			"chained range operators have no defined associativity"
-		} else {
-			"chained relational operators have no defined associativity"
+	/// A non-associative operator chained without parentheses, over the
+	/// operator at `op_start` through the token after its right operand.
+	/// `lhs` when the left operand is the chained one; `syn` words the two
+	/// cases slightly differently.
+	pub(crate) fn chain_error(&mut self, op: Binary, op_start: u32, lhs: bool) -> Stop {
+		let range = BINARY_BP[op as usize] == BP_RANGE;
+		let (msg, label) = match (range, lhs) {
+			(true, true) => (
+				"Chained range operators has no specified associativity",
+				"use parens, '()', to specify which operator must be evaluated first",
+			),
+			(true, false) => (
+				"Chained range operators have no defined associativity.",
+				"Use parens, '()', to specify which operator must be evaluated first",
+			),
+			(false, _) => (
+				"Chained relational operators have no defined associativity.",
+				"Use parens, '()', to specify which operator must be evaluated first",
+			),
 		};
-		self.error(self.tok.start, self.tok.end, msg)
+		let end = self.tok.end;
+		self.note(self.tok);
+		self.diag(Diag::message(op_start, end, msg).with_label(label))
 	}
 
 	pub(crate) fn check_postfix_chain(&mut self, v: NodeId) -> R<()> {
 		if self.node_bp(v) == BP_RANGE {
-			return Err(self.error(
-				self.tok.start,
-				self.tok.end,
-				"chaining range operators has no specified associativity",
+			let t = self.tok;
+			return Err(self.diag(
+				Diag::message(
+					t.start,
+					t.end,
+					"Chaining range operators has no specified associativity",
+				)
+				.with_label("use parens, '()', to specify which operator must be evaluated first"),
 			));
 		}
 		Ok(())
@@ -817,7 +855,7 @@ impl<'a, 's> Parser<'a, 's> {
 	/// `extra` of its payload record, whose first slot is left for the right
 	/// operand.
 	fn operator_payload(&mut self, op: Binary) -> R<u32> {
-		self.bump();
+		let open = self.bump();
 		if op == Binary::Matches {
 			// `[rhs, reference Int or NONE, 0 | 1 AND | 2 OR]`
 			let t = self.tok;
@@ -829,19 +867,19 @@ impl<'a, 's> Parser<'a, 's> {
 						let b = match o.kw {
 							Kw::And if o.kind == T::Ident => 1,
 							Kw::Or if o.kind == T::Ident => 2,
-							_ => return Err(self.unexpected("expected either `AND` or `OR`")),
+							_ => return Err(self.unexpected("either `AND` or `OR`")),
 						};
 						self.bump();
 						b
 					} else {
 						0
 					};
-					self.expect(T::At, "expected `@`")?;
+					self.expect(T::At, "@")?;
 					(rf, b)
 				}
 				T::Ident if t.kw == Kw::And || t.kw == Kw::Or => {
 					self.bump();
-					self.expect(T::At, "expected `@`")?;
+					self.expect(T::At, "@")?;
 					(
 						NONE,
 						if t.kw == Kw::And {
@@ -855,7 +893,7 @@ impl<'a, 's> Parser<'a, 's> {
 					self.bump();
 					(NONE, 0)
 				}
-				_ => return Err(self.unexpected("expected a match reference, operator or `@`")),
+				_ => return Err(self.unexpected("a match reference, operator or `@`")),
 			};
 			return Ok(self.record(&[NONE, rf, bool_op]));
 		}
@@ -876,11 +914,30 @@ impl<'a, 's> Parser<'a, 's> {
 				rec[1] = 2;
 				rec[3] = self.uint_lit()?;
 			} else {
-				return Err(self.unexpected("expected a distance or an integer"));
+				let end = self.syn_token_end(t);
+				return Err(self.diag(
+					Diag::message(
+						t.start,
+						end,
+						"Unexpected token {found} expected a distance of an integer",
+					)
+					.with_label(
+						"The NN operator accepts either a distance or an EF value (integer)",
+					),
+				));
 			}
 		}
 		if !self.at(T::Pipe) || self.adjacent1().is_none_or(|t| t.kind != T::Gt) {
-			return Err(self.unexpected("expected delimiter `|>`"));
+			// `syn` names the token after a `|` it consumed.
+			if self.at(T::Pipe) {
+				self.bump();
+			}
+			let t = self.tok;
+			let end = self.syn_token_end(t);
+			return Err(self.diag(
+				Diag::message(t.start, end, "Unexpected token `{found}` expected delimiter `|>`")
+					.with_extra(open.start, open.end, "expected this delimiter to close"),
+			));
 		}
 		self.bump();
 		self.bump();
@@ -922,7 +979,7 @@ impl<'a, 's> Parser<'a, 's> {
 			T::QQ => Binary::Nco,
 			// `syn` binds a lone `?` as the start of `??`, so an expression
 			// never ends at one.
-			T::Question => return Err(self.unexpected("expected `??`")),
+			T::Question => return Err(self.unexpected("`??`")),
 			T::EqEq => Binary::ExactEq,
 			T::Ne => Binary::Ne,
 			T::AllEq => Binary::AllEq,
@@ -998,7 +1055,7 @@ impl<'a, 's> Parser<'a, 's> {
 					}
 					// `NOT` must be followed by `IN`.
 					self.bump();
-					return Err(self.unexpected("expected `IN`"));
+					return Err(self.unexpected("IN"));
 				}
 				_ => return Ok(None),
 			},
@@ -1043,7 +1100,10 @@ impl<'a, 's> Parser<'a, 's> {
 					&& n.kind == T::Digits
 				{
 					self.bump();
-					return self.number(t.start, true).map(Some);
+					// `syn` reads the digits alone and applies the sign.
+					return self
+						.number_in(t.start, true, false, Compound::Numeric, n.start)
+						.map(Some);
 				}
 				self.bump();
 				let op = if t.kind == T::Minus {
@@ -1115,6 +1175,9 @@ impl<'a, 's> Parser<'a, 's> {
 		match t.kind {
 			T::Digits => self.number(t.start, false),
 			T::Str => {
+				if t.aux() == b'f' && self.limits.no_files {
+					return Err(self.files_off(t));
+				}
 				self.bump();
 				Ok(self.leaf(Tag::Str, t.aux(), t))
 			}
@@ -1137,7 +1200,13 @@ impl<'a, 's> Parser<'a, 's> {
 					return Err(self.lex_error(t.start, e));
 				}
 				let end = l.pos;
+				if let Some(compiles) = self.limits.regex
+					&& !compiles(self.text, t.start, end)
+				{
+					return Err(self.error(t.start, end, "{regex_error}"));
+				}
 				self.reset_to(end);
+				self.prev_start = t.start;
 				self.prev_end = end;
 				Ok(self.leaf_span(Tag::Regex, 0, 0, 0, t.start, end))
 			}
@@ -1209,7 +1278,7 @@ impl<'a, 's> Parser<'a, 's> {
 					_ => Ok(d),
 				}
 			}
-			_ => Err(self.unexpected("expected an expression")),
+			_ => Err(self.unexpected("an expression")),
 		}
 	}
 
@@ -1220,7 +1289,7 @@ impl<'a, 's> Parser<'a, 's> {
 			if self.eat(T::Pipe) {
 				break;
 			}
-			let p = self.expect(T::Param, "expected a parameter")?;
+			let p = self.expect(T::Param, "a parameter")?;
 			let p = self.leaf(Tag::Param, 0, p);
 			self.vals.push(p);
 			let k = if self.eat(T::Colon) {
@@ -1234,7 +1303,7 @@ impl<'a, 's> Parser<'a, 's> {
 			};
 			self.vals.push(k);
 			if !self.eat(T::Comma) {
-				self.expect(T::Pipe, "expected `|`")?;
+				self.close(T::Pipe, start)?;
 				break;
 			}
 		}
@@ -1247,7 +1316,7 @@ impl<'a, 's> Parser<'a, 's> {
 	fn closure_body(&mut self, start: u32, args: u32) -> R<NodeId> {
 		if self.eat(T::Arrow) {
 			let returns = self.kind()?;
-			let open = self.expect(T::LBrace, "expected `{`")?;
+			let open = self.expect(T::LBrace, "{")?;
 			self.push_frame(Frame::Closure {
 				start,
 				args,
@@ -1280,7 +1349,7 @@ impl<'a, 's> Parser<'a, 's> {
 	/// `|table:count|` or `|table:range|` after the first `|`.
 	fn mock(&mut self, start: u32) -> R<NodeId> {
 		let table = self.name()?;
-		self.expect(T::Colon, "expected `:`")?;
+		self.expect(T::Colon, ":")?;
 		// `[from, to, flags]`: flags bit 0 a range, bit 1 start excluded, bit 2
 		// end included.
 		let mut rec = [NONE, NONE, 0];
@@ -1291,10 +1360,10 @@ impl<'a, 's> Parser<'a, 's> {
 			if self.eat(T::DotDot) {
 				rec[2] = 1;
 			} else if self.eat(T::Gt) {
-				self.expect(T::DotDot, "expected `..`")?;
+				self.expect(T::DotDot, "..")?;
 				rec[2] = 3;
 			} else {
-				self.expect(T::Pipe, "expected `|`")?;
+				self.close(T::Pipe, start)?;
 				let idx = self.record(&rec);
 				return self.node(Tag::Mock, 0, table, idx, start, 1);
 			}
@@ -1304,7 +1373,7 @@ impl<'a, 's> Parser<'a, 's> {
 				rec[2] |= 4;
 			}
 			rec[1] = self.int_lit()?;
-			self.expect(T::Pipe, "expected `|`")?;
+			self.close(T::Pipe, start)?;
 		}
 		let idx = self.record(&rec);
 		self.node(Tag::Mock, 0, table, idx, start, 1)
@@ -1323,7 +1392,7 @@ impl<'a, 's> Parser<'a, 's> {
 			return Ok(None);
 		}
 		let y = self.float_lit()?;
-		self.expect(T::RParen, "expected `)`")?;
+		self.close(T::RParen, start)?;
 		self.node(Tag::Point, 0, x, y, start, 1).map(Some)
 	}
 
@@ -1332,7 +1401,22 @@ impl<'a, 's> Parser<'a, 's> {
 	/// 4 and `a` an index into `extra` of its parts.
 	fn special_call(&mut self, t: Tok) -> R<NodeId> {
 		self.bump();
-		self.expect(T::PathSep, "expected `::`")?;
+		if self.limits.no_surrealism {
+			match t.kw {
+				Kw::Mod => {
+					return Err(
+						self.surrealism_off(t, "Use of `mod::` requires Surrealism modules")
+					);
+				}
+				Kw::Silo => {
+					return Err(
+						self.surrealism_off(t, "Use of `silo::` requires Surrealism modules")
+					);
+				}
+				_ => {}
+			}
+		}
+		self.expect(T::PathSep, "::")?;
 		let path = |p: &mut Self| -> R<NodeId> {
 			let first = p.ident()?;
 			let mut end = first.end;
@@ -1357,12 +1441,12 @@ impl<'a, 's> Parser<'a, 's> {
 			Kw::Silo => {
 				let org = self.name()?;
 				self.vals.push(org);
-				self.expect(T::PathSep, "expected `::`")?;
+				self.expect(T::PathSep, "::")?;
 				let pkg = self.name()?;
 				self.vals.push(pkg);
-				self.expect(T::PathSep, "expected `::`")?;
+				self.expect(T::PathSep, "::")?;
 				if !self.at(T::Lt) || self.tok.ws() {
-					return Err(self.unexpected("expected `<`"));
+					return Err(self.unexpected("<"));
 				}
 				self.model_version()?;
 				let sub = if self.eat(T::PathSep) {
@@ -1382,13 +1466,14 @@ impl<'a, 's> Parser<'a, 's> {
 		};
 		let parts = self.list_from_raw(mark);
 		let callee = self.leaf_span(Tag::Name, op, parts, 0, t.start, self.prev_end);
-		self.expect(T::LParen, "expected `(`")?;
+		self.expect(T::LParen, "(")?;
 		if self.eat(T::RParen) {
 			let idx = self.empty_list();
 			return self.node(Tag::Call, op, callee, idx, t.start, 1);
 		}
 		self.push_frame(Frame::Args {
 			start: t.start,
+			open: self.prev_end - 1,
 			mark: self.vals.len() as u32,
 			callee,
 			tag: Tag::Call,
@@ -1399,13 +1484,14 @@ impl<'a, 's> Parser<'a, 's> {
 	/// `function(args) { javascript }` at `function`.
 	fn js_function(&mut self, t: Tok) -> R<NodeId> {
 		self.bump();
-		self.expect(T::LParen, "expected `(`")?;
+		self.expect(T::LParen, "(")?;
 		if self.eat(T::RParen) {
 			let args = self.empty_list();
 			return self.script_body(t.start, args, 0);
 		}
 		self.push_frame(Frame::Args {
 			start: t.start,
+			open: self.prev_end - 1,
 			mark: self.vals.len() as u32,
 			callee: NONE,
 			tag: Tag::Script,
@@ -1418,7 +1504,7 @@ impl<'a, 's> Parser<'a, 's> {
 	pub(crate) fn script_body(&mut self, start: u32, args: u32, depth: u16) -> R<NodeId> {
 		let open = self.tok;
 		if open.kind != T::LBrace {
-			return Err(self.unexpected("expected `{`"));
+			return Err(self.unexpected("{"));
 		}
 		let mut l = self.lex;
 		let end = match l.js_body(open.start) {
@@ -1429,6 +1515,7 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 		};
 		self.reset_to(end);
+		self.prev_start = open.start;
 		self.prev_end = end;
 		let body = self.leaf_span(Tag::Name, 0, 0, 0, open.start + 1, end - 1);
 		self.node(Tag::Script, 0, body, args, start, depth)
@@ -1493,6 +1580,7 @@ impl<'a, 's> Parser<'a, 's> {
 	/// `a::b::c(args)` or the constant `a::b::c`, at its first segment.
 	/// `custom` is set after `fn` was consumed and `::` is next.
 	pub(crate) fn path_call(&mut self, start: u32, custom: bool) -> R<NodeId> {
+		let any_path = core::mem::take(&mut self.any_path);
 		if custom {
 			self.bump();
 		}
@@ -1502,10 +1590,17 @@ impl<'a, 's> Parser<'a, 's> {
 			self.bump();
 			end = self.ident()?.end;
 		}
+		if !custom
+			&& !any_path
+			&& let Some(known) = self.limits.builtin
+			&& !known(self.text, first.start, end)
+		{
+			return Err(self.error(first.start, end, "Invalid function/constant path{suggest}"));
+		}
 		let name = self.leaf_span(Tag::Name, custom as u8, 0, 0, first.start, end);
 		if !self.at(T::LParen) {
 			if custom {
-				return Err(self.unexpected("expected `(`"));
+				return Err(self.unexpected("("));
 			}
 			return Ok(self.leaf_span(Tag::Path, 0, 0, 0, start, end));
 		}
@@ -1516,6 +1611,7 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 		self.push_frame(Frame::Args {
 			start,
+			open: self.prev_end - 1,
 			mark: self.vals.len() as u32,
 			callee: name,
 			tag: Tag::Call,
@@ -1544,11 +1640,11 @@ impl<'a, 's> Parser<'a, 's> {
 			return Ok(PUSHED);
 		}
 		if !matches!(wrap, Wrap::None) {
-			return Err(self.unexpected("expected an object key"));
+			return Err(self.unexpected("an object key"));
 		}
 		if self.eat(T::Comma) {
 			// `{,}`: the empty set.
-			self.expect(T::RBrace, "expected `}`")?;
+			self.close(T::RBrace, start)?;
 			let idx = self.empty_list();
 			return self.node(Tag::Set, 0, idx, 0, start, 0);
 		}
@@ -1582,7 +1678,7 @@ impl<'a, 's> Parser<'a, 's> {
 	/// A block, at its `{`, and nothing after it: for statements whose
 	/// grammar requires one.
 	pub(crate) fn block(&mut self) -> R<NodeId> {
-		let t = self.expect(T::LBrace, "expected `{`")?;
+		let t = self.expect(T::LBrace, "{")?;
 		let base = self.frames.len();
 		self.push_frame(Frame::Atom {
 			table_as_field: self.table_as_field,
@@ -1626,14 +1722,20 @@ impl<'a, 's> Parser<'a, 's> {
 	pub(crate) fn object_key(&mut self) -> R<()> {
 		let k = self.tok;
 		if !matches!(k.kind, T::Ident | T::EscIdent | T::Str | T::Digits) || k.aux() != 0 {
-			return Err(self.unexpected("expected an object key"));
+			return Err(self.unexpected("an object key"));
 		}
 		let n = if k.kind == T::Digits {
 			// A number key keeps its source text; it must be a valid number.
-			let num = self.number(k.start, false)?;
+			let num = self.number_in(k.start, false, false, Compound::Number, k.start)?;
 			let nn = self.ast.nodes[num as usize];
 			if nn.tag == Tag::Duration {
-				return Err(self.error(nn.start, nn.end, "expected an object key"));
+				// `syn` reads the key as a number, which a duration is not.
+				return Err(self.number_error(
+					k.start,
+					LexError::InvalidNumber,
+					Compound::Number,
+					k.start,
+				));
 			}
 			self.ast.nodes.pop();
 			self.leaf_span(Tag::Name, 0, 0, 0, nn.start, nn.end)
@@ -1647,29 +1749,68 @@ impl<'a, 's> Parser<'a, 's> {
 			self.leaf(Tag::Name, op, k)
 		};
 		self.vals.push(n);
-		self.expect(T::Colon, "expected `:`")?;
+		self.expect(T::Colon, ":")?;
 		Ok(())
+	}
+
+	/// A malformed numeric literal at `start`: `syn`'s error when its lexer
+	/// rejects the literal too, else the lexer's own.
+	pub(crate) fn number_error(
+		&mut self,
+		start: u32,
+		e: LexError,
+		mode: Compound,
+		origin: u32,
+	) -> Stop {
+		match crate::lex::compound_error(self.src, origin, mode) {
+			Some(d) => {
+				if d.end + 4 > self.src.len() as u32 {
+					self.saw_end.set(true);
+				}
+				self.diag(d)
+			}
+			None => self.lex_error(start, e),
+		}
 	}
 
 	/// A numeric literal at `start` (a sign, when `signed`, then digits).
 	pub(crate) fn number(&mut self, start: u32, signed: bool) -> R<NodeId> {
-		self.number_with(start, signed, false)
+		let mode = if signed {
+			Compound::Number
+		} else {
+			Compound::Numeric
+		};
+		self.number_in(start, signed, false, mode, start)
 	}
 
 	/// [`Self::number`], also accepting a positive integer up to `u64::MAX`
 	/// when `unsigned`: such an integer is an `Int` node with `op` 1, read with
 	/// [`crate::ast::Ast::uint`].
 	pub(crate) fn number_with(&mut self, start: u32, signed: bool, unsigned: bool) -> R<NodeId> {
+		self.number_in(start, signed, unsigned, Compound::Integer, start)
+	}
+
+	/// [`Self::number_with`], reporting a malformed literal as `syn` does when
+	/// it reads the literal with `mode` from `origin`.
+	pub(crate) fn number_in(
+		&mut self,
+		start: u32,
+		signed: bool,
+		unsigned: bool,
+		mode: Compound,
+		origin: u32,
+	) -> R<NodeId> {
 		let mut l = self.lex;
 		let kind = match l.numeric(start) {
 			Ok(k) => k,
 			Err(e) => {
 				self.lex.pos = l.pos;
-				return Err(self.lex_error(start, e));
+				return Err(self.number_error(start, e, mode, origin));
 			}
 		};
 		let end = l.pos;
 		self.reset_to(end);
+		self.prev_start = start;
 		self.prev_end = end;
 		let text = &self.src[start as usize..end as usize];
 		let neg = text[0] == b'-';
@@ -1681,11 +1822,11 @@ impl<'a, 's> Parser<'a, 's> {
 		match kind {
 			NumKind::Int => {
 				let Some(u) = crate::lex::decode_uint(body) else {
-					return Err(self.lex_error(start, LexError::IntOverflow));
+					return Err(self.number_error(start, LexError::IntOverflow, mode, origin));
 				};
 				let v = if neg {
 					if u > i64::MAX as u64 + 1 {
-						return Err(self.lex_error(start, LexError::IntOverflow));
+						return Err(self.number_error(start, LexError::IntOverflow, mode, origin));
 					}
 					(u as i64).wrapping_neg()
 				} else {
@@ -1700,7 +1841,7 @@ impl<'a, 's> Parser<'a, 's> {
 								end,
 							));
 						}
-						return Err(self.lex_error(start, LexError::IntOverflow));
+						return Err(self.number_error(start, LexError::IntOverflow, mode, origin));
 					}
 					u as i64
 				};
@@ -1715,7 +1856,7 @@ impl<'a, 's> Parser<'a, 's> {
 			NumKind::Decimal => Ok(self.leaf_span(Tag::Decimal, 0, 0, 0, start, end)),
 			NumKind::Duration => {
 				if crate::lex::decode_duration(body).is_none() {
-					return Err(self.lex_error(start, LexError::InvalidDuration));
+					return Err(self.number_error(start, LexError::InvalidDuration, mode, origin));
 				}
 				let lit = self.leaf_span(Tag::Duration, 0, 0, 0, start + signed as u32, end);
 				if signed {

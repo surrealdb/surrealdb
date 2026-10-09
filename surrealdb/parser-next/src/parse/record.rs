@@ -10,7 +10,10 @@ impl<'a, 's> Parser<'a, 's> {
 		self.bump();
 		let colon = self.bump();
 		if colon.ws() && ranges {
-			return Err(self.error(colon.start, colon.end, "unexpected whitespace in a record id"));
+			return Err(self.diag(
+				Diag::message(table_tok.start, table_tok.end, "Unexpected whitespace")
+					.with_label("No whitespace allowed after this token"),
+			));
 		}
 		let table = self.leaf(Tag::Name, (table_tok.kind == T::EscIdent) as u8, table_tok);
 		let start = table_tok.start;
@@ -18,7 +21,7 @@ impl<'a, 's> Parser<'a, 's> {
 			return self.record_range(table, start, NONE, 0).map(|v| v.unwrap_or(PUSHED));
 		}
 		if self.tok.ws() {
-			return Err(self.unexpected("expected a record-id key"));
+			return Err(self.unexpected("a record-id key"));
 		}
 		match self.tok.kind {
 			T::LBracket => {
@@ -52,11 +55,25 @@ impl<'a, 's> Parser<'a, 's> {
 					},
 				)
 			}
+			// In an expression `syn` asks what starts a key before reading one.
+			_ if ranges && !self.starts_key() && self.tok.kind != T::Param => {
+				Err(self.unexpected("a record-id key"))
+			}
 			_ => {
 				let key = self.simple_key()?;
 				self.record_after_key(table, start, key, ranges).map(|v| v.unwrap_or(PUSHED))
 			}
 		}
+	}
+
+	/// Whether the current token starts a record-id key (`syn`'s
+	/// `kind_starts_record_id_key`): a plain or uuid string does too, though
+	/// only the uuid string makes a valid one.
+	fn starts_key(&self) -> bool {
+		matches!(
+			self.tok.kind,
+			T::Ident | T::EscIdent | T::Digits | T::LBracket | T::LBrace | T::Plus | T::Minus
+		) || (self.tok.kind == T::Str && matches!(self.tok.aux(), 0 | b's' | b'u'))
 	}
 
 	/// After a record-id key: a range, or the finished record id.
@@ -78,7 +95,7 @@ impl<'a, 's> Parser<'a, 's> {
 			self.bump();
 			flags |= 1;
 			if self.tok.kind != T::DotDot || self.tok.ws() {
-				return Err(self.unexpected("expected the range operator `..`"));
+				return Err(self.unexpected("the range operator `..`"));
 			}
 		}
 		if self.tok.kind == T::DotDot && !self.tok.ws() {
@@ -101,16 +118,9 @@ impl<'a, 's> Parser<'a, 's> {
 			self.bump();
 			flags |= 2;
 		}
-		// `syn`'s `kind_starts_record_id_key`: a plain or uuid string starts a
-		// key too, though only the uuid string makes a valid one.
-		let starts_key = !self.tok.ws()
-			&& (matches!(
-				self.tok.kind,
-				T::Ident | T::EscIdent | T::Digits | T::LBracket | T::LBrace | T::Plus | T::Minus
-			) || (self.tok.kind == T::Str && matches!(self.tok.aux(), 0 | b's' | b'u')));
-		if !starts_key {
+		if self.tok.ws() || !self.starts_key() {
 			if flags & 2 != 0 {
-				return Err(self.unexpected("expected a record-id key"));
+				return Err(self.unexpected("a record-id key"));
 			}
 			let range = self.node(Tag::KeyRange, flags, lo, NONE, start, 2)?;
 			let d = self.depth_of(range);
@@ -183,6 +193,23 @@ impl<'a, 's> Parser<'a, 's> {
 					self.bump();
 					return Ok(self.leaf_span(Tag::KeyStr, 3, 0, 0, t.start, n.end));
 				}
+				// A strict key ends where `syn`'s digits token does, after any
+				// `_` and digits that open the joined identifier; with an `_`
+				// it is a string key.
+				if let Some(n) = self.adjacent1()
+					&& n.kind == T::Ident
+					&& self.src[n.start as usize] == b'_'
+				{
+					let mut dend = n.start as usize;
+					while self.src.get(dend).is_some_and(|&b| b.is_ascii_digit() || b == b'_') {
+						dend += 1;
+					}
+					let dend = dend as u32;
+					self.reset_to(dend);
+					self.prev_start = t.start;
+					self.prev_end = dend;
+					return Ok(self.leaf_span(Tag::KeyStr, 0, 0, 0, t.start, dend));
+				}
 				self.bump();
 				let text = &self.src[t.start as usize..t.end as usize];
 				match crate::lex::decode_uint(text) {
@@ -203,7 +230,7 @@ impl<'a, 's> Parser<'a, 's> {
 				let d = self.tok;
 				// After `+` the digits must follow directly; after `-` they may not.
 				if d.kind != T::Digits || (!neg && d.ws()) {
-					return Err(self.unexpected("expected an integer"));
+					return Err(self.unexpected("an integer"));
 				}
 				// `syn`'s digits token runs on over `_`.
 				let mut dend = d.end as usize;
@@ -234,6 +261,7 @@ impl<'a, 's> Parser<'a, 's> {
 					});
 				}
 				self.reset_to(dend);
+				self.prev_start = d.start;
 				self.prev_end = dend;
 				let text = &self.src[d.start as usize..dend as usize];
 				if self.src.get(dend as usize).is_some_and(|b| b.is_ascii_alphabetic()) {
@@ -241,6 +269,7 @@ impl<'a, 's> Parser<'a, 's> {
 					// failed integer and drops it: the key is the string
 					// `-digits`.
 					self.reset_to(dend + 1);
+					self.prev_start = d.start;
 					self.prev_end = dend + 1;
 					return Ok(self.leaf_span(Tag::KeyStr, 2, 0, 0, d.start, dend));
 				}
@@ -271,7 +300,7 @@ impl<'a, 's> Parser<'a, 's> {
 					&& self.at(T::LParen)
 				{
 					self.bump();
-					self.expect(T::RParen, "expected `)`")?;
+					self.expect(T::RParen, ")")?;
 					return Ok(self.leaf_span(Tag::KeyGen, g, 0, 0, t.start, self.prev_end));
 				}
 				Ok(self.leaf(Tag::KeyStr, 0, t))
@@ -284,10 +313,13 @@ impl<'a, 's> Parser<'a, 's> {
 				self.bump();
 				Ok(self.leaf(Tag::KeyUuid, 0, t))
 			}
-			T::Param => {
-				Err(self.error(t.start, t.end, "unexpected parameter, expected a record-id key"))
-			}
-			_ => Err(self.unexpected("expected a record-id key")),
+			T::Param => Err(self.diag(
+				Diag::message(t.start, t.end, "Unexpected token `$param` expected a record-id key")
+					.with_label(
+						"Record-id's can be create from a param with `type::record(\"{table}\",{text})`",
+					),
+			)),
+			_ => Err(self.unexpected("an identifier")),
 		}
 	}
 }

@@ -11,7 +11,7 @@ impl<'a, 's> Parser<'a, 's> {
 					.adjacent1()
 					.is_some_and(|n| matches!(n.kind, T::Minus | T::Arrow | T::Tilde))
 				{
-					return Err(self.unexpected("expected either `<-` `<->` or `->`"));
+					return Err(self.unexpected("either `<-` `<->` or `->`"));
 				}
 				self.graph_start()?
 			}
@@ -61,7 +61,7 @@ impl<'a, 's> Parser<'a, 's> {
 						let t = self.bump();
 						self.leaf(Tag::PartField, 0, t)
 					} else {
-						return Err(self.unexpected("expected an identifier"));
+						return Err(self.unexpected("an identifier"));
 					};
 					self.vals.push(p);
 				}
@@ -79,13 +79,13 @@ impl<'a, 's> Parser<'a, 's> {
 						T::Digits | T::Plus => {
 							let v = self.number_lit()?;
 							if self.ast.nodes[v as usize].tag == Tag::NaN {
-								return Err(self.unexpected("expected `$`, `*` or a number"));
+								return Err(self.unexpected("`$`, `*` or a number"));
 							}
 							self.node(Tag::PartIndex, 0, v, 0, open.start, 1)?
 						}
-						_ => return Err(self.unexpected("expected `$`, `*` or a number")),
+						_ => return Err(self.unexpected("`$`, `*` or a number")),
 					};
-					self.expect(T::RBracket, "expected `]`")?;
+					self.close(T::RBracket, open.start)?;
 					self.vals.push(p);
 				}
 				_ => break,
@@ -119,7 +119,7 @@ impl<'a, 's> Parser<'a, 's> {
 				match n.kind {
 					T::Star | T::Dollar => {
 						self.bump();
-						self.expect(T::RBracket, "expected `]`")?;
+						self.close(T::RBracket, t.start)?;
 						let tag = if n.kind == T::Star {
 							Tag::PartAll
 						} else {
@@ -188,6 +188,7 @@ impl<'a, 's> Parser<'a, 's> {
 				let at = n.start + 1;
 				let p = self.leaf_span(Tag::PartOptional, 0, 0, 0, n.start, at);
 				self.reset_to(at);
+				self.prev_start = n.start;
 				self.prev_end = at;
 				self.vals.push(p);
 			}
@@ -203,6 +204,7 @@ impl<'a, 's> Parser<'a, 's> {
 					} else {
 						self.push_frame(Frame::Args {
 							start: n.start,
+							open: self.prev_end - 1,
 							mark: self.vals.len() as u32,
 							callee: name,
 							tag: Tag::PartMethod,
@@ -227,7 +229,7 @@ impl<'a, 's> Parser<'a, 's> {
 				};
 				self.vals.push(p);
 			}
-			_ => return Err(self.unexpected("expected an identifier")),
+			_ => return Err(self.unexpected("an identifier")),
 		}
 		Ok(PartStep::Done)
 	}
@@ -248,7 +250,7 @@ impl<'a, 's> Parser<'a, 's> {
 				rec[2] = self.uint_lit()?;
 			}
 		} else if rec[1] == NONE {
-			return Err(self.unexpected("expected an integer or `..`"));
+			return Err(self.unexpected("an integer or `..`"));
 		}
 		if self.eat(T::Plus) {
 			let k = self.ident()?;
@@ -264,11 +266,11 @@ impl<'a, 's> Parser<'a, 's> {
 				return Err(self.error(
 					k.start,
 					k.end,
-					"expected `path`, `collect`, or `shortest`",
+					"Unexpected instruction `{text}` expected `path`, `collect`, or `shortest`",
 				));
 			};
 			if rec[3] == 3 {
-				self.expect(T::Eq, "expected `=`")?;
+				self.expect(T::Eq, "=")?;
 				let t = self.tok;
 				rec[4] = match t.kind {
 					T::Param => {
@@ -276,24 +278,28 @@ impl<'a, 's> Parser<'a, 's> {
 						self.leaf(Tag::Param, 0, t)
 					}
 					_ if t.is_ident() => self.record_id_only()?,
-					_ => return Err(self.unexpected("expected a param or record-id")),
+					_ => return Err(self.unexpected("a param or record-id")),
 				};
 			}
 			while self.eat(T::Plus) {
 				let o = self.ident()?;
 				if !self.text_of(o).eq_ignore_ascii_case("inclusive") {
-					return Err(self.error(o.start, o.end, "expected `inclusive`"));
+					return Err(self.error(
+						o.start,
+						o.end,
+						"Unexpected option `{text}` expected `inclusive`",
+					));
 				}
 				rec[5] = 1;
 			}
 		}
-		self.expect(T::RBrace, "expected `}`")?;
+		self.close(T::RBrace, start)?;
 		if self.at(T::LParen) {
 			rec[6] = self.nested(|p| {
-				p.bump();
+				let open = p.bump().start;
 				let head = p.leaf_span(Tag::Field, 1, 0, 0, p.tok.start, p.tok.start);
 				let i = p.path_from(head)?;
-				p.expect(T::RParen, "expected `)`")?;
+				p.close(T::RParen, open)?;
 				Ok(i)
 			})?;
 		}
@@ -315,7 +321,7 @@ impl<'a, 's> Parser<'a, 's> {
 			if self.eat(T::DotDotDot) {
 				let e = self.leaf(Tag::DestructEntry, 4, t);
 				self.vals.push(e);
-				self.expect(T::RBrace, "expected `}`")?;
+				self.close(T::RBrace, start)?;
 				break;
 			}
 			let f = self.ast.nodes.len();
@@ -336,7 +342,15 @@ impl<'a, 's> Parser<'a, 's> {
 							let s = self.bump().start;
 							(3, self.nested(|p| p.destructure(s))?)
 						}
-						_ => return Err(self.unexpected("expected a `*` or a destructuring")),
+						_ => {
+							let t = self.tok;
+							let end = self.syn_token_end(t);
+							return Err(self.diag(Diag::message(
+								t.start,
+								end,
+								"Unexpected token `{found}` expected a `*` or a destructuring",
+							)));
+						}
 					}
 				}
 				_ => (0, NONE),
@@ -344,7 +358,7 @@ impl<'a, 's> Parser<'a, 's> {
 			let e = self.stmt_node(Tag::DestructEntry, op, name, b, t.start, f)?;
 			self.vals.push(e);
 			if !self.eat(T::Comma) {
-				self.expect(T::RBrace, "expected `}`")?;
+				self.close(T::RBrace, start)?;
 				break;
 			}
 		}
@@ -372,6 +386,7 @@ impl<'a, 's> Parser<'a, 's> {
 				// token, as in `syn`, which has no `??` token.
 				let at = t.start + 1;
 				self.reset_to(at);
+				self.prev_start = t.start;
 				self.prev_end = at;
 				rec[crate::ast::select::WHAT] = self.empty_list();
 			}
@@ -384,7 +399,7 @@ impl<'a, 's> Parser<'a, 's> {
 				self.vals.push(s);
 				rec[crate::ast::select::WHAT] = self.list_from(mark).0;
 			}
-			_ => return Err(self.unexpected("expected `?`, `(` or an identifier")),
+			_ => return Err(self.unexpected("`?`, `(` or an identifier")),
 		}
 		rec[crate::ast::select::FLAGS] = flags;
 		let idx = self.record(&rec);
@@ -393,7 +408,7 @@ impl<'a, 's> Parser<'a, 's> {
 
 	/// `( [SELECT fields FROM [ONLY]] subjects [WHERE …] … [AS alias] )`.
 	fn lookup_clauses(&mut self, rec: &mut [u32], flags: &mut u32) -> R<()> {
-		self.bump();
+		let open = self.bump().start;
 		let select = self.eat_kw(Kw::Select);
 		if select {
 			*flags |= 128;
@@ -402,7 +417,7 @@ impl<'a, 's> Parser<'a, 's> {
 			} else {
 				rec[crate::ast::select::FIELDS] = self.fields()?;
 			}
-			self.expect_kw(Kw::From, "expected `FROM`")?;
+			self.expect_kw(Kw::From, "FROM")?;
 			if self.eat_kw(Kw::Only) {
 				*flags |= 1;
 			}
@@ -410,7 +425,7 @@ impl<'a, 's> Parser<'a, 's> {
 		let mark = self.vals.len() as u32;
 		if !self.eat(T::Question) {
 			if !self.tok.is_ident() {
-				return Err(self.unexpected("expected `?`, an identifier or a range"));
+				return Err(self.unexpected("`?`, an identifier or a range"));
 			}
 			loop {
 				let s = self.subject(true)?;
@@ -433,7 +448,7 @@ impl<'a, 's> Parser<'a, 's> {
 		if self.eat_kw(Kw::As) {
 			rec[crate::ast::select::FETCH] = self.plain_idiom()?;
 		}
-		self.expect(T::RParen, "expected `)`")?;
+		self.close(T::RParen, open)?;
 		Ok(())
 	}
 
@@ -474,7 +489,7 @@ impl<'a, 's> Parser<'a, 's> {
 		} else {
 			NONE
 		};
-		self.expect(T::DotDot, "expected `..`")?;
+		self.expect(T::DotDot, "..")?;
 		let hi = if self.at(T::Eq) && !self.tok.ws() {
 			self.bump();
 			flags |= 2;

@@ -14,7 +14,9 @@ use std::time::Duration;
 
 use surrealdb_parser_next::decode;
 use surrealdb_parser_next::kw::Kw;
-use surrealdb_parser_next::lex::{Lexer, NumKind, T, Tok, decode_duration};
+use surrealdb_parser_next::lex::{
+	Compound, Lexer, NumKind, T, Tok, compound_error, decode_duration, invalid_reason,
+};
 use surrealdb_parser_next::parse::starts_expression;
 use surrealdb_sql::Literal;
 use surrealdb_types::{
@@ -22,7 +24,7 @@ use surrealdb_types::{
 };
 
 use crate::entry::{Error, Settings};
-use crate::lit;
+use crate::{Reject, lit, render};
 
 /// Parses a SurrealQL value. Input after the value is not read.
 pub fn value(src: &str, settings: &Settings) -> Result<Value, Error> {
@@ -48,19 +50,21 @@ pub fn record_id(src: &str, settings: &Settings) -> Result<RecordId, Error> {
 type R<T> = Result<T, Error>;
 
 fn fail<T>(msg: &'static str) -> R<T> {
-	Err(Error::Lower(msg))
+	Err(Error::Lower(Reject::new(msg)))
 }
 
 /// A value under construction, waiting for its next element.
+/// Each collection frame holds the position of its opening delimiter, which
+/// a missing closer's error points at.
 enum Frame {
-	Array(Vec<Value>),
+	Array(Vec<Value>, u32),
 	/// An object, waiting for the value of `key`.
-	Object(BTreeMap<String, Value>, String),
+	Object(BTreeMap<String, Value>, String, u32),
 	/// A set; its length is after deduplication, which decides whether a
 	/// single element needs a trailing comma, as in `syn`.
-	Set(Set),
+	Set(Set, u32),
 	/// `( value )`.
-	Paren,
+	Paren(u32),
 	/// A range waiting for its end. `postfix` when it followed a start
 	/// value (`a..`), which makes the range final: no range follows it.
 	RangeEnd {
@@ -69,8 +73,8 @@ enum Frame {
 		postfix: bool,
 	},
 	/// A record id whose key is an array or object under construction.
-	KeyArray(String, Vec<Value>),
-	KeyObject(String, BTreeMap<String, Value>, String),
+	KeyArray(String, Vec<Value>, u32),
+	KeyObject(String, BTreeMap<String, Value>, String, u32),
 }
 
 /// What starting a value produced.
@@ -85,6 +89,8 @@ struct Parser<'a> {
 	src: &'a str,
 	lex: Lexer<'a>,
 	tok: Tok,
+	/// The last consumed token.
+	prev: Tok,
 	settings: &'a Settings,
 	json: bool,
 	json_escapes: bool,
@@ -103,6 +109,7 @@ impl<'a> Parser<'a> {
 			src,
 			lex,
 			tok,
+			prev: tok,
 			settings,
 			json,
 			json_escapes,
@@ -114,8 +121,69 @@ impl<'a> Parser<'a> {
 
 	fn bump(&mut self) -> Tok {
 		let t = self.tok;
+		self.prev = t;
 		self.tok = self.lex.next_token();
 		t
+	}
+
+	/// An error over `start..end`.
+	fn err_at(
+		&self,
+		start: u32,
+		end: u32,
+		msg: impl Into<std::borrow::Cow<'static, str>>,
+	) -> Error {
+		Error::Lower(Reject::new(msg).at(start, end))
+	}
+
+	/// `syn`'s unexpected-token error at the current token, with `expected` in
+	/// its words. An invalid token reports why the lexer rejected it.
+	fn unexpected(&self, expected: &str) -> Error {
+		let t = self.tok;
+		if t.kind == T::Invalid {
+			return Error::Syntax(invalid_reason(self.src.as_bytes(), t.start));
+		}
+		let msg = if t.kind == T::Eof {
+			format!("Unexpected end of file, expected {expected}")
+		} else {
+			format!(
+				"Unexpected token `{}`, expected {expected}",
+				render::token_name(self.src, t.start)
+			)
+		};
+		self.err_at(t.start, self.syn_token_end(t), msg)
+	}
+
+	/// A missing closing delimiter `closer` for the opener at `open`.
+	fn unclosed(&self, closer: &str, open: u32) -> Error {
+		let t = self.tok;
+		let msg = format!(
+			"Unexpected token `{}` expected delimiter `{closer}`",
+			render::token_name(self.src, t.start)
+		);
+		let r = Reject::new(msg).at(t.start, self.syn_token_end(t));
+		Error::Lower(Reject {
+			extra: Some((open, open + 1, "expected this delimiter to close".into())),
+			..r
+		})
+	}
+
+	/// Where `syn`'s token at `t` ends: `??` is two `?` tokens and a digits
+	/// token runs on over `_`.
+	fn syn_token_end(&self, t: Tok) -> u32 {
+		match t.kind {
+			T::QQ => t.start + 1,
+			T::Digits => self.digits_end(t.start),
+			_ => t.end,
+		}
+	}
+
+	/// `syn`'s error for the malformed literal at `start`, read as `mode`.
+	fn number_err(&self, start: u32, mode: Compound) -> Error {
+		match compound_error(self.src.as_bytes(), start, mode) {
+			Some(d) => Error::Syntax(d),
+			None => self.err_at(start, self.tok.end, "invalid number"),
+		}
 	}
 
 	fn peek1(&self) -> Tok {
@@ -142,23 +210,29 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Consumes a token of kind `k`, or fails having consumed the token in
-	/// its place, as `syn`'s `expected!`.
-	fn expect(&mut self, k: T, msg: &'static str) -> R<()> {
+	/// its place, as `syn`'s `expected!`. `expected` is `k` as `syn` names it.
+	fn expect(&mut self, k: T, expected: &'static str) -> R<()> {
 		if self.eat(k) {
 			Ok(())
 		} else {
+			let e = self.unexpected(expected);
 			self.consume_failed();
-			fail(msg)
+			Err(e)
 		}
 	}
 
-	/// Consumes a closing delimiter, or fails without consuming.
-	fn expect_close(&mut self, k: T, msg: &'static str) -> R<()> {
+	/// Consumes the closing delimiter `k` of the opener at `open`, or fails
+	/// without consuming.
+	fn expect_close(&mut self, k: T, open: u32) -> R<()> {
 		if self.eat(k) {
-			Ok(())
-		} else {
-			fail(msg)
+			return Ok(());
 		}
+		let closer = match k {
+			T::RBracket => "]",
+			T::RBrace => "}",
+			_ => ")",
+		};
+		Err(self.unclosed(closer, open))
 	}
 
 	/// Consumes the token a failure stopped at. `syn` has no `??` token, so
@@ -193,7 +267,13 @@ impl<'a> Parser<'a> {
 				self.bump();
 				Ok(name)
 			}
-			Err(e) => {
+			// An escaped identifier whose escapes do not decode, consumed.
+			Err(e) if t.kind == T::EscIdent => {
+				self.bump();
+				Err(e)
+			}
+			Err(_) => {
+				let e = self.unexpected("an identifier");
 				self.consume_failed();
 				Err(e)
 			}
@@ -203,7 +283,11 @@ impl<'a> Parser<'a> {
 	/// Enters one object level.
 	fn enter(&mut self) -> R<()> {
 		if self.budget == 0 {
-			return fail("Exceeded object recursion depth limit");
+			return Err(self.err_at(
+				self.prev.start,
+				self.prev.end,
+				"Exceeded object recursion depth limit",
+			));
 		}
 		self.budget -= 1;
 		Ok(())
@@ -255,41 +339,41 @@ impl<'a> Parser<'a> {
 					return Ok(v);
 				};
 				match f {
-					Frame::Array(mut items) => {
+					Frame::Array(mut items, open) => {
 						items.push(v);
 						if self.eat(T::Comma) {
 							if !self.eat(T::RBracket) {
-								self.frames.push(Frame::Array(items));
+								self.frames.push(Frame::Array(items, open));
 								s = self.element()?;
 								continue 'start;
 							}
 						} else {
-							self.expect_close(T::RBracket, "expected `]`")?;
+							self.expect_close(T::RBracket, open)?;
 						}
 						self.leave();
 						v = Value::Array(Array::from(items));
 						rangeable = true;
 					}
-					Frame::KeyArray(table, mut items) => {
+					Frame::KeyArray(table, mut items, open) => {
 						items.push(v);
 						if self.eat(T::Comma) {
 							if !self.eat(T::RBracket) {
-								self.frames.push(Frame::KeyArray(table, items));
+								self.frames.push(Frame::KeyArray(table, items, open));
 								s = self.element()?;
 								continue 'start;
 							}
 						} else {
-							self.expect_close(T::RBracket, "expected `]`")?;
+							self.expect_close(T::RBracket, open)?;
 						}
 						self.leave();
 						v = Value::RecordId(RecordId::new(table, RecordIdKey::Array(items.into())));
 						rangeable = !(self.record_only && self.frames.is_empty());
 					}
-					Frame::Object(mut map, key) => {
+					Frame::Object(mut map, key, open) => {
 						map.insert(key, v);
-						match self.object_next()? {
+						match self.object_next(open)? {
 							Some(key) => {
-								self.frames.push(Frame::Object(map, key));
+								self.frames.push(Frame::Object(map, key, open));
 								s = self.element()?;
 								continue 'start;
 							}
@@ -305,11 +389,11 @@ impl<'a> Parser<'a> {
 							}
 						}
 					}
-					Frame::KeyObject(table, mut map, key) => {
+					Frame::KeyObject(table, mut map, key, open) => {
 						map.insert(key, v);
-						match self.object_next()? {
+						match self.object_next(open)? {
 							Some(key) => {
-								self.frames.push(Frame::KeyObject(table, map, key));
+								self.frames.push(Frame::KeyObject(table, map, key, open));
 								s = self.element()?;
 								continue 'start;
 							}
@@ -323,27 +407,30 @@ impl<'a> Parser<'a> {
 							}
 						}
 					}
-					Frame::Set(mut items) => {
+					Frame::Set(mut items, open) => {
 						items.insert(v);
 						if self.eat(T::Comma) {
 							if !self.eat(T::RBrace) {
-								self.frames.push(Frame::Set(items));
+								self.frames.push(Frame::Set(items, open));
 								s = self.element()?;
 								continue 'start;
 							}
 						} else if items.len() <= 1 {
-							return fail(
+							let Error::Lower(r) = self.unexpected("`,`") else {
+								return Err(self.unexpected("`,`"));
+							};
+							return Err(Error::Lower(r.with_label(
 								"Sets with a single value must have at least a single comma",
-							);
+							)));
 						} else {
-							self.expect_close(T::RBrace, "expected `}`")?;
+							self.expect_close(T::RBrace, open)?;
 						}
 						self.leave();
 						v = Value::Set(items);
 						rangeable = true;
 					}
-					Frame::Paren => {
-						self.expect_close(T::RParen, "expected `)`")?;
+					Frame::Paren(open) => {
+						self.expect_close(T::RParen, open)?;
 						self.leave();
 						rangeable = true;
 					}
@@ -376,16 +463,16 @@ impl<'a> Parser<'a> {
 	}
 
 	/// After an object entry: the next key, or `None` at the closing brace.
-	fn object_next(&mut self) -> R<Option<String>> {
+	fn object_next(&mut self, open: u32) -> R<Option<String>> {
 		if !self.eat(T::Comma) {
-			self.expect_close(T::RBrace, "expected `}`")?;
+			self.expect_close(T::RBrace, open)?;
 			return Ok(None);
 		}
 		if self.eat(T::RBrace) {
 			return Ok(None);
 		}
 		let key = self.object_key()?;
-		self.expect(T::Colon, "expected `:`")?;
+		self.expect(T::Colon, ":")?;
 		Ok(Some(key))
 	}
 
@@ -394,8 +481,16 @@ impl<'a> Parser<'a> {
 		let excluded = match self.tok.kind {
 			T::Gt if !self.tok.ws() => {
 				self.bump();
-				if self.tok.kind != T::DotDot || self.tok.ws() {
-					return fail("expected `..`");
+				if self.tok.ws() {
+					let gt = self.prev;
+					return Err(Error::Lower(
+						Reject::new("Unexpected whitespace")
+							.at(gt.start, gt.end)
+							.with_label("No whitespace allowed after this token"),
+					));
+				}
+				if self.tok.kind != T::DotDot {
+					return Err(self.unexpected(".."));
 				}
 				true
 			}
@@ -435,7 +530,12 @@ impl<'a> Parser<'a> {
 	fn string(&self, t: Tok) -> R<String> {
 		let mut s = String::new();
 		if !decode::unescape_with(decode::strip_delims(self.text(t)), &mut s, self.json_escapes) {
-			return fail("invalid escape");
+			return Err(match decode::escape_error(self.text(t), self.json_escapes) {
+				Some((a, b, msg, label)) => {
+					Error::Lower(Reject::new(msg).at(t.start + a, t.start + b).with_label(label))
+				}
+				None => self.err_at(t.start, t.end, "Invalid escape sequence"),
+			});
 		}
 		Ok(s)
 	}
@@ -459,7 +559,9 @@ impl<'a> Parser<'a> {
 			T::Digits => {
 				let mut l = self.lex;
 				match l.numeric(t.start) {
-					Ok(NumKind::Duration) | Err(_) => fail("invalid number"),
+					Ok(NumKind::Duration) | Err(_) => {
+						Err(self.number_err(t.start, Compound::Number))
+					}
 					Ok(kind) => {
 						let end = l.pos;
 						self.reset_to(end);
@@ -472,11 +574,11 @@ impl<'a> Parser<'a> {
 								let digits: String = text.chars().filter(|&c| c != '_').collect();
 								match digits.parse::<u64>() {
 									Ok(u) if u <= i64::MAX as u64 + 1 => {}
-									_ => return fail("number does not fit in an i64"),
+									_ => return Err(self.number_err(t.start, Compound::Number)),
 								}
 							}
 							NumKind::Decimal => {
-								lit::decimal(text).map_err(|r| Error::Lower(r.0))?;
+								lit::decimal(text).map_err(Error::Lower)?;
 							}
 							_ => {}
 						}
@@ -484,7 +586,7 @@ impl<'a> Parser<'a> {
 					}
 				}
 			}
-			_ => fail("expected an object key"),
+			_ => Err(self.unexpected("an object key")),
 		}
 	}
 
@@ -504,28 +606,39 @@ impl<'a> Parser<'a> {
 				return Ok(Value::Number(Number::Float(f)));
 			}
 			if n.kind != T::Digits || n.ws() {
-				return fail("expected a number");
+				return Err(self.number_err(t.start, Compound::Numeric));
 			}
 		}
 		let mut l = self.lex;
-		let kind = l.numeric(t.start).map_err(|_| Error::Lower("invalid number"))?;
+		let Ok(kind) = l.numeric(t.start) else {
+			return Err(self.number_err(t.start, Compound::Numeric));
+		};
 		let end = l.pos;
-		self.reset_to(end);
 		let text = &self.src[t.start as usize..end as usize];
+		if let NumKind::Int = kind
+			&& int(text).is_err()
+		{
+			return Err(self.number_err(t.start, Compound::Numeric));
+		}
+		if kind == NumKind::Duration && t.kind != T::Digits {
+			return Err(self.number_err(t.start, Compound::Numeric));
+		}
+		self.reset_to(end);
+		self.prev = Tok {
+			start: t.start,
+			end,
+			..t
+		};
 		Ok(match kind {
 			NumKind::Int => Value::Number(Number::Int(int(text)?)),
 			NumKind::Float => Value::Number(Number::Float(float(text))),
-			NumKind::Decimal => match lit::decimal(text).map_err(|r| Error::Lower(r.0))? {
+			NumKind::Decimal => match lit::decimal(text).map_err(Error::Lower)? {
 				Literal::Decimal(d) => Value::Number(Number::Decimal(d)),
 				_ => unreachable!("a decimal literal"),
 			},
 			NumKind::Duration => {
-				if t.kind != T::Digits {
-					return fail("a duration takes no sign");
-				}
-				let body = text;
-				let (s, ns) =
-					decode_duration(body.as_bytes()).ok_or(Error::Lower("invalid duration"))?;
+				let (s, ns) = decode_duration(text.as_bytes())
+					.ok_or_else(|| self.number_err(t.start, Compound::Numeric))?;
 				Value::Duration(Duration::new(s, ns).into())
 			}
 		})
@@ -566,26 +679,27 @@ impl<'a> Parser<'a> {
 					return Ok(Start::Done(Value::Object(Object::new()), false));
 				}
 				if self.eat(T::Comma) {
-					self.expect_close(T::RBrace, "expected `}`")?;
+					self.expect_close(T::RBrace, t.start)?;
 					return Ok(Start::Done(Value::Set(Set::new()), false));
 				}
 				self.enter()?;
 				let keyish = matches!(self.tok.kind, T::Ident | T::EscIdent | T::Digits)
 					|| (self.tok.kind == T::Str && matches!(self.tok.aux(), 0 | b's'));
 				if keyish {
-					let (pos, tok) = (self.lex.pos, self.tok);
+					let (pos, tok, prev) = (self.lex.pos, self.tok, self.prev);
 					let key = self.object_key()?;
 					if self.eat(T::Colon) {
-						return self.push(Frame::Object(BTreeMap::new(), key));
+						return self.push(Frame::Object(BTreeMap::new(), key, t.start));
 					}
 					self.lex.pos = pos;
 					self.tok = tok;
+					self.prev = prev;
 				}
 				if self.eat(T::RBrace) {
 					self.leave();
 					return done(Value::Set(Set::new()));
 				}
-				self.push(Frame::Set(Set::new()))?;
+				self.push(Frame::Set(Set::new(), t.start))?;
 				self.start()
 			}
 			T::LBracket => {
@@ -595,7 +709,7 @@ impl<'a> Parser<'a> {
 					self.leave();
 					return done(Value::Array(Array::new()));
 				}
-				self.push(Frame::Array(Vec::new()))?;
+				self.push(Frame::Array(Vec::new(), t.start))?;
 				self.start()
 			}
 			T::Str => match t.aux() {
@@ -610,22 +724,29 @@ impl<'a> Parser<'a> {
 				b'd' | b'u' | b'b' | b'f' => {
 					self.bump();
 					let body = self.string(t)?;
+					let token = &self.src[t.start as usize..t.end as usize];
+					let at = |r| Error::Lower(lit::in_token(r, token, t.start));
 					let v = match t.aux() {
 						b'f' => {
 							if !self.settings.opts.files {
-								return fail(crate::FILES_DISABLED);
+								let msg = format!(
+									"Unexpected token `{}`, expected {}",
+									render::token_name(self.src, t.start),
+									crate::FILES_DISABLED
+								);
+								return Err(self.err_at(t.start, t.end, msg));
 							}
-							Value::File(crate::file_value(&body).map_err(|r| Error::Lower(r.0))?)
+							Value::File(lit::file(&body).map_err(at)?)
 						}
-						b'd' => match lit::datetime(&body).map_err(|r| Error::Lower(r.0))? {
+						b'd' => match lit::datetime(&body).map_err(at)? {
 							Literal::Datetime(d) => Value::Datetime(d.into()),
 							_ => unreachable!("a datetime literal"),
 						},
-						b'u' => match lit::uuid(&body).map_err(|r| Error::Lower(r.0))? {
+						b'u' => match lit::uuid(&body).map_err(at)? {
 							Literal::Uuid(u) => Value::Uuid(u.into()),
 							_ => unreachable!("a uuid literal"),
 						},
-						_ => match lit::bytes(&body).map_err(|r| Error::Lower(r.0))? {
+						_ => match lit::bytes(&body).map_err(at)? {
 							Literal::Bytes(b) => Value::Bytes(b.into()),
 							_ => unreachable!("a bytes literal"),
 						},
@@ -636,11 +757,14 @@ impl<'a> Parser<'a> {
 			},
 			T::Slash => {
 				let mut l = self.lex;
-				l.regex(t.start).map_err(|_| Error::Lower("invalid regex"))?;
+				if l.regex(t.start).is_err() {
+					let end = self.src.len() as u32;
+					return Err(self.err_at(t.start, end, "Failed to lex regex, unexpected eof"));
+				}
 				let end = l.pos;
 				self.reset_to(end);
-				match lit::regex(&self.src[t.start as usize..end as usize])
-					.map_err(|r| Error::Lower(r.0))?
+				match lit::regex_at(&self.src[t.start as usize..end as usize], t.start, end)
+					.map_err(Error::Lower)?
 				{
 					Literal::Regex(r) => done(Value::Regex(Regex::from(r))),
 					_ => unreachable!("a regex literal"),
@@ -649,22 +773,32 @@ impl<'a> Parser<'a> {
 			T::LParen => {
 				self.bump();
 				if matches!(self.tok.kind, T::Plus | T::Minus | T::Digits) {
+					let num_start = self.tok.start;
 					let n = self.number()?;
+					let num_end = self.prev_end();
 					if self.eat(T::Comma) {
 						let x = match n {
 							Value::Number(Number::Int(i)) => i as f64,
 							Value::Number(Number::Float(f)) if !f.is_nan() => f,
-							_ => return fail("Coordinate numbers can't be NaN or a decimal"),
+							_ => {
+								return Err(Error::Lower(
+									Reject::new(
+										"Unexpected token, expected a non-decimal, non-NaN, number",
+									)
+									.at(num_start, num_end)
+									.with_label("Coordinate numbers can't be NaN or a decimal"),
+								));
+							}
 						};
 						let y = self.float()?;
-						self.expect_close(T::RParen, "expected `)`")?;
+						self.expect_close(T::RParen, t.start)?;
 						return done(Value::Geometry(Geometry::Point((x, y).into())));
 					}
-					self.expect_close(T::RParen, "expected `)`")?;
+					self.expect_close(T::RParen, t.start)?;
 					return done(n);
 				}
 				self.enter()?;
-				self.push(Frame::Paren)?;
+				self.push(Frame::Paren(t.start))?;
 				self.start()
 			}
 			T::DotDot => {
@@ -692,12 +826,18 @@ impl<'a> Parser<'a> {
 				self.bump();
 				Ok(f64::INFINITY)
 			}
-			T::Plus | T::Minus | T::Digits => match self.number()? {
-				Value::Number(Number::Int(i)) => Ok(i as f64),
-				Value::Number(Number::Float(f)) => Ok(f),
-				_ => fail("expected a float"),
-			},
-			_ => fail("expected a float"),
+			T::Plus | T::Minus | T::Digits => {
+				let mut l = self.lex;
+				match l.numeric(t.start) {
+					Ok(NumKind::Int | NumKind::Float) => match self.number()? {
+						Value::Number(Number::Int(i)) => Ok(i as f64),
+						Value::Number(Number::Float(f)) => Ok(f),
+						_ => Err(self.number_err(t.start, Compound::Float)),
+					},
+					_ => Err(self.number_err(t.start, Compound::Float)),
+				}
+			}
+			_ => Err(self.unexpected("a floating point number")),
 		}
 	}
 
@@ -729,8 +869,8 @@ impl<'a> Parser<'a> {
 					return done(Value::Object(Object::new()));
 				}
 				let key = self.object_key()?;
-				self.expect(T::Colon, "expected `:`")?;
-				self.push(Frame::Object(BTreeMap::new(), key))?;
+				self.expect(T::Colon, ":")?;
+				self.push(Frame::Object(BTreeMap::new(), key, t.start))?;
 				self.start_json()
 			}
 			T::LBracket => {
@@ -740,7 +880,7 @@ impl<'a> Parser<'a> {
 					self.leave();
 					return done(Value::Array(Array::new()));
 				}
-				self.push(Frame::Array(Vec::new()))?;
+				self.push(Frame::Array(Vec::new(), t.start))?;
 				self.start_json()
 			}
 			T::Str if matches!(t.aux(), 0 | b's') => {
@@ -765,7 +905,7 @@ impl<'a> Parser<'a> {
 	/// id nested in a key, each of which charges the object budget.
 	fn json_record_or_table(&mut self) -> R<Start> {
 		if let Ok(table) = self.take_ident()
-			&& self.expect(T::Colon, "expected `:`").is_ok()
+			&& self.expect(T::Colon, ":").is_ok()
 		{
 			let outer = std::mem::take(&mut self.frames);
 			let budget = self.budget;
@@ -785,7 +925,7 @@ impl<'a> Parser<'a> {
 		match t.kind {
 			T::Ident => Ok(self.text(t).to_owned()),
 			T::EscIdent => self.string(t),
-			_ => fail("expected an identifier"),
+			_ => Err(self.unexpected("an identifier")),
 		}
 	}
 
@@ -793,7 +933,7 @@ impl<'a> Parser<'a> {
 	/// `parse_value_record_id_inner`).
 	fn record_id_start(&mut self) -> R<Start> {
 		let table = self.take_ident()?;
-		self.expect(T::Colon, "expected `:`")?;
+		self.expect(T::Colon, ":")?;
 		self.record_key(table)
 	}
 
@@ -804,7 +944,10 @@ impl<'a> Parser<'a> {
 			T::Str if k.aux() == b'u' => {
 				self.bump();
 				let body = self.string(k)?;
-				match lit::uuid(&body).map_err(|r| Error::Lower(r.0))? {
+				let token = &self.src[k.start as usize..k.end as usize];
+				match lit::uuid(&body)
+					.map_err(|r| Error::Lower(lit::in_token(r, token, k.start)))?
+				{
 					Literal::Uuid(u) => RecordIdKey::Uuid(u.into()),
 					_ => unreachable!("a uuid literal"),
 				}
@@ -817,8 +960,8 @@ impl<'a> Parser<'a> {
 					RecordIdKey::Object(Object::new())
 				} else {
 					let key = self.object_key()?;
-					self.expect(T::Colon, "expected `:`")?;
-					self.push(Frame::KeyObject(table, BTreeMap::new(), key))?;
+					self.expect(T::Colon, ":")?;
+					self.push(Frame::KeyObject(table, BTreeMap::new(), key, k.start))?;
 					return self.element();
 				}
 			}
@@ -829,7 +972,7 @@ impl<'a> Parser<'a> {
 					self.leave();
 					RecordIdKey::Array(Array::new())
 				} else {
-					self.push(Frame::KeyArray(table, Vec::new()))?;
+					self.push(Frame::KeyArray(table, Vec::new(), k.start))?;
 					return self.element();
 				}
 			}
@@ -837,16 +980,35 @@ impl<'a> Parser<'a> {
 				self.bump();
 				let d = self.tok;
 				if d.ws() {
-					return fail("Unexpected whitespace");
+					return Err(Error::Lower(
+						Reject::new("Unexpected whitespace")
+							.at(k.start, k.end)
+							.with_label("No whitespace allowed after this token"),
+					));
 				}
 				if d.kind != T::Digits {
-					return fail("expected an integer");
+					return Err(self.unexpected("an integer"));
 				}
 				// The digits are read but stay the next token.
 				let end = self.digits_end(d.start);
 				let after = self.token_at(end);
-				if !after.ws() && (after.kind == T::Dot || after.is_ident()) {
-					return fail("Numeric Record-id keys can only be integers");
+				if !after.ws() && after.kind == T::Dot {
+					let msg = format!(
+						"Unexpected token `{}`, expected an integer",
+						render::token_name(self.src, d.start)
+					);
+					return Err(Error::Lower(
+						Reject::new(msg)
+							.at(d.start, end)
+							.with_label("Numeric Record-id keys can only be integers"),
+					));
+				}
+				if !after.ws() && after.is_ident() {
+					let msg = format!(
+						"Unexpected token `{}` expected an integer",
+						render::token_name(self.src, after.start)
+					);
+					return Err(self.err_at(k.start, after.end, msg));
 				}
 				let text = &self.src[d.start as usize..end as usize];
 				match text.parse::<i64>() {
@@ -858,8 +1020,9 @@ impl<'a> Parser<'a> {
 				self.bump();
 				let d = self.tok;
 				if d.kind != T::Digits {
+					let e = self.unexpected("a number");
 					self.consume_failed();
-					return fail("expected digits");
+					return Err(e);
 				}
 				let end = self.digits_end(d.start);
 				let text = &self.src[d.start as usize..end as usize];
@@ -888,11 +1051,9 @@ impl<'a> Parser<'a> {
 				let end = self.digits_end(k.start);
 				let after = self.token_at(end);
 				let flexible = !self.settings.limits.strict_record_ids;
-				if flexible
-					&& !after.ws() && matches!(
-					after.kind,
-					T::Ident | T::EscIdent | T::NaN | T::Infinity
-				) {
+				// Unlike in a query, `NaN` or `Infinity` after the digits ends
+				// the key rather than joining it, as in `syn`'s value parser.
+				if flexible && !after.ws() && matches!(after.kind, T::Ident | T::EscIdent) {
 					self.reset_to(after.end);
 					RecordIdKey::String(self.src[k.start as usize..after.end as usize].to_owned())
 				} else {
@@ -912,6 +1073,11 @@ impl<'a> Parser<'a> {
 		};
 		let rangeable = !(self.record_only && self.frames.is_empty());
 		Ok(Start::Done(Value::RecordId(RecordId::new(table, key)), rangeable))
+	}
+
+	/// The end of the last consumed token.
+	fn prev_end(&self) -> u32 {
+		self.prev.end
 	}
 
 	/// Where `syn`'s digits token starting at `start` ends: digits and `_`.
@@ -961,14 +1127,15 @@ fn int(text: &str) -> R<i64> {
 		Some(b) => (true, b),
 		None => (false, digits.strip_prefix('+').unwrap_or(&digits)),
 	};
-	let u: u64 = body.parse().map_err(|_| Error::Lower("number does not fit in an i64"))?;
+	let u: u64 =
+		body.parse().map_err(|_| Error::Lower(Reject::new("number does not fit in an i64")))?;
 	if neg {
 		if u > i64::MAX as u64 + 1 {
 			return fail("number does not fit in an i64");
 		}
 		Ok((u as i64).wrapping_neg())
 	} else {
-		i64::try_from(u).map_err(|_| Error::Lower("number does not fit in an i64"))
+		i64::try_from(u).map_err(|_| Error::Lower(Reject::new("number does not fit in an i64")))
 	}
 }
 

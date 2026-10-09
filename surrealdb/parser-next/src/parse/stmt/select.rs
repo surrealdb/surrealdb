@@ -23,7 +23,7 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			rec[crate::ast::select::OMIT] = self.list_from(mark).0;
 		}
-		self.expect_kw(Kw::From, "expected `FROM`")?;
+		self.expect_kw(Kw::From, "FROM")?;
 		if self.eat_kw(Kw::Only) {
 			flags |= 1;
 		}
@@ -46,7 +46,7 @@ impl<'a, 's> Parser<'a, 's> {
 			rec[crate::ast::select::TIMEOUT] = self.expr(true)?;
 		}
 		if self.eat_kw(Kw::For) {
-			self.expect_kw(Kw::Update, "expected `UPDATE`")?;
+			self.expect_kw(Kw::Update, "UPDATE")?;
 			flags |= 64;
 		}
 		if self.eat_kw(Kw::Tempfiles) {
@@ -73,7 +73,7 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			Kw::No if n.kind == T::Ident => {
 				self.bump();
-				self.expect_kw(Kw::Index, "expected `INDEX`")?;
+				self.expect_kw(Kw::Index, "INDEX")?;
 			}
 			Kw::Index if n.kind == T::Ident => {
 				self.bump();
@@ -89,7 +89,7 @@ impl<'a, 's> Parser<'a, 's> {
 				let list = self.list_from(mark).0;
 				return self.stmt_node(Tag::With, 1, list, 0, t.start, first);
 			}
-			_ => return Err(self.unexpected("expected `NO`, `NOINDEX` or `INDEX`")),
+			_ => return Err(self.unexpected("`NO`, `NOINDEX` or `INDEX`")),
 		}
 		Ok(self.leaf_span(Tag::With, 0, 0, 0, t.start, self.prev_end))
 	}
@@ -130,8 +130,8 @@ impl<'a, 's> Parser<'a, 's> {
 			let mark = self.vals.len() as u32;
 			if self.at_kw(Kw::Rand) {
 				let t = self.bump();
-				self.expect(T::LParen, "expected `(`")?;
-				self.expect(T::RParen, "expected `)`")?;
+				self.expect(T::LParen, "(")?;
+				self.expect(T::RParen, ")")?;
 				let n = self.leaf_span(Tag::OrderRand, 0, 0, 0, t.start, self.prev_end);
 				self.vals.push(n);
 			} else {

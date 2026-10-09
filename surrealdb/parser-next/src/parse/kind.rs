@@ -35,14 +35,16 @@ impl<'a, 's> Parser<'a, 's> {
 
 	/// A cast's kind, after its `<`, through the closing `>`.
 	pub(crate) fn cast_kind(&mut self) -> R<NodeId> {
+		let open = self.prev_start;
 		let k = self.kind()?;
-		self.expect(T::Gt, "expected `>`")?;
+		self.close(T::Gt, open)?;
 		Ok(k)
 	}
 
 	fn push_alts(&mut self, option: bool) -> R<()> {
 		self.push_frame(Frame::KindAlts {
 			start: self.tok.start,
+			open: self.prev_start,
 			mark: self.vals.len() as u32,
 			option,
 			single: false,
@@ -52,6 +54,7 @@ impl<'a, 's> Parser<'a, 's> {
 	fn kind_run(&mut self, base: usize, single: bool) -> R<NodeId> {
 		self.push_frame(Frame::KindAlts {
 			start: self.tok.start,
+			open: self.prev_start,
 			mark: self.vals.len() as u32,
 			option: false,
 			single,
@@ -69,7 +72,7 @@ impl<'a, 's> Parser<'a, 's> {
 				self.leaf(Tag::Kind, k::ANY, t)
 			} else if inner_first && t.is_kw(Kw::Option) {
 				self.bump();
-				self.expect(T::Lt, "expected `<`")?;
+				self.expect(T::Lt, "<")?;
 				self.push_alts(true)?;
 				continue 'want;
 			} else {
@@ -92,6 +95,7 @@ impl<'a, 's> Parser<'a, 's> {
 					}
 					Frame::KindAlts {
 						start,
+						open,
 						mark,
 						option,
 						single,
@@ -108,7 +112,7 @@ impl<'a, 's> Parser<'a, 's> {
 						}
 						self.pop_frame();
 						if option {
-							self.expect(T::Gt, "expected `>`")?;
+							self.close(T::Gt, open)?;
 							let (list, d) = self.list_from(mark);
 							v = self.node(Tag::Kind, k::OPTION, list, 0, start, d)?;
 						} else if self.vals.len() - mark as usize == 1 {
@@ -120,6 +124,7 @@ impl<'a, 's> Parser<'a, 's> {
 					}
 					Frame::KindSized {
 						start,
+						open,
 						code,
 					} => {
 						self.pop_frame();
@@ -128,7 +133,7 @@ impl<'a, 's> Parser<'a, 's> {
 						} else {
 							NONE
 						};
-						self.expect(T::Gt, "expected `>`")?;
+						self.close(T::Gt, open)?;
 						let d = self.depth_of(v);
 						v = self.node(Tag::Kind, code, v, size, start, d)?;
 					}
@@ -174,7 +179,7 @@ impl<'a, 's> Parser<'a, 's> {
 	fn concrete_kind(&mut self) -> R<Option<NodeId>> {
 		// Every concrete kind is one object level in `syn`, even a leaf.
 		if self.o >= self.limits.object_depth {
-			return Err(self.unexpected("kinds nest too deeply"));
+			return Err(self.depth_error("Exceeded object recursion depth limit", ""));
 		}
 		let t = self.tok;
 		let code = match t.kind {
@@ -217,7 +222,12 @@ impl<'a, 's> Parser<'a, 's> {
 						return self.node(Tag::Kind, k::LITERAL, lit, 0, t.start, 1).map(Some);
 					}
 					if self.tok.kind != T::Digits || self.tok.ws() {
-						return Err(self.unexpected("expected a number"));
+						return Err(self.number_error(
+							t.start,
+							LexError::InvalidNumber,
+							Compound::Number,
+							t.start,
+						));
 					}
 				}
 				let lit = self.number(t.start, signed)?;
@@ -292,6 +302,7 @@ impl<'a, 's> Parser<'a, 's> {
 						_ => k::TABLE,
 					};
 					let list = if self.eat(T::Lt) {
+						let open = self.prev_start;
 						let mark = self.vals.len() as u32;
 						loop {
 							let n = self.ident()?;
@@ -308,7 +319,7 @@ impl<'a, 's> Parser<'a, 's> {
 								break;
 							}
 						}
-						self.expect(T::Gt, "expected `>`")?;
+						self.close(T::Gt, open)?;
 						self.list_from(mark).0
 					} else {
 						NONE
@@ -327,14 +338,15 @@ impl<'a, 's> Parser<'a, 's> {
 					}
 					self.push_frame(Frame::KindSized {
 						start: t.start,
+						open: self.prev_start,
 						code,
 					})?;
 					self.push_alts(false)?;
 					return Ok(None);
 				}
-				_ => return Err(self.unexpected("expected a kind name")),
+				_ => return Err(self.unexpected("a kind name")),
 			},
-			_ => return Err(self.unexpected("expected a kind name")),
+			_ => return Err(self.unexpected("a kind name")),
 		};
 		self.bump();
 		Ok(Some(self.leaf(Tag::Kind, code, t)))

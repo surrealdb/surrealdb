@@ -92,3 +92,149 @@ pub fn strip_delims(text: &str) -> &str {
 		t
 	}
 }
+
+/// `syn`'s error for the first invalid escape in a string or escaped
+/// identifier token, as `(start, end, message, label)` with offsets into
+/// `token`; `None` when every escape is valid. With `json`, a `\uXXXX` high
+/// surrogate must be followed by a low one.
+pub fn escape_error(token: &str, json: bool) -> Option<(u32, u32, &'static str, &'static str)> {
+	let b = token.as_bytes();
+	// Skip a string prefix and the opening delimiter.
+	let mut i = match b.first() {
+		Some(b'`') | Some(b'"') | Some(b'\'') => 1,
+		Some(b's' | b'r' | b'u' | b'f' | b'd' | b'b') => 2,
+		// `⟨`
+		Some(0xE2) => 3,
+		_ => return None,
+	};
+	let at = |i: usize| b.get(i).copied();
+	let hex = |c: u8| (c as char).to_digit(16);
+	while i < b.len() {
+		if b[i] != b'\\' {
+			i += 1;
+			continue;
+		}
+		let before = i as u32;
+		i += 1;
+		let Some(c) = at(i) else {
+			return Some((before, i as u32, "Invalid escape sequence", "missing escape character"));
+		};
+		i += 1;
+		match c {
+			b'n' | b'r' | b't' | b'0' | b'\\' | b'b' | b'f' | b'\'' | b'"' | b'`' => {}
+			b'u' => {
+				if at(i) == Some(b'{') {
+					i += 1;
+					let mut accum: u32 = 0;
+					for _ in 0..6 {
+						match at(i) {
+							Some(b'}') => break,
+							Some(c) if hex(c).is_some() => {
+								accum = accum * 16 + hex(c).unwrap_or(0);
+								i += 1;
+							}
+							_ => {
+								return Some((
+									i as u32,
+									i as u32 + 1,
+									"Invalid escape sequence, expected `}` or hexadecimal character.",
+									"Unexpected character",
+								));
+							}
+						}
+					}
+					if at(i) != Some(b'}') {
+						let label = if at(i).is_some_and(|c| c.is_ascii_hexdigit()) {
+							"Too many hex-digits"
+						} else {
+							"Unexpected character"
+						};
+						return Some((
+							i as u32,
+							i as u32 + 1,
+							"Invalid escape sequence, expected `}` character.",
+							label,
+						));
+					}
+					i += 1;
+					if char::from_u32(accum).is_none() {
+						return Some((
+							before,
+							i as u32,
+							"Invalid escape sequence, unicode escape character is not a valid unicode character.",
+							"Not a valid character code",
+						));
+					}
+				} else {
+					let mut accum: u32 = 0;
+					for _ in 0..4 {
+						match at(i).and_then(hex) {
+							Some(d) => {
+								accum = accum * 16 + d;
+								i += 1;
+							}
+							None => {
+								return Some((
+									i as u32,
+									i as u32 + 1,
+									"String contains invalid escape sequence, expected a hexadecimal character.",
+									"Unexpected character",
+								));
+							}
+						}
+					}
+					if json && (0xD800..=0xDBFF).contains(&accum) {
+						if at(i) == Some(b'\\') && at(i + 1) == Some(b'u') {
+							i += 2;
+							let mut low: u32 = 0;
+							for _ in 0..4 {
+								match at(i).and_then(hex) {
+									Some(d) => {
+										low = low * 16 + d;
+										i += 1;
+									}
+									None => {
+										return Some((
+											i as u32,
+											i as u32 + 1,
+											"String contains invalid escape sequence, expected a hexadecimal character.",
+											"Unexpected character",
+										));
+									}
+								}
+							}
+							if (0xDC00..=0xDFFF).contains(&low) {
+								continue;
+							}
+						} else if at(i) == Some(b'\\') {
+							i += 1;
+						}
+						return Some((
+							before,
+							i as u32,
+							"String contains invalid escape sequence, high surrogate must be followed by low surrogate (\\uDC00-\\uDFFF).",
+							"Incomplete surrogate pair",
+						));
+					}
+					if char::from_u32(accum).is_none() {
+						return Some((
+							before,
+							i as u32,
+							"String contains invalid escape sequence, unicode escape character is not a valid unicode character.",
+							"Not a valid character code",
+						));
+					}
+				}
+			}
+			_ => {
+				return Some((
+					before,
+					i as u32,
+					"Invalid escape sequence",
+					"not a valid escape character",
+				));
+			}
+		}
+	}
+	None
+}

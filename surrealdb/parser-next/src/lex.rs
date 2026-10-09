@@ -712,6 +712,379 @@ impl<'a> Lexer<'a> {
 	}
 }
 
+/// Which of `syn`'s compound number lexers reads a literal, which decides how
+/// a malformed one is reported.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Compound {
+	/// A number or a duration (`syn`'s `numeric`).
+	Numeric,
+	/// A number, after a sign or as an object key (`number`).
+	Number,
+	/// An integer (`integer`).
+	Integer,
+	/// A float (`float`).
+	Float,
+	/// A duration (`duration`).
+	Duration,
+}
+
+/// `syn`'s error for the malformed literal at `start` read as `mode`, or
+/// `None` when `syn`'s lexer accepts it. `start` is where `syn`'s compound
+/// token starts: the sign for a signed literal it lexes whole, the digits
+/// otherwise.
+pub fn compound_error(src: &[u8], start: u32, mode: Compound) -> Option<crate::parse::Diag> {
+	use crate::parse::Diag;
+	let at = |i: u32| src.get(i as usize).copied();
+	let len = src.len() as u32;
+	let char_len = |i: u32| match at(i).unwrap_or(0) {
+		0..0x80 => 1,
+		0xC0..0xE0 => 2,
+		0xE0..0xF0 => 3,
+		_ => 4,
+	};
+	let mut pos = start;
+	let digits = |pos: &mut u32| {
+		while at(*pos).is_some_and(|b| b.is_ascii_digit() || b == b'_') {
+			*pos += 1;
+		}
+	};
+	// `eat_digits1`: at least one digit, from `from`.
+	let digits1 = |pos: &mut u32, from: u32| -> Option<Diag> {
+		match at(*pos) {
+			Some(b) if b.is_ascii_digit() => {
+				digits(pos);
+				None
+			}
+			Some(_) => Some(Diag::message(
+				from,
+				*pos,
+				"Invalid number token, expected a digit, found: {next}",
+			)),
+			None => Some(Diag::message(
+				from,
+				*pos,
+				"Unexpected end of file, expected a number token digit",
+			)),
+		}
+	};
+	// `Lexer::expect`.
+	let expect = |pos: &mut u32, c: u8| -> Option<Diag> {
+		match at(*pos) {
+			Some(b) if b == c => {
+				*pos += 1;
+				None
+			}
+			Some(_) => {
+				let l = char_len(*pos);
+				let msg = match c {
+					b'e' => "Unexpected character `{char}` expected `e`",
+					b'c' => "Unexpected character `{char}` expected `c`",
+					_ => "Unexpected character `{char}` expected `s`",
+				};
+				Some(Diag::message(*pos, *pos + l, msg))
+			}
+			None => {
+				let msg = match c {
+					b'e' => "Unexpected end of file, expected character `e`",
+					b'c' => "Unexpected end of file, expected character `c`",
+					_ => "Unexpected end of file, expected character `s`",
+				};
+				Some(Diag::message(start, *pos, msg))
+			}
+		}
+	};
+	let signed = matches!(at(start), Some(b'+' | b'-'));
+	if signed {
+		pos += 1;
+		if at(pos) == Some(b'I') {
+			// `-Infinity` and `+Infinity`.
+			return None;
+		}
+	} else {
+		digits(&mut pos);
+	}
+	let is_duration = mode == Compound::Duration
+		|| (mode == Compound::Numeric
+			&& !signed
+			&& match at(pos) {
+				Some(b'n' | b's' | b'm' | b'h' | b'y' | b'w' | b'u' | 0xC2) => true,
+				Some(b'd') => at(pos + 1) != Some(b'e'),
+				_ => false,
+			});
+	if is_duration {
+		let mut total: u128 = 0;
+		let mut number_start = start;
+		loop {
+			let digits_text = &src[number_start as usize..pos as usize];
+			let value = {
+				let mut v: u128 = 0;
+				for &b in digits_text {
+					if b != b'_' {
+						v = v * 10 + (b - b'0') as u128;
+					}
+				}
+				v
+			};
+			let unit: u128 = match at(pos) {
+				Some(b'n') => {
+					pos += 1;
+					if let Some(d) = expect(&mut pos, b's') {
+						return Some(d);
+					}
+					1
+				}
+				Some(b'u') => {
+					pos += 1;
+					if let Some(d) = expect(&mut pos, b's') {
+						return Some(d);
+					}
+					1_000
+				}
+				Some(b'm') => {
+					pos += 1;
+					if at(pos) == Some(b's') {
+						pos += 1;
+						1_000_000
+					} else {
+						60_000_000_000
+					}
+				}
+				Some(b's') => {
+					pos += 1;
+					1_000_000_000
+				}
+				Some(b'h') => {
+					pos += 1;
+					3_600_000_000_000
+				}
+				Some(b'd') => {
+					pos += 1;
+					86_400_000_000_000
+				}
+				Some(b'w') => {
+					pos += 1;
+					604_800_000_000_000
+				}
+				Some(b'y') => {
+					pos += 1;
+					31_536_000_000_000_000
+				}
+				Some(0xC2) => {
+					pos += 1;
+					if at(pos) != Some(0xB5) {
+						return Some(Diag::message(
+							start,
+							pos - 1 + char_len(pos - 1),
+							"Invalid duration token, expected a duration suffix found `{last}`",
+						));
+					}
+					pos += 1;
+					if let Some(d) = expect(&mut pos, b's') {
+						return Some(d);
+					}
+					1_000
+				}
+				Some(_) => {
+					let end = pos + char_len(pos);
+					return Some(Diag::message(
+						start,
+						end.min(len),
+						"Invalid duration token, expected a duration suffix found `{last}`",
+					));
+				}
+				None => {
+					return Some(Diag::message(
+						start,
+						pos,
+						"Unexpected end of file, expected a duration suffix",
+					));
+				}
+			};
+			if at(pos).is_some_and(|b| b.is_ascii_alphabetic()) {
+				return Some(Diag::message(
+					start,
+					pos + 1,
+					"Invalid token, found invalid character `{last}` after duration suffix",
+				));
+			}
+			if value > u64::MAX as u128 {
+				return Some(Diag::message(
+					start,
+					pos,
+					"Invalid token, failed to parse duration digits: number too large to fit in target type",
+				));
+			}
+			// Units of a minute and more are whole seconds in `syn`, which
+			// checks them against `u64` seconds.
+			if unit >= 60_000_000_000 && value * (unit / 1_000_000_000) > u64::MAX as u128 {
+				return Some(Diag::message(
+					start,
+					pos,
+					"Invalid duration, value overflowed maximum allowed value",
+				));
+			}
+			total += value * unit;
+			if total / 1_000_000_000 > u64::MAX as u128 {
+				return Some(Diag::message(
+					start,
+					pos,
+					"Invalid duration, value overflowed maximum allowed value",
+				));
+			}
+			if at(pos).is_some_and(|b| b.is_ascii_digit()) {
+				number_start = pos;
+				digits(&mut pos);
+			} else {
+				return None;
+			}
+		}
+	}
+	if signed && let Some(d) = digits1(&mut pos, start) {
+		return Some(d);
+	}
+	if mode == Compound::Integer {
+		if at(pos).is_some_and(|b| b.is_ascii_alphabetic()) {
+			return Some(Diag::message(
+				start,
+				pos + 1,
+				"Invalid token, found unexpected character `{last} after integer token",
+			));
+		}
+		if at(pos) == Some(b'.') && at(pos + 1).is_some_and(|b| b.is_ascii_digit()) {
+			return Some(Diag::message(
+				pos,
+				pos + 1,
+				"Unexpected character `.` starting float, only integers are allowed here",
+			));
+		}
+		return None;
+	}
+	let mut float = false;
+	if mode == Compound::Float {
+		if at(pos) == Some(b'.') {
+			let before = pos;
+			pos += 1;
+			if let Some(d) = digits1(&mut pos, before) {
+				return Some(d);
+			}
+		}
+	} else if at(pos) == Some(b'.') && at(pos + 1).is_some_and(|b| b.is_ascii_digit()) {
+		pos += 1;
+		digits(&mut pos);
+		float = true;
+	}
+	if matches!(at(pos), Some(b'e' | b'E')) {
+		let before = pos;
+		pos += 1;
+		if at(pos) == Some(b'-') || at(pos) == Some(b'+') {
+			pos += 1;
+		}
+		if let Some(d) = digits1(&mut pos, before) {
+			return Some(d);
+		}
+		float = true;
+	}
+	if mode == Compound::Float {
+		if at(pos) == Some(b'f') {
+			pos += 1;
+		}
+		if at(pos).is_some_and(|b| b.is_ascii_alphabetic()) {
+			return Some(Diag::message(
+				start,
+				pos + 1,
+				"Invalid token, found invalid character `{last}` after number token",
+			));
+		}
+		return None;
+	}
+	if at(pos) == Some(b'f') {
+		pos += 1;
+		float = true;
+	} else if at(pos) == Some(b'd') {
+		pos += 1;
+		if let Some(d) = expect(&mut pos, b'e') {
+			return Some(d);
+		}
+		if let Some(d) = expect(&mut pos, b'c') {
+			return Some(d);
+		}
+		float = true;
+	}
+	if at(pos).is_some_and(|b| b.is_ascii_alphabetic()) {
+		return Some(Diag::message(
+			start,
+			pos + 1,
+			"Invalid token, found unexpected character `{last}` after number token",
+		));
+	}
+	if !float {
+		let body = &src[(start + signed as u32) as usize..pos as usize];
+		let neg = at(start) == Some(b'-');
+		let fits = decode_uint(body).is_some_and(|u| u <= i64::MAX as u64 + (neg as u64));
+		if !fits {
+			return Some(Diag::message(
+				start,
+				pos,
+				"Failed to parse number: number cannot fit within a 64bit signed integer",
+			));
+		}
+	}
+	None
+}
+
+/// Why the lexer produced an invalid token at `start`, worded and spanned as
+/// `syn`'s lexer reports it.
+pub fn invalid_reason(src: &[u8], start: u32) -> crate::parse::Diag {
+	use crate::parse::Diag;
+	let s = start as usize;
+	let end = src.len() as u32;
+	let at = |i: usize| src.get(s + i).copied().unwrap_or(0);
+	match at(0) {
+		b'/' if at(1) == b'*' => Diag::message(
+			start,
+			start + 2,
+			"Unexpected end of file, expected multi-line comment to end.",
+		)
+		.with_label("Comment starts here."),
+		b'\'' | b'"' => {
+			Diag::message(start, start + 1, "Unexpected end of file, expected string to end.")
+				.with_label("String starting here.")
+		}
+		b'r' | b'u' | b'd' | b'b' | b'f' | b's' if matches!(at(1), b'\'' | b'"') => {
+			Diag::message(start, start + 2, "Unexpected end of file, expected string to end.")
+				.with_label("String starting here.")
+		}
+		b'`' => {
+			Diag::message(start, end, "Unexpected end of file, expected identifier to end with ```")
+		}
+		b'$' if at(1) == b'`' => Diag::message(
+			start + 1,
+			end,
+			"Unexpected end of file, expected identifier to end with ```",
+		),
+		0xE2 if at(1) == 0x9F && at(2) == 0xA8 => {
+			Diag::message(start, end, "Unexpected end of file, expected identifier to end with `⟩`")
+		}
+		b'&' => Diag::message(
+			start,
+			start + 1,
+			"Invalid token `&`, single `&` are not a valid token, did you mean `&&`?",
+		),
+		b'+' if at(1) == b'?' => {
+			Diag::message(start, start + 2, "Invalid token `+?` did you maybe mean `+?=` ?")
+		}
+		b => {
+			let len = match b {
+				0..0x80 => 1,
+				0xC0..0xE0 => 2,
+				0xE0..0xF0 => 3,
+				_ => 4,
+			};
+			Diag::message(start, (start + len).min(end), "Invalid token `{char}`")
+		}
+	}
+}
+
 /// Decodes a lexed integer span. Underscores are separators.
 pub fn decode_uint(text: &[u8]) -> Option<u64> {
 	let mut v: u64 = 0;

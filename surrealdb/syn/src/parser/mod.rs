@@ -864,13 +864,26 @@ impl StatementStream {
 				self.accumulate_line_col(&eaten);
 				Ok(Some(*stmt))
 			}
-			Statement::Rejected(e) => match self.parse_syn(buffer, complete) {
-				Ok(Some(_)) => Err(stream_divergence(
-					&format!("parser-next rejects ({e:?}), syn accepts"),
-					buffer,
-				)),
-				other => other,
-			},
+			Statement::Rejected(e) => {
+				let ours =
+					crate::next::render(src, &e).offset_location(self.line_offset, self.col_offset);
+				if crate::next::mode() != crate::next::Mode::Check {
+					return Err(ours);
+				}
+				match self.parse_syn(buffer, complete) {
+					Ok(Some(_)) => Err(stream_divergence(
+						&format!("parser-next rejects ({e:?}), syn accepts"),
+						buffer,
+					)),
+					Err(theirs) if theirs.to_string() != ours.to_string() => {
+						Err(stream_divergence(
+							&format!("error text differs:\nsyn:\n{theirs}\nparser-next:\n{ours}"),
+							buffer,
+						))
+					}
+					other => other,
+				}
+			}
 		}
 	}
 

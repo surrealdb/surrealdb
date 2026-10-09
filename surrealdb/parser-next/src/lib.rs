@@ -14,8 +14,8 @@ pub mod stream;
 
 pub use ast::{Ast, Node, NodeId, Tag};
 pub use parse::{
-	Diag, Entry, Limits, Scratch, StatementEnd, parse_entry, parse_record_id, parse_record_id_all,
-	parse_script, parse_statement,
+	Diag, DiagKind, Entry, Extra, Limits, Scratch, StatementEnd, parse_entry, parse_record_id,
+	parse_record_id_all, parse_script, parse_statement,
 };
 pub use stream::{Statement, Step, StreamError, StreamParser};
 

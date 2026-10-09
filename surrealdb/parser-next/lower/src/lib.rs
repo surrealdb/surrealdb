@@ -15,10 +15,10 @@ use std::time::Duration;
 use common::range::TypedRange;
 use surrealdb_parser_next::ast::{self, Ast, Binary, NONE, Node, NodeId, Prefix, Tag};
 use surrealdb_parser_next::decode;
-use surrealdb_parser_next::lex::decode_duration;
+use surrealdb_parser_next::kw::Kw;
+use surrealdb_parser_next::lex::{Lexer, T, Tok, decode_duration};
 use surrealdb_sql::data::Assignment;
 use surrealdb_sql::field::Selector;
-use surrealdb_sql::file::File;
 use surrealdb_sql::kind::{GeometryKind, KindLiteral};
 use surrealdb_sql::literal::ObjectEntry;
 use surrealdb_sql::lookup::{LookupKind, LookupSubject};
@@ -45,10 +45,14 @@ use surrealdb_sql::{
 	Split, Splits, Start, TableName, TopLevelExpr, With,
 };
 use surrealdb_strand::Strand;
+use surrealdb_types::ToSql;
 
 mod define;
 pub mod entry;
 mod lit;
+pub mod render;
+
+pub use lit::{is_builtin, is_regex};
 pub mod value;
 
 thread_local! {
@@ -89,10 +93,37 @@ impl Options {
 pub(crate) const FILES_DISABLED: &str = "the experimental files feature to be enabled";
 pub(crate) const SURREALISM_DISABLED: &str = "Surrealism modules are not enabled";
 
-/// A lowering failure: a semantic check the old parser makes at parse time.
-#[derive(Debug)]
-#[allow(dead_code, reason = "read only by the differential example")]
-pub struct Reject(pub &'static str);
+/// A lowering failure: a semantic check the old parser makes at parse time,
+/// worded as `syn` words it, with the span it points at when it has one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Reject {
+	pub msg: std::borrow::Cow<'static, str>,
+	pub span: Option<(u32, u32)>,
+	pub label: Option<std::borrow::Cow<'static, str>>,
+	/// A second span with its label.
+	pub extra: Option<(u32, u32, std::borrow::Cow<'static, str>)>,
+}
+
+impl Reject {
+	pub fn new(msg: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+		Reject {
+			msg: msg.into(),
+			span: None,
+			label: None,
+			extra: None,
+		}
+	}
+
+	pub fn at(mut self, start: u32, end: u32) -> Self {
+		self.span = Some((start, end));
+		self
+	}
+
+	pub fn with_label(mut self, label: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+		self.label = Some(label.into());
+		self
+	}
+}
 
 pub(crate) type R<T> = Result<T, Reject>;
 
@@ -124,7 +155,7 @@ impl<'a> Lower<'a> {
 		if t.starts_with('`') || t.starts_with('⟨') {
 			let mut s = String::new();
 			if !decode::unescape(decode::strip_delims(t), &mut s) {
-				return Err(Reject("invalid escape"));
+				return Err(Reject::new("invalid escape"));
 			}
 			return Ok(s);
 		}
@@ -139,7 +170,7 @@ impl<'a> Lower<'a> {
 		if quoted {
 			let mut s = String::new();
 			if !decode::unescape(decode::strip_delims(t), &mut s) {
-				return Err(Reject("invalid escape"));
+				return Err(Reject::new("invalid escape"));
 			}
 			Ok(s)
 		} else {
@@ -189,7 +220,7 @@ impl<'a> Lower<'a> {
 				} else {
 					match self.expr(rec[1])? {
 						Expr::Literal(Literal::Datetime(d)) => ShowSince::Timestamp(d),
-						_ => return Err(Reject("not a datetime")),
+						_ => return Err(Reject::new("not a datetime")),
 					}
 				};
 				TopLevelExpr::Show(ShowStatement {
@@ -202,7 +233,10 @@ impl<'a> Lower<'a> {
 					limit: if rec[2] == NONE {
 						None
 					} else {
-						Some(u32::try_from(Ast::int(self.n(rec[2]))).map_err(|_| Reject("u32"))?)
+						Some(
+							u32::try_from(Ast::int(self.n(rec[2])))
+								.map_err(|_| Reject::new("u32"))?,
+						)
 					},
 				})
 			}
@@ -262,7 +296,7 @@ impl<'a> Lower<'a> {
 							Duration::default()
 						} else {
 							let (s, ns) = decode_duration(self.text(rec[2]).as_bytes())
-								.ok_or(Reject("duration overflow"))?;
+								.ok_or(Reject::new("duration overflow"))?;
 							Duration::new(s, ns)
 						},
 					}),
@@ -301,21 +335,21 @@ impl<'a> Lower<'a> {
 			Tag::Infinity => Expr::Literal(Literal::Float(f64::INFINITY)),
 			Tag::UnboundedRange => Expr::Literal(Literal::UnboundedRange),
 			Tag::Decimal => Expr::Literal(lit::decimal(self.text(id))?),
-			Tag::Regex => Expr::Literal(lit::regex(self.text(id))?),
-			Tag::Path => match lit::builtin(&self.path_name(id)?)? {
+			Tag::Regex => Expr::Literal(lit::regex_at(self.text(id), n.start, n.end)?),
+			Tag::Path => match lit::builtin(&self.path_name(id)?, n.start, n.end)? {
 				lit::Builtin::Constant(c) => Expr::Constant(c),
-				lit::Builtin::Function(_) => return Err(Reject("expected `(`")),
+				lit::Builtin::Function(_) => return Err(self.unexpected_after(n.end, "(")),
 			},
 			Tag::Duration => {
-				let (s, ns) =
-					decode_duration(self.text(id).as_bytes()).ok_or(Reject("duration overflow"))?;
+				let (s, ns) = decode_duration(self.text(id).as_bytes())
+					.ok_or(Reject::new("duration overflow"))?;
 				Expr::Literal(Literal::Duration(Duration::new(s, ns)))
 			}
 			Tag::Str => match n.op {
 				0 | b's' => {
 					let mut s = String::new();
 					if !decode::unescape(decode::strip_delims(self.text(id)), &mut s) {
-						return Err(Reject("invalid escape"));
+						return Err(Reject::new("invalid escape"));
 					}
 					if self.opts.legacy_strands {
 						return Ok(Expr::Literal(lit::legacy_strand(s)));
@@ -324,13 +358,14 @@ impl<'a> Lower<'a> {
 				}
 				b'f' => {
 					if !self.opts.files {
-						return Err(Reject(FILES_DISABLED));
+						return Err(Reject::new(FILES_DISABLED));
 					}
 					let mut s = String::new();
 					if !decode::unescape(decode::strip_delims(self.text(id)), &mut s) {
-						return Err(Reject("invalid escape"));
+						return Err(Reject::new("invalid escape"));
 					}
-					Expr::Literal(Literal::File(file(&s)?))
+					let f = lit::file(&s).map_err(|r| lit::in_token(r, self.text(id), n.start))?;
+					Expr::Literal(Literal::File(f.into()))
 				}
 				_ => self.prefixed(id)?,
 			},
@@ -371,7 +406,10 @@ impl<'a> Lower<'a> {
 						rf: if r[1] == NONE {
 							None
 						} else {
-							Some(u8::try_from(Ast::int(self.n(r[1]))).map_err(|_| Reject("u8"))?)
+							Some(
+								u8::try_from(Ast::int(self.n(r[1])))
+									.map_err(|_| Reject::new("u8"))?,
+							)
 						},
 						operator: match r[2] {
 							1 => Some(BooleanOperator::And),
@@ -380,13 +418,15 @@ impl<'a> Lower<'a> {
 						},
 					})
 				} else {
-					let k = u32::try_from(Ast::int(self.n(r[2]))).map_err(|_| Reject("u32"))?;
+					let k =
+						u32::try_from(Ast::int(self.n(r[2]))).map_err(|_| Reject::new("u32"))?;
 					BinaryOperator::NearestNeighbor(Box::new(match r[1] {
 						0 => NearestNeighbor::KTree(k),
 						1 => NearestNeighbor::K(k, self.distance_of(r[3], r[4])?),
 						_ => NearestNeighbor::Approximate(
 							k,
-							u32::try_from(Ast::int(self.n(r[3]))).map_err(|_| Reject("u32"))?,
+							u32::try_from(Ast::int(self.n(r[3])))
+								.map_err(|_| Reject::new("u32"))?,
 						),
 					}))
 				};
@@ -414,7 +454,7 @@ impl<'a> Lower<'a> {
 						if !CHECK_NAMES.with(|c| c.get()) {
 							Function::Normal(path.to_lowercase())
 						} else {
-							match lit::builtin(&path)? {
+							match lit::builtin(&path, callee.start, callee.end)? {
 								lit::Builtin::Function(f) => Function::Normal(f),
 								// A constant followed by arguments is a call of
 								// its value.
@@ -430,7 +470,7 @@ impl<'a> Lower<'a> {
 					1 => Function::Custom(self.path_name(n.a)?),
 					2 => {
 						if !self.opts.surrealism {
-							return Err(Reject(SURREALISM_DISABLED));
+							return Err(Reject::new(SURREALISM_DISABLED));
 						}
 						let p = &self.ast.extra[callee.a as usize + 1..];
 						Function::Module(
@@ -444,11 +484,11 @@ impl<'a> Lower<'a> {
 					}
 					3 => {
 						if !self.opts.surrealism {
-							return Err(Reject(SURREALISM_DISABLED));
+							return Err(Reject::new(SURREALISM_DISABLED));
 						}
 						let p = &self.ast.extra[callee.a as usize + 1..];
 						let v = |i: usize| {
-							u32::try_from(Ast::int(self.n(p[i]))).map_err(|_| Reject("u32"))
+							u32::try_from(Ast::int(self.n(p[i]))).map_err(|_| Reject::new("u32"))
 						};
 						Function::Silo {
 							org: self.name(p[0])?,
@@ -554,7 +594,7 @@ impl<'a> Lower<'a> {
 					range: self.expr(rec[1])?,
 					block: match self.expr(rec[2])? {
 						Expr::Block(b) => *b,
-						_ => return Err(Reject("not a block")),
+						_ => return Err(Reject::new("not a block")),
 					},
 				}))
 			}
@@ -630,7 +670,7 @@ impl<'a> Lower<'a> {
 			Tag::Set => Expr::Literal(Literal::Set(self.exprs(n.a)?)),
 			Tag::Sleep => {
 				let (s, ns) = decode_duration(self.text(n.a).as_bytes())
-					.ok_or(Reject("duration overflow"))?;
+					.ok_or(Reject::new("duration overflow"))?;
 				Expr::Sleep(Box::new(SleepStatement {
 					duration: Duration::new(s, ns),
 				}))
@@ -748,7 +788,7 @@ impl<'a> Lower<'a> {
 				// Read as written: `legacy_strands` does not apply to kinds.
 				let mut s = String::new();
 				if !decode::unescape(decode::strip_delims(self.text(n.a)), &mut s) {
-					return Err(Reject("invalid escape"));
+					return Err(Reject::new("invalid escape"));
 				}
 				Kind::Literal(KindLiteral::String(Strand::new(s)))
 			}
@@ -758,7 +798,7 @@ impl<'a> Lower<'a> {
 				Expr::Literal(Literal::Decimal(d)) => KindLiteral::Decimal(d),
 				Expr::Literal(Literal::Duration(d)) => KindLiteral::Duration(d),
 				Expr::Literal(Literal::Bool(b)) => KindLiteral::Bool(b),
-				_ => return Err(Reject("not a literal kind")),
+				_ => return Err(Reject::new("not a literal kind")),
 			}),
 			k::LIT_OBJECT => Kind::Literal(KindLiteral::Object(
 				self.list(n.a)
@@ -772,6 +812,58 @@ impl<'a> Lower<'a> {
 	}
 
 	/// A `::` path `Name` as the joined, unescaped segment names.
+	/// `syn`'s unexpected-token error for the token after byte `at`.
+	fn unexpected_after(&self, at: u32, expected: &str) -> Reject {
+		let mut l = Lexer::new(self.src.as_bytes());
+		l.pos = at;
+		let t = l.next_token();
+		if t.kind == T::Eof {
+			return Reject::new(format!("Unexpected end of file, expected {expected}"))
+				.at(t.start, t.end);
+		}
+		Reject::new(format!(
+			"Unexpected token `{}`, expected {expected}",
+			render::token_name(self.src, t.start)
+		))
+		.at(t.start, t.end)
+	}
+
+	/// The token at or after byte `at`.
+	fn tok_at(&self, at: u32) -> Tok {
+		let mut l = Lexer::new(self.src.as_bytes());
+		l.pos = at;
+		l.next_token()
+	}
+
+	/// The span of the last token that ends by `end`, lexing from `start`.
+	fn last_tok(&self, start: u32, end: u32) -> (u32, u32) {
+		let mut l = Lexer::new(self.src.as_bytes());
+		l.pos = start;
+		let mut last = (start, end);
+		loop {
+			let t = l.next_token();
+			if t.kind == T::Eof || t.end > end {
+				return last;
+			}
+			last = (t.start, t.end);
+		}
+	}
+
+	/// The first keyword `kw` among the tokens in `from..to`.
+	fn find_kw(&self, from: u32, to: u32, kw: Kw) -> Option<Tok> {
+		let mut l = Lexer::new(self.src.as_bytes());
+		l.pos = from;
+		loop {
+			let t = l.next_token();
+			if t.kind == T::Eof || t.start >= to {
+				return None;
+			}
+			if t.kind == T::Ident && t.kw == kw {
+				return Some(t);
+			}
+		}
+	}
+
 	fn path_name(&self, id: NodeId) -> R<String> {
 		let mut out = String::new();
 		for (i, seg) in self.text(id).split("::").enumerate() {
@@ -781,7 +873,7 @@ impl<'a> Lower<'a> {
 			let seg = seg.trim();
 			if seg.starts_with('`') || seg.starts_with('⟨') {
 				if !decode::unescape(decode::strip_delims(seg), &mut out) {
-					return Err(Reject("invalid escape"));
+					return Err(Reject::new("invalid escape"));
 				}
 			} else {
 				out.push_str(seg);
@@ -834,9 +926,11 @@ impl<'a> Lower<'a> {
 			}
 			Tag::KeyStr if n.op == 3 => RecordIdKeyLit::String(Strand::new(self.text(id))),
 			Tag::KeyStr => RecordIdKeyLit::String(Strand::new(self.name(id)?)),
-			Tag::KeyUuid => match lit::uuid(&lit::string_body(self.text(id))?)? {
+			Tag::KeyUuid => match lit::uuid(&lit::string_body(self.text(id))?)
+				.map_err(|r| lit::in_token(r, self.text(id), self.n(id).start))?
+			{
 				Literal::Uuid(u) => RecordIdKeyLit::Uuid(u),
-				_ => return Err(Reject("not a uuid")),
+				_ => return Err(Reject::new("not a uuid")),
 			},
 			Tag::KeyGen => RecordIdKeyLit::Generate(match n.op {
 				0 => RecordIdKeyGen::Ulid,
@@ -912,7 +1006,9 @@ impl<'a> Lower<'a> {
 						if id == NONE {
 							return Ok(None);
 						}
-						u32::try_from(Ast::int(self.n(id))).map(Some).map_err(|_| Reject("u32"))
+						u32::try_from(Ast::int(self.n(id)))
+							.map(Some)
+							.map_err(|_| Reject::new("u32"))
 					};
 					let recurse = if r[0] == 0 {
 						Recurse::Fixed(num(r[1])?.expect("fixed recursion has a count"))
@@ -999,7 +1095,7 @@ impl<'a> Lower<'a> {
 				}
 			} else {
 				let RecordIdKeyLit::Range(range) = self.key(x[0])? else {
-					return Err(Reject("not a range"));
+					return Err(Reject::new("not a range"));
 				};
 				LookupSubject::Range {
 					table,
@@ -1016,24 +1112,7 @@ impl<'a> Lower<'a> {
 			Some(self.fields(rec[s::FIELDS])?)
 		};
 		let (split, group) = match &expr {
-			Some(fields) => {
-				let split = if rec[s::SPLIT] == NONE {
-					None
-				} else {
-					let splits = self
-						.list(rec[s::SPLIT])
-						.iter()
-						.map(|&g| self.idiom(g).map(Split))
-						.collect::<R<Vec<_>>>()?;
-					check_split(fields, &splits)?;
-					Some(Splits(splits))
-				};
-				let group = self.groups(fields, rec)?;
-				if split.is_some() && group.is_some() {
-					return Err(Reject("SPLIT and GROUP are mutually exclusive"));
-				}
-				(split, group)
-			}
+			Some(fields) => self.split_group(fields, rec, pn.start, false)?,
 			None => (None, None),
 		};
 		Ok(Lookup {
@@ -1126,21 +1205,7 @@ impl<'a> Lower<'a> {
 			self.fields(rec[s::FIELDS])?
 		};
 		let flags = rec[s::FLAGS];
-		let split = if rec[s::SPLIT] == NONE {
-			None
-		} else {
-			let splits = self
-				.list(rec[s::SPLIT])
-				.iter()
-				.map(|&g| self.idiom(g).map(Split))
-				.collect::<R<Vec<_>>>()?;
-			check_split(&fields, &splits)?;
-			Some(Splits(splits))
-		};
-		let group = self.groups(&fields, rec)?;
-		if split.is_some() && group.is_some() {
-			return Err(Reject("SPLIT and GROUP are mutually exclusive"));
-		}
+		let (split, group) = self.split_group(&fields, rec, n.start, false)?;
 		let order = self.ordering(rec[s::ORDER])?;
 		Ok(SelectStatement {
 			fields,
@@ -1176,21 +1241,109 @@ impl<'a> Lower<'a> {
 	}
 
 	/// The `GROUP` clause of a `SELECT` record, checked against its fields.
-	fn groups(&self, fields: &Fields, rec: &[u32]) -> R<Option<Groups>> {
+	/// The `SPLIT` and `GROUP` clauses of a select-shaped record, checked
+	/// against the projection `fields` as `syn` checks them while parsing,
+	/// with its spans. `from` is at or before the `SELECT` keyword; in a
+	/// view the projection's span runs to the `FROM` keyword.
+	fn split_group(
+		&self,
+		fields: &Fields,
+		rec: &[u32],
+		from: u32,
+		view: bool,
+	) -> R<(Option<Splits>, Option<Groups>)> {
 		use ast::select as s;
-		Ok(if rec[s::FLAGS] & 2 != 0 {
+		let group_all = rec[s::FLAGS] & 2 != 0;
+		if rec[s::SPLIT] == NONE && rec[s::GROUP] == NONE && !group_all {
+			return Ok((None, None));
+		}
+		let fields_span = || {
+			let select = self.find_kw(from, u32::MAX, Kw::Select).map_or(from, |t| t.end);
+			let start = self.tok_at(select).start;
+			let last = if rec[s::VALUE] != NONE {
+				rec[s::VALUE]
+			} else {
+				*self.list(rec[s::FIELDS]).last().expect("a projection is never empty")
+			};
+			let mut end = self.n(last).end;
+			if view {
+				end = self.tok_at(end).end;
+			}
+			(start, end)
+		};
+		let missing = |msg: String, id: NodeId| {
+			let n = self.n(id);
+			let (a, b) = fields_span();
+			let mut r = Reject::new(msg).at(n.start, n.end);
+			r.extra = Some((a, b, "Idiom missing here".into()));
+			r
+		};
+		// Clauses before `SPLIT` and `GROUP` hold no such keyword after here.
+		let mut after = self.list(rec[s::WHAT]).last().map_or(from, |&w| self.n(w).end);
+		for at in [rec[s::COND], rec[s::WITH]] {
+			if at != NONE {
+				after = after.max(self.n(at).end);
+			}
+		}
+		let mut split_span = None;
+		let split = if rec[s::SPLIT] == NONE {
+			None
+		} else {
+			let ids = self.list(rec[s::SPLIT]);
+			let mut splits = Vec::with_capacity(ids.len());
+			for &id in ids {
+				let g = self.idiom(id)?;
+				if !projected(fields, &g, false) {
+					let msg =
+						format!("Missing split idiom `{:?}` in statement selection", g.to_sql());
+					return Err(missing(msg, id));
+				}
+				splits.push(Split(g));
+			}
+			let first = self.n(ids[0]).start;
+			let kw = self.find_kw(after, first, Kw::Split).map_or(first, |t| t.start);
+			after = self.n(*ids.last().expect("a split list is never empty")).end;
+			split_span = Some((kw, after));
+			Some(Splits(splits))
+		};
+		let exclusive = |group: (u32, u32)| -> Reject {
+			let (a, b) = split_span.expect("a split span");
+			let mut r = Reject::new("SPLIT and GROUP are mutually exclusive")
+				.at(a, b)
+				.with_label("SPLIT cannot be used with GROUP");
+			r.extra = Some((group.0, group.1, "GROUP cannot be used with SPLIT".into()));
+			r
+		};
+		let group = if group_all {
+			if split.is_some() {
+				let kw = self.find_kw(after, u32::MAX, Kw::Group).map_or(after, |t| t.start);
+				let all = self.find_kw(kw, u32::MAX, Kw::All).map_or(kw, |t| t.end);
+				return Err(exclusive((kw, all)));
+			}
 			Some(Groups(Vec::new()))
 		} else if rec[s::GROUP] != NONE {
-			let groups = self
-				.list(rec[s::GROUP])
-				.iter()
-				.map(|&g| self.idiom(g).map(Group))
-				.collect::<R<Vec<_>>>()?;
-			check_group(fields, &groups)?;
+			let ids = self.list(rec[s::GROUP]);
+			let mut groups = Vec::with_capacity(ids.len());
+			for &id in ids {
+				let g = self.idiom(id)?;
+				if !projected(fields, &g, true) {
+					let msg =
+						format!("Missing group idiom `{}` in statement selection", g.to_sql());
+					return Err(missing(msg, id));
+				}
+				groups.push(Group(g));
+			}
+			if split.is_some() {
+				let first = self.n(ids[0]).start;
+				let kw = self.find_kw(after, first, Kw::Group).map_or(first, |t| t.start);
+				let end = self.n(*ids.last().expect("a group list is never empty")).end;
+				return Err(exclusive((kw, end)));
+			}
 			Some(Groups(groups))
 		} else {
 			None
-		})
+		};
+		Ok((split, group))
 	}
 
 	fn fetchs(&self, list: u32) -> R<Option<Fetchs>> {
@@ -1313,7 +1466,7 @@ impl<'a> Lower<'a> {
 			for &row in self.list(v[1]) {
 				let vals = self.exprs(row)?;
 				if vals.len() != idioms.len() {
-					return Err(Reject("invalid number of values to insert"));
+					return Err(Reject::new("invalid number of values to insert"));
 				}
 				rows.push(idioms.iter().cloned().zip(vals).collect());
 			}
@@ -1351,30 +1504,6 @@ impl<'a> Lower<'a> {
 
 fn explain(flags: u32) -> Option<Explain> {
 	(flags & 16 != 0).then_some(Explain(flags & 32 != 0))
-}
-
-/// Decodes a file string body: `bucket:/key`, as `syn` reads it.
-fn file(s: &str) -> R<File> {
-	file_value(s).map(Into::into)
-}
-
-/// The contents of an `f"bucket:/key"` string.
-pub(crate) fn file_value(s: &str) -> R<surrealdb_types::File> {
-	let ok = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.');
-	let (bucket, rest) = s.split_once(':').ok_or(Reject("missing bucket separator"))?;
-	if !bucket.chars().all(ok) {
-		return Err(Reject("invalid bucket character"));
-	}
-	let rest = rest.strip_prefix('/').ok_or(Reject("expected `/`"))?;
-	let mut key = String::from("/");
-	for c in rest.chars() {
-		match c {
-			':' => break,
-			c if ok(c) || c == '/' => key.push(c),
-			_ => return Err(Reject("invalid key character")),
-		}
-	}
-	Ok(surrealdb_types::File::new(bucket.to_owned(), key))
 }
 
 fn binary(op: Binary) -> BinaryOperator {
@@ -1425,57 +1554,25 @@ fn binary(op: Binary) -> BinaryOperator {
 	}
 }
 
-/// `SPLIT` idioms must appear in the projection exactly.
-fn check_split(fields: &Fields, splits: &[Split]) -> R<()> {
-	let ok = |g: &Idiom, sel: &Selector| {
-		if sel.alias.as_ref() == Some(g) {
-			return true;
-		}
-		match &sel.expr {
-			Expr::Idiom(x) => g == x,
-			v => *g == v.to_idiom(),
-		}
-	};
-	for Split(g) in splits {
-		let found = match fields {
-			Fields::Value(sel) => ok(g, sel),
-			Fields::Select(fs) => fs.iter().any(|f| match f {
-				Field::All => true,
-				Field::Single(sel) => ok(g, sel),
-			}),
-		};
-		if !found {
-			return Err(Reject("missing split idiom in statement selection"));
-		}
-	}
-	Ok(())
-}
-
-/// `GROUP BY` idioms must appear in the projection: the check the current
-/// parser makes at parse time, made here at lowering.
-fn check_group(fields: &Fields, groups: &[Group]) -> R<()> {
+/// Whether the projection holds `g`, as a `SPLIT` idiom (exactly) or a
+/// `GROUP BY` idiom (or a prefix of a projected idiom).
+fn projected(fields: &Fields, g: &Idiom, group: bool) -> bool {
 	let prefix = |a: &Idiom, b: &Idiom| b.0.len() >= a.0.len() && b.0[..a.0.len()] == a.0[..];
-	let ok = |g: &Idiom, sel: &Selector| {
+	let ok = |sel: &Selector| {
 		if sel.alias.as_ref() == Some(g) {
 			return true;
 		}
-		let vi = match &sel.expr {
-			Expr::Idiom(x) => x.clone(),
-			v => v.to_idiom(),
-		};
-		*g == vi || prefix(g, &vi)
-	};
-	for Group(g) in groups {
-		let found = match fields {
-			Fields::Value(sel) => ok(g, sel),
-			Fields::Select(fs) => fs.iter().any(|f| match f {
-				Field::All => true,
-				Field::Single(sel) => ok(g, sel),
-			}),
-		};
-		if !found {
-			return Err(Reject("missing group idiom in statement selection"));
+		let same = |vi: &Idiom| g == vi || (group && prefix(g, vi));
+		match &sel.expr {
+			Expr::Idiom(x) => same(x),
+			v => same(&v.to_idiom()),
 		}
+	};
+	match fields {
+		Fields::Value(sel) => ok(sel),
+		Fields::Select(fs) => fs.iter().any(|f| match f {
+			Field::All => true,
+			Field::Single(sel) => ok(sel),
+		}),
 	}
-	Ok(())
 }

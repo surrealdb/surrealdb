@@ -10,7 +10,7 @@ impl<'a, 's> Parser<'a, 's> {
 		let t = self.tok;
 		let kind = match t.kw {
 			_ if t.kind != T::Ident => {
-				return Err(self.unexpected("expected an alter statement keyword"));
+				return Err(self.unexpected("a alter statement keyword"));
 			}
 			Kw::System => ALTER_SYSTEM,
 			Kw::Namespace => DefineKind::Namespace as u8,
@@ -29,21 +29,27 @@ impl<'a, 's> Parser<'a, 's> {
 			Kw::Config => DefineKind::Config as u8,
 			Kw::Api => DefineKind::Api as u8,
 			Kw::Module => DefineKind::Module as u8,
-			_ => return Err(self.unexpected("expected an alter statement keyword")),
+			_ => return Err(self.unexpected("a alter statement keyword")),
 		};
+		if self.limits.no_files && kind == DefineKind::Bucket as u8 {
+			return Err(self.files_off(t));
+		}
 		self.bump();
+		if self.limits.no_surrealism && kind == DefineKind::Module as u8 {
+			return Err(self.surrealism_off(t, "Use of `ALTER MODULE` requires Surrealism modules"));
+		}
 		let mut rec = [0, NONE, NONE, NONE];
 		let mark = self.vals.len() as u32;
 		if kind == ALTER_SYSTEM {
 			self.alter_system()?;
 		} else if kind == DefineKind::Namespace as u8 || kind == DefineKind::Database as u8 {
 			if !self.at_kw(Kw::Compact) {
-				return Err(self.unexpected("expected `COMPACT`"));
+				return Err(self.unexpected("`COMPACT`"));
 			}
 			self.flag_clause(Cl::Compact)?;
 		} else {
 			if self.eat_kw(Kw::If) {
-				self.expect_kw(Kw::Exists, "expected `EXISTS`")?;
+				self.expect_kw(Kw::Exists, "EXISTS")?;
 				rec[0] = 1;
 			}
 			self.alter_target(kind, &mut rec)?;
@@ -73,7 +79,7 @@ impl<'a, 's> Parser<'a, 's> {
 					let n = self.tok;
 					if n.kind != T::Ident || n.kw != Kw::None || self.text_of(n) != "QUERY_TIMEOUT"
 					{
-						return Err(self.unexpected("expected `QUERY_TIMEOUT`"));
+						return Err(self.unexpected("QUERY_TIMEOUT"));
 					}
 					self.bump();
 					self.push_clause(
@@ -92,7 +98,7 @@ impl<'a, 's> Parser<'a, 's> {
 					{
 						self.expr_clause(Cl::QueryTimeout)?;
 					} else {
-						return Err(self.unexpected("expected `QUERY_TIMEOUT`"));
+						return Err(self.unexpected("QUERY_TIMEOUT"));
 					}
 				}
 				_ => break,
@@ -100,7 +106,7 @@ impl<'a, 's> Parser<'a, 's> {
 			any = true;
 		}
 		if !any {
-			return Err(self.unexpected("expected `COMPACT`, `DROP` or `QUERY_TIMEOUT`"));
+			return Err(self.unexpected("`COMPACT`, `DROP` or `QUERY_TIMEOUT`"));
 		}
 		Ok(())
 	}
@@ -121,18 +127,18 @@ impl<'a, 's> Parser<'a, 's> {
 			TABLE => rec[1] = self.expr(false)?,
 			EVENT | INDEX | FIELD => {
 				rec[1] = self.expr(true)?;
-				self.expect_kw(Kw::On, "expected `ON`")?;
+				self.expect_kw(Kw::On, "ON")?;
 				self.eat_kw(Kw::Table);
 				rec[2] = self.expr(false)?;
 			}
 			PARAM => {
-				let p = self.expect(T::Param, "expected a parameter")?;
+				let p = self.expect(T::Param, "a parameter")?;
 				rec[1] = self.leaf(Tag::Param, 0, p);
 			}
 			FUNCTION => rec[1] = self.custom_function_name()?,
 			USER | ACCESS => {
 				rec[1] = self.expr(true)?;
-				self.expect_kw(Kw::On, "expected `ON`")?;
+				self.expect_kw(Kw::On, "ON")?;
 				rec[2] = self.base()?;
 			}
 			CONFIG => {
@@ -157,7 +163,7 @@ impl<'a, 's> Parser<'a, 's> {
 						self.bump();
 						rec[2] = 2;
 						if !(self.at_kw(Kw::Namespace) || self.at_kw(Kw::Database)) {
-							return Err(self.unexpected("expected a namespace or database name"));
+							return Err(self.unexpected("a namespace or database name"));
 						}
 						loop {
 							match self.tok.kw {
@@ -167,7 +173,7 @@ impl<'a, 's> Parser<'a, 's> {
 							}
 						}
 					}
-					_ => return Err(self.unexpected("expected a type of config")),
+					_ => return Err(self.unexpected("a type of config")),
 				}
 			}
 			MODULE => {
@@ -175,30 +181,27 @@ impl<'a, 's> Parser<'a, 's> {
 				match m.kw {
 					Kw::Mod if m.kind == T::Ident => {
 						self.bump();
-						if !self.at(T::PathSep) || self.tok.ws() {
-							return Err(self.unexpected("expected `::`"));
-						}
-						self.bump();
+						self.expect_adjacent(T::PathSep, "::")?;
 						rec[1] = self.name()?;
 					}
 					Kw::Silo if m.kind == T::Ident => {
 						self.bump();
-						self.expect(T::PathSep, "expected `::`")?;
+						self.expect(T::PathSep, "::")?;
 						let mark = self.vals.len() as u32;
 						let org = self.name()?;
 						self.vals.push(org);
-						self.expect(T::PathSep, "expected `::`")?;
+						self.expect(T::PathSep, "::")?;
 						let pkg = self.name()?;
 						self.vals.push(pkg);
-						self.expect(T::PathSep, "expected `::`")?;
+						self.expect(T::PathSep, "::")?;
 						if !self.at(T::Lt) || self.tok.ws() {
-							return Err(self.unexpected("expected `<`"));
+							return Err(self.unexpected("<"));
 						}
 						self.model_version()?;
 						rec[1] = self.list_from(mark).0;
 						rec[2] = 1;
 					}
-					_ => return Err(self.unexpected("expected a module name")),
+					_ => return Err(self.unexpected("a module name")),
 				}
 			}
 			_ => rec[1] = self.expr(true)?,
@@ -224,7 +227,7 @@ impl<'a, 's> Parser<'a, 's> {
 					self.bump();
 					Cl::InlineRefs
 				}
-				_ => return Err(self.unexpected("expected `EDGES` or `REFERENCES`")),
+				_ => return Err(self.unexpected("`EDGES` or `REFERENCES`")),
 			}
 		} else {
 			cl
@@ -236,10 +239,10 @@ impl<'a, 's> Parser<'a, 's> {
 	fn alter_durations(&mut self, fors: &[(Kw, Cl)]) -> R<()> {
 		self.bump();
 		loop {
-			self.expect_kw(Kw::For, "expected `FOR`")?;
+			self.expect_kw(Kw::For, "FOR")?;
 			let t = self.tok;
 			let Some(&(_, cl)) = fors.iter().find(|(k, _)| t.kind == T::Ident && t.kw == *k) else {
-				return Err(self.unexpected("expected a duration target"));
+				return Err(self.unexpected("a duration target"));
 			};
 			self.bump();
 			let first = self.ast.nodes.len();
@@ -336,7 +339,7 @@ impl<'a, 's> Parser<'a, 's> {
 					Kw::References if self.tok.kind == T::Ident => {
 						self.uint_clause(Cl::InlineRefs)?
 					}
-					_ => return Err(self.unexpected("expected `EDGES` or `REFERENCES`")),
+					_ => return Err(self.unexpected("`EDGES` or `REFERENCES`")),
 				}
 			}
 			Kw::Type if is(D::Table) => self.table_type_clause()?,
@@ -436,17 +439,17 @@ impl<'a, 's> Parser<'a, 's> {
 		let mark = self.vals.len() as u32;
 		if !self.eat(T::RParen) {
 			loop {
-				let p = self.expect(T::Param, "expected a parameter")?;
+				let p = self.expect(T::Param, "a parameter")?;
 				let p = self.leaf(Tag::Param, 0, p);
 				self.vals.push(p);
-				self.expect(T::Colon, "expected `:`")?;
+				self.expect(T::Colon, ":")?;
 				let k = self.kind()?;
 				self.vals.push(k);
 				if !self.eat(T::Comma) {
 					break;
 				}
 			}
-			self.expect(T::RParen, "expected `)`")?;
+			self.expect(T::RParen, ")")?;
 		}
 		let args = self.list_from(mark).0;
 		let returns = if self.eat(T::Arrow) {
@@ -469,7 +472,7 @@ impl<'a, 's> Parser<'a, 's> {
 			let fallback = if self.eat_kw(Kw::Then) {
 				self.expr(true)?
 			} else if self.eat_kw(Kw::Drop) {
-				self.expect_kw(Kw::Then, "expected `THEN`")?;
+				self.expect_kw(Kw::Then, "THEN")?;
 				NONE - 1
 			} else {
 				NONE
@@ -500,11 +503,11 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 		let methods = self.list_from(mark).0;
 		if self.eat_kw(Kw::Drop) {
-			self.expect_kw(Kw::Then, "expected `THEN`")?;
+			self.expect_kw(Kw::Then, "THEN")?;
 			return self.push_clause(Cl::ApiDropAction, methods, 0, t.start, first);
 		}
 		let cfg = self.api_config()?;
-		self.expect_kw(Kw::Then, "expected `THEN`")?;
+		self.expect_kw(Kw::Then, "THEN")?;
 		let action = self.expr(true)?;
 		let idx = self.record(&[methods, cfg, action]);
 		self.push_clause(Cl::ApiMethods, idx, 0, t.start, first)

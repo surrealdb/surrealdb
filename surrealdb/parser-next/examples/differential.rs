@@ -116,6 +116,14 @@ fn mask_keys_in_sql(sql: &str) -> String {
 	out
 }
 
+/// A lowering rejection's message, when it is static.
+fn reject_msg(r: &surrealdb_parser_next_lower::Reject) -> &'static str {
+	match r.msg {
+		std::borrow::Cow::Borrowed(m) => m,
+		std::borrow::Cow::Owned(_) => "lowering check failed",
+	}
+}
+
 fn old_parse(text: &str) -> Option<TopLevelExpr> {
 	let ast = surrealdb_syn::parse(text).ok()?;
 	let mut it = ast.expressions.into_iter();
@@ -456,7 +464,7 @@ fn main() {
 			let new = if n.tag == Tag::Error {
 				Err(diags.next().expect("one diagnostic per failed statement").msg)
 			} else {
-				Lower::new(&ast, &src).top(s).map_err(|r| r.0)
+				Lower::new(&ast, &src).top(s).map_err(|r| reject_msg(&r))
 			};
 			let outcome = judge(new, old_parse(text));
 			match &outcome {
@@ -532,7 +540,10 @@ fn compare_script(text: &str) -> Outcome {
 	let new: Result<Vec<TopLevelExpr>, &'static str> = if let Some(d) = diags.first() {
 		Err(d.msg)
 	} else {
-		ast.stmts.iter().map(|&s| Lower::new(&ast, text).top(s).map_err(|r| r.0)).collect()
+		ast.stmts
+			.iter()
+			.map(|&s| Lower::new(&ast, text).top(s).map_err(|r| reject_msg(&r)))
+			.collect()
 	};
 	let old = surrealdb_syn::parse(text).ok().map(|a| a.expressions);
 	match (new, old) {

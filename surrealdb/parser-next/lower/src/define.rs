@@ -70,12 +70,12 @@ impl Lower<'_> {
 	fn string(&self, id: NodeId) -> R<String> {
 		match self.expr(id)? {
 			Expr::Literal(Literal::String(s)) => Ok(s.into_string()),
-			_ => Err(Reject("not a string")),
+			_ => Err(Reject::new("not a string")),
 		}
 	}
 
 	fn uint<T: TryFrom<u64>>(&self, id: NodeId) -> R<T> {
-		T::try_from(Ast::uint(self.n(id))).map_err(|_| Reject("integer out of range"))
+		T::try_from(Ast::uint(self.n(id))).map_err(|_| Reject::new("integer out of range"))
 	}
 
 	fn float(&self, id: NodeId) -> f64 {
@@ -93,13 +93,13 @@ impl Lower<'_> {
 			Expr::Literal(Literal::Integer(i)) => surrealdb_types::Number::Int(i),
 			Expr::Literal(Literal::Float(f)) => surrealdb_types::Number::Float(f),
 			Expr::Literal(Literal::Decimal(d)) => surrealdb_types::Number::Decimal(d),
-			_ => return Err(Reject("not a number")),
+			_ => return Err(Reject::new("not a number")),
 		})
 	}
 
 	fn duration(&self, id: NodeId) -> R<Duration> {
 		let (s, ns) =
-			decode_duration(self.text(id).as_bytes()).ok_or(Reject("duration overflow"))?;
+			decode_duration(self.text(id).as_bytes()).ok_or(Reject::new("duration overflow"))?;
 		Ok(Duration::new(s, ns))
 	}
 
@@ -199,7 +199,7 @@ impl Lower<'_> {
 					.collect::<R<_>>()?;
 				let block = match self.expr(rec[define::X3])? {
 					Expr::Block(b) => *b,
-					_ => return Err(Reject("not a block")),
+					_ => return Err(Reject::new("not a block")),
 				};
 				let mut s = DefineFunctionStatement {
 					name: Strand::new(self.path(rec[define::NAME])),
@@ -239,20 +239,20 @@ impl Lower<'_> {
 						Cl::Comment => s.comment = self.expr(c.a)?,
 						Cl::Password => {
 							if matches!(s.pass_type, PassType::Hash(_)) {
-								return Err(Reject("both a passhash and a password"));
+								return Err(Reject::new("both a passhash and a password"));
 							}
 							s.pass_type = PassType::Password(self.string(c.a)?);
 						}
 						Cl::Passhash => {
 							if matches!(s.pass_type, PassType::Password(_)) {
-								return Err(Reject("both a passhash and a password"));
+								return Err(Reject::new("both a passhash and a password"));
 							}
 							s.pass_type = PassType::Hash(self.string(c.a)?);
 						}
 						Cl::Passscram => {
 							let v = self.string(c.a)?;
 							if !super::lit::scram_verifier(&v) {
-								return Err(Reject("invalid SCRAM verifier"));
+								return Err(Reject::new("invalid SCRAM verifier"));
 							}
 							s.scram = Some(v);
 						}
@@ -264,7 +264,7 @@ impl Lower<'_> {
 									role.to_lowercase().as_str(),
 									"viewer" | "editor" | "owner"
 								) {
-									return Err(Reject("not an existent role"));
+									return Err(Reject::new("not an existent role"));
 								}
 								roles.push(role);
 							}
@@ -419,14 +419,14 @@ impl Lower<'_> {
 								retry,
 								..
 							} => *retry = self.uint(c.a)?,
-							_ => return Err(Reject("RETRY must be set after ASYNC")),
+							_ => return Err(after_async(c, "RETRY")),
 						},
 						_ => match &mut s.event_kind {
 							EventKind::Async {
 								max_depth,
 								..
 							} => *max_depth = self.uint(c.a)?,
-							_ => return Err(Reject("MAXDEPTH must be set after ASYNC")),
+							_ => return Err(after_async(c, "MAXDEPTH")),
 						},
 					}
 				}
@@ -445,7 +445,11 @@ impl Lower<'_> {
 							let k = self.kind(c.a)?;
 							if c.b == 1 {
 								if !kind_contains_object(&k) {
-									return Err(Reject("FLEXIBLE needs a type containing object"));
+									let (a, b) = self.last_tok(c.start, c.end);
+									return Err(Reject::new(
+										"FLEXIBLE can only be used with types containing object",
+									)
+									.at(a, b));
 								}
 								s.flexible = true;
 							}
@@ -483,7 +487,9 @@ impl Lower<'_> {
 				}
 				DefineStatement::Field(Box::new(s))
 			}
-			x if x == K::Index as u8 => DefineStatement::Index(self.index(kind, rec, &clauses)?),
+			x if x == K::Index as u8 => {
+				DefineStatement::Index(self.index(kind, rec, &clauses, n.end)?)
+			}
 			x if x == K::Analyzer as u8 => {
 				let mut s = DefineAnalyzerStatement {
 					name: name()?,
@@ -560,7 +566,7 @@ impl Lower<'_> {
 						Expr::Literal(Literal::File(f)) => {
 							ModuleExecutable::Surrealism(SurrealismExecutable(f))
 						}
-						_ => return Err(Reject("not a file")),
+						_ => return Err(Reject::new("not a file")),
 					}
 				} else {
 					let l = self.list(exe);
@@ -605,7 +611,7 @@ impl Lower<'_> {
 		} else {
 			self.fields(rec[s::FIELDS])?
 		};
-		let group = self.groups(&expr, rec)?;
+		let (_, group) = self.split_group(&expr, rec, n.start, true)?;
 		Ok(View {
 			what: self
 				.list(rec[s::WHAT])
@@ -711,7 +717,14 @@ impl Lower<'_> {
 		})
 	}
 
-	fn index(&self, kind: DefineKind, rec: &[u32], clauses: &[&Node]) -> R<DefineIndexStatement> {
+	/// `end` is where the statement ends.
+	fn index(
+		&self,
+		kind: DefineKind,
+		rec: &[u32],
+		clauses: &[&Node],
+		end: u32,
+	) -> R<DefineIndexStatement> {
 		let mut s = DefineIndexStatement {
 			name: self.expr(rec[define::NAME])?,
 			what: self.expr(rec[define::ON])?,
@@ -721,12 +734,14 @@ impl Lower<'_> {
 			comment: Expr::Literal(Literal::None),
 			concurrently: false,
 		};
-		let mut fields_seen = false;
+		// The last token of the column list, where `syn` reports a column
+		// count that does not fit the index.
+		let mut fields = None;
 		for c in clauses {
 			match unsafe_cl(c.op) {
 				Cl::Fields => {
 					s.cols = self.exprs(c.a)?;
-					fields_seen = true;
+					fields = Some(self.last_tok(c.start, c.end));
 				}
 				Cl::Unique => s.index = Index::Uniq,
 				Cl::Count => s.index = Index::Count(self.opt(c.a)?.map(Cond)),
@@ -761,22 +776,30 @@ impl Lower<'_> {
 				_ => s.comment = self.expr(c.a)?,
 			}
 		}
-		match &s.index {
-			Index::Count(_) => {
-				if fields_seen && !s.cols.is_empty() {
-					return Err(Reject("cannot create a count index with fields"));
-				}
+		// The token after the statement.
+		let next = || {
+			let t = self.tok_at(end);
+			(t.start, t.end)
+		};
+		match (&s.index, fields) {
+			(Index::Count(_), Some((a, b))) if !s.cols.is_empty() => {
+				return Err(Reject::new("Cannot create a count index with fields").at(a, b));
 			}
-			Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_) => {
-				if s.cols.len() != 1 {
-					return Err(Reject("expected one column"));
-				}
+			(Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_), _) if s.cols.len() != 1 => {
+				let (msg, (a, b)) = match fields {
+					Some(span) => (format!("Expected one column, found {}", s.cols.len()), span),
+					None => ("Expected one column, found none".to_owned(), next()),
+				};
+				return Err(Reject::new(msg).at(a, b));
 			}
-			Index::Uniq | Index::Idx => {
-				if !fields_seen && s.cols.is_empty() {
-					return Err(Reject("expected at least one column"));
-				}
+			(Index::Uniq | Index::Idx, None) if s.cols.is_empty() => {
+				let (a, b) = next();
+				return Err(Reject::new(
+					"Expected at least one column - Use FIELDS to define columns",
+				)
+				.at(a, b));
 			}
+			_ => {}
 		}
 		Ok(s)
 	}
@@ -827,7 +850,7 @@ impl Lower<'_> {
 			self.uint(r[vector::M])?
 		};
 		if m > 127 {
-			return Err(Reject("`M` cannot be larger then 127"));
+			return Err(Reject::new("`M` cannot be larger then 127"));
 		}
 		Ok(HnswParams {
 			dimension: self.uint(r[vector::DIMENSION])?,
@@ -866,18 +889,18 @@ impl Lower<'_> {
 				| Distance::InnerProduct
 				| Distance::CosineNormalized
 		) {
-			return Err(Reject("invalid DISTANCE for DISKANN"));
+			return Err(Reject::new("invalid DISTANCE for DISKANN"));
 		}
 		if !matches!(
 			vector_type,
 			VectorType::F32 | VectorType::F16 | VectorType::I8 | VectorType::U8
 		) {
-			return Err(Reject("invalid TYPE for DISKANN"));
+			return Err(Reject::new("invalid TYPE for DISKANN"));
 		}
 		if matches!(distance, Distance::CosineNormalized)
 			&& matches!(vector_type, VectorType::I8 | VectorType::U8)
 		{
-			return Err(Reject("invalid TYPE for DISKANN COSINE_NORMALIZED"));
+			return Err(Reject::new("invalid TYPE for DISKANN COSINE_NORMALIZED"));
 		}
 		let degree: u16 = if r[vector::M] == NONE {
 			64
@@ -890,7 +913,7 @@ impl Lower<'_> {
 			self.uint(r[vector::M0])?
 		};
 		if degree == 0 || l_build == 0 {
-			return Err(Reject("DISKANN parameter must be greater than 0"));
+			return Err(Reject::new("DISKANN parameter must be greater than 0"));
 		}
 		Ok(DiskAnnParams {
 			dimension: self.uint(r[vector::DIMENSION])?,
@@ -960,7 +983,7 @@ impl Lower<'_> {
 				if let JwtAccessVerify::Key(ref ver) = res.verify
 					&& alg != ver.alg
 				{
-					return Err(Reject("incompatible issuer algorithm"));
+					return Err(Reject::new("incompatible issuer algorithm"));
 				}
 				iss.alg = alg;
 			}
@@ -990,7 +1013,7 @@ impl Lower<'_> {
 				Cl::AccessJwt => s.access_type = AccessType::Jwt(self.jwt(c.a)?),
 				Cl::AccessRecord => {
 					if !matches!(s.base, Base::Db) {
-						return Err(Reject("record access is only valid on a database"));
+						return Err(Reject::new("record access is only valid on a database"));
 					}
 					let mut ac = RecordAccess::default();
 					for &rc in self.list(c.a) {
@@ -1023,7 +1046,7 @@ impl Lower<'_> {
 					};
 					if c.a == 1 {
 						if !matches!(s.base, Base::Db) {
-							return Err(Reject(
+							return Err(Reject::new(
 								"`RECORD` bearer can only be defined on a database",
 							));
 						}
@@ -1044,10 +1067,23 @@ impl Lower<'_> {
 			}
 		}
 		if !matches!(s.base, Base::Db) && matches!(s.access_type, AccessType::Record(_)) {
-			return Err(Reject("an access defined at this level must specify a TYPE"));
+			// The base keyword, after `ON`.
+			let on = self.tok_at(self.n(rec[define::NAME]).end);
+			let b = self.tok_at(on.end);
+			return Err(Reject::new("Missing access type")
+				.at(b.start, b.end)
+				.with_label("An access defined at this level must specify a TYPE"));
 		}
 		Ok(s)
 	}
+}
+
+/// `syn`'s error for a `RETRY` or `MAXDEPTH` clause `c` before `ASYNC`.
+fn after_async(c: &Node, kw: &'static str) -> Reject {
+	let end = c.start + kw.len() as u32;
+	Reject::new(format!("Unexpected token `{kw}`"))
+		.at(c.start, end)
+		.with_label(format!("{kw} must be set after ASYNC"))
 }
 
 fn language(text: &str) -> Language {
@@ -1239,7 +1275,7 @@ impl Lower<'_> {
 			Ok(path)
 		} else {
 			if path.starts_with("mod") && !self.opts.surrealism {
-				return Err(Reject(SURREALISM_DISABLED));
+				return Err(Reject::new(SURREALISM_DISABLED));
 			}
 			Ok(path.split_whitespace().collect())
 		}
@@ -1248,10 +1284,10 @@ impl Lower<'_> {
 	/// Rejects a `DEFINE`, `ALTER` or `REMOVE` of a kind whose feature is off.
 	fn gate_kind(&self, kind: u8) -> R<()> {
 		if kind == K::Bucket as u8 && !self.opts.files {
-			return Err(Reject(FILES_DISABLED));
+			return Err(Reject::new(FILES_DISABLED));
 		}
 		if kind == K::Module as u8 && !self.opts.surrealism {
-			return Err(Reject(SURREALISM_DISABLED));
+			return Err(Reject::new(SURREALISM_DISABLED));
 		}
 		Ok(())
 	}
@@ -1384,14 +1420,14 @@ impl Lower<'_> {
 								retry,
 								..
 							}) => *retry = self.uint(c.a)?,
-							_ => return Err(Reject("RETRY must be set after ASYNC")),
+							_ => return Err(after_async(c, "RETRY")),
 						},
 						_ => match &mut s.kind {
 							AlterKind::Set(EventKind::Async {
 								max_depth,
 								..
 							}) => *max_depth = self.uint(c.a)?,
-							_ => return Err(Reject("MAXDEPTH must be set after ASYNC")),
+							_ => return Err(after_async(c, "MAXDEPTH")),
 						},
 					}
 				}
@@ -1412,7 +1448,7 @@ impl Lower<'_> {
 					}
 				}
 				if !s.prepare_remove && matches!(s.comment, AlterKind::None) {
-					return Err(Reject("expected `PREPARE`, `DROP` or `COMMENT`"));
+					return Err(self.unexpected_after(n.end, "`PREPARE`, `DROP` or `COMMENT`"));
 				}
 				AlterStatement::Index(s)
 			}
@@ -1438,7 +1474,11 @@ impl Lower<'_> {
 							let k = self.kind(c.a)?;
 							if c.b == 1 {
 								if !kind_contains_object(&k) {
-									return Err(Reject("FLEXIBLE needs a type containing object"));
+									let (a, b) = self.last_tok(c.start, c.end);
+									return Err(Reject::new(
+										"FLEXIBLE can only be used with types containing object",
+									)
+									.at(a, b));
 								}
 								s.flexible = AlterKind::Set(());
 							}
@@ -1564,7 +1604,7 @@ impl Lower<'_> {
 							}
 							s.block = AlterKind::Set(match self.expr(r[2])? {
 								Expr::Block(b) => *b,
-								_ => return Err(Reject("not a block")),
+								_ => return Err(Reject::new("not a block")),
 							});
 						}
 						(Cl::Comment, _) => s.comment = self.str_alter(c)?,
@@ -1590,7 +1630,7 @@ impl Lower<'_> {
 						(Cl::Passscram, _) => {
 							let v = self.string(c.a)?;
 							if !super::lit::scram_verifier(&v) {
-								return Err(Reject("invalid SCRAM verifier"));
+								return Err(Reject::new("invalid SCRAM verifier"));
 							}
 							s.scram = Some(v);
 						}

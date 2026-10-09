@@ -200,6 +200,10 @@ fn probe(parser: &str, family: &str, depth: usize, stack: usize) -> ! {
 					query_depth: u16::MAX,
 					object_depth: u16::MAX,
 					strict_record_ids: false,
+					builtin: None,
+					regex: None,
+					no_files: false,
+					no_surrealism: false,
 				};
 				parse_script(&src, limits, &mut ast, &mut scratch);
 				scratch.diags.is_empty()
@@ -541,6 +545,10 @@ fn main() {
 							query_depth: u16::MAX,
 							object_depth: u16::MAX,
 							strict_record_ids: false,
+							builtin: None,
+							regex: None,
+							no_files: false,
+							no_surrealism: false,
 						};
 						parse_script(&src, limits, &mut ast, &mut scratch);
 						black_box(&ast);

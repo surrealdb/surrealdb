@@ -88,7 +88,7 @@ impl<'a, 's> Parser<'a, 's> {
 				T::PlusEq => Assign::Add,
 				T::MinusEq => Assign::Sub,
 				T::PlusQEq => Assign::Ext,
-				_ => return Err(self.unexpected("expected an assignment operator")),
+				_ => return Err(self.unexpected("an assign operator")),
 			};
 			self.bump();
 			let v = self.expr(true)?;
@@ -148,14 +148,14 @@ impl<'a, 's> Parser<'a, 's> {
 	/// `LET $name [: kind] = expr`, after `LET`.
 	pub(crate) fn let_stmt(&mut self, start: u32) -> R<NodeId> {
 		let first = self.ast.nodes.len();
-		let name = self.expect(T::Param, "expected a parameter")?;
+		let name = self.expect(T::Param, "a parameter")?;
 		let name = self.leaf(Tag::Param, 0, name);
 		let kind = if self.eat(T::Colon) {
 			self.kind()?
 		} else {
 			NONE
 		};
-		self.expect(T::Eq, "expected `=`")?;
+		self.expect(T::Eq, "=")?;
 		let what = self.expr(self.table_as_field)?;
 		let idx = self.ast.extra.len() as u32;
 		self.ast.extra.extend_from_slice(&[name, kind, what]);
@@ -175,7 +175,7 @@ impl<'a, 's> Parser<'a, 's> {
 			flags |= 1;
 		}
 		if self.eat_kw(Kw::Or) {
-			self.expect_kw(Kw::Update, "expected `UPDATE`")?;
+			self.expect_kw(Kw::Update, "UPDATE")?;
 			flags |= 4;
 		}
 		let a = self.relate_end()?;
@@ -185,17 +185,17 @@ impl<'a, 's> Parser<'a, 's> {
 				self.relate_in_arrow()?;
 				false
 			}
-			_ => return Err(self.unexpected("expected a relation arrow")),
+			_ => return Err(self.unexpected("a relation arrow")),
 		};
 		if out {
 			self.bump();
 		}
 		rec[r::THROUGH] = self.relate_through()?;
 		if out {
-			self.expect(T::Arrow, "expected `->`")?;
+			self.expect(T::Arrow, "->")?;
 		} else {
 			if !self.at(T::Lt) {
-				return Err(self.unexpected("expected `<-`"));
+				return Err(self.unexpected("<-"));
 			}
 			self.relate_in_arrow()?;
 		}
@@ -220,7 +220,7 @@ impl<'a, 's> Parser<'a, 's> {
 	fn relate_in_arrow(&mut self) -> R<()> {
 		self.bump();
 		if !self.at(T::Minus) || self.tok.ws() {
-			return Err(self.unexpected("expected `-`"));
+			return Err(self.unexpected("-"));
 		}
 		self.bump();
 		Ok(())
@@ -238,7 +238,7 @@ impl<'a, 's> Parser<'a, 's> {
 			T::LParen => {
 				self.bump();
 				let e = self.expr(true)?;
-				self.expect(T::RParen, "expected `)`")?;
+				self.expect(T::RParen, ")")?;
 				self.ast.nodes[e as usize].depth |= COVERED;
 				Ok(e)
 			}
@@ -263,11 +263,11 @@ impl<'a, 's> Parser<'a, 's> {
 	/// A record-id literal without a range key, and nothing after it.
 	pub(crate) fn record_id_only(&mut self) -> R<NodeId> {
 		if !self.tok.is_ident() {
-			return Err(self.unexpected("expected an identifier"));
+			return Err(self.unexpected("an identifier"));
 		}
 		if self.peek1().kind != T::Colon {
 			self.bump();
-			return Err(self.unexpected("expected `:`"));
+			return Err(self.unexpected(":"));
 		}
 		let id = self.record_id_atom()?;
 		let n = self.ast.nodes[id as usize];
@@ -288,7 +288,7 @@ impl<'a, 's> Parser<'a, 's> {
 			T::LParen => {
 				self.bump();
 				let e = self.expr(self.table_as_field)?;
-				self.expect(T::RParen, "expected `)`")?;
+				self.expect(T::RParen, ")")?;
 				self.ast.nodes[e as usize].depth |= COVERED;
 				Ok(e)
 			}
@@ -340,9 +340,9 @@ impl<'a, 's> Parser<'a, 's> {
 			rec[w::DATA] = self.expr(true)?;
 		}
 		if self.eat_kw(Kw::On) {
-			self.expect_kw(Kw::Duplicate, "expected `DUPLICATE`")?;
-			self.expect_kw(Kw::Key, "expected `KEY`")?;
-			self.expect_kw(Kw::Update, "expected `UPDATE`")?;
+			self.expect_kw(Kw::Duplicate, "DUPLICATE")?;
+			self.expect_kw(Kw::Key, "KEY")?;
+			self.expect_kw(Kw::Update, "UPDATE")?;
 			rec[i::UPDATE] = self.assignments()?;
 		}
 		self.output_clause(&mut rec)?;
@@ -375,7 +375,7 @@ impl<'a, 's> Parser<'a, 's> {
 		loop {
 			if !self.eat(T::Comma) {
 				if comma {
-					self.expect(T::RParen, "expected `)`")?;
+					self.expect(T::RParen, ")")?;
 				} else if !self.eat(T::RParen) {
 					return Ok(None);
 				}
@@ -389,20 +389,20 @@ impl<'a, 's> Parser<'a, 's> {
 			self.vals.push(i);
 		}
 		if comma {
-			self.expect_kw(Kw::Values, "expected `VALUES`")?;
+			self.expect_kw(Kw::Values, "VALUES")?;
 		} else if !self.eat_kw(Kw::Values) {
 			return Ok(None);
 		}
 		let idioms = self.list_from(mark).0;
 		let rows_mark = self.vals.len() as u32;
 		loop {
-			self.expect(T::LParen, "expected `(`")?;
+			self.expect(T::LParen, "(")?;
 			let row_mark = self.vals.len() as u32;
 			loop {
 				let e = self.expr(true)?;
 				self.vals.push(e);
 				if !self.eat(T::Comma) {
-					self.expect(T::RParen, "expected `)`")?;
+					self.expect(T::RParen, ")")?;
 					break;
 				}
 				if self.eat(T::RParen) {

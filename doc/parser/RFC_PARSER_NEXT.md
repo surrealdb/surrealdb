@@ -4,7 +4,8 @@ Status: accepted direction. The new parser replaces both `surrealdb-syn`
 (`surrealdb/syn`) and the v3 parser (`surrealdb-parser`, `surrealdb-ast`,
 `surrealdb-token`) once it reaches parity; until then `syn` is the
 differential oracle. Milestones M1 (full grammar) and M3 (side by side behind
-a switch) are met (§8); M2 (error-message parity) is next.
+a switch) are met (§8). M2's error-message differential is at parity on the
+corpus (§7.8); its fuzz target and recovery remain.
 
 ## 1. Summary
 
@@ -55,8 +56,8 @@ On the 20,981 corpus statements all three parsers accept, it measures:
   old AST).
 - **Allocations:** zero heap allocations per statement with a reused arena,
   against 15.3 for `syn`.
-- **Size:** builds to a 123 KB standalone `-Oz` wasm module (62 KB gzipped), streaming included,
-  against 1.9 MB for `syn` built the same way.
+- **Size:** builds to a 134 KB standalone `-Oz` wasm module (66 KB gzipped), streaming
+  and `syn`'s error wording included, against 1.9 MB for `syn` built the same way.
 - **Streaming:** parses a 1 GiB import from 64 KiB chunks at 213 MB/s in
   10.5 MB of resident memory (§6.9).
 
@@ -795,12 +796,15 @@ budgets.
 
 ### 6.8 Size and allocation budget
 
-**Code.** The complete parser builds to a 123 KB standalone module after
-`wasm-opt -Oz` (60 KB gzipped), inside the 120–200 KB estimated from the
+**Code.** The complete parser builds to a 134 KB standalone module after
+`wasm-opt -Oz` (66 KB gzipped), inside the 120–200 KB estimated from the
 prototype. That includes the lexer, the keyword table (269 keywords and
 aliases), the expression engine, every statement, kinds, `core`'s float
-parser and the streaming layer's entry point, but not the error renderer
-(M2) or the printer (M4).
+parser, the streaming layer's entry point and the diagnostics in `syn`'s
+words, but not the printer (M4). The diagnostics cost 10.7 KB: `syn`'s message
+templates and a port of its compound-literal errors, which stay in the parser
+because streaming needs to know where an error ends. Filling a template
+against the source is the renderer's job, in the lowering crate.
 
 **Budget against today's cost** (engine attribution):
 
@@ -1088,7 +1092,7 @@ bulk-memory operations for this target).
 |---|---|---|
 | `syn` | 1,911,574 | 665,725 |
 | v3 | 2,264,337 | 490,006 |
-| parser-next, full grammar with streaming | 123,064 | 61,528 |
+| parser-next, full grammar with streaming and `syn`'s error wording | 133,790 | 65,948 |
 | parser-next, prototype (51% of the corpus) | 59,281 | 33,723 |
 
 **Inside the engine.** `surrealdb-wasm` with `kv-mem`, built the same way
@@ -1193,12 +1197,11 @@ mirrored deliberately and covered by a differential mode:
 
 - `off` (default): `syn` alone.
 - `on`: every routed entry point parses with parser-next and lowers into the
-  same `surrealdb_sql` tree. A rejected input is parsed again by `syn` for
-  its error text, so error messages are unchanged until M2. If `syn` accepts
-  an input parser-next rejected, the divergence is returned as an error, not
-  hidden.
-- `check`: both parsers on every input; any difference in outcome or tree
-  (masking random access keys) is an error. Test lanes use this.
+  same `surrealdb_sql` tree. A rejected input reports parser-next's own
+  diagnostic, rendered by `syn`'s renderer (§7.8).
+- `check`: both parsers on every input; any difference in outcome, tree
+  (masking random access keys) or rendered error text is an error. Test
+  lanes use this.
 
 Routed: `parse` and `query_with_settings` (core's `parse_with_capabilities`,
 so every query a datastore executes), `expr`, `expr_legacy_strand`, `block`,
@@ -1216,7 +1219,7 @@ re-parsed through parser-next and checked).
 
 | Run (memory backend unless noted) | `off` | `on` | `check` |
 |---|---|---|---|
-| Language suite, 3 planner strategies | 6,681 passed | 6,685 passed, 0 divergences | 6,682 passed, 0 divergences |
+| Language suite, 3 planner strategies | 6,681 passed | 6,685 passed, 0 divergences | 6,691 passed, 0 divergences in outcome, tree or error text |
 | Upgrade suite, every seed to the current checkout (SurrealKV) | 533 passed | — | 533 passed, 0 divergences |
 
 The few runs the totals differ by are tests that hit the suite's timeout
@@ -1224,6 +1227,43 @@ under load (reported as warnings, not failures). The `syn` integration test
 `next_switch` parses the same queries, definitions, values and a split
 statement stream in all three modes and requires identical trees and error
 text.
+
+### 7.8 Error parity
+
+A rejection is a diagnostic: one or two spans, labels, and a message template
+in `syn`'s words. The renderer fills the template against the source and
+hands the result to `syn`'s renderer, so the text matches character for
+character. Checks `syn` makes while parsing but parser-next makes in the
+lowering carry `syn`'s spans; the order `syn` meets failures in is kept by
+reporting an earlier invalid escape or undecodable prefixed string, or an
+earlier `SPLIT`, `GROUP` or `FLEXIBLE` check, before a later syntax error.
+
+The entries harness compares the outcome, tree and rendered error text of
+the 17 entry points and settings `syn` exposes, on every statement of the
+language-test corpus, the parser crate's test corpora and `syn`'s sample
+script, and on every token-start suffix of each (252,317 inputs):
+
+```text
+cargo run --locked --release -p surrealdb-parser-next --example entries -- --errors
+```
+
+| Inputs × entry points | Count |
+|---|---|
+| Both accept, equal trees | 992,394 |
+| Both reject, identical text | 3,296,991 |
+| Both reject, text differs | 4 |
+| Tree or outcome differs | 0 |
+
+The four are two suffixes of one corpus statement under the two definition
+entry points that read a whole expression. After a negative record-id key whose digits overflow
+`u64`, `syn`'s lexer leaves the start of the next token at those digits, so
+the error at the following `;` spans the digits too; parser-next reports the
+`;` alone. The text is otherwise identical.
+
+`--fuzz 1` replaces each input with one mutant. On the 12 entry points it
+reaches before `syn` itself panics on an unterminated string in a JSON
+record-id key (pinned in `syn`'s `json_record_id_unterminated_string` test),
+2,484,796 of 2,486,003 rejections (99.95%) render identically.
 
 ## 8. Migration plan
 
@@ -1316,8 +1356,8 @@ example builtin names or GROUP BY).
   Anything kept longer (prepared statements, catalog) holds lowered types or
   printed text, never the tree.
 
-**Size creep.** The full grammar measures 123 KB standalone; the error
-renderer and printer are still to come.
+**Size creep.** The full grammar with `syn`'s error wording measures 134 KB
+standalone; the printer is still to come.
 - Mitigation: the size probe runs at each milestone, with a CI budget from M6.
 
 **Phase B scope.** Lowering from the flat tree touches the planner,
@@ -1334,6 +1374,6 @@ because matching `syn`'s acceptance at depth requires charging them where
 
 1. **Recovery output.** Should the RPC error payload carry every diagnostic
    from a recovered parse, or keep reporting only the first?
-2. **Fans.** EDGE_PLAN puts "the front end on fans" after launch. A 123 KB
+2. **Fans.** EDGE_PLAN puts "the front end on fans" after launch. A 134 KB
    parser makes a fan-side parse for `eval`, `INFO` and stored-text decode
    affordable. Is that worth pulling earlier?

@@ -17,7 +17,7 @@
 
 use crate::ast::{self, Assign, Ast, Binary, COVERED, DataKind, NONE, Node, NodeId, Prefix, Tag};
 use crate::kw::Kw;
-use crate::lex::{LexError, Lexer, NumKind, T, Tok};
+use crate::lex::{Compound, LexError, Lexer, NumKind, T, Tok};
 
 mod expr;
 mod idiom;
@@ -52,6 +52,26 @@ pub struct Limits {
 	/// Record-id keys follow identifier rules, so `a:1b` is not one key
 	/// (`syn`'s `flexible_record_id` off).
 	pub strict_record_ids: bool,
+	/// Whether the builtin function or constant path written at
+	/// `start..end` of the source exists. With it, an unknown path is an
+	/// error where `syn` reports it, before any arguments are parsed;
+	/// without it, paths are left to the consumer.
+	///
+	/// The hooks take the source and a span rather than a `&str`: a wasm
+	/// indirect call of the `(&str) -> bool` shape keeps alive every table
+	/// entry of that shape, `core`'s formatting impls among them.
+	pub builtin: Option<fn(&str, u32, u32) -> bool>,
+	/// Whether the regex literal at `start..end` of the source, with its
+	/// `/` delimiters, compiles. With it, a pattern that does not is an error
+	/// where `syn` reports it; without it, patterns are left to the
+	/// consumer.
+	pub regex: Option<fn(&str, u32, u32) -> bool>,
+	/// File literals and buckets are rejected where `syn` rejects them with
+	/// the files feature off.
+	pub no_files: bool,
+	/// Surrealism modules are rejected where `syn` rejects them with the
+	/// feature off.
+	pub no_surrealism: bool,
 }
 
 impl Default for Limits {
@@ -61,6 +81,10 @@ impl Default for Limits {
 			query_depth: 20,
 			object_depth: 100,
 			strict_record_ids: false,
+			builtin: None,
+			regex: None,
+			no_files: false,
+			no_surrealism: false,
 		}
 	}
 }
@@ -89,23 +113,86 @@ impl Limits {
 			query_depth: 400,
 			object_depth: 400,
 			strict_record_ids: false,
+			builtin: None,
+			regex: None,
+			no_files: false,
+			no_surrealism: false,
 		}
 	}
 }
 
-/// A diagnostic. Messages are static, so recording one formats nothing; a
-/// renderer at the API boundary adds the source snippet.
+/// A diagnostic. Every part of its text is static or read back from the
+/// source, so recording one formats nothing; a renderer at the API boundary
+/// formats the message and adds the source snippets.
+///
+/// Message and label templates may name parts of the source, which the
+/// renderer substitutes: `{found}` is the token at the primary span as
+/// `syn` names it (`an identifier`, `FROM`, `;`), `{text}` the source text of
+/// the primary span and `{char}` its first character.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Diag {
+	/// The primary span: the token or construct the error is about.
 	pub start: u32,
 	pub end: u32,
+	pub kind: DiagKind,
+	/// For [`DiagKind::Unexpected`], what was expected; otherwise the message.
 	pub msg: &'static str,
+	/// A label under the primary span, or empty.
+	pub label: &'static str,
+	/// A second span with its label, such as the delimiter a missing closer
+	/// would close.
+	pub extra: Option<Extra>,
+}
+
+/// A secondary span of a [`Diag`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Extra {
+	pub start: u32,
+	pub end: u32,
+	pub label: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiagKind {
+	/// `Unexpected token {found}, expected {msg}`, or at the end of input
+	/// `Unexpected end of file, expected {msg}`.
+	Unexpected,
+	/// The message template alone.
+	Message,
+}
+
+impl Diag {
+	pub fn message(start: u32, end: u32, msg: &'static str) -> Self {
+		Diag {
+			start,
+			end,
+			kind: DiagKind::Message,
+			msg,
+			label: "",
+			extra: None,
+		}
+	}
+
+	pub fn with_label(mut self, label: &'static str) -> Self {
+		self.label = label;
+		self
+	}
+
+	pub fn with_extra(mut self, start: u32, end: u32, label: &'static str) -> Self {
+		self.extra = Some(Extra {
+			start,
+			end,
+			label,
+		});
+		self
+	}
 }
 
 #[derive(Clone, Copy)]
 struct Checkpoint {
 	lex_pos: u32,
 	tok: Tok,
+	prev_start: u32,
 	prev_end: u32,
 	nodes: usize,
 	extra: usize,
@@ -137,6 +224,8 @@ pub struct Parser<'a, 's> {
 	text: &'a str,
 	lex: Lexer<'a>,
 	tok: Tok,
+	/// The span of the last consumed token.
+	prev_start: u32,
 	prev_end: u32,
 	pub ast: &'s mut Ast,
 	frames: &'s mut Vec<Frame>,
@@ -152,6 +241,9 @@ pub struct Parser<'a, 's> {
 	/// clauses, destructuring).
 	native: u16,
 	table_as_field: bool,
+	/// Set for the next path call only: its name need not be a builtin, as
+	/// for a middleware name.
+	any_path: bool,
 	/// Set when the parser has looked at a token within [`END_SLACK`] bytes
 	/// of the end of input, so more input could have changed what it saw.
 	/// Only a failed statement consults it: a parsed one is confirmed by its
@@ -265,14 +357,26 @@ pub fn parse_entry(
 	let mut p = Parser::new(src, limits, ast, scratch);
 	let res = match entry {
 		Entry::Expr => p.expr(true),
-		Entry::Block => p.block(),
+		Entry::Block => {
+			if p.at(T::LBrace) {
+				p.block()
+			} else {
+				let t = p.tok;
+				let end = p.syn_token_end(t);
+				Err(p.diag(Diag::message(t.start, end, "Unexpected token `{found}` expected `{`")))
+			}
+		}
 		Entry::Idiom => p.plain_idiom(),
 		Entry::Kind => p.kind(),
 		Entry::Fields => p.fields_entry(),
 	};
 	let res = res.and_then(|id| {
-		if require_all && !p.at(T::Eof) {
-			Err(p.unexpected("expected no more tokens"))
+		if require_all && p.at(T::Invalid) {
+			// `syn` names an invalid token here rather than say why it is.
+			let t = p.tok;
+			Err(p.error(t.start, t.end, "Unexpected token `Invalid`, expected no more tokens"))
+		} else if require_all && !p.at(T::Eof) {
+			Err(p.unexpected("no more tokens"))
 		} else {
 			Ok(id)
 		}
@@ -316,6 +420,7 @@ impl<'a, 's> Parser<'a, 's> {
 			text,
 			lex,
 			tok,
+			prev_start: 0,
 			prev_end: 0,
 			ast,
 			frames: &mut scratch.frames,
@@ -328,6 +433,7 @@ impl<'a, 's> Parser<'a, 's> {
 			o: 0,
 			native: 0,
 			table_as_field: true,
+			any_path: false,
 			saw_end: core::cell::Cell::new(false),
 		};
 		p.note(p.tok);
@@ -348,6 +454,7 @@ impl<'a, 's> Parser<'a, 's> {
 	#[inline]
 	fn bump(&mut self) -> Tok {
 		let t = self.tok;
+		self.prev_start = t.start;
 		self.prev_end = t.end;
 		self.tok = self.lex.next_token();
 		self.note(self.tok);
@@ -427,38 +534,174 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 	}
 
+	/// Consumes the closing delimiter `closer` of the opener at `open`, or
+	/// reports it missing with the opener marked, as `syn`'s
+	/// `expect_closing_delimiter` does.
+	fn close(&mut self, closer: T, open: u32) -> R<Tok> {
+		if self.at(closer) {
+			return Ok(self.bump());
+		}
+		let msg = match closer {
+			T::RParen => "Unexpected token `{found}` expected delimiter `)`",
+			T::RBracket => "Unexpected token `{found}` expected delimiter `]`",
+			T::RBrace => "Unexpected token `{found}` expected delimiter `}`",
+			T::Gt => "Unexpected token `{found}` expected delimiter `>`",
+			T::Pipe => "Unexpected token `{found}` expected delimiter `|`",
+			_ => unreachable!("not a closing delimiter"),
+		};
+		let t = self.tok;
+		if t.end + END_SLACK > self.src.len() as u32 {
+			self.saw_end.set(true);
+		}
+		let end = self.syn_token_end(t);
+		Err(self.diag(Diag::message(t.start, end, msg).with_extra(
+			open,
+			open + 1,
+			"expected this delimiter to close",
+		)))
+	}
+
 	// ---------------------------------------------------------------- errors
 
 	fn error(&mut self, start: u32, end: u32, msg: &'static str) -> Stop {
-		self.diags.push(Diag {
-			start,
-			end,
-			msg,
-		});
+		self.diag(Diag::message(start, end, msg))
+	}
+
+	fn diag(&mut self, d: Diag) -> Stop {
+		self.diags.push(d);
 		Stop
 	}
 
-	fn unexpected(&mut self, msg: &'static str) -> Stop {
+	/// `Unexpected token …, expected {expected}` at the current token, with
+	/// `expected` in `syn`'s words. An invalid token reports why the lexer
+	/// rejected it instead.
+	fn unexpected(&mut self, expected: &'static str) -> Stop {
+		self.unexpected_at(self.tok, expected)
+	}
+
+	/// [`Self::unexpected`] at the token `t`, which `syn` names in place of
+	/// the current one where it reuses an earlier peek.
+	fn unexpected_at(&mut self, t: Tok, expected: &'static str) -> Stop {
+		if t.kind == T::Invalid {
+			return self.invalid_token(t);
+		}
+		let end = self.syn_token_end(t);
+		self.diag(Diag {
+			start: t.start,
+			end,
+			kind: DiagKind::Unexpected,
+			msg: expected,
+			label: "",
+			extra: None,
+		})
+	}
+
+	/// Where `syn`'s token at `t` ends, where its lexer splits differently:
+	/// `??` is two `?` tokens and a digits token runs on over `_`.
+	fn syn_token_end(&self, t: Tok) -> u32 {
+		match t.kind {
+			T::QQ => t.start + 1,
+			T::Digits => {
+				let mut e = t.end as usize;
+				while self.src.get(e).is_some_and(|&b| b.is_ascii_digit() || b == b'_') {
+					e += 1;
+				}
+				e as u32
+			}
+			_ => t.end,
+		}
+	}
+
+	/// `syn`'s error for a Surrealism construct with the feature off, at the
+	/// keyword `t` it follows; `what` names the construct.
+	fn surrealism_off(&mut self, t: Tok, label: &'static str) -> Stop {
+		self.diag(
+			Diag::message(t.start, t.end, "Surrealism modules are not enabled").with_label(label),
+		)
+	}
+
+	/// `syn`'s error for a files construct with the feature off, at `t`.
+	fn files_off(&mut self, t: Tok) -> Stop {
+		self.diag(Diag {
+			start: t.start,
+			end: t.end,
+			kind: DiagKind::Unexpected,
+			msg: "the experimental files feature to be enabled",
+			label: "",
+			extra: None,
+		})
+	}
+
+	/// Consumes `kind` directly after the previous token, as `syn`'s
+	/// `expected_whitespace!`: whitespace before it is its own error.
+	fn expect_adjacent(&mut self, kind: T, expected: &'static str) -> R<Tok> {
+		if self.tok.ws() {
+			let d = Diag::message(self.prev_start, self.prev_end, "Unexpected whitespace")
+				.with_label("No whitespace allowed after this token");
+			return Err(self.diag(d));
+		}
+		self.expect(kind, expected)
+	}
+
+	/// A statement followed by neither `;` nor the end of input. A token that
+	/// starts a statement suggests a missing `;`.
+	fn statement_end_error(&mut self) -> Stop {
 		let t = self.tok;
-		let msg = if t.kind == T::Invalid {
-			"invalid token"
-		} else {
-			msg
-		};
-		self.error(t.start, t.end, msg)
+		let starts = t.kind == T::Ident
+			&& matches!(
+				t.kw,
+				Kw::Access
+					| Kw::Alter | Kw::Begin
+					| Kw::Break | Kw::Cancel
+					| Kw::Commit | Kw::Continue
+					| Kw::Create | Kw::Define
+					| Kw::Delete | Kw::For
+					| Kw::If | Kw::Info
+					| Kw::Insert | Kw::Kill
+					| Kw::Live | Kw::Option
+					| Kw::Rebuild | Kw::Return
+					| Kw::Relate | Kw::Remove
+					| Kw::Select | Kw::Let
+					| Kw::Show | Kw::Sleep
+					| Kw::Throw | Kw::Update
+					| Kw::Upsert | Kw::Use
+			);
+		if starts {
+			self.unexpected("the query to end");
+			let d = self.diags.last_mut().expect("just recorded");
+			d.label = "maybe forgot a semicolon after the previous statement?";
+			return Stop;
+		}
+		self.unexpected("Eof")
+	}
+
+	/// The lexer's reason for rejecting the invalid token `t`.
+	fn invalid_token(&mut self, t: Tok) -> Stop {
+		let d = crate::lex::invalid_reason(self.src, t.start);
+		if d.end + END_SLACK > self.src.len() as u32 {
+			self.saw_end.set(true);
+		}
+		self.diag(d)
 	}
 
 	fn lex_error(&mut self, start: u32, e: LexError) -> Stop {
 		let msg = match e {
 			LexError::InvalidNumber => "invalid number",
 			LexError::InvalidDuration => "invalid duration",
-			LexError::InvalidRegex => "unterminated regex",
+			LexError::InvalidRegex => {
+				// `syn` points from the `/` to the end of input.
+				let end = self.src.len() as u32;
+				self.saw_end.set(true);
+				return self.error(start, end, "Failed to lex regex, unexpected eof");
+			}
 			LexError::IntOverflow => "number does not fit in a 64-bit signed integer",
 			LexError::UnterminatedString => "unterminated string",
 			LexError::UnterminatedComment => "unterminated comment",
 			LexError::UnterminatedIdent => "unterminated identifier",
 			LexError::UnexpectedChar => "unexpected character",
-			LexError::UnterminatedScript => "invalid JavaScript function, unexpected end of input",
+			LexError::UnterminatedScript => {
+				"Invalid JavaScript function, encountered unexpected eof"
+			}
 		};
 		let end = self.lex.pos.max(start + 1);
 		if end + END_SLACK > self.src.len() as u32 {
@@ -580,16 +823,25 @@ impl<'a, 's> Parser<'a, 's> {
 	/// Charges one expression level.
 	fn enter_e(&mut self) -> R<()> {
 		if self.e >= self.limits.expr_depth {
-			return Err(self.error(self.tok.start, self.tok.end, "expression nests too deeply"));
+			return Err(self.depth_error(
+				"Exceeded expression recursion depth limit",
+				"this expression nests or chains operators too deeply",
+			));
 		}
 		self.e += 1;
 		Ok(())
 	}
 
+	/// A depth budget exhausted, reported over the last consumed token as
+	/// `syn` reports it.
+	fn depth_error(&mut self, msg: &'static str, label: &'static str) -> Stop {
+		self.diag(Diag::message(self.prev_start, self.prev_end, msg).with_label(label))
+	}
+
 	/// Charges one query level.
 	fn enter_q(&mut self) -> R<()> {
 		if self.q >= self.limits.query_depth {
-			return Err(self.error(self.tok.start, self.tok.end, "statements nest too deeply"));
+			return Err(self.depth_error("Exceeded query recursion depth limit", ""));
 		}
 		self.q += 1;
 		Ok(())
@@ -598,7 +850,7 @@ impl<'a, 's> Parser<'a, 's> {
 	/// Charges one object level.
 	fn enter_o(&mut self) -> R<()> {
 		if self.o >= self.limits.object_depth {
-			return Err(self.error(self.tok.start, self.tok.end, "objects nest too deeply"));
+			return Err(self.depth_error("Exceeded object recursion depth limit", ""));
 		}
 		self.o += 1;
 		Ok(())
@@ -725,7 +977,7 @@ impl<'a, 's> Parser<'a, 's> {
 			if self.at(T::Semi) || self.at(T::Eof) {
 				Ok(id)
 			} else {
-				Err(self.unexpected("expected `;` or the end of the query"))
+				Err(self.statement_end_error())
 			}
 		});
 		match res {
@@ -831,10 +1083,13 @@ impl<'a, 's> Parser<'a, 's> {
 			&& n.op == Binary::Eq as u8
 			&& self.ast.nodes[n.a as usize].tag == Tag::Param
 		{
-			return Err(self.error(
-				n.start,
-				n.end,
-				"parameter declarations without `let` are deprecated",
+			return Err(self.diag(
+				Diag::message(
+					n.start,
+					n.end,
+					"Parameter declarations without `let` are deprecated.",
+				)
+				.with_label("Replace with `let {first} = ...` to keep the previous behavior."),
 			));
 		}
 		Ok(())
@@ -969,7 +1224,7 @@ impl<'a, 's> Parser<'a, 's> {
 		if self.tok.is_ident() {
 			Ok(self.bump())
 		} else {
-			Err(self.unexpected("expected an identifier"))
+			Err(self.unexpected("an identifier"))
 		}
 	}
 
@@ -979,6 +1234,7 @@ impl<'a, 's> Parser<'a, 's> {
 		Checkpoint {
 			lex_pos: self.lex.pos,
 			tok: self.tok,
+			prev_start: self.prev_start,
 			prev_end: self.prev_end,
 			nodes: self.ast.nodes.len(),
 			extra: self.ast.extra.len(),
@@ -992,6 +1248,7 @@ impl<'a, 's> Parser<'a, 's> {
 	fn restore(&mut self, cp: Checkpoint) {
 		self.lex.pos = cp.lex_pos;
 		self.tok = cp.tok;
+		self.prev_start = cp.prev_start;
 		self.prev_end = cp.prev_end;
 		self.ast.nodes.truncate(cp.nodes);
 		self.ast.extra.truncate(cp.extra);
@@ -1032,7 +1289,7 @@ impl<'a, 's> Parser<'a, 's> {
 			_ => 0,
 		};
 		if b == 0 {
-			return Err(self.unexpected("expected `NAMESPACE`, `DATABASE` or `ROOT`"));
+			return Err(self.unexpected("'NAMESPACE', 'DATABASE' or 'ROOT'"));
 		}
 		self.bump();
 		Ok(b)
@@ -1117,7 +1374,7 @@ mod test {
 			expr_depth: u16::MAX,
 			query_depth: u16::MAX,
 			object_depth: u16::MAX,
-			strict_record_ids: false,
+			..Limits::default()
 		};
 		for open in ["(", "[", "-(", "{a:", "math::abs(", "!", "{1;", "a[", "<array<"] {
 			// `<array<array<…` nests a kind; the rest nest expressions.
@@ -1128,7 +1385,7 @@ mod test {
 			let (ast, diags) = run(&nest(100_000));
 			assert_eq!(ast.stmts.len(), 1, "{open}");
 			assert_eq!(diags.len(), 1, "{open}");
-			assert!(diags[0].msg.ends_with("too deeply"), "{open}: {}", diags[0].msg);
+			assert!(diags[0].msg.contains("recursion depth limit"), "{open}: {}", diags[0].msg);
 			// With the budgets lifted, the nesting still costs no native
 			// stack: a small thread parses it (to the missing closers, if any).
 			let src = nest(30_000);
@@ -1147,17 +1404,17 @@ mod test {
 	fn bounds_tree_depth_of_flat_chains() {
 		let src = "1".to_owned() + &" + 1".repeat(10_000);
 		let (_, diags) = run(&src);
-		assert_eq!(diags[0].msg, "expression nests too deeply");
+		assert_eq!(diags[0].msg, "Exceeded expression recursion depth limit");
 		let src = "a".to_owned() + &".a".repeat(500);
 		let (_, diags) = run(&src);
-		assert_eq!(diags[0].msg, "expression nests too deeply");
+		assert_eq!(diags[0].msg, "Exceeded expression recursion depth limit");
 	}
 
 	#[test]
 	fn bounds_statement_nesting() {
 		let src = "(SELECT * FROM ".repeat(50) + "1" + &")".repeat(50);
 		let (_, diags) = run(&src);
-		assert_eq!(diags[0].msg, "statements nest too deeply");
+		assert_eq!(diags[0].msg, "Exceeded query recursion depth limit");
 	}
 
 	#[test]

@@ -12,12 +12,12 @@ impl<'a, 's> Parser<'a, 's> {
 			T::Plus => {
 				self.bump();
 				if self.tok.kind != T::Digits || self.tok.ws() {
-					return Err(self.unexpected("expected an unsigned integer"));
+					return Err(self.unexpected("an unsigned integer"));
 				}
 				true
 			}
 			T::Minus => return Err(self.unexpected("only positive integers are allowed here")),
-			_ => return Err(self.unexpected("expected an unsigned integer")),
+			_ => return Err(self.unexpected("an unsigned integer")),
 		};
 		let n = self.number_with(t.start, signed, true)?;
 		self.only_int(n)
@@ -31,13 +31,13 @@ impl<'a, 's> Parser<'a, 's> {
 			T::Plus | T::Minus => {
 				self.bump();
 				if self.tok.kind != T::Digits || self.tok.ws() {
-					return Err(self.unexpected("expected an integer"));
+					return Err(self.unexpected("an integer"));
 				}
 				true
 			}
-			_ => return Err(self.unexpected("expected an integer")),
+			_ => return Err(self.unexpected("an signed integer")),
 		};
-		let n = self.number(t.start, signed)?;
+		let n = self.number_in(t.start, signed, false, Compound::Integer, t.start)?;
 		self.only_int(n)
 	}
 
@@ -77,13 +77,24 @@ impl<'a, 's> Parser<'a, 's> {
 			T::Plus | T::Minus => {
 				self.bump();
 				if self.tok.kind != T::Digits || self.tok.ws() {
-					return Err(self.unexpected("expected a number"));
+					let mode = if decimal {
+						Compound::Number
+					} else {
+						Compound::Float
+					};
+					return Err(self.number_error(t.start, LexError::InvalidNumber, mode, t.start));
 				}
 				true
 			}
-			_ => return Err(self.unexpected("expected a number")),
+			_ if decimal => return Err(self.unexpected("a number")),
+			_ => return Err(self.unexpected("a floating point number")),
 		};
-		let n = self.number(t.start, signed)?;
+		let mode = if decimal {
+			Compound::Number
+		} else {
+			Compound::Float
+		};
+		let n = self.number_in(t.start, signed, false, mode, t.start)?;
 		let node = self.ast.nodes[n as usize];
 		let ok = match node.tag {
 			Tag::Int | Tag::Float => true,
@@ -99,9 +110,10 @@ impl<'a, 's> Parser<'a, 's> {
 	/// A duration literal.
 	pub(crate) fn duration_lit(&mut self) -> R<NodeId> {
 		if self.tok.kind != T::Digits {
-			return Err(self.unexpected("expected a duration"));
+			return Err(self.unexpected("a duration"));
 		}
-		let n = self.number(self.tok.start, false)?;
+		let at = self.tok.start;
+		let n = self.number_in(at, false, false, Compound::Duration, at)?;
 		let node = self.ast.nodes[n as usize];
 		if node.tag != Tag::Duration {
 			return Err(self.error(node.start, node.end, "expected a duration"));
@@ -113,7 +125,7 @@ impl<'a, 's> Parser<'a, 's> {
 	pub(crate) fn string_lit(&mut self) -> R<NodeId> {
 		let t = self.tok;
 		if t.kind != T::Str || t.aux() != 0 {
-			return Err(self.unexpected("expected a string"));
+			return Err(self.unexpected("a strand"));
 		}
 		self.bump();
 		Ok(self.leaf(Tag::Str, 0, t))

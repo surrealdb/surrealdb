@@ -11,7 +11,7 @@ impl<'a, 's> Parser<'a, 's> {
 		let t = self.tok;
 		let kind = match t.kw {
 			_ if t.kind != T::Ident => {
-				return Err(self.unexpected("expected a remove statement keyword"));
+				return Err(self.unexpected("a remove statement keyword"));
 			}
 			Kw::Namespace => DefineKind::Namespace,
 			Kw::Database => DefineKind::Database,
@@ -29,26 +29,31 @@ impl<'a, 's> Parser<'a, 's> {
 			Kw::Api => DefineKind::Api,
 			Kw::Bucket => DefineKind::Bucket,
 			Kw::Config => DefineKind::Config,
-			_ => return Err(self.unexpected("expected a remove statement keyword")),
+			_ => return Err(self.unexpected("a remove statement keyword")),
 		};
 		self.bump();
+		if self.limits.no_surrealism && kind == DefineKind::Module {
+			return Err(
+				self.surrealism_off(t, "Use of `REMOVE MODULE` requires Surrealism modules")
+			);
+		}
 		let mut rec = [NONE; remove::LEN];
 		let mut flags = 0;
 		if matches!(kind, DefineKind::Namespace | DefineKind::Database | DefineKind::Table)
 			&& self.eat_kw(Kw::And)
 		{
-			self.expect_kw(Kw::Expunge, "expected `EXPUNGE`")?;
+			self.expect_kw(Kw::Expunge, "EXPUNGE")?;
 			flags |= 2;
 		}
 		if self.eat_kw(Kw::If) {
-			self.expect_kw(Kw::Exists, "expected `EXISTS`")?;
+			self.expect_kw(Kw::Exists, "EXISTS")?;
 			flags |= 1;
 		}
 		match kind {
 			DefineKind::Function => {
 				rec[remove::NAME] = self.custom_function_name()?;
 				if self.eat(T::LParen) {
-					self.expect(T::RParen, "expected `)`")?;
+					self.expect(T::RParen, ")")?;
 				}
 			}
 			DefineKind::Module => {
@@ -56,38 +61,35 @@ impl<'a, 's> Parser<'a, 's> {
 				rec[remove::NAME] = match m.kw {
 					Kw::Mod if m.kind == T::Ident => {
 						self.bump();
-						if !self.at(T::PathSep) || self.tok.ws() {
-							return Err(self.unexpected("expected `::`"));
-						}
-						self.bump();
+						self.expect_adjacent(T::PathSep, "::")?;
 						self.name()?
 					}
 					Kw::Silo if m.kind == T::Ident => {
 						self.bump();
-						self.expect(T::PathSep, "expected `::`")?;
+						self.expect(T::PathSep, "::")?;
 						let mark = self.vals.len() as u32;
 						let org = self.name()?;
 						self.vals.push(org);
-						self.expect(T::PathSep, "expected `::`")?;
+						self.expect(T::PathSep, "::")?;
 						let pkg = self.name()?;
 						self.vals.push(pkg);
-						self.expect(T::PathSep, "expected `::`")?;
+						self.expect(T::PathSep, "::")?;
 						if !self.at(T::Lt) || self.tok.ws() {
-							return Err(self.unexpected("expected `<`"));
+							return Err(self.unexpected("<"));
 						}
 						self.model_version()?;
 						let list = self.list_from(mark).0;
 						rec[remove::ON] = 1;
 						list
 					}
-					_ => return Err(self.unexpected("expected a module name")),
+					_ => return Err(self.unexpected("a module name")),
 				};
 				if self.eat(T::LParen) {
-					self.expect(T::RParen, "expected `)`")?;
+					self.expect(T::RParen, ")")?;
 				}
 			}
 			DefineKind::Param => {
-				let p = self.expect(T::Param, "expected a parameter")?;
+				let p = self.expect(T::Param, "a parameter")?;
 				rec[remove::NAME] = self.leaf(Tag::Param, 0, p);
 			}
 			DefineKind::Config => {
@@ -96,7 +98,7 @@ impl<'a, 's> Parser<'a, 's> {
 					Kw::Graphql if c.kind == T::Ident => 0,
 					Kw::Api if c.kind == T::Ident => 1,
 					Kw::Default if c.kind == T::Ident => 2,
-					_ => return Err(self.unexpected("expected a type of config")),
+					_ => return Err(self.unexpected("a type of config")),
 				};
 				self.bump();
 			}
@@ -104,11 +106,11 @@ impl<'a, 's> Parser<'a, 's> {
 				rec[remove::NAME] = self.expr(true)?;
 				match kind {
 					DefineKind::Access | DefineKind::User => {
-						self.expect_kw(Kw::On, "expected `ON`")?;
+						self.expect_kw(Kw::On, "ON")?;
 						rec[remove::ON] = self.base()?;
 					}
 					DefineKind::Event | DefineKind::Field | DefineKind::Index => {
-						self.expect_kw(Kw::On, "expected `ON`")?;
+						self.expect_kw(Kw::On, "ON")?;
 						self.eat_kw(Kw::Table);
 						rec[remove::ON] = self.expr(true)?;
 					}
