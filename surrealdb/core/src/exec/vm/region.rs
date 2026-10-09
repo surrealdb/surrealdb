@@ -19,6 +19,16 @@
 //!   accumulator that appends keeps the serial order and a non-aggregate column keeps the value the
 //!   earliest batch evaluated.
 //!
+//! A batch whose body is not paged charges its breakers to the query's lease,
+//! as the statement does, where the query can spill. A breaker the lease no
+//! longer covers spills within the batch, and the batch hands the merge a
+//! [`Partial`] for it in place of its buffer. To absorb it, the merge first
+//! writes what the statement holds for that breaker as a run. It then appends
+//! the batch's runs and takes the batch's held records as the statement's
+//! buffer. Every record the statement holds therefore precedes the batch's,
+//! and the statement's runs stay in serial arrival order. A breaker whose
+//! state cannot be saved, or `GROUP ALL`, never spills in a batch.
+//!
 //! A failure is the failure of the earliest batch that fails, or of the
 //! source when no batch before it failed, raised once every earlier batch's
 //! results are merged, which is where the serial run raises it.
@@ -69,8 +79,12 @@ use std::sync::Arc;
 use futures::StreamExt;
 
 use super::host::{Ended, Out, flush, run_value_row};
-use super::interp::{Groups, Paging, State};
+use super::interp::{Groups, Paging, SortRow, State};
+use super::partial::Partial;
 use super::program::{AggregateSink, BlockInstr, Instr, NestedSpec, Pipeline, Program, Source};
+use super::sort::Sorted;
+use crate::exec::memory::Reservation;
+use crate::exec::memory::runs::BreakerKind;
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::val::Value;
@@ -374,12 +388,22 @@ pub(super) static HANDED_TO_WORKERS: std::sync::atomic::AtomicUsize =
 	std::sync::atomic::AtomicUsize::new(0);
 
 /// What one batch produced, on a state of its own.
-struct Partial {
+struct BatchResult {
 	output: Vec<Value>,
 	sorts: Vec<Vec<(Vec<Value>, super::interp::SortRow)>>,
 	/// What each bounded sort counted across the batch's rows.
 	arrivals: Vec<super::interp::Arrivals>,
 	groups: Vec<Option<Groups>>,
+	/// A partial per breaker the batch spilled; that breaker's buffer is
+	/// absent from `sorts` and `groups`.
+	spilled: Vec<Partial>,
+	/// What each of the batch's sorts and groups holds of its query's lease,
+	/// by breaker, the records its partials hold included; empty without a
+	/// query memory. The merge takes the reservations over for the statement's
+	/// own accounts, so a batch waiting to merge still counts against the
+	/// lease and the rows it hands over are counted once.
+	sort_accounts: Vec<Reservation>,
+	group_accounts: Vec<Reservation>,
 	/// For a paged body, how each row the batch ran ended, in row order.
 	ends: Vec<RowEnd>,
 	rows: usize,
@@ -400,15 +424,16 @@ struct RowEnd {
 
 /// A batch whose results the merge has not taken yet.
 enum Batch {
-	/// Run on the statement's task, or a failure the source raised.
-	Done(FlowResult<Partial>),
+	/// Run on the statement's task, or a failure the source raised. Boxed so
+	/// a pending batch stays the size of a worker handle; one box per batch.
+	Done(Box<FlowResult<BatchResult>>),
 	/// Running on a worker, which is aborted if the batch is dropped unmerged.
 	#[cfg(not(target_family = "wasm"))]
 	Running(Worker),
 }
 
 #[cfg(not(target_family = "wasm"))]
-struct Worker(Option<tokio::task::JoinHandle<FlowResult<Partial>>>);
+struct Worker(Option<tokio::task::JoinHandle<FlowResult<BatchResult>>>);
 
 #[cfg(not(target_family = "wasm"))]
 impl Drop for Worker {
@@ -430,14 +455,14 @@ impl Batch {
 	}
 
 	/// The batch's results, waiting for its worker.
-	async fn partial(self) -> FlowResult<Partial> {
+	async fn result(self) -> FlowResult<BatchResult> {
 		match self {
-			Batch::Done(partial) => partial,
+			Batch::Done(result) => *result,
 			#[cfg(not(target_family = "wasm"))]
 			Batch::Running(mut worker) => {
 				let handle = worker.0.take().expect("a worker is taken once");
 				match handle.await {
-					Ok(partial) => partial,
+					Ok(result) => result,
 					Err(e) => Err(ControlFlow::Err(anyhow::anyhow!("a region worker failed: {e}"))),
 				}
 			}
@@ -555,7 +580,7 @@ impl<'p> Rows<'p> {
 			if region.stopped {
 				return Ok(true);
 			}
-			region.merging.push_back(Batch::Done(Err(failure)));
+			region.merging.push_back(Batch::Done(Box::new(Err(failure))));
 			while !region.merging.is_empty() {
 				region.merge(true, state, yielder, flush_at, ctx).await?;
 			}
@@ -565,6 +590,61 @@ impl<'p> Rows<'p> {
 			return Err(ControlFlow::Err(anyhow::anyhow!("a region's failure was merged")));
 		}
 		Err(failure)
+	}
+}
+
+/// The sorts and aggregates a body fills, each once in first-use order, and
+/// its paging clause.
+pub(super) struct BodyBreakers {
+	pub(super) sorts: Vec<u16>,
+	pub(super) aggregates: Vec<u16>,
+	pub(super) paged: Option<u16>,
+}
+
+/// The breakers the body `code` fills.
+pub(super) fn body_breakers(code: &[Instr]) -> BodyBreakers {
+	let mut sorts = Vec::new();
+	let mut aggregates = Vec::new();
+	let mut paged = None;
+	for instr in code {
+		match instr {
+			Instr::Skip {
+				limit,
+				..
+			}
+			| Instr::Take {
+				limit,
+			} => paged = Some(*limit),
+			Instr::SortPush {
+				sort,
+				..
+			} if !sorts.contains(sort) => sorts.push(*sort),
+			Instr::GroupKey {
+				aggregate,
+				..
+			}
+			| Instr::GroupSelect {
+				aggregate,
+			}
+			| Instr::GroupFirstNeeded {
+				aggregate,
+				..
+			}
+			| Instr::GroupFirstSet {
+				aggregate,
+				..
+			}
+			| Instr::AccUpdate {
+				aggregate,
+				..
+			} if !aggregates.contains(aggregate) => aggregates.push(*aggregate),
+			_ => {}
+		}
+	}
+	BodyBreakers {
+		sorts,
+		aggregates,
+		paged,
 	}
 }
 
@@ -601,44 +681,11 @@ pub(super) struct Region<'p> {
 
 impl<'p> Region<'p> {
 	fn new(program: &'p Arc<Program>, at: usize, ctx: &ExecutionContext) -> Self {
-		let mut sorts = Vec::new();
-		let mut aggregates = Vec::new();
-		let mut paged = None;
-		for instr in &program.pipelines[at].code {
-			match instr {
-				Instr::Skip {
-					limit,
-					..
-				}
-				| Instr::Take {
-					limit,
-				} => paged = Some(*limit),
-				Instr::SortPush {
-					sort,
-					..
-				} if !sorts.contains(sort) => sorts.push(*sort),
-				Instr::GroupKey {
-					aggregate,
-					..
-				}
-				| Instr::GroupSelect {
-					aggregate,
-				}
-				| Instr::GroupFirstNeeded {
-					aggregate,
-					..
-				}
-				| Instr::GroupFirstSet {
-					aggregate,
-					..
-				}
-				| Instr::AccUpdate {
-					aggregate,
-					..
-				} if !aggregates.contains(aggregate) => aggregates.push(*aggregate),
-				_ => {}
-			}
-		}
+		let BodyBreakers {
+			sorts,
+			aggregates,
+			paged,
+		} = body_breakers(&program.pipelines[at].code);
 		Self {
 			program,
 			at,
@@ -774,12 +821,17 @@ impl<'p> Region<'p> {
 				.shared(self.program, ctx.function_registry())
 				.map_err(ControlFlow::Err)?,
 		};
+		// A paged body's batches hold their rows for the merge to count and are
+		// never bound.
+		let bound = self.paged.is_none();
 		let batch = match place {
 			#[cfg(not(target_family = "wasm"))]
 			Some(place) if rows.len() >= self.threshold => {
-				Batch::Running(spawn(self.program, self.at, rows, paged, under, ctx, place))
+				Batch::Running(spawn(self.program, self.at, rows, paged, bound, under, ctx, place))
 			}
-			_ => Batch::Done(run_batch(self.program, self.at, rows, paged, under, ctx).await),
+			_ => Batch::Done(Box::new(
+				run_batch(self.program, self.at, rows, paged, bound, under, ctx).await,
+			)),
 		};
 		self.merging.push_back(batch);
 		let waiting = self.merging.len() > read_ahead();
@@ -817,22 +869,22 @@ impl<'p> Region<'p> {
 		while self.merging.front().is_some_and(|batch| waiting || batch.is_done()) {
 			waiting = false;
 			let batch = self.merging.pop_front().expect("checked above");
-			let partial = batch.partial().await?;
+			let result = batch.result().await?;
 			// Merging a batch walks its rows, sorted rows and groups once: no
 			// more than a batch's worth, spent whole, the driver yielding at
 			// the next row it takes.
-			super::fuel::charge(super::fuel::units(partial.rows));
-			self.in_flight -= partial.rows;
-			if partial.rows > 0 {
-				let cost = partial.elapsed.as_nanos() as f64 / partial.rows as f64;
+			super::fuel::charge(super::fuel::units(result.rows));
+			self.in_flight -= result.rows;
+			if result.rows > 0 {
+				let cost = result.elapsed.as_nanos() as f64 / result.rows as f64;
 				self.cost = Some(match self.cost {
 					Some(seen) => 0.7 * seen + 0.3 * cost,
 					None => cost,
 				});
 			}
 			match self.paged {
-				Some(limit) => self.page(limit, partial, state)?,
-				None => self.absorb(partial, state)?,
+				Some(limit) => self.page(limit, result, state)?,
+				None => self.absorb(result, state, ctx).await?,
 			}
 			// Rows handed on to a reader that then asks for more: it takes
 			// more than it said it might.
@@ -852,9 +904,14 @@ impl<'p> Region<'p> {
 
 	/// Merge one batch of a paged body under paging clause `limit`: its rows
 	/// counted in order as the serial run counts them.
-	fn page(&mut self, limit: u16, partial: Partial, state: &mut State) -> FlowResult<()> {
-		let mut output = partial.output.into_iter();
-		for end in partial.ends {
+	fn page(&mut self, limit: u16, result: BatchResult, state: &mut State) -> FlowResult<()> {
+		if !result.spilled.is_empty() {
+			return Err(ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+				"a paged region's batch spilled".to_owned(),
+			))));
+		}
+		let mut output = result.output.into_iter();
+		for end in result.ends {
 			self.merged += 1;
 			if !end.reached {
 				if let Some(failure) = end.failure {
@@ -891,26 +948,123 @@ impl<'p> Region<'p> {
 	}
 
 	/// Merge one batch's results into the statement's state.
-	fn absorb(&self, partial: Partial, state: &mut State) -> FlowResult<()> {
-		let Partial {
+	async fn absorb(
+		&self,
+		result: BatchResult,
+		state: &mut State,
+		ctx: &ExecutionContext,
+	) -> FlowResult<()> {
+		let BatchResult {
 			output,
 			mut sorts,
 			arrivals,
 			mut groups,
+			mut spilled,
+			mut sort_accounts,
+			mut group_accounts,
 			..
-		} = partial;
+		} = result;
 		state.output.extend(output);
 		for &sort in &self.sorts {
-			let entries = std::mem::take(&mut sorts[sort as usize]);
-			let arrived = arrivals.get(sort as usize).map_or(0, |a| a.arrived);
-			state.keep_absorbed(self.program, sort, entries, arrived);
+			let at = sort as usize;
+			let partial = spilled
+				.iter()
+				.position(|p| p.spec.kind == BreakerKind::Sort && p.spec.index == sort)
+				.map(|found| spilled.swap_remove(found));
+			let Some(partial) = partial else {
+				adopt_reservation(&mut state.sort_accounts[at], sort_accounts.get_mut(at));
+				let entries = std::mem::take(&mut sorts[at]);
+				let arrived = arrivals.get(at).map_or(0, |a| a.arrived);
+				state.keep_absorbed(self.program, sort, entries, arrived);
+				continue;
+			};
+			super::host::seal_sort(state, at, ctx).await?;
+			adopt_reservation(&mut state.sort_accounts[at], sort_accounts.get_mut(at));
+			state.sort_runs[at].get_or_insert_with(Default::default).append(partial.runs)?;
+			let rows: Vec<Sorted> =
+				partial.held.into_iter().map(|(keys, row)| (keys, SortRow::Value(row))).collect();
+			let arrived = rows.len() as u64;
+			state.keep_absorbed(self.program, sort, rows, arrived);
 		}
 		for &aggregate in &self.aggregates {
-			let part = groups[aggregate as usize].take();
-			merge_groups(&mut state.groups[aggregate as usize], part)?;
+			let at = aggregate as usize;
+			let partial = spilled
+				.iter()
+				.position(|p| p.spec.kind == BreakerKind::Groups && p.spec.index == aggregate)
+				.map(|found| spilled.swap_remove(found));
+			let Some(partial) = partial else {
+				adopt_reservation(&mut state.group_accounts[at], group_accounts.get_mut(at));
+				let part = groups[at].take();
+				merge_groups(&mut state.groups[at], part)?;
+				continue;
+			};
+			super::host::seal_groups(state, at, ctx).await?;
+			adopt_reservation(&mut state.group_accounts[at], group_accounts.get_mut(at));
+			state.group_runs[at].get_or_insert_with(Default::default).append(partial.runs)?;
+			let functions = state.aggregates.functions[at].clone();
+			let into = state.groups[at].as_mut().ok_or_else(|| {
+				ControlFlow::Err(anyhow::anyhow!("a region merged groups of another kind"))
+			})?;
+			for (key, row) in partial.held {
+				into.load_saved(key, row, &functions).map_err(ControlFlow::Err)?;
+			}
+		}
+		// What the statement took from the batch was charged to the
+		// reservation it adopted from the batch, so the lease counted those
+		// rows once throughout. A charge that outgrew that reservation and
+		// the lease leaves the statement holding more than it reserved, and
+		// it spills that.
+		if state.memory.is_some() {
+			super::host::spill_breakers(state, ctx).await?;
+		}
+		drop((sort_accounts, group_accounts));
+		#[cfg(test)]
+		if let Some(memory) = state.memory.as_ref()
+			&& memory.lease().held() < held_by_breakers(state)
+		{
+			note_lease_fault(state, LeaseFault::Uncounted);
 		}
 		Ok(())
 	}
+}
+
+/// Hand a batch's reservation for a breaker, where it has one, to the
+/// statement's account for the same breaker.
+fn adopt_reservation(statement: &mut Reservation, batch: Option<&mut Reservation>) {
+	if let Some(batch) = batch {
+		statement.adopt(batch);
+	}
+}
+
+/// What the statement's breakers hold in memory, as the lease must cover it:
+/// the entries of each sort that charges them one by one, and the open groups
+/// of each aggregate that can spill.
+#[cfg(test)]
+fn held_by_breakers(state: &State) -> usize {
+	let sorts: usize = state
+		.sorts
+		.iter()
+		.zip(&state.sort_spill)
+		.filter(|(_, spill)| spill.as_ref().is_some_and(|spill| spill.keep.is_none()))
+		.flat_map(|(entries, _)| entries)
+		.map(super::sort::sorted_bytes)
+		.sum();
+	let groups: usize =
+		state.groups.iter().flatten().filter(|groups| groups.spillable()).map(Groups::bytes).sum();
+	sorts + groups
+}
+
+/// What the records `partial` holds in memory weigh, as a breaker's account
+/// counts them.
+fn held_bytes(partial: &Partial) -> usize {
+	partial
+		.held
+		.iter()
+		.map(|(keys, row)| {
+			crate::exec::memory::size::values_bytes(keys)
+				+ crate::exec::memory::size::value_bytes(row)
+		})
+		.sum()
 }
 
 /// Fold a batch's partial groups into the groups the statement has.
@@ -937,6 +1091,20 @@ struct Under {
 	shared: super::interp::RunShare,
 }
 
+impl Under {
+	/// What a batch of `program` runs under, from the statement `state`.
+	#[cfg(test)]
+	fn of(state: &mut State, program: &Program, ctx: &ExecutionContext) -> FlowResult<Self> {
+		Ok(Self {
+			frames: state.frames.clone(),
+			slots: state.slots.clone(),
+			kept: state.slot_charges(),
+			bypassed: state.permissions_bypassed,
+			shared: state.shared(program, ctx.function_registry()).map_err(ControlFlow::Err)?,
+		})
+	}
+}
+
 /// Run one row of a region's body. A batch's paging never spends its limit,
 /// so the body never stops its pipeline; one that did would answer fewer rows
 /// than the serial run.
@@ -960,16 +1128,123 @@ async fn run_row(
 /// row as though it were taken, but for the first rows reaching the paging
 /// that the clause is sure to skip, and records how each row ended; the batch
 /// stops at a row that fails before its paging, which no later row can be
-/// reached past.
+/// reached past. A `bound` batch charges its breakers to the query's lease and
+/// spills those it outgrows ([`BatchResult::spilled`]).
 async fn run_batch(
 	program: &Arc<Program>,
 	at: usize,
 	rows: Vec<Value>,
 	paged: Option<(u16, usize)>,
+	bound: bool,
 	under: Under,
 	ctx: &ExecutionContext,
-) -> FlowResult<Partial> {
+) -> FlowResult<BatchResult> {
 	let started = web_time::Instant::now();
+	let mut state = batch_state(program, paged, under, ctx).await?;
+	if bound {
+		super::host::bound_batch(program, &mut state, ctx);
+	}
+	let pipeline = &program.pipelines[at];
+	let count = rows.len();
+	let mut ends = Vec::new();
+	for row in rows {
+		let Some((limit, _)) = paged else {
+			run_row(program, pipeline, row, &mut state, ctx).await?;
+			if state.memory.is_some() {
+				super::host::spill_breakers(&mut state, ctx).await?;
+			}
+			continue;
+		};
+		state.reached_paging = false;
+		let before = state.output.len();
+		let skip = state.paging[limit as usize].skip;
+		let failure = run_row(program, pipeline, row, &mut state, ctx).await.err();
+		let reached = state.reached_paging;
+		let stops = failure.is_some() && !reached;
+		ends.push(RowEnd {
+			reached,
+			skipped: state.paging[limit as usize].skip < skip,
+			emitted: state.output.len() - before,
+			failure,
+		});
+		if state.memory.is_some() {
+			super::host::spill_breakers(&mut state, ctx).await?;
+		}
+		if stops {
+			break;
+		}
+	}
+	// A breaker's reservation leaves the state before its buffer becomes a
+	// partial, which clears the state's account: the lease keeps counting the
+	// buffer until the partial's own records are charged in its place, and
+	// the account then returns to the state to travel with the batch to the
+	// merge.
+	let mut spilled = Vec::new();
+	#[cfg(test)]
+	let leased = state.memory.as_ref().map(|memory| memory.lease().held());
+	for sort in 0..program.sorts.len() {
+		if state.sort_runs[sort].is_some() {
+			let mut account =
+				std::mem::replace(&mut state.sort_accounts[sort], Reservation::unbounded());
+			let partial = Partial::of_sort(&mut state, program, sort as u16, ctx).await?;
+			account.hold(held_bytes(&partial));
+			state.sort_accounts[sort] = account;
+			spilled.push(partial);
+		}
+	}
+	for aggregate in 0..program.aggregates.len() {
+		if state.group_runs[aggregate].is_some() {
+			let mut account =
+				std::mem::replace(&mut state.group_accounts[aggregate], Reservation::unbounded());
+			let partial = Partial::of_groups(&mut state, program, aggregate as u16)?;
+			account.hold(held_bytes(&partial));
+			state.group_accounts[aggregate] = account;
+			spilled.push(partial);
+		}
+	}
+	// What the batch holds stays reserved from the lease until the merge
+	// takes it over for the statement.
+	let (sort_accounts, group_accounts) = if state.memory.is_some() {
+		(std::mem::take(&mut state.sort_accounts), std::mem::take(&mut state.group_accounts))
+	} else {
+		Default::default()
+	};
+	#[cfg(test)]
+	if let (Some(leased), Some(memory)) = (leased, state.memory.as_ref())
+		&& memory.lease().held() < leased
+	{
+		note_lease_fault(&state, LeaseFault::Released);
+	}
+	#[cfg(test)]
+	if let Some(store) = state.memory.as_ref().and_then(|memory| memory.store()) {
+		let mut counted = BATCH_PARTIALS.lock().unwrap_or_else(|e| e.into_inner());
+		for partial in &spilled {
+			counted.entry(store.session().clone()).or_default()[partial_slot(partial.spec.kind)] +=
+				1;
+		}
+	}
+	Ok(BatchResult {
+		output: state.take_output(),
+		sorts: std::mem::take(&mut state.sorts),
+		arrivals: std::mem::take(&mut state.sort_arrivals),
+		groups: std::mem::take(&mut state.groups),
+		spilled,
+		sort_accounts,
+		group_accounts,
+		ends,
+		rows: count,
+		elapsed: started.elapsed(),
+	})
+}
+
+/// A state for a batch of `program` under `under`: its paging, its fuel and
+/// the statement's frames and block names.
+async fn batch_state(
+	program: &Arc<Program>,
+	paged: Option<(u16, usize)>,
+	under: Under,
+	ctx: &ExecutionContext,
+) -> FlowResult<super::interp::PooledState> {
 	// Paging that never spends, and skips only the rows sure to be skipped;
 	// a statement the body runs starts its own paging afresh.
 	let mut paging = vec![
@@ -991,48 +1266,133 @@ async fn run_batch(
 	state.slots = under.slots;
 	state.keep_copied(under.kept, ctx).await?;
 	state.permissions_bypassed = under.bypassed;
+	Ok(state)
+}
+
+/// How many partials region batches have handed their merge, by the session
+/// of the store they spilled to and then by breaker (sort, groups), for tests
+/// that must know their own batches spilled while others run beside them.
+#[cfg(test)]
+pub(super) static BATCH_PARTIALS: std::sync::LazyLock<
+	std::sync::Mutex<std::collections::HashMap<crate::exec::memory::SessionName, [usize; 2]>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// Where `kind`'s count sits in a [`BATCH_PARTIALS`] entry.
+#[cfg(test)]
+fn partial_slot(kind: BreakerKind) -> usize {
+	usize::from(kind == BreakerKind::Groups)
+}
+
+/// How many partials of `kind` (a sort or groups) batches have handed their
+/// merge over the store `session` names.
+#[cfg(test)]
+pub(super) fn batch_partials(
+	session: &crate::exec::memory::SessionName,
+	kind: BreakerKind,
+) -> usize {
+	BATCH_PARTIALS
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.get(session)
+		.map_or(0, |counted| counted[partial_slot(kind)])
+}
+
+/// A way a region's accounting left the lease counting less than its query
+/// holds.
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(super) enum LeaseFault {
+	/// A batch's lease reading fell while its buffers became partials.
+	Released,
+	/// The merge finished while the lease counted less than the statement's
+	/// sorts and groups hold.
+	Uncounted,
+}
+
+/// How many times each [`LeaseFault`] (released, uncounted) was seen by the
+/// batches and merges over a store's session.
+#[cfg(test)]
+static LEASE_FAULTS: std::sync::LazyLock<
+	std::sync::Mutex<std::collections::HashMap<crate::exec::memory::SessionName, [usize; 2]>>,
+> = std::sync::LazyLock::new(Default::default);
+
+#[cfg(test)]
+fn note_lease_fault(state: &State, fault: LeaseFault) {
+	if let Some(store) = state.memory.as_ref().and_then(|memory| memory.store()) {
+		LEASE_FAULTS
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.entry(store.session().clone())
+			.or_default()[fault as usize] += 1;
+	}
+}
+
+/// How many times `fault` was seen over the store `session` names.
+#[cfg(test)]
+pub(super) fn lease_faults(session: &crate::exec::memory::SessionName, fault: LeaseFault) -> usize {
+	LEASE_FAULTS
+		.lock()
+		.unwrap_or_else(|e| e.into_inner())
+		.get(session)
+		.map_or(0, |seen| seen[fault as usize])
+}
+
+/// Run `rows` as one bound batch of pipeline `at` of `program` and merge it
+/// into `state`, a statement's, as a region does.
+#[cfg(test)]
+pub(super) async fn merge_batch(
+	program: &Arc<Program>,
+	at: usize,
+	rows: Vec<Value>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<()> {
+	let under = Under::of(state, program, ctx)?;
+	let result = run_batch(program, at, rows, None, true, under, ctx).await?;
+	Region::new(program, at, ctx).absorb(result, state, ctx).await
+}
+
+/// Run `rows` through pipeline `at` of `program` on a state of its own, its
+/// breakers bound by `ctx`'s query memory and spilled after each row as a
+/// region batch's are: a producer of a simulated fan.
+#[cfg(test)]
+pub(super) async fn run_morsel(
+	program: &Arc<Program>,
+	at: usize,
+	rows: Vec<Value>,
+	ctx: &ExecutionContext,
+) -> FlowResult<super::interp::PooledState> {
+	let mut statement = super::host::statement_state(program, ctx).map_err(ControlFlow::Err)?;
+	let under = Under::of(&mut statement, program, ctx)?;
 	let pipeline = &program.pipelines[at];
-	let count = rows.len();
-	let mut ends = Vec::new();
+	if pipeline.enforce.is_some() {
+		return Err(ControlFlow::Err(anyhow::anyhow!(
+			"Internal error: a morsel of a pipeline that enforces its rows"
+		)));
+	}
+	let mut state = batch_state(program, None, under, ctx).await?;
+	super::host::bound_batch(program, &mut state, ctx);
 	for row in rows {
-		let Some((limit, _)) = paged else {
-			run_row(program, pipeline, row, &mut state, ctx).await?;
-			continue;
-		};
-		state.reached_paging = false;
-		let before = state.output.len();
-		let skip = state.paging[limit as usize].skip;
-		let failure = run_row(program, pipeline, row, &mut state, ctx).await.err();
-		let reached = state.reached_paging;
-		let stops = failure.is_some() && !reached;
-		ends.push(RowEnd {
-			reached,
-			skipped: state.paging[limit as usize].skip < skip,
-			emitted: state.output.len() - before,
-			failure,
-		});
-		if stops {
-			break;
+		run_row(program, pipeline, row, &mut state, ctx).await?;
+		if state.memory.is_some() {
+			super::host::spill_breakers(&mut state, ctx).await?;
 		}
 	}
-	Ok(Partial {
-		output: state.take_output(),
-		sorts: std::mem::take(&mut state.sorts),
-		arrivals: std::mem::take(&mut state.sort_arrivals),
-		groups: std::mem::take(&mut state.groups),
-		ends,
-		rows: count,
-		elapsed: started.elapsed(),
-	})
+	Ok(state)
 }
 
 /// Run a batch on a worker holding `place` in the budget until it is done.
 #[cfg(not(target_family = "wasm"))]
+#[expect(
+	clippy::too_many_arguments,
+	reason = "a batch with the program, rows, paging, binding, state, context and place it runs in"
+)]
 fn spawn(
 	program: &Arc<Program>,
 	at: usize,
 	rows: Vec<Value>,
 	paged: Option<(u16, usize)>,
+	bound: bool,
 	under: Under,
 	ctx: &ExecutionContext,
 	place: Place,
@@ -1043,11 +1403,12 @@ fn spawn(
 	let ctx = ctx.clone();
 	let handle = tokio::spawn(crate::exec::compiles::while_running_task(async move {
 		let _place = place;
-		let body = Box::pin(async move { run_batch(&program, at, rows, paged, under, &ctx).await });
+		let body =
+			Box::pin(async move { run_batch(&program, at, rows, paged, bound, under, &ctx).await });
 		// What nests beneath the body runs on this worker's own frame stack.
 		let mut driven = crate::exec::trampoline::Trampolined::root(futures::stream::once(body));
 		match driven.next().await {
-			Some(partial) => partial,
+			Some(result) => result,
 			None => Err(ControlFlow::Err(anyhow::anyhow!("a region worker answered nothing"))),
 		}
 	}));

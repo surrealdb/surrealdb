@@ -111,6 +111,7 @@ mod backfill;
 mod batch;
 mod distinct_spill;
 mod join_spill;
+mod partial;
 mod region;
 mod row;
 mod scalar;
@@ -161,6 +162,8 @@ mod tests_methods;
 mod tests_needs;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_overlay;
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests_partials;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_paths;
 #[cfg(test)]

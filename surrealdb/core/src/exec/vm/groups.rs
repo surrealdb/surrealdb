@@ -211,9 +211,29 @@ impl Groups {
 		if !self.spillable() {
 			return None;
 		}
+		self.save()
+	}
+
+	/// Every group saved, `GROUP ALL`'s one under an empty key; consumes the
+	/// groups. `None` when an accumulator's state cannot be saved.
+	pub(super) fn into_saved(mut self) -> Option<Vec<Record>> {
+		self.save()
+	}
+
+	/// Whether no group is open.
+	pub(super) fn is_empty(&self) -> bool {
+		self.len == 0
+	}
+
+	/// [`Self::save_all`] for every kind of groups: `GROUP ALL`'s one group
+	/// is saved under an empty key.
+	fn save(&mut self) -> Option<Vec<Record>> {
 		let (width, fields) = (self.width(), self.fields());
 		let index = match &mut self.index {
-			KeyIndex::All => return None,
+			KeyIndex::All => match self.len {
+				1 => vec![(Vec::new(), 0usize)],
+				_ => Vec::new(),
+			},
 			KeyIndex::One(index) => {
 				std::mem::take(index).into_iter().map(|(k, i)| (vec![k], i)).collect::<Vec<_>>()
 			}
@@ -444,6 +464,83 @@ impl Groups {
 			}
 		}
 		Ok(())
+	}
+}
+
+/// Saved groups in key order ([`Groups::save_all`]), folded a batch of keys
+/// at a time: the saved states of one key are loaded in the order the merge
+/// answers them, which is the order they were saved in.
+pub(super) struct SavedFold {
+	merge: super::spill::Merge,
+	next: Option<Record>,
+	keys: usize,
+	functions: Vec<Vec<Arc<dyn AggregateFunction>>>,
+	batch: usize,
+	room: usize,
+	done: bool,
+}
+
+impl SavedFold {
+	/// A fold of `merge`'s records, groups of `keys` keys with `functions`,
+	/// a chunk ending at `batch` keys or once it holds more than `room`
+	/// bytes.
+	pub(super) fn new(
+		merge: super::spill::Merge,
+		keys: usize,
+		functions: Vec<Vec<Arc<dyn AggregateFunction>>>,
+		batch: usize,
+		room: usize,
+	) -> Self {
+		Self {
+			merge,
+			next: None,
+			keys,
+			functions,
+			batch,
+			room,
+			done: false,
+		}
+	}
+
+	/// The next batch of keys, every saved state of each folded in source
+	/// order; `None` once every key is folded.
+	pub(super) async fn next_chunk(
+		&mut self,
+		ctx: &crate::exec::ExecutionContext,
+	) -> crate::exec::FlowResult<Option<Groups>> {
+		use crate::expr::ControlFlow;
+		if self.done {
+			return Ok(None);
+		}
+		let mut chunk = Groups::new(self.keys, &self.functions);
+		let mut taken = 0;
+		let mut last: Option<Vec<Value>> = None;
+		let mut drained = true;
+		loop {
+			let record = match self.next.take() {
+				Some(record) => record,
+				None => match self.merge.next(ctx).await? {
+					Some(record) => record,
+					None => break,
+				},
+			};
+			if last.as_ref().is_none_or(|l| l.cmp(&record.0) != std::cmp::Ordering::Equal) {
+				if taken == self.batch || (taken > 0 && chunk.bytes() > self.room) {
+					self.next = Some(record);
+					drained = false;
+					break;
+				}
+				taken += 1;
+				last = Some(record.0.clone());
+			}
+			chunk.load_saved(record.0, record.1, &self.functions).map_err(ControlFlow::Err)?;
+		}
+		if taken == 0 {
+			self.done = true;
+			return Ok(None);
+		}
+		self.done = drained;
+		Ok(Some(chunk))
 	}
 }
 

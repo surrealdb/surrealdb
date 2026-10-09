@@ -33,7 +33,12 @@
 //!
 //! A [`Run`] owns its run in the store: dropping it deletes the run, so a
 //! query that ends or fails before merging what it spilled leaves nothing
-//! behind.
+//! behind. A run handed to another process ([`Run::into_ref`]) is that
+//! process's to delete ([`Run::adopt`]).
+//!
+//! A query writes one run at a time: a [`RunSink`] holds the query's writer
+//! ([`QueryMemory::writer`]) from the moment it opens until it finishes or is
+//! dropped.
 
 use std::sync::Arc;
 
@@ -41,7 +46,7 @@ use anyhow::Context as _;
 use revision::{DeserializeRevisioned, SerializeRevisioned};
 
 use super::QueryMemory;
-use super::store::{RunRead, RunRef, RunWrite, Sharing, TempStore};
+use super::store::{RunRead, RunRef, RunWrite, Sharing, TempStore, Tier};
 use crate::exec::vm::program::ISA_VERSION;
 use crate::val::Value;
 
@@ -150,6 +155,7 @@ pub(crate) enum BreakerKind {
 }
 
 impl BreakerKind {
+	#[cfg_attr(not(test), allow(dead_code))]
 	fn from_u8(byte: u8) -> Option<Self> {
 		Some(match byte {
 			1 => Self::Sort,
@@ -236,6 +242,8 @@ pub(crate) struct Run {
 	records: u64,
 	store: Arc<dyn TempStore>,
 	memory: Arc<QueryMemory>,
+	/// Whether dropping the run deletes it: not once it is handed on.
+	armed: bool,
 }
 
 impl std::fmt::Debug for Run {
@@ -260,9 +268,51 @@ impl Run {
 	}
 
 	/// The records the run holds.
-	#[cfg(test)]
 	pub(crate) fn records(&self) -> u64 {
 		self.records
+	}
+
+	/// Which processes can open the run.
+	#[cfg_attr(not(test), allow(dead_code))]
+	pub(crate) fn tier(&self) -> Tier {
+		self.run.tier
+	}
+
+	/// Hand the run on: it is no longer deleted when dropped, and its bytes no
+	/// longer count against this query's quota. Answers its name and its
+	/// record count; the receiver owns it from here ([`Run::adopt`]).
+	#[cfg_attr(not(test), allow(dead_code))]
+	pub(crate) fn into_ref(mut self) -> (RunRef, u64) {
+		self.armed = false;
+		self.memory.unspilled(self.bytes);
+		(self.run.clone(), self.records)
+	}
+
+	/// Take ownership of `run`, written for `spec` with `records` records by
+	/// another query or process: it is read through `memory`'s store, counted
+	/// against `memory`'s quota, and deleted when dropped. A run refused for
+	/// the quota is not counted and is not owned: the caller deletes it.
+	#[cfg_attr(not(test), allow(dead_code))]
+	pub(crate) fn adopt(
+		memory: &Arc<QueryMemory>,
+		run: RunRef,
+		spec: RunSpec,
+		records: u64,
+	) -> anyhow::Result<Run> {
+		let store = memory.store().context("A query adopted a run with no temporary store")?;
+		if let Err(error) = memory.spilled(run.bytes) {
+			memory.unspilled(run.bytes);
+			return Err(error);
+		}
+		Ok(Run {
+			bytes: run.bytes,
+			run,
+			spec,
+			records,
+			store,
+			memory: Arc::clone(memory),
+			armed: true,
+		})
 	}
 
 	/// The run's name in its store.
@@ -274,8 +324,10 @@ impl Run {
 
 impl Drop for Run {
 	fn drop(&mut self) {
-		self.store.delete_run(&self.run);
-		self.memory.unspilled(self.bytes);
+		if self.armed {
+			self.store.delete_run(&self.run);
+			self.memory.unspilled(self.bytes);
+		}
 	}
 }
 
@@ -311,6 +363,9 @@ pub(crate) struct RunSink {
 	store: Arc<dyn TempStore>,
 	memory: Arc<QueryMemory>,
 	spilled: Spilled,
+	/// The query's one run writer, held until the run is finished or the sink
+	/// is dropped.
+	_writing: tokio::sync::OwnedSemaphorePermit,
 }
 
 impl RunSink {
@@ -322,6 +377,7 @@ impl RunSink {
 		sharing: Sharing,
 	) -> anyhow::Result<Self> {
 		let store = memory.store().context("A query spilled with no temporary store")?;
+		let writing = memory.writer().await?;
 		let part_size = store.part_size();
 		let block_size = BLOCK_SIZE.min(part_size);
 		let writer = store.write_run(sharing).await?;
@@ -345,6 +401,7 @@ impl RunSink {
 				memory: Arc::clone(memory),
 				bytes: 0,
 			},
+			_writing: writing,
 		})
 	}
 
@@ -436,6 +493,7 @@ impl RunSink {
 			records: self.records,
 			store: self.store,
 			memory: self.memory,
+			armed: true,
 		})
 	}
 }
@@ -444,6 +502,13 @@ fn write_header(out: &mut Vec<u8>, spec: &RunSpec, block_size: usize) {
 	out.extend_from_slice(&MAGIC);
 	out.extend_from_slice(&FORMAT.to_be_bytes());
 	out.extend_from_slice(&BUILD_KEY);
+	write_spec(out, spec);
+	out.extend_from_slice(&(block_size as u32).to_be_bytes());
+}
+
+/// Append what a run was written for: its program, its breaker (kind, index,
+/// key count) and the order of its records, as a run's header carries them.
+pub(crate) fn write_spec(out: &mut Vec<u8>, spec: &RunSpec) {
 	out.extend_from_slice(&spec.program.0);
 	out.push(spec.kind as u8);
 	out.extend_from_slice(&spec.index.to_be_bytes());
@@ -456,7 +521,39 @@ fn write_header(out: &mut Vec<u8>, spec: &RunSpec, block_size: usize) {
 			out.extend_from_slice(keys);
 		}
 	}
-	out.extend_from_slice(&(block_size as u32).to_be_bytes());
+}
+
+/// The spec [`write_spec`] wrote at `at` in `bytes`, and where it ends, or
+/// `None` when `bytes` ends first or holds a kind or an order tag no breaker
+/// writes.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn read_spec(bytes: &[u8], at: usize) -> Option<(RunSpec, usize)> {
+	let program: [u8; 16] = bytes.get(at..at.checked_add(16)?)?.try_into().ok()?;
+	let fixed = bytes.get(at + 16..at.checked_add(16 + 5)?)?;
+	let kind = BreakerKind::from_u8(fixed[0])?;
+	let (index, arity) = (be_u16(&fixed[1..3]), be_u16(&fixed[3..5]));
+	let mut end = at + 21;
+	let order = match *bytes.get(end)? {
+		0 => {
+			end += 1;
+			RunOrder::Plain
+		}
+		1 => {
+			let count = be_u16(bytes.get(end + 1..end.checked_add(3)?)?) as usize;
+			let keys = bytes.get(end + 3..end.checked_add(3 + count)?)?.to_vec();
+			end += 3 + count;
+			RunOrder::Keys(keys)
+		}
+		_ => return None,
+	};
+	let spec = RunSpec {
+		kind,
+		index,
+		arity,
+		order,
+		program: ProgramKey(program),
+	};
+	Some((spec, end))
 }
 
 /// A run's records, read back in the order written, each block checked
@@ -536,38 +633,35 @@ impl RunSource {
 		if head[10..26] != BUILD_KEY {
 			return Err(refuse(RunError::OtherBuild));
 		}
-		if head[26..42] != expected.program.0 {
+		let mut wanted = Vec::new();
+		write_spec(&mut wanted, expected);
+		if head[26..42] != wanted[..16] {
 			return Err(refuse(RunError::OtherProgram));
 		}
-		let kind = BreakerKind::from_u8(head[42]);
-		if kind != Some(expected.kind)
-			|| be_u16(&head[43..45]) != expected.index
-			|| be_u16(&head[45..47]) != expected.arity
-		{
+		if head[42..47] != wanted[16..21] {
 			return Err(refuse(RunError::OtherBreaker));
 		}
-		let tag = head[47];
-		source.advance(HEADER_FIXED);
-		let order = match tag {
-			0 => RunOrder::Plain,
+		// The spec ends with the order, a tag and, for sort keys, their count
+		// and bytes, which follow the fixed part of the header.
+		let mut spec_len = HEADER_FIXED - 26;
+		match head[47] {
+			0 => {}
 			1 => {
-				if !source.fill(2).await? {
+				if !source.fill(HEADER_FIXED + 2).await? {
 					return Err(refuse(RunError::Truncated));
 				}
-				let count = be_u16(&source.buf[source.at..]) as usize;
-				source.advance(2);
-				if !source.fill(count).await? {
+				let count = be_u16(&source.buf[source.at + HEADER_FIXED..]) as usize;
+				if !source.fill(HEADER_FIXED + 2 + count).await? {
 					return Err(refuse(RunError::Truncated));
 				}
-				let keys = source.buf[source.at..source.at + count].to_vec();
-				source.advance(count);
-				RunOrder::Keys(keys)
+				spec_len += 2 + count;
 			}
 			_ => return Err(refuse(RunError::Malformed)),
-		};
-		if order != expected.order {
+		}
+		if source.buf[source.at + 26..source.at + 26 + spec_len] != wanted[..] {
 			return Err(refuse(RunError::OtherBreaker));
 		}
+		source.advance(26 + spec_len);
 		if !source.fill(4).await? {
 			return Err(refuse(RunError::Truncated));
 		}

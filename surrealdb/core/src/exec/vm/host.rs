@@ -4436,7 +4436,7 @@ async fn finish_spilled_join(
 /// The rows aggregate `aggregate`'s groups finish into, as the aggregate
 /// operator finishes them: `GROUP ALL`'s one group whether or not a row
 /// reached it, `GROUP BY`'s groups in group-key order.
-async fn finish_groups(
+pub(super) async fn finish_groups(
 	program: &Program,
 	aggregate: u16,
 	groups: Option<Groups>,
@@ -4716,8 +4716,27 @@ fn bound_breakers(program: &Program, state: &mut State, ctx: &ExecutionContext) 
 	let Some(memory) = ctx.ctx().memory() else {
 		return;
 	};
+	bind_breakers(program, state, &Arc::clone(memory), tempfiles_limit(ctx));
+}
+
+/// Bound a region batch's breakers by its query's lease, where the query can
+/// spill: as the statement's are, but a sort never spills by its row count.
+pub(super) fn bound_batch(program: &Program, state: &mut State, ctx: &ExecutionContext) {
+	if let Some(memory) = ctx.ctx().memory().filter(|memory| memory.can_spill()) {
+		bind_breakers(program, state, &Arc::clone(memory), None);
+	}
+}
+
+/// [`bound_breakers`] over `memory`, a sort that keeps every row spilling
+/// each time it holds `tempfiles` rows where there is a limit.
+fn bind_breakers(
+	program: &Program,
+	state: &mut State,
+	memory: &Arc<crate::exec::memory::QueryMemory>,
+	tempfiles: Option<usize>,
+) {
 	state.memory = Some(Arc::clone(memory));
-	let rows = tempfiles_limit(ctx);
+	let rows = tempfiles;
 	for (at, spec) in program.sorts.iter().enumerate() {
 		// A brute-force KNN's sort publishes the distance of each row it
 		// keeps, which the spilled merge does not: it never spills.
@@ -4778,7 +4797,7 @@ fn tempfiles_limit(_ctx: &ExecutionContext) -> Option<usize> {
 /// the statement waits for other queries to give memory back, and is then
 /// granted the bytes past the node's limit. It fails only where the query's
 /// pinned bytes would pass its ceiling.
-async fn spill_breakers(state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
+pub(super) async fn spill_breakers(state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
 	let Some(memory) = state.memory.clone() else {
 		return Ok(());
 	};
@@ -4800,53 +4819,7 @@ async fn spill_breakers(state: &mut State, ctx: &ExecutionContext) -> FlowResult
 			account.insist(ctx).await?;
 			continue;
 		}
-		let (keys, random, limit) = (spill.keys.clone(), spill.random, spill.keep);
-		let mut rows = std::mem::take(&mut state.sorts[at]);
-		let slab = std::mem::take(&mut state.sort_slabs[at]);
-		if random {
-			super::sort::with_random_keys(&mut rows);
-		}
-		let spec = RunSpec::new(
-			BreakerKind::Sort,
-			at as u16,
-			rows[0].0.len(),
-			RunOrder::Keys(super::spill::key_order_bytes(&keys)),
-		);
-		let runs = state.sort_runs[at].get_or_insert_with(Default::default);
-		let last = runs.spill_sorted(&memory, spec, rows, &slab, &keys, limit, ctx).await?;
-		state.sort_accounts[at].clear();
-		if limit.is_some() && !random {
-			// The buffer is empty: the sort keeps nothing in memory, and the
-			// next row starts a fresh prune or merge. Arrivals keep counting,
-			// so stamps stay increasing across runs. Sorting the buffer
-			// stably at any point between rows gives the order a full sort of
-			// the rows that reached it would give: a merging sort stamps
-			// every row with its arrival, so its order is total and holds
-			// mid-merge, where rows only swap within the buffer; a pruning
-			// sort holds its kept rows sorted, stably, ahead of later
-			// arrivals, so among equal keys buffer position is arrival order.
-			let arrivals = &mut state.sort_arrivals[at];
-			*arrivals = Arrivals {
-				run: arrivals.run,
-				arrived: arrivals.arrived,
-				..Default::default()
-			};
-			if let Some(mut last) = last {
-				last.truncate(keys.len());
-				let spill = state.sort_spill[at].as_mut().expect("checked above");
-				let lower = match &spill.floor {
-					Some(floor) => {
-						super::interp::compare_keys(&last, floor, &keys) == Ordering::Less
-					}
-					None => true,
-				};
-				if lower {
-					spill.floor = Some(last);
-					#[cfg(test)]
-					super::spill::FLOORS_SET.with(|floors| floors.set(floors.get() + 1));
-				}
-			}
-		}
+		spill_sort(state, at, &memory, ctx).await?;
 	}
 	for at in 0..state.groups.len() {
 		let account = &mut state.group_accounts[at];
@@ -4866,16 +4839,134 @@ async fn spill_breakers(state: &mut State, ctx: &ExecutionContext) -> FlowResult
 		}
 		// Groups whose states cannot be saved stay in memory, held as bytes
 		// the query cannot spill.
-		let Some(records) = groups.save_all() else {
-			account.insist(ctx).await?;
-			continue;
-		};
-		let spec = RunSpec::new(BreakerKind::Groups, at as u16, groups.keys(), RunOrder::Plain);
-		let run = super::spill::write_run(&memory, spec, records, ctx).await?;
-		state.group_runs[at].get_or_insert_with(Default::default).push(run)?;
-		state.group_accounts[at].clear();
+		if !spill_groups(state, at, &memory, ctx).await? {
+			state.group_accounts[at].insist(ctx).await?;
+		}
 	}
 	Ok(())
+}
+
+/// Write sort `at`'s buffer, which is not empty, as its next run, cut to its
+/// `keep`, and reset what it keeps in memory: its account, its arrivals and,
+/// for a keep sort, its floor.
+pub(super) async fn spill_sort(
+	state: &mut State,
+	at: usize,
+	memory: &Arc<crate::exec::memory::QueryMemory>,
+	ctx: &ExecutionContext,
+) -> FlowResult<()> {
+	let Some(spill) = &state.sort_spill[at] else {
+		return Err(ControlFlow::Err(anyhow::anyhow!("Internal error: a sort that cannot spill")));
+	};
+	let (keys, random, limit) = (spill.keys.clone(), spill.random, spill.keep);
+	let mut rows = std::mem::take(&mut state.sorts[at]);
+	let slab = std::mem::take(&mut state.sort_slabs[at]);
+	if random {
+		super::sort::with_random_keys(&mut rows);
+	}
+	let spec = RunSpec::new(
+		BreakerKind::Sort,
+		at as u16,
+		keys.len(),
+		RunOrder::Keys(super::spill::key_order_bytes(&keys)),
+	);
+	let runs = state.sort_runs[at].get_or_insert_with(Default::default);
+	let last = runs.spill_sorted(memory, spec, rows, &slab, &keys, limit, ctx).await?;
+	state.sort_accounts[at].clear();
+	if limit.is_some() && !random {
+		// The buffer is empty: the sort keeps nothing in memory, and the
+		// next row starts a fresh prune or merge. Arrivals keep counting,
+		// so stamps stay increasing across runs. Sorting the buffer
+		// stably at any point between rows gives the order a full sort of
+		// the rows that reached it would give: a merging sort stamps
+		// every row with its arrival, so its order is total and holds
+		// mid-merge, where rows only swap within the buffer; a pruning
+		// sort holds its kept rows sorted, stably, ahead of later
+		// arrivals, so among equal keys buffer position is arrival order.
+		let arrivals = &mut state.sort_arrivals[at];
+		*arrivals = Arrivals {
+			run: arrivals.run,
+			arrived: arrivals.arrived,
+			..Default::default()
+		};
+		if let Some(last) = last {
+			let spill = state.sort_spill[at].as_mut().expect("checked above");
+			let lower = match &spill.floor {
+				Some(floor) => super::interp::compare_keys(&last, floor, &keys) == Ordering::Less,
+				None => true,
+			};
+			if lower {
+				spill.floor = Some(last);
+				#[cfg(test)]
+				super::spill::FLOORS_SET.with(|floors| floors.set(floors.get() + 1));
+			}
+		}
+	}
+	Ok(())
+}
+
+/// Write aggregate `at`'s open groups as its next run; `false`, writing
+/// nothing, where their states cannot be saved.
+pub(super) async fn spill_groups(
+	state: &mut State,
+	at: usize,
+	memory: &Arc<crate::exec::memory::QueryMemory>,
+	ctx: &ExecutionContext,
+) -> FlowResult<bool> {
+	let Some(groups) = state.groups[at].as_mut() else {
+		return Ok(false);
+	};
+	let Some(records) = groups.save_all() else {
+		return Ok(false);
+	};
+	let spec = RunSpec::new(BreakerKind::Groups, at as u16, groups.keys(), RunOrder::Plain);
+	let run = super::spill::write_run(memory, spec, records, ctx).await?;
+	state.group_runs[at].get_or_insert_with(Default::default).push(run)?;
+	state.group_accounts[at].clear();
+	Ok(true)
+}
+
+/// Write what the statement's sort `at` holds as its next run, so that a
+/// batch's runs appended after it follow every row it holds. Nothing when it
+/// holds nothing.
+pub(super) async fn seal_sort(
+	state: &mut State,
+	at: usize,
+	ctx: &ExecutionContext,
+) -> FlowResult<()> {
+	if state.sorts[at].is_empty() {
+		return Ok(());
+	}
+	let memory = sealing_memory(state)?;
+	spill_sort(state, at, &memory, ctx).await
+}
+
+/// [`seal_sort`] for aggregate `at`'s open groups.
+pub(super) async fn seal_groups(
+	state: &mut State,
+	at: usize,
+	ctx: &ExecutionContext,
+) -> FlowResult<()> {
+	if state.groups[at].as_ref().is_none_or(Groups::is_empty) {
+		return Ok(());
+	}
+	let memory = sealing_memory(state)?;
+	if !spill_groups(state, at, &memory, ctx).await? {
+		return Err(ControlFlow::Err(anyhow::anyhow!(
+			"Internal error: a region batch spilled groups its statement cannot save"
+		)));
+	}
+	Ok(())
+}
+
+/// The memory a statement seals a breaker through: a batch spilled where its
+/// statement can, so the statement has a store.
+fn sealing_memory(state: &State) -> FlowResult<Arc<crate::exec::memory::QueryMemory>> {
+	state.memory.clone().filter(|memory| memory.can_spill()).ok_or_else(|| {
+		ControlFlow::Err(anyhow::anyhow!(
+			"Internal error: a region batch spilled where its statement cannot"
+		))
+	})
 }
 
 /// The rows aggregate `aggregate` answers once some of its groups have been
@@ -4903,50 +4994,25 @@ async fn finish_spilled_groups(
 	};
 	state.group_accounts[at].clear();
 	let order: super::spill::RecordOrder = Arc::new(|(a, _), (b, _)| a.cmp(b));
-	let mut merge = runs.merge(&memory, held, order, None, ctx).await?;
+	let merge = runs.merge(&memory, held, order, None, ctx).await?;
 	let functions = state.aggregates.functions[at].clone();
 	let keys = program.aggregates[at].keys;
 	let batch = ctx.root().ctx.config.exec.scan_batch_size.max(1);
 	// A batch of keys is finished once it holds half of what the query may
 	// hold, so the groups finished at once stay within its lease.
 	let room = memory.working() / 2;
-	let mut next: Option<crate::exec::memory::runs::Record> = None;
-	loop {
-		let mut chunk = Groups::new(keys, &functions);
-		let mut taken = 0;
-		let mut last: Option<Vec<Value>> = None;
-		let mut drained = true;
-		loop {
-			let record = match next.take() {
-				Some(record) => record,
-				None => match merge.next(ctx).await? {
-					Some(record) => record,
-					None => break,
-				},
-			};
-			if last.as_ref() != Some(&record.0) {
-				if taken == batch || (taken > 0 && chunk.bytes() > room) {
-					next = Some(record);
-					drained = false;
-					break;
-				}
-				taken += 1;
-				last = Some(record.0.clone());
-			}
-			chunk.load_saved(record.0, record.1, &functions).map_err(ControlFlow::Err)?;
-		}
-		if taken == 0 {
-			return Ok(());
-		}
+	let mut fold = super::groups::SavedFold::new(merge, keys, functions, batch, room);
+	while let Some(chunk) = fold.next_chunk(ctx).await? {
 		let rows = out_of_line(|| finish_groups(program, aggregate, Some(chunk), ctx)).await?;
 		let rows = rows.into_iter().map(|row| (Vec::new(), row)).collect();
 		let stopped =
 			out_of_line(|| run_rows(program, pipeline, rows, state, ctx, yielder, flush_at))
 				.await?;
-		if stopped || drained {
-			return Ok(());
+		if stopped {
+			break;
 		}
 	}
+	Ok(())
 }
 
 /// A paging clause's count, evaluated once for the statement.

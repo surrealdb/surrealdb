@@ -26,6 +26,7 @@ use std::sync::Arc;
 
 use super::binding::{HostJudge, JoinStep, pairings};
 use super::host::RowSink;
+use super::partial::{Partial, PartialCounts};
 use super::program::HostScalar;
 use super::spill::{Merge, RecordOrder, Runs, write_run};
 use crate::exec::memory::runs::{BreakerKind, Record, RunOrder, RunSpec};
@@ -34,6 +35,7 @@ use crate::exec::operators::join::hash_join::{
 	BuildTable, JoinKey, join_key, key_has_regex, keys_equal, too_many_build_rows,
 };
 use crate::exec::{BoxFut, ExecutionContext, FlowResult};
+use crate::expr::ControlFlow;
 use crate::val::Value;
 
 fn by_keys() -> RecordOrder {
@@ -76,6 +78,9 @@ pub(super) struct BuildSink {
 	/// spilled, so they are charged as bytes the query cannot spill.
 	regex: Vec<(JoinKey, Value)>,
 	regex_account: Reservation,
+	/// The producer this build side is one of several of, whose index each
+	/// record carries after its key.
+	producer: Option<i64>,
 }
 
 impl BuildSink {
@@ -127,7 +132,41 @@ impl BuildSink {
 			held: Vec::new(),
 			runs: Runs::default(),
 			regex: Vec::new(),
+			producer: None,
 		}
+	}
+
+	/// This build side as producer `producer` of several: its records carry
+	/// the producer after their key, so partials merge in serial build order.
+	#[cfg_attr(not(test), allow(dead_code))]
+	pub(super) fn producing(mut self, producer: u32) -> Self {
+		self.producer = Some(i64::from(producer));
+		self
+	}
+
+	/// The build side read so far as a partial: its runs, its held rows sorted
+	/// by key, producer and arrival, and its regex rows as `side`. Only a
+	/// producing sink has one.
+	#[cfg_attr(not(test), allow(dead_code))]
+	pub(super) fn into_partial(mut self) -> FlowResult<Partial> {
+		if self.producer.is_none() {
+			return Err(ControlFlow::Err(anyhow::anyhow!(
+				"Internal error: a build side that is not a producer has no partial"
+			)));
+		}
+		let spec = self.spec(BreakerKind::JoinBuild);
+		let mut held = std::mem::take(&mut self.held);
+		held.sort_by(|(a, _), (b, _)| a.cmp(b));
+		self.account.clear();
+		Ok(Partial {
+			spec,
+			runs: std::mem::take(&mut self.runs),
+			held,
+			side: std::mem::take(&mut self.regex),
+			counts: PartialCounts {
+				taken: self.rows as u64,
+			},
+		})
 	}
 
 	/// The build side once every row is read: a table in memory, or the runs
@@ -167,9 +206,11 @@ impl BuildSink {
 }
 
 impl BuildSink {
-	/// The spec of a run of build rows: their key, then their arrival.
+	/// The spec of a run of build rows: their key, their producer where there
+	/// is one, then their arrival.
 	fn spec(&self, kind: BreakerKind) -> RunSpec {
-		RunSpec::new(kind, self.index, self.width + 1, RunOrder::Plain)
+		let arity = self.width + 1 + usize::from(self.producer.is_some());
+		RunSpec::new(kind, self.index, arity, RunOrder::Plain)
 	}
 
 	/// Take build row `row`, keyed `key`.
@@ -194,6 +235,7 @@ impl BuildSink {
 			return Ok(());
 		}
 		let mut keys = key;
+		keys.extend(self.producer.map(Value::from));
 		keys.push(arrival);
 		self.held.push((keys, row));
 		if self.account.charge(bytes) == Verdict::Spill
@@ -264,6 +306,74 @@ pub(super) struct SpilledJoin {
 	out: Vec<Record>,
 	out_runs: Runs,
 	arrivals: i64,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+impl SpilledJoin {
+	/// The spilled join a coordinator probes, from its producers' build
+	/// partials in producer order: the build runs in serial build order, the
+	/// regex rows in serial arrival order. Fails past `max_rows` build rows in
+	/// all, before any probe row, as the in-memory table does.
+	pub(super) async fn from_partials(
+		memory: &Arc<QueryMemory>,
+		partials: Vec<Partial>,
+		max_rows: usize,
+		ctx: &ExecutionContext,
+	) -> FlowResult<Box<SpilledJoin>> {
+		let taken: u64 = partials.iter().map(|partial| partial.counts.taken).sum();
+		if taken > max_rows as u64 {
+			return Err(too_many_build_rows(max_rows));
+		}
+		let Some(first) = partials.first() else {
+			return Err(ControlFlow::Err(anyhow::anyhow!("Internal error: a join of no partials")));
+		};
+		let spec = first.spec.clone();
+		if spec.kind != BreakerKind::JoinBuild || spec.arity < 2 {
+			return Err(ControlFlow::Err(anyhow::anyhow!(
+				"Internal error: partials merged as another breaker"
+			)));
+		}
+		let (width, index) = (spec.arity as usize - 2, spec.index);
+		let mut build = Runs::default();
+		let mut regex = Vec::new();
+		let mut regex_account = memory.pinned_reservation();
+		for partial in partials {
+			let Partial {
+				runs,
+				held,
+				side,
+				..
+			} = partial;
+			build.append(runs)?;
+			if !held.is_empty() {
+				build.push(write_run(memory, spec.clone(), held, ctx).await?)?;
+			}
+			for (key, row) in side {
+				let bytes = crate::exec::memory::size::value_bytes(&row)
+					+ crate::exec::memory::size::values_bytes(&key);
+				if regex_account.charge(bytes) == Verdict::Spill {
+					regex_account.insist(ctx).await?;
+				}
+				regex.push((key, row));
+			}
+		}
+		Ok(Box::new(SpilledJoin {
+			width,
+			index,
+			account: memory.reservation(),
+			memory: Arc::clone(memory),
+			build,
+			regex,
+			_regex_account: regex_account,
+			regex_probe_account: memory.pinned_reservation(),
+			probes: Vec::new(),
+			probe_runs: Runs::default(),
+			regex_probes: Vec::new(),
+			out: Vec::new(),
+			out_runs: Runs::default(),
+			arrivals: 0,
+		}))
+	}
 }
 
 /// What a join yields for a probe row given its matches: the in-memory

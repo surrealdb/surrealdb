@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use super::tests::{bind, outcome, planner};
+use crate::exec::memory::runs::BreakerKind;
 use crate::exec::memory::{
 	Admit, BoxFut, FairGovernor, Lease, MemTempStore, MemoryGovernor, TempStore,
 };
@@ -67,7 +68,7 @@ fn small(fan_in: usize) -> surrealdb_cnf::ConfigMap {
 /// A governor that grants every request while a database is set up, and
 /// defers to `inner` once the tests run on it: a setup's writes are not what
 /// a test bounds.
-struct SetUpFreely<G> {
+pub(super) struct SetUpFreely<G> {
 	setting_up: std::sync::atomic::AtomicBool,
 	inner: Arc<G>,
 }
@@ -120,7 +121,7 @@ impl<G: MemoryGovernor> MemoryGovernor for SetUpFreely<G> {
 
 /// A database set up with `setup`, then bounded by `governor` and spilling
 /// to `store`.
-async fn bounded_on(
+pub(super) async fn bounded_on(
 	governor: Arc<impl MemoryGovernor>,
 	store: Arc<impl TempStore>,
 	setup: &str,
@@ -167,7 +168,7 @@ async fn db_on(
 }
 
 /// The rows `sql` answers over `db`, under `scheduler` where given.
-async fn answer(
+pub(super) async fn answer(
 	db: &TestDb,
 	sql: &str,
 	scheduler: Option<Arc<dyn Scheduler>>,
@@ -1421,4 +1422,58 @@ async fn a_spilled_floor_drops_rows_that_cannot_be_kept() {
 		);
 	}
 	assert_eq!(store.runs(), 0, "a spilled run outlived its query");
+}
+
+/// A region whose batches outgrow a small budget spills inside its batches,
+/// and its merge answers what the serial run answers: sorts, whole and under a
+/// limit, aggregates whose states combine exactly, and `GROUP ALL`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn b_a_region_whose_batches_spill_answers_as_serial() {
+	// A `$this` read keeps each body off the storage cursor's in-place path,
+	// so each runs as a region.
+	let statements = [
+		"SELECT n, $this.k AS kk FROM t ORDER BY kk",
+		"SELECT n, $this.s AS ss FROM t ORDER BY ss COLLATE, n DESC",
+		"SELECT n, $this.k AS kk FROM t ORDER BY kk DESC LIMIT 1500",
+		"SELECT g, count() AS c, array::group(k) AS ks, math::max(n) AS mx, \
+		 array::join(s, ',') AS j, math::median(n) AS md FROM t WHERE $this.n >= 0 GROUP BY g",
+		"SELECT n % 400 AS b, pad AS first, array::distinct(s) AS ds, math::min(n) AS mn \
+		 FROM t WHERE $this.n >= 0 GROUP BY b",
+		"SELECT count() AS c, array::group(k) AS ks FROM t WHERE $this.n >= 0 GROUP ALL",
+	];
+	let expected = unbounded(&statements).await;
+	let store = Arc::new(MemTempStore::new(1024, None));
+	let config = small(4).with_key_value("region_row_threshold", "1");
+	let db = db_on(Watching::new(64 << 10), Arc::clone(&store), config).await;
+	let ctx = db.exec_ctx().await;
+	for sql in statements {
+		let program = super::tests_sources::program_of(&ctx, sql).await;
+		assert!(program.pipelines.iter().any(|p| p.region), "`{sql}` is no region");
+	}
+	let handed = super::region::HANDED_TO_WORKERS.load(Ordering::Relaxed);
+	let before = store.runs_written();
+	let partials = |kind| super::region::batch_partials(store.session(), kind);
+	for (sql, expected) in statements.iter().zip(&expected) {
+		let (sorts, groups) = (partials(BreakerKind::Sort), partials(BreakerKind::Groups));
+		assert_eq!(&answer(&db, sql, None).await, expected, "`{sql}` as a spilling region");
+		// `GROUP ALL` holds one group and never spills in a batch.
+		let (sorted, grouped) = (sql.contains("ORDER BY"), sql.contains("GROUP BY"));
+		assert_eq!(
+			partials(BreakerKind::Sort) > sorts,
+			sorted,
+			"`{sql}`: its sorts did not spill in a batch as expected"
+		);
+		assert_eq!(
+			partials(BreakerKind::Groups) > groups,
+			grouped,
+			"`{sql}`: its groups did not spill in a batch as expected"
+		);
+	}
+	assert!(
+		super::region::HANDED_TO_WORKERS.load(Ordering::Relaxed) > handed,
+		"no batch ran on a worker"
+	);
+	assert!(store.runs_written() > before, "nothing spilled");
+	assert_eq!(store.runs(), 0, "a spilled run outlived its query");
+	assert!(store.most_read_at_once() <= 4, "read {} runs at once", store.most_read_at_once());
 }

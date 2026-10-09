@@ -12,9 +12,12 @@
 //! What a breaker spills is a run ([`runs`]): written through one part
 //! buffer and read back through one, so the memory a spill takes is bounded
 //! whatever it spills. That memory is the lease's headroom, part of the
-//! minimum the lease is guaranteed: one buffer to write a run and one per run
-//! a merge reads at once ([`QueryMemory::fan_in`]). A merge of more
-//! runs than that takes several passes.
+//! minimum the lease is guaranteed: one part buffer to write a run and one
+//! per run a merge reads at once ([`QueryMemory::fan_in`]). A merge of more
+//! runs than that takes several passes. One run is written at a time per
+//! query ([`QueryMemory::writer`]), so the single writer buffer the headroom
+//! reserves is the most the query's writers hold, however many of its
+//! region's batches spill at once.
 //!
 //! A statement never fails for want of the governor's memory. What a breaker
 //! holds spills to the temporary store when the lease does not cover it.
@@ -121,6 +124,7 @@ impl MemoryHost {
 			unspillable: std::sync::Mutex::new((0, 0)),
 			writes: std::sync::Mutex::new((0, 0)),
 			counted: AtomicUsize::new(0),
+			writers: Arc::new(tokio::sync::Semaphore::new(1)),
 		})
 	}
 }
@@ -150,6 +154,9 @@ pub(crate) struct QueryMemory {
 	/// nothing, so a query that holds only a few small values never opens a
 	/// lease.
 	counted: AtomicUsize,
+	/// One run is written at a time per query: the lease's headroom reserves
+	/// one writer's part buffer.
+	writers: Arc<tokio::sync::Semaphore>,
 }
 
 impl std::fmt::Debug for QueryMemory {
@@ -199,6 +206,15 @@ impl QueryMemory {
 	/// Whether the query can spill.
 	pub(crate) fn can_spill(&self) -> bool {
 		self.host.store.is_some()
+	}
+
+	/// Wait for this query's one run writer: held by a [`runs::RunSink`] until
+	/// it finishes or is dropped.
+	pub(crate) async fn writer(&self) -> anyhow::Result<tokio::sync::OwnedSemaphorePermit> {
+		Arc::clone(&self.writers)
+			.acquire_owned()
+			.await
+			.map_err(|_| anyhow::anyhow!("A query's run writer was closed"))
 	}
 
 	/// The bytes a breaker reserves from its lease at a time.
@@ -453,6 +469,12 @@ impl QueryMemory {
 		Ok(())
 	}
 
+	/// The bytes this query counts as spilled now.
+	#[cfg(test)]
+	pub(crate) fn spilled_bytes(&self) -> u64 {
+		self.spilled.load(Ordering::Acquire)
+	}
+
 	/// Count `bytes` of a deleted run as no longer spilled.
 	pub(crate) fn unspilled(&self, bytes: u64) {
 		self.spilled.fetch_sub(bytes, Ordering::AcqRel);
@@ -691,6 +713,31 @@ impl Reservation {
 					|| (self.used >= memory.host.settings.chunk.max(1) && memory.lease().over())
 			}
 		}
+	}
+
+	/// Take over what `from` has reserved from the lease, leaving it
+	/// reserving nothing, so that the rows `from` counted can be charged here
+	/// without the lease counting them twice or, between the two, not at all.
+	/// Charges draw on what was taken before they reserve more. The bytes
+	/// stay pinned or not as they were reserved. Only accounts on the same
+	/// query's memory exchange a reservation.
+	pub(crate) fn adopt(&mut self, from: &mut Reservation) {
+		let same = match (&self.memory, &from.memory) {
+			(Some(mine), Some(theirs)) => Arc::ptr_eq(mine, theirs),
+			_ => false,
+		};
+		if !same {
+			return;
+		}
+		if from.pinned && !self.pinned {
+			self.pin();
+		} else if self.pinned
+			&& !from.pinned
+			&& let Some(memory) = &self.memory
+		{
+			memory.lease().pin(from.reserved);
+		}
+		self.reserved += std::mem::take(&mut from.reserved);
 	}
 
 	/// Give back everything reserved: the breaker has spilled or finished.

@@ -19,10 +19,17 @@
 //! The distinct rows counted against `gql_max_join_build_rows` are the rows
 //! seen before the spill and the deferred rows kept, so a statement past the
 //! limit fails with the error the in-memory set raises.
+//!
+//! A distinct whose rows several producers take ([`DistinctProducer`]) defers
+//! every row: each is kept as `[row, producer, arrival]`, and the producers'
+//! partials merge ([`merge_distinct`]) into the first arrival of every row, in
+//! the order a serial distinct over the producers' rows in producer order
+//! answers them.
 
 use std::cmp::Ordering;
 use std::sync::Arc;
 
+use super::partial::{Partial, PartialCounts, concat};
 use super::spill::{RecordOrder, Runs, write_run};
 use crate::exec::memory::runs::{BreakerKind, Record, RunOrder, RunSpec};
 use crate::exec::memory::{QueryMemory, Reservation, Verdict};
@@ -206,4 +213,148 @@ impl Distinct {
 		let merge = kept_runs.merge(&memory, kept, by_keys(), None, ctx).await?;
 		Ok(Some(merge))
 	}
+}
+
+/// One producer's side of a distinct whose rows several producers take: each
+/// row it takes is kept as `[row, producer, arrival]`; runs are written
+/// sorted by that key with all but the first arrival of each row dropped,
+/// once its lease no longer covers what it holds.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) struct DistinctProducer {
+	producer: i64,
+	arrivals: i64,
+	held: Vec<Record>,
+	runs: Runs,
+	account: Reservation,
+	/// `ctx`'s memory where it can spill.
+	memory: Option<Arc<QueryMemory>>,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+impl DistinctProducer {
+	/// Producer `producer`, charging `ctx`'s query where it can spill.
+	pub(super) fn new(producer: u32, ctx: &ExecutionContext) -> Self {
+		let memory = ctx.ctx().memory().filter(|memory| memory.can_spill()).cloned();
+		Self {
+			producer: i64::from(producer),
+			arrivals: 0,
+			held: Vec::new(),
+			runs: Runs::default(),
+			account: match &memory {
+				Some(memory) => memory.reservation(),
+				None => Reservation::unbounded(),
+			},
+			memory,
+		}
+	}
+
+	/// Take `row`, which arrives after every row this producer has taken.
+	pub(super) async fn take(&mut self, row: Value, ctx: &ExecutionContext) -> FlowResult<()> {
+		let arrival = self.arrivals;
+		self.arrivals += 1;
+		let bytes = crate::exec::memory::size::value_bytes(&row);
+		self.held.push((vec![row, Value::from(self.producer), Value::from(arrival)], Value::None));
+		if self.account.charge(bytes) == Verdict::Spill && self.memory.is_some() {
+			self.spill(ctx).await?;
+		}
+		Ok(())
+	}
+
+	/// Write the rows held as the next run and release what they were charged.
+	async fn spill(&mut self, ctx: &ExecutionContext) -> FlowResult<()> {
+		let Some(memory) = self.memory.clone() else {
+			return Ok(());
+		};
+		let held = first_arrivals(std::mem::take(&mut self.held));
+		let run = write_run(&memory, spec(BreakerKind::DistinctDeferred, 3), held, ctx).await?;
+		self.runs.push(run)?;
+		self.account.clear();
+		Ok(())
+	}
+
+	/// The rows taken as a partial: its runs, and the rows still held sorted
+	/// with all but the first arrival of each row dropped.
+	pub(super) fn into_partial(mut self) -> Partial {
+		let held = first_arrivals(std::mem::take(&mut self.held));
+		self.account.clear();
+		Partial {
+			spec: spec(BreakerKind::DistinctDeferred, 3),
+			runs: self.runs,
+			held,
+			side: Vec::new(),
+			counts: PartialCounts {
+				taken: self.arrivals as u64,
+			},
+		}
+	}
+}
+
+/// `records`, keyed `[row, producer, arrival]`, sorted by key with every
+/// record dropped whose row equals the row before it: the first of each equal
+/// run is the earliest arrival.
+#[cfg_attr(not(test), allow(dead_code))]
+fn first_arrivals(mut records: Vec<Record>) -> Vec<Record> {
+	records.sort_by(|(a, _), (b, _)| a.cmp(b));
+	let mut last: Option<Value> = None;
+	records.retain(|(keys, _)| {
+		if last.as_ref().is_some_and(|l| l.cmp(&keys[0]) == Ordering::Equal) {
+			return false;
+		}
+		last = Some(keys[0].clone());
+		true
+	});
+	records
+}
+
+/// The first arrival of every row across `partials`, in arrival order: the
+/// rows a serial distinct over the producers' rows in producer order
+/// answers. Fails past `max_rows` kept rows as the in-memory set does. The
+/// merge's records are `([producer, arrival], row)`.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) async fn merge_distinct(
+	memory: &Arc<QueryMemory>,
+	partials: Vec<Partial>,
+	max_rows: usize,
+	ctx: &ExecutionContext,
+) -> FlowResult<super::spill::Merge> {
+	let (runs, held, _) = concat(memory, partials, None, false, ctx).await?;
+	// One reader is left free for the run of kept rows being written.
+	let order = by_keys();
+	let runs = runs.reduce(memory, &order, memory.fan_in() - 1, None, ctx).await?;
+	let mut input = runs.open(held, order, None).await?;
+	let mut account = memory.reservation();
+	let mut kept_runs = Runs::default();
+	let mut kept: Vec<Record> = Vec::new();
+	let mut kept_count = 0usize;
+	let mut last: Option<Value> = None;
+	while let Some((keys, _)) = input.next(ctx).await? {
+		let mut keys = keys.into_iter();
+		let (Some(row), Some(producer), Some(arrival)) = (keys.next(), keys.next(), keys.next())
+		else {
+			return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
+				"Internal error: a distinct partial's record has too few keys"
+			)));
+		};
+		if last.as_ref().is_some_and(|l| l.cmp(&row) == Ordering::Equal) {
+			continue;
+		}
+		kept_count += 1;
+		if kept_count > max_rows {
+			return Err(too_many_distinct(max_rows));
+		}
+		last = Some(row.clone());
+		let bytes = crate::exec::memory::size::value_bytes(&row);
+		kept.push((vec![producer, arrival], row));
+		if account.charge(bytes) == Verdict::Spill {
+			let mut held = std::mem::take(&mut kept);
+			held.sort_by(|(a, _), (b, _)| a.cmp(b));
+			let run = write_run(memory, spec(BreakerKind::DistinctKept, 2), held, ctx).await?;
+			kept_runs.push(run)?;
+			account.clear();
+		}
+	}
+	drop(input);
+	kept.sort_by(|(a, _), (b, _)| a.cmp(b));
+	account.clear();
+	kept_runs.merge(memory, kept, by_keys(), None, ctx).await
 }

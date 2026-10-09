@@ -8,7 +8,9 @@
 //! hands its rows on, the runs and the rows still held are merged: at each
 //! step the row that orders first is taken, and of rows that tie, the one
 //! from the earlier run, the rows still held last. The merged order is the
-//! order sorting every row at once gives.
+//! order sorting every row at once gives. A run's records are its breaker's
+//! keys alone, stably ordered when written, so ties across runs are decided
+//! by run order alone.
 //!
 //! A merge reads each run through one part buffer, and reads no more runs at
 //! once than its query's fan-in ([`QueryMemory::fan_in`]). With more runs than
@@ -29,8 +31,9 @@ use std::sync::Arc;
 
 use surrealdb_runtime::fuel::LoserTree;
 
+use super::interp::compare_keys;
 use super::program::KeyOrder;
-use super::sort::{Sorted, compare_rows};
+use super::sort::Sorted;
 use crate::exec::memory::runs::{Record, Run, RunSink, RunSource, RunSpec};
 use crate::exec::memory::{QueryMemory, Sharing};
 use crate::exec::{ExecutionContext, FlowResult};
@@ -62,10 +65,12 @@ thread_local! {
 /// The order two records take in a merge.
 pub(crate) type RecordOrder = Arc<dyn Fn(&Record, &Record) -> Ordering + Send + Sync>;
 
-/// The order of a sort's records: by their keys under `keys`, then their
-/// arrival where a sort stamps one.
+/// The order of a sort's records: by their keys under `keys`. Only the first
+/// `keys.len()` columns are compared, so any arrival stamp a held record
+/// carries after them is ignored; records that tie keep the order of their
+/// sources.
 pub(crate) fn sort_order(keys: Vec<KeyOrder>) -> RecordOrder {
-	Arc::new(move |(a, _), (b, _)| compare_rows(a, b, &keys))
+	Arc::new(move |(a, _), (b, _)| compare_keys(a, b, &keys))
 }
 
 fn err(e: anyhow::Error) -> ControlFlow {
@@ -88,7 +93,18 @@ pub(crate) async fn write_run(
 	records: impl IntoIterator<Item = Record>,
 	ctx: &ExecutionContext,
 ) -> FlowResult<Run> {
-	let mut sink = RunSink::open(memory, spec, Sharing::Private).await.map_err(err)?;
+	write_run_as(memory, spec, records, Sharing::Private, ctx).await
+}
+
+/// [`write_run`] for a run readable as `sharing` says.
+pub(crate) async fn write_run_as(
+	memory: &Arc<QueryMemory>,
+	spec: RunSpec,
+	records: impl IntoIterator<Item = Record>,
+	sharing: Sharing,
+	ctx: &ExecutionContext,
+) -> FlowResult<Run> {
+	let mut sink = RunSink::open(memory, spec, sharing).await.map_err(err)?;
 	let mut taken = 0;
 	for (keys, row) in records {
 		sink.push(&keys, &row).await.map_err(err)?;
@@ -129,10 +145,43 @@ impl Runs {
 		Ok(())
 	}
 
+	/// Add `other`'s runs, in order, after every run held; they must be of the
+	/// breaker the runs held are.
+	pub(crate) fn append(&mut self, other: Runs) -> FlowResult<()> {
+		for run in other.runs {
+			self.push(run)?;
+		}
+		Ok(())
+	}
+
+	/// How many runs there are.
+	pub(crate) fn len(&self) -> usize {
+		self.runs.len()
+	}
+
+	/// The runs, in the order they were written.
+	#[cfg_attr(not(test), allow(dead_code))]
+	pub(crate) fn runs(&self) -> &[Run] {
+		&self.runs
+	}
+
+	/// The runs, in the order they were written, each now the caller's to
+	/// keep or hand on.
+	#[cfg_attr(not(test), allow(dead_code))]
+	pub(crate) fn into_runs(self) -> Vec<Run> {
+		self.runs
+	}
+
+	/// The records the runs hold in all.
+	pub(crate) fn total_records(&self) -> u64 {
+		self.runs.iter().map(Run::records).sum()
+	}
+
 	/// Sort a sort's `rows` stably by `keys`, keep the first `limit`, and write
-	/// them as the next run, written for `spec`; `slab` is the sort's slab its
-	/// slab rows lie in. Answers the keys of the run's last record when the
-	/// run holds exactly `limit` records.
+	/// them as the next run, written for `spec`, each record carrying its
+	/// keys alone: the spec's arity is the number of keys. `slab` is the sort's
+	/// slab its slab rows lie in. Answers the keys of the run's last record
+	/// when the run holds exactly `limit` records.
 	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn spill_sorted(
 		&mut self,
@@ -145,7 +194,10 @@ impl Runs {
 		ctx: &ExecutionContext,
 	) -> FlowResult<Option<Vec<Value>>> {
 		let rows = super::sort::sorted(rows, keys, limit.unwrap_or(usize::MAX), ctx).await?;
-		let records = records_of(rows, slab)?;
+		let mut records = records_of(rows, slab)?;
+		for (record, _) in &mut records {
+			record.truncate(keys.len());
+		}
 		let floor = match records.last() {
 			Some((last, _)) if limit == Some(records.len()) => Some(last.clone()),
 			_ => None,

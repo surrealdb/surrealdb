@@ -277,96 +277,142 @@ and never spills or fails for memory.
 /// What one producer — a region batch that spilled, or a fan — hands its
 /// coordinator for one breaker.
 pub(crate) struct Partial {
-    /// The breaker and order every run of this partial was written under.
+    /// The breaker and order every run of this partial was written under;
+    /// `held` records have the same arity, `side` keys are the join width only.
     pub spec: RunSpec,
     /// The producer's runs, in the order it wrote them.
     pub runs: Runs,
-    /// Records the producer still held, after every run, already in order.
-    /// Empty for a fan: a fan writes what it holds as its last run.
+    /// Records the producer still held, after every run, in the spec's order.
     pub held: Vec<Record>,
-    /// Counts the coordinator checks against main's limits: rows taken,
-    /// distinct rows kept, build rows read.
+    /// Records that travel beside the runs out of key order: a join build's
+    /// rows whose key holds a regex, `(key, row)` in arrival order. Empty for
+    /// every other breaker.
+    pub side: Vec<Record>,
     pub counts: PartialCounts,
+}
+
+pub(crate) struct PartialCounts {
+    /// For a join build, the build rows the producer read, regex rows
+    /// included; for a distinct, the rows it took; otherwise the records the
+    /// partial holds.
+    pub taken: u64,
 }
 ```
 
-`Partial` lives in `exec/vm/partial.rs`. Region's private batch struct, today
-also named `Partial`, is renamed `BatchResult`, so the two never share a name.
+`Partial` lives in `exec/vm/partial.rs`. Region's batch struct is
+`BatchResult`, so the two never share a name.
 
-A producer emits one `Partial` per breaker it ran. A fan writes every run with
-`Sharing::Shared` and the program key it was dispatched with, and hands the
-coordinator the `RunRef`s plus the counts; it holds nothing in memory after.
-A region batch writes `Sharing::Private` runs and may leave records in `held`.
+A producer emits one `Partial` per breaker it ran. A partial's runs are written
+with the producer's program key. A fan that hands its partial to another
+process writes its runs `Sharing::Shared` and seals its held records first
+(`Partial::seal`), so the partial travels as names and counts alone.
+
+The records of a partial are those a single node writes for the same breaker,
+with these differences, which let the order of a whole record vector stand for
+serial order across producers:
+
+- **Sort runs carry the sort's keys alone.** A sort's records are cut to the
+  sort's keys after they are stably sorted and before they are written, and a
+  sort run's arity is the number of keys (one for a random order), never the
+  width of the first row. An arrival stamp is local to the state that wrote it,
+  and whether a sort stamps at all depends on the thread's quantum, so stamps
+  are not compared across states. `sort_order` compares keys only; records that
+  tie keep the order of their sources, which is exact because each run is
+  written in arrival order, stably sorted, and a merge never reorders a source.
+- **A distinct partial's records are `[row, producer, arrival]`**, and a join
+  build partial's are `[key.., producer, arrival]`. A single node's spill keeps
+  its own arity, and a partial's runs never share a `Runs` with a single node's.
+- A distinct producer keeps only the first arrival of each row it holds.
 
 ### B.2 The coordinator merge
 
-`merge_partials(spec, partials: Vec<Partial>, ...)` merges producers in
-**producer order** — the order the source yielded the batches, or the order of
-the fans' key ranges — which is the arrival order of the serial run. Within one
-producer, its runs come first and its held records last, as in `Runs::merge`.
-The sources of the k-way merge are therefore
-`p0.runs..., p0.held, p1.runs..., p1.held, ...`, and the loser tree's
-earlier-source-wins tie rule gives every tie the serial order. `Merge::open`
-takes an ordered list of sources (`Run` or `Held`) instead of "runs then one
-held"; `Runs::merge` is the single-producer case.
+`merge_partials(memory, how, partials, ctx)` merges producers in **producer
+order** — the order the source yielded the batches, or the order of the fans'
+key ranges — which is the arrival order of the serial run. Within one producer,
+its runs come first and its held records last. Every partial must be of one
+breaker and agree in kind and arity with `how`; otherwise the merge fails with
+an internal error. `how` is a `PartialMerge`: `SortMerge { keys, keep }`,
+`KeyedFold`, `DistinctFirst { max_rows }` or `JoinBuild { max_rows }`.
+
+The merge **seals** rather than merging an ordered list of sources: every
+producer's held records but the last producer's are written as a run after that
+producer's runs. What is merged is then a list of runs in producer order and the
+last producer's held records, which arrived after every run: the single-producer
+case, `Runs::merge`, whose earlier-source-wins tie rule gives every tie the
+serial order. Sealing keeps passes of `Runs::reduce`, which merge consecutive
+runs, correct without a segment boundary.
 
 Per breaker:
 
-- **Sort** — k-way merge under `sort_order(keys)` with `limit = keep`. Each
-  producer's records carry an arrival stamp local to the producer only where
-  the sort stamps one (`keep` sorts); the merge needs no global stamp because
-  the source index orders producers. Fans of a `keep` sort each truncate to
-  `keep`.
-- **Keyed aggregate** — merge by key (`Value::cmp` on the key vector); for each
-  key, fold every record's saved states with `Groups::load_saved` in source
-  order: the first opens the group, each later one is merged after it, and a
-  first value is kept from the earliest source that has one. This is what
-  `finish_spilled_groups` does over one producer's runs today; over partials it
-  is the same fold over more sources. `GROUP ALL` (no key) folds every
-  producer's single group in producer order.
-- **GQL distinct** — each fan runs the distinct over its rows and ships its
-  kept rows with `(row, local arrival)`. The coordinator merges by row, keeps
-  the first occurrence by `(producer, arrival)`, and puts the kept rows back in
-  `(producer, arrival)` order by an external sort, as the spilled finish does
-  for deferred rows. The distinct-row cap is checked against the number of rows
-  the coordinator keeps, so the error and its threshold are main's.
-- **Join** — a fan reads part of the build side and ships build runs keyed
-  `(key, producer, arrival)`; the coordinator's spilled finish
-  (`SpilledJoin::finish`) consumes the merged build exactly as it consumes its
-  own build runs today, so the matches of a probe row are the build rows of an
-  equal key in serial build arrival order, then the regex build rows. The build
-  row cap is checked against the sum of the producers' build counts before the
-  probe side runs.
+- **Sort** — merge under `sort_order(keys)` with `limit = keep`. Each producer's
+  held records are cut to `keep` first, which is exact for the reason a merge
+  with a limit is.
+- **Keyed aggregate** — merge by key (`Value::cmp` on the key vector); the
+  caller folds the result with `SavedFold`: for each key, every record's saved
+  states are loaded with `Groups::load_saved` in source order, the first opening
+  the group and each later one merged after it, and a first value kept from the
+  earliest source that has one. `GROUP ALL`'s one group is saved under an empty
+  key (`Groups::into_saved`), so fans fold it as any other.
+- **GQL distinct** — `merge_distinct` reduces the runs to one reader fewer than
+  the fan-in, keeps the first row of each equal run, and puts the kept rows back
+  in `[producer, arrival]` order by a merge of runs of kept rows. The distinct-row
+  cap is checked against the rows kept, so the error and its threshold are
+  main's.
+- **Join** — `SpilledJoin::from_partials` appends the producers' build runs in
+  producer order, writes each producer's held records as a run, and concatenates
+  the regex rows (`side`) in producer order, which is serial arrival order. The
+  build row cap is checked against the sum of the producers' `taken` counts
+  before any probe row is deferred. `SpilledJoin::finish` slices the key columns
+  off each record, so the producer and arrival columns only order the build.
 
 ### B.3 Region batches that spill
 
 Region bodies hold only sorts and aggregates, so a region batch produces sort
 and group partials only.
 
-- A batch's `State` takes a `Reservation` per spillable breaker from the
-  statement's `QueryMemory` (one lease per query; the batch's accounts draw on
-  it). Charging is at the same buffer pushes the statement's state charges at.
-- While no batch account refuses, nothing changes: the batch's buffers are
-  absorbed as today (`keep_absorbed`, `Groups::absorb`), and the absorb path does
-  not touch the store. The `vm_alloc` regression tests and benchmarks hold this
-  path to its current allocations.
-- When a batch account says `Verdict::Spill`, the batch writes that breaker's
-  buffer as a run, as the statement does (`spill_sorted`, `save_all`), and its
-  result carries a `Partial` for that breaker instead of a buffer.
-- When the merge reaches a batch result that carries a `Partial` for a breaker,
-  it first **seals** the statement's own state for that breaker: it writes what
-  the statement holds as a run (in memory order, which is serial order) so that
-  every record the statement holds precedes the batch's records. It then
-  appends the batch's runs after the statement's runs and takes its `held`
-  records as its new in-memory buffer. From then on the statement's runs are in
-  serial arrival order and its held records arrived after every run, which is
-  the invariant `Runs::merge` relies on.
-- A breaker whose groups cannot be saved (`save_all` answers `None`) does not
-  spill in a batch either; it stays in memory, as at the statement.
+- A batch whose body is not paged binds its breakers to the query's lease when
+  the query can spill (`bound_batch`): one `Reservation` per spillable breaker,
+  charged at the buffer pushes the statement's state is charged at. A sort in a
+  batch never spills by `TEMPFILES` row count. After every row the batch spills
+  what its lease no longer covers, as the statement does. A paged batch is never
+  bound.
+- While no batch account refuses, the batch's buffers are absorbed
+  (`keep_absorbed`, `Groups::absorb`) and the absorb path does not touch the
+  store. The `vm_alloc` measurements hold this path to its allocations.
+- A batch that spilled a breaker hands the merge a `Partial` for it in place of
+  its buffer. A spilled breaker's reservation is taken out of the batch's state
+  before its buffer becomes a partial, so the lease keeps counting the buffer
+  until the partial's records are charged to the same reservation. The batch's
+  reservations travel with its result, and the merge takes each one over for
+  the statement's account for the same breaker (`Reservation::adopt`) before
+  it charges the statement for the rows it takes. A batch waiting to merge
+  therefore counts against the lease, the batches that start after it find the
+  lease short and spill sooner, and the rows a merge moves are counted once,
+  not by the batch and the statement together.
+- To absorb a `Partial`, the merge first **seals** the statement's own state for
+  that breaker (`seal_sort`, `seal_groups`): it writes what the statement holds
+  as a run, in memory order, which is serial order, so that every record the
+  statement holds precedes the batch's. It then appends the batch's runs after
+  the statement's and takes the batch's held records as its buffer
+  (`keep_absorbed` for a sort, `load_saved` for groups). The statement's runs
+  stay in serial arrival order and its held records arrived after every run,
+  which is the invariant `Runs::merge` relies on.
+- A breaker whose groups cannot be saved, and `GROUP ALL`, do not spill in a
+  batch; they stay in memory.
+- A batch's spilled floor is dropped with the batch: a floor only prunes rows
+  early.
 
 Sealing writes a run the serial run might not have written. That changes no
 result: the merge of runs in arrival order answers the same order as fewer,
 longer runs.
+
+**One run writer per query.** A query writes one run at a time
+(`QueryMemory::writer`): a `RunSink` holds the query's single writer permit from
+the moment it opens until it finishes or is dropped. The lease's headroom
+reserves one writer's part buffer, `part_size * (1 + fan_in)`, and batches on
+workers may spill concurrently; the permit keeps the headroom true. No code path
+holds two sinks, and the statement awaits no batch while it holds one, so the
+permit cannot deadlock.
 
 ### B.4 Fans
 
@@ -376,9 +422,21 @@ program key, its producer index, and the coordinator's backend; how the fan is
 started and how its `RunRef`s travel back is the dispatcher's concern (the
 Cloudflare edge's fan-out), not this design's. This step supplies:
 
-- `Partial` encode/decode for transport: `spec`, `RunRef` list, counts;
+- `Partial::to_wire` and `Partial::from_wire`, big-endian throughout: the magic
+  `SRLPARTL`, the run format and build key, the spec (the bytes a run's header
+  carries from its program key through its order), `taken`, the runs, and the
+  side records. Each run is a session name (u32 length, UTF-8), an id (u64), a
+  tier (u8: 0 local, 1 shared), the bytes the run holds (u64, which a reader
+  bounds the blocks it reads by) and its record count (u64). Each side record
+  is a u64 length and the framed record. `to_wire` refuses a partial that holds
+  records in memory or a run of the local tier, before it hands any run on; a
+  refused partial's runs are deleted when it drops. `Run::into_ref` disarms the
+  run's deletion and un-counts its bytes; `Run::adopt` counts them in the
+  receiver's `QueryMemory`, which then owns and deletes the run. `from_wire`
+  refuses another magic, format or build, and truncated, malformed or trailing
+  bytes.
 - `merge_partials`, and tests that run a program serially and as N simulated
-  fans over one shared `MemTempStore` and compare results row for row, including
+  producers over one `MemTempStore` and compare results row for row, including
   ties, first values, and errors past the caps.
 
 ### B.5 Attaching to the plan's Spill label
