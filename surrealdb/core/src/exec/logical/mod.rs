@@ -87,6 +87,7 @@
 #![warn(clippy::wildcard_enum_match_arm)]
 
 pub(crate) mod constants;
+pub(crate) mod edges;
 mod effects;
 mod fold;
 pub(crate) mod footprint;
@@ -104,11 +105,9 @@ pub(crate) use effects::{
 	Needs, effects_of_body, effects_of_expr, effects_of_plan, effects_of_plan_late_bound,
 	needs_of_expr, stored_functions_of,
 };
-#[cfg(test)]
-pub(crate) use rules::plan_may_raise;
 pub(crate) use rules::{
 	BatchRetry, ColumnEffects, and, columns_may_run_column_major, conjuncts, is_effect_free,
-	is_false, may_signal_control_flow, named_reads,
+	is_false, may_signal_control_flow, named_reads, plan_may_raise,
 };
 
 use crate::catalog::{DatabaseId, NamespaceId};

@@ -189,6 +189,10 @@ impl Footprint {
 	/// `moved` reads or writes: whether a rewrite that moves `moved` across
 	/// them, or decides its outcome before they run, may change what it reads
 	/// or leaves.
+	#[cfg_attr(
+		not(test),
+		allow(dead_code, reason = "the overlap tests state the edge module against it")
+	)]
 	pub(crate) fn conflicts(&self, moved: &Footprint) -> bool {
 		self.writes.iter().any(|w| moved.reads.iter().chain(&moved.writes).any(|r| w.overlaps(r)))
 	}
@@ -200,6 +204,10 @@ impl Footprint {
 	}
 
 	/// Whether the statement may write what `read` names.
+	#[cfg_attr(
+		not(test),
+		allow(dead_code, reason = "the overlap tests state the edge module against it")
+	)]
 	pub(crate) fn writes_over(&self, read: &Resource) -> bool {
 		self.writes.iter().any(|w| w.overlaps(read))
 	}
@@ -220,7 +228,13 @@ pub(crate) fn of(op: &LogicalOp, registry: &FunctionRegistry) -> Footprint {
 /// evaluated to reach it. The footprint of the whole `IF`, which [`of`]
 /// answers, is their union. A rewrite inside one arm consults that arm's
 /// alone; one that moves a statement across the `IF` consults the union.
-#[cfg_attr(not(test), allow(dead_code, reason = "read by the rewrites inside an arm"))]
+#[cfg_attr(
+	not(test),
+	allow(
+		dead_code,
+		reason = "the per-arm summary RFC §3.4 defines; no rewrite in this build works inside one arm"
+	)
+)]
 pub(crate) fn of_arms(ifs: &LogicalIfOp, registry: &FunctionRegistry) -> Vec<Footprint> {
 	let mut conditions = Footprint::default();
 	let mut out = Vec::with_capacity(ifs.arms.len());

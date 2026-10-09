@@ -5391,6 +5391,7 @@ impl Blocks {
 		planner: &Planner<'_>,
 		body: &LogicalOp,
 	) -> Mapped<Option<(Control, Control)>> {
+		use crate::exec::logical::edges::{Edges, data};
 		if !self.straight
 			|| !self.transparent
 			|| self.overlay.is_none()
@@ -5441,13 +5442,16 @@ impl Blocks {
 		let rest = crate::exec::vm::host::out_of_line(|| self.control(planner, body)).await?;
 		let later = self.later_schema.take().unwrap_or_default();
 		let rest_written = std::mem::take(&mut self.written);
+		// A later schema statement that did nothing stays settled only when the
+		// rest of the iteration's writes have no `FLOW` or `OUTPUT` edge into it.
 		let steady = !self.dead
 			&& self.transparent
 			&& self.overlay == after_first
 			&& !later.is_empty()
-			&& later
-				.iter()
-				.all(|(footprint, nothing)| *nothing && !rest_written.conflicts(footprint));
+			&& later.iter().all(|(footprint, nothing)| {
+				*nothing
+					&& !data(&rest_written, footprint).intersects(Edges::FLOW.union(Edges::OUTPUT))
+			});
 		if !steady {
 			undo(self);
 			return Ok(None);

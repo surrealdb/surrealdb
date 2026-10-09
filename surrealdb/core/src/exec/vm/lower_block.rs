@@ -74,8 +74,8 @@ pub(super) struct LoopTargets {
 	/// The statements nested in the body's statements whose value is kept
 	/// for one run of their statement ([`super::plan::Strategy::Once`]) and
 	/// that read no name the loop binds, by [`Lowering::nested`] index, with
-	/// what they read: kept across the loop's iterations when nothing in its
-	/// body writes what they read.
+	/// what they read: kept across the loop's iterations when the body's
+	/// writes have no `FLOW` edge into them.
 	invariant: Vec<(usize, crate::exec::logical::footprint::Footprint)>,
 }
 
@@ -572,10 +572,13 @@ impl Lowering<'_, '_> {
 			outer.written.absorb(targets.written.clone());
 		}
 		if !targets.writes {
-			// Nothing an iteration writes is what these read: each is run once
-			// for the loop, where an iteration first reaches it.
+			// A statement kept once for the loop is run where an iteration first
+			// reaches it unless what an iteration writes flows into what it
+			// reads: a `FLOW` edge from the body's writes to its reads.
 			for (at, reads) in targets.invariant {
-				if reads.reads.iter().any(|read| targets.written.writes_over(read)) {
+				if crate::exec::logical::edges::data(&targets.written, &reads)
+					.contains(crate::exec::logical::edges::Edges::FLOW)
+				{
 					continue;
 				}
 				self.nested[at].owner = None;
