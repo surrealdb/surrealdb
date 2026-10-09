@@ -10,6 +10,18 @@ inputs:
     description: 'Whether to free disk space before building (needed on standard GitHub-hosted runners)'
     required: false
     default: 'false'
+  kache-bucket:
+    description: 'S3 bucket backing the shared compile cache (see setup-environment)'
+    required: false
+    default: ''
+  kache-access-key-id:
+    description: 'Static access key for the cache bucket'
+    required: false
+    default: ''
+  kache-secret-access-key:
+    description: 'Secret half of kache-access-key-id'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -18,6 +30,9 @@ runs:
       uses: ./.github/actions/setup-environment
       with:
         save-cache: ${{ inputs.save-cache }}
+        kache-bucket: ${{ inputs.kache-bucket }}
+        kache-access-key-id: ${{ inputs.kache-access-key-id }}
+        kache-secret-access-key: ${{ inputs.kache-secret-access-key }}
         targets: wasm32-wasip2
         free-disk-space: ${{ inputs.free-disk-space }}
 

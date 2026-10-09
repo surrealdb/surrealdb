@@ -1,6 +1,15 @@
 # Nextest configuration for SurrealDB
 # https://nexte.st/book/configuration.html
 
+# Setup scripts are experimental in nextest and must be enabled explicitly.
+experimental = ["setup-scripts"]
+
+# Builds the surrealism demo module once per run; see the script for the
+# contract. `tests/surrealism_integration.rs` reads `SURREALISM_DEMO_SURLI`.
+[scripts.setup.surrealism-demo-module]
+command = '.config/scripts/build-demo-module.sh'
+slow-timeout = { period = "10m", terminate-after = 3 }
+
 [profile.default]
 retries = 2
 fail-fast = false
@@ -34,6 +43,10 @@ slow-timeout = "120s"
 filter = 'test(syn::test::test_excessive_size)'
 threads-required = 4
 slow-timeout = "60s"
+
+[[profile.default.scripts]]
+filter = 'binary(surrealism_integration)'
+setup = 'surrealism-demo-module'
 
 [[profile.default.overrides]]
 filter = 'test(surrealism_integration::)'

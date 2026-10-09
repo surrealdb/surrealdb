@@ -16,6 +16,7 @@ on:
       - opened
       - synchronize
       - reopened
+      - ready_for_review
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
@@ -35,6 +36,7 @@ jobs:
 
   build:
     name: Build binary (amd64)
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-amd-16-cores-spot
     steps:
       - name: Harden the runner (Audit all outbound calls)

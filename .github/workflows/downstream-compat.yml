@@ -31,6 +31,7 @@ on:
       - opened
       - synchronize
       - reopened
+      - ready_for_review
     paths-ignore:
       - "**/*.md"
       - "doc/**"
@@ -55,7 +56,7 @@ permissions:
 jobs:
   compat:
     name: Build + test
-    if: github.repository == vars.PRIVATE_ENGINE_REPO
+    if: github.repository == vars.PRIVATE_ENGINE_REPO && github.event.pull_request.draft != true
     # On-demand (not spot): spot preemption shows up as "runner lost
     # communication" failures, and this is a soft signal we don't want flaking.
     runs-on: runner-arm-16-cores

@@ -86,6 +86,27 @@ mod surrealism_integration {
 		assert!(output.exists(), "demo.surli not created at {}", output.display());
 	}
 
+	/// Environment variable naming a `demo.surli` built once for the whole run
+	/// by the nextest setup script `.config/scripts/build-demo-module.sh`.
+	const PREBUILT_DEMO_ENV: &str = "SURREALISM_DEMO_SURLI";
+
+	/// Copy the run-wide prebuilt `demo.surli` into `output_dir`.
+	///
+	/// Returns `false` when no usable prebuilt archive is available (the
+	/// variable is unset, as under plain `cargo test`, or it points at a
+	/// missing or empty file), in which case the caller builds the module. The
+	/// copy keeps each process's directory private, so tests never share
+	/// mutable files.
+	fn copy_prebuilt_demo(output_dir: &Path) -> bool {
+		let Some(src) = std::env::var_os(PREBUILT_DEMO_ENV).map(PathBuf::from) else {
+			return false;
+		};
+		if !std::fs::metadata(&src).map(|m| m.len() > 0).unwrap_or(false) {
+			return false;
+		}
+		std::fs::copy(&src, output_dir.join("demo.surli")).is_ok()
+	}
+
 	struct DemoModuleDir {
 		_tmp: tempfile::TempDir,
 		/// Canonical (symlink-resolved) path. On macOS `/var` is a symlink to
@@ -102,7 +123,9 @@ mod surrealism_integration {
 		let tmp = tempfile::TempDir::new().expect("Failed to create temp dir for demo module");
 		let canonical =
 			std::fs::canonicalize(tmp.path()).expect("Failed to canonicalize temp dir path");
-		build_and_pack_demo(&canonical);
+		if !copy_prebuilt_demo(&canonical) {
+			build_and_pack_demo(&canonical);
+		}
 		repack_without_localhost(&canonical);
 		DemoModuleDir {
 			_tmp: tmp,

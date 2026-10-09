@@ -13,6 +13,7 @@ on:
       - opened
       - synchronize
       - reopened
+      - ready_for_review
   merge_group:
 
 concurrency:
@@ -208,6 +209,7 @@ jobs:
 
   miri:
     name: Test unsafe code with miri
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -286,6 +288,7 @@ jobs:
 
   check-msrv:
     name: Check workspace (MSRV)
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     env:
       msrv: "1.95" # This should be updated if the MSRV is updated.
@@ -315,6 +318,7 @@ jobs:
 
   check-wasm:
     name: Check Wasm
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -343,6 +347,7 @@ jobs:
 
   test-wasm:
     name: Test Wasm (IndexedDB)
+    if: ${{ github.event.pull_request.draft != true }}
     # GitHub-hosted runner: Chrome and chromedriver come preinstalled, which
     # the wasm-bindgen-test browser harness needs.
     runs-on: ubuntu-latest
@@ -400,6 +405,7 @@ jobs:
 
   check-docs:
     name: Check docs
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -588,6 +594,7 @@ jobs:
 
   integration-tests:
     name: Integration tests (${{ matrix.arch }})
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -649,6 +656,9 @@ jobs:
       - name: Test workspace
         uses: ./.github/actions/test-workspace
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
   # The `cjk-embed-*` features are off in every other lane, so the segmentation
@@ -658,6 +668,7 @@ jobs:
   # dictionary crate download its dictionary at build time.
   test-cjk:
     name: Test CJK segmentation
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
@@ -685,6 +696,7 @@ jobs:
 
   kvs-engines:
     name: KVS - ${{ matrix.engine }} engine (${{ matrix.arch }})
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -732,6 +744,7 @@ jobs:
 
   sdk-build:
     name: Test SDK build
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -760,6 +773,7 @@ jobs:
 
   sdk-engines:
     name: Rust SDK - ${{ matrix.engine }} engine
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -806,6 +820,7 @@ jobs:
 
   lang-tests:
     name: Language tests - ${{ matrix.engine }} (${{ matrix.arch }})
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -878,6 +893,7 @@ jobs:
 
   upgrade-tests:
     name: Upgrade tests - ${{ matrix.engine }} (${{ matrix.arch }})
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -959,6 +975,7 @@ jobs:
 
   check-tokio-console:
     name: Check tokio-console feature
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     env:
       RUSTFLAGS: -D warnings --cfg tokio_unstable
@@ -993,6 +1010,7 @@ jobs:
   # the benchmark job needs to actually run benches.
   check-bench:
     name: Check language-test bench harness
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1022,6 +1040,7 @@ jobs:
 
   conformance-tests:
     name: Conformance tests
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     needs: build
     steps:
@@ -1081,6 +1100,7 @@ jobs:
   # against our own in-process assumptions.
   mcp-tests:
     name: MCP tests
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     needs: build
     steps:
@@ -1147,6 +1167,7 @@ jobs:
   # release time.
   node-engine:
     name: Node engine
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -1187,6 +1208,7 @@ jobs:
 
   wasm-engine:
     name: Wasm engine
+    if: ${{ github.event.pull_request.draft != true }}
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
